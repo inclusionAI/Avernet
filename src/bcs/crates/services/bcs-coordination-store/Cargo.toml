@@ -1,0 +1,24 @@
+[package]
+name = "bcs-coordination-store"
+description = "Shared cache store for coordination payload references"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+bcs-service-api = { workspace = true }
+bcs-cache-api = { workspace = true }
+uuid = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+bcs-test-support = { workspace = true }
+bcs-cache-local = { workspace = true }

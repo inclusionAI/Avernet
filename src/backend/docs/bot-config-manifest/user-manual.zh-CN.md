@@ -825,7 +825,11 @@ resources:
 
   # 目录（归档形态：oss 协议）
   - path: data/manuals/
-    source: https://cms.example.com/kb/manuals.zip
+    source:
+      protocol: oss
+      bucket: cms
+      key: kb/manuals.zip
+      auth: oss-artifacts
     unpack: zip                  # zip | tar.gz —— oss 目录条目**必填**
     strip_components: 1          # 可选，默认 0
     auth: cms-token
@@ -934,7 +938,11 @@ payload。那一行会在这个 bot **下一次开设备**时被执行：创建�
 ```yaml
 cli_tools:
   - name: shopctl                 # 命令名；同一 bot 内唯一。字母/数字开头，只含字母数字与 . _ -，≤128
-    source: https://artifacts.example-corp.com/tools/shopctl/2.3.0/shopctl-linux-amd64
+    source:
+      protocol: oss
+      bucket: artifacts
+      key: tools/shopctl/2.3.0/shopctl-linux-amd64
+      auth: oss-artifacts
     digest: "sha256:9f2c…"        # 本类目强制
     version: "2.3.0"              # 元数据；**不参与收敛**
     auth: oss-artifacts           # 私有制品库时写凭证名（§4.2）
@@ -1334,7 +1342,8 @@ sources:
     mode: non_strict
   order-lookup:                              # 制品桶上的一个对象
     protocol: oss                            # oss:一次请求取一个对象，
-    url: https://artifacts.example-corp.com/tools/skills/order-lookup-1.4.0.zip
+    bucket: artifacts             # 桶名来自源
+    key: tools/skills/order-lookup-1.4.0.zip
     auth: oss-artifacts                      # 所以 url 指向对象本身
 
 manifest:

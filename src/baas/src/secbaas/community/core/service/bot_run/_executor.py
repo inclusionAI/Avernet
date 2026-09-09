@@ -340,13 +340,12 @@ class BotRunRequestExecutor:
                 eval_id,
                 run.bot_id,
             )
-            if self._eval_session_log is not None:
-                self._eval_session_log.log_eval_session(
-                    eval_id=eval_id,
-                    bot_id=run.bot_id,
-                    session_id=session_id,
-                    method="execute",
-                )
+            self._eval_session_log.log_eval_session(
+                eval_id=eval_id,
+                bot_id=run.bot_id,
+                session_id=session_id,
+                method="execute",
+            )
 
         try:
             if request_type == "inject":
@@ -537,53 +536,70 @@ class BotRunRequestExecutor:
         final_content = ""
         stream_error: str | None = None
         last_flush_ts = time.monotonic()
+
+        def _handle_chunk(chunk: StreamChunk) -> None:
+            """处理单个 chunk，返回后由外层统一判断是否需要 flush。"""
+            nonlocal final_content, stream_error, pending_bytes, last_flush_ts
+            if chunk.type == "delta":
+                pending.append(("delta", chunk.content, chunk.engine_type))
+                pending_bytes += len(chunk.content or "")
+            elif chunk.type == "agent":
+                agent_payload = chunk.metadata or {}
+                pending.append(("agent", agent_payload, chunk.engine_type))
+                pending_bytes += len(
+                    json.dumps(agent_payload, ensure_ascii=False)
+                )
+            elif chunk.type == "final":
+                final_content = chunk.content
+                _write_chunk(chunk)
+                last_flush_ts = time.monotonic()
+            elif chunk.type == "error":
+                stream_error = chunk.content or "stream error"
+                _write_chunk(chunk)
+                last_flush_ts = time.monotonic()
+            elif chunk.type == "interaction":
+                _write_chunk(chunk)
+                last_flush_ts = time.monotonic()
+            else:
+                logger.debug(
+                    "[BotRequestWorker] ignore chunk type: %s, run_id: %s",
+                    chunk.type,
+                    run.run_id,
+                )
+
+        stream_iter = bot_service.send_message_stream(
+            session_id=session_id,
+            message=run.message_long or "",
+            binding_info=binding_info,
+            context=context,
+            timeout=timeout_sec,
+            attachments=attachments,
+        )
+        # 常驻 next 任务：用 asyncio.wait 加 flush 间隔超时等待，
+        # 超时只是返回而不取消 __anext__（wait_for 会 cancel 并关闭
+        # async generator，导致后续 chunk 丢失）。
+        next_task: asyncio.Task[Any] = asyncio.ensure_future(stream_iter.__anext__())
         try:
-            async for chunk in bot_service.send_message_stream(
-                session_id=session_id,
-                message=run.message_long or "",
-                binding_info=binding_info,
-                context=context,
-                timeout=timeout_sec,
-                attachments=attachments,
-            ):
-                if chunk.type == "delta":
-                    pending.append(("delta", chunk.content, chunk.engine_type))
-                    pending_bytes += len(chunk.content or "")
-                    if (
-                        time.monotonic() - last_flush_ts >= self._stream_flush_interval
-                        or pending_bytes >= self._stream_flush_max_content_bytes
-                    ):
-                        _flush_buffers()
-                        last_flush_ts = time.monotonic()
-                elif chunk.type == "agent":
-                    agent_payload = chunk.metadata or {}
-                    pending.append(("agent", agent_payload, chunk.engine_type))
-                    pending_bytes += len(
-                        json.dumps(agent_payload, ensure_ascii=False)
-                    )
-                    if (
-                        time.monotonic() - last_flush_ts >= self._stream_flush_interval
-                        or pending_bytes >= self._stream_flush_max_content_bytes
-                    ):
-                        _flush_buffers()
-                        last_flush_ts = time.monotonic()
-                elif chunk.type == "final":
-                    final_content = chunk.content
-                    _write_chunk(chunk)
+            while True:
+                done, _pending = await asyncio.wait(
+                    {next_task}, timeout=self._stream_flush_interval
+                )
+                if done:
+                    try:
+                        chunk = next_task.result()
+                    except StopAsyncIteration:
+                        break
+                    _handle_chunk(chunk)
+                    next_task = asyncio.ensure_future(stream_iter.__anext__())
+                # 超时无新 chunk 时 done 为空，直接走到下面统一 flush 判断
+
+                # 统一 flush 判断：时间窗口 或 字节阈值
+                if pending and (
+                    time.monotonic() - last_flush_ts >= self._stream_flush_interval
+                    or pending_bytes >= self._stream_flush_max_content_bytes
+                ):
+                    _flush_buffers()
                     last_flush_ts = time.monotonic()
-                elif chunk.type == "error":
-                    stream_error = chunk.content or "stream error"
-                    _write_chunk(chunk)
-                    last_flush_ts = time.monotonic()
-                elif chunk.type == "interaction":
-                    _write_chunk(chunk)
-                    last_flush_ts = time.monotonic()
-                else:
-                    logger.debug(
-                        "[BotRequestWorker] ignore chunk type: %s, run_id: %s",
-                        chunk.type,
-                        run.run_id,
-                    )
         except Exception:
             _flush_buffers()
             seq += 1
@@ -596,6 +612,9 @@ class BotRunRequestExecutor:
             self._cache_plugin.set(cache_key, f"{seq}:error", ttl_seconds=120)
             self._repo.update_error(run.run_id, "stream execution failed")
             return
+        finally:
+            if not next_task.done():
+                next_task.cancel()
 
         # flush 残留 buffer
         _flush_buffers()

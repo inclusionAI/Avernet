@@ -42,10 +42,12 @@ import time
 from pathlib import Path
 from typing import Callable, Mapping, Optional, Sequence
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
+    BlobDelivery,
     EntryFetchError,
+)
+from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetcher,
-    GitEntrySource,
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools.context import (
     CliToolContext,
@@ -633,7 +635,7 @@ class CliToolService:
         appliable".
         """
         if decl.entry is not None:
-            fetched = await asyncio.to_thread(
+            delivery = await asyncio.to_thread(
                 self._fetcher.fetch_declared,
                 ctx,
                 entry=decl.entry,
@@ -642,56 +644,59 @@ class CliToolService:
             )
         else:
             # The API-driven install: a plain URL from the caller, no manifest
-            # and no ``sources`` map to resolve against.
-            fetched = await asyncio.to_thread(
-                self._fetcher.fetch,
-                ctx,
-                source_url=decl.source_url,
-                digest=decl.digest,
-                auth=decl.auth,
-                category=FETCH_CATEGORY,
-                keep_last=decl.keep_last,
-                entry_identity=decl.name,
+            # and no ``sources`` map to resolve against. ``fetch`` answers in
+            # the transport's currency, so it is wrapped here — one type
+            # reaches the rest of this method whichever door it came through.
+            delivery = BlobDelivery(
+                await asyncio.to_thread(
+                    self._fetcher.fetch,
+                    ctx,
+                    source_url=decl.source_url,
+                    digest=decl.digest,
+                    auth=decl.auth,
+                    category=FETCH_CATEGORY,
+                    keep_last=decl.keep_last,
+                    entry_identity=decl.name,
+                )
             )
-        if isinstance(fetched, GitEntrySource):
-            # A repository hands over a tree, and this category wants exactly
-            # one file out of it — which the composed ``subpath`` already
-            # names. No archive is involved, so ``unpack`` has nothing to do
-            # here and the schema refuses it on a git source anyway.
-            data = await asyncio.to_thread(fetched.read_file)
+        data = await asyncio.to_thread(delivery.single)
+        if delivery.needs_receipt():
+            # A tree's bytes are not filed by the fetch — only the caller
+            # knows which of them this entry delivers, and here that is the
+            # one file the composed subpath named. Auth included, so the
+            # lineage answers "which credential served this" on both roads.
             await asyncio.to_thread(
                 self._fetcher.file_bytes,
                 ctx,
                 content=data,
-                source_url=fetched.receipt_url(),
+                source_url=delivery.receipt_url(),
                 category=FETCH_CATEGORY,
                 entry_identity=decl.name,
-                credential_name=fetched.auth,
+                credential_name=delivery.auth(),
             )
-            verify_amd64_elf(data, name=decl.name)
-            return data
-        if decl.digest and fetched.digest != decl.digest:
+        if decl.digest and delivery.digest() != decl.digest:
             # The fetch pipeline enforces the pin; this compares the content
             # address it already computed, so the belt costs nothing. It is
             # here because this is the one category that distributes an
             # executable, and a keep_last fallback is the path where stored
             # bytes could stand in for what was declared.
             raise ValueError(
-                f"{decl.name!r}: the bytes are {fetched.digest}, the entry "
+                f"{decl.name!r}: the bytes are {delivery.digest()}, the entry "
                 f"declared {decl.digest}"
             )
-        if not decl.unpack:
-            if decl.subpath:
-                raise CliToolSubpathError(
-                    f"{decl.name!r}: 'subpath' selects a member of an archive, "
-                    "but the entry declares no 'unpack' — without it the fetched "
-                    "object is the command itself and the selection would be "
-                    "silently ignored"
-                )
-            data = fetched.content
-        else:
-            data = await asyncio.to_thread(
-                self._select, fetched.content, decl,
+        if decl.unpack:
+            data = await asyncio.to_thread(self._select, data, decl)
+        elif decl.subpath and not delivery.is_tree():
+            # ``subpath`` on a tree already did its work — it selected the one
+            # file out of the checkout, which is what ``single()`` returned.
+            # On a single delivered object it selects an archive member, so
+            # without an ``unpack`` there is no archive for it to select from
+            # and the selection would be silently ignored.
+            raise CliToolSubpathError(
+                f"{decl.name!r}: 'subpath' selects a member of an archive, "
+                "but the entry declares no 'unpack' — without it the fetched "
+                "object is the command itself and the selection would be "
+                "silently ignored"
             )
         verify_amd64_elf(data, name=decl.name)
         return data

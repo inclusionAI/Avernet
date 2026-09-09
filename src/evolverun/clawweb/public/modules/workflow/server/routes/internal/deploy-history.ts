@@ -21,7 +21,7 @@ export function createInternalDeployHistoryRouter(
 ): Router {
   const router = Router();
 
-  /** POST / — Write deploy history record (with 409 auto-retry) */
+  /** POST / — Write one already-tagged deployment record. */
   router.post("/", asyncHandler(async (req: Request, res: Response) => {
     if (!wfdhRepo) { res.status(503).json({ error: "Service Unavailable" }); return; }
     const b = req.body as {
@@ -36,10 +36,8 @@ export function createInternalDeployHistoryRouter(
       return;
     }
 
-    let version = b.version;
-    const MAX_INSERT_ATTEMPTS = 3;
-
-    for (let attempt = 1; attempt <= MAX_INSERT_ATTEMPTS; attempt++) {
+    const version = b.version;
+    {
       try {
         await wfdhRepo.insert({
           packId: b.packId, workflowId: b.workflowId, deployNumber: b.deployNumber,
@@ -48,6 +46,7 @@ export function createInternalDeployHistoryRouter(
           note: b.note, botId: b.botId, ownerId: b.ownerId,
           isActive: b.isActive,
         });
+        if (b.isActive) await wfdhRepo.setActive(b.workflowId, version);
         // Sync version to workflow_specs table
         if (workflowSpecRepo) {
           try { await workflowSpecRepo.updateVersion(b.workflowId, version); }
@@ -59,21 +58,9 @@ export function createInternalDeployHistoryRouter(
         const msg = err instanceof Error ? err.message : String(err);
         const isDuplicate = msg.includes("UNIQUE") || msg.includes("Duplicate");
 
-        if (isDuplicate && attempt < MAX_INSERT_ATTEMPTS) {
-          // Version conflict — re-compute from MAX(version) + 1 and retry
-          console.warn(`[deploy-history] Insert version=${version} conflicted for ${b.workflowId}, retrying with MAX(version)+1 (attempt ${attempt}/${MAX_INSERT_ATTEMPTS})`);
-          try {
-            const maxV = await wfdhRepo.getLatestVersion(b.workflowId);
-            version = maxV + 1;
-          } catch {
-            version = version + 1;
-          }
-          continue; // retry
-        }
-
         if (isDuplicate) {
-          // All retries exhausted — still conflict. Return 409 with details.
-          console.error(`[deploy-history] Insert failed after ${MAX_INSERT_ATTEMPTS} attempts for ${b.workflowId}: ${msg}`);
+          // The tag's version is immutable; never silently write a different one.
+          console.error(`[deploy-history] Insert failed for ${b.workflowId}: ${msg}`);
           res.status(409).json({ error: "Conflict", message: msg });
         } else {
           res.status(500).json({ error: "Internal Server Error", message: msg });
@@ -115,6 +102,7 @@ export function createInternalDeployHistoryRouter(
       : row.gmt_modified;
     res.json({
       found: true,
+      workflowId,
       packId: row.pack_id,
       deployNumber: row.deploy_number,
       version: row.version,
@@ -184,6 +172,8 @@ export function createInternalDeployHistoryRouter(
       : row.gmt_create;
     res.json({
       found: true,
+      workflowId,
+      packId: row.pack_id,
       deployNumber: row.deploy_number,
       version: row.version,
       tagName: row.tag_name,

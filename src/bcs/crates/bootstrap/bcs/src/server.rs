@@ -2070,7 +2070,9 @@ impl Default for BcsServerState {
             ]));
         let state_machine_terminal_observer =
             Arc::new(DeferredStateMachineTerminalObserver::new(terminal_observer));
+        let coordination_intents = create_coordination_intents(Arc::new(bcs_cache_local::InMemoryCachePlugin::new()));
         let message_flow_builder = create_message_flow_builder(
+            coordination_intents.clone(),
             bot_registry.clone(),
             sessions.clone(),
             router.clone(),
@@ -2337,6 +2339,7 @@ impl Default for BcsServerState {
                 bot_run_context.clone(),
                 message_flow.clone(),
             )
+            .with_coordination_intents(coordination_intents.clone())
             .with_collaboration_runtime(collaboration_runtime.clone()),
         );
         let provider_event_ingest: Arc<dyn bcs_service_api::ProviderEventIngestService> =
@@ -2911,7 +2914,12 @@ impl BotTerminalObserverPort for DeferredStateMachineTerminalObserver {
     }
 }
 
+fn create_coordination_intents(cache: Arc<dyn bcs_cache_api::CachePlugin>) -> Option<Arc<dyn bcs_service_api::port::CoordinationIntentPort>> {
+    Some(Arc::new(bcs_coordination_store::CoordinationCacheStore::new(cache)))
+}
+
 fn create_message_flow_builder(
+    coordination_intents: Option<Arc<dyn bcs_service_api::port::CoordinationIntentPort>>,
     registry: Arc<dyn BotRegistryCoreService>,
     group: Arc<dyn GroupCoreService>,
     routing: Arc<dyn RoutingCoreService>,
@@ -2936,6 +2944,7 @@ fn create_message_flow_builder(
         bot_delivery.clone(),
         frontend_delivery.clone(),
     )
+    .with_coordination_intents(coordination_intents)
     .with_bot_relay_turn_limit(bot_relay_turn_limit)
     .with_interceptors(interceptors)
     .with_session_management(session_management)
@@ -3646,7 +3655,9 @@ impl BcsServer {
                  use BcsServer::new_with_storage to enable human mention notifications"
             );
         }
+        let coordination_intents = create_coordination_intents(Arc::new(bcs_cache_local::InMemoryCachePlugin::new()));
         let message_flow_builder = create_message_flow_builder(
+            coordination_intents.clone(),
             bot_registry.clone(),
             sessions.clone(),
             router.clone(),
@@ -3898,6 +3909,7 @@ impl BcsServer {
                 bot_run_context.clone(),
                 message_flow.clone(),
             )
+            .with_coordination_intents(coordination_intents.clone())
             .with_collaboration_runtime(collaboration_runtime.clone()),
         );
         let provider_event_ingest: Arc<dyn bcs_service_api::ProviderEventIngestService> =
@@ -4476,7 +4488,9 @@ impl BcsServer {
             ]));
         let state_machine_terminal_observer =
             Arc::new(DeferredStateMachineTerminalObserver::new(terminal_observer));
+        let coordination_intents = create_coordination_intents(cache_plugin.clone());
         let message_flow_builder = create_message_flow_builder(
+            coordination_intents.clone(),
             bot_registry.clone(),
             sessions.clone(),
             router.clone(),
@@ -4771,6 +4785,7 @@ impl BcsServer {
                 bot_run_context.clone(),
                 message_flow.clone(),
             )
+            .with_coordination_intents(coordination_intents.clone())
             .with_collaboration_runtime(collaboration_runtime.clone()),
         );
         let provider_event_ingest: Arc<dyn bcs_service_api::ProviderEventIngestService> =

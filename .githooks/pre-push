@@ -72,7 +72,16 @@ run_for_ref() {
   echo "merge base: $base"
   echo "head: $local_sha"
 
-  "$repo_root/scripts/ci/pre_push.sh" --base "$base" --head "$local_sha"
+  # Scan only added lines in the exact push range before any other gate runs.
+  # A non-zero result blocks this ref from being pushed. Keep the explicit
+  # conditional because run_for_ref is itself invoked from an `||` status
+  # collector, which would otherwise disable errexit inside the function.
+  if ! "$repo_root/scripts/ci/check_secrets.py" --base "$base" --head "$local_sha"; then
+    return 1
+  fi
+  if ! "$repo_root/scripts/ci/pre_push.sh" --base "$base" --head "$local_sha"; then
+    return 1
+  fi
 }
 
 while IFS=' ' read -r local_ref local_sha remote_ref remote_sha; do

@@ -1,3 +1,5 @@
+pub mod coordination_intent;
+pub use coordination_intent::*;
 pub mod bot_connection;
 pub mod bot_terminal_observer;
 pub mod channel_binding_cleanup;

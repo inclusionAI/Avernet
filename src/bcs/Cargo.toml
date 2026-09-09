@@ -98,6 +98,7 @@ members = [
     # external-clients
     "crates/external-clients/bcs-fuse-client",
     "crates/external-clients/bcs-webhook-client",
+    "crates/services/bcs-coordination-store",
     # tools
     "crates/tools/bcs-admin",
     "crates/tools/bcs-cli",
@@ -267,6 +268,7 @@ bcs-routing    = { path = "crates/services/bcs-routing" }
 bcs-fusion      = { path = "crates/services/bcs-fusion" }
 bcs-leader-election = { path = "crates/services/bcs-leader-election" }
 bcs-fuse-client = { path = "crates/external-clients/bcs-fuse-client" }
+bcs-coordination-store = { path = "crates/services/bcs-coordination-store" }
 bcs-webhook-client = { path = "crates/external-clients/bcs-webhook-client" }
 bcs-security-gateway-local = { path = "crates/plugins/bcs-security-gateway-local" }
 bcs-security-gateway-api = { path = "crates/plugin-api/bcs-security-gateway-api" }

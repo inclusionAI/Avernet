@@ -625,7 +625,14 @@ export type RepairTask = {
     sourceBatchId: string
     evidenceCount: number
     sessionIds: string[]
-    evidenceTaskRefs: Array<{ sessionId: string; taskIndex: number; ordinal: number }>
+    evidenceTaskRefs: Array<{
+      sessionId: string
+      taskIndex: number
+      ordinal: number
+      taskDescription?: string
+      failureClass?: string
+      reasoningSummary?: string | null
+    }>
     repairDirection: string | null
     authorizationMode: 'ONCE' | 'PERSISTENT'
     authorizationGrantId?: number
@@ -1422,6 +1429,8 @@ export const api = {
         originalWorkflowId?: string
         botOwnerId?: string
         botId?: string
+        /** Save the DB draft only; the caller owns any separately recorded release history. */
+        skipDeployHistory?: boolean
       },
     ): Promise<WorkflowSpec> {
       return fetchJson<WorkflowSpec>(`${BASE}/workflows/save`, {
@@ -1434,6 +1443,7 @@ export const api = {
           originalWorkflowId: options?.originalWorkflowId,
           botOwnerId: options?.botOwnerId,
           botId: options?.botId,
+          skipDeployHistory: options?.skipDeployHistory,
         }),
       })
     },
@@ -1446,8 +1456,10 @@ export const api = {
     },
 
     /** GET /api/workflows/:wf/history — deploy history list (no spec_json). */
-    getHistory(workflowId: string, limit = 50): Promise<{ workflowId: string; history: DeployHistoryItem[] }> {
-      return fetchJson(`${BASE}/workflows/${encodeURIComponent(workflowId)}/history?limit=${limit}`)
+    getHistory(workflowId: string, limit = 50, releaseOnly = false): Promise<{ workflowId: string; history: DeployHistoryItem[] }> {
+      const query = new URLSearchParams({ limit: String(limit) })
+      if (releaseOnly) query.set('releaseOnly', 'true')
+      return fetchJson(`${BASE}/workflows/${encodeURIComponent(workflowId)}/history?${query.toString()}`)
     },
 
     getAccess(workflowId: string): Promise<{ workflowId: string; canView: boolean; canEdit: boolean }> {

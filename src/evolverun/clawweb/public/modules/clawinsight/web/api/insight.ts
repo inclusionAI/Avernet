@@ -230,6 +230,7 @@ export const insightApi = {
     input: {
       reason: string;
       repairDirection?: string;
+      diagnosticMode?: "observe" | "deep";
       targetUserId?: string;
       targetBotId?: string;
       botEnv?: string;

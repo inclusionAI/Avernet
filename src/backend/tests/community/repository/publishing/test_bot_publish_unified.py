@@ -406,7 +406,7 @@ def test_get_latest_success_by_source_bot_id_returns_none_when_no_success(repo):
 
 
 def test_get_latest_built_by_source_bot_id_owner_agnostic_returns_latest(repo):
-    """Eval 区版本锚定：latest built row, owner-agnostic."""
+    """Eval 区版本锚定：latest non-online (built/validating) row, owner-agnostic."""
     repo.insert(_data(source_bot_id="src-1", owner_id="emp001", status="built", env="dev"))
     latest = repo.insert(
         _data(source_bot_id="src-1", owner_id="other-owner", status="built", env="dev", version=2)
@@ -418,6 +418,34 @@ def test_get_latest_built_by_source_bot_id_owner_agnostic_returns_latest(repo):
 
     assert got is not None
     assert got.id == latest.id
+
+
+def test_get_latest_built_by_source_bot_id_includes_validating(repo):
+    """status=validating 也属于非上线版本，应被查到。"""
+    repo.insert(_data(source_bot_id="src-1", owner_id="emp001", status="success", env="dev", version=1))
+    validating = repo.insert(
+        _data(source_bot_id="src-1", owner_id="emp001", status="validating", env="dev", version=2)
+    )
+
+    got = repo.get_latest_built_by_source_bot_id("src-1", "dev")
+
+    assert got is not None
+    assert got.id == validating.id
+
+
+def test_get_latest_built_by_source_bot_id_prefers_higher_id_across_statuses(repo):
+    """built 和 validating 都存在时，返回 id 更大的那一条。"""
+    built = repo.insert(
+        _data(source_bot_id="src-1", owner_id="emp001", status="built", env="dev", version=1)
+    )
+    validating = repo.insert(
+        _data(source_bot_id="src-1", owner_id="emp001", status="validating", env="dev", version=2)
+    )
+
+    got = repo.get_latest_built_by_source_bot_id("src-1", "dev")
+
+    assert got is not None
+    assert got.id == validating.id  # id 更大
 
 
 def test_get_latest_built_by_source_bot_id_returns_none_when_no_built(repo):

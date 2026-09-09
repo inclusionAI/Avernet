@@ -7,6 +7,10 @@ is implemented once here and applied per category rather than re-derived five
 times. The entity-key fields (``resources.path``, ``skills.name``,
 ``identity.type``, ``cli_tools.name``) deliberately differ, and their rules
 differ with them.
+
+Grammar reference: ``docs/bot-config-manifest/manifest-schema.zh-CN.md``
+— §2 (entry fields), §3 (per-category rules). Cite a section rather than restating the grammar here;
+two copies of one grammar drift, and the document is the one users read.
 """
 from __future__ import annotations
 
@@ -15,7 +19,6 @@ from typing import Any
 
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCategory,
-    SourceForm,
 )
 from agentclaw.community.core.bot_config_manifest.schema._support import (
     Context,
@@ -103,35 +106,6 @@ CATEGORY_ENTRY_KEYS: dict[ManifestCategory, frozenset[str]] = {
 _SOURCE_SELECTORS = ("from", "source", "content")
 
 
-@dataclass(frozen=True)
-class EntrySource:
-    """Which source an entry chose, once exclusivity has been settled.
-
-    Two vocabularies, deliberately both kept. ``form`` is *how the entry was
-    spelled* and remains the published ``constructs`` axis. ``kind`` is *which
-    protocol the content travels by* and is what every support rule keys on —
-    a ``from:`` naming a git source is ``NAMED``/``GIT``, and the rules that
-    used to read ``form`` there are the ones that got D5 wrong.
-    """
-
-    #: The chosen form, or ``None`` when the entry named no usable source.
-    form: SourceForm | None
-    #: The protocol, or ``None`` when it could not be determined (an undeclared
-    #: ``from`` name, a malformed source object). A ``None`` kind means every
-    #: protocol-keyed rule below stays silent: the entry is already refused for
-    #: a reason the caller has to fix first, and a second verdict derived from a
-    #: guess would send them at the wrong field.
-    kind: SourceKind | None = None
-    #: The resolved declaration, for the roads that have one. Inline ``content``
-    #: and an inline ``source:`` URL string have no declaration object.
-    decl: SourceDecl | None = None
-
-    @property
-    def is_git(self) -> bool:
-        """The one protocol whose commit SHA already is the entry's pin."""
-        return self.kind is SourceKind.GIT
-
-
 def legal_identity_types(engine_type: str) -> frozenset[str]:
     """The identity files this engine accepts.
 
@@ -177,8 +151,30 @@ def resolve_source(
     location: str,
     entry: dict[str, Any],
     category: ManifestCategory,
-) -> EntrySource:
+) -> SourceDecl | None:
     """Settle which source an entry uses, and refuse the illegal combinations.
+
+    **Answers one type, and ``None`` when it could not.** All three spellings
+    land on a :class:`SourceDecl`, because all three end at a protocol::
+
+        content: "..."                     -> SourceDecl(protocol=CONTENT)
+        source: {protocol: git, ...}       -> that declaration
+        from: team-repo                    -> ``team-repo``'s declaration
+
+    ``None`` means no protocol could be determined, in exactly three cases —
+    a ``from:`` that is not a non-empty string, a ``from:`` naming a source
+    that is not declared or failed its own parse, and a ``source:`` that is a
+    bare URL or not an object. Each is already refused for a reason the author
+    must fix first, so every protocol-keyed rule below stays silent rather
+    than emitting a second verdict from a guess and pointing at the wrong
+    field.
+
+    This used to return an ``EntrySource`` wrapper carrying ``kind`` + ``decl``
+    + a ``form`` (the *spelling*: ``NAMED`` for ``from:``). Review asked, twice,
+    why the spelling was tracked separately, and the answer both times was that
+    it could not diverge from the protocol once a ``from:`` resolved — and that
+    nothing read it. The wrapper is gone; ``decl.protocol`` is the one axis, and
+    a missing declaration is ``None``.
 
     Five rules, all from schema §2, and each names the offending entry:
 
@@ -206,19 +202,19 @@ def resolve_source(
             "an entry names exactly one source; found "
             + ", ".join(f"'{key}'" for key in present),
         )
-        return EntrySource(form=None)
+        return None
     if not present:
         ctx.add(
             location,
             "missing_source",
             "an entry must name one of 'from', 'source' or 'content'",
         )
-        return EntrySource(form=None)
+        return None
 
     selector = present[0]
     source = _classify(ctx, location, entry, selector)
-    if source.kind is not None:
-        refusal = refusal_for(category, source.kind)
+    if source is not None:
+        refusal = refusal_for(category, source.protocol)
         if refusal is not None:
             # The cell's own code and message, verbatim. Nothing here rewords
             # or prefixes them: the capabilities endpoint publishes the same
@@ -228,7 +224,7 @@ def resolve_source(
                 refusal.code,
                 refusal.reason,
             )
-            return EntrySource(form=None)
+            return None
 
     if "auth" in entry:
         if selector == "from":
@@ -264,7 +260,7 @@ def resolve_source(
         _check_inline_content(ctx, location, entry["content"])
 
     if "digest" in entry:
-        if source.is_git:
+        if source is not None and source.is_git:
             ctx.add(
                 f"{location}.digest",
                 "digest_on_git_source",
@@ -273,14 +269,14 @@ def resolve_source(
             )
         elif selector != "content":
             check_digest(ctx, f"{location}.digest", entry["digest"])
-    elif source.kind is not None and digest_required(category, source.kind):
+    elif source is not None and digest_required(category, source.protocol):
         # Keyed on the PROTOCOL, which is the whole of the D5 fix: reaching a
         # git source by name used to classify as ``NAMED`` and be charged this
         # rule, demanding a pin that git bytes cannot meaningfully carry.
         ctx.add(
             location,
             "missing_digest",
-            f"a {category.value} entry fetched over '{source.kind.value}' must "
+            f"a {category.value} entry fetched over '{source.protocol.value}' must "
             "declare a 'digest' — the platform is distributing executable "
             "content, and an unpinned fetch takes whatever is there at the time",
         )
@@ -308,7 +304,7 @@ def resolve_source(
 
 
 def _refusal_location(
-    location: str, selector: str, source: EntrySource
+    location: str, selector: str, source: SourceDecl | None
 ) -> str:
     """Where to hang a matrix refusal.
 
@@ -317,15 +313,15 @@ def _refusal_location(
     the entry, because the fix is usually the category or the source, not the
     one key naming it.
     """
-    if source.kind is SourceKind.CONTENT and selector == "content":
+    if source is not None and source.protocol is SourceKind.CONTENT and selector == "content":
         return f"{location}.content"
     return location
 
 
 def _classify(
     ctx: Context, location: str, entry: dict[str, Any], selector: str
-) -> EntrySource:
-    """Name the source form, resolve its protocol, and gate it on this build.
+) -> SourceDecl | None:
+    """Resolve which protocol an entry's content travels by.
 
     Three roads reach a protocol. Inline ``content`` *is* one. An inline
     ``source:`` string is an object over https, so ``oss``. Everything else —
@@ -334,8 +330,7 @@ def _classify(
     is the only thing that reads one.
     """
     if selector == "content":
-        ctx.require_source_support(f"{location}.content", SourceForm.CONTENT)
-        return EntrySource(form=SourceForm.CONTENT, kind=SourceKind.CONTENT)
+        return SourceDecl(protocol=SourceKind.CONTENT)
 
     if selector == "from":
         name = entry["from"]
@@ -345,7 +340,7 @@ def _classify(
                 "invalid_source_reference",
                 "'from' must name a source declared under top-level 'sources'",
             )
-            return EntrySource(form=SourceForm.NAMED)
+            return None
         ctx.referenced_sources.add(name)
         if name not in ctx.source_names:
             ctx.add(
@@ -354,8 +349,7 @@ def _classify(
                 f"'from' references source '{name}', which is not declared "
                 "under top-level 'sources'",
             )
-            return EntrySource(form=SourceForm.NAMED)
-        ctx.require_source_support(f"{location}.from", SourceForm.NAMED)
+            return None
         # The named source's protocol IS this entry's protocol — that identity
         # is the point of the axis. ``sources`` is walked before ``manifest``,
         # so a declaration that parsed is already here; one that did not is
@@ -363,31 +357,36 @@ def _classify(
         # entry stays silent rather than blaming it a second time.
         decl = ctx.sources.get(name)
         if decl is None:
-            return EntrySource(form=SourceForm.NAMED)
-        return EntrySource(form=SourceForm.NAMED, kind=decl.protocol, decl=decl)
+            return None
+        return decl
 
     source = entry["source"]
     if isinstance(source, str):
-        # A bare https URL: one object, over https, with no ref. That is
-        # ``oss`` — the protocol covers a public CDN file and a private bucket
-        # alike, and the credential (or its absence) is the only difference.
-        check_https_url(ctx, f"{location}.source", source)
-        ctx.require_source_support(f"{location}.source", SourceForm.URL)
-        return EntrySource(form=SourceForm.URL, kind=SourceKind.OSS)
+        # The bare-URL spelling. A manifest no longer hands the platform a URL
+        # to GET: content travels by git or out of an object store, and both
+        # are declared. Refused with the replacement named, because this is
+        # the spelling almost every existing document uses and the shortest
+        # path from the refusal to a working document is worth a sentence.
+        ctx.add(
+            f"{location}.source",
+            "invalid_source",
+            "a bare URL is no longer a source; declare an object with "
+            "'protocol: git' (with 'url' and 'ref') or 'protocol: oss' "
+            "(with 'bucket' and 'key')",
+        )
+        return None
     if isinstance(source, dict):
         decl = validate_source_declaration(ctx, f"{location}.source", source)
         if decl is None:
-            return EntrySource(form=None)
-        form = SourceForm.GIT if decl.is_git else SourceForm.URL
-        ctx.require_source_support(f"{location}.source", form)
-        return EntrySource(form=form, kind=decl.protocol, decl=decl)
+            return None
+        return decl
     ctx.add(
         f"{location}.source",
         "invalid_source",
-        "'source' must be an https URL or a source object declaring "
-        "'protocol' and 'url'",
+        "'source' must be an object declaring 'protocol: git' or "
+        "'protocol: oss'",
     )
-    return EntrySource(form=None)
+    return None
 
 
 def validate_source_declaration(
@@ -407,7 +406,14 @@ def validate_source_declaration(
         ctx.add(location + violation.suffix, violation.code, violation.message)
     if decl is None:
         return None
-    check_https_url(ctx, f"{location}.url", decl.url)
+    if decl.url is not None:
+        # Only the git road has a URL now. The https/userinfo/length rule
+        # still governs it — a repository address is as capable of carrying a
+        # token in its userinfo as any other URL was — but an oss source has
+        # no URL to judge, and running the check against ``None`` would
+        # answer "source URL must be a string" to a document that correctly
+        # declared none.
+        check_https_url(ctx, f"{location}.url", decl.url)
     if decl.subpath is not None:
         check_relative_path(
             ctx, f"{location}.subpath", decl.subpath, what="subpath"
@@ -462,7 +468,7 @@ def check_unpack(
     location: str,
     entry: dict[str, Any],
     *,
-    source: EntrySource,
+    source: SourceDecl | None,
     archive_expected: bool,
 ) -> None:
     """``unpack`` / ``strip_components`` rules, shared by resources and cli_tools.
@@ -479,10 +485,10 @@ def check_unpack(
     (schema §3.2): the behaviour of a declaration must not depend on what the
     archive turns out to look like inside.
     """
-    if source.kind is not None:
+    if source is not None:
         refused = False
         for field in sorted(ARCHIVE_FIELDS & entry.keys()):
-            refusal = archive_field_refusal(source.kind, field)
+            refusal = archive_field_refusal(source.protocol, field)
             if refusal is not None:
                 ctx.add(
                     f"{location}.{field}", "archive_field_on_source", refusal
@@ -522,7 +528,7 @@ def check_source_subpath(
     location: str,
     entry: dict[str, Any],
     *,
-    source: EntrySource,
+    source: SourceDecl | None,
     archive_expected: bool,
 ) -> None:
     """``subpath`` must have something to select *within*.
@@ -540,7 +546,7 @@ def check_source_subpath(
     """
     if "subpath" not in entry:
         return
-    if source.kind is not SourceKind.OSS or archive_expected:
+    if source is None or source.protocol is not SourceKind.OSS or archive_expected:
         return
     ctx.add(
         f"{location}.subpath",
@@ -584,14 +590,19 @@ def validate_resource_entry(
     # Git carries directory structure natively, so a tree needs no packaging
     # (schema §2.2); only an object store does, because one HTTPS GET fetches
     # one object and a tree has to travel inside it.
-    archive_expected = is_directory and source.kind is SourceKind.OSS
+    archive_expected = is_directory and source is not None and source.protocol is SourceKind.OSS
     check_unpack(
         ctx, location, entry, source=source, archive_expected=archive_expected
     )
     check_source_subpath(
         ctx, location, entry, source=source, archive_expected=archive_expected
     )
-    if is_directory and source.kind is SourceKind.OSS and "unpack" not in entry:
+    if (
+        is_directory
+        and source is not None
+        and source.protocol is SourceKind.OSS
+        and "unpack" not in entry
+    ):
         ctx.add(
             location,
             "missing_unpack",

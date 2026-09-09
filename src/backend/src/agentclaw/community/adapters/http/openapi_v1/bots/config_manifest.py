@@ -128,10 +128,10 @@ async def update_bot_config_manifest(
     with the offending entry named in each. Fixing a document is one pass, not a
     queue.
 
-    Declaring a category this bot's engine cannot be given — or a source form
-    the platform cannot yet resolve — is refused rather than stored, because a
-    stored declaration nothing can act on is a silent no-op the caller would
-    reasonably read as success. `GET …/config-manifest/capabilities` answers
+    Declaring a category this bot's engine cannot be given — or a
+    (category, protocol) pair the platform cannot yet resolve — is refused
+    rather than stored, because a stored declaration nothing can act on is a
+    silent no-op the caller would reasonably read as success. `GET …/config-manifest/capabilities` answers
     from the same rules, so it can never promise what this refuses.
 
     **Storing starts an apply.** Once the document is stored, an apply of it is
@@ -226,9 +226,11 @@ async def get_bot_config_manifest_capabilities(
     """Which manifest constructs this bot accepts, and why not when it does not.
 
     Answered by the same resolver `PUT` refuses with, so this can never claim
-    support for something the next write rejects. A construct is a category, a
-    top-level section (`script`), or a source form — a source with no resolver
-    fails exactly the way an unsupported category does, so both are listed.
+    support for something the next write rejects. A construct is a category or
+    a top-level section (`script`). Which (category, protocol) pairs are open
+    is the separate `source_matrix` field: a pair with no resolver fails the
+    way an unsupported category does, and the matrix is where a
+    category-aware reason can live.
 
     An unrecognised engine supports nothing.
     """

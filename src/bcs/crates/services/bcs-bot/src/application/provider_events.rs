@@ -1,3 +1,4 @@
+use bcs_service_api::port::{CoordinationIntentPort, CoordinationContext, CoordinationClaim, CoordinationResult, CoordinationStatus};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -18,12 +19,12 @@ use bcs_service_api::{
 use bcs_protocol::stream::{
     ProviderTextEventState, ProviderTextResponseMode, apply_provider_event_text,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use tracing::instrument::WithSubscriber;
 
-const COORDINATION_MAGIC_KEY: &str = "__bcs_coordination__";
+use bcs_protocol::CoordinationCall;
 const CONTRACT_VERSION: u64 = 1;
 const TOOL_ASSIGN_TASK: &str = "bcs_assign_task";
 const TOOL_SEND_TASK_MESSAGE: &str = "bcs_send_task_message";
@@ -61,76 +62,13 @@ impl Drop for StateMachineTerminalInflightGuard {
     }
 }
 
-#[derive(Debug, Clone)]
-struct CoordinationCall {
-    tool: String,
-    arguments: Map<String, Value>,
-}
-
-impl CoordinationCall {
-    fn from_stdout(stdout: &str) -> Option<Self> {
-        for line in stdout.lines() {
-            let line = line.trim();
-            if !line.contains(COORDINATION_MAGIC_KEY) {
-                continue;
-            }
-            if let Some(call) = Self::parse_candidate(line) {
-                return Some(call);
-            }
-        }
-
-        for (idx, _) in stdout.match_indices('{') {
-            let candidate = &stdout[idx..];
-            if !candidate.contains(COORDINATION_MAGIC_KEY) {
-                continue;
-            }
-            let mut stream = serde_json::Deserializer::from_str(candidate).into_iter::<Value>();
-            if let Some(Ok(value)) = stream.next() {
-                if let Some(call) = Self::from_value(value) {
-                    return Some(call);
-                }
-            }
-        }
-        None
-    }
-
-    fn parse_candidate(candidate: &str) -> Option<Self> {
-        serde_json::from_str::<Value>(candidate)
-            .ok()
-            .and_then(Self::from_value)
-    }
-
-    fn from_value(value: Value) -> Option<Self> {
-        let object = value.as_object()?;
-        let magic = object
-            .get(COORDINATION_MAGIC_KEY)
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let version = object.get("v").and_then(Value::as_u64).unwrap_or(0);
-        if !magic || version != CONTRACT_VERSION {
-            return None;
-        }
-        let tool = object
-            .get("tool")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())?
-            .to_string();
-        let arguments = object
-            .get("arguments")
-            .and_then(Value::as_object)
-            .cloned()
-            .unwrap_or_default();
-        Some(Self { tool, arguments })
-    }
-}
-
 #[derive(Clone)]
 pub struct ProviderBotEvents {
     provider_bot_core: Arc<dyn ProviderBotCoreService>,
     bot_run_context: Arc<dyn BotRunContextPort>,
     message_flow: Arc<dyn MessageFlowService>,
     collaboration_runtime: Option<Arc<dyn CollaborationRuntimeService>>,
+    pub(crate) coordination_intents: Option<Arc<dyn CoordinationIntentPort>>,
     coordination_seen: Arc<Mutex<HashMap<String, u64>>>,
     state_machine_terminals_inflight: Arc<StdMutex<HashSet<StateMachineTerminalKey>>>,
     state_machine_visible_text: Arc<Mutex<HashMap<String, StateMachineVisibleText>>>,
@@ -147,10 +85,16 @@ impl ProviderBotEvents {
             bot_run_context,
             message_flow,
             collaboration_runtime: None,
+            coordination_intents: None,
             coordination_seen: Arc::new(Mutex::new(HashMap::new())),
             state_machine_terminals_inflight: Arc::new(StdMutex::new(HashSet::new())),
             state_machine_visible_text: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    pub fn with_coordination_intents(mut self, port: Option<Arc<dyn CoordinationIntentPort>>) -> Self {
+        self.coordination_intents = port;
+        self
     }
 
     pub fn with_collaboration_runtime(
@@ -213,7 +157,8 @@ impl ProviderBotEvents {
         caller_bot_id: &str,
         context: &BotRunContext,
         call: &CoordinationCall,
-    ) -> Result<(), ProviderBotEventError> {
+    ) -> Result<Option<String>, ProviderBotEventError> {
+        let mut task_id = None;
         match call.tool.as_str() {
             TOOL_ASSIGN_TASK => {
                 let target_bot_id =
@@ -236,7 +181,7 @@ impl ProviderBotEvents {
                 if let Some(session_id) = context.bcs_session_id.as_deref() {
                     payload["bcs_session_id"] = serde_json::Value::String(session_id.to_string());
                 }
-                self.message_flow
+                let outcome = self.message_flow
                     .handle_task_dispatch(TaskDispatchCommand {
                         driver_bot_id: caller_bot_id.to_string(),
                         group_id: context.group_id.clone(),
@@ -246,6 +191,7 @@ impl ProviderBotEvents {
                     })
                     .await
                     .map_err(map_service_error)?;
+                task_id = Some(outcome.task_id);
             }
             TOOL_SEND_TASK_MESSAGE => {
                 let session_id = context.bcs_session_id.as_deref().ok_or_else(|| {
@@ -308,7 +254,7 @@ impl ProviderBotEvents {
                 )));
             }
         }
-        Ok(())
+        Ok(task_id)
     }
 
     async fn ingest_event(
@@ -889,6 +835,43 @@ impl ProviderBotEventService for ProviderBotEvents {
             .map_err(map_service_error)?;
         let call = coordination_call_from_command(&coordination, &command)?;
 
+        if let Some(intent_id) = call.intent_id.as_deref() {
+            let port = self.coordination_intents.as_ref().ok_or_else(||
+                ProviderBotEventError::Internal("coordination_store_unavailable".into()))?;
+            let consumer = CoordinationContext { bot_id: context.bot_id.clone(),
+                group_id: context.group_id.clone(), session_id: context.bcs_session_id.clone(),
+                run_id: context.run_id.clone(), tool_call_id: command.tool_call_id.trim().to_string() };
+            let lease = match port.resolve_and_claim(intent_id, &call.tool, &consumer, context.deadline_ms)
+                .await.map_err(map_service_error)? {
+                CoordinationClaim::Acquired(lease) => lease,
+                CoordinationClaim::Duplicate(Some(result)) if result.status == CoordinationStatus::Applied =>
+                    return Ok(ProviderBotCoordinationOutcome { processed: true, duplicate: true }),
+                CoordinationClaim::Duplicate(_) => return Err(ProviderBotEventError::Internal(
+                    "coordination_previous_outcome_unknown_or_failed".into())),
+            };
+            if !self.bot_run_context.get_context(&context.run_id).await.is_some_and(|run|
+                !run.terminal && run.deadline_ms > now_ms() && run.bot_id == consumer.bot_id
+                && run.group_id == consumer.group_id && run.bcs_session_id == consumer.session_id) {
+                port.finish(intent_id, &consumer, &lease.claim_token, &CoordinationResult {
+                    status: CoordinationStatus::Failed, task_id: None,
+                    error_code: Some("run_terminated_before_execution".into()),
+                }).await.map_err(map_service_error)?;
+                return Err(ProviderBotEventError::RunTerminated("run_terminated".into()));
+            }
+            let mut resolved = call.clone();
+            resolved.arguments = lease.arguments;
+            let dispatched = self.dispatch_coordination_call(&identity.bot_uuid, &context, &resolved).await;
+            let result = match &dispatched {
+                Ok(task_id) => CoordinationResult { status: CoordinationStatus::Applied,
+                    task_id: task_id.clone(), error_code: None },
+                Err(_) => CoordinationResult { status: CoordinationStatus::Unknown,
+                    task_id: None, error_code: Some("coordination_execution_not_confirmed".into()) },
+            };
+            port.finish(intent_id, &consumer, &lease.claim_token, &result).await.map_err(map_service_error)?;
+            dispatched?;
+            return Ok(ProviderBotCoordinationOutcome { processed: true, duplicate: false });
+        }
+
         let dedup_key = format!("{}:{}", command.run_id.trim(), command.tool_call_id.trim());
         {
             let mut seen = self.coordination_seen.lock().await;
@@ -1011,11 +994,16 @@ fn coordination_call_from_command(
                         "tool_result callback requires result_text".to_string(),
                     )
                 })?;
-            CoordinationCall::from_stdout(result_text).ok_or_else(|| {
+            let call = CoordinationCall::from_provider_stdout(result_text).ok_or_else(|| {
                 ProviderBotEventError::InvalidRequest(
                     "tool_result did not contain a BCS coordination echo".to_string(),
                 )
-            })
+            })?;
+            if call.v == 2 && command.tool_name.as_deref().is_some_and(|name| !name.trim().is_empty()
+                && !matches!(name.trim().to_ascii_lowercase().as_str(), "bash" | "exec" | "shell" | "mcporter")) {
+                return Err(ProviderBotEventError::Forbidden("unsupported coordination source tool".into()));
+            }
+            Ok(call)
         }
         CoordinationMode::NativeMcp => {
             let expected_server = coordination
@@ -1085,7 +1073,7 @@ fn coordination_call_from_command(
                                 "native_mcp tool_result requires result_text".to_string(),
                             )
                         })?;
-                    let call = CoordinationCall::from_stdout(result_text).ok_or_else(|| {
+                    let call = CoordinationCall::from_provider_stdout(result_text).ok_or_else(|| {
                         ProviderBotEventError::InvalidRequest(
                             "tool_result did not contain a BCS coordination echo".to_string(),
                         )
@@ -1147,6 +1135,7 @@ fn coordination_intent_to_call(
         ));
     }
     Ok(CoordinationCall {
+        magic: true, v: 1, status: "received".to_string(), intent_id: None,
         tool: intent.tool.trim().to_string(),
         arguments: intent.arguments.clone(),
     })
@@ -1238,5 +1227,30 @@ mod tests {
         );
         assert!(runs.is_empty());
         assert_eq!(cleanup_expired_visible_text_entries(&mut runs, u64::MAX), 0);
+    }
+}
+
+#[cfg(test)]
+mod coordination_legacy_compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn callback_source_restriction_applies_only_to_v2() {
+        let coordination: ProviderCoordinationConfig = serde_json::from_value(json!({
+            "mode": "mcporter_mcp"
+        })).unwrap();
+        let mut command = ProviderBotCoordinationCommand {
+            provider_id: "provider".into(), credential: ProviderBotEventCredential::StaticBearer("test".into()),
+            run_id: "run".into(), tool_call_id: "tool".into(),
+            kind: ProviderCoordinationEventKind::ToolResult, tool_name: Some("legacy_wrapper".into()),
+            result_text: Some(json!({"__bcs_coordination__":true,"v":1,
+                "tool":" bcs_task_complete ","arguments":{"summary":"done"},"status":null}).to_string()),
+            mcp_server: None, intent: None,
+        };
+        assert_eq!(coordination_call_from_command(&coordination, &command).unwrap().tool, "bcs_task_complete");
+        command.result_text = Some(json!({"__bcs_coordination__":true,"v":2,
+            "tool":"bcs_task_complete","status":"stored",
+            "intent_id":"bcs_intent_0123456789abcdef0123456789abcdef"}).to_string());
+        assert!(matches!(coordination_call_from_command(&coordination, &command), Err(ProviderBotEventError::Forbidden(_))));
     }
 }

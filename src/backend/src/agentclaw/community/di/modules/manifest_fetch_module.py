@@ -20,6 +20,9 @@ from typing import Callable
 
 from injector import Injector, Module, inject, provider, singleton
 
+from agentclaw.community.plugin_api.object_store_client import (
+    ObjectStoreClientFactory,
+)
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetcher,
 )
@@ -218,14 +221,16 @@ class ManifestFetchModule(Module):
         fetcher: GuardedFetcher,
         content: ManifestContentServiceProtocol,
         credentials: SourceCredentialServiceProtocol,
+        objects: ObjectStoreClientFactory,
     ) -> EntryFetcher:
         """The one fetch funnel the fetch-consuming materialisers share.
 
-        One instance over the three singletons: the transport, the store, and
-        W3's credentials — so every category that fetches reads the same
-        receipts and files the same provenance rows.
+        One instance over four singletons: the transport, the store, W3's
+        credentials, and the object-store client factory — so every category
+        that fetches reads the same receipts and files the same provenance
+        rows, whichever protocol served it.
         """
-        return EntryFetcher(fetcher, content, credentials)
+        return EntryFetcher(fetcher, content, credentials, objects)
 
     @singleton
     @provider

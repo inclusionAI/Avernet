@@ -14,7 +14,7 @@ vi.mock('../FailureTaskDrawer', () => ({
   default: ({ task }: { task: { sessionId: string; taskIndex: number } }) => <div>BAD_CASE:{task.sessionId}:{task.taskIndex}</div>,
 }))
 
-import AdminReviewQueue from '../AdminReviewQueue'
+import AdminReviewQueue, { AdminExecuteDialog } from '../AdminReviewQueue'
 
 const baseImprovement = {
   ownerUserId: 'dev_local', botOwnerUserId: 'dev_local', botId: 'bot-1',
@@ -60,6 +60,36 @@ function setup() {
 }
 
 describe('Admin review queue', () => {
+  it.each([false, true])('shows each manual repair evidence with deep diagnostics opt-out=%s', async (optOut) => {
+    const evidence = [
+      { sessionId: 'session-manual', taskIndex: 0, ordinal: 0, taskDescription: '读取项目配置', failureClass: 'CONFIG_MISSING', reasoningSummary: '缺少配置字段', payloadRef: 'oss://fixture', payloadEtag: 'etag', payloadVersionId: null },
+      { sessionId: 'session-manual', taskIndex: 1, ordinal: 1, taskDescription: '执行服务检查', failureClass: 'TOOL_FAILURE', reasoningSummary: '诊断工具未授权', payloadRef: 'oss://fixture', payloadEtag: 'etag', payloadVersionId: null },
+    ]
+    const onDone = vi.fn()
+    mocks.adminExecuteOnce.mockClear()
+    mocks.adminExecuteOnce.mockResolvedValue({ taskId: 'REPAIR-MANUAL-1' })
+    render(<AdminExecuteDialog item={{ ...items[1], status: 'ACTIVE', adminReviewStatus: 'APPROVED', evidence, evolveLinks: [] }} onClose={() => {}} onDone={onDone} />)
+    const user = userEvent.setup()
+
+    const permission = screen.getByRole('checkbox', { name: '允许深度诊断 Shell' })
+    expect(permission).toBeChecked()
+    expect(screen.getByText('标题：读取项目配置')).toBeInTheDocument()
+    expect(screen.getByText('标题：执行服务检查')).toBeInTheDocument()
+    expect(screen.getByText('Session ID：session-manual · Task 0')).toBeInTheDocument()
+    expect(screen.getByText('Session ID：session-manual · Task 1')).toBeInTheDocument()
+    expect(screen.getByText(/判定：.*缺少配置字段/)).toBeInTheDocument()
+    expect(screen.getByText(/判定：.*诊断工具未授权/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认并进入进化室' })).toBeDisabled()
+    if (optOut) await user.click(permission)
+    await user.type(screen.getByLabelText('管理员代处理原因 *'), '检查配置问题')
+    await user.click(screen.getByRole('button', { name: '确认并进入进化室' }))
+
+    await waitFor(() => expect(mocks.adminExecuteOnce).toHaveBeenCalledWith(4, {
+      reason: '检查配置问题', repairDirection: '更新 tools.md', diagnosticMode: optOut ? 'observe' : 'deep',
+    }, expect.any(String)))
+    expect(onDone).toHaveBeenCalledWith('REPAIR-MANUAL-1')
+  })
+
   it('only exposes approve/reject and supports select-all batch rejection with a required reason', async () => {
     setup()
     const user = userEvent.setup()
@@ -175,6 +205,7 @@ describe('Admin review queue', () => {
       {
         reason: '用户长期未处理，问题持续影响任务完成率',
         repairDirection: '更新 tools.md',
+        diagnosticMode: 'deep',
       },
       expect.any(String),
     ))

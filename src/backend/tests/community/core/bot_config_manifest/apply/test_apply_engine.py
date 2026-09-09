@@ -55,6 +55,7 @@ from ._fakes import (
     make_context,
     real_validator,
 )
+from agentclaw.community.plugins.local.object_store_client import InMemoryObjectStoreClientFactory
 
 
 def _engine(scripts=None, activations=None, auth=None):
@@ -83,7 +84,7 @@ def _dummy_entry_fetcher():
     the registry holds for them can be a never-called placeholder."""
     return EntryFetcher(
         FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
-    )
+    , InMemoryObjectStoreClientFactory())
 
 
 async def _apply(engine, document, *, ctx=None, dry_run=False, phases=None):
@@ -805,7 +806,7 @@ async def test_a_fetching_document_applies_all_four_categories_in_order():
             package_validator=real_validator(),
             entry_fetcher=EntryFetcher(
                 fetcher, FakeManifestContent(), FakeCredentials()
-            ),
+            , InMemoryObjectStoreClientFactory()),
             resource_service=FakeResourceFileService(),
             cli_tool_service=object(),
         ),

@@ -73,6 +73,7 @@ class SourceCredentialRepository(
         modifier: str,
         access_key_id: str | None = None,
         region: str | None = None,
+        endpoint: str | None = None,
     ) -> SourceCredentialRow:
         try:
             return self._upsert_once(
@@ -81,6 +82,7 @@ class SourceCredentialRepository(
                 header_name=header_name,
                 access_key_id=access_key_id,
                 region=region,
+                endpoint=endpoint,
                 allowed_prefixes=allowed_prefixes,
                 secret_ciphertext=secret_ciphertext,
                 owner_app_id=owner_app_id,
@@ -100,6 +102,7 @@ class SourceCredentialRepository(
                 header_name=header_name,
                 access_key_id=access_key_id,
                 region=region,
+                endpoint=endpoint,
                 allowed_prefixes=allowed_prefixes,
                 secret_ciphertext=secret_ciphertext,
                 owner_app_id=owner_app_id,
@@ -118,6 +121,7 @@ class SourceCredentialRepository(
         modifier: str,
         access_key_id: str | None = None,
         region: str | None = None,
+        endpoint: str | None = None,
     ) -> SourceCredentialRow:
         with self._db.orm_session() as db:
             row = (
@@ -132,6 +136,7 @@ class SourceCredentialRepository(
                     header_name=header_name,
                     access_key_id=access_key_id,
                     region=region,
+                    endpoint=endpoint,
                     allowed_prefixes=_encode_prefixes(allowed_prefixes),
                     secret_ciphertext=secret_ciphertext,
                     owner_app_id=owner_app_id,
@@ -146,6 +151,7 @@ class SourceCredentialRepository(
                 # mechanism's fields behind, half-configuring the new one.
                 row.access_key_id = access_key_id
                 row.region = region
+                row.endpoint = endpoint
                 row.allowed_prefixes = _encode_prefixes(allowed_prefixes)
                 row.secret_ciphertext = secret_ciphertext
                 # ``owner_app_id`` is deliberately NOT re-stamped on the

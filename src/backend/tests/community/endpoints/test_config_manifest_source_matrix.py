@@ -40,7 +40,10 @@ _BOT_ID = "matrix-bot"
 _KEY = "config-manifest-framework-signing-key-at-least-32-bytes"
 _DIGEST = "sha256:" + "0" * 64
 _REPO = "https://code.example.com/team/content.git"
-_OBJECT = "https://cdn.example.com/pkg.zip"
+#: An object store address is two structured fields, not a URL — the source
+#: names the bucket and the key, the credential names the endpoint.
+_BUCKET = "cdn-assets"
+_OBJECT_KEY = "pkg.zip"
 
 
 class _Secret:
@@ -144,7 +147,9 @@ def _document(category: ManifestCategory, kind: SourceKind) -> str:
             "sources:\n"
             "  src:\n"
             "    protocol: oss\n"
-            f"    url: {_OBJECT}\n"
+            f"    bucket: {_BUCKET}\n"
+            f"    key: {_OBJECT_KEY}\n"
+            "    auth: oss-cred\n"
         )
     entry += "      from: src\n"
     # ``oss`` needs the pin wherever the platform distributes executable
@@ -223,7 +228,11 @@ def test_an_mcp_entry_cannot_be_given_a_source(app_with_testing_modules, world):
         "manifest:\n"
         "  mcp:\n"
         "    - server_code: filesystem\n"
-        f"      source: {_OBJECT}\n",
+        "      source:\n"
+        "        protocol: oss\n"
+        f"        bucket: {_BUCKET}\n"
+        f"        key: {_OBJECT_KEY}\n"
+        "        auth: oss-cred\n",
     )
     assert response.status_code == 422
     codes = {v["code"] for v in response.json()["data"]["violations"]}
@@ -376,7 +385,9 @@ def test_cli_tools_over_oss_still_requires_a_digest(
         "sources:\n"
         "  artifacts:\n"
         "    protocol: oss\n"
-        f"    url: {_OBJECT}\n"
+        f"    bucket: {_BUCKET}\n"
+        f"    key: {_OBJECT_KEY}\n"
+        "    auth: oss-cred\n"
         "manifest:\n"
         "  cli_tools:\n"
         "    - name: rg\n"

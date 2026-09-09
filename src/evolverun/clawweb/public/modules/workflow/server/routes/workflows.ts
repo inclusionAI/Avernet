@@ -443,7 +443,8 @@ export function createWorkflowsRouter(
     if (!await requireWorkflowAccess(req, res, botPermRepo, workflowId, "view")) return;
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string ?? "20", 10)));
     if (isNaN(limit)) { res.status(400).json({ error: "Bad Request" }); return; }
-    const rows = await wfdhRepo.listHistory(workflowId, limit);
+    const releaseOnly = String(req.query.releaseOnly ?? "") === "true";
+    const rows = await wfdhRepo.listHistory(workflowId, limit, { releaseOnly });
     const history = rows.map((r) => ({
       deployNumber: r.deploy_number,
       version: r.version,
@@ -607,6 +608,12 @@ export function createWorkflowsRouter(
           const updatedAtMs = toEpochMs(row.gmt_modified);
           if (updatedAtMs > 0) {
             spec.updatedAt = updatedAtMs;
+          }
+
+          // Attach the synced deploy version so API-mode ClawMind can populate
+          // flow_runs.workflow_version when falling back to workflow_specs.
+          if (row.version != null) {
+            spec.version = row.version;
           }
 
           res.json(spec);

@@ -44,6 +44,7 @@ class SourceCredentialServiceProtocol(Protocol):
         header_name: str | None = None,
         access_key_id: str | None = None,
         region: str | None = None,
+        endpoint: str | None = None,
         credential_type: CredentialType = "header",
         modifier: str = "",
     ) -> SourceCredentialRecord:

@@ -4,7 +4,7 @@
 评测功能关闭。
 """
 
-from injector import Binder, Module, provider, singleton
+from injector import Binder, Module, singleton
 
 from agentclaw.community.plugin_api.eval_env import (
     EvalBcsCliTagProtocol,

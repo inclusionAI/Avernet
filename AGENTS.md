@@ -162,6 +162,16 @@ Install the repository hooks separately in every Git worktree:
 scripts/install_git_hooks.sh
 ```
 
+The pre-push hook first scans added lines in each pushed commit range for
+likely plaintext credentials. It blocks the push on private keys, recognizable
+provider tokens (including Alibaba Cloud AccessKey/STS credentials),
+bearer/JWT credentials, or high-entropy values assigned to credential-like
+fields. When a finding is reported, the hook prints the
+corresponding added line with the matched sensitive value partially masked,
+alongside its file, line, and rule, so authors can locate and remove it without
+leaking the complete credential into terminal or CI logs. This check is always
+enabled and is independent of the lint/test mode below.
+
 By default the pre-push hook runs in **lint-only** mode: for changed Python
 modules it runs the fast `python_sast_local.sh` SAST/lint gate, but skips the
 heavier unit tests, changed-line coverage, and Singlebox E2E. Set

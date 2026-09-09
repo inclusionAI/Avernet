@@ -80,6 +80,7 @@ from ..apply._fakes import (
 from ..managed_files._fakes import FakeObjectStorage
 from ..managed_files.test_skill_port import FakeSkillRepository, LiveCapabilityReader
 from tests.community.core.config_compose.test_collector import _reader_over, _registry_over
+from agentclaw.community.plugins.local.object_store_client import InMemoryObjectStoreClientFactory
 
 _OWNER = "u_owner"
 _BOT = "b_first"
@@ -187,7 +188,7 @@ def _build(db):
             FakeGuardedFetcher(responses={_QC_URL: fetched_object(_QZ, url=_QC_URL, content_type="application/zip")}),
             FakeManifestContent(),
             FakeCredentials(),
-        )
+        InMemoryObjectStoreClientFactory(),)
 
     def platform_ports() -> MaterialiserPorts:
         return MaterialiserPorts(

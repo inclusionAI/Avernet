@@ -40,7 +40,7 @@ export function createInternalRunsRouter(
       return;
     }
     try {
-      const { flow_id, workflow_id, workflow_title, status, triggered_by, params_json, input_json, node_count, identity_key, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine } = req.body as {
+      const { flow_id, workflow_id, workflow_title, status, triggered_by, params_json, input_json, node_count, identity_key, started_at, credentials_json, origin_session_key, origin_session_id, origin_bot_id, user_id, plugin_version, engine, workflow_version, workflow_deploy_number } = req.body as {
         flow_id?: string;
         workflow_id?: string;
         workflow_title?: string;
@@ -58,12 +58,21 @@ export function createInternalRunsRouter(
         user_id?: string;
         plugin_version?: string;
         engine?: string;
+        workflow_version?: number | null;
+        workflow_deploy_number?: number | null;
       };
 
       if (!flow_id || !workflow_id || !status) {
         apiLog("WRITE", "/runs", { httpStatus: 400, error: "Missing required fields", flow_id, workflow_id, runStatus: status });
         res.status(400).json({ success: false, error: "Bad Request", message: "Missing required fields: flow_id, workflow_id, status" });
         return;
+      }
+
+      for (const [field, value] of Object.entries({ workflow_version, workflow_deploy_number })) {
+        if (value != null && (!Number.isSafeInteger(value) || value < 1 || value > 2_147_483_647)) {
+          res.status(400).json({ success: false, error: "Bad Request", message: `${field} must be a positive integer or null` });
+          return;
+        }
       }
 
       const ok = await flowRunRepo.insert({
@@ -84,6 +93,8 @@ export function createInternalRunsRouter(
         userId: user_id ?? null,
         pluginVersion: plugin_version ?? null,
         engine: engine ?? null,
+        workflowVersion: workflow_version ?? null,
+        workflowDeployNumber: workflow_deploy_number ?? null,
       });
       if (!ok) {
         apiLog("WRITE", "/runs", { status: 500, error: "Failed to insert flow run", flow_id, workflow_id });

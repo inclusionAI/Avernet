@@ -18,6 +18,8 @@ pub struct CoordinationCall {
     pub v: u64,
     pub tool: String,
     #[serde(default)]
+    pub intent_id: Option<String>,
+    #[serde(default)]
     pub arguments: Map<String, Value>,
     #[serde(default)]
     pub status: String,
@@ -25,12 +27,22 @@ pub struct CoordinationCall {
 
 impl CoordinationCall {
     pub fn from_stdout(stdout: &str) -> Option<Self> {
+        Self::parse_stdout(stdout, false)
+    }
+
+    /// Preserve the provider callback's historical v1 normalization. V2 uses
+    /// the same strict validation at both intake paths.
+    pub fn from_provider_stdout(stdout: &str) -> Option<Self> {
+        Self::parse_stdout(stdout, true)
+    }
+
+    fn parse_stdout(stdout: &str, legacy_provider: bool) -> Option<Self> {
         for line in stdout.lines() {
             let line = line.trim();
             if !line.contains(MAGIC_KEY) {
                 continue;
             }
-            if let Some(call) = Self::parse_candidate(line) {
+            if let Some(call) = serde_json::from_str::<Value>(line).ok().and_then(|v| Self::from_value(v, legacy_provider)) {
                 return Some(call);
             }
         }
@@ -41,9 +53,9 @@ impl CoordinationCall {
                 continue;
             }
             let mut stream = serde_json::Deserializer::from_str(candidate)
-                .into_iter::<CoordinationCall>();
+                .into_iter::<Value>();
             if let Some(Ok(call)) = stream.next() {
-                if let Some(call) = Self::validate(call) {
+                if let Some(call) = Self::from_value(call, legacy_provider) {
                     return Some(call);
                 }
             }
@@ -51,14 +63,36 @@ impl CoordinationCall {
         None
     }
 
-    fn parse_candidate(candidate: &str) -> Option<Self> {
-        serde_json::from_str::<CoordinationCall>(candidate)
-            .ok()
-            .and_then(Self::validate)
+    fn from_value(mut value: Value, legacy_provider: bool) -> Option<Self> {
+        let object = value.as_object_mut()?;
+        if object.get("v").and_then(Value::as_u64) == Some(1) {
+            // This was an unknown extension field before v2, so ignore it in v1.
+            object.remove("intent_id");
+            if legacy_provider {
+                let tool = object.get("tool")?.as_str()?.trim().to_string();
+                if tool.is_empty() { return None; }
+                object.insert("tool".into(), Value::String(tool));
+                object.remove("status");
+                if !object.get("arguments").is_some_and(Value::is_object) {
+                    object.insert("arguments".into(), Value::Object(Map::new()));
+                }
+            }
+        }
+        serde_json::from_value(value).ok().and_then(Self::validate)
     }
 
     fn validate(call: Self) -> Option<Self> {
-        (call.magic && call.v == CONTRACT_VERSION).then_some(call)
+        let valid = call.magic && match call.v {
+            1 => call.intent_id.is_none(),
+            2 => call.status == "stored" && call.arguments.is_empty()
+                && matches!(call.tool.as_str(), TOOL_ASSIGN_TASK | TOOL_SEND_TASK_MESSAGE | TOOL_TASK_COMPLETE)
+                && call.intent_id.as_deref().is_some_and(|id| {
+                    id.strip_prefix("bcs_intent_").is_some_and(|suffix|
+                        suffix.len() == 32 && suffix.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+                }),
+            _ => false,
+        };
+        valid.then_some(call)
     }
 }
 
@@ -104,6 +138,36 @@ mod tests {
     #[test]
     fn ignores_non_coordination_stdout() {
         assert!(CoordinationCall::from_stdout("just regular output").is_none());
+    }
+
+    #[test]
+    fn v2_reference_survives_pretty_printing_and_output_cutoff() {
+        let mut value = serde_json::json!({"__bcs_coordination__": true, "v": 2,
+            "tool": "bcs_assign_task", "intent_id": "bcs_intent_0123456789abcdef0123456789abcdef",
+            "status": "stored"});
+        let stdout = format!("log\n{}\n{}", serde_json::to_string_pretty(&value).unwrap(), "x".repeat(8000));
+        let call = CoordinationCall::from_stdout(&stdout[..4000]).unwrap();
+        assert!(call.intent_id.is_some());
+        assert!(call.arguments.is_empty());
+        value["arguments"] = serde_json::json!({"message": "must not override stored arguments"});
+        assert!(CoordinationCall::from_stdout(&value.to_string()).is_none());
+        value.as_object_mut().unwrap().remove("arguments");
+        value["intent_id"] = serde_json::json!("../../other");
+        assert!(CoordinationCall::from_stdout(&value.to_string()).is_none());
+    }
+
+    #[test]
+    fn legacy_provider_v1_keeps_lenient_metadata_and_tool_normalization() {
+        let value = serde_json::json!({"__bcs_coordination__": true, "v": 1,
+            "tool": " bcs_task_complete ", "arguments": {"summary": "done"},
+            "status": {"legacy": true}, "intent_id": 123});
+        let call = CoordinationCall::from_provider_stdout(&value.to_string()).unwrap();
+        assert_eq!(call.tool, "bcs_task_complete");
+        assert_eq!(call.arguments["summary"], "done");
+        assert!(call.intent_id.is_none());
+        let stream = serde_json::json!({"__bcs_coordination__": true, "v": 1,
+            "tool": "bcs_task_complete", "arguments": {"summary": "done"}, "intent_id": 123});
+        assert!(CoordinationCall::from_stdout(&stream.to_string()).unwrap().intent_id.is_none());
     }
 
     #[test]

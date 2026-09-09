@@ -97,8 +97,15 @@ PUT_BODY = {
 AKSK_BODY = {
     "type": "oss_aksk",
     "access_key_id": "LTAI5tExampleKeyId",
+    # Issued with the key pair and stored beside it, so a tenant's manifest
+    # chooses which bucket it reads and never which host it reaches.
+    "endpoint": "https://objects.example-corp.com",
+    "region": "cn-shanghai",
     "secret": "an-object-store-secret-key",
-    "allowed_prefixes": ["https://artifacts.example-corp.com/tools"],
+    # Empty, and refused if not: this mechanism presents its secret to
+    # nothing, and its endpoint does not come from the document — there is no
+    # tenant-supplied host for a prefix to constrain.
+    "allowed_prefixes": [],
 }
 _BAD_PREFIX_BODY = {
     "type": "header",
