@@ -28,7 +28,8 @@
 
 | Job/指标 | 状态 | 证据 | 根因 | 修复/提交 | 验证 |
 |---|---|---|---|---|---|
-| GitHub checks | PENDING | PR #2055 | PR 刚创建 | - | 本地定向 455 passed |
+| Backend unit tests (round 1) | FAIL | [job 102338721499](https://github.com/inclusionAI/Avernet/actions/runs/34311412711/job/102338721499) | E3 要求新增 `core/token_exchange` 必须有 singlebox flow 或带原因的显式 exempt | 增加 corp-only/noop-singlebox 的精确 exempt 原因 | 本地运行 E3 architecture tests |
+| Other GitHub checks (round 1) | PASS | PR #2055 | - | - | BCS/BaaS/Engine/Gateway/Sandbox-proxy、Singlebox、title/design guard 均通过 |
 
 ## 人工意见
 
@@ -40,6 +41,6 @@
 
 - PR：OPEN
 - 自动意见：PENDING
-- ACI/CI：PENDING
+- ACI/CI：修复后待新一轮 checks
 - 人工意见：PENDING
-- 下一步：提交本报告后等待并收敛 GitHub PR checks/reviews。
+- 下一步：提交 E3 修复并等待新一轮 GitHub PR checks/reviews。
