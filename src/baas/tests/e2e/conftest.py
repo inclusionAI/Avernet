@@ -29,6 +29,10 @@ DEFAULT_TEMPLATE_UUID = TEMPLATE_ARCA
 
 DEFAULT_TIMEOUT = 120.0
 
+# Callback endpoint URL constants — referenced by helper functions below.
+DEVICE_CALLBACK_URL = "/api/v1/publish/device-callback"
+TECLAW_CALLBACK_URL = "/api/v1/publish/teclaw-callback"
+
 
 def pytest_report_teststatus(report, config):
     if report.when == "call":
@@ -740,6 +744,24 @@ async def call_device_callback(
         api.callback_url(),
         json=body,
     )
+
+
+async def call_teclaw_callback(
+    http_client: httpx.AsyncClient,
+    payload: dict[str, Any],
+) -> tuple[int, dict[str, Any]]:
+    """POST a TeClaw callback payload to /api/v1/publish/teclaw-callback.
+
+    Mirrors ``call_device_callback`` but targets the TeClaw async-callback
+    endpoint and accepts the full ``TeclawCallbackRequest`` payload dict.
+    Returns ``(status_code, response_json)`` for ergonomic assertions.
+    """
+    response = await http_client.post(TECLAW_CALLBACK_URL, json=payload)
+    try:
+        body = response.json()
+    except ValueError:
+        body = {"raw": response.text}
+    return response.status_code, body
 
 
 # ── Logging configuration ────────────────────────────────────────────────────

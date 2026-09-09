@@ -1646,6 +1646,14 @@ manifest 概念。
 > `digest`（以 SHA 形式的 ref 钉住）；`resources` 条目仍只认 URL 源——
 > W6 的物化器接上 git 路是后续工作（W6 先于 W7 合入，未携带 git 消费）。
 >
+> **✅ 那项后续工作已完成（2026-09-08）**，见
+> `specs/2026-09-08-manifest-source-protocols/`。它不止接通了 resources：
+> 一并把源轴做成显式的 `protocol`（`git` / `oss`）、把「类别 × 协议」的支持
+> 矩阵收进代码里的一张表（校验器与 capabilities 端点读同一张、逐格测试守
+> 着）、让条目 `subpath` 与源的 `subpath` 拼接（此前一个 git 源只能服务一个
+> 条目）、把 `cli_tools` 的取源接上同一扇门（它此前是唯一「PUT 过、apply
+> 炸」的构造），并实现 `oss_aksk` 凭证（私有对象存储的 AK/SK 请求签名）。
+>
 > **🔧 评审修复（2026-09-02，`fix/w7-review-fixes`）。**#1829 的全量评审发现
 > 上述交付被闸门挡住，另有五个潜在缺陷，本 PR 全部修掉：admission 的
 > `SourceForm.GIT`/`NAMED` 从未翻转，整个运行时经 PUT 不可达（现翻转，

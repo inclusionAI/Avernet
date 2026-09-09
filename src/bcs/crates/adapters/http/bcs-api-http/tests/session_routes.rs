@@ -510,6 +510,7 @@ impl SessionService for FakeSessionService {
             role: ParticipantRole::Consultant,
             tags: Vec::new(),
             mode: ParticipantMode::Auto,
+            message_view_scope: bcs_domain::MessageViewScope::Full,
             joined_at: Some(1),
         })
     }
@@ -522,17 +523,23 @@ impl SessionService for FakeSessionService {
             .updated_participant
             .lock()
             .expect("update participant lock") = Some(command.clone());
+        let actor_kind = if command.bot_uuid.starts_with("human_") {
+            ActorKind::Human
+        } else {
+            ActorKind::Bot
+        };
         Ok(SessionParticipant {
-            actor_kind: if command.bot_uuid.starts_with("human_") {
-                ActorKind::Human
-            } else {
-                ActorKind::Bot
-            },
+            actor_kind,
             actor_id: command.bot_uuid,
             name: None,
             role: ParticipantRole::Consultant,
             tags: Vec::new(),
-            mode: command.mode,
+            mode: command
+                .mode
+                .unwrap_or_else(|| ParticipantMode::default_for(actor_kind)),
+            message_view_scope: command
+                .message_view_scope
+                .unwrap_or(bcs_domain::MessageViewScope::Full),
             joined_at: Some(1),
         })
     }
@@ -648,6 +655,7 @@ fn session_participant() -> SessionParticipant {
         role: ParticipantRole::Driver,
         tags: Vec::new(),
         mode: ParticipantMode::Auto,
+        message_view_scope: bcs_domain::MessageViewScope::Full,
         joined_at: Some(1),
     }
 }
@@ -1002,6 +1010,7 @@ async fn create_session_returns_created_and_forwards_principal() {
                 "kind": "service_invocation",
                 "acting_bot_id": "bot-owned",
                 "creator_role": "manager",
+                "message_view_scope": "participant",
                 "input": {"query": "how to coordinate?", "custom": {"n": 1}},
                 "meta": {
                     "callback_target": {"baas_session_id": "baas-1"},
@@ -1039,6 +1048,10 @@ async fn create_session_returns_created_and_forwards_principal() {
         assert_eq!(created.kind, Some(SessionKind::ServiceInvocation));
         assert_eq!(created.acting_bot_id.as_deref(), Some("bot-owned"));
         assert_eq!(created.creator_role, Some(ParticipantRole::Manager));
+        assert_eq!(
+            created.message_view_scope,
+            Some(bcs_domain::MessageViewScope::Participant)
+        );
         assert_eq!(created.context_delivery, Some(DeliveryType::Inject));
         assert_eq!(
             created.meta,
@@ -1613,7 +1626,7 @@ async fn update_session_participant_returns_updated_mode() {
         assert_eq!(caller_user_id(&updated.caller), "staff-1");
         assert_eq!(updated.session_id, "session-1");
         assert_eq!(updated.bot_uuid, "bot-2");
-        assert_eq!(updated.mode, ParticipantMode::Muted);
+        assert_eq!(updated.mode, Some(ParticipantMode::Muted));
     }
 }
 
@@ -1643,7 +1656,7 @@ async fn update_session_human_participant_accepts_present_mode() {
         .expect("update participant lock");
     let updated = updated.as_ref().expect("update participant command");
     assert_eq!(updated.bot_uuid, "human_staff-1");
-    assert_eq!(updated.mode, ParticipantMode::Present);
+    assert_eq!(updated.mode, Some(ParticipantMode::Present));
 }
 
 #[tokio::test]
@@ -1736,6 +1749,7 @@ async fn create_session_rejects_null_optional_fields() {
         "kind",
         "acting_bot_id",
         "creator_role",
+        "message_view_scope",
         "input",
         "meta",
         "context_delivery",

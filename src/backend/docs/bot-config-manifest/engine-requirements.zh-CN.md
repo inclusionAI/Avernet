@@ -104,16 +104,17 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
   「平台工具目录在哪个注入点进 agent 进程的 PATH」——即把落点当成平台侧的答案、
   逐引擎去谈。**W9 把它反过来了**：落点是**引擎的**，平台不参与。
 
-  引擎需要提供四个按**命令名**寻址的端点（后端通过各 bot 的 engine adapter
-  调用，与 runtime-layout probe、cron relay 走的是同一条通道）。前三个是
-  「改一个」，第四个是「整体替换」：
+  引擎需要提供五个按**命令名**寻址的端点（后端通过各 bot 的 engine adapter
+  调用，与 runtime-layout probe、cron relay 走的是同一条通道）。前两个是
+  「改一个」，第三个是「整体替换」，后两个是只读的：
 
   | 端点 | 请求体 | 语义 |
   | --- | --- | --- |
   | `POST /api/cli/install` | `{name, size_bytes, content_b64}` | 「让这个 bot 有 `name` 这个命令」，其余命令不动。**目录、可执行位、以及让 agent 能用到它，全在这一次调用里由引擎完成。**平台不发 `chmod`、不跑 shell |
   | `POST /api/cli/delete` | `{name}` | 移除该命令；本来就没有也算成功 |
-  | `GET /api/cli/list` | — | 引擎认为这个 bot 有哪些命令。**仅供漂移观测**，平台的表才是「已安装」的定义 |
   | `POST /api/cli/replace` | `{tools: [{name, size_bytes, content_b64}, …]}` | 「这个 bot 的命令集**就是**这些」。**请求体里没出现的命令要被删掉**——删除是隐含的。空数组是合法且有意义的请求：等于「这个 bot 没有任何命令」 |
+  | `GET /api/cli/list` | — | 引擎认为这个 bot 有哪些命令。**仅供漂移观测**，平台的表才是「已安装」的定义。每条返回 `{name, md5, size_bytes}`；**`md5` 必填**——只报 `name` 只能发现「少了 / 多了」，发现不了**同名但二进制被换掉**，而那恰恰是最值得发现的一种。一个命令都没有时返回 `{"tools": []}`，不是 404 |
+  | `GET /api/cli/download?name=…` | — | 取回单个命令的字节（base64）。**核对与排查用的旁路，不是交付链路的一环**——平台自己留了一份字节，交付路径上不从容器回读。命令不存在时返回 `200` + `success:false` + `error:"not_found"`，**不用 404**（见下） |
 
   **`replace` 的响应必须逐命令给结论**，这是它比前三个端点难做的地方，也是
   必须写在契约里而不是留到实现时才发现的一点：
@@ -137,9 +138,16 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
 
   约定：非 2xx 抛错、200 但 envelope 里 `success: false` 同样算拒绝——引擎装
   不上的工具，平台**绝不**记成已安装。404 的含义是「这个引擎构建没有 CLI
-  端点」，不是「工具不存在」（平台从不按路径问工具）。字节以 base64 走
-  JSON body：`DeviceAdapterTransport` 是 core 能绑定也能测试的唯一引擎通道，
-  逐文件写用的 multipart 通道其 ARCA 分支是 corp-only。
+  端点」，不是「工具不存在」（平台从不按路径问工具）——所以 `download` 遇到
+  未知命令时**不能**用 404，否则一个写错的命令名会被读成「整个引擎坏了」。
+  字节以 base64 走 JSON body：`DeviceAdapterTransport` 是 core 能绑定也能测试
+  的唯一引擎通道，逐文件写用的 multipart 通道其 ARCA 分支是 corp-only。
+
+  **本仓库的实现按能力位拒绝时返回 `501` 而不是 `404`**（`api/caps.py` 的
+  `check_capability`，与其余所有 router 一致）。两者在平台侧都落成
+  `CliToolPlacementError`，都不可能被误读成成功；沿用 `501` 是为了让引擎内部
+  一致，而 `501`（未实现）本身也比 `404`（找不到）更贴近「这个构建不做
+  CLI」。契约在此以实现为准。
 
   **v1 已知代价：`replace` 会带上集合里每一个工具的字节，哪怕这次只改了一个。**
   四个工具改一个 = 四份二进制都重传。之所以可接受：**完全没变化的 apply 根本
@@ -147,9 +155,26 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
   所以代价只落在「确实改了东西」的那次 apply 上。后续优化要动契约——集合按
   `(name, digest)` 传、只对引擎说缺的那些补字节——因此留到 v2 一起谈。
 
-  **目录常量归引擎**，平台代码里没有它的副本。openclaw 侧的建议值是
-  `/home/admin/.openclaw/cli`；每个 ARCA 引擎有自己的一份，默认技能集本来就是
-  按引擎分的，所以「告诉 agent 去哪找」这件事天然也按引擎走。
+  **目录常量归引擎**，平台代码里没有它的副本。每个 ARCA 引擎有自己的一份，
+  默认技能集本来就是按引擎分的，所以「告诉 agent 去哪找」这件事天然也按引擎走。
+
+  **本仓库的实现把落点放在各引擎的装配处**
+  （`engines/<engine>/engine.py` 绑定 `_cli_tools` 的那一行）：服务要求传入一个
+  具体路径，由引擎自己给出。没有 resolver、没有查找表、`core/` 里也不读环境变量
+  ——某个引擎的落点变了，就只有一行要改。
+
+  | 引擎 | 目录 |
+  | --- | --- |
+  | openclaw | `/home/admin/.openclaw/cli` |
+  | claude_code | `/home/admin/.aicoding/cli` |
+
+  两者都是部署方给出的常量（claude_code 用 `.aicoding`，与部署方确认过——既不是
+  `.claude_code` 也不是 openclaw 那棵树）。**刻意写成字面量**：落点是镜像的属性，
+  不是运行时该推导的东西。
+
+  > **已知取舍：**同一台 singlebox 上的多个 bot 会共用同一个工具目录，因此其中
+  > 任何一个的整体替换都会删掉另一个的工具。这是当前有意接受的（"for now"）；
+  > 若 singlebox 上要跑 `cli_tools`，落点需要按 bot 区分。
 
   **v1 不做 PATH 注入**，这是一项明确的取舍：agent 由默认技能集里的一个 skill
   被告知落点，并以**绝对路径**调用。代价是 `mycli --help` 不工作、每次调用都

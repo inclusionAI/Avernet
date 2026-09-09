@@ -1,11 +1,127 @@
 //! Message / task / audit pure domain types.
 
-use crate::AttachmentType;
+use crate::{AttachmentType, MessageViewScope};
 use serde::{Deserialize, Serialize};
+
+/// Business producer domain used to select the server-side projection.
+///
+/// This value is independent from the containing Group strategy so a
+/// one-shot StateMachine run inside a Chat Group cannot inherit Chat's legacy
+/// projection semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageVisibilityDomain {
+    Chat,
+    ManagerWorker,
+    StateMachine,
+}
+
+/// Audience declared by ManagerWorker and StateMachine producers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MessageAudience {
+    Public,
+    Directed { actor_ids: Vec<String> },
+    FullOnly,
+}
+
+impl MessageAudience {
+    pub fn directed(
+        actor_ids: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Result<Self, &'static str> {
+        let mut actor_ids = actor_ids
+            .into_iter()
+            .map(Into::into)
+            .filter(|actor_id| !actor_id.is_empty())
+            .collect::<Vec<_>>();
+        actor_ids.sort();
+        actor_ids.dedup();
+        if actor_ids.is_empty() {
+            return Err("directed audience must contain at least one actor id");
+        }
+        Ok(Self::Directed { actor_ids })
+    }
+
+    pub fn validate(&self) -> Result<(), &'static str> {
+        match self {
+            Self::Directed { actor_ids }
+                if actor_ids.is_empty() || actor_ids.iter().any(String::is_empty) =>
+            {
+                Err("directed audience must contain non-empty actor ids")
+            }
+            Self::Directed { actor_ids } => {
+                let mut normalized = actor_ids.clone();
+                normalized.sort();
+                normalized.dedup();
+                if normalized.len() == actor_ids.len() {
+                    Ok(())
+                } else {
+                    Err("directed audience actor ids must be unique")
+                }
+            }
+            Self::Public | Self::FullOnly => Ok(()),
+        }
+    }
+
+    pub fn contains(&self, actor_id: &str) -> bool {
+        matches!(self, Self::Directed { actor_ids } if actor_ids.iter().any(|id| id == actor_id))
+    }
+}
+
+/// Authenticated Human projection context applied by message repositories
+/// before pagination. Bot views keep using the legacy owner filter and pass
+/// no Human view context.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HumanMessageView {
+    pub actor_id: String,
+    pub scope: MessageViewScope,
+    /// Legacy unclassified rows may be treated as ordinary Chat only when the
+    /// containing Group is Chat. Scoped domains otherwise fail closed.
+    pub allow_legacy_unclassified_chat: bool,
+}
+
+impl HumanMessageView {
+    pub fn allows_artifact(
+        &self,
+        visibility_domain: MessageVisibilityDomain,
+        audience: Option<&MessageAudience>,
+    ) -> bool {
+        if self.scope == MessageViewScope::Full {
+            return true;
+        }
+        match visibility_domain {
+            MessageVisibilityDomain::Chat => true,
+            MessageVisibilityDomain::ManagerWorker | MessageVisibilityDomain::StateMachine => {
+                match audience {
+                    Some(MessageAudience::Public) => true,
+                    Some(audience @ MessageAudience::Directed { .. }) => {
+                        audience.contains(&self.actor_id)
+                    }
+                    Some(MessageAudience::FullOnly) | None => false,
+                }
+            }
+        }
+    }
+
+    pub fn allows(&self, message: &PersistedMessage) -> bool {
+        if self.scope == MessageViewScope::Full {
+            return true;
+        }
+        match message.visibility_domain {
+            Some(MessageVisibilityDomain::Chat) => true,
+            None => self.allow_legacy_unclassified_chat,
+            Some(domain) => self.allows_artifact(domain, message.audience.as_ref()),
+        }
+    }
+}
 
 pub const BCS_STATE_MACHINE_MESSAGE_SENDER: &str = "bcs_state_machine";
 pub const BCS_STATE_MACHINE_MESSAGE_SENDER_NAME: &str = "BCS State Machine";
 pub const STATE_MACHINE_PANEL_MESSAGE_TYPE: &str = "state_machine_panel";
+pub const STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE: &str =
+    "state_machine_human_input_prompt";
+pub const STATE_MACHINE_HUMAN_INPUT_RESPONSE_MESSAGE_TYPE: &str =
+    "state_machine_human_input_response";
 pub const BCS_SESSION_OPENING_MESSAGE_SENDER: &str = "bcs_opening_message";
 pub const BCS_SESSION_OPENING_MESSAGE_SENDER_NAME: &str = "BCS";
 pub const SESSION_OPENING_MESSAGE_TYPE: &str = "opening_message";
@@ -187,6 +303,12 @@ pub struct PersistedMessage {
     pub client_msg_id: Option<String>,
     #[serde(default)]
     pub owner_bot_id: Option<String>,
+    /// `None` only for legacy rows created before Domain/Audience persistence.
+    #[serde(default)]
+    pub visibility_domain: Option<MessageVisibilityDomain>,
+    /// Required for ManagerWorker/StateMachine rows in visibility version 1.
+    #[serde(default)]
+    pub audience: Option<MessageAudience>,
     pub status: PersistedMessageStatus,
     pub created_at: u64,
     #[serde(default)]
@@ -204,6 +326,8 @@ pub struct NewMessage {
     pub content: serde_json::Value,
     pub client_msg_id: Option<String>,
     pub owner_bot_id: Option<String>,
+    pub visibility_domain: MessageVisibilityDomain,
+    pub audience: Option<MessageAudience>,
     pub created_at: u64,
     pub run_id: String,
 }
@@ -239,6 +363,7 @@ pub struct MessageQuery {
     pub owner_filter: MessageOwnerFilter,
     pub time_range: Option<(u64, u64)>,
     pub visible_from_seq: Option<i64>,
+    pub human_view: Option<HumanMessageView>,
 }
 
 /// Paginated message result page.
@@ -259,6 +384,54 @@ pub struct MessagePage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn participant_view(actor_id: &str) -> HumanMessageView {
+        HumanMessageView {
+            actor_id: actor_id.to_string(),
+            scope: MessageViewScope::Participant,
+            allow_legacy_unclassified_chat: false,
+        }
+    }
+
+    #[test]
+    fn directed_audience_is_normalized_and_requires_an_actor() {
+        assert_eq!(
+            MessageAudience::directed(["human_b", "human_a", "human_b"]).unwrap(),
+            MessageAudience::Directed {
+                actor_ids: vec!["human_a".to_string(), "human_b".to_string()]
+            }
+        );
+        assert!(MessageAudience::directed([""]).is_err());
+    }
+
+    #[test]
+    fn participant_view_applies_domain_and_audience_matrix() {
+        let view = participant_view("human_a");
+
+        assert!(view.allows_artifact(MessageVisibilityDomain::Chat, None));
+        assert!(view.allows_artifact(
+            MessageVisibilityDomain::ManagerWorker,
+            Some(&MessageAudience::Public),
+        ));
+        assert!(
+            view.allows_artifact(
+                MessageVisibilityDomain::StateMachine,
+                Some(
+                    &MessageAudience::directed(["human_a", "human_b"])
+                        .expect("valid directed audience"),
+                ),
+            )
+        );
+        assert!(!view.allows_artifact(
+            MessageVisibilityDomain::ManagerWorker,
+            Some(&MessageAudience::directed(["human_b"]).expect("valid directed audience"),),
+        ));
+        assert!(!view.allows_artifact(
+            MessageVisibilityDomain::StateMachine,
+            Some(&MessageAudience::FullOnly),
+        ));
+        assert!(!view.allows_artifact(MessageVisibilityDomain::StateMachine, None));
+    }
 
     #[test]
     fn group_message_omits_attachments_when_none() {
@@ -292,7 +465,10 @@ mod tests {
             expires_at: None,
         };
         let json = serde_json::to_string(&att).unwrap();
-        assert!(json.contains("\"type\":\"image\""), "type must rename: {json}");
+        assert!(
+            json.contains("\"type\":\"image\""),
+            "type must rename: {json}"
+        );
         assert!(
             !json.contains("mime_type") && !json.contains("url") && !json.contains("expires_at"),
             "None optionals must be omitted: {json}"

@@ -22,6 +22,7 @@ fn neutral_command_carries_no_transport_identity() {
         input: Some(serde_json::json!({"query": "hello", "custom": 1})),
         meta: Some(serde_json::json!({"channel": {"source": "ding"}})),
         public_creator_role: None,
+        human_message_view_scope: None,
         context_delivery: None,
     };
 

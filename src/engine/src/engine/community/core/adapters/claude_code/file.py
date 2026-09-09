@@ -1,32 +1,22 @@
-"""ClaudeCode file ACL adapter.
+"""Claude Code FileService adapter over the native file port.
 
-Implements the core ``FileService`` by delegating to an injected
-``ClaudeCodeFilePort`` and translating the port's primitive dicts/bytes into
-core DTOs. Path-rewrite logic and the actual FS calls live in the port impl
-(leaf side); this adapter only constructs UploadResult / RemoveResult /
-ListDirResult / FileEntry from the returned primitives.
-
-Divergence from OpenClaw's file adapter
----------------------------------------
-* The claude_code port's ``file_remove`` / ``file_rmtree`` return ``bool``;
-  the core protocol returns ``RemoveResult`` (remove) and ``str`` (rmtree).
-  The adapter synthesises RemoveResult from the path + bool, and returns the
-  target path string on rmtree success.
-* The port's ``file_read`` returns a dict (the relay's ``file.read`` payload
-  which wraps content + metadata), but the core protocol returns raw
-  ``bytes``. The adapter extracts the ``content`` field (string/bytes) and
-  decodes it to bytes.
-* The port's ``file_list_dir`` returns ``list[dict]`` of entries directly;
-  the core protocol returns ``ListDirResult`` with a ``dir_path`` and
-  ``recursive`` flag — the adapter passes through the request's values.
+Only parameter/result conversion lives here. The community concrete port does
+local Engine-filesystem I/O; it raises standard filesystem exceptions for the
+HTTP router to map. Recursion and exclusions must reach the port intact.
 """
+
 from __future__ import annotations
 
 import logging
 from typing import Any
 
 from engine.community.core.engine.context import AuthContext
-from engine.community.core.file.models import FileEntry, ListDirResult, RemoveResult, UploadResult
+from engine.community.core.file.models import (
+    FileEntry,
+    ListDirResult,
+    RemoveResult,
+    UploadResult,
+)
 from engine.community.core.file.protocol import FileService
 from engine.community.plugin_api.claude_code.file import ClaudeCodeFilePort
 
@@ -55,7 +45,7 @@ def _extract_bytes(raw: Any) -> bytes:
             return content
         if isinstance(content, str):
             return content.encode("utf-8")
-    return b""
+    raise ValueError("File port returned invalid content")
 
 
 class ClaudeCodeFileAdapter(FileService):
@@ -95,10 +85,8 @@ class ClaudeCodeFileAdapter(FileService):
         auth: AuthContext | None = None,
     ) -> RemoveResult:
         token = auth.token if auth is not None else None
-        ok = await self._port.file_remove(path=target_path, token=token)
-        if not ok:
-            raise FileNotFoundError(f"remove failed: {target_path}")
-        return RemoveResult(target_path=target_path, path_type="file")
+        raw = await self._port.file_remove(path=target_path, token=token)
+        return RemoveResult(target_path=raw["target_path"], path_type=raw["path_type"])
 
     async def rmtree(
         self,
@@ -125,7 +113,9 @@ class ClaudeCodeFileAdapter(FileService):
         auth: AuthContext | None = None,
     ) -> ListDirResult:
         token = auth.token if auth is not None else None
-        raw_entries = await self._port.file_list_dir(path=dir_path, token=token)
+        raw_entries = await self._port.file_list_dir(
+            path=dir_path, token=token, recursive=recursive, exclude_dirs=exclude_dirs
+        )
         files = [_to_file_entry(e) for e in raw_entries if isinstance(e, dict)]
         return ListDirResult(
             dir_path=dir_path,

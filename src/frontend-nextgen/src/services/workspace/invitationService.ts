@@ -18,7 +18,8 @@ function inviteBase(): string {
 }
 
 function buildInvitationUrl(token: string, type: 'group' | 'session'): string {
-  return `${inviteBase()}/workspace/invite/${encodeURIComponent(token)}?type=${type}`;
+  // 路径形态：/workspace/invite/groups/{token} | /workspace/invite/sessions/{token}
+  return `${inviteBase()}/workspace/invite/${type}s/${encodeURIComponent(token)}`;
 }
 
 export interface InvitationAcceptResult {

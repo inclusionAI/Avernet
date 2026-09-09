@@ -78,6 +78,20 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_friend_requests_req ON bcs_friend_requests(request_id)",
     "CREATE INDEX IF NOT EXISTS idx_friend_requests_from ON bcs_friend_requests(from_bot, status)",
     "CREATE INDEX IF NOT EXISTS idx_friend_requests_to ON bcs_friend_requests(to_bot, status)",
+    // ── invite_codes ─────────────────────────────────────
+    "CREATE TABLE IF NOT EXISTS bcs_invite_codes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code_hash TEXT NOT NULL UNIQUE,
+        code_hint TEXT NOT NULL,
+        status TEXT NOT NULL,
+        bound_user_id TEXT NULL UNIQUE,
+        bound_at INTEGER NULL,
+        created_by TEXT NULL,
+        env TEXT NOT NULL,
+        gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_invite_codes_env_status ON bcs_invite_codes(env, status)",
     // ── actor_relations ───────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_actor_relations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -330,7 +344,8 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         env TEXT NOT NULL,
         actor_kind TEXT NOT NULL DEFAULT 'bot',
         mode TEXT NOT NULL DEFAULT 'auto',
-        tags_json TEXT DEFAULT NULL
+        tags_json TEXT DEFAULT NULL,
+        message_view_scope TEXT NOT NULL DEFAULT 'full'
     )",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_participants_env_group_bot ON bcs_group_participants(env, group_id, bot_uuid)",
     "CREATE INDEX IF NOT EXISTS idx_participants_bot ON bcs_group_participants(bot_uuid)",
@@ -345,6 +360,7 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         env TEXT NOT NULL DEFAULT 'prod',
         status TEXT NOT NULL DEFAULT 'running',
         session_kind TEXT NOT NULL DEFAULT 'chat',
+        message_visibility_version INTEGER NOT NULL DEFAULT 0,
         session_title TEXT DEFAULT NULL,
         group_version INTEGER DEFAULT NULL,
         caller_id TEXT DEFAULT NULL,
@@ -399,6 +415,9 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
         content TEXT NOT NULL,
         client_msg_id TEXT DEFAULT NULL,
         owner_bot_id TEXT DEFAULT NULL,
+        visibility_domain TEXT DEFAULT NULL,
+        audience_kind TEXT DEFAULT NULL,
+        audience_actor_ids_json TEXT DEFAULT NULL,
         status TEXT DEFAULT 'normal',
         created_at INTEGER NOT NULL,
         ttl_until INTEGER DEFAULT NULL,
@@ -412,6 +431,7 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_messages_session_created ON bcs_messages(session_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_messages_session_sender_created ON bcs_messages(session_id, sender_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_messages_session_type_created ON bcs_messages(session_id, message_type, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_messages_session_audience_created ON bcs_messages(session_id, visibility_domain, audience_kind, created_at, session_seq)",
     // ── collaboration_definitions ─────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_collaboration_definitions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1000,6 +1020,14 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 19,
         name: "one_shot_opening_message_override",
     },
+    SqliteMigration {
+        version: 20,
+        name: "invite_code_id",
+    },
+    SqliteMigration {
+        version: 21,
+        name: "human_participant_message_visibility",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -1374,8 +1402,104 @@ async fn apply_sqlite_migration_body(
         17 => add_sqlite_session_callback_lease_schema(db).await,
         18 => add_sqlite_state_machine_rerun_lineage_schema(db).await,
         19 => add_sqlite_one_shot_opening_message_override_schema(db).await,
+        20 => add_sqlite_invite_code_id_schema(db).await,
+        21 => add_sqlite_human_participant_message_visibility_schema(db).await,
         _ => Ok(()),
     }
+}
+
+async fn add_sqlite_invite_code_id_schema(db: &dyn DbPlugin) -> DbResult<()> {
+    if !table_exists(db, "bcs_invite_codes").await? {
+        return Ok(());
+    }
+    let columns = sqlite_table_columns(db, "bcs_invite_codes").await?;
+    if columns.iter().any(|column| column == "id") {
+        return Ok(());
+    }
+    db.transaction(vec![
+        DbTransactionStep::Execute(DbStatement::new(
+            "DROP TABLE IF EXISTS bcs_invite_codes__id_migration",
+        )),
+        DbTransactionStep::Execute(DbStatement::new(
+            "CREATE TABLE bcs_invite_codes__id_migration (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code_hash TEXT NOT NULL UNIQUE,
+                code_hint TEXT NOT NULL,
+                status TEXT NOT NULL,
+                bound_user_id TEXT NULL UNIQUE,
+                bound_at INTEGER NULL,
+                created_by TEXT NULL,
+                env TEXT NOT NULL,
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )",
+        )),
+        DbTransactionStep::Execute(DbStatement::new(
+            "INSERT INTO bcs_invite_codes__id_migration (
+                code_hash, code_hint, status, bound_user_id, bound_at, created_by, env, gmt_create, gmt_modified
+            )
+            SELECT code_hash, code_hint, status, bound_user_id, bound_at, created_by, env, gmt_create, gmt_modified
+            FROM bcs_invite_codes",
+        )),
+        DbTransactionStep::Execute(DbStatement::new("DROP TABLE bcs_invite_codes")),
+        DbTransactionStep::Execute(DbStatement::new(
+            "ALTER TABLE bcs_invite_codes__id_migration RENAME TO bcs_invite_codes",
+        )),
+    ])
+    .await?;
+    Ok(())
+}
+
+async fn add_sqlite_human_participant_message_visibility_schema(
+    db: &dyn DbPlugin,
+) -> DbResult<()> {
+    if table_exists(db, "bcs_group_participants").await? {
+        let columns = sqlite_table_columns(db, "bcs_group_participants").await?;
+        if !columns.iter().any(|column| column == "message_view_scope") {
+            db.execute(DbStatement::new(
+                "ALTER TABLE bcs_group_participants \
+                 ADD COLUMN message_view_scope TEXT NOT NULL DEFAULT 'full'",
+            ))
+            .await?;
+        }
+    }
+
+    if table_exists(db, "bcs_group_sessions").await? {
+        let columns = sqlite_table_columns(db, "bcs_group_sessions").await?;
+        if !columns
+            .iter()
+            .any(|column| column == "message_visibility_version")
+        {
+            db.execute(DbStatement::new(
+                "ALTER TABLE bcs_group_sessions \
+                 ADD COLUMN message_visibility_version INTEGER NOT NULL DEFAULT 0",
+            ))
+            .await?;
+        }
+    }
+
+    if table_exists(db, "bcs_messages").await? {
+        let columns = sqlite_table_columns(db, "bcs_messages").await?;
+        for (name, definition) in [
+            ("visibility_domain", "TEXT DEFAULT NULL"),
+            ("audience_kind", "TEXT DEFAULT NULL"),
+            ("audience_actor_ids_json", "TEXT DEFAULT NULL"),
+        ] {
+            if !columns.iter().any(|column| column == name) {
+                db.execute(DbStatement::new(format!(
+                    "ALTER TABLE bcs_messages ADD COLUMN {name} {definition}"
+                )))
+                .await?;
+            }
+        }
+        db.execute(DbStatement::new(
+            "CREATE INDEX IF NOT EXISTS idx_messages_session_audience_created \
+             ON bcs_messages(session_id, visibility_domain, audience_kind, created_at, session_seq)",
+        ))
+        .await?;
+    }
+
+    Ok(())
 }
 
 async fn add_sqlite_one_shot_opening_message_override_schema(
@@ -1925,6 +2049,12 @@ mod tests {
                     19,
                     "one_shot_opening_message_override".to_string(),
                     "sqlite".to_string()
+                ),
+                (20, "invite_code_id".to_string(), "sqlite".to_string()),
+                (
+                    21,
+                    "human_participant_message_visibility".to_string(),
+                    "sqlite".to_string()
                 )
             ]
         );
@@ -1937,7 +2067,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 19);
+        assert_eq!(report.pending_versions.len(), 21);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1972,7 +2102,7 @@ mod tests {
             report.pending_versions[9].name,
             "eventing_plaintext_endpoint"
         );
-assert_eq!(report.pending_versions[10].version, 11);
+        assert_eq!(report.pending_versions[10].version, 11);
         assert_eq!(report.pending_versions[10].name, "group_opening_message");
         assert_eq!(report.pending_versions[11].version, 12);
         assert_eq!(report.pending_versions[11].name, "add_bot_task_modes");
@@ -2001,6 +2131,13 @@ assert_eq!(report.pending_versions[10].version, 11);
         assert_eq!(
             report.pending_versions[18].name,
             "one_shot_opening_message_override"
+        );
+        assert_eq!(report.pending_versions[19].version, 20);
+        assert_eq!(report.pending_versions[19].name, "invite_code_id");
+        assert_eq!(report.pending_versions[20].version, 21);
+        assert_eq!(
+            report.pending_versions[20].name,
+            "human_participant_message_visibility"
         );
         Ok(())
     }
@@ -2138,6 +2275,129 @@ assert_eq!(report.pending_versions[10].version, 11);
         ));
     }
 
+    #[test]
+    fn mysql_human_participant_message_visibility_migration_is_additive() {
+        let baseline = include_str!("../../../../migrations/mysql/001_init_schema.sql");
+        let migration = include_str!(
+            "../../../../migrations/mysql/020_human_participant_message_visibility.sql"
+        );
+        assert!(!baseline.contains("idx_messages_session_audience_created"));
+        assert!(migration.contains("ADD COLUMN IF NOT EXISTS `message_view_scope`"));
+        assert!(migration.contains("ADD COLUMN IF NOT EXISTS `message_visibility_version`"));
+        assert!(migration.contains("ADD COLUMN IF NOT EXISTS `visibility_domain`"));
+        assert!(migration.contains("ADD COLUMN IF NOT EXISTS `audience_kind`"));
+        assert!(migration.contains("ADD COLUMN IF NOT EXISTS `audience_actor_ids_json`"));
+        assert!(migration.contains("idx_messages_session_audience_created"));
+    }
+
+    #[tokio::test]
+    async fn sqlite_human_participant_visibility_migration_repairs_legacy_tables()
+    -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_group_participants (
+                id INTEGER PRIMARY KEY,
+                bot_uuid TEXT NOT NULL
+            )",
+        ))
+        .await?;
+        db.execute(DbStatement::new(
+            "INSERT INTO bcs_group_participants (id, bot_uuid) VALUES (1, 'human_staff-1')",
+        ))
+        .await?;
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_group_sessions (
+                id INTEGER PRIMARY KEY,
+                session_id TEXT NOT NULL
+            )",
+        ))
+        .await?;
+        db.execute(DbStatement::new(
+            "INSERT INTO bcs_group_sessions (id, session_id) VALUES (1, 'session-1')",
+        ))
+        .await?;
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_messages (
+                message_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                session_seq INTEGER NOT NULL
+            )",
+        ))
+        .await?;
+        db.execute(DbStatement::new(
+            "INSERT INTO bcs_messages (message_id, session_id, created_at, session_seq) \
+             VALUES ('message-1', 'session-1', 1, 1)",
+        ))
+        .await?;
+
+        add_sqlite_human_participant_message_visibility_schema(&db).await?;
+        add_sqlite_human_participant_message_visibility_schema(&db).await?;
+
+        assert!(
+            column_names(&db, "bcs_group_participants")
+                .await?
+                .iter()
+                .any(|column| column == "message_view_scope")
+        );
+        assert!(
+            column_names(&db, "bcs_group_sessions")
+                .await?
+                .iter()
+                .any(|column| column == "message_visibility_version")
+        );
+        let message_columns = column_names(&db, "bcs_messages").await?;
+        for expected in [
+            "visibility_domain",
+            "audience_kind",
+            "audience_actor_ids_json",
+        ] {
+            assert!(message_columns.iter().any(|column| column == expected));
+        }
+        assert!(index_exists(&db, "idx_messages_session_audience_created").await?);
+
+        let participant = db
+            .query(DbStatement::new(
+                "SELECT message_view_scope FROM bcs_group_participants WHERE id = 1",
+            ))
+            .await?;
+        assert_eq!(
+            db_get_column::<String>(&participant[0], "message_view_scope")?,
+            "full"
+        );
+        let session = db
+            .query(DbStatement::new(
+                "SELECT message_visibility_version FROM bcs_group_sessions WHERE id = 1",
+            ))
+            .await?;
+        assert_eq!(
+            db_get_column::<i64>(&session[0], "message_visibility_version")?,
+            0
+        );
+        let messages = db
+            .query(DbStatement::new(
+                "SELECT visibility_domain, audience_kind, audience_actor_ids_json \
+                 FROM bcs_messages WHERE message_id = 'message-1'",
+            ))
+            .await?;
+        assert_eq!(
+            bcs_db_api::db_get_column_opt::<String>(&messages[0], "visibility_domain")?,
+            None
+        );
+        assert_eq!(
+            bcs_db_api::db_get_column_opt::<String>(&messages[0], "audience_kind")?,
+            None
+        );
+        assert_eq!(
+            bcs_db_api::db_get_column_opt::<String>(
+                &messages[0],
+                "audience_actor_ids_json"
+            )?,
+            None
+        );
+        Ok(())
+    }
+
     #[tokio::test]
     async fn sqlite_migrations_are_idempotent() -> DbResult<()> {
         let db = LocalSqliteDbPlugin::new()?;
@@ -2225,6 +2485,12 @@ assert_eq!(report.pending_versions[10].version, 11);
                 (
                     19,
                     "one_shot_opening_message_override".to_string(),
+                    "sqlite".to_string()
+                ),
+                (20, "invite_code_id".to_string(), "sqlite".to_string()),
+                (
+                    21,
+                    "human_participant_message_visibility".to_string(),
                     "sqlite".to_string()
                 )
             ]

@@ -8,6 +8,7 @@ rust-version = { workspace = true }
 version = { workspace = true }
 
 [dependencies]
+bcs-observability = { workspace = true }
 async-trait = { workspace = true }
 bcs-cache-api = { workspace = true }
 bcs-config = { workspace = true }
@@ -22,7 +23,7 @@ uuid = { workspace = true }
 [dev-dependencies]
 bcs-cache-local = { workspace = true }
 bcs-db-local = { workspace = true }
-bcs-test-support = { workspace = true }
+bcs-test-support = { workspace = true, features = ["diagnostic-logs"] }
 tempfile = { workspace = true }
 tokio-test = "0.4"
 

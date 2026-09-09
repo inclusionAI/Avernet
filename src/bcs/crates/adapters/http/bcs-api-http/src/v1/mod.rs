@@ -7,7 +7,7 @@ pub mod openapi;
 use axum::Router;
 use axum::middleware;
 
-use common::{ApiState, verify_principal};
+use common::{ApiState, enforce_invite_code_gate, verify_principal};
 
 pub use group_session_connection::group_session_connection_router;
 
@@ -19,6 +19,10 @@ pub fn router(state: ApiState) -> Router {
     let protected = Router::new()
         .merge(openapi::protected_router())
         .merge(internal::protected_router())
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            enforce_invite_code_gate::<ApiState>,
+        ))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             verify_principal::<ApiState>,

@@ -75,12 +75,7 @@ describe('botEditorController', () => {
       'GET',
     ],
     ['bot MCPs', () => botEditorController.listBotMcps('bot-1'), '/openapi/v1/bots/bot-1/mcps', 'GET'],
-    [
-      'MCP market',
-      () => botEditorController.listMcpServers(),
-      '/openapi/v1/bots/mcp/servers?page=1&page_size=100',
-      'GET',
-    ],
+    ['MCP market', () => botEditorController.searchMarketMcpServers(), '/openapi/v1/bots/market/mcp-servers', 'POST'],
     [
       'MCP permission',
       () => botEditorController.getMcpPermission('mcp.weather'),

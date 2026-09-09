@@ -187,6 +187,26 @@ impl<'a> MakeWriter<'a> for RotatingFileWriter {
     }
 }
 
+impl Write for RotatingFileWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.make_writer().write(bytes)
+    }
+    fn flush(&mut self) -> std::io::Result<()> { self.make_writer().flush() }
+}
+
+/// Keep these guards alive until the runtime has stopped, then flush queued logs.
+#[must_use]
+pub struct LoggingGuard {
+    _workers: Vec<tracing_appender::non_blocking::WorkerGuard>,
+}
+
+fn buffered_writer(writer: impl Write + Send + 'static) -> (tracing_appender::non_blocking::NonBlocking, tracing_appender::non_blocking::WorkerGuard) {
+    tracing_appender::non_blocking::NonBlockingBuilder::default()
+        .buffered_lines_limit(4096)
+        .lossy(true)
+        .finish(writer)
+}
+
 // ─── Init ───────────────────────────────────────────────────────────────────
 
 fn timer_for_output<F: Clone>(
@@ -204,7 +224,8 @@ fn timer_for_output<F: Clone>(
 /// Initialize the tracing subscriber based on `LoggingConfig`.
 ///
 /// Console, file, and BCN OpenTelemetry output use independent layer filters.
-pub fn init(config: &LoggingConfig, tracer: SdkTracer) {
+pub fn init(config: &LoggingConfig, tracer: SdkTracer) -> LoggingGuard {
+    let mut workers = Vec::new();
     let timer = LocalTime::new(format_description!(
         "[year]-[month]-[day] [hour]:[minute]:[second]"
     ));
@@ -226,7 +247,8 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) {
                 return None;
             }
 
-            let writer = RotatingFileWriter::new(&dir, &output.file);
+            let (writer, guard) = buffered_writer(RotatingFileWriter::new(&dir, &output.file));
+            workers.push(guard);
 
             let filter = build_output_targets_filter(output);
             let output_timer = timer_for_output(&output.name, &timer, &millisecond_timer);
@@ -275,6 +297,7 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) {
         .with(file_layers)
         .with(otel_layer)
         .init();
+    LoggingGuard { _workers: workers }
 }
 
 // ─── Cleanup ────────────────────────────────────────────────────────────────
@@ -344,6 +367,46 @@ mod tests {
     use super::*;
     use std::ffi::OsStr;
     use tracing_subscriber::layer::SubscriberExt;
+
+    #[test]
+    fn worker_guard_flushes_all_queued_file_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut writer, guard) = buffered_writer(RotatingFileWriter::new(dir.path(), "buffered.log"));
+        for _ in 0..100 { writeln!(writer, "queued-log-line").unwrap(); }
+        drop(guard);
+        let output = fs::read_to_string(dir.path().join("buffered.log")).unwrap();
+        assert_eq!(output.lines().count(), 100);
+        assert_eq!(writer.error_counter().dropped_lines(), 0);
+    }
+
+    #[test]
+    fn stalled_sink_drops_and_counts_lines_without_blocking_callers() {
+        struct BlockedWriter {
+            entered: std::sync::mpsc::Sender<()>,
+            release: std::sync::mpsc::Receiver<()>,
+            first: bool,
+        }
+        impl Write for BlockedWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if self.first {
+                    self.first = false;
+                    self.entered.send(()).unwrap();
+                    self.release.recv_timeout(Duration::from_secs(10)).unwrap();
+                }
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+        }
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let (mut writer, guard) = buffered_writer(BlockedWriter { entered: entered_tx, release: release_rx, first: true });
+        writeln!(writer, "first").unwrap();
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        for _ in 0..5000 { writeln!(writer, "queued").unwrap(); }
+        assert!(writer.error_counter().dropped_lines() > 0);
+        release_tx.send(()).unwrap();
+        drop(guard);
+    }
 
     #[test]
     fn console_ansi_only_when_stdout_is_terminal_and_no_color_absent_or_empty() {
@@ -554,4 +617,55 @@ mod tests {
         assert_eq!(json["run_id"], "r1");
         assert_eq!(json["event_type"], "bot_accept");
     }
+    #[test]
+    fn observation_file_duplicates_diagnostics_in_main_text_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = LogOutputConfig {
+            name: "observability".into(), path: dir.path().to_string_lossy().into(),
+            file: "bcs-observability.log".into(), level: "info".into(), rotation: "daily".into(),
+            format: LogOutputFormat::Text, targets: vec!["bcs_observation".into(), "bcs_http_access".into()],
+            max_keep_days: 7,
+        };
+        let timer = LocalTime::new(format_description!("[year]-[month]-[day] [hour]:[minute]:[second]"));
+        let millis = LocalTime::new(format_description!("[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:3]"));
+        let (main_writer, main_guard) = buffered_writer(RotatingFileWriter::new(dir.path(), "bcs.log"));
+        let (observation_writer, observation_guard) = buffered_writer(RotatingFileWriter::new(dir.path(), &output.file));
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(main_writer)
+                .with_timer(timer_for_output("main", &timer, &millis)))
+            .with(tracing_subscriber::fmt::layer().with_ansi(false)
+                .with_timer(timer_for_output(&output.name, &timer, &millis))
+                .with_writer(observation_writer).with_filter(build_output_targets_filter(&output)));
+        let dispatch = tracing::Dispatch::new(subscriber);
+        tracing::dispatcher::with_default(&dispatch, || {
+            tracing::warn!(target: "bcs_observation", request_id = "diagnostic-42", operation = "test.io",
+                operation_id = "operation-42", process_instance_id = "process-42",
+                duration_ms = 123.5, "bcs.operation.finished");
+            tracing::info!(target: "bcs_http_access", request_id = "diagnostic-42", status = 200, "http.request.response_ready");
+            tracing::info!(target: "unrelated_module", "ordinary business log");
+        });
+        drop(dispatch);
+        drop(main_guard);
+        drop(observation_guard);
+        let main = fs::read_to_string(dir.path().join("bcs.log")).unwrap();
+        assert!(main.contains("bcs.operation.finished") && main.contains("http.request.response_ready"));
+        assert!(main.contains("ordinary business log"));
+        let diagnostics = fs::read_to_string(dir.path().join(&output.file)).unwrap();
+        let events: Vec<&str> = diagnostics.lines().collect();
+        assert_eq!(events.len(), 2);
+        for event in &events {
+            assert!(chrono::NaiveDateTime::parse_from_str(&event[..19], "%Y-%m-%d %H:%M:%S").is_ok());
+            assert_eq!(event.as_bytes().get(19), Some(&b' '), "diagnostic timestamp should match bcs.log");
+            assert!(event.contains("request_id=\"diagnostic-42\""));
+            assert!(!event.contains("trace_id=") && !event.contains("\u{1b}["));
+            assert!(main.lines().any(|line| line.get(19..) == event.get(19..)), "diagnostic event should use the main log format");
+        }
+        assert!(events[0].contains(" WARN bcs_observation: bcs.operation.finished"));
+        assert!(events[0].contains("duration_ms=123.5"));
+        assert!(events[0].contains("operation_id=\"operation-42\""));
+        assert!(events[0].contains("process_instance_id=\"process-42\""));
+        assert!(events[1].contains(" INFO bcs_http_access: http.request.response_ready"));
+        assert!(events[1].contains("status=200"));
+    }
+
 }

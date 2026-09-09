@@ -2,6 +2,7 @@
 import * as groupController from '@/services/backendApi/collaboration/collaborationGroupController';
 import * as sessionController from '@/services/backendApi/collaboration/sessionController';
 import { groupService } from '@/services/workspace/groupService';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 // auto-mock（不带 factory），避免 hoisted factory 内引用 jest.fn() 触发 @jest/globals 的 TDZ。
@@ -220,6 +221,97 @@ describe('loadGroupSessions pagination', () => {
   });
 });
 
+describe('BCS group routing by bcs_grp_ prefix', () => {
+  const originalFetch = global.fetch;
+  const userMe = { id: 'human-me', kind: 'user' as const, displayName: 'Me', online: true };
+
+  function jsonOk(body: unknown): Response {
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => 'application/json' },
+      json: async () => body,
+    } as unknown as Response;
+  }
+
+  beforeEach(() => {
+    useWorkspaceStore.setState({ bcsGroupIds: {} });
+  });
+  afterEach(() => {
+    global.fetch = originalFetch;
+    useWorkspaceStore.setState({ bcsGroupIds: {} });
+  });
+
+  it('routes bcs_grp_ group to BCS fetch path even when in-memory marker is empty (fresh tab)', async () => {
+    // 模拟新开页 target=_blank 全新挂载:bcsGroupIds 内存标记为空(非持久化),
+    // 仅靠 groupId 的 bcs_grp_ 前缀兜底应走 BCS 会话端点(raw-fetch 旁路)。
+    // view_bot_id 语义与通用端点一致：当前身份 mine bot_id，供后端按角色视角过滤会话。
+    useWorkspaceStore.setState({ bcsGroupIds: {} });
+    global.fetch = jest
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonOk({ code: 200000, message: 'OK', data: { items: [], offset: 0, limit: 10, total: 0 } }));
+
+    const res = await groupService.loadGroupSessionsOrBcs('bcs_grp_abc', userMe.id);
+
+    expect(sc.listGroupSessions).not.toHaveBeenCalled();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const calledUrl = (global.fetch as jest.Mock).mock.calls[0][0] as string;
+    expect(calledUrl).toContain(
+      '/openapi/v1/collaboration/groups/bcs_grp_abc/sessions?offset=0&limit=10&view_bot_id=human-me',
+    );
+    expect(res.ok).toBe(true);
+    expect(res.ok && res.data).toMatchObject({ items: [], total: 0, hasMore: false });
+    expect(typeof (res.ok && res.data.limit)).toBe('number');
+  });
+
+  it('BCS 群无当前身份时降级：URL 不带 view_bot_id', async () => {
+    useWorkspaceStore.setState({ bcsGroupIds: {} });
+    global.fetch = jest
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonOk({ code: 200000, message: 'OK', data: { items: [], offset: 0, limit: 10, total: 0 } }));
+
+    await groupService.loadGroupSessionsOrBcs('bcs_grp_abc', undefined);
+
+    const calledUrl = (global.fetch as jest.Mock).mock.calls[0][0] as string;
+    expect(calledUrl).toContain('/groups/bcs_grp_abc/sessions?offset=0&limit=10');
+    expect(calledUrl).not.toContain('view_bot_id');
+  });
+
+  it('BCS 群详情路径：sessions 子请求同样携带 view_bot_id（群详情请求保持不变）', async () => {
+    useWorkspaceStore.setState({ bcsGroupIds: {} });
+    global.fetch = jest.fn<typeof fetch>().mockImplementation(async (url: unknown) => {
+      const u = String(url);
+      if (u.includes('/sessions')) return jsonOk({ code: 200000, message: 'OK', data: { items: [] } });
+      return jsonOk({ code: 200000, message: 'OK', data: { id: 'bcs_grp_abc', name: 'G', participants: [] } });
+    });
+
+    const res = await groupService.loadGroupDetailOrBcs('bcs_grp_abc', 'human-me');
+
+    expect(res.ok).toBe(true);
+    const urls = (global.fetch as jest.Mock).mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(urls.some((u: string) => u.includes('/sessions?') && u.includes('view_bot_id=human-me'))).toBe(true);
+    expect(urls.some((u: string) => u.endsWith('/groups/bcs_grp_abc'))).toBe(true);
+  });
+
+  it('routes non-prefixed group to generic listGroupSessions path with view_bot_id', async () => {
+    sc.listGroupSessions.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: { items: [], offset: 0, limit: 10, total: 0 },
+    });
+
+    await groupService.loadGroupSessionsOrBcs('g-presets-1', userMe.id);
+
+    expect(sc.listGroupSessions).toHaveBeenCalledWith('g-presets-1', {
+      offset: 0,
+      limit: 10,
+      view_bot_id: 'human-me',
+    });
+    expect(global.fetch).toBe(originalFetch);
+  });
+});
+
 describe('loadGroupDetail', () => {
   it('passes view_bot_id to listGroupSessions when provided', async () => {
     gc.getGroup.mockResolvedValue({
@@ -288,7 +380,10 @@ describe('policy', () => {
   } as any;
   it('canManageGroup: originator user ok, member bot denied', () => {
     expect(groupService.canManageGroup(group, 'me-owner')).toEqual({ allowed: true });
-    expect(groupService.canManageGroup(group, 'bot-1')).toMatchObject({ allowed: false });
+    expect(groupService.canManageGroup(group, 'bot-1')).toEqual({
+      allowed: false,
+      disabledReason: '仅群主/主节点可管理该协作群',
+    });
     expect(
       groupService.canManageGroup(
         { ...group, participants: [{ actorId: 'bot-1', role: 'driver' as const }] } as never,
@@ -301,6 +396,14 @@ describe('policy', () => {
         'bot-1',
       ),
     ).toEqual({ allowed: true });
+  });
+  it('canDissolveGroup: driver bot owner from group list item ok', () => {
+    const listGroup = {
+      ...group,
+      participants: [],
+      driverBotUuid: 'bot-driver',
+    } as any;
+    expect(groupService.canDissolveGroup(listGroup, 'bot-driver')).toEqual({ allowed: true });
   });
   it('canDissolveGroup: dissolved group denied', () => {
     expect(groupService.canDissolveGroup({ ...group, status: 'dissolved' }, 'me-owner')).toMatchObject({

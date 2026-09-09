@@ -218,3 +218,32 @@ class OrmLocalUserMachineRepository(OrmConnectionMixin, LocalUserMachineReposito
         except (json.JSONDecodeError, TypeError):
             log.info("[local-user-machine:get_route_info] result: None (parse error)")
             return None
+
+    @with_orm_session
+    def update_user_id(
+        self, machine_id: str, env: str, old_user_id: str, new_user_id: str
+    ) -> int:
+        log.info(
+            "update_user_id: machine_id=%s, env=%s, old_user_id=%s, new_user_id=%s",
+            machine_id,
+            env,
+            old_user_id,
+            new_user_id,
+        )
+        from sqlalchemy import func
+
+        result = (
+            self._session.query(LocalUserMachineModel)
+            .filter(
+                LocalUserMachineModel.machine_id == machine_id,
+                LocalUserMachineModel.env == env,
+                LocalUserMachineModel.user_id == old_user_id,
+            )
+            .update(
+                {"user_id": new_user_id, "gmt_modified": func.now()},
+                synchronize_session=False,
+            )
+        )
+        rowcount = int(result)
+        log.info("[local-user-machine:update_user_id] result: %s rows", rowcount)
+        return rowcount

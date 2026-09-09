@@ -11,6 +11,7 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ResolvedSkillPlan,
     RuntimeProjectionResult,
     RuntimeProjectionStatus,
+    RuntimeServiceFactoryBoundary,
 )
 from agentclaw.community.core.skill_center.runtime_resolver import RuntimeSkillProjection
 from agentclaw.community.core.skills_pool.models import (
@@ -64,6 +65,7 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
         plan: ResolvedSkillPlan,
         scope: ProjectionScope,
         retired_mappings: Sequence[PoolSkillMapping] = (),
+        service_factory: RuntimeServiceFactoryBoundary,
     ) -> None:
         """Deliver once, or not at all.
 
@@ -127,7 +129,18 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
             if isinstance(plan, ResolvedCapabilityPlan)
             else None
         )
-        if not await plan.service.project_whole_artifact(
+        service = (
+            plan.service
+            if isinstance(plan, ResolvedCapabilityPlan)
+            else service_factory.create(
+                user_id=plan.owner_id,
+                entity_id=str(plan.bot.get("entity_id") or plan.owner_id),
+                bot_id=plan.bot_id,
+                engine_type=plan.engine,
+                entity_type=plan.bot.get("entity_type") or "staff",
+            )
+        )
+        if not await service.project_whole_artifact(
             desired_skills=self._desired_skills(plan.projection),
             effective_mcps=effective_mcps,
         ):

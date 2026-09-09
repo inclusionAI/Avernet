@@ -939,6 +939,21 @@ def _seed_excluded_default_mcp(world) -> None:
         )
 
 
+def _seed_excluded_platform_default_mcp(world) -> None:
+    _seed_default_member(world)
+    server_code = "mcp.ant.antprocessai.anttaskmcp"
+    with avernet_tenant_scope(_TENANT):
+        world.get(CapabilityDesiredStateRepositoryProtocol).exclude_default_mcp(
+            bot_id=_BOT_ID,
+            owner_id=_OWNER,
+            set_id="2",
+            server_code=server_code,
+            engine_type="openclaw",
+            default_engine_types=("openclaw",),
+            platform_default_codes=frozenset({server_code}),
+        )
+
+
 def _excluded_skill_ids(world) -> set[int]:
     with avernet_tenant_scope(_TENANT):
         return world.get(
@@ -971,6 +986,63 @@ def _assert_mcp_excluded(_response, world) -> None:
 def _assert_mcp_unexcluded(_response, world) -> None:
     assert _excluded_mcp_codes(world) == set()
     _assert_reconciled(_response, world)
+
+
+def _assert_default_mcp_projection(response, _world) -> None:
+    codes = {item["server_code"] for item in response.json()["data"]}
+    assert "mcp.default" in codes
+    assert "mcp.ant.antprocessai.anttaskmcp" in codes
+
+
+def _assert_excluded_default_mcp_absent(response, _world) -> None:
+    codes = {item["server_code"] for item in response.json()["data"]}
+    assert "mcp.ant.antprocessai.anttaskmcp" not in codes
+    assert "mcp.ant.arkai.dimamcpserver" in codes
+
+
+def _assert_excluded_persisted_default_mcp_absent(response, _world) -> None:
+    codes = {item["server_code"] for item in response.json()["data"]}
+    assert "mcp.default" not in codes
+    assert "mcp.ant.antprocessai.anttaskmcp" in codes
+
+
+@_case(
+    "GET",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps",
+    "lists_default_members_and_platform_defaults",
+    ExpectSuccess(status=200),
+    seed=_seed_default_member,
+    path_params=_DEFAULT_SET_PARAMS,
+    extra=(_assert_default_mcp_projection,),
+)
+def list_default_mcps_projects_platform_defaults():
+    """Default Set reads include code policy as well as persisted members."""
+
+
+@_case(
+    "GET",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps",
+    "filters_excluded_default_mcp",
+    ExpectSuccess(status=200),
+    seed=_seed_excluded_platform_default_mcp,
+    path_params=_DEFAULT_SET_PARAMS,
+    extra=(_assert_excluded_default_mcp_absent,),
+)
+def list_default_mcps_filters_bot_exclusions():
+    """A Bot exclusion hides that Default Set MCP from the read projection."""
+
+
+@_case(
+    "GET",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps",
+    "filters_excluded_persisted_default_mcp",
+    ExpectSuccess(status=200),
+    seed=_seed_excluded_default_mcp,
+    path_params=_DEFAULT_SET_PARAMS,
+    extra=(_assert_excluded_persisted_default_mcp_absent,),
+)
+def list_default_mcps_filters_persisted_membership_exclusions():
+    """Default exclusions apply to persisted members and code policy alike."""
 
 
 @_case(

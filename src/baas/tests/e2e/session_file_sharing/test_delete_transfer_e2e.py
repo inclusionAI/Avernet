@@ -21,6 +21,7 @@ from secbaas.community.api.session_file_sharing import (
 from secbaas.community.core.service.session_file_sharing import (
     DefaultSessionFileSharingDispatcher,
 )
+from secbaas.community.plugins.file_transfer import NoopSessionFileUrlProjector
 
 pytestmark = pytest.mark.e2e
 
@@ -39,6 +40,7 @@ async def test_delete_terminal_transfer(
     dispatcher = DefaultSessionFileSharingDispatcher(
         file_transfer_backend=stub_oss_backend,
         ticket_repo=mock_session_ticket_repo,
+        session_file_url_projector=NoopSessionFileUrlProjector(),
     )
     mock_session_ticket_repo.create_ticket.return_value = 1
 
@@ -115,6 +117,7 @@ async def test_delete_already_deleted_idempotent(
     dispatcher = DefaultSessionFileSharingDispatcher(
         file_transfer_backend=stub_oss_backend,
         ticket_repo=mock_session_ticket_repo,
+        session_file_url_projector=NoopSessionFileUrlProjector(),
     )
 
     mock_session_ticket_repo.get_by_transfer_id.return_value = (
@@ -149,6 +152,7 @@ async def test_delete_in_progress_rejects(
     dispatcher = DefaultSessionFileSharingDispatcher(
         file_transfer_backend=stub_oss_backend,
         ticket_repo=mock_session_ticket_repo,
+        session_file_url_projector=NoopSessionFileUrlProjector(),
     )
 
     mock_session_ticket_repo.get_by_transfer_id.return_value = (
@@ -179,6 +183,7 @@ async def test_delete_ticket_not_found(
     dispatcher = DefaultSessionFileSharingDispatcher(
         file_transfer_backend=stub_oss_backend,
         ticket_repo=mock_session_ticket_repo,
+        session_file_url_projector=NoopSessionFileUrlProjector(),
     )
 
     mock_session_ticket_repo.get_by_transfer_id.return_value = None

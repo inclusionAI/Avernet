@@ -217,7 +217,7 @@ impl BotRegistryCoreService for BotCore {
             return Ok(BotDeliveryTarget::WebSocket { bot_id: bot.bot_uuid });
         };
         if binding.disabled {
-            warn!(bot_id = %bot_id, provider_id = %binding.provider_id, "resolve_delivery_target: provider bot binding disabled");
+            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %binding.provider_id, "resolve_delivery_target: provider bot binding disabled");
             return Err(ServiceError::InvalidOperation {
                 message: format!("provider bot '{}' is disabled", bot_id),
                 request_id: None,
@@ -231,14 +231,14 @@ impl BotRegistryCoreService for BotCore {
             .get_provider(&binding.provider_id)
             .await?
             .ok_or_else(|| {
-                warn!(bot_id = %bot_id, provider_id = %binding.provider_id, "resolve_delivery_target: provider not found");
+                warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %binding.provider_id, "resolve_delivery_target: provider not found");
                 ServiceError::InvalidOperation {
                     message: format!("provider '{}' not found", binding.provider_id),
                     request_id: None,
                 }
             })?;
         if provider.disabled {
-            warn!(bot_id = %bot_id, provider_id = %provider.provider_id, "resolve_delivery_target: provider disabled");
+            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %provider.provider_id, "resolve_delivery_target: provider disabled");
             return Err(ServiceError::InvalidOperation {
                 message: format!("provider '{}' is disabled", provider.provider_id),
                 request_id: None,
@@ -246,7 +246,7 @@ impl BotRegistryCoreService for BotCore {
         }
         let downlink = parse_downlink_config(&provider.config)?;
         if !downlink.enabled {
-            warn!(bot_id = %bot_id, provider_id = %provider.provider_id, "resolve_delivery_target: provider downlink disabled");
+            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %provider.provider_id, "resolve_delivery_target: provider downlink disabled");
             return Err(ServiceError::InvalidOperation {
                 message: format!("provider '{}' downlink is disabled", provider.provider_id),
                 request_id: None,
@@ -260,7 +260,7 @@ impl BotRegistryCoreService for BotCore {
             .get_credential_by_kind(&provider.provider_id, "downlink_bcs_to_provider")
             .await?
             .ok_or_else(|| {
-                warn!(bot_id = %bot_id, provider_id = %provider.provider_id, "resolve_delivery_target: downlink credential not found");
+                warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %provider.provider_id, "resolve_delivery_target: downlink credential not found");
                 ServiceError::InvalidOperation {
                     message: format!(
                         "provider '{}' downlink credential not found",
@@ -270,7 +270,7 @@ impl BotRegistryCoreService for BotCore {
                 }
             })?;
         if credential.disabled {
-            warn!(bot_id = %bot_id, provider_id = %provider.provider_id, "resolve_delivery_target: downlink credential disabled");
+            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, provider_id = %provider.provider_id, "resolve_delivery_target: downlink credential disabled");
             return Err(ServiceError::InvalidOperation {
                 message: format!(
                     "provider '{}' downlink credential is disabled",
@@ -556,7 +556,7 @@ impl BotRegistryCoreService for BotCore {
         {
             Ok(bindings) => bindings,
             Err(error) => {
-                warn!(error = %error, "list_runtime_active_bot_ids: failed to list provider bindings");
+                warn!(request_id = %bcs_observability::CurrentRequestId, error = %error, "list_runtime_active_bot_ids: failed to list provider bindings");
                 return active.into_iter().collect();
             }
         };
@@ -574,7 +574,7 @@ impl BotRegistryCoreService for BotCore {
         let providers = match provider_repo.list_providers_by_ids(&provider_ids).await {
             Ok(providers) => providers,
             Err(error) => {
-                warn!(error = %error, "list_runtime_active_bot_ids: failed to list providers");
+                warn!(request_id = %bcs_observability::CurrentRequestId, error = %error, "list_runtime_active_bot_ids: failed to list providers");
                 return active.into_iter().collect();
             }
         };
@@ -587,7 +587,7 @@ impl BotRegistryCoreService for BotCore {
         {
             Ok(credentials) => credentials,
             Err(error) => {
-                warn!(error = %error, "list_runtime_active_bot_ids: failed to list provider credentials");
+                warn!(request_id = %bcs_observability::CurrentRequestId, error = %error, "list_runtime_active_bot_ids: failed to list provider credentials");
                 return active.into_iter().collect();
             }
         };
@@ -630,17 +630,17 @@ impl BotRegistryCoreService for BotCore {
     }
 
     async fn is_effectively_online(&self, bot_id: &str) -> bool {
-        let Some(bot) = self.repo.get(bot_id).await else {
+        let Some(bot) = bcs_observability::observe_value("bot.online.load", self.repo.get(bot_id)).await else {
             return false;
         };
         if bot.status != ActorStatus::Online {
             return false;
         }
-        if self.repo.is_connected(bot_id).await {
+        if bcs_observability::observe_value("bot.online.connection", self.repo.is_connected(bot_id)).await {
             return true;
         }
         matches!(
-            self.resolve_delivery_target(bot_id).await,
+            bcs_observability::observe_result("bot.online.delivery_target", self.resolve_delivery_target(bot_id)).await,
             Ok(BotDeliveryTarget::HttpProvider { .. })
         )
     }
@@ -788,7 +788,7 @@ impl BotRegistryCoreService for BotCore {
                             (reconnected_bot_id, tok)
                         }
                         Err(()) => {
-                            warn!(bot_id = %bot_id, "Reconnect failed, trying direct register");
+                            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, "Reconnect failed, trying direct register");
                             let registered_token = self
                                 .repo
                                 .register_streaming_connection(bot_id.clone())

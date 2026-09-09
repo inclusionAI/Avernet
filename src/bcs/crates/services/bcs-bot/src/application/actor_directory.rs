@@ -88,6 +88,7 @@ impl ActorDirectory {
                 .collect(),
             Err(error) => {
                 warn!(
+                    request_id = %bcs_observability::CurrentRequestId,
                     error = %error,
                     "actor directory: worker profile batch query failed, tags will be empty"
                 );

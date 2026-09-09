@@ -662,7 +662,7 @@ describe('useCollaborationSquare Bot Search', () => {
       await Promise.resolve();
     });
 
-    expect(openConversation).toHaveBeenCalledWith(bot.id, humanContext);
+    expect(openConversation).toHaveBeenCalledWith(bot.id, humanContext, { isOwnedByLoggedInUser: false });
     expect(legacyConversation).not.toHaveBeenCalled();
     expect(history.push).toHaveBeenCalledWith('/workspace?tab=chat&bot=bot-1%3A2088&session=session-1');
 
@@ -688,7 +688,7 @@ describe('useCollaborationSquare Bot Search', () => {
     });
 
     expect(requestFriendship).not.toHaveBeenCalled();
-    expect(openConversation).toHaveBeenCalledWith(bot.id, humanContext);
+    expect(openConversation).toHaveBeenCalledWith(bot.id, humanContext, { isOwnedByLoggedInUser: true });
     expect(history.push).toHaveBeenCalledWith('/workspace?tab=chat&bot=owned-bot&session=session-owned');
 
     unmount();

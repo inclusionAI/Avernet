@@ -417,6 +417,18 @@ class TestPublishWorkflow:
             f"Unexpected: {response.status_code}"
         )
 
+    @pytest.mark.asyncio
+    async def test_teclaw_callback_empty_body(self, api: APITestHelper) -> None:
+        """POST empty body to /api/v1/publish/teclaw-callback → 422
+        (Pydantic validation: TeclawCallbackRequest requires success + data)."""
+        response = await api.client.post(
+            "/api/v1/publish/teclaw-callback",
+            json={},
+        )
+        assert response.status_code == 422, (
+            f"Expected 422 for empty TeClaw callback body, got: {response.status_code}"
+        )
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Bot Service CMD / HTTP / HTTP-CONN / WSS routers

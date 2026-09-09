@@ -24,6 +24,7 @@ from secbaas.community.api.session_file_sharing import (
     SessionDeleteTransferResponse,
     SessionFileSharingDispatcher,
     SessionFileSharingError,
+    SessionFileTransferProxyUnavailableError,
     SessionGetTransferStatusResponse,
     SessionGetUploadUrlResponse,
     SessionShareLinkResponse,
@@ -209,6 +210,26 @@ class TestGetUploadUrl:
         assert resp.status_code == 501
         detail = resp.json()["detail"]
         assert detail["error_code"] == "NOT_IMPLEMENTED"
+
+    @pytest.mark.asyncio
+    async def test_upload_url_proxy_unavailable_503(self, mock_dispatcher):
+        """Proxy unavailable returns 503 with the structured reason field."""
+        mock_dispatcher.dispatch_get_upload_url.side_effect = (
+            SessionFileTransferProxyUnavailableError(
+                reason="session_file_url_proxy.proxy_base_url is not configured "
+                "for deploy_tenant=aliyun"
+            )
+        )
+
+        resp = await _post(
+            "/api/v1/sessions/t1/sess-001/files/upload-url",
+            json_data={"filename": "data.csv"},
+        )
+
+        assert resp.status_code == 503
+        detail = resp.json()["detail"]
+        assert detail["error_code"] == "SESSION_FILE_TRANSFER_PROXY_UNAVAILABLE"
+        assert "proxy_base_url" in detail["reason"]
 
     @pytest.mark.asyncio
     async def test_upload_url_content_type_pass_through(self, mock_dispatcher):
@@ -600,6 +621,26 @@ class TestGenerateShareLink:
         detail = resp.json()["detail"]
         assert detail["error_code"] == "SOURCE_TRANSFER_NOT_FOUND"
         assert detail["transfer_id"] == "tf-001"
+
+    @pytest.mark.asyncio
+    async def test_share_link_proxy_unavailable_503(self, mock_dispatcher):
+        """Proxy unavailable returns 503 with the structured reason field."""
+        mock_dispatcher.dispatch_get_share_link.side_effect = (
+            SessionFileTransferProxyUnavailableError(
+                reason="session_file_url_proxy.proxy_base_url is not configured "
+                "for deploy_tenant=aliyun"
+            )
+        )
+
+        resp = await _post(
+            "/api/v1/sessions/t1/sess-001/files/transfers/tf-001/share-link",
+            json_data={"expire_seconds": 3600, "show": False, "operator": "u1"},
+        )
+
+        assert resp.status_code == 503
+        detail = resp.json()["detail"]
+        assert detail["error_code"] == "SESSION_FILE_TRANSFER_PROXY_UNAVAILABLE"
+        assert "proxy_base_url" in detail["reason"]
 
     @pytest.mark.asyncio
     async def test_share_link_not_ready_409(self, mock_dispatcher):

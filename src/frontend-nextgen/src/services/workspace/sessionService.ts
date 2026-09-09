@@ -14,6 +14,7 @@ import {
   updateSessionMemberMode,
 } from '@/services/backendApi/collaboration/sessionController';
 import { triggerAceLoginRedirect } from '@/services/backendApi/httpClient';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { DomainError, DomainResult } from './identityService';
 import { mapBcsSessionItem, mapSessionListItem, type BcsSessionRaw } from './mappers';
@@ -142,7 +143,11 @@ export const sessionService = {
     try {
       const resp = await getSession(sessionId);
       return { ok: true, data: mapSessionListItem(resp.data!) };
-    } catch {
+    } catch (err) {
+      // 详情查询均为读侧静默用途（成员补齐 / 陈旧选中兜底探测 / 邀请与深链反查），调用方自行处理失败；
+      // 取消协议层默认全局提示，避免对已退出/已删除会话的「必然失败」反查变成用户可见报错。
+      const toastKey = (err as { toastKey?: string })?.toastKey;
+      if (toastKey) useErrorNotifyStore.getState().cancel(toastKey);
       return {
         ok: false,
         error: toDomainError('SESSION_DETAIL_FAILED', '加载会话详情失败，请稍后重试。'),

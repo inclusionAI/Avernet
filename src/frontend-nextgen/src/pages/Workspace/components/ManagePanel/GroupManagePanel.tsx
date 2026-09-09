@@ -19,6 +19,8 @@ export interface GroupManagePanelProps {
   canManage: PolicyResult;
   candidates: IdentityView[];
   activeIdentity: IdentityView | null;
+  authenticatedUserId?: string | null;
+  authenticatedUserName?: string | null;
   onClose: () => void;
   onUpdate: (patch: {
     name?: string;
@@ -44,7 +46,17 @@ const KIND_LABEL: Record<GroupView['kind'], string> = {
 };
 
 export function GroupManagePanel(props: GroupManagePanelProps) {
-  const { group, canManage, activeIdentity, onClose, onUpdate, onDissolve, onLeaveGroup } = props;
+  const {
+    group,
+    canManage,
+    activeIdentity,
+    authenticatedUserId,
+    authenticatedUserName,
+    onClose,
+    onUpdate,
+    onDissolve,
+    onLeaveGroup,
+  } = props;
   const [tab, setTab] = useState<'basic' | 'advanced'>('basic');
   const [name, setName] = useState(group.name);
   const [shareOpen, setShareOpen] = useState(false);
@@ -87,7 +99,6 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
     <aside className="flex h-full flex-col bg-background">
       <ManagePanelHeader
         title="群管理"
-        description="查看协作群基础信息与群成员，围绕同一任务现场保持协作一致。"
         subtitle={group.name}
         statusLabel={canManageGroup ? '可管理' : '可查看'}
         onClose={onClose}
@@ -119,18 +130,22 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
                   </Button>
                 </div>
               </label>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <div className="rounded-lg bg-muted px-3 py-2">
+              <div className="mt-3 space-y-2 rounded-lg bg-muted px-3 py-2">
+                <div>
                   <p className="m-0 text-[11px] font-medium text-muted-foreground">成员数量</p>
                   <p className="m-0 mt-1 text-sm font-medium text-foreground">
                     {group.participantCount || group.participants.length}
                   </p>
                 </div>
-                <div className="rounded-lg bg-muted px-3 py-2">
+                <div>
                   <p className="m-0 text-[11px] font-medium text-muted-foreground">创建时间</p>
                   <p className="m-0 mt-1 text-sm font-medium text-foreground">
                     {new Date(group.createdAt).toLocaleDateString()}
                   </p>
+                </div>
+                <div>
+                  <p className="m-0 text-[11px] font-medium text-muted-foreground">群 ID</p>
+                  <p className="m-0 mt-1 break-all text-xs font-medium text-foreground">{group.groupId}</p>
                 </div>
               </div>
             </Card>
@@ -159,10 +174,13 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
                 participants={group.participants}
                 participantCount={group.participantCount}
                 activeIdentity={activeIdentity}
+                authenticatedUserId={authenticatedUserId}
+                authenticatedUserName={authenticatedUserName}
                 canManage={canManageGroup}
                 disabledReason={canManage.disabledReason}
                 emptyText="暂无成员"
                 addLabel="添加群成员"
+                groupKind={group.kind}
                 onAddMany={handleAddMany}
                 onRemove={props.onRemoveMember}
               />

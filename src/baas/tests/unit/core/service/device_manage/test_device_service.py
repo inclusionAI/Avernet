@@ -29,6 +29,8 @@ from secbaas.community.api.device_manage import (
     LocalCreationResult,
     PoolabCreationResult,
     SigmaCreationResult,
+    TeClawCreateConfig,
+    TeClawCreationResult,
 )
 from secbaas.community.api.template_manage import (
     ArcaTemplateConfig,
@@ -37,6 +39,7 @@ from secbaas.community.api.template_manage import (
     LocalTemplateConfig,
     PoolabTemplateConfig,
     SigmaTemplateConfig,
+    TeClawTemplateConfig,
 )
 from secbaas.community.core.repository.device import DeviceRecord
 from secbaas.community.core.service.device_manage import DefaultDeviceService
@@ -1100,6 +1103,105 @@ class TestStartDeviceExtra:
             await service.start_device(
                 tenant="test-tenant", device_uuid="DEVICE-test-001"
             )
+
+
+class TestStartDeviceTeClawAsync:
+    """TeClaw async/callback mode coverage for start_device Step 8."""
+
+    @pytest.mark.asyncio
+    async def test_teclaw_async_returns_pending(
+        self,
+        service,
+        mock_repo,
+        mock_paas_facade,
+        mock_env,
+        mock_device_template_service,
+    ):
+        record = _make_record(
+            status=DeviceStatus.PENDING.value,
+            extra_config={"template_uuid": "tpl-teclaw"},
+        )
+        mock_repo.get_by_device_uuid.return_value = record
+        pending = _make_record(status=DeviceStatus.PENDING.value)
+        mock_repo.get_by_id.return_value = pending
+
+        teclaw_tpl = MagicMock(
+            template_uuid="tpl-teclaw",
+            config=TeClawTemplateConfig(
+                type="TECLAW", teclaw_endpoint="http://teclaw.test"
+            ),
+        )
+        mock_device_template_service.get_default_or_explicit_template.return_value = (
+            teclaw_tpl
+        )
+        mock_paas_facade.create_device.return_value = TeClawCreationResult(
+            platform="teclaw",
+            status="RUNNING",
+            teclaw_bot_id="teclaw-bot-001",
+        )
+
+        with patch(
+            f"{DS}._resolve_teclaw_callback_url", return_value="http://cb.test/cb"
+        ):
+            result = await service.start_device(
+                tenant="test-tenant",
+                device_uuid="DEVICE-test-001",
+                publish_id=42,
+            )
+
+        assert result.status == DeviceStatus.PENDING.value
+        mock_paas_facade.create_device.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_teclaw_async_missing_publish_id_raises(
+        self,
+        service,
+        mock_repo,
+        mock_env,
+        mock_device_template_service,
+    ):
+        record = _make_record(
+            status=DeviceStatus.PENDING.value,
+            extra_config={"template_uuid": "tpl-teclaw"},
+        )
+        mock_repo.get_by_device_uuid.return_value = record
+        failed = _make_record(status=DeviceStatus.FAILED.value)
+        mock_repo.get_by_id.return_value = failed
+
+        teclaw_tpl = MagicMock(
+            template_uuid="tpl-teclaw",
+            config=TeClawTemplateConfig(
+                type="TECLAW", teclaw_endpoint="http://teclaw.test"
+            ),
+        )
+        mock_device_template_service.get_default_or_explicit_template.return_value = (
+            teclaw_tpl
+        )
+
+        with patch(
+            f"{DS}._resolve_teclaw_callback_url", return_value="http://cb.test/cb"
+        ):
+            result = await service.start_device(
+                tenant="test-tenant",
+                device_uuid="DEVICE-test-001",
+                publish_id=0,
+            )
+
+        assert result.status == DeviceStatus.FAILED.value
+
+    def test_resolve_teclaw_callback_url_raises_when_config_missing(self):
+        with (
+            patch(f"{DS}.get_config_by_path", return_value=None),
+            patch(f"{DS}.get_current_env", return_value="dev"),
+        ):
+            with pytest.raises(
+                ValueError, match="secbaas.callback.host.dev is not configured"
+            ):
+                from secbaas.community.core.service.device_manage._device_service import (
+                    _resolve_teclaw_callback_url,
+                )
+
+                _resolve_teclaw_callback_url()
 
 
 class TestRestartDeviceExtra:
@@ -3293,3 +3395,108 @@ class TestUpdateDeviceDocker:
         assert isinstance(detail_config, DockerDeviceConfig)
         assert detail_config.image == "custom-image:v2"
         assert detail_config.container_port == 3000
+
+
+class TestUpdateDeviceTeClawAsync:
+    """TeClaw async/callback mode coverage for update_device TECLAW branch."""
+
+    @pytest.mark.asyncio
+    async def test_teclaw_async_update_returns_pending(
+        self,
+        service,
+        mock_repo,
+        mock_paas_facade,
+        mock_env,
+        mock_device_template_service,
+    ):
+        record = _make_record(
+            status=DeviceStatus.ACTIVE.value,
+            provider_type="TECLAW",
+            provider_device_id="teclaw-bot-001",
+            extra_config={
+                "template_uuid": "tpl-teclaw",
+                "deploy_config": {
+                    "teclaw_bot_config": {"bot_name": "updated-bot"},
+                },
+            },
+        )
+        mock_repo.get_by_device_uuid.return_value = record
+        pending = _make_record(
+            status=DeviceStatus.PENDING.value,
+            provider_type="TECLAW",
+            provider_device_id="teclaw-bot-001",
+        )
+        mock_repo.get_by_id.return_value = pending
+
+        teclaw_tpl = MagicMock(
+            template_uuid="tpl-teclaw",
+            config=TeClawTemplateConfig(
+                type="TECLAW", teclaw_endpoint="http://teclaw.test"
+            ),
+        )
+        mock_device_template_service.get_default_or_explicit_template.return_value = (
+            teclaw_tpl
+        )
+
+        with patch(
+            f"{DS}._resolve_teclaw_callback_url", return_value="http://cb.test/cb"
+        ):
+            result = await service.update_device(
+                tenant="test-tenant",
+                device_uuid="DEVICE-test-001",
+                modifier="test_user",
+                publish_id=42,
+            )
+
+        assert result.status == DeviceStatus.PENDING.value
+        mock_paas_facade.update_device.assert_awaited_once()
+        call_args = mock_paas_facade.update_device.await_args
+        passed_config = call_args.args[1]
+        assert isinstance(passed_config, TeClawCreateConfig)
+        assert passed_config.callback_context is not None
+        assert passed_config.callback_context.publish_id == "42"
+        assert passed_config.callback_context.device_uuid == "DEVICE-test-001"
+        assert passed_config.callback_context.tenant == "test-tenant"
+        assert passed_config.callback_context.operator == "test_user"
+
+    @pytest.mark.asyncio
+    async def test_teclaw_async_update_missing_publish_id_raises(
+        self,
+        service,
+        mock_repo,
+        mock_env,
+        mock_device_template_service,
+    ):
+        record = _make_record(
+            status=DeviceStatus.ACTIVE.value,
+            provider_type="TECLAW",
+            provider_device_id="teclaw-bot-001",
+            extra_config={
+                "template_uuid": "tpl-teclaw",
+                "deploy_config": {
+                    "teclaw_bot_config": {"bot_name": "updated-bot"},
+                },
+            },
+        )
+        mock_repo.get_by_device_uuid.return_value = record
+
+        teclaw_tpl = MagicMock(
+            template_uuid="tpl-teclaw",
+            config=TeClawTemplateConfig(
+                type="TECLAW", teclaw_endpoint="http://teclaw.test"
+            ),
+        )
+        mock_device_template_service.get_default_or_explicit_template.return_value = (
+            teclaw_tpl
+        )
+
+        with patch(
+            f"{DS}._resolve_teclaw_callback_url", return_value="http://cb.test/cb"
+        ):
+            with pytest.raises(ValueError, match="publish_id is required"):
+                await service.update_device(
+                    tenant="test-tenant",
+                    device_uuid="DEVICE-test-001",
+                    modifier="test_user",
+                    publish_id=0,
+                )

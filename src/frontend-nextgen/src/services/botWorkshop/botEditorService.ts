@@ -175,22 +175,40 @@ export const botEditorService = {
       (typeof data?.total === 'number' ? page * pageSize < data.total : (data?.items?.length ?? 0) >= pageSize);
     return { items, hasMore: Boolean(hasMore) && (data?.items?.length ?? 0) > 0 };
   },
-  async loadCapabilityCandidates(botId: string, spaceId?: string) {
-    const [boundMcps, mcpServers, repositorySkills, spaceSkills] = await Promise.all([
-      botEditorController.listBotMcps(botId),
-      botEditorController.listMcpServers(),
+  async loadCapabilityCandidates(
+    botId: string,
+    spaceId: string | undefined,
+    kind: 'skill' | 'mcp',
+    mcpQuery?: { source: 'internal' | 'open-platform'; keyword?: string },
+  ) {
+    if (kind === 'mcp') {
+      const [boundMcps, mcpServers] = await Promise.all([
+        botEditorController.listBotMcps(botId),
+        botEditorController.searchMarketMcpServers({
+          keyword: mcpQuery?.keyword || undefined,
+          tenants: mcpQuery?.source === 'open-platform' ? ['THIRD_PARTNER'] : undefined,
+        }),
+      ]);
+      return {
+        availableMcps: dataOr(mcpServers.data?.items, []).map(
+          (item): BotEditorMcp => ({
+            serverCode: item.server_code,
+            name: item.name || item.server_code,
+            description: item.description,
+            active: Boolean(boundMcps.data?.some((bound) => bound.server_code === item.server_code && bound.active)),
+          }),
+        ),
+        marketSkills: [] as BotEditorSkill[],
+        skillCenterSkills: [] as BotEditorSkill[],
+        workshopSkills: [] as BotEditorSkill[],
+      };
+    }
+    const [repositorySkills, spaceSkills] = await Promise.all([
       botEditorController.listRepositorySkills(),
       spaceId ? listAllConsumableSpaceSkills(spaceId) : Promise.resolve([]),
     ]);
     return {
-      availableMcps: dataOr(mcpServers.data?.items, []).map(
-        (item): BotEditorMcp => ({
-          serverCode: item.server_code,
-          name: item.name || item.server_code,
-          description: item.description,
-          active: Boolean(boundMcps.data?.some((bound) => bound.server_code === item.server_code && bound.active)),
-        }),
-      ),
+      availableMcps: [] as BotEditorMcp[],
       marketSkills: dataOr(repositorySkills.data?.items, []).map(
         (item): BotEditorSkill => ({
           id: String(item.skill_id ?? item.id ?? ''),

@@ -561,10 +561,12 @@ class TestPublicBcsBot:
         )
         assert bcn.patch_attributes.call_args.kwargs["body"]["user_visibility"] == "protected"
 
-    def test_callback_agree_agent_public_when_friend_check_open(self):
+    def test_callback_agree_agent_writes_block_visibility_to_visibility(self):
         bcn = MagicMock()
         bcn.get_attributes.return_value = {
-            "friend_ext": {"public_agent_approval": {"puid": "p1", "status": "PROCESSING"}},
+            "friend_ext": {"public_agent_approval": {"puid": "p1", "status": "PROCESSING", "visibility": "public"}},
+            # friend_check_in_strategy intentionally OPEN to prove the agent callback
+            # no longer consults it; visibility comes from the approval block.
             "friend_check_in_strategy": "OPEN",
         }
         svc = _make_service(bcn_service=bcn)
@@ -574,20 +576,35 @@ class TestPublicBcsBot:
         )
         body = bcn.patch_attributes.call_args.kwargs["body"]
         assert body["friend_ext"]["public_agent_approval"]["status"] == "AGREE"
-        # agent: visibility 由 friend_check_in_strategy=OPEN → public
+        # agent: visibility 直接取 block.visibility, 不再读 friend_check_in_strategy
         assert body["visibility"] == "public"
 
-    def test_callback_agree_agent_protected_when_friend_check_not_open(self):
+    def test_callback_agree_agent_uses_protected_from_block(self):
         bcn = MagicMock()
         bcn.get_attributes.return_value = {
-            "friend_ext": {"public_agent_approval": {"puid": "p1", "status": "PROCESSING"}},
-            "friend_check_in_strategy": "APPROVAL",
+            "friend_ext": {"public_agent_approval": {"puid": "p1", "status": "PROCESSING", "visibility": "protected"}},
+            "friend_check_in_strategy": "OPEN",
         }
         svc = _make_service(bcn_service=bcn)
         svc.handle_public_approval_callback(
             bot_id="b", owner_id="u", puid="p1",
             last_operate="AGREE", public_scope="agent",
         )
+        assert bcn.patch_attributes.call_args.kwargs["body"]["visibility"] == "protected"
+
+    def test_callback_agree_agent_defaults_protected_without_block_visibility(self):
+        bcn = MagicMock()
+        bcn.get_attributes.return_value = {
+            "friend_ext": {"public_agent_approval": {"puid": "p1", "status": "PROCESSING"}},
+            # friend_check_in_strategy=OPEN no longer lifts agent visibility to public
+            "friend_check_in_strategy": "OPEN",
+        }
+        svc = _make_service(bcn_service=bcn)
+        svc.handle_public_approval_callback(
+            bot_id="b", owner_id="u", puid="p1",
+            last_operate="AGREE", public_scope="agent",
+        )
+        # block 无 visibility → 缺省 protected; strategy=OPEN 不再抬升为 public
         assert bcn.patch_attributes.call_args.kwargs["body"]["visibility"] == "protected"
 
     def test_callback_agree_lifts_view_friend_deps_for_user(self):
@@ -1507,12 +1524,21 @@ class TestSearchPublicBotsByKeyword:
         assert result["total"] == 1
         metadata.search_public_bot_metadata.assert_not_called()
 
-    def test_catalog_search_joins_only_the_current_bcs_page_and_reports_its_count(self):
+    def test_catalog_search_keeps_bcs_only_bot_and_reports_bcs_count(self):
         metadata = MagicMock()
         metadata.search_public_bot_metadata.return_value = _metadata_page(
             [
                 BotCatalogMetadata(BotCatalogAddress("bot-1", "entity-1"), "bot"),
-                BotCatalogMetadata(BotCatalogAddress("missing", "entity-2"), "bot"),
+                BotCatalogMetadata(
+                    BotCatalogAddress("missing", "bcs-owner"),
+                    "bot",
+                    bot_uuid="missing:uuid-owner",
+                    actor_kind="bot",
+                    name="Native Bot",
+                    summary="BCS-only summary",
+                    created_by="bcs-owner",
+                    status="online",
+                ),
             ],
             total=2,
         )
@@ -1533,8 +1559,20 @@ class TestSearchPublicBotsByKeyword:
         )
 
         assert result["total"] == 2
-        assert [bot["bot_id"] for bot in result["items"]] == ["bot-1"]
-        assert [bot["bot_uuid"] for bot in result["items"]] == ["bot-1:entity-1"]
+        assert [bot["bot_id"] for bot in result["items"]] == ["bot-1", "missing"]
+        assert result["items"][1] == {
+            "bot_id": "missing",
+            "bot_uuid": "missing:uuid-owner",
+            "entity_id": "bcs-owner",
+            "owner_id": "bcs-owner",
+            "bot_type": "",
+            "bot_name": "Native Bot",
+            "bot_desc": "BCS-only summary",
+            "owner_name": None,
+            "active_engine": "",
+            "status": "online",
+            "actor_kind": "bot",
+        }
         metadata.search_public_bot_metadata.assert_called_once_with(
             search="agent",
             page=3,
@@ -1543,10 +1581,54 @@ class TestSearchPublicBotsByKeyword:
             request_id="trace-1",
         )
         repository.list_bots_by_owner_bot_pairs.assert_called_once_with(
-            [("bot-1", "entity-1"), ("missing", "entity-2")],
+            [("bot-1", "entity-1"), ("missing", "bcs-owner")],
             page=1,
             page_size=2,
         )
+
+    def test_catalog_search_prefers_non_blank_backend_fields_and_uses_bcs_fallbacks(self):
+        metadata = MagicMock()
+        metadata.search_public_bot_metadata.return_value = _metadata_page(
+            [
+                BotCatalogMetadata(
+                    BotCatalogAddress("backend", "owner-1"),
+                    "bot",
+                    summary="BCS ignored",
+                    created_by="owner-1",
+                ),
+                BotCatalogMetadata(
+                    BotCatalogAddress("fallback", "BCS-owner"),
+                    "bot",
+                    summary="BCS fallback",
+                    created_by="BCS-owner",
+                ),
+            ],
+            total=2,
+        )
+        backend = _make_catalog_bot("backend", "owner-1")
+        backend["bot_desc"] = "Backend description"
+        fallback = _make_catalog_bot("fallback", "BCS-owner")
+        fallback["bot_desc"] = "  "
+        fallback["entity_id"] = ""
+        fallback["owner_id"] = "BCS-owner"
+        repository = MagicMock()
+        repository.list_bots_by_owner_bot_pairs.return_value = (
+            2,
+            [backend, fallback],
+        )
+        svc = _make_service(
+            bot_repository=repository, catalog_metadata_service=metadata
+        )
+
+        result = svc.search_catalog_public_bots_by_keyword(
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace-field-fallbacks",
+        )
+
+        assert result["items"][0]["bot_desc"] == "Backend description"
+        assert result["items"][0]["entity_id"] == "owner-1"
+        assert result["items"][1]["bot_desc"] == "BCS fallback"
+        assert result["items"][1]["entity_id"] == "BCS-owner"
 
     def test_catalog_search_preserves_bcs_total_when_join_has_fewer_items(self):
         metadata = MagicMock()

@@ -2,7 +2,7 @@
 
 收编后 MCP 5 函数走注入的 ``transport``(post/get/put/delete + 相对 path），
 不再裸 httpx。用 FakeTransport 断言走了 transport，业务包装(409-as-update /
-retry / listPolicy)不变。
+bounded transient retry / listPolicy)保持一致。
 
 The transport-agnostic helpers are shared Core code; concrete HTTP transports
 remain in profile-specific composition roots. The moved Core
@@ -159,11 +159,62 @@ class TestCreateMcpNoRetryOnAlreadyExists:
 
     def test_retry_on_other_500_errors(self):
         t = FakeTransport(_resp(500, '{"detail":"Internal Server Error"}'))
-        with patch("time.sleep"):
-            with pytest.raises(Exception, match="Create MCP failed after 3 attempts"):
+        with patch("time.sleep") as sleep:
+            with pytest.raises(Exception, match="Create MCP failed after 4 attempts"):
                 mcp_transport._create_mcp(t, _make_config())
-        assert len(t.calls) == 3
+        assert len(t.calls) == 4
+        assert [call.args[0] for call in sleep.call_args_list] == [1, 2, 4]
         assert t.calls[0] == ("POST", "/api/mcp")
+
+    def test_retry_no_active_devices_then_success(self):
+        t = FakeTransport([
+            _resp(
+                503,
+                '{"detail":{"error":"NO_ACTIVE_DEVICES",'
+                '"message":"No active devices found for bot"}}',
+            ),
+            _resp(201),
+        ])
+
+        with patch("time.sleep") as sleep:
+            mcp_transport._create_mcp(t, _make_config())
+
+        assert len(t.calls) == 2
+        sleep.assert_called_once_with(1)
+
+    def test_no_active_devices_exhausts_initial_plus_three_retries(self):
+        t = FakeTransport(
+            _resp(503, '{"detail":{"error":"NO_ACTIVE_DEVICES"}}')
+        )
+
+        with patch("time.sleep") as sleep:
+            with pytest.raises(
+                Exception,
+                match="Create MCP failed after 4 attempts:.*NO_ACTIVE_DEVICES",
+            ):
+                mcp_transport._create_mcp(t, _make_config())
+
+        assert len(t.calls) == 4
+        assert [call.args[0] for call in sleep.call_args_list] == [1, 2, 4]
+
+    def test_request_error_recovers_within_bounded_retry_window(self):
+        t = FakeTransport([HttpClientRequestError("not ready"), _resp(201)])
+
+        with patch("time.sleep") as sleep:
+            mcp_transport._create_mcp(t, _make_config())
+
+        assert len(t.calls) == 2
+        sleep.assert_called_once_with(1)
+
+    def test_non_retryable_400_fails_immediately(self):
+        t = FakeTransport(_resp(400, '{"detail":"invalid config"}'))
+
+        with patch("time.sleep") as sleep:
+            with pytest.raises(Exception, match="Create failed: 400"):
+                mcp_transport._create_mcp(t, _make_config())
+
+        assert len(t.calls) == 1
+        sleep.assert_not_called()
 
 
 class TestProbeMcp:
@@ -187,12 +238,28 @@ class TestFilterServers:
         assert mcp_transport.filter_servers(t, []) is False
 
     def test_non_200(self):
-        assert mcp_transport.filter_servers(FakeTransport(_resp(400, text="bad")), []) is False
+        t = FakeTransport(_resp(400, text="bad"))
+        with patch("time.sleep") as sleep:
+            assert mcp_transport.filter_servers(t, []) is False
+        assert len(t.calls) == 1
+        sleep.assert_not_called()
 
     def test_retry_then_success(self):
         t = FakeTransport([_resp(500), _resp(200, json_body={"success": True})])
-        with patch("time.sleep"):
+        with patch("time.sleep") as sleep:
             assert mcp_transport.filter_servers(t, [{"server_code": "a"}]) is True
+        sleep.assert_called_once_with(1)
+
+    def test_no_active_devices_exhausts_initial_plus_three_retries(self):
+        t = FakeTransport(
+            _resp(503, text='{"detail":{"error":"NO_ACTIVE_DEVICES"}}')
+        )
+
+        with patch("time.sleep") as sleep:
+            assert mcp_transport.filter_servers(t, [{"server_code": "a"}]) is False
+
+        assert len(t.calls) == 4
+        assert [call.args[0] for call in sleep.call_args_list] == [1, 2, 4]
 
     def test_request_error_returns_false(self):
         with patch("time.sleep"):
@@ -223,9 +290,22 @@ class TestUpdateMcp:
         mcp_transport._update_mcp(FakeTransport(_resp(200)), _make_config())  # no raise
 
     def test_retry_exhausted_raises(self):
-        with patch("time.sleep"):
-            with pytest.raises(Exception, match="Update MCP failed after 3 attempts"):
-                mcp_transport._update_mcp(FakeTransport(_resp(500, text="err")), _make_config())
+        t = FakeTransport(_resp(500, text="err"))
+        with patch("time.sleep") as sleep:
+            with pytest.raises(Exception, match="Update MCP failed after 4 attempts"):
+                mcp_transport._update_mcp(t, _make_config())
+
+        assert len(t.calls) == 4
+        assert [call.args[0] for call in sleep.call_args_list] == [1, 2, 4]
+
+    def test_non_retryable_400_fails_immediately(self):
+        t = FakeTransport(_resp(400, text="bad request"))
+        with patch("time.sleep") as sleep:
+            with pytest.raises(Exception, match="Update failed: 400"):
+                mcp_transport._update_mcp(t, _make_config())
+
+        assert len(t.calls) == 1
+        sleep.assert_not_called()
 
 
 class TestDeleteMcp:
@@ -236,7 +316,9 @@ class TestDeleteMcp:
         mcp_transport._delete_mcp(FakeTransport(_resp(404)), "x")
 
     def test_retry_exhausted_swallows(self):
-        with patch("time.sleep"):
-            mcp_transport._delete_mcp(FakeTransport(_resp(500, text="err")), "x")  # logs + returns
+        t = FakeTransport(_resp(500, text="err"))
+        with patch("time.sleep") as sleep:
+            mcp_transport._delete_mcp(t, "x")  # logs + returns
 
-
+        assert len(t.calls) == 4
+        assert [call.args[0] for call in sleep.call_args_list] == [1, 2, 4]

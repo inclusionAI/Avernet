@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from time import perf_counter
 from typing import Any
 
 from injector import inject
+
+from agentclaw.community.log import get_logger
 
 from agentclaw.community.core.repository.capability_desired_state_types import (
     InstallationFlushPlan,
@@ -21,13 +24,17 @@ from agentclaw.community.core.skill_center.bot_engine_scope import (
     bot_default_engine_types,
     bot_engine_type,
 )
-from agentclaw.community.core.skill_center.feature_flags import get_skill_center_flags
+from agentclaw.community.core.skill_center.installation_read_config import InstallationReadConfig
 from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
 from agentclaw.community.core.skill_center.version_resolution_contract import (
     SkillVersionResolverProtocol,
 )
 from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
 from agentclaw.community.core.skill_center.bot_capability_state_reader_protocol import BotCapabilityStateReaderProtocol
+from agentclaw.community.core.skill_center.capability_state_contract import BotCapabilitySnapshot
+
+
+logger = get_logger()
 
 
 class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
@@ -47,11 +54,13 @@ class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
         bot_repo: BotRepository,
         pool_skills: SkillsPoolSkillRepositoryProtocol,
         version_resolver: SkillVersionResolverProtocol,
+        read_config: InstallationReadConfig = InstallationReadConfig(),
     ) -> None:
         self._repository = repository
         self._bot_repo = bot_repo
         self._pool_skills = pool_skills
         self._version_resolver = version_resolver
+        self._read_config = read_config
 
     def member_skill_ids(self, *, bot: Mapping[str, Any]) -> frozenset[int]:
         return self._repository.list_member_skill_ids(
@@ -110,6 +119,11 @@ class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
         self.synchronize_installations(
             bot_id=bot_id, owner_id=owner_id, bot=bot
         )
+        return self._read_skill_assets(bot_id=bot_id, owner_id=owner_id, bot=bot)
+
+    def _read_skill_assets(
+        self, *, bot_id: str, owner_id: str, bot: Mapping[str, Any]
+    ) -> tuple[RegisteredSkillAsset, ...]:
         assets = tuple(
             self._pool_skills.list_bot_installed_assets(
                 env=str(bot["env"]),
@@ -119,6 +133,24 @@ class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
         )
         return self._version_resolver.resolve_latest_runtime_assets(
             env=str(bot["env"]), assets=assets
+        )
+
+    def active_capabilities(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        bot: Mapping[str, Any] | None = None,
+    ) -> BotCapabilitySnapshot:
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, bot=bot)
+        self.synchronize_installations(bot_id=bot_id, owner_id=owner_id, bot=bot)
+        return BotCapabilitySnapshot(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            skills=self._read_skill_assets(bot_id=bot_id, owner_id=owner_id, bot=bot),
+            installed_mcp_server_codes=frozenset(
+                self._repository.list_installed_mcps(bot_id=bot_id, owner_id=owner_id)
+            ),
         )
 
     def active_mcp_server_codes(
@@ -150,15 +182,33 @@ class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
     def _flush(
         self, *, bot: Mapping[str, Any], bot_id: str, owner_id: str
     ) -> InstallationFlushPlan:
+        started = perf_counter()
+        default_sync_only = self._read_config.default_sync_only
+        sync_mode = "DEFAULT_ONLY" if default_sync_only else "FULL_FLUSH"
         sync = (
             self._repository.sync_default_installations
-            if get_skill_center_flags().installation_default_sync_only
+            if default_sync_only
             else self._repository.flush_installations
         )
-        return sync(
-            bot_id=bot_id,
-            owner_id=owner_id,
-            env=str(bot["env"]),
-            engine_type=bot_engine_type(bot),
-            default_engine_types=bot_default_engine_types(bot),
-        )
+        status = "FAILED"
+        try:
+            plan = sync(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                env=str(bot["env"]),
+                engine_type=bot_engine_type(bot),
+                default_engine_types=bot_default_engine_types(bot),
+            )
+            status = "SUCCEEDED"
+            return plan
+        finally:
+            logger.info(
+                "[BotCapabilityStateReader] installation_sync env=%s owner_id=%s "
+                "bot_id=%s sync_mode=%s status=%s duration_ms=%d",
+                str(bot["env"]),
+                owner_id,
+                bot_id,
+                sync_mode,
+                status,
+                int((perf_counter() - started) * 1000),
+            )

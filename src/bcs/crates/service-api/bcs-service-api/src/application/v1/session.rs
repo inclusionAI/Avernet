@@ -6,8 +6,8 @@ use super::group::{DeleteResult, Page};
 use super::{ApplicationError, AuthenticatedCaller};
 use crate::StateMachineRunView;
 
-pub use bcs_domain::{ActorKind, ParticipantMode, ParticipantRole};
 pub use crate::{DeliveryType, SessionCaller, SessionKind};
+pub use bcs_domain::{ActorKind, MessageViewScope, ParticipantMode, ParticipantRole};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -26,6 +26,7 @@ pub struct SessionParticipant {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     pub mode: ParticipantMode,
+    pub message_view_scope: MessageViewScope,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub joined_at: Option<u64>,
 }
@@ -124,6 +125,7 @@ pub struct CreateSession {
     /// while Bot callers may select only themselves.
     pub acting_bot_id: Option<String>,
     pub creator_role: Option<ParticipantRole>,
+    pub message_view_scope: Option<MessageViewScope>,
     pub input: Option<Value>,
     pub meta: Option<Value>,
     pub context_delivery: Option<DeliveryType>,
@@ -186,6 +188,7 @@ pub struct AddSessionParticipant {
     pub caller: AuthenticatedCaller,
     pub session_id: String,
     pub bot_uuid: String,
+    pub message_view_scope: Option<MessageViewScope>,
 }
 
 #[derive(Debug, Clone)]
@@ -193,7 +196,8 @@ pub struct UpdateSessionParticipant {
     pub caller: AuthenticatedCaller,
     pub session_id: String,
     pub bot_uuid: String,
-    pub mode: ParticipantMode,
+    pub mode: Option<ParticipantMode>,
+    pub message_view_scope: Option<MessageViewScope>,
 }
 
 #[derive(Debug, Clone)]

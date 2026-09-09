@@ -198,7 +198,7 @@ describe('collaboration privacy runtime wiring', () => {
     expect(getWorkerConfig).toHaveBeenCalledWith('bot-real-1', signal);
   });
 
-  it('pads a lost numeric prefix before user lookup and keeps the canonical employee number downstream', async () => {
+  it('pads a short ID only for organization lookup and preserves the raw business user ID', async () => {
     const context = createDependencies();
     const { dependencies, getOrgUser, listManagedBots } = context;
     getOrgUser.mockImplementationOnce(async (userId: string, _signal?: AbortSignal) => {
@@ -219,7 +219,63 @@ describe('collaboration privacy runtime wiring', () => {
     });
 
     expect(getOrgUser).toHaveBeenCalledWith('012345', undefined);
-    expect(listManagedBots).toHaveBeenCalledWith({ kind: 'bot', user_id: '012345' }, undefined);
+    expect(listManagedBots).toHaveBeenCalledWith({ kind: 'bot', user_id: '12345' }, undefined);
+  });
+
+  it('uses the raw short user ID when submitting Bot visibility', async () => {
+    const { dependencies, getOrgUser, publishBotPublic } = createDependencies();
+    getOrgUser.mockImplementationOnce(async (userId: string) => ({
+      code: 200000,
+      data: { ...createUserDto(), user_id: userId },
+    }));
+    const adapter = createCollaborationPrivacyRuntimeAdapter({ ...dependencies, getOrgUser });
+    await adapter.loadOverview('12345');
+
+    await adapter.submitPublication({
+      botId: 'bot-real-1',
+      audience: 'bot',
+      config: { scope: 'all', organizationPaths: [] },
+    });
+
+    expect(getOrgUser).toHaveBeenCalledWith('012345', undefined);
+    expect(publishBotPublic).toHaveBeenCalledWith(
+      'bot-real-1',
+      '12345',
+      { public_scope: 'agent', visibility: 'public', view_depts: null },
+      undefined,
+    );
+  });
+
+  it('does not let an older load overwrite the latest raw user ID used by mutations', async () => {
+    const { dependencies, getOrgUser, publishBotPublic } = createDependencies();
+    let resolveFirstUser!: (value: { code: number; data: OrgUserDto }) => void;
+    getOrgUser.mockImplementation((userId: string) => {
+      if (userId === '012345') {
+        return new Promise((resolve) => {
+          resolveFirstUser = resolve;
+        });
+      }
+      return Promise.resolve({ code: 200000, data: { ...createUserDto(), user_id: userId } });
+    });
+    const adapter = createCollaborationPrivacyRuntimeAdapter({ ...dependencies, getOrgUser });
+
+    const firstLoad = adapter.loadOverview('12345');
+    await Promise.resolve();
+    await adapter.loadOverview('54321');
+    resolveFirstUser({ code: 200000, data: { ...createUserDto(), user_id: '012345' } });
+    await firstLoad;
+    await adapter.submitPublication({
+      botId: 'bot-real-1',
+      audience: 'bot',
+      config: { scope: 'all', organizationPaths: [] },
+    });
+
+    expect(publishBotPublic).toHaveBeenLastCalledWith(
+      'bot-real-1',
+      '54321',
+      { public_scope: 'agent', visibility: 'public', view_depts: null },
+      undefined,
+    );
   });
 
   it('normalizes a short numeric user_id returned by the user API before page echo', async () => {
@@ -938,5 +994,95 @@ describe('collaboration privacy runtime wiring', () => {
       },
       undefined,
     );
+  });
+});
+
+describe('collaboration privacy load scope wiring', () => {
+  /** 三个 Bot 的 mine 结果：验证 hydrate 只覆盖选中 Bot，不为不渲染的 Bot 付 config/部门请求。 */
+  function useThreeBotList(listManagedBots: ReturnType<typeof jest.fn>) {
+    listManagedBots.mockImplementation(async () => ({
+      items: [
+        createBotDto(),
+        { ...createBotDto(), bot_id: 'bot-real-2', name: 'Bot B' },
+        { ...createBotDto(), bot_id: 'bot-real-3', name: 'Bot C' },
+      ],
+      total: 3,
+      offset: 0,
+      limit: 20,
+    }));
+  }
+
+  it('currentUser 只解析身份，不请求 Bot 列表、画像公开配置与部门回显', async () => {
+    const { dependencies, getOrgUser, listManagedBots, getWorkerConfig, listOrgDepts } = createDependencies();
+    useThreeBotList(listManagedBots);
+    const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
+    const signal = new AbortController().signal;
+
+    await expect(adapter.loadOverview('447147', signal, { target: 'currentUser' })).resolves.toMatchObject({
+      currentUser: { employeeNumber: '447147', departmentPath: ['蚂蚁集团-大安全-协作平台'] },
+      bots: [],
+      organizationOptions: [],
+    });
+
+    expect(getOrgUser).toHaveBeenCalledTimes(1);
+    expect(listManagedBots).not.toHaveBeenCalled();
+    expect(getWorkerConfig).not.toHaveBeenCalled();
+    expect(listOrgDepts).not.toHaveBeenCalled();
+  });
+
+  it('activeBot 命中复合身份 ID，只对选中 Bot 读一次画像公开配置与部门回显', async () => {
+    const { dependencies, listManagedBots, getWorkerConfig, listOrgDepts } = createDependencies();
+    useThreeBotList(listManagedBots);
+    const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
+    const signal = new AbortController().signal;
+
+    await expect(
+      adapter.loadOverview('447147', signal, { target: 'activeBot', botId: 'bot-real-2:447147' }),
+    ).resolves.toMatchObject({
+      bots: [{ id: 'bot-real-2', name: 'Bot B', profilePublic: true, profilePublicStatus: 'ready' }],
+    });
+
+    expect(listManagedBots).toHaveBeenCalledTimes(1);
+    expect(getWorkerConfig).toHaveBeenCalledTimes(1);
+    expect(getWorkerConfig).toHaveBeenCalledWith('bot-real-2', signal);
+    expect(listOrgDepts).toHaveBeenCalledWith({ keyword: 'A1000' }, signal);
+
+    // 快照同样只登记选中 Bot：未选中 Bot 的好友审批写入必须 fail closed，不能读到别的 Bot 快照。
+    await expect(
+      adapter.updateFriendApproval({ botId: 'bot-real-1', config: { mode: 'none', exemptOrganizationPaths: [] } }),
+    ).rejects.toThrow('未找到要更新好友审批策略的 Bot');
+  });
+
+  it('activeBot 命中不到目标 Bot 时返回空 Bot 列表，不升级为加载失败', async () => {
+    const { dependencies, listManagedBots, getWorkerConfig, listOrgDepts } = createDependencies();
+    useThreeBotList(listManagedBots);
+    const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
+
+    await expect(
+      adapter.loadOverview('447147', undefined, { target: 'activeBot', botId: 'bot-unknown' }),
+    ).resolves.toMatchObject({
+      currentUser: { employeeNumber: '447147' },
+      bots: [],
+    });
+
+    expect(listManagedBots).toHaveBeenCalledTimes(1);
+    expect(getWorkerConfig).not.toHaveBeenCalled();
+    expect(listOrgDepts).not.toHaveBeenCalled();
+  });
+
+  it('未传 loadScope 时保持遗留全量 hydrate（既有调用与回归覆盖不被收窄）', async () => {
+    const { dependencies, listManagedBots, getWorkerConfig } = createDependencies();
+    useThreeBotList(listManagedBots);
+    const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
+
+    await expect(adapter.loadOverview('447147')).resolves.toMatchObject({
+      bots: [
+        { id: 'bot-real-1', profilePublicStatus: 'ready' },
+        { id: 'bot-real-2', profilePublicStatus: 'ready' },
+        { id: 'bot-real-3', profilePublicStatus: 'ready' },
+      ],
+    });
+
+    expect(getWorkerConfig).toHaveBeenCalledTimes(3);
   });
 });

@@ -623,99 +623,7 @@ class TestCronMixin:
 # ── _file.py ─────────────────────────────────────────────────────────────────
 
 
-class TestFileMixin:
-    async def test_upload_success_with_content(self):
-        c = _FakeRelayClient()
-        c.set_response("file.upload", _ok({"path": "/x", "saved": True}))
-        impl, _ = _impl(c)
-        out = await impl.file_upload(path="/x", content_bytes=b"data")
-        assert out == {"path": "/x", "saved": True}
-        _, args, kw = _last_call(c)
-        assert args[0] == "file.upload"
-        assert kw["params"] == {"path": "/x", "content": b"data"}
-
-    async def test_upload_success_no_content(self):
-        c = _FakeRelayClient()
-        c.set_response("file.upload", _ok(None))
-        impl, _ = _impl(c)
-        out = await impl.file_upload(path="/x")
-        assert out == {"path": "/x"}
-        _, args, kw = _last_call(c)
-        assert kw["params"] == {"path": "/x"}
-
-    async def test_upload_success_non_dict_payload(self):
-        c = _FakeRelayClient()
-        c.set_response("file.upload", _ok("raw"))
-        impl, _ = _impl(c)
-        assert await impl.file_upload(path="/x") == {"path": "/x"}
-
-    async def test_upload_error_raises(self):
-        c = _FakeRelayClient()
-        c.set_response("file.upload", _err("UPLOAD_FAIL", "nope"))
-        impl, _ = _impl(c)
-        with pytest.raises(RuntimeError):
-            await impl.file_upload(path="/x")
-
-    async def test_read_success(self):
-        c = _FakeRelayClient()
-        c.set_response("file.read", _ok({"content": "data"}))
-        impl, _ = _impl(c)
-        assert await impl.file_read(path="/x") == {"content": "data"}
-
-    async def test_read_success_non_dict(self):
-        c = _FakeRelayClient()
-        c.set_response("file.read", _ok("raw"))
-        impl, _ = _impl(c)
-        assert await impl.file_read(path="/x") == {"path": "/x"}
-
-    async def test_read_error_raises_filenotfounderror(self):
-        c = _FakeRelayClient()
-        c.set_response("file.read", _err("NOT_FOUND", "nope"))
-        impl, _ = _impl(c)
-        with pytest.raises(FileNotFoundError):
-            await impl.file_read(path="/x")
-
-    async def test_remove_returns_bool(self):
-        c = _FakeRelayClient()
-        c.set_response("file.remove", _ok({}))
-        impl, _ = _impl(c)
-        assert await impl.file_remove(path="/x") is True
-
-    async def test_remove_error_returns_false(self):
-        c = _FakeRelayClient()
-        c.set_response("file.remove", _err("X", "y"))
-        impl, _ = _impl(c)
-        assert await impl.file_remove(path="/x") is False
-
-    async def test_rmtree_returns_bool(self):
-        c = _FakeRelayClient()
-        c.set_response("file.rmtree", _ok({}))
-        impl, _ = _impl(c)
-        assert await impl.file_rmtree(path="/x") is True
-
-    async def test_rmtree_error_returns_false(self):
-        c = _FakeRelayClient()
-        c.set_response("file.rmtree", _err("X", "y"))
-        impl, _ = _impl(c)
-        assert await impl.file_rmtree(path="/x") is False
-
-    async def test_list_dir_success(self):
-        c = _FakeRelayClient()
-        c.set_response("file.list", _ok({"entries": [{"name": "a"}, "x", {"name": "b"}]}))
-        impl, _ = _impl(c)
-        assert await impl.file_list_dir(path="/x") == [{"name": "a"}, {"name": "b"}]
-
-    async def test_list_dir_success_list_payload(self):
-        c = _FakeRelayClient()
-        c.set_response("file.list", _ok([{"name": "a"}]))
-        impl, _ = _impl(c)
-        assert await impl.file_list_dir(path="/x") == [{"name": "a"}]
-
-    async def test_list_dir_error_returns_empty(self):
-        c = _FakeRelayClient()
-        c.set_response("file.list", _err("X", "y"))
-        impl, _ = _impl(c)
-        assert await impl.file_list_dir(path="/x") == []
+# File behavior is exercised through the real HTTP/adapter/local port contract.
 
 
 # ── _skills.py ───────────────────────────────────────────────────────────────
@@ -892,37 +800,6 @@ class TestSkillsMixin:
         c.set_response("skills.discover", _err("X", "y"))
         impl, _ = _impl(c)
         assert await impl.skills_discover(source="market") == []
-
-    async def test_sync_symlinks_success_payload(self):
-        c = _FakeRelayClient()
-        c.set_response("skills.sync_symlinks", _ok({"synced": 3}))
-        impl, _ = _impl(c)
-        assert await impl.skills_sync_symlinks() == {"synced": 3}
-
-    async def test_sync_symlinks_success_non_dict(self):
-        c = _FakeRelayClient()
-        c.set_response("skills.sync_symlinks", _ok("raw"))
-        impl, _ = _impl(c)
-        assert await impl.skills_sync_symlinks() == {"success": True}
-
-    async def test_sync_symlinks_error(self):
-        c = _FakeRelayClient()
-        c.set_response("skills.sync_symlinks", _err("SYNC_FAIL", "nope"))
-        impl, _ = _impl(c)
-        out = await impl.skills_sync_symlinks()
-        assert out == {"success": False, "error": {"code": "SYNC_FAIL", "message": "nope"}}
-
-    async def test_sync_bindpaths_success(self):
-        c = _FakeRelayClient()
-        c.set_response("skills.sync_bindpaths", _ok({"ok": True}))
-        impl, _ = _impl(c)
-        assert await impl.skills_sync_bindpaths() == {"ok": True}
-
-    async def test_clean_symlinks_success(self):
-        c = _FakeRelayClient()
-        c.set_response("skills.clean_symlinks", _ok({"cleaned": 1}))
-        impl, _ = _impl(c)
-        assert await impl.skills_clean_symlinks() == {"cleaned": 1}
 
     async def test_ensure_center_success(self):
         c = _FakeRelayClient()

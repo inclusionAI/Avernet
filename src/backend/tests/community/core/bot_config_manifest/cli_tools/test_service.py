@@ -514,7 +514,7 @@ def test_a_manifest_entry_becomes_a_declaration() -> None:
     """The materialiser and the HTTP route reach the service through one type,
     which is what keeps the two callers from drifting."""
     decl = CliToolDecl.from_entry({
-        "name": "mycli", "from": "https://x/t.zip", "digest": _DIGEST,
+        "name": "mycli", "source": "https://x/t.zip", "digest": _DIGEST,
         "subpath": "bin/mycli", "unpack": "zip", "version": "1.4.2", "auth": "tok",
     })
     assert decl == CliToolDecl(
@@ -532,7 +532,7 @@ def test_an_entry_naming_its_source_the_other_way_reads_the_same() -> None:
 
 def test_on_fetch_failure_fail_turns_keep_last_off() -> None:
     decl = CliToolDecl.from_entry(
-        {"name": "c", "from": "https://x/c", "digest": _DIGEST,
+        {"name": "c", "source": "https://x/c", "digest": _DIGEST,
          "on_fetch_failure": "fail"}
     )
     assert decl.keep_last is False

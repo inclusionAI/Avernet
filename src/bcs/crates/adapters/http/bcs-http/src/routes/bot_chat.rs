@@ -129,7 +129,7 @@ pub async fn bot_chat_async(
         .timeout_ms
         .unwrap_or(state.async_chat_run_timeout_ms)
         .min(24 * 60 * 60 * 1_000);
-    let from_bot_id = match resolve_bot_caller(&state, &headers).await {
+    let from_bot_id = match bcs_observability::observe_result("chat.auth.bot", resolve_bot_caller(&state, &headers)).await {
         Ok(from_bot_id) => from_bot_id,
         Err(err) => {
             Span::current().set_attribute("bcn.auth.result", "failed");
@@ -152,7 +152,7 @@ pub async fn bot_chat_async(
             return Err(err);
         }
     };
-    let authenticated_staff_id = authenticated_staff_id(&state, &headers, &uri).await;
+    let authenticated_staff_id = bcs_observability::observe_value("chat.auth.staff", authenticated_staff_id(&state, &headers, &uri)).await;
 
     let run_id = uuid::Uuid::new_v4().to_string();
     let trace_request = req.clone();
@@ -196,7 +196,7 @@ pub async fn bot_chat_async(
     let tags = normalize_tags(req.tags);
     let caller_wait_mode = normalize_optional_string(req.caller_wait_mode);
     let digest_client = client_identity.clone();
-    let accepted_result = state
+    let accepted_result = bcs_observability::observe_result("chat.accept", state
         .services
         .a2a_chat_runs
         .start_async_chat(AsyncA2aChatCommand {
@@ -217,8 +217,7 @@ pub async fn bot_chat_async(
             caller_wait_mode,
             organization_code,
             provider_bypass_headers: state.provider_bypass_headers_from(&headers),
-        })
-        .await;
+        })).await;
     let accepted = match accepted_result {
         Ok(accepted) => {
             record_authenticated_async_chat_trace(

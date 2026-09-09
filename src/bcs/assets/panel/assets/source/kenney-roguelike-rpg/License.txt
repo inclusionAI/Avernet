@@ -1,0 +1,23 @@
+
+###############################################################################
+
+
+	Roguelike pack
+	by Kenney Vleugels for Kenney (www.kenney.nl)
+	with help by Lynn Evers (Twitter: @EversLynn)
+
+			------------------------------
+
+	License (Creative Commons Zero, CC0)
+	http://creativecommons.org/publicdomain/zero/1.0/
+
+	You may use these graphics in personal and commercial projects.
+	Credit (Kenney or www.kenney.nl) would be nice but is not mandatory.
+
+			------------------------------
+
+	Donate:   http://donate.kenney.nl/
+	Request:  http://request.kenney.nl/
+
+
+###############################################################################

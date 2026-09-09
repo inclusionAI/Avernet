@@ -43,6 +43,33 @@ it('bot 视角恒显示面板;读取 bot/human 成员 mode', () => {
   expect(result.current.humanName).toBe('章梧');
 });
 
+it('多个 human 成员时只选择与当前认证用户 ID 匹配的成员', () => {
+  const session = makeSession([
+    { actorId: 'human_other', kind: 'human', name: '其他成员', role: 'member', mode: 'present' },
+    { actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'absent' },
+  ]);
+  const { result } = renderHook(() => useCollabPanel(session, botIdentity, updateMemberMode, 'human_1', '认证用户'));
+
+  expect(result.current.human?.actorId).toBe('human_1');
+  expect(result.current.humanName).toBe('章梧');
+});
+
+it('用户身份视角 + 多个 human 成员：LeaveBar 显示当前用户名而非其他成员', () => {
+  useWorkspaceStore.getState().setActiveIdentity(humanIdentity.id);
+  // 群里两个 human：其他成员排在前且 present，当前用户排在后且 present。
+  const session = makeSession([
+    { actorId: 'human_other', kind: 'human', name: '其他成员', role: 'member', mode: 'present' },
+    { actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'present' },
+  ]);
+  const { result } = renderHook(() => useCollabPanel(session, humanIdentity, updateMemberMode, 'human_1', '章梧'));
+  // 用户视角 present → 渲染 LeaveBar（isHumanViewer），显示的必须是当前用户，而非数组首个 human。
+  expect(result.current.human?.actorId).toBe('human_1');
+  expect(result.current.humanName).toBe('章梧');
+  expect(result.current.humanJoined).toBe(true);
+  expect(result.current.humanAbsentOnly).toBe(false);
+  expect(result.current.botActorId).toBeNull();
+});
+
 it('setBotMode 调用 updateMemberMode 并携带 bot actorId', async () => {
   const session = makeSession([{ actorId: 'b:1', kind: 'bot', name: 'Alpha', role: 'driver', mode: 'auto' }]);
   const { result } = renderHook(() => useCollabPanel(session, botIdentity, updateMemberMode));
@@ -134,6 +161,52 @@ it('participants 列表刷新清空时 human 状态保持不闪烁', () => {
   expect(result.current.humanName).toBe('章梧');
 });
 
+/** 构造「用户身份此前停留在单聊页、bot 身份正在浏览群会话 g1/s1」的 store 状态。 */
+function seedHumanSingleChatMemo() {
+  const store = useWorkspaceStore.getState();
+  // 用户身份停在单聊页（botX 的 dm1）。
+  store.setActiveIdentity(humanIdentity.id);
+  store.setView('chat');
+  store.toggleBotExpanded('botX');
+  store.selectBotSession('dm1');
+  // 切到 bot 身份浏览群会话；setActiveIdentity 会把上面的单聊态写入用户身份记忆。
+  store.setActiveIdentity(botIdentity.id);
+  store.setView('group');
+  store.selectGroup('g1');
+  store.selectSession('s1');
+}
+
+it('去发言：用户身份记忆为单聊时，切换后回到群视图并选中当前会话', () => {
+  seedHumanSingleChatMemo();
+  const session = makeSession([{ actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'present' }]);
+  const { result } = renderHook(() => useCollabPanel(session, botIdentity, updateMemberMode));
+  act(() => result.current.switchToHuman());
+  const s = useWorkspaceStore.getState();
+  expect(s.activeIdentityId).toBe('human_1');
+  // 不应停留在记忆恢复的单聊视图，而应回到当前群会话。
+  expect(s.view).toBe('group');
+  expect(s.selectedGroupId).toBe('g1');
+  expect(s.selectedSessionId).toBe('s1');
+  expect(s.expandedGroupIds.g1).toBe(true);
+});
+
+it('加入会话：用户身份记忆为单聊时，加入后回到群视图并选中当前会话', async () => {
+  seedHumanSingleChatMemo();
+  const session = makeSession([{ actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'absent' }]);
+  const { result } = renderHook(() => useCollabPanel(session, botIdentity, updateMemberMode));
+  let ok = false;
+  await act(async () => {
+    ok = await result.current.joinSession();
+  });
+  expect(ok).toBe(true);
+  const s = useWorkspaceStore.getState();
+  expect(s.activeIdentityId).toBe('human_1');
+  expect(s.view).toBe('group');
+  expect(s.selectedGroupId).toBe('g1');
+  expect(s.selectedSessionId).toBe('s1');
+  expect(s.expandedGroupIds.g1).toBe(true);
+});
+
 it('切换会话时 human ref 缓存被清空，不串数据', () => {
   const session1 = makeSession([{ actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'present' }]);
   const session2: SessionView = {
@@ -152,4 +225,28 @@ it('切换会话时 human ref 缓存被清空，不串数据', () => {
 
   // 不应继承上一个会话的 human 状态
   expect(result.current.humanJoined).toBe(false);
+});
+
+it('bot 视角加入会话：human 不在 participants 时用 store 人类身份 id（mine bot_id，含 human_ 前缀）作 actor', async () => {
+  // Open Core OAuth 下 authenticatedUserId 是规范化 user_id（无 human_ 前缀）；
+  // participants/{actor} 路径参数必须是 mine 返回的 human 条目 bot_id（human_xxx）。
+  const session = makeSession([{ actorId: 'b:1', kind: 'bot', name: 'Alpha', role: 'driver', mode: 'auto' }]);
+  const { result } = renderHook(() => useCollabPanel(session, botIdentity, updateMemberMode, '1', '章梧'));
+  let ok = false;
+  await act(async () => {
+    ok = await result.current.joinSession();
+  });
+  expect(ok).toBe(true);
+  expect(updateMemberMode).toHaveBeenCalledWith('s1', 'human_1', 'present');
+  // 加入后切换身份也必须命中 store 身份（规范化 id 精确匹配不到）。
+  expect(useWorkspaceStore.getState().activeIdentityId).toBe('human_1');
+});
+
+it('去发言：authenticatedUserId 无 human_ 前缀时 setActiveIdentity 仍落到 store 人类身份', () => {
+  const session = makeSession([{ actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'present' }]);
+  const { result } = renderHook(() => useCollabPanel(session, botIdentity, updateMemberMode, '1', '章梧'));
+  useWorkspaceStore.getState().selectGroup('g1');
+  useWorkspaceStore.getState().selectSession('s1');
+  act(() => result.current.switchToHuman());
+  expect(useWorkspaceStore.getState().activeIdentityId).toBe('human_1');
 });

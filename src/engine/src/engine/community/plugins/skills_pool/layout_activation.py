@@ -93,6 +93,7 @@ class MappingItemResult:
     code: str | None = None
     retryable: bool = False
     action: str = "APPLY"
+    mapping: dict[str, str] | None = None
 
     def to_data(self) -> dict[str, object]:
         data: dict[str, object] = {
@@ -105,7 +106,27 @@ class MappingItemResult:
             data["source"] = self.source
         if self.code is not None:
             data["code"] = self.code
+        if self.mapping is not None:
+            data["mapping"] = self.mapping
         return data
+
+
+@dataclass(frozen=True, slots=True)
+class MappingApplyResult:
+    """Logical steady-state result; physical paths are diagnostic only."""
+
+    status: MappingProjectionStatus
+    items: tuple[MappingItemResult, ...]
+    issues: tuple[MappingItemResult, ...] = ()
+    evidence: dict[str, object] = field(default_factory=dict)
+
+    def to_data(self) -> dict[str, object]:
+        return {
+            "status": self.status.value,
+            "items": [item.to_data() for item in self.items],
+            "issues": [item.to_data() for item in self.issues],
+            "evidence": self.evidence,
+        }
 
 
 class ActiveRepoRetirementError(RuntimeError):
@@ -450,6 +471,53 @@ def _retire_bridge(path: Path, *, allowed_targets: tuple[Path, ...]) -> None:
     path.unlink()
 
 
+def _settle_hermes_repo_bridge(layout: _Layout) -> None:
+    """Retire the obsolete platform bridge while preserving unowned objects."""
+
+    path = layout.repo_bridge
+    try:
+        entry_stat = path.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        logger.warning(
+            "Hermes Pool could not inspect obsolete repo bridge path=%s error=%s",
+            path,
+            type(error).__name__,
+        )
+        return
+    if not stat.S_ISLNK(entry_stat.st_mode):
+        logger.warning("Hermes Pool retained unowned Legacy repo object path=%s", path)
+        return
+    try:
+        target = _lexical_target(path)
+    except OSError as error:
+        logger.warning(
+            "Hermes Pool retained unreadable Legacy repo symlink path=%s error=%s",
+            path,
+            type(error).__name__,
+        )
+        return
+    expected = Path(os.path.abspath(layout.pool_repo))
+    if target != expected:
+        logger.warning(
+            "Hermes Pool retained unexpected Legacy repo symlink path=%s target=%s",
+            path,
+            target,
+        )
+        return
+    try:
+        path.unlink()
+    except OSError as error:
+        logger.warning(
+            "Hermes Pool could not retire obsolete repo bridge path=%s error=%s",
+            path,
+            type(error).__name__,
+        )
+        return
+    logger.info("Hermes Pool retired obsolete repo bridge path=%s", path)
+
+
 def _publish_structural_bridge(path: Path, target: Path) -> None:
     """Atomically publish a descriptor-owned directory symlink."""
 
@@ -582,8 +650,10 @@ def _finalize_active_root(
         allowed_targets=(layout.legacy_local, layout.pool_local),
     )
     repo_delivery = current_repo_delivery()
-    if repo_delivery is RepoDelivery.DOWNLOAD and engine in {"aicoding", "hermes"}:
+    if repo_delivery is RepoDelivery.DOWNLOAD and engine == "aicoding":
         _publish_structural_bridge(layout.repo_bridge, layout.pool_repo)
+    if engine == "hermes":
+        _settle_hermes_repo_bridge(layout)
     if engine in {"openclaw", "claude_code"}:
         _retire_bridge(
             layout.repo_bridge,
@@ -607,7 +677,7 @@ def _finalize_active_root(
                 "paths": sorted(remaining_storage_entries),
             },
         )
-    if engine in {"aicoding", "hermes"}:
+    if engine == "aicoding":
         try:
             stable_repo_bridge_valid = (
                 layout.repo_bridge.is_symlink()
@@ -886,7 +956,13 @@ def _active_entry_inventory(
     external: list[Path] = []
     occupied: list[Path] = []
     reserved = {layout.local_bridge, layout.repo_bridge}
-    for entry in sorted(layout.active_root.iterdir(), key=lambda path: path.name):
+    try:
+        entries = sorted(layout.active_root.iterdir(), key=lambda path: path.name)
+    except FileNotFoundError:
+        if layout.active_root.is_symlink():
+            raise
+        return managed, tuple(external), tuple(occupied)
+    for entry in entries:
         if entry in reserved or entry.name.startswith(".skills-local.pool-cutover-"):
             continue
         if not entry.is_symlink():
@@ -1081,8 +1157,7 @@ def _mapping_target_invalid(
 ) -> bool:
     return (
         not target.is_absolute()
-        or target.parent
-        not in {layout.active_root, *additional_retirement_roots}
+        or target.parent not in {layout.active_root, *additional_retirement_roots}
         or target
         in {
             layout.legacy_local,
@@ -1418,7 +1493,9 @@ def _best_effort_mapping_results(
                         target=str(target),
                         source=str(source),
                         status=MappingProjectionStatus.DEGRADED,
-                        code="TARGET_NOT_SYMLINK" if not target.is_symlink() else "TARGET_MISMATCH",
+                        code="TARGET_NOT_SYMLINK"
+                        if not target.is_symlink()
+                        else "TARGET_MISMATCH",
                     )
                 )
             else:
@@ -1437,6 +1514,7 @@ def _best_effort_mapping_results(
                 )
             continue
         try:
+            target.parent.mkdir(parents=True, exist_ok=True)
             if target.is_symlink():
                 if _lexical_target(target) == source:
                     kept.append(str(target))
@@ -3023,6 +3101,7 @@ def publish_pool_mappings(
             target.unlink()
             removed.append(str(target))
         for target, source in plan.managed.items():
+            target.parent.mkdir(parents=True, exist_ok=True)
             if target.is_symlink():
                 if _lexical_target(target) == Path(os.path.abspath(source)):
                     kept.append(str(target))
@@ -3068,10 +3147,11 @@ def publish_pool_mappings(
 
 __all__ = [
     "ActiveRepoRestorationError",
-    "MappingPublishResult",
     "MappingApplyMode",
+    "MappingApplyResult",
     "MappingItemResult",
     "MappingProjectionStatus",
+    "MappingPublishResult",
     "MappingSourceLayout",
     "MappingVerificationResult",
     "PoolActivationResult",

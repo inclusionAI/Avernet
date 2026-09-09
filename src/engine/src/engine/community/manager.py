@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from engine.community.core.engine.capability import EngineCapabilities
     from engine.community.core.engine.context import AuthContext
     from engine.community.core.engine.protocol import Engine
+    from engine.community.core.cli_tools.protocol import CliToolsService
     from engine.community.core.default_config.protocol import DefaultConfigService
     from engine.community.core.file.protocol import FileService
     from engine.community.core.mcp.protocol import MCPService
@@ -311,6 +312,23 @@ class EngineManager:
                 self._engine, Capability.SKILLS_LIST,
             )
         return skills
+
+    @property
+    def cli_tools(self) -> CliToolsService:
+        """Active engine's CliToolsService.
+
+        Raises CapabilityNotSupportedError when the engine does not place CLI
+        tools. The HTTP routes in `api/cli/router.py` short-circuit before
+        touching this via `check_capability(CLI_*)`, so a build without the
+        capability answers 501 rather than reaching an absent service.
+        """
+        from engine.community.core.engine.capability import Capability
+        from engine.community.core.engine.exceptions import CapabilityNotSupportedError
+
+        cli_tools = self._require_engine().cli_tools
+        if cli_tools is None:
+            raise CapabilityNotSupportedError(self._engine, Capability.CLI_LIST)
+        return cli_tools
 
     @property
     def web_shell(self) -> WebShellService:

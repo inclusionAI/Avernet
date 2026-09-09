@@ -32,6 +32,7 @@ from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
     LegacySkillSetCompatibilityFactoryProtocol,
     LegacySkillSetScope,
+    list_skill_set_mcp_projection,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
@@ -541,10 +542,14 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
     ) -> list[dict]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
-        return self._repository.list_mcps(
+        target = self._target_set(bot=bot, bot_id=bot_id, set_id=set_id)
+        return list_skill_set_mcp_projection(
+            repository=self._repository,
+            legacy_factory=self._legacy_factory,
+            bot=bot,
             bot_id=bot_id,
             owner_id=str(bot["owner_id"]),
-            set_id=set_id,
+            target=target,
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
         )
@@ -552,7 +557,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
     def list_mcp_permissions(
         self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
     ) -> list[dict]:
-        mcps = self.list_mcps(
+        mcps = self._list_mcp_memberships(
             bot_id=bot_id,
             owner_id=owner_id,
             user_id=user_id,
@@ -577,7 +582,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         set_id: str,
         reason: str,
     ) -> list[dict]:
-        mcps = self.list_mcps(
+        mcps = self._list_mcp_memberships(
             bot_id=bot_id,
             owner_id=owner_id,
             user_id=user_id,
@@ -596,6 +601,20 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
             }
             for item in mcps
         ]
+
+    def _list_mcp_memberships(
+        self, *, bot_id: str, owner_id: str, user_id: str, set_id: str
+    ) -> list[dict]:
+        """Read persisted MCP members without expanding Default policy."""
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
+        target = self._target_set(bot=bot, bot_id=bot_id, set_id=set_id)
+        return self._repository.list_mcps(
+            bot_id=bot_id,
+            owner_id=str(bot["owner_id"]),
+            set_id=str(target["id"]),
+            engine_type=self._engine(bot),
+            default_engine_types=self._default_engine_types(bot),
+        )
 
     async def add_mcp(
         self,
@@ -798,38 +817,18 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
         )
-        # Default MCPs are not stored as ordinary ac_skill_set_mcp rows.  The
-        # legacy service combines engine/template defaults, explicit rows, and
-        # ac_default_skillset_mcp_exclusion.  Keep that proven projection for
-        # the published BFF resource response; ordinary Sets stay canonical.
-        legacy = (
-            self._legacy_factory.create(
-                entity_id=str(bot.get("entity_id") or owner_id),
-                bot_id=bot_id,
-                engine_type=self._engine(bot),
-                entity_type=bot.get("entity_type") or "staff",
-            )
-            if any(item["is_default"] for item in items)
-            else None
-        )
         resources: list[dict] = []
         for item in items:
-            if item["is_default"]:
-                assert legacy is not None
-                mcps = legacy.get_set_mcp_servers(
-                    str(item["id"]),
-                    user_id=owner_id,
-                    bot_id=bot_id,
-                    engine_type=self._engine(bot),
-                )
-            else:
-                mcps = self._repository.list_mcps(
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    set_id=item["id"],
-                    engine_type=self._engine(bot),
-                    default_engine_types=self._default_engine_types(bot),
-                )
+            mcps = list_skill_set_mcp_projection(
+                repository=self._repository,
+                legacy_factory=self._legacy_factory,
+                bot=bot,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                target=item,
+                engine_type=self._engine(bot),
+                default_engine_types=self._default_engine_types(bot),
+            )
             resources.append(
                 {
                     **item,

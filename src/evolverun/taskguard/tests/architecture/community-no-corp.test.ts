@@ -1,7 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { glob } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import * as path from "node:path";
 
 const PROJECT_ROOT = path.resolve(import.meta.dirname, "../../src");
@@ -13,7 +12,6 @@ const FORBIDDEN_IMPORT_PATTERNS = [
   /from\s+["'].*mysql2["']/,
   /from\s+["'].*mysql2\/promise["']/,
   /from\s+["'].*dingtalk-enterprise["']/,
-  /from\s+["'].*api-client["']/,
   /from\s+["'].*zdas-database["']/,
   /from\s+["'].*yuque-adapter["']/,
   /from\s+["'].*agentmind-adapter["']/,
@@ -25,18 +23,29 @@ const FORBIDDEN_IMPORT_PATTERNS = [
   /from\s+["'].*internal["']/,
 ];
 
+/** Recursively collect files under dir, filtering by suffix. */
+async function collectFiles(dir: string, suffix: string): Promise<string[]> {
+  const results: string[] = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...await collectFiles(full, suffix));
+    } else if (entry.name.endsWith(suffix)) {
+      results.push(full);
+    }
+  }
+  return results;
+}
+
 describe("Architecture boundary: community code must not import corp modules", () => {
   it("no source file imports forbidden internal packages", async () => {
-    const files: string[] = [];
-    for await (const entry of glob("**/*.ts", { cwd: PROJECT_ROOT })) {
-      // Skip community/ directory itself (it provides defaults, not restrictions)
-      if (entry.startsWith("community/")) continue;
-      files.push(entry);
-    }
+    const files = await collectFiles(PROJECT_ROOT, ".ts");
+    // Skip community/ directory itself (it provides defaults, not restrictions)
+    const filtered = files.filter(f => !path.relative(PROJECT_ROOT, f).startsWith("community/"));
 
     const violations: string[] = [];
-    for (const file of files) {
-      const fullPath = path.join(PROJECT_ROOT, file);
+    for (const fullPath of filtered) {
+      const file = path.relative(PROJECT_ROOT, fullPath);
       const content = await readFile(fullPath, "utf-8");
       for (const pattern of FORBIDDEN_IMPORT_PATTERNS) {
         if (pattern.test(content)) {

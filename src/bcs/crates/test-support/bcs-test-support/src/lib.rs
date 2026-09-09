@@ -6,6 +6,11 @@ mod auth_noop;
 mod auth_oauth_mock;
 mod edge_permission_noop;
 mod noop;
+#[cfg(feature = "diagnostic-logs")]
+mod logs;
+
+#[cfg(feature = "diagnostic-logs")]
+pub use logs::capture_request_logs;
 
 pub use auth_noop::{NoopAuthPlugin, NoopUserIdentityPort};
 pub use auth_oauth_mock::{

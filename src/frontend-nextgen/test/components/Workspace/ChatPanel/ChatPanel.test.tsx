@@ -229,6 +229,117 @@ describe('ChatPanel interactive', () => {
     expect(assistantAvatar.container.textContent).toContain('B');
   });
 
+  it('按 senderId 匹配认证用户名称，不把 Bot viewer 当作用户发起人', () => {
+    const current = resolveSingleSender(
+      {
+        id: 'u-current',
+        role: 'user',
+        content: '你好',
+        status: 'history',
+        extra: { senderId: 'human_447147' },
+      } as never,
+      botModeTarget as any,
+      { id: 'bot-1', kind: 'bot', displayName: '当前 Bot', online: true },
+      undefined,
+      '447147',
+      '风太',
+    );
+    const other = resolveSingleSender(
+      {
+        id: 'u-other',
+        role: 'user',
+        content: '你好',
+        status: 'history',
+        extra: { senderId: 'human_447148', senderName: '其他成员' },
+      } as never,
+      botModeTarget as any,
+      { id: 'bot-1', kind: 'bot', displayName: '当前 Bot', online: true },
+      undefined,
+      '447147',
+      '风太',
+    );
+
+    expect(current.name).toBe('风太');
+    expect(other.name).toBe('其他成员');
+  });
+
+  it('消息列表渲染认证用户名，同时保留其他用户和 Bot 的名称', () => {
+    const { container } = render(
+      <ChatPanel
+        {...baseProps}
+        target={demoTarget}
+        mode="bot"
+        viewer={{ id: 'bot_fixture:user-101', kind: 'bot', displayName: '当前 Bot', online: true }}
+        authenticatedUserId="user-101"
+        authenticatedUserName="认证用户"
+        messages={[
+          {
+            id: 'current',
+            role: 'user',
+            content: '当前消息',
+            status: 'history',
+            extra: { senderId: 'human_user-101', senderName: '旧消息名称' },
+          },
+          {
+            id: 'other',
+            role: 'user',
+            content: '其他消息',
+            status: 'history',
+            extra: { senderId: 'human_user-202', senderName: '其他成员' },
+          },
+          { id: 'bot', role: 'assistant', content: 'Bot 回复', status: 'history' },
+        ]}
+        isRequesting={false}
+        isLoadingMessages={false}
+        connectionStatus="connected"
+        retryCount={0}
+        supportState={{ phase: 'ready', error: null }}
+        onSend={() => {}}
+        onStop={() => {}}
+        onReconnect={() => {}}
+      />,
+    );
+
+    expect(screen.getByText('认证用户')).toBeInTheDocument();
+    expect(screen.getByText('其他成员')).toBeInTheDocument();
+    expect(screen.queryByText('旧消息名称')).not.toBeInTheDocument();
+    expect(
+      within(container.querySelector('[data-message-id="bot"]') as HTMLElement).getByText(demoTarget.name),
+    ).toBeInTheDocument();
+  });
+
+  it('认证身份晚到时更新已有消息名称，而不依赖重新加载消息', () => {
+    const props = {
+      ...baseProps,
+      target: demoTarget,
+      viewer: { id: 'human_user-101', kind: 'user' as const, displayName: '旧身份名称', online: true },
+      messages: [
+        {
+          id: 'late-auth',
+          role: 'user' as const,
+          content: '已有消息',
+          status: 'history' as const,
+          extra: { senderId: 'human_user-101', senderName: '旧消息名称' },
+        },
+      ],
+      isRequesting: false,
+      isLoadingMessages: false,
+      connectionStatus: 'connected' as const,
+      retryCount: 0,
+      supportState: { phase: 'ready' as const, error: null },
+      onSend: () => {},
+      onStop: () => {},
+      onReconnect: () => {},
+    };
+    const { rerender } = render(<ChatPanel {...props} />);
+    expect(screen.getByText('旧消息名称')).toBeInTheDocument();
+
+    rerender(<ChatPanel {...props} authenticatedUserId="user-101" authenticatedUserName="认证用户" />);
+
+    expect(screen.getByText('认证用户')).toBeInTheDocument();
+    expect(screen.queryByText('旧消息名称')).not.toBeInTheDocument();
+  });
+
   it('最近一条用户消息提供编辑入口，并回填输入区而不修改旧消息', () => {
     mockBubbleRenders.length = 0;
     const onDraftChange = jest.fn();

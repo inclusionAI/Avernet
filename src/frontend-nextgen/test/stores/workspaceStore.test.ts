@@ -196,4 +196,29 @@ describe('workspaceStore', () => {
     useWorkspaceStore.getState().resetWorkspace();
     expect(useWorkspaceStore.getState().sessionTabsByGroup).toEqual({});
   });
+
+  it('setActiveIdentity 记忆并恢复 friend 分区的 bot 展开归属', () => {
+    const s = useWorkspaceStore.getState();
+    s.setIdentities(
+      [
+        { id: 'u-memo', kind: 'user', displayName: '我', online: true },
+        { id: 'b-memo', kind: 'bot', displayName: 'B', online: true },
+      ],
+      'u-memo',
+    );
+    // 用户身份下展开好友 bot fb1（friend 分区）并选中其会话。
+    s.setView('chat');
+    s.toggleBotExpanded('fb1');
+    s.setBotExpandedSection('fb1', 'friend');
+    s.selectBotSession('sF1');
+    // 切到 bot 身份再切回。
+    s.setActiveIdentity('b-memo');
+    s.setActiveIdentity('u-memo');
+    const st = useWorkspaceStore.getState();
+    expect(st.view).toBe('chat');
+    expect(st.expandedBotIds).toEqual({ fb1: true });
+    // 旧实现 restore 硬编码 'mine'，好友 bot 会话归属错误分区。
+    expect(st.expandedBotSectionKey).toEqual({ fb1: 'friend' });
+    expect(st.selectedBotSessionId).toBe('sF1');
+  });
 });

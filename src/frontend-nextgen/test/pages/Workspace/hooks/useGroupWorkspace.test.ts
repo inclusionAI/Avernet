@@ -62,7 +62,7 @@ describe('useGroupWorkspace', () => {
     jest.useRealTimers();
   });
 
-  it('onSelectGroup loads detail then selects group', async () => {
+  it('onSelectGroup selects group without loading detail', async () => {
     gs.loadGroups.mockResolvedValue({ ok: true, data: [] });
     gs.loadGroupDetailOrBcs.mockResolvedValue({
       ok: true,
@@ -82,30 +82,72 @@ describe('useGroupWorkspace', () => {
     await act(async () => {
       await result.current.onSelectGroup('g9');
     });
-    expect(gs.loadGroupDetailOrBcs).toHaveBeenCalledWith('g9', 'bot-1');
+    expect(gs.loadGroupDetailOrBcs).not.toHaveBeenCalled();
     expect(useWorkspaceStore.getState().selectedGroupId).toBe('g9');
   });
 
-  it('direct selectedGroupId still loads group detail so chat pane can render', async () => {
-    gs.loadGroups.mockResolvedValue({ ok: true, data: [] });
-    gs.loadGroupDetailOrBcs.mockResolvedValue({
+  it('group present in current-identity list keeps membership direct (no premature switch)', async () => {
+    // 新开页深链场景回退:当前身份的 direct 列表已加载完成、且含深链群时,
+    // 不应被初始空列表/竞态把 membership 错切到 session_only。
+    gs.loadGroups.mockResolvedValue({
       ok: true,
-      data: {
-        groupId: 'g9',
-        name: 'X',
-        kind: 'free_chat',
-        status: 'active',
-        participants: [],
-        sessions: [],
-      } as any,
+      data: [
+        {
+          groupId: 'g9',
+          name: 'G9',
+          kind: 'free_chat',
+          status: 'active',
+          participants: [],
+          sessions: [],
+          lastMessageAt: 1,
+          createdAt: 1,
+          isPublic: false,
+          deliveryPolicy: 'send_to_driver',
+        },
+      ],
     });
     const { result } = renderHook(() => useGroupWorkspace());
+    await waitFor(() => expect(gs.loadGroups).toHaveBeenCalled());
+    gs.loadGroupDetailOrBcs.mockClear();
+    await act(async () => {
+      await result.current.onSelectGroup('g9');
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(useWorkspaceStore.getState().membership).toBe('direct');
+    expect(gs.loadGroupDetailOrBcs).not.toHaveBeenCalled();
+    expect(useWorkspaceStore.getState().selectedGroupId).toBe('g9');
+  });
+
+  it('missing selected group switches to session-only list without fetching group detail', async () => {
+    gs.loadGroups.mockResolvedValueOnce({ ok: true, data: [] }).mockResolvedValueOnce({
+      ok: true,
+      data: [
+        {
+          groupId: 'g9',
+          name: 'X',
+          kind: 'free_chat',
+          status: 'active',
+          participants: [],
+          sessions: [],
+          lastMessageAt: 1,
+          createdAt: 1,
+          isPublic: false,
+          deliveryPolicy: 'send_to_driver',
+        },
+      ],
+    });
+    const { result } = renderHook(() => useGroupWorkspace());
+    await waitFor(() => expect(gs.loadGroups).toHaveBeenCalledTimes(1));
     act(() => {
       useWorkspaceStore.getState().selectGroup('g9');
     });
-    await waitFor(() => expect(result.current.selectedGroup?.groupId).toBe('g9'));
-    expect(gs.loadGroupDetailOrBcs).toHaveBeenCalledWith('g9', 'bot-1');
-    expect(result.current.groups).toEqual([]);
+    await waitFor(() => expect(useWorkspaceStore.getState().membership).toBe('session_only'));
+    await waitFor(() => expect(gs.loadGroups).toHaveBeenCalledTimes(2));
+    expect(gs.loadGroups.mock.calls[1][1]).toMatchObject({ membership: 'session_only' });
+    expect(gs.loadGroupDetailOrBcs).not.toHaveBeenCalled();
+    expect(result.current.selectedGroup?.groupId).toBe('g9');
   });
 
   it('missing group under direct filter auto switches role filter to session_only', async () => {

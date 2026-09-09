@@ -58,6 +58,8 @@ provides:
   - "InstallationBackfillServiceProtocol"
   - "BotRuntimeProjector"
   - "BotRuntimeProjectorProtocol"
+  - "SkillRuntimeDelivery"
+  - "RuntimeServiceFactoryBoundary"
   - "LocalSkillCleanupWorkModel"
   - "SkillActivationSyncAction"
   - "SkillActivationSyncScope"
@@ -140,6 +142,7 @@ internal_dependencies:
   - agentclaw.community.core.access
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_collaborator
+  - agentclaw.community.core.common_config
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.config
   - agentclaw.community.core.config_compose
@@ -173,6 +176,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.secret_resolver
   - agentclaw.community.plugin_api.skill_center_client
   - agentclaw.community.plugin_api.skill_center_gateway
+  - agentclaw.community.plugin_api.local_skill_storage
   - agentclaw.community.plugin_api.skill_repo_sync
   - agentclaw.community.plugin_api.skill_scanner
   - agentclaw.community.plugin_api.space_skill_source
@@ -183,6 +187,15 @@ internal_dependencies:
 ```
 
 ### Change impact
+
+`SkillRuntimeDelivery` owns steady-state filesystem Skill delivery after plan
+resolution: Legacy Local-only and empty snapshots retain DeviceSync, while
+Pool, Repo, Center, and explicit retirement retain the logical Mapping route.
+`PerDomainRuntimeProjection` only schedules the Skill and MCP halves, isolates
+their failures, and combines results. Pool migration/recovery still consumes
+`SkillsPoolRuntimeProtocol` directly, and Teclaw still uses Whole Artifact;
+changing either route requires compatibility review across Projector, public
+Runtime, community DI, and the Corp transport binding.
 
 `SpaceSkillEditorRequestService` is an additional consumer of the existing
 `StaffDeptPlugin` profile lookup: newly created Skill editor-request approval

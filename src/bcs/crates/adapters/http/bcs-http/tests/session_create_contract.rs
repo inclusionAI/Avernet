@@ -331,6 +331,7 @@ async fn state_machine_group_session_creation_starts_run_with_created_session() 
                 .body(Body::from(
                     serde_json::json!({
                         "created_by": "driver-bot",
+                        "message_view_scope": "participant",
                         "input": {"question": "hello"}
                     })
                     .to_string(),
@@ -366,6 +367,10 @@ async fn state_machine_group_session_creation_starts_run_with_created_session() 
     assert_eq!(human.role, ParticipantRole::Observer);
     assert_eq!(human.mode, Some(ParticipantMode::Present));
     assert_eq!(human.bot_name.as_deref(), Some("Test"));
+    assert_eq!(
+        human.message_view_scope,
+        bcs_domain::MessageViewScope::Participant
+    );
 
     let run_commands = collaboration.start_commands.lock().await;
     assert_eq!(run_commands.len(), 1);
@@ -643,6 +648,7 @@ impl SessionManagementService for MockSessions {
             error_message: None,
             callback_status: None,
             activation_count: 1,
+            message_visibility_version: cmd.params.message_visibility_version,
             caller_principal: cmd.params.caller_principal.clone(),
             created_by: cmd.params.created_by.clone(),
             current_msg_seq: 0,

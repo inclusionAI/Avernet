@@ -2,16 +2,17 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use axum::http::StatusCode;
+use bcs_domain::{ActorKind, MessageViewScope, ParticipantMode};
 use bcs_protocol::{BcsFrame, RequestFrame};
 use bcs_service_api::application::v1::{
     AuthorizeGroupSessionConnection, AuthorizedGroupSessionConnection,
     GroupSessionConnectionBinding, GroupSessionConnectionError, GroupSessionConnectionService,
-    IssueGroupSessionConnectionToken, IssuedGroupSessionConnectionToken,
-    VerifyGroupSessionConnectionToken,
+    IssueGroupSessionConnectionToken, IssuedGroupSessionConnectionToken, ParticipantRole,
+    SessionParticipant, VerifyGroupSessionConnectionToken,
 };
 use bcs_services_container::Services;
-use bcs_test_support::{NoopCollaborationRuntimeService, NoopWsLifecycleInstrumentationHook};
 use bcs_test_support::NoopInteractionService;
+use bcs_test_support::{NoopCollaborationRuntimeService, NoopWsLifecycleInstrumentationHook};
 use bcs_ws::shared::RunChannelManager;
 use bcs_ws::web::{WebDispatchState, WorkbenchConnectionRegistry, group_session_websocket_router};
 use futures::{SinkExt, StreamExt};
@@ -32,6 +33,7 @@ struct RecordingConnectionService {
     mode: VerifyMode,
     verified_tokens: Mutex<Vec<String>>,
     authorizations: Mutex<Vec<AuthorizeGroupSessionConnection>>,
+    authorization_request_ids: Mutex<Vec<String>>,
 }
 
 impl RecordingConnectionService {
@@ -40,6 +42,7 @@ impl RecordingConnectionService {
             mode,
             verified_tokens: Mutex::new(Vec::new()),
             authorizations: Mutex::new(Vec::new()),
+            authorization_request_ids: Mutex::new(Vec::new()),
         }
     }
 }
@@ -75,8 +78,18 @@ impl GroupSessionConnectionService for RecordingConnectionService {
         command: AuthorizeGroupSessionConnection,
     ) -> Result<AuthorizedGroupSessionConnection, GroupSessionConnectionError> {
         self.authorizations.lock().await.push(command);
+        self.authorization_request_ids.lock().await.push(bcs_observability::current_request_id());
         Ok(AuthorizedGroupSessionConnection {
-            participants: Vec::new(),
+            participants: vec![SessionParticipant {
+                actor_id: "human_user-a".to_string(),
+                actor_kind: ActorKind::Human,
+                name: Some("Test Human".to_string()),
+                role: ParticipantRole::Observer,
+                tags: Vec::new(),
+                mode: ParticipantMode::Present,
+                message_view_scope: MessageViewScope::Full,
+                joined_at: None,
+            }],
         })
     }
 }
@@ -107,7 +120,12 @@ async fn start(
         .expect("bind test server");
     let addr = listener.local_addr().expect("test server address");
     let handle = tokio::spawn(async move {
-        axum::serve(listener, app(service))
+        let app = app(service).layer(axum::middleware::from_fn(
+            |request: axum::extract::Request, next: axum::middleware::Next| async move {
+                bcs_observability::with_request_context("group-ws-handshake-42".into(), next.run(request)).await
+            },
+        ));
+        axum::serve(listener, app)
             .await
             .expect("serve test app");
     });
@@ -197,6 +215,10 @@ async fn valid_token_upgrades_and_connect_uses_the_immutable_verified_binding() 
     };
     let response: BcsFrame = serde_json::from_str(&response).expect("BCS response frame");
     assert!(matches!(response, BcsFrame::Response(response) if response.ok));
+
+    // This authorization runs on a real post-upgrade Axum task, after the HTTP
+    // middleware has returned. The production upgrade boundary must carry its ID.
+    assert_eq!(service.authorization_request_ids.lock().await.as_slice(), ["group-ws-handshake-42"]);
 
     assert_eq!(
         service.verified_tokens.lock().await.as_slice(),

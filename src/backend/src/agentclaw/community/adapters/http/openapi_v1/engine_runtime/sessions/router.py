@@ -198,6 +198,7 @@ async def list_sessions(
                 session_key=session_key, limit=params["limit"],
                 offset=params["offset"],
                 iam_token=request.cookies.get("IAM_TOKEN") or None,
+                bcn_friend_authorized=True,
             )
         except Exception as error:
             _raise_expert_error(error)
@@ -243,6 +244,7 @@ async def create_session(
             created_result = await expert.create_chat_session(
                 user_id=f_user_id, bot_id=bot_id, owner_id=owner_id,
                 iam_token=request.cookies.get("IAM_TOKEN") or None,
+                bcn_friend_authorized=True,
             )
             session_key = created_result.get("session_key")
             if not session_key:
@@ -256,11 +258,13 @@ async def create_session(
                 item = await expert.update_owned_chat_session(
                     f_user_id, bot_id, owner_id, session_key, requested,
                     request.cookies.get("IAM_TOKEN") or None,
+                    bcn_friend_authorized=True,
                 )
             else:
                 item = await expert.get_owned_chat_session(
                     f_user_id, bot_id, owner_id, session_key,
                     request.cookies.get("IAM_TOKEN") or None,
+                    bcn_friend_authorized=True,
                 )
         except Exception as error:
             _raise_expert_error(error)
@@ -316,6 +320,7 @@ async def list_session_favorites(
                 user_id=f_user_id, bot_id=bot_id, owner_id=owner_id,
                 favorite_only=True, limit=window["limit"], offset=window["offset"],
                 iam_token=request.cookies.get("IAM_TOKEN") or None,
+                bcn_friend_authorized=True,
             )
         except Exception as error:
             _raise_expert_error(error)
@@ -369,6 +374,7 @@ async def get_session(
             item = await expert.get_owned_chat_session(
                 f_user_id, bot_id, owner_id, session_id,
                 request.cookies.get("IAM_TOKEN") or None,
+                bcn_friend_authorized=True,
             )
         except Exception as error:
             _raise_expert_error(error)
@@ -409,6 +415,7 @@ async def _set_session_favorite(
             await expert.set_owned_chat_session_favorite(
                 friend_user_id, bot_id, owner_id, session_id, favorited,
                 request.cookies.get("IAM_TOKEN") or None,
+                bcn_friend_authorized=True,
             )
         except Exception as error:
             _raise_expert_error(error)
@@ -516,6 +523,7 @@ async def update_session(
             item = await expert.update_owned_chat_session(
                 f_user_id, bot_id, owner_id, session_id, payload,
                 request.cookies.get("IAM_TOKEN") or None,
+                bcn_friend_authorized=True,
             )
         except Exception as error:
             _raise_expert_error(error)
@@ -561,7 +569,8 @@ async def delete_session(
     if facts is None:
         try:
             await expert.delete_owned_chat_session(
-                f_user_id, bot_id, owner_id, session_id
+                f_user_id, bot_id, owner_id, session_id,
+                bcn_friend_authorized=True,
             )
         except Exception as error:
             _raise_expert_error(error)
@@ -917,6 +926,7 @@ async def list_session_messages(
                 f_user_id, bot_id, owner_id, session_id,
                 limit=window["limit"], offset=0,
                 iam_token=request.cookies.get("IAM_TOKEN") or None,
+                bcn_friend_authorized=True,
             )
         except Exception as error:
             _raise_expert_error(error)
@@ -968,6 +978,7 @@ async def clear_session_messages(
             await expert.clear_owned_chat_session_messages(
                 f_user_id, bot_id, owner_id, session_id,
                 request.cookies.get("IAM_TOKEN") or None,
+                bcn_friend_authorized=True,
             )
         except Exception as error:
             _raise_expert_error(error)

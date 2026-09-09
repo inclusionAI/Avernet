@@ -19,6 +19,13 @@ class ApiResponse(BaseModel):
     message: Optional[str] = None
     warning: Optional[str] = None
     total: Optional[int] = None
+    #: A machine-readable discriminator for a refusal, when `success` is False
+    #: and the caller needs to branch on *which* refusal. `message` stays the
+    #: human-readable text. Added for the CLI tools contract, whose "no such
+    #: tool" answer must be distinguishable from "this engine build has no CLI
+    #: endpoints" without reusing HTTP 404 for both
+    #: (docs/bot-config-manifest/engine-requirements.zh-CN.md §4 A2).
+    error: Optional[str] = None
 
 
 __all__ = ["ApiResponse"]

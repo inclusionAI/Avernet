@@ -13,6 +13,7 @@ use bcs_event_store::MemoryEventStore;
 use bcs_service_api::port::repo::{
     CommitGroupEventfulMutation, FinalizeGroupProvisioning, GroupEventfulMutation, GroupRepoPort,
 };
+use bcs_service_api::types::MessageViewScope;
 use bcs_service_api::{
     Group as DomainGroup, GroupKind, GroupMessage, GroupMutableFieldsPatch, GroupStatus,
     GroupStrategy, Participant, ParticipantMode, ServiceError, ServiceResult, ServiceSpec,
@@ -360,6 +361,35 @@ impl GroupRepoPort for MemoryGroupRepo {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
         debug!(group_id = %id, actor_id = %actor_id, ?mode, "Participant mode updated");
+        Ok(())
+    }
+
+    async fn update_participant_message_view_scope(
+        &self,
+        id: &str,
+        actor_id: &str,
+        message_view_scope: MessageViewScope,
+    ) -> ServiceResult<()> {
+        let mut groups = self.groups.write().await;
+        let group = groups
+            .get_mut(id)
+            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
+        let participant = group
+            .participants
+            .iter_mut()
+            .find(|participant| participant.bot_uuid == actor_id)
+            .ok_or_else(|| ServiceError::ParticipantNotFound(actor_id.to_string()))?;
+        if !message_view_scope.is_valid_for(participant.actor_kind) {
+            return Err(ServiceError::InvalidOperation {
+                message: "Bot participants must use full message_view_scope".to_string(),
+                request_id: None,
+            });
+        }
+        participant.message_view_scope = message_view_scope;
+        group.updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0);
         Ok(())
     }
 
@@ -719,6 +749,34 @@ fn apply_memory_group_mutation(
             }
             participant.mode = Some(*mode);
         }
+        GroupEventfulMutation::UpdateParticipantMessageViewScope {
+            actor_id,
+            message_view_scope,
+            mode,
+        } => {
+            let participant = group
+                .participants
+                .iter_mut()
+                .find(|participant| participant.bot_uuid == *actor_id)
+                .ok_or_else(|| ServiceError::ParticipantNotFound(actor_id.clone()))?;
+            if !message_view_scope.is_valid_for(participant.actor_kind) {
+                return Err(ServiceError::InvalidOperation {
+                    message: "Bot participants must use full message_view_scope".to_string(),
+                    request_id: None,
+                });
+            }
+            let scope_changed = participant.message_view_scope != *message_view_scope;
+            let mode_changed = mode.is_some_and(|mode| participant.effective_mode() != mode);
+            if !scope_changed && !mode_changed {
+                return Err(ServiceError::Conflict(format!(
+                    "Participant '{actor_id}' mode and message_view_scope are unchanged"
+                )));
+            }
+            participant.message_view_scope = *message_view_scope;
+            if let Some(mode) = mode {
+                participant.mode = Some(*mode);
+            }
+        }
         GroupEventfulMutation::UpdateRoutingPolicy(policy) => {
             group.routing_policy = Some(policy.clone());
         }
@@ -844,6 +902,7 @@ mod tests {
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             })
             .build();
 
@@ -895,6 +954,7 @@ mod tests {
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             })
             .build();
 
@@ -945,6 +1005,7 @@ mod tests {
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             })
             .build();
 
@@ -959,6 +1020,7 @@ mod tests {
             actor_kind: bcs_service_api::ActorKind::default(),
             mode: None,
             tags: Vec::new(),
+            message_view_scope: MessageViewScope::Full,
         };
         store
             .add_participant("test-group", duplicate)
@@ -982,6 +1044,7 @@ mod tests {
             actor_kind: bcs_service_api::ActorKind::default(),
             mode: None,
             tags: Vec::new(),
+            message_view_scope: MessageViewScope::Full,
         };
 
         let result = store.add_participant("nonexistent", participant).await;
@@ -1161,6 +1224,7 @@ mod tests {
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             })
             .build();
 
@@ -1182,6 +1246,7 @@ mod tests {
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             })
             .participant(Participant {
                 bot_uuid: "initiator-bot".to_string(),
@@ -1191,6 +1256,7 @@ mod tests {
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             })
             .build();
 
@@ -1213,6 +1279,7 @@ mod tests {
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             })
             .participant(Participant {
                 bot_uuid: "dba".to_string(),
@@ -1222,6 +1289,7 @@ mod tests {
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             })
             .participant(Participant {
                 bot_uuid: "security".to_string(),
@@ -1231,6 +1299,7 @@ mod tests {
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             })
             .build();
 
@@ -1271,6 +1340,7 @@ mod tests {
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             })
             .participant(Participant {
                 bot_uuid: "dba".to_string(),
@@ -1280,6 +1350,7 @@ mod tests {
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             })
             .build();
 
@@ -1359,6 +1430,7 @@ mod tests {
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             })
             .build();
         store.upsert(session2).await.unwrap();
@@ -1420,6 +1492,7 @@ mod tests {
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             })
             .participant(Participant {
                 bot_uuid: "dev-bot".to_string(),
@@ -1429,6 +1502,7 @@ mod tests {
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             })
             .participant(Participant {
                 bot_uuid: "qa-bot".to_string(),
@@ -1438,6 +1512,7 @@ mod tests {
                 actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             })
             .build();
 

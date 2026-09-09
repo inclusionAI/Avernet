@@ -82,7 +82,6 @@ pub(crate) async fn build_eventing_runtime(
     sessions: Arc<dyn SessionManagementService>,
     collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
     registry: Arc<dyn BotRegistryCoreService>,
-    outbound_url_guard: OutboundUrlGuard,
     allow_local_test_endpoints: bool,
 ) -> Result<EventingRuntime> {
     config
@@ -99,11 +98,8 @@ pub(crate) async fn build_eventing_runtime(
     } else {
         WebhookEndpointPolicy::production()
     };
-    let outbound_url_guard = eventing_outbound_url_guard(
-        config,
-        outbound_url_guard,
-        allow_local_test_endpoints,
-    )?;
+    let outbound_url_guard =
+        eventing_outbound_url_guard(config, allow_local_test_endpoints)?;
     let delivery: Arc<dyn EventDeliveryPort> = Arc::new(
         WebhookClient::new(outbound_url_guard, endpoint_policy)
             .with_connect_timeout(Duration::from_millis(
@@ -209,14 +205,12 @@ pub(crate) async fn build_eventing_runtime(
 
 fn eventing_outbound_url_guard(
     config: &BcsConfig,
-    fallback: OutboundUrlGuard,
     allow_local_test_endpoints: bool,
 ) -> Result<OutboundUrlGuard> {
-    let guard = if allow_local_test_endpoints && config.eventing.webhook.allow_http_loopback {
-        OutboundUrlGuard::new(config.security.outbound_url.block_private_networks, true)
-    } else {
-        fallback
-    };
+    let guard = OutboundUrlGuard::new(
+        config.eventing.webhook.block_private_networks,
+        allow_local_test_endpoints && config.eventing.webhook.allow_http_loopback,
+    );
     guard
         .with_private_endpoint_allowlist(
             &config.eventing.webhook.private_endpoint_allowlist,
@@ -231,8 +225,7 @@ fn validate_production_security(
     if !config.eventing.enabled || allow_local_test_endpoints {
         return Ok(());
     }
-    if !config.security.outbound_url.block_private_networks
-        || config.security.outbound_url.allow_loopback
+    if !config.eventing.webhook.block_private_networks
         || config.eventing.webhook.allow_http_loopback
         || config.eventing.webhook.allow_non_standard_ports
     {
@@ -323,7 +316,7 @@ mod tests {
     fn production_eventing_rejects_weakened_outbound_security() {
         let mut config = BcsConfig::default();
         config.eventing.enabled = true;
-        config.security.outbound_url.block_private_networks = false;
+        config.eventing.webhook.block_private_networks = false;
 
         assert!(matches!(
             validate_production_security(&config, false),
@@ -333,11 +326,28 @@ mod tests {
     }
 
     #[test]
+    fn production_eventing_does_not_depend_on_shared_outbound_security() {
+        let mut config = BcsConfig::default();
+        config.eventing.enabled = true;
+        config.security.outbound_url.block_private_networks = false;
+        config.security.outbound_url.allow_loopback = true;
+
+        assert!(validate_production_security(&config, false).is_ok());
+        let guard = eventing_outbound_url_guard(&config, false)
+            .expect("Eventing guard should use its own strict policy");
+        assert!(
+            guard
+                .validate_configured_http_url("https://10.0.0.8/events")
+                .is_err()
+        );
+    }
+
+    #[test]
     fn local_eventing_guard_allows_only_loopback_from_private_address_space() {
         let mut config = BcsConfig::default();
         config.eventing.webhook.allow_http_loopback = true;
-        config.security.outbound_url.block_private_networks = true;
-        let guard = eventing_outbound_url_guard(&config, OutboundUrlGuard::strict(), true)
+        config.eventing.webhook.block_private_networks = true;
+        let guard = eventing_outbound_url_guard(&config, true)
             .expect("valid local Eventing guard");
 
         assert!(
@@ -362,7 +372,7 @@ mod tests {
                 ports: vec![443, 8443],
             },
         ];
-        let guard = eventing_outbound_url_guard(&config, OutboundUrlGuard::strict(), false)
+        let guard = eventing_outbound_url_guard(&config, false)
             .expect("valid private endpoint allowlist");
 
         assert!(guard.allows_allowlisted_host_port(

@@ -26,6 +26,7 @@ from websockets.asyncio.client import ClientConnection
 from secbaas.community.api.bot_interaction import InteractionResolution
 from secbaas.community.core.utils.env_utils import is_dev
 from secbaas.community.logger import get_logger
+from secbaas.community.tracer import get_tracer_plugin
 
 from ._interaction_protocol import (
     EngineInteractionResolveExchange,
@@ -269,6 +270,7 @@ class BotWebSocketClient:
                 for a in attachments
             ]
         params["x-iam-token"] = auth_token or "OPEN_API:NOT_PROVIDED"
+        params["traceId"] = get_tracer_plugin().get_trace_id()
 
         result = await self._send_request(
             "chat.send",
@@ -311,6 +313,7 @@ class BotWebSocketClient:
                 for a in attachments
             ]
         params["x-iam-token"] = auth_token or "OPEN_API:NOT_PROVIDED"
+        params["traceId"] = get_tracer_plugin().get_trace_id()
 
         result = await self._send_request(
             "chat.inject",
@@ -341,6 +344,7 @@ class BotWebSocketClient:
             interaction_id=interaction_id,
             resolution=resolution,
         )
+        request["params"]["traceId"] = get_tracer_plugin().get_trace_id()
         response = await self._send_request_frame(request, timeout=30.0)
         return EngineInteractionResolveExchange.from_frames(
             request=request,
@@ -356,6 +360,7 @@ class BotWebSocketClient:
         params: dict[str, Any] = {"sessionKey": session_key}
         if run_id:
             params["runId"] = run_id
+        params["traceId"] = get_tracer_plugin().get_trace_id()
 
         return await self._send_request("chat.abort", params)
 

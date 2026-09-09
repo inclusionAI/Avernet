@@ -69,11 +69,11 @@ describe('WorkspaceIdentitySelector', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '当前协作身份：协作 Bot' }));
     expect(
-      screen.queryByText('当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围'),
+      screen.queryByText('当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。'),
     ).not.toBeInTheDocument();
     expect(await screen.findByText('隐藏 Bot')).toBeInTheDocument();
     expect(screen.getByText('ClaudeCode')).toBeInTheDocument();
-    expect(screen.getByText('不在线')).toBeInTheDocument();
+    expect(screen.getByText('离线')).toBeInTheDocument();
   });
 
   it('将 bots 接口的引擎枚举统一为可读标签', () => {
@@ -136,7 +136,7 @@ describe('WorkspaceIdentitySelector', () => {
     fireEvent.pointerMove(infoTrigger);
 
     expect(
-      await screen.findByText('当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围'),
+      await screen.findByText('当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。'),
     ).toBeInTheDocument();
     expect(screen.queryByText(/我参与的会话|当前身份可见/)).not.toBeInTheDocument();
   });
@@ -150,11 +150,11 @@ describe('WorkspaceIdentitySelector', () => {
     expect(screen.getByLabelText('工作身份说明')).toHaveClass('top-px', 'text-muted-foreground/70');
     expect(screen.getByLabelText('工作身份说明').querySelector('svg')).toHaveClass('h-3', 'w-3');
     expect(
-      screen.queryByText('当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围'),
+      screen.queryByText('当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。'),
     ).not.toBeInTheDocument();
     fireEvent.pointerMove(screen.getByLabelText('工作身份说明'));
     expect(
-      await screen.findByText('当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围'),
+      await screen.findByText('当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。'),
     ).toBeInTheDocument();
     expect(screen.getByLabelText('协作 Bot')).toHaveStyle({ width: '24px', height: '24px' });
     expect(screen.getByText('协作 Bot')).toHaveClass('text-xs');
@@ -182,7 +182,7 @@ describe('WorkspaceIdentitySelector', () => {
     expect(screen.queryByText('可切换身份')).not.toBeInTheDocument();
   });
 
-  it('不可达 Bot 仍仅展示运行状态，不展示群聊参与状态', () => {
+  it('不可达 Bot 显示离线，且不展示群聊参与状态', async () => {
     render(
       <WorkspaceIdentitySelector
         identities={[
@@ -202,12 +202,14 @@ describe('WorkspaceIdentitySelector', () => {
       />,
     );
 
-    expect(screen.getByText('在线')).toBeInTheDocument();
+    expect(screen.getByText('离线')).toBeInTheDocument();
     expect(screen.queryByText(/可参与群聊/)).not.toBeInTheDocument();
     expect(screen.getByText('桌面 Bot')).toBeInTheDocument();
+    fireEvent.pointerMove(screen.getByLabelText('Bot 离线'));
+    expect(await screen.findByText('请检查 Bot 实例状态')).toBeInTheDocument();
   });
 
-  it('Bot 不在线时显示状态检查提示', async () => {
+  it('可达 Bot 即使 chatStatus 缺省也优先显示在线', () => {
     render(
       <WorkspaceIdentitySelector
         identities={[
@@ -225,10 +227,8 @@ describe('WorkspaceIdentitySelector', () => {
       />,
     );
 
-    expect(screen.getByText('不在线')).toBeInTheDocument();
+    expect(screen.getByText('在线')).toBeInTheDocument();
     expect(screen.queryByText(/可参与群聊/)).not.toBeInTheDocument();
-    fireEvent.pointerMove(screen.getByLabelText('Bot 不在线'));
-    expect(await screen.findByText('请检查 Bot 实例状态')).toBeInTheDocument();
   });
 
   it('将低频协作权限入口放在身份下拉菜单标题行右侧并触发页面导航回调', async () => {

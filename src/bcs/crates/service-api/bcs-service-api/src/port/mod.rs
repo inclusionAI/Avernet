@@ -16,6 +16,7 @@ pub mod judge;
 pub mod leader_election;
 pub mod metrics;
 pub mod pending_group_message;
+pub mod participant_view_binding;
 pub mod provider_stream_gray;
 pub mod repo;
 pub mod secret;
@@ -80,6 +81,10 @@ pub use metrics::{
 pub use pending_group_message::{
     PendingGroupMessage, PendingGroupMessageKind, PendingGroupMessagePort,
 };
+pub use participant_view_binding::{
+    NoopParticipantViewBindingPort, ParticipantViewBindingPort,
+    ParticipantViewScopeChangeLease,
+};
 pub use provider_stream_gray::ProviderStreamGrayList;
 pub use repo::{
     BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
@@ -97,6 +102,7 @@ pub use repo::{
     ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord, ProviderBotDiscoverySelector,
     ProviderCredentialRepoPort, ProviderRepoPort, RelationRepoPort, SessionRepoPort,
     StateMachineDefinitionRepoPort, StateMachineRunRepoPort, UpdateOrganizationRecord,
+    UpdateSessionParticipantMessageViewScopeWithEvent,
     UpsertOrganizationMemberRecord, UserIdentity, UserIdentityRepoPort,
 };
 pub use secret::{SecretAccessError, SecretAccessPort, SecretRecord};

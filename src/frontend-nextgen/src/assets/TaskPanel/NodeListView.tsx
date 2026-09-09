@@ -58,10 +58,12 @@ export const NodeListView: React.FC<{
   nodes: TaskView['nodes'];
   ownerBotId?: string | null;
   userId?: string;
+  /** 当前已下钻副屏的节点 id(用于高亮主副屏对应的节点卡片) */
+  activeDrillNodeId?: string | null;
   onViewNodeDetail: (node: TaskNodeView) => void;
   onOpenSubTask?: (subTaskId: string) => void;
   onOpenGroupSession?: (node: TaskNodeView) => void;
-}> = ({ nodes, ownerBotId, userId, onViewNodeDetail, onOpenSubTask, onOpenGroupSession }) => {
+}> = ({ nodes, ownerBotId, userId, activeDrillNodeId, onViewNodeDetail, onOpenSubTask, onOpenGroupSession }) => {
   if (!nodes.length) {
     return <Empty description="暂无执行节点" />;
   }
@@ -82,14 +84,18 @@ export const NodeListView: React.FC<{
         const canOpenSub = Boolean(node.hasSubTask && node.subTaskId && onOpenSubTask);
         // assignee 为空即「未分配」:未派发到任何 bot/group,不回退任务归属 bot 当执行人,也不可下钻。
         const isUnassigned = !node.assignee;
-        const canDrillSession = !isUnassigned && Boolean(node.sessionId) && Boolean(onOpenGroupSession);
+        const isGroupSession = Boolean(node.groupId) || (node.sessionId?.startsWith('bcs_grp_') ?? false);
+        // 下钻/新开页面判定：
+        // - 群会话按物理 session 形态(groupId 或 bcs_grp_ 前缀),不依赖 assignee——
+        //   查看身份由 workspace 按 group=/session= 解析(后端可能只在 extend_props 下发 session/group,run_info.assignee 为空)。
+        // - 单 bot 需 assignee/ownerBotId 解析出 bot_id:user_id 才能下钻 + 新开链接。
+        const canDrillSession =
+          Boolean(node.sessionId) && Boolean(onOpenGroupSession) && (isGroupSession || !isUnassigned);
         const runModeLabel = RUN_MODE_LABELS[node.runMode ?? ''];
         // 根节点的执行者可能只由 graph 级 owner_bot_id 兜底到 assignee，名称字段仍为空；
         // 即使没有 executor/groupName，只要存在 sessionId 也要渲染可点击的下钻入口。
-        // 因权限绕过,后端可能统一把 run_mode 标记为 coop_group,真实模式由 actual_run_mode 覆盖到 runMode。
-        // 故「下钻通道」必须按物理 session 形态判定（协作群 session_id 形如 bcs_grp_xxx:round 或存在 groupId），
-        // 不能再据 run_mode 选端点——否则单 bot 绕过群 session 时会错误跳 tab=chat。
-        const isGroupSession = Boolean(node.groupId) || (node.sessionId?.startsWith('bcs_grp_') ?? false);
+        // 因权限绕过,后端可能统一把 run_mode 标记为 coop_group,真实模式由 actual_run_mode 覆盖到 runMode；
+        // 单/群通道统一按物理 session 形态(isGroupSession,见上)判定,不再据 run_mode 选端点。
         // 执行者展示:
         // - coop_group → 群名
         // - single_bot/bbs(绕过群执行,assignee 常为 bcs 群 id):有 assignee_name → 显示 bot 名;否则占位「Bot/BBS 执行会话」。
@@ -97,28 +103,28 @@ export const NodeListView: React.FC<{
         const isSingleOrBbs = node.runMode === 'single_bot' || node.runMode === 'bbs';
         // 执行者展示:assignee_name 全局优先(已分配节点);空时按真实执行模式占位。
         //   - single_bot/bbs → Bot/BBS 执行会话; - coop_group → 协作群会话。
-        const executorLabel = isUnassigned
-          ? '未分配'
-          : node.assigneeName
-          ? node.assigneeName
-          : isSingleOrBbs
-          ? node.runMode === 'single_bot'
-            ? 'Bot执行会话'
-            : 'BBS执行会话'
-          : isCoopGroupDisplay
-          ? '协作群会话'
-          : node.executor ?? node.assignee ?? ownerBotId;
+        const executorLabel =
+          isUnassigned && !isGroupSession
+            ? '未分配'
+            : node.assigneeName
+            ? node.assigneeName
+            : isSingleOrBbs
+            ? node.runMode === 'single_bot'
+              ? 'Bot执行会话'
+              : 'BBS执行会话'
+            : isCoopGroupDisplay
+            ? '协作群会话'
+            : node.executor ?? node.assignee ?? ownerBotId;
         // 会话跳转链接：协作群走 tab=group，单 bot 走 tab=chat。
         // 群节点不依赖 assignee（查看身份由 workspace 按用户自有 bot 决定）；
         // 单 bot 需 assignee/ownerBotId 解析出 bot_id:user_id。
-        const conversationHref =
-          !isUnassigned && node.sessionId
-            ? isGroupSession
-              ? getCollaborationGroupConversationUrl(node.groupId, node.sessionId)
-              : getConversationBotId(node)
-              ? getCollaborationBotConversationUrl(getConversationBotId(node)!, node.sessionId)
-              : null
-            : null;
+        const conversationHref = node.sessionId
+          ? isGroupSession // 群会话不依赖 assignee(注释约定:由 workspace 按 group=/session= 解析成员)
+            ? getCollaborationGroupConversationUrl(node.groupId, node.sessionId)
+            : !isUnassigned && getConversationBotId(node)
+            ? getCollaborationBotConversationUrl(getConversationBotId(node)!, node.sessionId)
+            : null
+          : null;
         const actionLabel = canOpenSub ? `打开子任务 ${node.name}` : `查看节点详情 ${node.name}`;
         const openNode = () => {
           if (canOpenSub && node.subTaskId) {
@@ -128,6 +134,21 @@ export const NodeListView: React.FC<{
           }
         };
 
+        // 该节点已下钻到副屏:主副屏对应节点卡片高亮(更实的主色描边 + 更强阴影 + 更亮的主色底纹),
+        // 让用户在打开下钻副屏时一眼看出选中的是哪个节点任务。
+        const isActiveDrill =
+          activeDrillNodeId !== null && activeDrillNodeId !== undefined && node.id === activeDrillNodeId;
+        const restBorder = isActiveDrill ? C.primary : canOpenSub ? C.primary + '35' : C.border;
+        const restBackground = isActiveDrill
+          ? `linear-gradient(135deg, ${C.primary}1A 0%, ${C.primaryBg} 50%, ${C.surface} 100%)`
+          : canOpenSub
+          ? `linear-gradient(135deg, ${C.primaryBg} 0%, ${C.surface} 72%)`
+          : C.surface;
+        const restBoxShadow = isActiveDrill
+          ? `inset 4px 0 0 0 ${C.primary}, 0 6px 16px rgba(37, 99, 235, 0.26)`
+          : canOpenSub
+          ? '0 2px 10px rgba(37, 99, 235, 0.08)'
+          : '0 1px 3px rgba(29, 33, 41, 0.04)';
         return (
           <div
             key={node.id}
@@ -184,23 +205,23 @@ export const NodeListView: React.FC<{
                 marginLeft: 8,
                 marginBottom: 0,
                 padding: '12px 12px 11px',
-                border: `1px solid ${canOpenSub ? C.primary + '35' : C.border}`,
+                border: `1px solid ${restBorder}`,
                 borderRadius: 10,
-                background: canOpenSub ? `linear-gradient(135deg, ${C.primaryBg} 0%, ${C.surface} 72%)` : C.surface,
-                boxShadow: canOpenSub ? '0 2px 10px rgba(22, 93, 255, 0.08)' : '0 1px 3px rgba(29, 33, 41, 0.04)',
+                background: restBackground,
+                boxShadow: restBoxShadow,
                 cursor: 'pointer',
                 transition: 'border-color 150ms ease-out, box-shadow 150ms ease-out, transform 150ms ease-out',
               }}
               onMouseEnter={(event) => {
-                event.currentTarget.style.borderColor = canOpenSub ? C.primary : C.primary + '80';
-                event.currentTarget.style.boxShadow = '0 6px 18px rgba(29, 33, 41, 0.09)';
+                event.currentTarget.style.borderColor = C.primary;
+                event.currentTarget.style.boxShadow = isActiveDrill
+                  ? `inset 4px 0 0 0 ${C.primary}, 0 8px 20px rgba(37, 99, 235, 0.3)`
+                  : '0 6px 18px rgba(37, 99, 235, 0.18)';
                 event.currentTarget.style.transform = 'translateY(-1px)';
               }}
               onMouseLeave={(event) => {
-                event.currentTarget.style.borderColor = canOpenSub ? C.primary + '35' : C.border;
-                event.currentTarget.style.boxShadow = canOpenSub
-                  ? '0 2px 10px rgba(22, 93, 255, 0.08)'
-                  : '0 1px 3px rgba(29, 33, 41, 0.04)';
+                event.currentTarget.style.borderColor = restBorder;
+                event.currentTarget.style.boxShadow = restBoxShadow;
                 event.currentTarget.style.transform = 'translateY(0)';
               }}
             >

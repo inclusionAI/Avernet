@@ -121,6 +121,16 @@ export interface MetricsDashboardSpec {
 export type LoginStrategy = 'ace-gateway' | 'oauth-provider';
 
 /**
+ * 邀请码门禁策略（仅外部 `oauth-provider` 形态生效，配合 `getLoginStrategy` 双门控）：
+ * - `enabled`：对接后端邀请码准入门禁——登录建身份后未绑码则弹不可关闭输入弹窗，提交有效码后解锁。
+ *   Open Core 默认（=阿里云外部生产形态，gate 为产品对外准入控制，对齐既有「Open Core 默认即外部形态」约定）。
+ * - `disabled`：不激活门禁（不主动查 `/me`、不弹窗）。internal overlay（员工形态，ACE 后端无邀请码端点）。
+ * 反应式识别后端 `invite_code_required` 403 仍无条件于 `oauth-provider` 下生效（不受本 capability 约束，作安全网）。
+ * 同步签名，不发请求。
+ */
+export type InviteCodeGatePolicy = 'enabled' | 'disabled';
+
+/**
  * 任务认领授权策略：决定「任务认领」开关的 grant/revoke 是否经 secbaas 做 per-bot api-key 授权。
  * - `secbaas-relay`：内部部署，api-key 须经 secbaas `allowed-bots/grant` 授权才能调某 bot；grant/revoke 透传人类 Cookie(spanner) 到 secbaas。
  * - `skip`：Open Core / 开源部署，api-key 直发消息无需 per-bot 授权（secbaas 链路不通且无必要）；grant/revoke 短路 no-op，开关只写 BCS `task_claim_mode`。
@@ -273,6 +283,12 @@ export interface AppCapabilities {
    */
   getLoginStrategy: () => CapabilityResult<LoginStrategy>;
   /**
+   * 邀请码门禁策略（见 `InviteCodeGatePolicy`）：Open Core 默认 `enabled`（=阿里云外部形态）；
+   * internal overlay 覆盖为 `disabled`（员工形态）。`ace-gateway` 策略下门禁完全不激活（与 capability 双门控）。
+   * 同步签名，不发请求；门禁生效性经 `getLoginStrategy()` + 本 capability 双门控，禁止散落 `if(isInternal)`。
+   */
+  getInviteCodeGatePolicy: () => CapabilityResult<InviteCodeGatePolicy>;
+  /**
    * 任务模块 API 路径前缀（execute/dashboard/list/grant/revoke 共用；bbs/list 暂不纳入，后端 openapi 面未开放）。
    * Open Core 默认 `/openapi/v1/collaboration/tasks`（后端 openapi_v1/task 公开面，经 gateway spanner 鉴权；admission 已 OPEN execute/dashboard/list/grant/revoke）；
    * internal overlay 覆盖为 `/api/v1/collaboration/tasks`（内面，不经 spanner，内部网关直连 task 引擎）。
@@ -312,6 +328,8 @@ export interface AppCapabilities {
   getBotEngineOptions: () => CapabilityResult<BotEngineOption[]>;
   /** Open Core/阿里云仅本地 Skill；internal overlay 可开放市场和能力工坊来源。 */
   getBotSkillPickerSources: () => CapabilityResult<BotSkillPickerSource[]>;
+  /** Bot 编辑页添加 MCP 仅属于 Internal Overlay；Open Core / 阿里云不展示入口也不请求市场接口。 */
+  getBotMcpPickerEnabled: () => CapabilityResult<boolean>;
   /**
    * 产品品牌语义（名称/页头 Logo/登录视觉，见 `ProductBrand`）。
    * Open Core 默认 `Avernet` + 横版 wordmark；internal overlay 覆盖为 `TeamClaw` +
@@ -335,10 +353,15 @@ export interface AppCapabilities {
    */
   getGroupAdvancedConfigEnabled: () => CapabilityResult<boolean>;
   /**
-   * 公开范围编辑器是否提供“限制组织范围”。Open Core 默认关闭；internal overlay 保持开启。
+   * Bot 可见性编辑器是否提供“限定组织可申请”。Open Core 默认关闭；internal overlay 保持开启。
    * 同步签名，两个 audience 共用，组件不得按部署环境自行判断。
    */
   getRestrictedPublicationScopeEnabled: () => CapabilityResult<boolean>;
+  /**
+   * 好友审批编辑器是否提供“部分组织免审批”。Open Core 默认关闭；internal overlay 保持开启。
+   * 同步签名，组件不得按部署环境自行判断。
+   */
+  getPartialFriendApprovalEnabled: () => CapabilityResult<boolean>;
   /**
    * 壳层入口可见性（管理后台导航 / 空间切换器 / 通知中心，见 `ShellVisibility`）。
    * Open Core（阿里云部署）默认 `adminEntry=true`、`notificationBell=true`、`spaceSwitcher=false`

@@ -4,7 +4,9 @@
 //! Implementations: MemoryMessageRepo (local dev/test), MySqlMessageStore (production).
 
 use async_trait::async_trait;
-use bcs_domain::{MessageOwnerFilter, MessagePage, MessageQuery, NewMessage, PersistedMessage};
+use bcs_domain::{
+    HumanMessageView, MessageOwnerFilter, MessagePage, MessageQuery, NewMessage, PersistedMessage,
+};
 
 use crate::types::ServiceResult;
 
@@ -95,10 +97,18 @@ pub trait MessageRepoPort: Send + Sync + 'static {
         session_id: &str,
         owner_filter: MessageOwnerFilter,
         visible_from_seq: Option<i64>,
+        human_view: Option<HumanMessageView>,
         before: Option<(u64, i64)>,
         limit: u32,
     ) -> ServiceResult<MessagePage> {
-        let _ = (session_id, owner_filter, visible_from_seq, before, limit);
+        let _ = (
+            session_id,
+            owner_filter,
+            visible_from_seq,
+            human_view,
+            before,
+            limit,
+        );
         Ok(MessagePage {
             messages: Vec::new(),
             next_cursor: None,

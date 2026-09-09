@@ -1,10 +1,11 @@
 import { groupService } from '@/services/workspace/groupService';
 import { useCallback, useEffect, useRef } from 'react';
 import {
-  type UseSessionMapRequestsOptions,
+  dropGroupCache,
   normalizePage,
   notifyError,
   SESSION_PAGE_SIZE,
+  type UseSessionMapRequestsOptions,
 } from './sessionMapRequests.utils';
 import { useExpandedGroupSessionRequests } from './useExpandedGroupSessionRequests';
 
@@ -30,15 +31,27 @@ export function useSessionMapRequests({
 }: UseSessionMapRequestsOptions) {
   // 用 epoch+gid 做已拉标记：epoch 变化（身份切换清空缓存）时旧标记失效，重新拉。
   const lastLoadedKeyRef = useRef<string>('');
+  const prevGroupIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!groupId || !activeIdentityId) return;
     const key = `${identityEpochRef.current}:${groupId}`;
+    // 切回已加载过的群（groupId transition）必须重拉最新列表：缓存里可能残留当前角色
+    // 已离开/被移除的会话，复用会让自动选中命中陈旧会话，右栏随之对其发起请求而报错。
+    const isGroupTransition = prevGroupIdRef.current !== groupId;
+    prevGroupIdRef.current = groupId;
     // 仅在 groupId 或 epoch 变化时拉取，避免 effect 因其他依赖变化重复拉同一群。
     if (key === lastLoadedKeyRef.current) return;
-    if (rawByGroupIdRef.current[groupId] !== undefined || inFlightRef.current.has(groupId)) {
+    if (inFlightRef.current.has(groupId)) {
       lastLoadedKeyRef.current = key;
       return;
     }
+    if (!isGroupTransition && rawByGroupIdRef.current[groupId] !== undefined) {
+      lastLoadedKeyRef.current = key;
+      return;
+    }
+    // 重拉前先清掉该群陈旧缓存：重拉窗口内列表回到未加载态（骨架），
+    // 自动选中/陈旧选中兜底都不会消费旧数据；新结果到达后整体替换。
+    dropGroupCache(rawByGroupIdRef, setRawByGroupId, groupId);
     let cancelled = false;
     const requestEpoch = identityEpochRef.current;
     const requestVersion = beginGroupRequest(groupId);
@@ -83,10 +96,12 @@ export function useSessionMapRequests({
     identityEpochRef,
     inFlightRef,
     isCurrentRequest,
+    rawByGroupIdRef,
     replaceGroupPage,
     setErrorByGroupId,
     setLoadMoreErrorByGroupId,
     setIsLoading,
+    setRawByGroupId,
   ]);
 
   useExpandedGroupSessionRequests({
@@ -94,12 +109,14 @@ export function useSessionMapRequests({
     expandedGroupIds,
     groupId,
     rawByGroupId,
+    rawByGroupIdRef,
     inFlightRef,
     identityEpochRef,
     beginGroupRequest,
     isCurrentRequest,
     replaceGroupPage,
     setErrorByGroupId,
+    setRawByGroupId,
   });
 
   const reloadGroup = useCallback(

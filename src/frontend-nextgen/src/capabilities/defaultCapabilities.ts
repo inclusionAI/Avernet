@@ -9,6 +9,7 @@ import type {
   BotEngineOption,
   CapabilityResult,
   HumanIdentity,
+  InviteCodeGatePolicy,
   LoginStrategy,
   MetricsDashboardSpec,
   OpenSourceExperienceNoticeSpec,
@@ -131,6 +132,9 @@ export const defaultCapabilities: AppCapabilities = {
   getMemberAvatarUrl: (): CapabilityResult<string | null> => ({ status: 'available', value: null }),
   // Open Core 默认走外部 OAuth provider 登录（开源部署 = 外部用户，无 ACE）；internal overlay 覆盖为 'ace-gateway'（员工）。
   getLoginStrategy: (): CapabilityResult<LoginStrategy> => ({ status: 'available', value: 'oauth-provider' }),
+  // Open Core（=阿里云外部生产形态）默认激活邀请码门禁——gate 为产品对外准入控制（登录后未绑码则弹不可关闭输入弹窗）。
+  // internal overlay 覆盖为 'disabled'（员工形态，ACE 后端无邀请码端点）。门禁生效性由 getLoginStrategy + 本 capability 双门控。
+  getInviteCodeGatePolicy: (): CapabilityResult<InviteCodeGatePolicy> => ({ status: 'available', value: 'enabled' }),
   // Open Core（开源部署）task 接口走 openapi 公开面 /openapi/v1/collaboration/tasks/*（后端 openapi_v1/task router + gateway spanner 鉴权）。
   // internal overlay 覆盖为内面 /api/v1/collaboration/tasks（不经 spanner，内部网关直连 task 引擎）。
   getTaskApiBase: (): CapabilityResult<string> => ({ status: 'available', value: '/openapi/v1/collaboration/tasks' }),
@@ -154,6 +158,7 @@ export const defaultCapabilities: AppCapabilities = {
   }),
   // Open Core / 阿里云不具备内部 SkillCenter 与能力工坊产品入口，只展示用户自己的 Skill。
   getBotSkillPickerSources: () => ({ status: 'available', value: ['mine'] }),
+  getBotMcpPickerEnabled: () => ({ status: 'available', value: false }),
   // Open Core 品牌：Avernet（横版 wordmark 用于页头；方版 mark 备用于登录/空态方形场景）。
   getProductBrand: (): CapabilityResult<ProductBrand> => ({
     status: 'available',
@@ -177,6 +182,11 @@ export const defaultCapabilities: AppCapabilities = {
   }),
   // Open Core（外部部署）不提供组织目录限制公开能力；两个公开 audience 仅保留“不公开/全部公开”。
   getRestrictedPublicationScopeEnabled: (): CapabilityResult<boolean> => ({
+    status: 'available',
+    value: false,
+  }),
+  // Open Core 不提供组织免审批策略，仅保留无需审批和全部审批。
+  getPartialFriendApprovalEnabled: (): CapabilityResult<boolean> => ({
     status: 'available',
     value: false,
   }),

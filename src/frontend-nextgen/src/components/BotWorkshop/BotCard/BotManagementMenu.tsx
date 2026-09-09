@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
+import { restartPublishStageLabel, restartPublishStageOf } from '@/domain/botWorkshop';
 import type { BotDomain } from '@/services/botWorkshop';
 import { ArrowUpRight, CircleHelp, MapPin, MoreHorizontal, Users } from 'lucide-react';
 import { useState } from 'react';
@@ -38,9 +39,19 @@ function ActionHelp({ children, description }: { children: string; description: 
 export function BotManagementMenu(props: BotManagementMenuProps) {
   const { bot, collaborationMode, lockedByOther, onAction, onManagePublication, onChangeSpace, onAuthorize } = props;
   const [open, setOpen] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<'upgrade' | 'restart' | 'engine_restart' | 'delete'>();
+  const [confirmAction, setConfirmAction] = useState<BotCardManagementAction>();
   const [confirming, setConfirming] = useState(false);
   const isAgentCodingBot = bot.runtime.isAgentCodingBot;
+  const isServiceBot = bot.serviceMode === 'service';
+  // 重启词表（Avernet PR #1911）：动作名即路由键。服务卡由后端词表决定三个
+  // 重启动词各自落在哪张卡（draft→restart，predeploy/online→restart_publish）；词表与
+  // disabled_actions 均未声明时不渲染（对齐 bot-workshop-page.md §10.3 卡片操作口径）。
+  const restartDeclared = bot.actions.includes('restart') || Boolean(bot.disabledActions.restart);
+  const restartPublishDeclared =
+    bot.actions.includes('restart_publish') || Boolean(bot.disabledActions.restart_publish);
+  const restartPublishDisabledReason = bot.disabledActions.restart_publish;
+  const restartDisabledReason = bot.disabledActions.restart;
+  const restartPublishStage = confirmAction === 'restart_publish' ? restartPublishStageOf(bot.lifecycle) : undefined;
   return (
     <>
       <Popover open={open} onOpenChange={setOpen}>
@@ -83,22 +94,53 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
               {actionLabel.upgrade}
             </Button>
           ) : null}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full justify-start"
-            leftIcon={actionIcon.restart}
-            disabled={lockedByOther || !bot.actions.includes('restart')}
-            onClick={() => {
-              setOpen(false);
-              setConfirmAction('restart');
-            }}
-          >
-            <ActionHelp description="指重新启动当前 Bot 实例，重新加载当前会话状态、配置或运行流程。">
-              {actionLabel.restart}
-            </ActionHelp>
-          </Button>
-          {!isAgentCodingBot ? (
+          {!isServiceBot || restartDeclared ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start"
+              leftIcon={actionIcon.restart}
+              disabled={lockedByOther || !bot.actions.includes('restart')}
+              onClick={() => {
+                setOpen(false);
+                setConfirmAction('restart');
+              }}
+            >
+              <ActionHelp
+                description={
+                  restartDisabledReason && !bot.actions.includes('restart')
+                    ? restartDisabledReason
+                    : '指重新启动当前 Bot 实例，重新加载当前会话状态、配置或运行流程。'
+                }
+              >
+                {actionLabel.restart}
+              </ActionHelp>
+            </Button>
+          ) : null}
+          {restartPublishDeclared ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start"
+              leftIcon={actionIcon.restart_publish}
+              disabled={lockedByOther || !bot.actions.includes('restart_publish')}
+              onClick={() => {
+                setOpen(false);
+                setConfirmAction('restart_publish');
+              }}
+            >
+              <ActionHelp
+                description={
+                  restartPublishDisabledReason && !bot.actions.includes('restart_publish')
+                    ? restartPublishDisabledReason
+                    : '指重新启动该服务已发布环境（预发/线上）的运行时，不影响草稿机器。'
+                }
+              >
+                {actionLabel.restart_publish}
+              </ActionHelp>
+            </Button>
+          ) : null}
+          {!isAgentCodingBot && !isServiceBot ? (
             <Button
               variant="ghost"
               size="sm"
@@ -160,15 +202,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
       <ConfirmDialog
         open={Boolean(confirmAction)}
         loading={confirming}
-        title={
-          confirmAction === 'delete'
-            ? '确认删除 Bot'
-            : confirmAction === 'upgrade'
-            ? '开启服务化'
-            : confirmAction === 'engine_restart'
-            ? '重启引擎'
-            : '重启 Bot'
-        }
+        title={confirmAction === 'delete' ? '确认删除 Bot' : confirmAction ? actionLabel[confirmAction] : '确认'}
         description={
           confirmAction === 'delete'
             ? `删除「${bot.name}」后无法恢复。`
@@ -176,6 +210,10 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
             ? '开启后不可逆，确认将此 Bot 转换为服务 Bot？'
             : confirmAction === 'engine_restart'
             ? '仅重启引擎进程，不重建容器。'
+            : confirmAction === 'restart_publish'
+            ? restartPublishStage
+              ? `将重启该服务在${restartPublishStageLabel[restartPublishStage]}环境发布的运行时，进行中的服务会话可能短暂中断；草稿机器与草稿数据不受影响。`
+              : '当前发布状态不支持重启发布，请刷新 Bot 列表后重试。'
             : '将重新拉起整个 Bot 容器，现有会话可能中断。'
         }
         confirmText={confirmAction === 'delete' ? '删除' : '确认'}
@@ -187,6 +225,8 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
           try {
             await onAction(confirmAction, bot);
             setConfirmAction(undefined);
+          } catch {
+            // 失败提示已由 Hook toast 统一负责；保留弹窗供用户取消或重试，同时避免 rethrow 变成未处理拒绝。
           } finally {
             setConfirming(false);
           }

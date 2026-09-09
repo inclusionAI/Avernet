@@ -310,7 +310,7 @@ class BaasBotService(BotService):
             ) from e
 
         # Step 2: Get or create adapter session
-        session_client = self._create_session_client(conn_info, engine_type)
+        session_client = self._create_session_client(conn_info, engine_type, metadata=metadata)
 
         # 评测流量：eval_id 存在且调用方未传 session_id 时，
         # 用 consistency_key（结构化格式，含 evalId）作为 session_id 传给 adapter，
@@ -952,12 +952,19 @@ class BaasBotService(BotService):
         return f"{scheme}://{base}"
 
     def _create_session_client(
-        self, conn_info: WsConnectionInfo, engine_type: str = "openclaw"
+        self,
+        conn_info: WsConnectionInfo,
+        engine_type: str = "openclaw",
+        metadata: dict[str, Any] | None = None,
     ) -> AsyncSessionClient:
         """Create an AsyncSessionClient from resolved WS connection info.
 
         Args:
             conn_info: WsConnectionInfo with ws_url, token, target.
+            engine_type: Engine type for URL resolution.
+            metadata: 请求 metadata，从中提取 eval_id / default_tag 注入
+                      X-Eval-Id / X-Agentclaw-Default-Tag Header 供引擎
+                      propagation 传播。为 None 或字段缺失时不注入。
 
         base_url 计算：新引擎（aicoding 等）用 adapter.ws_path() 作 strip 后缀，
         openclaw/teclaw 走原 _build_base_url。
@@ -967,7 +974,14 @@ class BaasBotService(BotService):
             base_url = self._strip_ws_url_to_base(conn_info.ws_url, _adapter.ws_path())
         else:
             base_url = self._build_base_url(conn_info, engine_type)
-        headers = {"x-proxypass-token": conn_info.token}
+        headers: dict[str, str] = {"x-proxypass-token": conn_info.token}
+        if metadata:
+            eval_id = metadata.get("eval_id")
+            if eval_id:
+                headers["X-Eval-Id"] = str(eval_id)
+            default_tag = metadata.get("default_tag")
+            if default_tag:
+                headers["X-Agentclaw-Default-Tag"] = str(default_tag)
         return AsyncSessionClient(
             base_url=base_url,
             headers=headers,
@@ -1214,8 +1228,18 @@ class BaasBotService(BotService):
             return f"agent:main:session:{session_key}:user:{user_id}"
         elif engine_type == "claude_code":
             return f"agent:{tc_bot_id}:session:{session_key}:user:{user_id}"
+        elif engine_type == "teclaw":
+            # 仅评测流量（eval_id 存在）时构造结构化 key，
+            # 生产流量返回 None，保持 TeClaw adapter 原有 sessionKey 生成逻辑
+            if eval_id:
+                return f"agent:{tc_bot_id}:session:{session_key}:user:{user_id}"
+            return None
         else:
-            # TODO
+            logger.warning(
+                "[_create_session_consistency_key] unsupported engine_type=%s, "
+                "returning None",
+                engine_type,
+            )
             return None
 
 

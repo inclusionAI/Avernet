@@ -1263,12 +1263,13 @@ class TestUpdateDevice:
         svc, facade, repo, _, _ = _make_service("TECLAW")
         record = _make_record(status="ACTIVE", provider_device_id="dev@42")
         repo.get_by_device_uuid.return_value = record
-        updated = _make_record(status="ACTIVE")
+        updated = _make_record(status="PENDING")
         repo.get_by_id.return_value = updated
         facade.update_device = AsyncMock()
 
-        result = await svc.update_device("t1", "dev-1")
+        result = await svc.update_device("t1", "dev-1", publish_id=42)
         facade.update_device.assert_awaited_once()
+        assert result.status == "PENDING"
 
     @pytest.mark.asyncio
     async def test_k8s_native_update(self):

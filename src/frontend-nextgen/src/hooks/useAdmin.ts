@@ -1,8 +1,10 @@
 // useAdmin：空间列表搜索（防抖）/ 类型筛选 / 分页 / 创建团队空间 / 打开详情拉成员 /
-// 成员增删改 / 申请加入。编排 store + adminService，错误 toast（经统一 notify 入口）。
+// 申请加入。编排 store + adminService，错误 toast（经统一 notify 入口）。成员增删改（含批量添加）
+// 下沉到 useSpaceMemberActions，避免本 Hook 超文件体积阈值（Hook ≤ 250 行）。
 import { notifyError, notifySuccess } from '@/components/ui/notify';
 import type { Space } from '@/domain/admin/models';
 import { sortSpacesByDisplayOrder } from '@/domain/spaceContext';
+import { useSpaceMemberActions } from '@/hooks/useSpaceMemberActions';
 import { adminService } from '@/services/admin';
 import { useAdminStore } from '@/stores/adminStore';
 import { shouldMuteNonAuthedToast } from '@/utils/loginToastGate';
@@ -36,6 +38,8 @@ export function useAdmin() {
   } = useAdminStore();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const keywordRef = useRef(keyword);
+  // 成员增删改（含批量添加 Promise.allSettled 聚合）编排下沉到此子 Hook。
+  const memberActions = useSpaceMemberActions({ currentSpace, setMembers });
 
   const fetchList = useCallback(
     async (override?: { keyword?: string; spaceType?: typeof spaceType; pageNo?: number; pageSize?: number }) => {
@@ -152,54 +156,6 @@ export function useAdmin() {
     [closeSpaceDetail, fetchList],
   );
 
-  const refreshMembers = useCallback(async () => {
-    if (!currentSpace?.spaceId) return;
-    const r = await adminService.listMembers(currentSpace.spaceId);
-    if (!r.error) setMembers(r.data?.items ?? []);
-  }, [currentSpace, setMembers]);
-
-  const addMember = useCallback(
-    async (userId: string, role: 'ADMIN' | 'MEMBER' = 'MEMBER', userName?: string) => {
-      if (!currentSpace?.spaceId) return;
-      const r = await adminService.addMember(currentSpace.spaceId, userId, role, userName);
-      if (r.error) {
-        notifyError(r.error.message, { title: '添加成员失败', requestId: r.error.requestId });
-        return;
-      }
-      notifySuccess('成员已添加');
-      void refreshMembers();
-    },
-    [currentSpace, refreshMembers],
-  );
-
-  const removeMember = useCallback(
-    async (userId: string) => {
-      if (!currentSpace?.spaceId) return;
-      const r = await adminService.removeMember(currentSpace.spaceId, userId);
-      if (r.error) {
-        notifyError(r.error.message, { title: '移除成员失败', requestId: r.error.requestId });
-        return;
-      }
-      notifySuccess('成员已移除');
-      void refreshMembers();
-    },
-    [currentSpace, refreshMembers],
-  );
-
-  const updateRole = useCallback(
-    async (userId: string, role: 'ADMIN' | 'MEMBER') => {
-      if (!currentSpace?.spaceId) return;
-      const r = await adminService.updateRole(currentSpace.spaceId, userId, role);
-      if (r.error) {
-        notifyError(r.error.message, { title: '修改角色失败', requestId: r.error.requestId });
-        return;
-      }
-      notifySuccess('角色已更新');
-      void refreshMembers();
-    },
-    [currentSpace, refreshMembers],
-  );
-
   const requestJoin = useCallback(
     async (spaceId: number | string, reason: string) => {
       const r = await adminService.requestJoin(spaceId, reason);
@@ -240,9 +196,12 @@ export function useAdmin() {
     openSpaceDetail,
     closeSpaceDetail,
     deleteSpace,
-    addMember,
-    removeMember,
-    updateRole,
+    addMember: memberActions.addMember,
+    addMembers: memberActions.addMembers,
+    addMembersLoading: memberActions.addMembersLoading,
+    addMembersDisabledReason: memberActions.addMembersDisabledReason,
+    removeMember: memberActions.removeMember,
+    updateRole: memberActions.updateRole,
     requestJoin,
     fetchList,
   };

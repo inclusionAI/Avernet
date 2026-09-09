@@ -7,6 +7,7 @@ use axum::{
 use bcs_service_api::{
     CreateInviteTokenCommand, InviteService, InviteUseCaseError, JoinByInviteCommand,
 };
+use bcs_service_api::types::MessageViewScope;
 use serde::Deserialize;
 
 use crate::error::HttpAdapterError;
@@ -16,6 +17,12 @@ use crate::state::HttpAppState;
 pub struct InviteLinkBody {
     #[serde(default)]
     pub ttl_seconds: Option<u64>,
+}
+
+#[derive(Deserialize, Default)]
+pub struct JoinInviteBody {
+    #[serde(default)]
+    pub message_view_scope: Option<MessageViewScope>,
 }
 
 fn build_invite_service(
@@ -105,6 +112,7 @@ pub async fn join_group_by_invite(
     headers: HeaderMap,
     uri: Uri,
     Path(token): Path<String>,
+    body: Option<Json<JoinInviteBody>>,
 ) -> Response {
     let user = state.user_identity.extract(&headers, &uri).await;
     let staff_no = match user.as_ref().and_then(|u| u.staff_no.as_deref()) {
@@ -119,7 +127,12 @@ pub async fn join_group_by_invite(
         .map(str::to_string);
 
     let svc = build_invite_service(&state, &headers);
-    let cmd = JoinByInviteCommand { token, staff_no, nick_name };
+    let cmd = JoinByInviteCommand {
+        token,
+        staff_no,
+        nick_name,
+        message_view_scope: body.and_then(|body| body.message_view_scope),
+    };
     match svc.join_group_by_invite(cmd).await {
         Ok(result) => Json(result).into_response(),
         Err(e) => HttpAdapterError::from(e).into_response(),
@@ -131,6 +144,7 @@ pub async fn join_session_by_invite(
     headers: HeaderMap,
     uri: Uri,
     Path(token): Path<String>,
+    body: Option<Json<JoinInviteBody>>,
 ) -> Response {
     let user = state.user_identity.extract(&headers, &uri).await;
     let staff_no = match user.as_ref().and_then(|u| u.staff_no.as_deref()) {
@@ -145,7 +159,12 @@ pub async fn join_session_by_invite(
         .map(str::to_string);
 
     let svc = build_invite_service(&state, &headers);
-    let cmd = JoinByInviteCommand { token, staff_no, nick_name };
+    let cmd = JoinByInviteCommand {
+        token,
+        staff_no,
+        nick_name,
+        message_view_scope: body.and_then(|body| body.message_view_scope),
+    };
     match svc.join_session_by_invite(cmd).await {
         Ok(result) => Json(result).into_response(),
         Err(e) => HttpAdapterError::from(e).into_response(),

@@ -269,3 +269,111 @@ it('选中首页外会话时直接拉取详情并补入列表（外链直达旧�
   await waitFor(() => expect(result.current.sessionsByBotId['b:1'].find((s) => s.sessionId === 's-old')).toBeDefined());
   await waitFor(() => expect(result.current.selectedSession?.sessionId).toBe('s-old'));
 });
+
+it('记忆的 bot 会话已删除：详情反查失败后回落首条', async () => {
+  useWorkspaceStore.getState().setView('chat');
+  useWorkspaceStore.getState().selectBotSession('gone');
+  renderHook(() => useBotSessions([bot], ['b:1'], 'human-1'));
+  await waitFor(() => expect(svc.getSessionDetail).toHaveBeenCalledWith(bot, 'human-1', 'gone'));
+  await waitFor(() => expect(useWorkspaceStore.getState().selectedBotSessionId).toBe('s2'));
+});
+
+it('展开的 bot 已不在可用列表：清空悬空选中', async () => {
+  useWorkspaceStore.getState().setView('chat');
+  useWorkspaceStore.getState().selectBotSession('sX');
+  renderHook(() => useBotSessions([bot], ['ghost-bot'], 'human-1'));
+  await waitFor(() => expect(useWorkspaceStore.getState().selectedBotSessionId).toBeNull());
+});
+
+it('bot 列表仍在加载（好友 bot 未到位）：不清空展开 bot 缺失时的选中', async () => {
+  useWorkspaceStore.getState().setView('chat');
+  useWorkspaceStore.getState().selectBotSession('sF1');
+  const { rerender } = renderHook(
+    ({ loading }: { loading: boolean }) => useBotSessions([bot], ['fr:1'], 'human-1', loading),
+    { initialProps: { loading: true } },
+  );
+  await act(async () => Promise.resolve());
+  // 好友 bot 列表在途：选中必须保住（旧实现 chatBots.length>0 即清空）。
+  expect(useWorkspaceStore.getState().selectedBotSessionId).toBe('sF1');
+
+  // 列表加载完成且 fr:1 确实不存在 → 兜底恢复，清空悬空选中。
+  rerender({ loading: false });
+  await waitFor(() => expect(useWorkspaceStore.getState().selectedBotSessionId).toBeNull());
+});
+
+it('兜底反查在途时用户已切换选中：失败回调不得劫持新选中', async () => {
+  const detailResolvers: Array<(value: { ok: false }) => void> = [];
+  svc.getSessionDetail.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        detailResolvers.push(resolve);
+      }),
+  );
+  useWorkspaceStore.getState().setView('chat');
+  useWorkspaceStore.getState().selectBotSession('gone');
+  renderHook(() => useBotSessions([bot], ['b:1'], 'human-1'));
+  await waitFor(() => expect(svc.getSessionDetail).toHaveBeenCalledWith(bot, 'human-1', 'gone'));
+
+  // 反查在途期间用户点选了 s1。
+  act(() => {
+    useWorkspaceStore.getState().selectBotSession('s1');
+  });
+  await act(async () => {
+    detailResolvers.splice(0).forEach((resolve) => resolve({ ok: false }));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(useWorkspaceStore.getState().selectedBotSessionId).toBe('s1');
+});
+
+const friendBot: ChatBotView = {
+  botId: 'botfriend:999',
+  realBotId: 'botfriend',
+  ownerId: '999',
+  displayName: '好友Bot',
+  online: true,
+  chatable: true,
+  isFriendBot: true,
+};
+
+it('展开「好友 Bot」分类下的 bot：按 isFriendBot 调用会话列表接口（服务层据此附带 f_user_id）', async () => {
+  useWorkspaceStore.getState().setView('chat');
+  const { result } = renderHook(() => useBotSessions([friendBot], ['botfriend:999'], 'human_327325', false));
+  // 懒加载必须以好友 bot 实体（isFriendBot=true、realBotId 拆分）与当前用户 id 调用 listSessionsPage；
+  // 服务层 withFriendBotRequestParams 据此在 GET /openapi/v1/bots/{realBotId}/sessions 上附带 f_user_id。
+  await waitFor(() => expect(svc.listSessionsPage).toHaveBeenCalledWith(friendBot, 'human_327325', 1, 10));
+  const [calledBot] = svc.listSessionsPage.mock.calls[0];
+  expect(calledBot.isFriendBot).toBe(true);
+  expect(calledBot.realBotId).toBe('botfriend');
+  expect(result.current.sessionsByBotId['botfriend:999']).toBeDefined();
+});
+
+it('openSession 好友 bot：展开时分区归属记为 friend（缺省 mine 会让侧栏好友分区折叠）', async () => {
+  useWorkspaceStore.getState().setView('chat');
+  const { result } = renderHook(() => useBotSessions([friendBot], [], 'human_327325', false));
+  act(() => {
+    result.current.openSession('botfriend:999', 's1');
+  });
+  expect(useWorkspaceStore.getState().expandedBotIds['botfriend:999']).toBe(true);
+  expect(useWorkspaceStore.getState().expandedBotSectionKey['botfriend:999']).toBe('friend');
+});
+
+it('收起后重新展开 bot：每次切换 bot 都重新拉取最新会话列表', async () => {
+  const { rerender } = renderHook(
+    ({ expanded }: { expanded: string[] }) => useBotSessions([bot], expanded, 'human-1'),
+    {
+      initialProps: { expanded: [] as string[] },
+    },
+  );
+  await act(async () => Promise.resolve());
+  expect(svc.listSessionsPage).not.toHaveBeenCalled();
+
+  rerender({ expanded: ['b:1'] });
+  await waitFor(() => expect(svc.listSessionsPage).toHaveBeenCalledTimes(1));
+
+  // 收起再展开（= 切换到别的 bot 再切回来）：必须重新请求获取最新列表。
+  rerender({ expanded: [] });
+  await act(async () => Promise.resolve());
+  rerender({ expanded: ['b:1'] });
+  await waitFor(() => expect(svc.listSessionsPage).toHaveBeenCalledTimes(2));
+});

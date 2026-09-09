@@ -2,14 +2,19 @@
 import { useBotWorkshop } from '@/hooks/useBotWorkshop';
 import { useBotWorkshopRequestIdentity } from '@/hooks/useBotWorkshopEditorIdentity';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
+import { BackendRequestError } from '@/services/backendApi/httpClient';
 import type { BotDomain } from '@/services/botWorkshop';
 import { botWorkshopService } from '@/services/botWorkshop';
 import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { history } from '@umijs/max';
+import { toast } from 'sonner';
 
 jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
+jest.mock('sonner', () => ({
+  toast: { success: jest.fn(), error: jest.fn(), warning: jest.fn(), loading: jest.fn() },
+}));
 jest.mock('@/hooks/useBotWorkshopEditorIdentity', () => ({
   useBotWorkshopRequestIdentity: jest.fn(),
 }));
@@ -25,7 +30,9 @@ jest.mock('@/services/botWorkshop/agentCodingTemplateService', () => ({
 jest.mock('@/services/botWorkshop', () => ({
   botWorkshopService: {
     list: jest.fn(),
+    remove: jest.fn(),
     getCreateSpaces: jest.fn(() => []),
+    restartPublish: jest.fn(),
   },
   getBotActionAvailability: jest.fn(() => []),
 }));
@@ -249,4 +256,89 @@ it('点击对话时跳转到用户单聊并展开对应 Bot', () => {
   expect(state.expandedBotIds).toEqual({ 'bot-1:2088': true });
   expect(state.expandedBotSectionKey['bot-1:2088']).toBe('mine');
   expect(state.selectedBotSessionId).toBeNull();
+});
+
+describe('runAction restart_publish（重启发布）', () => {
+  it('经 Service 提交重启发布，提示提交成功并刷新列表', async () => {
+    mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+    mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+    const mockedRestartPublish = botWorkshopService.restartPublish as jest.Mock;
+    mockedRestartPublish.mockResolvedValue(undefined);
+    const { result } = renderHook(() => useBotWorkshop());
+    await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+
+    const bot = { id: 'service-prestable-bot', lifecycle: 'prestable', serviceMode: 'service' } as BotDomain;
+
+    await act(async () => {
+      await result.current.runAction('restart_publish', bot);
+    });
+
+    expect(mockedRestartPublish).toHaveBeenCalledWith(bot);
+    expect(toast.success).toHaveBeenCalledWith('重启发布已提交');
+    await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(2));
+  });
+
+  it('提交失败时展示服务端错误并原样抛出，不刷新列表', async () => {
+    mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+    mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+    const mockedRestartPublish = botWorkshopService.restartPublish as jest.Mock;
+    mockedRestartPublish.mockRejectedValue(new Error('发布人在审批中'));
+    const { result } = renderHook(() => useBotWorkshop());
+    await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+
+    const bot = { id: 'service-online-bot', lifecycle: 'running', serviceMode: 'service' } as BotDomain;
+    let caught: unknown;
+    await act(async () => {
+      try {
+        await result.current.runAction('restart_publish', bot);
+      } catch (error) {
+        caught = error;
+      }
+    });
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe('发布人在审批中');
+    expect(toast.error).toHaveBeenCalledWith('发布人在审批中');
+    expect(mockedList).toHaveBeenCalledTimes(1);
+  });
+});
+
+it('删除失败优先展示后端返回的明确错误信息', async () => {
+  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  const remove = botWorkshopService.remove as jest.Mock;
+  remove.mockRejectedValue(
+    new BackendRequestError('该 Bot 存在运行中的发布任务，暂时无法删除', {
+      status: 409,
+      apiPath: '/openapi/v1/bots/bot-1',
+      data: { code: 409000, message: '该 Bot 存在运行中的发布任务，暂时无法删除' },
+    }),
+  );
+  const { result } = renderHook(() => useBotWorkshop());
+  await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+
+  await expect(act(async () => result.current.runAction('delete', { id: 'bot-1' } as BotDomain))).rejects.toThrow(
+    '该 Bot 存在运行中的发布任务，暂时无法删除',
+  );
+  expect(toast.error).toHaveBeenCalledWith('该 Bot 存在运行中的发布任务，暂时无法删除');
+});
+
+it('删除接口返回不支持操作时展示中文提示', async () => {
+  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  const remove = botWorkshopService.remove as jest.Mock;
+  remove.mockRejectedValue(
+    new BackendRequestError('Operation not supported for this bot', {
+      status: 409,
+      apiPath: '/openapi/v1/bots/bot-1',
+      data: { code: 409000, message: 'Operation not supported for this bot' },
+    }),
+  );
+  const { result } = renderHook(() => useBotWorkshop());
+  await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+
+  await expect(act(async () => result.current.runAction('delete', { id: 'bot-1' } as BotDomain))).rejects.toThrow(
+    'Operation not supported for this bot',
+  );
+  expect(toast.error).toHaveBeenCalledWith('该 Bot 不允许删除');
 });

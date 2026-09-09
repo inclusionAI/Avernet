@@ -1,4 +1,6 @@
-use bcs_domain::{CoordinationMode, CoordinationSurface, SenderType};
+use bcs_domain::{
+    CoordinationMode, CoordinationSurface, MessageAudience, MessageVisibilityDomain, SenderType,
+};
 use bcs_protocol::{
     BcsFrame, CoordinationCall, DirectiveAction, EventFrame, GroupContext, RequestFrame,
     RequestSource, ResponseDirective, ResponseMode as WireResponseMode, TOOL_ASSIGN_TASK,
@@ -12,7 +14,7 @@ use bcs_service_api::{
     DefaultDelivery, DeliveryType, FrontendDeliveryCommand, FrontendDeliveryKind,
     FrontendDeliveryResult, FrontendDeliveryTarget, Group, GroupKind, GroupStatus, GroupStrategy,
     MESSAGE_LOG_SCHEMA_VERSION, MessageDeliveryResult, MessageLogContent, MessageLogEventType,
-    MessageLogMode, MessageLogStatus, MessageLogTargetSummary, ResponseMode,
+    MessageLogMode, MessageLogStatus, MessageLogTargetSummary, ParticipantRole, ResponseMode,
     RouteParticipantOverlay, RoutingDecision, RoutingMode, RoutingTarget, RunFallbackDelivery,
     ServiceError, ServiceResult, SystemMessageEvent, TaskCompleteCommand, TaskDispatchCommand,
     TaskMessageCommand, backfill_bot_names, backfill_participant_names, message_log_json,
@@ -23,6 +25,7 @@ use tracing::{info, warn};
 use crate::BcsMessageFlow;
 use crate::MSG_LOG_TARGET;
 use crate::group_flow::apply_overlay_to_decision;
+use crate::message_tracker::BotEventRunInfo;
 use crate::protocol_context::{group_context_delivery_type, group_context_input, group_type_wire};
 use crate::task_store::{TaskEntry, TaskLedgerStatus, TaskStore};
 
@@ -100,7 +103,8 @@ pub async fn handle_bot_event(
         }
     }
 
-    let mut frontend_deliveries = publish_incoming_event(flow, &cmd).await?;
+    let mut frontend_deliveries =
+        publish_incoming_event(flow, &cmd, task_id_for_event.as_deref()).await?;
     try_channel_outbound(flow, &cmd).await;
     let mut bot_deliveries = Vec::new();
 
@@ -289,35 +293,33 @@ async fn try_channel_outbound(flow: &BcsMessageFlow, cmd: &BotEventCommand) {
 async fn resolve_channel_sender(
     flow: &BcsMessageFlow,
     cmd: &BotEventCommand,
-) -> (bcs_domain::ParticipantRole, String) {
-    if let Some(info) = flow.message_tracker.channel_sender_info(&cmd.run_id).await {
+) -> (ParticipantRole, String) {
+    if let Some(info) = flow
+        .message_tracker
+        .channel_sender_info(&cmd.run_id)
+        .await
+    {
         return info;
     }
 
-    let info = match flow.group.get(&cmd.group_id).await {
-        Some(group) => match group
-            .participants
-            .into_iter()
-            .find(|participant| participant.bot_uuid == cmd.bot_id)
-        {
-            Some(mut participant) => {
-                let sender_role = participant.role;
-                let label = match participant_display_name(&participant) {
-                    Some(label) => label,
-                    None => {
-                        backfill_participant_names(
-                            flow.registry.as_ref(),
-                            std::slice::from_mut(&mut participant),
-                        )
-                        .await;
-                        participant_display_name(&participant).unwrap_or_else(|| cmd.bot_id.clone())
-                    }
-                };
-                (sender_role, label)
-            }
-            None => (bcs_domain::ParticipantRole::Observer, cmd.bot_id.clone()),
-        },
-        None => (bcs_domain::ParticipantRole::Observer, cmd.bot_id.clone()),
+    let run_info = resolve_bot_event_run_info(flow, cmd).await;
+    let info = match run_info.participant {
+        Some(mut participant) => {
+            let sender_role = participant.role;
+            let label = match participant_display_name(&participant) {
+                Some(label) => label,
+                None => {
+                    backfill_participant_names(
+                        flow.registry.as_ref(),
+                        std::slice::from_mut(&mut participant),
+                    )
+                    .await;
+                    participant_display_name(&participant).unwrap_or_else(|| cmd.bot_id.clone())
+                }
+            };
+            (sender_role, label)
+        }
+        None => (ParticipantRole::Observer, cmd.bot_id.clone()),
     };
     flow.message_tracker
         .cache_channel_sender_info(&cmd.run_id, info.clone())
@@ -1136,6 +1138,7 @@ async fn record_task_response_event_in_store(
 async fn publish_incoming_event(
     flow: &BcsMessageFlow,
     cmd: &BotEventCommand,
+    task_id: Option<&str>,
 ) -> ServiceResult<Vec<FrontendDeliveryResult>> {
     let frontend_event = workbench_event_name(&cmd.event_type, &cmd.state);
     let frame = serde_json::json!({
@@ -1164,6 +1167,7 @@ async fn publish_incoming_event(
             None,
         )))?,
     };
+    let (visibility_domain, audience) = incoming_event_visibility(flow, cmd, task_id).await;
     let result = flow
         .frontend_delivery
         .publish(FrontendDeliveryCommand {
@@ -1172,9 +1176,104 @@ async fn publish_incoming_event(
             delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
             run_fallback: Some(run_fallback),
             exclude_conn_id: None,
+            visibility_domain,
+            audience,
         })
         .await?;
     Ok(vec![result])
+}
+
+async fn incoming_event_visibility(
+    flow: &BcsMessageFlow,
+    cmd: &BotEventCommand,
+    task_id: Option<&str>,
+) -> (MessageVisibilityDomain, Option<MessageAudience>) {
+    let run_info = resolve_bot_event_run_info(flow, cmd).await;
+    let visibility_domain = run_info.visibility_domain;
+    if visibility_domain == MessageVisibilityDomain::Chat {
+        return (visibility_domain, None);
+    }
+
+    if let Some(task_id) = task_id {
+        let audience = match flow.task_store.get(task_id).await {
+            Some(task)
+                if task.group_id == cmd.group_id
+                    && task.target_bot == cmd.bot_id
+                    && task.session_id.as_deref() == cmd.bcs_session_id.as_deref() =>
+            {
+                MessageAudience::directed([task.driver_bot, task.target_bot])
+                    .unwrap_or(MessageAudience::FullOnly)
+            }
+            _ => MessageAudience::FullOnly,
+        };
+        return (visibility_domain, Some(audience));
+    }
+
+    let sender_role = run_info
+        .participant
+        .filter(|participant| participant.is_bot())
+        .map(|participant| participant.role);
+    // State-machine node events are consumed by CollaborationRuntime before
+    // they reach this generic group-message path. A manager chat event that
+    // reaches here is therefore a public group announcement, while non-chat
+    // execution events remain full-only.
+    let audience = if sender_role == Some(ParticipantRole::Manager)
+        && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
+    {
+        MessageAudience::Public
+    } else {
+        MessageAudience::FullOnly
+    };
+    (visibility_domain, Some(audience))
+}
+
+async fn resolve_bot_event_run_info(
+    flow: &BcsMessageFlow,
+    cmd: &BotEventCommand,
+) -> BotEventRunInfo {
+    if let Some(info) = flow
+        .message_tracker
+        .bot_event_run_info(&cmd.run_id, &cmd.group_id, &cmd.bot_id)
+        .await
+    {
+        return info;
+    }
+
+    let group = flow.group.try_get(&cmd.group_id).await.ok().flatten();
+    let visibility_domain = group
+        .as_ref()
+        .map(|group| match group.group_strategy {
+            GroupStrategy::Chat => MessageVisibilityDomain::Chat,
+            GroupStrategy::ManagerWorker => MessageVisibilityDomain::ManagerWorker,
+            GroupStrategy::StateMachine => MessageVisibilityDomain::StateMachine,
+        })
+        .unwrap_or(MessageVisibilityDomain::ManagerWorker);
+    let mut participant = group
+        .as_ref()
+        .and_then(|group| group.get_participant(&cmd.bot_id))
+        .cloned();
+    if let (Some(session_id), Some(session_management)) =
+        (cmd.bcs_session_id.as_deref(), flow.session_management.as_ref())
+    {
+        if let Ok(Some(session)) = session_management.get(session_id).await {
+            if session.group_id == cmd.group_id {
+                participant = session
+                    .participants
+                    .into_iter()
+                    .find(|candidate| candidate.bot_uuid == cmd.bot_id);
+            }
+        }
+    }
+    let info = BotEventRunInfo {
+        group_id: cmd.group_id.clone(),
+        bot_id: cmd.bot_id.clone(),
+        visibility_domain,
+        participant,
+    };
+    flow.message_tracker
+        .cache_bot_event_run_info(&cmd.run_id, info.clone())
+        .await;
+    info
 }
 
 fn workbench_event_name<'a>(event_type: &'a str, state: &ChatEventState) -> &'a str {
@@ -1197,6 +1296,9 @@ async fn publish_system_event(
     bot_id: &str,
     text: &str,
 ) -> ServiceResult<FrontendDeliveryResult> {
+    let visibility_domain = crate::group_flow::frontend_domain_for_group(flow, group_id).await;
+    let audience = (visibility_domain != MessageVisibilityDomain::Chat)
+        .then_some(MessageAudience::FullOnly);
     let frame = serde_json::json!({
         "type": "event",
         "event": "chat",
@@ -1222,6 +1324,8 @@ async fn publish_system_event(
             delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
             run_fallback: None,
             exclude_conn_id: None,
+            visibility_domain,
+            audience,
         })
         .await
 }

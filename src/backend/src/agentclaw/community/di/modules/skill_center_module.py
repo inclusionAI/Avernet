@@ -223,6 +223,7 @@ from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
+from agentclaw.community.plugin_api.local_skill_storage import LocalSkillStorageResolver
 from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
 
 
@@ -578,14 +579,19 @@ class SkillCenterModule(
         from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import (
             PerDomainRuntimeProjection,
         )
+        from agentclaw.community.core.skill_center.services.runtime_projections.skill_runtime_delivery import (
+            SkillRuntimeDelivery,
+        )
         from agentclaw.community.core.skill_center.services.runtime_projections.whole_artifact import (
             WholeArtifactRuntimeProjection,
         )
 
         return EngineRuntimeProjectionRegistry(
             default=PerDomainRuntimeProjection(
-                pool_runtime=pool_runtime,
-                pool_layouts=pool_layouts,
+                skill_delivery=SkillRuntimeDelivery(
+                    pool_runtime=pool_runtime,
+                    pool_layouts=pool_layouts,
+                ),
             ),
             by_engine={"teclaw": WholeArtifactRuntimeProjection()},
         )
@@ -719,6 +725,12 @@ class SkillCenterModule(
 
     @singleton
     @provider
+    def local_skill_storage(self) -> LocalSkillStorageResolver:
+        from agentclaw.community.plugins.local_skill_storage import ConfiguredLocalSkillStorage
+        return ConfiguredLocalSkillStorage()
+
+    @singleton
+    @provider
     @inject
     def skill_service_factory(
         self,
@@ -731,6 +743,7 @@ class SkillCenterModule(
         bot_repo: BotRepository,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
         path_factory: WorkspacePathFactory,
+        local_skill_storage: LocalSkillStorageResolver,
     ) -> SkillServiceFactory:
         def resolve_pool_paths(
             owner_id: str,
@@ -762,6 +775,7 @@ class SkillCenterModule(
             git_sync_service_factory=git_sync_service_factory,
             path_factory=path_factory,
             pool_layout_paths=resolve_pool_paths,
+            local_skill_storage=local_skill_storage,
         )
 
     @singleton

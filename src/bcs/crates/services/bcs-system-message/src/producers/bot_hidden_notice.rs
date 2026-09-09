@@ -95,6 +95,7 @@ mod tests {
                     actor_kind: ActorKind::Bot,
                     mode: Some(ParticipantMode::Auto),
                     tags: Vec::new(),
+                    message_view_scope: bcs_domain::MessageViewScope::Full,
                 },
                 Participant {
                     bot_uuid: "bot-hidden".into(),
@@ -104,6 +105,7 @@ mod tests {
                     actor_kind: ActorKind::Bot,
                     mode: Some(ParticipantMode::Auto),
                     tags: Vec::new(),
+                    message_view_scope: bcs_domain::MessageViewScope::Full,
                 },
             ],
             messages: vec![],
@@ -165,6 +167,7 @@ mod tests {
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::Auto),
                 tags: Vec::new(),
+                message_view_scope: bcs_domain::MessageViewScope::Full,
             }],
             messages: vec![],
             workspace: Default::default(),

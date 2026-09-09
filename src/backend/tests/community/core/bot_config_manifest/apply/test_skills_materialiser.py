@@ -612,7 +612,8 @@ _SKILL_MD = (
 ).encode()
 
 SKILL_GIT_SOURCE = {
-    "git": "https://git.corp/skills.git",
+    "protocol": "git",
+    "url": "https://git.corp/skills.git",
     "ref": "main",
     "subpath": "pkg",
     "auth": None,

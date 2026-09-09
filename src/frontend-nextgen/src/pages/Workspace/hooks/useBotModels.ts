@@ -24,8 +24,9 @@ export function useBotModels(
   const [isLoadingModels, setIsLoadingModels] = useState(false);
 
   useEffect(() => {
-    if (!bot || !activeIdentityId) {
+    if (!bot || !activeIdentityId || bot.isFriendBot) {
       setModels([]);
+      setIsLoadingModels(false);
       return;
     }
     let cancelled = false;
@@ -45,7 +46,7 @@ export function useBotModels(
 
   const selectModel = useCallback(
     async (modelId: string) => {
-      if (!bot || !session || !activeIdentityId || modelId === session.model) return false;
+      if (!bot || bot.isFriendBot || !session || !activeIdentityId || modelId === session.model) return false;
       const res = await botSessionService.updateSessionModel(bot, activeIdentityId, session.sessionId, modelId);
       if (!res.ok) {
         toast.error(res.error.friendlyMessage);

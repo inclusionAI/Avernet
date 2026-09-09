@@ -148,6 +148,7 @@ fn stub_session(kind: SessionKind, participants: Vec<Participant>) -> Session {
         error_message: None,
         callback_status: Some("pending".to_string()),
         activation_count: 1,
+        message_visibility_version: 1,
         caller_principal: None,
         created_by: None,
         created_at: 1,
@@ -188,6 +189,7 @@ async fn test_app(
                     actor_kind: ActorKind::Bot,
                     mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
                     tags: Vec::new(),
+                    message_view_scope: bcs_domain::MessageViewScope::Full,
                 },
                 Participant {
                     bot_uuid: "worker-bot".to_string(),
@@ -197,6 +199,7 @@ async fn test_app(
                     actor_kind: ActorKind::Bot,
                     mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
                     tags: Vec::new(),
+                    message_view_scope: bcs_domain::MessageViewScope::Full,
                 },
             ],
         ))

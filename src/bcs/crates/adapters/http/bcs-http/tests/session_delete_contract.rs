@@ -132,6 +132,7 @@ async fn bot_app() -> (axum::Router, TempDir) {
         error_message: None,
         callback_status: None,
         activation_count: 1,
+        message_visibility_version: 1,
         caller_principal: None,
         created_by: Some("creator-bot".to_string()),
         current_msg_seq: 0,
@@ -192,6 +193,7 @@ async fn human_app(staff: &str) -> (axum::Router, TempDir) {
         error_message: None,
         callback_status: None,
         activation_count: 1,
+        message_visibility_version: 1,
         caller_principal: None,
         created_by: Some("creator-bot".to_string()),
         current_msg_seq: 0,
@@ -226,6 +228,7 @@ fn bot_participant(bot_uuid: &str, role: ParticipantRole) -> Participant {
         actor_kind: ActorKind::Bot,
         mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
         tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
     }
 }
 

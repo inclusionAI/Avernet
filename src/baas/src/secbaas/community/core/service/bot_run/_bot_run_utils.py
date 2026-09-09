@@ -225,6 +225,11 @@ def build_chat_metadata(
         "biz_task_id": str(biz_task_id),
         "biz_scene": str(biz_scene),
     }
+    # 评测标识透传：eval_id / default_tag 需传递给引擎 chat.send
+    if metadata.get("eval_id"):
+        chat_metadata["eval_id"] = str(metadata["eval_id"])
+    if metadata.get("default_tag"):
+        chat_metadata["default_tag"] = str(metadata["default_tag"])
     # eval 观测字段注入 — 委托 Plugin
     enriched = eval_session_log.enrich_chat_metadata(
         metadata=chat_metadata,

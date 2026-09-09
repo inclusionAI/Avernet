@@ -22,6 +22,7 @@ from secbaas.community.api.session_file_sharing import (
     SessionCompleteUploadResponse,
     SessionDeleteTransferResponse,
     SessionFileSharingDispatcher,
+    SessionFileTransferProxyUnavailableError,
     SessionGetTransferStatusResponse,
     SessionGetUploadUrlResponse,
     SessionShareLinkResponse,
@@ -38,7 +39,10 @@ if TYPE_CHECKING:
     from secbaas.community.core.repository.session_file_ticket import (
         SessionTicketRepository,
     )
-    from secbaas.community.spi.file_transfer import FileTransferBackend
+    from secbaas.community.spi.file_transfer import (
+        FileTransferBackend,
+        SessionFileUrlProjector,
+    )
 
 logger = get_logger("core-service")
 
@@ -47,9 +51,10 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
     """File transfer dispatcher for Session File Sharing.
 
     Implements ``SessionFileSharingDispatcher`` protocol.  Injects
-    ``FileTransferBackend`` (for OSS operations) and
-    ``SessionTicketRepository`` (for ticket persistence) via the
-    constructor — no bot/device resolution needed.
+    ``FileTransferBackend`` (for OSS operations), ``SessionTicketRepository``
+    (for ticket persistence), and ``SessionFileUrlProjector`` (for
+    client-visible URL projection) via the constructor — no bot/device
+    resolution needed.
 
     Six methods cover the full Session transfer lifecycle:
     get-upload-url → complete/cancel → share-link / status / delete.
@@ -63,9 +68,11 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
         self,
         file_transfer_backend: FileTransferBackend,
         ticket_repo: SessionTicketRepository,
+        session_file_url_projector: SessionFileUrlProjector,
     ):
         self._file_transfer_backend = file_transfer_backend
         self._ticket_repo = ticket_repo
+        self._session_file_url_projector = session_file_url_projector
 
     # ------------------------------------------------------------------
     # dispatch_get_upload_url
@@ -185,15 +192,44 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 part_count,
             )
 
-            parts_data = [
-                {
-                    "part_number": p.part_number,
-                    "upload_url": p.upload_url,
-                    "http_method": "PUT",
-                    "expires_at": expires_at,
-                }
-                for p in multipart_session.parts
-            ]
+            # Project after initiation, fail-safe: a D-06 refusal must abort
+            # the just-initiated OSS multipart session — otherwise the
+            # uploadId leaks (no ticket exists yet, so cancel/delete cannot
+            # reach it).
+            try:
+                parts_data = [
+                    {
+                        "part_number": p.part_number,
+                        "upload_url": self._session_file_url_projector.project(
+                            p.upload_url
+                        ),
+                        "http_method": "PUT",
+                        "expires_at": expires_at,
+                    }
+                    for p in multipart_session.parts
+                ]
+            except SessionFileTransferProxyUnavailableError as proj_err:
+                logger.warning(
+                    "MULTIPART URL projection refused (transfer_id=%s) — "
+                    "aborting OSS multipart session %s",
+                    transfer_id,
+                    multipart_session.session_id,
+                )
+                try:
+                    await asyncio.to_thread(
+                        self._file_transfer_backend.abort_multipart_upload,
+                        staging_path,
+                        multipart_session.session_id,
+                    )
+                except Exception:
+                    # The client must still receive the original 503 even if
+                    # the cleanup roundtrip fails; log for operator review.
+                    logger.exception(
+                        "Aborting leaked multipart session %s failed (transfer_id=%s)",
+                        multipart_session.session_id,
+                        transfer_id,
+                    )
+                raise proj_err
 
             # Create ticket AFTER OSS success — DB/OSS consistency
             await asyncio.to_thread(
@@ -228,6 +264,11 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 expire_seconds,
                 content_type,
             )
+
+            # Project before any ticket is created — a D-06 refusal must
+            # never leave an orphan ticket behind after the client did not
+            # receive a usable URL.
+            upload_url = self._session_file_url_projector.project(upload_url)
 
             logger.info(
                 "Upload URL generated: transfer_id=%s, staging_path=%s",
@@ -537,6 +578,8 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
             expire_seconds,
             response_params,
         )
+
+        share_url = self._session_file_url_projector.project(share_url)
 
         logger.info(
             "share-link audit: operator=%s transfer_id=%s session_id=%s "

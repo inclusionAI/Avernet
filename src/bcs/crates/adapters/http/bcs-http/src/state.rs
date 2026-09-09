@@ -7,7 +7,7 @@ use bcs_route_security::OutboundUrlGuard;
 use axum::http::{HeaderMap, HeaderName};
 pub use bcs_service_api::{ChatRunCleanupPort, ChatRunEventPort};
 use bcs_service_api::application::v1::{
-    InternalBotAttributesService, GroupService, SessionFileApplicationService
+    GroupService, InternalBotAttributesService, SessionFileApplicationService, SessionService,
 };
 use bcs_service_api::{ProviderCredentialRepoPort, ProviderStreamGrayList};
 use bcs_services_container::Services;
@@ -434,6 +434,7 @@ fn purge_expired(runs: &mut HashMap<String, AdminInvocationRun>) {
 pub struct HttpAppState {
     pub services: Services,
     pub group_application: Option<Arc<dyn GroupService>>,
+    pub session_application: Option<Arc<dyn SessionService>>,
     pub session_file_application: Option<Arc<dyn SessionFileApplicationService>>,
     pub internal_bot_attributes_service: Option<Arc<dyn InternalBotAttributesService>>,
     pub health: Arc<dyn HealthPort>,
@@ -490,6 +491,7 @@ impl HttpAppState {
         Self {
             services,
             group_application: None,
+            session_application: None,
             session_file_application: None,
             internal_bot_attributes_service: None,
             health: Arc::new(DefaultHealthPort),
@@ -555,6 +557,11 @@ impl HttpAppState {
 
     pub fn with_group_application(mut self, service: Arc<dyn GroupService>) -> Self {
         self.group_application = Some(service);
+        self
+    }
+
+    pub fn with_session_application(mut self, service: Arc<dyn SessionService>) -> Self {
+        self.session_application = Some(service);
         self
     }
 

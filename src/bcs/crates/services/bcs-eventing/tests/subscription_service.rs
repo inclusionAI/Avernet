@@ -278,6 +278,7 @@ async fn inline_group_finalization_activates_and_snapshots_ordered_creation_even
         error_message: None,
         callback_status: None,
         activation_count: 1,
+        message_visibility_version: 1,
         caller_principal: None,
         created_by: Some("human_owner".to_string()),
         current_msg_seq: 0,

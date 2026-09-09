@@ -38,7 +38,9 @@ pub use core::{
 };
 pub use application::SystemMessageService;
 pub use application::v1::{
-    BotInternalAttributes, FriendCheckInStrategy, InternalBotAttributesService,
+    BindInviteCode, BindInviteCodeResult, BotInternalAttributes, FriendCheckInStrategy,
+    GetMyInviteCodeBinding, InitInviteCodes, InitInviteCodesResult,
+    InviteCodeBindingView, InviteCodeService, InternalBotAttributesService,
     PatchBotInternalAttributes, UserVisibility,
 };
 pub use application::system_message::resolve_session_topic;
@@ -219,6 +221,7 @@ pub use port::{
     SessionRepoPort, StateMachineDefinitionRepoPort, StateMachineResultPublishCommand,
     StateMachineResultPublisherPort, StateMachineRunRepoPort, StateMachineTerminalEvent,
     StateMachineTerminalStatus, UserIdentity, UserIdentityRepoPort,
+    UpdateSessionParticipantMessageViewScopeWithEvent,
     CollaborationTemplateEntry, CollaborationTemplateRepoPort,
     CollaborationDefinitionRecord, CollaborationEventRecord, CollaborationEventRepoPort,
     CreateStateMachineRerun, CreateStateMachineRerunOutcome,

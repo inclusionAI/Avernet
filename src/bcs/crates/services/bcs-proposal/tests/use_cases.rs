@@ -1338,6 +1338,7 @@ fn test_session(
         error_message: None,
         callback_status: None,
         activation_count: 1,
+        message_visibility_version: 1,
         caller_principal: None,
         created_by: None,
         current_msg_seq: 0,

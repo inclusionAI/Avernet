@@ -18,6 +18,7 @@ import {
 } from './groupChatRequestBuilder';
 import { useConnectionStatusSmoothing } from './useConnectionStatusSmoothing';
 import { useGroupBootstrapProcessing } from './useGroupBootstrapProcessing';
+import { useHumanOnlyChatRequests } from './useHumanOnlyChatRequests';
 import { useManifestHistoryLoader } from './useManifestHistoryLoader';
 
 /**
@@ -26,7 +27,7 @@ import { useManifestHistoryLoader } from './useManifestHistoryLoader';
  * 是基于 SDK `useChat` 与 `createGroupChatProvider` 的薄包装：
  * - 透传 `chat` (useChat 结果) 供 GroupChatPane SDK UI 直接消费
  * - 透传 `supportState` (Provider 阶段) 与 `connectionStatus` (WebSocket 连接 5 态)
- * - 暴露 `send/stop/reconnect` 命令，仅在 Hook 内做最小裁剪（trim、isRequesting 短路）
+ * - 暴露 `send/stop/reconnect` 命令，仅在 Hook 内做最小裁剪（trim、请求中短路；human-only 不阻塞输入）
  * - 不拼装会话显示字段（业务字段层由调用方 / 组件负责）
  *
  * Provider 连接、history hydration 与 WS 暂存由 useManifestHistoryLoader 统一协调；
@@ -72,6 +73,7 @@ export function useGroupChat(session: SessionView | null) {
     placeholderMessage: '',
     panelRef,
   });
+  const { isSendBlocked, markRequest } = useHumanOnlyChatRequests(chat, session?.participants ?? []);
   const groupBootstrapProcessing = useGroupBootstrapProcessing({
     groupId,
     sessionId,
@@ -136,11 +138,12 @@ export function useGroupChat(session: SessionView | null) {
   const send = (text: string, mentions?: string[], attachments?: SessionMessageAttachment[]) => {
     const hasText = text.trim().length > 0;
     const hasAttachments = !!attachments && attachments.length > 0;
-    if (!sessionId || (!hasText && !hasAttachments) || chat.isRequesting) return;
+    if (!sessionId || (!hasText && !hasAttachments) || isSendBlocked()) return;
     const trimmed = text.trim();
     // 本地回显附件：share_url 用于跨端/免鉴权分发，`<img>` 本地回显改走会话内容地址避免分享域名/CORS 加载失败。
     // 与桥路径 buildGroupChatBridgeRequest 共用 buildEchoAttachments/buildGroupUserMessageExtra（O3 回显一致）。
     const echoAttachments = buildEchoAttachments(sessionId, attachments);
+    markRequest(mentions);
     chat.onRequest({
       content: trimmed,
       sessionId,

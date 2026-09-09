@@ -8,6 +8,10 @@ import {
   SessionManagePanel,
   type SessionManagePanelProps,
 } from '@/pages/Workspace/components/ManagePanel/SessionManagePanel';
+import {
+  WorkspaceManagePanels,
+  type WorkspaceManagePanelsProps,
+} from '@/pages/Workspace/components/WorkspaceManagePanels';
 import type { PolicyResult } from '@/services/workspace/groupService';
 import { expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
@@ -75,11 +79,39 @@ it('group panel exposes base info tabs and member management', () => {
   render(<GroupManagePanel {...groupProps()} />);
   expect(screen.getByRole('tab', { name: '基础信息' })).toBeInTheDocument();
   expect(screen.getByRole('tab', { name: '高级配置' })).toBeInTheDocument();
+  expect(screen.getByText('成员数量')).toBeInTheDocument();
+  expect(screen.getByText('创建时间')).toBeInTheDocument();
+  expect(screen.getByText('群 ID')).toBeInTheDocument();
+  expect(screen.getByText('g1')).toBeInTheDocument();
   expect(screen.getByText('群成员管理')).toBeInTheDocument();
   expect(screen.getByText('分享协作群')).toBeInTheDocument();
   expect(screen.getByText('用户可以通过链接加入群组')).toBeInTheDocument();
   expect(screen.queryByText(/Human/)).not.toBeInTheDocument();
   expect(screen.getByText('删除协作群')).toBeInTheDocument();
+});
+
+it('member list resolves only the authenticated human and preserves other human names', () => {
+  const otherHumanGroup: GroupView = {
+    ...group,
+    participants: [
+      { actorId: 'human_447147', kind: 'human', name: '447147', role: 'owner', mode: 'present' },
+      { actorId: 'human_447148', kind: 'human', name: '其他成员', role: 'member', mode: 'present' },
+    ],
+    participantCount: 2,
+  };
+  render(
+    <GroupManagePanel
+      {...groupProps()}
+      group={otherHumanGroup}
+      activeIdentity={{ id: 'bot_xxx:447147', kind: 'bot', displayName: '协作 Bot', online: true }}
+      authenticatedUserId="447147"
+      authenticatedUserName="风太"
+    />,
+  );
+
+  expect(screen.getByText('风太')).toBeInTheDocument();
+  expect(screen.getByText('其他成员')).toBeInTheDocument();
+  expect(screen.queryByText('447147')).not.toBeInTheDocument();
 });
 
 it('group panel advanced tab renders dingtalk binding form', () => {
@@ -124,6 +156,7 @@ it('group panel hides 退出协作群 for non-member viewer', () => {
 const sessionProps = (): SessionManagePanelProps => ({
   session,
   groupName: group.name,
+  groupKind: group.kind,
   canManage: allowed,
   activeIdentity: identity,
   candidates: [identity],
@@ -139,6 +172,14 @@ const sessionProps = (): SessionManagePanelProps => ({
 it('session panel renders basic info, members, share and delete', () => {
   render(<SessionManagePanel {...sessionProps()} />);
   expect(screen.getByText('会话管理')).toBeInTheDocument();
+  expect(screen.getByText('自由聊天')).toBeInTheDocument();
+  expect(screen.queryByText('聊天会话')).not.toBeInTheDocument();
+  expect(screen.queryByText('进行中')).not.toBeInTheDocument();
+  expect(screen.queryByText('已完成')).not.toBeInTheDocument();
+  expect(screen.getByText('群 ID')).toBeInTheDocument();
+  expect(screen.getByText('g1')).toBeInTheDocument();
+  expect(screen.getByText('会话 ID')).toBeInTheDocument();
+  expect(screen.getByText('s1')).toBeInTheDocument();
   expect(screen.getByText('会话成员管理')).toBeInTheDocument();
   expect(screen.getByText('分享会话')).toBeInTheDocument();
   expect(screen.getByText('删除会话')).toBeInTheDocument();
@@ -156,4 +197,64 @@ it('session panel hides delete for non driver/manager even when canManage is all
   render(<SessionManagePanel {...sessionProps()} session={viewerSession} />);
   expect(screen.getByText('可查看')).toBeInTheDocument();
   expect(screen.queryByText('删除会话')).not.toBeInTheDocument();
+});
+
+it('session panel maps group kind to collaboration type label', () => {
+  const cases: Array<[GroupView['kind'], string]> = [
+    ['free_chat', '自由聊天'],
+    ['task_master_slave', '任务协作'],
+    ['task_dag', '自定义协作'],
+  ];
+
+  cases.forEach(([kind, label]) => {
+    const { unmount } = render(<SessionManagePanel {...sessionProps()} groupKind={kind} />);
+    expect(screen.getByText(label)).toBeInTheDocument();
+    unmount();
+  });
+});
+
+it.each(['manage', 'sessionManage'] as const)('%s 入口将认证名称传递到实际成员列表', (activePanel) => {
+  const participants: GroupView['participants'] = [
+    { actorId: 'human_user-101', kind: 'human', name: '旧用户名称', role: 'member', mode: 'present' },
+    { actorId: 'human_user-202', kind: 'human', name: '其他成员', role: 'member', mode: 'present' },
+    { actorId: 'bot_fixture:user-101', kind: 'bot', name: '协作 Bot', role: 'driver', mode: 'auto' },
+  ];
+  const groupHandlers = groupProps();
+  const sessionHandlers = sessionProps();
+  const props: WorkspaceManagePanelsProps = {
+    activePanel,
+    group: { ...group, participants, participantCount: participants.length },
+    session: { ...session, participants, participantCount: participants.length },
+    groupAdvancedConfigEnabled: true,
+    canManage: allowed,
+    identities: [],
+    activeIdentity: { id: 'bot_fixture:user-101', kind: 'bot', displayName: '协作 Bot', online: true },
+    authenticatedUserId: 'user-101',
+    authenticatedUserName: '认证用户',
+    onClose: groupHandlers.onClose,
+    onUpdateGroup: groupHandlers.onUpdate,
+    onDissolveGroup: groupHandlers.onDissolve,
+    onLeaveGroup: groupHandlers.onLeaveGroup,
+    onAddGroupMember: groupHandlers.onAddMember,
+    onRemoveGroupMember: groupHandlers.onRemoveMember,
+    onShareGroup: groupHandlers.onShare,
+    onSaveDingTalk: groupHandlers.onSaveDingTalk,
+    onToggleDingTalkActive: groupHandlers.onToggleDingTalkActive,
+    onDeleteDingTalk: groupHandlers.onDeleteDingTalk,
+    dingTalkBinding: null,
+    dingTalkLoading: false,
+    onRenameSession: sessionHandlers.onRename,
+    onDeleteSession: sessionHandlers.onDelete,
+    onLeaveSession: sessionHandlers.onLeaveSession,
+    onAddSessionMember: sessionHandlers.onAddMember,
+    onRemoveSessionMember: sessionHandlers.onRemoveMember,
+    onShareSession: sessionHandlers.onShare,
+  };
+
+  render(<WorkspaceManagePanels {...props} />);
+
+  expect(screen.getByText('认证用户')).toBeInTheDocument();
+  expect(screen.getByText('其他成员')).toBeInTheDocument();
+  expect(screen.getByText('协作 Bot')).toBeInTheDocument();
+  expect(screen.queryByText('旧用户名称')).not.toBeInTheDocument();
 });

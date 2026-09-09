@@ -17,6 +17,7 @@ import pytest
 from secbaas.community.core.service.session_file_sharing import (
     DefaultSessionFileSharingDispatcher,
 )
+from secbaas.community.plugins.file_transfer import NoopSessionFileUrlProjector
 
 pytestmark = pytest.mark.e2e
 
@@ -36,6 +37,7 @@ async def test_upload_single_complete_flow(
     dispatcher = DefaultSessionFileSharingDispatcher(
         file_transfer_backend=stub_oss_backend,
         ticket_repo=mock_session_ticket_repo,
+        session_file_url_projector=NoopSessionFileUrlProjector(),
     )
 
     # 2. Configure mock: create_ticket returns an ID
@@ -98,6 +100,7 @@ async def test_upload_and_cancel_flow(
     dispatcher = DefaultSessionFileSharingDispatcher(
         file_transfer_backend=stub_oss_backend,
         ticket_repo=mock_session_ticket_repo,
+        session_file_url_projector=NoopSessionFileUrlProjector(),
     )
     mock_session_ticket_repo.create_ticket.return_value = 1
 
@@ -141,6 +144,7 @@ async def test_multipart_upload_flow(
     dispatcher = DefaultSessionFileSharingDispatcher(
         file_transfer_backend=stub_oss_backend,
         ticket_repo=mock_session_ticket_repo,
+        session_file_url_projector=NoopSessionFileUrlProjector(),
     )
     mock_session_ticket_repo.create_ticket.return_value = 1
 

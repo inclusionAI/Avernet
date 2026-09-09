@@ -54,6 +54,8 @@ internal_dependencies:
   - agentclaw.community.core.desktop_bot
   - agentclaw.community.core.mcp
   - agentclaw.community.core.devices
+  - agentclaw.community.core.engine_runtime.errors    # EngineStageNotLiveError used by codefuse runtime-target resolution
+  - agentclaw.community.core.engine_runtime.stage    # resolve_stage_bind_id / STAGE_* reused by codefuse runtime-target resolution
   - agentclaw.community.core.events
   - agentclaw.community.core.resources
   - agentclaw.community.core.service_bot
@@ -85,3 +87,16 @@ internal_dependencies:
 ### Change impact
 
 Highest-fanout domain — 12+ other core domains import it. BotService signature changes ripple widely. Repository protocol changes break the corresponding plugin_impl repos.
+
+## Owner display name on OpenAPI creation
+
+OpenAPI creation supplies the matching verified gateway user's nonblank
+`display_name` as `nick_name`, stripping surrounding whitespace. When no matching
+user display name is available, the owner ID remains the fallback. The existing
+`ac_bots.owner_name` column persists this value; catalog search projects it
+without substituting the entity ID.
+
+Create-with-manifest freezes `nick_name` in the durable job's `spec` at submission,
+so background completion does not depend on request identity context. Jobs queued
+before this field was introduced remain readable and fall back to their `user_id`.
+This requires no database migration and does not backfill historical Bot rows.

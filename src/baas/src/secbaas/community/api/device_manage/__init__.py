@@ -4,6 +4,7 @@ Package structure mirrors the original domain/model/device*.py files,
 consolidated under the canonical api/domain/device_manage/ path.
 """
 
+from ._callback import DeviceCallbackContext
 from ._command_result import CommandResult
 from ._credentials import (
     ArcaCredentials,
@@ -109,6 +110,7 @@ __all__ = [
     "ArcaDeviceConfig",
     "ArcaDeviceInfo",
     "BaseDeviceConfig",
+    "DeviceCallbackContext",
     "CommandResult",
     "DeployConfig",
     "DestroyDeviceResponse",

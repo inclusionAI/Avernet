@@ -1,7 +1,8 @@
+import scenarioBotCollab1 from '@/assets/Images/scenarios/bot_collab_1.png';
+import scenarioBotCollab2 from '@/assets/Images/scenarios/bot_collab_2.png';
 import scenarioCollaborationKinds from '@/assets/Images/scenarios/collaboration_kinds.png';
 import scenarioCostumeCollaboration from '@/assets/Images/scenarios/costume_collaboration.png';
 import scenarioDiscover from '@/assets/Images/scenarios/discover.png';
-import scenarioFreeChat from '@/assets/Images/scenarios/free_chat.png';
 import scenarioHumanInvolved1 from '@/assets/Images/scenarios/human_involved_1.png';
 import scenarioHumanInvolved2 from '@/assets/Images/scenarios/human_involved_2.png';
 import { getCapabilities } from '@/capabilities';
@@ -11,8 +12,9 @@ import { LayoutGrid, MessagesSquare, Search, UserRound } from 'lucide-react';
 /**
  * 场景素材(src/assets/Images/scenarios,经 webpack asset import 随构建产物发行;
  * 运行时 URL 自动跟 publicPath、带 hash 可长缓存,OSS 导出走 src/** 通配无需白名单):
- * - narrow:竖版截图,居中按 50% 宽展示(对齐参考稿 discover/modes[0] 处理);
+ * - narrow:方形/竖版截图,居中按 50% 宽展示,避免全宽时卡片过高;
  * - tall:超长全页截图,裁切收进窗口帧 + 底部渐隐提示"内容续滚",避免单卡过长。
+ * 展示方式按素材宽高比选取:横版(>1.3)全宽、方形/竖版 narrow、超长滚动页 tall。
  */
 interface ScenarioImage {
   src: string;
@@ -35,14 +37,17 @@ const SCENARIOS: Scenario[] = [
     title: 'Bot 发现',
     icon: Search,
     description: '根据协作目标智能推荐可协作 Bot。',
-    images: [{ src: scenarioDiscover, alt: 'Bot 发现示例', narrow: true }],
+    images: [{ src: scenarioDiscover, alt: 'Bot 发现示例' }],
   },
   {
     id: 'collaborate',
     title: 'Bot 协作',
     icon: MessagesSquare,
     description: '让 Bot 根据目标参与讨论、对齐目标、分工执行、共同进化。',
-    images: [{ src: scenarioFreeChat, alt: 'Bot 协作示例', tall: true }],
+    images: [
+      { src: scenarioBotCollab1, alt: 'Bot 协作示例一' },
+      { src: scenarioBotCollab2, alt: 'Bot 协作示例二', narrow: true },
+    ],
   },
   {
     id: 'modes',
@@ -61,7 +66,7 @@ const SCENARIOS: Scenario[] = [
     description: '这是一个 H+A 的协作平台,Human 可以随时参与协作,和 Bot 无缝协作。',
     images: [
       { src: scenarioHumanInvolved1, alt: 'Human 参与示例一' },
-      { src: scenarioHumanInvolved2, alt: 'Human 参与示例二' },
+      { src: scenarioHumanInvolved2, alt: 'Human 参与示例二', narrow: true },
     ],
   },
 ];
@@ -110,7 +115,7 @@ function ScenarioFrame({ image, windowTitle }: { image: ScenarioImage; windowTit
 /**
  * 欢迎页场景展示(id="scenarios",Welcome 页二期挂载位):四张场景卡单列布局,
  * 沿用落地页大圆角白底卡语言;视觉走设计系统 token,hover 抬升与品牌蓝晕影。
- * 素材为本地截图(src/assets/Images/scenarios),后续替换为真实产品截图。
+ * 素材为真实产品截图(src/assets/Images/scenarios)。
  */
 export function ScenariosSection() {
   const brand = getCapabilities().getProductBrand().value;

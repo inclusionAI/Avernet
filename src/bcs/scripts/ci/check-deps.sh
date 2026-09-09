@@ -16,6 +16,11 @@ if [[ "$metadata" == "{}" ]]; then
   log SKIP - "cargo metadata 失败"; exit 77
 fi
 
+# Log observation must remain independent of trace/metric implementations.
+if ! bash "$(dirname "${BASH_SOURCE[0]}")/check-observability-deps.sh"; then
+  fail=1
+fi
+
 # ─── 工具函数：列出 crate 的 bcs-* 依赖 ───
 bcs_deps_of() {
   local crate=$1

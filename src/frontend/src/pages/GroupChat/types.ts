@@ -17,6 +17,9 @@ export type ActorKind = 'bot' | 'human';
  */
 export type ParticipantMode = 'present' | 'absent' | 'auto' | 'muted';
 
+/** Human 参与者的消息可见范围；Bot 固定为 full。 */
+export type MessageViewScope = 'full' | 'participant';
+
 /**
  * 群聊成员类型
  */
@@ -52,6 +55,8 @@ export interface GroupMember {
   actorKind?: ActorKind;
   /** 协作姿态/发言模式（新增） */
   mode?: ParticipantMode;
+  /** Human 消息可见范围；participant 会隔离主从/状态机内部消息 */
+  messageViewScope?: MessageViewScope;
   /** 头像URL */
   avatar?: string;
   /** 对应OpenClaw的sessionKey */
@@ -402,6 +407,7 @@ export interface GroupSession {
     name?: string;
     avatar?: string;
     mode?: ParticipantMode;
+    messageViewScope?: MessageViewScope;
     role?: string;
     type?: string;
   }>;
@@ -419,6 +425,8 @@ export interface CreateSessionParams {
   session_title?: string;
   /** 创建者标识（用户视角下传用户的 bot_uuid，即 human_{userId}） */
   created_by?: string;
+  /** 创建时为当前 Human 固定的 Session 消息视角；不传时兼容旧默认 */
+  message_view_scope?: MessageViewScope;
   /** 服务调用输入（service_invocation 会话使用） */
   input?: {
     query: string;

@@ -18,6 +18,8 @@
 
 ## Allowed dependencies
 
+- `auxiliary/bcs-observability` for log-only operation observations and correlation.
+
 - `service-api/*`
 - Utility crates such as `serde` and `tracing`
 

@@ -126,6 +126,7 @@ impl BotCandidateSearchCore {
             }
             Err(error) => {
                 warn!(
+                    request_id = %bcs_observability::CurrentRequestId,
                     error = %error,
                     "candidate search: worker recommendation failed, falling back to name search"
                 );
@@ -220,6 +221,7 @@ impl BotCandidateSearchCore {
                 .collect(),
             Err(error) => {
                 warn!(
+                    request_id = %bcs_observability::CurrentRequestId,
                     error = %error,
                     "candidate search: worker profile lookup failed, tags will be empty"
                 );

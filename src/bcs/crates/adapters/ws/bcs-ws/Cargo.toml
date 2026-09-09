@@ -31,6 +31,7 @@ bcs-domain      = { workspace = true }
 bcs-service-api = { workspace = true }
 bcs-protocol    = { workspace = true }
 bcs-telemetry   = { workspace = true }
+bcs-observability = { workspace = true }
 bcs-callback    = { workspace = true }
 bcs-route-security = { workspace = true }
 
@@ -38,7 +39,7 @@ bcs-route-security = { workspace = true }
 tokio-test  = "0.4"
 tokio-tungstenite = "0.26"
 bcs-session = { workspace = true }
-bcs-test-support = { workspace = true }
+bcs-test-support = { workspace = true, features = ["diagnostic-logs"] }
 bcs-services-container = { workspace = true, features = ["test-support"] }
 bcs-interaction = { workspace = true }
 tracing-subscriber = { workspace = true }

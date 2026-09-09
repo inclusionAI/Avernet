@@ -11,6 +11,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+bcs-observability = { workspace = true }
 async-trait = { workspace = true }
 bcs-config-api = { workspace = true }
 bcs-service-api = { workspace = true }

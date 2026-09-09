@@ -485,9 +485,16 @@ def get_profile_source_from_request(request):
 
 
 def _get_api_profile_store():
-    """
-    获取 API Profile Content Store 实例 - SQLite only for open-core
-    """
+    """Use the application's profile provider; retain SQLite for standalone use."""
+    if _app_context is not None:
+        profile_store = _app_context.registry.get("worker_profile_content_store")
+        if profile_store is None:
+            raise RuntimeError(
+                "Application registry missing worker_profile_content_store; "
+                "fusion must use the same profile store as profile CRUD."
+            )
+        return profile_store
+
     global _api_profile_store
     if _api_profile_store is None:
         try:

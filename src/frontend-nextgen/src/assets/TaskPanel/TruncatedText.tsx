@@ -24,6 +24,13 @@ function getTooltipPosition(anchor: HTMLElement): TooltipPosition {
   return { left, top: rect.bottom + 8, maxWidth };
 }
 
+/** 锚点是否已完全离开视口（被滚走/被遮挡后给一个兜底隐藏判定）。 */
+function isAnchorOutOfView(anchor: HTMLElement): boolean {
+  const rect = anchor.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return true; // display:none / 卸载残留
+  return rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth;
+}
+
 export const TruncatedText: React.FC<{
   value: string;
   maxLength: number;
@@ -37,13 +44,21 @@ export const TruncatedText: React.FC<{
 
   useEffect(() => {
     if (!anchor) return undefined;
-    const updatePosition = () => setPosition(getTooltipPosition(anchor));
-    updatePosition();
-    window.addEventListener('resize', updatePosition);
-    window.addEventListener('scroll', updatePosition, true);
+    const onScroll = () => {
+      // 锚点随滚动/布局离开视口 → 关闭 tooltip，避免叠在其它面板上「一直显示不消失」。
+      if (isAnchorOutOfView(anchor)) {
+        setAnchor(null);
+        setPosition(null);
+        return;
+      }
+      setPosition(getTooltipPosition(anchor));
+    };
+    onScroll();
+    window.addEventListener('resize', onScroll);
+    window.addEventListener('scroll', onScroll, true);
     return () => {
-      window.removeEventListener('resize', updatePosition);
-      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', onScroll);
+      window.removeEventListener('scroll', onScroll, true);
     };
   }, [anchor]);
 
@@ -58,6 +73,8 @@ export const TruncatedText: React.FC<{
     setPosition(null);
   };
   const Wrapper = as === 'span' ? 'span' : 'div';
+  // 点击（mousedown）即「要触发动作」（节点卡片点击会下钻/打开侧栏且不卸载节点列表、也不产生 mouseleave），
+  // 此刻应立即收起 tooltip，避免 portal 残留在 document.body 上盖住新面板。
   const Text = React.createElement(
     as,
     {
@@ -73,6 +90,7 @@ export const TruncatedText: React.FC<{
     <Wrapper
       onMouseEnter={showTooltip}
       onMouseLeave={hideTooltip}
+      onMouseDown={hideTooltip}
       style={{ display: as === 'span' ? 'inline-block' : 'block', minWidth: 0, maxWidth: '100%' }}
     >
       {Text}

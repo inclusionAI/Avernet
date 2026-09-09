@@ -20,6 +20,15 @@ CreateChannelBindingRequest:
     config:
       type: object
       additionalProperties: true
+      properties:
+        group_chat_new_session_per_message:
+          type: boolean
+          default: false
+          description: >-
+            Create a fresh session for each accepted group-chat message (conversation_type=2),
+            for Bot and Group targets and either group_chat_scope. Direct chats ignore this
+            setting. Commands and pending HumanInput replies retain their existing behavior;
+            duplicate message IDs do not create another session. Previous runs are not cancelled.
 
 # Exactly one of `active` or `config` is accepted (the server XOR-checks).
 UpdateChannelBindingRequest:
@@ -33,6 +42,15 @@ UpdateChannelBindingRequest:
     config:
       type: object
       additionalProperties: true
+      properties:
+        group_chat_new_session_per_message:
+          type: boolean
+          default: false
+          description: >-
+            Create a fresh session for each accepted group-chat message (conversation_type=2),
+            for Bot and Group targets and either group_chat_scope. Direct chats ignore this
+            setting. Commands and pending HumanInput replies retain their existing behavior;
+            duplicate message IDs do not create another session. Previous runs are not cancelled.
   description: "Exactly one of `active` (boolean) or `config`; both or neither is a 400."
 
 BindingTarget:
@@ -99,6 +117,15 @@ ChannelBinding:
     config:
       type: object
       additionalProperties: true
+      properties:
+        group_chat_new_session_per_message:
+          type: boolean
+          default: false
+          description: >-
+            Create a fresh session for each accepted group-chat message (conversation_type=2),
+            for Bot and Group targets and either group_chat_scope. Direct chats ignore this
+            setting. Commands and pending HumanInput replies retain their existing behavior;
+            duplicate message IDs do not create another session. Previous runs are not cancelled.
 
 ChannelBindingPage:
   type: object

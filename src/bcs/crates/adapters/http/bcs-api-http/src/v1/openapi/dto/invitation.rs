@@ -1,5 +1,6 @@
 use bcs_service_api::application::v1::{
     AcceptInvitation, AuthenticatedCaller, CreateGroupInvitation, CreateSessionInvitation,
+    MessageViewScope,
 };
 use serde::Deserialize;
 
@@ -60,19 +61,22 @@ impl CreateInvitationRequest {
 
 /// Request body for accepting an invitation token.
 ///
-/// The body is empty: only a Caller with User identity may accept, and the
-/// joining Human actor is derived from the User subject id.
-/// `deny_unknown_fields` rejects any supplied `bot_uuid` (legacy
-/// V1 pre-pivot field, now removed) with a 400 `invalid_request`.
+/// The joining Human actor is derived from the User subject id. The optional
+/// scope is persisted on the new Participant; omission preserves the legacy
+/// full/default-or-inherited behavior.
 #[derive(Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct AcceptInvitationRequest {}
+pub struct AcceptInvitationRequest {
+    #[serde(default)]
+    pub message_view_scope: Option<MessageViewScope>,
+}
 
 impl AcceptInvitationRequest {
     pub fn into_command(self, caller: AuthenticatedCaller, token: String) -> AcceptInvitation {
         AcceptInvitation {
             caller,
             token,
+            message_view_scope: self.message_view_scope,
         }
     }
 }

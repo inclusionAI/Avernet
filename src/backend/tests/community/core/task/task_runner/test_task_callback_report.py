@@ -892,6 +892,21 @@ class TestIdempotency:
             _run(_dispatch_call(_req(self._body()), svc, NoopCallbackAuthenticator(),
                                 InMemoryCallbackCorrelationRegistry()))
 
+    def test_result_replay_to_terminal_returns_idempotent_200(self):
+        # 回归(静态/动态公共):on_report 抛 TaskStateError(撞终态,如静态 mock 兜底先终结节点)
+        # → 路由按 loop_task_id 反查节点为终态 → 200 idempotent,不误上抛 409。
+        # 依赖 translate_common_task_callback 把 loop_task_id 组装成 "task_id::node_id";
+        # 旧实现仅写 task_id → _find_node_status 的 split("::") 抛 ValueError → 恢复失效 → 误 409。
+        engine = _TaskStateErrorEngine(terminal=True)
+        svc, _e, _repo, _ri = _make_svc(
+            engine=engine,
+            graph_nodes={"t1": [_node("t1", "n1", Status.SUCCESS)]},
+        )
+        result = _run(_dispatch_call(_req(self._body()), svc, NoopCallbackAuthenticator(),
+                                     InMemoryCallbackCorrelationRegistry()))
+        _ok_envelope(result)
+        assert result.message == "idempotent"
+
 
 # ===== 分流选择 + 鉴权 source =====
 

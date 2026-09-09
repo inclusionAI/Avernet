@@ -13,6 +13,8 @@ from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
     HARNESS_POLLER,
     HARNESS_POLLER_KEY,
     KEY,
+    MODE_COVERAGE,
+    MODE_COVERAGE_KEY,
     TaskClaimJoinGate,
     TaskSettingsService,
 )
@@ -129,3 +131,28 @@ def test_harness_poller_unsupported_type_rejected():
     except ValueError:
         raised = True
     assert raised is True
+
+
+def test_mode_coverage_defaults_on_and_writable():
+    """mode_coverage(模式覆盖路由)默认开启,且经 tasks/settings 写穿后 is_enabled 立即反映。
+
+    锁定:动态规划链路 3 模式轮替覆盖默认生效;可经 mode_coverage 关闭退到纯正常派发。
+    """
+    store = _FakeStore()
+    svc = TaskSettingsService(config=store)
+
+    # 默认开启(store 无值 → default=True)
+    assert svc.get_enabled(setting_type=MODE_COVERAGE, env="pre") is True
+    assert svc.is_enabled(MODE_COVERAGE) is True
+
+    # 写穿:mode_coverage_enabled KV 落库
+    assert svc.set_enabled(setting_type=MODE_COVERAGE, enabled=True, env="pre", operator="146836") is True
+    assert len(store.set_calls) == 1
+    call = store.set_calls[0]
+    assert call["config_key"] == MODE_COVERAGE_KEY
+    assert call["config_value"] is True
+    assert svc.is_enabled(MODE_COVERAGE) is True
+
+    # 关闭回写:is_enabled 立即 False
+    assert svc.set_enabled(setting_type=MODE_COVERAGE, enabled=False, env="pre", operator="146836") is False
+    assert svc.is_enabled(MODE_COVERAGE) is False

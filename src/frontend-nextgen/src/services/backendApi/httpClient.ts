@@ -6,6 +6,7 @@ import { buildToastKey, extractFriendlyErrorMessage, formatApiPath } from '@/uti
 import { retryOnTransient } from '@/utils/retryRequest';
 import { extractLoginUrl, isAceLoginResponse } from './aceLoginBody';
 import { resolveAuthFailureDisposition } from './authFailurePolicy';
+import { resolveInviteGateDisposition } from './inviteGateFailurePolicy';
 
 export interface BackendRequestOptions {
   method?: string;
@@ -178,6 +179,18 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
     const message = extractFriendlyErrorMessage({ response: { status: response.status, data: responseData } });
     const operation = options.operation;
     const toastKey = buildToastKey({ apiPath, operation, message });
+    // 邀请码门禁拦截（oauth-provider 策略下 `error_code='invite_code_required'` 403）：单飞登记门禁弹窗信号 +
+    // 静默上抛（不投默认 toast，未绑定用户的业务 403 不逐条轰炸；未登录 UX 唯一出口是 InviteCodeBindingModal）。
+    // 识别键严格限定专属 error_code，不吞通用 forbidden/真实权限拒绝 403（见 inviteGateFailurePolicy）。
+    if (resolveInviteGateDisposition({ status: response.status, data: responseData }) === 'gate-prompt-silent') {
+      throw new BackendRequestError(message, {
+        status: response.status,
+        data: responseData,
+        apiPath,
+        toastKey,
+        alreadyHandled: true,
+      });
+    }
     // 默认提示投递(由顶层观察者 useErrorNotifyObserver 兜底发起):Service 层只 enqueue 上抛,不直接 toast,
     // 守 `src/services` 禁 toast/DOM。Hook 可在 catch 中 cancel(toastKey) 静默,或经 safeReportError 跳过重复。
     // 未登录(`silent`)时跳过投递,仅保留 alreadyHandled 标记供下游 safeReportError 亦不再补发。
@@ -213,6 +226,18 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
   // 同处置——登记弹窗信号(单飞)+ 静默上抛,避免误包体被无校验调用方当成功数据渲染或逐条报错。
   if (resolveAuthFailureDisposition({ data: responseData }) === 'login-prompt-silent') {
     throw new AceLoginRedirectError();
+  }
+
+  // 网关误包形态(HTTP 2xx 但信封含 `error_code='invite_code_required'` 门禁体):与 !response.ok 的门禁路径
+  // 同处置——单飞登记门禁弹窗信号 + 静默上抛（不投默认 toast），避免误包体被无校验调用方当成功数据渲染。
+  if (resolveInviteGateDisposition({ data: responseData }) === 'gate-prompt-silent') {
+    const apiPath = formatApiPath(requestUrl);
+    throw new BackendRequestError('邀请码门禁拦截', {
+      status: response.status,
+      data: responseData,
+      apiPath,
+      alreadyHandled: true,
+    });
   }
 
   return responseData as T;

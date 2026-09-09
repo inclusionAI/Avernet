@@ -135,7 +135,7 @@ class PublishConfig(BaseModel):
     # UPDATE-specific: ID of the new PENDING bot record created during create_publish
     target_bot_id: int | None = None
 
-    # UPDATE_DEVICE-specific: explicit list of device UUIDs to update
+    # UPDATE_DEVICE and SCALE_DOWN: explicit list of device UUIDs targeted by this publish
     target_device_uuids: list[str] | None = None
 
     # auto_approve: when True, manual /approve calls are rejected; only internal loop drives gates

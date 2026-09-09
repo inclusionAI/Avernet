@@ -166,7 +166,9 @@ export function useCollaborationSquare(resource: SquareResource) {
         void runBusy(
           busyKey,
           async () => {
-            const result = await collaborationSquareBotService.openBotConversation(bot.id, humanBotContext);
+            const result = await collaborationSquareBotService.openBotConversation(bot.id, humanBotContext, {
+              isOwnedByLoggedInUser: Boolean(bot.isOwnedByLoggedInUser),
+            });
             history.push(getCollaborationBotConversationUrl(bot.id, result.sessionId));
           },
           bot.id,

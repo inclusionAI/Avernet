@@ -18,7 +18,6 @@ describe("ArcaCommandTransport", () => {
       sandboxId: "ARCA-SANDBOX-123",
       arcaInstanceId: "ARCA-SANDBOX-123@9",
       ttlSeconds: 120,
-      authHeaders: {},
     });
 
     expect(connection.target).toBe("ARCA_ARCA-SANDBOX-123@9:20003");
@@ -45,7 +44,6 @@ describe("ArcaCommandTransport", () => {
       sandboxId: "ARCA-SANDBOX-123",
       arcaInstanceId: "ARCA-SANDBOX-OTHER@9",
       ttlSeconds: 120,
-      authHeaders: {},
     })).rejects.toMatchObject({ code: "repair_arca_target_mismatch" });
   });
 
@@ -72,7 +70,6 @@ describe("ArcaCommandTransport", () => {
       bindingId: "1377065",
       sandboxId: "ARCA-SANDBOX-123",
       command: "ps -ef",
-      authHeaders: { Cookie: "SESSION=owner-secret", "x-user-id": "405935" },
     })).resolves.toMatchObject({ status: "success" });
 
     expect(connectionProvider.getConnection).toHaveBeenCalledWith({
@@ -80,13 +77,12 @@ describe("ArcaCommandTransport", () => {
       bindingId: "1377065",
       sandboxId: "ARCA-SANDBOX-123",
       ttlSeconds: 120,
-      authHeaders: { Cookie: "SESSION=owner-secret", "x-user-id": "405935" },
     });
     expect((fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>)["x-proxypass-token"])
       .toBe("header.payload.signature");
   });
 
-  it("forwards only the owner identity plus the short-lived proxy token", async () => {
+  it("forwards only the target-scoped proxy credential", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       success: true,
       code: "13-200000",
@@ -120,7 +116,6 @@ describe("ArcaCommandTransport", () => {
       bindingId: "1377065",
       sandboxId: "ARCA-SANDBOX-123@9",
       command: "id",
-      authHeaders: { Cookie: "SESSION=owner-secret", "x-user-id": "405935", "x-extra": "drop-me" },
     })).resolves.toEqual({
       status: "success",
       exitCode: 0,
@@ -136,19 +131,17 @@ describe("ArcaCommandTransport", () => {
     expect(init?.method).toBe("POST");
     expect(JSON.parse(String(init?.body))).toEqual({ command: "id" });
     const headers = init?.headers as Record<string, string>;
-    expect(headers.Cookie).toBe("SESSION=owner-secret");
-    expect(headers["x-user-id"]).toBe("405935");
-    expect(headers["x-extra"]).toBeUndefined();
+    expect(headers.Cookie).toBeUndefined();
+    expect(headers["x-user-id"]).toBeUndefined();
     expect(headers["x-agent-sandbox-id"]).toBe("ARCA-SANDBOX-123");
     expect(headers["x-proxypass-token"]).toBe("header.payload.signature");
     expect(connectionProvider.getConnection).toHaveBeenCalledWith(expect.objectContaining({
       sandboxId: "ARCA-SANDBOX-123",
       bindingId: "1377065",
-      authHeaders: { Cookie: "SESSION=owner-secret", "x-user-id": "405935" },
     }));
   });
 
-  it("normalizes login rejection without persisting the returned login URL", async () => {
+  it("normalizes an unexpected login response as proxy rejection without persisting its URL", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       buserviceErrorCode: "USER_NOT_LOGIN",
       buserviceErrorMsg: "login at https://example.test/?token=must-not-leak",
@@ -168,11 +161,10 @@ describe("ArcaCommandTransport", () => {
       bindingId: "1377065",
       sandboxId: "ARCA-SANDBOX-123",
       command: "id",
-      authHeaders: { Cookie: "SESSION=owner-secret", "x-user-id": "405935" },
     })).rejects.toMatchObject({
-      status: 401,
-      code: "repair_arca_identity_required",
-      message: "ARCA 运行态访问需要当前 Owner 登录身份",
+      status: 502,
+      code: "repair_arca_proxy_rejected",
+      message: "ARCA 代理拒绝了短期连接凭据",
     });
   });
 
@@ -195,7 +187,6 @@ describe("ArcaCommandTransport", () => {
       bindingId: "1377065",
       sandboxId: "ARCA-SANDBOX-123",
       command: "id",
-      authHeaders: { Cookie: "SESSION=owner-secret", "x-user-id": "405935" },
     })).rejects.toMatchObject({
       status: 502,
       code: "repair_arca_proxy_rejected",
@@ -227,7 +218,6 @@ describe("ArcaCommandTransport", () => {
       bindingId: "1377065",
       sandboxId: "ARCA-SANDBOX-123",
       command: "id",
-      authHeaders: { Cookie: "SESSION=owner-secret", "x-user-id": "405935" },
     })).resolves.toMatchObject({ exitCode: null, durationMs: null });
   });
 
@@ -249,7 +239,6 @@ describe("ArcaCommandTransport", () => {
       bindingId: "1377065",
       sandboxId: "ARCA-SANDBOX-123",
       command: "id",
-      authHeaders: { Cookie: "SESSION=owner-secret", "x-user-id": "405935" },
     })).rejects.toMatchObject({ code: "repair_arca_connection_invalid" });
     expect(fetchMock).not.toHaveBeenCalled();
   });

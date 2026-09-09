@@ -20,6 +20,7 @@ import { useHumanIdentity } from './useHumanIdentity';
 import { TEST_SUPPORT_TARGET } from './useWorkspace.constants';
 import type { UseWorkspaceOptions } from './useWorkspace.options';
 import { useWorkspaceIdentityBootstrap } from './useWorkspaceIdentityBootstrap';
+import { useWorkspaceDisplayIdentities } from './useWorkspaceDisplayIdentities';
 import { buildBotChatTarget, mapIdentityViewToIdentity } from './workspaceIdentityMapper';
 export type { UseWorkspaceOptions } from './useWorkspace.options';
 export function useWorkspace(options: UseWorkspaceOptions = {}) {
@@ -44,10 +45,11 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
   const inputRef = useRef<SenderRef | null>(null);
   const provider = useMemo(() => workspaceService.createProvider(), []);
   useWorkspaceIdentityBootstrap();
-  const identities = useMemo(() => identityViews.map(mapIdentityViewToIdentity), [identityViews]);
+  const displayIdentityViews = useWorkspaceDisplayIdentities(identityViews, humanIdentity);
+  const identities = useMemo(() => displayIdentityViews.map(mapIdentityViewToIdentity), [displayIdentityViews]);
   const activeIdentityView = useMemo(
-    () => identityViews.find((i) => i.id === activeIdentityId) ?? null,
-    [identityViews, activeIdentityId],
+    () => displayIdentityViews.find((i) => i.id === activeIdentityId) ?? null,
+    [displayIdentityViews, activeIdentityId],
   );
   const availableViews = useMemo<WorkspaceView[]>(
     () => getAvailableViews(activeIdentityView ? { id: activeIdentityView.id, kind: activeIdentityView.kind } : null),
@@ -78,7 +80,12 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     [chatBots, friendBots],
   );
   const expandedBotIdList = useMemo(() => Object.keys(expandedBotIds), [expandedBotIds]);
-  const botSessions = useBotSessions(allChatBots, expandedBotIdList, activeIdentityId);
+  const botSessions = useBotSessions(
+    allChatBots,
+    expandedBotIdList,
+    activeIdentityId,
+    isMyBotsLoading || isFriendBotsLoading,
+  );
   const selectedChatBot = useMemo(
     () => allChatBots.find((b) => b.botId === botSessions.selectedSession?.botId) ?? null,
     [allChatBots, botSessions.selectedSession],
@@ -186,6 +193,8 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
 
   return {
     identities,
+    currentUserId: humanIdentity?.userId,
+    currentUserDisplayName: humanIdentity?.displayName,
     currentUserAvatarUrl: humanIdentity?.avatarUrl,
     activeIdentityId,
     activeIdentity: activeIdentityView,

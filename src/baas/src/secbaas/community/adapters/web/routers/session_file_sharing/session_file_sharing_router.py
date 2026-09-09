@@ -16,6 +16,7 @@ from secbaas.community.api.session_file_sharing import (
     SessionCompleteUploadResponse,
     SessionDeleteTransferResponse,
     SessionFileSharingDispatcher,
+    SessionFileTransferProxyUnavailableError,
     SessionGetTransferStatusResponse,
     SessionGetUploadUrlRequest,
     SessionGetUploadUrlResponse,
@@ -88,6 +89,15 @@ async def get_upload_url(
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail={"error_code": "NOT_IMPLEMENTED", "message": str(e)},
+        )
+    except SessionFileTransferProxyUnavailableError as e:
+        raise HTTPException(
+            status_code=e.http_status,
+            detail={
+                "error_code": e.error_code,
+                "message": str(e),
+                "reason": e.reason,
+            },
         )
     except DomainError as e:
         raise HTTPException(
@@ -323,6 +333,15 @@ async def generate_share_link(
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail={"error_code": "NOT_IMPLEMENTED", "message": str(e)},
+        )
+    except SessionFileTransferProxyUnavailableError as e:
+        raise HTTPException(
+            status_code=e.http_status,
+            detail={
+                "error_code": e.error_code,
+                "message": str(e),
+                "reason": e.reason,
+            },
         )
     except DomainError as e:
         raise HTTPException(

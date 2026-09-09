@@ -16,7 +16,7 @@ from secbaas.community.api.bot_manage import (
     UpdateDevicesResponse,
 )
 from secbaas.community.api.bot_runtime import BotNotFoundError
-from secbaas.community.api.device_manage import DeployConfig
+from secbaas.community.api.device_manage import DeployConfig, DeviceStatus
 from secbaas.community.api.device_manage._models import ResourceSpecification
 from secbaas.community.api.publish_manage import (
     DEFAULT_CALLBACK_TIMEOUT_SECONDS,
@@ -2443,6 +2443,322 @@ class TestScaleBotDown:
             call_kwargs = mock_publish_service.create_publish.call_args.kwargs
             assert call_kwargs["publish_type"] == PublishType.SCALE_DOWN
             assert call_kwargs["config"].replica_desired == 1
+
+
+class TestScaleBotWithDeviceUuids:
+    """Tests for scale_bot when ``device_uuids`` is supplied.
+
+    Mirrors ``TestScaleBotDown`` for the targeted SCALE_DOWN path: the
+    service must validate the supplied UUIDs against the bot's active device
+    map, derive (or cross-check) target_count, and forward the deduped
+    UUID list to the publish via ``PublishConfig.target_device_uuids``.
+    """
+
+    def _make_bot_response(self) -> MagicMock:
+        """Build a 3-device ACTIVE bot (id=1, BOT-001, replica_desired=3)."""
+        mock_bot = MagicMock()
+        mock_bot.id = 1
+        mock_bot.bot_uuid = "BOT-001"
+        mock_bot.status = BotStatus.ACTIVE.value
+        mock_bot.model_dump = MagicMock(
+            return_value={
+                "id": 1,
+                "bot_uuid": "BOT-001",
+                "tenant": "test_tenant",
+                "env": "dev",
+                "domain": "default",
+                "is_deleted": 0,
+                "creator": "user1",
+                "modifier": "user1",
+                "status": BotStatus.ACTIVE.value,
+                "name": "Test Bot",
+                "description": None,
+                "template_uuid": None,
+                "replica_desired": 3,
+                "replica_minimum": 1,
+                "replica_maximum": 10,
+                "auto_scaling_enabled": 0,
+                "sla_grade": "standard",
+                "gmt_create": "2024-01-01T00:00:00",
+                "gmt_modified": "2024-01-01T00:00:00",
+                "config": None,
+            }
+        )
+        return mock_bot
+
+    def _make_device(self, device_uuid: str, status: str | None = None) -> MagicMock:
+        """Build a single mock device record with the given device_uuid and status."""
+        d = MagicMock()
+        d.device_uuid = device_uuid
+        d.status = status if status is not None else DeviceStatus.ACTIVE.value
+        d.provider_device_id = f"sandbox-{device_uuid}@0"
+        d.provider_type = "ARCA"
+        d.gmt_create = "2024-01-01T00:00:00"
+        return d
+
+    def _make_service(
+        self, devices: list[MagicMock] | None = None
+    ) -> tuple[
+        "BotManagementService",
+        MagicMock,
+        MagicMock,
+        list[MagicMock],
+    ]:
+        """Wire a service with a 3-ACTIVE-device bot by default.
+
+        Returns ``(service, mock_publish_service, mock_device_repo, devices)``
+        so individual tests can drive further assertions on any of them.
+        """
+        if devices is None:
+            devices = [
+                self._make_device("uuid-1"),
+                self._make_device("uuid-2"),
+                self._make_device("uuid-3"),
+            ]
+        mock_device_repo = MagicMock()
+        mock_device_repo.list_by_bot_id.return_value = devices
+
+        mock_publish = MagicMock()
+        mock_publish.id = 555
+
+        mock_publish_service = MagicMock()
+        mock_publish_service.create_publish = AsyncMock(return_value=mock_publish)
+
+        service = _make_service(
+            device_repo=mock_device_repo,
+            publish_service=mock_publish_service,
+        )
+        return service, mock_publish_service, mock_device_repo, devices
+
+    @pytest.mark.asyncio
+    async def test_scale_down_with_device_uuids_success(self):
+        """device_uuids + consistent target_count creates a SCALE_DOWN publish
+        with target_device_uuids populated and replica_desired derived."""
+        service, mock_publish_service, _, _ = self._make_service()
+
+        with patch.object(
+            service,
+            "get_bot",
+            new_callable=AsyncMock,
+            return_value=self._make_bot_response(),
+        ):
+            result = await service.scale_bot(
+                tenant="test_tenant",
+                bot_uuid="BOT-001",
+                operator="user1",
+                request_id="test-request-id-12345678901234567890",
+                target_count=1,
+                device_uuids=["uuid-2", "uuid-3"],
+            )
+
+            assert result.publish_id == 555
+            assert result.target_count == 1
+            call_kwargs = mock_publish_service.create_publish.call_args.kwargs
+            assert call_kwargs["publish_type"] == PublishType.SCALE_DOWN
+            assert call_kwargs["config"].replica_desired == 1
+            assert call_kwargs["config"].target_device_uuids == ["uuid-2", "uuid-3"]
+
+    @pytest.mark.asyncio
+    async def test_scale_down_with_device_uuids_count_mismatch(self):
+        """When target_count != current_count - len(device_uuids), ValueError."""
+        service, _, _, _ = self._make_service()
+
+        with patch.object(
+            service,
+            "get_bot",
+            new_callable=AsyncMock,
+            return_value=self._make_bot_response(),
+        ):
+            with pytest.raises(
+                ValueError,
+                match="target_count .* does not match current_count - len\\(device_uuids\\)",
+            ):
+                await service.scale_bot(
+                    tenant="test_tenant",
+                    bot_uuid="BOT-001",
+                    operator="user1",
+                    request_id="test-request-id-12345678901234567890",
+                    target_count=3,  # current(3) - len(2) = 1, not 3
+                    device_uuids=["uuid-2", "uuid-3"],
+                )
+
+    @pytest.mark.asyncio
+    async def test_scale_down_with_device_uuids_unknown_uuid(self):
+        """A device UUID absent from the bot's device map raises ValueError."""
+        service, _, _, _ = self._make_service()
+
+        with patch.object(
+            service,
+            "get_bot",
+            new_callable=AsyncMock,
+            return_value=self._make_bot_response(),
+        ):
+            with pytest.raises(
+                ValueError,
+                match="not found or not belonging to bot",
+            ):
+                await service.scale_bot(
+                    tenant="test_tenant",
+                    bot_uuid="BOT-001",
+                    operator="user1",
+                    request_id="test-request-id-12345678901234567890",
+                    target_count=2,
+                    device_uuids=["unknown-uuid", "uuid-2"],
+                )
+
+    @pytest.mark.asyncio
+    async def test_scale_down_with_device_uuids_non_active(self):
+        """A device UUID whose device status is not ACTIVE raises ValueError."""
+        devices = [
+            self._make_device("uuid-1"),
+            self._make_device("uuid-2", status=DeviceStatus.FAILED.value),
+            self._make_device("uuid-3"),
+        ]
+        service, _, _, _ = self._make_service(devices=devices)
+
+        with patch.object(
+            service,
+            "get_bot",
+            new_callable=AsyncMock,
+            return_value=self._make_bot_response(),
+        ):
+            with pytest.raises(ValueError, match="not ACTIVE, cannot scale down"):
+                await service.scale_bot(
+                    tenant="test_tenant",
+                    bot_uuid="BOT-001",
+                    operator="user1",
+                    request_id="test-request-id-12345678901234567890",
+                    target_count=2,
+                    device_uuids=["uuid-2"],
+                )
+
+    @pytest.mark.asyncio
+    async def test_scale_down_with_device_uuids_belongs_to_other_bot(self):
+        """A device UUID belonging to another bot is not in this bot's device map,
+        so it is reported as unknown (the device_repo only returns this bot's devices)."""
+        service, _, _, _ = self._make_service()
+
+        with patch.object(
+            service,
+            "get_bot",
+            new_callable=AsyncMock,
+            return_value=self._make_bot_response(),
+        ):
+            with pytest.raises(
+                ValueError,
+                match="not found or not belonging to bot",
+            ):
+                await service.scale_bot(
+                    tenant="test_tenant",
+                    bot_uuid="BOT-001",
+                    operator="user1",
+                    request_id="test-request-id-12345678901234567890",
+                    target_count=2,
+                    device_uuids=["other-bot-uuid-1"],
+                )
+
+    @pytest.mark.asyncio
+    async def test_scale_down_with_device_uuids_duplicate_deduped(self):
+        """Duplicate device UUIDs are deduped (order preserved) before being
+        forwarded in target_device_uuids and used for consistency check."""
+        service, mock_publish_service, _, _ = self._make_service()
+
+        with patch.object(
+            service,
+            "get_bot",
+            new_callable=AsyncMock,
+            return_value=self._make_bot_response(),
+        ):
+            await service.scale_bot(
+                tenant="test_tenant",
+                bot_uuid="BOT-001",
+                operator="user1",
+                request_id="test-request-id-12345678901234567890",
+                target_count=1,  # 3 - len(deduped=2) = 1
+                device_uuids=["uuid-2", "uuid-2", "uuid-3"],
+            )
+
+            call_kwargs = mock_publish_service.create_publish.call_args.kwargs
+            assert call_kwargs["publish_type"] == PublishType.SCALE_DOWN
+            assert call_kwargs["config"].target_device_uuids == ["uuid-2", "uuid-3"]
+            assert call_kwargs["config"].replica_desired == 1  # 3 - 2
+
+    @pytest.mark.asyncio
+    async def test_scale_down_with_device_uuids_scale_up_rejected(self):
+        """Combining device_uuids with an explicit target_count above current_count
+        is rejected (device_uuids are exclusively a SCALE_DOWN mechanism)."""
+        service, _, _, _ = self._make_service()
+
+        with patch.object(
+            service,
+            "get_bot",
+            new_callable=AsyncMock,
+            return_value=self._make_bot_response(),
+        ):
+            with pytest.raises(ValueError):
+                await service.scale_bot(
+                    tenant="test_tenant",
+                    bot_uuid="BOT-001",
+                    operator="user1",
+                    request_id="test-request-id-12345678901234567890",
+                    target_count=5,  # > current_count(3)
+                    device_uuids=["uuid-1"],
+                )
+
+    @pytest.mark.asyncio
+    async def test_scale_down_without_device_uuids_backward_compatible(self):
+        """Omitting device_uuids preserves the legacy path: target_device_uuids
+        on the publish config is None."""
+        service, mock_publish_service, _, _ = self._make_service()
+
+        with patch.object(
+            service,
+            "get_bot",
+            new_callable=AsyncMock,
+            return_value=self._make_bot_response(),
+        ):
+            result = await service.scale_bot(
+                tenant="test_tenant",
+                bot_uuid="BOT-001",
+                operator="user1",
+                request_id="test-request-id-12345678901234567890",
+                target_count=1,  # Scale from 3 to 1
+            )
+
+            assert result.publish_id == 555
+            assert result.target_count == 1
+            call_kwargs = mock_publish_service.create_publish.call_args.kwargs
+            assert call_kwargs["publish_type"] == PublishType.SCALE_DOWN
+            assert call_kwargs["config"].replica_desired == 1
+            assert call_kwargs["config"].target_device_uuids is None
+
+    async def test_scale_down_with_empty_device_uuids_list_behaves_like_none(self):
+        """An empty ``device_uuids`` list is treated the same as ``None``:
+        no targeted destruction — the publish config's
+        ``target_device_uuids`` is ``None``."""
+        service, mock_publish_service, _, _ = self._make_service()
+
+        with patch.object(
+            service,
+            "get_bot",
+            new_callable=AsyncMock,
+            return_value=self._make_bot_response(),
+        ):
+            result = await service.scale_bot(
+                tenant="test_tenant",
+                bot_uuid="BOT-001",
+                operator="user1",
+                request_id="test-request-id-12345678901234567890",
+                target_count=1,  # Scale from 3 to 1
+                device_uuids=[],
+            )
+
+            assert result.publish_id == 555
+            assert result.target_count == 1
+            call_kwargs = mock_publish_service.create_publish.call_args.kwargs
+            assert call_kwargs["publish_type"] == PublishType.SCALE_DOWN
+            assert call_kwargs["config"].replica_desired == 1
+            assert call_kwargs["config"].target_device_uuids is None
 
 
 class TestListBotsStatusFilter:

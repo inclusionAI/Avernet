@@ -186,16 +186,17 @@ async function doLoadIdentities(): Promise<DomainResult<LoadIdentitiesResult>> {
         const b = asRecord(value);
         const id = readBotId(value);
         if (!b || !id) return [];
-        const status = readString(b.status);
+        const reachability = b.reachability === 'unreachable' ? 'unreachable' : 'reachable';
+        const online = reachability === 'reachable';
         return [
           {
             id,
             kind: b.kind === 'human' ? 'user' : 'bot',
             displayName: readString(b.name) ?? '未命名',
             avatarUrl: readString(b.avatar_url),
-            online: status === 'online',
-            status: status === 'online' ? 'online' : 'hidden',
-            reachability: b.reachability === 'unreachable' ? 'unreachable' : 'reachable',
+            online,
+            status: online ? 'online' : 'hidden',
+            reachability,
             engine: readBotEngine(value),
             botType: readBotType(value),
           },

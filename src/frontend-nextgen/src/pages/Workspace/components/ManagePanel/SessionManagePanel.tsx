@@ -1,6 +1,6 @@
 import { Badge, Button, Card, Input } from '@/components/ui';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import type { IdentityView, SessionView } from '@/domain/collaboration';
+import type { GroupView, IdentityView, SessionView } from '@/domain/collaboration';
 import type { PolicyResult } from '@/services/workspace/groupService';
 import type { DomainResult } from '@/services/workspace/identityService';
 import { Link as LinkIcon, LogOut, Trash2 } from 'lucide-react';
@@ -13,8 +13,11 @@ import { ShareDialog } from './ShareDialog';
 export interface SessionManagePanelProps {
   session: SessionView;
   groupName?: string;
+  groupKind: GroupView['kind'];
   canManage: PolicyResult;
   activeIdentity: IdentityView | null;
+  authenticatedUserId?: string | null;
+  authenticatedUserName?: string | null;
   candidates: IdentityView[];
   onClose: () => void;
   onRename: (sessionId: string, title: string) => Promise<boolean>;
@@ -25,8 +28,25 @@ export interface SessionManagePanelProps {
   onShare: () => Promise<DomainResult<{ invitationUrl: string }>>;
 }
 
+const GROUP_KIND_LABEL: Record<GroupView['kind'], string> = {
+  free_chat: '自由聊天',
+  task_master_slave: '任务协作',
+  task_dag: '自定义协作',
+};
+
 export function SessionManagePanel(props: SessionManagePanelProps) {
-  const { session, groupName, canManage, activeIdentity, onClose, onRename, onDelete, onLeaveSession } = props;
+  const {
+    session,
+    groupName,
+    canManage,
+    activeIdentity,
+    authenticatedUserId,
+    authenticatedUserName,
+    onClose,
+    onRename,
+    onDelete,
+    onLeaveSession,
+  } = props;
   const [title, setTitle] = useState(session.title);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
@@ -64,7 +84,6 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
     <aside className="flex h-full flex-col bg-background">
       <ManagePanelHeader
         title="会话管理"
-        description="查看会话基础信息与参与成员，维护当前会话的协作范围。"
         subtitle={groupName ? `${groupName} · ${session.title}` : session.title}
         statusLabel={isSessionDriverOrManager ? '可管理' : '可查看'}
         onClose={onClose}
@@ -73,11 +92,8 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
       <div className="app-scrollbar flex-1 overflow-y-auto p-4">
         <div className="space-y-3">
           <Card className="rounded-lg bg-card p-3 shadow-sm">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <Badge tone="primary">{session.kind === 'service_invocation' ? '服务调用' : '聊天会话'}</Badge>
-              <Badge tone={session.status === 'running' ? 'success' : 'neutral'}>
-                {session.status === 'running' ? '进行中' : '已完成'}
-              </Badge>
+            <div className="mb-3 flex items-center gap-2">
+              <Badge tone="primary">{GROUP_KIND_LABEL[props.groupKind]}</Badge>
             </div>
             <label className="block">
               <span className="mb-1.5 block text-xs text-muted-foreground">会话标题</span>
@@ -88,11 +104,21 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
                 </Button>
               </div>
             </label>
-            <div className="mt-3 rounded-lg bg-muted px-3 py-2">
-              <p className="m-0 text-[11px] font-medium text-muted-foreground">成员数量</p>
-              <p className="m-0 mt-1 text-sm font-medium text-foreground">
-                {session.participantCount || session.participants.length}
-              </p>
+            <div className="mt-3 space-y-2 rounded-lg bg-muted px-3 py-2">
+              <div>
+                <p className="m-0 text-[11px] font-medium text-muted-foreground">成员数量</p>
+                <p className="m-0 mt-1 text-sm font-medium text-foreground">
+                  {session.participantCount || session.participants.length}
+                </p>
+              </div>
+              <div>
+                <p className="m-0 text-[11px] font-medium text-muted-foreground">群 ID</p>
+                <p className="m-0 mt-1 break-all text-xs font-medium text-foreground">{session.groupId}</p>
+              </div>
+              <div>
+                <p className="m-0 text-[11px] font-medium text-muted-foreground">会话 ID</p>
+                <p className="m-0 mt-1 break-all text-xs font-medium text-foreground">{session.sessionId}</p>
+              </div>
             </div>
           </Card>
 
@@ -102,10 +128,14 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
               participants={session.participants}
               participantCount={session.participantCount}
               activeIdentity={activeIdentity}
+              authenticatedUserId={authenticatedUserId}
+              authenticatedUserName={authenticatedUserName}
               canManage={isSessionDriverOrManager}
               disabledReason={canManage.disabledReason}
               emptyText="暂无成员"
               addLabel="添加会话成员"
+              groupKind={props.groupKind}
+              showMode
               onAddMany={handleAddMany}
               onRemove={props.onRemoveMember}
             />

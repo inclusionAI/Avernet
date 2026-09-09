@@ -279,6 +279,47 @@ describe('GroupSessionView root session fallback', () => {
       global.fetch = originalFetch;
     }
   });
+
+  it('单 bot 根节点缺 group_id 时，用节点执行者本地兜底为 1 条「执行者」，不再显示 0', async () => {
+    const originalFetch = global.fetch;
+    const fetchMock = jest.fn<(...args: Parameters<typeof fetch>) => Promise<Response>>();
+    // 单聊消息端点，返回空列表让 loading 收敛后渲染成员分区
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ data: { items: [] } }) } as Response);
+    global.fetch = fetchMock;
+
+    try {
+      render(
+        <GroupSessionView
+          node={{
+            id: 'root-node',
+            name: '根节点',
+            sequence: 1,
+            status: 'done',
+            executor: 'doudi',
+            assignee: 'doudi',
+            runMode: 'single_bot',
+            // 单聊会话 session_id 形如 ...:user:<工号>，归属人=当前登录人，无跨用户权限问题
+            sessionId: 'agent:main:session:sess-1:user:123',
+            hasSubTask: false,
+            subTaskId: null,
+            stepTraces: [],
+            acceptanceResult: null,
+            artifacts: [],
+          }}
+          bcsBaseUrl=""
+          apiBaseUrl=""
+          userId="123"
+          onBack={jest.fn()}
+        />,
+      );
+
+      // 本地兜底合成 1 条执行者成员 → 分区显示「执行者（1）」，不再是旧的「执行者（0）」
+      expect(await screen.findByText('执行者（1）')).toBeInTheDocument();
+      expect(screen.queryByText('执行者（0）')).not.toBeInTheDocument();
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
 });
 
 describe('GroupDrillDown view bot resolution', () => {

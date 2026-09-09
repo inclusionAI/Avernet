@@ -1,5 +1,6 @@
 import type { HumanIdentity, UserProfilePresentation } from '@/capabilities';
 import { getCapabilities } from '@/capabilities';
+import { matchesBotIdentity } from '@/domain/collaborationPrivacy/loadScope';
 import type {
   CollaborationBot,
   CollaborationPrivacyOverview,
@@ -121,7 +122,7 @@ function toPublicationRequest(command: PublicationCommand): BcsPublicRequest {
     command.config.scope === 'restricted' &&
     (!viewDepts?.length || viewDepts.some((entry) => !entry.deptNo.trim()))
   ) {
-    throw new Error('组织范围缺少部门编码，无法提交公开范围变更');
+    throw new Error('组织范围缺少部门编码，无法提交 Bot 可见性变更');
   }
 
   return {
@@ -133,7 +134,7 @@ function toPublicationRequest(command: PublicationCommand): BcsPublicRequest {
 
 function assertPublicationResponse(response: BackendApiEnvelope<BcsPublishResult>): BcsPublishResult {
   if (isEnvelopeFailure(response) || !response.data || !response.data.success) {
-    throw new Error(response.data?.error_msg || response.message || '公开范围变更提交失败');
+    throw new Error(response.data?.error_msg || response.message || 'Bot 可见性变更提交失败');
   }
   return response.data;
 }
@@ -175,10 +176,10 @@ function createPublicationResult(command: PublicationCommand, result: BcsPublish
   }
 
   if (result.state !== 'COMPLETED') {
-    throw new Error('公开范围接口返回了无法识别的终态');
+    throw new Error('Bot 可见性接口返回了无法识别的终态');
   }
   if (result.last_operate === 'DISAGREE' || result.last_operate === 'CANCEL') {
-    throw new Error('公开范围变更未通过，当前生效配置保持不变');
+    throw new Error('Bot 可见性变更未通过，当前可见性保持不变');
   }
 
   const config: PublicConfig =
@@ -363,27 +364,45 @@ export function createCollaborationPrivacyRuntimeAdapter(
   },
 ): CollaborationPrivacyGateway {
   let overview: CollaborationPrivacyOverview | undefined;
+  let activeRawUserId: string | undefined;
+  let latestLoadId = 0;
   let managedBotSnapshots = new Map<string, CollaborationBotDto>();
 
   return {
-    async loadOverview(userId, signal) {
+    async loadOverview(userId, signal, loadScope = { target: 'allBots' }) {
+      const loadId = ++latestLoadId;
+      const rawUserId = userId.trim();
       const userProfilePresentation = resolveUserProfilePresentation(dependencies);
       const currentUser = userProfilePresentation.preferAuthenticatedUserProfile
         ? buildAuthenticatedCurrentUser(userId, dependencies.getHumanIdentity?.())
         : mapOrgUserToIdentity(
             normalizeOrgUser(
-              assertOrgUserResponse(await dependencies.getOrgUser(normalizeEmployeeNumber(userId), signal)),
+              assertOrgUserResponse(await dependencies.getOrgUser(normalizeEmployeeNumber(rawUserId), signal)),
             ),
           );
-      const managedBots = await dependencies.apiAdapter.listManagedBots(
-        { kind: 'bot', user_id: currentUser.employeeNumber },
-        signal,
-      );
+      // 用户身份入口只渲染身份卡：不请求 Bot 列表，部门回显与 BCSFuse config 的 N+1 自然归零。
+      if (loadScope.target === 'currentUser') {
+        const userScopedOverview: CollaborationPrivacyOverview = { currentUser, organizationOptions: [], bots: [] };
+        if (loadId === latestLoadId) {
+          managedBotSnapshots = new Map();
+          activeRawUserId = rawUserId;
+          overview = userScopedOverview;
+        }
+        return structuredClone(userScopedOverview);
+      }
+      const managedBots = await dependencies.apiAdapter.listManagedBots({ kind: 'bot', user_id: rawUserId }, signal);
       const physicalBots = managedBots.items.filter((item) => item.kind === 'bot');
+      // Bot 身份入口只渲染命中的那一张卡，故 hydrate 前先收敛读取范围：避免为不渲染的 Bot 付部门搜索与
+      // config 调用（慢 Bot 会拖长当前卡首屏，非 404 失败还会为无关 Bot 弹 toast）。命中不到时按空列表处理，
+      // 页面沿用既有局部空态，不升级为整页加载失败。
+      const hydratableBots =
+        loadScope.target === 'activeBot'
+          ? physicalBots.filter((item) => matchesBotIdentity(item.bot_id, loadScope.botId))
+          : physicalBots;
       // 部门回显和画像公开配置是两条独立链路；并行启动，避免部门搜索慢/失败时看不到 BCSFuse 请求。
-      const baseBots = physicalBots.map(mapBotDtoToDomain);
+      const baseBots = hydratableBots.map(mapBotDtoToDomain);
       const [botsWithDepartments, botsWithProfile] = await Promise.all([
-        hydrateDepartmentScopes(physicalBots, dependencies.listOrgDepts, signal),
+        hydrateDepartmentScopes(hydratableBots, dependencies.listOrgDepts, signal),
         hydrateProfilePublic(baseBots, dependencies.getWorkerConfig, signal),
       ]);
       const profileByBotId = new Map(botsWithProfile.map((bot) => [bot.id, bot]));
@@ -397,8 +416,11 @@ export function createCollaborationPrivacyRuntimeAdapter(
             : bot;
         }),
       };
-      managedBotSnapshots = new Map(physicalBots.map((item) => [item.bot_id, structuredClone(item)]));
-      overview = nextOverview;
+      if (loadId === latestLoadId) {
+        managedBotSnapshots = new Map(hydratableBots.map((item) => [item.bot_id, structuredClone(item)]));
+        activeRawUserId = rawUserId;
+        overview = nextOverview;
+      }
       return structuredClone(nextOverview);
     },
 
@@ -465,15 +487,9 @@ export function createCollaborationPrivacyRuntimeAdapter(
     },
 
     async submitPublication(command, signal) {
-      const currentOverview = overview;
-      if (!currentOverview) throw new Error('协作权限数据尚未加载');
+      if (!overview || !activeRawUserId) throw new Error('协作权限数据尚未加载');
       const result = assertPublicationResponse(
-        await dependencies.publishBotPublic(
-          command.botId,
-          currentOverview.currentUser.employeeNumber,
-          toPublicationRequest(command),
-          signal,
-        ),
+        await dependencies.publishBotPublic(command.botId, activeRawUserId, toPublicationRequest(command), signal),
       );
       return createPublicationResult(command, result);
     },

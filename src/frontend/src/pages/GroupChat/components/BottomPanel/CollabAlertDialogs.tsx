@@ -4,6 +4,7 @@
  * 从 BottomPanel 中提取的弹窗组件，减少主组件行数
  */
 
+import { Button } from '@/components';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -13,15 +14,22 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { AlertCircle, Info } from 'lucide-react';
-import React from 'react';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { AlertCircle, CircleHelp, Info } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import type { MessageViewScope } from '../../types';
 
 interface CollabAlertDialogsProps {
   showJoinDialog: boolean;
   setShowJoinDialog: (v: boolean) => void;
   showLeaveDialog: boolean;
   setShowLeaveDialog: (v: boolean) => void;
-  onJoin: () => Promise<void>;
+  onJoin: (messageViewScope: MessageViewScope) => Promise<void>;
   onLeave: () => Promise<void>;
   /** 是否为任务协作群（主从模式） */
   isManagerWorker?: boolean;
@@ -36,6 +44,15 @@ const CollabAlertDialogs: React.FC<CollabAlertDialogsProps> = ({
   onLeave,
   isManagerWorker,
 }) => {
+  const [messageViewScope, setMessageViewScope] =
+    useState<MessageViewScope>('full');
+
+  useEffect(() => {
+    if (showJoinDialog) {
+      setMessageViewScope('full');
+    }
+  }, [showJoinDialog]);
+
   return (
     <>
       {/* 加入协作确认弹窗 */}
@@ -58,6 +75,45 @@ const CollabAlertDialogs: React.FC<CollabAlertDialogsProps> = ({
                 </li>
               </ul>
             </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={messageViewScope === 'participant'}
+                    onChange={(event) =>
+                      setMessageViewScope(
+                        event.target.checked ? 'participant' : 'full',
+                      )
+                    }
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm font-medium text-slate-700">
+                    只看公开及与我相关的消息
+                  </span>
+                </label>
+                <TooltipProvider delayDuration={100}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        ghost
+                        type="button"
+                        aria-label="了解参与者视角"
+                        className="h-auto min-h-0 p-0 text-slate-400 hover:text-slate-600 focus-visible:ring-2 focus-visible:ring-blue-400"
+                      >
+                        <CircleHelp className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-72 text-xs">
+                      这是“参与者视角”：勾选后会隐藏部分其他参与者的消息，适合需要独立参与的评审、访谈、分组协作或游戏场景。
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              <p className="mt-1 pl-6 text-xs text-slate-500">
+                未勾选时，可看到群内的全部消息。
+              </p>
+            </div>
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
               <h4 className="text-sm font-medium text-amber-800 mb-2 flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
@@ -69,7 +125,8 @@ const CollabAlertDialogs: React.FC<CollabAlertDialogsProps> = ({
                     您可与主节点Bot进行对话，由主节点Bot负责任务分发、状态推进、质量核验
                   </li>
                   <li className="relative pl-2 before:content-['·'] before:absolute before:left-0 before:text-amber-500">
-                    顶栏切换至用户视角时，您可见的任务协作群的会话上下文，将与主节点Bot可见的上下文保持一致
+                    勾选参与者视角后将过滤协作内部消息；切换到您拥有的 Bot
+                    视角不受影响
                   </li>
                 </ul>
               ) : (
@@ -98,7 +155,7 @@ const CollabAlertDialogs: React.FC<CollabAlertDialogsProps> = ({
               取消
             </AlertDialogCancel>
             <AlertDialogAction
-              onClick={onJoin}
+              onClick={() => onJoin(messageViewScope)}
               className="bg-blue-600 hover:bg-blue-700"
               data-aspm-click="ca114903.da194170"
               data-aspm-desc="GroupChat-确认加入协作"

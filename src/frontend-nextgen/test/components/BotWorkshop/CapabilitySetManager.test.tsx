@@ -4,6 +4,10 @@ import { CapabilitySetManager } from '@/components/BotWorkshop/Editor/Capability
 import '@testing-library/jest-dom';
 import { render, screen } from '@testing-library/react';
 
+jest.mock('@/capabilities', () => ({
+  getCapabilities: () => ({ getBotMcpPickerEnabled: () => ({ status: 'available', value: true }) }),
+}));
+
 test('能力集以统一成员样式展示聚合接口返回的 CLI', () => {
   render(
     <CapabilitySetManager

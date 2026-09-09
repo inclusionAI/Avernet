@@ -103,6 +103,7 @@ export function BotModelSelectorContainer({
       models={botModels.models}
       activeModelId={botModels.activeModelId}
       loading={botModels.isLoadingModels}
+      disabled={bot?.isFriendBot}
       onSelect={(modelId) => void botModels.selectModel(modelId)}
     />
   );

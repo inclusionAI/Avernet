@@ -1,0 +1,14 @@
+# openclaw.path — keys merge-config takes from the image-rendered template
+# into the NAS copy of ~/.openclaw/openclaw.json (applied by
+# start_openclaw.sh on every startup; merge-config reads this via --keys).
+#
+# One key or dot-path per line; '#' comments and blank lines are ignored.
+# Keys NOT listed here belong to the user/deployment copy and are never
+# overwritten by a merge — add a key here when the image template grows one
+# and image updates should reach pods with an existing NAS config.
+#
+# 'meta' is deliberately absent: the openclaw CLI's own lastTouched*
+# bookkeeping lives in the running copy.
+models
+plugins
+agents.defaults.models

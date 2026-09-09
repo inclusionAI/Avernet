@@ -189,6 +189,16 @@ class PoolMappingVerifyRequest(BaseModel):
     apply_mode: Literal["STRICT", "BEST_EFFORT"] = "STRICT"
 
 
+class SkillMappingApplyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mappings: list[PoolSkillMappingIntent | PoolCenterMappingIntent]
+    retired_mappings: list[PoolSkillMappingIntent | PoolCenterMappingIntent] = Field(
+        default_factory=list
+    )
+    source_layout: Literal["pool", "legacy"]
+
+
 __all__ = [
     "BindPathItem",
     "BindPathRequest",
@@ -209,6 +219,7 @@ __all__ = [
     "RuntimeLayoutProbeApiResponse",
     "RuntimeLayoutProbeRequest",
     "RuntimeLayoutProbeResponse",
+    "SkillMappingApplyRequest",
     "SymlinkItem",
     "SyncSymlinkRequest",
 ]

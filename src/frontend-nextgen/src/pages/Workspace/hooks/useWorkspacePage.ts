@@ -39,7 +39,8 @@ export function useWorkspacePage(): UseWorkspacePageResult {
   // URL 残留 session= 导致反复切回用户身份。
   const isFirstUrlSyncRef = useRef(true);
 
-  // 挂载时一次性快照协作群外链参数。外链/邀请直达（session= 且无 bot=）才需要把身份切回用户；
+  // 挂载时一次性快照协作群外链参数。外链/邀请直达（session= 无 bot=）切回用户身份；
+  // 带 bot=（BCN 落地透传 bot_uuid）则按它定位视角身份，未命中退回用户身份。
   // 用户后续手动点击协作群产生的 session= 属于内部选中，不应切身份，否则会把手动选中的 bot 身份切回用户。
   const initialGroupUrlRef = useRef({
     session: sessionParam,
@@ -49,7 +50,7 @@ export function useWorkspacePage(): UseWorkspacePageResult {
   });
 
   // view：以 store.view 为权威（身份切换/记忆恢复都写入 store）。URL 中的 tab=group
-  // / group= 仅作为外链直达初始化（见下方 URL → store view effect）。
+  // / group= 仅作为外链直达初始化（见下方首次挂载 effect）。
   const view: WorkspaceView = storeView;
 
   const ensureGroupExpanded = useCallback((groupId: string) => {
@@ -57,9 +58,13 @@ export function useWorkspacePage(): UseWorkspacePageResult {
     if (!store.expandedGroupIds[groupId]) store.toggleGroupExpanded(groupId);
   }, []);
 
-  // 首次挂载：把 URL 中的 tab=/group=/session= 初始化到 store.view（支持外链直达）。
-  // session= 不带 bot= 时属于协作群会话（如协作广场创建后跳转），也落到 group 视图。
+  // 首次挂载：URL 显式携带 tab=/group=/session=/bot= 时才回填 store.view（外链直达/前进后退）。
+  // session= 不带 bot= 时属于协作群会话（如协作广场创建后跳转），落到 group 视图。
+  // 裸 URL（侧栏导航 push('/workspace')、/work redirect 均不带参数）：store 是唯一真源，
+  // 保留 SPA 内记忆（view/群/会话/bot），group 视图由 Store→URL 投影 effect、chat 视图由 useChatUrlSync 反向写回 URL；
+  // 冷启动时 store 即初始态（view='chat'），行为与旧版一致。
   useEffect(() => {
+    if (tab === null && groupParam === null && sessionParam === null && botParam === null) return;
     const initialView: WorkspaceView =
       tab === 'group' || groupParam !== null || (sessionParam !== null && botParam === null) ? 'group' : 'chat';
     if (useWorkspaceStore.getState().view !== initialView) {
@@ -70,11 +75,12 @@ export function useWorkspacePage(): UseWorkspacePageResult {
 
   // URL → Store 单向同步：仅在 URL 参数变化时回填选中态，避免与 Store 内部更新相互反弹。
   useEffect(() => {
+    // 仅在 URL 显式携带 group= 且与 store 不一致时回填。
+    // 不再对「tab=group 但无 group 参数」清空选中：视图切换/身份切换时 URL 会被投影 effect
+    // 短暂改写，清空分支会误杀 store 记忆并形成 selectGroup(null)→URL 回写→再恢复的
+    // ping-pong（闪烁且 auto-select-first 可能在 null 窗口期抢跑选错会话）。
     if (groupParam && groupParam !== selectedGroupId) {
       useWorkspaceStore.getState().selectGroup(groupParam);
-    } else if (!groupParam && selectedGroupId && tab === 'group') {
-      // URL 中无 group 但处于 group 视图，清空选中。
-      useWorkspaceStore.getState().selectGroup(null);
     }
     if (groupParam) ensureGroupExpanded(groupParam);
     // session 选中交给会话 Hook 在 Task 10 接管；这里仅做最小回填。
@@ -89,8 +95,12 @@ export function useWorkspacePage(): UseWorkspacePageResult {
       if (user && store.activeIdentityId !== user.id) store.setActiveIdentityId(user.id);
       const workspace = useWorkspaceStore.getState();
       workspace.setView('chat');
+      // 已展开时保留 store 的分区归属（侧栏点击路径已写入 'friend'/'mine'）：本 effect 会在
+      // URL 回写（useChatUrlSync）后随 botParam 变化重跑，无条件覆盖 'mine' 会让好友 bot 行
+      // 被好友分区判定为折叠（expanded 需 sectionKey==='friend'），已加载的会话列表随之消失。
+      // 冷启动深链新展开走 store 缺省 'mine'，好友 bot 由 useFriendBotSectionSync 在列表就绪后纠正。
       if (!workspace.expandedBotIds[botParam]) workspace.toggleBotExpanded(botParam);
-      workspace.setBotExpandedSection(botParam, 'mine');
+      else if (!workspace.expandedBotSectionKey[botParam]) workspace.setBotExpandedSection(botParam, 'mine');
       if (sessionParam && workspace.selectedBotSessionId !== sessionParam) {
         workspace.selectBotSession(sessionParam);
         workspace.bumpHistoryRefresh();
@@ -99,15 +109,27 @@ export function useWorkspacePage(): UseWorkspacePageResult {
       }
       return;
     }
-    // 协作群会话（协作广场跳转 / 邀请链接）：仅在首次挂载时执行一次，后续身份切换
-    // 不应再触发——否则用户手动切到 bot 角色后，URL 残留的 session= 会导致反复切回
-    // 用户身份（isFirstUrlSyncRef 守卫，与下方 isFirstIdentityRef 同构）。
+    // 协作群会话（协作广场跳转 / 邀请链接 / 任务节点「新开页面查看会话」/ BCN 外链落地）：
+    // 首次满足条件时执行一次，后续身份切换不应再触发——否则用户手动切到 bot 角色后，
+    // URL 残留的 session= 会反复切回用户身份（isFirstUrlSyncRef 守卫，与下方 isFirstIdentityRef 同构）。
     const initialGroupUrl = initialGroupUrlRef.current;
-    if (isFirstUrlSyncRef.current && initialGroupUrl.session && !initialGroupUrl.bot) {
+    if (isFirstUrlSyncRef.current && initialGroupUrl.session) {
+      const all = useWorkspaceStore.getState().identities;
+      // 全新挂载(target=_blank 新开页面)时身份尚未加载:此刻不能消费首次同步,否则 initWorkspace
+      // 回填的持久化身份会落定,再也不会按外链切换 → 等 identities 就绪后(本 effect deps 含
+      // identities)再消费。
+      if (all.length === 0) return;
+      // bot= 为外链指定的视角身份（BCN 落地透传 bot_uuid）：命中 store 身份（含 Bot 角色）
+      // 则以其打开；未命中（链接身份不在当前账号名下）退回用户身份，等价旧行为。
+      // 无 bot= 时（邀请链接/协作广场跳转）保持原语义：强制切回用户身份——否则持久化的
+      // 上次 Bot 身份拉取目标群多半不可见 → 协作群会话打不开。
+      const target =
+        (initialGroupUrl.bot ? all.find((i) => i.id === initialGroupUrl.bot) : undefined) ??
+        all.find((i) => i.kind === 'user');
+      if (!target) return;
       isFirstUrlSyncRef.current = false;
       const store = useWorkspaceStore.getState();
-      const me = store.identities.find((i) => i.kind === 'user');
-      if (me && store.activeIdentityId !== me.id) store.setActiveIdentityId(me.id);
+      if (store.activeIdentityId !== target.id) store.setActiveIdentityId(target.id);
       const fresh = useWorkspaceStore.getState();
       fresh.setView('group');
       if (initialGroupUrl.membership === 'session_only' || initialGroupUrl.membership === 'direct') {
@@ -182,32 +204,6 @@ export function useWorkspacePage(): UseWorkspacePageResult {
     },
     [searchParams, setSearchParams],
   );
-
-  // URL → store view：URL 中的 tab 与 store.view 不一致时回填 store（例如外链直达 / 浏览器后退）。
-  useEffect(() => {
-    if (view === storeView) return;
-    useWorkspaceStore.getState().setView(view);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view]);
-
-  // Store view → URL：身份切换后 store 的 view（记忆恢复）与 URL 推导不一致时同步 URL。
-  useEffect(() => {
-    if (storeView === view) return;
-    // 外链直达单聊期间不回写 URL,避免 store 记忆的 group 在对齐 chat 时把 ?bot=/?session= 清掉。
-    if (tab === 'chat' && botParam && sessionParam) return;
-    const params = new URLSearchParams(searchParams);
-    if (storeView === 'group') {
-      params.set('tab', 'group');
-      params.delete('bot');
-      params.delete('session');
-    } else {
-      params.set('tab', 'chat');
-      params.delete('group');
-      params.delete('session');
-    }
-    setSearchParams(params, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeView, tab, botParam, sessionParam]);
 
   // Store → URL 反向同步：选中群/会话变化时把 group=/session= 写回 URL，便于分享/刷新回填。
   // 从零构建 URL，避免从 stale searchParams 继承另一视图的残留参数（如 chat 的 bot=）。

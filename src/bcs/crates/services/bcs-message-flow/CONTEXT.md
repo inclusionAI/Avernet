@@ -12,6 +12,8 @@
 
 ## Allowed dependencies
 
+- `auxiliary/bcs-observability` for log-only operation observations and correlation.
+
 - `service-api/*`
 - Pure utility crates such as `serde_json`, `uuid`, and `tracing`
 

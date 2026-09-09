@@ -11,7 +11,10 @@ pub use edge_grant::run_edge_grant_repo_contract;
 pub use permission_profile::run_permission_profile_repo_contract;
 pub use permission_request::run_permission_request_repo_contract;
 
-use bcs_domain::{MessageOwnerFilter, MessageQuery, NewMessage, SenderType};
+use bcs_domain::{
+    HumanMessageView, MessageAudience, MessageOwnerFilter, MessageQuery, MessageViewScope,
+    MessageVisibilityDomain, NewMessage, SenderType,
+};
 use bcs_service_api::ServiceError;
 use bcs_service_api::port::repo::{
     AppendEventRecord, ClaimEventDeliveries, ClaimFanoutTargets, ClaimSessionCallback,
@@ -2331,6 +2334,8 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
         owner_bot_id: None,
         created_at: 1000,
         run_id: String::new(),
+        visibility_domain: MessageVisibilityDomain::Chat,
+        audience: None,
     };
     let persisted = repo.append_message(msg).await.expect("append_message");
     assert_eq!(persisted.session_id, session_id);
@@ -2350,6 +2355,8 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
         owner_bot_id: None,
         created_at: 2000,
         run_id: String::new(),
+        visibility_domain: MessageVisibilityDomain::Chat,
+        audience: None,
     };
     let dup = repo.append_message(dup_msg).await.expect("idempotent append");
     assert_eq!(dup.message_id, persisted.message_id);
@@ -2368,6 +2375,8 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
             owner_bot_id: None,
             created_at: 2000 + i * 100,
             run_id: String::new(),
+            visibility_domain: MessageVisibilityDomain::Chat,
+            audience: None,
         };
         repo.append_message(m).await.expect("append");
     }
@@ -2389,6 +2398,7 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
             owner_filter: MessageOwnerFilter::Any,
             time_range: None,
             visible_from_seq: None,
+            human_view: None,
         })
         .await
         .expect("query_messages");
@@ -2413,6 +2423,7 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
             owner_filter: MessageOwnerFilter::Any,
             time_range: None,
             visible_from_seq: None,
+            human_view: None,
         })
         .await
         .expect("query_messages cursor");
@@ -2432,6 +2443,7 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
             owner_filter: MessageOwnerFilter::Any,
             time_range: None,
             visible_from_seq: None,
+            human_view: None,
         })
         .await
         .expect("query by sender");
@@ -2450,6 +2462,7 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
             owner_filter: MessageOwnerFilter::Any,
             time_range: None,
             visible_from_seq: None,
+            human_view: None,
         })
         .await
         .expect("query by type");
@@ -2468,6 +2481,7 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
             owner_filter: MessageOwnerFilter::Any,
             time_range: None,
             visible_from_seq: None,
+            human_view: None,
         })
         .await
         .expect("keyword search");
@@ -2486,6 +2500,7 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
             owner_filter: MessageOwnerFilter::Any,
             time_range: None,
             visible_from_seq: Some(4),
+            human_view: None,
         })
         .await
         .expect("visible_from_seq");
@@ -2521,6 +2536,7 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
             owner_filter: MessageOwnerFilter::Any,
             time_range: None,
             visible_from_seq: None,
+            human_view: None,
         })
         .await
         .expect("empty query");
@@ -2540,6 +2556,8 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
             owner_bot_id: Some("mgr".to_string()),
             created_at: 5000,
             run_id: String::new(),
+            visibility_domain: MessageVisibilityDomain::Chat,
+            audience: None,
         })
         .await
         .expect("append owner manager message");
@@ -2555,6 +2573,8 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
             owner_bot_id: Some("workerA".to_string()),
             created_at: 5100,
             run_id: String::new(),
+            visibility_domain: MessageVisibilityDomain::Chat,
+            audience: None,
         })
         .await
         .expect("append owner worker message");
@@ -2570,6 +2590,8 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
             owner_bot_id: None,
             created_at: 5200,
             run_id: String::new(),
+            visibility_domain: MessageVisibilityDomain::Chat,
+            audience: None,
         })
         .await
         .expect("append system ownerless message");
@@ -2589,6 +2611,7 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
             owner_filter: MessageOwnerFilter::Eq("workerA".to_string()),
             time_range: Some((5000, 5200)),
             visible_from_seq: None,
+            human_view: None,
         })
         .await
         .expect("query by owner_bot_id");
@@ -2607,6 +2630,7 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
             owner_filter: MessageOwnerFilter::Any,
             time_range: Some((5000, 5200)),
             visible_from_seq: None,
+            human_view: None,
         })
         .await
         .expect("query without owner filter");
@@ -2624,6 +2648,7 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
             owner_filter: MessageOwnerFilter::IsNull,
             time_range: Some((5000, 5200)),
             visible_from_seq: None,
+            human_view: None,
         })
         .await
         .expect("query public owner rows");
@@ -2643,6 +2668,7 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
             owner_filter: MessageOwnerFilter::PublicOrOwner("mgr".to_string()),
             time_range: Some((5000, 5200)),
             visible_from_seq: None,
+            human_view: None,
         })
         .await
         .expect("query public-or-mgr");
@@ -2667,7 +2693,7 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
     // store's responsibility: the MySQL/SQLite store filters reads by its own
     // `env`; the memory store does not track env.
     let history = repo
-        .list_session_history(session_id, MessageOwnerFilter::Any, None, None, 3)
+        .list_session_history(session_id, MessageOwnerFilter::Any, None, None, None, 3)
         .await
         .expect("list_session_history first page");
     assert!(history.has_more);
@@ -2691,6 +2717,7 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
             session_id,
             MessageOwnerFilter::Any,
             None,
+            None,
             history.next_cursor,
             3,
         )
@@ -2713,7 +2740,14 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
 
     // IsNull → only NULL-owned messages (seqs 9,6,5,4,3,2,1) in DESC order.
     let public_only = repo
-        .list_session_history(session_id, MessageOwnerFilter::IsNull, None, None, 100)
+        .list_session_history(
+            session_id,
+            MessageOwnerFilter::IsNull,
+            None,
+            None,
+            None,
+            100,
+        )
         .await
         .expect("list_session_history IsNull");
     assert_eq!(
@@ -2731,6 +2765,7 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
         .list_session_history(
             session_id,
             MessageOwnerFilter::Eq("workerA".to_string()),
+            None,
             None,
             None,
             100,
@@ -2752,6 +2787,7 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
         .list_session_history(
             session_id,
             MessageOwnerFilter::PublicOrOwner("workerA".to_string()),
+            None,
             None,
             None,
             100,
@@ -2776,7 +2812,14 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
 
     // visible_from_seq cutoff: only seqs >= 4 survive, DESC.
     let cutoff = repo
-        .list_session_history(session_id, MessageOwnerFilter::Any, Some(4), None, 100)
+        .list_session_history(
+            session_id,
+            MessageOwnerFilter::Any,
+            Some(4),
+            None,
+            None,
+            100,
+        )
         .await
         .expect("list_session_history visible_from_seq");
     assert_eq!(
@@ -2786,12 +2829,127 @@ pub async fn message_repo_contract_tests<T: MessageRepoPort + ?Sized>(repo: &T) 
 
     // unknown session → empty page, no more.
     let empty_history = repo
-        .list_session_history("no-such-session", MessageOwnerFilter::Any, None, None, 10)
+        .list_session_history(
+            "no-such-session",
+            MessageOwnerFilter::Any,
+            None,
+            None,
+            None,
+            10,
+        )
         .await
         .expect("list_session_history unknown session");
     assert!(empty_history.messages.is_empty());
     assert!(!empty_history.has_more);
     assert!(empty_history.next_cursor.is_none());
+
+    // Human collaboration views are applied before pagination and independently
+    // from the legacy owner filter. In particular, a Directed row may retain an
+    // owner_bot_id while still being visible to a different Human audience.
+    for (created_at, content, visibility_domain, audience, owner_bot_id) in [
+        (
+            6000,
+            "public-collaboration",
+            MessageVisibilityDomain::ManagerWorker,
+            MessageAudience::Public,
+            None,
+        ),
+        (
+            6100,
+            "directed-human-a",
+            MessageVisibilityDomain::ManagerWorker,
+            MessageAudience::Directed {
+                actor_ids: vec!["human-a".to_string(), "workerA".to_string()],
+            },
+            Some("workerA".to_string()),
+        ),
+        (
+            6200,
+            "directed-human-b",
+            MessageVisibilityDomain::StateMachine,
+            MessageAudience::Directed {
+                actor_ids: vec!["human-b".to_string(), "workerB".to_string()],
+            },
+            Some("workerB".to_string()),
+        ),
+        (
+            6300,
+            "full-only",
+            MessageVisibilityDomain::StateMachine,
+            MessageAudience::FullOnly,
+            None,
+        ),
+    ] {
+        repo.append_message(NewMessage {
+            group_id: group_id.to_string(),
+            session_id: session_id.to_string(),
+            sender_id: "collaboration-runtime".to_string(),
+            sender_type: SenderType::System,
+            message_type: "collaboration_artifact".to_string(),
+            content: serde_json::json!({"text": content}),
+            client_msg_id: None,
+            owner_bot_id,
+            created_at,
+            run_id: String::new(),
+            visibility_domain,
+            audience: Some(audience),
+        })
+        .await
+        .expect("append collaboration visibility fixture");
+    }
+
+    let participant_page = repo
+        .query_messages(MessageQuery {
+            group_id: group_id.to_string(),
+            session_id: session_id.to_string(),
+            cursor: None,
+            limit: 2,
+            keyword: None,
+            sender_id: None,
+            message_type: None,
+            owner_filter: MessageOwnerFilter::Any,
+            time_range: Some((6000, 6300)),
+            visible_from_seq: None,
+            human_view: Some(HumanMessageView {
+                actor_id: "human-a".to_string(),
+                scope: MessageViewScope::Participant,
+                allow_legacy_unclassified_chat: false,
+            }),
+        })
+        .await
+        .expect("query participant collaboration view");
+    assert_eq!(participant_page.messages.len(), 2);
+    assert!(!participant_page.has_more);
+    assert_eq!(
+        participant_page
+            .messages
+            .iter()
+            .map(|message| message.content["text"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["directed-human-a", "public-collaboration"]
+    );
+
+    let full_page = repo
+        .query_messages(MessageQuery {
+            group_id: group_id.to_string(),
+            session_id: session_id.to_string(),
+            cursor: None,
+            limit: 10,
+            keyword: None,
+            sender_id: None,
+            message_type: None,
+            owner_filter: MessageOwnerFilter::Any,
+            time_range: Some((6000, 6300)),
+            visible_from_seq: None,
+            human_view: Some(HumanMessageView {
+                actor_id: "human-a".to_string(),
+                scope: MessageViewScope::Full,
+                allow_legacy_unclassified_chat: false,
+            }),
+        })
+        .await
+        .expect("query full collaboration view");
+    assert_eq!(full_page.messages.len(), 4);
 }
 
 fn now_ms() -> u64 {

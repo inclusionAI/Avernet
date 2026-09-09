@@ -171,17 +171,17 @@ async def batch_query_workers(request: Request, req: WorkerBatchQueryRequest):
 @api_router.post(
     "/workers/{worker_id}/sync",
     summary="Sync worker",
-    description="Atomic sync: create + online + profile activation.",
+    description="Sync worker and profile; preserve existing runtime state when omitted.",
     response_model=WorkerSyncResponse,
     tags=["Workers"],
 )
 async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
     """
-    P1: Sync worker (create + online + activate profile).
+    P1: Sync worker and profile without changing omitted runtime state.
 
     Atomic sync operation aligned with root_original contract:
     - Create or update worker
-    - Set runtime_state to online
+    - Apply explicit runtime_state; otherwise preserve it (new workers default online)
     - Upsert and activate profile
     - Return canonical response schema
     """
@@ -213,15 +213,33 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
     worker_created = False  # For compensation logic
     profile_activated = False
     profile_id = req.profile.profile_id  # Use profile_id from request (root_original contract)
-    effective_runtime_state = req.runtime_state or "online"  # 传入则用传入值，否则默认 online
+    effective_runtime_state = req.runtime_state
 
     try:
         from src.domain.models.worker import Worker, WorkerType, WorkerIdentity, WorkerState
         from src.domain.models.worker_lifecycle_state import WorkerLifecycleState
         from src.domain.models.worker_source_info import WorkerSourceType
+        from src.domain.models.worker_runtime_state import WorkerRuntimeState
 
         # Step 1: Create or update worker
         existing = worker_store.get_by_id(worker_id)
+        update_runtime_state = existing is None or req.runtime_state is not None
+        if effective_runtime_state is None:
+            if existing is None:
+                effective_runtime_state = "online"
+            else:
+                # Read for response/analysis only. Do not write a snapshot back:
+                # user publication owns runtime state independently of visibility.
+                stored_state = (
+                    runtime_state_store.get_runtime_state(worker_id)
+                    if runtime_state_store is not None else None
+                )
+                current_state = stored_state if stored_state is not None else existing.state.runtime_state
+                # The in-memory store retains the mapping written by this route;
+                # persistent stores return the runtime-state enum.
+                if isinstance(current_state, dict):
+                    current_state = current_state["state"]
+                effective_runtime_state = WorkerRuntimeState(current_state).value
 
         # Phase 2.6.5: Map availability string to enum
         availability_map = {
@@ -286,12 +304,11 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
             worker_store.update(updated_worker)
             logger.info(f"[Workers R3 Sync] Worker updated: {worker_id}, availability={availability.value}")
 
-        # Step 2: Set runtime state (use request value, default to online if not provided)
+        # Step 2: Only explicit changes or new workers write runtime state.
         try:
-            if runtime_state_store is not None:
+            if runtime_state_store is not None and update_runtime_state:
                 from src.application.services.worker_runtime_state_service import WorkerRuntimeStateService
                 from src.domain.models.worker_runtime_state import WorkerRuntimeState
-                from datetime import datetime
 
                 # Upsert runtime state (set_runtime_state handles both create and update)
                 # Use effective_runtime_state from request (or default "online")
@@ -336,6 +353,13 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
                     except Exception as sync_err:
                         logger.warning(f"[Workers R3 Sync] Vector payload sync failed: {sync_err}")
 
+            elif not update_runtime_state:
+                logger.info(f"[Workers R3 Sync] Runtime state preserved: {worker_id} -> {effective_runtime_state}")
+                # Availability still changed even though runtime state did not.
+                try:
+                    _sync_availability_to_vector_store(worker_id, availability.value)
+                except Exception as sync_err:
+                    logger.warning(f"[Workers R3 Sync] Vector availability sync failed: {sync_err}")
             else:
                 logger.warning(f"[Workers R3 Sync] Runtime state store not available, skipping runtime state update")
         except Exception as e:
@@ -368,7 +392,7 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
         # Step 4: Upsert and activate profile
         logger.info(
             f"[SYNC_STEP_START] worker_id={worker_id}, profile_id={profile_id}, "
-            f"profile_key={worker_id}:{profile_id}, request_activate=True, runtime_state_requested=online"
+            f"profile_key={worker_id}:{profile_id}, request_activate=True, runtime_state_requested={req.runtime_state}"
         )
         logger.info(
             f"[SYNC_PROVIDER_RESOLUTION] worker_registry_store_class={type(worker_store).__name__}, "
@@ -384,7 +408,7 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
             f"created={created}, active_profile_key={worker_id}:{profile_id}, success=True"
         )
         logger.info(
-            f"[SYNC_RUNTIME_STATE_SET] worker_id={worker_id}, target_state=online, "
+            f"[SYNC_RUNTIME_STATE_SET] worker_id={worker_id}, target_state={effective_runtime_state}, update_requested={update_runtime_state}, "
             f"runtime_state_store_class={type(runtime_state_store).__name__ if runtime_state_store else 'None'}, "
             f"success=True"
         )
@@ -393,7 +417,7 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
         # Use profile data from request (req.profile) instead of req.profile_content
         logger.info(
             f"[SYNC_STEP_START] worker_id={worker_id}, profile_id={req.profile.profile_id}, "
-            f"profile_key={worker_id}:{req.profile.profile_id}, request_activate={req.profile.activate}, runtime_state_requested=online"
+            f"profile_key={worker_id}:{req.profile.profile_id}, request_activate={req.profile.activate}, runtime_state_requested={req.runtime_state}"
         )
         logger.info(
             f"[SYNC_PROVIDER_RESOLUTION] worker_registry_store_class={type(worker_store).__name__}, "
@@ -711,7 +735,7 @@ async def sync_worker(worker_id: str, request: Request, req: WorkerSyncRequest):
 @compat_router.post(
     "/workers/{worker_id}/sync",
     summary="Sync worker (backward-compatible)",
-    description="Atomic sync: create + online + profile activation. "
+    description="Sync worker and profile; preserve existing runtime state when omitted. "
                 "Legacy path at /v1 for backward compatibility; prefer /api/v1.",
     response_model=WorkerSyncResponse,
     tags=["Workers"],

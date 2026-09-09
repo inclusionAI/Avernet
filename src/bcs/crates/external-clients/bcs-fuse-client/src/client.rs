@@ -64,6 +64,7 @@ impl FuseClient {
         worker_id: &str,
         request: SyncWorkerRequest,
     ) -> Result<SyncWorkerResponse, FuseClientError> {
+        bcs_observability::observe_result("fuse.sync_worker", async {
         let url = format!("{}/v1/workers/{}/sync", self.base_url, worker_id);
 
         let response = self
@@ -77,10 +78,12 @@ impl FuseClient {
             .await?;
 
         Ok(response)
+            }).await
     }
 
     /// Set worker offline (best-effort, fire-and-forget).
     pub async fn set_worker_offline(&self, worker_id: &str) -> Result<(), FuseClientError> {
+        bcs_observability::observe_result("fuse.set_worker_offline", async {
         let url = format!("{}/v1/workers/{}/offline", self.base_url, worker_id);
 
         self.sync_client
@@ -90,6 +93,7 @@ impl FuseClient {
             .error_for_status()?;
 
         Ok(())
+            }).await
     }
 
     /// Call the fusion API (uses longer timeout — LLM-backed).
@@ -98,6 +102,7 @@ impl FuseClient {
         group_id: &str,
         request: FuseRequest,
     ) -> Result<FuseResponse, FuseClientError> {
+        bcs_observability::observe_result("fuse.fuse", async {
         let url = format!("{}/api/v1/groups/{}/fuse", self.base_url, group_id);
 
         let resp = self
@@ -123,6 +128,7 @@ impl FuseClient {
             })?;
 
         Ok(response)
+            }).await
     }
 
     /// Recommend/discover workers by question.
@@ -130,6 +136,7 @@ impl FuseClient {
         &self,
         request: RecommendWorkersRequest,
     ) -> Result<(RecommendWorkersResponse, serde_json::Value), FuseClientError> {
+        bcs_observability::observe_result("fuse.recommend_workers", async {
         let url = format!("{}/api/v1/recommend", self.base_url);
 
         tracing::info!(
@@ -168,6 +175,7 @@ impl FuseClient {
             serde_json::from_str(&raw_body).unwrap_or(serde_json::Value::Null);
 
         Ok((response, raw_value))
+            }).await
     }
 
     /// Batch query workers by IDs.
@@ -177,6 +185,7 @@ impl FuseClient {
         &self,
         worker_ids: &[String],
     ) -> Result<BatchWorkersResponse, FuseClientError> {
+        bcs_observability::observe_result("fuse.batch_query_workers", async {
         let url = format!("{}/v1/workers/batch", self.base_url);
 
         let request = BatchWorkersRequest {
@@ -203,6 +212,7 @@ impl FuseClient {
         })?;
 
         Ok(response)
+            }).await
     }
 }
 

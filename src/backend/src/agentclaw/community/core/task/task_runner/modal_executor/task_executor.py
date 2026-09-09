@@ -29,6 +29,10 @@ from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter impor
 )
 from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
     _no_callback_instruction,
+    _static_relay_closure,
+)
+from agentclaw.community.core.task.domain.prompt_constants import (
+    OUTPUT_LANGUAGE_CONSTRAINT,
 )
 from agentclaw.community.core.task.task_runner.modal_executor.task_executor_result_poller import (
     BcsGroupHandle,
@@ -788,82 +792,86 @@ class TaskExecutor(TaskExecutorBbsMixin):
         _task_instruction = str(gf.extend_props.get("task_instruction") or "")
         if _task_objective or _task_instruction or _loop_task_id:
             if str(_task_instruction).lstrip().startswith("# 接自"):
-                # 接力协作群:群成员收到的 context 以"# 接自/## 群组成/## 上游产出正文/## 本群任务"
-                # 接力交接正文先导(与 single_bot format_execute 直发交接同口径),再附 driver 回投定位
-                # 协议作脚注;不再重复注入验收叙事/目标/字段要求/禁联网——回收与验收由各 bot 的
-                # skill/rule + 框架 80s 兜底承托,与 single_bot 接力保持一致。
+                # 接力协作群(static_plan):## 本群任务 正文(承接/执行/gap交接三步)已具备。但真正多 bot
+                # 协作群的 task_instruction 由 engine 直取 raw metadata.instruction,未走 format_execute,
+                # 缺 _static_relay_closure(承接→执行→交接三步硬约束)+ 中文输出约束——导致协作群 bot 塌缩
+                # 只做执行、跳过接力接自/gap与派发。此处按需(以 '三步缺一不可' 标记判定,避免
+                # singlebot_2_group 的 task_instruction 已含 closure 而重复注入)补齐 closure+中文,
+                # 再补 driver/reporter 定位脚注;不再重复 目标/验收标准(静态接力 acceptances=[] 会打印空)。
+                _ctx_body = _task_instruction.rstrip()
+                if "三步缺一不可" not in _ctx_body:
+                    _ctx_body = f"{_ctx_body}\n{_static_relay_closure()}\n{OUTPUT_LANGUAGE_CONSTRAINT}"
                 _rfooter = [
                     "---",
-                    "[协作群回投协议 — 仅 driver/reporter bot 上报回投,其它成员只提供产出,不得重复回调]",
+                    "[协作群分工 — driver/reporter bot 负责汇总本群产出,其它成员只提供产出,不重复汇总]",
                     f"reporter_bot_id={_reporter_bot_id}; reporter_role={_reporter_role}",
-                    f"目标:{_task_objective}",
-                    f"验收标准:{json.dumps(_acceptances, ensure_ascii=False)}",
                 ]
-                if _task_context:
-                    _rfooter.append(f"任务上下文:{_task_context}")
-                if _loop_task_id:
-                    try:
-                        _task_id, _node_id = _loop_task_id.split("::", 1)
-                    except ValueError:
-                        _task_id, _node_id = "<task_id>", "<node_id>"
-                    if _skill_report:
-                        _rfooter.append(
-                            "回投请求体只能包含以下节点级字段;callback 内部会根据 task_id/node_id 组装 loop_task_id 等关联字段:"
-                            + json.dumps({
-                                "task_id": _task_id,
-                                "node_id": _node_id,
-                                "status": "SUCCESS",
-                                "output": "完整协作群执行输出",
-                                "acceptance_result": {},
-                                "extend_props": {},
-                            }, ensure_ascii=False)
-                            + "\n验收通过时上报 status=SUCCESS；未通过时上报 status=DONE 并在 acceptance_result.gaps 填写具体差距；只有执行失败才使用 FAILED。"
-                        )
-                    else:
-                        _rfooter.append(_no_callback_instruction())
-                req_kwargs["context"] = f"{_task_instruction.rstrip()}\n" + "\n".join(_rfooter)
+                req_kwargs["context"] = f"{_ctx_body}\n" + "\n".join(_rfooter)
             else:
-                # 非接力协作群:保留原 [task-execute] reporter/目标/指令/验收/任务上下文/回投体验收信封。
-                req_kwargs["context"] = (
-                    "[task-execute]\n"
-                    "execution_mode=coop_group\n"
-                    f"reporter_bot_id={_reporter_bot_id}\n"
-                    f"reporter_role={_reporter_role}\n"
-                    "只有 reporter_bot_id 对应的 Bot（本群唯一 master/driver）可以调用 "
-                    "task-loop 的任务验收(acceptance)逻辑。所有 worker 完成或明确失败后，"
-                    "reporter 必须立即逐条检查当前节点 goal.acceptances，汇总完整执行输出，"
-                    + (
-                        "生成 SUCCESS/DONE/FAILED，并真正 POST 回投；不得只在群里回复完成；其它 Bot 只提供产出，不得重复回调。\n"
-                        "验收步骤不可跳过：执行→逐条校验→生成结论→HTTP上报→确认HTTP 200。\n"
-                        if _skill_report else
-                        "完成验收后由平台接口负责结果回收；不得发起 HTTP callback；其它 Bot 只提供产出。\n"
-                    )
-                    + "只有在上述完成条件满足后才触发 task-acceptance；建群初始上下文不触发验收。\n"
-                    f"目标:{_task_objective}\n"
-                    f"指令:{_task_instruction}\n"
-                    f"验收标准:{json.dumps(_acceptances, ensure_ascii=False)}\n"
-                    f"任务上下文:{_task_context or ''}"
+                # 非接力协作群。task_instruction 有两种来源,需分别处置以免重复注入上报协议:
+                # A) singlebot_2_group:task_instruction 已是 format_execute 生成的完整 [task-execute] 信封,
+                #    内含统一上报协议(_skill_report_instruction:阶段1-4/回调地址/请求体/自检/防重复约束)
+                #    或平台回收声明(_no_callback_instruction)。
+                # B) 其它(含 BBS _task_msg):裸/手写指令,保留原外层信封行为,不改其任务指令。
+                # 统一原则:整群只出现一份完整上报协议。A 路径仅补 reporter 定位脚注,绝不二次包裹
+                # [task-execute] 或重复注入上报协议——否则回调地址/请求体被说两遍,强化 bot 收尾轮
+                # 重贴全文(重复回复)与反复试错重复 POST(重复上报)。B 路径保持原样(不动 BBS 指令)。
+                _is_full_execute_envelope = (
+                    "请严格按以下阶段执行，执行、校验、验收、上报均不可跳过。" in _task_instruction
                 )
-                if _loop_task_id:
-                    try:
-                        _task_id, _node_id = _loop_task_id.split("::", 1)
-                    except ValueError:
-                        _task_id, _node_id = "<task_id>", "<node_id>"
-                    if _skill_report:
-                        req_kwargs["context"] += (
-                            "\n回投请求体只能包含以下节点级字段；callback 内部会根据 task_id/node_id 组装 loop_task_id 等关联字段："
-                            + json.dumps({
-                                "task_id": _task_id,
-                                "node_id": _node_id,
-                                "status": "SUCCESS",
-                                "output": "完整协作群执行输出",
-                                "acceptance_result": {},
-                                "extend_props": {},
-                            }, ensure_ascii=False)
-                            + "\n验收通过时上报 status=SUCCESS；未通过时上报 status=DONE，并在 acceptance_result.gaps 填写具体差距；只有执行失败才使用 FAILED。"
+                if _is_full_execute_envelope:
+                    # A) singlebot_2_group:task_instruction 已是完整格式化信封,仅追加 reporter 定位脚注,
+                    # 不再重复打印外层 [task-execute]/目标/指令/验收标准/任务上下文/请求体(会与内层重复,
+                    # 且外层 acceptances 为空会打印 验收标准:[] 误导)。loop_task_id 已内嵌在上报请求体内。
+                    req_kwargs["context"] = (
+                        f"{_task_instruction.rstrip()}\n"
+                        "---\n"
+                        "[协作群分工 — driver/reporter bot 负责汇总本群产出,其它成员只提供产出,不重复汇总]\n"
+                        f"reporter_bot_id={_reporter_bot_id}; reporter_role={_reporter_role}"
+                    )
+                else:
+                    # B) 非接力协作群:保留原 [task-execute] reporter/目标/指令/验收/任务上下文/回投体验收信封,
+                    # 不改 task_instruction 内容(含 BBS _task_msg 手写指令,保持原行为)。
+                    req_kwargs["context"] = (
+                        "[task-execute]\n"
+                        "execution_mode=coop_group\n"
+                        f"reporter_bot_id={_reporter_bot_id}\n"
+                        f"reporter_role={_reporter_role}\n"
+                        "只有 reporter_bot_id 对应的 Bot（本群唯一 master/driver）可以调用 "
+                        "task-loop 的任务验收(acceptance)逻辑。所有 worker 完成或明确失败后，"
+                        "reporter 必须立即逐条检查当前节点 goal.acceptances，汇总完整执行输出，"
+                        + (
+                            "生成 SUCCESS/DONE/FAILED，并真正 POST 回投；不得只在群里回复完成；其它 Bot 只提供产出，不得重复回调。\n"
+                            "验收步骤不可跳过：执行→逐条校验→生成结论→HTTP上报→确认HTTP 200。\n"
+                            if _skill_report else
+                            "完成验收后由平台接口负责结果回收；不得发起 HTTP callback；其它 Bot 只提供产出。\n"
                         )
-                    else:
-                        req_kwargs["context"] += "\n" + _no_callback_instruction()
+                        + "只有在上述完成条件满足后才触发 task-acceptance；建群初始上下文不触发验收。\n"
+                        f"目标:{_task_objective}\n"
+                        f"指令:{_task_instruction}\n"
+                        f"验收标准:{json.dumps(_acceptances, ensure_ascii=False)}\n"
+                        f"任务上下文:{_task_context or ''}"
+                    )
+                    if _loop_task_id:
+                        try:
+                            _task_id, _node_id = _loop_task_id.split("::", 1)
+                        except ValueError:
+                            _task_id, _node_id = "<task_id>", "<node_id>"
+                        if _skill_report:
+                            req_kwargs["context"] += (
+                                "\n回投请求体只能包含以下节点级字段；callback 内部会根据 task_id/node_id 组装 loop_task_id 等关联字段："
+                                + json.dumps({
+                                    "task_id": _task_id,
+                                    "node_id": _node_id,
+                                    "status": "SUCCESS",
+                                    "output": "完整协作群执行输出",
+                                    "acceptance_result": {},
+                                    "extend_props": {},
+                                }, ensure_ascii=False)
+                                + "\n验收通过时上报 status=SUCCESS；未通过时上报 status=DONE，并在 acceptance_result.gaps 填写具体差距；只有执行失败才使用 FAILED。"
+                            )
+                        else:
+                            req_kwargs["context"] += "\n" + _no_callback_instruction()
         # 人类观察者(P1):任务 owner 以 observer 角色被拉入协作群(chat/manager_worker),不发言。
         # routing_policy.inject_observers 默认生效,终产投递给观察者;state_machine 群 participants 不得带 role,故跳过。
         if mode in _HUMAN_OBSERVER_MODES:

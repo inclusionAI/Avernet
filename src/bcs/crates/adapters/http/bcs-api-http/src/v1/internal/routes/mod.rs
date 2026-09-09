@@ -4,3 +4,4 @@ pub mod collaboration_definition;
 pub mod collaboration_run;
 pub mod manifest;
 pub mod session_file;
+pub mod invite_code;

@@ -89,6 +89,81 @@ def test_form_coop_group_manager_worker_sets_strategy():
     assert bcs.created[0].driver_bot == "mgr:double-owner"
     assert bcs.created[0].master_bot == "mgr:double-owner"  # master 即 driver/manager
 
+def test_form_coop_group_relay_footer_only_reporter_no_duplicate_protocol():
+    """# 接力协作群(static_plan):task_instruction 已含 format_execute(# 接自 分支)注入的执行闭环
+    (禁联网/平台回收/接力交接,不含 HTTP 上报协议),form_coop_group 只补 driver/reporter 定位脚注,
+    不再重复 目标/验收标准/任务上下文——静态接力 Goal.acceptances=[] 会打印空 验收标准:[](末尾偏置
+    误导 bot 跳过验收)。"""
+    bcs = _Bcs()
+    fmt = PromptFormatterImpl()
+    relay_body = "# 接自:上游Bot\n## 上游产出正文\n上游摘要\n## 本角色任务\n执行投放"
+    n = TaskNode(node_id="n1", task_id="t1", status=Status.RUNNING,
+                 task_spec=TaskSpec(Metadata("t1", "T", relay_body), Context("bg"), Goal("O", [])),
+                 run_info=RuntimeInfo(), node_run_graph=None)  # type: ignore[arg-type]
+    fc_msg = fmt.format_execute({
+        "mode": "execute", "node_instruction": relay_body, "skill_report_enabled": True,
+        "backend": "http://b", "task_id": "t1", "node_id": "n1",
+    }, n)
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=fmt, context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["mgr", "w1"], collab_mode="manager_worker",
+        extend_props={"manager_bot_id": "mgr", "loop_task_id": "t1::n1", "task_instruction": fc_msg},
+    )))
+    ctx = bcs.created[0].context
+    # static_plan 接力:不注入 HTTP 上报协议(回调地址/请求体/verdict/acceptances_metric)
+    assert "回调地址" not in ctx and "callback/report" not in ctx
+    assert '"verdict"' not in ctx and '"acceptances_metric"' not in ctx
+    # 接力脚注仅保留 driver/reporter 定位(协作群分工,不提上报回投),无 mock 字样
+    assert "reporter_bot_id=mgr" in ctx and "reporter_role=master/manager" in ctx
+    assert "协作群分工" in ctx
+    assert "mock" not in ctx and "演示" not in ctx
+    # 不再重复打印空验收标准 / 任务上下文
+    assert "验收标准:" not in ctx
+    assert "回投请求体只能包含" not in ctx
+    assert "任务上下文:" not in ctx
+
+
+def test_form_coop_group_relay_appends_closure_for_raw_instruction():
+    """# 真正多 bot 协作群(static_plan):task_instruction 由 engine 直取 raw metadata.instruction
+    (未走 format_execute,无 _static_relay_closure/中文约束),form_coop_group 按需补承接→执行→交接
+    三步硬约束 + 中文约束,避免协作群 bot 塌缩只做执行、跳过接力接自/gap与派发。"""
+    bcs = _Bcs()
+    fmt = PromptFormatterImpl()
+    raw_relay = (
+        "# 接自:营销Bot(营销Bot 执行完计算 gap 后规划的下一步任务=商场与平台侧评审,其交付=完整营销方案见上方\"## 上游产出正文\")\n"
+        "## 群组成\n- 商场运营Bot(driver/总结者)\n- 线上平台Bot\n"
+        "## 上游产出正文\n营销方案:新客体验券+护理套餐+会员机制。\n"
+        "## 本群任务\n【接力执行】\n"
+        "接力上下文:接自营销Bot,承接评审任务。职责边界:给修订条件,默认不打回。\n"
+        "执行产出:逐项给修订条件——商场:展位报批;平台:券有效期明示。\n"
+        "gap与交接:对照合规计算 gap,定下一步任务=利润核算,经搜推命中店主Bot,派发执行。\n"
+    )
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=fmt, context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["mgr", "w1"], collab_mode="manager_worker",
+        extend_props={"manager_bot_id": "mgr", "loop_task_id": "t1::n1", "task_instruction": raw_relay},
+    )))
+    ctx = bcs.created[0].context
+    # raw 指令(无 closure)按需补承接→执行→交接三步硬约束 + 中文约束
+    assert "三步缺一不可" in ctx
+    assert "获取上方最新统一上下文" in ctx
+    # 协作群多轮接力:driver先承接→派发非human成员+driver自执行→成员不卡流程→收齐汇总;单人接力一次性
+    assert "协作群多轮接力" in ctx and "单人接力" in ctx
+    assert "bcs_assign_task" in ctx and "bcs_route" in ctx
+    assert "driver 自己也是执行者" in ctx and "不得把全部执行甩给成员" in ctx
+    assert "human 仅为观察者" in ctx
+    assert "视为已提供全部所需上下文" in ctx and "严禁以“缺详情/需完整方案”为由" in ctx
+    assert "交接只描述,不路由群外" in ctx and "正文不重复输出" in ctx
+    assert "bcs_task_complete" in ctx and "bcs_fuse" in ctx
+    assert "按问题智能匹配能力" not in ctx
+    assert "必须使用中文" in ctx
+    # 仍只补 driver/reporter 定位脚注(协作群分工),不注入上报协议/mock
+    assert "reporter_bot_id=mgr" in ctx and "协作群分工" in ctx
+    assert "回调地址" not in ctx and "callback/report" not in ctx
+    assert "mock" not in ctx and "演示" not in ctx
+
 
 def test_dispatch_coop_group_session_mode_registers_session_handle():
     bcs = _Bcs()
@@ -168,3 +243,42 @@ def test_form_coop_group_recovers_owner_via_task_id_for_run_yaml_path():
     assert {"bot_uuid": "human_35983", "bot_name": "35983", "role": "observer"} in req.participants
     assert req.routing_policy == {"default_bot_final_delivery": "inject_observers"}
     assert req.originator is None  # originator 须为 Bot Actor(BCS 拒 human);人类仅作 participant 观察者
+
+
+def test_form_coop_group_singlebot_2_group_no_duplicate_protocol():
+    """singlebot_2_group:task_instruction 已是 format_execute 生成的完整 [task-execute] 信封(含统一上报协议:
+    回调地址/阶段1-4/请求体/自检/防重复约束),form_coop_group 仅追加 reporter 定位脚注,绝不二次包裹
+    [task-execute] 或重复注入上报协议——否则回调地址/请求体被说两遍,强化 bot 收尾轮重贴全文
+    (重复回复)与反复试错重复 POST(重复上报)。"""
+    bcs = _Bcs()
+    fmt = PromptFormatterImpl()
+    n = TaskNode(node_id="n1", task_id="t1", status=Status.RUNNING,
+                 task_spec=TaskSpec(Metadata("t1", "T", "分析存储行业"), Context("bg"),
+                                    Goal("O", [AcceptanceCriteria("a1", "d")])),
+                 run_info=RuntimeInfo(), node_run_graph=None)  # type: ignore[arg-type]
+    interp = fmt.format_execute({
+        "mode": "execute", "node_instruction": "分析存储行业", "skill_report_enabled": True,
+        "backend": "http://b", "task_id": "t1", "node_id": "n1", "execution_mode": "single_bot",
+    }, n)
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=fmt, context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver(),
+                       api_base_url="http://b")
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["mgr"], collab_mode="manager_worker",
+        members_info=[{"bot_id": "mgr", "role": "manager"}],
+        extend_props={"manager_bot_id": "mgr", "loop_task_id": "t1::n1", "task_instruction": interp},
+    )))
+    ctx = bcs.created[0].context
+    # 内层完整信封原样保留:回调地址全路径 + 阶段1-4 + 自检 各一次
+    assert "回调地址: POST http://b/api/v1/collaboration/tasks/callback/report" in ctx
+    assert "阶段1 执行" in ctx and "阶段4 上报" in ctx and "上报前自检" in ctx
+    # 附加 reporter 定位脚注
+    assert "reporter_bot_id=mgr" in ctx and "reporter_role=master/manager" in ctx
+    # 不二次包裹外层 [task-execute] 信封(否则 [task-execute] 出现两次 + 指令嵌套)
+    assert ctx.count("[task-execute]") == 1
+    # 旧外层"回投请求体只能包含"片段不再单独出现在 _task_instruction 包装外(已由内层请求体覆盖)
+    assert "回投请求体只能包含" not in ctx
+    # 旧外层被替换的请求体文案不再出现
+    assert "完整协作群执行输出" not in ctx
+    # 外层空 acceptances 不再打印误导性的 验收标准:[] (内层已有真验收标准)
+    assert "验收标准:[]" not in ctx

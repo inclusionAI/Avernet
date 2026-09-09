@@ -11,6 +11,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+bcs-observability = { workspace = true }
 async-trait     = { workspace = true }
 bcs-domain      = { workspace = true }
 bcs-protocol    = { workspace = true }

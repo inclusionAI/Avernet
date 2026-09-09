@@ -176,6 +176,10 @@ pub trait ChannelService: Send + Sync {
         channel_type: Option<ChannelType>,
     ) -> Result<Vec<ChannelBinding>, ChannelUseCaseError>;
     /// Query the channel conversation mappings associated with a BCS session.
+    /// When no stored mappings remain, return the historical `meta.channel` route,
+    /// filtering by its `source` instead of requiring the binding to still exist.
+    /// Missing source/binding/conversation IDs yield no result. Historical routes
+    /// use the session update time as `last_active_at` and never restore live mappings.
     async fn list_conversations_by_session(
         &self,
         bcs_session_id: &str,

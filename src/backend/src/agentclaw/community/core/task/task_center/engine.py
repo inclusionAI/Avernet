@@ -128,11 +128,166 @@ _STATIC_MOCK_SUMMARY: dict[str, str] = {
     "profit_accounting": (
         "利润核算表(自持成本):体验券单次成本25/售价48达标;护理套餐成本180/售价398达标;某引流款低于毛利底线标红。授权清单:体验券分批投放可自主、护理套餐放量需店主审批、扩产能(临时技师)需店主审批。待取舍:低价引流款是否保留、临时技师成本是否接受。交投放实施。"
     ),
-    "launch": (
-        "投放实施阶段发现:周年活动券当前通过公众号和门店渠道发放,"
-        "现有发券与核销工具无法可靠判断同一用户是否已领取过同类活动券,"
-        "重复领取拦截能力无法确认,需要补齐后再继续放量。"
-    ),
+    "launch": """# 理发店「十八而立 · 焕新一剪」18 周年店庆营销方案
+
+> 用「老客户的第 18 年 × 新客的第一次」双线叙事,把店庆做成一场有情怀、有转介绍、能沉淀会员的增长战役——32 天一条「引流→体验→复购→裂变」自循环增长飞轮。
+>
+> 活动窗口 2026.10.15–11.15(32 天)｜ 促销预算 ≤ 20 万｜ 备货新增占用 ≤ 8 万
+
+## 〇 执行摘要:为什么这套方案能打动人
+
+| 常见店庆做法 | 本方案不同之处 |
+| --- | --- |
+| 发券拉满、价格战、伤老客 | 以「老客第 18 年 × 新客第 1 次」双线叙事,让老客感到被尊重、新客感到被欢迎 |
+| 核销靠天、转化断层 | 设计到店体验剧本打通「核销→护理→会员」三段转化,把 15% 转化率做成可执行标准 |
+| 拉新一次性、走完即散 | 内建老客带新客裂变环,让每个新客背后站着一位老客推荐人,沉淀可复购会员 |
+| 只看销量不看口碑 | 专设老客口碑护城河:老客专属权益 + 投诉快通道,护住「不伤老客」这条 O |
+
+**期望效果**:体验券核销 ≥ 1000 → 新客到店 ≥ 1500(核销 + 裂变 + 自然)→ 护理转化 ≥ 15% 配额 200 份 → 到店授权会员 ≥ 800。四条 KR 一条漏斗串通,而非各自为政。
+
+## 一 战略主张:十八而立,焕新一剪
+
+- **品牌叙事**:18 周年 = 一把剪刀用 18 年,剪出新老两代人的体面。老客在这里的 18 年值得被看见,新客的第一剪值得被记住。
+- **双线定位**:对老客——「陪你第 18 年」,专属权益 + 回忆杀,把忠诚换成转介绍和复购;对新客——「你的第一次,交给我们」,低门槛体验卡 + 到店即被重视,第一印象即转化入口。
+- **核心策略**:不做价格战,做体验战——把 48 元体验价定位为「见面礼」而非折扣,把 398 元护理套餐定位为「升级仪式」,把会员定位为「加入 18 周年朋友圈」。
+
+## 二 增长模型:一条漏斗串起四条 KR
+
+```
+曝光(社群/传单/路人) → 领券 → 到店扫码核销 → 护理升级 → 会员授权 → 老客裂变带新
+```
+
+| 漏斗环节 | 目标 | 转化口径 | 拆解逻辑 |
+| --- | --- | --- | --- |
+| 体验券投放 | 1800 张(分批) | — | 首批 50 试水,按产能放量 |
+| 券核销 | ≥ 1000 张 | 核销率 ≥ 55% | 到店扫码 + 领券去重保障口径 |
+| 新客到店 | ≥ 1500 人 | — | 核销 1000 + 裂变约 300 + 自然/路过约 200 |
+| 护理售卖 | ≥ 200 份 | 转化率 ≥ 15% | 从体验客基数约 1300 引导,约 15.4% 命中 |
+| 新增会员 | ≥ 800 人 | 授权率约 55% | 到店即授权 + 双倍积分诱因 |
+
+四条 KR 不是平行罗列,而是一条漏斗逐级转化:核销 1000 自然推动新客 1500,护理 200 自然推动会员 800,目标之间互相成就。
+
+## 三 三大主场活动(产品力设计)
+
+### 3.1 「初见卡」——新客王牌体验券
+- 原价 68 → **体验价 48**(补贴 29% ≤ 30% 红线),成本 25,毛利 23 达标。
+- 命名「初见卡」:不是打折券,是「第一次见面的诚意」。
+- 分批按产能放量,首批 50 张试水;预约占用率 > 75% 暂停,护住体验质量。
+- 渠道:线上社群 + 线下传单同步,扫码领券、到店核销。
+
+### 3.2 「焕新护理套餐」——老客升级仪式
+- **398 元**(≥ 298 红线),90 min,成本 180,毛利 218 达标。
+- 命名「焕新」:从一次剪发升级为「头皮 + 基础护理」的仪式感,承载 15% 转化率。
+- 预约制 + 库存 60 份限量,稀缺感促即时决策。
+
+### 3.3 「18 周年朋友圈」会员俱乐部——沉淀可复购
+- 周年**双倍积分** + 会员日(每周三)提前购。
+- 入会即赠「18 周年纪念券」,锁定二次到店。
+- 到店即引导实名授权,目标新增会员 ≥ 800,把流量变成可复购资产。
+
+## 四 客群分层与触达:四类人四套话
+
+| 客群 | 占位 | 触达与权益 | 目的 |
+| --- | --- | --- | --- |
+| 忠诚老客 | 转介绍主力 | 专属权益 + 老客优先迎接 + 转介绍双倍奖励 | 换复购与裂变 |
+| 沉睡老客 | 召回对象 | 「第 18 年,老位置还给你留着」召回消息 + 回归体验券 | 唤醒回店 |
+| 新客 | 增量来源 | 初见卡 48 元见面礼 + 到店重点服务引导 | 转化为核销与会员 |
+| 转介绍新客 | 高质量增量 | 老客带新客,新客享初见卡、老客得「伯乐券」 | 裂变环放大 |
+
+**裂变环**:每位老客推荐 1 名新客,老客得「伯乐券」(下次护理立减),新客得初见卡优先时段——让拉新从门店单向发券,变成老客主动带来,质量与口碑双升。
+
+## 五 32 天作战节奏:四幕情感弧
+
+| 幕 | 日期 | 主题 | 关键动作 | 控流 |
+| --- | --- | --- | --- | --- |
+| 第 1 幕 · 蓄水 | 10.15–10.19 | 「第 18 年,回来了」 | 老客召回 + 首批初见卡 50 张试水 + 社群情怀预热 | — |
+| 第 2 幕 · 引爆 | 10.20–11.05 | 「你的第一次,交给我们」 | 初见卡放量 + 焕新护理开放预约 + 转介绍启动 | 占用率 > 75% 暂停 |
+| 第 3 幕 · 高潮 | 11.06–11.11 | 「周年朋友圈,一起焕新」 | 会员日早购 + 满额赠 + 高峰盯产能客诉 | 客诉触发暂停 |
+| 第 4 幕 · 沉淀 | 11.12–11.15 | 「再见,也是老朋友」 | 返场复购券 + 会员二次邀请 + 复盘收官 | — |
+
+## 六 到店体验剧本:把转化率做成标准动作
+
+> 很多店庆死于「核销完就走」,本方案把到店 45 分钟设计成转化流水线。
+
+1. **迎接(0–2 min)**:扫码核销 + 递「18 周年欢迎卡」;新客/老客话术分流,老客说「老位置还在」,新客说「第一次交给我们」。
+2. **服务(2–35 min)**:剪发中由技师自然种草焕新护理(基于头皮/发质一句点评),不硬推销。
+3. **升级(35–40 min)**:体验后出示「焕新护理限时预约」,引导预约即享会员价。
+4. **入会(40–43 min)**:实名授权入「18 周年朋友圈」,即赠纪念券锁定二次到店。
+5. **离店回访(44–45 min + 当晚)**:加企业微信,当晚发护理预约提醒 + 转介绍「伯乐券」入口。
+
+15% 护理转化率与 55% 会员授权率,由这五步标准动作承担——不是赌手感,是按剧本走。
+
+## 七 老客口碑护城河(守 O:不伤老客)
+
+| 动作 | 作用 |
+| --- | --- |
+| 老客专属权益(双倍积分 + 会员日提前购 + 伯乐券) | 让老客感到「18 年被看见」,主动复购与转介绍 |
+| 老客优先时段与迎接 | 高峰期不与抢券新客挤占,护住体验质量 |
+| 投诉快通道(24h 响应 + 赔付预备金) | 客诉 > 日常 1.2 倍即触发暂停投放,第一时间止损 |
+| 不做全城最低价、不价格战 | 避免老客「买贵了」的心理落差,守住信任 |
+
+## 八 产能与扩容(增长落地的硬底盘)
+
+- 剪发位 8 / 护理位 3 / 技师 12(剪发 8·护理 4);剪发 45 min、护理 90 min。
+- 周末产能余量:剪发 +15 人/天、护理 +8 人/天(扣自然客流);工作日余量足,承接核销。
+- 护理耗材现有 30 份,备货补到 60 份。
+- **扩容(需店主审批)**:临时剪发技师 +2 → +10 人/天;延营至 23:00 → 周末 +5 人/天。高峰前到位,避免「来了接不住」伤口碑。
+
+## 九 价格与利润核算
+
+| 品项 | 成本 | 售价 | 毛利 | 判定 |
+| --- | --- | --- | --- | --- |
+| 初见卡(体验券) | 25 | 48 | 23 | ✅ 达标 |
+| 焕新护理套餐 | 180 | 398 | 218 | ✅ 达标 |
+| 低价引流款 | — | — | — | ❌ 低于毛利底线,标红待取舍 |
+
+**授权划界**:初见卡分批投放 = 自主执行;护理放量 / 扩产能临时技师 = 需店主审批;低价引流款 = 待取舍。
+
+## 十 预算与备货
+
+**促销预算 ≈ 11 万(留 9 万缓冲,远低于 20 万上限)**
+
+| 科目 | 万元 |
+| --- | --- |
+| 初见卡减收(68→48,按核销 1000 计) | 2.0 |
+| 物料(传单/展位/易拉宝/欢迎卡) | 1.5 |
+| 线上社群推送 + 内容制作 | 0.8 |
+| 会员权益(双倍积分 + 会员日早购 + 纪念券) | 2.5 |
+| 扫码核销 + 领券去重配置 | 1.0 |
+| 客诉赔付预备金 | 1.0 |
+| 应急机动 | 2.2 |
+| 临时技师工时(需审批) | 1.0 |
+
+**备货现金占用 ≈ 1–2 万(远低于 8 万)**:护理耗材 30 → 60 份(增量 30 × 180 ≈ 0.54 万)+ 物料备货。
+
+## 十一 风险与护航
+
+| 风险 | 阈值 | 处置 |
+| --- | --- | --- |
+| 重复领券 | 同 ID 多领 / 核销异常 | 扫码核销 + 领券去重拦截,必要时暂停该批次 |
+| 产能不足 | 占用率 > 75% | 暂停放量,启临时技师(需审批) |
+| 老客被冷落 | 老客投诉上升 | 启用老客优先时段 + 快通道赔付 |
+| 核销滞后 | 日核销 < 20 | 调整投放时段 / 返场加推 |
+
+## 十二 KPI 作战看板(每日刷新)
+
+| 指标 | 目标 | 盯控频次 |
+| --- | --- | --- |
+| 新客到店 | ≥ 1500 | 日 |
+| 券核销 / 核销率 | ≥ 1000 / ≥ 55% | 日 |
+| 护理售卖 / 转化率 | ≥ 200 / ≥ 15% | 日 |
+| 新增会员 / 授权率 | ≥ 800 / 约 55% | 日 |
+| 客诉差评 | ≤ 日常 × 1.2 | 滚动 |
+| 转介绍新客数(裂变环健康度) | ≈ 300 | 日 |
+
+## 十三 终态验收与复盘
+
+- ✅ **达成**:六项 KR 全部完成,预算未超、口碑守住。
+- ⚠️ **部分达成**:列出未达项与补救(如护理转化不足则加推体验包)。
+- ❌ **未达成**:预算超支或客诉失控,启动复盘定责。
+
+**收官复盘**:预算核销差异、会员二次到店率、转介绍裂变系数、护理复购率——把这次店庆沉淀为下一年可复制的增长模板。
+""",
 }
 
 # 固定流程兜底 mock 的"不可实现任务"(risk_assessment 上报无结构化 unhandled_tasks 时兜底)。
@@ -538,25 +693,16 @@ class ExecutionEngine:
     ) -> AcceptanceResult:
         """结构父/根 gap 闭(自身验收通过)翻 DONE 时的父自身验收结果(验收执行者=owner)。
 
-        调用上下文已 ``not pr.has_gap`` → verdict 恒 DONE。``pr.acceptance_verdicts`` 非空 →
-        用 owner bot plan 逐条结论填 ``acceptances_metric``(每条 ac 的 reason);否则回退合成"验收通过"。"""
-        ac_ids = [a.id for a in parent.task_spec.goal.acceptances]
-        verdicts: list[dict] = []
-        if pr is not None:
-            verdicts = getattr(pr, "acceptance_verdicts", None) or []
-        if verdicts:
-            vmap: dict[str, dict] = {}
-            for v in verdicts:
-                if isinstance(v, dict):
-                    vmap[str(v.get("ac_id", ""))] = v
-            metrics: list[Any] = []
-            for ac_id in ac_ids:
-                v = vmap.get(ac_id)
-                reason = str(v.get("reason") or "") if v else ""
-                metrics.append({ac_id: reason or "验收通过(子节点交付达成)"})
+        调用上下文已 ``not pr.has_gap`` → verdict 恒 DONE。``pr.acceptance_result``(owner bot plan
+        自评,对齐 common_task 协议)非空 → 直接用(acceptances_metric 透传);空 → 回退合成逐条"验收通过"。"""
+        if pr is not None and pr.acceptance_result is not None:
+            ar = pr.acceptance_result
             return AcceptanceResult(
-                verdict=AcceptanceVerdict.DONE, acceptances_metric=metrics, gaps=[]
+                verdict=AcceptanceVerdict.DONE,  # gap 闭语境恒 DONE(防御 owner 自评 FAILED)
+                acceptances_metric=list(ar.acceptances_metric or []),
+                gaps=[],
             )
+        ac_ids = [a.id for a in parent.task_spec.goal.acceptances]
         metrics = [{ac_id: "验收通过(子节点交付达成)"} for ac_id in ac_ids]
         if not metrics:
             metrics = [{"all": "验收通过"}]
@@ -2455,9 +2601,9 @@ class ExecutionEngine:
             [n.node_id for n in pending],
             dispatch_started_at,
         )
-        dispatched = await self._dispatcher.dispatch(pending)
         to_run: list[TaskNode] = []
-        for node in dispatched:
+
+        def _handle_node(node: TaskNode) -> None:
             miss = node.run_info.extend_props.get("miss_events")
             gf = node.run_info.extend_props.pop("pending_group_formation", None)
             if gf is not None:
@@ -2492,7 +2638,7 @@ class ExecutionEngine:
                     )
                 )
                 side.append(("group", node, gf))
-                continue
+                return
             if node.run_info.run_mode and node.run_info.assignee:
                 logger.info(
                     "[task][prepare] task=%s node=%s → run(mode=%s assignee=%s)",
@@ -2512,7 +2658,8 @@ class ExecutionEngine:
                     )
                 )
                 to_run.append(node)
-            elif miss:
+                return
+            if miss:
                 logger.info(
                     "[task][prepare] task=%s node=%s → miss(%s)",
                     task_id,
@@ -2529,27 +2676,93 @@ class ExecutionEngine:
                         ),
                     )
                 )
-            else:
-                # 派发未产出执行者也非 MISS(dispatcher 已容错吞异常):标 dispatch_error 留 PENDING,harness 按超时重试搜推
-                derr = node.run_info.extend_props.get("dispatch_error") or "no_result"
-                logger.warning(
-                    "[task][prepare] task=%s node=%s 派发未产出(%s)→留 PENDING 待 harness",
-                    task_id,
-                    node.node_id,
-                    derr,
+                return
+            # 派发未产出执行者也非 MISS(dispatcher 已容错吞异常):标 dispatch_error 留 PENDING,harness 按超时重试搜推
+            derr = node.run_info.extend_props.get("dispatch_error") or "no_result"
+            logger.warning(
+                "[task][prepare] task=%s node=%s 派发未产出(%s)→留 PENDING 待 harness",
+                task_id,
+                node.node_id,
+                derr,
+            )
+            side.append(
+                (
+                    "dispatch_fail",
+                    TaskNodePatch(
+                        task_id=task_id,
+                        node_id=node.node_id,
+                        extend_props_patch={"dispatch_error": derr},
+                    ),
                 )
-                side.append(
-                    (
-                        "dispatch_fail",
-                        TaskNodePatch(
-                            task_id=task_id,
-                            node_id=node.node_id,
-                            extend_props_patch={"dispatch_error": derr},
-                        ),
-                    )
-                )
+            )
+
+        mode_coverage_on = (
+            self._task_settings is not None
+            and self._task_settings.is_enabled("mode_coverage")
+        )
+        if mode_coverage_on:
+            # on-path 模式覆盖:per-node 串行派发 + 每节点后即时 _record_mode_coverage 写回 covered,
+            # 下节点 apply 读到更新后的 covered → 批次内 single→group→bbs 依次轮替,保证全模态覆盖。
+            # 并发 gather 会共享派发前 covered 快照,同批多节点全命中同一档,轮替失效;故 ON 时串行。
+            for node in pending:
+                d = await self._dispatcher.dispatch([node])
+                for dn in d:
+                    _handle_node(dn)
+                if d:
+                    self._record_mode_coverage(task_id, d)
+        else:
+            dispatched = await self._dispatcher.dispatch(pending)
+            for node in dispatched:
+                _handle_node(node)
+            # 批后一次性写回 covered(并发模式无批次内轮替;OFF 链路仅累计,不下轮依赖)
+            self._record_mode_coverage(task_id, dispatched)
         if to_run:
             side.append(("run", to_run))
+
+    def _record_mode_coverage(self, task_id: str, dispatched: list) -> None:
+        """mode_coverage ON 时,按本批派发 outcome 映射已覆盖模式(single/group/bbs)并 union 写回
+        graph.extend_props["mode_coverage"]。strategy 下轮派发读该标记决定覆盖路由;OFF/无产出不写。
+
+        映射:HIT_SINGLE→single(run_mode=single_bot)、HIT_MULTI→group(run_mode=coop_group)、
+        bbs 档 MISS(reason=mode_coverage_bbs)→bbs。仅 mode_coverage ON 写,避免 OFF 运行污染 extend_props。
+        best-effort:读/写图异常不阻断 dispatch 主流程(标记丢失仅影响覆盖路由,下轮重新评估)。
+        """
+        if self._task_settings is None or not self._task_settings.is_enabled("mode_coverage"):
+            return
+        new_modes: set[str] = set()
+        for node in dispatched or []:
+            run_mode = node.run_info.run_mode
+            if run_mode == "single_bot":
+                new_modes.add("single")
+            elif run_mode == "coop_group":
+                new_modes.add("group")
+            else:
+                miss_events = node.run_info.extend_props.get("miss_events") or []
+                if any(str(m) == "mode_coverage_bbs" for m in miss_events):
+                    new_modes.add("bbs")
+        if not new_modes:
+            return
+        try:
+            existing = set(
+                self._graph.query_task_dashboard(task_id).extend_props.get("mode_coverage") or []
+            )
+        except Exception:  # noqa: BLE001  读图容错:标记 best-effort
+            existing = set()
+        merged = existing | new_modes
+        if merged == existing:
+            return
+        try:
+            self._graph.update_task_graph_info(
+                task_id,
+                TaskGraphPatch(extend_props_patch={"mode_coverage": sorted(merged)}),
+            )
+        except Exception as exc:  # noqa: BLE001  写图容错:不阻断 dispatch 主流程
+            logger.warning(
+                "[task][prepare] mode_coverage 标记写失败 task=%s modes=%s: %s",
+                task_id,
+                sorted(merged),
+                exc,
+            )
 
     async def _drain(self, task_id: str, side: list[tuple]) -> None:
         """锁外统一执行 side effects。投递/拉群 IO 锁外 await;翻态(side effect)收口锁内。

@@ -17,7 +17,7 @@ export function useBotSkills(bot: ChatBotView | null, userId: string | null): Us
   const loadedKeyRef = useRef<string | null>(null);
 
   const loadSkills = useCallback(() => {
-    if (!bot || !userId) return;
+    if (!bot || bot.isFriendBot || !userId) return;
     setIsLoading(true);
     void botSkillService
       .listSkills(bot, userId)
@@ -32,7 +32,7 @@ export function useBotSkills(bot: ChatBotView | null, userId: string | null): Us
     const key = `${bot?.realBotId ?? ''}_${userId ?? ''}`;
     if (loadedKeyRef.current === key) return;
     loadedKeyRef.current = key;
-    if (!bot || !userId) {
+    if (!bot || bot.isFriendBot || !userId) {
       setSkills([]);
       return;
     }

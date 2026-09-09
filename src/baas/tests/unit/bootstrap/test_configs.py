@@ -239,3 +239,144 @@ class TestChatClientPoolConfigDataclass:
 
         with pytest.raises(pydantic.ValidationError):
             ChatClientPoolConfig(retry_base_backoff=0)
+
+
+class TestSessionFileUrlProjectorPluginConfig:
+    """PluginConfig.session_file_url_projector pattern and seeding."""
+
+    def test_default_is_stub(self):
+        cfg = PluginConfig()
+        assert cfg.session_file_url_projector == "stub"
+
+    def test_aliyun_ack_accepted(self):
+        cfg = PluginConfig(session_file_url_projector="aliyun_ack")
+        assert cfg.session_file_url_projector == "aliyun_ack"
+
+    def test_unknown_value_rejected(self):
+        # pattern=r"^(stub|aliyun_ack)$" — 非法值须被 pydantic 拒绝
+        import pydantic
+
+        with pytest.raises(pydantic.ValidationError):
+            PluginConfig(session_file_url_projector="proxy_real")
+
+    def test_seeded_in_schema_defaults(self):
+        from secbaas.community.bootstrap._configs import _schema_defaults
+
+        plugins_defaults = _schema_defaults()["plugins"]
+        assert plugins_defaults["session_file_url_projector"] == "stub"
+
+
+class TestFileTransferOssAliyunConfigSchema:
+    """Cloud OSS section inherits FileTransferOssConfigSchema fields (D-07)."""
+
+    def test_config_section(self):
+        from secbaas.community.bootstrap._configs import (
+            FileTransferOssAliyunConfigSchema,
+        )
+
+        assert (
+            FileTransferOssAliyunConfigSchema.config_section
+            == "file_transfer_oss_aliyun"
+        )
+
+    def test_defaults_match_parent_schema(self):
+        from secbaas.community.bootstrap._configs import (
+            FileTransferOssAliyunConfigSchema,
+            FileTransferOssConfigSchema,
+        )
+
+        assert (
+            FileTransferOssAliyunConfigSchema().model_dump()
+            == FileTransferOssConfigSchema().model_dump()
+        )
+
+    def test_seeded_in_schema_defaults(self):
+        from secbaas.community.bootstrap._configs import _schema_defaults
+
+        aliyun_defaults = _schema_defaults()["file_transfer_oss_aliyun"]
+        assert aliyun_defaults["bucket_name"] == ""
+        assert aliyun_defaults["staging_root_path"] == "baas-file-transfer"
+        assert aliyun_defaults["secret_name"] == ""
+
+
+class TestSessionFileUrlProxyConfigSchema:
+    """session_file_url_proxy section default (A4)."""
+
+    def test_default_proxy_base_url_empty(self):
+        from secbaas.community.bootstrap._configs import (
+            SessionFileUrlProxyConfigSchema,
+        )
+
+        cfg = SessionFileUrlProxyConfigSchema()
+        assert cfg.config_section == "session_file_url_proxy"
+        assert cfg.proxy_base_url == ""
+
+    def test_seeded_in_schema_defaults(self):
+        from secbaas.community.bootstrap._configs import _schema_defaults
+
+        proxy_defaults = _schema_defaults()["session_file_url_proxy"]
+        assert proxy_defaults["proxy_base_url"] == ""
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "",  # main site: projector disabled
+            "https://bff.example.com",
+            "https://bff.example.com/",  # trailing slash tolerated
+            "http://10.0.0.1:8080",
+            "https://bff.example.com:8080",
+        ],
+    )
+    def test_proxy_base_url_valid_values_accepted(self, value):
+        from secbaas.community.bootstrap._configs import (
+            SessionFileUrlProxyConfigSchema,
+        )
+
+        cfg = SessionFileUrlProxyConfigSchema(proxy_base_url=value)
+        assert cfg.proxy_base_url == value
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "baas.aliyun.com",  # no scheme -> protocol-relative URL
+            "https://host/base",  # path component is silently dropped
+            " ",  # whitespace-only (truthy, pre-phase-88 accepted it)
+            "ftp://bff.example.com",  # non-http scheme
+            "https://",  # empty authority
+        ],
+    )
+    def test_proxy_base_url_invalid_values_rejected(self, value):
+        # pattern guard — a malformed non-empty value must fail LOUDLY at
+        # config load (WR-04/88) instead of emitting broken client URLs.
+        import pydantic
+
+        from secbaas.community.bootstrap._configs import (
+            SessionFileUrlProxyConfigSchema,
+        )
+
+        with pytest.raises(pydantic.ValidationError):
+            SessionFileUrlProxyConfigSchema(proxy_base_url=value)
+
+
+class TestDeployEnvConfig:
+    """env.deploy_tenant default and section registration (D-01)."""
+
+    def test_default_deploy_tenant_empty(self):
+        from secbaas.community.bootstrap._configs import DeployEnvConfig
+
+        cfg = DeployEnvConfig()
+        assert cfg.config_section == "env"
+        assert cfg.deploy_tenant == ""
+
+    def test_seeded_in_schema_defaults(self):
+        from secbaas.community.bootstrap._configs import _schema_defaults
+
+        env_defaults = _schema_defaults()["env"]
+        assert env_defaults["deploy_tenant"] == ""
+
+    def test_new_sections_registered(self):
+        from secbaas.community.bootstrap._configs import _CONFIG_SCHEMAS
+
+        assert "file_transfer_oss_aliyun" in _CONFIG_SCHEMAS
+        assert "session_file_url_proxy" in _CONFIG_SCHEMAS
+        assert "env" in _CONFIG_SCHEMAS

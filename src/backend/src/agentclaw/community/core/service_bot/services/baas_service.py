@@ -66,6 +66,7 @@ from agentclaw.community.core.devices.services.sandbox_overrides import (
 )
 
 from agentclaw.community.kernel.device_dto import (
+    HeaderOperationRule,
     OutBoundOperationRule,
     ResourceSpecification,
 )
@@ -3000,6 +3001,120 @@ class BaasService:  # pragma: no cover
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
             )
+
+    def append_token_outbound_rule(
+        self,
+        *,
+        paas_device_id: str,
+        header_name: str,
+        action: str,
+        token: str,
+        plugin_code: str,
+        domains: tuple[str, ...] = (),
+    ) -> bool:
+        """Append one plugin-owned token header without replacing existing rules."""
+        # COSEC: paas_device_id is interpolated into a relative BaaS URL; reuse
+        # the strict Caller validator so database/plugin values cannot alter the path.
+        paas_device_id_valid = self._is_valid_paas_device_id(paas_device_id)
+        if not paas_device_id_valid or not token or action != "set" or not header_name:
+            logger.warning(
+                "token_outbound_append_rejected_invalid_input plugin_code=%s "
+                "paas_device_id_valid=%s header_name_present=%s action=%s token_present=%s",
+                plugin_code,
+                paas_device_id_valid,
+                bool(header_name),
+                action,
+                bool(token),
+            )
+            raise ValueError("invalid token outbound rule")
+        rule = OutBoundOperationRule(
+            header_operation_rules=(
+                HeaderOperationRule(
+                    domains=list(domains),
+                    action=action,
+                    header_name=header_name,
+                    value=token,
+                ),
+            )
+        )
+        logger.info(
+            "token_outbound_append_started plugin_code=%s paas_device_id=%s "
+            "header_name=%s rule_count=%s",
+            plugin_code,
+            paas_device_id,
+            header_name,
+            len(rule.header_operation_rules),
+        )
+        started = time.perf_counter()
+        try:
+            response = self._http.put(
+                f"/api/v1/paas/devices/{paas_device_id}/outbound-rule?mode=append",
+                json=self._outbound_rule_to_dict(rule),
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            response_data = response.json()
+            if response_data.get("code") != 0:
+                logger.warning(
+                    "token_outbound_append_rejected plugin_code=%s status_code=%s "
+                    "result_code=%s elapsed_ms=%s",
+                    plugin_code,
+                    response.status_code,
+                    response_data.get("code"),
+                    int((time.perf_counter() - started) * 1000),
+                )
+                raise BaasServiceError("BaaS token outbound append rejected")
+        except httpx.HTTPStatusError as exc:
+            logger.warning(
+                "token_outbound_append_http_failed plugin_code=%s status_code=%s "
+                "elapsed_ms=%s",
+                plugin_code,
+                exc.response.status_code,
+                int((time.perf_counter() - started) * 1000),
+            )
+            raise BaasServiceError("BaaS token outbound append failed") from exc
+        except BaasServiceError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "token_outbound_append_failed plugin_code=%s status_code=%s "
+                "error_type=%s elapsed_ms=%s",
+                plugin_code,
+                None,
+                type(exc).__name__,
+                int((time.perf_counter() - started) * 1000),
+            )
+            raise BaasServiceError("BaaS token outbound append failed") from exc
+        logger.info(
+            "token_outbound_append_succeeded plugin_code=%s paas_device_id=%s "
+            "header_name=%s status_code=%s elapsed_ms=%s",
+            plugin_code,
+            paas_device_id,
+            header_name,
+            response.status_code,
+            int((time.perf_counter() - started) * 1000),
+        )
+        return True
+
+    def append_token(
+        self,
+        *,
+        paas_device_id: str,
+        header_name: str,
+        action: str,
+        token: str,
+        plugin_code: str,
+        domains: tuple[str, ...] = (),
+    ) -> bool:
+        """Implement the neutral TokenOutboundAppender contract."""
+        return self.append_token_outbound_rule(
+            paas_device_id=paas_device_id,
+            header_name=header_name,
+            action=action,
+            token=token,
+            plugin_code=plugin_code,
+            domains=domains,
+        )
 
     def append_caller_outbound_rule(
         self,

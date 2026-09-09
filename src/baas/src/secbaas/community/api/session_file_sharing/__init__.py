@@ -9,6 +9,7 @@ error codes with shared semantics are re-exported without a SESSION_ prefix
 
 from ._errors import (
     SessionFileSharingError,
+    SessionFileTransferProxyUnavailableError,
     SourceTransferNotFoundError,
     SourceTransferNotReadyError,
     StagingObjectNotFoundError,
@@ -32,6 +33,7 @@ __all__ = [
     # Errors
     "StagingObjectNotFoundError",
     "SessionFileSharingError",
+    "SessionFileTransferProxyUnavailableError",
     "SourceTransferNotFoundError",
     "SourceTransferNotReadyError",
     "TransferNotFoundError",

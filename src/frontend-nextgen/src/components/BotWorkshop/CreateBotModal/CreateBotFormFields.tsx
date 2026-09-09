@@ -6,7 +6,8 @@ import { Textarea } from '@/components/ui/Textarea';
 import { useBotEngineOptions } from '@/hooks/useBotEngineOptions';
 import type { BotCreateInput, BotCreateSpace } from '@/services/botWorkshop';
 import { supportsServiceBot, type AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
-import { Sparkles } from 'lucide-react';
+// 「初始化配置」开关已下线，其唯一用处的 Sparkles 图标随之停用（见表单底部注释块）。
+// import { Sparkles } from 'lucide-react';
 import type React from 'react';
 import { AgentCodingSection } from './agentCoding/AgentCodingSection';
 
@@ -173,7 +174,8 @@ export function CreateBotFormFields({
         ) : null}
       </div>
 
-      <div className="grid gap-3 rounded-lg border border-border bg-muted/30 p-4 sm:grid-cols-2">
+      {/* sm:w-[calc(50%_-_0.5rem)] 与上方 grid gap-4 sm:grid-cols-2 的单列等宽，使边框对齐引擎类型选择器。 */}
+      <div className="rounded-lg border border-border bg-muted/30 p-4 sm:w-[calc(50%_-_0.5rem)]">
         <label className="flex items-center justify-between gap-4">
           <span>
             <span className="block text-xs font-medium text-foreground">提供服务</span>
@@ -196,6 +198,8 @@ export function CreateBotFormFields({
             aria-label="是否提供服务"
           />
         </label>
+        {/* 「初始化配置」开关已下线：该值从未被 toCreateRequest 读取，不影响创建请求体。
+            BotCreateInput.initialize 类型字段与默认值 true 暂予保留，待独立 change 清理。
         <label className="flex items-center justify-between gap-4 sm:border-l sm:border-border sm:pl-4">
           <span>
             <span className="flex items-center gap-1 text-xs font-medium text-foreground">
@@ -210,6 +214,7 @@ export function CreateBotFormFields({
             aria-label="初始化配置"
           />
         </label>
+        */}
       </div>
 
       <div className="flex items-center justify-between gap-3">

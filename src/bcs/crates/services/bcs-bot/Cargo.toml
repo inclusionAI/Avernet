@@ -8,6 +8,7 @@ rust-version = { workspace = true }
 version = { workspace = true }
 
 [dependencies]
+bcs-observability = { workspace = true }
 # Async runtime
 tokio = { workspace = true }
 

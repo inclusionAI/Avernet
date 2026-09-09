@@ -18,6 +18,8 @@ export interface IdentityMemo {
   botId?: string | null;
   botSessionId?: string | null;
   expandedBotId?: string | null;
+  /** 展开 bot 卡片归属分区（mine/friend）；缺失时恢复为 mine。 */
+  botSectionKey?: string | null;
 }
 
 export interface WorkspaceState {

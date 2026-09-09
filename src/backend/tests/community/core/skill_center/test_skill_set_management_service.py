@@ -437,6 +437,13 @@ class _DefaultResourceRepository(_ResourceRepository):
         self.list_set_calls.append(kwargs)
         return [{"id": "global-default", "is_default": True}]
 
+    def get_set(self, **kwargs):
+        return {
+            "id": kwargs["set_id"],
+            "is_default": kwargs["set_id"] == "global-default",
+            "is_active": True,
+        }
+
     def list_mcps(self, **kwargs):
         self.list_mcp_calls.append(kwargs)
         return [{"server_code": "visible-default-mcp"}]
@@ -469,6 +476,7 @@ class _McpAuth:
     def __init__(self, allowed: bool) -> None:
         self.allowed = allowed
         self.calls: list[tuple[str, str]] = []
+        self.apply_calls: list[dict] = []
 
     def check_mcp_permission_detail(self, actor_id: str, server_code: str) -> dict:
         self.calls.append((actor_id, server_code))
@@ -478,6 +486,7 @@ class _McpAuth:
         }
 
     def apply_permission(self, **_kwargs) -> dict:
+        self.apply_calls.append(_kwargs)
         return {"success": True, "process_url": None, "error": None}
 
 
@@ -511,6 +520,9 @@ def _registry(*, pool_runtime, pool_layouts):
     from agentclaw.community.core.skill_center.services.runtime_projections.registry import (
         EngineRuntimeProjectionRegistry,
     )
+    from agentclaw.community.core.skill_center.services.runtime_projections.skill_runtime_delivery import (
+        SkillRuntimeDelivery,
+    )
     from agentclaw.community.core.skill_center.services.runtime_projections.whole_artifact import (
         WholeArtifactRuntimeProjection,
     )
@@ -519,8 +531,10 @@ def _registry(*, pool_runtime, pool_layouts):
     # stop describing production.
     return EngineRuntimeProjectionRegistry(
         default=PerDomainRuntimeProjection(
-            pool_runtime=pool_runtime,
-            pool_layouts=pool_layouts,
+            skill_delivery=SkillRuntimeDelivery(
+                pool_runtime=pool_runtime,
+                pool_layouts=pool_layouts,
+            ),
         ),
         by_engine={"teclaw": WholeArtifactRuntimeProjection()},
     )
@@ -736,6 +750,7 @@ class _RuntimeSkills:
 
 class _RuntimePool:
     def __init__(self, *, published=True, verified=True) -> None:
+        self.apply_calls: list[dict] = []
         self.publish_calls: list[dict] = []
         self.verify_calls: list[dict] = []
         self._published = published
@@ -744,6 +759,14 @@ class _RuntimePool:
     async def probe(self, **_kwargs):
         raise AssertionError("non-Center projection must keep the legacy adapter")
 
+    async def apply_mappings(self, **kwargs):
+        from agentclaw.community.core.skills_pool.ports import (
+            LegacyMappingApplyRequired,
+        )
+
+        self.apply_calls.append(kwargs)
+        raise LegacyMappingApplyRequired()
+
     async def publish_mappings(self, **kwargs):
         self.publish_calls.append(kwargs)
         return self._published
@@ -751,6 +774,12 @@ class _RuntimePool:
     async def verify_mappings(self, **kwargs):
         self.verify_calls.append(kwargs)
         return self._verified
+
+
+class _FailingPublishRuntimePool(_RuntimePool):
+    async def publish_mappings(self, **kwargs):
+        self.publish_calls.append(kwargs)
+        raise RuntimeError("device unavailable")
 
 
 class _CenterRuntimePool(_RuntimePool):
@@ -1676,6 +1705,157 @@ def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_sc
     ]
 
 
+def test_list_mcps_reads_global_default_projection_for_collaborator_owner_scope():
+    repository = _DefaultResourceRepository()
+    legacy = _ResourceLegacyFactory()
+    service = SkillSetManagementService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=legacy,
+        passport=object(),
+        authorization=_Authorization(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
+    )
+
+    result = service.list_mcps(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="collaborator",
+        set_id="global-default",
+    )
+
+    assert result == [{"server_code": "legacy-default-mcp"}]
+    assert repository.list_mcp_calls == []
+    assert legacy.service.default_mcp_calls == [
+        {
+            "skill_set_id": "global-default",
+            "user_id": "true-owner",
+            "bot_id": "bot-1",
+            "engine_type": "openclaw",
+        }
+    ]
+
+
+def test_list_mcps_keeps_ordinary_membership_on_canonical_repository_path():
+    repository = _MixedResourceRepository()
+    legacy = _ResourceLegacyFactory()
+    service = SkillSetManagementService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=legacy,
+        passport=object(),
+        authorization=_Authorization(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
+    )
+
+    result = service.list_mcps(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="ordinary-set",
+    )
+
+    assert result == [{"server_code": "ordinary-set-mcp"}]
+    assert legacy.calls == []
+    assert repository.list_mcp_calls == [
+        {
+            "bot_id": "bot-1",
+            "owner_id": "true-owner",
+            "set_id": "ordinary-set",
+            "engine_type": "openclaw",
+            "default_engine_types": ("openclaw",),
+        }
+    ]
+
+
+def test_default_mcp_permissions_remain_scoped_to_persisted_membership():
+    repository = _DefaultResourceRepository()
+    legacy = _ResourceLegacyFactory()
+    mcp_center = _McpCenter(allowed=True)
+    service = SkillSetManagementService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=legacy,
+        passport=object(),
+        authorization=_Authorization(),
+        audit_log_repo=_Audit(),
+        mcp_center=mcp_center,
+        mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
+    )
+
+    result = service.list_mcp_permissions(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="collaborator",
+        set_id="global-default",
+    )
+
+    assert result == [
+        {
+            "server_code": "visible-default-mcp",
+            "has_permission": True,
+            "access_level": "LOCAL",
+        }
+    ]
+    assert mcp_center.calls == [("collaborator", "visible-default-mcp")]
+    assert legacy.calls == []
+
+
+def test_default_mcp_permission_request_does_not_expand_platform_defaults():
+    repository = _DefaultResourceRepository()
+    legacy = _ResourceLegacyFactory()
+    mcp_auth = _McpAuth(allowed=True)
+    service = SkillSetManagementService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=legacy,
+        passport=object(),
+        authorization=_Authorization(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=mcp_auth,
+        ext_info_provider=lambda _bot_id: None,
+    )
+
+    result = service.request_mcp_permissions(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="collaborator",
+        set_id="global-default",
+        reason="needed",
+    )
+
+    assert result == [
+        {
+            "server_code": "visible-default-mcp",
+            "success": True,
+            "process_url": None,
+            "error": None,
+        }
+    ]
+    assert mcp_auth.apply_calls == [
+        {
+            "staff_no": "collaborator",
+            "service_code": "visible-default-mcp",
+            "tool_list": [],
+            "is_public": True,
+            "reason": "needed",
+        }
+    ]
+    assert legacy.calls == []
+
+
 def test_resources_keeps_ordinary_mcp_membership_on_canonical_repository_path():
     repository = _MixedResourceRepository()
     legacy = _ResourceLegacyFactory()
@@ -2018,12 +2198,13 @@ async def test_runtime_projection_fails_before_engine_writes_when_flush_fails():
 async def test_runtime_projection_fails_closed_when_default_mcp_policy_is_unavailable():
     factory = _FailingPolicyCollectFactory()
     passport = _RuntimePassport()
+    pool = _RuntimePool()
     runtime = BotRuntimeProjector(
         factory=factory,
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
-        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
+        registry=_registry(pool_runtime=pool, pool_layouts=_RuntimeLayouts()),
         passport=passport,
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -2037,6 +2218,9 @@ async def test_runtime_projection_fails_closed_when_default_mcp_policy_is_unavai
 
     assert factory.service.mcp_codes is None
     assert passport.calls == []
+    assert pool.apply_calls == []
+    assert pool.publish_calls == []
+    assert pool.verify_calls == []
 
 
 @pytest.mark.asyncio
@@ -2071,6 +2255,7 @@ async def test_runtime_projection_mcp_inputs_agree_when_the_union_overlaps():
 
 @pytest.mark.asyncio
 async def test_runtime_reconcile_projects_full_mcp_desired_state():
+    from agentclaw.community.core.skill_center.capability_state_contract import BotCapabilitySnapshot
     factory = _RuntimeFactory()
     passport = _RuntimePassport()
     runtime = BotRuntimeProjector(
@@ -2109,6 +2294,9 @@ async def test_runtime_reconcile_projects_full_mcp_desired_state():
             "entity_type": "staff",
             "engine_type": "openclaw",
             "strict_policy_context": True,
+            "capability_snapshot": BotCapabilitySnapshot(
+                "bot-1", "true-owner", (), frozenset({"mcp.weather"})
+            ),
         }
     ]
     assert passport.calls == [
@@ -2617,12 +2805,13 @@ async def test_a_release_no_longer_supplied_is_deleted():
 async def test_runtime_reconcile_fails_closed_when_effective_cli_scope_cannot_be_read():
     factory = _RuntimeFactory()
     passport = _FailingRuntimePassport()
+    pool = _RuntimePool()
     runtime = BotRuntimeProjector(
         factory=factory,
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
-        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
+        registry=_registry(pool_runtime=pool, pool_layouts=_RuntimeLayouts()),
         passport=passport,
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -2635,6 +2824,9 @@ async def test_runtime_reconcile_fails_closed_when_effective_cli_scope_cannot_be
         )
 
     assert passport.calls == []
+    assert pool.apply_calls == []
+    assert pool.publish_calls == []
+    assert pool.verify_calls == []
 
 
 @pytest.mark.asyncio
@@ -3386,6 +3578,26 @@ def test_projector_and_per_domain_contain_no_engine_identity_test():
         )
 
 
+def test_per_domain_delegates_filesystem_delivery_without_layout_knowledge():
+    """PerDomain owns half scheduling, not filesystem compatibility."""
+    from pathlib import Path
+
+    from agentclaw.community.core.skill_center.services.runtime_projections import (
+        per_domain,
+    )
+
+    source = Path(per_domain.__file__).read_text(encoding="utf-8")
+    for forbidden in (
+        "SkillsPoolLayoutRepositoryProtocol",
+        "SkillsPoolRuntimeProtocol",
+        "runtime_uses_pool_paths",
+        "mapping_contract_for",
+        "_apply_pool_mappings",
+        "_mapping_message",
+    ):
+        assert forbidden not in source
+
+
 
 @pytest.mark.asyncio
 async def test_per_domain_engine_keeps_the_scope_split():
@@ -3422,6 +3634,36 @@ async def test_per_domain_engine_keeps_the_scope_split():
     assert claimed <= set(declared)
     assert released == frozenset()
     assert pool.publish_calls == []
+
+
+@pytest.mark.asyncio
+async def test_failed_skill_delivery_does_not_skip_the_mcp_half():
+    pool = _FailingPublishRuntimePool()
+    factory = _RuntimeFactory()
+    repo_skill = RegisteredSkillAsset(
+        skill_id=8,
+        name="repo-skill",
+        git_path="git://team/repo-skill",
+    )
+    runtime = BotRuntimeProjector(
+        factory=factory,
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills([repo_skill])),
+        registry=_registry(pool_runtime=pool, pool_layouts=_RuntimeLayouts()),
+        passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+    result = await runtime.project(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
+
+    assert result.status.value == "PENDING"
+    assert result.issues[0].code == "SKILL_RUNTIME_UNAVAILABLE"
+    assert len(factory.service.mcp_projections) == 1
 
 
 # ── Skill mutations carry the Skill's MCP dependencies ───────────────
@@ -3811,7 +4053,9 @@ async def test_projector_exposes_skill_and_complete_plan_shapes_at_the_engine_se
         def validate_plan(self, *, skill_assets, retired_mappings=()) -> None:
             return None
 
-        async def apply(self, *, plan, scope, retired_mappings=()) -> None:
+        async def apply(
+            self, *, plan, scope, retired_mappings=(), service_factory
+        ) -> None:
             plans.append(plan)
 
     projection = _RecordingProjection()

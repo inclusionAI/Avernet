@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import pytest
 
+from secbaas.community.api.device_manage import DeviceCallbackContext
 from secbaas.community.plugins.bot.teclaw._stub import StubTeClawBotPlugin
 from secbaas.community.spi.bot.teclaw._types import (
+    BotAsyncTaskResult,
     BotCreateResult,
     BotDestroyResult,
     BotInfo,
@@ -24,6 +26,18 @@ from secbaas.community.spi.bot.teclaw._types import (
 def stub_plugin() -> StubTeClawBotPlugin:
     """Return a fresh StubTeClawBotPlugin instance for each test."""
     return StubTeClawBotPlugin()
+
+
+@pytest.fixture
+def callback_context() -> DeviceCallbackContext:
+    """Return a DeviceCallbackContext used to trigger the async path."""
+    return DeviceCallbackContext(
+        callback_url="http://example/cb",
+        publish_id="p1",
+        device_uuid="d1",
+        tenant="t1",
+        operator="op1",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -55,6 +69,26 @@ class TestStubCreateBot:
         create_result = await stub_plugin.create_bot(config)
         info = await stub_plugin.get_bot(create_result.teclaw_bot_id)
         assert info.teclaw_bot_config == config
+
+    @pytest.mark.asyncio
+    async def test_creates_bot_async_returns_async_result(
+        self, stub_plugin, callback_context
+    ):
+        """create_bot(callback_context=ctx) returns BotAsyncTaskResult."""
+        result = await stub_plugin.create_bot(
+            {"k": "v"}, callback_context=callback_context
+        )
+        assert isinstance(result, BotAsyncTaskResult)
+        assert result.status == "RUNNING"
+        assert result.task_id.startswith("stub-task-")
+        assert result.operation == "CREATE"
+
+    @pytest.mark.asyncio
+    async def test_sync_path_returns_bot_create_result(self, stub_plugin):
+        """create_bot() without callback_context returns BotCreateResult (sync path)."""
+        result = await stub_plugin.create_bot({"k": "v"})
+        assert isinstance(result, BotCreateResult)
+        assert not isinstance(result, BotAsyncTaskResult)
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +147,86 @@ class TestStubUpdateBot:
         assert result.teclaw_bot_id == bid
         assert result.status == "ONLINE"
         assert result.teclaw_bot_config == {"new": "config"}
+
+
+# ---------------------------------------------------------------------------
+# Test update_bot callback_context storage
+# ---------------------------------------------------------------------------
+
+
+class TestStubUpdateCallbackContext:
+    @pytest.mark.asyncio
+    async def test_update_bot_stores_callback_context(
+        self, stub_plugin, callback_context
+    ):
+        """update_bot(callback_context=ctx) records ctx as last_callback_context."""
+        bot_id = "stub-teclaw-cb-ctx-test"
+        await stub_plugin.update_bot(
+            bot_id, bot_config={}, callback_context=callback_context
+        )
+        assert stub_plugin._bots[bot_id]["last_callback_context"] is callback_context
+
+
+# ---------------------------------------------------------------------------
+# Test update_bot async path (BotAsyncTaskResult return shape)
+# ---------------------------------------------------------------------------
+
+
+class TestStubUpdateBotAsync:
+    """Async-path return shape for ``update_bot`` — mirrors create_bot async shape.
+
+    Triggered by ``callback_context`` being non-None.
+    """
+
+    @pytest.mark.asyncio
+    async def test_update_bot_async_returns_bot_async_task_result(
+        self, stub_plugin, callback_context
+    ):
+        """update_bot(callback_context=ctx) returns BotAsyncTaskResult with operation=UPDATE."""
+        result = await stub_plugin.update_bot(
+            "stub-teclaw-async-update",
+            bot_config={"k": "v"},
+            callback_context=callback_context,
+        )
+        assert isinstance(result, BotAsyncTaskResult)
+        assert result.bot_id == "stub-teclaw-async-update"
+        assert result.operation == "UPDATE"
+        assert result.status == "RUNNING"
+        assert result.version == 1
+        assert result.task_id.startswith("stub-task-")
+
+    @pytest.mark.asyncio
+    async def test_update_bot_async_sets_running_status(
+        self, stub_plugin, callback_context
+    ):
+        """async update marks the stored entry status as RUNNING."""
+        bot_id = "stub-teclaw-async-status"
+        await stub_plugin.update_bot(
+            bot_id, bot_config={"k": "v"}, callback_context=callback_context
+        )
+        assert stub_plugin._bots[bot_id]["status"] == "RUNNING"
+
+    @pytest.mark.asyncio
+    async def test_update_bot_async_stores_new_config(
+        self, stub_plugin, callback_context
+    ):
+        """async update stores the supplied bot_config on the entry."""
+        bot_id = "stub-teclaw-async-cfg"
+        await stub_plugin.update_bot(
+            bot_id, bot_config={"new": "config"}, callback_context=callback_context
+        )
+        assert stub_plugin._bots[bot_id]["bot_config"] == {"new": "config"}
+
+    @pytest.mark.asyncio
+    async def test_update_bot_sync_returns_bot_update_result(self, stub_plugin):
+        """update_bot() without callback_context preserves the BotUpdateResult sync path."""
+        result = await stub_plugin.update_bot(
+            "stub-teclaw-sync-update",
+            bot_config={"k": "v"},
+        )
+        assert isinstance(result, BotUpdateResult)
+        assert not isinstance(result, BotAsyncTaskResult)
+        assert result.status == "ONLINE"
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +317,76 @@ class TestStubRestartBot:
         # After restart, the bot gets stored with empty config
         info = await stub_plugin.get_bot("nonexistent")
         assert info.teclaw_bot_config == {}
+
+
+# ---------------------------------------------------------------------------
+# Test restart_bot async path (BotAsyncTaskResult return shape)
+# ---------------------------------------------------------------------------
+
+
+class TestStubRestartBotAsync:
+    """Async-path return shape for ``restart_bot``.
+
+    Triggered by ``callback_context`` being non-None. Restart proxies to
+    UPDATE so the ``BotAsyncTaskResult.operation`` is ``"UPDATE"``
+    (not ``"RESTART"``).
+    """
+
+    @pytest.mark.asyncio
+    async def test_restart_bot_async_returns_bot_async_task_result(
+        self, stub_plugin, callback_context
+    ):
+        """restart_bot(callback_context=ctx) returns BotAsyncTaskResult with operation=UPDATE."""
+        create_result = await stub_plugin.create_bot({"k": "v"})
+        bid = create_result.teclaw_bot_id
+        result = await stub_plugin.restart_bot(bid, callback_context=callback_context)
+        assert isinstance(result, BotAsyncTaskResult)
+        assert result.bot_id == bid
+        assert result.operation == "UPDATE"
+        assert result.status == "RUNNING"
+        assert result.version == 1
+        assert result.task_id.startswith("stub-task-")
+
+    @pytest.mark.asyncio
+    async def test_restart_bot_async_sets_running_status(
+        self, stub_plugin, callback_context
+    ):
+        """async restart marks the stored entry status as RUNNING."""
+        create_result = await stub_plugin.create_bot({"k": "v"})
+        bid = create_result.teclaw_bot_id
+        await stub_plugin.restart_bot(bid, callback_context=callback_context)
+        assert stub_plugin._bots[bid]["status"] == "RUNNING"
+
+    @pytest.mark.asyncio
+    async def test_restart_bot_async_stores_callback_context(
+        self, stub_plugin, callback_context
+    ):
+        """async restart records the supplied callback_context on the entry."""
+        create_result = await stub_plugin.create_bot({"k": "v"})
+        bid = create_result.teclaw_bot_id
+        await stub_plugin.restart_bot(bid, callback_context=callback_context)
+        assert stub_plugin._bots[bid]["last_callback_context"] is callback_context
+
+    @pytest.mark.asyncio
+    async def test_restart_bot_async_preserves_stored_config(
+        self, stub_plugin, callback_context
+    ):
+        """async restart preserves the previously stored bot_config."""
+        config = {"feature": "enabled"}
+        create_result = await stub_plugin.create_bot(config)
+        bid = create_result.teclaw_bot_id
+        await stub_plugin.restart_bot(bid, callback_context=callback_context)
+        assert stub_plugin._bots[bid]["bot_config"] == config
+
+    @pytest.mark.asyncio
+    async def test_restart_bot_sync_returns_bot_restart_result(self, stub_plugin):
+        """restart_bot() without callback_context preserves the BotRestartResult sync path."""
+        create_result = await stub_plugin.create_bot({"k": "v"})
+        bid = create_result.teclaw_bot_id
+        result = await stub_plugin.restart_bot(bid)
+        assert isinstance(result, BotRestartResult)
+        assert not isinstance(result, BotAsyncTaskResult)
+        assert result.status == "ONLINE"
 
 
 # ---------------------------------------------------------------------------

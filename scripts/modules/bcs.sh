@@ -386,12 +386,14 @@ build_bcs_panel_asset() {
 
     log_info "Building BCS panel asset..."
     cd "${BCS_PANEL_ASSET_DIR}"
-
     if ! npm run build; then
         log_error "Failed to build BCS panel asset"
         return 1
     fi
-
+    if [[ ! -f "${BCS_PANEL_ASSET_DIR}/dist/index.umd.js" ]]; then
+        log_error "BCS panel asset resolution failed: missing dist/index.umd.js"
+        return 1
+    fi
     log_info "BCS panel asset built successfully"
 }
 

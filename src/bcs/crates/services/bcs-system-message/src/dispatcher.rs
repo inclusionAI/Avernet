@@ -7,24 +7,24 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_domain::{DeliveryType, Group, GroupStrategy, NewMessage, Participant, PersistMode, SenderType, SystemGroupMessage, SystemMessageEvent, SystemMessageEventKind};
+use bcs_domain::{
+    DeliveryType, Group, GroupStrategy, MessageAudience, MessageVisibilityDomain, NewMessage,
+    Participant, PersistMode, SenderType, SystemGroupMessage, SystemMessageEvent,
+    SystemMessageEventKind,
+};
 use bcs_protocol::{
     build_chat_inject_frame, build_chat_send_frame, now_ms, BcsFrame, BotDeliveryKind,
     GroupContextInput, GroupContextParticipant,
 };
+use bcs_service_api::core::BCS_SYSTEM_MESSAGE;
 use bcs_service_api::{
     ActiveBotRunContext, BotDeliveryCommand, BotDeliveryPort, BotDeliveryTarget,
-    BotRegistryCoreService, BotRunContext, BotRunContextPort, BotRunScope,
-    BotRunTransportOwner,
-    DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
-    FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort, FrontendDeliveryTarget,
-    ProviderStreamGrayList,
-    ServiceError, ServiceResult,
-    SystemMessageDispatchOutcome, SystemMessageDispatcherService, SystemMessageProducerService,
-    SystemMessageRecipientResult,
-    port::repo::MessageRepoPort,
+    BotRegistryCoreService, BotRunContext, BotRunContextPort, BotRunScope, BotRunTransportOwner,
+    DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS, FrontendDeliveryCommand, FrontendDeliveryKind,
+    FrontendDeliveryPort, FrontendDeliveryTarget, ProviderStreamGrayList, ServiceError,
+    ServiceResult, SystemMessageDispatchOutcome, SystemMessageDispatcherService,
+    SystemMessageProducerService, SystemMessageRecipientResult, port::repo::MessageRepoPort,
 };
-use bcs_service_api::core::BCS_SYSTEM_MESSAGE;
 use futures::future::join_all;
 
 /// Concrete dispatcher that holds a producer registry and delivery port.
@@ -51,7 +51,6 @@ impl SystemMessageDispatcherImpl {
     pub fn builder() -> SystemMessageDispatcherBuilder {
         SystemMessageDispatcherBuilder::default()
     }
-
 }
 
 /// Builder for `SystemMessageDispatcherImpl`.
@@ -81,7 +80,10 @@ impl SystemMessageDispatcherBuilder {
     }
 
     /// Set the frontend delivery port.
-    pub fn with_frontend_delivery(mut self, frontend_delivery: Arc<dyn FrontendDeliveryPort>) -> Self {
+    pub fn with_frontend_delivery(
+        mut self,
+        frontend_delivery: Arc<dyn FrontendDeliveryPort>,
+    ) -> Self {
         self.frontend_delivery = Some(frontend_delivery);
         self
     }
@@ -188,7 +190,9 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
             ServiceError::InternalError(format!("No producer registered for kind {:?}", kind))
         })?;
 
-        let (bot_messages, user_message) = producer.produce(&event, group, self.registry.as_ref(), participants).await;
+        let (bot_messages, user_message) = producer
+            .produce(&event, group, self.registry.as_ref(), participants)
+            .await;
 
         // Persist system messages according to each message's PersistMode:
         // - PerRecipient: one record per recipient with owner_bot_id = recipient
@@ -202,17 +206,45 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
         // user_message is NOT persisted (frontend-only).
         if let Some(ref repo) = self.message_repo {
             let mut persisted_count = 0usize;
-            let new_record = |msg: &SystemGroupMessage, owner_bot_id: Option<String>| NewMessage {
-                group_id: group.id.clone(),
-                session_id: session_id.to_string(),
-                sender_id: "system".to_string(),
-                sender_type: SenderType::System,
-                message_type: "system".to_string(),
-                content: serde_json::Value::String(msg.message.clone()),
-                client_msg_id: None,
-                owner_bot_id,
-                created_at: now_ms(),
-                run_id: String::new(),
+            let new_record = |msg: &SystemGroupMessage, owner_bot_id: Option<String>| {
+                let visibility_domain = match group.group_strategy {
+                    GroupStrategy::Chat => MessageVisibilityDomain::Chat,
+                    GroupStrategy::ManagerWorker => MessageVisibilityDomain::ManagerWorker,
+                    GroupStrategy::StateMachine => MessageVisibilityDomain::StateMachine,
+                };
+                let audience = match visibility_domain {
+                    MessageVisibilityDomain::Chat => None,
+                    MessageVisibilityDomain::ManagerWorker
+                    | MessageVisibilityDomain::StateMachine => {
+                        Some(if kind == SystemMessageEventKind::SessionContext {
+                            // GroupContext is bot execution context, not a
+                            // manager announcement. Full keeps the legacy
+                            // owner-filtered row; participant hides it.
+                            MessageAudience::FullOnly
+                        } else {
+                            match owner_bot_id.as_ref() {
+                                Some(owner_actor_id) => MessageAudience::Directed {
+                                    actor_ids: vec![owner_actor_id.clone()],
+                                },
+                                None => MessageAudience::Public,
+                            }
+                        })
+                    }
+                };
+                NewMessage {
+                    group_id: group.id.clone(),
+                    session_id: session_id.to_string(),
+                    sender_id: "system".to_string(),
+                    sender_type: SenderType::System,
+                    message_type: "system".to_string(),
+                    content: serde_json::Value::String(msg.message.clone()),
+                    client_msg_id: None,
+                    owner_bot_id,
+                    created_at: now_ms(),
+                    run_id: String::new(),
+                    visibility_domain,
+                    audience,
+                }
             };
             for msg in &bot_messages {
                 let records: Vec<NewMessage> = match msg.persist {
@@ -476,15 +508,30 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
         // session-level broadcast; NOT persisted). bot_messages are never
         // broadcast to the frontend.
         if let Some(content) = user_message.filter(|s| !s.trim().is_empty()) {
+            let visibility_domain = match group.group_strategy {
+                GroupStrategy::Chat => MessageVisibilityDomain::Chat,
+                GroupStrategy::ManagerWorker => MessageVisibilityDomain::ManagerWorker,
+                GroupStrategy::StateMachine => MessageVisibilityDomain::StateMachine,
+            };
+            let audience = (visibility_domain != MessageVisibilityDomain::Chat)
+                .then_some(MessageAudience::Public);
             let event_json = build_frontend_system_event_frame(&group.id, &content, session_id);
-            let target = FrontendDeliveryTarget::Session { session_id: session_id.to_string() };
-            if let Err(e) = self.frontend_delivery.publish(FrontendDeliveryCommand {
-                target,
-                event_json,
-                delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
-                run_fallback: None,
-                exclude_conn_id: None,
-            }).await {
+            let target = FrontendDeliveryTarget::Session {
+                session_id: session_id.to_string(),
+            };
+            if let Err(e) = self
+                .frontend_delivery
+                .publish(FrontendDeliveryCommand {
+                    target,
+                    event_json,
+                    delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
+                    run_fallback: None,
+                    exclude_conn_id: None,
+                    visibility_domain,
+                    audience,
+                })
+                .await
+            {
                 tracing::warn!(
                     group_id = %group.id, %session_id, error = %e,
                     "system message frontend delivery failed"
@@ -494,14 +541,29 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
         if provider_delivery_failed {
             let content = "消息投递失败，请稍后重试。";
             let event_json = build_frontend_system_event_frame(&group.id, content, session_id);
-            let target = FrontendDeliveryTarget::Session { session_id: session_id.to_string() };
-            if let Err(e) = self.frontend_delivery.publish(FrontendDeliveryCommand {
-                target,
-                event_json,
-                delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
-                run_fallback: None,
-                exclude_conn_id: None,
-            }).await {
+            let target = FrontendDeliveryTarget::Session {
+                session_id: session_id.to_string(),
+            };
+            let visibility_domain = match group.group_strategy {
+                GroupStrategy::Chat => MessageVisibilityDomain::Chat,
+                GroupStrategy::ManagerWorker => MessageVisibilityDomain::ManagerWorker,
+                GroupStrategy::StateMachine => MessageVisibilityDomain::StateMachine,
+            };
+            let audience = (visibility_domain != MessageVisibilityDomain::Chat)
+                .then_some(MessageAudience::Public);
+            if let Err(e) = self
+                .frontend_delivery
+                .publish(FrontendDeliveryCommand {
+                    target,
+                    event_json,
+                    delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
+                    run_fallback: None,
+                    exclude_conn_id: None,
+                    visibility_domain,
+                    audience,
+                })
+                .await
+            {
                 tracing::warn!(
                     group_id = %group.id, %session_id, error = %e,
                     "provider delivery failure notice delivery failed"
@@ -529,11 +591,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
 
 /// Build the frontend JSON event frame for a system message.
 /// Follows the exact format used by `group_flow.rs::publish_group_callback_event`.
-fn build_frontend_system_event_frame(
-    group_id: &str,
-    content: &str,
-    session_id: &str,
-) -> String {
+fn build_frontend_system_event_frame(group_id: &str, content: &str, session_id: &str) -> String {
     let run_id = uuid::Uuid::new_v4().to_string();
     let mut event = serde_json::json!({
         "bcs_group_id": group_id,

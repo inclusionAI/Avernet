@@ -651,13 +651,13 @@ class _FakeSkillsPort:
     async def skills_discover(self, source, token=None) -> list[dict]:
         return [{"skillId": "new", "name": "New", "description": ""}]
 
-    async def skills_sync_symlinks(self, token=None) -> dict:
+    async def skills_sync_symlinks(self, params, token=None) -> dict:
         return {"total": 2, "created": ["a"], "kept": ["b"]}
 
-    async def skills_sync_bindpaths(self, token=None) -> dict:
+    async def skills_sync_bindpaths(self, params, token=None) -> dict:
         return {"total": 1, "created": ["c"]}
 
-    async def skills_clean_symlinks(self, token=None) -> dict:
+    async def skills_clean_symlinks(self, params, token=None) -> dict:
         return {"directories_scanned": 2, "removed": ["x"]}
 
     async def skills_ensure_center(self, token=None) -> dict:
@@ -938,13 +938,13 @@ class _FakeFilePort:
     async def file_read(self, path, token=None) -> dict:
         return {"content": "hello body"}
 
-    async def file_remove(self, path, token=None) -> bool:
-        return True
+    async def file_remove(self, path, token=None) -> dict:
+        return {"target_path": path, "path_type": "file"}
 
     async def file_rmtree(self, path, token=None) -> bool:
         return True
 
-    async def file_list_dir(self, path, token=None) -> list[dict]:
+    async def file_list_dir(self, path, token=None, *, recursive=False, exclude_dirs=None) -> list[dict]:
         return [{"name": "f.txt", "path": "/d/f.txt", "relative_path": "f.txt",
                  "is_dir": False, "size": 10}]
 

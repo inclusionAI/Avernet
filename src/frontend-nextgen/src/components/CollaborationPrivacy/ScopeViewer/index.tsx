@@ -7,9 +7,7 @@ import type {
   PublicAudience,
   PublicConfig,
 } from '@/domain/collaborationPrivacy/types';
-
-const audienceLabels: Record<PublicAudience, string> = { user: '其他用户', bot: '其他 Bot' };
-const scopeLabels = { none: '不公开', all: '全部公开', restricted: '限制公开范围' } as const;
+import { visibilityAudience, visibilityScopeLabels } from '../botVisibilityCopy';
 
 interface ScopeViewerBaseProps {
   open: boolean;
@@ -28,11 +26,11 @@ export function ScopeViewer(props: ScopeViewerProps) {
   const paths: OrganizationPath[] = publication ? props.config.organizationPaths : props.config.exemptOrganizationPaths;
   const departmentNos = publication ? [] : props.config.exemptDepartmentNos ?? [];
   const count = paths.length || departmentNos.length;
-  const title = publication ? `对${audienceLabels[props.audience]}公开范围` : '好友申请免审批范围';
+  const title = publication ? visibilityAudience[props.audience].editorTitle : '好友申请免审批范围';
   const description = publication
-    ? '以下为当前已生效配置，不包含审批中的目标配置。'
+    ? '以下为当前已生效可见性配置，不包含审批中的目标配置。'
     : '以下为当前已生效的好友申请免审批组织范围。';
-  const statusLabel = publication ? scopeLabels[props.config.scope] : '部分组织免审批';
+  const statusLabel = publication ? visibilityScopeLabels[props.config.scope] : '部分组织免审批';
   const statusTone = publication
     ? props.config.scope === 'restricted'
       ? 'warning'

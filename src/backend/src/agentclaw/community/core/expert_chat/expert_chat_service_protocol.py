@@ -36,6 +36,8 @@ class ExpertChatServiceProtocol(Protocol):
         limit: int = 20,
         offset: int = 0,
         iam_token: Optional[str] = None,
+        *,
+        bcn_friend_authorized: bool = False,
     ) -> Dict[str, Any]: ...
 
     async def create_chat_session(
@@ -44,6 +46,8 @@ class ExpertChatServiceProtocol(Protocol):
         bot_id: str,
         owner_id: str,
         iam_token: Optional[str] = None,
+        *,
+        bcn_friend_authorized: bool = False,
     ) -> Dict[str, Any]: ...
 
     async def connect_chat_session(
@@ -53,6 +57,8 @@ class ExpertChatServiceProtocol(Protocol):
         owner_id: str,
         session_key: str,
         iam_token: Optional[str] = None,
+        *,
+        bcn_friend_authorized: bool = False,
     ) -> Dict[str, Any]: ...
 
     async def delete_owned_chat_session(
@@ -61,29 +67,36 @@ class ExpertChatServiceProtocol(Protocol):
         bot_id: str,
         owner_id: str,
         session_key: str,
+        *,
+        bcn_friend_authorized: bool = False,
     ) -> bool: ...
 
     async def get_owned_chat_session(
         self, user_id: str, bot_id: str, owner_id: str, session_key: str,
         iam_token: Optional[str] = None,
+        *, bcn_friend_authorized: bool = False,
     ) -> Dict[str, Any]: ...
 
     async def list_owned_chat_session_messages(
         self, user_id: str, bot_id: str, owner_id: str, session_key: str,
         limit: int, offset: int = 0, iam_token: Optional[str] = None,
+        *, bcn_friend_authorized: bool = False,
     ) -> Dict[str, Any]: ...
 
     async def update_owned_chat_session(
         self, user_id: str, bot_id: str, owner_id: str, session_key: str,
         fields: Dict[str, Any], iam_token: Optional[str] = None,
+        *, bcn_friend_authorized: bool = False,
     ) -> Dict[str, Any]: ...
 
     async def clear_owned_chat_session_messages(
         self, user_id: str, bot_id: str, owner_id: str, session_key: str,
         iam_token: Optional[str] = None,
+        *, bcn_friend_authorized: bool = False,
     ) -> bool: ...
 
     async def set_owned_chat_session_favorite(
         self, user_id: str, bot_id: str, owner_id: str, session_key: str,
         favorited: bool, iam_token: Optional[str] = None,
+        *, bcn_friend_authorized: bool = False,
     ) -> bool: ...

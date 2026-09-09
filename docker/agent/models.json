@@ -1,0 +1,21 @@
+[
+  {
+    "id": "antchat",
+    "name": "AntChat",
+    "enabled": true,
+    "models": [
+      {
+        "id": "glm-5.2",
+        "name": "glm-5.2",
+        "display_name": "glm-5.2",
+        "env": { "ANTHROPIC_MODEL": "glm-5.2", "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000" }
+      },
+      {
+        "id": "qwen3.8-max",
+        "name": "qwen3.8-max",
+        "display_name": "qwen3.8-max",
+        "env": { "ANTHROPIC_MODEL": "qwen3.8-max", "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "1000000" }
+      }
+    ]
+  }
+]

@@ -1,6 +1,7 @@
 import { getWorkerConfig, updateWorkerConfig } from '@/services/backendApi/bcsfuse/bcsfuseController';
 import { BackendRequestError } from '@/services/backendApi/httpClient';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
+import { useIdentityStore } from '@/stores/identityStore';
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 const response = (data: unknown = null) =>
@@ -21,6 +22,20 @@ const failingResponse = (status: number, data: unknown = {}) =>
 describe('bcsfuse worker config controller', () => {
   afterEach(() => {
     jest.restoreAllMocks();
+    useIdentityStore.getState().reset();
+  });
+
+  it('does not inject the global user_id into worker config GET or PUT requests', async () => {
+    useIdentityStore.getState().setCurrentIdentityId('012345');
+    const spy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(() => response({ success: true, worker_id: 'bot-1', fusion_enable: true, version: 1 }));
+
+    await getWorkerConfig('bot-1');
+    await updateWorkerConfig('bot-1', { fusion_enable: false });
+
+    expect(spy).toHaveBeenNthCalledWith(1, '/openapi/v1/bcsfuse/workers/bot-1/config', expect.anything());
+    expect(spy).toHaveBeenNthCalledWith(2, '/openapi/v1/bcsfuse/workers/bot-1/config', expect.anything());
   });
 
   it('gets the fusion config with the composite worker id and forwards cancellation', async () => {

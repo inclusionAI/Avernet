@@ -1,4 +1,5 @@
 import type { ParticipantView } from '@/domain/collaboration';
+import type { AuthenticatedUserName } from '@/domain/userIdentity';
 import { queryCollaborationBots } from '@/services/backendApi/collaboration/collaborationBotController';
 import type { SessionFileDto, SessionFileStatus } from '@/services/backendApi/collaboration/sessionFileController';
 import {
@@ -51,7 +52,11 @@ function normalizeShareUrl(url: string): string {
   return url.replace(/\/openapi\/v1\//g, '/api/v1/');
 }
 
-function mapFile(dto: SessionFileDto, participants?: ParticipantView[]): SessionFileView {
+function mapFile(
+  dto: SessionFileDto,
+  participants?: ParticipantView[],
+  authenticatedUser?: AuthenticatedUserName | null,
+): SessionFileView {
   const sources: OwnerNameSource[] = (participants ?? []).map((p) => ({ actorId: p.actorId, name: p.name }));
   return {
     fileId: dto.file_id,
@@ -62,7 +67,7 @@ function mapFile(dto: SessionFileDto, participants?: ParticipantView[]): Session
     status: dto.status,
     ownerActorId: dto.owner.actor_id,
     ownerKind: dto.owner.actor_kind === 'human' ? 'human' : 'bot',
-    ownerName: resolveOwnerDisplayName(dto.owner, sources),
+    ownerName: resolveOwnerDisplayName(dto.owner, sources, authenticatedUser),
     sha256: dto.sha256,
     createdAt: dto.created_at,
     updatedAt: dto.updated_at,
@@ -102,13 +107,17 @@ export const sessionFileService = {
     sessionId: string,
     participants?: ParticipantView[],
     opts: { status?: SessionFileStatus; limit?: number; offset?: number } = {},
+    authenticatedUser?: AuthenticatedUserName | null,
   ): Promise<DomainResult<{ items: SessionFileView[]; total: number }>> {
     try {
       const resp = await listSessionFiles(sessionId, opts);
       const data = resp.data ?? { items: [], total: 0 };
       return {
         ok: true,
-        data: { items: (data.items ?? []).map((f) => mapFile(f, participants)), total: data.total ?? 0 },
+        data: {
+          items: (data.items ?? []).map((f) => mapFile(f, participants, authenticatedUser)),
+          total: data.total ?? 0,
+        },
       };
     } catch (err) {
       const status = (err as { status?: number })?.status;

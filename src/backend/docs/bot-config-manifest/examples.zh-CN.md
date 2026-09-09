@@ -6,9 +6,11 @@
 > 操作说明见 `user-manual.zh-CN.md`；本文所引端点、字段、路径均取自现有业务
 > 代码。
 >
-> **本文展示的是 v1 的完整形状**，其中有几处第一期还没开放（`engine_config`、
-> `cli_tools`、命名源 `from` 与 git 源）——它们写了会在 `PUT` 时被拒绝，清单
-> 见 `manifest-schema.zh-CN.md` §7。
+> **本文展示的是 v1 的完整形状。**其中仍未开放的只有 `engine_config`（没有
+> 物化器），写了会在 `PUT` 时被拒绝；`cli_tools`、命名源 `from`、`git` 源与
+> `oss` 源都**已经开放**，`resources` 的 git 那条路是本轮接通的。完整的
+> 「类别 × 协议」矩阵见 `manifest-schema.zh-CN.md` §7，它在代码里是一张表，
+> 并由一个逐格发真实 `PUT` 的测试守着。
 
 ## 0. 场景设定
 
@@ -42,14 +44,13 @@ open API；容器重建后 bot 立即可用但内容可能滞后；scale-out 出
 **一个端点、一个 body schema**：`PUT /openapi/v1/bots/source-credentials/{name}`。
 下面是同一个接口的两次调用（`{name}` 是凭证名，如同 `PUT /users/alice` 与
 `PUT /users/bob`），两次是因为要存**两个不同的 secret**——git 一个、制品库
-一个。body 的判别键 `type` 是**认证机制**而非存储类型：git 源与 OSS 源在
-这里都是「注入一个静态请求头」，走同一个 `type: header`（schema §2.1 另留
-了 `oss_aksk` / `basic` 两种机制，v1 未实现）。
+一个。body 的判别键 `type` 是**认证机制**而非源协议。注意这一组端点是
+**租户级的、不带 `user_id`**，与本特性其余每条路由都不同。
 
 ```text
 PUT /openapi/v1/bots/source-credentials/corp-git-content
 {
-  "type": "header",
+  "type": "header",                                                # git 主机 token:出示
   "header_name": "PRIVATE-TOKEN",
   "secret": "…",                                                   # 仓库级只读 token 或机器人账号 token，不用个人 PAT
   "allowed_prefixes": ["https://code.example-corp.com/team/content"]
@@ -57,12 +58,17 @@ PUT /openapi/v1/bots/source-credentials/corp-git-content
 
 PUT /openapi/v1/bots/source-credentials/oss-artifacts
 {
-  "type": "header",
-  "header_name": "Authorization",
-  "secret": "Bearer …",
+  "type": "oss_aksk",                                              # 私有对象存储:签名
+  "access_key_id": "LTAI5t…",                                      # 标识符，不是密钥;可回读
+  "secret": "…",                                                   # 密钥半边:永不上线路、永不回读
   "allowed_prefixes": ["https://artifacts.example-corp.com/tools/"]
 }
 ```
+
+两种机制的差别不只是字段：`header` 把 secret **本身**放上线路，`oss_aksk`
+的密钥半边**从不上线路**——它派生签名密钥，线路上走的是对**这一个请求**的
+签名。所以私有桶用后者。回读时 `access_key_id` 原样返回（轮换若不可验证
+就没人会做），密钥半边在任何响应、日志、apply report 里都没有表示。
 
 `allowed_prefixes` **必填**：git 服务和对象存储都是单 origin 承载大量
 互不相关的内容，只按域名放行的话，把 `source` 改指同域名下别人的仓库/桶
@@ -81,12 +87,18 @@ schema_version: 1
 
 sources:                                     # 命名源：一处声明、多处引用
   content:                                   # ① 内容仓库（git）
-    git: https://code.example-corp.com/team/content.git
+    protocol: git
+    url: https://code.example-corp.com/team/content.git
     ref: v1.2.0                              # ← 整套配置升版本只改这一行
     auth: corp-git-content
-  artifacts:                                 # ② 制品桶（URL 前缀）
-    url: https://artifacts.example-corp.com/tools/
-    auth: oss-artifacts
+  order-lookup:                              # ② 制品桶上的一个 zip
+    protocol: oss                            #    oss:一次请求取一个对象，
+    url: https://artifacts.example-corp.com/tools/skills/order-lookup-1.4.0.zip
+    auth: oss-artifacts                      #    所以 url 指向对象本身
+  shopctl:                                   # ③ 同一个桶、另一个对象 = 另一个源
+    protocol: oss
+    url: https://artifacts.example-corp.com/tools/shopctl/2.3.0/shopctl-linux-amd64
+    auth: oss-artifacts                      #    凭证是共享的，地址不是
 
 manifest:
   engine_config:                             # ③ 引擎配置：声明的顶层键获胜
@@ -120,17 +132,16 @@ manifest:
     - name: quality-check                    # 形态 A：仓库里的 skill 目录
       from: content
       subpath: skills/quality-check/
-    - name: order-lookup                     # 形态 B：OSS 上的 zip 包
-      from: artifacts
-      subpath: skills/order-lookup-1.4.0.zip
-      digest: "sha256:3e7a…"                 # 非 git 形态：强制钉版
+    - name: order-lookup                     # 形态 B：对象存储上的 zip 包
+      from: order-lookup
+      digest: "sha256:3e7a…"                 # oss 形态：强制钉版
+      unpack: zip
 
   cli_tools:                                 # ⑦ 给模型调用的命令行工具
     - name: shopctl
-      from: artifacts
-      subpath: shopctl/2.3.0/shopctl-linux-amd64
-      digest: "sha256:9f2c…"                 # 本类目强制
-      version: "2.3.0"
+      from: shopctl
+      digest: "sha256:9f2c…"                 # oss 形态：强制钉版
+      version: "2.3.0"                       # （git 源则以 commit SHA 钉扎，无需 digest）
 
   mcp:                                       # ⑧ MCP servers：注册表引用
     - server_code: mcp.ant.homistudio.meetmcp
@@ -152,7 +163,8 @@ script:                                      # ⑨ 命令式长尾（ARCA 系专
   "trigger": "republish", "result": "SUCCEEDED",
   "sources": [
     {"name": "content", "ref": "v1.2.0", "resolved_sha": "9c1f4ae…"},
-    {"name": "artifacts", "url": "https://artifacts.example-corp.com/tools/"}
+    {"name": "order-lookup", "url": "https://artifacts.example-corp.com/tools/skills/order-lookup-1.4.0.zip"},
+    {"name": "shopctl", "url": "https://artifacts.example-corp.com/tools/shopctl/2.3.0/shopctl-linux-amd64"}
   ],
   "entries": [
     {"category": "engine_config", "name": "language,reply_style", "action": "updated"},
@@ -163,9 +175,9 @@ script:                                      # ⑨ 命令式长尾（ARCA 系专
     {"category": "resources", "name": "data/kb/",     "action": "updated", "from": "content"},
     {"category": "skills",    "name": "quality-check", "action": "unchanged", "from": "content"},
     {"category": "skills",    "name": "order-lookup",  "action": "created",
-     "from": "artifacts", "source_digest": "sha256:3e7a…"},
+     "from": "order-lookup", "source_digest": "sha256:3e7a…"},
     {"category": "cli_tools", "name": "shopctl", "action": "created",
-     "from": "artifacts", "source_digest": "sha256:9f2c…", "version": "2.3.0"},
+     "from": "shopctl", "source_digest": "sha256:9f2c…", "version": "2.3.0"},
     {"category": "mcp",       "name": "mcp.ant.homistudio.meetmcp", "action": "unchanged"}
   ]
 }
@@ -183,27 +195,49 @@ script:                                      # ⑨ 命令式长尾（ARCA 系专
 ```yaml
 sources:
   content:
-    git: https://code.example-corp.com/team/content.git
+    protocol: git
+    url: https://code.example-corp.com/team/content.git
     ref: v1.2.0
     auth: corp-git-content
-  artifacts:
-    url: https://artifacts.example-corp.com/tools/
+  order-lookup:
+    protocol: oss
+    url: https://artifacts.example-corp.com/tools/skills/order-lookup-1.4.0.zip
     auth: oss-artifacts
 ```
+
+**源先声明它的协议**。旧写法靠「带了 `git:` 还是 `url:` 这个键」反推协议，
+于是没有任何东西能枚举它、capabilities 端点无法发布它、各类目只好各自反推
+——这正是本轮修复的那批缺陷的共同来源。旧写法现在 `PUT` 时被拒绝，并在错误
+里点名替代形式。
 
 **它解决什么**：identity、resources、skills 的内容通常来自同一个仓库的
 同一个版本。若逐条目重复写 `{git, ref, auth}`，「升一版」就变成改 N 处，
 且可能改漏——半新半旧。命名源把来源提取出来，**一次 `ref` 变更，所有
 引用它的条目在同一个 apply 点原子地收敛到同一个 commit**。
 
-**两种源类型**：
+**两个协议**：
 
-- **git 源**（`git` + `ref`）：`ref` 可以是 tag、branch 或 commit SHA。
-  收敛单位是**解析出的 commit SHA**，即天然 digest，条目不需要写
-  `digest`。`ref` 在每个 apply 点重新解析——tag 被重打即声明含义变化，
-  下次 apply 收敛到新内容；要绝对不可变就直接写 SHA；追最新则写 branch。
-- **URL 源**（`url`）：作为前缀，条目的 `subpath` 拼在其后。适合 OSS
-  制品桶这类「一个前缀下放很多制品」的场景。
+- **`protocol: git`**（`url` + `ref`）：`ref` 可以是 tag、branch 或 commit
+  SHA。收敛单位是**解析出的 commit SHA**，即天然 digest，条目不需要写
+  `digest`——**无论这个源是内联写的还是 `from` 来的**，因为它们是同一个源。
+  `ref` 在每个 apply 点重新解析——tag 被重打即声明含义变化，下次 apply 收敛
+  到新内容；要绝对不可变就直接写 SHA；追最新则写 branch。
+  一个 git 源可以服务**多个条目**：源上的 `subpath` 与条目上的 `subpath`
+  拼接（源在前），一次 apply 只 clone 一次。
+- **`protocol: oss`**（`url`）：一次 HTTPS 请求取回**一个对象**，`url` 就是
+  那个对象的地址。平台不列举桶，也不需要 `LIST` 权限，所以**同一个桶里的两
+  个对象是两个源**——上面的 `order-lookup` 与 `shopctl` 就是这样。`skills`
+  与 `cli_tools` 走这个协议时**强制 `digest`**：平台在分发可执行内容，没钉
+  住的取源每次拿到的是「那一刻碰巧在那里的东西」。
+
+**这两条差别值得直说，它解释了「文本进 git、制品进制品库」**：
+
+- **git 给你原子升版**——改一行 `ref`，引用它的所有条目在同一个 apply 点
+  一起走到同一个 commit。这是「一处声明、多处引用」在 v1 唯一完整成立的
+  地方，因为只有 git 有一个覆盖整棵树的版本坐标。
+- **oss 给你共享凭证与逐对象钉扎**——多个 oss 源共用一个 `auth`（同一份
+  AK/SK、同一组 `allowed_prefixes`），但各指一个对象、各带自己的 `digest`。
+  升版本是改那个源的 `url` 与 `digest`。
 
 **凭证声明在源上**（`auth`），引用它的条目不再各写一遍。
 
@@ -312,22 +346,39 @@ resources:
 ```
 
 **两个「路径」不要混淆**：`path` 是**落点**（写到 workspace 的哪里，
-逻辑路径、非引擎物理路径）；`subpath` 是**源内路径**（从源的哪里取）。
-二者可同时出现在一个条目里，故必须异名。
+逻辑路径、非引擎物理路径）；`subpath` 是**源交付物之内的路径**（从源交付
+的东西里取哪一块）。二者可同时出现在一个条目里，故必须异名。
 
-**目录条目**：`path` 以 `/` 结尾即目录条目。**HTTP 没有目录语义**——
-一个 URL 只能是一个字节流，所以「文件夹」要么用带目录枚举能力的协议
-（git，枚举由仓库服务完成，**免打包**），要么以归档为约定形态整体运输：
+上面两条引用的是**同一个** git 源，各取一条路径——这正是本轮接通的：
+在此之前 `resources` 是唯一一个被锁死在内联来源上的取源类目，`from:` 即使
+指向一个 URL 源也会被拒（`unsupported_source`），于是命名源「一处声明、
+多处引用」的整个机制把工作区文件排除在外——而「改一行 `ref` 升整套内容」
+正是这套机制的招牌属性。
+
+**目录条目**：`path` 以 `/` 结尾即目录条目，整棵子树**递归**下发（每一层
+的每一个文件）。**一次 HTTPS 请求只能取一个对象**，所以「文件夹」要么用带
+目录枚举能力的协议（git，枚举由仓库服务完成，**免打包**），要么以归档为
+约定形态整体运输：
 
 ```yaml
-  # 归档形态（源不在 git 时）
+  # git 形态：整棵树，免打包
   - path: data/kb/
+    from: content
+    subpath: kb/                # 选仓库树里的这个子目录
+
+  # 归档形态（oss 源）
+  - path: data/archive/
     source: https://cms.example.com/kb/knowledge-base.zip
-    unpack: zip                 # 可选：扩展名不可靠时显式指定
+    unpack: zip                 # oss 目录条目**必填**：树要装在归档里才走得动
     strip_components: 1         # 可选，默认 0：剥掉归档内前 N 层目录
                                 # （业务 `zip -r kb.zip kb/` 的壳目录用它消掉）
     auth: cms-token
 ```
+
+`unpack` / `strip_components` **只属于 `oss`**：git 手上已经是一棵真实的
+树，`subpath` 就是选择器，没有东西要解包。写在 git 源上会被 `PUT` **拒绝**
+而不是忽略——一个看起来在配置什么、实际什么都不管的字段，正是这套矩阵要
+消灭的那类失败。
 
 **目录条目的语义**：
 - **收敛单位是整棵树**（git 形态即 commit SHA，归档形态即归档内容
@@ -358,10 +409,10 @@ skills:
   - name: quality-check         # 形态 A：仓库里的 skill 目录
     from: content
     subpath: skills/quality-check/
-  - name: order-lookup          # 形态 B：OSS 上的 zip 包
-    from: artifacts
-    subpath: skills/order-lookup-1.4.0.zip
+  - name: order-lookup          # 形态 B：对象存储上的 zip 包
+    from: order-lookup          # oss 源的 url 就指向这个 zip
     digest: "sha256:3e7a…"
+    unpack: zip
 ```
 
 **`name` 是标识符，不含位置信息**——skill 装到引擎的哪个目录由引擎决定
@@ -371,11 +422,16 @@ skills:
 内容仓库里最自然——和 identity、resources 共享同一个 tag，一起升版本。
 收敛靠 commit SHA，不需要 `digest`。
 
-**形态 B（OSS zip）**：适合由构建流水线产出 zip 制品的 skill。**此形态
+**形态 B（oss zip）**：适合由构建流水线产出 zip 制品的 skill。**此形态
 `digest` 强制**——skill 里有会被 agent 加载执行的脚本，属于「代码」而非
-「数据」；git 形态有 commit SHA 天然兜底，OSS 形态没有钉子就等于每次
+「数据」；git 形态有 commit SHA 天然兜底，oss 形态没有钉子就等于每次
 apply 盲取最新。（相比之下 resources 的归档不强制 digest：那是数据，
 `keep_last` 兜底足够。）
+
+**这条规则按协议判，不按写法判**：`from:` 一个 git 源与内联写一个 git 源
+是同一件事，都不需要 `digest`。此前它读的是「来源形态」，于是 `from:` 一个
+git 源被归类成 `named` 并被要求出示一个 git 字节流根本无法承载的钉子——然后
+在 apply 时照样失败。
 
 **归档自动识别**：平台按内容类型/扩展名判定是否需要解包，`unpack` 只在
 扩展名不可靠时作为显式覆盖。两种形态下用户声明的都是「我要这个 skill」，
@@ -400,19 +456,21 @@ activate，落成的 Local Skill 对 reconcile / quarantine 完全可见——�
 ```yaml
 cli_tools:
   - name: shopctl
-    from: artifacts
-    subpath: shopctl/2.3.0/shopctl-linux-amd64
-    digest: "sha256:9f2c…"
+    from: shopctl               # oss 源的 url 就指向这个二进制
+    digest: "sha256:9f2c…"      # oss 形态：本类目强制
     version: "2.3.0"
 ```
 
 **含义**：内部数据查询 CLI，希望每个客服 bot 里都有，agent 处理工单时
 自己 bash 调它查订单。
 
-**为什么放 OSS 而不是 git**：这是唯一**不建议进 git** 的类目。二进制进
+**为什么放对象存储而不是 git**：这是唯一**不建议进 git** 的类目。二进制进
 git 是反模式（仓库膨胀、LFS 运维），而可执行物需要的是 digest 钉死的
-供应链通道——制品库（OSS）+ 强制 `digest` 才是它的形态。路径里带版本号
-（`shopctl/2.3.0/…`）让制品不可变，配合 digest 双保险。
+供应链通道——制品库（`protocol: oss`）+ 强制 `digest` 才是它的形态。路径里
+带版本号（`shopctl/2.3.0/…`）让制品不可变，配合 digest 双保险。
+
+**git 源在这个类目也是允许的**（工具本身就在仓库里构建产出的场景），且
+**不需要 `digest`**：commit SHA 已经是钉子。规则按**协议**判，不按写法判。
 
 **平台做什么**：取二进制 → **digest 强校验**（不符即 `failed`）→ 落进平台
 定义的逻辑「工具目录」（NAS 持久）+ 置可执行位 → 保证该目录在 agent 进程的

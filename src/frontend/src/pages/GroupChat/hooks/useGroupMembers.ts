@@ -19,7 +19,7 @@ import { useGroupChatStore } from '@/stores/groupChatStore';
 import { extractErrorMessage } from '@/utils/requestErrorHandler';
 import { useCallback, useState } from 'react';
 import { toast } from 'sonner';
-import type { GroupMember } from '../types';
+import type { GroupMember, MessageViewScope } from '../types';
 
 export interface AddGroupMemberItem {
   /** Bot UUID */
@@ -40,6 +40,7 @@ export interface AddBatchResult {
 export function useGroupMembers() {
   const [isAdding, setIsAdding] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
+  const [isUpdatingScope, setIsUpdatingScope] = useState(false);
 
   /** 添加单个成员（不弹 toast，由调用方汇总） */
   const addOne = useCallback(
@@ -140,10 +141,55 @@ export function useGroupMembers() {
     [],
   );
 
+  const updateGroupMemberScope = useCallback(
+    async (
+      groupId: string,
+      member: GroupMember,
+      messageViewScope: MessageViewScope,
+    ): Promise<boolean> => {
+      const actorId = member.botUuid || member.id;
+      const mode = member.mode === 'absent' ? 'absent' : 'present';
+      try {
+        setIsUpdatingScope(true);
+        await BcnController.updateParticipantMode({
+          group_id: groupId,
+          actor_id: actorId,
+          mode,
+          message_view_scope: messageViewScope,
+        });
+        const state = useGroupChatStore.getState();
+        const group =
+          state.currentGroup?.id === groupId
+            ? state.currentGroup
+            : state.getGroupById(groupId);
+        if (group) {
+          state.updateGroup(groupId, {
+            participants: group.participants.map((participant) =>
+              participant.id === actorId || participant.botUuid === actorId
+                ? { ...participant, messageViewScope }
+                : participant,
+            ),
+          });
+        }
+        toast.success('消息视角已更新');
+        return true;
+      } catch (error: any) {
+        console.error('[useGroupMembers] updateGroupMemberScope failed:', error);
+        toast.error(extractErrorMessage(error, '更新消息视角失败'));
+        return false;
+      } finally {
+        setIsUpdatingScope(false);
+      }
+    },
+    [],
+  );
+
   return {
     addGroupMembersBatch,
     removeGroupMember,
+    updateGroupMemberScope,
     isAdding,
     isRemoving,
+    isUpdatingScope,
   };
 }

@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bcs_domain::{
-    ActorKind, DeliveryType, Group, GroupKind, GroupStatus, GroupStrategy, Participant,
-    ParticipantMode, ParticipantRole, PersistMode, RedactedToken, SystemGroupMessage,
+    ActorKind, DeliveryType, Group, GroupKind, GroupStatus, GroupStrategy, MessageAudience,
+    Participant, ParticipantMode, ParticipantRole, PersistMode, RedactedToken, SystemGroupMessage,
     SystemMessageEvent, SystemMessageEventKind,
 };
 use bcs_service_api::{
@@ -21,8 +21,10 @@ use bcs_test_support::NoopFrontendDeliveryPort;
 use tokio::sync::RwLock;
 
 use crate::{
-    producers::{bot_joined::BotJoinedMessageProducer, session_context::SessionContextMessageProducer},
     SystemMessageDispatcherImpl,
+    producers::{
+        bot_joined::BotJoinedMessageProducer, session_context::SessionContextMessageProducer,
+    },
 };
 
 /// Mock delivery port that records every command it receives.
@@ -241,6 +243,8 @@ impl bcs_service_api::port::repo::MessageRepoPort for RecordingMessageRepo {
             status: bcs_domain::PersistedMessageStatus::Normal,
             created_at: msg.created_at,
             run_id: msg.run_id.clone(),
+            visibility_domain: Some(msg.visibility_domain),
+            audience: msg.audience.clone(),
         };
         self.appended.write().await.push(msg);
         Ok(persisted)
@@ -297,6 +301,7 @@ async fn dispatch_bot_joined_delivers_to_all_participants() {
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::Auto),
                 tags: Vec::new(),
+                message_view_scope: bcs_domain::MessageViewScope::Full,
             },
             Participant {
                 bot_uuid: new_bot_id.clone(),
@@ -306,6 +311,7 @@ async fn dispatch_bot_joined_delivers_to_all_participants() {
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::Auto),
                 tags: Vec::new(),
+                message_view_scope: bcs_domain::MessageViewScope::Full,
             },
         ],
         messages: vec![],
@@ -333,6 +339,7 @@ async fn dispatch_bot_joined_delivers_to_all_participants() {
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
             tags: Vec::new(),
+            message_view_scope: bcs_domain::MessageViewScope::Full,
         },
         session_id: "session-test".to_string(),
         session_input: None,
@@ -364,7 +371,10 @@ async fn dispatch_bot_joined_delivers_to_all_participants() {
     let calls = delivery.calls.lock().unwrap();
     assert_eq!(calls.len(), 2);
 
-    let target_ids: Vec<String> = calls.iter().map(|c| c.target_bot_id().to_string()).collect();
+    let target_ids: Vec<String> = calls
+        .iter()
+        .map(|c| c.target_bot_id().to_string())
+        .collect();
     assert!(target_ids.contains(&new_bot_id));
     assert!(target_ids.contains(&existing_bot_id));
 
@@ -389,35 +399,50 @@ async fn dispatch_bot_joined_persists_per_recipient_and_ws_shows_notification_on
         participants: vec![
             Participant {
                 bot_uuid: existing_bot_id.clone(),
-                bot_name: None, kind: None,
+                bot_name: None,
+                kind: None,
                 role: ParticipantRole::Driver,
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::Auto),
                 tags: Vec::new(),
+                message_view_scope: bcs_domain::MessageViewScope::Full,
             },
             Participant {
                 bot_uuid: new_bot_id.clone(),
-                bot_name: None, kind: None,
+                bot_name: None,
+                kind: None,
                 role: ParticipantRole::Consultant,
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::Auto),
                 tags: Vec::new(),
+                message_view_scope: bcs_domain::MessageViewScope::Full,
             },
         ],
-        messages: vec![], workspace: Default::default(),
-        service_group_uuid: None, service_mode: None,
-        created_at: 0, updated_at: 0,
-        group_kind: GroupKind::Normal, dm_pair_key: None,
-        group_strategy: GroupStrategy::Chat, service_spec: None,
-        version: 0, record_status: "active".to_string(), visibility: "private".to_string(),
+        messages: vec![],
+        workspace: Default::default(),
+        service_group_uuid: None,
+        service_mode: None,
+        created_at: 0,
+        updated_at: 0,
+        group_kind: GroupKind::Normal,
+        dm_pair_key: None,
+        group_strategy: GroupStrategy::Chat,
+        service_spec: None,
+        version: 0,
+        record_status: "active".to_string(),
+        visibility: "private".to_string(),
     };
     let event = SystemMessageEvent::BotJoined {
         group_id: group.id.clone(),
         actor: Participant {
-            bot_uuid: new_bot_id.clone(), bot_name: None, kind: None,
-            role: ParticipantRole::Consultant, actor_kind: ActorKind::Bot,
+            bot_uuid: new_bot_id.clone(),
+            bot_name: None,
+            kind: None,
+            role: ParticipantRole::Consultant,
+            actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
             tags: Vec::new(),
+            message_view_scope: bcs_domain::MessageViewScope::Full,
         },
         session_id: "session-test".to_string(),
         session_input: None,
@@ -433,12 +458,16 @@ async fn dispatch_bot_joined_persists_per_recipient_and_ws_shows_notification_on
         .with_delivery(delivery.clone())
         .with_frontend_delivery(frontend_delivery.clone())
         .with_message_repo(message_repo.clone())
-        .register(BotJoinedMessageProducer::new(Arc::new(bcs_test_support::NoopGroupMessageHistoryService)))
+        .register(BotJoinedMessageProducer::new(Arc::new(
+            bcs_test_support::NoopGroupMessageHistoryService,
+        )))
         .build()
         .expect("build dispatcher");
 
-    dispatcher.dispatch(event, &group, "session-test", &group.participants)
-        .await.expect("dispatch");
+    dispatcher
+        .dispatch(event, &group, "session-test", &group.participants)
+        .await
+        .expect("dispatch");
 
     // Persistence: the new-bot injection is per-recipient (owner=new-bot);
     // the shared join notice is a single public record (owner=None) that
@@ -446,18 +475,28 @@ async fn dispatch_bot_joined_persists_per_recipient_and_ws_shows_notification_on
     // copies of the identical text.
     let appended = message_repo.appended().await;
     assert_eq!(appended.len(), 2);
-    let injection = appended.iter().find(|m| m.owner_bot_id.as_deref() == Some(&new_bot_id))
+    let injection = appended
+        .iter()
+        .find(|m| m.owner_bot_id.as_deref() == Some(&new_bot_id))
         .expect("new-bot injection record");
     assert_eq!(injection.sender_id, "system");
     assert_eq!(injection.message_type, "system");
-    assert!(content_text(injection).contains("<GroupContext>"),
-        "new-bot context injection persisted under owner=new-bot");
-    let notice = appended.iter().find(|m| m.owner_bot_id.is_none())
+    assert!(
+        content_text(injection).contains("<GroupContext>"),
+        "new-bot context injection persisted under owner=new-bot"
+    );
+    let notice = appended
+        .iter()
+        .find(|m| m.owner_bot_id.is_none())
         .expect("public join notification record");
     assert!(content_text(notice).contains("已加入协作群"));
     assert!(!content_text(notice).contains("<GroupContext>"));
-    assert!(!appended.iter().any(|m| m.owner_bot_id.as_deref() == Some(&existing_bot_id)),
-        "shared notice must not persist per-bot copies");
+    assert!(
+        !appended
+            .iter()
+            .any(|m| m.owner_bot_id.as_deref() == Some(&existing_bot_id)),
+        "shared notice must not persist per-bot copies"
+    );
 
     // WS: exactly one publish, content = user_message (join notification),
     // NOT the new-bot context injection.
@@ -465,35 +504,59 @@ async fn dispatch_bot_joined_persists_per_recipient_and_ws_shows_notification_on
     assert_eq!(published.len(), 1, "WS publishes a single user_message");
     let payload = &published[0].event_json;
     assert!(payload.contains("已加入协作群"));
-    assert!(!payload.contains("<GroupContext>"),
-        "WS must not leak the new-bot context injection");
+    assert!(
+        !payload.contains("<GroupContext>"),
+        "WS must not leak the new-bot context injection"
+    );
 }
 
 #[tokio::test]
 async fn dispatch_bot_left_with_no_recipients_persists_public_record_and_pushes_ws() {
     let leaving = "bot-only".to_string();
     let group = Group {
-        id: "group-left".into(), label: None, status: GroupStatus::Active,
-        driver_bot: leaving.clone(), originator: Some(leaving.clone()),
-        routing_policy: None, context: None, opening_message: None,
+        id: "group-left".into(),
+        label: None,
+        status: GroupStatus::Active,
+        driver_bot: leaving.clone(),
+        originator: Some(leaving.clone()),
+        routing_policy: None,
+        context: None,
+        opening_message: None,
         participants: vec![Participant {
-            bot_uuid: leaving.clone(), bot_name: Some("Solo".into()), kind: None,
-            role: ParticipantRole::Driver, actor_kind: ActorKind::Bot,
+            bot_uuid: leaving.clone(),
+            bot_name: Some("Solo".into()),
+            kind: None,
+            role: ParticipantRole::Driver,
+            actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
             tags: Vec::new(),
+            message_view_scope: bcs_domain::MessageViewScope::Full,
         }],
-        messages: vec![], workspace: Default::default(),
-        service_group_uuid: None, service_mode: None,
-        created_at: 0, updated_at: 0, group_kind: GroupKind::Normal,
-        dm_pair_key: None, group_strategy: GroupStrategy::Chat, service_spec: None,
-        version: 0, record_status: "active".to_string(), visibility: "private".to_string(),
+        messages: vec![],
+        workspace: Default::default(),
+        service_group_uuid: None,
+        service_mode: None,
+        created_at: 0,
+        updated_at: 0,
+        group_kind: GroupKind::Normal,
+        dm_pair_key: None,
+        group_strategy: GroupStrategy::Chat,
+        service_spec: None,
+        version: 0,
+        record_status: "active".to_string(),
+        visibility: "private".to_string(),
     };
     let event = SystemMessageEvent::BotLeft {
         group_id: group.id.clone(),
         actor: Participant {
-            bot_uuid: leaving.clone(), bot_name: Some("Solo".into()), kind: None,
-            role: ParticipantRole::Driver, actor_kind: ActorKind::Bot, mode: None,
+            bot_uuid: leaving.clone(),
+            bot_name: Some("Solo".into()),
+            kind: None,
+            role: ParticipantRole::Driver,
+            actor_kind: ActorKind::Bot,
+            mode: None,
             tags: Vec::new(),
+            message_view_scope: bcs_domain::MessageViewScope::Full,
         },
     };
     let registry = Arc::new(ProviderTargetRegistry::default());
@@ -510,13 +573,21 @@ async fn dispatch_bot_left_with_no_recipients_persists_public_record_and_pushes_
         .build()
         .expect("build dispatcher");
 
-    dispatcher.dispatch(event, &group, "session-left", &group.participants)
-        .await.expect("dispatch");
+    dispatcher
+        .dispatch(event, &group, "session-left", &group.participants)
+        .await
+        .expect("dispatch");
 
     let appended = message_repo.appended().await;
-    assert_eq!(appended.len(), 1,
-        "no recipients → still a single public record for human history");
-    assert!(appended[0].owner_bot_id.is_none(), "public record has no owner");
+    assert_eq!(
+        appended.len(),
+        1,
+        "no recipients → still a single public record for human history"
+    );
+    assert!(
+        appended[0].owner_bot_id.is_none(),
+        "public record has no owner"
+    );
     let published = frontend_delivery.published.lock().unwrap();
     assert_eq!(published.len(), 1);
     assert!(published[0].event_json.contains("已退出协作群"));
@@ -528,7 +599,11 @@ async fn dispatch_session_context_preserves_manager_worker_group_type() {
     manager.bot_name = Some("Manager".to_string());
     let mut worker = Participant::bot("bot-worker", ParticipantRole::Worker);
     worker.bot_name = Some("Worker".to_string());
-    let mut group = Group::new("group-manager-worker", "control-plane-owner", vec![manager, worker]);
+    let mut group = Group::new(
+        "group-manager-worker",
+        "control-plane-owner",
+        vec![manager, worker],
+    );
     group.originator = Some("bot-manager".to_string());
     group.group_strategy = GroupStrategy::ManagerWorker;
 
@@ -553,7 +628,12 @@ async fn dispatch_session_context_preserves_manager_worker_group_type() {
         .expect("build dispatcher");
 
     dispatcher
-        .dispatch(event, &group, "group-manager-worker:abcdef12", &group.participants)
+        .dispatch(
+            event,
+            &group,
+            "group-manager-worker:abcdef12",
+            &group.participants,
+        )
         .await
         .expect("dispatch succeeded");
 
@@ -578,7 +658,11 @@ async fn dispatch_manager_worker_session_context_persists_worker_private_context
     manager.bot_name = Some("Manager".to_string());
     let mut worker = Participant::bot("bot-worker", ParticipantRole::Worker);
     worker.bot_name = Some("Worker".to_string());
-    let mut group = Group::new("group-manager-worker", "control-plane-owner", vec![manager, worker]);
+    let mut group = Group::new(
+        "group-manager-worker",
+        "control-plane-owner",
+        vec![manager, worker],
+    );
     group.originator = Some("bot-manager".to_string());
     group.group_strategy = GroupStrategy::ManagerWorker;
 
@@ -621,6 +705,7 @@ async fn dispatch_manager_worker_session_context_persists_worker_private_context
     assert_eq!(manager_context.session_id, session_id);
     assert_eq!(manager_context.sender_id, "system");
     assert_eq!(manager_context.message_type, "system");
+    assert_eq!(manager_context.audience, Some(MessageAudience::FullOnly));
     assert!(content_text(manager_context).contains("你的角色: manager"));
 
     let worker_context = appended
@@ -629,6 +714,7 @@ async fn dispatch_manager_worker_session_context_persists_worker_private_context
         .expect("worker-owned context record");
     assert_eq!(worker_context.sender_id, "system");
     assert_eq!(worker_context.message_type, "system");
+    assert_eq!(worker_context.audience, Some(MessageAudience::FullOnly));
     assert!(content_text(worker_context).contains("你的角色: worker"));
 }
 
@@ -678,12 +764,14 @@ async fn dispatch_manager_worker_session_context_persists_each_worker_private_co
 
     let appended = message_repo.appended().await;
     assert_eq!(appended.len(), 3);
-    let manager_ctx = appended.iter()
+    let manager_ctx = appended
+        .iter()
         .find(|msg| msg.owner_bot_id.is_none())
         .expect("public manager copy");
     assert!(content_text(manager_ctx).contains("你的角色: manager"));
     for worker_id in ["bot-worker-a", "bot-worker-b"] {
-        let worker_context = appended.iter()
+        let worker_context = appended
+            .iter()
             .find(|msg| msg.owner_bot_id.as_deref() == Some(worker_id))
             .unwrap_or_else(|| panic!("worker-owned context for {worker_id}"));
         assert!(content_text(worker_context).contains("你的角色: worker"));
@@ -696,11 +784,7 @@ async fn dispatch_non_manager_worker_session_context_persists_per_recipient_reco
     driver.bot_name = Some("Driver".to_string());
     let mut consultant = Participant::bot("bot-consultant", ParticipantRole::Consultant);
     consultant.bot_name = Some("Consultant".to_string());
-    let group = Group::new(
-        "group-chat",
-        "bot-driver",
-        vec![driver, consultant],
-    );
+    let group = Group::new("group-chat", "bot-driver", vec![driver, consultant]);
 
     let session_id = "group-chat:abcdef12";
     let event = SystemMessageEvent::SessionContext {
@@ -738,7 +822,8 @@ async fn dispatch_non_manager_worker_session_context_persists_per_recipient_reco
         "no global record; each recipient owns a copy"
     );
     for owner in ["bot-driver", "bot-consultant"] {
-        let rec = appended.iter()
+        let rec = appended
+            .iter()
             .find(|m| m.owner_bot_id.as_deref() == Some(owner))
             .unwrap_or_else(|| panic!("owner record for {owner}"));
         assert!(content_text(rec).contains("<GroupContext>"));
@@ -751,7 +836,11 @@ async fn dispatch_manager_worker_session_context_does_not_make_worker_context_pu
     manager.bot_name = Some("Manager".to_string());
     let mut worker = Participant::bot("bot-worker", ParticipantRole::Worker);
     worker.bot_name = Some("Worker".to_string());
-    let mut group = Group::new("group-manager-worker", "control-plane-owner", vec![manager, worker]);
+    let mut group = Group::new(
+        "group-manager-worker",
+        "control-plane-owner",
+        vec![manager, worker],
+    );
     group.originator = Some("bot-manager".to_string());
     group.group_strategy = GroupStrategy::ManagerWorker;
 
@@ -778,7 +867,12 @@ async fn dispatch_manager_worker_session_context_does_not_make_worker_context_pu
         .expect("build dispatcher");
 
     dispatcher
-        .dispatch(event, &group, "group-manager-worker:abcdef12", &group.participants)
+        .dispatch(
+            event,
+            &group,
+            "group-manager-worker:abcdef12",
+            &group.participants,
+        )
         .await
         .expect("dispatch succeeded");
 
@@ -794,7 +888,11 @@ async fn dispatch_manager_worker_generic_system_message_persists_single_global_r
     manager.bot_name = Some("Manager".to_string());
     let mut worker = Participant::bot("bot-worker", ParticipantRole::Worker);
     worker.bot_name = Some("Worker".to_string());
-    let mut group = Group::new("group-manager-worker", "control-plane-owner", vec![manager, worker]);
+    let mut group = Group::new(
+        "group-manager-worker",
+        "control-plane-owner",
+        vec![manager, worker],
+    );
     group.originator = Some("bot-manager".to_string());
     group.group_strategy = GroupStrategy::ManagerWorker;
 
@@ -818,7 +916,12 @@ async fn dispatch_manager_worker_generic_system_message_persists_single_global_r
         .expect("build dispatcher");
 
     dispatcher
-        .dispatch(event, &group, "group-manager-worker:abcdef12", &group.participants)
+        .dispatch(
+            event,
+            &group,
+            "group-manager-worker:abcdef12",
+            &group.participants,
+        )
         .await
         .expect("dispatch succeeded");
 
@@ -864,7 +967,9 @@ async fn dispatch_session_context_uses_at_mention_when_group_has_provider_downli
     for recipient in ["bot-ws", "bot-provider"] {
         let text = delivered_text_for(&calls, recipient);
         assert!(text.contains("## 工具说明 (@mention)"));
-        assert!(text.contains("消息中任何 @ 标识都会触发路由，让被 @ 的 Bot 收到消息并被要求响应。"));
+        assert!(
+            text.contains("消息中任何 @ 标识都会触发路由，让被 @ 的 Bot 收到消息并被要求响应。")
+        );
         assert!(text.contains("只有希望某个 Bot 响应时才使用 @"));
         assert!(text.contains("不要用 @ 表示引用、收到或转述某个 Bot 的消息"));
         assert!(text.contains("优先使用名称；名称为空、重复或不确定时，使用 Bot ID。"));
@@ -897,6 +1002,7 @@ async fn dispatch_send_system_message_records_run_context_for_provider_callback(
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
             tags: Vec::new(),
+            message_view_scope: bcs_domain::MessageViewScope::Full,
         }],
         messages: vec![],
         workspace: Default::default(),
@@ -1001,6 +1107,7 @@ async fn deprecated_stream_gray_setting_keeps_system_message_send_delivery() {
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
             tags: Vec::new(),
+            message_view_scope: bcs_domain::MessageViewScope::Full,
         }],
         messages: vec![],
         workspace: Default::default(),
@@ -1067,6 +1174,7 @@ async fn dispatch_send_system_message_to_websocket_records_run_context_and_retur
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
             tags: Vec::new(),
+            message_view_scope: bcs_domain::MessageViewScope::Full,
         }],
         messages: vec![],
         workspace: Default::default(),
@@ -1162,6 +1270,7 @@ async fn dispatch_failed_send_system_message_does_not_leave_active_run_context()
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
             tags: Vec::new(),
+            message_view_scope: bcs_domain::MessageViewScope::Full,
         }],
         messages: vec![],
         workspace: Default::default(),
@@ -1243,6 +1352,7 @@ async fn dispatch_failed_provider_send_notifies_frontend_without_active_run_cont
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
             tags: Vec::new(),
+            message_view_scope: bcs_domain::MessageViewScope::Full,
         }],
         messages: vec![],
         workspace: Default::default(),
@@ -1331,6 +1441,7 @@ async fn dispatch_inject_system_message_does_not_record_run_context() {
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
             tags: vec!["draft".to_string(), "tenant-a".to_string()],
+            message_view_scope: bcs_domain::MessageViewScope::Full,
         }],
         messages: vec![],
         workspace: Default::default(),

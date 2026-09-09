@@ -1,71 +1,68 @@
 import type { GroupView } from '@/domain/collaboration';
-import { groupService } from '@/services/workspace/groupService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
 
 /**
- * useSelectedGroupDetail —— 从 useGroupWorkspace 拆出的选中群详情兜底逻辑：
- * - selectedGroupId 直接写入（URL/邀请/去发言）但未出现在当前身份筛选列表时，补拉详情；
- * - 用户首次选择 direct 群但后端判定为 session_only 时，自动纠正到「会话成员」。
- *   身份切换恢复期间不纠正（membership 已从记忆恢复）。
+ * useSelectedGroupDetail —— selectedGroupId 直接写入（URL/邀请/去发言）时的成员视角兜底：
+ * 若群不在「固定协作成员」列表中，切换到「仅参与临时会话」列表，而不是补拉群详情。
+ *
+ * 跨身份/初始空列表竞态修正（新开页 target=_blank 全新挂载）：
+ * 全新挂载、身份切到人类 me 后,首个 commit 内 sessionGroups 可能仍是初始空 [] 或上一身份
+ * 陈旧列表,若此刻放任“漏选即纠正”会把 membership 从 direct 错切到 session_only;
+ * 而单向纠正(仅 direct→session_only)此后再也回不去,群被 session_only 视角筛掉 → 右栏空态。
+ *
+ * 守卫:仅当 listReadyForCurrentIdentity(由调用方 useGroupWorkspace 在 loadGroups 成功回填
+ * sessionGroups、且列表仍属于当前活动身份时置 true)为真时,才按漏选纠正 membership。
+ * 这保证当前可见列表确实是“为当前身份加载完成”的列表(非初始 [] 也非上一身份陈旧列表),
+ * 堵住同提交竞态 cursor 抢跑。
  */
 export function useSelectedGroupDetail(
   selectedGroupId: string | null,
-  activeIdentityId: string | null,
-  selectedGroup: GroupView | null,
   sessionGroups: GroupView[],
   isGroupsLoading: boolean,
-  setSelectedGroupFallback: (g: GroupView | null) => void,
-  setSessionGroups: React.Dispatch<React.SetStateAction<GroupView[]>>,
+  listReadyForCurrentIdentity: boolean,
 ) {
+  const activeIdentityId = useWorkspaceStore((s) => s.activeIdentityId);
   const membership = useWorkspaceStore((s) => s.membership);
   const setMembership = useWorkspaceStore((s) => s.setMembership);
 
-  // 身份切换后标记恢复中，loadGroups 完成并稳定一帧后解除。
+  // 身份切换/挂载后标记恢复中，loadGroups 完成并稳定一帧后解除。
   // 恢复期间跳过 membership 自动纠正，避免覆盖用户之前选择的视角。
-  const restoringRef = useRef(false);
+  // 初值必须为 true：暖重挂载（store 已有 selectedGroupId、列表 hook 局部 state 为空）时，
+  // 首个 effect flush 中 isGroupsLoading 闭包仍为 false（loadGroups 同步置位发生在同一 flush），
+  // 若初值为 false 三个守卫全部失守，membership 会被误翻转为 session_only。
+  const [isRestoringList, setIsRestoringList] = useState(true);
   useEffect(() => {
-    restoringRef.current = true;
+    setIsRestoringList(true);
     if (isGroupsLoading) return;
     // 列表已加载，下一帧解除恢复标记。
     const timer = setTimeout(() => {
-      restoringRef.current = false;
+      setIsRestoringList(false);
     }, 0);
     return () => clearTimeout(timer);
   }, [activeIdentityId, isGroupsLoading]);
 
   useEffect(() => {
-    if (!selectedGroupId) {
-      setSelectedGroupFallback(null);
-      return;
-    }
-    // 群已在当前筛选列表中：列表项已含展示所需字段，无需补拉详情，避免选中即触发
-    // GET /groups/{id} 详情请求。群详情仅在打开管理面板（查看/编辑）时按需拉取。
+    if (!selectedGroupId) return;
+    // 群已在当前筛选列表中：列表项已含侧边栏与聊天头部展示所需字段。
     if (sessionGroups.some((group) => group.groupId === selectedGroupId)) {
-      setSelectedGroupFallback(null);
       return;
     }
-    // 列表尚未加载完成时等待，避免 sessionGroups 暂空时误判为"不在列表"而提前补拉。
-    if (isGroupsLoading) return;
-    // 仅当选中群不在当前筛选列表（URL 深链/邀请直达/被过滤）时，才补拉详情兜底展示。
-    let cancelled = false;
-    groupService.loadGroupDetailOrBcs(selectedGroupId, activeIdentityId ?? undefined).then((res) => {
-      if (cancelled || !res?.ok) return;
-      setSelectedGroupFallback(res.data);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedGroupId, activeIdentityId, sessionGroups, isGroupsLoading, setSelectedGroupFallback, setSessionGroups]);
-
-  // 自动纠正：用户首次选了 direct 群但后端判定为 session_only 时自动切视角。
-  // 恢复期间（restoringRef）跳过，避免覆盖记忆恢复的 membership。
-  useEffect(() => {
-    if (restoringRef.current) return;
-    if (!selectedGroupId || !selectedGroup || isGroupsLoading) return;
-    if (selectedGroup.membership === 'direct') return;
-    if (membership !== 'direct') return;
-    if (sessionGroups.some((group) => group.groupId === selectedGroupId)) return;
-    setMembership('session_only');
-  }, [isGroupsLoading, membership, selectedGroup, selectedGroupId, sessionGroups, setMembership]);
+    // 当前可见列表尚未为当前身份加载完成(初始空 [] 或上一身份陈旧列表)——
+    // 不能据此判漏选,待当前身份列表加载完(listReadyForCurrentIdentity 翻真)再纠正。
+    if (!listReadyForCurrentIdentity) return;
+    // 列表加载/身份恢复期间等待，避免暂空列表被误判为群不属于当前视角。
+    if (isGroupsLoading || isRestoringList) return;
+    // 深链/会话邀请进入的群可能只出现在 session_only 列表；切换视角复用列表接口。
+    // 群详情 participants/owner/driver 仍由管理面板打开时按需拉取。
+    if (membership === 'direct') setMembership('session_only');
+  }, [
+    isGroupsLoading,
+    isRestoringList,
+    listReadyForCurrentIdentity,
+    membership,
+    selectedGroupId,
+    sessionGroups,
+    setMembership,
+  ]);
 }

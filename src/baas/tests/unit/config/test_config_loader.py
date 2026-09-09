@@ -201,6 +201,131 @@ class TestEnvOverlaySelection:
         assert config.workers == 1
 
 
+class TestDeployTenantOverlay:
+    """Tests for the BAAS_DEPLOY_TENANT tenant overlay layer.
+
+    Merged after the SERVER_ENV/COMMUNITY_DEPLOY layer; a missing file is
+    silently skipped; an unset var keeps the legacy behaviour byte-identical.
+    """
+
+    def test_tenant_overlay_merges_after_env_layer(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "app_name: base\nworkers: 1\nuser_config: {}\n"
+        )
+        (config_dir / "application-dev.yaml").write_text("workers: 4\n")
+        (config_dir / "application-aliyun.yaml").write_text("workers: 9\n")
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.delenv("COMMUNITY_DEPLOY", raising=False)
+        monkeypatch.setenv("SERVER_ENV", "dev")
+        monkeypatch.setenv("BAAS_DEPLOY_TENANT", "aliyun")
+        from secbaas.community.config import ConfigLoader
+
+        config = ConfigLoader.load()
+        assert config.app_name == "base"
+        # Tenant layer is merged last — its value wins over the env layer.
+        assert config.workers == 9
+
+    def test_tenant_overlay_merges_without_env_layer(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "app_name: base\nworkers: 1\nuser_config: {}\n"
+        )
+        (config_dir / "application-aliyun.yaml").write_text("workers: 9\n")
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.delenv("SERVER_ENV", raising=False)
+        monkeypatch.delenv("COMMUNITY_DEPLOY", raising=False)
+        monkeypatch.setenv("BAAS_DEPLOY_TENANT", "aliyun")
+        from secbaas.community.config import ConfigLoader
+
+        config = ConfigLoader.load()
+        assert config.app_name == "base"
+        assert config.workers == 9
+
+    def test_tenant_overlay_missing_file_silently_skipped(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "app_name: base\nworkers: 1\nuser_config: {}\n"
+        )
+        # No application-aliyun.yaml: the missing tenant overlay is ignored.
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.delenv("SERVER_ENV", raising=False)
+        monkeypatch.delenv("COMMUNITY_DEPLOY", raising=False)
+        monkeypatch.setenv("BAAS_DEPLOY_TENANT", "aliyun")
+        from secbaas.community.config import ConfigLoader
+
+        config = ConfigLoader.load()
+        assert config.workers == 1
+        assert config.app_name == "base"
+
+    def test_tenant_env_unset_keeps_legacy_behavior(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "app_name: base\nworkers: 1\nuser_config: {}\n"
+        )
+        (config_dir / "application-dev.yaml").write_text("workers: 4\n")
+        # No BAAS_DEPLOY_TENANT at all: behaviour identical to today.
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.delenv("COMMUNITY_DEPLOY", raising=False)
+        monkeypatch.delenv("BAAS_DEPLOY_TENANT", raising=False)
+        monkeypatch.setenv("SERVER_ENV", "dev")
+        from secbaas.community.config import ConfigLoader
+
+        config = ConfigLoader.load()
+        assert config.app_name == "base"
+        assert config.workers == 4
+
+    @pytest.mark.parametrize(
+        ("tenant_value", "bait_files"),
+        [
+            # Charset violation: a valid Linux filename the guard must reject.
+            ("ali^yun", {"application-ali^yun.yaml": "workers: 99\n"}),
+            # Path traversal: an unguarded join resolves
+            # configs/application-../../evil.yaml to configs/evil.yaml, so
+            # plant the literal "application-.." directory plus the evil.yaml
+            # bait — a guard-deleted loader would merge workers: 99.
+            ("../../evil", {"application-..": None, "evil.yaml": "workers: 99\n"}),
+        ],
+    )
+    def test_tenant_value_charset_guard(
+        self, monkeypatch, tmp_path, tenant_value, bait_files
+    ):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "app_name: base\nworkers: 1\nuser_config: {}\n"
+        )
+        # Plant the exact files an UNGUARDED loader needs to load this tenant
+        # overlay: without the charset guard the bait merges and flips workers
+        # to 99, so these assertions pin the guard — not just "no crash".
+        for rel_path, content in bait_files.items():
+            target = config_dir / rel_path
+            if content is None:
+                target.mkdir()
+            else:
+                target.write_text(content)
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.delenv("SERVER_ENV", raising=False)
+        monkeypatch.delenv("COMMUNITY_DEPLOY", raising=False)
+        monkeypatch.setenv("BAAS_DEPLOY_TENANT", tenant_value)
+        from secbaas.community.config import ConfigLoader
+
+        # The invalid tenant is rejected no matter what bait is planted:
+        # no filesystem escape, no overlay load — base values survive.
+        config = ConfigLoader.load()
+        assert config.app_name == "base"
+        assert config.workers == 1
+
+
 class TestEnvInterpolation:
     """Tests for `${NAME}` (and `${NAME:-default}`) placeholder expansion."""
 
@@ -338,3 +463,102 @@ class TestGetConfig:
 
         config = get_config(strict=False)
         assert config.user_config["secret"] == "${REQUIRED_VAR}"
+
+
+class TestAliyunOverlayStrictContract:
+    """Strict ${VAR} contract of the shipped configs/application-aliyun.yaml.
+
+    Exercises the REAL overlay file in the community config tree (not a
+    hand-written tmp copy): full expansion under BAAS_DEPLOY_TENANT=aliyun,
+    fail-closed KeyError when a referenced placeholder variable is missing,
+    and unreachability (base "stub" values win) when the tenant is unset.
+    """
+
+    def _isolate_loader_env(self, monkeypatch):
+        """Clear loader selectors and point at the real configs/ directory."""
+        from pathlib import Path
+
+        config_dir = Path(__file__).resolve().parents[3] / "configs"
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.delenv("SERVER_ENV", raising=False)
+        monkeypatch.delenv("COMMUNITY_DEPLOY", raising=False)
+        monkeypatch.delenv("BAAS_DEPLOY_TENANT", raising=False)
+        for name in (
+            "FT_OSS_ENDPOINT",
+            "FT_OSS_EXTERNAL_ENDPOINT",
+            "FT_OSS_BUCKET",
+            "FT_OSS_STAGING_ROOT",
+            "FT_PROXY_BASE_URL",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+
+    def test_aliyun_overlay_full_expansion(self, monkeypatch):
+        """All 8 variables set: the real overlay merges and expands fully."""
+        from secbaas.community.config import ConfigLoader
+
+        self._isolate_loader_env(monkeypatch)
+        monkeypatch.setenv("BAAS_DEPLOY_TENANT", "aliyun")
+        monkeypatch.setenv("FT_OSS_ENDPOINT", "https://oss-cn-hangzhou.aliyuncs.com")
+        monkeypatch.setenv(
+            "FT_OSS_EXTERNAL_ENDPOINT", "https://oss-cn-hangzhou-ext.aliyuncs.com"
+        )
+        monkeypatch.setenv("FT_OSS_BUCKET", "my-bucket")
+        monkeypatch.setenv("FT_OSS_STAGING_ROOT", "baas-file-transfer")
+        monkeypatch.setenv("FT_PROXY_BASE_URL", "https://bff.example.com")
+
+        config = ConfigLoader.load()
+        plugins = config.user_config["plugins"]
+        assert plugins["file_transfer"] == "real"
+        assert plugins["session_file_url_projector"] == "aliyun_ack"
+        assert config.user_config["env"]["deploy_tenant"] == "aliyun"
+        oss = config.user_config["file_transfer_oss_aliyun"]
+        assert oss["endpoint"] == "https://oss-cn-hangzhou.aliyuncs.com"
+        assert oss["external_endpoint"] == "https://oss-cn-hangzhou-ext.aliyuncs.com"
+        assert oss["bucket_name"] == "my-bucket"
+        assert oss["staging_root_path"] == "baas-file-transfer"
+        assert (
+            config.user_config["session_file_url_proxy"]["proxy_base_url"]
+            == "https://bff.example.com"
+        )
+
+    def test_aliyun_overlay_missing_var_raises_keyerror(self, monkeypatch):
+        """A strict placeholder unset: load() fails closed with KeyError."""
+        from secbaas.community.config import ConfigLoader
+
+        self._isolate_loader_env(monkeypatch)
+        monkeypatch.setenv("BAAS_DEPLOY_TENANT", "aliyun")
+        monkeypatch.setenv("FT_OSS_ENDPOINT", "https://oss-cn-hangzhou.aliyuncs.com")
+        monkeypatch.setenv(
+            "FT_OSS_EXTERNAL_ENDPOINT", "https://oss-cn-hangzhou-ext.aliyuncs.com"
+        )
+        # FT_OSS_BUCKET deliberately left unset: the placeholder has no
+        # ":-default" fallback, so startup fails before any service runs.
+        monkeypatch.setenv("FT_OSS_STAGING_ROOT", "baas-file-transfer")
+        monkeypatch.setenv("FT_PROXY_BASE_URL", "https://bff.example.com")
+
+        with pytest.raises(KeyError, match="FT_OSS_BUCKET"):
+            ConfigLoader.load()
+
+    def test_aliyun_overlay_unreachable_without_tenant(self, monkeypatch):
+        """Tenant unset: the overlay file is unreachable — base stub wins."""
+        from secbaas.community.config import ConfigLoader
+
+        self._isolate_loader_env(monkeypatch)
+        # The reference variables are set but must not matter: without
+        # BAAS_DEPLOY_TENANT the overlay is never loaded, so it cannot leak
+        # aliyun values into the main-site config.
+        monkeypatch.setenv("FT_OSS_ENDPOINT", "https://oss-cn-hangzhou.aliyuncs.com")
+        monkeypatch.setenv(
+            "FT_OSS_EXTERNAL_ENDPOINT", "https://oss-cn-hangzhou-ext.aliyuncs.com"
+        )
+        monkeypatch.setenv("FT_OSS_BUCKET", "my-bucket")
+        monkeypatch.setenv("FT_OSS_STAGING_ROOT", "baas-file-transfer")
+        monkeypatch.setenv("FT_PROXY_BASE_URL", "https://bff.example.com")
+
+        config = ConfigLoader.load()
+        plugins = config.user_config["plugins"]
+        assert plugins["file_transfer"] == "stub"
+        assert plugins["session_file_url_projector"] == "stub"
+        assert config.user_config["file_transfer_oss_aliyun"]["endpoint"] == ""
+        assert config.user_config["session_file_url_proxy"]["proxy_base_url"] == ""

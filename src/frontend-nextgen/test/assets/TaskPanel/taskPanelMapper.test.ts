@@ -507,8 +507,12 @@ describe('taskPanelMapper root output dimensions (产物输出处理)', () => {
           status: 'DONE',
           run_info: {
             output: {
-              投放实施计划: { summary: '店庆投放实施计划摘要' },
-              阶段性结果: { summary: '新客到店 1500、券核销 1000' },
+              result: {
+                summary:
+                  '投放实施执行报告:体验券分批投放 50 张、传单 3 公里覆盖、展位布置、社群定时推送;护理套餐放量与扩产能待审批;低价引流款挂起;到店核销去重工具缺口转 BBS 研发接力。',
+                random: '432251',
+              },
+              handoff: { summary: '不应作为最终产物输出的 handoff 重复内容', random: '432251' },
             },
           },
           task_spec: {
@@ -521,12 +525,16 @@ describe('taskPanelMapper root output dimensions (产物输出处理)', () => {
     } as unknown as TaskDashboardResponse;
 
     const task = mapDashboard(dashboard);
-    // 维度来自「投放实施」节点 output，而非根节点
-    expect(task.rootOutputDimensions?.map((d) => d.key)).toEqual(['投放实施计划', '阶段性结果']);
-    expect(task.rootOutputDimensions?.[0].content).toBe('店庆投放实施计划摘要');
-    // 渲染源取自「投放实施」节点，不含根节点概览
-    expect(task.rootOutputRender).toContain('店庆投放实施计划摘要');
+    // 产物定制:投放实施节点 output 仅取 `result` 维度,过滤 handoff 等非 result 顶层字段
+    expect(task.rootOutputDimensions?.map((d) => d.key)).toEqual(['result']);
+    expect(task.rootOutputDimensions?.[0].content).toBe(
+      '投放实施执行报告:体验券分批投放 50 张、传单 3 公里覆盖、展位布置、社群定时推送;护理套餐放量与扩产能待审批;低价引流款挂起;到店核销去重工具缺口转 BBS 研发接力。',
+    );
+    expect(task.rootOutputDimensions?.some((d) => d.key === 'handoff')).toBe(false);
+    // 渲染源也收敛到 `result` 维度内容,不含根节点概览、也不带出 handoff
+    expect(task.rootOutputRender).toContain('投放实施执行报告');
     expect(task.rootOutputRender).not.toContain('根节点产出概览');
+    expect(task.rootOutputRender).not.toContain('handoff');
   });
 });
 

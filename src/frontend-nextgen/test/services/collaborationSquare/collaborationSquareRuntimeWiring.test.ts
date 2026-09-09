@@ -209,7 +209,9 @@ describe('collaboration square BOT runtime wiring', () => {
     ).resolves.toEqual({ sessionId: 'session-real-1' });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe('/openapi/v1/bots/bot-real-1/sessions?user_id=327325&owner_id=2088');
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/openapi/v1/bots/bot-real-1/sessions?user_id=327325&owner_id=2088&f_user_id=327325',
+    );
     expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({ method: 'POST', body: '{}' }));
     expect(
       fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) =>

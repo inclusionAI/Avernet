@@ -30,7 +30,12 @@ import { useSessionMembers } from '@/pages/GroupChat/hooks/useSessionMembers';
 import { cn } from '@/utils/utils';
 import { EyeOff, Mic, MicOff, Plus, User, X } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
-import type { GroupInfo, GroupSession, ParticipantMode } from '../../types';
+import type {
+  GroupInfo,
+  GroupSession,
+  MessageViewScope,
+  ParticipantMode,
+} from '../../types';
 
 interface SessionMembersSectionProps {
   session: GroupSession;
@@ -47,6 +52,7 @@ interface DisplayMember {
   avatar?: string;
   botUuid?: string;
   mode?: ParticipantMode;
+  messageViewScope?: MessageViewScope;
   role?: string;
   isOwner: boolean;
   isMaster: boolean;
@@ -81,7 +87,12 @@ const SessionMembersSection: React.FC<SessionMembersSectionProps> = ({
   isOwner,
   onClickAddMember,
 }) => {
-  const { removeSessionMember, isRemoving } = useSessionMembers();
+  const {
+    removeSessionMember,
+    updateSessionMemberScope,
+    isRemoving,
+    isUpdatingScope,
+  } = useSessionMembers();
   const [pendingRemove, setPendingRemove] = useState<DisplayMember | null>(
     null,
   );
@@ -120,6 +131,7 @@ const SessionMembersSection: React.FC<SessionMembersSectionProps> = ({
         avatar: matched?.avatar,
         botUuid: matched?.botUuid,
         mode: sm.mode,
+        messageViewScope: sm.messageViewScope,
         role: sm.role,
         isOwner,
         isMaster,
@@ -192,6 +204,39 @@ const SessionMembersSection: React.FC<SessionMembersSectionProps> = ({
                     主节点
                   </span>
                 )}
+                {m.actorKind === 'human' && isOwner ? (
+                  <select
+                    aria-label={`设置 ${m.name} 的会话消息视角`}
+                    value={m.messageViewScope || 'full'}
+                    disabled={isUpdatingScope}
+                    onChange={(event) => {
+                      void updateSessionMemberScope(
+                        session.sessionId,
+                        m.actorId,
+                        event.target.value as MessageViewScope,
+                      );
+                    }}
+                    className="h-6 rounded-md border border-slate-200 bg-white px-1 text-[10px] text-slate-600 disabled:cursor-wait disabled:opacity-50"
+                    title="当前会话的有效消息视角，可用于游戏准入判断"
+                  >
+                    <option value="full">完整视角</option>
+                    <option value="participant">参与者视角</option>
+                  </select>
+                ) : m.actorKind === 'human' ? (
+                  <span
+                    className={cn(
+                      'inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium flex-shrink-0',
+                      m.messageViewScope === 'participant'
+                        ? 'bg-emerald-50 text-emerald-600'
+                        : 'bg-orange-50 text-orange-600',
+                    )}
+                    title="当前会话的有效消息视角，可用于游戏准入判断"
+                  >
+                    {m.messageViewScope === 'participant'
+                      ? '参与者视角'
+                      : '完整视角'}
+                  </span>
+                ) : null}
                 {m.isWorker && (
                   <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-slate-100 text-slate-500 flex-shrink-0">
                     从节点

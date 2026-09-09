@@ -18,13 +18,14 @@ Captured invariants (reviewer S2):
 """
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from engine.community.core.engine.capability import Capability, EngineCapabilities
 from engine.community.core.engine.protocol import Engine
-from engine.community.engines.openclaw.engine import OpenClawEngine
+from engine.community.engines.openclaw.engine import OPENCLAW_CLI_DIR, OpenClawEngine
 
 # ── Golden snapshot of OpenClaw's declared capabilities (pre-F2). ──
 # An INDEPENDENT copy — asserting against this (not against the engine's own
@@ -97,6 +98,12 @@ GOLDEN_SUPPORTED = frozenset({
     Capability.DEFAULT_CONFIG_GET,
     # Web shell
     Capability.WEB_SHELL_OPEN,
+    # CLI tools (W9) — model-callable binaries placed by a config manifest.
+    Capability.CLI_INSTALL,
+    Capability.CLI_DELETE,
+    Capability.CLI_LIST,
+    Capability.CLI_REPLACE,
+    Capability.CLI_DOWNLOAD,
 })
 GOLDEN_LIMITED = frozenset({Capability.MCP_START, Capability.MCP_STOP})
 
@@ -225,3 +232,26 @@ class TestInjectionSeams:
         engine = OpenClawEngine(client=_fake_client(), pool=pool)
         await engine.shutdown()
         pool.shutdown.assert_not_awaited()
+
+
+class TestCliToolsBinding:
+    """W9. The service is bound, and it is *this* engine's directory."""
+
+    def test_cli_tools_service_is_assigned(self):
+        engine = OpenClawEngine(client=_fake_client())
+
+        assert engine.cli_tools is not None
+
+    def test_the_tool_directory_is_the_deployments_constant(self):
+        """A literal, not derived — the deployment owns this location."""
+        engine = OpenClawEngine(client=_fake_client())
+
+        assert engine.cli_tools._dir() == Path("/home/admin/.openclaw/cli")
+
+    def test_claude_code_keeps_its_own_tree(self):
+        """`.aicoding`, confirmed with the deployment owners — not this
+        engine's tree, and not `.claude_code` either."""
+        from engine.community.engines.claude_code.engine import CLAUDE_CODE_CLI_DIR
+
+        assert CLAUDE_CODE_CLI_DIR == Path("/home/admin/.aicoding/cli")
+        assert CLAUDE_CODE_CLI_DIR != OPENCLAW_CLI_DIR

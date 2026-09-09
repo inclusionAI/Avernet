@@ -3,11 +3,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_service_api::application::v1::{
     ActorKind, ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity,
-    AuthorizeGroupSessionConnection, AuthorizedGroupSessionConnection, GetSession,
-    GroupSessionConnectionBinding, GroupSessionConnectionError, GroupSessionConnectionService,
-    IssueGroupSessionConnectionToken, IssuedGroupSessionConnectionToken, ParticipantMode,
-    SessionService, VerifyGroupSessionConnectionToken, GROUP_SESSION_WS_TOKEN_TTL_SECONDS,
-    require_authenticated_user,
+    AuthorizeGroupSessionConnection, AuthorizedGroupSessionConnection,
+    GROUP_SESSION_WS_TOKEN_TTL_SECONDS, GetSession, GroupSessionConnectionBinding,
+    GroupSessionConnectionError, GroupSessionConnectionService, IssueGroupSessionConnectionToken,
+    IssuedGroupSessionConnectionToken, ParticipantMode, SessionService,
+    VerifyGroupSessionConnectionToken, require_authenticated_user,
 };
 use bcs_service_api::port::{
     GroupSessionTokenError, GroupSessionTokenPort, GroupSessionTokenScope,
@@ -21,10 +21,7 @@ pub struct GroupSessionConnectionServiceImpl {
 }
 
 impl GroupSessionConnectionServiceImpl {
-    pub fn new(
-        sessions: Arc<dyn SessionService>,
-        tokens: Arc<dyn GroupSessionTokenPort>,
-    ) -> Self {
+    pub fn new(sessions: Arc<dyn SessionService>, tokens: Arc<dyn GroupSessionTokenPort>) -> Self {
         Self { sessions, tokens }
     }
 }

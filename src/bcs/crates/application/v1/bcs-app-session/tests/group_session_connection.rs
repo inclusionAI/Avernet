@@ -100,6 +100,7 @@ impl SessionService for FakeSessionService {
                     role: ParticipantRole::Driver,
                     tags: Vec::new(),
                     mode: ParticipantMode::Auto,
+                    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                     joined_at: None,
                 };
                 Ok(session)
@@ -268,6 +269,7 @@ fn session_detail(session_id: &str, group_id: &str) -> SessionDetail {
             role: ParticipantRole::Consultant,
             tags: Vec::new(),
             mode: ParticipantMode::Present,
+            message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
             joined_at: None,
         }],
         caller_principal: None,

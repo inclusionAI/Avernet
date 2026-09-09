@@ -8,7 +8,7 @@ export interface Identity {
   kind: 'user' | 'bot';
   avatar: string;
   status?: 'available' | 'unavailable';
-  /** Bot 实例运行状态：online→在线，hidden→不在线。 */
+  /** Bot 实例运行状态：online→在线，hidden→离线。 */
   chatStatus?: IdentityStatus;
   /** Bot 所使用的引擎类型；后端未返回时保持缺省。 */
   engine?: string;

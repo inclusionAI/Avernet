@@ -91,6 +91,10 @@ describe('Open Core default capabilities', () => {
     expect(defaultCapabilities.getBotSkillPickerSources()).toEqual({ status: 'available', value: ['mine'] });
   });
 
+  test('Open Core / 阿里云隐藏 MCP 添加能力', () => {
+    expect(defaultCapabilities.getBotMcpPickerEnabled()).toEqual({ status: 'available', value: false });
+  });
+
   test('getProductBrand 默认 Avernet（横版 wordmark + 方版 mark 视觉组件）', () => {
     const r = defaultCapabilities.getProductBrand();
     expect(r.status).toBe('available');
@@ -124,8 +128,12 @@ describe('Open Core default capabilities', () => {
     });
   });
 
-  test('getRestrictedPublicationScopeEnabled 默认 false（Open Core 隐藏限制组织范围）', () => {
+  test('getRestrictedPublicationScopeEnabled 默认 false（Open Core 隐藏限定组织可申请）', () => {
     expect(defaultCapabilities.getRestrictedPublicationScopeEnabled()).toEqual({ status: 'available', value: false });
+  });
+
+  test('getPartialFriendApprovalEnabled 默认 false（Open Core 隐藏部分组织免审批）', () => {
+    expect(defaultCapabilities.getPartialFriendApprovalEnabled()).toEqual({ status: 'available', value: false });
   });
 
   test('getShellVisibility 默认 adminEntry/notificationBell=true、spaceSwitcher=false（Open Core 展示管理后台与通知中心，不展示空间切换器）', () => {

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 
 use crate::types::{
     EventActor, Group, GroupKind, GroupMessage, GroupMutableFieldsPatch, GroupStatus, Participant,
-    ParticipantMode, RoutingPolicy, ServiceResult, ServiceSpec, Workspace,
+    MessageViewScope, ParticipantMode, RoutingPolicy, ServiceResult, ServiceSpec, Workspace,
 };
 
 use super::AppendEventRecord;
@@ -33,6 +33,11 @@ pub enum GroupEventfulMutation {
     UpdateParticipantMode {
         actor_id: String,
         mode: ParticipantMode,
+    },
+    UpdateParticipantMessageViewScope {
+        actor_id: String,
+        message_view_scope: MessageViewScope,
+        mode: Option<ParticipantMode>,
     },
     UpdateRoutingPolicy(RoutingPolicy),
     UpdateServiceSpec(Option<ServiceSpec>),
@@ -108,6 +113,12 @@ pub trait GroupRepoPort: Send + Sync {
         group_id: &str,
         actor_id: &str,
         mode: ParticipantMode,
+    ) -> ServiceResult<()>;
+    async fn update_participant_message_view_scope(
+        &self,
+        group_id: &str,
+        actor_id: &str,
+        message_view_scope: MessageViewScope,
     ) -> ServiceResult<()>;
     async fn update_workspace(&self, id: &str, workspace: Workspace) -> ServiceResult<()>;
     async fn update_label(&self, id: &str, label: Option<String>) -> ServiceResult<()>;

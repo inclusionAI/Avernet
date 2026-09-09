@@ -101,6 +101,17 @@ class MappingItemResult:
     code: str | None = None
     retryable: bool = False
     action: str = "APPLY"
+    mapping: PoolSkillMapping | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MappingApplyResult:
+    """One steady-state logical Mapping apply result."""
+
+    status: MappingProjectionStatus
+    items: tuple[MappingItemResult, ...] = ()
+    issues: tuple[MappingItemResult, ...] = ()
+    evidence: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +180,7 @@ __all__ = [
     "PoolCutoverResult",
     "PoolCutoverStatus",
     "MappingApplyMode",
+    "MappingApplyResult",
     "MappingItemResult",
     "MappingProjectionStatus",
     "MappingPublishResult",

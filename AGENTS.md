@@ -325,7 +325,7 @@ marked as TODO.
 
 Before changing Skills management, publication, mounting, or runtime
 activation, read
-`src/backend/src/agentclaw/community/adapters/http/skill_center/CLAUDE.md`.
+`src/backend/src/agentclaw/community/core/skill_center/AGENTS.md`.
 
 - `skills-repo` and `skills-local` are complete content stores. An active
   Skills directory must expose only the Skills explicitly activated for the
@@ -336,6 +336,19 @@ activation, read
 - Treat a `center://` source as a governed, versioned content source. A source
   prefix alone is not evidence that publication, distribution, and activation
   have completed.
+
+## Agent skills
+
+### Issue tracker
+
+Work items live in GitHub Issues for `inclusionAI/Avernet`. See
+`docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Avernet uses a multi-context domain-document layout. Start at
+`CONTEXT-MAP.md`; it identifies the relevant glossary, ADRs, and module-local
+context for the work. See `docs/agents/domain.md`.
 
 # Code Review
 

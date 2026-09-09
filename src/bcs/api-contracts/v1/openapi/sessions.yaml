@@ -32,6 +32,15 @@ CreateSessionRequest:
         - manager
         - worker
         - observer
+    message_view_scope:
+      allOf:
+        - $ref: ../domain-models.yaml#/MessageViewScope
+      description: >-
+        Optional Session-level message projection for the authenticated Human
+        participant inserted or inherited while creating this Session. An
+        explicit value overrides the Group default for this Session. When
+        omitted, an existing Group Human inherits its Group value and a
+        session-only Human keeps the backward-compatible full default.
     input:
       $ref: ../domain-models.yaml#/SessionInput
     meta:
@@ -47,6 +56,8 @@ SessionParticipantInput:
   properties:
     bot_uuid:
       type: string
+    message_view_scope:
+      $ref: ../domain-models.yaml#/MessageViewScope
 
 SessionParticipantActorIdPath:
   name: bot_uuid
@@ -74,6 +85,8 @@ UpdateSessionParticipantRequest:
   properties:
     mode:
       $ref: ../domain-models.yaml#/SessionParticipantMode
+    message_view_scope:
+      $ref: ../domain-models.yaml#/MessageViewScope
 
 CollectSessionRequest:
   type: object
@@ -647,7 +660,7 @@ AddSessionParticipantPath:
   post:
     operationId: add_session_participant
     tags: ["Collaboration / Sessions"]
-    summary: Add a Bot as a Session participant.
+    summary: Add a Human or Bot as a Session participant.
     x-avernet-security:
       user: required
       app: required
@@ -671,6 +684,7 @@ AddSessionParticipantPath:
         x-error-codes:
           - invalid_request
           - invalid_participant
+          - invalid_message_view_scope
         content:
           application/json:
             schema:
@@ -731,7 +745,7 @@ SessionParticipantPath:
   patch:
     operationId: update_session_participant
     tags: ["Collaboration / Sessions"]
-    summary: Update a Session participant mode.
+    summary: Update a Session participant mode or Human message view scope.
     x-avernet-security:
       user: required
       app: required
@@ -756,6 +770,7 @@ SessionParticipantPath:
         x-error-codes:
           - invalid_request
           - invalid_participant_mode
+          - invalid_message_view_scope
         content:
           application/json:
             schema:
@@ -770,12 +785,12 @@ SessionParticipantPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
         description: >-
-          A Human caller may only update its own present/absent mode and must be
-          able to read the Session. Bot participant modes require Session
-          management authority through the Session creator or a parent Group
-          driver, originator, or ManagerWorker manager participant.
+          A Human may update its own mode and message view scope. A Session
+          manager may set another Human participant's scope; Bot participant
+          modes require Session management authority.
         x-error-codes:
           - forbidden
+          - message_view_scope_forbidden
         content:
           application/json:
             schema:

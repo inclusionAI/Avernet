@@ -493,20 +493,24 @@ export const GroupSessionView: React.FC<{
     setError(null);
     setNoMessagePermission(false);
     // group_id 非空（群执行）→ 查群成员（预发 OpenAPI；传入 bcsBaseUrl 时兼容 BCS raw）
-    // group_id 空（单 bot）→ bot 信息由后端 dashboard 返回（待实现），本地用 node executor 兜底
+    // group_id 空时（单 bot，或群信息缺失）：本地用节点执行者兜底合成一条成员。
+    // 后端 dashboard 返回单 bot 信息尚未实现；不兜底会导致单 bot（根节点）下钻「执行者（0）」错显。
+    const fallbackName = node.executor ?? node.assigneeName ?? assignee ?? null;
+    const fallbackActorId = assignee ?? node.assigneeName ?? node.executor ?? '';
     const memberPromise = groupId
       ? fetchGroupDetail(groupId, bcsBaseUrl)
       : Promise.resolve(
-          isGroup && assignee
+          fallbackName || fallbackActorId
             ? {
                 group_id: '',
-                name: node.executor ?? assignee,
+                name: fallbackName ?? fallbackActorId,
                 status: 'active',
                 participants: [
                   {
-                    actor_id: assignee,
+                    actor_id: fallbackActorId,
                     actor_kind: 'bot',
-                    name: node.executor ?? assignee,
+                    name: fallbackName ?? fallbackActorId,
+                    // 群兜底走执行侧；单 bot 是会话 owner，统一标 worker，与顶部「执行者」分区语义一致。
                     role: 'worker',
                     mode: 'auto',
                   },
@@ -526,12 +530,12 @@ export const GroupSessionView: React.FC<{
         const effectiveUserId = resolveCurrentUserId(userId);
         const ownedViewBot = isGroup ? resolveOwnedViewBot(g?.participants ?? [], effectiveUserId) : null;
         const groupViewBotId = isGroup ? ownedViewBot?.actor_id ?? null : null;
-        // 单聊会话归属人(session_id 里的 :user:xxx,即 bot owner);与当前登录人不符 → 跨用户,无权查看。
-        const singleSessionUser = !isGroup ? sessionId.match(/:user:([^:]+)$/)?.[1] ?? '' : '';
-        const crossUserSingle =
-          !isGroup && singleSessionUser !== '' && Boolean(effectiveUserId) && singleSessionUser !== effectiveUserId;
+        // 消息可见性统一交后端裁决,不在客户端凭 session_id 的 :user: 与登录人做预判:
+        // session_id 的 :user: 段是 engine 会话归属(BaaS bot owner 侧 id),与当前登录人工号
+        // 不一定同名(同属一人但 id 编码可能不同);static_plan 根节点等单聊会话虽为本人 Bot 所有,
+        // :user: 段也常 ≠ 登录工号 → 旧预判会误判跨用户、拒看本人会话消息(根节点下钻无法查看 bug)。
         // 协作群:有本人 bot → 带 view_bot_id;无本人 bot 但有登录人(Human 视角) → 省略 view_bot_id 仍尝试。
-        const canViewMessages = isGroup ? Boolean(groupViewBotId) || Boolean(effectiveUserId) : !crossUserSingle;
+        const canViewMessages = isGroup ? Boolean(groupViewBotId) || Boolean(effectiveUserId) : true;
         let msgs: GroupMessage[] = [];
         let noMessagePerm = !canViewMessages;
         if (canViewMessages) {
@@ -546,11 +550,20 @@ export const GroupSessionView: React.FC<{
           } catch (err) {
             if (cancelled) return;
             const msg = err instanceof Error ? err.message : '会话消息请求失败';
-            // Human 非该 Session participant → 403;转为无权限提示,群成员仍展示;其余错误外抛为加载失败。
-            if (isGroup && /（403）|forbidden/i.test(msg)) {
-              noMessagePerm = true;
+            // 后端按会话归属人圈定可见性:群为 participant 名册校验、单聊为按 owner 圈定的 bot 查找范围。
+            // 登录人无权 → 403;单聊跨用户他人 Bot → 404。统一转无权限提示(群成员/执行者仍展示);其余错误外抛。
+            if (isGroup) {
+              if (/（403）|forbidden/i.test(msg)) {
+                noMessagePerm = true;
+              } else {
+                throw err;
+              }
             } else {
-              throw err;
+              if (/（403）|（404）|forbidden|not found/i.test(msg)) {
+                noMessagePerm = true;
+              } else {
+                throw err;
+              }
             }
           }
         }

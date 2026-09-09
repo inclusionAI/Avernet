@@ -23,6 +23,18 @@ class ConfigLoader:
     # SERVER_ENV, so a community stack and an internal SERVER_ENV deployment
     # can coexist without fighting over one overlay naming scheme.
     ENV_COMMUNITY_DEPLOY = "COMMUNITY_DEPLOY"
+    # Deploy-tenant overlay: when set, its value names the
+    # application-<value>.yaml overlay (e.g. BAAS_DEPLOY_TENANT=aliyun loads
+    # application-aliyun.yaml). Merged after the SERVER_ENV/COMMUNITY_DEPLOY
+    # layer so tenant-specific settings win over the env overlay. Note that
+    # load() merges an explicitly-set SOFAPY_CONFIG_OVERLAY after this layer,
+    # so that explicit overlay still merges last and wins.
+    ENV_DEPLOY_TENANT = "BAAS_DEPLOY_TENANT"
+
+    # A tenant value becomes an application-{tenant}.yaml filename component,
+    # so path separators, traversal and any charset outside this pattern are
+    # rejected (T-g63-01) — the overlay is skipped with a warning instead.
+    DEPLOY_TENANT_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
 
     # Placeholder syntax: ${NAME} or ${NAME:-default} (shell / k8s / envsubst
     # style). ${NAME:-} yields an empty string; a placeholder that references an
@@ -70,6 +82,19 @@ class ConfigLoader:
             env_data = cls._load_yaml_file(env_path)
             if env_data:
                 base = Config.merge_configs(base, env_data)
+        tenant = os.getenv(cls.ENV_DEPLOY_TENANT, "")
+        if tenant:
+            if not cls.DEPLOY_TENANT_PATTERN.fullmatch(tenant):
+                logger.warning(
+                    "Deploy tenant value %r does not match %s — tenant overlay skipped",
+                    tenant,
+                    cls.DEPLOY_TENANT_PATTERN.pattern,
+                )
+            else:
+                tenant_path = os.path.join(config_dir, f"application-{tenant}.yaml")
+                tenant_data = cls._load_yaml_file(tenant_path)
+                if tenant_data:
+                    base = Config.merge_configs(base, tenant_data)
         return base
 
     @classmethod

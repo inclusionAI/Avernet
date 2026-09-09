@@ -8,3 +8,4 @@ pub mod group;
 pub mod invitation;
 pub mod register;
 pub mod session;
+pub mod invite_code;

@@ -291,8 +291,28 @@ async def test_chat_stream_discards_early_final_when_followup_run_arrives(monkey
 
 
 @pytest.mark.asyncio
-async def test_chat_stream_accepts_immediate_followup_after_early_final(monkeypatch):
-    monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "1")
+@pytest.mark.parametrize(
+    "request_key,event_key,accept_followup",
+    [
+        ("sk-1", "sk-1", True),
+        ("session:step:user:123", "agent:main:session:step:user:123", True),
+        ("agent:main:session:step:user:123", "session:step:user:123", True),
+        ("session:STEP-ABC:user:AbC", "agent:main:session:step-abc:user:abc", True),
+        ("agent:main:session:STEP:user:AbC", "agent:main:session:step:user:abc", True),
+        (" session:STEP:user:123 ", " Agent:Main:session:step:user:123 ", True),
+        ("session:step:user:123", "agent:other:session:step:user:123", False),
+        ("agent:other:session:step:user:123", "agent:main:session:step:user:123", False),
+        ("session:step:user:123", "agent:main:session:other:user:123", False),
+        ("session:step:user:123", "agent:main:session:step:user:456", False),
+        ("session:step:user:123", "agent:main:session:step:user:1234", False),
+        ("session:step:user:123", None, False),
+        ("session:step:user:123", 123, False),
+    ],
+)
+async def test_chat_stream_accepts_immediate_followup_after_early_final(
+    monkeypatch, request_key, event_key, accept_followup
+):
+    monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0.01")
     client = _make_client()
 
     async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
@@ -300,7 +320,7 @@ async def test_chat_stream_accepts_immediate_followup_after_early_final(monkeypa
             client,
             "chat",
             {
-                "sessionKey": "sk-1",
+                "sessionKey": request_key,
                 "runId": "expected-run",
                 "state": "final",
                 "seq": 1,
@@ -310,7 +330,7 @@ async def test_chat_stream_accepts_immediate_followup_after_early_final(monkeypa
             client,
             "agent",
             {
-                "sessionKey": "sk-1",
+                "sessionKey": event_key,
                 "runId": "followup-run",
                 "stream": "lifecycle",
                 "data": {"phase": "start"},
@@ -321,10 +341,11 @@ async def test_chat_stream_accepts_immediate_followup_after_early_final(monkeypa
             client,
             "chat",
             {
-                "sessionKey": "sk-1",
+                "sessionKey": event_key,
                 "runId": "followup-run",
                 "state": "final",
                 "seq": 2,
+                "message": {"content": [{"type": "text", "text": "real answer"}]},
             },
         )
         return ResponseFrame.ok_response("rid", {"runId": "expected-run"})
@@ -333,14 +354,20 @@ async def test_chat_stream_accepts_immediate_followup_after_early_final(monkeypa
 
     events = await _collect(
         client.chat_stream(
-            session_key="sk-1",
+            session_key=request_key,
             message="hello",
             idempotency_key="expected-run",
         )
     )
 
-    assert [event["runId"] for event in events] == ["followup-run", "followup-run"]
-    assert [event.get("state") for event in events] == [None, "final"]
+    if accept_followup:
+        assert [event["runId"] for event in events] == ["followup-run", "followup-run"]
+        assert [event.get("state") for event in events] == [None, "final"]
+        assert events[-1]["message"]["content"][0]["text"] == "real answer"
+    else:
+        assert [event["runId"] for event in events] == ["expected-run"]
+        assert events[0]["state"] == "final"
+        assert "message" not in events[0]
 
 
 @pytest.mark.asyncio

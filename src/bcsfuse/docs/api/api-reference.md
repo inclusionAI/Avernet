@@ -1252,13 +1252,22 @@ curl http://localhost:8765/v1/workers/my-bot-001/profiles/quality \
 
 ```json
 {
+  "success": true,
   "worker_id": "my-bot-001",
+  "fusion_enable": true,
   "config": {
+    "fusion_enable": true,
     "max_concurrent_tasks": 5,
     "timeout_seconds": 30
-  }
+  },
+  "version": 9,
+  "updated_at": "2026-09-07T03:59:00"
 }
 ```
+
+Successful GET and PUT `/v1/workers/{worker_id}/config` responses include
+`success: true`, including when `fusion_enable` is false. Errors retain their
+non-2xx HTTP status and error response.
 
 **Status Codes:**
 

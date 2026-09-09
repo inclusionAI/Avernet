@@ -73,7 +73,9 @@ async fn upgrade(
     let dispatch = state.dispatch;
     let metrics = state.metrics;
 
-    ws.on_upgrade(move |socket| handle_client_connection(socket, dispatch, auth, metrics))
+    let log_request_id = bcs_observability::current_request_id();
+    ws.on_upgrade(move |socket| bcs_observability::with_request_id(
+        log_request_id, handle_client_connection(socket, dispatch, auth, metrics)))
 }
 
 fn connection_token(raw_query: Option<&str>) -> Option<String> {

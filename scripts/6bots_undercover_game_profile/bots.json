@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "name": "谁是卧底游戏局",
+  "port_start": 30801,
+  "port_step": 10,
+  "scopes": "local,undercover-game,social-deduction,party-game",
+  "bots": [
+    {
+      "source": "referee",
+      "profile": "undercover-referee",
+      "name": "谁是卧底主持人",
+      "summary": "谁是卧底游戏的裁判与主持人，负责随机抽词发牌、按轮编排发言自定义协作、并行收集投票、计票判定出局与胜负，并向人类玩家维护公开游戏面板。",
+      "domains": "undercover-game,social-deduction,party-game,game-hosting,turn-orchestration,state-machine,manager-worker",
+      "skills": "game-hosting,secret-dealing,round-orchestration,speech-collection,vote-tallying,win-condition-judging,game-board-rendering"
+    },
+    {
+      "source": "player-laochen",
+      "profile": "undercover-player-laochen",
+      "name": "玩家稳健老陈",
+      "summary": "谁是卧底玩家，稳健保守型选手，发言短而抽象、先留余地再收口，投票偏向证据最扎实的一票。",
+      "domains": "undercover-game,social-deduction,party-game,word-description,cautious-play",
+      "skills": "one-line-word-description,ambiguity-control,conservative-voting,speech-reading"
+    },
+    {
+      "source": "player-xiaoman",
+      "profile": "undercover-player-xiaoman",
+      "name": "玩家话痨小满",
+      "summary": "谁是卧底玩家，跳跃联想型选手，习惯用生活场景和比喻描述词语，投票凭对场景是否合拍的直觉。",
+      "domains": "undercover-game,social-deduction,party-game,word-description,associative-play",
+      "skills": "one-line-word-description,scene-metaphor,associative-voting,speech-reading"
+    },
+    {
+      "source": "player-hehe",
+      "profile": "undercover-player-hehe",
+      "name": "玩家和事佬阿和",
+      "summary": "谁是卧底玩家，老好人型选手，发言跟随场上共识、不轻易暴露立场，投票倾向跟票并回避冲突。",
+      "domains": "undercover-game,social-deduction,party-game,word-description,consensus-play",
+      "skills": "one-line-word-description,consensus-following,low-risk-voting,speech-reading"
+    },
+    {
+      "source": "player-luoji",
+      "profile": "undercover-player-luoji",
+      "name": "玩家逻辑控林工",
+      "summary": "谁是卧底玩家，逻辑推理型选手，发言用属性和条件描述词语但严格按轮次控制宽窄，投票时在心里走可复核的推理链、票面只交票号。",
+      "domains": "undercover-game,social-deduction,party-game,word-description,deductive-play",
+      "skills": "one-line-word-description,attribute-framing,deductive-voting,speech-reading"
+    },
+    {
+      "source": "player-xijing",
+      "profile": "undercover-player-xijing",
+      "name": "玩家戏精阿浪",
+      "summary": "谁是卧底玩家，情绪带节奏型选手，发言有画面感和表演性，投票敢于第一个指认并制造话题。",
+      "domains": "undercover-game,social-deduction,party-game,word-description,expressive-play",
+      "skills": "one-line-word-description,dramatic-framing,aggressive-voting,speech-reading"
+    }
+  ]
+}

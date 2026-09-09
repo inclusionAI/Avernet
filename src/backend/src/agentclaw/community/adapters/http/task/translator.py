@@ -243,12 +243,18 @@ def translate_bcn(raw: dict) -> TranslatedCallback | None:
     )
 
 def translate_common_task_callback(raw: dict) -> TranslatedCallback | None:
+    # loop_task_id 须组装成 "task_id::node_id"(与 _split_loop_task_id /
+    # router._find_node_status / prompt "callback 内部按 task_id/node_id 组装 loop_task_id" 契约一致);
+    # 仅写 task_id 会让路由终态幂等恢复的 split("::") 抛 ValueError -> 恢复失效,
+    # 真实回投撞终态(如静态 mock 兜底先终结)时误上抛 409 而非 200 idempotent(静态/动态公共)。
+    _task_id = raw.get("task_id")
+    _node_id = raw.get("node_id")
     disposition: Literal["start", "result"] = "result"
     return TranslatedCallback(
         disposition=disposition,
         data=TaskCallbackData(data={
-            "loop_task_id": raw.get("task_id"),
-            "node_id": raw.get("node_id"),
+            "loop_task_id": f"{_task_id}::{_node_id}" if _task_id is not None else "",
+            "node_id": _node_id,
             "workflow_type": "task_loop",
             "workflow_id": 0,
             "instance_id": 0,

@@ -1,4 +1,5 @@
 import type { IdentityView, ParticipantMode, ParticipantView, SessionView } from '@/domain/collaboration';
+import { isSameHumanIdentity } from '@/domain/userIdentity';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -42,6 +43,8 @@ export function useCollabPanel(
   session: SessionView | null,
   activeIdentity: IdentityView | null,
   updateMemberMode: (sessionId: string, actorId: string, mode: ParticipantMode) => Promise<boolean>,
+  authenticatedUserId?: string | null,
+  authenticatedUserName?: string | null,
 ): CollabPanelState {
   const [switchingBotMode, setSwitchingBotMode] = useState(false);
   const [joining, setJoining] = useState(false);
@@ -62,6 +65,21 @@ export function useCollabPanel(
     return isBotViewer && session ? 'auto' : null;
   }, [botParticipant, isBotViewer, session]);
 
+  const identities = useWorkspaceStore((s) => s.identities);
+  const humanIdentity = useMemo(
+    () => identities.find((i) => i.kind === 'user' && !i.id.startsWith('test-')) ?? null,
+    [identities],
+  );
+  const humanIdentityId = authenticatedUserId ?? humanIdentity?.id ?? null;
+  // 加入/退出会话与「去发言」切换身份用的 actor id：必须优先 store 人类身份 id
+  //（= mine 接口 human 条目的 bot_id，形如 human_xxx）。authenticatedUserId 是规范化
+  // OpenAPI user_id（无 human_ 前缀），放进 participants/{actor} 路径参数或
+  // setActiveIdentity（按身份 id 精确匹配）都会落空。匹配会话成员仍用 humanIdentityId
+  //（isSameHumanIdentity 两侧归一化，前缀无关）。
+  const humanActorId = humanIdentity?.id ?? authenticatedUserId ?? null;
+  const humanIdentityName = authenticatedUserName?.trim() || humanIdentity?.displayName || '';
+  const setActiveIdentity = useWorkspaceStore((s) => s.setActiveIdentity);
+
   // 列表接口刷新会暂时把 participants 置空（列表不返回 participants），
   // 用 ref 暂存最近一次非空的 human 成员，避免面板在刷新间隙闪烁消失。
   // 切换身份（如「去发言」）时 session 会短暂变为 null，此时不清空缓存，
@@ -77,37 +95,43 @@ export function useCollabPanel(
     } else if (currentSessionId) {
       lastSessionIdRef.current = currentSessionId;
     }
-    const found = session?.participants.find((p) => p.kind === 'human') ?? null;
+    const found =
+      session?.participants.find(
+        (p) => p.kind === 'human' && isSameHumanIdentity(p.actorId, humanIdentityId, 'human'),
+      ) ?? null;
     if (found) {
       humanRef.current = found;
       return found;
     }
     // participants 暂时为空（列表刷新中/session 为 null），回退到上次缓存的 human 状态。
     return humanRef.current;
-  }, [session]);
+  }, [humanIdentityId, session]);
   const humanJoined = human?.mode === 'present';
   const humanAbsent = human?.mode === 'absent';
-  const humanName = human?.name ?? (activeIdentity?.kind === 'user' ? activeIdentity.displayName : '用户协作身份');
+  const humanName =
+    (human?.name ?? humanIdentityName) ||
+    (activeIdentity?.kind === 'user' ? activeIdentity.displayName : '用户协作身份');
 
-  const identities = useWorkspaceStore((s) => s.identities);
-  const humanIdentityId = useMemo(
-    () => identities.find((i) => i.kind === 'user' && !i.id.startsWith('test-'))?.id ?? null,
-    [identities],
-  );
-  const setActiveIdentity = useWorkspaceStore((s) => s.setActiveIdentity);
+  // 切到用户身份并落到当前群会话。setActiveIdentity 会恢复该身份上次记忆的
+  // 视图/选中态（可能停留在某个单聊页），若不显式覆盖 view 与选中态，
+  // URL 同步 effect 会按恢复结果回填旧单聊，导致跳转落错页面且视图来回闪烁。
+  const openGroupSessionAsHuman = useCallback((target: SessionView) => {
+    const store = useWorkspaceStore.getState();
+    store.setView('group');
+    // 恢复的展开态可能不含目标群，侧栏需展开目标群（与 useWorkspacePage.ensureGroupExpanded 对齐）。
+    if (!store.expandedGroupIds[target.groupId]) store.toggleGroupExpanded(target.groupId);
+    store.selectGroup(target.groupId);
+    store.selectSession(target.sessionId);
+  }, []);
 
   const switchToHuman = useCallback(() => {
-    if (!humanIdentityId) {
+    if (!humanActorId) {
       toast.error('未找到用户身份，请稍后重试');
       return;
     }
-    setActiveIdentity(humanIdentityId);
-    if (session) {
-      const store = useWorkspaceStore.getState();
-      store.selectGroup(session.groupId);
-      store.selectSession(session.sessionId);
-    }
-  }, [humanIdentityId, session, setActiveIdentity]);
+    setActiveIdentity(humanActorId);
+    if (session) openGroupSessionAsHuman(session);
+  }, [humanActorId, openGroupSessionAsHuman, session, setActiveIdentity]);
 
   const setBotMode = useCallback(
     async (mode: 'auto' | 'muted') => {
@@ -124,7 +148,7 @@ export function useCollabPanel(
 
   const joinSession = useCallback(async (): Promise<boolean> => {
     if (!session) return false;
-    const actorId = human?.actorId ?? humanIdentityId;
+    const actorId = human?.actorId ?? humanActorId;
     if (!actorId) {
       toast.error('未找到用户身份，请稍后重试');
       return false;
@@ -133,23 +157,21 @@ export function useCollabPanel(
     try {
       const ok = await updateMemberMode(session.sessionId, actorId, 'present');
       if (ok) {
-        if (humanIdentityId) setActiveIdentity(humanIdentityId);
-        const store = useWorkspaceStore.getState();
-        store.selectGroup(session.groupId);
-        store.selectSession(session.sessionId);
+        if (humanActorId) setActiveIdentity(humanActorId);
+        openGroupSessionAsHuman(session);
       }
       return ok;
     } finally {
       setJoining(false);
     }
-  }, [human, humanIdentityId, session, setActiveIdentity, updateMemberMode]);
+  }, [human, humanActorId, openGroupSessionAsHuman, session, setActiveIdentity, updateMemberMode]);
 
   const leaveSession = useCallback(async (): Promise<boolean> => {
     if (!session) return false;
-    const actorId = human?.actorId ?? humanIdentityId;
+    const actorId = human?.actorId ?? humanActorId;
     if (!actorId) return false;
     return updateMemberMode(session.sessionId, actorId, 'absent');
-  }, [human, humanIdentityId, session, updateMemberMode]);
+  }, [human, humanActorId, session, updateMemberMode]);
 
   // bot 视角恒显;human 视角 absent 时显示加入条;human 视角 present 时显示「在会话中隐身」条。
   const humanAbsentOnly = !isBotViewer && !!session && humanAbsent;
@@ -165,7 +187,7 @@ export function useCollabPanel(
     humanJoined,
     humanName,
     humanAvatarUrl: human?.avatarUrl,
-    canSwitchToHuman: !!humanIdentityId,
+    canSwitchToHuman: !!humanActorId,
     switchingBotMode,
     joining,
     setBotMode,

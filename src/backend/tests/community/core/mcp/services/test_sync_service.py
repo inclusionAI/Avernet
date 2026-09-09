@@ -1092,6 +1092,24 @@ class TestSyncMcpDetailsForBot:
         return [{"server_code": f"mcp.s{i}"} for i in range(n)]
 
     @pytest.mark.asyncio
+    async def test_supplied_device_is_used_for_details_and_removal(self):
+        resolver, dispatcher, plugin = _make_resolver_and_dispatcher()
+        svc = _make_sync_service(resolver=resolver, dispatcher=dispatcher)
+        result = await svc.sync_mcp_details_for_bot(
+            user_id="u1", mcp_entries=self._entries(1), bot_id="bot1", device_sync=plugin
+        )
+        assert result["success"] is True
+        plugin.sync_remove_mcp.return_value = True
+        result = await svc.remove_mcp_detail(
+            user_id="u1", bot_id="bot1", server_code="mcp.old", device_sync=plugin
+        )
+        assert result["success"] is True
+        resolver.resolve_for_bot.assert_not_called()
+        dispatcher.dispatch.assert_not_called()
+        plugin.sync_single_mcp.assert_called_once()
+        plugin.sync_remove_mcp.assert_called_once_with("mcp.old")
+
+    @pytest.mark.asyncio
     async def test_device_is_resolved_once_for_the_whole_batch(self):
         resolver, dispatcher, plugin = _make_resolver_and_dispatcher()
         svc = _make_sync_service(resolver=resolver, dispatcher=dispatcher)

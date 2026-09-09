@@ -13,14 +13,13 @@ use bcs_service_api::application::session_files::{
     SessionFileUseCaseError, ShareMintCommand,
 };
 use bcs_service_api::application::v1::{
-    ApplicationError, CompleteSessionFile, DeleteResult, DeleteSessionFile,
-    DownloadSessionFile, DownloadSharedSessionFile, GetSessionFile, IdentityPolicy,
-    ListSessionFiles, PrepareSessionFile, PrepareSessionFileResult, Principal,
-    SessionFileActor, SessionFileActorKind, SessionFileApplicationService,
-    SessionFileContent, SessionFilePage, SessionFileInternalContentUrlProjector,
-    SessionFileStatus, SessionFileView, ShareSessionFile, ShareSessionFileResult,
-    UPLOAD_COMPLETION_SHARE_TTL_SECONDS, UploadSessionFileContent,
-    UploadSessionFileResult, select_principal,
+    ApplicationError, CompleteSessionFile, DeleteResult, DeleteSessionFile, DownloadSessionFile,
+    DownloadSharedSessionFile, GetSessionFile, IdentityPolicy, ListSessionFiles,
+    PrepareSessionFile, PrepareSessionFileResult, Principal, SessionFileActor,
+    SessionFileActorKind, SessionFileApplicationService, SessionFileContent,
+    SessionFileInternalContentUrlProjector, SessionFilePage, SessionFileStatus, SessionFileView,
+    ShareSessionFile, ShareSessionFileResult, UPLOAD_COMPLETION_SHARE_TTL_SECONDS,
+    UploadSessionFileContent, UploadSessionFileResult, select_principal,
 };
 use bcs_service_api::{
     BotRegistryCoreService, GroupCoreService, ServiceError, SystemMessageService,
@@ -95,17 +94,13 @@ impl SessionFileApplicationServiceImpl {
         session: &Session,
     ) -> Result<bool, ApplicationError> {
         let actor_id = principal.actor_id();
-        if session
-            .participants
-            .iter()
-            .any(|participant| {
-                participant.bot_uuid == actor_id
-                    && match principal {
-                        Principal::Human(_) => participant.is_human(),
-                        Principal::Bot(_) => participant.is_bot(),
-                    }
-            })
-        {
+        if session.participants.iter().any(|participant| {
+            participant.bot_uuid == actor_id
+                && match principal {
+                    Principal::Human(_) => participant.is_human(),
+                    Principal::Bot(_) => participant.is_bot(),
+                }
+        }) {
             return Ok(true);
         }
         let Principal::Human(human) = principal else {
@@ -122,9 +117,7 @@ impl SessionFileApplicationServiceImpl {
         Ok(session
             .participants
             .iter()
-            .any(|participant| {
-                participant.is_bot() && owned.contains(&participant.bot_uuid)
-            }))
+            .any(|participant| participant.is_bot() && owned.contains(&participant.bot_uuid)))
     }
 
     async fn caller_identities(
@@ -330,12 +323,7 @@ impl SessionFileApplicationServiceImpl {
         };
         if let Err(error) = self
             .system_message
-            .notify(
-                &session.group_id,
-                event,
-                &session.id,
-                &session.participants,
-            )
+            .notify(&session.group_id, event, &session.id, &session.participants)
             .await
         {
             tracing::warn!(
@@ -354,7 +342,9 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
         &self,
         command: PrepareSessionFile,
     ) -> Result<PrepareSessionFileResult, ApplicationError> {
-        let (principal, _) = self.load_member(&command.caller, &command.session_id).await?;
+        let (principal, _) = self
+            .load_member(&command.caller, &command.session_id)
+            .await?;
         let result = self
             .files
             .prepare_upload(PrepareUploadCommand {
@@ -378,13 +368,8 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
         &self,
         command: UploadSessionFileContent,
     ) -> Result<UploadSessionFileResult, ApplicationError> {
-        self.authorized_file(
-            &command.caller,
-            &command.session_id,
-            &command.file_id,
-            true,
-        )
-        .await?;
+        self.authorized_file(&command.caller, &command.session_id, &command.file_id, true)
+            .await?;
         self.files
             .stream_upload(
                 &command.session_id,
@@ -406,12 +391,7 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
         command: CompleteSessionFile,
     ) -> Result<SessionFileView, ApplicationError> {
         let (principal, session, _) = self
-            .authorized_file(
-                &command.caller,
-                &command.session_id,
-                &command.file_id,
-                true,
-            )
+            .authorized_file(&command.caller, &command.session_id, &command.file_id, true)
             .await?;
         let file = self
             .files
@@ -434,7 +414,9 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
     }
 
     async fn delete(&self, command: DeleteSessionFile) -> Result<DeleteResult, ApplicationError> {
-        let (principal, session) = self.load_member(&command.caller, &command.session_id).await?;
+        let (principal, session) = self
+            .load_member(&command.caller, &command.session_id)
+            .await?;
         let group = self
             .groups
             .try_get(&session.group_id)
@@ -461,7 +443,8 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
     }
 
     async fn get(&self, command: GetSessionFile) -> Result<SessionFileView, ApplicationError> {
-        self.load_member(&command.caller, &command.session_id).await?;
+        self.load_member(&command.caller, &command.session_id)
+            .await?;
         self.files
             .get(&command.session_id, &command.file_id)
             .await
@@ -470,7 +453,8 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
     }
 
     async fn list(&self, command: ListSessionFiles) -> Result<SessionFilePage, ApplicationError> {
-        self.load_member(&command.caller, &command.session_id).await?;
+        self.load_member(&command.caller, &command.session_id)
+            .await?;
         let page = self
             .files
             .list(
@@ -494,7 +478,8 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
         &self,
         command: DownloadSessionFile,
     ) -> Result<SessionFileContent, ApplicationError> {
-        self.load_member(&command.caller, &command.session_id).await?;
+        self.load_member(&command.caller, &command.session_id)
+            .await?;
         self.content(&command.session_id, &command.file_id, command.show)
             .await
     }
@@ -503,7 +488,9 @@ impl SessionFileApplicationService for SessionFileApplicationServiceImpl {
         &self,
         command: ShareSessionFile,
     ) -> Result<ShareSessionFileResult, ApplicationError> {
-        let (principal, session) = self.load_member(&command.caller, &command.session_id).await?;
+        let (principal, session) = self
+            .load_member(&command.caller, &command.session_id)
+            .await?;
         let result = self
             .files
             .share_mint(ShareMintCommand {
@@ -660,8 +647,7 @@ fn map_session_error(
         SessionUseCaseError::InvalidParams(message) => {
             ApplicationError::invalid("invalid_request", message)
         }
-        SessionUseCaseError::CallbackPending(message)
-        | SessionUseCaseError::Conflict(message) => {
+        SessionUseCaseError::CallbackPending(message) | SessionUseCaseError::Conflict(message) => {
             ApplicationError::conflict("conflict", message)
         }
         SessionUseCaseError::Internal(error) => map_service_error(error),
@@ -670,9 +656,10 @@ fn map_session_error(
 
 fn map_service_error(error: ServiceError) -> ApplicationError {
     match error {
-        ServiceError::SessionNotFound(id) => {
-            ApplicationError::not_found("session_not_found", format!("Session '{id}' was not found"))
-        }
+        ServiceError::SessionNotFound(id) => ApplicationError::not_found(
+            "session_not_found",
+            format!("Session '{id}' was not found"),
+        ),
         ServiceError::GroupNotFound(id) => {
             ApplicationError::not_found("group_not_found", format!("Group '{id}' was not found"))
         }
@@ -706,9 +693,9 @@ fn human_readable_size(bytes: u64) -> String {
 
 #[cfg(test)]
 mod shared_error_tests {
+    use bcs_service_api::ServiceError;
     use bcs_service_api::application::session_files::SessionFileUseCaseError;
     use bcs_service_api::application::v1::ApplicationError;
-    use bcs_service_api::ServiceError;
 
     use super::{map_shared_content_error, map_shared_file_error};
 

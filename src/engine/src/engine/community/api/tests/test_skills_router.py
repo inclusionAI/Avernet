@@ -8,9 +8,13 @@ dispatch contract: calls land on `manager.skills.*`, the capability guard
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from engine.community.api.skills.router import (
     _mapping_command,
 )
@@ -37,9 +41,11 @@ from engine.community.core.skills.models import (
     PoolLayoutProbeResult,
     PoolLayoutProbeStatus,
     PoolMappingApplyMode,
+    PoolMappingApplyRequest,
+    PoolMappingApplyResult,
     PoolMappingItemResult,
-    PoolMappingPublishResult,
     PoolMappingProjectionStatus,
+    PoolMappingPublishResult,
     PoolMappingSourceLayout,
     PoolMappingVerificationResult,
     PoolQuarantineCleanupResult,
@@ -47,10 +53,9 @@ from engine.community.core.skills.models import (
     SymlinkItem,
     SyncSymlinksResult,
 )
+from engine.community.core.skills.protocol import SkillsService
 from engine.community.manager import EngineManager
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 
 class _EngineWithSkills(BaseEngine):
@@ -632,6 +637,107 @@ def test_pool_mapping_routes_explicitly_propagate_best_effort_mode(
         [SymlinkItem(source="/pool/user-owned", target="/skills/user-owned")],
         apply_mode=PoolMappingApplyMode.BEST_EFFORT,
     )
+
+
+def test_daily_mapping_apply_dispatches_one_logical_request(client, rich_manager):
+    mapping = PoolSkillMappingIntent("repo", "team/package", "runtime-name")
+    plugin = SimpleNamespace(
+        apply_pool_mappings=AsyncMock(
+            return_value=PoolMappingApplyResult(
+                status=PoolMappingProjectionStatus.CONVERGED,
+                items=(
+                    PoolMappingItemResult(
+                        target="/diagnostic/runtime-name",
+                        source="/diagnostic/team/package",
+                        status=PoolMappingProjectionStatus.CONVERGED,
+                        mapping={
+                            "corpus": "repo",
+                            "relative_path": "team/package",
+                            "link_name": "runtime-name",
+                        },
+                    ),
+                ),
+            )
+        )
+    )
+    rich_manager._active_engine._skills = plugin
+
+    response = client.post(
+        "/api/skills/mappings/apply",
+        json={
+            "mappings": [
+                {
+                    "corpus": "repo",
+                    "relative_path": "team/package",
+                    "link_name": "runtime-name",
+                }
+            ],
+            "retired_mappings": [],
+            "source_layout": "legacy",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["items"][0]["mapping"]["link_name"] == "runtime-name"
+    plugin.apply_pool_mappings.assert_awaited_once_with(
+        PoolMappingApplyRequest(
+            mappings=(mapping,),
+            retired_mappings=(),
+            source_layout=PoolMappingSourceLayout.LEGACY,
+        )
+    )
+
+
+def test_daily_mapping_apply_rejects_missing_plugin_capability_before_write(
+    client, rich_manager
+):
+    publish = AsyncMock()
+    rich_manager._active_engine._skills = SimpleNamespace(
+        publish_pool_mappings=publish
+    )
+
+    response = client.post(
+        "/api/skills/mappings/apply",
+        json={"mappings": [], "retired_mappings": [], "source_layout": "legacy"},
+    )
+
+    assert response.status_code == 501
+    assert response.json()["detail"]["code"] == "SKILL_MAPPINGS_APPLY_UNSUPPORTED"
+    publish.assert_not_awaited()
+
+
+def test_daily_mapping_apply_rejects_inherited_protocol_stub_before_write(
+    client, rich_manager
+):
+    class LegacySkills(SkillsService):
+        pass
+
+    rich_manager._active_engine._skills = LegacySkills()
+
+    response = client.post(
+        "/api/skills/mappings/apply",
+        json={"mappings": [], "retired_mappings": [], "source_layout": "legacy"},
+    )
+
+    assert response.status_code == 501
+    assert response.json()["detail"]["code"] == "SKILL_MAPPINGS_APPLY_UNSUPPORTED"
+
+
+def test_daily_mapping_apply_rejects_physical_wire_shape(client, rich_manager):
+    apply = AsyncMock()
+    rich_manager._active_engine._skills = SimpleNamespace(apply_pool_mappings=apply)
+
+    response = client.post(
+        "/api/skills/mappings/apply",
+        json={
+            "mappings": [{"source": "/pool/a", "target": "/active/a"}],
+            "retired_mappings": [],
+            "source_layout": "pool",
+        },
+    )
+
+    assert response.status_code == 422
+    apply.assert_not_awaited()
 
 
 @pytest.mark.parametrize(

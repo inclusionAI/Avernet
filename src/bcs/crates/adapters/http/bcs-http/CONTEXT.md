@@ -16,6 +16,8 @@
 
 ## Allowed dependencies
 
+- `auxiliary/bcs-observability` for log-only operation observations and correlation.
+
 - `service-api/*`
 - `adapters/auth/bcs-http-auth`
 - HTTP framework crates such as `axum`

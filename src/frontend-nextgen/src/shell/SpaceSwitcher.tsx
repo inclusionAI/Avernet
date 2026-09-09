@@ -10,7 +10,11 @@ import type { Space } from '@/domain/admin/models';
 import { refreshSpaceContext, switchSpaceContext, useSpaceContext } from '@/hooks/useSpaceContext';
 import { cn } from '@/utils/cn';
 import { CheckCircle, ChevronDown, Loader2, User, Users } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+
+// 打开气泡的刷新节流窗口：窗口内复用 store 现有列表，避免反复开合连打 GET /spaces?page_size=100。
+// plan.md D7「下次打开切换器时刷新」的兜底仍生效，远端变更最迟一个窗口后可见。
+const REFRESH_THROTTLE_MS = 60_000;
 
 function SpaceIcon({ type, className }: { type: Space['spaceType']; className?: string }) {
   // 个人=紫 User(text-brand)，团队=蓝 Users(text-primary)，与 SpaceCard 图标配色一致
@@ -56,6 +60,7 @@ function SpaceRow({ space, active, onSelect }: { space: Space; active: boolean; 
 
 export function SpaceSwitcher() {
   const [open, setOpen] = useState(false);
+  const lastRefreshAt = useRef(0);
   const currentSpace = useSpaceContext((s) => s.currentSpace);
   const currentSpaceId = useSpaceContext((s) => s.currentSpaceId);
   const spaces = useSpaceContext((s) => s.spaces);
@@ -67,10 +72,14 @@ export function SpaceSwitcher() {
     setOpen(false);
   };
 
-  // 每次打开气泡都重拉最新空间列表（成员变更/新空间可能发生在上次初始化之后）
+  // 打开气泡时按 REFRESH_THROTTLE_MS 节流重拉（成员变更/新空间可能发生在上次初始化之后）
   const onOpenChange = (next: boolean) => {
     setOpen(next);
-    if (next) void refreshSpaceContext();
+    if (!next) return;
+    const now = Date.now();
+    if (now - lastRefreshAt.current < REFRESH_THROTTLE_MS) return;
+    lastRefreshAt.current = now;
+    void refreshSpaceContext();
   };
 
   // 列表排序：个人空间置顶，团队按 gmtModified 倒序（与空间管理页一致）

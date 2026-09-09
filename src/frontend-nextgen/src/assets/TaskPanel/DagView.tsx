@@ -39,8 +39,10 @@ export const DagView: React.FC<{
   dagNodes: DagNodeView[];
   dagEdges: DagEdgeView[];
   selectedNodeId?: string | null;
+  /** 当前已下钻副屏的节点 id(用于高亮) */
+  drilledNodeId?: string | null;
   onViewNodeDetail?: (node: DagNodeView) => void;
-}> = ({ dagNodes: propNodes, dagEdges, selectedNodeId, onViewNodeDetail }) => {
+}> = ({ dagNodes: propNodes, dagEdges, selectedNodeId, drilledNodeId, onViewNodeDetail }) => {
   const [scale, setScale] = useState(1);
   // pan 仅表示用户偏移；居中由 render 时的 base(view.w/2, TOP_BAND) 承担。
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -427,8 +429,14 @@ export const DagView: React.FC<{
                   rx={10}
                   ry={10}
                   fill={tone.fill}
-                  stroke={selectedNodeId === n.id ? C.primary : isCurrent ? tone.stroke : `${tone.stroke}80`}
-                  strokeWidth={selectedNodeId === n.id ? 2.5 : isCurrent ? 2 : 1.5}
+                  stroke={
+                    selectedNodeId === n.id || drilledNodeId === n.id
+                      ? C.primary
+                      : isCurrent
+                      ? tone.stroke
+                      : `${tone.stroke}80`
+                  }
+                  strokeWidth={selectedNodeId === n.id || drilledNodeId === n.id ? 2.5 : isCurrent ? 2 : 1.5}
                   filter="url(#dag-shadow)"
                 />
                 {/* 左侧状态色条 */}
