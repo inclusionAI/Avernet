@@ -19,7 +19,7 @@ export interface PublicHistoryRound { round: number; speeches: PublicHistorySpee
 
 export interface UndercoverGamePanelParams {
   runId: string; groupId: string; sessionId: string; gameSessionId?: string; phase: UndercoverPhase; round: number; attempt: number;
-  deadlineAt?: number; host: HostActor; seatOrder: string[]; turnOrder: string[]; players: PlayerActor[]; nodeActorMap: Record<string, string>;
+  openingAnnouncement?: string; deadlineAt?: number; host: HostActor; seatOrder: string[]; turnOrder: string[]; players: PlayerActor[]; nodeActorMap: Record<string, string>;
   publicHistory: PublicHistoryRound[]; rules: PublicRules; voteCandidates?: VoteCandidate[]; apiBaseUrl?: string; currentViewerActorId?: string;
   currentAction?: CurrentAction; display?: PublicDisplayFlags; pollingInterval?: number; autoRefresh?: boolean; maxResponseBytes?: number;
 }

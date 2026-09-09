@@ -90,6 +90,27 @@ OPENCLAW_OPENAI_MODEL_ID=your-model-id
 
 ## 4. 启动 Avernet
 
+完成 setup 和模型配置后，也可以使用一键脚本管理整套游戏环境：
+
+```bash
+./scripts/undercover.sh start    # 启动 BCS、前端和游戏 Bot，自动 onboard
+./scripts/undercover.sh stop     # 先停止 Bot，再停止 BCS 和前端
+./scripts/undercover.sh clean    # 停止后重置数据库、Bot 身份/会话/工作区及日志缓存
+./scripts/undercover.sh restart  # stop → clean → start
+```
+
+每次 `start` 会在 Bot 启动前，按 `bots.json` 的角色映射复制游戏技能：
+主持人使用 `referee/skills/undercover-game-referee`，玩家使用各自角色目录的
+`skills/undercover-game-player`。目标是各 Bot profile 配置指向的运行工作区
+`skills/`；游戏技能目录会完整刷新，其他技能（例如 `bcs-coordination`）保留。
+
+`clean` 删除本地 BCS 数据目录（包括整个数据库中的注册、协作群和会话）、
+生成的 BCS 配置，以及这 6 个游戏 Bot 的运行配置、身份、会话和工作区，
+同时清理服务日志、前端 Umi 临时目录和依赖缓存。源码中的角色配置和
+`.env.local` 保留；下次 `start` 会重新创建并 onboard Bot，需重新创建游戏协作群。
+如果服务端口仍在监听，清理会中止。`start` 的模型选择沿用下文的菜单；
+使用一键启动后可直接从第 6 步创建游戏协作群。
+
 启动 BCS 和前端，并指定本次使用的游戏配置目录：
 
 ```bash

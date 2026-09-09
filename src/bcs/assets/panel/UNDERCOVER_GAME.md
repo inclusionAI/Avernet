@@ -18,6 +18,23 @@ bcs collaborate run ./phase.yaml \
 
 Public parameters include the complete original roster, explicit `seatNumber`, stable `seatOrder`, living `turnOrder`, referee node mappings, sanitized `publicHistory`, public rules, and eligible non-self vote candidates. They never include words, roles, raw speech, raw votes, or private reasoning.
 
+## Vote opening announcement
+
+`openingAnnouncement?: string` is an optional public, script-generated notice for
+new vote runs. It contains only phase/round guidance and, on retry, invalidation
+of earlier votes. The referee authorizes voting by submitting the run and ends
+that activation without an extra opening speech.
+
+The single entry `vote_start` is a neutral acknowledgement by a living player
+Bot, followed by parallel `vote_N` nodes and the referee's `tally`. Keep
+`vote_start` out of `nodeActorMap`: its output is neither speech nor a vote and
+must not affect player completion counts. The panel displays the announcement
+only for the matching running run after `vote_start` completes. Before that it
+shows preparation; failed/aborted runs show failure rather than completion.
+Existing runs without this optional field retain their previous presentation.
+No BCS Service or Plugin API changes are required. Deploy the updated panel and
+referee profile together for the new notice; old running graphs are unchanged.
+
 ## Private HumanInput context
 
 The current viewer's pending HumanInput instruction may append a delimited `UNDERCOVER_UI_CONTEXT_V1` JSON block. The panel parses that authenticated, viewer-private boundary to show the owning player's word, speech limits, round/seat context, or vote action. Unsupported or malformed recognized blocks produce a safe recoverable error. Private values are not placed in public params, storage, URLs, console output, errors, or `onInteraction` records.

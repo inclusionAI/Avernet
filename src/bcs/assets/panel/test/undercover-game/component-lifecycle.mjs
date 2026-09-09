@@ -142,5 +142,22 @@ try{
  assert.match(markers.container.querySelector('[data-region="speech-bubble"]').textContent,/3号 小丙/);
  await act(async()=>markers.unmount());
 
+ // The unmapped preparation node never counts as a vote or exposes its output.
+ const opening='第 2 轮投票开始。本轮之前的票作废，请重新投票。';
+ for(const [runStatus,startStatus,opened] of [['pending','pending',false],['running','running',false],['running','completed',true],['failed','failed',false],['aborted','completed',false]]){
+  const graph={run:{run_id:'run-vote-start',status:runStatus},nodes:[{node_id:'vote_start',kind:'bot_task',status:startStatus,assignee_bot_id:'b'},{node_id:'node-a',status:opened?'running':'pending'},{node_id:'node-b',status:'pending'},{node_id:'node-host',status:'pending'}]};
+  globalThis.fetch=fetchFor([{graph,pending:opened?[{node_id:'node-a',instruction:'投票'}]:[],artifacts:{vote_start:'收到'}}],[]);
+  let starting;await act(async()=>{starting=mount({...base,phase:'voting',runId:'run-vote-start',round:2,openingAnnouncement:opening});await settle(5)});
+  assert.equal(text(starting).includes(opening),opened);
+  assert.match(text(starting),/0\/2/);
+  assert.doesNotMatch(text(starting),/收到/);
+  if(opened)assert.ok(starting.container.querySelector('[aria-label="选择投票对象"]'));
+  if(runStatus==='failed'||runStatus==='aborted'){
+   assert.match(text(starting),/本阶段未正常完成/);
+   assert.doesNotMatch(text(starting),/本阶段已完成/);
+  }
+  await act(async()=>starting.unmount());
+ }
+
 }finally{globalThis.fetch=originalFetch}
 console.log('Component lifecycle tests passed: dock speech/vote/abstain, privacy, compact layout, focus, transition, and recovery.');

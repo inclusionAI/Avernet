@@ -128,8 +128,9 @@ class PromptContractsTest(unittest.TestCase):
                 prompt = undercover.bluntness_block(rnd, first=False)
                 self.assertIn(f"钝度 {n}", prompt)
                 self.assertIn("类目名词", prompt)
-                self.assertIn("不更锐利", prompt)
-                self.assertIn("不补", prompt)
+                self.assertIn("每轮补充一个", prompt)
+                self.assertIn("尚未说过的角度", prompt)
+                self.assertIn("信息量以本轮钝度为准", prompt)
                 if rnd == 1:
                     self.assertIn("用途和对象不能进同一句", prompt)
                 elif rnd == 2:
@@ -154,8 +155,12 @@ class PromptContractsTest(unittest.TestCase):
                 else:
                     for constraint in ("10", "不能投自己", "我弃权", "全部历轮", "不写理由"):
                         self.assertIn(constraint, node)
+                    for constraint in ("相对最可疑", "证据弱也选", "并列者中选一位",
+                                       "只有全部历轮都没有可用的玩家描述", "不假定自己一定是平民"):
+                        self.assertIn(constraint, node)
+                    self.assertNotIn("均无依据则弃权", node)
 
-    def test_successful_submission_starts_players_and_returns_public_announcement(self) -> None:
+    def test_successful_submission_starts_players_and_publishes_public_announcement(self) -> None:
         for kind, command in (("speak", undercover.cmd_open_round), ("vote", undercover.cmd_open_vote)):
             for retry in (False, True):
                 with self.subTest(kind=kind, retry=retry):
@@ -189,17 +194,18 @@ class PromptContractsTest(unittest.TestCase):
                         public_text = result["announcement"]
                     else:
                         self.assertNotIn("announcement", result)
-                        self.assertNotIn("opening", run_input)
+                        self.assertIn("opening", run_input)
                         self.assertIn("立刻结束激活", result["next_action"])
-                        public_text = yaml_text.split("      vote_open:\n", 1)[1].split("        transitions:", 1)[0]
-                        self.assertIn("binding: referee", public_text)
-                        self.assertNotIn("作废", public_text)
-                        self.assertEqual("之前的票作废" in result["next_action"], retry)
+                        panel = json.loads(Path(submit.call_args.args[3]).read_text())
+                        public_text = panel["openingAnnouncement"]
+                        self.assertEqual(public_text, run_input["opening"])
+                        self.assertEqual("之前的票作废" in public_text, retry)
+                        self.assertNotIn("vote_open", yaml_text)
                     for secret in state["words"].values():
                         self.assertNotIn(secret, public_text)
                         self.assertNotIn(secret, json.dumps(run_input, ensure_ascii=False))
 
-    def test_graph_preserves_player_speech_entry_and_referee_vote_entry(self) -> None:
+    def test_graph_starts_without_referee_and_keeps_all_votes_before_tally(self) -> None:
         for fixture in self.fixtures:
             for human_first in (False, True):
                 state = copy.deepcopy(fixture["state"])
@@ -219,18 +225,24 @@ class PromptContractsTest(unittest.TestCase):
                             parents[target].add(node)
                     players = [f"{kind}_{seat['seat']}" for seat in living]
                     self.assertEqual({node for node, upstream in parents.items() if not upstream},
-                                     {players[0]} if kind == "speak" else {"vote_open"})
+                                     {players[0]} if kind == "speak" else {"vote_start"})
                     terminal = "collect" if kind == "speak" else "tally"
                     self.assertEqual(parents[terminal], set(players))
                     for idx, player in enumerate(players):
-                        self.assertEqual(parents[player], set(players[:idx]) if kind == "speak" else {"vote_open"})
+                        self.assertEqual(parents[player], set(players[:idx]) if kind == "speak" else {"vote_start"})
                         self.assertNotIn("binding: referee", blocks[player])
                     self.assertIn("binding: referee", blocks[terminal])
                     if kind == "vote":
-                        self.assertIn("binding: referee", blocks["vote_open"])
-                        self.assertEqual(undercover.public_panel_projection(state, kind, 1)["nodeActorMap"]["vote_open"], state["referee_uuid"])
+                        self.assertNotIn("binding: referee", blocks["vote_start"])
+                        entry = next(seat for seat in living if seat["kind"] == "bot")
+                        self.assertIn(f"binding: {entry['binding']}", blocks["vote_start"])
+                        self.assertNotIn("vote_start", undercover.public_panel_projection(state, kind, 1)["nodeActorMap"])
+                        self.assertNotIn("vote_open", blocks)
+                        # Even while the submitting referee is busy, the sole entry
+                        # is assigned to a player. No referee callback gates voting.
+                        self.assertEqual(set(re.search(r"targets: \[(.*?)\]", blocks["vote_start"])[1].split(", ")), set(players))
                         for secret in state["words"].values():
-                            self.assertNotIn(secret, blocks["vote_open"])
+                            self.assertNotIn(secret, blocks["vote_start"])
 
     def test_failed_submission_does_not_emit_success_handoff(self) -> None:
         for command, prepare in ((undercover.cmd_open_round, "prepare_speak_run"),
