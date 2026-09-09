@@ -85,7 +85,7 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
     }
     let cancelled = false
     api.workflows
-      .getHistory(selectedWorkflowId, 50)
+      .getHistory(selectedWorkflowId, 50, true)
       .then((r) => {
         if (!cancelled) setLatestDeploy(r.history?.find((item) => item.action !== 'edit') ?? null)
       })

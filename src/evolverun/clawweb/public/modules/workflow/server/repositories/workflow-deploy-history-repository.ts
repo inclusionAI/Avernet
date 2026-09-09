@@ -56,10 +56,11 @@ export class WorkflowDeployHistoryRepository {
     );
   }
 
-  async listHistory(workflowId: string, limit: number): Promise<Omit<WorkflowDeployHistoryRow, "spec_json">[]> {
+  async listHistory(workflowId: string, limit: number, options?: { releaseOnly?: boolean }): Promise<Omit<WorkflowDeployHistoryRow, "spec_json">[]> {
+    const releaseClause = options?.releaseOnly ? " AND action <> 'edit'" : "";
     return this.db.query<Omit<WorkflowDeployHistoryRow, "spec_json">>(
       `SELECT id, pack_id, workflow_id, deploy_number, version, tag_name, action, from_deploy_number, note, bot_id, owner_id, is_active, gmt_create, gmt_modified
-       FROM workflow_deploy_history WHERE workflow_id = ? ORDER BY deploy_number DESC LIMIT ?`,
+       FROM workflow_deploy_history WHERE workflow_id = ?${releaseClause} ORDER BY deploy_number DESC LIMIT ?`,
       [workflowId, limit],
     );
   }

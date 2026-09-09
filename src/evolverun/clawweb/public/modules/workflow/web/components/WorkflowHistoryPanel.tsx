@@ -59,7 +59,7 @@ export default function WorkflowHistoryPanel({ workflowId, onClose }: WorkflowHi
     setLoading(true)
     setError(null)
     api.workflows
-      .getHistory(workflowId)
+      .getHistory(workflowId, 50, true)
       // `edit` rows are from the old browser-save flow. They have no Git tag and
       // cannot run as a version, so do not present them as release history.
       .then((r) => setHistory((r.history ?? []).filter((item) => item.action !== 'edit')))

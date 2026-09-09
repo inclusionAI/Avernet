@@ -1449,8 +1449,10 @@ export const api = {
     },
 
     /** GET /api/workflows/:wf/history — deploy history list (no spec_json). */
-    getHistory(workflowId: string, limit = 50): Promise<{ workflowId: string; history: DeployHistoryItem[] }> {
-      return fetchJson(`${BASE}/workflows/${encodeURIComponent(workflowId)}/history?limit=${limit}`)
+    getHistory(workflowId: string, limit = 50, releaseOnly = false): Promise<{ workflowId: string; history: DeployHistoryItem[] }> {
+      const query = new URLSearchParams({ limit: String(limit) })
+      if (releaseOnly) query.set('releaseOnly', 'true')
+      return fetchJson(`${BASE}/workflows/${encodeURIComponent(workflowId)}/history?${query.toString()}`)
     },
 
     getAccess(workflowId: string): Promise<{ workflowId: string; canView: boolean; canEdit: boolean }> {
