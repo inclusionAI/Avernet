@@ -2404,11 +2404,56 @@ async def delete_skill(
         ("git://", "center://")
     )
     if is_governed_content_source:
-        service = skill_service_factory.create()
+        persisted_owner_id = str(skill.get("user_id") or "")
+        persisted_bot_id = str(skill.get("bolt_id") or "")
+        collaborator_authorized = bool(
+            ctx.metadata.get("skill_delete_collaborator_authorized")
+        )
+        if persisted_owner_id:
+            if not persisted_bot_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Skill is missing its Bot identity",
+                )
+            if bot_id and bot_id != persisted_bot_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error_code": "SKILL_BOT_CONTEXT_MISMATCH",
+                        "message": "删除技能必须使用 Skill 持久化归属的 Bot",
+                        "bot_id": persisted_bot_id,
+                    },
+                )
+            scoped_bot = bot_repo.get_by_id_and_owner(
+                persisted_bot_id, persisted_owner_id
+            )
+            if not scoped_bot:
+                raise HTTPException(status_code=404, detail="Bot not found")
+            active_engine = str(
+                scoped_bot.get("active_engine") or DEFAULT_ENGINE_TYPE
+            )
+            if engine_type and engine_type != active_engine:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error_code": "SKILL_ENGINE_CONTEXT_MISMATCH",
+                        "message": "删除技能必须使用 Bot 当前的生效引擎",
+                        "active_engine": active_engine,
+                    },
+                )
+            service = skill_service_factory.create(
+                bot_id=persisted_bot_id,
+                bot_owner_id=persisted_owner_id,
+                engine_type=active_engine,
+            )
+        else:
+            service = skill_service_factory.create()
         try:
             success = await service.delete_skill(
                 skill_id,
                 user_id=current_user_id,
+                authorized_bot_owner_id=persisted_owner_id or None,
+                collaborator_authorization_verified=collaborator_authorized,
             )
             if not success:
                 raise HTTPException(status_code=404, detail="Skill not found")

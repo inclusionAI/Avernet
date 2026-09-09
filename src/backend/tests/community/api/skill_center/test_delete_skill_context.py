@@ -476,6 +476,91 @@ async def test_owner_can_delete_unreferenced_governed_content_without_device_io(
 
 
 @pytest.mark.asyncio
+async def test_authorized_collaborator_can_delete_owner_governed_content():
+    skill_repo = MagicMock()
+    skill_repo.get_by_id.return_value = {
+        "id": SKILL_ID,
+        "name": "owned-center-skill",
+        "git_path": "center://owned-center-skill",
+        "bolt_id": BOT_ID,
+        "user_id": OWNER_ID,
+    }
+    skill_repo.delete.return_value = True
+    device_fs = MagicMock()
+
+    response, _, factory = await _call_delete(
+        device_fs=device_fs,
+        skill_repo=skill_repo,
+        current_user_id="authorized-collaborator",
+        verified_collaborator=True,
+    )
+
+    assert response.success is True
+    assert factory.calls == [
+        {
+            "bot_id": BOT_ID,
+            "bot_owner_id": OWNER_ID,
+            "engine_type": "hermes",
+        }
+    ]
+    skill_repo.delete.assert_called_once_with(SKILL_ID)
+    assert factory.device_fs_calls == []
+
+
+@pytest.mark.asyncio
+async def test_unverified_collaborator_cannot_delete_owner_governed_content():
+    skill_repo = MagicMock()
+    skill_repo.get_by_id.return_value = {
+        "id": SKILL_ID,
+        "name": "owned-git-skill",
+        "git_path": "git://owner/owned-git-skill",
+        "bolt_id": BOT_ID,
+        "user_id": OWNER_ID,
+    }
+    device_fs = MagicMock()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_delete(
+            device_fs=device_fs,
+            skill_repo=skill_repo,
+            current_user_id="unverified-collaborator",
+        )
+
+    assert exc_info.value.status_code == 403
+    skill_repo.delete.assert_not_called()
+    device_fs.exists.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_owner_governed_content_still_maps_asset_blockers_to_conflict():
+    skill_repo = MagicMock()
+    skill_repo.get_by_id.return_value = {
+        "id": SKILL_ID,
+        "name": "owned-center-skill",
+        "git_path": "center://owned-center-skill",
+        "bolt_id": BOT_ID,
+        "user_id": OWNER_ID,
+    }
+    skill_repo.require_unreferenced_for_delete.side_effect = SkillAssetInUseError(
+        {"version": 1, "space_binding": 1}
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_delete(
+            device_fs=MagicMock(),
+            skill_repo=skill_repo,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["error_code"] == "SKILL_ASSET_IN_USE"
+    assert exc_info.value.detail["blockers"] == {
+        "version": 1,
+        "space_binding": 1,
+    }
+    skill_repo.delete.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_shared_delete_does_not_trust_query_user_id_for_admin_permission():
     skill_repo = MagicMock()
     skill_repo.get_by_id.return_value = {
