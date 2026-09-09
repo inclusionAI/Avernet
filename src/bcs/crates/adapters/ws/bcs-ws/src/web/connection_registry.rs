@@ -45,6 +45,7 @@ pub struct WorkbenchConnectionRegistry {
 impl std::fmt::Debug for WorkbenchConnectionRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WorkbenchConnectionRegistry")
+            .field("cluster_scope_changes_enabled", &!self.scope_changes_disabled)
             .finish_non_exhaustive()
     }
 }
@@ -297,12 +298,6 @@ impl ParticipantViewBindingPort for WorkbenchConnectionRegistry {
         scope_id: &str,
         human_actor_id: &str,
     ) -> ServiceResult<ParticipantViewScopeChangeLease> {
-        if self.scope_changes_disabled {
-            return Err(ServiceError::InvalidOperation {
-                message: "view_scope_change_requires_cluster_binding".to_string(),
-                request_id: None,
-            });
-        }
         let lease_id = NEXT_SCOPE_CHANGE_LEASE_ID.fetch_add(1, Ordering::Relaxed);
         let mut barriers = self.scope_change_barriers.lock().await;
         if barriers

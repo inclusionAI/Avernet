@@ -92,7 +92,11 @@ audience_actor_ids = [...]
 必须沿用改造前的 full 连接授权、participant 列表和未投影投递逻辑；不得从登录 Human
 推断 view actor，也不得要求该 Human 本身已作为 participant 加入群或 session。
 
-scope 更新后，应使旧连接失效或要求重连，避免旧连接继续使用缓存 scope。
+首次创建 Session Human 成员不属于 scope 更新，直接写入所选 scope，不要求失效连接。
+已有成员更新 Session scope 后，应使当前实例的旧连接失效并要求重连，避免继续使用缓存
+scope。Leader Election 开启的多副本部署暂时只提供实例内的 best-effort 失效；其他副本上的
+旧连接在下次重连时读取新 scope。TODO：如果该展示投影未来升级为严格安全边界，再增加
+跨副本失效通知。
 
 ### Group/Session message history
 
@@ -204,7 +208,9 @@ API 默认值为 `full`。不应引入 `participant_view_unsupported` 之类由 
 ### 管理与连接
 
 - 群主/管理员能查看成员 scope，并据此选择游戏玩家。
-- scope 更新后旧 WS 连接不能继续沿用旧投影。
+- 首次创建成员直接写入 scope，不触发旧连接失效。
+- Session scope 更新后当前实例的旧 WS 连接不能继续沿用旧投影；多副本跨实例失效暂为
+  best-effort。
 - 创建 session 的下拉选择不改变默认的一键创建习惯。
 
 ## 11. 非目标
