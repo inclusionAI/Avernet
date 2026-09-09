@@ -19,12 +19,13 @@
 - open-* / bcs_assign_task 是本次最后一个工具调用。派遗言时身后不能有排队节点。
 - IN_COLLECT_NODE / IN_TALLY_NODE 立即结束，不重试、sleep 或轮询。重开只走阶段机 SX，最多两次。
 - 运行中迟到的 WORKER_MSG 不推进；阶段不符的节点命令停止，不当成新阶段执行。
-- 终局在本次 votes-set 刚返回 finished 的 tally 内 reveal、公布主持稿、bcs-cli session complete。
+- 终局在本次 votes-set 刚返回 finished 的 tally 内 reveal、公布主持稿、uc finish --session。
   state_machine 不提供 bcs_task_complete；不使用 bcs_route，也不等待 ECHO 来结束会话。
 - 新会话读到 FINISHED 要核对 session；已结束会话的再次唤醒不重复 reveal 或完成。
+  关闭失败后的重试仅按 SKILL.md「关闭失败恢复」执行。
 
 ## 输出
 
 一次激活只写当前主持稿，不夹工作记录。发牌、遗言、终局按既有顺序先念稿再执行收尾命令；
-open-round 成功后播报 announcement；open-vote 提交后按返回提示立即结束激活，开投稿由 vote_open 主持人节点播报。派遗言后不另念稿。只写中文、不用表格，限制见 boards.md。
+open-round 成功后播报 announcement；open-vote 提交后按返回提示立即结束激活，开投及重开提示由副屏显示。派遗言后不另念稿。只写中文、不用表格，限制见 boards.md。
 不输出阶段编号、phase、节点名、会话 ID、UUID、YAML、命令或其他内部术语。

@@ -86,6 +86,9 @@ try{
  for(const snapshot of [
    hostSnapshot('投票已收齐，主持人正在计票或准备下一轮。'),
    hostSnapshot('如果游戏结束，平民胜利就公布身份。'),
+   hostSnapshot('终局揭晓\n平民胜利就公布身份。'),
+   hostSnapshot('终局揭晓\n> 平民胜利！'),
+   hostSnapshot('终局揭晓\n平民胜利！\n卧底胜利！'),
    {graph:{...finishGraph,nodes:[{node_id:'node-host',status:'running'}]},pending:[],artifacts:{'node-host':finale}},
    {graph:{...finishGraph,nodes:[{node_id:'node-b',status:'completed'}]},pending:[],artifacts:{'node-b':finale}},
    {graph:{...finishGraph,nodes:[{node_id:'unmapped',status:'completed'}]},pending:[],artifacts:{unmapped:finale}},
@@ -95,6 +98,13 @@ try{
    await act(async()=>{ordinary=mount({...base,runId:'run-finale',phase:'voting'});await settle(5)});
    assert.equal(ordinary.container.querySelector('[aria-label="游戏结束"]'),null);
    await act(async()=>ordinary.unmount());
+ }
+ // Production prose and the documented referee board are valid finales.
+ for(const content of ['🔔 终局揭晓\n平民胜利！卧底在第一轮就被精准揪出。','🏁 本局结束——**平民赢了**。']) {
+   globalThis.fetch=fetchFor([hostSnapshot(content)],[]);let legacy;
+   await act(async()=>{legacy=mount({...base,runId:'run-finale',phase:'voting'});await settle(5)});
+   assert.ok(legacy.container.querySelector('[aria-label="游戏结束"]'),content);
+   await act(async()=>legacy.unmount());
  }
  globalThis.fetch=fetchFor([hostSnapshot(finale)],[]);
  let finalePanel;await act(async()=>{finalePanel=mount({...base,runId:'run-finale',phase:'voting'});await settle(5)});
@@ -141,6 +151,23 @@ try{
  assert.ok(markers.container.querySelector('[aria-label="回看 2号 小乙 的发言"]'));
  assert.match(markers.container.querySelector('[data-region="speech-bubble"]').textContent,/3号 小丙/);
  await act(async()=>markers.unmount());
+
+ // The unmapped preparation node never counts as a vote or exposes its output.
+ const opening='第 2 轮投票开始。本轮之前的票作废，请重新投票。';
+ for(const [runStatus,startStatus,opened] of [['pending','pending',false],['running','running',false],['running','completed',true],['failed','failed',false],['aborted','completed',false]]){
+  const graph={run:{run_id:'run-vote-start',status:runStatus},nodes:[{node_id:'vote_start',kind:'bot_task',status:startStatus,assignee_bot_id:'b'},{node_id:'node-a',status:opened?'running':'pending'},{node_id:'node-b',status:'pending'},{node_id:'node-host',status:'pending'}]};
+  globalThis.fetch=fetchFor([{graph,pending:opened?[{node_id:'node-a',instruction:'投票'}]:[],artifacts:{vote_start:'收到'}}],[]);
+  let starting;await act(async()=>{starting=mount({...base,phase:'voting',runId:'run-vote-start',round:2,openingAnnouncement:opening});await settle(5)});
+  assert.equal(text(starting).includes(opening),opened);
+  assert.match(text(starting),/0\/2/);
+  assert.doesNotMatch(text(starting),/收到/);
+  if(opened)assert.ok(starting.container.querySelector('[aria-label="选择投票对象"]'));
+  if(runStatus==='failed'||runStatus==='aborted'){
+   assert.match(text(starting),/本阶段未正常完成/);
+   assert.doesNotMatch(text(starting),/本阶段已完成/);
+  }
+  await act(async()=>starting.unmount());
+ }
 
 }finally{globalThis.fetch=originalFetch}
 console.log('Component lifecycle tests passed: dock speech/vote/abstain, privacy, compact layout, focus, transition, and recovery.');

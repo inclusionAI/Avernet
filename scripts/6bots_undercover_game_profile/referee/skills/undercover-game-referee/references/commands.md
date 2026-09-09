@@ -3,11 +3,11 @@
 `scripts/undercover.py` 是本局事实层的全部实现。所有命令都输出 JSON，第一个字段是 `ok`。
 
 ```bash
-SKILL_DIR="${OPENCLAW_WORKSPACE_DIR:-$PWD}/skills/undercover-game-referee"
+SKILL_DIR="skills/undercover-game-referee"
 uc() { python3 "$SKILL_DIR/scripts/undercover.py" "$@"; }
 ```
 
-失败时 `ok: false`，带 `error` 和 `message`，退出码 2。**看到失败就停下并向人类说明，不要绕过它继续。**
+失败时 `ok: false`，带 `error` 和 `message`，退出码 2。认证、身份与环境故障按 SKILL.md「BCS 身份与运行环境」停止；BAD_ARGS 只按本参考纠正一次，其余只执行脚本明确给出的恢复动作。
 
 ## `--session` 什么时候必须给
 
@@ -17,7 +17,7 @@ GroupContext 里抄。
 
 | 命令 | `--session` |
 | --- | --- |
-| `status` `begin` `init` `reveal` `my-word` | **必须给。** 它们是一局的入口和出口，也是新会话里第一条会被调用的命令 |
+| `status` `begin` `init` `reveal` `finish` `my-word` | **必须给。** 它们是一局的入口和出口，也是新会话里第一条会被调用的命令 |
 | 其余（`open-*`、`*-set`、`render-*`、`mask`、`parse-vote`） | 可以省，脚本只落到**本机唯一一局还没结束**的游戏上；有两局同时在跑就报 `AMBIGUOUS_SESSION` |
 
 `--group` 一律可以省：取会话 ID 冒号前面那一段（`bcs_grp_xxxx:yyyy` → `bcs_grp_xxxx`）。
@@ -45,18 +45,18 @@ GroupContext 里抄。
 
 | 命令 | 顶掉了什么 | 用在哪 |
 | --- | --- | --- |
-| `begin` | 三条 `bcs session get \| jq` + 找自己 UUID | S0 |
+| `begin` | 查询当前 session 成员并校验投递接收者身份 | S0 |
 | `open-round` | `collaborate permission` + `render-speak-run` + `collaborate run` | S1 / S5 / SX |
+| `finish` | `session complete`，统一运行环境并支持关闭重试 | S4 |
 | `open-vote` | `collaborate permission` + `render-vote-run` + `collaborate run` | S3 / SX |
 
-它们会自己调 `bcs-cli`（认证仍由 CLI 负责，脚本不碰 token）。下面的 `render-*` 是拆开的
-底层命令，只在复合命令因为环境问题跑不通时手工用。
+它们会自己调 `bcs-cli`（认证仍由 CLI 负责，脚本不碰 token）。下面的 `render-*` 是维护者测试用的底层命令，主持人运行时不调用。
 
 ## 脱敏约定
 
 | 命令 | 输出里有词吗 |
 | --- | --- |
-| `status` `speeches-set` `votes-set` `parse-vote` `render-ping` `mask` | **没有**，可以放心引用 |
+| `status` `speeches-set` `votes-set` `parse-vote` `render-ping` `mask` `finish` | **没有**，可以放心引用 |
 | `init`（`human_word` 字段）`my-word` | 只有**人类玩家自己那个词**，只能说给他一个人听 |
 | `render-speak-run` `render-vote-run` | 只有文件路径，词在文件里，我不读也不贴 |
 | `reveal` | 有，且只有终局才能调 |
@@ -66,42 +66,40 @@ GroupContext 里抄。
 ### `begin`
 
 ```bash
-uc begin --session S [--group G] [--difficulty medium] [--undercover 1] [--max-rounds 6]
+uc begin --session S --referee-uuid R [--group G] [--difficulty medium] [--undercover 1] [--max-rounds 6]
 ```
 
-开局前的全部探测一次做完：人类在不在会话里、是不是 Present、有哪些 Bot 玩家、我自己的
-`bot_uuid` 是什么。返回 `human_present`、`human_actor_id`、`bots[]`、`referee_uuid`，
-以及一条可以原样跑的 `init_command`。
+`R` 必须来自本次 BCS 投递的 `GroupContext.recipient`，文本上下文取「你的身份」中的 ID。
+脚本查询当前 session，校验该 ID 是唯一 manager，玩家只选 `actor_kind=bot, role=worker`。
+返回 `human_present`、`human_actor_id`、`bots[]`、`referee_uuid` 和可原样执行的 `init_command`；
+生成命令已带主持人 ID。名称只用于展示，不读取本机身份文件。
 
-- `human_present: false` → 说"加入提示"那段，结束激活。**人类参与者的 mode 缺省是
-  `absent` 不是 `present`**，字段缺失按 absent 处理，这条判断在脚本里。
-- `human_present: true` → 说开场白，等人类回一句"开始"。**这一步不 init。**
-
-**不要再去读 `BCN_BOT_UUID`。** 这套部署里它是空的，而 `bot_uuid` 实际上就等于 Bot 名称。
-脚本按 `BCN_BOT_UUID` → `$BOT_DATA_DIR/.bcs/session.json` 的顺序自己解析。
+- `human_present: false` → 提示人类加入，结束激活。mode 缺省按 absent 处理。
+- `human_present: true` → 说开场白，等待人类“开始”；此时尚未发牌，也未证明认证可用。
+- 身份未匹配或成员数据不完整 → 停止，不自行 connect 或猜测 ID。
 
 ### `init`
 
 ```bash
-uc init --session S --human human_123 \
+uc init --session S --referee-uuid R --human human_123 \
   --bot "玩家稳健老陈=uuid1" --bot "玩家话痨小满=uuid2" \
-  [--group G] [--referee-uuid X] [--difficulty easy|medium|hard] [--undercover 1] [--max-rounds 6] [--force]
+  [--group G] [--difficulty easy|medium|hard] [--undercover 1] [--max-rounds 6] [--force]
 ```
 
-抽词对、随机座位、随机身份，一次做完。返回 `seating`（座位号 + 名字 + 是不是人类）、`human_seat`、
+重新查询当前 session，校验主持人与完整 worker 名单、人类 Present 状态，再检查协作权限；通过后才抽词对、随机座位、随机身份。返回 `seating`（座位号 + 名字 + 是不是人类）、`human_seat`、
 `human_word`、`referee_uuid`。同一局重复调会被拒，除非 `--force`。
 
 **`human_word` 是人类玩家自己那个词**，也是全场唯一一个我可以说出口的词：群聊是我和他
 的私密双人频道，Bot 收不到。发牌时念给他一次（S1 第 2 步），别的座位的词脚本不会给我。
 
-`--referee-uuid` 可以不给，脚本自己解析；只有解析不出来时才需要显式传。
+`--referee-uuid` 是 begin/init 的必填参数，仅使用本次投递 ID；不要传给 open-round/open-vote。
 
 ### `status`
 
-默认返回压成一行的四件事：`phase`、`round`（"1/6"）、`alive`、`pending_ping`、`next_action`。
+默认返回压成一行的字段：`phase`、`round`（"1/6"）、`alive`、`pending_ping`、`next_action`、`referee_uuid`（已开局时）。
 **每次被唤醒的第一件事。**
 
-还没开局时它不报错，返回 `phase: NO_GAME` 和一条现成的 `begin` 命令——所以"被唤醒先
+还没开局时它不报错，返回 `phase: NO_GAME` 和一条现成的 `begin` 命令模板（填入本次 recipient，不能执行占位符）——所以"被唤醒先
 `status`"这条纪律在 session 刚启动时也成立，不用为它开特例。
 
 **新会话看到 `FINISHED` 一定是会话 ID 传错了**（新会话没有自己的状态文件，只可能是
@@ -145,10 +143,10 @@ uc open-vote --session S [--retry]
   是因为我把 S2 和 S3 挤进了同一次激活——我此刻就是那个运行的末节点，它等我结束、我等
   槽位。**立刻结束激活，一次都不要重试**，照返回的 `message` 办。
 
-**提交完立刻结束激活，一个工具调用都不要再加。** 开投稿同样是入口节点的产物，不用我说。
-这里以前还要 `bcs_assign_task` 派一个看门狗，那条已经删了——`vote_open` 入口节点此刻正排在
-我后面，而派单和它的回执都会往我自己的会话里回灌一条 `[任务状态]`，回灌会打断正在跑的节点。
-见 [runs.md](runs.md#派任务会打断我自己)。
+**提交成功后立刻结束激活。** 开投及重开公告写入 Input.opening 与副屏参数
+openingAnnouncement；副屏确认预备节点完成后显示。主持人本次不再播报或调用工具。
+投票运行的唯一入口 vote_start 由首位存活玩家 Bot 原样播报「投票开始，请大家投出一票，等待主持人公布结果。」，完成后所有 vote_N
+并行开始；预备确认不算投票、不承载词语、不决定流程。收齐后仍由主持人 tally 计票。
 
 ### `render-speak-run`
 
@@ -159,7 +157,7 @@ uc render-speak-run --session S [--retry]
 只能在 `AWAIT_START` 或 `AWAIT_NEXT_ROUND` 调。**渲染即推进**：它自己把轮次加一、建好本轮记录、把 phase 推到 `SPEAK_RUNNING`。
 
 返回 `yaml_path`、`input_path`、`binding_args`、`attempt`，以及一条拼好的 `run_command`。
-**只在 `open-round` 跑不通、需要手工提交时才用它。**
+**仅供维护者测试；主持人不能用它绕过 open-round 失败。**
 
 `--retry` 用来重开当前这一轮：只能在 `SPEAK_RUNNING` 且本轮发言还没收齐时调，**轮次不推进、本轮记录不重建**，只是把同一份 YAML 重渲染一次。上一次提交的运行失败了才用它——运行失败不会唤醒我，所以这条路只会从 SX 卡住诊断走进来。
 
@@ -191,7 +189,7 @@ uc render-vote-run --session S [--retry]
 ```
 
 只能在 `AWAIT_VOTE_START` 调，同样渲染即推进，phase 到 `VOTE_RUNNING`。返回字段同
-`render-speak-run`。**只在 `open-vote` 跑不通、需要手工提交时才用它。**
+`render-speak-run`。**仅供维护者测试；主持人不能用它绕过 open-vote 失败。**
 
 `--retry` 用来重开当前这一轮的投票，只能在 `VOTE_RUNNING` 调。**没有它，卡住诊断走不通**——不带 `--retry` 时阶段卫兵只认 `AWAIT_VOTE_START`，而这时 phase 早就是 `VOTE_RUNNING` 了。重开后之前投过的票作废，要向人类说明。
 
@@ -200,6 +198,16 @@ uc render-vote-run --session S [--retry]
 ```bash
 uc votes-set --session S --json '{"1":"我投3号","2":"我弃权"}'
 ```
+
+外层 JSON 的键是本轮座位号，值是各自的原始票面字符串。Human 结构化票面已经是
+JSON 字符串时原样保留；如果上游提供对象，先用 `json.dumps()` 将该对象转为字符串，
+再用 `json.dumps(payload)` 序列化外层映射。例如一个座位的条目是
+`"4":"{\"kind\":\"vote\",\"target_actor_id\":\"player-b\"}"`，弃权为
+`"4":"{\"kind\":\"vote\",\"abstain\":true}"`。保留完整字段，不提取目标 ID，
+不自行换算号码，也不使用 `str(dict)`。
+
+脚本兼容被剥掉 JSON 外壳的裸 actor_id：先精确匹配本局名单，再检查自投和存活状态。
+未知 ASCII 标识符不会按其中的数字猜座位；正常票面仍应传完整 JSON 字符串。
 
 只能在 `VOTE_RUNNING` 调。一次做完解析、计票、平票规则、出局、胜负判定。返回：
 
@@ -261,12 +269,36 @@ uc mask --session S --seat N --text "遗言原话" [--max-chars 35]
 
 ### `reveal`
 
-只能在 `FINISHED` 调，**而且一局只能调一次**：第二次返回 `ALREADY_REVEALED`。
-返回 `winner`、`win_reason`、`words`、每个座位的身份与词、每轮的发言与投票流向。
+只能在 `FINISHED` 调。每局成功揭晓一次：成功后再次执行返回 `ALREADY_REVEALED`。
+新版投票运行先保存公开结果快照，再通过 BCS 会话文件接口发布。发布失败返回
+`RESULT_PUBLISH_FAILED`，尚未确认揭晓；修复后重试 `reveal` 会核对同名文件，
+避免上传响应丢失导致重复发布。公开结果只包含终局事实，不包含原始投票和隐藏发言。
+返回 `winner`、`win_reason`、`words`、每个座位的身份与词、每轮的发言与投票流向，
+以及主持稿应原样使用的两行 `finale_header`。
 
 公布答案是不可撤销的，所以这里额外上了一道闸：真相已经公布过还想再公布，多半是认错了
 局（在新会话里读到了上一局的状态）。看到 `ALREADY_REVEALED` 就核对 `--session`，
 终局稿已经发过就别再发一遍。
+
+### `publish-result`
+
+```bash
+uc publish-result --session S
+```
+
+仅重试由 `reveal` 已生成的公开结果发布，不重新判胜、不重复主持稿、不关闭会话。
+已有结果内容必须一致；冲突或无法验证时失败，不覆盖。旧局没有结果快照时拒绝发布，
+由副屏的旧播报兼容逻辑展示。
+
+### `finish`
+
+```bash
+uc finish --session S
+```
+
+在 `FINISHED` 且已执行 `reveal` 后关闭 BCS 会话，成功返回 `completed=true`。
+脚本统一准备 CLI 环境，认证仍由 CLI 自动发现。失败如实报告；维护者修复后可只重试
+此命令，服务端接受重复关闭。不会再次公布答案，也不会修改本地 reveal 记录。
 
 ### `parse-vote`
 
