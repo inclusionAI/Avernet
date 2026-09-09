@@ -1,4 +1,3 @@
-import { WorkflowReleaseRepository, type ReleaseInput, type Release } from "./workflow-release-repository.js";
 /**
  * Repository for workflow_deploy_history table — centralized deploy history.
  * MySQL-only table (migration v45, mysqlOnly: true).
@@ -43,9 +42,6 @@ export type InsertDeployHistoryInput = {
 export class WorkflowDeployHistoryRepository {
   constructor(private db: IDatabase) {}
 
-  reserveRelease(input: ReleaseInput): Promise<Release> { return new WorkflowReleaseRepository(this.db).reserve(input); }
-  completeRelease(input: Omit<Release, "completed">): Promise<Release> { return new WorkflowReleaseRepository(this.db).complete(input); }
-
   async insert(input: InsertDeployHistoryInput): Promise<void> {
     const now = this.db.dialect.now();
     await this.db.exec(
@@ -63,7 +59,7 @@ export class WorkflowDeployHistoryRepository {
   async listHistory(workflowId: string, limit: number): Promise<Omit<WorkflowDeployHistoryRow, "spec_json">[]> {
     return this.db.query<Omit<WorkflowDeployHistoryRow, "spec_json">>(
       `SELECT id, pack_id, workflow_id, deploy_number, version, tag_name, action, from_deploy_number, note, bot_id, owner_id, is_active, gmt_create, gmt_modified
-       FROM workflow_deploy_history WHERE workflow_id = ? AND action <> 'pending' ORDER BY deploy_number DESC LIMIT ?`,
+       FROM workflow_deploy_history WHERE workflow_id = ? ORDER BY deploy_number DESC LIMIT ?`,
       [workflowId, limit],
     );
   }
@@ -88,7 +84,7 @@ export class WorkflowDeployHistoryRepository {
   async findByVersion(workflowId: string, version: number): Promise<Pick<WorkflowDeployHistoryRow, "deploy_number" | "tag_name" | "action" | "spec_json" | "note" | "gmt_create"> | null> {
     const rows = await this.db.query<Pick<WorkflowDeployHistoryRow, "deploy_number" | "tag_name" | "action" | "spec_json" | "note" | "gmt_create">>(
       `SELECT deploy_number, tag_name, action, spec_json, note, gmt_create
-       FROM workflow_deploy_history WHERE workflow_id = ? AND version = ? AND action <> 'pending'
+       FROM workflow_deploy_history WHERE workflow_id = ? AND version = ?
        ORDER BY deploy_number DESC LIMIT 1`,
       [workflowId, version],
     );
@@ -97,7 +93,7 @@ export class WorkflowDeployHistoryRepository {
 
   async getLatestDeploy(packId: string, workflowId: string): Promise<Pick<WorkflowDeployHistoryRow, "deploy_number" | "version" | "tag_name" | "spec_json"> | null> {
     const rows = await this.db.query<Pick<WorkflowDeployHistoryRow, "deploy_number" | "version" | "tag_name" | "spec_json">>(
-      `SELECT deploy_number, version, tag_name, spec_json FROM workflow_deploy_history WHERE pack_id = ? AND workflow_id = ? AND action <> 'pending'
+      `SELECT deploy_number, version, tag_name, spec_json FROM workflow_deploy_history WHERE pack_id = ? AND workflow_id = ?
        ORDER BY version DESC LIMIT 1`,
       [packId, workflowId],
     );
@@ -108,7 +104,7 @@ export class WorkflowDeployHistoryRepository {
   async findByDeployNumber(packId: string, workflowId: string, deployNumber: number): Promise<Pick<WorkflowDeployHistoryRow, "deploy_number" | "version" | "tag_name" | "action" | "spec_json" | "note" | "from_deploy_number" | "gmt_create"> | null> {
     const rows = await this.db.query<Pick<WorkflowDeployHistoryRow, "deploy_number" | "version" | "tag_name" | "action" | "spec_json" | "note" | "from_deploy_number" | "gmt_create">>(
       `SELECT deploy_number, version, tag_name, action, spec_json, note, from_deploy_number, gmt_create
-       FROM workflow_deploy_history WHERE pack_id = ? AND workflow_id = ? AND deploy_number = ? AND action <> 'pending'`,
+       FROM workflow_deploy_history WHERE pack_id = ? AND workflow_id = ? AND deploy_number = ?`,
       [packId, workflowId, deployNumber],
     );
     return rows[0] ?? null;
@@ -119,7 +115,7 @@ export class WorkflowDeployHistoryRepository {
   async findByWorkflowAndDeployNumber(workflowId: string, deployNumber: number): Promise<Pick<WorkflowDeployHistoryRow, "deploy_number" | "version" | "tag_name" | "action" | "spec_json" | "note" | "from_deploy_number" | "gmt_create"> | null> {
     const rows = await this.db.query<Pick<WorkflowDeployHistoryRow, "deploy_number" | "version" | "tag_name" | "action" | "spec_json" | "note" | "from_deploy_number" | "gmt_create">>(
       `SELECT deploy_number, version, tag_name, action, spec_json, note, from_deploy_number, gmt_create
-       FROM workflow_deploy_history WHERE workflow_id = ? AND deploy_number = ? AND action <> 'pending'`,
+       FROM workflow_deploy_history WHERE workflow_id = ? AND deploy_number = ?`,
       [workflowId, deployNumber],
     );
     return rows[0] ?? null;
@@ -156,7 +152,7 @@ export class WorkflowDeployHistoryRepository {
 
       // Verify target version exists (and lock matching rows)
       const targetRows = await tx.query<{ count: number }>(
-        `SELECT COUNT(*) as count FROM workflow_deploy_history WHERE workflow_id = ? AND version = ? AND action <> 'pending' ${lockClause}`,
+        `SELECT COUNT(*) as count FROM workflow_deploy_history WHERE workflow_id = ? AND version = ? ${lockClause}`,
         [workflowId, version],
       );
       if (!targetRows[0] || targetRows[0].count === 0) {
@@ -169,7 +165,7 @@ export class WorkflowDeployHistoryRepository {
         [workflowId],
       );
       await tx.exec(
-        `UPDATE workflow_deploy_history SET is_active = 1 WHERE workflow_id = ? AND version = ? AND action <> 'pending' ORDER BY deploy_number DESC LIMIT 1`,
+        `UPDATE workflow_deploy_history SET is_active = 1 WHERE workflow_id = ? AND version = ? ORDER BY deploy_number DESC LIMIT 1`,
         [workflowId, version],
       );
       return true;

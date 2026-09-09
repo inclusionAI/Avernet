@@ -1,10 +1,3 @@
-import { ReleaseConflict } from "../../repositories/workflow-release-repository.js";
-import {
-  WORKFLOW_RELEASE_SERVICE_V1,
-  parseWorkflowReleaseReservationV1,
-  parseWorkflowReleaseReserveRequestV1,
-  type WorkflowReleaseReservationV1,
-} from "../../contracts/workflow-release-service-v1.js";
 /**
  * Internal API for deploy history management.
  *
@@ -28,35 +21,7 @@ export function createInternalDeployHistoryRouter(
 ): Router {
   const router = Router();
 
-  // These endpoints inherit internal API signature authentication from the host.
-  const releaseResponse = (value: Omit<WorkflowReleaseReservationV1, "serviceApiVersion">): WorkflowReleaseReservationV1 => ({
-    serviceApiVersion: WORKFLOW_RELEASE_SERVICE_V1.version,
-    ...value,
-  });
-  router.post(WORKFLOW_RELEASE_SERVICE_V1.reservePath, asyncHandler(async (req: Request, res: Response) => {
-    if (!wfdhRepo) { res.status(503).json({ error: "Service Unavailable" }); return; }
-    const input = parseWorkflowReleaseReserveRequestV1(req.body);
-    if (!input) { res.status(400).json({ error: "Invalid release request" }); return; }
-    try { if (JSON.parse(input.specJson)?.id !== input.workflowId) throw new Error(); }
-    catch { res.status(400).json({ error: "Snapshot workflow mismatch" }); return; }
-    try { res.json(releaseResponse(await wfdhRepo.reserveRelease(input))); }
-    catch (err) {
-      if (err instanceof ReleaseConflict) { res.status(409).json({ error: "Conflict", message: err.message }); return; }
-      throw err;
-    }
-  }));
-  router.post(WORKFLOW_RELEASE_SERVICE_V1.completePath, asyncHandler(async (req: Request, res: Response) => {
-    if (!wfdhRepo) { res.status(503).json({ error: "Service Unavailable" }); return; }
-    const release = parseWorkflowReleaseReservationV1(req.body);
-    if (!release) { res.status(400).json({ error: "Invalid release request" }); return; }
-    try { res.json(releaseResponse(await wfdhRepo.completeRelease(release))); }
-    catch (err) {
-      if (err instanceof ReleaseConflict) { res.status(409).json({ error: "Conflict", message: err.message }); return; }
-      throw err;
-    }
-  }));
-
-  /** Legacy insert: conflicts must not silently change a pre-published tag/version. */
+  /** POST / — Write one already-tagged deployment record. */
   router.post("/", asyncHandler(async (req: Request, res: Response) => {
     if (!wfdhRepo) { res.status(503).json({ error: "Service Unavailable" }); return; }
     const b = req.body as {
@@ -66,7 +31,7 @@ export function createInternalDeployHistoryRouter(
       isActive?: boolean;
     };
     if (!b.packId || !b.workflowId || typeof b.deployNumber !== "number"
-        || typeof b.version !== "number" || !["deploy", "rollback", "pull", "migration", "edit"].includes(b.action) || !b.specJson) {
+        || typeof b.version !== "number" || !b.action || !b.specJson) {
       res.status(400).json({ error: "Bad Request", message: "Missing required fields" });
       return;
     }
@@ -81,6 +46,7 @@ export function createInternalDeployHistoryRouter(
           note: b.note, botId: b.botId, ownerId: b.ownerId,
           isActive: b.isActive,
         });
+        if (b.isActive) await wfdhRepo.setActive(b.workflowId, version);
         // Sync version to workflow_specs table
         if (workflowSpecRepo) {
           try { await workflowSpecRepo.updateVersion(b.workflowId, version); }
@@ -93,7 +59,7 @@ export function createInternalDeployHistoryRouter(
         const isDuplicate = msg.includes("UNIQUE") || msg.includes("Duplicate");
 
         if (isDuplicate) {
-          // The caller must reconcile its existing tag and history.
+          // The tag's version is immutable; never silently write a different one.
           console.error(`[deploy-history] Insert failed for ${b.workflowId}: ${msg}`);
           res.status(409).json({ error: "Conflict", message: msg });
         } else {

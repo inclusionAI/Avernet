@@ -2892,39 +2892,4 @@ END`,
       `CREATE INDEX IF NOT EXISTS idx_flow_runs_origin_id ON flow_runs (origin_bot_id, id)`,
     ],
   },
-  {
-    version: 120,
-    description: "Reserve workflow releases by saved Git commit",
-    sql: [
-      `CREATE TABLE IF NOT EXISTS workflow_release_reservations (
-        workflow_id VARCHAR(255) NOT NULL,
-        snapshot_commit VARCHAR(64) NOT NULL,
-        pack_id VARCHAR(255) NOT NULL,
-        deploy_number INTEGER NOT NULL,
-        version INTEGER NOT NULL,
-        PRIMARY KEY (workflow_id, snapshot_commit)
-      )`,
-    ],
-  },
-  {
-    version: 121,
-    description: "Enforce workflow release numbers in MySQL",
-    mysqlOnly: true,
-    sql: [
-      `ALTER TABLE workflow_deploy_history ADD COLUMN release_deploy_number INT GENERATED ALWAYS AS (
-        CASE WHEN action IN ('pending', 'deploy', 'rollback') THEN deploy_number ELSE NULL END
-      ) STORED`,
-      `ALTER TABLE workflow_deploy_history ADD UNIQUE KEY uk_wdh_workflow_release_number (workflow_id, release_deploy_number)`,
-    ],
-  },
-  {
-    version: 122,
-    description: "Enforce workflow release numbers in SQLite",
-    sqliteOnly: true,
-    sql: [
-      `CREATE UNIQUE INDEX IF NOT EXISTS uk_wdh_workflow_release_number
-        ON workflow_deploy_history (workflow_id, deploy_number)
-        WHERE action IN ('pending', 'deploy', 'rollback')`,
-    ],
-  },
 ];
