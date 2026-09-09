@@ -110,6 +110,77 @@ def _add_version(
         )
 
 
+def _add_center_skill(
+    db: _Database,
+    *,
+    skill_id: int,
+    is_public: bool,
+    tenant: str = "teamclaw",
+    space_id: int | None = None,
+) -> None:
+    with avernet_tenant_scope(tenant), db.orm_session() as session:
+        session.add(
+            Skill(
+                id=skill_id,
+                name=f"center-{skill_id}",
+                git_path=f"center://skill-{skill_id}",
+                skill_uuid=f"00000000-0000-4000-8000-{skill_id:012d}",
+                is_public=is_public,
+                user_id=None,
+                bolt_id="default",
+                env="pre",
+                avernet_tenant=tenant,
+            )
+        )
+        if space_id is not None:
+            session.add(
+                SkillSpaceBinding(
+                    skill_id=skill_id,
+                    space_id=space_id,
+                    created_by="owner",
+                    env="pre",
+                    avernet_tenant=tenant,
+                )
+            )
+
+
+def test_center_access_reports_public_or_space_facts_without_deciding_actor_acl() -> (
+    None
+):
+    db = _Database()
+    _add_center_skill(db, skill_id=10, is_public=True)
+    _add_center_skill(db, skill_id=20, is_public=False, space_id=7)
+    repo = SkillVersionRepository(db)
+
+    with avernet_tenant_scope("teamclaw"):
+        public = repo.get_access(env="pre", skill_id=10)
+        space = repo.get_access(env="pre", skill_id=20)
+
+    assert public == {
+        "skill_id": 10,
+        "skill_uuid": "00000000-0000-4000-8000-000000000010",
+        "visibility": "PUBLIC",
+        "space_id": None,
+        "offline_at": None,
+    }
+    assert space is not None
+    assert space["visibility"] == "SPACE"
+    assert space["space_id"] == 7
+
+
+def test_center_access_fails_closed_for_inconsistent_or_cross_tenant_rows() -> None:
+    db = _Database()
+    _add_center_skill(db, skill_id=10, is_public=False)
+    _add_center_skill(db, skill_id=20, is_public=True, space_id=7)
+    _add_center_skill(db, skill_id=30, is_public=True, tenant="external")
+    repo = SkillVersionRepository(db)
+
+    with avernet_tenant_scope("teamclaw"):
+        assert repo.get_access(env="pre", skill_id=10) is None
+        assert repo.get_access(env="pre", skill_id=20) is None
+        assert repo.get_access(env="pre", skill_id=30) is None
+
+
 def test_latest_query_ignores_materializing_and_is_tenant_scoped() -> None:
     db = _Database()
     repo = SkillVersionRepository(db)

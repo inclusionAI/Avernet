@@ -71,6 +71,9 @@ from agentclaw.community.core.repository.protocols.bot import (
     BotCollabLogRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.center_skill_access import (
+    CenterSkillAccessRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillEditorRequestRepositoryProtocol,
     SkillCategoryRepository,
@@ -78,6 +81,10 @@ from agentclaw.community.core.repository.protocols.skill_center import (
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillCenterSyncLogRepository,
 )
+from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterVersionStore,
+)
+from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillMemberRepository,
 )
@@ -112,6 +119,9 @@ from agentclaw.community.core.skill_center.capability_state_contract import (
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
     ProjectionScope,
+)
+from agentclaw.community.core.skill_center.version_resolution_contract import (
+    SkillVersionResolverProtocol,
 )
 from agentclaw.community.core.skill_center.services.runtime_projections.registry import (
     EngineRuntimeProjectionRegistry,
@@ -464,6 +474,10 @@ class SkillCenterModule(
         reader: CoreBotCapabilityStateReaderProtocol,
         skill_service_factory: SkillServiceFactory,
         parameter_service_factory: SkillParameterServiceFactoryProtocol,
+        center_access: CenterSkillAccessRepositoryProtocol,
+        version_resolver: SkillVersionResolverProtocol,
+        canonical_store: CanonicalCenterVersionStore,
+        space_access: SpaceAccessServiceProtocol,
         injector: Injector,
     ) -> SkillQueryServiceProtocol:
         """Bind the one Bot-Skill query seam (listing/detail/content/params)."""
@@ -475,6 +489,10 @@ class SkillCenterModule(
             skill_service_factory,
             parameter_service_factory,
             lambda: injector.get(DeviceContextResolver),
+            center_access,
+            version_resolver,
+            canonical_store,
+            space_access,
         )
 
     @singleton
@@ -726,7 +744,10 @@ class SkillCenterModule(
     @singleton
     @provider
     def local_skill_storage(self) -> LocalSkillStorageResolver:
-        from agentclaw.community.plugins.local_skill_storage import ConfiguredLocalSkillStorage
+        from agentclaw.community.plugins.local_skill_storage import (
+            ConfiguredLocalSkillStorage,
+        )
+
         return ConfiguredLocalSkillStorage()
 
     @singleton

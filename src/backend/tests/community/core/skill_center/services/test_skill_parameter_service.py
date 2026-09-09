@@ -1,4 +1,5 @@
 """Tests for SkillParameterService (async, DeviceFileSystemPlugin-based)."""
+
 import json
 from unittest.mock import AsyncMock
 
@@ -8,6 +9,7 @@ from agentclaw.community.core.skill_center.services.skill_parameter_service impo
     DEFAULT_PARAMETERS_PATH,
     SkillParameterService,
 )
+from agentclaw.community.core.skill_center.errors import LocalSkillStorageError
 
 
 @pytest.fixture
@@ -25,19 +27,28 @@ def svc(mock_device_fs):
 
 # ---------- async_load ----------
 
+
 @pytest.mark.asyncio
-async def test_async_load_returns_empty_when_read_file_returns_none(svc, mock_device_fs):
+async def test_async_load_returns_empty_when_read_file_returns_none(
+    svc, mock_device_fs
+):
     """read_file returns None → _data initialises with empty parameters."""
     mock_device_fs.read_file.return_value = None
     await svc.async_load()
     assert svc._data == {"parameters": {}}
-    mock_device_fs.read_file.assert_awaited_once_with(DEFAULT_PARAMETERS_PATH)
+    mock_device_fs.read_file.assert_awaited_once_with(
+        DEFAULT_PARAMETERS_PATH,
+        preserve_read_errors=True,
+    )
 
 
 @pytest.mark.asyncio
 async def test_async_load_parses_valid_json(svc, mock_device_fs):
     """read_file returns valid JSON → _data is populated correctly."""
-    payload = {"parameters": {"my_skill": {"key": "val"}}, "updated_at": "2025-01-01T00:00:00"}
+    payload = {
+        "parameters": {"my_skill": {"key": "val"}},
+        "updated_at": "2025-01-01T00:00:00",
+    }
     mock_device_fs.read_file.return_value = json.dumps(payload).encode("utf-8")
     await svc.async_load()
     assert svc._data == payload
@@ -45,11 +56,29 @@ async def test_async_load_parses_valid_json(svc, mock_device_fs):
 
 
 @pytest.mark.asyncio
-async def test_async_load_handles_invalid_json(svc, mock_device_fs):
-    """read_file returns garbage bytes → _data falls back to empty."""
+async def test_async_load_rejects_invalid_json_without_treating_it_as_empty(
+    svc, mock_device_fs
+):
     mock_device_fs.read_file.return_value = b"NOT JSON{{"
-    await svc.async_load()
-    assert svc._data == {"parameters": {}}
+    with pytest.raises(LocalSkillStorageError):
+        await svc.async_load()
+    assert svc._data == {}
+    mock_device_fs.write_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_async_load_rejects_invalid_structure_and_read_failures(
+    svc, mock_device_fs
+):
+    mock_device_fs.read_file.return_value = b'{"parameters": []}'
+    with pytest.raises(LocalSkillStorageError):
+        await svc.async_load()
+    mock_device_fs.write_file.assert_not_awaited()
+
+    mock_device_fs.read_file.side_effect = TimeoutError("device timed out")
+    with pytest.raises(LocalSkillStorageError):
+        await svc.async_load()
+    mock_device_fs.write_file.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -60,10 +89,11 @@ async def test_async_load_custom_path():
     custom = "/tmp/custom/params.json"
     svc = SkillParameterService(device_fs=fs, file_path=custom)
     await svc.async_load()
-    fs.read_file.assert_awaited_once_with(custom)
+    fs.read_file.assert_awaited_once_with(custom, preserve_read_errors=True)
 
 
 # ---------- save_skill_parameters ----------
+
 
 @pytest.mark.asyncio
 async def test_save_skill_parameters_writes_json(svc, mock_device_fs):
@@ -80,7 +110,25 @@ async def test_save_skill_parameters_writes_json(svc, mock_device_fs):
     assert "updated_at" in written
 
 
+@pytest.mark.asyncio
+async def test_save_replaces_only_one_skill_and_preserves_metadata(svc, mock_device_fs):
+    payload = {
+        "format_version": 1,
+        "parameters": {"a": {"old": True}, "b": {"kept": 2}},
+        "updated_at": "2025-01-01T00:00:00",
+    }
+    mock_device_fs.read_file.return_value = json.dumps(payload).encode()
+    await svc.async_load()
+
+    assert await svc.save_skill_parameters("a", {"new": False}) is True
+
+    written = json.loads(mock_device_fs.write_file.await_args.args[1])
+    assert written["format_version"] == 1
+    assert written["parameters"] == {"a": {"new": False}, "b": {"kept": 2}}
+
+
 # ---------- delete_skill_parameters ----------
+
 
 @pytest.mark.asyncio
 async def test_delete_skill_parameters_removes_key(svc, mock_device_fs):
@@ -107,6 +155,7 @@ async def test_delete_nonexistent_skill_is_noop(svc, mock_device_fs):
 
 # ---------- sync readers ----------
 
+
 def test_get_skill_parameters_empty(svc):
     """Before load, returns empty dict."""
     assert svc.get_skill_parameters("anything") == {}
@@ -117,6 +166,7 @@ def test_get_all_parameters_empty(svc):
 
 
 # ---------- check_parameters_required ----------
+
 
 @pytest.mark.asyncio
 async def test_check_parameters_required_finds_missing(svc, mock_device_fs):

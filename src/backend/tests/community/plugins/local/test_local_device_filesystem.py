@@ -2,6 +2,8 @@
 
 Uses real filesystem via tmp_path — no mocks.
 """
+from pathlib import Path
+
 import pytest
 
 from agentclaw.community.core.devices.services.local_device_filesystem import LocalDeviceFileSystem
@@ -39,6 +41,21 @@ class TestReadFile:
         data = bytes(range(256))
         f.write_bytes(data)
         assert await fs.read_file(str(f)) == data
+
+    @pytest.mark.asyncio
+    async def test_preserve_read_errors_distinguishes_io_failure_from_absence(
+        self, fs, tmp_path, monkeypatch
+    ):
+        target = tmp_path / "unreadable.json"
+        target.write_bytes(b"{}")
+
+        def _denied(_path):
+            raise PermissionError("read denied")
+
+        monkeypatch.setattr(Path, "read_bytes", _denied)
+        assert await fs.read_file(str(target)) is None
+        with pytest.raises(PermissionError, match="read denied"):
+            await fs.read_file(str(target), preserve_read_errors=True)
 
 
 # ── write_file ─────────────────────────────────────────────────────────

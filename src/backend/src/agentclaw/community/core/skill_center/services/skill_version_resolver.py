@@ -31,6 +31,19 @@ class SkillVersionResolver:
     def __init__(self, versions: SkillVersionRepositoryProtocol) -> None:
         self._versions = versions
 
+    def resolve_latest_published(
+        self,
+        *,
+        env: str,
+        skill_id: int,
+    ) -> PublishedSkillVersion:
+        rows = self._versions.list_latest_published(env=env, skill_ids=(skill_id,))
+        if len(rows) != 1:
+            raise SkillVersionResolutionError(
+                "Center Skill has no PUBLISHED Version"
+            )
+        return self._published(rows[0])
+
     def resolve_latest_runtime_assets(
         self,
         *,

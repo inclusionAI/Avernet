@@ -160,7 +160,11 @@ class TeclawDeviceFileSystem(DeviceFileSystem):
         )
 
     async def read_file(
-        self, file_path: str, *, enforce_download_limit: bool = False
+        self,
+        file_path: str,
+        *,
+        enforce_download_limit: bool = False,
+        preserve_read_errors: bool = False,
     ) -> bytes | None:
         # ``enforce_download_limit`` only applies to whole-file-into-memory impls
         # (Arca); the engine read here streams, so it is ignored.
@@ -187,9 +191,13 @@ class TeclawDeviceFileSystem(DeviceFileSystem):
                     "[TeclawDeviceFileSystem.read_file] HTTP %d: %s",
                     e.response.status_code, file_path,
                 )
+                if preserve_read_errors:
+                    raise
             return None
         except Exception as e:
             logger.error("[TeclawDeviceFileSystem.read_file] error: %s", e)
+            if preserve_read_errors:
+                raise
             return None
 
     async def list_dir(

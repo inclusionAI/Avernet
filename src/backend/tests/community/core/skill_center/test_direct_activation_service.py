@@ -119,6 +119,18 @@ class _Skills:
             return {**row, "active": False}
         return None
 
+    def resolve_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str
+    ) -> dict:
+        row = self._ROWS.get(skill_id)
+        if row is None:
+            raise LocalSkillNotFoundError()
+        if str(row["git_path"]).startswith("local://") and (
+            row["bolt_id"] != bot_id or row["user_id"] != owner_id
+        ):
+            raise LocalSkillNotFoundError()
+        return {**row, "bolt_id": bot_id, "user_id": owner_id, "active": False}
+
 
 class _Authorization:
     def __init__(self, allowed: bool = True) -> None:
@@ -456,7 +468,7 @@ async def test_a_not_ready_bot_commits_desired_state_and_returns_pending():
 
 
 @pytest.mark.asyncio
-async def test_a_space_asset_and_a_mismatched_local_row_are_masked_as_not_found():
+async def test_a_visible_center_asset_is_directly_activatable_but_local_addressing_stays_exact():
     class _MoreSkills(_Skills):
         _ROWS = {
             **_Skills._ROWS,
@@ -476,12 +488,11 @@ async def test_a_space_asset_and_a_mismatched_local_row_are_masked_as_not_found(
         _PlatformDefaultMcpPolicy(),
     )
 
-    # A Space (center://) asset has no direct-activation wire.
-    with pytest.raises(LocalSkillNotFoundError):
-        await service.activate_skill(
-            skill_id="9", bot_id="bot-1", owner_id="true-owner",
-            actor_id="true-owner",
-        )
+    result = await service.activate_skill(
+        skill_id="9", bot_id="bot-1", owner_id="true-owner",
+        actor_id="true-owner",
+    )
+    assert result["active"] is True
     # A Local row carries its own Bot: addressing it through another Bot
     # must not resolve.
     with pytest.raises(LocalSkillNotFoundError):
@@ -489,7 +500,7 @@ async def test_a_space_asset_and_a_mismatched_local_row_are_masked_as_not_found(
             skill_id="7", bot_id="another-bot", owner_id="true-owner",
             actor_id="true-owner",
         )
-    assert repository.install_skill_calls == []
+    assert [call["skill_id"] for call in repository.install_skill_calls] == ["9"]
 
 
 @pytest.mark.asyncio

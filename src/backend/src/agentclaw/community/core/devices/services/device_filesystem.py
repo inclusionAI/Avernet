@@ -28,7 +28,11 @@ class DeviceFileSystem(Protocol):
     """Read / write / delete files on a device filesystem."""
 
     async def read_file(
-        self, file_path: str, *, enforce_download_limit: bool = False
+        self,
+        file_path: str,
+        *,
+        enforce_download_limit: bool = False,
+        preserve_read_errors: bool = False,
     ) -> bytes | None:
         """Read file content.
 
@@ -38,6 +42,9 @@ class DeviceFileSystem(Protocol):
                 memory (Arca) checks the size **before** reading and raises
                 :class:`FileTooLargeError` if it exceeds the impl's cap. Other impls
                 ignore the flag.
+            preserve_read_errors: When True, distinguish transport/permission
+                failures from a missing file. Read-modify-write flows use this
+                to prevent an unreadable file from being treated as empty.
 
         Returns:
             File content as bytes, or None if file does not exist.
