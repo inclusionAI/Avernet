@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use bcs_service_api::types::MessageViewScope;
 use bcs_service_api::{
     CreateOrReactivateCommand, CreateOrReactivateOutcome, EnsureOwnerEdgesResult, Participant,
     ParticipantMode, RelationCoreService, RelationEdge, ServiceError, ServiceResult, Session,
@@ -118,6 +119,7 @@ impl SessionManagementService for EmptySessionManagementService {
                 caller_principal: cmd.params.caller_principal,
                 created_by: cmd.params.created_by,
                 current_msg_seq: 0,
+                message_visibility_version: cmd.params.message_visibility_version,
                 participant_join_seq: None,
                 created_at: 0,
                 updated_at: 0,
@@ -205,6 +207,17 @@ impl SessionManagementService for EmptySessionManagementService {
         _mode: ParticipantMode,
     ) -> Result<Session, SessionUseCaseError> {
         Err(SessionUseCaseError::Conflict("EmptySessionManagementService".to_string()))
+    }
+
+    async fn update_participant_message_view_scope(
+        &self,
+        _session_id: &str,
+        _actor_id: &str,
+        _message_view_scope: MessageViewScope,
+    ) -> Result<Session, SessionUseCaseError> {
+        Err(SessionUseCaseError::Conflict(
+            "EmptySessionManagementService".to_string(),
+        ))
     }
 
     async fn update_title(

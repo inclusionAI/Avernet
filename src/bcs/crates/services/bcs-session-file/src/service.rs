@@ -929,6 +929,7 @@ mod tests {
                         error_message: None,
                         callback_status: None,
                         activation_count: 1,
+                        message_visibility_version: 1,
                         caller_principal: None,
                         created_by: Some("creator_1".into()),
                         current_msg_seq: 0,

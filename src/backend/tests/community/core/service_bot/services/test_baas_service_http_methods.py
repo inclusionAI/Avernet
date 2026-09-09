@@ -16,6 +16,7 @@ import pytest
 from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
     ManagedDeployConfigComposer,
 )
+from agentclaw.community.core.service_bot.services import baas_service as baas_service_module
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.plugins.local.http_client import LocalHttpClient
 from agentclaw.community.plugins.local.outbound_rules import NoopOutboundRuleProvider
@@ -204,6 +205,58 @@ class TestBaasServiceHttpMethods:
         call = http.calls_to("put")[0]
         assert call.args[0] == "/api/v1/paas/devices/PAAS-1/outbound-rule"
         assert call.kwargs["json"] == {"header_operation_rules": []}
+
+    def test_append_token_uses_exact_append_path_and_jit_header(self, monkeypatch):
+        service, http = _make_service()
+        test_logger = MagicMock()
+        monkeypatch.setattr(baas_service_module, "logger", test_logger)
+        http.set_response("put", _resp({}))
+
+        assert service.append_token(
+            paas_device_id="dev-1@tpl-1",
+            header_name="x-jit-token",
+            action="set",
+            token="jit-secret",
+            plugin_code="jit_token",
+        ) is True
+
+        call = http.calls_to("put")[0]
+        assert call.args[0] == "/api/v1/paas/devices/dev-1@tpl-1/outbound-rule?mode=append"
+        assert call.kwargs["json"] == {
+            "header_operation_rules": [
+                {
+                    "domains": [],
+                    "action": "set",
+                    "header_name": "x-jit-token",
+                    "value": "jit-secret",
+                    "placeholder": None,
+                    "separator": None,
+                }
+            ]
+        }
+        assert "token_outbound_append_started" in repr(test_logger.info.call_args_list)
+        assert "token_outbound_append_succeeded" in repr(test_logger.info.call_args_list)
+        assert "jit-secret" not in repr(test_logger.method_calls)
+
+    def test_append_token_rejects_unsafe_paas_device_id_before_http(self, monkeypatch):
+        service, http = _make_service()
+        test_logger = MagicMock()
+        monkeypatch.setattr(baas_service_module, "logger", test_logger)
+
+        with pytest.raises(ValueError, match="invalid token outbound rule"):
+            service.append_token(
+                paas_device_id="dev-1@../../admin",
+                header_name="x-jit-token",
+                action="set",
+                token="jit-secret",
+                plugin_code="jit_token",
+            )
+
+        assert http.calls_to("put") == []
+        assert "token_outbound_append_rejected_invalid_input" in repr(
+            test_logger.warning.call_args_list
+        )
+        assert "jit-secret" not in repr(test_logger.method_calls)
 
     def test_append_caller_outbound_rule_uses_exact_append_path_and_body(self):
         service, http = _make_service()

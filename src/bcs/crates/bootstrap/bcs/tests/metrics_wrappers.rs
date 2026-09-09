@@ -293,6 +293,7 @@ impl GroupManagementService for GroupServiceFake {
             group_id: cmd.group_id,
             actor_id: cmd.actor_id,
             mode: cmd.mode,
+            message_view_scope: cmd.message_view_scope.unwrap_or_default(),
         })
     }
 
@@ -560,6 +561,7 @@ fn participant_view(bot_uuid: &str) -> GroupParticipantView {
         actor_kind: ActorKind::Bot,
         mode: None,
         tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
     }
 }
 
@@ -598,6 +600,7 @@ fn group_add_member_cmd() -> GroupAddMemberCommand {
         human_actor_id: None,
         group_id: "group-wrapper".to_string(),
         bot_id: "bot-member".to_string(),
+        message_view_scope: None,
     }
 }
 
@@ -738,5 +741,7 @@ fn frontend_delivery_cmd() -> FrontendDeliveryCommand {
         delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
         run_fallback: None,
         exclude_conn_id: None,
+        visibility_domain: bcs_domain::MessageVisibilityDomain::Chat,
+        audience: Some(bcs_domain::MessageAudience::Public),
     }
 }

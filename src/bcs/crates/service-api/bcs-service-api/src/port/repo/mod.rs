@@ -66,6 +66,7 @@ pub use session::{
     AddSessionParticipantWithEvent, ClaimSessionCallback, CompleteSessionCallback,
     CompleteSessionWithEvent, CreateSessionWithEvent, NewSessionParams,
     RemoveSessionParticipantWithEvent, SessionCallbackClaim, SessionRepoPort,
+    UpdateSessionParticipantMessageViewScopeWithEvent,
 };
 pub use session_file::{
     NewSessionFileParams, SessionFileListPage, SessionFileListParams, SessionFileRepoPort,

@@ -6,25 +6,28 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use bcs_domain::{
-    BCS_SESSION_OPENING_MESSAGE_SENDER, BCS_SESSION_OPENING_MESSAGE_SENDER_NAME, NewMessage,
-    OpeningMessageRenderContext, SESSION_OPENING_MESSAGE_TYPE, SenderType,
+    BCS_SESSION_OPENING_MESSAGE_SENDER, BCS_SESSION_OPENING_MESSAGE_SENDER_NAME, MessageAudience,
+    MessageVisibilityDomain, NewMessage, OpeningMessageRenderContext, SESSION_OPENING_MESSAGE_TYPE,
+    SenderType,
 };
 
 use bcs_service_api::application::session::{
-    ClaimSessionCallbackCommand, ClaimSessionCallbackOutcome,
-    CompleteSessionCallbackCommand, CreateOrReactivateCommand, CreateOrReactivateOutcome,
-    SessionManagementService, SessionUseCaseError,
+    ClaimSessionCallbackCommand, ClaimSessionCallbackOutcome, CompleteSessionCallbackCommand,
+    CreateOrReactivateCommand, CreateOrReactivateOutcome, SessionManagementService,
+    SessionUseCaseError,
 };
 use bcs_service_api::core::session::new_session_id;
 use bcs_service_api::port::repo::{
     AddSessionParticipantWithEvent, ClaimSessionCallback, CompleteSessionCallback,
-    CompleteSessionWithEvent, CreateSessionWithEvent, GroupRepoPort,
-    MessageRepoPort, RemoveSessionParticipantWithEvent, SessionRepoPort,
+    CompleteSessionWithEvent, CreateSessionWithEvent, GroupRepoPort, MessageRepoPort,
+    RemoveSessionParticipantWithEvent, SessionRepoPort,
+    UpdateSessionParticipantMessageViewScopeWithEvent,
 };
 use bcs_service_api::port::{
     EventRecordFactoryPort, FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort,
     FrontendDeliveryTarget, NewEvent,
 };
+use bcs_service_api::types::MessageViewScope;
 use bcs_service_api::types::{EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject};
 use bcs_service_api::{
     ActorKind, BotRuntimeConnectionService, CollaborationRuntimeService, GroupStrategy,
@@ -102,10 +105,7 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
             .await
     }
 
-    async fn count_running_service(
-        &self,
-        group_id: &str,
-    ) -> Result<u64, SessionUseCaseError> {
+    async fn count_running_service(&self, group_id: &str) -> Result<u64, SessionUseCaseError> {
         self.inner.count_running_service(group_id).await
     }
 
@@ -188,6 +188,34 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
             .await
     }
 
+    async fn update_participant_message_view_scope(
+        &self,
+        session_id: &str,
+        actor_id: &str,
+        message_view_scope: MessageViewScope,
+    ) -> Result<Session, SessionUseCaseError> {
+        self.inner
+            .update_participant_message_view_scope(session_id, actor_id, message_view_scope)
+            .await
+    }
+
+    async fn update_participant_mode_and_message_view_scope(
+        &self,
+        session_id: &str,
+        actor_id: &str,
+        mode: Option<ParticipantMode>,
+        message_view_scope: MessageViewScope,
+    ) -> Result<Session, SessionUseCaseError> {
+        self.inner
+            .update_participant_mode_and_message_view_scope(
+                session_id,
+                actor_id,
+                mode,
+                message_view_scope,
+            )
+            .await
+    }
+
     async fn update_title(
         &self,
         session_id: &str,
@@ -217,19 +245,11 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         self.inner.delete(session_id).await
     }
 
-    async fn collect(
-        &self,
-        session_id: &str,
-        bot_uuid: &str,
-    ) -> Result<(), SessionUseCaseError> {
+    async fn collect(&self, session_id: &str, bot_uuid: &str) -> Result<(), SessionUseCaseError> {
         self.inner.collect(session_id, bot_uuid).await
     }
 
-    async fn uncollect(
-        &self,
-        session_id: &str,
-        bot_uuid: &str,
-    ) -> Result<(), SessionUseCaseError> {
+    async fn uncollect(&self, session_id: &str, bot_uuid: &str) -> Result<(), SessionUseCaseError> {
         self.inner.uncollect(session_id, bot_uuid).await
     }
 
@@ -243,14 +263,7 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         limit: u64,
     ) -> Result<Vec<Session>, SessionUseCaseError> {
         self.inner
-            .list_collected_by_group(
-                group_id,
-                bot_uuid,
-                status,
-                title_contains,
-                offset,
-                limit,
-            )
+            .list_collected_by_group(group_id, bot_uuid, status, title_contains, offset, limit)
             .await
     }
 
@@ -275,10 +288,7 @@ impl SessionManagementServiceImpl {
         }
     }
 
-    pub fn with_bot_runtime(
-        mut self,
-        bot_runtime: Arc<dyn BotRuntimeConnectionService>,
-    ) -> Self {
+    pub fn with_bot_runtime(mut self, bot_runtime: Arc<dyn BotRuntimeConnectionService>) -> Self {
         self.bot_runtime = Some(bot_runtime);
         self
     }
@@ -338,6 +348,13 @@ impl SessionManagementServiceImpl {
             GroupStrategy::ManagerWorker => "manager_worker",
             GroupStrategy::StateMachine => unreachable!("filtered above"),
         };
+        let visibility_domain = match group.group_strategy {
+            GroupStrategy::Chat => MessageVisibilityDomain::Chat,
+            GroupStrategy::ManagerWorker => MessageVisibilityDomain::ManagerWorker,
+            GroupStrategy::StateMachine => unreachable!("filtered above"),
+        };
+        let audience =
+            (visibility_domain != MessageVisibilityDomain::Chat).then_some(MessageAudience::Public);
         let mut opening_metadata = serde_json::json!({
             "scope": "session",
             "strategy": strategy,
@@ -364,6 +381,8 @@ impl SessionManagementServiceImpl {
                 owner_bot_id: None,
                 created_at: session.created_at,
                 run_id: run_id.clone(),
+                visibility_domain,
+                audience,
             })
             .await
             .map_err(|error| {
@@ -411,6 +430,13 @@ impl SessionManagementServiceImpl {
             "group_id": group.id,
             "bot_uuid": BCS_SESSION_OPENING_MESSAGE_SENDER,
         });
+        let visibility_domain = match group.group_strategy {
+            GroupStrategy::Chat => MessageVisibilityDomain::Chat,
+            GroupStrategy::ManagerWorker => MessageVisibilityDomain::ManagerWorker,
+            GroupStrategy::StateMachine => MessageVisibilityDomain::StateMachine,
+        };
+        let audience =
+            (visibility_domain != MessageVisibilityDomain::Chat).then_some(MessageAudience::Public);
         match tokio::time::timeout(
             Duration::from_millis(500),
             frontend_delivery.publish(FrontendDeliveryCommand {
@@ -421,6 +447,8 @@ impl SessionManagementServiceImpl {
                 delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
                 run_fallback: None,
                 exclude_conn_id: None,
+                visibility_domain,
+                audience,
             }),
         )
         .await
@@ -516,7 +544,10 @@ impl SessionManagementService for SessionManagementServiceImpl {
                 }
             }
             let session = self.repo.reactivate(sid, cmd.params.input.clone()).await?;
-            Ok(CreateOrReactivateOutcome { session, created: false })
+            Ok(CreateOrReactivateOutcome {
+                session,
+                created: false,
+            })
         } else {
             self.ensure_manager_worker_accepts_participants(
                 &cmd.group_id,
@@ -533,9 +564,8 @@ impl SessionManagementService for SessionManagementServiceImpl {
             } else {
                 let session_id = match params.id.clone() {
                     Some(session_id) => session_id,
-                    None => new_session_id(&cmd.group_id).map_err(|error| {
-                        SessionUseCaseError::InvalidParams(error.to_string())
-                    })?,
+                    None => new_session_id(&cmd.group_id)
+                        .map_err(|error| SessionUseCaseError::InvalidParams(error.to_string()))?,
                 };
                 params.id = Some(session_id.clone());
                 let mut data = BTreeMap::new();
@@ -545,10 +575,8 @@ impl SessionManagementService for SessionManagementServiceImpl {
                 );
                 data.insert("status".to_string(), json!("running"));
                 data.insert("initial".to_string(), json!(false));
-                if let Some(created_by) = params
-                    .created_by
-                    .as_deref()
-                    .or(params.caller_id.as_deref())
+                if let Some(created_by) =
+                    params.created_by.as_deref().or(params.caller_id.as_deref())
                 {
                     data.insert("created_by".to_string(), json!(created_by));
                 }
@@ -573,9 +601,8 @@ impl SessionManagementService for SessionManagementServiceImpl {
                 }
             };
             if let Some(group) = group.as_ref() {
-                if let Err(opening_error) = self
-                    .persist_session_opening_message(group, &session)
-                    .await
+                if let Err(opening_error) =
+                    self.persist_session_opening_message(group, &session).await
                 {
                     let opening_error_message = opening_error.to_string();
                     let compensation_reason =
@@ -595,12 +622,12 @@ impl SessionManagementService for SessionManagementServiceImpl {
                         .await
                     };
                     if let Err(compensation_error) = compensation_result {
-                        return Err(SessionUseCaseError::Internal(
-                            ServiceError::InternalError(format!(
+                        return Err(SessionUseCaseError::Internal(ServiceError::InternalError(
+                            format!(
                                 "{opening_error_message}; failed to compensate session '{}': {compensation_error}",
                                 session.id
-                            )),
-                        ));
+                            ),
+                        )));
                     }
                     return Err(opening_error);
                 }
@@ -646,10 +673,7 @@ impl SessionManagementService for SessionManagementServiceImpl {
             .await?)
     }
 
-    async fn count_running_service(
-        &self,
-        group_id: &str,
-    ) -> Result<u64, SessionUseCaseError> {
+    async fn count_running_service(&self, group_id: &str) -> Result<u64, SessionUseCaseError> {
         Ok(self.repo.count_running_service(group_id).await)
     }
 
@@ -756,7 +780,11 @@ impl SessionManagementService for SessionManagementServiceImpl {
         data.insert("completed_by".to_string(), json!("bcs-system"));
         data.insert(
             "reason".to_string(),
-            json!(if error.is_some() { "failed" } else { "completed" }),
+            json!(if error.is_some() {
+                "failed"
+            } else {
+                "completed"
+            }),
         );
         data.insert(
             "summary".to_string(),
@@ -877,10 +905,15 @@ impl SessionManagementService for SessionManagementServiceImpl {
             }
 
             if group.group_strategy == GroupStrategy::ManagerWorker {
-                if let Some(manager) = group.participants.iter().find(|p| p.role == ParticipantRole::Manager) {
+                if let Some(manager) = group
+                    .participants
+                    .iter()
+                    .find(|p| p.role == ParticipantRole::Manager)
+                {
                     if bot_uuid == manager.bot_uuid {
                         return Err(SessionUseCaseError::InvalidParams(
-                            "Cannot remove the Manager bot from a ManagerWorker session".to_string(),
+                            "Cannot remove the Manager bot from a ManagerWorker session"
+                                .to_string(),
                         ));
                     }
                 }
@@ -935,7 +968,109 @@ impl SessionManagementService for SessionManagementServiceImpl {
         bot_uuid: &str,
         mode: ParticipantMode,
     ) -> Result<Session, SessionUseCaseError> {
-        Ok(self.repo.update_participant_mode(session_id, bot_uuid, mode).await?)
+        Ok(self
+            .repo
+            .update_participant_mode(session_id, bot_uuid, mode)
+            .await?)
+    }
+
+    async fn update_participant_message_view_scope(
+        &self,
+        session_id: &str,
+        actor_id: &str,
+        message_view_scope: MessageViewScope,
+    ) -> Result<Session, SessionUseCaseError> {
+        self.update_participant_mode_and_message_view_scope(
+            session_id,
+            actor_id,
+            None,
+            message_view_scope,
+        )
+        .await
+    }
+
+    async fn update_participant_mode_and_message_view_scope(
+        &self,
+        session_id: &str,
+        actor_id: &str,
+        mode: Option<ParticipantMode>,
+        message_view_scope: MessageViewScope,
+    ) -> Result<Session, SessionUseCaseError> {
+        let session = self
+            .repo
+            .get(session_id)
+            .await
+            .ok_or_else(|| SessionUseCaseError::NotFound(session_id.to_string()))?;
+        let participant = session
+            .participants
+            .iter()
+            .find(|participant| participant.bot_uuid == actor_id)
+            .ok_or_else(|| {
+                SessionUseCaseError::InvalidParams(format!(
+                    "participant {actor_id} not in session {session_id}"
+                ))
+            })?;
+        if !message_view_scope.is_valid_for(participant.actor_kind) {
+            return Err(SessionUseCaseError::InvalidParams(
+                "Bot participants must use full message_view_scope".to_string(),
+            ));
+        }
+        if mode.is_some_and(|mode| !mode.is_valid_for(participant.actor_kind)) {
+            return Err(SessionUseCaseError::InvalidParams(
+                "Participant mode is invalid for the actor kind".to_string(),
+            ));
+        }
+        let previous_scope = participant.message_view_scope;
+        let scope_changed = previous_scope != message_view_scope;
+        let mode_changed = mode.is_some_and(|mode| participant.effective_mode() != mode);
+        if !scope_changed && !mode_changed {
+            return Ok(session);
+        }
+        if !scope_changed {
+            return Ok(self
+                .repo
+                .update_participant_mode(
+                    session_id,
+                    actor_id,
+                    mode.expect("mode differs when scope is unchanged"),
+                )
+                .await?);
+        }
+        let mut data = BTreeMap::new();
+        data.insert("actor_id".to_string(), json!(actor_id));
+        data.insert("from_scope".to_string(), json!(previous_scope));
+        data.insert("to_scope".to_string(), json!(message_view_scope));
+        match self.prepare_event(
+            "session.participant.message_view_scope_changed",
+            &session.group_id,
+            session_id,
+            "participant",
+            actor_id,
+            data,
+        )? {
+            Some(event) => Ok(self
+                .repo
+                .update_participant_message_view_scope_with_event(
+                    UpdateSessionParticipantMessageViewScopeWithEvent {
+                        session_id: session_id.to_string(),
+                        expected_participants: session.participants,
+                        actor_id: actor_id.to_string(),
+                        message_view_scope,
+                        mode,
+                        event,
+                    },
+                )
+                .await?),
+            None => Ok(self
+                .repo
+                .update_participant_mode_and_message_view_scope(
+                    session_id,
+                    actor_id,
+                    mode,
+                    message_view_scope,
+                )
+                .await?),
+        }
     }
 
     async fn update_title(
@@ -960,11 +1095,7 @@ impl SessionManagementService for SessionManagementServiceImpl {
         Ok(self.repo.delete(session_id).await?)
     }
 
-    async fn collect(
-        &self,
-        session_id: &str,
-        bot_uuid: &str,
-    ) -> Result<(), SessionUseCaseError> {
+    async fn collect(&self, session_id: &str, bot_uuid: &str) -> Result<(), SessionUseCaseError> {
         if self.repo.get(session_id).await.is_none() {
             return Err(SessionUseCaseError::NotFound(session_id.to_string()));
         }
@@ -972,11 +1103,7 @@ impl SessionManagementService for SessionManagementServiceImpl {
         Ok(())
     }
 
-    async fn uncollect(
-        &self,
-        session_id: &str,
-        bot_uuid: &str,
-    ) -> Result<(), SessionUseCaseError> {
+    async fn uncollect(&self, session_id: &str, bot_uuid: &str) -> Result<(), SessionUseCaseError> {
         if self.repo.get(session_id).await.is_none() {
             return Err(SessionUseCaseError::NotFound(session_id.to_string()));
         }

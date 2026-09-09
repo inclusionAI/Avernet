@@ -19,6 +19,7 @@ use bcs_event_store::{
     EventAppendTransactionPlan, GroupDeletionEventTransactionPlan,
     GroupProvisioningEventTransactionPlan,
 };
+use bcs_domain::MessageViewScope;
 use chrono::{TimeZone, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -31,8 +32,9 @@ use bcs_service_api::port::repo::{
 use bcs_service_api::types::OpeningMessage;
 use bcs_service_api::{
     ActorKind, DefaultDelivery, Group, GroupMessage, GroupMetricCount, GroupMetricsSnapshotPort,
-    GroupMutableFieldsPatch, GroupStatus, GroupStrategy, Participant, ParticipantKind,
-    ParticipantMode, ParticipantRole, RoutingPolicy, ServiceError, ServiceResult, Workspace,
+    GroupMutableFieldsPatch, GroupStatus, GroupStrategy, Participant,
+    ParticipantKind, ParticipantMode, ParticipantRole, RoutingPolicy, ServiceError, ServiceResult,
+    Workspace,
 };
 
 pub mod memory;
@@ -248,6 +250,30 @@ fn apply_db_group_mutation_candidate(
                 true
             }
         }
+        GroupEventfulMutation::UpdateParticipantMessageViewScope {
+            actor_id,
+            message_view_scope,
+            mode,
+        } => {
+            let participant = group
+                .participants
+                .iter_mut()
+                .find(|participant| participant.bot_uuid == *actor_id)
+                .ok_or_else(|| ServiceError::ParticipantNotFound(actor_id.clone()))?;
+            if !message_view_scope.is_valid_for(participant.actor_kind) {
+                return Err(ServiceError::InvalidOperation {
+                    message: "Bot participants must use full message_view_scope".to_string(),
+                    request_id: None,
+                });
+            }
+            let scope_changed = participant.message_view_scope != *message_view_scope;
+            let mode_changed = mode.is_some_and(|mode| participant.effective_mode() != mode);
+            participant.message_view_scope = *message_view_scope;
+            if let Some(mode) = mode {
+                participant.mode = Some(*mode);
+            }
+            scope_changed || mode_changed
+        }
         GroupEventfulMutation::UpdateRoutingPolicy(policy) => {
             let current = serde_json::to_value(&group.routing_policy)
                 .map_err(|error| ServiceError::InternalError(error.to_string()))?;
@@ -400,6 +426,54 @@ impl MySqlGroupStore {
             ParticipantMode::Muted => "muted",
             ParticipantMode::Present => "present",
             ParticipantMode::Absent => "absent",
+        }
+    }
+
+    fn message_view_scope_to_str(scope: MessageViewScope) -> &'static str {
+        match scope {
+            MessageViewScope::Full => "full",
+            MessageViewScope::Participant => "participant",
+        }
+    }
+
+    fn parse_message_view_scope(raw: Option<&str>) -> ServiceResult<MessageViewScope> {
+        match raw {
+            None | Some("") | Some("full") => Ok(MessageViewScope::Full),
+            Some("participant") => Ok(MessageViewScope::Participant),
+            Some(other) => Err(ServiceError::InternalError(format!(
+                "unknown participant message_view_scope '{other}'"
+            ))),
+        }
+    }
+
+    fn message_view_scope_from_row(
+        row: &DbRow,
+        column: &str,
+        group_id: &str,
+        actor_id: &str,
+        actor_kind: ActorKind,
+    ) -> MessageViewScope {
+        let least_privileged = match actor_kind {
+            ActorKind::Human => MessageViewScope::Participant,
+            ActorKind::Bot => MessageViewScope::Full,
+        };
+        let raw = match db_get_column_opt::<String>(row, column) {
+            Ok(raw) => raw,
+            Err(error) => {
+                error!(%group_id, %actor_id, %error, "failed to decode participant message view scope");
+                return least_privileged;
+            }
+        };
+        match Self::parse_message_view_scope(raw.as_deref()) {
+            Ok(scope) if scope.is_valid_for(actor_kind) => scope,
+            Ok(scope) => {
+                error!(%group_id, %actor_id, ?scope, ?actor_kind, "invalid participant message view scope for actor kind");
+                least_privileged
+            }
+            Err(error) => {
+                error!(%group_id, %actor_id, %error, "invalid participant message view scope");
+                least_privileged
+            }
         }
     }
 
@@ -753,7 +827,7 @@ impl MySqlGroupStore {
         &self,
         group_id: &str,
     ) -> ServiceResult<Vec<Participant>> {
-        let sql = "SELECT bot_uuid, role, actor_kind, mode, tags_json FROM bcs_group_participants \
+        let sql = "SELECT bot_uuid, role, actor_kind, mode, tags_json, message_view_scope FROM bcs_group_participants \
              WHERE group_id = ? AND env = ?";
 
         let rows = self
@@ -787,7 +861,8 @@ impl MySqlGroupStore {
                     db_get_column_opt(row, "mode").map_err(|error| decode("mode", error))?;
                 let tags_json: Option<String> = db_get_column_opt(row, "tags_json")
                     .map_err(|error| decode("tags_json", error))?;
-
+                let scope_raw: Option<String> = db_get_column_opt(row, "message_view_scope")
+                    .map_err(|error| decode("message_view_scope", error))?;
                 let (actor_kind, mode) = Self::normalize_kind_mode(
                     group_id,
                     &bot_uuid,
@@ -795,6 +870,12 @@ impl MySqlGroupStore {
                     actor_kind_str.as_deref(),
                     mode_str.as_deref(),
                 );
+                let message_view_scope = Self::parse_message_view_scope(scope_raw.as_deref())?;
+                if !message_view_scope.is_valid_for(actor_kind) {
+                    return Err(ServiceError::InternalError(format!(
+                        "Bot participant '{bot_uuid}' has invalid participant message scope"
+                    )));
+                }
 
                 Ok(Participant {
                     bot_uuid,
@@ -804,6 +885,7 @@ impl MySqlGroupStore {
                     actor_kind,
                     mode: Some(mode),
                     tags: Self::deserialize_participant_tags(tags_json),
+                    message_view_scope,
                 })
             })
             .collect()
@@ -821,7 +903,7 @@ impl MySqlGroupStore {
                     gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                     gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                     {} AS created_ts, {} AS updated_ts, \
-                    gp.actor_kind, gp.mode, gp.tags_json, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
+                    gp.actor_kind, gp.mode, gp.tags_json, gp.message_view_scope, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
              FROM bcs_groups gs \
              LEFT JOIN bcs_group_participants gp ON gs.group_id = gp.group_id AND gp.env = ? \
              WHERE gs.env = ?",
@@ -951,7 +1033,7 @@ impl MySqlGroupStore {
                         mode_str.as_deref(),
                     );
                     entry.participants.push(Participant {
-                        bot_uuid,
+                        bot_uuid: bot_uuid.clone(),
                         bot_name: None,
                         kind: Some(ParticipantKind::Bot),
                         role: Self::str_to_role(&role_str),
@@ -959,6 +1041,13 @@ impl MySqlGroupStore {
                         mode: Some(mode),
                         tags: Self::deserialize_participant_tags(
                             db_get_column_opt(row, "tags_json").ok().flatten(),
+                        ),
+                        message_view_scope: Self::message_view_scope_from_row(
+                            row,
+                            "message_view_scope",
+                            &entry.id,
+                            &bot_uuid,
+                            actor_kind,
                         ),
                     });
                 }
@@ -1140,8 +1229,8 @@ impl GroupRepoPort for MySqlGroupStore {
         };
         let g_version: i64 = group.version as i64;
         let g_record_status = group.record_status.clone();
-        // Build participant tuples: (bot_uuid, role_str, actor_kind_str, mode_str, tags_json)
-        let g_participants: Vec<(String, &'static str, &'static str, &'static str, String)> = group
+        // Build participant tuples: (bot_uuid, role_str, actor_kind_str, mode_str, tags_json, scope)
+        let g_participants: Vec<(String, &'static str, &'static str, &'static str, String, &'static str)> = group
             .participants
             .iter()
             .map(|p| {
@@ -1153,6 +1242,7 @@ impl GroupRepoPort for MySqlGroupStore {
                     serde_json::to_string(&p.tags).map_err(|error| {
                         ServiceError::InternalError(format!("participant tags: {error}"))
                     })?,
+                    Self::message_view_scope_to_str(p.message_view_scope),
                 ))
             })
             .collect::<ServiceResult<Vec<_>>>()?;
@@ -1218,10 +1308,10 @@ impl GroupRepoPort for MySqlGroupStore {
 
         // 3. Insert new participants.
         // Always populate actor_kind + mode explicitly per Requirement 3.10#2 / 3.18#6.
-        for (bot_uuid, role_str, actor_kind_str, mode_str, tags_json) in &g_participants {
+        for (bot_uuid, role_str, actor_kind_str, mode_str, tags_json, message_view_scope) in &g_participants {
             steps.push(DbTransactionStep::Execute(DbStatement::with_params(
-                    "INSERT INTO bcs_group_participants (group_id, bot_uuid, role, env, actor_kind, mode, tags_json) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO bcs_group_participants (group_id, bot_uuid, role, env, actor_kind, mode, tags_json, message_view_scope) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     vec![
                         Value::from(g_id.as_str()),
                         Value::from(bot_uuid.as_str()),
@@ -1230,6 +1320,7 @@ impl GroupRepoPort for MySqlGroupStore {
                         Value::from(*actor_kind_str),
                         Value::from(*mode_str),
                         Value::from(tags_json.as_str()),
+                        Value::from(*message_view_scope),
                     ],
             )));
         }
@@ -1474,8 +1565,8 @@ impl GroupRepoPort for MySqlGroupStore {
                 steps.push(DbTransactionStep::Execute(
                     DbStatement::with_transaction_params(
                         "INSERT INTO bcs_group_participants \
-                         (group_id, bot_uuid, role, env, actor_kind, mode) \
-                         VALUES (?, ?, ?, ?, ?, ?)",
+                         (group_id, bot_uuid, role, env, actor_kind, mode, message_view_scope) \
+                         VALUES (?, ?, ?, ?, ?, ?, ?)",
                         vec![
                             group_id.clone(),
                             DbTransactionParam::value(participant.bot_uuid.as_str()),
@@ -1486,6 +1577,9 @@ impl GroupRepoPort for MySqlGroupStore {
                             )),
                             DbTransactionParam::value(Self::mode_to_str(
                                 participant.effective_mode(),
+                            )),
+                            DbTransactionParam::value(Self::message_view_scope_to_str(
+                                participant.message_view_scope,
                             )),
                         ],
                     ),
@@ -1568,6 +1662,70 @@ impl GroupRepoPort for MySqlGroupStore {
                             DbTransactionParam::query_result(participant_query_step, 0, "bot_uuid"),
                         ],
                     ),
+                ));
+                steps.push(group_version_update_step(
+                    &self.env,
+                    group_id.clone(),
+                    &mutated_at,
+                ));
+            }
+            GroupEventfulMutation::UpdateParticipantMessageViewScope {
+                actor_id,
+                message_view_scope,
+                mode,
+            } => {
+                let participant_query_step = steps.len();
+                let participant_lock = match self.flavor {
+                    DbSqlFlavor::Mysql => {
+                        "SELECT bot_uuid FROM bcs_group_participants \
+                         WHERE env = ? AND group_id = ? AND bot_uuid = ? FOR UPDATE"
+                    }
+                    DbSqlFlavor::Sqlite => {
+                        "SELECT bot_uuid FROM bcs_group_participants \
+                         WHERE env = ? AND group_id = ? AND bot_uuid = ?"
+                    }
+                };
+                steps.push(DbTransactionStep::Query(
+                    DbStatement::with_transaction_params(
+                        participant_lock,
+                        vec![
+                            DbTransactionParam::value(self.env.as_str()),
+                            group_id.clone(),
+                            DbTransactionParam::value(actor_id.as_str()),
+                        ],
+                    ),
+                ));
+                let (update_sql, update_params) = if let Some(mode) = mode {
+                    (
+                        "UPDATE bcs_group_participants \
+                         SET message_view_scope = ?, mode = ? \
+                         WHERE env = ? AND group_id = ? AND bot_uuid = ?",
+                        vec![
+                            DbTransactionParam::value(Self::message_view_scope_to_str(
+                                *message_view_scope,
+                            )),
+                            DbTransactionParam::value(Self::mode_to_str(*mode)),
+                            DbTransactionParam::value(self.env.as_str()),
+                            group_id.clone(),
+                            DbTransactionParam::query_result(participant_query_step, 0, "bot_uuid"),
+                        ],
+                    )
+                } else {
+                    (
+                        "UPDATE bcs_group_participants SET message_view_scope = ? \
+                         WHERE env = ? AND group_id = ? AND bot_uuid = ?",
+                        vec![
+                            DbTransactionParam::value(Self::message_view_scope_to_str(
+                                *message_view_scope,
+                            )),
+                            DbTransactionParam::value(self.env.as_str()),
+                            group_id.clone(),
+                            DbTransactionParam::query_result(participant_query_step, 0, "bot_uuid"),
+                        ],
+                    )
+                };
+                steps.push(DbTransactionStep::Execute(
+                    DbStatement::with_transaction_params(update_sql, update_params),
                 ));
                 steps.push(group_version_update_step(
                     &self.env,
@@ -1843,8 +2001,8 @@ impl GroupRepoPort for MySqlGroupStore {
         })?;
         self.db.execute_with(
             &self.logical_db,
-            "INSERT INTO bcs_group_participants (group_id, bot_uuid, role, env, actor_kind, mode, tags_json) \
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO bcs_group_participants (group_id, bot_uuid, role, env, actor_kind, mode, tags_json, message_view_scope) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             vec![
                 Value::from(id),
                 Value::from(participant.bot_uuid.as_str()),
@@ -1853,6 +2011,7 @@ impl GroupRepoPort for MySqlGroupStore {
                 Value::from(actor_kind_str),
                 Value::from(mode_str),
                 Value::from(tags_json.as_str()),
+                Value::from(Self::message_view_scope_to_str(participant.message_view_scope)),
             ],
         ).await
             .map_err(|e| {
@@ -1875,6 +2034,7 @@ impl GroupRepoPort for MySqlGroupStore {
         let role = Self::role_to_str(&participant.role);
         let actor_kind = Self::actor_kind_to_str(participant.actor_kind);
         let mode = Self::mode_to_str(participant.effective_mode());
+        let message_view_scope = Self::message_view_scope_to_str(participant.message_view_scope);
         let update_group = format!(
             "UPDATE bcs_groups \
              SET {} \
@@ -1887,8 +2047,8 @@ impl GroupRepoPort for MySqlGroupStore {
         );
         let insert_participant = format!(
             "{} INTO bcs_group_participants \
-             (group_id, bot_uuid, role, env, actor_kind, mode) \
-             SELECT ?, ?, ?, ?, ?, ? \
+             (group_id, bot_uuid, role, env, actor_kind, mode, message_view_scope) \
+             SELECT ?, ?, ?, ?, ?, ?, ? \
              FROM bcs_groups \
              WHERE group_id = ? AND env = ? AND (visibility <> 'public' OR ?)",
             self.flavor.insert_or_ignore()
@@ -1917,6 +2077,7 @@ impl GroupRepoPort for MySqlGroupStore {
                         Value::from(self.env.as_str()),
                         Value::from(actor_kind),
                         Value::from(mode),
+                        Value::from(message_view_scope),
                         Value::from(id),
                         Value::from(self.env.as_str()),
                         Value::from(actor_is_public),
@@ -2040,6 +2201,48 @@ impl GroupRepoPort for MySqlGroupStore {
 
         debug!(group_id = %id, actor_id = %actor_id, ?mode, "Participant mode updated");
         // Invalidate cache so the next get() reloads with the new mode.
+        self.cache.write().await.remove(id);
+        Ok(())
+    }
+
+    async fn update_participant_message_view_scope(
+        &self,
+        id: &str,
+        actor_id: &str,
+        message_view_scope: MessageViewScope,
+    ) -> ServiceResult<()> {
+        let group = self
+            .get(id)
+            .await
+            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
+        let participant = group
+            .participants
+            .iter()
+            .find(|participant| participant.bot_uuid == actor_id)
+            .ok_or_else(|| ServiceError::ParticipantNotFound(actor_id.to_string()))?;
+        if !message_view_scope.is_valid_for(participant.actor_kind) {
+            return Err(ServiceError::InvalidOperation {
+                message: "Bot participants must use full message_view_scope".to_string(),
+                request_id: None,
+            });
+        }
+        if participant.message_view_scope == message_view_scope {
+            return Ok(());
+        }
+        self.db
+            .execute_with(
+                &self.logical_db,
+                "UPDATE bcs_group_participants SET message_view_scope = ? \
+                 WHERE group_id = ? AND bot_uuid = ? AND env = ?",
+                vec![
+                    Value::from(Self::message_view_scope_to_str(message_view_scope)),
+                    Value::from(id),
+                    Value::from(actor_id),
+                    Value::from(self.env.as_str()),
+                ],
+            )
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
         self.cache.write().await.remove(id);
         Ok(())
     }
@@ -2211,7 +2414,7 @@ impl GroupRepoPort for MySqlGroupStore {
                     gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                     gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                     gs.created_ts, gs.updated_ts, \
-                    gp.actor_kind, gp.mode, gp.tags_json, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
+                    gp.actor_kind, gp.mode, gp.tags_json, gp.message_view_scope, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
              FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
                           service_group_uuid, service_mode, service_spec, version, record_status, \
                           {} AS created_ts, {} AS updated_ts, \
@@ -2346,7 +2549,7 @@ impl GroupRepoPort for MySqlGroupStore {
                         mode_str.as_deref(),
                     );
                     entry.participants.push(Participant {
-                        bot_uuid,
+                        bot_uuid: bot_uuid.clone(),
                         bot_name: None,
                         kind: Some(ParticipantKind::Bot),
                         role: Self::str_to_role(&role_str),
@@ -2354,6 +2557,13 @@ impl GroupRepoPort for MySqlGroupStore {
                         mode: Some(mode),
                         tags: Self::deserialize_participant_tags(
                             db_get_column_opt(row, "tags_json").ok().flatten(),
+                        ),
+                        message_view_scope: Self::message_view_scope_from_row(
+                            row,
+                            "message_view_scope",
+                            &entry.id,
+                            &bot_uuid,
+                            actor_kind,
                         ),
                     });
                 }
@@ -2382,7 +2592,7 @@ impl GroupRepoPort for MySqlGroupStore {
                 gp2.bot_uuid AS p_bot_uuid, gp2.role AS p_role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                 gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                 {} AS created_ts, {} AS updated_ts, \
-                gp2.actor_kind AS p_actor_kind, gp2.mode AS p_mode, gp2.tags_json AS p_tags_json, \
+                gp2.actor_kind AS p_actor_kind, gp2.mode AS p_mode, gp2.tags_json AS p_tags_json, gp2.message_view_scope AS p_message_view_scope, \
                 gs.group_kind AS g_group_kind, gs.dm_pair_key AS g_dm_pair_key, gs.group_strategy, gs.visibility \
              FROM bcs_group_participants gp \
              JOIN bcs_groups gs ON gp.group_id = gs.group_id AND gs.env = ? \
@@ -2526,7 +2736,7 @@ impl GroupRepoPort for MySqlGroupStore {
                         mode_str.as_deref(),
                     );
                     entry.participants.push(Participant {
-                        bot_uuid: p_bot_uuid,
+                        bot_uuid: p_bot_uuid.clone(),
                         bot_name: None,
                         kind: Some(ParticipantKind::Bot),
                         role: Self::str_to_role(&p_role),
@@ -2534,6 +2744,13 @@ impl GroupRepoPort for MySqlGroupStore {
                         mode: Some(mode),
                         tags: Self::deserialize_participant_tags(
                             db_get_column_opt(row, "p_tags_json").ok().flatten(),
+                        ),
+                        message_view_scope: Self::message_view_scope_from_row(
+                            row,
+                            "p_message_view_scope",
+                            &entry.id,
+                            &p_bot_uuid,
+                            actor_kind,
                         ),
                     });
                 }
@@ -2602,7 +2819,7 @@ impl GroupRepoPort for MySqlGroupStore {
                 gp2.bot_uuid AS p_bot_uuid, gp2.role AS p_role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                 gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                 {} AS created_ts, {} AS updated_ts, \
-                gp2.actor_kind AS p_actor_kind, gp2.mode AS p_mode, gp2.tags_json AS p_tags_json, \
+                gp2.actor_kind AS p_actor_kind, gp2.mode AS p_mode, gp2.tags_json AS p_tags_json, gp2.message_view_scope AS p_message_view_scope, \
                 gs.group_kind AS g_group_kind, gs.dm_pair_key AS g_dm_pair_key, gs.group_strategy, gs.visibility \
              FROM bcs_group_participants gp \
              JOIN bcs_groups gs ON gp.group_id = gs.group_id AND gs.env = ? \
@@ -2741,7 +2958,7 @@ impl GroupRepoPort for MySqlGroupStore {
                         mode_str.as_deref(),
                     );
                     entry.participants.push(Participant {
-                        bot_uuid: p_bot_uuid,
+                        bot_uuid: p_bot_uuid.clone(),
                         bot_name: None,
                         kind: Some(ParticipantKind::Bot),
                         role: Self::str_to_role(&p_role),
@@ -2749,6 +2966,13 @@ impl GroupRepoPort for MySqlGroupStore {
                         mode: Some(mode),
                         tags: Self::deserialize_participant_tags(
                             db_get_column_opt(row, "p_tags_json").ok().flatten(),
+                        ),
+                        message_view_scope: Self::message_view_scope_from_row(
+                            row,
+                            "p_message_view_scope",
+                            &entry.id,
+                            &p_bot_uuid,
+                            actor_kind,
                         ),
                     });
                 }
@@ -2842,7 +3066,7 @@ impl GroupRepoPort for MySqlGroupStore {
                             gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                             gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                             gs.created_ts, gs.updated_ts, \
-                            gp.actor_kind, gp.mode, gp.tags_json, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
+                            gp.actor_kind, gp.mode, gp.tags_json, gp.message_view_scope, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
                      FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
                                   service_group_uuid, service_mode, service_spec, version, record_status, \
                                   {} AS created_ts, {} AS updated_ts, \
@@ -2871,7 +3095,7 @@ impl GroupRepoPort for MySqlGroupStore {
                             gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                             gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                             gs.created_ts, gs.updated_ts, \
-                            gp.actor_kind, gp.mode, gp.tags_json, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
+                            gp.actor_kind, gp.mode, gp.tags_json, gp.message_view_scope, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
                      FROM (SELECT group_id, label, status, driver_bot, originator, routing_policy_json, context, opening_message_json, \
                                   service_group_uuid, service_mode, service_spec, version, record_status, \
                                   {} AS created_ts, {} AS updated_ts, \
@@ -3001,7 +3225,7 @@ impl GroupRepoPort for MySqlGroupStore {
                         mode_str.as_deref(),
                     );
                     entry.participants.push(Participant {
-                        bot_uuid,
+                        bot_uuid: bot_uuid.clone(),
                         bot_name: None,
                         kind: Some(ParticipantKind::Bot),
                         role: Self::str_to_role(&role_str),
@@ -3009,6 +3233,13 @@ impl GroupRepoPort for MySqlGroupStore {
                         mode: Some(mode),
                         tags: Self::deserialize_participant_tags(
                             db_get_column_opt(row, "tags_json").ok().flatten(),
+                        ),
+                        message_view_scope: Self::message_view_scope_from_row(
+                            row,
+                            "message_view_scope",
+                            &entry.id,
+                            &bot_uuid,
+                            actor_kind,
                         ),
                     });
                 }
@@ -3199,7 +3430,7 @@ impl GroupRepoPort for MySqlGroupStore {
                         mode_str.as_deref(),
                     );
                     entry.participants.push(Participant {
-                        bot_uuid: p_bot_uuid,
+                        bot_uuid: p_bot_uuid.clone(),
                         bot_name: None,
                         kind: Some(ParticipantKind::Bot),
                         role: Self::str_to_role(&p_role),
@@ -3207,6 +3438,13 @@ impl GroupRepoPort for MySqlGroupStore {
                         mode: Some(mode),
                         tags: Self::deserialize_participant_tags(
                             db_get_column_opt(row, "tags_json").ok().flatten(),
+                        ),
+                        message_view_scope: Self::message_view_scope_from_row(
+                            row,
+                            "message_view_scope",
+                            &entry.id,
+                            &p_bot_uuid,
+                            actor_kind,
                         ),
                     });
                 }
@@ -3332,8 +3570,8 @@ impl GroupRepoPort for MySqlGroupStore {
         let g_context = group.context.clone();
         let g_dm_pair_key = group.dm_pair_key.clone();
         let g_group_strategy_str = Self::group_strategy_to_str(group.group_strategy);
-        // Build participant tuples: (bot_uuid, role_str, actor_kind_str, mode_str)
-        let g_participants: Vec<(String, &'static str, &'static str, &'static str)> = group
+        // Build participant tuples: (bot_uuid, role_str, actor_kind_str, mode_str, scope)
+        let g_participants: Vec<(String, &'static str, &'static str, &'static str, &'static str)> = group
             .participants
             .iter()
             .map(|p| {
@@ -3342,6 +3580,7 @@ impl GroupRepoPort for MySqlGroupStore {
                     Self::role_to_str(&p.role),
                     Self::actor_kind_to_str(p.actor_kind),
                     Self::mode_to_str(p.effective_mode()),
+                    Self::message_view_scope_to_str(p.message_view_scope),
                 )
             })
             .collect();
@@ -3385,13 +3624,13 @@ impl GroupRepoPort for MySqlGroupStore {
         let insert_ignore_prefix = self.flavor.insert_or_ignore();
         let participant_insert_sql = format!(
             "{} INTO bcs_group_participants \
-                         (group_id, bot_uuid, role, env, actor_kind, mode) \
-                     SELECT ?, ?, ?, ?, ?, ? \
+                         (group_id, bot_uuid, role, env, actor_kind, mode, message_view_scope) \
+                     SELECT ?, ?, ?, ?, ?, ?, ? \
                      FROM bcs_groups \
                      WHERE group_id = ? AND env = ? AND dm_pair_key = ?",
             insert_ignore_prefix,
         );
-        for (bot_uuid, role_str, actor_kind_str, mode_str) in &g_participants {
+        for (bot_uuid, role_str, actor_kind_str, mode_str, message_view_scope) in &g_participants {
             steps.push(DbTransactionStep::Execute(DbStatement::with_params(
                 &participant_insert_sql,
                 vec![
@@ -3401,6 +3640,7 @@ impl GroupRepoPort for MySqlGroupStore {
                     Value::from(env.as_str()),
                     Value::from(*actor_kind_str),
                     Value::from(*mode_str),
+                    Value::from(*message_view_scope),
                     Value::from(g_id.as_str()),
                     Value::from(env.as_str()),
                     Value::from(pair_key.as_str()),
@@ -3617,7 +3857,7 @@ impl GroupRepoPort for MySqlGroupStore {
                     gp.bot_uuid, gp.role, gs.routing_policy_json, gs.context, gs.opening_message_json, \
                     gs.service_group_uuid, gs.service_mode, gs.service_spec, gs.version, gs.record_status, \
                     gs.created_ts, gs.updated_ts, \
-                    gp.actor_kind, gp.mode, gp.tags_json, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
+                    gp.actor_kind, gp.mode, gp.tags_json, gp.message_view_scope, gs.group_kind, gs.dm_pair_key, gs.group_strategy, gs.visibility \
              FROM ({}) gs \
              LEFT JOIN bcs_group_participants gp ON gs.group_id = gp.group_id AND gp.env = ?",
             inner_sql
@@ -3728,7 +3968,7 @@ impl GroupRepoPort for MySqlGroupStore {
                         mode_str.as_deref(),
                     );
                     entry.participants.push(Participant {
-                        bot_uuid,
+                        bot_uuid: bot_uuid.clone(),
                         bot_name: None,
                         kind: Some(ParticipantKind::Bot),
                         role: Self::str_to_role(&role_str),
@@ -3736,6 +3976,13 @@ impl GroupRepoPort for MySqlGroupStore {
                         mode: Some(mode),
                         tags: Self::deserialize_participant_tags(
                             db_get_column_opt(row, "tags_json").ok().flatten(),
+                        ),
+                        message_view_scope: Self::message_view_scope_from_row(
+                            row,
+                            "message_view_scope",
+                            &entry.id,
+                            &bot_uuid,
+                            actor_kind,
                         ),
                     });
                 }
@@ -4145,6 +4392,39 @@ mod tests {
         assert!(error.to_string().contains("bot_uuid"));
     }
 
+    #[test]
+    fn infallible_group_reads_do_not_fail_open_on_invalid_human_scope() {
+        let unknown_scope = DbRow::new(BTreeMap::from([(
+            "message_view_scope".to_string(),
+            Value::from("unknown"),
+        )]));
+        let bot_participant_scope = DbRow::new(BTreeMap::from([(
+            "message_view_scope".to_string(),
+            Value::from("participant"),
+        )]));
+
+        assert_eq!(
+            MySqlGroupStore::message_view_scope_from_row(
+                &unknown_scope,
+                "message_view_scope",
+                "group-1",
+                "human-1",
+                ActorKind::Human,
+            ),
+            MessageViewScope::Participant
+        );
+        assert_eq!(
+            MySqlGroupStore::message_view_scope_from_row(
+                &bot_participant_scope,
+                "message_view_scope",
+                "group-1",
+                "bot-1",
+                ActorKind::Bot,
+            ),
+            MessageViewScope::Full
+        );
+    }
+
     #[tokio::test]
     async fn sqlite_dm_pair_unique_conflict_is_treated_as_a_lost_race() {
         let db = Arc::new(RecordingDbPlugin::with_duplicate_transaction_error());
@@ -4182,6 +4462,7 @@ mod tests {
                 actor_kind: ActorKind::Bot,
                 mode: None,
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             },
             Participant {
                 bot_uuid: "bob".to_string(),
@@ -4191,6 +4472,7 @@ mod tests {
                 actor_kind: ActorKind::Bot,
                 mode: None,
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             },
         ];
         let mut group = Group::new("loser-group", "alice", participants);

@@ -4,6 +4,7 @@ from ._protocols import (
     ObjectItem,
     ObjectListing,
     PartInfo,
+    SessionFileUrlProjector,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "ObjectItem",
     "ObjectListing",
     "PartInfo",
+    "SessionFileUrlProjector",
 ]

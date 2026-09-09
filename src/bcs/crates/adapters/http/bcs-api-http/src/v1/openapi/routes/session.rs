@@ -281,6 +281,7 @@ async fn add_session_participant(
             caller,
             session_id,
             bot_uuid: body.bot_uuid,
+            message_view_scope: body.message_view_scope,
         })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;
@@ -301,6 +302,12 @@ async fn update_session_participant(
     let Path((session_id, bot_uuid)) =
         path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    if body.mode.is_none() && body.message_view_scope.is_none() {
+        return Err(invalid_request(
+            &request_id,
+            "At least one of mode or message_view_scope must be provided",
+        ));
+    }
     let result = state
         .session_service
         .update_participant(UpdateSessionParticipant {
@@ -308,6 +315,7 @@ async fn update_session_participant(
             session_id,
             bot_uuid,
             mode: body.mode,
+            message_view_scope: body.message_view_scope,
         })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;

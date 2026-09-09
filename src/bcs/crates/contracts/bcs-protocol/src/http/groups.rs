@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fmt};
 
 use serde::{Deserialize, Serialize};
 
-use bcs_domain::OpeningMessage;
+use bcs_domain::{MessageViewScope, OpeningMessage};
 
 /// Context for a proposal.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +52,8 @@ pub struct ParticipantInfo {
     pub role: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_view_scope: Option<MessageViewScope>,
 }
 
 /// Participant slot binding for state-machine group creation.

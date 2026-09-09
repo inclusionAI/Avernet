@@ -30,6 +30,7 @@ async fn test_broadcast_to_all_on_no_mention() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "consultant".to_string(),
@@ -39,6 +40,7 @@ async fn test_broadcast_to_all_on_no_mention() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "expert".to_string(),
@@ -48,6 +50,7 @@ async fn test_broadcast_to_all_on_no_mention() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),
@@ -100,6 +103,7 @@ async fn test_mention_broadcasts_to_all_with_mentions_extracted() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "consultant".to_string(),
@@ -109,6 +113,7 @@ async fn test_mention_broadcasts_to_all_with_mentions_extracted() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),
@@ -161,6 +166,7 @@ async fn test_multiple_mentions_broadcast_to_all() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "dba".to_string(),
@@ -170,6 +176,7 @@ async fn test_multiple_mentions_broadcast_to_all() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "security".to_string(),
@@ -179,6 +186,7 @@ async fn test_multiple_mentions_broadcast_to_all() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),
@@ -233,6 +241,7 @@ async fn test_invalid_mention_ignored_broadcasts_to_all() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "consultant".to_string(),
@@ -242,6 +251,7 @@ async fn test_invalid_mention_ignored_broadcasts_to_all() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),
@@ -325,6 +335,7 @@ fn test_group_session_originator_defaults_to_driver() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),
@@ -367,6 +378,7 @@ fn test_group_session_originator_can_be_set() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "initiator".to_string(),
@@ -376,6 +388,7 @@ fn test_group_session_originator_can_be_set() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),
@@ -425,6 +438,7 @@ async fn test_g1_agent_mode_mention_routes_to_consultant() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "dba".to_string(),
@@ -434,6 +448,7 @@ async fn test_g1_agent_mode_mention_routes_to_consultant() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),
@@ -482,6 +497,7 @@ async fn test_g2_fusion_mode_broadcast_to_all() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "lisi".to_string(),
@@ -491,6 +507,7 @@ async fn test_g2_fusion_mode_broadcast_to_all() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "security".to_string(),
@@ -500,6 +517,7 @@ async fn test_g2_fusion_mode_broadcast_to_all() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),
@@ -547,6 +565,7 @@ async fn test_g4_dynamic_member_addition() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),
@@ -579,6 +598,7 @@ async fn test_g4_dynamic_member_addition() {
             actor_kind: bcs_service_api::ActorKind::default(),
         mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 });
 
     // Now message should route to both
@@ -608,6 +628,7 @@ async fn test_g5_expert_consultation_multiple_mentions() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "security".to_string(),
@@ -617,6 +638,7 @@ async fn test_g5_expert_consultation_multiple_mentions() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "legal".to_string(),
@@ -626,6 +648,7 @@ async fn test_g5_expert_consultation_multiple_mentions() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "dba".to_string(),
@@ -635,6 +658,7 @@ async fn test_g5_expert_consultation_multiple_mentions() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),
@@ -799,6 +823,7 @@ async fn test_all_participants_mentioned() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "consultant".to_string(),
@@ -808,6 +833,7 @@ async fn test_all_participants_mentioned() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),
@@ -856,6 +882,7 @@ async fn test_routing_target_is_driver_flag() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "consultant".to_string(),
@@ -865,6 +892,7 @@ async fn test_routing_target_is_driver_flag() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),
@@ -914,6 +942,7 @@ async fn test_routing_target_is_driver_flag() {
                                     actor_kind: bcs_service_api::ActorKind::default(),
                     mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
                 Participant {
                     bot_uuid: "dba".to_string(),
@@ -923,6 +952,7 @@ async fn test_routing_target_is_driver_flag() {
                                     actor_kind: bcs_service_api::ActorKind::default(),
                     mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             ],
             messages: Vec::new(),
@@ -991,6 +1021,7 @@ async fn test_no_mention_originator_gets_send_others_inject() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "consultant".to_string(),
@@ -1000,6 +1031,7 @@ async fn test_no_mention_originator_gets_send_others_inject() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "expert".to_string(),
@@ -1009,6 +1041,7 @@ async fn test_no_mention_originator_gets_send_others_inject() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),
@@ -1063,6 +1096,7 @@ async fn test_mention_mentioned_gets_send_others_inject() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "dba".to_string(),
@@ -1072,6 +1106,7 @@ async fn test_mention_mentioned_gets_send_others_inject() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "security".to_string(),
@@ -1081,6 +1116,7 @@ async fn test_mention_mentioned_gets_send_others_inject() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),
@@ -1135,6 +1171,7 @@ async fn test_all_mention_everyone_gets_send() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "consultant".to_string(),
@@ -1144,6 +1181,7 @@ async fn test_all_mention_everyone_gets_send() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),
@@ -1193,6 +1231,7 @@ async fn test_sender_excluded_from_delivery() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "consultant".to_string(),
@@ -1202,6 +1241,7 @@ async fn test_sender_excluded_from_delivery() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),
@@ -1261,6 +1301,7 @@ async fn test_multiple_mentions_delivery_type() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "dba".to_string(),
@@ -1270,6 +1311,7 @@ async fn test_multiple_mentions_delivery_type() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "security".to_string(),
@@ -1279,6 +1321,7 @@ async fn test_multiple_mentions_delivery_type() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "legal".to_string(),
@@ -1288,6 +1331,7 @@ async fn test_multiple_mentions_delivery_type() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),
@@ -1347,6 +1391,7 @@ async fn test_real_person_sends_message_all_bots_receive() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "dba".to_string(),
@@ -1356,6 +1401,7 @@ async fn test_real_person_sends_message_all_bots_receive() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),
@@ -1407,6 +1453,7 @@ async fn test_real_person_sends_with_mention() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "dba".to_string(),
@@ -1416,6 +1463,7 @@ async fn test_real_person_sends_with_mention() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),
@@ -1474,6 +1522,7 @@ async fn test_anonymous_sender_broadcasts_to_all() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
             Participant {
                 bot_uuid: "consultant".to_string(),
@@ -1483,6 +1532,7 @@ async fn test_anonymous_sender_broadcasts_to_all() {
                             actor_kind: bcs_service_api::ActorKind::default(),
                 mode: None,
     tags: Vec::new(),
+    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
 },
         ],
         messages: Vec::new(),

@@ -60,9 +60,9 @@ pub use fusion::{
     ContextFusionResponse, ContextParticipantPerspective,
 };
 pub use group::{
-    DefaultDelivery, Group, GroupKind, GroupStatus, GroupStrategy, Participant, ParticipantKind,
-    ParticipantMode, ParticipantRole, RoutingMode, RoutingPolicy, SenderRoutesValidationError,
-    Workspace,
+    DefaultDelivery, Group, GroupKind, GroupStatus, GroupStrategy, MessageViewScope, Participant,
+    ParticipantKind, ParticipantMode, ParticipantRole, RoutingMode, RoutingPolicy,
+    SenderRoutesValidationError, Workspace,
 };
 pub use group_id::{
     GENERATED_SESSION_ID_SUFFIX_CHARS, GROUP_ID_PREFIX, GroupIdBuildError,
@@ -72,9 +72,12 @@ pub use group_id::{
 pub use message::{
     AuditEntry, BCS_SESSION_OPENING_MESSAGE_SENDER, BCS_SESSION_OPENING_MESSAGE_SENDER_NAME,
     BCS_STATE_MACHINE_MESSAGE_SENDER, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME, DeliveryType,
-    GroupMessage, GroupMessageType, MessageAttachment, MessageOwnerFilter, MessagePage,
-    MessageQuery, MessageRole, NewMessage, PersistedMessage, PersistedMessageStatus,
-    SESSION_OPENING_MESSAGE_TYPE, STATE_MACHINE_PANEL_MESSAGE_TYPE, SenderType, Task, TaskStatus,
+    GroupMessage, GroupMessageType, HumanMessageView, MessageAttachment, MessageAudience, MessageOwnerFilter,
+    MessagePage, MessageQuery, MessageRole, MessageVisibilityDomain, NewMessage, PersistedMessage,
+    PersistedMessageStatus, SESSION_OPENING_MESSAGE_TYPE,
+    STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE,
+    STATE_MACHINE_HUMAN_INPUT_RESPONSE_MESSAGE_TYPE, STATE_MACHINE_PANEL_MESSAGE_TYPE, SenderType,
+    Task, TaskStatus,
 };
 pub use organization::{Organization, OrganizationMember};
 pub use opening_message::{

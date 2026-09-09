@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 
 @dataclass(slots=True)
@@ -289,5 +289,44 @@ class FileTransferBackend(Protocol):
 
         Raises:
             ValueError: If any input field contains ``..`` (path traversal).
+        """
+        ...
+
+
+@runtime_checkable
+class SessionFileUrlProjector(Protocol):
+    """Protocol for projecting outward-facing session file transfer URLs.
+
+    Orthogonal to ``FileTransferBackend``: the backend performs OSS storage
+    operations and produces presigned URLs, while a projector rewrites the
+    URL the client sees.  This decouples URL presentation (e.g. proxying
+    behind the BaaS domain) from storage operations.
+
+    Implementations:
+    - NoopSessionFileUrlProjector: identity — returns the URL unchanged.
+      The degree-zero default, never failing on account of proxy config.
+    - AliyunAckSessionFileUrlProjector: projects URLs to the BaaS-domain
+      ``/api/v1/file-transfer-proxy/`` prefix for the aliyun tenant.
+
+    Unlike ``FileTransferBackend`` there is no ``disabled`` property: every
+    deployment ships a working projector (the Noop identity at minimum).
+    """
+
+    def project(self, url: str) -> str:
+        """Project a service-generated URL to its client-visible form.
+
+        Args:
+            url: Service-generated presigned URL (upload or share).
+
+        Returns:
+            The projected URL string.  Implementations MUST preserve the
+            query component byte-for-byte (D-03 — the OSS V1 signature
+            binds path + query, so any reordering or re-encoding breaks
+            verification).
+
+        Raises:
+            SessionFileTransferProxyUnavailableError: When the active
+                deploy tenant requires projection but the proxy is not
+                configured (D-06 fail-fast).
         """
         ...

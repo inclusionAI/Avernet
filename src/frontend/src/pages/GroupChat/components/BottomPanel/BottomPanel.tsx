@@ -13,7 +13,7 @@ import type { MentionCategory } from '@aix-chat/ui';
 import { ConnectionBanner } from '@aix-chat/ui';
 import { Loader2, Network } from 'lucide-react';
 import React, { useCallback, useState } from 'react';
-import type { GroupInfo, ParticipantMode } from '../../types';
+import type { GroupInfo, MessageViewScope, ParticipantMode } from '../../types';
 import BotControlTab from './BotControlTab';
 import CollabAlertDialogs from './CollabAlertDialogs';
 import UserCollabTab from './UserCollabTab';
@@ -55,7 +55,7 @@ interface BottomPanelProps {
   /** 当前活跃会话 ID */
   activeSessionId?: string | null;
   onModeChange: (mode: ParticipantMode) => void;
-  onJoinCollaboration: () => Promise<void>;
+  onJoinCollaboration: (messageViewScope: MessageViewScope) => Promise<void>;
   onLeaveCollaboration: () => Promise<void>;
   onSendMessage: (msg: string, mentions?: string[], senderId?: string) => void;
   onAbort: () => void;
@@ -103,12 +103,15 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
   const shouldShowUserCollabOnly =
     isHumanDriverBot || isManagerWorker || isStateMachine;
 
-  const handleJoin = useCallback(async () => {
-    await onJoinCollaboration();
-    setShowJoinDialog(false);
-    // 加入成功后自动切换到用户视角，无需再点击"去发言"
-    onSwitchToHuman?.();
-  }, [onJoinCollaboration, onSwitchToHuman]);
+  const handleJoin = useCallback(
+    async (messageViewScope: MessageViewScope) => {
+      await onJoinCollaboration(messageViewScope);
+      setShowJoinDialog(false);
+      // 加入成功后自动切换到用户视角，无需再点击"去发言"
+      onSwitchToHuman?.();
+    },
+    [onJoinCollaboration, onSwitchToHuman],
+  );
 
   const handleLeave = useCallback(async () => {
     await onLeaveCollaboration();
@@ -179,8 +182,6 @@ const BottomPanel: React.FC<BottomPanelProps> = ({
           userId={userId}
           isSessionLevel={!!activeSessionId}
           isHumanDriverBot={isHumanDriverBot}
-          isJoinCollaborationDisabled={isStateMachine}
-          joinButtonSuffix={isStateMachine ? '（开发中）' : undefined}
           onSwitchToHuman={onSwitchToHuman}
           onJoinCollaboration={() => setShowJoinDialog(true)}
           onLeaveCollaboration={() => setShowLeaveDialog(true)}

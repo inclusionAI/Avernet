@@ -892,6 +892,7 @@ mod tests {
             actor_kind: DomainActorKind::Bot,
             mode: None,
             tags: Vec::new(),
+            message_view_scope: bcs_domain::MessageViewScope::Full,
         }
     }
 
@@ -988,6 +989,7 @@ mod tests {
                     session_title: None,
                     id: Some(sid.clone()),
                     meta: None,
+                    message_visibility_version: 1,
                 },
             )
             .await

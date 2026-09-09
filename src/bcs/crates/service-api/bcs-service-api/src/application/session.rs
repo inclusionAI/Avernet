@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::ServiceError;
 use crate::port::repo::NewSessionParams;
-use crate::types::{Participant, ParticipantMode, Session, SessionStatus};
+use crate::types::{MessageViewScope, Participant, ParticipantMode, Session, SessionStatus};
 
 /// Use-case level error for session operations.
 #[derive(Debug, thiserror::Error)]
@@ -183,6 +183,42 @@ pub trait SessionManagementService: Send + Sync {
         bot_uuid: &str,
         mode: ParticipantMode,
     ) -> Result<Session, SessionUseCaseError>;
+
+    async fn update_participant_message_view_scope(
+        &self,
+        session_id: &str,
+        actor_id: &str,
+        message_view_scope: MessageViewScope,
+    ) -> Result<Session, SessionUseCaseError> {
+        let _ = (session_id, actor_id, message_view_scope);
+        Err(SessionUseCaseError::Internal(
+            ServiceError::InvalidOperation {
+                message: "Session participant scope updates are not configured".to_string(),
+                request_id: None,
+            },
+        ))
+    }
+
+    async fn update_participant_mode_and_message_view_scope(
+        &self,
+        session_id: &str,
+        actor_id: &str,
+        mode: Option<ParticipantMode>,
+        message_view_scope: MessageViewScope,
+    ) -> Result<Session, SessionUseCaseError> {
+        let updated = self
+            .update_participant_message_view_scope(
+                session_id,
+                actor_id,
+                message_view_scope,
+            )
+            .await?;
+        if let Some(mode) = mode {
+            self.update_participant_mode(session_id, actor_id, mode).await
+        } else {
+            Ok(updated)
+        }
+    }
 
     async fn update_title(
         &self,

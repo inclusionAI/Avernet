@@ -8,7 +8,9 @@ use bcs_service_api::port::repo::{
     CommitGroupEventfulMutation, FinalizeGroupProvisioning, GroupEventfulMutation, GroupRepoPort,
 };
 use bcs_service_api::port::{EventRecordFactoryPort, NewEvent};
-use bcs_service_api::types::{EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject};
+use bcs_service_api::types::{
+    EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject, MessageViewScope,
+};
 use bcs_service_api::{
     ActorKind, DmActorSpec, Group, GroupCoreService, GroupKind, GroupMessage,
     GroupMutableFieldsPatch, GroupStatus, Participant, ParticipantMode, ParticipantRole,
@@ -166,6 +168,17 @@ impl GroupCoreService for GroupCore {
     ) -> ServiceResult<()> {
         self.repo
             .update_participant_mode(group_id, actor_id, mode)
+            .await
+    }
+
+    async fn update_participant_message_view_scope(
+        &self,
+        group_id: &str,
+        actor_id: &str,
+        message_view_scope: MessageViewScope,
+    ) -> ServiceResult<()> {
+        self.repo
+            .update_participant_message_view_scope(group_id, actor_id, message_view_scope)
             .await
     }
 
@@ -414,6 +427,7 @@ impl GroupCoreService for GroupCore {
                     actor_kind: actor.actor_kind,
                     mode: Some(mode),
                     tags: Vec::new(),
+                    message_view_scope: MessageViewScope::Full,
                 }
             })
             .collect();
@@ -623,6 +637,54 @@ fn prepare_group_mutation(
                 event: None,
                 mutation: GroupEventfulMutation::UpdateParticipantMode {
                     actor_id: actor_id.clone(),
+                    mode: *mode,
+                },
+            }
+        }
+        GroupMutationKind::UpdateParticipantMessageViewScope {
+            actor_id,
+            message_view_scope,
+            mode,
+        } => {
+            let participant = group
+                .participants
+                .iter()
+                .find(|participant| participant.bot_uuid == *actor_id)
+                .ok_or_else(|| ServiceError::ParticipantNotFound(actor_id.clone()))?;
+            if !message_view_scope.is_valid_for(participant.actor_kind) {
+                return Err(ServiceError::InvalidOperation {
+                    message: "Bot participants must use full message_view_scope".to_string(),
+                    request_id: None,
+                });
+            }
+            if mode.is_some_and(|mode| !mode.is_valid_for(participant.actor_kind)) {
+                return Err(ServiceError::InvalidOperation {
+                    message: "Participant mode is invalid for the actor kind".to_string(),
+                    request_id: None,
+                });
+            }
+            let scope_changed = participant.message_view_scope != *message_view_scope;
+            let mode_changed = mode.is_some_and(|mode| participant.effective_mode() != mode);
+            if !scope_changed && !mode_changed {
+                return Ok(None);
+            }
+            let mut data = BTreeMap::new();
+            data.insert("actor_id".to_string(), json!(actor_id));
+            data.insert(
+                "from_scope".to_string(),
+                json!(participant.message_view_scope),
+            );
+            data.insert("to_scope".to_string(), json!(message_view_scope));
+            data.insert("group_version".to_string(), json!(next_version));
+            PreparedGroupMutation {
+                event: scope_changed.then(|| PreparedGroupEvent {
+                    event_type: "group.participant.message_view_scope_changed",
+                    subject: participant_subject(actor_id),
+                    data,
+                }),
+                mutation: GroupEventfulMutation::UpdateParticipantMessageViewScope {
+                    actor_id: actor_id.clone(),
+                    message_view_scope: *message_view_scope,
                     mode: *mode,
                 },
             }

@@ -18,6 +18,9 @@ from secbaas.community.api.bot_runtime import (
     TransferNotTerminalError,
     TransferStateConflictError,
 )
+from secbaas.community.api.session_file_sharing import (
+    SessionFileTransferProxyUnavailableError,
+)
 from secbaas.community.core.repository.file_transfer_ticket import TicketRecord
 from secbaas.community.core.service.bot_runtime.dispatcher._file_transfer_dispatcher import (
     MULTIPART_THRESHOLD,
@@ -722,3 +725,170 @@ class TestDispatchGenerateShareLink:
         ticket_repo.get_by_transfer_id.return_value = ticket
         with pytest.raises(ValueError, match="requires ticket status DONE"):
             await dispatcher.dispatch_generate_share_link("tf-001")
+
+
+# ── WR-01/89: client-visible URL projection ────────────────────────────
+
+
+class _RaisingProjector:
+    """Projector stand-in that always refuses (contradictory config)."""
+
+    def project(self, url: str) -> str:
+        raise SessionFileTransferProxyUnavailableError(reason="projection refused")
+
+
+class TestProjectedClientUrls:
+    """WR-01/89: when a session_file_url_projector is wired, the
+    client-visible URLs (share URL, SINGLE upload URL, MULTIPART part URLs)
+    are projected onto the proxy domain — a bare OSS URL is never handed
+    out.  Without a projector the bare URLs pass through unchanged."""
+
+    PROXY_PREFIX = "https://bff.example.com/api/v1/file-transfer-proxy/"
+
+    @pytest.fixture
+    def aliyun_projector(self):
+        from secbaas.community.plugins.file_transfer.aliyun_ack import (
+            AliyunAckSessionFileUrlProjector,
+        )
+
+        return AliyunAckSessionFileUrlProjector(
+            proxy_base_url="https://bff.example.com",
+            deploy_tenant="aliyun",
+        )
+
+    @pytest.fixture
+    def projected_dispatcher(
+        self,
+        bot_repo,
+        device_repo,
+        paas_facade,
+        file_backend,
+        ticket_repo,
+        aliyun_projector,
+    ):
+        return DefaultBotFileTransferDispatcher(
+            bot_repo=bot_repo,
+            device_repo=device_repo,
+            paas_facade=paas_facade,
+            file_transfer_backend=file_backend,
+            ticket_repo=ticket_repo,
+            session_file_url_projector=aliyun_projector,
+        )
+
+    @pytest.mark.asyncio
+    async def test_share_url_projected(
+        self, projected_dispatcher, ticket_repo, file_backend
+    ):
+        ticket = _make_ticket(status="DONE")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        result = await projected_dispatcher.dispatch_generate_share_link(
+            "tf-001", tenant="t1"
+        )
+
+        assert result.share_url.startswith(self.PROXY_PREFIX)
+        assert "https://oss.example.com" not in result.share_url
+        file_backend.generate_download_url.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_share_url_passthrough_without_projector(
+        self, dispatcher, ticket_repo, file_backend
+    ):
+        ticket = _make_ticket(status="DONE")
+        ticket_repo.get_by_transfer_id.return_value = ticket
+
+        result = await dispatcher.dispatch_generate_share_link("tf-001", tenant="t1")
+
+        assert result.share_url == "https://oss.example.com/get?token=abc"
+
+    @pytest.mark.asyncio
+    async def test_single_upload_url_projected(
+        self, projected_dispatcher, bot_repo, device_repo, ticket_repo
+    ):
+        _setup_resolve_bot_device(projected_dispatcher, bot_repo, device_repo)
+
+        result = await projected_dispatcher.dispatch_get_upload_url(
+            bot_uuid="bot-001",
+            tenant="t1",
+            device_path="/home/data.csv",
+            filename="data.csv",
+            file_size=100,
+        )
+
+        assert result.type == "SINGLE"
+        assert result.upload_url.startswith(self.PROXY_PREFIX)
+        assert "https://oss.example.com" not in result.upload_url
+        ticket_repo.create_ticket.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_multipart_part_urls_projected(
+        self, projected_dispatcher, bot_repo, device_repo, ticket_repo
+    ):
+        _setup_resolve_bot_device(projected_dispatcher, bot_repo, device_repo)
+
+        result = await projected_dispatcher.dispatch_get_upload_url(
+            bot_uuid="bot-001",
+            tenant="t1",
+            device_path="/home/bigfile.bin",
+            filename="bigfile.bin",
+            file_size=MULTIPART_THRESHOLD,
+        )
+
+        assert result.type == "MULTIPART"
+        assert result.parts
+        assert all(p["upload_url"].startswith(self.PROXY_PREFIX) for p in result.parts)
+        assert all(
+            "https://oss.example.com" not in p["upload_url"] for p in result.parts
+        )
+        ticket_repo.create_ticket.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_multipart_projection_refusal_aborts_session(
+        self, bot_repo, device_repo, paas_facade, file_backend, ticket_repo
+    ):
+        dispatcher = DefaultBotFileTransferDispatcher(
+            bot_repo=bot_repo,
+            device_repo=device_repo,
+            paas_facade=paas_facade,
+            file_transfer_backend=file_backend,
+            ticket_repo=ticket_repo,
+            session_file_url_projector=_RaisingProjector(),
+        )
+        _setup_resolve_bot_device(dispatcher, bot_repo, device_repo)
+
+        with pytest.raises(SessionFileTransferProxyUnavailableError):
+            await dispatcher.dispatch_get_upload_url(
+                bot_uuid="bot-001",
+                tenant="t1",
+                device_path="/home/bigfile.bin",
+                filename="bigfile.bin",
+                file_size=MULTIPART_THRESHOLD,
+            )
+
+        file_backend.abort_multipart_upload.assert_called_once()
+        ticket_repo.create_ticket.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_single_upload_projection_refusal_creates_no_ticket(
+        self, bot_repo, device_repo, paas_facade, file_backend, ticket_repo
+    ):
+        dispatcher = DefaultBotFileTransferDispatcher(
+            bot_repo=bot_repo,
+            device_repo=device_repo,
+            paas_facade=paas_facade,
+            file_transfer_backend=file_backend,
+            ticket_repo=ticket_repo,
+            session_file_url_projector=_RaisingProjector(),
+        )
+        _setup_resolve_bot_device(dispatcher, bot_repo, device_repo)
+
+        with pytest.raises(SessionFileTransferProxyUnavailableError):
+            await dispatcher.dispatch_get_upload_url(
+                bot_uuid="bot-001",
+                tenant="t1",
+                device_path="/home/data.csv",
+                filename="data.csv",
+                file_size=100,
+            )
+
+        ticket_repo.create_ticket.assert_not_called()

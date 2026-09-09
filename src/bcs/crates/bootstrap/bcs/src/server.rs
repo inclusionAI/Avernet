@@ -30,8 +30,8 @@ use crate::config::{
     BcsConfig, CollaborationTemplateStorageKind, GatewayPrincipalConfig, GroupSessionWsConfig,
     LlmConfig, LlmProviderType,
 };
-use crate::lifecycle::LifecycleOrchestrator;
 use crate::friend_connect_notification::HttpFriendConnectNotificationPort;
+use crate::lifecycle::LifecycleOrchestrator;
 use crate::plugins::{
     CachePluginKind, DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
     build_human_mention_notify_port, build_registered_channel_provider,
@@ -42,12 +42,12 @@ use bcs_api_http::v1::gateway_principal::{GatewayPrincipalTokenVerifier, Gateway
 use bcs_api_http::v1::openapi::SessionFileUrlProjector;
 use bcs_api_http::{ApiState, PrincipalVerifier};
 use bcs_app_bot::{BotServiceConfig, BotServiceImpl, InternalBotAttributesServiceImpl};
+use bcs_app_collaboration_definition::CollaborationDefinitionServiceImpl as V1CollaborationDefinitionServiceImpl;
+use bcs_app_collaboration_template::CollaborationTemplateServiceImpl as V1CollaborationTemplateServiceImpl;
 use bcs_app_group::{GroupServiceConfig, GroupServiceImpl};
 use bcs_app_invitation::{InvitationFriendshipServiceConfig, InvitationFriendshipServiceImpl};
 use bcs_app_invite_code::InviteCodeServiceImpl;
 use bcs_app_register;
-use bcs_app_collaboration_definition::CollaborationDefinitionServiceImpl as V1CollaborationDefinitionServiceImpl;
-use bcs_app_collaboration_template::CollaborationTemplateServiceImpl as V1CollaborationTemplateServiceImpl;
 use bcs_app_session::{
     GroupSessionConnectionServiceImpl, SessionFileApplicationServiceImpl, SessionServiceConfig,
     SessionServiceImpl,
@@ -70,7 +70,7 @@ use bcs_collaboration_store::{
 };
 use bcs_collaboration_template::{CollaborationTemplateServiceImpl, FileCollaborationTemplateRepo};
 use bcs_db_api::DbSqlFlavor;
-use bcs_domain::{NewMessage, SenderType};
+use bcs_domain::{MessageAudience, MessageVisibilityDomain, NewMessage, SenderType};
 use bcs_friend::{FriendCore, FriendRequestCore};
 use bcs_friend_store::{
     DbFriendRequestStore, DbFriendStore, MemoryFriendRepo, MemoryFriendRequestRepo,
@@ -116,15 +116,15 @@ use bcs_service_api::{
     BotControlPlaneCoreService, BotControlPlaneRepoPort, BotDeliveryPort, BotDeliveryTarget,
     BotMetricsSnapshotPort, BotRegistryCoreService, BotRunContextPort, BotTerminalEvent,
     BotTerminalObserverPort, BotTerminalState, CallerContext, CanResolveInteraction,
-    ChannelBindingCleanupPort,
-    ChannelService, CollaborationRuntimeService, CollaborationTemplateService,
-    CompositeBotTerminalObserver, DirectChatClientKind, DirectChatRunEvent,
-    DirectChatRunLifecycleHook, DirectChatRunReason, DirectChatRunSnapshotPort, FriendCoreService,
-    FriendRequestCoreService, FrontendDeliveryPort, GroupCoreService, GroupHistoryBotRequestPort,
-    GroupManagementService, GroupMessageHistoryService, GroupMetricsSnapshotPort, GroupRepoPort,
-    GroupSessionMetricsSnapshotPort, HandleBotTerminalEventCommand, HumanInputReadyEvent,
-    InteractionService, InviteService, JudgeEvaluatorPort, LeaderElectionPort, MessageFlowService,
-    MetricsResult, OrganizationCoreService, OrganizationManagementService, OrganizationRepoPort,
+    ChannelBindingCleanupPort, ChannelService, CollaborationRuntimeService,
+    CollaborationTemplateService, CompositeBotTerminalObserver, DirectChatClientKind,
+    DirectChatRunEvent, DirectChatRunLifecycleHook, DirectChatRunReason, DirectChatRunSnapshotPort,
+    FriendCoreService, FriendRequestCoreService, FrontendDeliveryPort, GroupCoreService,
+    GroupHistoryBotRequestPort, GroupManagementService, GroupMessageHistoryService,
+    GroupMetricsSnapshotPort, GroupRepoPort, GroupSessionMetricsSnapshotPort,
+    HandleBotTerminalEventCommand, HumanInputReadyEvent, InteractionService, InviteService,
+    JudgeEvaluatorPort, LeaderElectionPort, MessageFlowService, MetricsResult,
+    OrganizationCoreService, OrganizationManagementService, OrganizationRepoPort,
     ProviderBotBindingRepoPort, ProviderBotCoreService, ProviderBotEventService,
     ProviderCoreService, ProviderCredentialRepoPort, ProviderManagementService, ProviderRepoPort,
     ProviderStreamGrayList, RelationCoreService, RoutingCoreService, ServiceResult,
@@ -492,6 +492,8 @@ impl StateMachineResultPublisherPort for MessageFlowStateMachineResultPublisher 
                 owner_bot_id: None,
                 created_at: now_ms(),
                 run_id: cmd.run_id.clone(),
+                visibility_domain: MessageVisibilityDomain::StateMachine,
+                audience: Some(MessageAudience::Public),
             })
             .await
             .map_err(|error| {
@@ -550,10 +552,7 @@ impl ChannelBindingCleanupPort for DeferredChannelBindingCleanupPort {
         service.delete_bindings_for_group(group_id).await
     }
 
-    async fn delete_bindings_for_bot(
-        &self,
-        bot_id: &str,
-    ) -> bcs_service_api::ServiceResult<u64> {
+    async fn delete_bindings_for_bot(&self, bot_id: &str) -> bcs_service_api::ServiceResult<u64> {
         let service = self.service.get().ok_or_else(|| {
             bcs_service_api::ServiceError::InternalError(
                 "channel binding cleanup port is not initialized".to_string(),
@@ -1072,8 +1071,7 @@ pub struct BcsServerState {
     pub openapi_v1: ApiState,
 
     /// Bot attributes application service owned by the Provider-scoped HTTP adapter.
-    pub internal_bot_attributes_service:
-        Arc<dyn bcs_service_api::InternalBotAttributesService>,
+    pub internal_bot_attributes_service: Arc<dyn bcs_service_api::InternalBotAttributesService>,
 
     /// Configured secret source used for the session-bound Workbench credential.
     pub group_session_secret_access: Arc<dyn SecretAccessPort>,
@@ -1568,6 +1566,7 @@ fn build_openapi_v1_state(
     public_invite_code_claim_enabled: bool,
     principal_verifier: Arc<dyn PrincipalVerifier>,
     connect_service: Arc<dyn bcs_service_api::application::ConnectService>,
+    participant_view_bindings: Arc<dyn bcs_service_api::port::ParticipantViewBindingPort>,
     event_subscription_service: Arc<dyn bcs_service_api::application::v1::EventSubscriptionService>,
     group_event_subscription_provisioner: Arc<
         dyn bcs_service_api::application::v1::GroupEventSubscriptionProvisioner,
@@ -1609,25 +1608,29 @@ fn build_openapi_v1_state(
             relation_env: relation_env.clone(),
         },
     )
+    .with_participant_view_bindings(participant_view_bindings.clone())
     .with_collaboration_runtime(collaboration_runtime.clone());
     if config.eventing.enabled {
         group_service =
             group_service.with_event_subscription_provisioner(group_event_subscription_provisioner);
     }
     let group_service = Arc::new(group_service);
-    let session_service = Arc::new(SessionServiceImpl::new(
-        session_launch,
-        sessions.clone(),
-        groups.clone(),
-        registry.clone(),
-        friends.clone(),
-        relation,
-        session_repo,
-        group_message_history,
-        collaboration_runtime.clone(),
-        system_message.clone(),
-        SessionServiceConfig { relation_env },
-    ));
+    let session_service = Arc::new(
+        SessionServiceImpl::new(
+            session_launch,
+            sessions.clone(),
+            groups.clone(),
+            registry.clone(),
+            friends.clone(),
+            relation,
+            session_repo,
+            group_message_history,
+            collaboration_runtime.clone(),
+            system_message.clone(),
+            SessionServiceConfig { relation_env },
+        )
+        .with_participant_view_bindings(participant_view_bindings),
+    );
     let session_file_url_projector = SessionFileUrlProjector::new(
         config
             .openapi_v1
@@ -1657,7 +1660,7 @@ fn build_openapi_v1_state(
             group_link_url: config.invite.group_link_url.clone(),
             session_link_url: config.invite.session_link_url.clone(),
         });
-let invitation_service = Arc::new(
+    let invitation_service = Arc::new(
         InvitationFriendshipServiceImpl::new(
             friends,
             friend_requests,
@@ -1680,7 +1683,9 @@ let invitation_service = Arc::new(
         ));
     let collaboration_template_service: Arc<
         dyn bcs_service_api::application::v1::CollaborationTemplateService,
-    > = Arc::new(V1CollaborationTemplateServiceImpl::new(collaboration_templates));
+    > = Arc::new(V1CollaborationTemplateServiceImpl::new(
+        collaboration_templates,
+    ));
     let collaboration_definition_service: Arc<
         dyn bcs_service_api::application::v1::CollaborationDefinitionService,
     > = Arc::new(V1CollaborationDefinitionServiceImpl::new(
@@ -1709,7 +1714,9 @@ let invitation_service = Arc::new(
         .with_collaboration_definition_service(collaboration_definition_service)
         .with_collaboration_runtime_service(collaboration_runtime.clone())
         .with_manifest_config(
-            crate::config_loader::Environment::resolve().as_str().to_string(),
+            crate::config_loader::Environment::resolve()
+                .as_str()
+                .to_string(),
             config.manifest.clone(),
         ),
         internal_bot_attributes_service,
@@ -1969,9 +1976,15 @@ impl Default for BcsServerState {
             bot_use_cases = bot_use_cases.with_user_directory(user_directory);
         }
         let bot_use_cases = Arc::new(bot_use_cases);
-        let frontend_connections = Arc::new(WorkbenchConnectionRegistry::with_bot_query(
-            bot_use_cases.clone(),
-        ));
+        let frontend_connections = Arc::new(
+            WorkbenchConnectionRegistry::with_bot_query(bot_use_cases.clone())
+                .with_scope_changes_enabled(
+                    !config
+                        .leader_election
+                        .as_ref()
+                        .is_some_and(|leader_election| leader_election.enabled),
+                ),
+        );
         let run_channels = Arc::new(RunChannelManager::new());
         let frontend_run_channels = run_channels.clone();
         let ws_bot_delivery: Arc<dyn BotDeliveryPort> = bot_connections.clone();
@@ -2120,23 +2133,26 @@ impl Default for BcsServerState {
         };
         let (message_flow, channel_slot) =
             finalize_message_flow(message_flow_builder, system_message.clone());
-        let group_management_impl = Arc::new(GroupManagement::new(
-            sessions.clone(),
-            bot_registry.clone(),
-            friend_store.clone(),
-            relation_store.clone(),
-            GroupConfig {
-                max_group_members: config.max_group_members,
-                max_groups_as_driver: config.max_groups_as_driver,
-                max_groups_as_member: config.max_groups_as_member,
-                relation_env: crate::env::resolve_env(),
-            },
-            session_management.clone(),
-            system_message.clone(),
-        )
-        .with_channel_binding_cleanup(channel_binding_cleanup.clone())
-        .with_outbound_url_guard(outbound_url_guard.clone())
-        .with_bot_runtime(bot_use_cases.clone()));
+        let group_management_impl = Arc::new(
+            GroupManagement::new(
+                sessions.clone(),
+                bot_registry.clone(),
+                friend_store.clone(),
+                relation_store.clone(),
+                GroupConfig {
+                    max_group_members: config.max_group_members,
+                    max_groups_as_driver: config.max_groups_as_driver,
+                    max_groups_as_member: config.max_groups_as_member,
+                    relation_env: crate::env::resolve_env(),
+                },
+                session_management.clone(),
+                system_message.clone(),
+            )
+            .with_channel_binding_cleanup(channel_binding_cleanup.clone())
+            .with_participant_view_bindings(frontend_connections.clone())
+            .with_outbound_url_guard(outbound_url_guard.clone())
+            .with_bot_runtime(bot_use_cases.clone()),
+        );
         let group_proposals = Arc::new(GroupProposalUseCases::new(
             sessions.clone(),
             bot_registry.clone(),
@@ -2237,8 +2253,9 @@ impl Default for BcsServerState {
                 candidate_search.legacy,
             ),
         );
-let collaboration_templates = build_standalone_collaboration_template_service(&config);
-        let invite_code_service = build_invite_code_service(&config, None, None, invite_token_secret.clone());
+        let collaboration_templates = build_standalone_collaboration_template_service(&config);
+        let invite_code_service =
+            build_invite_code_service(&config, None, None, invite_token_secret.clone());
         let eventing_runtime = build_eventing_runtime_blocking(
             &config,
             event_repo,
@@ -2284,6 +2301,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             config.invite.public_claim_enabled,
             gateway_principal_verifier.clone(),
             Arc::new(bcs_test_support::NoopConnectService),
+            frontend_connections.clone(),
             eventing_runtime.service.clone(),
             eventing_runtime.group_provisioner.clone(),
         );
@@ -2345,7 +2363,6 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             .collaboration_templates(collaboration_templates)
             .actor_directory(actor_directory)
             .bot_query(bot_use_cases.clone())
-            
             .bot_management(bot_use_cases.clone())
             .bot_runtime(bot_use_cases.clone())
             .bot_discovery(bot_use_cases)
@@ -2670,6 +2687,7 @@ fn build_use_case_bundle(
     group_message_history: Arc<dyn GroupMessageHistoryService>,
     session_management: Arc<dyn SessionManagementService>,
     channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
+    participant_view_bindings: Arc<dyn bcs_service_api::port::ParticipantViewBindingPort>,
     bot_run_context: Arc<dyn BotRunContextPort>,
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     message_repo: Option<Arc<dyn MessageRepoPort>>,
@@ -2726,23 +2744,26 @@ fn build_use_case_bundle(
             group.clone(),
         ))
     };
-    let group_management = Arc::new(GroupManagement::new(
-        group.clone(),
-        bot_registry.clone(),
-        friend.clone(),
-        relation.clone(),
-        GroupConfig {
-            max_group_members: config.max_group_members,
-            max_groups_as_driver: config.max_groups_as_driver,
-            max_groups_as_member: config.max_groups_as_member,
-            relation_env: crate::env::resolve_env(),
-        },
-        session_management.clone(),
-        system_message.clone(),
-    )
-    .with_channel_binding_cleanup(channel_binding_cleanup)
-    .with_outbound_url_guard(callback_url_guard.clone())
-    .with_bot_runtime(bot_use_cases.clone()));
+    let group_management = Arc::new(
+        GroupManagement::new(
+            group.clone(),
+            bot_registry.clone(),
+            friend.clone(),
+            relation.clone(),
+            GroupConfig {
+                max_group_members: config.max_group_members,
+                max_groups_as_driver: config.max_groups_as_driver,
+                max_groups_as_member: config.max_groups_as_member,
+                relation_env: crate::env::resolve_env(),
+            },
+            session_management.clone(),
+            system_message.clone(),
+        )
+        .with_channel_binding_cleanup(channel_binding_cleanup)
+        .with_participant_view_bindings(participant_view_bindings)
+        .with_outbound_url_guard(callback_url_guard.clone())
+        .with_bot_runtime(bot_use_cases.clone()),
+    );
     let group_management_v1: Arc<dyn bcs_service_api::GroupManagementService> =
         Arc::new((*group_management).clone().for_v1_openapi());
     let proposal_base_url = config
@@ -2778,13 +2799,15 @@ fn build_use_case_bundle(
             bot_registry.clone(),
             relation.clone(),
         )),
-        bot_onboarding: Arc::new(bcs_bot::BotOnboarding::new(
-            bot_registry,
-            relation,
-            config.onboard_binding_enabled,
-            config.default_visibility.clone(),
-        )
-        .with_profiles(profile_store)),
+        bot_onboarding: Arc::new(
+            bcs_bot::BotOnboarding::new(
+                bot_registry,
+                relation,
+                config.onboard_binding_enabled,
+                config.default_visibility.clone(),
+            )
+            .with_profiles(profile_store),
+        ),
         bot_query: bot_use_cases.clone(),
         bot_management: bot_use_cases.clone(),
         bot_runtime: bot_use_cases.clone(),
@@ -3551,9 +3574,15 @@ impl BcsServer {
         }
         let bot_use_cases = Arc::new(bot_use_cases);
         let frontend_bot_query: Arc<dyn bcs_service_api::BotQueryService> = bot_use_cases.clone();
-        let frontend_connections = Arc::new(WorkbenchConnectionRegistry::with_bot_query(
-            frontend_bot_query,
-        ));
+        let frontend_connections = Arc::new(
+            WorkbenchConnectionRegistry::with_bot_query(frontend_bot_query)
+                .with_scope_changes_enabled(
+                    !config
+                        .leader_election
+                        .as_ref()
+                        .is_some_and(|leader_election| leader_election.enabled),
+                ),
+        );
         let run_channels: Arc<RunChannelManager> = Arc::new(RunChannelManager::new());
         let frontend_run_channels = run_channels.clone();
         let ws_bot_delivery: Arc<dyn BotDeliveryPort> = bot_connections.clone();
@@ -3702,6 +3731,7 @@ impl BcsServer {
             group_message_history.clone(),
             session_management.clone(),
             channel_binding_cleanup.clone(),
+            frontend_connections.clone(),
             bot_run_context.clone(),
             user_directory.clone(),
             Some(message_repo.clone()),
@@ -3781,8 +3811,9 @@ impl BcsServer {
                 collaboration_runtime.clone(),
             )),
         );
-let collaboration_templates = build_standalone_collaboration_template_service(&config);
-        let invite_code_service = build_invite_code_service(&config, None, None, invite_token_secret.clone());
+        let collaboration_templates = build_standalone_collaboration_template_service(&config);
+        let invite_code_service =
+            build_invite_code_service(&config, None, None, invite_token_secret.clone());
         let eventing_runtime = build_eventing_runtime_blocking(
             &config,
             event_repo,
@@ -3821,6 +3852,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             config.invite.public_claim_enabled,
             gateway_principal_verifier.clone(),
             Arc::new(bcs_test_support::NoopConnectService),
+            frontend_connections.clone(),
             eventing_runtime.service.clone(),
             eventing_runtime.group_provisioner.clone(),
         );
@@ -3895,7 +3927,6 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             .human_actors(use_cases.human_actors)
             .bot_onboarding(use_cases.bot_onboarding)
             .bot_query(use_cases.bot_query)
-            
             .bot_management(use_cases.bot_management)
             .bot_runtime(use_cases.bot_runtime)
             .bot_discovery(use_cases.bot_discovery)
@@ -4213,16 +4244,12 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             Arc<dyn bcs_service_api::port::repo::BotActorConfigRepoPort>,
         ) = {
             let edge_grant_repo = match db_kind {
-                DbPluginKind::LocalSqlite => {
-                    Arc::new(bcs_edge_permission_store::DbEdgeGrantStore::sqlite(
-                        db_plugin.clone(),
-                    ))
-                }
-                DbPluginKind::Mysql => {
-                    Arc::new(bcs_edge_permission_store::DbEdgeGrantStore::mysql(
-                        db_plugin.clone(),
-                    ))
-                }
+                DbPluginKind::LocalSqlite => Arc::new(
+                    bcs_edge_permission_store::DbEdgeGrantStore::sqlite(db_plugin.clone()),
+                ),
+                DbPluginKind::Mysql => Arc::new(
+                    bcs_edge_permission_store::DbEdgeGrantStore::mysql(db_plugin.clone()),
+                ),
                 DbPluginKind::External(provider) => {
                     panic!(
                         "external database plugin '{}' has no edge-grant store wiring",
@@ -4330,7 +4357,14 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
         }
         let bot_runtime_for_session: Arc<dyn bcs_service_api::BotRuntimeConnectionService> =
             Arc::new(bot_runtime_for_session);
-        let frontend_connections = Arc::new(WorkbenchConnectionRegistry::new());
+        let frontend_connections = Arc::new(
+            WorkbenchConnectionRegistry::new().with_scope_changes_enabled(
+                !config
+                    .leader_election
+                    .as_ref()
+                    .is_some_and(|leader_election| leader_election.enabled),
+            ),
+        );
         let run_channels = Arc::new(RunChannelManager::new());
         let frontend_run_channels = run_channels.clone();
         let ws_bot_delivery: Arc<dyn BotDeliveryPort> = bot_connections.clone();
@@ -4394,10 +4428,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
                         &config,
                         event_repo.clone(),
                     ))
-                    .with_opening_message_delivery(
-                        message_repo.clone(),
-                        frontend_delivery.clone(),
-                    ),
+                    .with_opening_message_delivery(message_repo.clone(), frontend_delivery.clone()),
             );
             (
                 session_repo.clone() as Arc<dyn SessionRepoPort>,
@@ -4416,16 +4447,16 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
                     .to_string(),
             ));
         }
-        let bot_run_context: Arc<dyn BotRunContextPort> =
-            if config.bot_run_context_store == "redis" {
-                Arc::new(bcs_message_flow::RedisBotRunContextStore::new(
-                    cache_plugin.clone(),
-                    cache_key_prefix.clone(),
-                    config.async_chat_run_retention_ms,
-                ))
-            } else {
-                Arc::new(bcs_message_flow::MemoryBotRunContextStore::new())
-            };
+        let bot_run_context: Arc<dyn BotRunContextPort> = if config.bot_run_context_store == "redis"
+        {
+            Arc::new(bcs_message_flow::RedisBotRunContextStore::new(
+                cache_plugin.clone(),
+                cache_key_prefix.clone(),
+                config.async_chat_run_retention_ms,
+            ))
+        } else {
+            Arc::new(bcs_message_flow::MemoryBotRunContextStore::new())
+        };
         let session_file_service = build_session_files_service(
             &config,
             crate::env::resolve_env(),
@@ -4497,7 +4528,9 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
                         config.async_chat_run_retention_ms,
                         crate::env::resolve_env(),
                     ));
-                Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_repo(chat_run_repo))
+                Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_repo(
+                    chat_run_repo,
+                ))
             } else {
                 Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_capacity(
                     config.async_chat_run_max_entries,
@@ -4546,6 +4579,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             group_message_history.clone(),
             session_management.clone(),
             channel_binding_cleanup.clone(),
+            frontend_connections.clone(),
             bot_run_context.clone(),
             user_directory.clone(),
             Some(message_repo.clone()),
@@ -4632,7 +4666,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
                 collaboration_runtime.clone(),
             )),
         );
-let collaboration_templates = build_collaboration_template_service_with_storage(
+        let collaboration_templates = build_collaboration_template_service_with_storage(
             &config,
             &infrastructure_plugins,
             config.llm.is_enabled() || extensions.llm_provider.is_some(),
@@ -4686,6 +4720,7 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
             config.invite.public_claim_enabled,
             gateway_principal_verifier.clone(),
             connect_service.clone(),
+            frontend_connections.clone(),
             eventing_runtime.service,
             eventing_runtime.group_provisioner,
         );
@@ -4765,7 +4800,6 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
             .human_actors(use_cases.human_actors)
             .bot_onboarding(use_cases.bot_onboarding)
             .bot_query(use_cases.bot_query)
-            
             .bot_management(use_cases.bot_management)
             .bot_runtime(use_cases.bot_runtime)
             .bot_discovery(use_cases.bot_discovery)
@@ -4925,9 +4959,11 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
     }
 
     fn openapi_auth_public_base_url(&self) -> Option<String> {
-        self.state.auth_config.oauth.as_ref().map(|oauth| {
-            format!("{}/openapi/v1/auth", oauth.base_url.trim_end_matches('/'))
-        })
+        self.state
+            .auth_config
+            .oauth
+            .as_ref()
+            .map(|oauth| format!("{}/openapi/v1/auth", oauth.base_url.trim_end_matches('/')))
     }
 
     /// Build the `/auth/*` router.
@@ -4984,10 +5020,9 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
         );
         let oauth_state = self.build_full_oauth_route_state();
         let mut openapi_v1 = self.state.openapi_v1.clone();
-        if let (Some(auth_service), Some(public_base_url)) = (
-            oauth_state.clone(),
-            self.openapi_auth_public_base_url(),
-        ) {
+        if let (Some(auth_service), Some(public_base_url)) =
+            (oauth_state.clone(), self.openapi_auth_public_base_url())
+        {
             openapi_v1 = openapi_v1.with_auth_service(auth_service, public_base_url);
         }
 
@@ -6032,6 +6067,8 @@ mod tests {
                     event_json: r#"{"type":"event","event":"chat.event"}"#.to_string(),
                 }),
                 exclude_conn_id: None,
+                visibility_domain: bcs_domain::MessageVisibilityDomain::Chat,
+                audience: Some(bcs_domain::MessageAudience::Public),
             })
             .await
             .unwrap();

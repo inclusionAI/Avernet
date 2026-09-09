@@ -2398,7 +2398,9 @@ class TestEvalSessionLog:
             mock_bot_service_plugin,
             eval_session_log=eval_log,
         )
-        with patch("secbaas.community.core.service.bot_run._runner.logger") as mock_logger:
+        with patch(
+            "secbaas.community.core.service.bot_run._runner.logger"
+        ) as mock_logger:
             await runner.deliver_message(
                 bot_id=f"{BOT_ID}:{ENTITY_ID}",
                 message="hello",
@@ -2408,7 +2410,8 @@ class TestEvalSessionLog:
             )
             # 验证 logger.debug 被调用（eval 缺少显式 session_id 降为 debug）
             debug_calls = [
-                c for c in mock_logger.debug.call_args_list
+                c
+                for c in mock_logger.debug.call_args_list
                 if "eval 对话缺少显式 session_id" in str(c)
             ]
             assert len(debug_calls) == 1
@@ -2570,7 +2573,9 @@ class TestEvalSessionLogStream:
             eval_session_log=eval_log,
         )
 
-        with patch("secbaas.community.core.service.bot_run._runner.logger") as mock_logger:
+        with patch(
+            "secbaas.community.core.service.bot_run._runner.logger"
+        ) as mock_logger:
             await runner.deliver_message_stream(
                 bot_id=f"{BOT_ID}:{ENTITY_ID}",
                 message="hello",
@@ -2579,7 +2584,8 @@ class TestEvalSessionLogStream:
             )
             # 验证 logger.debug 被调用
             debug_calls = [
-                c for c in mock_logger.debug.call_args_list
+                c
+                for c in mock_logger.debug.call_args_list
                 if "eval 对话缺少显式 session_id" in str(c)
             ]
             assert len(debug_calls) == 1

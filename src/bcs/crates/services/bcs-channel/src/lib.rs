@@ -6411,6 +6411,7 @@ mod tests {
                 error_message: None,
                 callback_status: None,
                 activation_count: 1,
+                message_visibility_version: params.message_visibility_version,
                 caller_principal: params.caller_principal,
                 created_by: params.created_by,
                 current_msg_seq: 0,

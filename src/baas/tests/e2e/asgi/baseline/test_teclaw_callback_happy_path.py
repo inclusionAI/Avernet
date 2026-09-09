@@ -160,7 +160,10 @@ class TestTeclawCallbackHappyPath:
             )
 
             payload = _callback_payload(
-                device_uuid, publish_id, api.tenant, success=True,
+                device_uuid,
+                publish_id,
+                api.tenant,
+                success=True,
             )
             status_code, body = await call_teclaw_callback(api.client, payload)
 
@@ -184,9 +187,7 @@ class TestTeclawCallbackHappyPath:
                 (d for d in devices if d.get("device_uuid") == device_uuid),
                 None,
             )
-            assert target is not None, (
-                "Device not found in progress after callback"
-            )
+            assert target is not None, "Device not found in progress after callback"
             assert target.get("result_status") == "SUCCESS", (
                 f"publish_record result_status should be 'SUCCESS'; "
                 f"got: {target.get('result_status')}"

@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use bcs_domain::BotDeliveryTarget;
+use bcs_domain::{BotDeliveryTarget, MessageAudience, MessageVisibilityDomain};
 use bcs_protocol::BcsFrame;
 
 use crate::{ServiceError, ServiceResult};
@@ -87,6 +87,8 @@ pub struct FrontendDeliveryCommand {
     pub delivery_kind: FrontendDeliveryKind,
     pub run_fallback: Option<RunFallbackDelivery>,
     pub exclude_conn_id: Option<u64>,
+    pub visibility_domain: MessageVisibilityDomain,
+    pub audience: Option<MessageAudience>,
 }
 
 #[derive(Debug, Clone)]

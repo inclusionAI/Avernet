@@ -94,6 +94,7 @@ async fn cleanup_wrapper_forwards_non_delete_operations() {
                 group_id: "group-1".to_string(),
                 actor_id: "worker".to_string(),
                 mode: ParticipantMode::Muted,
+                message_view_scope: None,
             })
             .await
             .is_err()

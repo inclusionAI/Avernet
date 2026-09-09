@@ -12,7 +12,11 @@
  * 两个接口都返回完整 Session 对象，前端用 participants 重建本地 members。
  */
 
-import type { ActorKind, GroupSession } from '@/pages/GroupChat/types';
+import type {
+  ActorKind,
+  GroupSession,
+  MessageViewScope,
+} from '@/pages/GroupChat/types';
 import * as BcnController from '@/services/backend-api/BcnController';
 import { useGroupSessionStore } from '@/stores/groupSessionStore';
 import { extractErrorMessage } from '@/utils/requestErrorHandler';
@@ -44,6 +48,7 @@ function membersFromParticipants(
       (p.type === 'bot' ? 'bot' : 'human')) as ActorKind,
     name: p.bot_name,
     mode: p.mode,
+    messageViewScope: p.message_view_scope,
     role: p.role,
     type: p.type,
   }));
@@ -64,6 +69,7 @@ function applyResponseToStore(
 export function useSessionMembers() {
   const [isAdding, setIsAdding] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
+  const [isUpdatingScope, setIsUpdatingScope] = useState(false);
 
   /** 添加单个成员（不弹 toast，由调用方汇总） */
   const addOne = useCallback(
@@ -163,11 +169,43 @@ export function useSessionMembers() {
     [],
   );
 
+  const updateSessionMemberScope = useCallback(
+    async (
+      sessionId: string,
+      actorId: string,
+      messageViewScope: MessageViewScope,
+    ): Promise<boolean> => {
+      try {
+        setIsUpdatingScope(true);
+        const resp = await BcnController.updateSessionMember({
+          session_id: sessionId,
+          actor_id: actorId,
+          message_view_scope: messageViewScope,
+        });
+        applyResponseToStore(sessionId, resp);
+        toast.success('消息视角已更新');
+        return true;
+      } catch (error: any) {
+        console.error(
+          '[useSessionMembers] updateSessionMemberScope failed:',
+          error,
+        );
+        toast.error(extractErrorMessage(error, '更新消息视角失败'));
+        return false;
+      } finally {
+        setIsUpdatingScope(false);
+      }
+    },
+    [],
+  );
+
   return {
     addSessionMember,
     addSessionMembersBatch,
     removeSessionMember,
+    updateSessionMemberScope,
     isAdding,
     isRemoving,
+    isUpdatingScope,
   };
 }

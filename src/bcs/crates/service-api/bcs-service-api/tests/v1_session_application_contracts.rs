@@ -3,10 +3,10 @@ use bcs_service_api::application::v1::{
     ActorKind, AddSessionParticipant, ApplicationError, AuthenticatedCaller,
     AuthenticatedUserIdentity, CollectSession, CompleteSession, CreateSession,
     CreateSessionOutcome, DeleteResult, DeleteSession, DeleteSessionParticipant, GetSession,
-    ListSessionMessages, ListSessions, Page, ParticipantMode, SessionCollectionResult,
-    SessionCompletionResult, SessionDetail, SessionMessageService, SessionParticipant,
-    SessionCaller, SessionService, SessionStatus, UncollectSession, UpdateSession,
-    UpdateSessionParticipant,
+    ListSessionMessages, ListSessions, MessageViewScope, Page, ParticipantMode,
+    SessionCollectionResult, SessionCompletionResult, SessionDetail, SessionMessageService,
+    SessionParticipant, SessionCaller, SessionService, SessionStatus, UncollectSession,
+    UpdateSession, UpdateSessionParticipant,
 };
 use bcs_service_api::types::{AttachmentType, MessageAttachment};
 use bcs_service_api::{GroupMessage, GroupMessageType, MessageRole};
@@ -133,6 +133,7 @@ fn session_commands_carry_caller_and_no_raw_credentials() {
         kind: None,
         acting_bot_id: None,
         creator_role: None,
+        message_view_scope: None,
         input: None,
         meta: None,
         context_delivery: None,
@@ -177,12 +178,14 @@ fn session_commands_carry_caller_and_no_raw_credentials() {
         caller: caller.clone(),
         session_id: "s1".into(),
         bot_uuid: "bot-3".into(),
+        message_view_scope: None,
     };
     let update_p = UpdateSessionParticipant {
         caller: caller.clone(),
         session_id: "s1".into(),
         bot_uuid: "human_staff-1".into(),
-        mode: ParticipantMode::Present,
+        mode: Some(ParticipantMode::Present),
+        message_view_scope: None,
     };
     let remove_p = DeleteSessionParticipant {
         caller,
@@ -304,6 +307,7 @@ fn session_participant_serializes_bot_and_human_actors() {
         role: bcs_service_api::application::v1::ParticipantRole::Driver,
         tags: vec!["tenant-a".into()],
         mode: ParticipantMode::Auto,
+        message_view_scope: MessageViewScope::Full,
         joined_at: Some(42),
     };
     let bot_json = serde_json::to_value(&bot).expect("serialize Bot SessionParticipant");
@@ -321,6 +325,7 @@ fn session_participant_serializes_bot_and_human_actors() {
         role: bcs_service_api::application::v1::ParticipantRole::Consultant,
         tags: Vec::new(),
         mode: ParticipantMode::Present,
+        message_view_scope: MessageViewScope::Full,
         joined_at: None,
     };
     let human_json = serde_json::to_value(&human).expect("serialize Human SessionParticipant");

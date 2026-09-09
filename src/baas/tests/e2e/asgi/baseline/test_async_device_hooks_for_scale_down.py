@@ -202,9 +202,7 @@ async def _scale_down_bot_with_device_uuids(
 
 async def _get_bot_devices(api: APITestHelper, bot_uuid: str) -> list[dict]:
     """Fetch bot devices via HTTP, return list of device dicts from the response."""
-    resp = await api.client.get(
-        api.bot_devices_url(bot_uuid), params=api.params()
-    )
+    resp = await api.client.get(api.bot_devices_url(bot_uuid), params=api.params())
     assert resp.status_code == 200
     devices_data = resp.json()["data"]
     all_devices: list[dict] = []
@@ -270,9 +268,7 @@ class TestScaleDownWithDeviceUuids:
 
         # Remaining ACTIVE device count must match target_count (3 - 2 = 1).
         remaining_devices = await _get_bot_devices(api, bot_uuid)
-        remaining_active = [
-            d for d in remaining_devices if d.get("status") == "ACTIVE"
-        ]
+        remaining_active = [d for d in remaining_devices if d.get("status") == "ACTIVE"]
         assert len(remaining_active) == 1, (
             f"Expected 1 ACTIVE device after scale down, got "
             f"{len(remaining_active)}: {remaining_active}"
@@ -332,9 +328,7 @@ class TestScaleDownWithDeviceUuids:
         # Devices 1 and 3 must remain ACTIVE.
         remaining_devices = await _get_bot_devices(api, bot_uuid)
         remaining_active_uuids = {
-            d["device_uuid"]
-            for d in remaining_devices
-            if d.get("status") == "ACTIVE"
+            d["device_uuid"] for d in remaining_devices if d.get("status") == "ACTIVE"
         }
         assert preserve_uuids.issubset(remaining_active_uuids), (
             f"Expected preserved devices {preserve_uuids} to remain ACTIVE, "

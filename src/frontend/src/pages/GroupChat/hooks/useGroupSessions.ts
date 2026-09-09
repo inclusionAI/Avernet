@@ -8,6 +8,7 @@
 import type {
   CreateSessionParams,
   GroupSession,
+  MessageViewScope,
 } from '@/pages/GroupChat/types';
 import { transformMessageData } from '@/pages/GroupChat/utils/transformMessageData';
 import * as BcnController from '@/services/backend-api/BcnController';
@@ -34,6 +35,7 @@ function transformSessionData(
       actorKind: p.actor_kind || (p.type === 'bot' ? 'bot' : 'human'),
       name: p.bot_name,
       mode: p.mode,
+      messageViewScope: p.message_view_scope,
       role: p.role,
       type: p.type,
     })),
@@ -269,6 +271,7 @@ export function useGroupSessions() {
           session_kind: params.session_kind,
           session_title: params.session_title,
           created_by: params.created_by,
+          message_view_scope: params.message_view_scope,
           input: params.input,
         });
 
@@ -313,6 +316,7 @@ export function useGroupSessions() {
       sessionId: string,
       actorId: string,
       actorKind: 'bot' | 'human' = 'human',
+      messageViewScope?: MessageViewScope,
     ) => {
       try {
         setJoiningSession(true);
@@ -320,6 +324,7 @@ export function useGroupSessions() {
           session_id: sessionId,
           actor_id: actorId,
           mode: 'present',
+          message_view_scope: messageViewScope,
         });
         // 更新当前会话的成员列表
         if (currentSession?.sessionId === sessionId) {
@@ -330,7 +335,13 @@ export function useGroupSessions() {
             updateSession(sessionId, {
               members: currentSession.members.map((m) =>
                 m.actorId === actorId
-                  ? { ...m, actorKind, mode: 'present' as const }
+                  ? {
+                      ...m,
+                      actorKind,
+                      mode: 'present' as const,
+                      messageViewScope:
+                        messageViewScope || m.messageViewScope,
+                    }
                   : m,
               ),
             });
@@ -338,7 +349,12 @@ export function useGroupSessions() {
             updateSession(sessionId, {
               members: [
                 ...currentSession.members,
-                { actorId, actorKind, mode: 'present' as const },
+                {
+                  actorId,
+                  actorKind,
+                  mode: 'present' as const,
+                  messageViewScope,
+                },
               ],
             });
           }

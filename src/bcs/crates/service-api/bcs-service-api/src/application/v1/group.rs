@@ -10,7 +10,9 @@ use crate::types::{
 };
 use crate::InitialGroupRun;
 
-pub use bcs_domain::{ActorKind, OpeningMessage, ParticipantMode, ParticipantRole};
+pub use bcs_domain::{
+    ActorKind, MessageViewScope, OpeningMessage, ParticipantMode, ParticipantRole,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -99,6 +101,7 @@ pub struct Participant {
     pub name: Option<String>,
     pub role: ParticipantRole,
     pub mode: ParticipantMode,
+    pub message_view_scope: MessageViewScope,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
 }
@@ -285,6 +288,7 @@ pub struct CreateParticipant {
     pub actor_id: String,
     pub role: ParticipantRole,
     pub tags: Vec<String>,
+    pub message_view_scope: Option<MessageViewScope>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -473,6 +477,7 @@ pub struct AddGroupParticipant {
     pub caller: AuthenticatedCaller,
     pub group_id: String,
     pub actor_id: String,
+    pub message_view_scope: Option<MessageViewScope>,
 }
 
 #[derive(Debug, Clone)]
@@ -480,7 +485,8 @@ pub struct UpdateGroupParticipant {
     pub caller: AuthenticatedCaller,
     pub group_id: String,
     pub actor_id: String,
-    pub mode: ParticipantMode,
+    pub mode: Option<ParticipantMode>,
+    pub message_view_scope: Option<MessageViewScope>,
 }
 
 #[derive(Debug, Clone)]
