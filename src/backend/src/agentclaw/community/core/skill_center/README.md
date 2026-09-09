@@ -14,6 +14,10 @@ provides:
   - "GitSyncService"
   - "SkillAuthService"
   - "CurrentRuntimeLayoutProbeService"
+  - "CurrentMcpRuntimeProbeService"
+  - "LifecycleRuntimeProjectionTaskHandler"
+  - "LifecycleRuntimeProjectionWakeup"
+  - "RuntimeProjectionDeliveryShape"
   - "SkillQueryService"
   - "LocalSkillUploadService"
   - "SkillPackageValidator"
@@ -187,6 +191,18 @@ internal_dependencies:
 ```
 
 ### Change impact
+
+Lifecycle-triggered recovery now differs from mutation-triggered projection.
+For a PerDomain runtime, the required `DeviceAliveEvent` hand-off and explicit
+restart/reconcile signals enqueue independent `skills` and `mcp` rows under
+`runtime_projection.reconcile`.  Each attempt fences the current binding,
+device, sandbox and Bot before re-reading current Desired State.  The MCP row
+must receive `READY` from `/api/mcp/readiness`; transient readiness and
+retryable projection issues use TaskQueue backoff until the ten-minute
+deadline.  WholeArtifact runtimes remain synchronous in
+`SkillSymlinkListener`, so Teclaw still composes and applies exactly one full
+artifact without this probe or task policy.  User mutations remain on their
+existing synchronous projection and compensation contracts.
 
 `SkillRuntimeDelivery` owns steady-state filesystem Skill delivery after plan
 resolution: Legacy Local-only and empty snapshots retain DeviceSync, while

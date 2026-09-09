@@ -46,6 +46,9 @@ from agentclaw.community.core.devices.services.device_accessor import DeviceAcce
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
+from agentclaw.community.core.repository.protocols.devices import (
+    DeviceBindingRepository,
+)
 from agentclaw.community.core.devices.services.device_filesystem_dispatcher import (
     DeviceFilesystemDispatcher,
     DeviceFileSystemResolver,
@@ -115,6 +118,18 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 )
 from agentclaw.community.core.skill_center.services.runtime_projections.registry import (
     EngineRuntimeProjectionRegistry,
+    RuntimeProjectionDeliveryShape,
+)
+from agentclaw.community.core.skill_center.services.lifecycle_runtime_reprojection import (
+    LifecycleRuntimeProjectionTaskHandler,
+    LifecycleRuntimeProjectionWakeup,
+)
+from agentclaw.community.core.skill_center.services.mcp_runtime_probe import (
+    CurrentMcpRuntimeProbeService,
+)
+from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
+from agentclaw.community.core.task_queue.services.task_queue_service import (
+    TaskQueueService,
 )
 from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
 from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
@@ -216,6 +231,9 @@ from agentclaw.community.di.modules.space_skill_repository_bindings import (
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterTransport,
+)
 from agentclaw.community.plugin_api.impl_registry import IMPL_REGISTRY, Mode
 from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
@@ -594,6 +612,76 @@ class SkillCenterModule(
                 ),
             ),
             by_engine={"teclaw": WholeArtifactRuntimeProjection()},
+            delivery_shape_by_engine={
+                "teclaw": RuntimeProjectionDeliveryShape.WHOLE_ARTIFACT,
+            },
+        )
+
+    @singleton
+    @provider
+    def current_mcp_runtime_probe_service(
+        self,
+        resolver: DeviceContextResolver,
+        adapter_transport: DeviceAdapterTransport,
+    ) -> CurrentMcpRuntimeProbeService:
+        return CurrentMcpRuntimeProbeService(
+            resolver=resolver,
+            adapter_transport=adapter_transport,
+        )
+
+    @singleton
+    @provider
+    def lifecycle_runtime_projection_task_handler(
+        self,
+        binding_repository: DeviceBindingRepository,
+        bot_repository: BotRepository,
+        projection_registry: EngineRuntimeProjectionRegistry,
+        runtime_reconciler: CoreBotRuntimeProjectorProtocol,
+        mcp_probe: CurrentMcpRuntimeProbeService,
+        layout_repository: SkillsPoolLayoutRepositoryProtocol,
+    ) -> LifecycleRuntimeProjectionTaskHandler:
+        def skill_projection_owned_elsewhere(bot: dict[str, object]) -> bool:
+            if bot.get("bot_type") != "desktop":
+                return False
+            values = (bot.get("env"), bot.get("entity_id"), bot.get("bot_id"))
+            if not all(isinstance(value, str) and value for value in values):
+                return False
+            state = layout_repository.get(
+                BotSkillLayoutScope(
+                    env=str(values[0]),
+                    entity_id=str(values[1]),
+                    bot_id=str(values[2]),
+                )
+            )
+            return runtime_uses_pool_paths(state)
+
+        return LifecycleRuntimeProjectionTaskHandler(
+            binding_repository=binding_repository,
+            bot_repository=bot_repository,
+            projection_registry=projection_registry,
+            projector=runtime_reconciler,
+            mcp_probe=mcp_probe,
+            skill_projection_owned_elsewhere=skill_projection_owned_elsewhere,
+        )
+
+    @singleton
+    @provider
+    def lifecycle_runtime_projection_wakeup(
+        self,
+        binding_repository: DeviceBindingRepository,
+        bot_repository: BotRepository,
+        task_queue_service: TaskQueueService,
+        projection_registry: EngineRuntimeProjectionRegistry,
+        registry: HandlerRegistry,
+        task_handler: LifecycleRuntimeProjectionTaskHandler,
+    ) -> LifecycleRuntimeProjectionWakeup:
+        return LifecycleRuntimeProjectionWakeup(
+            binding_repository=binding_repository,
+            bot_repository=bot_repository,
+            task_queue_service=task_queue_service,
+            projection_registry=projection_registry,
+            registry=registry,
+            task_handler=task_handler,
         )
 
     @singleton
@@ -908,6 +996,7 @@ class SkillCenterModule(
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
         skills_pool_wakeup: SkillsPoolReconcileWakeupListener,
         runtime_reconciler: CoreBotRuntimeProjectorProtocol,
+        projection_registry: EngineRuntimeProjectionRegistry,
     ) -> SkillSymlinkListener:
         def desktop_layout_authority(bot: dict) -> str | None:
             if bot.get("bot_type") != "desktop":
@@ -956,4 +1045,5 @@ class SkillCenterModule(
                     scope=ProjectionScope(mcp=True, claim_all_mcp=True),
                 )
             ),
+            delivery_shape_for_engine=projection_registry.delivery_shape_for_engine,
         )

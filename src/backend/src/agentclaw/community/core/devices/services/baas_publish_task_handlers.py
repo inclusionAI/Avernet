@@ -76,6 +76,7 @@ def _request_baas_runtime_projection(binding: DeviceBindingRecord) -> None:
             entity_type=binding.entity_type,
             device_provider=binding.device_provider,
             sandbox_id=binding.device_props.get("sandbox_id"),
+            source="baas_restart",
         )
     )
 

@@ -383,8 +383,8 @@ class ProjectionScope:
     released_mcp: frozenset[str] = frozenset()
     #: Treat *every* projected MCP code as claimed, ignoring ``claimed_mcp``.
     #:
-    #: Exactly one listener sets this: ``SkillSymlinkListener``, via either a
-    #: first ``DeviceActivatedEvent`` or a post-restart
+    #: Lifecycle runtime reprojection sets this for the MCP component after a
+    #: first ``DeviceAliveEvent`` or a post-restart
     #: ``RuntimeProjectionRequestedEvent``. It is the one place where "just
     #: re-declare the allow-list" is not enough, because a newly active or
     #: restarted container must converge from its current runtime contents.

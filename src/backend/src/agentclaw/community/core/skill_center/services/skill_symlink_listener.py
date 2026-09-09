@@ -1,8 +1,8 @@
-"""Event listener: full runtime projection when a runtime becomes ready.
+"""Event listener for WholeArtifact delivery and Desktop Pool wake-ups.
 
-Subscribed to ``DeviceActivatedEvent`` for first activation and to
-``RuntimeProjectionRequestedEvent`` for successful BaaS restarts. Both paths
-refresh runtime state from the DB's current desired state.
+PerDomain lifecycle projection is persisted by
+``LifecycleRuntimeProjectionWakeup``. This listener retains Teclaw's existing
+single WholeArtifact call and the Desktop Skills Pool transition wake-up.
 
 The listener is constructed via the DI injector at app startup; its
 ``handle`` method is bound to the event bus so the bus can dispatch with
@@ -22,6 +22,9 @@ from agentclaw.community.core.events.types import (
 )
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.skill_center.services.runtime_projections.registry import (
+    RuntimeProjectionDeliveryShape,
+)
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -74,6 +77,9 @@ class SkillSymlinkListener(LifecycleBase):
         ) = None,
         runtime_reconcile: Callable[[str, str], object] | None = None,
         runtime_non_skill_reconcile: Callable[[str, str], object] | None = None,
+        delivery_shape_for_engine: (
+            Callable[[str], RuntimeProjectionDeliveryShape] | None
+        ) = None,
     ) -> None:
         self._bot_repo = bot_repo
         self._skill_set_factory = skill_set_factory
@@ -83,6 +89,7 @@ class SkillSymlinkListener(LifecycleBase):
         self._desktop_reconcile_wakeup = desktop_reconcile_wakeup
         self._runtime_reconcile = runtime_reconcile
         self._runtime_non_skill_reconcile = runtime_non_skill_reconcile
+        self._delivery_shape_for_engine = delivery_shape_for_engine
 
     async def startup(self) -> None:
         """Subscribe ``self.handle`` to activation and reprojection events.
@@ -155,6 +162,20 @@ class SkillSymlinkListener(LifecycleBase):
                     bot_id,
                     event.binding_id,
                     ctx.binding_id,
+                )
+                return
+
+            engine = str(bot.get("active_engine") or "openclaw")
+            if (
+                self._delivery_shape_for_engine is not None
+                and self._delivery_shape_for_engine(engine)
+                is RuntimeProjectionDeliveryShape.PER_DOMAIN
+            ):
+                logger.info(
+                    "[skill_symlink_listener] per-domain lifecycle projection "
+                    "is owned by durable tasks: bot_id=%s engine=%s",
+                    bot_id,
+                    engine,
                 )
                 return
 

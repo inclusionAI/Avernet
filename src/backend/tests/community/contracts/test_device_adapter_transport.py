@@ -34,6 +34,25 @@ def test_transport_resolves_to_local_impl(world) -> None:
 
 
 @pytest.mark.asyncio
+async def test_local_transport_exposes_mcp_readiness_contract(world) -> None:
+    transport = world.get(DeviceAdapterTransport)
+
+    response = await transport.invoke(
+        {"engine_type": "openclaw"}, "GET", "/api/mcp/readiness"
+    )
+
+    assert response == {
+        "success": True,
+        "data": {
+            "status": "READY",
+            "engine": "openclaw",
+            "reason": None,
+            "retryable": False,
+        },
+    }
+
+
+@pytest.mark.asyncio
 async def test_relay_runs_end_to_end_over_transport(world) -> None:
     make_staff_user(world, user_id="u_owner")
     binding_id = make_active_local_device(world, owner_id="u_owner")

@@ -26,5 +26,8 @@ boundaries: all siblings still run, then `publish()` raises
 
 `DeviceActivatedEvent` announces the first `PENDING -> ACTIVE` transition.
 `RuntimeProjectionRequestedEvent` is a narrower wake-up used after a successful
+runtime restart or an explicit operator recovery. Its `source` distinguishes
+`baas_restart` from `explicit_reconcile`; per-domain consumers persist the
+request before returning from the required event handler.
 runtime restart; it asks projection consumers to re-read current desired state
 without replaying unrelated activation side effects.

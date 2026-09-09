@@ -41,6 +41,7 @@ _EXPECTED_PARTICIPANTS: frozenset[str] = frozenset({
     "BaasPublishTaskLifecycle",  # Phase 2: register durable BaaS publish handlers
     "TeclawPublishTaskLifecycle",  # Phase 2: register durable Teclaw publish handler
     "SkillsPoolReconcileWakeupListener",  # Phase 1/2: durable reconciliation
+    "LifecycleRuntimeProjectionWakeup",  # durable per-domain lifecycle projection
 })
 
 

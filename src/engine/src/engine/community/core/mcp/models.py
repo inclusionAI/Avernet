@@ -6,7 +6,7 @@ See src/engine/docs/heterogeneous-engine-architecture.md §6.2.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any
 
 
@@ -26,6 +26,41 @@ class MCPServerStatus(Enum):
     RUNNING = "running"
     STOPPING = "stopping"
     ERROR = "error"
+
+
+class McpRuntimeReadinessStatus(StrEnum):
+    """Whether the active Engine can accept MCP configuration delivery."""
+
+    READY = "READY"
+    NOT_CAPABLE = "NOT_CAPABLE"
+    TRANSIENT_ERROR = "TRANSIENT_ERROR"
+    INVALID = "INVALID"
+
+
+@dataclass(frozen=True, slots=True)
+class McpRuntimeReadinessResult:
+    status: McpRuntimeReadinessStatus
+    engine: str
+    reason: str | None
+    retryable: bool
+
+    @classmethod
+    def ready(cls, *, engine: str) -> McpRuntimeReadinessResult:
+        return cls(McpRuntimeReadinessStatus.READY, engine, None, False)
+
+    @classmethod
+    def transient(cls, *, engine: str, reason: str) -> McpRuntimeReadinessResult:
+        return cls(McpRuntimeReadinessStatus.TRANSIENT_ERROR, engine, reason, True)
+
+    @classmethod
+    def invalid(cls, *, engine: str, reason: str) -> McpRuntimeReadinessResult:
+        return cls(McpRuntimeReadinessStatus.INVALID, engine, reason, False)
+
+    @classmethod
+    def not_capable(
+        cls, *, engine: str, reason: str = "mcp_projection_not_supported"
+    ) -> McpRuntimeReadinessResult:
+        return cls(McpRuntimeReadinessStatus.NOT_CAPABLE, engine, reason, False)
 
 
 @dataclass
@@ -162,5 +197,7 @@ __all__ = [
     "MCPTool",
     "MCPToolCallRequest",
     "MCPToolCallResult",
+    "McpRuntimeReadinessResult",
+    "McpRuntimeReadinessStatus",
     "TransportType",
 ]

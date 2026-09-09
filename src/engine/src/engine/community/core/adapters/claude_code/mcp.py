@@ -38,6 +38,7 @@ from engine.community.core.mcp.models import (
     MCPTool,
     MCPToolCallRequest,
     MCPToolCallResult,
+    McpRuntimeReadinessResult,
     TransportType,
 )
 from engine.community.core.mcp.protocol import MCPService
@@ -163,6 +164,23 @@ class ClaudeCodeMcpAdapter(MCPService):
 
     def __init__(self, port: ClaudeCodeMcpPort) -> None:
         self._port = port
+
+    async def readiness(self) -> McpRuntimeReadinessResult:
+        try:
+            ready = await self._port.mcp_config_round_trip()
+        except (TypeError, ValueError):
+            return McpRuntimeReadinessResult.invalid(
+                engine="claude_code", reason="relay_mcp_response_invalid"
+            )
+        except Exception:  # noqa: BLE001 - relay implementations vary
+            return McpRuntimeReadinessResult.transient(
+                engine="claude_code", reason="relay_mcp_unavailable"
+            )
+        if not ready:
+            return McpRuntimeReadinessResult.transient(
+                engine="claude_code", reason="relay_mcp_not_ready"
+            )
+        return McpRuntimeReadinessResult.ready(engine="claude_code")
 
     # ── Server CRUD ──────────────────────────────────────────────────────────
 

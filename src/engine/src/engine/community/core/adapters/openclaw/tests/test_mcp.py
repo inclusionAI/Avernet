@@ -11,6 +11,7 @@ canned primitive dicts.  Verifies:
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -180,6 +181,24 @@ async def test_list_servers_empty():
 
     result = await adapter.list_servers()
     assert result == []
+
+
+@pytest.mark.asyncio
+async def test_readiness_accepts_missing_config_as_legal_empty_state():
+    port = _FakeMcpPort()
+    port.will_list([])
+    result = await OpenClawMcpAdapter(port).readiness()
+    assert result.status.value == "READY"
+    assert result.engine == "openclaw"
+
+
+@pytest.mark.asyncio
+async def test_readiness_rejects_invalid_config():
+    port = _FakeMcpPort()
+    port.list_servers = AsyncMock(side_effect=RuntimeError("invalid json"))
+    result = await OpenClawMcpAdapter(port).readiness()
+    assert result.status.value == "INVALID"
+    assert result.retryable is False
 
 
 @pytest.mark.asyncio

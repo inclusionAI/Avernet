@@ -492,6 +492,10 @@ class _FakeMcpPort:
         return [{"serverCode": "s1", "type": "stdio", "command": "npx",
                  "args": ["-y", "x"], "enabled": True}]
 
+    async def mcp_config_round_trip(self) -> bool:
+        self.calls.append({"method": "mcp_config_round_trip"})
+        return True
+
     async def mcp_get_server(self, server_code, token=None) -> dict | None:
         self.calls.append({"method": "mcp_get_server", "server_code": server_code, "token": token})
         return {"serverCode": server_code, "type": "sse", "url": "http://x", "enabled": True}
@@ -543,6 +547,21 @@ class _FakeMcpPort:
 
 
 class TestMcpAdapter:
+    async def test_readiness_requires_successful_relay_round_trip(self):
+        port = _FakeMcpPort()
+        result = await ClaudeCodeMcpAdapter(port).readiness()
+        assert result.status.value == "READY"
+        assert port.calls == [{"method": "mcp_config_round_trip"}]
+
+    async def test_readiness_fails_closed_for_relay_rejection(self):
+        class _Rejected(_FakeMcpPort):
+            async def mcp_config_round_trip(self) -> bool:
+                return False
+
+        result = await ClaudeCodeMcpAdapter(_Rejected()).readiness()
+        assert result.status.value == "TRANSIENT_ERROR"
+        assert result.retryable is True
+
     async def test_filter_servers_applies_allowlist_via_port(self):
         port = _FakeMcpPort()
         adapter = ClaudeCodeMcpAdapter(port)

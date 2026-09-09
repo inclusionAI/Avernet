@@ -7,6 +7,7 @@ HTTP↔Plugin types and applies capability guards.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import subprocess
 
@@ -28,6 +29,7 @@ from engine.community.core.mcp.models import (
     MCPServer,
     MCPServerConfig,
     MCPToolCallRequest,
+    McpRuntimeReadinessResult,
     TransportType,
 )
 
@@ -109,6 +111,40 @@ def _server_to_dict(server: MCPServer) -> dict:
 
 
 # ── Endpoints ──
+
+
+@router.get("/readiness", response_model=ApiResponse)
+async def get_mcp_runtime_readiness() -> ApiResponse:
+    from engine.community.manager import EngineManager
+
+    manager = EngineManager.get_instance()
+    try:
+        plugin = manager.mcp
+    except CapabilityNotSupportedError:
+        result = McpRuntimeReadinessResult.not_capable(engine=manager.engine)
+    else:
+        try:
+            result = await asyncio.wait_for(plugin.readiness(), timeout=5.0)
+        except TimeoutError:
+            result = McpRuntimeReadinessResult.transient(
+                engine=manager.engine, reason="mcp_readiness_timeout"
+            )
+        except Exception:  # noqa: BLE001 - adapter implementations vary
+            log.exception("MCP readiness probe failed")
+            result = McpRuntimeReadinessResult.transient(
+                engine=manager.engine, reason="mcp_readiness_failed"
+            )
+    if not isinstance(result, McpRuntimeReadinessResult):
+        raise HTTPException(status_code=500, detail="Invalid MCP readiness response")
+    return ApiResponse(
+        success=True,
+        data={
+            "status": result.status.value,
+            "engine": result.engine,
+            "reason": result.reason,
+            "retryable": result.retryable,
+        },
+    )
 
 
 @router.get("", response_model=ApiResponse)

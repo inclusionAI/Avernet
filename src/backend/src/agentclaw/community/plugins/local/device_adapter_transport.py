@@ -138,6 +138,16 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
     ) -> dict[str, Any]:
         if path == "/health":
             return {"status": "ok", "engine": conn_info.get("engine", "openclaw")}
+        if path == "/api/mcp/readiness":
+            return {
+                "success": True,
+                "data": {
+                    "status": "READY",
+                    "engine": conn_info.get("engine_type", "openclaw"),
+                    "reason": None,
+                    "retryable": False,
+                },
+            }
         if path == "/api/skills/mappings/apply":
             request = body or {}
             # Mirror the Engine's logical deduplication and replacement-owned

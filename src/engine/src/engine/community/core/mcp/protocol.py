@@ -24,12 +24,17 @@ from engine.community.core.mcp.models import (
     MCPTool,
     MCPToolCallRequest,
     MCPToolCallResult,
+    McpRuntimeReadinessResult,
 )
 
 
 @runtime_checkable
 class MCPService(Protocol):
     """Backend talks to MCP-capable engines through this Protocol."""
+
+    async def readiness(self) -> McpRuntimeReadinessResult:
+        """Return fail-closed readiness of the MCP configuration plane."""
+        ...
 
     # ── Server configuration (CRUD) ──
     async def list_servers(

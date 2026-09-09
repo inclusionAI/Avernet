@@ -11,6 +11,23 @@ class _McpPortMixin:
     """Domain mixin: mcp.config.* / mcp.tools.* / mcp.resources.* / mcp.prompts.*
     / mcp.server.* / mcp.filter_servers."""
 
+    async def mcp_config_round_trip(self) -> bool:
+        resp = await (await self._relay()).send_request("mcp.config.list", {})
+        if not resp.ok:
+            return False
+        payload = resp.payload if resp.payload is not None else {}
+        if isinstance(payload, list):
+            servers = payload
+        elif isinstance(payload, dict):
+            servers = payload.get("servers", [])
+        else:
+            raise TypeError("mcp.config.list payload must be an object or list")
+        if not isinstance(servers, list) or not all(
+            isinstance(server, dict) for server in servers
+        ):
+            raise ValueError("mcp.config.list servers must be a list of objects")
+        return True
+
     async def mcp_list_servers(self, token: str | None = None) -> list[dict]:
         resp = await (await self._relay()).send_request("mcp.config.list", {})
         if not resp.ok:

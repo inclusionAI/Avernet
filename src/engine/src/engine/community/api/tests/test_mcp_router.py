@@ -22,6 +22,7 @@ from engine.community.core.mcp.models import (
     MCPServerStatus,
     MCPToolCallRequest,
     MCPToolCallResult,
+    McpRuntimeReadinessResult,
     TransportType,
 )
 from engine.community.manager import EngineManager
@@ -131,6 +132,34 @@ class TestList:
 
     def test_501(self, lean_manager, client):
         assert client.get("/api/mcp").status_code == 501
+
+
+class TestReadiness:
+    def test_dispatches_without_exposing_configuration(self, rich_manager, client):
+        plugin = MagicMock()
+        plugin.readiness = AsyncMock(
+            return_value=McpRuntimeReadinessResult.ready(engine="rich")
+        )
+        rich_manager._active_engine._mcp = plugin
+        response = client.get("/api/mcp/readiness")
+        assert response.status_code == 200
+        assert response.json()["data"] == {
+            "status": "READY",
+            "engine": "rich",
+            "reason": None,
+            "retryable": False,
+        }
+        plugin.readiness.assert_awaited_once()
+
+    def test_engine_without_mcp_reports_not_capable(self, lean_manager, client):
+        response = client.get("/api/mcp/readiness")
+        assert response.status_code == 200
+        assert response.json()["data"] == {
+            "status": "NOT_CAPABLE",
+            "engine": "lean",
+            "reason": "mcp_projection_not_supported",
+            "retryable": False,
+        }
 
 
 class TestGet:

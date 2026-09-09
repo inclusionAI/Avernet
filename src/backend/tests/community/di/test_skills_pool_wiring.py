@@ -64,6 +64,10 @@ from agentclaw.community.core.skill_center.services.skill_symlink_listener impor
 from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import (
     PerDomainRuntimeProjection,
 )
+from agentclaw.community.core.skill_center.services.runtime_projections.registry import (
+    EngineRuntimeProjectionRegistry,
+    RuntimeProjectionDeliveryShape,
+)
 from agentclaw.community.core.skill_center.services.runtime_projections.skill_runtime_delivery import (
     SkillRuntimeDelivery,
 )
@@ -276,7 +280,7 @@ def test_skill_symlink_listener_uses_public_desktop_layout_state(
     assert authority(bot) == "legacy"
 
 
-def test_skill_symlink_listener_projects_everything_for_runtime_ready_events() -> None:
+def test_skill_symlink_listener_defers_per_domain_runtime_ready_events_to_task() -> None:
     runtime_reconciler = MagicMock()
     bot_repo = MagicMock()
     bot_repo.get_by_binding_id.return_value = {
@@ -296,6 +300,7 @@ def test_skill_symlink_listener_projects_everything_for_runtime_ready_events() -
         layout_repository=layout_repository,
         skills_pool_wakeup=MagicMock(),
         runtime_reconciler=runtime_reconciler,
+        projection_registry=EngineRuntimeProjectionRegistry(default=MagicMock()),
     )
 
     listener.handle(
@@ -308,12 +313,54 @@ def test_skill_symlink_listener_projects_everything_for_runtime_ready_events() -
         )
     )
 
+    runtime_reconciler.project.assert_not_called()
+    layout_repository.get.assert_not_called()
+
+
+def test_skill_symlink_listener_keeps_whole_artifact_runtime_ready_delivery() -> None:
+    runtime_reconciler = MagicMock()
+    bot_repo = MagicMock()
+    bot_repo.get_by_binding_id.return_value = {
+        "bot_id": "service-1",
+        "owner_id": "owner-1",
+        "bot_type": "service",
+        "active_engine": "teclaw",
+    }
+    resolver = MagicMock()
+    resolver.resolve_for_bot.return_value.binding_id = 42
+    registry = EngineRuntimeProjectionRegistry(
+        default=MagicMock(),
+        by_engine={"teclaw": MagicMock()},
+        delivery_shape_by_engine={
+            "teclaw": RuntimeProjectionDeliveryShape.WHOLE_ARTIFACT,
+        },
+    )
+    listener = SkillCenterModule().skill_symlink_listener(
+        bot_repo=bot_repo,
+        skill_set_factory=MagicMock(),
+        resolver=resolver,
+        device_sync_dispatcher=MagicMock(),
+        layout_repository=MagicMock(),
+        skills_pool_wakeup=MagicMock(),
+        runtime_reconciler=runtime_reconciler,
+        projection_registry=registry,
+    )
+
+    listener.handle(
+        RuntimeProjectionRequestedEvent(
+            device_id="device-1",
+            binding_id=42,
+            entity_id="owner-1",
+            entity_type="staff",
+            device_provider="teclaw",
+        )
+    )
+
     runtime_reconciler.project.assert_called_once_with(
         bot_id="service-1",
         owner_id="owner-1",
         scope=ProjectionScope.everything(),
     )
-    layout_repository.get.assert_not_called()
 
 
 @pytest.mark.parametrize("template_type", ("personalCoding", "applicationCoding"))

@@ -45,6 +45,7 @@ class RuntimeProjectionRequestedEvent:
     entity_type: str
     device_provider: str
     sandbox_id: str | None = None
+    source: str = "explicit_reconcile"
 
 
 @dataclass(frozen=True)

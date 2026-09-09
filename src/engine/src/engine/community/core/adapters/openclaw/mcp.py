@@ -35,6 +35,7 @@ from engine.community.core.mcp.models import (
     MCPTool,
     MCPToolCallRequest,
     MCPToolCallResult,
+    McpRuntimeReadinessResult,
     TransportType,
 )
 from engine.community.core.mcp.protocol import MCPService
@@ -148,6 +149,19 @@ class OpenClawMcpAdapter(MCPService):
 
     def __init__(self, port: OpenClawMcpPort) -> None:
         self._port = port
+
+    async def readiness(self) -> McpRuntimeReadinessResult:
+        try:
+            await self._port.list_servers()
+        except RuntimeError:
+            return McpRuntimeReadinessResult.invalid(
+                engine="openclaw", reason="mcp_configuration_invalid"
+            )
+        except Exception:  # noqa: BLE001 - transport/filesystem failures vary
+            return McpRuntimeReadinessResult.transient(
+                engine="openclaw", reason="mcp_configuration_unavailable"
+            )
+        return McpRuntimeReadinessResult.ready(engine="openclaw")
 
     # ── Server CRUD ──────────────────────────────────────────────────────────
 

@@ -91,6 +91,19 @@ def _last_call(client: _FakeRelayClient) -> tuple[str, tuple, dict]:
 
 
 class TestMcpMixin:
+    async def test_config_round_trip_requires_ok_and_valid_servers(self):
+        c = _FakeRelayClient()
+        c.set_response("mcp.config.list", _ok({"servers": []}))
+        impl, _ = _impl(c)
+        assert await impl.mcp_config_round_trip() is True
+
+        c.set_response("mcp.config.list", _err("STARTING", "not ready"))
+        assert await impl.mcp_config_round_trip() is False
+
+        c.set_response("mcp.config.list", _ok({"servers": "invalid"}))
+        with pytest.raises(ValueError, match="servers must be a list"):
+            await impl.mcp_config_round_trip()
+
     async def test_list_servers_success_dict_payload(self):
         c = _FakeRelayClient()
         c.set_response("mcp.config.list", _ok({"servers": [{"serverCode": "s1"}, "x", {"name": "n"}]}))

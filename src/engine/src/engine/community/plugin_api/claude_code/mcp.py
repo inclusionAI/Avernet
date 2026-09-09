@@ -28,6 +28,7 @@ Port method                   Relay RPC (method name on the wire)
 ``mcp_apply_server_filter``   (allow-list apply, wire RPC mcp.filter_servers)
 ============================  ================================================
 """
+
 from __future__ import annotations
 
 from typing import Protocol
@@ -35,6 +36,14 @@ from typing import Protocol
 
 class ClaudeCodeMcpPort(Protocol):
     """Native MCP server management over the claude_code gateway (vendored Node relay)."""
+
+    async def mcp_config_round_trip(self) -> bool:
+        """Return True only when ``mcp.config.list`` explicitly succeeds.
+
+        A successful empty list is True. Relay rejection/disconnection is
+        False; a successful but malformed payload raises ``ValueError``.
+        """
+        ...
 
     async def mcp_list_servers(
         self,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from enum import StrEnum
 
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     EngineRuntimeProjection,
@@ -11,6 +12,13 @@ from agentclaw.community.log import get_logger
 
 
 logger = get_logger()
+
+
+class RuntimeProjectionDeliveryShape(StrEnum):
+    """How lifecycle recovery may safely split one runtime projection."""
+
+    PER_DOMAIN = "PER_DOMAIN"
+    WHOLE_ARTIFACT = "WHOLE_ARTIFACT"
 
 
 class EngineRuntimeProjectionRegistry:
@@ -35,9 +43,17 @@ class EngineRuntimeProjectionRegistry:
         *,
         default: EngineRuntimeProjection,
         by_engine: Mapping[str, EngineRuntimeProjection] | None = None,
+        default_delivery_shape: RuntimeProjectionDeliveryShape = (
+            RuntimeProjectionDeliveryShape.PER_DOMAIN
+        ),
+        delivery_shape_by_engine: (
+            Mapping[str, RuntimeProjectionDeliveryShape] | None
+        ) = None,
     ) -> None:
         self._default = default
         self._by_engine = dict(by_engine or {})
+        self._default_delivery_shape = default_delivery_shape
+        self._delivery_shape_by_engine = dict(delivery_shape_by_engine or {})
 
     def for_engine(self, engine: str) -> EngineRuntimeProjection:
         """The runtime contract ``engine`` obeys; the default if unregistered."""
@@ -50,5 +66,12 @@ class EngineRuntimeProjectionRegistry:
         )
         return projection if projection is not None else self._default
 
+    def delivery_shape_for_engine(self, engine: str) -> RuntimeProjectionDeliveryShape:
+        """Return the lifecycle delivery shape without exposing implementations."""
+        return self._delivery_shape_by_engine.get(engine, self._default_delivery_shape)
 
-__all__ = ["EngineRuntimeProjectionRegistry"]
+
+__all__ = [
+    "EngineRuntimeProjectionRegistry",
+    "RuntimeProjectionDeliveryShape",
+]

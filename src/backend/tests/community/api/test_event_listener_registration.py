@@ -9,6 +9,7 @@ import pytest
 from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
 from agentclaw.community.core.events.types import (
     DeviceActivatedEvent,
+    DeviceAliveEvent,
     RuntimeProjectionRequestedEvent,
 )
 
@@ -55,3 +56,20 @@ def test_register_is_idempotent():
         RuntimeProjectionRequestedEvent, []
     )
     assert reprojection_handlers.count(listener.handle) == 1
+
+
+def test_lifecycle_runtime_projection_wakeup_is_required_and_idempotent():
+    from agentclaw.community.core.skill_center.services.lifecycle_runtime_reprojection import (
+        LifecycleRuntimeProjectionWakeup,
+    )
+    from agentclaw.community.adapters.http.app import app
+
+    wakeup = app.state.injector.get(LifecycleRuntimeProjectionWakeup)
+    asyncio.run(wakeup.bootstrap())
+    asyncio.run(wakeup.bootstrap())
+
+    bus = get_event_bus()
+    assert bus._handlers[DeviceAliveEvent].count(wakeup.handle) == 1
+    assert bus._handlers[RuntimeProjectionRequestedEvent].count(wakeup.handle) == 1
+    assert (DeviceAliveEvent, wakeup.handle) in bus._required_handlers
+    assert (RuntimeProjectionRequestedEvent, wakeup.handle) in bus._required_handlers
