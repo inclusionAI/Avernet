@@ -221,6 +221,7 @@ pub use port::{
     SessionRepoPort, StateMachineDefinitionRepoPort, StateMachineResultPublishCommand,
     StateMachineResultPublisherPort, StateMachineRunRepoPort, StateMachineTerminalEvent,
     StateMachineTerminalStatus, UserIdentity, UserIdentityRepoPort,
+    UpdateSessionParticipantMessageViewScopeWithEvent,
     CollaborationTemplateEntry, CollaborationTemplateRepoPort,
     CollaborationDefinitionRecord, CollaborationEventRecord, CollaborationEventRepoPort,
     CreateStateMachineRerun, CreateStateMachineRerunOutcome,

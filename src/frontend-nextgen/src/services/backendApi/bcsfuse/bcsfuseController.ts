@@ -80,6 +80,7 @@ export async function getWorkerConfig(worker_id: string, signal?: AbortSignal) {
       `/openapi/v1/bcsfuse/workers/${worker_id}/config`,
       {
         method: 'GET',
+        injectUserId: false,
         signal,
       },
     );
@@ -100,6 +101,7 @@ export async function updateWorkerConfig(worker_id: string, body: BcsfuseWorkerC
       method: 'PUT',
       data: body,
       headers: { 'Content-Type': 'application/json' },
+      injectUserId: false,
       signal,
     },
   );

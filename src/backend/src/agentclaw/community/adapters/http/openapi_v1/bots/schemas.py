@@ -709,6 +709,36 @@ class ManifestConstruct(BaseModel):
     reason: str = Field(description="Empty when supported; otherwise names the cause.")
 
 
+class ManifestSourceCell(BaseModel):
+    """One (category, protocol) combination, and whether this bot accepts it.
+
+    The cartesian view `constructs` structurally cannot express: its rows carry
+    one verdict per construct, so "which categories work with which sources" had
+    no representation at all and callers discovered the answer from a 422 — or,
+    worse, from a failed apply. Read this to decide what to write before writing
+    it.
+    """
+
+    category: str = Field(
+        description="One of the six categories under `manifest`."
+    )
+    protocol: str = Field(
+        description=(
+            "How the content travels: `content` (inline in the document), "
+            "`oss` (an object over https, signed or plain) or `git` (a "
+            "repository resolved to one commit). Reaching a source **by name** "
+            "(`from`) is not a fourth value — a named source declares one of "
+            "these, and that protocol's row is the one that governs."
+        )
+    )
+    supported: bool = Field(
+        description="False when a document using this combination is refused."
+    )
+    reason: str = Field(
+        description="Empty when supported; otherwise the refusal a `PUT` gives."
+    )
+
+
 class ConfigManifestCapabilities(BaseModel):
     """Which manifest constructs a bot accepts.
 
@@ -731,12 +761,28 @@ class ConfigManifestCapabilities(BaseModel):
                         "reason": "",
                     },
                     {
-                        "kind": "source",
-                        "name": "git",
+                        "kind": "section",
+                        "name": "script",
                         "supported": False,
-                        "reason": "git sources are resolved by the "
-                        "named-and-git source work item (W7), which has not "
-                        "landed",
+                        "reason": "teclaw bots are provisioned without a "
+                        "start sequence, so a script would never execute",
+                    },
+                ],
+                "source_matrix": [
+                    {
+                        "category": "resources",
+                        "protocol": "git",
+                        "supported": True,
+                        "reason": "",
+                    },
+                    {
+                        "category": "skills",
+                        "protocol": "content",
+                        "supported": False,
+                        "reason": "a skills entry is a package (SKILL.md + "
+                        "the files it names) — inline content cannot be one; "
+                        "declare a source with 'protocol: git' or "
+                        "'protocol: oss'",
                     },
                 ],
             }
@@ -751,6 +797,15 @@ class ConfigManifestCapabilities(BaseModel):
     )
     constructs: list[ManifestConstruct] = Field(
         description="Every construct, supported or not, with its reason."
+    )
+    source_matrix: list[ManifestSourceCell] = Field(
+        default_factory=list,
+        description=(
+            "Every (category, protocol) combination, supported or not. "
+            "Additive alongside `constructs`, which keeps its exact shape and "
+            "meaning: a construct row says whether a *form* can be resolved at "
+            "all, and a matrix cell says whether a *combination* is delivered."
+        ),
     )
 
 

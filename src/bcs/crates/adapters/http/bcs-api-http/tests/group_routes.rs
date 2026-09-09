@@ -152,6 +152,7 @@ impl GroupService for FakeGroupService {
             role: ParticipantRole::Consultant,
             tags: Vec::new(),
             mode: ParticipantMode::Auto,
+            message_view_scope: bcs_domain::MessageViewScope::Full,
         })
     }
 
@@ -169,7 +170,10 @@ impl GroupService for FakeGroupService {
             name: None,
             role: ParticipantRole::Consultant,
             tags: Vec::new(),
-            mode: command.mode,
+            mode: command.mode.unwrap_or(ParticipantMode::Auto),
+            message_view_scope: command
+                .message_view_scope
+                .unwrap_or(bcs_domain::MessageViewScope::Full),
         })
     }
 
@@ -438,6 +442,7 @@ fn group_detail() -> GroupDetail {
             role: ParticipantRole::Driver,
             tags: Vec::new(),
             mode: ParticipantMode::Auto,
+            message_view_scope: bcs_domain::MessageViewScope::Full,
         }],
         driver_bot_uuid: "bot-1".into(),
         collaboration: CollaborationConfiguration::Chat(ChatConfiguration {
@@ -616,17 +621,19 @@ async fn group_routes_forward_the_verified_caller() {
         ))
         .await
         .expect("update participant forwarding response");
-    assert_eq!(
-        update_participant_response.status(),
-        StatusCode::METHOD_NOT_ALLOWED
-    );
-    assert!(
-        service
+    assert_eq!(update_participant_response.status(), StatusCode::OK);
+    {
+        let updated = service
             .updated_participant
             .lock()
-            .expect("update participant lock")
-            .is_none()
-    );
+            .expect("update participant lock");
+        let updated = updated.as_ref().expect("update participant command");
+        assert_eq!(caller_user_id(&updated.caller), "staff-1");
+        assert_eq!(updated.group_id, "group-1");
+        assert_eq!(updated.actor_id, "bot-2");
+        assert_eq!(updated.mode, Some(ParticipantMode::Muted));
+        assert_eq!(updated.message_view_scope, None);
+    }
 
     let remove_participant_response = app
         .oneshot(authenticated_request(
@@ -1090,7 +1097,7 @@ async fn add_group_participant_returns_participant() {
 }
 
 #[tokio::test]
-async fn update_group_participant_route_is_not_mounted() {
+async fn update_group_participant_returns_updated_values() {
     let service = Arc::new(FakeGroupService::default());
     let app = test_router(service);
 
@@ -1098,11 +1105,15 @@ async fn update_group_participant_route_is_not_mounted() {
         .oneshot(authenticated_request(
             "PATCH",
             "/openapi/v1/collaboration/groups/group-1/participants/bot-2",
-            json!({ "mode": "muted" }),
+            json!({ "mode": "muted", "message_view_scope": "full" }),
         ))
         .await
         .expect("update participant response");
-    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["actor_id"], "bot-2");
+    assert_eq!(body["data"]["mode"], "muted");
+    assert_eq!(body["data"]["message_view_scope"], "full");
 }
 
 #[tokio::test]

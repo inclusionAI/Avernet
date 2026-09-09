@@ -26,7 +26,7 @@ pub use bcs_config_api::{
 #[allow(unused_imports)]
 pub use bcs_config_api::{DmPolicy, RedisAuthMode};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InviteConfig {
     #[serde(default)]
     pub token_secret: Option<String>,
@@ -35,6 +35,14 @@ pub struct InviteConfig {
     /// When false or unset, protected routes do not enforce invite-code binding.
     #[serde(default)]
     pub invite_code_gate_enabled: bool,
+
+    /// Whether anonymous OpenAPI callers may claim a newly generated invite code.
+    #[serde(default)]
+    pub public_claim_enabled: bool,
+
+    /// Maximum number of invite codes that anonymous OpenAPI callers may claim.
+    #[serde(default = "default_public_claim_max_count")]
+    pub public_claim_max_count: u64,
 
     #[serde(default = "default_invite_ttl_seconds")]
     pub default_ttl_seconds: u64,
@@ -47,6 +55,25 @@ pub struct InviteConfig {
 
     #[serde(default)]
     pub session_link_url: Option<String>,
+}
+
+impl Default for InviteConfig {
+    fn default() -> Self {
+        Self {
+            token_secret: None,
+            invite_code_gate_enabled: false,
+            public_claim_enabled: false,
+            public_claim_max_count: default_public_claim_max_count(),
+            default_ttl_seconds: default_invite_ttl_seconds(),
+            base_url: None,
+            group_link_url: None,
+            session_link_url: None,
+        }
+    }
+}
+
+fn default_public_claim_max_count() -> u64 {
+    1_000
 }
 
 fn default_invite_ttl_seconds() -> u64 {
@@ -2354,9 +2381,19 @@ file = "assets/panel/dist/index.umd.js"
     #[test]
     fn test_shipped_manifests_use_the_shared_panel_bundle() {
         for (source, uses_cdn) in [
-            (include_str!("../../../../configs/bcs-config-example.toml"), false),
+            (include_str!("../../../../configs/bcs-config-example.toml"), true),
             (include_str!("../../../../configs/bcs-config-local.toml"), false),
-            (include_str!("../../../../configs/bcs-config-prod.toml"), true),
+            (
+                r#"
+bots_base_dir = "/bots"
+
+[[manifest.bundles]]
+name = "bcsPanel"
+type = "file"
+url = "https://cdn.example.com/bcs-panel/1.0.0/index.js"
+"#,
+                true,
+            ),
         ] {
             let config: BcsConfig = toml::from_str(source).unwrap();
             assert_eq!(config.manifest.bundles.len(), 1);
@@ -3060,6 +3097,27 @@ base_url = "https://directory.example.com"
         let err = toml::from_str::<BcsConfig>(toml)
             .expect_err("legacy top-level provider options should be rejected");
         assert!(err.to_string().contains("base_url"));
+    }
+
+    #[test]
+    fn invite_public_claim_is_nested_and_disabled_by_default() {
+        let default_config = BcsConfig::default();
+        assert!(!default_config.invite.public_claim_enabled);
+        assert_eq!(default_config.invite.public_claim_max_count, 1_000);
+
+        let config: BcsConfig = toml::from_str(
+            r#"
+            bots_base_dir = "/bots"
+
+            [invite]
+            public_claim_enabled = true
+            public_claim_max_count = 200
+            "#,
+        )
+        .expect("parse invite public claim config");
+
+        assert!(config.invite.public_claim_enabled);
+        assert_eq!(config.invite.public_claim_max_count, 200);
     }
 
     #[test]

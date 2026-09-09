@@ -11,6 +11,8 @@ in ``tests/community/core/bot_config_manifest/apply/``. What these cover is the
 
 from __future__ import annotations
 
+import hashlib
+
 import io
 import json
 import tarfile
@@ -482,6 +484,17 @@ def _tool_archive() -> bytes:
     return buf.getvalue()
 
 
+#: Built **once**. ``tarfile``'s gzip header carries an mtime, so two calls to
+#: :func:`_tool_archive` do not produce the same bytes — and the digest below
+#: has to be the address of the very bytes the fixture serves.
+_TOOL_ARCHIVE = _tool_archive()
+
+#: The archive's real content address. The old fixture stubbed the transport
+#: and returned a fixed digest, so the pin in this document was never actually
+#: compared. The oss road computes it for real, and a placeholder now fails
+#: the entry — correctly.
+_TOOL_ARCHIVE_DIGEST = "sha256:" + hashlib.sha256(_TOOL_ARCHIVE).hexdigest()
+
 _RESOURCE_DOCUMENT = (
     "schema_version: 1\n"
     "manifest:\n"
@@ -492,8 +505,12 @@ _RESOURCE_DOCUMENT = (
     "    - path: tools/\n"
     "      unpack: tar.gz\n"
     "      strip_components: 1\n"
-    "      source: https://mirror.example.test/tools.tgz\n"
-    "      digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+    "      source:\n"
+    "        protocol: oss\n"
+    "        bucket: mirror\n"
+    "        key: tools.tgz\n"
+    "        auth: oss-cred\n"
+    f"      digest: {_TOOL_ARCHIVE_DIGEST}\n"
     "script:\n"
     '  body: "echo hello"\n'
 )
@@ -522,11 +539,17 @@ def _seed_bot_with_resource_manifest(world) -> None:
         EntryFetcher,
         FetchedEntry,
     )
+    from agentclaw.community.core.bot_config_manifest.credentials.service_protocol import (  # noqa: E501
+        SourceCredentialServiceProtocol,
+    )
     from agentclaw.community.core.services.resource_file_service import (
         ResourceFileService,
     )
+    from agentclaw.community.plugin_api.object_store_client import (
+        ObjectStoreClientFactory,
+    )
 
-    archive = _tool_archive()
+    archive = _TOOL_ARCHIVE
     uploads: list[dict] = []
     deletes: list[str] = []
 
@@ -565,6 +588,32 @@ def _seed_bot_with_resource_manifest(world) -> None:
     # attributes carry the recorders to the assertion — the framework builds
     # a fresh injector per case, so there is no shared fixture to hang
     # them on.
+    # Registered last, after the overrides are bound: resolving a service off
+    # the injector part-builds the graph, and doing it earlier displaced the
+    # apply task handler's registration — the apply then finished PARTIAL for
+    # a reason that had nothing to do with the road under test.
+    #
+    # The credential itself is required because the oss road resolves it
+    # before reading anything: the endpoint and the key pair are the
+    # credential's, not the document's. That ordering is the point, so the
+    # name the manifest cites has to exist even when the read is doubled.
+    # The oss road is left REAL end to end here — credential resolution, the
+    # client factory, the read — with only the bucket's contents seeded. That
+    # is the point of an endpoint test: the URL transport's double
+    # (``fetch``) does not stand in for it, because the object road does not
+    # go through the URL transport at all.
+    world.get(ObjectStoreClientFactory).put("mirror", "tools.tgz", archive)
+    world.get(SourceCredentialServiceProtocol).put(
+        name="oss-cred",
+        credential_type="oss_aksk",
+        access_key_id="LTAI5tEndpointTest",
+        endpoint="https://objects.example.test",
+        secret="the-secret-half",
+        allowed_prefixes=[],
+        owner_app_id=1,
+        modifier=_OWNER,
+    )
+
     _seed_bot_with_resource_manifest.uploads = uploads
     _seed_bot_with_resource_manifest.deletes = deletes
 

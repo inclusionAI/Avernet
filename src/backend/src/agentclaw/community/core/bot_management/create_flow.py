@@ -574,6 +574,7 @@ class ManifestCreationSubmitted:
 def submit_bot_creation_with_manifest(
     *,
     user_id: str,
+    nick_name: str,
     bot_id: str,
     document: str,
     modifier: str,
@@ -653,6 +654,7 @@ def submit_bot_creation_with_manifest(
     # can.
     try:
         return _apply_and_hand_off(
+            nick_name=nick_name,
             manifest_seam=manifest_seam,
             passport_plugin=passport_plugin,
             skill_set_factory=skill_set_factory,
@@ -676,6 +678,7 @@ def _apply_and_hand_off(
     passport_plugin: PassportPlugin,
     skill_set_factory: SkillSetServiceFactory,
     user_id: str,
+    nick_name: str,
     bot_id: str,
     entity_id: str,
     bot_name: str | None,
@@ -740,7 +743,7 @@ def _apply_and_hand_off(
         entity_id=entity_id,
         user_id=user_id,
         document_owner=user_id,
-        spec=creation_spec_to_payload(spec, context),
+        spec={**creation_spec_to_payload(spec, context), "nick_name": nick_name},
         iframe_url=iframe_url,
         redirect_url=redirect_url,
     )
@@ -827,7 +830,8 @@ def complete_manifest_creation(
     user_id = str(job_payload["user_id"])
     return complete_bot_authorization(
         user_id=user_id,
-        nick_name=user_id,
+        # Tasks submitted before owner-name propagation contain no nickname.
+        nick_name=job_payload["spec"].get("nick_name", user_id),
         bot_id=str(job_payload["bot_id"]),
         spec=spec,
         context=context,

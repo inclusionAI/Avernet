@@ -32,16 +32,17 @@ from engine.community.plugins.openclaw.layout_activation import (
     verify_skill_mappings,
 )
 from engine.community.plugins.openclaw.layout_probe import inspect_runtime_layout
-from engine.community.plugins.skills_pool.layout_quarantine import (
-    cleanup_quarantine,
-)
 from engine.community.plugins.skills_pool.center_mount import (
     CenterMountStatus,
     inspect_center_mount,
     inspect_center_version,
 )
+from engine.community.plugins.skills_pool.layout_quarantine import (
+    cleanup_quarantine,
+)
 from engine.community.plugins.skills_pool.mapping_contract import (
     ResolvedMappingPayload,
+    apply_logical_mapping_request,
     resolve_mapping_payload,
 )
 
@@ -149,6 +150,13 @@ class _SkillsPortMixin:
         if result.published and resolved.resolved_locators:
             data["evidence"]["resolved_mappings"] = list(resolved.resolved_locators)
         return data
+
+    async def apply_pool_mappings(self, params: dict[str, Any]) -> dict[str, Any]:
+        return await apply_logical_mapping_request(
+            params=params,
+            engine="openclaw",
+            center_is_mounted=self._skills_center_is_mounted,
+        )
 
     async def verify_pool_mappings(self, params: dict[str, Any]) -> dict[str, Any]:
         resolved = self._pool_mappings(

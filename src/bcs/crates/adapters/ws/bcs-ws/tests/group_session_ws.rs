@@ -2,16 +2,17 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use axum::http::StatusCode;
+use bcs_domain::{ActorKind, MessageViewScope, ParticipantMode};
 use bcs_protocol::{BcsFrame, RequestFrame};
 use bcs_service_api::application::v1::{
     AuthorizeGroupSessionConnection, AuthorizedGroupSessionConnection,
     GroupSessionConnectionBinding, GroupSessionConnectionError, GroupSessionConnectionService,
-    IssueGroupSessionConnectionToken, IssuedGroupSessionConnectionToken,
-    VerifyGroupSessionConnectionToken,
+    IssueGroupSessionConnectionToken, IssuedGroupSessionConnectionToken, ParticipantRole,
+    SessionParticipant, VerifyGroupSessionConnectionToken,
 };
 use bcs_services_container::Services;
-use bcs_test_support::{NoopCollaborationRuntimeService, NoopWsLifecycleInstrumentationHook};
 use bcs_test_support::NoopInteractionService;
+use bcs_test_support::{NoopCollaborationRuntimeService, NoopWsLifecycleInstrumentationHook};
 use bcs_ws::shared::RunChannelManager;
 use bcs_ws::web::{WebDispatchState, WorkbenchConnectionRegistry, group_session_websocket_router};
 use futures::{SinkExt, StreamExt};
@@ -79,7 +80,16 @@ impl GroupSessionConnectionService for RecordingConnectionService {
         self.authorizations.lock().await.push(command);
         self.authorization_request_ids.lock().await.push(bcs_observability::current_request_id());
         Ok(AuthorizedGroupSessionConnection {
-            participants: Vec::new(),
+            participants: vec![SessionParticipant {
+                actor_id: "human_user-a".to_string(),
+                actor_kind: ActorKind::Human,
+                name: Some("Test Human".to_string()),
+                role: ParticipantRole::Observer,
+                tags: Vec::new(),
+                mode: ParticipantMode::Present,
+                message_view_scope: MessageViewScope::Full,
+                joined_at: None,
+            }],
         })
     }
 }

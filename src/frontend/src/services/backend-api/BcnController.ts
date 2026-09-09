@@ -7,7 +7,11 @@
  * 原 GroupChatController.ts 重命名而来，新增好友关系和可见性接口
  */
 
-import type { CreateGroupParams, GroupStrategy } from '@/pages/GroupChat/types';
+import type {
+  CreateGroupParams,
+  GroupStrategy,
+  MessageViewScope,
+} from '@/pages/GroupChat/types';
 import { request } from '@umijs/max';
 
 // === BCN API 响应类型 ===
@@ -178,6 +182,8 @@ export interface GetGroupResponse {
     actor_kind?: 'human' | 'bot';
     /** 协作姿态/发言模式 */
     mode?: 'present' | 'absent' | 'auto' | 'muted';
+    /** Human 消息可见范围；Bot 固定为 full */
+    message_view_scope?: MessageViewScope;
   }>;
   created_at?: number;
   updated_at?: number;
@@ -292,6 +298,8 @@ export interface GroupInfo {
     actor_kind?: 'human' | 'bot';
     /** 协作姿态/发言模式 */
     mode?: 'present' | 'absent' | 'auto' | 'muted';
+    /** Human 消息可见范围；Bot 固定为 full */
+    message_view_scope?: MessageViewScope;
   }>;
   created_at: number;
   updated_at: number;
@@ -986,12 +994,14 @@ export async function addGroupMember(
     group_id: string;
     bot_uuid: string;
     role?: GroupMemberRoleApi;
+    message_view_scope?: MessageViewScope;
   },
   options?: { [key: string]: any },
 ) {
-  const { group_id, bot_uuid, role } = params;
+  const { group_id, bot_uuid, role, message_view_scope } = params;
   const data: Record<string, string> = { bot_uuid };
   if (role) data.role = role;
+  if (message_view_scope) data.message_view_scope = message_view_scope;
   return request<AddGroupMemberResponse>(
     `/bcnproxy/groups/${group_id}/members`,
     {
@@ -1172,6 +1182,7 @@ export interface UpdateParticipantModeParams {
   group_id: string;
   actor_id: string;
   mode: 'present' | 'absent' | 'auto' | 'muted';
+  message_view_scope?: MessageViewScope;
 }
 
 export interface UpdateParticipantModeResponse {
@@ -1181,6 +1192,7 @@ export interface UpdateParticipantModeResponse {
     group_id: string;
     actor_id: string;
     mode: string;
+    message_view_scope?: MessageViewScope;
     updated_at: number;
   };
   // 兼容旧格式（直接返回在顶层）
@@ -1194,7 +1206,7 @@ export async function updateParticipantMode(
   params: UpdateParticipantModeParams,
   options?: { [key: string]: any },
 ) {
-  const { group_id, actor_id, mode } = params;
+  const { group_id, actor_id, mode, message_view_scope } = params;
   return request<UpdateParticipantModeResponse>(
     `/bcnproxy/groups/${group_id}/participants/${actor_id}/mode`,
     {
@@ -1202,7 +1214,7 @@ export async function updateParticipantMode(
       headers: {
         'Content-Type': 'application/json',
       },
-      data: { mode },
+      data: { mode, message_view_scope },
       skipErrorHandler: true,
       ...(options || {}),
     },
@@ -1444,6 +1456,7 @@ export interface SessionInfoResponse {
     role?: string;
     type?: string;
     mode?: 'present' | 'absent' | 'auto' | 'muted';
+    message_view_scope?: MessageViewScope;
   }>;
   activation_count?: number;
   input?:
@@ -1521,6 +1534,7 @@ export async function createGroupSession(
     session_kind: string;
     session_title?: string;
     created_by?: string;
+    message_view_scope?: MessageViewScope;
     input?: {
       query: string;
     };
@@ -1604,17 +1618,18 @@ export async function updateSessionMember(
   params: {
     session_id: string;
     actor_id: string;
-    mode: 'present' | 'absent' | 'auto' | 'muted';
+    mode?: 'present' | 'absent' | 'auto' | 'muted';
+    message_view_scope?: MessageViewScope;
   },
   options?: { [key: string]: any },
 ) {
-  const { session_id, actor_id, mode } = params;
-  return request<{ success?: boolean; error?: string }>(
+  const { session_id, actor_id, mode, message_view_scope } = params;
+  return request<SessionInfoResponse>(
     `/bcnproxy/sessions/${session_id}/members/${actor_id}`,
     {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      data: { mode },
+      data: { mode, message_view_scope },
       skipErrorHandler: true,
       ...(options || {}),
     },
@@ -1641,12 +1656,14 @@ export async function addSessionMember(
     session_id: string;
     bot_uuid: string;
     role?: SessionMemberRole;
+    message_view_scope?: MessageViewScope;
   },
   options?: { [key: string]: any },
 ) {
-  const { session_id, bot_uuid, role } = params;
+  const { session_id, bot_uuid, role, message_view_scope } = params;
   const data: Record<string, string> = { bot_uuid };
   if (role) data.role = role;
+  if (message_view_scope) data.message_view_scope = message_view_scope;
   return request<SessionInfoResponse>(
     `/bcnproxy/sessions/${session_id}/members`,
     {

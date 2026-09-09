@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bcs_bot::BotCore;
+use bcs_domain::MessageViewScope;
 use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_service_api::port::repo::{GroupRepoPort, SessionRepoPort};
 use bcs_service_api::{
@@ -278,6 +279,7 @@ fn request(
         input: None,
         meta: None,
         public_creator_role: None,
+        human_message_view_scope: None,
         context_delivery: None,
     }
 }
@@ -518,11 +520,11 @@ async fn explicit_private_human_creator_is_added_with_join_sequence() {
         ))
         .await;
 
+    let mut launch = request(human("alice"), "group-1", Some("human_alice"));
+    launch.human_message_view_scope = Some(MessageViewScope::Participant);
     let outcome = fixture
         .service
-        .create(CreateSessionLaunch {
-            request: request(human("alice"), "group-1", Some("human_alice")),
-        })
+        .create(CreateSessionLaunch { request: launch })
         .await
         .expect("explicit Human creator may create");
 
@@ -536,6 +538,10 @@ async fn explicit_private_human_creator_is_added_with_join_sequence() {
     assert_eq!(participant.role, ParticipantRole::Driver);
     assert_eq!(participant.mode, Some(ParticipantMode::Present));
     assert_eq!(
+        participant.message_view_scope,
+        MessageViewScope::Participant
+    );
+    assert_eq!(
         outcome
             .session
             .participant_join_seq
@@ -543,6 +549,44 @@ async fn explicit_private_human_creator_is_added_with_join_sequence() {
             .and_then(|join_seq| join_seq.get("human_alice"))
             .and_then(serde_json::Value::as_i64),
         Some(0)
+    );
+}
+
+#[tokio::test]
+async fn explicit_scope_overrides_inherited_human_scope_for_new_session() {
+    let fixture = Fixture::new();
+    fixture.add_bot("driver", "alice").await;
+    let mut human_participant = Participant::human("human_alice", ParticipantRole::Observer);
+    human_participant.bot_name = Some("Alice".into());
+    human_participant.message_view_scope = MessageViewScope::Full;
+    fixture
+        .add_group(Group::new(
+            "group-1",
+            "driver",
+            vec![
+                Participant::bot("driver", ParticipantRole::Driver),
+                human_participant,
+            ],
+        ))
+        .await;
+
+    let mut launch = request(human("alice"), "group-1", Some("driver"));
+    launch.human_message_view_scope = Some(MessageViewScope::Participant);
+    let outcome = fixture
+        .service
+        .create(CreateSessionLaunch { request: launch })
+        .await
+        .expect("Human scope override is applied while creating the Session");
+
+    let participant = outcome
+        .session
+        .participants
+        .iter()
+        .find(|participant| participant.bot_uuid == "human_alice")
+        .expect("inherited Human remains in the Session");
+    assert_eq!(
+        participant.message_view_scope,
+        MessageViewScope::Participant
     );
 }
 

@@ -13,13 +13,15 @@ from urllib.parse import urlsplit
 
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCapabilities,
-    SourceForm,
 )
 from agentclaw.community.core.bot_config_manifest.schema.limits import (
     MAX_SOURCE_URL_CHARS,
 )
 from agentclaw.community.core.bot_config_manifest.schema.placeholders import (
     unknown_placeholders,
+)
+from agentclaw.community.core.bot_config_manifest.schema.sources import (
+    SourceDecl,
 )
 from agentclaw.community.core.bot_config_manifest.schema.violations import Violation
 
@@ -52,8 +54,15 @@ class Context:
     violations: list[Violation] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     #: Names declared under top-level ``sources``, for ``from`` to resolve
-    #: against. Populated before any entry is walked.
+    #: against. Populated before any entry is walked. Every declared name is
+    #: here, including one whose declaration failed to parse — so a ``from``
+    #: naming it is not *also* reported as undeclared, which would be one
+    #: mistake answered as two.
     source_names: set[str] = field(default_factory=set)
+    #: The declarations that parsed, by name. An entry's ``from`` reads its
+    #: protocol from here, which is what makes a named source resolve to a
+    #: support-matrix cell rather than needing a column of its own.
+    sources: dict[str, SourceDecl] = field(default_factory=dict)
     #: Named sources actually referenced, so an unused one can be reported —
     #: schema §2.3 makes that a hint, not an error.
     referenced_sources: set[str] = field(default_factory=set)
@@ -63,19 +72,6 @@ class Context:
         self.violations.append(
             Violation(location=location, code=code, message=message)
         )
-
-    def require_source_support(self, location: str, form: SourceForm) -> bool:
-        """Refuse a source form nothing can resolve yet. True when supported."""
-        if self.capabilities.supports(form):
-            return True
-        self.add(
-            location,
-            "unsupported_source",
-            f"source form '{form.value}' is not supported: "
-            + self.capabilities.reason_for(form),
-        )
-        return False
-
 
 def check_placeholders(ctx: Context, location: str, value: Any) -> None:
     """Refuse any ``${...}`` name outside the whitelist.

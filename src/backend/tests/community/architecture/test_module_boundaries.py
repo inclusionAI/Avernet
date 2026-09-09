@@ -120,7 +120,10 @@ _ACTIVE_SIGNIFICANT_MODULES: frozenset[str] = frozenset(
 # are not yet reflected in module README metadata. This keeps the unit test
 # focused on newly introduced undeclared dependencies.
 _TEST_ONLY_DECLARED_DEPS: dict[str, list[str]] = {
-    "agentclaw.community.core.service_bot": ["agentclaw.community.api.channel_service"],
+    "agentclaw.community.core.service_bot": [
+        "agentclaw.community.api.channel_service",
+        "agentclaw.community.plugin_api.eval_env",
+    ],
 }
 
 

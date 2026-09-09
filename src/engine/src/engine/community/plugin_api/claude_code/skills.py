@@ -28,7 +28,7 @@ Port method                 Relay RPC (method name on the wire)
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class ClaudeCodeSkillsPort(Protocol):
@@ -271,6 +271,10 @@ class ClaudeCodeSkillsPort(Protocol):
         params: dict,
     ) -> dict:
         """Publish mappings from the declared ``source_layout``."""
+        ...
+
+    async def apply_pool_mappings(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Apply one logical steady-state Mapping snapshot."""
         ...
 
     async def verify_pool_mappings(

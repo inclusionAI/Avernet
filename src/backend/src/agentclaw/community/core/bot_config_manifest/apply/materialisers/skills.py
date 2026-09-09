@@ -41,11 +41,12 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Sequence
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
+    EntryDelivery,
     EntryFetchError,
+)
+from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetcher,
-    FetchedEntry,
-    GitEntrySource,
 )
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     EntryOutcome,
@@ -256,7 +257,7 @@ class SkillsMaterialiser(Materialiser):
                 # blob write) off the event loop — see the identity
                 # materialiser's note; a dry run must not park the server on
                 # a hung source.
-                decl = await asyncio.to_thread(
+                delivery = await asyncio.to_thread(
                     self._fetcher.fetch_declared,
                     ctx,
                     entry=entry,
@@ -273,16 +274,24 @@ class SkillsMaterialiser(Materialiser):
                 # a dry run runs this on the request event loop — the fetch
                 # got to_thread for exactly that reason (and the module's
                 # own comment says it).
-                if isinstance(decl, GitEntrySource):
+                # The one branch this category keeps, and it asks what
+                # *arrived* rather than which class produced it. The two roads
+                # run two validators on purpose: a fetched zip with no
+                # ``subpath`` goes byte-for-byte through ``validate_zip`` — the
+                # same validator the manual upload service runs, so limits and
+                # layout stay one rule — while a tree goes through
+                # ``validate_directory``. Collapsing them would discard the
+                # byte-for-byte road.
+                if delivery.is_tree():
                     package = await asyncio.to_thread(
-                        self._git_package, ctx, decl, name
+                        self._tree_package, ctx, delivery, name
                     )
                 else:
                     package = await asyncio.to_thread(
                         self._build_package,
                         entry=entry,
-                        fetched=decl,
-                        source_url=decl.source_url
+                        delivery=delivery,
+                        source_url=delivery.source_url()
                         or (
                             entry["source"]
                             if isinstance(entry.get("source"), str)
@@ -428,66 +437,73 @@ class SkillsMaterialiser(Materialiser):
     # ── the package road ────────────────────────────────────────────────────
 
     def _build_package(
-        self, *, entry: dict[str, Any], fetched: FetchedEntry, source_url: str
+        self, *, entry: dict[str, Any], delivery: EntryDelivery, source_url: str
     ) -> _SkillPackage:
-        """Fetched bytes → a validated package, the manual-upload shape."""
-        kind = self._archive_kind(entry, source_url, fetched.content_type)
+        """One delivered object → a validated package, the manual-upload shape."""
+        kind = self._archive_kind(entry, source_url, delivery.content_type())
         subpath = entry.get("subpath")
+        content = delivery.single()
 
         if kind == "zip" and not subpath:
             # The byte-for-byte manual road: the fetched zip is validated and
             # its canonical form handed on — the same ``validate_zip`` the
             # upload service itself runs, so limits and layout are one rule.
-            validated = self._validate(self._validator.validate_zip, fetched.content)
+            validated = self._validate(self._validator.validate_zip, content)
             return _SkillPackage(
                 validated.name,
                 validated.canonical_zip,
-                from_store=fetched.from_store,
-                note=fetched.fallback_reason,
+                from_store=delivery.from_store(),
+                note=delivery.note(),
             )
 
         files = self._extract_subtree(
-            fetched.content, kind, subpath if isinstance(subpath, str) else None
+            content, kind, subpath if isinstance(subpath, str) else None
         )
         validated = self._validate(self._validator.validate_directory, files)
         return _SkillPackage(
             validated.name,
             validated.canonical_zip,
-            from_store=fetched.from_store,
-            note=fetched.fallback_reason,
+            from_store=delivery.from_store(),
+            note=delivery.note(),
         )
 
-    def _git_package(
-        self, ctx: "ApplyContext", decl: GitEntrySource, name: str
+    def _tree_package(
+        self, ctx: "ApplyContext", delivery: EntryDelivery, name: str
     ) -> _SkillPackage:
-        """A git checkout's tree → a validated package, plus its W11 receipt.
+        """A delivered tree → a validated package, plus its W11 receipt.
 
         The canonical zip the validator returns is what this entry delivers,
         so it is also what the platform stores: the receipt a later keep_last
         falls back to must be the deliverable bytes, not a re-derivation.
+        That is exactly why the filing happens **here** and not behind the
+        delivery seam — the bytes worth a receipt are the ones validation
+        produced, which only this category knows how to make.
         """
         try:
-            files = decl.files()
+            files = delivery.members(unpack=None, strip_components=0)
         except EntryFetchError as exc:
             raise _PackageRefusal(str(exc)) from exc
+        if isinstance(files, str):
+            raise _PackageRefusal(files)
         validated = self._validate(self._validator.validate_directory, files)
-        try:
-            self._fetcher.file_bytes(
-                ctx,
-                content=validated.canonical_zip,
-                source_url=decl.receipt_url(),
-                category=_FETCH_CATEGORY,
-                entry_identity=name,
-                content_type="application/zip",
-                credential_name=decl.auth,
-            )
-        except EntryFetchError as exc:
-            raise _PackageRefusal(str(exc)) from exc
+        if delivery.needs_receipt():
+            try:
+                self._fetcher.file_bytes(
+                    ctx,
+                    content=validated.canonical_zip,
+                    source_url=delivery.receipt_url(),
+                    category=_FETCH_CATEGORY,
+                    entry_identity=name,
+                    content_type="application/zip",
+                    credential_name=delivery.auth(),
+                )
+            except EntryFetchError as exc:
+                raise _PackageRefusal(str(exc)) from exc
         return _SkillPackage(
             validated.name,
             validated.canonical_zip,
-            from_store=False,
-            note=decl.moved_note(),
+            from_store=delivery.from_store(),
+            note=delivery.note(),
         )
 
     def _extract_subtree(

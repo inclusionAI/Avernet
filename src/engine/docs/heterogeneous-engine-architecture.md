@@ -1075,6 +1075,20 @@ class SkillExecutionResult:
 
 ### 7.3 Skills Pool mapping wire contract
 
+Steady-state Skill projection uses the separate internal
+`POST /api/skills/mappings/apply` command. Its request always contains logical
+`mappings`, `retired_mappings`, and `source_layout`; it never accepts physical
+`source`/`target` pairs. The Engine validates the full request before mutation,
+checks Center mount + exact version + readable `SKILL.md`, then calls the shared
+BEST_EFFORT mapping helper once. Results echo the logical Mapping with
+`action=APPLY|RETIRE`, status/code/retryability; unmatched filesystem drift is
+reported separately as a Runtime issue. A Center replacement that is not ready
+returns the new APPLY as PENDING and suppresses retirement of the old same-name
+entry while unrelated mappings continue.
+
+The pre-existing activation/publish/verify endpoints below remain the versioned
+STRICT migration and old-Backend compatibility surface.
+
 `SkillsService` 的 Pool activation、publish、verify 使用显式版本协商。v2 保留
 给仅含 Local/Repo 的 mapping；v3 在同一完整 mapping 集合加入 Center 时使用：
 

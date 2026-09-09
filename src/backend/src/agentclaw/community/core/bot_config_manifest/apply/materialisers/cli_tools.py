@@ -55,7 +55,11 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.models import (
 from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
     CliToolService,
 )
+from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+    declared_protocol,
+)
 from agentclaw.community.core.bot_config_manifest.schema import placeholders
+from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
 
 #: How the service's four outcomes read on a report row. ``REMOVED`` has no
 #: declared entry to attach to — the orchestrator reports removals from the
@@ -153,12 +157,20 @@ class CliToolsMaterialiser(Materialiser):
             seen.add(name)
 
             decl = CliToolDecl.from_entry(entry)
-            if not decl.digest:
+            if not decl.digest and declared_protocol(ctx, entry) is not SourceKind.GIT:
                 # The schema refuses this at PUT. Re-asked here because a stored
                 # document can predate a rule or have skipped the validator (a
                 # hand-built apply in W8's lifecycle points), and the platform
                 # distributing an unpinned executable is the one thing this
                 # category exists not to do.
+                #
+                # **Except over git**, where the resolved commit SHA is already
+                # the pin — the same exemption ``DIGEST_REQUIRED`` states at
+                # ``PUT``, keyed on the same axis. A belt that refused what the
+                # surface accepts would be the "accepted means appliable" rule
+                # broken by the belt itself. ``declared_protocol`` answers from
+                # the source declaration through the one parser, so inline and
+                # ``from:`` are the same source — which is the whole of D5.
                 failures.append(
                     ResolveFailure(
                         name,
@@ -174,14 +186,31 @@ class CliToolsMaterialiser(Materialiser):
                 )
                 continue
 
+            # Substituted into BOTH halves, so the address the report shows and
+            # the entry the acquisition reads are one string. The fetch funnel
+            # substitutes again on its own road, which is harmless (the result
+            # is a fixed point) and is what covers a ``from``-named source's
+            # URL — a value this materialiser never sees.
             substituted = placeholders.resolve(
                 decl.source_url,
                 engine_type=ctx.engine_type,
                 env=ctx.env,
                 tenant=ctx.tenant,
             )
+            resolved_entry = dict(entry)
+            if isinstance(resolved_entry.get("source"), str):
+                resolved_entry["source"] = substituted
             intents.append(
-                Intent(name, CliToolDecl(**{**decl.__dict__, "source_url": substituted}))
+                Intent(
+                    name,
+                    CliToolDecl(
+                        **{
+                            **decl.__dict__,
+                            "source_url": substituted,
+                            "entry": resolved_entry,
+                        }
+                    ),
+                )
             )
 
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
@@ -208,7 +237,12 @@ class CliToolsMaterialiser(Materialiser):
                 intent,
                 (
                     EntryOutcome.UNCHANGED.value
-                    if installed.get(intent.identity) == intent.value.convergence_key
+                    # ``and`` first: an unpinned (git) declaration's key is
+                    # ``None``, and ``None == None`` would make an absent row
+                    # and an unpinned tool compare equal — "unchanged" for a
+                    # tool that is not installed at all.
+                    if intent.value.convergence_key is not None
+                    and installed.get(intent.identity) == intent.value.convergence_key
                     else (
                         EntryOutcome.UPDATED.value
                         if intent.identity in installed

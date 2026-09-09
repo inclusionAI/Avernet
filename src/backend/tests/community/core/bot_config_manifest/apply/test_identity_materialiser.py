@@ -29,6 +29,7 @@ from agentclaw.community.core.bot_config_manifest.apply.source_session import (
 )
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     FetchFailedError,
+    FetchRefusedError,
 )
 
 from ._fakes import (
@@ -42,6 +43,7 @@ from ._fakes import (
     SOUL_BODY,
     SOUL_URL,
 )
+from agentclaw.community.plugins.local.object_store_client import InMemoryObjectStoreClientFactory
 
 
 def _run(coro):
@@ -204,7 +206,7 @@ def test_one_failed_fetch_aborts_the_whole_category_no_writes():
         failures={SOUL_URL: FetchFailedError("source answered 404")},
     )
     materialiser = IdentityMaterialiser(
-        identity, EntryFetcher(failing, FakeManifestContent(), FakeCredentials())
+        identity, EntryFetcher(failing, FakeManifestContent(), FakeCredentials(), InMemoryObjectStoreClientFactory())
     )
 
     resolved = _run(
@@ -237,7 +239,7 @@ def test_keep_last_reuses_the_platform_copy_when_the_source_is_down():
         failures={SOUL_URL: FetchFailedError("source transport failed")}
     )
     materialiser = IdentityMaterialiser(
-        identity, EntryFetcher(failing, content, FakeCredentials())
+        identity, EntryFetcher(failing, content, FakeCredentials(), InMemoryObjectStoreClientFactory())
     )
 
     result, plan, written = _run(
@@ -369,7 +371,7 @@ def test_an_omitted_on_fetch_failure_defaults_to_keep_last():
         failures={SOUL_URL: FetchFailedError("source transport failed")}
     )
     materialiser = IdentityMaterialiser(
-        identity, EntryFetcher(failing, content, FakeCredentials())
+        identity, EntryFetcher(failing, content, FakeCredentials(), InMemoryObjectStoreClientFactory())
     )
 
     result, _, written = _run(
@@ -417,6 +419,10 @@ def test_the_real_identity_service_satisfies_the_port():
 # ── resolve: the git road (W7) ──────────────────────────────────────────────
 
 
+def _raise_no_subpath():
+    raise FetchRefusedError("the source's 'subpath' must name a single file")
+
+
 class _StaticGit:
     """A git client that serves one checkout with stable bytes.
 
@@ -424,6 +430,13 @@ class _StaticGit:
     reaches it: ``read_file``/``files`` take the source's subpath argument
     the way the guarded readers do, and the bytes are static so the intent,
     the note and the store filing can be asserted exactly.
+
+    ``read_file`` refuses a ``None`` subpath because the real one does. That
+    fidelity is load-bearing now: the materialiser used to ask "is the
+    subpath set?" itself before reading, so a permissive double still failed
+    the entry. It no longer asks — the question needed a git-only field on
+    the delivery seam — and a double that answered where the real checkout
+    refuses would let this test pass against code that cannot work.
     """
 
     def __init__(self, sha: str = "a" * 40, body: bytes = b"# rules\n") -> None:
@@ -439,7 +452,11 @@ class _StaticGit:
             url=spec.url,
             ref=spec.ref,
             files=lambda subpath=None, file_limit=None: [],
-            read_file=lambda subpath=None, file_limit=None: self.body,
+            read_file=lambda subpath=None, file_limit=None: (
+                self.body
+                if subpath
+                else _raise_no_subpath()
+            ),
         )
 
 
@@ -453,7 +470,8 @@ def _git_ctx(git: _StaticGit | None = None, *, sources=None, baselines=None):
 
 
 IDENTITY_GIT_SOURCE = {
-    "git": "https://git.corp/id.git",
+    "protocol": "git",
+    "url": "https://git.corp/id.git",
     "ref": "main",
     "subpath": "files/rules.md",
 }
@@ -477,7 +495,7 @@ def test_an_identity_entry_can_read_one_file_from_a_git_source():
 def test_a_git_identity_without_subpath_is_a_resolve_failure():
     materialiser, identity, _, _ = identity_rig()
     ctx = _git_ctx(
-        sources={"id": {"git": "https://git.corp/id.git", "ref": "main"}}
+        sources={"id": {"protocol": "git", "url": "https://git.corp/id.git", "ref": "main"}}
     )
     resolved = _run(materialiser.resolve(ctx, [{"type": "RULES.md", "from": "id"}]))
     assert not resolved.ok

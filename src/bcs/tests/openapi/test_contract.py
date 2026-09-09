@@ -38,6 +38,7 @@ EXPECTED_OPERATIONS = {
     ("patch", "/openapi/v1/collaboration/groups/{group_id}"),
     ("delete", "/openapi/v1/collaboration/groups/{group_id}"),
     ("post", "/openapi/v1/collaboration/groups/{group_id}/participants"),
+    ("patch", "/openapi/v1/collaboration/groups/{group_id}/participants/{actor_id}"),
     ("delete", "/openapi/v1/collaboration/groups/{group_id}/participants/{actor_id}"),
     ("post", "/openapi/v1/collaboration/groups/{group_id}/sessions"),
     ("get", "/openapi/v1/collaboration/groups/{group_id}/sessions"),

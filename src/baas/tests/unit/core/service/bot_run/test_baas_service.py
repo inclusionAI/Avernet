@@ -1345,9 +1345,7 @@ class TestCreateSessionEffectiveSessionId:
         mock_adapter.create_adapter_session = AsyncMock(
             return_value=(caller_session_id, True)
         )
-        mock_adapter.session_consistency_key = MagicMock(
-            return_value=caller_session_id
-        )
+        mock_adapter.session_consistency_key = MagicMock(return_value=caller_session_id)
 
         binding = _make_binding_info(engine_type="hermes")
 
@@ -1373,9 +1371,7 @@ class TestCreateSessionEffectiveSessionId:
             assert call_kwargs.kwargs["session_id"] == caller_session_id
 
     @pytest.mark.asyncio
-    async def test_no_effective_session_id_when_no_eval_id(
-        self, service, wss_resolver
-    ):
+    async def test_no_effective_session_id_when_no_eval_id(self, service, wss_resolver):
         """无 eval_id 时，不触发 effective_session_id 逻辑。"""
         wss_resolver.dispatch_bot_ws_conn_info.return_value = _make_conn_info()
 
@@ -1411,9 +1407,7 @@ class TestCreateSessionDegradation:
     """session_id 退化检查：调用方传入 session_id，但 adapter 返回了不同值时记录 warning。"""
 
     @pytest.mark.asyncio
-    async def test_session_id_degradation_logs_warning(
-        self, service, wss_resolver
-    ):
+    async def test_session_id_degradation_logs_warning(self, service, wss_resolver):
         """adapter 返回的 session_id 与调用方传入不同时记录 WARNING。
 
         退化只发生在 adapter 路径（hermes/claude_code/aicoding），
@@ -1442,7 +1436,9 @@ class TestCreateSessionDegradation:
             ),
             patch.object(service, "_adapter_for", return_value=mock_adapter),
             patch.object(service, "_persist_session_create", return_value=None),
-            patch("secbaas.community.core.service.bot_run._baas_service.logger") as mock_logger,
+            patch(
+                "secbaas.community.core.service.bot_run._baas_service.logger"
+            ) as mock_logger,
         ):
             await service.create_session(
                 bot_id=BOT_UUID,
@@ -1452,7 +1448,8 @@ class TestCreateSessionDegradation:
             )
             # 验证退化 warning 被调用
             warning_calls = [
-                c for c in mock_logger.warning.call_args_list
+                c
+                for c in mock_logger.warning.call_args_list
                 if "session_id 退化" in str(c)
             ]
             assert len(warning_calls) == 1
@@ -1460,9 +1457,7 @@ class TestCreateSessionDegradation:
             assert "sess-different" in str(warning_calls[0])
 
     @pytest.mark.asyncio
-    async def test_session_id_no_degradation_when_matched(
-        self, service, wss_resolver
-    ):
+    async def test_session_id_no_degradation_when_matched(self, service, wss_resolver):
         """adapter 返回的 session_id 与调用方传入一致时不记录 WARNING。"""
         wss_resolver.dispatch_bot_ws_conn_info.return_value = _make_conn_info()
 
@@ -1487,7 +1482,9 @@ class TestCreateSessionDegradation:
             ),
             patch.object(service, "_adapter_for", return_value=mock_adapter),
             patch.object(service, "_persist_session_create", return_value=None),
-            patch("secbaas.community.core.service.bot_run._baas_service.logger") as mock_logger,
+            patch(
+                "secbaas.community.core.service.bot_run._baas_service.logger"
+            ) as mock_logger,
         ):
             await service.create_session(
                 bot_id=BOT_UUID,
@@ -1496,7 +1493,8 @@ class TestCreateSessionDegradation:
                 binding_info=binding,
             )
             warning_calls = [
-                c for c in mock_logger.warning.call_args_list
+                c
+                for c in mock_logger.warning.call_args_list
                 if "session_id 退化" in str(c)
             ]
             assert len(warning_calls) == 0
@@ -1522,7 +1520,9 @@ class TestCreateSessionDegradation:
                 service, "_create_session_client", return_value=mock_session_client
             ),
             patch.object(service, "_persist_session_create", return_value=None),
-            patch("secbaas.community.core.service.bot_run._baas_service.logger") as mock_logger,
+            patch(
+                "secbaas.community.core.service.bot_run._baas_service.logger"
+            ) as mock_logger,
         ):
             await service.create_session(
                 bot_id=BOT_UUID,
@@ -1531,7 +1531,8 @@ class TestCreateSessionDegradation:
                 binding_info=binding,
             )
             warning_calls = [
-                c for c in mock_logger.warning.call_args_list
+                c
+                for c in mock_logger.warning.call_args_list
                 if "session_id 退化" in str(c)
             ]
             assert len(warning_calls) == 0
@@ -3356,3 +3357,61 @@ class TestSendMessageStreamEvalConsistencyCheck:
                 chat_metadata={"eval_id": "eval-789"},
             ):
                 chunks.append(chunk)
+
+
+class TestCreateSessionClientEvalIdHeader:
+    """_create_session_client 中 metadata 注入评测 Header 的测试。"""
+
+    def test_eval_id_injects_x_eval_id_header(self, service):
+        """metadata 中 eval_id 非空时，headers 包含 X-Eval-Id。"""
+        conn_info = _make_conn_info()
+        client = service._create_session_client(
+            conn_info, engine_type="teclaw", metadata={"eval_id": "eval-abc123"}
+        )
+        assert client.headers["X-Eval-Id"] == "eval-abc123"
+        assert client.headers["x-proxypass-token"] == conn_info.token
+
+    def test_default_tag_injects_header(self, service):
+        """metadata 中 default_tag 非空时，headers 包含 X-Agentclaw-Default-Tag。"""
+        conn_info = _make_conn_info()
+        client = service._create_session_client(
+            conn_info, engine_type="teclaw", metadata={"default_tag": "eval"}
+        )
+        assert client.headers["X-Agentclaw-Default-Tag"] == "eval"
+        assert "X-Eval-Id" not in client.headers
+
+    def test_eval_id_and_default_tag_both_inject(self, service):
+        """metadata 中 eval_id 和 default_tag 同时存在时，两个 Header 都注入。"""
+        conn_info = _make_conn_info()
+        client = service._create_session_client(
+            conn_info,
+            engine_type="teclaw",
+            metadata={"eval_id": "eval-abc", "default_tag": "eval"},
+        )
+        assert client.headers["X-Eval-Id"] == "eval-abc"
+        assert client.headers["X-Agentclaw-Default-Tag"] == "eval"
+
+    def test_no_metadata_no_eval_headers(self, service):
+        """metadata 为 None 时，headers 不含评测 Header。"""
+        conn_info = _make_conn_info()
+        client = service._create_session_client(
+            conn_info, engine_type="teclaw", metadata=None
+        )
+        assert "X-Eval-Id" not in client.headers
+        assert "X-Agentclaw-Default-Tag" not in client.headers
+        assert client.headers["x-proxypass-token"] == conn_info.token
+
+    def test_empty_metadata_no_eval_headers(self, service):
+        """metadata 为空 dict 时，headers 不含评测 Header。"""
+        conn_info = _make_conn_info()
+        client = service._create_session_client(
+            conn_info, engine_type="openclaw", metadata={}
+        )
+        assert "X-Eval-Id" not in client.headers
+        assert "X-Agentclaw-Default-Tag" not in client.headers
+
+    def test_default_metadata_no_eval_headers(self, service):
+        """未传 metadata 参数（默认 None），headers 不含评测 Header。"""
+        conn_info = _make_conn_info()
+        client = service._create_session_client(conn_info, engine_type="openclaw")
+        assert "X-Eval-Id" not in client.headers

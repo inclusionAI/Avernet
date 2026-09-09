@@ -281,6 +281,51 @@ def test_search_projects_requested_bcs_metadata_when_present(
     assert "unexpected_bcs_field" not in item
 
 
+def test_search_projects_bcs_only_bot_with_required_public_fields(
+    client: TestClient, services: tuple[_PublicService, _DiscoverService]
+) -> None:
+    services[0].result = {
+        "total": 1,
+        "items": [
+            {
+                "bot_id": "native-bot",
+                "bot_uuid": "native-bot:native-owner",
+                "entity_id": "native-owner",
+                "bot_type": "",
+                "bot_name": "Native Bot",
+                "bot_desc": "BCS summary",
+                "active_engine": "",
+                "status": "online",
+                "actor_kind": "bot",
+                "upstream_secret": "must-not-be-public",
+            }
+        ],
+    }
+
+    response = client.get(
+        _SEARCH_PATH,
+        params={
+            "viewer_actor_type": "bot",
+            "viewer_actor_id": "viewer-bot",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["items"] == [
+        {
+            "bot_id": "native-bot",
+            "bot_uuid": "native-bot:native-owner",
+            "entity_id": "native-owner",
+            "bot_type": "",
+            "name": "Native Bot",
+            "description": "BCS summary",
+            "actor_kind": "bot",
+            "engine": "",
+            "status": "online",
+        }
+    ]
+
+
 def test_search_omits_is_friend_when_bcs_did_not_return_it(
     client: TestClient,
 ) -> None:

@@ -35,10 +35,10 @@ services that own each area and passes no secret of its own.
 
 W1 parses the *whole* v1 vocabulary while only part of it has code behind it. So
 anything the schema can express but nothing can act on is reported unsupported
-and refused at `PUT` — and the gap is **not confined to categories**: a *source
-form* with no resolver fails in exactly the same way. That is why
-`capabilities.py` answers per **construct** (category, section, source form)
-rather than per bot or per category.
+and refused at `PUT` — and the gap is **not confined to categories**: a
+*(category, protocol) pair* with no resolver fails in exactly the same way.
+That is why `capabilities.py` answers per **construct** (category, section)
+rather than per bot, and publishes `source_matrix` for the pairs.
 
 As of the first wave the unsupported constructs are (`cli_tools` left this
 table when W9 materialised it — the surface accepts it because something now
@@ -616,7 +616,6 @@ provides:
   - ConstructKind
   - ManifestCategory
   - ManifestSection
-  - SourceForm
   - kind_of
   - parse_category
   - ManifestWriteResult
@@ -698,6 +697,7 @@ internal_dependencies:
   - agentclaw.community.core.config_compose.models  # the collector-shaped refs the managed-files reader yields to the teclaw composer (W8)
   - agentclaw.community.kernel.bot_config  # OwnershipCategory — the artifact's own category names the managed-files reader answers the composer in (W8)
   - agentclaw.community.plugin_api.object_storage  # the bot-data object store the managed-files store writes a teclaw bot's manifest-delivered files into (W8), and the cli_tools store keeps a bot's tool bytes in (W9)
+  - agentclaw.community.plugin_api.object_store_client  # the per-credential client a 'protocol: oss' source reads its bucket through; distinct from object_storage, which is one bucket bound at wiring time
   - agentclaw.community.core.bot_startup_script
   - agentclaw.community.core.bot_management.engines.registry  # the pure runtime-engine routing policy the resources materialiser addresses workspaces through, the router's own rule (W6)
   - agentclaw.community.core.bot_management.manifest_seam  # the Protocol the creation seam is declared as, bound as, and injected as everywhere; declaring it rather than matching it by shape is what checks the contract in one place

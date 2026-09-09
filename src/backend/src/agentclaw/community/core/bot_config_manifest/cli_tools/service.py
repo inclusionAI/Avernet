@@ -42,8 +42,11 @@ import time
 from pathlib import Path
 from typing import Callable, Mapping, Optional, Sequence
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
+    BlobDelivery,
     EntryFetchError,
+)
+from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetcher,
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools.context import (
@@ -195,6 +198,19 @@ class CliToolService:
         fetched_at = time.monotonic()
 
         md5 = hashlib.md5(data).hexdigest()
+        # The digest the STORE and the row are keyed by, which is not always
+        # the declared one. A git-sourced declaration carries no digest — the
+        # commit SHA is its pin — and the store's key embeds a fingerprint of
+        # this value precisely so a new version never overwrites the object a
+        # surviving row still points at. An empty digest fingerprints to a
+        # constant, so every revision of one tool would land on one key: a
+        # rejected delivery would then roll the row back to bytes that had
+        # already been overwritten. Hashing the acquired bytes restores the
+        # property for every road — the fetch pipeline has already proved a
+        # *declared* digest, so this only ever fills in the missing case.
+        content_digest = decl.digest or (
+            "sha256:" + hashlib.sha256(data).hexdigest()
+        )
         # Read before the write: a replacement must know which object the
         # surviving row points at, so a failed delivery can discard only what
         # nothing references — and, since rev 8, so the row can be *restored*
@@ -205,7 +221,7 @@ class CliToolService:
                 self._store.put,
                 ctx.scope,
                 name=decl.name,
-                digest=decl.digest,
+                digest=content_digest,
                 data=data,
             )
         except CliToolStoreError as error:
@@ -226,7 +242,7 @@ class CliToolService:
                 bot_id=ctx.bot_id,
                 name=decl.name,
                 source=decl.source_url,
-                digest=decl.digest,
+                digest=content_digest,
                 subpath=decl.subpath,
                 md5=md5,
                 size_bytes=len(data),
@@ -442,7 +458,16 @@ class CliToolService:
 
         for decl in decls:
             current = existing.get(decl.name)
-            if current is not None and current.convergence_key == decl.convergence_key:
+            # An unpinned (git-sourced) declaration has no convergence key —
+            # the SHA that would be its pin is only known once the ref is
+            # resolved, which is inside ``_record_one`` below. So it always
+            # re-acquires, which is what stops a moved ref from surviving as
+            # "unchanged". See ``CliToolDecl.convergence_key``.
+            if (
+                current is not None
+                and decl.convergence_key is not None
+                and current.convergence_key == decl.convergence_key
+            ):
                 outcomes.append(
                     CliToolOutcome(decl.name, CliToolStatus.UNCHANGED, record=current)
                 )
@@ -599,39 +624,79 @@ class CliToolService:
     # ── the pipeline ─────────────────────────────────────────────────────
 
     async def _acquire(self, ctx: CliToolContext, decl: CliToolDecl) -> bytes:
-        """Fetch, confirm the pin, unpack if declared, select and verify."""
-        fetched = await asyncio.to_thread(
-            self._fetcher.fetch,
-            ctx,
-            source_url=decl.source_url,
-            digest=decl.digest,
-            auth=decl.auth,
-            category=FETCH_CATEGORY,
-            keep_last=decl.keep_last,
-            entry_identity=decl.name,
-        )
-        if decl.digest and fetched.digest != decl.digest:
+        """Fetch, confirm the pin, unpack if declared, select and verify.
+
+        A declaration that came from a manifest entry goes through
+        ``fetch_declared`` — the same door every other fetching category uses,
+        and the only one that resolves a ``from`` name or a ``protocol: git``
+        source. Reading ``decl.source_url`` instead is what used to put a
+        *source name* on the wire as though it were a URL: accepted at ``PUT``,
+        failed at apply, the one construct that broke "accepted means
+        appliable".
+        """
+        if decl.entry is not None:
+            delivery = await asyncio.to_thread(
+                self._fetcher.fetch_declared,
+                ctx,
+                entry=decl.entry,
+                category=FETCH_CATEGORY,
+                entry_identity=decl.name,
+            )
+        else:
+            # The API-driven install: a plain URL from the caller, no manifest
+            # and no ``sources`` map to resolve against. ``fetch`` answers in
+            # the transport's currency, so it is wrapped here — one type
+            # reaches the rest of this method whichever door it came through.
+            delivery = BlobDelivery(
+                await asyncio.to_thread(
+                    self._fetcher.fetch,
+                    ctx,
+                    source_url=decl.source_url,
+                    digest=decl.digest,
+                    auth=decl.auth,
+                    category=FETCH_CATEGORY,
+                    keep_last=decl.keep_last,
+                    entry_identity=decl.name,
+                )
+            )
+        data = await asyncio.to_thread(delivery.single)
+        if delivery.needs_receipt():
+            # A tree's bytes are not filed by the fetch — only the caller
+            # knows which of them this entry delivers, and here that is the
+            # one file the composed subpath named. Auth included, so the
+            # lineage answers "which credential served this" on both roads.
+            await asyncio.to_thread(
+                self._fetcher.file_bytes,
+                ctx,
+                content=data,
+                source_url=delivery.receipt_url(),
+                category=FETCH_CATEGORY,
+                entry_identity=decl.name,
+                credential_name=delivery.auth(),
+            )
+        if decl.digest and delivery.digest() != decl.digest:
             # The fetch pipeline enforces the pin; this compares the content
             # address it already computed, so the belt costs nothing. It is
             # here because this is the one category that distributes an
             # executable, and a keep_last fallback is the path where stored
             # bytes could stand in for what was declared.
             raise ValueError(
-                f"{decl.name!r}: the bytes are {fetched.digest}, the entry "
+                f"{decl.name!r}: the bytes are {delivery.digest()}, the entry "
                 f"declared {decl.digest}"
             )
-        if not decl.unpack:
-            if decl.subpath:
-                raise CliToolSubpathError(
-                    f"{decl.name!r}: 'subpath' selects a member of an archive, "
-                    "but the entry declares no 'unpack' — without it the fetched "
-                    "object is the command itself and the selection would be "
-                    "silently ignored"
-                )
-            data = fetched.content
-        else:
-            data = await asyncio.to_thread(
-                self._select, fetched.content, decl,
+        if decl.unpack:
+            data = await asyncio.to_thread(self._select, data, decl)
+        elif decl.subpath and not delivery.is_tree():
+            # ``subpath`` on a tree already did its work — it selected the one
+            # file out of the checkout, which is what ``single()`` returned.
+            # On a single delivered object it selects an archive member, so
+            # without an ``unpack`` there is no archive for it to select from
+            # and the selection would be silently ignored.
+            raise CliToolSubpathError(
+                f"{decl.name!r}: 'subpath' selects a member of an archive, "
+                "but the entry declares no 'unpack' — without it the fetched "
+                "object is the command itself and the selection would be "
+                "silently ignored"
             )
         verify_amd64_elf(data, name=decl.name)
         return data

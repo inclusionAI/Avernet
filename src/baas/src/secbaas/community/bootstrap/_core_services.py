@@ -300,6 +300,10 @@ class CoreServiceContainer(containers.DeclarativeContainer):
 
     file_transfer_backend = providers.Dependency()
 
+    session_file_url_projector = providers.Dependency()
+
+    oss_streaming_proxy = providers.Dependency()
+
     paas_facade = providers.Singleton(
         PaasServiceFacade,
         device_repository=device_repo,
@@ -383,12 +387,14 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         paas_facade=paas_facade,
         file_transfer_backend=file_transfer_backend,
         ticket_repo=ticket_repository,
+        session_file_url_projector=session_file_url_projector,
     )
 
     session_file_sharing_dispatcher = providers.Singleton(
         DefaultSessionFileSharingDispatcher,
         file_transfer_backend=file_transfer_backend,
         ticket_repo=session_ticket_repository,
+        session_file_url_projector=session_file_url_projector,
     )
 
     # Engine adapter registry — 按 config.plugins.engine_adapter 切 stub/real,

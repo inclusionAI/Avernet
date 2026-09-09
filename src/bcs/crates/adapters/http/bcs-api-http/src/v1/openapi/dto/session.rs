@@ -1,7 +1,7 @@
 use bcs_service_api::application::v1::{
     ApplicationError, AuthenticatedCaller, CreateSession, DeliveryType, IdentityPolicy,
-    ParticipantMode, ParticipantRole, Principal, SessionCaller, SessionKind, SessionStatus,
-    UpdateSession, select_principal,
+    MessageViewScope, ParticipantMode, ParticipantRole, Principal, SessionCaller, SessionKind,
+    SessionStatus, UpdateSession, select_principal,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -66,6 +66,8 @@ pub struct CreateSessionRequest {
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub creator_role: Option<CreatorRoleDto>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
+    pub message_view_scope: Option<MessageViewScope>,
+    #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub input: Option<SessionInputDto>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub meta: Option<Map<String, Value>>,
@@ -105,6 +107,7 @@ impl CreateSessionRequest {
             kind: self.kind,
             acting_bot_id: self.acting_bot_id,
             creator_role: self.creator_role.map(ParticipantRole::from),
+            message_view_scope: self.message_view_scope,
             input: self.input.map(Value::from),
             meta: self.meta.map(Value::Object),
             context_delivery: self.context_delivery,
@@ -218,13 +221,18 @@ impl UpdateSessionRequest {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateSessionParticipantRequest {
-    pub mode: ParticipantMode,
+    #[serde(default)]
+    pub mode: Option<ParticipantMode>,
+    #[serde(default)]
+    pub message_view_scope: Option<MessageViewScope>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AddSessionParticipantRequest {
     pub bot_uuid: String,
+    #[serde(default)]
+    pub message_view_scope: Option<MessageViewScope>,
 }
 
 #[derive(Debug, Deserialize)]

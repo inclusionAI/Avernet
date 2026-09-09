@@ -1050,6 +1050,7 @@ mod tests {
                     role: ParticipantRole::Driver,
                     actor_kind: bcs_service_api::ActorKind::default(),
                     tags: Vec::new(),
+                    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                     mode: None,
                 },
                 Participant {
@@ -1059,6 +1060,7 @@ mod tests {
                     role: ParticipantRole::Consultant,
                     actor_kind: bcs_service_api::ActorKind::default(),
                     tags: Vec::new(),
+                    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                     mode: None,
                 },
             ],
@@ -1434,6 +1436,7 @@ mod tests {
                     role: ParticipantRole::Driver,
                     actor_kind: bcs_service_api::ActorKind::default(),
                     tags: Vec::new(),
+                    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                     mode: None,
                 },
                 Participant {
@@ -1443,6 +1446,7 @@ mod tests {
                     role: ParticipantRole::Consultant,
                     actor_kind: bcs_service_api::ActorKind::default(),
                     tags: Vec::new(),
+                    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                     mode: None,
                 },
                 Participant {
@@ -1452,6 +1456,7 @@ mod tests {
                     role: ParticipantRole::Consultant,
                     actor_kind: bcs_service_api::ActorKind::default(),
                     tags: Vec::new(),
+                    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                     mode: None,
                 },
             ],
@@ -1666,6 +1671,7 @@ mod tests {
                     role: ParticipantRole::Driver,
                     actor_kind: bcs_service_api::ActorKind::default(),
                     tags: Vec::new(),
+                    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                     mode: None,
                 },
                 Participant {
@@ -1675,6 +1681,7 @@ mod tests {
                     role: ParticipantRole::Consultant,
                     actor_kind: bcs_service_api::ActorKind::default(),
                     tags: Vec::new(),
+                    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                     mode: None,
                 },
                 Participant {
@@ -1684,6 +1691,7 @@ mod tests {
                     role: ParticipantRole::Consultant,
                     actor_kind: bcs_service_api::ActorKind::default(),
                     tags: Vec::new(),
+                    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                     mode: None,
                 },
             ],
@@ -1964,6 +1972,7 @@ mod tests {
                     role: ParticipantRole::Driver,
                     actor_kind: bcs_service_api::ActorKind::default(),
                     tags: Vec::new(),
+                    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                     mode: None,
                 },
                 Participant {
@@ -1973,6 +1982,7 @@ mod tests {
                     role: ParticipantRole::Consultant,
                     actor_kind: bcs_service_api::ActorKind::default(),
                     tags: Vec::new(),
+                    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                     mode: None,
                 },
             ],
@@ -2233,6 +2243,7 @@ mod tests {
                     role: ParticipantRole::Driver,
                     actor_kind: ActorKind::Bot,
                     tags: Vec::new(),
+                    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                     mode: None,
                 },
                 Participant {
@@ -2242,6 +2253,7 @@ mod tests {
                     role: ParticipantRole::Consultant,
                     actor_kind: ActorKind::Bot,
                     tags: Vec::new(),
+                    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                     mode: None,
                 },
                 Participant {
@@ -2251,6 +2263,7 @@ mod tests {
                     role: ParticipantRole::Consultant,
                     actor_kind: ActorKind::Human,
                     tags: Vec::new(),
+                    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                     mode: Some(ParticipantMode::Present),
                 },
                 Participant {
@@ -2260,6 +2273,7 @@ mod tests {
                     role: ParticipantRole::Consultant,
                     actor_kind: ActorKind::Bot,
                     tags: Vec::new(),
+                    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                     mode: None,
                 },
             ],
@@ -2324,6 +2338,7 @@ mod tests {
                 role: ParticipantRole::Observer,
                 actor_kind: ActorKind::Human,
                 tags: Vec::new(),
+                message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                 mode: Some(ParticipantMode::Present),
             },
             Participant {
@@ -2333,6 +2348,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: ActorKind::Bot,
                 tags: Vec::new(),
+                message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                 mode: Some(ParticipantMode::Auto),
             },
         ];
@@ -2352,6 +2368,7 @@ mod tests {
                 role: ParticipantRole::Driver,
                 actor_kind: ActorKind::Bot,
                 tags: Vec::new(),
+                message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                 mode: Some(ParticipantMode::Auto),
             },
             Participant {
@@ -2361,6 +2378,7 @@ mod tests {
                 role: ParticipantRole::Consultant,
                 actor_kind: ActorKind::Bot,
                 tags: Vec::new(),
+                message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                 mode: Some(ParticipantMode::Auto),
             },
         ];
@@ -2781,6 +2799,7 @@ mod tests {
                     role: ParticipantRole::Manager,
                     actor_kind: ActorKind::Bot,
                     tags: Vec::new(),
+                    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                     mode: None,
                 },
                 Participant {
@@ -2790,6 +2809,7 @@ mod tests {
                     role: ParticipantRole::Worker,
                     actor_kind: ActorKind::Bot,
                     tags: Vec::new(),
+                    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                     mode: None,
                 },
                 Participant {
@@ -2799,6 +2819,7 @@ mod tests {
                     role: ParticipantRole::Worker,
                     actor_kind: ActorKind::Bot,
                     tags: Vec::new(),
+                    message_view_scope: bcs_service_api::application::v1::MessageViewScope::Full,
                     mode: None,
                 },
             ],

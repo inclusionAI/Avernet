@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use bcs_domain::MessageViewScope;
 use bcs_service_api::{
     CallerContext, DefaultDelivery, DmCreateCommand, DmCreateResult, GroupAddMemberCommand,
     GroupAddMemberResult, GroupCreateCommand, GroupCreateParticipantCommand, GroupDeleteCommand,
@@ -35,11 +36,13 @@ fn group_create_command_carries_caller_and_members() {
                 bot_id: "driver".to_string(),
                 role: Some("driver".to_string()),
                 tags: Vec::new(),
+                message_view_scope: None,
             },
             GroupCreateParticipantCommand {
                 bot_id: "bot-a".to_string(),
                 role: Some("consultant".to_string()),
                 tags: Vec::new(),
+                message_view_scope: None,
             },
         ],
         member_bot_ids: vec!["bot-a".to_string(), "bot-b".to_string()],
@@ -135,6 +138,7 @@ fn group_status_and_history_commands_carry_route_inputs() {
         human_actor_id: Some("human_alice".to_string()),
         group_id: "group-1".to_string(),
         bot_id: "bot-a".to_string(),
+        message_view_scope: None,
     };
     let history = GroupHistoryCommand {
         caller: CallerContext::Public,
@@ -201,6 +205,7 @@ fn group_result_dtos_are_route_friendly_views() {
         actor_kind: bcs_service_api::ActorKind::Bot,
         mode: None,
         tags: Vec::new(),
+        message_view_scope: MessageViewScope::Full,
     };
     let detail = GroupDetailResult {
         group_id: "group-1".to_string(),
@@ -255,6 +260,7 @@ fn group_result_dtos_are_route_friendly_views() {
             actor_kind: bcs_service_api::ActorKind::Bot,
             mode: None,
             tags: Vec::new(),
+            message_view_scope: MessageViewScope::Full,
         },
     };
     let history = GroupHistoryResult {
@@ -272,6 +278,7 @@ fn group_result_dtos_are_route_friendly_views() {
         actor_kind: bcs_service_api::ActorKind::Bot,
         mode: None,
         tags: Vec::new(),
+        message_view_scope: MessageViewScope::Full,
     })
     .unwrap();
 
@@ -324,6 +331,7 @@ async fn noop_group_management_service_fails_closed() {
                 bot_id: "bot-a".to_string(),
                 role: Some("consultant".to_string()),
                 tags: Vec::new(),
+                message_view_scope: None,
             }],
             member_bot_ids: vec!["bot-a".to_string()],
             group_kind: None,
@@ -364,6 +372,7 @@ async fn noop_group_management_service_fails_closed() {
             human_actor_id: None,
             group_id: "group-1".to_string(),
             bot_id: "bot-a".to_string(),
+            message_view_scope: None,
         })
         .await;
     assert_not_configured(added, "group management service is not configured");
@@ -419,6 +428,7 @@ async fn noop_group_management_service_fails_closed() {
             group_id: "group-1".to_string(),
             actor_id: "driver".to_string(),
             mode: ParticipantMode::Muted,
+            message_view_scope: None,
         })
         .await;
     assert_not_configured(mode, "group management service is not configured");

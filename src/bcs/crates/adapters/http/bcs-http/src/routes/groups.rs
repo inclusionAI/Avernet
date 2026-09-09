@@ -35,6 +35,7 @@ use bcs_service_api::{
     ServiceSpec, SessionKind, SessionStatus, StartStateMachineRunCommand,
     UpgradeGroupCollaborationDefinitionCommand, Workspace,
 };
+use bcs_service_api::types::MessageViewScope;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -208,6 +209,8 @@ pub struct UpdateRoutingPolicyRequest {
 #[derive(Debug, Deserialize)]
 pub struct PutParticipantModeRequest {
     pub mode: ParticipantMode,
+    #[serde(default)]
+    pub message_view_scope: Option<MessageViewScope>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -629,6 +632,7 @@ fn legacy_create_group_spec(
                 )?,
                 actor_id: participant.bot_id,
                 tags: participant.tags,
+                message_view_scope: participant.message_view_scope,
             })
         })
         .collect::<Result<Vec<_>, HttpAdapterError>>()?;
@@ -1359,6 +1363,7 @@ pub async fn add_group_member(
             human_actor_id: extract_human_actor_id(&state, &headers, &uri).await,
             group_id: id.clone(),
             bot_id: bot_uuid,
+            message_view_scope: None,
         })
         .await
         .map_err(group_use_case_error_to_http)?;
@@ -1588,10 +1593,17 @@ pub async fn put_participant_mode(
     uri: Uri,
     Json(req): Json<PutParticipantModeRequest>,
 ) -> Response {
-    let caller = match resolve_put_caller(&state, &headers, &uri).await {
+    let mut caller = match resolve_put_caller(&state, &headers, &uri).await {
         Ok(caller) => caller,
         Err(response) => return response,
     };
+    if req.message_view_scope.is_some()
+        && caller != actor_id
+        && let Ok(manage_actor) =
+            resolve_group_member_caller(&state, &headers, &uri, &group_id).await
+    {
+        caller = manage_actor;
+    }
 
     let result = match state
         .services
@@ -1601,6 +1613,7 @@ pub async fn put_participant_mode(
             group_id,
             actor_id,
             mode: req.mode,
+            message_view_scope: req.message_view_scope,
         })
         .await
     {
@@ -1616,6 +1629,7 @@ pub async fn put_participant_mode(
                 "group_id": result.group_id,
                 "actor_id": result.actor_id,
                 "mode": result.mode,
+                "message_view_scope": result.message_view_scope,
             }
         })),
     )
@@ -1715,6 +1729,7 @@ fn group_create_participants(
                     participant.role.clone()
                 },
                 tags: normalize_participant_tags(&participant.tags),
+                message_view_scope: participant.message_view_scope,
             })
             .collect());
     }
@@ -1768,6 +1783,7 @@ fn group_create_participants(
             bot_id: bot_id.to_string(),
             role: Some(role),
             tags: Vec::new(),
+            message_view_scope: None,
         });
     }
 
@@ -1807,6 +1823,7 @@ fn group_create_participants_from_runtime_bindings(
                 bot_id: bot_id.to_string(),
                 role: Some(inferred_participant_role_wire(bot_id, driver_bot).to_string()),
                 tags: Vec::new(),
+                message_view_scope: None,
             });
         }
     }

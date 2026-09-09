@@ -20,7 +20,7 @@ pub fn protected_router() -> Router<ApiState> {
             .merge(routes::group::router())
             .merge(routes::session::router())
             .merge(routes::invitation::router())
-            .merge(routes::invite_code::router())
+            .merge(routes::invite_code::protected_router())
             .merge(routes::register::router())
             .merge(routes::friendship::router())
             .merge(routes::friend_connection::router())
@@ -32,4 +32,8 @@ pub fn public_router() -> Router<ApiState> {
     Router::new()
         .nest("/openapi/v1/auth", routes::auth::router())
         .merge(routes::register::public_router())
+        .nest(
+            "/openapi/v1/collaboration",
+            routes::invite_code::public_router(),
+        )
 }

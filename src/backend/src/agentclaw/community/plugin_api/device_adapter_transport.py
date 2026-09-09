@@ -32,7 +32,13 @@ class DeviceAdapterTimeoutError(TimeoutError):
 
 
 class DeviceAdapterEndpointNotFoundError(ValueError):
-    """The current runtime does not expose the requested adapter endpoint."""
+    """The adapter returned HTTP 404, retaining whether it is the standard route miss."""
+
+    def __init__(self, response_text: str, *, standard_route_missing: bool = False) -> None:
+        self.status_code = 404
+        self.response_text = response_text
+        self.standard_route_missing = standard_route_missing
+        super().__init__(f"Adapter returned HTTP 404: {response_text}")
 
 
 class DeviceAdapterHTTPStatusError(ValueError):

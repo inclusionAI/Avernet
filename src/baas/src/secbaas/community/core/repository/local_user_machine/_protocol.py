@@ -43,7 +43,7 @@ class LocalUserMachineRepository(Protocol):
     def list_by_user_id(self, user_id: str, env: str) -> list[LocalUserMachineRecord]:
         """List all machine records for a user in an environment.
 
-        Uses uk_user_env unique constraint (user_id + env).
+        Uses idx_user_env index (user_id + env, non-unique).
         """
         ...
 
@@ -85,5 +85,17 @@ class LocalUserMachineRepository(Protocol):
         """Get connected_route_info JSON for a machine.
 
         Returns None if route_info is NULL or machine not found.
+        """
+        ...
+
+    def update_user_id(
+        self, machine_id: str, env: str, old_user_id: str, new_user_id: str
+    ) -> int:
+        """Conditional ownership migration for a local user machine.
+
+        Updates user_id to new_user_id only when the row currently has
+        user_id == old_user_id (the guard lives in the WHERE clause).
+        Returns the affected rowcount; 0 rows means the guard lost a race
+        with a concurrent migration and the caller must decide per D-02.
         """
         ...

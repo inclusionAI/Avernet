@@ -318,8 +318,12 @@ class GitCheckout:
             subpath = self.subpath
         _require_safe("subpath", subpath)
         if subpath is None or subpath == "":
+            # Worded for a report, not a stack trace: since the identity
+            # category stopped asking this question itself (it needed a
+            # git-only field to ask), this string is what an author reads
+            # when their entry selected no single file out of a tree.
             raise FetchRefusedError(
-                "read_file: the source's subpath must name a single file"
+                "the source's 'subpath' must name a single file"
             )
         hit = [
             (mode, name, size)

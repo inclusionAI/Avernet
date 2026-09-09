@@ -14,6 +14,7 @@ import {
   showSuccessToast,
 } from '@/utils/hooksErrorHandler';
 import { useCallback } from 'react';
+import type { MessageViewScope } from '../types';
 
 /**
  * Actor 管理 Hook
@@ -68,10 +69,16 @@ export function useActor() {
       group_id: string,
       actor_id: string,
       mode: 'present' | 'absent' | 'auto' | 'muted',
+      messageViewScope?: MessageViewScope,
     ): Promise<boolean> => {
       try {
         const response = await BcnController.updateParticipantMode(
-          { group_id, actor_id, mode },
+          {
+            group_id,
+            actor_id,
+            mode,
+            message_view_scope: messageViewScope,
+          },
           { skipErrorHandler: true },
         );
 

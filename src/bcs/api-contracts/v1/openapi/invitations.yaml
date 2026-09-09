@@ -11,10 +11,13 @@ AcceptInvitationRequest:
   type: object
   additionalProperties: false
   description: >-
-    Empty request body for accepting an invitation token. Only a Human Principal
-    authenticated by the Gateway may accept; the request carries no fields
-    because legacy `join_*_by_invite` derives the joining Human actor from the
-    Principal's `staff_no` (subject id). Bot Principals are rejected with 403.
+    Request for accepting an invitation token. Only a Human Principal
+    authenticated by the Gateway may accept; the joining Human actor is derived
+    from the Principal's subject id. When omitted, Group joins default to full;
+    Session joins inherit the Human's Group scope when present, otherwise full.
+  properties:
+    message_view_scope:
+      $ref: ../domain-models.yaml#/MessageViewScope
 
 CreateGroupInvitationPath:
   post:

@@ -18,9 +18,12 @@
 配置意图分为两部分，能力边界不同：
 
 1. **声明式 manifest**（引擎无关，所有引擎支持）：声明要什么、从哪来
-   （git 引用 / `source` URL / 内联内容 / 平台注册项引用），**不写路径、
+   （**源协议** `git` / `oss`、内联内容、或平台注册项引用），**不写路径、
    不写命令**。业务内容多在公司 git 上以 tag 发版，故 git 源与命名源
    （一处声明、多处引用、一次 `ref` 变更原子升级整套配置）是主推形态。
+   **哪些「类别 × 协议」组合可用是代码里的一张表**
+   （`core/bot_config_manifest/support_matrix.py`）：`PUT` 校验器与
+   capabilities 端点读同一张表，并由一个逐格发真实 `PUT` 的测试守着。
 2. **命令式 script**（能力受限，teclaw 明确不支持）：即 #935 已上线的
    per-bot startup script，覆盖无法声明化的长尾（沙箱内动态取数、条件逻辑）。
 
@@ -55,7 +58,9 @@
 - **GitOps 语义**：manifest 管辖的实体每个 apply 点重新收敛，声明状态获胜，
   手工漂移被纠正；未声明的实体完全不碰。
 - **私有源鉴权走租户级凭证引用**：secret 不入 manifest / script / URL，
-  凭证绑定 origin、读回掩码；fetch 全在平台侧，凭证零引擎面。
+  凭证按路径段边界绑定前缀、读回掩码；fetch 全在平台侧，凭证零引擎面。
+  两种机制：`header` **出示** secret，`oss_aksk` **签名**（密钥半边从不
+  上线路，线路上是对单个请求的签名）——私有对象存储走后者。
 - **script 部分维持 #935 的全部安全机制**（base64 / `su admin` / `__OCB_RC` /
   `mktemp`）与支持判定口径（teclaw、desktop 拒绝）。
 
@@ -70,6 +75,7 @@
 | `engine-requirements.zh-CN.md` | 各引擎的工作量与需确认清单、能力矩阵、开放问题 | 平台 & 引擎团队 |
 | `work-items.md` | **实现工作项拆分**（英文）：W1–W13 每项的范围、依赖、验收标准；已定决策、设计问题与外部确认项；人员分工 | 平台团队 |
 | `work-items.zh-CN.md` | 上一份的中文版，内容对齐 | 平台团队 |
+| `../../specs/2026-09-08-manifest-source-protocols/` | **后续变更**：源协议轴、`resources` 接通 git、`oss_aksk` 凭证。含 spec / plan / tasks，与这五个缺陷的复现记录 | 平台团队 |
 | `engine-convergence-contract.zh-CN.md` | **跨引擎收敛语义契约**：应用一份 manifest 对已有状态做什么，写成对 applier 的要求（R1–R9）+ 逐类目区域表 + 自查清单 | teclaw 团队 & 引擎团队 |
 | `teclaw-cli-contract.zh-CN.md` | **给 teclaw owner 的实现说明**：下发契约不变，仅新增 `cli_tools` 段。含字段定义、用例与验收清单 | teclaw 团队 |
 
@@ -78,10 +84,12 @@
 | 术语 | 含义 |
 | --- | --- |
 | TC Open API | `/openapi/v1/...` 公开 API 面（`adapters/http/openapi_v1/`） |
+| 源协议（source protocol） | 源内容的传输形态，由源自身声明：`git`（交付整棵树，以 commit SHA 收敛）或 `oss`（一次请求交付一个对象）。**不是**「源怎么被写出来的」——命名源 `from` 解析到它声明的协议，规则按协议判 |
+| 支持矩阵（support matrix） | 「类别 × 协议」的那张表，`support_matrix.py`。校验器的拒绝理由与 capabilities 端点发布的理由是同一个字符串 |
 | manifest | 配置清单的声明式部分（六个类别），本设计的核心新增物 |
 | script | #935 的 per-bot startup script，本设计中作为配置清单的命令式部分 |
 | apply 点 | 平台评估并应用 manifest 的生命周期边界（创建 / republish / 重建式 restart / 显式 apply）。**第一期实际实现的是：创建、`PUT` 之后自动跟的一次、显式 `POST …/apply`**；republish 与重建式 restart 推迟，见 `user-manual.zh-CN.md` §7 |
-| 物化（materialize） | 平台把 `source` URL 的内容 fetch 下来、写入平台存储（对 teclaw 即 OSS store）的动作 |
+| 物化（materialize） | 平台把源的内容 fetch 下来、写入平台存储（对 teclaw 即 OSS store）的动作 |
 | ARCA 系 | 走 `_build_create_bot_payload` 组装启动命令的单容器引擎家族：openclaw / claude_code / aicoding / hermes / moltis |
 | teclaw | 外部容器引擎：无启动命令通道，唯一配置通道是整包 `BotConfigArtifact` |
 | 收敛（converge） | 「同一份文档应用 N 次 = 应用一次」，声明式 apply 对幂等的替代表述 |

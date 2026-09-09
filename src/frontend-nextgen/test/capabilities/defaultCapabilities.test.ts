@@ -128,7 +128,7 @@ describe('Open Core default capabilities', () => {
     });
   });
 
-  test('getRestrictedPublicationScopeEnabled 默认 false（Open Core 隐藏限制组织范围）', () => {
+  test('getRestrictedPublicationScopeEnabled 默认 false（Open Core 隐藏限定组织可申请）', () => {
     expect(defaultCapabilities.getRestrictedPublicationScopeEnabled()).toEqual({ status: 'available', value: false });
   });
 

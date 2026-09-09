@@ -21,6 +21,7 @@ use bcs_service_api::application::v1::{
     require_authenticated_user, require_human, select_principal,
 };
 use bcs_service_api::core::{GroupMutationCommand, GroupMutationKind};
+use bcs_service_api::port::{NoopParticipantViewBindingPort, ParticipantViewBindingPort};
 use bcs_service_api::types::{EventActor, EventActorType, OpeningMessageScope};
 use bcs_service_api::{
     ActorKind, ActorStatus, AuthenticatedHumanCaller, BotRegistryCoreService,
@@ -56,6 +57,7 @@ pub struct GroupServiceImpl {
     relation: Arc<dyn RelationCoreService>,
     sessions: Arc<dyn SessionManagementService>,
     management: Arc<dyn GroupManagementService>,
+    participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
     collaboration_runtime: Option<Arc<dyn CollaborationRuntimeService>>,
     event_subscription_provisioner: Option<Arc<dyn GroupEventSubscriptionProvisioner>>,
     config: GroupServiceConfig,
@@ -372,6 +374,7 @@ impl GroupServiceImpl {
             relation,
             sessions,
             management,
+            participant_view_bindings: Arc::new(NoopParticipantViewBindingPort),
             collaboration_runtime: None,
             event_subscription_provisioner: None,
             config,
@@ -383,6 +386,14 @@ impl GroupServiceImpl {
         collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
     ) -> Self {
         self.collaboration_runtime = Some(collaboration_runtime);
+        self
+    }
+
+    pub fn with_participant_view_bindings(
+        mut self,
+        participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
+    ) -> Self {
+        self.participant_view_bindings = participant_view_bindings;
         self
     }
 
@@ -1099,6 +1110,7 @@ impl GroupServiceImpl {
                 actor_id: request.driver_bot_uuid.clone(),
                 role: lead_role,
                 tags: Vec::new(),
+                message_view_scope: None,
             }),
             _ => {}
         }
@@ -1167,6 +1179,7 @@ impl GroupServiceImpl {
                 bot_id: participant.actor_id,
                 role: Some(role_name(participant.role).to_string()),
                 tags: normalize_participant_tags(participant.tags),
+                message_view_scope: participant.message_view_scope,
             })
             .collect::<Vec<_>>();
         let created = self
@@ -2275,6 +2288,7 @@ impl GroupService for GroupServiceImpl {
                 human_actor_id: legacy_human_actor_id,
                 group_id: command.group_id.clone(),
                 bot_id,
+                message_view_scope: command.message_view_scope,
             })
             .await
             .map_err(map_group_error)?;
@@ -2285,43 +2299,113 @@ impl GroupService for GroupServiceImpl {
         &self,
         command: UpdateGroupParticipant,
     ) -> Result<V1Participant, ApplicationError> {
+        if command.mode.is_none() && command.message_view_scope.is_none() {
+            return Err(ApplicationError::invalid(
+                "empty_participant_update",
+                "At least one of mode or message_view_scope must be provided",
+            ));
+        }
         let principal = require_human(&command.caller)?;
         let mutation_actor = event_actor_for_principal(&principal);
-        let group = self
+        let mut group = self
             .load_readable_group(&principal, &command.group_id)
             .await?;
         // Design §8.7: the target Actor may update its own participant mode
         // (self-service) in addition to the driver/originator/manager path.
         let is_self = self.principal_can_act_as(&principal, &command.actor_id).await?;
         if !is_self && self.resolve_group_manage_actor(&principal, &group).await?.is_none() {
-            return Err(ApplicationError::forbidden(
-                "Principal cannot manage the group",
-            ));
+            return Err(if command.message_view_scope.is_some() {
+                ApplicationError::forbidden_code(
+                    "message_view_scope_forbidden",
+                    "A Human may only update its own scope unless it manages the Group",
+                )
+            } else {
+                ApplicationError::forbidden("Principal cannot manage the group")
+            });
         }
-        let target = self.load_bot(&command.actor_id).await?;
-        if !command.mode.is_valid_for(target.actor_kind) {
-            return Err(ApplicationError::invalid(
-                "invalid_participant_mode",
-                format!(
-                    "Participant mode '{:?}' is invalid for actor kind '{:?}'",
-                    command.mode, target.actor_kind
-                ),
-            ));
+        let target = group
+            .participants
+            .iter()
+            .find(|participant| participant.bot_uuid == command.actor_id)
+            .cloned()
+            .ok_or_else(|| {
+                ApplicationError::not_found(
+                    "participant_not_found",
+                    format!("Participant '{}' not found", command.actor_id),
+                )
+            })?;
+        if let Some(mode) = command.mode {
+            if !mode.is_valid_for(target.actor_kind) {
+                return Err(ApplicationError::invalid(
+                    "invalid_participant_mode",
+                    format!(
+                        "Participant mode '{mode:?}' is invalid for actor kind '{:?}'",
+                        target.actor_kind
+                    ),
+                ));
+            }
+            if command.message_view_scope.is_none() {
+                group = self
+                    .groups
+                    .mutate(GroupMutationCommand {
+                        group_id: command.group_id.clone(),
+                        actor: mutation_actor.clone(),
+                        correlation_id: None,
+                        trace_id: None,
+                        mutation: GroupMutationKind::UpdateParticipantMode {
+                            actor_id: command.actor_id.clone(),
+                            mode,
+                        },
+                    })
+                    .await
+                    .map_err(map_service_error)?;
+            }
         }
-        let group = self
-            .groups
-            .mutate(GroupMutationCommand {
-                group_id: command.group_id.clone(),
-                actor: mutation_actor,
-                correlation_id: None,
-                trace_id: None,
-                mutation: GroupMutationKind::UpdateParticipantMode {
-                    actor_id: command.actor_id.clone(),
-                    mode: command.mode,
-                },
-            })
-            .await
-            .map_err(map_service_error)?;
+        if let Some(message_view_scope) = command.message_view_scope {
+            if !message_view_scope.is_valid_for(target.actor_kind) {
+                return Err(ApplicationError::invalid(
+                    "invalid_message_view_scope",
+                    "Bot participants must use full message_view_scope",
+                ));
+            }
+            let scope_change_lease = if target.actor_kind == ActorKind::Human
+                && target.message_view_scope != message_view_scope
+            {
+                Some(
+                    self.participant_view_bindings
+                        .begin_scope_change(&command.group_id, &command.actor_id)
+                        .await
+                        .map_err(map_service_error)?,
+                )
+            } else {
+                None
+            };
+            let update_result = self
+                .groups
+                .mutate(GroupMutationCommand {
+                    group_id: command.group_id.clone(),
+                    actor: mutation_actor,
+                    correlation_id: None,
+                    trace_id: None,
+                    mutation: GroupMutationKind::UpdateParticipantMessageViewScope {
+                        actor_id: command.actor_id.clone(),
+                        message_view_scope,
+                        mode: command.mode,
+                    },
+                })
+                .await
+                .map_err(map_service_error);
+            let release_result = if let Some(lease) = scope_change_lease {
+                self.participant_view_bindings
+                    .finish_scope_change(lease)
+                    .await
+                    .map_err(map_service_error)
+            } else {
+                Ok(())
+            };
+            group = update_result?;
+            release_result?;
+        }
         group
             .participants
             .iter()
@@ -2409,6 +2493,7 @@ fn project_participant(participant: &bcs_service_api::Participant) -> V1Particip
         role: participant.role,
         mode: participant.effective_mode(),
         tags: participant.tags.clone(),
+        message_view_scope: participant.message_view_scope,
     }
 }
 
@@ -2426,6 +2511,7 @@ fn participant_view_to_v1(view: GroupParticipantView) -> V1Participant {
             .mode
             .unwrap_or_else(|| ParticipantMode::default_for(view.actor_kind)),
         tags: view.tags,
+        message_view_scope: view.message_view_scope,
     }
 }
 

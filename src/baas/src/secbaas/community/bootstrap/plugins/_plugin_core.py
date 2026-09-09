@@ -15,6 +15,8 @@ Selectors via the public ``set_providers()`` API, so no enterprise import is
 needed here and class-level Selectors stay untouched.
 """
 
+import os
+
 from dependency_injector import containers, providers
 
 from secbaas.community.api.device_manage import K8sCredentials
@@ -35,7 +37,14 @@ from secbaas.community.plugins.eval_env import (
     NoopEvalConsistencyCheck,
     NoopEvalSessionLog,
 )
-from secbaas.community.plugins.file_transfer import NoopFileTransferBackend
+from secbaas.community.plugins.file_transfer import (
+    NoopFileTransferBackend,
+    NoopSessionFileUrlProjector,
+    OssStreamingProxy,
+)
+from secbaas.community.plugins.file_transfer.aliyun_ack import (
+    AliyunAckSessionFileUrlProjector,
+)
 from secbaas.community.plugins.sandbox.arca import (
     StubArcaSandboxPlugin,
 )
@@ -62,6 +71,82 @@ from secbaas.community.plugins.sandbox.poolab import StubPoolabSandboxPlugin
 from secbaas.community.plugins.sandbox.utils.arca_utils import ArcaUtils
 from secbaas.community.plugins.secret.env import EnvSecretStorePlugin
 from secbaas.community.plugins.secret.stub import StubSecretStorePlugin
+
+
+def _read_deploy_tenant(container) -> str:
+    """Read ``user_config.env.deploy_tenant`` from the DI Configuration proxy.
+
+    The ``container.config`` Configuration provider exposes sections as
+    zero-arg callables (``container.config.env()`` returns the section
+    dict); unit tests may pass a plain object whose sections are already
+    plain dicts. Both shapes are tolerated — an absent or non-dict env
+    section resolves to "" (D-01: missing tenant means the main site).
+    """
+    env_section = container.config.env
+    if callable(env_section):
+        env_section = env_section()
+    if isinstance(env_section, dict):
+        return str(env_section.get("deploy_tenant", "") or "")
+    return ""
+
+
+def _real_file_transfer():
+    """Build the community ``real`` file transfer backend (plan 89-03).
+
+    Statement-level replica of the enterprise ``_real_file_transfer``
+    factory (A3): the community class-level Selector key makes the
+    enterprise runtime injection a silent no-op, so this factory must
+    carry both branches — the aliyun tenant reads AK/SK from the
+    environment and the main site goes through the secret plugin.
+    """
+    from secbaas.community.bootstrap import get_container
+    from secbaas.community.plugins.file_transfer import (
+        AliyunOssFileTransferBackend,
+    )
+
+    from .._configs import (
+        ConfigError,
+        FileTransferOssConfigSchema,
+    )
+
+    container = get_container()
+    is_aliyun = _read_deploy_tenant(container) == "aliyun"
+    section = "file_transfer_oss_aliyun" if is_aliyun else "file_transfer_oss"
+    config = getattr(container.config, section)()
+    if is_aliyun:
+        oss_config = FileTransferOssConfigSchema(**config)
+        for field in ("endpoint", "bucket_name", "staging_root_path"):
+            if not getattr(oss_config, field):
+                raise ConfigError(
+                    f"{section}.{field} is required when "
+                    f"plugins.file_transfer is 'real'"
+                )
+        access_key_id = os.environ.get("FT_OSS_ACCESS_KEY")
+        access_key_secret = os.environ.get("FT_OSS_SECRET_KEY")
+        if not access_key_id or not access_key_secret:
+            raise ConfigError(
+                f"{section} requires FT_OSS_ACCESS_KEY and "
+                f"FT_OSS_SECRET_KEY in the environment when "
+                f"plugins.file_transfer is 'real'"
+            )
+        return AliyunOssFileTransferBackend(
+            config=oss_config, credentials=(access_key_id, access_key_secret)
+        )
+
+    secret_plugin = container.plugins().secret_plugin()
+
+    oss_config = FileTransferOssConfigSchema(**config)
+    for field in (
+        "endpoint",
+        "bucket_name",
+        "secret_name",
+        "staging_root_path",
+    ):
+        if not getattr(oss_config, field):
+            raise ConfigError(
+                f"{section}.{field} is required when plugins.file_transfer is 'real'"
+            )
+    return AliyunOssFileTransferBackend(config=oss_config, secret_store=secret_plugin)
 
 
 class PluginContainer(containers.DeclarativeContainer):
@@ -172,6 +257,26 @@ class PluginContainer(containers.DeclarativeContainer):
     file_transfer_backend = providers.Selector(
         config.plugins.file_transfer,
         stub=providers.Singleton(NoopFileTransferBackend),
+        real=providers.Singleton(_real_file_transfer),
+    )
+
+    session_file_url_projector = providers.Selector(
+        config.plugins.session_file_url_projector,
+        stub=providers.Singleton(
+            NoopSessionFileUrlProjector,
+            deploy_tenant=config.env.deploy_tenant,
+        ),
+        aliyun_ack=providers.Singleton(
+            AliyunAckSessionFileUrlProjector,
+            proxy_base_url=config.session_file_url_proxy.proxy_base_url,
+            deploy_tenant=config.env.deploy_tenant,
+        ),
+    )
+
+    oss_streaming_proxy = providers.Singleton(
+        OssStreamingProxy,
+        endpoint=config.file_transfer_oss_aliyun.endpoint,
+        bucket_name=config.file_transfer_oss_aliyun.bucket_name,
     )
 
     eval_binding_resolver = providers.Selector(

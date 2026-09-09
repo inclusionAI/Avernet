@@ -213,6 +213,21 @@ class CapabilityRuntimeBoundary(Protocol):
         ...
 
 
+@runtime_checkable
+class RuntimeServiceFactoryBoundary(Protocol):
+    """Create the legacy runtime boundary only when an executor consumes it."""
+
+    def create(
+        self,
+        *,
+        user_id: str,
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        entity_type: str,
+    ) -> CapabilityRuntimeBoundary: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ResolvedSkillPlan:
     """One Bot's complete Skill state, resolved and ready to apply.
@@ -230,9 +245,6 @@ class ResolvedSkillPlan:
     #: The Bot this plan is for, and the owner whose desired state it reads.
     bot_id: str
     owner_id: str
-    #: The runtime boundary an implementation writes through. Narrowed to the
-    #: two calls a projection may make; see ``CapabilityRuntimeBoundary``.
-    service: CapabilityRuntimeBoundary
     #: The ``ac_bots`` row. Carries ``env`` / ``entity_id`` / ``active_engine``
     #: that a filesystem-layout decision needs.
     bot: dict
@@ -253,6 +265,8 @@ class ResolvedCapabilityPlan(ResolvedSkillPlan):
     #: the base type: a ResolvedCapabilityPlan can always satisfy a Skill-only
     #: consumer, while its MCP consumers receive a genuine full snapshot.
     projection: RuntimeProjection
+    #: Built only for consumers that actually use the legacy capability service.
+    service: CapabilityRuntimeBoundary
     #: Effective Default CLI facts, as the authorization service holds them,
     #: ready for the overwrite-style Passport update.
     effective_cli_items: list[dict]
@@ -314,6 +328,7 @@ class EngineRuntimeProjection(Protocol):
         plan: ResolvedSkillPlan,
         scope: ProjectionScope,
         retired_mappings: Sequence[PoolSkillMapping] = (),
+        service_factory: RuntimeServiceFactoryBoundary,
     ) -> RuntimeProjectionResult:
         """Converge this Bot's runtime on ``plan``.
 
@@ -493,6 +508,7 @@ __all__ = [
     "RuntimeProjectionIssue",
     "RuntimeProjectionResult",
     "RuntimeProjectionStatus",
+    "RuntimeServiceFactoryBoundary",
     "ResolvedCapabilityPlan",
     "ResolvedSkillPlan",
 ]

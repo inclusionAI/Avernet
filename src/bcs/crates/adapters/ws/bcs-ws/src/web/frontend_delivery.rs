@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bcs_domain::{MessageAudience, MessageVisibilityDomain};
 use bcs_service_api::{
-    FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort,
-    FrontendDeliveryResult, FrontendDeliveryTarget, InteractionFrontendEvent,
-    InteractionFrontendPort, RunFallbackDelivery, ServiceError, ServiceResult,
+    FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort, FrontendDeliveryResult,
+    FrontendDeliveryTarget, InteractionFrontendEvent, InteractionFrontendPort, ServiceError,
+    ServiceResult,
 };
 
 use crate::shared::RunChannelManager;
@@ -49,9 +50,9 @@ pub(crate) fn interaction_event_json(event: &InteractionFrontendEvent) -> Servic
         "bcsSessionId": event.bcs_session_id,
         "payload": event.payload,
     }))
-    .map_err(|error| ServiceError::InternalError(format!(
-        "serialize interaction Workbench event: {error}"
-    )))
+    .map_err(|error| {
+        ServiceError::InternalError(format!("serialize interaction Workbench event: {error}"))
+    })
 }
 
 #[async_trait]
@@ -66,6 +67,8 @@ impl InteractionFrontendPort for WorkbenchInteractionDelivery {
                 delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
                 run_fallback: None,
                 exclude_conn_id: None,
+                visibility_domain: MessageVisibilityDomain::StateMachine,
+                audience: Some(MessageAudience::FullOnly),
             })
             .await?;
         Ok(())
@@ -74,10 +77,16 @@ impl InteractionFrontendPort for WorkbenchInteractionDelivery {
 
 #[async_trait]
 impl FrontendDeliveryPort for WorkbenchFrontendDelivery {
-    async fn publish(
-        &self,
-        cmd: FrontendDeliveryCommand,
-    ) -> ServiceResult<FrontendDeliveryResult> {
+    async fn publish(&self, cmd: FrontendDeliveryCommand) -> ServiceResult<FrontendDeliveryResult> {
+        if let Some(audience) = cmd.audience.as_ref() {
+            audience
+                .validate()
+                .map_err(|message| ServiceError::InvalidOperation {
+                    message: message.to_string(),
+                    request_id: None,
+                })?;
+        }
+
         let delivered = match &cmd.target {
             FrontendDeliveryTarget::Group { group_id } => {
                 self.publish_group_or_fallback(group_id, &cmd).await
@@ -88,7 +97,14 @@ impl FrontendDeliveryPort for WorkbenchFrontendDelivery {
             FrontendDeliveryTarget::Run { run_id } => {
                 let sent = match cmd.delivery_kind {
                     FrontendDeliveryKind::RunEvent | FrontendDeliveryKind::WorkbenchEvent => {
-                        self.run_channels.send_event(run_id, cmd.event_json.clone()).await
+                        self.run_channels
+                            .send_visible_event(
+                                run_id,
+                                cmd.event_json.clone(),
+                                cmd.visibility_domain,
+                                cmd.audience.as_ref(),
+                            )
+                            .await
                     }
                 };
                 usize::from(sent)
@@ -113,26 +129,40 @@ impl WorkbenchFrontendDelivery {
         session_id: &str,
         cmd: &FrontendDeliveryCommand,
     ) -> usize {
-        let bound = self.connections.connection_count(session_id).await;
+        // A scope-invalidated connection remains in the registry until its
+        // socket handler unregisters run fallbacks. Count that closing slot so
+        // an event cannot race through a stale run binding.
+        let bound = self.connections.binding_slot_count(session_id).await;
         let delivered = self
             .connections
-            .broadcast_excluding(session_id, &cmd.event_json, cmd.exclude_conn_id)
+            .broadcast_visible_excluding(
+                session_id,
+                &cmd.event_json,
+                cmd.visibility_domain,
+                cmd.audience.as_ref(),
+                cmd.exclude_conn_id,
+            )
             .await;
         if bound == 0 {
-            delivered + self.publish_run_fallback(cmd.run_fallback.as_ref()).await
+            delivered + self.publish_run_fallback(cmd).await
         } else {
             delivered
         }
     }
 
-    async fn publish_run_fallback(&self, fallback: Option<&RunFallbackDelivery>) -> usize {
-        let Some(fallback) = fallback else {
+    async fn publish_run_fallback(&self, cmd: &FrontendDeliveryCommand) -> usize {
+        let Some(fallback) = cmd.run_fallback.as_ref() else {
             return 0;
         };
 
         let delivered_by_run = self
             .run_channels
-            .send_event(&fallback.run_id, fallback.event_json.clone())
+            .send_visible_event(
+                &fallback.run_id,
+                fallback.event_json.clone(),
+                cmd.visibility_domain,
+                cmd.audience.as_ref(),
+            )
             .await;
         if delivered_by_run {
             return 1;
@@ -140,7 +170,12 @@ impl WorkbenchFrontendDelivery {
 
         let delivered_by_session = self
             .run_channels
-            .send_event_by_session(&fallback.session_id, fallback.event_json.clone())
+            .send_visible_event_by_session(
+                &fallback.session_id,
+                fallback.event_json.clone(),
+                cmd.visibility_domain,
+                cmd.audience.as_ref(),
+            )
             .await;
         usize::from(delivered_by_session)
     }

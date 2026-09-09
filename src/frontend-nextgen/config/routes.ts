@@ -19,6 +19,8 @@ export const routes = [
       { path: '/workspace', component: '@/pages/Workspace' },
       { path: '/work/my-task', component: '@/pages/MyTask' },
       { path: '/workspace/invite/:type/:token', component: '@/pages/Workspace/InviteAcceptPanel' },
+      // BCN 协作会话外链落地页：判定参与方式后 replace 至 /workspace 协作群深链。
+      { path: '/workspace/bcn/chat/detail', component: '@/pages/Workspace/BcnChatDetail' },
       { path: '/collaboration-square', redirect: '/collaboration-square/bots' },
       { path: '/collaboration-square/bots', component: '@/pages/CollaborationSquare/Bots' },
       { path: '/collaboration-square/groups', component: '@/pages/CollaborationSquare/Groups' },

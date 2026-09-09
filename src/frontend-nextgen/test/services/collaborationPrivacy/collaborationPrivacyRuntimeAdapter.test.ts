@@ -121,7 +121,7 @@ describe('collaborationPrivacyRuntimeAdapter.submitPublication', () => {
     expect((result as { approvalUrl?: string }).approvalUrl).toBeUndefined();
   });
 
-  it('限制公开范围遇到 SKIPPED 时,按本次请求的受限配置直接生效', async () => {
+  it('限定组织可申请遇到 SKIPPED 时,按本次请求的受限配置直接生效', async () => {
     const { adapter } = createAdapterWithPublishResult({
       success: true,
       puid: 'pub-skip-2',

@@ -15,6 +15,16 @@ pub struct InitInviteCodesResult {
     pub codes: Vec<String>,
 }
 
+/// Command for anonymously claiming one newly generated invite code.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ClaimPublicInviteCode;
+
+/// Result returned when an anonymous caller claims an invite code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClaimPublicInviteCodeResult {
+    pub invite_code: String,
+}
+
 /// Command for binding the current human caller to an invite code.
 #[derive(Debug, Clone)]
 pub struct BindInviteCode {
@@ -50,6 +60,11 @@ pub trait InviteCodeService: Send + Sync {
         &self,
         command: InitInviteCodes,
     ) -> Result<InitInviteCodesResult, ApplicationError>;
+
+    async fn claim_public_invite_code(
+        &self,
+        command: ClaimPublicInviteCode,
+    ) -> Result<ClaimPublicInviteCodeResult, ApplicationError>;
 
     async fn bind_invite_code(
         &self,

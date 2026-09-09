@@ -47,6 +47,7 @@ async fn noop_workbench_session_service_fails_closed() {
             bound_actor_id: Some("human_1".to_string()),
             group_id: "group-1".to_string(),
             session_id: None,
+            view_actor_id: None,
         })
         .await;
     assert!(connect.is_err());

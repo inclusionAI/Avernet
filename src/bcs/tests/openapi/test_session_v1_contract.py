@@ -48,6 +48,21 @@ def test_session_list_and_history_use_the_shared_view_actor_contract() -> None:
     assert message_queries["include_pending"].get("required", False) is False
 
 
+def test_session_create_accepts_an_optional_human_message_view_scope() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/groups/{group_id}/sessions"
+    ]["post"]
+    schema = operation["requestBody"]["content"]["application/json"]["schema"]
+
+    assert "message_view_scope" in schema["properties"]
+    assert "message_view_scope" not in schema.get("required", [])
+    assert schema["properties"]["message_view_scope"]["allOf"][0]["enum"] == [
+        "full",
+        "participant",
+    ]
+
+
 def test_session_history_uses_legacy_group_message_array_envelope() -> None:
     contract = load_contract(CONTRACT_ROOT)
     operation = contract["paths"][
@@ -280,19 +295,22 @@ def test_session_collection_returns_a_strict_result_envelope() -> None:
         assert data["properties"]["collected"] == {"type": "boolean"}
 
 
-def test_add_session_participant_accepts_only_bot_uuid() -> None:
+def test_add_session_participant_accepts_bot_uuid_and_optional_scope() -> None:
     contract = load_contract(CONTRACT_ROOT)
     operation = contract["paths"][
         "/openapi/v1/collaboration/sessions/{session_id}/participants"
     ]["post"]
     schema = operation["requestBody"]["content"]["application/json"]["schema"]
 
-    assert schema == {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["bot_uuid"],
-        "properties": {"bot_uuid": {"type": "string"}},
-    }
+    assert schema["type"] == "object"
+    assert schema["additionalProperties"] is False
+    assert schema["required"] == ["bot_uuid"]
+    assert set(schema["properties"]) == {"bot_uuid", "message_view_scope"}
+    assert schema["properties"]["bot_uuid"] == {"type": "string"}
+    assert schema["properties"]["message_view_scope"]["enum"] == [
+        "full",
+        "participant",
+    ]
 
 
 def test_update_session_participant_accepts_bot_and_human_modes() -> None:
@@ -308,6 +326,11 @@ def test_update_session_participant_accepts_bot_and_human_modes() -> None:
             {"type": "string", "enum": ["present", "absent"]},
         ]
     }
+    assert schema["minProperties"] == 1
+    assert schema["properties"]["message_view_scope"]["enum"] == [
+        "full",
+        "participant",
+    ]
     participant = next(
         parameter
         for parameter in operation["parameters"]
@@ -317,9 +340,11 @@ def test_update_session_participant_accepts_bot_and_human_modes() -> None:
     assert set(operation["responses"]["400"]["x-error-codes"]) == {
         "invalid_request",
         "invalid_participant_mode",
+        "invalid_message_view_scope",
     }
     forbidden = operation["responses"]["403"]["description"]
-    assert "only update its own present/absent mode" in forbidden
+    assert "update its own mode and message view scope" in forbidden
+    assert "Session manager may set another Human participant's scope" in forbidden
     assert "Bot participant modes require Session management authority" in forbidden
 
 
@@ -367,6 +392,17 @@ def test_create_group_session_does_not_accept_driver_or_participants() -> None:
     schema = operation["requestBody"]["content"]["application/json"]["schema"]
 
     assert "required" not in schema
-    assert set(schema["properties"]) == {"title", "input"}
+    assert set(schema["properties"]) == {
+        "title",
+        "kind",
+        "acting_bot_id",
+        "creator_role",
+        "message_view_scope",
+        "input",
+        "meta",
+        "context_delivery",
+    }
+    assert "driver_bot_uuid" not in schema["properties"]
+    assert "participants" not in schema["properties"]
     assert "driver_bot_uuid" not in schema["properties"]
     assert "participants" not in schema["properties"]

@@ -58,6 +58,8 @@ provides:
   - "InstallationBackfillServiceProtocol"
   - "BotRuntimeProjector"
   - "BotRuntimeProjectorProtocol"
+  - "SkillRuntimeDelivery"
+  - "RuntimeServiceFactoryBoundary"
   - "LocalSkillCleanupWorkModel"
   - "SkillActivationSyncAction"
   - "SkillActivationSyncScope"
@@ -140,6 +142,7 @@ internal_dependencies:
   - agentclaw.community.core.access
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_collaborator
+  - agentclaw.community.core.common_config
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.config
   - agentclaw.community.core.config_compose

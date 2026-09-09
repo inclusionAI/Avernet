@@ -1,0 +1,35 @@
+# aliyun deployment overlay — loaded by the ConfigLoader tenant layer when
+# BAAS_DEPLOY_TENANT=aliyun (no SERVER_ENV=aliyun needed) and merged after
+# the SERVER_ENV/COMMUNITY_DEPLOY env overlay.  The file name
+# application-aliyun.yaml matches the tenant value; a missing file would be
+# silently skipped by the loader.
+#
+# env.deploy_tenant inherits the "${BAAS_DEPLOY_TENANT:-}" placeholder line
+# from the base configs/application.yaml.
+#
+# The community file-transfer factory (_real_file_transfer in
+# bootstrap/plugins/_plugin_core.py) selects the file_transfer_oss_aliyun
+# section when deploy_tenant == "aliyun".  Values below are strict
+# "${VAR}" placeholders (D-B): the community ConfigLoader raises KeyError at
+# load when a referenced variable is unset, so aliyun startup fails closed
+# before any service runs.
+
+user_config:
+  plugins:
+    file_transfer: "real"
+    session_file_url_projector: "aliyun_ack"
+
+  file_transfer_oss_aliyun:
+    endpoint: "${FT_OSS_ENDPOINT}"
+    external_endpoint: "${FT_OSS_EXTERNAL_ENDPOINT}"
+    bucket_name: "${FT_OSS_BUCKET}"
+    staging_root_path: "${FT_OSS_STAGING_ROOT}"
+    # Env-only AK/SK contract (D-D): the enterprise factory reads
+    # FT_OSS_ACCESS_KEY / FT_OSS_SECRET_KEY straight from the environment
+    # when this section is selected — secret_name carries no value and is
+    # not consulted on the aliyun path.
+    secret_name: ""
+
+  # Must be set to the BaaS domain the ACK gateway exposes (e.g. https://<baas-host>).
+  session_file_url_proxy:
+    proxy_base_url: "${FT_PROXY_BASE_URL}"

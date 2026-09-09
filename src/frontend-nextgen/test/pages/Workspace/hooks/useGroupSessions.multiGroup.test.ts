@@ -63,7 +63,7 @@ it('loads sessions for every expanded group, keyed by groupId (multi-group expan
   expect(result.current.sessionsByGroupId.g2.map((s) => s.title)).toEqual(['g2会话']);
 });
 
-it('expanding one more group later loads it too; re-expand reuses cache without refetch', async () => {
+it('expanding one more group later loads it too; re-expand refetches the latest list', async () => {
   const { result, rerender } = renderHook(({ expanded }: { expanded: string[] }) => useGroupSessions('g1', expanded), {
     initialProps: { expanded: ['g1'] },
   });
@@ -76,10 +76,11 @@ it('expanding one more group later loads it too; re-expand reuses cache without 
   expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalledWith('g2', 'me');
   const callsAfterExpand = gs.loadGroupSessionsOrBcs.mock.calls.length;
 
-  // 收起再展开 → 命中缓存，不再请求
+  // 收起再展开 → 展开 transition 必重拉最新列表（陈旧缓存可能残留当前角色已离开的会话）。
   rerender({ expanded: ['g1'] });
   rerender({ expanded: ['g1', 'g2'] });
-  expect(gs.loadGroupSessionsOrBcs.mock.calls.length).toBe(callsAfterExpand);
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs.mock.calls.length).toBe(callsAfterExpand + 1));
+  expect(gs.loadGroupSessionsOrBcs).toHaveBeenLastCalledWith('g2', 'me');
   expect(result.current.sessionsByGroupId.g2).toHaveLength(1);
 });
 

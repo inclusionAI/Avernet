@@ -10,12 +10,14 @@ use async_trait::async_trait;
 use bcs_collaboration_runtime::CollaborationRuntime;
 use bcs_collaboration_store::MemoryCollaborationStore;
 use bcs_domain::{
-    ActorKind, CollaborationDefinition, CollaborationDefinitionRef,
-    CollaborationRuntimeDefinition, Group, GroupMessageType, GroupStrategy, MessagePage,
-    MessageRole, NewMessage, OpeningMessage, Participant, ParticipantMode, ParticipantRole,
-    PersistedMessage, ResolvedParticipantBinding, RuntimeParticipantBinding, SessionStatus,
-    StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus, StateMachineTransition,
+    ActorKind, CollaborationDefinition, CollaborationDefinitionRef, CollaborationRuntimeDefinition,
+    Group, GroupMessageType, GroupStrategy, HumanMessageView, MessageAudience, MessagePage,
+    MessageRole, MessageViewScope, MessageVisibilityDomain, NewMessage, OpeningMessage,
+    Participant, ParticipantMode, ParticipantRole, PersistedMessage, ResolvedParticipantBinding,
+    RuntimeParticipantBinding, SessionStatus, StateMachineNodeStatus, StateMachineRun,
+    StateMachineRunStatus, StateMachineTransition,
 };
+use bcs_domain::{MessageOwnerFilter, MessageQuery, STATE_MACHINE_PANEL_MESSAGE_TYPE};
 use bcs_group::{GroupManagement, GroupManagementWithRuntimeCleanup, GroupStore};
 use bcs_group_store::MemoryGroupRepo;
 use bcs_message_store::MemoryMessageRepo;
@@ -25,24 +27,21 @@ use bcs_service_api::port::{EventRecordError, EventRecordFactoryPort, NewEvent};
 use bcs_service_api::{
     AuthenticatedHumanCaller, BotDeliveryCommand, BotDeliveryPort, BotDeliveryResult,
     BotDeliveryTarget, BotRunContext, BotRunContextPort, CallbackChannelConfig, CallbackConfig,
-    ChatEventState, ProviderRunTransport,
-    CollaborationEventRepoPort, CollaborationRuntimeError, CollaborationRuntimeService,
-    ConfigureGroupRuntimeCommand, DefinitionYamlSource, FrontendDeliveryCommand,
+    ChatEventState, CollaborationEventRepoPort, CollaborationRuntimeError,
+    CollaborationRuntimeService, ConfigureGroupRuntimeCommand, CreateStateMachineRerun,
+    CreateStateMachineRerunOutcome, DefinitionYamlSource, FrontendDeliveryCommand,
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget, GroupCoreService,
     GroupDeleteCommand, GroupManagementService, GroupRuntimeBindingRepoPort,
     HandleSessionHumanInputCommand, HandleSessionHumanInputOutcome, HumanInputReadyEvent,
     HumanResponseSource, HumanRunAccessCommand, JudgeDecision, JudgeEvaluatorPort, JudgeRequest,
-    ListPendingHumanNodesCommand,
-    PatchGroupCollaborationDefinitionCommand, RespondHumanNodeCommand, RespondHumanNodeOutcome,
-    CreateStateMachineRerun, CreateStateMachineRerunOutcome, RerunStateMachineCommand,
-    ServiceError, ServiceResult, ServiceSpec, SessionChannelDeliveryOutcome,
-    SessionChannelOutboundPort, SessionManagementService,
-    SessionStateMachinePermissionCommand, StartSessionStateMachineRunCommand,
-    StartStateMachineRunCommand, StateMachineDefinitionRepoPort, StateMachineNodeSubStatus,
-    StateMachineResultPublishCommand, StateMachineResultPublisherPort,
-    StateMachineRunAccessCommand, StateMachineRunRepoPort,
+    ListPendingHumanNodesCommand, PatchGroupCollaborationDefinitionCommand, ProviderRunTransport,
+    RerunStateMachineCommand, RespondHumanNodeCommand, RespondHumanNodeOutcome, ServiceError,
+    ServiceResult, ServiceSpec, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
+    SessionManagementService, SessionStateMachinePermissionCommand,
+    StartSessionStateMachineRunCommand, StartStateMachineRunCommand,
+    StateMachineDefinitionRepoPort, StateMachineNodeSubStatus, StateMachineResultPublishCommand,
+    StateMachineResultPublisherPort, StateMachineRunAccessCommand, StateMachineRunRepoPort,
 };
-use bcs_domain::{MessageOwnerFilter, MessageQuery, STATE_MACHINE_PANEL_MESSAGE_TYPE};
 use bcs_service_api::{CreateOrReactivateCommand, NewSessionParams, SessionKind};
 use bcs_session::{SessionManagementServiceImpl, SessionManagementWithRuntimeCleanup};
 use bcs_session_store::MemorySessionRepo;
@@ -73,10 +72,7 @@ impl MessageRepoPort for FailingAppendMessageRepo {
         ))
     }
 
-    async fn query_messages(
-        &self,
-        query: MessageQuery,
-    ) -> Result<MessagePage, MessageRepoError> {
+    async fn query_messages(&self, query: MessageQuery) -> Result<MessagePage, MessageRepoError> {
         self.inner.query_messages(query).await
     }
 
@@ -343,16 +339,82 @@ async fn current_session_permission_is_owned_by_chat_and_manager_group_driver() 
 }
 
 #[tokio::test]
+async fn legacy_chat_session_allows_one_shot_run_for_participant_human_view() {
+    let group_store = Arc::new(GroupStore::new());
+    let group = session_collaboration_group(GroupStrategy::Chat);
+    group_store
+        .upsert(group.clone())
+        .await
+        .expect("seed chat group");
+    let mut participants = group.participants.clone();
+    let mut human = Participant::human("human_player", ParticipantRole::Observer);
+    human.message_view_scope = MessageViewScope::Participant;
+    participants.push(human);
+    let sessions = test_sessions();
+    let session = sessions
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: group.id.clone(),
+            session_id: None,
+            params: NewSessionParams {
+                session_kind: SessionKind::Chat,
+                participants,
+                message_visibility_version: 0,
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("seed legacy chat session")
+        .session;
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let delivery = Arc::new(RecordingDelivery::default());
+    let runtime = test_runtime!(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        group_store,
+        sessions,
+        delivery.clone(),
+        noop_judge(),
+    );
+
+    let started = runtime
+        .start_session_state_machine_run(StartSessionStateMachineRunCommand {
+            session_id: session.id.clone(),
+            caller_bot_id: "driver-bot".to_string(),
+            definition_yaml: one_shot_authoring_yaml(),
+            participant_bindings: BTreeMap::from([(
+                "writer".to_string(),
+                RuntimeParticipantBinding {
+                    source: "manual".to_string(),
+                    bot_ids: vec!["worker-bot".to_string()],
+                    extensions: Default::default(),
+                },
+            )]),
+            opening_message: None,
+            input: Value::Null,
+            judge_available: false,
+        })
+        .await
+        .expect("message scope must not block a one-shot state-machine run");
+
+    assert_eq!(started.view.run.session_id, session.id);
+    assert!(
+        StateMachineRunRepoPort::get_run_by_session_id(&*store, &session.id)
+            .await
+            .expect("query started run")
+            .is_some(),
+    );
+}
+
+#[tokio::test]
 async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publishes_as_initiator() {
     let group_store = Arc::new(GroupStore::new());
     let mut group = test_group();
     group.opening_message = Some(OpeningMessage::Text(
         "Chat session opening {{bcs.session_id}}".to_string(),
     ));
-    group_store
-        .upsert(group.clone())
-        .await
-        .expect("seed group");
+    group_store.upsert(group.clone()).await.expect("seed group");
     let mut session_participants = group.participants.clone();
     session_participants.push(Participant {
         bot_uuid: "worker-bot".to_string(),
@@ -362,6 +424,7 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
         actor_kind: ActorKind::Bot,
         mode: Some(ParticipantMode::Auto),
         tags: Vec::new(),
+        message_view_scope: MessageViewScope::Full,
     });
     let sessions = test_sessions();
     let session = sessions
@@ -409,9 +472,7 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
                     extensions: Default::default(),
                 },
             )]),
-            opening_message: Some(OpeningMessage::Text(
-                "Invalid {{bcs.unknown}}".to_string(),
-            )),
+            opening_message: Some(OpeningMessage::Text("Invalid {{bcs.unknown}}".to_string())),
             input: Value::Null,
             judge_available: false,
         })
@@ -456,7 +517,10 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
         started.view.nodes[0].assignee_bot_id.as_deref(),
         Some("worker-bot")
     );
-    assert_eq!(delivery.commands.lock().await[0].target_bot_id(), "worker-bot");
+    assert_eq!(
+        delivery.commands.lock().await[0].target_bot_id(),
+        "worker-bot"
+    );
     assert!(
         GroupRuntimeBindingRepoPort::get(&*store, "group-1")
             .await
@@ -475,13 +539,11 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
         .is_none(),
         "one-shot inline YAML must not create a reusable global definition"
     );
-    let run_snapshot = StateMachineDefinitionRepoPort::get_run_snapshot(
-        &*store,
-        &started.view.run.run_id,
-    )
-    .await
-    .expect("read one-shot run snapshot")
-    .expect("one-shot run snapshot");
+    let run_snapshot =
+        StateMachineDefinitionRepoPort::get_run_snapshot(&*store, &started.view.run.run_id)
+            .await
+            .expect("read one-shot run snapshot")
+            .expect("one-shot run snapshot");
     assert_eq!(run_snapshot.id, started.view.run.definition_id);
 
     let frontend_commands = frontend_delivery.commands.lock().await;
@@ -508,6 +570,7 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
             owner_filter: MessageOwnerFilter::Any,
             time_range: None,
             visible_from_seq: None,
+            human_view: None,
         })
         .await
         .expect("query persisted panel history");
@@ -597,14 +660,89 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
 }
 
 #[tokio::test]
+async fn manager_worker_one_shot_human_input_consumes_the_assigned_human_chat_reply() {
+    let group_store = Arc::new(GroupStore::new());
+    let group = session_collaboration_group(GroupStrategy::ManagerWorker);
+    group_store
+        .upsert(group.clone())
+        .await
+        .expect("seed manager-worker group");
+    let mut participants = group.participants.clone();
+    let mut human = Participant::human("human_1001", ParticipantRole::Observer);
+    human.mode = Some(ParticipantMode::Present);
+    human.message_view_scope = MessageViewScope::Participant;
+    participants.push(human);
+    let sessions = test_sessions();
+    let session = sessions
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: group.id.clone(),
+            session_id: None,
+            params: NewSessionParams {
+                session_kind: SessionKind::Chat,
+                participants,
+                message_visibility_version: 1,
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("seed manager-worker session")
+        .session;
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let runtime = test_runtime!(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group_store,
+        sessions,
+        Arc::new(RecordingDelivery::default()),
+        noop_judge(),
+    )
+    .with_message_repo(Arc::new(MemoryMessageRepo::new()))
+    .with_result_publisher(Arc::new(RecordingResultPublisher::default()));
+
+    let started = runtime
+        .start_session_state_machine_run(StartSessionStateMachineRunCommand {
+            session_id: session.id.clone(),
+            caller_bot_id: "driver-bot".to_string(),
+            definition_yaml: one_shot_human_input_authoring_yaml(),
+            participant_bindings: BTreeMap::new(),
+            opening_message: None,
+            input: Value::Null,
+            judge_available: false,
+        })
+        .await
+        .expect("start one-shot HumanInput run");
+    assert_eq!(
+        started.view.nodes[0].status,
+        StateMachineNodeStatus::Running
+    );
+
+    let outcome = runtime
+        .handle_session_human_input(HandleSessionHumanInputCommand {
+            group_id: group.id,
+            session_id: Some(session.id),
+            caller_actor_id: "human_1001".to_string(),
+            content: "确认".to_string(),
+            source: HumanResponseSource::Http,
+        })
+        .await
+        .expect("route manager-worker chat reply to one-shot HumanInput");
+    let HandleSessionHumanInputOutcome::Consumed { response } = outcome else {
+        panic!("assigned Human reply must be consumed by the one-shot run");
+    };
+    assert_eq!(response.node.status, StateMachineNodeStatus::Completed);
+    assert_eq!(response.node.artifact_text.as_deref(), Some("确认"));
+    assert_eq!(response.node.responded_by.as_deref(), Some("human_1001"));
+    assert_eq!(response.run.status, StateMachineRunStatus::Completed);
+}
+
+#[tokio::test]
 async fn one_shot_result_publication_failure_marks_run_failed_and_allows_rerun() {
     let group_store = Arc::new(GroupStore::new());
     let mut group = test_group();
     group.label = Some("Original Group".to_string());
-    group_store
-        .upsert(group.clone())
-        .await
-        .expect("seed group");
+    group_store.upsert(group.clone()).await.expect("seed group");
     let mut session_participants = group.participants.clone();
     session_participants.push(Participant {
         bot_uuid: "worker-bot".to_string(),
@@ -614,6 +752,7 @@ async fn one_shot_result_publication_failure_marks_run_failed_and_allows_rerun()
         actor_kind: ActorKind::Bot,
         mode: Some(ParticipantMode::Auto),
         tags: Vec::new(),
+        message_view_scope: MessageViewScope::Full,
     });
     let sessions = test_sessions();
     let session = sessions
@@ -818,6 +957,7 @@ async fn one_shot_result_publication_failure_marks_run_failed_and_allows_rerun()
             owner_filter: MessageOwnerFilter::Any,
             time_range: None,
             visible_from_seq: None,
+            human_view: None,
         })
         .await
         .expect("query custom panel history");
@@ -866,10 +1006,12 @@ async fn one_shot_result_publication_failure_marks_run_failed_and_allows_rerun()
         Some(rerun_panel),
         "an idempotent rerun must publish the already persisted opening message"
     );
-    assert!(!repeated_event["payload"]["content"]
-        .as_str()
-        .unwrap()
-        .contains("Renamed Group"));
+    assert!(
+        !repeated_event["payload"]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Renamed Group")
+    );
     drop(frontend_commands);
 
     let rerun_delivery_run_id = delivery.commands.lock().await[1].run_id.clone();
@@ -944,7 +1086,10 @@ async fn one_shot_result_publication_failure_marks_run_failed_and_allows_rerun()
     assert!(!recovered.created);
     assert_eq!(recovered.view.run.run_id, materialized.run_id);
     assert_eq!(recovered.view.run.status, StateMachineRunStatus::Running);
-    assert_eq!(recovered.view.nodes[0].status, StateMachineNodeStatus::Running);
+    assert_eq!(
+        recovered.view.nodes[0].status,
+        StateMachineNodeStatus::Running
+    );
     assert_eq!(delivery.commands.lock().await.len(), 3);
     let recovered_history = runtime
         .get_state_machine_session_history(&session.id, 20, None)
@@ -976,8 +1121,8 @@ async fn human_input_without_authenticated_or_present_human_is_invalid_request()
         store.clone(),
         store.clone(),
         store,
-        group,
-        sessions,
+        group.clone(),
+        sessions.clone(),
         delivery.clone(),
         noop_judge(),
     );
@@ -1195,17 +1340,21 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
     let channel_outbound = Arc::new(RecordingSessionChannelOutbound::default());
+    let frontend_delivery = Arc::new(RecordingFrontendDelivery::default());
+    let message_repo = Arc::new(MemoryMessageRepo::new());
     let runtime = test_runtime!(
         store.clone(),
         store.clone(),
         store.clone(),
         store,
         group,
-        sessions,
+        sessions.clone(),
         delivery.clone(),
         noop_judge(),
     )
-    .with_session_channel_outbound(channel_outbound.clone());
+    .with_session_channel_outbound(channel_outbound.clone())
+    .with_frontend_delivery(frontend_delivery.clone())
+    .with_message_repo(message_repo.clone());
 
     let started = runtime
         .start_state_machine_run(StartStateMachineRunCommand {
@@ -1226,6 +1375,22 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
         .await
         .expect("start human run");
 
+    sessions
+        .add_participant(
+            &started.view.run.session_id,
+            Participant::human("human_2002", ParticipantRole::Observer),
+        )
+        .await
+        .expect("add a Human after prompt activation");
+    sessions
+        .update_participant_message_view_scope(
+            &started.view.run.session_id,
+            "human_1001",
+            MessageViewScope::Participant,
+        )
+        .await
+        .expect("participant scope is a message projection preference");
+
     let unauthenticated_read = runtime
         .get_state_machine_run_with_access(StateMachineRunAccessCommand {
             run_id: started.view.run.run_id.clone(),
@@ -1245,6 +1410,19 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
     );
     assert!(started.view.nodes[0].assignee_bot_id.is_none());
     assert!(started.view.nodes[0].delivery_request_id.is_none());
+    let frontend_commands = frontend_delivery.commands.lock().await;
+    assert!(
+        frontend_commands
+            .iter()
+            .all(|command| !matches!(command.audience, Some(MessageAudience::Directed { .. }))),
+        "HumanInput must remain available through StateMachine APIs without adding a new main-stream event for full viewers",
+    );
+    assert!(frontend_commands.iter().any(|command| {
+        command.visibility_domain == MessageVisibilityDomain::StateMachine
+            && command.audience == Some(MessageAudience::Public)
+            && command.event_json.contains("bcsPanel.StateMachineRunView")
+    }));
+    drop(frontend_commands);
     let channel_events = channel_outbound.events.lock().await;
     assert_eq!(channel_events.len(), 1);
     assert_eq!(channel_events[0].run_id, started.view.run.run_id);
@@ -1370,12 +1548,62 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
         .await
         .expect("human history")
         .expect("history result");
+    assert!(history.messages.iter().all(|message| {
+        message.sender != "bcs_state_machine" || message.content != "请用自然语言给出你的意见。"
+    }));
     let human_message = history
         .messages
         .iter()
         .find(|message| message.sender == "human_1001")
         .expect("human history message");
     assert_eq!(human_message.message_type, GroupMessageType::Bot);
+    let participant_history = runtime
+        .get_state_machine_session_history_for_view(
+            &run.session_id,
+            20,
+            None,
+            HumanMessageView {
+                actor_id: "human_1001".to_string(),
+                scope: MessageViewScope::Participant,
+                allow_legacy_unclassified_chat: false,
+            },
+        )
+        .await
+        .expect("assigned participant history")
+        .expect("assigned participant history result");
+    assert!(
+        participant_history
+            .messages
+            .iter()
+            .any(|message| message.id.ends_with(":000-panel")),
+        "participant history keeps the public panel control message",
+    );
+    assert!(participant_history.messages.iter().any(|message| {
+        message.sender == "bcs_state_machine" && message.content == "请用自然语言给出你的意见。"
+    }));
+    assert!(
+        participant_history
+            .messages
+            .iter()
+            .any(|message| message.sender == "human_1001")
+    );
+    let other_participant_history = runtime
+        .get_state_machine_session_history_for_view(
+            &run.session_id,
+            20,
+            None,
+            HumanMessageView {
+                actor_id: "human_2002".to_string(),
+                scope: MessageViewScope::Participant,
+                allow_legacy_unclassified_chat: false,
+            },
+        )
+        .await
+        .expect("other participant history")
+        .expect("other participant history result");
+    assert!(other_participant_history.messages.iter().all(|message| {
+        message.sender != "human_1001" && message.content != "请用自然语言给出你的意见。"
+    }));
     assert_eq!(human_message.role, MessageRole::User);
     assert_eq!(human_message.bot_name.as_deref(), Some("Reviewer"));
     let no_longer_pending = runtime
@@ -2320,14 +2548,11 @@ async fn timeout_scanner_skips_invalid_candidate_and_processes_later_run() {
     poison_run.definition_id = "invalid_snapshot".to_string();
     poison_run.created_at = 1;
     poison_run.updated_at = 1;
-    let mut poison_node = StateMachineRunRepoPort::get_node_run(
-        &*store,
-        &valid.view.run.run_id,
-        "answer",
-    )
-    .await
-    .expect("read valid node")
-    .expect("valid node");
+    let mut poison_node =
+        StateMachineRunRepoPort::get_node_run(&*store, &valid.view.run.run_id, "answer")
+            .await
+            .expect("read valid node")
+            .expect("valid node");
     poison_node.run_id = poison_run.run_id.clone();
     poison_node.timeout_deadline_ms = Some(1);
     StateMachineRunRepoPort::create_run(&*store, poison_run.clone(), vec![poison_node])
@@ -2674,14 +2899,8 @@ async fn state_machine_bot_delivery_registers_message_flow_run_context() {
     assert!(context.group_id.is_empty());
     assert!(context.bcs_session_id.is_none());
     assert!(!context.terminal);
-    assert!(
-        context.deadline_ms
-            >= before_start_ms.saturating_add(CONFIGURED_TIMEOUT_MS)
-    );
-    assert!(
-        context.deadline_ms
-            <= after_start_ms.saturating_add(CONFIGURED_TIMEOUT_MS)
-    );
+    assert!(context.deadline_ms >= before_start_ms.saturating_add(CONFIGURED_TIMEOUT_MS));
+    assert!(context.deadline_ms <= after_start_ms.saturating_add(CONFIGURED_TIMEOUT_MS));
 }
 
 #[tokio::test]
@@ -3119,7 +3338,7 @@ async fn deleting_session_aborts_all_active_state_machine_runs() {
         store.clone(),
         store.clone(),
         store.clone(),
-        group,
+        group.clone(),
         sessions.clone(),
         Arc::new(RecordingDelivery::default()),
         noop_judge(),
@@ -3257,7 +3476,10 @@ async fn retrying_deleted_group_cleanup_aborts_orphaned_active_runs() {
         })
         .await
         .expect("start run");
-    group.delete("group-1").await.expect("simulate partial delete");
+    group
+        .delete("group-1")
+        .await
+        .expect("simulate partial delete");
     let group_management = Arc::new(GroupManagement::with_defaults(
         group,
         Arc::new(NoopBotRegistryCoreService),
@@ -3423,7 +3645,11 @@ async fn configure_im_definition_defers_channel_validation_until_run_start() {
         })
         .await
         .expect_err("run start must still enforce the active binding");
-    assert!(error.to_string().contains("no active dingtalk ChannelBinding"));
+    assert!(
+        error
+            .to_string()
+            .contains("no active dingtalk ChannelBinding")
+    );
     assert_eq!(
         channel_outbound.validation_calls.lock().await.as_slice(),
         &[("group-1".to_string(), "dingtalk".to_string())]
@@ -3716,6 +3942,7 @@ async fn start_run_from_group_binding_does_not_upsert_persisted_definition() {
             owner_filter: MessageOwnerFilter::Any,
             time_range: None,
             visible_from_seq: None,
+            human_view: None,
         })
         .await
         .expect("query generic run panel anchors");
@@ -3786,6 +4013,7 @@ async fn custom_opening_message_is_rendered_once_and_reused_from_history() {
             owner_filter: MessageOwnerFilter::Any,
             time_range: None,
             visible_from_seq: None,
+            human_view: None,
         })
         .await
         .expect("query opening message");
@@ -3827,6 +4055,7 @@ async fn custom_opening_message_is_rendered_once_and_reused_from_history() {
             owner_filter: MessageOwnerFilter::Any,
             time_range: None,
             visible_from_seq: None,
+            human_view: None,
         })
         .await
         .expect("query next opening message");
@@ -3870,7 +4099,11 @@ async fn opening_message_persistence_failure_fails_run_before_node_dispatch() {
         })
         .await
         .expect_err("opening message persistence failure must abort startup");
-    assert!(error.to_string().contains("panel history persistence failed"));
+    assert!(
+        error
+            .to_string()
+            .contains("panel history persistence failed")
+    );
     assert!(delivery.commands.lock().await.is_empty());
 
     let session = sessions
@@ -3959,6 +4192,7 @@ async fn start_run_rejects_multi_bot_slot_with_current_single_assignee_runtime()
         actor_kind: ActorKind::Bot,
         mode: Some(ParticipantMode::Auto),
         tags: Vec::new(),
+        message_view_scope: MessageViewScope::Full,
     });
     group.upsert(seeded_group).await.expect("seed group");
     let sessions = test_sessions();
@@ -4170,14 +4404,9 @@ async fn complete_transitions_support_fan_out_and_implicit_all_join() {
         .filter(|event| event.event_type == "state_machine.node.started")
         .map(|event| {
             (
-                event.data["node_id"]
-                    .as_str()
-                    .expect("node_id")
-                    .to_string(),
-                serde_json::from_value::<Vec<String>>(
-                    event.data["predecessor_node_ids"].clone(),
-                )
-                .expect("predecessor_node_ids"),
+                event.data["node_id"].as_str().expect("node_id").to_string(),
+                serde_json::from_value::<Vec<String>>(event.data["predecessor_node_ids"].clone())
+                    .expect("predecessor_node_ids"),
             )
         })
         .collect::<BTreeMap<_, _>>();
@@ -4921,6 +5150,7 @@ fn test_group() -> Group {
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
             tags: Vec::new(),
+            message_view_scope: MessageViewScope::Full,
         }],
     )
 }
@@ -4941,6 +5171,7 @@ fn session_collaboration_group(strategy: GroupStrategy) -> Group {
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::Auto),
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             },
             Participant {
                 bot_uuid: "worker-bot".to_string(),
@@ -4955,6 +5186,7 @@ fn session_collaboration_group(strategy: GroupStrategy) -> Group {
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::Auto),
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             },
         ],
     );
@@ -4988,6 +5220,27 @@ runtime:
           binding: writer
         instruction: Answer the current question.
         final_output: true
+"#
+    .to_string()
+}
+
+fn one_shot_human_input_authoring_yaml() -> String {
+    r#"
+name: One Shot Human Review
+participants:
+  driver:
+    required: false
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      review:
+        kind: human_input
+        display_name: Review
+        instruction: 请在前端给出你的意见。
+        node_timeout_ms: 60000
 "#
     .to_string()
 }

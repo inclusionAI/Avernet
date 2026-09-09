@@ -304,6 +304,15 @@ class PoolMappingApplyMode(StrEnum):
     BEST_EFFORT = "BEST_EFFORT"
 
 
+@dataclass(frozen=True, slots=True)
+class PoolMappingApplyRequest:
+    """One complete steady-state logical Skill mapping snapshot."""
+
+    mappings: tuple[PoolSkillMappingIntent, ...]
+    retired_mappings: tuple[PoolSkillMappingIntent, ...]
+    source_layout: PoolMappingSourceLayout
+
+
 class PoolMappingProjectionStatus(StrEnum):
     CONVERGED = "CONVERGED"
     PENDING = "PENDING"
@@ -318,9 +327,10 @@ class PoolMappingItemResult:
     code: str | None = None
     retryable: bool = False
     action: str = "APPLY"
+    mapping: dict[str, str] | None = None
 
     @classmethod
-    def from_data(cls, data: dict[str, Any]) -> "PoolMappingItemResult":
+    def from_data(cls, data: dict[str, Any]) -> PoolMappingItemResult:
         raw_status = str(data.get("status", PoolMappingProjectionStatus.DEGRADED))
         try:
             status = PoolMappingProjectionStatus(raw_status)
@@ -333,6 +343,11 @@ class PoolMappingItemResult:
             code=str(data["code"]) if data.get("code") is not None else None,
             retryable=bool(data.get("retryable")),
             action=str(data.get("action") or "APPLY"),
+            mapping=(
+                {str(key): str(value) for key, value in data["mapping"].items()}
+                if isinstance(data.get("mapping"), dict)
+                else None
+            ),
         )
 
     def to_data(self) -> dict[str, Any]:
@@ -346,7 +361,25 @@ class PoolMappingItemResult:
             data["source"] = self.source
         if self.code is not None:
             data["code"] = self.code
+        if self.mapping is not None:
+            data["mapping"] = self.mapping
         return data
+
+
+@dataclass(frozen=True, slots=True)
+class PoolMappingApplyResult:
+    status: PoolMappingProjectionStatus
+    items: tuple[PoolMappingItemResult, ...]
+    issues: tuple[PoolMappingItemResult, ...] = ()
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+    def to_data(self) -> dict[str, Any]:
+        return {
+            "status": self.status.value,
+            "items": [item.to_data() for item in self.items],
+            "issues": [item.to_data() for item in self.issues],
+            "evidence": self.evidence,
+        }
 
 
 @dataclass
@@ -399,10 +432,12 @@ __all__ = [
     "PoolLayoutProbeResult",
     "PoolLayoutProbeStatus",
     "PoolLayoutRollbackRequest",
-    "PoolMappingPublishResult",
     "PoolMappingApplyMode",
+    "PoolMappingApplyRequest",
+    "PoolMappingApplyResult",
     "PoolMappingItemResult",
     "PoolMappingProjectionStatus",
+    "PoolMappingPublishResult",
     "PoolMappingSourceLayout",
     "PoolMappingVerificationResult",
     "PoolQuarantineCleanupRequest",

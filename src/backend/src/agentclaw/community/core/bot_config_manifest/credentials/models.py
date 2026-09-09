@@ -35,13 +35,18 @@ AutoIncrementBigInteger = BigInteger().with_variant(Integer, "sqlite")
 
 
 class CredentialType(StrEnum):
-    """The presentation mechanism carrying the secret (W3, #1471).
+    """The mechanism that carries the secret to the source (W3, #1471).
 
-    Members, not bare strings: 'header' is the one implemented mechanism
-    and the only value a write can store; 'oss_aksk'/'basic' are reserved
-    containers for future mechanisms — kept in the vocabulary so a caller
-    sending one is refused *by name* ("reserved") rather than as an
-    unknown value, per the one-endpoint-one-body discrimination.
+    Members, not bare strings, so a caller sending an unimplemented one is
+    refused *by name* ("reserved") rather than as an unknown value.
+
+    Two are implemented. ``header`` **presents** an opaque secret — the value
+    itself travels on the wire under a header the caller names. ``oss_aksk``
+    **signs**: the secret key never leaves the platform, and what travels is a
+    signature computed from it over the request. That difference is why the two
+    carry different fields and why the key id, unlike a header secret, is
+    readable back — it is an identifier that rotation cannot be operated
+    without seeing.
     """
 
     HEADER = "header"
@@ -49,8 +54,31 @@ class CredentialType(StrEnum):
     BASIC = "basic"
 
 
-#: The mechanisms with no implementation yet — refused at write.
-RESERVED_TYPES = (CredentialType.OSS_AKSK, CredentialType.BASIC)
+#: The mechanisms with no implementation yet — refused at write. ``oss_aksk``
+#: has left this tuple: it is the object store's real road now.
+RESERVED_TYPES = (CredentialType.BASIC,)
+
+#: What each implemented mechanism requires, and what it may not carry. Read by
+#: the service rather than re-derived per branch, so "which fields belong to
+#: which mechanism" has one answer — the same discipline the source matrix
+#: applies to categories and protocols.
+REQUIRED_FIELDS_BY_TYPE: dict[CredentialType, frozenset[str]] = {
+    CredentialType.HEADER: frozenset({"header_name"}),
+    # ``endpoint`` joins ``access_key_id`` as required: it is issued with the
+    # key pair and belongs to the same trust boundary. Keeping it here rather
+    # than on the source is what makes the host a property of the credential
+    # instead of something a tenant's document chooses.
+    CredentialType.OSS_AKSK: frozenset({"access_key_id", "endpoint"}),
+}
+
+#: Fields that belong to exactly one mechanism. Sending one on another is
+#: refused rather than ignored: a caller who writes ``access_key_id`` on a
+#: header credential believes they pointed it at an object store, and silence
+#: would let them believe it until a fetch failed.
+EXCLUSIVE_FIELDS_BY_TYPE: dict[CredentialType, frozenset[str]] = {
+    CredentialType.HEADER: frozenset({"header_name"}),
+    CredentialType.OSS_AKSK: frozenset({"access_key_id", "region", "endpoint"}),
+}
 
 
 class SourceCredentialRecord(BaseModel):
@@ -64,7 +92,21 @@ class SourceCredentialRecord(BaseModel):
     id: int | None = None
     name: str
     credential_type: CredentialType = CredentialType.HEADER
-    header_name: str
+    #: ``None`` on a mechanism that presents no header at all — an
+    #: ``oss_aksk`` credential is handed to an object-store client rather than
+    #: put on a request, so there is nothing the caller chose to report back.
+    header_name: str | None = None
+    #: ``oss_aksk`` only. Present in every read: an identifier, not a secret,
+    #: and rotation is unoperable without it. Its partner
+    #: (``secret_ciphertext``) still has no public representation at all.
+    access_key_id: str | None = None
+    #: ``oss_aksk`` only. Passed to the object-store client; ``None`` lets the
+    #: client take its own default.
+    region: str | None = None
+    #: ``oss_aksk`` only. The object store this credential is for. Readable
+    #: back for the same reason ``access_key_id`` is — it is an address, not a
+    #: secret, and rotation cannot be operated blind.
+    endpoint: str | None = None
     allowed_prefixes: list[str]
     has_secret: bool = True
     #: The owning application (registry id). Rotation and delete are its
@@ -85,7 +127,10 @@ class SourceCredentialRow(BaseModel):
     id: int | None = None
     name: str
     credential_type: CredentialType
-    header_name: str
+    header_name: str = ""
+    access_key_id: str | None = None
+    region: str | None = None
+    endpoint: str | None = None
     allowed_prefixes: str  # JSON array as stored
     secret_ciphertext: str
     #: Set at insert, immutable after: the application whose PUT created
@@ -110,6 +155,12 @@ class SourceCredentialModel(Base):
     name = Column(String(128), nullable=False)
     credential_type = Column(String(32), nullable=False)
     header_name = Column(String(256), nullable=False)
+    #: ``oss_aksk`` only, nullable and never backfilled: on a ``header`` row
+    #: both of these describe nothing, and a defaulted value would read as
+    #: configuration while governing nothing.
+    access_key_id = Column(String(256), nullable=True)
+    region = Column(String(64), nullable=True)
+    endpoint = Column(String(512), nullable=True)
     #: JSON array of absolute https prefixes, validated at write time.
     allowed_prefixes = Column(Text, nullable=False)
     #: ``enc:v1:<AES-GCM ciphertext>`` (or plaintext under a non fail-closed
@@ -142,6 +193,9 @@ class SourceCredentialModel(Base):
             name=self.name,
             credential_type=self.credential_type,
             header_name=self.header_name,
+            access_key_id=self.access_key_id,
+            region=self.region,
+            endpoint=self.endpoint,
             allowed_prefixes=self.allowed_prefixes,
             secret_ciphertext=self.secret_ciphertext,
             owner_app_id=self.owner_app_id,

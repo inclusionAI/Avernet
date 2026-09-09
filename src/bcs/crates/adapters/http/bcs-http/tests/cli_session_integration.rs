@@ -60,6 +60,7 @@ impl SessionManagementService for MockSessions {
             error_message: None,
             callback_status: None,
             activation_count: 1,
+            message_visibility_version: cmd.params.message_visibility_version,
             caller_principal: cmd.params.caller_principal.clone(),
             created_by: cmd.params.created_by.clone(),
             current_msg_seq: 0,

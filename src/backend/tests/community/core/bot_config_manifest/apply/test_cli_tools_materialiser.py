@@ -7,6 +7,8 @@ declaration for the same reason.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import hashlib
 import inspect
 
@@ -79,7 +81,7 @@ def _service(*, content=_TOOL, digest=_DIGEST, delivery=None):
 
 
 def _entry(**kwargs) -> dict:
-    base = {"name": "mycli", "from": "https://x/mycli", "digest": _DIGEST}
+    base = {"name": "mycli", "source": "https://x/mycli", "digest": _DIGEST}
     base.update(kwargs)
     return base
 
@@ -148,7 +150,7 @@ async def test_a_placeholder_in_a_source_is_substituted_before_the_fetch() -> No
     service, _, _, fetcher = _service()
     mat = CliToolsMaterialiser(service)
     await _apply(
-        mat, _ctx(), [_entry(**{"from": "https://x/${BOT_ENGINE_TYPE}/mycli"})]
+        mat, _ctx(), [_entry(**{"source": "https://x/${BOT_ENGINE_TYPE}/mycli"})]
     )
     assert fetcher.calls[0]["source_url"] == "https://x/openclaw/mycli"
 
@@ -308,3 +310,184 @@ def test_no_materialiser_names_an_engine() -> None:
     source = inspect.getsource(inspect.getmodule(CliToolsMaterialiser))
     for engine in ("openclaw", "teclaw", "aicoding", "hermes", "claude_code"):
         assert engine not in source, f"the materialiser names {engine!r}"
+
+
+# ── cli_tools over a named git source (defect D5) ──────────────────────────
+#
+# The one construct that used to pass `PUT` and fail at apply — the "accepted
+# means appliable" rule broken by the category that most needed it. Two halves
+# had to be wrong together: the schema charged the object-store digest rule to
+# a source it classified as `named`, and the materialiser put that `from` NAME
+# on the wire as though it were a URL.
+
+
+_REPO = "https://code.example.com/team/tools.git"
+
+
+def _git_ctx(**kwargs) -> ApplyContext:
+    """An apply context whose session declares one git source named ``tools``."""
+    session = SimpleNamespace(
+        sources={
+            "tools": {
+                "protocol": "git",
+                "url": _REPO,
+                "ref": "v1.0.0",
+                "subpath": "bin",
+            }
+        }
+    )
+    return _ctx(source_session=session, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_a_tool_from_a_named_git_source_applies_without_a_digest() -> None:
+    """The commit SHA is the pin, so no `digest` is asked for — and the entry
+    reaches the wire as the *repository*, not as the string "tools"."""
+    service, repo, _, fetcher = _service()
+    mat = CliToolsMaterialiser(service)
+    resolved, _, results = await _apply(
+        mat, _git_ctx(), [{"name": "mycli", "from": "tools", "subpath": "mycli"}]
+    )
+    assert resolved.ok, resolved.failures
+    assert [r.reason for r in results] == [None]
+    assert fetcher.calls[0]["source_url"] == _REPO
+    assert fetcher.calls[0].get("git") is True
+    # The source's subpath and the entry's composed, so one declared source can
+    # serve more than one tool out of one repository.
+    assert fetcher.filed[0]["entry_identity"] == "mycli"
+
+
+@pytest.mark.asyncio
+async def test_the_digest_belt_still_refuses_an_unpinned_object_store_tool() -> None:
+    """Loosening git must not loosen the object store: the belt behind the
+    schema keys on the same axis the schema does, not on a blanket."""
+    service, _, _, _ = _service()
+    mat = CliToolsMaterialiser(service)
+    resolved = await mat.resolve(
+        _git_ctx(), [{"name": "mycli", "source": "https://x/mycli"}]
+    )
+    assert not resolved.ok
+    assert "requires a 'digest'" in resolved.failures[0].reason
+
+
+@pytest.mark.asyncio
+async def test_an_undeclared_from_fails_the_entry_with_the_name() -> None:
+    """And when the source really is missing, the failure says so — rather
+    than fetching the name as a URL and failing somewhere unrecognisable."""
+    service, _, _, _ = _service()
+    mat = CliToolsMaterialiser(service)
+    _, _, results = await _apply(
+        mat, _git_ctx(), [{"name": "mycli", "from": "nowhere", "digest": _DIGEST}]
+    )
+    assert results[0].outcome is EntryOutcome.FAILED
+    assert "nowhere" in results[0].reason
+
+
+@pytest.mark.asyncio
+async def test_a_git_sourced_tool_never_plans_unchanged() -> None:
+    """Convergence is ``(digest, subpath)``, and a git source has no digest.
+
+    Without this, every git-sourced tool at one subpath would compare equal to
+    every other — so a ref that moved to a new commit would plan ``unchanged``
+    and the old binary would survive, which is the single outcome convergence
+    exists to prevent. An unpinned declaration re-acquires every apply instead:
+    the same conservative answer ``resources`` gives, for the same reason.
+    """
+    service, _, _, _ = _service()
+    mat = CliToolsMaterialiser(service)
+    ctx = _git_ctx()
+    entries = [{"name": "mycli", "from": "tools", "subpath": "mycli"}]
+    await _apply(mat, ctx, entries)
+    _, plan, _ = await _apply(mat, ctx, entries)
+    assert [p.outcome for p in plan.entries] != [EntryOutcome.UNCHANGED.value]
+    assert not plan.is_noop
+
+
+@pytest.mark.asyncio
+async def test_a_pinned_tool_still_plans_unchanged_on_a_repeat_apply() -> None:
+    """And the object-store road keeps its fast path: re-applying an unchanged
+    pin must not redeliver a binary that can be 200 MiB."""
+    service, _, _, _ = _service()
+    mat = CliToolsMaterialiser(service)
+    ctx = _ctx()
+    await _apply(mat, ctx, [_entry()])
+    _, plan, _ = await _apply(mat, ctx, [_entry()])
+    assert plan.is_noop
+
+
+@pytest.mark.asyncio
+async def test_two_revisions_of_a_git_tool_do_not_share_one_object_key() -> None:
+    """The review's P1, closed.
+
+    The store's key embeds a fingerprint of the digest precisely so a new
+    version never overwrites the object a surviving row still points at. A
+    git-sourced declaration carries no digest — the commit SHA is its pin — and
+    an empty digest fingerprints to the constant "0", so every revision of one
+    tool landed on one key. A rejected delivery would then roll the row back to
+    bytes that had already been overwritten, publishing a binary the engine
+    refused. The acquired bytes are hashed instead.
+    """
+    first, oss, _, _ = _service(content=_TOOL)
+    mat = CliToolsMaterialiser(first)
+    entries = [{"name": "mycli", "from": "tools", "subpath": "mycli"}]
+    await _apply(mat, _git_ctx(), entries)
+
+    other = elf(payload=b"a-different-build".ljust(64, b"\x00"))
+    second, _, _, _ = _service(content=other)
+    # Same store, so the two revisions compete for the same keys if they can.
+    second._store = first._store
+    await _apply(CliToolsMaterialiser(second), _git_ctx(), entries)
+
+    keys = [k for k in first._store._oss.puts if "mycli" in k]
+    assert len(keys) == 2
+    assert keys[0] != keys[1], "two different binaries wrote to one object key"
+    assert not any(k.endswith(".0") for k in keys), (
+        "an empty digest fingerprinted to the constant key"
+    )
+    # And both objects survive, so a rollback has real bytes to point back at.
+    assert len({first._store._oss.objects[k] for k in keys}) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_git_tool_records_a_real_content_digest() -> None:
+    """The row's digest is what convergence, the store key and the audit all
+    read. Empty is not a value any of them can use."""
+    service, repo, _, _ = _service()
+    await _apply(
+        CliToolsMaterialiser(service),
+        _git_ctx(),
+        [{"name": "mycli", "from": "tools", "subpath": "mycli"}],
+    )
+    row = service.get(context_for(_git_ctx()), "mycli")
+    assert row is not None
+    assert row.digest.startswith("sha256:")
+    assert len(row.digest) == len("sha256:") + 64
+
+
+@pytest.mark.asyncio
+async def test_an_inline_git_source_is_exempt_from_the_digest_belt_too() -> None:
+    """The other spelling of the same source.
+
+    `from:` a git source and an inline `source: {protocol: git, ...}` are one
+    source declared two ways, so the digest exemption has to reach both — which
+    is the whole of D5, and the named road alone would not have proved it.
+    """
+    service, _, _, fetcher = _service()
+    mat = CliToolsMaterialiser(service)
+    resolved, _, results = await _apply(
+        mat,
+        _ctx(source_session=SimpleNamespace(sources={})),
+        [{
+            "name": "mycli",
+            "source": {
+                "protocol": "git",
+                "url": "https://code.example.com/team/tools.git",
+                "ref": "v1.0.0",
+            },
+            "subpath": "bin/mycli",
+        }],
+    )
+    assert resolved.ok, resolved.failures
+    assert [r.reason for r in results] == [None]
+    assert fetcher.calls[0]["source_url"] == "https://code.example.com/team/tools.git"
+    assert fetcher.calls[0].get("git") is True

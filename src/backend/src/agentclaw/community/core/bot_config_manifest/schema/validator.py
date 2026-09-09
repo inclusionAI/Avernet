@@ -264,7 +264,7 @@ def _validate_sources(ctx: Context, sources: Any) -> None:
             # take substitutions too, and a typo there fails the same way.
             for key, value in source.items():
                 check_placeholders(ctx, f"sources.{name}.{key}", value)
-        validate_named_source(ctx, f"sources.{name}", source)
+        validate_named_source(ctx, f"sources.{name}", name, source)
 
 
 def _validate_manifest(ctx: Context, manifest: Any) -> None:

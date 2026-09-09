@@ -72,14 +72,26 @@ manifest:
         # Who I am
         Reads ${{HOME}} literally — inline content is not scanned.
     - type: RULES.md
-      source: https://cdn.example.com/bots/${{BOT_ENV}}/rules.md
+      source:
+        protocol: oss
+        bucket: cdn
+        key: bots/${{BOT_ENV}}/rules.md
+        auth: oss-cred
   skills:
     - name: quality-check
-      source: https://cdn.example.com/skills/qc.zip
+      source:
+        protocol: oss
+        bucket: cdn
+        key: skills/qc.zip
+        auth: oss-cred
       digest: "{_DIGEST}"
   resources:
     - path: data/kb/
-      source: https://cdn.example.com/kb.zip
+      source:
+        protocol: oss
+        bucket: cdn
+        key: kb.zip
+        auth: oss-cred
       unpack: zip
       strip_components: 1
 script:
@@ -141,7 +153,11 @@ def test_two_sources_on_one_entry_are_refused():
 manifest:
   skills:
     - name: qc
-      source: https://cdn.example.com/qc.zip
+      source:
+        protocol: oss
+        bucket: cdn
+        key: qc.zip
+        auth: oss-cred
       content: "inline"
       digest: "{_DIGEST}"
 """
@@ -173,7 +189,8 @@ def test_named_and_git_sources_are_accepted_for_the_w7_categories():
     _accept("""schema_version: 1
 sources:
   content:
-    git: https://code.example.com/team/content.git
+    protocol: git
+    url: https://code.example.com/team/content.git
     ref: v1.2.0
 manifest:
   identity:
@@ -185,38 +202,80 @@ manifest:
   identity:
     - type: SOUL.md
       source:
-        git: https://code.example.com/team/content.git
+        protocol: git
+        url: https://code.example.com/team/content.git
         ref: v1.2.0
         subpath: soul.md
 """)
 
 
-def test_named_and_git_sources_are_refused_for_resources_entries():
-    """The v1 (category, form) narrowing, at PUT: the resources materialiser
-    is still on the URL road W6 shipped, so a resources entry naming a named
-    or git source is refused with a reason that names the category — never
-    a runtime accident the follow-up would have met as a misleading error."""
-    document = """schema_version: 1
+def test_resources_accepts_named_and_git_sources():
+    """Defect D1, closed. ``resources`` was the one fetching category locked to
+    inline sources: a ``from:`` was refused even when it named a plain URL
+    source, so the declare-once-reference-many mechanism — the stated point of
+    named sources — silently excluded workspace files. Every category that
+    fetches now reads the same table, and ``resources`` is open on both
+    protocols."""
+    _accept("""schema_version: 1
 sources:
   content:
-    git: https://code.example.com/team/content.git
+    protocol: git
+    url: https://code.example.com/team/content.git
     ref: v1.2.0
 manifest:
   resources:
     - path: assets/logo.png
       from: content
-"""
-    assert ("manifest.resources[0]", "unsupported_source") in _reject(document)
+      subpath: brand/logo.png
+""")
 
-    inline = """schema_version: 1
+    _accept("""schema_version: 1
 manifest:
   resources:
     - path: assets/logo.png
       source:
-        git: https://code.example.com/team/content.git
+        protocol: git
+        url: https://code.example.com/team/content.git
         ref: v1.2.0
+        subpath: brand/logo.png
+""")
+
+
+def test_a_resources_directory_over_git_needs_no_unpack():
+    """The half of D1 that makes it worth having: a tree arrives as a tree.
+
+    ``unpack`` exists because one HTTPS GET fetches one object, so a directory
+    has to travel inside an archive. Git hands the platform a real tree, and
+    ``subpath`` selects within it — asking for a packaging step there would be
+    asking the caller to configure something that does not happen.
+    """
+    _accept("""schema_version: 1
+sources:
+  content:
+    protocol: git
+    url: https://code.example.com/team/content.git
+    ref: v1.2.0
+manifest:
+  resources:
+    - path: data/kb/
+      from: content
+      subpath: kb/
+""")
+
+
+def test_a_resources_directory_over_oss_still_needs_unpack():
+    """The other protocol keeps the rule, for the reason the rule exists."""
+    document = """schema_version: 1
+manifest:
+  resources:
+    - path: data/kb/
+      source:
+        protocol: oss
+        bucket: cdn
+        key: kb.zip
+        auth: oss-cred
 """
-    assert ("manifest.resources[0]", "unsupported_source") in _reject(inline)
+    assert ("manifest.resources[0]", "missing_unpack") in _reject(document)
 
 
 def test_a_declared_but_unreferenced_source_is_a_warning_not_a_refusal():
@@ -224,7 +283,10 @@ def test_a_declared_but_unreferenced_source_is_a_warning_not_a_refusal():
     document = """schema_version: 1
 sources:
   content:
-    url: https://cdn.example.com/content/
+    protocol: oss
+    bucket: cdn
+    key: content/
+    auth: oss-cred
 manifest:
   skills: []
 """
@@ -237,15 +299,24 @@ manifest:
 
 def test_a_source_url_with_userinfo_is_refused():
     """The one rule with real teeth: a token in a URL is a secret in a document
-    that is stored as written and read back verbatim."""
+    that is stored as written and read back verbatim.
+
+    Asked of a **git** source now — after the bare-URL spelling went away, a
+    repository address is the only URL a manifest still writes, and it is as
+    capable of carrying userinfo as any other.
+    """
     document = """schema_version: 1
 manifest:
   identity:
     - type: SOUL.md
-      source: https://alice:t0ken@cdn.example.com/soul.md
+      source:
+        protocol: git
+        url: https://alice:t0ken@code.example.com/team/x.git
+        ref: v1
+        subpath: soul.md
 """
     assert (
-        "manifest.identity[0].source",
+        "manifest.identity[0].source.url",
         "source_url_has_userinfo",
     ) in _reject(document)
 
@@ -254,7 +325,10 @@ def test_auth_on_a_from_entry_is_refused():
     document = """schema_version: 1
 sources:
   content:
-    url: https://cdn.example.com/content/
+    protocol: oss
+    bucket: cdn
+    key: content/
+    auth: oss-cred
 manifest:
   identity:
     - type: SOUL.md
@@ -289,7 +363,8 @@ manifest:
   identity:
     - type: SOUL.md
       source:
-        git: https://code.example.com/team/content.git
+        protocol: git
+        url: https://code.example.com/team/content.git
         ref: v1.2.0
       digest: "{_DIGEST}"
 """
@@ -318,7 +393,11 @@ def test_a_url_skill_without_a_digest_is_refused():
 manifest:
   skills:
     - name: qc
-      source: https://cdn.example.com/qc.zip
+      source:
+        protocol: oss
+        bucket: cdn
+        key: qc.zip
+        auth: oss-cred
 """
     assert ("manifest.skills[0]", "missing_digest") in _reject(document)
 
@@ -356,7 +435,11 @@ def test_the_dropped_on_fetch_failure_value_is_refused():
 manifest:
   skills:
     - name: qc
-      source: https://cdn.example.com/qc.zip
+      source:
+        protocol: oss
+        bucket: cdn
+        key: qc.zip
+        auth: oss-cred
       digest: "{_DIGEST}"
       on_fetch_failure: skip
 """
@@ -373,7 +456,11 @@ def test_the_surviving_on_fetch_failure_values_are_accepted(value):
 manifest:
   skills:
     - name: qc
-      source: https://cdn.example.com/qc.zip
+      source:
+        protocol: oss
+        bucket: cdn
+        key: qc.zip
+        auth: oss-cred
       digest: "{_DIGEST}"
       on_fetch_failure: {value}
 """
@@ -389,7 +476,8 @@ def test_an_unknown_source_mode_is_refused():
     document = """schema_version: 1
 sources:
   assets:
-    url: https://cdn.example.com/assets/
+    protocol: git
+    url: https://code.example.com/team/assets.git
     mode: strictt
 manifest:
   skills: []
@@ -403,12 +491,53 @@ def test_the_two_source_modes_are_accepted(mode):
         f"""schema_version: 1
 sources:
   assets:
-    url: https://cdn.example.com/assets/
+    protocol: git
+    url: https://code.example.com/team/assets.git
     mode: {mode}
 manifest:
   skills: []
 """
     )
+
+
+def test_mode_is_refused_on_an_object_store_source():
+    """``mode`` rules on whether a **ref** may move, and an object store has no
+    ref. Accepting it there would be a field that reads as configuration and
+    governs nothing — which is the class of defect this change exists to close,
+    not a nicety. Refused rather than ignored, and the shape of the value is
+    not then also complained about: one mistake, one violation."""
+    document = """schema_version: 1
+sources:
+  assets:
+    protocol: oss
+    bucket: cdn
+    key: assets/
+    auth: oss-cred
+    mode: strict
+manifest:
+  skills: []
+"""
+    codes = _codes(document)
+    assert codes == {"field_not_valid_for_protocol"}
+
+
+def test_ref_is_refused_on_an_object_store_source():
+    """The same rule, the field that names the ref rather than ruling on it."""
+    document = """schema_version: 1
+sources:
+  assets:
+    protocol: oss
+    bucket: cdn
+    key: assets/
+    auth: oss-cred
+    ref: v1.2.0
+manifest:
+  skills: []
+"""
+    assert (
+        "sources.assets.ref",
+        "field_not_valid_for_protocol",
+    ) in _reject(document)
 
 
 # ── the reserved word ───────────────────────────────────────────────────────
@@ -432,7 +561,10 @@ def test_apply_once_is_refused_at_any_depth():
     document = """schema_version: 1
 sources:
   assets:
-    url: https://cdn.example.com/assets/
+    protocol: oss
+    bucket: cdn
+    key: assets/
+    auth: oss-cred
     apply_once: true
 manifest:
   skills: []
@@ -448,10 +580,17 @@ def test_an_unknown_placeholder_is_refused():
 manifest:
   identity:
     - type: SOUL.md
-      source: https://cdn.example.com/${BOT_NAME}/soul.md
+      source:
+        protocol: git
+        url: https://code.example.com/${BOT_NAME}/x.git
+        ref: v1
+        subpath: soul.md
 """
     locations = _reject(document)
-    assert ("manifest.identity[0].source", "unknown_placeholder") in locations
+    assert (
+        "manifest.identity[0].source.url",
+        "unknown_placeholder",
+    ) in locations
 
 
 def test_the_old_prefix_is_no_longer_a_placeholder():
@@ -462,7 +601,11 @@ def test_the_old_prefix_is_no_longer_a_placeholder():
 manifest:
   identity:
     - type: SOUL.md
-      source: https://cdn.example.com/${OCB_BOT_ID}/soul.md
+      source:
+        protocol: oss
+        bucket: cdn
+        key: ${OCB_BOT_ID}/soul.md
+        auth: oss-cred
 """
     assert "unknown_placeholder" in _codes(document)
 
@@ -476,7 +619,11 @@ def test_every_whitelisted_placeholder_is_accepted(name):
 manifest:
   identity:
     - type: SOUL.md
-      source: https://cdn.example.com/${{{name}}}/soul.md
+      source:
+        protocol: oss
+        bucket: cdn
+        key: ${{{name}}}/soul.md
+        auth: oss-cred
 """
     )
 
@@ -519,7 +666,11 @@ def test_bot_id_is_not_a_placeholder():
 manifest:
   identity:
     - type: SOUL.md
-      source: https://cdn.example.com/bots/${BOT_ID}/soul.md
+      source:
+        protocol: oss
+        bucket: cdn
+        key: bots/${BOT_ID}/soul.md
+        auth: oss-cred
 """
     assert "unknown_placeholder" in _codes(document)
 
@@ -540,7 +691,11 @@ def test_an_escaping_resource_path_is_refused(path, code):
 manifest:
   resources:
     - path: {path}
-      source: https://cdn.example.com/x
+      source:
+        protocol: oss
+        bucket: cdn
+        key: x
+        auth: oss-cred
 """
     assert ("manifest.resources[0].path", code) in _reject(document)
 
@@ -552,7 +707,11 @@ def test_a_dotdot_prefixed_directory_name_is_not_a_traversal():
 manifest:
   resources:
     - path: data/..config
-      source: https://cdn.example.com/x
+      source:
+        protocol: oss
+        bucket: cdn
+        key: x
+        auth: oss-cred
 """
     )
 
@@ -564,10 +723,18 @@ def test_a_resource_nested_under_a_directory_entry_is_refused():
 manifest:
   resources:
     - path: data/kb/
-      source: https://cdn.example.com/kb.zip
+      source:
+        protocol: oss
+        bucket: cdn
+        key: kb.zip
+        auth: oss-cred
       unpack: zip
     - path: data/kb/extra.csv
-      source: https://cdn.example.com/extra.csv
+      source:
+        protocol: oss
+        bucket: cdn
+        key: extra.csv
+        auth: oss-cred
 """
     assert ("manifest.resources", "nested_resource_path") in _reject(document)
 
@@ -577,7 +744,11 @@ def test_a_directory_entry_from_a_url_must_declare_unpack():
 manifest:
   resources:
     - path: data/kb/
-      source: https://cdn.example.com/kb.zip
+      source:
+        protocol: oss
+        bucket: cdn
+        key: kb.zip
+        auth: oss-cred
 """
     assert ("manifest.resources[0]", "missing_unpack") in _reject(document)
 
@@ -633,11 +804,19 @@ def test_two_tools_with_the_same_name_are_refused():
 manifest:
   cli_tools:
     - name: tk
-      source: https://cdn.example.com/toolkit.tar.gz
+      source:
+        protocol: oss
+        bucket: cdn
+        key: toolkit.tar.gz
+        auth: oss-cred
       subpath: bin/tk
       digest: "{_DIGEST}"
     - name: tk
-      source: https://cdn.example.com/other.tar.gz
+      source:
+        protocol: oss
+        bucket: cdn
+        key: other.tar.gz
+        auth: oss-cred
       subpath: bin/tk
       digest: "{_DIGEST}"
 """
@@ -653,7 +832,11 @@ def test_the_retired_entrypoints_field_is_refused_rather_than_ignored():
 manifest:
   cli_tools:
     - name: toolkit
-      source: https://cdn.example.com/toolkit.tar.gz
+      source:
+        protocol: oss
+        bucket: cdn
+        key: toolkit.tar.gz
+        auth: oss-cred
       unpack: tar.gz
       digest: "{_DIGEST}"
       entrypoints: [bin/tk, bin/tk-helper]
@@ -672,7 +855,11 @@ def test_the_archive_form_selects_its_one_file_with_subpath():
 manifest:
   cli_tools:
     - name: tk
-      source: https://cdn.example.com/toolkit.tar.gz
+      source:
+        protocol: oss
+        bucket: cdn
+        key: toolkit.tar.gz
+        auth: oss-cred
       subpath: bin/tk
       unpack: tar.gz
       digest: "{_DIGEST}"
@@ -687,7 +874,11 @@ def test_cli_tools_requires_a_digest():
 manifest:
   cli_tools:
     - name: mycli
-      source: https://cdn.example.com/mycli
+      source:
+        protocol: oss
+        bucket: cdn
+        key: mycli
+        auth: oss-cred
 """
     assert ("manifest.cli_tools[0]", "missing_digest") in _reject(document)
 
@@ -710,7 +901,11 @@ def test_a_well_formed_cli_tools_document_is_accepted_since_w9():
 manifest:
   cli_tools:
     - name: mycli
-      source: https://cdn.example.com/mycli
+      source:
+        protocol: oss
+        bucket: cdn
+        key: mycli
+        auth: oss-cred
       digest: "{_DIGEST}"
 """
     assert _accept(document).parsed["manifest"]["cli_tools"][0]["name"] == "mycli"
@@ -793,7 +988,11 @@ def test_every_reason_is_reported_at_once():
 manifest:
   cli_tools:
     - name: mycli
-      source: https://cdn.example.com/mycli
+      source:
+        protocol: oss
+        bucket: cdn
+        key: mycli
+        auth: oss-cred
   engine_config:
     config:
       model: m
@@ -801,7 +1000,11 @@ manifest:
     - type: MEMORY.md
       content: "hi"
     - type: SOUL.md
-      source: https://user:token@cdn.example.com/soul.md
+      source:
+        protocol: git
+        url: https://user:token@code.example.com/team/x.git
+        ref: v1
+        subpath: soul.md
 """
     codes = _codes(document)
     assert {
@@ -853,20 +1056,27 @@ def test_an_oversized_source_url_is_refused_at_put_not_after_a_fetch():
     the store: the expensive order, and a document every apply point rejects
     — the exact shape "this surface never accepts something it cannot apply"
     forbids."""
-    long_url = "https://content.example/" + "a" * 3000 + ".bin"
+    long_url = "https://code.example.com/" + "a" * 3000 + ".git"
     document = f"""schema_version: 1
 manifest:
   identity:
     - type: SOUL.md
-      source: "{long_url}"
+      source:
+        protocol: git
+        url: "{long_url}"
+        ref: v1
+        subpath: soul.md
 """
-    assert ("manifest.identity[0].source", "source_url_too_long") in _reject(
-        document
-    )
+    assert (
+        "manifest.identity[0].source.url",
+        "source_url_too_long",
+    ) in _reject(document)
 
 
 def test_a_source_url_at_just_under_the_limit_is_accepted():
-    prefix, suffix = "https://content.example/", ".bin"
+    """The boundary is inclusive — 2048 is the provenance column's width, and
+    a URL exactly that long stores without truncation."""
+    prefix, suffix = "https://code.example.com/", ".git"
     boundary = prefix + "b" * (2048 - len(prefix) - len(suffix)) + suffix
     assert len(boundary) == 2048
     _accept(
@@ -874,7 +1084,11 @@ def test_a_source_url_at_just_under_the_limit_is_accepted():
 manifest:
   identity:
     - type: SOUL.md
-      source: "{boundary}"
+      source:
+        protocol: git
+        url: "{boundary}"
+        ref: v1
+        subpath: soul.md
 """
     )
 
@@ -911,3 +1125,274 @@ def test_relative_path_refusal_is_the_one_rule_both_sides_ask():
     # The legitimate shapes, including the per-segment '..' reading.
     for value in ("data/..config", "data/a.md", "top/sub/b.txt", "${BASE}/k.md"):
         assert relative_path_refusal(value) is None, value
+
+
+# ── the rules that must survive the protocol axis ──────────────────────────
+#
+# The source declaration is parsed by a new module now, and these are the rules
+# that would be silently lost if the wrapper stopped contributing them: the pure
+# parser knows nothing about https, userinfo, URL length or workspace paths.
+
+
+def test_userinfo_is_still_refused_on_a_declared_source():
+    """The rule with teeth (schema §2.1). A document is stored as written, read
+    back verbatim by `GET`, and recorded as provenance — which is exactly what
+    the encrypted credential store exists to avoid. Refused, never redacted:
+    redaction cannot un-store what was already accepted somewhere else."""
+    document = """schema_version: 1
+sources:
+  s:
+    protocol: git
+    url: https://user:token@code.example.com/team/content.git
+manifest:
+  identity:
+    - type: SOUL.md
+      from: s
+      subpath: soul.md
+"""
+    assert ("sources.s.url", "source_url_has_userinfo") in _reject(document)
+
+
+def test_a_non_https_source_is_still_refused():
+    document = """schema_version: 1
+sources:
+  s:
+    protocol: git
+    url: http://code.example.com/team/x.git
+    ref: v1
+    subpath: a.md
+manifest:
+  identity:
+    - type: SOUL.md
+      from: s
+"""
+    assert ("sources.s.url", "invalid_source") in _reject(document)
+
+
+@pytest.mark.parametrize(
+    ("where", "document"),
+    [
+        (
+            "sources.s.subpath",
+            """schema_version: 1
+sources:
+  s:
+    protocol: git
+    url: https://code.example.com/team/content.git
+    subpath: ../../etc
+manifest:
+  identity:
+    - type: SOUL.md
+      from: s
+""",
+        ),
+        (
+            "manifest.identity[0].subpath",
+            """schema_version: 1
+sources:
+  s:
+    protocol: git
+    url: https://code.example.com/team/content.git
+manifest:
+  identity:
+    - type: SOUL.md
+      from: s
+      subpath: ../../etc/shadow
+""",
+        ),
+    ],
+)
+def test_traversal_is_refused_on_both_halves_of_a_subpath(where, document):
+    """Both halves compose into one path at fetch time, so both are checked
+    here and the composition is checked again there — by the same predicate,
+    never a second weaker one."""
+    assert (where, "path_traversal") in _reject(document)
+
+
+def test_a_source_that_fails_to_parse_is_one_problem_not_two():
+    """An entry naming a source whose declaration was refused must not ALSO be
+    reported as naming an undeclared source. One mistake, one violation — the
+    caller fixes the source, not the reference."""
+    document = """schema_version: 1
+sources:
+  s:
+    url: https://cdn.example.com/a.md
+manifest:
+  identity:
+    - type: SOUL.md
+      from: s
+"""
+    assert _codes(document) == {"missing_protocol"}
+
+
+def test_the_reserved_word_is_still_swept_inside_a_source():
+    document = """schema_version: 1
+sources:
+  s:
+    protocol: git
+    url: https://code.example.com/team/content.git
+    apply_once: true
+manifest:
+  identity:
+    - type: SOUL.md
+      from: s
+      subpath: soul.md
+"""
+    assert ("sources.s.apply_once", "reserved_field") in _reject(document)
+
+
+def test_an_unknown_key_on_a_source_is_refused_not_ignored():
+    document = """schema_version: 1
+sources:
+  s:
+    protocol: oss
+    bucket: cdn
+    key: a.md
+    auth: oss-cred
+    nonsense: 1
+manifest:
+  identity:
+    - type: SOUL.md
+      from: s
+"""
+    assert ("sources.s.nonsense", "unknown_field") in _reject(document)
+
+
+# ── subpath must have something to select within ───────────────────────────
+#
+# Found by review. On `git` a subpath always means something — the source
+# delivers a tree. On `oss` it selects a member of an ARCHIVE, so where no
+# archive is unpacked it configures nothing, which is the exact failure this
+# change exists to remove. Refused at PUT rather than ignored at apply.
+
+_OSS_SOURCE = """schema_version: 1
+sources:
+  artifacts:
+    protocol: oss
+    bucket: artifacts
+    key: tools/pkg.zip
+    auth: oss-cred
+manifest:
+"""
+
+
+def test_subpath_on_an_oss_resources_file_entry_is_refused():
+    """A file entry unpacks nothing, so the whole object would land at `path`
+    and the subpath would silently do nothing."""
+    document = _OSS_SOURCE + """  resources:
+    - path: data/pricing.csv
+      from: artifacts
+      subpath: reference/pricing.csv
+"""
+    assert (
+        "manifest.resources[0].subpath",
+        "subpath_without_archive",
+    ) in _reject(document)
+
+
+def test_subpath_on_an_oss_identity_entry_is_refused():
+    """An identity file is one text body and is never an archive."""
+    document = _OSS_SOURCE + """  identity:
+    - type: SOUL.md
+      from: artifacts
+      subpath: bots/soul.md
+"""
+    assert (
+        "manifest.identity[0].subpath",
+        "subpath_without_archive",
+    ) in _reject(document)
+
+
+def test_subpath_on_an_oss_cli_tool_without_unpack_is_refused_at_put():
+    """The acquisition refused this already — but only once the apply was
+    running, which is the surface accepting what apply rejects."""
+    document = _OSS_SOURCE + f"""  cli_tools:
+    - name: rg
+      from: artifacts
+      subpath: bin/rg
+      digest: "{_DIGEST}"
+"""
+    assert (
+        "manifest.cli_tools[0].subpath",
+        "subpath_without_archive",
+    ) in _reject(document)
+
+
+def test_subpath_is_accepted_wherever_an_archive_is_actually_unpacked():
+    """The other half of the rule, so it narrows nothing it should not."""
+    # cli_tools with an explicit unpack
+    _accept(_OSS_SOURCE + f"""  cli_tools:
+    - name: rg
+      from: artifacts
+      subpath: bin/rg
+      unpack: zip
+      digest: "{_DIGEST}"
+""")
+    # skills always unpack — a skill IS a package
+    _accept(_OSS_SOURCE + f"""  skills:
+    - name: qc
+      from: artifacts
+      subpath: quality-check/
+      digest: "{_DIGEST}"
+""")
+    # a resources directory entry over oss requires unpack, so it has one
+    _accept(_OSS_SOURCE + """  resources:
+    - path: data/kb/
+      from: artifacts
+      subpath: kb/
+      unpack: zip
+""")
+
+
+@pytest.mark.parametrize(
+    ("category", "entry"),
+    [
+        ("identity", "    - type: SOUL.md\n      from: repo\n      subpath: soul.md\n"),
+        (
+            "resources",
+            "    - path: data/faq.csv\n      from: repo\n      subpath: kb/faq.csv\n",
+        ),
+        ("skills", "    - name: qc\n      from: repo\n      subpath: skills/qc/\n"),
+        ("cli_tools", "    - name: rg\n      from: repo\n      subpath: bin/rg\n"),
+    ],
+)
+def test_subpath_is_always_meaningful_on_a_git_source(category, entry):
+    """Git delivers a tree, so there is always something to select within —
+    in every category, with no archive and no `unpack` anywhere."""
+    _accept(
+        "schema_version: 1\n"
+        "sources:\n"
+        "  repo:\n"
+        "    protocol: git\n"
+        "    url: https://code.example.com/team/content.git\n"
+        "    ref: v1.2.0\n"
+        f"manifest:\n  {category}:\n{entry}"
+    )
+
+
+def test_one_mistake_on_a_source_field_is_one_violation():
+    """Absence and malformedness are different mistakes with different fixes,
+    and each gets exactly one message.
+
+    The required-field check used to fire alongside the per-field one, so an
+    empty ``url`` produced both "must declare 'url'" and "'url' must be a
+    non-empty string" — and for a wrong-typed value the first was actively
+    false, since the field *is* declared. Same anti-duplication rule the
+    misplaced-key path already followed.
+    """
+    from agentclaw.community.core.bot_config_manifest.schema.sources import (
+        parse_source,
+    )
+
+    for raw, expected in [
+        ({"protocol": "git", "url": ""}, "non-empty"),
+        ({"protocol": "git", "url": 123}, "non-empty"),
+        ({"protocol": "git"}, "must declare"),
+        # ``auth`` has its own wording; what is pinned is the count.
+        ({"protocol": "oss", "bucket": "b", "auth": ""}, "credential"),
+        ({"protocol": "oss", "bucket": "b"}, "must declare"),
+    ]:
+        decl, violations = parse_source(raw)
+        assert decl is None
+        assert len(violations) == 1, (raw, [v.message for v in violations])
+        assert expected in violations[0].message, (raw, violations[0].message)

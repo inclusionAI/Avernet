@@ -3,6 +3,7 @@
 __all__ = [
     "ApiResponse",
     "BaseRequest",
+    "ConfigError",
     "DomainError",
     "ListResponse",
     "OperationContext",
@@ -87,6 +88,16 @@ class SuccessResponse(BaseModel):
     )
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ConfigError(Exception):
+    """Raised when a required config value is missing or invalid.
+
+    Lives on the api contract layer so lower layers (plugins) can raise it
+    without importing the bootstrap composition root.  ``bootstrap._configs``
+    re-exports this class; prefer importing it from ``secbaas.community.api``
+    outside the bootstrap layer.
+    """
 
 
 class DomainError(Exception):

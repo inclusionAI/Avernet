@@ -1,4 +1,4 @@
-import type { CollaborationBot, PublicAudience } from '@/domain/collaborationPrivacy/types';
+import type { CollaborationBot, PublicAudience, PublicConfig } from '@/domain/collaborationPrivacy/types';
 import type { DirectSetting } from '@/services/collaborationPrivacy';
 
 export interface Confirmation {
@@ -22,13 +22,10 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : '操作失败，请稍后重试';
 }
 
-export function normalizeBotIdentityId(id: string): string {
-  const separator = id.indexOf(':');
-  return separator >= 0 ? id.slice(0, separator) : id;
-}
-
-export function matchesBotIdentity(botId: string, identityId: string): boolean {
-  return botId === identityId || normalizeBotIdentityId(botId) === normalizeBotIdentityId(identityId);
+export function publicationSuccessMessage(config: PublicConfig): string {
+  return config.scope === 'none'
+    ? 'Bot 可见性已更新为不可见，当前立即生效'
+    : '可见性变更申请已提交，当前可见性保持不变';
 }
 
 export function directSettingLabel(setting: DirectSetting, value: Confirmation['value']): string {

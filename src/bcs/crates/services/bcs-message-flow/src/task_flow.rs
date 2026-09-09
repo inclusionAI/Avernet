@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use bcs_domain::{LedgerSummary, SenderType};
+use bcs_domain::{LedgerSummary, MessageAudience, MessageVisibilityDomain, SenderType};
 use bcs_protocol::{BcsFrame, GroupContext, RequestFrame};
 use bcs_service_api::{
     BotDeliveryCommand, BotDeliveryKind, ChatResponseMode, DeliveryType, FrontendDeliveryCommand,
@@ -1110,6 +1110,15 @@ async fn publish_task_message_to_workbench(
         worker_name,
         message,
     );
+    let mut actor_ids = vec![worker_bot.to_string()];
+    actor_ids.extend(
+        group
+            .participants
+            .iter()
+            .filter(|participant| participant.role == ParticipantRole::Manager)
+            .map(|participant| participant.bot_uuid.clone()),
+    );
+    let audience = MessageAudience::directed(actor_ids).unwrap_or(MessageAudience::FullOnly);
     let delivery = flow
         .frontend_delivery
         .publish(FrontendDeliveryCommand {
@@ -1120,6 +1129,8 @@ async fn publish_task_message_to_workbench(
             delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
             run_fallback: None,
             exclude_conn_id: None,
+            visibility_domain: MessageVisibilityDomain::ManagerWorker,
+            audience: Some(audience),
         })
         .await;
 

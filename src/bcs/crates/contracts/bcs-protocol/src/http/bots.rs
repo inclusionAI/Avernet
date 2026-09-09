@@ -64,6 +64,9 @@ pub struct BotSearchEntry {
     pub is_online: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_friend: Option<bool>,
+    /// Owner identity (e.g. staff_no) of the bot, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_by: Option<String>,
 }
 
 /// Engine type for the bot.

@@ -9,7 +9,7 @@ needs to be told which.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Mapping, Optional
 
@@ -69,6 +69,21 @@ class CliToolDecl:
     #: ``on_fetch_failure`` — the stored copy may stand in for an unreachable
     #: source, per the schema's default.
     keep_last: bool = True
+    #: The manifest entry this was read from, when there was one.
+    #:
+    #: Present ⇒ the acquisition goes through ``fetch_declared``, which is the
+    #: only thing that can resolve a ``from`` name or a ``protocol: git`` source.
+    #: ``None`` ⇒ the API-driven install, whose caller hands over a plain URL
+    #: and has no ``sources`` map to resolve against. The distinction is the
+    #: declaration's, not a flag: a decl that knows its entry can be resolved
+    #: like every other category's, and one that does not, cannot.
+    #:
+    #: ``compare=False`` on purpose. This field is *how* the bytes are
+    #: acquired, not *what* is declared: two entries naming the same tool from
+    #: the same place are the same declaration whichever mapping they were read
+    #: from. Comparing it would also make the type unhashable (a dict), and
+    #: would let a whitespace-level edit to a manifest read as a changed tool.
+    entry: Optional[Mapping[str, Any]] = field(default=None, compare=False)
 
     @classmethod
     def from_entry(cls, entry: Mapping[str, Any]) -> CliToolDecl:
@@ -83,7 +98,13 @@ class CliToolDecl:
         """
         return cls(
             name=entry["name"],
-            source_url=entry.get("from") or entry.get("source") or "",
+            # Kept for the report and for logs. It is the *declared* address
+            # and may be a source NAME rather than a URL — which is why the
+            # acquisition reads ``entry`` below and never this field: reading
+            # this one is precisely how a ``from`` name came to be fetched as
+            # though it were a URL.
+            source_url=_declared_address(entry),
+            entry=dict(entry),
             digest=entry.get("digest") or "",
             subpath=entry.get("subpath"),
             unpack=entry.get("unpack"),
@@ -93,7 +114,7 @@ class CliToolDecl:
         )
 
     @property
-    def convergence_key(self) -> tuple[str, Optional[str]]:
+    def convergence_key(self) -> Optional[tuple[str, Optional[str]]]:
         """What decides whether an installed tool already satisfies this.
 
         ``(digest, subpath)`` and never the digest alone: one archive can carry
@@ -101,8 +122,32 @@ class CliToolDecl:
         only if they also select the same member. ``version`` is excluded on
         purpose — it is a label, and letting it force a reinstall would make
         an edit to a comment redeliver a 200 MiB binary.
+
+        **``None`` when there is no digest**, which is the git road: a git
+        source declares no digest (the commit SHA is the pin) and the SHA is
+        not known until the ref is resolved, which happens after planning. A
+        key of ``("", subpath)`` would make every git-sourced tool at one path
+        compare equal to every other — so a moved ref would plan ``unchanged``
+        and survive, which is the one outcome convergence exists to prevent.
+        ``None`` means "never equal": the tool is re-acquired every apply, the
+        same conservative answer ``resources`` gives for the same reason.
         """
+        if not self.digest:
+            return None
         return (self.digest, self.subpath)
+
+
+def _declared_address(entry: Mapping[str, Any]) -> str:
+    """How the entry named its source, for the report to echo.
+
+    An inline URL is itself; an inline source object is its ``url``; a ``from``
+    is the source's name, which is what the apply report's ``from`` column
+    carries for every other category too.
+    """
+    inline = entry.get("source")
+    if isinstance(inline, Mapping):
+        return str(inline.get("url") or "")
+    return str(entry.get("from") or inline or "")
 
 
 @dataclass(frozen=True)

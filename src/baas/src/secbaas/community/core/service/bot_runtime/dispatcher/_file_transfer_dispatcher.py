@@ -27,6 +27,9 @@ from secbaas.community.api.bot_runtime import (
     TransferNotFoundError,
     TransferStateConflictError,
 )
+from secbaas.community.api.session_file_sharing import (
+    SessionFileTransferProxyUnavailableError,
+)
 from secbaas.community.core.service.paas import PaasServiceFacade
 from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.logger import get_logger
@@ -35,7 +38,10 @@ if TYPE_CHECKING:
     from secbaas.community.core.repository.bot import BotRepository
     from secbaas.community.core.repository.device import DeviceRepository
     from secbaas.community.core.repository.file_transfer_ticket import TicketRepository
-    from secbaas.community.spi.file_transfer import FileTransferBackend
+    from secbaas.community.spi.file_transfer import (
+        FileTransferBackend,
+        SessionFileUrlProjector,
+    )
 
 from ._base_dispatcher import BotBaseDispatcher
 
@@ -65,10 +71,25 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
         paas_facade: PaasServiceFacade,
         file_transfer_backend: FileTransferBackend,
         ticket_repo: TicketRepository,
+        session_file_url_projector: SessionFileUrlProjector | None = None,
     ):
         super().__init__(bot_repo, device_repo, paas_facade)
         self._file_transfer_backend = file_transfer_backend
         self._ticket_repo = ticket_repo
+        self._session_file_url_projector = session_file_url_projector
+
+    def _project_client_url(self, url: str) -> str:
+        """Rewrite a client-visible transfer URL via the injected projector.
+
+        Returns the URL unchanged when no projector is wired (main site and
+        pre-existing enterprise callers pass no such argument), so every
+        existing consumer keeps today's bare-URL behavior (WR-01/89).  The
+        community aliyun wiring passes the session URL projector in, which
+        rewrites upload and share URLs onto the BaaS proxy domain.
+        """
+        if self._session_file_url_projector is None:
+            return url
+        return self._session_file_url_projector.project(url)
 
     async def dispatch_get_upload_url(
         self,
@@ -189,15 +210,42 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
                 part_count,
             )
 
-            parts_data = [
-                {
-                    "part_number": p.part_number,
-                    "upload_url": p.upload_url,
-                    "http_method": "PUT",
-                    "expires_at": expires_at,
-                }
-                for p in multipart_session.parts
-            ]
+            # Project after initiation, fail-safe (WR-01/89, same pattern as
+            # the session domain): a projection refusal must abort the
+            # just-initiated OSS multipart session — otherwise the uploadId
+            # leaks (no ticket exists yet, so cancel/delete cannot reach it).
+            try:
+                parts_data = [
+                    {
+                        "part_number": p.part_number,
+                        "upload_url": self._project_client_url(p.upload_url),
+                        "http_method": "PUT",
+                        "expires_at": expires_at,
+                    }
+                    for p in multipart_session.parts
+                ]
+            except SessionFileTransferProxyUnavailableError as proj_err:
+                logger.warning(
+                    "MULTIPART URL projection refused (transfer_id=%s) — "
+                    "aborting OSS multipart session %s",
+                    transfer_id,
+                    multipart_session.session_id,
+                )
+                try:
+                    await asyncio.to_thread(
+                        self._file_transfer_backend.abort_multipart_upload,
+                        staging_path,
+                        multipart_session.session_id,
+                    )
+                except Exception:
+                    # The caller must still receive the original refusal even
+                    # if the cleanup roundtrip fails; log for operator review.
+                    logger.exception(
+                        "Aborting leaked multipart session %s failed (transfer_id=%s)",
+                        multipart_session.session_id,
+                        transfer_id,
+                    )
+                raise proj_err
 
             # Create ticket with multipart_session_id
             await asyncio.to_thread(
@@ -236,6 +284,11 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
                 staging_path,
                 expire_seconds,
             )
+
+            # Project before any ticket is created (WR-01/89): a projection
+            # refusal must never leave an orphan ticket behind after the
+            # client did not receive a usable URL.
+            upload_url = self._project_client_url(upload_url)
 
             logger.info(
                 "Upload URL generated: transfer_id=%s, staging_path=%s",
@@ -764,6 +817,10 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
             ticket.fileservice_staging_path,
             expire_seconds,
         )
+        # WR-01/89: when a session URL projector is wired (community aliyun
+        # form), the client-visible share URL must be projected onto the
+        # BaaS proxy domain — never a bare OSS pre-signed URL.
+        share_url = self._project_client_url(share_url)
 
         expires_at = (datetime.now(UTC) + timedelta(seconds=expire_seconds)).isoformat()
         return ShareLinkResponse(

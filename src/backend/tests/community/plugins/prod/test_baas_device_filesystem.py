@@ -3,7 +3,7 @@
 8 个 file 方法走 transport.post / transport.post_multipart。write_file 是
 multipart,其他都是 json POST。
 """
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import httpx
 import pytest
@@ -282,6 +282,56 @@ async def test_exists_returns_false_on_404():
     transport = _make_transport(response=err_resp)
     fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
     assert await fs.exists("/missing") is False
+
+
+@pytest.mark.asyncio
+async def test_exists_recovers_when_file_appears_before_directory_probe():
+    """A concurrent upload may win between read(file) and list(file)."""
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+    missing = httpx.Response(
+        status_code=404, content=b"not found",
+        request=httpx.Request("POST", "http://fake/api/file/read"),
+    )
+    not_a_directory = httpx.Response(
+        status_code=400, content=b"not a directory",
+        request=httpx.Request("POST", "http://fake/api/file/list"),
+    )
+    winner = _ok_response(content=b"concurrent upload")
+    transport = _make_transport()
+    transport.post.side_effect = [missing, not_a_directory, winner]
+    fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
+
+    assert await fs.exists("/workspace/install_coship_tools.py") is True
+    assert transport.post.call_args_list == [
+        call("/api/file/read", json={"file_path": "/workspace/install_coship_tools.py"}),
+        call(
+            "/api/file/list",
+            json={"dir_path": "/workspace/install_coship_tools.py", "recursive": False},
+        ),
+        call("/api/file/read", json={"file_path": "/workspace/install_coship_tools.py"}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_exists_preserves_400_when_second_read_still_finds_nothing():
+    """A real bad list request must not be weakened into absence."""
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+    missing = httpx.Response(
+        status_code=404, content=b"not found",
+        request=httpx.Request("POST", "http://fake/api/file/read"),
+    )
+    bad_request = httpx.Response(
+        status_code=400, content=b"bad request",
+        request=httpx.Request("POST", "http://fake/api/file/list"),
+    )
+    transport = _make_transport()
+    transport.post.side_effect = [missing, bad_request, missing]
+    fs = BaasDeviceFileSystem(transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p)
+
+    with pytest.raises(httpx.HTTPStatusError) as error:
+        await fs.exists("/workspace/bad.txt")
+
+    assert error.value.response.status_code == 400
 
 
 @pytest.mark.asyncio

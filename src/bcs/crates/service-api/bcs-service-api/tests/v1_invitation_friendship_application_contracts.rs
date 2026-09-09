@@ -124,6 +124,7 @@ fn invitation_commands_carry_caller_and_no_raw_credentials() {
     let accept = AcceptInvitation {
         caller: caller.clone(),
         token: "tok-1".into(),
+        message_view_scope: None,
     };
     for cmd in [
         &create_group.caller,
@@ -331,6 +332,7 @@ fn authenticated_caller_can_be_carried_in_invitation_command() {
     let command = AcceptInvitation {
         caller: human_caller(),
         token: "tok-1".into(),
+        message_view_scope: None,
     };
     assert_eq!(command.caller.user.expect("User").id, "staff-1");
     assert_eq!(command.token, "tok-1");

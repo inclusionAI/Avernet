@@ -1,4 +1,5 @@
 """Tests for agentclaw.community.core.services.skill_set_service.SkillSetService."""
+import logging
 from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
@@ -227,6 +228,40 @@ class TestGetSetMcpServers:
         codes = {r["server_code"] for r in result}
         assert "mcp.ant.antprocessai.anttaskmcp" not in codes
 
+    def test_default_skillset_excludes_persisted_mcp_membership(self):
+        from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
+        mock_repo = MagicMock()
+        mock_repo.get_by_id.return_value = {"id": "1", "is_default": True}
+        mock_repo.get_mcp_servers_in_set.return_value = [
+            {
+                "id": 10,
+                "server_code": "mcp.persisted.default",
+                "name": "persisted",
+                "description": "desc",
+                "icon": None,
+            }
+        ]
+        mock_repo.get_excluded_mcps.return_value = ["mcp.persisted.default"]
+
+        with patch("agentclaw.community.core.skill_center.services.skill_set_service.WorkspacePathFactory"):
+            svc = SkillSetService(
+                skill_repo=MagicMock(),
+                skill_set_repo=MagicMock(),
+                mcp_center=MagicMock(),
+                mcp_config_service=MagicMock(),
+                skill_service=MagicMock(),
+                bot_repo=MagicMock(),
+                path_factory=MagicMock(),
+            )
+        svc.skill_set_repo = mock_repo
+        svc.bot_id = "default"
+
+        result = svc.get_set_mcp_servers("1", user_id="user1")
+
+        assert "mcp.persisted.default" not in {
+            item["server_code"] for item in result
+        }
+
     def test_normal_skillset_returns_db_mcps_only(self):
         from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
         mock_repo = MagicMock()
@@ -259,7 +294,10 @@ class TestGetSetMcpServers:
 class TestCollectBotActiveMcps:
     """collect_bot_active_mcps filters out user-excluded default MCPs."""
 
-    def test_collect_excludes_user_excluded_default_mcps(self):
+    @pytest.mark.parametrize("reuse_snapshot", [False, True])
+    def test_collect_excludes_user_excluded_default_mcps(self, caplog, reuse_snapshot):
+        from agentclaw.community.core.skill_center.capability_state_contract import BotCapabilitySnapshot
+        from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
         from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
         mock_repo = MagicMock()
         mock_repo.get_all_active_skill_sets.return_value = [
@@ -287,12 +325,134 @@ class TestCollectBotActiveMcps:
         svc.skill_set_repo = mock_repo
         svc.bot_id = "default"
 
+        caplog.set_level(logging.INFO)
         with patch.object(svc, "get_set_mcp_servers") as mock_get_mcps:
             mock_get_mcps.return_value = []
-            result = svc.collect_bot_active_mcps("entity1", "default", "user1", "staff")
+            snapshot = BotCapabilitySnapshot(
+                "default", "user1",
+                (RegisteredSkillAsset(
+                    skill_id=1, name="center", git_path="center://public-code",
+                    skill_uuid="00000000-0000-4000-8000-000000000001",
+                    sc_version_number="2.0.0", mcp_dependencies=("mcp.dependency",),
+                ),),
+                frozenset({"mcp.installed"}),
+            ) if reuse_snapshot else None
+            result = svc.collect_bot_active_mcps(
+                "entity1", "default", "user1", "staff", capability_snapshot=snapshot
+            )
+        if reuse_snapshot:
+            svc._reader.active_skill_assets.assert_not_called()
+            svc._reader.active_mcp_server_codes.assert_not_called()
 
         codes = {r["server_code"] for r in result}
+        if reuse_snapshot:
+            assert {"mcp.installed", "mcp.dependency"} <= codes
         assert "mcp.ant.antprocessai.anttaskmcp" not in codes
+        messages = [record.getMessage() for record in caplog.records]
+        for stage in (
+            "default_ext_info",
+            "active_skill_sets",
+            "default_mcp_exclusions",
+            "active_skill_assets",
+            "installed_mcp_codes",
+            "resolve_non_default_codes",
+        ):
+            assert any(
+                "[collect_bot_active_mcps] timing" in message
+                and f"stage={stage}" in message
+                and "duration_ms=" in message
+                and "outcome=success" in message
+                for message in messages
+            )
+
+    def test_collect_logs_stage_error_before_reraising(self, caplog):
+        from agentclaw.community.core.skill_center.services.skill_set_service import (
+            SkillSetService,
+        )
+
+        mock_repo = MagicMock()
+        mock_repo.get_all_active_skill_sets.return_value = []
+        mock_repo.get_all_excluded_mcps.return_value = []
+        svc = SkillSetService(
+            skill_repo=MagicMock(),
+            skill_set_repo=mock_repo,
+            mcp_center=MagicMock(),
+            mcp_config_service=MagicMock(),
+            skill_service=MagicMock(),
+            bot_repo=MagicMock(),
+            path_factory=MagicMock(),
+            reader=MagicMock(),
+        )
+        failure = RuntimeError("active skill read failed")
+
+        caplog.set_level(logging.INFO)
+        with (
+            patch.object(svc, "_active_skill_assets", side_effect=failure),
+            pytest.raises(RuntimeError, match="active skill read failed"),
+        ):
+            svc.collect_bot_active_mcps("entity1", "bot-1", "user1", "staff")
+
+        messages = [record.getMessage() for record in caplog.records]
+        assert any(
+            "[collect_bot_active_mcps] timing" in message
+            and "stage=active_skill_assets" in message
+            and "outcome=error" in message
+            for message in messages
+        )
+
+    def test_collect_logs_each_enrichment_cardinality(self, caplog):
+        from agentclaw.community.core.skill_center.services.skill_set_service import (
+            SkillSetService,
+        )
+
+        svc = SkillSetService(
+            skill_repo=MagicMock(),
+            skill_set_repo=MagicMock(),
+            mcp_center=MagicMock(),
+            mcp_config_service=MagicMock(),
+            skill_service=MagicMock(),
+            bot_repo=MagicMock(),
+            path_factory=MagicMock(),
+            reader=MagicMock(),
+        )
+        caplog.set_level(logging.INFO)
+        with (
+            patch.object(
+                svc,
+                "_get_all_active_skill_sets_with_default_fallback",
+                return_value=[],
+            ),
+            patch.object(svc.skill_set_repo, "get_all_excluded_mcps", return_value=[]),
+            patch.object(
+                svc,
+                "_default_set_mcp_rows",
+                return_value=[{"server_code": "default-row"}],
+            ),
+            patch.object(
+                svc,
+                "_default_policy_mcp_entries",
+                return_value=[{"server_code": "default-policy"}],
+            ),
+            patch.object(svc, "_active_skill_assets", return_value=[]),
+            patch.object(svc, "_installed_mcp_codes", return_value={"direct"}),
+            patch.object(
+                svc,
+                "_non_default_effective_mcp_entries",
+                return_value=[{"server_code": "direct"}],
+            ),
+        ):
+            svc.collect_bot_active_mcps("entity1", "bot-1", "user1", "staff")
+
+        messages = [record.getMessage() for record in caplog.records]
+        for stage in (
+            "default_set_mcp_rows",
+            "default_policy_mcp_entries",
+            "non_default_mcp_entries",
+        ):
+            assert any(
+                f"stage={stage}" in message and "item_count=1" in message
+                for message in messages
+            )
 
     def test_get_bot_mcp_codes_for_env_uses_only_explicit_env_repository_reads(self):
         from agentclaw.community.core.skill_center.services.skill_set_service import (
@@ -672,6 +832,46 @@ class TestSyncMcpDesiredState:
         plugin.sync_all_mcp_servers.assert_called_once_with(
             [{"server_code": code} for code in sorted(codes)]
         )
+
+    @pytest.mark.asyncio
+    async def test_projection_reuses_device_for_details_and_declaration(self):
+        svc, plugin = self._make_svc()
+        events = []
+
+        async def deliver(**kwargs):
+            assert kwargs["device_sync"] is plugin
+            events.append("details")
+            return {"success": True}
+
+        svc._mcp_sync_service.sync_mcp_details_for_bot.side_effect = deliver
+        plugin.sync_all_mcp_servers.side_effect = lambda _codes: events.append("declare") or True
+        assert await svc.project_mcps(
+            claimed=frozenset({"mcp.new"}), released=frozenset(), declared={"mcp.new"}
+        )
+        assert events == ["details", "declare"]
+        svc._resolver.resolve_for_bot.assert_called_once_with("bot1", "staff_user1")
+        svc._device_sync_dispatcher.dispatch.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_projection_failure_does_not_declare_and_next_call_resolves_again(self):
+        svc, plugin = self._make_svc(delivery={"success": False})
+        for _ in range(2):
+            assert not await svc.project_mcps(
+                claimed=frozenset({"mcp.new"}), released=frozenset(), declared={"mcp.new"}
+            )
+        assert svc._resolver.resolve_for_bot.call_count == 2
+        plugin.sync_all_mcp_servers.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_release_only_reuses_device_and_still_declares_empty_scope(self):
+        svc, plugin = self._make_svc()
+        svc._mcp_sync_service.remove_mcp_detail = AsyncMock(return_value={"success": True})
+        assert await svc.project_mcps(
+            claimed=frozenset(), released=frozenset({"mcp.old"}), declared=set()
+        )
+        assert svc._mcp_sync_service.remove_mcp_detail.await_args.kwargs["device_sync"] is plugin
+        svc._resolver.resolve_for_bot.assert_called_once()
+        plugin.sync_all_mcp_servers.assert_called_once_with([])
 
     @pytest.mark.asyncio
     async def test_declaration_pushes_no_configuration(self):

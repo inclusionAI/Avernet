@@ -90,6 +90,23 @@ PUT_BODY = {
     "secret": "Bearer fw-secret",
     "allowed_prefixes": ["https://git.example/team/content"],
 }
+#: The other implemented mechanism. Same endpoint, same path shape, one body
+#: field apart — which is the point of the single-body discrimination: what
+#: differs between a git host token and an object-store key pair is the
+#: mechanism, not the route.
+AKSK_BODY = {
+    "type": "oss_aksk",
+    "access_key_id": "LTAI5tExampleKeyId",
+    # Issued with the key pair and stored beside it, so a tenant's manifest
+    # chooses which bucket it reads and never which host it reaches.
+    "endpoint": "https://objects.example-corp.com",
+    "region": "cn-shanghai",
+    "secret": "an-object-store-secret-key",
+    # Empty, and refused if not: this mechanism presents its secret to
+    # nothing, and its endpoint does not come from the document — there is no
+    # tenant-supplied host for a prefix to constrain.
+    "allowed_prefixes": [],
+}
 _BAD_PREFIX_BODY = {
     "type": "header",
     "header_name": "PRIVATE-TOKEN",
@@ -342,3 +359,92 @@ def list_credentials_unauthenticated_error_shape():
 )
 def delete_credential_unauthenticated_error_shape():
     """No principal → 401; the idempotent delete contract is untouched."""
+
+
+# ── the oss_aksk mechanism, at the endpoint (defect D4) ─────────────────────
+#
+# One case per implemented credential type on the write path, plus the shapes
+# the service refuses rather than ignores. The refusals are the rows worth
+# having: a body that named the wrong mechanism's field and got a 200 would
+# leave the caller believing they had configured signing.
+
+
+@endpoint_test(
+    method="PUT",
+    path=f"{_BASE}/{{name}}",
+    scenario="registers_an_object_store_key_pair",
+    input=CaseInput(
+        path_params={"name": "oss-artifacts"},
+        headers=_HEADERS,
+        json_body=AKSK_BODY,
+    ),
+    seed=_seed_verifier,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "name": "oss-artifacts",
+                "type": "oss_aksk",
+                "has_secret": True,
+                # The id comes back — it is an identifier, and a rotation
+                # nobody can verify is a rotation nobody will do. Its partner,
+                # the secret key, has no field in this response at all.
+                "access_key_id": "LTAI5tExampleKeyId",
+                "header_name": None,
+                "owner_app_id": APP_ID,
+            },
+        },
+    ),
+)
+def put_aksk_credential_happy():
+    """Register a signing credential: the road to a private object store."""
+
+
+@endpoint_test(
+    method="PUT",
+    path=f"{_BASE}/{{name}}",
+    scenario="an_aksk_credential_without_its_key_id_is_refused",
+    input=CaseInput(
+        path_params={"name": "oss-artifacts"},
+        headers=_HEADERS,
+        json_body={k: v for k, v in AKSK_BODY.items() if k != "access_key_id"},
+    ),
+    seed=_seed_verifier,
+    expect=ExpectError(status=422, json_contains={"data": None}),
+)
+def put_aksk_credential_missing_key_id_error_shape():
+    """Signing needs both halves; one half is not a credential."""
+
+
+@endpoint_test(
+    method="PUT",
+    path=f"{_BASE}/{{name}}",
+    scenario="a_header_name_on_a_signing_credential_is_refused",
+    input=CaseInput(
+        path_params={"name": "oss-artifacts"},
+        headers=_HEADERS,
+        json_body={**AKSK_BODY, "header_name": "PRIVATE-TOKEN"},
+    ),
+    seed=_seed_verifier,
+    expect=ExpectError(status=422, json_contains={"data": None}),
+)
+def put_aksk_credential_with_header_name_error_shape():
+    """Refused rather than dropped: the field describes the other mechanism."""
+
+
+@endpoint_test(
+    method="PUT",
+    path=f"{_BASE}/{{name}}",
+    scenario="a_key_id_on_a_header_credential_is_refused",
+    input=CaseInput(
+        path_params={"name": "corp-git"},
+        headers=_HEADERS,
+        json_body={**PUT_BODY, "access_key_id": "LTAI5tExampleKeyId"},
+    ),
+    seed=_seed_verifier,
+    expect=ExpectError(status=422, json_contains={"data": None}),
+)
+def put_header_credential_with_key_id_error_shape():
+    """The same rule in the other direction — a credential describes exactly
+    one mechanism, or it describes none of them honestly."""

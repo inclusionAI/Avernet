@@ -390,6 +390,7 @@ impl InvitationService for InvitationFriendshipServiceImpl {
             token: command.token.clone(),
             staff_no: user.id.clone(),
             nick_name,
+            message_view_scope: command.message_view_scope,
         };
         let result = match target_type {
             InviteTargetType::Group => self.invite.join_group_by_invite(join_command).await,

@@ -24,7 +24,7 @@ import { useBotNetwork } from './hooks/useBotNetwork';
 import { useGroupChatProviders } from './hooks/useGroupChatProviders';
 import { useGroups } from './hooks/useGroups';
 import { useGroupSessions } from './hooks/useGroupSessions';
-import type { BotTabItem } from './types';
+import type { BotTabItem, MessageViewScope } from './types';
 
 /**
  * 从 useBotStore 的 bots 转换为 BotTabItem[] 格式（内部版专用）
@@ -164,8 +164,12 @@ const SessionOnlyPage: React.FC = () => {
 
   // 会话操作回调
   const handleJoinSession = useCallback(
-    async (sid: string, actorId: string) => {
-      return joinSession(sid, actorId);
+    async (
+      sid: string,
+      actorId: string,
+      messageViewScope: MessageViewScope,
+    ) => {
+      return joinSession(sid, actorId, 'human', messageViewScope);
     },
     [joinSession],
   );

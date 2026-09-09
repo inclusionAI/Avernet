@@ -83,6 +83,16 @@ impl InviteCodeRepoPort for MemoryInviteCodeRepo {
         Ok(true)
     }
 
+    async fn count_by_created_by(&self, created_by: &str) -> ServiceResult<u64> {
+        Ok(self
+            .by_code_hash
+            .read()
+            .await
+            .values()
+            .filter(|record| record.created_by.as_deref() == Some(created_by))
+            .count() as u64)
+    }
+
     async fn bind_code(
         &self,
         code_hash: &str,

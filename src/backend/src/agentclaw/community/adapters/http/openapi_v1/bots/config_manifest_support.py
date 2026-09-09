@@ -41,6 +41,7 @@ from .schemas import (
     ConfigManifest,
     ConfigManifestCapabilities,
     ManifestConstruct,
+    ManifestSourceCell,
 )
 
 logger = get_logger()
@@ -228,6 +229,14 @@ def capabilities_payload(
         # pair of plain strings. Reading it here rather than unpacking the enum
         # keeps one definition of how a construct serialises.
         constructs=[ManifestConstruct(**item.as_dict()) for item in capabilities.constructs],
+        # Same reasoning, same method: the cell defines its own wire shape, and
+        # the reason string it carries is the *validator's* string — a
+        # capabilities answer that paraphrased the refusal would be a second
+        # wording for callers to reconcile.
+        source_matrix=[
+            ManifestSourceCell(**cell.as_dict())
+            for cell in capabilities.source_matrix
+        ],
     )
 
 

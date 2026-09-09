@@ -9,16 +9,18 @@ use async_trait::async_trait;
 use tracing::info;
 
 use bcs_domain::{
-    BCS_SESSION_OPENING_MESSAGE_SENDER_NAME, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
-    MessageAttachment, MessageOwnerFilter, MessageQuery, SESSION_OPENING_MESSAGE_TYPE,
-    STATE_MACHINE_PANEL_MESSAGE_TYPE, Session,
+    ActorKind, BCS_SESSION_OPENING_MESSAGE_SENDER_NAME, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
+    HumanMessageView, MessageAttachment, MessageOwnerFilter, MessageQuery, MessageViewScope,
+    SESSION_OPENING_MESSAGE_TYPE, STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE,
+    STATE_MACHINE_HUMAN_INPUT_RESPONSE_MESSAGE_TYPE, STATE_MACHINE_PANEL_MESSAGE_TYPE, Session,
 };
 use bcs_service_api::{
-    application::session_files::SessionFileService, BotRegistryCoreService, CallerContext,
-    Group, GroupCoreService, GroupHistoryCommand, GroupHistoryResult, GroupMessage,
-    GroupMessageHistoryService, GroupMessageType, GroupStrategy, GroupUseCaseError, MessageRole,
-    MessageHistoryOptions, PendingGroupMessage, PendingGroupMessageKind, PendingGroupMessagePort,
-    ParticipantRole, ServiceError, SessionHistoryCommand, SessionHistoryResult,
+    BotRegistryCoreService, CallerContext, Group, GroupCoreService, GroupHistoryCommand,
+    GroupHistoryResult, GroupMessage, GroupMessageHistoryService, GroupMessageType, GroupStrategy,
+    GroupUseCaseError, MessageHistoryOptions, MessageRole, ParticipantRole, PendingGroupMessage,
+    PendingGroupMessageKind, PendingGroupMessagePort, ServiceError, SessionHistoryCommand,
+    SessionHistoryResult,
+    application::session_files::SessionFileService,
     port::repo::{MessageRepoPort, SessionRepoPort},
 };
 
@@ -48,6 +50,27 @@ pub enum ManagerWorkerHistoryView {
 }
 
 impl MessageService {
+    fn human_message_view(
+        group: &Group,
+        session: Option<&Session>,
+        view_actor_id: Option<&str>,
+    ) -> Option<HumanMessageView> {
+        let actor_id = view_actor_id?;
+        let participant = session
+            .and_then(|session| {
+                session
+                    .participants
+                    .iter()
+                    .find(|participant| participant.bot_uuid == actor_id)
+            })
+            .or_else(|| group.get_participant(actor_id))?;
+        (participant.actor_kind == ActorKind::Human).then(|| HumanMessageView {
+            actor_id: actor_id.to_string(),
+            scope: participant.message_view_scope,
+            allow_legacy_unclassified_chat: group.group_strategy == GroupStrategy::Chat,
+        })
+    }
+
     pub fn new(
         message_repo: Arc<dyn MessageRepoPort>,
         fallback: Arc<dyn GroupMessageHistoryService>,
@@ -208,7 +231,10 @@ impl MessageService {
                 ),
                 None => None,
             };
-            Ok((Self::chat_owner_filter_for_view(view_bot_id), visible_from_seq))
+            Ok((
+                Self::chat_owner_filter_for_view(view_bot_id),
+                visible_from_seq,
+            ))
         }
     }
 
@@ -241,15 +267,10 @@ impl MessageService {
                     .find(|participant| participant.bot_uuid == bot_id)
             })
             .or_else(|| group.get_participant(bot_id))?;
-        Some(
-            (participant.role == ParticipantRole::Worker).then(|| bot_id.to_string()),
-        )
+        Some((participant.role == ParticipantRole::Worker).then(|| bot_id.to_string()))
     }
 
-    fn pending_is_visible(
-        owner_filter: &MessageOwnerFilter,
-        owner_bot_id: Option<&str>,
-    ) -> bool {
+    fn pending_is_visible(owner_filter: &MessageOwnerFilter, owner_bot_id: Option<&str>) -> bool {
         // COSEC: pending in-memory content must follow the same owner isolation
         // as the durable MessageRepo query; never expose another worker's run.
         match owner_filter {
@@ -268,8 +289,21 @@ impl MessageService {
         session: Option<&Session>,
         session_id: Option<&str>,
         owner_filter: &MessageOwnerFilter,
+        human_view: Option<&HumanMessageView>,
         before: Option<u64>,
     ) -> Vec<GroupMessage> {
+        let visibility_domain = match group.group_strategy {
+            GroupStrategy::Chat => bcs_domain::MessageVisibilityDomain::Chat,
+            GroupStrategy::ManagerWorker => bcs_domain::MessageVisibilityDomain::ManagerWorker,
+            GroupStrategy::StateMachine => bcs_domain::MessageVisibilityDomain::StateMachine,
+        };
+        let audience = (visibility_domain != bcs_domain::MessageVisibilityDomain::Chat)
+            .then_some(bcs_domain::MessageAudience::FullOnly);
+        if human_view
+            .is_some_and(|view| !view.allows_artifact(visibility_domain, audience.as_ref()))
+        {
+            return Vec::new();
+        }
         let snapshots = self
             .pending_messages
             .list_pending(&group.id, session_id)
@@ -441,7 +475,10 @@ fn parse_message_attachment(v: &serde_json::Value) -> Option<MessageAttachment> 
             .and_then(|t| serde_json::from_value(t.clone()).ok())
             .unwrap_or(bcs_domain::AttachmentType::Image),
         file_name: obj.get("file_name")?.as_str()?.to_string(),
-        mime_type: obj.get("mime_type").and_then(|v| v.as_str()).map(String::from),
+        mime_type: obj
+            .get("mime_type")
+            .and_then(|v| v.as_str())
+            .map(String::from),
         size: obj.get("size").and_then(|v| v.as_u64()),
         sha256: obj.get("sha256").and_then(|v| v.as_str()).map(String::from),
         url: None,
@@ -453,17 +490,26 @@ fn persisted_to_group_message(
     pm: bcs_domain::PersistedMessage,
     bot_name: Option<String>,
 ) -> GroupMessage {
-    let is_persisted_bcs_ui = matches!(
+    let uses_stable_client_message_id = matches!(
         pm.message_type.as_str(),
-        STATE_MACHINE_PANEL_MESSAGE_TYPE | SESSION_OPENING_MESSAGE_TYPE
+        STATE_MACHINE_PANEL_MESSAGE_TYPE
+            | STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE
+            | STATE_MACHINE_HUMAN_INPUT_RESPONSE_MESSAGE_TYPE
+            | SESSION_OPENING_MESSAGE_TYPE
     );
-    let message_id = if is_persisted_bcs_ui {
+    let message_id = if uses_stable_client_message_id {
         pm.client_msg_id
             .clone()
             .unwrap_or_else(|| pm.message_id.clone())
     } else {
         pm.message_id.clone()
     };
+    let is_persisted_bcs_ui = matches!(
+        pm.message_type.as_str(),
+        STATE_MACHINE_PANEL_MESSAGE_TYPE
+            | STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE
+            | SESSION_OPENING_MESSAGE_TYPE
+    );
     let bcs_bot_name = is_persisted_bcs_ui.then(|| {
         pm.content
             .get("bot_name")
@@ -484,10 +530,9 @@ fn persisted_to_group_message(
             let (text, attachments) = extract_text_and_attachments(&pm.content);
             (role, None, text, attachments)
         }
-        STATE_MACHINE_PANEL_MESSAGE_TYPE | SESSION_OPENING_MESSAGE_TYPE => {
-            // TODO(sm-history-node-expansion): expand this persisted panel anchor
-            // into node task/output messages after pagination and cursor semantics
-            // for expanded state-machine history are defined.
+        STATE_MACHINE_PANEL_MESSAGE_TYPE
+        | STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE
+        | SESSION_OPENING_MESSAGE_TYPE => {
             let text = pm
                 .content
                 .get("text")
@@ -497,9 +542,20 @@ fn persisted_to_group_message(
             let metadata = pm.content.get("metadata").cloned();
             (MessageRole::Assistant, metadata, text, None)
         }
+        STATE_MACHINE_HUMAN_INPUT_RESPONSE_MESSAGE_TYPE => {
+            let text = pm
+                .content
+                .get("text")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let metadata = pm.content.get("metadata").cloned();
+            (MessageRole::User, metadata, text, None)
+        }
         "tool_call" => {
             let metadata = build_tool_call_metadata(&pm.content);
-            let text = pm.content
+            let text = pm
+                .content
                 .get("result")
                 .map(|r| extract_tool_result_text(r))
                 .unwrap_or_else(|| pm.content.to_string());
@@ -544,7 +600,10 @@ async fn enrich_message_attachments(
         return;
     };
     for att in atts.iter_mut() {
-        match svc.share_mint_for_history(session_id, &att.attachment_id, ttl).await {
+        match svc
+            .share_mint_for_history(session_id, &att.attachment_id, ttl)
+            .await
+        {
             Ok(minted) => {
                 att.url = Some(minted.share_url);
                 att.expires_at = Some(minted.expires_at);
@@ -573,13 +632,9 @@ impl GroupMessageHistoryService for MessageService {
         options: MessageHistoryOptions,
     ) -> Result<GroupHistoryResult, GroupUseCaseError> {
         let hide_opening_message = matches!(&cmd.caller, CallerContext::Bot(_));
-        let group = self
-            .group
-            .get(&cmd.group_id)
-            .await
-            .ok_or_else(|| {
-                GroupUseCaseError::Service(ServiceError::GroupNotFound(cmd.group_id.clone()))
-            })?;
+        let group = self.group.get(&cmd.group_id).await.ok_or_else(|| {
+            GroupUseCaseError::Service(ServiceError::GroupNotFound(cmd.group_id.clone()))
+        })?;
 
         if group.group_strategy == GroupStrategy::ManagerWorker {
             return Err(GroupUseCaseError::Service(ServiceError::InvalidOperation {
@@ -596,6 +651,7 @@ impl GroupMessageHistoryService for MessageService {
                 "get_history: new Chat group, querying MessageRepoPort"
             );
             let owner_filter = Self::chat_owner_filter_for_view(cmd.view_bot_id.as_deref());
+            let human_view = Self::human_message_view(&group, None, cmd.view_bot_id.as_deref());
             let query = MessageQuery {
                 group_id: cmd.group_id.clone(),
                 session_id: String::new(),
@@ -607,6 +663,7 @@ impl GroupMessageHistoryService for MessageService {
                 owner_filter: owner_filter.clone(),
                 time_range: None,
                 visible_from_seq: None,
+                human_view: human_view.clone(),
             };
             let page = self.message_repo.query_messages(query).await.map_err(|e| {
                 GroupUseCaseError::Service(ServiceError::InternalError(format!(
@@ -618,14 +675,9 @@ impl GroupMessageHistoryService for MessageService {
                 std::collections::HashMap::new();
             let mut messages: Vec<GroupMessage> = {
                 let mut result = Vec::with_capacity(page.messages.len());
-                for pm in page
-                    .messages
-                    .into_iter()
-                    .filter(|message| {
-                        !hide_opening_message
-                            || message.message_type != SESSION_OPENING_MESSAGE_TYPE
-                    })
-                {
+                for pm in page.messages.into_iter().filter(|message| {
+                    !hide_opening_message || message.message_type != SESSION_OPENING_MESSAGE_TYPE
+                }) {
                     let bot_name = match bot_names.entry(pm.sender_id.clone()) {
                         std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
                         std::collections::hash_map::Entry::Vacant(e) => {
@@ -683,15 +735,12 @@ impl GroupMessageHistoryService for MessageService {
                     None,
                     None,
                     &owner_filter,
+                    human_view.as_ref(),
                     cmd.before,
                 )
                 .await;
-            let (messages, next_before) = merge_history_window(
-                messages,
-                pending,
-                limit,
-                durable_next_before,
-            );
+            let (messages, next_before) =
+                merge_history_window(messages, pending, limit, durable_next_before);
             Ok(GroupHistoryResult {
                 group_id: cmd.group_id,
                 messages,
@@ -727,27 +776,65 @@ impl GroupMessageHistoryService for MessageService {
 
         // Chat and ManagerWorker use independent cutoffs for the new message store path.
         let group_opt = self.group.get(&cmd.group_id).await;
+        let human_view = group_opt.as_ref().and_then(|group| {
+            Self::human_message_view(group, session.as_ref(), cmd.view_bot_id.as_deref())
+        });
+        // Legacy provider transcripts do not carry visibility domain/audience
+        // metadata and therefore cannot be projected safely. Participant views
+        // always read the classified durable store, while Full keeps the exact
+        // pre-feature cutoff/fallback behavior.
+        let requires_participant_projection = human_view
+            .as_ref()
+            .is_some_and(|view| view.scope == MessageViewScope::Participant);
+        if requires_participant_projection && session.is_none() {
+            info!(
+                session_id = %session_id,
+                "get_session_history: participant view has no classified session; returning empty history"
+            );
+            return Ok(SessionHistoryResult {
+                session_id,
+                messages: Vec::new(),
+                limit: cmd.limit,
+                before: cmd.before,
+                next_before: None,
+            });
+        }
         let use_new_path = match group_opt.as_ref() {
-            Some(group) => self.should_use_new_path(group, session.as_ref()),
+            Some(group) => {
+                requires_participant_projection
+                    || self.should_use_new_path(group, session.as_ref())
+            }
             None => false,
         };
-
         if use_new_path {
             let sess = session.as_ref().unwrap();
             let limit = self.effective_limit(cmd.limit);
-            let (owner_filter, visible_from_seq) = Self::compute_session_history_query(
+            let (legacy_owner_filter, visible_from_seq) = Self::compute_session_history_query(
                 group_opt.as_ref().unwrap(),
                 sess,
                 cmd.view_bot_id.as_deref(),
                 self.new_participant_visible_limit,
             )?;
-            let merge_public_opening_message = !hide_opening_message
-                && matches!(&owner_filter, MessageOwnerFilter::Eq(_));
+            let owner_filter = if human_view
+                .as_ref()
+                .is_some_and(|view| view.scope == MessageViewScope::Participant)
+                && group_opt.as_ref().unwrap().group_strategy != GroupStrategy::Chat
+            {
+                // Participant projections must inspect public and directed
+                // collaboration records before applying Domain/Audience. Full
+                // Human views keep the pre-feature owner filter unchanged.
+                MessageOwnerFilter::Any
+            } else {
+                legacy_owner_filter
+            };
+            let merge_public_opening_message =
+                !hide_opening_message && matches!(&owner_filter, MessageOwnerFilter::Eq(_));
 
             info!(
                 session_id = %session_id,
                 limit,
                 visible_from_seq,
+                human_view = ?human_view,
                 owner_filter = ?owner_filter,
                 "get_session_history: new session, querying MessageRepoPort"
             );
@@ -763,6 +850,7 @@ impl GroupMessageHistoryService for MessageService {
                 owner_filter: owner_filter.clone(),
                 time_range: None,
                 visible_from_seq,
+                human_view: human_view.clone(),
             };
             let mut page = self.message_repo.query_messages(query).await.map_err(|e| {
                 GroupUseCaseError::Service(ServiceError::InternalError(format!(
@@ -784,6 +872,7 @@ impl GroupMessageHistoryService for MessageService {
                         owner_filter: MessageOwnerFilter::IsNull,
                         time_range: None,
                         visible_from_seq: None,
+                        human_view: human_view.clone(),
                     })
                     .await
                     .map_err(|error| {
@@ -815,14 +904,9 @@ impl GroupMessageHistoryService for MessageService {
                 std::collections::HashMap::new();
             let messages: Vec<GroupMessage> = {
                 let mut result = Vec::with_capacity(page.messages.len());
-                for pm in page
-                    .messages
-                    .into_iter()
-                    .filter(|message| {
-                        !hide_opening_message
-                            || message.message_type != SESSION_OPENING_MESSAGE_TYPE
-                    })
-                {
+                for pm in page.messages.into_iter().filter(|message| {
+                    !hide_opening_message || message.message_type != SESSION_OPENING_MESSAGE_TYPE
+                }) {
                     let bot_name = match bot_names.entry(pm.sender_id.clone()) {
                         std::collections::hash_map::Entry::Occupied(e) => e.get().clone(),
                         std::collections::hash_map::Entry::Vacant(e) => {
@@ -866,15 +950,12 @@ impl GroupMessageHistoryService for MessageService {
                     Some(sess),
                     Some(&session_id),
                     &owner_filter,
+                    human_view.as_ref(),
                     cmd.before,
                 )
                 .await;
-            let (messages, next_before) = merge_history_window(
-                messages,
-                pending,
-                limit,
-                durable_next_before,
-            );
+            let (messages, next_before) =
+                merge_history_window(messages, pending, limit, durable_next_before);
             Ok(SessionHistoryResult {
                 session_id,
                 messages,
@@ -924,6 +1005,7 @@ impl GroupMessageHistoryService for MessageService {
                     owner_filter: owner_filter.clone(),
                     time_range: None,
                     visible_from_seq: None,
+                    human_view: human_view.clone(),
                 })
                 .await
                 .map_err(|error| {
@@ -947,6 +1029,7 @@ impl GroupMessageHistoryService for MessageService {
                         owner_filter: MessageOwnerFilter::IsNull,
                         time_range: None,
                         visible_from_seq: None,
+                        human_view: human_view.clone(),
                     })
                     .await
                     .map_err(|error| {
@@ -1004,13 +1087,13 @@ mod tests {
     use bcs_group::GroupCore;
     use bcs_message_store::MemoryMessageRepo;
     use bcs_service_api::{
+        BotActor, CallerContext, Group, HumanActor, MessageRole, Participant, ParticipantRole,
+        PendingGroupMessage, PendingGroupMessagePort, SessionKind,
         application::session_files::{
             CapabilitiesView, DeleteFileCommand, DownloadRoute, PrepareUploadCommand,
             PrepareUploadResult, SessionFileService, SessionFileUseCaseError, ShareConsumeResult,
             ShareMintCommand, ShareMintResult,
         },
-        BotActor, CallerContext, Group, HumanActor, MessageRole, Participant, ParticipantRole,
-        PendingGroupMessage, PendingGroupMessagePort, SessionKind,
         port::repo::{
             MessageRepoError, NewSessionParams, SessionFileListPage, SessionFileListParams,
             SessionRepoPort,
@@ -1185,7 +1268,10 @@ mod tests {
         let mut msg = att_msg();
         enrich_message_attachments(&svc, "sid", 3600, &mut msg).await;
         let att = &msg.attachments.as_ref().unwrap()[0];
-        assert_eq!(att.url.as_deref(), Some("https://bcs/sessions/shared-file/content?token=x"));
+        assert_eq!(
+            att.url.as_deref(),
+            Some("https://bcs/sessions/shared-file/content?token=x")
+        );
         assert_eq!(att.expires_at, Some(9999));
     }
 
@@ -1327,7 +1413,11 @@ mod tests {
         }
     }
 
-    fn session_cmd(group_id: &str, session_id: &str, view_bot_id: Option<&str>) -> SessionHistoryCommand {
+    fn session_cmd(
+        group_id: &str,
+        session_id: &str,
+        view_bot_id: Option<&str>,
+    ) -> SessionHistoryCommand {
         SessionHistoryCommand {
             caller: CallerContext::Public,
             group_id: group_id.to_string(),
@@ -1430,6 +1520,17 @@ mod tests {
             created_at: 1,
             run_id: String::new(),
             owner_bot_id: owner_bot_id.map(str::to_string),
+            visibility_domain: if owner_bot_id.is_some() {
+                bcs_domain::MessageVisibilityDomain::ManagerWorker
+            } else {
+                bcs_domain::MessageVisibilityDomain::Chat
+            },
+            audience: Some(match owner_bot_id {
+                Some(owner) => bcs_domain::MessageAudience::Directed {
+                    actor_ids: vec![owner.to_string()],
+                },
+                None => bcs_domain::MessageAudience::Public,
+            }),
         })
         .await
         .expect("append history");
@@ -1437,13 +1538,8 @@ mod tests {
 
     #[tokio::test]
     async fn manager_worker_pending_history_reuses_durable_owner_visibility() {
-        let (mut service, _repo, _sessions, _fallback, session_id) = service_fixture(
-            GroupStrategy::ManagerWorker,
-            0,
-            0,
-            Vec::new(),
-        )
-        .await;
+        let (mut service, _repo, _sessions, _fallback, session_id) =
+            service_fixture(GroupStrategy::ManagerWorker, 0, 0, Vec::new()).await;
         service.pending_messages = Arc::new(StaticPendingMessages(vec![
             PendingGroupMessage {
                 run_id: "manager-run".to_string(),
@@ -1493,9 +1589,26 @@ mod tests {
             .expect("human history");
         assert_eq!(human.messages.len(), 1);
         assert_eq!(human.messages[0].run_id, "manager-run");
-        assert_eq!(
-            human.messages[0].id,
-            "bcs-run:manager-run:mgr"
+        assert_eq!(human.messages[0].id, "bcs-run:manager-run:mgr");
+
+        let mut participant_human = Participant::human("human-1", ParticipantRole::Observer);
+        participant_human.message_view_scope = MessageViewScope::Participant;
+        _sessions
+            .add_participant(&session_id, participant_human)
+            .await
+            .expect("add participant Human");
+        let participant_history = service
+            .get_session_history_with_options(
+                session_cmd("group-1", &session_id, Some("human-1")),
+                MessageHistoryOptions {
+                    include_pending: true,
+                },
+            )
+            .await
+            .expect("participant Human history");
+        assert!(
+            participant_history.messages.is_empty(),
+            "participant Human must not receive FullOnly pending ManagerWorker content"
         );
 
         let worker = service
@@ -1568,7 +1681,15 @@ mod tests {
     async fn chat_history_uses_chat_cutoff_and_keeps_owner_filter_disabled() {
         let (service, repo, _sessions, fallback, session_id) =
             service_fixture(GroupStrategy::Chat, 0, u64::MAX, Vec::new()).await;
-        append_history(&repo, "group-1", &session_id, "bot-a", "visible", Some("worker-a")).await;
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "bot-a",
+            "visible",
+            Some("worker-a"),
+        )
+        .await;
 
         let result = service
             .get_session_history(session_cmd("group-1", &session_id, Some("worker-a")))
@@ -1581,13 +1702,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn state_machine_panel_round_trips_through_chat_session_history() {
-        let (service, repo, _sessions, fallback, session_id) =
+    async fn public_state_machine_panel_round_trips_for_participant_chat_history() {
+        let (service, repo, sessions, fallback, session_id) =
             service_fixture(GroupStrategy::Chat, 0, u64::MAX, Vec::new()).await;
+        let mut human = Participant::human("human-1", ParticipantRole::Observer);
+        human.message_view_scope = MessageViewScope::Participant;
+        sessions
+            .add_participant(&session_id, human)
+            .await
+            .expect("add participant Human");
         let run_id = "sm-run-1";
         let stable_message_id = format!("{run_id}:000-panel");
-        let panel_content =
-            "<AixUI type=\"panel\" component=\"bcsPanel.StateMachineRunView\" />";
+        let panel_content = "<AixUI type=\"panel\" component=\"bcsPanel.StateMachineRunView\" />";
         repo.append_message(NewMessage {
             group_id: "group-1".to_string(),
             session_id: session_id.clone(),
@@ -1609,12 +1735,14 @@ mod tests {
             created_at: 2,
             run_id: run_id.to_string(),
             owner_bot_id: None,
+            visibility_domain: bcs_domain::MessageVisibilityDomain::StateMachine,
+            audience: Some(bcs_domain::MessageAudience::Public),
         })
         .await
         .expect("append state-machine panel");
 
         let result = service
-            .get_session_history(session_cmd("group-1", &session_id, None))
+            .get_session_history(session_cmd("group-1", &session_id, Some("human-1")))
             .await
             .expect("state-machine panel history");
 
@@ -1635,6 +1763,131 @@ mod tests {
                 .as_ref()
                 .and_then(|metadata| metadata["state_machine"]["event"].as_str()),
             Some("panel")
+        );
+    }
+
+    #[tokio::test]
+    async fn directed_human_input_prompt_round_trips_through_manager_worker_history() {
+        let (service, repo, sessions, fallback, session_id) =
+            service_fixture(GroupStrategy::ManagerWorker, 0, 0, Vec::new()).await;
+        let mut human = Participant::human("human_1001", ParticipantRole::Observer);
+        human.message_view_scope = MessageViewScope::Participant;
+        sessions
+            .add_participant(&session_id, human)
+            .await
+            .expect("add assigned Human participant");
+        let stable_message_id = "sm-run-1:review:1:human-input-prompt";
+        let prompt = "回复\"确认\"表示方向通过。";
+        repo.append_message(NewMessage {
+            group_id: "group-1".to_string(),
+            session_id: session_id.clone(),
+            sender_id: bcs_domain::BCS_STATE_MACHINE_MESSAGE_SENDER.to_string(),
+            sender_type: SenderType::Bot,
+            message_type: STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE.to_string(),
+            content: serde_json::json!({
+                "text": prompt,
+                "bot_name": BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
+                "metadata": {
+                    "state_machine": {
+                        "event": "human_input_prompt",
+                        "run_id": "sm-run-1",
+                        "node_id": "review",
+                    }
+                }
+            }),
+            client_msg_id: Some(stable_message_id.to_string()),
+            created_at: 2,
+            run_id: "sm-run-1".to_string(),
+            owner_bot_id: None,
+            visibility_domain: bcs_domain::MessageVisibilityDomain::StateMachine,
+            audience: Some(bcs_domain::MessageAudience::Directed {
+                actor_ids: vec!["human_1001".to_string()],
+            }),
+        })
+        .await
+        .expect("append directed HumanInput prompt");
+
+        let result = service
+            .get_session_history(session_cmd("group-1", &session_id, Some("human_1001")))
+            .await
+            .expect("assigned Human history");
+
+        assert_eq!(fallback.session_calls().await, 0);
+        assert_eq!(result.messages.len(), 1);
+        let message = &result.messages[0];
+        assert_eq!(message.id, stable_message_id);
+        assert_eq!(message.content, prompt);
+        assert_eq!(
+            message.bot_name.as_deref(),
+            Some(BCS_STATE_MACHINE_MESSAGE_SENDER_NAME)
+        );
+        assert_eq!(message.role, MessageRole::Assistant);
+        assert_eq!(
+            message
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata["state_machine"]["event"].as_str()),
+            Some("human_input_prompt")
+        );
+    }
+
+    #[tokio::test]
+    async fn directed_human_input_response_round_trips_as_user_message() {
+        let (service, repo, sessions, fallback, session_id) =
+            service_fixture(GroupStrategy::ManagerWorker, 0, 0, Vec::new()).await;
+        let mut human = Participant::human("human_1001", ParticipantRole::Observer);
+        human.message_view_scope = MessageViewScope::Participant;
+        sessions
+            .add_participant(&session_id, human)
+            .await
+            .expect("add responding Human participant");
+        let stable_message_id = "sm-run-1:review:0:1-output";
+        repo.append_message(NewMessage {
+            group_id: "group-1".to_string(),
+            session_id: session_id.clone(),
+            sender_id: "human_1001".to_string(),
+            sender_type: SenderType::Human,
+            message_type: STATE_MACHINE_HUMAN_INPUT_RESPONSE_MESSAGE_TYPE.to_string(),
+            content: serde_json::json!({
+                "text": "通过",
+                "metadata": {
+                    "state_machine": {
+                        "event": "output",
+                        "run_id": "sm-run-1",
+                        "node_id": "review",
+                    }
+                }
+            }),
+            client_msg_id: Some(stable_message_id.to_string()),
+            created_at: 3,
+            run_id: "sm-run-1".to_string(),
+            owner_bot_id: None,
+            visibility_domain: bcs_domain::MessageVisibilityDomain::StateMachine,
+            audience: Some(bcs_domain::MessageAudience::Directed {
+                actor_ids: vec!["human_1001".to_string()],
+            }),
+        })
+        .await
+        .expect("append directed HumanInput response");
+
+        let result = service
+            .get_session_history(session_cmd("group-1", &session_id, Some("human_1001")))
+            .await
+            .expect("responding Human history");
+
+        assert_eq!(fallback.session_calls().await, 0);
+        assert_eq!(result.messages.len(), 1);
+        let message = &result.messages[0];
+        assert_eq!(message.id, stable_message_id);
+        assert_eq!(message.content, "通过");
+        assert_eq!(message.sender, "human_1001");
+        assert_eq!(message.role, MessageRole::User);
+        assert_eq!(
+            message
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata["state_machine"]["event"].as_str()),
+            Some("output")
         );
     }
 
@@ -1663,6 +1916,8 @@ mod tests {
             created_at: 1,
             run_id: format!("{session_id}:opening"),
             owner_bot_id: None,
+            visibility_domain: bcs_domain::MessageVisibilityDomain::Chat,
+            audience: Some(bcs_domain::MessageAudience::Public),
         })
         .await
         .expect("append opening message");
@@ -1737,6 +1992,8 @@ mod tests {
                 created_at,
                 run_id: run_id.to_string(),
                 owner_bot_id: None,
+                visibility_domain: bcs_domain::MessageVisibilityDomain::StateMachine,
+                audience: Some(bcs_domain::MessageAudience::FullOnly),
             })
             .await
             .expect("append state-machine panel");
@@ -1752,6 +2009,8 @@ mod tests {
             created_at: 3,
             run_id: String::new(),
             owner_bot_id: None,
+            visibility_domain: bcs_domain::MessageVisibilityDomain::Chat,
+            audience: Some(bcs_domain::MessageAudience::Public),
         })
         .await
         .expect("append ordinary message");
@@ -1789,6 +2048,93 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pre_cutoff_participant_reads_only_classified_durable_history() {
+        let (service, repo, sessions, fallback, session_id) = service_fixture(
+            GroupStrategy::ManagerWorker,
+            0,
+            u64::MAX,
+            vec![fallback_message("unclassified worker reply")],
+        )
+        .await;
+        let mut human = Participant::human("human-1", ParticipantRole::Observer);
+        human.message_view_scope = MessageViewScope::Participant;
+        sessions
+            .add_participant(&session_id, human)
+            .await
+            .expect("add participant Human");
+        for (sender_id, content, audience, created_at) in [
+            (
+                "worker-a",
+                "classified worker reply",
+                bcs_domain::MessageAudience::FullOnly,
+                2,
+            ),
+            (
+                "mgr",
+                "public manager announcement",
+                bcs_domain::MessageAudience::Public,
+                3,
+            ),
+        ] {
+            repo.append_message(NewMessage {
+                group_id: "group-1".to_string(),
+                session_id: session_id.clone(),
+                sender_id: sender_id.to_string(),
+                sender_type: SenderType::Bot,
+                message_type: "chat".to_string(),
+                content: serde_json::Value::String(content.to_string()),
+                client_msg_id: None,
+                created_at,
+                run_id: String::new(),
+                owner_bot_id: None,
+                visibility_domain: bcs_domain::MessageVisibilityDomain::ManagerWorker,
+                audience: Some(audience),
+            })
+            .await
+            .expect("append classified history");
+        }
+
+        let result = service
+            .get_session_history(session_cmd("group-1", &session_id, Some("human-1")))
+            .await
+            .expect("participant history");
+
+        assert_eq!(fallback.session_calls().await, 0);
+        assert_eq!(result.messages.len(), 1);
+        assert_eq!(result.messages[0].content, "public manager announcement");
+    }
+
+    #[tokio::test]
+    async fn pre_cutoff_participant_without_classified_session_does_not_use_fallback() {
+        let (service, _repo, sessions, fallback, session_id) = service_fixture(
+            GroupStrategy::ManagerWorker,
+            0,
+            u64::MAX,
+            vec![fallback_message("unclassified worker reply")],
+        )
+        .await;
+        let mut human = Participant::human("human-1", ParticipantRole::Observer);
+        human.message_view_scope = MessageViewScope::Participant;
+        service
+            .group
+            .add_participant("group-1", human)
+            .await
+            .expect("add group participant Human");
+        sessions
+            .delete(&session_id)
+            .await
+            .expect("delete classified session");
+
+        let result = service
+            .get_session_history(session_cmd("group-1", &session_id, Some("human-1")))
+            .await
+            .expect("participant history");
+
+        assert_eq!(fallback.session_calls().await, 0);
+        assert!(result.messages.is_empty());
+    }
+
+    #[tokio::test]
     async fn pre_cutoff_manager_worker_merges_opening_message_only_for_humans() {
         let (service, repo, _sessions, fallback, session_id) = service_fixture(
             GroupStrategy::ManagerWorker,
@@ -1818,6 +2164,8 @@ mod tests {
             created_at: 2,
             run_id: format!("{session_id}:opening"),
             owner_bot_id: None,
+            visibility_domain: bcs_domain::MessageVisibilityDomain::ManagerWorker,
+            audience: Some(bcs_domain::MessageAudience::Public),
         })
         .await
         .expect("append opening message");
@@ -1831,10 +2179,12 @@ mod tests {
             .get_session_history(human_command)
             .await
             .expect("human legacy history");
-        assert!(human_result
-            .messages
-            .iter()
-            .any(|message| message.id == stable_message_id));
+        assert!(
+            human_result
+                .messages
+                .iter()
+                .any(|message| message.id == stable_message_id)
+        );
 
         let mut bot_command = session_cmd("group-1", &session_id, Some("worker-a"));
         bot_command.caller = CallerContext::Bot(BotActor {
@@ -1844,10 +2194,12 @@ mod tests {
             .get_session_history(bot_command)
             .await
             .expect("bot legacy history");
-        assert!(bot_result
-            .messages
-            .iter()
-            .all(|message| message.id != stable_message_id));
+        assert!(
+            bot_result
+                .messages
+                .iter()
+                .all(|message| message.id != stable_message_id)
+        );
         assert_eq!(fallback.session_calls().await, 2);
     }
 
@@ -1884,6 +2236,8 @@ mod tests {
             created_at: 2,
             run_id: run_id.to_string(),
             owner_bot_id: None,
+            visibility_domain: bcs_domain::MessageVisibilityDomain::StateMachine,
+            audience: Some(bcs_domain::MessageAudience::FullOnly),
         })
         .await
         .expect("append state-machine panel");
@@ -1930,9 +2284,33 @@ mod tests {
     async fn manager_worker_worker_view_filters_by_worker_owner_after_cutoff() {
         let (service, repo, _sessions, fallback, session_id) =
             service_fixture(GroupStrategy::ManagerWorker, 0, 0, Vec::new()).await;
-        append_history(&repo, "group-1", &session_id, "human_1", "public-human", None).await;
-        append_history(&repo, "group-1", &session_id, "worker-a", "a-only", Some("worker-a")).await;
-        append_history(&repo, "group-1", &session_id, "worker-b", "b-only", Some("worker-b")).await;
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "human_1",
+            "public-human",
+            None,
+        )
+        .await;
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "worker-a",
+            "a-only",
+            Some("worker-a"),
+        )
+        .await;
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "worker-b",
+            "b-only",
+            Some("worker-b"),
+        )
+        .await;
 
         let result = service
             .get_session_history(session_cmd("group-1", &session_id, Some("worker-a")))
@@ -1969,6 +2347,8 @@ mod tests {
             created_at: 1,
             run_id: format!("{session_id}:opening"),
             owner_bot_id: None,
+            visibility_domain: bcs_domain::MessageVisibilityDomain::ManagerWorker,
+            audience: Some(bcs_domain::MessageAudience::Public),
         })
         .await
         .expect("append opening message");
@@ -2021,10 +2401,34 @@ mod tests {
     async fn manager_worker_manager_view_reads_public_rows_after_cutoff() {
         let (service, repo, _sessions, fallback, session_id) =
             service_fixture(GroupStrategy::ManagerWorker, 0, 0, Vec::new()).await;
-        append_history(&repo, "group-1", &session_id, "human_1", "public-human", None).await;
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "human_1",
+            "public-human",
+            None,
+        )
+        .await;
         append_history(&repo, "group-1", &session_id, "mgr", "public-manager", None).await;
-        append_history(&repo, "group-1", &session_id, "worker-a", "a-only", Some("worker-a")).await;
-        append_history(&repo, "group-1", &session_id, "worker-b", "b-only", Some("worker-b")).await;
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "worker-a",
+            "a-only",
+            Some("worker-a"),
+        )
+        .await;
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "worker-b",
+            "b-only",
+            Some("worker-b"),
+        )
+        .await;
 
         let result = service
             .get_session_history(session_cmd("group-1", &session_id, Some("mgr")))
@@ -2039,11 +2443,34 @@ mod tests {
 
     #[tokio::test]
     async fn manager_worker_human_view_reads_public_rows_after_cutoff() {
-        let (service, repo, _sessions, fallback, session_id) =
+        let (service, repo, sessions, fallback, session_id) =
             service_fixture(GroupStrategy::ManagerWorker, 0, 0, Vec::new()).await;
-        append_history(&repo, "group-1", &session_id, "human_1", "public-human", None).await;
+        sessions
+            .add_participant(
+                &session_id,
+                Participant::human("human_1", ParticipantRole::Observer),
+            )
+            .await
+            .expect("add full Human participant");
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "human_1",
+            "public-human",
+            None,
+        )
+        .await;
         append_history(&repo, "group-1", &session_id, "mgr", "public-manager", None).await;
-        append_history(&repo, "group-1", &session_id, "worker-a", "a-only", Some("worker-a")).await;
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "worker-a",
+            "a-only",
+            Some("worker-a"),
+        )
+        .await;
 
         let result = service
             .get_session_history(session_cmd("group-1", &session_id, Some("human_1")))
@@ -2060,10 +2487,22 @@ mod tests {
     async fn manager_worker_unknown_view_bot_is_rejected_after_cutoff() {
         let (service, repo, _sessions, _fallback, session_id) =
             service_fixture(GroupStrategy::ManagerWorker, 0, 0, Vec::new()).await;
-        append_history(&repo, "group-1", &session_id, "human_1", "public-human", None).await;
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "human_1",
+            "public-human",
+            None,
+        )
+        .await;
 
         let err = service
-            .get_session_history(session_cmd("group-1", &session_id, Some("not-a-participant")))
+            .get_session_history(session_cmd(
+                "group-1",
+                &session_id,
+                Some("not-a-participant"),
+            ))
             .await
             .expect_err("unknown view bot should not read public history");
 
@@ -2080,8 +2519,24 @@ mod tests {
     async fn manager_worker_history_without_view_owner_reads_public_rows_after_cutoff() {
         let (service, repo, _sessions, fallback, session_id) =
             service_fixture(GroupStrategy::ManagerWorker, 0, 0, Vec::new()).await;
-        append_history(&repo, "group-1", &session_id, "human_1", "public-human", None).await;
-        append_history(&repo, "group-1", &session_id, "worker-a", "a-only", Some("worker-a")).await;
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "human_1",
+            "public-human",
+            None,
+        )
+        .await;
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "worker-a",
+            "a-only",
+            Some("worker-a"),
+        )
+        .await;
 
         let result = service
             .get_session_history(session_cmd("group-1", &session_id, None))
@@ -2097,9 +2552,33 @@ mod tests {
     async fn chat_bot_viewer_sees_public_and_own_system_copies_not_others() {
         let (service, repo, _sessions, fallback, session_id) =
             service_fixture(GroupStrategy::Chat, 0, u64::MAX, Vec::new()).await;
-        append_history(&repo, "group-1", &session_id, "human_1", "public-human", None).await;
-        append_history(&repo, "group-1", &session_id, "system", "sys-to-worker-a", Some("worker-a")).await;
-        append_history(&repo, "group-1", &session_id, "system", "sys-to-worker-b", Some("worker-b")).await;
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "human_1",
+            "public-human",
+            None,
+        )
+        .await;
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "system",
+            "sys-to-worker-a",
+            Some("worker-a"),
+        )
+        .await;
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "system",
+            "sys-to-worker-b",
+            Some("worker-b"),
+        )
+        .await;
 
         // worker-a view: public + own system copy; NOT worker-b's copy.
         let res_a = service
@@ -2109,15 +2588,21 @@ mod tests {
         let contents_a: Vec<&str> = res_a.messages.iter().map(|m| m.content.as_str()).collect();
         assert!(contents_a.contains(&"public-human"));
         assert!(contents_a.contains(&"sys-to-worker-a"));
-        assert!(!contents_a.contains(&"sys-to-worker-b"),
-            "other bot's system copy must be hidden under PublicOrOwner");
+        assert!(
+            !contents_a.contains(&"sys-to-worker-b"),
+            "other bot's system copy must be hidden under PublicOrOwner"
+        );
 
         // no view_bot_id: only public (IsNull).
         let res_none = service
             .get_session_history(session_cmd("group-1", &session_id, None))
             .await
             .expect("public chat history");
-        let contents_none: Vec<&str> = res_none.messages.iter().map(|m| m.content.as_str()).collect();
+        let contents_none: Vec<&str> = res_none
+            .messages
+            .iter()
+            .map(|m| m.content.as_str())
+            .collect();
         assert!(contents_none.contains(&"public-human"));
         assert!(!contents_none.contains(&"sys-to-worker-a"));
         assert!(!contents_none.contains(&"sys-to-worker-b"));
@@ -2128,9 +2613,33 @@ mod tests {
     async fn mw_manager_viewer_sees_public_and_own_system_copies() {
         let (service, repo, _sessions, _fallback, session_id) =
             service_fixture(GroupStrategy::ManagerWorker, 0, 0, Vec::new()).await;
-        append_history(&repo, "group-1", &session_id, "human_1", "public-human", None).await;
-        append_history(&repo, "group-1", &session_id, "system", "sys-to-manager", Some("mgr")).await;
-        append_history(&repo, "group-1", &session_id, "system", "sys-to-worker-a", Some("worker-a")).await;
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "human_1",
+            "public-human",
+            None,
+        )
+        .await;
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "system",
+            "sys-to-manager",
+            Some("mgr"),
+        )
+        .await;
+        append_history(
+            &repo,
+            "group-1",
+            &session_id,
+            "system",
+            "sys-to-worker-a",
+            Some("worker-a"),
+        )
+        .await;
 
         let res = service
             .get_session_history(session_cmd("group-1", &session_id, Some("mgr")))
@@ -2138,8 +2647,10 @@ mod tests {
             .expect("manager history");
         let contents: Vec<&str> = res.messages.iter().map(|m| m.content.as_str()).collect();
         assert!(contents.contains(&"public-human"));
-        assert!(contents.contains(&"sys-to-manager"),
-            "manager now sees own system copy under PublicOrOwner(mgr)");
+        assert!(
+            contents.contains(&"sys-to-manager"),
+            "manager now sees own system copy under PublicOrOwner(mgr)"
+        );
         assert!(!contents.contains(&"sys-to-worker-a"));
     }
 
@@ -2162,14 +2673,20 @@ mod tests {
         let contents_a: Vec<&str> = res_a.messages.iter().map(|m| m.content.as_str()).collect();
         assert!(contents_a.contains(&"public-human"));
         assert!(contents_a.contains(&"sys-to-a"));
-        assert!(!contents_a.contains(&"sys-to-b"),
-            "get_history must now honor view_bot_id (was hardcoded Any)");
+        assert!(
+            !contents_a.contains(&"sys-to-b"),
+            "get_history must now honor view_bot_id (was hardcoded Any)"
+        );
 
         let res_none = service
             .get_history(group_cmd(gid, None))
             .await
             .expect("public group history");
-        let contents_none: Vec<&str> = res_none.messages.iter().map(|m| m.content.as_str()).collect();
+        let contents_none: Vec<&str> = res_none
+            .messages
+            .iter()
+            .map(|m| m.content.as_str())
+            .collect();
         assert!(contents_none.contains(&"public-human"));
         assert!(!contents_none.contains(&"sys-to-a"));
         assert!(!contents_none.contains(&"sys-to-b"));
@@ -2187,20 +2704,28 @@ mod tests {
     /// scoping).
     #[tokio::test]
     async fn system_message_dispatch_round_trips_through_message_service_view_scoping() {
+        use bcs_service_api::SystemMessageDispatcherService;
         use bcs_system_message::SystemMessageDispatcherImpl;
         use bcs_system_message::producers::bot_joined::BotJoinedMessageProducer;
         use bcs_test_support::{
             NoopBotDeliveryPort, NoopBotRegistryCoreService, NoopFrontendDeliveryPort,
             NoopGroupMessageHistoryService,
         };
-        use bcs_service_api::SystemMessageDispatcherService;
 
         let (service, repo, _sessions, _fallback, session_id) =
             service_fixture(GroupStrategy::Chat, 0, u64::MAX, Vec::new()).await;
         let group_id = "group-1";
 
         // A public (owner=None) anchor that must remain visible to every viewer.
-        append_history(&repo, group_id, &session_id, "bot-anchor", "public-anchor", None).await;
+        append_history(
+            &repo,
+            group_id,
+            &session_id,
+            "bot-anchor",
+            "public-anchor",
+            None,
+        )
+        .await;
 
         // Build a REAL dispatcher wired to the SAME MemoryMessageRepo. Delivery
         // ports are noops — persistence happens before delivery, so the
@@ -2234,7 +2759,12 @@ mod tests {
             session_input: None,
         };
         dispatcher
-            .dispatch(event, &group_fixture(group_id, &existing_id), &session_id, &participants)
+            .dispatch(
+                event,
+                &group_fixture(group_id, &existing_id),
+                &session_id,
+                &participants,
+            )
             .await
             .expect("dispatch succeeded");
 
@@ -2245,19 +2775,33 @@ mod tests {
             .get_session_history(session_cmd(group_id, &session_id, Some(&existing_id)))
             .await
             .expect("existing view session history");
-        let existing_contents: Vec<&str> =
-            res_existing.messages.iter().map(|m| m.content.as_str()).collect();
-        assert!(existing_contents.contains(&"public-anchor"),
-            "public owner=None records still visible to mgr");
-        assert!(existing_contents.iter().any(|c| c.contains("已加入协作群")),
-            "public join notice (owner=None) is returned to mgr");
+        let existing_contents: Vec<&str> = res_existing
+            .messages
+            .iter()
+            .map(|m| m.content.as_str())
+            .collect();
+        assert!(
+            existing_contents.contains(&"public-anchor"),
+            "public owner=None records still visible to mgr"
+        );
+        assert!(
+            existing_contents.iter().any(|c| c.contains("已加入协作群")),
+            "public join notice (owner=None) is returned to mgr"
+        );
         assert_eq!(
-            existing_contents.iter().filter(|c| c.contains("已加入协作群")).count(),
+            existing_contents
+                .iter()
+                .filter(|c| c.contains("已加入协作群"))
+                .count(),
             1,
             "the shared notice is a single public record, not per-bot copies"
         );
-        assert!(existing_contents.iter().all(|c| !c.contains("<GroupContext>")),
-            "new-bot's context injection (owner=new-bot) is hidden from mgr");
+        assert!(
+            existing_contents
+                .iter()
+                .all(|c| !c.contains("<GroupContext>")),
+            "new-bot's context injection (owner=new-bot) is hidden from mgr"
+        );
 
         // Viewer = new-bot: sees its own context injection (owner=new-bot) +
         // the public anchor + the public join notice.
@@ -2265,14 +2809,23 @@ mod tests {
             .get_session_history(session_cmd(group_id, &session_id, Some(&new_bot_id)))
             .await
             .expect("new-bot view session history");
-        let new_contents: Vec<&str> =
-            res_new.messages.iter().map(|m| m.content.as_str()).collect();
-        assert!(new_contents.contains(&"public-anchor"),
-            "public owner=None records still visible to new-bot");
-        assert!(new_contents.iter().any(|c| c.contains("<GroupContext>")),
-            "new-bot's own context injection (owner=new-bot) is returned");
-        assert!(new_contents.iter().any(|c| c.contains("已加入协作群")),
-            "public join notice (owner=None) is returned to new-bot");
+        let new_contents: Vec<&str> = res_new
+            .messages
+            .iter()
+            .map(|m| m.content.as_str())
+            .collect();
+        assert!(
+            new_contents.contains(&"public-anchor"),
+            "public owner=None records still visible to new-bot"
+        );
+        assert!(
+            new_contents.iter().any(|c| c.contains("<GroupContext>")),
+            "new-bot's own context injection (owner=new-bot) is returned"
+        );
+        assert!(
+            new_contents.iter().any(|c| c.contains("已加入协作群")),
+            "public join notice (owner=None) is returned to new-bot"
+        );
 
         // Viewer = human (no bot view): sees the public anchor + the public
         // join notice; must NOT see any per-bot owned copy. This is the
@@ -2281,14 +2834,23 @@ mod tests {
             .get_session_history(session_cmd(group_id, &session_id, None))
             .await
             .expect("human view session history");
-        let human_contents: Vec<&str> =
-            res_human.messages.iter().map(|m| m.content.as_str()).collect();
-        assert!(human_contents.contains(&"public-anchor"),
-            "public owner=None records visible to human viewers");
-        assert!(human_contents.iter().any(|c| c.contains("已加入协作群")),
-            "public join notice is visible to human viewers");
-        assert!(human_contents.iter().all(|c| !c.contains("<GroupContext>")),
-            "per-bot owned copies stay hidden from human viewers");
+        let human_contents: Vec<&str> = res_human
+            .messages
+            .iter()
+            .map(|m| m.content.as_str())
+            .collect();
+        assert!(
+            human_contents.contains(&"public-anchor"),
+            "public owner=None records visible to human viewers"
+        );
+        assert!(
+            human_contents.iter().any(|c| c.contains("已加入协作群")),
+            "public join notice is visible to human viewers"
+        );
+        assert!(
+            human_contents.iter().all(|c| !c.contains("<GroupContext>")),
+            "per-bot owned copies stay hidden from human viewers"
+        );
     }
 
     fn group_fixture(group_id: &str, driver_bot_id: &str) -> Group {
@@ -2324,6 +2886,8 @@ mod tests {
                 status: bcs_domain::PersistedMessageStatus::Normal,
                 created_at: 1,
                 run_id: String::new(),
+                visibility_domain: None,
+                audience: None,
             }
         }
 

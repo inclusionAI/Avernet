@@ -23,7 +23,8 @@ schema_version: 1
 
 sources:                       # 命名源（可选，§2.3）：一处声明、多处引用
   content:
-    git: https://code.example-corp.com/team/content.git
+    protocol: git                # 源声明它的协议：git | oss，二者其一（§2.2）
+    url: https://code.example-corp.com/team/content.git
     ref: v1.2.0
     auth: corp-git-content
 
@@ -82,9 +83,9 @@ report；一个类别的失败**不牵连**别的类别。在覆盖语义下，�
 
 | 类别 | 内容本性 | 典型来源 |
 | --- | --- | --- |
-| identity / skills / resources | **文本表达**（md、SKILL.md、csv/json…） | git（§2.2/§2.3）；也可 URL |
+| identity / skills / resources | **文本表达**（md、SKILL.md、csv/json…） | git（§2.2/§2.3）；也可 oss |
 | engine_config / mcp | 文本，但**内联在 manifest 内**（键值 / 注册表引用） | 无 source——它们的「文本」就是配置清单文档自身 |
-| cli_tools | **二进制制品** | URL + 强制 `digest`（§3.7） |
+| cli_tools | **二进制制品** | oss + 强制 `digest`（§3.7）；git 源亦可，以 commit SHA 钉扎 |
 
 `cli_tools` 是唯一的例外，且是原则性的：**git 管表达，制品库管产物**。
 二进制进 git 是反模式（仓库膨胀、LFS 运维），而可执行物需要的是 digest
@@ -98,7 +99,7 @@ report；一个类别的失败**不牵连**别的类别。在覆盖语义下，�
 | 字段 | 说明 |
 | --- | --- |
 | `from` + `subpath` | 引用一个**命名源**（§2.3）并取其中某个子路径。多类目共用同一仓库同一版本时的推荐写法 |
-| `source` | 内联来源。两种形态：**HTTPS URL**（字符串），或**git 引用**（结构化对象，§2.2）。由平台在 apply 点经 guarded fetcher 拉取（design §4），支持变量替换（§4） |
+| `source` | 内联来源，**必须是源对象**：声明 `protocol: git`（带 `url` / `ref`）或 `protocol: oss`（带 `bucket` / `key` / `auth`，§2.2）。**裸 URL 字符串已不再是一种来源**，写了会被 `PUT` 拒绝并给出替代写法——清单不再把一个 URL 交给平台去 GET。支持变量替换（§4），`git` 的 `url` 与 `oss` 的 `bucket` / `key` 都替换 |
 | `content` | 内联 UTF-8 文本（YAML block scalar）。**不推荐**：内容游离于版本控制之外，仅用于 per-bot 一次性小片段；常规内容一律走取源。内联条目无 fetch 环节，`auth` / `digest` / `on_fetch_failure` 对它非法 |
 | （注册项引用） | 仅特定类别：MCP 的 `server_code`；v2 的 `center://` skill 引用 |
 
@@ -106,8 +107,9 @@ report；一个类别的失败**不牵连**别的类别。在覆盖语义下，�
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
-| `subpath` | 无 | **源内路径**：命名源/git 仓库内、或归档内的子目录或文件。缺省 = 源的根 |
-| `digest` | 无 | `sha256:…`。校验 fetch 内容，不匹配按 fetch 失败处理（钉扎可复现）。**仅适用于 URL 源**——git 源以 commit SHA 为天然 digest，写了报错 |
+| `subpath` | 无 | **源交付物之内的路径**——一条规则，两种协议：`git` 交付一棵树，`subpath` 选树内的文件或目录（并与源自身的 `subpath` 拼接，源在前）；`oss` 交付一个对象，`subpath` 选**归档之内**的成员。缺省 = 交付物的根。**在 `oss` 上、且这一条不解包任何归档时，写 `subpath` 会被 `PUT` 拒绝**（`subpath_without_archive`）——没有归档就没有东西可选，它什么都不配置。git 上永远有意义 |
+| `key` | 无 | **仅 `oss`**：这一条读取的对象名，与源自身的 `key` 拼接（源在前，源的那半是前缀）——和 `subpath` 在 git 上的拼接是同一条规则，也走同一条路径安全校验。一个源因此能服务多个条目。`key` 定位**哪个对象**，`subpath` 定位**对象解包后的哪个成员**：两件事，在一条 `oss` 条目上都成立 |
+| `digest` | 无 | `sha256:…`。校验 fetch 内容，不匹配按 fetch 失败处理（钉扎可复现）。**仅适用于 `oss` 源**——git 源以 commit SHA 为天然 digest，写了报错；**这与源是内联写的还是 `from` 引用的无关**，协议决定规则 |
 | `auth` | 无 | 租户级命名凭证的引用（§2.1）；仅对内联 `source` 有效（命名源的凭证声明在源上）。fetch 时注入为请求头 |
 | `on_fetch_failure` | `keep_last` | **只有两个取值**：`keep_last`（用平台上一次为这一条成功物化的副本补全集合）/ `fail`（该类别不写）。**`skip` 已删除**——在类目覆盖语义下它会意味着「把这一条删掉」，与字面相反 |
 | `apply_once` | —— | **v1 保留字，拒绝写入**；v2 语义见 design §3.2 |
@@ -141,18 +143,20 @@ report；一个类别的失败**不牵连**别的类别。在覆盖语义下，�
 名字与 `allowed_prefixes` 里的域名之间不存在任何字符串匹配或推导关系。
 
 **一个端点、一个 body schema**。判别键是**认证机制**（凭证怎么作用到请求
-上），**不是存储类型**——`git` / `oss` / `url` 是**源**的属性，凭证不关心：
-git 源调托管服务 HTTP API、URL 源发普通 GET，注入动作相同。
+上），**不是源协议**——`git` / `oss` 是**源**的属性，凭证不关心。一个 `header`
+凭证既能用在 git clone 上，也能用在对象 GET 上。
 
 ```text
 PUT /openapi/v1/bots/source-credentials/{name}
 {
-  "type": "header",                     # 判别键；v1 唯一实现，缺省即 header
+  "type": "header",                     # 判别键；缺省即 header
   "allowed_prefixes": ["…"],            # 所有 type 共有（见下）
   "header_name": "PRIVATE-TOKEN",       # ↓ type=header 专有
   "secret": "…"
 }
 ```
+
+**这一组端点是租户级的，不带 `user_id`**——与本特性其余每条路由都不同。
 
 两个实际调用（同一端点、同一 schema，只是 `{name}` 与取值不同）：
 
@@ -167,10 +171,12 @@ PUT /openapi/v1/bots/source-credentials/corp-git-content
 
 PUT /openapi/v1/bots/source-credentials/oss-artifacts
 {
-  "type": "header",
-  "header_name": "Authorization",
-  "secret": "Bearer …",
-  "allowed_prefixes": ["https://artifacts.example-corp.com/tools/"]
+  "type": "oss_aksk",
+  "access_key_id": "LTAI5t…",                                      # 标识符，可回读
+  "endpoint": "https://objects.example-corp.com",                  # 地址，可回读；与密钥对一起签发
+  "region": "cn-shanghai",
+  "secret": "…",                                                   # 密钥半边，永不回读
+  "allowed_prefixes": []                                           # 这条路上没有租户可控的主机
 }
 ```
 
@@ -178,20 +184,53 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 接口——`{name}` 是凭证名，同 `PUT /users/alice` 与 `PUT /users/bob` 的关系。
 一个凭证装多个 secret 是反模式：轮换周期、权限边界、可出示范围都会糊在一起。
 
-**预留的 `type`（v1 写入即拒绝，等真实需求再实现）**：
+**已实现的 `type`**：
 
 | type | 字段 | 何时需要 |
 | --- | --- | --- |
-| `header`（v1） | `header_name` + `secret` | 静态请求头：git token、多数对象存储的临时 token |
-| `oss_aksk`（预留） | `access_key_id` + `access_key_secret` | 阿里云 OSS 等的 **AK/SK 请求签名**——不是固定头，而是每个请求现场按签名算法计算，装不进 header 形状 |
-| `basic`（预留） | `username` + `password` | HTTP Basic 源 |
+| `header` | `header_name` + `secret` | 静态请求头：git token、对象存储的临时 token |
+| `oss_aksk` | `access_key_id` + `endpoint` + `secret`（密钥对的密钥半边），可选 `region` | 私有对象存储的 **AK/SK**——交给对象存储客户端，由它按自己的协议访问 |
 
-判别键留在 `type` 上而非源类型上，是为了让 AK/SK 这类**机制不同**的凭证将来
-能直接加进同一个端点，而不必新开接口。
+`basic`（`username` + `password`）仍是预留字，写入即拒。
+
+**`header` 出示，`oss_aksk` 不出示**，这条差别决定了两者的字段与可回读性：
+
+- `header` 把 secret **本身**放上线路，而且是放到清单里那个 URL 上；
+- `oss_aksk` 不产生任何请求头。平台把密钥对交给**对象存储客户端**，由它
+  按自己的协议去访问——平台不再手写签名。因此 `access_key_id` 与
+  `endpoint` **都可以回读**（它们是标识符与地址，且轮换若不可验证就没人
+  会做），而密钥半边在任何响应、日志、apply report 里都**没有任何表示**。
+- **`endpoint` 在凭证上，`bucket` 在源上**，这个划分本身就是一条安全性质：
+  租户的清单决定**读哪个桶**，永远不决定**连到哪台主机**——密钥对是和
+  endpoint 一起签发的，属于同一个信任边界。签名那条路上这条性质只能靠
+  `allowed_prefixes` 这条策略维持；现在它从**清单**里移走了。
+  **但这不等于这个值可信**：凭证本身是租户应用通过 API 写入的，所以
+  endpoint 仍然是租户提供的，只是换了一个面。写入时会按 guarded fetcher
+  的同一套规则校验它（形态、以及解析出的每一个地址），内网对象存储由
+  部署侧的 transport 白名单显式放行——这是唯一的例外口子。
+  有一条规则**没有**照搬：主机**解析不出来**只记日志，不拒绝。fetch 那边
+  解析失败是在陈述事实（这一跳当场就走不通），这边却是在预测——写凭证的
+  进程和之后拿它去读的进程不是同一个，split-horizon DNS、内网 zone、一分钟
+  的抖动，都会让一个好 endpoint 在此时此地解析不出来，据此拒绝等于把「能不能
+  存凭证」挂到本机 DNS 上。它也挡不住这条守卫真正针对的情况：能操纵域名的人
+  完全可以写入时答一个公网地址、读取时答一个 link-local 地址。而字面地址不需要
+  DNS（`getaddrinfo` 直接从字符串给出结果），所以 `https://169.254.169.254/`
+  照旧被拒，任何**确实**解析到内网的域名也照旧被拒。
+- 字段与机制**必须对上**：`header` 凭证写 `access_key_id` 或 `endpoint`、
+  `oss_aksk` 凭证写 `header_name`，都会被**拒绝**而不是忽略——静默丢弃会让
+  调用方以为自己配置了什么。
+
+判别键留在 `type` 上而非源协议上，正是为了让机制不同的凭证加进同一个端点，
+而不必新开接口——AK/SK 就是这个设计兑现的第一例。
 
 #### `allowed_prefixes`：凭证可被出示给谁
 
-**必填，至少一项**，每项是绝对 https URL 前缀。fetch 前校验目标 URL 落在
+**`header` 凭证必填，至少一项；`oss_aksk` 凭证写了会被拒绝。** 这条边界约束
+的是「secret 可以被出示给哪些 URL」，而 `oss_aksk` 不出示 secret、endpoint
+也不来自清单——没有租户可控的主机需要约束，写前缀只会看起来约束了什么而
+实际什么都不约束。约束搬到它真正生效的地方，而不是硬套到不合身的那条路上。
+
+以下规则因此都只讲 `header`。每项是绝对 https URL 前缀。fetch 前校验目标 URL 落在
 某个前缀之下，否则该条目 `failed`——**不降级为「不带凭证继续请求」**
 （静默降级会把配置错误或攻击企图伪装成 401，或在源站恰好允许匿名时掩盖
 过去）。跨前缀重定向同样直接失败，凭证不会被重定向带走。
@@ -204,7 +243,7 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 匹配规则（必须按**路径段边界**比较，否则前缀匹配本身就是漏洞）：目标
 URL 规范化后，须等于前缀、或以「前缀 + `/`」开头——前缀
 `…/team/content` **不得**匹配 `…/team/content-secret`。git 源比较仓库
-URL（忽略可选的 `.git` 后缀），URL 源比较完整目标 URL。
+URL（忽略可选的 `.git` 后缀）。
 
 想覆盖整个 origin 就显式写 `https://host/`——这是一个明确选择，不是默认。
 
@@ -259,33 +298,75 @@ scope 里只读的那个（`read_repository`）**只有 Git-over-HTTP、没有 A
 （401/403）在 apply report 里必须报成「凭证 `<name>` 被拒绝」，与通用取源
 错误区分开，否则一次该去轮换的故障会被读成网络问题。
 
-### 2.2 git 源
+### 2.2 源协议 `protocol`
 
-业务内容托管在公司 git 服务（类 GitLab）上、以 tag 管理版本时，`source`
-写结构化 git 引用，**对所有带 source 的类目统一可用**：
+**源声明它的协议**，而不是靠「它带了哪个键」被反推出来。v1 有且只有两个：
+
+| `protocol` | 交付物 | 专有字段 | `digest` |
+| --- | --- | --- | --- |
+| `git` | 仓库解析到一个 commit 后的**整棵树** | `ref`、`subpath`、`mode` | 不适用（commit SHA 即天然 digest） |
+| `oss` | 对象存储中**一个对象**：源声明 `bucket` 与 `key`，凭证声明 endpoint 与 AK/SK | —— | `skills` / `cli_tools` **强制** |
+
+> **为什么是显式的 `protocol` 而不是旧写法。** 旧写法用 `git:` / `url:` 哪个键
+> 出现来区分协议，于是「协议」是一个形状的副产品而不是一条声明：没有任何东西
+> 能枚举它，capabilities 端点无法发布它，各类目只好各自反推——而反推出三份不
+> 一致的答案，正是本轮修复的五个缺陷的共同来源（见 `specs/2026-09-08-manifest-source-protocols/`）。
+> 旧写法在 `PUT` 时被**拒绝**并在错误信息里点名替代形式；`schema_version` 仍是 `1`
+> （功能尚未发布，没有存量文档需要兼容，多一个版本只买到迁移成本）。
 
 ```yaml
 resources:
   - path: data/kb/                        # 落点：workspace 相对
     source:
-      git: https://code.example-corp.com/team/content.git
+      protocol: git
+      url: https://code.example-corp.com/team/content.git
       ref: v1.2.0                         # tag / branch / commit SHA
-      subpath: kb/                        # 源内路径：仓库内子目录或文件，缺省 = 仓库根
-    auth: corp-git-content                # 凭证引用（§2.1）
+      subpath: kb/                        # 仓库内路径，缺省 = 仓库根
+      auth: corp-git-content              # 凭证引用（§2.1），声明在源上
 
 identity:
   - type: SOUL.md
     source:
-      git: https://code.example-corp.com/team/content.git
+      protocol: git
+      url: https://code.example-corp.com/team/content.git
       ref: v1.2.0
-      subpath: bots/support-agent/soul.md # 源内路径；变量替换照常可用
-    auth: corp-git-content
+      subpath: bots/support-agent/soul.md
+      auth: corp-git-content
+
+skills:
+  - name: order-lookup
+    source:
+      protocol: oss                       # 对象存储上的一个 zip
+      bucket: artifacts             # 桶名来自源
+      key: tools/order-lookup-1.4.0.zip
+      auth: oss-artifacts
+    digest: "sha256:3e7a…"                # oss + skills:强制钉版
+    unpack: zip
 ```
 
-（多个条目引用同一仓库同一 `ref` 时，改用命名源写法更短且升版本只改一处，
-见 §2.3。）
+`ref`、`mode` 与源上的 `subpath` 都只属于 `git`——三者描述的都是「仓库才有的
+东西」：`ref` 命名一个版本，`mode` 裁决它能否移动，`subpath` 选树内的路径。写
+在 `oss` 源上会被 `PUT` 拒绝，而不是被忽略：一个看起来在配置什么、实际什么都不
+管的字段，正是本轮要消灭的那类失败。
 
-语义：
+`unpack` / `strip_components` 反过来只属于 `oss`——git 手上已经是一棵真实的树，
+没有东西要解包。写在 git 源上同样是 `PUT` 拒绝。
+
+**`subpath` 在 `oss` 上要有归档才成立。**`oss` 交付一个对象，`subpath` 选的是
+**归档之内**的成员；这一条不解包归档时，它选不到任何东西：
+
+| 类目 | `oss` + `subpath` | 为什么 |
+| --- | --- | --- |
+| `skills` | ✅ | skill 本来就是包，这条路总要解包 |
+| `cli_tools` | 需同时写 `unpack` | 不解包时对象本身就是那个命令，`subpath` 无处可选 |
+| `resources`（目录条目） | ✅ | 目录条目在 `oss` 上本来就必须写 `unpack` |
+| `resources`（文件条目） | ❌ 拒 | 没有归档；整个对象会落到 `path`，`subpath` 静默失效 |
+| `identity` | ❌ 拒 | identity 文件是一段文本，从不是归档 |
+
+拒绝而不是忽略，理由同上：一个看起来在配置什么、实际什么都不管的字段。要按
+路径取，把源的 `url` 指到那个对象，或者改用 `protocol: git`。
+
+git 语义：
 
 - **收敛单位 = `ref` 解析出的 commit SHA**，即 git 源的天然 digest（条目
   `digest` 字段不适用）。apply report 同时记声明的 `ref` 与解析出的 SHA，
@@ -294,9 +375,9 @@ identity:
   （动 tag 即改声明的含义，声明获胜语义的自然延伸）；要绝对不可变，
   `ref` 直接写 SHA；追最新则写 branch。
 - **目录条目免打包**——枚举由仓库服务完成，这是「文件夹语义」的原生
-  形态；zip/HTTP 形态保留给非 git 源。
-- 同一 `{git, ref}` 被多个条目引用时，单次 apply 只拉取一次（按解析后
-  SHA 缓存）。
+  形态；zip/HTTP 形态保留给 `oss` 源。
+- 同一 `{url, ref}` 被多个条目引用时，单次 apply 只拉取一次（按解析后
+  SHA 缓存），条目各自的 `subpath` 不影响这个缓存键。
 - 落地后的全部语义（目录级所有权、整树替换及其非原子窗口、嵌套禁止、
   权限拍平、teclaw 逐文件展开）与 §3.2 完全一致——git 只是传输形态。
 
@@ -308,6 +389,29 @@ git 宿主没有只读的 **API** scope，只有只读的 **Git-over-HTTP** scop
 API 那条路就得把一个「对一切可读写」的凭证放进数据库（§2.1）。契约本身
 与托管方无关——任何经 HTTPS 可达的 git 服务都满足它。
 
+`oss` 语义：
+
+- **一次请求取一个对象。** `url` 就是那个对象的地址；平台不列举桶，也不需要
+  `LIST` 权限。因此**同一个桶里的两个对象是两个源**——这不是限制的遗漏，而是
+  协议本身的形状。
+- 公有 CDN 文件与私有桶对象是同一个协议，差别只在有没有 `auth`。
+- 私有桶用 `type: oss_aksk` 凭证（§2.1）：平台用密钥对**对每个请求签名**，
+  密钥本身从不上线路。
+
+### 2.2.1 `oss` 与 `git` 各自擅长什么
+
+`sources` 段的价值在两个协议上不一样，值得直说：
+
+- **`git` 给你原子升版**。一次 `ref` 变更，所有引用该源的条目在同一个 apply 点
+  一起收敛到同一个 commit——这是「一处声明、多处引用」在 v1 唯一完整成立的地方，
+  因为只有 git 有一个能覆盖整棵树的版本坐标。
+- **`oss` 给你共享凭证与逐对象钉扎**。多个 `oss` 源可以引用同一个
+  `auth`（同一份 AK/SK、同一组 `allowed_prefixes`），但每个源指向一个对象、
+  各自带自己的 `digest`。升版本是改那个源的 `url`（与 `digest`）。
+
+所以**文本进 git、制品进制品库**（§1.1）不只是存储偏好，也是这条差别的
+直接结果：需要整套一起升版的内容属于 git。
+
 ### 2.3 命名源 `sources` 与 `from`
 
 多个类目的内容通常来自**同一个仓库的同一个版本**（identity、skills、
@@ -318,12 +422,15 @@ resources 都在业务的内容仓库里）。逐条目重复写 `{git, ref, aut
 ```yaml
 sources:
   content:                                  # 源名：自由标识符
-    git: https://code.example-corp.com/team/content.git
+    protocol: git
+    url: https://code.example-corp.com/team/content.git
     ref: v1.2.0                             # ← 整套配置升版本只改这一行
     auth: corp-git-content
-  public-assets:                            # URL 源同样可命名
-    url: https://cdn.example.com/assets/
-    auth: cdn-token
+  order-lookup:                             # oss 源同样可命名
+    protocol: oss
+    bucket: artifacts             # 桶名来自源
+    key: tools/order-lookup-1.4.0.zip
+    auth: oss-artifacts
 
 manifest:
   identity:
@@ -337,7 +444,10 @@ manifest:
   resources:
     - path: data/kb/                        # 落点
       from: content
-      subpath: kb/                          # 源内路径
+      subpath: kb/                          # 仓库内路径
+    - path: data/faq.csv                    # 同一个源、另一条路径
+      from: content
+      subpath: kb/faq.csv
 ```
 
 规则：
@@ -347,8 +457,13 @@ manifest:
 - `from` 与内联 `source` 互斥；引用不存在的源名 → PUT 时拒绝。
 - 凭证声明在**源**上（`sources.<name>.auth`），条目不再写 `auth`。
 - 命名源被引用零次不报错（允许先声明后使用），但会在 PUT 响应里提示。
-- URL 源的 `url` 作为前缀，条目的 `subpath` 拼在其后；git 源的 `subpath`
-  为仓库内路径。拼接前后均施加路径穿越校验。
+- **一个源服务多个条目**：源上的 `subpath` 与条目上的 `subpath` 拼接（源在前），
+  拼接结果再过一次与 `PUT` 完全相同的路径穿越校验（同一个纯函数，不是第二条
+  更宽松的规则）。没有这一条，一个 git 源只能服务一个条目——同一仓库取两个文件
+  就得写两个源块、重复 `url`/`ref`/`auth`，正是命名源要消灭的那种漂移。
+- **`from` 不是支持矩阵的第三列**：命名源声明一个 `protocol`，生效的是那个
+  协议所在的格子。`cli_tools` 引用一个 git 源不需要 `digest`——无论它是内联
+  写的还是 `from` 来的，因为它们是同一个源。
 - 内联 `source` 写法**保留**：单条目、跨仓库、一次性来源仍可直接写。
 
 **移动引用与 `mode`**：分支（以及会被重打的 tag）可能在一次没人把它跟配置
@@ -365,7 +480,8 @@ manifest:
 - **SHA 形式的 `ref` 忽略这个模式**（它动不了，两个分支都触发不了）——是
   「接受但无效」，不是报错。
 - 未知取值 `PUT` 时拒绝：拼错的 `mode` 若静默落到默认值，等于什么都没钉住。
-- 内联 git `source` 同样接受 `mode`（它也持有 `ref`）。
+- 内联 git `source` 同样接受 `mode`（它也持有 `ref`）；`oss` 源写 `mode` 会被
+  `PUT` 拒绝——它没有 ref 可以移动。
 
 ## 3. 类别定义
 
@@ -437,11 +553,19 @@ lock epoch 与不可逆语义（`CallerLockEpochError`、`CallerIdentityReadOnly
 resources:
   # 文件条目
   - path: data/sales.csv         # workspace 相对路径（必填）
-    source: https://my-svc.example.com/data/sales.csv
+    source:
+      protocol: oss
+      bucket: my-svc
+      key: data/sales.csv
+      auth: oss-artifacts
 
   # 目录条目（归档形态）：source 为归档，内容按相对层次展开到 path 之下
   - path: data/kb/
-    source: https://my-svc.example.com/kb/knowledge-base.zip
+    source:
+      protocol: oss
+      bucket: my-svc
+      key: kb/knowledge-base.zip
+      auth: oss-artifacts
     unpack: zip                  # zip | tar.gz（归档形态必填）
     strip_components: 1          # 可选，默认 0：剥掉归档内的前 N 层目录
                                  # （语义同 tar --strip-components；业务用
@@ -543,7 +667,11 @@ engine_config:
 ```yaml
 identity:
   - type: SOUL.md                # 必须属于该引擎的合法 identity 文件集
-    source: https://my-svc.example.com/bots/support-agent/soul.md
+    source:
+      protocol: oss
+      bucket: my-svc
+      key: bots/support-agent/soul.md
+      auth: oss-artifacts
   - type: RULES.md
     content: |                   # 小文件可内联
       # 团队规范
@@ -603,11 +731,19 @@ script:
 ```yaml
 cli_tools:
   - name: mycli                              # 命令名。一个条目 = 一个命令 = 一个文件
-    source: https://my-svc.example.com/tools/mycli-linux-amd64
+    source:
+      protocol: oss
+      bucket: my-svc
+      key: tools/mycli-linux-amd64
+      auth: oss-artifacts
     digest: "sha256:…"                       # 本类目强制，无 digest 拒绝写入
     version: "1.4.2"                         # 元数据，进 apply report，审计线上版本
   - name: tk                                 # 压缩包形态：用 subpath 指出包内哪个文件是命令
-    source: https://my-svc.example.com/tools/toolkit.tar.gz
+    source:
+      protocol: oss
+      bucket: my-svc
+      key: tools/toolkit.tar.gz
+      auth: oss-artifacts
     subpath: bin/tk                          # 源内路径（§2），此处即包内路径
     unpack: tar.gz                           # 可选，扩展名不可靠时显式指定
     digest: "sha256:…"
@@ -734,23 +870,32 @@ report。
 | 构造 | 为什么还不能 apply | 何时解禁 |
 | --- | --- | --- |
 | 类别 `engine_config`（§3.4） | 按跨引擎确认的结论移出第一期，至今没有物化器 | 其物化器回来时 |
-| `resources` 条目用 `from`（§2.3）或 **git 源**（§2.2） | resources 物化器只走 URL 那条路；这是「类别 × 源形态」的组合，因此由条目校验逐条拒绝，理由里点名类别 | resources 接上 git 那条路时 |
-| `cli_tools` 条目用 `from`（§2.3）或 **git 源**（§2.2） | cli_tools 物化器同样不解析命名源：`CliToolDecl.from_entry` 把 `from` 的**源名原样放进 `source_url`**，`CliToolsMaterialiser.resolve` 不经过取源会话。⚠️ **与上一行不同，这个组合 `PUT` 不拒——它在 apply 时才失败**，是本表唯一「提交得过、跑不通」的构造 | cli_tools 接上取源会话时 |
+| `skills` 条目用内联 `content` | skill 是一个**包**（SKILL.md 加上它引用的文件），一段内联文本成不了包 | 不计划 |
+| `cli_tools` 条目用内联 `content` | 同理，它是一个**可执行文件** | 不计划 |
+| `mcp` 条目的任何来源字段 | mcp 条目是注册表引用（`server_code`），根本没有来源轴 | 不计划 |
 
-**已经解禁的**（早期版本的本表曾列出它们）：类别 `cli_tools`（§3.7）本身；`from`
-指向命名源与 git 源——两者对 **`skills` 与 `identity`** 条目已可用，尚未覆盖
-`resources` 与 `cli_tools`（见上表）。
+**已经解禁的**（早期版本的本表曾列出它们）：类别 `cli_tools`（§3.7）本身；
+`from` 指向命名源；**`git` 源**——现在对 `identity` / `skills` / `resources` /
+`cli_tools` **四个类目全部可用**，`resources` 的 git 那条路正是本轮接通的
+（见 `specs/2026-09-08-manifest-source-protocols/`）。
 
-**源形态是「类别 × 形态」的矩阵，不是全局开关**，完整那张表见
-`user-manual.zh-CN.md` §2.1。两条最容易踩的：内联 `content` **只有 `identity` 与
-`resources` 能用**（`skills` 条目答 `content_not_a_skill_package`；`cli_tools` 强制
-`digest` 而 `content` 上写 `digest` 非法，两条规则互斥）；`cli_tools` 的来源**只能是
-内联 `source` URL**。
+**源支持是「类别 × 协议」的矩阵，而这张矩阵现在是代码里的一张表**
+（`core/bot_config_manifest/support_matrix.py`）：`PUT` 校验器的拒绝理由与
+capabilities 端点发布的理由是**同一个字符串对象**，且有一个测试逐格发真实
+`PUT` 断言两者一致。完整那张表见 `user-manual.zh-CN.md` §2.1。
 
-命名源与 git 源是本文推荐的主力写法；`resources` 与 `cli_tools` 在它接通之前用
-**条目内联的 HTTPS `source` URL**（`resources` 也可以用 `content`），之后迁到命名源
-只是把 `source` 换成 `from` + `subpath`。
+| 类别 | `content`（内联） | `oss` | `git` |
+| --- | --- | --- | --- |
+| `identity` | ✅ | ✅ | ✅ |
+| `resources` | ✅ | ✅ | ✅ |
+| `skills` | ❌ 不是包 | ✅（强制 `digest`） | ✅ |
+| `cli_tools` | ❌ 不是可执行文件 | ✅（强制 `digest`） | ✅（**不需要** `digest`） |
+| `mcp` | —— 注册表引用，无来源轴 | | |
+| `engine_config` | —— 没有物化器，整个类别被拒 | | |
 
 **写客户端的人：能力表是唯一的事实来源**——先
 `GET /openapi/v1/bots/{bot_id}/config-manifest/capabilities`，它与 `PUT`
-的判定是同一个函数，不会出现「声称支持而随后拒绝」。
+的判定是同一个函数，不会出现「声称支持而随后拒绝」。该响应现在除了原有的
+`constructs` 数组，还带一个 `source_matrix`：**每个（类别，协议）组合一行**，
+这是扁平的 `constructs` 结构上表达不了的问题——而表达不了，正是本轮五个缺陷
+的共同根源。

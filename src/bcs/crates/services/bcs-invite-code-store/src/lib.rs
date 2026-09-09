@@ -175,6 +175,22 @@ impl InviteCodeRepoPort for DbInviteCodeStore {
         Ok(affected > 0)
     }
 
+    async fn count_by_created_by(&self, created_by: &str) -> ServiceResult<u64> {
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                "SELECT COUNT(*) AS invite_code_count FROM bcs_invite_codes WHERE created_by = ? AND env = ?",
+                vec![DbValue::from(created_by), DbValue::from(Self::current_env())],
+            ))
+            .await
+            .map_err(|err| service_db_error("count_by_created_by", err))?;
+        let Some(row) = rows.first() else {
+            return Ok(0);
+        };
+        db_get_column(row, "invite_code_count")
+            .map_err(|err| service_db_error("invite_code_count", err))
+    }
+
     async fn bind_code(
         &self,
         code_hash: &str,
@@ -345,11 +361,12 @@ mod tests {
             status: InviteCodeStatus::Active,
             bound_user_id: None,
             bound_at: None,
-            created_by: None,
+            created_by: Some("public_openapi".into()),
             created_at: 1,
             updated_at: 1,
         };
         assert!(store.insert_code(code).await.expect("insert"));
+        assert_eq!(store.count_by_created_by("public_openapi").await.expect("count"), 1);
         match store.bind_code("hash-1", "user-1", 11).await.expect("bind") {
             InviteCodeBindOutcome::Bound(record) => {
                 assert_eq!(record.bound_user_id.as_deref(), Some("user-1"))

@@ -25,8 +25,8 @@ from tests.e2e.asgi.baseline.test_teclaw_callback_happy_path import (
     _get_device,
 )
 from tests.e2e.asgi.conftest import (
-    APITestHelper,
     TEMPLATE_TECLAW,
+    APITestHelper,
     approve_publish,
     call_teclaw_callback,
     cleanup_bot,
@@ -40,9 +40,7 @@ if TYPE_CHECKING:
 pytestmark = [pytest.mark.e2e_asgi]
 
 
-async def _create_teclaw_bot(
-    api: APITestHelper, name: str
-) -> dict[str, Any]:
+async def _create_teclaw_bot(api: APITestHelper, name: str) -> dict[str, Any]:
     return await create_test_bot(
         api,
         name,
@@ -51,7 +49,6 @@ async def _create_teclaw_bot(
 
 
 class TestTeClawAsyncPublishFlowSuccess:
-
     @pytest.mark.asyncio
     async def test_teclaw_async_publish_success(
         self,
@@ -89,7 +86,10 @@ class TestTeClawAsyncPublishFlowSuccess:
             )
 
             payload = _callback_payload(
-                device_uuid, publish_id, api.tenant, success=True,
+                device_uuid,
+                publish_id,
+                api.tenant,
+                success=True,
             )
             status_code, body = await call_teclaw_callback(api.client, payload)
             assert status_code == 200, f"Callback failed: {status_code} {body}"
@@ -121,7 +121,6 @@ class TestTeClawAsyncPublishFlowSuccess:
 
 
 class TestTeClawAsyncPublishFlowFailure:
-
     @pytest.mark.asyncio
     async def test_teclaw_async_publish_failure(
         self,
