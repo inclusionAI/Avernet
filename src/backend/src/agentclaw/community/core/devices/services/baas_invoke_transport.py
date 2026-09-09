@@ -40,6 +40,15 @@ if TYPE_CHECKING:
 # token comfortably inside its lifetime, and a token that expires anyway is recovered
 # by the refresh-and-retry in :meth:`BaasInvokeTransport._invoke`.
 _HTTP_INFO_TTL_SECONDS = 30.0
+_MCP_REQUEST_TIMEOUT_SECONDS = 25.0
+
+
+def _mcp_timeout(path: str) -> dict[str, float]:
+    return (
+        {"timeout": _MCP_REQUEST_TIMEOUT_SECONDS}
+        if path == "/api/mcp" or path.startswith("/api/mcp/")
+        else {}
+    )
 
 # The proxypass gateway answers 401 when it rejects the token it was handed — the one
 # verdict that means "this cached http_info is no longer usable".
@@ -208,6 +217,7 @@ class BaasInvokeTransport:
             # 仅 header 名不同。
             auth_header="x-proxypass-token",
             device_uuid=self._device_uuid,
+            **_mcp_timeout(path),
             **kwargs,
         )
         info = self._http_info(path)
@@ -277,22 +287,24 @@ class DesktopBaasInvokeTransport:
 
     def post(self, path: str, *, json: Any | None = None) -> httpx.Response:
         return self._client.post(
-            self._invoke_url(path), json=json, headers=self._headers
+            self._invoke_url(path), json=json, headers=self._headers,
+            **_mcp_timeout(path),
         )
 
     def get(self, path: str) -> httpx.Response:
         return self._client.get(
-            self._invoke_url(path), headers=self._headers
+            self._invoke_url(path), headers=self._headers, **_mcp_timeout(path)
         )
 
     def put(self, path: str, *, json: Any | None = None) -> httpx.Response:
         return self._client.put(
-            self._invoke_url(path), json=json, headers=self._headers
+            self._invoke_url(path), json=json, headers=self._headers,
+            **_mcp_timeout(path),
         )
 
     def delete(self, path: str) -> httpx.Response:
         return self._client.delete(
-            self._invoke_url(path), headers=self._headers
+            self._invoke_url(path), headers=self._headers, **_mcp_timeout(path)
         )
 
     def post_multipart(

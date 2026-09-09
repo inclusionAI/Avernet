@@ -131,6 +131,7 @@ def test_baas_invoke_transport_all_http_methods_use_proxypass_token_header():
     calls = svc.invoke_http.call_args_list
     assert [call.kwargs["method"] for call in calls] == ["GET", "PUT", "DELETE"]
     assert all(call.kwargs["auth_header"] == "x-proxypass-token" for call in calls)
+    assert all(call.kwargs["timeout"] == 25.0 for call in calls)
 
 
 def test_baas_invoke_transport_propagates_request_error():
@@ -172,6 +173,20 @@ def test_desktop_baas_invoke_transport_post_uses_self_built_url():
     assert args[0] == expected_url
     assert kwargs["json"] == {"x": 1}
     assert kwargs["headers"] == {"x-proxypass-token": "tok-xyz"}
+
+
+def test_desktop_baas_mcp_requests_use_outer_25_second_deadline():
+    transport, client = _desktop()
+
+    transport.post("/api/mcp", json={"server_code": "x"})
+    transport.get("/api/mcp/x")
+    transport.put("/api/mcp/x", json={})
+    transport.delete("/api/mcp/x")
+
+    assert client.post.call_args.kwargs["timeout"] == 25.0
+    assert client.get.call_args.kwargs["timeout"] == 25.0
+    assert client.put.call_args.kwargs["timeout"] == 25.0
+    assert client.delete.call_args.kwargs["timeout"] == 25.0
 
 
 def test_desktop_baas_invoke_transport_invoke_url_adds_leading_slash():
