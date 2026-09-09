@@ -281,6 +281,17 @@ def test_mcp_task_fails_when_runtime_is_not_capable() -> None:
     projector.project_mcp_and_cli.assert_not_awaited()
 
 
+def test_mcp_task_re_fences_after_readiness_before_write() -> None:
+    handler, projector, _ = _handler()
+    handler._bindings.get_by_id.side_effect = [
+        _binding(status="ACTIVE"),
+        _binding(status="ACTIVE", device_props={"sandbox_id": "sandbox-2"}),
+    ]
+
+    assert isinstance(handler.handle(_payload("mcp")), Complete)
+    projector.project_mcp_and_cli.assert_not_awaited()
+
+
 def test_projection_issue_retryability_controls_task_outcome() -> None:
     retryable = RuntimeProjectionResult.pending(code="TEMP", reason="later")
     handler, _, _ = _handler(projection_result=retryable)

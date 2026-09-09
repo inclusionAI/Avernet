@@ -132,6 +132,12 @@ class LifecycleRuntimeProjectionTaskHandler:
                 f"MCP runtime readiness {readiness.status.value}: "
                 f"{readiness.reason or 'no reason'}"
             )
+        binding = self._bindings.get_by_id(work["binding_id"])
+        bot = self._bots.get_by_binding_id(work["binding_id"])
+        if binding is None or bot is None or not self._is_current(
+            work=work, binding=binding, bot=bot
+        ):
+            return Complete()
         result = await self._projector.project_mcp_and_cli(
             bot_id=work["bot_id"],
             owner_id=work["owner_id"],

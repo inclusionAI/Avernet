@@ -152,19 +152,6 @@ class SkillSymlinkListener(LifecycleBase):
                     event=event,
                     is_desktop=is_desktop,
                 )
-            initial_authority = self._resolve_desktop_layout_authority(bot)
-            ctx = self._resolver.resolve_for_bot(bot_id, owner_id)
-            if ctx.binding_id != event.binding_id:
-                logger.info(
-                    "[skill_symlink_listener] activated binding is no longer "
-                    "current, skipping: bot_id=%s event_binding_id=%s "
-                    "current_binding_id=%s",
-                    bot_id,
-                    event.binding_id,
-                    ctx.binding_id,
-                )
-                return
-
             engine = str(bot.get("active_engine") or "openclaw")
             if (
                 self._delivery_shape_for_engine is not None
@@ -176,6 +163,18 @@ class SkillSymlinkListener(LifecycleBase):
                     "is owned by durable tasks: bot_id=%s engine=%s",
                     bot_id,
                     engine,
+                )
+                return
+            initial_authority = self._resolve_desktop_layout_authority(bot)
+            ctx = self._resolver.resolve_for_bot(bot_id, owner_id)
+            if ctx.binding_id != event.binding_id:
+                logger.info(
+                    "[skill_symlink_listener] activated binding is no longer "
+                    "current, skipping: bot_id=%s event_binding_id=%s "
+                    "current_binding_id=%s",
+                    bot_id,
+                    event.binding_id,
+                    ctx.binding_id,
                 )
                 return
 
