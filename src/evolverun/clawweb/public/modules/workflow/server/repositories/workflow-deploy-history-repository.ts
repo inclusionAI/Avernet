@@ -122,9 +122,9 @@ export class WorkflowDeployHistoryRepository {
   }
 
   /** Find by version, filtered to deploy/edit actions only (for rollback content lookup). */
-  async findByVersionDeployOrEdit(workflowId: string, version: number): Promise<Pick<WorkflowDeployHistoryRow, "deploy_number" | "version" | "tag_name" | "action" | "spec_json" | "note" | "from_deploy_number" | "gmt_create"> | null> {
-    const rows = await this.db.query<Pick<WorkflowDeployHistoryRow, "deploy_number" | "version" | "tag_name" | "action" | "spec_json" | "note" | "from_deploy_number" | "gmt_create">>(
-      `SELECT deploy_number, version, tag_name, action, spec_json, note, from_deploy_number, gmt_create
+  async findByVersionDeployOrEdit(workflowId: string, version: number): Promise<Pick<WorkflowDeployHistoryRow, "pack_id" | "deploy_number" | "version" | "tag_name" | "action" | "spec_json" | "note" | "from_deploy_number" | "gmt_create"> | null> {
+    const rows = await this.db.query<Pick<WorkflowDeployHistoryRow, "pack_id" | "deploy_number" | "version" | "tag_name" | "action" | "spec_json" | "note" | "from_deploy_number" | "gmt_create">>(
+      `SELECT pack_id, deploy_number, version, tag_name, action, spec_json, note, from_deploy_number, gmt_create
        FROM workflow_deploy_history WHERE workflow_id = ? AND version = ? AND action IN ('deploy', 'edit')
        ORDER BY deploy_number DESC LIMIT 1`,
       [workflowId, version],
