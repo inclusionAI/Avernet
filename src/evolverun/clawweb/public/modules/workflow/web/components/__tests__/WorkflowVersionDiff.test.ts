@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compactDiff, formatSpecForDiff, unifiedDiff } from '../WorkflowVersionDiff'
+import { compactDiff, formatSpecForDiff, specsEqual, unifiedDiff } from '../WorkflowVersionDiff'
 
 describe('WorkflowVersionDiff', () => {
   it('formats JSON snapshots as multiline YAML before calculating the diff', () => {
@@ -30,5 +30,10 @@ describe('WorkflowVersionDiff', () => {
       expect.objectContaining({ type: 'add', text: '  - id: new' }),
       expect.objectContaining({ type: 'skip' }),
     ]))
+  })
+
+  it('does not flag reordered YAML fields as an undeployed change', () => {
+    expect(specsEqual('id: support\ntitle: 支持\nnodes: []\n', 'nodes: []\ntitle: 支持\nid: support\n')).toBe(true)
+    expect(specsEqual('id: support\ntitle: 支持\n', 'id: support\ntitle: 新支持\n')).toBe(false)
   })
 })

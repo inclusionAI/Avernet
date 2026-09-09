@@ -121,6 +121,28 @@ export function formatSpecForDiff(specJson: string): string {
   }
 }
 
+function sortSpecValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortSpecValue)
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, nested]) => nested !== undefined)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, nested]) => [key, sortSpecValue(nested)]),
+    )
+  }
+  return value
+}
+
+/** Compare parsed specs so YAML field ordering and formatting do not create a false pending deploy. */
+export function specsEqual(fromText: string, toText: string): boolean {
+  try {
+    return JSON.stringify(sortSpecValue(parseYaml(fromText))) === JSON.stringify(sortSpecValue(parseYaml(toText)))
+  } catch {
+    return fromText === toText
+  }
+}
+
 function topLevelChanges(fromText: string, toText: string): string[] {
   try {
     const from = parseYaml(fromText) as Record<string, unknown>
