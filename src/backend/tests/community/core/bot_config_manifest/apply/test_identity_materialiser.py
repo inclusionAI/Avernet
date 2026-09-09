@@ -43,6 +43,7 @@ from ._fakes import (
     SOUL_BODY,
     SOUL_URL,
 )
+from agentclaw.community.plugins.local.object_store_client import InMemoryObjectStoreClientFactory
 
 
 def _run(coro):
@@ -205,7 +206,7 @@ def test_one_failed_fetch_aborts_the_whole_category_no_writes():
         failures={SOUL_URL: FetchFailedError("source answered 404")},
     )
     materialiser = IdentityMaterialiser(
-        identity, EntryFetcher(failing, FakeManifestContent(), FakeCredentials())
+        identity, EntryFetcher(failing, FakeManifestContent(), FakeCredentials(), InMemoryObjectStoreClientFactory())
     )
 
     resolved = _run(
@@ -238,7 +239,7 @@ def test_keep_last_reuses_the_platform_copy_when_the_source_is_down():
         failures={SOUL_URL: FetchFailedError("source transport failed")}
     )
     materialiser = IdentityMaterialiser(
-        identity, EntryFetcher(failing, content, FakeCredentials())
+        identity, EntryFetcher(failing, content, FakeCredentials(), InMemoryObjectStoreClientFactory())
     )
 
     result, plan, written = _run(
@@ -370,7 +371,7 @@ def test_an_omitted_on_fetch_failure_defaults_to_keep_last():
         failures={SOUL_URL: FetchFailedError("source transport failed")}
     )
     materialiser = IdentityMaterialiser(
-        identity, EntryFetcher(failing, content, FakeCredentials())
+        identity, EntryFetcher(failing, content, FakeCredentials(), InMemoryObjectStoreClientFactory())
     )
 
     result, _, written = _run(

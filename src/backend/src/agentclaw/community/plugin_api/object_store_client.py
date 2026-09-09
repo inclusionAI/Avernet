@@ -96,7 +96,7 @@ class ObjectFetchStatus(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
-#: The statuses ``keep_last`` may **not** mask. Named here rather than
+#: The statuses ``keep_last`` must never mask. Named here rather than
 #: re-derived at the call site: an implementation that adds a status without
 #: ruling on it would otherwise default to maskable, which is the unsafe
 #: direction.
@@ -115,10 +115,17 @@ class ObjectFetchResult:
 
     status: ObjectFetchStatus
     content: Optional[bytes] = None
-    #: Report-safe by construction: composed from the bucket, the key and the
-    #: status — never from the SDK's own message, which echoes endpoints and
-    #: sometimes signed query strings. The same ruling ``fetch/git_source.py``
-    #: applies to git's stderr, for the same reason.
+    #: A short, report-safe sentence naming what happened — it is copied into
+    #: the apply report an operator reads, so it must carry no secret. Built
+    #: from the bucket, the key and the status and nothing else, for example::
+    #:
+    #:     "object 'tools/qc/v2.tgz' was not found in bucket
+    #:      'team-artifacts'"
+    #:     "bucket 'team-artifacts' denied the credential"
+    #:
+    #: Never the SDK's own message, which echoes the endpoint and sometimes a
+    #: signed query string carrying the key pair. The same ruling
+    #: ``fetch/git_source.py`` applies to git's stderr, for the same reason.
     detail: str = ""
 
     @property
@@ -133,6 +140,20 @@ class ObjectStoreClient(Protocol):
 
     def get(self, key: str, *, byte_limit: int) -> ObjectFetchResult:
         """Read the object at ``key``, refusing past ``byte_limit``.
+
+        ``key`` is the **object's full path inside the bucket** — everything
+        after the bucket name, already composed from the source's ``key``
+        prefix and the entry's own part. For
+        ``oss://team-artifacts/tools/qc/v2.tgz`` the bucket is
+        ``team-artifacts`` (fixed on the client by
+        :meth:`ObjectStoreClientFactory.client_for`) and ``key`` is
+        ``tools/qc/v2.tgz``. No leading slash, no scheme, no bucket.
+
+        It is **not** the credential's ``access_key_id`` — review asked, and
+        the collision of the word "key" between "object key" and "access key"
+        is a fair thing to trip on. The key pair reaches the client on
+        :class:`ObjectStoreTarget`; nothing about the caller's identity
+        travels through this argument.
 
         ``byte_limit`` is the category's per-entry cap
         (``FETCH_ENTRY_LIMITS``), and it must be enforced **while streaming**:

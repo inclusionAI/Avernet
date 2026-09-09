@@ -35,10 +35,15 @@ that limits and layout stay one rule, while a git tree goes through
 So :meth:`EntryDelivery.is_tree` asks what *arrived*, where the old code asked
 what *class* it was. A third protocol that delivers a tree slots into the
 existing branch instead of adding an arm to it.
+
+Grammar reference: ``docs/bot-config-manifest/manifest-schema.zh-CN.md``
+— §3.2 (``resources``), §3.3 (``skills``). Cite a section rather than restating the grammar here;
+two copies of one grammar drift, and the document is the one users read.
 """
 from __future__ import annotations
 
 import tempfile
+from abc import abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
@@ -164,6 +169,7 @@ class EntryDelivery(Protocol):
     ``plugin_api/object_storage.py`` states for its own protocol.
     """
 
+    @abstractmethod
     def is_tree(self) -> bool:
         """Did the source deliver a tree, or a single object?
 
@@ -173,6 +179,7 @@ class EntryDelivery(Protocol):
         """
         ...
 
+    @abstractmethod
     def members(
         self, *, unpack: object, strip_components: object
     ) -> list[tuple[str, bytes]] | str:
@@ -189,6 +196,7 @@ class EntryDelivery(Protocol):
         """
         ...
 
+    @abstractmethod
     def single(self) -> bytes:
         """The one file this entry delivers.
 
@@ -199,6 +207,7 @@ class EntryDelivery(Protocol):
         """
         ...
 
+    @abstractmethod
     def note(self) -> Optional[str]:
         """The report line this delivery owes, or ``None``.
 
@@ -208,6 +217,7 @@ class EntryDelivery(Protocol):
         """
         ...
 
+    @abstractmethod
     def digest(self) -> Optional[str]:
         """The content address of what arrived, when one was computed.
 
@@ -216,10 +226,12 @@ class EntryDelivery(Protocol):
         """
         ...
 
+    @abstractmethod
     def receipt_url(self) -> Optional[str]:
         """The W11 identity to file this entry's bytes under."""
         ...
 
+    @abstractmethod
     def auth(self) -> Optional[str]:
         """The credential **name** the acquisition rode, for the receipt.
 
@@ -228,6 +240,7 @@ class EntryDelivery(Protocol):
         """
         ...
 
+    @abstractmethod
     def source_url(self) -> Optional[str]:
         """Where the bytes came from, for callers that infer shape from it.
 
@@ -235,6 +248,7 @@ class EntryDelivery(Protocol):
         """
         ...
 
+    @abstractmethod
     def content_type(self) -> Optional[str]:
         """What the source said the bytes are, when it said anything.
 
@@ -242,6 +256,7 @@ class EntryDelivery(Protocol):
         """
         ...
 
+    @abstractmethod
     def from_store(self) -> bool:
         """True when the platform's own copy answered and no network moved.
 
@@ -250,6 +265,7 @@ class EntryDelivery(Protocol):
         """
         ...
 
+    @abstractmethod
     def needs_receipt(self) -> bool:
         """Does the caller still owe this delivery's bytes to the store?
 
@@ -264,7 +280,7 @@ class EntryDelivery(Protocol):
 
 
 @dataclass(frozen=True)
-class BlobDelivery:
+class BlobDelivery(EntryDelivery):
     """One object's bytes, however they were acquired."""
 
     fetched: FetchedEntry
@@ -327,7 +343,7 @@ class BlobDelivery:
 
 
 @dataclass(frozen=True)
-class GitDelivery:
+class GitDelivery(EntryDelivery):
     """A checked-out tree, read on the category's terms."""
 
     source: GitEntrySource

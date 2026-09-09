@@ -7,6 +7,10 @@ is implemented once here and applied per category rather than re-derived five
 times. The entity-key fields (``resources.path``, ``skills.name``,
 ``identity.type``, ``cli_tools.name``) deliberately differ, and their rules
 differ with them.
+
+Grammar reference: ``docs/bot-config-manifest/manifest-schema.zh-CN.md``
+— §2 (entry fields), §3 (per-category rules). Cite a section rather than restating the grammar here;
+two copies of one grammar drift, and the document is the one users read.
 """
 from __future__ import annotations
 
@@ -107,20 +111,34 @@ _SOURCE_SELECTORS = ("from", "source", "content")
 class EntrySource:
     """Which source an entry chose, once exclusivity has been settled.
 
-    Two vocabularies, deliberately both kept. ``form`` is *how the entry was
-    spelled* and remains the published ``constructs`` axis. ``kind`` is *which
-    protocol the content travels by* and is what every support rule keys on —
-    a ``from:`` naming a git source is ``NAMED``/``GIT``, and the rules that
-    used to read ``form`` there are the ones that got D5 wrong.
+    **One axis: the protocol.** An earlier draft carried a second field,
+    ``form``, holding the *spelling* (``NAMED`` for ``from:``, ``GIT`` /
+    ``OSS`` for an inline ``source:``). Review asked why both, and the answer
+    was that they cannot diverge: once ``from: team-repo`` resolves, the
+    protocol is ``team-repo``'s and nothing else. The field was also never
+    read — write-only state that existed to be confusing. It is gone.
+
+    :class:`~agentclaw.community.core.bot_config_manifest.capabilities.SourceForm`
+    still exists, but for a different question and only at the parse site: it
+    is the *deployment capability* axis, asking "can this deployment resolve
+    this spelling at all?" — which is why ``NAMED`` is one of its members and
+    is not a protocol. A deployment can refuse the ``from:`` spelling wholesale
+    without refusing git. That check happens transiently in
+    :meth:`Context.require_source_support` and nothing stores its answer.
+
+    See ``docs/bot-config-manifest/manifest-schema.zh-CN.md`` §2.2 (entry
+    source spellings) and §2.3 (``sources``) for the grammar these fields
+    summarise.
     """
 
-    #: The chosen form, or ``None`` when the entry named no usable source.
-    form: SourceForm | None
-    #: The protocol, or ``None`` when it could not be determined (an undeclared
-    #: ``from`` name, a malformed source object). A ``None`` kind means every
-    #: protocol-keyed rule below stays silent: the entry is already refused for
-    #: a reason the caller has to fix first, and a second verdict derived from a
-    #: guess would send them at the wrong field.
+    #: The protocol the content travels by, or ``None`` when it could not be
+    #: determined. Concretely ``None`` in three cases, each already refused
+    #: for a reason the caller must fix first: a ``from:`` that is not a
+    #: non-empty string, a ``from:`` naming a source that is not declared (or
+    #: that failed its own parse), and a ``source:`` that is a bare URL or not
+    #: an object. A ``None`` kind means every protocol-keyed rule stays
+    #: silent rather than emitting a second verdict from a guess, which would
+    #: send the caller at the wrong field.
     kind: SourceKind | None = None
     #: The resolved declaration, for the roads that have one. Inline ``content``
     #: and an inline ``source:`` URL string have no declaration object.
@@ -206,14 +224,14 @@ def resolve_source(
             "an entry names exactly one source; found "
             + ", ".join(f"'{key}'" for key in present),
         )
-        return EntrySource(form=None)
+        return EntrySource()
     if not present:
         ctx.add(
             location,
             "missing_source",
             "an entry must name one of 'from', 'source' or 'content'",
         )
-        return EntrySource(form=None)
+        return EntrySource()
 
     selector = present[0]
     source = _classify(ctx, location, entry, selector)
@@ -228,7 +246,7 @@ def resolve_source(
                 refusal.code,
                 refusal.reason,
             )
-            return EntrySource(form=None)
+            return EntrySource()
 
     if "auth" in entry:
         if selector == "from":
@@ -335,7 +353,7 @@ def _classify(
     """
     if selector == "content":
         ctx.require_source_support(f"{location}.content", SourceForm.CONTENT)
-        return EntrySource(form=SourceForm.CONTENT, kind=SourceKind.CONTENT)
+        return EntrySource(kind=SourceKind.CONTENT)
 
     if selector == "from":
         name = entry["from"]
@@ -345,7 +363,7 @@ def _classify(
                 "invalid_source_reference",
                 "'from' must name a source declared under top-level 'sources'",
             )
-            return EntrySource(form=SourceForm.NAMED)
+            return EntrySource()
         ctx.referenced_sources.add(name)
         if name not in ctx.source_names:
             ctx.add(
@@ -354,7 +372,7 @@ def _classify(
                 f"'from' references source '{name}', which is not declared "
                 "under top-level 'sources'",
             )
-            return EntrySource(form=SourceForm.NAMED)
+            return EntrySource()
         ctx.require_source_support(f"{location}.from", SourceForm.NAMED)
         # The named source's protocol IS this entry's protocol — that identity
         # is the point of the axis. ``sources`` is walked before ``manifest``,
@@ -363,8 +381,8 @@ def _classify(
         # entry stays silent rather than blaming it a second time.
         decl = ctx.sources.get(name)
         if decl is None:
-            return EntrySource(form=SourceForm.NAMED)
-        return EntrySource(form=SourceForm.NAMED, kind=decl.protocol, decl=decl)
+            return EntrySource()
+        return EntrySource(kind=decl.protocol, decl=decl)
 
     source = entry["source"]
     if isinstance(source, str):
@@ -380,21 +398,21 @@ def _classify(
             "'protocol: git' (with 'url' and 'ref') or 'protocol: oss' "
             "(with 'bucket' and 'key')",
         )
-        return EntrySource(form=None)
+        return EntrySource()
     if isinstance(source, dict):
         decl = validate_source_declaration(ctx, f"{location}.source", source)
         if decl is None:
-            return EntrySource(form=None)
+            return EntrySource()
         form = SourceForm.GIT if decl.is_git else SourceForm.OSS
         ctx.require_source_support(f"{location}.source", form)
-        return EntrySource(form=form, kind=decl.protocol, decl=decl)
+        return EntrySource(kind=decl.protocol, decl=decl)
     ctx.add(
         f"{location}.source",
         "invalid_source",
         "'source' must be an object declaring 'protocol: git' or "
         "'protocol: oss'",
     )
-    return EntrySource(form=None)
+    return EntrySource()
 
 
 def validate_source_declaration(

@@ -19,9 +19,14 @@ its transport, its content store, its credentials. They are strategies over
 one pipeline's collaborators, not independent pipelines: two fetchers that
 each built their own store would file receipts under two policies, and W11's
 lineage would answer differently depending on which road served an entry.
+
+Grammar reference: ``docs/bot-config-manifest/manifest-schema.zh-CN.md``
+— §2.2 (``protocol``), §5 (per-entry limits). Cite a section rather than restating the grammar here;
+two copies of one grammar drift, and the document is the one users read.
 """
 from __future__ import annotations
 
+from abc import abstractmethod
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Protocol, runtime_checkable
@@ -53,6 +58,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
 )
 from agentclaw.community.core.bot_config_manifest.fetch.limits import (
     FETCH_ENTRY_LIMITS,
+    FetchCategory,
 )
 from agentclaw.community.core.bot_config_manifest.schema import placeholders
 from agentclaw.community.core.bot_config_manifest.schema._support import (
@@ -70,17 +76,46 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class DeclaredFetch:
-    """One entry's acquisition, resolved down to what any protocol needs.
+    """One entry's acquisition request, resolved down to what any protocol needs.
 
-    Assembled once by the front door so no fetcher re-derives it — two
+    This is the *argument* every fetcher takes: one manifest entry, plus
+    everything the front door already worked out about it, so a fetcher can
+    do its protocol and nothing else. Given::
+
+        sources:
+          artifacts:
+            protocol: oss
+            bucket: team-artifacts
+            key: tools/
+            auth: oss-prod
+
+        manifest:
+          cli_tools:
+            - name: qc
+              from: artifacts
+              key: qc/v2.tgz
+              on_fetch_failure: keep_last
+
+    the front door hands :class:`ObjectStoreFetcher` a ``DeclaredFetch``
+    whose ``decl`` is the parsed ``artifacts`` declaration, ``entry`` is the
+    ``qc`` mapping, ``name`` is ``"artifacts"``, ``category`` is
+    ``FetchCategory.CLI_TOOLS`` and ``keep_last`` is ``True``.
+
+    Assembled once, by the front door, so no fetcher re-derives it — two
     fetchers each deciding what ``keep_last`` means, or each looking up the
     ``from`` name, is how the roads drift apart while both look correct.
     """
 
-    ctx: "FetchContext"
+    ctx: FetchContext
     decl: SourceDecl
     entry: Mapping[str, Any]
-    category: str
+    #: The fetch category, as the closed vocabulary rather than a bare
+    #: string. Review asked whether an enum for this already existed — it
+    #: does, and every caller was already passing its members (some as
+    #: ``.value``), so only the annotation was loose. Typing it here makes
+    #: ``FETCH_ENTRY_LIMITS`` a total lookup below instead of one guarded by
+    #: a default that silently narrowed a mis-typed category to the file cap.
+    category: FetchCategory
     entry_identity: Optional[str]
     #: ``on_fetch_failure`` already resolved to its boolean.
     keep_last: bool
@@ -96,12 +131,13 @@ class DeclaredFetch:
 class SourceFetcher(Protocol):
     """Acquire one entry's content over one protocol."""
 
+    @abstractmethod
     def fetch(self, request: DeclaredFetch) -> EntryDelivery:
         """Raises :class:`EntryFetchError` with a report-safe reason."""
         ...
 
 
-class ObjectStoreFetcher:
+class ObjectStoreFetcher(SourceFetcher):
     """``protocol: oss`` — one request, one object, addressed by the source.
 
     The source carries the credential (W7 — the declaration, not the entry).
@@ -111,7 +147,7 @@ class ObjectStoreFetcher:
     source delivered; git delivers a tree, an object store delivers an object.
     """
 
-    def __init__(self, owner: "EntryFetcher") -> None:
+    def __init__(self, owner: EntryFetcher) -> None:
         self._owner = owner
 
     def fetch(self, request: DeclaredFetch) -> EntryDelivery:
@@ -157,7 +193,7 @@ class ObjectStoreFetcher:
         )
 
 
-class GitSourceFetcher:
+class GitSourceFetcher(SourceFetcher):
     """``protocol: git`` — one checkout per ``(url, ref)`` per apply.
 
     The ref resolves once through the apply's source session, ``mode`` is
@@ -168,7 +204,7 @@ class GitSourceFetcher:
     the transport and may be.
     """
 
-    def __init__(self, owner: "EntryFetcher") -> None:
+    def __init__(self, owner: EntryFetcher) -> None:
         self._owner = owner
 
     def fetch(self, request: DeclaredFetch) -> EntryDelivery:
@@ -272,9 +308,11 @@ class GitSourceFetcher:
                 subpath=spec.subpath,
                 moved_from=moved,
                 auth=auth,
-                file_limit=FETCH_ENTRY_LIMITS.get(
-                    request.category, FETCH_ENTRY_LIMITS["resources_file"]
-                ),
+                # Total, not ``.get`` with a fallback: ``FetchCategory`` and
+                # ``FETCH_ENTRY_LIMITS`` are bound by that module's own
+                # assertion, so every member has a cap and a missing one is a
+                # bug to raise on rather than to paper over with the file cap.
+                file_limit=FETCH_ENTRY_LIMITS[request.category],
             )
         )
 
@@ -302,7 +340,7 @@ if _UNSERVED:
     )
 
 
-def build_fetchers(owner: "EntryFetcher") -> Mapping[SourceKind, SourceFetcher]:
+def build_fetchers(owner: EntryFetcher) -> Mapping[SourceKind, SourceFetcher]:
     """The table, bound to one pipeline's collaborators."""
     return MappingProxyType(
         {kind: cls(owner) for kind, cls in FETCHER_TYPES.items()}
@@ -386,7 +424,7 @@ def compose_subpath(
     return joined
 
 
-def substitute(ctx: "FetchContext", source_url: str) -> str:
+def substitute(ctx: FetchContext, source_url: str) -> str:
     """``${BOT_*}`` in a source URL, against this apply's deployment context.
 
     Unknown names are left untouched by the resolver itself — they cannot

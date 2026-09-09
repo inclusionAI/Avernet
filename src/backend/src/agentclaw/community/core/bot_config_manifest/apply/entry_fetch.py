@@ -109,6 +109,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
 )
 from agentclaw.community.core.bot_config_manifest.fetch.limits import (
     FETCH_ENTRY_LIMITS,
+    FetchCategory,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     FetchFailedError,
@@ -171,11 +172,11 @@ class FetchContext(Protocol):
     engine_type: str
     actor_id: str
     apply_id: Optional[str]
-    budget: Optional["ApplyFetchBudget"]
+    budget: Optional[ApplyFetchBudget]
     source_session: Optional[SourceSession]
 
 
-def scope_of(ctx: "FetchContext") -> ContentScope:
+def scope_of(ctx: FetchContext) -> ContentScope:
     """The store scope for the bot an apply runs against.
 
     The three axes the bot record already carries — the same scope every store
@@ -198,18 +199,20 @@ class EntryFetcher:
     def __init__(
         self,
         fetcher: GuardedFetcher,
-        content: "ManifestContentServiceProtocol",
-        credentials: "SourceCredentialServiceProtocol",
-        objects: Optional[ObjectStoreClientFactory] = None,
+        content: ManifestContentServiceProtocol,
+        credentials: SourceCredentialServiceProtocol,
+        objects: ObjectStoreClientFactory,
     ) -> None:
         self._fetcher = fetcher
         self._content = content
         self._credentials = credentials
-        # Optional at construction, required at use. The composition root
-        # always binds one; the default exists for the many rigs that drive
-        # only the git or URL roads and have no business assembling an
-        # object-store factory to do it. ``acquire_object`` says so plainly
-        # rather than failing with an AttributeError.
+        # Required, not defaulted. It was ``Optional[...] = None`` so that
+        # rigs driving only the git road need not assemble a factory — but
+        # the composition root always binds one, so the type said "may be
+        # absent" about a value that never is, and bought a ``None`` branch
+        # in ``acquire_object`` that production could not reach. Rigs pass
+        # ``InMemoryObjectStoreClientFactory()``; it costs them one line and
+        # buys everyone an honest signature.
         self._objects = objects
         # Bound once, to this pipeline: the fetchers are strategies over these
         # same collaborators, so every road files receipts under one policy
@@ -218,7 +221,7 @@ class EntryFetcher:
 
     def fetch(
         self,
-        ctx: "FetchContext",
+        ctx: FetchContext,
         *,
         source_url: str,
         digest: Optional[str] = None,
@@ -400,7 +403,7 @@ class EntryFetcher:
 
     def fetch_declared(
         self,
-        ctx: "FetchContext",
+        ctx: FetchContext,
         *,
         entry: Mapping[str, Any],
         category: str,
@@ -418,8 +421,11 @@ class EntryFetcher:
 
         One road never reaches a fetcher: a bare-string ``source`` is a URL
         with no declaration to parse, so it goes straight to :meth:`fetch`.
-        (Group D of this change removes that spelling; until then it is the
-        road most documents take.)
+        The schema now **refuses** that spelling at ``PUT`` (§2.2 — declare
+        ``protocol: git`` or ``protocol: oss``), so no new document can take
+        it. It survives here for the documents already stored under the old
+        grammar, which an apply still has to be able to read; delete it only
+        once those are known to be gone.
 
         Every road answers with an :class:`EntryDelivery` — see
         ``apply/entry_delivery.py`` for why the caller does not branch on
@@ -429,6 +435,15 @@ class EntryFetcher:
         if expired is not None:
             raise EntryFetchError(expired)
 
+        # The entry's own inline ``source:`` — the alternative to naming a
+        # declared one with ``from:``. Three shapes reach here, and the type
+        # is the dispatch::
+        #
+        #     source: {protocol: git, url: ..., ref: v1.2.0}   # Mapping
+        #     source: {protocol: oss, bucket: b, key: k}       # Mapping
+        #     source: "https://example.com/x.zip"              # str, legacy
+        #
+        # ``None`` when the entry used ``from:`` or inline ``content:``.
         inline = entry.get("source")
         # Only the roads that read the session require one: a ``from`` name
         # is looked up in ``session.sources`` and a git road checks out
@@ -504,7 +519,11 @@ class EntryFetcher:
                 ctx=ctx,
                 decl=decl,
                 entry=entry,
-                category=category,
+                # Coerced once, here, at the only place a ``DeclaredFetch`` is
+                # built: an unknown category becomes a loud ``ValueError`` at
+                # the front door rather than a quiet fall back to the file cap
+                # deep inside a fetcher.
+                category=FetchCategory(category),
                 entry_identity=entry_identity,
                 keep_last=keep_last,
                 session=session,
@@ -514,13 +533,13 @@ class EntryFetcher:
 
     def _git_keep_last(
         self,
-        ctx: "FetchContext",
+        ctx: FetchContext,
         *,
         session: SourceSession,
         spec: GitSourceSpec,
         display: str,
         keep_last: bool,
-    ) -> "Optional[FetchedEntry]":
+    ) -> Optional[FetchedEntry]:
         """`keep_last` for the git road: the receipt of the *last-resolved*
         SHA, when there was one. A first-time source has no baseline — and
         therefore no stored copy entitled to answer for it."""
@@ -556,9 +575,9 @@ class EntryFetcher:
 
     def acquire_object(
         self,
-        ctx: "FetchContext",
+        ctx: FetchContext,
         *,
-        target: "ObjectStoreTarget",
+        target: ObjectStoreTarget,
         key: str,
         digest: Optional[str],
         auth: Optional[str],
@@ -578,11 +597,6 @@ class EntryFetcher:
         byte cap (enforced inside the client, while streaming) and the
         content address computed here.
         """
-        if self._objects is None:
-            raise EntryFetchError(
-                "this deployment has no object-store client bound, so a "
-                "'protocol: oss' source cannot be read"
-            )
         expired = ctx.budget.expired() if ctx.budget is not None else None
         if expired is not None:
             raise EntryFetchError(expired)
@@ -698,7 +712,7 @@ class EntryFetcher:
 
     def file_bytes(
         self,
-        ctx: "FetchContext",
+        ctx: FetchContext,
         *,
         content: bytes,
         source_url: str,
@@ -744,7 +758,7 @@ class EntryFetcher:
 
     def _fetch(
         self,
-        ctx: "FetchContext",
+        ctx: FetchContext,
         *,
         target: str,
         digest: Optional[str],
@@ -771,7 +785,7 @@ class EntryFetcher:
 
 
 def declared_protocol(
-    ctx: "FetchContext", entry: Mapping[str, Any]
+    ctx: FetchContext, entry: Mapping[str, Any]
 ) -> Optional[SourceKind]:
     """Which protocol :meth:`EntryFetcher.fetch_declared` will take, **without
     fetching anything**.

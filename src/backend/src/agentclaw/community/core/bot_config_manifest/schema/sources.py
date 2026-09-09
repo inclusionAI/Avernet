@@ -20,6 +20,10 @@ the feature is pre-release, so there is no installed base whose documents a
 compatibility road would protect, and a dual spelling is two vocabularies to
 keep honest forever. A source written the old way is refused at ``PUT`` with a
 message naming the replacement.
+
+Grammar reference: ``docs/bot-config-manifest/manifest-schema.zh-CN.md``
+— §2.2 (``protocol``), §2.3 (``sources`` / ``from``). Cite a section rather than restating the grammar here;
+two copies of one grammar drift, and the document is the one users read.
 """
 from __future__ import annotations
 
@@ -120,9 +124,25 @@ class SourceDecl:
     #: the credential because one credential commonly reads several buckets in
     #: an account, and the bucket is the part a manifest author chooses.
     bucket: str | None = None
-    #: oss only — a key **prefix**, composed with an entry's own ``key`` the
+    #: oss only — a key *prefix*, composed with an entry's own ``key`` the
     #: way ``subpath`` composes on the git road (source's first, then the
-    #: entry's). ``None`` means the entry's key is the whole object name.
+    #: entry's). ``None`` means the entry's key is the whole object name::
+    #:
+    #:     sources:
+    #:       artifacts:
+    #:         protocol: oss
+    #:         bucket: team-artifacts
+    #:         key: tools/            # <- the source's prefix
+    #:         auth: oss-prod
+    #:
+    #:     manifest:
+    #:       cli_tools:
+    #:         - name: qc
+    #:           from: artifacts
+    #:           key: qc/v2.tgz       # <- the entry's part
+    #:
+    #: reads ``oss://team-artifacts/tools/qc/v2.tgz``. Drop the source's
+    #: ``key`` and the same entry reads ``oss://team-artifacts/qc/v2.tgz``.
     key: str | None = None
     #: git only — a tag, a branch, or a full commit SHA. ``None`` means the
     #: repository's default head.
@@ -178,11 +198,30 @@ def parse_source(
 ) -> tuple[SourceDecl | None, tuple[SourceViolation, ...]]:
     """Read one source declaration. Returns the model, or ``None`` and reasons.
 
-    ``raw`` is ``object`` rather than a mapping type, and rather than ``Any``:
-    it is whatever ``yaml.safe_load`` produced at that position in a
-    caller-authored document — a string, a list, ``None``, anything. ``Any``
-    would silence the checker; ``object`` makes the narrowing below mandatory,
-    which is exactly the contract this function has with its callers.
+    ``raw`` is **one value from under top-level ``sources``**, or one inline
+    ``source:`` object. When the document is well-formed it is a mapping::
+
+        sources:
+          content:                 # <- the name; the value below is ``raw``
+            protocol: git
+            url: https://code.example-corp.com/team/content.git
+            ref: v1.2.0
+            auth: corp-git-content
+
+    so ``raw`` here is ``{"protocol": "git", "url": ..., "ref": "v1.2.0",
+    "auth": "corp-git-content"}``. Grammar:
+    ``docs/bot-config-manifest/manifest-schema.zh-CN.md`` §2.3.
+
+    **Why it is typed ``object`` and not ``Mapping``**, which review asked:
+    because a caller-authored document is under no obligation to put a
+    mapping there. ``sources: {content: "just a string"}`` parses as YAML and
+    arrives here as ``str``; ``content:`` with nothing under it arrives as
+    ``None``. Typing the parameter ``Mapping`` would be a promise the caller
+    cannot keep, and would move the failure from this function's violation
+    list — which is a message the document's author can act on — to a
+    ``TypeError`` somewhere below. ``Any`` would silence the checker instead;
+    ``object`` makes the ``isinstance`` narrowing below *mandatory*, which is
+    exactly the contract this function has with its callers.
 
     Every problem that can be found is found — the whole document's violations
     are answered at once, so a caller fixes their source in one pass rather

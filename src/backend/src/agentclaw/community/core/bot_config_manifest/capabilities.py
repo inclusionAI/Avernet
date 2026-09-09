@@ -91,11 +91,46 @@ class ManifestSection(StrEnum):
 
 
 class SourceForm(StrEnum):
-    """How an entry names its content.
+    """How an entry *spells* its content — **not** which protocol carries it.
 
-    Four forms. ``GIT`` and ``OSS`` each cover both spellings of their
-    protocol — inline on an entry and declared under ``sources`` — because one
-    resolver serves both (W7's declared-source dispatch).
+    That distinction is the whole reason this enum is separate from
+    :class:`~agentclaw.community.core.bot_config_manifest.support_matrix.SourceKind`,
+    and it is worth being concrete, because ``NAMED`` reads like a fourth
+    protocol and is not one. There are only three protocols: content, git,
+    oss. Grammar: ``docs/bot-config-manifest/manifest-schema.zh-CN.md``
+    §2.2 (``protocol``) and §2.3 (``sources`` / ``from``).
+
+    Three spellings say their own protocol::
+
+        - name: CLAUDE.md
+          content: "You are a helpful bot."          # CONTENT
+
+        - name: notes                                 # GIT
+          source: {protocol: git, url: ..., ref: v1.2.0}
+
+        - name: tools                                 # OSS
+          source: {protocol: oss, bucket: b, key: tools/, auth: oss-prod}
+
+    The fourth does not, because it points at a declaration::
+
+        sources:
+          team-repo: {protocol: git, url: ..., ref: v1.2.0}
+
+        manifest:
+          resources:
+            - name: notes
+              from: team-repo                         # NAMED — protocol is git
+              subpath: docs/notes.md
+
+    **What this enum is for.** One thing only: the deployment-capability gate
+    in :meth:`Context.require_source_support` — "can this deployment resolve
+    this spelling at all?" A deployment may refuse the ``from:`` spelling
+    wholesale while still serving git, which is a statement about spellings
+    and cannot be made on the protocol axis. The answer is checked at the
+    parse site and never stored; ``EntrySource`` keeps only the protocol.
+    (It briefly kept the form too. Review asked why both, and the honest
+    answer was that they cannot diverge once a ``from:`` resolves — and that
+    nothing ever read it. The field is gone.)
     """
 
     #: An object store, addressed by ``bucket``/``key``. Named for the
@@ -103,8 +138,12 @@ class SourceForm(StrEnum):
     #: is gone, because a manifest no longer names a URL for the platform to
     #: fetch.
     OSS = "oss"
+    #: An inline ``source:`` object on the entry, ``protocol: git``.
     GIT = "git"
+    #: ``from: <name>``, pointing at a ``sources`` declaration that carries
+    #: the protocol. A spelling, never a protocol of its own.
     NAMED = "named"
+    #: ``content:`` inline in the document. The one form that fetches nothing.
     CONTENT = "content"
 
 
