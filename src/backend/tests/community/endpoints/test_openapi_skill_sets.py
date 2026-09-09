@@ -6,8 +6,6 @@ same ACL, desired-state UoW, and router seam as a real request.
 """
 
 from __future__ import annotations
-from unittest.mock import MagicMock
-
 from datetime import UTC, datetime
 import time
 from types import SimpleNamespace
@@ -32,6 +30,9 @@ from agentclaw.community.api.skill_center_reference_service import (
 )
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
+)
+from agentclaw.community.core.skill_center.desktop_skill_recovery_protocol import (
+    DesktopSkillRecoveryServiceProtocol,
 )
 from agentclaw.community.core.skill_center.services.direct_activation_service import (
     DirectActivationService,
@@ -200,7 +201,7 @@ def _seed(world, *, member: bool = False) -> None:
         mcp_center=world.get(MCPCenterPlugin),
         mcp_auth=world.get(MCPAuthPlugin),
         ext_info_provider=lambda _bot_id: None,
-        recovery=MagicMock(),
+        recovery=world.get(DesktopSkillRecoveryServiceProtocol),
     )
     world.injector.binder.bind(
         SkillSetManagementServiceProtocol, to=control_plane, scope=None
@@ -217,7 +218,7 @@ def _seed(world, *, member: bool = False) -> None:
         world.get(MCPCenterPlugin),
         world.get(BotCapabilityStateReaderProtocol),
         PlatformDefaultMcpPolicy(lambda _bot_id: None),
-        MagicMock(),
+        world.get(DesktopSkillRecoveryServiceProtocol),
     )
     world.injector.binder.bind(
         DirectActivationServiceProtocol, to=direct, scope=None

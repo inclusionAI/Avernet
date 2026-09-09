@@ -179,14 +179,6 @@ def _as_bool(raw: Any) -> bool:
         raise ValueError(f"not a boolean: {raw!r}")
     raise TypeError(f"not a boolean: {type(raw).__name__}")
 
-def _as_finite_float(raw: Any) -> float:
-    if isinstance(raw, bool):
-        raise TypeError(f"not a number: {raw!r}")
-    value = float(raw)
-    if not math.isfinite(value):
-        raise ValueError(f"not a finite number: {raw!r}")
-    return value
-
 def _reject_unknown_keys(
     block: dict[str, Any], where: str, *, allow_overrides: bool
 ) -> None:
@@ -808,32 +800,6 @@ class ConfigModule(Module):
             enabled=bool(block.get("enabled", defaults.enabled)),
             apply_owner_whitelist=whitelist,
             global_dry_run=bool(block.get("global_dry_run", defaults.global_dry_run)),
-        )
-
-    @singleton
-    @provider
-    def desktop_skill_recovery(self) -> cfg.DesktopSkillRecoveryConfig:
-        """Bot-level recovery sweep, independent of Desktop health scanning."""
-        block = _block("desktop_skill_recovery")
-        defaults = cfg.DesktopSkillRecoveryConfig()
-        allowed = {"enabled", "sweep_interval_seconds", "sweep_page_size"}
-        unknown = sorted(str(key) for key in block if str(key) not in allowed)
-        if unknown:
-            raise ValueError(
-                "unknown desktop_skill_recovery key(s) "
-                + ", ".join(repr(key) for key in unknown)
-            )
-        return cfg.DesktopSkillRecoveryConfig(
-            enabled=_as_bool(block.get("enabled", defaults.enabled)),
-            sweep_interval_seconds=_as_finite_float(
-                block.get(
-                    "sweep_interval_seconds",
-                    defaults.sweep_interval_seconds,
-                )
-            ),
-            sweep_page_size=_as_int(
-                block.get("sweep_page_size", defaults.sweep_page_size)
-            ),
         )
 
     # NOTE: skill_scan + antcode + dima providers moved to ``CorpConfigModule`` (B8) —

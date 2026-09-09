@@ -19,8 +19,11 @@ from agentclaw.community.core.skill_center.services.group4_task_registrar import
     SkillCenterGroup4TaskRegistrar,
 )
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
-from agentclaw.community.di.modules import config_module
-from agentclaw.community.di.modules.config_module import ConfigModule
+from agentclaw.community.di import DeployProfile, build_injector
+from agentclaw.community.di.modules import desktop_skill_recovery_config_module
+from agentclaw.community.di.modules.desktop_skill_recovery_config_module import (
+    DesktopSkillRecoveryConfigModule,
+)
 
 
 def test_desktop_skill_recovery_service_handler_sweeper_and_registry_resolve(
@@ -43,18 +46,16 @@ def test_desktop_skill_recovery_service_handler_sweeper_and_registry_resolve(
 
 def test_desktop_skill_recovery_config_reads_valid_sweep_values(monkeypatch) -> None:
     monkeypatch.setattr(
-        config_module,
+        desktop_skill_recovery_config_module,
         "_block",
-        lambda name: {
+        lambda: {
             "enabled": False,
             "sweep_interval_seconds": 601,
             "sweep_page_size": 23,
-        }
-        if name == "desktop_skill_recovery"
-        else {},
+        },
     )
 
-    value = ConfigModule().desktop_skill_recovery()
+    value = DesktopSkillRecoveryConfigModule().desktop_skill_recovery()
 
     assert value.enabled is False
     assert value.sweep_interval_seconds == 601
@@ -69,13 +70,13 @@ def test_desktop_skill_recovery_config_rejects_nonpositive_values(
     monkeypatch, field, value
 ) -> None:
     monkeypatch.setattr(
-        config_module,
+        desktop_skill_recovery_config_module,
         "_block",
-        lambda _name: {field: value},
+        lambda: {field: value},
     )
 
     with pytest.raises(ValueError, match="must be positive"):
-        ConfigModule().desktop_skill_recovery()
+        DesktopSkillRecoveryConfigModule().desktop_skill_recovery()
 
 
 @pytest.mark.parametrize(
@@ -90,7 +91,20 @@ def test_desktop_skill_recovery_config_rejects_nonpositive_values(
 def test_desktop_skill_recovery_config_rejects_invalid_schema(
     monkeypatch, block
 ) -> None:
-    monkeypatch.setattr(config_module, "_block", lambda _name: block)
+    monkeypatch.setattr(desktop_skill_recovery_config_module, "_block", lambda: block)
 
     with pytest.raises((TypeError, ValueError)):
-        ConfigModule().desktop_skill_recovery()
+        DesktopSkillRecoveryConfigModule().desktop_skill_recovery()
+
+
+def test_invalid_desktop_skill_recovery_config_fails_injector_build(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        desktop_skill_recovery_config_module.config_module,
+        "read_user_config",
+        lambda: {"desktop_skill_recovery": {"sweep_page_szie": 10}},
+    )
+
+    with pytest.raises(ValueError, match="unknown desktop_skill_recovery"):
+        build_injector(profile=DeployProfile.TEST)
