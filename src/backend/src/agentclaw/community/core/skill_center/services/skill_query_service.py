@@ -17,14 +17,24 @@ from typing import Any, Callable, Protocol, TYPE_CHECKING
 
 from injector import inject
 
-from agentclaw.community.core.skill_center.skill_query_service_protocol import SkillQueryServiceProtocol
+from agentclaw.community.core.skill_center.skill_query_service_protocol import (
+    SkillQueryServiceProtocol,
+)
 from agentclaw.community.core.bot_config_surface.coords import BotConfigCoords
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.center_skill_access import (
+    CenterSkillAccessRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterVersionIdentity,
+    CanonicalCenterVersionRef,
+    CanonicalCenterVersionStore,
+)
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
 )
@@ -39,6 +49,13 @@ from agentclaw.community.core.skill_center.factories import (
     SkillServiceFactory,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
+from agentclaw.community.core.skill_center.version_resolution_contract import (
+    SkillVersionResolutionError,
+    SkillVersionResolverProtocol,
+)
+from agentclaw.community.core.spaces.errors import SpaceError
+from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
+from agentclaw.community.utils.env_utils import get_current_env
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -101,7 +118,7 @@ def skill_coords_from_spec(bot_id: str, owner_id: str) -> BotConfigCoords:
 class SkillAssetKind(StrEnum):
     LOCAL = "LOCAL"
     REPO = "REPO"
-    SPACE = "SPACE"
+    CENTER = "CENTER"
 
 
 class _AssetAdapter(Protocol):
@@ -128,6 +145,10 @@ class SkillQueryService(SkillQueryServiceProtocol):
         skill_service_factory: SkillServiceFactory,
         parameter_service_factory: SkillParameterServiceFactory,
         device_context_resolver_provider: Callable[[], "DeviceContextResolver"],
+        center_access: CenterSkillAccessRepositoryProtocol,
+        version_resolver: SkillVersionResolverProtocol,
+        canonical_store: CanonicalCenterVersionStore,
+        space_access: SpaceAccessServiceProtocol,
     ) -> None:
         self._skill_repo = skill_repo
         self._bot_repo = bot_repo
@@ -136,10 +157,14 @@ class SkillQueryService(SkillQueryServiceProtocol):
         self._skill_service_factory = skill_service_factory
         self._parameter_service_factory = parameter_service_factory
         self._device_context_resolver_provider = device_context_resolver_provider
+        self._center_access = center_access
+        self._version_resolver = version_resolver
+        self._canonical_store = canonical_store
+        self._space_access = space_access
         self._adapters: dict[SkillAssetKind, _AssetAdapter] = {
             SkillAssetKind.LOCAL: _LocalAssetAdapter(self),
             SkillAssetKind.REPO: _RepoAssetAdapter(self),
-            SkillAssetKind.SPACE: _UnavailableAssetAdapter(),
+            SkillAssetKind.CENTER: _CenterAssetAdapter(self),
         }
 
     # ── Listing ─────────────────────────────────────────────────────
@@ -225,6 +250,18 @@ class SkillQueryService(SkillQueryServiceProtocol):
             "active": any(asset.skill_id == int(skill_id) for asset in installed),
         }
 
+    def resolve_skill(
+        self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str
+    ) -> dict[str, Any]:
+        """Resolve a Bot-facing asset without reading or flushing desired state."""
+        skill, _bot, _owner_id = self._resolve(
+            skill_id=skill_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            user_id=user_id,
+        )
+        return skill
+
     # ── Legacy reference resolution ─────────────────────────────────
 
     def resolve_legacy_skill_id(
@@ -292,16 +329,19 @@ class SkillQueryService(SkillQueryServiceProtocol):
             owner_id=owner_id,
             user_id=user_id,
         )
-        if self._kind_for(skill) is SkillAssetKind.REPO:
+        kind = self._kind_for(skill)
+        if kind is SkillAssetKind.REPO:
             # Repo assets are read from the global skills-repo corpus, never a
             # Bot workspace and never the historical README fallback.
             content = self._skill_service_factory.create().get_repository_skill_content(
                 skill_id
             )
-        else:
+        elif kind is SkillAssetKind.LOCAL:
             content = await self._local_storage(skill, bot, owner_id).read_file(
                 "SKILL.md"
             )
+        else:
+            content = self._center_content(skill=skill, actor_id=user_id)
         if content is None:
             raise LocalSkillNotFoundError()
         if isinstance(content, str):
@@ -331,17 +371,21 @@ class SkillQueryService(SkillQueryServiceProtocol):
                 raise LocalSkillNotFoundError()
             return content
 
+        if kind is SkillAssetKind.CENTER:
+            return SkillParser.decode_content_for_display(
+                self._center_content(skill=skill, actor_id=actor_id)
+            )
         if kind is not SkillAssetKind.LOCAL:
             raise LocalSkillNotFoundError()
 
         bot_id = str(skill.get("bolt_id") or "")
-        if not bot_id:
+        owner_id = str(skill.get("user_id") or "")
+        if not bot_id or not owner_id:
             raise LocalSkillNotFoundError()
-        bot = self._bot_repo.get_unique_by_id(bot_id)
+        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
             raise LocalSkillNotFoundError()
-        owner_id = str(bot.get("owner_id") or "")
-        if not owner_id:
+        if str(bot.get("owner_id") or "") != owner_id:
             raise LocalSkillNotFoundError()
         if actor_id != owner_id:
             permission = self._collaborators.check_collaborator_permission(
@@ -495,7 +539,7 @@ class SkillQueryService(SkillQueryServiceProtocol):
         if source.startswith("git://"):
             return SkillAssetKind.REPO
         if source.startswith("center://"):
-            return SkillAssetKind.SPACE
+            return SkillAssetKind.CENTER
         raise LocalSkillNotFoundError()
 
     def _local_storage(self, skill: dict[str, Any], bot: dict[str, Any], owner_id: str):
@@ -513,6 +557,47 @@ class SkillQueryService(SkillQueryServiceProtocol):
             is_teclaw=context.provider == "teclaw",
             locator=locator,
         )
+
+    def _require_center_access(
+        self, *, skill: dict[str, Any], actor_id: str
+    ) -> dict[str, Any]:
+        skill_id = skill.get("id")
+        if not isinstance(skill_id, (str, int)) or not str(skill_id).isdecimal():
+            raise LocalSkillNotFoundError()
+        access = self._center_access.get_access(
+            env=get_current_env(), skill_id=int(skill_id)
+        )
+        if access is None or access["offline_at"] is not None:
+            raise LocalSkillNotFoundError()
+        if access["visibility"] == "SPACE":
+            space_id = access["space_id"]
+            if space_id is None:
+                raise LocalSkillNotFoundError()
+            try:
+                self._space_access.require_space_member(
+                    space_id=space_id, user_id=actor_id
+                )
+            except SpaceError as exc:
+                raise LocalSkillNotFoundError() from exc
+        return access
+
+    def _center_content(self, *, skill: dict[str, Any], actor_id: str) -> bytes:
+        access = self._require_center_access(skill=skill, actor_id=actor_id)
+        try:
+            version = self._version_resolver.resolve_latest_published(
+                env=get_current_env(), skill_id=int(skill["id"])
+            )
+        except SkillVersionResolutionError as exc:
+            raise LocalSkillNotFoundError() from exc
+
+        return self._canonical_store.read_version(
+            CanonicalCenterVersionRef(
+                CanonicalCenterVersionIdentity(
+                    skill_uuid=access["skill_uuid"],
+                    sc_version_number=version.sc_version_number,
+                )
+            )
+        ).skill_md
 
     @staticmethod
     def _validate_parameters(manifest: str, parameters: dict[str, Any]) -> None:
@@ -591,8 +676,11 @@ class _RepoAssetAdapter:
         return {**skill, "bolt_id": bot_id, "user_id": owner_id}, bot, owner_id
 
 
-class _UnavailableAssetAdapter:
-    """Explicit P1-01 registration point for P1-02/Phase-2 asset readers."""
+class _CenterAssetAdapter:
+    """Authorize a shared Center asset without changing its persisted owner."""
+
+    def __init__(self, service: SkillQueryService) -> None:
+        self._service = service
 
     def resolve(
         self,
@@ -602,4 +690,8 @@ class _UnavailableAssetAdapter:
         owner_id: str,
         user_id: str,
     ):
-        raise LocalSkillNotFoundError()
+        bot = self._service._require_view_access(
+            bot_id=bot_id, owner_id=owner_id, actor_id=user_id
+        )
+        self._service._require_center_access(skill=skill, actor_id=user_id)
+        return {**skill, "bolt_id": bot_id, "user_id": owner_id}, bot, owner_id

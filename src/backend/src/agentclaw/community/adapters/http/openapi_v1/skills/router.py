@@ -1,8 +1,9 @@
-"""Public lifecycle routes for Bot-owned Local Skills.
+"""Public Bot-facing Skill routes.
 
-This router deliberately exposes only the six ratified Local Skill operations.
-Git, Center, marketplace, and install semantics remain on their separate,
-non-public surfaces.
+Upload and delete remain Local-only lifecycle operations. Shared Repo and
+Center assets reuse the read, parameter, and Direct desired-state operations;
+their catalogue, publication, and asynchronous reference semantics remain on
+their existing market, Space, and SkillSet surfaces.
 """
 
 from __future__ import annotations
@@ -178,7 +179,7 @@ async def get_skill_readme(
         SkillQueryServiceProtocol
     ),
 ) -> Envelope[SkillContent]:
-    """Read a Local or public-market Skill by its stable Skill ID."""
+    """Read a visible shared or Local Skill without selecting a Bot."""
     content = await query_service.get_readme_by_skill(
         skill_id=skill_id,
         actor_id=caller_owner_id(principal),
@@ -352,7 +353,7 @@ async def get_skill(
         SkillQueryServiceProtocol
     ),
 ) -> Envelope[Skill]:
-    """Get public metadata for one Local Skill; the Skill ID selects its Bot."""
+    """Get Bot-facing metadata for one Local, Repo, or Center Skill."""
     record = query_service.get_skill(
         skill_id=skill_id,
         bot_id=bot_id,

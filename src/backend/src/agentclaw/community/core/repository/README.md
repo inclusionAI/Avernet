@@ -157,6 +157,7 @@ provides:
   - BotPublishRepositoryProtocol
   - PublishOperationRepository    # an ABC, not a Protocol — same role, same surface
   # skill_center
+  - CenterSkillAccessRepositoryProtocol
   - SkillCategoryRepository
   - SkillCenterSyncLogRepository
   - SkillMemberRepository

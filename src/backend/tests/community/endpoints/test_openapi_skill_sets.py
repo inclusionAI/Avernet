@@ -17,6 +17,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_
 from agentclaw.community.api.direct_activation_service import (
     DirectActivationServiceProtocol,
 )
+from agentclaw.community.api.skill_query_service import SkillQueryServiceProtocol
 from agentclaw.community.api.skill_set_management_service import (
     SkillSetManagementServiceProtocol,
 )
@@ -207,7 +208,7 @@ def _seed(world, *, member: bool = False) -> None:
     direct = DirectActivationService(
         world.get(CapabilityDesiredStateRepositoryProtocol),
         world.get(BotRepository),
-        world.get(SkillRepository),
+        world.get(SkillQueryServiceProtocol),
         runtime,
         world.get(BotCapabilityAuthorizationHookProtocol),
         world.get(BotCollabLogRepositoryProtocol),

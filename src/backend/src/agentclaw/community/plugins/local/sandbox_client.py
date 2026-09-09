@@ -50,7 +50,13 @@ class NoopSandboxClient(MockSeam, SandboxRuntimeClient):
     def build_proxy_request(self, *, sandbox_id: str, api_path: str, port: int = 20003) -> ProxyRequest:
         return ProxyRequest(url=f"http://noop-sandbox:{port}{api_path}", headers={})
 
-    async def read_file(self, *, sandbox_id: str, path: str) -> bytes | None:
+    async def read_file(
+        self,
+        *,
+        sandbox_id: str,
+        path: str,
+        preserve_read_errors: bool = False,
+    ) -> bytes | None:
         return b""
 
     async def write_file(self, *, sandbox_id: str, path: str, content: bytes) -> None:
