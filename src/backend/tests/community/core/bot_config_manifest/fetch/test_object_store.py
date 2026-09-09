@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 
 import oss2.exceptions as oss_exc
 import pytest
+from requests import ConnectionError as RequestsConnectionError
 
 from agentclaw.community.core.bot_config_manifest.fetch import object_store
 from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
@@ -42,6 +43,7 @@ SDK_MESSAGE = (
     f"request to {ENDPOINT}/bkt/k?Signature={SECRET} was refused, "
     f"AccessKeyId={AK}"
 )
+WHERE = "object 'tools/qc.tgz' in bucket 'team-artifacts': "
 
 
 def _target(bucket: str = "team-artifacts", *, region: str = "cn-shanghai") -> ObjectStoreTarget:
@@ -71,8 +73,7 @@ class _Stream:
     body: bytes
     serve: int = 1 << 20
     fail_after: int | None = None
-    client_crc: int | None = None
-    server_crc: int | None = None
+    close_error: BaseException | None = None
     reads: int = 0
     served: int = 0
     closed: bool = False
@@ -88,6 +89,8 @@ class _Stream:
 
     def close(self) -> None:
         self.closed = True
+        if self.close_error is not None:
+            raise self.close_error
 
 
 @dataclass
@@ -161,25 +164,25 @@ def test_the_target_repr_redacts_the_secret():
         pytest.param(
             _server_error(oss_exc.NoSuchKey, 404, "NoSuchKey"),
             ObjectFetchStatus.NOT_FOUND,
-            "team-artifacts/tools/qc.tgz: no such object (NoSuchKey)",
+            "the object was not found (NoSuchKey)",
             id="NoSuchKey",
         ),
         pytest.param(
             _server_error(oss_exc.NoSuchBucket, 404, "NoSuchBucket"),
             ObjectFetchStatus.NOT_FOUND,
-            "team-artifacts/tools/qc.tgz: no such object (NoSuchBucket)",
+            "the object was not found (NoSuchBucket)",
             id="NoSuchBucket",
         ),
         pytest.param(
             _server_error(oss_exc.AccessDenied, 403, "AccessDenied"),
             ObjectFetchStatus.DENIED,
-            "team-artifacts/tools/qc.tgz: not authorized (AccessDenied)",
+            "the credential was denied (AccessDenied)",
             id="AccessDenied",
         ),
         pytest.param(
             _server_error(oss_exc.SignatureDoesNotMatch, 403, "SignatureDoesNotMatch"),
             ObjectFetchStatus.DENIED,
-            "team-artifacts/tools/qc.tgz: not authorized (SignatureDoesNotMatch)",
+            "the credential was denied (SignatureDoesNotMatch)",
             id="SignatureDoesNotMatch",
         ),
         pytest.param(
@@ -187,8 +190,23 @@ def test_the_target_repr_redacts_the_secret():
             # bare ``ServerError`` and only the status and code identify it.
             _server_error(oss_exc.ServerError, 403, "InvalidAccessKeyId"),
             ObjectFetchStatus.DENIED,
-            "team-artifacts/tools/qc.tgz: not authorized (InvalidAccessKeyId)",
+            "the credential was denied (InvalidAccessKeyId)",
             id="bare-403-InvalidAccessKeyId",
+        ),
+        pytest.param(
+            # Clock skew is a refusal: the credential cannot be presented
+            # from this host until the clock is fixed, and no retry changes
+            # that.
+            _server_error(oss_exc.ServerError, 403, "RequestTimeTooSkewed"),
+            ObjectFetchStatus.DENIED,
+            "the credential was denied (RequestTimeTooSkewed)",
+            id="RequestTimeTooSkewed",
+        ),
+        pytest.param(
+            _server_error(oss_exc.ServerError, 401, ""),
+            ObjectFetchStatus.DENIED,
+            "the credential was denied",
+            id="bare-401",
         ),
         pytest.param(
             # The live-testing failure: an S3-style signature against the
@@ -199,50 +217,81 @@ def test_the_target_repr_redacts_the_secret():
                 oss_exc.InvalidArgument, 400, "InvalidArgument", ArgumentName="Authorization"
             ),
             ObjectFetchStatus.NOT_FOUND,
-            "team-artifacts/tools/qc.tgz: the object store refused the request (InvalidArgument)",
+            "the object store refused the request (InvalidArgument)",
             id="InvalidArgument",
         ),
         pytest.param(
             _server_error(oss_exc.ServerError, 400, "InvalidArgument"),
             ObjectFetchStatus.NOT_FOUND,
-            "team-artifacts/tools/qc.tgz: the object store refused the request (InvalidArgument)",
+            "the object store refused the request (InvalidArgument)",
             id="bare-400-InvalidArgument",
         ),
         pytest.param(
             _server_error(oss_exc.ServerError, 400, ""),
             ObjectFetchStatus.NOT_FOUND,
-            "team-artifacts/tools/qc.tgz: the object store refused the request",
+            "the object store refused the request",
             id="bare-400-no-code",
+        ),
+        pytest.param(
+            # A 301: the bucket lives in another region. Configuration, and
+            # caught by code because no status range would catch it.
+            _server_error(oss_exc.ServerError, 301, "PermanentRedirect"),
+            ObjectFetchStatus.NOT_FOUND,
+            "the object store refused the request (PermanentRedirect)",
+            id="PermanentRedirect-301",
         ),
         pytest.param(
             # A local SDK error: the store never saw the request. Its own
             # sentence, pointing at the credential row and not at the bucket
             # policy — and a refusal all the same, since retrying changes
             # nothing. The SDK reports it with a negative status, so it is
-            # checked before the 4xx range.
+            # ruled on before the status ranges.
             oss_exc.ClientError("The region should not be None in signature version 4."),
             ObjectFetchStatus.NOT_FOUND,
-            "team-artifacts/tools/qc.tgz: the request could not be built from the "
-            "credential; check its endpoint, region and key pair",
+            "the request could not be built from the credential; check its "
+            "endpoint, region and key pair",
             id="ClientError",
         ),
         pytest.param(
-            oss_exc.RequestError(ConnectionError(SDK_MESSAGE)),
+            oss_exc.RequestError(RequestsConnectionError(SDK_MESSAGE)),
             ObjectFetchStatus.UNAVAILABLE,
-            "team-artifacts/tools/qc.tgz: the object store could not be reached",
+            "the object store could not be reached",
             id="RequestError",
+        ),
+        pytest.param(
+            # Throttling arrives as a 4xx and is the store having a bad time,
+            # not the document being wrong: maskable, ruled on before the
+            # refused-request range.
+            _server_error(oss_exc.ServerError, 429, "QpsLimitExceeded"),
+            ObjectFetchStatus.UNAVAILABLE,
+            "the object store is unavailable (QpsLimitExceeded)",
+            id="throttled-429",
+        ),
+        pytest.param(
+            _server_error(oss_exc.ServerError, 408, "RequestTimeout"),
+            ObjectFetchStatus.UNAVAILABLE,
+            "the object store is unavailable (RequestTimeout)",
+            id="RequestTimeout-408",
         ),
         pytest.param(
             _server_error(oss_exc.ServerError, 500, "InternalError"),
             ObjectFetchStatus.UNAVAILABLE,
-            "team-artifacts/tools/qc.tgz: the object store returned an error (InternalError)",
+            "the object store is unavailable (InternalError)",
             id="5xx",
         ),
         pytest.param(
             _server_error(oss_exc.ServerError, 503, ""),
             ObjectFetchStatus.UNAVAILABLE,
-            "team-artifacts/tools/qc.tgz: the object store returned an error",
+            "the object store is unavailable",
             id="5xx-no-code",
+        ),
+        pytest.param(
+            # A response the SDK could not parse: its own negative status,
+            # no code. Nothing to refuse on, so maskable.
+            oss_exc.OpenApiFormatError("unparseable body"),
+            ObjectFetchStatus.UNAVAILABLE,
+            "the object store returned an error",
+            id="format-error",
         ),
     ],
 )
@@ -252,7 +301,7 @@ def test_classify_pins_each_sdk_outcome_to_a_status_and_a_sentence(exc, status, 
     result = store.get(_target(), "tools/qc.tgz", byte_limit=1024)
 
     assert result.status is status
-    assert result.detail == sentence
+    assert result.detail == WHERE + sentence
     assert result.content is None
     # The SDK's message is what carries the endpoint and the signed material.
     for leak in (ENDPOINT, SECRET, AK, "Signature="):
@@ -271,6 +320,18 @@ def test_an_unreachable_store_is_a_failure_not_a_refusal():
     assert result.is_refusal is False
 
 
+@pytest.mark.parametrize(
+    "exc",
+    [RequestsConnectionError("pool exhausted"), ConnectionRefusedError("refused")],
+    ids=["requests", "os"],
+)
+def test_a_transport_error_the_sdk_did_not_wrap_is_still_a_failure(exc):
+    store, _ = _store(k=exc)
+    result = store.get(_target(), "k", byte_limit=1)
+    assert result.status is ObjectFetchStatus.UNAVAILABLE
+    assert result.detail == "object 'k' in bucket 'team-artifacts': the object store could not be reached"
+
+
 def test_no_store_side_outcome_raises_out_of_the_read():
     """A missing object, a denied credential and an unreachable endpoint are
     all *results*: the caller's next move differs for each, and an exception
@@ -282,6 +343,8 @@ def test_no_store_side_outcome_raises_out_of_the_read():
         oss_exc.ClientError("bucket_name is invalid"),
         oss_exc.InconsistentError("crc", "req-2"),
         _server_error(oss_exc.ServerError, 500, "InternalError"),
+        RequestsConnectionError("raw"),
+        _Stream(b"x", close_error=RequestsConnectionError("close reset")),
     ]
     for exc in outcomes:
         store, _ = _store(k=exc)
@@ -370,7 +433,9 @@ def test_an_oversized_object_is_refused_while_streaming_not_after():
 
     assert result.status is ObjectFetchStatus.TOO_LARGE
     assert result.content is None
-    assert result.detail == "team-artifacts/big: object exceeds the 4096-byte cap"
+    assert result.detail == (
+        "object 'big' in bucket 'team-artifacts': the object exceeds the 4096-byte cap"
+    )
     assert stream.served <= 4096 + 512
     assert stream.closed  # the rest stays on the wire, and the socket goes back
 
@@ -383,27 +448,22 @@ def test_a_read_that_dies_mid_stream_is_the_transport_not_the_document():
 
     assert result.status is ObjectFetchStatus.UNAVAILABLE
     assert result.is_refusal is False
-    assert result.detail == "team-artifacts/k: the read did not complete"
+    assert result.detail == "object 'k' in bucket 'team-artifacts': the object read did not complete"
     assert stream.closed
 
 
-def test_a_crc_disagreement_is_a_corrupted_transfer():
-    """The SDK computes the CRC on the same pass and the store declares its
-    own; when both are present and disagree the bytes are not the object's,
-    which is the transport's fault — maskable, and never handed over."""
-    stream = _Stream(b"x" * 10, client_crc=1, server_crc=2)
+def test_a_close_that_fails_does_not_take_the_verdict_with_it():
+    """The bytes are already in hand when the socket is returned; a reset on
+    close is logged and nothing else — it must not raise out of the read, and
+    it must not turn a ``FOUND`` into a failure."""
+    stream = _Stream(b"payload", close_error=RequestsConnectionError("reset on close"))
     store, _ = _store(k=stream)
 
     result = store.get(_target(), "k", byte_limit=1024)
 
-    assert result.status is ObjectFetchStatus.UNAVAILABLE
-    assert result.content is None
-
-
-def test_a_crc_the_store_did_not_declare_is_not_held_against_the_object():
-    stream = _Stream(b"x" * 10, client_crc=1, server_crc=None)
-    store, _ = _store(k=stream)
-    assert store.get(_target(), "k", byte_limit=1024).status is ObjectFetchStatus.FOUND
+    assert result.status is ObjectFetchStatus.FOUND
+    assert result.content == b"payload"
+    assert stream.closed
 
 
 # ── report safety ────────────────────────────────────────────────────────────
@@ -415,11 +475,13 @@ def test_a_crc_the_store_did_not_declare_is_not_held_against_the_object():
         _server_error(oss_exc.AccessDenied, 403, "AccessDenied"),
         _server_error(oss_exc.NoSuchKey, 404, "NoSuchKey"),
         _server_error(oss_exc.InvalidArgument, 400, "InvalidArgument"),
+        _server_error(oss_exc.ServerError, 429, "Throttling"),
         oss_exc.ClientError(f"bad endpoint {ENDPOINT} for {AK}"),
-        oss_exc.RequestError(ConnectionError(SDK_MESSAGE)),
+        oss_exc.RequestError(RequestsConnectionError(SDK_MESSAGE)),
+        RequestsConnectionError(SDK_MESSAGE),
         _Stream(b"x" * 5000),
     ],
-    ids=["denied", "missing", "refused", "client", "unreachable", "too-large"],
+    ids=["denied", "missing", "refused", "throttled", "client", "unreachable", "raw", "too-large"],
 )
 def test_detail_never_carries_the_endpoint_or_the_secret(outcome):
     """``detail`` reaches an apply report. The bucket and key belong there;
@@ -432,4 +494,4 @@ def test_detail_never_carries_the_endpoint_or_the_secret(outcome):
     assert SECRET not in result.detail
     assert ENDPOINT not in result.detail
     assert AK not in result.detail
-    assert result.detail.startswith("team-artifacts/k: ")
+    assert result.detail.startswith("object 'k' in bucket 'team-artifacts': ")

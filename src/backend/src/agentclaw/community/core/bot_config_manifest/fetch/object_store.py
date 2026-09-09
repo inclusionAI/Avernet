@@ -53,6 +53,7 @@ from typing import Any, Callable, Optional
 
 import oss2
 import oss2.exceptions as oss_exc
+from requests import RequestException
 
 from agentclaw.community.log import get_logger
 
@@ -145,8 +146,10 @@ class ObjectFetchResult:
     #: from the bucket, the key, the status and the store's error code and
     #: nothing else, for example::
     #:
-    #:     "team-artifacts/tools/qc/v2.tgz: no such object (NoSuchKey)"
-    #:     "team-artifacts/tools/qc/v2.tgz: not authorized (AccessDenied)"
+    #:     "object 'tools/qc/v2.tgz' in bucket 'team-artifacts': the object
+    #:      was not found (NoSuchKey)"
+    #:     "object 'tools/qc/v2.tgz' in bucket 'team-artifacts': the
+    #:      credential was denied (AccessDenied)"
     #:
     #: Never the SDK's own message, which echoes the endpoint and sometimes a
     #: signed query string carrying the key pair. The error code is safe: it
@@ -168,22 +171,75 @@ _CHUNK = 256 * 1024
 #: Bounded like every other manifest fetch: an apply must not sit on a hung
 #: endpoint past the lock TTL. ``oss2`` hands the pair straight to ``requests``
 #: as ``(connect, read)``.
-_TIMEOUT = (10, 60)
+_CONNECT_TIMEOUT_SECONDS = 10
+_READ_TIMEOUT_SECONDS = 60
 
-#: Codes that mean "this credential may not read it", beyond the two the SDK
-#: types for us. Both halves matter: a wrong key and a right key without
-#: permission are the same refusal to the caller, and neither may be masked
-#: by ``keep_last``.
+#: The store's own vocabulary, by verdict. Codes rather than the SDK's typed
+#: exceptions alone: ``make_exception`` answers a bare ``ServerError`` for any
+#: (status, code) pair it has no class for, so the code is the reliable key.
+_NOT_FOUND_CODES = frozenset({"NoSuchKey", "NoSuchBucket", "404", "NotFound"})
+
+#: "This credential may not read it". Both halves matter: a wrong key and a
+#: right key without permission are the same refusal to the caller, and
+#: neither may be masked by ``keep_last``.
 _DENIED_CODES = frozenset(
     {
         "AccessDenied",
-        "InvalidAccessKeyId",
-        "SignatureDoesNotMatch",
-        "InvalidSecurityToken",
-        "SecurityTokenExpired",
         "AccessDeniedByBucketPolicy",
+        "AccessKeyDisabled",
+        "AllAccessDisabled",
+        "InvalidAccessKeyId",
+        "InvalidSecurity",
+        "InvalidSecurityToken",
+        "RequestTimeTooSkewed",
+        "SecurityTokenExpired",
+        "SignatureDoesNotMatch",
+        "401",
+        "403",
+        "Forbidden",
     }
 )
+
+#: "The request itself is wrong" — a malformed bucket name, a bad argument, a
+#: signature the store rejects because the region is wrong. Configuration,
+#: not availability: retrying changes nothing, and letting ``keep_last`` mask
+#: them is how a mistyped region goes on serving last apply's bytes
+#: indefinitely while looking healthy. Listed by code and not only by status
+#: range because ``PermanentRedirect`` arrives as a 301.
+_INVALID_REQUEST_CODES = frozenset(
+    {
+        "AuthorizationHeaderMalformed",
+        "AuthorizationQueryParametersError",
+        "BadRequest",
+        "InvalidArgument",
+        "InvalidBucketName",
+        "InvalidObjectName",
+        "InvalidRequest",
+        "MalformedXML",
+        "MethodNotAllowed",
+        "PermanentRedirect",
+        "400",
+    }
+)
+
+#: The store having a bad time — throttling, a timeout, an internal error.
+#: Maskable: this is the class ``keep_last`` exists for, and several of them
+#: arrive as 4xx (408, 429), which is why they are ruled on before the
+#: refused-request range below.
+_RETRYABLE_CODES = frozenset(
+    {
+        "InternalError",
+        "QpsLimitExceeded",
+        "RequestLimitExceeded",
+        "RequestTimeout",
+        "ServerBusy",
+        "ServiceUnavailable",
+        "SlowDown",
+        "Throttling",
+        "TooManyRequests",
+    }
+)
+_RETRYABLE_STATUSES = frozenset({408, 425, 429})
 
 
 def _with_code(sentence: str, code: str) -> str:
@@ -192,7 +248,8 @@ def _with_code(sentence: str, code: str) -> str:
     The code is what identifies a configuration mistake — ``InvalidArgument``
     is the whole diagnosis of a signature the store will not accept — and it
     is safe: a closed vocabulary, never the message that carries endpoints
-    and signed material.
+    and signed material. Its absence from the report is what cost a
+    debugging cycle once.
     """
     return f"{sentence} ({code})" if code else sentence
 
@@ -200,19 +257,21 @@ def _with_code(sentence: str, code: str) -> str:
 def _open_bucket(target: ObjectStoreTarget) -> Any:
     """One ``oss2.Bucket`` for this target — one bucket, one credential.
 
-    Explicit credentials, never the SDK's env chain: these come from a
-    tenant's credential row, and falling back to the process's ambient
-    identity would read one tenant's bucket as the platform. Signature
-    version 4 is the native scheme; ``region`` is what scopes it, and an empty
-    one is handed to the SDK as absent so its own precondition fires locally
-    rather than a mis-scoped signature travelling to the store.
+    The SDK receives structured endpoint, bucket and key inputs and its own
+    native signer; no URL is assembled or forwarded here. Explicit
+    credentials, never the SDK's env chain: these come from a tenant's
+    credential row, and falling back to the process's ambient identity would
+    read one tenant's bucket as the platform. Signature version 4 is the
+    native scheme and ``region`` is what scopes it; an empty one is handed to
+    the SDK as absent so its own precondition fires locally rather than a
+    mis-scoped signature travelling to the store.
     """
     return oss2.Bucket(
         oss2.AuthV4(target.access_key_id, target.secret_access_key),
         target.endpoint,
         target.bucket,
+        connect_timeout=(_CONNECT_TIMEOUT_SECONDS, _READ_TIMEOUT_SECONDS),
         region=target.region or None,
-        connect_timeout=_TIMEOUT,
     )
 
 
@@ -222,9 +281,10 @@ class AliyunObjectStore:
     One instance serves every target: the reader is allocated per call — an
     ``oss2.Bucket`` holds nothing but the endpoint, the bucket name and the
     signer, so allocating it is not a step worth separating from the read.
-    Construction touches no network; an unreachable endpoint is discovered by
-    :meth:`get` and reported as ``UNAVAILABLE``, so a credential that cannot
-    be used still fails one entry rather than the apply that named it.
+    Construction touches no network, and the SDK's own objects are built
+    inside :meth:`get`: even SDK construction can reject a malformed target,
+    and doing it there turns that into a refusal for one entry instead of
+    aborting the apply that merely named the credential.
 
     ``_open`` is the test seam, the way :class:`GuardedFetcher` takes a
     ``resolver``: production opens a real bucket, a unit test hands in one
@@ -278,17 +338,27 @@ class AliyunObjectStore:
         credential and an unreachable endpoint are all *results*, because the
         caller's next move differs for each and an exception flattens them.
         """
-        where = f"{target.bucket}/{key}"
         try:
-            result = self._open(target).get_object(key)
+            body = self._open(target).get_object(key)
+        except oss_exc.RequestError as exc:
+            # Transport: DNS, TLS, connect and read timeouts — the SDK's own
+            # wrapper for them. The class keep_last exists for.
+            return self._unavailable(
+                target, key, exc, "the object store could not be reached"
+            )
         except oss_exc.OssError as exc:
             return self._classify(exc, target, key)
+        except (RequestException, OSError) as exc:
+            # The same transport failures the SDK did not get to wrap.
+            return self._unavailable(
+                target, key, exc, "the object store could not be reached"
+            )
 
         try:
             chunks: list[bytes] = []
             seen = 0
             while True:
-                chunk = result.read(_CHUNK)
+                chunk = body.read(_CHUNK)
                 if not chunk:
                     break
                 seen += len(chunk)
@@ -299,47 +369,20 @@ class AliyunObjectStore:
                     # what the cap refuses.
                     return ObjectFetchResult(
                         ObjectFetchStatus.TOO_LARGE,
-                        detail=f"{where}: object exceeds the {byte_limit}-byte cap",
+                        detail=_detail(
+                            target,
+                            key,
+                            f"the object exceeds the {byte_limit}-byte cap",
+                        ),
                     )
                 chunks.append(chunk)
-        except (oss_exc.OssError, OSError) as exc:
+        except (oss_exc.OssError, RequestException, OSError) as exc:
             # A read that dies mid-stream is the transport, not the document.
-            # ``requests`` raises its own family here (an ``IOError``), which
-            # the SDK does not wrap once the response has started streaming.
-            logger.warning(
-                "[manifest.object_store] read failed bucket=%s key=%s type=%s",
-                target.bucket,
-                key,
-                type(exc).__name__,
-            )
-            return ObjectFetchResult(
-                ObjectFetchStatus.UNAVAILABLE,
-                detail=f"{where}: the read did not complete",
+            return self._unavailable(
+                target, key, exc, "the object read did not complete"
             )
         finally:
-            close = getattr(result, "close", None)
-            if close is not None:
-                close()
-
-        client_crc = getattr(result, "client_crc", None)
-        server_crc = getattr(result, "server_crc", None)
-        if (
-            client_crc is not None
-            and server_crc is not None
-            and client_crc != server_crc
-        ):
-            # The SDK computes the CRC on the same pass and the store declares
-            # its own; a disagreement is a corrupted transfer, which is the
-            # transport's fault and not the document's.
-            logger.warning(
-                "[manifest.object_store] crc mismatch bucket=%s key=%s",
-                target.bucket,
-                key,
-            )
-            return ObjectFetchResult(
-                ObjectFetchStatus.UNAVAILABLE,
-                detail=f"{where}: the read did not complete",
-            )
+            self._close_quietly(body, target, key)
 
         return ObjectFetchResult(ObjectFetchStatus.FOUND, content=b"".join(chunks))
 
@@ -354,10 +397,8 @@ class AliyunObjectStore:
         and the store's error code instead. Same ruling ``fetch/git_source.py``
         applies to git's stderr.
         """
-        bucket = target.bucket
-        where = f"{bucket}/{key}"
         code = str(getattr(exc, "code", "") or "")
-        status = getattr(exc, "status", None)
+        status = _status_of(exc)
 
         if isinstance(exc, oss_exc.ClientError):
             # The SDK refused to build the request: no region, a malformed
@@ -365,79 +406,123 @@ class AliyunObjectStore:
             # so sending an operator to the bucket policy would be wrong —
             # the fault is in their own credential row. A refusal all the
             # same: retrying changes nothing and ``keep_last`` must not mask
-            # it. Checked before the 4xx range because the SDK reports it
-            # with a negative status of its own.
+            # it. Ruled on first, ahead of the status ranges, because the SDK
+            # reports it with a negative status of its own.
             logger.warning(
                 "[manifest.object_store] client error bucket=%s key=%s",
-                bucket,
+                target.bucket,
                 key,
             )
             return ObjectFetchResult(
                 ObjectFetchStatus.NOT_FOUND,
-                detail=(
-                    f"{where}: the request could not be built from the "
-                    "credential; check its endpoint, region and key pair"
+                detail=_detail(
+                    target,
+                    key,
+                    "the request could not be built from the credential; "
+                    "check its endpoint, region and key pair",
                 ),
             )
-        if isinstance(exc, oss_exc.RequestError):
-            # Transport: DNS, TLS, connect and read timeouts. The class
-            # keep_last exists for.
-            logger.warning(
-                "[manifest.object_store] unavailable bucket=%s key=%s type=%s",
-                bucket,
-                key,
-                type(getattr(exc, "exception", exc)).__name__,
-            )
-            return ObjectFetchResult(
-                ObjectFetchStatus.UNAVAILABLE,
-                detail=f"{where}: the object store could not be reached",
-            )
-        if isinstance(exc, oss_exc.NotFound) or status == 404:
+        if code in _NOT_FOUND_CODES or status == 404:
             return ObjectFetchResult(
                 ObjectFetchStatus.NOT_FOUND,
-                detail=_with_code(f"{where}: no such object", code),
+                detail=_detail(
+                    target, key, _with_code("the object was not found", code)
+                ),
             )
-        if (
-            isinstance(exc, (oss_exc.AccessDenied, oss_exc.SignatureDoesNotMatch))
-            or status == 403
-            or code in _DENIED_CODES
-        ):
+        if code in _DENIED_CODES or status in (401, 403):
             return ObjectFetchResult(
                 ObjectFetchStatus.DENIED,
-                detail=_with_code(f"{where}: not authorized", code),
-            )
-        if isinstance(status, int) and 400 <= status < 500:
-            # A 4xx the store did not classify further is still the request
-            # being wrong — a malformed bucket name, a bad argument, a
-            # signature scoped to the wrong region — and retrying it changes
-            # nothing. Refusing rather than reporting UNAVAILABLE is what
-            # keeps ``keep_last`` from masking a mistyped region or bucket
-            # name forever. The code rides along because it is the diagnosis:
-            # ``InvalidArgument`` is the one word that says "wrong signature
-            # scheme or region", and a report without it sends an operator
-            # looking at the bucket instead.
-            return ObjectFetchResult(
-                ObjectFetchStatus.NOT_FOUND,
-                detail=_with_code(
-                    f"{where}: the object store refused the request", code
+                detail=_detail(
+                    target, key, _with_code("the credential was denied", code)
                 ),
             )
-        # What is left is the store having a bad time — 5xx, throttling, a
-        # response the SDK could not parse. Maskable, and only this. An
-        # earlier version of this function sent *everything* unmapped down
-        # this path on the reasoning that masking is the safer direction; it
-        # is not, for a configuration error, which never recovers on its own.
-        logger.warning(
-            "[manifest.object_store] unclassified bucket=%s key=%s code=%s status=%s",
-            bucket,
+        if (
+            code in _RETRYABLE_CODES
+            or status in _RETRYABLE_STATUSES
+            or (status is not None and status >= 500)
+        ):
+            return self._unavailable(
+                target,
+                key,
+                exc,
+                _with_code("the object store is unavailable", code),
+            )
+        if code in _INVALID_REQUEST_CODES or (
+            status is not None and 400 <= status < 500
+        ):
+            # A 4xx the store did not classify further is still the request
+            # being wrong, and retrying it changes nothing. Refusing rather
+            # than reporting UNAVAILABLE is what keeps ``keep_last`` from
+            # masking a mistyped region or bucket name forever. The code
+            # rides along because it is the diagnosis: ``InvalidArgument`` is
+            # the one word that says "wrong signature scheme or region", and
+            # a report without it sends an operator looking at the bucket.
+            return ObjectFetchResult(
+                ObjectFetchStatus.NOT_FOUND,
+                detail=_detail(
+                    target,
+                    key,
+                    _with_code("the object store refused the request", code),
+                ),
+            )
+        # What is left is a response the SDK could not make sense of — a
+        # negative status of its own, a 3xx with no code. Maskable, and only
+        # this. An earlier version sent *everything* unmapped down this path
+        # on the reasoning that masking is the safer direction; it is not,
+        # for a configuration error, which never recovers on its own.
+        return self._unavailable(
+            target,
             key,
-            code or "?",
-            status if status is not None else "?",
+            exc,
+            _with_code("the object store returned an error", code),
+        )
+
+    def _unavailable(
+        self,
+        target: ObjectStoreTarget,
+        key: str,
+        exc: BaseException,
+        sentence: str,
+    ) -> ObjectFetchResult:
+        # Never log the SDK message: it may contain the endpoint or signed
+        # request material. Bucket, key and exception type are report-safe.
+        logger.warning(
+            "[manifest.object_store] unavailable bucket=%s key=%s type=%s",
+            target.bucket,
+            key,
+            type(exc).__name__,
         )
         return ObjectFetchResult(
-            ObjectFetchStatus.UNAVAILABLE,
-            detail=_with_code(f"{where}: the object store returned an error", code),
+            ObjectFetchStatus.UNAVAILABLE, detail=_detail(target, key, sentence)
         )
+
+    @staticmethod
+    def _close_quietly(body: Any, target: ObjectStoreTarget, key: str) -> None:
+        """The connection goes back whatever the outcome — and a close that
+        fails must not raise out of a read that already has its verdict."""
+        close = getattr(body, "close", None)
+        if close is None:
+            return
+        try:
+            close()
+        except (RequestException, OSError):
+            logger.warning(
+                "[manifest.object_store] close failed bucket=%s key=%s",
+                target.bucket,
+                key,
+            )
+
+
+def _detail(target: ObjectStoreTarget, key: str, sentence: str) -> str:
+    """The report line: the bucket, the key and the verdict, nothing else."""
+    return f"object {key!r} in bucket {target.bucket!r}: {sentence}"
+
+
+def _status_of(exc: oss_exc.OssError) -> Optional[int]:
+    try:
+        return int(exc.status)
+    except (TypeError, ValueError, AttributeError):
+        return None
 
 
 __all__ = [
