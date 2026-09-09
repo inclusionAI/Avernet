@@ -557,6 +557,11 @@ class ClaudeCodeSkillsAdapter(SkillsService):
                     _serialize_pool_mapping(item) for item in request.retired_mappings
                 ],
                 "source_layout": request.source_layout.value,
+                **(
+                    {"center_content": request.center_content.to_data()}
+                    if request.center_content is not None
+                    else {}
+                ),
             }
         )
         try:

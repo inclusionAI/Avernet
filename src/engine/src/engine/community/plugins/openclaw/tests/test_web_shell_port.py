@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import os
 
+from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
+
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 from engine.community.plugins.openclaw.web_shell import OpenClawWebShellSession
 
@@ -16,11 +18,11 @@ from engine.community.plugins.openclaw.web_shell import OpenClawWebShellSession
 class TestCheckToken:
     def test_allows_all_when_no_debug_token_configured(self, monkeypatch):
         monkeypatch.delenv("DEBUG_TOKEN", raising=False)
-        assert OpenClawPluginImpl().check_token("anything") is True
+        assert OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), ).check_token("anything") is True
 
     def test_matches_configured_token(self, monkeypatch):
         monkeypatch.setenv("DEBUG_TOKEN", "secret")
-        impl = OpenClawPluginImpl()
+        impl = OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), )
         assert impl.check_token("secret") is True
         assert impl.check_token("wrong") is False
 
@@ -28,7 +30,7 @@ class TestCheckToken:
         # The impl reads DEBUG_TOKEN at check_token() call time, not at
         # construction — so an env set AFTER construction still takes effect.
         monkeypatch.delenv("DEBUG_TOKEN", raising=False)
-        impl = OpenClawPluginImpl()  # constructed with no token configured
+        impl = OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), )  # constructed with no token configured
         monkeypatch.setenv("DEBUG_TOKEN", "later")  # set after construction
         assert impl.check_token("later") is True
         assert impl.check_token("nope") is False

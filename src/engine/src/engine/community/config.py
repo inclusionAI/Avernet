@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Dict, Optional
+from urllib.parse import urlsplit
 
 from engine.community.core.skills.layout_planner import (
     LAYOUT_CONTRACT_VERSION, LayoutIdentity, RuntimeLayoutContext,
@@ -119,6 +120,43 @@ def current_repo_delivery() -> RepoDelivery:
     if is_agentbox_runtime():
         return RepoDelivery.DOWNLOAD
     return RepoDelivery.MOUNT
+
+
+def load_center_content_allowed_hosts() -> tuple[str, ...]:
+    """Load the exact HTTPS hosts trusted for signed Center package downloads."""
+
+    raw = os.getenv("ENGINE_CENTER_CONTENT_ALLOWED_HOSTS", "").strip()
+    candidates = [item.strip() for item in raw.split(",") if item.strip()]
+    if not candidates:
+        try:
+            from engine import internal_defaults
+
+            candidates.extend(
+                str(item).strip()
+                for item in getattr(
+                    internal_defaults, "CENTER_CONTENT_ALLOWED_HOSTS", ()
+                )
+                if str(item).strip()
+            )
+            if not candidates:
+                meta_url = str(
+                    getattr(internal_defaults, "SKILLS_REPO_META_URL_TEMPLATE", "")
+                )
+                if host := urlsplit(meta_url).hostname:
+                    candidates.append(host)
+        except ImportError:
+            pass
+    normalized = tuple(dict.fromkeys(host.lower().rstrip(".") for host in candidates))
+    if any(
+        not host
+        or "/" in host
+        or "\\" in host
+        or host.startswith(".")
+        or "*" in host
+        for host in normalized
+    ):
+        raise ValueError("invalid Center content allowed host")
+    return normalized
 
 
 def _normalize_header_name(value: Any) -> str:

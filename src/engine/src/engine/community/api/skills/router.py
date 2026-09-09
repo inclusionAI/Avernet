@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from engine.community.api.caps import check_capability
 from engine.community.api.response import ApiResponse
@@ -55,7 +56,12 @@ from engine.community.core.skills.models import (
     CenterEnsureRequest,
     CleanSymlinksRequest,
     PoolMappingApplyMode,
+    PoolCenterContentPackage,
     PoolMappingApplyRequest,
+    PoolCenterContentPendingPackage,
+    PoolCenterContentReadyPackage,
+    PoolCenterContentRequest,
+    PoolCenterContentUnavailablePackage,
     PoolMappingSourceLayout,
     PoolSkillMappingIntent,
     SymlinkItem,
@@ -117,6 +123,18 @@ def _logical_mapping_command(
     return command
 
 
+def _center_content_package(package: BaseModel) -> PoolCenterContentPackage:
+    data = package.model_dump()
+    state = data.pop("state")
+    if state == "READY":
+        return PoolCenterContentReadyPackage(**data)
+    if state == "PENDING":
+        return PoolCenterContentPendingPackage(**data)
+    if state == "UNAVAILABLE":
+        return PoolCenterContentUnavailablePackage(**data)
+    raise AssertionError("Pydantic must reject unknown Center content states")
+
+
 @router.post("/mappings/apply", response_model=ApiResponse)
 async def apply_runtime_skill_mappings(
     body: SkillMappingApplyRequest,
@@ -142,6 +160,17 @@ async def apply_runtime_skill_mappings(
                     _logical_mapping_command(item) for item in body.retired_mappings
                 ),
                 source_layout=PoolMappingSourceLayout(body.source_layout),
+                center_content=(
+                    PoolCenterContentRequest(
+                        contract_version=body.center_content.contract_version,
+                        packages=tuple(
+                            _center_content_package(package)
+                            for package in body.center_content.packages
+                        ),
+                    )
+                    if body.center_content is not None
+                    else None
+                ),
             )
         )
     except CapabilityNotSupportedError as error:

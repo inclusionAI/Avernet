@@ -12,6 +12,7 @@ from unittest.mock import patch
 from engine.community.kernel.frames import ErrorShape, ResponseFrame
 from engine.community.openclaw.config import OpenClawConfig, reset_config, set_config
 from engine.community.plugins.openclaw import _chat as chat_mod
+from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 
 
@@ -62,7 +63,7 @@ class _FakePool:
 
 def _impl() -> tuple[OpenClawPluginImpl, _FakeClient]:
     client = _FakeClient()
-    return OpenClawPluginImpl(pool=_FakePool(client)), client
+    return OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), pool=_FakePool(client)), client
 
 
 # ── relay ──
@@ -227,7 +228,7 @@ async def test_chat_inject_creates_missing_session_then_retries():
 
 async def test_chat_inject_connect_failure_returns_internal_error():
     client = _FakeClient()
-    impl = OpenClawPluginImpl(pool=_FakePool(client, exc=RuntimeError("pool down")))
+    impl = OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), pool=_FakePool(client, exc=RuntimeError("pool down")))
 
     out = await impl.chat_inject("sk-1", "hello")
 

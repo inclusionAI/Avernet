@@ -155,7 +155,7 @@ class _SkillsPortMixin:
         return await apply_logical_mapping_request(
             params=params,
             engine="openclaw",
-            center_is_mounted=self._skills_center_is_mounted,
+            content_adapter=self._center_content_adapter,
         )
 
     async def verify_pool_mappings(self, params: dict[str, Any]) -> dict[str, Any]:
