@@ -97,6 +97,7 @@ fn group_detail() -> GroupDetail {
             role: ParticipantRole::Driver,
             mode: ParticipantMode::Auto,
             tags: Vec::new(),
+            message_view_scope: bcs_domain::MessageViewScope::Full,
         }],
         driver_bot_uuid: "driver-bot".into(),
         collaboration: CollaborationConfiguration::Chat(ChatConfiguration {

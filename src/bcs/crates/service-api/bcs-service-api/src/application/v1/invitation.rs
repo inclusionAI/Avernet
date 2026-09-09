@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use super::{ApplicationError, AuthenticatedCaller};
+use super::{ApplicationError, AuthenticatedCaller, MessageViewScope};
 
 /// Kind of resource an invitation grants access to.
 ///
@@ -84,6 +84,7 @@ pub struct CreateSessionInvitation {
 pub struct AcceptInvitation {
     pub caller: AuthenticatedCaller,
     pub token: String,
+    pub message_view_scope: Option<MessageViewScope>,
 }
 
 /// Transport-independent invitation use cases for BCN OpenAPI v1.

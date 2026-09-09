@@ -79,6 +79,7 @@ mod tests {
             actor_kind: ActorKind::Human,
             mode: None,
             tags: Vec::new(),
+            message_view_scope: bcs_domain::MessageViewScope::Full,
         };
         let event = SystemMessageEvent::HumanJoined { group_id: "g1".into(), actor };
 
@@ -102,6 +103,7 @@ mod tests {
             actor_kind: ActorKind::Human,
             mode: None,
             tags: Vec::new(),
+            message_view_scope: bcs_domain::MessageViewScope::Full,
         };
         let event = SystemMessageEvent::HumanJoined { group_id: "g1".into(), actor };
 

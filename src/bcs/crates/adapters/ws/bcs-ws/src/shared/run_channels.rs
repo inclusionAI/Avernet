@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use opentelemetry::trace::SpanContext;
+use bcs_domain::{HumanMessageView, MessageAudience, MessageVisibilityDomain};
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, info, warn};
 
@@ -14,6 +15,7 @@ pub struct ClientChannel {
     pub source: Option<String>,
     pub user_id: Option<String>,
     pub trace_parent: Option<SpanContext>,
+    pub human_view: Option<HumanMessageView>,
 }
 
 #[derive(Debug, Default)]
@@ -41,6 +43,27 @@ impl RunChannelManager {
             .await;
     }
 
+    pub async fn register_with_view(
+        &self,
+        run_id: String,
+        bcs_group_id: String,
+        tx: mpsc::Sender<String>,
+        source: Option<String>,
+        user_id: Option<String>,
+        human_view: Option<HumanMessageView>,
+    ) {
+        self.register_with_trace_parent_and_view(
+            run_id,
+            bcs_group_id,
+            tx,
+            source,
+            user_id,
+            None,
+            human_view,
+        )
+        .await;
+    }
+
     pub async fn register_with_trace_parent(
         &self,
         run_id: String,
@@ -50,6 +73,29 @@ impl RunChannelManager {
         user_id: Option<String>,
         trace_parent: Option<SpanContext>,
     ) {
+        self.register_with_trace_parent_and_view(
+            run_id,
+            bcs_group_id,
+            tx,
+            source,
+            user_id,
+            trace_parent,
+            None,
+        )
+        .await;
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn register_with_trace_parent_and_view(
+        &self,
+        run_id: String,
+        bcs_group_id: String,
+        tx: mpsc::Sender<String>,
+        source: Option<String>,
+        user_id: Option<String>,
+        trace_parent: Option<SpanContext>,
+        human_view: Option<HumanMessageView>,
+    ) {
         let trace_parent = trace_parent.filter(SpanContext::is_valid);
         let channel = ClientChannel {
             tx,
@@ -57,6 +103,7 @@ impl RunChannelManager {
             source,
             user_id,
             trace_parent,
+            human_view,
         };
 
         self.channels.write().await.insert(run_id.clone(), channel);
@@ -75,11 +122,34 @@ impl RunChannelManager {
     }
 
     pub async fn send_event(&self, run_id: &str, event: String) -> bool {
+        self.send_visible_event(run_id, event, MessageVisibilityDomain::Chat, None)
+            .await
+    }
+
+    pub async fn send_visible_event(
+        &self,
+        run_id: &str,
+        event: String,
+        visibility_domain: MessageVisibilityDomain,
+        audience: Option<&MessageAudience>,
+    ) -> bool {
         let resolved_run_id = self.resolve_run_id(run_id).await;
         let channels = bcs_observability::observe_value("ws.run_channels.read_lock", self.channels.read()).await;
 
         if let Some(channel) = channels.get(&resolved_run_id) {
-            match bcs_observability::observe_result("ws.run_channels.enqueue", channel.tx.send(event)).await {
+            if channel
+                .human_view
+                .as_ref()
+                .is_some_and(|view| !view.allows_artifact(visibility_domain, audience))
+            {
+                return false;
+            }
+            match bcs_observability::observe_result(
+                "ws.run_channels.enqueue",
+                channel.tx.send(event),
+            )
+            .await
+            {
                 Ok(()) => {
                     debug!(
                         run_id = %run_id,
@@ -111,6 +181,22 @@ impl RunChannelManager {
     }
 
     pub async fn send_event_by_session(&self, bcs_group_id: &str, event: String) -> bool {
+        self.send_visible_event_by_session(
+            bcs_group_id,
+            event,
+            MessageVisibilityDomain::Chat,
+            None,
+        )
+        .await
+    }
+
+    pub async fn send_visible_event_by_session(
+        &self,
+        bcs_group_id: &str,
+        event: String,
+        visibility_domain: MessageVisibilityDomain,
+        audience: Option<&MessageAudience>,
+    ) -> bool {
         let session_runs = self.session_runs.read().await;
 
         if let Some(run_ids) = session_runs.get(bcs_group_id) {
@@ -118,7 +204,9 @@ impl RunChannelManager {
                 let run_id = run_id.clone();
                 drop(session_runs);
                 debug!(bcs_group_id = %bcs_group_id, run_id = %run_id, "Sending event by session fallback");
-                return self.send_event(&run_id, event).await;
+                return self
+                    .send_visible_event(&run_id, event, visibility_domain, audience)
+                    .await;
             }
         }
 

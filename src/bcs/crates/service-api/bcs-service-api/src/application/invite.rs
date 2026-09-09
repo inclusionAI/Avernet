@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde::Serialize;
 
 use crate::core::ServiceError;
+use crate::types::MessageViewScope;
 
 #[derive(Debug, Clone)]
 pub struct CreateInviteTokenCommand {
@@ -23,6 +24,7 @@ pub struct JoinByInviteCommand {
     pub token: String,
     pub staff_no: String,
     pub nick_name: Option<String>,
+    pub message_view_scope: Option<MessageViewScope>,
 }
 
 #[derive(Debug, Clone, Serialize)]

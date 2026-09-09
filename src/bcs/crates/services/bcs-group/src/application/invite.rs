@@ -1,15 +1,14 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bcs_service_api::types::MessageViewScope;
 use bcs_service_api::{
-    ActorKind, BotRegistryCoreService, GroupCoreService, GroupKind, GroupStatus,
-    InviteTargetType, Participant, ParticipantMode, ParticipantRole,
-    SessionManagementService,
-    SystemMessageEvent, SystemMessageService,
-    CreateInviteTokenCommand, InviteService, InviteTokenResult,
-    InviteUseCaseError, JoinByInviteCommand, JoinByInviteResult,
-    InviteTokenPayload, InviteTokenError,
-    invite_token_encode, invite_token_decode_no_expiry,
+    ActorKind, BotRegistryCoreService, CreateInviteTokenCommand, GroupCoreService, GroupKind,
+    GroupStatus, InviteService, InviteTargetType, InviteTokenError, InviteTokenPayload,
+    InviteTokenResult, InviteUseCaseError, JoinByInviteCommand, JoinByInviteResult, Participant,
+    ParticipantMode, ParticipantRole, SessionManagementService, SystemMessageEvent,
+    SystemMessageService,
+    invite_token_decode_no_expiry, invite_token_encode,
 };
 
 pub struct InviteServiceImpl {
@@ -162,9 +161,7 @@ impl InviteServiceImpl {
             InviteTokenError::UnsupportedVersion => {
                 InviteUseCaseError::InvalidToken("unsupported invite token version".to_string())
             }
-            InviteTokenError::MalformedPayload(msg) => {
-                InviteUseCaseError::InvalidToken(msg)
-            }
+            InviteTokenError::MalformedPayload(msg) => InviteUseCaseError::InvalidToken(msg),
             _ => InviteUseCaseError::InvalidToken("invalid invite token".to_string()),
         })
     }
@@ -174,9 +171,7 @@ impl InviteServiceImpl {
         staff_no: &str,
         nick_name: Option<&str>,
     ) -> Result<String, InviteUseCaseError> {
-        let display = nick_name
-            .filter(|s| !s.is_empty())
-            .unwrap_or(staff_no);
+        let display = nick_name.filter(|s| !s.is_empty()).unwrap_or(staff_no);
         self.registry
             .ensure_human_actor(staff_no, display)
             .await
@@ -202,8 +197,9 @@ impl InviteService for InviteServiceImpl {
         &self,
         cmd: CreateInviteTokenCommand,
     ) -> Result<InviteTokenResult, InviteUseCaseError> {
-        let group = self.group.get(&cmd.target_id).await
-            .ok_or_else(|| InviteUseCaseError::NotFound(format!("group not found: {}", cmd.target_id)))?;
+        let group = self.group.get(&cmd.target_id).await.ok_or_else(|| {
+            InviteUseCaseError::NotFound(format!("group not found: {}", cmd.target_id))
+        })?;
 
         if group.group_kind == GroupKind::Dm {
             return Err(InviteUseCaseError::Forbidden(
@@ -237,14 +233,18 @@ impl InviteService for InviteServiceImpl {
         &self,
         cmd: CreateInviteTokenCommand,
     ) -> Result<InviteTokenResult, InviteUseCaseError> {
-        let session = self.session
+        let session = self
+            .session
             .get(&cmd.target_id)
             .await
             .map_err(|e| InviteUseCaseError::NotFound(format!("session lookup failed: {}", e)))?
-            .ok_or_else(|| InviteUseCaseError::NotFound(format!("session not found: {}", cmd.target_id)))?;
+            .ok_or_else(|| {
+                InviteUseCaseError::NotFound(format!("session not found: {}", cmd.target_id))
+            })?;
 
-        let group = self.group.get(&session.group_id).await
-            .ok_or_else(|| InviteUseCaseError::NotFound(format!("group not found: {}", session.group_id)))?;
+        let group = self.group.get(&session.group_id).await.ok_or_else(|| {
+            InviteUseCaseError::NotFound(format!("group not found: {}", session.group_id))
+        })?;
 
         if group.group_kind == GroupKind::Dm {
             return Err(InviteUseCaseError::Forbidden(
@@ -276,10 +276,13 @@ impl InviteService for InviteServiceImpl {
         let payload = self.decode_token(&cmd.token)?;
         Self::ensure_target_type(&payload, InviteTargetType::Group)?;
         let group_id = &payload.id;
-        let group = self.group.get(group_id).await
-            .ok_or_else(|| InviteUseCaseError::NotFound(format!("group not found: {}", group_id)))?;
+        let group = self.group.get(group_id).await.ok_or_else(|| {
+            InviteUseCaseError::NotFound(format!("group not found: {}", group_id))
+        })?;
 
-        let actor_id = self.ensure_human(&cmd.staff_no, cmd.nick_name.as_deref()).await?;
+        let actor_id = self
+            .ensure_human(&cmd.staff_no, cmd.nick_name.as_deref())
+            .await?;
 
         self.ensure_actor_is_human(&actor_id).await?;
 
@@ -309,6 +312,7 @@ impl InviteService for InviteServiceImpl {
             actor_kind: ActorKind::Human,
             mode: Some(ParticipantMode::Present),
             tags: Vec::new(),
+            message_view_scope: cmd.message_view_scope.unwrap_or(MessageViewScope::Full),
         };
         self.group.add_participant(group_id, participant).await?;
 
@@ -328,13 +332,21 @@ impl InviteService for InviteServiceImpl {
         let payload = self.decode_token(&cmd.token)?;
         Self::ensure_target_type(&payload, InviteTargetType::Session)?;
         let session_id = &payload.id;
-        let session = self.session
+        let session = self
+            .session
             .get(session_id)
             .await
             .map_err(|e| InviteUseCaseError::NotFound(format!("session lookup failed: {}", e)))?
-            .ok_or_else(|| InviteUseCaseError::NotFound(format!("session not found: {}", session_id)))?;
+            .ok_or_else(|| {
+                InviteUseCaseError::NotFound(format!("session not found: {}", session_id))
+            })?;
+        let group = self.group.get(&session.group_id).await.ok_or_else(|| {
+            InviteUseCaseError::NotFound(format!("group not found: {}", session.group_id))
+        })?;
 
-        let actor_id = self.ensure_human(&cmd.staff_no, cmd.nick_name.as_deref()).await?;
+        let actor_id = self
+            .ensure_human(&cmd.staff_no, cmd.nick_name.as_deref())
+            .await?;
 
         self.ensure_actor_is_human(&actor_id).await?;
 
@@ -356,6 +368,16 @@ impl InviteService for InviteServiceImpl {
             return Err(InviteUseCaseError::Expired);
         }
 
+        let message_view_scope = cmd
+            .message_view_scope
+            .or_else(|| {
+                group
+                    .participants
+                    .iter()
+                    .find(|participant| participant.bot_uuid == actor_id)
+                    .map(|participant| participant.message_view_scope)
+            })
+            .unwrap_or(MessageViewScope::Full);
         let participant = Participant {
             bot_uuid: actor_id.clone(),
             bot_name: cmd.nick_name.clone(),
@@ -364,25 +386,34 @@ impl InviteService for InviteServiceImpl {
             actor_kind: ActorKind::Human,
             mode: Some(ParticipantMode::Present),
             tags: Vec::new(),
+            message_view_scope,
         };
-        let updated_session = self.session
+        let updated_session = self
+            .session
             .add_participant(session_id, participant.clone())
             .await
             .map_err(|e| match e {
-                bcs_service_api::SessionUseCaseError::NotFound(msg) => InviteUseCaseError::NotFound(msg),
-                bcs_service_api::SessionUseCaseError::Conflict(msg) => InviteUseCaseError::Conflict(msg),
+                bcs_service_api::SessionUseCaseError::NotFound(msg) => {
+                    InviteUseCaseError::NotFound(msg)
+                }
+                bcs_service_api::SessionUseCaseError::Conflict(msg) => {
+                    InviteUseCaseError::Conflict(msg)
+                }
                 other => InviteUseCaseError::NotFound(other.to_string()),
             })?;
 
-        let _ = self.system_message.notify(
-            &session.group_id,
-            SystemMessageEvent::HumanJoined {
-                group_id: session.group_id.clone(),
-                actor: participant,
-            },
-            session_id,
-            &updated_session.participants,
-        ).await;
+        let _ = self
+            .system_message
+            .notify(
+                &session.group_id,
+                SystemMessageEvent::HumanJoined {
+                    group_id: session.group_id.clone(),
+                    actor: participant,
+                },
+                session_id,
+                &updated_session.participants,
+            )
+            .await;
 
         Ok(JoinByInviteResult {
             joined: true,

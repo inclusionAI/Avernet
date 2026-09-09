@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use bcs_domain::CoordinationSurface;
+
+use bcs_domain::{CoordinationSurface, MessageVisibilityDomain, Participant};
 use serde_json::Value;
 use tokio::sync::Mutex;
 
@@ -12,6 +13,14 @@ pub struct ToolCallStartInfo {
     pub name: String,
     pub args: Value,
     pub created_at_ms: u64,
+}
+
+#[derive(Clone)]
+pub struct BotEventRunInfo {
+    pub group_id: String,
+    pub bot_id: String,
+    pub visibility_domain: MessageVisibilityDomain,
+    pub participant: Option<Participant>,
 }
 
 /// In-memory tracker coordinating tool call lifecycle and streaming chat
@@ -33,6 +42,12 @@ pub struct MessageTracker {
     /// prevents malformed/repeated echoes from turning into repeated storage
     /// lookups during one run.
     coordination_surfaces: Mutex<HashMap<String, (String, Option<CoordinationSurface>)>>,
+    /// run_id → producer visibility domain and sender membership snapshot.
+    ///
+    /// Bot streams can contain many deltas. Resolve the Group/Session metadata
+    /// once per run so audience classification and channel rendering do not
+    /// repeatedly read Group storage on the hot path.
+    bot_event_run_info: Mutex<HashMap<String, BotEventRunInfo>>,
     /// run_id → text buffered for the CURRENT open chat segment.
     ///
     /// Two producers write here, depending on what the upstream frame carries:
@@ -78,6 +93,7 @@ impl MessageTracker {
             tool_call_starts: Mutex::new(HashMap::new()),
             coordination_echoes: Mutex::new(HashMap::new()),
             coordination_surfaces: Mutex::new(HashMap::new()),
+            bot_event_run_info: Mutex::new(HashMap::new()),
             streaming_chat_buf: Mutex::new(HashMap::new()),
             chat_delta_mode: Mutex::new(HashSet::new()),
             streaming_thinking_buf: Mutex::new(HashMap::new()),
@@ -146,6 +162,27 @@ impl MessageTracker {
             run_id.to_string(),
             (bot_id.to_string(), surface),
         );
+    }
+
+    pub async fn bot_event_run_info(
+        &self,
+        run_id: &str,
+        group_id: &str,
+        bot_id: &str,
+    ) -> Option<BotEventRunInfo> {
+        self.bot_event_run_info
+            .lock()
+            .await
+            .get(run_id)
+            .filter(|info| info.group_id == group_id && info.bot_id == bot_id)
+            .cloned()
+    }
+
+    pub async fn cache_bot_event_run_info(&self, run_id: &str, info: BotEventRunInfo) {
+        self.bot_event_run_info
+            .lock()
+            .await
+            .insert(run_id.to_string(), info);
     }
 
     // -- Streaming chat segmentation (memory buffer, flush-at-boundary) --
@@ -302,6 +339,7 @@ impl MessageTracker {
         self.channel_sender_info.lock().await.remove(run_id);
         self.channel_source_message_ids.lock().await.remove(run_id);
         self.coordination_surfaces.lock().await.remove(run_id);
+        self.bot_event_run_info.lock().await.remove(run_id);
         self.streaming_chat_buf.lock().await.remove(run_id)
     }
 }

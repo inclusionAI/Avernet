@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use bcs_domain::{MessageAudience, MessageVisibilityDomain};
 use bcs_protocol::{BcsFrame, RequestFrame};
 use bcs_service_api::{
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget,
@@ -92,6 +93,8 @@ async fn delivery_ports_are_transport_free_contracts() {
             delivery_kind: FrontendDeliveryKind::RunEvent,
             run_fallback: None,
             exclude_conn_id: None,
+            visibility_domain: MessageVisibilityDomain::Chat,
+            audience: Some(MessageAudience::Public),
         })
         .await
         .unwrap();

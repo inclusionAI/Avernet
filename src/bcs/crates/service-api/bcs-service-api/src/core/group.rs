@@ -6,9 +6,9 @@ use super::{ActorKind, GroupMessage, ServiceResult};
 use crate::types::EventActor;
 
 pub use bcs_domain::{
-    DefaultDelivery, Group, GroupKind, GroupStatus, GroupStrategy, Participant, ParticipantKind,
-    ParticipantMode, ParticipantRole, RoutingMode, RoutingPolicy, SenderRoutesValidationError,
-    ServiceSpec, Workspace,
+    DefaultDelivery, Group, GroupKind, GroupStatus, GroupStrategy, MessageViewScope, Participant,
+    ParticipantKind, ParticipantMode, ParticipantRole, RoutingMode, RoutingPolicy,
+    SenderRoutesValidationError, ServiceSpec, Workspace,
 };
 
 /// Actor input for actor-level DM group creation.
@@ -39,6 +39,11 @@ pub enum GroupMutationKind {
     UpdateParticipantMode {
         actor_id: String,
         mode: ParticipantMode,
+    },
+    UpdateParticipantMessageViewScope {
+        actor_id: String,
+        message_view_scope: MessageViewScope,
+        mode: Option<ParticipantMode>,
     },
     UpdateRoutingPolicy(RoutingPolicy),
     UpdateServiceSpec(Option<ServiceSpec>),
@@ -240,6 +245,21 @@ pub trait GroupCoreService: Send + Sync {
         mode: ParticipantMode,
     ) -> ServiceResult<()>;
 
+    /// Persist the effective Human message view scope. Bot participants must
+    /// remain `full`; callers authorize self-service versus manager updates.
+    async fn update_participant_message_view_scope(
+        &self,
+        group_id: &str,
+        actor_id: &str,
+        message_view_scope: MessageViewScope,
+    ) -> ServiceResult<()> {
+        let _ = (group_id, actor_id, message_view_scope);
+        Err(super::ServiceError::InvalidOperation {
+            message: "Group participant scope updates are not configured".to_string(),
+            request_id: None,
+        })
+    }
+
     /// Insert a Human participant into an existing group (Human Actor V1, Task P.1).
     ///
     /// Convenience wrapper that constructs a `Participant` with
@@ -260,6 +280,7 @@ pub trait GroupCoreService: Send + Sync {
             actor_kind: ActorKind::Human,
             mode: Some(mode),
             tags: Vec::new(),
+            message_view_scope: MessageViewScope::Full,
         };
         self.add_participant(group_id, participant).await
     }

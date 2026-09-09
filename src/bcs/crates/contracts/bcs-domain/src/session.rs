@@ -117,6 +117,11 @@ pub struct Session {
     pub status: SessionStatus,
     pub session_kind: SessionKind,
 
+    /// `0` is legacy visibility; `1` guarantees producer Domain and scoped
+    /// Audience metadata for all newly written collaboration artifacts.
+    #[serde(default)]
+    pub message_visibility_version: u8,
+
     /// Session 成员（从 group.participants seed 后独立演化）。
     /// 路由决策基于该字段而非 group.participants —— 群层改 seed 不影响 in-flight session。
     #[serde(default)]

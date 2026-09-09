@@ -91,6 +91,8 @@ impl bcs_service_api::port::repo::MessageRepoPort for RecordingMessageRepo {
             status: bcs_domain::PersistedMessageStatus::Normal,
             created_at: msg.created_at,
             run_id: msg.run_id.clone(),
+            visibility_domain: Some(msg.visibility_domain),
+            audience: msg.audience.clone(),
         };
         self.appended.write().await.push(msg);
         Ok(persisted)
@@ -240,8 +242,9 @@ async fn make_human_bot_dm(support: &support::FlowTestSupport) {
             role: ParticipantRole::Observer,
             actor_kind: ActorKind::Human,
             mode: Some(ParticipantMode::Present),
-            tags: Vec::new(),
-        },
+        tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
+    },
         Participant {
             bot_uuid: "bot-driver".to_string(),
             bot_name: Some("Driver".to_string()),
@@ -249,8 +252,9 @@ async fn make_human_bot_dm(support: &support::FlowTestSupport) {
             role: ParticipantRole::Driver,
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
-            tags: Vec::new(),
-        },
+        tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
+    },
     ];
     support.group.upsert(group).await.unwrap();
 }
@@ -391,6 +395,7 @@ fn test_session(session_id: &str, group_id: &str, participants: Vec<Participant>
         error_message: None,
         callback_status: None,
         activation_count: 1,
+        message_visibility_version: 1,
         caller_principal: None,
         created_by: None,
         created_at: 1,
@@ -1096,8 +1101,9 @@ async fn history_requests_provider_target_without_ws_connection() {
                 role: ParticipantRole::Observer,
                 actor_kind: ActorKind::Human,
                 mode: Some(ParticipantMode::Present),
-                tags: Vec::new(),
-            },
+        tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
+    },
         ],
     );
     support.group.upsert(group).await.unwrap();
@@ -1297,7 +1303,7 @@ async fn web_send_resets_message_count_routes_and_delivers() {
 }
 
 #[tokio::test]
-async fn web_send_persists_public_human_owner_for_manager_worker() {
+async fn web_send_persists_human_only_audience_for_manager_worker() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();
     group.driver_bot = "control-plane-owner".to_string();
@@ -1345,6 +1351,10 @@ async fn web_send_persists_public_human_owner_for_manager_worker() {
     assert_eq!(appended[0].sender_id, "human_1");
     assert_eq!(appended[0].message_type, "chat");
     assert_eq!(appended[0].owner_bot_id, None);
+    assert_eq!(
+        appended[0].audience,
+        Some(bcs_domain::MessageAudience::directed(["human_1"]).unwrap())
+    );
 
     let chat_support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let chat_repo = Arc::new(RecordingMessageRepo::default());
@@ -1494,8 +1504,9 @@ async fn web_send_delivers_to_registered_provider_target_without_ws_connection()
                 role: ParticipantRole::Observer,
                 actor_kind: ActorKind::Human,
                 mode: Some(ParticipantMode::Present),
-                tags: Vec::new(),
-            },
+        tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
+    },
         ],
     );
     support.group.upsert(group).await.unwrap();
@@ -1804,8 +1815,9 @@ async fn install_provider_driver_group(support: &support::FlowTestSupport, creat
                     role: ParticipantRole::Observer,
                     actor_kind: ActorKind::Human,
                     mode: Some(ParticipantMode::Present),
-                    tags: Vec::new(),
-                },
+        tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
+    },
             ],
         ))
         .await
@@ -1880,8 +1892,9 @@ async fn web_send_explicit_mentions_do_not_inject_manager_worker_workers() {
             role: ParticipantRole::Manager,
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
-            tags: Vec::new(),
-        },
+        tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
+    },
         Participant {
             bot_uuid: "bot-observer".to_string(),
             bot_name: Some("Worker".to_string()),
@@ -1889,8 +1902,9 @@ async fn web_send_explicit_mentions_do_not_inject_manager_worker_workers() {
             role: ParticipantRole::Worker,
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
-            tags: Vec::new(),
-        },
+        tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
+    },
         Participant {
             bot_uuid: "human_1".to_string(),
             bot_name: Some("Human One".to_string()),
@@ -1898,8 +1912,9 @@ async fn web_send_explicit_mentions_do_not_inject_manager_worker_workers() {
             role: ParticipantRole::Observer,
             actor_kind: ActorKind::Human,
             mode: Some(ParticipantMode::Present),
-            tags: Vec::new(),
-        },
+        tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
+    },
     ];
     support.group.upsert(group).await.unwrap();
     let flow = BcsMessageFlow::new(
@@ -3240,8 +3255,9 @@ async fn persistent_group_send_delivers_to_registered_provider_target_without_ws
                 role: ParticipantRole::Observer,
                 actor_kind: ActorKind::Human,
                 mode: Some(ParticipantMode::Present),
-                tags: Vec::new(),
-            },
+        tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
+    },
         ],
     );
     support.group.upsert(group).await.unwrap();
@@ -4563,6 +4579,7 @@ async fn add_present_human_2(support: &support::FlowTestSupport) {
         actor_kind: ActorKind::Human,
         mode: Some(ParticipantMode::Present),
         tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
     });
     support.group.upsert(group).await.unwrap();
 }
@@ -4579,6 +4596,7 @@ async fn web_send_notifies_explicitly_mentioned_human() {
         actor_kind: ActorKind::Human,
         mode: None,
         tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
     });
     support.group.upsert(group).await.unwrap();
 
@@ -4660,6 +4678,7 @@ async fn web_send_skips_notification_when_port_unavailable() {
         actor_kind: ActorKind::Human,
         mode: None,
         tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
     });
     support.group.upsert(group).await.unwrap();
 
@@ -4773,6 +4792,7 @@ async fn group_callback_never_triggers_human_notification() {
         actor_kind: ActorKind::Human,
         mode: None,
         tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
     });
     support.group.upsert(group).await.unwrap();
 
@@ -4818,6 +4838,7 @@ async fn web_send_dm_group_does_not_notify_mentioned_human() {
         actor_kind: ActorKind::Human,
         mode: Some(ParticipantMode::Present),
         tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
     });
     support.group.upsert(group).await.unwrap();
 

@@ -53,8 +53,9 @@ impl FlowTestSupport {
                     role: ParticipantRole::Observer,
                     actor_kind: ActorKind::Human,
                     mode: None,
-                    tags: Vec::new(),
-                },
+        tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
+    },
             ],
         );
         group.upsert(session).await.unwrap();

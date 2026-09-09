@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
-use bcs_domain::{Attachment, NewMessage, SenderType};
+use bcs_domain::{Attachment, MessageAudience, MessageVisibilityDomain, NewMessage, SenderType};
 use bcs_protocol::{
     Attachment as WireAttachment, BcsFrame, ChannelInfo, ChannelSource, RequestFrame,
     apply_channel_info, build_chat_inject_frame, build_chat_send_frame,
@@ -433,17 +433,24 @@ pub(crate) async fn try_persist_group_message(
         return Ok(None);
     };
     let created_at = now_ms();
-    let strategy_supports_message_event =
-        if flow.event_record_factory.is_some() && message_type == "chat" {
-            flow.group.try_get(group_id).await?.is_some_and(|group| {
-                matches!(
-                    group.group_strategy,
-                    GroupStrategy::Chat | GroupStrategy::ManagerWorker
-                )
-            })
-        } else {
-            false
-        };
+    let group = flow.group.try_get(group_id).await?;
+    // When the group cannot be resolved, default the strategy to `ManagerWorker`
+    // rather than `Chat`: `Chat` maps to `MessageVisibilityDomain::Chat`, which is
+    // always visible to Participant-scoped Humans regardless of the real audience.
+    // `ManagerWorker` keeps the message hidden from Participant views unless the
+    // audience computation below explicitly grants visibility, matching the same
+    // fail-closed default used by `frontend_domain_for_group` and
+    // `publish_web_user_message` for the identical "group lookup missed" case.
+    let group_strategy = group
+        .as_ref()
+        .map(|group| group.group_strategy)
+        .unwrap_or(GroupStrategy::ManagerWorker);
+    let strategy_supports_message_event = flow.event_record_factory.is_some()
+        && message_type == "chat"
+        && matches!(
+            group_strategy,
+            GroupStrategy::Chat | GroupStrategy::ManagerWorker
+        );
     let effective_session_id = if strategy_supports_message_event {
         match session_id.filter(|session_id| !session_id.is_empty()) {
             Some(session_id) => session_id.to_string(),
@@ -478,6 +485,39 @@ pub(crate) async fn try_persist_group_message(
     } else {
         session_id.unwrap_or_default().to_string()
     };
+    let visibility_domain = match group_strategy {
+        GroupStrategy::Chat => MessageVisibilityDomain::Chat,
+        GroupStrategy::ManagerWorker => MessageVisibilityDomain::ManagerWorker,
+        GroupStrategy::StateMachine => MessageVisibilityDomain::StateMachine,
+    };
+    let audience = match visibility_domain {
+        MessageVisibilityDomain::Chat => None,
+        MessageVisibilityDomain::ManagerWorker => Some(
+            manager_worker_message_audience(
+                group.as_ref(),
+                sender_id,
+                sender_type,
+                message_type,
+                owner_bot_id.as_deref(),
+            )
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?,
+        ),
+        MessageVisibilityDomain::StateMachine => Some(
+            if sender_type == SenderType::Human {
+                MessageAudience::directed([sender_id.to_string()])
+                    .map_err(|error| ServiceError::InternalError(error.to_string()))?
+            } else if message_type == "chat"
+                && group
+                    .as_ref()
+                    .and_then(|group| group.get_participant(sender_id))
+                    .is_some_and(|participant| participant.role == ParticipantRole::Manager)
+            {
+                MessageAudience::Public
+            } else {
+                MessageAudience::FullOnly
+            },
+        ),
+    };
     let msg = NewMessage {
         group_id: group_id.to_string(),
         session_id: effective_session_id.clone(),
@@ -489,6 +529,8 @@ pub(crate) async fn try_persist_group_message(
         owner_bot_id,
         created_at,
         run_id: run_id.to_string(),
+        visibility_domain,
+        audience,
     };
     let persisted = if let Some(factory) = flow.event_record_factory.as_ref() {
         if strategy_supports_message_event {
@@ -604,6 +646,30 @@ pub(crate) async fn try_persist_group_message(
     Ok(Some(persisted))
 }
 
+fn manager_worker_message_audience(
+    group: Option<&Group>,
+    sender_id: &str,
+    sender_type: SenderType,
+    message_type: &str,
+    owner_actor_id: Option<&str>,
+) -> Result<MessageAudience, &'static str> {
+    if sender_type == SenderType::Human {
+        return MessageAudience::directed([sender_id.to_string()]);
+    }
+    if let Some(owner_actor_id) = owner_actor_id {
+        return MessageAudience::directed([sender_id.to_string(), owner_actor_id.to_string()]);
+    }
+    if sender_type == SenderType::Bot
+        && message_type == "chat"
+        && group
+            .and_then(|group| group.get_participant(sender_id))
+            .is_some_and(|participant| participant.role == ParticipantRole::Manager)
+    {
+        return Ok(MessageAudience::Public);
+    }
+    Ok(MessageAudience::FullOnly)
+}
+
 /// Persist the sender's original text verbatim so human-facing history keeps
 /// `@mention` markers visible (mention tokens are only stripped from bot-bound
 /// deliveries, via `RoutingDecision::cleaned_message`). Non-empty `mentions`
@@ -709,9 +775,8 @@ mod staged_construction_tests {
         let missing = message_flow();
         assert!(missing.pending_message_port().is_err());
 
-        let configured = message_flow().with_bot_run_context(Arc::new(
-            crate::run_context::MemoryBotRunContextStore::new(),
-        ));
+        let configured = message_flow()
+            .with_bot_run_context(Arc::new(crate::run_context::MemoryBotRunContextStore::new()));
         assert!(configured.pending_message_port().is_ok());
     }
 }
@@ -854,7 +919,10 @@ pub async fn handle_web_send(
             // 显式 mention 路径：使用人类发送者看到的原始消息文本。
             (Some(cmd.mentions.as_slice()), cmd.message.clone())
         } else {
-            (Some(decision.mentions.as_slice()), decision.cleaned_message.clone())
+            (
+                Some(decision.mentions.as_slice()),
+                decision.cleaned_message.clone(),
+            )
         };
     let sender_type = if cmd.from_actor_id.starts_with("human_") {
         SenderType::Human
@@ -3050,6 +3118,35 @@ async fn publish_web_user_message(
     cmd: &WebSendCommand,
 ) -> Vec<FrontendDeliveryResult> {
     let event_json = build_workbench_user_event(flow, cmd).await;
+    let group = flow.group.try_get(&cmd.group_id).await.ok().flatten();
+    let visibility_domain = group
+        .as_ref()
+        .map(|group| match group.group_strategy {
+            GroupStrategy::Chat => MessageVisibilityDomain::Chat,
+            GroupStrategy::ManagerWorker => MessageVisibilityDomain::ManagerWorker,
+            GroupStrategy::StateMachine => MessageVisibilityDomain::StateMachine,
+        })
+        .unwrap_or(MessageVisibilityDomain::ManagerWorker);
+    let audience = match visibility_domain {
+        MessageVisibilityDomain::Chat => None,
+        MessageVisibilityDomain::ManagerWorker => {
+            let mut actor_ids = vec![cmd.from_actor_id.clone()];
+            if let Some(group) = group.as_ref() {
+                actor_ids.extend(
+                    group
+                        .participants
+                        .iter()
+                        .filter(|participant| participant.role == ParticipantRole::Manager)
+                        .map(|participant| participant.bot_uuid.clone()),
+                );
+            }
+            Some(MessageAudience::directed(actor_ids).unwrap_or(MessageAudience::FullOnly))
+        }
+        MessageVisibilityDomain::StateMachine => Some(
+            MessageAudience::directed([cmd.from_actor_id.clone()])
+                .unwrap_or(MessageAudience::FullOnly),
+        ),
+    };
     let delivery = flow
         .frontend_delivery
         .publish(FrontendDeliveryCommand {
@@ -3058,6 +3155,8 @@ async fn publish_web_user_message(
             delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
             run_fallback: None,
             exclude_conn_id: cmd.sender_conn_id,
+            visibility_domain,
+            audience,
         })
         .await;
 
@@ -3087,6 +3186,9 @@ async fn publish_group_callback_event(
     flow: &BcsMessageFlow,
     cmd: &GroupCallbackCommand,
 ) -> Vec<FrontendDeliveryResult> {
+    let visibility_domain = frontend_domain_for_group(flow, &cmd.group_id).await;
+    let audience =
+        (visibility_domain != MessageVisibilityDomain::Chat).then_some(MessageAudience::FullOnly);
     let run_id = uuid::Uuid::new_v4().to_string();
     let event = serde_json::json!({
         "bcs_group_id": cmd.group_id,
@@ -3115,6 +3217,8 @@ async fn publish_group_callback_event(
             delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
             run_fallback: None,
             exclude_conn_id: None,
+            visibility_domain,
+            audience,
         })
         .await;
 
@@ -3137,6 +3241,9 @@ async fn publish_chat_abort_event(
     session_id: Option<&str>,
     aborted_run_ids: &[String],
 ) -> Vec<FrontendDeliveryResult> {
+    let visibility_domain = frontend_domain_for_group(flow, group_id).await;
+    let audience =
+        (visibility_domain != MessageVisibilityDomain::Chat).then_some(MessageAudience::FullOnly);
     let event_json = build_chat_abort_event(group_id, aborted_run_ids);
     let target = match session_id {
         Some(session_id) => FrontendDeliveryTarget::Session {
@@ -3154,6 +3261,8 @@ async fn publish_chat_abort_event(
             delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
             run_fallback: None,
             exclude_conn_id: None,
+            visibility_domain,
+            audience,
         })
         .await;
 
@@ -3168,6 +3277,23 @@ async fn publish_chat_abort_event(
             Vec::new()
         }
     }
+}
+
+pub(crate) async fn frontend_domain_for_group(
+    flow: &BcsMessageFlow,
+    group_id: &str,
+) -> MessageVisibilityDomain {
+    flow.group
+        .try_get(group_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|group| match group.group_strategy {
+            GroupStrategy::Chat => MessageVisibilityDomain::Chat,
+            GroupStrategy::ManagerWorker => MessageVisibilityDomain::ManagerWorker,
+            GroupStrategy::StateMachine => MessageVisibilityDomain::StateMachine,
+        })
+        .unwrap_or(MessageVisibilityDomain::ManagerWorker)
 }
 
 fn build_chat_abort_event(group_id: &str, aborted_run_ids: &[String]) -> String {

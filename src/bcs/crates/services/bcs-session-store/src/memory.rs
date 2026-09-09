@@ -18,7 +18,9 @@ use bcs_service_api::port::repo::{
     AddSessionParticipantWithEvent, ClaimSessionCallback, CompleteSessionCallback,
     CompleteSessionWithEvent, CreateSessionWithEvent, NewSessionParams,
     RemoveSessionParticipantWithEvent, SessionCallbackClaim, SessionRepoPort,
+    UpdateSessionParticipantMessageViewScopeWithEvent,
 };
+use bcs_service_api::types::MessageViewScope;
 use bcs_service_api::{
     GroupSessionMetricCount, GroupSessionMetricsSnapshotPort, Participant, ParticipantMode,
     ServiceError, ServiceResult, Session, SessionKind, SessionStatus,
@@ -57,6 +59,7 @@ fn session_from_params(
         env: None,
         status: SessionStatus::Running,
         session_kind: params.session_kind,
+        message_visibility_version: params.message_visibility_version,
         participants: params.participants.clone(),
         group_version: params.group_version,
         caller_id: params.caller_id.clone(),
@@ -799,6 +802,140 @@ impl SessionRepoPort for MemorySessionRepo {
         p.mode = Some(mode);
         sess.updated_at = now;
         Ok(sess.clone())
+    }
+
+    async fn update_participant_message_view_scope(
+        &self,
+        session_id: &str,
+        actor_id: &str,
+        message_view_scope: MessageViewScope,
+    ) -> ServiceResult<Session> {
+        let now = now_ms();
+        let mut state = self.state.write().await;
+        let session = state
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
+        let participant = session
+            .participants
+            .iter_mut()
+            .find(|participant| participant.bot_uuid == actor_id)
+            .ok_or_else(|| {
+                ServiceError::SessionInvalidParams(format!(
+                    "participant {actor_id} not in session {session_id}"
+                ))
+            })?;
+        if !message_view_scope.is_valid_for(participant.actor_kind) {
+            return Err(ServiceError::SessionInvalidParams(
+                "Bot participants must use full message_view_scope".to_string(),
+            ));
+        }
+        participant.message_view_scope = message_view_scope;
+        session.updated_at = now;
+        Ok(session.clone())
+    }
+
+    async fn update_participant_mode_and_message_view_scope(
+        &self,
+        session_id: &str,
+        actor_id: &str,
+        mode: Option<ParticipantMode>,
+        message_view_scope: MessageViewScope,
+    ) -> ServiceResult<Session> {
+        let now = now_ms();
+        let mut state = self.state.write().await;
+        let session = state
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
+        let participant = session
+            .participants
+            .iter_mut()
+            .find(|participant| participant.bot_uuid == actor_id)
+            .ok_or_else(|| {
+                ServiceError::SessionInvalidParams(format!(
+                    "participant {actor_id} not in session {session_id}"
+                ))
+            })?;
+        if !message_view_scope.is_valid_for(participant.actor_kind)
+            || mode.is_some_and(|mode| !mode.is_valid_for(participant.actor_kind))
+        {
+            return Err(ServiceError::SessionInvalidParams(
+                "Participant mode or message_view_scope is invalid for the actor kind".to_string(),
+            ));
+        }
+        participant.message_view_scope = message_view_scope;
+        if let Some(mode) = mode {
+            participant.mode = Some(mode);
+        }
+        session.updated_at = now;
+        Ok(session.clone())
+    }
+
+    async fn update_participant_message_view_scope_with_event(
+        &self,
+        command: UpdateSessionParticipantMessageViewScopeWithEvent,
+    ) -> ServiceResult<Session> {
+        let event_store = self.event_store.as_ref().ok_or_else(|| {
+            ServiceError::InternalError(
+                "Eventful Memory Session participant scope update requires the shared Memory Event Store"
+                    .to_string(),
+            )
+        })?;
+        let mut state = self.state.write().await;
+        let current = state
+            .sessions
+            .get(&command.session_id)
+            .cloned()
+            .ok_or_else(|| ServiceError::SessionNotFound(command.session_id.clone()))?;
+        if serde_json::to_value(&current.participants).ok()
+            != serde_json::to_value(&command.expected_participants).ok()
+        {
+            return Err(ServiceError::Conflict(format!(
+                "Session '{}' participants changed during scope update",
+                command.session_id
+            )));
+        }
+        let mut candidate = current;
+        let participant = candidate
+            .participants
+            .iter_mut()
+            .find(|participant| participant.bot_uuid == command.actor_id)
+            .ok_or_else(|| {
+                ServiceError::SessionInvalidParams(format!(
+                    "participant {} not in session {}",
+                    command.actor_id, command.session_id
+                ))
+            })?;
+        if !command
+            .message_view_scope
+            .is_valid_for(participant.actor_kind)
+        {
+            return Err(ServiceError::SessionInvalidParams(
+                "Bot participants must use full message_view_scope".to_string(),
+            ));
+        }
+        participant.message_view_scope = command.message_view_scope;
+        if let Some(mode) = command.mode {
+            if !mode.is_valid_for(participant.actor_kind) {
+                return Err(ServiceError::SessionInvalidParams(
+                    "Participant mode is invalid for the actor kind".to_string(),
+                ));
+            }
+            participant.mode = Some(mode);
+        }
+        candidate.updated_at = now_ms();
+        validate_session_event_scope(&candidate, &command.event)?;
+        event_store
+            .commit_business_mutation(&command.event, || {
+                state
+                    .sessions
+                    .insert(command.session_id.clone(), candidate.clone());
+                Ok(())
+            })
+            .await
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        Ok(candidate)
     }
 
     async fn update_callback_status(&self, session_id: &str, status: &str) -> ServiceResult<()> {

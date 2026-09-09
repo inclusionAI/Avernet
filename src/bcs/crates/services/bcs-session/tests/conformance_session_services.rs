@@ -288,6 +288,7 @@ async fn impl_persists_and_publishes_chat_opening_message_once() {
             owner_filter: MessageOwnerFilter::Any,
             time_range: None,
             visible_from_seq: None,
+            human_view: None,
         })
         .await
         .expect("query opening message");
@@ -327,6 +328,7 @@ async fn impl_persists_and_publishes_chat_opening_message_once() {
             owner_filter: MessageOwnerFilter::Any,
             time_range: None,
             visible_from_seq: None,
+            human_view: None,
         })
         .await
         .expect("query after reactivation");
@@ -374,6 +376,7 @@ async fn impl_persists_manager_worker_opening_message() {
             owner_filter: MessageOwnerFilter::Any,
             time_range: None,
             visible_from_seq: None,
+            human_view: None,
         })
         .await
         .expect("query opening message");

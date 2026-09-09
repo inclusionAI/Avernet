@@ -93,9 +93,29 @@ GroupSessionWebSocketPath:
     operationId: connect_group_session_websocket
     tags: ["Collaboration / Sessions"]
     summary: Upgrade to a session-bound Workbench WebSocket.
-    description: >-
+    description: |
       Authenticates the five-minute BCN credential before Upgrade and exposes
       the existing Workbench frame protocol within the immutable token scope.
+
+      The Workbench `connect` request accepts `params.view_actor_id`. Human-tab
+      clients bind it to the authenticated Human actor; Bot-tab clients bind it
+      to a Bot participant that the Human is authorized to operate. Clients
+      cannot supply `message_view_scope`: the server resolves that value from
+      the Session participant snapshot and returns both `view_actor_id` and
+      `message_view_scope` in the successful `connect` response. Omitting
+      `view_actor_id` preserves the legacy full-view connection: the server does
+      not infer a participant projection from the authenticated Human.
+
+      Human connections are projected per connection. `participant` receives
+      public artifacts and directed artifacts whose audience contains that
+      Human; `full` receives all artifacts. Chat-domain artifacts retain legacy
+      visibility. Bot-tab connections are not affected by Human scope.
+
+      When a Human's Session scope changes, the server sends an `event=close`
+      frame with `payload.reason=view_scope_changed` and then closes the socket.
+      The client must establish a new connection so the server can bind the new
+      persisted scope. The scope projects only the Workbench message stream;
+      StateMachine resource APIs keep their existing authorization semantics.
     x-avernet-protocol: websocket
     x-avernet-security: {}
     parameters:

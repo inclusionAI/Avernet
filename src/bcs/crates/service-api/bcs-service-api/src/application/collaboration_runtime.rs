@@ -9,10 +9,9 @@ use crate::application::message_flow::ChatEventState;
 use crate::core::ServiceError;
 use crate::port::{JudgeArtifact, JudgeDecision};
 use crate::types::{
-    CollaborationDefinition, CollaborationDefinitionRef, OpeningMessage,
-    RuntimeParticipantBinding, StateMachineAssignee, StateMachineDeliveryCorrelation,
-    StateMachineGraphMode, StateMachineNodeKind, StateMachineNodeRun, StateMachineNodeStatus,
-    StateMachineRun,
+    CollaborationDefinition, CollaborationDefinitionRef, OpeningMessage, RuntimeParticipantBinding,
+    StateMachineAssignee, StateMachineDeliveryCorrelation, StateMachineGraphMode,
+    StateMachineNodeKind, StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun,
 };
 
 pub const MAX_COLLABORATION_DEFINITION_YAML_BYTES: usize = 256 * 1024;
@@ -678,6 +677,17 @@ pub trait CollaborationRuntimeService: Send + Sync {
         limit: u64,
         before: Option<u64>,
     ) -> Result<Option<SessionHistoryResult>, CollaborationRuntimeError>;
+
+    async fn get_state_machine_session_history_for_view(
+        &self,
+        session_id: &str,
+        limit: u64,
+        before: Option<u64>,
+        _human_view: crate::types::HumanMessageView,
+    ) -> Result<Option<SessionHistoryResult>, CollaborationRuntimeError> {
+        self.get_state_machine_session_history(session_id, limit, before)
+            .await
+    }
 
     async fn cancel_state_machine_run(
         &self,

@@ -142,8 +142,10 @@ async fn requested_events_resolve_in_reverse_order_retry_and_continue_on_same_ru
             "session-e2e".to_string(),
             tx.clone(),
             Some("human-e2e".to_string()),
+            None,
         )
-        .await;
+        .await
+        .unwrap();
 
     interactions
         .on_provider_requested(requested("first"))

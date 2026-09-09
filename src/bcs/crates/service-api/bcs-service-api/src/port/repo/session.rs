@@ -6,15 +6,17 @@ use async_trait::async_trait;
 
 use crate::core::ServiceError;
 use crate::types::{
-    Participant, ParticipantMode, ServiceResult, Session, SessionKind, SessionStatus,
+    MessageViewScope, Participant, ParticipantMode, ServiceResult, Session, SessionKind,
+    SessionStatus,
 };
 
 use super::AppendEventRecord;
 
 /// Session 服务层入参（创建新 session）。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct NewSessionParams {
     pub session_kind: SessionKind,
+    pub message_visibility_version: u8,
     pub participants: Vec<Participant>,
     pub group_version: Option<i32>,
     pub caller_id: Option<String>,
@@ -25,6 +27,26 @@ pub struct NewSessionParams {
     /// 显式指定 session_id；不传则由实现层生成原生 `{group_id}:{8_hex}` ID。
     pub id: Option<String>,
     pub meta: Option<serde_json::Value>,
+}
+
+impl Default for NewSessionParams {
+    fn default() -> Self {
+        Self {
+            session_kind: SessionKind::default(),
+            // Existing persisted Sessions decode as version 0. New Session
+            // creation uses the classified Domain/Audience writer contract.
+            message_visibility_version: 1,
+            participants: Vec::new(),
+            group_version: None,
+            caller_id: None,
+            caller_principal: None,
+            input: None,
+            created_by: None,
+            session_title: None,
+            id: None,
+            meta: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +101,16 @@ pub struct RemoveSessionParticipantWithEvent {
     pub session_id: String,
     pub expected_participants: Vec<Participant>,
     pub bot_uuid: String,
+    pub event: AppendEventRecord,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateSessionParticipantMessageViewScopeWithEvent {
+    pub session_id: String,
+    pub expected_participants: Vec<Participant>,
+    pub actor_id: String,
+    pub message_view_scope: MessageViewScope,
+    pub mode: Option<ParticipantMode>,
     pub event: AppendEventRecord,
 }
 
@@ -255,6 +287,48 @@ pub trait SessionRepoPort: Send + Sync {
         bot_uuid: &str,
         mode: ParticipantMode,
     ) -> ServiceResult<Session>;
+    async fn update_participant_message_view_scope(
+        &self,
+        session_id: &str,
+        actor_id: &str,
+        message_view_scope: MessageViewScope,
+    ) -> ServiceResult<Session> {
+        let _ = (session_id, actor_id, message_view_scope);
+        Err(ServiceError::InvalidOperation {
+            message: "Session participant scope updates are not configured".to_string(),
+            request_id: None,
+        })
+    }
+    async fn update_participant_mode_and_message_view_scope(
+        &self,
+        session_id: &str,
+        actor_id: &str,
+        mode: Option<ParticipantMode>,
+        message_view_scope: MessageViewScope,
+    ) -> ServiceResult<Session> {
+        let updated = self
+            .update_participant_message_view_scope(
+                session_id,
+                actor_id,
+                message_view_scope,
+            )
+            .await?;
+        if let Some(mode) = mode {
+            self.update_participant_mode(session_id, actor_id, mode).await
+        } else {
+            Ok(updated)
+        }
+    }
+    async fn update_participant_message_view_scope_with_event(
+        &self,
+        command: UpdateSessionParticipantMessageViewScopeWithEvent,
+    ) -> ServiceResult<Session> {
+        let _ = command;
+        Err(ServiceError::InvalidOperation {
+            message: "Eventful Session participant scope update is not configured".to_string(),
+            request_id: None,
+        })
+    }
     async fn update_callback_status(&self, session_id: &str, status: &str) -> ServiceResult<()>;
     async fn claim_callback(
         &self,

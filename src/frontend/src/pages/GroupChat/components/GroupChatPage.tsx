@@ -43,6 +43,7 @@ import type {
   GroupInfo,
   GroupMessage,
   GroupSession,
+  MessageViewScope,
   ParticipantMode,
 } from '../types';
 import BottomPanel from './BottomPanel/BottomPanel';
@@ -72,7 +73,11 @@ interface GroupChatPageProps {
   /** 当前活跃的会话（会话模式时传入） */
   activeSession?: GroupSession | null;
   /** 加入会话回调 */
-  onJoinSession?: (sessionId: string, actorId: string) => Promise<boolean>;
+  onJoinSession?: (
+    sessionId: string,
+    actorId: string,
+    messageViewScope: MessageViewScope,
+  ) => Promise<boolean>;
   /** 退出会话回调 */
   onLeaveSession?: (sessionId: string, actorId: string) => Promise<boolean>;
   /** 更新会话标题回调 */
@@ -306,7 +311,9 @@ const GroupChatPage: React.FC<GroupChatPageProps> = ({
   }, [group.id]);
 
   // 加入协作处理
-  const handleJoinCollaboration = useCallback(async () => {
+  const handleJoinCollaboration = useCallback(async (
+    messageViewScope: MessageViewScope,
+  ) => {
     if (!userId) return;
     const humanActorId = `human_${userId}`;
 
@@ -315,6 +322,7 @@ const GroupChatPage: React.FC<GroupChatPageProps> = ({
       const success = await onJoinSession(
         activeSession.sessionId,
         humanActorId,
+        messageViewScope,
       );
       if (success) {
         onRefreshSession?.(activeSession.sessionId);
@@ -327,6 +335,7 @@ const GroupChatPage: React.FC<GroupChatPageProps> = ({
           group.id,
           humanActorId,
           'present',
+          messageViewScope,
         );
         if (success) {
           onRefreshGroup?.();

@@ -12,17 +12,19 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::HashSet;
 
-use bcs_domain::{ActorKind, DeliveryType, SystemMessageEvent};
+use bcs_domain::{ActorKind, DeliveryType, HumanMessageView, MessageViewScope, SystemMessageEvent};
 use bcs_service_api::{
-    CreateSessionLaunch, GroupChatCommand, ParticipantRole as DomainParticipantRole,
+    CreateSessionLaunch, GroupChatCommand, GroupMessage, ParticipantRole as DomainParticipantRole,
     ReactivateSessionLaunch, RequestedSessionRole, SessionCaller, SessionKind as DomainSessionKind,
     SessionLaunchError, SessionLaunchRequest, StateMachineRunView,
 };
 
 use crate::routes::collaboration_runs::collaboration_error_to_response;
 use crate::routes::group_messages::{
-    GroupChatCaller, delivery_results_json, group_chat_caller_context, resolve_group_chat_caller,
+    GroupChatCaller, application_caller, delivery_results_json, group_chat_caller_context,
+    resolve_group_chat_caller,
 };
 use crate::state::HttpAppState;
 
@@ -83,17 +85,16 @@ pub(crate) async fn human_has_session_access(
     actor_id: &str,
     staff_no: &str,
 ) -> bool {
-    if session
-        .participants
-        .iter()
-        .any(|p| p.bot_uuid == actor_id)
-    {
+    if session.participants.iter().any(|p| p.bot_uuid == actor_id) {
         return true;
     }
     let owned = state.services.registry.list_bots_by_creator(staff_no).await;
-    owned
-        .iter()
-        .any(|b| session.participants.iter().any(|p| p.bot_uuid == b.bot_uuid))
+    owned.iter().any(|b| {
+        session
+            .participants
+            .iter()
+            .any(|p| p.bot_uuid == b.bot_uuid)
+    })
 }
 
 pub fn session_error_to_response(err: &bcs_service_api::SessionUseCaseError) -> Response {
@@ -135,6 +136,11 @@ pub struct CreateSessionRequest {
     pub created_by: Option<String>,
     #[serde(default)]
     pub caller_role: Option<String>,
+    /// Optional Session-level message projection for the authenticated Human
+    /// inserted or inherited during creation. Omission preserves the legacy
+    /// `full` default for a session-only Human.
+    #[serde(default)]
+    pub message_view_scope: Option<MessageViewScope>,
     /// Optional delivery override for the driver bot's `<GroupContext>`
     /// message: `"send"` (default, driver is asked to respond) or
     /// `"inject"` (driver observes silently). Other participants always
@@ -246,6 +252,7 @@ pub async fn create_session_for_group(
         input: body.input,
         meta: body.meta,
         public_creator_role: legacy_creator_role(body.caller_role),
+        human_message_view_scope: body.message_view_scope,
         context_delivery: body.group_context_delivery,
     };
 
@@ -839,6 +846,8 @@ pub struct AddParticipantRequest {
     pub bot_uuid: String,
     #[serde(default)]
     pub role: Option<String>,
+    #[serde(default)]
+    pub message_view_scope: Option<MessageViewScope>,
 }
 
 pub async fn add_session_participant(
@@ -874,10 +883,12 @@ pub async fn add_session_participant(
         }
         Err(e) => return session_error_to_response(&e),
     };
-    let strategy = match state.services.group.get(&sess.group_id).await {
-        Some(g) => g.group_strategy,
-        None => bcs_service_api::GroupStrategy::Chat,
-    };
+    let group = state.services.group.get(&sess.group_id).await;
+    let strategy = group
+        .as_ref()
+        .map_or(bcs_service_api::GroupStrategy::Chat, |group| {
+            group.group_strategy
+        });
 
     // Default role: Worker for ManagerWorker, Consultant for Chat (matches legacy).
     let role = match body.role.as_deref() {
@@ -922,6 +933,28 @@ pub async fn add_session_participant(
     } else {
         None
     };
+    let message_view_scope = body
+        .message_view_scope
+        .or_else(|| {
+            group.as_ref().and_then(|group| {
+                group
+                    .participants
+                    .iter()
+                    .find(|participant| participant.bot_uuid == body.bot_uuid)
+                    .map(|participant| participant.message_view_scope)
+            })
+        })
+        .unwrap_or(MessageViewScope::Full);
+    if !message_view_scope.is_valid_for(bot.actor_kind) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "invalid_message_view_scope",
+                "message": "Bot participants must use full message_view_scope"
+            })),
+        )
+            .into_response();
+    }
     let participant = bcs_service_api::Participant {
         bot_uuid: body.bot_uuid,
         bot_name: bot.capabilities.name,
@@ -930,6 +963,7 @@ pub async fn add_session_participant(
         actor_kind: bot.actor_kind,
         mode,
         tags: Vec::new(),
+        message_view_scope,
     };
 
     match state
@@ -1022,9 +1056,7 @@ pub async fn remove_session_participant(
     let is_bot_owner = human_owns_actor(&bot_uuid);
     let is_session_creator = session_created_by
         .as_deref()
-        .map(|c| {
-            caller_id == format!("human_{}", c) || caller_id == c || human_owns_actor(c)
-        })
+        .map(|c| caller_id == format!("human_{}", c) || caller_id == c || human_owns_actor(c))
         .unwrap_or(false);
     let is_session_principal = session_caller_principal
         .as_deref()
@@ -1045,7 +1077,8 @@ pub async fn remove_session_participant(
     } else {
         (false, false)
     };
-    if !is_self && !is_bot_owner && !is_session_creator && !is_session_principal && !is_coordinator {
+    if !is_self && !is_bot_owner && !is_session_creator && !is_session_principal && !is_coordinator
+    {
         return (
             StatusCode::FORBIDDEN,
             Json(
@@ -1105,6 +1138,7 @@ pub async fn remove_session_participant(
                         actor_kind: kind,
                         mode: None,
                         tags: Vec::new(),
+                        message_view_scope: MessageViewScope::Full,
                     },
                 };
                 let _ = state
@@ -1128,7 +1162,10 @@ pub async fn remove_session_participant(
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateParticipantModeRequest {
-    pub mode: String,
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub message_view_scope: Option<MessageViewScope>,
 }
 
 pub async fn update_session_participant_mode(
@@ -1138,32 +1175,152 @@ pub async fn update_session_participant_mode(
     uri: Uri,
     Json(body): Json<UpdateParticipantModeRequest>,
 ) -> impl IntoResponse {
-    if resolve_group_chat_caller(&state, &headers, &uri)
-        .await
-        .is_err()
-    {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"error": "unauthorized"})),
-        )
-            .into_response();
-    }
-
-    let mode = match body.mode.as_str() {
-        "auto" => bcs_service_api::ParticipantMode::Auto,
-        "muted" => bcs_service_api::ParticipantMode::Muted,
-        "present" => bcs_service_api::ParticipantMode::Present,
-        "absent" => bcs_service_api::ParticipantMode::Absent,
-        _ => {
+    let caller = match resolve_group_chat_caller(&state, &headers, &uri).await {
+        Ok(caller) => caller,
+        Err(_) => {
             return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": format!("unknown mode: {}", body.mode)
-                })),
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({"error": "unauthorized"})),
             )
                 .into_response();
         }
     };
+
+    if body.mode.is_none() && body.message_view_scope.is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "At least one of mode or message_view_scope must be provided"
+            })),
+        )
+            .into_response();
+    }
+
+    let mode = match body.mode.as_deref() {
+        Some("auto") => Some(bcs_service_api::ParticipantMode::Auto),
+        Some("muted") => Some(bcs_service_api::ParticipantMode::Muted),
+        Some("present") => Some(bcs_service_api::ParticipantMode::Present),
+        Some("absent") => Some(bcs_service_api::ParticipantMode::Absent),
+        Some(unknown) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": format!("unknown mode: {unknown}")
+                })),
+            )
+                .into_response();
+        }
+        None => None,
+    };
+
+    if let Some(message_view_scope) = body.message_view_scope {
+        let GroupChatCaller::Human(human) = &caller else {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "invalid_message_view_scope",
+                    "message": "Bot participants must use full message_view_scope"
+                })),
+            )
+                .into_response();
+        };
+
+        if let Some(application) = state.session_application.as_ref() {
+            let update = application
+                .update_participant(bcs_service_api::application::v1::UpdateSessionParticipant {
+                    caller: application_caller(&caller),
+                    session_id: sid.clone(),
+                    bot_uuid: bot_uuid.clone(),
+                    mode,
+                    message_view_scope: Some(message_view_scope),
+                })
+                .await;
+            match update {
+                Ok(_) => {
+                    return match state.services.session_management.get(&sid).await {
+                        Ok(Some(session)) => Json(session_to_json(&session)).into_response(),
+                        Ok(None) => session_application_error_response(
+                            bcs_service_api::application::v1::ApplicationError::not_found(
+                                "session_not_found",
+                                format!("Session '{sid}' was not found after update"),
+                            ),
+                        ),
+                        Err(error) => session_error_to_response(&error),
+                    };
+                }
+                Err(bcs_service_api::application::v1::ApplicationError::NotFound {
+                    code, ..
+                }) if code == "participant_not_found" && human.actor_id == bot_uuid => {
+                    let mut participant = bcs_service_api::Participant::human(
+                        &bot_uuid,
+                        bcs_service_api::ParticipantRole::Observer,
+                    );
+                    participant.bot_name = human.nick_name.clone();
+                    participant.mode = mode.or(Some(bcs_service_api::ParticipantMode::Present));
+                    participant.message_view_scope = message_view_scope;
+                    return match state
+                        .services
+                        .session_management
+                        .add_participant(&sid, participant)
+                        .await
+                    {
+                        Ok(session) => Json(session_to_json(&session)).into_response(),
+                        Err(error) => session_error_to_response(&error),
+                    };
+                }
+                Err(error) => return session_application_error_response(error),
+            }
+        }
+
+        if human.actor_id != bot_uuid {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": "message_view_scope_forbidden",
+                    "message": "A Human may only update its own scope unless it manages the Session"
+                })),
+            )
+                .into_response();
+        }
+
+        match state
+            .services
+            .session_management
+            .update_participant_mode_and_message_view_scope(
+                &sid,
+                &bot_uuid,
+                mode,
+                message_view_scope,
+            )
+            .await
+        {
+            Ok(session) => return Json(session_to_json(&session)).into_response(),
+            Err(
+                bcs_service_api::SessionUseCaseError::NotFound(_)
+                | bcs_service_api::SessionUseCaseError::InvalidParams(_),
+            ) => {
+                let mut participant = bcs_service_api::Participant::human(
+                    &bot_uuid,
+                    bcs_service_api::ParticipantRole::Observer,
+                );
+                participant.bot_name = human.nick_name.clone();
+                participant.mode = mode.or(Some(bcs_service_api::ParticipantMode::Present));
+                participant.message_view_scope = message_view_scope;
+                return match state
+                    .services
+                    .session_management
+                    .add_participant(&sid, participant)
+                    .await
+                {
+                    Ok(session) => Json(session_to_json(&session)).into_response(),
+                    Err(error) => session_error_to_response(&error),
+                };
+            }
+            Err(error) => return session_error_to_response(&error),
+        }
+    }
+
+    let mode = mode.expect("mode is required when message_view_scope is absent");
 
     // Capture old mode before update so we can notify on change.
     let old_mode = state
@@ -1292,6 +1449,49 @@ pub async fn update_session_participant_mode(
     }
 }
 
+fn session_application_error_response(
+    error: bcs_service_api::application::v1::ApplicationError,
+) -> Response {
+    use bcs_service_api::application::v1::ApplicationError;
+    let (status, code, message) = match error {
+        ApplicationError::InvalidInput { code, message } => {
+            (StatusCode::BAD_REQUEST, code, message)
+        }
+        ApplicationError::Unauthenticated => (
+            StatusCode::UNAUTHORIZED,
+            "unauthenticated".to_string(),
+            "authentication is required".to_string(),
+        ),
+        ApplicationError::Forbidden(message) => {
+            (StatusCode::FORBIDDEN, "forbidden".to_string(), message)
+        }
+        ApplicationError::ForbiddenCode { code, message } => (StatusCode::FORBIDDEN, code, message),
+        ApplicationError::NotFound { code, message } => (StatusCode::NOT_FOUND, code, message),
+        ApplicationError::Conflict { code, message } => (StatusCode::CONFLICT, code, message),
+        ApplicationError::Gone { code, message } => (StatusCode::GONE, code, message),
+        ApplicationError::QuotaExceeded { code, message } => {
+            (StatusCode::TOO_MANY_REQUESTS, code, message)
+        }
+        ApplicationError::PayloadTooLarge { code, message } => {
+            (StatusCode::PAYLOAD_TOO_LARGE, code, message)
+        }
+        ApplicationError::Unprocessable { code, message } => {
+            (StatusCode::UNPROCESSABLE_ENTITY, code, message)
+        }
+        ApplicationError::BadGateway { code, message } => (StatusCode::BAD_GATEWAY, code, message),
+        ApplicationError::Internal(message) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error".to_string(),
+            message,
+        ),
+    };
+    (
+        status,
+        Json(serde_json::json!({"error": code, "message": message})),
+    )
+        .into_response()
+}
+
 // ---------------------------------------------------------------
 // POST /sessions/{sid}/chat
 // ---------------------------------------------------------------
@@ -1340,10 +1540,7 @@ pub async fn session_chat(
         GroupChatCaller::Bot { bot_uuid } => bot_uuid.clone(),
         GroupChatCaller::Human(h) => h.actor_id.clone(),
     };
-    let is_participant = sess
-        .participants
-        .iter()
-        .any(|p| p.bot_uuid == caller_id);
+    let is_participant = sess.participants.iter().any(|p| p.bot_uuid == caller_id);
     if !is_participant {
         // COSEC: only the authenticated Human may self-enroll. Bot callers
         // remain fail-closed so a valid Bot token cannot expand membership.
@@ -1535,23 +1732,46 @@ pub async fn get_session_messages(
         Err(response) => return response,
     };
 
+    let resolved_view =
+        match resolve_session_history_view(&sess, &caller, query.view_bot_id.as_deref()) {
+            Ok(view) => view,
+            Err(response) => return response,
+        };
     let limit = query.limit.unwrap_or(u64::MAX);
+    let participant_human_view = resolved_view
+        .human_view
+        .clone()
+        .filter(|view| view.scope == MessageViewScope::Participant);
     if group.group_strategy == bcs_service_api::GroupStrategy::StateMachine {
-        if let Err(response) = authorize_state_machine_session_history(&state, &sess, &caller).await {
+        // Full keeps the pre-participant-view authorization and history path.
+        // Only an explicitly participant-scoped Human uses the projected
+        // state-machine history API.
+        if participant_human_view.is_none()
+            && let Err(response) =
+                authorize_state_machine_session_history(&state, &sess, &caller).await
+        {
             return response;
         }
-        return match state
-            .services
-            .collaboration_runtime
-            .get_state_machine_session_history(&sid, limit, query.before)
-            .await
-        {
+        let human_view = resolved_view.human_view;
+        let history = match human_view {
+            Some(view) => {
+                state
+                    .services
+                    .collaboration_runtime
+                    .get_state_machine_session_history_for_view(&sid, limit, query.before, view)
+                    .await
+            }
+            None => {
+                state
+                    .services
+                    .collaboration_runtime
+                    .get_state_machine_session_history(&sid, limit, query.before)
+                    .await
+            }
+        };
+        return match history {
             Ok(Some(result)) => (StatusCode::OK, Json(result.messages)).into_response(),
-            Ok(None) => (
-                StatusCode::OK,
-                Json(Vec::<bcs_service_api::GroupMessage>::new()),
-            )
-                .into_response(),
+            Ok(None) => (StatusCode::OK, Json(Vec::<GroupMessage>::new())).into_response(),
             Err(error) => collaboration_error_to_response(error),
         };
     }
@@ -1562,7 +1782,7 @@ pub async fn get_session_messages(
         group_id: sess.group_id.clone(),
         session_id: sid.clone(),
         session_participants: sess.participants.clone(),
-        view_bot_id: query.view_bot_id.clone(),
+        view_bot_id: resolved_view.view_actor_id,
         limit,
         before: query.before,
     };
@@ -1578,11 +1798,134 @@ pub async fn get_session_messages(
         )
         .await
     {
-        Ok(result) => (StatusCode::OK, Json(result.messages)).into_response(),
+        Ok(result) => {
+            let mut messages = result.messages;
+            if let Some(human_view) = participant_human_view {
+                let snapshot = match state
+                    .services
+                    .collaboration_runtime
+                    .get_state_machine_session_history_for_view(
+                        &sid,
+                        limit,
+                        query.before,
+                        human_view,
+                    )
+                    .await
+                {
+                    Ok(snapshot) => snapshot,
+                    Err(error) => return collaboration_error_to_response(error),
+                };
+                messages = merge_participant_state_machine_snapshot(
+                    messages,
+                    snapshot.map(|history| history.messages),
+                    limit,
+                );
+            }
+            (StatusCode::OK, Json(messages)).into_response()
+        }
         Err(e) => {
             let (status, body) = session_history_error_to_response(&e);
             (status, Json(body)).into_response()
         }
+    }
+}
+
+fn merge_participant_state_machine_snapshot(
+    mut persisted: Vec<GroupMessage>,
+    snapshot: Option<Vec<GroupMessage>>,
+    limit: u64,
+) -> Vec<GroupMessage> {
+    let mut seen_ids = persisted
+        .iter()
+        .map(|message| message.id.clone())
+        .collect::<HashSet<_>>();
+    if let Some(snapshot) = snapshot {
+        persisted.extend(
+            snapshot
+                .into_iter()
+                .filter(|message| seen_ids.insert(message.id.clone())),
+        );
+    }
+    persisted.sort_by(|left, right| {
+        right
+            .timestamp
+            .cmp(&left.timestamp)
+            .then_with(|| right.id.cmp(&left.id))
+    });
+    persisted.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+    persisted
+}
+
+struct ResolvedSessionHistoryView {
+    view_actor_id: Option<String>,
+    human_view: Option<HumanMessageView>,
+}
+
+fn resolve_session_history_view(
+    session: &bcs_service_api::Session,
+    caller: &bcs_service_api::CallerContext,
+    requested_view_actor_id: Option<&str>,
+) -> Result<ResolvedSessionHistoryView, Response> {
+    let forbidden = || {
+        (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "forbidden",
+                "message": "the selected View Actor is not an authorized Session participant"
+            })),
+        )
+            .into_response()
+    };
+
+    match caller {
+        bcs_service_api::CallerContext::Human(human) => {
+            let participant_view = session
+                .participants
+                .iter()
+                .find(|participant| {
+                    participant.bot_uuid == human.actor_id
+                        && participant.actor_kind == ActorKind::Human
+                        && participant.message_view_scope == MessageViewScope::Participant
+                });
+            if let Some(participant) = participant_view {
+                if requested_view_actor_id.is_some_and(|requested| requested != human.actor_id) {
+                    return Err(forbidden());
+                }
+                return Ok(ResolvedSessionHistoryView {
+                    view_actor_id: Some(human.actor_id.clone()),
+                    human_view: Some(HumanMessageView {
+                        actor_id: human.actor_id.clone(),
+                        scope: participant.message_view_scope,
+                        allow_legacy_unclassified_chat: false,
+                    }),
+                });
+            }
+
+            // Full is the compatibility mode. Preserve the pre-feature
+            // behavior exactly: do not infer a Human View Actor and leave an
+            // explicitly requested legacy view unchanged.
+            Ok(ResolvedSessionHistoryView {
+                view_actor_id: requested_view_actor_id.map(str::to_string),
+                human_view: None,
+            })
+        }
+        bcs_service_api::CallerContext::Bot(_) => Ok(ResolvedSessionHistoryView {
+            view_actor_id: requested_view_actor_id.map(str::to_string),
+            human_view: None,
+        }),
+        bcs_service_api::CallerContext::Public => Err((
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({
+                "error": "unauthorized",
+                "message": "valid Human identity or Bot token is required for session history"
+            })),
+        )
+            .into_response()),
+        bcs_service_api::CallerContext::Integration(_)
+        | bcs_service_api::CallerContext::Admin(_) => Ok(ResolvedSessionHistoryView {
+            view_actor_id: requested_view_actor_id.map(str::to_string),
+            human_view: None,
+        }),
     }
 }
 
@@ -1754,7 +2097,12 @@ pub async fn delete_session(
             // Best-effort session-file cleanup: count logged on success, error
             // logged but not fatal — orphan sweep reconciles later. MUST NOT
             // fail the session-delete response.
-            match state.services.session_files.delete_all_for_session(&sid).await {
+            match state
+                .services
+                .session_files
+                .delete_all_for_session(&sid)
+                .await
+            {
                 Ok(n) => tracing::info!(
                     session_id = %sid,
                     deleted = n,
@@ -1805,13 +2153,11 @@ async fn resolve_collector_bot(
     let caller = match resolve_group_chat_caller(state, headers, uri).await {
         Ok(c) => c,
         Err(_) => {
-            return Err(
-                (
-                    StatusCode::UNAUTHORIZED,
-                    Json(serde_json::json!({"error": "unauthorized"})),
-                )
-                    .into_response(),
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({"error": "unauthorized"})),
             )
+                .into_response());
         }
     };
     match caller {
@@ -1835,16 +2181,14 @@ async fn resolve_collector_bot(
                 .iter()
                 .any(|b| b.bot_uuid == bot_uuid);
             if !owns {
-                return Err(
-                    (
-                        StatusCode::FORBIDDEN,
-                        Json(serde_json::json!({
-                            "error": "forbidden",
-                            "message": format!("caller does not own bot {}", bot_uuid)
-                        })),
-                    )
-                        .into_response(),
-                );
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(serde_json::json!({
+                        "error": "forbidden",
+                        "message": format!("caller does not own bot {}", bot_uuid)
+                    })),
+                )
+                    .into_response());
             }
             Ok(bot_uuid.to_string())
         }
@@ -1858,11 +2202,17 @@ pub async fn collect_session(
     uri: Uri,
     Json(body): Json<CollectSessionRequest>,
 ) -> impl IntoResponse {
-    let collector = match resolve_collector_bot(&state, &headers, &uri, body.participant.as_deref()).await {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
-    match state.services.session_management.collect(&sid, &collector).await {
+    let collector =
+        match resolve_collector_bot(&state, &headers, &uri, body.participant.as_deref()).await {
+            Ok(b) => b,
+            Err(resp) => return resp,
+        };
+    match state
+        .services
+        .session_management
+        .collect(&sid, &collector)
+        .await
+    {
         Ok(()) => Json(serde_json::json!({"collected": true, "session_id": sid})).into_response(),
         Err(e) => session_error_to_response(&e),
     }
@@ -1875,11 +2225,17 @@ pub async fn uncollect_session(
     uri: Uri,
     Query(body): Query<CollectSessionRequest>,
 ) -> impl IntoResponse {
-    let collector = match resolve_collector_bot(&state, &headers, &uri, body.participant.as_deref()).await {
-        Ok(b) => b,
-        Err(resp) => return resp,
-    };
-    match state.services.session_management.uncollect(&sid, &collector).await {
+    let collector =
+        match resolve_collector_bot(&state, &headers, &uri, body.participant.as_deref()).await {
+            Ok(b) => b,
+            Err(resp) => return resp,
+        };
+    match state
+        .services
+        .session_management
+        .uncollect(&sid, &collector)
+        .await
+    {
         Ok(()) => Json(serde_json::json!({"collected": false, "session_id": sid})).into_response(),
         Err(e) => session_error_to_response(&e),
     }

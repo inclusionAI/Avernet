@@ -25,24 +25,24 @@ use bcs_service_api::application::system_message::SystemMessageService;
 use bcs_service_api::application::v1::{
     AddSessionParticipant, ApplicationError as V1ApplicationError, AuthenticatedAppIdentity,
     AuthenticatedBotIdentity, AuthenticatedCaller, AuthenticatedUserIdentity, CollectSession,
-    CompleteSession, CreateSession, DeleteSession,
-    DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions, SessionMessageService,
-    SessionParticipantInput, SessionService,
-    SessionStatus as V1SessionStatus, UncollectSession, UpdateSession, UpdateSessionParticipant,
+    CompleteSession, CreateSession, DeleteSession, DeleteSessionParticipant, GetSession,
+    ListSessionMessages, ListSessions, SessionMessageService, SessionParticipantInput,
+    SessionService, SessionStatus as V1SessionStatus, UncollectSession, UpdateSession,
+    UpdateSessionParticipant,
 };
 use bcs_service_api::port::repo::{NewSessionParams, SessionRepoPort};
+use bcs_service_api::types::{HumanMessageView, MessageViewScope};
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCapabilities, BotRegistryCoreService, CallerContext,
     CancelStateMachineRunCommand, CollaborationDefinition, CollaborationRuntimeError,
     CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
-    FriendCoreService, Group,
-    GroupCoreService, GroupHistoryCommand, GroupHistoryResult, GroupMessage,
-    GroupMessageHistoryService, GroupMessageType, GroupStrategy, GroupUseCaseError,
-    HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, HumanActor, MessageRole,
-    MessageHistoryOptions, Participant, ParticipantMode, ParticipantRole, ServiceResult, SessionCaller,
-    SessionHistoryCommand, SessionHistoryResult, SessionKind, StartStateMachineRunCommand,
-    StartStateMachineRunOutcome, StateMachineDeliveryCorrelation, StateMachineRun,
-    StateMachineRunStatus, StateMachineRunView, SystemMessageEvent,
+    FriendCoreService, Group, GroupCoreService, GroupHistoryCommand, GroupHistoryResult,
+    GroupMessage, GroupMessageHistoryService, GroupMessageType, GroupStrategy, GroupUseCaseError,
+    HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, HumanActor,
+    MessageHistoryOptions, MessageRole, Participant, ParticipantMode, ParticipantRole,
+    ServiceResult, SessionCaller, SessionHistoryCommand, SessionHistoryResult, SessionKind,
+    StartStateMachineRunCommand, StartStateMachineRunOutcome, StateMachineDeliveryCorrelation,
+    StateMachineRun, StateMachineRunStatus, StateMachineRunView, SystemMessageEvent,
 };
 use bcs_session::{SessionLaunchApplication, SessionManagementServiceImpl};
 use bcs_session_store::MemorySessionRepo;
@@ -134,7 +134,9 @@ impl GroupMessageHistoryService for RecordingHistoryService {
 struct RecordingRuntime {
     start_calls: Mutex<Vec<StartStateMachineRunCommand>>,
     history_calls: Mutex<Vec<(String, u64, Option<u64>)>>,
+    participant_history_calls: Mutex<Vec<(String, u64, Option<u64>, HumanMessageView)>>,
     history_result: Mutex<Option<SessionHistoryResult>>,
+    session_run: Mutex<Option<StateMachineRunView>>,
 }
 
 #[async_trait]
@@ -183,6 +185,17 @@ impl CollaborationRuntimeService for RecordingRuntime {
         Ok(None)
     }
 
+    async fn get_state_machine_run_by_session_id(
+        &self,
+        _session_id: &str,
+    ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
+        Ok(self
+            .session_run
+            .lock()
+            .expect("runtime session run lock")
+            .clone())
+    }
+
     async fn get_state_machine_session_history(
         &self,
         session_id: &str,
@@ -193,6 +206,29 @@ impl CollaborationRuntimeService for RecordingRuntime {
             .lock()
             .expect("runtime history lock")
             .push((session_id.to_string(), limit, before));
+        Ok(self
+            .history_result
+            .lock()
+            .expect("runtime result lock")
+            .clone())
+    }
+
+    async fn get_state_machine_session_history_for_view(
+        &self,
+        session_id: &str,
+        limit: u64,
+        before: Option<u64>,
+        human_view: HumanMessageView,
+    ) -> Result<Option<SessionHistoryResult>, CollaborationRuntimeError> {
+        if human_view.scope == MessageViewScope::Full {
+            return self
+                .get_state_machine_session_history(session_id, limit, before)
+                .await;
+        }
+        self.participant_history_calls
+            .lock()
+            .expect("runtime participant history lock")
+            .push((session_id.to_string(), limit, before, human_view));
         Ok(self
             .history_result
             .lock()
@@ -559,6 +595,7 @@ async fn create_session(
             kind: None,
             acting_bot_id: None,
             creator_role: None,
+            message_view_scope: None,
             input,
             meta: None,
             context_delivery: None,
@@ -667,6 +704,7 @@ async fn state_machine_service_create_projects_raw_fields_and_run() {
             kind: Some(SessionKind::ServiceInvocation),
             acting_bot_id: Some("driver".into()),
             creator_role: None,
+            message_view_scope: None,
             input: Some(input.clone()),
             meta: Some(meta.clone()),
             context_delivery: None,
@@ -713,6 +751,7 @@ async fn create_as_non_manager_is_forbidden() {
             kind: None,
             acting_bot_id: None,
             creator_role: None,
+            message_view_scope: None,
             input: None,
             meta: None,
             context_delivery: None,
@@ -739,6 +778,7 @@ async fn create_with_unknown_group_is_not_found() {
             kind: None,
             acting_bot_id: None,
             creator_role: None,
+            message_view_scope: None,
             input: None,
             meta: None,
             context_delivery: None,
@@ -1517,7 +1557,10 @@ async fn collect_rejects_participant_not_owned_by_authenticated_human() {
         .await
         .expect_err("must not collect as an actor the human does not own");
     assert!(
-        matches!(error, bcs_service_api::application::v1::ApplicationError::Forbidden(_)),
+        matches!(
+            error,
+            bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+        ),
         "expected forbidden, got {error:?}"
     );
 }
@@ -1827,6 +1870,113 @@ async fn list_messages_delegates_and_returns_legacy_group_messages_unchanged() {
 }
 
 #[tokio::test]
+async fn participant_history_merges_own_legacy_one_shot_response_snapshot() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "worker-a"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .store_manager_worker_group_with_originator(
+            "g1",
+            "driver",
+            &["worker-a"],
+            "human_staff-1",
+            None,
+        )
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let mut human = Participant::human("human_staff-1", ParticipantRole::Observer);
+    human.message_view_scope = MessageViewScope::Participant;
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                session_kind: SessionKind::Chat,
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::bot("worker-a", ParticipantRole::Worker),
+                    human,
+                ],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed manager-worker session");
+
+    let mut prompt = rich_group_message();
+    prompt.id = "run-1:review:1:human-input-prompt".into();
+    prompt.timestamp = 10;
+    prompt.content = "请审核".into();
+    *fixture.history.messages.lock().expect("messages lock") = vec![prompt.clone()];
+
+    let mut duplicate_prompt = prompt.clone();
+    duplicate_prompt.content = "snapshot duplicate must not replace durable message".into();
+    let mut response = rich_group_message();
+    response.id = "run-1:review:1:1-output".into();
+    response.timestamp = 20;
+    response.sender = "human_staff-1".into();
+    response.content = "通过".into();
+    response.role = MessageRole::User;
+    response.bot_name = None;
+    *fixture
+        .runtime
+        .history_result
+        .lock()
+        .expect("runtime result lock") = Some(SessionHistoryResult {
+        session_id: session.id.clone(),
+        messages: vec![duplicate_prompt, response.clone()],
+        limit: 100,
+        before: None,
+        next_before: None,
+    });
+
+    let messages = SessionMessageService::list(
+        &fixture.service,
+        ListSessionMessages {
+            caller: human_principal("staff-1"),
+            session_id: session.id.clone(),
+            before: None,
+            limit: 100,
+            view_bot_id: None,
+        },
+    )
+    .await
+    .expect("participant history");
+
+    assert_eq!(
+        messages
+            .iter()
+            .map(|message| (message.id.as_str(), message.content.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("run-1:review:1:1-output", "通过"),
+            ("run-1:review:1:human-input-prompt", "请审核"),
+        ]
+    );
+    assert_eq!(messages[0].role, MessageRole::User);
+    assert_eq!(
+        fixture
+            .runtime
+            .participant_history_calls
+            .lock()
+            .expect("participant history calls")
+            .as_slice(),
+        &[(
+            session.id,
+            100,
+            None,
+            HumanMessageView {
+                actor_id: "human_staff-1".into(),
+                scope: MessageViewScope::Participant,
+                allow_legacy_unclassified_chat: false,
+            },
+        )]
+    );
+}
+
+#[tokio::test]
 async fn list_messages_rejects_invalid_limit_before_calling_history() {
     let fixture = Fixture::new().await;
     fixture.add_bot("driver").await;
@@ -1973,6 +2123,7 @@ async fn human_owner_of_group_driver_can_add_session_participant_without_human_m
             caller: human_principal("staff-unrelated"),
             session_id: session.id.clone(),
             bot_uuid: "newcomer".into(),
+            message_view_scope: None,
         })
         .await
         .expect_err("unrelated Human cannot manage session through Bot ownership");
@@ -1987,6 +2138,7 @@ async fn human_owner_of_group_driver_can_add_session_participant_without_human_m
             caller: human_principal("staff-driver"),
             session_id: session.id,
             bot_uuid: "newcomer".into(),
+            message_view_scope: None,
         })
         .await
         .expect("Human owner of group driver can manage session");
@@ -2097,6 +2249,7 @@ async fn chat_manager_role_does_not_grant_session_management_to_human_owner() {
             caller: human_principal("staff-manager-owner"),
             session_id: session.id,
             bot_uuid: "newcomer".into(),
+            message_view_scope: None,
         })
         .await
         .expect_err("Chat manager role must not grant session management authority");
@@ -2132,6 +2285,7 @@ async fn participant_add_update_remove_lifecycle() {
             caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "newcomer".into(),
+            message_view_scope: None,
         })
         .await
         .expect("add participant");
@@ -2146,6 +2300,7 @@ async fn participant_add_update_remove_lifecycle() {
             caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "newcomer".into(),
+            message_view_scope: None,
         })
         .await
         .expect_err("duplicate add should conflict");
@@ -2158,7 +2313,8 @@ async fn participant_add_update_remove_lifecycle() {
             caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "newcomer".into(),
-            mode: ParticipantMode::Muted,
+            mode: Some(ParticipantMode::Muted),
+            message_view_scope: None,
         })
         .await
         .expect("update participant");
@@ -2215,6 +2371,7 @@ async fn update_participant_emits_mode_changed_system_message_only_on_change() {
             caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "expert".into(),
+            message_view_scope: None,
         })
         .await
         .expect("add expert");
@@ -2227,7 +2384,8 @@ async fn update_participant_emits_mode_changed_system_message_only_on_change() {
             caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "expert".into(),
-            mode: ParticipantMode::Muted,
+            mode: Some(ParticipantMode::Muted),
+            message_view_scope: None,
         })
         .await
         .expect("mute expert");
@@ -2245,7 +2403,8 @@ async fn update_participant_emits_mode_changed_system_message_only_on_change() {
             caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "expert".into(),
-            mode: ParticipantMode::Muted,
+            mode: Some(ParticipantMode::Muted),
+            message_view_scope: None,
         })
         .await
         .expect("re-mute expert is idempotent");
@@ -2285,6 +2444,7 @@ async fn add_participant_emits_bot_joined_system_message() {
             caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "expert".into(),
+            message_view_scope: None,
         })
         .await
         .expect("add expert");
@@ -2300,6 +2460,7 @@ async fn add_participant_emits_bot_joined_system_message() {
             caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "expert".into(),
+            message_view_scope: None,
         })
         .await
         .expect_err("duplicate add should conflict");
@@ -2335,6 +2496,7 @@ async fn delete_participant_emits_bot_left_system_message() {
             caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "expert".into(),
+            message_view_scope: None,
         })
         .await
         .expect("add expert");
@@ -2451,7 +2613,10 @@ async fn delete_participant_still_rejects_group_driver() {
         .await
         .expect_err("driver remains pinned");
     assert!(
-        matches!(error, bcs_service_api::application::v1::ApplicationError::InvalidInput { .. }),
+        matches!(
+            error,
+            bcs_service_api::application::v1::ApplicationError::InvalidInput { .. }
+        ),
         "expected invalid_request, got {error:?}"
     );
     // No leave event when removal is rejected.
@@ -2636,10 +2801,7 @@ fn recorded_mode_changes(
         .filter(|recorded| recorded.session_id == session_id)
         .filter_map(|recorded| {
             if let SystemMessageEvent::ParticipantModeChanged {
-                actor_id,
-                from,
-                to,
-                ..
+                actor_id, from, to, ..
             } = &recorded.event
             {
                 Some((actor_id.clone(), *from, *to))
@@ -2713,7 +2875,8 @@ async fn human_participant_can_update_own_mode_without_session_management() {
             caller: human_principal("staff-1"),
             session_id: session.id,
             bot_uuid: "human_staff-1".into(),
-            mode: ParticipantMode::Present,
+            mode: Some(ParticipantMode::Present),
+            message_view_scope: None,
         })
         .await
         .expect("Human participant updates own presence");
@@ -2762,7 +2925,8 @@ async fn readable_session_auto_adds_missing_human_as_present_observer() {
             caller: human_principal("staff-1"),
             session_id: session.id,
             bot_uuid: "human_staff-1".into(),
-            mode: ParticipantMode::Present,
+            mode: Some(ParticipantMode::Present),
+            message_view_scope: None,
         })
         .await
         .expect("missing Human self-inserts into readable Session");
@@ -2824,7 +2988,8 @@ async fn readable_session_auto_adds_missing_human_as_absent_observer() {
             caller: human_principal("staff-1"),
             session_id: session.id,
             bot_uuid: "human_staff-1".into(),
-            mode: ParticipantMode::Absent,
+            mode: Some(ParticipantMode::Absent),
+            message_view_scope: None,
         })
         .await
         .expect("missing Human self-inserts as absent");
@@ -2845,6 +3010,163 @@ async fn readable_session_auto_adds_missing_human_as_absent_observer() {
     assert_eq!(matching.len(), 1);
     assert_eq!(matching[0].role, ParticipantRole::Observer);
     assert_eq!(matching[0].mode, Some(ParticipantMode::Absent));
+}
+
+#[tokio::test]
+async fn readable_session_auto_add_inherits_group_human_scope() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "owned-bot"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .bots
+        .save_created_by("owned-bot", "staff-1", true)
+        .await
+        .expect("assign owned Bot");
+    fixture
+        .store_group_with_originator("g1", "driver", "human_other", None)
+        .await;
+    let mut group_human = Participant::human("human_staff-1", ParticipantRole::Observer);
+    group_human.message_view_scope = MessageViewScope::Participant;
+    fixture
+        .groups
+        .add_participant("g1", group_human)
+        .await
+        .expect("add Human to Group");
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::bot("owned-bot", ParticipantRole::Consultant),
+                ],
+                group_version: Some(group.version),
+                created_by: Some("driver".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session");
+    let session_id = session.id.clone();
+
+    let inserted = fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            caller: human_principal("staff-1"),
+            session_id: session.id,
+            bot_uuid: "human_staff-1".into(),
+            mode: Some(ParticipantMode::Present),
+            message_view_scope: None,
+        })
+        .await
+        .expect("missing Human inherits Group scope when joining Session");
+
+    assert_eq!(inserted.mode, ParticipantMode::Present);
+    assert_eq!(inserted.message_view_scope, MessageViewScope::Participant);
+    let stored = fixture
+        .session_repo
+        .get(&session_id)
+        .await
+        .expect("stored session");
+    let human = stored
+        .participants
+        .iter()
+        .find(|participant| participant.bot_uuid == "human_staff-1")
+        .expect("stored Human participant");
+    assert_eq!(human.mode, Some(ParticipantMode::Present));
+    assert_eq!(human.message_view_scope, MessageViewScope::Participant);
+}
+
+#[tokio::test]
+async fn legacy_chat_session_with_state_machine_run_allows_participant_scope_and_history() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture
+        .store_group_with_originator("g1", "driver", "human_staff-1", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::human("human_staff-1", ParticipantRole::Observer),
+                ],
+                group_version: Some(group.version),
+                created_by: Some("human_staff-1".to_string()),
+                message_visibility_version: 0,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed legacy Chat session");
+    *fixture
+        .runtime
+        .session_run
+        .lock()
+        .expect("runtime session run lock") = Some(StateMachineRunView {
+        run: StateMachineRun {
+            run_id: "legacy-run".to_string(),
+            root_run_id: Some("legacy-run".to_string()),
+            rerun_of: None,
+            definition_id: "definition-1".to_string(),
+            definition_version: 1,
+            group_id: "g1".to_string(),
+            group_version: group.version,
+            session_id: session.id.clone(),
+            session_activation_count: None,
+            created_by: Some("human_staff-1".to_string()),
+            status: StateMachineRunStatus::Completed,
+            input: serde_json::Value::Null,
+            opening_message_override: None,
+            output: None,
+            error: None,
+            created_at: 1,
+            updated_at: 1,
+            completed_at: Some(1),
+        },
+        nodes: Vec::new(),
+        judge_outputs: Vec::new(),
+    });
+
+    let updated = fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            caller: human_principal("staff-1"),
+            session_id: session.id.clone(),
+            bot_uuid: "human_staff-1".to_string(),
+            mode: None,
+            message_view_scope: Some(MessageViewScope::Participant),
+        })
+        .await
+        .expect("message scope must not be gated by state-machine artifacts");
+    assert_eq!(updated.message_view_scope, MessageViewScope::Participant);
+
+    let history = SessionMessageService::list(
+        &fixture.service,
+        ListSessionMessages {
+            caller: human_principal("staff-1"),
+            session_id: session.id,
+            before: None,
+            limit: 100,
+            view_bot_id: None,
+        },
+    )
+    .await
+    .expect("participant history remains available for legacy sessions");
+    assert!(history.is_empty());
+    let calls = fixture
+        .runtime
+        .participant_history_calls
+        .lock()
+        .expect("runtime participant history lock");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].3.actor_id, "human_staff-1");
 }
 
 #[tokio::test]
@@ -2883,7 +3205,8 @@ async fn session_manager_cannot_update_another_human_mode() {
             caller: human_principal("staff-manager"),
             session_id: session.id,
             bot_uuid: "human_target".into(),
-            mode: ParticipantMode::Present,
+            mode: Some(ParticipantMode::Present),
+            message_view_scope: None,
         })
         .await
         .expect_err("Session manager cannot control another Human's presence");
@@ -2892,6 +3215,67 @@ async fn session_manager_cannot_update_another_human_mode() {
         error,
         bcs_service_api::application::v1::ApplicationError::Forbidden(_)
     ));
+}
+
+#[tokio::test]
+async fn session_manager_can_update_another_human_scope_without_changing_mode() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture
+        .bots
+        .save_created_by("driver", "staff-manager", true)
+        .await
+        .expect("assign driver owner");
+    fixture
+        .store_group_with_originator("g1", "driver", "human_other", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let mut target = Participant::human("human_target", ParticipantRole::Observer);
+    target.mode = Some(ParticipantMode::Absent);
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    target,
+                ],
+                group_version: Some(group.version),
+                created_by: Some("driver".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session");
+    let session_id = session.id.clone();
+
+    let updated = fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            caller: human_principal("staff-manager"),
+            session_id: session.id,
+            bot_uuid: "human_target".into(),
+            mode: None,
+            message_view_scope: Some(MessageViewScope::Participant),
+        })
+        .await
+        .expect("Session manager may update another Human's scope");
+
+    assert_eq!(updated.mode, ParticipantMode::Absent);
+    assert_eq!(updated.message_view_scope, MessageViewScope::Participant);
+    let stored = fixture
+        .session_repo
+        .get(&session_id)
+        .await
+        .expect("stored session");
+    let target = stored
+        .participants
+        .iter()
+        .find(|participant| participant.bot_uuid == "human_target")
+        .expect("target remains in session");
+    assert_eq!(target.mode, Some(ParticipantMode::Absent));
+    assert_eq!(target.message_view_scope, MessageViewScope::Participant);
 }
 
 #[tokio::test]
@@ -2928,7 +3312,8 @@ async fn session_manager_cannot_auto_add_another_human() {
             caller: human_principal("staff-manager"),
             session_id: session.id,
             bot_uuid: "human_target".into(),
-            mode: ParticipantMode::Present,
+            mode: Some(ParticipantMode::Present),
+            message_view_scope: None,
         })
         .await
         .expect_err("Session manager cannot auto-add another Human");
@@ -2978,7 +3363,8 @@ async fn human_cannot_auto_join_an_unreadable_session() {
             caller: human_principal("staff-1"),
             session_id: session.id,
             bot_uuid: "human_staff-1".into(),
-            mode: ParticipantMode::Present,
+            mode: Some(ParticipantMode::Present),
+            message_view_scope: None,
         })
         .await
         .expect_err("Human cannot join a Session it cannot read");
@@ -3018,7 +3404,8 @@ async fn participant_mode_must_match_the_target_actor_kind() {
             caller: human_principal("staff-1"),
             session_id: session.id.clone(),
             bot_uuid: "human_staff-1".into(),
-            mode: ParticipantMode::Auto,
+            mode: Some(ParticipantMode::Auto),
+            message_view_scope: None,
         })
         .await
         .expect_err("Human rejects Bot-only mode");
@@ -3030,7 +3417,8 @@ async fn participant_mode_must_match_the_target_actor_kind() {
             caller: human_principal("driver"),
             session_id: session.id,
             bot_uuid: "driver".into(),
-            mode: ParticipantMode::Present,
+            mode: Some(ParticipantMode::Present),
+            message_view_scope: None,
         })
         .await
         .expect_err("Bot rejects Human-only mode");
@@ -3076,7 +3464,8 @@ async fn bot_mode_does_not_auto_add_a_missing_human() {
             caller: human_principal("staff-1"),
             session_id: session.id,
             bot_uuid: "human_staff-1".into(),
-            mode: ParticipantMode::Auto,
+            mode: Some(ParticipantMode::Auto),
+            message_view_scope: None,
         })
         .await
         .expect_err("Bot-only mode cannot auto-add a Human");
@@ -3122,7 +3511,8 @@ async fn update_mode_does_not_auto_add_a_missing_bot() {
             caller: human_principal("driver"),
             session_id: session.id,
             bot_uuid: "missing-bot".into(),
-            mode: ParticipantMode::Auto,
+            mode: Some(ParticipantMode::Auto),
+            message_view_scope: None,
         })
         .await
         .expect_err("missing Bot is not auto-added");
@@ -3236,7 +3626,8 @@ async fn owned_bot_does_not_grant_session_participant_update_permission() {
             caller: human_principal("staff-1"),
             session_id: session_id.clone(),
             bot_uuid: "bot-a".into(),
-            mode: ParticipantMode::Muted,
+            mode: Some(ParticipantMode::Muted),
+            message_view_scope: None,
         })
         .await
         .expect_err("Bot ownership grants detail read only, not management");
@@ -3252,7 +3643,8 @@ async fn owned_bot_does_not_grant_session_participant_update_permission() {
             caller: human_principal("staff-2"),
             session_id,
             bot_uuid: "bot-a".into(),
-            mode: ParticipantMode::Auto,
+            mode: Some(ParticipantMode::Auto),
+            message_view_scope: None,
         })
         .await
         .expect_err("non-owner human should be forbidden");
@@ -3346,6 +3738,7 @@ async fn session_only_participant_can_list_sessions() {
             caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "newcomer".into(),
+            message_view_scope: None,
         })
         .await
         .expect("add newcomer to session");
@@ -3411,6 +3804,7 @@ async fn session_only_participant_list_sessions_scoped() {
             caller: bot_principal("driver"),
             session_id: s1_id.clone(),
             bot_uuid: "newcomer".into(),
+            message_view_scope: None,
         })
         .await
         .expect("add newcomer to S1");
@@ -3507,6 +3901,7 @@ async fn create_session_inherits_parent_group_participants_without_request_roste
             kind: None,
             acting_bot_id: None,
             creator_role: None,
+            message_view_scope: None,
             input: None,
             meta: None,
             context_delivery: None,
@@ -3872,6 +4267,7 @@ async fn get_preserves_human_participant_from_legacy_invitation_join() {
                         actor_kind: ActorKind::Human,
                         mode: Some(ParticipantMode::Present),
                         tags: Vec::new(),
+                        message_view_scope: MessageViewScope::Full,
                     },
                 ],
                 group_version: Some(group.version),
@@ -4050,6 +4446,7 @@ async fn add_participant_duplication_rejects_409() {
             caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "newcomer".into(),
+            message_view_scope: None,
         })
         .await
         .expect("first add of newcomer");
@@ -4061,6 +4458,7 @@ async fn add_participant_duplication_rejects_409() {
             caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "newcomer".into(),
+            message_view_scope: None,
         })
         .await
         .expect_err("duplicate add should reject with participant_already_exists");
@@ -4141,9 +4539,7 @@ async fn add_participant_admits_protected_bot_reachable_from_driver_friend() {
     // Protected Bot not owned by / friends with the caller, but friends with the
     // group driver → admitted via the driver anchor.
     let fixture = eligibility_fixture("g1", "driver-bot", "human_manager").await;
-    fixture
-        .add_bot_with("px", "protected", "other-owner")
-        .await;
+    fixture.add_bot_with("px", "protected", "other-owner").await;
     fixture.befriend("driver-bot", "px").await;
 
     let outcome = create_session(
@@ -4164,6 +4560,7 @@ async fn add_participant_admits_protected_bot_reachable_from_driver_friend() {
             caller: human_principal("manager"),
             session_id: session_id.clone(),
             bot_uuid: "px".into(),
+            message_view_scope: None,
         })
         .await
         .expect("driver-friend Bot should be admitted");
@@ -4174,9 +4571,7 @@ async fn add_participant_admits_protected_bot_reachable_from_driver_friend() {
 async fn add_participant_rejects_protected_bot_unreachable_from_all_anchors() {
     // Protected Bot reachable from none of caller/driver/originator → 403.
     let fixture = eligibility_fixture("g1", "driver-bot", "human_manager").await;
-    fixture
-        .add_bot_with("px", "protected", "other-owner")
-        .await;
+    fixture.add_bot_with("px", "protected", "other-owner").await;
 
     let outcome = create_session(
         &fixture,
@@ -4196,6 +4591,7 @@ async fn add_participant_rejects_protected_bot_unreachable_from_all_anchors() {
             caller: human_principal("manager"),
             session_id: session_id.clone(),
             bot_uuid: "px".into(),
+            message_view_scope: None,
         })
         .await
         .expect_err("unreachable Bot should be rejected");
@@ -4234,6 +4630,7 @@ async fn add_participant_admits_protected_bot_owned_by_caller() {
             caller: human_principal("manager"),
             session_id: session_id.clone(),
             bot_uuid: "px".into(),
+            message_view_scope: None,
         })
         .await
         .expect("caller-owned protected Bot should be admitted");
@@ -4246,9 +4643,7 @@ async fn add_participant_admits_protected_bot_reachable_from_originator_friend()
     // the target → admitted via the originator anchor, proving the anchor set is
     // not collapsed to caller+driver only.
     let fixture = eligibility_fixture("g1", "driver-bot", "originator-bot").await;
-    fixture
-        .add_bot_with("px", "protected", "other-owner")
-        .await;
+    fixture.add_bot_with("px", "protected", "other-owner").await;
     fixture.befriend("originator-bot", "px").await;
 
     let outcome = create_session(
@@ -4269,6 +4664,7 @@ async fn add_participant_admits_protected_bot_reachable_from_originator_friend()
             caller: human_principal("manager"),
             session_id: session_id.clone(),
             bot_uuid: "px".into(),
+            message_view_scope: None,
         })
         .await
         .expect("originator-friend Bot should be admitted");
@@ -4280,9 +4676,7 @@ async fn add_participant_rejects_hidden_bot_regardless_of_anchors() {
     // A Hidden Bot is rejected outright before any anchor is consulted, even when
     // the driver is its friend.
     let fixture = eligibility_fixture("g1", "driver-bot", "human_manager").await;
-    fixture
-        .add_bot_with("px", "protected", "other-owner")
-        .await;
+    fixture.add_bot_with("px", "protected", "other-owner").await;
     fixture.befriend("driver-bot", "px").await;
     fixture
         .bots
@@ -4308,6 +4702,7 @@ async fn add_participant_rejects_hidden_bot_regardless_of_anchors() {
             caller: human_principal("manager"),
             session_id: session_id.clone(),
             bot_uuid: "px".into(),
+            message_view_scope: None,
         })
         .await
         .expect_err("hidden Bot should be rejected");

@@ -495,6 +495,7 @@ Participant:
     - actor_kind
     - role
     - mode
+    - message_view_scope
   properties:
     actor_id:
       type: string
@@ -521,11 +522,8 @@ Participant:
         - muted
         - present
         - absent
-    tags:
-      type: array
-      items:
-        type: string
-      description: Provider routing tags scoped to this Group or Session membership.
+    message_view_scope:
+      $ref: "#/MessageViewScope"
 
 DeliveryPolicy:
   type: object
@@ -1060,6 +1058,15 @@ ParticipantMode:
     - present
     - absent
 
+MessageViewScope:
+  type: string
+  enum:
+    - full
+    - participant
+  description: >-
+    Persisted Human message projection. It applies to Human tabs in
+    ManagerWorker and StateMachine domains; Bot views always use full.
+
 BotParticipantMode:
   type: string
   enum:
@@ -1091,6 +1098,7 @@ SessionParticipant:
     - actor_kind
     - role
     - mode
+    - message_view_scope
   properties:
     actor_id:
       type: string
@@ -1108,6 +1116,8 @@ SessionParticipant:
         - observer
     mode:
       $ref: "#/ParticipantMode"
+    message_view_scope:
+      $ref: "#/MessageViewScope"
     joined_at:
       type: integer
       minimum: 0

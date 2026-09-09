@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_domain::{
-    CollaborationDefinition, StateMachineDeliveryCorrelation, StateMachineNodeRun,
+    CollaborationDefinition, HumanMessageView, MessageAudience, MessageViewScope,
+    MessageVisibilityDomain, StateMachineDeliveryCorrelation, StateMachineNodeRun,
     StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
 };
 use bcs_protocol::{BcsFrame, RequestFrame, ResponseFrame};
@@ -200,6 +201,8 @@ struct RecordingWorkbenchSessions {
     authorizations: Mutex<Vec<WorkbenchChatAuthorizationCommand>>,
     abort_authorizations: Mutex<Vec<WorkbenchChatAbortAuthorizationCommand>>,
     connect_error: Mutex<Option<WorkbenchUseCaseError>>,
+    connect_scope: Mutex<Option<MessageViewScope>>,
+    connect_participants: Mutex<Option<Vec<WorkbenchParticipantView>>>,
 }
 
 #[derive(Default)]
@@ -240,6 +243,7 @@ impl GroupSessionConnectionService for RecordingGroupSessionConnections {
                 role: ParticipantRole::Observer,
                 tags: Vec::new(),
                 mode: ParticipantMode::Present,
+                message_view_scope: MessageViewScope::Full,
                 joined_at: None,
             }],
         })
@@ -256,14 +260,26 @@ impl WorkbenchSessionService for RecordingWorkbenchSessions {
         if let Some(error) = self.connect_error.lock().await.take() {
             return Err(error);
         }
-        Ok(WorkbenchConnectOutcome {
-            group_id: command.group_id,
-            participants: vec![WorkbenchParticipantView {
+        let participants = if let Some(participants) =
+            self.connect_participants.lock().await.clone()
+        {
+            participants
+        } else {
+            vec![WorkbenchParticipantView {
                 bot_uuid: "human_100001".to_string(),
                 role: "observer".to_string(),
                 kind: ParticipantKind::Bot,
                 mode: Some(ParticipantMode::Present),
-            }],
+                message_view_scope: self
+                    .connect_scope
+                    .lock()
+                    .await
+                    .unwrap_or(MessageViewScope::Full),
+            }]
+        };
+        Ok(WorkbenchConnectOutcome {
+            group_id: command.group_id,
+            participants,
         })
     }
 
@@ -609,8 +625,16 @@ async fn frontend_socket_malformed_binary_and_abrupt_close_logs_keep_request_id(
 }
 
 #[tokio::test]
-async fn web_connect_frame_subscribes_frontend_registry() {
+async fn web_connect_without_view_actor_preserves_legacy_full_subscription() {
     let state = new_state();
+    *state.workbench_sessions.connect_participants.lock().await =
+        Some(vec![WorkbenchParticipantView {
+            bot_uuid: "owned-bot".to_string(),
+            role: "driver".to_string(),
+            kind: ParticipantKind::Bot,
+            mode: Some(ParticipantMode::Present),
+            message_view_scope: MessageViewScope::Full,
+        }]);
 
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
@@ -647,11 +671,29 @@ async fn web_connect_frame_subscribes_frontend_registry() {
         1
     );
     assert_eq!(connection_state.subscribed_sessions.len(), 1);
+    assert!(connection_state.subscribed_sessions[0].2.is_none());
+    assert_eq!(
+        state
+            .dispatch_state
+            .frontend_connections
+            .broadcast_visible_excluding(
+                "group-web-1",
+                "legacy-full-only",
+                MessageVisibilityDomain::ManagerWorker,
+                Some(&MessageAudience::FullOnly),
+                None,
+            )
+            .await,
+        1,
+        "omitting view_actor_id must keep the legacy unprojected connection"
+    );
+    assert_eq!(rx.recv().await.as_deref(), Some("legacy-full-only"));
     let connects = state.workbench_sessions.connects.lock().await;
     assert_eq!(connects.len(), 1);
     assert_eq!(connects[0].group_id, "group-web-1");
     assert_eq!(connects[0].session_id, None);
     assert_eq!(connects[0].bound_actor_id.as_deref(), Some("human_100001"));
+    assert_eq!(connects[0].view_actor_id, None);
     assert!(
         state
             .group_session_connections
@@ -660,6 +702,64 @@ async fn web_connect_frame_subscribes_frontend_registry() {
             .await
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn web_connect_with_explicit_human_view_binds_participant_projection() {
+    let state = new_state();
+    *state.workbench_sessions.connect_scope.lock().await = Some(MessageViewScope::Participant);
+
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut connection_state = WebClientConnectionState::default();
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-participant",
+        "connect",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "view_actor_id": "human_100001"
+        })),
+    ));
+
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut connection_state,
+        &WorkbenchConnectionAuth::UserBound {
+            actor_id: Some("human_100001".to_string()),
+        },
+    )
+    .await
+    .unwrap();
+
+    let connected = recv_response(&mut rx).await;
+    assert!(connected.ok);
+    let payload = connected.payload.expect("connect payload");
+    assert_eq!(payload["view_actor_id"], "human_100001");
+    assert_eq!(payload["message_view_scope"], "participant");
+    assert_eq!(
+        connection_state.subscribed_sessions[0].2,
+        Some(HumanMessageView {
+            actor_id: "human_100001".to_string(),
+            scope: MessageViewScope::Participant,
+            allow_legacy_unclassified_chat: true,
+        })
+    );
+    assert_eq!(
+        state
+            .dispatch_state
+            .frontend_connections
+            .broadcast_visible_excluding(
+                "group-web-1",
+                "hidden",
+                MessageVisibilityDomain::ManagerWorker,
+                Some(&MessageAudience::FullOnly),
+                None,
+            )
+            .await,
+        0
+    );
+    assert!(rx.try_recv().is_err());
 }
 
 #[tokio::test]
@@ -729,6 +829,7 @@ async fn web_connect_with_session_id_subscribes_session_registry_key() {
 #[tokio::test]
 async fn web_chat_send_frame_is_forwarded_to_message_flow_and_tracks_run() {
     let state = new_state();
+    *state.workbench_sessions.connect_scope.lock().await = Some(MessageViewScope::Participant);
 
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
@@ -777,6 +878,20 @@ async fn web_chat_send_frame_is_forwarded_to_message_flow_and_tracks_run() {
             .await,
         vec!["run-web-1".to_string()]
     );
+    assert!(
+        !state
+            .dispatch_state
+            .run_channels
+            .send_visible_event(
+                "run-web-1",
+                "hidden".to_string(),
+                MessageVisibilityDomain::StateMachine,
+                Some(&MessageAudience::FullOnly),
+            )
+            .await,
+        "send-before-connect must bind the authoritative participant scope"
+    );
+    assert!(rx.try_recv().is_err());
 
     let calls = state.message_flow.web_sends.lock().await;
     assert_eq!(calls.len(), 1);
@@ -796,6 +911,75 @@ async fn web_chat_send_frame_is_forwarded_to_message_flow_and_tracks_run() {
         authorizations[0].bound_actor_id.as_deref(),
         Some("human_100001")
     );
+    let connects = state.workbench_sessions.connects.lock().await;
+    assert_eq!(connects.len(), 1);
+    assert_eq!(
+        connects[0].session_id.as_deref(),
+        Some("group-web-1:abcdef12")
+    );
+}
+
+#[tokio::test]
+async fn session_chat_send_does_not_inherit_group_full_scope() {
+    let state = new_state();
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut connection_state = WebClientConnectionState::default();
+    let auth = WorkbenchConnectionAuth::UserBound {
+        actor_id: Some("human_100001".to_string()),
+    };
+
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-group",
+        "connect",
+        Some(serde_json::json!({"group_id": "group-web-1"})),
+    ));
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut connection_state,
+        &auth,
+    )
+    .await
+    .unwrap();
+    assert!(recv_response(&mut rx).await.ok);
+
+    *state.workbench_sessions.connect_scope.lock().await = Some(MessageViewScope::Participant);
+    let send = BcsFrame::Request(RequestFrame::new(
+        "send-session",
+        "chat.send",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "bot_uuid": "human_100001",
+            "session_id": "group-web-1:abcdef12",
+            "message": "hello"
+        })),
+    ));
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&send).unwrap(),
+        &tx,
+        &mut connection_state,
+        &auth,
+    )
+    .await
+    .unwrap();
+    assert!(recv_response(&mut rx).await.ok);
+
+    assert!(
+        !state
+            .dispatch_state
+            .run_channels
+            .send_visible_event(
+                "run-web-1",
+                "hidden".to_string(),
+                MessageVisibilityDomain::StateMachine,
+                Some(&MessageAudience::FullOnly),
+            )
+            .await,
+        "Session run must use the Session participant scope, not the Group subscription"
+    );
+    assert!(rx.try_recv().is_err());
 }
 
 #[tokio::test]
@@ -995,6 +1179,66 @@ async fn web_chat_send_uses_session_subscription_key_for_sender_conn_id() {
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].session_id.as_deref(), Some("group-web-1:abcdef12"));
     assert_eq!(calls[0].sender_conn_id, Some(sender_conn_id));
+}
+
+#[tokio::test]
+async fn web_chat_send_uses_view_bound_to_the_target_session() {
+    let state = new_state();
+    *state.workbench_sessions.connect_scope.lock().await = Some(MessageViewScope::Participant);
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut connection_state = WebClientConnectionState {
+        subscribed_sessions: vec![
+            (
+                "group-web-1:participant-session".to_string(),
+                1,
+                Some(HumanMessageView {
+                    actor_id: "human_100001".to_string(),
+                    scope: MessageViewScope::Participant,
+                    allow_legacy_unclassified_chat: false,
+                }),
+            ),
+            ("group-web-1:full-session".to_string(), 2, None),
+        ],
+        ..Default::default()
+    };
+    let send = BcsFrame::Request(RequestFrame::new(
+        "send-participant-session",
+        "chat.send",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "bot_uuid": "human_100001",
+            "session_id": "group-web-1:participant-session",
+            "sessionKey": "group-web-1:participant-session",
+            "message": "hello"
+        })),
+    ));
+
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&send).unwrap(),
+        &tx,
+        &mut connection_state,
+        &WorkbenchConnectionAuth::UserBound {
+            actor_id: Some("human_100001".to_string()),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert!(recv_response(&mut rx).await.ok);
+    assert!(
+        !state
+            .dispatch_state
+            .run_channels
+            .send_visible_event(
+                "run-web-1",
+                "full-only".to_string(),
+                MessageVisibilityDomain::ManagerWorker,
+                Some(&MessageAudience::FullOnly),
+            )
+            .await,
+        "run fallback must use the participant view bound to the target Session"
+    );
 }
 
 #[tokio::test]
@@ -1801,7 +2045,8 @@ async fn session_bound_connect_projects_v1_participants_into_workbench_shape() {
             "bot_uuid": "human_100001",
             "role": "observer",
             "type": "bot",
-            "mode": "present"
+            "mode": "present",
+            "message_view_scope": "full"
         }])
     );
 }

@@ -118,6 +118,7 @@ impl Fixture {
             session_title: Some(format!("{group_id}-session")),
             id: None,
             meta: None,
+            message_visibility_version: 1,
         };
         let outcome = self
             .sessions
@@ -374,6 +375,7 @@ async fn session_token_rejected_on_group_join() {
             token: token.invite_token,
             staff_no: "staff-9".to_string(),
             nick_name: None,
+            message_view_scope: None,
         })
         .await
         .expect_err("session token must not join via the group path");
@@ -402,6 +404,7 @@ async fn group_token_rejected_on_session_join() {
             token: token.invite_token,
             staff_no: "staff-9".to_string(),
             nick_name: None,
+            message_view_scope: None,
         })
         .await
         .expect_err("group token must not join via the session path");
@@ -436,6 +439,7 @@ async fn typed_token_joins_matching_target() {
             token: group_token.invite_token,
             staff_no: "staff-9".to_string(),
             nick_name: None,
+            message_view_scope: None,
         })
         .await
         .expect("group token joins via the group path");
@@ -453,6 +457,7 @@ async fn typed_token_joins_matching_target() {
             token: session_token.invite_token,
             staff_no: "staff-8".to_string(),
             nick_name: None,
+            message_view_scope: None,
         })
         .await
         .expect("session token joins via the session path");
@@ -495,6 +500,7 @@ async fn pre_field_legacy_token_still_joins_both_paths() {
             token: group_token,
             staff_no: "staff-9".to_string(),
             nick_name: None,
+            message_view_scope: None,
         })
         .await
         .expect("pre-field token still joins the group path");
@@ -515,6 +521,7 @@ async fn pre_field_legacy_token_still_joins_both_paths() {
             token: session_token,
             staff_no: "staff-8".to_string(),
             nick_name: None,
+            message_view_scope: None,
         })
         .await
         .expect("pre-field token still joins the session path");

@@ -175,12 +175,14 @@ fn participant_commands_carry_caller_and_no_raw_credentials() {
         caller: caller.clone(),
         group_id: "g1".into(),
         actor_id: "bot-2".into(),
+        message_view_scope: None,
     };
     let update = UpdateGroupParticipant {
         caller: caller.clone(),
         group_id: "g1".into(),
         actor_id: "bot-2".into(),
-        mode: ParticipantMode::Muted,
+        mode: Some(ParticipantMode::Muted),
+        message_view_scope: None,
     };
     let remove = DeleteGroupParticipant {
         caller,
