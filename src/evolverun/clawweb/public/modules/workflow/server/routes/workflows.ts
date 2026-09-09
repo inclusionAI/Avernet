@@ -609,6 +609,12 @@ export function createWorkflowsRouter(
             spec.updatedAt = updatedAtMs;
           }
 
+          // Attach the synced deploy version so API-mode ClawMind can populate
+          // flow_runs.workflow_version when falling back to workflow_specs.
+          if (row.version != null) {
+            spec.version = row.version;
+          }
+
           res.json(spec);
           return;
         }
