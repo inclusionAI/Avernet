@@ -15,6 +15,9 @@ from agentclaw.community.core.service_bot.services.baas_service import BaasServi
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
 from agentclaw.community.core.workspace.engines.aicoding import AICodingSandboxProvider
 from agentclaw.community.core.workspace.engines.claude_code import ClaudeCodeSandboxProvider
+from agentclaw.community.core.workspace.engines.deepseek_harness import (
+    DeepSeekHarnessSandboxProvider,
+)
 from agentclaw.community.core.workspace.engines.openclaw import OpenClawSandboxProvider
 from agentclaw.community.core.workspace.engines.hermes import HermesSandboxProvider
 from agentclaw.community.di import config as cfg
@@ -32,6 +35,7 @@ def _make_registry() -> EngineSandboxRegistry:
     registry.register(ClaudeCodeSandboxProvider(workspace=workspace))
     registry.register(AICodingSandboxProvider(workspace=workspace))
     registry.register(HermesSandboxProvider(workspace=workspace))
+    registry.register(DeepSeekHarnessSandboxProvider(workspace=workspace))
     return registry
 
 
@@ -282,6 +286,18 @@ class TestSetupSessionsDirEngineAware:
         )
 
         assert storage.path == "/home/admin/.claude/projects"
+
+    def test_deepseek_harness_sessions_path_uses_dsh_home(self):
+        composer = _make_composer()
+
+        storage = composer._setup_sessions_dir(
+            entity_id="u1",
+            entity_type="staff",
+            bot_id="b1",
+            engine_type="deepseek_harness",
+        )
+
+        assert storage.path == "/home/admin/.dsh/sessions"
 
     def test_empty_engine_type_falls_back_to_openclaw(self):
         bot_repo = MagicMock()

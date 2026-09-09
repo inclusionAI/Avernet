@@ -110,6 +110,13 @@ _CASES = [
         "agent:main:sess-oc",
     ),
     ("teclaw", "sess-tc", "/api/teclaw/ws", None, "sess-tc"),
+    (
+        "deepseek_harness",
+        "sess-dsh",
+        "/api/deepseek_harness/ws",
+        _AGENT_KEY,
+        "sess-dsh",
+    ),
 ]
 
 

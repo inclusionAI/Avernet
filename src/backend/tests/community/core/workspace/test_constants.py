@@ -14,6 +14,7 @@ def test_supported_engine_types():
     assert "moltis" in SUPPORTED_ENGINE_TYPES
     assert "aicoding" in SUPPORTED_ENGINE_TYPES
     assert "hermes" in SUPPORTED_ENGINE_TYPES
+    assert "deepseek_harness" in SUPPORTED_ENGINE_TYPES
     assert "teclaw" in SUPPORTED_ENGINE_TYPES
 
 

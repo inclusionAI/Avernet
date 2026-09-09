@@ -20,6 +20,7 @@ from agentclaw.community.core.bot_inventory.types import DeployMode
 @pytest.mark.unit
 def test_personal_cloud_supported_engine_matrix_includes_teclaw() -> None:
     assert "teclaw" in PERSONAL_CLOUD_CAPABLE_ENGINES
+    assert "deepseek_harness" in PERSONAL_CLOUD_CAPABLE_ENGINES
     for engine in PERSONAL_CLOUD_CAPABLE_ENGINES:
         assert assert_personal_cloud_create(engine, "personal").ok
         assert assert_personal_cloud_create(engine, "team").ok
@@ -67,10 +68,22 @@ def test_local_rejects_teclaw_cloud_only_engine() -> None:
 
 
 @pytest.mark.unit
+def test_local_rejects_deepseek_harness_cloud_only_engine() -> None:
+    rejected = assert_local_create("deepseek_harness", "personal")
+    assert not rejected.ok
+    assert rejected.reason == ("local bot does not support engine: deepseek_harness")
+    assert assert_personal_cloud_create("deepseek_harness", "personal").ok
+
+
+@pytest.mark.unit
 def test_service_upgrade_engine_matrix() -> None:
     assert SERVICE_CAPABLE_ENGINES == frozenset({"openclaw", "claude_code", "teclaw"})
     for engine in SERVICE_CAPABLE_ENGINES:
         assert assert_service_upgrade(engine).ok
+
+    rejected = assert_service_upgrade("deepseek_harness")
+    assert not rejected.ok
+    assert rejected.reason == "engine cannot be serviced: deepseek_harness"
 
     rejected = assert_service_upgrade("hermes")
     assert not rejected.ok
