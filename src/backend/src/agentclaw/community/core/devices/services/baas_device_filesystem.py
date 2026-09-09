@@ -18,7 +18,10 @@ import httpx
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.devices.services.device_filesystem import DeviceFileSystem
-from agentclaw.community.core.devices.services.baas_invoke_transport import BaasTransport
+from agentclaw.community.core.devices.services.baas_invoke_transport import (
+    BaasTransport,
+    is_not_directory_error,
+)
 
 logger = get_logger()
 
@@ -243,9 +246,16 @@ class BaasDeviceFileSystem(DeviceFileSystem):
         try:
             files = await self.list_dir(path)
         except httpx.HTTPStatusError as e:
-            if e.response.status_code != 404:
-                raise
-            return False
+            if e.response.status_code == 404:
+                return False
+            if is_not_directory_error(e):
+                # A concurrent writer can create the file after the first read
+                # returned 404 but before this directory probe lands. Re-read once;
+                # only verified content turns the probe into True. Otherwise the
+                # original transport error remains observable.
+                if await self.read_file(path) is not None:
+                    return True
+            raise
         return files is not None
 
 

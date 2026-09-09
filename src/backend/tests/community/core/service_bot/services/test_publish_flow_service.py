@@ -3407,6 +3407,9 @@ async def test_eval_publish_success():
     assert build_service.release_async.await_args.kwargs["bot"] == bot_service.get_bot.return_value
     assert build_service.release_async.await_args.kwargs["ext_info"] == {"biz_id": "biz-001"}
     assert bot_service.get_bot.return_value["ext"] == {}
+    # 未传 default_tag 时 AGENTCLAW_DEFAULT_TAG 不应注入 extra_envs
+    extra_envs = build_service.release_async.await_args.kwargs["extra_envs"]
+    assert "AGENTCLAW_DEFAULT_TAG" not in extra_envs
     # #197 all-auto: eval CREATE is auto-approved server-side — no client approve.
     baas_service.approve_publish.assert_not_called()
     # #197: a TTL teardown safety-net task is enqueued for the eval bot.
@@ -3488,6 +3491,9 @@ async def test_eval_publish_with_default_tag():
     ext_info = build_service.release_async.await_args.kwargs["ext_info"]
     assert ext_info["biz_id"] == "eval_chat:bot-1:eval"
     assert ext_info["default_tag"] == "eval"
+    # default_tag 应注入 extra_envs[DYNAMIC_ENV_TAG_KEY]，使容器内进程可感知评测环境
+    extra_envs = build_service.release_async.await_args.kwargs["extra_envs"]
+    assert extra_envs.get("AGENTCLAW_DEFAULT_TAG") == "eval"
 
 
 def test_eval_teardown_with_default_tag():

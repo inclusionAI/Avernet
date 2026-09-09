@@ -37,6 +37,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Envelope,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import (
+    OwnerNameDep,
     UserIdDep,
     refuse_app_only_caller,
 )
@@ -143,6 +144,7 @@ async def create_bot_with_manifest(
     body: BotCreateWithManifest,
     request: Request,
     owner_id: UserIdDep,
+    owner_name: OwnerNameDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
@@ -197,6 +199,7 @@ async def create_bot_with_manifest(
 
     submitted = submit_bot_creation_with_manifest(
         user_id=owner_id,
+        nick_name=owner_name,
         bot_id=bot_id,
         document=body.config_manifest,
         modifier=owner_id,

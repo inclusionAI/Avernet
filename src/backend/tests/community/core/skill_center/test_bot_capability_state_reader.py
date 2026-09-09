@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from types import SimpleNamespace
+from agentclaw.community.core.skill_center.installation_read_config import InstallationReadConfig
 
 from agentclaw.community.api.bot_capability_state_reader import (
     BotCapabilityStateReaderProtocol,
@@ -70,7 +70,7 @@ class _Repository:
 
     def list_installed_mcps(self, **kwargs) -> set[str]:
         # A read that beats the flush would answer from unflushed rows.
-        assert self.flush_calls, "read reached Installation before the flush"
+        assert self.flush_calls or self.default_sync_calls, "read reached Installation before the flush"
         self.mcp_reads.append(kwargs)
         return {"mcp.weather"}
 
@@ -113,7 +113,7 @@ class _Versions:
 
 
 def _reader(
-    *, bots: _Bots | None = None
+    *, bots: _Bots | None = None, default_sync_only: bool = False
 ) -> tuple[BotCapabilityStateReader, _Repository, _PoolSkills, _Bots, _Versions]:
     repository = _Repository()
     pool_skills = _PoolSkills().bind(repository)
@@ -125,6 +125,7 @@ def _reader(
             bot_repo=bots,
             pool_skills=pool_skills,
             version_resolver=versions,
+            read_config=InstallationReadConfig(default_sync_only=default_sync_only),
         ),
         repository,
         pool_skills,
@@ -145,6 +146,19 @@ _EXPECTED_FLUSH = {
 def test_the_implementation_satisfies_the_public_protocol():
     reader, _repository, _pool, _bots, _versions = _reader()
     assert isinstance(reader, BotCapabilityStateReaderProtocol)
+
+
+@pytest.mark.parametrize("default_sync_only", [False, True])
+def test_projection_snapshot_synchronizes_once_and_is_not_cached(default_sync_only):
+    reader, repository, pool, bots, versions = _reader(default_sync_only=default_sync_only)
+    first = reader.active_capabilities(bot_id="bot-1", owner_id="owner")
+    assert first.skills[0].skill_id == 1
+    assert first.installed_mcp_server_codes == frozenset({"mcp.weather"})
+    assert len(repository.flush_calls) + len(repository.default_sync_calls) == 1
+    assert len(pool.reads) == len(versions.calls) == len(repository.mcp_reads) == 1
+    second = reader.active_capabilities(bot_id="bot-1", owner_id="owner")
+    assert second == first and second is not first
+    assert len(repository.flush_calls) + len(repository.default_sync_calls) == 2
 
 
 def test_skill_read_flushes_then_answers_from_the_installation_join():
@@ -215,14 +229,8 @@ def test_member_skill_ids_reads_the_set_membership_without_materializing():
     assert ids == frozenset({1})
 
 
-def test_reader_uses_default_only_sync_after_the_explicit_migration_switch(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    reader, repository, pool_skills, _bots, _versions = _reader()
-    monkeypatch.setattr(
-        "agentclaw.community.core.skill_center.services.bot_capability_state_reader.get_skill_center_flags",
-        lambda: SimpleNamespace(installation_default_sync_only=True),
-    )
+def test_reader_uses_default_only_sync_after_the_explicit_migration_switch():
+    reader, repository, pool_skills, _bots, _versions = _reader(default_sync_only=True)
 
     reader.active_skill_assets(bot_id="bot-1", owner_id="owner")
 
@@ -231,17 +239,18 @@ def test_reader_uses_default_only_sync_after_the_explicit_migration_switch(
     assert pool_skills.reads
 
 
-def test_new_bot_initialization_always_uses_the_complete_resolver(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    reader, repository, _pool, _bots, _versions = _reader()
-    monkeypatch.setattr(
-        "agentclaw.community.core.skill_center.services.bot_capability_state_reader.get_skill_center_flags",
-        lambda: SimpleNamespace(installation_default_sync_only=True),
-    )
+def test_new_bot_initialization_always_uses_the_complete_resolver():
+    reader, repository, _pool, _bots, _versions = _reader(default_sync_only=True)
 
     reader.initialize_installations(bot_id="bot-1", owner_id="owner")
 
     assert repository.initialization_calls == [_EXPECTED_FLUSH]
     assert repository.flush_calls == []
     assert repository.default_sync_calls == []
+
+
+def test_default_only_mode_also_synchronizes_before_mcp_read():
+    reader, repository, _pool, _bots, _versions = _reader(default_sync_only=True)
+    assert reader.active_mcp_server_codes(bot_id="bot-1", owner_id="owner") == frozenset({"mcp.weather"})
+    assert repository.default_sync_calls == [_EXPECTED_FLUSH]
+    assert repository.flush_calls == []

@@ -54,6 +54,19 @@ _HTTP_INFO_TTL_SECONDS = 30.0
 _STALE_TOKEN_STATUS = 401
 
 
+def is_not_directory_error(exc: Exception) -> bool:
+    """Classify Engine's ``list(file_path)`` transport verdict.
+
+    The Engine file API maps ``NotADirectoryError`` to HTTP 400. Keeping that
+    translation here lets filesystem behavior avoid inspecting status codes while
+    preserving the original exception for callers that need to propagate it.
+    """
+    return (
+        isinstance(exc, httpx.HTTPStatusError)
+        and exc.response.status_code == 400
+    )
+
+
 def build_desktop_client() -> httpx.Client:
     """Build the pooled client :class:`DesktopBaasInvokeTransport` sends through.
 
