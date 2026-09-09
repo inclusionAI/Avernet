@@ -1608,26 +1608,29 @@ fn build_openapi_v1_state(
             relation_env: relation_env.clone(),
         },
     )
-    .with_participant_view_bindings(participant_view_bindings)
+    .with_participant_view_bindings(participant_view_bindings.clone())
     .with_collaboration_runtime(collaboration_runtime.clone());
     if config.eventing.enabled {
         group_service =
             group_service.with_event_subscription_provisioner(group_event_subscription_provisioner);
     }
     let group_service = Arc::new(group_service);
-    let session_service = Arc::new(SessionServiceImpl::new(
-        session_launch,
-        sessions.clone(),
-        groups.clone(),
-        registry.clone(),
-        friends.clone(),
-        relation,
-        session_repo,
-        group_message_history,
-        collaboration_runtime.clone(),
-        system_message.clone(),
-        SessionServiceConfig { relation_env },
-    ));
+    let session_service = Arc::new(
+        SessionServiceImpl::new(
+            session_launch,
+            sessions.clone(),
+            groups.clone(),
+            registry.clone(),
+            friends.clone(),
+            relation,
+            session_repo,
+            group_message_history,
+            collaboration_runtime.clone(),
+            system_message.clone(),
+            SessionServiceConfig { relation_env },
+        )
+        .with_participant_view_bindings(participant_view_bindings),
+    );
     let session_file_url_projector = SessionFileUrlProjector::new(
         config
             .openapi_v1
@@ -1975,8 +1978,8 @@ impl Default for BcsServerState {
         let bot_use_cases = Arc::new(bot_use_cases);
         let frontend_connections = Arc::new(
             WorkbenchConnectionRegistry::with_bot_query(bot_use_cases.clone())
-                .with_scope_changes_enabled(
-                    !config
+                .with_cluster_scope_changes_best_effort(
+                    config
                         .leader_election
                         .as_ref()
                         .is_some_and(|leader_election| leader_election.enabled),
@@ -3582,8 +3585,8 @@ impl BcsServer {
         let frontend_bot_query: Arc<dyn bcs_service_api::BotQueryService> = bot_use_cases.clone();
         let frontend_connections = Arc::new(
             WorkbenchConnectionRegistry::with_bot_query(frontend_bot_query)
-                .with_scope_changes_enabled(
-                    !config
+                .with_cluster_scope_changes_best_effort(
+                    config
                         .leader_election
                         .as_ref()
                         .is_some_and(|leader_election| leader_election.enabled),
@@ -4367,8 +4370,8 @@ impl BcsServer {
         let bot_runtime_for_session: Arc<dyn bcs_service_api::BotRuntimeConnectionService> =
             Arc::new(bot_runtime_for_session);
         let frontend_connections = Arc::new(
-            WorkbenchConnectionRegistry::new().with_scope_changes_enabled(
-                !config
+            WorkbenchConnectionRegistry::new().with_cluster_scope_changes_best_effort(
+                config
                     .leader_election
                     .as_ref()
                     .is_some_and(|leader_election| leader_election.enabled),

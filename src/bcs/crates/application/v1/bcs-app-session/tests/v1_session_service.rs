@@ -30,6 +30,7 @@ use bcs_service_api::application::v1::{
     SessionService, SessionStatus as V1SessionStatus, UncollectSession, UpdateSession,
     UpdateSessionParticipant,
 };
+use bcs_service_api::port::{ParticipantViewBindingPort, ParticipantViewScopeChangeLease};
 use bcs_service_api::port::repo::{NewSessionParams, SessionRepoPort};
 use bcs_service_api::types::{HumanMessageView, MessageViewScope};
 use bcs_service_api::{
@@ -67,6 +68,42 @@ struct RecordedSystemMessage {
     group_id: String,
     session_id: String,
     event: SystemMessageEvent,
+}
+
+#[derive(Default)]
+struct RecordingParticipantViewBindings {
+    begun: Mutex<Vec<(String, String)>>,
+    finished: Mutex<Vec<ParticipantViewScopeChangeLease>>,
+}
+
+#[async_trait]
+impl ParticipantViewBindingPort for RecordingParticipantViewBindings {
+    async fn begin_scope_change(
+        &self,
+        scope_id: &str,
+        human_actor_id: &str,
+    ) -> ServiceResult<ParticipantViewScopeChangeLease> {
+        self.begun
+            .lock()
+            .expect("scope binding begin lock")
+            .push((scope_id.to_string(), human_actor_id.to_string()));
+        Ok(ParticipantViewScopeChangeLease {
+            scope_id: scope_id.to_string(),
+            human_actor_id: human_actor_id.to_string(),
+            lease_id: 1,
+        })
+    }
+
+    async fn finish_scope_change(
+        &self,
+        lease: ParticipantViewScopeChangeLease,
+    ) -> ServiceResult<()> {
+        self.finished
+            .lock()
+            .expect("scope binding finish lock")
+            .push(lease);
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -368,6 +405,16 @@ impl Fixture {
             system_messages,
             session_repo,
         }
+    }
+
+    fn with_participant_view_bindings(
+        mut self,
+        participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
+    ) -> Self {
+        self.service = self
+            .service
+            .with_participant_view_bindings(participant_view_bindings);
+        self
     }
 
     async fn add_bot(&self, bot_uuid: &str) {
@@ -2888,7 +2935,10 @@ async fn human_participant_can_update_own_mode_without_session_management() {
 
 #[tokio::test]
 async fn readable_session_auto_adds_missing_human_with_selected_scope() {
-    let fixture = Fixture::new().await;
+    let participant_view_bindings = Arc::new(RecordingParticipantViewBindings::default());
+    let fixture = Fixture::new()
+        .await
+        .with_participant_view_bindings(participant_view_bindings.clone());
     for bot in ["driver", "owned-bot"] {
         fixture.add_bot(bot).await;
     }
@@ -2951,6 +3001,14 @@ async fn readable_session_auto_adds_missing_human_with_selected_scope() {
     assert_eq!(
         matching[0].message_view_scope,
         MessageViewScope::Participant
+    );
+    assert!(
+        participant_view_bindings
+            .begun
+            .lock()
+            .expect("scope binding begin lock")
+            .is_empty(),
+        "initial membership creation must not acquire a scope-change lease"
     );
 }
 
@@ -3224,7 +3282,10 @@ async fn session_manager_cannot_update_another_human_mode() {
 
 #[tokio::test]
 async fn session_manager_can_update_another_human_scope_without_changing_mode() {
-    let fixture = Fixture::new().await;
+    let participant_view_bindings = Arc::new(RecordingParticipantViewBindings::default());
+    let fixture = Fixture::new()
+        .await
+        .with_participant_view_bindings(participant_view_bindings.clone());
     fixture.add_bot("driver").await;
     fixture
         .bots
@@ -3281,6 +3342,20 @@ async fn session_manager_can_update_another_human_scope_without_changing_mode() 
         .expect("target remains in session");
     assert_eq!(target.mode, Some(ParticipantMode::Absent));
     assert_eq!(target.message_view_scope, MessageViewScope::Participant);
+    assert_eq!(
+        *participant_view_bindings
+            .begun
+            .lock()
+            .expect("scope binding begin lock"),
+        vec![(session_id.clone(), "human_target".to_string())]
+    );
+    let finished = participant_view_bindings
+        .finished
+        .lock()
+        .expect("scope binding finish lock");
+    assert_eq!(finished.len(), 1);
+    assert_eq!(finished[0].scope_id, session_id);
+    assert_eq!(finished[0].human_actor_id, "human_target");
 }
 
 #[tokio::test]

@@ -35,6 +35,7 @@ use bcs_service_api::application::v1::{
     },
 };
 use bcs_service_api::port::repo::SessionRepoPort;
+use bcs_service_api::port::{NoopParticipantViewBindingPort, ParticipantViewBindingPort};
 use bcs_service_api::types::{HumanMessageView, MessageViewScope};
 use bcs_service_api::{
     ActorKind, ActorStatus, BotRegistryCoreService, CallerContext, CollaborationRuntimeError,
@@ -71,6 +72,7 @@ pub struct SessionServiceImpl {
     history: Arc<dyn GroupMessageHistoryService>,
     collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
     system_message: Arc<dyn SystemMessageService>,
+    participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
     config: SessionServiceConfig,
 }
 
@@ -100,8 +102,17 @@ impl SessionServiceImpl {
             history,
             collaboration_runtime,
             system_message,
+            participant_view_bindings: Arc::new(NoopParticipantViewBindingPort),
             config,
         }
+    }
+
+    pub fn with_participant_view_bindings(
+        mut self,
+        participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
+    ) -> Self {
+        self.participant_view_bindings = participant_view_bindings;
+        self
     }
 
     // ── authorization helpers ──────────────────────────────────────────
@@ -1211,10 +1222,19 @@ impl SessionService for SessionServiceImpl {
             }
         }
         if let Some(message_view_scope) = command.message_view_scope {
-            // TODO: Existing WebSocket connections retain their bound scope
-            // until reconnect. Add connection invalidation only if participant
-            // projection becomes a strict security boundary.
-            updated = self
+            let lease = if actor_kind == ActorKind::Human
+                && existing.message_view_scope != message_view_scope
+            {
+                Some(
+                    self.participant_view_bindings
+                        .begin_scope_change(&command.session_id, &command.bot_uuid)
+                        .await
+                        .map_err(map_service_error)?,
+                )
+            } else {
+                None
+            };
+            let update_result = self
                 .sessions
                 .update_participant_mode_and_message_view_scope(
                     &command.session_id,
@@ -1223,7 +1243,17 @@ impl SessionService for SessionServiceImpl {
                     message_view_scope,
                 )
                 .await
-                .map_err(map_session_error)?;
+                .map_err(map_session_error);
+            let release_result = if let Some(lease) = lease {
+                self.participant_view_bindings
+                    .finish_scope_change(lease)
+                    .await
+                    .map_err(map_service_error)
+            } else {
+                Ok(())
+            };
+            updated = update_result?;
+            release_result?;
             if let Some(mode) = command.mode
                 && old_mode != Some(mode)
             {
