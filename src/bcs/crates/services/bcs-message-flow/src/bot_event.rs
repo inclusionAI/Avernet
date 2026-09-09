@@ -1,6 +1,7 @@
 use bcs_domain::{
     CoordinationMode, CoordinationSurface, MessageAudience, MessageVisibilityDomain, SenderType,
 };
+use bcs_service_api::port::{CoordinationContext, CoordinationClaim, CoordinationResult, CoordinationStatus};
 use bcs_protocol::{
     BcsFrame, CoordinationCall, DirectiveAction, EventFrame, GroupContext, RequestFrame,
     RequestSource, ResponseDirective, ResponseMode as WireResponseMode, TOOL_ASSIGN_TASK,
@@ -114,7 +115,26 @@ pub async fn handle_bot_event(
             "start" => cache_tool_start(flow, &cmd, data).await,
             "result" => {
                 persist_tool_result(flow, &cmd, data).await?;
-                if let Some(coordination) = maybe_handle_coordination_echo(flow, &cmd, data).await?
+                let coordination = maybe_handle_coordination_echo(flow, &cmd, data).await;
+                if let Err(error) = &coordination {
+                    warn!(bot_id = %cmd.bot_id, run_id = %cmd.run_id, error = %error,
+                        "Coordination event could not be confirmed");
+                    if let Some(system_message) = &flow.system_message {
+                        if let Some(group) = flow.group.get(&cmd.group_id).await {
+                            let event = SystemMessageEvent::GenericNotification {
+                                group_id: cmd.group_id.clone(),
+                                message: "协同操作未确认完成，请检查任务状态后再处理；系统不会自动重复分发。".into(),
+                                receivers: group.participants.iter()
+                                    .filter(|p| p.bot_uuid == cmd.bot_id).cloned().collect(),
+                            };
+                            if let Err(notice_error) = system_message.notify(&cmd.group_id, event,
+                                cmd.bcs_session_id.as_deref().unwrap_or(&cmd.group_id), &group.participants).await {
+                                warn!(error = %notice_error, "Coordination failure notice could not be delivered");
+                            }
+                        }
+                    }
+                }
+                if let Some(coordination) = coordination?
                 {
                     bot_deliveries.extend(coordination.bot_deliveries);
                     frontend_deliveries.extend(coordination.frontend_deliveries);
@@ -1604,6 +1624,7 @@ async fn persist_tool_result(
 }
 
 struct CoordinationEchoDispatch {
+    task_id: Option<String>,
     bot_deliveries: Vec<BotDeliveryResult>,
     frontend_deliveries: Vec<FrontendDeliveryResult>,
 }
@@ -1652,6 +1673,54 @@ async fn maybe_handle_coordination_echo(
         );
         return Ok(None);
     };
+    if let Some(intent_id) = call.intent_id.as_deref() {
+        let port = flow.coordination_intents.as_ref()
+            .ok_or_else(|| ServiceError::InternalError("coordination_resolver_disabled".into()))?;
+        let context = match &flow.bot_run_context {
+            Some(runs) => runs.get_context(&cmd.run_id).await,
+            None => None,
+        }.ok_or_else(|| ServiceError::Forbidden("coordination_run_not_found".into()))?;
+        if context.terminal || context.deadline_ms <= now_ms() || context.bot_id != cmd.bot_id
+            || context.group_id != cmd.group_id || context.bcs_session_id != cmd.bcs_session_id {
+            return Err(ServiceError::Forbidden("coordination_run_mismatch_or_terminated".into()));
+        }
+        let identity = CoordinationContext {
+            bot_id: context.bot_id, group_id: context.group_id, session_id: context.bcs_session_id,
+            run_id: context.run_id, tool_call_id: tool_call_id.to_string(),
+        };
+        let lease = match port.resolve_and_claim(intent_id, &call.tool, &identity, context.deadline_ms).await? {
+            CoordinationClaim::Acquired(lease) => lease,
+            CoordinationClaim::Duplicate(Some(result)) if result.status == CoordinationStatus::Applied => return Ok(None),
+            CoordinationClaim::Duplicate(_) => return Err(ServiceError::Conflict("coordination_previous_outcome_unknown_or_failed".into())),
+        };
+        let active = match &flow.bot_run_context {
+            Some(runs) => runs.get_context(&cmd.run_id).await,
+            None => None,
+        };
+        if !active.is_some_and(|run| !run.terminal && run.deadline_ms > now_ms()
+            && run.bot_id == identity.bot_id && run.group_id == identity.group_id
+            && run.bcs_session_id == identity.session_id) {
+            port.finish(intent_id, &identity, &lease.claim_token, &CoordinationResult {
+                status: CoordinationStatus::Failed, task_id: None,
+                error_code: Some("run_terminated_before_execution".into()),
+            }).await?;
+            return Err(ServiceError::Forbidden("coordination_run_terminated".into()));
+        }
+        let mut resolved = call.clone();
+        resolved.arguments = lease.arguments;
+        let dispatched = dispatch_coordination_call(flow, cmd, &resolved).await;
+        let result = match &dispatched {
+            Ok(Some(outcome)) => CoordinationResult { status: CoordinationStatus::Applied,
+                task_id: outcome.task_id.clone(), error_code: None },
+            _ => CoordinationResult { status: CoordinationStatus::Unknown,
+                task_id: None, error_code: Some("coordination_execution_not_confirmed".into()) },
+        };
+        port.finish(intent_id, &identity, &lease.claim_token, &result).await?;
+        return match dispatched {
+            Ok(None) => Err(ServiceError::InternalError("coordination_execution_not_confirmed".into())),
+            other => other,
+        };
+    }
     let dedup_key = format!("{}:{}", cmd.run_id, tool_call_id);
     if !flow
         .message_tracker
@@ -1717,6 +1786,7 @@ async fn dispatch_coordination_call(
             .await
             {
                 Ok(outcome) => Ok(Some(CoordinationEchoDispatch {
+                    task_id: Some(outcome.task_id),
                     bot_deliveries: outcome.bot_deliveries,
                     frontend_deliveries: outcome.frontend_deliveries,
                 })),
@@ -1728,7 +1798,7 @@ async fn dispatch_coordination_call(
                         error = %error,
                         "Failed to dispatch bcs_assign_task coordination echo"
                     );
-                    Ok(None)
+                    if call.v == 2 { Err(error) } else { Ok(None) }
                 }
             }
         }
@@ -1763,6 +1833,7 @@ async fn dispatch_coordination_call(
             .await
             {
                 Ok(outcome) => Ok(Some(CoordinationEchoDispatch {
+                    task_id: None,
                     bot_deliveries: outcome.bot_deliveries,
                     frontend_deliveries: outcome.frontend_deliveries,
                 })),
@@ -1774,7 +1845,7 @@ async fn dispatch_coordination_call(
                         error = %error,
                         "Failed to dispatch bcs_send_task_message coordination echo"
                     );
-                    Ok(None)
+                    if call.v == 2 { Err(error) } else { Ok(None) }
                 }
             }
         }
@@ -1818,6 +1889,7 @@ async fn dispatch_coordination_call(
                         return Ok(None);
                     }
                     Ok(Some(CoordinationEchoDispatch {
+                        task_id: None,
                         bot_deliveries: Vec::new(),
                         frontend_deliveries: outcome.frontend_deliveries,
                     }))
@@ -1830,7 +1902,7 @@ async fn dispatch_coordination_call(
                         error = %error,
                         "Failed to dispatch bcs_task_complete coordination echo"
                     );
-                    Ok(None)
+                    if call.v == 2 { Err(error) } else { Ok(None) }
                 }
             }
         }

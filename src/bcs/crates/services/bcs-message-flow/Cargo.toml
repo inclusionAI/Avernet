@@ -29,6 +29,7 @@ bcs-protocol = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
+bcs-bot = { workspace = true }
 bcs-test-support = { workspace = true }
 bcs-cache-local = { workspace = true }
 tokio = { workspace = true }
