@@ -2887,7 +2887,7 @@ async fn human_participant_can_update_own_mode_without_session_management() {
 }
 
 #[tokio::test]
-async fn readable_session_auto_adds_missing_human_as_present_observer() {
+async fn readable_session_auto_adds_missing_human_with_selected_scope() {
     let fixture = Fixture::new().await;
     for bot in ["driver", "owned-bot"] {
         fixture.add_bot(bot).await;
@@ -2926,14 +2926,15 @@ async fn readable_session_auto_adds_missing_human_as_present_observer() {
             session_id: session.id,
             bot_uuid: "human_staff-1".into(),
             mode: Some(ParticipantMode::Present),
-            message_view_scope: None,
+            message_view_scope: Some(MessageViewScope::Participant),
         })
         .await
-        .expect("missing Human self-inserts into readable Session");
+        .expect("missing Human self-inserts with selected scope");
 
     assert_eq!(inserted.actor_kind, ActorKind::Human);
     assert_eq!(inserted.role, ParticipantRole::Observer);
     assert_eq!(inserted.mode, ParticipantMode::Present);
+    assert_eq!(inserted.message_view_scope, MessageViewScope::Participant);
     let stored = fixture
         .session_repo
         .get(&session_id)
@@ -2947,6 +2948,10 @@ async fn readable_session_auto_adds_missing_human_as_present_observer() {
     assert_eq!(matching.len(), 1);
     assert_eq!(matching[0].role, ParticipantRole::Observer);
     assert_eq!(matching[0].mode, Some(ParticipantMode::Present));
+    assert_eq!(
+        matching[0].message_view_scope,
+        MessageViewScope::Participant
+    );
 }
 
 #[tokio::test]

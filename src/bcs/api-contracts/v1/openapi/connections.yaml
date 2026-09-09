@@ -111,11 +111,13 @@ GroupSessionWebSocketPath:
       Human; `full` receives all artifacts. Chat-domain artifacts retain legacy
       visibility. Bot-tab connections are not affected by Human scope.
 
-      When a Human's Session scope changes, the server sends an `event=close`
-      frame with `payload.reason=view_scope_changed` and then closes the socket.
-      The client must establish a new connection so the server can bind the new
-      persisted scope. The scope projects only the Workbench message stream;
-      StateMachine resource APIs keep their existing authorization semantics.
+      A connection keeps the Session scope resolved during `connect`. After a
+      Human's Session scope changes, the client must close the old connection
+      and establish a new one so the server can bind the newly persisted scope.
+      Existing connections are not guaranteed to observe scope changes. The
+      scope projects only the Workbench message stream and is not a security
+      boundary; StateMachine resource APIs keep their existing authorization
+      semantics.
     x-avernet-protocol: websocket
     x-avernet-security: {}
     parameters:

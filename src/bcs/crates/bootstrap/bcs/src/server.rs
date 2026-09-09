@@ -1608,29 +1608,26 @@ fn build_openapi_v1_state(
             relation_env: relation_env.clone(),
         },
     )
-    .with_participant_view_bindings(participant_view_bindings.clone())
+    .with_participant_view_bindings(participant_view_bindings)
     .with_collaboration_runtime(collaboration_runtime.clone());
     if config.eventing.enabled {
         group_service =
             group_service.with_event_subscription_provisioner(group_event_subscription_provisioner);
     }
     let group_service = Arc::new(group_service);
-    let session_service = Arc::new(
-        SessionServiceImpl::new(
-            session_launch,
-            sessions.clone(),
-            groups.clone(),
-            registry.clone(),
-            friends.clone(),
-            relation,
-            session_repo,
-            group_message_history,
-            collaboration_runtime.clone(),
-            system_message.clone(),
-            SessionServiceConfig { relation_env },
-        )
-        .with_participant_view_bindings(participant_view_bindings),
-    );
+    let session_service = Arc::new(SessionServiceImpl::new(
+        session_launch,
+        sessions.clone(),
+        groups.clone(),
+        registry.clone(),
+        friends.clone(),
+        relation,
+        session_repo,
+        group_message_history,
+        collaboration_runtime.clone(),
+        system_message.clone(),
+        SessionServiceConfig { relation_env },
+    ));
     let session_file_url_projector = SessionFileUrlProjector::new(
         config
             .openapi_v1

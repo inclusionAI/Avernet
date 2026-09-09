@@ -1,9 +1,8 @@
 //! Runtime binding barrier for Human participant message-scope mutations.
 //!
-//! Group and Session Application services acquire a lease before changing a
-//! persisted scope. The adapter must reject new bindings for the same
-//! Group-or-Session/Human and invalidate existing bindings before returning
-//! the lease.
+//! Group mutation services acquire a lease before changing a persisted scope.
+//! The adapter must reject new bindings for the same Group/Human and invalidate
+//! existing bindings before returning the lease.
 
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicU64, Ordering};
