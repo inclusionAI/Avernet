@@ -9,6 +9,7 @@ import { createRequestId } from '../utils/request-id'
 import BenchDomains from './BenchDomains'
 import BenchTemplateDetail from './BenchTemplateDetail'
 import BenchRunDetail from './BenchRunDetail'
+import EvolveRoutes from '../EvolveRoutes'
 import SessionAnalysis from './SessionAnalysis'
 import Repair from './Repair'
 import { evolveTaskRegistry, isEvolveTaskType } from '../features/evolve/task-registry'
@@ -2594,6 +2595,10 @@ function PackDetail() {
 }
 
 export default function Evolve() {
+  return <EvolveRoutes><EvolvePage /></EvolveRoutes>
+}
+
+function EvolvePage() {
   const location = useLocation()
   const { authState } = useClientUser()
   // COSEC: The embedded package owns a separate auth cache from its ClawWeb host;
