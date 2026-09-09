@@ -74,7 +74,7 @@ export class WorkflowSpecRepository {
 
   async findByWorkflowId(workflowId: string): Promise<WorkflowSpecRow | null> {
     const rows = await this.db.query<WorkflowSpecRow>(
-      "SELECT id, workflow_id, pack_id, spec_json, gmt_create, gmt_modified, title FROM workflow_specs WHERE workflow_id = ?",
+      "SELECT id, workflow_id, pack_id, version, spec_json, gmt_create, gmt_modified, title FROM workflow_specs WHERE workflow_id = ?",
       [workflowId],
     );
     return rows[0] ?? null;
