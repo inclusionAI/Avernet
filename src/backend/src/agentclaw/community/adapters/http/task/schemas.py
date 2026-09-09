@@ -285,7 +285,7 @@ class TaskNodeDTO(BaseModel):
 
 
 class TaskInfoRecordDTO(BaseModel):
-    """GET .../collaboration/tasks/list 返回的持久化任务记录。"""
+    """GET /openapi/v1/collaboration/tasks/list 返回的持久化任务记录。"""
 
     id: int = Field(..., description="持久化记录自增主键")
     task_id: str = Field(..., description="任务ID")

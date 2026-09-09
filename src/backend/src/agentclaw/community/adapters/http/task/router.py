@@ -1,20 +1,17 @@
 """Task 内部 HTTP adapter routes —— 不经 gateway spanner(内部 API)。
 
 任务模块内部前缀 ``/api/v1/collaboration/tasks``。本 router 承载:
-- 公开面镜像(execute/dashboard/list 副本):供内部调用方(bot / 服务间)免 gateway spanner 直调;
+- 公开面镜像(execute 副本):供内部调用方(bot / 服务间)免 gateway spanner 直调;
   与 ``adapters/http/openapi_v1/task/`` 公开面同一 ``TaskServiceProtocol`` 委托,逻辑保持一致(改其一须同步)。
 - 回投 / BBS 接力 / 任务发现阶段:前端不直面的内部写口/阶段接口。
 前端公开面(经 gateway spanner)见 ``adapters/http/openapi_v1/task/``。本 router 只转协议,不持领域策略(Rule 22)。
 
 端点(同一任务模块,不同阶段):
   POST /api/v1/collaboration/tasks/execute          — 提交任务(公开面镜像;delegate TaskServiceProtocol.execute)
-  GET  /api/v1/collaboration/tasks/dashboard         — 查任务图(公开面镜像;delegate get_task_dashboard)
-  GET  /api/v1/collaboration/tasks/list              — 列持久化任务记录(公开面镜像;delegate list_tasks)
   POST /api/v1/collaboration/tasks/callback/report  — 执行实体回投(delegate TaskLoopCallbackProtocol.report_result)
   POST /api/v1/collaboration/tasks/bbs/claim        — BBS 接力步②:CAS 占根(恰一赢,输者 409)
   POST /api/v1/collaboration/tasks/bbs/attach        — BBS 接力步④:挂 run_mode=bbs scoped 子节点 + start
   POST /api/v1/collaboration/tasks/bbs/result        — BBS 接力步⑤:回投终态 + 释放 claim
-  GET  /api/v1/collaboration/tasks/bbs/list          — 列 BBS 接力任务(分页;可选 status / search_word 过滤)
   POST /api/v1/collaboration/tasks/discovery/discover — 任务发现阶段:读取任务 → per-bot engine 建 session → 投递通知
   GET  /api/v1/collaboration/tasks/discovery/status   — 任务发现状态(读 SQLite db)
 
@@ -36,30 +33,24 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
-from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope, Page
+from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
-    page as page_envelope,
 )
 from agentclaw.community.adapters.http.task.auth import CallbackAuthenticator
 from agentclaw.community.adapters.http.task.schemas import (
     BbsAttachDTO,
     BbsClaimDTO,
     BbsResultDTO,
-    BbsTaskItemDTO,
     TaskCallbackDataDTO,
     TaskCallbackRequest,
-    TaskExecutionGraphDTO,
-    TaskInfoRecordDTO,
     TaskInfoRequestDTO,
     TaskNodeUpdateDTO,
     TaskNodeCallbackRequest,
     TaskOpResultDTO,
     acceptance_result_from_dto,
-    bbs_task_overview_to_dto,
     callback_from_dto,
-    graph_to_dto,
     op_result_to_dto,
     TaskSettingRequestDTO,
     TaskSettingStateDTO,
@@ -67,7 +58,6 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskGrantResultDTO,
     TaskRevokeRequestDTO,
     TaskRevokeResultDTO,
-    task_info_record_to_dto,
     task_info_request_from_dto,
     task_spec_from_dto,
 )
@@ -122,32 +112,11 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-def _validate_status_filter(status: str | None) -> None:
-    """校验 status query(逗号分隔的运行时态枚举),任一 token 非法 → 400。"""
-    if status is None:
-        return
-    valid = {s.value for s in Status}
-    for tok in (t.strip().upper() for t in status.split(",") if t.strip()):
-        if tok not in valid:
-            raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
-
-
-def _validate_single_status(status: str | None) -> str | None:
-    """校验单值 status:空白(None/空串) → None(不过滤);非空则 strip+upper 后必须 ∈ Status 枚举值,
-    否则 400(含逗号多值,如 ``RUNNING,DONE`` 不在枚举内 → 400,强制单值契约)。返回归一化大写字符串,
-    供 ``task_node.status == v`` 直接比对;与多值版 ``_validate_status_filter`` 区分(后者用于 /list)。"""
-    if status is None or not status.strip():
-        return None
-    v = status.strip().upper()
-    if v not in {s.value for s in Status}:
-        raise HTTPException(status_code=400, detail=f"invalid status: {status}")
-    return v
-
 
 router = APIRouter(prefix="/api/v1/collaboration/tasks", tags=["task"])
 
 
-# ===== 公开面镜像(execute/dashboard/list;内部 /api/v1 副本,不经 spanner)=====
+# ===== 公开面镜像(execute;内部 /api/v1 副本,不经 spanner)=====
 # 与 ``adapters/http/openapi_v1/task/router.py`` 公开面同一 ``TaskServiceProtocol`` 委托,
 # 逻辑保持一致 —— 内部调用方(bot / 服务间)走此副本免 gateway spanner。改其一须同步。
 
@@ -165,76 +134,6 @@ async def execute_task_internal(
     task_request = task_info_request_from_dto(body)
     result = await service.execute(task_request)
     return envelope(op_result_to_dto(result), request)
-
-
-@router.get("/dashboard", response_model=Envelope[TaskExecutionGraphDTO])
-@envelope_errors
-async def get_task_dashboard_internal(
-    task_id: str,
-    request: Request,
-    node_id: str | None = None,
-    include_action_log: bool = False,
-    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-) -> Envelope[TaskExecutionGraphDTO]:
-    """任务执行详情可视化(内部副本,只读;整图或按 node_id 子树投影)。
-
-    任务/节点不存在 → TaskNotFoundError/NodeNotFoundError → ``@envelope_errors`` 映射 404。"""
-    if include_action_log:
-        graph = service.get_task_dashboard(task_id, node_id, include_action_log=True)
-    else:
-        graph = service.get_task_dashboard(task_id, node_id)
-    return envelope(graph_to_dto(graph, include_action_log=include_action_log), request)
-
-
-@router.get(
-    "/list",
-    response_model=Envelope[list[TaskInfoRecordDTO] | Page[TaskInfoRecordDTO]],
-)
-@envelope_errors
-async def list_tasks_internal(
-    request: Request,
-    status: str | None = Query(
-        None,
-        description="可选 status 过滤:支持单个或逗号分隔多值(如 DONE,FAILED);非法值 → 400",
-    ),
-    user_id: str | None = Query(
-        None,
-        description="可选:按 owner_user_id 过滤;为空返回全量。与公开面 "
-        "``/openapi/v1/.../list`` 的 owner 作用域语义对齐(内部镜像用查询参数身份,非签名 principal)",
-    ),
-    page: int | None = Query(
-        None, ge=1, description="分页页码(1-based);不传则不分页,返回全量。"
-    ),
-    page_size: int | None = Query(
-        None, ge=1, le=100, description="每页条数(1-100);不传则不分页,返回全量。"
-    ),
-    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-) -> Envelope[list[TaskInfoRecordDTO] | Page[TaskInfoRecordDTO]]:
-    """列持久化 ``task_info`` 记录(内部副本,按更新时间降序;可选单状态/多状态/owner 过滤)。
-
-    非法 ``status`` 过滤值 → 400(经 ``HTTPException`` → 中央 handler → ``ErrorEnvelope``)。
-    ``user_id`` 为空时不按 owner 过滤(返回全量,供内部可信调用方);传入则按 ``owner_user_id``
-    过滤,与公开面 ``/openapi/v1/.../list`` 的 owner 作用域一致。
-
-    分页为可选入参(与公开面同步):page/page_size 均不传时 data 为列表(历史契约);
-    两者同时传入时返回 Page(total, items);仅传其一 → 400。"""
-    _validate_status_filter(status)
-    if (page is None) != (page_size is None):
-        raise HTTPException(
-            status_code=400,
-            detail="page and page_size must be both provided or both omitted",
-        )
-    if page_size is None:
-        items = service.list_tasks(status, owner_user_id=user_id)
-        return envelope([task_info_record_to_dto(item) for item in items], request)
-    items, total = service.list_tasks_page(
-        status, owner_user_id=user_id, page=page or 1, page_size=page_size
-    )
-    return page_envelope(
-        total,
-        [task_info_record_to_dto(item) for item in items],
-        request,
-    )
 
 
 # ===== 任务认领 Bot 授权(grant/revoke,无状态中继) =====
@@ -456,50 +355,6 @@ async def bbs_result(
         exec_error=body.exec_error,
     )
     return envelope({"ok": True}, request)
-
-
-@router.get("/bbs/list", response_model=Envelope[Page[BbsTaskItemDTO]])
-@envelope_errors
-async def list_bbs_tasks(
-    request: Request,
-    page: int = Query(default=1, ge=1, description="页码,1-based,默认 1"),
-    page_size: int = Query(
-        default=20, ge=1, le=100, description="每页数量,默认 20,最大 100"
-    ),
-    search_word: str | None = Query(
-        default=None,
-        description="可选模糊匹配:对 task_spec/extend_props 两列文本大小写不敏感 LIKE;空则不过滤",
-    ),
-    status: str | None = Query(
-        default=None,
-        description="可选单值状态过滤(PENDING/PLANNING/RUNNING/DONE/FAILED/HUNG/CANCELLED);逗号多值/非法 → 400",
-    ),
-    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
-) -> Envelope[Page[BbsTaskItemDTO]]:
-    """列 BBS 接力任务(run_mode='bbs')的一页:`task_node_run_info` r ⋈ `task_node` n (task_id+node_id),
-    再按 task_id 补 `task_info.owner_bot_id`(publisher)。无 retry 过滤(当前 retry 恒 0)。
-
-    分页(1-based,缺省用默认值):``page``(默认 1)/ ``page_size``(默认 20,最大 100)。返回
-    ``Page{total, items}``——``items`` 为 ``BbsTaskItemDTO``(SQL 直投字段 task_id/node_id/run_mode/
-    retry/assignee_id/status/acceptance_result/extend_props/relay_* time/task_spec + adapter 二次解析字段
-    title=task_spec.metadata.title / goal=task_spec.goal.objective / acceptances=task_spec.goal.acceptances
-    / assignee_name=extend_props.assignee_name / publisher);``total`` 为**过滤后**行数。
-
-    可选过滤(为空时退化为纯分页,行为不变):``status``(单值,对 ``task_node.status`` 等值;逗号多值/非法值
-    → 400)、``search_word``(大小写不敏感模糊匹配 ``task_spec`` 或 ``extend_props`` 文本;``%``/``_`` 视作
-    通配符)。结果按 run info 记录 id 降序(最新优先);页越界 → items=[] 但 total 真实;非法 page/page_size →
-    422(Query 校验)。translator 投影遵循 Rule 22(adapter 只转协议);
-    领域查询委托 TaskServiceProtocol.list_bbs_tasks(page, page_size, search_word=?, status=?)。
-    """
-    normalized_status = _validate_single_status(status)
-    normalized_word = (search_word or "").strip() or None
-    records, total = service.list_bbs_tasks(
-        page=page,
-        page_size=page_size,
-        search_word=normalized_word,
-        status=normalized_status,
-    )
-    return page_envelope(total, [bbs_task_overview_to_dto(r) for r in records], request)
 
 
 @router.post("/nodes/update", response_model=Envelope[dict[str, Any]])

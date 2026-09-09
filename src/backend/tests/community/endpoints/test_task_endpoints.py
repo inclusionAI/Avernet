@@ -1,6 +1,6 @@
 """Endpoint-framework coverage for the task API surface.
 
-Covers the 11 routes mounted under ``/api/v1/collaboration/tasks(...)`` (task router,
+Covers the 9 routes mounted under ``/api/v1/collaboration/tasks(...)`` (task router,
 task-callback router) with a happy + error case each,
 so the coverage gate sees every route as covered.
 
@@ -157,55 +157,6 @@ def execute_ok():
 )
 def execute_conflict_on_reexecute():
     """Same task_id already initialized → GraphAlreadyInitializedError → 409."""
-
-
-# ===== GET /api/v1/collaboration/tasks/dashboard =====
-
-@endpoint_test(
-    method="GET",
-    path="/api/v1/collaboration/tasks/dashboard",
-    scenario="ok",
-    input=CaseInput(query_params={"task_id": "t_dash_ok"}),
-    seed=lambda w: _seed_graph(w, "t_dash_ok"),
-    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
-)
-def dashboard_ok():
-    """Existing task → graph snapshot → 200."""
-
-
-@endpoint_test(
-    method="GET",
-    path="/api/v1/collaboration/tasks/dashboard",
-    scenario="task_not_found",
-    input=CaseInput(query_params={"task_id": "t_dash_ghost"}),
-    expect=ExpectError(status=404),
-)
-def dashboard_task_not_found():
-    """Unknown task_id → TaskNotFoundError → 404."""
-
-
-# ===== GET /api/v1/collaboration/tasks/list =====
-
-@endpoint_test(
-    method="GET",
-    path="/api/v1/collaboration/tasks/list",
-    scenario="ok",
-    seed=lambda w: _seed_graph(w, "t_list_ok"),
-    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
-)
-def list_ok():
-    """List summaries (seeded graph present) → 200."""
-
-
-@endpoint_test(
-    method="GET",
-    path="/api/v1/collaboration/tasks/list",
-    scenario="invalid_status_filter",
-    input=CaseInput(query_params={"status": "INVALID_STATUS"}),
-    expect=ExpectError(status=400),
-)
-def list_invalid_status_filter():
-    """Non-enum status → router rejects with 400 (not an uncaught ValueError 500)."""
 
 
 # ===== POST /api/v1/collaboration/tasks/callback/report =====
