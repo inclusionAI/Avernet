@@ -558,6 +558,7 @@ export function createWorkflowsRouter(
   router.post("/:workflowId/versions/:v/activate", asyncHandler(async (req: Request, res: Response) => {
     if (!wfdhRepo) { res.status(503).json({ error: "Service Unavailable" }); return; }
     const workflowId = String(req.params.workflowId);
+    if (!await requireWorkflowAccess(req, res, botPermRepo, workflowId, "edit")) return;
     const version = parseInt(String(req.params.v), 10);
     if (isNaN(version)) { res.status(400).json({ error: "Bad Request", message: "Invalid version" }); return; }
     const ok = await wfdhRepo.setActive(workflowId, version);

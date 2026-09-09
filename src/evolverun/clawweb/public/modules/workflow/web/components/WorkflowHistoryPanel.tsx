@@ -6,6 +6,7 @@ import WorkflowVersionDiff from './WorkflowVersionDiff'
 
 interface WorkflowHistoryPanelProps {
   workflowId: string
+  onActiveVersionChange?: () => void
   onClose?: () => void
 }
 
@@ -39,7 +40,7 @@ function specJsonToText(specJson: string): string {
   }
 }
 
-export default function WorkflowHistoryPanel({ workflowId, onClose }: WorkflowHistoryPanelProps) {
+export default function WorkflowHistoryPanel({ workflowId, onActiveVersionChange, onClose }: WorkflowHistoryPanelProps) {
   const [history, setHistory] = useState<DeployHistoryItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -55,33 +56,37 @@ export default function WorkflowHistoryPanel({ workflowId, onClose }: WorkflowHi
   const [diffToDeploy, setDiffToDeploy] = useState<number | null>(null)
   const [activating, setActivating] = useState<number | null>(null)
 
-  const loadHistory = useCallback(() => {
+  const loadHistory = useCallback(async () => {
     setLoading(true)
     setError(null)
-    api.workflows
-      .getHistory(workflowId, 50, true)
+    try {
+      const r = await api.workflows.getHistory(workflowId, 50, true)
       // `edit` rows are from the old browser-save flow. They have no Git tag and
       // cannot run as a version, so do not present them as release history.
-      .then((r) => setHistory((r.history ?? []).filter((item) => item.action !== 'edit')))
-      .catch((err) => setError(err instanceof Error ? err.message : '加载历史失败'))
-      .finally(() => setLoading(false))
+      setHistory((r.history ?? []).filter((item) => item.action !== 'edit'))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '加载历史失败')
+    } finally {
+      setLoading(false)
+    }
   }, [workflowId])
 
   useEffect(() => {
-    loadHistory()
+    void loadHistory()
   }, [loadHistory])
 
   const handleActivateVersion = useCallback(async (deployNumber: number, version: number) => {
     setActivating(version)
     try {
       await api.workflows.activateVersion(workflowId, version)
-      loadHistory()
+      await loadHistory()
+      onActiveVersionChange?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : '激活版本失败')
     } finally {
       setActivating(null)
     }
-  }, [workflowId, loadHistory])
+  }, [workflowId, loadHistory, onActiveVersionChange])
 
   // Reset selections on workflow change
   useEffect(() => {
@@ -164,24 +169,24 @@ export default function WorkflowHistoryPanel({ workflowId, onClose }: WorkflowHi
       ) : (
         <div className="flex flex-1 overflow-hidden">
           {/* History list */}
-          <div className="w-1/2 overflow-auto border-r border-gray-200">
-            <table className="w-full text-xs">
+          <div className="w-[46%] overflow-auto border-r border-gray-200">
+            <table className="min-w-[720px] table-fixed text-xs">
               <thead className="sticky top-0 bg-gray-50 text-gray-500">
                 <tr>
-                  <th className="w-8 px-2 py-1.5 text-left font-medium"></th>
-                  <th className="px-2 py-1.5 text-left font-medium">版本</th>
-                  <th className="px-2 py-1.5 text-left font-medium">部署</th>
-                  <th className="px-2 py-1.5 text-left font-medium">状态</th>
-                  <th className="px-2 py-1.5 text-left font-medium">操作</th>
-                  <th className="px-2 py-1.5 text-left font-medium">时间</th>
-                  <th className="px-2 py-1.5 text-left font-medium">触发者</th>
-                  <th className="w-20 px-2 py-1.5 text-left font-medium">默认版本</th>
+                  <th className="w-10 px-2 py-1.5 text-left font-medium"></th>
+                  <th className="w-14 whitespace-nowrap px-2 py-1.5 text-left font-medium">版本</th>
+                  <th className="w-16 whitespace-nowrap px-2 py-1.5 text-left font-medium">部署</th>
+                  <th className="w-[68px] whitespace-nowrap px-2 py-1.5 text-left font-medium">状态</th>
+                  <th className="w-40 whitespace-nowrap px-2 py-1.5 text-left font-medium">时间</th>
+                  <th className="w-44 whitespace-nowrap px-2 py-1.5 text-left font-medium">触发者</th>
+                  <th className="w-24 whitespace-nowrap px-2 py-1.5 text-left font-medium">默认版本</th>
                 </tr>
               </thead>
               <tbody>
                 {history.map((h) => {
                   const isViewing = viewDeploy === h.deployNumber
                   const isSelected = selected.includes(h.deployNumber)
+                  const actor = h.ownerId || h.botId ? [h.ownerId, h.botId].filter(Boolean).join('/') : '-'
                   return (
                     <tr
                       key={`${h.deployNumber}-${h.version}`}
@@ -198,27 +203,27 @@ export default function WorkflowHistoryPanel({ workflowId, onClose }: WorkflowHi
                           className="cursor-pointer"
                         />
                       </td>
-                      <td className="px-2 py-1.5 font-mono text-gray-800">v{h.version}</td>
-                      <td className="px-2 py-1.5 font-mono text-gray-500">#{h.deployNumber}</td>
-                      <td className="px-2 py-1.5">
+                      <td className="whitespace-nowrap px-2 py-1.5 font-mono text-gray-800">v{h.version}</td>
+                      <td className="whitespace-nowrap px-2 py-1.5 font-mono text-gray-500">#{h.deployNumber}</td>
+                      <td className="whitespace-nowrap px-2 py-1.5">
                         <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${actionClass(h.action)}`}>
                           {h.action}
                         </span>
                       </td>
-                      <td className="px-2 py-1.5 text-gray-500">{formatTime(h.gmtCreate)}</td>
+                      <td className="whitespace-nowrap px-2 py-1.5 text-gray-500">{formatTime(h.gmtCreate)}</td>
                       <td className="px-2 py-1.5 text-gray-500">
-                        {h.ownerId || h.botId ? [h.ownerId, h.botId].filter(Boolean).join('/') : '-'}
+                        <span className="block truncate" title={actor}>{actor}</span>
                       </td>
                       <td className="px-2 py-1.5" onClick={(e) => e.stopPropagation()}>
                         {h.isActive ? (
-                          <span className="inline-flex items-center gap-0.5 rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">
+                          <span className="inline-flex whitespace-nowrap items-center gap-0.5 rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">
                             默认
                           </span>
                         ) : h.action === 'deploy' ? (
                           <button
                             onClick={() => void handleActivateVersion(h.deployNumber, h.version)}
                             disabled={activating === h.version}
-                            className="rounded border border-blue-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50"
+                            className="whitespace-nowrap rounded border border-blue-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50"
                             title={`将 v${h.version} 设为默认版本`}
                           >
                             {activating === h.version ? '设置中…' : '设为默认'}
