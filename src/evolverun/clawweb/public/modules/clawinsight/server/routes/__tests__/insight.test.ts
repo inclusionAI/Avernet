@@ -318,7 +318,7 @@ describe("Insight Center local contract", () => {
     }, null, { insightTaskService: { create } as unknown as InsightTaskService });
   });
 
-  it("routes an administrator's one-time Improvement action into Bot Repair", async () => {
+  it.each(["deep", "observe", undefined] as const)("routes an administrator's one-time action into Bot Repair with diagnosticMode=%s", async (diagnosticMode) => {
     const createRepair = vi.fn(async (input: Record<string, unknown>) => ({
       taskId: "REPAIR-ADMIN-ONCE-1",
       taskName: "管理员代处理 · Bot 修复",
@@ -345,6 +345,15 @@ describe("Insight Center local contract", () => {
       });
       expect(created.response.status).toBe(201);
 
+      const invalidMode = await jsonRequestAt(isolatedBaseUrl,
+        `/api/insight/v1/admin/improvements/${created.body.improvementId}/execute-once`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-User-Id": "admin-1", "Idempotency-Key": "admin-repair-invalid-mode" },
+          body: JSON.stringify({ reason: "检查配置", diagnosticMode: "unrestricted" }),
+        });
+      expect(invalidMode.response.status).toBe(400);
+      expect(createRepair).not.toHaveBeenCalled();
+
       const executed = await jsonRequestAt(
         isolatedBaseUrl,
         `/api/insight/v1/admin/improvements/${created.body.improvementId}/execute-once`,
@@ -354,6 +363,7 @@ describe("Insight Center local contract", () => {
           body: JSON.stringify({
             reason: "用户长期未处理，改由管理员发起一次 Bot Repair",
             repairDirection: "只修改测试 Bot 的配置模板",
+            diagnosticMode,
           }),
         },
       );
@@ -371,6 +381,7 @@ describe("Insight Center local contract", () => {
           targetUserId: "dev_local",
           adminOverrideReason: "用户长期未处理，改由管理员发起一次 Bot Repair",
           repairDirection: "只修改测试 Bot 的配置模板",
+          diagnosticMode: diagnosticMode ?? "observe",
           insightImprovementId: created.body.improvementId,
         }),
       }));

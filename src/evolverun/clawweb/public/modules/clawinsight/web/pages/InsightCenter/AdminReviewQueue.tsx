@@ -365,13 +365,14 @@ export function AdminExecuteDialog({
 }) {
   const [reason, setReason] = useState("");
   const [repairDirection, setRepairDirection] = useState(item.suggestedAction || item.userGuidance || "");
+  const [deepDiagnostics, setDeepDiagnostics] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const isManual = item.actionType === "ASSIGN_OWNER";
   const title = isManual ? "指定方向并进入进化室" : "代用户发起一次自动修复";
 
   return <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-[95] flex items-center justify-center bg-gray-950/40 p-4">
-    <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
+    <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h3 className="text-base font-semibold text-gray-950">{title}</h3>
@@ -389,6 +390,22 @@ export function AdminExecuteDialog({
         </div>
         <label className="block"><span className="mb-1.5 block text-xs font-semibold text-gray-700">管理员代处理原因 <span className="text-red-500">*</span></span><textarea value={reason} maxLength={1000} onChange={(event) => setReason(event.target.value)} placeholder="例如：用户长期未处理，该问题已确认且持续影响任务完成率。" className="min-h-24 w-full resize-y rounded-lg border border-gray-200 px-3 py-2.5 text-sm leading-6 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10" /></label>
         <label className="block"><span className="mb-1.5 block text-xs font-semibold text-gray-700">{isManual ? "管理员指定的修复方向" : "本次修复方向"} {isManual && <span className="text-red-500">*</span>}</span><textarea value={repairDirection} maxLength={5000} onChange={(event) => setRepairDirection(event.target.value)} placeholder="说明希望检查或修改的配置、Skill、权限或运行环境，以及不能修改的范围。" className="min-h-28 w-full resize-y rounded-lg border border-gray-200 px-3 py-2.5 text-sm leading-6 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10" /><p className="mt-1 text-[11px] leading-5 text-gray-400">这段内容会写入本次进化任务的修复 Spec，供 Agent 执行。</p></label>
+        <label className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 ${deepDiagnostics ? "border-amber-400 bg-amber-50" : "border-gray-200 bg-gray-50"}`}>
+          <input aria-label="允许深度诊断 Shell" type="checkbox" checked={deepDiagnostics} onChange={(event) => setDeepDiagnostics(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-gray-300 text-amber-600" />
+          <span><span className="block text-sm font-medium text-gray-900">允许目标 Bot 深度诊断 Shell</span><span className="mt-1 block text-xs leading-5 text-gray-600">仅在本任务固定的 Bot 和环境中，以 admin 用户执行诊断命令（包括读取、联网和临时实验）；无法切换到 admin 时拒绝执行。取消后仅允许只读观察，修复方案仍需审批后才能应用。</span></span>
+        </label>
+        <details open className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+          <summary className="cursor-pointer text-sm font-medium text-gray-700">补充可选线索 · 已关联 {item.evidence.length} 条证据</summary>
+          <p className="mt-2 text-xs leading-5 text-gray-500">以下 Session ID、任务标题和判定会自动保存到本次修复上下文，无需手动复制。</p>
+          <div className="mt-3 space-y-3">
+            {item.evidence.map((evidence) => <div key={`${evidence.sessionId}:${evidence.taskIndex}:${evidence.ordinal}`} className="rounded-lg border border-gray-200 bg-white p-3 text-xs leading-5">
+              <p className="font-medium text-gray-800">标题：{evidence.taskDescription}</p>
+              <p className="mt-1 break-all font-mono text-[11px] text-gray-500">Session ID：{evidence.sessionId} · Task {evidence.taskIndex}</p>
+              <p className="mt-1 whitespace-pre-wrap text-gray-600">判定：{failureClassText[evidence.failureClass] || evidence.failureClass}；{evidence.reasoningSummary || "暂无 Judge 摘要"}</p>
+            </div>)}
+            {item.evidence.length === 0 && <p className="text-xs text-gray-500">暂无关联证据，将使用问题描述和修复方向。</p>}
+          </div>
+        </details>
       </div>
       {error && <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-xs leading-5 text-red-700">{error}</p>}
       <div className="mt-5 flex justify-end gap-2">
@@ -399,6 +416,7 @@ export function AdminExecuteDialog({
             const result = await insightApi.adminExecuteOnce(item.improvementId, {
               reason: reason.trim(),
               repairDirection: repairDirection.trim() || undefined,
+              diagnosticMode: deepDiagnostics ? "deep" : "observe",
             }, createRequestId(`insight-admin-once-${item.improvementId}`));
             onDone(result.taskId);
           } catch (cause) {
