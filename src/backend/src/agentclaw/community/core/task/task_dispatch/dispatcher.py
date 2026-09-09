@@ -19,6 +19,25 @@ from agentclaw.community.core.task.task_dispatch.strategies import (
 logger = logging.getLogger("task.dispatcher")
 
 
+def _is_exec_retry_replay(node: TaskNode) -> bool:
+    """exec_error/SLA-timeout 重试且节点已有有效执行者 → 原样重跑,跳过搜推。
+
+    命中条件:``harness_retries>0``(harness 三路巡检 SLA 超时/exec_error/FAILED 触发的重试计数)
+    且有效执行模态 ∈ {single_bot,coop_group} 且 ``assignee`` 非空(曾真实派发执行,非 MISS/stale PENDING)。
+    命中后 dispatcher 不重搜推、不覆写 run_mode/assignee,交编排核 ``_prepare_into._handle_node`` 的
+    "run_mode+assignee" 分支走 ``start_run`` 原样重投(single_bot 重发同一 bot;coop_group 向既有
+    group_id 重投,即首派 form_coop_group 之后的同条 start_run 路径)。避免重试被搜推/claim_join/
+    mode_coverage 翻转模态或换执行者;harness_retries 达 MAX_HARNESS→HUNG→升 BBS 的兜底不变。
+    首次派发(harness_retries=0)/MISS 无 assignee/PENDING-stale 无 assignee/bbs → 不命中,走正常搜推/退化。
+    """
+    if int(node.run_info.extend_props.get("harness_retries", 0) or 0) <= 0:
+        return False
+    mode = effective_run_mode(node)
+    if mode not in ("single_bot", "coop_group"):
+        return False
+    return bool(node.run_info.assignee)
+
+
 class TaskDispatcher:
     """派发编排壳:对每节点 first-match-wins 选策略(graph 级 config 匹配)→ apply 填 run_info 后返回。
 
@@ -58,6 +77,16 @@ class TaskDispatcher:
                 if effective_run_mode(node) == "bbs":
                     logger.info("[task][dispatch] node=%s run_mode=bbs 退化维持", node.node_id)
                     return node  # BBS 节点退化维持
+                if _is_exec_retry_replay(node):
+                    logger.info(
+                        "[task][dispatch] node=%s exec-retry 原样重跑(跳过搜推)mode=%s assignee=%s "
+                        "harness_retries=%s",
+                        node.node_id,
+                        node.run_info.run_mode,
+                        node.run_info.assignee,
+                        node.run_info.extend_props.get("harness_retries", 0),
+                    )
+                    return node  # exec_error/超时重试:保留原模式+原执行者,不重搜推
                 result = await self._select_and_apply(node, graph)
                 if result.outcome == SearchOutcome.HIT_SINGLE:
                     node.run_info.run_mode = "single_bot"
