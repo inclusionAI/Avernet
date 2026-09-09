@@ -8,6 +8,7 @@ import { migrations } from "@avernet/clawweb-shared/server/schema";
 import { sqliteDialect } from "@avernet/clawweb-shared/server/db/dialect";
 import { FlowRunRepository } from "../../../repositories/flow-run-repository.js";
 import { WorkflowDeployHistoryRepository } from "../../../repositories/workflow-deploy-history-repository.js";
+import { WORKFLOW_RELEASE_SERVICE_V1 } from "../../../contracts/workflow-release-service-v1.js";
 import { createInternalRunsRouter } from "../runs.js";
 import { createInternalDeployHistoryRouter } from "../deploy-history.js";
 
@@ -83,22 +84,34 @@ describe("ClawMind workflow version wire contract", () => {
     expect(await response.json()).toEqual({ found: false });
   });
   it("reserves and confirms a release through HTTP, including lost-response retries", async () => {
-    const post = (endpoint: string, body: unknown) => fetch(`${baseUrl}/deploy-history/releases/${endpoint}`, {
+    const post = (endpoint: "reserve" | "complete", body: unknown) => fetch(`${baseUrl}/deploy-history${endpoint === "reserve" ? WORKFLOW_RELEASE_SERVICE_V1.reservePath : WORKFLOW_RELEASE_SERVICE_V1.completePath}`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
-    const body = { workflowId: "demo", packId: "pack", snapshotCommit: "c".repeat(40), specJson: '{"id":"demo"}', minDeployNumber: 9 };
+    const body = { serviceApiVersion: "v1", workflowId: "demo", packId: "pack", snapshotCommit: "c".repeat(40), specJson: '{"id":"demo"}', minDeployNumber: 9 };
     const response = await post("reserve", body);
     expect(response.status).toBe(200);
     const release = await response.json();
     expect(release).toMatchObject({ version: 3, deployNumber: 9, completed: false });
     expect(await (await post("reserve", body)).json()).toEqual(release);
-    expect((await post("complete", { ...release, tagName: "wrong" })).status).toBe(409);
+    expect((await post("complete", { ...release, deployNumber: release.deployNumber + 1, tagName: "deploy/demo/#10" })).status).toBe(409);
     expect(await (await post("complete", release)).json()).toEqual({ ...release, completed: true });
     expect(await (await post("complete", release)).json()).toEqual({ ...release, completed: true });
-    for (const invalid of [{ ...body, minDeployNumber: 0 }, { ...body, snapshotCommit: "invalid" }, { ...body, specJson: '{"id":"other"}' }]) {
+    for (const invalid of [{ ...body, serviceApiVersion: "v2" }, { ...body, minDeployNumber: 0 }, { ...body, snapshotCommit: "invalid" }, { ...body, specJson: '{"id":"other"}' }]) {
       expect((await post("reserve", invalid)).status).toBe(400);
     }
     expect((await post("reserve", { ...body, specJson: '{"id":"demo","title":"changed"}' })).status).toBe(409);
+  });
+
+  it("serves reservation requests through the versioned v1 contract", async () => {
+    const response = await fetch(`${baseUrl}/deploy-history${WORKFLOW_RELEASE_SERVICE_V1.reservePath}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        serviceApiVersion: "v1", workflowId: "demo", packId: "pack", snapshotCommit: "d".repeat(40),
+        specJson: '{"id":"demo"}', minDeployNumber: 10,
+      }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ serviceApiVersion: "v1", deployNumber: 10, completed: false });
   });
 
   it("returns 409 for an existing legacy deployment without silently renumbering its version", async () => {

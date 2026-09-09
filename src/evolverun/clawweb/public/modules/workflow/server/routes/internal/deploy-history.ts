@@ -1,4 +1,10 @@
 import { ReleaseConflict } from "../../repositories/workflow-release-repository.js";
+import {
+  WORKFLOW_RELEASE_SERVICE_V1,
+  parseWorkflowReleaseReservationV1,
+  parseWorkflowReleaseReserveRequestV1,
+  type WorkflowReleaseReservationV1,
+} from "../../contracts/workflow-release-service-v1.js";
 /**
  * Internal API for deploy history management.
  *
@@ -23,28 +29,32 @@ export function createInternalDeployHistoryRouter(
   const router = Router();
 
   // These endpoints inherit internal API signature authentication from the host.
-  for (const operation of ["reserve", "complete"] as const) {
-    router.post(`/releases/${operation}`, asyncHandler(async (req: Request, res: Response) => {
-      if (!wfdhRepo) { res.status(503).json({ error: "Service Unavailable" }); return; }
-      const b = req.body;
-      if (!b || typeof b.workflowId !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$/.test(b.workflowId)
-          || typeof b.packId !== "string" || !b.packId || b.packId.length > 255
-          || typeof b.snapshotCommit !== "string" || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(b.snapshotCommit)
-          || (operation === "reserve" && (typeof b.specJson !== "string" || !Number.isSafeInteger(b.minDeployNumber) || b.minDeployNumber < 1 || b.minDeployNumber > 2147483647))
-          || (operation === "complete" && (!Number.isSafeInteger(b.version) || b.version < 1 || b.version > 2147483647 || !Number.isSafeInteger(b.deployNumber) || b.deployNumber < 1 || b.deployNumber > 2147483647 || typeof b.tagName !== "string"))) {
-        res.status(400).json({ error: "Invalid release request" }); return;
-      }
-      if (operation === "reserve") {
-        try { if (JSON.parse(b.specJson)?.id !== b.workflowId) throw new Error(); }
-        catch { res.status(400).json({ error: "Snapshot workflow mismatch" }); return; }
-      }
-      try { res.json(operation === "reserve" ? await wfdhRepo.reserveRelease(b) : await wfdhRepo.completeRelease(b)); }
-      catch (err) {
-        if (err instanceof ReleaseConflict) { res.status(409).json({ error: "Conflict", message: err.message }); return; }
-        throw err;
-      }
-    }));
-  }
+  const releaseResponse = (value: Omit<WorkflowReleaseReservationV1, "serviceApiVersion">): WorkflowReleaseReservationV1 => ({
+    serviceApiVersion: WORKFLOW_RELEASE_SERVICE_V1.version,
+    ...value,
+  });
+  router.post(WORKFLOW_RELEASE_SERVICE_V1.reservePath, asyncHandler(async (req: Request, res: Response) => {
+    if (!wfdhRepo) { res.status(503).json({ error: "Service Unavailable" }); return; }
+    const input = parseWorkflowReleaseReserveRequestV1(req.body);
+    if (!input) { res.status(400).json({ error: "Invalid release request" }); return; }
+    try { if (JSON.parse(input.specJson)?.id !== input.workflowId) throw new Error(); }
+    catch { res.status(400).json({ error: "Snapshot workflow mismatch" }); return; }
+    try { res.json(releaseResponse(await wfdhRepo.reserveRelease(input))); }
+    catch (err) {
+      if (err instanceof ReleaseConflict) { res.status(409).json({ error: "Conflict", message: err.message }); return; }
+      throw err;
+    }
+  }));
+  router.post(WORKFLOW_RELEASE_SERVICE_V1.completePath, asyncHandler(async (req: Request, res: Response) => {
+    if (!wfdhRepo) { res.status(503).json({ error: "Service Unavailable" }); return; }
+    const release = parseWorkflowReleaseReservationV1(req.body);
+    if (!release) { res.status(400).json({ error: "Invalid release request" }); return; }
+    try { res.json(releaseResponse(await wfdhRepo.completeRelease(release))); }
+    catch (err) {
+      if (err instanceof ReleaseConflict) { res.status(409).json({ error: "Conflict", message: err.message }); return; }
+      throw err;
+    }
+  }));
 
   /** Legacy insert: conflicts must not silently change a pre-published tag/version. */
   router.post("/", asyncHandler(async (req: Request, res: Response) => {

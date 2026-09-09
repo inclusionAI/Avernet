@@ -15,7 +15,12 @@ it("reserves unique numbers, hides pending releases, and retries without duplica
       tag_name TEXT, action TEXT, from_deploy_number INTEGER, spec_json TEXT, note TEXT, bot_id TEXT,
       owner_id TEXT, is_active INTEGER, gmt_create INTEGER, gmt_modified INTEGER,
       UNIQUE(pack_id, deploy_number, workflow_id));`);
-  for (const sql of migrations.find(m => m.description === "Reserve workflow releases by saved Git commit")?.sql ?? []) raw.exec(sql);
+  for (const description of [
+    "Reserve workflow releases by saved Git commit",
+    "Enforce workflow release numbers in SQLite",
+  ]) {
+    for (const sql of migrations.find(m => m.description === description)?.sql ?? []) raw.exec(sql);
+  }
   const db: IDatabase = {
     dbType: "sqlite", dialect: sqliteDialect,
     query: async <T>(sql: string, params: unknown[] = []) => raw.prepare(sql).all(...params) as T[],
@@ -49,5 +54,27 @@ it("reserves unique numbers, hides pending releases, and retries without duplica
     expect((await repo.findActiveByWorkflowId(input.workflowId))?.version).toBe(b.version);
     expect(raw.prepare("SELECT COUNT(*) AS n FROM workflow_deploy_history").get()).toEqual({ n: 3 });
     await expect(repo.reserveRelease({ ...input, specJson: '{"id":"changed"}' })).rejects.toThrow(/mismatch/);
+  } finally { raw.close(); }
+});
+
+it("rejects a second published number from another pack while retaining edit history", async () => {
+  const raw = new Database(":memory:");
+  raw.exec(`CREATE TABLE workflow_deploy_history (
+    id INTEGER PRIMARY KEY, pack_id TEXT, workflow_id TEXT, deploy_number INTEGER, version INTEGER,
+    tag_name TEXT, action TEXT, from_deploy_number INTEGER, spec_json TEXT, note TEXT, bot_id TEXT,
+    owner_id TEXT, is_active INTEGER, gmt_create INTEGER, gmt_modified INTEGER,
+    UNIQUE(pack_id, deploy_number, workflow_id));`);
+  for (const sql of migrations.find(m => m.description === "Enforce workflow release numbers in SQLite")?.sql ?? []) raw.exec(sql);
+  const db: IDatabase = {
+    dbType: "sqlite", dialect: sqliteDialect,
+    query: async <T>(sql: string, params: unknown[] = []) => raw.prepare(sql).all(...params) as T[],
+    exec: async (sql, params = []) => ({ affectedRows: raw.prepare(sql).run(...params).changes }),
+    transaction: async fn => fn(db), close: async () => raw.close(),
+  };
+  const repo = new WorkflowDeployHistoryRepository(db);
+  try {
+    await repo.insert({ packId: "pack-a", workflowId: "demo", deployNumber: 9, version: 1, tagName: "deploy/demo/#9", action: "deploy", specJson: '{"id":"demo"}' });
+    await expect(repo.insert({ packId: "pack-b", workflowId: "demo", deployNumber: 9, version: 2, tagName: "deploy/demo/#9", action: "deploy", specJson: '{"id":"demo"}' })).rejects.toThrow();
+    await repo.insert({ packId: "pack-b", workflowId: "demo", deployNumber: 9, version: 3, tagName: "", action: "edit", specJson: '{"id":"demo"}' });
   } finally { raw.close(); }
 });

@@ -2906,4 +2906,25 @@ END`,
       )`,
     ],
   },
+  {
+    version: 121,
+    description: "Enforce workflow release numbers in MySQL",
+    mysqlOnly: true,
+    sql: [
+      `ALTER TABLE workflow_deploy_history ADD COLUMN release_deploy_number INT GENERATED ALWAYS AS (
+        CASE WHEN action IN ('pending', 'deploy', 'rollback') THEN deploy_number ELSE NULL END
+      ) STORED`,
+      `ALTER TABLE workflow_deploy_history ADD UNIQUE KEY uk_wdh_workflow_release_number (workflow_id, release_deploy_number)`,
+    ],
+  },
+  {
+    version: 122,
+    description: "Enforce workflow release numbers in SQLite",
+    sqliteOnly: true,
+    sql: [
+      `CREATE UNIQUE INDEX IF NOT EXISTS uk_wdh_workflow_release_number
+        ON workflow_deploy_history (workflow_id, deploy_number)
+        WHERE action IN ('pending', 'deploy', 'rollback')`,
+    ],
+  },
 ];
