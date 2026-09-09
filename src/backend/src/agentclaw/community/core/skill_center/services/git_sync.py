@@ -169,6 +169,14 @@ class GitSyncConfig:
         self.sync_jitter_seconds = int(os.getenv("SYNC_JITTER_SECONDS", "60"))
         # 抢不到 bootstrap 锁的 worker 轮询等待 bare repo 就绪的超时（秒）
         self.bootstrap_wait_timeout = int(os.getenv("BOOTSTRAP_WAIT_TIMEOUT", "60"))
+        # Wall-clock cap on one ``git fetch``. Without it a hung fetch holds
+        # the bare repo's ``shallow.lock`` forever and every later fetch dies
+        # on "File exists"; with it the fetch is killed, and the kill is what
+        # makes the stale-lock reaper below both necessary and sound — no lock
+        # older than this bound can belong to a fetch this service still runs.
+        self.git_fetch_timeout_seconds = int(
+            os.getenv("GIT_FETCH_TIMEOUT_SECONDS", "300")
+        )
         self.archive_cron = "0 0 * * *"  # Daily at 00:00
         self.archive_max_age_hours = 24
 
@@ -451,7 +459,17 @@ class GitSyncService(LifecycleBase, GitSyncServiceProtocol):
         return result
 
     async def _ensure_skills_subtree_ready(self) -> dict[str, Any]:
-        """Ensure skills working tree exists when the bare repo already exists."""
+        """Ensure skills working tree exists when the bare repo already exists.
+
+        Serialized on the **same** distributed lock the periodic sync takes
+        (``skill_repo_sync``), because it fetches the same bare repo. The
+        clone path's ``git_sync_bootstrap`` lock is deliberately not reused:
+        it does not exclude a periodic sync, and this repair races that far
+        more often than it races another clone. Every worker process reaches
+        this path on startup — the repo already exists, so the clone branch
+        and its lock are skipped entirely — so without a lock here N workers
+        fetch one repo at once and all but one die on ``shallow.lock``.
+        """
         skills_subtree = next(
             (
                 subtree
@@ -463,7 +481,10 @@ class GitSyncService(LifecycleBase, GitSyncServiceProtocol):
         target_dir = skills_subtree["target_dir"]
         version_file = target_dir / skills_subtree["version_file"]
 
-        if target_dir.is_dir() and version_file.is_file():
+        def _subtree_ready() -> bool:
+            return target_dir.is_dir() and version_file.is_file()
+
+        if _subtree_ready():
             return {"success": True, "method": "existing"}
 
         logger.warning(
@@ -471,6 +492,51 @@ class GitSyncService(LifecycleBase, GitSyncServiceProtocol):
             "is missing/incomplete at %s; repairing",
             target_dir,
         )
+
+        cache = self._cache_plugin
+        lock_key = f"skill_repo_sync:{_get_env()}"
+        lock_value = await self._run_sync(
+            functools.partial(cache.acquire_lock, lock_key, ttl=600)
+        )
+        if not lock_value:
+            # Someone else holds the repo. Do not fetch alongside them — that
+            # is the collision. Wait for their repair instead, then re-check
+            # the tree rather than trusting that they repaired what we need.
+            logger.info(
+                "[GitSyncService] Bootstrap: repo sync lock held by another "
+                "worker; waiting for the skills subtree to become ready"
+            )
+            waited = 0
+            while not _subtree_ready():
+                if waited >= self.config.bootstrap_wait_timeout:
+                    return {
+                        "success": False,
+                        "method": "existing_repair_failed",
+                        "error": (
+                            "Skills subtree still missing after waiting "
+                            f"{self.config.bootstrap_wait_timeout}s for the "
+                            "lock holder's repair"
+                        ),
+                    }
+                await asyncio.sleep(2)
+                waited += 2
+            logger.info(
+                "[GitSyncService] Bootstrap: skills subtree repaired by the "
+                "lock holder"
+            )
+            return {"success": True, "method": "existing_repaired_by_peer"}
+
+        try:
+            return await self._repair_skills_subtree(skills_subtree)
+        finally:
+            await self._run_sync(
+                functools.partial(cache.release_lock, lock_key, lock_value)
+            )
+
+    async def _repair_skills_subtree(
+        self, skills_subtree: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Fetch and re-extract the skills subtree. Caller holds the repo lock."""
         fetch_result = await self._git_fetch()
         if not fetch_result["success"]:
             return {
@@ -989,20 +1055,84 @@ class GitSyncService(LifecycleBase, GitSyncServiceProtocol):
             logger.info("[GitSyncService] _git_fetch: self-heal bootstrap succeeded, retrying fetch")
         return await self._run_sync(self._sync_git_fetch)
 
+    def _reap_stale_shallow_lock(self, bare_repo: Path) -> None:
+        """Remove a ``shallow.lock`` no live fetch can still own.
+
+        ``git fetch --depth`` guards the ``shallow`` file with this lock and
+        never cleans it up after a crash or a kill, so one interrupted fetch
+        makes every later fetch fail with "Unable to create ... File exists"
+        until a human deletes the file. Age is a sound owner test here because
+        the fetch below is bounded: a lock older than that bound plus a margin
+        cannot belong to a fetch this service still has running.
+
+        Deliberately narrow — only ``shallow.lock``. Ref and index locks are
+        left alone: git has its own recovery for those, and deleting a lock
+        that *is* held corrupts the repo this is meant to protect.
+        """
+        lock_file = bare_repo / "shallow.lock"
+        try:
+            age = time.time() - lock_file.stat().st_mtime
+        except FileNotFoundError:
+            return
+        except OSError as e:  # unreadable mtime — leave it for a human
+            logger.warning("[GitSyncService] Fetch: cannot stat %s: %s", lock_file, e)
+            return
+
+        if age <= self.config.git_fetch_timeout_seconds + 60:
+            # Young enough that a fetch may legitimately still hold it; the
+            # fetch below will fail loudly rather than race the holder.
+            return
+
+        try:
+            lock_file.unlink()
+        except FileNotFoundError:
+            return  # the owner cleaned up between the stat and here
+        except OSError as e:
+            logger.error(
+                "[GitSyncService] Fetch: failed to remove stale lock %s: %s",
+                lock_file, e,
+            )
+            return
+
+        logger.warning(
+            "[GitSyncService] Fetch: removed stale shallow.lock (age %.0fs) at "
+            "%s — a previous fetch was killed or crashed holding it",
+            age, lock_file,
+        )
+
     def _sync_git_fetch(self) -> dict[str, Any]:
         bare_repo = self.config.local_bare_repo
 
         if not bare_repo.exists():
             return {"success": False, "error": "Bare repo not found, run bootstrap first"}
 
+        self._reap_stale_shallow_lock(bare_repo)
+
         # Use --force to handle non-fast-forward cases (e.g., remote was force-pushed)
-        result = subprocess.run(
-            ["git", "fetch", self.config.remote_name,
-             f"{self.config.branch}:{self.config.branch}", "--depth=1", "--force"],
-            cwd=bare_repo,
-            capture_output=True,
-            text=True
-        )
+        try:
+            result = subprocess.run(
+                ["git", "fetch", self.config.remote_name,
+                 f"{self.config.branch}:{self.config.branch}", "--depth=1", "--force"],
+                cwd=bare_repo,
+                capture_output=True,
+                text=True,
+                timeout=self.config.git_fetch_timeout_seconds,
+            )
+        except subprocess.TimeoutExpired:
+            # The child is killed on the way out, which can leave the
+            # shallow.lock behind; the reaper above clears it once it ages past
+            # this same bound, so the repo recovers without human hands.
+            logger.error(
+                "[GitSyncService] Fetch: timed out after %ss",
+                self.config.git_fetch_timeout_seconds,
+            )
+            return {
+                "success": False,
+                "error": (
+                    "git fetch timed out after "
+                    f"{self.config.git_fetch_timeout_seconds}s"
+                ),
+            }
 
         if result.returncode != 0:
             return {"success": False, "error": result.stderr}
