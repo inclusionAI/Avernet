@@ -5,6 +5,9 @@ from typing import Any
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
 from agentclaw.community.core.workspace.engines.aicoding import AICodingSandboxProvider
 from agentclaw.community.core.workspace.engines.claude_code import ClaudeCodeSandboxProvider
+from agentclaw.community.core.workspace.engines.deepseek_harness import (
+    DeepSeekHarnessSandboxProvider,
+)
 from agentclaw.community.core.workspace.engines.openclaw import OpenClawSandboxProvider
 from agentclaw.community.core.workspace.engines.hermes import HermesSandboxProvider
 from agentclaw.community.di import config as cfg
@@ -50,4 +53,5 @@ def create_engine_sandbox_registry(
     registry.register(ClaudeCodeSandboxProvider(workspace=workspace))
     registry.register(AICodingSandboxProvider(workspace=workspace))
     registry.register(HermesSandboxProvider(workspace=workspace))
+    registry.register(DeepSeekHarnessSandboxProvider(workspace=workspace))
     return registry

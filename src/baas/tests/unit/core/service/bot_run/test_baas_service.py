@@ -280,6 +280,20 @@ class TestSessionRoutingAffinityPrefix:
             == f"agent:{BOT_UUID}:session:run-1:user:u-1"
         )
 
+    @pytest.mark.parametrize("eval_id", [None, "eval-abc123"])
+    def test_deepseek_harness_uses_structured_affinity_key(
+        self, service, eval_id
+    ):
+        session_key = eval_id or "run-1"
+        assert service._create_session_consistency_key(
+            engine_type="deepseek_harness",
+            tc_bot_id=BOT_UUID,
+            user_id="u-1",
+            run_id="run-1",
+            session_id=None,
+            eval_id=eval_id,
+        ) == f"agent:{BOT_UUID}:session:{session_key}:user:u-1"
+
     def test_eval_id_ignored_when_session_id_provided(self, service):
         """session_id 已传入时直接返回，eval_id 不生效。"""
         assert (

@@ -669,6 +669,7 @@ class WorkspaceConfig:
         claude_code_root: Same shape, for Claude Code bots.
         aicoding_root: Same shape, for AICoding bots.
         hermes_root: Same shape, for Hermes bots.
+        deepseek_harness_root: Same shape, for DeepSeek Harness bots.
     """
 
     openclaw_root: str = "/home/admin/.openclaw"
@@ -676,6 +677,7 @@ class WorkspaceConfig:
     claude_code_session_root: str = "/home/admin/.claude"
     aicoding_root: str = "/home/admin/.aicoding"
     hermes_root: str = "/home/admin/.hermes"
+    deepseek_harness_root: str = "/home/admin/.dsh"
 
 
 # ── Creating a bot with its configuration manifest (W13) ─────────────────
