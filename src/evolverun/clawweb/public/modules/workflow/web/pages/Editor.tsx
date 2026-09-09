@@ -44,6 +44,7 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
   const [showDeployGuide, setShowDeployGuide] = useState(false)
   const [deployCommandCopied, setDeployCommandCopied] = useState(false)
   const [latestDeploy, setLatestDeploy] = useState<DeployHistoryItem | null>(null)
+  const [baselineIsActive, setBaselineIsActive] = useState(false)
   const [activeSnapshot, setActiveSnapshot] = useState<VersionSnapshot | null>(null)
   const [showDeploymentDiff, setShowDeploymentDiff] = useState(false)
 
@@ -84,16 +85,25 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
   useEffect(() => {
     if (!selectedWorkflowId) {
       setLatestDeploy(null)
+      setBaselineIsActive(false)
       return
     }
+    setLatestDeploy(null)
+    setBaselineIsActive(false)
     let cancelled = false
     api.workflows
       .getHistory(selectedWorkflowId, 50, true)
       .then((r) => {
-        if (!cancelled) setLatestDeploy(r.history?.find((item) => item.isActive) ?? r.history?.find((item) => item.action !== 'edit') ?? null)
+        if (cancelled) return
+        const active = r.history?.find((item) => item.isActive)
+        setLatestDeploy(active ?? r.history?.find((item) => item.action !== 'edit') ?? null)
+        setBaselineIsActive(Boolean(active))
       })
       .catch(() => {
-        if (!cancelled) setLatestDeploy(null)
+        if (!cancelled) {
+          setLatestDeploy(null)
+          setBaselineIsActive(false)
+        }
       })
     return () => {
       cancelled = true
@@ -122,6 +132,7 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
   const deployedSpecText = activeSnapshot ? formatSpecForDiff(activeSnapshot.specJson) : ''
   const savedSpecText = workflowSpec ? stringifyYaml(workflowSpec, { lineWidth: 0 }) : ''
   const hasUndeployedChanges = Boolean(activeSnapshot && workflowSpec && !specsEqual(deployedSpecText, savedSpecText))
+  const deploymentBaselineLabel = baselineIsActive ? '生效' : '最新发布'
   const deploymentDiffLines = useMemo(
     () => hasUndeployedChanges ? compactDiff(unifiedDiff(deployedSpecText, savedSpecText)) : [],
     [deployedSpecText, hasUndeployedChanges, savedSpecText],
@@ -284,7 +295,7 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
           {selectedWorkflowId &&
             (latestDeploy ? (
               <span className="hidden shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500 2xl:inline">
-                生效 v{latestDeploy.version} · deploy #{latestDeploy.deployNumber}
+                {deploymentBaselineLabel} v{latestDeploy.version} · deploy #{latestDeploy.deployNumber}
               </span>
             ) : (
               <span className="hidden text-[10px] text-slate-400 2xl:inline">仅本地草稿</span>
@@ -295,7 +306,7 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
               onClick={() => setShowDeploymentDiff(true)}
               className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800 hover:bg-amber-200"
             >
-              与生效 v{latestDeploy.version} 有差异 · 待部署
+              与{deploymentBaselineLabel} v{latestDeploy.version} 有差异 · 待部署
             </button>
           )}
         </div>
@@ -603,7 +614,7 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
             <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-3">
               <div>
                 <h3 className="text-sm font-semibold text-gray-900">部署前差异</h3>
-                <p className="mt-0.5 text-xs text-gray-500">生效 v{latestDeploy.version} · deploy #{latestDeploy.deployNumber} → 当前已保存内容</p>
+                <p className="mt-0.5 text-xs text-gray-500">{deploymentBaselineLabel} v{latestDeploy.version} · deploy #{latestDeploy.deployNumber} → 当前已保存内容</p>
               </div>
               <button onClick={() => setShowDeploymentDiff(false)} className="rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50">关闭</button>
             </div>
