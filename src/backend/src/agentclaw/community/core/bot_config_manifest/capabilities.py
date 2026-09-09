@@ -5,14 +5,20 @@ cannot apply.* Anything the schema can express but no shipped code can act on is
 reported unsupported and refused at ``PUT``. The feature flag over the routes is
 not enough on its own: W1 parses the **whole** v1 vocabulary while only part of
 it has a materializer behind it, and the gap is not confined to categories — a
-**source form** with no resolver fails in exactly the same way.
+**(category, protocol) pair** with no resolver fails in exactly the same way,
+which is what ``source_matrix`` answers.
 
 So capabilities are answered **per accepted construct**, not per bot and not
-only per category. Three kinds of construct appear here:
+only per category. Two kinds of construct appear here:
 
 * ``category`` — one of the six under ``manifest``;
-* ``section`` — a top-level section that is not a category (``script``);
-* ``source`` — how an entry says where its content comes from.
+* ``section`` — a top-level section that is not a category (``script``).
+
+A third kind, ``source``, published one row per source *spelling*. It is gone:
+no spelling ever carried a verdict of its own in any configuration, so the
+rows could not disagree, and which (category, protocol) pairs are open — the
+question that was actually being asked — is answered by ``source_matrix`` on
+``SourceKind``.
 
 **One function, and that is an acceptance criterion, not tidiness.** The read
 path (``GET …/config-manifest/capabilities``) and the write path (``PUT``'s
@@ -29,7 +35,7 @@ Two entry points, one body.
 **Constructs are enums, and a construct's kind is its type.** ``kind`` and
 ``name`` are not two free strings that happen to be used together: most of their
 combinations are meaningless — there is no ``source`` called ``mcp``. So each
-kind gets its own enum, those three enums *are* the construct vocabulary, and
+kind gets its own enum, those enums *are* the construct vocabulary, and
 ``kind`` is derived from which enum a value belongs to. An illegal pair is not
 rejected at runtime; it cannot be written. The wire shape is unchanged — a
 construct still serialises as ``{kind, name, supported, reason}`` — but nothing
@@ -66,7 +72,6 @@ class ConstructKind(StrEnum):
 
     CATEGORY = "category"
     SECTION = "section"
-    SOURCE = "source"
 
 
 class ManifestCategory(StrEnum):
@@ -90,72 +95,25 @@ class ManifestSection(StrEnum):
     SCRIPT = "script"
 
 
-class SourceForm(StrEnum):
-    """How an entry *spells* its content — **not** which protocol carries it.
-
-    That distinction is the whole reason this enum is separate from
-    :class:`~agentclaw.community.core.bot_config_manifest.support_matrix.SourceKind`,
-    and it is worth being concrete, because ``NAMED`` reads like a fourth
-    protocol and is not one. There are only three protocols: content, git,
-    oss. Grammar: ``docs/bot-config-manifest/manifest-schema.zh-CN.md``
-    §2.2 (``protocol``) and §2.3 (``sources`` / ``from``).
-
-    Three spellings say their own protocol::
-
-        - name: CLAUDE.md
-          content: "You are a helpful bot."          # CONTENT
-
-        - name: notes                                 # GIT
-          source: {protocol: git, url: ..., ref: v1.2.0}
-
-        - name: tools                                 # OSS
-          source: {protocol: oss, bucket: b, key: tools/, auth: oss-prod}
-
-    The fourth does not, because it points at a declaration::
-
-        sources:
-          team-repo: {protocol: git, url: ..., ref: v1.2.0}
-
-        manifest:
-          resources:
-            - name: notes
-              from: team-repo                         # NAMED — protocol is git
-              subpath: docs/notes.md
-
-    **What this enum is for.** One thing only: the deployment-capability gate
-    in :meth:`Context.require_source_support` — "can this deployment resolve
-    this spelling at all?" A deployment may refuse the ``from:`` spelling
-    wholesale while still serving git, which is a statement about spellings
-    and cannot be made on the protocol axis. The answer is checked at the
-    parse site and never stored; ``EntrySource`` keeps only the protocol.
-    (It briefly kept the form too. Review asked why both, and the honest
-    answer was that they cannot diverge once a ``from:`` resolves — and that
-    nothing ever read it. The field is gone.)
-    """
-
-    #: An object store, addressed by ``bucket``/``key``. Named for the
-    #: protocol rather than the spelling it replaced (``url``): the spelling
-    #: is gone, because a manifest no longer names a URL for the platform to
-    #: fetch.
-    OSS = "oss"
-    #: An inline ``source:`` object on the entry, ``protocol: git``.
-    GIT = "git"
-    #: ``from: <name>``, pointing at a ``sources`` declaration that carries
-    #: the protocol. A spelling, never a protocol of its own.
-    NAMED = "named"
-    #: ``content:`` inline in the document. The one form that fetches nothing.
-    CONTENT = "content"
-
-
-#: Any of the three. A value's own type says which kind it is, which is what
+#: Either of the two. A value's own type says which kind it is, which is what
 #: makes an ill-formed ``(kind, name)`` pair unwritable rather than merely
 #: invalid.
-Construct = ManifestCategory | ManifestSection | SourceForm
+#:
+#: ``SourceForm`` used to be a third member, publishing one row per source
+#: *spelling* (``oss``/``git``/``named``/``content``). Review asked what
+#: ``named`` was doing there, and the check settled it: across all 50
+#: engine/bot-type/teclaw configurations no form ever carried a verdict of
+#: its own — the only refusal is bot-wide ("desktop bots are outside this
+#: feature's scope") and hits all four identically. So the axis published four
+#: rows that could never disagree, and the spelling/protocol split it forced
+#: on the parser is the same one that produced the D5 bug recorded in
+#: ``support_matrix.py``. Which (category, protocol) pairs are open was always
+#: the real question, and ``source_matrix`` answers it on ``SourceKind``.
+Construct = ManifestCategory | ManifestSection
 
 _KIND_BY_TYPE: dict[type, ConstructKind] = {
     ManifestCategory: ConstructKind.CATEGORY,
     ManifestSection: ConstructKind.SECTION,
-    SourceForm: ConstructKind.SOURCE,
 }
 
 
@@ -391,10 +349,6 @@ def resolve_capabilities(
         # ``source_matrix`` below — these flat rows structurally cannot express
         # a pair, which is what forced the per-category narrowing this change
         # removed. Every form resolves; the matrix says where.
-        SourceForm.OSS: None,
-        SourceForm.CONTENT: None,
-        SourceForm.GIT: None,
-        SourceForm.NAMED: None,
     }
 
     def cell(category: ManifestCategory, protocol: SourceKind) -> SourceCell:
@@ -442,7 +396,6 @@ def _all_constructs() -> Iterable[Construct]:
     """Every construct, categories first, then sections, then source forms."""
     yield from ManifestCategory
     yield from ManifestSection
-    yield from SourceForm
 
 
 def _script_reason(*, teclaw: bool, desktop: bool) -> str | None:
