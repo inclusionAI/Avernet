@@ -127,12 +127,12 @@ export default function WorkflowWorkspace() {
                   type="button"
                   aria-label="新建工作流"
                   onClick={() => setCreateOpen(true)}
-                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30"
                 >
                   <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24">
                     <path d="M12 5v14M5 12h14" strokeLinecap="round" />
                   </svg>
-                  <span>新建</span>
+                  <span>新建工作流</span>
                 </button>
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">

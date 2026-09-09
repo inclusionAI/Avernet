@@ -318,6 +318,7 @@ export function useCreateWorkflow() {
         facade,
         botOwnerId,
         botId,
+        skipDeployHistory: true,
       }),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({ queryKey: ['workflow-types'] })
