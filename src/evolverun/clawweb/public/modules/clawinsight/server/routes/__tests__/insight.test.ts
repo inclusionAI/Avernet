@@ -2153,6 +2153,205 @@ describe("Insight Center local contract", () => {
     );
   });
 
+  it("closes open items with zero new sessions only after the observation window and without recurrence evidence", async () => {
+    await withIsolatedFixture(
+      async () => undefined,
+      async ({ baseUrl: isolatedBaseUrl, db: isolatedDb }) => {
+        const createOpenItem = (key: string, title: string) => jsonRequestAt(
+          isolatedBaseUrl,
+          "/api/insight/v1/improvements",
+          {
+            method: "POST",
+            headers: ownerHeaders({
+              "Content-Type": "application/json",
+              "Idempotency-Key": key,
+            }),
+            body: JSON.stringify(improvementBody(title)),
+          },
+        );
+        const backdateModified = (id: number, days: number) => isolatedDb.exec(
+          "UPDATE insight_improvement_item SET gmt_modified = ? WHERE id = ?",
+          [Math.floor(Date.now() / 1000) - days * 24 * 60 * 60, id],
+        );
+        const submitOpen = (improvementId: number, version: number, extra: Record<string, unknown>) => jsonRequestAt(
+          isolatedBaseUrl,
+          "/api/insight/v1/internal/governance/verification-results/open",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              improvementId,
+              version,
+              outcome: "DISAPPEARED",
+              newSessionCount: 0,
+              ...extra,
+            }),
+          },
+        );
+
+        const settled = await createOpenItem("open-zero-settled", "开放项无新Session关单");
+        expect(settled.response.status).toBe(201);
+        const settledId = Number(settled.body.improvementId);
+        await backdateModified(settledId, 8);
+        const closed = await submitOpen(settledId, settled.body.version as number, {});
+        expect(closed.response.status).toBe(200);
+        expect(closed.body.improvement).toEqual(expect.objectContaining({
+          improvementId: settledId,
+          status: "RESOLVED",
+          verificationStatus: "VERIFIED",
+          resolvedSource: "AUTO_VERIFIED",
+        }));
+
+        const fresh = await createOpenItem("open-zero-too-early", "观察期未满的开放项");
+        expect(fresh.response.status).toBe(201);
+        const freshId = Number(fresh.body.improvementId);
+        const premature = await submitOpen(freshId, fresh.body.version as number, {});
+        expect(premature.response.status).toBe(409);
+        expect(premature.body.code).toBe("OPEN_VERIFICATION_TOO_EARLY");
+
+        const recurring = await createOpenItem("open-zero-recurrence", "携带复现证据的开放项");
+        expect(recurring.response.status).toBe(201);
+        const recurringId = Number(recurring.body.improvementId);
+        await backdateModified(recurringId, 8);
+        const recurrence = await submitOpen(recurringId, recurring.body.version as number, {
+          lastRecurrenceAt: "2026-08-30T00:00:00+08:00",
+        });
+        expect(recurrence.response.status).toBe(409);
+        expect(recurrence.body.code).toBe("RECURRENCE_FOUND");
+        const recurrenceWithFlag = await submitOpen(recurringId, recurring.body.version as number, {
+          allowZeroSession: true,
+          lastRecurrenceAt: "2026-08-30T00:00:00+08:00",
+        });
+        expect(recurrenceWithFlag.response.status).toBe(409);
+        expect(recurrenceWithFlag.body.code).toBe("RECURRENCE_FOUND");
+
+        const stillSettled = await createOpenItem("open-still-zero", "仍有复现的开放项");
+        expect(stillSettled.response.status).toBe(201);
+        const stillId = Number(stillSettled.body.improvementId);
+        await backdateModified(stillId, 8);
+        const stillPresent = await jsonRequestAt(
+          isolatedBaseUrl,
+          "/api/insight/v1/internal/governance/verification-results/open",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              improvementId: stillId,
+              version: stillSettled.body.version,
+              outcome: "STILL_PRESENT",
+              newSessionCount: 0,
+            }),
+          },
+        );
+        expect(stillPresent.response.status).toBe(400);
+
+        const negative = await submitOpen(freshId, fresh.body.version as number, { newSessionCount: -1 });
+        expect(negative.response.status).toBe(400);
+
+        const standard = await createOpenItem("open-standard-item", "已回传修复的标准项");
+        expect(standard.response.status).toBe(201);
+        const standardId = Number(standard.body.improvementId);
+        await isolatedDb.exec(
+          "UPDATE insight_improvement_item SET status = 'IN_PROGRESS', user_guidance = user_guidance || ? WHERE id = ?",
+          ["\n\n[用户已处理]\n时间：2026-08-20T00:00:00+08:00", standardId],
+        );
+        const standardToOpen = await submitOpen(standardId, standard.body.version as number, { newSessionCount: 1 });
+        expect(standardToOpen.response.status).toBe(409);
+        expect(standardToOpen.body.code).toBe("CONFLICT");
+
+        const withSessions = await createOpenItem("open-with-sessions", "带新Session的正常开放项验收");
+        expect(withSessions.response.status).toBe(201);
+        const withSessionsId = Number(withSessions.body.improvementId);
+        await backdateModified(withSessionsId, 8);
+        const normalClosure = await submitOpen(withSessionsId, withSessions.body.version as number, { newSessionCount: 3 });
+        expect(normalClosure.response.status).toBe(200);
+        expect(normalClosure.body.improvement).toEqual(expect.objectContaining({
+          improvementId: withSessionsId,
+          status: "RESOLVED",
+          verificationStatus: "VERIFIED",
+        }));
+      },
+    );
+  });
+
+  it("requires explicit allowZeroSession and no recurrence evidence for zero-session closure of standard items", async () => {
+    await withIsolatedFixture(
+      async () => undefined,
+      async ({ baseUrl: isolatedBaseUrl, db: isolatedDb }) => {
+        const createHandledItem = async (key: string, title: string) => {
+          const created = await jsonRequestAt(
+            isolatedBaseUrl,
+            "/api/insight/v1/improvements",
+            {
+              method: "POST",
+              headers: ownerHeaders({
+                "Content-Type": "application/json",
+                "Idempotency-Key": key,
+              }),
+              body: JSON.stringify(improvementBody(title)),
+            },
+          );
+          expect(created.response.status).toBe(201);
+          const id = Number(created.body.improvementId);
+          await isolatedDb.exec(
+            "UPDATE insight_improvement_item SET status = 'IN_PROGRESS', gmt_modified = ?, user_guidance = user_guidance || ? WHERE id = ?",
+            [
+              Math.floor(Date.now() / 1000) - 8 * 24 * 60 * 60,
+              "\n\n[用户已处理]\n时间：2026-08-20T00:00:00+08:00",
+              id,
+            ],
+          );
+          return { id, version: created.body.version as number };
+        };
+        const submitStandard = (improvementId: number, version: number, extra: Record<string, unknown>) => jsonRequestAt(
+          isolatedBaseUrl,
+          "/api/insight/v1/internal/governance/verification-results",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              improvementId,
+              version,
+              outcome: "DISAPPEARED",
+              newSessionCount: 0,
+              ...extra,
+            }),
+          },
+        );
+
+        const implicit = await createHandledItem("standard-zero-implicit", "未显式确认的无Session关单");
+        const implicitAttempt = await submitStandard(implicit.id, implicit.version, {});
+        expect(implicitAttempt.response.status).toBe(400);
+
+        const confirmed = await submitStandard(implicit.id, implicit.version, { allowZeroSession: true });
+        expect(confirmed.response.status).toBe(200);
+        expect(confirmed.body.improvement).toEqual(expect.objectContaining({
+          improvementId: implicit.id,
+          status: "RESOLVED",
+          verificationStatus: "VERIFIED",
+          resolvedSource: "AUTO_VERIFIED",
+        }));
+
+        const recurrent = await createHandledItem("standard-zero-recurrence", "携带复现证据的标准项");
+        const recurrenceAttempt = await submitStandard(recurrent.id, recurrent.version, {
+          allowZeroSession: true,
+          lastRecurrenceAt: "2026-08-30T00:00:00+08:00",
+        });
+        expect(recurrenceAttempt.response.status).toBe(409);
+        expect(recurrenceAttempt.body.code).toBe("RECURRENCE_FOUND");
+
+        const withSessions = await createHandledItem("standard-with-sessions", "带新Session的正常标准项验收");
+        const withSessionsAttempt = await submitStandard(withSessions.id, withSessions.version, { newSessionCount: 3 });
+        expect(withSessionsAttempt.response.status).toBe(200);
+        expect(withSessionsAttempt.body.improvement).toEqual(expect.objectContaining({
+          improvementId: withSessions.id,
+          status: "RESOLVED",
+          verificationStatus: "VERIFIED",
+        }));
+      },
+    );
+  });
+
   it("filters improvement work views on the server and returns complete status counts", async () => {
     await withIsolatedFixture(
       async () => undefined,
