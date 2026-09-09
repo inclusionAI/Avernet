@@ -157,7 +157,64 @@ class TestBbsDegradation:
         assert len(strat.search_calls) == 0
 
 
+class TestExecRetryReplay:
+    """exec_error/SLA-timeout 重试节点(harness_retries>0 + 已有 run_mode/assignee)原样重跑:
+    跳过搜推、不覆写模式/执行者,避免 mode_coverage/候选抖动在重试时翻转模态或换 bot。
+    harness_retries 达 MAX_HARNESS→HUNG→升 BBS 的兜底在编排核侧,不在此测。"""
+
+    def test_single_bot_retry_preserves_mode_and_assignee(self, svc):
+        # 策略本会覆写为 bot_other;命中 replay → 保留原 single_bot/bot_orig 且不搜推
+        d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="bot_other"))
+        node = _node("c1", run_mode="single_bot", assignee="bot_orig")
+        node.run_info.extend_props["harness_retries"] = 1
+        out = _run(d.dispatch([node]))
+        assert out[0].run_info.run_mode == "single_bot"
+        assert out[0].run_info.assignee == "bot_orig"
+        assert len(strat.search_calls) == 0
+
+    def test_coop_group_retry_preserves_mode_and_group_id(self, svc):
+        d, strat = _dispatcher(svc, SearchResult(
+            outcome=SearchOutcome.HIT_MULTI_BOTS,
+            group_formation=GroupFormation(bot_ids=["bot_a", "bot_b"], collab_mode="manager_worker"),
+        ))
+        node = _node("c1", run_mode="coop_group", assignee="grp_exist")
+        node.run_info.extend_props["harness_retries"] = 1
+        out = _run(d.dispatch([node]))
+        assert out[0].run_info.run_mode == "coop_group"
+        assert out[0].run_info.assignee == "grp_exist"
+        assert out[0].run_info.extend_props.get("pending_group_formation") is None  # 不重新拉群
+        assert len(strat.search_calls) == 0
+
+    def test_fresh_dispatch_not_replayed(self, svc):
+        # harness_retries=0(首次派发)→ 正常搜推覆写
+        d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="bot_market"))
+        out = _run(d.dispatch([_node("c1")]))
+        assert out[0].run_info.run_mode == "single_bot"
+        assert out[0].run_info.assignee == "bot_market"
+        assert len(strat.search_calls) == 1
+
+    def test_retry_without_assignee_still_searches(self, svc):
+        # 重试但 assignee 已失(MISS/stale/start_run_failed 清空)→ 无法原样重跑,正常搜推
+        d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="bot_market"))
+        node = _node("c1", run_mode="single_bot", assignee=None)
+        node.run_info.extend_props["harness_retries"] = 1
+        out = _run(d.dispatch([node]))
+        assert out[0].run_info.assignee == "bot_market"
+        assert len(strat.search_calls) == 1
+
+    def test_bbs_retry_degrades_before_replay(self, svc):
+        # bbs 退化优先于 exec-replay(bbs 走自驱,不进 start_run 重投)
+        d, strat = _dispatcher(svc, SearchResult(outcome=SearchOutcome.MISS))
+        node = _node("c1", run_mode="bbs", assignee="bot_bbs")
+        node.run_info.extend_props["harness_retries"] = 1
+        out = _run(d.dispatch([node]))
+        assert out[0].run_info.run_mode == "bbs"
+        assert out[0].run_info.assignee == "bot_bbs"
+        assert len(strat.search_calls) == 0
+
+
 class TestNoWriteGraph:
+
     def test_dispatch_returns_filled_nodes_only(self, svc):
         # dispatcher 持 graph 只读 config;不写图(不调 add/update/patch)。验证仅填充入参返回。
         d, _ = _dispatcher(svc, SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id="b1"))

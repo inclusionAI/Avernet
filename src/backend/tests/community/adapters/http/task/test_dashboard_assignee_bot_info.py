@@ -12,6 +12,8 @@ from injector import Injector, Module, provider, singleton
 
 from agentclaw.community.adapters.http.task.router import router as task_internal_router
 from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router
+from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.principal import require_user_id
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
@@ -105,6 +107,9 @@ def harness():
     fake_bot = injector.get(BotServiceProtocol)
     app = FastAPI()
     app.include_router(task_router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": "dashboard-owner"}
+    app.dependency_overrides[require_user_id] = lambda: "dashboard-owner"
+
     app.include_router(task_internal_router)
     attach_injector(app, injector)
     return TestClient(app), injector, fake_bot
@@ -126,7 +131,7 @@ def test_dashboard_attaches_assignee_owner_and_name_for_single_bot(harness):
     c, inj, fake_bot = harness
     tid = f"ab-{uuid.uuid4().hex[:6]}"
     _seed_node(inj, tid, "single_bot", "bot_a")
-    d = c.get("/api/v1/collaboration/tasks/dashboard", params={"task_id": tid}).json()["data"]
+    d = c.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": tid}).json()["data"]
     root = {t["node_id"]: t for t in d["tasks"]}[tid]
     ep = root["run_info"]["extend_props"]
     assert ep.get("assignee_owner_id") == "o1"
@@ -138,7 +143,7 @@ def test_dashboard_skips_coop_group_assignee(harness):
     c, inj, fake_bot = harness
     tid = f"ag-{uuid.uuid4().hex[:6]}"
     _seed_node(inj, tid, "coop_group", "grp_xxx")
-    c.get("/api/v1/collaboration/tasks/dashboard", params={"task_id": tid})
+    c.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": tid})
     assert fake_bot.calls == []  # assignee 是 group_id 非 bot,不查 BotService
 
 
@@ -146,7 +151,7 @@ def test_dashboard_no_bot_record_leaves_no_attach(harness):
     c, inj, fake_bot = harness
     tid = f"an-{uuid.uuid4().hex[:6]}"
     _seed_node(inj, tid, "single_bot", "bot_missing")
-    d = c.get("/api/v1/collaboration/tasks/dashboard", params={"task_id": tid}).json()["data"]
+    d = c.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": tid}).json()["data"]
     root = {t["node_id"]: t for t in d["tasks"]}[tid]
     ep = root["run_info"]["extend_props"]
     assert "assignee_owner_id" not in ep
@@ -166,7 +171,7 @@ def test_dashboard_resolves_duplicate_bot_id_by_assignee_owner(harness):
         task_id=tid, node_id=tid,
         extend_props_patch={"assignee_owner_id": "o1"},
     ))
-    d = c.get("/api/v1/collaboration/tasks/dashboard", params={"task_id": tid}).json()["data"]
+    d = c.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": tid}).json()["data"]
     root = {t["node_id"]: t for t in d["tasks"]}[tid]
     ep = root["run_info"]["extend_props"]
     assert ep["assignee_owner_id"] == "o1"

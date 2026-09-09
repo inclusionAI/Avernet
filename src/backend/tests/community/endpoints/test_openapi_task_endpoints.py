@@ -243,7 +243,7 @@ def revoke_unauthenticated():
     pass
 
 
-# ── BBS 接力任务列表(public openapi face 镜像 /api/v1/collaboration/tasks/bbs/list)──
+# ── BBS 接力任务列表(public openapi face:GET /openapi/v1/collaboration/tasks/bbs/list)──
 _BBS_SPEC = {
     "metadata": {"task_id": "bbs-1", "title": "BBS 任务标题", "instruction": "执行"},
     "context": {"background": "bg"},

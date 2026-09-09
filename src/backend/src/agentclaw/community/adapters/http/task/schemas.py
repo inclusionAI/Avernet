@@ -285,7 +285,7 @@ class TaskNodeDTO(BaseModel):
 
 
 class TaskInfoRecordDTO(BaseModel):
-    """GET .../collaboration/tasks/list 返回的持久化任务记录。"""
+    """GET /openapi/v1/collaboration/tasks/list 返回的持久化任务记录。"""
 
     id: int = Field(..., description="持久化记录自增主键")
     task_id: str = Field(..., description="任务ID")
@@ -823,20 +823,5 @@ class TaskSettingStateDTO(BaseModel):
     setting_type: Literal["claim_join_filter", "search_skill", "skill_report_enabled", "harness_poller"] = Field(
         ..., description="任务开关类型"
     )
-    enabled: bool = Field(..., description="当前开关状态")
-    env: str = Field(..., description="生效环境(prod/pre/dev)")
-
-
-class TaskClaimJoinFilterRequestDTO(BaseModel):
-    """Legacy request DTO for the hidden compatibility route."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    enabled: bool = Field(..., description="是否启用 claim_join_filter")
-
-
-class TaskClaimJoinFilterStateDTO(BaseModel):
-    """Legacy response DTO for the hidden compatibility route."""
-
     enabled: bool = Field(..., description="当前开关状态")
     env: str = Field(..., description="生效环境(prod/pre/dev)")
