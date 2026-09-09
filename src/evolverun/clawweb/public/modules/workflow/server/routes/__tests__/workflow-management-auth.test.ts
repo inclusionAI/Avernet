@@ -43,6 +43,7 @@ async function start() {
   } as unknown as WorkflowSpecRepository;
   const historyRepo = {
     listHistory: vi.fn(async () => []),
+    setActive: vi.fn(async () => true),
   } as unknown as WorkflowDeployHistoryRepository;
 
   const app = express();
@@ -104,5 +105,19 @@ describe("workflow management authorization", () => {
     expect((await fetch(`${baseUrl}/api/workflows/wf-1/bot-permissions`, { headers })).status).toBe(403);
     expect((await fetch(`${baseUrl}/api/workflows/wf-1/history`, { headers })).status).toBe(200);
     expect((await fetch(`${baseUrl}/api/workflows/wf-1`, { method: "DELETE", headers })).status).toBe(403);
+  });
+
+  it("allows only an editor to change the default version", async () => {
+    const baseUrl = await start();
+
+    expect((await fetch(`${baseUrl}/api/workflows/wf-1/versions/2/activate`, {
+      method: "POST",
+      headers: { "X-User-Id": "viewer-1" },
+    })).status).toBe(403);
+
+    expect((await fetch(`${baseUrl}/api/workflows/wf-1/versions/2/activate`, {
+      method: "POST",
+      headers: { "X-User-Id": "editor-1" },
+    })).status).toBe(200);
   });
 });
