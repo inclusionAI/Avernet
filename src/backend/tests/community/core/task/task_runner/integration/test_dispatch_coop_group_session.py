@@ -243,3 +243,42 @@ def test_form_coop_group_recovers_owner_via_task_id_for_run_yaml_path():
     assert {"bot_uuid": "human_35983", "bot_name": "35983", "role": "observer"} in req.participants
     assert req.routing_policy == {"default_bot_final_delivery": "inject_observers"}
     assert req.originator is None  # originator 须为 Bot Actor(BCS 拒 human);人类仅作 participant 观察者
+
+
+def test_form_coop_group_singlebot_2_group_no_duplicate_protocol():
+    """singlebot_2_group:task_instruction 已是 format_execute 生成的完整 [task-execute] 信封(含统一上报协议:
+    回调地址/阶段1-4/请求体/自检/防重复约束),form_coop_group 仅追加 reporter 定位脚注,绝不二次包裹
+    [task-execute] 或重复注入上报协议——否则回调地址/请求体被说两遍,强化 bot 收尾轮重贴全文
+    (重复回复)与反复试错重复 POST(重复上报)。"""
+    bcs = _Bcs()
+    fmt = PromptFormatterImpl()
+    n = TaskNode(node_id="n1", task_id="t1", status=Status.RUNNING,
+                 task_spec=TaskSpec(Metadata("t1", "T", "分析存储行业"), Context("bg"),
+                                    Goal("O", [AcceptanceCriteria("a1", "d")])),
+                 run_info=RuntimeInfo(), node_run_graph=None)  # type: ignore[arg-type]
+    interp = fmt.format_execute({
+        "mode": "execute", "node_instruction": "分析存储行业", "skill_report_enabled": True,
+        "backend": "http://b", "task_id": "t1", "node_id": "n1", "execution_mode": "single_bot",
+    }, n)
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=fmt, context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver(),
+                       api_base_url="http://b")
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["mgr"], collab_mode="manager_worker",
+        members_info=[{"bot_id": "mgr", "role": "manager"}],
+        extend_props={"manager_bot_id": "mgr", "loop_task_id": "t1::n1", "task_instruction": interp},
+    )))
+    ctx = bcs.created[0].context
+    # 内层完整信封原样保留:回调地址全路径 + 阶段1-4 + 自检 各一次
+    assert "回调地址: POST http://b/api/v1/collaboration/tasks/callback/report" in ctx
+    assert "阶段1 执行" in ctx and "阶段4 上报" in ctx and "上报前自检" in ctx
+    # 附加 reporter 定位脚注
+    assert "reporter_bot_id=mgr" in ctx and "reporter_role=master/manager" in ctx
+    # 不二次包裹外层 [task-execute] 信封(否则 [task-execute] 出现两次 + 指令嵌套)
+    assert ctx.count("[task-execute]") == 1
+    # 旧外层"回投请求体只能包含"片段不再单独出现在 _task_instruction 包装外(已由内层请求体覆盖)
+    assert "回投请求体只能包含" not in ctx
+    # 旧外层被替换的请求体文案不再出现
+    assert "完整协作群执行输出" not in ctx
+    # 外层空 acceptances 不再打印误导性的 验收标准:[] (内层已有真验收标准)
+    assert "验收标准:[]" not in ctx
