@@ -369,7 +369,8 @@
             "eligible": true
           }
         ],
-        "openingAnnouncement": "第 1 轮投票开始，请在副屏投票，全部提交后统一计票。"
+        "openingAnnouncement": "第 1 轮投票开始，请在副屏投票，全部提交后统一计票。",
+        "resultFile": "undercover-result-v1-r1-a1.json"
       },
       "tab": {
         "id": "undercover-game-group-game-session-1",
@@ -735,7 +736,8 @@
             "eligible": true
           }
         ],
-        "openingAnnouncement": "第 2 轮投票开始，请在副屏投票，全部提交后统一计票。"
+        "openingAnnouncement": "第 2 轮投票开始，请在副屏投票，全部提交后统一计票。",
+        "resultFile": "undercover-result-v1-r2-a1.json"
       },
       "tab": {
         "id": "undercover-game-group-game-session-1",
@@ -1062,7 +1064,8 @@
           "showHostOutput": true,
           "showTimer": true
         },
-        "openingAnnouncement": "第 3 轮投票开始，请在副屏投票，全部提交后统一计票。"
+        "openingAnnouncement": "第 3 轮投票开始，请在副屏投票，全部提交后统一计票。",
+        "resultFile": "undercover-result-v1-r3-a1.json"
       },
       "tab": {
         "id": "undercover-game-group-game-session-1",

@@ -31,7 +31,7 @@
     "scan:public": "node scripts/public-scan.mjs && node scripts/asset-scan.mjs",
     "verify": "npm run typecheck && npm run build && npm run test:umd && npm run test:focused && npm run test:integration && npm run test:visual && npm run scan:public",
     "prepack": "npm run verify",
-    "test:focused": "node test/undercover-game/focused.mjs && node test/undercover-game/component-lifecycle.mjs",
+    "test:focused": "node test/undercover-game/focused.mjs && node test/undercover-game/component-lifecycle.mjs && node test/undercover-game/public-result.mjs",
     "test:integration": "node test/undercover-game/integration-smoke.mjs && node test/shared-panels.mjs",
     "test:visual": "node test/undercover-game/visual-regression.mjs"
   },

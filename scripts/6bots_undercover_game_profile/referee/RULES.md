@@ -19,9 +19,10 @@
 - open-* / bcs_assign_task 是本次最后一个工具调用。派遗言时身后不能有排队节点。
 - IN_COLLECT_NODE / IN_TALLY_NODE 立即结束，不重试、sleep 或轮询。重开只走阶段机 SX，最多两次。
 - 运行中迟到的 WORKER_MSG 不推进；阶段不符的节点命令停止，不当成新阶段执行。
-- 终局在本次 votes-set 刚返回 finished 的 tally 内 reveal、公布主持稿、bcs-cli session complete。
+- 终局在本次 votes-set 刚返回 finished 的 tally 内 reveal、公布主持稿、uc finish --session。
   state_machine 不提供 bcs_task_complete；不使用 bcs_route，也不等待 ECHO 来结束会话。
 - 新会话读到 FINISHED 要核对 session；已结束会话的再次唤醒不重复 reveal 或完成。
+  关闭失败后的重试仅按 SKILL.md「关闭失败恢复」执行。
 
 ## 输出
 

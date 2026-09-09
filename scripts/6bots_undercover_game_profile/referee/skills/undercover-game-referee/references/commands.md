@@ -17,7 +17,7 @@ GroupContext 里抄。
 
 | 命令 | `--session` |
 | --- | --- |
-| `status` `begin` `init` `reveal` `my-word` | **必须给。** 它们是一局的入口和出口，也是新会话里第一条会被调用的命令 |
+| `status` `begin` `init` `reveal` `finish` `my-word` | **必须给。** 它们是一局的入口和出口，也是新会话里第一条会被调用的命令 |
 | 其余（`open-*`、`*-set`、`render-*`、`mask`、`parse-vote`） | 可以省，脚本只落到**本机唯一一局还没结束**的游戏上；有两局同时在跑就报 `AMBIGUOUS_SESSION` |
 
 `--group` 一律可以省：取会话 ID 冒号前面那一段（`bcs_grp_xxxx:yyyy` → `bcs_grp_xxxx`）。
@@ -47,6 +47,7 @@ GroupContext 里抄。
 | --- | --- | --- |
 | `begin` | 查询当前 session 成员并校验投递接收者身份 | S0 |
 | `open-round` | `collaborate permission` + `render-speak-run` + `collaborate run` | S1 / S5 / SX |
+| `finish` | `session complete`，统一运行环境并支持关闭重试 | S4 |
 | `open-vote` | `collaborate permission` + `render-vote-run` + `collaborate run` | S3 / SX |
 
 它们会自己调 `bcs-cli`（认证仍由 CLI 负责，脚本不碰 token）。下面的 `render-*` 是维护者测试用的底层命令，主持人运行时不调用。
@@ -55,7 +56,7 @@ GroupContext 里抄。
 
 | 命令 | 输出里有词吗 |
 | --- | --- |
-| `status` `speeches-set` `votes-set` `parse-vote` `render-ping` `mask` | **没有**，可以放心引用 |
+| `status` `speeches-set` `votes-set` `parse-vote` `render-ping` `mask` `finish` | **没有**，可以放心引用 |
 | `init`（`human_word` 字段）`my-word` | 只有**人类玩家自己那个词**，只能说给他一个人听 |
 | `render-speak-run` `render-vote-run` | 只有文件路径，词在文件里，我不读也不贴 |
 | `reveal` | 有，且只有终局才能调 |
@@ -268,12 +269,36 @@ uc mask --session S --seat N --text "遗言原话" [--max-chars 35]
 
 ### `reveal`
 
-只能在 `FINISHED` 调，**而且一局只能调一次**：第二次返回 `ALREADY_REVEALED`。
-返回 `winner`、`win_reason`、`words`、每个座位的身份与词、每轮的发言与投票流向。
+只能在 `FINISHED` 调。每局成功揭晓一次：成功后再次执行返回 `ALREADY_REVEALED`。
+新版投票运行先保存公开结果快照，再通过 BCS 会话文件接口发布。发布失败返回
+`RESULT_PUBLISH_FAILED`，尚未确认揭晓；修复后重试 `reveal` 会核对同名文件，
+避免上传响应丢失导致重复发布。公开结果只包含终局事实，不包含原始投票和隐藏发言。
+返回 `winner`、`win_reason`、`words`、每个座位的身份与词、每轮的发言与投票流向，
+以及主持稿应原样使用的两行 `finale_header`。
 
 公布答案是不可撤销的，所以这里额外上了一道闸：真相已经公布过还想再公布，多半是认错了
 局（在新会话里读到了上一局的状态）。看到 `ALREADY_REVEALED` 就核对 `--session`，
 终局稿已经发过就别再发一遍。
+
+### `publish-result`
+
+```bash
+uc publish-result --session S
+```
+
+仅重试由 `reveal` 已生成的公开结果发布，不重新判胜、不重复主持稿、不关闭会话。
+已有结果内容必须一致；冲突或无法验证时失败，不覆盖。旧局没有结果快照时拒绝发布，
+由副屏的旧播报兼容逻辑展示。
+
+### `finish`
+
+```bash
+uc finish --session S
+```
+
+在 `FINISHED` 且已执行 `reveal` 后关闭 BCS 会话，成功返回 `completed=true`。
+脚本统一准备 CLI 环境，认证仍由 CLI 自动发现。失败如实报告；维护者修复后可只重试
+此命令，服务端接受重复关闭。不会再次公布答案，也不会修改本地 reveal 记录。
 
 ### `parse-vote`
 

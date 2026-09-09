@@ -263,7 +263,7 @@ cd src/bcs/assets/panel && npm run verify
 - 主持人的常规动作入口是 referee skill，详细 references 按需读，不在开局通读全部手册。
 - `votes-set` 刚判胜时明确要求 reveal；再次唤醒看到 FINISHED 才禁止重复公布。
   继续游戏时按遗言/直接下一轮分支给出指引，不再把终局的空 ping 误导为下一轮。
-- tally 使用 `bcs-cli session complete` 完成原会话。该节点的 state_machine 上下文
+- tally 使用 `uc finish --session "$session_id"` 完成原会话。该节点的 state_machine 上下文
   不提供 bcs_task_complete；不路由给自己寻找工具，也不把收尾移到 ECHO。
 - 玩家保留人格、钝度和投票依据，缩短公共入口，去掉隐式建模/论证要求。
   skill 的 `allowed-tools: []` 仅表达任务不需要工具，不代表运行时工具 schema 已被移除。

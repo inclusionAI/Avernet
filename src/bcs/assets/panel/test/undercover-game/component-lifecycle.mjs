@@ -86,6 +86,9 @@ try{
  for(const snapshot of [
    hostSnapshot('投票已收齐，主持人正在计票或准备下一轮。'),
    hostSnapshot('如果游戏结束，平民胜利就公布身份。'),
+   hostSnapshot('终局揭晓\n平民胜利就公布身份。'),
+   hostSnapshot('终局揭晓\n> 平民胜利！'),
+   hostSnapshot('终局揭晓\n平民胜利！\n卧底胜利！'),
    {graph:{...finishGraph,nodes:[{node_id:'node-host',status:'running'}]},pending:[],artifacts:{'node-host':finale}},
    {graph:{...finishGraph,nodes:[{node_id:'node-b',status:'completed'}]},pending:[],artifacts:{'node-b':finale}},
    {graph:{...finishGraph,nodes:[{node_id:'unmapped',status:'completed'}]},pending:[],artifacts:{unmapped:finale}},
@@ -95,6 +98,13 @@ try{
    await act(async()=>{ordinary=mount({...base,runId:'run-finale',phase:'voting'});await settle(5)});
    assert.equal(ordinary.container.querySelector('[aria-label="游戏结束"]'),null);
    await act(async()=>ordinary.unmount());
+ }
+ // Production prose and the documented referee board are valid finales.
+ for(const content of ['🔔 终局揭晓\n平民胜利！卧底在第一轮就被精准揪出。','🏁 本局结束——**平民赢了**。']) {
+   globalThis.fetch=fetchFor([hostSnapshot(content)],[]);let legacy;
+   await act(async()=>{legacy=mount({...base,runId:'run-finale',phase:'voting'});await settle(5)});
+   assert.ok(legacy.container.querySelector('[aria-label="游戏结束"]'),content);
+   await act(async()=>legacy.unmount());
  }
  globalThis.fetch=fetchFor([hostSnapshot(finale)],[]);
  let finalePanel;await act(async()=>{finalePanel=mount({...base,runId:'run-finale',phase:'voting'});await settle(5)});

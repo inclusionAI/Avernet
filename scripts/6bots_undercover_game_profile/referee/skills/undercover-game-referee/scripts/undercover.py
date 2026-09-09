@@ -57,7 +57,7 @@ NEXT_ACTION = {
     "pending_ping 为空（平票，或出局的是人类）：**不要派任何任务**，直接 open-round——"
     "开票稿的回灌就是这一步的唤醒源，bcs_assign_task 会打断你自己这次激活。",
     "FINISHED": "本局已经结束、真相也公布过了。只说一句「本局已结束，新建会话再来一局」，"
-    "**不要再 reveal、不要 bcs_task_complete、不要调任何脚本**。"
+    "**不要再 reveal、不要 bcs_task_complete**。仅维护者确认故障已修复并明确要求重试关闭当前会话时，调用 finish --session；其余情况不调脚本。"
     "如果你是刚被一个新会话叫醒的，那说明 --session 传错了：新会话应该看到 NO_GAME。",
 }
 
@@ -146,7 +146,7 @@ def work_dir(session_id: str) -> Path:
 #
 # 认错局的代价在这几条上也最大：status 让主持人以为本局已结束，reveal / my-word 直接
 # 把答案念出来，begin / init 会往错的地方写。所以它们必须显式给 --session。
-SESSION_REQUIRED_COMMANDS = ("status", "begin", "init", "reveal", "my-word")
+SESSION_REQUIRED_COMMANDS = ("status", "begin", "init", "reveal", "publish-result", "finish", "my-word")
 
 
 def known_states() -> list[tuple[str, str, Path]]:
@@ -632,6 +632,7 @@ def public_panel_projection(state: dict[str, Any], kind: str, attempt: int) -> d
         viewer_id = actor_id_for(human, state)
         params["voteCandidates"] = [{"actorId": actor_id_for(seat, state), "displayName": seat["display"], "seatNumber": int(seat["seat"]), "eligible": True} for seat in living if actor_id_for(seat, state) != viewer_id]
     if kind == "vote":
+        params["resultFile"] = f"undercover-result-v1-r{state['round']}-a{attempt}.json"
         params["openingAnnouncement"] = opening_announcement(state, kind, attempt)
     return params
 
@@ -890,9 +891,9 @@ def render_vote_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
         "不自行计票，不编造投票理由。tie 为真时本轮无人出局、不重投。\n"
         "3. verdict=continue：身份不公布，报存活名单，输出开票稿后结束激活。"
         "下一轮或遗言任务由开票稿回灌唤醒后安排。\n"
-        "4. verdict=finished：本次刚判胜，尚未公布真相。先执行 "
-        "undercover.py reveal --session '<当前会话ID>'，按返回公布词对、全员身份和词、"
-        "胜负与关键转折；然后执行 bcs-cli session complete '<当前会话ID>'。"
+        "4. verdict=finished：刚判胜未揭晓，执行 "
+        "undercover.py reveal --session '<当前会话ID>'，以 finale_header 开头，公布词对、"
+        "全员身份词、胜负转折；执行 uc finish --session '<当前会话ID>'。"
         "这是终局唯一允许公开全员词语和身份的分支；命令失败须如实报告。\n"
         "本节点的上下文是 state_machine，不能使用 bcs_task_complete；"
         "禁止 bcs_route（包括路由给自己）、查工具用法、派任务、open-round 或提交运行。"
@@ -961,14 +962,13 @@ def run_command(
 def _bcs_env() -> dict[str, str]:
     """Build the environment for bcs-cli subprocesses.
 
-    bcs-cli reads BOT_DATA_DIR (or OPENCLAW_DATA_DIR) to locate
-    ~/.openclaw/.bcs/session.json which holds the bot token.
-    In exec shells spawned by the agent, these vars are often unset,
-    so we fall back to the home directory just like game_dir() does.
+    bcs-cli reads BOT_DATA_DIR to locate .bcs/session.json. Normalize
+    OPENCLAW_DATA_DIR and the home fallback just like game_dir() does,
+    while leaving credential discovery and precedence to the CLI.
     """
     env = os.environ.copy()
-    if not env.get("BOT_DATA_DIR") and not env.get("OPENCLAW_DATA_DIR"):
-        env["BOT_DATA_DIR"] = str(Path.home() / ".openclaw")
+    if not env.get("BOT_DATA_DIR"):
+        env["BOT_DATA_DIR"] = env.get("OPENCLAW_DATA_DIR") or str(Path.home() / ".openclaw")
     return env
 
 
@@ -1309,6 +1309,11 @@ def cmd_status(args: argparse.Namespace) -> None:
         "next_action": NEXT_ACTION.get(state["phase"], "先跑 status"),
     }
     if state["phase"] == "FINISHED":
+        if state.get("public_result") and not state.get("revealed_at"):
+            brief["next_action"] = (
+                "终局结果已生成，但尚未确认发布及揭晓。报告发布失败；维护者确认修复后，"
+                "核对当前会话，重试 reveal --session；成功后按返回主持稿，再 finish --session。"
+            )
         # 一个新会话永远不该看到 FINISHED——它自己的状态文件还不存在，只会是 NO_GAME。
         brief["note"] = (
             "如果你是刚被一个新会话叫醒的，那是认错局了：--session 传的是上一局的 ID。"
@@ -1502,6 +1507,7 @@ def prepare_vote_run(session_id: str, retry: bool) -> dict[str, Any]:
             "rule": "只根据所有人历史全部发言，投出你认为词语和大家不一样的人；不能投自己；只交票号，不写理由",
         }
         panel_params = public_panel_projection(state, "vote", attempt)
+        current_round(state)["result_file"] = panel_params["resultFile"]
         panel_tab = panel_tab_metadata(state, "vote", attempt)
         yaml_path, input_path, panel_params_path = write_run_files(
             session_id, run_file_kind("vote", state["round"], attempt), yaml_text, run_input, panel_params
@@ -1680,7 +1686,7 @@ def cmd_votes_set(args: argparse.Namespace) -> None:
             "ping": ping,
             "next_action": (
                 "本次刚判胜，真相尚未公布。保持在当前计票节点：先 reveal --session '<当前会话ID>'，"
-                "公布终局稿，再执行 bcs-cli session complete '<当前会话ID>'。"
+                "公布终局稿，再执行 uc finish --session '<当前会话ID>'。"
                 "不要等待 ECHO，不调用 bcs_task_complete 或 bcs_route。"
                 if verdict == "finished"
                 else (
@@ -1930,6 +1936,110 @@ def cmd_open_vote(args: argparse.Namespace) -> None:
     )
 
 
+def build_public_result(state: dict[str, Any]) -> dict[str, Any]:
+    """Called only by reveal after the game has reached FINISHED."""
+    winner = state["result"]["winner"]
+    title = "平民阵营获胜" if winner == "civilian" else "卧底阵营获胜"
+    lines = [f"游戏结束！{title}。", state["result"]["reason"],
+             f"词对：平民词「{state['words']['civilian']}」／卧底词「{state['words']['undercover']}」", "全员身份："]
+    for seat in sorted(state["seats"], key=lambda item: item["seat"]):
+        role = "平民" if seat["role"] == "civilian" else "卧底"
+        lines.append(f"{seat['seat']}号 {seat['display']} — {role}（{seat['word']}）")
+    return {
+        "kind": "undercover.game-result", "version": 1, "status": "finished",
+        "gameSessionId": state["session_id"], "hostActorId": state["referee_uuid"],
+        "round": state["round"], "attempt": current_round(state)["renders"]["vote"],
+        "winner": winner, "reason": state["result"]["reason"], "summary": "\n".join(lines),
+    }
+
+
+def publish_public_result(state: dict[str, Any]) -> None:
+    """Caller holds the session lock. Reconcile a lost upload response before retrying."""
+    if state.get("result_file_id"):
+        return
+    result = state["public_result"]
+    name = current_round(state)["result_file"]
+    session = state["session_id"]
+    offset = 0
+    found_file_id = ""
+    while True:
+        code, out, _ = bcs_cli("--json", "session", "file", "list", "--session", session,
+                               "--prefix", name, "--limit", "100", "--offset", str(offset))
+        page = last_json(out)
+        if code or not isinstance(page, dict) or not isinstance(page.get("items"), list) or not isinstance(page.get("total"), int):
+            die("RESULT_PUBLISH_FAILED", "无法核对终局文件；修复后重试原命令。")
+        for item in page["items"]:
+            if (item.get("file_name") != name or item.get("session_id") != session
+                    or str(item.get("status", "")).lower() != "ready"
+                    or str(item.get("owner", {}).get("actor_kind", "")).lower() != "bot"
+                    or item.get("owner", {}).get("actor_id") != state["referee_uuid"]):
+                continue
+            with tempfile.TemporaryDirectory() as directory:
+                target = Path(directory) / "result.json"
+                code, _, _ = bcs_cli("--json", "session", "file", "download", "--session", session,
+                                      "--file-id", item["file_id"], "--out", str(target))
+                try:
+                    existing = json.loads(target.read_text(encoding="utf-8")) if code == 0 else None
+                except (OSError, ValueError):
+                    existing = None
+            if existing != result:
+                die("RESULT_PUBLISH_FAILED", "已有终局文件无法验证或内容冲突；请维护者排查，不能覆盖。")
+            found_file_id = item["file_id"]
+        offset += len(page["items"])
+        if offset >= page["total"]:
+            break
+        if not page["items"] or offset >= 1000:
+            die("RESULT_PUBLISH_FAILED", "终局文件列表未完整读取，请维护者排查。")
+    if found_file_id:
+        state["result_file_id"] = found_file_id
+        save_state(state)
+        return
+    with tempfile.TemporaryDirectory() as directory:
+        target = Path(directory) / name
+        target.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
+        code, out, _ = bcs_cli("--json", "session", "file", "upload", "--session", session,
+                               "--path", str(target), "--name", name, "--mime", "application/json")
+    uploaded = last_json(out)
+    if (code or not isinstance(uploaded, dict) or not uploaded.get("file_id")
+            or str(uploaded.get("status", "")).lower() != "ready"
+            or uploaded.get("session_id") != session or uploaded.get("file_name") != name
+            or str(uploaded.get("owner", {}).get("actor_kind", "")).lower() != "bot"
+            or uploaded.get("owner", {}).get("actor_id") != state["referee_uuid"]):
+        die("RESULT_PUBLISH_FAILED", "终局文件发布未确认；修复后重试原命令，脚本会核对已上传结果。")
+    state["result_file_id"] = uploaded["file_id"]
+    save_state(state)
+
+
+def cmd_publish_result(args: argparse.Namespace) -> None:
+    with locked(args.session):
+        state = load_state(args.session)
+        if state["phase"] != "FINISHED" or not state.get("public_result"):
+            die("NOT_REVEALED", "尚未生成公开终局结果，请先执行 reveal。")
+        publish_public_result(state)
+    emit({"ok": True, "published": True, "file_id": state["result_file_id"]})
+
+
+def cmd_finish(args: argparse.Namespace) -> None:
+    with locked(args.session):
+        state = load_state(args.session)
+        if state["phase"] != "FINISHED":
+            die("NOT_FINISHED", "本局还没结束，不能关闭会话。")
+        if not state.get("revealed_at"):
+            die("NOT_REVEALED", "本局尚未执行 reveal；先按终局步骤公布答案，再 finish。")
+        if state.get("public_result"):
+            publish_public_result(state)
+    # The server accepts repeated completion, including after a lost response.
+    # Keep the reveal record intact so closing can be retried independently.
+    code, out, err = bcs_cli("--json", "session", "complete", args.session)
+    if code != 0 or last_json(out) is None:
+        die(
+            "FINISH_FAILED",
+            f"关闭会话失败（exit={code}）：{(err or out)[:300]}。"
+            "本局结果已公布，但尚未确认 BCS 会话关闭。请维护者排障后仅重试 finish --session，勿重复 reveal。",
+        )
+    emit({"ok": True, "session_id": args.session, "completed": True})
+
+
 def cmd_reveal(args: argparse.Namespace) -> None:
     # 真相只许公布一次。
     #
@@ -1947,12 +2057,18 @@ def cmd_reveal(args: argparse.Namespace) -> None:
                 "如果你是刚被一个新会话叫醒的，那说明认错局了——新的一局要先 begin。"
                 "如果终局稿已经发出去了，就别再发一遍。",
             )
+        if current_round(state).get("result_file"):
+            if not state.get("public_result"):
+                state["public_result"] = build_public_result(state)
+                save_state(state)
+            publish_public_result(state)
         state["revealed_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
         save_state(state)
     emit(
         {
             "winner": state["result"]["winner"],
             "win_reason": state["result"]["reason"],
+            "finale_header": "游戏结束！\n" + ("平民胜利！" if state["result"]["winner"] == "civilian" else "卧底胜利！"),
             "words": state["words"],
             "seats": [
                 {
@@ -2055,6 +2171,10 @@ def main() -> None:
         func=cmd_render_ping
     )
     with_session(sub.add_parser("reveal", help="终局公布真相")).set_defaults(func=cmd_reveal)
+
+    with_session(sub.add_parser("publish-result", help="重试发布已生成的终局结果，不重复揭晓")).set_defaults(func=cmd_publish_result)
+
+    with_session(sub.add_parser("finish", help="公布终局后关闭 BCS 会话；失败修复后可重试")).set_defaults(func=cmd_finish)
 
     p = with_session(sub.add_parser("speeches-set", help="提交本轮发言：检查、遮蔽、落盘"))
     p.add_argument("--json", required=True, metavar='{"1":"...","3":"..."}')

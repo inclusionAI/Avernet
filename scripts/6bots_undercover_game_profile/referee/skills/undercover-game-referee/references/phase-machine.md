@@ -158,13 +158,15 @@ uc open-vote
    - `continue` → 说"开票结果"那段（逐条报票向、报票数、宣布出局、身份暂不公布、报剩下谁）。
      **玩家只交了票号，没有理由，不许替他们编。**
      `tie` 为真就是平票：**本轮没有人出局，直接进下一轮，没有重投。**
-   - `finished` → 先 `uc reveal --session "$session_id"`，再说"终局"那段，然后执行 `bcs-cli session complete "$session_id"` 结束会话，失败如实报告。当前 tally 是 state_machine 上下文，不提供 `bcs_task_complete`；禁止 `bcs_route` 或路由给自己寻找工具。
+   - `finished` → 先 `uc reveal --session "$session_id"`，再说"终局"那段，然后执行 `uc finish --session "$session_id"` 结束会话，失败如实报告。当前 tally 是 state_machine 上下文，不提供 `bcs_task_complete`；禁止 `bcs_route` 或路由给自己寻找工具。
      **这是全局唯一一处可以 `reveal` 和结束会话的地方**：只有在我自己刚跑完 `votes-set`、
      它返回 `finished` 的这次激活里才做。被唤醒时看到 `FINISHED` 而这次激活里我一轮都没
      主持过，那不是终局，是认错局。
 3. **这个节点里只做上面两件事。** 不要在这里派任务、不要调 `bcs_assign_task`，也不要开下一轮、不要提交任何运行——这里和 S2 的汇总节点是同一条纪律：我此刻就是投票运行的
    末节点，在里面提交下一个运行就是等自己让路（脚本会报 `IN_TALLY_NODE`）。下一轮的唤醒源在 S4b 安排。
 4. 以上作为这个节点的产物输出，结束激活。
+
+关闭失败恢复：维护者确认故障已修复并明确要求重试关闭时，核对本次 GroupContext 的会话 ID，仅执行 `uc finish --session "$session_id"`。此为 FINISHED 的恢复例外；不重复 reveal 或终局稿。只有 finish 成功才确认 BCS 会话已关闭。
 
 ## S4b 派遗言任务
 
