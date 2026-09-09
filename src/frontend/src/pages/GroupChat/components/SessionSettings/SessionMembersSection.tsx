@@ -27,6 +27,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { useSessionMembers } from '@/pages/GroupChat/hooks/useSessionMembers';
+import { useUserStore } from '@/stores/userStore';
 import { cn } from '@/utils/utils';
 import { EyeOff, Mic, MicOff, Plus, User, X } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
@@ -87,6 +88,7 @@ const SessionMembersSection: React.FC<SessionMembersSectionProps> = ({
   isOwner,
   onClickAddMember,
 }) => {
+  const userId = useUserStore((state) => state.userId);
   const {
     removeSessionMember,
     updateSessionMemberScope,
@@ -204,7 +206,8 @@ const SessionMembersSection: React.FC<SessionMembersSectionProps> = ({
                     主节点
                   </span>
                 )}
-                {m.actorKind === 'human' && isOwner ? (
+                {m.actorKind === 'human' &&
+                (isOwner || (!!userId && m.actorId === `human_${userId}`)) ? (
                   <select
                     aria-label={`设置 ${m.name} 的会话消息视角`}
                     value={m.messageViewScope || 'full'}
