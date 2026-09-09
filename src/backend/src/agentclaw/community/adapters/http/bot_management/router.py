@@ -1092,7 +1092,7 @@ async def create_bot(
             data=None,
         )
     except Exception as e:
-        logger.error(f"[bot_router.create_bot] Unexpected error: {e}")
+        logger.error(f"[XX]: {e}")
         return ApiResponse(
             success=False,
             message=f"创建Bot失败: {str(e)}",
