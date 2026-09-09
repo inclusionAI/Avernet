@@ -24,6 +24,20 @@ import EvolveTaskOverview from '../components/EvolveTaskOverview'
 import { insightApi } from '../api/insight'
 import { useEvolveAdminScope } from '../features/evolve/admin-scope'
 
+type RepairEvidenceHint = NonNullable<RepairTask['insightSource']>['evidenceTaskRefs'][number]
+
+function RepairEvidenceHints({ evidence }: { evidence: RepairEvidenceHint[] }) {
+  if (evidence.length === 0) return null
+  return <div className="mt-3 space-y-3" aria-label="已关联的修复证据">
+    <p className="text-xs leading-5 text-gray-500">以下证据会自动带入修复上下文，无需手动复制。</p>
+    {evidence.map((item) => <div key={`${item.sessionId}:${item.taskIndex}:${item.ordinal}`} className="rounded-lg border border-gray-200 bg-white p-3 text-xs leading-5">
+      <p className="font-medium text-gray-800">标题：{item.taskDescription || '历史任务未保存标题'}</p>
+      <p className="mt-1 break-all font-mono text-[11px] text-gray-500">Session ID：{item.sessionId} · Task {item.taskIndex}</p>
+      <p className="mt-1 whitespace-pre-wrap text-gray-600">判定：{item.failureClass || '未记录分类'}；{item.reasoningSummary || '暂无 Judge 摘要'}</p>
+    </div>)}
+  </div>
+}
+
 const inputClass = 'w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10'
 const primaryButton = 'inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50'
 const secondaryButton = 'inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50'
@@ -538,6 +552,7 @@ function CreateRepair({
   const [repairDirection, setRepairDirection] = useState('')
   const [insightEvidenceCount, setInsightEvidenceCount] = useState<number | null>(null)
   const [insightSessionIds, setInsightSessionIds] = useState<string[]>([])
+  const [insightEvidence, setInsightEvidence] = useState<RepairEvidenceHint[]>([])
   const [traceId, setTraceId] = useState('')
   const [relatedTaskId, setRelatedTaskId] = useState('')
   const [errorText, setErrorText] = useState('')
@@ -621,6 +636,7 @@ function CreateRepair({
         setSymptom(detail.title)
         setRepairDirection(detail.suggestedAction ?? detail.userGuidance ?? '')
         setInsightEvidenceCount(detail.evidenceCount)
+        setInsightEvidence(detail.evidence)
         setInsightSessionIds([...new Set(detail.evidence.map((item) => item.sessionId))])
         setBotId(detail.botId)
         setBotSelectionKey(detail.botId)
@@ -790,7 +806,8 @@ function CreateRepair({
             <label className="mt-3 block text-xs font-medium text-gray-600">现象 <span className="text-red-500">*</span><textarea aria-label="问题现象" className={`${inputClass} mt-1.5 min-h-32 resize-y`} maxLength={4000} value={symptom} onChange={(event) => setSymptom(event.target.value)} placeholder="描述用户看到的现象、期望行为和已经尝试过的操作" /></label>
             {insightImprovementId != null && <label className="mt-4 block text-xs font-medium text-gray-600">修复方向 / Spec（可选）<textarea aria-label="修复方向" className={`${inputClass} mt-1.5 min-h-24 resize-y`} maxLength={5000} value={repairDirection} onChange={(event) => setRepairDirection(event.target.value)} placeholder="说明希望检查或修改的配置、Skill、权限或运行环境，以及不能修改的范围。" /><span className="mt-1 block text-[11px] font-normal text-gray-500">这段内容会作为 Repair Agent 的执行约束；Session 和完整 Evidence 由系统自动带入。</span></label>}
             <details className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
-              <summary className="cursor-pointer text-sm font-medium text-gray-700">补充可选线索</summary>
+              <summary className="cursor-pointer text-sm font-medium text-gray-700">补充可选线索{insightEvidence.length > 0 ? ` · 已关联 ${insightEvidence.length} 条证据` : ''}</summary>
+              <RepairEvidenceHints evidence={insightEvidence} />
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <label className="text-xs font-medium text-gray-600">Trace ID<input aria-label="Trace ID" className={`${inputClass} mt-1.5`} maxLength={256} value={traceId} onChange={(event) => setTraceId(event.target.value)} /></label>
                 <label className="text-xs font-medium text-gray-600">相关任务 ID<input aria-label="相关任务 ID" className={`${inputClass} mt-1.5`} maxLength={256} value={relatedTaskId} onChange={(event) => setRelatedTaskId(event.target.value)} /></label>
@@ -1557,6 +1574,7 @@ function RepairDetail({
           <div className="rounded-lg bg-white/80 px-3 py-2.5"><p className="text-[10px] text-indigo-600/70">授权方式</p><p className="mt-1 font-medium text-indigo-950">{task.insightSource.authorizationMode === 'PERSISTENT' ? '持续授权' : '仅本次授权'}</p></div>
         </div>
         {task.insightSource.repairDirection && <div className="mt-3 rounded-lg bg-white/80 px-3 py-2.5 text-xs leading-5 text-indigo-950"><span className="font-medium">修复方向：</span>{task.insightSource.repairDirection}</div>}
+        <RepairEvidenceHints evidence={task.insightSource.evidenceTaskRefs} />
       </section>}
 
       {adminOperator && <div role="status" className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">当前为管理员操作视角。你可以推进方案、结果验收、恢复或终止该 Repair；需要 Owner 浏览器登录态的上下文请求和 CodeFuse 授权仍需由 Owner 完成。</div>}

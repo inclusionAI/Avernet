@@ -613,7 +613,7 @@ it("freezes an explicit ADMIN_ONCE execution scope for administrator delegation"
   }));
 });
 
-it("creates an Insight-backed Repair run with frozen evidence hints", async () => {
+it.each([false, true])("preserves frozen evidence through plan/apply when sourceUnavailable=%s", async (sourceUnavailable) => {
   const detail = {
     improvementId: 42,
     ownerUserId: ACTOR,
@@ -623,8 +623,8 @@ it("creates an Insight-backed Repair run with frozen evidence hints", async () =
     userGuidance: "只修改测试 Bot 的查询模板",
     sourceType: "USER_SELECTED",
     sourceRuleId: null,
-    evidenceCount: 1,
-    sessionCount: 1,
+    evidenceCount: 3,
+    sessionCount: 2,
     dataStartTime: null,
     dataEndTime: null,
     dataAsOf: "2026-08-17T00:00:00.000Z",
@@ -666,10 +666,32 @@ it("creates an Insight-backed Repair run with frozen evidence hints", async () =
       payloadRef: "oss://fixture/session-42.json",
       payloadEtag: "etag-42",
       payloadVersionId: "v1",
+    }, {
+      sessionId: "session-42",
+      taskIndex: 1,
+      ordinal: 1,
+      taskDescription: "检查网关状态",
+      failureClass: "TOOL_FAILURE",
+      reasoningSummary: "诊断请求失败 token=secret-test-value 应检查工具授权",
+      payloadRef: "oss://fixture/session-42.json",
+      payloadEtag: "etag-42",
+      payloadVersionId: "v1",
+    }, {
+      sessionId: "session-43",
+      taskIndex: 0,
+      ordinal: 2,
+      taskDescription: "重新执行打包任务",
+      failureClass: "CONFIG_MISSING",
+      reasoningSummary: null,
+      payloadRef: "oss://fixture/session-43.json",
+      payloadEtag: "etag-43",
+      payloadVersionId: "v1",
     }],
     evolveLinks: [],
   } as unknown as ImprovementDetail;
   harness.insightBridge.getDetail.mockResolvedValue(detail);
+
+  if (sourceUnavailable) harness.insightBridge.resolvePlanSource.mockRejectedValue(new Error("source unavailable"));
 
   const created = await createTask({
     insightImprovementId: 42,
@@ -677,11 +699,17 @@ it("creates an Insight-backed Repair run with frozen evidence hints", async () =
     repairDirection: "只允许修改 workflow_engine_dispatch 查询模板",
   });
 
+  const evidenceTaskRefs = [
+    { sessionId: "session-42", taskIndex: 0, ordinal: 0, taskDescription: "执行打包任务", failureClass: "CONFIG_MISSING", reasoningSummary: "字段不存在" },
+    { sessionId: "session-42", taskIndex: 1, ordinal: 1, taskDescription: "检查网关状态", failureClass: "TOOL_FAILURE", reasoningSummary: "诊断请求失败 [REDACTED_SECRET_TEXT] 应检查工具授权" },
+    { sessionId: "session-43", taskIndex: 0, ordinal: 2, taskDescription: "重新执行打包任务", failureClass: "CONFIG_MISSING", reasoningSummary: null },
+  ];
   expect(created.config.insightSource).toEqual(expect.objectContaining({
     improvementId: 42,
     requestId: "insight-repair-run-1",
-    evidenceCount: 1,
-    sessionIds: ["session-42"],
+    evidenceCount: 3,
+    sessionIds: ["session-42", "session-43"],
+    evidenceTaskRefs,
     authorizationMode: "ONCE",
     repairDirection: "只允许修改 workflow_engine_dispatch 查询模板",
   }));
@@ -697,9 +725,20 @@ it("creates an Insight-backed Repair run with frozen evidence hints", async () =
 
   const bootstrap = await harness.service.bootstrap(created.identity);
   expect(bootstrap).toEqual(expect.objectContaining({
-    insightSource: expect.objectContaining({ improvementId: 42, sessionIds: ["session-42"] }),
-    insightPlanSource: { status: "ready" },
+    insightSource: expect.objectContaining({ improvementId: 42, title: detail.title, sessionIds: ["session-42", "session-43"], evidenceTaskRefs }),
+    insightPlanSource: sourceUnavailable ? expect.objectContaining({ status: "unavailable", reason: "source_unavailable" }) : { status: "ready" },
   }));
+  expect(() => assertRepairAuditSecretFree(bootstrap, "bootstrap")).not.toThrow();
+  // Mutating the source after creation must not change the frozen repair hints.
+  detail.evidence[0].taskDescription = "已修改的源任务";
+  const applyConfig = await advanceToApply(created);
+  const applyBootstrap = await harness.service.bootstrap({
+    taskId: created.taskId,
+    stepId: applyConfig.current.stepId,
+    executionId: applyConfig.execution.executionId,
+  });
+  expect(applyBootstrap).toMatchObject({ insightSource: { evidenceTaskRefs } });
+  expect(applyBootstrap).not.toHaveProperty("insightPlanSource");
 });
 
 it("records a secret-safe Insight projection in the bootstrap audit", async () => {

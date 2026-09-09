@@ -1141,6 +1141,7 @@ export class InsightService {
       "version",
       "outcome",
       "newSessionCount",
+      "allowZeroSession",
       "lastRecurrenceAt",
       "overrideActionType",
     ]);
@@ -1152,6 +1153,7 @@ export class InsightService {
     const version = Number(body.version);
     const outcome = String(body.outcome ?? "").trim().toUpperCase();
     const newSessionCount = Number(body.newSessionCount ?? 0);
+    const allowZeroSession = body.allowZeroSession === true;
     const lastRecurrenceAt = body.lastRecurrenceAt == null ? null : String(body.lastRecurrenceAt).trim() || null;
     const overrideActionType = body.overrideActionType == null
       ? null
@@ -1162,9 +1164,7 @@ export class InsightService {
     if (!["DISAPPEARED", "STILL_PRESENT", "INSUFFICIENT_DATA"].includes(outcome)) {
       throw new InsightValidationError("outcome 不合法");
     }
-    if (outcome === "DISAPPEARED" && newSessionCount < 1) {
-      throw new InsightValidationError("没有新 Session 时不能确认问题已消失");
-    }
+
     if (outcome === "STILL_PRESENT" && newSessionCount < 1) {
       throw new InsightValidationError("没有新 Session 时不能确认问题仍然存在");
     }
@@ -1179,12 +1179,14 @@ export class InsightService {
       expectedVersion: version,
       outcome: outcome as "DISAPPEARED" | "STILL_PRESENT" | "INSUFFICIENT_DATA",
       newSessionCount,
+      allowZeroSession,
       lastRecurrenceAt,
       overrideActionType: overrideActionType as "ASSIGN_OWNER" | null,
     });
     if (updated === null) throw new InsightNotFoundError("改进项不存在");
     if (updated === "VERSION_CONFLICT") throw new InsightConflictError("改进项已被更新，请重新读取");
     if (updated === "TOO_EARLY") throw new InsightConflictError("开放改进项至少需要观察 7 天且没有同类问题，才能确认验收通过", "OPEN_VERIFICATION_TOO_EARLY");
+    if (updated === "RECURRENCE_FOUND") throw new InsightConflictError("无新 Session 关单不能携带同类问题复现证据", "RECURRENCE_FOUND");
     if (updated === "STATE_CONFLICT") throw new InsightConflictError("当前改进项不属于未回传修复的主动验收范围");
     return updated;
   }
@@ -1195,6 +1197,7 @@ export class InsightService {
       "version",
       "outcome",
       "newSessionCount",
+      "allowZeroSession",
       "lastRecurrenceAt",
       "overrideActionType",
     ]);
@@ -1206,6 +1209,7 @@ export class InsightService {
     const version = Number(body.version);
     const outcome = String(body.outcome ?? "").trim().toUpperCase();
     const newSessionCount = Number(body.newSessionCount ?? 0);
+    const allowZeroSession = body.allowZeroSession === true;
     const lastRecurrenceAt = body.lastRecurrenceAt == null ? null : String(body.lastRecurrenceAt).trim() || null;
     const overrideActionType = body.overrideActionType == null
       ? null
@@ -1216,8 +1220,8 @@ export class InsightService {
     if (!["DISAPPEARED", "STILL_PRESENT", "INSUFFICIENT_DATA"].includes(outcome)) {
       throw new InsightValidationError("outcome 不合法");
     }
-    if (outcome === "DISAPPEARED" && newSessionCount < 1) {
-      throw new InsightValidationError("没有新 Session 时不能确认问题已消失");
+    if (outcome === "DISAPPEARED" && newSessionCount === 0 && !allowZeroSession) {
+      throw new InsightValidationError("无新 Session 关单必须显式确认 allowZeroSession=true");
     }
     if (outcome === "STILL_PRESENT" && newSessionCount < 1) {
       throw new InsightValidationError("没有新 Session 时不能确认问题仍然存在");
@@ -1233,12 +1237,14 @@ export class InsightService {
       expectedVersion: version,
       outcome: outcome as "DISAPPEARED" | "STILL_PRESENT" | "INSUFFICIENT_DATA",
       newSessionCount,
+      allowZeroSession,
       lastRecurrenceAt,
       overrideActionType: overrideActionType as "ASSIGN_OWNER" | null,
     });
     if (updated === null) throw new InsightNotFoundError("改进项不存在");
     if (updated === "VERSION_CONFLICT") throw new InsightConflictError("改进项已被更新，请重新读取");
     if (updated === "TOO_EARLY") throw new InsightConflictError("修复后至少需要观察 2 天且没有同类问题，才能确认验收通过", "VERIFICATION_TOO_EARLY");
+    if (updated === "RECURRENCE_FOUND") throw new InsightConflictError("无新 Session 关单不能携带同类问题复现证据", "RECURRENCE_FOUND");
     if (updated === "STATE_CONFLICT") throw new InsightConflictError("当前状态不允许验证回写");
     return updated;
   }

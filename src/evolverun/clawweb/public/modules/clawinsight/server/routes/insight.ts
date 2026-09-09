@@ -1064,6 +1064,7 @@ export function createInsightRouter(service: InsightService | null, options: Ins
       "targetBotId",
       "botEnv",
       "repairDirection",
+      "diagnosticMode",
       "reason",
       "crossBotConfirmed",
       "maxRounds",
@@ -1106,6 +1107,10 @@ export function createInsightRouter(service: InsightService | null, options: Ins
     if (improvement.actionType === "ASSIGN_OWNER" && !repairDirection) {
       throw new InsightValidationError("手动改进项必须填写修复方向，才能进入进化室");
     }
+    const diagnosticMode = body.diagnosticMode === undefined ? "observe" : body.diagnosticMode;
+    if (diagnosticMode !== "observe" && diagnosticMode !== "deep") {
+      throw new InsightValidationError("diagnosticMode 必须是 observe 或 deep");
+    }
     const crossBotConfirmed = body.crossBotConfirmed === true;
     if (targetBotId !== improvement.botId && !crossBotConfirmed) {
       throw new InsightValidationError("目标 Bot 与问题证据来源不同，必须明确确认跨 Bot 执行");
@@ -1127,6 +1132,7 @@ export function createInsightRouter(service: InsightService | null, options: Ins
             taskName: `${improvement.title.slice(0, 119)} · 管理员代处理`,
             symptom: improvement.title,
             repairDirection,
+            diagnosticMode,
             targetUserId,
             botId: targetBotId,
             targetEnvironment: botEnv,

@@ -66,7 +66,15 @@ export type RepairInsightSource = {
   sourceBatchId: string;
   evidenceCount: number;
   sessionIds: string[];
-  evidenceTaskRefs: Array<{ sessionId: string; taskIndex: number; ordinal: number }>;
+  evidenceTaskRefs: Array<{
+    sessionId: string;
+    taskIndex: number;
+    ordinal: number;
+    /** Frozen, redacted evidence hints; absent on historical Repair tasks. */
+    taskDescription?: string;
+    failureClass?: string;
+    reasoningSummary?: string | null;
+  }>;
   repairDirection: string | null;
   authorizationMode: "ONCE" | "PERSISTENT";
   authorizationGrantId?: number;
