@@ -4,6 +4,7 @@ import express from "express";
 import Database from "better-sqlite3";
 import type { Server } from "node:http";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
+import { migrations } from "@avernet/clawweb-shared/server/schema";
 import { sqliteDialect } from "@avernet/clawweb-shared/server/db/dialect";
 import { FlowRunRepository } from "../../../repositories/flow-run-repository.js";
 import { WorkflowDeployHistoryRepository } from "../../../repositories/workflow-deploy-history-repository.js";
@@ -33,8 +34,10 @@ describe("ClawMind workflow version wire contract", () => {
     ); CREATE TABLE workflow_deploy_history (
       id INTEGER PRIMARY KEY, pack_id TEXT, workflow_id TEXT, deploy_number INTEGER, version INTEGER,
       tag_name TEXT, action TEXT, from_deploy_number INTEGER, spec_json TEXT, note TEXT, bot_id TEXT,
-      owner_id TEXT, is_active INTEGER, gmt_create INTEGER, gmt_modified INTEGER
+      owner_id TEXT, is_active INTEGER, gmt_create INTEGER, gmt_modified INTEGER, UNIQUE(pack_id, deploy_number, workflow_id)
     );`);
+    raw.exec("CREATE TABLE workflow_specs (workflow_id TEXT PRIMARY KEY, version INTEGER); INSERT INTO workflow_specs VALUES ('demo', 2)");
+    for (const sql of migrations.find(m => m.description === "Reserve workflow releases by saved Git commit")!.sql) raw.exec(sql);
     const history = new WorkflowDeployHistoryRepository(db);
     await history.insert({ packId: "pack", workflowId: "demo", deployNumber: 5, version: 2, action: "deploy", tagName: "deploy/demo/#5", specJson: '{"id":"demo"}', isActive: true });
     const app = express();
@@ -62,7 +65,7 @@ describe("ClawMind workflow version wire contract", () => {
     expect(raw.prepare("SELECT workflow_version, workflow_deploy_number FROM flow_runs WHERE flow_id = 'legacy'").get()).toEqual({ workflow_version: null, workflow_deploy_number: null });
   });
 
-  it.each([0, -1, 1.5, "2", 9007199254740992])("rejects invalid version metadata %s before persistence", async value => {
+  it.each([0, -1, 1.5, "2", 2147483648, 9007199254740992])("rejects invalid version metadata %s before persistence", async value => {
     for (const field of ["workflow_version", "workflow_deploy_number"]) {
       const response = await fetch(`${baseUrl}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ flow_id: `invalid-${field}-${value}`, workflow_id: "demo", status: "running", [field]: value }) });
       expect(response.status).toBe(400);
@@ -79,4 +82,29 @@ describe("ClawMind workflow version wire contract", () => {
     const response = await fetch(`${baseUrl}/deploy-history/other/versions/2/snapshot`);
     expect(await response.json()).toEqual({ found: false });
   });
+  it("reserves and confirms a release through HTTP, including lost-response retries", async () => {
+    const post = (endpoint: string, body: unknown) => fetch(`${baseUrl}/deploy-history/releases/${endpoint}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    const body = { workflowId: "demo", packId: "pack", snapshotCommit: "c".repeat(40), specJson: '{"id":"demo"}', minDeployNumber: 9 };
+    const response = await post("reserve", body);
+    expect(response.status).toBe(200);
+    const release = await response.json();
+    expect(release).toMatchObject({ version: 3, deployNumber: 9, completed: false });
+    expect(await (await post("reserve", body)).json()).toEqual(release);
+    expect((await post("complete", { ...release, tagName: "wrong" })).status).toBe(409);
+    expect(await (await post("complete", release)).json()).toEqual({ ...release, completed: true });
+    expect(await (await post("complete", release)).json()).toEqual({ ...release, completed: true });
+    for (const invalid of [{ ...body, minDeployNumber: 0 }, { ...body, snapshotCommit: "invalid" }, { ...body, specJson: '{"id":"other"}' }]) {
+      expect((await post("reserve", invalid)).status).toBe(400);
+    }
+    expect((await post("reserve", { ...body, specJson: '{"id":"demo","title":"changed"}' })).status).toBe(409);
+  });
+
+  it("returns 409 for an existing legacy deployment without silently renumbering its version", async () => {
+    const response = await fetch(`${baseUrl}/deploy-history`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ packId: "pack", workflowId: "demo", deployNumber: 5, version: 2, action: "deploy", tagName: "deploy/demo/#5", specJson: '{"id":"demo"}' }) });
+    expect(response.status).toBe(409);
+  });
+
 });

@@ -1,3 +1,4 @@
+import { ReleaseConflict } from "../../repositories/workflow-release-repository.js";
 /**
  * Internal API for deploy history management.
  *
@@ -21,7 +22,31 @@ export function createInternalDeployHistoryRouter(
 ): Router {
   const router = Router();
 
-  /** POST / — Write deploy history record (with 409 auto-retry) */
+  // These endpoints inherit internal API signature authentication from the host.
+  for (const operation of ["reserve", "complete"] as const) {
+    router.post(`/releases/${operation}`, asyncHandler(async (req: Request, res: Response) => {
+      if (!wfdhRepo) { res.status(503).json({ error: "Service Unavailable" }); return; }
+      const b = req.body;
+      if (!b || typeof b.workflowId !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$/.test(b.workflowId)
+          || typeof b.packId !== "string" || !b.packId || b.packId.length > 255
+          || typeof b.snapshotCommit !== "string" || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(b.snapshotCommit)
+          || (operation === "reserve" && (typeof b.specJson !== "string" || !Number.isSafeInteger(b.minDeployNumber) || b.minDeployNumber < 1 || b.minDeployNumber > 2147483647))
+          || (operation === "complete" && (!Number.isSafeInteger(b.version) || b.version < 1 || b.version > 2147483647 || !Number.isSafeInteger(b.deployNumber) || b.deployNumber < 1 || b.deployNumber > 2147483647 || typeof b.tagName !== "string"))) {
+        res.status(400).json({ error: "Invalid release request" }); return;
+      }
+      if (operation === "reserve") {
+        try { if (JSON.parse(b.specJson)?.id !== b.workflowId) throw new Error(); }
+        catch { res.status(400).json({ error: "Snapshot workflow mismatch" }); return; }
+      }
+      try { res.json(operation === "reserve" ? await wfdhRepo.reserveRelease(b) : await wfdhRepo.completeRelease(b)); }
+      catch (err) {
+        if (err instanceof ReleaseConflict) { res.status(409).json({ error: "Conflict", message: err.message }); return; }
+        throw err;
+      }
+    }));
+  }
+
+  /** Legacy insert: conflicts must not silently change a pre-published tag/version. */
   router.post("/", asyncHandler(async (req: Request, res: Response) => {
     if (!wfdhRepo) { res.status(503).json({ error: "Service Unavailable" }); return; }
     const b = req.body as {
@@ -31,15 +56,13 @@ export function createInternalDeployHistoryRouter(
       isActive?: boolean;
     };
     if (!b.packId || !b.workflowId || typeof b.deployNumber !== "number"
-        || typeof b.version !== "number" || !b.action || !b.specJson) {
+        || typeof b.version !== "number" || !["deploy", "rollback", "pull", "migration", "edit"].includes(b.action) || !b.specJson) {
       res.status(400).json({ error: "Bad Request", message: "Missing required fields" });
       return;
     }
 
-    let version = b.version;
-    const MAX_INSERT_ATTEMPTS = 3;
-
-    for (let attempt = 1; attempt <= MAX_INSERT_ATTEMPTS; attempt++) {
+    const version = b.version;
+    {
       try {
         await wfdhRepo.insert({
           packId: b.packId, workflowId: b.workflowId, deployNumber: b.deployNumber,
@@ -59,21 +82,9 @@ export function createInternalDeployHistoryRouter(
         const msg = err instanceof Error ? err.message : String(err);
         const isDuplicate = msg.includes("UNIQUE") || msg.includes("Duplicate");
 
-        if (isDuplicate && attempt < MAX_INSERT_ATTEMPTS) {
-          // Version conflict — re-compute from MAX(version) + 1 and retry
-          console.warn(`[deploy-history] Insert version=${version} conflicted for ${b.workflowId}, retrying with MAX(version)+1 (attempt ${attempt}/${MAX_INSERT_ATTEMPTS})`);
-          try {
-            const maxV = await wfdhRepo.getLatestVersion(b.workflowId);
-            version = maxV + 1;
-          } catch {
-            version = version + 1;
-          }
-          continue; // retry
-        }
-
         if (isDuplicate) {
-          // All retries exhausted — still conflict. Return 409 with details.
-          console.error(`[deploy-history] Insert failed after ${MAX_INSERT_ATTEMPTS} attempts for ${b.workflowId}: ${msg}`);
+          // The caller must reconcile its existing tag and history.
+          console.error(`[deploy-history] Insert failed for ${b.workflowId}: ${msg}`);
           res.status(409).json({ error: "Conflict", message: msg });
         } else {
           res.status(500).json({ error: "Internal Server Error", message: msg });

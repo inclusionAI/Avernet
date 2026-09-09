@@ -2892,4 +2892,18 @@ END`,
       `CREATE INDEX IF NOT EXISTS idx_flow_runs_origin_id ON flow_runs (origin_bot_id, id)`,
     ],
   },
+  {
+    version: 120,
+    description: "Reserve workflow releases by saved Git commit",
+    sql: [
+      `CREATE TABLE IF NOT EXISTS workflow_release_reservations (
+        workflow_id VARCHAR(255) NOT NULL,
+        snapshot_commit VARCHAR(64) NOT NULL,
+        pack_id VARCHAR(255) NOT NULL,
+        deploy_number INTEGER NOT NULL,
+        version INTEGER NOT NULL,
+        PRIMARY KEY (workflow_id, snapshot_commit)
+      )`,
+    ],
+  },
 ];
