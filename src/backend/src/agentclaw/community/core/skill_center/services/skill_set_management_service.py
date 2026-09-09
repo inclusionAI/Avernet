@@ -37,6 +37,9 @@ from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
 )
+from agentclaw.community.core.skill_center.desktop_skill_recovery_protocol import (
+    DesktopSkillRecoveryServiceProtocol,
+)
 from agentclaw.community.core.repository.capability_desired_state_types import (
     DesiredStateMutation,
 )
@@ -74,11 +77,16 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         mcp_center: MCPCenterPlugin,
         mcp_auth: MCPAuthPlugin,
         ext_info_provider: Callable[[str], Mapping[str, Any] | None],
+        recovery: DesktopSkillRecoveryServiceProtocol,
     ) -> None:
         self._repository = repository
         self._bot_repo = bot_repo
         self._runtime = runtime
-        self._flow = MutationProjectionFlow(repository=repository, runtime=runtime)
+        self._flow = MutationProjectionFlow(
+            repository=repository,
+            runtime=runtime,
+            recovery=recovery,
+        )
         self._legacy_factory = legacy_factory
         self._passport = passport
         self._authorization = authorization

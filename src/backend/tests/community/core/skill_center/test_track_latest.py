@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from agentclaw.community.core.repository.track_latest_types import (
     PublishedTrackLatestVersion,
@@ -13,6 +16,11 @@ from agentclaw.community.core.repository.track_latest_types import (
 )
 from agentclaw.community.core.skill_center.materialization_contract import (
     PublishedMaterializedSkillVersion,
+)
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    RuntimeProjectionIssue,
+    RuntimeProjectionResult,
+    RuntimeProjectionStatus,
 )
 from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
 from agentclaw.community.core.skill_center.services.track_latest import (
@@ -253,6 +261,22 @@ class _Projector:
         self.project_calls.append(kwargs)
 
 
+def _pending_result(code: str) -> RuntimeProjectionResult:
+    return RuntimeProjectionResult(
+        status=RuntimeProjectionStatus.PENDING,
+        components={"skills": RuntimeProjectionStatus.PENDING},
+        issues=(
+            RuntimeProjectionIssue(
+                resource_type="SKILL" if code.startswith("CENTER_CONTENT_") else "RUNTIME",
+                code=code,
+                reason="pending",
+                status=RuntimeProjectionStatus.PENDING,
+                retryable=True,
+            ),
+        ),
+    )
+
+
 def test_bot_task_rereads_latest_and_projects_skill_plus_dependency_delta_once() -> None:
     reader = _Reader(active=True)
     projector = _Projector()
@@ -260,6 +284,7 @@ def test_bot_task_rereads_latest_and_projects_skill_plus_dependency_delta_once()
         reader=reader,
         projector=projector,
         latest=_Latest(),
+        recovery=MagicMock(),
         env_provider=lambda: "pre",
     )
 
@@ -290,6 +315,7 @@ def test_bot_task_completes_without_projection_when_reader_no_longer_has_skill()
         reader=reader,
         projector=projector,
         latest=_Latest(),
+        recovery=MagicMock(),
         env_provider=lambda: "pre",
     )
 
@@ -308,6 +334,7 @@ def test_bot_task_retries_when_complete_mapping_snapshot_drifts() -> None:
         reader=_Reader(active=True),
         projector=projector,
         latest=_Latest(),
+        recovery=MagicMock(),
         env_provider=lambda: "pre",
     )
 
@@ -328,6 +355,7 @@ def test_bot_task_completes_when_candidate_bot_was_deleted() -> None:
         reader=_DeletedReader(),
         projector=projector,
         latest=_Latest(),
+        recovery=MagicMock(),
         env_provider=lambda: "pre",
     )
 
@@ -337,3 +365,55 @@ def test_bot_task_completes_when_candidate_bot_was_deleted() -> None:
 
     assert isinstance(outcome, Complete)
     assert projector.project_calls == []
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["CENTER_CONTENT_DOWNLOAD_PENDING", "CENTER_CONTENT_DOWNLOAD_FAILED"],
+)
+def test_bot_task_hands_center_wait_to_skill_recovery_without_full_domain_retry(
+    code,
+) -> None:
+    projector = _Projector()
+    projector.project = AsyncMock(
+        return_value=_pending_result(code)
+    )
+    recovery = MagicMock()
+    handler = BotTrackLatestReconcileTaskHandler(
+        reader=_Reader(active=True),
+        projector=projector,
+        latest=_Latest(),
+        recovery=recovery,
+        env_provider=lambda: "pre",
+    )
+
+    outcome = handler.handle(
+        {"owner_id": "owner-a", "bot_id": "bot-a", "skill_id": 10}
+    )
+
+    assert isinstance(outcome, Complete)
+    recovery.ensure.assert_called_once_with(owner_id="owner-a", bot_id="bot-a")
+
+
+def test_bot_task_keeps_retrying_when_mcp_projection_is_pending() -> None:
+    projector = _Projector()
+
+    async def project(**_kwargs):
+        return _pending_result("MCP_RUNTIME_UNAVAILABLE")
+
+    projector.project = project
+    recovery = MagicMock()
+    handler = BotTrackLatestReconcileTaskHandler(
+        reader=_Reader(active=True),
+        projector=projector,
+        latest=_Latest(),
+        recovery=recovery,
+        env_provider=lambda: "pre",
+    )
+
+    outcome = handler.handle(
+        {"owner_id": "owner-a", "bot_id": "bot-a", "skill_id": 10}
+    )
+
+    assert isinstance(outcome, Retry)
+    recovery.ensure.assert_not_called()

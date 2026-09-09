@@ -1,6 +1,7 @@
 """G4 Reference consumes G5's canonical Offline write seam unchanged."""
 
 from __future__ import annotations
+from unittest.mock import MagicMock
 
 import asyncio
 from contextlib import contextmanager
@@ -183,6 +184,7 @@ def _skill_sets(db: _Database) -> SkillSetManagementService:
         mcp_center=object(),
         mcp_auth=object(),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
 

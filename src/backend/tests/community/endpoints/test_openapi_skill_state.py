@@ -1,6 +1,7 @@
 """Endpoint-framework coverage for Local Skill desired-state commands."""
 
 from __future__ import annotations
+from unittest.mock import MagicMock
 
 import time
 
@@ -189,6 +190,7 @@ def _seed_state(world, *, runtime_success: bool) -> None:
                 version_resolver=PassthroughSkillVersionResolver(),
             ),
             PlatformDefaultMcpPolicy(lambda _bot_id: None),
+            MagicMock(),
         ),
         scope=None,
     )

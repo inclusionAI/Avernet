@@ -72,6 +72,9 @@ class SkillSymlinkListener(LifecycleBase):
         desktop_reconcile_wakeup: (
             Callable[[DeviceActivatedEvent], None] | None
         ) = None,
+        desktop_skill_recovery_wakeup: (
+            Callable[[str, str], object] | None
+        ) = None,
         runtime_reconcile: Callable[[str, str], object] | None = None,
         runtime_non_skill_reconcile: Callable[[str, str], object] | None = None,
     ) -> None:
@@ -81,6 +84,7 @@ class SkillSymlinkListener(LifecycleBase):
         self._device_sync_dispatcher = device_sync_dispatcher
         self._desktop_layout_authority = desktop_layout_authority
         self._desktop_reconcile_wakeup = desktop_reconcile_wakeup
+        self._desktop_skill_recovery_wakeup = desktop_skill_recovery_wakeup
         self._runtime_reconcile = runtime_reconcile
         self._runtime_non_skill_reconcile = runtime_non_skill_reconcile
 
@@ -157,6 +161,14 @@ class SkillSymlinkListener(LifecycleBase):
                     ctx.binding_id,
                 )
                 return
+
+            if is_desktop and self._desktop_skill_recovery_wakeup is not None:
+                # This wake is independent of the Pool migration wake above.
+                # The durable recovery handler re-checks Pool transition
+                # ownership before writing Skill mappings.
+                self._desktop_skill_recovery_wakeup(
+                    str(owner_id), str(bot_id)
+                )
 
             if initial_authority == _TRANSITION_AUTHORITY:
                 logger.info(

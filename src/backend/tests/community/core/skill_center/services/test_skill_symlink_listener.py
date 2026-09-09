@@ -42,6 +42,7 @@ def _make_listener(
     bot_query=None,
     layout_repository=None,
     skills_pool_wakeup=None,
+    desktop_skill_recovery_wakeup=None,
     runtime_reconcile=None,
     runtime_non_skill_reconcile=None,
 ):
@@ -81,6 +82,7 @@ def _make_listener(
             if skills_pool_wakeup is not None
             else None
         ),
+        desktop_skill_recovery_wakeup=desktop_skill_recovery_wakeup,
         runtime_reconcile=runtime_reconcile,
         runtime_non_skill_reconcile=runtime_non_skill_reconcile,
     )
@@ -107,6 +109,62 @@ def _layout_state(
 
 
 class TestHandleDeviceActivated:
+    def test_current_desktop_binding_wakes_pool_and_skill_recovery_independently(self):
+        event = _make_event(device_provider="baas")
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "bot_id": "desktop-1",
+            "owner_id": "owner-1",
+            "entity_id": "entity-1",
+            "env": "pre",
+            "bot_type": "desktop",
+            "active_engine": "openclaw",
+        }
+        wakeup = MagicMock()
+        recovery = MagicMock()
+        runtime_reconcile = MagicMock()
+        listener, _, _, _ = _make_listener(
+            bot_query=bot_query,
+            skills_pool_wakeup=wakeup,
+            desktop_skill_recovery_wakeup=recovery,
+            runtime_reconcile=runtime_reconcile,
+        )
+
+        listener.handle(event)
+
+        wakeup.handle.assert_called_once_with(event)
+        recovery.assert_called_once_with("owner-1", "desktop-1")
+        runtime_reconcile.assert_called_once_with("desktop-1", "owner-1")
+
+    def test_restart_projection_event_wakes_the_same_skill_recovery_interface(self):
+        event = RuntimeProjectionRequestedEvent(
+            device_id="staff_u001_default",
+            binding_id=42,
+            entity_id="u001",
+            entity_type="staff",
+            device_provider="baas",
+            sandbox_id="sbx-abc@alt-0",
+        )
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "bot_id": "desktop-1",
+            "owner_id": "owner-1",
+            "entity_id": "entity-1",
+            "env": "pre",
+            "bot_type": "desktop",
+            "active_engine": "openclaw",
+        }
+        recovery = MagicMock()
+        listener, _, _, _ = _make_listener(
+            bot_query=bot_query,
+            desktop_skill_recovery_wakeup=recovery,
+            runtime_reconcile=MagicMock(),
+        )
+
+        listener.handle(event)
+
+        recovery.assert_called_once_with("owner-1", "desktop-1")
+
     def test_restart_projection_trigger_is_layout_agnostic(self):
         bot_query = MagicMock()
         bot_query.get_by_binding_id.return_value = {

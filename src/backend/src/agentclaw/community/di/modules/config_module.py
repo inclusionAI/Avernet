@@ -802,6 +802,25 @@ class ConfigModule(Module):
             global_dry_run=bool(block.get("global_dry_run", defaults.global_dry_run)),
         )
 
+    @singleton
+    @provider
+    def desktop_skill_recovery(self) -> cfg.DesktopSkillRecoveryConfig:
+        """Bot-level recovery sweep, independent of Desktop health scanning."""
+        block = _block("desktop_skill_recovery")
+        defaults = cfg.DesktopSkillRecoveryConfig()
+        return cfg.DesktopSkillRecoveryConfig(
+            enabled=bool(block.get("enabled", defaults.enabled)),
+            sweep_interval_seconds=float(
+                block.get(
+                    "sweep_interval_seconds",
+                    defaults.sweep_interval_seconds,
+                )
+            ),
+            sweep_page_size=int(
+                block.get("sweep_page_size", defaults.sweep_page_size)
+            ),
+        )
+
     # NOTE: skill_scan + antcode + dima providers moved to ``CorpConfigModule`` (B8) —
     # AntCode git + DIMA hosting are corp-only.
 
