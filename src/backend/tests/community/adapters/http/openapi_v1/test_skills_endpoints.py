@@ -54,9 +54,9 @@ from agentclaw.community.core.repository.implementations.skill_center.capability
     CapabilityDesiredStateRepository,
 )
 from agentclaw.community.core.skill_center.errors import (
-    LocalSkillActiveError,
     LocalSkillNotFoundError,
     LocalSkillOwnerAmbiguousError,
+    SkillAssetInUseError,
 )
 from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
 from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
@@ -442,11 +442,11 @@ def test_delete_derives_scope_from_skill_id_and_returns_standard_deleted_payload
     }
 
 
-def test_delete_active_error_uses_the_fixed_public_conflict_envelope():
+def test_delete_active_error_uses_the_asset_in_use_conflict_envelope():
     class _ActiveDelete(_Delete):
         async def delete_local_skill(self, **kwargs):
             self.args = kwargs
-            raise LocalSkillActiveError()
+            raise SkillAssetInUseError({"installation": 1})
 
     response = _client(_Query(), delete=_ActiveDelete()).delete(
         "/openapi/v1/bots/bot-1/skills/8"
@@ -454,9 +454,28 @@ def test_delete_active_error_uses_the_fixed_public_conflict_envelope():
 
     assert response.status_code == 409
     assert response.json() == {
-        "code": 409102,
-        "message": "Skill is active",
-        "data": None,
+        "code": 409105,
+        "message": "Skill is still in use",
+        "data": {"blockers": {"installation": 1}},
+        "request_id": "",
+    }
+
+
+def test_delete_referenced_error_returns_safe_blocker_counts():
+    class _ReferencedDelete(_Delete):
+        async def delete_local_skill(self, **kwargs):
+            self.args = kwargs
+            raise SkillAssetInUseError({"installation": 2, "membership": 1})
+
+    response = _client(_Query(), delete=_ReferencedDelete()).delete(
+        "/openapi/v1/bots/bot-1/skills/8"
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "code": 409105,
+        "message": "Skill is still in use",
+        "data": {"blockers": {"installation": 2, "membership": 1}},
         "request_id": "",
     }
 

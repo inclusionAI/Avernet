@@ -20,6 +20,13 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
     """Tenant/env-scoped atomic SkillSet desired-state operations."""
 
     @abstractmethod
+    def purge_bot_installations(
+        self, *, bot_id: str, owner_id: str, env: str
+    ) -> dict[str, int]:
+        """Remove both Installation tables during explicit Bot deletion."""
+        ...
+
+    @abstractmethod
     def list_sets(
         self,
         *,
