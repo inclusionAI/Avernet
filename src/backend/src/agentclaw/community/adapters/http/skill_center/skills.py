@@ -2400,10 +2400,10 @@ async def delete_skill(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
     persisted_git_path = str(skill.get("git_path") or "")
-    is_shared_source = not skill.get("user_id") and persisted_git_path.startswith(
+    is_governed_content_source = persisted_git_path.startswith(
         ("git://", "center://")
     )
-    if is_shared_source:
+    if is_governed_content_source:
         service = skill_service_factory.create()
         try:
             success = await service.delete_skill(

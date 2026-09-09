@@ -2217,16 +2217,17 @@ class SkillService:
         bolt_id = skill.get('bolt_id')
         skill_user_id = skill.get('user_id') or user_id
         device_owner_id = self._device_owner_id or skill_user_id
-        is_shared_source = (
-            not skill.get('user_id')
-            and git_path.startswith(("git://", "center://"))
-        )
+        # Repo and Center content is governed outside the Bot's writable
+        # Local store. Ownership affects authorization, not filesystem
+        # placement: legacy BFF rows may legitimately keep ``user_id`` while
+        # using either locator. Never resolve a DeviceFS for these sources.
+        is_governed_content_source = git_path.startswith(("git://", "center://"))
 
         logger.info(f"[SkillService] Deleting skill: id={skill_id}, name={skill_name}, git_path={git_path}")
         logger.info(f"[SkillService] local_dir: {self.local_dir}, active_dir: {self.active_dir}")
 
         device_fs = None
-        if not is_shared_source:
+        if not is_governed_content_source:
             try:
                 device_fs = self._device_fs_factory(bolt_id, device_owner_id)
             except Exception as e:

@@ -448,6 +448,34 @@ async def test_admin_can_delete_unreferenced_shared_market_skill():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("git_path", ["git://owner/repo-skill", "center://owner-skill"])
+async def test_owner_can_delete_unreferenced_governed_content_without_device_io(
+    git_path,
+):
+    skill_repo = MagicMock()
+    skill_repo.get_by_id.return_value = {
+        "id": SKILL_ID,
+        "name": "owned-skill",
+        "git_path": git_path,
+        "bolt_id": "default",
+        "user_id": OWNER_ID,
+    }
+    skill_repo.delete.return_value = True
+    device_fs = MagicMock()
+
+    response, _, factory = await _call_delete(
+        device_fs=device_fs,
+        skill_repo=skill_repo,
+    )
+
+    assert response.success is True
+    skill_repo.require_unreferenced_for_delete.assert_called_once_with(SKILL_ID)
+    skill_repo.delete.assert_called_once_with(SKILL_ID)
+    assert factory.device_fs_calls == []
+    device_fs.exists.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_shared_delete_does_not_trust_query_user_id_for_admin_permission():
     skill_repo = MagicMock()
     skill_repo.get_by_id.return_value = {
