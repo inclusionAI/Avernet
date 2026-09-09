@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import contextmanager
 from dataclasses import replace
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
@@ -15,10 +17,29 @@ from agentclaw.community.core.base import Base
 from agentclaw.community.core.repository.implementations.platform.task_queue import (
     TaskQueueRepository,
 )
+from agentclaw.community.core.repository.capability_desired_state_types import (
+    CapabilityDesiredState,
+    DesiredStateMutation,
+)
+from agentclaw.community.core.repository.track_latest_types import (
+    PublishedTrackLatestVersion,
+    TrackLatestCandidateFacts,
+)
+from agentclaw.community.core.repository.skill_center_reference_types import (
+    PublicCenterVersionTarget,
+    SkillCenterReferenceWorkBatch,
+    SkillCenterReferenceWorkItem,
+)
 from agentclaw.community.core.task_queue.repository.models import TaskQueueModel  # noqa: F401
 from agentclaw.community.core.skill_center.center_content_distribution import (
     CenterContentPendingPackage,
     CenterContentReadyPackage,
+)
+from agentclaw.community.core.skill_center.materialization_contract import (
+    PublishedMaterializedSkillVersion,
+)
+from agentclaw.community.core.skill_center.reference_contract import (
+    SkillCenterReferenceStatus,
 )
 from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterVersionIdentity,
@@ -38,7 +59,20 @@ from agentclaw.community.core.skill_center.services.desktop_skill_recovery impor
     DesktopSkillRecoveryService,
     DesktopSkillRecoverySweeper,
 )
-from agentclaw.community.core.skills_pool.models import PoolSkillMapping
+from agentclaw.community.core.skill_center.services.track_latest import (
+    BotTrackLatestReconcileTaskHandler,
+    TrackLatestFanoutTaskHandler,
+)
+from agentclaw.community.core.skill_center.services.skill_center_reference_processor import (
+    SkillCenterReferenceProcessor,
+)
+from agentclaw.community.core.skill_center.services.skill_set_management_service import (
+    SkillSetManagementService,
+)
+from agentclaw.community.core.skills_pool.models import (
+    PoolSkillMapping,
+    RegisteredSkillAsset,
+)
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     BotSkillLayoutState,
@@ -54,6 +88,11 @@ from agentclaw.community.core.task_queue.types import (
     Retry,
 )
 from agentclaw.community.di.config import DesktopSkillRecoveryConfig, TaskQueueConfig
+from agentclaw.community.plugin_api.skill_center_gateway import (
+    SkillCenterAccessLevel,
+    SkillCenterSkill,
+    SkillCenterVersion,
+)
 
 
 _UUID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -101,18 +140,36 @@ def _empty_plan() -> ResolvedSkillPlan:
     )
 
 
+def _combined_plan() -> ResolvedSkillPlan:
+    return replace(
+        _plan("3"),
+        projection=RuntimeSkillProjection(
+            skill_mappings=(
+                _plan("3").projection.skill_mappings[0],
+                replace(
+                    _plan("7").projection.skill_mappings[0],
+                    link_name="calculator",
+                    skill_uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                ),
+            ),
+            skill_assets=(),
+        ),
+    )
+
+
 class _Projector:
     def __init__(self) -> None:
         self.plans = [_plan("1"), _plan("2")]
         self.applied: list[ResolvedSkillPlan] = []
+        self.retired: list[tuple[PoolSkillMapping, ...]] = []
 
     def resolve_plan(self, **_kwargs) -> ResolvedSkillPlan:
         return self.plans.pop(0)
 
     async def apply_plan(self, *, plan, retired_mappings, scope):
-        assert retired_mappings == ()
         assert scope == ProjectionScope(skills=True)
         self.applied.append(plan)
+        self.retired.append(tuple(retired_mappings))
         return RuntimeProjectionResult.converged(
             components={"skills": RuntimeProjectionStatus.CONVERGED}
         )
@@ -175,6 +232,7 @@ def test_late_cache_does_not_reactivate_a_skill_removed_during_prepare() -> None
 
     assert isinstance(outcome, Complete)
     assert projector.applied[0].projection.skill_mappings == ()
+    assert projector.retired == [(_plan("1").projection.skill_mappings[0],)]
 
 
 def test_stale_prepare_wait_does_not_keep_removed_skill_task_alive() -> None:
@@ -313,28 +371,346 @@ def recovery_queue(monkeypatch):
     )
 
 
+class _ReferenceFacts:
+    def __init__(self) -> None:
+        self.batch = SkillCenterReferenceWorkBatch(
+            request_id="reference-a",
+            env="dev",
+            bot_id="bot-a",
+            owner_id="owner-a",
+            skill_set_id="42",
+            actor_id="owner-a",
+            items=(
+                SkillCenterReferenceWorkItem(
+                    reference_id="ref-a",
+                    skill_code="public-weather",
+                    status=SkillCenterReferenceStatus.QUEUED,
+                    sc_version_number=None,
+                    skill_version_id=None,
+                    resolved_skill_id=None,
+                    attempt_count=0,
+                ),
+            ),
+        )
+
+    def get_work_batch(self, *, env, request_id):
+        return self.batch if (env, request_id) == ("dev", "reference-a") else None
+
+    def update_item(self, *, env, reference_id, status, **fields):
+        assert (env, reference_id) == ("dev", "ref-a")
+        item = replace(self.batch.items[0], status=status, **fields)
+        self.batch = replace(self.batch, items=(item,))
+        return item
+
+    def ensure_public_version(self, **_kwargs):
+        return PublicCenterVersionTarget(
+            skill_id=10, skill_version_id=103, status="MATERIALIZING"
+        )
+
+
+class _ReferenceGateway:
+    def get_public_skill(self, request):
+        assert request.skill_code == "public-weather"
+        return SkillCenterSkill(
+            skill_code="public-weather",
+            skill_name="weather",
+            access_level=SkillCenterAccessLevel.PUBLIC,
+            skill_id="9001",
+            latest_version_number="3",
+        )
+
+    def list_versions(self, _request):
+        return (SkillCenterVersion(version_number="3", version_id="10003"),)
+
+
+class _ReferenceMaterializer:
+    def materialize(self, request):
+        return PublishedMaterializedSkillVersion(
+            skill_version_id=request.skill_version_id,
+            skill_id=request.skill_id,
+            version_ordinal=3,
+            status="PUBLISHED",
+            skill_uuid=_UUID,
+            sc_version_number="3",
+            sc_skill_id=9001,
+            sc_version_id=10003,
+            name="weather",
+            description=None,
+            metadata_json='{"mcp_dependencies":[]}',
+            published_at=datetime(2026, 9, 10, tzinfo=UTC),
+        )
+
+
 @pytest.mark.integration
-def test_market_set_and_track_latest_ensures_share_one_live_bot_task(
+def test_track_latest_pending_enters_durable_recovery_and_applies_latest_plan(
     recovery_queue,
 ) -> None:
     bots = MagicMock()
     bots.get_by_id_and_owner.return_value = _bot()
     recovery = DesktopSkillRecoveryService(bots=bots, tasks=recovery_queue)
+    mapping = _plan("3").projection.skill_mappings[0]
 
-    results = [
-        recovery.ensure(owner_id="owner-a", bot_id="bot-a")
-        for _source in ("market", "set", "track-latest")
+    class _VerticalProjector:
+        def __init__(self) -> None:
+            self.applied: list[ResolvedSkillPlan] = []
+
+        async def snapshot_skill_mappings(self, **_kwargs):
+            return (mapping,)
+
+        async def project(self, **_kwargs):
+            return RuntimeProjectionResult.pending(
+                code="CENTER_CONTENT_PACKAGE_PENDING",
+                reason="package is not cached yet",
+            )
+
+        def resolve_plan(self, **_kwargs):
+            return _plan("3")
+
+        async def apply_plan(self, *, plan, retired_mappings, scope):
+            assert retired_mappings == ()
+            assert scope == ProjectionScope(skills=True)
+            self.applied.append(plan)
+            return RuntimeProjectionResult.converged(
+                components={"skills": RuntimeProjectionStatus.CONVERGED}
+            )
+
+    projector = _VerticalProjector()
+    reader = MagicMock()
+    reader.active_skill_assets.return_value = (
+        RegisteredSkillAsset(
+            skill_id=10,
+            name="weather",
+            git_path="center://public-weather",
+            skill_uuid=_UUID,
+            sc_version_number="3",
+        ),
+    )
+    latest = MagicMock()
+    latest.list_published_versions.return_value = (
+        PublishedTrackLatestVersion(
+            skill_version_id=103,
+            metadata_json='{"mcp_dependencies":[]}',
+        ),
+    )
+    foreground = BotTrackLatestReconcileTaskHandler(
+        reader=reader,
+        projector=projector,
+        latest=latest,
+        recovery=recovery,
+        env_provider=lambda: "dev",
+    )
+
+    foreground_outcome = foreground.handle(
+        {"owner_id": "owner-a", "bot_id": "bot-a", "skill_id": 10}
+    )
+    assert isinstance(foreground_outcome, Complete), foreground_outcome
+    claimed = recovery_queue._repo.claim_batch(
+        worker_id="worker-1",
+        env="dev",
+        app=DEFAULT_APP,
+        limit=1,
+        lease_seconds=60,
+    )
+    distribution = _Distribution()
+    layouts = MagicMock()
+    layouts.get.return_value = BotSkillLayoutState.legacy_default(
+        BotSkillLayoutScope(env="dev", entity_id="owner-a", bot_id="bot-a")
+    )
+    recovery_handler = DesktopSkillRecoveryTaskHandler(
+        bots=bots,
+        projector=projector,
+        distribution=distribution,
+        layouts=layouts,
+        env_provider=lambda: "dev",
+    )
+
+    recovery_outcome = recovery_handler.handle(claimed[0].payload)
+
+    assert claimed[0].payload == {"owner_id": "owner-a", "bot_id": "bot-a"}
+    assert isinstance(recovery_outcome, Complete)
+    assert distribution.prepared == [CanonicalCenterVersionIdentity(_UUID, "3")]
+    assert projector.applied[0].projection.skill_mappings == (mapping,)
+
+
+@pytest.mark.integration
+def test_reference_set_and_track_latest_share_one_task_for_latest_combined_plan(
+    recovery_queue,
+) -> None:
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = _bot()
+    recovery = DesktopSkillRecoveryService(bots=bots, tasks=recovery_queue)
+    combined = _combined_plan()
+
+    class _CombinedProjector:
+        def __init__(self) -> None:
+            self.applied: list[ResolvedSkillPlan] = []
+            self.recovery_phase = False
+
+        async def snapshot_skill_mappings(self, **_kwargs):
+            return combined.projection.skill_mappings
+
+        async def project(self, **_kwargs):
+            return RuntimeProjectionResult.pending(
+                code="CENTER_CONTENT_PACKAGE_PENDING",
+                reason="exact package is still being prepared",
+            )
+
+        def resolve_plan(self, **_kwargs):
+            return combined
+
+        async def apply_plan(self, *, plan, retired_mappings, scope):
+            if not self.recovery_phase:
+                return RuntimeProjectionResult.pending(
+                    code="CENTER_CONTENT_PACKAGE_PENDING",
+                    reason="exact package is still being prepared",
+                )
+            assert scope.skills is True
+            self.applied.append(plan)
+            return RuntimeProjectionResult.converged(
+                components={"skills": RuntimeProjectionStatus.CONVERGED}
+            )
+
+    projector = _CombinedProjector()
+
+    class _ZeroCandidateTrackLatest:
+        def __init__(self) -> None:
+            candidates = MagicMock()
+            candidates.list_candidate_facts.return_value = TrackLatestCandidateFacts(
+                installations=(), skill_sets=(), bots=()
+            )
+            self._fanout = TrackLatestFanoutTaskHandler(
+                candidates=candidates,
+                tasks=recovery_queue,
+                env_provider=lambda: "dev",
+            )
+            self.outcomes = []
+
+        def version_published(self, version) -> None:
+            self.outcomes.append(self._fanout.handle({"skill_id": version.skill_id}))
+
+    class _DesiredStateRepository:
+        def get_set(self, **_kwargs):
+            return {"id": "42", "is_active": True, "is_default": False}
+
+        def add_skill(self, **kwargs):
+            return DesiredStateMutation(
+                item={"skill_id": kwargs["skill_id"]},
+                changed=True,
+                previous_state=CapabilityDesiredState(set(), {}, {}),
+            )
+
+        def restore_desired_state(self, **_kwargs):
+            raise AssertionError("successful Desired State writes are not restored")
+
+    class _DesktopBots:
+        def get_by_id_and_owner(self, bot_id, owner_id):
+            return {
+                **_bot(),
+                "status": "ACTIVE",
+                "device_id": "device-a",
+            } if (bot_id, owner_id) == ("bot-a", "owner-a") else None
+
+    class _Allow:
+        def can_manage_bot(self, **_kwargs):
+            return True
+
+    class _Audit:
+        def insert(self, _record):
+            return None
+
+    fanout = _ZeroCandidateTrackLatest()
+    skill_sets = SkillSetManagementService(
+        repository=_DesiredStateRepository(),
+        bot_repo=_DesktopBots(),
+        runtime=projector,
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Allow(),
+        audit_log_repo=_Audit(),
+        mcp_center=object(),
+        mcp_auth=object(),
+        ext_info_provider=lambda _bot_id: None,
+        recovery=recovery,
+    )
+    references = _ReferenceFacts()
+    processor = SkillCenterReferenceProcessor(
+        references=references,
+        gateway=_ReferenceGateway(),
+        materializer=_ReferenceMaterializer(),
+        skill_sets=skill_sets,
+        track_latest=fanout,
+        env_provider=lambda: "dev",
+    )
+
+    reference_outcome = asyncio.run(processor.process("reference-a"))
+    asyncio.run(
+        skill_sets.add_skills(
+            bot_id="bot-a",
+            owner_id="owner-a",
+            user_id="owner-a",
+            set_id="42",
+            skill_ids=("20",),
+        )
+    )
+    reader = MagicMock()
+    reader.active_skill_assets.return_value = (
+        RegisteredSkillAsset(
+            skill_id=20,
+            name="calculator",
+            git_path="center://public-calculator",
+            skill_uuid="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+            sc_version_number="7",
+        ),
+    )
+    latest = MagicMock()
+    latest.list_published_versions.return_value = (
+        PublishedTrackLatestVersion(
+            skill_version_id=207,
+            metadata_json='{"mcp_dependencies":[]}',
+        ),
+    )
+    track_latest_outcome = BotTrackLatestReconcileTaskHandler(
+        reader=reader,
+        projector=projector,
+        latest=latest,
+        recovery=recovery,
+        env_provider=lambda: "dev",
+    ).handle({"owner_id": "owner-a", "bot_id": "bot-a", "skill_id": 20})
+
+    claimed = recovery_queue._repo.claim_batch(
+        worker_id="worker-1",
+        env="dev",
+        app=DEFAULT_APP,
+        limit=10,
+        lease_seconds=60,
+    )
+    distribution = _Distribution()
+    layouts = MagicMock()
+    layouts.get.return_value = BotSkillLayoutState.legacy_default(
+        BotSkillLayoutScope(env="dev", entity_id="owner-a", bot_id="bot-a")
+    )
+    recovery_handler = DesktopSkillRecoveryTaskHandler(
+        bots=bots,
+        projector=projector,
+        distribution=distribution,
+        layouts=layouts,
+        env_provider=lambda: "dev",
+    )
+    projector.recovery_phase = True
+    recovery_outcome = recovery_handler.handle(claimed[0].payload)
+
+    assert isinstance(reference_outcome, Complete)
+    assert all(isinstance(outcome, Complete) for outcome in fanout.outcomes)
+    assert isinstance(track_latest_outcome, Complete)
+    assert len(claimed) == 1
+    assert isinstance(recovery_outcome, Complete)
+    assert distribution.prepared == [
+        CanonicalCenterVersionIdentity(_UUID, "3"),
+        CanonicalCenterVersionIdentity(
+            "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "7"
+        ),
     ]
-
-    assert all(result is not None for result in results)
-    assert [result.created for result in results] == [True, False, False]
-    assert len({result.record.id for result in results}) == 1
-    assert len({result.record.deadline_at for result in results}) == 1
-    assert len({result.record.run_at for result in results}) == 1
-    assert results[0].record.payload == {
-        "owner_id": "owner-a",
-        "bot_id": "bot-a",
-    }
+    assert projector.applied == [combined]
 
 
 def test_ensure_uses_minimal_payload_and_thirty_minute_deadline() -> None:

@@ -550,6 +550,31 @@ class TestHandleDeviceActivated:
         wakeup.handle.assert_called_once_with(event)
         sync_plugin.sync_symlinks.assert_called_once_with([])
 
+    def test_skill_recovery_wakeup_failure_preserves_runtime_reconcile(self):
+        event = _make_event(device_provider="baas")
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "bot_id": "desktop-1",
+            "owner_id": "owner-1",
+            "entity_id": "entity-1",
+            "env": "pre",
+            "bot_type": "desktop",
+            "active_engine": "openclaw",
+        }
+        recovery = MagicMock(side_effect=RuntimeError("queue unavailable"))
+        runtime_reconcile = MagicMock()
+        listener, _, dispatcher, _ = _make_listener(
+            bot_query=bot_query,
+            desktop_skill_recovery_wakeup=recovery,
+            runtime_reconcile=runtime_reconcile,
+        )
+
+        listener.handle(event)
+
+        recovery.assert_called_once_with("owner-1", "desktop-1")
+        runtime_reconcile.assert_called_once_with("desktop-1", "owner-1")
+        dispatcher.dispatch.assert_not_called()
+
     def test_desktop_layout_lookup_failure_preserves_legacy_mapping_refresh(self):
         event = _make_event(device_provider="baas")
         bot_query = MagicMock()

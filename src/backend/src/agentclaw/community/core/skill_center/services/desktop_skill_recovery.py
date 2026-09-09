@@ -29,6 +29,9 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     RuntimeProjectionResult,
     RuntimeProjectionStatus,
 )
+from agentclaw.community.core.skills_pool.mapping_intent import (
+    retired_logical_skill_mappings,
+)
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     SkillLayoutPhase,
@@ -62,6 +65,7 @@ _NORMAL_PENDING_CODES = frozenset(
         "CENTER_CONTENT_DOWNLOAD_CAPACITY",
     }
 )
+_POOL_TRANSITION_CODE = "SKILLS_POOL_TRANSITION_OWNS_MAPPING"
 _KEY_DIGEST_CHARS = 32
 logger = get_logger()
 
@@ -223,9 +227,15 @@ class DesktopSkillRecoveryTaskHandler:
             latest_center_keys.add(
                 (mapping.skill_uuid, mapping.sc_version_number)
             )
+        retired_mappings = tuple(
+            retired_logical_skill_mappings(
+                list(plan.projection.skill_mappings),
+                list(latest_plan.projection.skill_mappings),
+            )
+        )
         projection = await self._projector.apply_plan(
             plan=latest_plan,
-            retired_mappings=(),
+            retired_mappings=retired_mappings,
             scope=scope,
         )
         return self._outcome(
@@ -269,6 +279,8 @@ class DesktopSkillRecoveryTaskHandler:
         prepare_retryable_error: bool,
     ) -> TaskOutcome:
         retryable = tuple(issue for issue in projection.issues if issue.retryable)
+        if any(issue.code == _POOL_TRANSITION_CODE for issue in retryable):
+            return Reschedule(DESKTOP_SKILL_RECOVERY_DELAY_SECONDS)
         abnormal = tuple(
             issue for issue in retryable if not is_normal_center_content_wait(issue.code)
         )

@@ -76,3 +76,21 @@ def test_desktop_skill_recovery_config_rejects_nonpositive_values(
 
     with pytest.raises(ValueError, match="must be positive"):
         ConfigModule().desktop_skill_recovery()
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        {"enabled": "not-bool"},
+        {"sweep_interval_seconds": float("nan")},
+        {"sweep_page_size": True},
+        {"sweep_page_szie": 10},
+    ],
+)
+def test_desktop_skill_recovery_config_rejects_invalid_schema(
+    monkeypatch, block
+) -> None:
+    monkeypatch.setattr(config_module, "_block", lambda _name: block)
+
+    with pytest.raises((TypeError, ValueError)):
+        ConfigModule().desktop_skill_recovery()
