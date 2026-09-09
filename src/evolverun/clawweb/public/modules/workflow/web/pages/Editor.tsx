@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { useDbWorkflow, useSaveWorkflowToDb, useFacadeBindings } from '../api/hooks'
@@ -11,8 +11,9 @@ import NodePropertyPanel from '../components/NodePropertyPanel'
 import WorkflowConfigPanel from '../components/WorkflowConfigPanel'
 import YamlEditor from '../components/YamlEditor'
 import WorkflowHistoryPanel from '../components/WorkflowHistoryPanel'
+import { compactDiff, formatCurrentSpecForDiff, formatSpecForDiff, specsEqual, unifiedDiff } from '../components/WorkflowVersionDiff'
 import { api } from '@avernet/clawweb-shared/web/api/client'
-import type { WorkflowSpec, DeployHistoryItem } from '@avernet/clawweb-shared/web/types'
+import type { WorkflowSpec, DeployHistoryItem, VersionSnapshot } from '@avernet/clawweb-shared/web/types'
 
 type ViewMode = 'visual' | 'yaml' | 'split'
 
@@ -43,6 +44,10 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
   const [showDeployGuide, setShowDeployGuide] = useState(false)
   const [deployCommandCopied, setDeployCommandCopied] = useState(false)
   const [latestDeploy, setLatestDeploy] = useState<DeployHistoryItem | null>(null)
+  const [baselineIsActive, setBaselineIsActive] = useState(false)
+  const [activeSnapshot, setActiveSnapshot] = useState<VersionSnapshot | null>(null)
+  const [showDeploymentDiff, setShowDeploymentDiff] = useState(false)
+  const [deploymentBaselineRevision, setDeploymentBaselineRevision] = useState(0)
 
   const { spec, isDirty, selectedNodeId, validationErrors, loadSpec, createNew, importYaml, selectNode, markClean } = useEditorStore()
 
@@ -81,21 +86,58 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
   useEffect(() => {
     if (!selectedWorkflowId) {
       setLatestDeploy(null)
+      setBaselineIsActive(false)
       return
     }
+    setLatestDeploy(null)
+    setBaselineIsActive(false)
     let cancelled = false
     api.workflows
       .getHistory(selectedWorkflowId, 50, true)
       .then((r) => {
-        if (!cancelled) setLatestDeploy(r.history?.find((item) => item.action !== 'edit') ?? null)
+        if (cancelled) return
+        const active = r.history?.find((item) => item.isActive)
+        setLatestDeploy(active ?? r.history?.find((item) => item.action !== 'edit') ?? null)
+        setBaselineIsActive(Boolean(active))
       })
       .catch(() => {
-        if (!cancelled) setLatestDeploy(null)
+        if (!cancelled) {
+          setLatestDeploy(null)
+          setBaselineIsActive(false)
+        }
       })
     return () => {
       cancelled = true
     }
-  }, [selectedWorkflowId])
+  }, [selectedWorkflowId, deploymentBaselineRevision])
+
+  useEffect(() => {
+    if (!selectedWorkflowId || !latestDeploy) {
+      setActiveSnapshot(null)
+      return
+    }
+    let cancelled = false
+    api.workflows
+      .getDeploySnapshot(selectedWorkflowId, latestDeploy.deployNumber)
+      .then((snapshot) => {
+        if (!cancelled) setActiveSnapshot(snapshot)
+      })
+      .catch(() => {
+        if (!cancelled) setActiveSnapshot(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedWorkflowId, latestDeploy])
+
+  const deployedSpecText = activeSnapshot ? formatSpecForDiff(activeSnapshot.specJson) : ''
+  const savedSpecText = workflowSpec ? formatCurrentSpecForDiff(workflowSpec) : ''
+  const hasUndeployedChanges = Boolean(activeSnapshot && workflowSpec && !specsEqual(deployedSpecText, savedSpecText))
+  const deploymentBaselineLabel = baselineIsActive ? '生效' : '最新发布'
+  const deploymentDiffLines = useMemo(
+    () => hasUndeployedChanges ? compactDiff(unifiedDiff(deployedSpecText, savedSpecText)) : [],
+    [deployedSpecText, hasUndeployedChanges, savedSpecText],
+  )
 
   const handleOpenSaveDialog = useCallback(() => {
     if (!spec) return
@@ -254,11 +296,20 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
           {selectedWorkflowId &&
             (latestDeploy ? (
               <span className="hidden shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500 2xl:inline">
-                生效 v{latestDeploy.version} · deploy #{latestDeploy.deployNumber}
+                {deploymentBaselineLabel} v{latestDeploy.version} · deploy #{latestDeploy.deployNumber}
               </span>
             ) : (
               <span className="hidden text-[10px] text-slate-400 2xl:inline">仅本地草稿</span>
             ))}
+          {hasUndeployedChanges && latestDeploy && (
+            <button
+              type="button"
+              onClick={() => setShowDeploymentDiff(true)}
+              className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800 hover:bg-amber-200"
+            >
+              与{deploymentBaselineLabel} v{latestDeploy.version} 有差异 · 待部署
+            </button>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <div className="flex rounded-lg bg-slate-100 p-0.5" aria-label="编辑器视图">
@@ -289,14 +340,6 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
           >
             版本历史
           </button>
-          <button
-            type="button"
-            onClick={() => setShowDeployGuide(true)}
-            disabled={!selectedWorkflowId}
-            className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:text-slate-300"
-          >
-            部署
-          </button>
           {!embedded && <div className="relative">
             <button type="button" aria-label="更多操作" aria-expanded={showMore} onClick={() => setShowMore((open) => !open)} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">更多 ···</button>
             {showMore && <><button type="button" aria-label="关闭更多操作" className="fixed inset-0 z-40 cursor-default" onClick={() => setShowMore(false)} /><div role="menu" className="absolute right-0 top-full z-50 mt-2 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_16px_40px_rgba(15,23,42,0.16)]">
@@ -312,6 +355,14 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
             className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-40"
           >
             {saveToDbMutation.isPending ? '保存中…' : '保存'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowDeployGuide(true)}
+            disabled={!selectedWorkflowId}
+            className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:text-slate-300"
+          >
+            部署
           </button>
         </div>
       </div>
@@ -552,8 +603,44 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
           <div className="flex h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-xl">
             <WorkflowHistoryPanel
               workflowId={selectedWorkflowId}
+              onActiveVersionChange={() => setDeploymentBaselineRevision((revision) => revision + 1)}
               onClose={() => setShowHistory(false)}
             />
+          </div>
+        </div>
+      )}
+
+      {showDeploymentDiff && activeSnapshot && latestDeploy && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
+          <div className="flex h-[80vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">部署前差异</h3>
+                <p className="mt-0.5 text-xs text-gray-500">{deploymentBaselineLabel} v{latestDeploy.version} · deploy #{latestDeploy.deployNumber} → 当前已保存内容</p>
+              </div>
+              <button onClick={() => setShowDeploymentDiff(false)} className="rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50">关闭</button>
+            </div>
+            <div className="flex-1 overflow-auto bg-gray-900 font-mono text-xs leading-relaxed">
+              {deploymentDiffLines.map((line, index) => {
+                if (line.type === 'skip') {
+                  return <div key={`skip-${index}`} className="border-y border-gray-700 bg-gray-800 px-3 py-1 text-center text-gray-500">{line.text}</div>
+                }
+                const isAdded = line.type === 'add'
+                const isDeleted = line.type === 'del'
+                const lineNumber = isDeleted ? line.fromLine : line.toLine
+                return (
+                  <div key={index} className={`flex ${isAdded ? 'bg-green-900/30' : isDeleted ? 'bg-red-900/30' : ''}`}>
+                    <span className="w-10 shrink-0 select-none border-r border-gray-700 px-1 text-right text-gray-500">{lineNumber ?? ''}</span>
+                    <span className={`shrink-0 select-none px-1 ${isAdded ? 'text-green-300' : isDeleted ? 'text-red-300' : 'text-gray-300'}`}>{isAdded ? '+' : isDeleted ? '-' : ' '}</span>
+                    <span className={`whitespace-pre px-1 ${isAdded ? 'text-green-300' : isDeleted ? 'text-red-300' : 'text-gray-300'}`}>{line.text}</span>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="flex justify-end gap-2 border-t border-gray-200 bg-gray-50 px-4 py-2">
+              <button onClick={() => setShowDeploymentDiff(false)} className="rounded border border-gray-300 bg-white px-3 py-1 text-xs text-gray-700 hover:bg-gray-50">稍后部署</button>
+              <button onClick={() => { setShowDeploymentDiff(false); setShowDeployGuide(true) }} className="rounded bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700">部署</button>
+            </div>
           </div>
         </div>
       )}
@@ -563,16 +650,10 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
           <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
             <h3 className="text-lg font-semibold text-gray-900">部署工作流</h3>
-            <p className="mt-2 text-sm leading-6 text-gray-600">
-              部署会把最近一次保存的快照打 Git tag，并准备对应的只读 Pack。该操作需要 ClawMind 的 Git 凭据，网页端不会只写数据库来伪造一次发布。
-            </p>
             <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
               <div className="text-xs text-slate-500">在对应 Bot 对话中执行</div>
               <code className="mt-1 block select-all font-mono text-sm text-slate-800">/workflow deploy {selectedWorkflowId}</code>
             </div>
-            <p className="mt-3 text-xs leading-5 text-slate-500">
-              如果尚未保存过快照，请先执行 <code>/workflow save {selectedWorkflowId}</code>。
-            </p>
             <div className="mt-5 flex justify-end gap-2">
               <button onClick={() => setShowDeployGuide(false)} className="rounded-md border border-gray-300 px-4 py-1.5 text-sm text-gray-700 hover:bg-gray-50">关闭</button>
               <button onClick={() => void handleCopyDeployCommand()} className="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">

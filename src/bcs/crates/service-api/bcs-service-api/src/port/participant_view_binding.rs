@@ -1,9 +1,11 @@
 //! Runtime binding barrier for Human participant message-scope mutations.
 //!
-//! Group and Session Application services acquire a lease before changing a
-//! persisted scope. The adapter must reject new bindings for the same
-//! Group-or-Session/Human and invalidate existing bindings before returning
-//! the lease.
+//! Group and Session Application services acquire a lease before changing an
+//! existing persisted scope. The adapter rejects new bindings for the same
+//! Group-or-Session/Human and invalidates bindings visible to that adapter
+//! before returning the lease. In-memory adapters provide process-local
+//! coordination; callers must not treat this presentation projection as a
+//! cluster-wide security boundary.
 
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicU64, Ordering};

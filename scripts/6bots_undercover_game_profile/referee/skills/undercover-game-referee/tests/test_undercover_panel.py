@@ -47,6 +47,9 @@ class UndercoverPanelParamsTest(unittest.TestCase):
         vote = undercover.public_panel_projection(self.state, "vote", 2)
         payload = json.dumps({"speech": speech, "vote": vote}, ensure_ascii=False)
         self.assertEqual(speech["runId"], "{{bcs.run_id}}")
+        for projection in (speech, vote):
+            self.assertNotIn("apiBaseUrl", projection)
+            self.assertNotIn("baseUrl", projection)
         self.assertEqual(speech["seatOrder"], ["human-1", "bot-a", "bot-b"])
         self.assertEqual(speech["turnOrder"], ["human-1", "bot-a"])
         self.assertEqual([p["seatNumber"] for p in speech["players"]], [1, 2, 3])
@@ -57,7 +60,7 @@ class UndercoverPanelParamsTest(unittest.TestCase):
         })
         self.assertEqual(vote["nodeActorMap"], {
             "vote_1": "human-1", "vote_2": "bot-a",
-            "vote_open": "referee-1", "tally": "referee-1",
+            "tally": "referee-1",
         })
         player_by_id = {player["actorId"]: player for player in speech["players"]}
         self.assertEqual(

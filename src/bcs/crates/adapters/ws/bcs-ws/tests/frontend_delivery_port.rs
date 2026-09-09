@@ -481,17 +481,17 @@ async fn scope_change_cancels_socket_when_close_queue_is_full() {
 }
 
 #[tokio::test]
-async fn distributed_deployment_rejects_local_only_scope_change_barrier() {
+async fn distributed_deployment_allows_instance_local_scope_change_barrier() {
     let connections = WorkbenchConnectionRegistry::new().with_scope_changes_enabled(false);
+    assert!(format!("{connections:?}").contains("cluster_scope_changes_enabled: false"));
 
-    let error = connections
+    let lease = connections
         .begin_scope_change("session-scoped", "human_target")
         .await
-        .expect_err("local registry cannot fence connections on other replicas");
+        .expect("cluster mode permits instance-local connection invalidation");
 
-    assert!(matches!(
-        error,
-        bcs_service_api::ServiceError::InvalidOperation { message, .. }
-            if message == "view_scope_change_requires_cluster_binding"
-    ));
+    connections
+        .finish_scope_change(lease)
+        .await
+        .expect("finish instance-local scope change");
 }
