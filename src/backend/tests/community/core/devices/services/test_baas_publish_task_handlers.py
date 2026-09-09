@@ -13,6 +13,7 @@ from agentclaw.community.core.devices.services.baas_publish_task_handlers import
     BAAS_CREATE_INIT_TASK,
     BAAS_CREATE_PUBLISH_POLL_TASK,
     BAAS_RESTART_PUBLISH_POLL_TASK,
+    RESTART_REQUEST_ID_KEY,
     BaasCreateInitTaskHandler,
     BaasCreatePublishPollHandler,
     BaasPublishTaskLifecycle,
@@ -1720,10 +1721,72 @@ def test_restart_success_requests_runtime_projection_and_baas_reconciliation():
                 entity_type="staff",
                 device_provider="baas",
                 sandbox_id=None,
+                source="baas_restart",
+                runtime_generation="1002",
             )
         ]
         assert activated == []
         assert delivery_order == ["runtime_projection", "baas_completed"]
+    finally:
+        reset_event_bus()
+
+
+def test_restart_required_projection_failure_preserves_recovery_intent():
+    reset_event_bus()
+
+    def fail_projection(_event: RuntimeProjectionRequestedEvent) -> None:
+        raise RuntimeError("task queue unavailable")
+
+    get_event_bus().subscribe(
+        RuntimeProjectionRequestedEvent,
+        fail_projection,
+        required=True,
+    )
+    try:
+        request_id = "restart-request-1"
+        repo = MagicMock()
+        repo.get_by_id.return_value = _make_binding(
+            status=DeviceBindingStatus.PENDING.value,
+            device_props={
+                "restart_publish_id": 1002,
+                RESTART_REQUEST_ID_KEY: request_id,
+            },
+        )
+        bot_repository = MagicMock()
+        bot_repository.get_by_binding_id.return_value = {
+            "bot_id": "bot-001",
+            "owner_id": "owner-001",
+            "active_engine": "openclaw",
+            "bot_type": "personal",
+        }
+        bot_repository.get_by_id_and_owner.return_value = {"ext": {}}
+        baas_device_service = MagicMock()
+        baas_device_service.poll_publish_once.return_value = (
+            DeviceBindingStatus.ACTIVE.value
+        )
+        baas_device_service.refresh_codefuse_token_on_publish_success.return_value = (
+            None
+        )
+        handler, _ = _make_restart_handler(
+            repo=repo,
+            bot_repository=bot_repository,
+            baas_device_service=baas_device_service,
+        )
+
+        with pytest.raises(RuntimeError, match="required handler failed"):
+            handler.handle(
+                build_restart_publish_poll_payload(
+                    binding_id=42,
+                    bot_id="bot-001",
+                    owner_id="owner-001",
+                    publish_id=1002,
+                    started_at_epoch_s=190.0,
+                    bot_uuid="baas-bot-1",
+                    request_id=request_id,
+                )
+            )
+
+        repo.update_device_props.assert_not_called()
     finally:
         reset_event_bus()
 

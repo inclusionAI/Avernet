@@ -18,7 +18,6 @@ import pytest
 
 from engine.community.kernel.frames import EventFrame
 
-
 # ── helpers (copied from test_community_transport.py) ────────────────────────
 
 
@@ -96,6 +95,7 @@ class TestMcpMixin:
         c.set_response("mcp.config.list", _ok({"servers": []}))
         impl, _ = _impl(c)
         assert await impl.mcp_config_round_trip() is True
+        assert _last_call(c)[2]["timeout"] == 5.0
 
         c.set_response("mcp.config.list", _err("STARTING", "not ready"))
         assert await impl.mcp_config_round_trip() is False
@@ -103,6 +103,11 @@ class TestMcpMixin:
         c.set_response("mcp.config.list", _ok({"servers": "invalid"}))
         with pytest.raises(ValueError, match="servers must be a list"):
             await impl.mcp_config_round_trip()
+
+        for payload in (None, {}):
+            c.set_response("mcp.config.list", _ok(payload))
+            with pytest.raises(TypeError, match="must contain servers"):
+                await impl.mcp_config_round_trip()
 
     async def test_list_servers_success_dict_payload(self):
         c = _FakeRelayClient()
@@ -113,6 +118,7 @@ class TestMcpMixin:
         method, args, kw = _last_call(c)
         assert method == "send_request" and args[0] == "mcp.config.list"
         assert kw["params"] == {}
+        assert kw["timeout"] == 20.0
 
     async def test_list_servers_success_list_payload(self):
         c = _FakeRelayClient()
@@ -168,6 +174,7 @@ class TestMcpMixin:
         assert out == {"serverCode": "s1", "created": True}
         _, args, kw = _last_call(c)
         assert args[0] == "mcp.config.create" and kw["params"] is cfg
+        assert kw["timeout"] == 20.0
 
     async def test_create_server_success_non_dict_returns_config(self):
         cfg = {"serverCode": "s1"}

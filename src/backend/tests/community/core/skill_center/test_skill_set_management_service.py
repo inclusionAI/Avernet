@@ -12,22 +12,31 @@ from types import SimpleNamespace
 
 import pytest
 
+from agentclaw.community.core.caller_identity.models import McpCallType
+from agentclaw.community.core.repository.capability_desired_state_types import (
+    InstallationFlushPlan,
+)
 from agentclaw.community.core.repository.implementations.skill_center.capability_desired_state import (
     CapabilityDesiredState,
     DesiredStateMutation,
 )
-from agentclaw.community.core.repository.capability_desired_state_types import (
-    InstallationFlushPlan,
-)
-from agentclaw.community.core.caller_identity.models import McpCallType
-from agentclaw.community.core.skill_center.runtime_projection_contract import (
-    ProjectionScope,
-)
 from agentclaw.community.core.skill_center.errors import (
+    McpPermissionDeniedError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
     SkillSetRuntimeReconcileError,
-    McpPermissionDeniedError,
+)
+from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
+    LegacySkillSetScope,
+)
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    ProjectionScope,
+)
+from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
+    BotCapabilityStateReader,
+)
+from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
+    BotRuntimeProjector,
 )
 from agentclaw.community.core.skill_center.services.skill_set_management_service import (
     SkillSetManagementService,
@@ -35,20 +44,11 @@ from agentclaw.community.core.skill_center.services.skill_set_management_service
 from agentclaw.community.core.skill_center.skill_set_batch import (
     SkillSetSkillOutcome,
 )
-from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
-    BotCapabilityStateReader,
-)
-from tests.community.skill_version_fakes import PassthroughSkillVersionResolver
-from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
-    BotRuntimeProjector,
-)
-from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
-    LegacySkillSetScope,
-)
 from agentclaw.community.core.skills_pool.models import (
     PoolSkillMapping,
     RegisteredSkillAsset,
 )
+from tests.community.skill_version_fakes import PassthroughSkillVersionResolver
 
 
 class _Repository:
@@ -519,6 +519,7 @@ def _registry(*, pool_runtime, pool_layouts):
     )
     from agentclaw.community.core.skill_center.services.runtime_projections.registry import (
         EngineRuntimeProjectionRegistry,
+        RuntimeProjectionDeliveryShape,
     )
     from agentclaw.community.core.skill_center.services.runtime_projections.skill_runtime_delivery import (
         SkillRuntimeDelivery,
@@ -537,6 +538,9 @@ def _registry(*, pool_runtime, pool_layouts):
             ),
         ),
         by_engine={"teclaw": WholeArtifactRuntimeProjection()},
+        delivery_shape_by_engine={
+            "teclaw": RuntimeProjectionDeliveryShape.WHOLE_ARTIFACT,
+        },
     )
 
 
@@ -2255,7 +2259,9 @@ async def test_runtime_projection_mcp_inputs_agree_when_the_union_overlaps():
 
 @pytest.mark.asyncio
 async def test_runtime_reconcile_projects_full_mcp_desired_state():
-    from agentclaw.community.core.skill_center.capability_state_contract import BotCapabilitySnapshot
+    from agentclaw.community.core.skill_center.capability_state_contract import (
+        BotCapabilitySnapshot,
+    )
     factory = _RuntimeFactory()
     passport = _RuntimePassport()
     runtime = BotRuntimeProjector(

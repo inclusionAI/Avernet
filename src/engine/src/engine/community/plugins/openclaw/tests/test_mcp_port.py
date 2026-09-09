@@ -17,7 +17,6 @@ import pytest
 
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 
-
 # ── fixtures ─────────────────────────────────────────────────────────────────
 
 
@@ -73,6 +72,21 @@ async def test_list_preserves_all_raw_fields(impl, cfg_path):
     assert entry["type"] == "http"
     assert entry["baseUrl"] == "http://x"
     assert entry["enabled"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    (
+        {"mcpServers": []},
+        {"servers": "invalid"},
+        {"mcpServers": {"broken": "invalid"}},
+    ),
+)
+async def test_list_rejects_invalid_existing_configuration(impl, cfg_path, payload):
+    cfg_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="必须为 object"):
+        await impl.list_servers()
 
 
 # ── get_server ───────────────────────────────────────────────────────────────

@@ -21,25 +21,35 @@ from agentclaw.community.api.skill_version_materializer import (
     SkillVersionMaterializerProtocol,
 )
 from agentclaw.community.api.track_latest import TrackLatestServiceProtocol
+from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+from agentclaw.community.core.devices.services.device_context_resolver import (
+    DeviceContextResolver,
+)
+from agentclaw.community.core.events.types import (
+    DeviceActivatedEvent,
+    DeviceAliveEvent,
+)
 from agentclaw.community.core.repository.implementations.skill_center.skill_center_reference import (
     SkillCenterReferenceRepository,
 )
 from agentclaw.community.core.repository.implementations.skill_center.track_latest import (
     TrackLatestRepository,
 )
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.devices import (
+    DeviceBindingRepository,
+)
 from agentclaw.community.core.repository.protocols.skill_center_reference import (
     SkillCenterReferenceRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolLayoutRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.track_latest import (
     TrackLatestRepositoryProtocol,
 )
-from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
-from agentclaw.community.core.repository.protocols.skills_pool import (
-    SkillsPoolLayoutRepositoryProtocol,
-)
-from agentclaw.community.core.devices.services.device_context_resolver import (
-    DeviceContextResolver,
+from agentclaw.community.core.skill_center.services.group4_task_registrar import (
+    SkillCenterGroup4TaskRegistrar,
 )
 from agentclaw.community.core.skill_center.services.lifecycle_runtime_reprojection import (
     LifecycleRuntimeProjectionTaskHandler,
@@ -50,13 +60,6 @@ from agentclaw.community.core.skill_center.services.mcp_runtime_probe import (
 )
 from agentclaw.community.core.skill_center.services.runtime_projections.registry import (
     EngineRuntimeProjectionRegistry,
-)
-from agentclaw.community.core.skills_pool.types import (
-    BotSkillLayoutScope,
-    runtime_uses_pool_paths,
-)
-from agentclaw.community.core.skill_center.services.group4_task_registrar import (
-    SkillCenterGroup4TaskRegistrar,
 )
 from agentclaw.community.core.skill_center.services.skill_center_reference_processor import (
     SkillCenterReferenceProcessor,
@@ -76,14 +79,24 @@ from agentclaw.community.core.skill_center.services.track_latest import (
 from agentclaw.community.core.skill_center.services.track_latest_event_listener import (
     TrackLatestPublishedVersionListener,
 )
+from agentclaw.community.core.skill_center.skill_center_gateway_service_protocol import (
+    SkillCenterGatewayServiceProtocol,
+)
+from agentclaw.community.core.skills_pool.reconcile_task import (
+    SkillsPoolReconcileWakeupListener,
+)
+from agentclaw.community.core.skills_pool.types import (
+    BotSkillLayoutScope,
+    SkillLayout,
+    runtime_uses_pool_paths,
+)
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
-from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
+from agentclaw.community.core.task_queue.services.task_queue_service import (
+    TaskQueueService,
+)
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTransport,
-)
-from agentclaw.community.core.skill_center.skill_center_gateway_service_protocol import (
-    SkillCenterGatewayServiceProtocol,
 )
 
 
@@ -122,13 +135,14 @@ class SkillCenterGroup4Module(Module):
         runtime_reconciler: BotRuntimeProjectorProtocol,
         mcp_probe: CurrentMcpRuntimeProbeService,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
+        skills_pool_wakeup: SkillsPoolReconcileWakeupListener,
     ) -> LifecycleRuntimeProjectionTaskHandler:
-        def skill_projection_owned_elsewhere(bot: dict[str, object]) -> bool:
+        def skill_projection_authority(bot: dict[str, object]) -> str | None:
             if bot.get("bot_type") != "desktop":
-                return False
+                return None
             values = (bot.get("env"), bot.get("entity_id"), bot.get("bot_id"))
             if not all(isinstance(value, str) and value for value in values):
-                return False
+                return None
             state = layout_repository.get(
                 BotSkillLayoutScope(
                     env=str(values[0]),
@@ -136,7 +150,28 @@ class SkillCenterGroup4Module(Module):
                     bot_id=str(values[2]),
                 )
             )
-            return runtime_uses_pool_paths(state)
+            if state.active_layout is SkillLayout.POOL:
+                return "pool"
+            return "transition" if runtime_uses_pool_paths(state) else "legacy"
+
+        def wake_skills_pool(
+            bot: dict[str, object], binding: DeviceBindingRecord
+        ) -> None:
+            event_type = (
+                DeviceActivatedEvent
+                if binding.device_provider == "baas"
+                else DeviceAliveEvent
+            )
+            skills_pool_wakeup.handle(
+                event_type(
+                    device_id=binding.device_id,
+                    binding_id=binding.id,
+                    entity_id=binding.entity_id,
+                    entity_type=binding.entity_type,
+                    device_provider=binding.device_provider,
+                    sandbox_id=(binding.device_props or {}).get("sandbox_id"),
+                )
+            )
 
         return LifecycleRuntimeProjectionTaskHandler(
             binding_repository=binding_repository,
@@ -144,7 +179,8 @@ class SkillCenterGroup4Module(Module):
             projection_registry=projection_registry,
             projector=runtime_reconciler,
             mcp_probe=mcp_probe,
-            skill_projection_owned_elsewhere=skill_projection_owned_elsewhere,
+            skill_projection_authority=skill_projection_authority,
+            skills_pool_reconcile_wakeup=wake_skills_pool,
         )
 
     @singleton

@@ -29,19 +29,20 @@ from engine.community.core.mcp.models import (
     MCPFilterResult,
     MCPPrompt,
     MCPResource,
+    McpRuntimeReadinessResult,
     MCPServer,
     MCPServerConfig,
     MCPServerStatus,
     MCPTool,
     MCPToolCallRequest,
     MCPToolCallResult,
-    McpRuntimeReadinessResult,
     TransportType,
 )
 from engine.community.core.mcp.protocol import MCPService
 from engine.community.plugin_api.openclaw.mcp import OpenClawMcpPort
 
 log = logging.getLogger("openclaw-mcp-adapter")
+_MCP_RUNTIME_OPERATION_TIMEOUT_SECONDS = 20
 
 
 # ── Dict → DTO helpers (relocated from engines/openclaw/mcp.py) ──────────────
@@ -290,7 +291,10 @@ class OpenClawMcpAdapter(MCPService):
     ) -> MCPFilterResult:
         raw = await self._port.filter_servers(
             request.server_codes or [],
-            timeout=_normalize_timeout(request.timeout_seconds) or 30,
+            timeout=min(
+                _normalize_timeout(request.timeout_seconds) or 30,
+                _MCP_RUNTIME_OPERATION_TIMEOUT_SECONDS,
+            ),
         )
         return MCPFilterResult(
             server_codes=raw["server_codes"],

@@ -10,7 +10,6 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 )
 from agentclaw.community.log import get_logger
 
-
 logger = get_logger()
 
 
@@ -54,6 +53,16 @@ class EngineRuntimeProjectionRegistry:
         self._by_engine = dict(by_engine or {})
         self._default_delivery_shape = default_delivery_shape
         self._delivery_shape_by_engine = dict(delivery_shape_by_engine or {})
+        projection_keys = set(self._by_engine)
+        shape_keys = set(self._delivery_shape_by_engine)
+        if projection_keys != shape_keys:
+            missing = sorted(projection_keys - shape_keys)
+            extra = sorted(shape_keys - projection_keys)
+            raise ValueError(
+                "runtime projection and delivery-shape registrations must "
+                f"have identical engine keys (missing_shapes={missing}, "
+                f"orphan_shapes={extra})"
+            )
 
     def for_engine(self, engine: str) -> EngineRuntimeProjection:
         """The runtime contract ``engine`` obeys; the default if unregistered."""

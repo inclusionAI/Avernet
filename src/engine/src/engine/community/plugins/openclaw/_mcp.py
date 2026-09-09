@@ -36,10 +36,20 @@ class _McpPortMixin:
             raise RuntimeError(f"mcporter.json 格式错误: {e}") from e
         if not isinstance(data, dict):
             raise RuntimeError("mcporter.json 顶层必须为 object")
-        if isinstance(data.get("mcpServers"), dict):
-            return data, "mcpServers", data["mcpServers"]
-        if isinstance(data.get("servers"), dict):
-            return data, "servers", data["servers"]
+        if "mcpServers" in data:
+            if not isinstance(data["mcpServers"], dict):
+                raise RuntimeError("mcporter.json mcpServers 必须为 object")
+            servers = data["mcpServers"]
+            if not all(isinstance(entry, dict) for entry in servers.values()):
+                raise RuntimeError("mcporter.json server 配置必须为 object")
+            return data, "mcpServers", servers
+        if "servers" in data:
+            if not isinstance(data["servers"], dict):
+                raise RuntimeError("mcporter.json servers 必须为 object")
+            servers = data["servers"]
+            if not all(isinstance(entry, dict) for entry in servers.values()):
+                raise RuntimeError("mcporter.json server 配置必须为 object")
+            return data, "servers", servers
         data["mcpServers"] = {}
         return data, "mcpServers", data["mcpServers"]
 

@@ -28,6 +28,7 @@ boundaries: all siblings still run, then `publish()` raises
 `RuntimeProjectionRequestedEvent` is a narrower wake-up used after a successful
 runtime restart or an explicit operator recovery. Its `source` distinguishes
 `baas_restart` from `explicit_reconcile`; per-domain consumers persist the
-request before returning from the required event handler.
-runtime restart; it asks projection consumers to re-read current desired state
-without replaying unrelated activation side effects.
+request before returning from the required event handler. `runtime_generation`
+distinguishes restart incarnations that reuse the same binding.
+It asks projection consumers to re-read current desired state without replaying
+unrelated activation side effects.

@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from collections.abc import Callable
 from enum import StrEnum
 from typing import Any
 
+from agentclaw.community.core.bot_management.engines.registry import (
+    normalize_engine_type,
+    resolve_bot_engine,
+)
 from agentclaw.community.core.events.types import (
     DeviceAliveEvent,
     RuntimeProjectionRequestedEvent,
@@ -51,9 +56,18 @@ class LifecycleProjectionComponent(StrEnum):
 
 
 def build_lifecycle_projection_key(
-    *, env: str, binding_id: int, component: LifecycleProjectionComponent
+    *,
+    env: str,
+    binding_id: int,
+    component: LifecycleProjectionComponent,
+    signal_identity: dict[str, Any],
 ) -> str:
-    return f"runtime-projection:{env}:{binding_id}:{component.value}"
+    generation = "\x1f".join(
+        str(signal_identity.get(key) or "")
+        for key in ("source", "device_id", "sandbox_id", "runtime_generation")
+    )
+    digest = hashlib.sha256(generation.encode()).hexdigest()[:16]
+    return f"runtime-projection:{env}:{binding_id}:{component.value}:{digest}"
 
 
 class LifecycleRuntimeProjectionTaskHandler:
@@ -65,8 +79,11 @@ class LifecycleRuntimeProjectionTaskHandler:
         projection_registry: EngineRuntimeProjectionRegistry,
         projector: BotRuntimeProjectorProtocol,
         mcp_probe: CurrentMcpRuntimeProbeService,
-        skill_projection_owned_elsewhere: (
-            Callable[[dict[str, Any]], bool] | None
+        skill_projection_authority: (
+            Callable[[dict[str, Any]], str | None] | None
+        ) = None,
+        skills_pool_reconcile_wakeup: (
+            Callable[[dict[str, Any], Any], None] | None
         ) = None,
     ) -> None:
         self._bindings = binding_repository
@@ -74,7 +91,8 @@ class LifecycleRuntimeProjectionTaskHandler:
         self._projection_registry = projection_registry
         self._projector = projector
         self._mcp_probe = mcp_probe
-        self._skill_projection_owned_elsewhere = skill_projection_owned_elsewhere
+        self._skill_projection_authority = skill_projection_authority
+        self._skills_pool_reconcile_wakeup = skills_pool_reconcile_wakeup
 
     @property
     def task_type(self) -> str:
@@ -99,24 +117,34 @@ class LifecycleRuntimeProjectionTaskHandler:
             is not RuntimeProjectionDeliveryShape.PER_DOMAIN
         ):
             return Complete()
-
-        return asyncio.run(self._run(work=work, engine=engine))
+        runtime_engine = normalize_engine_type(resolve_bot_engine(bot), default=engine)
+        return asyncio.run(self._run(work=work, engine=runtime_engine))
 
     async def _run(self, *, work: dict[str, Any], engine: str) -> TaskOutcome:
         component = work["component"]
         if component is LifecycleProjectionComponent.SKILLS:
             bot = self._bots.get_by_binding_id(work["binding_id"])
-            if (
-                bot is not None
-                and self._skill_projection_owned_elsewhere is not None
-                and self._skill_projection_owned_elsewhere(bot)
-            ):
+            initial_authority = self._skill_authority(bot)
+            if initial_authority in {"transition", "pool"}:
+                self._wake_skills_pool(bot=bot, binding_id=work["binding_id"])
                 return Complete()
-            result = await self._projector.project(
-                bot_id=work["bot_id"],
-                owner_id=work["owner_id"],
-                scope=ProjectionScope(skills=True),
-            )
+            try:
+                result = await self._projector.project(
+                    bot_id=work["bot_id"],
+                    owner_id=work["owner_id"],
+                    scope=ProjectionScope(skills=True),
+                )
+            finally:
+                current_bot = self._bots.get_by_binding_id(work["binding_id"])
+                current_authority = self._skill_authority(current_bot)
+                if (
+                    initial_authority == "legacy"
+                    and current_authority in {"transition", "pool"}
+                ):
+                    self._wake_skills_pool(
+                        bot=current_bot,
+                        binding_id=work["binding_id"],
+                    )
             return self._projection_outcome(result)
 
         readiness = await self._mcp_probe.probe_binding(
@@ -144,6 +172,20 @@ class LifecycleRuntimeProjectionTaskHandler:
             scope=ProjectionScope(mcp=True, claim_all_mcp=True),
         )
         return self._projection_outcome(result)
+
+    def _skill_authority(self, bot: dict[str, Any] | None) -> str | None:
+        if bot is None or self._skill_projection_authority is None:
+            return None
+        return self._skill_projection_authority(bot)
+
+    def _wake_skills_pool(
+        self, *, bot: dict[str, Any] | None, binding_id: int
+    ) -> None:
+        if bot is None or self._skills_pool_reconcile_wakeup is None:
+            return
+        binding = self._bindings.get_by_id(binding_id)
+        if binding is not None:
+            self._skills_pool_reconcile_wakeup(bot, binding)
 
     @staticmethod
     def _projection_outcome(result: RuntimeProjectionResult) -> TaskOutcome:
@@ -258,6 +300,13 @@ class LifecycleRuntimeProjectionWakeup(LifecycleBase):
         if not isinstance(bot_id, str) or not bot_id or owner_id is None:
             return
         source = "device_alive" if isinstance(event, DeviceAliveEvent) else event.source
+        signal_identity = {
+            "source": source,
+            "binding_id": event.binding_id,
+            "device_id": event.device_id,
+            "sandbox_id": event.sandbox_id,
+            "runtime_generation": getattr(event, "runtime_generation", None),
+        }
         for component in LifecycleProjectionComponent:
             payload = {
                 "env": binding.env,
@@ -268,11 +317,7 @@ class LifecycleRuntimeProjectionWakeup(LifecycleBase):
                 "sandbox_id": (binding.device_props or {}).get("sandbox_id"),
                 "component": component.value,
                 "source": source,
-                "signal_identity": {
-                    "binding_id": event.binding_id,
-                    "device_id": event.device_id,
-                    "sandbox_id": event.sandbox_id,
-                },
+                "signal_identity": signal_identity,
             }
             self._queue.enqueue(
                 LIFECYCLE_RUNTIME_PROJECTION_TASK,
@@ -282,6 +327,7 @@ class LifecycleRuntimeProjectionWakeup(LifecycleBase):
                     env=binding.env,
                     binding_id=binding.id,
                     component=component,
+                    signal_identity=signal_identity,
                 ),
             )
 

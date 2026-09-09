@@ -5,8 +5,8 @@ from dataclasses import replace
 from typing import Any, Callable, Optional, cast
 
 from agentclaw.community.core.bot_management.engines import resolve_provisioning
-from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.bot_management.utils import clear_baas_publish_failure_ext
+from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.events.bus import get_event_bus
@@ -26,8 +26,8 @@ from agentclaw.community.core.task_queue.types import (
     TaskOutcome,
 )
 from agentclaw.community.kernel.lifecycle import LifecycleBase
-from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.env_utils import get_current_env
 
 BAAS_CREATE_PUBLISH_POLL_TASK = "baas.create.publish_poll"
 BAAS_CREATE_INIT_TASK = "baas.create.init"
@@ -65,7 +65,9 @@ def _publish_baas_completed(
     )
 
 
-def _request_baas_runtime_projection(binding: DeviceBindingRecord) -> None:
+def _request_baas_runtime_projection(
+    binding: DeviceBindingRecord, *, publish_id: int
+) -> None:
     """Request a full desired-state projection after a BaaS restart."""
 
     get_event_bus().publish(
@@ -77,6 +79,7 @@ def _request_baas_runtime_projection(binding: DeviceBindingRecord) -> None:
             device_provider=binding.device_provider,
             sandbox_id=binding.device_props.get("sandbox_id"),
             source="baas_restart",
+            runtime_generation=str(publish_id),
         )
     )
 
@@ -762,10 +765,10 @@ class BaasRestartPublishPollHandler:
                     exc,
                 )
                 return Retry(str(exc))
-        # Clear only after every success-side persistence step has completed.
-        # A failure above keeps the durable request/baseline/policy for replay.
-        self._clear_restart_recovery_intent(binding_id=binding_id)
-        _request_baas_runtime_projection(binding)
+        # The lifecycle hand-offs below are required and durable. Keep the
+        # restart intent until both have succeeded so a transient enqueue
+        # failure can replay this terminal success path instead of aging out.
+        _request_baas_runtime_projection(binding, publish_id=publish_id)
         _publish_baas_completed(
             binding_id=binding_id,
             bot_id=bot_id,
@@ -773,6 +776,7 @@ class BaasRestartPublishPollHandler:
             publish_id=publish_id,
             publish_kind="restart",
         )
+        self._clear_restart_recovery_intent(binding_id=binding_id)
         return Complete()
 
     def _persist_failed(

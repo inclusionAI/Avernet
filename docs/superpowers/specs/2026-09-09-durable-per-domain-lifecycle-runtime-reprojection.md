@@ -106,8 +106,8 @@ runtime_projection.reconcile
 PerDomain 产生两个 component task：
 
 ```text
-runtime-projection:{env}:{binding_id}:skills
-runtime-projection:{env}:{binding_id}:mcp
+runtime-projection:{env}:{binding_id}:skills:{runtime_generation_digest}
+runtime-projection:{env}:{binding_id}:mcp:{runtime_generation_digest}
 ```
 
 Payload：
@@ -122,7 +122,7 @@ Payload：
   "sandbox_id": "...",
   "component": "skills | mcp",
   "source": "device_alive | baas_restart | explicit_reconcile",
-  "signal_identity": {}
+  "signal_identity": {"runtime_generation": "..."}
 }
 ```
 
@@ -132,11 +132,19 @@ Payload：
 2. 校验 `env`、`device_id`、`sandbox_id` 和 Bot 当前 binding 均未改变。
 3. 失配时 `Complete` 为 stale no-op，绝不选择历史 sandbox。
 4. 从数据库重新解析当前 Desired State；payload 不携带 Skill/MCP 快照。
-5. `skills` 调用 `project(scope=ProjectionScope(skills=True))`。
+5. `skills` 调用 `project(scope=ProjectionScope(skills=True))`；若 Desktop
+   Skills Pool 已进入 transition/POOL authority，则该 component 以唤醒既有
+   `skills_pool.reconcile` 作为完成证据，不再发起竞争的 Legacy 写入；若
+   transition 在 Legacy 投影期间开始，投影后必须再次唤醒 Pool 以保证 Pool
+   最后收敛。
 6. `mcp` 先做 MCP readiness，再调用 `project_mcp_and_cli(scope=ProjectionScope(mcp=True, claim_all_mcp=True))`。
 7. `CONVERGED`/合法 `SKIPPED` → `Complete`；全部 issue 可重试 → `Retry`；存在不可重试 issue → `Fail`。
 
 Task deadline 为 600 秒。超时进入 `TIMED_OUT`，保留 Desired State。新 binding、后续重启、显式 `RuntimeProjectionRequestedEvent` 或运维 manual reconcile 可以使用已释放的幂等键创建新任务。
+
+幂等键的 generation digest 来自 source、device、sandbox 与 BaaS restart
+publish id 等稳定 signal identity。同一 Runtime 代际重复 wake 仍合并为一个
+live task；新 Runtime 代际使用不同 key，避免旧 live payload 吞掉新信号。
 
 Task worker 已有运行中 lease heartbeat；保留现有 transport 内部短重试不会造成 lease 过期后的重复 claim。生命周期的跨尝试退避继续由 worker 统一管理，范围为 1 秒指数增长至 60 秒上限。
 
@@ -196,7 +204,8 @@ HTTP 200 承载合法业务状态；无法形成合法合同响应时返回非 2
 - MCP CRUD 的 Engine 内部 Relay deadline 必须小于 Backend transport deadline；目标为 20 秒与 25 秒。
 - Task lease heartbeat 必须覆盖整个 handler；不依赖固定 lease 长度猜测最长运行时间。
 - 保留现有 MCP detail fan-out concurrency=5；当前没有证据表明并发度是根因。
-- AICoding 的 `sync-cc --mcp` 当前失败只记录 warning，不改变配置写成功；实现时应把它从 HTTP 成功回执的关键路径分离，并保留单独的恢复与日志证据。
+- AICoding 的 `sync-cc --mcp` 不改变配置写成功，且从 HTTP 成功回执关键路径
+  分离；后台恢复使用独立的有界重试与日志证据。
 
 ## 9. 模块变更计划
 

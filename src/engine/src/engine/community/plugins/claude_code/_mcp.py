@@ -5,6 +5,8 @@ import logging
 from typing import Any
 
 log = logging.getLogger("claude-code-community-port")
+_MCP_READINESS_TIMEOUT_SECONDS = 5.0
+_MCP_RELAY_TIMEOUT_SECONDS = 20.0
 
 
 class _McpPortMixin:
@@ -12,16 +14,15 @@ class _McpPortMixin:
     / mcp.server.* / mcp.filter_servers."""
 
     async def mcp_config_round_trip(self) -> bool:
-        resp = await (await self._relay()).send_request("mcp.config.list", {})
+        resp = await (await self._relay()).send_request(
+            "mcp.config.list", {}, timeout=_MCP_READINESS_TIMEOUT_SECONDS
+        )
         if not resp.ok:
             return False
-        payload = resp.payload if resp.payload is not None else {}
-        if isinstance(payload, list):
-            servers = payload
-        elif isinstance(payload, dict):
-            servers = payload.get("servers", [])
-        else:
-            raise TypeError("mcp.config.list payload must be an object or list")
+        payload = resp.payload
+        if not isinstance(payload, dict) or "servers" not in payload:
+            raise TypeError("mcp.config.list payload must contain servers")
+        servers = payload["servers"]
         if not isinstance(servers, list) or not all(
             isinstance(server, dict) for server in servers
         ):
@@ -29,7 +30,9 @@ class _McpPortMixin:
         return True
 
     async def mcp_list_servers(self, token: str | None = None) -> list[dict]:
-        resp = await (await self._relay()).send_request("mcp.config.list", {})
+        resp = await (await self._relay()).send_request(
+            "mcp.config.list", {}, timeout=_MCP_RELAY_TIMEOUT_SECONDS
+        )
         if not resp.ok:
             return []
         payload = resp.payload or {}
@@ -39,7 +42,8 @@ class _McpPortMixin:
     async def mcp_get_server(self, server_code: str,
                              token: str | None = None) -> dict | None:
         resp = await (await self._relay()).send_request(
-            "mcp.config.get", {"serverCode": server_code})
+            "mcp.config.get", {"serverCode": server_code},
+            timeout=_MCP_RELAY_TIMEOUT_SECONDS)
         if not resp.ok or not resp.payload:
             return None
         return resp.payload if isinstance(resp.payload, dict) else None
@@ -47,7 +51,7 @@ class _McpPortMixin:
     async def mcp_create_server(self, config: dict,
                                 token: str | None = None) -> dict:
         resp = await (await self._relay()).send_request(
-            "mcp.config.create", config)
+            "mcp.config.create", config, timeout=_MCP_RELAY_TIMEOUT_SECONDS)
         if not resp.ok:
             msg = resp.error.message if resp.error else "unknown"
             if resp.error and ("already exists" in msg or "已存在" in msg):
@@ -59,7 +63,8 @@ class _McpPortMixin:
                                 token: str | None = None) -> dict:
         params = dict(patch)
         params["serverCode"] = server_code
-        resp = await (await self._relay()).send_request("mcp.config.update", params)
+        resp = await (await self._relay()).send_request(
+            "mcp.config.update", params, timeout=_MCP_RELAY_TIMEOUT_SECONDS)
         if not resp.ok:
             msg = resp.error.message if resp.error else "unknown"
             raise RuntimeError(f"mcp.config.update failed: {msg}")
@@ -68,7 +73,8 @@ class _McpPortMixin:
     async def mcp_delete_server(self, server_code: str,
                                 token: str | None = None) -> bool:
         resp = await (await self._relay()).send_request(
-            "mcp.config.delete", {"serverCode": server_code})
+            "mcp.config.delete", {"serverCode": server_code},
+            timeout=_MCP_RELAY_TIMEOUT_SECONDS)
         if not resp.ok:
             return False
         payload = resp.payload
@@ -197,6 +203,7 @@ class _McpPortMixin:
         resp = await (await self._relay()).send_request(
             "mcp.filter_servers",
             {"serverCodes": server_codes or [], "timeoutSeconds": timeout_seconds},
+            timeout=min(float(timeout_seconds), _MCP_RELAY_TIMEOUT_SECONDS),
         )
         if not resp.ok:
             msg = resp.error.message if resp.error else "unknown"

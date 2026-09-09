@@ -20,15 +20,14 @@ from engine.community.core.engine.capability import Capability
 from engine.community.core.engine.exceptions import CapabilityNotSupportedError
 from engine.community.core.mcp.models import (
     MCPFilterRequest,
+    MCPFilterResult,
     MCPServer,
     MCPServerConfig,
     MCPServerStatus,
     MCPToolCallRequest,
     MCPToolCallResult,
-    MCPFilterResult,
     TransportType,
 )
-
 
 # ── Fake port ────────────────────────────────────────────────────────────────
 
@@ -486,8 +485,8 @@ async def test_filter_servers_builds_result():
     assert result.return_code == 0
     assert result.stdout == "ok"
     assert port.last_filter_codes == ["alpha", "beta"]
-    # the caller's timeout_seconds must be forwarded to the port (not hardcoded 30)
-    assert port.last_filter_timeout == 90
+    # Engine work must finish before Backend's 25-second outer deadline.
+    assert port.last_filter_timeout == 20
 
 
 @pytest.mark.asyncio
@@ -505,8 +504,7 @@ async def test_filter_servers_empty_codes():
     result = await adapter.filter_servers(MCPFilterRequest(server_codes=[]))
     assert result.server_codes == []
     assert port.last_filter_codes == []
-    # default timeout_seconds=30 forwards as 30
-    assert port.last_filter_timeout == 30
+    assert port.last_filter_timeout == 20
 
 
 # ── capability-gated methods ──────────────────────────────────────────────────

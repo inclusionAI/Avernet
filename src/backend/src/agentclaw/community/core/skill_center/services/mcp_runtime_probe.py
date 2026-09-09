@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import traceback
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
@@ -15,13 +16,16 @@ from agentclaw.community.core.devices.services.device_context import (
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
+from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
     DeviceAdapterHTTPStatusError,
+    DeviceAdapterTimeoutError,
     DeviceAdapterTransport,
 )
 
 MCP_READINESS_TIMEOUT_SECONDS = 8.0
+logger = get_logger()
 
 
 class McpRuntimeReadinessStatus(StrEnum):
@@ -126,7 +130,22 @@ class CurrentMcpRuntimeProbeService:
                 engine,
                 f"adapter_http_{error.status_code}",
             )
-        except Exception:
+        except DeviceAdapterTimeoutError:
+            return self._result(
+                McpRuntimeReadinessStatus.TRANSIENT_ERROR,
+                engine,
+                "adapter_request_timeout",
+            )
+        except Exception as error:
+            logger.warning(
+                "[mcp_runtime_probe] adapter request failed: binding_id=%s "
+                "bot_id=%s engine=%s error_type=%s traceback=%s",
+                binding_id,
+                bot_id,
+                engine,
+                type(error).__name__,
+                "".join(traceback.format_tb(error.__traceback__)),
+            )
             return self._result(
                 McpRuntimeReadinessStatus.TRANSIENT_ERROR,
                 engine,
