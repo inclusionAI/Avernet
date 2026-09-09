@@ -1555,3 +1555,69 @@ async def test_executor_stream_stall_then_normal_end_flushes_residual():
     repo.update_result.assert_called_once()
     assert repo.update_result.call_args[1]["content_long"] == "part1part2"
     repo.update_error.assert_not_called()
+
+
+async def test_executor_stream_interaction_and_error_chunks_written_inline():
+    """stream 模式：interaction chunk 立即写入、error chunk 立即写入并标记 FAILED。
+
+    覆盖 _handle_chunk 的 error / interaction 分支：两者都不进 buffer，
+    直接 _write_chunk（先 flush 缓冲再写）。
+    """
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-int-err",
+        bot_id="bot-1:ent",
+        metadata={"request_type": "chat", "stream": "true"},
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    chunks = [
+        StreamChunk(type="interaction", content="tool-pick"),
+        StreamChunk(type="delta", content="partial"),
+        StreamChunk(type="error", content="CONNECTION_ERROR"),
+    ]
+
+    async def _stream_gen(*a, **kw):
+        for c in chunks:
+            yield c
+
+    bot_svc = MagicMock()
+    bot_svc.send_message_stream = _stream_gen
+    selector.select.return_value = bot_svc
+
+    chunk_repo = MagicMock()
+    executor = BotRunRequestExecutor(
+        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo(), MagicMock()
+    )
+    await executor.execute(
+        _queue_rec(run_id="r-int-err", bot_id="bot-1:ent", session_id="sess-ie")
+    )
+
+    insert_calls = chunk_repo.insert_chunk.call_args_list
+    interaction_calls = [
+        c for c in insert_calls if c[1]["chunk_type"] == "interaction"
+    ]
+    error_calls = [c for c in insert_calls if c[1]["chunk_type"] == "error"]
+    delta_calls = [c for c in insert_calls if c[1]["chunk_type"] == "delta"]
+
+    # interaction 立即写出一行
+    assert len(interaction_calls) == 1
+    assert interaction_calls[0][1]["content"] == "tool-pick"
+    # error chunk 立即写出，不因 delta buffer 在 pending 而延迟
+    assert len(error_calls) == 1
+    assert error_calls[0][1]["content"] == "CONNECTION_ERROR"
+    # error 前的 delta 也被 flush 成独立行
+    assert len(delta_calls) == 1
+    assert delta_calls[0][1]["content"] == "partial"
+
+    # seq 递增且不重复
+    seqs = [c[1]["seq"] for c in insert_calls]
+    assert seqs == sorted(seqs)
+    assert len(set(seqs)) == len(seqs)
+
+    # 标记 FAILED，不写结果
+    repo.update_error.assert_called_once_with("r-int-err", "CONNECTION_ERROR")
+    repo.update_result.assert_not_called()
