@@ -94,20 +94,29 @@ from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.skill_set_management_service import (
     SkillSetManagementServiceProtocol,
 )
+from agentclaw.community.api.local_skill_delete_service import (
+    LocalSkillDeleteServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_engine_for_bot,
     resolve_runtime_engine_for_bot,
 )
 from agentclaw.community.core.skill_center.errors import (
+    LocalSkillActiveError,
+    LocalSkillEditBusyError,
+    LocalSkillEditLockUnavailableError,
+    LocalSkillEditPausedError,
+    LocalSkillLayoutRollbackError,
     LocalSkillNotFoundError,
+    LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
-    SkillDeleteConsistencyError,
+    LocalSkillStorageError,
+    SkillAssetInUseError,
     SkillReferencedBySkillSetError,
     SkillRuntimeNameConflictError,
     SkillSetControlPlaneConflictError,
 )
-from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditGuard,
     SkillsPoolEditLockUnavailableError,
@@ -2360,12 +2369,12 @@ async def delete_skill(
     ctx: RequestContext = Depends(get_request_context),
     skill_repo: SkillRepository = Injected(SkillRepository),
     bot_repo: BotRepository = Injected(BotRepository),
-    path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
     skill_service_factory: SkillServiceFactoryProtocol = Injected(
         SkillServiceFactoryProtocol
     ),
-    resolver: DeviceContextResolver = Injected(DeviceContextResolver),
-    edit_guard: SkillsPoolEditGuard = Injected(SkillsPoolEditGuard),
+    local_delete: LocalSkillDeleteServiceProtocol = Injected(
+        LocalSkillDeleteServiceProtocol
+    ),
 ) -> MessageResponse:
     """Delete a skill.
 
@@ -2416,6 +2425,15 @@ async def delete_skill(
                     "skill_set_ids": e.skill_set_ids,
                 },
             ) from e
+        except SkillAssetInUseError as e:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_code": "SKILL_ASSET_IN_USE",
+                    "message": "请先解除该 Skill 的生效或能力集引用，再删除 Skill",
+                    "blockers": e.blocker_counts,
+                },
+            ) from e
         except ValueError as e:
             error_msg = str(e)
             if "无权删除" in error_msg or "Permission denied" in error_msg:
@@ -2435,124 +2453,69 @@ async def delete_skill(
             },
         )
 
-    try:
-        bot = (
-            bot_repo.get_by_id_and_entity(effective_bot_id, entity_id)
-            if entity_id
-            else bot_repo.get_unique_by_id(effective_bot_id)
-        )
-    except BotLookupAmbiguousError as e:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error_code": "SKILL_BOT_CONTEXT_AMBIGUOUS",
-                "message": "历史 Bot ID 不唯一，请提供 entity_id 精确定位",
-                "bot_id": effective_bot_id,
-            },
-        ) from e
-    if not bot:
-        raise HTTPException(status_code=404, detail="Bot not found")
-
-    effective_entity_id = str(bot.get("entity_id") or bot.get("owner_id") or "")
-    effective_entity_type = str(bot.get("entity_type") or "staff")
-    effective_engine = str(bot.get("active_engine") or DEFAULT_ENGINE_TYPE)
-    runtime_engine = resolve_runtime_engine_for_bot(
-        bot_id=effective_bot_id,
-        owner_id=str(bot.get("owner_id") or effective_entity_id),
-        bot_repo=bot_repo,
-    )
-    if engine_type and engine_type != effective_engine:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error_code": "SKILL_ENGINE_CONTEXT_MISMATCH",
-                "message": "删除技能必须使用 Bot 当前的生效引擎",
-                "active_engine": effective_engine,
-            },
-        )
-    is_desktop = bot.get("bot_type") == "desktop"
-
-    # teclaw deletes the skill files from the (draft) container; resolve provider
-    # so the device-fs path is the workspace-namespace form.
-    is_teclaw, local_skill_adapter = _resolve_teclaw_local_skill(
-        resolver, effective_bot_id, effective_entity_id
-    )
-
-    skills_dir = path_factory.get_bot_skills_dir(
-        effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type
-    )
-    local_dir = path_factory.get_bot_skills_local_dir(
-        effective_entity_id,
-        effective_bot_id,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop=is_desktop,
-        is_teclaw=is_teclaw,
-    )
-    repo_dir = path_factory.get_bot_skills_repo_dir(
-        effective_entity_id,
-        effective_bot_id,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop=is_desktop,
-    )
-
-    service = skill_service_factory.create(
-        active_dir=skills_dir,
-        repo_dir=repo_dir,
-        local_dir=local_dir,
-        local_skill_path_adapter=local_skill_adapter,
-        entity_id=effective_entity_id,
-        bot_owner_id=str(bot.get("owner_id") or ""),
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-    )
-    try:
-        edit_lease = edit_guard.acquire_for_edit(
-            scope=BotSkillLayoutScope(
-                env=str(bot["env"]),
-                entity_id=str(bot["entity_id"]),
-                bot_id=effective_bot_id,
+    if persisted_git_path.startswith("local://"):
+        if engine_type:
+            scoped_bot = bot_repo.get_by_id_and_owner(
+                effective_bot_id, str(skill.get("user_id") or "")
             )
-        )
+            if not scoped_bot:
+                raise HTTPException(status_code=404, detail="Bot not found")
+            active_engine = str(
+                scoped_bot.get("active_engine") or DEFAULT_ENGINE_TYPE
+            )
+            if engine_type != active_engine:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error_code": "SKILL_ENGINE_CONTEXT_MISMATCH",
+                        "message": "删除技能必须使用 Bot 当前的生效引擎",
+                        "active_engine": active_engine,
+                    },
+                )
         try:
-            # 路由已先通过 CollaboratorPermissionInterceptor；仍把持久化
-            # Bot owner 显式传给 Service 做 scope 双重校验，不能把协作者当成
-            # Skill metadata owner。
-            success = await service.delete_skill(
-                skill_id,
+            await local_delete.delete_local_skill(
+                skill_id=skill_id,
+                owner_id=str(skill.get("user_id") or ""),
                 user_id=current_user_id,
-                authorized_bot_owner_id=str(bot.get("owner_id") or ""),
-                collaborator_authorization_verified=bool(
-                    ctx.metadata.get("skill_delete_collaborator_authorized")
-                ),
             )
-        finally:
-            edit_guard.release(edit_lease)
-        if not success:
-            raise HTTPException(status_code=404, detail="Skill not found")
-        return MessageResponse(success=True, message="Skill deleted successfully")
-    except SkillsPoolEditPausedError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except SkillDeleteConsistencyError as e:
-        raise HTTPException(status_code=409, detail=str(e)) from e
-    except SkillReferencedBySkillSetError as e:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error_code": "SKILL_REFERENCED_BY_SKILL_SET",
-                "message": "请先从所有技能集中移除该技能，再删除技能",
-                "skill_set_ids": e.skill_set_ids,
-            },
-        ) from e
-    except ValueError as e:
-        error_msg = str(e)
-        # 权限错误返回 403
-        if "无权删除" in error_msg or "Permission denied" in error_msg:
-            raise HTTPException(status_code=403, detail=error_msg)
-        # 其他值错误返回 400
-        raise HTTPException(status_code=400, detail=error_msg)
+            return MessageResponse(
+                success=True,
+                message="Skill deleted successfully",
+            )
+        except SkillAssetInUseError as e:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_code": "SKILL_ASSET_IN_USE",
+                    "message": "请先解除该 Skill 的生效或能力集引用，再删除 Skill",
+                    "blockers": e.blocker_counts,
+                },
+            ) from e
+        except LocalSkillNotFoundError as e:
+            raise HTTPException(status_code=404, detail="Skill not found") from e
+        except (
+            LocalSkillActiveError,
+            LocalSkillEditBusyError,
+            LocalSkillEditPausedError,
+            LocalSkillLayoutRollbackError,
+        ) as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+        except LocalSkillNotReadyError as e:
+            raise HTTPException(status_code=409, detail="Bot is not ready") from e
+        except LocalSkillEditLockUnavailableError as e:
+            raise HTTPException(status_code=503, detail=str(e)) from e
+        except LocalSkillStorageError as e:
+            raise HTTPException(
+                status_code=502, detail="Skill storage operation failed"
+            ) from e
 
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "error_code": "SKILL_SOURCE_IDENTITY_INVALID",
+            "message": "历史 Skill 缺少可安全删除的内容定位，请联系管理员处理",
+        },
+    )
 
 # ==================== Skill Parameters Endpoints (设备文件版) ====================
 

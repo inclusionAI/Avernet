@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agentclaw.community.core.skill_center.services.skill_service import SkillService
+from agentclaw.community.core.skill_center.errors import SkillAssetInUseError
+from agentclaw.community.adapters.http.skill_center.schemas import SyncSkillsResult
 
 
 # ── helpers ──────────────────────────────────────────────────────────
@@ -33,6 +35,27 @@ def _make_skill_dir(base: Path, rel_path: str, *, skill_md_content: str = "") ->
     )
     (d / "SKILL.md").write_text(content, encoding="utf-8")
     return d
+
+
+def test_sync_http_contract_preserves_structured_blocked_results():
+    payload = SyncSkillsResult(
+        created=0,
+        updated=0,
+        deleted=0,
+        failed=1,
+        skipped=0,
+        errors=[],
+        blocked=[
+            {
+                "code": "SOURCE_MISSING_IN_USE",
+                "skill_id": "2",
+                "git_path": "git://old/removed",
+                "blockers": {"installation": 1},
+            }
+        ],
+    ).model_dump()
+
+    assert payload["blocked"][0]["code"] == "SOURCE_MISSING_IN_USE"
 
 
 # ── TestSkillServiceLinkName ─────────────────────────────────────────
@@ -140,6 +163,40 @@ class TestSkillServiceSync:
         result = svc.sync_skills_from_git()
         assert result["deleted"] == 1
         mock_skill_repo.delete.assert_called_once_with("2")
+
+    def test_sync_preserves_referenced_skill_when_git_source_disappears(
+        self, skill_dirs, mock_skill_repo
+    ):
+        mock_skill_repo.list_skills.return_value = [
+            {"id": "2", "git_path": "git://old/removed", "name": "removed"},
+        ]
+        mock_skill_repo.delete.side_effect = SkillAssetInUseError(
+            {"installation": 2, "membership": 1}
+        )
+        svc = SkillService(
+            skill_repo=mock_skill_repo,
+            skill_repo_sync=_lenient_skill_repo_sync(),
+            category_repo=MagicMock(),
+            active_dir=skill_dirs["active_dir"],
+            repo_dir=skill_dirs["repo_dir"],
+            local_dir=skill_dirs["local_dir"],
+            market_cache=MagicMock(),
+            device_fs_factory=MagicMock(),
+            git_sync_service_factory=MagicMock(),
+        )
+
+        result = svc.sync_skills_from_git()
+
+        assert result["deleted"] == 0
+        assert result["failed"] == 1
+        assert result["blocked"] == [
+            {
+                "code": "SOURCE_MISSING_IN_USE",
+                "skill_id": "2",
+                "git_path": "git://old/removed",
+                "blockers": {"installation": 2, "membership": 1},
+            }
+        ]
 
     def test_sync_updates_git_renamed_skill_instead_of_delete_create(
         self, skill_dirs, mock_skill_repo

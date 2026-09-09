@@ -14,6 +14,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillLayoutRollbackError,
     LocalSkillNotReadyError,
     LocalSkillStorageError,
+    SkillAssetInUseError,
 )
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
@@ -74,11 +75,13 @@ class _Files:
 
 class _Skills:
     def __init__(
-        self, *, active=False, fail_delete=False, active_during_delete=False
+        self, *, active=False, fail_delete=False, active_during_delete=False,
+        delete_error=None,
     ) -> None:
         self.active = active
         self.fail_delete = fail_delete
         self.active_during_delete = active_during_delete
+        self.delete_error = delete_error
         self.deleted = False
         self.pending_work = None
 
@@ -98,6 +101,8 @@ class _Skills:
         return {**self.get_by_id("9"), "name": "one", "active": self.active}
 
     def delete_bot_local_skill(self, **_kwargs):
+        if self.delete_error is not None:
+            raise self.delete_error
         if self.fail_delete:
             raise RuntimeError("database write failed")
         if self.active_during_delete:
@@ -105,6 +110,10 @@ class _Skills:
         self.pending_work = _kwargs
         self.deleted = True
         return 1
+
+    def require_unreferenced_for_delete(self, _skill_id):
+        if self.active:
+            raise SkillAssetInUseError({"installation": 1})
 
     def list_skill_set_references(self, _skill_id):
         return []
@@ -253,12 +262,14 @@ def _service(
     status="ACTIVE",
     provider="local",
     guard_error=None,
+    delete_error=None,
 ):
     files = _Files()
     skills = _Skills(
         active=active,
         fail_delete=fail_delete,
         active_during_delete=active_during_delete,
+        delete_error=delete_error,
     )
     guard = _Guard(on_acquire)
     if guard_error is not None:
@@ -350,11 +361,12 @@ async def test_delete_fails_closed_when_device_context_cannot_be_resolved():
 async def test_active_delete_is_rejected_before_quarantine_or_database_mutation():
     service, files, skills, _guard, cleanup = _service(active=True)
 
-    with pytest.raises(LocalSkillActiveError):
+    with pytest.raises(SkillAssetInUseError) as raised:
         await service.delete_local_skill(
             skill_id="9", owner_id="owner", user_id="owner"
         )
 
+    assert raised.value.blocker_counts == {"installation": 1}
     assert skills.deleted is False
     assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
     assert cleanup.work == []
@@ -407,7 +419,7 @@ async def test_database_failure_restores_verified_package_before_fixed_storage_e
 
 
 @pytest.mark.asyncio
-async def test_transactional_active_recheck_restores_package_and_returns_active_error():
+async def test_transactional_active_recheck_restores_package_and_returns_conflict():
     service, files, skills, _guard, _cleanup = _service(active_during_delete=True)
 
     with pytest.raises(LocalSkillActiveError):
@@ -415,6 +427,21 @@ async def test_transactional_active_recheck_restores_package_and_returns_active_
             skill_id="9", owner_id="owner", user_id="owner"
         )
 
+    assert skills.deleted is False
+    assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
+
+
+@pytest.mark.asyncio
+async def test_reference_race_restores_package_and_preserves_asset_in_use_error():
+    conflict = SkillAssetInUseError({"membership": 1})
+    service, files, skills, _guard, _cleanup = _service(delete_error=conflict)
+
+    with pytest.raises(SkillAssetInUseError) as raised:
+        await service.delete_local_skill(
+            skill_id="9", owner_id="owner", user_id="owner"
+        )
+
+    assert raised.value is conflict
     assert skills.deleted is False
     assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
 
@@ -696,7 +723,7 @@ async def test_lock_rereads_active_state_before_any_package_mutation():
     service._skill_repo = skills
     service._skill_set_repo = _Sets(skills)
 
-    with pytest.raises(LocalSkillActiveError):
+    with pytest.raises(SkillAssetInUseError):
         await service.delete_local_skill(
             skill_id="9", owner_id="owner", user_id="owner"
         )

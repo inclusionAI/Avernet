@@ -200,6 +200,14 @@ Engine 拥有物理布局。Backend 通过 `community/core/skills_pool/` 的版�
 - Offline 只记录离线状态并保留历史 Version，不自动生成 Vn+1 Draft，不调用 SC 删除。
 - Offline 原身份不能直接升级/发布；Copy 读取选定已发布版本，创建新的 Skill UUID 和独立 V1 Draft。新副本发布使用新 UUID 作为 SC code。
 
+### Asset Deletion
+
+- Asset Deletion 只能删除零引用 Skill；Installation、任意 active/inactive SkillSet Membership、Space Binding/Grant、Draft、Publication Attempt 和 Version 都是 blocker。
+- 所有硬删除 primitive 必须先锁 exact Skill，再在同一事务内重检 blocker；不能依赖 Router 或 Service 的一次性预检查，也不能顺手删除 Membership/Installation。
+- Bot 删除是独立生命周期：按 exact `owner_id + bot_id + env` 先清 Skill/MCP Installation，再删 SkillSet，最后删 Bot-owned Skill。`bot_id=default` 不能单独作为删除范围。
+- Git 源消失且存在 blocker 时保留 Skill 和 Desired State，返回 `SOURCE_MISSING_IN_USE`；Runtime 继续使用既有 `MANAGED_SOURCE_MISSING` / `PENDING`，不要新增同义状态。
+- Service Artifact 当前只引用 exact Center Version；硬删除由 `SkillVersion` 作为 dominant blocker，Offline 影响展示才扫描 Artifact。新增无 Version 的 Artifact Skill 引用前，必须先补可事务校验的 lineage fact。
+
 ## 9. DI 与 Legacy 兼容入口
 
 装配从 `community/di/container.py` 核对：

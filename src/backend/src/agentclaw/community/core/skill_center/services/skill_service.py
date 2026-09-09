@@ -27,8 +27,8 @@ if TYPE_CHECKING:
 
 from agentclaw.community.core.access.admin_scopes import skill_admin
 from agentclaw.community.core.skill_center.errors import (
+    SkillAssetInUseError,
     SkillDeleteConsistencyError,
-    SkillReferencedBySkillSetError,
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillCategoryRepository
@@ -2207,20 +2207,10 @@ class SkillService:
             raise ValueError("无权删除此技能：您不是该技能的创建者，且没有管理员权限")
 
         git_path = skill.get('git_path') or ''
-        published_center_uuid = (
-            skill.get("skill_uuid")
-            if git_path.startswith("center://")
-            and str(skill.get("status") or "").upper() == "PUBLISHED"
-            else None
-        )
-        references = self._skill_repo.list_skill_set_references(
-            skill_id,
-            skill_uuid=published_center_uuid,
-        )
-        if references:
-            raise SkillReferencedBySkillSetError(
-                [str(ref["skill_set_id"]) for ref in references]
-            )
+        # Fail before any filesystem or upstream work. ``delete`` repeats the
+        # same check while holding the exact Skill lock, so an internal caller
+        # cannot bypass the invariant.
+        self._skill_repo.require_unreferenced_for_delete(skill_id)
 
         # 获取技能名称和路径
         skill_name = skill.get('name')
@@ -2345,7 +2335,7 @@ class SkillService:
 
         Git market skills are system-wide and have no user_id or bolt_id.
         """
-        results = {"created": 0, "updated": 0, "deleted": 0, "failed": 0, "skipped": 0, "errors": []}
+        results = {"created": 0, "updated": 0, "deleted": 0, "failed": 0, "skipped": 0, "errors": [], "blocked": []}
         git_renames = git_renames or {}
 
         # Resolve scan target. In cloud mode, _resolve_sync_scan_target raises
@@ -2595,8 +2585,25 @@ class SkillService:
                     skill.get('name'),
                     skill_path,
                 )
-                self._skill_repo.delete(skill['id'])
-                results["deleted"] += 1
+                try:
+                    self._skill_repo.delete(skill['id'])
+                    results["deleted"] += 1
+                except SkillAssetInUseError as exc:
+                    results["failed"] += 1
+                    blocked = {
+                        "code": "SOURCE_MISSING_IN_USE",
+                        "skill_id": str(skill["id"]),
+                        "git_path": skill_path,
+                        "blockers": exc.blocker_counts,
+                    }
+                    results["blocked"].append(blocked)
+                    logger.warning(
+                        "[sync_skills_from_git] SOURCE_MISSING_IN_USE "
+                        "skill_id=%s git_path=%s blockers=%s",
+                        skill["id"],
+                        skill_path,
+                        exc.blocker_counts,
+                    )
 
         # 刷新市场缓存（同步完成后）
         logger.info(f"[sync_skills_from_git] Sync completed: created={results['created']}, updated={results['updated']}, deleted={results['deleted']}, skipped={results['skipped']}, failed={results['failed']}")

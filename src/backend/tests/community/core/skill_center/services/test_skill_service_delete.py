@@ -54,18 +54,17 @@ def test_collaborator_delete_requires_explicit_verified_authorization():
 class TestDeleteSkillStep1:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        ("git_path", "status", "expected_uuid"),
+        ("git_path", "status"),
         [
-            ("center://uuid", "PUBLISHED", "uuid"),
-            ("", "DEVELOPING", None),
-            ("center://uuid", "OFFLINE", None),
+            ("center://uuid", "PUBLISHED"),
+            ("", "DEVELOPING"),
+            ("center://uuid", "OFFLINE"),
         ],
     )
-    async def test_delete_checks_uuid_only_for_published_center_version(
+    async def test_delete_preflights_the_canonical_asset_guard(
         self,
         git_path,
         status,
-        expected_uuid,
     ):
         device_fs = MagicMock()
         device_fs.exists = AsyncMock(return_value=False)
@@ -85,10 +84,7 @@ class TestDeleteSkillStep1:
         ), patch.object(svc._skill_repo, "delete", return_value=True):
             assert await svc.delete_skill("sk-1", user_id="u-1") is True
 
-        svc._skill_repo.list_skill_set_references.assert_called_once_with(
-            "sk-1",
-            skill_uuid=expected_uuid,
-        )
+        svc._skill_repo.require_unreferenced_for_delete.assert_called_once_with("sk-1")
 
     @pytest.mark.asyncio
     async def test_legacy_delete_keeps_metadata_only_fallback_without_device(self):

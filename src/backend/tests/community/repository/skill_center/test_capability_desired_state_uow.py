@@ -65,6 +65,40 @@ class _Database:
             session.close()
 
 
+def test_purge_bot_installations_is_exactly_owner_bot_env_scoped() -> None:
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        session.add_all(
+            [
+                BotSkillInstallation(
+                    owner_id="owner", bot_id="default", skill_id=1, env="dev"
+                ),
+                BotSkillInstallation(
+                    owner_id="other", bot_id="default", skill_id=2, env="dev"
+                ),
+                BotMCPInstallation(
+                    owner_id="owner", bot_id="default", server_code="mcp.mine", env="dev"
+                ),
+                BotMCPInstallation(
+                    owner_id="other", bot_id="default", server_code="mcp.other", env="dev"
+                ),
+            ]
+        )
+
+    result = CapabilityDesiredStateRepository(db).purge_bot_installations(
+        owner_id="owner", bot_id="default", env="dev"
+    )
+
+    assert result == {"skills": 1, "mcps": 1}
+    with db.orm_session() as session:
+        assert [row.owner_id for row in session.query(BotSkillInstallation)] == [
+            "other"
+        ]
+        assert [row.owner_id for row in session.query(BotMCPInstallation)] == [
+            "other"
+        ]
+
+
 def test_legacy_scope_resolution_returns_only_ordinary_set_address() -> None:
     db = _Database()
     with db.transactional_orm_session() as session:
