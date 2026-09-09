@@ -62,7 +62,10 @@ class TestTeclawCallbackIdempotency:
             device_uuid = device["device_uuid"]
 
             payload = _callback_payload(
-                device_uuid, publish_id, api.tenant, success=True,
+                device_uuid,
+                publish_id,
+                api.tenant,
+                success=True,
             )
 
             code1, body1 = await call_teclaw_callback(api.client, payload)

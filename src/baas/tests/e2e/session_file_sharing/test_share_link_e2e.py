@@ -19,6 +19,7 @@ from secbaas.community.api.session_file_sharing import (
 from secbaas.community.core.service.session_file_sharing import (
     DefaultSessionFileSharingDispatcher,
 )
+from secbaas.community.plugins.file_transfer import NoopSessionFileUrlProjector
 
 pytestmark = pytest.mark.e2e
 
@@ -38,6 +39,7 @@ async def test_share_link_for_done_transfer(
     dispatcher = DefaultSessionFileSharingDispatcher(
         file_transfer_backend=stub_oss_backend,
         ticket_repo=mock_session_ticket_repo,
+        session_file_url_projector=NoopSessionFileUrlProjector(),
     )
     mock_session_ticket_repo.create_ticket.return_value = 1
 
@@ -111,6 +113,7 @@ async def test_share_link_show_true(
     dispatcher = DefaultSessionFileSharingDispatcher(
         file_transfer_backend=stub_oss_backend,
         ticket_repo=mock_session_ticket_repo,
+        session_file_url_projector=NoopSessionFileUrlProjector(),
     )
     mock_session_ticket_repo.create_ticket.return_value = 1
 
@@ -178,6 +181,7 @@ async def test_share_link_non_done_raises(
     dispatcher = DefaultSessionFileSharingDispatcher(
         file_transfer_backend=stub_oss_backend,
         ticket_repo=mock_session_ticket_repo,
+        session_file_url_projector=NoopSessionFileUrlProjector(),
     )
 
     # Configure ticket as CREATED (not DONE)

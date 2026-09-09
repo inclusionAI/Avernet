@@ -1075,15 +1075,11 @@ class DefaultPublishService(PublishService):
             )
 
             publish_repo = self._publish_repo
-            publish_record = publish_repo.get_by_id(
-                publish_id, tenant=tenant, env=env
-            )
+            publish_record = publish_repo.get_by_id(publish_id, tenant=tenant, env=env)
             target_uuids: list[str] = []
             if publish_record and publish_record.extra_config:
                 try:
-                    cfg = PublishConfig.model_validate(
-                        publish_record.extra_config
-                    )
+                    cfg = PublishConfig.model_validate(publish_record.extra_config)
                     target_uuids = cfg.target_device_uuids or []
                 except Exception:
                     logger.warning(
@@ -1104,9 +1100,7 @@ class DefaultPublishService(PublishService):
                 eligible_devices = [
                     d for d in eligible_devices if d.device_uuid in target_set
                 ]
-                expected_scale_amount = sum(
-                    b.batch_capacity for b in batch_records
-                )
+                expected_scale_amount = sum(b.batch_capacity for b in batch_records)
                 if len(eligible_devices) != expected_scale_amount:
                     raise ValueError(
                         f"SCALE_DOWN target_device_uuids count "

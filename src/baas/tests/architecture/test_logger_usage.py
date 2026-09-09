@@ -91,6 +91,12 @@ ALLOWED_LOGGER_NAMES = frozenset(
         "plugin-sandbox",
         "plugin-bot-service",
         "plugin-auth",
+        # plugins/file_transfer (session file URL projection, D-01)
+        "plugin-file-transfer",
+        # plugins/file_transfer — the AliyunOss backend is a byte-for-byte
+        # port of the enterprise source, which keeps get_logger("file_transfer")
+        # (legacy underscore name); the port must stay byte-identical.
+        "file_transfer",
         "bootstrap",
         "config",
         "webserver",
@@ -103,12 +109,15 @@ ALLOWED_LOGGER_NAMES = frozenset(
     }
 )
 
-CANONICAL_NAME_PATTERN = r"^[a-z][a-z0-9-]*$"
+# Underscores allowed only for legacy names inherited from the enterprise
+# port (see "file_transfer" in ALLOWED_LOGGER_NAMES); new names should
+# still use hyphens.
+CANONICAL_NAME_PATTERN = r"^[a-z][a-z0-9_-]*$"
 
 
 def test_logger_names_are_canonical():
     """All ``get_logger("...")`` calls must use a canonical name from the
-    whitelist and match the naming style ``^[a-z][a-z0-9-]*$``.
+    whitelist and match the naming style ``^[a-z][a-z0-9_-]*$``.
 
     Logger names become log file names (``{name}.log``); reusing existing
     canonical names reduces log-file fragmentation.  Adding a new name

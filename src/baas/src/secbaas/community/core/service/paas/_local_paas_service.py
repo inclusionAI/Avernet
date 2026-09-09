@@ -1787,7 +1787,9 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
             DeviceCreationError: WR-05: when the machine is new and no Local
                 template is configured (``LOCAL_TEMPLATE_NOT_CONFIGURED``).
                 Registration now fails fast with context instead of silently
-                inserting ``template_id=0``.
+                inserting ``template_id=0``. Also raises
+                ``MACHINE_OWNERSHIP_MIGRATION_FAILED`` when the ownership
+                migration's critical step affects 0 rows (D-02).
         """
         if not machine_id:
             raise ValueError("machine_id is required")
@@ -1801,7 +1803,14 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         existing = self._repository.get_by_machine_id(machine_id, self._env)
 
         if existing:
-            # Machine exists: update machine_info and set status ONLINE
+            # Machine exists: auto-migrate ownership on drift (D-01), then
+            # update machine_info and set status ONLINE
+            if existing.user_id != user_id:
+                self._migrate_machine_ownership(
+                    existing=existing,
+                    machine_id=machine_id,
+                    new_user_id=user_id,
+                )
             self._repository.update_machine_info(machine_id, self._env, machine_info)
             self._repository.update_status(machine_id, self._env, "ONLINE")
         else:
@@ -1818,6 +1827,130 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
                 status="ONLINE",
                 env=self._env,
             )
+
+    def _migrate_machine_ownership(
+        self,
+        existing: LocalUserMachineRecord,
+        machine_id: str,
+        new_user_id: str,
+    ) -> None:
+        """Auto-migrate machine ownership in place on sno drift (D-01).
+
+        D-06 step order:
+        1. update_user_id conditional UPDATE (CRITICAL per D-02/D-05).
+        2. Old user's ACTIVE devices batch-OFFLINE (best-effort, D-03).
+        3. clear_route_info (best-effort).
+        4. Normal ONLINE path continues in the caller.
+
+        Raises:
+            DeviceCreationError: MACHINE_OWNERSHIP_MIGRATION_FAILED when the
+                critical ownership update affects 0 rows and the single
+                re-query still shows the old user_id (D-02), or when the
+                critical step raises a DB error (wrapped, cause preserved).
+        """
+        old_user_id = existing.user_id
+
+        # Step 1: CRITICAL conditional ownership update (D-02, D-05)
+        try:
+            updated = self._repository.update_user_id(
+                machine_id, self._env, old_user_id, new_user_id
+            )
+            if updated is None or updated == 0:
+                # Re-query ONCE: another instance may have already migrated it
+                fresh = self._repository.get_by_machine_id(machine_id, self._env)
+                if fresh is not None and fresh.user_id == new_user_id:
+                    logger.info(
+                        f"[MACHINE_OWNERSHIP_MIGRATION_RACE_RESOLVED] "
+                        f"machine_id={machine_id} user_id={new_user_id} env={self._env}"
+                    )
+                    return
+                logger.error(
+                    f"[MACHINE_OWNERSHIP_MIGRATION_FAILED] machine_id={machine_id} "
+                    f"old_user_id={old_user_id} new_user_id={new_user_id} "
+                    f"env={self._env}"
+                )
+                raise DeviceCreationError(
+                    error_code="MACHINE_OWNERSHIP_MIGRATION_FAILED",
+                    message=(
+                        f"Ownership migration for machine {machine_id} affected 0 rows"
+                    ),
+                    context={
+                        "machine_id": machine_id,
+                        "old_user_id": old_user_id,
+                        "new_user_id": new_user_id,
+                        "env": self._env,
+                    },
+                )
+        except DeviceCreationError:
+            raise
+        except Exception as e:
+            # DB failure on the critical step: fail closed with structure
+            logger.error(
+                f"[MACHINE_OWNERSHIP_MIGRATION_DB_ERROR] machine_id={machine_id} "
+                f"old_user_id={old_user_id} new_user_id={new_user_id} "
+                f"env={self._env} err={e}"
+            )
+            raise DeviceCreationError(
+                error_code="MACHINE_OWNERSHIP_MIGRATION_FAILED",
+                message=f"Ownership migration for machine {machine_id} failed: {e}",
+                context={
+                    "machine_id": machine_id,
+                    "old_user_id": old_user_id,
+                    "new_user_id": new_user_id,
+                    "env": self._env,
+                },
+            ) from e
+
+        # Step 2: best-effort OFFLINE of the old user's ACTIVE devices (D-03)
+        if self._device_repository is None:
+            logger.warning(
+                f"[MACHINE_OWNERSHIP_MIGRATED_DEVICE_SKIP] machine_id={machine_id} "
+                f"old_user_id={old_user_id} env={self._env}"
+            )
+        else:
+            try:
+                devices = (
+                    self._device_repository.list_active_local_devices_by_machine_user(
+                        machine_id=machine_id,
+                        user_id=old_user_id,
+                        env=self._env,
+                    )
+                )
+                if devices:
+                    device_ids = [d.id for d in devices]
+                    updated_count = (
+                        self._device_repository.batch_update_status_to_offline(
+                            device_ids=device_ids,
+                            env=self._env,
+                        )
+                    )
+                    logger.info(
+                        f"[MIGRATION_DEVICE_UPDATE] machine_id={machine_id} "
+                        f"old_user_id={old_user_id} found={len(devices)} "
+                        f"updated={updated_count}"
+                    )
+            except Exception as e:
+                # Best-effort: device OFFLINE failure must not abort migration
+                logger.warning(
+                    f"[MIGRATION_DEVICE_OFFLINE_FAIL] machine_id={machine_id} "
+                    f"old_user_id={old_user_id} err={e}"
+                )
+
+        # Step 3: best-effort clear_route_info (D-14 idiom)
+        try:
+            self._repository.clear_route_info(machine_id, self._env)
+            logger.info(f"[MIGRATION_ROUTE_CLEARED] machine_id={machine_id}")
+        except Exception as e:
+            logger.warning(
+                f"[MIGRATION_ROUTE_CLEAR_FAIL] machine_id={machine_id} err={e}"
+            )
+
+        # Step 4: WARNING audit log — migration completed (D-07, audit-log-only)
+        logger.warning(
+            f"[MACHINE_OWNERSHIP_MIGRATED] machine_id={machine_id} "
+            f"from_user={old_user_id} to_user={new_user_id} env={self._env} "
+            f"instance={self._server_ip}"
+        )
 
     async def handle_mng_heartbeat(
         self,

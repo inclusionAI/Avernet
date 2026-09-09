@@ -67,9 +67,7 @@ async def _scale_down_bot_with_device_uuids(
 
 async def _get_bot_devices(api: APITestHelper, bot_uuid: str) -> list[dict]:
     """Fetch bot devices via HTTP, return list of device dicts from the response."""
-    resp = await api.client.get(
-        api.bot_devices_url(bot_uuid), params=api.params()
-    )
+    resp = await api.client.get(api.bot_devices_url(bot_uuid), params=api.params())
     assert resp.status_code == 200
     devices_data = resp.json()["data"]
     all_devices: list[dict] = []
@@ -112,9 +110,7 @@ class TestScaleLifecycleWithDeviceUuids:
         )
 
         # Capture the 2 original device UUIDs (must survive scale down later)
-        original_device_uuids = {
-            d["device_uuid"] for d in active_devices
-        }
+        original_device_uuids = {d["device_uuid"] for d in active_devices}
 
         # ── Step 2: Scale up from 2 to 4 devices ─────────────────────────────
         publish_id = await _scale_up_bot(api, bot_uuid, target_count=4)
@@ -129,9 +125,7 @@ class TestScaleLifecycleWithDeviceUuids:
         status = await wait_for_publish_status(
             api, publish_id, {"SUCCESS"}, timeout_seconds=0.5
         )
-        assert status == "SUCCESS", (
-            f"Expected scale-up publish SUCCESS, got {status}"
-        )
+        assert status == "SUCCESS", f"Expected scale-up publish SUCCESS, got {status}"
 
         all_devices = await _get_bot_devices(api, bot_uuid)
         active_devices = [d for d in all_devices if d.get("status") == "ACTIVE"]
@@ -178,9 +172,7 @@ class TestScaleLifecycleWithDeviceUuids:
         status = await wait_for_publish_status(
             api, publish_id, {"SUCCESS"}, timeout_seconds=0.5
         )
-        assert status == "SUCCESS", (
-            f"Expected scale-down publish SUCCESS, got {status}"
-        )
+        assert status == "SUCCESS", f"Expected scale-down publish SUCCESS, got {status}"
 
         # 4a. The two targeted devices must be gone from the listing.
         # destroy_device_by_uuid soft-deletes (is_deleted=1) before setting
@@ -195,9 +187,7 @@ class TestScaleLifecycleWithDeviceUuids:
         )
 
         # 4b. The two original devices must remain ACTIVE.
-        remaining_active = [
-            d for d in all_devices if d.get("status") == "ACTIVE"
-        ]
+        remaining_active = [d for d in all_devices if d.get("status") == "ACTIVE"]
         remaining_active_uuids = {d["device_uuid"] for d in remaining_active}
         assert remaining_active_uuids == original_device_uuids, (
             f"Expected original devices {original_device_uuids} to remain "

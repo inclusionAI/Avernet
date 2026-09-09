@@ -592,6 +592,50 @@ async def test_generate_share_link_transfer_not_found(mock_dispatcher):
 
 
 @pytest.mark.asyncio
+async def test_generate_share_link_projection_refusal_503(mock_dispatcher):
+    """WR-01/89: a projector refusal surfaces as 503, not a coarse 500 —
+    the bot domain mirrors the session domain's mapping."""
+    from secbaas.community.api.session_file_sharing import (
+        SessionFileTransferProxyUnavailableError,
+    )
+
+    mock_dispatcher.dispatch_generate_share_link.side_effect = (
+        SessionFileTransferProxyUnavailableError(reason="base not configured")
+    )
+    resp = await _post(
+        "/api/v1/bots/t1/bot-001/files/transfers/tf-001/share-link",
+        json_data={"expire_seconds": 3600},
+    )
+
+    assert resp.status_code == 503
+    detail = resp.json()["detail"]
+    assert detail["error"] == "SESSION_FILE_TRANSFER_PROXY_UNAVAILABLE"
+    assert "base not configured" in detail["message"]
+
+
+@pytest.mark.asyncio
+async def test_get_upload_url_projection_refusal_503(mock_dispatcher):
+    """WR-01/89: upload-url projector refusal surfaces as 503 — same
+    isomorphic mapping as the session domain."""
+    from secbaas.community.api.session_file_sharing import (
+        SessionFileTransferProxyUnavailableError,
+    )
+
+    mock_dispatcher.dispatch_get_upload_url.side_effect = (
+        SessionFileTransferProxyUnavailableError(reason="base not configured")
+    )
+    resp = await _post(
+        "/api/v1/bots/t1/bot-001/files/upload-url",
+        json_data={"device_path": "/home/data.csv", "filename": "data.csv"},
+    )
+
+    assert resp.status_code == 503
+    detail = resp.json()["detail"]
+    assert detail["error"] == "SESSION_FILE_TRANSFER_PROXY_UNAVAILABLE"
+    assert "base not configured" in detail["message"]
+
+
+@pytest.mark.asyncio
 async def test_generate_share_link_value_error(mock_dispatcher):
     """POST share-link with ValueError returns 422."""
     mock_dispatcher.dispatch_generate_share_link.side_effect = ValueError("not DONE")

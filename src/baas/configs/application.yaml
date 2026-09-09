@@ -21,6 +21,8 @@ user_config:
     bot_service: "stub"  # real | local | stub
     engine_adapter: "stub"  # stub | real (aicoding/hermes/claude_code engine adapter)
     file_transfer: "stub"  # stub | real
+    # Session file URL projection selector: stub (identity) | aliyun_ack (proxy to BaaS domain)
+    session_file_url_projector: "stub"
     database: "sqlite"        # sqlite | mariadb
     eval_env: "stub"       # stub | real (评测环境 Plugin: stub=空操作, real=实际逻辑)
     sandbox:
@@ -205,6 +207,17 @@ user_config:
     bucket_name: ""
     staging_root_path: "baas-file-transfer"
     secret_name: ""
+  # aliyun cloud OSS section (D-07): values injected by deploy team;
+  # empty values fail fast at startup when plugins.file_transfer is 'real'
+  file_transfer_oss_aliyun:
+    endpoint: ""
+    external_endpoint: ""
+    bucket_name: ""
+    staging_root_path: ""
+    secret_name: ""
+  # Session file URL proxy base (D-06): BaaS-domain base for aliyun projection
+  session_file_url_proxy:
+    proxy_base_url: ""
   # SecBaaS 回调服务器 URL（按环境）
   # 设备 start hook 完成后通过此 URL 回调状态。
   secbaas:
@@ -226,6 +239,9 @@ user_config:
   env:
     # 用于探测当前部署环境的环境变量名称
     deploy_env_var: "DEPLOY_ENV"
+    # Deploy tenant selector (D-01): BAAS_DEPLOY_TENANT=aliyun enables
+    # cloud OSS + session URL proxy projection; unset/other = main site
+    deploy_tenant: "${BAAS_DEPLOY_TENANT:-}"
 
   # 应用级动态调试/展示标记
   app:

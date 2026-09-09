@@ -30,6 +30,9 @@ from secbaas.community.api.bot_runtime import (
     TransferStateConflictError,
 )
 from secbaas.community.api.device_manage import DeviceFacadeException
+from secbaas.community.api.session_file_sharing import (
+    SessionFileTransferProxyUnavailableError,
+)
 from secbaas.community.bootstrap import ApplicationContainer
 from secbaas.community.logger import get_logger
 
@@ -137,6 +140,11 @@ async def get_upload_url(
                     "paas_device_id": e.paas_device_id,
                 },
             },
+        )
+    except SessionFileTransferProxyUnavailableError as e:
+        raise HTTPException(
+            status_code=e.http_status,
+            detail={"error": e.error_code, "message": e.reason, "bot_uuid": bot_uuid},
         )
     except Exception as e:
         raise HTTPException(
@@ -497,6 +505,11 @@ async def generate_share_link(
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail={"error": "NOT_IMPLEMENTED", "message": str(e)},
+        )
+    except SessionFileTransferProxyUnavailableError as e:
+        raise HTTPException(
+            status_code=e.http_status,
+            detail={"error": e.error_code, "message": e.reason},
         )
     except Exception as e:
         raise HTTPException(

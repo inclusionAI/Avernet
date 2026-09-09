@@ -216,3 +216,37 @@ class TestLocalUserMachineSqliteOrmEquivalence:
         record = repo.get_by_machine_id(machine_id, TEST_ENV)
         assert record is not None
         assert record.connected_server_instance == new_instance
+
+    def test_update_user_id_conditional_migration(self):
+        """D-05 conditional guard on SQLite: migrate once, stale old_user_id is 0."""
+        repo: LocalUserMachineRepository = (
+            get_container().repository.local_user_machine_repository()
+        )
+        machine_id = _generate_uuid()
+
+        repo.insert_machine(
+            template_id=1,
+            user_id="user-old",
+            machine_id=machine_id,
+            machine_info={"os": "linux", "cpu": "4"},
+            last_heartbeat=datetime.now(),
+            connected_server_instance=f"server-{_generate_uuid()[:8]}",
+            status="ONLINE",
+            env=TEST_ENV,
+        )
+
+        # Migration: the conditional UPDATE finds the row and rewrites user_id.
+        updated = repo.update_user_id(machine_id, TEST_ENV, "user-old", "user-new")
+        assert updated == 1
+
+        record = repo.get_by_machine_id(machine_id, TEST_ENV)
+        assert record is not None
+        assert record.user_id == "user-new"
+
+        # Stale guard (D-05): the old user_id no longer matches, so 0 rows update.
+        stale = repo.update_user_id(machine_id, TEST_ENV, "user-old", "user-third")
+        assert stale == 0
+
+        record_after = repo.get_by_machine_id(machine_id, TEST_ENV)
+        assert record_after is not None
+        assert record_after.user_id == "user-new"

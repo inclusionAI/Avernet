@@ -178,6 +178,10 @@ _PLUGINS_ALLOW = [
     # TECH DEBT: sqlite_orm.init_database registers with db_manager.
     # Fix: move db_manager registration back to lifecycle or allow plugin→core.database.
     "secbaas.community.core.database",
+    # TECH DEBT (byte-port provenance, phase 89): _aliyun_oss.py is a
+    # byte-identical port of the enterprise backend (diff==0 contract).
+    # Fix: none planned — restructuring the import would break byte-identity.
+    "secbaas.community.plugins.file_transfer._aliyun_oss",
 ]
 
 

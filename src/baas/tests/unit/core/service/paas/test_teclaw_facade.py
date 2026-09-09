@@ -301,10 +301,10 @@ class TestFacadeCreateDeviceForTeClaw:
             await facade.create_device(
                 tenant_name="test-tenant",
                 device_template_uuid="test-teclaw-template-uuid",
-detail_config=TeClawDeviceConfig(
-                name="test-device",
-                callback_context=_DEFAULT_CTX,
-            ),
+                detail_config=TeClawDeviceConfig(
+                    name="test-device",
+                    callback_context=_DEFAULT_CTX,
+                ),
             )
 
         assert exc_info.value.operation == "create_device"

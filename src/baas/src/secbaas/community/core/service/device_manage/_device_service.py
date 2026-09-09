@@ -36,6 +36,7 @@ from secbaas.community.api.template_manage import (
     SigmaTemplateConfig,
     TeClawTemplateConfig,  # noqa: F401 used in start_device and _resolve_device_for_operation
 )
+from secbaas.community.config import ConfigPath, get_config, get_config_by_path
 from secbaas.community.core.repository.device import (
     DeviceRecord,
     DeviceRepository,
@@ -47,7 +48,6 @@ from secbaas.community.core.service.paas import (
     PaasServiceFacade,
     dispatch_start_hook,
 )
-from secbaas.community.config import ConfigPath, get_config, get_config_by_path
 from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.core.utils.secret_utils import (
     common_sm4_decrypt,
