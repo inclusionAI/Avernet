@@ -135,22 +135,22 @@ export default function WorkflowHistoryPanel({ workflowId, onActiveVersionChange
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2">
+      <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-5 py-3">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-gray-800">版本历史</span>
-          <span className="text-xs text-gray-400">{workflowId}</span>
+          <span className="text-base font-semibold tracking-tight text-slate-900">发布历史</span>
+          <span className="rounded bg-slate-200/70 px-2 py-0.5 font-mono text-[11px] text-slate-500">{workflowId}</span>
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={loadHistory}
-            className="rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50"
+            onClick={() => void loadHistory()}
+            className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-slate-400 hover:text-slate-900"
           >
             刷新
           </button>
           {onClose && (
             <button
               onClick={onClose}
-              className="rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50"
+              className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-slate-400 hover:text-slate-900"
             >
               关闭
             </button>
@@ -167,108 +167,49 @@ export default function WorkflowHistoryPanel({ workflowId, onActiveVersionChange
       ) : history.length === 0 ? (
         <div className="p-8 text-center text-sm text-gray-400">暂无已发布版本</div>
       ) : (
-        <div className="flex flex-1 overflow-hidden">
-          {/* History list */}
-          <div className="w-[46%] overflow-auto border-r border-gray-200">
-            <table className="min-w-[720px] table-fixed text-xs">
-              <thead className="sticky top-0 bg-gray-50 text-gray-500">
-                <tr>
-                  <th className="w-10 px-2 py-1.5 text-left font-medium"></th>
-                  <th className="w-14 whitespace-nowrap px-2 py-1.5 text-left font-medium">版本</th>
-                  <th className="w-16 whitespace-nowrap px-2 py-1.5 text-left font-medium">部署</th>
-                  <th className="w-[68px] whitespace-nowrap px-2 py-1.5 text-left font-medium">状态</th>
-                  <th className="w-40 whitespace-nowrap px-2 py-1.5 text-left font-medium">时间</th>
-                  <th className="w-44 whitespace-nowrap px-2 py-1.5 text-left font-medium">触发者</th>
-                  <th className="w-24 whitespace-nowrap px-2 py-1.5 text-left font-medium">默认版本</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map((h) => {
-                  const isViewing = viewDeploy === h.deployNumber
-                  const isSelected = selected.includes(h.deployNumber)
-                  const actor = h.ownerId || h.botId ? [h.ownerId, h.botId].filter(Boolean).join('/') : '-'
-                  return (
-                    <tr
-                      key={`${h.deployNumber}-${h.version}`}
-                      className={`border-b border-gray-100 cursor-pointer ${
-                        h.isActive ? 'bg-green-50/60' : ''
-                      } ${isViewing ? '!bg-blue-50' : ''} hover:bg-blue-50/40`}
-                      onClick={() => setViewDeploy(h.deployNumber)}
-                    >
-                      <td className="px-2 py-1.5" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => toggleSelect(h.deployNumber)}
-                          className="cursor-pointer"
-                        />
-                      </td>
-                      <td className="whitespace-nowrap px-2 py-1.5 font-mono text-gray-800">v{h.version}</td>
-                      <td className="whitespace-nowrap px-2 py-1.5 font-mono text-gray-500">#{h.deployNumber}</td>
-                      <td className="whitespace-nowrap px-2 py-1.5">
-                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${actionClass(h.action)}`}>
-                          {h.action}
-                        </span>
-                      </td>
-                      <td className="whitespace-nowrap px-2 py-1.5 text-gray-500">{formatTime(h.gmtCreate)}</td>
-                      <td className="px-2 py-1.5 text-gray-500">
-                        <span className="block truncate" title={actor}>{actor}</span>
-                      </td>
-                      <td className="px-2 py-1.5" onClick={(e) => e.stopPropagation()}>
-                        {h.isActive ? (
-                          <span className="inline-flex whitespace-nowrap items-center gap-0.5 rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">
-                            默认
-                          </span>
-                        ) : h.action === 'deploy' ? (
-                          <button
-                            onClick={() => void handleActivateVersion(h.deployNumber, h.version)}
-                            disabled={activating === h.version}
-                            className="whitespace-nowrap rounded border border-blue-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50"
-                            title={`将 v${h.version} 设为默认版本`}
-                          >
-                            {activating === h.version ? '设置中…' : '设为默认'}
-                          </button>
-                        ) : (
-                          <span className="text-gray-300 text-[10px]">—</span>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-
-            {/* Compare action bar */}
-            <div className="sticky bottom-0 flex items-center justify-between border-t border-gray-200 bg-gray-50 px-3 py-1.5">
-              <span className="text-[11px] text-gray-500">
-                已选 {selected.length}/2 进行对比
-              </span>
-              <button
-                onClick={handleCompare}
-                disabled={selected.length !== 2}
-                className="rounded bg-blue-600 px-2.5 py-0.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40"
-              >
-                对比差异
-              </button>
+        <div className="flex flex-1 overflow-hidden bg-slate-100">
+          <aside className="flex w-[340px] shrink-0 flex-col border-r border-slate-200 bg-white">
+            <div className="border-b border-slate-100 px-4 py-2 text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400">已发布版本 · 选择两项进行比较</div>
+            <div className="flex-1 overflow-y-auto px-2 py-2">
+              {history.map((h) => {
+                const isViewing = viewDeploy === h.deployNumber
+                const isSelected = selected.includes(h.deployNumber)
+                const actor = h.ownerId || h.botId ? [h.ownerId, h.botId].filter(Boolean).join('/') : '未知触发者'
+                return (
+                  <article key={`${h.deployNumber}-${h.version}`} onClick={() => setViewDeploy(h.deployNumber)} className={`mb-1.5 cursor-pointer rounded-lg border px-3 py-2.5 transition-colors ${isViewing ? 'border-blue-300 bg-blue-50/70 shadow-sm' : 'border-transparent hover:border-slate-200 hover:bg-slate-50'} ${h.isActive ? 'ring-1 ring-emerald-100' : ''}`}>
+                    <div className="flex items-start gap-2">
+                      <input type="checkbox" checked={isSelected} onClick={(e) => e.stopPropagation()} onChange={() => toggleSelect(h.deployNumber)} className="mt-1 cursor-pointer accent-blue-600" aria-label={`选择 v${h.version} 进行对比`} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-baseline gap-2"><span className="font-mono text-sm font-semibold text-slate-800">v{h.version}</span><span className="font-mono text-[11px] text-slate-400">#{h.deployNumber}</span></div>
+                          {h.isActive ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">线上生效</span> : <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${actionClass(h.action)}`}>{h.action}</span>}
+                        </div>
+                        <div className="mt-1 truncate text-[11px] text-slate-500" title={actor}>{actor} · {formatTime(h.gmtCreate)}</div>
+                        {!h.isActive && h.action === 'deploy' && <button onClick={(e) => { e.stopPropagation(); void handleActivateVersion(h.deployNumber, h.version) }} disabled={activating === h.version} className="mt-2 text-[11px] font-medium text-blue-600 hover:text-blue-800 disabled:opacity-50" title={`将 v${h.version} 设置为线上生效版本`}>{activating === h.version ? '设置中…' : '设为线上生效版本'}</button>}
+                      </div>
+                    </div>
+                  </article>
+                )
+              })}
             </div>
-          </div>
+            <div className="border-t border-slate-200 bg-slate-50 px-3 py-3">
+              <div className="mb-2 flex items-center justify-between text-[11px] text-slate-500"><span>已选 <strong className="text-slate-700">{selected.length}</strong>/2</span>{selected.length === 2 && <span className="text-blue-600">已准备对比</span>}</div>
+              <button onClick={handleCompare} disabled={selected.length !== 2} className="w-full rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400">查看版本差异</button>
+            </div>
+          </aside>
 
-          {/* Right pane: single version snapshot OR diff */}
-          <div className="flex-1 overflow-auto">
+          <main className="min-w-0 flex-1 overflow-hidden bg-white">
             {diffFromDeploy != null && diffToDeploy != null ? (
               <div className="flex h-full flex-col">
-                <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-1">
-                  <span className="text-xs font-medium text-gray-700">
-                    部署对比: #{diffFromDeploy} → #{diffToDeploy}
-                  </span>
+                <div className="flex items-center justify-end border-b border-slate-200 bg-slate-50 px-4 py-2">
                   <button
                     onClick={() => {
                       setDiffFromDeploy(null)
                       setDiffToDeploy(null)
                     }}
-                    className="rounded border border-gray-300 bg-white px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-50"
+                    className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 hover:border-slate-400"
                   >
-                    返回
+                    退出对比
                   </button>
                 </div>
                 {diffFromDeploy === diffToDeploy ? (
@@ -285,17 +226,14 @@ export default function WorkflowHistoryPanel({ workflowId, onActiveVersionChange
               </div>
             ) : viewDeploy != null ? (
               <div className="flex h-full flex-col">
-                <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-1">
-                  <span className="text-xs font-medium text-gray-700">
-                    {snapshot
-                      ? `v${snapshot.version} deploy #${snapshot.deployNumber} (${snapshot.action})`
-                      : `deploy #${viewDeploy}`}
-                  </span>
+                <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-2">
+                  <span className="font-mono text-xs font-semibold text-slate-700">{snapshot ? `v${snapshot.version} · deploy #${snapshot.deployNumber}` : `deploy #${viewDeploy}`}</span>
+                  <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-medium text-slate-600">{snapshot?.action ?? 'loading'}</span>
                 </div>
                 {snapshotLoading ? (
                   <div className="p-4 text-sm text-gray-500">加载中…</div>
                 ) : snapshot ? (
-                  <pre className="flex-1 overflow-auto bg-gray-900 p-3 font-mono text-xs leading-relaxed text-green-100">
+                  <pre className="flex-1 overflow-auto bg-slate-950 p-5 font-mono text-xs leading-relaxed text-slate-200">
                     {specJsonToText(snapshot.specJson)}
                   </pre>
                 ) : (
@@ -303,11 +241,11 @@ export default function WorkflowHistoryPanel({ workflowId, onActiveVersionChange
                 )}
               </div>
             ) : (
-              <div className="flex h-full items-center justify-center p-8 text-center text-sm text-gray-400">
-                点选左侧某行查看版本内容；勾选两行后点"对比差异"
+              <div className="flex h-full items-center justify-center p-8 text-center">
+                <div><div className="text-sm font-medium text-slate-600">选择一个版本查看内容</div><div className="mt-1 text-xs text-slate-400">勾选两个版本后，可在这里阅读精简差异</div></div>
               </div>
             )}
-          </div>
+          </main>
         </div>
       )}
     </div>
