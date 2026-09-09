@@ -33,6 +33,7 @@ from tests.community.core.bot_config_manifest.apply._fakes import (
 )
 
 from ._fakes import FakeObjectStorage
+from agentclaw.community.plugins.local.object_store_client import InMemoryObjectStoreClientFactory
 
 _BASE = "teclaw/dev/bolt_data"
 # The identity and resources materialisers address the bot at ("staff", owner).
@@ -49,7 +50,7 @@ def _store():
 
 
 def _fetcher():
-    return EntryFetcher(FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials())
+    return EntryFetcher(FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials(), InMemoryObjectStoreClientFactory())
 
 
 async def _apply(materialiser, ctx, entries):

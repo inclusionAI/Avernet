@@ -110,7 +110,6 @@ from agentclaw.community.core.skill_center.skill_package import SkillPackageVali
 from agentclaw.community.core.skill_center.draft_content import DraftContentStore
 from agentclaw.community.plugin_api.space_skill_source import SpaceSkillSourcePlugin
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
-from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,

@@ -80,6 +80,7 @@ from ._fakes import (
     FakeStartupScriptService,
     real_validator,
 )
+from agentclaw.community.plugins.local.object_store_client import InMemoryObjectStoreClientFactory
 
 _ENTITY = "u_owner"
 _BOT = "b_task"
@@ -183,7 +184,7 @@ def _service(db, *, scripts, manifests=None, queue=None):
         package_validator_provider=lambda: real_validator(),
         entry_fetcher_provider=lambda: EntryFetcher(
             FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
-        ),
+        , InMemoryObjectStoreClientFactory()),
         # W6's resources materialiser and W7's git transport: unreached by
         # this suite's script-only document, but the registry registers them
         # and the session is built per apply regardless.

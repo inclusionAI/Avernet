@@ -72,6 +72,7 @@ from ..apply._fakes import (
     FakeStartupScriptService,
     real_validator,
 )
+from agentclaw.community.plugins.local.object_store_client import InMemoryObjectStoreClientFactory
 
 _ENTITY = "u_owner"
 _BOT = "b_ordering"
@@ -220,7 +221,7 @@ def _build(db, *, scripts=None):
         package_validator_provider=lambda: real_validator(),
         entry_fetcher_provider=lambda: EntryFetcher(
             FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
-        ),
+        , InMemoryObjectStoreClientFactory()),
         # W6's resources materialiser and W7's git transport: unreached by
         # this suite's document, but the registry registers them and the
         # session is built per apply regardless.

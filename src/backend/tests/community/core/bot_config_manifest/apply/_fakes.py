@@ -23,6 +23,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     FetchFailedError,
     FetchedObject,
 )
+from agentclaw.community.plugins.local.object_store_client import InMemoryObjectStoreClientFactory
 
 
 def fetched_object(
@@ -286,7 +287,7 @@ def identity_rig(files: dict[str, str] | None = None):
     identity = FakeIdentityService(files)
     fetcher = FakeGuardedFetcher(responses={SOUL_URL: fetched_object(SOUL_BODY)})
     content = FakeManifestContent()
-    pipeline = EntryFetcher(fetcher, content, FakeCredentials())
+    pipeline = EntryFetcher(fetcher, content, FakeCredentials(), InMemoryObjectStoreClientFactory())
     return IdentityMaterialiser(identity, pipeline), identity, fetcher, content
 
 

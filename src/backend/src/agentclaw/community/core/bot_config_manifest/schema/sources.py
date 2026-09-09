@@ -20,6 +20,10 @@ the feature is pre-release, so there is no installed base whose documents a
 compatibility road would protect, and a dual spelling is two vocabularies to
 keep honest forever. A source written the old way is refused at ``PUT`` with a
 message naming the replacement.
+
+Grammar reference: ``docs/bot-config-manifest/manifest-schema.zh-CN.md``
+— §2.2 (``protocol``), §2.3 (``sources`` / ``from``). Cite a section rather than restating the grammar here;
+two copies of one grammar drift, and the document is the one users read.
 """
 from __future__ import annotations
 
@@ -39,26 +43,59 @@ VALID_SOURCE_MODES: frozenset[str] = frozenset({"strict", "non_strict"})
 DEFAULT_SOURCE_MODE = "non_strict"
 
 #: Keys every source may carry, whatever its protocol.
-_COMMON_KEYS: frozenset[str] = frozenset({"protocol", "url", "auth"})
+_COMMON_KEYS: frozenset[str] = frozenset({"protocol", "auth"})
 
-#: Keys only a git source may carry, and why — the message a caller reads when
-#: they write one on an object store.
+#: Every other key belongs to exactly one protocol, with the sentence a caller
+#: reads when they write it on the other one.
 #:
-#: All three describe something only a repository has. ``ref`` names a revision
-#: and ``mode`` rules on its movement; ``subpath`` selects inside a **tree**,
-#: which is what a git source delivers and what one HTTPS GET never does — it
-#: fetches one object, and the object's own URL is how you address it.
-_GIT_ONLY_KEY_REASONS: dict[str, str] = {
-    "ref": "names a revision",
-    "mode": "rules on whether a revision may move",
-    "subpath": "selects inside the tree a repository delivers",
+#: The git side describes what only a repository has: ``url`` addresses it,
+#: ``ref`` names a revision, ``mode`` rules on that revision's movement, and
+#: ``subpath`` selects inside a **tree**. The oss side describes what only an
+#: object store has, and it is two fields rather than a URL on purpose — the
+#: bucket and the key are structured inputs to the store's own client, and a
+#: URL would only be parsed back apart at the first call.
+_KEY_OWNER: dict[str, tuple[SourceKind, str]] = {
+    "url": (SourceKind.GIT, "addresses a repository"),
+    "ref": (SourceKind.GIT, "names a revision"),
+    "mode": (SourceKind.GIT, "rules on whether a revision may move"),
+    "subpath": (SourceKind.GIT, "selects inside the tree a repository delivers"),
+    "bucket": (SourceKind.OSS, "names a bucket in an object store"),
+    "key": (SourceKind.OSS, "names an object inside that bucket"),
 }
-_GIT_ONLY_KEYS: frozenset[str] = frozenset(_GIT_ONLY_KEY_REASONS)
+
+#: How each protocol says where its content is — quoted back to a caller who
+#: reached for the other protocol's vocabulary.
+_ADDRESSING: dict[SourceKind, str] = {
+    SourceKind.GIT: "a git source addresses its content with 'url' and 'ref'",
+    SourceKind.OSS: (
+        "an oss source addresses its object with 'bucket' and 'key'"
+    ),
+}
 
 _KEYS_BY_PROTOCOL: dict[SourceKind, frozenset[str]] = {
-    SourceKind.GIT: _COMMON_KEYS | _GIT_ONLY_KEYS,
-    SourceKind.OSS: _COMMON_KEYS,
+    protocol: _COMMON_KEYS
+    | frozenset(k for k, (owner, _) in _KEY_OWNER.items() if owner is protocol)
+    for protocol in (SourceKind.GIT, SourceKind.OSS)
 }
+
+#: What each protocol cannot do without. Everything else is optional or
+#: defaulted; these are the fields whose absence makes a source unfetchable.
+_REQUIRED_BY_PROTOCOL: dict[SourceKind, tuple[str, ...]] = {
+    SourceKind.GIT: ("url",),
+    # ``auth`` is required here and optional on git, and the asymmetry is not
+    # an oversight. A bucket read needs an endpoint, and the endpoint is a
+    # property of the credential — with no ``auth`` there is nowhere to send
+    # the request. Refusing it at PUT rather than at apply is the rule this
+    # whole feature is built on: the surface must not accept what it cannot
+    # apply. The fetcher re-asks it as a belt, for documents that reached
+    # storage before this rule existed.
+    SourceKind.OSS: ("bucket", "auth"),
+}
+
+#: The field each protocol says *where* with. Writing the other protocol's is
+#: one mistake, and the refusal for it already names the replacement — so the
+#: "you are missing X" complaint is suppressed rather than added to it.
+_ADDRESSING_FIELDS: frozenset[str] = frozenset({"url", "bucket"})
 
 #: The protocols a source may declare. ``content`` is a
 #: :class:`~agentclaw.community.core.bot_config_manifest.support_matrix.SourceKind`
@@ -80,7 +117,33 @@ class SourceDecl:
     """
 
     protocol: SourceKind
-    url: str
+    #: git only — the repository's address. ``None`` on an oss source, which
+    #: addresses its content with ``bucket``/``key`` instead.
+    url: str | None = None
+    #: oss only — the bucket to read from. Lives on the source rather than on
+    #: the credential because one credential commonly reads several buckets in
+    #: an account, and the bucket is the part a manifest author chooses.
+    bucket: str | None = None
+    #: oss only — a key *prefix*, composed with an entry's own ``key`` the
+    #: way ``subpath`` composes on the git road (source's first, then the
+    #: entry's). ``None`` means the entry's key is the whole object name::
+    #:
+    #:     sources:
+    #:       artifacts:
+    #:         protocol: oss
+    #:         bucket: team-artifacts
+    #:         key: tools/            # <- the source's prefix
+    #:         auth: oss-prod
+    #:
+    #:     manifest:
+    #:       cli_tools:
+    #:         - name: qc
+    #:           from: artifacts
+    #:           key: qc/v2.tgz       # <- the entry's part
+    #:
+    #: reads ``oss://team-artifacts/tools/qc/v2.tgz``. Drop the source's
+    #: ``key`` and the same entry reads ``oss://team-artifacts/qc/v2.tgz``.
+    key: str | None = None
     #: git only — a tag, a branch, or a full commit SHA. ``None`` means the
     #: repository's default head.
     ref: str | None = None
@@ -135,11 +198,30 @@ def parse_source(
 ) -> tuple[SourceDecl | None, tuple[SourceViolation, ...]]:
     """Read one source declaration. Returns the model, or ``None`` and reasons.
 
-    ``raw`` is ``object`` rather than a mapping type, and rather than ``Any``:
-    it is whatever ``yaml.safe_load`` produced at that position in a
-    caller-authored document — a string, a list, ``None``, anything. ``Any``
-    would silence the checker; ``object`` makes the narrowing below mandatory,
-    which is exactly the contract this function has with its callers.
+    ``raw`` is **one value from under top-level ``sources``**, or one inline
+    ``source:`` object. When the document is well-formed it is a mapping::
+
+        sources:
+          content:                 # <- the name; the value below is ``raw``
+            protocol: git
+            url: https://code.example-corp.com/team/content.git
+            ref: v1.2.0
+            auth: corp-git-content
+
+    so ``raw`` here is ``{"protocol": "git", "url": ..., "ref": "v1.2.0",
+    "auth": "corp-git-content"}``. Grammar:
+    ``docs/bot-config-manifest/manifest-schema.zh-CN.md`` §2.3.
+
+    **Why it is typed ``object`` and not ``Mapping``**, which review asked:
+    because a caller-authored document is under no obligation to put a
+    mapping there. ``sources: {content: "just a string"}`` parses as YAML and
+    arrives here as ``str``; ``content:`` with nothing under it arrives as
+    ``None``. Typing the parameter ``Mapping`` would be a promise the caller
+    cannot keep, and would move the failure from this function's violation
+    list — which is a message the document's author can act on — to a
+    ``TypeError`` somewhere below. ``Any`` would silence the checker instead;
+    ``object`` makes the ``isinstance`` narrowing below *mandatory*, which is
+    exactly the contract this function has with its callers.
 
     Every problem that can be found is found — the whole document's violations
     are answered at once, so a caller fixes their source in one pass rather
@@ -178,14 +260,14 @@ def parse_source(
             # the sweep that names every occurrence at any depth. Naming it
             # here too would report one mistake as two problems.
             continue
-        if key in _GIT_ONLY_KEYS:
+        if key in _KEY_OWNER:
             misplaced.add(key)
+            _, reason = _KEY_OWNER[key]
             add(
                 f".{key}",
                 "field_not_valid_for_protocol",
-                f"'{key}' {_GIT_ONLY_KEY_REASONS[key]} and is not valid on a "
-                f"'{protocol.value}' source; an oss source addresses its "
-                "object with 'url'",
+                f"'{key}' {reason} and is not valid on "
+                f"'{protocol.value}' sources; {_ADDRESSING[protocol]}",
             )
             continue
         add(
@@ -194,13 +276,45 @@ def parse_source(
             f"unknown field '{key}' on a {protocol.value} source",
         )
 
-    url = raw.get("url")
-    if not isinstance(url, str) or not url:
-        add(
-            ".url",
-            "missing_source",
-            "a source must declare 'url'",
-        )
+    # A caller who addressed the source the other protocol's way has one
+    # mistake, and the refusal above already names what to write instead;
+    # adding "and you are missing 'bucket'" states that same mistake twice in
+    # different words. Same discipline as ``misplaced`` itself.
+    misaddressed = bool(misplaced & _ADDRESSING_FIELDS)
+    for required in _REQUIRED_BY_PROTOCOL[protocol]:
+        if required in misplaced or (
+            misaddressed and required in _ADDRESSING_FIELDS
+        ):
+            continue
+        # **Absence only.** The per-field checks below own empty and
+        # wrong-typed values, and answering here as well produced two
+        # violations for one mistake — worse, for ``url: 123`` the "must
+        # declare 'url'" half is actively false, since the field *is*
+        # declared. Same rule as ``misaddressed`` a few lines up, which this
+        # did not follow.
+        if raw.get(required) is None:
+            add(
+                f".{required}",
+                "missing_source",
+                f"a source on '{protocol.value}' must declare '{required}'",
+            )
+
+    url = None if "url" in misplaced else raw.get("url")
+    if url is not None and (not isinstance(url, str) or not url):
+        add(".url", "invalid_source", "'url' must be a non-empty string")
+        url = None
+
+    bucket = None if "bucket" in misplaced else raw.get("bucket")
+    if bucket is not None and (not isinstance(bucket, str) or not bucket):
+        add(".bucket", "invalid_bucket", "'bucket' must be a non-empty string")
+        bucket = None
+
+    key_prefix = None if "key" in misplaced else raw.get("key")
+    if key_prefix is not None and (
+        not isinstance(key_prefix, str) or not key_prefix
+    ):
+        add(".key", "invalid_path", "'key' must be a non-empty string")
+        key_prefix = None
 
     ref = None if "ref" in misplaced else raw.get("ref")
     if ref is not None and (not isinstance(ref, str) or not ref):
@@ -236,11 +350,12 @@ def parse_source(
 
     if violations:
         return None, tuple(violations)
-    assert isinstance(url, str)
     return (
         SourceDecl(
             protocol=protocol,
             url=url,
+            bucket=bucket,
+            key=key_prefix,
             ref=ref,
             subpath=subpath,
             auth=auth,

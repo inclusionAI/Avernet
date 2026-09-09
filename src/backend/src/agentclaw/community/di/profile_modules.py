@@ -265,6 +265,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.community.object_storage import (
             CommunityObjectStorageModule,
         )
+        from agentclaw.community.di.modules.infrastructure.community.object_store_client import (
+            CommunityObjectStoreClientModule,
+        )
         from agentclaw.community.di.modules.infrastructure.community.secret import (
             CommunitySecretModule,
         )
@@ -314,6 +317,7 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             CommunitySecretModule(),
             CommunityDatabaseModule(),
             CommunityObjectStorageModule(),
+            CommunityObjectStoreClientModule(),
             CommunityIdentityModule(),
             CommunityHealthModule(),
             CommunityHarnessModule(),

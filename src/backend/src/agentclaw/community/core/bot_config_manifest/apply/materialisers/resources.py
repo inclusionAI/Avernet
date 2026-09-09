@@ -49,14 +49,16 @@ Two v1 narrows, stated here rather than discovered:
 from __future__ import annotations
 
 import asyncio
-import tempfile
-from pathlib import Path
 from typing import Any, Sequence
 
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
+    EntryDelivery,
     EntryFetchError,
-    GitEntrySource,
+    archive_refusal,
+    canonical_tree_bytes,
+)
+from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     declared_protocol,
 )
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
@@ -74,15 +76,8 @@ from agentclaw.community.core.bot_config_manifest.apply.registry import (
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCategory,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.unpack import (
-    UnpackError,
-    unpack_archive,
-)
 from agentclaw.community.core.bot_config_manifest.schema._support import (
     relative_path_refusal,
-)
-from agentclaw.community.core.bot_config_manifest.schema.entries import (
-    VALID_UNPACK,
 )
 from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
@@ -176,64 +171,48 @@ class ResourcesMaterialiser(Materialiser):
                 # through: the fetch below raises the real error.
                 protocol = declared_protocol(ctx, entry)
                 if protocol is SourceKind.OSS:
-                    refusal = _archive_refusal(entry)
+                    refusal = archive_refusal(
+                        entry.get("unpack"), entry.get("strip_components", 0)
+                    )
                     if refusal is not None:
                         failures.append(ResolveFailure(path, refusal))
                         continue
                 try:
-                    fetched = await self._fetch_entry(
+                    delivery = await self._fetch_entry(
                         ctx, entry, path, _FETCH_CATEGORY_ARCHIVE
+                    )
+                    # One call on every road. A git checkout answers with its
+                    # tree, an archive with its unpacked members, and a
+                    # ``keep_last`` fallback for a failed git fetch answers
+                    # with the stored tree decoded — three shapes the delivery
+                    # resolves, because which one arrived is not a question
+                    # this category has any way to answer.
+                    members = await asyncio.to_thread(
+                        delivery.members,
+                        unpack=entry.get("unpack"),
+                        strip_components=entry.get("strip_components", 0),
                     )
                 except EntryFetchError as exc:
                     failures.append(ResolveFailure(path, exc.reason))
                     continue
-                stored_tree = (
-                    None
-                    if isinstance(fetched, GitEntrySource)
-                    else _decode_tree_bytes(fetched.content)
-                )
-                if stored_tree is not None:
-                    # ``keep_last`` standing in for a failed git fetch. The
-                    # receipt holds the tree this entry last delivered, so the
-                    # members come straight back — without this the entry took
-                    # the archive road, was told to declare an 'unpack' that a
-                    # git source may not carry, and a transient outage failed
-                    # the whole category instead of keeping what the bot has.
-                    members = stored_tree
-                    note = fetched.fallback_reason
-                elif isinstance(fetched, GitEntrySource):
-                    # A repository hands over a real tree, so there is no
-                    # packaging step: ``files()`` returns exactly the
-                    # ``(relative path, bytes)`` pairs ``_unpack_members``
-                    # produces from an archive, and everything below — the
-                    # member gate, the declared-tree marker, the per-member
-                    # intents — is the same code on both roads.
+                if isinstance(members, str):
+                    failures.append(ResolveFailure(path, members))
+                    continue
+                if delivery.needs_receipt():
+                    # The members are filed as **one canonical blob** under the
+                    # tree's receipt URL — the same shape the skills
+                    # materialiser files a package as, and for the same reason:
+                    # §2.8's audit and ``keep_last`` read one receipt per entry,
+                    # and a receipt per member would make a 5000-file tree 5000
+                    # rows describing one delivery.
                     try:
-                        members = await asyncio.to_thread(
-                            self._git_members, ctx, fetched, path
+                        await asyncio.to_thread(
+                            self._file_tree, ctx, delivery, members, path
                         )
                     except EntryFetchError as exc:
                         failures.append(ResolveFailure(path, exc.reason))
                         continue
-                    note = fetched.moved_note()
-                else:
-                    # Re-asked rather than assumed: ``protocol`` above is
-                    # ``None`` for a source this belt could not parse, and that
-                    # entry still reaches here with bytes in hand.
-                    refusal = _archive_refusal(entry)
-                    if refusal is not None:
-                        failures.append(ResolveFailure(path, refusal))
-                        continue
-                    members = await asyncio.to_thread(
-                        self._unpack_members,
-                        fetched.content,
-                        entry["unpack"],
-                        entry.get("strip_components", 0),
-                    )
-                    if isinstance(members, str):
-                        failures.append(ResolveFailure(path, members))
-                        continue
-                    note = fetched.fallback_reason
+                note = delivery.note()
                 # The declared-tree marker intent rides first so plan routes
                 # the tree into ``removals`` and write replaces it before
                 # members upload. The gate on every member comes before the
@@ -278,19 +257,18 @@ class ResourcesMaterialiser(Materialiser):
                 intents.append(Intent(identity=path, value=data))
                 continue
             try:
-                fetched = await self._fetch_entry(
+                delivery = await self._fetch_entry(
                     ctx, entry, path, _FETCH_CATEGORY_FILE
                 )
-                if isinstance(fetched, GitEntrySource):
-                    data = await asyncio.to_thread(
-                        self._git_file, ctx, fetched, path
+                data = await asyncio.to_thread(delivery.single)
+                if delivery.needs_receipt():
+                    await asyncio.to_thread(
+                        self._file_one, ctx, delivery, data, path
                     )
-                    note = fetched.moved_note()
-                else:
-                    data, note = fetched.content, fetched.fallback_reason
             except EntryFetchError as exc:
                 failures.append(ResolveFailure(str(path), exc.reason))
                 continue
+            note = delivery.note()
             refused = _delivery_refusal(path, data)
             if refused is not None:
                 failures.append(ResolveFailure(path, refused))
@@ -315,11 +293,11 @@ class ResourcesMaterialiser(Materialiser):
         the old signature to take. Every other fetching category came through
         this door already.
 
-        Returns a :class:`FetchedEntry` **or** a :class:`GitEntrySource`; the
-        caller branches. The whole object rather than its bytes, because a
-        keep_last fallback's reason and a moved ref's note ride on it (§9.6 —
-        the report row must state the fallback), and dropping either here would
-        be the contract broken quietly. Blocking network + disk I/O (W2's sync
+        Returns an :class:`EntryDelivery`; the caller does not branch. The
+        whole delivery rather than its bytes, because a keep_last fallback's
+        reason and a moved ref's note ride on it (§9.6 — the report row must
+        state the fallback), and dropping either here would be the contract
+        broken quietly. Blocking network + disk I/O (W2's sync
         transport, W11's blob write) off the event loop — see the identity
         materialiser's note; a dry run must not park the server on a hung
         source.
@@ -332,80 +310,45 @@ class ResourcesMaterialiser(Materialiser):
             entry_identity=path,
         )
 
-    def _git_members(
-        self, ctx: ApplyContext, source: GitEntrySource, path: str
-    ) -> list[tuple[str, bytes]]:
-        """A git tree as ``(relative path, bytes)`` — the archive road's shape.
+    def _file_tree(
+        self,
+        ctx: ApplyContext,
+        delivery: EntryDelivery,
+        members: list[tuple[str, bytes]],
+        path: str,
+    ) -> None:
+        """File a delivered tree with the store, as one canonical blob.
 
-        Every file at every depth under the composed ``subpath``, which is what
-        makes a directory entry over git recursive with no packaging step: the
-        checkout walks the tree and the per-member byte cap is the same
-        ``FETCH_ENTRY_LIMITS`` number the URL road enforces at the transport.
-
-        The members are filed with the platform's store as **one canonical
-        blob** under the tree's receipt URL — the same shape the skills
-        materialiser files a package as, and for the same reason: §2.8's audit
-        and ``keep_last`` read one receipt per entry, and a receipt per member
-        would make a 5000-file tree 5000 rows describing one delivery. The
-        credential name rides along, so the lineage answers "which credential
-        served this" identically on both roads.
+        Only the roads that still owe a receipt reach here — the object road
+        filed what arrived inside the fetch. The credential name rides along,
+        so the lineage answers "which credential served this" identically on
+        both roads.
         """
-        members = source.files()
         self._fetcher.file_bytes(
             ctx,
-            content=_canonical_tree_bytes(members),
-            source_url=source.receipt_url(),
+            content=canonical_tree_bytes(members),
+            source_url=delivery.receipt_url(),
             category=_FETCH_CATEGORY_ARCHIVE,
             entry_identity=path,
-            credential_name=source.auth,
+            credential_name=delivery.auth(),
         )
-        return members
 
-    def _git_file(
-        self, ctx: ApplyContext, source: GitEntrySource, path: str
-    ) -> bytes:
-        """One file out of a git tree, filed with the store on the way past."""
-        body = source.read_file()
+    def _file_one(
+        self,
+        ctx: ApplyContext,
+        delivery: EntryDelivery,
+        data: bytes,
+        path: str,
+    ) -> None:
+        """File one delivered file with the store. Same rule as the tree's."""
         self._fetcher.file_bytes(
             ctx,
-            content=body,
-            source_url=source.receipt_url(),
+            content=data,
+            source_url=delivery.receipt_url(),
             category=_FETCH_CATEGORY_FILE,
             entry_identity=path,
-            credential_name=source.auth,
+            credential_name=delivery.auth(),
         )
-        return body
-
-    @staticmethod
-    def _unpack_members(
-        archive: bytes, kind: str, strip_components: int
-    ) -> list[tuple[str, bytes]] | str:
-        """The guarded unpack, platform-side, into a throwaway directory.
-
-        The bot is never a scratch space: ``unpack_archive`` writes only into
-        a fresh temporary directory, so a bad or oversized archive (W1's
-        member / unpacked-size limits live inside it) fails before anything
-        is delivered. Returned members are ``(relative path, bytes)`` with
-        ``strip_components`` already applied — the bytes are read back
-        before the throwaway dir goes away; a refusal comes back as its
-        reason string rather than an exception, keeping every failure in
-        ``resolve``'s currency and the bot's tree untouched.
-        """
-        try:
-            with tempfile.TemporaryDirectory(prefix="manifest-resources-") as tmp:
-                tree = unpack_archive(
-                    archive,
-                    kind,
-                    Path(tmp) / "tree",
-                    strip_components=strip_components,
-                )
-                # ``UnpackedTree.members`` are the tree's files only —
-                # directories are structural — relative to ``root``.
-                return [
-                    (name, (tree.root / name).read_bytes()) for name in tree.members
-                ]
-        except UnpackError as exc:
-            return str(exc)
 
     def _entry_failure(
         self, entry: dict[str, Any], path: Any, index: int
@@ -605,94 +548,6 @@ class ResourcesMaterialiser(Materialiser):
                 )
             )
         return tuple(results)
-
-
-#: Marks the stored form of a git-delivered tree. Self-describing on purpose:
-#: ``keep_last`` reads a receipt back as plain bytes with no idea what shape
-#: they are, and "guess from the URL" is not identification. The version digit
-#: is what lets the framing change later without a stored copy being decoded
-#: under the wrong rules.
-_TREE_MAGIC = b"acm-tree-v1\n"
-
-
-def _archive_refusal(entry: dict[str, Any]) -> str | None:
-    """The archive fields a directory entry over ``oss`` must carry, or why not.
-
-    Pure, and asked twice on purpose: once before the fetch, so a doomed entry
-    costs no network, and once after, for the entry whose protocol this belt
-    could not determine up front. Two calls of one function, never two rules.
-    """
-    unpack_kind = entry.get("unpack")
-    # Str first: ``VALID_UNPACK`` is a frozenset, and an unhashable ``unpack``
-    # (a YAML list) would raise on the membership test where the belt owes a
-    # clean refusal.
-    if not isinstance(unpack_kind, str) or unpack_kind not in VALID_UNPACK:
-        return (
-            "a directory entry fetched over 'oss' must declare "
-            "'unpack: zip|tar.gz' — one request fetches one object, so the "
-            "tree travels as an archive"
-        )
-    strip = entry.get("strip_components", 0)
-    if not isinstance(strip, int) or isinstance(strip, bool) or strip < 0:
-        return "'strip_components' must be a non-negative integer"
-    return None
-
-
-def _canonical_tree_bytes(members: list[tuple[str, bytes]]) -> bytes:
-    """One deterministic byte string standing for a whole delivered tree.
-
-    Two jobs, and the second is why it is **reversible**:
-
-    1. A stable content address for the store — the same tree must hash the
-       same on every apply, and two different trees must not collide. Members
-       are sorted by path and each is framed with its path, its length and its
-       bytes: length-prefixed rather than delimiter-joined, because a delimiter
-       is something a *path or a payload* could contain, and a tree that could
-       be made to hash as another tree is a receipt that proves nothing.
-    2. The bytes ``keep_last`` stands in with when a later git fetch fails.
-       ``on_fetch_failure: keep_last`` is the default and it promises the bot
-       keeps running what it has — a promise an unreadable receipt cannot keep.
-
-    Never delivered to a bot as-is: :func:`_decode_tree_bytes` turns it back
-    into the members, and those are the intents.
-    """
-    parts: list[bytes] = [_TREE_MAGIC]
-    for rel, data in sorted(members):
-        encoded = rel.encode("utf-8")
-        parts.append(b"%d:%s%d:" % (len(encoded), encoded, len(data)))
-        parts.append(data)
-    return b"".join(parts)
-
-
-def _decode_tree_bytes(blob: bytes) -> list[tuple[str, bytes]] | None:
-    """The members back out, or ``None`` when these are not a canonical tree.
-
-    ``None`` rather than an exception: the caller is asking "is this a stored
-    git tree or an archive?", and a shape it does not recognise is an answer,
-    not a fault. Truncation and a bad length are the same answer — a receipt
-    that does not decode cleanly must not half-deliver a tree.
-    """
-    if not blob.startswith(_TREE_MAGIC):
-        return None
-    members: list[tuple[str, bytes]] = []
-    at = len(_TREE_MAGIC)
-    try:
-        while at < len(blob):
-            colon = blob.index(b":", at)
-            name_len = int(blob[at:colon])
-            at = colon + 1
-            name = blob[at : at + name_len].decode("utf-8")
-            at += name_len
-            colon = blob.index(b":", at)
-            size = int(blob[at:colon])
-            at = colon + 1
-            if at + size > len(blob):
-                return None
-            members.append((name, blob[at : at + size]))
-            at += size
-    except (ValueError, UnicodeDecodeError):
-        return None
-    return members
 
 
 def _delivery_refusal(identity: str, data: bytes) -> str | None:
