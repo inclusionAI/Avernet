@@ -72,7 +72,7 @@ from ._fakes import (
     FakeStartupScriptService,
     real_validator,
 )
-from agentclaw.community.plugins.local.object_store_client import InMemoryObjectStoreClientFactory
+from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 
 _ENTITY = "u_owner"
 _BOT = "b_1"
@@ -204,7 +204,7 @@ def world():
         package_validator_provider=lambda: real_validator(),
         entry_fetcher_provider=lambda: EntryFetcher(
             FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
-        , InMemoryObjectStoreClientFactory()),
+        , FakeObjectStore()),
         # W6's materialiser: this suite's document declares no resources,
         # so the write chain is never reached — but it must exist for the
         # registry to register.

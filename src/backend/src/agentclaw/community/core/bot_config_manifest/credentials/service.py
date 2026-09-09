@@ -51,7 +51,9 @@ from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
 )
 from agentclaw.community.core.bot_config_manifest.fetch.limits import Resolver
 from agentclaw.community.core.bot_management.token_vault import TokenVault
-from agentclaw.community.plugin_api.object_store_client import ObjectStoreTarget
+from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
+    ObjectStoreTarget,
+)
 from agentclaw.community.core.repository.protocols.bot.source_credential import (
     SourceCredentialRepositoryProtocol,
 )
@@ -420,7 +422,11 @@ class SourceCredentialBinding:
             secret_access_key=self._service._vault.decrypt_or_passthrough(
                 row.secret_ciphertext
             ),
-            region=row.region,
+            # Required at PUT since signature version 4 landed; a row written
+            # before that rule carries NULL, and the empty string is how the
+            # store client learns to blame the credential rather than the
+            # bucket.
+            region=row.region or "",
         )
 
     def reauthorize(self, url) -> None:
