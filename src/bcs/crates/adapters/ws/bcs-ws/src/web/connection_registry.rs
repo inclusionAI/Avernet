@@ -39,12 +39,13 @@ pub struct WorkbenchConnectionRegistry {
     sessions: RwLock<HashMap<String, Vec<FrontendConnection>>>,
     bot_query: RwLock<Option<Arc<dyn BotQueryService>>>,
     scope_change_barriers: Mutex<HashSet<(String, String, u64)>>,
-    cluster_scope_changes_best_effort: bool,
+    scope_changes_disabled: bool,
 }
 
 impl std::fmt::Debug for WorkbenchConnectionRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WorkbenchConnectionRegistry")
+            .field("cluster_scope_changes_enabled", &!self.scope_changes_disabled)
             .finish_non_exhaustive()
     }
 }
@@ -59,12 +60,12 @@ impl WorkbenchConnectionRegistry {
             sessions: RwLock::new(HashMap::new()),
             bot_query: RwLock::new(Some(bot_query)),
             scope_change_barriers: Mutex::new(HashSet::new()),
-            cluster_scope_changes_best_effort: false,
+            scope_changes_disabled: false,
         }
     }
 
-    pub fn with_cluster_scope_changes_best_effort(mut self, enabled: bool) -> Self {
-        self.cluster_scope_changes_best_effort = enabled;
+    pub fn with_scope_changes_enabled(mut self, enabled: bool) -> Self {
+        self.scope_changes_disabled = !enabled;
         self
     }
 
@@ -297,16 +298,6 @@ impl ParticipantViewBindingPort for WorkbenchConnectionRegistry {
         scope_id: &str,
         human_actor_id: &str,
     ) -> ServiceResult<ParticipantViewScopeChangeLease> {
-        if self.cluster_scope_changes_best_effort {
-            // TODO: Broadcast participant-view invalidation across replicas if
-            // this presentation projection becomes a strict security boundary.
-            warn!(
-                request_id = %bcs_observability::CurrentRequestId,
-                scope_id = %scope_id,
-                human_actor_id = %human_actor_id,
-                "participant view scope change uses instance-local connection invalidation"
-            );
-        }
         let lease_id = NEXT_SCOPE_CHANGE_LEASE_ID.fetch_add(1, Ordering::Relaxed);
         let mut barriers = self.scope_change_barriers.lock().await;
         if barriers

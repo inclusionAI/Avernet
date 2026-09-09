@@ -482,8 +482,8 @@ async fn scope_change_cancels_socket_when_close_queue_is_full() {
 
 #[tokio::test]
 async fn distributed_deployment_allows_instance_local_scope_change_barrier() {
-    let connections = WorkbenchConnectionRegistry::new()
-        .with_cluster_scope_changes_best_effort(true);
+    let connections = WorkbenchConnectionRegistry::new().with_scope_changes_enabled(false);
+    assert!(format!("{connections:?}").contains("cluster_scope_changes_enabled: false"));
 
     let lease = connections
         .begin_scope_change("session-scoped", "human_target")

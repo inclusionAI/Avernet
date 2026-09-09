@@ -1978,8 +1978,8 @@ impl Default for BcsServerState {
         let bot_use_cases = Arc::new(bot_use_cases);
         let frontend_connections = Arc::new(
             WorkbenchConnectionRegistry::with_bot_query(bot_use_cases.clone())
-                .with_cluster_scope_changes_best_effort(
-                    config
+                .with_scope_changes_enabled(
+                    !config
                         .leader_election
                         .as_ref()
                         .is_some_and(|leader_election| leader_election.enabled),
@@ -3585,8 +3585,8 @@ impl BcsServer {
         let frontend_bot_query: Arc<dyn bcs_service_api::BotQueryService> = bot_use_cases.clone();
         let frontend_connections = Arc::new(
             WorkbenchConnectionRegistry::with_bot_query(frontend_bot_query)
-                .with_cluster_scope_changes_best_effort(
-                    config
+                .with_scope_changes_enabled(
+                    !config
                         .leader_election
                         .as_ref()
                         .is_some_and(|leader_election| leader_election.enabled),
@@ -4370,8 +4370,8 @@ impl BcsServer {
         let bot_runtime_for_session: Arc<dyn bcs_service_api::BotRuntimeConnectionService> =
             Arc::new(bot_runtime_for_session);
         let frontend_connections = Arc::new(
-            WorkbenchConnectionRegistry::new().with_cluster_scope_changes_best_effort(
-                config
+            WorkbenchConnectionRegistry::new().with_scope_changes_enabled(
+                !config
                     .leader_election
                     .as_ref()
                     .is_some_and(|leader_election| leader_election.enabled),
