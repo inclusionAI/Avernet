@@ -81,6 +81,8 @@ export type FlowRunCompletion = {
 
 export type FindFlowRunsOptions = {
   workflowId?: string;
+  /** Permission scope: undefined is unrestricted; an empty list denies all. */
+  allowedWorkflowIds?: string[];
   status?: string;
   statuses?: string[];
   from?: number;
@@ -178,6 +180,14 @@ export class FlowRunRepository {
     const conds: string[] = [];
     const params: unknown[] = [];
     if (options.workflowId) { conds.push("workflow_id = ?"); params.push(options.workflowId); }
+    if (options.allowedWorkflowIds !== undefined) {
+      if (options.allowedWorkflowIds.length === 0) {
+        conds.push("1 = 0");
+      } else {
+        conds.push(`workflow_id IN (${options.allowedWorkflowIds.map(() => "?").join(",")})`);
+        params.push(...options.allowedWorkflowIds);
+      }
+    }
     if (options.statuses?.length) {
       conds.push(`status IN (${options.statuses.map(() => "?").join(",")})`);
       params.push(...options.statuses);

@@ -156,11 +156,15 @@ export function createRunsRouter(
       const botId = (_req.query.botId as string | undefined)?.trim() || undefined;
 
       const viewPerm = _req.isAdmin ? null : await resolveViewPerm(botPermRepo, botOwnerId, botId);
+      const allowedWorkflowIds = viewPerm === null
+        ? undefined
+        : [...viewPerm.viewableIds].filter((id) => viewPerm.restrictedIds.has(id));
 
       // origin_bot_id filtering: botOwnerId/botId also filter runs by their origin bot
       const originFilter = botOwnerId ? { originBotOwnerId: botOwnerId, originBotId: botId } : {};
 
       const countOptions = {
+        allowedWorkflowIds,
         status: statuses.length === 0 ? status : undefined,
         statuses: statuses.length > 0 ? statuses : undefined,
         workflowId,
@@ -176,14 +180,11 @@ export function createRunsRouter(
       // When a status filter is active the breakdown is trivial (all runs share that status),
       // so we only query when unfiltered.
       const statusCounts = !status && statuses.length === 0 && !inputQuery && !query
-        ? await flowRunRepo.countByStatus({ workflowId, from, to, ...originFilter })
+        ? await flowRunRepo.countByStatus(countOptions)
         : undefined;
 
-      // If permission filter is active, fetch more rows to compensate for filtered-out ones
-      const fetchLimit = viewPerm !== null ? Math.min(limit * 5, 200) : limit;
-      let runs = await flowRunRepo.findRuns({ ...countOptions, limit: fetchLimit, offset });
-
-      runs = applyViewPermFilter(runs, viewPerm).slice(0, limit);
+      // Apply the same permission predicate before counting and pagination.
+      const runs = await flowRunRepo.findRuns({ ...countOptions, limit, offset });
 
       res.json({ runs: runs.map(fixDurationMs), total, limit, offset, statusCounts });
     } catch (error) {
