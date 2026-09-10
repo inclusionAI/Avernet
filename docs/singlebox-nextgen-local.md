@@ -58,6 +58,26 @@ The launcher checks the selected root element and `/umi.js`, refusing the Umi
 processes; Linux retains the existing Perl launcher. No authentication policy
 is changed by frontend selection.
 
+## Local login (singlebox only)
+
+Singlebox wires no OAuth provider, so the nextgen login modal has nothing to
+navigate to and `/openapi/v1/auth/user` answers "auth not configured" (the
+provider step is what is missing, not the caller's). The sanctioned local
+identity is the Gateway's `dev_cookie` strategy: it resolves a `staff_id`
+cookie into a signed principal for every forwarded route. `/_dev/login` on the
+Gateway sets those cookies, so logging in is a URL, not a DevTools instruction:
+
+```bash
+# Open in a browser on the SAME host you browse the workbench from
+# (cookie jars are host-scoped and port-agnostic):
+open "http://127.0.0.1:8889/_dev/login?next=8000"
+```
+
+The page redirects back to the workbench with the identity armed. It 404s
+outside `SERVER_ENV` local/dev/test, mirroring the strategy's own gating;
+`?staff_id=`/`?nick_name=` accept only cookie-safe validated values. The ready
+banner prints this URL for the nextgen variant when `GATEWAY_AUTH_MOCK=1`.
+
 ## API contract and verification boundary
 
 Nextgen defaults are configured at the Singlebox composition root:

@@ -39,6 +39,12 @@ print_frontend_ready_banner() {
     echo -e "${GREEN}  FRONTEND READY${NC}"
     echo -e "${CYAN}  Open the workbench:${NC}"
     echo -e "${CYAN}  http://localhost:${FRONTEND_PORT:-8000}/${NC}"
+    if [ "${FRONTEND_VARIANT:-legacy}" = nextgen ] && [ "${GATEWAY_AUTH_MOCK:-0}" = "1" ]; then
+        # nextgen 的登录态来自 gateway dev_cookie 策略的 staff_id cookie；
+        # /_dev/login 是设置它的浏览器入口（仅 local/dev/test 环境存在）。
+        echo -e "${CYAN}  Dev login (set local identity):${NC}"
+        echo -e "${CYAN}  http://localhost:${GATEWAY_PORT:-8889}/_dev/login?next=${FRONTEND_PORT:-8000}${NC}"
+    fi
     echo -e "${GREEN}============================================================${NC}"
     echo ""
 }
