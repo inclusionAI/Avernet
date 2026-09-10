@@ -6,7 +6,7 @@ import { insightApi } from "../../api/insight";
 import type { TCLogBot } from "@avernet/clawweb-shared/web/types";
 import type { AutoRepairGrantView, FailureTaskIndex, ImprovementDetail, ImprovementView } from "../../types/insight";
 import { InsightIcon, EmptyPanel, ErrorPanel, LoadingPanel } from "./InsightUi";
-import { createRequestId, failureClassText, formatDateTime } from "./utils";
+import { createRequestId, failureClassText, formatDateTime, resolveBotName } from "./utils";
 import FailureTaskDrawer from "./FailureTaskDrawer";
 import { AdminExecuteDialog } from "./AdminReviewQueue";
 
@@ -332,14 +332,13 @@ export default function ImprovementItems({
     Boolean(selectedImprovementId) &&
     (detailLoading || loadedDetailId !== selectedImprovementId);
   const activeDetailVerifying = activeDetail ? isVerificationStage(activeDetail) : false;
-  const botNames = new Map(botOptions.map((bot) => [bot.botId, bot.botName]));
 
   const openFailureTask = (improvement: ImprovementDetail, evidence: ImprovementDetail["evidence"][number]) => {
     const task: FailureTaskIndex = {
       sourceDt: "",
       ownerUserId: improvement.botOwnerUserId,
       botId: improvement.botId,
-      botName: botNames.get(improvement.botId) || improvement.botId,
+      botName: resolveBotName(botOptions, improvement.botOwnerUserId, improvement.botId),
       sessionId: evidence.sessionId,
       taskIndex: evidence.taskIndex,
       taskDescription: evidence.taskDescription,
@@ -588,7 +587,7 @@ export default function ImprovementItems({
                       </td>
                       <td className="px-4 py-4">
                         <p className="truncate font-medium text-gray-700">
-                          {botNames.get(item.botId) || item.botId}
+                          {resolveBotName(botOptions, item.botOwnerUserId, item.botId)}
                         </p>
                         <p className="mt-1 truncate font-mono text-[10px] text-gray-400">
                           {item.botId}
@@ -781,8 +780,7 @@ export default function ImprovementItems({
                         {activeDetail.title}
                       </h2>
                       <p className="mt-1 text-xs text-gray-500">
-                        {botNames.get(activeDetail.botId) ||
-                          activeDetail.botId}
+                        {resolveBotName(botOptions, activeDetail.botOwnerUserId, activeDetail.botId)}
                       </p>
                     </div>
                     <div className="mt-5 border-t border-gray-100 pt-4">
