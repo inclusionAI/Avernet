@@ -256,7 +256,7 @@ describe('GroupSidebar', () => {
     expect(onToggleGroupExpanded).not.toHaveBeenCalled();
     const createSessionButton = screen.getByRole('button', { name: '新建会话' });
     const scopeButton = screen.getByRole('button', { name: '会话范围：全部会话' });
-    expect(scopeButton).toHaveClass('h-7', 'w-7');
+    expect(scopeButton).toHaveClass('h-6', 'w-6');
     expect(scopeButton.querySelector('svg.lucide-list-filter')).toBeInTheDocument();
     fireEvent.click(createSessionButton);
     fireEvent.click(screen.getByText('参与者视角'));
@@ -315,9 +315,8 @@ describe('GroupSidebar', () => {
       'shadow-md',
     );
     expect(filterPanel).not.toHaveClass('mx-[18px]', 'mt-2');
-    const sidebarScrollArea = screen
-      .getByLabelText('协作群会话列表：主站群')
-      .parentElement?.parentElement?.parentElement;
+    const sidebarScrollArea =
+      screen.getByLabelText('协作群会话列表：主站群').parentElement?.parentElement?.parentElement;
     expect(sidebarScrollArea).not.toContainElement(filterPanel);
     expect(screen.getByRole('radiogroup', { name: '协作群类型' })).toHaveClass('min-w-0');
     expect(screen.getByRole('radiogroup', { name: '协作群类型' }).querySelector('.flex')).toHaveClass(

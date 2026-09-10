@@ -40,7 +40,7 @@ function renderBotAvatar(name: string, avatarUrl?: string, fallbackAvatar?: stri
     return <img src={avatarUrl} alt={name} className="h-8 w-8 shrink-0 rounded-full object-cover" />;
   }
   return (
-    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-semibold text-background">
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
       {fallbackAvatar || name.charAt(0)}
     </span>
   );

@@ -100,7 +100,7 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
         className="overlay-scrollbar max-h-[calc(100vh-3rem)] max-w-[710px] p-4"
       >
         {authorization ? (
-          <AuthorizationPanel authorization={authorization} creating={creating} onClose={onClose} />
+          <AuthorizationPanel authorization={authorization} />
         ) : (
           <>
             <ModalHeader className="flex-row items-center gap-2.5 space-y-0">

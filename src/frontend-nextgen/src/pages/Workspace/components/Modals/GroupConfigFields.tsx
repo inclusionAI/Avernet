@@ -225,13 +225,11 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
             协作定义 YAML
           </label>
           <YamlCodeEditor value={definitionYaml} onChange={onYamlChange} className="text-sm" />
-          <div className="mt-2 min-h-5 text-xs text-muted-foreground">
-            {yamlSummary.length > 0 ? (
-              <span>已识别顶层 key：{yamlSummary.join(' / ')}</span>
-            ) : (
+          {yamlSummary.length === 0 && (
+            <div className="mt-2 min-h-5 text-xs text-muted-foreground">
               <span>等待输入有效 YAML</span>
-            )}
-          </div>
+            </div>
+          )}
           {bindingSlot}
         </div>
       )}
