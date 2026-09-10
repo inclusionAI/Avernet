@@ -1456,7 +1456,7 @@ export const api = {
     },
 
     /** GET /api/workflows/:wf/history — deploy history list (no spec_json). */
-    getHistory(workflowId: string, limit = 50, releaseOnly = false): Promise<{ workflowId: string; history: DeployHistoryItem[] }> {
+    getHistory(workflowId: string, limit = 50, releaseOnly = false): Promise<{ workflowId: string; history: DeployHistoryItem[]; active: DeployHistoryItem | null }> {
       const query = new URLSearchParams({ limit: String(limit) })
       if (releaseOnly) query.set('releaseOnly', 'true')
       return fetchJson(`${BASE}/workflows/${encodeURIComponent(workflowId)}/history?${query.toString()}`)
