@@ -441,6 +441,7 @@ async fn sqlite_mode_and_scope_update_succeeds_on_legacy_participants_bytes() {
 struct ScopeRaceDb {
     inner: Arc<dyn DbPlugin>,
     sabotage: AtomicBool,
+    fail_transaction: AtomicBool,
 }
 
 #[async_trait]
@@ -457,6 +458,9 @@ impl DbPlugin for ScopeRaceDb {
         &self,
         steps: Vec<DbTransactionStep>,
     ) -> DbResult<Vec<DbTransactionStepResult>> {
+        if self.fail_transaction.swap(false, Ordering::SeqCst) {
+            return Err(DbError::Backend("forced transaction failure".to_string()));
+        }
         if self.sabotage.swap(false, Ordering::SeqCst) {
             self.inner
                 .execute(DbStatement::with_params(
@@ -479,6 +483,7 @@ async fn sqlite_scope_update_race_reports_clean_conflict() {
     let db = Arc::new(ScopeRaceDb {
         inner,
         sabotage: AtomicBool::new(false),
+        fail_transaction: AtomicBool::new(false),
     });
     let repo = MySqlSessionStore::sqlite(db.clone() as Arc<dyn DbPlugin>, "dev".to_string());
     let session = repo
@@ -590,4 +595,193 @@ async fn sqlite_remove_participant_with_event_succeeds_on_legacy_participants_by
             .iter()
             .any(|participant| participant.bot_uuid == "human-1")
     );
+}
+
+#[tokio::test]
+async fn sqlite_add_participant_with_event_race_reports_clean_conflict() {
+    let inner = sqlite_db().await;
+    let db = Arc::new(ScopeRaceDb {
+        inner,
+        sabotage: AtomicBool::new(false),
+        fail_transaction: AtomicBool::new(false),
+    });
+    let repo = MySqlSessionStore::sqlite(db.clone() as Arc<dyn DbPlugin>, "dev".to_string());
+    let session = repo
+        .create(
+            "group-race",
+            NewSessionParams {
+                participants: vec![Participant::bot("bot-1", ParticipantRole::Driver)],
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("create session");
+
+    let stored = repo.get(&session.id).await.expect("stored session");
+    db.sabotage.store(true, Ordering::SeqCst);
+
+    let error = repo
+        .add_participant_with_event(AddSessionParticipantWithEvent {
+            session_id: session.id.clone(),
+            expected_participants: stored.participants.clone(),
+            participant: Participant::bot("bot-2", ParticipantRole::Consultant),
+            event: scope_change_event(&session.id, &session.group_id),
+        })
+        .await
+        .expect_err("concurrent writer must produce a conflict");
+
+    match &error {
+        ServiceError::Conflict(message) => {
+            assert!(
+                !message.contains("references missing row"),
+                "conflict must not leak transaction binding internals: {message}"
+            );
+            assert!(
+                !message.contains("transaction parameter"),
+                "conflict must not leak transaction binding internals: {message}"
+            );
+            assert!(
+                message.contains(&session.id),
+                "conflict should identify the session: {message}"
+            );
+        }
+        other => panic!("expected Conflict, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn sqlite_remove_participant_with_event_race_reports_clean_conflict() {
+    let inner = sqlite_db().await;
+    let db = Arc::new(ScopeRaceDb {
+        inner,
+        sabotage: AtomicBool::new(false),
+        fail_transaction: AtomicBool::new(false),
+    });
+    let repo = MySqlSessionStore::sqlite(db.clone() as Arc<dyn DbPlugin>, "dev".to_string());
+    let session = repo
+        .create(
+            "group-race",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("bot-1", ParticipantRole::Driver),
+                    Participant::human("human-1", ParticipantRole::Observer),
+                ],
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("create session");
+
+    let stored = repo.get(&session.id).await.expect("stored session");
+    db.sabotage.store(true, Ordering::SeqCst);
+
+    let error = repo
+        .remove_participant_with_event(RemoveSessionParticipantWithEvent {
+            session_id: session.id.clone(),
+            expected_participants: stored.participants.clone(),
+            bot_uuid: "human-1".to_string(),
+            event: scope_change_event(&session.id, &session.group_id),
+        })
+        .await
+        .expect_err("concurrent writer must produce a conflict");
+
+    match &error {
+        ServiceError::Conflict(message) => {
+            assert!(
+                !message.contains("references missing row"),
+                "conflict must not leak transaction binding internals: {message}"
+            );
+            assert!(
+                !message.contains("transaction parameter"),
+                "conflict must not leak transaction binding internals: {message}"
+            );
+            assert!(
+                message.contains(&session.id),
+                "conflict should identify the session: {message}"
+            );
+        }
+        other => panic!("expected Conflict, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn sqlite_add_participant_with_event_db_failure_maps_to_internal_error() {
+    let inner = sqlite_db().await;
+    let db = Arc::new(ScopeRaceDb {
+        inner,
+        sabotage: AtomicBool::new(false),
+        fail_transaction: AtomicBool::new(false),
+    });
+    let repo = MySqlSessionStore::sqlite(db.clone() as Arc<dyn DbPlugin>, "dev".to_string());
+    let session = repo
+        .create("group-db-fail", NewSessionParams::default())
+        .await
+        .expect("create session");
+
+    let stored = repo.get(&session.id).await.expect("stored session");
+    db.fail_transaction.store(true, Ordering::SeqCst);
+
+    let error = repo
+        .add_participant_with_event(AddSessionParticipantWithEvent {
+            session_id: session.id.clone(),
+            expected_participants: stored.participants.clone(),
+            participant: Participant::bot("bot-2", ParticipantRole::Consultant),
+            event: scope_change_event(&session.id, &session.group_id),
+        })
+        .await
+        .expect_err("db failure must propagate");
+
+    match &error {
+        ServiceError::InternalError(message) => {
+            assert!(
+                message.contains("forced transaction failure"),
+                "internal error should carry the db failure: {message}"
+            );
+        }
+        other => panic!("expected InternalError, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn sqlite_remove_participant_with_event_db_failure_maps_to_internal_error() {
+    let inner = sqlite_db().await;
+    let db = Arc::new(ScopeRaceDb {
+        inner,
+        sabotage: AtomicBool::new(false),
+        fail_transaction: AtomicBool::new(false),
+    });
+    let repo = MySqlSessionStore::sqlite(db.clone() as Arc<dyn DbPlugin>, "dev".to_string());
+    let session = repo
+        .create(
+            "group-db-fail",
+            NewSessionParams {
+                participants: vec![Participant::human("human-1", ParticipantRole::Observer)],
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("create session");
+
+    let stored = repo.get(&session.id).await.expect("stored session");
+    db.fail_transaction.store(true, Ordering::SeqCst);
+
+    let error = repo
+        .remove_participant_with_event(RemoveSessionParticipantWithEvent {
+            session_id: session.id.clone(),
+            expected_participants: stored.participants.clone(),
+            bot_uuid: "human-1".to_string(),
+            event: scope_change_event(&session.id, &session.group_id),
+        })
+        .await
+        .expect_err("db failure must propagate");
+
+    match &error {
+        ServiceError::InternalError(message) => {
+            assert!(
+                message.contains("forced transaction failure"),
+                "internal error should carry the db failure: {message}"
+            );
+        }
+        other => panic!("expected InternalError, got {other:?}"),
+    }
 }
