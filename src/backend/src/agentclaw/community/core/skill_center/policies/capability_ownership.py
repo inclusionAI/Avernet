@@ -80,6 +80,17 @@ def require_direct_mcp_control_allowed(
     membership walk cannot see them. They remain policy-managed even after a
     Bot excludes them; exclusion/un-exclusion is their only control surface.
     """
+    require_non_platform_mcp(server_code=server_code, platform_default_codes=platform_default_codes)
+
+
+def require_non_platform_mcp(
+    *, server_code: str, platform_default_codes: frozenset[str]
+) -> None:
+    """Policy-owned MCPs cannot be Direct or ordinary-Set controlled.
+
+    Pass the complete applicable engine/template policy, before exclusions:
+    excluding a default changes activation, not ownership.
+    """
     if server_code in platform_default_codes:
         raise SkillSetControlPlaneConflictError(
             "RESOURCE_MANAGED_BY_PLATFORM_POLICY"
@@ -129,4 +140,5 @@ __all__ = [
     "is_set_managed",
     "require_can_join_set",
     "require_direct_mcp_control_allowed",
+    "require_non_platform_mcp",
 ]
