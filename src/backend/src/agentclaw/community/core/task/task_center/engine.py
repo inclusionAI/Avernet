@@ -2607,12 +2607,24 @@ class ExecutionEngine:
             miss = node.run_info.extend_props.get("miss_events")
             gf = node.run_info.extend_props.pop("pending_group_formation", None)
             if gf is not None:
+                # ``pending_group_formation`` 只由动态 dispatcher 的 HIT_MULTI_BOTS
+                # 产生；在动态编排核边界统一其协议和 BCS 协作方式，不能依赖任一
+                # 搜推实现是否正确携带内部标记/默认 collab_mode。静态计划走
+                # ``_prepare_static``，不会进入这里。
+                inherited_protocol = gf.extend_props.get("dynamic_task_node_protocol")
+                inherited_mode = gf.collab_mode
+                gf.extend_props["dynamic_task_node_protocol"] = True
+                gf.collab_mode = "manager_worker"
                 logger.info(
-                    "[task][prepare] task=%s node=%s → group(HIT_MULTI_BOTS collab=%s bot_ids=%s)",
+                    "[task][prepare] task=%s node=%s → group(HIT_MULTI_BOTS collab=%s "
+                    "bot_ids=%s dynamic_task_node_protocol=%s inherited_protocol=%s inherited_collab=%s)",
                     task_id,
                     node.node_id,
                     gf.collab_mode,
                     gf.bot_ids,
+                    gf.extend_props["dynamic_task_node_protocol"],
+                    inherited_protocol,
+                    inherited_mode,
                 )
                 # 群验收需要完整 goal/instruction，而不是只有一句 task_context。
                 gf.extend_props.setdefault(
@@ -2779,12 +2791,14 @@ class ExecutionEngine:
             elif kind == "group":
                 node, gf = payload
                 logger.info(
-                    "[task][drain] task=%s node=%s 拉群开始 collab=%s bot_ids=%s members=%s",
+                    "[task][drain] task=%s node=%s 拉群开始 collab=%s bot_ids=%s members=%s "
+                    "dynamic_task_node_protocol=%s",
                     task_id,
                     node.node_id,
                     gf.collab_mode,
                     list(getattr(gf, "bot_ids", []) or []),
                     list(getattr(gf, "members_info", []) or []),
+                    gf.extend_props.get("dynamic_task_node_protocol"),
                 )
                 # 协作群叶子:注入 loop_task_id 供 form_coop_group 写入群 context,
                 # 供 driver/owner bot 验收后 push 回投 /callback/report 定位执行节点

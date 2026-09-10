@@ -183,6 +183,27 @@ class TestPrepareDispatchStartTime:
         assert root.run_info.start_time is not None
         assert side and side[0][0] == "miss"
 
+    def test_dynamic_group_forces_manager_worker_protocol_at_engine_boundary(self, svc, graph):
+        """动态 HIT_MULTI 不信任上游默认值：统一成 BCS 主从群和新业务协议。"""
+
+        class _UnmarkedGroupDispatcher:
+            async def dispatch(self, nodes):
+                node = nodes[0]
+                node.run_info.run_mode = "coop_group"
+                node.run_info.extend_props["pending_group_formation"] = GroupFormation(
+                    bot_ids=["manager", "worker"], collab_mode="chat"
+                )
+                return [node]
+
+        eng = _engine(svc, dispatcher=_UnmarkedGroupDispatcher())
+        side: list[tuple] = []
+        _run(eng._prepare_into("t1", side))
+
+        assert side and side[0][0] == "group"
+        formation = side[0][2]
+        assert formation.collab_mode == "manager_worker"
+        assert formation.extend_props["dynamic_task_node_protocol"] is True
+
 
 # ===== on_execute =====
 class TestDispatchStartTimeSemantics:

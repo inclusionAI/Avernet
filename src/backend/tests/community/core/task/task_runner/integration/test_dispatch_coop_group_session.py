@@ -272,6 +272,29 @@ def test_form_coop_group_singlebot_2_group_uses_single_business_protocol():
     assert "完整协作群执行输出" not in ctx
 
 
+def test_dynamic_group_rewrites_legacy_business_envelope_to_unified_protocol():
+    """动态群不得因旧指令文本而回退到旧通用上下文。"""
+    bcs = _Bcs()
+    exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
+                       poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver(),
+                       api_base_url="http://b")
+    _run(exe.form_coop_group(GroupFormation(
+        bot_ids=["mgr", "worker"], collab_mode="manager_worker",
+        members_info=[{"bot_id": "mgr", "role": "manager"}, {"bot_id": "worker", "role": "worker"}],
+        extend_props={
+            "manager_bot_id": "mgr", "dynamic_task_node_protocol": True,
+            "loop_task_id": "t1::n1", "task_id": "t1", "task_objective": "O",
+            "task_instruction": "请严格按以下阶段执行，执行、校验、验收、上报均不可跳过。旧协议正文",
+            "acceptances": [{"id": "a1", "description": "d"}],
+        },
+    )))
+
+    context = bcs.created[0].context
+    assert "【业务节点执行协议】" in context
+    assert "旧协议正文" in context
+    assert context.count("[task-execute]") == 1
+
+
 def test_manager_worker_uses_unified_business_protocol_for_one_or_many_bots():
     """单 Bot 退化群和多 Bot 群共享业务协议；差别仅在执行者名单。"""
     contexts = []

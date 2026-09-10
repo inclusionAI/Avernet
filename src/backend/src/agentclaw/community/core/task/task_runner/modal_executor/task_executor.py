@@ -798,11 +798,6 @@ class TaskExecutor(TaskExecutorBbsMixin):
                 mode == "manager_worker"
                 and bool(gf.extend_props.get("dynamic_task_node_protocol"))
                 and not str(_task_instruction).lstrip().startswith("# 接自")
-                # Compatibility for already-persisted/in-flight groups created by
-                # the previous singlebot formatter. New dispatch never produces
-                # this envelope; wrapping it would turn an old protocol into the
-                # node's business instruction and reintroduce duplicate output.
-                and "请严格按以下阶段执行，执行、校验、验收、上报均不可跳过。" not in _task_instruction
             ):
                 # 所有 manager_worker 群（单 bot 的退化群和多 bot 群）使用同一业务协议。
                 # BCS 的 bcs_assign_task/bcs_task_complete 系统指令不在此重复，避免业务 prompt
