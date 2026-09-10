@@ -864,7 +864,12 @@ _FACTORY_SNAPSHOT_BODY = {
         "image": "reg.antgroup-inc.cn/aixcoding/arca:20260901140138",
         "resource_spec": {"cpu": "4", "memory": "8g", "disk": "50"},
         "envs": {"AIX_SKIP_DAEMON": "false"},
-        "capabilities": {"channel_management": False},
+        # A service-capable factory template must allow BCN provider join
+        # (the direct-create gate and the BCN registration surface agree).
+        "capabilities": {
+            "channel_management": False,
+            "bcn": {"join_as_provider": True},
+        },
         "bot_template_config": {"id": 2800006},
         "custom_field_values": {"field_a": "value_a"},
     },

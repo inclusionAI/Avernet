@@ -14,6 +14,8 @@ import uuid
 from typing import Any, Dict, Mapping, TYPE_CHECKING
 
 from agentclaw.community.core.bot_management.capabilities import (
+    can_join_bcn_as_provider,
+    has_declared_capabilities,
     is_template_factory_config,
 )
 from agentclaw.community.core.bot_management.errors import (
@@ -231,6 +233,26 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
 
         template = engine_properties["template_config"]
         if self._is_factory_snapshot(template):
+            if bot_type == "service":
+                # 直接创建即服务要求"能直建"与"能成为 BCN provider"同面：
+                # 注册判定（BotService._should_register_bcn_provider）对工厂快照
+                # 以 capabilities 为唯一事实源，无声明时仅 legacy 桶
+                # （personalCoding / normalCC）覆盖 claude_code。这里前置拒绝
+                # "可创建但注册不了 BCN"的组合，避免静默产出没有 provider 绑定
+                # 的 service bot——不支持的组合明确 409 而不是半支持。
+                if has_declared_capabilities(template):
+                    if not can_join_bcn_as_provider(template):
+                        raise BotCombinationUnsupportedError(
+                            "coding factory template declares capabilities "
+                            "without BCN provider join; it cannot be created "
+                            "as a service bot"
+                        )
+                elif declarative_type not in ("personalCoding", "normalCC"):
+                    raise BotCombinationUnsupportedError(
+                        "coding factory template without declared "
+                        "capabilities must be personalCoding or normalCC to "
+                        "be created as a service bot"
+                    )
             return self._prepare_factory_snapshot(
                 declarative_type=declarative_type,
                 template=template,

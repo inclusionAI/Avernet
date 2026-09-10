@@ -734,19 +734,119 @@ def test_factory_snapshot_keeps_factory_marker_keys_in_public_mode() -> None:
 
 
 def test_factory_snapshot_gates_match_application_coding() -> None:
-    props = {"template_type": "architect", "template_config": dict(_FACTORY_SNAPSHOT)}
+    # The stock snapshot declares capabilities that do NOT include BCN
+    # provider join, so a direct service create must be refused for it —
+    # the allowed surface has to match the BCN registration surface.
+    bcn_capable = dict(_FACTORY_SNAPSHOT)
+    bcn_capable["capabilities"] = {"bcn": {"join_as_provider": True}}
+    props = {"template_type": "architect", "template_config": bcn_capable}
     with pytest.raises(BotCombinationUnsupportedError):
         _strategy_prepare("claude_code", props, deployment_mode="local")
     with pytest.raises(BotCombinationUnsupportedError):
         _strategy_prepare("openclaw", props)
-    # Factory snapshots may build service bots directly (the create is one
-    # BaaS call in the service shape); the hand-written path stays the one
-    # that refuses — see test_handcrafted_service_create_refused.
+    # Factory snapshots may build service bots directly when the template
+    # declares BCN provider capability (one BaaS call in the service shape);
+    # the hand-written path stays the one that refuses — see
+    # test_handcrafted_service_create_refused.
     prepared = _strategy_prepare("claude_code", props, bot_type="service")
     assert prepared.template_type == "architect"
     prepared = _strategy_prepare("claude_code", props, space_kind="team")
     assert prepared.template_type == "architect"
-    assert prepared.template_config == _FACTORY_SNAPSHOT
+
+
+@pytest.mark.unit
+class TestFactorySnapshotServiceBcnGate:
+    """Direct service creates must stay within the BCN registration surface.
+
+    allowed surface = registered-capable combos:
+    * capabilities declared and BCN provider join allowed; or
+    * no capabilities and the legacy registration bucket (personalCoding /
+      normalCC) covers the template.
+    """
+
+    def test_capabilities_denying_bcn_refuse_service_create(self) -> None:
+        with pytest.raises(BotCombinationUnsupportedError):
+            _strategy_prepare(
+                "claude_code",
+                {
+                    "template_type": "architect",
+                    "template_config": dict(_FACTORY_SNAPSHOT),
+                },
+                bot_type="service",
+            )
+
+    def test_capabilities_without_bcn_node_refuse_service_create(self) -> None:
+        snapshot = dict(_FACTORY_SNAPSHOT)
+        snapshot["capabilities"] = {"channel_management": True}
+        with pytest.raises(BotCombinationUnsupportedError):
+            _strategy_prepare(
+                "claude_code",
+                {"template_type": "coship_new", "template_config": snapshot},
+                bot_type="service",
+            )
+
+    def test_flat_bcn_capability_allows_service_create(self) -> None:
+        snapshot = dict(_FACTORY_SNAPSHOT)
+        snapshot["capabilities"] = {"enable_bcn_network": True}
+        prepared = _strategy_prepare(
+            "claude_code",
+            {"template_type": "coship_new", "template_config": snapshot},
+            bot_type="service",
+        )
+        assert prepared.template_type == "coship_new"
+
+    def test_capabilities_declared_bcn_false_refuse_service_create(self) -> None:
+        snapshot = dict(_FACTORY_SNAPSHOT)
+        snapshot["capabilities"] = {
+            "bcn": {"join_as_provider": False},
+            "channel_management": False,
+        }
+        with pytest.raises(BotCombinationUnsupportedError):
+            _strategy_prepare(
+                "claude_code",
+                {"template_type": "architect", "template_config": snapshot},
+                bot_type="service",
+            )
+
+    def test_no_capabilities_personal_coding_allows_service_create(self) -> None:
+        # personalCoding is covered by the legacy BCN registration bucket.
+        snapshot = dict(_FACTORY_SNAPSHOT)
+        snapshot.pop("capabilities")
+        prepared = _strategy_prepare(
+            "claude_code",
+            {"template_type": "personalCoding", "template_config": snapshot},
+            bot_type="service",
+        )
+        assert prepared.template_type == "personalCoding"
+
+    def test_no_capabilities_normal_cc_allows_service_create(self) -> None:
+        snapshot = dict(_FACTORY_SNAPSHOT)
+        snapshot.pop("capabilities")
+        prepared = _strategy_prepare(
+            "claude_code",
+            {"template_type": "normalCC", "template_config": snapshot},
+            bot_type="service",
+        )
+        assert prepared.template_type == "normalCC"
+
+    def test_no_capabilities_foreign_template_refuses_service_create(self) -> None:
+        snapshot = dict(_FACTORY_SNAPSHOT)
+        snapshot.pop("capabilities")
+        with pytest.raises(BotCombinationUnsupportedError):
+            _strategy_prepare(
+                "claude_code",
+                {"template_type": "architect", "template_config": snapshot},
+                bot_type="service",
+            )
+
+    def test_bcn_gate_only_binds_service_not_personal(self) -> None:
+        # A template that cannot join BCN may still create a personal bot.
+        prepared = _strategy_prepare(
+            "claude_code",
+            {"template_type": "architect", "template_config": dict(_FACTORY_SNAPSHOT)},
+            bot_type="personal",
+        )
+        assert prepared.template_type == "architect"
 
 
 def test_legacy_fold_supplies_template_type_for_factory_snapshot() -> None:
