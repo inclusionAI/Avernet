@@ -20,7 +20,11 @@ from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterStoreConfig,
 )
 from agentclaw.community.core.skill_center.draft_content import DraftContentStoreConfig
-from agentclaw.community.di.config import HttpClientPoolConfig, TaskQueueConfig
+from agentclaw.community.di.config import (
+    HttpClientPoolConfig,
+    McpRuntimeCredentialsConfig,
+    TaskQueueConfig,
+)
 
 from agentclaw.community.di.modules.access_module import AccessModule
 from agentclaw.community.di.modules.aicoding_module import AICodingModule
@@ -51,6 +55,9 @@ from agentclaw.community.di.modules.http_client_module import HttpClientModule
 from agentclaw.community.di.modules.identity_module import IdentityModule
 from agentclaw.community.di.modules.installation_read_config_module import (
     InstallationReadConfigModule,
+)
+from agentclaw.community.di.modules.mcp_runtime_credentials_config_module import (
+    McpRuntimeCredentialsConfigModule,
 )
 from agentclaw.community.di.modules.mcp_module import McpModule
 from agentclaw.community.di.modules.quality_module import QualityModule
@@ -113,6 +120,7 @@ def build_injector(
     """
     modules: list[Module] = [
         ConfigModule(),
+        McpRuntimeCredentialsConfigModule(),
         InstallationReadConfigModule(),
         SkillCenterModule(),
         SkillCenterGroup4Module(),
@@ -190,6 +198,7 @@ def build_injector(
     _app_injector.get(TaskQueueConfig)
     _app_injector.get(CanonicalCenterStoreConfig)
     _app_injector.get(DraftContentStoreConfig)
+    _app_injector.get(McpRuntimeCredentialsConfig)
 
     return _app_injector
 

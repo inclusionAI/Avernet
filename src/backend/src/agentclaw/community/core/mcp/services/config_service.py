@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from threading import Lock
 from typing import Any, Optional
 
 from injector import inject
@@ -9,8 +10,10 @@ from injector import inject
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.bot import UserMCPConfigRepository
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
+from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.mcp.mcp_config_service_protocol import MCPConfigServiceProtocol
+from agentclaw.community.di.config import McpRuntimeCredentialsConfig
 
 logger = get_logger()
 
@@ -28,10 +31,16 @@ class MCPConfigService(MCPConfigServiceProtocol):
         user_mcp_config_repo: UserMCPConfigRepository,
         mcp_center: MCPCenterPlugin,
         bot_repo: BotRepository,
+        mcp_runtime_credentials: McpRuntimeCredentialsConfig,
+        secret_resolver: SecretResolver,
     ) -> None:
         self.user_mcp_config_repo = user_mcp_config_repo
         self.mcp_center = mcp_center
         self._bot_repo = bot_repo
+        self._mcp_runtime_credentials = mcp_runtime_credentials
+        self._secret_resolver = secret_resolver
+        self._secret_values: dict[str, str] = {}
+        self._secret_values_lock = Lock()
 
     # ------------------------------------------------------------------
     # Public API
@@ -243,4 +252,48 @@ class MCPConfigService(MCPConfigServiceProtocol):
         # 合并策略：默认 headers 作为基底，用户 headers 覆盖同名键。
         merged_headers = {**config_headers, **user_headers}
 
+        # Platform-managed headers are the final authority.  Header names are
+        # case-insensitive, so discard every differently-cased user/default key
+        # before inserting the configured canonical spelling.
+        for header_name, value in self._managed_headers(server_code).items():
+            merged_headers = {
+                key: existing
+                for key, existing in merged_headers.items()
+                if key.lower() != header_name.lower()
+            }
+            merged_headers[header_name] = value
+
         return _api_key, merged_headers, _endpoint_env, _transport_protocol
+
+    def _managed_headers(self, server_code: str) -> dict[str, str]:
+        bindings = self._mcp_runtime_credentials.header_secrets.get(server_code, {})
+        return {
+            header_name: self._resolve_secret_value(
+                secret_name=secret_name,
+                server_code=server_code,
+                header_name=header_name,
+            )
+            for header_name, secret_name in bindings.items()
+        }
+
+    def _resolve_secret_value(
+        self, *, secret_name: str, server_code: str, header_name: str
+    ) -> str:
+        # ``build_mcp_sync_payload`` runs in worker threads and may fan out
+        # several MCPs concurrently.  Holding the lock through the first lookup
+        # guarantees one successful backend read per secret and process.
+        with self._secret_values_lock:
+            cached = self._secret_values.get(secret_name)
+            if cached is not None:
+                return cached
+
+            secret = self._secret_resolver.get_secret(secret_name)
+            value = getattr(secret, "secret_value", None) if secret is not None else None
+            if not isinstance(value, str) or not value.strip():
+                raise RuntimeError(
+                    "managed MCP Header secret is unavailable: "
+                    f"server_code={server_code!r}, header={header_name!r}, "
+                    f"secret_name={secret_name!r}"
+                )
+            self._secret_values[secret_name] = value
+            return value
