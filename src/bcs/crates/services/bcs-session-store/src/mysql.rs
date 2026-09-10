@@ -10,8 +10,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_db_api::{
-    DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbTransactionParam, DbTransactionStep, DbValue,
-    db_get_column, db_get_column_opt,
+    DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbTransactionParam, DbTransactionStep,
+    DbValue, db_get_column, db_get_column_opt,
 };
 use bcs_event_store::EventAppendTransactionPlan;
 use tracing::info;
@@ -97,6 +97,41 @@ impl MySqlSessionStore {
             self.flavor.unix_ts("s.gmt_create"),
             self.flavor.unix_ts("s.gmt_modified"),
         )
+    }
+
+    /// Internal: load a Session together with the raw stored `participants`
+    /// TEXT bytes in a single read.
+    ///
+    /// The raw bytes are the CAS identity for scope-update optimistic locking.
+    /// Comparing re-serialized JSON against stored TEXT breaks on schema
+    /// evolution: a row written before a `Participant` field existed parses
+    /// equal (serde defaults) but serializes differently, so a re-serialized
+    /// expectation never matches the stored bytes and the CAS can never win.
+    async fn load_with_raw_participants(
+        &self,
+        session_id: &str,
+    ) -> ServiceResult<Option<(Session, String)>> {
+        let select_cols = self.select_cols();
+        let sql = format!(
+            "SELECT {select_cols} FROM bcs_group_sessions \
+             WHERE env = ? AND session_id = ? LIMIT 1"
+        );
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                &sql,
+                vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
+            ))
+            .await
+            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
+        let Some(row) = rows.into_iter().next() else {
+            return Ok(None);
+        };
+        let raw = db_get_column_opt::<String>(&row, "participants")
+            .map_err(|e| ServiceError::InternalError(format!("participants: {e}")))?
+            .unwrap_or_default();
+        let session = row_to_session(&row)?;
+        Ok(Some((session, raw)))
     }
 
     /// Internal: execute the INSERT and return the constructed Session on success.
@@ -244,6 +279,18 @@ fn transaction_lock_suffix(flavor: DbSqlFlavor) -> &'static str {
         DbSqlFlavor::Mysql => " FOR UPDATE",
         DbSqlFlavor::Sqlite => "",
     }
+}
+
+/// Whether a transaction failed because its CAS lock query (step 0) matched no
+/// row, so a later step could not resolve its `query_result(0, 0, ..)` binding.
+/// This means the guarded row changed or vanished concurrently — a retryable
+/// conflict, not an internal error. Mirrors the bcs-group-store helper.
+fn transaction_lock_row_is_missing(error: &DbError) -> bool {
+    matches!(
+        error,
+        DbError::InvalidInput(message)
+            if message.contains("references missing row 0 from step 0")
+    )
 }
 
 /// Read a TEXT column from a row and parse it as JSON.
@@ -1809,12 +1856,10 @@ impl SessionRepoPort for MySqlSessionStore {
         mode: Option<ParticipantMode>,
         message_view_scope: MessageViewScope,
     ) -> ServiceResult<Session> {
-        let mut current = self
-            .get(session_id)
-            .await
+        let (mut current, stored_participants_json) = self
+            .load_with_raw_participants(session_id)
+            .await?
             .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
-        let expected_participants_json = serde_json::to_string(&current.participants)
-            .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
         let participant = current
             .participants
             .iter_mut()
@@ -1851,7 +1896,7 @@ impl SessionRepoPort for MySqlSessionStore {
                     DbValue::from(participants_json.as_str()),
                     DbValue::from(self.env.as_str()),
                     DbValue::from(session_id),
-                    DbValue::from(expected_participants_json.as_str()),
+                    DbValue::from(stored_participants_json.as_str()),
                 ],
             ))
             .await
@@ -1868,9 +1913,9 @@ impl SessionRepoPort for MySqlSessionStore {
         &self,
         command: UpdateSessionParticipantMessageViewScopeWithEvent,
     ) -> ServiceResult<Session> {
-        let mut candidate = self
-            .get(&command.session_id)
-            .await
+        let (mut candidate, stored_participants_json) = self
+            .load_with_raw_participants(&command.session_id)
+            .await?
             .ok_or_else(|| ServiceError::SessionNotFound(command.session_id.clone()))?;
         if serde_json::to_value(&candidate.participants).ok()
             != serde_json::to_value(&command.expected_participants).ok()
@@ -1910,8 +1955,6 @@ impl SessionRepoPort for MySqlSessionStore {
         candidate.updated_at = current_millis();
         validate_session_event_scope(&candidate, &command.event)?;
 
-        let expected_json = serde_json::to_string(&command.expected_participants)
-            .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
         let participants_json = serde_json::to_string(&candidate.participants)
             .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
         let lock_sql = format!(
@@ -1930,7 +1973,7 @@ impl SessionRepoPort for MySqlSessionStore {
                 vec![
                     DbValue::from(self.env.as_str()),
                     DbValue::from(command.session_id.as_str()),
-                    DbValue::from(expected_json.as_str()),
+                    DbValue::from(stored_participants_json.as_str()),
                 ],
             )),
             DbTransactionStep::Execute(DbStatement::with_transaction_params(
@@ -1939,7 +1982,7 @@ impl SessionRepoPort for MySqlSessionStore {
                     DbTransactionParam::value(participants_json.as_str()),
                     DbTransactionParam::value(self.env.as_str()),
                     DbTransactionParam::query_result(0, 0, "session_id"),
-                    DbTransactionParam::value(expected_json.as_str()),
+                    DbTransactionParam::value(stored_participants_json.as_str()),
                 ],
             )),
         ];
@@ -1953,10 +1996,16 @@ impl SessionRepoPort for MySqlSessionStore {
         })?;
         steps.extend(event_plan.steps);
         self.db.transaction(steps).await.map_err(|error| {
-            ServiceError::Conflict(format!(
-                "Session '{}' changed during participant scope update: {error}",
-                command.session_id
-            ))
+            if transaction_lock_row_is_missing(&error) {
+                // The CAS lock row vanished: a concurrent writer changed or
+                // deleted the session between the pre-check read and the lock.
+                ServiceError::Conflict(format!(
+                    "Session '{}' changed during participant scope update",
+                    command.session_id
+                ))
+            } else {
+                ServiceError::InternalError(format!("session db: {error}"))
+            }
         })?;
         Ok(candidate)
     }
