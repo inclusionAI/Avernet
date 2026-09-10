@@ -415,6 +415,16 @@ class SourceCredentialBinding:
                 "credential; an object store source needs one of type "
                 f"{CredentialType.OSS_AKSK.value!r}"
             )
+        if not row.region:
+            # Required at PUT since signature version 4 landed, so only a row
+            # written before that rule can reach here without one. Refused
+            # here, before any client is built: the store cannot sign a
+            # request without a region, and the entry fails naming the
+            # credential to rotate rather than a bucket to inspect.
+            raise CredentialError(
+                f"credential {self.name!r} has no region; an object store "
+                "source needs one, so rotate the credential with its region"
+            )
         return ObjectStoreTarget(
             endpoint=row.endpoint or "",
             bucket=bucket,
@@ -422,11 +432,7 @@ class SourceCredentialBinding:
             secret_access_key=self._service._vault.decrypt_or_passthrough(
                 row.secret_ciphertext
             ),
-            # Required at PUT since signature version 4 landed; a row written
-            # before that rule carries NULL, and the empty string is how the
-            # store client learns to blame the credential rather than the
-            # bucket.
-            region=row.region or "",
+            region=row.region,
         )
 
     def reauthorize(self, url) -> None:

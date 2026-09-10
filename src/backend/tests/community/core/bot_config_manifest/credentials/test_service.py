@@ -36,6 +36,7 @@ from agentclaw.community.core.repository.implementations.bot.source_credential i
 )
 # Side effect: registers the model on Base.metadata for create_all.
 from agentclaw.community.core.bot_config_manifest.credentials.models import (  # noqa: F401
+    CredentialType,
     SourceCredentialModel,
 )
 from tests.community.core.bot_config_manifest.credentials.repo_helper import (
@@ -460,6 +461,28 @@ def test_an_aksk_binding_hands_over_a_target_and_never_a_header(service):
     assert target.bucket == "bkt"
     assert target.access_key_id == _AK
     assert target.secret_access_key == _SK  # reaches the client, nothing else
+
+
+def test_a_row_stored_before_region_was_required_is_refused_at_binding(service):
+    """A legacy row with no region cannot be used: signature version 4 cannot
+    sign without one. It is refused here, before any store client is built,
+    so the entry fails naming the credential to rotate rather than reaching
+    the SDK and being reported as a store-side refusal. Written straight to
+    the repository because the service itself no longer accepts such a row."""
+    service._repository.upsert(
+        name="legacy-aksk",
+        credential_type=CredentialType.OSS_AKSK,
+        header_name="",
+        access_key_id=_AK,
+        endpoint=_ENDPOINT,
+        region=None,
+        allowed_prefixes=[],
+        secret_ciphertext=_SK,
+        owner_app_id=OWNER_APP,
+        modifier="alice",
+    )
+    with pytest.raises(CredentialError, match="has no region"):
+        service.binding(name="legacy-aksk").object_store_target("bkt")
 
 
 def test_the_target_redacts_the_secret_when_it_is_printed(service):
