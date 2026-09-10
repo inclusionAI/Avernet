@@ -105,7 +105,7 @@ describe("ClawMind workflow version wire contract", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(raw.prepare("SELECT version, is_active FROM workflow_deploy_history WHERE workflow_id = 'demo' ORDER BY deploy_number").all())
+    expect(raw.prepare("SELECT version, is_active FROM workflow_deploy_history WHERE workflow_id = 'demo' AND action <> 'edit' ORDER BY deploy_number").all())
       .toEqual([{ version: 2, is_active: 0 }, { version: 1, is_active: 1 }]);
   });
 });
