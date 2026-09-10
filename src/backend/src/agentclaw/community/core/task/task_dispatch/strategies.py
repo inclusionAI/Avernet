@@ -637,6 +637,7 @@ def _build_manager_worker_group(bot_ids: list[str]) -> GroupFormation:
         collab_mode="manager_worker",
         group_name="任务主从协作群",
         members_info=members_info,
+        extend_props={"dynamic_task_node_protocol": True},
     )
 
 
@@ -856,7 +857,7 @@ def _parse_search_result(run: dict) -> SearchResult:
             collab_mode=str(data.get("collab_mode") or "chat"),
             group_name=data.get("group_name"),
             members_info=data.get("members_info"),
-            extend_props={},
+            extend_props={"dynamic_task_node_protocol": True},
         )
         def_yaml = data.get("definition_yaml")
         if def_yaml:

@@ -2792,6 +2792,25 @@ class ExecutionEngine:
                 gf.extend_props.setdefault(
                     "loop_task_id", f"{node.task_id}::{node.node_id}"
                 )
+                if gf.extend_props.get("dynamic_task_node_protocol"):
+                    # 只作用于动态规划的 manager_worker 群。静态计划、YAML 和
+                    # BBS 链路不带此标记，维持各自既有的群上下文和执行语义。
+                    group_context = self.build(node.task_id, node.node_id)
+                    gf.extend_props.setdefault("task_id", node.task_id)
+                    gf.extend_props.setdefault("task_objective", node.task_spec.goal.objective)
+                    gf.extend_props.setdefault(
+                        "task_instruction", node.task_spec.metadata.instruction
+                    )
+                    gf.extend_props.setdefault(
+                        "acceptances",
+                        [
+                            {"id": item.id, "description": item.description}
+                            for item in node.task_spec.goal.acceptances
+                        ],
+                    )
+                    gf.extend_props.setdefault(
+                        "upstream_outputs", group_context.get("sibling_outputs") or {}
+                    )
                 try:
                     gid = await self._runner.form_coop_group(gf)
                     logger.info(
