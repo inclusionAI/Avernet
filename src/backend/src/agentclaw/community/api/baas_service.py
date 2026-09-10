@@ -14,7 +14,7 @@ imports them so there's exactly one source of truth.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Dict, Optional, Protocol, runtime_checkable
 
 from agentclaw.community.core.service_bot.services.baas_service import (
     BotWsConnectionInfoResponse,
@@ -27,9 +27,27 @@ from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.kernel.device_dto import OutBoundOperationRule
 
 
+if TYPE_CHECKING:
+    from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+
+
 @runtime_checkable
 class BaasServiceProtocol(Protocol):
     """BaaS-layer service: bot publish / restart / destroy / inspection."""
+
+    def resolve_token_outbound_device_id(
+        self, binding: DeviceBindingRecord | None,
+    ) -> str:
+        """Resolve an authorized ACTIVE binding to a validated token append target.
+
+        device_provider=baas uses a unique current device lookup (3s timeout);
+        arca uses device_props.sandbox_id directly, retaining its ASCII numeric
+        @template suffix and requiring ARCA-SANDBOX-. No template lookup occurs.
+        BaasOutboundTargetError.reason is binding_unavailable,
+        unsupported_provider, target_not_found, target_ambiguous or invalid_target.
+        Query transport errors propagate unchanged.
+        """
+        ...
 
     def post_bots_api(
         self,
