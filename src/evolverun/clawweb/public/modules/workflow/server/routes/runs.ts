@@ -130,6 +130,7 @@ export function createRunsRouter(
         .slice(0, 10);
       const workflowId = _req.query.workflowId as string | undefined;
       const inputQuery = (_req.query.inputQuery as string | undefined)?.trim() || undefined;
+      const query = typeof _req.query.query === "string" ? _req.query.query.trim() || undefined : undefined;
       const limit = Math.min(parseInt(_req.query.limit as string, 10) || 30, 2000);
       const offset = parseInt(_req.query.offset as string, 10) || 0;
       // from/to accept ISO strings (e.g. "2026-07-22T08:41:14.023Z", what the frontend sends)
@@ -166,6 +167,7 @@ export function createRunsRouter(
         from,
         to,
         inputQuery,
+        query,
         ...originFilter,
       };
       const total = await flowRunRepo.countRuns(countOptions);
@@ -173,7 +175,7 @@ export function createRunsRouter(
       // Get status breakdown for accurate success-rate calculation (avoids pagination skew).
       // When a status filter is active the breakdown is trivial (all runs share that status),
       // so we only query when unfiltered.
-      const statusCounts = !status && statuses.length === 0 && !inputQuery
+      const statusCounts = !status && statuses.length === 0 && !inputQuery && !query
         ? await flowRunRepo.countByStatus({ workflowId, from, to, ...originFilter })
         : undefined;
 
