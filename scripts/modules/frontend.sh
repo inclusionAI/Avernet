@@ -3,6 +3,35 @@
 [[ -n "${_FRONTEND_SH_LOADED:-}" ]] && return 0
 _FRONTEND_SH_LOADED=1
 
+# Explicit composition-root choice; never accept an arbitrary source path.
+frontend_select_variant() {
+    case "${FRONTEND_VARIANT:-legacy}" in
+        legacy)
+            FRONTEND_DIR="${PROJECT_ROOT}/src/frontend"
+            FRONTEND_DEFAULT_SCRIPT="devs:local:oss"
+            FRONTEND_ROOT_ID="root-master"
+            ;;
+        nextgen)
+            FRONTEND_DIR="${PROJECT_ROOT}/src/frontend-nextgen"
+            FRONTEND_DEFAULT_SCRIPT="dev:local"
+            FRONTEND_ROOT_ID="root"
+            ;;
+        *) printf '%s\n' 'FRONTEND_VARIANT must be legacy or nextgen' >&2; return 1 ;;
+    esac
+}
+
+# Bind the public frontend to the Singlebox Gateway, not the exported
+# localhost:8888 placeholder (which is Backend, not Gateway). Other optional
+# upstreams remain explicit operator settings; never invent proxy services.
+frontend_configure_upstreams() {
+    [ "${FRONTEND_VARIANT:-legacy}" = nextgen ] || return 0
+    export TEAMCLAW_GW_BASE="${TEAMCLAW_GW_BASE:-http://127.0.0.1:${GATEWAY_PORT:-8889}}"
+    export TEAMCLAW_ADMIN_BASE="${TEAMCLAW_ADMIN_BASE:-${TEAMCLAW_GW_BASE}}"
+    export TASK_ENGINE_UPSTREAM="${TASK_ENGINE_UPSTREAM:-${TEAMCLAW_GW_BASE}}"
+    export BCS_ENDPOINT_PRE="${BCS_ENDPOINT_PRE:-http://127.0.0.1:${BCS_PORT:-21000}}"
+    export BCS_ENDPOINT_PROD="${BCS_ENDPOINT_PROD:-http://127.0.0.1:${BCS_PORT:-21000}}"
+}
+
 # Service-specific constants
 FRONTEND_LOG="${LOG_DIR}/frontend.log"
 # 前端 dev server 端口（umi 读 PORT 环境变量）。默认 8000，可用 FRONTEND_PORT 覆盖；
@@ -67,10 +96,11 @@ frontend_deps_ready() {
     (
         cd "${FRONTEND_DIR}" &&
             node -e '
-                for (const pkg of ["@aix-chat/adapters", "@aix-chat/core", "@aix-chat/ui"]) {
+                const scope = process.argv[1] === "nextgen" ? "@tc-chat" : "@aix-chat";
+                for (const pkg of ["adapters", "core", "ui"].map(name => `${scope}/${name}`)) {
                     require.resolve(`${pkg}/package.json`);
                 }
-            '
+            ' "${FRONTEND_VARIANT:-legacy}"
     ) >/dev/null 2>&1
 }
 
@@ -114,7 +144,8 @@ frontend_start() {
     frontend_setup || return 1
 
     cd "${FRONTEND_DIR}"
-    local frontend_script="${FRONTEND_DEV_SCRIPT:-devs:local:oss}"
+    frontend_configure_upstreams
+    local frontend_script="${FRONTEND_DEV_SCRIPT:-${FRONTEND_DEFAULT_SCRIPT:-devs:local:oss}}"
 
     stop_port_processes_if_owned "${FRONTEND_PORT}" "${FRONTEND_DIR}" "existing frontend"
     if port_is_listening "${FRONTEND_PORT}"; then
@@ -171,7 +202,7 @@ frontend_start() {
 frontend_http_ready() {
     local html
     html="$(curl --noproxy '*' --connect-timeout 1 --max-time 2 -fsS "http://127.0.0.1:${FRONTEND_PORT}/" 2>/dev/null)" || return 1
-    printf '%s' "$html" | grep -q 'id="root-master"' || return 1
+    printf '%s' "$html" | grep -Fq "id=\"${FRONTEND_ROOT_ID:-root-master}\"" || return 1
     printf '%s' "$html" | grep -q 'src="/umi.js"' || return 1
     if printf '%s' "$html" | grep -qi 'Bundling'; then
         return 1
@@ -249,5 +280,5 @@ frontend_prereqs() {
 }
 
 frontend_help() {
-    echo "frontend - Web UI workbench (port ${FRONTEND_PORT})"
+    echo "frontend - Web UI workbench (port ${FRONTEND_PORT}; FRONTEND_VARIANT=legacy|nextgen)"
 }

@@ -167,6 +167,7 @@ source "${SCRIPT_DIR}/modules/engine.sh"
 source "${SCRIPT_DIR}/modules/baas.sh"
 source "${SCRIPT_DIR}/modules/backend.sh"
 source "${SCRIPT_DIR}/modules/frontend.sh"
+frontend_select_variant || exit 1
 source "${SCRIPT_DIR}/modules/gateway.sh"
 source "${SCRIPT_DIR}/modules/bcs.sh"
 source "${SCRIPT_DIR}/modules/bcsfuse.sh"
