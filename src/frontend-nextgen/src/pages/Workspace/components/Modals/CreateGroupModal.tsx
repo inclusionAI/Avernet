@@ -214,7 +214,7 @@ export function CreateGroupModal({
         closeLabel="关闭发起协作弹窗"
         className="min-w-0 gap-0 overflow-hidden p-0"
       >
-        <CreateGroupHeader activeIdentity={activeIdentity} activeIdentityDisplayName={activeIdentityDisplayName} />
+        <CreateGroupHeader />
 
         <div className="flex min-h-0 min-w-0 max-w-full overflow-x-hidden">
           <div

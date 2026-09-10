@@ -2,6 +2,7 @@ import type { DeliveryPolicy, GroupView, IdentityView, SessionView } from '@/dom
 import type { DingTalkBindingState } from '@/services/workspace/channelBindingService';
 import type { PolicyResult } from '@/services/workspace/groupService';
 import type { DomainResult } from '@/services/workspace/identityService';
+import { useEffect } from 'react';
 import type { GroupPanelKind } from './GroupHeader';
 import type { GroupDingTalkConfig } from './ManagePanel/DingTalkConfigPanel';
 import { GroupManagePanel } from './ManagePanel/GroupManagePanel';
@@ -55,15 +56,38 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
     onClose,
   } = props;
 
+  // 点击面板外部自动收起：监听 pointerdown，命中面板本体、面板开关按钮（data-manage-panel-trigger）
+  // 或浮层（菜单/弹窗，避免侧栏「…」菜单打开面板时误关）之外的区域即关闭。
+  useEffect(() => {
+    if (activePanel !== 'manage' && activePanel !== 'sessionManage') return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (!target?.closest) return;
+      if (
+        target.closest('[data-manage-panel="true"]') ||
+        target.closest('[data-manage-panel-trigger]') ||
+        target.closest('[role="dialog"], [role="menu"], [role="alertdialog"]')
+      ) {
+        return;
+      }
+      onClose();
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [activePanel, onClose]);
+
   if (!group) return null;
 
   // 不再渲染全屏点击层:fixed inset-0 的 backdrop 会盖在侧栏与聊天区之上,拦截 pointer/touch,
   // 导致群列表与会话框无法上下滚动。面板改为与 members 面板一致的纯 inline 侧栏,
-  // 关闭由 ManagePanelHeader 的 X 按钮 / GroupHeader 齿轮 toggle 承担。
+  // 关闭由 ManagePanelHeader 的 X 按钮 / GroupHeader 齿轮 toggle / 点击面板外部（上方 effect）承担。
   return (
     <>
       {activePanel === 'manage' ? (
-        <div className="relative z-30 flex w-[min(380px,36vw)] max-w-[36vw] shrink-0 border-l border-border">
+        <div
+          data-manage-panel="true"
+          className="relative z-30 flex w-[min(380px,36vw)] max-w-[36vw] shrink-0 border-l border-border"
+        >
           <GroupManagePanel
             key={group.groupId}
             group={group}
@@ -90,7 +114,10 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
       ) : null}
 
       {activePanel === 'sessionManage' && session ? (
-        <div className="relative z-30 flex w-[min(380px,36vw)] max-w-[36vw] shrink-0 border-l border-border">
+        <div
+          data-manage-panel="true"
+          className="relative z-30 flex w-[min(380px,36vw)] max-w-[36vw] shrink-0 border-l border-border"
+        >
           <SessionManagePanel
             key={session.sessionId}
             session={session}

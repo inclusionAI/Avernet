@@ -47,13 +47,13 @@ export function GroupLeaderSelect({
             <span className={cn('flex min-w-0 flex-1 items-center gap-2', !selected && 'text-muted-foreground')}>
               {selected ? (
                 <>
-                  <span className="max-w-44 truncate text-sm text-foreground">{selected.name}</span>
+                  <span className="max-w-44 truncate text-xs text-foreground">{selected.name}</span>
                   {selected.current && (
                     <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">当前</span>
                   )}
                 </>
               ) : (
-                <span className="truncate text-sm">{placeholder}</span>
+                <span className="truncate text-xs">{placeholder}</span>
               )}
             </span>
             <ChevronDown
