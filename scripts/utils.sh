@@ -183,6 +183,12 @@ process_command() {
 # background job or an explicit subshell; `exec` replaces that wrapper so the
 # recorded PID is the actual service process and no shell is left waiting.
 start_in_detached_session() {
+    # macOS hosts may disable the bundled Perl executable. Use the installed
+    # Python 3 runtime there; Linux retains its existing Perl prerequisite.
+    # Both branches exec argv directly and preserve the owned service PID.
+    if [ "$(uname -s)" = Darwin ]; then
+        exec python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' "$@"
+    fi
     exec perl -MPOSIX=setsid -e 'setsid() or die "setsid failed: $!\\n"; exec @ARGV' "$@"
 }
 
