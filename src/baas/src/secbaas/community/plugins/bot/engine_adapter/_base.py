@@ -31,7 +31,7 @@ class BaseEngineAdapter:
         *,
         tc_bot_id: str,
         user_id: str,
-        run_id: str | None,
+        run_id: str,
         session_id: str | None = None,
     ) -> str | None:
         """默认：session_id 优先，否则无 device 亲和（aicoding 语义）。"""

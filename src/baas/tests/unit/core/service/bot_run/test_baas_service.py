@@ -35,6 +35,7 @@ from secbaas.community.core.service.bot_run._async_chat_client import (
 from secbaas.community.core.service.bot_run._async_chat_client_pool import (
     AsyncChatClientPool,
 )
+from secbaas.community.core.service.bot_run._bot_run_utils import plan_session_id
 
 # ==================== Fixtures ====================
 
@@ -203,7 +204,7 @@ class TestSessionRoutingAffinityPrefix:
     def test_consistency_key_returns_session_id_as_is(self, service):
         """_create_session_consistency_key 不再剥离前缀,原样返回 session_id。"""
         assert (
-            service._create_session_consistency_key(
+            plan_session_id(
                 engine_type="openclaw",
                 tc_bot_id=BOT_UUID,
                 user_id="u-1",
@@ -215,7 +216,7 @@ class TestSessionRoutingAffinityPrefix:
 
     def test_non_prefix_id_unchanged(self, service):
         assert (
-            service._create_session_consistency_key(
+            plan_session_id(
                 engine_type="openclaw",
                 tc_bot_id=BOT_UUID,
                 user_id="u-1",
@@ -228,7 +229,7 @@ class TestSessionRoutingAffinityPrefix:
     def test_none_branch_synthetic_key_unchanged(self, service):
         """session_id=None 的合成键保持不变,不动既有 first-call 路由 stickiness。"""
         assert (
-            service._create_session_consistency_key(
+            plan_session_id(
                 engine_type="openclaw",
                 tc_bot_id=BOT_UUID,
                 user_id="u-1",
@@ -241,7 +242,7 @@ class TestSessionRoutingAffinityPrefix:
     def test_eval_id_replaces_run_id_in_openclaw_key(self, service):
         """eval_id 存在时用 evalId 替换 run_id 作为 session 字段值。"""
         assert (
-            service._create_session_consistency_key(
+            plan_session_id(
                 engine_type="openclaw",
                 tc_bot_id=BOT_UUID,
                 user_id="u-1",
@@ -255,7 +256,7 @@ class TestSessionRoutingAffinityPrefix:
     def test_eval_id_replaces_run_id_in_claude_code_key(self, service):
         """eval_id 存在时 claude_code 引擎也用 evalId 替换 run_id。"""
         assert (
-            service._create_session_consistency_key(
+            plan_session_id(
                 engine_type="claude_code",
                 tc_bot_id=BOT_UUID,
                 user_id="u-1",
@@ -269,7 +270,7 @@ class TestSessionRoutingAffinityPrefix:
     def test_eval_id_none_falls_back_to_run_id(self, service):
         """eval_id=None 时回退到 run_id，与原有行为一致。"""
         assert (
-            service._create_session_consistency_key(
+            plan_session_id(
                 engine_type="claude_code",
                 tc_bot_id=BOT_UUID,
                 user_id="u-1",
@@ -298,7 +299,7 @@ class TestSessionRoutingAffinityPrefix:
     def test_eval_id_ignored_when_session_id_provided(self, service):
         """session_id 已传入时直接返回，eval_id 不生效。"""
         assert (
-            service._create_session_consistency_key(
+            plan_session_id(
                 engine_type="openclaw",
                 tc_bot_id=BOT_UUID,
                 user_id="u-1",
@@ -312,7 +313,7 @@ class TestSessionRoutingAffinityPrefix:
     def test_teclaw_eval_id_replaces_run_id_in_key(self, service):
         """teclaw 引擎评测流量（eval_id 存在）时构造结构化 key。"""
         assert (
-            service._create_session_consistency_key(
+            plan_session_id(
                 engine_type="teclaw",
                 tc_bot_id=BOT_UUID,
                 user_id="u-1",
@@ -326,7 +327,7 @@ class TestSessionRoutingAffinityPrefix:
     def test_teclaw_no_eval_id_returns_none(self, service):
         """teclaw 引擎生产流量（无 eval_id）返回 None，保持原有 sessionKey 生成逻辑。"""
         assert (
-            service._create_session_consistency_key(
+            plan_session_id(
                 engine_type="teclaw",
                 tc_bot_id=BOT_UUID,
                 user_id="u-1",
@@ -340,7 +341,7 @@ class TestSessionRoutingAffinityPrefix:
     def test_unsupported_engine_type_returns_none_with_warning(self, service):
         """未知引擎类型返回 None 并记录 WARNING。"""
         assert (
-            service._create_session_consistency_key(
+            plan_session_id(
                 engine_type="unknown_engine",
                 tc_bot_id=BOT_UUID,
                 user_id="u-1",

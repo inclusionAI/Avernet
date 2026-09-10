@@ -25,7 +25,7 @@ class NoopClaudeCodeAdapter:
         *,
         tc_bot_id: str,
         user_id: str,
-        run_id: str | None,
+        run_id: str,
         session_id: str | None = None,
     ) -> str | None:
         return None
@@ -69,7 +69,7 @@ class MockClaudeCodeAdapter:
         *,
         tc_bot_id: str,
         user_id: str,
-        run_id: str | None,
+        run_id: str,
         session_id: str | None = None,
     ) -> str | None:
         self.calls.append(

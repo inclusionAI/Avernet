@@ -90,6 +90,7 @@ class QueueTaskMessageDispatcher:
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         """队列化消息发送：只入库（PENDING），Worker 异步执行。
 
@@ -107,6 +108,8 @@ class QueueTaskMessageDispatcher:
             meta["timeout"] = timeout
         if attachments:
             meta["attachments"] = [dataclasses.asdict(a) for a in attachments]
+        if session_pending:
+            meta["session_pending"] = True
         self._enqueue_work(run_id, bot_id, session_id, meta=meta)
         logger.info(
             "[queue_dispatcher.dispatch_send] run_id=%s bot_id=%s session_id=%s",
@@ -126,6 +129,7 @@ class QueueTaskMessageDispatcher:
         context: BotChatContext | None = None,
         bot_id: str = "",
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         """队列化消息注入：只入库（PENDING），Worker 异步执行。
 
@@ -133,9 +137,14 @@ class QueueTaskMessageDispatcher:
         串行由 Worker 端 DistributedLockService 的 session 锁保证。
         """
         self._check_backpressure(bot_id)
-        meta: dict[str, Any] = {"request_type": "inject"}
+        meta: dict[str, Any] = {
+            "request_type": "inject",
+            "timeout": 300.0,
+        }
         if attachments:
             meta["attachments"] = [dataclasses.asdict(a) for a in attachments]
+        if session_pending:
+            meta["session_pending"] = True
         self._enqueue_work(run_id, bot_id, session_id, meta=meta)
         logger.info(
             "[queue_dispatcher.dispatch_inject] run_id=%s bot_id=%s session_id=%s",
@@ -158,6 +167,7 @@ class QueueTaskMessageDispatcher:
         timeout: float | None = None,
         bot_id: str = "",
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         """队列化流式发送：入队 + 轮询 chunk 表。
 
@@ -175,6 +185,8 @@ class QueueTaskMessageDispatcher:
             meta["timeout"] = timeout
         if attachments:
             meta["attachments"] = [dataclasses.asdict(a) for a in attachments]
+        if session_pending:
+            meta["session_pending"] = True
         self._enqueue_work(run_id, bot_id, session_id, meta=meta)
 
         logger.info(
@@ -374,27 +386,3 @@ class QueueTaskMessageDispatcher:
         self._queue_repository.insert_queue(
             run_id=run_id, bot_id=bot_id, session_id=session_id, meta=meta
         )
-
-    @staticmethod
-    def _build_metadata(
-        context: BotChatContext | None,
-        *,
-        session_id: str | None = None,
-        request_type: str = "chat",
-    ) -> dict[str, Any]:
-        """构建 Worker 重建上下文所需的 metadata。
-
-        以下字段由 Worker 端 ``BotRunRequestExecutor`` 读取来重建 ``BotChatContext``：
-        - ``app_id`` / ``app_type`` / ``tenant``：来自 BotChatContext
-        - ``session_id``：会话 ID
-        - ``request_type``：chat / inject
-        """
-        metadata: dict[str, Any] = {}
-        if session_id:
-            metadata["session_id"] = session_id
-        if context:
-            metadata["app_id"] = context.app_id
-            metadata["app_type"] = context.app_type
-            metadata["tenant"] = context.tenant
-        metadata["request_type"] = request_type
-        return metadata

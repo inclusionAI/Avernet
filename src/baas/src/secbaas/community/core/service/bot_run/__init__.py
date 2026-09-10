@@ -17,7 +17,7 @@ from ._async_chat_client import (
 from ._async_chat_client_pool import AsyncChatClientPool
 from ._async_session_client import AsyncSessionClient
 from ._baas_service import BaasBotService, BaasBotServiceConfig
-from ._bot_concurrency import BotConcurrencyManager, FixedMachineCountProvider
+from ._bot_concurrency import BotConcurrencyManager
 from ._bot_run_utils import (
     binding_data_to_info,
     extract_lifecycle_stage,
@@ -82,7 +82,6 @@ __all__ = [
     "BotRequestWorker",
     "BotRequestWorkerConfig",
     "BotConcurrencyManager",
-    "FixedMachineCountProvider",
     "BotRunRequestExecutor",
     "BotRunQueueRecord",
     "PostRunCallback",

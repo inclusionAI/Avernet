@@ -173,6 +173,8 @@ class TestDispatchInject:
         d._queue_repository.insert_queue.assert_called_once()
         call_kwargs = d._queue_repository.insert_queue.call_args.kwargs
         assert call_kwargs["meta"]["request_type"] == "inject"
+        # inject 无调用方 timeout，写默认值以便被 Worker 超时扫描收敛
+        assert call_kwargs["meta"]["timeout"] == 300.0
 
     @pytest.mark.asyncio
     async def test_inject_with_attachments(self):
@@ -805,39 +807,6 @@ class TestEnqueueWork:
             d._enqueue_work("run-1", "bot-1", None)
         args = d._queue_repository.insert_queue.call_args
         assert args.kwargs["meta"] == {"traceparent": carrier}
-
-
-class TestBuildMetadata:
-    def test_no_context_no_session(self):
-        result = QueueTaskMessageDispatcher._build_metadata(None)
-        assert result == {"request_type": "chat"}
-
-    def test_with_session_only(self):
-        result = QueueTaskMessageDispatcher._build_metadata(None, session_id="s-1")
-        assert result["session_id"] == "s-1"
-        assert result["request_type"] == "chat"
-
-    def test_with_context(self):
-        ctx = BotChatContext(
-            api_key_prefix="prefix", app_id="app-1", app_type="web", tenant="t-1"
-        )
-        result = QueueTaskMessageDispatcher._build_metadata(
-            ctx, session_id="s-1", request_type="inject"
-        )
-        assert result["session_id"] == "s-1"
-        assert result["app_id"] == "app-1"
-        assert result["app_type"] == "web"
-        assert result["tenant"] == "t-1"
-        assert result["request_type"] == "inject"
-
-    def test_with_context_no_session(self):
-        ctx = BotChatContext(
-            api_key_prefix="prefix", app_id="app-1", app_type="web", tenant="t-1"
-        )
-        result = QueueTaskMessageDispatcher._build_metadata(ctx)
-        assert "session_id" not in result
-        assert result["app_id"] == "app-1"
-        assert result["request_type"] == "chat"
 
 
 class TestEnqueueWorkWithAttachments:

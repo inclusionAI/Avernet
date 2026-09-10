@@ -48,7 +48,7 @@ class BotEngineAdapter(Protocol):
         *,
         tc_bot_id: str,
         user_id: str,
-        run_id: str | None,
+        run_id: str,
         session_id: str | None = None,
     ) -> str | None:
         """返回 device 亲和一致性哈希字符串（传给 `_wss_resolver` 的 ``device_affinity``）。
