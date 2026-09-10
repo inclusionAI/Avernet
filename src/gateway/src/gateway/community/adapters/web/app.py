@@ -22,6 +22,7 @@ from gateway.community.adapters.web._forward import _ALL_METHODS, forward_reques
 from gateway.community.adapters.web._log_redaction import install_credential_redaction
 from gateway.community.adapters.web._relay_ws import forward_websocket, relay_routes
 from gateway.community.adapters.web.admin import router as admin_router
+from gateway.community.adapters.web.dev_login import router as dev_login_router
 from gateway.community.config import ConfigLoader
 from gateway.community.logger import get_logger, get_logger_plugin
 from gateway.community.tracer import get_tracer_plugin
@@ -145,6 +146,11 @@ def create_app() -> FastAPI:
     # Admin endpoints (credential issuance/registration) — explicit routes, so
     # they win over the catch-all forward. Unauthenticated (single-box/dev only).
     app.include_router(admin_router, prefix="/admin")
+
+    # Local dev-login page (sets the dev_cookie strategy's cookies). Explicit
+    # route for the same reason as admin, and it 404s outside
+    # SERVER_ENV local/dev/test — see dev_login.py.
+    app.include_router(dev_login_router)
 
     # One socket entrypoint per domain declaring the websocket protocol. Driven
     # from configuration, so no domain is named here; a domain that declares
