@@ -277,8 +277,7 @@ class ConfigModule(Module):
             ),
             hermes_root=_expand(block.get("hermes_root"), defaults.hermes_root),
             deepseek_harness_root=_expand(
-                block.get("deepseek_harness_root"),
-                defaults.deepseek_harness_root,
+                block.get("deepseek_harness_root"), defaults.deepseek_harness_root
             ),
         )
 
