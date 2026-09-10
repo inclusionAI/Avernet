@@ -56,6 +56,37 @@ const workflow = {
 }
 
 describe('task escort overview layout', () => {
+  it('filters all history, resets pagination, and leaves metrics independent', async () => {
+    mockQueries()
+    render(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '下一页' }))
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: '运行状态' }), 'failed')
+    expect(mocks.useFlowRuns).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'failed', offset: 0 }))
+    await userEvent.type(screen.getByRole('searchbox', { name: '搜索运行记录' }), '  gateway-client  ')
+    await userEvent.click(screen.getByRole('button', { name: '搜索', exact: true }))
+    expect(mocks.useFlowRuns).toHaveBeenLastCalledWith(expect.objectContaining({ query: 'gateway-client', status: 'failed', offset: 0 }))
+    await userEvent.click(screen.getByRole('button', { name: '下一页' }))
+    expect(mocks.useFlowRuns).toHaveBeenLastCalledWith(expect.objectContaining({ query: 'gateway-client', status: 'failed', offset: 20 }))
+    const metricCalls = mocks.useFlowRuns.mock.calls.filter(([params]) => params?.from)
+    expect(metricCalls.every(([params]) => !params.query && !params.status && !params.statuses)).toBe(true)
+    expect(screen.getByText('没有匹配的运行')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '重置筛选' }))
+    expect(mocks.useFlowRuns).toHaveBeenLastCalledWith(expect.objectContaining({ query: undefined, status: undefined, statuses: undefined, offset: 0 }))
+    expect(screen.getByRole('searchbox', { name: '搜索运行记录' })).toHaveValue('')
+    expect(screen.getByText('暂无运行')).toBeInTheDocument()
+  })
+
+  it('supports both cancellation spellings and submits keyword search with Enter', async () => {
+    mockQueries()
+    render(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: '运行状态' }), 'cancelled')
+    expect(mocks.useFlowRuns).toHaveBeenLastCalledWith(expect.objectContaining({ status: undefined, statuses: ['cancelled', 'canceled'] }))
+    await userEvent.type(screen.getByRole('searchbox', { name: '搜索运行记录' }), 'bot_123')
+    expect(mocks.useFlowRuns).toHaveBeenLastCalledWith(expect.objectContaining({ query: undefined }))
+    await userEvent.keyboard('{Enter}')
+    expect(mocks.useFlowRuns).toHaveBeenLastCalledWith(expect.objectContaining({ query: 'bot_123', offset: 0 }))
+  })
+
   it.each(['history', 'metrics'])('refreshes both queries and stays busy while %s is fetching', async (pendingQuery) => {
     mockQueries()
     const history = mocks.useFlowRuns()
