@@ -34,6 +34,7 @@ from agentclaw.community.core.task_queue.repository.models import TaskQueueModel
 from agentclaw.community.core.skill_center.center_content_distribution import (
     CenterContentPendingPackage,
     CenterContentReadyPackage,
+    CenterContentUnavailablePackage,
 )
 from agentclaw.community.core.skill_center.materialization_contract import (
     PublishedMaterializedSkillVersion,
@@ -283,6 +284,95 @@ def test_handler_retries_transient_network_failure_instead_of_fast_polling() -> 
     )
 
     assert isinstance(outcome, Retry)
+
+
+def test_permanent_prepare_failure_stops_derived_pending_fast_poll(caplog) -> None:
+    projector = _Projector()
+    projector.plans = [_plan("1"), _plan("1")]
+    projector.apply_plan = AsyncMock(
+        return_value=RuntimeProjectionResult(
+            status=RuntimeProjectionStatus.PENDING,
+            components={"skills": RuntimeProjectionStatus.PENDING},
+            issues=(
+                RuntimeProjectionIssue(
+                    resource_type="SKILL",
+                    code="CENTER_CONTENT_PACKAGE_PENDING",
+                    reason="descriptor is absent",
+                    status=RuntimeProjectionStatus.PENDING,
+                    retryable=True,
+                    name="weather",
+                    corpus="CENTER",
+                ),
+            ),
+        )
+    )
+    distribution = MagicMock()
+    distribution.prepare.side_effect = lambda identity: (
+        CenterContentUnavailablePackage(
+            identity,
+            code="CENTER_CONTENT_PACKAGE_CONFLICT",
+            retryable=False,
+        )
+    )
+
+    outcome = _handler(
+        projector=projector, distribution=distribution
+    ).handle({"owner_id": "owner-a", "bot_id": "bot-a"})
+
+    assert isinstance(outcome, Complete)
+    assert "CENTER_CONTENT_PACKAGE_CONFLICT" in caplog.text
+
+
+def test_permanent_prepare_failure_does_not_hide_other_recoverable_item(
+    caplog,
+) -> None:
+    projector = _Projector()
+    projector.plans = [_combined_plan(), _combined_plan()]
+    projector.apply_plan = AsyncMock(
+        return_value=RuntimeProjectionResult(
+            status=RuntimeProjectionStatus.PENDING,
+            components={"skills": RuntimeProjectionStatus.PENDING},
+            issues=(
+                RuntimeProjectionIssue(
+                    resource_type="SKILL",
+                    code="CENTER_CONTENT_PACKAGE_PENDING",
+                    reason="descriptor is absent",
+                    status=RuntimeProjectionStatus.PENDING,
+                    retryable=True,
+                    name="weather",
+                    corpus="CENTER",
+                ),
+                RuntimeProjectionIssue(
+                    resource_type="SKILL",
+                    code="CENTER_CONTENT_DOWNLOAD_PENDING",
+                    reason="download is active",
+                    status=RuntimeProjectionStatus.PENDING,
+                    retryable=True,
+                    name="calculator",
+                    corpus="CENTER",
+                ),
+            ),
+        )
+    )
+    distribution = MagicMock()
+
+    def prepare(identity):
+        if identity.skill_uuid == _UUID:
+            return CenterContentUnavailablePackage(
+                identity,
+                code="CENTER_CONTENT_PACKAGE_CONFLICT",
+                retryable=False,
+            )
+        return CenterContentPendingPackage(identity)
+
+    distribution.prepare.side_effect = prepare
+
+    outcome = _handler(
+        projector=projector, distribution=distribution
+    ).handle({"owner_id": "owner-a", "bot_id": "bot-a"})
+
+    assert isinstance(outcome, Reschedule)
+    assert "CENTER_CONTENT_PACKAGE_CONFLICT" in caplog.text
 
 
 def test_handler_keeps_fast_polling_recoverable_item_beside_permanent_issue() -> None:

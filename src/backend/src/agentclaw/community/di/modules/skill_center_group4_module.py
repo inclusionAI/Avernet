@@ -48,6 +48,9 @@ from agentclaw.community.core.skill_center.services.desktop_skill_recovery impor
     DesktopSkillRecoverySweeper,
     DesktopSkillRecoveryTaskHandler,
 )
+from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
+    BotRuntimeProjector,
+)
 from agentclaw.community.di.config import DesktopSkillRecoveryConfig
 from agentclaw.community.core.skill_center.services.group4_task_registrar import (
     SkillCenterGroup4TaskRegistrar,
@@ -190,7 +193,7 @@ class SkillCenterGroup4Module(Module):
     def desktop_skill_recovery_task_handler(
         self,
         bots: BotRepository,
-        projector: BotRuntimeProjectorProtocol,
+        projector: BotRuntimeProjector,
         distribution: CenterContentDistribution,
         layouts: SkillsPoolLayoutRepositoryProtocol,
     ) -> DesktopSkillRecoveryTaskHandler:

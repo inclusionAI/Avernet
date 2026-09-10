@@ -12,7 +12,12 @@ from agentclaw.community.di.modules import config_module
 
 
 def _block() -> dict[str, Any]:
-    raw = config_module.read_user_config().get("desktop_skill_recovery") or {}
+    user_config = config_module.read_user_config()
+    if "desktop_skill_recovery" not in user_config:
+        return {}
+    raw = user_config["desktop_skill_recovery"]
+    if raw is None:
+        return {}
     if not isinstance(raw, dict):
         raise ValueError("desktop_skill_recovery must be a mapping")
     return dict(raw)

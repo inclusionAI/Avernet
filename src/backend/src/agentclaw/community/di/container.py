@@ -61,6 +61,9 @@ from agentclaw.community.di.modules.installation_read_config_module import (
 )
 from agentclaw.community.di.modules.mcp_module import McpModule
 from agentclaw.community.di.modules.quality_module import QualityModule
+from agentclaw.community.di.modules.runtime_projection_recovery_module import (
+    RuntimeProjectionRecoveryModule,
+)
 from agentclaw.community.di.modules.resources_module import ResourcesModule
 from agentclaw.community.di.modules.service_bot_module import ServiceBotModule
 from agentclaw.community.di.modules.session_resources_module import SessionResourcesModule
@@ -124,6 +127,7 @@ def build_injector(
         InstallationReadConfigModule(),
         SkillCenterModule(),
         SkillCenterGroup4Module(),
+        RuntimeProjectionRecoveryModule(),
         SkillVersionModule(),
         ServiceBotModule(),
         DesktopBotModule(),

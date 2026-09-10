@@ -11,9 +11,6 @@ from typing import Callable
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
-from agentclaw.community.api.bot_runtime_projector import (
-    BotRuntimeProjectorProtocol as ApiBotRuntimeProjectorProtocol,
-)
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
@@ -403,24 +400,6 @@ class SkillCenterModule(
     def api_capability_state_reader_protocol(
         self, service: BotCapabilityStateReader
     ) -> ApiBotCapabilityStateReaderProtocol:
-        """Expose that same singleton through the public Service API."""
-        return service
-
-    @singleton
-    @provider
-    @inject
-    def core_runtime_projection_reconciler_protocol(
-        self, service: BotRuntimeProjector
-    ) -> CoreBotRuntimeProjectorProtocol:
-        """Expose the one reconciler singleton to Core consumers."""
-        return service
-
-    @singleton
-    @provider
-    @inject
-    def api_runtime_projection_reconciler_protocol(
-        self, service: BotRuntimeProjector
-    ) -> ApiBotRuntimeProjectorProtocol:
         """Expose that same singleton through the public Service API."""
         return service
 

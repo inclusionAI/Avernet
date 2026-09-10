@@ -58,6 +58,7 @@ provides:
   - "InstallationBackfillServiceProtocol"
   - "BotRuntimeProjector"
   - "BotRuntimeProjectorProtocol"
+  - "RecoveringBotRuntimeProjector"
   - "SkillRuntimeDelivery"
   - "RuntimeServiceFactoryBoundary"
   - "LocalSkillCleanupWorkModel"
@@ -424,12 +425,20 @@ waiting, and current-binding startup/reconnect events all call the same
 that same seam for live bound Desktop Bots and performs no download or Runtime
 projection itself.
 
+Ordinary `project` and direct `apply_plan` calls pass through
+`RecoveringBotRuntimeProjector`, so callers such as active Local replacement
+cannot bypass the same recovery completion. The recovery task alone receives
+the undecorated projector; its own attempt returns `Reschedule`/`Retry` rather
+than enqueueing itself again.
+
 Each handler attempt checks the current Bot/binding and yields while Skills
 Pool transition owns mappings, resolves the current Skill-only plan, prepares
 its exact Center packages, then discards that plan and resolves again before
 the only Runtime write. Healthy package/download/capacity waiting uses a
 five-second `Reschedule`; transient storage/network/device failures use queue
-`Retry`; permanent degraded items do not pin the live key. The task deadline
+`Retry`; permanent exact-package preparation issues replace any derived
+package-pending observation for that same current mapping, while other
+recoverable mappings continue. Permanent degraded items do not pin the live key. The task deadline
 is 30 minutes, and terminal Queue transitions release the Bot-level key.
 Skill recovery never declares MCP scope or updates Passport. Pool migration
 retains its independent `skills_pool.reconcile` task and exclusive mapping

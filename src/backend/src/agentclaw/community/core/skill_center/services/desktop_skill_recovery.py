@@ -27,6 +27,7 @@ from agentclaw.community.core.skill_center.desktop_skill_recovery_protocol impor
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
     RuntimeProjectionResult,
+    RuntimeProjectionIssue,
     RuntimeProjectionStatus,
 )
 from agentclaw.community.core.skills_pool.mapping_intent import (
@@ -169,7 +170,9 @@ class DesktopSkillRecoveryTaskHandler:
             owner_id=owner_id,
             scope=scope,
         )
-        prepare_states: dict[tuple[str, str], str] = {}
+        prepare_states: dict[
+            tuple[str, str], str | CenterContentUnavailablePackage
+        ] = {}
         seen: set[tuple[str, str]] = set()
         for mapping in plan.projection.skill_mappings:
             if mapping.corpus != "center":
@@ -197,11 +200,10 @@ class DesktopSkillRecoveryTaskHandler:
                 continue
             if isinstance(prepared, CenterContentPendingPackage):
                 prepare_states[key] = "pending"
-            elif (
-                isinstance(prepared, CenterContentUnavailablePackage)
-                and prepared.retryable
-            ):
-                prepare_states[key] = "retryable_error"
+            elif isinstance(prepared, CenterContentUnavailablePackage):
+                prepare_states[key] = (
+                    "retryable_error" if prepared.retryable else prepared
+                )
 
         # Heavy package preparation may overlap a deactivate, version publish,
         # rebind, or Pool transition. Discard the old plan and validate all
@@ -219,14 +221,20 @@ class DesktopSkillRecoveryTaskHandler:
             scope=scope,
         )
         latest_center_keys: set[tuple[str, str]] = set()
+        permanent_by_name: dict[str, CenterContentUnavailablePackage] = {}
         for mapping in latest_plan.projection.skill_mappings:
             if mapping.corpus != "center":
                 continue
             if mapping.skill_uuid is None or mapping.sc_version_number is None:
                 raise ValueError("Center mapping has no exact identity")
-            latest_center_keys.add(
-                (mapping.skill_uuid, mapping.sc_version_number)
-            )
+            key = (mapping.skill_uuid, mapping.sc_version_number)
+            latest_center_keys.add(key)
+            prepared = prepare_states.get(key)
+            if (
+                isinstance(prepared, CenterContentUnavailablePackage)
+                and not prepared.retryable
+            ):
+                permanent_by_name[mapping.link_name] = prepared
         retired_mappings = tuple(
             retired_logical_skill_mappings(
                 list(plan.projection.skill_mappings),
@@ -238,6 +246,14 @@ class DesktopSkillRecoveryTaskHandler:
             retired_mappings=retired_mappings,
             scope=scope,
         )
+        projection = self._preserve_permanent_prepare_issues(
+            projection,
+            permanent_by_name=permanent_by_name,
+            all_latest_center_permanent=(
+                bool(latest_center_keys)
+                and len(permanent_by_name) == len(latest_center_keys)
+            ),
+        )
         return self._outcome(
             projection,
             prepare_pending=any(
@@ -247,6 +263,57 @@ class DesktopSkillRecoveryTaskHandler:
                 prepare_states.get(key) == "retryable_error"
                 for key in latest_center_keys
             ),
+        )
+
+    @staticmethod
+    def _preserve_permanent_prepare_issues(
+        projection: RuntimeProjectionResult,
+        *,
+        permanent_by_name: dict[str, CenterContentUnavailablePackage],
+        all_latest_center_permanent: bool,
+    ) -> RuntimeProjectionResult:
+        """Keep exact prepare failures from degrading into synthetic waits."""
+        if not permanent_by_name:
+            return projection
+        logger.warning(
+            "[DesktopSkillRecovery] permanent package preparation issues "
+            "codes=%s names=%s",
+            sorted({package.code for package in permanent_by_name.values()}),
+            sorted(permanent_by_name),
+        )
+        retained = tuple(
+            issue
+            for issue in projection.issues
+            if not (
+                issue.retryable
+                and is_normal_center_content_wait(issue.code)
+                and (
+                    issue.name in permanent_by_name
+                    or (issue.name is None and all_latest_center_permanent)
+                )
+            )
+        )
+        existing = {(issue.name, issue.code) for issue in retained}
+        issues = retained + tuple(
+            RuntimeProjectionIssue(
+                resource_type="SKILL",
+                code=package.code,
+                reason="Exact Center package preparation cannot be completed automatically",
+                status=RuntimeProjectionStatus.DEGRADED,
+                retryable=False,
+                name=name,
+                corpus="CENTER",
+                logical_location=f"active-skills/{name}",
+                suggested_action="请联系管理员检查不可变 Skill 包及其描述文件。",
+            )
+            for name, package in permanent_by_name.items()
+            if (name, package.code) not in existing
+        )
+        return RuntimeProjectionResult(
+            status=RuntimeProjectionStatus.DEGRADED,
+            components={**projection.components, "skills": RuntimeProjectionStatus.DEGRADED},
+            issues=issues,
+            reason=projection.reason,
         )
 
     def _current_desktop(self, *, owner_id: str, bot_id: str) -> dict | None:
