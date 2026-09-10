@@ -2612,19 +2612,16 @@ class ExecutionEngine:
                 # 搜推实现是否正确携带内部标记/默认 collab_mode。静态计划走
                 # ``_prepare_static``，不会进入这里。
                 inherited_protocol = gf.extend_props.get("dynamic_task_node_protocol")
-                inherited_mode = gf.collab_mode
                 gf.extend_props["dynamic_task_node_protocol"] = True
-                gf.collab_mode = "manager_worker"
                 logger.info(
                     "[task][prepare] task=%s node=%s → group(HIT_MULTI_BOTS collab=%s "
-                    "bot_ids=%s dynamic_task_node_protocol=%s inherited_protocol=%s inherited_collab=%s)",
+                    "bot_ids=%s dynamic_task_node_protocol=%s inherited_protocol=%s)",
                     task_id,
                     node.node_id,
                     gf.collab_mode,
                     gf.bot_ids,
                     gf.extend_props["dynamic_task_node_protocol"],
                     inherited_protocol,
-                    inherited_mode,
                 )
                 # 群验收需要完整 goal/instruction，而不是只有一句 task_context。
                 gf.extend_props.setdefault(

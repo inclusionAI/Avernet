@@ -183,8 +183,8 @@ class TestPrepareDispatchStartTime:
         assert root.run_info.start_time is not None
         assert side and side[0][0] == "miss"
 
-    def test_dynamic_group_forces_manager_worker_protocol_at_engine_boundary(self, svc, graph):
-        """动态 HIT_MULTI 不信任上游默认值：统一成 BCS 主从群和新业务协议。"""
+    def test_dynamic_group_keeps_chat_mode_and_marks_business_protocol(self, svc, graph):
+        """动态 HIT_MULTI 保留策略选定的群形态，仅补齐节点业务协议标记。"""
 
         class _UnmarkedGroupDispatcher:
             async def dispatch(self, nodes):
@@ -201,7 +201,27 @@ class TestPrepareDispatchStartTime:
 
         assert side and side[0][0] == "group"
         formation = side[0][2]
-        assert formation.collab_mode == "manager_worker"
+        assert formation.collab_mode == "chat"
+        assert formation.extend_props["dynamic_task_node_protocol"] is True
+
+    def test_dynamic_state_machine_group_keeps_its_explicit_protocol(self, svc, graph):
+        """显式状态机群原样透传，仍走状态机执行路径。"""
+
+        class _StateMachineDispatcher:
+            async def dispatch(self, nodes):
+                node = nodes[0]
+                node.run_info.run_mode = "coop_group"
+                node.run_info.extend_props["pending_group_formation"] = GroupFormation(
+                    bot_ids=["driver", "worker"], collab_mode="state_machine"
+                )
+                return [node]
+
+        eng = _engine(svc, dispatcher=_StateMachineDispatcher())
+        side: list[tuple] = []
+        _run(eng._prepare_into("t1", side))
+
+        formation = side[0][2]
+        assert formation.collab_mode == "state_machine"
         assert formation.extend_props["dynamic_task_node_protocol"] is True
 
 
