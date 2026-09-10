@@ -220,9 +220,9 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             raise BotCombinationUnsupportedError(
                 f"application coding does not support engine: {engine_type}"
             )
-        if bot_type != "personal":
+        if bot_type not in {"personal", "service"}:
             raise BotCombinationUnsupportedError(
-                "application coding bot must be personal"
+                f"application coding bot must be personal or service, got: {bot_type}"
             )
         # No space-kind gate: coding bots may be created in any business space
         # the caller is a member of (personal or team). ``space_kind`` stays in
@@ -235,6 +235,17 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                 declarative_type=declarative_type,
                 template=template,
                 template_validation_mode=template_validation_mode,
+            )
+
+        if bot_type == "service":
+            # Factory snapshots may build service bots directly; the
+            # hand-written application-coding surface keeps the personal-only
+            # shape — its workspace-hosting support (allocation + soft-delete
+            # rollback) was only ever built for the personal form (#1403
+            # first phase), so a service ask is answered, not half-run.
+            raise BotCombinationUnsupportedError(
+                "application coding service bots must use a template "
+                "factory snapshot, not a hand-written config"
             )
 
         if declarative_type is not None and declarative_type != "applicationCoding":

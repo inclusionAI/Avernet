@@ -32,31 +32,22 @@ class BotCreateContext:
     space_kind: str
     # Legacy callers keep BotService's established owner/device limit behavior.
     space_quota: bool = False
-    # Whether this surface offers the "create as service" coding intake: a
-    # coding create (engine_properties present) with bot_type="service" is
-    # translated to a personal create — the only shape the engine-strategy
-    # combination gate admits — and, once created and owned, upgraded through
-    # the ServiceIntakeSeam. Surfaces that do not opt in keep the historical
-    # 409. The seam must be wired for the translation to engage: an opted-in
-    # surface without one is a misconfiguration the gate refuses, not an
-    # intent to fulfill.
-    service_intake: bool = False
 
     def as_payload(self) -> dict[str, Any]:
         return {
             "deployment_mode": self.deployment_mode.value,
             "space_kind": self.space_kind,
             "space_quota": self.space_quota,
-            "service_intake": self.service_intake,
         }
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "BotCreateContext":
+        # A pre-2026-09 payload may still carry the retired "service_intake"
+        # key; unknown keys are ignored, so old durable records deserialize.
         return cls(
             deployment_mode=BotCreateDeploymentMode(payload["deployment_mode"]),
             space_kind=payload["space_kind"],
             space_quota=bool(payload.get("space_quota", False)),
-            service_intake=bool(payload.get("service_intake", False)),
         )
 
 

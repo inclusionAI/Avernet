@@ -739,8 +739,11 @@ def test_factory_snapshot_gates_match_application_coding() -> None:
         _strategy_prepare("claude_code", props, deployment_mode="local")
     with pytest.raises(BotCombinationUnsupportedError):
         _strategy_prepare("openclaw", props)
-    with pytest.raises(BotCombinationUnsupportedError):
-        _strategy_prepare("claude_code", props, bot_type="service")
+    # Factory snapshots may build service bots directly (the create is one
+    # BaaS call in the service shape); the hand-written path stays the one
+    # that refuses — see test_handcrafted_service_create_refused.
+    prepared = _strategy_prepare("claude_code", props, bot_type="service")
+    assert prepared.template_type == "architect"
     prepared = _strategy_prepare("claude_code", props, space_kind="team")
     assert prepared.template_type == "architect"
     assert prepared.template_config == _FACTORY_SNAPSHOT
@@ -767,6 +770,20 @@ def test_handcrafted_path_rejects_foreign_template_type() -> None:
         _strategy_prepare(
             "claude_code",
             {"template_type": "architect", "template_config": {"devflow_workflow": "x"}},
+        )
+
+
+def test_handcrafted_service_create_refused() -> None:
+    # 手写 applicationCoding + 服务一步式依旧拒绝: 其 workspace-hosting 支持
+    # (分配 + 软删回滚)只打通过 personal 形态 (#1403 一期),不半支持。
+    with pytest.raises(BotCombinationUnsupportedError):
+        _strategy_prepare(
+            "claude_code",
+            {
+                "template_type": "applicationCoding",
+                "template_config": {"devflow_workflow": "x"},
+            },
+            bot_type="service",
         )
 
 

@@ -990,20 +990,22 @@ def test_create_rejects_legacy_template_key_name(client, svc):
     svc.create_bot.assert_not_called()
 
 
-def test_create_factory_snapshot_for_service_bot_is_orchestrated(
+def test_create_factory_snapshot_for_service_bot_is_direct(
     client, svc, passport, service_publication
 ):
-    """Create-as-service for a coding template: personal create, then upgrade.
+    """Create-as-service for a coding template: one direct service create.
 
-    The combination gate stays personal-only for template carries; this surface
-    answers the product's 开启服务 by translating the create and driving the
-    service upgrade behind the same request.
+    The strategy gate admits service for factory-snapshot template creates, so
+    this surface answers the product's 开启服务 with a single creation already
+    in the service shape — no follow-up upgrade, no second BaaS call racing
+    the first.
     """
     passport.apply_first_agent_passport.return_value = {
         "token": "tok",
         "agent_code": "ac",
     }
     svc.get_bot.return_value = {**BOT, "bot_type": "service"}
+    svc.create_bot.return_value = {**BOT, "bot_type": "service"}
 
     with patch.object(bots_router, "generate_bot_id", return_value="default"):
         response = client.post(
@@ -1018,49 +1020,21 @@ def test_create_factory_snapshot_for_service_bot_is_orchestrated(
 
     body = response.json()
     assert response.status_code == 201, body
-    # The gate the engine strategy enforces saw a personal create…
-    assert svc.create_bot.call_args.kwargs["bot_type"] == "personal"
-    # …and the freshly created bot went through the service upgrade.
-    service_publication.convert_to_service.assert_called_once_with(
-        "default", actor_id="u1", owner_id="u1"
-    )
+    # One creation, already in the requested service shape…
+    assert svc.create_bot.call_args.kwargs["bot_type"] == "service"
+    # …and no conversion is driven behind the request.
+    service_publication.convert_to_service.assert_not_called()
     assert body["data"]["bot_type"] == "service"
 
 
-def test_create_service_intake_conversion_failure_answers_502(
+def test_post_auth_status_service_create_completes_directly_on_issued(
     client, svc, passport, service_publication
 ):
-    """The bot exists as personal; the caller must be told, not given a 201."""
-    passport.apply_first_agent_passport.return_value = {
-        "token": "tok",
-        "agent_code": "ac",
-    }
-    service_publication.convert_to_service.side_effect = RuntimeError("bcn down")
-
-    with patch.object(bots_router, "generate_bot_id", return_value="default"):
-        response = client.post(
-            "/openapi/v1/bots",
-            json={
-                **_CREATE_BODY,
-                "engine": "claude_code",
-                "bot_type": "service",
-                "engine_properties": dict(_FACTORY_SNAPSHOT_BODY),
-            },
-        )
-
-    body = response.json()
-    assert response.status_code == 502, body
-    assert body["code"] == 502000, body
-    svc.create_bot.assert_called_once()  # the bot exists; retry the upgrade
-
-
-def test_post_auth_status_service_intake_converts_on_issued(
-    client, svc, passport, service_publication
-):
-    """The poll is the retry surface: echoed bot_type=service completes + upgrades."""
+    """The poll completes a pending create: echoed bot_type=service builds it."""
     passport.query_auth_status.return_value = {"status": "ISSUED"}
     passport.query_agent_passport.return_value = {"agent_code": "ac"}
     svc.get_bot.return_value = {**BOT, "bot_type": "service"}
+    svc.create_bot.return_value = {**BOT, "bot_type": "service"}
 
     response = client.post(
         "/openapi/v1/bots/b1/auth-status",
@@ -1074,14 +1048,12 @@ def test_post_auth_status_service_intake_converts_on_issued(
 
     body = response.json()
     assert response.status_code == 200, body
-    assert svc.create_bot.call_args.kwargs["bot_type"] == "personal"
-    service_publication.convert_to_service.assert_called_once_with(
-        "b1", actor_id="u1", owner_id="u1"
-    )
+    assert svc.create_bot.call_args.kwargs["bot_type"] == "service"
+    service_publication.convert_to_service.assert_not_called()
     assert body["data"]["bot"]["bot_type"] == "service"
 
 
-def test_post_auth_status_pending_service_intake_does_not_convert(
+def test_post_auth_status_pending_service_create_does_not_create(
     client, svc, passport, service_publication
 ):
     passport.query_auth_status.return_value = {"status": "PENDING"}
@@ -1099,44 +1071,6 @@ def test_post_auth_status_pending_service_intake_does_not_convert(
     assert response.status_code == 200, response.json()
     svc.create_bot.assert_not_called()
     service_publication.convert_to_service.assert_not_called()
-
-
-def test_post_auth_status_replayed_conversion_is_success(
-    client, svc, passport, service_publication
-):
-    """A poll after a succeeded conversion replays into already-service — success.
-
-    The completion is idempotent and the poll is its retry surface; a caller
-    (or a racing tab) re-polling must not read a 502 for a goal state already
-    reached.
-    """
-    from agentclaw.community.core.service_bot.errors import (
-        ServicePublicationConflictError,
-    )
-
-    passport.query_auth_status.return_value = {"status": "ISSUED"}
-    passport.query_agent_passport.return_value = {"agent_code": "ac"}
-    svc.get_bot.return_value = {**BOT, "bot_type": "service"}
-    service_publication.convert_to_service.side_effect = (
-        ServicePublicationConflictError("bot is already a service bot")
-    )
-
-    response = client.post(
-        "/openapi/v1/bots/b1/auth-status",
-        json={
-            "engine": "claude_code",
-            "cluster_name": "ACRA",
-            "bot_type": "service",
-            "engine_properties": dict(_FACTORY_SNAPSHOT_BODY),
-        },
-    )
-
-    body = response.json()
-    assert response.status_code == 200, body
-    service_publication.convert_to_service.assert_called_once_with(
-        "b1", actor_id="u1", owner_id="u1"
-    )
-    assert body["data"]["bot"]["bot_type"] == "service"
 
 
 def test_create_bot_cluster_mismatch_400(client, svc):
