@@ -51,7 +51,7 @@ from ._fakes import (
     FakeStartupScriptService,
     real_validator,
 )
-from agentclaw.community.plugins.local.object_store_client import InMemoryObjectStoreClientFactory
+from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 
 _ENTITY = "u_owner"
 _BOT = "b_teclaw"
@@ -150,7 +150,7 @@ def _world(*, bot, platform_managed, platform_activation=None, redeliver=None):
             package_validator=real_validator(),
             entry_fetcher=EntryFetcher(
                 FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
-            , InMemoryObjectStoreClientFactory()),
+            , FakeObjectStore()),
             resource_service=FakeResourceFileService(),
             cli_tool_service=object(),
         )
@@ -168,7 +168,7 @@ def _world(*, bot, platform_managed, platform_activation=None, redeliver=None):
         package_validator_provider=lambda: real_validator(),
         entry_fetcher_provider=lambda: EntryFetcher(
             FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
-        , InMemoryObjectStoreClientFactory()),
+        , FakeObjectStore()),
         resource_service_provider=lambda: FakeResourceFileService(),
         cli_tool_service_factory=lambda family: None,
         git_client_provider=lambda: FakeGitClient(),

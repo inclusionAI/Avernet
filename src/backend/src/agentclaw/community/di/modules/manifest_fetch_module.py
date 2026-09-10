@@ -20,9 +20,6 @@ from typing import Callable
 
 from injector import Injector, Module, inject, provider, singleton
 
-from agentclaw.community.plugin_api.object_store_client import (
-    ObjectStoreClientFactory,
-)
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetcher,
 )
@@ -57,6 +54,9 @@ from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
 )
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     GuardedFetcher,
+)
+from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
+    AliyunObjectStore,
 )
 from agentclaw.community.core.repository.protocols.bot.cli_tool import (
     BotCliToolRepositoryProtocol,
@@ -249,6 +249,18 @@ class ManifestFetchModule(Module):
 
     @singleton
     @provider
+    def manifest_object_store(self) -> AliyunObjectStore:
+        """The ``oss`` road: the object store's native client.
+
+        Like ``GuardedFetcher``, nothing about it is configurable from here.
+        The endpoint, the region and the key pair are properties of each
+        tenant credential rather than of the deployment, so there is no
+        config block to read and no backend to select — one road, taken.
+        """
+        return AliyunObjectStore()
+
+    @singleton
+    @provider
     @inject
     def manifest_content_service(
         self,
@@ -269,12 +281,12 @@ class ManifestFetchModule(Module):
         fetcher: GuardedFetcher,
         content: ManifestContentServiceProtocol,
         credentials: SourceCredentialServiceProtocol,
-        objects: ObjectStoreClientFactory,
+        objects: AliyunObjectStore,
     ) -> EntryFetcher:
         """The one fetch funnel the fetch-consuming materialisers share.
 
         One instance over four singletons: the transport, the store, W3's
-        credentials, and the object-store client factory — so every category
+        credentials, and the object-store client — so every category
         that fetches reads the same receipts and files the same provenance
         rows, whichever protocol served it.
         """

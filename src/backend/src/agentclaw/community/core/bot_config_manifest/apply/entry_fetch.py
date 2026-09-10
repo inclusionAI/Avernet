@@ -121,12 +121,12 @@ from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
 from agentclaw.community.core.bot_config_manifest.schema.sources import (
     parse_source,
 )
-from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
-from agentclaw.community.plugin_api.object_store_client import (
+from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
+    AliyunObjectStore,
     ObjectFetchStatus,
-    ObjectStoreClientFactory,
     ObjectStoreTarget,
 )
+from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
@@ -201,18 +201,18 @@ class EntryFetcher:
         fetcher: GuardedFetcher,
         content: ManifestContentServiceProtocol,
         credentials: SourceCredentialServiceProtocol,
-        objects: ObjectStoreClientFactory,
+        objects: AliyunObjectStore,
     ) -> None:
         self._fetcher = fetcher
         self._content = content
         self._credentials = credentials
         # Required, not defaulted. It was ``Optional[...] = None`` so that
-        # rigs driving only the git road need not assemble a factory — but
+        # rigs driving only the git road need not assemble a store — but
         # the composition root always binds one, so the type said "may be
         # absent" about a value that never is, and bought a ``None`` branch
         # in ``acquire_object`` that production could not reach. Rigs pass
-        # ``InMemoryObjectStoreClientFactory()``; it costs them one line and
-        # buys everyone an honest signature.
+        # ``FakeObjectStore()``; it costs them one line and buys everyone an
+        # honest signature.
         self._objects = objects
         # Bound once, to this pipeline: the fetchers are strategies over these
         # same collaborators, so every road files receipts under one policy
@@ -585,16 +585,16 @@ class EntryFetcher:
         keep_last: bool,
         entry_identity: Optional[str],
     ) -> FetchedEntry:
-        """One object out of a tenant-named bucket, through the store plugin.
+        """One object out of a tenant-named bucket, through the object store.
 
         The same shape :meth:`fetch` has on the URL road — pinned fast path,
         acquire, ``keep_last``, file — with the transport swapped and four of
         the guarded fetcher's six protections gone *because they have nothing
         left to guard*: there is no tenant-supplied URL to shape-check, no
         host to resolve and pin, and no redirect to re-validate, since the
-        endpoint comes off the credential row and the client owns the wire.
-        The two that survive are the two that were never about the URL: the
-        byte cap (enforced inside the client, while streaming) and the
+        endpoint comes off the credential row and the store client owns the
+        wire. The two that survive are the two that were never about the URL:
+        the byte cap (enforced inside the client, while streaming) and the
         content address computed here.
         """
         expired = ctx.budget.expired() if ctx.budget is not None else None
@@ -633,7 +633,7 @@ class EntryFetcher:
                 ) from exc
 
         limit = FETCH_ENTRY_LIMITS.get(category, FETCH_ENTRY_LIMITS["resources_file"])
-        result = self._objects.client_for(target).get(key, byte_limit=limit)
+        result = self._objects.get(target, key, byte_limit=limit)
 
         if result.is_refusal:
             # NOT_FOUND, DENIED, TOO_LARGE — the document or the credential is
@@ -670,9 +670,9 @@ class EntryFetcher:
         content = result.content or b""
         computed = "sha256:" + hashlib.sha256(content).hexdigest()
         if digest is not None and computed != digest:
-            # The pin, checked here rather than in the client: a plugin has no
-            # business knowing what a manifest digest is, and this is the one
-            # place both roads agree on what "the declared bytes" means.
+            # The pin, checked here rather than in the client: a transport has
+            # no business knowing what a manifest digest is, and this is the
+            # one place both roads agree on what "the declared bytes" means.
             raise EntryFetchError(
                 f"the object's bytes are {computed}, the entry declared {digest}"
             )

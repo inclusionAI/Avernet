@@ -116,9 +116,10 @@ class SourceCredentialWrite(BaseModel):
     )
     region: str | None = Field(
         default=None,
-        description="Region for an 'oss_aksk' credential, passed to the "
-        "object store's client. Omit to take that client's own default. Not "
-        "valid on other types.",
+        description="Region for an 'oss_aksk' credential, for example "
+        "'cn-hangzhou'. Required on that type: the object store's signature "
+        "scheme scopes every signature to a region and a credential without "
+        "one cannot read anything. Not valid on other types.",
     )
     secret: str = Field(
         description="The secret value itself — the header token, or the "
@@ -174,8 +175,10 @@ class SourceCredentialDetail(SourceCredential):
     )
     region: str | None = Field(
         default=None,
-        description="The region of an 'oss_aksk' credential; null when the "
-        "client's own default applies.",
+        description="The region of an 'oss_aksk' credential; null on a "
+        "'header' credential, and on an 'oss_aksk' row written before the "
+        "region became required (such a row fails every read until it is "
+        "rotated with one).",
     )
     allowed_prefixes: list[str] = Field(
         description="Absolute HTTPS prefixes this credential's presentation "

@@ -41,7 +41,7 @@ from ._fakes import (
     FakeManifestContent,
     make_context,
 )
-from agentclaw.community.plugins.local.object_store_client import InMemoryObjectStoreClientFactory
+from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 
 
 def _session(sources=None) -> SourceSession:
@@ -54,7 +54,7 @@ def _session(sources=None) -> SourceSession:
 def pipeline() -> EntryFetcher:
     return EntryFetcher(
         FakeGuardedFetcher(responses={}), FakeManifestContent(), FakeCredentials()
-    , InMemoryObjectStoreClientFactory())
+    , FakeObjectStore())
 
 
 # ── the table ────────────────────────────────────────────────────────────────
@@ -264,7 +264,7 @@ def test_a_git_source_naming_an_object_store_credential_fails_one_entry():
         FakeGuardedFetcher(responses={}),
         FakeManifestContent(),
         _WrongTypeCredentials(),
-    InMemoryObjectStoreClientFactory(),)
+    FakeObjectStore(),)
     ctx = make_context(
         source_session=_session(
             {

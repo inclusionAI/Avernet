@@ -16,10 +16,10 @@ import pytest
 from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
     GitDelivery,
 )
-from agentclaw.community.plugin_api.object_store_client import ObjectStoreTarget
-from agentclaw.community.plugins.local.object_store_client import (
-    InMemoryObjectStoreClientFactory,
+from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
+    ObjectStoreTarget,
 )
+from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetchError,
     EntryFetcher,
@@ -43,7 +43,6 @@ from ._fakes import (
     fetched_object,
     make_context,
 )
-from agentclaw.community.plugins.local.object_store_client import InMemoryObjectStoreClientFactory
 
 BODY = b"soul-or-skill-bytes"
 
@@ -93,11 +92,10 @@ class _AksKCredentials(FakeCredentials):
 
 @pytest.fixture
 def objects_rig():
-    """A pipeline wired to an in-memory object store — the local impl the
-    Rule 25 conformance suite uses as its executable spec, so these consumer
-    tests and that suite agree on what the plugin does."""
+    """A pipeline wired to an in-memory object store — the test double that
+    gives every ``ObjectFetchStatus`` a shape a consumer test can drive."""
     fetcher = FakeGuardedFetcher(responses={})
-    objects = InMemoryObjectStoreClientFactory()
+    objects = FakeObjectStore()
     pipeline = EntryFetcher(
         fetcher, FakeManifestContent(), _AksKCredentials(), objects
     )
@@ -109,7 +107,7 @@ def rig():
     content = FakeManifestContent()
     fetcher = FakeGuardedFetcher(responses={URL: fetched_object(BODY, url=URL)})
     credentials = FakeCredentials()
-    return content, fetcher, credentials, EntryFetcher(fetcher, content, credentials, InMemoryObjectStoreClientFactory())
+    return content, fetcher, credentials, EntryFetcher(fetcher, content, credentials, FakeObjectStore())
 
 
 def test_placeholders_substitute_before_the_transport_sees_the_url(rig):
@@ -189,7 +187,7 @@ def test_a_pinned_entry_with_a_matching_receipt_survives_a_dead_source(rig):
     _store_serving(content)
     # The source is unreachable — and it will never be asked.
     failing = FakeGuardedFetcher(failures={URL: FetchFailedError("source transport failed")})
-    pipeline_failing = EntryFetcher(failing, content, FakeCredentials(), InMemoryObjectStoreClientFactory())
+    pipeline_failing = EntryFetcher(failing, content, FakeCredentials(), FakeObjectStore())
 
     result = pipeline_failing.fetch(
         make_context(),
@@ -208,7 +206,7 @@ def test_a_pinned_entry_with_a_matching_receipt_survives_a_dead_source(rig):
 def test_keep_last_with_no_receipt_fails(rig):
     _, fetcher, _, _ = rig
     failing = FakeGuardedFetcher(failures={URL: FetchFailedError("source answered 404")})
-    pipeline = EntryFetcher(failing, FakeManifestContent(), FakeCredentials(), InMemoryObjectStoreClientFactory())
+    pipeline = EntryFetcher(failing, FakeManifestContent(), FakeCredentials(), FakeObjectStore())
 
     with pytest.raises(EntryFetchError) as excinfo:
         pipeline.fetch(
@@ -228,7 +226,7 @@ def test_keep_last_with_an_unpinned_entry_falls_back_to_the_last_digest(rig):
     content, _, _, _ = rig
     _store_serving(content)
     failing = FakeGuardedFetcher(failures={URL: FetchFailedError("source transport failed")})
-    pipeline = EntryFetcher(failing, content, FakeCredentials(), InMemoryObjectStoreClientFactory())
+    pipeline = EntryFetcher(failing, content, FakeCredentials(), FakeObjectStore())
 
     result = pipeline.fetch(
         make_context(), source_url=URL, category="identity", keep_last=True
@@ -262,7 +260,7 @@ def test_keep_last_never_supplies_bytes_that_disagree_with_a_pin(rig):
 def test_a_fetch_failure_without_keep_last_fails_the_entry(rig):
     content, _, credentials, _ = rig
     failing = FakeGuardedFetcher(failures={URL: FetchFailedError("source answered 503")})
-    pipeline = EntryFetcher(failing, content, credentials, InMemoryObjectStoreClientFactory())
+    pipeline = EntryFetcher(failing, content, credentials, FakeObjectStore())
 
     with pytest.raises(EntryFetchError) as excinfo:
         pipeline.fetch(make_context(), source_url=URL, category="identity")
@@ -278,7 +276,7 @@ def test_neither_the_error_nor_the_store_carries_a_credential_value(rig):
     failing = FakeGuardedFetcher(
         failures={URL: FetchFailedError("source answered 401")}
     )
-    pipeline_failing = EntryFetcher(failing, content, credentials, InMemoryObjectStoreClientFactory())
+    pipeline_failing = EntryFetcher(failing, content, credentials, FakeObjectStore())
 
     with pytest.raises(EntryFetchError) as excinfo:
         pipeline_failing.fetch(
@@ -319,7 +317,7 @@ def test_a_missing_credential_fails_with_the_name_and_no_binding(rig):
     fetcher = FakeGuardedFetcher(responses={URL: fetched_object(BODY, url=URL)})
     pipeline = EntryFetcher(
         fetcher, content, FakeCredentials(missing={"ghost"})
-    , InMemoryObjectStoreClientFactory())
+    , FakeObjectStore())
 
     with pytest.raises(EntryFetchError) as excinfo:
         pipeline.fetch(
@@ -353,7 +351,7 @@ def test_a_prefix_escape_refusal_becomes_the_same_entry_error(rig):
             )
         }
     )
-    pipeline = EntryFetcher(refusing, FakeManifestContent(), FakeCredentials(), InMemoryObjectStoreClientFactory())
+    pipeline = EntryFetcher(refusing, FakeManifestContent(), FakeCredentials(), FakeObjectStore())
 
     with pytest.raises(EntryFetchError) as excinfo:
         pipeline.fetch(
@@ -371,7 +369,7 @@ def test_a_refused_transport_becomes_the_same_entry_error(rig):
     refused = FakeGuardedFetcher(
         failures={URL: FetchRefusedError("non-public address for host")}
     )
-    pipeline = EntryFetcher(refused, content, credentials, InMemoryObjectStoreClientFactory())
+    pipeline = EntryFetcher(refused, content, credentials, FakeObjectStore())
 
     with pytest.raises(EntryFetchError) as excinfo:
         pipeline.fetch(make_context(), source_url=URL, category="identity")
@@ -470,7 +468,7 @@ def test_a_refusal_never_triggers_keep_last_even_when_a_receipt_exists(rig):
     refusing = FakeGuardedFetcher(
         failures={URL: FetchRefusedError("non-public address for host")}
     )
-    pipeline = EntryFetcher(refusing, content, credentials, InMemoryObjectStoreClientFactory())
+    pipeline = EntryFetcher(refusing, content, credentials, FakeObjectStore())
 
     with pytest.raises(EntryFetchError) as excinfo:
         pipeline.fetch(
@@ -494,7 +492,7 @@ def test_a_keep_last_read_failure_names_both_halves(rig):
     failing = FakeGuardedFetcher(
         failures={URL: FetchFailedError("source transport failed")}
     )
-    pipeline = EntryFetcher(failing, content, credentials, InMemoryObjectStoreClientFactory())
+    pipeline = EntryFetcher(failing, content, credentials, FakeObjectStore())
 
     with pytest.raises(EntryFetchError) as excinfo:
         pipeline.fetch(
@@ -522,7 +520,7 @@ def test_a_time_exhausted_budget_refuses_before_touching_the_network(rig):
     ctx = _with_budget(ctx, ApplyFetchBudget(deadline=0.0, total_bytes=10**9))
 
     with pytest.raises(EntryFetchError) as excinfo:
-        EntryFetcher(fetcher, content, credentials, InMemoryObjectStoreClientFactory()).fetch(
+        EntryFetcher(fetcher, content, credentials, FakeObjectStore()).fetch(
             ctx, source_url=URL, digest=None, category="identity"
         )
     assert "exhausted (time)" in excinfo.value.reason
@@ -539,7 +537,7 @@ def test_a_byte_exhausted_budget_refuses_the_next_entry(rig):
 
     budget = ApplyFetchBudget(deadline=1e18, total_bytes=len(BODY), clock=lambda: 0.0)
     ctx = _with_budget(make_context(), budget)
-    pipeline = EntryFetcher(fetcher, content, credentials, InMemoryObjectStoreClientFactory())
+    pipeline = EntryFetcher(fetcher, content, credentials, FakeObjectStore())
 
     first = pipeline.fetch(ctx, source_url=URL, digest=None, category="identity")
     assert first.content == BODY  # the first fetch fits exactly

@@ -19,6 +19,7 @@ import tarfile
 import time
 
 import jwt
+from injector import singleton
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.api.bot_config_manifest_apply_service import (
@@ -545,8 +546,11 @@ def _seed_bot_with_resource_manifest(world) -> None:
     from agentclaw.community.core.services.resource_file_service import (
         ResourceFileService,
     )
-    from agentclaw.community.plugin_api.object_store_client import (
-        ObjectStoreClientFactory,
+    from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
+        AliyunObjectStore,
+    )
+    from tests.community.core.bot_config_manifest.apply._fakes import (
+        FakeObjectStore,
     )
 
     archive = _TOOL_ARCHIVE
@@ -573,6 +577,11 @@ def _seed_bot_with_resource_manifest(world) -> None:
     async def exists(_self, **_kwargs):
         return False
 
+    # The object store is doubled BEFORE the fetch funnel is first resolved:
+    # the funnel is a singleton built over whatever store the injector holds
+    # at that moment, and a fake bound afterwards would never be consulted.
+    objects = FakeObjectStore()
+    world.injector.binder.bind(AliyunObjectStore, to=objects, scope=singleton)
     bind_overrides(
         world,
         EntryFetcher,
@@ -597,17 +606,19 @@ def _seed_bot_with_resource_manifest(world) -> None:
     # before reading anything: the endpoint and the key pair are the
     # credential's, not the document's. That ordering is the point, so the
     # name the manifest cites has to exist even when the read is doubled.
-    # The oss road is left REAL end to end here — credential resolution, the
-    # client factory, the read — with only the bucket's contents seeded. That
-    # is the point of an endpoint test: the URL transport's double
-    # (``fetch``) does not stand in for it, because the object road does not
-    # go through the URL transport at all.
-    world.get(ObjectStoreClientFactory).put("mirror", "tools.tgz", archive)
+    # The oss road is left REAL up to the wire here — credential resolution,
+    # the composed key, the read through the funnel — with only the store
+    # itself doubled and the bucket's contents seeded. That is the point of an
+    # endpoint test: the URL transport's double (``fetch``) does not stand in
+    # for it, because the object road does not go through the URL transport
+    # at all.
+    objects.put("mirror", "tools.tgz", archive)
     world.get(SourceCredentialServiceProtocol).put(
         name="oss-cred",
         credential_type="oss_aksk",
         access_key_id="LTAI5tEndpointTest",
         endpoint="https://objects.example.test",
+        region="cn-hangzhou",
         secret="the-secret-half",
         allowed_prefixes=[],
         owner_app_id=1,

@@ -36,3 +36,29 @@ def test_credential_service_receives_the_deployment_transport_allowlist(
     service = test_injector.get(SourceCredentialServiceProtocol)
 
     assert tuple(service._endpoint_allow_hosts) == declared
+
+
+def test_the_entry_fetcher_reads_the_oss_road_through_the_one_object_store(
+    test_injector,
+) -> None:
+    """The ``oss`` road has one implementation and one instance.
+
+    ``EntryFetcher`` is the funnel every fetch-consuming category shares, and
+    it takes the object store by constructor — a plain core class since the
+    plugin seam went, exactly as it takes ``GuardedFetcher``. Asserted on the
+    wired instance rather than the module source: what matters is that the
+    singleton the injector binds is the one the funnel reads through, so a
+    test that substitutes the store on the injector substitutes it for every
+    apply.
+    """
+    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+        EntryFetcher,
+    )
+    from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
+        AliyunObjectStore,
+    )
+
+    store = test_injector.get(AliyunObjectStore)
+
+    assert isinstance(store, AliyunObjectStore)
+    assert test_injector.get(EntryFetcher)._objects is store

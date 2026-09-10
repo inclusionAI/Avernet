@@ -59,6 +59,15 @@ _TERM_ALLOWLIST_PREFIXES: dict[str, str] = {
 _TERM_ALLOWLIST_FILES = {
     "core/service_bot/services/baas_service.py": "B6 — BaaS outbound (Mist/layotto)",
     "core/harness/services/llm.py": "B5 — harness LLM token via the legacy Mist secret_utils path",
+    # The manifest ``oss`` road is a transport, not a B3 data-plane concern:
+    # it reads a *tenant's* bucket under the tenant's credential, and the one
+    # store that matters serves Aliyun's native signature scheme, which no
+    # neutral S3 client can speak. One implementation, so no plugin seam and
+    # no neutral name to hide the vendor behind (the guard matches the bare
+    # product name in its import line too). Its consumer names the class it
+    # takes, exactly as it names ``GuardedFetcher``.
+    "core/bot_config_manifest/fetch/object_store.py": "manifest oss road — Aliyun-native transport (oss2)",
+    "core/bot_config_manifest/apply/entry_fetch.py": "manifest oss road — constructor-injects AliyunObjectStore",
 }
 
 
