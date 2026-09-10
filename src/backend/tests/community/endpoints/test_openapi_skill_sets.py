@@ -702,6 +702,7 @@ def _seed_mcp_member(world) -> None:
     _seed(world)
     with avernet_tenant_scope(_TENANT):
         world.get(CapabilityDesiredStateRepositoryProtocol).add_mcp(
+            platform_default_codes=frozenset(),
             bot_id=_BOT_ID,
             owner_id=_OWNER,
             set_id="1",
@@ -776,6 +777,22 @@ def list_mcps_error():
     extra=(_assert_mcp_catalog_metadata_persisted,),
 )
 def add_mcp_happy():
+    pass
+
+
+@_case(
+    "PUT",
+    "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}",
+    "rejects_code_policy_default_mcp",
+    ExpectError(status=409, json_contains={"code": 409210}),
+    seed=_seed_mcp_catalog,
+    path_params={
+        "bot_id": _BOT_ID, "set_id": "1",
+        "server_code": "mcp.ant.arkai.dimamcpserver",
+    },
+    extra=(_assert_no_mcp_membership,),
+)
+def add_platform_default_mcp_rejected():
     pass
 
 

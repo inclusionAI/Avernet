@@ -4384,6 +4384,40 @@ async def test_default_mcp_exclusion_passes_the_platform_default_policy():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("active", [False, True])
+async def test_ordinary_set_rejects_platform_default_before_mutation(active):
+    class Repository(_Repository):
+        def get_set(self, **kwargs):
+            return {"id": "set-1", "is_default": False, "is_active": active}
+
+    repository = Repository()
+    runtime = _ProjectionCountingRuntime()
+    service = _default_wire_service(repository, runtime)
+    with pytest.raises(SkillSetControlPlaneConflictError, match="RESOURCE_MANAGED_BY_PLATFORM_POLICY"):
+        await service.add_mcp(
+            bot_id="bot-1", owner_id="true-owner", user_id="true-owner",
+            set_id="set-1", server_code="mcp.ant.arkai.dimamcpserver",
+        )
+    assert repository.add_mcp_calls == []
+    assert runtime.projections == 0
+
+
+@pytest.mark.asyncio
+async def test_ordinary_set_policy_lookup_failure_does_not_write():
+    def unavailable(_bot_id):
+        raise RuntimeError("policy unavailable")
+
+    repository = _Repository()
+    service = _default_wire_service(repository, ext_info_provider=unavailable)
+    with pytest.raises(RuntimeError, match="policy unavailable"):
+        await service.add_mcp(
+            bot_id="bot-1", owner_id="true-owner", user_id="true-owner",
+            set_id="set-1", server_code="mcp.new",
+        )
+    assert repository.add_mcp_calls == []
+
+
+@pytest.mark.asyncio
 async def test_default_mcp_exclusion_propagates_a_template_context_failure():
     """A failed ext lookup is an error, never a silently narrower gate.
 
