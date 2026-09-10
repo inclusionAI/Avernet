@@ -472,6 +472,7 @@ export type RepairBot = {
 
 export type RepairIssue = {
   symptom: string
+  sessionIds?: string[]
   traceId: string | null
   relatedTaskId: string | null
   errorText: string | null

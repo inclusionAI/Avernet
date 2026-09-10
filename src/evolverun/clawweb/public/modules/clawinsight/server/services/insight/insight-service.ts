@@ -1075,6 +1075,12 @@ export class InsightService {
     };
   }
 
+  async getGovernanceAction(improvementIdValue: number): Promise<Record<string, unknown>> {
+    const detail = await this.improvementRepo.getDetailById(improvementIdValue);
+    if (!detail) throw new InsightNotFoundError("改进项不存在");
+    return governanceActionRecord(detail);
+  }
+
   listVerificationCandidates(limit: number) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
       throw new InsightValidationError("limit 必须是 1 到 200 的整数");

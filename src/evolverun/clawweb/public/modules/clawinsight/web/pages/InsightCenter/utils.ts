@@ -1,5 +1,13 @@
 import type { CompletionState } from '../../types/insight'
 
+type BotNameOption = { botId: string; botName: string; ownerUserId?: string }
+
+/** Resolve display names at the same (owner, bot) granularity as Insight data. */
+export function resolveBotName(options: BotNameOption[], ownerUserId: string | undefined, botId: string): string {
+  const scoped = options.find((bot) => bot.botId === botId && bot.ownerUserId === ownerUserId)
+  return scoped?.botName || botId
+}
+
 export const failureClassText: Record<string, string> = {
   TOOL_FAILURE: '工具或环境失败',
   USER_INTERRUPTION: '用户中断',
