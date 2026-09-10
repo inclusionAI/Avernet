@@ -375,6 +375,31 @@ def test_permanent_prepare_failure_does_not_hide_other_recoverable_item(
     assert "CENTER_CONTENT_PACKAGE_CONFLICT" in caplog.text
 
 
+def test_permanent_prepare_failure_for_old_version_is_discarded(caplog) -> None:
+    projector = _Projector()
+    projector.apply_plan = AsyncMock(
+        return_value=RuntimeProjectionResult.pending(
+            code="CENTER_CONTENT_PACKAGE_PENDING",
+            reason="new exact version is not ready",
+        )
+    )
+    distribution = MagicMock()
+    distribution.prepare.side_effect = lambda identity: (
+        CenterContentUnavailablePackage(
+            identity,
+            code="CENTER_CONTENT_PACKAGE_CONFLICT",
+            retryable=False,
+        )
+    )
+
+    outcome = _handler(
+        projector=projector, distribution=distribution
+    ).handle({"owner_id": "owner-a", "bot_id": "bot-a"})
+
+    assert isinstance(outcome, Reschedule)
+    assert "CENTER_CONTENT_PACKAGE_CONFLICT" not in caplog.text
+
+
 def test_handler_keeps_fast_polling_recoverable_item_beside_permanent_issue() -> None:
     projector = _Projector()
     projector.apply_plan = AsyncMock(
