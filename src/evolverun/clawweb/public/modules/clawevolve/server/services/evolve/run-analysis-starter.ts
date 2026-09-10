@@ -270,7 +270,13 @@ export function createFailedRunAutoAnalysisObserver(input: {
       : enabled.has("*") || enabled.has(run.workflow_id);
     if (!isEnabled) return;
     const originParts = String(run.origin_bot_id ?? "").split(":");
-    const userId = String(run.user_id ?? originParts[1] ?? "").trim();
+    // Automated runs can record a service caller (e.g. gateway-client) as
+    // user_id. Bot permissions and runtime resolution need the origin owner,
+    // not that caller. Keep the original run identity unchanged for auditing.
+    const originOwnerId = originParts.length === 2 && originParts[0].trim()
+      ? originParts[1].trim()
+      : "";
+    const userId = originOwnerId || String(run.user_id ?? "").trim();
     if (!userId) {
       console.warn(`[task-guard][auto-analysis] skipped flow=${flowId}: run user is missing`);
       return;
