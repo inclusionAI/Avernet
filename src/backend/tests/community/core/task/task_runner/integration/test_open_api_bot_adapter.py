@@ -32,14 +32,14 @@ def test_parse_bot_id():
 
 class _KeyNoPrefix:
     api_key = "ak1234567890"
-    api_key_prefix = ""    # 未设置 → 回落取 api_key 前 10 位
+    api_key_prefix = ""    # 未设置 → 回落取 api_key 前 8 位
     base_url = "http://b:8890"
     cookie = "sess=1"
     referer = "http://b/"
 
 
 def test_ensure_grant_falls_back_to_api_key_prefix_when_unset():
-    # api_key_prefix 为空时,URL 用 api_key 前 N 位(默认 10,与 _Key.ak12345678 约定一致)作 prefix
+    # api_key_prefix 为空时，URL 使用 api_key 前 8 位作为 prefix。
     seen: dict = {}
 
     def h(req):
@@ -151,6 +151,22 @@ def test_send_and_wait_returns_completed_run():
     assert run["status"] == "COMPLETED"
     assert run["result"]["content"] == "ans"
     assert calls["n"] >= 2  # 先 RUNNING 再 COMPLETED,至少轮询 2 次
+
+
+def test_send_and_wait_async_uses_optional_defaults():
+    """异步便捷接口只要求 bot_id/message；其余参数应保持可选默认值。"""
+    def h(req):
+        if req.url.path == "/openapi/v1/messages" and req.method == "POST":
+            return httpx.Response(200, json={"data": {"message_id": "mid_default"}})
+        if req.url.path.endswith("/allowed-bots") and req.method == "GET":
+            return httpx.Response(200, json={"data": {"allowed_bots": ["bot9:ent1"]}})
+        if req.url.path == "/openapi/v1/messages/mid_default" and req.method == "GET":
+            return httpx.Response(200, json={"data": {"status": "COMPLETED"}})
+        return httpx.Response(404)
+
+    run = _run(_adapter(h).send_and_wait_async(bot_id="bot9:ent1", message="hi"))
+
+    assert run["status"] == "COMPLETED"
 
 
 def test_send_and_wait_timeout_raises():

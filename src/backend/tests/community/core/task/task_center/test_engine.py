@@ -1086,3 +1086,23 @@ class TestPrepareModeCoverageSerial:
         node = svc._get_node(graph, "c1")
         assert node.run_info.extend_props.get("dispatch_error") is not None
         assert node.status == Status.PENDING
+
+    def test_start_run_exception_clears_assignment_and_keeps_node_pending(self, svc, graph):
+        """执行后端异常不能中断整轮；节点应清理在途执行者并留待 harness 重派。"""
+        class _RaisingRunner(StubRunner):
+            async def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
+                self.run_calls.append(list(toDoTaskList))
+                raise RuntimeError("transport unavailable")
+
+        planner = StubPlanner(lambda _graph: [_child("c1")])
+        runner = _RaisingRunner()
+        eng = _engine(svc, planner=planner, runner=runner)
+
+        _run(eng.on_execute("t1"))
+
+        node = svc._get_node(graph, "c1")
+        assert len(runner.run_calls) == 1
+        assert node.status == Status.PENDING
+        assert node.run_info.run_mode in (None, "")
+        assert node.run_info.assignee in (None, "")
+        assert node.run_info.extend_props["dispatch_error"] == "start_run_failed"
