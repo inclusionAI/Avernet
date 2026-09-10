@@ -15,6 +15,11 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     RuntimeProjectionStatus,
 )
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
+from agentclaw.community.log import get_logger
+
+
+logger = get_logger()
+_SKILL_ISSUE_PREFIXES = ("CENTER_CONTENT_", "SKILL_", "SKILLS_POOL_")
 
 
 class RecoveringBotRuntimeProjector(BotRuntimeProjectorProtocol):
@@ -49,12 +54,18 @@ class RecoveringBotRuntimeProjector(BotRuntimeProjectorProtocol):
         retired_mappings: Sequence[PoolSkillMapping] = (),
         scope: ProjectionScope,
     ) -> RuntimeProjectionResult:
-        result = await self._delegate.project(
-            bot_id=bot_id,
-            owner_id=owner_id,
-            retired_mappings=retired_mappings,
-            scope=scope,
-        )
+        try:
+            result = await self._delegate.project(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                retired_mappings=retired_mappings,
+                scope=scope,
+            )
+        except Exception:
+            self._ensure_after_projection_exception(
+                scope=scope, bot_id=bot_id, owner_id=owner_id
+            )
+            raise
         self._ensure_if_unresolved(
             result=result, scope=scope, bot_id=bot_id, owner_id=owner_id
         )
@@ -82,11 +93,17 @@ class RecoveringBotRuntimeProjector(BotRuntimeProjectorProtocol):
         retired_mappings: Sequence[PoolSkillMapping] = (),
         scope: ProjectionScope,
     ) -> RuntimeProjectionResult:
-        result = await self._delegate.apply_plan(
-            plan=plan,
-            retired_mappings=retired_mappings,
-            scope=scope,
-        )
+        try:
+            result = await self._delegate.apply_plan(
+                plan=plan,
+                retired_mappings=retired_mappings,
+                scope=scope,
+            )
+        except Exception:
+            self._ensure_after_projection_exception(
+                scope=scope, bot_id=plan.bot_id, owner_id=plan.owner_id
+            )
+            raise
         self._ensure_if_unresolved(
             result=result,
             scope=scope,
@@ -110,12 +127,49 @@ class RecoveringBotRuntimeProjector(BotRuntimeProjectorProtocol):
         bot_id: str,
         owner_id: str,
     ) -> None:
-        if not scope.skills or result.status in {
-            RuntimeProjectionStatus.CONVERGED,
-            RuntimeProjectionStatus.SKIPPED,
-        }:
+        if not self._skill_projection_is_unresolved(result=result, scope=scope):
             return
         self._recovery.ensure(owner_id=owner_id, bot_id=bot_id)
+
+    @staticmethod
+    def _skill_projection_is_unresolved(
+        *, result: RuntimeProjectionResult, scope: ProjectionScope
+    ) -> bool:
+        if not scope.skills:
+            return False
+        skill_status = result.components.get("skills")
+        if skill_status is not None:
+            return skill_status not in {
+                RuntimeProjectionStatus.CONVERGED,
+                RuntimeProjectionStatus.SKIPPED,
+            }
+        if any(
+            issue.resource_type == "SKILL"
+            or issue.code.startswith(_SKILL_ISSUE_PREFIXES)
+            for issue in result.issues
+        ):
+            return True
+        if scope.mcp:
+            return False
+        return result.status not in {
+            RuntimeProjectionStatus.CONVERGED,
+            RuntimeProjectionStatus.SKIPPED,
+        }
+
+    def _ensure_after_projection_exception(
+        self, *, scope: ProjectionScope, bot_id: str, owner_id: str
+    ) -> None:
+        if not scope.skills:
+            return
+        try:
+            self._recovery.ensure(owner_id=owner_id, bot_id=bot_id)
+        except Exception:
+            logger.exception(
+                "[RecoveringBotRuntimeProjector] recovery ensure failed after "
+                "projection exception owner_id=%s bot_id=%s",
+                owner_id,
+                bot_id,
+            )
 
 
 __all__ = ["RecoveringBotRuntimeProjector"]
