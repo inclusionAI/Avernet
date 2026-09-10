@@ -229,7 +229,7 @@ function ownerHeaders(
   return { "X-User-Id": "dev_local", ...extra };
 }
 
-const AGENT_SECRET = "test-only-insight-agent-secret";
+const agentSecret = "test-only-insight-agent-secret";
 
 /**
  * Signs a request the same way the production Agent client must. `path` is the
@@ -249,7 +249,7 @@ function signedAgentHeaders(input: {
   const content = input.body && typeof input.body === "object" ? JSON.stringify(input.body) : "";
   const bodyDigest = createHash("sha256").update(content).digest("hex");
   const canonical = [input.method.toUpperCase(), input.path, String(timestamp), nonce, bodyDigest].join("\n");
-  const signature = createHmac("sha256", input.secret ?? AGENT_SECRET).update(canonical).digest("hex");
+  const signature = createHmac("sha256", input.secret ?? agentSecret).update(canonical).digest("hex");
   return {
     "X-Agent-Id": agentId,
     "X-Agent-Timestamp": String(timestamp),
@@ -3547,7 +3547,7 @@ describe("Insight Center local contract", () => {
     }, null, { agentAuthorizer: lockedAuthorizer });
 
     const scopedAuthorizer = new InsightAgentAuthorizer({
-      clients: { "insight-bot": { secret: AGENT_SECRET, scopes: ["action.read", "action.review"] } },
+      clients: { "insight-bot": { secret: agentSecret, scopes: ["action.read", "action.review"] } },
       allowLocalUnsigned: false,
     });
     await withDbInsightServer(async ({ baseUrl: isolatedBaseUrl }) => {
