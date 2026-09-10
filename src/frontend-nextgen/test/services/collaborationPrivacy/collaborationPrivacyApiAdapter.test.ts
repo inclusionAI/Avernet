@@ -101,7 +101,7 @@ describe('collaborationPrivacyApiAdapter', () => {
     listMyBots.mockResolvedValue({
       code: 20000,
       data: {
-        items: [createPhysicalBot({ bot_id: 'bot-1:447147' })],
+        items: [createPhysicalBot({ bot_id: 'bot-1:900004' })],
         total: 1,
         offset: 0,
         limit: 20,
@@ -109,11 +109,11 @@ describe('collaborationPrivacyApiAdapter', () => {
     });
 
     await expect(
-      enrichedAdapter.listManagedBots({ user_id: '447147' }, new AbortController().signal),
+      enrichedAdapter.listManagedBots({ user_id: '900004' }, new AbortController().signal),
     ).resolves.toMatchObject({
-      items: [expect.objectContaining({ bot_id: 'bot-1:447147', engine: 'openclaw' })],
+      items: [expect.objectContaining({ bot_id: 'bot-1:900004', engine: 'openclaw' })],
     });
-    expect(listBots).toHaveBeenCalledWith({ page: 1, page_size: 100, user_id: '447147' }, expect.any(AbortSignal));
+    expect(listBots).toHaveBeenCalledWith({ page: 1, page_size: 100, user_id: '900004' }, expect.any(AbortSignal));
   });
 
   it('keeps the managed Bot list usable when the optional /bots engine enrichment fails', async () => {
@@ -142,7 +142,7 @@ describe('collaborationPrivacyApiAdapter', () => {
       data: { items: [createPhysicalBot()], total: 1, offset: 0, limit: 20 },
     });
 
-    await expect(enrichedAdapter.listManagedBots({ user_id: '447147' })).resolves.toMatchObject({
+    await expect(enrichedAdapter.listManagedBots({ user_id: '900004' })).resolves.toMatchObject({
       items: [expect.objectContaining({ bot_id: 'bot-1' })],
       total: 1,
       offset: 0,

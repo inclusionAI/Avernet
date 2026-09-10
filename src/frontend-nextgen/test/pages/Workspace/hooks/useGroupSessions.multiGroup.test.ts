@@ -170,7 +170,7 @@ it('createSessionIn creates in the given group and selects group + session', asy
   await waitFor(() => expect(result.current.sessionsByGroupId.g2).toHaveLength(0));
 
   const created = await act(async () => result.current.createSessionIn('g2', '跨群新建'));
-  expect(ss.createNewSession).toHaveBeenCalledWith('g2', '跨群新建', undefined);
+  expect(ss.createNewSession).toHaveBeenCalledWith('g2', '跨群新建', undefined, undefined);
   expect(created?.sessionId).toBe('g2-s9');
   expect(result.current.sessionsByGroupId.g2.map((s) => s.sessionId)).toContain('g2-s9');
   expect(useWorkspaceStore.getState().selectedGroupId).toBe('g2');

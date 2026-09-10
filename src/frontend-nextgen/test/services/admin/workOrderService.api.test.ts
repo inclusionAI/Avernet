@@ -29,12 +29,12 @@ function setUserIdentity(value: { userId: string; displayName?: string | null } 
 
 beforeEach(() => {
   jest.resetAllMocks();
-  // 命中缓存用例取能力 user_id='327325'；未就绪用例（setUserIdentity(null)）走 ensureUserId 补拉，默认失败降级为 error（不发业务请求）。
+  // 命中缓存用例取能力 user_id='900003'；未就绪用例（setUserIdentity(null)）走 ensureUserId 补拉，默认失败降级为 error（不发业务请求）。
   (identityService.loadIdentities as unknown as jest.Mock<any>).mockResolvedValue({
     ok: false,
     error: { code: 'IDENTITY_LOAD_FAILED', friendlyMessage: '', canRetry: true },
   });
-  setUserIdentity({ userId: '327325', displayName: null });
+  setUserIdentity({ userId: '900003', displayName: null });
 });
 
 describe('workOrderService.list 参数对齐 clawweb=Avernet', () => {
@@ -42,7 +42,7 @@ describe('workOrderService.list 参数对齐 clawweb=Avernet', () => {
     wc.listWorkOrders.mockResolvedValue({ success: true, data: { items: [], total: 0 } });
     await workOrderService.list({ view: 'initiated_mine', category: 'NOTIFICATION', page: 2, pageSize: 10 });
     expect(wc.listWorkOrders).toHaveBeenCalledWith({
-      user_id: '327325',
+      user_id: '900003',
       page_no: 2,
       page_size: 10,
       query_type: 'INITIATED_BY_ME',
@@ -59,7 +59,7 @@ describe('workOrderService.list 参数对齐 clawweb=Avernet', () => {
         item_type: 'APPROVAL',
         page_no: 1,
         page_size: 20,
-        user_id: '327325',
+        user_id: '900003',
       }),
     );
   });
@@ -87,7 +87,7 @@ describe('workOrderService.approve / reject → 统一审批入口', () => {
     expect(wc.submitWorkOrderApproval).toHaveBeenCalledWith(
       30001,
       { decision: 'APPROVED', review_remark: null },
-      { user_id: '327325' },
+      { user_id: '900003' },
     );
   });
 
@@ -97,7 +97,7 @@ describe('workOrderService.approve / reject → 统一审批入口', () => {
     expect(wc.submitWorkOrderApproval).toHaveBeenCalledWith(
       30001,
       { decision: 'APPROVED', review_remark: '同意' },
-      { user_id: '327325' },
+      { user_id: '900003' },
     );
   });
 
@@ -107,25 +107,25 @@ describe('workOrderService.approve / reject → 统一审批入口', () => {
     expect(wc.submitWorkOrderApproval).toHaveBeenCalledWith(
       30001,
       { decision: 'REJECTED', review_remark: '理由不充分' },
-      { user_id: '327325' },
+      { user_id: '900003' },
     );
   });
 
   it('approve 传 user_name(花名) query（同 requestJoin 契约，审批人随 user_id 写入工单）', async () => {
     // 能力命中花名缓存（不调 loadIdentities）。
-    setUserIdentity({ userId: '327325', displayName: '风太' });
+    setUserIdentity({ userId: '900003', displayName: '示例用户' });
     wc.submitWorkOrderApproval.mockResolvedValue({ success: true, data: {} });
     await workOrderService.approve(30001);
     expect(wc.submitWorkOrderApproval).toHaveBeenCalledWith(
       30001,
       { decision: 'APPROVED', review_remark: null },
-      { user_id: '327325', user_name: '风太' },
+      { user_id: '900003', user_name: '示例用户' },
     );
   });
 
   it('getDetail 注入 user_id', async () => {
     wc.getWorkOrderDetail.mockResolvedValue({ success: true, data: { work_order_id: 30001, status: 'PENDING' } });
     await workOrderService.getDetail(30001);
-    expect(wc.getWorkOrderDetail).toHaveBeenCalledWith(30001, { user_id: '327325' });
+    expect(wc.getWorkOrderDetail).toHaveBeenCalledWith(30001, { user_id: '900003' });
   });
 });

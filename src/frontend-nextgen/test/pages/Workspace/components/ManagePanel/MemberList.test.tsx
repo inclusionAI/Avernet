@@ -156,4 +156,73 @@ describe('MemberList', () => {
     expect(screen.getByText('禁言')).toHaveClass('bg-muted', 'text-muted-foreground');
     expect(screen.getByText('旁观')).toHaveClass('bg-muted', 'text-muted-foreground');
   });
+
+  it('human 成员回显 messageViewScope 时展示对应视角标签', () => {
+    renderMembers(
+      [
+        {
+          ...baseParticipant,
+          actorId: 'human-participant',
+          kind: 'human',
+          name: '参与者用户',
+          role: 'member',
+          mode: 'present',
+          messageViewScope: 'participant',
+        },
+        {
+          ...baseParticipant,
+          actorId: 'human-full',
+          kind: 'human',
+          name: '完整视角用户',
+          role: 'member',
+          mode: 'present',
+          messageViewScope: 'full',
+        },
+      ],
+      { groupKind: 'task_master_slave', showMode: true },
+    );
+
+    expect(memberRow('human-participant').textContent).toContain('参与者视角');
+    expect(memberRow('human-full').textContent).toContain('完整视角');
+    // 视角标签色：full 主色蓝（primary），participant 灰（neutral）。
+    expect(screen.getByText('完整视角')).toHaveClass('bg-primary/10', 'text-primary');
+    expect(screen.getByText('参与者视角')).toHaveClass('bg-muted', 'text-muted-foreground');
+  });
+
+  it('human 成员无 messageViewScope 回显时不展示视角标签', () => {
+    renderMembers(
+      [
+        {
+          ...baseParticipant,
+          actorId: 'human-plain',
+          kind: 'human',
+          name: '普通用户',
+          role: 'member',
+          mode: 'present',
+        },
+      ],
+      { groupKind: 'task_master_slave', showMode: true },
+    );
+
+    expect(memberRow('human-plain').textContent).not.toContain('完整视角');
+    expect(memberRow('human-plain').textContent).not.toContain('参与者视角');
+  });
+
+  it('bot 成员即使误带 messageViewScope 也不展示视角标签（按 kind 门控）', () => {
+    renderMembers(
+      [
+        {
+          ...baseParticipant,
+          actorId: 'bot-scope',
+          name: '带视角 Bot',
+          mode: 'auto',
+          messageViewScope: 'participant',
+        },
+      ],
+      { groupKind: 'task_master_slave', showMode: true },
+    );
+
+    expect(memberRow('bot-scope').textContent).not.toContain('参与者视角');
+    expect(memberRow('bot-scope').textContent).not.toContain('完整视角');
+  });
 });

@@ -2,7 +2,7 @@
 /**
  * TaskPanelFetcher —— 任务副屏轮询内核（路 A 自管）。
  * - 数据流：由上层 wrapper 透传 {apiBaseUrl(host), taskApiBase(路径前缀), taskId}，组件内 raw fetch，不自读 config / 不依赖 taskService / 不反查 capability。
- * - apiBaseUrl 为 '' 时走相对路径，由当前环境代理转发；taskApiBase 缺省回退内面 /api/v1。
+ * - apiBaseUrl 为 '' 时走相对路径，由当前环境代理转发；taskApiBase 缺省回退 /openapi/v1 读公开面（gateway spanner 鉴权）。
  * - 轮询：图级 status 非终态时 setTimeout 重排（默认 1000ms）；产品态 DONE/FAILED/REVIEWING/CANCELLED 停，兼容旧 HUNG。
  * - 取消：AbortController，切 taskId / 卸载时 abort。
  * - 日志：include_action_log 默认 false（日志抽屉打开时由上层单独请求，P0 常规轮询不携带）。
@@ -29,7 +29,7 @@ function joinUrl(baseUrl: string, path: string): string {
 export interface TaskPanelFetcherProps {
   apiBaseUrl: string;
   // task API 路径前缀（不含 host）：Open Core /openapi/v1/collaboration/tasks、内部 /api/v1/collaboration/tasks。
-  // 由 app-level 经 capability 解析透传，缺省回退内面路径（向后兼容纯 assets 渲染）。
+  // 由 app-level 透传读公开面 /openapi/v1（gateway spanner 鉴权）；缺省回退同一公开面（向后兼容纯 assets 渲染）。
   taskApiBase?: string;
   taskId: string;
   userId?: string;
@@ -45,7 +45,7 @@ export interface TaskPanelFetcherProps {
 
 export const TaskPanelFetcher: React.FC<TaskPanelFetcherProps> = ({
   apiBaseUrl,
-  taskApiBase = '/api/v1/collaboration/tasks',
+  taskApiBase = '/openapi/v1/collaboration/tasks',
   taskId,
   userId,
   includeActionLog = false,

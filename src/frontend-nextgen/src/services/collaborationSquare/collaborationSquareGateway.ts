@@ -1,3 +1,4 @@
+import type { MessageViewScope } from '@/domain/collaboration/types';
 import type {
   CollaborationSquarePage,
   CreateSessionResult,
@@ -48,7 +49,7 @@ export interface CollaborationSquareGateway {
   createGroupSession(
     groupId: string,
     context?: HumanBotActionContext,
-    options?: { title?: string; query?: string },
+    options?: { title?: string; query?: string; messageViewScope?: MessageViewScope },
   ): Promise<CreateSessionResult>;
   /** 浏览/搜索公开任务广场（跨用户公开，本期仅 Mock/Unsupported，真实端点待后端建设）。 */
   listPublicTasks(query?: PublicTaskSearchQuery, signal?: AbortSignal): Promise<PublicTaskPage>;

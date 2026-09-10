@@ -22,7 +22,7 @@ export function TaskLoopCard(props: PanelContentProps) {
     default:
       return (
         <div className="p-1 w-full flex justify-start task-loop-card-root">
-          <div className="w-full max-w-[360px] bg-white border border-gray-100 shadow-md rounded-2xl p-4 text-center">
+          <div className="w-full max-w-[420px] bg-white border border-gray-100 shadow-md rounded-2xl p-4 text-center">
             <AlertCircle className="block mx-auto mb-1.5 h-4 w-4 text-gray-300" aria-hidden />
             <p className="text-[11px] text-gray-400">暂无数据</p>
           </div>

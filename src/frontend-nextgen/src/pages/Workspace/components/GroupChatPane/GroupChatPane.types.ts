@@ -1,4 +1,5 @@
 import type { GroupView, IdentityView, ParticipantMode, SessionView } from '@/domain/collaboration';
+import type { MessageViewScope } from '@/domain/collaboration/types';
 import type { SessionMessageAttachment } from '@/services/workspace/groupChatAttachmentService';
 import type { GroupChatState } from '@/services/workspace/groupChatProvider';
 import type { PolicyResult } from '@/services/workspace/groupService';
@@ -16,6 +17,8 @@ export interface GroupChatPaneProps {
   activeIdentity?: IdentityView | null;
   /** 会话成员 mode 更新出口（PATCH participants/{actor}），经由会话 Hook 注入。 */
   updateMemberMode?: (sessionId: string, actorId: string, mode: ParticipantMode) => Promise<boolean>;
+  /** 会话成员消息可见域更新出口（PATCH participants/{actor} 仅带 scope），经由会话 Hook 注入。 */
+  updateMemberScope?: (sessionId: string, actorId: string, scope: MessageViewScope) => Promise<boolean>;
   chat: UseChatResult<unknown>;
   /** 建群后 Driver/Manager 尚未产生第一条消息时的瞬态处理状态。 */
   groupBootstrapProcessing?: boolean;

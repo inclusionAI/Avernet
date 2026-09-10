@@ -13,7 +13,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 const mockedUseHumanIdentity = jest.spyOn(identityModule, 'useHumanIdentity');
 
 const overview = {
-  currentUser: { displayName: '真实用户', employeeNumber: '447147', departmentPath: ['协作平台'] },
+  currentUser: { displayName: '真实用户', employeeNumber: '900004', departmentPath: ['协作平台'] },
   organizationOptions: [],
   bots: [],
 } as CollaborationPrivacyOverview;
@@ -54,14 +54,14 @@ describe('useCollaborationPrivacy identity wiring', () => {
   it('waits for identity and passes the employee number to the overview service', async () => {
     mockedUseHumanIdentity.mockReturnValue({
       status: 'ready',
-      identity: { userId: '447147', displayName: '真实用户', online: true },
+      identity: { userId: '900004', displayName: '真实用户', online: true },
     });
     const mockedLoadOverview = jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overview);
 
     renderHook(() => useCollaborationPrivacy());
 
     await waitFor(() =>
-      expect(mockedLoadOverview).toHaveBeenCalledWith('447147', expect.any(AbortSignal), { target: 'currentUser' }),
+      expect(mockedLoadOverview).toHaveBeenCalledWith('900004', expect.any(AbortSignal), { target: 'currentUser' }),
     );
   });
 
@@ -77,7 +77,7 @@ describe('useCollaborationPrivacy identity wiring', () => {
   it('用户身份只显示用户内容，不显示 Bot 管理卡片', async () => {
     mockedUseHumanIdentity.mockReturnValue({
       status: 'ready',
-      identity: { userId: '447147', displayName: '真实用户', online: true },
+      identity: { userId: '900004', displayName: '真实用户', online: true },
     });
     useWorkspaceStore.setState({
       activeIdentityId: 'human-1',
@@ -94,11 +94,11 @@ describe('useCollaborationPrivacy identity wiring', () => {
   it('Bot 身份只显示当前 Bot 的管理卡片', async () => {
     mockedUseHumanIdentity.mockReturnValue({
       status: 'ready',
-      identity: { userId: '447147', displayName: '真实用户', online: true },
+      identity: { userId: '900004', displayName: '真实用户', online: true },
     });
     useWorkspaceStore.setState({
-      activeIdentityId: 'bot-1:447147',
-      identities: [{ id: 'bot-1:447147', kind: 'bot', displayName: 'Bot A', online: true }],
+      activeIdentityId: 'bot-1:900004',
+      identities: [{ id: 'bot-1:900004', kind: 'bot', displayName: 'Bot A', online: true }],
     });
     jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overviewWithBots);
 
@@ -112,20 +112,20 @@ describe('useCollaborationPrivacy identity wiring', () => {
   it('Bot 身份只按选中 Bot 请求，不携带全量范围', async () => {
     mockedUseHumanIdentity.mockReturnValue({
       status: 'ready',
-      identity: { userId: '447147', displayName: '真实用户', online: true },
+      identity: { userId: '900004', displayName: '真实用户', online: true },
     });
     useWorkspaceStore.setState({
-      activeIdentityId: 'bot-1:447147',
-      identities: [{ id: 'bot-1:447147', kind: 'bot', displayName: 'Bot A', online: true }],
+      activeIdentityId: 'bot-1:900004',
+      identities: [{ id: 'bot-1:900004', kind: 'bot', displayName: 'Bot A', online: true }],
     });
     const mockedLoadOverview = jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overview);
 
     renderHook(() => useCollaborationPrivacy());
 
     await waitFor(() =>
-      expect(mockedLoadOverview).toHaveBeenCalledWith('447147', expect.any(AbortSignal), {
+      expect(mockedLoadOverview).toHaveBeenCalledWith('900004', expect.any(AbortSignal), {
         target: 'activeBot',
-        botId: 'bot-1:447147',
+        botId: 'bot-1:900004',
       }),
     );
     expect(mockedLoadOverview).toHaveBeenCalledTimes(1);
@@ -134,13 +134,13 @@ describe('useCollaborationPrivacy identity wiring', () => {
   it('切换工作身份时取消上一次在途请求并按新范围重取', async () => {
     mockedUseHumanIdentity.mockReturnValue({
       status: 'ready',
-      identity: { userId: '447147', displayName: '真实用户', online: true },
+      identity: { userId: '900004', displayName: '真实用户', online: true },
     });
     useWorkspaceStore.setState({
-      activeIdentityId: 'bot-1:447147',
+      activeIdentityId: 'bot-1:900004',
       identities: [
-        { id: 'bot-1:447147', kind: 'bot', displayName: 'Bot A', online: true },
-        { id: 'bot-2:447147', kind: 'bot', displayName: 'Bot B', online: true },
+        { id: 'bot-1:900004', kind: 'bot', displayName: 'Bot A', online: true },
+        { id: 'bot-2:900004', kind: 'bot', displayName: 'Bot B', online: true },
       ],
     });
     const mockedLoadOverview = jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overview);
@@ -149,26 +149,26 @@ describe('useCollaborationPrivacy identity wiring', () => {
     await waitFor(() => expect(mockedLoadOverview).toHaveBeenCalledTimes(1));
 
     act(() => {
-      workspaceService.switchIdentity('bot-2:447147');
+      workspaceService.switchIdentity('bot-2:900004');
     });
     await waitFor(() => expect(mockedLoadOverview).toHaveBeenCalledTimes(2));
 
     const signals = mockedLoadOverview.mock.calls.map((call: unknown[]) => call[1] as AbortSignal);
     expect(signals[0].aborted).toBe(true);
     expect(signals[1].aborted).toBe(false);
-    expect(mockedLoadOverview.mock.calls[1][2]).toEqual({ target: 'activeBot', botId: 'bot-2:447147' });
+    expect(mockedLoadOverview.mock.calls[1][2]).toEqual({ target: 'activeBot', botId: 'bot-2:900004' });
   });
 
   it('切换身份后仅最新请求可以更新页面状态', async () => {
     mockedUseHumanIdentity.mockReturnValue({
       status: 'ready',
-      identity: { userId: '447147', displayName: '真实用户', online: true },
+      identity: { userId: '900004', displayName: '真实用户', online: true },
     });
     useWorkspaceStore.setState({
-      activeIdentityId: 'bot-1:447147',
+      activeIdentityId: 'bot-1:900004',
       identities: [
-        { id: 'bot-1:447147', kind: 'bot', displayName: 'Bot A', online: true },
-        { id: 'bot-2:447147', kind: 'bot', displayName: 'Bot B', online: true },
+        { id: 'bot-1:900004', kind: 'bot', displayName: 'Bot A', online: true },
+        { id: 'bot-2:900004', kind: 'bot', displayName: 'Bot B', online: true },
       ],
     });
     let resolveFirst!: (value: CollaborationPrivacyOverview) => void;
@@ -191,7 +191,7 @@ describe('useCollaborationPrivacy identity wiring', () => {
     const { result } = renderHook(() => useCollaborationPrivacy());
     await waitFor(() => expect(mockedLoadOverview).toHaveBeenCalledTimes(1));
     act(() => {
-      workspaceService.switchIdentity('bot-2:447147');
+      workspaceService.switchIdentity('bot-2:900004');
     });
     await waitFor(() => expect(mockedLoadOverview).toHaveBeenCalledTimes(2));
 
@@ -213,13 +213,13 @@ describe('useCollaborationPrivacy identity wiring', () => {
   it('守护：生产入口任何身份下都不会回落到遗留全量 hydrate', async () => {
     mockedUseHumanIdentity.mockReturnValue({
       status: 'ready',
-      identity: { userId: '447147', displayName: '真实用户', online: true },
+      identity: { userId: '900004', displayName: '真实用户', online: true },
     });
     useWorkspaceStore.setState({
-      activeIdentityId: 'bot-1:447147',
+      activeIdentityId: 'bot-1:900004',
       identities: [
         { id: 'human-1', kind: 'user', displayName: '真实用户', online: true },
-        { id: 'bot-1:447147', kind: 'bot', displayName: 'Bot A', online: true },
+        { id: 'bot-1:900004', kind: 'bot', displayName: 'Bot A', online: true },
       ],
     });
     const mockedLoadOverview = jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overview);
@@ -243,13 +243,13 @@ describe('useCollaborationPrivacy identity wiring', () => {
   it('同一页面内切换 Human 与 Bot 身份时更新内容并关闭旧身份编辑态', async () => {
     mockedUseHumanIdentity.mockReturnValue({
       status: 'ready',
-      identity: { userId: '447147', displayName: '真实用户', online: true },
+      identity: { userId: '900004', displayName: '真实用户', online: true },
     });
     useWorkspaceStore.setState({
       activeIdentityId: 'human-1',
       identities: [
         { id: 'human-1', kind: 'user', displayName: '真实用户', online: true },
-        { id: 'bot-1:447147', kind: 'bot', displayName: 'Bot A', online: true },
+        { id: 'bot-1:900004', kind: 'bot', displayName: 'Bot A', online: true },
       ],
     });
     const mockedLoadOverview = jest
@@ -262,7 +262,7 @@ describe('useCollaborationPrivacy identity wiring', () => {
     expect(result.current.visibleBots).toEqual([]);
 
     act(() => {
-      workspaceService.switchIdentity('bot-1:447147');
+      workspaceService.switchIdentity('bot-1:900004');
     });
     await waitFor(() => expect(result.current.visibleBots.map((bot) => bot.id)).toEqual(['bot-1']));
     expect(result.current.showIdentityCard).toBe(false);
@@ -293,7 +293,7 @@ describe('useCollaborationPrivacy identity wiring', () => {
     );
     expect(scopes).toEqual([
       { target: 'currentUser' },
-      { target: 'activeBot', botId: 'bot-1:447147' },
+      { target: 'activeBot', botId: 'bot-1:900004' },
       { target: 'currentUser' },
     ]);
   });

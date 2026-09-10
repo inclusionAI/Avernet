@@ -6,7 +6,7 @@ import {
 } from '../src/services/collaborationSquare/collaborationSquareService';
 import { MockCollaborationSquareAdapter } from '../src/services/collaborationSquare/mockCollaborationSquareAdapter';
 
-const humanContext = { actorId: 'human_327325', userId: '327325' };
+const humanContext = { actorId: 'human_900003', userId: '900003' };
 
 const publicBot = (id: string, name = '项目助手'): PublicBot => ({
   id,
@@ -107,7 +107,7 @@ describe('collaboration square service', () => {
     const service = new CollaborationSquareService(gateway);
     const humanRequest = service.requestBotFriendship('b1', humanContext, undefined, {
       type: 'human',
-      id: '327325',
+      id: '900003',
     });
     const botRequest = service.requestBotFriendship('b1', humanContext, undefined, { type: 'bot', id: 'bot-viewer' });
 
@@ -226,7 +226,7 @@ describe('collaboration square service', () => {
         'bot:target',
         '  项目助手  ',
         humanContext,
-        { viewerActorType: 'human', viewerActorId: '327325' },
+        { viewerActorType: 'human', viewerActorId: '900003' },
         signal,
       ),
     ).resolves.toEqual(expect.objectContaining({ id: 'bot:target' }));
@@ -236,7 +236,7 @@ describe('collaboration square service', () => {
         page: 1,
         pageSize: 100,
         viewerActorType: 'human',
-        viewerActorId: '327325',
+        viewerActorId: '900003',
       },
       humanContext,
       signal,

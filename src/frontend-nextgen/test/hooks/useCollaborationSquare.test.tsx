@@ -22,8 +22,8 @@ jest.mock('@/components/ui/notify', () => ({ notifyError: jest.fn(), notifySucce
 const mockedUseHumanIdentity = useHumanIdentity as jest.MockedFunction<typeof useHumanIdentity>;
 const mockedNotifyError = notifyError as jest.MockedFunction<typeof notifyError>;
 const mockedNotifySuccess = notifySuccess as jest.MockedFunction<typeof notifySuccess>;
-const humanContext = { actorId: 'human_327325', userId: '327325' };
-const viewerFields = { viewerActorType: 'human', viewerActorId: '327325' };
+const humanContext = { actorId: 'human_900003', userId: '900003' };
+const viewerFields = { viewerActorType: 'human', viewerActorId: '900003' };
 
 interface PendingRequest {
   query: PublicBotSearchQuery | undefined;
@@ -75,9 +75,9 @@ describe('useCollaborationSquare Bot Search', () => {
     useWorkspaceStore.getState().reset();
     useWorkspaceStore
       .getState()
-      .setIdentities([{ id: 'human_327325', kind: 'user', displayName: '当前用户', online: true }], 'human_327325');
+      .setIdentities([{ id: 'human_900003', kind: 'user', displayName: '当前用户', online: true }], 'human_900003');
     mockedUseHumanIdentity.mockReturnValue({
-      identity: { userId: '327325', displayName: '当前用户', online: true },
+      identity: { userId: '900003', displayName: '当前用户', online: true },
       status: 'ready',
     });
     mockedNotifyError.mockClear();
@@ -526,7 +526,7 @@ describe('useCollaborationSquare Bot Search', () => {
     expect(result.current.createSessionTarget).toEqual(group);
 
     await act(async () => {
-      result.current.submitCreateSession({ title: '测试会话', query: '测试协作目标' });
+      result.current.submitCreateSession({ title: '测试会话', query: '测试协作目标', messageViewScope: 'full' });
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -534,6 +534,7 @@ describe('useCollaborationSquare Bot Search', () => {
     expect(createGroupSession).toHaveBeenCalledWith(group.id, humanContext, {
       title: '测试会话',
       query: '测试协作目标',
+      messageViewScope: 'full',
     });
     expect(legacyCreateGroupSession).not.toHaveBeenCalled();
     expect(history.push).toHaveBeenCalledWith(
@@ -573,7 +574,7 @@ describe('useCollaborationSquare Bot Search', () => {
 
     expect(legacyProfile).toHaveBeenCalledWith(bot.id);
     expect(realProfile).not.toHaveBeenCalled();
-    expect(realFriendship).toHaveBeenCalledWith(bot.id, humanContext, undefined, { type: 'human', id: '327325' });
+    expect(realFriendship).toHaveBeenCalledWith(bot.id, humanContext, undefined, { type: 'human', id: '900003' });
     expect(legacyFriendship).not.toHaveBeenCalled();
     expect(useCollaborationSquareStore.getState().bots[0].relationshipStatus).toBe('applying');
 
@@ -598,7 +599,7 @@ describe('useCollaborationSquare Bot Search', () => {
 
     expect(requestFriendship).toHaveBeenCalledWith(bot.id, humanContext, 'default:366656', {
       type: 'human',
-      id: '327325',
+      id: '900003',
     });
     unmount();
   });
@@ -626,9 +627,9 @@ describe('useCollaborationSquare Bot Search', () => {
 
     expect(requestFriendship).toHaveBeenCalledWith(botA.id, humanContext, botA.friendRequestBotId, {
       type: 'human',
-      id: '327325',
+      id: '900003',
     });
-    expect(useCollaborationSquareStore.getState().busyKeys).toEqual(['bot:human:327325:default:entity-a']);
+    expect(useCollaborationSquareStore.getState().busyKeys).toEqual(['bot:human:900003:default:entity-a']);
     expect(useCollaborationSquareStore.getState().bots.map((bot) => bot.relationshipStatus)).toEqual(['none', 'none']);
 
     await act(async () => {
@@ -747,7 +748,7 @@ describe('useCollaborationSquare Bot Search', () => {
     useWorkspaceStore
       .getState()
       .setIdentities(
-        [{ id: 'human_327325', kind: 'user', displayName: '当前用户', online: true }, botIdentity],
+        [{ id: 'human_900003', kind: 'user', displayName: '当前用户', online: true }, botIdentity],
         botIdentity.id,
       );
     const bot = resultBot('bot-target');
@@ -768,7 +769,7 @@ describe('useCollaborationSquare Bot Search', () => {
       await Promise.resolve();
     });
 
-    expect(requestFriendship).toHaveBeenCalledWith(bot.id, { actorId: 'bot-viewer', userId: '327325' }, undefined, {
+    expect(requestFriendship).toHaveBeenCalledWith(bot.id, { actorId: 'bot-viewer', userId: '900003' }, undefined, {
       type: 'bot',
       id: 'bot-viewer',
     });
@@ -784,7 +785,7 @@ describe('useCollaborationSquare Bot Search', () => {
     useWorkspaceStore
       .getState()
       .setIdentities(
-        [{ id: 'human_327325', kind: 'user', displayName: '当前用户', online: true }, botIdentity],
+        [{ id: 'human_900003', kind: 'user', displayName: '当前用户', online: true }, botIdentity],
         botIdentity.id,
       );
     const friend = { ...resultBot('bot-friend'), relationshipStatus: 'friend' as const };
@@ -840,9 +841,9 @@ describe('useCollaborationSquare Task Plaza', () => {
     useWorkspaceStore.getState().reset();
     useWorkspaceStore
       .getState()
-      .setIdentities([{ id: 'human_327325', kind: 'user', displayName: '当前用户', online: true }], 'human_327325');
+      .setIdentities([{ id: 'human_900003', kind: 'user', displayName: '当前用户', online: true }], 'human_900003');
     mockedUseHumanIdentity.mockReturnValue({
-      identity: { userId: '327325', displayName: '当前用户', online: true },
+      identity: { userId: '900003', displayName: '当前用户', online: true },
       status: 'ready',
     });
   });

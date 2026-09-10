@@ -1,4 +1,4 @@
-// 工单中心协议层 Controller。
+// 通知中心协议层 Controller（模块 UI 名为「通知中心」，后端端点仍为 work-orders）。
 // 契约对齐 clawweb=Avernet（/openapi/v1/bots/work-orders）：user_id query 必填；
 // 审批统一入口 POST .../{id}/approval（decision=APPROVED/REJECTED，reject 时 review_remark 必填）。分页 page_no。
 // DTO=BackendUnknownRecord，由 domain/admin/mappers 读字段映射。
@@ -36,7 +36,7 @@ export interface WorkOrderApprovalBody {
   review_remark?: string | null;
 }
 
-// 查询我的工单列表（消息通知铃铛与工单中心共用，靠参数区分）。
+// 查询我的消息列表（铃铛预览与通知中心完整视图共用，靠参数区分）。
 export function listWorkOrders(params: WorkOrderListParams) {
   return backendRequest<BackendApiEnvelope<BackendApiPage<WorkOrderDto>>>(WORK_ORDER_ENDPOINTS.list, {
     method: 'GET',

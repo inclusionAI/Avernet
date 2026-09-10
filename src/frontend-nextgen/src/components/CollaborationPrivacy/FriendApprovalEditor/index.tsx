@@ -13,9 +13,9 @@ import { ChoiceGroup } from '../ChoiceGroup';
 import { OrganizationScopeSearch } from '../OrganizationScopeSearch';
 
 const modes: Array<{ value: FriendApprovalMode; label: string; description: string }> = [
-  { value: 'none', label: '无需审批', description: '符合 Bot 可见性限制的新申请直接建立好友关系' },
-  { value: 'all', label: '全部审批', description: '所有新好友申请都需要确认' },
-  { value: 'partial_exempt', label: '部分组织免审批', description: '指定组织范围直接通过，其余申请需审批' },
+  { value: 'none', label: '无需审批', description: '新好友申请无需用户审批，直接通过' },
+  { value: 'all', label: '全部审批', description: '新好友申请都需要用户审批后方可通过' },
+  { value: 'partial_exempt', label: '部分组织免审批', description: '限定组织的用户申请可直接通过；其余组织的用户申请仍需当前用户审批' },
 ];
 
 interface FriendApprovalEditorProps {
@@ -89,6 +89,7 @@ export function FriendApprovalEditor({
             options={availableModes}
             ariaLabel="好友审批策略"
             onChange={setMode}
+            className={partialExemptEnabled ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}
           />
           {!partialExemptEnabled && initialConfig.mode === 'partial_exempt' && mode === null && (
             <p className="text-xs text-warning">当前策略“部分组织免审批”已下线，请重新选择“无需审批”或“全部审批”。</p>

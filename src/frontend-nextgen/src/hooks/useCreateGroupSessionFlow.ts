@@ -36,7 +36,7 @@ export function useCreateGroupSessionFlow(
         const result = await collaborationSquareGroupService.createGroupSession(
           group.id,
           humanBotContext ?? undefined,
-          { title: values.title, query: values.query },
+          { title: values.title, query: values.query, messageViewScope: values.messageViewScope },
         );
         notifySuccess('会话创建成功');
         setTarget(null);

@@ -1,3 +1,4 @@
+import type { MessageViewScope } from '@/domain/collaboration/types';
 import { mapPublicBotCatalogDto, mapPublicGroupCatalogDto } from '@/domain/collaborationSquare/mapper';
 import { mapBbsTaskItemDto, mapPlazaStatusToBbsStatus } from '@/domain/collaborationSquare/taskMapper';
 import type {
@@ -282,7 +283,7 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
   async createGroupSession(
     groupId: string,
     context?: HumanBotActionContext,
-    options?: { title?: string; query?: string },
+    options?: { title?: string; query?: string; messageViewScope?: MessageViewScope },
   ): Promise<CreateSessionResult> {
     try {
       const response = await createGroupSessionRequest(groupId, {
@@ -290,6 +291,7 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
         ...(context?.actorId ? { acting_bot_id: context.actorId } : {}),
         ...(options?.title ? { title: options.title } : {}),
         ...(options?.query ? { input: { query: options.query } } : {}),
+        ...(options?.messageViewScope ? { message_view_scope: options.messageViewScope } : {}),
       });
       if (isAceLoginResponse(response))
         throw new CollaborationSquareError('unauthenticated', '登录状态已失效，请重新登录后重试');
@@ -314,7 +316,7 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
     }
   }
 
-  // 任务广场：接入真实 BBS 接力公开任务端点 GET /api/v1/collaboration/tasks/bbs/list（1-based 分页 +
+  // 任务广场：接入真实 BBS 接力公开任务端点 GET /openapi/v1/collaboration/tasks/bbs/list（1-based 分页 +
   // 可选 status / search_word 过滤，`total` 为过滤后行数）。分页 / 过滤 / 排序均在服务端，adapter 只做参数
   // 换算与展示名反查：offset/limit→page/page_size、search→search_word、广场态 status→BBS 原始态；publisher 与
   // assignee 经 bots/query 反查为展示名（复合 bot_id:owner 由 resolveBotNames 拆 realBotId 下发，按原始 id 回填）。

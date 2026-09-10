@@ -93,3 +93,15 @@ export function resolveGroupGatewayOrigin(hostname?: string): string | undefined
 export function resolveGroupWsOrigin(hostname?: string): string | undefined {
   return resolveGroupGatewayOrigin(hostname)?.replace(/^https/, 'wss');
 }
+
+/**
+ * 匹配服务端「在线修改 scope 后关闭连接」的 view_scope_changed 事件帧。
+ * 兼容 method / type / event 三种载体（具体帧形以联调为准，匹配从宽）。
+ */
+export function isViewScopeChangedFrame(message: unknown): boolean {
+  if (!message || typeof message !== 'object') return false;
+  const frame = message as Record<string, unknown>;
+  return (
+    frame.method === 'view_scope_changed' || frame.type === 'view_scope_changed' || frame.event === 'view_scope_changed'
+  );
+}

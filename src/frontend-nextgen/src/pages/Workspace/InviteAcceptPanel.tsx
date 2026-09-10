@@ -1,4 +1,7 @@
+import { MessageViewScopeField } from '@/components/MessageViewScope';
 import { Button, Empty, Spin } from '@/components/ui';
+import { DEFAULT_MESSAGE_VIEW_SCOPE } from '@/domain/collaboration/messageViewScope';
+import type { MessageViewScope } from '@/domain/collaboration/types';
 import { useInviteAccept } from '@/pages/Workspace/hooks/useInviteAccept';
 import { Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -21,6 +24,8 @@ export function InviteAcceptPanel() {
   const { status, friendlyMessage, targetType, targetId, groupId, alreadyJoined, accept, resetToConfirm } =
     useInviteAccept(token);
   const targetLabel = inviteType === 'session' ? '该会话' : '该协作群';
+  // 确认页可选消息视角，accept 时透传给邀请接受接口。
+  const [viewScope, setViewScope] = useState<MessageViewScope>(DEFAULT_MESSAGE_VIEW_SCOPE);
 
   // accepted 状态下做一次导航副作用（写在 effect 里避免渲染中途触发路由跳转）。
   const [navigated, setNavigated] = useState(false);
@@ -113,10 +118,13 @@ export function InviteAcceptPanel() {
           ? '加入后将作为成员参与该会话的对话与资源协作，可随时退出。'
           : '加入后将作为成员参与该协作群的对话与资源协作，可随时退出。'}
       </p>
+      <div className="w-full">
+        <MessageViewScopeField value={viewScope} onChange={setViewScope} />
+      </div>
       <Button
         size="lg"
         onClick={() => {
-          void accept();
+          void accept(viewScope);
         }}
       >
         确认加入

@@ -1,3 +1,4 @@
+import { MessageViewScopeCheckbox } from '@/components/MessageViewScope';
 import { Button, Segmented } from '@/components/ui';
 import {
   AlertDialog,
@@ -9,9 +10,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/AlertDialog';
+import type { MessageViewScope } from '@/domain/collaboration/types';
 import type { CollabPanelState } from '@/pages/Workspace/hooks/useCollabPanel';
 import { Loader2, UserPlus } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BotControlRow } from './BotControlRow';
 import { LeaveBar } from './LeaveBar';
 
@@ -67,7 +69,7 @@ function HumanJoinedRow({
   );
 }
 
-/** 加入会话二次确认（与群内解散群等破坏性/身份变更操作一致的确认规范）。 */
+/** 加入会话二次确认（含消息可见域选择，视觉稿：加入当前会话按钮效果.png）。 */
 function JoinConfirmDialog({
   open,
   onOpenChange,
@@ -78,19 +80,32 @@ function JoinConfirmDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   joining: boolean;
-  onConfirm: () => void;
+  onConfirm: (scope: MessageViewScope) => void;
   humanName: string;
 }) {
+  const [participantOnly, setParticipantOnly] = useState(false);
+  // 每次打开重置为未勾选（默认完整视角，不做记忆）。
+  useEffect(() => {
+    if (open) setParticipantOnly(false);
+  }, [open]);
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>加入当前会话</AlertDialogTitle>
-          <AlertDialogDescription>加入后，{humanName}将参与本会话协作，可以直接发言。</AlertDialogDescription>
+          <AlertDialogDescription>确认后：您的所有发言将以用户身份（{humanName}）发送。</AlertDialogDescription>
         </AlertDialogHeader>
+        <div className="space-y-3">
+          <MessageViewScopeCheckbox checked={participantOnly} onCheckedChange={setParticipantOnly} disabled={joining} />
+          <div className="rounded-lg bg-muted px-3 py-2.5 text-xs leading-5 text-muted-foreground">
+            <p className="font-medium text-foreground">其他须知：</p>
+            <p className="mt-1">· 您可与主节点Bot进行对话，由主节点Bot负责任务分发、状态推进、质量核验</p>
+            <p className="mt-1">· 勾选参与者视角后将过滤协作内部消息；切换到您拥有的 Bot 视角不受影响</p>
+          </div>
+        </div>
         <AlertDialogFooter>
           <AlertDialogCancel>取消</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm} disabled={joining}>
+          <AlertDialogAction onClick={() => onConfirm(participantOnly ? 'participant' : 'full')} disabled={joining}>
             {joining ? '加入中…' : '确认加入'}
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -124,7 +139,14 @@ export function CollabPanel({ panel }: CollabPanelProps) {
     };
     return (
       <div className="border-t border-border bg-background px-3 pb-2 pt-2 sm:px-6">
-        <LeaveBar humanName={panel.humanName} onLeave={handleLeave} leaving={leaving} />
+        <LeaveBar
+          humanName={panel.humanName}
+          onLeave={handleLeave}
+          leaving={leaving}
+          viewScope={panel.humanViewScope}
+          switchingViewScope={panel.switchingViewScope}
+          onViewScopeChange={(scope) => void panel.setViewScope(scope)}
+        />
       </div>
     );
   }
@@ -138,8 +160,8 @@ export function CollabPanel({ panel }: CollabPanelProps) {
           open={confirmJoin}
           onOpenChange={setConfirmJoin}
           joining={panel.joining}
-          onConfirm={() => {
-            void panel.joinSession().then((ok) => {
+          onConfirm={(scope) => {
+            void panel.joinSession(scope).then((ok) => {
               if (ok) setConfirmJoin(false);
             });
           }}
@@ -149,8 +171,8 @@ export function CollabPanel({ panel }: CollabPanelProps) {
     );
   }
 
-  const join = () => {
-    void panel.joinSession().then((ok) => {
+  const join = (scope: MessageViewScope) => {
+    void panel.joinSession(scope).then((ok) => {
       if (ok) setConfirmJoin(false);
     });
   };

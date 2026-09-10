@@ -1,3 +1,4 @@
+import type { MessageViewScope } from '@/domain/collaboration/types';
 import {
   acceptInvitation,
   createGroupInvitation,
@@ -91,9 +92,15 @@ export const invitationService = {
     return { ok: true, data: { isValid: true } };
   },
 
-  async acceptInvitation(token: string): Promise<DomainResult<InvitationAcceptResult>> {
+  async acceptInvitation(
+    token: string,
+    messageViewScope?: MessageViewScope,
+  ): Promise<DomainResult<InvitationAcceptResult>> {
     try {
-      const resp = await acceptInvitation(token);
+      const resp = await acceptInvitation(
+        token,
+        messageViewScope ? { message_view_scope: messageViewScope } : undefined,
+      );
       const data = resp.data;
       const targetId = data?.target_id ?? '';
       if (!targetId || !data?.target_type) {

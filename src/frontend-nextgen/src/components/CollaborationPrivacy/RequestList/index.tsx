@@ -1,9 +1,5 @@
 import { Button } from '@/components/ui/Button';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { FriendApprovalConfig } from '@/domain/collaborationPrivacy/types';
-import { Info } from 'lucide-react';
-import { botFriendApprovalSection } from '../botVisibilityCopy';
-import { collaborationPrivacyTooltipDelayMs } from '../interaction';
 
 const modeLabels = { none: '无需审批', all: '全部审批', partial_exempt: '部分组织免审批（历史配置）' } as const;
 
@@ -21,24 +17,7 @@ export function RequestList({ config, disabled, disabledReason, onEdit, onViewSc
     <section className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <div className="flex items-center gap-1.5">
-            <p className="m-0 text-sm font-medium text-foreground">好友审批策略</p>
-            <TooltipProvider delayDuration={collaborationPrivacyTooltipDelayMs}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-5 w-5 text-muted-foreground"
-                    aria-label="好友审批策略说明"
-                  >
-                    <Info className="h-3.5 w-3.5" aria-hidden />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{botFriendApprovalSection.policyDescription}</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
+          <p className="m-0 text-sm font-medium text-foreground">好友审批策略</p>
           {disabledReason && <span className="text-xs leading-5 text-warning">{disabledReason}</span>}
         </div>
         <p className="mt-1 text-xs text-muted-foreground">

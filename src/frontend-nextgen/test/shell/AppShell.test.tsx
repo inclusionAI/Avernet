@@ -19,6 +19,14 @@ jest.mock('@/hooks/useSpaceContext', () => ({
   initSpaceContext: mockInitSpaceContext,
   ensurePersonalSpaceOnAppEntry: mockEnsurePersonalSpaceOnAppEntry,
 }));
+const mockInitWorkspace = jest.fn(async () => ({
+  ok: true as const,
+  data: { defaultActiveId: 'human-1' },
+}));
+
+jest.mock('@/services/workspace/workspaceService', () => ({
+  workspaceService: { initWorkspace: mockInitWorkspace },
+}));
 jest.mock('@/services/workspace/identityService', () => ({
   identityService: {
     loadIdentities: jest.fn(async () => ({
@@ -47,6 +55,7 @@ beforeEach(() => {
   useWorkspaceStore.getState().reset();
   useExternalAuthStore.getState().reset();
   window.localStorage.clear();
+  mockInitWorkspace.mockClear();
 });
 
 it('Open Core 体验提示位于 AppHeader 前', () => {
@@ -99,6 +108,17 @@ it('将 mine 返回的 Human 身份传给顶栏账号区', async () => {
   const view = render(<AppShell>工作内容</AppShell>);
 
   await waitFor(() => expect(view.getByTestId('app-header')).toHaveTextContent('验收用户'));
+});
+
+it('挂载即通过 initWorkspace 写回协作身份，避免 human capability ready 跳过落库', async () => {
+  useExternalAuthStore.getState().setAuthenticated({
+    userId: 'external-user-1',
+    displayName: '外部用户',
+    provider: 'alipay',
+  });
+  render(<AppShell>工作内容</AppShell>);
+
+  await waitFor(() => expect(mockInitWorkspace).toHaveBeenCalledTimes(1));
 });
 
 it('登录回归：/auth/user（checkAuth）晚于 mine 落位时，顶栏账号区随 externalAuthStore 刷新', async () => {

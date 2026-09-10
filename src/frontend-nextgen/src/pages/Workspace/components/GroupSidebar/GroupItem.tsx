@@ -1,3 +1,4 @@
+import { MessageViewScopeMenuButton } from '@/components/MessageViewScope';
 import { Button, IconButton } from '@/components/ui';
 import {
   AlertDialog,
@@ -25,6 +26,7 @@ export type { SessionTab } from './GroupItem.types';
 
 export const GroupItem = React.memo(function GroupItem({
   group,
+  viewerKind,
   expanded,
   sessions,
   sessionTab,
@@ -149,16 +151,20 @@ export const GroupItem = React.memo(function GroupItem({
             </TooltipProvider>
           </div>
         </Button>
-        <IconButton
-          label="新建会话"
-          size="sm"
-          icon={<Plus className="h-4 w-4" />}
-          className="rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
-          onClick={(event) => {
-            event.stopPropagation();
-            onCreateSession(group.groupId);
-          }}
-        />
+        {viewerKind === 'user' ? (
+          <MessageViewScopeMenuButton onSelect={(scope) => onCreateSession(group.groupId, scope)} />
+        ) : (
+          <IconButton
+            label="新建会话"
+            size="sm"
+            icon={<Plus className="h-4 w-4" />}
+            className="rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
+            onClick={(event) => {
+              event.stopPropagation();
+              onCreateSession(group.groupId);
+            }}
+          />
+        )}
         <SessionScopeFilter
           value={sessionTab}
           onChange={handleSessionScopeChange}

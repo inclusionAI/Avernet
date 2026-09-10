@@ -149,6 +149,7 @@ export const groupService = {
           name: p.name ?? p.actor_id,
           role: ROLE_NATIVE_TO_DOMAIN[p.role] ?? 'member',
           mode: p.mode,
+          ...(p.message_view_scope ? { messageViewScope: p.message_view_scope } : {}),
         })),
         sessions: (sessions.data?.items ?? []).map((s) => mapSessionListItem(s)),
         lastMessageAt: d.updated_at,

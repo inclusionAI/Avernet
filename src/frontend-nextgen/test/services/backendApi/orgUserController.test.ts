@@ -12,11 +12,11 @@ beforeEach(() => {
 
 describe('/openapi/v1/org/user controller', () => {
   it('passes the required employee number as an explicit user_id query parameter', async () => {
-    await getOrgUser('447147');
+    await getOrgUser('900004');
 
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/org/user', {
       method: 'GET',
-      params: { user_id: '447147' },
+      params: { user_id: '900004' },
       injectUserId: false,
       signal: undefined,
     });
@@ -25,11 +25,11 @@ describe('/openapi/v1/org/user controller', () => {
   it('forwards the abort signal without falling back to implicit identity injection', async () => {
     const signal = new AbortController().signal;
 
-    await getOrgUser('447147', signal);
+    await getOrgUser('900004', signal);
 
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/org/user', {
       method: 'GET',
-      params: { user_id: '447147' },
+      params: { user_id: '900004' },
       injectUserId: false,
       signal,
     });

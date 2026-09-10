@@ -27,7 +27,7 @@ Object.assign(globalThis, { TextDecoder, TextEncoder });
 const { renderToStaticMarkup } = require('react-dom/server') as typeof import('react-dom/server');
 
 const bot: CollaborationBot = {
-  id: '20260825_mbu0ey8f:447147',
+  id: '20260825_mbu0ey8f:900004',
   name: '产品协作助手',
   engine: 'OpenClaw',
   joinedBcn: true,
@@ -89,7 +89,7 @@ describe('collaboration privacy accessible UI', () => {
     expect(pageSource).not.toContain('Mock 验证');
     expect(pageSource).not.toContain('sample-only Mock 数据');
     expect(pageSource).toContain(
-      '管理用户信息，以及归属于当前用户的所有 Bot 在 BCN 网络中的各类协作状态及好友审批策略。',
+      '管理用户信息，以及归属于当前用户的所有 Bot 在 BCN 网络中的各类协作状态及好友审批策略',
     );
     expect(mockSource).not.toContain('待接入助手');
     expect(mockSource).not.toContain('joined_bcn: false');
@@ -141,8 +141,8 @@ describe('collaboration privacy accessible UI', () => {
     expect(html).not.toContain('bg-gray-');
     expect(html).not.toContain('animate-pulse');
     expect(html).toContain('>Bot UUID<');
-    expect(html).toContain('title="20260825_mbu0ey8f:447147"');
-    expect(html).not.toContain('Bot ID：20260825_mbu0ey8f:447147');
+    expect(html).toContain('title="20260825_mbu0ey8f:900004"');
+    expect(html).not.toContain('Bot ID：20260825_mbu0ey8f:900004');
     expect(html).toContain('aria-label="复制 产品协作助手 的 Bot UUID"');
     expect(html).toContain('参与协作群聊');
     expect(html).toContain('控制当前 Bot 是否可参与群聊。关闭后无法加入新协作群，已加入的协作群也不再回复。');
@@ -174,7 +174,7 @@ describe('collaboration privacy accessible UI', () => {
       <IdentityCard
         identity={{
           displayName: '示例管理员',
-          employeeNumber: '447147',
+          employeeNumber: '900004',
           departmentPath: ['示例集团-产品部'],
           lastSyncedAt: '2026-08-18T08:00:00.000Z',
         }}
@@ -194,7 +194,7 @@ describe('collaboration privacy accessible UI', () => {
     expect(html).toContain('text-xs text-muted-foreground');
     expect(html).toContain('text-xs leading-5 text-muted-foreground');
     expect(html).not.toContain('text-sm leading-6 text-[var(--color-muted)]');
-    expect(html).toContain('工号 447147');
+    expect(html).toContain('工号 900004');
     expect(html).toContain('示例集团-产品部');
     expect(html).not.toContain('示例集团 / 产品部');
     expect(html).not.toContain('同步部门');
@@ -206,7 +206,7 @@ describe('collaboration privacy accessible UI', () => {
       <IdentityCard
         identity={{
           displayName: '组织接口名称',
-          employeeNumber: 'internal-447147',
+          employeeNumber: 'internal-900004',
           departmentPath: ['内部集团-产品部'],
           lastSyncedAt: '2026-08-18T08:00:00.000Z',
         }}
@@ -220,7 +220,7 @@ describe('collaboration privacy accessible UI', () => {
     expect(html).toContain('开源用户');
     expect(html).toContain('工号 external-user-1');
     expect(html).not.toContain('组织接口名称');
-    expect(html).not.toContain('internal-447147');
+    expect(html).not.toContain('internal-900004');
     expect(html).not.toContain('内部集团-产品部');
     expect(html).not.toContain('同步用户部门信息');
   });
@@ -362,9 +362,9 @@ describe('collaboration privacy accessible UI', () => {
         onSubmit={jest.fn()}
       />,
     );
-    expect(userHtml).toContain('其他用户以个人身份，无法在协作广场看到当前 Bot，也不能发起申请。');
-    expect(userHtml).toContain('其他用户以个人身份，在协作广场可见当前 Bot 并申请好友');
-    expect(userHtml).not.toContain('其他用户以个人身份，在协作广场可见当前 Bot，但仅选中组织范围的用户可申请好友');
+    expect(userHtml).toContain('其他用户无法发现该 Bot');
+    expect(userHtml).toContain('其他用户可见，也可申请好友');
+    expect(userHtml).not.toContain('仅选中组织范围内的用户可申请好友');
     expect(userHtml).not.toContain('该受众');
     expect(userHtml).not.toContain('所有主体');
 
@@ -378,9 +378,9 @@ describe('collaboration privacy accessible UI', () => {
         onSubmit={jest.fn()}
       />,
     );
-    expect(botHtml).toContain('其他 Bot 以 Bot 工作身份，无法在协作广场看到当前 Bot，也不能发起申请。');
-    expect(botHtml).toContain('其他 Bot 以 Bot 工作身份，在协作广场可见当前 Bot 并申请好友');
-    expect(botHtml).not.toContain('其他用户以个人身份，在协作广场可见当前 Bot，但仅选中组织范围的用户可申请好友');
+    expect(botHtml).toContain('其他 Bot 无法发现该 Bot');
+    expect(botHtml).toContain('其他 Bot 可见，也可申请好友');
+    expect(botHtml).not.toContain('其他用户可见');
   });
 
   test('Open Core 读取存量限制范围时 fail closed 且不展示组织选择', () => {
@@ -403,17 +403,25 @@ describe('collaboration privacy accessible UI', () => {
     expect(html).not.toContain('Mock');
   });
 
-  test('协作权限页内说明类 Tooltip 统一使用 200ms 延迟', () => {
-    const tooltipSources = [
-      'src/components/CollaborationPrivacy/PermissionCard/index.tsx',
-      'src/components/CollaborationPrivacy/RelationCard/index.tsx',
-      'src/components/CollaborationPrivacy/RequestList/index.tsx',
-    ].map((sourcePath) => readFileSync(path.join(process.cwd(), sourcePath), 'utf8'));
+  test('协作权限页内常态与动态说明 Tooltip 统一使用 200ms 延迟', () => {
+    const tooltipSource = readFileSync(
+      path.join(process.cwd(), 'src/components/CollaborationPrivacy/HelpTooltip/index.tsx'),
+      'utf8',
+    );
+    const relationSource = readFileSync(
+      path.join(process.cwd(), 'src/components/CollaborationPrivacy/RelationCard/index.tsx'),
+      'utf8',
+    );
+    const requestSource = readFileSync(
+      path.join(process.cwd(), 'src/components/CollaborationPrivacy/RequestList/index.tsx'),
+      'utf8',
+    );
 
-    for (const source of tooltipSources) {
-      expect(source).toContain('collaborationPrivacyTooltipDelayMs');
-      expect(source).not.toContain('<TooltipProvider>');
-    }
+    expect(tooltipSource).toContain('collaborationPrivacyTooltipDelayMs');
+    expect(tooltipSource).toContain('LabelHelpTooltip');
+    expect(tooltipSource).toContain('ControlStateTooltip');
+    expect(relationSource).not.toContain('Tooltip');
+    expect(requestSource).not.toContain('Tooltip');
   });
 
   test('Bot 可见性和好友审批编辑器使用单选组语义', () => {

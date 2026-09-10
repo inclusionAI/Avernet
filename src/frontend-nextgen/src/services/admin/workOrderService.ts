@@ -1,4 +1,4 @@
-// 工单中心 Service：三视图查询 / 分类筛选 / 详情 / 审批 / 通知已读。
+// 通知中心 Service：三视图查询 / 分类筛选 / 详情 / 审批 / 通知已读。
 // 契约对齐 clawweb=Avernet：user_id query 必填（Service 经 resolveUserId 注入）；分页 page_no；
 // query_type=INITIATED_BY_ME、item_type=NOTICE；审批走统一 /approval 入口（decision=APPROVED/REJECTED，reject 非空）。
 // 错误标准化（catch -> {message,apiPath}），不 throw 到 Component。
