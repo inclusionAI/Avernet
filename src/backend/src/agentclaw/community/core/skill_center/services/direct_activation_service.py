@@ -44,6 +44,9 @@ from agentclaw.community.core.skill_center.policies.platform_default_mcp import 
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
 )
+from agentclaw.community.core.skill_center.desktop_skill_recovery_protocol import (
+    DesktopSkillRecoveryServiceProtocol,
+)
 from agentclaw.community.core.skill_center.services._mutation_flow import (
     MutationProjectionFlow,
     mcp_claim_scope,
@@ -79,6 +82,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
         mcp_center: MCPCenterPlugin,
         reader: BotCapabilityStateReaderProtocol,
         platform_default_mcp_policy: PlatformDefaultMcpPolicy,
+        recovery: DesktopSkillRecoveryServiceProtocol,
     ) -> None:
         self._repository = repository
         self._bot_repo = bot_repo
@@ -88,7 +92,11 @@ class DirectActivationService(DirectActivationServiceProtocol):
         self._mcp_center = mcp_center
         self._reader = reader
         self._platform_default_mcp_policy = platform_default_mcp_policy
-        self._flow = MutationProjectionFlow(repository=repository, runtime=runtime)
+        self._flow = MutationProjectionFlow(
+            repository=repository,
+            runtime=runtime,
+            recovery=recovery,
+        )
 
     # ── Skills ──────────────────────────────────────────────────────
 

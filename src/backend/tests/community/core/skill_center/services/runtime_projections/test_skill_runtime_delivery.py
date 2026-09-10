@@ -410,7 +410,7 @@ async def test_repo_delivery_uses_one_logical_apply_call() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cutover_intermediate_state_uses_pool_mapping_sources() -> None:
+async def test_cutover_intermediate_state_refuses_steady_state_mapping_write() -> None:
     service = _LegacyRuntimeService()
     pool = _RecordingPoolRuntime()
     scope = BotSkillLayoutScope(env="pre", entity_id="owner-1", bot_id="bot-1")
@@ -431,14 +431,14 @@ async def test_cutover_intermediate_state_uses_pool_mapping_sources() -> None:
     )
     delivery = _delivery(pool, layouts)
 
-    await delivery.deliver(plan=_plan(asset), service_factory=_Factory(service))
+    result = await delivery.deliver(
+        plan=_plan(asset), service_factory=_Factory(service)
+    )
 
     assert layouts.scopes == [scope]
-    assert [name for name, _ in pool.calls] == ["apply"]
-    assert all(
-        request["source_layout"] is SkillMappingSourceLayout.POOL
-        for _, request in pool.calls
-    )
+    assert result.status is RuntimeProjectionStatus.PENDING
+    assert result.issues[0].code == "SKILLS_POOL_TRANSITION_OWNS_MAPPING"
+    assert pool.calls == []
     assert service.desired_skills is None
 
 

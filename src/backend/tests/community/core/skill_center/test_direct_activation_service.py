@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -243,6 +244,7 @@ def _service(
     reader=None,
     audit=None,
     platform_default_mcp_policy=None,
+    recovery=None,
 ) -> DirectActivationService:
     return DirectActivationService(
         repository if repository is not None else _Repository(),
@@ -256,6 +258,7 @@ def _service(
         platform_default_mcp_policy
         if platform_default_mcp_policy is not None
         else _PlatformDefaultMcpPolicy(),
+        recovery if recovery is not None else MagicMock(),
     )
 
 
@@ -455,6 +458,7 @@ async def test_a_not_ready_bot_commits_desired_state_and_returns_pending():
         repository, _PendingBots(), _Skills(), _SuccessfulRuntime(),
         _Authorization(), _Audit(), _McpCenter(allowed=True), _Reader(),
         _PlatformDefaultMcpPolicy(),
+        MagicMock(),
     )
 
     result = await service.activate_skill(
@@ -486,6 +490,7 @@ async def test_a_visible_center_asset_is_directly_activatable_but_local_addressi
         repository, _Bots(), _MoreSkills(), _SuccessfulRuntime(),
         _Authorization(), _Audit(), _McpCenter(allowed=True), _Reader(),
         _PlatformDefaultMcpPolicy(),
+        MagicMock(),
     )
 
     result = await service.activate_skill(
@@ -692,6 +697,7 @@ async def test_record_only_mcp_activation_writes_desired_state_on_a_pending_bot(
         repository, _PendingBotsForRecordOnly(), _Skills(), _NeverProjects(),
         _Authorization(), audit, _McpCenter(allowed=True), _Reader(),
         _PlatformDefaultMcpPolicy(),
+        MagicMock(),
     )
     result = await service.activate_mcp(
         server_code="github", bot_id="bot-1", owner_id="true-owner",
@@ -714,6 +720,7 @@ async def test_record_only_skill_activation_writes_desired_state_on_a_pending_bo
         repository, _PendingBotsForRecordOnly(), _Skills(), _NeverProjects(),
         _Authorization(), _Audit(), _McpCenter(allowed=True), _Reader(),
         _PlatformDefaultMcpPolicy(),
+        MagicMock(),
     )
     await service.activate_skill(
         skill_id="7", bot_id="bot-1", owner_id="true-owner", actor_id="true-owner",
@@ -738,6 +745,7 @@ async def test_record_only_skips_the_runtime_where_the_default_reports_it_pendin
         repository, _PendingBotsForRecordOnly(), _Skills(), _NeverProjects(),
         _Authorization(), _Audit(), _McpCenter(allowed=True), _Reader(),
         _PlatformDefaultMcpPolicy(),
+        MagicMock(),
     )
     by_default = await service.activate_mcp(
         server_code="github", bot_id="bot-1", owner_id="true-owner",

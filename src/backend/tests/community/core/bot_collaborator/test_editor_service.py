@@ -234,6 +234,77 @@ def test_update_editor_changes_only_role_and_operator(dependencies):
     service.on_collaboration_changed.assert_called_once_with("bot-1", OWNER, "dev")
 
 
+@pytest.fixture
+def team_space_dependencies(dependencies):
+    """A capabilities-False Team Space Bot plus its resolved Team Space.
+
+    工单放行之后（PR #2115）,这类 bot 获批的编辑授权必须能被公开 Editors
+    API 管理和撤销,不能在 list/remove/leave/add 上被引擎能力闸门挡死。
+    """
+    service, collaborator_repo, bot_repo, space_access = dependencies
+    bot_repo.get_by_id_and_owner.return_value = _bot(
+        bot_type="personal",
+        active_engine="openclaw",
+        template_type=None,
+        space_id="spc-team",
+    )
+    space_access.require_space_reference.return_value = Mock(
+        id=22, space_type=SpaceType.TEAM
+    )
+    return service, collaborator_repo, bot_repo, space_access
+
+
+def test_team_space_bot_lists_editors_without_engine_capability(
+    team_space_dependencies,
+):
+    service, collaborator_repo, _, _ = team_space_dependencies
+    collaborator_repo.get_user_role.return_value = CollaboratorRole.MEMBER
+    collaborator_repo.list_by_bot.return_value = [_record()]
+
+    records = service.list_editors("bot-1", OWNER, MEMBER, env="dev")
+
+    assert records == [_record()]
+
+
+def test_team_space_owner_adds_editor_without_engine_capability(
+    team_space_dependencies,
+):
+    record = _record(user_id="editor-9")
+    service, collaborator_repo, _, _ = team_space_dependencies
+    collaborator_repo.insert.return_value = record
+
+    result = service.add_editor("bot-1", OWNER, "editor-9", OWNER, env="dev")
+
+    assert result is record
+    collaborator_repo.insert.assert_called_once()
+
+
+def test_team_space_owner_removes_editor_without_engine_capability(
+    team_space_dependencies,
+):
+    service, collaborator_repo, _, _ = team_space_dependencies
+    collaborator_repo.get_by_id.return_value = _record(user_id=MEMBER)
+    collaborator_repo.delete.return_value = True
+
+    assert service.remove_editor("bot-1", OWNER, 7, OWNER, env="dev") is True
+
+    collaborator_repo.delete.assert_called_once_with(7)
+    service.on_collaboration_changed.assert_called_once_with("bot-1", OWNER, "dev")
+
+
+def test_team_space_editor_leaves_without_engine_capability(
+    team_space_dependencies,
+):
+    service, collaborator_repo, _, _ = team_space_dependencies
+    collaborator_repo.get_user_role.return_value = CollaboratorRole.MEMBER
+    collaborator_repo.get_by_bot_and_user.return_value = _record(user_id=MEMBER)
+    collaborator_repo.delete.return_value = True
+
+    assert service.leave_editors("bot-1", OWNER, MEMBER, env="dev") is True
+
+    collaborator_repo.delete.assert_called_once_with(7)
+
+
 def test_non_owner_admin_must_leave_instead_of_removing_self(dependencies):
     service, collaborator_repo, _, _ = dependencies
     collaborator_repo.get_user_role.return_value = CollaboratorRole.ADMIN

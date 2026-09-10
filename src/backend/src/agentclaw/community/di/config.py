@@ -283,6 +283,18 @@ class SecretNamesConfig:
     aicoding_theta_master_key: str = ""
 
 
+@dataclass(frozen=True)
+class McpRuntimeCredentialsConfig:
+    """Secret references for platform-managed MCP request headers.
+
+    The nested mapping is ``server_code -> header_name -> secret_name``.  It
+    contains registry names only; values are resolved lazily through the active
+    ``SecretResolver`` when an MCP payload is built.
+    """
+
+    header_secrets: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
+
+
 def _default_cors_origins() -> list[str]:
     """Neutral localhost CORS origins (each deploy adds its own via the yaml)."""
     return [
@@ -541,6 +553,21 @@ class DesktopBotPeriodicScanConfig:
     enabled: bool = True
     apply_owner_whitelist: frozenset[str] = frozenset()
     global_dry_run: bool = False
+
+
+@dataclass(frozen=True)
+class DesktopSkillRecoveryConfig:
+    """Low-frequency safety net for missed Desktop Skill recovery wakes."""
+
+    enabled: bool = True
+    sweep_interval_seconds: float = 10 * 60
+    sweep_page_size: int = 100
+
+    def __post_init__(self) -> None:
+        if self.sweep_interval_seconds <= 0:
+            raise ValueError("sweep_interval_seconds must be positive")
+        if self.sweep_page_size <= 0:
+            raise ValueError("sweep_page_size must be positive")
 
 
 @dataclass(frozen=True)

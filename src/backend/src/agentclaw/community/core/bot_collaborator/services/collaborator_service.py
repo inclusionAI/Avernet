@@ -325,17 +325,10 @@ class CollaboratorService(CollaboratorQueryMixin, CollaboratorServiceProtocol):
         if not bot:
             raise BotNotFoundError(f"Bot 不存在: bot_id={bot_id}, owner_id={owner_id}")
 
-        # 2. 检查 Bot 类型 / 成员管理能力
-        #    CollaboratorService 是 engine-agnostic 服务：
-        #    - service：Service Bot 协作者，走原逻辑；
-        #    - 非 service：通过 MemberManagementCapabilityService 协调模板开关和
-        #      各引擎自己的能力实现，避免在这里直接依赖某个 engine 的定制逻辑。
-        if not self._member_management_capability_service.can_manage_collaborators(
-            bot, bot_id
-        ):
-            raise BotNotServiceTypeError(
-                f"Bot 不是服务型且未开启成员管理: bot_id={bot_id}"
-            )
+        # 2. 检查 Bot 类型 / 成员管理能力（委托 EditorPolicy 单点判定）
+        #    与公开 Editors API 工同一规则:Team Space 归属的 Bot 按空间契约
+        #    放行,其余 Bot 仍走引擎能力判定;详情见 EditorPolicy.require_capability。
+        self._editor_policy.require_capability(bot=bot, bot_id=bot_id)
 
         bot_pk = bot["id"]
         owner_id_from_bot = bot["owner_id"]

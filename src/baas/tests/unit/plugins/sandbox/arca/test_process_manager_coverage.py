@@ -51,6 +51,7 @@ def _clean_env(monkeypatch):
         "BCN_PLUGIN_PATH",
         "BCS_PORT",
         "LOCAL_HERMES_DIR",
+        "OPENCLAW_OPENAI_API_KEY",
         "LOCAL_ENGINE_SRC_DIR",
         "LOCAL_ENGINE_PYTHON",
     ):
@@ -1153,7 +1154,14 @@ class TestCreateHermesConfig:
 
         # Mock yaml module
         mock_yaml = MagicMock()
-        loaded_config = {"existing": "value"}
+        loaded_config = {
+            "existing": "value",
+            "api_key": "",
+            "custom_providers": [
+                {"name": "antchat-kimi", "api_key": ""},
+                {"name": "antchat-glm", "api_key": ""},
+            ],
+        }
         mock_yaml.safe_load.return_value = loaded_config
         mock_yaml.dump = MagicMock()
 
@@ -1165,6 +1173,7 @@ class TestCreateHermesConfig:
 
             template_path = tmp_path / "hermes_template.yaml"
             template_path.write_text("existing: value")
+            monkeypatch.setenv("OPENCLAW_OPENAI_API_KEY", "test-model-key")
             monkeypatch.setattr(
                 manager,
                 "_resolve_hermes_config_template_path",
@@ -1186,6 +1195,13 @@ class TestCreateHermesConfig:
         # Check subdirectories were created
         for subdir in ("sessions", "logs", "skills", "memories", "cron"):
             assert (config_dir / subdir).is_dir()
+        dumped_config = mock_yaml.dump.call_args[0][0]
+        assert dumped_config["api_key"] == "test-model-key"
+        assert all(
+            provider["api_key"] == "test-model-key"
+            for provider in dumped_config["custom_providers"]
+        )
+        assert stat.S_IMODE(config_file.stat().st_mode) == 0o600
 
     def test_create_hermes_config_no_template(self, monkeypatch, tmp_path):
         """create_hermes_config uses minimal config when template not found."""
@@ -1219,6 +1235,7 @@ class TestCreateHermesConfig:
         assert dumped_config["platforms"]["api_server"]["port"] == 18700
         assert dumped_config["platforms"]["api_server"]["host"] == "127.0.0.1"
         assert dumped_config["platforms"]["api_server"]["enabled"] is True
+        assert dumped_config["api_key"] == ""
 
     def test_create_hermes_config_with_local_env(self, monkeypatch, tmp_path):
         """create_hermes_config respects LOCAL_HERMES_DIR env var."""

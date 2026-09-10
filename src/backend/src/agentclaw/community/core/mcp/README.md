@@ -39,6 +39,7 @@ consumes:
   - "DeviceAccessor"
   - "MCPAuthPlugin"
   - "MCPCenterPlugin"
+  - "SecretResolver"
   - "PassportPlugin"
   - "CallerIdentityRepositoryProtocol"
 internal_dependencies:
@@ -58,6 +59,8 @@ internal_dependencies:
   - agentclaw.community.plugin_api.mcp_auth
   - agentclaw.community.plugin_api.mcp_center
   - agentclaw.community.plugin_api.passport
+  - agentclaw.community.plugin_api.secret_resolver
+  - agentclaw.community.di.config
   - agentclaw.community.utils.env_utils
 ```
 

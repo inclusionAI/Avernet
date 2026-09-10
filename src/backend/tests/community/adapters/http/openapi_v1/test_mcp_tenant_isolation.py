@@ -28,6 +28,7 @@ from agentclaw.community.core.mcp.config_flow import (
     write_unified_config,
 )
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
+from agentclaw.community.di.config import McpRuntimeCredentialsConfig
 from agentclaw.community.core.models.mcp import UserMCPConfig
 from agentclaw.community.core.repository.implementations.bot.user_mcp_config import UserMCPConfigRepository
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
@@ -74,7 +75,11 @@ def config_service(tmp_path):
     UserMCPConfig.__table__.create(engine)
     repo = UserMCPConfigRepository(_FileSqliteDB(engine))
     return MCPConfigService(
-        user_mcp_config_repo=repo, mcp_center=MagicMock(), bot_repo=MagicMock()
+        user_mcp_config_repo=repo,
+        mcp_center=MagicMock(),
+        bot_repo=MagicMock(),
+        mcp_runtime_credentials=McpRuntimeCredentialsConfig(),
+        secret_resolver=MagicMock(),
     )
 
 

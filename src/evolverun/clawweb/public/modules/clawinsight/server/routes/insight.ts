@@ -22,9 +22,9 @@ import type {
 } from "../repositories/insight-task-index-repository.js";
 import type { InsightAgentAuthorizer } from "../services/insight/agent-auth.js";
 import type { GovernanceRuleProvider } from "../services/insight/governance-rule-provider.js";
-import type { InsightAutoRepairRepository } from "../repositories/insight-auto-repair-repository.js";
+import type { AutoRepairGrantView, InsightAutoRepairRepository } from "../repositories/insight-auto-repair-repository.js";
 import type { RuleEvolutionService } from "../services/insight/rule-evolution-service.js";
-import { readAutoRepairRule } from "../services/insight/auto-repair-policy.js";
+import { readAutoRepairRule, type AutoRepairRuleSnapshot } from "../services/insight/auto-repair-policy.js";
 import { createAdminConsentToken } from "../services/insight/admin-consent.js";
 import { getClawWebPublicBaseUrl } from "@avernet/clawweb-shared/server/env";
 import { InsightTaskCreationError } from "../services/evolve/insight-task-service.js";
@@ -317,6 +317,99 @@ function repairAuthHeaders(req: Request, userId: string): Record<string, string>
   const cookie = req.header("cookie")?.trim();
   if (cookie) headers.cookie = cookie;
   return headers;
+}
+
+type AutoDispatchImprovement = Pick<ImprovementView, "improvementId" | "ownerUserId" | "botOwnerUserId" | "botId" | "title" | "suggestedAction" | "userGuidance" | "sourceRuleId">;
+
+type AutoDispatchScope = { rule: AutoRepairRuleSnapshot | null; grant: AutoRepairGrantView | null };
+
+async function resolveAutoDispatchScope(
+  options: InsightRouterOptions,
+  improvement: AutoDispatchImprovement,
+): Promise<AutoDispatchScope> {
+  if (!options.ruleProvider || !options.autoRepairRepo) return { rule: null, grant: null };
+  const rule = improvement.sourceRuleId
+    ? await readAutoRepairRule(options.ruleProvider, improvement.sourceRuleId, "DIRECT_EVOLUTION")
+    : null;
+  const grant = rule
+    ? await options.autoRepairRepo.findLatestActiveGrantForRule(improvement.ownerUserId, rule)
+    : null;
+  return { rule, grant };
+}
+
+/**
+ * An Agent may only auto-approve when the governance policy declares the rule
+ * trusted, or the Owner pre-consented to unattended execution for that exact
+ * rule scope. Both are recorded consents; anything else keeps the human gate.
+ */
+async function assertAgentMayAutoApprove(
+  options: InsightRouterOptions,
+  improvement: AutoDispatchImprovement & { actionType: ImprovementView["actionType"] },
+): Promise<void> {
+  if (improvement.actionType !== "DIRECT_EVOLUTION" || !improvement.sourceRuleId) {
+    throw new InsightUnauthorizedError("该项没有可信任的治理规则，必须由管理员人工审核");
+  }
+  if (!options.ruleProvider || !options.autoRepairRepo) {
+    throw new InsightUnauthorizedError("治理规则或自动修复授权存储不可用，必须由管理员人工审核");
+  }
+  const rule = await readAutoRepairRule(options.ruleProvider, improvement.sourceRuleId, "DIRECT_EVOLUTION");
+  if (!rule) throw new InsightUnauthorizedError("治理规则不存在或已停用，必须由管理员人工审核");
+  if (await options.autoRepairRepo.isRuleTrusted(rule)) return;
+  const grant = await options.autoRepairRepo.findLatestActiveGrantForRule(improvement.ownerUserId, rule);
+  if (grant?.autoExecute !== true) {
+    throw new InsightUnauthorizedError("规则未标记可信且 Owner 未开启自动执行，Agent 不能自动批准，必须由管理员人工审核");
+  }
+}
+
+async function dispatchGrantAuthorizedRepair(input: {
+  req: Request;
+  options: InsightRouterOptions;
+  improvement: AutoDispatchImprovement;
+  grant: AutoRepairGrantView;
+  remark: string;
+}): Promise<string | null> {
+  const { req, options, improvement, grant, remark } = input;
+  const requestId = `insight-auto:${improvement.improvementId}:grant:${grant.grantId}`;
+  const crossBotConfirmed = improvement.ownerUserId !== improvement.botOwnerUserId || grant.botId !== improvement.botId;
+  if (options.repairService) {
+    const task = await options.repairService.createTask({
+      actorUserId: grant.ownerUserId,
+      authHeaders: repairAuthHeaders(req, grant.ownerUserId),
+      body: {
+        taskName: `${improvement.title.slice(0, 119)} · 自动修复`,
+        symptom: improvement.title,
+        repairDirection: improvement.suggestedAction ?? improvement.userGuidance ?? undefined,
+        targetUserId: grant.ownerUserId,
+        botId: grant.botId,
+        insightImprovementId: improvement.improvementId,
+        insightRequestId: requestId,
+        authorizationGrantId: grant.grantId,
+        crossBotConfirmed,
+      },
+    });
+    return String(task.taskId);
+  }
+  if (options.insightTaskService) {
+    const task = await options.insightTaskService.create({
+      taskType: "full",
+      taskName: `${improvement.title.slice(0, 119)} · 自动修复`,
+      remark: remark.slice(0, 1000),
+      userId: grant.ownerUserId,
+      botId: grant.botId,
+      improvementId: improvement.improvementId,
+      crossBotConfirmed,
+      maxRounds: 3,
+      nodeCommandYamls: undefined,
+      forceMessage: false,
+      idempotencyKey: requestId,
+      actorUserId: null,
+      authorizationGrantId: grant.grantId,
+      createdByOverride: "insight-auto-repair",
+      callbackUrl: (taskId, stepId) => `${req.protocol}://${req.get("host")}/api/evolve/internal/tasks/${encodeURIComponent(taskId)}/steps/${encodeURIComponent(stepId)}/bot-callback`,
+    });
+    return task.task.task_id;
+  }
+  throw new InsightDataNotReadyError("Insight Repair/Evolve Source 服务不可用");
 }
 
 function parsePositiveInteger(value: unknown, name: string, fallback: number, max: number): number {
@@ -681,10 +774,7 @@ export function createInsightRouter(service: InsightService | null, options: Ins
       && (options.insightTaskService || options.repairService)
     ) {
       try {
-        const rule = await readAutoRepairRule(options.ruleProvider, improvement.sourceRuleId, "DIRECT_EVOLUTION");
-        const grant = rule
-          ? await options.autoRepairRepo.findLatestActiveGrantForRule(improvement.ownerUserId, rule)
-          : null;
+        const { grant } = await resolveAutoDispatchScope(options, improvement);
         if (grant?.autoExecute) {
           improvement = await requireService(service).reviewAdminAction(
             "governance-auto-owner-consent",
@@ -692,44 +782,13 @@ export function createInsightRouter(service: InsightService | null, options: Ins
             { decision: "APPROVE", version: improvement.version },
             { notifyApproved: false },
           );
-          const requestId = `insight-auto:${improvement.improvementId}:grant:${grant.grantId}`;
-          if (options.repairService) {
-            const task = await options.repairService.createTask({
-              actorUserId: grant.ownerUserId,
-              authHeaders: repairAuthHeaders(req, grant.ownerUserId),
-              body: {
-                taskName: `${improvement.title.slice(0, 119)} · 自动修复`,
-                symptom: improvement.title,
-                repairDirection: improvement.suggestedAction ?? improvement.userGuidance ?? undefined,
-                targetUserId: grant.ownerUserId,
-                botId: grant.botId,
-                insightImprovementId: improvement.improvementId,
-                insightRequestId: requestId,
-                authorizationGrantId: grant.grantId,
-                crossBotConfirmed: improvement.ownerUserId !== improvement.botOwnerUserId || grant.botId !== improvement.botId,
-              },
-            });
-            autoTaskId = String(task.taskId);
-          } else if (options.insightTaskService) {
-            const task = await options.insightTaskService.create({
-              taskType: "full",
-              taskName: `${improvement.title.slice(0, 119)} · 自动修复`,
-              remark: (improvement.suggestedAction ?? improvement.userGuidance ?? "Owner 已授权的自动修复项").slice(0, 1000),
-              userId: grant.ownerUserId,
-              botId: grant.botId,
-              improvementId: improvement.improvementId,
-              crossBotConfirmed: improvement.ownerUserId !== improvement.botOwnerUserId || grant.botId !== improvement.botId,
-              maxRounds: 3,
-              nodeCommandYamls: undefined,
-              forceMessage: false,
-              idempotencyKey: requestId,
-              actorUserId: null,
-              authorizationGrantId: grant.grantId,
-              createdByOverride: "insight-auto-repair",
-              callbackUrl: (taskId, stepId) => `${req.protocol}://${req.get("host")}/api/evolve/internal/tasks/${encodeURIComponent(taskId)}/steps/${encodeURIComponent(stepId)}/bot-callback`,
-            });
-            autoTaskId = task.task.task_id;
-          }
+          autoTaskId = await dispatchGrantAuthorizedRepair({
+            req,
+            options,
+            improvement,
+            grant,
+            remark: improvement.suggestedAction ?? improvement.userGuidance ?? "Owner 已授权的自动修复项",
+          });
         }
       } catch (error) {
         console.warn(`[clawweb] Governance owner auto-execution skipped improvement=${improvement.improvementId}: ${error instanceof Error ? error.message : String(error)}`);
@@ -747,6 +806,130 @@ export function createInsightRouter(service: InsightService | null, options: Ins
       bodyRecord(req),
     );
     res.json(improvement);
+  }));
+
+  router.get("/internal/governance/actions/:improvementId", asyncHandler(async (req, res) => {
+    authorizeAgent(req, options, "action.read");
+    res.set("Cache-Control", "no-store");
+    res.json(await requireService(service).getGovernanceAction(parseImprovementId(req.params.improvementId)));
+  }));
+
+  router.post("/internal/governance/actions/:improvementId/review", asyncHandler(async (req, res) => {
+    const agentId = authorizeAgent(req, options, "action.review");
+    const body = bodyRecord(req);
+    const insightService = requireService(service);
+    const improvementId = parseImprovementId(req.params.improvementId);
+    const decision = String(body.decision ?? "").trim().toUpperCase();
+    if (decision === "APPROVE") {
+      const pending = await insightService.getAdminImprovement(improvementId);
+      // The Agent only replaces the human gate when the rule itself is trusted or the
+      // Owner pre-consented to unattended execution. Everything else needs an Admin.
+      if (pending.adminReviewStatus === "PENDING") {
+        await assertAgentMayAutoApprove(options, pending);
+      }
+    }
+    let improvement = await insightService.reviewAdminAction(`agent:${agentId}`, improvementId, body, { notifyApproved: false });
+    let autoRepairStarted = false;
+    if (decision === "APPROVE" && improvement.actionType === "DIRECT_EVOLUTION" && improvement.sourceRuleId) {
+      try {
+        const { grant } = await resolveAutoDispatchScope(options, improvement);
+        if (grant) {
+          await dispatchGrantAuthorizedRepair({
+            req,
+            options,
+            improvement,
+            grant,
+            remark: improvement.suggestedAction ?? improvement.userGuidance ?? "Agent 已批准的自动修复项",
+          });
+          improvement = await insightService.getAdminImprovement(improvement.improvementId);
+          autoRepairStarted = improvement.status === "IN_PROGRESS";
+        }
+      } catch (error) {
+        console.warn(`[clawweb] Agent approved auto-repair continuation skipped improvement=${improvement.improvementId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (decision === "APPROVE" && !autoRepairStarted) {
+      insightService.notifyAdminApprovedImprovement(improvement);
+    }
+    res.json({ ...improvement, autoRepairStarted });
+  }));
+
+  router.post("/internal/governance/actions/:improvementId/evolve", asyncHandler(async (req, res) => {
+    authorizeAgent(req, options, "action.evolve");
+    const insightService = requireService(service);
+    const improvement = await insightService.getAdminImprovement(parseImprovementId(req.params.improvementId));
+    if (!options.repairService && !options.insightTaskService) {
+      throw new InsightDataNotReadyError("Insight Repair/Evolve Source 服务不可用");
+    }
+    if (improvement.actionType !== "DIRECT_EVOLUTION") {
+      throw new InsightConflictError("只有 DIRECT_EVOLUTION 治理项可以推送到进化室");
+    }
+    if (improvement.adminReviewStatus === "PENDING") {
+      throw new InsightConflictError("治理项必须先审批后才能推送到进化室");
+    }
+    if (improvement.adminReviewStatus === "REJECTED") {
+      throw new InsightConflictError("已驳回的治理项不能推送到进化室");
+    }
+    const status = improvement.status.toUpperCase();
+    if (status === "RESOLVED" || status === "ARCHIVED") {
+      throw new InsightConflictError("治理项已完结，无需再次推送");
+    }
+    if (!improvement.sourceRuleId) {
+      throw new InsightConflictError("治理项缺少治理规则，无法自动派发");
+    }
+    if (!options.ruleProvider || !options.autoRepairRepo) {
+      throw new InsightDataNotReadyError("治理规则或自动修复授权存储不可用");
+    }
+    const rule = await readAutoRepairRule(options.ruleProvider, improvement.sourceRuleId, "DIRECT_EVOLUTION");
+    if (!rule) throw new InsightConflictError("治理规则不存在或已停用，无法自动派发");
+    const grant = await options.autoRepairRepo.findLatestActiveGrantForRule(improvement.ownerUserId, rule);
+    if (!grant) throw new InsightConflictError("Owner 未授权该规则的持续自动修复，无法自动派发");
+    if (!grant.autoExecute) {
+      throw new InsightConflictError("Owner 授权未开启自动执行，Agent 不能自动推送到进化室");
+    }
+    const requestId = `insight-auto:${improvement.improvementId}:grant:${grant.grantId}`;
+    let taskId: string | null;
+    try {
+      taskId = await dispatchGrantAuthorizedRepair({
+        req,
+        options,
+        improvement,
+        grant,
+        remark: improvement.suggestedAction ?? improvement.userGuidance ?? "Owner 已授权的自动修复项",
+      });
+    } catch (error) {
+      if (error instanceof RepairError) {
+        res.status(error.status).json({
+          error: error.code,
+          message: error.message,
+          ...(error.toolCallId ? { toolCallId: error.toolCallId } : {}),
+          ...(error.recovery ? { recovery: error.recovery } : {}),
+        });
+        return;
+      }
+      if (isInsightTaskCreationError(error)) {
+        const status = error.category === "validation" ? 400
+          : error.category === "auth" ? 401
+            : error.category === "forbidden" ? 403
+              : error.category === "not_found" ? 404
+                : error.category === "conflict" ? 409 : 422;
+        res.status(status).json({
+          code: error.code,
+          error: error.message,
+          stage: error.stage,
+          retryable: error.retryable,
+        });
+        return;
+      }
+      throw error;
+    }
+    res.status(202).json({
+      improvementId: improvement.improvementId,
+      taskId,
+      grantId: grant.grantId,
+      requestId,
+      dispatched: true,
+    });
   }));
 
   router.get("/internal/governance/verification-candidates", asyncHandler(async (req, res) => {
@@ -992,50 +1175,16 @@ export function createInsightRouter(service: InsightService | null, options: Ins
     ) {
       let activeGrantMatched = false;
       try {
-        const rule = await readAutoRepairRule(options.ruleProvider, improvement.sourceRuleId, "DIRECT_EVOLUTION");
-        const activeGrant = rule
-          ? await options.autoRepairRepo.findLatestActiveGrantForRule(improvement.ownerUserId, rule)
-          : null;
-        if (activeGrant) {
+        const { grant } = await resolveAutoDispatchScope(options, improvement);
+        if (grant) {
           activeGrantMatched = true;
-          const requestId = `insight-auto:${improvement.improvementId}:grant:${activeGrant.grantId}`;
-          if (options.repairService) {
-            await options.repairService.createTask({
-              actorUserId: activeGrant.ownerUserId,
-              authHeaders: repairAuthHeaders(req, activeGrant.ownerUserId),
-              body: {
-                taskName: `${improvement.title.slice(0, 119)} · 自动修复`,
-                symptom: improvement.title,
-                repairDirection: improvement.suggestedAction ?? improvement.userGuidance ?? undefined,
-                targetUserId: activeGrant.ownerUserId,
-                botId: activeGrant.botId,
-                insightImprovementId: improvement.improvementId,
-                insightRequestId: requestId,
-                authorizationGrantId: activeGrant.grantId,
-                crossBotConfirmed: improvement.ownerUserId !== improvement.botOwnerUserId
-                  || activeGrant.botId !== improvement.botId,
-              },
-            });
-          } else if (options.insightTaskService) {
-            await options.insightTaskService.create({
-              taskType: "full",
-              taskName: `${improvement.title.slice(0, 119)} · 自动修复`,
-              remark: (improvement.suggestedAction ?? improvement.userGuidance ?? "Admin 已批准的自动修复项").slice(0, 1000),
-              userId: activeGrant.ownerUserId,
-              botId: activeGrant.botId,
-              improvementId: improvement.improvementId,
-              crossBotConfirmed: improvement.ownerUserId !== improvement.botOwnerUserId
-                || activeGrant.botId !== improvement.botId,
-              maxRounds: 3,
-              nodeCommandYamls: undefined,
-              forceMessage: false,
-              idempotencyKey: requestId,
-              actorUserId: null,
-              authorizationGrantId: activeGrant.grantId,
-              createdByOverride: "insight-auto-repair",
-              callbackUrl: (taskId, stepId) => `${req.protocol}://${req.get("host")}/api/evolve/internal/tasks/${encodeURIComponent(taskId)}/steps/${encodeURIComponent(stepId)}/bot-callback`,
-            });
-          }
+          await dispatchGrantAuthorizedRepair({
+            req,
+            options,
+            improvement,
+            grant,
+            remark: improvement.suggestedAction ?? improvement.userGuidance ?? "Admin 已批准的自动修复项",
+          });
         }
       } catch (error) {
         console.warn(`[clawweb] Insight approved auto-repair continuation skipped improvement=${improvement.improvementId}: ${error instanceof Error ? error.message : String(error)}`);

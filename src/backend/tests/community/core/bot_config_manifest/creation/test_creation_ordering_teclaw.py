@@ -59,7 +59,7 @@ from ..apply._fakes import (
 )
 from ..managed_files._fakes import FakeObjectStorage
 from .test_creation_ordering import _Db, _InlineQueue, _IssuedPassport, _RecordedRelationship
-from agentclaw.community.plugins.local.object_store_client import InMemoryObjectStoreClientFactory
+from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 
 _ENTITY = "u_owner"
 _BOT = "b_teclaw"
@@ -123,7 +123,7 @@ def _build(db):
     )
     queue = _InlineQueue()
     bots = _Bots()
-    fetcher = lambda: EntryFetcher(FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials(), InMemoryObjectStoreClientFactory())  # noqa: E731
+    fetcher = lambda: EntryFetcher(FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials(), FakeObjectStore())  # noqa: E731
 
     def platform_ports() -> MaterialiserPorts:
         return MaterialiserPorts(

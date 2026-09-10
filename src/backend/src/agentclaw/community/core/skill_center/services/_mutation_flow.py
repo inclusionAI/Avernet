@@ -21,6 +21,10 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
     ProjectionScope,
     RuntimeProjectionResult,
+    RuntimeProjectionStatus,
+)
+from agentclaw.community.core.skill_center.desktop_skill_recovery_protocol import (
+    DesktopSkillRecoveryServiceProtocol,
 )
 from agentclaw.community.core.skills_pool.mapping_intent import (
     retired_logical_skill_mappings,
@@ -92,9 +96,11 @@ class MutationProjectionFlow:
         *,
         repository: CapabilityDesiredStateRepositoryProtocol,
         runtime: BotRuntimeProjectorProtocol,
+        recovery: DesktopSkillRecoveryServiceProtocol,
     ) -> None:
         self._repository = repository
         self._runtime = runtime
+        self._recovery = recovery
 
     async def apply(
         self,
@@ -146,14 +152,25 @@ class MutationProjectionFlow:
             }
         if not is_bot_ready(bot):
             result = mutation()
+            effective_scope = (
+                scope_from_result(result) if scope_from_result is not None else scope
+            )
+            assert effective_scope is not None
+            runtime_result = RuntimeProjectionResult.pending(
+                code="BOT_RUNTIME_NOT_READY",
+                reason="Bot 运行环境尚未就绪，能力状态已保存但尚未同步",
+            )
+            self._ensure_skill_recovery(
+                bot=bot,
+                bot_id=bot_id,
+                scope=effective_scope,
+                result=runtime_result,
+            )
             return {
                 **result.item,
                 "changed": result.changed,
                 **result.details,
-                "runtime_projection": RuntimeProjectionResult.pending(
-                    code="BOT_RUNTIME_NOT_READY",
-                    reason="Bot 运行环境尚未就绪，能力状态已保存但尚未同步",
-                ).to_dict(),
+                "runtime_projection": runtime_result.to_dict(),
             }
         owner_id = str(bot["owner_id"])
         snapshot_started_at = time.perf_counter()
@@ -185,13 +202,24 @@ class MutationProjectionFlow:
             mcp_delta_count=len(result.mcp_codes),
         )
         if skip_projection_when_unchanged and not result.changed:
+            effective_scope = (
+                scope_from_result(result) if scope_from_result is not None else scope
+            )
+            assert effective_scope is not None
+            runtime_result = RuntimeProjectionResult.skipped(
+                reason="DESIRED_STATE_UNCHANGED"
+            )
+            self._ensure_skill_recovery(
+                bot=bot,
+                bot_id=bot_id,
+                scope=effective_scope,
+                result=runtime_result,
+            )
             return {
                 **result.item,
                 "changed": False,
                 **result.details,
-                "runtime_projection": RuntimeProjectionResult.skipped(
-                    reason="DESIRED_STATE_UNCHANGED"
-                ).to_dict(),
+                "runtime_projection": runtime_result.to_dict(),
             }
         effective_scope = (
             scope_from_result(result) if scope_from_result is not None else scope
@@ -206,6 +234,12 @@ class MutationProjectionFlow:
             scope=effective_scope,
             previous_snapshot_failed=previous_snapshot_failed,
         )
+        self._ensure_skill_recovery(
+            bot=bot,
+            bot_id=bot_id,
+            scope=effective_scope,
+            result=runtime_result,
+        )
         self._log_timing(
             stage="runtime_projection",
             bot_id=bot_id,
@@ -219,6 +253,19 @@ class MutationProjectionFlow:
             **result.details,
             "runtime_projection": runtime_result.to_dict(),
         }
+
+    def _ensure_skill_recovery(
+        self,
+        *,
+        bot: dict,
+        bot_id: str,
+        scope: ProjectionScope,
+        result: RuntimeProjectionResult,
+    ) -> None:
+        """Persist only unresolved Skill work after the desired-state commit."""
+        if not scope.skills or result.status is RuntimeProjectionStatus.CONVERGED:
+            return
+        self._recovery.ensure(owner_id=str(bot["owner_id"]), bot_id=bot_id)
 
     async def _project_best_effort(
         self,

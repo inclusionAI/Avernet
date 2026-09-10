@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -85,7 +86,9 @@ class _PlanRuntime:
 
 @pytest.mark.asyncio
 async def test_mutation_flow_logs_control_plane_timing_stages(caplog) -> None:
-    flow = MutationProjectionFlow(repository=_Repository(), runtime=_Runtime())
+    flow = MutationProjectionFlow(
+        repository=_Repository(), runtime=_Runtime(), recovery=MagicMock()
+    )
     caplog.set_level(logging.INFO)
 
     result = await flow.apply(
@@ -134,7 +137,9 @@ async def test_mutation_flow_logs_control_plane_timing_stages(caplog) -> None:
 @pytest.mark.asyncio
 async def test_mutation_flow_applies_the_single_post_mutation_plan() -> None:
     runtime = _PlanRuntime()
-    flow = MutationProjectionFlow(repository=_Repository(), runtime=runtime)
+    flow = MutationProjectionFlow(
+        repository=_Repository(), runtime=runtime, recovery=MagicMock()
+    )
 
     await flow.apply(
         bot={"owner_id": "owner-1", "status": "ACTIVE"},
@@ -161,14 +166,17 @@ async def test_mutation_flow_applies_the_single_post_mutation_plan() -> None:
 @pytest.mark.asyncio
 async def test_mutation_flow_preserves_plan_failure_and_retry_outcomes() -> None:
     runtime = _PlanRuntime()
-    flow = MutationProjectionFlow(repository=_Repository(), runtime=runtime)
-    mutation = lambda: DesiredStateMutation(
-        item={"id": "set-1"},
-        changed=True,
-        previous_state=CapabilityDesiredState(
-            installations=set(), set_active={}, memberships={}
-        ),
+    flow = MutationProjectionFlow(
+        repository=_Repository(), runtime=runtime, recovery=MagicMock()
     )
+    def mutation() -> DesiredStateMutation:
+        return DesiredStateMutation(
+            item={"id": "set-1"},
+            changed=True,
+            previous_state=CapabilityDesiredState(
+                installations=set(), set_active={}, memberships={}
+            ),
+        )
 
     runtime.fail_resolve = True
     unresolved = await flow.apply(
@@ -199,6 +207,109 @@ async def test_mutation_flow_preserves_plan_failure_and_retry_outcomes() -> None
     assert unavailable["runtime_projection"]["issues"][0]["code"] == "RUNTIME_PROJECTION_UNAVAILABLE"
     assert retried["runtime_projection"]["status"] == "CONVERGED"
     assert runtime.resolve_calls == 3
+
+
+@pytest.mark.asyncio
+async def test_unready_skill_mutation_ensures_durable_recovery_after_commit() -> None:
+    recovery = MagicMock()
+    flow = MutationProjectionFlow(
+        repository=_Repository(), runtime=_Runtime(), recovery=recovery
+    )
+
+    result = await flow.apply(
+        bot={"owner_id": "owner-1", "status": "PENDING"},
+        bot_id="bot-1",
+        engine_type="openclaw",
+        scope=ProjectionScope(skills=True),
+        mutation=lambda: DesiredStateMutation(
+            item={"id": "set-1"},
+            changed=True,
+            previous_state=CapabilityDesiredState(
+                installations=set(), set_active={}, memberships={}
+            ),
+        ),
+    )
+
+    assert result["runtime_projection"]["status"] == "PENDING"
+    recovery.ensure.assert_called_once_with(owner_id="owner-1", bot_id="bot-1")
+
+
+@pytest.mark.asyncio
+async def test_inactive_skill_membership_does_not_enqueue_runtime_recovery() -> None:
+    recovery = MagicMock()
+    flow = MutationProjectionFlow(
+        repository=_Repository(), runtime=_Runtime(), recovery=recovery
+    )
+
+    result = await flow.apply(
+        bot={"owner_id": "owner-1", "status": "ACTIVE"},
+        bot_id="bot-1",
+        engine_type="openclaw",
+        runtime_required=False,
+        scope=ProjectionScope(skills=True),
+        mutation=lambda: DesiredStateMutation(
+            item={"id": "set-1"},
+            changed=True,
+            previous_state=CapabilityDesiredState(
+                installations=set(), set_active={}, memberships={}
+            ),
+        ),
+    )
+
+    assert result["runtime_projection"]["reason"] == "RUNTIME_NOT_REQUIRED"
+    recovery.ensure.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_unchanged_active_membership_still_ensures_existing_recovery() -> None:
+    recovery = MagicMock()
+    flow = MutationProjectionFlow(
+        repository=_Repository(), runtime=_Runtime(), recovery=recovery
+    )
+
+    result = await flow.apply(
+        bot={"owner_id": "owner-1", "status": "ACTIVE"},
+        bot_id="bot-1",
+        engine_type="openclaw",
+        scope=ProjectionScope(skills=True),
+        skip_projection_when_unchanged=True,
+        mutation=lambda: DesiredStateMutation(
+            item={"id": "set-1"},
+            changed=False,
+            previous_state=CapabilityDesiredState(
+                installations=set(), set_active={}, memberships={}
+            ),
+        ),
+    )
+
+    assert result["runtime_projection"]["reason"] == "DESIRED_STATE_UNCHANGED"
+    recovery.ensure.assert_called_once_with(owner_id="owner-1", bot_id="bot-1")
+
+
+@pytest.mark.asyncio
+async def test_recovery_enqueue_failure_is_reported_after_desired_state_commit() -> None:
+    recovery = MagicMock()
+    recovery.ensure.side_effect = RuntimeError("queue unavailable")
+    runtime = _PlanRuntime()
+    runtime.fail_resolve = True
+    flow = MutationProjectionFlow(
+        repository=_Repository(), runtime=runtime, recovery=recovery
+    )
+
+    with pytest.raises(RuntimeError, match="queue unavailable"):
+        await flow.apply(
+            bot={"owner_id": "owner-1", "status": "ACTIVE"},
+            bot_id="bot-1",
+            engine_type="openclaw",
+            scope=ProjectionScope(skills=True),
+            mutation=lambda: DesiredStateMutation(
+                item={"id": "set-1"},
+                changed=True,
+                previous_state=CapabilityDesiredState(
+                    installations=set(), set_active={}, memberships={}
+                ),
+            ),
+        )
 
 
 @pytest.mark.asyncio

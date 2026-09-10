@@ -17,6 +17,9 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
     BotRuntimeProjector,
 )
+from agentclaw.community.core.skill_center.services.recovering_bot_runtime_projector import (
+    RecoveringBotRuntimeProjector,
+)
 
 
 class _RecordingReconciler:
@@ -87,14 +90,14 @@ def _consumer(world, runtime: _RecordingReconciler) -> _Consumer:
     return world.injector.create_object(_Consumer)
 
 
-def test_world_wires_service_api_to_the_real_reconciler(world) -> None:
-    assert isinstance(
-        world.get(BotRuntimeProjectorProtocol),
-        BotRuntimeProjector,
-    )
-    assert world.get(BotRuntimeProjectorProtocol) is world.get(
-        CoreBotRuntimeProjectorProtocol
-    )
+def test_world_wires_service_api_through_recovery_to_the_real_reconciler(
+    world,
+) -> None:
+    service = world.get(BotRuntimeProjectorProtocol)
+
+    assert isinstance(service, RecoveringBotRuntimeProjector)
+    assert service._delegate is world.get(BotRuntimeProjector)
+    assert service is world.get(CoreBotRuntimeProjectorProtocol)
 
 
 @pytest.mark.asyncio

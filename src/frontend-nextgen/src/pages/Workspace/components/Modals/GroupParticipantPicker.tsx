@@ -65,7 +65,7 @@ export function GroupParticipantPicker({
   return (
     <div data-testid="group-participant-picker" className="w-full min-w-0 max-w-full">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-sm font-semibold text-foreground">
+        <span className="text-xs font-semibold text-muted-foreground">
           成员 Bot <span className="text-destructive">*</span>
         </span>
         <span className="rounded-lg border border-primary/20 bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">

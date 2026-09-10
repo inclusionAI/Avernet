@@ -110,6 +110,10 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
   const workflowId = workflow.workflow_id
   const [days, setDays] = useState<7 | 30>(7)
   const [page, setPage] = useState(0)
+  const [statusFilter, setStatusFilter] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const [query, setQuery] = useState('')
+  const hasFilters = Boolean(statusFilter || query)
   const [windowEnd] = useState(() => Math.floor(Date.now() / 1000))
   const [activeSubTab, setActiveSubTab] = useState<'runs' | 'nodes'>('runs')
   const [highlightNodeId, setHighlightNodeId] = useState<string | null>(null)
@@ -142,6 +146,9 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
     workflowId,
     limit: pageSize,
     offset: page * pageSize,
+    status: statusFilter && statusFilter !== 'cancelled' ? statusFilter : undefined,
+    statuses: statusFilter === 'cancelled' ? ['cancelled', 'canceled'] : undefined,
+    query: query || undefined,
   })
 
   const runs = useMemo(() => data?.runs ?? [], [data?.runs])
@@ -273,6 +280,30 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
           </button>
         </div>
 
+        {activeSubTab === 'runs' && (
+          <form
+            aria-label="运行记录筛选"
+            onSubmit={(event) => { event.preventDefault(); setQuery(searchInput.trim()); setPage(0) }}
+            className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3"
+          >
+            <select aria-label="运行状态" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(0) }} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <option value="">全部状态</option>
+              <option value="running">运行中</option>
+              <option value="succeeded">成功</option>
+              <option value="failed">失败</option>
+              <option value="waiting">等待中</option>
+              <option value="blocked">阻塞</option>
+              <option value="queued">排队中</option>
+              <option value="cancelled">取消</option>
+              <option value="aborted">终止</option>
+            </select>
+            <input type="search" aria-label="搜索运行记录" placeholder="搜索 Run ID / 发起方 / Bot ID" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} className="min-w-0 flex-1 basis-64 rounded-md border border-slate-200 px-3 py-2 text-xs text-slate-700 sm:max-w-sm" />
+            <button type="submit" className="rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700">搜索</button>
+            <button type="button" disabled={!hasFilters && !searchInput} onClick={() => { setStatusFilter(''); setSearchInput(''); setQuery(''); setPage(0) }} className="rounded-md px-3 py-2 text-xs text-slate-500 hover:bg-slate-50 disabled:opacity-40">重置筛选</button>
+            {!isLoading && !isError && <span className="ml-auto text-xs text-slate-400" aria-live="polite">{hasFilters ? '匹配' : '共'} {totalCount} 条</span>}
+          </form>
+        )}
+
         {activeSubTab === 'nodes' && workflowId ? (
           <div className="p-4">
             <NodeAnalysisPanel workflowId={workflowId} highlightNodeId={highlightNodeId} />
@@ -290,7 +321,7 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
           </div>
         ) : runs.length === 0 ? (
           <div className="p-6">
-            <EmptyState title="暂无运行" description="该工作流尚未执行过" />
+            <EmptyState title={hasFilters ? '没有匹配的运行' : '暂无运行'} description={hasFilters ? '请调整筛选条件或重置筛选' : '该工作流尚未执行过'} />
           </div>
         ) : (
           <div className="overflow-x-auto">

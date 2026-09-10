@@ -20,7 +20,12 @@ from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterStoreConfig,
 )
 from agentclaw.community.core.skill_center.draft_content import DraftContentStoreConfig
-from agentclaw.community.di.config import HttpClientPoolConfig, TaskQueueConfig
+from agentclaw.community.di.config import (
+    DesktopSkillRecoveryConfig,
+    HttpClientPoolConfig,
+    McpRuntimeCredentialsConfig,
+    TaskQueueConfig,
+)
 
 from agentclaw.community.di.modules.access_module import AccessModule
 from agentclaw.community.di.modules.aicoding_module import AICodingModule
@@ -40,6 +45,9 @@ from agentclaw.community.di.modules.common_config_module import CommonConfigModu
 from agentclaw.community.di.modules.config_module import ConfigModule
 from agentclaw.community.di.modules.cron_module import CronModule
 from agentclaw.community.di.modules.desktop_bot_module import DesktopBotModule
+from agentclaw.community.di.modules.desktop_skill_recovery_config_module import (
+    DesktopSkillRecoveryConfigModule,
+)
 from agentclaw.community.di.modules.devices_module import DevicesModule
 from agentclaw.community.di.modules.economy_governance_module import EconomyGovernanceModule
 from agentclaw.community.di.modules.engine_config_module import EngineConfigModule
@@ -52,8 +60,14 @@ from agentclaw.community.di.modules.identity_module import IdentityModule
 from agentclaw.community.di.modules.installation_read_config_module import (
     InstallationReadConfigModule,
 )
+from agentclaw.community.di.modules.mcp_runtime_credentials_config_module import (
+    McpRuntimeCredentialsConfigModule,
+)
 from agentclaw.community.di.modules.mcp_module import McpModule
 from agentclaw.community.di.modules.quality_module import QualityModule
+from agentclaw.community.di.modules.runtime_projection_recovery_module import (
+    RuntimeProjectionRecoveryModule,
+)
 from agentclaw.community.di.modules.resources_module import ResourcesModule
 from agentclaw.community.di.modules.service_bot_module import ServiceBotModule
 from agentclaw.community.di.modules.session_resources_module import SessionResourcesModule
@@ -113,9 +127,12 @@ def build_injector(
     """
     modules: list[Module] = [
         ConfigModule(),
+        McpRuntimeCredentialsConfigModule(),
+        DesktopSkillRecoveryConfigModule(),
         InstallationReadConfigModule(),
         SkillCenterModule(),
         SkillCenterGroup4Module(),
+        RuntimeProjectionRecoveryModule(),
         SkillVersionModule(),
         ServiceBotModule(),
         DesktopBotModule(),
@@ -190,6 +207,8 @@ def build_injector(
     _app_injector.get(TaskQueueConfig)
     _app_injector.get(CanonicalCenterStoreConfig)
     _app_injector.get(DraftContentStoreConfig)
+    _app_injector.get(DesktopSkillRecoveryConfig)
+    _app_injector.get(McpRuntimeCredentialsConfig)
 
     return _app_injector
 

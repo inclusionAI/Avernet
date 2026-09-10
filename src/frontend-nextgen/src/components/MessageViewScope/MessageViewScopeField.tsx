@@ -14,7 +14,7 @@ export function MessageViewScopeField({ value, onChange, disabled, label = 'æ¶ˆæ
   const name = useId();
   return (
     <fieldset className="space-y-2 text-left" disabled={disabled}>
-      <legend className="mb-2 text-xs font-medium text-foreground">{label}</legend>
+      <legend className="mb-2 text-xs font-semibold text-muted-foreground">{label}</legend>
       <div className="space-y-2" role="radiogroup" aria-label={label}>
         {MESSAGE_VIEW_SCOPE_OPTIONS.map((option) => (
           <label
@@ -30,8 +30,8 @@ export function MessageViewScopeField({ value, onChange, disabled, label = 'æ¶ˆæ
               onChange={() => onChange(option.value)}
             />
             <span className="min-w-0">
-              <span className="block text-sm text-foreground">{option.label}</span>
-              <span className="mt-0.5 block text-xs text-muted-foreground">{option.description}</span>
+              <span className="block text-xs text-foreground">{option.label}</span>
+              <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">{option.description}</span>
             </span>
           </label>
         ))}

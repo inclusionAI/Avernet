@@ -68,7 +68,12 @@ REQUIRED_FIELDS_BY_TYPE: dict[CredentialType, frozenset[str]] = {
     # key pair and belongs to the same trust boundary. Keeping it here rather
     # than on the source is what makes the host a property of the credential
     # instead of something a tenant's document chooses.
-    CredentialType.OSS_AKSK: frozenset({"access_key_id", "endpoint"}),
+    #
+    # ``region`` is required too. The object store's signature version 4
+    # scopes every signature to a region and the SDK refuses to sign without
+    # one, so a credential stored without it would be accepted here and fail
+    # every apply — the one thing this surface must never do.
+    CredentialType.OSS_AKSK: frozenset({"access_key_id", "endpoint", "region"}),
 }
 
 #: Fields that belong to exactly one mechanism. Sending one on another is

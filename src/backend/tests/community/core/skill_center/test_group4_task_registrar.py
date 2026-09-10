@@ -14,6 +14,9 @@ from agentclaw.community.core.skill_center.services.track_latest import (
     BOT_TRACK_LATEST_RECONCILE_TASK,
     TRACK_LATEST_FANOUT_TASK,
 )
+from agentclaw.community.core.skill_center.services.desktop_skill_recovery import (
+    DESKTOP_SKILL_RECOVERY_TASK,
+)
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.types import Complete
 
@@ -35,11 +38,13 @@ def test_bootstrap_registers_reference_and_track_latest_handlers() -> None:
     reference = _Handler(SKILL_CENTER_REFERENCE_TASK)
     fanout = _Handler(TRACK_LATEST_FANOUT_TASK)
     reconcile = _Handler(BOT_TRACK_LATEST_RECONCILE_TASK)
+    recovery = _Handler(DESKTOP_SKILL_RECOVERY_TASK)
     registrar = SkillCenterGroup4TaskRegistrar(
         registry=registry,
         reference=reference,  # type: ignore[arg-type]
         fanout=fanout,  # type: ignore[arg-type]
         reconcile=reconcile,  # type: ignore[arg-type]
+        desktop_skill_recovery=recovery,  # type: ignore[arg-type]
     )
 
     asyncio.run(registrar.bootstrap())
@@ -48,3 +53,5 @@ def test_bootstrap_registers_reference_and_track_latest_handlers() -> None:
     assert registry.wakes_on_enqueue(SKILL_CENTER_REFERENCE_TASK) is True
     assert registry.get(TRACK_LATEST_FANOUT_TASK) is fanout
     assert registry.get(BOT_TRACK_LATEST_RECONCILE_TASK) is reconcile
+    assert registry.get(DESKTOP_SKILL_RECOVERY_TASK) is recovery
+    assert registry.wakes_on_enqueue(DESKTOP_SKILL_RECOVERY_TASK) is True

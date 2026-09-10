@@ -420,6 +420,23 @@ def put_aksk_credential_missing_key_id_error_shape():
 @endpoint_test(
     method="PUT",
     path=f"{_BASE}/{{name}}",
+    scenario="an_aksk_credential_without_its_region_is_refused",
+    input=CaseInput(
+        path_params={"name": "oss-artifacts"},
+        headers=_HEADERS,
+        json_body={k: v for k, v in AKSK_BODY.items() if k != "region"},
+    ),
+    seed=_seed_verifier,
+    expect=ExpectError(status=422, json_contains={"data": None}),
+)
+def put_aksk_credential_missing_region_error_shape():
+    """The signature scheme scopes to a region; a credential without one
+    cannot read anything, so it is refused here rather than on every apply."""
+
+
+@endpoint_test(
+    method="PUT",
+    path=f"{_BASE}/{{name}}",
     scenario="a_header_name_on_a_signing_credential_is_refused",
     input=CaseInput(
         path_params={"name": "oss-artifacts"},

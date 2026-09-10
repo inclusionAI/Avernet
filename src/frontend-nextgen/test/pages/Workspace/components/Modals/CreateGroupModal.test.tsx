@@ -97,8 +97,8 @@ beforeEach(() => {
   });
 });
 
-it('发起协作顶栏只在当前 human ID 匹配时使用认证用户名，Bot 保留自身名称', () => {
-  const { rerender } = render(
+it('发起协作顶栏不再展示身份 chip，仅保留标题', () => {
+  render(
     <CreateGroupModal
       open
       activeIdentity={{ id: 'human_900004', kind: 'user', displayName: '900004', online: true }}
@@ -108,10 +108,15 @@ it('发起协作顶栏只在当前 human ID 匹配时使用认证用户名，Bot
       onCreated={jest.fn()}
     />,
   );
-  expect(screen.getByText('示例用户')).toBeInTheDocument();
-  expect(screen.queryByText('900004')).not.toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: '发起协作' })).toBeInTheDocument();
+  // 「为 xxx」身份 chip 已移除：顶栏不再展示认证用户名 / 身份类型徽标。
+  expect(screen.queryByText('示例用户')).not.toBeInTheDocument();
+  expect(screen.queryByText('为')).not.toBeInTheDocument();
+});
 
-  rerender(
+it('Bot 身份未命名时自动群名保留自身名称而非认证用户名', async () => {
+  gs.createGroup.mockResolvedValue({ ok: true, data: { groupId: 'g9' } });
+  render(
     <CreateGroupModal
       open
       activeIdentity={{ id: 'bot_xxx:900004', kind: 'bot', displayName: '协作 Bot', online: true }}
@@ -121,8 +126,13 @@ it('发起协作顶栏只在当前 human ID 匹配时使用认证用户名，Bot
       onCreated={jest.fn()}
     />,
   );
-  expect(screen.getByText('协作 Bot')).toBeInTheDocument();
-  expect(screen.queryByText('示例用户')).not.toBeInTheDocument();
+  fireEvent.click(await screen.findByRole('button', { name: '确认创建' }));
+  await waitFor(() =>
+    expect(gs.createGroup).toHaveBeenCalledWith(expect.objectContaining({ name: expect.stringContaining('协作 Bot') })),
+  );
+  expect(gs.createGroup).not.toHaveBeenCalledWith(
+    expect.objectContaining({ name: expect.stringContaining('示例用户') }),
+  );
 });
 
 it('free_chat strategy posts delivery_policy on confirm', async () => {
