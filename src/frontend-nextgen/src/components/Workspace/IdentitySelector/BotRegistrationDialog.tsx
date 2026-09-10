@@ -1,5 +1,4 @@
 import {
-  Badge,
   Button,
   Empty,
   Modal,
@@ -68,12 +67,9 @@ export function BotRegistrationDialog({ open, onClose }: BotRegistrationDialogPr
     <Modal open={open} onOpenChange={(next) => !next && onClose()}>
       <ModalContent size="lg" className="min-w-0 p-5">
         <ModalHeader>
-          <Badge tone="primary" className="w-fit">
-            Bot 接入
-          </Badge>
-          <ModalTitle className="text-lg">接入新 Bot</ModalTitle>
+          <ModalTitle className="text-lg">接入外部 Bot</ModalTitle>
           <ModalDescription className="leading-5">
-            选择接入方式，复制命令后在对应环境中执行，即可完成新 Bot 的初始化接入。
+            选择接入方式，复制命令后在对应环境中执行，即可完成外部 Bot 的初始化接入。
           </ModalDescription>
         </ModalHeader>
 

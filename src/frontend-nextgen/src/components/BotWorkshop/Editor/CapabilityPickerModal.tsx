@@ -61,7 +61,9 @@ export function CapabilityPickerModal({
   const remoteMcpSearch = kind === 'mcp';
   const skillCenter = useSkillCenterPicker(open && remoteSearch, keyword);
   const items =
-    source === 'mine'
+    kind === 'mcp'
+      ? marketItems
+      : source === 'mine'
       ? myItems
       : source === 'market'
       ? marketSource === 'skillcenter-market'

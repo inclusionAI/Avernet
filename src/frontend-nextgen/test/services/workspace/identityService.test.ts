@@ -66,7 +66,7 @@ describe('identityService.loadIdentities', () => {
       request_id: 'r',
       data: {
         items: [
-          { kind: 'human', bot_id: 'human-1', name: '风太', avatar_url: 'avatar-x', status: 'online' },
+          { kind: 'human', bot_id: 'human-1', name: '示例用户', avatar_url: 'avatar-x', status: 'online' },
           { kind: 'bot', bot_id: 'b1', name: 'Bot一号', avatar_url: 'u1', status: 'online', engine: 'OpenClaw' },
           { kind: 'bot', bot_id: 'b2', name: 'Bot二号', avatar_url: 'u2', status: 'offline' },
         ],
@@ -82,7 +82,7 @@ describe('identityService.loadIdentities', () => {
     expect(data.identities[0]).toMatchObject({
       kind: 'user',
       id: 'human-1',
-      displayName: '风太',
+      displayName: '示例用户',
       avatarUrl: 'avatar-x',
       online: true,
     });
@@ -356,7 +356,7 @@ describe('identityService.loadIdentities', () => {
       request_id: 'r',
       data: {
         items: [
-          { kind: 'human', bot_id: 'human_447147', name: '风太', status: 'online' },
+          { kind: 'human', bot_id: 'human_900004', name: '示例用户', status: 'online' },
           { kind: 'bot', bot_id: 'b1', name: 'Bot一号', status: 'online' },
         ],
         total: 2,
@@ -382,7 +382,7 @@ describe('identityService.loadIdentities', () => {
     expect((res as SuccessResult).data.identities).toContainEqual(
       expect.objectContaining({ id: 'b1', engine: 'Hermes', botType: 'service' }),
     );
-    expect(listBots).toHaveBeenCalledWith({ page: 1, page_size: 100, user_id: '447147' });
+    expect(listBots).toHaveBeenCalledWith({ page: 1, page_size: 100, user_id: '900004' });
   });
 
   it('maps bot runtime status from mine reachability', async () => {

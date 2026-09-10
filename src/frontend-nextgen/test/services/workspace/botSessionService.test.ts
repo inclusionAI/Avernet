@@ -108,7 +108,7 @@ describe('botSessionService', () => {
       },
     });
 
-    const res = await botSessionService.listOwnedBots('human_327325');
+    const res = await botSessionService.listOwnedBots('human_900003');
     expect(res.ok).toBe(true);
     expect(res.ok && res.data).toEqual([
       expect.objectContaining({
@@ -153,9 +153,9 @@ describe('botSessionService', () => {
       message: 'OK',
       request_id: 'r',
     });
-    const res = await botSessionService.listSessions(bot, 'human_327325');
+    const res = await botSessionService.listSessions(bot, 'human_900003');
     expect(mocked.listBotSessions).toHaveBeenCalledWith('20260402_ab', {
-      user_id: '327325',
+      user_id: '900003',
       owner_id: '2088',
       page: 1,
       page_size: 50,
@@ -182,10 +182,10 @@ describe('botSessionService', () => {
       message: 'OK',
       request_id: 'r',
     });
-    const res = await botSessionService.createSession(bot, 'human_327325', '新');
+    const res = await botSessionService.createSession(bot, 'human_900003', '新');
     expect(mocked.createBotSession).toHaveBeenCalledWith(
       '20260402_ab',
-      { user_id: '327325', owner_id: '2088' },
+      { user_id: '900003', owner_id: '2088' },
       { title: '新' },
     );
     expect((res as any).data.sessionId).toBe('sid-new');
@@ -198,9 +198,9 @@ describe('botSessionService', () => {
       message: 'OK',
       request_id: 'r',
     });
-    const res = await botSessionService.deleteSession(bot, 'human_327325', 'sid-9');
+    const res = await botSessionService.deleteSession(bot, 'human_900003', 'sid-9');
     expect(mocked.deleteBotSession).toHaveBeenCalledWith('20260402_ab', 'sid-9', {
-      user_id: '327325',
+      user_id: '900003',
       owner_id: '2088',
     });
     expect(res.ok).toBe(true);
@@ -243,9 +243,9 @@ describe('botSessionService', () => {
       message: 'OK',
       request_id: 'r',
     });
-    await botSessionService.listMessages(bot, 'human_327325', 's');
+    await botSessionService.listMessages(bot, 'human_900003', 's');
     expect(mocked.listBotSessionMessages).toHaveBeenCalledWith('20260402_ab', 's', {
-      user_id: '327325',
+      user_id: '900003',
       owner_id: '2088',
       page: 1,
       page_size: 50,
@@ -265,9 +265,9 @@ describe('botSessionService', () => {
       message: 'OK',
       request_id: 'r',
     });
-    const res = await botSessionService.listModels(bot, 'human_327325');
+    const res = await botSessionService.listModels(bot, 'human_900003');
     expect(mocked.listBotModels).toHaveBeenCalledWith('20260402_ab', {
-      user_id: '327325',
+      user_id: '900003',
       owner_id: '2088',
       page: 1,
       page_size: 50,
@@ -290,11 +290,11 @@ describe('botSessionService', () => {
       message: 'OK',
       request_id: 'r',
     });
-    const res = await botSessionService.updateSessionModel(bot, 'human_327325', 's1', 'openai/gpt-5.3');
+    const res = await botSessionService.updateSessionModel(bot, 'human_900003', 's1', 'openai/gpt-5.3');
     expect(mocked.updateBotSession).toHaveBeenCalledWith(
       '20260402_ab',
       's1',
-      { user_id: '327325' },
+      { user_id: '900003' },
       { model: 'openai/gpt-5.3' },
     );
     expect(res.ok && res.data.model).toBe('openai/gpt-5.3');
@@ -312,7 +312,7 @@ describe('botSessionService', () => {
     };
     const messageDto = { message_id: 'm1', session_id: 's1', role: 'user', content: 'q', gmt_create: '' };
     const friendBot = { ...bot, isFriendBot: true };
-    const baseParams = { user_id: '327325', owner_id: '2088', f_user_id: '327325' };
+    const baseParams = { user_id: '900003', owner_id: '2088', f_user_id: '900003' };
 
     mocked.listBotSessions.mockResolvedValue({ data: { items: [], total: 0 } });
     mocked.createBotSession.mockResolvedValue({ data: sessionDto });
@@ -326,63 +326,63 @@ describe('botSessionService', () => {
     mocked.listFavoriteSessions.mockResolvedValue({ data: { items: [], total: 0 } });
     mocked.listBotModels.mockResolvedValue({ data: { items: [], total: 0 } });
 
-    await botSessionService.listSessionsPage(friendBot, 'human_327325', 1, 10);
+    await botSessionService.listSessionsPage(friendBot, 'human_900003', 1, 10);
     expect(mocked.listBotSessions).toHaveBeenLastCalledWith('20260402_ab', {
       ...baseParams,
       page: 1,
       page_size: 10,
     });
 
-    await botSessionService.createSession(friendBot, 'human_327325');
+    await botSessionService.createSession(friendBot, 'human_900003');
     expect(mocked.createBotSession).toHaveBeenLastCalledWith('20260402_ab', baseParams, { title: undefined });
 
-    await botSessionService.getSessionDetail(friendBot, 'human_327325', 's1');
+    await botSessionService.getSessionDetail(friendBot, 'human_900003', 's1');
     expect(mocked.getBotSession).toHaveBeenLastCalledWith('20260402_ab', 's1', baseParams);
 
-    await botSessionService.deleteSession(friendBot, 'human_327325', 's1');
+    await botSessionService.deleteSession(friendBot, 'human_900003', 's1');
     expect(mocked.deleteBotSession).toHaveBeenLastCalledWith('20260402_ab', 's1', baseParams);
 
-    await botSessionService.updateSessionTitle(friendBot, 'human_327325', 's1', '新标题');
+    await botSessionService.updateSessionTitle(friendBot, 'human_900003', 's1', '新标题');
     expect(mocked.updateBotSession).toHaveBeenLastCalledWith('20260402_ab', 's1', baseParams, { title: '新标题' });
 
-    await botSessionService.clearContext(friendBot, 'human_327325', 's1');
+    await botSessionService.clearContext(friendBot, 'human_900003', 's1');
     expect(mocked.deleteBotSessionMessages).toHaveBeenLastCalledWith('20260402_ab', 's1', baseParams);
 
-    await botSessionService.listMessages(friendBot, 'human_327325', 's1');
+    await botSessionService.listMessages(friendBot, 'human_900003', 's1');
     expect(mocked.listBotSessionMessages).toHaveBeenLastCalledWith('20260402_ab', 's1', {
       ...baseParams,
       page: 1,
       page_size: 50,
     });
 
-    await botSessionService.toggleFavorite(friendBot, 'human_327325', 's1', true);
+    await botSessionService.toggleFavorite(friendBot, 'human_900003', 's1', true);
     expect(mocked.favoriteBotSession).toHaveBeenLastCalledWith('20260402_ab', 's1', baseParams);
-    await botSessionService.toggleFavorite(friendBot, 'human_327325', 's1', false);
+    await botSessionService.toggleFavorite(friendBot, 'human_900003', 's1', false);
     expect(mocked.unfavoriteBotSession).toHaveBeenLastCalledWith('20260402_ab', 's1', baseParams);
 
-    await botSessionService.listFavoriteSessionsPage(friendBot, 'human_327325', 1, 10);
+    await botSessionService.listFavoriteSessionsPage(friendBot, 'human_900003', 1, 10);
     expect(mocked.listFavoriteSessions).toHaveBeenLastCalledWith('20260402_ab', {
       ...baseParams,
       page: 1,
       page_size: 10,
     });
 
-    await botSessionService.listModels(friendBot, 'human_327325');
+    await botSessionService.listModels(friendBot, 'human_900003');
     expect(mocked.listBotModels).toHaveBeenLastCalledWith('20260402_ab', {
       ...baseParams,
       page: 1,
       page_size: 50,
     });
 
-    await botSessionService.updateSessionModel(friendBot, 'human_327325', 's1', 'openai/gpt-5.3');
+    await botSessionService.updateSessionModel(friendBot, 'human_900003', 's1', 'openai/gpt-5.3');
     expect(mocked.updateBotSession).toHaveBeenLastCalledWith('20260402_ab', 's1', baseParams, {
       model: 'openai/gpt-5.3',
     });
 
     mocked.listBotSessions.mockClear();
-    await botSessionService.listSessionsPage(bot, 'human_327325', 1, 10);
+    await botSessionService.listSessionsPage(bot, 'human_900003', 1, 10);
     expect(mocked.listBotSessions).toHaveBeenLastCalledWith('20260402_ab', {
-      user_id: '327325',
+      user_id: '900003',
       owner_id: '2088',
       page: 1,
       page_size: 10,
@@ -416,9 +416,9 @@ it('listSessionsPage 与收藏分页复用统一标题映射并透传分页参�
       total: 12,
     },
   });
-  const all = await botSessionService.listSessionsPage(bot, 'human_327325', 2, 10);
+  const all = await botSessionService.listSessionsPage(bot, 'human_900003', 2, 10);
   expect(mocked.listBotSessions).toHaveBeenCalledWith('20260402_ab', {
-    user_id: '327325',
+    user_id: '900003',
     owner_id: '2088',
     page: 2,
     page_size: 10,
@@ -432,7 +432,7 @@ it('listSessionsPage 与收藏分页复用统一标题映射并透传分页参�
       total: 1,
     },
   });
-  const favorites = await botSessionService.listFavoriteSessionsPage(bot, 'human_327325', 1, 10);
+  const favorites = await botSessionService.listFavoriteSessionsPage(bot, 'human_900003', 1, 10);
   expect(favorites).toMatchObject({
     ok: true,
     data: { total: 1, items: [{ sessionId: 'sid-f', title: '收藏标题', favorite: true }] },

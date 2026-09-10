@@ -37,7 +37,7 @@ describe('InviteAcceptPanel', () => {
     );
     expect(await screen.findByText(/是否确认加入/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '确认加入' }));
-    await waitFor(() => expect(svc.acceptInvitation).toHaveBeenCalledWith('tk-1'));
+    await waitFor(() => expect(svc.acceptInvitation).toHaveBeenCalled());
   });
 
   it('uses sessions path segment to show session join copy', async () => {

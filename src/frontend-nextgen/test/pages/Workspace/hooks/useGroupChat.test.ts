@@ -135,6 +135,7 @@ beforeEach(() => {
     isLoadingMoreHistory: false,
     subscribeToSupportState: jest.fn<any>(() => jest.fn<any>()),
     subscribeToConnectionStatus: jest.fn<any>(() => jest.fn<any>()),
+    subscribeToViewScopeChanged: jest.fn<any>(() => jest.fn<any>()),
   };
   mockedProviderFactory.mockReturnValue(mockProvider);
 
@@ -347,6 +348,38 @@ it('stop calls chat.abort, reconnect calls provider.reconnect', async () => {
   expect(mockChat.abort).toHaveBeenCalled();
   await result.current.reconnect();
   expect(mockProvider.reconnect).toHaveBeenCalled();
+});
+
+it('bumpWsReconnect 触发 provider.reconnect；mount 首跳不触发', async () => {
+  renderHook(() => useGroupChat(session));
+  await waitFor(() => expect(mockProvider.connect).toHaveBeenCalled());
+  expect(mockProvider.reconnect).not.toHaveBeenCalled();
+  act(() => useWorkspaceStore.getState().bumpWsReconnect());
+  await waitFor(() => expect(mockProvider.reconnect).toHaveBeenCalledTimes(1));
+});
+
+it('bumpWsReconnect 重连成功后以不变参数刷新历史消息（loadHistory 再调一次）', async () => {
+  renderHook(() => useGroupChat(session));
+  await waitFor(() => expect(mockProvider.loadHistory).toHaveBeenCalledTimes(1));
+  act(() => useWorkspaceStore.getState().bumpWsReconnect());
+  await waitFor(() => expect(mockProvider.reconnect).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(mockProvider.loadHistory).toHaveBeenCalledTimes(2));
+  expect(mockChat.setMessages).toHaveBeenCalledTimes(2);
+});
+
+it('view_scope_changed 推送路径同样刷新历史消息（loadHistory 再调一次）', async () => {
+  let viewScopeListener: (() => void) | null = null;
+  mockProvider.subscribeToViewScopeChanged = jest.fn<any>((cb: () => void) => {
+    viewScopeListener = cb;
+    return () => {
+      viewScopeListener = null;
+    };
+  });
+  renderHook(() => useGroupChat(session));
+  await waitFor(() => expect(mockProvider.loadHistory).toHaveBeenCalledTimes(1));
+  expect(viewScopeListener).not.toBeNull();
+  act(() => viewScopeListener?.());
+  await waitFor(() => expect(mockProvider.loadHistory).toHaveBeenCalledTimes(2));
 });
 
 it('loadMoreHistory prepends deduped older messages and syncs hasMore from provider', async () => {

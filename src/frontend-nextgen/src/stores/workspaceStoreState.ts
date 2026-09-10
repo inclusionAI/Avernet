@@ -48,6 +48,8 @@ export interface WorkspaceState {
   selectedBotSessionId: string | null;
   /** 点击会话时递增的计数器;chat hooks 监听变化以强制重新拉取历史消息。 */
   historyRefreshNonce: number;
+  /** 消息视角切换后递增;chat hooks 监听变化以整体重建 ws 连接（重拉一次性 token）。 */
+  wsReconnectNonce: number;
   pendingGroupBootstrap: { groupId: string; sessionId: string; run: GroupInitialRun } | null;
   lastSessionByIdentity: Record<string, IdentityMemo>;
   sessionTabsByGroup: Record<string, SessionTab>;
@@ -56,6 +58,8 @@ export interface WorkspaceState {
   activePanel: ActivePanel;
   isGroupsLoading: boolean;
   isSessionsLoading: boolean;
+  /** /mine 及身份详情 enrich 是否仍在加载；用于区分“加载中”和“真实空列表”。 */
+  isIdentityListLoading: boolean;
   setIdentities: (items: IdentityView[], activeId: string | null) => void;
   setActiveIdentity: (id: string | null) => void;
   selectGroup: (groupId: string | null) => void;
@@ -70,6 +74,7 @@ export interface WorkspaceState {
   setBotExpandedSection: (botId: string, sectionKey: string) => void;
   selectBotSession: (sessionId: string | null) => void;
   bumpHistoryRefresh: () => void;
+  bumpWsReconnect: () => void;
   setPendingGroupBootstrap: (value: WorkspaceState['pendingGroupBootstrap']) => void;
   clearPendingGroupBootstrap: (runId?: string) => void;
   setSessionTabForGroup: (groupId: string, tab: SessionTab) => void;
@@ -78,6 +83,7 @@ export interface WorkspaceState {
   setActivePanel: (p: ActivePanel) => void;
   setIsGroupsLoading: (v: boolean) => void;
   setIsSessionsLoading: (v: boolean) => void;
+  setIsIdentityListLoading: (v: boolean) => void;
   reset: () => void;
   resetWorkspace: () => void;
 }
@@ -89,6 +95,7 @@ export const topLevelState = {
   view: 'chat' as WorkspaceView,
   collapsedGroups: [] as string[],
   historyRefreshNonce: 0,
+  wsReconnectNonce: 0,
   pendingGroupBootstrap: null as WorkspaceState['pendingGroupBootstrap'],
   lastSessionByIdentity: {} as Record<string, IdentityMemo>,
 } satisfies Record<string, unknown>;
@@ -112,6 +119,7 @@ export const groupViewState = {
   activePanel: 'none' as ActivePanel,
   isGroupsLoading: false,
   isSessionsLoading: false,
+  isIdentityListLoading: false,
 } satisfies Record<string, unknown>;
 
 export const initialState = { ...topLevelState, ...groupViewState };

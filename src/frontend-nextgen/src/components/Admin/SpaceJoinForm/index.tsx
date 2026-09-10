@@ -56,7 +56,7 @@ export function SpaceJoinForm({ space, open, onOpenChange, onSubmit }: SpaceJoin
             />
           </div>
           <CaptionText className="m-0">
-            提交后需等待该团队管理员审批，审批结果可在「工单中心 - 我发起的」中查看。
+            提交后需等待该团队管理员审批，审批结果可在管理后台「通知中心 - 我发起的」中查看。
           </CaptionText>
         </div>
         <ModalFooter>

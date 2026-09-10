@@ -1,4 +1,5 @@
 import type { ParticipantMode, SessionView } from '@/domain/collaboration';
+import type { MessageViewScope } from '@/domain/collaboration/types';
 import type { DomainError } from '@/services/workspace/identityService';
 import { sessionService } from '@/services/workspace/sessionService';
 import { useCallback, useEffect, useRef } from 'react';
@@ -16,7 +17,14 @@ function errOf(res: { ok: false; error: DomainError }): DomainError {
 
 export interface UseSessionMemberSyncResult {
   /** 更新会话成员姿态/发言模式（Bot auto↔muted；Human present↔absent），成功后就地刷新会话参与者。 */
-  updateMemberMode: (sessionId: string, actorId: string, mode: ParticipantMode) => Promise<boolean>;
+  updateMemberMode: (
+    sessionId: string,
+    actorId: string,
+    mode: ParticipantMode,
+    messageViewScope?: MessageViewScope,
+  ) => Promise<boolean>;
+  /** 仅更新成员消息可见域（不带 mode），成功后就地刷新会话参与者。 */
+  updateMemberScope: (sessionId: string, actorId: string, scope: MessageViewScope) => Promise<boolean>;
   /** 用后端返回的会话详情就地替换指定会话（成员增删后就地刷新）。 */
   applySessionUpdate: (sessionId: string, session: SessionView) => void;
 }
@@ -93,8 +101,13 @@ export function useSessionMemberSync(
   }, [applyDetail, selectedSessionId, sessionMap]);
 
   const updateMemberMode = useCallback(
-    async (sessionId: string, actorId: string, mode: ParticipantMode): Promise<boolean> => {
-      const res = await sessionService.updateMemberMode(sessionId, actorId, mode);
+    async (
+      sessionId: string,
+      actorId: string,
+      mode: ParticipantMode,
+      messageViewScope?: MessageViewScope,
+    ): Promise<boolean> => {
+      const res = await sessionService.updateMemberMode(sessionId, actorId, mode, messageViewScope);
       if (!res.ok) {
         notifyError(errOf(res));
         return false;
@@ -107,6 +120,20 @@ export function useSessionMemberSync(
     [applyMapUpdate],
   );
 
+  const updateMemberScope = useCallback(
+    async (sessionId: string, actorId: string, scope: MessageViewScope): Promise<boolean> => {
+      const res = await sessionService.updateMemberScope(sessionId, actorId, scope);
+      if (!res.ok) {
+        notifyError(errOf(res));
+        return false;
+      }
+      const refreshed = res.data;
+      applyMapUpdate((cur) => replaceSessionInMap(cur, sessionId, refreshed));
+      return true;
+    },
+    [applyMapUpdate],
+  );
+
   const applySessionUpdate = useCallback(
     (sessionId: string, session: SessionView) => {
       applyMapUpdate((current) => replaceSessionInMap(current, sessionId, session));
@@ -114,5 +141,5 @@ export function useSessionMemberSync(
     [applyMapUpdate],
   );
 
-  return { updateMemberMode, applySessionUpdate };
+  return { updateMemberMode, updateMemberScope, applySessionUpdate };
 }

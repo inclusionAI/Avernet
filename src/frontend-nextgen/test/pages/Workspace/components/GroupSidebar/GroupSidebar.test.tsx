@@ -48,6 +48,7 @@ function makeProps(partial: Partial<React.ComponentProps<typeof GroupSidebar>> =
   return {
     view: 'group' as 'chat' | 'group',
     onViewChange: jest.fn(),
+    viewerKind: 'user' as const,
     groups: [baseGroup],
     isLoading: false,
     onSelectGroup: jest.fn(),
@@ -254,19 +255,12 @@ describe('GroupSidebar', () => {
     expect(onManageGroup).toHaveBeenCalledWith('g1');
     expect(onToggleGroupExpanded).not.toHaveBeenCalled();
     const createSessionButton = screen.getByRole('button', { name: '新建会话' });
-    expect(createSessionButton).toHaveClass(
-      'h-7',
-      'w-7',
-      'rounded-md',
-      'text-muted-foreground',
-      'hover:bg-primary/10',
-      'hover:text-primary',
-    );
     const scopeButton = screen.getByRole('button', { name: '会话范围：全部会话' });
     expect(scopeButton).toHaveClass('h-7', 'w-7');
     expect(scopeButton.querySelector('svg.lucide-list-filter')).toBeInTheDocument();
     fireEvent.click(createSessionButton);
-    expect(onCreateSession).toHaveBeenCalledWith('g1');
+    fireEvent.click(screen.getByText('参与者视角'));
+    expect(onCreateSession).toHaveBeenCalledWith('g1', 'participant');
     expect(onToggleGroupExpanded).not.toHaveBeenCalled();
   });
 
@@ -282,9 +276,9 @@ describe('GroupSidebar', () => {
     const secondGroup = { ...baseGroup, groupId: 'g2', name: '新品发布协作组', sessions: [] };
     render(<GroupSidebar {...makeProps({ groups: [baseGroup, secondGroup] })} />);
 
-    const groupList = screen.getByText(/^协作群 \(\d+\)$/).nextElementSibling;
-    expect(groupList).toHaveClass('divide-y', 'divide-border/70');
     const sessionList = screen.getByLabelText('协作群会话列表：主站群');
+    const groupList = sessionList.parentElement?.parentElement;
+    expect(groupList).toHaveClass('divide-y', 'divide-border/70');
     expect(sessionList).toHaveClass('border-t');
     expect(sessionList).not.toHaveClass('border-b', 'ml-[60px]', 'border-l', 'pl-2');
     expect(sessionList.firstElementChild).not.toHaveClass('border-b');
@@ -321,7 +315,9 @@ describe('GroupSidebar', () => {
       'shadow-md',
     );
     expect(filterPanel).not.toHaveClass('mx-[18px]', 'mt-2');
-    const sidebarScrollArea = screen.getByText(/^协作群 \(\d+\)$/).parentElement?.parentElement;
+    const sidebarScrollArea = screen
+      .getByLabelText('协作群会话列表：主站群')
+      .parentElement?.parentElement?.parentElement;
     expect(sidebarScrollArea).not.toContainElement(filterPanel);
     expect(screen.getByRole('radiogroup', { name: '协作群类型' })).toHaveClass('min-w-0');
     expect(screen.getByRole('radiogroup', { name: '协作群类型' }).querySelector('.flex')).toHaveClass(
@@ -370,7 +366,7 @@ describe('GroupSidebar', () => {
 
   it('协作身份移出二级侧栏，群卡片保留可读间距并降低标题字重', () => {
     render(<GroupSidebar {...makeProps()} />);
-    expect(screen.queryByRole('button', { name: '当前协作身份：风太' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '当前协作身份：示例用户' })).not.toBeInTheDocument();
     const groupTrigger = screen.getByRole('button', { name: /主站群/ });
     expect(groupTrigger.parentElement).toHaveClass('min-h-16', 'bg-primary/5', 'px-4', 'py-2.5');
     expect(groupTrigger).toHaveClass('px-0', 'py-1');

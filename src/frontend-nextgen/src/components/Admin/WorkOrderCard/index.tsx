@@ -18,7 +18,7 @@ export interface WorkOrderCardProps {
   onApprove?: (workOrderId: number | string) => void;
   onReject?: (workOrderId: number | string, remark: string) => void | Promise<void>;
   onView?: (workOrder: WorkOrder) => void;
-  canAct?: boolean; // 工单中心容器决定是否可操作（缺 identity 时只读）
+  canAct?: boolean; // 通知中心容器决定是否可操作（缺 identity 时只读）
 }
 
 export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canAct = true }: WorkOrderCardProps) {

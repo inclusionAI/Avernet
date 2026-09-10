@@ -3,7 +3,7 @@ import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useMinWidth } from '@/hooks/useMediaQuery';
 import { ensurePersonalSpaceOnAppEntry, initSpaceContext } from '@/hooks/useSpaceContext';
 import { getWorkIdentityRedirect, useWorkIdentityAccess } from '@/hooks/useWorkIdentityAccess';
-import { identityService } from '@/services/workspace/identityService';
+import { workspaceService } from '@/services/workspace/workspaceService';
 import { history, useLocation } from '@umijs/max';
 import React, { useEffect, useMemo, useState } from 'react';
 import { AppHeader } from './AppHeader';
@@ -56,16 +56,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (area === 'manage') void initSpaceContext();
   }, [area]);
 
-  // 挂载即触发身份加载（listMyBots → workspaceStore.identities，由 useHumanIdentity 写回 store），
-  // 供全局 AccountBadge 消费。单飞复用 identityService，与 /work init 共用 inflight，零重复请求。
-  // 失败静默（AccountBadge 走 error 态）。
+  // 挂载即刷新协作身份列表。initWorkspace 会在成功后写回 workspaceStore.identities 与 activeIdentity，
+  // 避免只在 getHumanIdentity 能力已 ready（如 external auth / internal cookie）时跳过身份列表落 store。
+  // identityService 单飞保证与 /workspace 初始化共用同一 /mine 请求。
+  // 失败静默（AccountBadge / IdentitySelector 各自呈现 error 态）。
   //
   // 关键：currentUser 经 useHumanIdentity 反应式派生（内部走 capability 契约 getHumanIdentity，不直接
   // 透传后端 DTO），不在加载回调里一次性快照 —— Open Core（oauth-provider）下 /auth/user（AppLayout
   // boot 的 checkAuth）与 mine 并跑，早于 auth 落位 captured 的 mine 兜底身份会被冻结进顶栏，
   // 登录后头像/花名不一致（此前需切 tab 触发 re-render 才纠正）。
   useEffect(() => {
-    void identityService.loadIdentities();
+    void workspaceService.initWorkspace();
   }, []);
   const { identity } = useHumanIdentity();
   const currentUser = useMemo(

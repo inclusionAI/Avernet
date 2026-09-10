@@ -25,22 +25,22 @@ describe('botController OpenAPI contracts', () => {
   test('lists owned Bot engines with the explicit user id and pagination contract', async () => {
     const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => response({ total: 1, items: [] }));
 
-    await listBots({ user_id: '447147', page: 1, page_size: 100 });
+    await listBots({ user_id: '900004', page: 1, page_size: 100 });
 
     expect(spy).toHaveBeenCalledWith(
-      '/openapi/v1/bots?user_id=447147&page=1&page_size=100',
+      '/openapi/v1/bots?user_id=900004&page=1&page_size=100',
       expect.objectContaining({ method: 'GET' }),
     );
   });
 
   test('adds the current OpenAPI user id to inventory requests', async () => {
-    useWorkspaceStore.setState({ activeIdentityId: 'human_327325' });
+    useWorkspaceStore.setState({ activeIdentityId: 'human_900003' });
     const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => response({ total: 0, items: [] }));
 
     await listBotInventory({ page: 1, page_size: 20 });
 
     expect(spy).toHaveBeenCalledWith(
-      '/openapi/v1/bots/all?page=1&page_size=20&user_id=327325',
+      '/openapi/v1/bots/all?page=1&page_size=20&user_id=900003',
       expect.objectContaining({ method: 'GET' }),
     );
   });

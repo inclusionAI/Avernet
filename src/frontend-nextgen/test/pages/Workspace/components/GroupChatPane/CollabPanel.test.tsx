@@ -20,10 +20,13 @@ function makePanel(overrides: Partial<CollabPanelState> = {}): CollabPanelState 
     canSwitchToHuman: true,
     switchingBotMode: false,
     joining: false,
+    humanViewScope: null,
+    switchingViewScope: false,
     setBotMode: jest.fn<any>().mockResolvedValue(undefined),
     joinSession: jest.fn<any>().mockResolvedValue(true),
     leaveSession: jest.fn<any>().mockResolvedValue(true),
     switchToHuman: jest.fn(),
+    setViewScope: jest.fn<any>().mockResolvedValue(true),
     ...overrides,
   };
 }

@@ -1,5 +1,5 @@
 // Admin 专用轻量 tab 组件（对齐 PRD ant-tabs 视觉，不引入 antd）。
-// - UnderlineTabs：主 tab（空间管理/工单中心），下划线指示器，54px 高，ink-bar 3px 主色。
+// - UnderlineTabs：主 tab（空间管理/通知中心），下划线指示器，54px 高，ink-bar 3px 主色。
 // - CardTabs：工单视图 tab（待我处理/我发起的/已处理），卡片式，40px 高，激活态白底主色字，独立于下方内容面板（间距由调用方给）。
 import { Button } from '@/components/ui';
 import { cn } from '@/utils/cn';

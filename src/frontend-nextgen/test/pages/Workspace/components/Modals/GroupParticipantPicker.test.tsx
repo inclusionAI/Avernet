@@ -8,8 +8,8 @@ import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen } from '@testing-library/react';
 
 const unknownBot = {
-  id: 'b2:327325',
-  name: 'b2:327325',
+  id: 'b2:900003',
+  name: 'b2:900003',
   online: false,
   status: 'hidden',
   reachability: 'reachable',
@@ -52,7 +52,7 @@ it('renders an unresolved collaboration friend as a disabled unknown option', ()
     />,
   );
 
-  const option = screen.getByRole('button', { name: /b2:327325/ });
+  const option = screen.getByRole('button', { name: /b2:900003/ });
   expect(option).toBeDisabled();
   expect(option).toHaveClass('bg-muted/50');
   expect(screen.getByText('未知')).toBeInTheDocument();

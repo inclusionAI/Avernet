@@ -1,4 +1,5 @@
 import type { SessionView } from '@/domain/collaboration';
+import type { MessageViewScope } from '@/domain/collaboration/types';
 import type { DomainError, DomainResult } from '@/services/workspace/identityService';
 import { sessionService } from '@/services/workspace/sessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -114,7 +115,7 @@ export function useGroupSessions(groupId: string | null, expandedGroupIds: strin
     [sessionViews, selectedSessionId],
   );
 
-  const { updateMemberMode, applySessionUpdate } = useSessionMemberSync(
+  const { updateMemberMode, updateMemberScope, applySessionUpdate } = useSessionMemberSync(
     selectedSessionId,
     applyMapUpdate,
     selectedSession?.participants.length ?? 0,
@@ -125,8 +126,18 @@ export function useGroupSessions(groupId: string | null, expandedGroupIds: strin
   useStaleSessionFallback(groupId, isLoading, rawByGroupId, applyMapUpdate, selectSession, identityEpochRef);
 
   const createSessionIn = useCallback(
-    async (gid: string, title?: string, contextQuery?: string): Promise<SessionView | null> => {
-      const res: DomainResult<SessionView> = await sessionService.createNewSession(gid, title, contextQuery);
+    async (
+      gid: string,
+      title?: string,
+      contextQuery?: string,
+      messageViewScope?: MessageViewScope,
+    ): Promise<SessionView | null> => {
+      const res: DomainResult<SessionView> = await sessionService.createNewSession(
+        gid,
+        title,
+        contextQuery,
+        messageViewScope,
+      );
       if (!res.ok) {
         notifyError(errOf(res));
         return null;
@@ -144,9 +155,9 @@ export function useGroupSessions(groupId: string | null, expandedGroupIds: strin
   );
 
   const createSession = useCallback(
-    (title?: string, contextQuery?: string): Promise<SessionView | null> => {
+    (title?: string, contextQuery?: string, messageViewScope?: MessageViewScope): Promise<SessionView | null> => {
       if (!groupId) return Promise.resolve(null);
-      return createSessionIn(groupId, title, contextQuery);
+      return createSessionIn(groupId, title, contextQuery, messageViewScope);
     },
     [groupId, createSessionIn],
   );
@@ -227,6 +238,7 @@ export function useGroupSessions(groupId: string | null, expandedGroupIds: strin
     leaveSession,
     toggleFavorite,
     updateMemberMode,
+    updateMemberScope,
     applySessionUpdate,
     reloadSessions,
     reloadGroup,

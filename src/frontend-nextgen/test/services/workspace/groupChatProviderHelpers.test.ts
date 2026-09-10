@@ -3,6 +3,7 @@ import { buildGroupChatBridgeRequest } from '@/pages/Workspace/hooks/groupChatRe
 import type { GroupChatRequest } from '@/services/workspace/groupChatProvider';
 import {
   buildGroupChatPayload,
+  isViewScopeChangedFrame,
   resolveGroupGatewayOrigin,
   resolveGroupWsOrigin,
 } from '@/services/workspace/groupChatProviderHelpers';
@@ -133,5 +134,19 @@ describe('resolveGroupGatewayOrigin — 资源标签直连网关', () => {
 
   it('renderoffice PROD hostname 返回 https prod 网关', () => {
     expect(resolveGroupGatewayOrigin('app.example.com')).toBe('https://gateway.example.com');
+  });
+});
+
+describe('isViewScopeChangedFrame', () => {
+  it('匹配 method/type/event 三种载体', () => {
+    expect(isViewScopeChangedFrame({ method: 'view_scope_changed' })).toBe(true);
+    expect(isViewScopeChangedFrame({ type: 'view_scope_changed' })).toBe(true);
+    expect(isViewScopeChangedFrame({ event: 'view_scope_changed' })).toBe(true);
+  });
+
+  it('普通消息帧与非对象不匹配', () => {
+    expect(isViewScopeChangedFrame({ method: 'chat.update', group_id: 'g1' })).toBe(false);
+    expect(isViewScopeChangedFrame(null)).toBe(false);
+    expect(isViewScopeChangedFrame('view_scope_changed')).toBe(false);
   });
 });

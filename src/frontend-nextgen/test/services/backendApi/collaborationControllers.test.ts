@@ -160,10 +160,10 @@ describe('collaboration session controller', () => {
       request_id: 'r',
     });
     const signal = new AbortController().signal;
-    await sessionController.createSession('group-1', { kind: 'chat', acting_bot_id: 'human_327325' }, signal);
+    await sessionController.createSession('group-1', { kind: 'chat', acting_bot_id: 'human_900003' }, signal);
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/groups/group-1/sessions', {
       method: 'POST',
-      data: { kind: 'chat', acting_bot_id: 'human_327325' },
+      data: { kind: 'chat', acting_bot_id: 'human_900003' },
       injectUserId: false,
       signal,
     });
@@ -413,7 +413,7 @@ describe('managed collaboration bot controller', () => {
     };
 
     await botController.patchCollaborationBot(
-      '20260715_vl4oht43:447147',
+      '20260715_vl4oht43:900004',
       {
         friend_ext: friendExt,
         friend_check_in_strategy: 'DEPT_FREE',
@@ -421,7 +421,7 @@ describe('managed collaboration bot controller', () => {
       signal,
     );
 
-    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/bots/20260715_vl4oht43:447147', {
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/bots/20260715_vl4oht43:900004', {
       method: 'PATCH',
       data: {
         friend_ext: friendExt,
@@ -436,9 +436,9 @@ describe('managed collaboration bot controller', () => {
     backendRequest.mockResolvedValue({ code: 20000, data: { items: [], total: 0 }, request_id: 'r' });
     const signal = new AbortController().signal;
 
-    await botController.listBotFriendships('human_327325', { offset: 0, limit: 100 }, signal);
+    await botController.listBotFriendships('human_900003', { offset: 0, limit: 100 }, signal);
 
-    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/bots/human_327325/friendships', {
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/bots/human_900003/friendships', {
       method: 'GET',
       params: { offset: 0, limit: 100 },
       injectUserId: false,
@@ -450,9 +450,9 @@ describe('managed collaboration bot controller', () => {
     backendRequest.mockResolvedValue({ code: 20100, data: { request_id: 'r1', state: 'pending' }, request_id: 'r' });
     const signal = new AbortController().signal;
 
-    await botController.createBotFriendRequest('human_327325', { to_bot_uuid: 'bot-1' }, signal);
+    await botController.createBotFriendRequest('human_900003', { to_bot_uuid: 'bot-1' }, signal);
 
-    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/bots/human_327325/friend-requests', {
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/bots/human_900003/friend-requests', {
       method: 'POST',
       data: { to_bot_uuid: 'bot-1' },
       injectUserId: false,
@@ -473,7 +473,7 @@ describe('collaboration publication controller', () => {
 
     await publicationController.publishBotPublic(
       'bot-1',
-      '447147',
+      '900004',
       {
         public_scope: 'user',
         visibility: 'public',
@@ -484,7 +484,7 @@ describe('collaboration publication controller', () => {
 
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/bots/bot-1/public', {
       method: 'POST',
-      params: { user_id: '447147' },
+      params: { user_id: '900004' },
       data: {
         public_scope: 'user',
         visibility: 'public',

@@ -27,14 +27,14 @@ const audienceTitles: Record<PublicAudience, string> = {
 const collaborationSquareBotsPath = '/collaboration-square/bots';
 const scopeDescriptions: Record<PublicAudience, Record<PublicScope, string>> = {
   user: {
-    none: '其他用户以个人身份，无法在协作广场看到当前 Bot，也不能发起申请。',
-    all: '其他用户以个人身份，在协作广场可见当前 Bot 并申请好友。',
-    restricted: '其他用户以个人身份，在协作广场可见当前 Bot，但仅选中组织范围的用户可申请好友。',
+    none: '其他用户无法发现该 Bot',
+    all: '其他用户可见，也可申请好友',
+    restricted: '其他用户可见，仅选中组织范围内的用户可申请好友',
   },
   bot: {
-    none: '其他 Bot 以 Bot 工作身份，无法在协作广场看到当前 Bot，也不能发起申请。',
-    all: '其他 Bot 以 Bot 工作身份，在协作广场可见当前 Bot 并申请好友。',
-    restricted: '其他 Bot 以 Bot 工作身份，在协作广场可见当前 Bot，但仅选中组织范围的 Bot 可申请好友。',
+    none: '其他 Bot 无法发现该 Bot',
+    all: '其他 Bot 可见，也可申请好友',
+    restricted: '其他 Bot 可见，仅选中组织范围内的用户的 Bot 可申请好友',
   },
 };
 
@@ -126,7 +126,7 @@ export function PublicationEditor({
         <ModalHeader>
           <ModalTitle>{audienceTitles[audience]}</ModalTitle>
           <ModalDescription>
-            {visibilityEditorDescription}
+            {visibilityEditorDescription.leading}
             <a
               href={collaborationSquareBotsPath}
               className="font-medium text-primary hover:opacity-80"
@@ -134,6 +134,7 @@ export function PublicationEditor({
             >
               [协作广场/公开Bot]
             </a>
+            {visibilityEditorDescription.trailing}
           </ModalDescription>
         </ModalHeader>
         <div className="space-y-5">

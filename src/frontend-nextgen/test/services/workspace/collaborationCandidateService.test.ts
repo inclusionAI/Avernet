@@ -67,15 +67,15 @@ describe('collaborationCandidateService', () => {
       },
     });
 
-    const res = await collaborationCandidateService.listFriends('actor-1:327325', { actorType: 'bot' });
+    const res = await collaborationCandidateService.listFriends('actor-1:900003', { actorType: 'bot' });
 
     expect(connections.listFriendConnections).toHaveBeenCalledWith({
       actor_type: 'bot',
-      actor_id: 'actor-1:327325',
+      actor_id: 'actor-1:900003',
     });
     expect(bc.listBotFriendships).not.toHaveBeenCalled();
     expect(bots.listBotMetadata).toHaveBeenCalledWith(
-      { user_id: '327325', page: 1, page_size: 2 },
+      { user_id: '900003', page: 1, page_size: 2 },
       {
         bots: [
           { bot_id: 'b1', owner_id: 'actor-1' },
@@ -118,19 +118,19 @@ describe('collaborationCandidateService', () => {
     connections.listFriendConnections.mockResolvedValue({
       code: 20000,
       data: {
-        items: [{ actor: { type: 'bot', id: 'b1:327325' } }],
+        items: [{ actor: { type: 'bot', id: 'b1:900003' } }],
         total: 1,
       },
     });
     bots.listBotMetadata.mockResolvedValue({
       code: 200000,
       data: {
-        items: [{ bot_id: 'b1', owner_id: '327325', bot_name: '蒜蓉粉丝虾', status: 'online', engine: 'OpenAI' }],
+        items: [{ bot_id: 'b1', owner_id: '900003', bot_name: '蒜蓉粉丝虾', status: 'online', engine: 'OpenAI' }],
         total: 1,
       },
     });
 
-    const res = await collaborationCandidateService.listFriends('human_327325', {
+    const res = await collaborationCandidateService.listFriends('human_900003', {
       actorType: 'human',
       offset: 0,
       limit: 100,
@@ -138,15 +138,15 @@ describe('collaborationCandidateService', () => {
 
     expect(connections.listFriendConnections).toHaveBeenCalledWith({
       actor_type: 'human',
-      actor_id: '327325',
+      actor_id: '900003',
     });
     expect(bc.listBotFriendships).not.toHaveBeenCalled();
     expect(bots.listBotMetadata).toHaveBeenCalledWith(
-      { user_id: '327325', page: 1, page_size: 1 },
-      { bots: [{ bot_id: 'b1', owner_id: '327325' }] },
+      { user_id: '900003', page: 1, page_size: 1 },
+      { bots: [{ bot_id: 'b1', owner_id: '900003' }] },
     );
     expect(res.ok && res.data.items[0]).toMatchObject({
-      id: 'b1:327325',
+      id: 'b1:900003',
       name: '蒜蓉粉丝虾',
       engine: 'OpenAI',
     });
@@ -156,7 +156,7 @@ describe('collaborationCandidateService', () => {
     connections.listFriendConnections.mockResolvedValue({
       code: 20000,
       data: {
-        items: [{ actor: { type: 'bot', id: 'b1:327325' } }, { actor: { type: 'bot', id: 'b2:327325' } }],
+        items: [{ actor: { type: 'bot', id: 'b1:900003' } }, { actor: { type: 'bot', id: 'b2:900003' } }],
         total: 2,
       },
     });
@@ -166,7 +166,7 @@ describe('collaborationCandidateService', () => {
         items: [
           {
             kind: 'bot',
-            bot_id: 'b1:327325',
+            bot_id: 'b1:900003',
             name: '协作 Alpha',
             status: 'online',
             reachability: 'reachable',
@@ -177,18 +177,18 @@ describe('collaborationCandidateService', () => {
       },
     });
 
-    const res = await collaborationCandidateService.listFriends('human_327325', {
+    const res = await collaborationCandidateService.listFriends('human_900003', {
       actorType: 'human',
       detailSource: 'collaboration',
     });
 
-    expect(bc.queryCollaborationBots).toHaveBeenCalledWith({ bot_ids: ['b1:327325', 'b2:327325'] });
+    expect(bc.queryCollaborationBots).toHaveBeenCalledWith({ bot_ids: ['b1:900003', 'b2:900003'] });
     expect(bots.listBotMetadata).not.toHaveBeenCalled();
     expect(res.ok && res.data.items).toEqual([
-      expect.objectContaining({ id: 'b1:327325', name: '协作 Alpha', isFriend: true }),
+      expect.objectContaining({ id: 'b1:900003', name: '协作 Alpha', isFriend: true }),
       expect.objectContaining({
-        id: 'b2:327325',
-        name: 'b2:327325',
+        id: 'b2:900003',
+        name: 'b2:900003',
         online: false,
         detailsResolved: false,
       }),

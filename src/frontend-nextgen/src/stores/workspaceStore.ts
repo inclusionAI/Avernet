@@ -94,6 +94,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set((state) => ({ expandedBotSectionKey: { ...state.expandedBotSectionKey, [botId]: sectionKey } })),
   selectBotSession: (sessionId) => set({ selectedBotSessionId: sessionId }),
   bumpHistoryRefresh: () => set((state) => ({ historyRefreshNonce: state.historyRefreshNonce + 1 })),
+  bumpWsReconnect: () => set((state) => ({ wsReconnectNonce: state.wsReconnectNonce + 1 })),
   setPendingGroupBootstrap: (value) => set({ pendingGroupBootstrap: value }),
   clearPendingGroupBootstrap: (runId) =>
     set((state) =>
@@ -109,6 +110,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   setActivePanel: (p) => set({ activePanel: p }),
   setIsGroupsLoading: (v) => set({ isGroupsLoading: v }),
   setIsSessionsLoading: (v) => set({ isSessionsLoading: v }),
+  setIsIdentityListLoading: (v) => set({ isIdentityListLoading: v }),
   reset: () => set(initialState),
   resetWorkspace: () => set(groupFields),
 }));

@@ -1,4 +1,4 @@
-import type { GroupView, SessionView } from '@/domain/collaboration/types';
+import type { GroupView, MessageViewScope, SessionView } from '@/domain/collaboration/types';
 import type { DomainResult } from '@/services/workspace/identityService';
 
 export type SessionTab = 'all' | 'favorite';
@@ -16,7 +16,9 @@ export interface GroupItemProps {
   onToggleGroupExpanded: (groupId: string) => void;
   onSelectSession: (groupId: string, sessionId: string) => void;
   onToggleFavorite: (sessionId: string) => void;
-  onCreateSession: (groupId: string) => void;
+  onCreateSession: (groupId: string, scope?: MessageViewScope) => void;
+  /** 当前登录身份类型：human 点「+」弹视角菜单，bot 直接创建会话。 */
+  viewerKind: 'user' | 'bot';
   onManageGroup: (groupId: string) => void;
   onManageSession: (groupId: string, sessionId: string) => void;
   onShareGroup: (groupId: string) => Promise<DomainResult<{ invitationUrl: string }>>;

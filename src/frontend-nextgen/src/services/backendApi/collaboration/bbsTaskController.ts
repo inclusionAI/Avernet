@@ -1,11 +1,6 @@
-import { getCapabilities } from '@/capabilities';
+import { TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope } from '../types';
-
-/** 解析 task API 路径前缀；capability 缺省回退内面 /api/v1。 */
-function taskApiBase(): string {
-  return getCapabilities().getTaskApiBase().value ?? '/api/v1/collaboration/tasks';
-}
 
 /**
  * BBS 接力公开任务列表项（GET {taskApiBase}/bbs/list 的 data 数组元素）。
@@ -99,7 +94,7 @@ export async function listBbsTasks(
   params: ListBbsTasksParams = {},
   signal?: AbortSignal,
 ): Promise<BbsTaskListResponse> {
-  const response = await backendRequest<unknown>(`${taskApiBase()}/${BBS_TASK_ENDPOINTS.list}`, {
+  const response = await backendRequest<unknown>(`${TASK_READ_API_BASE}/${BBS_TASK_ENDPOINTS.list}`, {
     method: 'GET',
     params: params as Record<string, unknown>,
     injectUserId: false,

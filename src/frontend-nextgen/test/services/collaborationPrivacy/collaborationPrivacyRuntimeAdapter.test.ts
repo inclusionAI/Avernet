@@ -5,7 +5,7 @@ import { createCollaborationPrivacyRuntimeAdapter } from '@/services/collaborati
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 const orgUser: OrgUserDto = {
-  user_id: '447147',
+  user_id: '900004',
   username: 'testuser',
   display_name: '测试用户',
   full_name: '测试用户',
@@ -108,7 +108,7 @@ describe('collaborationPrivacyRuntimeAdapter.submitPublication', () => {
       visibility_field: null,
       error_msg: null,
     });
-    await adapter.loadOverview('447147');
+    await adapter.loadOverview('900004');
 
     const command: PublicationCommand = {
       botId: 'bot-1',
@@ -132,7 +132,7 @@ describe('collaborationPrivacyRuntimeAdapter.submitPublication', () => {
       visibility_field: 'view',
       error_msg: null,
     });
-    await adapter.loadOverview('447147');
+    await adapter.loadOverview('900004');
 
     const result = await adapter.submitPublication({
       botId: 'bot-1',

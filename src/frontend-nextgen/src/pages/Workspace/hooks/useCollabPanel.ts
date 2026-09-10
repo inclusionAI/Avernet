@@ -1,4 +1,5 @@
 import type { IdentityView, ParticipantMode, ParticipantView, SessionView } from '@/domain/collaboration';
+import type { MessageViewScope } from '@/domain/collaboration/types';
 import { isSameHumanIdentity } from '@/domain/userIdentity';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -22,12 +23,18 @@ export interface CollabPanelState {
   canSwitchToHuman: boolean;
   switchingBotMode: boolean;
   joining: boolean;
+  /** human 成员的消息可见域回显（后端未返回时为 null，UI 不渲染切换控件）。 */
+  humanViewScope: MessageViewScope | null;
+  /** 消息视角切换请求进行中（禁用 Switch）。 */
+  switchingViewScope: boolean;
   setBotMode: (mode: 'auto' | 'muted') => Promise<void>;
-  joinSession: () => Promise<boolean>;
+  joinSession: (scope?: MessageViewScope) => Promise<boolean>;
   /** 退出当前会话（将 human mode 置为 absent）。 */
   leaveSession: () => Promise<boolean>;
   /** 切换到用户视角继续发言（对齐 open-claw「去发言」）。 */
   switchToHuman: () => void;
+  /** 仅切换 human 成员消息可见域；成功后触发 ws 整体重连（重拉一次性 token）。 */
+  setViewScope: (scope: MessageViewScope) => Promise<boolean>;
 }
 
 /**
@@ -42,12 +49,19 @@ export interface CollabPanelState {
 export function useCollabPanel(
   session: SessionView | null,
   activeIdentity: IdentityView | null,
-  updateMemberMode: (sessionId: string, actorId: string, mode: ParticipantMode) => Promise<boolean>,
+  updateMemberMode: (
+    sessionId: string,
+    actorId: string,
+    mode: ParticipantMode,
+    messageViewScope?: MessageViewScope,
+  ) => Promise<boolean>,
   authenticatedUserId?: string | null,
   authenticatedUserName?: string | null,
+  updateMemberScope?: (sessionId: string, actorId: string, scope: MessageViewScope) => Promise<boolean>,
 ): CollabPanelState {
   const [switchingBotMode, setSwitchingBotMode] = useState(false);
   const [joining, setJoining] = useState(false);
+  const [switchingViewScope, setSwitchingViewScope] = useState(false);
 
   const isBotViewer = activeIdentity?.kind === 'bot';
   const botActorId = isBotViewer ? activeIdentity?.id ?? null : null;
@@ -146,25 +160,28 @@ export function useCollabPanel(
     [session, botActorId, botMode, updateMemberMode],
   );
 
-  const joinSession = useCallback(async (): Promise<boolean> => {
-    if (!session) return false;
-    const actorId = human?.actorId ?? humanActorId;
-    if (!actorId) {
-      toast.error('未找到用户身份，请稍后重试');
-      return false;
-    }
-    setJoining(true);
-    try {
-      const ok = await updateMemberMode(session.sessionId, actorId, 'present');
-      if (ok) {
-        if (humanActorId) setActiveIdentity(humanActorId);
-        openGroupSessionAsHuman(session);
+  const joinSession = useCallback(
+    async (scope?: MessageViewScope): Promise<boolean> => {
+      if (!session) return false;
+      const actorId = human?.actorId ?? humanActorId;
+      if (!actorId) {
+        toast.error('未找到用户身份，请稍后重试');
+        return false;
       }
-      return ok;
-    } finally {
-      setJoining(false);
-    }
-  }, [human, humanActorId, openGroupSessionAsHuman, session, setActiveIdentity, updateMemberMode]);
+      setJoining(true);
+      try {
+        const ok = await updateMemberMode(session.sessionId, actorId, 'present', scope);
+        if (ok) {
+          if (humanActorId) setActiveIdentity(humanActorId);
+          openGroupSessionAsHuman(session);
+        }
+        return ok;
+      } finally {
+        setJoining(false);
+      }
+    },
+    [human, humanActorId, openGroupSessionAsHuman, session, setActiveIdentity, updateMemberMode],
+  );
 
   const leaveSession = useCallback(async (): Promise<boolean> => {
     if (!session) return false;
@@ -172,6 +189,27 @@ export function useCollabPanel(
     if (!actorId) return false;
     return updateMemberMode(session.sessionId, actorId, 'absent');
   }, [human, humanActorId, session, updateMemberMode]);
+
+  // 仅切换消息可见域（不带 mode）：成功后 bump wsReconnectNonce 触发 ws 整体重连（重拉一次性 token）。
+  const setViewScope = useCallback(
+    async (scope: MessageViewScope): Promise<boolean> => {
+      if (!session || !updateMemberScope) return false;
+      const actorId = human?.actorId ?? humanActorId;
+      if (!actorId) return false;
+      setSwitchingViewScope(true);
+      try {
+        const ok = await updateMemberScope(session.sessionId, actorId, scope);
+        if (ok) {
+          useWorkspaceStore.getState().bumpWsReconnect();
+          toast.success(scope === 'participant' ? '已切换到参与者视角，正在重连' : '已切换到完整视角，正在重连');
+        }
+        return ok;
+      } finally {
+        setSwitchingViewScope(false);
+      }
+    },
+    [human, humanActorId, session, updateMemberScope],
+  );
 
   // bot 视角恒显;human 视角 absent 时显示加入条;human 视角 present 时显示「在会话中隐身」条。
   const humanAbsentOnly = !isBotViewer && !!session && humanAbsent;
@@ -190,9 +228,12 @@ export function useCollabPanel(
     canSwitchToHuman: !!humanActorId,
     switchingBotMode,
     joining,
+    humanViewScope: human?.messageViewScope ?? null,
+    switchingViewScope,
     setBotMode,
     joinSession,
     leaveSession,
     switchToHuman,
+    setViewScope,
   };
 }

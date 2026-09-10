@@ -20,7 +20,7 @@ const BotWorkshopPage: React.FC = () => {
   return (
     <main className="app-scrollbar h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-[1600px] space-y-5 p-4 sm:p-6 2xl:p-8">
-        <PageHeader title="Bot 工坊" description="创建、配置和运维当前空间内的 Bot。" />
+        <PageHeader title="Bot 工坊" description="创建、配置和运维当前空间内的 Bot" />
         <div className="py-3">
           <BotWorkshopToolbar
             keyword={workshop.keyword}

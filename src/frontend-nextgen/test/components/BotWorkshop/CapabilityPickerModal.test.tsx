@@ -80,6 +80,32 @@ test('添加 MCP 只展示引用市场 MCP，不展示引用工坊 MCP', () => {
   expect(screen.queryByRole('button', { name: '引用工坊 MCP' })).not.toBeInTheDocument();
 });
 
+test('添加 MCP 渲染市场接口返回的候选项', () => {
+  render(
+    <CapabilityPickerModal
+      kind="mcp"
+      open
+      marketItems={[
+        {
+          serverCode: 'mcp.ant.faas.skylarkmcpserver.skylarkmcpserver',
+          name: '语雀 MCP',
+          description: '语雀 MCP 服务，覆盖文档读写与知识库管理。',
+          active: false,
+        },
+      ]}
+      skillCenterItems={[]}
+      workshopItems={[]}
+      myItems={[]}
+      existingIds={[]}
+      onOpenChange={jest.fn()}
+      onConfirm={jest.fn()}
+    />,
+  );
+
+  expect(screen.getByText('语雀 MCP')).toBeInTheDocument();
+  expect(screen.getByText('语雀 MCP 服务，覆盖文档读写与知识库管理。')).toBeInTheDocument();
+});
+
 test('MCP 按内部和开放平台分 Tab，并将搜索交给服务端查询', async () => {
   const searchMcp = jest.fn().mockResolvedValue(undefined);
   render(

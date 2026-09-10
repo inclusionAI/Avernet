@@ -13,6 +13,7 @@ import { BindingSlot, YamlValidateButton } from './BindingSlot';
 import { CollaborationFlowAside } from './CollaborationFlowAside';
 import { CollaborationTemplatePicker } from './CollaborationTemplatePicker';
 import { CreateGroupHeader } from './CreateGroupHeader';
+import { CreateGroupViewScope, useCreateGroupViewScope } from './CreateGroupViewScope';
 import { GroupConfigFields, type GroupStrategyKind } from './GroupConfigFields';
 import type { GroupLeaderOption } from './GroupLeaderSelect';
 import { formatAutoGroupName } from './groupNaming';
@@ -39,6 +40,7 @@ export function CreateGroupModal({
   onCreated,
 }: CreateGroupModalProps) {
   const { run, friendlyError, creating, clearError } = useCreateGroup();
+  const { viewScope, changeViewScope, applyViewScope } = useCreateGroupViewScope(open, clearError);
   const picker = useGroupCollaborationPicker(activeIdentity?.id, open, activeIdentity?.kind === 'user');
   const [kind, setKind] = useState<GroupStrategyKind>('free_chat');
   const [name, setName] = useState('');
@@ -184,9 +186,7 @@ export function CreateGroupModal({
       memberIds = [currentHuman, effectiveLeader, ...botUuids].filter((id): id is string => Boolean(id));
     }
     const participantIds = Array.from(new Set(memberIds));
-    const participants = participantIds.map((id) => ({ actor_id: id }));
-    const participantName = (id: string) =>
-      id === activeIdentity?.id ? activeIdentityDisplayName : allBotName(id);
+    const participantName = (id: string) => (id === activeIdentity?.id ? activeIdentityDisplayName : allBotName(id));
     const participantBindingsArr = Object.entries(binding.participantBindings)
       .filter(([, botId]) => Boolean(botId))
       .map(([binding, botId]) => ({ binding, actor_ids: [botId] }));
@@ -198,7 +198,7 @@ export function CreateGroupModal({
         definitionYaml,
         driverBotUuid: effectiveLeader,
         originator: activeIdentity?.id ?? '',
-        participants,
+        participants: applyViewScope(participantIds, currentHuman),
         context: context.trim() || undefined,
         participantBindings: kind === 'task_dag' ? participantBindingsArr : undefined,
       },
@@ -258,6 +258,7 @@ export function CreateGroupModal({
                 binding.yamlValidation.invalidate();
               }}
             />
+            <CreateGroupViewScope activeIdentity={activeIdentity} value={viewScope} onChange={changeViewScope} />
 
             {(kind !== 'task_dag' || binding.yamlValidation.isValidated) && (
               <GroupParticipantPicker

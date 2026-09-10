@@ -33,9 +33,9 @@ describe('FriendApprovalEditor', () => {
 
     expect(screen.getByRole('radiogroup', { name: '好友审批策略' })).toBeInTheDocument();
     expect(
-      screen.getByRole('radio', { name: '无需审批 符合 Bot 可见性限制的新申请直接建立好友关系' }),
+      screen.getByRole('radio', { name: '无需审批 新好友申请无需用户审批，直接通过' }),
     ).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: '全部审批 所有新好友申请都需要确认' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '全部审批 新好友申请都需要用户审批后方可通过' })).toBeInTheDocument();
     expect(screen.queryByText('部分组织免审批')).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: '搜索组织范围' })).not.toBeInTheDocument();
   });
@@ -59,7 +59,7 @@ describe('FriendApprovalEditor', () => {
     expect(screen.getByText(/当前策略“部分组织免审批”已下线/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '保存策略' })).toBeDisabled();
 
-    fireEvent.click(screen.getByRole('radio', { name: '全部审批 所有新好友申请都需要确认' }));
+    fireEvent.click(screen.getByRole('radio', { name: '全部审批 新好友申请都需要用户审批后方可通过' }));
     fireEvent.click(screen.getByRole('button', { name: '保存策略' }));
 
     expect(onSubmit).toHaveBeenCalledWith({
@@ -86,7 +86,11 @@ describe('FriendApprovalEditor', () => {
       />,
     );
 
-    expect(screen.getByRole('radio', { name: /部分组织免审批/ })).toHaveAttribute('aria-checked', 'true');
+    expect(
+      screen.getByRole('radio', {
+        name: '部分组织免审批 限定组织的用户申请可直接通过；其余组织的用户申请仍需当前用户审批',
+      }),
+    ).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByRole('textbox', { name: '搜索组织范围' })).toBeInTheDocument();
   });
 });

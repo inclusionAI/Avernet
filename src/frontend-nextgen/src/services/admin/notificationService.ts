@@ -30,7 +30,7 @@ function toServiceError(e: unknown): ServiceError {
 }
 
 export const notificationService = {
-  /** 红点总数（铃铛 + 工单中心「待我处理」徽标共用）。
+  /** 红点总数（铃铛 + 通知中心「待我处理」徽标共用）。
    * 后端 UnreadCountResponse 同时返回 unread_count / pending_approval_count / unread_notice_count / badge_count，
    * 铃铛红点语义是「需要我处理的总数」(待审批 + 未读通知)，因此读 badge_count。
    * 单读 unread_count 会漏掉待审批工单的提醒。 */

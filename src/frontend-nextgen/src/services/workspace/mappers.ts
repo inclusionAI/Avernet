@@ -81,6 +81,7 @@ export function mapParticipant(dto: {
   name?: string;
   role: string;
   mode: 'auto' | 'muted' | 'present' | 'absent';
+  message_view_scope?: 'full' | 'participant';
 }): ParticipantView {
   return {
     actorId: dto.actor_id,
@@ -88,6 +89,7 @@ export function mapParticipant(dto: {
     name: dto.name ?? dto.actor_id,
     role: ROLE_NATIVE_TO_DOMAIN[dto.role] ?? 'member',
     mode: dto.mode,
+    ...(dto.message_view_scope ? { messageViewScope: dto.message_view_scope } : {}),
   };
 }
 

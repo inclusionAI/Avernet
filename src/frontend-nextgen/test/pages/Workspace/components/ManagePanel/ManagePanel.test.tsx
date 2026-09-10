@@ -94,7 +94,7 @@ it('member list resolves only the authenticated human and preserves other human 
   const otherHumanGroup: GroupView = {
     ...group,
     participants: [
-      { actorId: 'human_447147', kind: 'human', name: '447147', role: 'owner', mode: 'present' },
+      { actorId: 'human_900004', kind: 'human', name: '900004', role: 'owner', mode: 'present' },
       { actorId: 'human_447148', kind: 'human', name: '其他成员', role: 'member', mode: 'present' },
     ],
     participantCount: 2,
@@ -103,15 +103,15 @@ it('member list resolves only the authenticated human and preserves other human 
     <GroupManagePanel
       {...groupProps()}
       group={otherHumanGroup}
-      activeIdentity={{ id: 'bot_xxx:447147', kind: 'bot', displayName: '协作 Bot', online: true }}
-      authenticatedUserId="447147"
-      authenticatedUserName="风太"
+      activeIdentity={{ id: 'bot_xxx:900004', kind: 'bot', displayName: '协作 Bot', online: true }}
+      authenticatedUserId="900004"
+      authenticatedUserName="示例用户"
     />,
   );
 
-  expect(screen.getByText('风太')).toBeInTheDocument();
+  expect(screen.getByText('示例用户')).toBeInTheDocument();
   expect(screen.getByText('其他成员')).toBeInTheDocument();
-  expect(screen.queryByText('447147')).not.toBeInTheDocument();
+  expect(screen.queryByText('900004')).not.toBeInTheDocument();
 });
 
 it('group panel advanced tab renders dingtalk binding form', () => {

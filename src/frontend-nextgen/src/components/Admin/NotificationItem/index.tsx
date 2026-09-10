@@ -1,4 +1,4 @@
-// 通知下拉单条。未读浅蓝底 + 未读 dot；已读透明无 dot。点击跳工单中心对应分类。
+// 通知下拉单条。未读浅蓝底 + 未读 dot；已读透明无 dot。点击跳通知中心对应分类。
 import { Button } from '@/components/ui';
 import type { NotificationSummary } from '@/domain/admin/models';
 import { cn } from '@/utils/cn';

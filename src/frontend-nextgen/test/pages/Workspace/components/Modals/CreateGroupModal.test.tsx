@@ -101,28 +101,28 @@ it('发起协作顶栏只在当前 human ID 匹配时使用认证用户名，Bot
   const { rerender } = render(
     <CreateGroupModal
       open
-      activeIdentity={{ id: 'human_447147', kind: 'user', displayName: '447147', online: true }}
-      authenticatedUserId="447147"
-      authenticatedUserName="风太"
+      activeIdentity={{ id: 'human_900004', kind: 'user', displayName: '900004', online: true }}
+      authenticatedUserId="900004"
+      authenticatedUserName="示例用户"
       onClose={jest.fn()}
       onCreated={jest.fn()}
     />,
   );
-  expect(screen.getByText('风太')).toBeInTheDocument();
-  expect(screen.queryByText('447147')).not.toBeInTheDocument();
+  expect(screen.getByText('示例用户')).toBeInTheDocument();
+  expect(screen.queryByText('900004')).not.toBeInTheDocument();
 
   rerender(
     <CreateGroupModal
       open
-      activeIdentity={{ id: 'bot_xxx:447147', kind: 'bot', displayName: '协作 Bot', online: true }}
-      authenticatedUserId="447147"
-      authenticatedUserName="风太"
+      activeIdentity={{ id: 'bot_xxx:900004', kind: 'bot', displayName: '协作 Bot', online: true }}
+      authenticatedUserId="900004"
+      authenticatedUserName="示例用户"
       onClose={jest.fn()}
       onCreated={jest.fn()}
     />,
   );
   expect(screen.getByText('协作 Bot')).toBeInTheDocument();
-  expect(screen.queryByText('风太')).not.toBeInTheDocument();
+  expect(screen.queryByText('示例用户')).not.toBeInTheDocument();
 });
 
 it('free_chat strategy posts delivery_policy on confirm', async () => {
@@ -142,7 +142,7 @@ it('free_chat strategy posts delivery_policy on confirm', async () => {
         name: '我的群',
         driverBotUuid: 'b1',
         originator: 'actor-1',
-        participants: [{ actor_id: 'actor-1' }, { actor_id: 'b1' }],
+        participants: [{ actor_id: 'actor-1', message_view_scope: 'full' }, { actor_id: 'b1' }],
       }),
     ),
   );
@@ -163,7 +163,7 @@ it('task_master_slave uses the selected manager as driver_bot_uuid', async () =>
       expect.objectContaining({
         strategy: 'manager_worker',
         driverBotUuid: 'b1',
-        participants: [{ actor_id: 'actor-1' }, { actor_id: 'b1' }],
+        participants: [{ actor_id: 'actor-1', message_view_scope: 'full' }, { actor_id: 'b1' }],
       }),
     ),
   );

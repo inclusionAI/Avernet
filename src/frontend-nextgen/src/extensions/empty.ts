@@ -2,7 +2,7 @@ import { registerTaskPanel, TaskPanelAdapter } from '@/assets/TaskPanel';
 import { defaultCapabilities, getCapabilities } from '@/capabilities';
 import { TaskLoopCard } from '@/components/TaskCards';
 import { registerUmdPanelHandler } from '@/services/bcs/UmdPanel';
-import { resolveTaskApiBase } from '@/services/tasks/taskConfig';
+import { TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
 import { ensureReactGlobal } from '@/services/workspace';
 import '@/services/workspace/chatBridge';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -22,9 +22,9 @@ type SidePanelConfigureFn = (opts: { maxTabLabelLength?: number }) => void;
  *
  * assets 守卫禁止 TaskPanelAdapter 反查 teamclaw 业务层（stores/capabilities/services），故在此 wrapper 注入：
  * - userId：从登录态 human identity 取纯工号塞入 params.userId；params 已带（发起方/后端注入）优先沿用，缺省才回填登录人工号。
- * - taskApiBase：task API 路径前缀由 capability getTaskApiBase 解析（Open Core → /openapi/v1/collaboration/tasks、
- *   内部 overlay → /api/v1/collaboration/tasks），渲染期注入而不落库到持久 params——部署路由随环境变化，
- *   渲染期取当前 capability 最准，旧副屏消息切环境后仍命中正确路由。
+ * - taskApiBase：副屏的 dashboard/list 读接口统一走 /openapi/v1/collaboration/tasks 读公开面
+ *   （前端经 gateway spanner 鉴权），不随 capability 切到内面 /api/v1——对齐后端安全收敛（删除非 openapi 接口，
+ *   仅保留公开面，杜绝公网出口上内部 /api/v1 裸奔）。渲染期注入而不落库到持久 params，旧副屏消息仍命中正确路由。
  *
  * 用 getHumanIdentity 而非 getCurrentOpenApiUserId：后者依赖 activeIdentityId，群聊副屏以 bot 身份
  * 渲染时取不到工号；前者直接从 workspaceStore.identities 取 kind=user 的登录人，不受当前身份影响。
@@ -35,11 +35,11 @@ const TaskPanelAdapterWithUser: ComponentType<PanelContentProps> = (props) => {
   const human = getCapabilities().getHumanIdentity();
   const loginUserId = human.status === 'available' ? human.value?.userId?.trim() || undefined : undefined;
   const incoming = props.params ?? {};
-  // userId：已带沿用，缺省回填登录人工号；taskApiBase：capability 渲染期注入（部署路由随环境取最准）。
+  // userId：已带沿用，缺省回填登录人工号；taskApiBase：读公开面 /openapi/v1（gateway 鉴权），不随 capability 切内面。
   const params = {
     ...incoming,
     userId: incoming.userId ?? loginUserId,
-    taskApiBase: resolveTaskApiBase(),
+    taskApiBase: TASK_READ_API_BASE,
   };
   return React.createElement(TaskPanelAdapter, { ...props, params } as PanelContentProps);
 };

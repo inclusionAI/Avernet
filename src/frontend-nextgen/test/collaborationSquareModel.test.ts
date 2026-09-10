@@ -82,49 +82,49 @@ describe('collaboration square model', () => {
   });
 
   test('通用协作 Bot 与画像 Mapper 优先保留后端 Bot UUID，缺失时回退 Bot ID', () => {
-    expect(mapCollaborationBotDto({ bot_id: '20260825_mbu0ey8f', bot_uuid: '20260825_mbu0ey8f:447147' })).toEqual(
-      expect.objectContaining({ id: '20260825_mbu0ey8f:447147' }),
+    expect(mapCollaborationBotDto({ bot_id: '20260825_mbu0ey8f', bot_uuid: '20260825_mbu0ey8f:900004' })).toEqual(
+      expect.objectContaining({ id: '20260825_mbu0ey8f:900004' }),
     );
     expect(
-      mapBotProfileTransport({ bot_id: 'default', bot_uuid: 'default:447147', bot_name: '助手', owner_name: 'Owner' }),
-    ).toEqual(expect.objectContaining({ id: 'default:447147' }));
+      mapBotProfileTransport({ bot_id: 'default', bot_uuid: 'default:900004', bot_name: '助手', owner_name: 'Owner' }),
+    ).toEqual(expect.objectContaining({ id: 'default:900004' }));
     expect(mapBotProfileTransport({ bot_id: 'default', bot_name: '助手', owner_name: 'Owner' }).id).toBe('default');
   });
 
   test('Bot Catalog 使用 bot_uuid 作为页面与操作 canonical id，并消费 Search 返回的 is_friend', () => {
     expect(
-      resolveFriendRequestBotId({ bot_id: 'default', bot_uuid: '20260825_mbu0ey8f:447147', entity_id: '366656' }),
-    ).toBe('20260825_mbu0ey8f:447147');
+      resolveFriendRequestBotId({ bot_id: 'default', bot_uuid: '20260825_mbu0ey8f:900004', entity_id: '366656' }),
+    ).toBe('20260825_mbu0ey8f:900004');
     expect(resolveFriendRequestBotId({ bot_id: 'default', entity_id: '366656' })).toBe('default:366656');
     expect(resolveFriendRequestBotId({ bot_id: 'default' })).toBe('default');
     expect(
       mapPublicBotCatalogDto({
         bot_id: 'default',
-        bot_uuid: '20260825_mbu0ey8f:447147',
+        bot_uuid: '20260825_mbu0ey8f:900004',
         entity_id: '366656',
         is_friend: true,
       }),
     ).toEqual(
       expect.objectContaining({
-        id: '20260825_mbu0ey8f:447147',
+        id: '20260825_mbu0ey8f:900004',
         relationshipStatus: 'friend',
       }),
     );
 
     expect(
-      mapPublicBotCatalogDto({ bot_id: 'default', bot_uuid: '20260825_mbu0ey8f:447147', is_friend: false }),
+      mapPublicBotCatalogDto({ bot_id: 'default', bot_uuid: '20260825_mbu0ey8f:900004', is_friend: false }),
     ).toEqual(expect.objectContaining({ relationshipStatus: 'none' }));
 
     // 智能搜索 Discovery 的 recommendation.short_profile 映射为卡片 shortProfile。
     expect(
       mapPublicBotCatalogDto({
         bot_id: 'default',
-        bot_uuid: '20260825_mbu0ey8f:447147',
+        bot_uuid: '20260825_mbu0ey8f:900004',
         recommendation: { short_profile: '用于测试目的的专用 Bot' },
       }),
     ).toEqual(expect.objectContaining({ shortProfile: '用于测试目的的专用 Bot' }));
     expect(
-      mapPublicBotCatalogDto({ bot_id: 'default', bot_uuid: '20260825_mbu0ey8f:447147' })?.shortProfile,
+      mapPublicBotCatalogDto({ bot_id: 'default', bot_uuid: '20260825_mbu0ey8f:900004' })?.shortProfile,
     ).toBeUndefined();
 
     expect(
@@ -165,7 +165,7 @@ describe('collaboration square model', () => {
   });
 
   test('公开 Bot 主操作按当前 actor、关系和 self-target 决定', () => {
-    const human = { type: 'human' as const, id: '327325' };
+    const human = { type: 'human' as const, id: '900003' };
     const botActor = { type: 'bot' as const, id: 'bot-viewer' };
 
     expect(
