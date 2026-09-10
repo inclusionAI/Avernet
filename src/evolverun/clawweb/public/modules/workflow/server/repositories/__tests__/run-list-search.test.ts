@@ -20,12 +20,13 @@ describe("run history keyword filtering", () => {
       completed_at INTEGER, identity_key TEXT, current_phase TEXT, origin_session_key TEXT,
       origin_session_id TEXT, user_id TEXT, plugin_version TEXT, engine TEXT,
       workflow_version INTEGER, workflow_deploy_number INTEGER, gmt_create INTEGER,
-      gmt_modified INTEGER, evolution_analysis_status TEXT);
+      gmt_modified INTEGER, evolution_analysis_status TEXT, input_json TEXT);
       INSERT INTO flow_runs (flow_id,workflow_id,status,triggered_by,origin_bot_id,started_at) VALUES
       ('old-match','wf','failed','gateway-client','bot_one:owner',1),
       ('new-match','wf','failed','gateway-client','bot_two:owner',2),
       ('success','wf','succeeded','gateway-client','bot_three:owner',3),
       ('foreign','other','failed','gateway-client','bot_one:owner',4);`);
+    raw.exec("UPDATE flow_runs SET input_json = 'needle' WHERE flow_id = 'new-match'");
     try {
       const filters = { workflowId: "wf", status: "failed", query: "gateway-client" };
       expect(await repo.countRuns(filters)).toBe(2);
@@ -52,6 +53,27 @@ describe("run history keyword filtering", () => {
         return response.json();
       };
       try {
+        // Public HTTP compatibility: omission, blank and non-scalar values
+        // preserve the existing unfiltered contract, including status counts.
+        const baseline = await read("?workflowId=wf");
+        expect(baseline).toMatchObject({ total: 3, limit: 30, offset: 0, statusCounts: { failed: 2, succeeded: 1 } });
+        for (const suffix of ["&query=", "&query=%20%20", "&query=old&query=new", "&query[field]=old"]) {
+          expect(await read("?workflowId=wf" + suffix)).toEqual(baseline);
+        }
+        const trimmed = await read("?workflowId=wf&query=%20new-match%20");
+        expect(trimmed.total).toBe(1);
+        expect(trimmed.runs.map((r: { flow_id: string }) => r.flow_id)).toEqual(["new-match"]);
+        expect(trimmed).not.toHaveProperty("statusCounts");
+        const combined = await read("?workflowId=wf&query=gateway&status=failed&from=2&to=2&inputQuery=needle&limit=1&offset=0");
+        expect(combined).toMatchObject({ total: 1, limit: 1, offset: 0 });
+        expect(combined.runs.map((r: { flow_id: string }) => r.flow_id)).toEqual(["new-match"]);
+        expect(await read("?workflowId=wf&query=old-match&inputQuery=needle")).toMatchObject({ total: 0, runs: [] });
+        const multiStatus = await read("?workflowId=wf&query=gateway&status=failed&statuses=succeeded,waiting");
+        expect(multiStatus.total).toBe(1);
+        expect(multiStatus.runs.map((r: { flow_id: string }) => r.flow_id)).toEqual(["success"]);
+        expect(await read("?workflowId=wf&query=bot_one&botId=bot_two")).toMatchObject({ total: 0, runs: [] });
+        expect(await read("?workflowId=wf&query=%25")).toMatchObject({ total: 0, runs: [] });
+        expect((await read("?workflowId=wf&query=bot_one")).total).toBe(1);
         for (const query of ["?query=foreign", "?workflowId=other", "?query=bot_one&workflowId=other"]) {
           const hidden = await read(query);
           expect(hidden.total).toBe(0);
