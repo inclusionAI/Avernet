@@ -10,7 +10,8 @@ use bcs_db_api::{
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::port::NewEvent;
 use bcs_service_api::port::repo::{
-    AppendEventRecord, NewSessionParams, SessionRepoPort,
+    AddSessionParticipantWithEvent, AppendEventRecord, NewSessionParams,
+    RemoveSessionParticipantWithEvent, SessionRepoPort,
     UpdateSessionParticipantMessageViewScopeWithEvent,
 };
 use bcs_service_api::types::{
@@ -525,4 +526,68 @@ async fn sqlite_scope_update_race_reports_clean_conflict() {
         }
         other => panic!("expected Conflict, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn sqlite_add_participant_with_event_succeeds_on_legacy_participants_bytes() {
+    let db = sqlite_db().await;
+    let repo = MySqlSessionStore::sqlite(db.clone(), "dev".to_string());
+    let session = create_legacy_scope_session(&repo, &db).await;
+
+    let stored = repo.get(&session.id).await.expect("stored session");
+    let updated = repo
+        .add_participant_with_event(AddSessionParticipantWithEvent {
+            session_id: session.id.clone(),
+            expected_participants: stored.participants.clone(),
+            participant: Participant::bot("bot-2", ParticipantRole::Consultant),
+            event: scope_change_event(&session.id, &session.group_id),
+        })
+        .await
+        .expect("legacy participants bytes must not break the addition CAS");
+
+    assert!(
+        updated
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == "bot-2")
+    );
+    let reloaded = repo.get(&session.id).await.expect("reload session");
+    assert!(
+        reloaded
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == "bot-2")
+    );
+}
+
+#[tokio::test]
+async fn sqlite_remove_participant_with_event_succeeds_on_legacy_participants_bytes() {
+    let db = sqlite_db().await;
+    let repo = MySqlSessionStore::sqlite(db.clone(), "dev".to_string());
+    let session = create_legacy_scope_session(&repo, &db).await;
+
+    let stored = repo.get(&session.id).await.expect("stored session");
+    let updated = repo
+        .remove_participant_with_event(RemoveSessionParticipantWithEvent {
+            session_id: session.id.clone(),
+            expected_participants: stored.participants.clone(),
+            bot_uuid: "human-1".to_string(),
+            event: scope_change_event(&session.id, &session.group_id),
+        })
+        .await
+        .expect("legacy participants bytes must not break the removal CAS");
+
+    assert!(
+        !updated
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == "human-1")
+    );
+    let reloaded = repo.get(&session.id).await.expect("reload session");
+    assert!(
+        !reloaded
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == "human-1")
+    );
 }
