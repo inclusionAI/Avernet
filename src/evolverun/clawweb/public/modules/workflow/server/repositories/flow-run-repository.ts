@@ -81,6 +81,8 @@ export type FlowRunCompletion = {
 
 export type FindFlowRunsOptions = {
   workflowId?: string;
+  /** Permission scope: undefined is unrestricted; an empty list denies all. */
+  allowedWorkflowIds?: string[];
   status?: string;
   statuses?: string[];
   from?: number;
@@ -89,6 +91,8 @@ export type FindFlowRunsOptions = {
   offset?: number;
   /** Fuzzy-match against input_json (LIKE %value%) */
   inputQuery?: string;
+  /** Literal substring search across run ID, initiator and origin Bot ID. */
+  query?: string;
   /** Filter by origin_bot_id owner part (format: botId:botOwnerId) */
   originBotOwnerId?: string;
   /** Filter by origin_bot_id bot part; requires originBotOwnerId */
@@ -176,6 +180,14 @@ export class FlowRunRepository {
     const conds: string[] = [];
     const params: unknown[] = [];
     if (options.workflowId) { conds.push("workflow_id = ?"); params.push(options.workflowId); }
+    if (options.allowedWorkflowIds !== undefined) {
+      if (options.allowedWorkflowIds.length === 0) {
+        conds.push("1 = 0");
+      } else {
+        conds.push(`workflow_id IN (${options.allowedWorkflowIds.map(() => "?").join(",")})`);
+        params.push(...options.allowedWorkflowIds);
+      }
+    }
     if (options.statuses?.length) {
       conds.push(`status IN (${options.statuses.map(() => "?").join(",")})`);
       params.push(...options.statuses);
@@ -186,6 +198,11 @@ export class FlowRunRepository {
     if (options.from) { conds.push("started_at >= ?"); params.push(options.from); }
     if (options.to) { conds.push("started_at <= ?"); params.push(options.to); }
     if (options.inputQuery) { conds.push("input_json LIKE ?"); params.push(`%${options.inputQuery}%`); }
+    if (options.query?.trim()) {
+      const pattern = `%${options.query.trim().replace(/[!%_]/g, "!$&")}%`;
+      conds.push("(flow_id LIKE ? ESCAPE '!' OR triggered_by LIKE ? ESCAPE '!' OR origin_bot_id LIKE ? ESCAPE '!')");
+      params.push(pattern, pattern, pattern);
+    }
     // origin_bot_id filtering: format is "botId:botOwnerId" (e.g. "default:461514")
     // NULL/empty origin_bot_id rows are always included (no filtering on them)
     if (options.originBotOwnerId) {
