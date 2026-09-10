@@ -25,6 +25,9 @@ assert_contains() {
   esac
 }
 
+# shellcheck source=/dev/null
+source "${ROOT}/scripts/utils.sh"
+
 YELLOW=""
 NC=""
 log_info() { :; }
@@ -169,6 +172,20 @@ test_toolchain_setup_continues_after_claude_code_skip() (
     assert_eq "system,node,npm,uv,python,openclaw,rust,protobuf" "$completed_steps" "steps after declining Claude Code"
 )
 
+test_openclaw_supported_version_range() (
+    MIN_OPENCLAW_VERSION="2026.3.28"
+    MAX_OPENCLAW_VERSION="2026.7.1"
+
+    if openclaw_version_supported "2026.3.27"; then
+        fail "OpenClaw version below the supported minimum should not match"
+    fi
+    openclaw_version_supported "2026.3.28" || fail "minimum supported OpenClaw version should match"
+    openclaw_version_supported "2026.7.1" || fail "maximum supported OpenClaw version should match"
+    if openclaw_version_supported "2026.7.2"; then
+        fail "OpenClaw version above the supported maximum should not match"
+    fi
+)
+
 test_claude_code_installs_missing_cli() (
     local temp_dir bin_dir args_path
     temp_dir="$(mktemp -d)"
@@ -275,6 +292,7 @@ test_claude_code_existing_cli_skips_install
 test_claude_code_default_response_installs_missing_cli
 test_claude_code_decline_skips_install
 test_toolchain_setup_continues_after_claude_code_skip
+test_openclaw_supported_version_range
 test_claude_code_installs_missing_cli
 test_claude_code_install_fails_without_resolved_cli
 test_load_rust_environment
