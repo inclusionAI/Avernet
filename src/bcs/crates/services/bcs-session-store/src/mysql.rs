@@ -1461,9 +1461,9 @@ impl SessionRepoPort for MySqlSessionStore {
         &self,
         command: AddSessionParticipantWithEvent,
     ) -> ServiceResult<Session> {
-        let mut candidate = self
-            .get(&command.session_id)
-            .await
+        let (mut candidate, stored_participants_json) = self
+            .load_with_raw_participants(&command.session_id)
+            .await?
             .ok_or_else(|| ServiceError::SessionNotFound(command.session_id.clone()))?;
         if candidate
             .participants
@@ -1481,8 +1481,6 @@ impl SessionRepoPort for MySqlSessionStore {
             )));
         }
 
-        let expected_json = serde_json::to_string(&command.expected_participants)
-            .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
         let bot_uuid = command.participant.bot_uuid.clone();
         let role = participant_role_to_str(command.participant.role);
         let mut join_map = candidate
@@ -1528,7 +1526,7 @@ impl SessionRepoPort for MySqlSessionStore {
                 vec![
                     DbValue::from(self.env.as_str()),
                     DbValue::from(command.session_id.as_str()),
-                    DbValue::from(expected_json.as_str()),
+                    DbValue::from(stored_participants_json.as_str()),
                 ],
             )),
             DbTransactionStep::Execute(DbStatement::with_transaction_params(
@@ -1538,7 +1536,7 @@ impl SessionRepoPort for MySqlSessionStore {
                     DbTransactionParam::value(join_seq_json.to_string()),
                     DbTransactionParam::value(self.env.as_str()),
                     DbTransactionParam::query_result(0, 0, "session_id"),
-                    DbTransactionParam::value(expected_json.as_str()),
+                    DbTransactionParam::value(stored_participants_json.as_str()),
                 ],
             )),
             DbTransactionStep::Execute(DbStatement::with_params(
@@ -1562,10 +1560,16 @@ impl SessionRepoPort for MySqlSessionStore {
         })?;
         steps.extend(event_plan.steps);
         self.db.transaction(steps).await.map_err(|error| {
-            ServiceError::Conflict(format!(
-                "Session '{}' changed during participant addition: {error}",
-                command.session_id
-            ))
+            if transaction_lock_row_is_missing(&error) {
+                // The CAS lock row vanished: a concurrent writer changed or
+                // deleted the session between the pre-check read and the lock.
+                ServiceError::Conflict(format!(
+                    "Session '{}' changed during participant addition",
+                    command.session_id
+                ))
+            } else {
+                ServiceError::InternalError(format!("session db: {error}"))
+            }
         })?;
         Ok(candidate)
     }
@@ -1640,9 +1644,9 @@ impl SessionRepoPort for MySqlSessionStore {
         &self,
         command: RemoveSessionParticipantWithEvent,
     ) -> ServiceResult<Session> {
-        let mut candidate = self
-            .get(&command.session_id)
-            .await
+        let (mut candidate, stored_participants_json) = self
+            .load_with_raw_participants(&command.session_id)
+            .await?
             .ok_or_else(|| ServiceError::SessionNotFound(command.session_id.clone()))?;
         if serde_json::to_value(&candidate.participants).ok()
             != serde_json::to_value(&command.expected_participants).ok()
@@ -1665,8 +1669,6 @@ impl SessionRepoPort for MySqlSessionStore {
         candidate.updated_at = current_millis();
         validate_session_event_scope(&candidate, &command.event)?;
 
-        let expected_json = serde_json::to_string(&command.expected_participants)
-            .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
         let participants_json = serde_json::to_string(&candidate.participants)
             .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
         let lock_sql = format!(
@@ -1685,7 +1687,7 @@ impl SessionRepoPort for MySqlSessionStore {
                 vec![
                     DbValue::from(self.env.as_str()),
                     DbValue::from(command.session_id.as_str()),
-                    DbValue::from(expected_json.as_str()),
+                    DbValue::from(stored_participants_json.as_str()),
                 ],
             )),
             DbTransactionStep::Execute(DbStatement::with_transaction_params(
@@ -1694,7 +1696,7 @@ impl SessionRepoPort for MySqlSessionStore {
                     DbTransactionParam::value(participants_json.as_str()),
                     DbTransactionParam::value(self.env.as_str()),
                     DbTransactionParam::query_result(0, 0, "session_id"),
-                    DbTransactionParam::value(expected_json.as_str()),
+                    DbTransactionParam::value(stored_participants_json.as_str()),
                 ],
             )),
             DbTransactionStep::Execute(DbStatement::with_params(
@@ -1717,10 +1719,16 @@ impl SessionRepoPort for MySqlSessionStore {
         })?;
         steps.extend(event_plan.steps);
         self.db.transaction(steps).await.map_err(|error| {
-            ServiceError::Conflict(format!(
-                "Session '{}' changed during participant removal: {error}",
-                command.session_id
-            ))
+            if transaction_lock_row_is_missing(&error) {
+                // The CAS lock row vanished: a concurrent writer changed or
+                // deleted the session between the pre-check read and the lock.
+                ServiceError::Conflict(format!(
+                    "Session '{}' changed during participant removal",
+                    command.session_id
+                ))
+            } else {
+                ServiceError::InternalError(format!("session db: {error}"))
+            }
         })?;
         Ok(candidate)
     }
