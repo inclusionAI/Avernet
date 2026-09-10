@@ -66,7 +66,7 @@ class RecoveringBotRuntimeProjector(BotRuntimeProjectorProtocol):
                 scope=scope, bot_id=bot_id, owner_id=owner_id
             )
             raise
-        self._ensure_if_unresolved(
+        result = self._ensure_if_unresolved(
             result=result, scope=scope, bot_id=bot_id, owner_id=owner_id
         )
         return result
@@ -104,7 +104,7 @@ class RecoveringBotRuntimeProjector(BotRuntimeProjectorProtocol):
                 scope=scope, bot_id=plan.bot_id, owner_id=plan.owner_id
             )
             raise
-        self._ensure_if_unresolved(
+        result = self._ensure_if_unresolved(
             result=result,
             scope=scope,
             bot_id=plan.bot_id,
@@ -126,10 +126,27 @@ class RecoveringBotRuntimeProjector(BotRuntimeProjectorProtocol):
         scope: ProjectionScope,
         bot_id: str,
         owner_id: str,
-    ) -> None:
+    ) -> RuntimeProjectionResult:
         if not self._skill_projection_is_unresolved(result=result, scope=scope):
-            return
-        self._recovery.ensure(owner_id=owner_id, bot_id=bot_id)
+            return result
+        try:
+            self._recovery.ensure(owner_id=owner_id, bot_id=bot_id)
+        except Exception:
+            logger.exception(
+                "[RecoveringBotRuntimeProjector] durable recovery enqueue failed "
+                "owner_id=%s bot_id=%s",
+                owner_id,
+                bot_id,
+            )
+            return RuntimeProjectionResult.combine(
+                result,
+                RuntimeProjectionResult.pending(
+                    code="DESKTOP_SKILL_RECOVERY_ENQUEUE_FAILED",
+                    reason="Desktop Skill 持久恢复任务未能入队",
+                    suggested_action="请稍后重试；若持续失败，请联系管理员。",
+                ),
+            )
+        return result
 
     @staticmethod
     def _skill_projection_is_unresolved(

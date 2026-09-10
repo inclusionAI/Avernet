@@ -147,3 +147,34 @@ async def test_skill_projection_exception_ensures_then_preserves_error(method) -
     recovery.ensure.assert_called_once_with(
         owner_id="owner-1", bot_id="desktop-1"
     )
+
+
+@pytest.mark.asyncio
+async def test_recovery_enqueue_failure_is_logged_and_returned_distinctly(
+    caplog,
+) -> None:
+    delegate = MagicMock()
+    delegate.project = AsyncMock(
+        return_value=RuntimeProjectionResult.pending(
+            code="CENTER_CONTENT_DOWNLOAD_PENDING",
+            reason="download is active",
+        )
+    )
+    recovery = MagicMock()
+    recovery.ensure.side_effect = RuntimeError("task database unavailable")
+    projector = RecoveringBotRuntimeProjector(
+        delegate=delegate,
+        recovery=recovery,
+    )
+
+    result = await projector.project(
+        bot_id="desktop-1",
+        owner_id="owner-1",
+        scope=ProjectionScope(skills=True),
+    )
+
+    assert {issue.code for issue in result.issues} == {
+        "CENTER_CONTENT_DOWNLOAD_PENDING",
+        "DESKTOP_SKILL_RECOVERY_ENQUEUE_FAILED",
+    }
+    assert "task database unavailable" in caplog.text
