@@ -198,6 +198,7 @@ class ClawBotService(BotService):
         timeout: float,
         chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> BotResponse:
         """Send a message and get response via ChatClient.
 
@@ -213,6 +214,9 @@ class ClawBotService(BotService):
             wait_result: Whether to wait for result.
             context: Optional request context.
             timeout: Optional timeout in seconds. None means no limit.
+            session_pending: session_id 为提前构造的计划值，发送前需先物化。
+            chat_metadata:
+            attachments:
 
         Returns:
             BotResponse: The bot's response.
@@ -224,9 +228,12 @@ class ClawBotService(BotService):
         engine_type = binding_info.engine_type
         if sandbox_id is None:
             raise BotServiceError("ClawBotService requires sandbox_id in binding_info.")
-        if engine_type is None:
-            raise BotServiceError(
-                "ClawBotService requires engine_type in binding_info."
+        if session_pending:
+            user_id = resolve_user_id({}, binding_info, context, binding_info.entity_id)
+            await self._materialize_session(
+                session_id=session_id,
+                binding_info=binding_info,
+                user_id=user_id,
             )
 
         url = self._build_ws_url(sandbox_id, engine_type)
@@ -265,6 +272,7 @@ class ClawBotService(BotService):
         context: BotChatContext | None = None,
         timeout: float,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         """流式发送消息，逐 chunk 产出 StreamChunk。
 
@@ -278,6 +286,14 @@ class ClawBotService(BotService):
         if engine_type is None:
             raise BotServiceError(
                 "ClawBotService requires engine_type in binding_info."
+            )
+
+        if session_pending:
+            user_id = resolve_user_id({}, binding_info, context, binding_info.entity_id)
+            await self._materialize_session(
+                session_id=session_id,
+                binding_info=binding_info,
+                user_id=user_id,
             )
 
         url = self._build_ws_url(sandbox_id, engine_type)
@@ -314,6 +330,7 @@ class ClawBotService(BotService):
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         """注入消息到已有会话
 
@@ -325,11 +342,20 @@ class ClawBotService(BotService):
             message: 注入的消息内容
             binding_info: Binding info for WS connection.
             context: 可选的请求上下文（身份认证、调用者信息等）
+            session_pending: session_id 为提前构造的计划值，注入前需先物化。
         """
         sandbox_id = binding_info.sandbox_id
         engine_type = binding_info.engine_type
         if sandbox_id is None:
             raise BotServiceError("ClawBotService requires sandbox_id in binding_info.")
+
+        if session_pending:
+            user_id = resolve_user_id({}, binding_info, context, binding_info.entity_id)
+            await self._materialize_session(
+                session_id=session_id,
+                binding_info=binding_info,
+                user_id=user_id,
+            )
 
         url = self._build_ws_url(sandbox_id, engine_type or "openclaw")
         headers = self._get_headers(sandbox_id)
@@ -638,6 +664,46 @@ class ClawBotService(BotService):
 
             logger.info(f"Adapter session created: session_id={adapter_session_id}")
             return adapter_session_id, False
+
+    async def _materialize_session(
+        self,
+        *,
+        session_id: str,
+        binding_info: BotBindingInfo,
+        user_id: str,
+    ) -> None:
+        """用预先构造的 session_id 在 adapter 侧创建会话（幂等）。
+
+        与 _get_or_create_adapter_session 的"复用"分支不同：
+        这里明确知道 session_id 是计划值，需要先在 adapter 侧创建。
+        已存在则直接返回，保证并发安全。
+        """
+        sandbox_id = binding_info.sandbox_id
+        session_client = self._create_session_client(sandbox_id)
+        try:
+            async with session_client:
+                try:
+                    await session_client.get_session(session_id)
+                    logger.info(
+                        "[materialize_session] already exists: session_id=%s",
+                        session_id,
+                    )
+                    return
+                except Exception:
+                    pass
+                await session_client.create_session(
+                    user_id=user_id,
+                    session_id=session_id,
+                )
+                logger.info(
+                    "[materialize_session] created: session_id=%s, sandbox_id=%s",
+                    session_id,
+                    sandbox_id,
+                )
+        except Exception as e:
+            raise BotServiceError(
+                f"Failed to materialize session {session_id}: {e}"
+            ) from e
 
     def _get_path_target(self, sandbox_id: str) -> str:
         """Get the target path for HTTP requests.

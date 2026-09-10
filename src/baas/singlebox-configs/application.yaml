@@ -157,9 +157,6 @@ user_config:
     candidates_per_bot: 5
     max_concurrent: 50
     heartbeat_interval_seconds: 30.0
-    machine_count: 1
-    bucket_sweep_interval_seconds: 300.0
-    bucket_idle_ttl_seconds: 600.0
 
   # BCN 下行协议配置
   bcn:

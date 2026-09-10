@@ -209,7 +209,7 @@ def _rebuild_context(
     若 metadata 缺失，则 fallback 到 api_key_repository.get_by_prefix 反查。
     """
     metadata = metadata or {}
-    app_id = metadata.get("app_id")
+    app_id: str | None = metadata.get("app_id")
     app_type = metadata.get("app_type")
     tenant = metadata.get("tenant")
 
@@ -347,6 +347,8 @@ class BotRunRequestExecutor:
                 method="execute",
             )
 
+        session_pending: bool = bool(queue_meta.get("session_pending", False))
+
         try:
             if request_type == "inject":
                 await self._do_inject(
@@ -356,6 +358,7 @@ class BotRunRequestExecutor:
                     binding_info,
                     context,
                     attachments=attachments,
+                    session_pending=session_pending,
                 )
             elif stream:
                 await self._do_send_stream(
@@ -366,6 +369,7 @@ class BotRunRequestExecutor:
                     binding_info,
                     context,
                     attachments=attachments,
+                    session_pending=session_pending,
                 )
             else:
                 await self._do_send(
@@ -378,6 +382,7 @@ class BotRunRequestExecutor:
                     context,
                     chat_metadata,
                     attachments=attachments,
+                    session_pending=session_pending,
                 )
 
         except TimeoutError:
@@ -397,6 +402,7 @@ class BotRunRequestExecutor:
         context: BotChatContext,
         chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         wait_result = True
         if "ignore_result" in metadata:
@@ -422,6 +428,7 @@ class BotRunRequestExecutor:
             timeout=timeout_sec,
             chat_metadata=chat_metadata,
             attachments=attachments,
+            session_pending=session_pending,
         )
 
         extra: dict[str, Any] = {"session_id": session_id}
@@ -448,6 +455,7 @@ class BotRunRequestExecutor:
         binding_info: BotBindingInfo,
         context: BotChatContext,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         """流式发送：消费 bot_service.send_message_stream，逐 chunk 写 chunk 表 + ZCache watermark。
 
@@ -570,6 +578,7 @@ class BotRunRequestExecutor:
             context=context,
             timeout=timeout_sec,
             attachments=attachments,
+            session_pending=session_pending,
         )
         # 常驻 next 任务：用 asyncio.wait 加 flush 间隔超时等待，
         # 超时只是返回而不取消 __anext__（wait_for 会 cancel 并关闭
@@ -632,6 +641,7 @@ class BotRunRequestExecutor:
         binding_info: BotBindingInfo,
         context: BotChatContext,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         await bot_service.inject_message(
             session_id=session_id,
@@ -639,6 +649,7 @@ class BotRunRequestExecutor:
             binding_info=binding_info,
             context=context,
             attachments=attachments,
+            session_pending=session_pending,
         )
         self._repo.update_result(
             run_id=run.run_id,

@@ -36,8 +36,13 @@ class BotRunQueueRepository(Protocol):
         worker_id: str,
         *,
         candidates: int = 5,
+        max_running: int | None = None,
     ) -> BotRunQueueRecord | None:
-        """无锁乐观认领指定 bot 的一个 PENDING 工作项（PENDING→RUNNING）。"""
+        """无锁乐观认领指定 bot 的一个 PENDING 工作项（PENDING→RUNNING）。
+
+        ``max_running`` 为 None 时不限并发；否则认领前统计该 bot 当前
+        RUNNING（在途）数，达到上限即返回 None，实现跨进程的全局并发上限。
+        """
         ...
 
     def touch_heartbeat(self, run_id: str, worker_id: str) -> None:
@@ -62,6 +67,10 @@ class BotRunQueueRepository(Protocol):
 
     def count_pending_by_bot(self, bot_id: str) -> int:
         """统计某 bot 的 PENDING 队列深度（供入口背压判断）。"""
+        ...
+
+    def count_running_by_bot(self, bot_id: str) -> int:
+        """统计某 bot 当前 RUNNING（在途）工作项数（供全局并发上限观测）。"""
         ...
 
     def update_meta(self, run_id: str, updates: dict) -> bool:

@@ -376,6 +376,10 @@ class TestMetadataBizFields:
 
         await _flush_background_report()
         payload = mock_bot_service_plugin.report.call_args[0][0]
+        # openclaw 路径：session_id 为 _plan_session 提前构造的结构化 id
         assert payload.refs == [
-            {"ref_type": "session_key", "ref_value": "agent:main:sess-001"}
+            {
+                "ref_type": "session_key",
+                "ref_value": f"agent:main:session:test-msg-id:user:{ENTITY_ID}",
+            }
         ]

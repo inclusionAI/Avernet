@@ -460,9 +460,6 @@ class BotRunQueueConfig(ConfigSchema):
     candidates_per_bot: int = Field(default=5, ge=1)
     max_concurrent: int = Field(default=50, ge=1)
     heartbeat_interval_seconds: float = Field(default=30.0, gt=0)
-    machine_count: int = Field(default=1, ge=1)
-    bucket_sweep_interval_seconds: float = Field(default=300.0, gt=0)
-    bucket_idle_ttl_seconds: float = Field(default=600.0, gt=0)
 
 
 def _schema_defaults() -> dict:

@@ -10,6 +10,7 @@ from secbaas.community.spi.eval_env import EvalSessionLog
 if TYPE_CHECKING:
     from secbaas.community.api.bot_runtime import BotChatContext
     from secbaas.community.core.repository.bot_run import BotRunRecord
+    from secbaas.community.spi.bot.engine_adapter import BotEngineAdapter
 
 logger = get_logger("core-bot-run")
 
@@ -243,3 +244,52 @@ def build_chat_metadata(
         run_id=run_id,
     )
     return enriched
+
+
+def plan_session_id(
+    *,
+    engine_type: str | None,
+    tc_bot_id: str,
+    user_id: str,
+    run_id: str,
+    session_id: str | None = None,
+    eval_id: str | None = None,
+    adapter: "BotEngineAdapter | None" = None,
+) -> str | None:
+    """提前构造 session_id（与 consistency_key 计算规则完全一致）。
+
+    返回 None 表示该引擎不支持提前构造（如 teclaw 生产流量），
+    调用方应走同步 create_session 旧路径。
+
+    规则：
+    - session_id 非空 → 直接返回（显式指定）
+    - adapter 命中 → 委托 adapter.session_consistency_key
+    - openclaw → agent:main:session:{key}:user:{user_id}
+    - claude_code → agent:{tc_bot_id}:session:{key}:user:{user_id}
+    - teclaw → 仅 eval 流量返回结构化 key，否则 None
+    """
+    if session_id is not None:
+        return session_id
+
+    if adapter is not None:
+        return adapter.session_consistency_key(
+            tc_bot_id=tc_bot_id,
+            user_id=user_id,
+            run_id=eval_id or run_id,
+            session_id=session_id,
+        )
+
+    key = eval_id if eval_id else run_id
+    if engine_type == "openclaw":
+        return f"agent:main:session:{key}:user:{user_id}"
+    if engine_type == "claude_code":
+        return f"agent:{tc_bot_id}:session:{key}:user:{user_id}"
+    if engine_type == "teclaw":
+        if eval_id:
+            return f"agent:{tc_bot_id}:session:{key}:user:{user_id}"
+        return None
+    logger.warning(
+        "[plan_session_id] unsupported engine_type=%s, returning None",
+        engine_type,
+    )
+    return None

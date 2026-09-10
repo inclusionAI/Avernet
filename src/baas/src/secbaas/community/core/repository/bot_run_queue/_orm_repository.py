@@ -74,6 +74,19 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
         )
         return [r[0] for r in rows]
 
+    def _count_running(self, bot_id: str, env: str | None) -> int:
+        """统计某 bot 当前 RUNNING（在途）工作项数（供全局并发上限判断）。"""
+        return (
+            self._session.query(func.count(BotRunQueueModel.id))
+            .filter(
+                BotRunQueueModel.bot_id == bot_id,
+                BotRunQueueModel.status == "RUNNING",
+                BotRunQueueModel.env == env,
+            )
+            .scalar()
+            or 0
+        )
+
     @with_orm_session
     def claim_pending_by_bot(
         self,
@@ -81,6 +94,7 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
         worker_id: str,
         *,
         candidates: int = 5,
+        max_running: int | None = None,
     ) -> BotRunQueueRecord | None:
         """无锁乐观认领指定 bot 的一个 PENDING 工作项。
 
@@ -90,15 +104,22 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
         并发 Worker 中只有一个能把某行从 PENDING 翻成 RUNNING（affected=1），
         其余 affected=0 自动跳到下一候选。OB(InnoDB) 与 SQLite 行为一致。
 
+        ``max_running`` 为 None 时不限并发；否则认领前统计该 bot 的 RUNNING
+        （在途）数，达到上限即返回 None —— 由此实现跨进程的全局并发上限
+        （各 Worker 进程查同一张队列表，计数天然全局一致）。
+
         同 session 串行不在此处保证 —— 由上层 DistributedLockService 的
         session 维度锁负责（见 core/service 层）。
         """
+        env = get_current_env()
+        if max_running is not None and self._count_running(bot_id, env) >= max_running:
+            return None
         rows = (
             self._session.query(BotRunQueueModel.run_id)
             .filter(
                 BotRunQueueModel.bot_id == bot_id,
                 BotRunQueueModel.status == "PENDING",
-                BotRunQueueModel.env == get_current_env(),
+                BotRunQueueModel.env == env,
             )
             .order_by(BotRunQueueModel.gmt_create.asc())
             .limit(candidates)
@@ -298,6 +319,11 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
             )
             .count()
         )
+
+    @with_orm_session
+    def count_running_by_bot(self, bot_id: str) -> int:
+        """统计某 bot 当前 RUNNING（在途）工作项数（供全局并发上限观测）。"""
+        return self._count_running(bot_id, get_current_env())
 
     @with_orm_session
     def update_meta(self, run_id: str, updates: dict) -> bool:

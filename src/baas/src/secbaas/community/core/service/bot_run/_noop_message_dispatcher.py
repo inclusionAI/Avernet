@@ -46,6 +46,7 @@ class NoopMessageDispatcher:
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         logger.warning(
             "NoopMessageDispatcher.dispatch_send called: run_id=%s, "
@@ -65,6 +66,7 @@ class NoopMessageDispatcher:
         timeout: float,
         bot_id: str = "",
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         logger.warning(
             "NoopMessageDispatcher.dispatch_send_stream called: run_id=%s, "
@@ -90,6 +92,7 @@ class NoopMessageDispatcher:
         context: BotChatContext | None = None,
         bot_id: str = "",
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         logger.warning(
             "NoopMessageDispatcher.dispatch_inject called: run_id=%s, "

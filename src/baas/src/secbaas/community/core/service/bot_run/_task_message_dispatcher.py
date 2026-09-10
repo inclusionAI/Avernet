@@ -67,6 +67,7 @@ class TaskMessageDispatcher:
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         task = asyncio.create_task(
             self._execute_send_message(
@@ -81,6 +82,7 @@ class TaskMessageDispatcher:
                 bot_id=bot_id,
                 chat_metadata=chat_metadata,
                 attachments=attachments,
+                session_pending=session_pending,
             )
         )
         task.add_done_callback(
@@ -101,6 +103,7 @@ class TaskMessageDispatcher:
         timeout: float,
         bot_id: str = "",
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         """流式直传：直接 yield bot_service.send_message_stream 的 chunk。
 
@@ -125,6 +128,7 @@ class TaskMessageDispatcher:
                     context=context,
                     timeout=timeout,
                     attachments=attachments,
+                    session_pending=session_pending,
                 ):
                     if chunk.type == "final":
                         final_content = chunk.content
@@ -165,6 +169,7 @@ class TaskMessageDispatcher:
         context: BotChatContext | None = None,
         bot_id: str = "",
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         task = asyncio.create_task(
             self._execute_inject_message(
@@ -176,6 +181,7 @@ class TaskMessageDispatcher:
                 context=context,
                 bot_id=bot_id,
                 attachments=attachments,
+                session_pending=session_pending,
             )
         )
         task.add_done_callback(self._handle_task_exception)
@@ -205,10 +211,11 @@ class TaskMessageDispatcher:
         bot_id: str = "",
         chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         """执行消息发送
 
-        会话已创建，此方法只负责发送消息。
+        session_pending=True 时 session_id 为计划值，发送前由 bot_service 物化。
         """
         slot = await self._acquire_slot(bot_id)
         try:
@@ -227,6 +234,7 @@ class TaskMessageDispatcher:
                     timeout=max(timeout - 0.2, 0.1),
                     chat_metadata=chat_metadata,
                     attachments=attachments,
+                    session_pending=session_pending,
                 )
 
                 # 3. 更新成功结果
@@ -274,10 +282,11 @@ class TaskMessageDispatcher:
         context: BotChatContext | None = None,
         bot_id: str = "",
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         """执行消息注入
 
-        会话已创建，此方法只负责注入消息。
+        session_pending=True 时 session_id 为计划值，注入前由 bot_service 物化。
         """
         slot = await self._acquire_slot(bot_id)
         try:
@@ -293,6 +302,7 @@ class TaskMessageDispatcher:
                     binding_info=binding_info,
                     context=context,
                     attachments=attachments,
+                    session_pending=session_pending,
                 )
 
                 # 3. 更新成功结果（inject 无响应内容）
