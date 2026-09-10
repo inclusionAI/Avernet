@@ -50,6 +50,7 @@ from agentclaw.community.core.skills_pool.ports import (
 )
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
+    SkillLayoutPhase,
     runtime_uses_pool_paths,
 )
 from agentclaw.community.core.workspace.skill_layout import (
@@ -101,6 +102,14 @@ class SkillRuntimeDelivery:
         pool_owns_runtime = layout_state is not None and runtime_uses_pool_paths(
             layout_state
         )
+        if (
+            pool_owns_runtime
+            and layout_state.phase is not SkillLayoutPhase.POOL_ACTIVE
+        ):
+            return RuntimeProjectionResult.pending(
+                code="SKILLS_POOL_TRANSITION_OWNS_MAPPING",
+                reason="Skills Pool transition owns runtime mapping convergence",
+            )
         uses_legacy_mapping = (
             pool_owns_runtime
             or any(

@@ -31,6 +31,9 @@ user_config:
     aicoding_root: "~/.aicoding"
     hermes_root: "~/.hermes"
 
+  desktop_skill_recovery:
+    enabled: false
+
   # Yuque binding-verify endpoint — neutral stand-in; the suite mocks the HTTP call,
   # so only the config key's presence matters (the yuque verify endpoint reads it).
   yuque:

@@ -38,6 +38,7 @@ _EXPECTED_PARTICIPANTS: frozenset[str] = frozenset({
     "SkillSymlinkListener",      # Phase 2: self-subscribe to event bus
     "CronAutoSetupListener",     # Phase 2: self-subscribe to event bus
     "DesktopBotLifecycle",       # Phase 2: recover PENDING desktop bots
+    "DesktopSkillRecoverySweeper",  # G4: missed-wakeup Bot-level recovery
     "BaasPublishTaskLifecycle",  # Phase 2: register durable BaaS publish handlers
     "TeclawPublishTaskLifecycle",  # Phase 2: register durable Teclaw publish handler
     "SkillsPoolReconcileWakeupListener",  # Phase 1/2: durable reconciliation

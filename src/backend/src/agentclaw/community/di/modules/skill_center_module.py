@@ -11,9 +11,6 @@ from typing import Callable
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
-from agentclaw.community.api.bot_runtime_projector import (
-    BotRuntimeProjectorProtocol as ApiBotRuntimeProjectorProtocol,
-)
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
@@ -128,6 +125,9 @@ from agentclaw.community.core.skill_center.services.runtime_projections.registry
 )
 from agentclaw.community.core.skill_center.center_content_distribution import (
     CenterContentDistribution,
+)
+from agentclaw.community.core.skill_center.desktop_skill_recovery_protocol import (
+    DesktopSkillRecoveryServiceProtocol,
 )
 from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
 from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
@@ -406,24 +406,6 @@ class SkillCenterModule(
     @singleton
     @provider
     @inject
-    def core_runtime_projection_reconciler_protocol(
-        self, service: BotRuntimeProjector
-    ) -> CoreBotRuntimeProjectorProtocol:
-        """Expose the one reconciler singleton to Core consumers."""
-        return service
-
-    @singleton
-    @provider
-    @inject
-    def api_runtime_projection_reconciler_protocol(
-        self, service: BotRuntimeProjector
-    ) -> ApiBotRuntimeProjectorProtocol:
-        """Expose that same singleton through the public Service API."""
-        return service
-
-    @singleton
-    @provider
-    @inject
     def platform_default_mcp_policy(
         self, injector: Injector
     ) -> PlatformDefaultMcpPolicy:
@@ -512,6 +494,7 @@ class SkillCenterModule(
         audit_log_repo: BotCollabLogRepositoryProtocol,
         mcp_center: MCPCenterPlugin,
         mcp_auth: MCPAuthPlugin,
+        recovery: DesktopSkillRecoveryServiceProtocol,
         injector: Injector,
     ) -> SkillSetManagementServiceProtocol:
         """Bind the Set-scoped command service with the template ext seam.
@@ -531,6 +514,7 @@ class SkillCenterModule(
             mcp_center,
             mcp_auth,
             ext_info_provider=_build__ext_info_provider(injector),
+            recovery=recovery,
         )
 
     @singleton
@@ -935,6 +919,7 @@ class SkillCenterModule(
         device_sync_dispatcher: DeviceSyncDispatcher,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
         skills_pool_wakeup: SkillsPoolReconcileWakeupListener,
+        desktop_skill_recovery: DesktopSkillRecoveryServiceProtocol,
         runtime_reconciler: CoreBotRuntimeProjectorProtocol,
     ) -> SkillSymlinkListener:
         def desktop_layout_authority(bot: dict) -> str | None:
@@ -967,6 +952,12 @@ class SkillCenterModule(
             device_sync_dispatcher=device_sync_dispatcher,
             desktop_layout_authority=desktop_layout_authority,
             desktop_reconcile_wakeup=skills_pool_wakeup.handle,
+            desktop_skill_recovery_wakeup=(
+                lambda owner_id, bot_id: desktop_skill_recovery.ensure(
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                )
+            ),
             # A device-activated listener has no mutation to describe, so it
             # asks for the whole projection explicitly rather than relying on
             # a default that a future caller could inherit by accident.

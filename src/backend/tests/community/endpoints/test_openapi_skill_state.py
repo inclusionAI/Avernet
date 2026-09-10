@@ -1,7 +1,6 @@
 """Endpoint-framework coverage for Local Skill desired-state commands."""
 
 from __future__ import annotations
-
 import time
 
 import jwt
@@ -17,6 +16,9 @@ from agentclaw.community.core.repository.protocols.capability_desired_state impo
 )
 from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
     BotCapabilityStateReader,
+)
+from agentclaw.community.core.skill_center.desktop_skill_recovery_protocol import (
+    DesktopSkillRecoveryServiceProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import (
     BotCollabLogRepositoryProtocol,
@@ -189,6 +191,7 @@ def _seed_state(world, *, runtime_success: bool) -> None:
                 version_resolver=PassthroughSkillVersionResolver(),
             ),
             PlatformDefaultMcpPolicy(lambda _bot_id: None),
+            world.get(DesktopSkillRecoveryServiceProtocol),
         ),
         scope=None,
     )

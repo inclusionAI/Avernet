@@ -9,6 +9,7 @@ import pathlib
 import re
 from dataclasses import replace
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -937,6 +938,7 @@ async def test_collaborator_command_keeps_desired_state_and_uses_true_owner():
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     result = await service.activate(
@@ -991,6 +993,7 @@ async def test_deactivate_retires_mappings_removed_from_the_runtime_projection()
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     await service.deactivate(
@@ -1025,6 +1028,7 @@ def test_create_rejects_missing_bot_instead_of_creating_orphan_set():
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     # The control plane speaks one error vocabulary: an invisible Bot scope is
@@ -1053,6 +1057,7 @@ def test_default_create_rejects_missing_bot_instead_of_creating_orphan_set():
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     with pytest.raises(SkillSetControlPlaneNotFoundError):
@@ -1082,6 +1087,7 @@ def test_default_create_uses_owner_qualified_bot_lookup():
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     service.create_set(
@@ -1114,6 +1120,7 @@ def test_legacy_set_scope_recovers_persisted_bot_then_applies_actor_acl() -> Non
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     scope = service.resolve_legacy_set_scope(
@@ -1148,6 +1155,7 @@ def test_legacy_set_scope_rejects_conflicting_owner_hint() -> None:
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     with pytest.raises(SkillSetControlPlaneNotFoundError):
@@ -1171,6 +1179,7 @@ def test_addressed_create_persists_metadata_without_runtime_reconcile() -> None:
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     result = service.create_set(
@@ -1206,6 +1215,7 @@ def test_create_active_empty_set_does_not_require_runtime_readiness() -> None:
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     result = service.create_set(
@@ -1233,6 +1243,7 @@ def test_inactive_set_metadata_updates_do_not_require_runtime_readiness() -> Non
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     updated = service.update_set(
@@ -1280,6 +1291,7 @@ async def test_inactive_set_membership_does_not_require_runtime_readiness(
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     result = await getattr(service, method_name)(
@@ -1321,6 +1333,7 @@ async def test_active_set_membership_commits_when_runtime_is_not_ready() -> None
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     outcomes = await service.add_skills(
@@ -1347,6 +1360,7 @@ def test_default_read_rejects_missing_bot():
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     with pytest.raises(SkillSetControlPlaneNotFoundError):
@@ -1369,6 +1383,7 @@ async def test_legacy_sync_activates_additively_without_replacing_other_sets():
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     await service.legacy_activate(
@@ -1406,6 +1421,7 @@ async def test_legacy_default_sync_uses_owner_qualified_bot_lookup():
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     await service.legacy_activate(
@@ -1574,6 +1590,7 @@ def test_the_service_keeps_writing_its_own_audit_row_after_the_seam_took_over():
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     # The owner acting on their own bot: the case the seam does not audit.
@@ -1608,6 +1625,7 @@ def test_resources_forwards_resolved_bot_owner_to_owner_scoped_set_listing():
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     assert (
@@ -1639,6 +1657,7 @@ def test_list_sets_uses_aicoding_default_then_claude_code_fallback_for_coding_im
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     assert (
@@ -1668,6 +1687,7 @@ def test_update_set_uses_runtime_default_candidates_for_coding_image():
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     service.update_set(
@@ -1706,6 +1726,7 @@ def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_sc
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     result = service.list_resources(
@@ -1740,6 +1761,7 @@ def test_list_mcps_reads_global_default_projection_for_collaborator_owner_scope(
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     result = service.list_mcps(
@@ -1775,6 +1797,7 @@ def test_list_mcps_keeps_ordinary_membership_on_canonical_repository_path():
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     result = service.list_mcps(
@@ -1812,6 +1835,7 @@ def test_default_mcp_permissions_remain_scoped_to_persisted_membership():
         mcp_center=mcp_center,
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     result = service.list_mcp_permissions(
@@ -1847,6 +1871,7 @@ def test_default_mcp_permission_request_does_not_expand_platform_defaults():
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=mcp_auth,
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     result = service.request_mcp_permissions(
@@ -1891,6 +1916,7 @@ def test_resources_keeps_ordinary_mcp_membership_on_canonical_repository_path():
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     result = service.list_resources(
@@ -1926,6 +1952,7 @@ async def test_existing_coding_bot_can_activate_skill_set(bots) -> None:
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     result = await service.activate(
@@ -1957,6 +1984,7 @@ async def test_existing_claude_code_skill_set_deactivate_uses_full_projection():
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     await service.deactivate(
@@ -2005,6 +2033,7 @@ def test_existing_coding_bot_metadata_mutations_ignore_product_creation_matrix(
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     created = service.create_set(
@@ -2039,6 +2068,7 @@ def test_historical_bot_may_delete_an_inactive_skill_set_without_new_runtime_wri
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     service.delete_set(
@@ -2064,6 +2094,7 @@ def test_legacy_name_or_git_path_materializes_market_repo_skill_before_membershi
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     stable_id = service.resolve_legacy_skill_id(
@@ -2649,6 +2680,7 @@ async def test_failed_mcp_projection_keeps_the_declared_mcp_delta():
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     result = await service.add_mcp(
@@ -3730,6 +3762,7 @@ def _skill_service(repository, runtime):
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
 
@@ -4268,6 +4301,7 @@ def _default_wire_service(
         ext_info_provider=(
             ext_info_provider if ext_info_provider is not None else lambda _bot_id: None
         ),
+        recovery=MagicMock(),
     )
 
 
@@ -4454,6 +4488,7 @@ async def test_unexcluding_a_default_mcp_still_requires_marketplace_permission()
         mcp_center=_McpCenter(allowed=False),
         mcp_auth=_McpAuth(allowed=False),
         ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
     )
 
     with pytest.raises(McpPermissionDeniedError):
