@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { stringify as stringifyYaml } from 'yaml'
 import { api } from '@avernet/clawweb-shared/web/api/client'
 import type { DeployHistoryItem, VersionSnapshot } from '@avernet/clawweb-shared/web/types'
+import { useWorkflowAccess } from '../api/hooks'
 import WorkflowVersionDiff from './WorkflowVersionDiff'
 
 interface WorkflowHistoryPanelProps {
@@ -55,6 +56,8 @@ export default function WorkflowHistoryPanel({ workflowId, onActiveVersionChange
   const [diffFromDeploy, setDiffFromDeploy] = useState<number | null>(null)
   const [diffToDeploy, setDiffToDeploy] = useState<number | null>(null)
   const [activating, setActivating] = useState<number | null>(null)
+  const { data: access } = useWorkflowAccess(workflowId)
+  const canEdit = access?.canEdit === true
 
   const loadHistory = useCallback(async () => {
     setLoading(true)
@@ -185,7 +188,7 @@ export default function WorkflowHistoryPanel({ workflowId, onActiveVersionChange
                           {h.isActive ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">线上生效</span> : <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${actionClass(h.action)}`}>{h.action}</span>}
                         </div>
                         <div className="mt-1 truncate text-[11px] text-slate-500" title={actor}>{actor} · {formatTime(h.gmtCreate)}</div>
-                        {!h.isActive && h.action === 'deploy' && <button onClick={(e) => { e.stopPropagation(); void handleActivateVersion(h.deployNumber, h.version) }} disabled={activating === h.version} className="mt-2 text-[11px] font-medium text-blue-600 hover:text-blue-800 disabled:opacity-50" title={`将 v${h.version} 设置为线上生效版本`}>{activating === h.version ? '设置中…' : '设为线上生效版本'}</button>}
+                        {canEdit && !h.isActive && h.action === 'deploy' && <button onClick={(e) => { e.stopPropagation(); void handleActivateVersion(h.deployNumber, h.version) }} disabled={activating === h.version} className="mt-2 text-[11px] font-medium text-blue-600 hover:text-blue-800 disabled:opacity-50" title={`将 v${h.version} 设置为线上生效版本`}>{activating === h.version ? '设置中…' : '设为线上生效版本'}</button>}
                       </div>
                     </div>
                   </article>
