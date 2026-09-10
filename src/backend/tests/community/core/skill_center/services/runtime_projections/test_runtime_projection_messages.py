@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from agentclaw.community.core.devices.services.device_context import DeviceContext
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ResolvedSkillPlan,
     RuntimeProjectionResult,
@@ -57,6 +58,26 @@ class _MappingResultRuntime:
 class _MissingLayouts:
     def get(self, _scope):
         return None
+
+
+class _Contexts:
+    def resolve_for_bot(self, bot_id: str, user_id: str) -> DeviceContext:
+        return DeviceContext(
+            provider="local",
+            conn_info={},
+            binding_id=1,
+            bot_id=bot_id,
+            user_id=user_id,
+            bot_type="personal",
+        )
+
+
+class _UnusedCenterContent:
+    def lookup(self, _identity):
+        raise AssertionError("cloud projection must not resolve download content")
+
+    def prepare(self, _identity):
+        raise AssertionError("projection must not prepare download content")
 
 
 class _UnusedLegacyService:
@@ -117,6 +138,8 @@ async def test_mapping_message_exposes_complete_user_action(
     delivery = SkillRuntimeDelivery(
         pool_runtime=_MappingResultRuntime(code),
         pool_layouts=_MissingLayouts(),
+        device_contexts=_Contexts(),
+        center_content=_UnusedCenterContent(),
     )
 
     result = await delivery.deliver(plan=plan, service_factory=_UnusedFactory())

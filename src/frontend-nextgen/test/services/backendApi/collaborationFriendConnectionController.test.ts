@@ -48,7 +48,7 @@ describe('collaboration friend connection controller', () => {
         direction: 'sent',
         status: 'pending',
         actor_type: 'human',
-        actor_id: '327325',
+        actor_id: '900003',
         page: 1,
         page_size: 100,
       },
@@ -61,7 +61,7 @@ describe('collaboration friend connection controller', () => {
         direction: 'sent',
         status: 'pending',
         actor_type: 'human',
-        actor_id: '327325',
+        actor_id: '900003',
         page: 1,
         page_size: 100,
       },
@@ -76,11 +76,11 @@ describe('collaboration friend connection controller', () => {
       data: { items: [{ actor: { type: 'bot', id: 'bot-1' }, is_online: false }], total: 1 },
     });
 
-    await listFriendConnections({ actor_type: 'human', actor_id: '327325' });
+    await listFriendConnections({ actor_type: 'human', actor_id: '900003' });
 
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/friend-connections', {
       method: 'GET',
-      params: { actor_type: 'human', actor_id: '327325' },
+      params: { actor_type: 'human', actor_id: '900003' },
       injectUserId: false,
     });
   });
@@ -104,14 +104,14 @@ describe('collaboration friend connection controller', () => {
     backendRequest.mockResolvedValue({ code: 20000, data: {} });
 
     await deleteFriendConnection({
-      from_actor: { type: 'human', id: '327325' },
+      from_actor: { type: 'human', id: '900003' },
       to_actor: { type: 'bot', id: 'bot-1' },
     });
 
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/friend-connections', {
       method: 'DELETE',
       data: {
-        from_actor: { type: 'human', id: '327325' },
+        from_actor: { type: 'human', id: '900003' },
         to_actor: { type: 'bot', id: 'bot-1' },
       },
       injectUserId: false,

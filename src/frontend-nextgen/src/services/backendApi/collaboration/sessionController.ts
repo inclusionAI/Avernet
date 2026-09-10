@@ -1,3 +1,4 @@
+import type { MessageViewScope } from '@/domain/collaboration/types';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope } from '../types';
 
@@ -11,6 +12,8 @@ export interface SessionParticipantDto {
   role: 'driver' | 'consultant' | 'manager' | 'worker' | 'observer';
   mode: SessionParticipantMode;
   joined_at?: number;
+  /** 该成员的消息可见域（human 参与者专属；bot 不下发）。 */
+  message_view_scope?: MessageViewScope;
 }
 export interface SessionDetailData {
   session_id: string;
@@ -123,11 +126,11 @@ export async function listSessionMessages(
   );
 }
 
-// 更新会话成员模式。
+// 更新会话成员模式；body 可选携带 human 成员的消息可见域（mode 与 scope 至少传一个）。
 export async function updateSessionMemberMode(
   session_id: string,
   actor_id: string,
-  body: { mode: SessionParticipantMode },
+  body: { mode?: SessionParticipantMode; message_view_scope?: MessageViewScope },
 ) {
   return backendRequest<BackendApiEnvelope<SessionParticipantDto>>(
     `/openapi/v1/collaboration/sessions/${session_id}/participants/${actor_id}`,
@@ -179,6 +182,8 @@ export interface CreateSessionRequest {
   acting_bot_id?: string;
   creator_role?: Exclude<SessionParticipantDto['role'], 'driver'>;
   input?: { query?: string; [key: string]: unknown };
+  /** 创建者（human）在会话中的消息可见域；不传时由后端继承/默认规则决定。 */
+  message_view_scope?: MessageViewScope;
 }
 
 export async function createSession(group_id: string, body: CreateSessionRequest, signal?: AbortSignal) {

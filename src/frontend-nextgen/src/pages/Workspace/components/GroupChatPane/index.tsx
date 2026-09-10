@@ -30,6 +30,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     session,
     activeIdentity,
     updateMemberMode,
+    updateMemberScope,
     chat,
     supportState,
     connectionStatus,
@@ -64,6 +65,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     updateMemberMode ?? (() => Promise.resolve(false)),
     userIdentityId,
     userIdentityName,
+    updateMemberScope,
   );
 
   const messages = (chat.messages ?? []).filter(

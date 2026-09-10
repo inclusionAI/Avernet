@@ -199,9 +199,9 @@ export interface PublicGroupMember {
 }
 
 export interface HumanBotActionContext {
-  /** Collaboration actor path parameter, for example human_327325. */
+  /** Collaboration actor path parameter, for example human_900003. */
   actorId: string;
-  /** Normalized OpenAPI user_id, for example 327325. */
+  /** Normalized OpenAPI user_id, for example 900003. */
   userId: string;
 }
 

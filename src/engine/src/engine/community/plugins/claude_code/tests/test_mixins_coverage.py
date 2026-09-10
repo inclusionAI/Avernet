@@ -78,9 +78,10 @@ def _err(code: str, message: str) -> Any:
 
 
 def _impl(client: _FakeRelayClient | None = None) -> tuple[Any, _FakeRelayClient]:
+    from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
     from engine.community.plugins.claude_code.plugin_impl import ClaudeCodePluginImpl
     c = client or _FakeRelayClient()
-    return ClaudeCodePluginImpl(client=c), c
+    return ClaudeCodePluginImpl(center_content_adapter=MountedCenterContentAdapter(), client=c), c
 
 
 def _last_call(client: _FakeRelayClient) -> tuple[str, tuple, dict]:

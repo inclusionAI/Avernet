@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
+
 from engine.community.plugins.claude_code.plugin_impl import ClaudeCodePluginImpl
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 from engine.community.plugins.skills_pool.layout_quarantine import (
@@ -149,12 +151,12 @@ def test_cleanup_reports_remove_failure_without_deleting_other_generations(
     ("plugin", "module_path", "engine"),
     [
         (
-            OpenClawPluginImpl(),
+            OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), ),
             "engine.community.plugins.openclaw._skills.cleanup_quarantine",
             "openclaw",
         ),
         (
-            ClaudeCodePluginImpl(),
+            ClaudeCodePluginImpl(center_content_adapter=MountedCenterContentAdapter(), ),
             "engine.community.plugins.claude_code._skills.cleanup_quarantine",
             "claude_code",
         ),

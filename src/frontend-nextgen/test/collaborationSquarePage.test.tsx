@@ -22,7 +22,7 @@ const bot = {
   capabilities: ['需求分析'],
   relationshipStatus: 'none' as const,
 };
-const botWithUuid = { ...bot, id: '20260825_mbu0ey8f:447147' };
+const botWithUuid = { ...bot, id: '20260825_mbu0ey8f:900004' };
 const group = {
   id: 'g1',
   name: '产品共创群',
@@ -51,7 +51,7 @@ describe('collaboration square accessible UI', () => {
     const html = renderToStaticMarkup(
       <SquareBotCard
         bot={bot}
-        activeActor={{ type: 'human', id: '327325' }}
+        activeActor={{ type: 'human', id: '900003' }}
         busy={false}
         onShare={jest.fn()}
         onPrimaryAction={jest.fn()}
@@ -60,7 +60,7 @@ describe('collaboration square accessible UI', () => {
     const friendHtml = renderToStaticMarkup(
       <SquareBotCard
         bot={{ ...bot, relationshipStatus: 'friend' }}
-        activeActor={{ type: 'human', id: '327325' }}
+        activeActor={{ type: 'human', id: '900003' }}
         busy={false}
         onShare={jest.fn()}
         onPrimaryAction={jest.fn()}
@@ -84,7 +84,7 @@ describe('collaboration square accessible UI', () => {
     const uuidHtml = renderToStaticMarkup(
       <SquareBotCard
         bot={botWithUuid}
-        activeActor={{ type: 'human', id: '327325' }}
+        activeActor={{ type: 'human', id: '900003' }}
         busy={false}
         onShare={jest.fn()}
         onPrimaryAction={jest.fn()}
@@ -96,7 +96,7 @@ describe('collaboration square accessible UI', () => {
     const profileHtml = renderToStaticMarkup(
       <SquareBotCard
         bot={{ ...bot, shortProfile: '用于测试的专用 Bot' }}
-        activeActor={{ type: 'human', id: '327325' }}
+        activeActor={{ type: 'human', id: '900003' }}
         busy={false}
         onShare={jest.fn()}
         onPrimaryAction={jest.fn()}
@@ -110,7 +110,7 @@ describe('collaboration square accessible UI', () => {
     const html = renderToStaticMarkup(
       <SquareBotCard
         bot={{ ...bot, isOwnedByLoggedInUser: true, relationshipStatus: 'none' }}
-        activeActor={{ type: 'human', id: '327325' }}
+        activeActor={{ type: 'human', id: '900003' }}
         busy={false}
         onShare={jest.fn()}
         onPrimaryAction={jest.fn()}

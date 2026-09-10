@@ -24,6 +24,7 @@ from engine.community.core.engine.base import BaseEngine
 from engine.community.core.engine.capability import Capability, EngineCapabilities
 from engine.community.core.engine.registry import EngineRegistry
 from engine.community.manager import EngineManager
+from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 
 
@@ -48,7 +49,7 @@ class _SkillsTestEngine(BaseEngine):
         super().__init__(None)
         self._session = MagicMock()
         self._chat = MagicMock()
-        self._skills = OpenClawSkillsAdapter(OpenClawPluginImpl())
+        self._skills = OpenClawSkillsAdapter(OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), ))
 
 
 def install_skills_manager(router: APIRouter, base_dir: Path):

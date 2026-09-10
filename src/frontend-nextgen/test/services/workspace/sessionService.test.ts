@@ -1,9 +1,10 @@
 /** @jest-environment jsdom */
+import type { IdentityView } from '@/domain/collaboration';
 import * as sessionController from '@/services/backendApi/collaboration/sessionController';
 import { sessionService } from '@/services/workspace/sessionService';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { beforeEach, expect, it, jest } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 // 使用 auto-mock（不带 factory），避免在 hoisted factory 内引用 jest.fn() —— 与 @jest/globals 一起会触发 TDZ。
 // auto-mock 会把 createSession/updateSession/deleteSession/listGroupSessions 替成 jest.fn()，下方强取即可。
@@ -45,7 +46,7 @@ it('createNewSession 以 activeIdentityId 作为 acting_bot_id 传递当前角�
   useWorkspaceStore.getState().reset();
   useWorkspaceStore
     .getState()
-    .setIdentities([{ id: 'human_327325', kind: 'user', displayName: '当前用户', online: true }], 'human_327325');
+    .setIdentities([{ id: 'human_900003', kind: 'user', displayName: '当前用户', online: true }], 'human_900003');
   try {
     sc.createSession.mockResolvedValue({
       code: 20000,
@@ -65,11 +66,68 @@ it('createNewSession 以 activeIdentityId 作为 acting_bot_id 传递当前角�
     expect(sc.createSession).toHaveBeenCalledWith('g1', {
       title: '新会话',
       input: { query: '协作目标' },
-      acting_bot_id: 'human_327325',
+      acting_bot_id: 'human_900003',
     });
   } finally {
     useWorkspaceStore.getState().reset();
   }
+});
+
+describe('createNewSession acting_bot_id = 当前角色 id（契约锁定）', () => {
+  const identities: IdentityView[] = [
+    { id: 'human_1', kind: 'user', displayName: '章梧', online: true },
+    { id: 'bot_a:1', kind: 'bot', displayName: 'Alpha', online: true },
+  ];
+
+  const mockCreateSession = () => {
+    sc.createSession.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: {
+        session_id: 'g1:s1',
+        group_id: 'g1',
+        title: '',
+        status: 'running',
+        participants: [],
+        created_at: 1,
+        updated_at: 2,
+      },
+    });
+  };
+
+  beforeEach(() => {
+    // reset() 为 resetWorkspace() 的超集，且额外清空 activeIdentityId（属顶层状态），保证用例间隔离。
+    useWorkspaceStore.getState().reset();
+  });
+
+  afterEach(() => {
+    useWorkspaceStore.getState().reset();
+  });
+
+  it('bot 身份激活时，acting_bot_id 为当前 bot 角色 id', async () => {
+    useWorkspaceStore.getState().setIdentities(identities, 'bot_a:1');
+    mockCreateSession();
+    await sessionService.createNewSession('g1');
+    const body = sc.createSession.mock.calls[0][1];
+    expect(body.acting_bot_id).toBe('bot_a:1');
+  });
+
+  it('human 身份激活时，acting_bot_id 为当前 human 角色 id', async () => {
+    useWorkspaceStore.getState().setIdentities(identities, 'human_1');
+    mockCreateSession();
+    await sessionService.createNewSession('g1');
+    const body = sc.createSession.mock.calls[0][1];
+    expect(body.acting_bot_id).toBe('human_1');
+  });
+
+  it('无激活身份时，请求体不含 acting_bot_id 键', async () => {
+    useWorkspaceStore.getState().setIdentities(identities, null);
+    mockCreateSession();
+    await sessionService.createNewSession('g1');
+    const body = sc.createSession.mock.calls[0][1];
+    expect(Object.prototype.hasOwnProperty.call(body, 'acting_bot_id')).toBe(false);
+  });
 });
 
 it('setFavorite true calls collect API and returns collected status', async () => {
@@ -187,6 +245,39 @@ it('updateMemberMode maps failure to friendly error', async () => {
   const res = await sessionService.updateMemberMode('s1', 'human_1', 'present');
   expect(res.ok).toBe(false);
   expect(!res.ok && res.error.friendlyMessage).toContain('更新会话成员状态失败');
+});
+
+it('updateMemberScope PATCH 仅携带 message_view_scope（无 mode 键）并刷新会话详情', async () => {
+  sc.updateSessionMemberMode.mockResolvedValue({
+    code: 20000,
+    message: '',
+    request_id: 'r',
+    data: {
+      actor_id: 'human_1',
+      actor_kind: 'human',
+      name: '章梧',
+      role: 'consultant',
+      mode: 'present',
+      message_view_scope: 'participant',
+    },
+  });
+  sc.getSession.mockResolvedValue({
+    code: 20000,
+    message: '',
+    request_id: 'r',
+    data: memberDetail,
+  });
+  const res = await sessionService.updateMemberScope('s1', 'human_1', 'participant');
+  expect(sc.updateSessionMemberMode).toHaveBeenCalledWith('s1', 'human_1', { message_view_scope: 'participant' });
+  expect(sc.getSession).toHaveBeenCalledWith('s1');
+  expect(res.ok).toBe(true);
+});
+
+it('updateMemberScope maps failure to friendly error', async () => {
+  sc.updateSessionMemberMode.mockRejectedValue(new Error('boom'));
+  const res = await sessionService.updateMemberScope('s1', 'human_1', 'participant');
+  expect(res.ok).toBe(false);
+  expect(!res.ok && res.error.friendlyMessage).toContain('切换消息视角失败');
 });
 
 it('getSessionDetail returns SessionView with participants', async () => {

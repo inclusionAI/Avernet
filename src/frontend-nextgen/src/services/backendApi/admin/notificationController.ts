@@ -1,6 +1,6 @@
 // 消息通知协议层 Controller。铃铛未读数 / 最近 N 条 / 全部已读 / 单条已读。
 // 契约对齐 clawweb=Avernet（/openapi/v1/bots/work-order-notifications）：user_id query 必填。
-// 「通知列表」复用 work-orders 端点（与工单中心同源，靠 query 参数区分），仅复用路径常量与 DTO 类型。
+// 「通知列表」复用 work-orders 端点（与通知中心完整视图同源，靠 query 参数区分），仅复用路径常量与 DTO 类型。
 
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope, BackendApiPage } from '../types';

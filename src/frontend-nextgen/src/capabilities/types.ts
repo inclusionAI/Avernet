@@ -204,9 +204,9 @@ export interface ShellVisibility {
 /**
  * 管理后台页内分区（Tab）形态级可见性（见 `getAdminSections` capability）。
  * - `spaces`：【空间管理】Tab（空间卡片/创建/成员管理视图）
- * - `workOrders`：【工单中心】Tab
+ * - `workOrders`：【通知中心】Tab（标识符沿用 `workOrders`，与后端 work-orders 端点对齐）
  * Open Core（阿里云部署）默认 `{ spaces:false, workOrders:true }`——管理后台入口开放后，
- * 仅暴露工单中心，空间管理 Tab 收敛（空间数据链路不受影响）；internal overlay 覆盖为全 true。
+ * 仅暴露通知中心，空间管理 Tab 收敛（空间数据链路不受影响）；internal overlay 覆盖为全 true。
  * 消费方（`src/pages/Admin`）按本结果过滤 Tab 与默认/深链回退，MUST NOT 以 `if (isInternal)` 替代。
  */
 export interface AdminSections {
@@ -371,8 +371,8 @@ export interface AppCapabilities {
    */
   getShellVisibility: () => CapabilityResult<ShellVisibility>;
   /**
-   * 管理后台页内分区（Tab）可见性（空间管理 / 工单中心，见 `AdminSections`）。
-   * Open Core（阿里云部署）默认 `{ spaces:false, workOrders:true }`——管理后台入口开放后仅暴露工单中心，
+   * 管理后台页内分区（Tab）可见性（空间管理 / 通知中心，见 `AdminSections`）。
+   * Open Core（阿里云部署）默认 `{ spaces:false, workOrders:true }`——管理后台入口开放后仅暴露通知中心，
    * 空间管理 Tab 收敛；internal overlay 经 `src/extensions/internal.ts` 覆盖为 `{ spaces:true, workOrders:true }`，
    * 内部形态两 Tab 均在（与改造前一致）。同步签名，不发请求。
    * 消费方（`src/pages/Admin/index.tsx`）按本结果过滤 Tab、选择默认 Tab 并对隐藏/非法 `?tab=` 深链回落首项。

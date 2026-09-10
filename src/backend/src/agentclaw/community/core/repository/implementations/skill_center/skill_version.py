@@ -11,11 +11,15 @@ from agentclaw.community.core.models.skill import (
     SkillSetSkill,
 )
 from agentclaw.community.core.models.space_skill import SkillSpaceBinding, SkillVersion
+from agentclaw.community.core.repository.protocols.center_skill_access import (
+    CenterSkillAccessRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillVersionMaterializationRepositoryProtocol,
     SkillVersionRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.skill_center_types import (
+    CenterSkillAccessRecord,
     SkillVersionRecord,
 )
 from agentclaw.community.core.repository.implementations.skill_center.skill_version_lock import (
@@ -26,9 +30,11 @@ from agentclaw.community.core.skill_center.materialization_contract import (
     PublishedMaterializedSkillVersion,
 )
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
 
 class SkillVersionRepository(
+    CenterSkillAccessRepositoryProtocol,
     SkillVersionRepositoryProtocol,
     SkillVersionMaterializationRepositoryProtocol,
 ):
@@ -37,6 +43,59 @@ class SkillVersionRepository(
     @inject
     def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
+
+    def get_access(self, *, env: str, skill_id: int) -> CenterSkillAccessRecord | None:
+        """Return Center ownership facts without granting actor access.
+
+        Public imports are unbound ``is_public`` rows.  Space-managed Skills
+        are bound to exactly one Space and are never inferred public merely
+        because their Canonical content exists.
+        """
+        tenant = get_current_avernet_tenant()
+        with self._db.orm_session() as session:
+            result = (
+                session.query(Skill, SkillSpaceBinding)
+                .outerjoin(
+                    SkillSpaceBinding,
+                    (SkillSpaceBinding.skill_id == Skill.id)
+                    & (SkillSpaceBinding.env == env)
+                    & (SkillSpaceBinding.avernet_tenant == tenant),
+                )
+                .filter(
+                    Skill.id == skill_id,
+                    Skill.env == env,
+                    Skill.avernet_tenant == tenant,
+                )
+                .one_or_none()
+            )
+            if result is None:
+                return None
+            skill, binding = result
+            source = str(skill.git_path or "")
+            skill_uuid = str(skill.skill_uuid or "")
+            if (
+                not source.startswith("center://")
+                or not source[len("center://") :]
+                or not skill_uuid
+            ):
+                return None
+            if binding is None:
+                if not bool(skill.is_public):
+                    return None
+                visibility = "PUBLIC"
+                space_id = None
+            else:
+                if bool(skill.is_public):
+                    return None
+                visibility = "SPACE"
+                space_id = int(binding.space_id)
+            return CenterSkillAccessRecord(
+                skill_id=int(skill.id),
+                skill_uuid=skill_uuid,
+                visibility=visibility,
+                space_id=space_id,
+                offline_at=skill.offline_at,
+            )
 
     def list_latest_published(
         self, *, env: str, skill_ids: tuple[int, ...]

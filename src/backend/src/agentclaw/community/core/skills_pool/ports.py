@@ -5,6 +5,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
+from agentclaw.community.core.devices.services.device_context import DeviceContext
+from agentclaw.community.core.skill_center.center_content_distribution import (
+    CenterContentRequest,
+)
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     RuntimeLayoutProbeResult,
 )
@@ -25,6 +29,10 @@ class LegacyMappingApplyRequired(RuntimeError):
     """The verified target is an older Engine without the daily apply route."""
 
 
+class CenterContentContractUnsupported(RuntimeError):
+    """The target explicitly rejected the additive Center content contract."""
+
+
 @runtime_checkable
 class SkillsPoolRuntimeProtocol(Protocol):
     """当前运行环境上的探测、切换和 mapping 边界。"""
@@ -40,12 +48,12 @@ class SkillsPoolRuntimeProtocol(Protocol):
     async def apply_mappings(
         self,
         *,
-        bot_id: str,
-        user_id: str,
+        context: DeviceContext,
         engine: str,
         mappings: list[PoolSkillMapping],
         retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
+        center_content: CenterContentRequest | None = None,
     ) -> MappingApplyResult: ...
 
     async def cutover(
@@ -105,6 +113,7 @@ class SkillsPoolRuntimeProtocol(Protocol):
 
 __all__ = [
     "LegacyMappingApplyRequired",
+    "CenterContentContractUnsupported",
     "SkillsPoolRuntimeProtocol",
     "SkillsPoolSkillRepositoryProtocol",
 ]

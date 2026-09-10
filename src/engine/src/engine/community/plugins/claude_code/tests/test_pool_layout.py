@@ -23,6 +23,7 @@ from engine.community.plugins.claude_code.layout_pool import (
     publish_claude_code_pool_mappings,
     verify_claude_code_pool_mappings,
 )
+from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
 from engine.community.plugins.claude_code.plugin_impl import ClaudeCodePluginImpl
 
 PREPARATION_ID = "2a958f59-8cf4-4413-a267-7d56d3382f23"
@@ -367,7 +368,7 @@ async def test_claude_code_port_runs_pool_filesystem_operations_off_loop(
             kwargs,
         ),
     )
-    port = ClaudeCodePluginImpl()
+    port = ClaudeCodePluginImpl(center_content_adapter=MountedCenterContentAdapter(), )
     params = {
         "migration_generation": "generation-1",
         "preparation_id": PREPARATION_ID,
@@ -428,8 +429,8 @@ async def test_claude_code_port_forwards_best_effort_apply_mode(
         "mappings": [{"source": "/pool/a", "target": "/skills/a"}],
     }
 
-    await ClaudeCodePluginImpl().publish_pool_mappings(params)
-    await ClaudeCodePluginImpl().verify_pool_mappings(params)
+    await ClaudeCodePluginImpl(center_content_adapter=MountedCenterContentAdapter(), ).publish_pool_mappings(params)
+    await ClaudeCodePluginImpl(center_content_adapter=MountedCenterContentAdapter(), ).verify_pool_mappings(params)
 
     assert [kwargs["apply_mode"].value for kwargs in received] == [
         "BEST_EFFORT",

@@ -3,6 +3,7 @@ import pytest
 
 from engine.community.plugins.claude_code import _skills as claude_skills
 from engine.community.plugins.openclaw import _skills as openclaw_skills
+from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
 
 
 @pytest.mark.asyncio
@@ -32,6 +33,7 @@ async def test_concrete_ports_delegate_daily_apply_to_shared_logical_contract(
 
     monkeypatch.setattr(module, "apply_logical_mapping_request", apply)
     port = port_type()
+    port._center_content_adapter = MountedCenterContentAdapter()
 
     result = await port.apply_pool_mappings(
         {

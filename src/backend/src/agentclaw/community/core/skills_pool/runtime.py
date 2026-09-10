@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import json
 from collections.abc import Sequence
 from typing import Any
 
@@ -10,6 +11,10 @@ from injector import inject
 
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
+)
+from agentclaw.community.core.devices.services.device_context import DeviceContext
+from agentclaw.community.core.skill_center.center_content_distribution import (
+    CenterContentRequest,
 )
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     CurrentRuntimeLayoutProbeService,
@@ -33,10 +38,14 @@ from agentclaw.community.core.skills_pool.quarantine import (
     RuntimeQuarantineCleanupResult,
     RuntimeQuarantineCleanupStatus,
 )
-from agentclaw.community.core.skills_pool.ports import LegacyMappingApplyRequired
+from agentclaw.community.core.skills_pool.ports import (
+    CenterContentContractUnsupported,
+    LegacyMappingApplyRequired,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
+    DeviceAdapterHTTPStatusError,
     DeviceAdapterTransport,
 )
 
@@ -74,21 +83,22 @@ class SkillsPoolRuntime:
     async def apply_mappings(
         self,
         *,
-        bot_id: str,
-        user_id: str,
+        context: DeviceContext,
         engine: str,
         mappings: list[PoolSkillMapping],
         retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
+        center_content: CenterContentRequest | None = None,
     ) -> MappingApplyResult:
         """Apply one logical snapshot, falling back only after bounded proof."""
 
-        context = self._resolver.resolve_for_bot(bot_id, user_id)
         body = {
             "mappings": [mapping.to_dict() for mapping in mappings],
             "retired_mappings": [mapping.to_dict() for mapping in retired_mappings],
             "source_layout": source_layout.value,
         }
+        if center_content is not None:
+            body["center_content"] = center_content.to_wire()
         try:
             response = await self._transport.invoke(
                 context.conn_info,
@@ -112,16 +122,42 @@ class SkillsPoolRuntime:
             if health.get("status") == "ok" and health.get("engine") == engine:
                 raise LegacyMappingApplyRequired() from error
             return self._unavailable_apply_result("runtime_mapping_apply_health_mismatch")
+        except DeviceAdapterHTTPStatusError as error:
+            # Validation responses can echo request fields, including a short-lived
+            # signed URL. Preserve only structured non-secret diagnostics.
+            if center_content is not None and self._rejects_center_content(error):
+                raise CenterContentContractUnsupported() from error
+            return self._unavailable_apply_result(
+                "runtime_mapping_apply_http_rejected",
+                error_type=f"HTTP_{error.status_code}",
+            )
         except Exception as error:
             logger.exception(
                 "[skills_pool.runtime] logical mapping apply unavailable bot_id=%s",
-                bot_id,
+                context.bot_id,
             )
             return self._unavailable_apply_result(
                 "runtime_mapping_apply_outcome_unknown",
                 error_type=type(error).__name__,
             )
         return self._mapping_apply_result(response)
+
+    @staticmethod
+    def _rejects_center_content(error: DeviceAdapterHTTPStatusError) -> bool:
+        if error.status_code != 422:
+            return False
+        try:
+            payload = json.loads(error.response_text)
+            details = payload.get("detail")
+        except (AttributeError, json.JSONDecodeError, TypeError):
+            return False
+        return isinstance(details, list) and any(
+            isinstance(item, dict)
+            and item.get("type") == "extra_forbidden"
+            and isinstance(item.get("loc"), list)
+            and item["loc"][-1:] == ["center_content"]
+            for item in details
+        )
 
     @staticmethod
     def _unavailable_apply_result(
@@ -151,7 +187,12 @@ class SkillsPoolRuntime:
             return self._unavailable_apply_result("contradictory_runtime_response")
         raw_items = data.get("items")
         raw_issues = data.get("issues")
-        if not isinstance(raw_items, list) or not isinstance(raw_issues, list):
+        raw_evidence = data.get("evidence", {})
+        if (
+            not isinstance(raw_items, list)
+            or not isinstance(raw_issues, list)
+            or not isinstance(raw_evidence, dict)
+        ):
             return self._unavailable_apply_result("invalid_runtime_response")
         items = tuple(
             item
@@ -171,7 +212,7 @@ class SkillsPoolRuntime:
             status=status,
             items=items,
             issues=issues,
-            evidence=dict(data.get("evidence") or {}),
+            evidence=dict(raw_evidence),
         )
 
     @staticmethod

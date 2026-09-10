@@ -7,6 +7,9 @@ from injector import Binder, Module, inject, provider, singleton
 from agentclaw.community.core.repository.implementations.skill_center.skill_version import (
     SkillVersionRepository,
 )
+from agentclaw.community.core.repository.protocols.center_skill_access import (
+    CenterSkillAccessRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillVersionMaterializationRepositoryProtocol,
     SkillVersionRepositoryProtocol,
@@ -56,6 +59,16 @@ class SkillVersionModule(Module):
             to=SkillVersionRepository,
             scope=singleton,
         )
+
+    @singleton
+    @provider
+    @inject
+    def center_skill_access_repository(
+        self,
+        versions: SkillVersionRepositoryProtocol,
+    ) -> CenterSkillAccessRepositoryProtocol:
+        """Expose access facts from the exact same Version repository instance."""
+        return versions
 
     @singleton
     @provider

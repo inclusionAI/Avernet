@@ -1,6 +1,6 @@
 import { Button, Empty, Input, Skeleton } from '@/components/ui';
 import type { WorkspaceView } from '@/domain/collaboration/availableViews';
-import type { GroupView, SessionView } from '@/domain/collaboration/types';
+import type { GroupView, MessageViewScope, SessionView } from '@/domain/collaboration/types';
 import type { DomainResult } from '@/services/workspace/identityService';
 import { Search } from 'lucide-react';
 import { ListErrorState } from '../ListErrorState';
@@ -16,6 +16,8 @@ export type SessionTab = 'all' | 'favorite';
 export interface GroupSidebarProps {
   view: 'chat' | 'group';
   onViewChange: (v: 'chat' | 'group') => void;
+  /** 当前登录身份类型：human 点「+」弹视角菜单，bot 直接创建会话。 */
+  viewerKind: 'user' | 'bot';
   /** 当前身份可见视图；Bot 仅协作群时不再渲染「会话」切换项。 */
   availableViews?: WorkspaceView[];
   groups: GroupView[];
@@ -49,7 +51,7 @@ export interface GroupSidebarProps {
   selectedGroupId: string | null;
   selectedSessionId: string | null;
   onSelectSession: (groupId: string, sessionId: string) => void;
-  onCreateSession: (groupId: string) => void;
+  onCreateSession: (groupId: string, scope?: MessageViewScope) => void;
   onToggleFavorite: (sessionId: string) => void;
   onClearSessionFilter: () => void;
   onCreateGroup: () => void;
@@ -68,6 +70,7 @@ export function GroupSidebarList(props: GroupSidebarProps) {
   const {
     view,
     onViewChange,
+    viewerKind,
     availableViews: availableViewsProp,
     groups,
     isLoading,
@@ -176,45 +179,41 @@ export function GroupSidebarList(props: GroupSidebarProps) {
             />
           )
         ) : (
-          <>
-            <div className="flex min-h-9 items-center border-b border-border/70 bg-muted/10 px-[18px] py-2 text-xs font-medium text-foreground">
-              协作群 ({groups.length})
-            </div>
-            <div className="divide-y divide-border/70 overflow-hidden border-b border-border bg-muted/10">
-              {groups.map((group) => {
-                const sessions = sessionsByGroupId[group.groupId];
-                return (
-                  <GroupItem
-                    key={group.groupId}
-                    group={group}
-                    expanded={!!expandedGroupIds[group.groupId]}
-                    sessions={sessions}
-                    sessionTab={sessionTabsByGroup[group.groupId] ?? 'all'}
-                    onSessionTabChange={(t) => onSessionTabForGroup(group.groupId, t)}
-                    favoriteSessionIds={favoriteSessionIds}
-                    selectedGroupId={selectedGroupId}
-                    selectedSessionId={selectedSessionId}
-                    onSelectGroup={onSelectGroup}
-                    onToggleGroupExpanded={onToggleGroupExpanded}
-                    onSelectSession={onSelectSession}
-                    onToggleFavorite={onToggleFavorite}
-                    onCreateSession={onCreateSession}
-                    onManageGroup={onManageGroup}
-                    onManageSession={onManageSession}
-                    onShareGroup={onShareGroup}
-                    onDissolveGroup={onDissolveGroup}
-                    totalSessionCount={totalSessionsByGroupId[group.groupId]}
-                    hasMoreSessions={hasMoreSessionsByGroupId[group.groupId] ?? false}
-                    isLoadingMoreSessions={isLoadingMoreSessionsByGroupId[group.groupId] ?? false}
-                    error={errorByGroupId[group.groupId]}
-                    loadMoreError={loadMoreErrorByGroupId[group.groupId]}
-                    onRetrySessions={() => onReloadSession?.(group.groupId) ?? Promise.resolve()}
-                    onLoadMoreSessions={() => onLoadMoreSessions(group.groupId)}
-                  />
-                );
-              })}
-            </div>
-          </>
+          <div className="divide-y divide-border/70 overflow-hidden border-b border-border bg-muted/10">
+            {groups.map((group) => {
+              const sessions = sessionsByGroupId[group.groupId];
+              return (
+                <GroupItem
+                  key={group.groupId}
+                  group={group}
+                  viewerKind={viewerKind}
+                  expanded={!!expandedGroupIds[group.groupId]}
+                  sessions={sessions}
+                  sessionTab={sessionTabsByGroup[group.groupId] ?? 'all'}
+                  onSessionTabChange={(t) => onSessionTabForGroup(group.groupId, t)}
+                  favoriteSessionIds={favoriteSessionIds}
+                  selectedGroupId={selectedGroupId}
+                  selectedSessionId={selectedSessionId}
+                  onSelectGroup={onSelectGroup}
+                  onToggleGroupExpanded={onToggleGroupExpanded}
+                  onSelectSession={onSelectSession}
+                  onToggleFavorite={onToggleFavorite}
+                  onCreateSession={onCreateSession}
+                  onManageGroup={onManageGroup}
+                  onManageSession={onManageSession}
+                  onShareGroup={onShareGroup}
+                  onDissolveGroup={onDissolveGroup}
+                  totalSessionCount={totalSessionsByGroupId[group.groupId]}
+                  hasMoreSessions={hasMoreSessionsByGroupId[group.groupId] ?? false}
+                  isLoadingMoreSessions={isLoadingMoreSessionsByGroupId[group.groupId] ?? false}
+                  error={errorByGroupId[group.groupId]}
+                  loadMoreError={loadMoreErrorByGroupId[group.groupId]}
+                  onRetrySessions={() => onReloadSession?.(group.groupId) ?? Promise.resolve()}
+                  onLoadMoreSessions={() => onLoadMoreSessions(group.groupId)}
+                />
+              );
+            })}
+          </div>
         )}
       </div>
     </div>

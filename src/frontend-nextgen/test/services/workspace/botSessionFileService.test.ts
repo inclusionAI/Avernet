@@ -23,12 +23,12 @@ function file(name: string, size = 100): File {
 describe('botSessionFileService.resolveContentUrl', () => {
   it('使用 gateway 内容地址', () => {
     mocked.buildBotSessionFileContentUrl.mockReturnValue('/openapi/v1/bots/bot-1/sessions/s1/files/sr_1/content?x=1');
-    const url = botSessionFileService.resolveContentUrl('bot-1', 's1', 'sr_1', 'human_327325', '327325', 'attachment');
+    const url = botSessionFileService.resolveContentUrl('bot-1', 's1', 'sr_1', 'human_900003', '900003', 'attachment');
     expect(mocked.buildBotSessionFileContentUrl).toHaveBeenCalledWith(
       'bot-1',
       's1',
       'sr_1',
-      { user_id: '327325', owner_id: '327325' },
+      { user_id: '900003', owner_id: '900003' },
       'attachment',
     );
     expect(url).toBe('/openapi/v1/bots/bot-1/sessions/s1/files/sr_1/content?x=1');
@@ -240,8 +240,8 @@ describe('botSessionFileService 列表/删除/下载', () => {
   });
   it('loadReady 将 human_ 前缀的 user_id 归一化为工号', async () => {
     mocked.listReady.mockResolvedValue({ files: [] });
-    await botSessionFileService.loadReady('bot-1', 'sess-1', 'human_327325');
-    expect(mocked.listReady).toHaveBeenCalledWith('bot-1', 'sess-1', { user_id: '327325' });
+    await botSessionFileService.loadReady('bot-1', 'sess-1', 'human_900003');
+    expect(mocked.listReady).toHaveBeenCalledWith('bot-1', 'sess-1', { user_id: '900003' });
   });
   it('remove 成功', async () => {
     mocked.deleteFile.mockResolvedValue({ deleted: true });

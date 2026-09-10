@@ -16,6 +16,7 @@ from unittest.mock import patch
 import pytest
 
 from engine.community.plugins.openclaw._file import _convert_path
+from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 
 
@@ -132,7 +133,7 @@ def test_singlebox_env_root_preserves_kernel_path_segments(tmp_path):
 
 @pytest.fixture
 def impl():
-    return OpenClawPluginImpl()
+    return OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), )
 
 
 # ── upload ────────────────────────────────────────────────────────────────────

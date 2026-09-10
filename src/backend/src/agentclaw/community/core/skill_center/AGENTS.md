@@ -91,7 +91,7 @@ Bot 定位必须携带 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 - `center://<skill_code>`：SC 外部定位。`skill_code` 可为普通字符串，不要求 UUID，也不等于运行时名称。
 - `ac_skill.skill_uuid`：TeamClaw 内部稳定身份。Space 自建 Skill 发布时使用该 UUID 作为 SC code；Public 导入由 `public_center_identity.py` 基于 tenant/env/code 确定性派生内部 UUID。复用资产按来源身份，不能按名称复用 Local/Repo。
 - `ac_skill.name`：运行时名称，允许与 SC code 不同。Canonical 内容按内部 UUID + 精确 `sc_version_number` 寻址，不使用 name、latest/current 目录。
-- `SkillAssetKind.SPACE` 是当前 Center 消费分类；Space 管理权限仍需真实 Space Binding/Grant，不能从该分类推出“属于团队空间”。
+- `SkillAssetKind.CENTER` 是 Center 消费分类；Space 管理权限仍需真实 Space Binding/Grant，不能从该分类推出“属于团队空间”。
 
 ## 5. Space Draft、授权与发布
 
@@ -219,11 +219,12 @@ Engine 拥有物理布局。Backend 通过 `community/core/skills_pool/` 的版�
 
 Legacy `/api/skills`、`/api/skillsets` 位于 `community/adapters/http/skill_center/`，继续复用 Query、DirectActivation、SkillSetManagement。Legacy scope/reference resolution 与 Factory 负责旧参数、Default/exclusion、设备路径适配；保留其 wire compatibility，不恢复第二条 Installation 写路径。
 
-## 10. 当前缺口：不得写成已交付能力
+## 10. 当前边界：不得扩大成未交付能力
 
-- `SkillQueryService._kind_for` 将 Center 分类为 SPACE，但 `_adapters` 中 SPACE 仍注册 `_UnavailableAssetAdapter`。这不影响 Reader 的精确 Version 解析，却意味着通用 Bot 内容解析不能仅凭路由存在就认定支持 Center；Space Version 文件读取是另一条已实现链路。
-- `get_readme_by_skill` 当前支持 Repo 和 Local，Center 返回 not-found；Local 分支仍调用 `get_unique_by_id(bot_id)`，与 owner+bot 的目标约束不一致，shared default 需专项修复。文档更新不改变该行为。
-- Legacy Factory/fallback、配置迁移 gate、TaskQueue 提交窗口仍存在。以上规则描述如何维护当前实现，不表示历史数据全量迁移、运行时全引擎验收或发布消费端都已经验证。
+- `SkillQueryService` 已支持 Bot-facing Center 详情、内容、参数前置解析与 Direct 操作，并支持无 Bot 的共享 README。Center 内容只读最新 PUBLISHED 数据库 Version 对应的 Canonical 精确版本；读取不调用 Engine、不下载，也不证明 Runtime 已应用该版本。
+- Center 的 PUBLIC/Space/offline 事实由 `CenterSkillAccessRepositoryProtocol` 提供；Bot owner/member 与 Space member 分别校验。返回值可投影为当前 Bot 的只读视图，但不得修改共享 `ac_skill.user_id/bolt_id`。PRIVATE 且没有唯一 Space binding、PUBLIC 同时绑定 Space 等矛盾状态必须 fail closed。
+- 参数仍保存在 Bot Engine 的历史 name-keyed `skill_parameters.json`；它不是新数据库、原生注入或 observed-runtime 接口。只有明确缺失才能初始化为空，读取拒绝、损坏或异常必须零写；替换一个 Skill 时保留其它 Skill 与根元信息。
+- Local shared README 从 Skill 行的 `owner_id + bot_id` 精确定位，不使用全局唯一 bot_id 假设。Legacy Factory/fallback、配置迁移 gate、TaskQueue 提交窗口仍存在；上述实现不表示历史数据全量迁移、运行时全引擎验收或发布消费端都已经验证。
 
 ## 11. 修改后的验证与文档维护
 

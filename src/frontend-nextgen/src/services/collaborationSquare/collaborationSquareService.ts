@@ -1,3 +1,4 @@
+import type { MessageViewScope } from '@/domain/collaboration/types';
 import type {
   BotCatalogViewer,
   FriendRequestActor,
@@ -125,7 +126,11 @@ export class CollaborationSquareService {
     );
   }
 
-  createGroupSession(groupId: string, context?: HumanBotActionContext, options?: { title?: string; query?: string }) {
+  createGroupSession(
+    groupId: string,
+    context?: HumanBotActionContext,
+    options?: { title?: string; query?: string; messageViewScope?: MessageViewScope },
+  ) {
     return this.runTargetAction(`session:${groupId}`, () => this.gateway.createGroupSession(groupId, context, options));
   }
 }
@@ -133,6 +138,6 @@ export class CollaborationSquareService {
 export const collaborationSquareService = new CollaborationSquareService(new MockCollaborationSquareAdapter());
 export const collaborationSquareBotService = new CollaborationSquareService(new CollaborationSquareApiAdapter());
 export const collaborationSquareGroupService = new CollaborationSquareService(new CollaborationSquareApiAdapter());
-// 任务广场：接入真实 BBS 任务列表端点 GET /api/v1/collaboration/tasks/bbs/list，与 bot/group 一致走 ApiAdapter。
+// 任务广场：接入真实 BBS 任务列表端点 GET /openapi/v1/collaboration/tasks/bbs/list，与 bot/group 一致走 ApiAdapter。
 // Mock 的 task 方法/fixture 保留（不再被 wired service 使用，留作 dev/测试兜底，不删）。
 export const collaborationSquareTaskService = new CollaborationSquareService(new CollaborationSquareApiAdapter());

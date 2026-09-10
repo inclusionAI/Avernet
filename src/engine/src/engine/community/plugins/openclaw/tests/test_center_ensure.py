@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
+
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 
 
@@ -13,7 +15,7 @@ def _plugin_for_root(
     *,
     mounted: bool,
 ) -> OpenClawPluginImpl:
-    plugin = OpenClawPluginImpl()
+    plugin = OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), )
     monkeypatch.setattr(plugin, "_skills_center_root", lambda: root)
     monkeypatch.setattr(
         plugin,

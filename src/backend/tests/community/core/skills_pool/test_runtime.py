@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import json
 from types import SimpleNamespace
 
 import pytest
 
+from agentclaw.community.core.devices.services.device_context import DeviceContext
 from agentclaw.community.core.skills_pool.models import (
     MappingProjectionStatus,
     PoolCutoverStatus,
@@ -16,6 +18,14 @@ from agentclaw.community.core.skills_pool.quarantine import (
     RuntimeQuarantineCleanupStatus,
 )
 from agentclaw.community.core.skills_pool.ports import LegacyMappingApplyRequired
+from agentclaw.community.core.skills_pool.ports import CenterContentContractUnsupported
+from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterVersionIdentity,
+)
+from agentclaw.community.core.skill_center.center_content_distribution import (
+    CenterContentPendingPackage,
+    CenterContentRequest,
+)
 from agentclaw.community.core.skills_pool.runtime import OpenClawSkillsPoolRuntime
 from agentclaw.community.plugins.local.device_adapter_transport import (
     InMemoryDeviceAdapterTransport,
@@ -83,6 +93,17 @@ class FakeProbe:
         return kwargs
 
 
+def _context(bot_id: str = "bot-1", user_id: str = "owner-1") -> DeviceContext:
+    return DeviceContext(
+        provider="local",
+        conn_info={"binding": 1, "provider": "local"},
+        binding_id=1,
+        bot_id=bot_id,
+        user_id=user_id,
+        bot_type="desktop",
+    )
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("replacement", [False, True], ids=["retire", "replace"])
 async def test_local_transport_apply_matches_runtime_consumer_contract(replacement: bool) -> None:
@@ -94,7 +115,7 @@ async def test_local_transport_apply_matches_runtime_consumer_contract(replaceme
     retired = PoolSkillMapping("repo", "old-package", "writer" if replacement else "old-writer")
 
     result = await runtime.apply_mappings(
-        bot_id="bot", user_id="owner", engine="openclaw",
+        context=_context("bot", "owner"), engine="openclaw",
         mappings=[desired, desired], retired_mappings=[retired, retired],
     )
 
@@ -221,8 +242,7 @@ async def test_daily_apply_uses_one_transport_call_and_parses_logical_item() -> 
     mapping = PoolSkillMapping("local", "package", "display-name")
 
     result = await runtime.apply_mappings(
-        bot_id="bot-1",
-        user_id="owner-1",
+        context=_context(),
         engine="openclaw",
         mappings=[mapping],
     )
@@ -249,8 +269,7 @@ async def test_standard_route_miss_requires_matching_health_before_fallback() ->
 
     with pytest.raises(LegacyMappingApplyRequired):
         await runtime.apply_mappings(
-            bot_id="bot-1",
-            user_id="owner-1",
+            context=_context(),
             engine="openclaw",
             mappings=[],
         )
@@ -281,8 +300,7 @@ async def test_unknown_apply_failure_never_switches_write_protocol(
     )
 
     result = await runtime.apply_mappings(
-        bot_id="bot-1",
-        user_id="owner-1",
+        context=_context(),
         engine="openclaw",
         mappings=[],
     )
@@ -306,8 +324,7 @@ async def test_http_failure_never_switches_write_protocol(status_code: int) -> N
     )
 
     result = await runtime.apply_mappings(
-        bot_id="bot-1",
-        user_id="owner-1",
+        context=_context(),
         engine="openclaw",
         mappings=[],
     )
@@ -316,6 +333,40 @@ async def test_http_failure_never_switches_write_protocol(status_code: int) -> N
     assert [call["path"] for call in transport.calls] == [
         "/api/skills/mappings/apply"
     ]
+
+
+@pytest.mark.asyncio
+async def test_structured_old_dto_rejection_reports_center_contract_unsupported() -> None:
+    rejection = {
+        "detail": [
+            {
+                "type": "extra_forbidden",
+                "loc": ["body", "center_content"],
+                "msg": "Extra inputs are not permitted",
+                "input": {"signed_url": "https://must-not-be-logged.example/secret"},
+            }
+        ]
+    }
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=ApplyTransport(
+            DeviceAdapterHTTPStatusError(422, json.dumps(rejection))
+        ),
+        probe_service=FakeProbe(),
+    )
+    identity = CanonicalCenterVersionIdentity(
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "17"
+    )
+
+    with pytest.raises(CenterContentContractUnsupported):
+        await runtime.apply_mappings(
+            context=_context(),
+            engine="openclaw",
+            mappings=[],
+            center_content=CenterContentRequest(
+                (CenterContentPendingPackage(identity),)
+            ),
+        )
 
 
 @pytest.mark.asyncio
@@ -333,8 +384,7 @@ async def test_health_mismatch_does_not_enable_legacy_write_fallback() -> None:
     )
 
     result = await runtime.apply_mappings(
-        bot_id="bot-1",
-        user_id="owner-1",
+        context=_context(),
         engine="openclaw",
         mappings=[],
     )
@@ -404,8 +454,7 @@ async def test_contradictory_apply_envelope_cannot_report_converged() -> None:
     )
 
     result = await runtime.apply_mappings(
-        bot_id="bot-1",
-        user_id="owner-1",
+        context=_context(),
         engine="openclaw",
         mappings=[],
     )

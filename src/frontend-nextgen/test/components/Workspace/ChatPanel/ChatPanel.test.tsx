@@ -236,13 +236,13 @@ describe('ChatPanel interactive', () => {
         role: 'user',
         content: '你好',
         status: 'history',
-        extra: { senderId: 'human_447147' },
+        extra: { senderId: 'human_900004' },
       } as never,
       botModeTarget as any,
       { id: 'bot-1', kind: 'bot', displayName: '当前 Bot', online: true },
       undefined,
-      '447147',
-      '风太',
+      '900004',
+      '示例用户',
     );
     const other = resolveSingleSender(
       {
@@ -255,11 +255,11 @@ describe('ChatPanel interactive', () => {
       botModeTarget as any,
       { id: 'bot-1', kind: 'bot', displayName: '当前 Bot', online: true },
       undefined,
-      '447147',
-      '风太',
+      '900004',
+      '示例用户',
     );
 
-    expect(current.name).toBe('风太');
+    expect(current.name).toBe('示例用户');
     expect(other.name).toBe('其他成员');
   });
 

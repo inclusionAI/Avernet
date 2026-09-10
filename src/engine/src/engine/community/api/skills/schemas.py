@@ -197,6 +197,51 @@ class SkillMappingApplyRequest(BaseModel):
         default_factory=list
     )
     source_layout: Literal["pool", "legacy"]
+    center_content: "CenterContentRequestSchema | None" = None
+
+
+class CenterContentReadyPackageSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    skill_uuid: str
+    sc_version_number: str
+    state: Literal["READY"]
+    package_sha256: str
+    package_size: int
+    signed_url: str
+    expires_at: str
+
+
+class CenterContentPendingPackageSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    skill_uuid: str
+    sc_version_number: str
+    state: Literal["PENDING"]
+
+
+class CenterContentUnavailablePackageSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    skill_uuid: str
+    sc_version_number: str
+    state: Literal["UNAVAILABLE"]
+    code: str
+    retryable: bool
+
+
+class CenterContentRequestSchema(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    contract_version: Literal[1]
+    packages: list[
+        CenterContentReadyPackageSchema
+        | CenterContentPendingPackageSchema
+        | CenterContentUnavailablePackageSchema
+    ]
+
+
+SkillMappingApplyRequest.model_rebuild()
 
 
 __all__ = [
@@ -206,6 +251,7 @@ __all__ = [
     "CenterEnsureItemSchema",
     "CenterEnsureRequestSchema",
     "CenterEnsureResponseSchema",
+    "CenterContentRequestSchema",
     "CleanSymlinkRequest",
     "PoolCenterMappingIntent",
     "PoolLayoutActivateApiResponse",

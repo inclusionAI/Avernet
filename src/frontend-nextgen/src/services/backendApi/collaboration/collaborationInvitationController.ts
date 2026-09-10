@@ -1,3 +1,4 @@
+import type { MessageViewScope } from '@/domain/collaboration/types';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope } from '../types';
 
@@ -35,10 +36,10 @@ export async function createSessionInvitation(session_id: string, body: CreateIn
   );
 }
 
-// 接受邀请。
-export async function acceptInvitation(token: string) {
+// 接受邀请。body 可选携带 human 加入后的消息可见域。
+export async function acceptInvitation(token: string, body?: { message_view_scope?: MessageViewScope }) {
   return backendRequest<BackendApiEnvelope<AcceptInvitationData>>(
     `/openapi/v1/collaboration/invitations/${token}/accept`,
-    { method: 'POST', data: {}, injectUserId: false },
+    { method: 'POST', data: body ?? {}, injectUserId: false },
   );
 }

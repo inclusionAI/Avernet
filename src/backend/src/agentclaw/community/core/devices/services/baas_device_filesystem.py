@@ -90,7 +90,11 @@ class BaasDeviceFileSystem(DeviceFileSystem):
         self._bot_uuid: str = conn_info.get("paas_device_id", "")
 
     async def read_file(
-        self, file_path: str, *, enforce_download_limit: bool = False
+        self,
+        file_path: str,
+        *,
+        enforce_download_limit: bool = False,
+        preserve_read_errors: bool = False,
     ) -> bytes | None:
         # ``enforce_download_limit`` is for whole-file-into-memory impls (Arca); the
         # transport here streams, so it is ignored.

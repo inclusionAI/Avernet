@@ -151,8 +151,8 @@ describe('SquarePageShell three-way dispatch', () => {
 
   test('Bot 工作身份隐藏公开协作群入口，保留公开 Bot 与任务广场', () => {
     useWorkspaceStore.setState({
-      activeIdentityId: 'bot-1:447147',
-      identities: [{ id: 'bot-1:447147', kind: 'bot', displayName: 'Bot A', online: true }],
+      activeIdentityId: 'bot-1:900004',
+      identities: [{ id: 'bot-1:900004', kind: 'bot', displayName: 'Bot A', online: true }],
     });
 
     render(<SquarePageShell resource="bot" />);

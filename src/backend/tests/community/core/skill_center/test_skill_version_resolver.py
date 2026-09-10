@@ -133,6 +133,26 @@ def test_center_assets_use_one_batch_and_preserve_input_order() -> None:
     )
 
 
+def test_single_asset_latest_resolution_returns_the_formal_published_value() -> None:
+    versions = _Versions(
+        (_version(skill_id=10, version_id=102, ordinal=2, number="2.0.0"),)
+    )
+    resolver = SkillVersionResolver(versions)
+
+    resolved = resolver.resolve_latest_published(env="pre", skill_id=10)
+
+    assert resolved.skill_version_id == 102
+    assert resolved.sc_version_number == "2.0.0"
+    assert versions.latest_calls == [{"env": "pre", "skill_ids": (10,)}]
+
+
+def test_single_asset_latest_resolution_fails_without_one_published_row() -> None:
+    resolver = SkillVersionResolver(_Versions())
+
+    with pytest.raises(SkillVersionResolutionError):
+        resolver.resolve_latest_published(env="pre", skill_id=10)
+
+
 @pytest.mark.parametrize(
     ("asset", "rows"),
     [

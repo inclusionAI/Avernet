@@ -369,6 +369,50 @@ describe('loadGroupDetail', () => {
     await groupService.loadGroupDetail('g1');
     expect(sc.listGroupSessions).toHaveBeenCalledWith('g1', { offset: 0, limit: 50 });
   });
+
+  it('participants 回显 message_view_scope 时映射为 messageViewScope，无值时不回显', async () => {
+    const detailData = (participants: unknown[]) => ({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: {
+        group_id: 'g1',
+        name: 'X',
+        strategy: 'chat',
+        collaboration: { strategy: 'chat', delivery_policy: { bot_final_delivery: 'send_to_driver' } },
+        status: 'active',
+        participants,
+        originator_actor_id: 'bot-1',
+        updated_at: 1,
+        created_at: 1,
+      },
+    });
+    gc.getGroup.mockResolvedValue(
+      detailData([
+        {
+          actor_id: 'human-1',
+          actor_kind: 'human',
+          name: '成员甲',
+          role: 'consultant',
+          mode: 'present',
+          message_view_scope: 'participant',
+        },
+        { actor_id: 'human-2', actor_kind: 'human', name: '成员乙', role: 'consultant', mode: 'present' },
+      ]),
+    );
+    sc.listGroupSessions.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: { items: [], offset: 0, limit: 50, total: 0 },
+    });
+
+    const res = await groupService.loadGroupDetail('g1');
+    expect(res.ok).toBe(true);
+    const participants = res.ok ? res.data.participants : [];
+    expect(participants[0].messageViewScope).toBe('participant');
+    expect(participants[1].messageViewScope).toBeUndefined();
+  });
 });
 
 describe('policy', () => {

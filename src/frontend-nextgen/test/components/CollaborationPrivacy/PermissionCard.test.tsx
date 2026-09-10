@@ -75,30 +75,36 @@ describe('PermissionCard', () => {
     expect(screen.getByText('OpenClaw')).toBeInTheDocument();
   });
 
-  it('explains the Bot friend approval entry point', async () => {
+  it('explains Bot visibility from the group label', async () => {
     const user = userEvent.setup();
     renderCard();
 
-    const infoTrigger = screen.getByRole('button', { name: '好友审批策略说明' });
-    await user.hover(infoTrigger);
+    await user.hover(screen.getByRole('button', { name: 'Bot 可见性功能说明' }));
 
     expect(
       await screen.findByText(
-        '统一控制其他用户和其他 Bot 申请添加当前 Bot 为好友时的审批方式。审批入口见「工单中心 - 待我处理」，也可通过顶栏铃铛「通知中心」查看。',
+        '分别控制其他用户和其他 Bot 能否在协作广场看到当前 Bot，并决定其是否可以发起好友申请。两个对象的可见性可单独设置。',
       ),
     ).toBeInTheDocument();
   });
 
-  it('explains that Bot friend approval covers both user and Bot friend requests', async () => {
+  it('explains Bot friend approval from the group label without duplicate row tooltips', async () => {
     const user = userEvent.setup();
     renderCard();
 
-    const infoTrigger = screen.getByRole('button', { name: 'Bot 好友审批说明' });
-    await user.hover(infoTrigger);
+    await user.hover(screen.getByRole('button', { name: 'Bot 好友审批功能说明' }));
 
-    expect(
-      await screen.findByText('统一控制其他用户和其他 Bot 申请添加当前 Bot 为好友时的审批方式。'),
-    ).toBeInTheDocument();
+    const tooltip = await screen.findByRole('tooltip');
+    expect(tooltip).toHaveTextContent(
+      '在其他用户或其他 Bot 发起好友申请后，统一控制是否需要审批。待审批的申请可前往「管理后台 / 通知中心 / 待我处理」处理。',
+    );
+    expect(screen.getByRole('link', { name: '管理后台 / 通知中心 / 待我处理' })).toHaveAttribute(
+      'href',
+      '/admin?tab=work-orders',
+    );
+    expect(screen.queryByRole('button', { name: '对用户可见性说明' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '对 Bot 可见性说明' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '好友审批策略说明' })).not.toBeInTheDocument();
   });
 
   it('keeps refresh and copy actions close to their related Bot information', () => {
@@ -148,10 +154,11 @@ describe('PermissionCard', () => {
     expect(screen.getByRole('switch', { name: '开启Bot 画像公开' })).toBeDisabled();
     expect(screen.getByText('Bot 画像公开')).toBeInTheDocument();
     expect(screen.getByText('Bot 可见性')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Bot 可见性说明' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '对用户可见性说明' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '对 Bot 可见性说明' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '好友审批策略说明' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Bot 可见性功能说明' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Bot 好友审批功能说明' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '对用户可见性说明' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '对 Bot 可见性说明' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '好友审批策略说明' })).not.toBeInTheDocument();
     expect(screen.getByText('好友审批策略')).toBeInTheDocument();
   });
 
@@ -159,12 +166,15 @@ describe('PermissionCard', () => {
     const user = userEvent.setup();
     renderCard({ ...bot, profilePublic: false, profilePublicStatus: 'unavailable' });
 
-    expect(screen.getByText('暂不可用')).toBeInTheDocument();
-    const statusTrigger = screen.getByRole('button', { name: 'Bot 画像公开暂不可用说明' });
+    const status = screen.getByText('暂不可用');
+    const statusTrigger = screen.getByRole('button', { name: 'Bot 画像公开暂不可用原因' });
+    const profileSwitch = screen.getByRole('switch', { name: '开启Bot 画像公开' });
+    expect(status).not.toHaveRole('button');
+    expect(statusTrigger.parentElement).toContainElement(profileSwitch);
     await user.hover(statusTrigger);
 
     expect(await screen.findByRole('tooltip')).toHaveTextContent('该 Bot 尚未对其他 Bot 开放可见，请先调整 Bot 可见性');
-    expect(screen.getByRole('switch', { name: '开启Bot 画像公开' })).toBeDisabled();
+    expect(profileSwitch).toBeDisabled();
   });
 
   it('restores the Bot profile visibility toggle and sends the confirmed target value', () => {

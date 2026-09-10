@@ -81,6 +81,11 @@ provides:
   - "CanonicalCenterVersionStore"
   - "CanonicalCenterVersion"
   - "CanonicalCenterVersionIdentity"
+  - "CenterContentDistribution"
+  - "CenterContentPackage"
+  - "CenterContentRequest"
+  - "CenterContentURLSigner"
+  - "CanonicalCenterContentDistribution"
   - "enqueue_skill_activation_sync"
   - "build_skill_activation_sync_payload"
   - "parse_skill_activation_sync_payload"
@@ -114,6 +119,7 @@ consumes:
   - "SpaceSkillDraftRepository"
   - "SpaceSkillReadRepository"
   - "SkillVersionRepositoryProtocol"
+  - "CenterSkillAccessRepositoryProtocol"
   - "SkillVersionMaterializationRepositoryProtocol"
   - "SpaceSkillPublicationRepositoryProtocol"
   - "HttpClient"
@@ -122,6 +128,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_config_surface    # BotConfigCoords, the shared config-category address type
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.center_skill_access
   - agentclaw.community.core.repository.protocols.space_skill_version # published Space Skill read contract consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center_types # query projection types consumed by this module
   - agentclaw.community.core.repository.protocols.space_skill_publication # Publication aggregate persistence contract
@@ -233,6 +240,18 @@ owned by their existing services and are not changed by this trust boundary.
 Publication and SC Reference producers consume the public
 Materializer Service API; Runtime reads consume only PUBLISHED Versions through
 `SkillVersionResolver`.
+
+Bot-facing Center reads consume `CenterSkillAccessRepositoryProtocol` only for
+tenant/env-scoped asset facts: PUBLIC or one bound Space, stable Skill UUID,
+and offline state. `SkillQueryService` separately proves Bot access and live
+Space membership, delegates latest-PUBLISHED selection to the formal
+`SkillVersionResolverProtocol`, and reads the exact
+`skill_uuid + sc_version_number` from `CanonicalCenterVersionStore`.
+Only the returned view is enriched with the addressed Bot and owner; the shared
+`ac_skill` row is never rebound. Content and shared README reads do not call
+Engine or download from Skill Center. Bot parameters retain their historical
+name-keyed Engine file and describe desired configuration, not observed
+runtime.
 
 `SpaceSkillPublicationService` freezes the current immutable Draft Revision and
 persists its `frozen_draft_locator` on the durable Attempt before enqueueing;

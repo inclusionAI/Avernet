@@ -240,7 +240,7 @@ test('LOCAL Skill 请求携带当前用户、Bot owner 与分页参数', async (
     await botEditorController.listSkills('bot-1', {
       source: 'LOCAL',
       owner_id: 'owner-1',
-      user_id: '168944',
+      user_id: '900005',
       page: 2,
       page_size: 20,
     });
@@ -249,7 +249,7 @@ test('LOCAL Skill 请求携带当前用户、Bot owner 与分页参数', async (
     expect(Object.fromEntries(url.searchParams)).toEqual({
       source: 'LOCAL',
       owner_id: 'owner-1',
-      user_id: '168944',
+      user_id: '900005',
       page: '2',
       page_size: '20',
     });

@@ -370,14 +370,14 @@ describe('botWorkshopService', () => {
     expect(
       botWorkshopService.getCreateSpaces('cloud', '10001', 'mock-user', {
         id: '10001',
-        name: '风太的个人空间',
+        name: '示例用户的个人空间',
         ownership: 'personal',
         canCreate: true,
       }),
     ).toEqual([
       {
         id: '10001',
-        name: '风太的个人空间',
+        name: '示例用户的个人空间',
         ownership: 'personal',
         canCreate: true,
       },
