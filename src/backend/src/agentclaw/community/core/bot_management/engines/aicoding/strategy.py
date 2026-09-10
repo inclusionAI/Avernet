@@ -772,41 +772,43 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         *,
         template_service: Any,
     ) -> None:
-        """Apply AICoding/Claude Code values from generic restart extras."""
+        """Persist a frontend-composed AICoding/Claude Code restart snapshot.
+
+        Publication and version selection belong to the frontend. Reuse the
+        existing template service for create-or-update and token encryption;
+        do not change the shared restart hook's ordering or failure policy.
+        """
         active_engine = self.normalize_engine_type(ctx.active_engine, default="")
         if active_engine not in TEMPLATE_CONFIG_CONSUMING_ENGINES:
             return
         if not isinstance(extra_configs, dict):
             return
         candidate = extra_configs.get("template_config")
-        if not isinstance(candidate, dict):
+        if not isinstance(candidate, dict) or not candidate:
             return
 
-        stored_config = template_service.get_template_config(ctx.bot_id) or {}
+        # The frontend owns publication/version selection and full-snapshot
+        # composition. Same-version and unversioned snapshots are valid (e.g.
+        # published env policy refresh or a legacy bot's first migration).
         incoming_version = self._template_version_id(candidate)
-        stored_version = self._template_version_id(stored_config)
-        if incoming_version is None or incoming_version < 0:
-            return
-        if stored_version is not None and incoming_version <= stored_version:
-            return
-
         persisted_config = candidate
         if extra_configs.get("confirmed_template_update"):
             persisted_config = self._with_restart_resync_marker(
                 candidate, template_version_id=incoming_version
             )
 
-        template_service.update_template(
+        saved = template_service.create_or_update_template(
             bot_id=ctx.bot_id,
             template_config=persisted_config,
             template_type=ctx.template_type,
             active_engine=ctx.active_engine,
         )
+        if not saved:
+            raise RuntimeError("Failed to persist coding restart template snapshot")
         logger.info(
-            "[aicoding.restart] persisted newer template snapshot: "
-            "bot_id=%s old_version=%s new_version=%s resync_marker=%s",
+            "[aicoding.restart] persisted restart template snapshot: "
+            "bot_id=%s version=%s resync_marker=%s",
             ctx.bot_id,
-            stored_version,
             incoming_version,
             persisted_config is not candidate,
         )
