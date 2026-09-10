@@ -15,6 +15,8 @@ export type WorkflowSpecRow = {
   gmt_modified: number | string;
   title: string;
   version: number | null;
+  /** 工号 (staff_id) — 与 workflow_deploy_history.owner_id 保持一致，写入保存者。 */
+  owner_id: string | null;
 };
 
 /** Lightweight summary row — avoids loading spec_json (MEDIUMTEXT) for list views. */
@@ -23,6 +25,7 @@ export type WorkflowSpecSummary = {
   pack_id: string | null;
   title: string | null;
   gmt_modified: number | string;
+  owner_id: string | null;
 };
 
 /** Row returned by accessible-workflow queries (joined with bot_workflow_permissions). */
@@ -61,41 +64,55 @@ export class WorkflowSpecRepository {
   /** List all workflow specs with full spec_json (use only when spec_json is needed). */
   async listAll(): Promise<WorkflowSpecRow[]> {
     return this.db.query<WorkflowSpecRow>(
-      "SELECT id, workflow_id, pack_id, spec_json, gmt_create, gmt_modified, title FROM workflow_specs ORDER BY gmt_modified DESC",
+      "SELECT id, workflow_id, pack_id, spec_json, gmt_create, gmt_modified, title, owner_id FROM workflow_specs ORDER BY gmt_modified DESC",
     );
   }
 
   /** List workflow summaries without loading spec_json — used for list/table views. */
   async listSummaries(): Promise<WorkflowSpecSummary[]> {
     return this.db.query<WorkflowSpecSummary>(
-      "SELECT workflow_id, pack_id, title, gmt_modified FROM workflow_specs ORDER BY gmt_modified DESC",
+      "SELECT workflow_id, pack_id, title, gmt_modified, owner_id FROM workflow_specs ORDER BY gmt_modified DESC",
     );
   }
 
   async findByWorkflowId(workflowId: string): Promise<WorkflowSpecRow | null> {
     const rows = await this.db.query<WorkflowSpecRow>(
-      "SELECT id, workflow_id, pack_id, version, spec_json, gmt_create, gmt_modified, title FROM workflow_specs WHERE workflow_id = ?",
+      "SELECT id, workflow_id, pack_id, version, spec_json, gmt_create, gmt_modified, title, owner_id FROM workflow_specs WHERE workflow_id = ?",
       [workflowId],
     );
     return rows[0] ?? null;
   }
 
-  async upsert(workflowId: string, packId: string | null, specJson: string): Promise<WorkflowSpecRow> {
+  async upsert(
+    workflowId: string,
+    packId: string | null,
+    specJson: string,
+    ownerId: string | null = null,
+  ): Promise<WorkflowSpecRow> {
     const now = this.db.dialect.now();
     const existing = await this.findByWorkflowId(workflowId);
     const title = extractTitleFromSpecJson(specJson, workflowId);
 
     if (existing) {
+      // 编辑时同步更新 owner_id：与 workflow_deploy_history.owner_id 的语义保持一致，
+      // 记录最近一次保存者；首次保存的 owner_id（NULL → 具体值）也允许覆盖。
       await this.db.exec(
-        "UPDATE workflow_specs SET spec_json = ?, pack_id = ?, title = ?, gmt_modified = ? WHERE workflow_id = ?",
-        [specJson, packId, title, now, workflowId],
+        "UPDATE workflow_specs SET spec_json = ?, pack_id = ?, title = ?, owner_id = ?, gmt_modified = ? WHERE workflow_id = ?",
+        [specJson, packId, title, ownerId, now, workflowId],
       );
-      return { ...existing, spec_json: specJson, pack_id: packId, title, gmt_modified: now as number };
+      return {
+        ...existing,
+        spec_json: specJson,
+        pack_id: packId,
+        title,
+        owner_id: ownerId,
+        gmt_modified: now as number,
+      };
     }
 
     await this.db.exec(
-      "INSERT INTO workflow_specs (workflow_id, pack_id, spec_json, title, gmt_create, gmt_modified) VALUES (?, ?, ?, ?, ?, ?)",
-      [workflowId, packId, specJson, title, now, now],
+      "INSERT INTO workflow_specs (workflow_id, pack_id, spec_json, title, owner_id, gmt_create, gmt_modified) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [workflowId, packId, specJson, title, ownerId, now, now],
     );
     const result = await this.findByWorkflowId(workflowId);
     return result!;
@@ -111,12 +128,19 @@ export class WorkflowSpecRepository {
   }
 
   /** Update a workflow by its original ID (for workflowId rename), including changing the workflow_id column */
-  async updateByOriginalId(originalId: string, newId: string, packId: string | null, specJson: string): Promise<WorkflowSpecRow | null> {
+  async updateByOriginalId(
+    originalId: string,
+    newId: string,
+    packId: string | null,
+    specJson: string,
+    ownerId: string | null = null,
+  ): Promise<WorkflowSpecRow | null> {
     const now = this.db.dialect.now();
     const title = extractTitleFromSpecJson(specJson, newId);
+    // 与 workflow_deploy_history.owner_id 同步：rename 时把 owner_id 也带上，保持最近一次保存者一致。
     await this.db.exec(
-      "UPDATE workflow_specs SET workflow_id = ?, spec_json = ?, pack_id = ?, title = ?, gmt_modified = ? WHERE workflow_id = ?",
-      [newId, specJson, packId, title, now, originalId],
+      "UPDATE workflow_specs SET workflow_id = ?, spec_json = ?, pack_id = ?, title = ?, owner_id = ?, gmt_modified = ? WHERE workflow_id = ?",
+      [newId, specJson, packId, title, ownerId, now, originalId],
     );
     return this.findByWorkflowId(newId);
   }
@@ -149,7 +173,7 @@ export class WorkflowSpecRepository {
     const total = countRows[0]?.cnt ?? 0;
 
     const rows = await this.db.query<WorkflowSpecSummary>(
-      `SELECT workflow_id, pack_id, title, gmt_modified FROM workflow_specs ${whereClause} ORDER BY gmt_modified DESC LIMIT ? OFFSET ?`,
+      `SELECT workflow_id, pack_id, title, gmt_modified, owner_id FROM workflow_specs ${whereClause} ORDER BY gmt_modified DESC LIMIT ? OFFSET ?`,
       [...params, limit, offset],
     );
 

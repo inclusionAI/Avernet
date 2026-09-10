@@ -195,7 +195,7 @@ export function createWorkflowsRouter(
       let row;
       if (idChanged) {
         // ID changed: update by original ID + cascade related tables
-        const updated = await workflowSpecRepo.updateByOriginalId(originalWorkflowId!, workflowId, packId ?? existingRow?.pack_id ?? null, specJson);
+        const updated = await workflowSpecRepo.updateByOriginalId(originalWorkflowId!, workflowId, packId ?? existingRow?.pack_id ?? null, specJson, resolvedBotOwnerId);
         if (!updated) {
           res.status(404).json({ error: "Not Found", message: `Workflow "${originalWorkflowId}" not found` });
           return;
@@ -212,7 +212,7 @@ export function createWorkflowsRouter(
           await httpCallbackConfigRepo.updateWorkflowId(originalWorkflowId!, workflowId);
         }
       } else {
-        row = await workflowSpecRepo.upsert(workflowId, packId ?? existingRow?.pack_id ?? null, specJson);
+        row = await workflowSpecRepo.upsert(workflowId, packId ?? existingRow?.pack_id ?? null, specJson, resolvedBotOwnerId);
       }
 
       // Persist facade binding (slash command) if provided and repo available
