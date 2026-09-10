@@ -5,6 +5,9 @@ import { SqliteDatabase, runMigrations } from "@avernet/clawweb-shared/server/db
 import { EvolveRepository } from "../../repositories/evolve-repository.js";
 import { WorkflowEvolutionRepository } from "../../repositories/workflow-evolution-repository.js";
 import { createEvolveRouter } from "../evolve.js";
+import { IssueAggregationRepository } from '../../repositories/issue-aggregation-repository.js';
+import { createInternalEvolveRouter } from '../internal/evolve.js';
+import { createEvolveKnowledgeRouter } from '../evolve-knowledge.js';
 
 let db: SqliteDatabase;
 let repo: EvolveRepository;
@@ -38,6 +41,10 @@ beforeEach(async () => {
   cancelExecution.mockReset();
   const app = express();
   app.use(express.json());
+  app.use('/internal', createInternalEvolveRouter({ db, evolveRepo: repo }));
+  app.use('/restricted', createEvolveKnowledgeRouter(db, repo, {
+    getViewByIdsForOwner: async (owner: string) => ({ viewableIds: new Set(owner === 'owner' ? ['wf'] : []) }),
+  } as never));
   const createSignedUrl = vi.fn();
   createSignedUrl.mockResolvedValue("https://oss.example.test/signed");
   app.use("/api/evolve", createEvolveRouter(repo, {
@@ -52,6 +59,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   const activeServer = server;
   server = null;
   if (activeServer) await new Promise<void>((resolve) => activeServer.close(() => resolve()));
@@ -59,6 +67,67 @@ afterEach(async () => {
 });
 
 describe("evolve knowledge endpoints", () => {
+  it('retains competing cause proposals without overwriting a single executable suggestion', async () => {
+    const analyses = new WorkflowEvolutionRepository(db);
+    await analyses.createAnalysisRun({ analysisId: 'multi', requestKey: 'multi', workflowId: 'wf', flowId: 'run', scopeType: 'single_run', scope: { flowIds: ['run'] }, analysisVersion: 'v1', requestedAtMs: 1 });
+    await analyses.completeAnalysisRun('multi', { schemaVersion: 'workflow-evolution-analysis/v1', analysisId: 'multi', facts: [], inferences: [], unknowns: [],
+      diagnoses: [100, 200].map(value => ({ diagnosisId: `d${value}`, flowIds: ['run'], nodeId: 'fetch', failureSignature: 'timeout', failureMode: 'timeout', severity: 'high', reasoning: String(value), evidenceEventIds: [],
+        proposal: { schemaVersion: 'workflow-patch/v1', workflowId: 'wf', baseSpecDigest: 'a'.repeat(64), summary: `timeout ${value}`,
+          operations: [{ op: 'replace', nodeId: 'fetch', path: '/executor/timeoutMs', value }] } })) }, 2);
+    expect((await db.query('SELECT * FROM workflow_healing_suggestions'))).toHaveLength(0);
+    const groups = await new IssueAggregationRepository(db).list('wf');
+    expect(groups[0].sources.map(s => s.proposal?.summary)).toEqual(expect.arrayContaining(['timeout 100', 'timeout 200']));
+    const response = await fetch(`${baseUrl}/api/evolve/issue-groups?workflowId=wf`);
+    expect(response.status).toBe(200);
+    expect((await response.json() as { groups: unknown[] }).groups).toHaveLength(1);
+    expect((await fetch(`${baseUrl}/api/evolve/issue-groups`)).status).toBe(400);
+  });
+  it('freezes latest-run aggregation input, caches completed results and rejects stale or invented references', async () => {
+    const insert = async (id: string, run: string, time: number, findings = true) => {
+      const result = { schemaVersion: 'workflow-evolution-analysis/v1', analysisId: id, facts: [], inferences: [], unknowns: [],
+        diagnoses: findings ? [{ diagnosisId: 'd', flowIds: [run], nodeId: 'fetch', failureSignature: 'timeout · cli · fetch',
+          failureMode: 'timeout', severity: 'high', reasoning: 'network delay', evidenceEventIds: [] }] : [] };
+      await db.exec(`INSERT INTO workflow_evolution_analysis_runs
+        (analysis_id, request_key, scope_type, scope_json, flow_id, workflow_id, status, analysis_version, result_json, requested_at_ms, completed_at_ms)
+        VALUES (?, ?, 'single_run', '{}', ?, 'wf', 'completed', 'v1', ?, ?, ?)`, [id, id, run, JSON.stringify(result), time, time]);
+    };
+    await insert('a', 'run-a', 1);
+    await insert('b', 'run-b', 2);
+    const aggregates = new IssueAggregationRepository(db);
+    const jobs = await aggregates.prepare('b');
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].input.flowIds).toEqual(['run-a', 'run-b']);
+    expect((await fetch(`${baseUrl}/restricted/issue-groups?workflowId=wf`)).status).toBe(401);
+    expect((await fetch(`${baseUrl}/restricted/issue-groups?workflowId=wf`, { headers: { 'X-User-Id': 'other' } })).status).toBe(403);
+    expect((await fetch(`${baseUrl}/restricted/issue-groups?workflowId=wf`, { headers: { 'X-User-Id': 'owner' } })).status).toBe(200);
+    await db.exec("UPDATE workflow_evolution_analysis_runs SET task_id = 'task', step_id = 'step' WHERE analysis_id = 'b'");
+    vi.spyOn(repo, 'findTask').mockResolvedValue({ bot_id: 'assigned' } as never);
+    vi.spyOn(repo, 'findStep').mockResolvedValue({ task_id: 'task', step_type: 'run_analysis' } as never);
+    const post = (path: string, body: unknown) => fetch(`${baseUrl}/internal${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    expect((await post('/analysis-runs/b/aggregations', { botId: 'wrong' })).status).toBe(403);
+    expect((await post('/analysis-runs/b/aggregations', { botId: 'assigned' })).status).toBe(200);
+    const summary = { summary: 'Network delays', causes: [{ title: 'Network', conclusion: 'Slow upstream', certainty: 'hypothesis',
+      sourceIds: jobs[0].input.sources.map(s => s.sourceId) }], unknowns: [] };
+    await expect(aggregates.complete('b', jobs[0].id, { ...summary, causes: [{ ...summary.causes[0], sourceIds: ['invented'] }] })).rejects.toThrow();
+    expect((await post(`/analysis-runs/b/aggregations/${jobs[0].id}`, { botId: 'wrong', result: summary })).status).toBe(403);
+    expect((await post(`/analysis-runs/b/aggregations/${jobs[0].id}`, { botId: 'assigned', result: summary })).status).toBe(200);
+    expect((await aggregates.list('wf'))[0].summary?.summary).toBe('Network delays');
+    expect(await aggregates.prepare('b')).toEqual([]);
+    await insert('c', 'run-a', 3, false);
+    const updated = await aggregates.list('wf');
+    expect(updated[0].flowIds).toEqual(['run-b']);
+    expect(updated[0].stale).toBe(true);
+    expect((await aggregates.list('other'))).toEqual([]);
+    await expect(aggregates.complete('c', jobs[0].id, summary)).rejects.toThrow();
+    const retry = await aggregates.prepare('c');
+    expect(retry).toHaveLength(1);
+    expect(await aggregates.prepare('c')).toEqual([]);
+    await db.exec('UPDATE workflow_evolution_analysis_runs SET requested_at_ms = 1 WHERE analysis_id = ?', [retry[0].id]);
+    const recovered = await aggregates.prepare('c');
+    expect(recovered).toHaveLength(1);
+    expect(recovered[0].id).not.toBe(retry[0].id);
+    await expect(aggregates.complete('c', retry[0].id, summary)).rejects.toThrow();
+  });
   it("normalizes legacy applied suggestions to applied-unverified for clients", async () => {
     const suggestion = await repo.createSuggestion({
       workflowId: "wf-legacy",

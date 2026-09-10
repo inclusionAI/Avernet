@@ -152,6 +152,7 @@ export function useAnalyzeRun() {
     onSuccess: (_data, input) => {
       void queryClient.invalidateQueries({ queryKey: ['runs'] })
       void queryClient.invalidateQueries({ queryKey: ['evolve-diagnoses'] })
+      void queryClient.invalidateQueries({ queryKey: ['evolve-issue-groups'] })
       void queryClient.invalidateQueries({ queryKey: ['evolve-suggestions'] })
       void queryClient.invalidateQueries({ queryKey: ['run', input.flowId] })
     },
@@ -203,6 +204,7 @@ export function useAnalyzeWorkflowLogs() {
     mutationFn: (input: Parameters<typeof api.evolve.analyzeWorkflowLogs>[0]) => api.evolve.analyzeWorkflowLogs(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['evolve-diagnoses'] })
+      void queryClient.invalidateQueries({ queryKey: ['evolve-issue-groups'] })
       void queryClient.invalidateQueries({ queryKey: ['evolve-suggestions'] })
     },
   })
@@ -223,6 +225,7 @@ export function useAnalyzeFlow() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['runs'] })
       void queryClient.invalidateQueries({ queryKey: ['evolve-diagnoses'] })
+      void queryClient.invalidateQueries({ queryKey: ['evolve-issue-groups'] })
     },
   })
 }

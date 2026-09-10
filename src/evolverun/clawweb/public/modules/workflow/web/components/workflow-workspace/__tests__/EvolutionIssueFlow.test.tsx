@@ -3,6 +3,25 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
+vi.mock('../issue-groups', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../issue-groups')>();
+  const hooks = await import('../../../api/hooks');
+  return { ...actual, useIssueGroups: () => {
+    const rows = hooks.useEvolveDiagnoses().data!.diagnoses;
+    const signatures = [...new Set(rows.map(row => row.failure_signature))];
+    return { isLoading: false, isError: false, data: { groups: signatures.map(signature => ({
+      workflowId: 'wf-1', signature, flowIds: rows.filter(r => r.failure_signature === signature).map(r => r.flow_id),
+      inputDigest: 'fixture', aggregationStatus: 'not_generated', summary: null, stale: false,
+      sources: rows.filter(row => row.failure_signature === signature).map(row => ({
+        sourceId: String(row.id), analysisId: row.analysis_id ?? 'legacy', diagnosisId: row.diagnosis_id,
+        flowId: row.flow_id, flowIds: [row.flow_id], nodeId: row.node_id, failureMode: row.failure_mode,
+        completedAtMs: Number(row.gmt_create), reasoning: row.reasoning ?? row.error_text,
+        evidenceEventIds: row.evidence_event_ids ?? [],
+      })),
+    })) } };
+  } };
+});
+
 const { mutate, applyBatch, eligibleBots, applyTasks, runAnalysis } = vi.hoisted(() => ({
   mutate: vi.fn(),
   applyBatch: vi.fn(),
@@ -204,7 +223,7 @@ describe('issue and optimization flow', () => {
     await userEvent.click(within(actionableIssue!).getByRole('button', { name: '查看' }))
     const drawer = screen.getByRole('dialog', { name: '问题详情' })
     expect(within(drawer).getByText('聚合结论')).toBeInTheDocument()
-    expect(within(drawer).getByText('当前建议')).toBeInTheDocument()
+    expect(within(drawer).getByText('已有建议')).toBeInTheDocument()
     expect(within(drawer).getByText('相关分析记录')).toBeInTheDocument()
     expect(within(drawer).getByText('所选分析详情')).toBeInTheDocument()
     expect(within(drawer).getByText('判断依据')).toBeInTheDocument()
@@ -250,7 +269,7 @@ describe('issue and optimization flow', () => {
 
     const drawer = screen.getByRole('dialog', { name: '问题详情' })
     expect(within(drawer).getByRole('button', { name: '选择分析 run-1 AN-1' })).toBeInTheDocument()
-    expect(within(drawer).getAllByText('请求超时')).toHaveLength(2)
+    expect(within(drawer).getAllByText('请求超时')).toHaveLength(1)
     expect(runAnalysis).toHaveBeenCalledWith('run-1', 'AN-1', true)
   })
 
