@@ -283,6 +283,18 @@ class SecretNamesConfig:
     aicoding_theta_master_key: str = ""
 
 
+@dataclass(frozen=True)
+class McpRuntimeCredentialsConfig:
+    """Secret references for platform-managed MCP request headers.
+
+    The nested mapping is ``server_code -> header_name -> secret_name``.  It
+    contains registry names only; values are resolved lazily through the active
+    ``SecretResolver`` when an MCP payload is built.
+    """
+
+    header_secrets: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
+
+
 def _default_cors_origins() -> list[str]:
     """Neutral localhost CORS origins (each deploy adds its own via the yaml)."""
     return [
