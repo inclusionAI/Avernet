@@ -1,3 +1,4 @@
+import { MessageViewScopeBadge } from '@/components/MessageViewScope';
 import { Badge, Button, IconButton, Skeleton } from '@/components/ui';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import type { GroupView, IdentityView, ParticipantView } from '@/domain/collaboration';
@@ -150,6 +151,9 @@ export function MemberList({
                     <Badge tone={getRoleTone(participant, groupKind)}>{getRoleLabel(participant, groupKind)}</Badge>
                     {showMode && getModeLabel(participant) ? (
                       <Badge tone={getModeTone(participant)}>{getModeLabel(participant)}</Badge>
+                    ) : null}
+                    {participant.kind === 'human' && participant.messageViewScope ? (
+                      <MessageViewScopeBadge scope={participant.messageViewScope} />
                     ) : null}
                   </div>
                 </div>

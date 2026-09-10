@@ -1,3 +1,4 @@
+import type { MessageViewScope } from '@/domain/collaboration/types';
 import { invitationService } from '@/services/workspace/invitationService';
 import { sessionService } from '@/services/workspace/sessionService';
 import { useCallback, useEffect, useState } from 'react';
@@ -28,13 +29,14 @@ export interface InviteAcceptState {
  * - mount → loading（调 getAcceptPageState 校验 token）
  * - 校验通过 → confirm
  * - 校验失败 → invalid（friendlyMessage 来自 service error）
- * - accept() → accepting → accepted（携带 targetType/targetId/groupId/sessionId） 或 error
+ * - accept(scope?) → accepting → accepted（携带 targetType/targetId/groupId/sessionId） 或 error；
+ *   scope 为消息视角（message_view_scope），透传给 acceptInvitation
  *
  * 不含导航副作用——把 `accepted` 状态与 groupId/alreadyJoined 交给组件决定跳转目标，
  * 让组件保持纯 view。
  */
 export function useInviteAccept(token: string): InviteAcceptState & {
-  accept: () => Promise<void>;
+  accept: (scope?: MessageViewScope) => Promise<void>;
   resetToConfirm: () => void;
 } {
   const [state, setState] = useState<InviteAcceptState>({ status: 'loading' });
@@ -60,37 +62,40 @@ export function useInviteAccept(token: string): InviteAcceptState & {
     };
   }, [token]);
 
-  const accept = useCallback(async () => {
-    setState({ status: 'accepting' });
-    const res = await invitationService.acceptInvitation(token);
-    if (!res.ok) {
-      setState({ status: 'error', friendlyMessage: res.error.friendlyMessage });
-      return;
-    }
-    const { targetType, targetId, alreadyJoined } = res.data;
-    if (targetType === 'session' && targetId) {
-      const session = await sessionService.getSessionDetail(targetId);
-      if (session.ok) {
-        setState({
-          status: 'accepted',
-          targetType,
-          targetId,
-          groupId: session.data.groupId,
-          sessionId: targetId,
-          alreadyJoined,
-        });
+  const accept = useCallback(
+    async (scope?: MessageViewScope) => {
+      setState({ status: 'accepting' });
+      const res = await invitationService.acceptInvitation(token, scope);
+      if (!res.ok) {
+        setState({ status: 'error', friendlyMessage: res.error.friendlyMessage });
         return;
       }
-    }
-    setState({
-      status: 'accepted',
-      targetType,
-      targetId,
-      groupId: targetType === 'group' ? targetId : undefined,
-      sessionId: targetType === 'session' ? targetId : undefined,
-      alreadyJoined,
-    });
-  }, [token]);
+      const { targetType, targetId, alreadyJoined } = res.data;
+      if (targetType === 'session' && targetId) {
+        const session = await sessionService.getSessionDetail(targetId);
+        if (session.ok) {
+          setState({
+            status: 'accepted',
+            targetType,
+            targetId,
+            groupId: session.data.groupId,
+            sessionId: targetId,
+            alreadyJoined,
+          });
+          return;
+        }
+      }
+      setState({
+        status: 'accepted',
+        targetType,
+        targetId,
+        groupId: targetType === 'group' ? targetId : undefined,
+        sessionId: targetType === 'session' ? targetId : undefined,
+        alreadyJoined,
+      });
+    },
+    [token],
+  );
 
   const resetToConfirm = useCallback(() => {
     setState({ status: 'confirm' });

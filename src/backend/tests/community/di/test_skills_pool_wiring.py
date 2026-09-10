@@ -303,6 +303,7 @@ def test_skill_symlink_listener_projects_everything_for_runtime_ready_events() -
         device_sync_dispatcher=MagicMock(),
         layout_repository=layout_repository,
         skills_pool_wakeup=MagicMock(),
+        desktop_skill_recovery=MagicMock(),
         runtime_reconciler=runtime_reconciler,
     )
 

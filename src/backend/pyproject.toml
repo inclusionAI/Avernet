@@ -66,6 +66,12 @@ dependencies = [
   #    Aliyun-OSS S3 endpoint). Corp runtime never uses it; the corp manifest
   #    declares no community deps (its test venv gets boto3 via moto[s3]). ──
   "boto3>=1.34",
+  # ── oss2 backs the manifest ``oss`` road (core/bot_config_manifest/fetch/
+  #    object_store.py): a tenant-named bucket read over Aliyun OSS's native
+  #    signature scheme, which the S3 protocol cannot speak. Public (Apache-2.0,
+  #    PyPI); a different concern from boto3, which serves the platform's own
+  #    bucket. ──
+  "oss2>=2.18",
   # apscheduler: TaskDiscoveryScheduler uses BackgroundScheduler + CronTrigger
   # for thread-level cron scheduling of backend task discovery. Pinned <4.0
   # to match the 3.x API (BackgroundScheduler, CronTrigger.from_crontab);

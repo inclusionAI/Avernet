@@ -96,7 +96,7 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
       .getHistory(selectedWorkflowId, 50, true)
       .then((r) => {
         if (cancelled) return
-        const active = r.history?.find((item) => item.isActive)
+        const active = r.active ?? null
         setLatestDeploy(active ?? r.history?.find((item) => item.action !== 'edit') ?? null)
         setBaselineIsActive(Boolean(active))
       })
@@ -110,6 +110,16 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
       cancelled = true
     }
   }, [selectedWorkflowId, deploymentBaselineRevision])
+
+  // Deployment runs in the Bot conversation. When the editor regains focus,
+  // refresh only the comparison baseline so a completed external deployment is
+  // reflected without reloading the user's in-progress canvas edits.
+  useEffect(() => {
+    if (!selectedWorkflowId) return
+    const refreshBaselineOnFocus = () => setDeploymentBaselineRevision((revision) => revision + 1)
+    window.addEventListener('focus', refreshBaselineOnFocus)
+    return () => window.removeEventListener('focus', refreshBaselineOnFocus)
+  }, [selectedWorkflowId])
 
   useEffect(() => {
     if (!selectedWorkflowId || !latestDeploy) {

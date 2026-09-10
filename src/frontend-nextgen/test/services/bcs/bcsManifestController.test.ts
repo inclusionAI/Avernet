@@ -12,9 +12,9 @@ describe('listBotRenderScreens', () => {
       data: { total: 1, items: [{ id: 1, name: 'lib', cdn_url: 'https://cdn/lib.js' }] },
     });
 
-    const screens = await listBotRenderScreens('20260811_lklnq6d0:327325');
+    const screens = await listBotRenderScreens('20260811_lklnq6d0:900003');
 
-    expect(mocked.listRenderScreens).toHaveBeenCalledWith('20260811_lklnq6d0', '327325');
+    expect(mocked.listRenderScreens).toHaveBeenCalledWith('20260811_lklnq6d0', '900003');
     expect(screens).toEqual([
       {
         id: 1,

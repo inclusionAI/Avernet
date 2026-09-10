@@ -14,7 +14,7 @@ export type CollaborationPrivacyLoadScope =
    */
   | { target: 'allBots' };
 
-/** Work 区 Bot 身份 ID 可能携带 `:` 后缀（如 `bot-real-1:447147`），比较前归一到 Bot UUID 部分。 */
+/** Work 区 Bot 身份 ID 可能携带 `:` 后缀（如 `bot-real-1:900004`），比较前归一到 Bot UUID 部分。 */
 export function normalizeBotIdentityId(id: string): string {
   const separator = id.indexOf(':');
   return separator >= 0 ? id.slice(0, separator) : id;

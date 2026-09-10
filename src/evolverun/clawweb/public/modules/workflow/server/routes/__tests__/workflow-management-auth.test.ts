@@ -43,6 +43,7 @@ async function start() {
   } as unknown as WorkflowSpecRepository;
   const historyRepo = {
     listHistory: vi.fn(async () => []),
+    findActiveByWorkflowId: vi.fn(async () => null),
     setActive: vi.fn(async () => true),
   } as unknown as WorkflowDeployHistoryRepository;
 

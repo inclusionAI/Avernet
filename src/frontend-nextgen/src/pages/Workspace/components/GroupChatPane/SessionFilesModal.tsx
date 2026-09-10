@@ -97,14 +97,14 @@ export function SessionFilesModal({
           'border border-border bg-card text-foreground shadow-2xl',
         )}
       >
-        <ModalTitle className="sr-only">资源管理 · {sessionName}</ModalTitle>
+        <ModalTitle className="sr-only">文件管理 · {sessionName}</ModalTitle>
         <ModalDescription className="sr-only">查看、预览、下载本会话中已上传的文件。</ModalDescription>
 
         <header className="flex items-start justify-between gap-3 border-b border-border px-3 py-4 sm:px-6 sm:py-5">
           <div className="min-w-0 flex-1 pr-2">
             <div className="flex items-center gap-2">
               <FolderOpen className="h-5 w-5 shrink-0 text-primary" aria-hidden />
-              <h2 className="m-0 truncate text-base font-semibold text-foreground">资源管理 · {sessionName}</h2>
+              <h2 className="m-0 truncate text-base font-semibold text-foreground">文件管理</h2>
             </div>
             <p className="mt-1.5 text-sm leading-5 text-muted-foreground">
               已添加的资源仅对当前会话生效，协作群内所有成员均可查看与管理。
@@ -119,7 +119,6 @@ export function SessionFilesModal({
 
         <div className="flex items-center justify-between gap-4 border-b border-border px-3 pt-3 sm:px-6">
           <div className="rounded-t-lg bg-primary/10 px-4 py-2.5 text-[13px] font-medium text-primary">文件</div>
-          <span className="pb-2 text-xs text-muted-foreground">仅可访问当前协作群会话文件</span>
         </div>
 
         <div className="flex min-h-0 flex-1">
@@ -153,21 +152,24 @@ export function SessionFilesModal({
                 />
               ) : (
                 <TooltipProvider>
-                  <ul className="m-0 list-none p-0">
+                  <ul className="m-0 list-none space-y-1 p-0">
                     {readyFiles.map((file) => {
                       const isActive = file.fileId === selectedFile?.fileId;
                       return (
                         <li
                           key={file.fileId}
-                          className="group flex items-center gap-1 rounded-lg px-1.5 py-1 transition-colors hover:bg-muted/50"
+                          className={cn(
+                            'group flex items-center gap-1 rounded-lg px-2.5 py-2 transition-colors',
+                            isActive ? 'bg-primary/10' : 'hover:bg-muted/50',
+                          )}
                         >
                           <Button
                             type="button"
                             variant="ghost"
                             onClick={() => setSelectedId(file.fileId)}
                             className={cn(
-                              'min-w-0 flex-1 shrink justify-start gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors',
-                              isActive ? 'bg-primary/10 text-primary' : 'text-foreground hover:text-primary',
+                              'min-w-0 flex-1 shrink justify-start gap-2 rounded-md px-1.5 py-0.5 text-left text-[13px] transition-colors hover:bg-transparent',
+                              isActive ? 'text-primary' : 'text-foreground hover:text-primary',
                             )}
                           >
                             <FileText
@@ -181,7 +183,7 @@ export function SessionFilesModal({
                                 </TooltipTrigger>
                                 <TooltipContent>{file.name}</TooltipContent>
                               </Tooltip>
-                              <span className="block truncate text-[11px] text-muted-foreground">
+                              <span className="mt-1 block truncate text-[11px] leading-4 text-muted-foreground">
                                 {file.ownerName} · {formatMonthDayTime(file.createdAt * 1000)}
                               </span>
                             </div>

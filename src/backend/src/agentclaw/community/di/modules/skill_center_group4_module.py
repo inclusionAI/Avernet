@@ -1,4 +1,4 @@
-"""Composition-root bindings for SC Public Reference, Sync, and Track Latest."""
+"""Composition-root bindings for Reference, Sync, Track Latest, and recovery."""
 
 from __future__ import annotations
 
@@ -33,6 +33,25 @@ from agentclaw.community.core.repository.protocols.skill_center_reference import
 from agentclaw.community.core.repository.protocols.track_latest import (
     TrackLatestRepositoryProtocol,
 )
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolLayoutRepositoryProtocol,
+)
+from agentclaw.community.core.skill_center.center_content_distribution import (
+    CenterContentDistribution,
+)
+from agentclaw.community.core.skill_center.desktop_skill_recovery_protocol import (
+    DesktopSkillRecoveryServiceProtocol,
+)
+from agentclaw.community.core.skill_center.services.desktop_skill_recovery import (
+    DesktopSkillRecoveryService,
+    DesktopSkillRecoverySweeper,
+    DesktopSkillRecoveryTaskHandler,
+)
+from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
+    BotRuntimeProjector,
+)
+from agentclaw.community.di.config import DesktopSkillRecoveryConfig
 from agentclaw.community.core.skill_center.services.group4_task_registrar import (
     SkillCenterGroup4TaskRegistrar,
 )
@@ -74,6 +93,16 @@ class SkillCenterGroup4Module(Module):
             to=TrackLatestRepository,
             scope=singleton,
         )
+
+    @singleton
+    @provider
+    @inject
+    def desktop_skill_recovery_service(
+        self,
+        bots: BotRepository,
+        tasks: TaskQueueService,
+    ) -> DesktopSkillRecoveryServiceProtocol:
+        return DesktopSkillRecoveryService(bots=bots, tasks=tasks)
 
     @singleton
     @provider
@@ -149,9 +178,45 @@ class SkillCenterGroup4Module(Module):
         reader: BotCapabilityStateReaderProtocol,
         projector: BotRuntimeProjectorProtocol,
         latest: TrackLatestRepositoryProtocol,
+        recovery: DesktopSkillRecoveryServiceProtocol,
     ) -> BotTrackLatestReconcileTaskHandler:
         return BotTrackLatestReconcileTaskHandler(
-            reader=reader, projector=projector, latest=latest
+            reader=reader,
+            projector=projector,
+            latest=latest,
+            recovery=recovery,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def desktop_skill_recovery_task_handler(
+        self,
+        bots: BotRepository,
+        projector: BotRuntimeProjector,
+        distribution: CenterContentDistribution,
+        layouts: SkillsPoolLayoutRepositoryProtocol,
+    ) -> DesktopSkillRecoveryTaskHandler:
+        return DesktopSkillRecoveryTaskHandler(
+            bots=bots,
+            projector=projector,
+            distribution=distribution,
+            layouts=layouts,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def desktop_skill_recovery_sweeper(
+        self,
+        bots: BotRepository,
+        recovery: DesktopSkillRecoveryServiceProtocol,
+        config: DesktopSkillRecoveryConfig,
+    ) -> DesktopSkillRecoverySweeper:
+        return DesktopSkillRecoverySweeper(
+            bots=bots,
+            recovery=recovery,
+            config=config,
         )
 
     @singleton
@@ -163,12 +228,14 @@ class SkillCenterGroup4Module(Module):
         reference: SkillCenterReferenceTaskHandler,
         fanout: TrackLatestFanoutTaskHandler,
         reconcile: BotTrackLatestReconcileTaskHandler,
+        desktop_skill_recovery: DesktopSkillRecoveryTaskHandler,
     ) -> SkillCenterGroup4TaskRegistrar:
         return SkillCenterGroup4TaskRegistrar(
             registry=registry,
             reference=reference,
             fanout=fanout,
             reconcile=reconcile,
+            desktop_skill_recovery=desktop_skill_recovery,
         )
 
     @singleton

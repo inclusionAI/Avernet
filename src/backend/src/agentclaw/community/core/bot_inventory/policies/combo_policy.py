@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from agentclaw.community.core.bot_inventory.types import DeployMode
 from agentclaw.community.core.workspace.constants import SUPPORTED_ENGINE_TYPES
 
-LOCAL_CAPABLE_ENGINES = frozenset({"openclaw", "claude_code"})
+LOCAL_CAPABLE_ENGINES = frozenset({"openclaw", "claude_code", "hermes"})
 PERSONAL_CLOUD_CAPABLE_ENGINES = frozenset(SUPPORTED_ENGINE_TYPES)
 SERVICE_CAPABLE_ENGINES = frozenset({"openclaw", "claude_code", "teclaw"})
 APPLICATION_CODING_ENGINES = frozenset({"claude_code"})

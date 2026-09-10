@@ -185,6 +185,20 @@ describe("workflow version history (read-only)", () => {
       expect(body.history).toHaveLength(1);
       expect(body.history[0]).toMatchObject({ deployNumber: 3, action: "deploy" });
     });
+
+    it("returns an active release outside the bounded history page", async () => {
+      await stopApp();
+      await startApp(makeFakeRepo([
+        row({ deploy_number: 1, version: 1, is_active: 1 }),
+        ...Array.from({ length: 50 }, (_, index) => row({ deploy_number: index + 2, version: index + 2 })),
+      ]));
+      const res = await fetch(`${baseUrl}/api/workflows/tech-research/history?limit=50&releaseOnly=true`);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.history).toHaveLength(50);
+      expect(body.history.some((item: { deployNumber: number }) => item.deployNumber === 1)).toBe(false);
+      expect(body.active).toMatchObject({ deployNumber: 1, version: 1, isActive: true });
+    });
   });
 
   describe("GET /api/workflows/:wf/history/:version", () => {

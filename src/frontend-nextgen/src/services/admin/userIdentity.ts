@@ -12,7 +12,7 @@
 import { getCapabilities } from '@/capabilities';
 import { resolveUserId } from '@/services/workspace/botSessionService';
 import { identityService } from '@/services/workspace/identityService';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { applyIdentityLoadResult } from '@/services/workspace/identityStore';
 
 /** 同步读当前已就绪操作者 user_id（经 canonical getHumanIdentity 能力），剥前缀兜底；未就绪返回 null（不主动拉取）。 */
 export function readUserId(): string | null {
@@ -29,7 +29,7 @@ export async function ensureUserId(): Promise<string | null> {
   if (cached) return cached;
   const res = await identityService.loadIdentities();
   if (!res.ok) return null;
-  useWorkspaceStore.getState().setIdentities(res.data.identities, res.data.defaultActiveId);
+  applyIdentityLoadResult(res.data);
   return readUserId();
 }
 
@@ -54,6 +54,6 @@ export async function ensureUserName(): Promise<string | null> {
   if (cached) return cached;
   const res = await identityService.loadIdentities();
   if (!res.ok) return null;
-  useWorkspaceStore.getState().setIdentities(res.data.identities, res.data.defaultActiveId);
+  applyIdentityLoadResult(res.data);
   return readUserName();
 }

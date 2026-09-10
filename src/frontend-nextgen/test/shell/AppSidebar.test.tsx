@@ -54,8 +54,8 @@ it('用户工作身份在展开与折叠导航中展示我的任务', () => {
 
 it('Bot 工作身份在展开与折叠导航中继续展示我的任务', () => {
   useWorkspaceStore.setState({
-    activeIdentityId: 'bot-1:447147',
-    identities: [{ id: 'bot-1:447147', kind: 'bot', displayName: 'Bot A', online: true }],
+    activeIdentityId: 'bot-1:900004',
+    identities: [{ id: 'bot-1:900004', kind: 'bot', displayName: 'Bot A', online: true }],
   });
 
   const expanded = render(

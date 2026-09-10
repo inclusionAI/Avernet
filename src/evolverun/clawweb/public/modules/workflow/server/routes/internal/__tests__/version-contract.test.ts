@@ -80,6 +80,19 @@ describe("ClawMind workflow version wire contract", () => {
     expect(await response.json()).toEqual({ found: false });
   });
 
+  it("filters edit records before limiting release history", async () => {
+    for (let deployNumber = 6; deployNumber <= 8; deployNumber++) {
+      raw.prepare(`INSERT INTO workflow_deploy_history
+        (pack_id, workflow_id, deploy_number, version, tag_name, action, spec_json, is_active, gmt_create)
+        VALUES (?, ?, ?, ?, ?, 'edit', ?, 0, ?)`)
+        .run("pack", "demo", deployNumber, 2, null, '{"id":"demo"}', deployNumber);
+    }
+
+    const response = await fetch(`${baseUrl}/deploy-history/demo/history?limit=1&releaseOnly=true`);
+    expect(response.status).toBe(200);
+    expect((await response.json()).history).toMatchObject([{ deployNumber: 5, action: "deploy" }]);
+  });
+
   it("activates the rollback target when the caller sends isActive", async () => {
     const response = await fetch(`${baseUrl}/deploy-history`, {
       method: "POST",
@@ -92,7 +105,7 @@ describe("ClawMind workflow version wire contract", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(raw.prepare("SELECT version, is_active FROM workflow_deploy_history WHERE workflow_id = 'demo' ORDER BY deploy_number").all())
+    expect(raw.prepare("SELECT version, is_active FROM workflow_deploy_history WHERE workflow_id = 'demo' AND action <> 'edit' ORDER BY deploy_number").all())
       .toEqual([{ version: 2, is_active: 0 }, { version: 1, is_active: 1 }]);
   });
 });

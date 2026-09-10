@@ -173,7 +173,7 @@ describe('BotSessionSidebar', () => {
         view="chat"
         availableViews={['chat', 'group']}
         onViewChange={() => {}}
-        identities={[{ id: 'identity:me', name: '风太', kind: 'user', avatar: '风' }]}
+        identities={[{ id: 'identity:me', name: '示例用户', kind: 'user', avatar: '风' }]}
         activeIdentityId="identity:me"
         chatBots={[]}
         friendBots={[]}
@@ -209,7 +209,7 @@ describe('BotSessionSidebar', () => {
         view="chat"
         availableViews={['chat', 'group']}
         onViewChange={() => {}}
-        identities={[{ id: 'identity:me', name: '风太', kind: 'user', avatar: '风' }]}
+        identities={[{ id: 'identity:me', name: '示例用户', kind: 'user', avatar: '风' }]}
         activeIdentityId="identity:me"
         chatBots={[bots[0]]}
         friendBots={[]}
@@ -375,7 +375,7 @@ describe('BotSessionSidebar', () => {
         view="chat"
         availableViews={['chat', 'group']}
         onViewChange={() => {}}
-        identities={[{ id: 'identity:me', name: '风太', kind: 'user', avatar: '风' }]}
+        identities={[{ id: 'identity:me', name: '示例用户', kind: 'user', avatar: '风' }]}
         activeIdentityId="identity:me"
         chatBots={bots}
         friendBots={[]}
@@ -398,10 +398,10 @@ describe('BotSessionSidebar', () => {
       />,
     );
 
-    expect(screen.queryByRole('button', { name: '当前协作身份：风太' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '风太管理的 Bot (2)' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '风太管理的 Bot (2)' })).toHaveClass('min-h-9');
-    expect(screen.getByRole('button', { name: '风太的好友 Bot (0)' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '当前协作身份：示例用户' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '示例用户管理的 Bot (2)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '示例用户管理的 Bot (2)' })).toHaveClass('min-h-9');
+    expect(screen.getByRole('button', { name: '示例用户的好友 Bot (0)' })).toBeInTheDocument();
   });
 
   it('Bot 卡片触发区支持键盘展开,新建会话不触发展开', async () => {
@@ -441,15 +441,15 @@ describe('BotSessionSidebar', () => {
     const createSessionButton = screen.getByRole('button', { name: '新建会话' });
     expect(createSessionButton).toBeInTheDocument();
     expect(createSessionButton).toHaveClass(
-      'h-7',
-      'w-7',
+      'h-6',
+      'w-6',
       'rounded-md',
       'text-muted-foreground',
       'hover:bg-primary/10',
       'hover:text-primary',
     );
     const scopeButton = screen.getByRole('button', { name: '会话范围：全部会话' });
-    expect(scopeButton).toHaveClass('h-7', 'w-7');
+    expect(scopeButton).toHaveClass('h-6', 'w-6');
     expect(scopeButton.querySelector('svg.lucide-list-filter')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Bot操作' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '管理 Bot' })).not.toBeInTheDocument();
@@ -772,7 +772,7 @@ describe('BotSessionSidebar', () => {
         view="chat"
         availableViews={['chat', 'group']}
         onViewChange={() => {}}
-        identities={[{ id: 'identity:me', name: '风太', kind: 'user', avatar: '风' }]}
+        identities={[{ id: 'identity:me', name: '示例用户', kind: 'user', avatar: '风' }]}
         activeIdentityId="identity:me"
         chatBots={bots}
         friendBots={[]}
@@ -800,7 +800,7 @@ describe('BotSessionSidebar', () => {
     const hintButton = screen.getByRole('button', { name: 'AgentCoding Bot 使用提示' });
     expect(hintButton).toHaveClass('h-7', 'w-7');
     expect(hintButton.closest('.flex.min-h-9')).toContainElement(
-      screen.getByRole('button', { name: '风太管理的 Bot (2)' }),
+      screen.getByRole('button', { name: '示例用户管理的 Bot (2)' }),
     );
     await userEvent.setup().hover(hintButton);
     const workshopLink = await screen.findByRole('link', { name: 'Bot 工坊' });

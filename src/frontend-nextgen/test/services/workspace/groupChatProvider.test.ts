@@ -19,7 +19,7 @@ const fakeSdkProvider = jest.fn<any>().mockImplementation((cfg: any) => {
   lastOriginalSend = send;
   const inner: any = {
     config: cfg,
-    transport: { send },
+    transport: { send, onMessage: jest.fn<any>() },
     request: jest.fn<any>().mockResolvedValue(undefined),
     abort: jest.fn<any>(),
     connect: jest.fn<any>(),
@@ -36,6 +36,7 @@ const fakeSdkProvider = jest.fn<any>().mockImplementation((cfg: any) => {
   inner.connect.mockImplementation(async () => {
     inner.isConnected = true;
   });
+  inner.originalOnMessage = inner.transport.onMessage;
   return inner;
 });
 
@@ -47,7 +48,7 @@ beforeEach(() => {
     lastOriginalSend = send;
     const inner: any = {
       config: cfg,
-      transport: { send },
+      transport: { send, onMessage: jest.fn<any>() },
       request: jest.fn<any>().mockResolvedValue(undefined),
       abort: jest.fn<any>(),
       connect: jest.fn<any>(),
@@ -64,6 +65,7 @@ beforeEach(() => {
     inner.connect.mockImplementation(async () => {
       inner.isConnected = true;
     });
+    inner.originalOnMessage = inner.transport.onMessage;
     return inner;
   });
 });
@@ -195,7 +197,7 @@ describe('groupChatProvider', () => {
     const provider = createGroupChatProvider({
       sessionId: 's1',
       groupId: 'g1',
-      identityId: 'human_327325',
+      identityId: 'human_900003',
       createSdkProvider: fakeSdkProvider as unknown as Parameters<
         typeof createGroupChatProvider
       >[0]['createSdkProvider'],
@@ -207,15 +209,15 @@ describe('groupChatProvider', () => {
     await provider.request({
       content: '@波士顿龙虾 你在干嘛',
       sessionId: 's1',
-      mentions: ['20260528_udt1y38n:327325'],
+      mentions: ['20260528_udt1y38n:900003'],
     });
     expect(inner.inner.request).toHaveBeenCalledWith({
       query: '@波士顿龙虾 你在干嘛',
       groupId: 'g1',
       sessionId: 's1',
-      senderId: '327325',
-      botUuid: 'human_327325',
-      mentions: ['20260528_udt1y38n:327325'],
+      senderId: '900003',
+      botUuid: 'human_900003',
+      mentions: ['20260528_udt1y38n:900003'],
     });
   });
 
@@ -229,7 +231,7 @@ describe('groupChatProvider', () => {
     const provider = createGroupChatProvider({
       sessionId: 's1',
       groupId: 'g1',
-      identityId: 'human_327325',
+      identityId: 'human_900003',
       createSdkProvider: fakeSdkProvider as unknown as Parameters<
         typeof createGroupChatProvider
       >[0]['createSdkProvider'],
@@ -255,8 +257,8 @@ describe('groupChatProvider', () => {
       query: '看图',
       groupId: 'g1',
       sessionId: 's1',
-      senderId: '327325',
-      botUuid: 'human_327325',
+      senderId: '900003',
+      botUuid: 'human_900003',
       attachments,
     });
   });
@@ -293,7 +295,7 @@ describe('groupChatProvider', () => {
     expect(lastOriginalSend).toHaveBeenCalledWith(
       expect.objectContaining({
         method: 'connect',
-        params: { group_id: 'g1', session_id: 's1' },
+        params: { group_id: 'g1', session_id: 's1', view_actor_id: 'me' },
       }),
     );
 
@@ -345,6 +347,31 @@ describe('groupChatProvider', () => {
     expect(firstInner.disconnect).toHaveBeenCalledTimes(1);
     expect(fakeSdkProvider.mock.calls[1][0].url).toBe('wss://x.test/openapi/v1/collaboration/messages/ws?token=tk-2');
     expect(secondInner).not.toBe(firstInner);
+  });
+
+  it('并发 reconnect 共享同一 in-flight：token 仅重拉一次、SDK provider 仅再构造一次', async () => {
+    sc.createSessionToken.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: { token: 'tk', expires_at: 999 },
+    });
+    const provider = createGroupChatProvider({
+      sessionId: 's-reconnect-race',
+      groupId: 'g1',
+      identityId: 'me',
+      createSdkProvider: fakeSdkProvider as unknown as Parameters<
+        typeof createGroupChatProvider
+      >[0]['createSdkProvider'],
+      wsOrigin: 'wss://x.test',
+    });
+
+    await provider.connect();
+    await Promise.all([provider.reconnect(), provider.reconnect()]);
+
+    // connect 1 次 + 并发 reconnect 合并为 1 次
+    expect(sc.createSessionToken).toHaveBeenCalledTimes(2);
+    expect(fakeSdkProvider).toHaveBeenCalledTimes(2);
   });
 
   it('兼容不提供 hydration 扩展能力的 SDK 版本', async () => {
@@ -688,5 +715,94 @@ describe('groupChatProvider', () => {
     expect(older).toEqual([]);
     // 只有首屏那次调用，未额外翻页请求。
     expect(sc.listSessionMessages).toHaveBeenCalledTimes(1);
+  });
+
+  it('connect 帧注入 view_actor_id=当前身份 id（human/bot 统一）', async () => {
+    sc.createSessionToken.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: { token: 'tk', expires_at: 999 },
+    });
+    const provider = createGroupChatProvider({
+      sessionId: 's1',
+      groupId: 'g1',
+      identityId: 'human_900003',
+      createSdkProvider: fakeSdkProvider as unknown as Parameters<
+        typeof createGroupChatProvider
+      >[0]['createSdkProvider'],
+      wsOrigin: 'wss://x.test',
+    });
+    await provider.connect();
+    const inner = provider as unknown as { inner: { transport: { send: jest.Mock } } };
+    await inner.inner.transport.send({ type: 'req', id: 'c1', method: 'connect', params: { group_id: 'g1' } });
+    expect(lastOriginalSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'connect',
+        params: { group_id: 'g1', session_id: 's1', view_actor_id: 'human_900003' },
+      }),
+    );
+    // chat.send 帧不注入 view_actor_id
+    await inner.inner.transport.send({ type: 'req', id: 's1', method: 'chat.send', params: { message: 'hi' } });
+    const sendCalls = (lastOriginalSend as jest.Mock).mock.calls;
+    const chatSendParams = sendCalls[sendCalls.length - 1][0].params as Record<string, unknown>;
+    expect(chatSendParams.view_actor_id).toBeUndefined();
+  });
+
+  it('入站 view_scope_changed 帧触发通知与自动重连（重拉 token），且不透传给 SDK parser', async () => {
+    sc.createSessionToken
+      .mockResolvedValueOnce({ code: 20000, message: '', request_id: 'r1', data: { token: 'tk-1', expires_at: 999 } })
+      .mockResolvedValueOnce({ code: 20000, message: '', request_id: 'r2', data: { token: 'tk-2', expires_at: 999 } });
+    const provider = createGroupChatProvider({
+      sessionId: 's-scope',
+      groupId: 'g1',
+      identityId: 'me',
+      createSdkProvider: fakeSdkProvider as unknown as Parameters<
+        typeof createGroupChatProvider
+      >[0]['createSdkProvider'],
+      wsOrigin: 'wss://x.test',
+    });
+    const onChanged = jest.fn();
+    provider.subscribeToViewScopeChanged(onChanged);
+    await provider.connect();
+    const firstInner = provider as unknown as {
+      inner: { transport: { onMessage?: (msg: unknown) => void }; originalOnMessage: jest.Mock };
+    };
+    const originalOnMessage = firstInner.inner.originalOnMessage;
+
+    firstInner.inner.transport.onMessage?.({ method: 'view_scope_changed' });
+
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    expect(sc.createSessionToken).toHaveBeenCalledTimes(2);
+    // 关闭事件帧不透传给 SDK 原 onMessage
+    expect(originalOnMessage).not.toHaveBeenCalledWith({ method: 'view_scope_changed' });
+  });
+
+  it('普通入站帧正常透传给 SDK 原 onMessage', async () => {
+    sc.createSessionToken.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: { token: 'tk', expires_at: 999 },
+    });
+    const provider = createGroupChatProvider({
+      sessionId: 's-pass',
+      groupId: 'g1',
+      identityId: 'me',
+      createSdkProvider: fakeSdkProvider as unknown as Parameters<
+        typeof createGroupChatProvider
+      >[0]['createSdkProvider'],
+      wsOrigin: 'wss://x.test',
+    });
+    await provider.connect();
+    const inner = provider as unknown as {
+      inner: { transport: { onMessage?: (msg: unknown) => void }; originalOnMessage: jest.Mock };
+    };
+    const rawFrame = { group_id: 'g1', message: 'hello' };
+    inner.inner.transport.onMessage?.(rawFrame);
+    expect(inner.inner.originalOnMessage).toHaveBeenCalledWith(rawFrame);
   });
 });

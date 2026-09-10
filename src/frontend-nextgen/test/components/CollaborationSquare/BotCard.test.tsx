@@ -8,7 +8,7 @@ const longDescription =
   '这是一个用于验证公开 Bot 卡片超长描述展示效果的说明文本，需要固定为两行，并在悬停后展示完整内容，避免卡片被持续撑高或撑宽。';
 
 const bot = {
-  id: 'bot-long-description:447147',
+  id: 'bot-long-description:900004',
   name: '长描述 Bot',
   ownerName: '示例用户',
   description: longDescription,
@@ -22,7 +22,7 @@ describe('SquareBotCard', () => {
     const { unmount } = render(
       <SquareBotCard
         bot={bot}
-        activeActor={{ type: 'human', id: '327325' }}
+        activeActor={{ type: 'human', id: '900003' }}
         busy={false}
         onShare={jest.fn()}
         onPrimaryAction={jest.fn()}

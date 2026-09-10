@@ -46,7 +46,7 @@ from ._fakes import (
     real_validator,
     skill_asset,
 )
-from agentclaw.community.plugins.local.object_store_client import InMemoryObjectStoreClientFactory
+from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 
 QC_URL = "https://content.example/skills/quality-check.zip"
 
@@ -103,7 +103,7 @@ def skill_rig(
         failures=fetch_failures or {},
     )
     content = FakeManifestContent()
-    pipeline = EntryFetcher(fetcher, content, FakeCredentials(), InMemoryObjectStoreClientFactory())
+    pipeline = EntryFetcher(fetcher, content, FakeCredentials(), FakeObjectStore())
     materialiser = SkillsMaterialiser(
         uploads, activation, reader, real_validator(), pipeline
     )

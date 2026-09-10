@@ -1,3 +1,4 @@
+import type { MessageViewScope } from '@/domain/collaboration/types';
 import { isAceLoginResponse } from '../aceLoginBody';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope, BackendApiPage } from '../types';
@@ -13,6 +14,8 @@ export interface GroupParticipantDto {
   name?: string;
   role: 'driver' | 'consultant' | 'manager' | 'worker' | 'observer';
   mode: 'auto' | 'muted' | 'absent' | 'present';
+  /** 该成员的消息可见域（human 参与者专属；bot 不下发）。 */
+  message_view_scope?: MessageViewScope;
 }
 export interface GroupCollaborationChat {
   strategy: 'chat';
@@ -40,6 +43,8 @@ export type GroupCollaboration =
 export interface GroupParticipantInput {
   actor_id: string;
   role: GroupParticipantDto['role'];
+  /** 创建群时为指定 human 参与者设置消息可见域；不传时由后端默认规则决定。 */
+  message_view_scope?: MessageViewScope;
 }
 
 export interface GroupDetailData {

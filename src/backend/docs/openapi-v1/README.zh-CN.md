@@ -963,24 +963,33 @@ _注：这里的 `Page` 是后端在整个目录列表上做的切片——engin
 与第一页开销相同。这只有在列表非递归时才成比例；若将来加 `recursive=true`，必须
 一并重新审视分页。_
 
-### 🟪 totalfrank + lucas-xzp · P3 —— skills，共担（六个已定案操作）· `openapi_v1/skills/router.py`
+### 🟪 totalfrank + lucas-xzp · P3 —— skills，共担 · `openapi_v1/skills/router.py`
 
-公共面是 Bot-owned `local://` Local Skill 生命周期，不是目录、市场、Git/Center 安装面或通用
-Skill Set API。collection 的可选 `active` filter 是唯一 Active-list 机制。所有操作均要求
-verified principal、按 owner/Bot 作用域处理，并使用标准 `Envelope` / `Page`。
+Desktop 对共享 Center Skill 的详情、内容、参数、Direct desired-state 与
+异步 Reference 接入约束见 [Desktop Center Skill 前端接入说明](desktop-center-skills.zh-CN.md)。
+
+上传与删除属于 Bot-owned `local://` 生命周期；经授权的 Local、Repo、Center
+资产共用详情、内容、参数与 Direct desired-state。目录、市场、发布、异步 Center
+Reference 和通用 SkillSet 操作仍使用各自独立 API。collection 的可选 `active`
+filter 是 Active-list 机制。所有操作均要求 verified principal、按 owner/Bot
+作用域处理，并使用标准 `Envelope` / `Page`。
 
 | 方法 | 路径 | 用途 | 成功响应 |
 |---|---|---|---|
 | GET | `/openapi/v1/bots/{bot_id}/skills` | 列出精确 Bot-owned Local Skill 元数据（`bot_id`、可选 owner locator、`active`、`keyword`、分页） | `Envelope[Page[Skill]]` |
 | POST | `/openapi/v1/bots/{bot_id}/skills` | 创建或安全替换一个原始 `application/zip` Local Skill 包 | `201 Envelope[SkillUpload]` / 替换时 `200` |
+| POST | `/openapi/v1/bots/{bot_id}/skills/upload-folder` | 创建或替换浏览器选择的 Local Skill 目录 | `201 Envelope[SkillUpload]` / 替换时 `200` |
 | GET | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | 读取一个部署范围 Skill ID 的公开元数据 | `Envelope[Skill]` |
+| GET | `/openapi/v1/bots/{bot_id}/skills/{skill_id}/content` | 读取已授权资产的当前期望内容 | `Envelope[SkillContent]` |
+| GET/PUT | `/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters` | 读取或替换该 Bot 上按 name 存储的参数 | `Envelope[SkillParameters]` |
 | POST | `/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate` | 设为 Active desired state 并同步 runtime | `Envelope[SkillState]` |
 | POST | `/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate` | 设为 Inactive desired state 并同步 runtime | `Envelope[SkillState]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | 可恢复地删除一个 Inactive Local Skill | `Envelope[Deleted]` |
+| GET | `/openapi/v1/bots/skills/{skill_id}/readme` | 不选择 Bot，读取可见的共享或 Local 文档 | `Envelope[SkillContent]` |
 
 `413101` 只在原始 ZIP upload 上公开。稳定 Local Skill subcode 为 `400101`、`404000`、
 `409101`–`409104`、`413101`、`502101`、`502102`；既有公共类别保持原有 `xxx000` code。
-Generated OpenAPI 已由合同测试锁定为恰好这六个操作。
+Generated OpenAPI 继续由 Backend Router 与 DTO 派生。
 
 **发布闸口：现在不得标记 Track B complete。** #725 的 cleanup-work DDL 必须先部署并验证，
 真实 owner/collaborator 预发验收仍需要已授权凭据与 Bot container。见英文

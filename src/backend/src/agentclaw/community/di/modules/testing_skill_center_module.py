@@ -24,15 +24,9 @@ from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterVersionStore,
 )
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
-from agentclaw.community.plugin_api.object_store_client import (
-    ObjectStoreClientFactory,
-)
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 from agentclaw.community.testing.draft_content_store import (
     LocalDraftContentStore,
-)
-from agentclaw.community.plugins.local.object_store_client import (
-    InMemoryObjectStoreClientFactory,
 )
 from agentclaw.community.plugins.local.oss_storage import MockObjectStoragePlugin
 from agentclaw.community.testing.canonical_center_store import (
@@ -64,15 +58,6 @@ class TestingSkillCenterModule(Module):
         binder.bind(
             ObjectStoragePlugin,
             to=MockObjectStoragePlugin,
-            scope=singleton,
-        )
-        # The manifest ``oss`` road's client factory. A singleton so a test
-        # can seed buckets and read back the calls on the same instance the
-        # service under test was handed — the plugin-hit evidence Rule 25's
-        # suites assert on.
-        binder.bind(
-            ObjectStoreClientFactory,
-            to=InMemoryObjectStoreClientFactory,
             scope=singleton,
         )
         binder.bind(

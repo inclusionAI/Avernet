@@ -39,7 +39,7 @@ from tests.community.core.bot_config_manifest.apply._fakes import (
 )
 
 from ._fakes import FakeObjectStorage
-from agentclaw.community.plugins.local.object_store_client import InMemoryObjectStoreClientFactory
+from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 
 _BASE = "teclaw/dev/bolt_data"
 _SCOPE = ManagedFileScope(entity_type="staff", entity_id="u_owner", bot_id="b_1")
@@ -126,7 +126,7 @@ def _rig(packages: dict[str, bytes]):
             for url, body in packages.items()
         }
     )
-    pipeline = EntryFetcher(fetcher, FakeManifestContent(), FakeCredentials(), InMemoryObjectStoreClientFactory())
+    pipeline = EntryFetcher(fetcher, FakeManifestContent(), FakeCredentials(), FakeObjectStore())
     materialiser = SkillsMaterialiser(
         port, activation, LiveCapabilityReader(skills, activation), real_validator(), pipeline
     )

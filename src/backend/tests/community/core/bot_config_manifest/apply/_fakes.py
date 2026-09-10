@@ -8,6 +8,7 @@ nothing". Equal-looking output would prove neither.
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
@@ -23,7 +24,11 @@ from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     FetchFailedError,
     FetchedObject,
 )
-from agentclaw.community.plugins.local.object_store_client import InMemoryObjectStoreClientFactory
+from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
+    ObjectFetchResult,
+    ObjectFetchStatus,
+    ObjectStoreTarget,
+)
 
 
 def fetched_object(
@@ -165,6 +170,114 @@ class FakeGuardedFetcher:
         return response
 
 
+@dataclass
+class FakeBucket:
+    """One bucket's contents and the credential entitled to read it."""
+
+    objects: dict[str, bytes] = field(default_factory=dict)
+    #: ``None`` means "any credential reads this bucket" — the shape a test
+    #: that is not about authorisation wants.
+    access_key_id: str | None = None
+    #: When set, every read answers ``UNAVAILABLE`` with this detail.
+    unavailable: str | None = None
+
+
+class FakeObjectStore:
+    """Stands in for ``AliyunObjectStore``: in-memory buckets, every status
+    reachable by seeding, and every read recorded.
+
+    A test double, not a shipped implementation — the real client has one
+    road and this is where each :class:`ObjectFetchStatus` is given a shape a
+    consumer test can drive:
+
+    - an object that is present answers ``FOUND``
+    - one that is not answers ``NOT_FOUND``
+    - a target whose key pair does not match what the bucket was seeded with
+      answers ``DENIED`` — credentials are compared rather than ignored,
+      because a double that authorised everything would let a consumer
+      bypass the credential entirely and still pass
+    - an object over the caller's ``byte_limit`` answers ``TOO_LARGE``
+      **without the caller ever holding it**
+    - a bucket a test marks unreachable answers ``UNAVAILABLE``
+
+    ``calls`` records ``(target, key, byte_limit)`` per read — the evidence a
+    consumer test asserts on so a pipeline cannot bypass the store and pass.
+    """
+
+    def __init__(self) -> None:
+        self.buckets: dict[str, FakeBucket] = {}
+        self.calls: list[tuple[ObjectStoreTarget, str, int]] = []
+
+    # --- seeding ------------------------------------------------------------
+
+    def put(
+        self,
+        bucket: str,
+        key: str,
+        content: bytes,
+        *,
+        access_key_id: str | None = None,
+    ) -> None:
+        holder = self.buckets.setdefault(bucket, FakeBucket())
+        holder.objects[key] = content
+        if access_key_id is not None:
+            holder.access_key_id = access_key_id
+
+    def make_unavailable(self, bucket: str, detail: str = "endpoint unreachable") -> None:
+        self.buckets.setdefault(bucket, FakeBucket()).unavailable = detail
+
+    def reset(self) -> None:
+        self.buckets.clear()
+        self.calls.clear()
+
+    # --- the read -----------------------------------------------------------
+
+    def get(
+        self, target: ObjectStoreTarget, key: str, *, byte_limit: int
+    ) -> ObjectFetchResult:
+        self.calls.append((target, key, byte_limit))
+        where = f"{target.bucket}/{key}"
+        bucket = self.buckets.get(target.bucket)
+
+        if bucket is None:
+            # An unknown bucket is not distinguishable from one this
+            # credential may not see, and guessing which would leak the
+            # difference. The store's own answer is the honest one.
+            return ObjectFetchResult(
+                ObjectFetchStatus.DENIED, detail=f"{where}: not authorized"
+            )
+        if bucket.unavailable is not None:
+            return ObjectFetchResult(
+                ObjectFetchStatus.UNAVAILABLE,
+                detail=f"{where}: {bucket.unavailable}",
+            )
+        if (
+            bucket.access_key_id is not None
+            and bucket.access_key_id != target.access_key_id
+        ):
+            return ObjectFetchResult(
+                ObjectFetchStatus.DENIED, detail=f"{where}: not authorized"
+            )
+
+        body = bucket.objects.get(key)
+        if body is None:
+            return ObjectFetchResult(
+                ObjectFetchStatus.NOT_FOUND, detail=f"{where}: no such object"
+            )
+        if len(body) > byte_limit:
+            # The bytes are NOT returned. A caller that received them would be
+            # holding exactly what the cap exists to keep out of memory, and a
+            # test asserting only on the status would not notice.
+            return ObjectFetchResult(
+                ObjectFetchStatus.TOO_LARGE,
+                detail=(
+                    f"{where}: object exceeds the {byte_limit}-byte cap "
+                    f"({len(body)} bytes)"
+                ),
+            )
+        return ObjectFetchResult(ObjectFetchStatus.FOUND, content=body)
+
+
 class FakeCredentials:
     """Stands in for W3: a named binding, live or missing.
 
@@ -287,7 +400,7 @@ def identity_rig(files: dict[str, str] | None = None):
     identity = FakeIdentityService(files)
     fetcher = FakeGuardedFetcher(responses={SOUL_URL: fetched_object(SOUL_BODY)})
     content = FakeManifestContent()
-    pipeline = EntryFetcher(fetcher, content, FakeCredentials(), InMemoryObjectStoreClientFactory())
+    pipeline = EntryFetcher(fetcher, content, FakeCredentials(), FakeObjectStore())
     return IdentityMaterialiser(identity, pipeline), identity, fetcher, content
 
 

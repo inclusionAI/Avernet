@@ -17,7 +17,7 @@ const loadIdentities = identityService.loadIdentities as unknown as jest.Mock<an
 
 type HumanIdentityValue = { userId: string; displayName: string } | null;
 
-/** 镜像 resolveOpenApiUserId：'human_327325'/'human:327325'/'me' → '327325'/'327325'/'me'。 */
+/** 镜像 resolveOpenApiUserId：'human_900003'/'human:900003'/'me' → '900003'/'900003'/'me'。 */
 function humanIdOf(id: string): string {
   const colon = id.indexOf(':');
   const afterColon = colon >= 0 ? id.slice(colon + 1) : id;
@@ -52,15 +52,15 @@ beforeEach(() => {
 
 describe('readUserId', () => {
   it('经 canonical getHumanIdentity 能力得当前操作者 user_id', () => {
-    setHumanIdentity({ userId: '327325', displayName: '风太' });
-    expect(readUserId()).toBe('327325');
+    setHumanIdentity({ userId: '900003', displayName: '示例用户' });
+    expect(readUserId()).toBe('900003');
   });
 
   it('即便 activeIdentityId 存在也忽略——以 capability 为唯一源（内部 staffNo 覆盖 BCS-id 形 store 值）', () => {
     // 模拟内部部署：store 的 activeIdentityId 为 BCS-id 形（human_<BCS>），但能力返回 staffNo
     useWorkspaceStore.setState({ activeIdentityId: 'human_gYJSGDajzYPV', identities: [] });
-    setHumanIdentity({ userId: '327325', displayName: '风太' });
-    expect(readUserId()).toBe('327325');
+    setHumanIdentity({ userId: '900003', displayName: '示例用户' });
+    expect(readUserId()).toBe('900003');
   });
 
   it('阿里云 BCS id 经 resolveUserId 幂等透传', () => {
@@ -69,12 +69,12 @@ describe('readUserId', () => {
   });
 
   it('capability 偶尔下发带前缀 id 时 resolveUserId 仍剥前缀兜底', () => {
-    setHumanIdentity({ userId: 'human_327325', displayName: '风太' });
-    expect(readUserId()).toBe('327325');
+    setHumanIdentity({ userId: 'human_900003', displayName: '示例用户' });
+    expect(readUserId()).toBe('900003');
   });
 
   it('capability 未就绪返回 null（不读 activeIdentityId）', () => {
-    useWorkspaceStore.setState({ activeIdentityId: 'human_327325' });
+    useWorkspaceStore.setState({ activeIdentityId: 'human_900003' });
     setHumanIdentity(null);
     expect(readUserId()).toBeNull();
   });
@@ -82,9 +82,9 @@ describe('readUserId', () => {
 
 describe('ensureUserId', () => {
   it('能力命中直接返回，不调 loadIdentities（内部 staffNo 同步命中）', async () => {
-    setHumanIdentity({ userId: '327325', displayName: '风太' });
+    setHumanIdentity({ userId: '900003', displayName: '示例用户' });
     const id = await ensureUserId();
-    expect(id).toBe('327325');
+    expect(id).toBe('900003');
     expect(loadIdentities).not.toHaveBeenCalled();
   });
 
@@ -124,17 +124,17 @@ describe('ensureUserId', () => {
 
 describe('readUserName', () => {
   it('固定形态：返回能力内 displayName（内部 __TERN__ 花名）', () => {
-    setHumanIdentity({ userId: '327325', displayName: '风太' });
-    expect(readUserName()).toBe('风太');
+    setHumanIdentity({ userId: '900003', displayName: '示例用户' });
+    expect(readUserName()).toBe('示例用户');
   });
 
   it('动态形态：从 identities 解析当前 human 花名', () => {
     setHumanIdentityDynamic();
     useWorkspaceStore.setState({
-      activeIdentityId: 'human_327325',
-      identities: [{ id: 'human_327325', kind: 'user', displayName: '风太', online: true }],
+      activeIdentityId: 'human_900003',
+      identities: [{ id: 'human_900003', kind: 'user', displayName: '示例用户', online: true }],
     });
-    expect(readUserName()).toBe('风太');
+    expect(readUserName()).toBe('示例用户');
   });
 
   it('identities 未就绪返回 null', () => {
@@ -145,8 +145,8 @@ describe('readUserName', () => {
 
 describe('ensureUserName', () => {
   it('能力命中直接返回花名，不调 loadIdentities', async () => {
-    setHumanIdentity({ userId: '327325', displayName: '风太' });
-    expect(await ensureUserName()).toBe('风太');
+    setHumanIdentity({ userId: '900003', displayName: '示例用户' });
+    expect(await ensureUserName()).toBe('示例用户');
     expect(loadIdentities).not.toHaveBeenCalled();
   });
 
@@ -155,13 +155,13 @@ describe('ensureUserName', () => {
     loadIdentities.mockResolvedValue({
       ok: true,
       data: {
-        identities: [{ id: 'human_327325', kind: 'user', displayName: '风太', online: true }],
-        defaultActiveId: 'human_327325',
+        identities: [{ id: 'human_900003', kind: 'user', displayName: '示例用户', online: true }],
+        defaultActiveId: 'human_900003',
       },
     });
-    expect(await ensureUserName()).toBe('风太');
+    expect(await ensureUserName()).toBe('示例用户');
     expect(loadIdentities).toHaveBeenCalledTimes(1);
-    expect(useWorkspaceStore.getState().activeIdentityId).toBe('human_327325');
+    expect(useWorkspaceStore.getState().activeIdentityId).toBe('human_900003');
   });
 
   it('补拉失败 → 返回 null', async () => {

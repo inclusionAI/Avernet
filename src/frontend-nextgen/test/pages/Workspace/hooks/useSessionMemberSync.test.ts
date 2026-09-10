@@ -15,8 +15,8 @@ type Map = Record<string, SessionView[]>;
 /** 包装子 hook:用真实 React state 承载 map,applyMapUpdate 走 setState 以触发重渲染。 */
 function useHarness(initial: Map, selectedId: string | null) {
   const [map, setMap] = useState<Map>(initial);
-  const { updateMemberMode } = useSessionMemberSync(selectedId, setMap, 0, map);
-  return { map, setMap, updateMemberMode };
+  const { updateMemberMode, updateMemberScope } = useSessionMemberSync(selectedId, setMap, 0, map);
+  return { map, setMap, updateMemberMode, updateMemberScope };
 }
 
 beforeEach(() => {
@@ -131,7 +131,7 @@ it('updateMemberMode 成功后用 PATCH 响应刷新对应会话 participants', 
   const { result } = renderHook(() => useHarness(initial, 's1'));
   const ok = await act(() => result.current.updateMemberMode('s1', 'b1', 'muted'));
   expect(ok).toBe(true);
-  expect(ss.updateMemberMode).toHaveBeenCalledWith('s1', 'b1', 'muted');
+  expect(ss.updateMemberMode).toHaveBeenCalledWith('s1', 'b1', 'muted', undefined);
   await waitFor(() => {
     expect(result.current.map.g1[0].participants.find((p) => p.actorId === 'b1')?.mode).toBe('muted');
   });
@@ -185,5 +185,66 @@ it('updateMemberMode 失败时返回 false', async () => {
   });
   const { result } = renderHook(() => useHarness({}, 's1'));
   const ok = await act(() => result.current.updateMemberMode('s1', 'b1', 'muted'));
+  expect(ok).toBe(false);
+});
+
+it('updateMemberScope 成功后就地刷新对应会话的 scope 回显', async () => {
+  ss.updateMemberScope.mockResolvedValue({
+    ok: true,
+    data: {
+      sessionId: 's1',
+      groupId: 'g1',
+      title: '一号',
+      kind: 'chat',
+      status: 'running',
+      participants: [
+        {
+          actorId: 'human_1',
+          kind: 'human' as const,
+          name: '章梧',
+          role: 'member' as const,
+          mode: 'present' as const,
+          messageViewScope: 'participant' as const,
+        },
+      ],
+      lastMessageAt: 1,
+      createdAt: 1,
+      favorite: false,
+    },
+  });
+  const initial: Map = {
+    g1: [
+      {
+        sessionId: 's1',
+        groupId: 'g1',
+        title: '一号',
+        kind: 'chat',
+        status: 'running',
+        participants: [],
+        lastMessageAt: 1,
+        createdAt: 1,
+        favorite: true,
+      },
+    ],
+  };
+  const { result } = renderHook(() => useHarness(initial, 's1'));
+  const ok = await act(() => result.current.updateMemberScope('s1', 'human_1', 'participant'));
+  expect(ok).toBe(true);
+  expect(ss.updateMemberScope).toHaveBeenCalledWith('s1', 'human_1', 'participant');
+  await waitFor(() => {
+    expect(result.current.map.g1[0].participants.find((p) => p.actorId === 'human_1')?.messageViewScope).toBe(
+      'participant',
+    );
+  });
+  expect(result.current.map.g1[0].favorite).toBe(true);
+});
+
+it('updateMemberScope 失败时返回 false', async () => {
+  ss.updateMemberScope.mockResolvedValue({
+    ok: false,
+    error: { code: 'X', friendlyMessage: '切换消息视角失败', canRetry: false },
+  });
+  const { result } = renderHook(() => useHarness({}, 's1'));
+  const ok = await act(() => result.current.updateMemberScope('s1', 'human_1', 'participant'));
   expect(ok).toBe(false);
 });

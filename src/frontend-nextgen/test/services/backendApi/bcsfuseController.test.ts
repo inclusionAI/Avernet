@@ -42,7 +42,7 @@ describe('bcsfuse worker config controller', () => {
     const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() =>
       response({
         success: true,
-        worker_id: '20260720_4kekavkp:447147',
+        worker_id: '20260720_4kekavkp:900004',
         fusion_enable: true,
         version: 10,
         server_ip: '11.38.221.87',
@@ -50,15 +50,15 @@ describe('bcsfuse worker config controller', () => {
     );
     const signal = new AbortController().signal;
 
-    await expect(getWorkerConfig('20260720_4kekavkp:447147', signal)).resolves.toEqual({
+    await expect(getWorkerConfig('20260720_4kekavkp:900004', signal)).resolves.toEqual({
       success: true,
-      worker_id: '20260720_4kekavkp:447147',
+      worker_id: '20260720_4kekavkp:900004',
       fusion_enable: true,
       version: 10,
       server_ip: '11.38.221.87',
     });
     expect(spy).toHaveBeenCalledWith(
-      '/openapi/v1/bcsfuse/workers/20260720_4kekavkp:447147/config',
+      '/openapi/v1/bcsfuse/workers/20260720_4kekavkp:900004/config',
       expect.objectContaining({ method: 'GET', signal }),
     );
   });
@@ -101,15 +101,15 @@ describe('bcsfuse worker config controller', () => {
     const spy = jest
       .spyOn(globalThis, 'fetch')
       .mockImplementation(() =>
-        response({ success: true, worker_id: '20260825_mbu0ey8f:447147', fusion_enable: false, version: 2 }),
+        response({ success: true, worker_id: '20260825_mbu0ey8f:900004', fusion_enable: false, version: 2 }),
       );
     const signal = new AbortController().signal;
 
     await expect(
-      updateWorkerConfig('20260825_mbu0ey8f:447147', { fusion_enable: false }, signal),
+      updateWorkerConfig('20260825_mbu0ey8f:900004', { fusion_enable: false }, signal),
     ).resolves.toMatchObject({ fusion_enable: false });
     expect(spy).toHaveBeenCalledWith(
-      '/openapi/v1/bcsfuse/workers/20260825_mbu0ey8f:447147/config',
+      '/openapi/v1/bcsfuse/workers/20260825_mbu0ey8f:900004/config',
       expect.objectContaining({
         method: 'PUT',
         signal,

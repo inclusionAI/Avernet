@@ -1243,6 +1243,7 @@ export const api = {
   runs: {
     list(params?: {
       status?: string
+      query?: string
       statuses?: string[]
       workflowId?: string
       limit?: number
@@ -1256,6 +1257,7 @@ export const api = {
       const sp = new URLSearchParams()
       if (params?.status) sp.set('status', params.status)
       if (params?.statuses?.length) sp.set('statuses', params.statuses.join(','))
+      if (params?.query) sp.set('query', params.query)
       if (params?.workflowId) sp.set('workflowId', params.workflowId)
       if (params?.limit) sp.set('limit', String(params.limit))
       if (params?.offset) sp.set('offset', String(params.offset))
@@ -1456,7 +1458,7 @@ export const api = {
     },
 
     /** GET /api/workflows/:wf/history — deploy history list (no spec_json). */
-    getHistory(workflowId: string, limit = 50, releaseOnly = false): Promise<{ workflowId: string; history: DeployHistoryItem[] }> {
+    getHistory(workflowId: string, limit = 50, releaseOnly = false): Promise<{ workflowId: string; history: DeployHistoryItem[]; active: DeployHistoryItem | null }> {
       const query = new URLSearchParams({ limit: String(limit) })
       if (releaseOnly) query.set('releaseOnly', 'true')
       return fetchJson(`${BASE}/workflows/${encodeURIComponent(workflowId)}/history?${query.toString()}`)

@@ -20,7 +20,7 @@ const mockedCreateFriendConnectionRequest = jest.spyOn(friendConnectionControlle
 const mockedCreateBotSession = jest.spyOn(botSessionController, 'createBotSession');
 const mockedCreateGroupSession = jest.spyOn(sessionController, 'createSession');
 const mockedListBbsTasks = jest.spyOn(bbsTaskController, 'listBbsTasks');
-const humanContext = { actorId: 'human_327325', userId: '327325' };
+const humanContext = { actorId: 'human_900003', userId: '900003' };
 
 beforeEach(() => {
   mockedSearchPublicBots.mockReset();
@@ -212,16 +212,16 @@ describe('CollaborationSquareApiAdapter', () => {
     mockedListFriendConnections.mockResolvedValue({ code: 20000, data: { items: [], total: 0 } });
     mockedListFriendConnectionRequests.mockResolvedValue({ code: 20000, data: { items: [], total: 0 } });
     const adapter = new CollaborationSquareApiAdapter();
-    const viewer = { viewerActorType: 'human' as const, viewerActorId: '327325' };
+    const viewer = { viewerActorType: 'human' as const, viewerActorId: '900003' };
 
     await adapter.listBots({ page: 1, pageSize: 5, ...viewer });
     expect(mockedSearchPublicBots).toHaveBeenCalledWith(
-      { page: 1, page_size: 5, viewer_actor_type: 'human', viewer_actor_id: '327325' },
+      { page: 1, page_size: 5, viewer_actor_type: 'human', viewer_actor_id: '900003' },
       undefined,
     );
     // Search 路径仅补读 pending 申请，回填 actor 跟随 viewer（human）。
     expect(mockedListFriendConnectionRequests).toHaveBeenCalledWith(
-      expect.objectContaining({ actor_type: 'human', actor_id: '327325', direction: 'sent', status: 'pending' }),
+      expect.objectContaining({ actor_type: 'human', actor_id: '900003', direction: 'sent', status: 'pending' }),
       undefined,
     );
 
@@ -233,7 +233,7 @@ describe('CollaborationSquareApiAdapter', () => {
         min_score: 0.1,
         runtime_state: 'online',
         viewer_actor_type: 'human',
-        viewer_actor_id: '327325',
+        viewer_actor_id: '900003',
       },
       undefined,
     );
@@ -249,7 +249,7 @@ describe('CollaborationSquareApiAdapter', () => {
             bot_type: 'assistant',
             description: '',
             engine: 'OpenClaw',
-            entity_id: '327325',
+            entity_id: '900003',
             name: '我的公开 Bot',
             owner_name: '当前用户',
             status: 'online',
@@ -265,8 +265,8 @@ describe('CollaborationSquareApiAdapter', () => {
         items: [
           {
             request_id: 'request-owned-bot',
-            from_actor: { type: 'human', id: '327325' },
-            to_actor: { type: 'bot', id: 'owned-bot:327325' },
+            from_actor: { type: 'human', id: '900003' },
+            to_actor: { type: 'bot', id: 'owned-bot:900003' },
             status: 'pending',
           },
         ],
@@ -275,7 +275,7 @@ describe('CollaborationSquareApiAdapter', () => {
     });
 
     const result = await new CollaborationSquareApiAdapter().listBotPage(
-      { viewerActorType: 'human', viewerActorId: '327325' },
+      { viewerActorType: 'human', viewerActorId: '900003' },
       humanContext,
     );
 
@@ -483,7 +483,7 @@ describe('CollaborationSquareApiAdapter', () => {
         items: [
           {
             request_id: 'request-1',
-            from_actor: { type: 'human', id: '327325' },
+            from_actor: { type: 'human', id: '900003' },
             to_actor: { type: 'bot', id: 'bot-applying:e2' },
             status: 'pending',
           },
@@ -500,7 +500,7 @@ describe('CollaborationSquareApiAdapter', () => {
         direction: 'sent',
         status: 'pending',
         actor_type: 'human',
-        actor_id: '327325',
+        actor_id: '900003',
         page: 1,
         page_size: 100,
       },
@@ -577,7 +577,7 @@ describe('CollaborationSquareApiAdapter', () => {
           items: [
             {
               request_id: 'request-1',
-              from_actor: { type: 'human', id: '327325' },
+              from_actor: { type: 'human', id: '900003' },
               to_actor: { type: 'bot', id: 'bot-applying:e2' },
               status: 'pending',
             },
@@ -591,7 +591,7 @@ describe('CollaborationSquareApiAdapter', () => {
           items: [
             {
               request_id: 'request-2',
-              from_actor: { type: 'human', id: '327325' },
+              from_actor: { type: 'human', id: '900003' },
               to_actor: { type: 'bot', id: 'bot-other' },
               status: 'pending',
             },
@@ -602,7 +602,7 @@ describe('CollaborationSquareApiAdapter', () => {
 
     const result = await new CollaborationSquareApiAdapter().discoverBots({ keyword: 'workflow' }, humanContext);
 
-    expect(mockedListFriendConnections).toHaveBeenCalledWith({ actor_type: 'human', actor_id: '327325' }, undefined);
+    expect(mockedListFriendConnections).toHaveBeenCalledWith({ actor_type: 'human', actor_id: '900003' }, undefined);
     expect(mockedListFriendConnectionRequests).toHaveBeenCalledTimes(2);
     expect(result.map((bot) => [bot.id, bot.relationshipStatus])).toEqual([
       ['bot-friend:e1', 'friend'],
@@ -635,7 +635,7 @@ describe('CollaborationSquareApiAdapter', () => {
     });
     expect(mockedCreateFriendConnectionRequest).toHaveBeenCalledWith({
       to_actor: { type: 'bot', id: 'bot-1' },
-      from_actor: { type: 'human', id: '327325' },
+      from_actor: { type: 'human', id: '900003' },
     });
   });
 
@@ -650,7 +650,7 @@ describe('CollaborationSquareApiAdapter', () => {
     ).resolves.toEqual({ status: 'applying' });
     expect(mockedCreateFriendConnectionRequest).toHaveBeenCalledWith({
       to_actor: { type: 'bot', id: 'explicit-bot-uuid' },
-      from_actor: { type: 'human', id: '327325' },
+      from_actor: { type: 'human', id: '900003' },
     });
   });
 
@@ -669,7 +669,7 @@ describe('CollaborationSquareApiAdapter', () => {
     ).resolves.toEqual({ status: 'applying' });
     expect(mockedCreateFriendConnectionRequest).toHaveBeenCalledWith({
       to_actor: { type: 'bot', id: '20260410_kt9ermvn:431368' },
-      from_actor: { type: 'human', id: '327325' },
+      from_actor: { type: 'human', id: '900003' },
     });
   });
 
@@ -749,7 +749,7 @@ describe('CollaborationSquareApiAdapter', () => {
     });
     expect(mockedCreateBotSession).toHaveBeenCalledWith(
       'bot-1',
-      { user_id: '327325', owner_id: '2088', f_user_id: '327325' },
+      { user_id: '900003', owner_id: '2088', f_user_id: '900003' },
       {},
     );
   });
@@ -765,7 +765,7 @@ describe('CollaborationSquareApiAdapter', () => {
         isOwnedByLoggedInUser: true,
       }),
     ).resolves.toEqual({ sessionId: 'session-owned' });
-    expect(mockedCreateBotSession).toHaveBeenCalledWith('bot-1', { user_id: '327325', owner_id: '2088' }, {});
+    expect(mockedCreateBotSession).toHaveBeenCalledWith('bot-1', { user_id: '900003', owner_id: '2088' }, {});
   });
 
   it('rejects a session response without session_id as a protocol error', async () => {
@@ -811,7 +811,7 @@ describe('CollaborationSquareApiAdapter', () => {
         status: 'running',
         participants: [
           {
-            actor_id: 'human_327325',
+            actor_id: 'human_900003',
             actor_kind: 'human',
             role: 'consultant',
             mode: 'present',
@@ -828,7 +828,7 @@ describe('CollaborationSquareApiAdapter', () => {
       defaultRole: '顾问',
       memberSource: 'session_temp',
     });
-    expect(mockedCreateGroupSession).toHaveBeenCalledWith('group-1', { kind: 'chat', acting_bot_id: 'human_327325' });
+    expect(mockedCreateGroupSession).toHaveBeenCalledWith('group-1', { kind: 'chat', acting_bot_id: 'human_900003' });
   });
 
   it('rejects a public group session response without session_id or caller role', async () => {

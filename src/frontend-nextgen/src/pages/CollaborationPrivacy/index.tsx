@@ -43,7 +43,7 @@ export default function CollaborationPrivacyPage() {
       <div className="mx-auto max-w-7xl space-y-5 p-4 sm:p-6 lg:p-8">
         <PageHeader
           title="协作权限"
-          description="管理用户信息，以及归属于当前用户的所有 Bot 在 BCN 网络中的各类协作状态及好友审批策略。"
+          description="管理用户信息，以及归属于当前用户的所有 Bot 在 BCN 网络中的各类协作状态及好友审批策略"
         />
         {privacy.loading && <LoadingState />}
         {!privacy.loading && privacy.error && (

@@ -1,6 +1,7 @@
 """HTTP contract tests for #722's Bot-scoped Local Skill read routes."""
 
 from __future__ import annotations
+from unittest.mock import MagicMock
 
 import json
 import time
@@ -684,7 +685,17 @@ def _real_query_service(db, bots, skills) -> SkillQueryService:
         PassthroughSkillVersionResolver(),
     )
     return SkillQueryService(
-        skills, bots, object(), reader, object(), object(), lambda: object()
+        skills,
+        bots,
+        object(),
+        reader,
+        object(),
+        object(),
+        lambda: object(),
+        object(),
+        object(),
+        object(),
+        object(),
     )
 
 
@@ -1054,18 +1065,21 @@ async def test_state_command_cannot_cross_the_real_tenant_guard(tmp_path):
     service = DirectActivationService(
         object(),
         bots,
-        skills,
+        _real_query_service(db, bots, skills),
         factory.runtime,
         object(),
         object(),
         object(),
         object(),
         PlatformDefaultMcpPolicy(lambda _bot_id: None),
+        MagicMock(),
     )
     with avernet_tenant_scope("tenant-b"):
         with pytest.raises(LocalSkillNotFoundError):
             await service.activate_skill(
-                skill_id=skill["id"], bot_id="bot", owner_id="owner",
+                skill_id=skill["id"],
+                bot_id="bot",
+                owner_id="owner",
                 actor_id="owner",
             )
     assert factory.runtime.calls == 0

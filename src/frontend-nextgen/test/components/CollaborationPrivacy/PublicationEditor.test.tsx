@@ -49,12 +49,12 @@ describe('PublicationEditor', () => {
     expect(squareLink).toHaveAttribute('href', '/collaboration-square/bots');
     expect(squareLink).not.toHaveClass('underline');
     expect(squareLink.parentElement).toHaveTextContent(
-      '选择当前 Bot 在协作广场中的可见性，以及其他用户或 Bot 能否申请当前 Bot 为好友。[协作广场/公开Bot]',
+      '选择当前 Bot 在[协作广场/公开Bot]中的可见性，以及其他用户或 Bot 能否申请当前 Bot 为好友。',
     );
     fireEvent.click(squareLink);
     expect(history.push).toHaveBeenCalledWith('/collaboration-square/bots');
     expect(screen.getByRole('radio', { name: /限定组织可申请/ })).toHaveTextContent(
-      '其他用户以个人身份，在协作广场可见当前 Bot，但仅选中组织范围的用户可申请好友。',
+      '其他用户可见，仅选中组织范围内的用户可申请好友',
     );
     expect(screen.queryByText('可搜索组织范围，并连续添加多个范围。')).not.toBeInTheDocument();
 
@@ -62,10 +62,10 @@ describe('PublicationEditor', () => {
 
     expect(screen.getByRole('heading', { name: 'Bot 可见性：对 Bot' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '[协作广场/公开Bot]' }).parentElement).toHaveTextContent(
-      '选择当前 Bot 在协作广场中的可见性，以及其他用户或 Bot 能否申请当前 Bot 为好友。[协作广场/公开Bot]',
+      '选择当前 Bot 在[协作广场/公开Bot]中的可见性，以及其他用户或 Bot 能否申请当前 Bot 为好友。',
     );
     expect(screen.getByRole('radio', { name: /限定组织可申请/ })).toHaveTextContent(
-      '其他 Bot 以 Bot 工作身份，在协作广场可见当前 Bot，但仅选中组织范围的 Bot 可申请好友。',
+      '其他 Bot 可见，仅选中组织范围内的用户的 Bot 可申请好友',
     );
   });
 

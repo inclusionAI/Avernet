@@ -556,6 +556,21 @@ class DesktopBotPeriodicScanConfig:
 
 
 @dataclass(frozen=True)
+class DesktopSkillRecoveryConfig:
+    """Low-frequency safety net for missed Desktop Skill recovery wakes."""
+
+    enabled: bool = True
+    sweep_interval_seconds: float = 10 * 60
+    sweep_page_size: int = 100
+
+    def __post_init__(self) -> None:
+        if self.sweep_interval_seconds <= 0:
+            raise ValueError("sweep_interval_seconds must be positive")
+        if self.sweep_page_size <= 0:
+            raise ValueError("sweep_page_size must be positive")
+
+
+@dataclass(frozen=True)
 class AixConfig:
     """AIX preview config for dingding channels (the ``aix`` user_config block).
 

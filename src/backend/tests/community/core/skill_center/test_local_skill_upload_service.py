@@ -21,11 +21,20 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillStorageError,
 )
 from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    RuntimeProjectionResult,
+)
 from agentclaw.community.core.skill_center.services import (
     local_skill_upload_service as upload_module,
 )
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
+)
+from agentclaw.community.core.skill_center.services.desktop_skill_recovery import (
+    DesktopSkillRecoveryService,
+)
+from agentclaw.community.core.skill_center.services.recovering_bot_runtime_projector import (
+    RecoveringBotRuntimeProjector,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
@@ -1350,6 +1359,101 @@ async def test_active_replacement_keeps_new_content_when_runtime_is_pending():
     assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"] == (
         _skill_md(description="new description")
     )
+
+
+@pytest.mark.asyncio
+async def test_active_replacement_pending_ensures_common_desktop_recovery():
+    class _PendingProjector:
+        calls = 0
+
+        async def project(self, **_kwargs):
+            self.calls += 1
+            return RuntimeProjectionResult.pending(
+                code="CENTER_CONTENT_DOWNLOAD_PENDING",
+                reason="Center package download is active",
+            )
+
+    class _Recovery:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def ensure(self, **kwargs):
+            self.calls.append(kwargs)
+
+    filesystem = _Filesystem()
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
+    recovery = _Recovery()
+    runtime = RecoveringBotRuntimeProjector(
+        delegate=_PendingProjector(),  # type: ignore[arg-type]
+        recovery=recovery,  # type: ignore[arg-type]
+    )
+
+    result = await _replacement_service(
+        filesystem,
+        _ReplacementRepo([_existing_skill(active=True)]),
+        runtime,
+    ).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip({"SKILL.md": _skill_md(description="new description")}),
+    )
+
+    assert result["runtime_projection"]["status"] == "PENDING"
+    assert recovery.calls == [{"owner_id": "owner", "bot_id": "bot"}]
+
+
+@pytest.mark.asyncio
+async def test_active_replacement_preserves_enqueue_failure_and_new_content(caplog):
+    class _PendingProjector:
+        async def project(self, **_kwargs):
+            return RuntimeProjectionResult.pending(
+                code="CENTER_CONTENT_DOWNLOAD_PENDING",
+                reason="Center package download is active",
+            )
+
+    class _DesktopBots:
+        def get_by_id_and_owner(self, bot_id, owner_id):
+            return {
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "bot_type": "desktop",
+            }
+
+    class _FailingTasks:
+        def enqueue(self, *_args, **_kwargs):
+            raise RuntimeError("task database unavailable")
+
+    filesystem = _Filesystem()
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
+    runtime = RecoveringBotRuntimeProjector(
+        delegate=_PendingProjector(),  # type: ignore[arg-type]
+        recovery=DesktopSkillRecoveryService(
+            bots=_DesktopBots(),  # type: ignore[arg-type]
+            tasks=_FailingTasks(),  # type: ignore[arg-type]
+        ),
+    )
+
+    result = await _replacement_service(
+        filesystem,
+        _ReplacementRepo([_existing_skill(active=True)]),
+        runtime,
+    ).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip({"SKILL.md": _skill_md(description="new description")}),
+    )
+
+    assert result["operation"] == "updated"
+    assert {issue["code"] for issue in result["runtime_projection"]["issues"]} == {
+        "CENTER_CONTENT_DOWNLOAD_PENDING",
+        "DESKTOP_SKILL_RECOVERY_ENQUEUE_FAILED",
+    }
+    assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"] == (
+        _skill_md(description="new description")
+    )
+    assert "task database unavailable" in caplog.text
 
 
 @pytest.mark.asyncio

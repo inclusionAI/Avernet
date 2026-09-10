@@ -31,7 +31,7 @@ beforeEach(() => {
     ok: false,
     error: { code: 'IDENTITY_LOAD_FAILED', friendlyMessage: '', canRetry: true },
   });
-  setUserIdentity({ userId: '327325', displayName: null });
+  setUserIdentity({ userId: '900003', displayName: null });
 });
 
 /**
@@ -39,7 +39,9 @@ beforeEach(() => {
  *  - resolve 一个信封（success envelope 或业务失败 envelope）；
  *  - reject 一个 BackendRequestError（网络异常，且可控制 message 是否可读以验证「请求异常」回退）。
  */
-function mockAddByUserId(map: Record<string, { resolve?: Record<string, unknown> | null; reject?: BackendRequestError } | null>): void {
+function mockAddByUserId(
+  map: Record<string, { resolve?: Record<string, unknown> | null; reject?: BackendRequestError } | null>,
+): void {
   sc.addSpaceMember.mockImplementation((_spaceId: unknown, body: { member_user_id: string }) => {
     const entry = map[body.member_user_id];
     if (!entry || entry.resolve === null || entry.reject) {
@@ -60,7 +62,11 @@ describe('adminService.addMembersBatch：Promise.allSettled + {error} 归属', (
       ok2: { resolve: { success: true, data: { user_id: 'ok2', role: 'MEMBER' } } },
       ok3: { resolve: { success: true, data: { user_id: 'ok3', role: 'MEMBER' } } },
     });
-    const r = await adminService.addMembersBatch(10001, [{ userId: 'ok1' }, { userId: 'ok2' }, { userId: 'ok3' }], 'MEMBER');
+    const r = await adminService.addMembersBatch(
+      10001,
+      [{ userId: 'ok1' }, { userId: 'ok2' }, { userId: 'ok3' }],
+      'MEMBER',
+    );
     expect(r.succeeded.map((m) => m.userId).sort()).toEqual(['ok1', 'ok2', 'ok3']);
     expect(r.failed).toEqual([]);
     expect(sc.addSpaceMember).toHaveBeenCalledTimes(3);
@@ -87,7 +93,13 @@ describe('adminService.addMembersBatch：Promise.allSettled + {error} 归属', (
   it('网络异常无可读 message → 失败原因回退「请求异常」', async () => {
     // 5xx + 空 body + 空 message → toServiceError 得 message='' → 聚合回退「请求异常」
     mockAddByUserId({
-      neterr: { reject: new BackendRequestError('', { status: 500, data: {}, apiPath: '/openapi/v1/bots/spaces/10001/members' }) },
+      neterr: {
+        reject: new BackendRequestError('', {
+          status: 500,
+          data: {},
+          apiPath: '/openapi/v1/bots/spaces/10001/members',
+        }),
+      },
     });
     const r = await adminService.addMembersBatch(10001, [{ userId: 'neterr' }], 'MEMBER');
     expect(r.succeeded).toEqual([]);
@@ -123,12 +135,12 @@ describe('adminService.addMembersBatch：Promise.allSettled + {error} 归属', (
       named: { resolve: { success: true, data: { user_id: 'named', role: 'MEMBER' } } },
       plain: { resolve: { success: true, data: { user_id: 'plain', role: 'MEMBER' } } },
     });
-    await adminService.addMembersBatch(
-      10001,
-      [{ userId: 'named', userName: '花名甲' }, { userId: 'plain' }],
-      'MEMBER',
-    );
-    const calls = sc.addSpaceMember.mock.calls as unknown as [unknown, Record<string, unknown>, Record<string, unknown>][];
+    await adminService.addMembersBatch(10001, [{ userId: 'named', userName: '花名甲' }, { userId: 'plain' }], 'MEMBER');
+    const calls = sc.addSpaceMember.mock.calls as unknown as [
+      unknown,
+      Record<string, unknown>,
+      Record<string, unknown>,
+    ][];
     const namedCall = calls.find((c) => c[1]?.member_user_id === 'named');
     const plainCall = calls.find((c) => c[1]?.member_user_id === 'plain');
     expect(namedCall?.[1]).toMatchObject({ member_user_id: 'named', member_user_name: '花名甲', role: 'MEMBER' });
@@ -142,9 +154,13 @@ describe('adminService.addMembersBatch：Promise.allSettled + {error} 归属', (
       b: { resolve: { success: true, data: { user_id: 'b', role: 'ADMIN' } } },
     });
     await adminService.addMembersBatch(10001, [{ userId: 'a' }, { userId: 'b' }], 'ADMIN');
-    const calls = sc.addSpaceMember.mock.calls as unknown as [unknown, Record<string, unknown>, Record<string, unknown>][];
+    const calls = sc.addSpaceMember.mock.calls as unknown as [
+      unknown,
+      Record<string, unknown>,
+      Record<string, unknown>,
+    ][];
     expect(calls.every((c) => c[1]?.role === 'ADMIN')).toBe(true);
-    expect(calls.every((c) => c[2]?.user_id === '327325')).toBe(true);
+    expect(calls.every((c) => c[2]?.user_id === '900003')).toBe(true);
   });
 
   it('空批次 → 不发请求、succeeded/failed 均为空', async () => {

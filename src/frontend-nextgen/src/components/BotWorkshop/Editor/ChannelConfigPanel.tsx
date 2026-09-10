@@ -2,6 +2,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
+import { Switch } from '@/components/ui/Switch';
 import type { BotChannel, BotChannelInput, ChannelBindingMode } from '@/domain/botAdvancedConfig';
 import { CircleHelp, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
@@ -74,52 +75,73 @@ export function ChannelConfigPanel({
           <Badge tone="neutral">{modeLabel}</Badge>
         </div>
         {visibleChannels.length ? (
-          visibleChannels.map((channel) => (
-            <div key={channel.id} className="flex items-center gap-4 rounded-lg border border-border p-3">
-              <div className="min-w-0 flex-1">
-                <p className="m-0 font-medium">钉钉 · {channel.description || channel.clientId}</p>
-                <p className="m-0 mt-1 text-xs text-muted-foreground">
-                  {bindingMode === 'bcn_gateway' ? `Robot Code：${channel.robotCode || '未配置'} · ` : ''}
-                  Client ID：{channel.clientId} · Secret {channel.hasSecret ? '已配置' : '未配置'}
-                </p>
-                <p className="m-0 mt-1 text-xs text-muted-foreground">
-                  流式输出：{channel.enableStreamingCards ? '已开启' : '已关闭'}
-                  {bindingMode === 'plugin'
-                    ? ` · 私聊：${channel.dmPolicy === 'open' ? '允许' : '禁止'}`
-                    : ` · 会话：${channel.groupChatScope === 'conversation_shared' ? '群内共享' : '按发送者隔离'}`}
-                  {channel.createdAt
-                    ? ` · 创建于 ${new Date(channel.createdAt).toLocaleString('zh-CN', { hour12: false })}`
-                    : ''}
-                </p>
-              </div>
-              <Badge tone={channel.status === 'active' ? 'success' : 'neutral'}>
-                {channel.status === 'active' ? '已启用' : '已停用'}
-              </Badge>
-              <Button variant="secondary" size="sm" disabled={!editable} onClick={() => void onToggle(channel)}>
-                {channel.status === 'active' ? '停用' : '启用'}
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                disabled={!editable}
-                aria-label={`编辑${channel.description || channel.clientId}`}
-                leftIcon={<Pencil className="size-4" />}
-                onClick={() => {
-                  setEditing(channel);
-                  setOpen(true);
-                }}
-              />
-              <ConfirmDialog
-                title="删除渠道"
-                description="删除后需重新配置凭证。"
-                confirmVariant="destructive"
-                disabled={!editable}
-                onConfirm={() => onDelete(channel.id)}
-              >
-                <Button variant="ghost" size="icon" aria-label="删除渠道" leftIcon={<Trash2 className="size-4" />} />
-              </ConfirmDialog>
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <div className="grid min-w-[780px] grid-cols-[minmax(150px,1.4fr)_90px_minmax(150px,1.2fr)_100px_150px_100px] gap-3 border-b border-border bg-muted px-4 py-2 text-xs font-medium text-muted-foreground">
+              <span>场景描述</span>
+              <span>绑定环境</span>
+              <span>{bindingMode === 'plugin' ? '机器人 ID' : 'Robot Code'}</span>
+              <span>状态</span>
+              <span>创建时间</span>
+              <span className="text-right">操作</span>
             </div>
-          ))
+            {visibleChannels.map((channel) => (
+              <div
+                key={channel.id}
+                className="grid min-w-[780px] grid-cols-[minmax(150px,1.4fr)_90px_minmax(150px,1.2fr)_100px_150px_100px] items-center gap-3 border-b border-border px-4 py-3 text-xs last:border-b-0"
+              >
+                <div className="min-w-0">
+                  <p className="m-0 truncate font-medium">{channel.description || '未命名场景'}</p>
+                  <p className="m-0 mt-1 truncate text-muted-foreground">
+                    流式输出：{channel.enableStreamingCards ? '已开启' : '已关闭'}
+                  </p>
+                </div>
+                <Badge tone="neutral">草稿态</Badge>
+                <span className="truncate">
+                  {bindingMode === 'plugin' ? channel.clientId : channel.robotCode || '未配置'}
+                </span>
+                <span className="flex items-center gap-2">
+                  <Switch
+                    size="sm"
+                    checked={channel.status === 'active'}
+                    disabled={!editable}
+                    aria-label={`${channel.description || channel.clientId}渠道状态`}
+                    onCheckedChange={() => void onToggle(channel)}
+                  />
+                  {channel.status === 'active' ? '启用' : '停用'}
+                </span>
+                <span className="text-muted-foreground">
+                  {channel.createdAt ? new Date(channel.createdAt).toLocaleString('zh-CN', { hour12: false }) : '--'}
+                </span>
+                <span className="flex justify-end gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    disabled={!editable}
+                    aria-label={`编辑${channel.description || channel.clientId}`}
+                    leftIcon={<Pencil className="size-4" />}
+                    onClick={() => {
+                      setEditing(channel);
+                      setOpen(true);
+                    }}
+                  />
+                  <ConfirmDialog
+                    title="删除渠道"
+                    description="删除后需重新配置凭证。"
+                    confirmVariant="destructive"
+                    disabled={!editable}
+                    onConfirm={() => onDelete(channel.id)}
+                  >
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`删除${channel.description || channel.clientId}`}
+                      leftIcon={<Trash2 className="size-4" />}
+                    />
+                  </ConfirmDialog>
+                </span>
+              </div>
+            ))}
+          </div>
         ) : (
           <Empty title={`暂无${modeLabel}配置`} description="点击“新建配置”绑定钉钉机器人。" />
         )}

@@ -17,8 +17,8 @@ const resolveBcsEndpointMock = resolveBcsEndpoint as jest.MockedFunction<typeof 
 
 const identities: Identity[] = [
   {
-    id: 'human_447147',
-    name: '风太',
+    id: 'human_900004',
+    name: '示例用户',
     kind: 'user',
     avatar: '风',
   },
@@ -46,6 +46,15 @@ const identities: Identity[] = [
   },
 ];
 
+describe('WorkspaceIdentitySelector loading and empty states', () => {
+  it('loading uses a spinner row instead of a temporary empty-state copy', () => {
+    render(<WorkspaceIdentitySelector identities={[]} activeId={null} onChange={() => {}} identityListLoading />);
+
+    expect(screen.getByRole('button', { name: '协作身份加载中' })).toBeInTheDocument();
+    expect(screen.queryByText('暂无可协作身份')).not.toBeInTheDocument();
+  });
+});
+
 describe('WorkspaceIdentitySelector', () => {
   beforeEach(() => {
     extendCapabilities({
@@ -69,7 +78,9 @@ describe('WorkspaceIdentitySelector', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '当前协作身份：协作 Bot' }));
     expect(
-      screen.queryByText('当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。'),
+      screen.queryByText(
+        '当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。',
+      ),
     ).not.toBeInTheDocument();
     expect(await screen.findByText('隐藏 Bot')).toBeInTheDocument();
     expect(screen.getByText('ClaudeCode')).toBeInTheDocument();
@@ -115,28 +126,30 @@ describe('WorkspaceIdentitySelector', () => {
     render(
       <WorkspaceIdentitySelector
         identities={identities}
-        activeId="human_447147"
+        activeId="human_900004"
         userAvatarUrl="https://cdn.example.com/avatar.png"
         onChange={() => {}}
       />,
     );
 
-    expect(screen.getByRole('img', { name: '风太' })).toHaveAttribute('src', 'https://cdn.example.com/avatar.png');
+    expect(screen.getByRole('img', { name: '示例用户' })).toHaveAttribute('src', 'https://cdn.example.com/avatar.png');
     expect(screen.getByText('用户')).toBeInTheDocument();
-    expect(screen.getByText('工号：447147')).toBeInTheDocument();
+    expect(screen.getByText('工号：900004')).toBeInTheDocument();
     expect(screen.queryByText('OpenClaw')).not.toBeInTheDocument();
     expect(screen.queryByText('可参与群聊：')).not.toBeInTheDocument();
   });
 
   it('通过信息图标提供客观的数据范围说明，不使用观察者主体文案', async () => {
-    render(<WorkspaceIdentitySelector identities={identities} activeId="human_447147" onChange={() => {}} />);
+    render(<WorkspaceIdentitySelector identities={identities} activeId="human_900004" onChange={() => {}} />);
 
     const infoTrigger = screen.getByLabelText('协作身份说明');
     expect(infoTrigger).toBeInTheDocument();
     fireEvent.pointerMove(infoTrigger);
 
     expect(
-      await screen.findByText('当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。'),
+      await screen.findByText(
+        '当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。',
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/我参与的会话|当前身份可见/)).not.toBeInTheDocument();
   });
@@ -150,11 +163,15 @@ describe('WorkspaceIdentitySelector', () => {
     expect(screen.getByLabelText('工作身份说明')).toHaveClass('top-px', 'text-muted-foreground/70');
     expect(screen.getByLabelText('工作身份说明').querySelector('svg')).toHaveClass('h-3', 'w-3');
     expect(
-      screen.queryByText('当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。'),
+      screen.queryByText(
+        '当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。',
+      ),
     ).not.toBeInTheDocument();
     fireEvent.pointerMove(screen.getByLabelText('工作身份说明'));
     expect(
-      await screen.findByText('当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。'),
+      await screen.findByText(
+        '当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。',
+      ),
     ).toBeInTheDocument();
     expect(screen.getByLabelText('协作 Bot')).toHaveStyle({ width: '24px', height: '24px' });
     expect(screen.getByText('协作 Bot')).toHaveClass('text-xs');
@@ -177,7 +194,7 @@ describe('WorkspaceIdentitySelector', () => {
   });
 
   it('只有一个协作身份时不显示切换提示', () => {
-    render(<WorkspaceIdentitySelector identities={[identities[0]]} activeId="human_447147" onChange={() => {}} />);
+    render(<WorkspaceIdentitySelector identities={[identities[0]]} activeId="human_900004" onChange={() => {}} />);
 
     expect(screen.queryByText('可切换身份')).not.toBeInTheDocument();
   });
@@ -236,7 +253,7 @@ describe('WorkspaceIdentitySelector', () => {
     render(
       <WorkspaceIdentitySelector
         identities={identities}
-        activeId="human_447147"
+        activeId="human_900004"
         onChange={() => {}}
         onOpenPermissions={onOpenPermissions}
       />,
@@ -244,15 +261,15 @@ describe('WorkspaceIdentitySelector', () => {
 
     expect(screen.queryByRole('button', { name: '进入协作权限设置' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '当前协作身份：风太' }));
+    fireEvent.click(screen.getByRole('button', { name: '当前协作身份：示例用户' }));
     const permissionsButton = await screen.findByRole('button', { name: '进入协作权限设置' });
     expect(permissionsButton).toBeInTheDocument();
-    expect(screen.getByText('切换协作身份')).toBeInTheDocument();
+    expect(screen.getByText('切换工作身份')).toBeInTheDocument();
     fireEvent.click(permissionsButton);
 
     expect(onOpenPermissions).toHaveBeenCalledTimes(1);
     await waitFor(() => {
-      expect(screen.queryByText('切换协作身份')).not.toBeInTheDocument();
+      expect(screen.queryByText('切换工作身份')).not.toBeInTheDocument();
     });
   });
 
@@ -268,20 +285,20 @@ describe('WorkspaceIdentitySelector', () => {
     );
 
     expect(screen.queryByRole('button', { name: '进入协作权限设置' })).not.toBeInTheDocument();
-    expect(screen.queryByText('切换协作身份')).not.toBeInTheDocument();
+    expect(screen.queryByText('切换工作身份')).not.toBeInTheDocument();
     expect(onOpenPermissions).not.toHaveBeenCalled();
   });
 
-  it('内部形态关闭接入新的 Bot 入口', async () => {
+  it('能力关闭时不展示接入外部 Bot 入口', async () => {
     extendCapabilities({
       getBotRegistrationEnabled: () => ({ status: 'available', value: false }),
     });
-    render(<WorkspaceIdentitySelector identities={identities} activeId="human_447147" onChange={() => {}} />);
+    render(<WorkspaceIdentitySelector identities={identities} activeId="human_900004" onChange={() => {}} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '当前协作身份：风太' }));
+    fireEvent.click(screen.getByRole('button', { name: '当前协作身份：示例用户' }));
     await screen.findByText('隐藏 Bot');
 
-    expect(screen.queryByRole('button', { name: '接入新的 Bot' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '接入外部 Bot' })).not.toBeInTheDocument();
     expect(getRegistrationTokenMock).not.toHaveBeenCalled();
   });
 
@@ -296,14 +313,25 @@ describe('WorkspaceIdentitySelector', () => {
         note: 'Use this token for bot registration within 6 hours',
       },
     });
-    render(<WorkspaceIdentitySelector identities={identities} activeId="human_447147" onChange={() => {}} />);
+    render(<WorkspaceIdentitySelector identities={identities} activeId="human_900004" onChange={() => {}} />);
 
-    fireEvent.click(screen.getByRole('button', { name: '当前协作身份：风太' }));
+    fireEvent.click(screen.getByRole('button', { name: '当前协作身份：示例用户' }));
     expect(getRegistrationTokenMock).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole('button', { name: '接入新的 Bot' }));
+    const registrationButton = await screen.findByRole('button', { name: '接入外部 Bot' });
+    const registrationInfo = screen.getByLabelText('接入外部 Bot 说明');
+    fireEvent.focus(registrationInfo);
+    expect(
+      await screen.findByText('获取接入指令，将当前平台之外创建的 Bot 接入当前协作网络。'),
+    ).toBeInTheDocument();
+    fireEvent.click(registrationButton);
 
     await waitFor(() => expect(getRegistrationTokenMock).toHaveBeenCalledTimes(1));
     const dialog = await screen.findByRole('dialog');
+    expect(screen.queryByText('Bot 接入')).not.toBeInTheDocument();
+    expect(dialog).toHaveTextContent('接入外部 Bot');
+    expect(dialog).toHaveTextContent(
+      '选择接入方式，复制命令后在对应环境中执行，即可完成外部 Bot 的初始化接入。',
+    );
     expect(dialog).toHaveTextContent('用户自助接入');
     expect(dialog).toHaveTextContent('install.sh --token token-1 --bcs-endpoint http://127.0.0.1:21000');
     expect(dialog).not.toHaveTextContent('Use this token for bot registration within 6 hours');
@@ -323,18 +351,18 @@ describe('WorkspaceIdentitySelector', () => {
 
   it('打开入口和点击当前身份不会切换，点击其他身份后关闭 Popover', async () => {
     const onChange = jest.fn();
-    render(<WorkspaceIdentitySelector identities={identities} activeId="human_447147" onChange={onChange} />);
+    render(<WorkspaceIdentitySelector identities={identities} activeId="human_900004" onChange={onChange} />);
 
-    const trigger = screen.getByRole('button', { name: '当前协作身份：风太' });
+    const trigger = screen.getByRole('button', { name: '当前协作身份：示例用户' });
     fireEvent.click(trigger);
-    const currentOption = await screen.findByRole('button', { name: /风太 用户/ });
+    const currentOption = await screen.findByRole('button', { name: /示例用户 用户/ });
     fireEvent.click(currentOption);
     expect(onChange).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: /协作 Bot/ }));
     expect(onChange).toHaveBeenCalledWith('bot-online');
     await waitFor(() => {
-      expect(screen.queryByText('切换协作身份')).not.toBeInTheDocument();
+      expect(screen.queryByText('切换工作身份')).not.toBeInTheDocument();
     });
   });
 });

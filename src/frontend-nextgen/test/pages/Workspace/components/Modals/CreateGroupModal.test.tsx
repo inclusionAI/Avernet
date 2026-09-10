@@ -97,32 +97,42 @@ beforeEach(() => {
   });
 });
 
-it('发起协作顶栏只在当前 human ID 匹配时使用认证用户名，Bot 保留自身名称', () => {
-  const { rerender } = render(
+it('发起协作顶栏不再展示身份 chip，仅保留标题', () => {
+  render(
     <CreateGroupModal
       open
-      activeIdentity={{ id: 'human_447147', kind: 'user', displayName: '447147', online: true }}
-      authenticatedUserId="447147"
-      authenticatedUserName="风太"
+      activeIdentity={{ id: 'human_900004', kind: 'user', displayName: '900004', online: true }}
+      authenticatedUserId="900004"
+      authenticatedUserName="示例用户"
       onClose={jest.fn()}
       onCreated={jest.fn()}
     />,
   );
-  expect(screen.getByText('风太')).toBeInTheDocument();
-  expect(screen.queryByText('447147')).not.toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: '发起协作' })).toBeInTheDocument();
+  // 「为 xxx」身份 chip 已移除：顶栏不再展示认证用户名 / 身份类型徽标。
+  expect(screen.queryByText('示例用户')).not.toBeInTheDocument();
+  expect(screen.queryByText('为')).not.toBeInTheDocument();
+});
 
-  rerender(
+it('Bot 身份未命名时自动群名保留自身名称而非认证用户名', async () => {
+  gs.createGroup.mockResolvedValue({ ok: true, data: { groupId: 'g9' } });
+  render(
     <CreateGroupModal
       open
-      activeIdentity={{ id: 'bot_xxx:447147', kind: 'bot', displayName: '协作 Bot', online: true }}
-      authenticatedUserId="447147"
-      authenticatedUserName="风太"
+      activeIdentity={{ id: 'bot_xxx:900004', kind: 'bot', displayName: '协作 Bot', online: true }}
+      authenticatedUserId="900004"
+      authenticatedUserName="示例用户"
       onClose={jest.fn()}
       onCreated={jest.fn()}
     />,
   );
-  expect(screen.getByText('协作 Bot')).toBeInTheDocument();
-  expect(screen.queryByText('风太')).not.toBeInTheDocument();
+  fireEvent.click(await screen.findByRole('button', { name: '确认创建' }));
+  await waitFor(() =>
+    expect(gs.createGroup).toHaveBeenCalledWith(expect.objectContaining({ name: expect.stringContaining('协作 Bot') })),
+  );
+  expect(gs.createGroup).not.toHaveBeenCalledWith(
+    expect.objectContaining({ name: expect.stringContaining('示例用户') }),
+  );
 });
 
 it('free_chat strategy posts delivery_policy on confirm', async () => {
@@ -142,7 +152,7 @@ it('free_chat strategy posts delivery_policy on confirm', async () => {
         name: '我的群',
         driverBotUuid: 'b1',
         originator: 'actor-1',
-        participants: [{ actor_id: 'actor-1' }, { actor_id: 'b1' }],
+        participants: [{ actor_id: 'actor-1', message_view_scope: 'full' }, { actor_id: 'b1' }],
       }),
     ),
   );
@@ -163,7 +173,7 @@ it('task_master_slave uses the selected manager as driver_bot_uuid', async () =>
       expect.objectContaining({
         strategy: 'manager_worker',
         driverBotUuid: 'b1',
-        participants: [{ actor_id: 'actor-1' }, { actor_id: 'b1' }],
+        participants: [{ actor_id: 'actor-1', message_view_scope: 'full' }, { actor_id: 'b1' }],
       }),
     ),
   );

@@ -9,9 +9,9 @@ export type SpaceType = 'TEAM' | 'PERSONAL' | 'UNKNOWN';
 export type SpaceRole = 'ADMIN' | 'MEMBER' | 'UNKNOWN';
 export type WorkOrderStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'UNKNOWN';
 export type WorkOrderItemType = 'APPROVAL' | 'NOTIFICATION' | 'UNKNOWN';
-/** 工单中心三视图（对应顶部分组 tab） */
+/** 通知中心三视图（对应顶部分组 tab） */
 export type WorkOrderView = 'pending_mine' | 'initiated_mine' | 'processed';
-/** 工单中心分类筛选（Segmented 全部/审批类/通知类） */
+/** 通知中心分类筛选（Segmented 全部/审批类/通知类） */
 export type WorkOrderCategory = 'ALL' | 'APPROVAL' | 'NOTIFICATION';
 
 /** 空间加入态（后端 join_status：JOINED/APPLYING/NOT_JOINED） */

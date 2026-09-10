@@ -38,16 +38,16 @@ def test_personal_cloud_rejects_unknown_engine_and_invalid_space() -> None:
 
 @pytest.mark.unit
 def test_local_supported_engine_matrix() -> None:
-    assert LOCAL_CAPABLE_ENGINES == frozenset({"openclaw", "claude_code"})
+    assert LOCAL_CAPABLE_ENGINES == frozenset({"openclaw", "claude_code", "hermes"})
     for engine in LOCAL_CAPABLE_ENGINES:
         assert assert_local_create(engine, "personal").ok
 
 
 @pytest.mark.unit
 def test_local_rejects_unknown_engine_and_non_personal_space() -> None:
-    unsupported = assert_local_create("hermes", "personal")
+    unsupported = assert_local_create("unknown", "personal")
     assert not unsupported.ok
-    assert unsupported.reason == "local bot does not support engine: hermes"
+    assert unsupported.reason == "local bot does not support engine: unknown"
 
     invalid_space = assert_local_create("openclaw", "team")
     assert not invalid_space.ok

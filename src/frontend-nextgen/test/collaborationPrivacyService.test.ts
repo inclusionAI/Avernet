@@ -170,7 +170,7 @@ describe('CollaborationPrivacyService', () => {
   test('按需刷新只替换目标 Bot，不重新加载整个列表', async () => {
     const gateway = new FakeGateway();
     const service = new CollaborationPrivacyService(gateway);
-    await service.loadOverview('447147');
+    await service.loadOverview('900004');
 
     const refreshed = await service.refreshBot('joined');
 
@@ -188,7 +188,7 @@ describe('CollaborationPrivacyService', () => {
   test('BCN 未加入时拒绝任何写操作', async () => {
     const gateway = new FakeGateway();
     const service = new CollaborationPrivacyService(gateway);
-    await service.loadOverview('447147');
+    await service.loadOverview('900004');
 
     await expect(
       service.updateDirectSetting({ botId: 'disabled', setting: 'profilePublic', value: true }),
@@ -199,7 +199,7 @@ describe('CollaborationPrivacyService', () => {
   test('提交公开变更只创建对应 audience pending，不提前改变生效值', async () => {
     const gateway = new FakeGateway();
     const service = new CollaborationPrivacyService(gateway);
-    await service.loadOverview('447147');
+    await service.loadOverview('900004');
 
     const next = await service.submitPublication({
       botId: 'joined',
@@ -216,7 +216,7 @@ describe('CollaborationPrivacyService', () => {
   test('restricted 和 partial_exempt 缺少范围时不调用 Gateway', async () => {
     const gateway = new FakeGateway();
     const service = new CollaborationPrivacyService(gateway);
-    await service.loadOverview('447147');
+    await service.loadOverview('900004');
 
     await expect(
       service.submitPublication({
@@ -238,7 +238,7 @@ describe('CollaborationPrivacyService', () => {
   test('双公开均 none 时拒绝修改好友审批策略', async () => {
     const gateway = new FakeGateway();
     const service = new CollaborationPrivacyService(gateway);
-    await service.loadOverview('447147');
+    await service.loadOverview('900004');
 
     await expect(
       service.updateFriendApproval({
@@ -251,7 +251,7 @@ describe('CollaborationPrivacyService', () => {
   test('同一 audience 存在 pending 时拒绝重复提交', async () => {
     const gateway = new FakeGateway();
     const service = new CollaborationPrivacyService(gateway);
-    await service.loadOverview('447147');
+    await service.loadOverview('900004');
     await service.submitPublication({
       botId: 'joined',
       audience: 'user',
@@ -271,7 +271,7 @@ describe('CollaborationPrivacyService', () => {
   test('归一化后配置无变化时不创建工单', async () => {
     const gateway = new FakeGateway();
     const service = new CollaborationPrivacyService(gateway);
-    await service.loadOverview('447147');
+    await service.loadOverview('900004');
 
     await expect(
       service.submitPublication({
@@ -299,7 +299,7 @@ describe('CollaborationPrivacyService', () => {
   test('限制公开部门发生变化时仍提交变更并进入 pending', async () => {
     const gateway = new FakeGateway();
     const service = new CollaborationPrivacyService(gateway);
-    await service.loadOverview('447147');
+    await service.loadOverview('900004');
 
     const next = await service.submitPublication({
       botId: 'joined',
@@ -328,7 +328,7 @@ describe('CollaborationPrivacyService', () => {
     const gateway = new FakeGateway();
     gateway.holdPublications = true;
     const service = new CollaborationPrivacyService(gateway);
-    await service.loadOverview('447147');
+    await service.loadOverview('900004');
 
     const userRequest = service.submitPublication({
       botId: 'joined',
@@ -367,7 +367,7 @@ describe('CollaborationPrivacyService', () => {
     const gateway = new FakeGateway();
     gateway.holdDirectSettings = true;
     const service = new CollaborationPrivacyService(gateway);
-    await service.loadOverview('447147');
+    await service.loadOverview('900004');
 
     const request = service.updateDirectSetting({ botId: 'joined', setting: 'profilePublic', value: false });
     await expect(
@@ -383,8 +383,8 @@ describe('CollaborationPrivacyService', () => {
     const service = new CollaborationPrivacyService(gateway);
     const signal = new AbortController().signal;
 
-    await service.loadOverview('447147', signal);
-    await service.syncDepartment('447147', signal);
+    await service.loadOverview('900004', signal);
+    await service.syncDepartment('900004', signal);
     await service.updateDirectSetting({ botId: 'joined', setting: 'profilePublic', value: false }, signal);
     await service.submitPublication(
       {

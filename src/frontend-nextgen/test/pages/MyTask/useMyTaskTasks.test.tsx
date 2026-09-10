@@ -19,7 +19,7 @@ describe('useMyTaskTasks enabled gate', () => {
   });
 
   it('Bot 工作身份禁用时不请求用户任务', async () => {
-    const { result } = renderHook(() => useMyTaskTasks('327325', 1, 10, 'all', false));
+    const { result } = renderHook(() => useMyTaskTasks('900003', 1, 10, 'all', false));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(mockedListMyTasks).not.toHaveBeenCalled();
@@ -33,7 +33,7 @@ describe('useMyTaskTasks enabled gate', () => {
         resolveRequest = resolve;
       }) as ReturnType<typeof listMyTasks>,
     );
-    const { result, rerender } = renderHook(({ enabled }) => useMyTaskTasks('327325', 1, 10, 'all', enabled), {
+    const { result, rerender } = renderHook(({ enabled }) => useMyTaskTasks('900003', 1, 10, 'all', enabled), {
       initialProps: { enabled: true },
     });
 

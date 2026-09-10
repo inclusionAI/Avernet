@@ -176,6 +176,13 @@ user_config:
     apply_owner_whitelist: []
     global_dry_run: false
 
+  # Level-triggered Desktop Skill recovery. The sweep only enqueues one
+  # owner+bot task; downloads and Runtime projection stay in the queue worker.
+  desktop_skill_recovery:
+    enabled: true
+    sweep_interval_seconds: 600
+    sweep_page_size: 100
+
   # In-process durable task-queue worker (one per pod). Enabled by default so the
   # publish flow's stage advances (build/release/progress-poll) run as persisted,
   # crash-safe tasks. The test profile overrides this to false so unit tests don't
@@ -242,4 +249,3 @@ user_config:
     fetch_transport_allowlist: []
     content_store_dir: "./data/manifest_content"
     teclaw_platform_managed: false
-

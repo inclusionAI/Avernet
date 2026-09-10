@@ -27,6 +27,11 @@ jest.mock('@/hooks/useSpaceContext', () => ({
   initSpaceContext: jest.fn(async () => undefined),
   ensurePersonalSpaceOnAppEntry: jest.fn(async () => undefined),
 }));
+jest.mock('@/services/workspace/workspaceService', () => ({
+  workspaceService: {
+    initWorkspace: jest.fn(async () => ({ ok: true as const, data: { defaultActiveId: null } })),
+  },
+}));
 jest.mock('@/services/workspace/identityService', () => ({
   identityService: {
     loadIdentities: jest.fn(async () => ({
@@ -134,8 +139,8 @@ describe('AppShell 工作身份路由保护', () => {
   it('Bot 工作身份可直访我的任务', () => {
     mockLocation.pathname = '/work/my-task';
     useWorkspaceStore.setState({
-      activeIdentityId: 'bot-1:447147',
-      identities: [{ id: 'bot-1:447147', kind: 'bot', displayName: 'Bot A', online: true }],
+      activeIdentityId: 'bot-1:900004',
+      identities: [{ id: 'bot-1:900004', kind: 'bot', displayName: 'Bot A', online: true }],
     });
 
     renderShell();
@@ -147,8 +152,8 @@ describe('AppShell 工作身份路由保护', () => {
   it('Bot 工作身份直访公开协作群时替换到公开 Bot 且不挂载页面', () => {
     mockLocation.pathname = '/collaboration-square/groups';
     useWorkspaceStore.setState({
-      activeIdentityId: 'bot-1:447147',
-      identities: [{ id: 'bot-1:447147', kind: 'bot', displayName: 'Bot A', online: true }],
+      activeIdentityId: 'bot-1:900004',
+      identities: [{ id: 'bot-1:900004', kind: 'bot', displayName: 'Bot A', online: true }],
     });
 
     renderShell();
