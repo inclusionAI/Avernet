@@ -3,6 +3,21 @@
 ## Provides
 
 - Coordination store composition using the selected cache plugin without additional settings.
+
+Durable delivery composition installs a post-commit in-memory instrumentation
+hook and a shutdown-bound 10-second SQL aggregate sampler, independent of the
+Prometheus feature/config. A dedicated tracing target emits fixed-column records
+through the existing logging.outputs pipeline to message-delivery.log with the
+message-only raw format. Rotation, cleanup, asynchronous writers and LoggingGuard
+are shared with all other log outputs; no separate file infrastructure is used.
+Failed snapshots retain values and expose freshness/success; writer errors remain
+visible through the logging system. No
+Bot/session/message IDs, message text, Provider keys or credentials enter monitor records.
+The scheduler shutdown waits for sampling to stop; the process LoggingGuard
+subsequently flushes the shared logging workers when runtime shutdown completes.
+
+Delivery wiring loads DB policy, rejects non-default legacy file policy, and starts an idle scheduler on durable storage even while all business flows are disabled. Deployment guarantees exactly one non-overlapping instance per DB; no file lock or same-host/cross-host duplicate detection is provided. Lifecycle guards still disable admissions and dynamic enforce when the scheduler stops.
+
 - BCS process entrypoint and composition root.
 - Config loading, logging bootstrap, runtime assembly, and adapter registration.
 - Concrete selection of services, plugins, and external clients from validated config.

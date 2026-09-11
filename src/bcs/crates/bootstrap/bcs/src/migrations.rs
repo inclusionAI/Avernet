@@ -1028,6 +1028,15 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 21,
         name: "human_participant_message_visibility",
     },
+    SqliteMigration {
+        version: 22,
+        name: "message_deliveries",
+    },
+    SqliteMigration { version: 23, name: "message_delivery_policy" },
+    SqliteMigration { version: 24, name: "delivery_worker_queries" },
+    SqliteMigration { version: 25, name: "delivery_context_selection" },
+    SqliteMigration { version: 26, name: "delivery_pending_abort" },
+    SqliteMigration { version: 27, name: "run_reply_segments" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -1404,6 +1413,42 @@ async fn apply_sqlite_migration_body(
         19 => add_sqlite_one_shot_opening_message_override_schema(db).await,
         20 => add_sqlite_invite_code_id_schema(db).await,
         21 => add_sqlite_human_participant_message_visibility_schema(db).await,
+        22 => {
+            // This migration contains only simple DDL statements, no routines
+            // or string literals containing semicolons.
+            for sql in
+                include_str!("../../../../migrations/sqlite/022_message_deliveries.sql").split(';')
+            {
+                if !sql.trim().is_empty() {
+                    db.execute(DbStatement::new(sql.trim())).await?;
+                }
+            }
+            Ok(())
+        }
+        23 => {
+            db.execute(DbStatement::new(include_str!("../../../../migrations/sqlite/023_message_delivery_policy.sql"))).await?;
+            Ok(())
+        }
+        24 => {
+            for sql in include_str!("../../../../migrations/sqlite/024_delivery_worker_queries.sql").split(';').map(str::trim).filter(|s| !s.is_empty()) {
+                db.execute(DbStatement::new(sql)).await?;
+            }
+            Ok(())
+        }
+        25 => {
+            for sql in include_str!("../../../../migrations/sqlite/025_delivery_context_selection.sql").split(';').map(str::trim).filter(|s| !s.is_empty()) {
+                db.execute(DbStatement::new(sql)).await?;
+            }
+            Ok(())
+        }
+        26 => {
+            db.execute(DbStatement::new(include_str!("../../../../migrations/sqlite/026_delivery_pending_abort.sql"))).await?;
+            Ok(())
+        }
+        27 => {
+            db.execute(DbStatement::new(include_str!("../../../../migrations/sqlite/027_run_reply_segments.sql"))).await?;
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
@@ -1902,6 +1947,25 @@ mod tests {
         Ok(!rows.is_empty())
     }
 
+    #[test]
+    fn mysql_queue_tables_preserve_business_keys_with_audit_columns() {
+        let deliveries = include_str!("../../../../migrations/mysql/021_message_deliveries.sql");
+        let policy = include_str!("../../../../migrations/mysql/022_message_delivery_policy.sql");
+        for sql in [deliveries, policy] {
+            assert!(sql.contains("id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT"));
+            assert!(sql.contains("gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"));
+            assert!(sql.contains("gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"));
+            assert!(sql.contains("PRIMARY KEY (id)"));
+            assert!(sql.contains("updated_at_ms BIGINT NOT NULL"));
+        }
+        assert!(deliveries.contains("UNIQUE KEY uk_delivery_env_id (env, delivery_id)"));
+        assert!(deliveries.contains("created_at_ms BIGINT NOT NULL"));
+        for key in ["env, source_message_id, target_bot_id", "env, run_id", "env, idempotency_key", "env, request_id"] {
+            assert!(deliveries.contains(&format!("UNIQUE ({key})")));
+        }
+        assert!(policy.contains("UNIQUE KEY uk_delivery_policy_env (env)"));
+    }
+
     async fn migration_rows(db: &dyn DbPlugin) -> DbResult<Vec<(i64, String, String)>> {
         let rows = db
             .query(DbStatement::new(
@@ -1999,7 +2063,7 @@ mod tests {
                     "human_input_im_requests".to_string(),
                     "sqlite".to_string()
                 ),
-(9, "eventing".to_string(), "sqlite".to_string()),
+                (9, "eventing".to_string(), "sqlite".to_string()),
                 (
                     10,
                     "eventing_plaintext_endpoint".to_string(),
@@ -2010,16 +2074,8 @@ mod tests {
                     "group_opening_message".to_string(),
                     "sqlite".to_string()
                 ),
-                (
-                    12,
-"add_bot_task_modes".to_string(),
-                    "sqlite".to_string()
-                ),
-                (
-                    13,
-                    "edge_permission".to_string(),
-                    "sqlite".to_string()
-                ),
+                (12, "add_bot_task_modes".to_string(), "sqlite".to_string()),
+                (13, "edge_permission".to_string(), "sqlite".to_string()),
                 (
                     14,
                     "add_bot_internal_attributes".to_string(),
@@ -2030,11 +2086,7 @@ mod tests {
                     "group_participant_tags".to_string(),
                     "sqlite".to_string()
                 ),
-                (
-                    16,
-                    "expand_session_ids".to_string(),
-                    "sqlite".to_string()
-                ),
+                (16, "expand_session_ids".to_string(), "sqlite".to_string()),
                 (
                     17,
                     "session_callback_lease".to_string(),
@@ -2055,7 +2107,13 @@ mod tests {
                     21,
                     "human_participant_message_visibility".to_string(),
                     "sqlite".to_string()
-                )
+                ),
+                (22, "message_deliveries".to_string(), "sqlite".to_string()),
+                (23, "message_delivery_policy".to_string(), "sqlite".to_string()),
+                (24, "delivery_worker_queries".to_string(), "sqlite".to_string()),
+                (25, "delivery_context_selection".to_string(), "sqlite".to_string()),
+                (26, "delivery_pending_abort".to_string(), "sqlite".to_string()),
+                (27, "run_reply_segments".to_string(), "sqlite".to_string())
             ]
         );
         Ok(())
@@ -2067,7 +2125,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 21);
+        assert_eq!(report.pending_versions.len(), 27);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -2114,10 +2172,7 @@ mod tests {
             "add_bot_internal_attributes"
         );
         assert_eq!(report.pending_versions[14].version, 15);
-        assert_eq!(
-            report.pending_versions[14].name,
-            "group_participant_tags"
-        );
+        assert_eq!(report.pending_versions[14].name, "group_participant_tags");
         assert_eq!(report.pending_versions[15].version, 16);
         assert_eq!(report.pending_versions[15].name, "expand_session_ids");
         assert_eq!(report.pending_versions[16].version, 17);
@@ -2219,8 +2274,7 @@ mod tests {
                 "SELECT root_run_id FROM bcs_state_machine_runs WHERE run_id = 'legacy-run'",
             ))
             .await?;
-        let legacy_root: Option<String> =
-            bcs_db_api::db_get_column_opt(&rows[0], "root_run_id")?;
+        let legacy_root: Option<String> = bcs_db_api::db_get_column_opt(&rows[0], "root_run_id")?;
         assert_eq!(legacy_root, None);
         Ok(())
     }
@@ -2232,12 +2286,11 @@ mod tests {
         for column in ["`root_run_id`", "`rerun_of`", "`session_activation_count`"] {
             assert!(migration.contains(column), "missing rerun column {column}");
         }
+        assert!(migration.contains("ADD UNIQUE INDEX `uk_sm_run_rerun_of` (`env`, `rerun_of`)"));
         assert!(
-            migration.contains("ADD UNIQUE INDEX `uk_sm_run_rerun_of` (`env`, `rerun_of`)")
+            migration
+                .contains("ADD INDEX `idx_sm_runs_root` (`env`, `root_run_id`, `created_at_ms`)")
         );
-        assert!(migration.contains(
-            "ADD INDEX `idx_sm_runs_root` (`env`, `root_run_id`, `created_at_ms`)"
-        ));
         assert!(!migration.contains("SET `root_run_id` = `run_id`"));
     }
 
@@ -2267,9 +2320,8 @@ mod tests {
 
     #[test]
     fn mysql_one_shot_opening_message_override_migration_adds_nullable_column() {
-        let migration = include_str!(
-            "../../../../migrations/mysql/018_one_shot_opening_message_override.sql"
-        );
+        let migration =
+            include_str!("../../../../migrations/mysql/018_one_shot_opening_message_override.sql");
         assert!(migration.contains(
             "ADD COLUMN IF NOT EXISTS `opening_message_override_json` text DEFAULT NULL"
         ));
@@ -2436,7 +2488,7 @@ mod tests {
                     "human_input_im_requests".to_string(),
                     "sqlite".to_string()
                 ),
-(9, "eventing".to_string(), "sqlite".to_string()),
+                (9, "eventing".to_string(), "sqlite".to_string()),
                 (
                     10,
                     "eventing_plaintext_endpoint".to_string(),
@@ -2447,16 +2499,8 @@ mod tests {
                     "group_opening_message".to_string(),
                     "sqlite".to_string()
                 ),
-                (
-                    12,
-"add_bot_task_modes".to_string(),
-                    "sqlite".to_string()
-                ),
-                (
-                    13,
-                    "edge_permission".to_string(),
-                    "sqlite".to_string()
-                ),
+                (12, "add_bot_task_modes".to_string(), "sqlite".to_string()),
+                (13, "edge_permission".to_string(), "sqlite".to_string()),
                 (
                     14,
                     "add_bot_internal_attributes".to_string(),
@@ -2467,11 +2511,7 @@ mod tests {
                     "group_participant_tags".to_string(),
                     "sqlite".to_string()
                 ),
-                (
-                    16,
-                    "expand_session_ids".to_string(),
-                    "sqlite".to_string()
-                ),
+                (16, "expand_session_ids".to_string(), "sqlite".to_string()),
                 (
                     17,
                     "session_callback_lease".to_string(),
@@ -2492,7 +2532,13 @@ mod tests {
                     21,
                     "human_participant_message_visibility".to_string(),
                     "sqlite".to_string()
-                )
+                ),
+                (22, "message_deliveries".to_string(), "sqlite".to_string()),
+                (23, "message_delivery_policy".to_string(), "sqlite".to_string()),
+                (24, "delivery_worker_queries".to_string(), "sqlite".to_string()),
+                (25, "delivery_context_selection".to_string(), "sqlite".to_string()),
+                (26, "delivery_pending_abort".to_string(), "sqlite".to_string()),
+                (27, "run_reply_segments".to_string(), "sqlite".to_string())
             ]
         );
         Ok(())
@@ -2537,10 +2583,12 @@ mod tests {
         // follows it), so assert it was re-applied as the version-11 row rather than
         // as the last row. The column check above already proves the migration
         // re-added opening_message_json; this row check pins it to the right version.
-        assert!(migration_rows(&db)
-            .await?
-            .iter()
-            .any(|(version, name, _)| *version == 11 && name == "group_opening_message"));
+        assert!(
+            migration_rows(&db)
+                .await?
+                .iter()
+                .any(|(version, name, _)| *version == 11 && name == "group_opening_message")
+        );
         Ok(())
     }
 

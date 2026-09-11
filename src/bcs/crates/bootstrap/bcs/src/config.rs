@@ -657,6 +657,10 @@ pub struct BcsConfig {
     #[serde(default)]
     pub human_notify: HumanNotifyConfig,
 
+    /// Managed message admission; all business flows default to disabled.
+    #[serde(default)]
+    pub message_delivery: bcs_config_api::message_delivery::MessageDeliveryConfig,
+
     /// HTTP provider webhook adapter configuration.
     #[serde(default)]
     pub provider_http: ProviderHttpConfig,
@@ -1152,6 +1156,7 @@ impl Default for BcsConfig {
             secret: SecretConfig::default(),
             channels: ChannelConfigSection::default(),
             human_notify: HumanNotifyConfig::default(),
+            message_delivery: bcs_config_api::message_delivery::MessageDeliveryConfig::default(),
             provider_http: ProviderHttpConfig::default(),
             collaboration: CollaborationConfig::default(),
             openapi_v1: OpenApiV1Config::default(),
@@ -1610,6 +1615,8 @@ impl BcsConfig {
 }
 
 fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::Error>> {
+    // Readiness is code-owned; other business flows retain legacy delivery.
+    config.message_delivery.validate_ready_flows(&[bcs_config_api::message_delivery::DeliveryFlowKey::Group])?;
     if config.provider_chat_run_timeout_ms == 0 {
         return Err(Box::new(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -1704,6 +1711,28 @@ fn validate_eventing_environment_policy(
 mod tests {
     use super::*;
     use secrecy::ExposeSecret;
+
+    #[test]
+    fn only_group_message_delivery_is_ready_and_all_flows_default_off() {
+        let mut config = BcsConfig::default();
+        assert!(validate_loaded_config(&config).is_ok());
+        config.message_delivery.flow_enabled.group = true;
+        assert!(validate_loaded_config(&config).is_ok());
+        config.message_delivery.flow_enabled.direct_a2a = true;
+        let result = validate_loaded_config(&config);
+        assert!(matches!(result, Err(error) if error.to_string().contains("queue_flow_not_ready")));
+    }
+
+    #[test]
+    fn message_delivery_invalid_enum_is_rejected() -> Result<(), serde_json::Error> {
+        let mut config = serde_json::to_value(BcsConfig::default())?;
+        config["message_delivery"] = serde_json::json!({"bots": {"bot": {
+            "mode": "enabled", "max_running": 1, "max_queued": 10,
+            "min_send_interval_ms": 100
+        }}});
+        assert!(serde_json::from_value::<BcsConfig>(config).is_err());
+        Ok(())
+    }
 
     #[test]
     fn validate_run_store_selectors_accepts_known_and_rejects_unknown() {

@@ -6648,7 +6648,8 @@ mod tests {
             self.web_sends.lock().await.push(cmd);
             let failed_count = *self.failed_dispatch_count.lock().await;
             let active_run_ids = self.active_run_ids.lock().await.clone();
-            Ok(WebSendOutcome {
+        Ok(WebSendOutcome {
+            queue_admission: None,
                 primary_run_id: "run_1".to_string(),
                 status: "accepted".to_string(),
                 active_run_ids,

@@ -509,6 +509,27 @@ pub async fn db_plugin_contract_tests<P: DbPlugin>(plugin: &P) {
             .is_empty(),
         "a later SQL failure must roll back a write that used a result binding"
     );
+
+    let checked = plugin.transaction(vec![
+        DbTransactionStep::Execute(DbStatement::new(
+            "INSERT INTO contract_items (id, name, active) VALUES ('checked-rollback', 'before', 1)",
+        )),
+        DbTransactionStep::ExecuteChecked {
+            statement: DbStatement::new("UPDATE contract_items SET active = active + 1 WHERE id = 'missing-cas'"),
+            expected_affected_rows: 1,
+        },
+        DbTransactionStep::Execute(DbStatement::new(
+            "INSERT INTO contract_items (id, name, active) VALUES ('checked-after', 'after', 1)",
+        )),
+    ]).await;
+    assert!(matches!(checked, Err(DbError::ConditionFailed { expected: 1, actual: 0 })));
+    assert!(plugin.query(DbStatement::new(
+        "SELECT id FROM contract_items WHERE id IN ('checked-rollback', 'checked-after')",
+    )).await.expect("checked rollback query").is_empty());
+    plugin.transaction(vec![DbTransactionStep::ExecuteChecked {
+        statement: DbStatement::new("UPDATE contract_items SET active = active + 1 WHERE id = 'item-1'"),
+        expected_affected_rows: 1,
+    }]).await.expect("matched CAS commits");
 }
 
 /// Contract suite every `SecretAccessPort` implementation must satisfy.

@@ -32,6 +32,15 @@
 
 The crate owns local DB driver mechanics only. It does not own service-level SQL policy or schema semantics above the plugin contract.
 
+File-backed SQLite owns five connections, each with WAL, foreign keys and a
+5000 ms busy timeout. In-memory construction keeps one isolated connection.
+An async semaphore bounds checkout; blocking-pool jobs own connection leases
+until completion, including when the awaiting caller is cancelled. Transactions
+pin one connection and use BEGIN IMMEDIATE when containing Execute steps to
+avoid read-to-write snapshot upgrades; query-only transactions remain deferred.
+This changes local execution concurrency, not the DbPlugin contract or durability
+settings. SQLite remains single-writer. Timing spans propagate into blocking jobs.
+
 ## Tests
 
 - `cargo test --package bcs-db-local --manifest-path src/bcs/Cargo.toml`

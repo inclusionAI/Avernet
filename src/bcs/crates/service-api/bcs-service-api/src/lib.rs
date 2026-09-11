@@ -37,6 +37,12 @@ pub use core::{
     WorkerRecommendResult, WorkerRecommendation,
 };
 pub use application::SystemMessageService;
+pub use application::message_delivery::{
+    CancelMessageDeliveryCommand, CancelMessageDeliveryResult, DeliveryAdmissionView,
+    DeliveryStatusQuery, DeliveryStatusView, DeliveryTransitionCommand,
+    ManagedDeliveryError, ManagedDeliveryPreparationService, ManagedMessageDeliveryService,
+    PreparedManagedDelivery,
+};
 pub use application::v1::{
     BindInviteCode, BindInviteCodeResult, BotInternalAttributes, FriendCheckInStrategy,
     GetMyInviteCodeBinding, InitInviteCodes, InitInviteCodesResult,

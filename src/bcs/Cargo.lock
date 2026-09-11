@@ -1009,7 +1009,9 @@ dependencies = [
  "bcs-db-api",
  "bcs-test-support",
  "rusqlite",
+ "tempfile",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1466,7 +1468,10 @@ dependencies = [
  "bcs-cache-api",
  "bcs-cache-local",
  "bcs-chat-run-store",
+ "bcs-config-api",
  "bcs-domain",
+ "bcs-event-store",
+ "bcs-message-store",
  "bcs-observability",
  "bcs-protocol",
  "bcs-service-api",
@@ -1478,6 +1483,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
@@ -1486,6 +1492,7 @@ name = "bcs-message-store"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bcs-config-api",
  "bcs-db-api",
  "bcs-db-local",
  "bcs-domain",
@@ -1495,6 +1502,7 @@ dependencies = [
  "hex",
  "serde_json",
  "sha2",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -1740,6 +1748,7 @@ name = "bcs-service-api"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bcs-config-api",
  "bcs-domain",
  "bcs-protocol",
  "bcs-storage-api",

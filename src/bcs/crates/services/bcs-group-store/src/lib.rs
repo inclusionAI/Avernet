@@ -4100,6 +4100,9 @@ mod tests {
 
             for step in steps {
                 match step {
+                    DbTransactionStep::ExecuteChecked { .. } => {
+                        return Err(DbError::Unsupported("group SQL recorder does not execute conditional transactions".into()));
+                    }
                     DbTransactionStep::Query(statement) => {
                         self.transaction_statements
                             .lock()

@@ -821,6 +821,35 @@ impl BotTransportMux {
 
 #[async_trait]
 impl BotDeliveryPort for BotTransportMux {
+    async fn connection_identity(&self, target: &BotDeliveryTarget) -> Option<String> {
+        match target {
+            BotDeliveryTarget::WebSocket { .. } => self.websocket.connection_identity(target).await,
+            BotDeliveryTarget::HttpProvider { .. } => self.provider.connection_identity(target).await,
+        }
+    }
+
+    async fn deliver_on_connection(
+        &self,
+        cmd: BotDeliveryCommand,
+        connection_id: &str,
+    ) -> ServiceResult<BotDeliveryResult> {
+        match &cmd.target {
+            BotDeliveryTarget::WebSocket { .. } => self.websocket.deliver_on_connection(cmd, connection_id).await,
+            BotDeliveryTarget::HttpProvider { .. } => self.provider.deliver_on_connection(cmd, connection_id).await,
+        }
+    }
+
+    async fn abort_on_connection(
+        &self,
+        cmd: BotAbortDeliveryCommand,
+        connection_id: &str,
+    ) -> ServiceResult<BotAbortDeliveryResult> {
+        match &cmd.target {
+            BotDeliveryTarget::WebSocket { .. } => self.websocket.abort_on_connection(cmd, connection_id).await,
+            BotDeliveryTarget::HttpProvider { .. } => self.provider.abort_on_connection(cmd, connection_id).await,
+        }
+    }
+
     async fn is_available(&self, target: &BotDeliveryTarget) -> bool {
         match target {
             BotDeliveryTarget::WebSocket { .. } => self.websocket.is_available(target).await,

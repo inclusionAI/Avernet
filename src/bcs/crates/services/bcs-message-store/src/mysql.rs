@@ -8,7 +8,7 @@ use bcs_db_api::{
     db_get_column,
 };
 use bcs_event_store::EventAppendTransactionPlan;
-use tracing::{debug, info};
+use tracing::debug;
 
 use bcs_domain::{
     HumanMessageView, MessageAudience, MessageOwnerFilter, MessagePage, MessageQuery, MessageVisibilityDomain,
@@ -40,18 +40,19 @@ const INSERT_SQL: &str = "INSERT INTO bcs_messages \
 /// MySQL-backed message repository.
 #[derive(Clone)]
 pub struct MySqlMessageStore {
-    db: Arc<dyn DbPlugin>,
-    env: String,
-    flavor: DbSqlFlavor,
+    pub(crate) db: Arc<dyn DbPlugin>,
+    pub(crate) env: String,
+    pub(crate) flavor: DbSqlFlavor,
+    pub(crate) delivery_writer: Arc<super::delivery::DeliveryWriterLocks>,
 }
 
 impl MySqlMessageStore {
     pub fn new(db: Arc<dyn DbPlugin>, env: String) -> Self {
-        Self { db, env, flavor: DbSqlFlavor::Mysql }
+        Self { db, env, flavor: DbSqlFlavor::Mysql, delivery_writer: Default::default() }
     }
 
     pub fn sqlite(db: Arc<dyn DbPlugin>, env: String) -> Self {
-        Self { db, env, flavor: DbSqlFlavor::Sqlite }
+        Self { db, env, flavor: DbSqlFlavor::Sqlite, delivery_writer: Default::default() }
     }
 
     /// Backend label for logs ("mysql" / "sqlite"), so persistence logs reflect
@@ -72,7 +73,7 @@ fn visibility_domain_name(domain: MessageVisibilityDomain) -> &'static str {
     }
 }
 
-fn serialize_visibility(
+pub(crate) fn serialize_visibility(
     msg: &NewMessage,
 ) -> Result<(&'static str, Option<&'static str>, Option<String>), MessageRepoError> {
     if matches!(
@@ -254,6 +255,16 @@ fn row_to_message(row: &bcs_db_api::DbRow) -> Result<PersistedMessage, MessageRe
 
 #[async_trait]
 impl MessageRepoPort for MySqlMessageStore {
+    async fn run_chat_segments(&self, session: &str, sender: &str, run: &str) -> Result<Vec<PersistedMessage>, MessageRepoError> {
+        let rows = self.db.query(DbStatement::with_params(
+            "SELECT * FROM bcs_messages WHERE env = ? AND session_id = ? AND sender_id = ? AND run_id = ? AND message_type = 'chat' ORDER BY session_seq",
+            vec![self.env.as_str().into(), session.into(), sender.into(), run.into()],
+        )).await.map_err(|e| MessageRepoError::StorageError(e.to_string()))?;
+        rows.iter().map(row_to_message).collect()
+    }
+    fn delivery_repository(self: Arc<Self>) -> Option<Arc<dyn bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort>> {
+        Some(self)
+    }
     async fn append_message(
         &self,
         msg: NewMessage,
@@ -378,7 +389,7 @@ impl MessageRepoPort for MySqlMessageStore {
             }
         };
 
-        info!(
+        debug!(
             session_id = %msg.session_id,
             message_id = %message_id,
             session_seq,
@@ -545,6 +556,7 @@ impl MessageRepoPort for MySqlMessageStore {
         let mut conditions = vec![
             "group_id = ?".to_string(),
             "session_id = ?".to_string(),
+            "message_type <> 'run_reply'".to_string(),
         ];
 
         if let Some(cursor) = query.cursor {
@@ -636,7 +648,7 @@ impl MessageRepoPort for MySqlMessageStore {
 
         let mut messages = Vec::with_capacity(rows.len());
         for row in rows {
-            messages.push(row_to_message(row)?);
+            messages.push(super::history_projection(row_to_message(row)?));
         }
 
         let next_cursor = if has_more {
@@ -645,7 +657,7 @@ impl MessageRepoPort for MySqlMessageStore {
             None
         };
 
-        info!(
+        debug!(
             group_id = %query.group_id,
             session_id = %query.session_id,
             count = messages.len(),
@@ -659,16 +671,27 @@ impl MessageRepoPort for MySqlMessageStore {
         })
     }
 
+    async fn get_messages_by_ids(&self, session_id: &str, ids: &[String]) -> Result<Vec<PersistedMessage>, MessageRepoError> {
+        let mut messages = Vec::new();
+        for chunk in ids.chunks(200) {
+            let mut params = vec![self.env.as_str().into(), session_id.into()];
+            params.extend(chunk.iter().map(|id| DbValue::from(id.as_str())));
+            let sql = format!("SELECT {SELECT_COLS} FROM bcs_messages WHERE env = ? AND session_id = ? AND message_id IN ({})", vec!["?"; chunk.len()].join(","));
+            let rows = self.db.query(DbStatement::with_params(sql, params)).await.map_err(|e| MessageRepoError::StorageError(e.to_string()))?;
+            for row in rows { messages.push(row_to_message(&row)?); }
+        }
+        Ok(messages)
+    }
     async fn get_message_by_id(
         &self,
-        _session_id: &str,
+        session_id: &str,
         message_id: &str,
     ) -> Result<Option<PersistedMessage>, MessageRepoError> {
         let sql = format!(
-            "SELECT {} FROM bcs_messages WHERE message_id = ?",
+            "SELECT {} FROM bcs_messages WHERE env = ? AND session_id = ? AND message_id = ?",
             SELECT_COLS
         );
-        let stmt = DbStatement::with_params(&sql, vec![DbValue::from(message_id.to_string())]);
+        let stmt = DbStatement::with_params(&sql, vec![self.env.as_str().into(), session_id.into(), message_id.into()]);
         let rows = self
             .db
             .query(stmt)
@@ -729,6 +752,7 @@ impl MessageRepoPort for MySqlMessageStore {
         let mut conditions = vec![
             "session_id = ?".to_string(),
             "env = ?".to_string(),
+            "message_type <> 'run_reply'".to_string(),
         ];
 
         match &owner_filter {
@@ -807,9 +831,9 @@ impl MessageRepoPort for MySqlMessageStore {
 
         let mut messages = Vec::with_capacity(rows.len());
         for row in rows {
-            messages.push(row_to_message(row).map_err(|e| {
+            messages.push(super::history_projection(row_to_message(row).map_err(|e| {
                 ServiceError::InternalError(format!("list_session_history row: {e}"))
-            })?);
+            })?));
         }
 
         let next_cursor = if has_more {
@@ -818,7 +842,7 @@ impl MessageRepoPort for MySqlMessageStore {
             None
         };
 
-        info!(
+        debug!(
             session_id = %session_id,
             count = messages.len(),
             has_more,

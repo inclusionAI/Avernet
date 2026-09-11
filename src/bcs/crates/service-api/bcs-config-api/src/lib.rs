@@ -15,6 +15,7 @@ use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 
 pub mod bcsfuse;
+pub mod message_delivery;
 pub mod mysql;
 pub mod redis;
 pub mod redis_route_type;
@@ -1191,6 +1192,8 @@ pub struct LogOutputConfig {
 pub enum LogOutputFormat {
     Text,
     Json,
+    /// Only the event message, without timestamp/level/target/field names.
+    Raw,
 }
 
 impl Default for LogOutputFormat {
@@ -1211,6 +1214,16 @@ fn default_true() -> bool {
 
 fn default_log_outputs() -> Vec<LogOutputConfig> {
     vec![
+        LogOutputConfig {
+            name: "message-delivery".to_string(),
+            path: "./logs".to_string(),
+            file: "message-delivery.log".to_string(),
+            level: "info".to_string(),
+            rotation: "daily".to_string(),
+            format: LogOutputFormat::Raw,
+            targets: vec!["bcs_message_delivery_monitor".to_string()],
+            max_keep_days: 7,
+        },
         LogOutputConfig {
             name: "common-error".to_string(),
             path: "./logs".to_string(),
@@ -1684,6 +1697,18 @@ mod tests {
         assert_eq!(digest.format, LogOutputFormat::Text);
         assert_eq!(digest.targets, vec!["bcs_chat_digest"]);
         assert_eq!(digest.max_keep_days, 7);
+    }
+
+    #[test]
+    fn delivery_monitor_defaults_to_raw_and_existing_formats_remain_compatible() {
+        let logging = LoggingConfig::default();
+        let output = logging.outputs.iter().find(|o| o.name == "message-delivery").unwrap();
+        assert_eq!(output.file, "message-delivery.log"); assert_eq!(output.format, LogOutputFormat::Raw);
+        assert_eq!(output.targets, vec!["bcs_message_delivery_monitor"]);
+        for (value, format) in [("raw", LogOutputFormat::Raw), ("text", LogOutputFormat::Text), ("json", LogOutputFormat::Json)] {
+            assert_eq!(serde_json::from_value::<LogOutputFormat>(serde_json::json!(value)).unwrap(), format);
+        }
+        assert_eq!(LogOutputFormat::default(), LogOutputFormat::Text);
     }
 
     #[test]

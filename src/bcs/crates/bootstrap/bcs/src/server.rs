@@ -3501,6 +3501,8 @@ impl BcsServer {
         let invite_token_secret = resolve_invite_token_secret(&config);
         let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         // Create service implementations (synchronous, in-memory mode)
+        assert!(!config.message_delivery.flow_enabled.group,
+            "managed Group delivery requires the durable async server constructor");
         let provider_repos = memory_provider_repos();
         let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(config.bots_base_dir.clone()));
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
@@ -4601,8 +4603,10 @@ impl BcsServer {
             provider_stream_gray_list.clone(),
             profile_store.clone(),
         );
-        let (message_flow, channel_slot) =
-            finalize_message_flow(message_flow_builder, use_cases.system_message.clone());
+        let message_flow_builder = message_flow_builder.with_system_message(use_cases.system_message.clone());
+        let channel_slot = message_flow_builder.channel_slot();
+        let message_flow: Arc<dyn MessageFlowService> = crate::message_delivery_wiring::wire(message_flow_builder, &config).await?;
+        let mut delivery_startup_guard = crate::message_delivery_wiring::StartupGuard(Some(message_flow.clone()));
         frontend_connections
             .set_bot_query(use_cases.bot_query.clone())
             .await;
@@ -4900,6 +4904,7 @@ impl BcsServer {
             admission_service,
         });
 
+        delivery_startup_guard.0 = None;
         Ok(Self { config, state })
     }
 
@@ -5151,6 +5156,11 @@ impl BcsServer {
 
     /// Run the server with graceful shutdown support.
     pub async fn run(self) -> Result<()> {
+        // Also stop durable workers if address parsing, lifecycle setup or bind
+        // fails before the normal graceful-shutdown path is installed.
+        let _delivery_shutdown_guard = crate::message_delivery_wiring::StartupGuard(
+            Some(self.state.services.message_flow.clone()),
+        );
         let addr: SocketAddr = format!("{}:{}", self.config.bind, self.config.port)
             .parse()
             .map_err(|e| crate::BcsError::InvalidConfig(format!("Invalid address: {}", e)))?;
@@ -5224,8 +5234,10 @@ impl BcsServer {
         let final_lifecycle = self.state.lifecycle.clone();
         let shutdown_metrics = self.state.metrics.clone();
         let final_metrics = self.state.metrics.clone();
+        let shutdown_message_flow = self.state.services.message_flow.clone();
+        let final_message_flow = self.state.services.message_flow.clone();
 
-        axum::serve(
+        let serve_result = axum::serve(
             listener,
             app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
         )
@@ -5244,6 +5256,10 @@ impl BcsServer {
 
                 info!("Shutdown signal received, gracefully shutting down...");
 
+                if let Err(error) = shutdown_message_flow.shutdown_managed_delivery().await {
+                    warn!(%error, "message delivery shutdown failed");
+                }
+
                 if let Err(error) = shutdown_lifecycle.lock().await.shutdown_all().await {
                     warn!(error = %error, "service lifecycle shutdown failed");
                 }
@@ -5252,8 +5268,11 @@ impl BcsServer {
                 }
             })
             .await
-            .map_err(|e| crate::BcsError::InvalidConfig(e.to_string()))?;
+            .map_err(|e| crate::BcsError::InvalidConfig(e.to_string()));
 
+        if let Err(error) = final_message_flow.shutdown_managed_delivery().await {
+            warn!(%error, "message delivery final shutdown failed");
+        }
         if let Err(error) = final_lifecycle.lock().await.shutdown_all().await {
             warn!(error = %error, "service lifecycle shutdown failed");
         }
@@ -5262,7 +5281,7 @@ impl BcsServer {
         }
 
         info!("Bot Coordination Service stopped");
-        Ok(())
+        serve_result
     }
 
     /// Run the server on a random port and return the bound address.

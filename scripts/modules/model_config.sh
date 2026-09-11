@@ -66,7 +66,8 @@ singlebox_mock_model_start() {
     fi
 
     python3 "${PROJECT_ROOT}/scripts/modules/mock_model_server.py" \
-        --port "${SINGLEBOX_MOCK_MODEL_PORT:-18080}" >"$log_file" 2>&1 &
+        --port "${SINGLEBOX_MOCK_MODEL_PORT:-18080}" \
+        --response-delay-seconds "${SINGLEBOX_MOCK_MODEL_RESPONSE_DELAY_SECONDS:-0}" >"$log_file" 2>&1 &
     pid=$!
 
     local attempt

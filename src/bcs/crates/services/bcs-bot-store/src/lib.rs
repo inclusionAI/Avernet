@@ -44,6 +44,7 @@ fn log_bot_cache_source(source: &'static str) {
 
 pub mod memory;
 pub mod provider;
+pub mod provider_cache;
 
 pub use bcs_service_api::port::repo::BotRepoPort;
 pub use memory::MemoryBotRepo;

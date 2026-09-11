@@ -4,6 +4,7 @@
 //! `tests/conformance_*.rs`.
 
 pub mod edge_grant;
+pub mod message_delivery;
 pub mod permission_profile;
 pub mod permission_request;
 

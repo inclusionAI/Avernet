@@ -139,6 +139,8 @@ mod identity_wiring;
 pub mod lifecycle;
 pub mod metrics;
 pub mod migrations;
+mod message_delivery_wiring;
+mod delivery_metrics;
 pub mod plugins;
 pub mod server;
 pub mod state_machine_timeout_scanner;
@@ -189,7 +191,7 @@ pub async fn run_from_env_with_config_dir(config_dir: Option<&std::path::PathBuf
 
     let telemetry = telemetry::Telemetry::init(&config.telemetry);
     let _logging_guard = logging::init(&config.logging, telemetry.tracer());
-    logging::spawn_cleanup_task(config.logging.outputs.clone());
+    logging::spawn_cleanup_task(logging::effective_outputs(&config.logging));
 
     tracing::info!(
         version = %BCS_VERSION,
