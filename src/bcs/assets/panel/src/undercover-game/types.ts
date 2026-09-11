@@ -15,12 +15,18 @@ export interface VoteCandidate { actorId: string; displayName: string; seatNumbe
 export interface PublicDisplayFlags { showTimer?: boolean; showPublicReveal?: boolean; showVoteResults?: boolean; showHostOutput?: boolean }
 export interface PublicRules { speechMaxChars?: number; voteMaxChars?: number; forbidOwnWord?: boolean; bluntness?: number }
 export interface PublicHistorySpeech { actorId: string; seatNumber: number; displayName: string; text: string }
-export interface PublicHistoryRound { round: number; speeches: PublicHistorySpeech[] }
+export interface PublicHistoryRound { round: number; stage?: 'regular' | 'pk'; speeches: PublicHistorySpeech[] }
+
+export interface PublicVoteRound {
+  round: number; stage: 'regular' | 'pk';
+  votes: Array<{ seatNumber: number; displayName: string; text: string }>;
+  counts: Array<{ seatNumber: number; votes: number }>;
+}
 
 export interface UndercoverGamePanelParams {
   runId: string; groupId: string; sessionId: string; gameSessionId?: string; phase: UndercoverPhase; round: number; attempt: number;
   openingAnnouncement?: string; deadlineAt?: number; host: HostActor; seatOrder: string[]; turnOrder: string[]; players: PlayerActor[]; nodeActorMap: Record<string, string>;
-  publicHistory: PublicHistoryRound[]; rules: PublicRules; voteCandidates?: VoteCandidate[]; apiBaseUrl?: string; currentViewerActorId?: string;
+  publicHistory: PublicHistoryRound[]; pkCandidates?: string[]; voteHistory?: PublicVoteRound[]; rules: PublicRules; voteCandidates?: VoteCandidate[]; apiBaseUrl?: string; currentViewerActorId?: string;
   currentAction?: CurrentAction; display?: PublicDisplayFlags; pollingInterval?: number; autoRefresh?: boolean; maxResponseBytes?: number;
   resultFile?: string;
 }

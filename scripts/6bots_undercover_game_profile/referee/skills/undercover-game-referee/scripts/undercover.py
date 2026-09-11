@@ -33,7 +33,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-STATE_VERSION = 5
+STATE_VERSION = 6
 
 # 发言提交后没有主持人入口任务；只播报公开开场并释放当前激活。
 SUBMITTED_NEXT_ACTION = "原样播报 announcement 后结束激活；不追加工具调用，不宣称任何玩家已经完成。"
@@ -43,11 +43,19 @@ PHASES = (
     "SPEAK_RUNNING",
     "AWAIT_VOTE_START",
     "VOTE_RUNNING",
+    "AWAIT_PK_SPEAK_START",
+    "PK_SPEAK_RUNNING",
+    "AWAIT_PK_VOTE_START",
+    "PK_VOTE_RUNNING",
     "AWAIT_NEXT_ROUND",
     "FINISHED",
 )
 
 NEXT_ACTION = {
+    "AWAIT_PK_SPEAK_START": "常规投票平票。计票节点只报 PK 名单后结束；开票稿回灌后 open-round 开始本轮 PK 发言，不派遗言。",
+    "PK_SPEAK_RUNNING": "等 PK 发言汇总节点；只收 PK 玩家发言，调 speeches-set。",
+    "AWAIT_PK_VOTE_START": "PK 发言汇总节点念稿后结束；回灌后 open-vote 开始 PK 投票。",
+    "PK_VOTE_RUNNING": "等全体存活玩家 PK 投票收齐，在计票节点调 votes-set。",
     "AWAIT_START": "开第一轮：先用工具调用前的消息告诉人类座位和 human_word，然后最后调用 open-round；不要把发牌告知留到提交后的最终回复。",
     "SPEAK_RUNNING": "等发言协作把汇总节点派给你；拿到全部发言后调 speeches-set。",
     "AWAIT_VOTE_START": "**如果这次激活是「本轮发言汇总」节点：念完汇总稿就结束激活，不要在那里开投。**你正占着协作槽位，在那个节点里跑 open-vote 一定失败，重试会卡死整局。其余情况（汇总稿的回灌、人类说话）：直接开投，不用等人类说话，跑 open-vote。",
@@ -377,25 +385,69 @@ def current_round(state: dict[str, Any]) -> dict[str, Any]:
     return state["rounds"][-1]
 
 
+def is_pk(state: dict[str, Any]) -> bool:
+    return bool(state["rounds"] and current_round(state).get("pk"))
+
+
+def current_stage(state: dict[str, Any]) -> dict[str, Any]:
+    rnd = current_round(state)
+    return rnd["pk"] if is_pk(state) else rnd
+
+
+def speech_seats(state: dict[str, Any]) -> list[dict[str, Any]]:
+    living = sorted(alive_seats(state), key=lambda seat: seat["seat"])
+    return [seat for seat in living if seat["seat"] in current_stage(state)["order"]] if is_pk(state) else living
+
+
+def require_submission(state: dict[str, Any], args: argparse.Namespace, kind: str) -> None:
+    stage = "pk" if is_pk(state) else "regular"
+    if getattr(args, "stage", "regular") != stage:
+        die("WRONG_STAGE", "提交不属于当前常规/PK 阶段，请使用当前节点指令。")
+    attempt = getattr(args, "attempt", None)
+    expected = current_stage(state).get("renders", {}).get(kind, 1)
+    if (is_pk(state) or attempt is not None) and attempt != expected:
+        die("STALE_ATTEMPT", "提交不属于当前运行尝试，请使用当前节点指令。")
+    round_number = getattr(args, "round", None)
+    if (is_pk(state) or round_number is not None) and round_number != state["round"]:
+        die("STALE_ROUND", "提交不属于当前轮，请使用当前节点指令。")
+
+
+def submission_scope(state: dict[str, Any], kind: str) -> str:
+    stage = "pk" if is_pk(state) else "regular"
+    attempt = current_stage(state).get("renders", {}).get(kind, 1)
+    return f"--round {state['round']} --stage {stage} --attempt {attempt}"
+
+
+def public_vote_history(state: dict[str, Any]) -> list[dict[str, Any]]:
+    history = []
+    for rnd in state["rounds"]:
+        for stage, record in [("regular", rnd)] + ([("pk", rnd["pk"])] if rnd.get("pk") else []):
+            if not record.get("tallied"):
+                continue
+            history.append({
+                "round": rnd["round"], "stage": stage,
+                "votes": [{"seatNumber": int(seat), "displayName": seat_of(state, int(seat))["display"],
+                           "text": vote["display"]} for seat, vote in sorted(record["votes"].items(), key=lambda item: int(item[0]))],
+                "counts": [{"seatNumber": int(seat), "votes": count} for seat, count in sorted(record["counts"].items(), key=lambda item: int(item[0]))],
+            })
+    return history
+
+
 def public_history(state: dict[str, Any]) -> list[dict[str, Any]]:
     """给玩家看的公开发言史，只含可展示文本，不含词与身份。"""
     out = []
     for rnd in state["rounds"]:
-        if not rnd["speeches"]:
-            continue
-        out.append(
-            {
+        for stage, record in [("regular", rnd)] + ([("pk", rnd["pk"])] if rnd.get("pk") else []):
+            if not record["speeches"]:
+                continue
+            entry = {
                 "round": rnd["round"],
-                "speeches": [
-                    {
-                        "seat": int(seat),
-                        "player": seat_of(state, int(seat))["display"],
-                        "text": rec["display"],
-                    }
-                    for seat, rec in sorted(rnd["speeches"].items(), key=lambda kv: int(kv[0]))
-                ],
+                "speeches": [{"seat": int(seat), "player": seat_of(state, int(seat))["display"], "text": rec["display"]}
+                             for seat, rec in sorted(record["speeches"].items(), key=lambda kv: int(kv[0]))],
             }
-        )
+            if stage == "pk":
+                entry["stage"] = stage
+            out.append(entry)
     return out
 
 
@@ -499,6 +551,16 @@ CN_DIGITS = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 
 
 
 def parse_vote(state: dict[str, Any], voter_seat: int | None, text: str) -> tuple[int | None, str | None]:
+    target, note = parse_ballot(state, voter_seat, text)
+    if is_pk(state):
+        if note == "弃权":
+            return None, "PK 禁止弃权"
+        if target is not None and target not in current_stage(state)["order"]:
+            return None, "投票目标不在 PK 名单"
+    return target, note
+
+
+def parse_ballot(state: dict[str, Any], voter_seat: int | None, text: str) -> tuple[int | None, str | None]:
     """Parse structured votes and exact actor IDs before legacy Bot text."""
     if not text or not text.strip():
         return None, "没有内容"
@@ -609,17 +671,18 @@ def public_panel_projection(state: dict[str, Any], kind: str, attempt: int) -> d
     """Build the complete whitelist-only public projection for one phase."""
     all_seats = sorted(state["seats"], key=lambda seat: seat["seat"])
     living = [seat for seat in all_seats if seat["alive"]]
-    phase = "speaking" if kind == "speak" else "voting"
+    phase = ("pk_" if is_pk(state) else "") + ("speaking" if kind == "speak" else "voting")
+    acting = speech_seats(state) if kind == "speak" else living
     node_prefix = "speak" if kind == "speak" else "vote"
     seat_order = [actor_id_for(seat, state) for seat in all_seats]
-    turn_order = [actor_id_for(seat, state) for seat in living]
+    turn_order = [actor_id_for(seat, state) for seat in acting]
     players = [{"actorId": actor_id_for(seat, state), "displayName": seat["display"], "seatNumber": int(seat["seat"]), "isHuman": seat["kind"] == "human", "alive": bool(seat["alive"]), "eliminated": not bool(seat["alive"])} for seat in all_seats]
-    node_actor_map = {f"{node_prefix}_{seat['seat']}": actor_id_for(seat, state) for seat in living}
+    node_actor_map = {f"{node_prefix}_{seat['seat']}": actor_id_for(seat, state) for seat in acting}
     for node_id in (("collect",) if kind == "speak" else ("tally",)):
         node_actor_map[node_id] = state["referee_uuid"]
-    human = next((seat for seat in living if seat["kind"] == "human"), None)
+    human = next((seat for seat in acting if seat["kind"] == "human"), None)
     current_action = None if human is None else {"actorId": actor_id_for(human, state), "type": "speech" if kind == "speak" else "vote", "nodeId": f"{node_prefix}_{human['seat']}"}
-    history = [{"round": entry["round"], "speeches": [{"actorId": actor_id_for(seat_of(state, item["seat"]), state), "seatNumber": item["seat"], "displayName": item["player"], "text": item["text"]} for item in entry["speeches"]]} for entry in public_history(state)]
+    history = [{"round": entry["round"], **({"stage": "pk"} if entry.get("stage") == "pk" else {}), "speeches": [{"actorId": actor_id_for(seat_of(state, item["seat"]), state), "seatNumber": item["seat"], "displayName": item["player"], "text": item["text"]} for item in entry["speeches"]]} for entry in public_history(state)]
     params: dict[str, Any] = {
         "runId": RUN_ID_TEMPLATE, "groupId": state["group_id"] or "{{bcs.group_id}}", "sessionId": state["session_id"], "gameSessionId": state["session_id"],
         "phase": phase, "round": state["round"], "attempt": attempt,
@@ -628,17 +691,22 @@ def public_panel_projection(state: dict[str, Any], kind: str, attempt: int) -> d
         "currentViewerActorId": state["human_actor_id"], "currentAction": current_action,
         "display": {"showVoteResults": False, "showHostOutput": True, "showTimer": True},
     }
+    if is_pk(state):
+        params["pkCandidates"] = [actor_id_for(seat_of(state, seat), state) for seat in current_stage(state)["order"]]
+    vote_history = public_vote_history(state)
+    if vote_history:
+        params["voteHistory"] = vote_history
     if kind == "vote" and human is not None:
         viewer_id = actor_id_for(human, state)
-        params["voteCandidates"] = [{"actorId": actor_id_for(seat, state), "displayName": seat["display"], "seatNumber": int(seat["seat"]), "eligible": True} for seat in living if actor_id_for(seat, state) != viewer_id]
+        params["voteCandidates"] = [{"actorId": actor_id_for(seat, state), "displayName": seat["display"], "seatNumber": int(seat["seat"]), "eligible": True} for seat in living if actor_id_for(seat, state) != viewer_id and (not is_pk(state) or seat["seat"] in current_stage(state)["order"])]
     if kind == "vote":
-        params["resultFile"] = f"undercover-result-v1-r{state['round']}-a{attempt}.json"
+        params["resultFile"] = f"undercover-result-v1-r{state['round']}{'-pk' if is_pk(state) else ''}-a{attempt}.json"
         params["openingAnnouncement"] = opening_announcement(state, kind, attempt)
     return params
 
 
 def panel_tab_metadata(state: dict[str, Any], kind: str, attempt: int) -> dict[str, str]:
-    phase = "发言" if kind == "speak" else "投票"
+    phase = ("PK " if is_pk(state) else "") + ("发言" if kind == "speak" else "投票")
     safe_session = re.sub(r"[^A-Za-z0-9_.-]", "-", state["session_id"])
     return {"id": f"undercover-game-{safe_session}", "title": f"谁是卧底 · 第 {state['round']} 轮{phase}"}
 
@@ -662,6 +730,12 @@ def write_run_files(
 
 def opening_announcement(state: dict[str, Any], kind: str, attempt: int) -> str:
     """Only public phase information; speech is spoken, vote is shown by the panel."""
+    if is_pk(state):
+        action = "发言" if kind == "speak" else "投票"
+        retry = f"本次 PK 之前的{action}作废，请重新{action}。" if attempt > 1 else ""
+        roster = "、".join(label_of(state, seat) for seat in current_stage(state)["order"])
+        rule = "上述玩家依次补充描述或辩解。" if kind == "speak" else "所有存活玩家仅投 PK 玩家，禁止自投和弃权，全部提交后统一计票。"
+        return retry + f"第 {state['round']} 轮 PK {action}开始，PK 玩家：{roster}。" + rule
     retry = ("本轮之前的发言作废，请重新发言。" if kind == "speak" else
              "本轮之前的票作废，请重新投票。") if attempt > 1 else ""
     if kind == "vote":
@@ -675,7 +749,9 @@ def opening_announcement(state: dict[str, Any], kind: str, attempt: int) -> str:
 
 def render_speak_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
     rnd = state["round"]
-    living = sorted(alive_seats(state), key=lambda s: s["seat"])
+    pk = is_pk(state)
+    phase_label = "PK 发言" if pk else "发言"
+    living = speech_seats(state)
     node_ids = [f"speak_{s['seat']}" for s in living]
 
     participants: list[str] = []
@@ -702,12 +778,13 @@ def render_speak_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
             # 那个词、说钝一点。字面泄词有 check_text 兜底，不必在这里枚举。
             instruction = append_ui_context((
                 f"【你的词语】{s['word']}\n\n"
-                f"第 {rnd} 轮 · 你是 {s['seat']} 号 · 轮到你发言了。\n"
+                f"第 {rnd} 轮 · 你是 {s['seat']} 号 · 轮到你{phase_label}了。\n"
                 "上面能看到本轮在你之前的人说了什么。\n\n"
                 f"写一句话（不超过 {SPEECH_MAX_CHARS} 个字）描述你的词，"
                 "别把这个词说出来，也别拆开来说。\n"
                 f"说钝一点：这句话得能同时套在至少 {bluntness_n(rnd)} 样别的东西上。\n"
-                "别提身份、别点评别人，只说你的词。"
+                + ("本次 PK，可基于公开发言和已公布票面补充描述或辩解，不暴露私有信息。" if pk else
+                 "别提身份、别点评别人，只说你的词。")
             ), {"action": "speech", "round": rnd, "seatNumber": s["seat"], "word": s["word"], "maxChars": SPEECH_MAX_CHARS, "forbidOwnWord": True, "bluntness": bluntness_n(rnd)})
             nodes.append(
                 f"      {nid}:\n"
@@ -721,14 +798,15 @@ def render_speak_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
             )
         else:
             instruction = (
-                f"你是 {s['seat']} 号，你的词是【{s['word']}】。第 {rnd} 轮发言。\n"
+                f"你是 {s['seat']} 号，你的词是【{s['word']}】。第 {rnd} 轮{phase_label}。\n"
                 "[Input] 含公开规则和开场；[Upstream Outputs] 只含本轮排在你前面的人的原话。"
                 "[Input]：历史轮次的发言。\n"
                 f"输出一句话，不超过 {SPEECH_MAX_CHARS} 字，描述你的词。\n"
                 f"{forbid_line(s['word'])}\n\n"
                 f"{bluntness_block(rnd, first)}\n\n"
-                "不提身份、轮次、规则、票数，不点评别人。\n"
-                "只输出这句话：没有编号、引号、JSON、前缀、解释。"
+                + ("本次 PK，可基于公开发言和已公布票面补充描述或辩解，不暴露私有信息。\n" if pk else
+                 "不提身份、轮次、规则、票数，不点评别人。\n")
+                + "只输出这句话：没有编号、引号、JSON、前缀、解释。"
             )
             nodes.append(
                 f"      {nid}:\n"
@@ -747,7 +825,7 @@ def render_speak_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
         "【裁判节点 · 本轮发言汇总】\n"
         "这是 NODE_TASK/collect；本次激活类型不会随脚本返回的 phase 改变。\n"
         "1. 将 [Upstream Outputs] 中每个座位的原话整理成 JSON，执行 "
-        "undercover.py speeches-set --session '<当前会话ID>' --json '<JSON>'。\n"
+        f"undercover.py speeches-set --session '<当前会话ID>' {submission_scope(state, 'speak')} --json '<JSON>'。\n"
         "2. 用返回的 label 称呼每个人，逐字引用遮蔽后的 text，标明 violation；"
         "串场用自己的口吻，不评价谁可疑。\n"
         "3. 告诉人类接下来自动开投、不用回复，输出这一段主持稿后结束激活。\n"
@@ -768,7 +846,7 @@ def render_speak_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
     )
 
     yaml_text = (
-        f"name: {yq(f'谁是卧底 第{rnd}轮 发言')}\n"
+        f"name: {yq(f'谁是卧底 第{rnd}轮 {phase_label}')}\n"
         "metadata:\n"
         f"  description: {yq('存活玩家按座位顺序各说一句话描述自己的词语')}\n"
         "participants:\n" + "\n".join(participants) + "\n"
@@ -789,6 +867,8 @@ def render_speak_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
 
 def render_vote_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
     rnd = state["round"]
+    pk = is_pk(state)
+    phase_label = "PK 投票" if pk else "投票"
     living = sorted(alive_seats(state), key=lambda s: s["seat"])
     node_ids = [f"vote_{s['seat']}" for s in living]
     seat_list = "、".join(f"{s['seat']}号 {s['display']}" for s in living)
@@ -829,16 +909,16 @@ def render_vote_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
 
     for idx, s in enumerate(living):
         nid = node_ids[idx]
-        others = "、".join(f"{o['seat']}号" for o in living if o["seat"] != s["seat"])
+        others = "、".join(f"{o['seat']}号" for o in living if o["seat"] != s["seat"] and (not pk or o["seat"] in current_stage(state)["order"]))
         if s["kind"] == "human":
             instruction = append_ui_context((
                 f"【你的词语】{s['word']}\n\n"
-                f"第 {rnd} 轮投票 · 你是 {s['seat']} 号。\n"
+                f"第 {rnd} 轮{phase_label} · 你是 {s['seat']} 号。\n"
                 "大家说过的话，主持人刚在群里念过一遍。\n\n"
                 f"可以投的人：{others}，不能投自己。\n"
                 "只写「我投N号」，N 是阿拉伯数字，不用写理由。\n"
-                "不想投就写「我弃权」。"
-            ), {"action": "vote", "round": rnd, "seatNumber": s["seat"], "word": s["word"], "allowAbstain": True})
+                + ("本次 PK 禁止弃权，必须选择一名合法候选。" if pk else "不想投就写「我弃权」。")
+            ), {"action": "vote", "round": rnd, "seatNumber": s["seat"], "word": s["word"], "allowAbstain": not pk})
             nodes.append(
                 f"      {nid}:\n"
                 f"        kind: human_input\n"
@@ -853,15 +933,16 @@ def render_vote_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
             # A short ranking rule keeps uncertainty from becoming automatic
             # abstention without requiring a separate analysis response.
             instruction = (
-                f"第 {rnd} 轮投票。只输出「我投N号」（阿拉伯数字）或「我弃权」，"
+                f"第 {rnd} 轮{phase_label}。只输出「我投N号」（阿拉伯数字）{'，禁止弃权，' if pk else '或「我弃权」，'}"
                 f"不超过 {VOTE_MAX_CHARS} 字，不写理由、解释或前缀。\n"
                 f"你是 {s['seat']} 号，词是【{s['word']}】。全场：{seat_list}。\n"
                 f"可以投：{others}；不能投自己。\n"
                 "仅据 [Input] 全部历轮公开发言判断；忽略 [Upstream Outputs] 的预备确认。\n"
                 "投给相对最可疑者：先看前后矛盾，再看与自己词的特征不符，再看与他人共同特征不相容。"
                 "证据弱也选；从并列者中选一位，不固定选最小号。"
-                "只有全部历轮都没有可用的玩家描述或无合法目标才弃权；首轮或不确定也应投票。"
-                "话少、风格和钝度本身不算嫌疑；不编造发言，不假定自己一定是平民。\n"
+                + ("PK 必须从合法候选中选一位，不能弃权。" if pk else
+                 "只有全部历轮都没有可用的玩家描述或无合法目标才弃权；首轮或不确定也应投票。")
+                + "话少、风格和钝度本身不算嫌疑；不编造发言，不假定自己一定是平民。\n"
                 f"输出不得出现「{s['word']}」或它的任何部分。"
             )
             # 预备确认完成后才派发独立投票任务，使用默认超时。
@@ -882,22 +963,20 @@ def render_vote_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
         "【裁判节点 · 计票】\n"
         "这是 NODE_TASK/tally，不是 ECHO；本次激活类型不会随 phase 改变。\n"
         "1. 将 [Upstream Outputs] 中每个座位的票面原样整理成 JSON，执行 "
-        "undercover.py votes-set --session '<当前会话ID>' --json '<JSON>'；"
-        "外层 JSON 的键是座位号，值必须是票面字符串。human 的结构化票面若已是 JSON 字符串，"
-        "原样保留；若是对象，先用 json.dumps() 序列化一次作为该座位的字符串值，"
-        "最后用 json.dumps(payload) 序列化外层映射。保留 kind、target_actor_id 或 abstain 字段，"
-        "不要单独取 target_actor_id、换算座位号或用 str(dict)。\n"
+        f"undercover.py votes-set --session '<当前会话ID>' {submission_scope(state, 'vote')} --json '<JSON>'；"
+        "座位号作键、票面字符串作值；human 的结构化票面保留完整 JSON 字符串（对象先 json.dumps）。"
+        "保留 kind/target_actor_id/abstain，不提取 ID、不换号、不用 str(dict)。\n"
         "2. 按返回的 label/target_label 逐条报票向、票数和出局者；"
-        "不自行计票，不编造投票理由。tie 为真时本轮无人出局、不重投。\n"
+        "不自行计票，不编造投票理由。verdict=pk 时宣布 pk_candidates 进入额外发言，结束节点后等回灌再 open-round。\n"
         "3. verdict=continue：身份不公布，报存活名单，输出开票稿后结束激活。"
-        "下一轮或遗言任务由开票稿回灌唤醒后安排。\n"
+        "PK 再平票或零有效票不再追加 PK；下一轮或遗言任务由开票稿回灌唤醒后安排。\n"
         "4. verdict=finished：刚判胜未揭晓，执行 "
         "undercover.py reveal --session '<当前会话ID>'，以 finale_header 开头，公布词对、"
         "全员身份词、胜负转折；执行 uc finish --session '<当前会话ID>'。"
         "这是终局唯一允许公开全员词语和身份的分支；命令失败须如实报告。\n"
         "本节点的上下文是 state_machine，不能使用 bcs_task_complete；"
-        "禁止 bcs_route（包括路由给自己）、查工具用法、派任务、open-round 或提交运行。"
-        "完成会话仍在本次终局节点内，不等待 ECHO 来收尾。\n"
+        "禁止 bcs_route（包括路由给自己）、查工具用法、派任务、open-round、open-vote 或提交运行。"
+        "终局在本节点收尾，不等 ECHO。\n"
         "只输出主持稿，不输出内部状态、节点名、命令或运行 ID。"
     )
     nodes.append(
@@ -913,7 +992,7 @@ def render_vote_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
     )
 
     yaml_text = (
-        f"name: {yq(f'谁是卧底 第{rnd}轮 投票')}\n"
+        f"name: {yq(f'谁是卧底 第{rnd}轮 {phase_label}')}\n"
         "metadata:\n"
         f"  description: {yq('存活玩家根据全部发言并行投票，主持人计票')}\n"
         "participants:\n" + "\n".join(participants) + "\n"
@@ -1067,7 +1146,10 @@ SELF_LOCK = {
 
 def self_lock_hint(session_id: str, phase: str) -> tuple[str, str] | None:
     """槽位被占且 phase 正停在末节点推出来的那个值时，替换 require_run_slot 的报错。"""
-    entry = SELF_LOCK.get(phase)
+    actual_phase = load_state(session_id)["phase"]
+    if actual_phase in ("AWAIT_PK_SPEAK_START", "AWAIT_PK_VOTE_START"):
+        phase = actual_phase
+    entry = SELF_LOCK.get({"AWAIT_PK_SPEAK_START": "AWAIT_NEXT_ROUND", "AWAIT_PK_VOTE_START": "AWAIT_VOTE_START"}.get(phase, phase))
     if entry is None or load_state(session_id)["phase"] != phase:
         return None
     err_code, run_name, node_name, board = entry
@@ -1342,7 +1424,7 @@ def cmd_status(args: argparse.Namespace) -> None:
 
 def bump_render(state: dict[str, Any], kind: str) -> int:
     """记下这一轮的某个运行渲染到第几次，并返回次数。第一次是 1。"""
-    renders = current_round(state).setdefault("renders", {})
+    renders = current_stage(state).setdefault("renders", {})
     renders[kind] = renders.get(kind, 0) + 1
     return renders[kind]
 
@@ -1354,16 +1436,19 @@ def run_file_kind(kind: str, rnd: int, attempt: int) -> str:
 def prepare_speak_run(session_id: str, retry: bool) -> dict[str, Any]:
     with locked(session_id):
         state = load_state(session_id)
+        pk = state["phase"] in ("AWAIT_PK_SPEAK_START", "PK_SPEAK_RUNNING")
         if retry:
             # 重开当前这一轮：上一次提交的运行失败了，而运行失败不会唤醒裁判。
             # 轮次不推进、本轮记录不重建，只把同一份 YAML 重新渲染一次。
-            require_phase(state, "SPEAK_RUNNING")
-            if current_round(state)["speeches"]:
+            require_phase(state, "SPEAK_RUNNING", "PK_SPEAK_RUNNING")
+            if current_stage(state)["speeches"]:
                 die(
                     "ALREADY_SPOKEN",
                     "本轮发言已经收齐落盘了，不能重开发言运行。"
                     "如果卡住的是投票，用 render-vote-run --retry。",
                 )
+        elif pk:
+            require_phase(state, "AWAIT_PK_SPEAK_START")
         else:
             require_phase(state, "AWAIT_START", "AWAIT_NEXT_ROUND")
             state["round"] += 1
@@ -1383,7 +1468,7 @@ def prepare_speak_run(session_id: str, retry: bool) -> dict[str, Any]:
                 }
             )
         living = sorted(alive_seats(state), key=lambda s: s["seat"])
-        state["phase"] = "SPEAK_RUNNING"
+        state["phase"] = "PK_SPEAK_RUNNING" if pk else "SPEAK_RUNNING"
         attempt = bump_render(state, "speak")
         yaml_text, bindings = render_speak_yaml(state)
         announcement = opening_announcement(state, "speak", attempt)
@@ -1398,15 +1483,20 @@ def prepare_speak_run(session_id: str, retry: bool) -> dict[str, Any]:
                 f"本轮的描述要钝到至少还能套在 {bluntness_n(state['round'])} 样别的东西上"
             ),
         }
+        vote_history = public_vote_history(state)
+        if vote_history:
+            run_input["voteHistory"] = vote_history
+        if pk:
+            run_input["rule"] += "；本次是 PK，可基于公开发言和已公布票面辩解，不暴露私有信息"
         panel_params = public_panel_projection(state, "speak", attempt)
         panel_tab = panel_tab_metadata(state, "speak", attempt)
         yaml_path, input_path, panel_params_path = write_run_files(
-            session_id, run_file_kind("speak", state["round"], attempt), yaml_text, run_input, panel_params
+            session_id, run_file_kind("pk-speak" if pk else "speak", state["round"], attempt), yaml_text, run_input, panel_params
         )
         save_state(state)
 
     return {
-        "phase": "SPEAK_RUNNING",
+        "phase": state["phase"],
         "round": state["round"],
         "attempt": attempt,
         "announcement": announcement,
@@ -1437,8 +1527,9 @@ def cmd_speeches_set(args: argparse.Namespace) -> None:
         flags[int(seat)] = reason
     with locked(args.session):
         state = load_state(args.session)
-        require_phase(state, "SPEAK_RUNNING")
-        rnd = current_round(state)
+        require_phase(state, "SPEAK_RUNNING", "PK_SPEAK_RUNNING")
+        require_submission(state, args, "speak")
+        rnd = current_stage(state)
         expected = set(rnd["order"])
         got = {int(k) for k in payload}
         if got != expected:
@@ -1464,12 +1555,12 @@ def cmd_speeches_set(args: argparse.Namespace) -> None:
                     "violation": reason,
                 }
             )
-        state["phase"] = "AWAIT_VOTE_START"
+        state["phase"] = "AWAIT_PK_VOTE_START" if is_pk(state) else "AWAIT_VOTE_START"
         save_state(state)
 
     emit(
         {
-            "phase": "AWAIT_VOTE_START",
+            "phase": state["phase"],
             "round": state["round"],
             "speeches": results,
             # 这条命令只可能在「本轮发言汇总」节点里跑，所以 next_action 不用
@@ -1490,10 +1581,10 @@ def prepare_vote_run(session_id: str, retry: bool) -> dict[str, Any]:
         if retry:
             # 投票运行失败不会唤醒裁判，phase 却已经推到 VOTE_RUNNING 了。
             # 没有这条路，卡住诊断走到重开那一步就会被阶段卫兵拦死。
-            require_phase(state, "VOTE_RUNNING")
+            require_phase(state, "VOTE_RUNNING", "PK_VOTE_RUNNING")
         else:
-            require_phase(state, "AWAIT_VOTE_START")
-        state["phase"] = "VOTE_RUNNING"
+            require_phase(state, "AWAIT_VOTE_START", "AWAIT_PK_VOTE_START")
+        state["phase"] = "PK_VOTE_RUNNING" if is_pk(state) else "VOTE_RUNNING"
         attempt = bump_render(state, "vote")
         yaml_text, bindings = render_vote_yaml(state)
         living = sorted(alive_seats(state), key=lambda s: s["seat"])
@@ -1506,16 +1597,22 @@ def prepare_vote_run(session_id: str, retry: bool) -> dict[str, Any]:
             "history": public_history(state),
             "rule": "只根据所有人历史全部发言，投出你认为词语和大家不一样的人；不能投自己；只交票号，不写理由",
         }
+        vote_history = public_vote_history(state)
+        if vote_history:
+            run_input["voteHistory"] = vote_history
+        if is_pk(state):
+            run_input["phase"] = "PK 投票"
+            run_input["rule"] += "；仅投本次 PK 玩家，禁止弃权"
         panel_params = public_panel_projection(state, "vote", attempt)
-        current_round(state)["result_file"] = panel_params["resultFile"]
+        current_stage(state)["result_file"] = panel_params["resultFile"]
         panel_tab = panel_tab_metadata(state, "vote", attempt)
         yaml_path, input_path, panel_params_path = write_run_files(
-            session_id, run_file_kind("vote", state["round"], attempt), yaml_text, run_input, panel_params
+            session_id, run_file_kind("pk-vote" if is_pk(state) else "vote", state["round"], attempt), yaml_text, run_input, panel_params
         )
         save_state(state)
 
     return {
-        "phase": "VOTE_RUNNING",
+        "phase": state["phase"],
         "round": state["round"],
         "attempt": attempt,
         "yaml_path": yaml_path,
@@ -1559,9 +1656,12 @@ def cmd_votes_set(args: argparse.Namespace) -> None:
     payload = json.loads(args.json)
     with locked(args.session):
         state = load_state(args.session)
-        require_phase(state, "VOTE_RUNNING")
-        rnd = current_round(state)
-        expected = set(rnd["order"])
+        require_phase(state, "VOTE_RUNNING", "PK_VOTE_RUNNING")
+        require_submission(state, args, "vote")
+        pk = is_pk(state)
+        rnd = current_stage(state)
+        voters = current_round(state)["order"]
+        expected = set(voters)
         got = {int(k) for k in payload}
         if got != expected:
             die(
@@ -1572,7 +1672,7 @@ def cmd_votes_set(args: argparse.Namespace) -> None:
 
         results = []
         counts: dict[int, int] = {}
-        for seat in rnd["order"]:
+        for seat in voters:
             raw = str(payload[str(seat)] if str(seat) in payload else payload[seat]).strip()
             _masked, reason = check_text(state, seat, raw, VOTE_MAX_CHARS)
             target, note = parse_vote(state, seat, raw)
@@ -1616,11 +1716,6 @@ def cmd_votes_set(args: argparse.Namespace) -> None:
         top = max(counts.values()) if counts else 0
         candidates = sorted(s for s, c in counts.items() if c == top) if top else []
         tie = len(candidates) != 1
-        # 平票 = 本轮无人出局，直接进下一轮。没有重投，也不在平票者里随机挑人。
-        #
-        # 代价是明摆着的：平票不减员，但照样烧掉一轮，而轮数用完判卧底赢，所以平
-        # 票是纯粹的平民损失。这是有意的——票是暗投、只有票号、Bot 之间没法串供，
-        # 连着平票很难人为制造；真要调平衡，杠杆是 max_rounds，不是把重投加回来。
         eliminated = None if tie else candidates[0]
 
         if eliminated is not None:
@@ -1630,10 +1725,17 @@ def cmd_votes_set(args: argparse.Namespace) -> None:
         rnd["counts"] = {str(k): v for k, v in counts.items()}
         rnd["eliminated"] = eliminated
         rnd["tie"] = tie
+        rnd["tallied"] = True
+        if pk:
+            current_round(state)["eliminated"] = eliminated
 
         spies_alive = [s for s in alive_seats(state) if s["role"] == "undercover"]
         survivors = alive_seats(state)
-        if not spies_alive:
+        if len(candidates) > 1 and not pk:
+            rnd["pk"] = {"order": candidates, "speeches": {}, "votes": {}, "counts": {},
+                         "tie": False, "eliminated": None, "renders": {}}
+            verdict, winner, reason = "pk", None, "最高票并列，进入 PK"
+        elif not spies_alive:
             verdict, winner, reason = "finished", "civilian", "卧底已经全部出局"
         elif len(survivors) <= 2:
             verdict, winner, reason = "finished", "undercover", "场上只剩两个人，卧底还在"
@@ -1643,7 +1745,10 @@ def cmd_votes_set(args: argparse.Namespace) -> None:
             verdict, winner, reason = "continue", None, ""
 
         ping = None
-        if verdict == "continue":
+        if verdict == "pk":
+            state["pending_ping"] = None
+            state["phase"] = "AWAIT_PK_SPEAK_START"
+        elif verdict == "continue":
             ping = choose_ping(state, eliminated)
             state["pending_ping"] = ping
             state["phase"] = "AWAIT_NEXT_ROUND"
@@ -1667,6 +1772,7 @@ def cmd_votes_set(args: argparse.Namespace) -> None:
                 for s, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
             ],
             "tie": tie,
+            "pk_candidates": candidates if verdict == "pk" else [],
             "eliminated": (
                 {
                     "seat": eliminated,
@@ -1689,6 +1795,8 @@ def cmd_votes_set(args: argparse.Namespace) -> None:
                 "公布终局稿，再执行 uc finish --session '<当前会话ID>'。"
                 "不要等待 ECHO，不调用 bcs_task_complete 或 bcs_route。"
                 if verdict == "finished"
+                else "报 PK 名单和开票稿后结束当前节点。回灌后 open-round 开始本轮 PK 发言。"
+                if verdict == "pk"
                 else (
                     "念开票稿后结束当前节点。回灌后 render-ping 派遗言，回执后开下一轮。"
                     if ping and ping["kind"] == "eulogy"
@@ -1698,7 +1806,7 @@ def cmd_votes_set(args: argparse.Namespace) -> None:
             "note": "只使用 text 字段念稿——它已经规范化成票号，玩家的原话不会给你。"
             "每位玩家用 label / target_label 原样称呼（名字带号数）。"
             "不要替玩家编造或猜测投票理由。出局者身份不要公布，除非 verdict 是 finished。"
-            "tie 为真就是本轮无人出局、直接进下一轮，没有重投这回事。"
+            "verdict=pk 时只公布 PK 名单，不淘汰；PK 计票仍平票或零有效票时本轮无人出局，不追加 PK。"
             "仅 verdict=continue 且 ping 为空、或 verdict=continue 且 kind 是 standby 时，**这一轮不派任何任务**："
             "开票稿会把你自己叫醒一次，那一拍直接 open-round。",
         }
@@ -1711,7 +1819,7 @@ def history_block(state: dict[str, Any]) -> str:
     for rnd in public_history(state):
         for sp in rnd["speeches"]:
             lines.append(
-                f"第{rnd['round']}轮 {sp['seat']}号 {public_name(state, sp['seat'])}：「{sp['text']}」"
+                f"第{rnd['round']}轮{' PK' if rnd.get('stage') == 'pk' else ''} {sp['seat']}号 {public_name(state, sp['seat'])}：「{sp['text']}」"
             )
     return "\n".join(lines)
 
@@ -1945,10 +2053,16 @@ def build_public_result(state: dict[str, Any]) -> dict[str, Any]:
     for seat in sorted(state["seats"], key=lambda item: item["seat"]):
         role = "平民" if seat["role"] == "civilian" else "卧底"
         lines.append(f"{seat['seat']}号 {seat['display']} — {role}（{seat['word']}）")
+    for entry in public_vote_history(state):
+        phase = "PK 投票" if entry["stage"] == "pk" else "常规投票"
+        lines.append(f"第 {entry['round']} 轮 · {phase}")
+        lines.extend(f"{v['seatNumber']}号 {v['displayName']}：{v['text']}" for v in entry["votes"])
+        lines.append("、".join(f"{c['seatNumber']}号 {c['votes']}票" for c in entry["counts"]) or "零有效票")
     return {
         "kind": "undercover.game-result", "version": 1, "status": "finished",
+        **({"stage": "pk"} if is_pk(state) else {}),
         "gameSessionId": state["session_id"], "hostActorId": state["referee_uuid"],
-        "round": state["round"], "attempt": current_round(state)["renders"]["vote"],
+        "round": state["round"], "attempt": current_stage(state)["renders"]["vote"],
         "winner": winner, "reason": state["result"]["reason"], "summary": "\n".join(lines),
     }
 
@@ -1958,7 +2072,7 @@ def publish_public_result(state: dict[str, Any]) -> None:
     if state.get("result_file_id"):
         return
     result = state["public_result"]
-    name = current_round(state)["result_file"]
+    name = current_stage(state)["result_file"]
     session = state["session_id"]
     offset = 0
     found_file_id = ""
@@ -2057,7 +2171,7 @@ def cmd_reveal(args: argparse.Namespace) -> None:
                 "如果你是刚被一个新会话叫醒的，那说明认错局了——新的一局要先 begin。"
                 "如果终局稿已经发出去了，就别再发一遍。",
             )
-        if current_round(state).get("result_file"):
+        if current_stage(state).get("result_file"):
             if not state.get("public_result"):
                 state["public_result"] = build_public_result(state)
                 save_state(state)
@@ -2080,6 +2194,8 @@ def cmd_reveal(args: argparse.Namespace) -> None:
                 }
                 for s in sorted(state["seats"], key=lambda x: x["seat"])
             ],
+            "public_history": public_history(state),
+            "vote_history": public_vote_history(state),
             "rounds": [
                 {
                     "round": r["round"],
@@ -2087,6 +2203,8 @@ def cmd_reveal(args: argparse.Namespace) -> None:
                     "votes": {k: v["target"] for k, v in r["votes"].items()},
                     "eliminated": r["eliminated"],
                     "tie": r["tie"],
+                    **({"pk": {"candidates": r["pk"]["order"], "speeches": {k: v["display"] for k, v in r["pk"]["speeches"].items()},
+                               "votes": {k: v["target"] for k, v in r["pk"]["votes"].items()}, "tie": r["pk"]["tie"]}} if r.get("pk") else {}),
                 }
                 for r in state["rounds"]
             ],
@@ -2177,11 +2295,17 @@ def main() -> None:
     with_session(sub.add_parser("finish", help="公布终局后关闭 BCS 会话；失败修复后可重试")).set_defaults(func=cmd_finish)
 
     p = with_session(sub.add_parser("speeches-set", help="提交本轮发言：检查、遮蔽、落盘"))
+    p.add_argument("--round", type=int, default=None, help="当前节点指令中的主轮号；PK 必填")
+    p.add_argument("--stage", choices=("regular", "pk"), default="regular")
+    p.add_argument("--attempt", type=int, default=None, help="当前节点指令中的运行尝试号；PK 必填")
     p.add_argument("--json", required=True, metavar='{"1":"...","3":"..."}')
     p.add_argument("--flag", action="append", default=[], metavar="座位=原因")
     p.set_defaults(func=cmd_speeches_set)
 
     p = with_session(sub.add_parser("votes-set", help="提交本轮投票：解析、计票、判定"))
+    p.add_argument("--round", type=int, default=None, help="当前节点指令中的主轮号；PK 必填")
+    p.add_argument("--stage", choices=("regular", "pk"), default="regular")
+    p.add_argument("--attempt", type=int, default=None, help="当前节点指令中的运行尝试号；PK 必填")
     p.add_argument("--json", required=True, metavar='{"1":"...","3":"..."}')
     p.set_defaults(func=cmd_votes_set)
 

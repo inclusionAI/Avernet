@@ -26,6 +26,7 @@ class PublicResultTest(unittest.TestCase):
             seat["eliminated_round"] = None if seat["alive"] else 1
         uc.save_state(self.state)
         self.remote = None
+        self.result_file = "undercover-result-v1-r1-a2.json"
         self.uploads = 0
         self.lose_response = False
         self.close_fails = False
@@ -34,7 +35,7 @@ class PublicResultTest(unittest.TestCase):
         self.addCleanup(self.cli.stop)
 
     def metadata(self):
-        return {"file_id": "result-file", "file_name": "undercover-result-v1-r1-a2.json",
+        return {"file_id": "result-file", "file_name": self.result_file,
                 "session_id": self.state["session_id"], "status": "Ready",
                 "owner": {"actor_kind": "Bot", "actor_id": "referee-1"}}
 
@@ -111,6 +112,23 @@ class PublicResultTest(unittest.TestCase):
         self.close_fails = False
         self.assertTrue(self.invoke(uc.cmd_finish)["completed"])
         self.assertEqual(self.uploads, 1)
+
+    def test_pk_finale_publishes_both_ballots_under_pk_result_identity(self):
+        rnd = self.state["rounds"][0]
+        rnd.update(tallied=True, votes={"1": {"display": "我投3号", "target": 3}}, counts={"3": 1}, tie=True)
+        self.result_file = "undercover-result-v1-r1-pk-a1.json"
+        rnd["pk"] = {"order": [2, 3], "speeches": {"2": {"display": "补充描述"}},
+                     "votes": {"1": {"display": "我投2号", "target": 2}}, "counts": {"2": 1},
+                     "tallied": True, "tie": False, "renders": {"vote": 1}, "result_file": self.result_file}
+        uc.save_state(self.state)
+        result = self.invoke(uc.cmd_reveal)
+        self.assertEqual(result["rounds"][0]["pk"]["votes"], {"1": 2})
+        self.assertEqual((self.remote["stage"], self.remote["attempt"]), ("pk", 1))
+        self.assertIn("常规投票", self.remote["summary"])
+        self.assertIn("PK 投票", self.remote["summary"])
+        self.assertIn("我投3号", self.remote["summary"])
+        self.assertIn("我投2号", self.remote["summary"])
+        self.assertTrue(self.invoke(uc.cmd_finish)["completed"])
 
 
 if __name__ == "__main__":
