@@ -72,8 +72,8 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
     EntryDelivery,
     EntryFetchError,
 )
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-    EntryFetcher,
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+    DeclaredSourceResolver,
 )
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     EntryOutcome,
@@ -244,13 +244,13 @@ class SkillsMaterialiser(Materialiser):
         activation_service: ActivationPort,
         capability_reader: BotCapabilityStateReaderProtocol,
         validator: SkillPackageValidator,
-        fetcher: EntryFetcher,
+        resolver: DeclaredSourceResolver,
     ) -> None:
         self._uploads = upload_service
         self._activation = activation_service
         self._reader = capability_reader
         self._validator = validator
-        self._fetcher = fetcher
+        self._resolver = resolver
 
     async def resolve(
         self, ctx: "ApplyContext", entries: Sequence[dict[str, Any]]
@@ -343,7 +343,7 @@ class SkillsMaterialiser(Materialiser):
                 # materialiser's note; a dry run must not park the server on
                 # a hung source.
                 delivery = await asyncio.to_thread(
-                    self._fetcher.fetch_declared,
+                    self._resolver.resolve,
                     ctx,
                     entry=entry,
                     category=_FETCH_CATEGORY,

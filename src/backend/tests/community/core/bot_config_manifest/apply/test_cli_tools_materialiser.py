@@ -37,7 +37,7 @@ from ..cli_tools._fakes import (
     elf,
     FakeCliToolRepo,
     FakeDelivery,
-    FakeEntryFetcher,
+    FakeDeclaredSourceResolver,
     FakeObjectStorage,
 )
 
@@ -82,7 +82,7 @@ def _service(*, content=_TOOL, digest=_DIGEST, delivery=None):
     oss = FakeObjectStorage()
     repo = FakeCliToolRepo()
     delivery = delivery if delivery is not None else FakeDelivery()
-    fetcher = FakeEntryFetcher(content=content, digest=digest)
+    fetcher = FakeDeclaredSourceResolver(content=content, digest=digest)
     service = CliToolService(
         repo=repo,
         store=CliToolStore(object_storage=oss, store_base=lambda: _BASE),
@@ -149,7 +149,7 @@ async def test_the_materialiser_adds_no_fetch_of_its_own() -> None:
     source = inspect.getsource(
         inspect.getmodule(CliToolsMaterialiser)
     )
-    for forbidden in ("entry_fetcher", "EntryFetcher", "unpack_archive", "verify_amd64"):
+    for forbidden in ("entry_fetcher", "DeclaredSourceResolver", "unpack_archive", "verify_amd64"):
         assert forbidden not in source, f"the materialiser names {forbidden!r}"
 
 

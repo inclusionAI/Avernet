@@ -63,8 +63,8 @@ from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     build_apply_task_payload,
     phases_from_payload,
 )
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-    EntryFetcher,
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+    DeclaredSourceResolver,
 )
 from agentclaw.community.core.ports.identity_file_port import (
     IdentityFilePort,
@@ -212,7 +212,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         upload_service_provider: Callable[[], LocalSkillUploadServiceProtocol],
         capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
-        entry_fetcher_provider: Callable[[], EntryFetcher],
+        entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
         resource_service_provider: Callable[[], ResourceFilePort],
         cli_tool_service_factory: Callable[[str], "CliToolService"],
         git_client_provider: Callable[[], GitSourceClient],

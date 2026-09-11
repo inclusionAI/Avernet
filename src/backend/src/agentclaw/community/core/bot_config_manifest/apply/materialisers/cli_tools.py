@@ -93,7 +93,7 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.models import (
 from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
     CliToolService,
 )
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
     declared_protocol,
 )
 from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind

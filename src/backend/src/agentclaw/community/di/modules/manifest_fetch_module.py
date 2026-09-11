@@ -20,8 +20,8 @@ from typing import Callable
 
 from injector import Injector, Module, inject, provider, singleton
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-    EntryFetcher,
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+    DeclaredSourceResolver,
 )
 from agentclaw.community.core.bot_config_manifest.credentials.service import (
     SourceCredentialService,
@@ -281,7 +281,7 @@ class ManifestFetchModule(Module):
         content: ManifestContentServiceProtocol,
         credentials: SourceCredentialServiceProtocol,
         objects: AliyunObjectStore,
-    ) -> EntryFetcher:
+    ) -> DeclaredSourceResolver:
         """The one fetch funnel the fetch-consuming materialisers share.
 
         One instance over three singletons: the store, W3's credentials, and
@@ -292,7 +292,7 @@ class ManifestFetchModule(Module):
         two roads that remain reach their sources through the object store and
         through git.
         """
-        return EntryFetcher(content, credentials, objects)
+        return DeclaredSourceResolver(content, credentials, objects)
 
     @singleton
     @provider
@@ -402,9 +402,9 @@ class ManifestFetchModule(Module):
     @inject
     def manifest_entry_fetcher_factory(
         self, injector: Injector
-    ) -> Callable[[], EntryFetcher]:
+    ) -> Callable[[], DeclaredSourceResolver]:
         """The lazy lookup the apply service's registry wiring asks for."""
-        return lambda: injector.get(EntryFetcher)
+        return lambda: injector.get(DeclaredSourceResolver)
 
     @singleton
     @provider
@@ -443,7 +443,7 @@ class ManifestFetchModule(Module):
         self,
         injector: Injector,
         object_storage: ObjectStoragePlugin,
-        entry_fetcher_provider: Callable[[], EntryFetcher],
+        entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
     ) -> CliToolServiceFactory:
         """W9: the one component both callers install a CLI tool through.
 
@@ -632,7 +632,7 @@ class ManifestFetchModule(Module):
         mcp_auth_service_provider: Callable[[], MCPAuthServiceProtocol],
         capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
-        entry_fetcher_provider: Callable[[], EntryFetcher],
+        entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
         cli_tool_service_factory: CliToolServiceFactory,
     ) -> TeclawPlatformBindings:
         """The store-backed ports and the closing redeliver (W8, spec D-7).

@@ -8,7 +8,7 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
     BlobDelivery,
     GitDelivery,
 )
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
     EntryFetchError,
     GitEntrySource,
 )
@@ -261,10 +261,10 @@ class _RecordingStore:
         return SimpleNamespace(digest=fetched.sha256)
 
 
-class FakeEntryFetcher:
+class FakeDeclaredSourceResolver:
     """Answers a declared entry with canned bytes; records what it resolved.
 
-    It resolves the entry the way the real ``fetch_declared`` does — a ``from``
+    It resolves the entry the way the real ``resolve`` does — a ``from``
     name against the session's ``sources``, an inline declaration, a git source
     answering with a tree — and **refuses anything else**, including the bare
     URL string the grammar used to allow. A double that quietly served a string
@@ -280,7 +280,7 @@ class FakeEntryFetcher:
         #: The store a git delivery files its own receipt through.
         self.store = _RecordingStore(self.filed)
 
-    def fetch_declared(self, ctx, *, entry, category, entry_identity=None):
+    def resolve(self, ctx, *, entry, category, entry_identity=None):
         decl = None
         if isinstance(entry.get("from"), str):
             session = getattr(ctx, "source_session", None)

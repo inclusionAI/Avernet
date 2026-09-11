@@ -126,8 +126,8 @@ def _real_apply_service(manifests):
         BotConfigManifestApplyRepository,
     )
 
-    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-        EntryFetcher,
+    from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+        DeclaredSourceResolver,
     )
     from ..apply._fakes import (
         FakeActivationService,
@@ -181,7 +181,7 @@ def _real_apply_service(manifests):
         upload_service_provider=lambda: FakeSkillUploadService(),
         capability_reader_provider=lambda: FakeCapabilityReader(),
         package_validator_provider=lambda: real_validator(),
-        entry_fetcher_provider=lambda: EntryFetcher(
+        entry_fetcher_provider=lambda: DeclaredSourceResolver(
             FakeManifestContent(), FakeCredentials(), FakeObjectStore()
         ),
         # W6's resources materialiser and W7's git transport: unreached by

@@ -67,7 +67,7 @@ _TERM_ALLOWLIST_FILES = {
     # product name in its import line too). Its consumer names the class it
     # takes, exactly as it names ``GuardedFetcher``.
     "core/bot_config_manifest/fetch/object_store.py": "manifest oss road — Aliyun-native transport (oss2)",
-    "core/bot_config_manifest/apply/entry_fetch.py": "manifest oss road — constructor-injects AliyunObjectStore",
+    "core/bot_config_manifest/apply/source_resolver.py": "manifest oss road — constructor-injects AliyunObjectStore",
 }
 
 

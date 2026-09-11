@@ -67,7 +67,7 @@ class ApplyContext:
 
     Created by: ``services/config_manifest_apply_service._context``.
     Consumed by: every materialiser stage, ``apply/orchestrator``, and the
-    fetch pipeline through the narrower ``entry_fetch.FetchContext`` protocol.
+    fetch pipeline through the narrower ``source_resolver.FetchContext`` protocol.
 
     ``owner_id`` and ``actor_id`` differ on a shared bot: the bot is resolved as
     the *owner's*, while the actor is whoever is applying. Materialisers that
@@ -130,7 +130,8 @@ class ApplyContext:
     #: git checkout cache. Mutable by design inside the frozen context, for the
     #: same reason as ``budget``: the alternative is state on a DI-singleton
     #: fetcher, which would leak across applies. ``None`` for callers that run
-    #: no ``from``/git pipeline; ``fetch_declared`` refuses such entries loudly
+    #: no ``from``/git pipeline; the declared-source resolver refuses such
+    #: entries loudly
     #: rather than fetching anonymously.
     source_session: Optional[SourceSession] = None
 

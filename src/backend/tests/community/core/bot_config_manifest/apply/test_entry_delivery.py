@@ -244,7 +244,7 @@ def test_a_blob_files_nothing_and_answers_with_its_own_digest():
     the delivery's own rather than a hash of the caller's bytes — the receipt
     this entry answers for is the one already in the store — so the caller's
     bytes here are deliberately *different* ones, and the answer is still the
-    fetch's digest. ``test_entry_fetch`` pins the same property end to end:
+    fetch's digest. ``test_source_resolver`` pins the same property end to end:
     one fetch, one receipt, `file` adds none.
     """
     delivery = _blob(b"body", digest="sha256:feed")

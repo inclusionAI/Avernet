@@ -43,7 +43,7 @@ def test_the_entry_fetcher_reads_the_oss_road_through_the_one_object_store(
 ) -> None:
     """The ``oss`` road has one implementation and one instance.
 
-    ``EntryFetcher`` is the funnel every fetch-consuming category shares, and
+    ``DeclaredSourceResolver`` is the funnel every fetch-consuming category shares, and
     it takes the object store by constructor — a plain core class since the
     plugin seam went, exactly as it takes ``GuardedFetcher``. Asserted on the
     wired instance rather than the module source: what matters is that the
@@ -51,8 +51,8 @@ def test_the_entry_fetcher_reads_the_oss_road_through_the_one_object_store(
     test that substitutes the store on the injector substitutes it for every
     apply.
     """
-    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-        EntryFetcher,
+    from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+        DeclaredSourceResolver,
     )
     from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
         AliyunObjectStore,
@@ -61,4 +61,4 @@ def test_the_entry_fetcher_reads_the_oss_road_through_the_one_object_store(
     store = test_injector.get(AliyunObjectStore)
 
     assert isinstance(store, AliyunObjectStore)
-    assert test_injector.get(EntryFetcher)._objects is store
+    assert test_injector.get(DeclaredSourceResolver)._objects is store

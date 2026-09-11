@@ -11,7 +11,7 @@ operation needs: ``owner_id`` resolves the bot and its device binding,
 is carried but read by nobody here: the family difference lives in *which*
 delivery port the strategy bound, never in a branch inside one.
 
-It also satisfies ``apply/entry_fetch.py``'s :class:`FetchContext`, which is
+It also satisfies ``apply/source_resolver.py``'s :class:`FetchContext`, which is
 what lets an HTTP-driven install fetch through the *same* funnel a manifest
 apply does. ``apply_id``, ``budget`` and ``source_session`` are the three
 fields only an apply has, and they are ``None`` for the API caller: an

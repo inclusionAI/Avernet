@@ -1,8 +1,8 @@
 """What a source delivered, and how a category reads it.
 
-One return type for the fetch layer. ``fetch_declared`` used to answer with
-``FetchedEntry | GitEntrySource`` and every consumer opened with "which one did
-I get?" — eight ``isinstance`` sites across four files, all asking that question
+One return type for the fetch layer. The declared-source front door used to
+answer with ``FetchedEntry | GitEntrySource`` and every consumer opened with
+"which one did I get?" — eight ``isinstance`` sites across four files, all asking that question
 to answer a different one: *what did this entry deliver?*
 
 :class:`EntryDelivery` is that question's home. Two implementations satisfy it:

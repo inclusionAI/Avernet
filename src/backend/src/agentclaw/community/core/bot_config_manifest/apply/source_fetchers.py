@@ -1,6 +1,6 @@
 """One fetcher per protocol, and the table that picks between them.
 
-The front door (``entry_fetch.fetch_declared``) does the work that is the same
+The front door (``source_resolver.resolve``) does the work that is the same
 on every road — budget, session, ``keep_last``, and parsing the declaration
 once — then looks the protocol up in :data:`FETCHER_TYPES` and calls it.
 Adding a protocol is a class and a row; the branch has no third arm to grow.
@@ -225,7 +225,7 @@ class DeclaredFetch:
     An **inline** source differs in exactly one field: ``name`` is ``None`` and
     ``decl`` is parsed from the entry's own ``source:`` mapping.
 
-    Created by: ``apply/entry_fetch.EntryFetcher.fetch_declared``, the only
+    Created by: ``apply/source_resolver.DeclaredSourceResolver.resolve``, the only
     place one is built.
     Consumed by: :meth:`SourceFetcher.fetch` — that is, both fetchers below.
 
@@ -761,7 +761,7 @@ def build_fetchers(
     record of *which* protocols are served, and still what the import-time
     check holds exhaustive; this binds them.
 
-    Called once per :class:`~...entry_fetch.EntryFetcher`, in its constructor.
+    Called once per :class:`~...source_resolver.DeclaredSourceResolver`, in its constructor.
     """
     return MappingProxyType(
         {

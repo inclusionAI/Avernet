@@ -12,7 +12,7 @@ Created by: ``services/config_manifest_apply_service`` (both the apply and the
 dry-run path) as ``ApplyFetchBudget(deadline=time.monotonic() +
 APPLY_BUDGET_S, total_bytes=APPLY_FETCH_TOTAL_LIMIT)`` — 300 seconds and
 500 MiB, from ``fetch/limits.py``.
-Consumed by: ``apply/entry_fetch.EntryFetcher.fetch_declared``, both fetchers
+Consumed by: ``apply/source_resolver.DeclaredSourceResolver.resolve``, both fetchers
 in ``apply/source_fetchers``, and ``apply/entry_delivery.GitDelivery.file``.
 
 Deliberately mutable: it is a ledger threaded through an immutable context,

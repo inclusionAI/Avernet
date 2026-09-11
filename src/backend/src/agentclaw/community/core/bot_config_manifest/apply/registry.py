@@ -55,7 +55,7 @@ if TYPE_CHECKING:  # pragma: no cover — the registry stays import-light; see b
     from agentclaw.community.core.ports.activation_port import (
         ActivationPort,
     )
-    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
+    from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
     from agentclaw.community.core.ports.identity_file_port import (
         IdentityFilePort,
     )
@@ -345,7 +345,7 @@ def build_materialisers(
     upload_service: SkillPackageUploadPort,
     capability_reader: BotCapabilityStateReaderProtocol,
     package_validator: SkillPackageValidator,
-    entry_fetcher: EntryFetcher,
+    entry_fetcher: DeclaredSourceResolver,
     resource_service: ResourceFilePort,
     cli_tool_service: CliToolService,
 ) -> dict[ApplyConstruct, Materialiser]:

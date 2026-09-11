@@ -1,14 +1,17 @@
 """One entry's fetch, from a declared source to materialisable bytes.
 
-The second half of ``resolve`` for every fetch-consuming category: resolve the
-entry's declared source, consult the platform's own copy before the network,
-read it through the protocol's own transport under a named credential, and file
-the result with the content store so delivery and audit share one copy.
+The second half of a **materialiser's** ``resolve`` for every fetch-consuming
+category: resolve the entry's declared source, consult the platform's own copy
+before the network, read it through the protocol's own transport under a named
+credential, and file the result with the content store so delivery and audit
+share one copy.
 
-**One entry point**, ``fetch_declared(ctx, *, entry=…)``: the front door
-every fetching materialiser calls. It takes no URL at all — it reads the
-entry, resolves the declaration and dispatches on its ``protocol``. A receipt
-is filed and the budget charged through whichever road it picked.
+**One entry point**, :meth:`DeclaredSourceResolver.resolve` — the front door
+every fetching materialiser calls, and the reason this module's one class is
+named for resolving a declaration rather than for fetching. It takes no URL at
+all: it reads the entry, resolves the declaration and dispatches on its
+``protocol``. A receipt is filed and the budget charged through whichever road
+it picked.
 
 **What each road does with the source it was handed lives in
 ``apply/source_fetchers.py``**, and so does the policy it runs under: the two
@@ -16,16 +19,18 @@ receipt-identity shapes, pinned vs unpinned, which failures ``keep_last`` may
 answer for, and the translation of every store fault into
 :class:`EntryFetchError`. This module picks the road; it does not drive one.
 
-Fetch lives here **and only here** — the registry's contract says ``resolve``
-is where a category's failures are collected before anything is written, and a
-fetch is exactly that kind of failure. Materialisers translate :class:`EntryFetchError`
+Fetch lives here **and only here** — the registry's contract says a
+materialiser's ``resolve`` is where a category's failures are collected before
+anything is written, and a fetch is exactly that kind of failure. Materialisers
+translate :class:`EntryFetchError`
 into their ``ResolveFailure`` currency; nothing about the transport leaks out.
-Because the fetch belongs to ``resolve``, a ``dry_run`` may perform one (it
+Because the fetch belongs to that phase, a ``dry_run`` may perform one (it
 still writes **nothing to the bot** — the store it files with is the
 platform's own record of what a bot was served, true whether or not the apply
 proceeds).
 
-W7 is the declared-source front door, :meth:`fetch_declared`: the ``from``
+W7 is the declared-source front door, :meth:`DeclaredSourceResolver.resolve`:
+the ``from``
 and inline-source roads resolve through the apply's source session, and the git
 road returns a :class:`GitEntrySource` — the tree is the entry's to
 interpret (a file? a package?) — while its canonical, entry-level bytes are
@@ -84,13 +89,15 @@ if TYPE_CHECKING:
     )
 
 
-class EntryFetcher:
-    """Fetches one manifest entry's bytes on a bot's behalf.
+class DeclaredSourceResolver:
+    """Resolves one manifest entry's declared source, and dispatches to it.
 
     The one funnel every fetching category goes through: ``skills``,
     ``resources``, ``identity`` and ``cli_tools``. One public entry point,
-    :meth:`fetch_declared`; it holds no collaborators of its own, only the
-    table of roads it dispatches to.
+    :meth:`resolve`; it holds no collaborators of its own, only the table of
+    roads it dispatches to — which is the whole of what it does, and what it
+    is named for. The bytes are the roads' business, in
+    ``apply/source_fetchers.py``.
 
     Composed once per apply — the transport is stateless per hop, so there is
     nothing to hold between entries — and handed to every materialiser that
@@ -118,7 +125,7 @@ class EntryFetcher:
         # honest signature.
         self._fetchers = build_fetchers(content, credentials, objects)
 
-    def fetch_declared(
+    def resolve(
         self,
         ctx: FetchContext,
         *,
@@ -267,7 +274,7 @@ def _raw_declaration(
         _raw_declaration(ctx, {"content": "inline text"})
         # -> (None, None)
 
-    Two callers, one lookup: :meth:`EntryFetcher.fetch_declared` and
+    Two callers, one lookup: :meth:`DeclaredSourceResolver.resolve` and
     :func:`declared_protocol`. They used to each spell out "a ``from`` name in
     ``session.sources``, else the entry's own ``source`` mapping", which is two
     places for one rule to be true in — and the two of them must agree, because
@@ -293,7 +300,7 @@ def _raw_declaration(
 def declared_protocol(
     ctx: FetchContext, entry: Mapping[str, Any]
 ) -> Optional[SourceKind]:
-    """Which protocol :meth:`EntryFetcher.fetch_declared` will take, **without
+    """Which protocol :meth:`DeclaredSourceResolver.resolve` will take, **without
     fetching anything**.
 
     ==============================================  ====================
@@ -323,8 +330,8 @@ def declared_protocol(
     and ``materialisers/cli_tools``, which asks whether the digest rule
     applies.
 
-    Read through the same parser the ``PUT`` validator and ``fetch_declared``
-    use, and off the same lookup ``fetch_declared`` uses
+    Read through the same parser the ``PUT`` validator and ``resolve``
+    use, and off the same lookup ``resolve`` uses
     (:func:`_raw_declaration`), so a fourth derivation cannot appear and this
     cannot drift from the road it predicts.
     """
@@ -338,7 +345,7 @@ def declared_protocol(
 __all__ = [
     "declared_protocol",
     "EntryFetchError",
-    "EntryFetcher",
+    "DeclaredSourceResolver",
     "FetchContext",
     "FetchedEntry",
     "GitEntrySource",

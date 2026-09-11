@@ -1,4 +1,4 @@
-"""Tests for the per-entry fetch pipeline (``apply/entry_fetch.py``, W5).
+"""Tests for the per-entry fetch pipeline (``apply/source_resolver.py``, W5).
 
 The pipeline is where the fetch-side waves meet: the object store and git as
 transports, W3's named credentials, W11's platform copy. What these tests pin
@@ -26,10 +26,10 @@ from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
     ObjectStoreTarget,
 )
 from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
     declared_protocol,
     EntryFetchError,
-    EntryFetcher,
+    DeclaredSourceResolver,
 )
 from agentclaw.community.core.bot_config_manifest.apply.source_fetchers import (
     ObjectStoreFetcher,
@@ -105,7 +105,7 @@ def objects_rig():
     gives every ``ObjectFetchStatus`` a shape a consumer test can drive."""
     content = FakeManifestContent()
     objects = FakeObjectStore()
-    pipeline = EntryFetcher(content, _AksKCredentials(), objects)
+    pipeline = DeclaredSourceResolver(content, _AksKCredentials(), objects)
     return content, objects, pipeline
 
 
@@ -113,7 +113,7 @@ def objects_rig():
 def rig():
     content = FakeManifestContent()
     credentials = FakeCredentials()
-    return content, credentials, EntryFetcher(content, credentials, FakeObjectStore())
+    return content, credentials, DeclaredSourceResolver(content, credentials, FakeObjectStore())
 
 
 #: The object road's coordinates, as a document declares them, and the address
@@ -160,7 +160,7 @@ def _acquire(pipeline, *, ctx=None, digest=None, keep_last=False):
     entry = {"from": "s", "on_fetch_failure": "keep_last" if keep_last else "fail"}
     if digest is not None:
         entry["digest"] = digest
-    return pipeline.fetch_declared(
+    return pipeline.resolve(
         ctx if ctx is not None else _oss_ctx(),
         entry=entry,
         category="identity",
@@ -170,7 +170,7 @@ def _acquire(pipeline, *, ctx=None, digest=None, keep_last=False):
 
 # --- the store-first policy, on the road that still has a network ---------
 #
-# These cases used to drive ``EntryFetcher.fetch``, the HTTPS-GET road that no
+# These cases used to drive ``DeclaredSourceResolver.fetch``, the HTTPS-GET road that no
 # longer exists. The policy they pin is not the transport's — it is the
 # pipeline's, and ``acquire_object`` is where it lives now: pinned entries read
 # from the platform's copy, unpinned ones re-read, ``keep_last`` answers only
@@ -280,7 +280,7 @@ def test_a_missing_credential_fails_with_the_name_and_no_read(objects_rig):
     """The credential is resolved before the store is touched, and a name that
     no longer exists is configuration drift: loud, named, and never masked."""
     content, objects, _ = objects_rig
-    pipeline = EntryFetcher(
+    pipeline = DeclaredSourceResolver(
         content, FakeCredentials(missing={"ghost"}), objects
     )
     ctx = make_context(source_session=_session(_ScriptedGit(), sources={
@@ -288,7 +288,7 @@ def test_a_missing_credential_fails_with_the_name_and_no_read(objects_rig):
     }))
 
     with pytest.raises(EntryFetchError) as excinfo:
-        pipeline.fetch_declared(ctx, entry={"from": "s"}, category="identity")
+        pipeline.resolve(ctx, entry={"from": "s"}, category="identity")
     assert "ghost" in excinfo.value.reason
     assert objects.calls == []
 
@@ -442,13 +442,13 @@ def test_the_funnel_requires_a_category_by_keyword():
     the PR's two blocking-level type issues)."""
     import inspect
 
-    for entry_point in (EntryFetcher.fetch_declared, ObjectStoreFetcher._acquire):
+    for entry_point in (DeclaredSourceResolver.resolve, ObjectStoreFetcher._acquire):
         category = inspect.signature(entry_point).parameters["category"]
         assert category.kind is inspect.Parameter.KEYWORD_ONLY
         assert category.default is inspect.Parameter.empty
 
 
-# --- the W7 declared-source front door: fetch_declared ---
+# --- the W7 declared-source front door: resolve ---
 
 GIT_URL = "https://git.corp/repo.git"
 _FAKE_SHA = "a" * 40
@@ -499,7 +499,7 @@ def test_a_named_oss_source_reads_through_the_object_store(objects_rig):
             },
         })
     )
-    result = pipeline.fetch_declared(
+    result = pipeline.resolve(
         ctx, entry={"from": "cdn", "key": "logo.png"}, category="identity"
     )
     assert result.single() == BODY
@@ -525,7 +525,7 @@ def test_the_document_names_the_bucket_and_the_credential_names_the_host(
     ctx = make_context(source_session=_session(_ScriptedGit(), sources={
         "s": {"protocol": "oss", "bucket": "b", "key": "k", "auth": "oss-cred"},
     }))
-    pipeline.fetch_declared(ctx, entry={"from": "s"}, category="identity")
+    pipeline.resolve(ctx, entry={"from": "s"}, category="identity")
     assert objects.calls[0][0].endpoint == _OBJ_ENDPOINT
 
 
@@ -561,11 +561,11 @@ def test_a_refusal_is_never_masked_by_keep_last(objects_rig, break_it, expected)
     }))
     entry = {"from": "s", "on_fetch_failure": "keep_last"}
     # The first apply succeeds and files the receipt a fallback would read.
-    assert pipeline.fetch_declared(ctx, entry=entry, category="identity").single() == BODY
+    assert pipeline.resolve(ctx, entry=entry, category="identity").single() == BODY
 
     break_it(objects)
     with pytest.raises(EntryFetchError, match=expected):
-        pipeline.fetch_declared(ctx, entry=entry, category="identity")
+        pipeline.resolve(ctx, entry=entry, category="identity")
 
 
 def test_an_unreachable_store_is_a_failure_keep_last_may_answer(objects_rig):
@@ -576,10 +576,10 @@ def test_an_unreachable_store_is_a_failure_keep_last_may_answer(objects_rig):
         "s": {"protocol": "oss", "bucket": "b", "key": "k", "auth": "oss-cred"},
     }))
     # First apply files the receipt the second one falls back to.
-    pipeline.fetch_declared(ctx, entry={"from": "s"}, category="identity")
+    pipeline.resolve(ctx, entry={"from": "s"}, category="identity")
     objects.make_unavailable("b")
 
-    result = pipeline.fetch_declared(
+    result = pipeline.resolve(
         ctx,
         entry={"from": "s", "on_fetch_failure": "keep_last"},
         category="identity",
@@ -589,7 +589,7 @@ def test_an_unreachable_store_is_a_failure_keep_last_may_answer(objects_rig):
     assert result.note() and "keep_last" in result.note()
 
 
-def test_fetch_declared_gives_the_git_road_a_checkout(rig):
+def test_resolve_gives_the_git_road_a_checkout(rig):
     _, credentials, pipeline = rig
     git = _ScriptedGit()
     ctx = make_context(
@@ -597,7 +597,7 @@ def test_fetch_declared_gives_the_git_road_a_checkout(rig):
             "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"},
         })
     )
-    decl = pipeline.fetch_declared(
+    decl = pipeline.resolve(
         ctx, entry={"from": "app"}, category="skills", entry_identity="s1"
     )
     assert isinstance(decl, GitDelivery)
@@ -609,18 +609,18 @@ def test_fetch_declared_gives_the_git_road_a_checkout(rig):
     assert ctx.source_session.resolution_records()[0].resolved_sha == _FAKE_SHA
 
 
-def test_fetch_declared_refuses_a_from_that_names_nothing(rig):
+def test_resolve_refuses_a_from_that_names_nothing(rig):
     _, _, pipeline = rig
     ctx = make_context(source_session=_session(_ScriptedGit()))
     with pytest.raises(EntryFetchError, match="not declared"):
-        pipeline.fetch_declared(ctx, entry={"from": "ghost"}, category="skills")
+        pipeline.resolve(ctx, entry={"from": "ghost"}, category="skills")
 
 
-def test_fetch_declared_missing_session_is_loud(rig):
+def test_resolve_missing_session_is_loud(rig):
     _, _, pipeline = rig
     ctx = make_context()
     with pytest.raises(EntryFetchError, match="no source session"):
-        pipeline.fetch_declared(ctx, entry={"from": "x"}, category="skills")
+        pipeline.resolve(ctx, entry={"from": "x"}, category="skills")
 
 
 def test_strict_refuses_when_the_ref_moved(rig):
@@ -632,7 +632,7 @@ def test_strict_refuses_when_the_ref_moved(rig):
         source_session=_session(git, baselines={GIT_URL: "b" * 40})
     )
     with pytest.raises(EntryFetchError, match="moved"):
-        pipeline.fetch_declared(
+        pipeline.resolve(
             ctx,
             entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "main", "mode": "strict"}},
             category="skills",
@@ -650,7 +650,7 @@ def test_non_strict_records_the_move_in_the_note(rig):
     ctx = make_context(
         source_session=_session(git, baselines={GIT_URL: "b" * 40})
     )
-    decl = pipeline.fetch_declared(
+    decl = pipeline.resolve(
         ctx,
         entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "main"}},
         category="skills",
@@ -664,7 +664,7 @@ def test_strict_on_the_first_apply_has_no_opinion(rig):
     _, _, pipeline = rig
     git = _ScriptedGit()
     ctx = make_context(source_session=_session(git))  # no baselines
-    decl = pipeline.fetch_declared(
+    decl = pipeline.resolve(
         ctx,
         entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "main", "mode": "strict"}},
         category="skills",
@@ -677,7 +677,7 @@ def test_digest_on_a_git_source_is_refused(rig):
     _, _, pipeline = rig
     ctx = make_context(source_session=_session(_ScriptedGit()))
     with pytest.raises(EntryFetchError, match="digest"):
-        pipeline.fetch_declared(
+        pipeline.resolve(
             ctx,
             entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "main"},
                    "digest": "sha256:" + "0" * 64},
@@ -700,7 +700,7 @@ def test_git_keep_last_falls_back_to_the_baseline_receipt(rig):
         sources={"app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"}},
         baselines={"app": old_sha},
     ))
-    result = pipeline.fetch_declared(
+    result = pipeline.resolve(
         ctx,
         entry={"from": "app", "on_fetch_failure": "keep_last"},
         category="skills",
@@ -718,7 +718,7 @@ def test_git_credentials_reach_the_transport_as_headers(rig):
     ctx = make_context(source_session=_session(git, sources={
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "auth": "ci-token"},
     }))
-    pipeline.fetch_declared(ctx, entry={"from": "app"}, category="skills")
+    pipeline.resolve(ctx, entry={"from": "app"}, category="skills")
     assert credentials.binding_calls == ["ci-token"]
     assert git.headers == [{"X-Custom-Auth": "payload-of-ci-token"}]
 
@@ -730,7 +730,7 @@ def _git_delivery(pipeline, ctx, *, subpath="pkg", auth=None):
     through is the one the fetcher bound it to — which is the whole of what
     replaced the caller reaching for ``receipt_url`` and ``auth``.
     """
-    return pipeline.fetch_declared(
+    return pipeline.resolve(
         ctx, entry={"from": "app"}, category="skills", entry_identity="s1"
     )
 
@@ -787,7 +787,7 @@ def test_the_git_fetchs_declared_bytes_charge_the_apply_ledger_once(rig):
     # Two entries name the same source: one fetch, one charge — a cached
     # checkout answers a read, not a fetch, the URL road's fast-path ruling.
     for name in ("first", "second"):
-        pipeline.fetch_declared(
+        pipeline.resolve(
             ctx, entry={"from": "app", "name": name}, category="skills",
             entry_identity=name,
         )
@@ -808,7 +808,7 @@ def test_a_git_fetch_exhausting_the_byte_ledger_fails_the_entry(rig):
         ApplyFetchBudget(deadline=9e99, total_bytes=5),
     )
     with pytest.raises(EntryFetchError, match="exhausted \\(bytes\\)"):
-        pipeline.fetch_declared(
+        pipeline.resolve(
             ctx, entry={"from": "app"}, category="skills"
         )
 
@@ -827,7 +827,7 @@ def test_entry_subpath_composes_with_the_sources_on_the_git_road(rig):
     ctx = make_context(source_session=_session(git, sources={
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"},
     }))
-    decl = pipeline.fetch_declared(
+    decl = pipeline.resolve(
         ctx, entry={"from": "app", "subpath": "narrow/inner.md"},
         category="skills",
     )
@@ -842,7 +842,7 @@ def test_a_source_with_no_subpath_takes_the_entrys_whole(rig):
     ctx = make_context(source_session=_session(git, sources={
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main"},
     }))
-    decl = pipeline.fetch_declared(
+    decl = pipeline.resolve(
         ctx, entry={"from": "app", "subpath": "kb/faq.csv"}, category="skills"
     )
     assert decl.source.subpath == "kb/faq.csv"
@@ -862,10 +862,10 @@ def test_two_entries_off_one_git_source_share_a_checkout_and_a_sha(rig):
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "kb"},
     })
     ctx = make_context(source_session=session)
-    first = pipeline.fetch_declared(
+    first = pipeline.resolve(
         ctx, entry={"from": "app", "subpath": "faq.csv"}, category="resources_file"
     )
-    second = pipeline.fetch_declared(
+    second = pipeline.resolve(
         ctx, entry={"from": "app", "subpath": "pricing.csv"},
         category="resources_file",
     )
@@ -887,7 +887,7 @@ def test_a_composed_subpath_that_escapes_the_tree_is_refused(rig):
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"},
     }))
     with pytest.raises(EntryFetchError, match="'..' segment"):
-        pipeline.fetch_declared(
+        pipeline.resolve(
             ctx, entry={"from": "app", "subpath": "../../etc/shadow"},
             category="skills",
         )
@@ -909,7 +909,7 @@ def test_an_entry_subpath_is_not_part_of_an_object_stores_address(objects_rig):
             "auth": "oss-cred",
         },
     }))
-    pipeline.fetch_declared(
+    pipeline.resolve(
         ctx,
         entry={"from": "cdn", "subpath": "inside/archive.md"},
         category="skills",
@@ -922,7 +922,7 @@ def test_entry_level_auth_on_an_inline_git_source_is_refused(rig):
     _, _, pipeline = rig
     ctx = make_context(source_session=_session(_ScriptedGit()))
     with pytest.raises(EntryFetchError, match="'auth' is not supported on a git"):
-        pipeline.fetch_declared(
+        pipeline.resolve(
             ctx,
             entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "main"}, "auth": "ci-token"},
             category="skills",
@@ -954,7 +954,7 @@ def test_the_object_road_files_once_and_its_delivery_adds_nothing(objects_rig):
     objects.put("b", "k", BODY, access_key_id=_OBJ_AK)
     ctx = _oss_ctx()
 
-    delivery = pipeline.fetch_declared(
+    delivery = pipeline.resolve(
         ctx, entry={"from": "s"}, category="identity", entry_identity="soul"
     )
     assert len(content.store_calls) == 1
@@ -972,7 +972,7 @@ def test_the_git_road_carries_the_auth_and_the_category_limit(rig):
     ctx = make_context(source_session=_session(git, sources={
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "auth": "ci-token"},
     }))
-    decl = pipeline.fetch_declared(ctx, entry={"from": "app"}, category="identity")
+    decl = pipeline.resolve(ctx, entry={"from": "app"}, category="identity")
     assert isinstance(decl, GitDelivery)
     # The identity category's per-entry cap rides the source: its reader
     # refuses a member by DECLARED size against the category number, the
@@ -1001,7 +1001,7 @@ def test_an_oss_source_without_auth_is_refused_before_any_read(objects_rig):
         "cdn": {"protocol": "oss", "bucket": "b", "key": "k"},
     }))
     with pytest.raises(EntryFetchError, match="auth"):
-        pipeline.fetch_declared(ctx, entry={"from": "cdn"}, category="identity")
+        pipeline.resolve(ctx, entry={"from": "cdn"}, category="identity")
     assert objects.calls == []  # refused before the store was touched
 
 
@@ -1024,7 +1024,7 @@ def test_a_source_written_as_a_plain_url_string_is_refused(rig):
     _, _, pipeline = rig
     ctx = make_context(source_session=_session(_ScriptedGit()))
     with pytest.raises(EntryFetchError) as raised:
-        pipeline.fetch_declared(
+        pipeline.resolve(
             ctx,
             entry={"source": "https://example.com/x.zip"},
             category="skills",

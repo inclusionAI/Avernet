@@ -88,7 +88,7 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
     archive_refusal,
     canonical_tree_bytes,
 )
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
     declared_protocol,
 )
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
@@ -185,9 +185,9 @@ class ResourcesMaterialiser(Materialiser):
 
     construct = ManifestCategory.RESOURCES
 
-    def __init__(self, resource_service: Any, fetcher: Any) -> None:
+    def __init__(self, resource_service: Any, resolver: Any) -> None:
         self._resources = resource_service
-        self._fetcher = fetcher
+        self._resolver = resolver
 
     async def resolve(
         self, ctx: ApplyContext, entries: Sequence[dict[str, Any]]
@@ -349,7 +349,8 @@ class ResourcesMaterialiser(Materialiser):
     ):
         """One entry's content through the W2/W3/W11 funnel.
 
-        ``fetch_declared``, not ``fetch``: this is the whole of defect D1. The
+        ``DeclaredSourceResolver.resolve``, not ``fetch``: this is the whole of
+        defect D1. The
         URL-only call this replaced is why ``resources`` was the one fetching
         category that could not name a source — not just git, but ``from:``
         pointing at anything, since a named source has no ``source:`` URL for
@@ -366,7 +367,7 @@ class ResourcesMaterialiser(Materialiser):
         source.
         """
         return await asyncio.to_thread(
-            self._fetcher.fetch_declared,
+            self._resolver.resolve,
             ctx,
             entry=entry,
             category=category,

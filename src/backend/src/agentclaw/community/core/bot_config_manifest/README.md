@@ -19,7 +19,7 @@ that travel the manual-upload road (`SkillPackageValidator`, then
 `upload_local_skill`, then direct activation) — and `identity` — the file set
 minus the reserved names, written through the router's own
 `IdentityService` path. The one funnel they fetch through is
-`apply/entry_fetch.py`: substitute, consult the platform's copy, fetch under
+`apply/source_resolver.py`: substitute, consult the platform's copy, fetch under
 a named credential, file the receipt. W6 adds `resources` — files and
 archived directory trees, written through `ResourceFileService`'s one
 dispatcher chain, directory entries replacing their declared tree in full.
@@ -336,7 +336,7 @@ effect now" is the tempting bug, and the one this boundary exists to prevent.
 everything that can fail before touching the bot into `resolve`, and a fetch is
 exactly that kind of failure: one failed fetch aborts its whole category with
 zero writes, by construction rather than by discipline. The pipeline every
-fetching category runs is `apply/entry_fetch.py` — substitute ``${BOT_*}``
+fetching category runs is `apply/source_resolver.py` — substitute ``${BOT_*}``
 *before* prefix authorization, consult W11's newest receipt for the source
 (pinned entries are served from the store: content addressing makes those bytes
 *the* declared bytes, and unpinned entries re-fetch so an apply converges to the
@@ -600,7 +600,7 @@ provides:
   - Materialiser
   - APPLY_ORDER
   - build_materialisers
-  - EntryFetcher
+  - DeclaredSourceResolver
   - FetchedEntry
   - EntryFetchError
   - scope_of
@@ -690,7 +690,7 @@ consumes:
 consumed_by:
   - "adapters/http/openapi_v1/bots — the public read/replace/clear/capabilities surface, and the create-with-manifest pair (W13), which reaches the seam and never the task queue"
   - "core.bot_management create_flow — submission calls the creation seam (preflight, persist, start the job); the dependency runs one way, so the seam is handed its job operations at construction rather than importing them"
-  - "the apply orchestration (`apply/`, W4 #1472 + W5 #1473) — di/modules/manifest_fetch_module.py constructor-injects the transport_allowlist and the content store root (read via the W2/W11 pure parsers over config_module's seam) and holds the one EntryFetcher over the fetcher, the store, and W3's credentials"
+  - "the apply orchestration (`apply/`, W4 #1472 + W5 #1473) — di/modules/manifest_fetch_module.py constructor-injects the transport_allowlist and the content store root (read via the W2/W11 pure parsers over config_module's seam) and holds the one DeclaredSourceResolver over the fetcher, the store, and W3's credentials"
   - "adapters/http/openapi_v1/source_credentials — the public tenant credential register/rotate/read/delete surface (OPEN admission; app-operated — the edge requires an app credential, owner-app guarded)"
 internal_dependencies:
   - agentclaw.community.core.base
