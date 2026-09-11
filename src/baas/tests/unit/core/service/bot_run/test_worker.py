@@ -20,12 +20,12 @@ from secbaas.community.core.repository.bot_run_queue import (
     BotRunQueueRecord,
     OrmBotRunQueueRepository,
 )
+from secbaas.community.core.service.bot_run import BotRunner
 from secbaas.community.core.service.bot_run._bot_concurrency import (
     BotConcurrencyManager,
     FixedMachineCountProvider,
 )
 from secbaas.community.core.service.bot_run._executor import ResultGuardExecutor
-from secbaas.community.core.service.bot_run import BotRunner
 from secbaas.community.core.service.bot_run._worker import (
     BotRequestWorker,
     BotRequestWorkerConfig,
@@ -1240,9 +1240,7 @@ async def test_abort_runs_by_session_without_run_repo_skips_update_error(repo, q
     assert queue.get_by_run_id(run_id).status == "DONE"
 
 
-async def test_abort_runs_by_session_remote_worker_marks_abort_meta(
-    repo, queue
-):
+async def test_abort_runs_by_session_remote_worker_marks_abort_meta(repo, queue):
     """非本机 RUNNING run 被 abort 时，应写 abort_requested 到 meta 并 force_done。"""
     run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
     claimed = queue.claim_pending_by_bot("bot-1", "worker-a", candidates=5)
@@ -1259,8 +1257,6 @@ async def test_abort_runs_by_session_remote_worker_marks_abort_meta(
     assert queue.get_by_run_id(run_id).status == "DONE"
     assert repo.get_by_run_id(run_id).status == "FAILED"
     assert queue.is_abort_requested(run_id) is True
-
-
 
 
 async def test_abort_poll_loop_cancels_run_task_and_force_done(repo, queue):
@@ -1298,7 +1294,6 @@ async def test_abort_poll_loop_cancels_run_task_and_force_done(repo, queue):
     await asyncio.wait_for(run_cancelled.wait(), timeout=2)
 
     assert queue.get_by_run_id(run_id).status == "DONE"
-
 
 
 async def test_abort_runs_by_session_group_chat_other_bot_running_not_killed(
@@ -1402,9 +1397,7 @@ async def test_abort_runs_by_session_calls_repo_with_bot_session_args(repo, queu
     assert find_terminal_calls == []
 
 
-async def test_abort_poll_loop_awaits_engine_notifier(
-    repo, queue
-):
+async def test_abort_poll_loop_awaits_engine_notifier(repo, queue):
     """_abort_poll_loop 感知 abort 信号后会 await engine_abort_notifier。"""
     run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
     record = queue.get_by_run_id(run_id)
@@ -1449,9 +1442,7 @@ async def test_abort_poll_loop_awaits_engine_notifier(
     assert captured["run_id"] == run_id
 
 
-async def test_bot_runner_abort_propagates_to_bot_service(
-    repo, queue
-):
+async def test_bot_runner_abort_propagates_to_bot_service(repo, queue):
     """BotRunner.abort 解析 binding、选择 service 并调用 service.abort。"""
     run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
     repo.update_session_id(run_id, "agent:main:sess-real")
@@ -1482,6 +1473,7 @@ async def test_bot_runner_abort_propagates_to_bot_service(
     class _FakePlugin:
         async def get_binding(self, bot_id: str, owner_id: str, stage: str):
             from secbaas.community.spi.bot_service import BotBindingData
+
             return BotBindingData(
                 bot_id="bot-1",
                 owner_id="entity-1",

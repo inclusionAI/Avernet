@@ -231,7 +231,6 @@ class BotService(Protocol):
         ...
 
 
-
 @runtime_checkable
 class MessageDispatcher(Protocol):
     """消息分发协议

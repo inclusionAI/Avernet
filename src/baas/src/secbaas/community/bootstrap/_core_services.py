@@ -1,5 +1,6 @@
-from dependency_injector import containers, providers
 from collections.abc import Awaitable, Callable
+
+from dependency_injector import containers, providers
 
 from secbaas.community.api.health_check.bot import BotHealthCheckerConfig
 from secbaas.community.core.service.api_gateway import (

@@ -310,7 +310,9 @@ class BaasBotService(BotService):
             ) from e
 
         # Step 2: Get or create adapter session
-        session_client = self._create_session_client(conn_info, engine_type, metadata=metadata)
+        session_client = self._create_session_client(
+            conn_info, engine_type, metadata=metadata
+        )
 
         # 评测流量：eval_id 存在且调用方未传 session_id 时，
         # 用 consistency_key（结构化格式，含 evalId）作为 session_id 传给 adapter，

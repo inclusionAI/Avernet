@@ -437,9 +437,7 @@ class BotRequestWorker:
         heartbeat = asyncio.create_task(
             self._heartbeat_loop(record.run_id, self._worker_id)
         )
-        abort_poll = asyncio.create_task(
-            self._abort_poll_loop(record, current_task)
-        )
+        abort_poll = asyncio.create_task(self._abort_poll_loop(record, current_task))
         try:
             with _trace_context_from_meta(record.meta):
                 try:
@@ -546,7 +544,7 @@ class BotRequestWorker:
     async def _abort_poll_loop(
         self,
         record: BotRunQueueRecord,
-        run_task: "asyncio.Task[None] | None",
+        run_task: asyncio.Task[None] | None,
     ) -> None:
         """执行期间轮询队列 meta，收到外部 abort 信号时取消本机 task。
 
