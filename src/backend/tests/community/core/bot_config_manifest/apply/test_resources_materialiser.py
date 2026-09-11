@@ -1786,7 +1786,15 @@ def test_an_oss_directory_entry_is_refused_before_the_network_is_touched():
     resolved = _run(
         m.resolve(
             make_context(engine_type="claude_code"),
-            [{"path": "data/kb/", "source": "https://cdn.example.com/kb.zip"}],
+            [{
+                "path": "data/kb/",
+                "source": {
+                    "protocol": "oss",
+                    "bucket": "cdn",
+                    "key": "kb.zip",
+                    "auth": "oss-prod",
+                },
+            }],
         )
     )
     assert not resolved.ok
@@ -1803,7 +1811,12 @@ def test_an_invalid_strip_components_is_also_refused_before_the_fetch():
             make_context(engine_type="claude_code"),
             [{
                 "path": "data/kb/",
-                "source": "https://cdn.example.com/kb.zip",
+                "source": {
+                    "protocol": "oss",
+                    "bucket": "cdn",
+                    "key": "kb.zip",
+                    "auth": "oss-prod",
+                },
                 "unpack": "zip",
                 "strip_components": -1,
             }],

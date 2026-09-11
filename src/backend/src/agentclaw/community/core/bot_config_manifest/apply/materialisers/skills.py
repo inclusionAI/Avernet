@@ -12,14 +12,18 @@ Both source spellings are accepted::
           subpath: quality-check     # selects a subtree, then re-packed
           on_fetch_failure: keep_last
 
-        # an inline source; the legacy bare-string spelling shown here is
-        # what the tests drive, and is still readable from stored documents
+        # an inline source declaration
         - name: quality-check
-          source: https://content.example/skills/quality-check.zip
+          source:
+            protocol: oss
+            bucket: content
+            key: skills/quality-check.zip
+            auth: oss-prod
           digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b...
 
 An entry reaches ``resolve`` as the raw mapping, e.g.
-``{"name": "quality-check", "source": "https://…/quality-check.zip",
+``{"name": "quality-check", "source": {"protocol": "oss", "bucket": "content",
+"key": "skills/quality-check.zip", "auth": "oss-prod"},
 "digest": "sha256:…"}``.
 
 The area is the one the all-or-nothing rule names: the bot's **active** skill
@@ -372,12 +376,7 @@ class SkillsMaterialiser(Materialiser):
                         self._build_package,
                         entry=entry,
                         delivery=delivery,
-                        source_url=delivery.source_url()
-                        or (
-                            entry["source"]
-                            if isinstance(entry.get("source"), str)
-                            else ""
-                        ),
+                        source_url=delivery.source_url() or "",
                     )
             except _PackageRefusal as exc:
                 failures.append(ResolveFailure(name, str(exc)))

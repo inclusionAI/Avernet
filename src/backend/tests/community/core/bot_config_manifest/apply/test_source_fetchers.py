@@ -37,7 +37,6 @@ from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKi
 
 from ._fakes import (
     FakeCredentials,
-    FakeGuardedFetcher,
     FakeManifestContent,
     make_context,
 )
@@ -53,8 +52,8 @@ def _session(sources=None) -> SourceSession:
 @pytest.fixture
 def pipeline() -> EntryFetcher:
     return EntryFetcher(
-        FakeGuardedFetcher(responses={}), FakeManifestContent(), FakeCredentials()
-    , FakeObjectStore())
+        FakeManifestContent(), FakeCredentials(), FakeObjectStore()
+    )
 
 
 # ── the table ────────────────────────────────────────────────────────────────
@@ -261,10 +260,8 @@ def test_a_git_source_naming_an_object_store_credential_fails_one_entry():
             return _AksKBinding()
 
     pipeline = EntryFetcher(
-        FakeGuardedFetcher(responses={}),
-        FakeManifestContent(),
-        _WrongTypeCredentials(),
-    FakeObjectStore(),)
+        FakeManifestContent(), _WrongTypeCredentials(), FakeObjectStore()
+    )
     ctx = make_context(
         source_session=_session(
             {

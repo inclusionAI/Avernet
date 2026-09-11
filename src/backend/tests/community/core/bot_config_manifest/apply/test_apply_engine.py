@@ -44,7 +44,6 @@ from ._fakes import (
     FakeCapabilityReader,
     FakeCredentials,
     FakeGitClient,
-    FakeGuardedFetcher,
     FakeIdentityService,
     FakeManifestContent,
     FakeMcpAuth,
@@ -83,8 +82,8 @@ def _dummy_entry_fetcher():
     """The engine tests never declare skills/identity sources, so the fetcher
     the registry holds for them can be a never-called placeholder."""
     return EntryFetcher(
-        FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
-    , FakeObjectStore())
+        FakeManifestContent(), FakeCredentials(), FakeObjectStore()
+    )
 
 
 async def _apply(engine, document, *, ctx=None, dry_run=False, phases=None):
@@ -772,14 +771,16 @@ async def test_a_fetching_document_applies_all_four_categories_in_order():
     the partial delivery.
     """
     from ._fakes import (
+        OBJECT_BUCKET,
         SOUL_BODY as _SOUL_BODY,
-        SOUL_URL as _SOUL_URL,
+        SOUL_KEY as _SOUL_KEY,
         build_skill_zip,
+        object_session,
     )
 
     qc_zip = build_skill_zip("quality-check")
-    qc_url = "https://content.example/skills/quality-check.zip"
-    rules_url = "https://content.example/identity/rules.md"
+    qc_key = "skills/quality-check.zip"
+    rules_key = "identity/rules.md"
     import hashlib
 
     qc_digest = "sha256:" + hashlib.sha256(qc_zip).hexdigest()
@@ -787,13 +788,12 @@ async def test_a_fetching_document_applies_all_four_categories_in_order():
     uploads = FakeSkillUploadService()
     activation = FakeActivationService()
     reader = FakeCapabilityReader()
-    fetcher = FakeGuardedFetcher(
-        responses={
-            _SOUL_URL: fetched_object(_SOUL_BODY, url=_SOUL_URL),
-            qc_url: fetched_object(qc_zip, url=qc_url, content_type="application/zip"),
-            # identity rules fetch: the source is gone — a real outage shape.
-        },
-        failures={rules_url: FetchFailedError("source answered 404")},
+    objects = FakeObjectStore()
+    objects.put(OBJECT_BUCKET, _SOUL_KEY, _SOUL_BODY)
+    objects.put(OBJECT_BUCKET, qc_key, qc_zip)
+    # identity rules read: the source is gone — a real outage shape.
+    objects.make_key_unavailable(
+        OBJECT_BUCKET, rules_key, "the object store is unreachable"
     )
     engine = ApplyOrchestrator(
         build_materialisers(
@@ -805,8 +805,8 @@ async def test_a_fetching_document_applies_all_four_categories_in_order():
             capability_reader=reader,
             package_validator=real_validator(),
             entry_fetcher=EntryFetcher(
-                fetcher, FakeManifestContent(), FakeCredentials()
-            , FakeObjectStore()),
+                FakeManifestContent(), FakeCredentials(), objects
+            ),
             resource_service=FakeResourceFileService(),
             cli_tool_service=object(),
         ),
@@ -816,20 +816,37 @@ async def test_a_fetching_document_applies_all_four_categories_in_order():
     report = await _apply(
         engine,
         f"""schema_version: 1
+sources:
+  content:
+    protocol: oss
+    bucket: {OBJECT_BUCKET}
+    auth: oss-cred
 manifest:
   identity:
     - type: SOUL.md
-      source: "{_SOUL_URL}"
+      from: content
+      key: "{_SOUL_KEY}"
     - type: RULES.md
-      source: "{rules_url}"
+      from: content
+      key: "{rules_key}"
   skills:
     - name: quality-check
-      source: "{qc_url}"
+      from: content
+      key: "{qc_key}"
       digest: "{qc_digest}"
 script:
   body: "echo hi"
 """,
-        ctx=make_context(engine_type="openclaw"),
+        ctx=make_context(
+            engine_type="openclaw",
+            source_session=object_session(
+                content={
+                    "protocol": "oss",
+                    "bucket": OBJECT_BUCKET,
+                    "auth": "oss-cred",
+                }
+            ),
+        ),
     )
 
     # identity aborted on the failed RULES fetch — nothing written there;

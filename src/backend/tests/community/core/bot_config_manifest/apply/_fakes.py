@@ -170,6 +170,13 @@ class FakeGuardedFetcher:
         return response
 
 
+#: The endpoint every :class:`FakeCredentials` binding hands out for the object
+#: road. A constant rather than a per-test value on purpose: it comes off the
+#: credential in production, and a double that let a test choose it would erase
+#: the property that says so.
+OBJECT_ENDPOINT = "https://objects.internal.example"
+
+
 @dataclass
 class FakeBucket:
     """One bucket's contents and the credential entitled to read it."""
@@ -180,6 +187,11 @@ class FakeBucket:
     access_key_id: str | None = None
     #: When set, every read answers ``UNAVAILABLE`` with this detail.
     unavailable: str | None = None
+    #: Per-key ``UNAVAILABLE``, for the suites that need one object in a bucket
+    #: to be unreachable while its neighbours answer — "this source is down and
+    #: that one is not" is a per-entry story, and a bucket-wide switch cannot
+    #: tell it.
+    unavailable_keys: dict[str, str] = field(default_factory=dict)
 
 
 class FakeObjectStore:
@@ -226,6 +238,12 @@ class FakeObjectStore:
     def make_unavailable(self, bucket: str, detail: str = "endpoint unreachable") -> None:
         self.buckets.setdefault(bucket, FakeBucket()).unavailable = detail
 
+    def make_key_unavailable(
+        self, bucket: str, key: str, detail: str = "endpoint unreachable"
+    ) -> None:
+        """One object unreachable, the rest of the bucket fine."""
+        self.buckets.setdefault(bucket, FakeBucket()).unavailable_keys[key] = detail
+
     def reset(self) -> None:
         self.buckets.clear()
         self.calls.clear()
@@ -246,10 +264,11 @@ class FakeObjectStore:
             return ObjectFetchResult(
                 ObjectFetchStatus.DENIED, detail=f"{where}: not authorized"
             )
-        if bucket.unavailable is not None:
+        unavailable = bucket.unavailable or bucket.unavailable_keys.get(key)
+        if unavailable is not None:
             return ObjectFetchResult(
                 ObjectFetchStatus.UNAVAILABLE,
-                detail=f"{where}: {bucket.unavailable}",
+                detail=f"{where}: {unavailable}",
             )
         if (
             bucket.access_key_id is not None
@@ -296,6 +315,18 @@ class FakeCredentials:
         return SimpleNamespace(
             headers_for=lambda url: {"X-Custom-Auth": f"payload-of-{name}"},
             reauthorize=lambda url: None,
+            # The object road's half of a binding: the endpoint and the key
+            # pair are properties of the *credential*, never of the document,
+            # so a suite driving that road gets them from here — the same
+            # arrangement production has, where nothing a manifest writes can
+            # move the host its credential is presented to.
+            object_store_target=lambda bucket: ObjectStoreTarget(
+                endpoint=OBJECT_ENDPOINT,
+                bucket=bucket,
+                access_key_id=f"ak-of-{name}",
+                secret_access_key="the-secret-half",
+                region="cn-shanghai",
+            ),
         )
 
 
@@ -386,9 +417,12 @@ class FakeIdentityService:
 
 
 def identity_rig(files: dict[str, str] | None = None):
-    """A materialiser over fakes: (materialiser, identity fake, fetcher fake).
+    """A materialiser over fakes: (materialiser, identity fake, object store,
+    content store).
 
-    The fetched URL ``SOUL_URL`` serves ``SOUL_BODY`` for identity tests.
+    The object ``SOUL_KEY`` serves ``SOUL_BODY`` for identity tests — a key in
+    a bucket, because a declared source is a declaration and the bare URL these
+    tests used to write has no road left.
     """
     from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
         EntryFetcher,
@@ -398,13 +432,14 @@ def identity_rig(files: dict[str, str] | None = None):
     )
 
     identity = FakeIdentityService(files)
-    fetcher = FakeGuardedFetcher(responses={SOUL_URL: fetched_object(SOUL_BODY)})
+    objects = FakeObjectStore()
+    objects.put(OBJECT_BUCKET, SOUL_KEY, SOUL_BODY)
     content = FakeManifestContent()
-    pipeline = EntryFetcher(fetcher, content, FakeCredentials(), FakeObjectStore())
-    return IdentityMaterialiser(identity, pipeline), identity, fetcher, content
+    pipeline = EntryFetcher(content, FakeCredentials(), objects)
+    return IdentityMaterialiser(identity, pipeline), identity, objects, content
 
 
-SOUL_URL = "https://content.example/identity/soul.md"
+SOUL_KEY = "identity/soul.md"
 SOUL_BODY = b"# team charter\nServe the customer honestly.\n"
 
 
@@ -942,3 +977,43 @@ class FakeResourceFileService:
             }
         )
         return path in self._exists
+
+
+#: The bucket the fetching suites declare their objects in, and the credential
+#: name they read them under. One pair, shared, so a reader moving between
+#: suites recognises the road at a glance.
+OBJECT_BUCKET = "content"
+OBJECT_AUTH = "oss-cred"
+
+
+def object_source(key: str, *, bucket: str = OBJECT_BUCKET, **extra) -> dict:
+    """An inline ``protocol: oss`` source declaration for one object::
+
+        {"protocol": "oss", "bucket": "content", "key": "skills/qc.zip",
+         "auth": "oss-cred"}
+
+    What a manifest entry's ``source:`` is, now that the grammar's only other
+    spelling is git. Suites that used to write a bare URL here write this.
+    """
+    return {
+        "protocol": "oss",
+        "bucket": bucket,
+        "key": key,
+        "auth": OBJECT_AUTH,
+        **extra,
+    }
+
+
+def object_session(**sources):
+    """A :class:`SourceSession` for the object road, with no git client.
+
+    ``fetch_declared`` requires a session for every declared source — the
+    ``from`` road looks its name up here, and a declaration's own fetcher
+    resolves through it — so a suite driving inline ``oss`` sources needs one
+    even when it names nothing under ``sources``.
+    """
+    from agentclaw.community.core.bot_config_manifest.apply.source_session import (
+        SourceSession,
+    )
+
+    return SourceSession(sources=dict(sources), baselines={}, git=None)

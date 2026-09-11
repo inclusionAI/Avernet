@@ -278,19 +278,21 @@ class ManifestFetchModule(Module):
     @inject
     def manifest_entry_fetcher(
         self,
-        fetcher: GuardedFetcher,
         content: ManifestContentServiceProtocol,
         credentials: SourceCredentialServiceProtocol,
         objects: AliyunObjectStore,
     ) -> EntryFetcher:
         """The one fetch funnel the fetch-consuming materialisers share.
 
-        One instance over four singletons: the transport, the store, W3's
-        credentials, and the object-store client — so every category
-        that fetches reads the same receipts and files the same provenance
-        rows, whichever protocol served it.
+        One instance over three singletons: the store, W3's credentials, and
+        the object-store client — so every category that fetches reads the
+        same receipts and files the same provenance rows, whichever protocol
+        served it. The guarded HTTPS transport is no longer among them: the
+        funnel's last URL road went with the bare-string ``source``, and the
+        two roads that remain reach their sources through the object store and
+        through git.
         """
-        return EntryFetcher(fetcher, content, credentials, objects)
+        return EntryFetcher(content, credentials, objects)
 
     @singleton
     @provider

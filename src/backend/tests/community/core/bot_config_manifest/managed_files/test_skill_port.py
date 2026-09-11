@@ -30,7 +30,6 @@ from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
 from tests.community.core.bot_config_manifest.apply._fakes import (
     FakeActivationService,
     FakeCredentials,
-    FakeGuardedFetcher,
     FakeManifestContent,
     build_skill_zip,
     fetched_object,
@@ -39,11 +38,16 @@ from tests.community.core.bot_config_manifest.apply._fakes import (
 )
 
 from ._fakes import FakeObjectStorage
-from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
+from tests.community.core.bot_config_manifest.apply._fakes import (
+    FakeObjectStore,
+    OBJECT_BUCKET,
+    object_session,
+    object_source,
+)
 
 _BASE = "teclaw/dev/bolt_data"
 _SCOPE = ManagedFileScope(entity_type="staff", entity_id="u_owner", bot_id="b_1")
-QC_URL = "https://example.test/skills/quality-check.zip"
+QC_KEY = "skills/quality-check.zip"
 QZ = build_skill_zip("quality-check", extra=[("scripts/run.sh", b"echo ok\n")])
 QZ_V2 = build_skill_zip("quality-check", extra=[("scripts/run.sh", b"echo v2\n")])
 
@@ -120,17 +124,14 @@ def _rig(packages: dict[str, bytes]):
         validator=real_validator(),
         skill_repository=skills,
     )
-    fetcher = FakeGuardedFetcher(
-        responses={
-            url: fetched_object(body, url=url, content_type="application/zip")
-            for url, body in packages.items()
-        }
-    )
-    pipeline = EntryFetcher(fetcher, FakeManifestContent(), FakeCredentials(), FakeObjectStore())
+    objects = FakeObjectStore()
+    for key, body in packages.items():
+        objects.put(OBJECT_BUCKET, key, body)
+    pipeline = EntryFetcher(FakeManifestContent(), FakeCredentials(), objects)
     materialiser = SkillsMaterialiser(
         port, activation, LiveCapabilityReader(skills, activation), real_validator(), pipeline
     )
-    return materialiser, store, oss, skills, activation, fetcher
+    return materialiser, store, oss, skills, activation, objects
 
 
 async def _apply(materialiser, ctx, entries):
@@ -142,11 +143,17 @@ async def _apply(materialiser, ctx, entries):
 
 
 def _ctx():
-    return make_context(engine_type="teclaw", owner_id="u_owner")
+    return make_context(
+        engine_type="teclaw", owner_id="u_owner", source_session=object_session()
+    )
 
 
-def _declared(url: str = QC_URL, body: bytes = QZ):
-    return {"name": "quality-check", "source": url, "digest": _digest_of(body)}
+def _declared(key: str = QC_KEY, body: bytes = QZ):
+    return {
+        "name": "quality-check",
+        "source": object_source(key),
+        "digest": _digest_of(body),
+    }
 
 
 def _indexed(store) -> list[tuple[str, str]]:
@@ -157,7 +164,7 @@ def _indexed(store) -> list[tuple[str, str]]:
 
 
 def test_a_declared_skill_is_unpacked_into_the_store_and_recorded() -> None:
-    materialiser, store, oss, skills, activation, _ = _rig({QC_URL: QZ})
+    materialiser, store, oss, skills, activation, _ = _rig({QC_KEY: QZ})
 
     plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
 
@@ -188,7 +195,7 @@ def test_a_declared_skill_is_unpacked_into_the_store_and_recorded() -> None:
 
 
 def test_the_second_apply_is_unchanged_and_writes_nothing() -> None:
-    materialiser, store, oss, skills, activation, _ = _rig({QC_URL: QZ})
+    materialiser, store, oss, skills, activation, _ = _rig({QC_KEY: QZ})
     _run(_apply(materialiser, _ctx(), [_declared()]))
     puts_before = list(oss.puts)
 
@@ -201,12 +208,12 @@ def test_the_second_apply_is_unchanged_and_writes_nothing() -> None:
 
 
 def test_a_changed_package_is_replaced_in_place() -> None:
-    materialiser, store, oss, skills, activation, fetcher = _rig({QC_URL: QZ})
+    materialiser, store, oss, skills, activation, objects = _rig({QC_KEY: QZ})
     _run(_apply(materialiser, _ctx(), [_declared()]))
     created_id = skills.creates[0]["id"]
 
     # The same URL now serves a new package (a moved pin).
-    fetcher.responses[QC_URL] = fetched_object(QZ_V2, url=QC_URL, content_type="application/zip")
+    objects.put(OBJECT_BUCKET, QC_KEY, QZ_V2)
     plan, written = _run(_apply(materialiser, _ctx(), [_declared(body=QZ_V2)]))
 
     assert [e.outcome.value for e in written] == ["updated"]
@@ -238,7 +245,7 @@ def test_a_stale_member_of_a_replaced_package_is_dropped_from_the_store() -> Non
 
 
 def test_removal_deactivates_record_only() -> None:
-    materialiser, store, oss, skills, activation, _ = _rig({QC_URL: QZ})
+    materialiser, store, oss, skills, activation, _ = _rig({QC_KEY: QZ})
     _run(_apply(materialiser, _ctx(), [_declared()]))
 
     plan, written = _run(_apply(materialiser, _ctx(), []))

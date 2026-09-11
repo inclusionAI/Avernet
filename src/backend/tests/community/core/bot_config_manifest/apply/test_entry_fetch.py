@@ -1,10 +1,15 @@
 """Tests for the per-entry fetch pipeline (``apply/entry_fetch.py``, W5).
 
-The pipeline is where the three fetch-side waves meet for the first time: W2's
-transport, W3's named credentials, W11's platform copy. What these tests pin
+The pipeline is where the fetch-side waves meet: the object store and git as
+transports, W3's named credentials, W11's platform copy. What these tests pin
 is the *policy* on top of them — pinned entries read from the store, unpinned
-entries re-fetch, ``keep_last`` reads the receipt only when it may — and that
-a secret cannot ride out through an error.
+entries re-read the source, ``keep_last`` reads the receipt only when it may —
+and that a secret cannot ride out through an error.
+
+W2's guarded HTTPS transport is no longer one of them. It served the
+bare-string ``source:`` road, which had one caller left (``cli_tools``, whose
+management API now takes an upload) and no way to be declared; the road and its
+entry point are gone, and the policy above lives on ``acquire_object``.
 """
 from __future__ import annotations
 
@@ -23,7 +28,12 @@ from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStor
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetchError,
     EntryFetcher,
+    declared_protocol,
 )
+from agentclaw.community.core.bot_config_manifest.apply.source_fetchers import (
+    object_receipt_url,
+)
+from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
 )
@@ -33,12 +43,9 @@ from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
 )
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     FetchFailedError,
-    FetchRefusedError,
 )
-
 from ._fakes import (
     FakeCredentials,
-    FakeGuardedFetcher,
     FakeManifestContent,
     fetched_object,
     make_context,
@@ -94,305 +101,205 @@ class _AksKCredentials(FakeCredentials):
 def objects_rig():
     """A pipeline wired to an in-memory object store — the test double that
     gives every ``ObjectFetchStatus`` a shape a consumer test can drive."""
-    fetcher = FakeGuardedFetcher(responses={})
+    content = FakeManifestContent()
     objects = FakeObjectStore()
-    pipeline = EntryFetcher(
-        fetcher, FakeManifestContent(), _AksKCredentials(), objects
-    )
-    return fetcher, objects, pipeline
+    pipeline = EntryFetcher(content, _AksKCredentials(), objects)
+    return content, objects, pipeline
 
 
 @pytest.fixture
 def rig():
     content = FakeManifestContent()
-    fetcher = FakeGuardedFetcher(responses={URL: fetched_object(BODY, url=URL)})
     credentials = FakeCredentials()
-    return content, fetcher, credentials, EntryFetcher(fetcher, content, credentials, FakeObjectStore())
+    return content, credentials, EntryFetcher(content, credentials, FakeObjectStore())
 
 
-def test_placeholders_substitute_before_the_transport_sees_the_url(rig):
-    content, fetcher, _, pipeline = rig
-    ctx = make_context()  # env="dev"
+#: The object road's coordinates, and the address a receipt for them is filed
+#: under. The endpoint and the key pair come off the credential in production;
+#: the tests that go through ``fetch_declared`` prove that, and the ones that
+#: call :meth:`EntryFetcher.acquire_object` directly are past the point where
+#: it was resolved.
+_TARGET = ObjectStoreTarget(
+    endpoint=_OBJ_ENDPOINT,
+    bucket="b",
+    access_key_id=_OBJ_AK,
+    secret_access_key="the-secret-half",
+    region="cn-shanghai",
+)
+_ADDRESS = object_receipt_url("b", "k")
 
-    substituted = "https://content.example/dev/payload.bin"
-    fetcher.responses[substituted] = fetched_object(BODY, url=substituted)
-    result = pipeline.fetch(
-        ctx,
-        source_url="https://content.example/${BOT_ENV}/payload.bin",
+
+def _store_holding(content: FakeManifestContent, body: bytes = BODY) -> None:
+    """One receipt already filed for the object address, holding ``body``."""
+    content.store(
+        fetched_object(body, url=_ADDRESS, content_type=None),
+        scope=None,
+        source_url=_ADDRESS,
+    )
+    content.store_calls.clear()
+
+
+def _acquire(pipeline, *, ctx=None, digest=None, keep_last=False, auth="oss-cred"):
+    return pipeline.acquire_object(
+        ctx if ctx is not None else make_context(),
+        target=_TARGET,
+        key="k",
+        digest=digest,
+        auth=auth,
         category="identity",
+        keep_last=keep_last,
+        entry_identity="data/faq.csv",
     )
-    # The wire saw the substituted URL: the fake answers only for it, and the
-    # receipt is filed under it — substitution, then transport, then store.
-    assert fetcher.requests[0].url == substituted
-    assert result.content == BODY
-    assert result.from_store is False
-    assert content.store_calls[0]["source_url"] == substituted
 
 
-def test_a_pinned_entry_with_a_matching_receipt_is_served_from_the_store(rig):
-    content, fetcher, _, pipeline = rig
-    _store_serving(content)
+# --- the store-first policy, on the road that still has a network ---------
+#
+# These cases used to drive ``EntryFetcher.fetch``, the HTTPS-GET road that no
+# longer exists. The policy they pin is not the transport's — it is the
+# pipeline's, and ``acquire_object`` is where it lives now: pinned entries read
+# from the platform's copy, unpinned ones re-read, ``keep_last`` answers only
+# when it may, and every store fault is *this entry's* failure. The ones that
+# were about the URL transport itself (per-hop prefix authorization, a refused
+# address, a header injector) went with it: they pinned ``GuardedFetcher``'s
+# seams, which this module no longer has.
 
-    result = pipeline.fetch(
-        make_context(), source_url=URL, digest=DIGEST, category="identity"
-    )
-    # No network: the platform's own copy answers for the pinned bytes.
-    assert fetcher.requests == []
+
+def test_a_pinned_entry_with_a_matching_receipt_is_served_from_the_store(
+    objects_rig,
+):
+    content, objects, pipeline = objects_rig
+    _store_holding(content)
+
+    result = _acquire(pipeline, digest=DIGEST)
+    # No read: the platform's own copy answers for the pinned bytes.
+    assert objects.calls == []
     assert result.from_store is True
     assert result.content == BODY
     assert result.digest == DIGEST
 
 
-def test_a_pinned_entry_with_a_mismatched_receipt_refetches(rig):
-    content, fetcher, _, pipeline = rig
-    _store_serving(content)
-    # The source legitimately rotated: it now serves bytes pinned by a NEW
-    # digest, so the platform's old receipt for this URL is stale, not "last".
+def test_a_pinned_entry_with_a_mismatched_receipt_rereads(objects_rig):
+    content, objects, pipeline = objects_rig
+    _store_holding(content)
+    # The source legitimately rotated: it now holds bytes pinned by a NEW
+    # digest, so the platform's old receipt for this address is stale, not
+    # "last".
     rotated = b"rotated-bytes"
     rotated_digest = "sha256:" + hashlib.sha256(rotated).hexdigest()
-    fetcher.responses[URL] = fetched_object(rotated, url=URL)
+    objects.put("b", "k", rotated, access_key_id=_OBJ_AK)
 
-    result = pipeline.fetch(
-        make_context(), source_url=URL, digest=rotated_digest, category="identity"
-    )
-    assert len(fetcher.requests) == 1
-    assert fetcher.requests[0].expected_digest == rotated_digest
-    assert fetcher.requests[0].injector is None
+    result = _acquire(pipeline, digest=rotated_digest)
+    assert len(objects.calls) == 1
     assert result.from_store is False
     assert result.digest == rotated_digest
     assert len(content.store_calls) == 1
 
 
-def test_an_unpinned_entry_refetches_even_when_a_receipt_exists(rig):
-    content, fetcher, credentials, pipeline = rig
-    _store_serving(content)
+def test_an_unpinned_entry_rereads_even_when_a_receipt_exists(objects_rig):
+    content, objects, pipeline = objects_rig
+    _store_holding(content)
+    objects.put("b", "k", BODY, access_key_id=_OBJ_AK)
 
-    result = pipeline.fetch(make_context(), source_url=URL, category="identity")
+    result = _acquire(pipeline)
     # No pin means "whatever is there now": the source is re-read so an apply
     # converges to it, never to our own memory of it.
-    assert len(fetcher.requests) == 1
+    assert len(objects.calls) == 1
     assert result.from_store is False
 
 
-def test_a_pinned_entry_with_a_matching_receipt_survives_a_dead_source(rig):
-    """A pinned entry with a matching receipt never reaches the network at
-    all — so a source that is DOWN between applies costs nothing: content
-    addressing makes the stored bytes *the* declared bytes regardless of
-    availability. This is the store-hit fast path, NOT a keep_last fallback
-    (no fetch was attempted, none failed), and it carries no note: silence
-    here is legitimate — the pinned fast path is exactly what convergence
-    looks like, while a keep_last fallback is what "the source failed" looks
-    like and must be reported. The two are distinguished by the mark."""
-    content, fetcher, _, pipeline = rig
-    _store_serving(content)
-    # The source is unreachable — and it will never be asked.
-    failing = FakeGuardedFetcher(failures={URL: FetchFailedError("source transport failed")})
-    pipeline_failing = EntryFetcher(failing, content, FakeCredentials(), FakeObjectStore())
+def test_a_pinned_entry_with_a_matching_receipt_survives_a_dead_source(
+    objects_rig,
+):
+    """A pinned entry with a matching receipt never reaches the store at all —
+    so a source that is DOWN between applies costs nothing: content addressing
+    makes the stored bytes *the* declared bytes regardless of availability.
+    This is the store-hit fast path, NOT a keep_last fallback (no read was
+    attempted, none failed), and it carries no note: silence here is legitimate
+    — the pinned fast path is exactly what convergence looks like, while a
+    keep_last fallback is what "the source failed" looks like and must be
+    reported. The two are distinguished by the mark."""
+    content, objects, pipeline = objects_rig
+    _store_holding(content)
+    objects.make_unavailable("b")
 
-    result = pipeline_failing.fetch(
-        make_context(),
-        source_url=URL,
-        digest=DIGEST,
-        category="identity",
-        keep_last=True,
-    )
+    result = _acquire(pipeline, digest=DIGEST, keep_last=True)
     assert result.from_store is True
     assert result.content == BODY
-    assert result.digest == DIGEST
-    assert failing.requests == []  # never reached the dead source
+    assert objects.calls == []  # never reached the dead source
     assert result.fallback_reason is None  # a fast path, not a fallback
 
 
-def test_keep_last_with_no_receipt_fails(rig):
-    _, fetcher, _, _ = rig
-    failing = FakeGuardedFetcher(failures={URL: FetchFailedError("source answered 404")})
-    pipeline = EntryFetcher(failing, FakeManifestContent(), FakeCredentials(), FakeObjectStore())
+def test_keep_last_with_no_receipt_fails(objects_rig):
+    _, objects, pipeline = objects_rig
+    objects.make_unavailable("b", "endpoint unreachable")
 
     with pytest.raises(EntryFetchError) as excinfo:
-        pipeline.fetch(
-            make_context(),
-            source_url=URL,
-            category="identity",
-            keep_last=True,
-        )
-    # The transport's own words — W2 already refuses before sending anything
-    # that would carry the caller's or the source's data.
-    assert "source answered 404" in excinfo.value.reason
+        _acquire(pipeline, keep_last=True)
+    # The store's own words, which carry no caller or source data.
+    assert "endpoint unreachable" in excinfo.value.reason
 
 
-def test_keep_last_with_an_unpinned_entry_falls_back_to_the_last_digest(rig):
-    """An unpinned keep_last entry reuses the last-fetched bytes — that is the
-    whole of "keep_last" for a declaration that pinned nothing."""
-    content, _, _, _ = rig
-    _store_serving(content)
-    failing = FakeGuardedFetcher(failures={URL: FetchFailedError("source transport failed")})
-    pipeline = EntryFetcher(failing, content, FakeCredentials(), FakeObjectStore())
-
-    result = pipeline.fetch(
-        make_context(), source_url=URL, category="identity", keep_last=True
-    )
-    assert result.from_store is True
-    assert result.digest == DIGEST
-    # Marked here too: the mode is on the entry, not on the claim of a pin.
-    assert result.fallback_reason is not None
-
-
-def test_keep_last_never_supplies_bytes_that_disagree_with_a_pin(rig):
-    content, fetcher, _, pipeline = rig
-    _store_serving(content)
-    other = "sha256:" + "1" * 64
-    fetcher.responses = {URL: fetched_object(b"", url=URL)}
-    fetcher.failures = {URL: FetchFailedError("source transport failed")}
+def test_keep_last_never_supplies_bytes_that_disagree_with_a_pin(objects_rig):
+    content, objects, pipeline = objects_rig
+    _store_holding(content)
+    objects.make_unavailable("b")
 
     with pytest.raises(EntryFetchError) as excinfo:
-        pipeline.fetch(
-            make_context(),
-            source_url=URL,
-            digest=other,
-            category="identity",
-            keep_last=True,
-        )
+        _acquire(pipeline, digest="sha256:" + "1" * 64, keep_last=True)
     # The receipt is stale, not "last": refused rather than silently pinning
     # bytes the declaration never named.
-    assert "source transport failed" in excinfo.value.reason
+    assert "endpoint unreachable" in excinfo.value.reason
 
 
-def test_a_fetch_failure_without_keep_last_fails_the_entry(rig):
-    content, _, credentials, _ = rig
-    failing = FakeGuardedFetcher(failures={URL: FetchFailedError("source answered 503")})
-    pipeline = EntryFetcher(failing, content, credentials, FakeObjectStore())
-
-    with pytest.raises(EntryFetchError) as excinfo:
-        pipeline.fetch(make_context(), source_url=URL, category="identity")
-    assert "source answered 503" in excinfo.value.reason
-
-
-def test_neither_the_error_nor_the_store_carries_a_credential_value(rig):
-    """The secrecy seam is W2's and W3's own error texts; this pipeline's job
-    is not to weaken them. The transport's message passes through verbatim —
-    never the headers, never the binding — and a failed fetch stores nothing
-    with even the credential *name* attached (no store event happened)."""
-    content, _, credentials, pipeline = rig
-    failing = FakeGuardedFetcher(
-        failures={URL: FetchFailedError("source answered 401")}
-    )
-    pipeline_failing = EntryFetcher(failing, content, credentials, FakeObjectStore())
+def test_a_read_failure_without_keep_last_fails_the_entry(objects_rig):
+    _, objects, pipeline = objects_rig
+    objects.make_unavailable("b", "endpoint unreachable")
 
     with pytest.raises(EntryFetchError) as excinfo:
-        pipeline_failing.fetch(
-            make_context(),
-            source_url=URL,
-            auth="mirror",
-            category="identity",
-        )
-    assert excinfo.value.reason == "source answered 401"
-    # The binding travelled as the request's headers/policy, never as message
-    # or log-line text; and no receipt was filed for a failed acquisition.
-    assert failing.requests[0].injector is not None
-    assert "mirror" not in excinfo.value.reason
-    assert content.store_calls == []
+        _acquire(pipeline)
+    assert "endpoint unreachable" in excinfo.value.reason
 
 
-def test_the_credential_binding_reaches_the_transport_by_name(rig):
-    content, fetcher, credentials, pipeline = rig
-
-    result = pipeline.fetch(
-        make_context(),
-        source_url=URL,
-        category="identity",
-        auth="mirror",
-    )
-    # The binding is injector AND policy — one object, both seams, the way
-    # SourceCredentialBinding satisfies both.
-    binding = fetcher.requests[0].injector
-    assert binding is fetcher.requests[0].policy
-    assert binding.headers_for(None) == {"X-Custom-Auth": "payload-of-mirror"}
-    assert credentials.binding_calls == ["mirror"]
-    assert content.store_calls[0]["credential_name"] == "mirror"
-    assert result.content == BODY
-
-
-def test_a_missing_credential_fails_with_the_name_and_no_binding(rig):
-    content, _, _, _ = rig
-    fetcher = FakeGuardedFetcher(responses={URL: fetched_object(BODY, url=URL)})
+def test_a_missing_credential_fails_with_the_name_and_no_read(objects_rig):
+    """The credential is resolved before the store is touched, and a name that
+    no longer exists is configuration drift: loud, named, and never masked."""
+    content, objects, _ = objects_rig
     pipeline = EntryFetcher(
-        fetcher, content, FakeCredentials(missing={"ghost"})
-    , FakeObjectStore())
+        content, FakeCredentials(missing={"ghost"}), objects
+    )
+    ctx = make_context(source_session=_session(_ScriptedGit(), sources={
+        "s": {"protocol": "oss", "bucket": "b", "key": "k", "auth": "ghost"},
+    }))
 
     with pytest.raises(EntryFetchError) as excinfo:
-        pipeline.fetch(
-            make_context(), source_url=URL, category="identity", auth="ghost"
-        )
+        pipeline.fetch_declared(ctx, entry={"from": "s"}, category="identity")
     assert "ghost" in excinfo.value.reason
-    assert fetcher.requests == []
+    assert objects.calls == []
 
 
-def test_the_store_receives_the_actor_as_modifier(rig):
-    content, _, _, pipeline = rig
-    pipeline.fetch(make_context(), source_url=URL, category="identity")
+def test_the_store_receives_the_actor_as_modifier(objects_rig):
+    content, objects, pipeline = objects_rig
+    objects.put("b", "k", BODY, access_key_id=_OBJ_AK)
+    _acquire(pipeline)
     assert content.store_calls[0]["modifier"] == "u_actor"
-
-
-def test_a_prefix_escape_refusal_becomes_the_same_entry_error(rig):
-    """W3's policy refuses per hop — the substituted URL or a redirect
-    stepping outside the credential's prefixes. That refusal reaches the
-    materialiser as the entry's own failure, reason intact: the entry fails
-    like a refused address, with the credential *named* (never valued)."""
-    _, _, _, _ = rig
-    from agentclaw.community.core.bot_config_manifest.credentials.policy import (
-        PrefixAuthorizationError,
-    )
-
-    refusing = FakeGuardedFetcher(
-        failures={
-            URL: PrefixAuthorizationError(
-                "credential 'mirror' is not authorized to leave "
-                "https://mirror.example/prefix"
-            )
-        }
-    )
-    pipeline = EntryFetcher(refusing, FakeManifestContent(), FakeCredentials(), FakeObjectStore())
-
-    with pytest.raises(EntryFetchError) as excinfo:
-        pipeline.fetch(
-            make_context(),
-            source_url=URL,
-            auth="mirror",
-            category="identity",
-        )
-    assert "not authorized" in excinfo.value.reason
-    assert "mirror" in excinfo.value.reason
-
-
-def test_a_refused_transport_becomes_the_same_entry_error(rig):
-    content, _, credentials, _ = rig
-    refused = FakeGuardedFetcher(
-        failures={URL: FetchRefusedError("non-public address for host")}
-    )
-    pipeline = EntryFetcher(refused, content, credentials, FakeObjectStore())
-
-    with pytest.raises(EntryFetchError) as excinfo:
-        pipeline.fetch(make_context(), source_url=URL, category="identity")
-    assert "non-public address" in excinfo.value.reason
 
 
 # --- the P0-2 translation family: store faults are the ENTRY's failures ---
 
 
-def test_a_pinned_blob_that_went_missing_heals_via_the_network(rig):
+def test_a_pinned_blob_that_went_missing_heals_via_a_reread(objects_rig):
     """A pinned store-hit whose blob is gone (the store lost the file) is a
     self-repairing cache miss, not a caller-visible failure: the pin is
-    byte-provable, the guarded fetch reacquires exactly those bytes, and the
-    re-file heals the address. The result reads as an ordinary (network)
-    fetch — from_store False, no fallback note: nothing FAILED."""
-    content, fetcher, _, pipeline = rig
-    _store_serving(content)
+    byte-provable, the re-read reacquires exactly those bytes, and the re-file
+    heals the address. The result reads as an ordinary read — from_store False,
+    no fallback note: nothing FAILED."""
+    content, objects, pipeline = objects_rig
+    _store_holding(content)
     content.missing_blobs.add(DIGEST)
+    objects.put("b", "k", BODY, access_key_id=_OBJ_AK)
 
-    result = pipeline.fetch(
-        make_context(), source_url=URL, digest=DIGEST, category="identity"
-    )
-    assert fetcher.requests, "the missing blob must be reacquired"
+    result = _acquire(pipeline, digest=DIGEST)
+    assert objects.calls, "the missing blob must be reacquired"
     assert result.content == BODY
     assert result.digest == DIGEST
     assert result.from_store is False
@@ -401,25 +308,23 @@ def test_a_pinned_blob_that_went_missing_heals_via_the_network(rig):
     assert content.read(DIGEST) == BODY
 
 
-def test_a_pinned_blob_that_is_corrupt_loudly_fails_the_entry(rig):
+def test_a_pinned_blob_that_is_corrupt_loudly_fails_the_entry(objects_rig):
     """A blob that exists but fails its own digest is disk-side damage — a
-    hit a re-fetch CANNOT heal (the dedup write skips same-size files) — so
+    hit a re-read CANNOT heal (the dedup write skips same-size files) — so
     it stays the 500-family failure it is, on this entry, with its reason;
     never a silent skip and never a wrapped whole-category abort."""
-    content, _, _, pipeline = rig
-    _store_serving(content)
+    content, _, pipeline = objects_rig
+    _store_holding(content)
     content.corrupt_blobs.add(DIGEST)
 
     with pytest.raises(EntryFetchError) as excinfo:
-        pipeline.fetch(
-            make_context(), source_url=URL, digest=DIGEST, category="identity"
-        )
+        _acquire(pipeline, digest=DIGEST)
     assert "could not be read" in excinfo.value.reason
     assert "fails its own digest" in excinfo.value.reason
 
 
-def test_a_store_side_refusal_of_the_lookup_is_the_entrys_error(rig):
-    content, _, _, pipeline = rig
+def test_a_store_side_refusal_of_the_lookup_is_the_entrys_error(objects_rig):
+    content, _, pipeline = objects_rig
     from agentclaw.community.core.bot_config_manifest.content.errors import (
         ContentStoreError,
     )
@@ -428,144 +333,138 @@ def test_a_store_side_refusal_of_the_lookup_is_the_entrys_error(rig):
         "provenance fetched_url exceeds the 2048-char column: length 2200"
     )
     with pytest.raises(EntryFetchError) as excinfo:
-        pipeline.fetch(
-            make_context(), source_url=URL, digest="sha256:" + "0" * 64,
-            category="identity",
-        )
-    # The store's own message (never the URL), as this entry's failure.
+        _acquire(pipeline, digest="sha256:" + "0" * 64)
+    # The store's own message (never the address), as this entry's failure.
     assert "2048-char column" in excinfo.value.reason
 
 
-def test_a_store_side_refusal_of_the_filing_is_the_entrys_error(rig):
-    """The reachable shape the audit named: a redirect destination whose
-    sanitized form exceeds the column — admission cannot see a redirect's
-    Location, so the refusal lands here, AFTER the bytes were fetched. It
-    fails ONE entry with the store's words, not the whole category under a
-    wrapped 'resolve failed' surprise."""
-    content, _, _, pipeline = rig
+def test_a_store_side_refusal_of_the_filing_is_the_entrys_error(objects_rig):
+    """The refusal that lands AFTER the bytes were acquired. It fails ONE entry
+    with the store's words, not the whole category under a wrapped 'resolve
+    failed' surprise."""
+    content, objects, pipeline = objects_rig
     from agentclaw.community.core.bot_config_manifest.content.errors import (
         ContentStoreError,
     )
 
+    objects.put("b", "k", BODY, access_key_id=_OBJ_AK)
     content.store_fault = ContentStoreError(
         "provenance fetched_url exceeds the 2048-char column: length 2200"
     )
     with pytest.raises(EntryFetchError) as excinfo:
-        pipeline.fetch(make_context(), source_url=URL, category="identity")
+        _acquire(pipeline)
     assert "could not be filed" in excinfo.value.reason
     assert "2048-char column" in excinfo.value.reason
 
 
-def test_a_refusal_never_triggers_keep_last_even_when_a_receipt_exists(rig):
-    """The ruling, pinned: a refused fetch (non-public address, scheme,
-    hop budget, digest vocabulary) is a statement about the document's
-    configuration — it never left the wire. Falling back to stored bytes
-    would answer SUCCEEDED to a document the platform just refused, so the
-    refusal fails the entry even with keep_last declared and a receipt in
-    hand."""
-    content, _, credentials, _ = rig
-    _store_serving(content)
-    refusing = FakeGuardedFetcher(
-        failures={URL: FetchRefusedError("non-public address for host")}
-    )
-    pipeline = EntryFetcher(refusing, content, credentials, FakeObjectStore())
-
-    with pytest.raises(EntryFetchError) as excinfo:
-        pipeline.fetch(
-            make_context(),
-            source_url=URL,
-            digest=None,
-            category="identity",
-            keep_last=True,
-        )
-    assert "non-public address" in excinfo.value.reason
-    # Nothing was served: the fallback did not fire.
-
-
-def test_a_keep_last_read_failure_names_both_halves(rig):
+def test_a_keep_last_read_failure_names_both_halves(objects_rig):
     """The source failed, the fallback copy ALSO could not be read: the
     entry's error carries both reasons — drop either and the caller fixes
     the wrong thing (the audit called this swallowing)."""
-    content, _, credentials, _ = rig
-    _store_serving(content)
+    content, objects, pipeline = objects_rig
+    _store_holding(content)
     content.missing_blobs.add(DIGEST)
-    failing = FakeGuardedFetcher(
-        failures={URL: FetchFailedError("source transport failed")}
-    )
-    pipeline = EntryFetcher(failing, content, credentials, FakeObjectStore())
+    objects.make_unavailable("b", "endpoint unreachable")
 
     with pytest.raises(EntryFetchError) as excinfo:
-        pipeline.fetch(
-            make_context(),
-            source_url=URL,
-            digest=DIGEST,
-            category="identity",
-            keep_last=True,
-        )
-    assert "source transport failed" in excinfo.value.reason
+        _acquire(pipeline, digest=DIGEST, keep_last=True)
+    assert "endpoint unreachable" in excinfo.value.reason
     assert "keep_last fallback copy could not be read" in excinfo.value.reason
 
 
-def test_a_time_exhausted_budget_refuses_before_touching_the_network(rig):
-    """The deadline is checked before the fetch — the audit's scenario was
+def test_a_time_exhausted_budget_refuses_before_touching_the_network(
+    objects_rig,
+):
+    """The deadline is checked before the read — the audit's scenario was
     entries-long fetching that outran the apply-lock TTL and let the reaper
     hand a live apply's lock to a second one, so an exhausted budget must
     end the apply in bounded time with a named reason."""
-    content, fetcher, credentials, pipeline = rig
+    _, objects, pipeline = objects_rig
     from agentclaw.community.core.bot_config_manifest.apply.budget import (
         ApplyFetchBudget,
     )
 
-    ctx = make_context()
-    ctx = _with_budget(ctx, ApplyFetchBudget(deadline=0.0, total_bytes=10**9))
+    objects.put("b", "k", BODY, access_key_id=_OBJ_AK)
+    ctx = _with_budget(
+        make_context(), ApplyFetchBudget(deadline=0.0, total_bytes=10**9)
+    )
 
     with pytest.raises(EntryFetchError) as excinfo:
-        EntryFetcher(fetcher, content, credentials, FakeObjectStore()).fetch(
-            ctx, source_url=URL, digest=None, category="identity"
-        )
+        _acquire(pipeline, ctx=ctx)
     assert "exhausted (time)" in excinfo.value.reason
-    assert fetcher.requests == []
+    assert objects.calls == []
 
 
-def test_a_byte_exhausted_budget_refuses_the_next_entry(rig):
-    """Bytes charge per network fetch; the cap stops the N+1st entry, not
-    the first — per-entry caps stay the fetcher's own business."""
-    content, fetcher, credentials, _ = rig
+def test_a_byte_exhausted_budget_refuses_the_next_entry(objects_rig):
+    """Bytes charge per read; the cap stops the N+1st entry, not the first —
+    per-entry caps stay the store client's own business."""
+    _, objects, pipeline = objects_rig
     from agentclaw.community.core.bot_config_manifest.apply.budget import (
         ApplyFetchBudget,
     )
 
+    objects.put("b", "k", BODY, access_key_id=_OBJ_AK)
     budget = ApplyFetchBudget(deadline=1e18, total_bytes=len(BODY), clock=lambda: 0.0)
     ctx = _with_budget(make_context(), budget)
-    pipeline = EntryFetcher(fetcher, content, credentials, FakeObjectStore())
 
-    first = pipeline.fetch(ctx, source_url=URL, digest=None, category="identity")
-    assert first.content == BODY  # the first fetch fits exactly
+    first = _acquire(pipeline, ctx=ctx)
+    assert first.content == BODY  # the first read fits exactly
 
     with pytest.raises(EntryFetchError) as excinfo:
-        pipeline.fetch(ctx, source_url=URL, digest=None, category="identity")
+        _acquire(pipeline, ctx=ctx)
     assert "exhausted (bytes)" in excinfo.value.reason
-    # Only the FIRST fetch reached the wire; the refused one never did —
-    # and note the first fetch's receipt does NOT serve the second (the
-    # receipt exists, but an unpinned entry's re-fetch is the point).
-    assert len(fetcher.requests) == 1
+    # Only the FIRST read reached the store; the refused one never did — and
+    # note the first read's receipt does NOT serve the second (the receipt
+    # exists, but an unpinned entry's re-read is the point).
+    assert len(objects.calls) == 1
 
 
-def test_the_funnel_requires_a_category_by_keyword(rig):
+def test_the_funnel_requires_a_category_by_keyword():
     """Linkage by default is linkage by accident: a call site that forgets
     its category would file an unattributed receipt and take the default
     cap. Reject the omission loudly (type analysis flagged this as one of
     the PR's two blocking-level type issues)."""
     import inspect
 
-    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-        EntryFetcher,
-    )
+    for entry_point in (EntryFetcher.fetch_declared, EntryFetcher.acquire_object):
+        category = inspect.signature(entry_point).parameters["category"]
+        assert category.kind is inspect.Parameter.KEYWORD_ONLY
+        assert category.default is inspect.Parameter.empty
 
-    signature = inspect.signature(EntryFetcher.fetch)
-    category = signature.parameters["category"]
-    assert category.kind is inspect.Parameter.KEYWORD_ONLY
-    assert category.default is inspect.Parameter.empty
+
+# --- the road that is gone -----------------------------------------------
+
+
+def test_a_bare_url_source_is_refused_with_the_form_it_should_have_taken(rig):
+    """A ``source`` that is a plain string names no protocol, so there is
+    nothing to dispatch on. It used to be an HTTPS GET performed by this
+    module; the refusal names the declaration form instead of guessing that a
+    string is an address worth dialling."""
+    _, _, pipeline = rig
+    ctx = make_context(source_session=_session(_ScriptedGit()))
+
+    with pytest.raises(EntryFetchError) as excinfo:
+        pipeline.fetch_declared(
+            ctx, entry={"source": "https://content.example/kb.zip"},
+            category="identity",
+        )
+    assert "declaration object" in excinfo.value.reason
+    assert "bare URL is not accepted" in excinfo.value.reason
+
+
+def test_declared_protocol_cannot_name_one_for_a_bare_url(rig):
+    """And the pre-fetch question answers ``None`` rather than ``OSS``: a
+    string is not a declaration, so nothing can be said about it without
+    reaching the refusal above. The callers read ``None`` as "cannot say", and
+    that is the honest answer."""
+    _, _, pipeline = rig
+    ctx = make_context()
+    assert declared_protocol(ctx, {"source": "https://content.example/kb.zip"}) is None
+    assert declared_protocol(ctx, {"content": "inline text"}) is None
+    assert declared_protocol(
+        ctx,
+        {"source": {"protocol": "oss", "bucket": "b", "key": "k", "auth": "a"}},
+    ) is SourceKind.OSS
 
 
 # --- the W7 declared-source front door: fetch_declared / file_bytes ---
@@ -603,10 +502,11 @@ def _session(git, *, sources=None, baselines=None):
 
 def test_a_named_oss_source_reads_through_the_object_store(objects_rig):
     """The oss road end to end, and the assertion that matters most about it:
-    **the guarded fetcher is never called.** That transport exists to make a
-    tenant-supplied URL safe, and this road has no URL — a request reaching it
-    would mean the address came from somewhere it should not have."""
-    fetcher, objects, pipeline = objects_rig
+    **there is no URL transport to reach.** That transport existed to make a
+    tenant-supplied URL safe; the roads that remain have no URL, so the
+    pipeline no longer holds one at all and an address from somewhere it should
+    not have come from has nothing to travel over."""
+    _, objects, pipeline = objects_rig
     objects.put("named-bucket", "assets/logo.png", BODY, access_key_id=_OBJ_AK)
     ctx = make_context(
         source_session=_session(_ScriptedGit(), sources={
@@ -622,7 +522,7 @@ def test_a_named_oss_source_reads_through_the_object_store(objects_rig):
         ctx, entry={"from": "cdn", "key": "logo.png"}, category="identity"
     )
     assert result.single() == BODY
-    assert fetcher.requests == []  # the URL transport stayed out of it
+    assert not hasattr(pipeline, "_fetcher")  # no URL transport, at all
     target, key, _ = objects.calls[0]
     # The source's key is a prefix and the entry's composes onto it, the same
     # rule ``subpath`` follows on the git road.
@@ -709,7 +609,7 @@ def test_an_unreachable_store_is_a_failure_keep_last_may_answer(objects_rig):
 
 
 def test_fetch_declared_gives_the_git_road_a_checkout(rig):
-    _, _, credentials, pipeline = rig
+    _, credentials, pipeline = rig
     git = _ScriptedGit()
     ctx = make_context(
         source_session=_session(git, sources={
@@ -729,21 +629,21 @@ def test_fetch_declared_gives_the_git_road_a_checkout(rig):
 
 
 def test_fetch_declared_refuses_a_from_that_names_nothing(rig):
-    _, _, _, pipeline = rig
+    _, _, pipeline = rig
     ctx = make_context(source_session=_session(_ScriptedGit()))
     with pytest.raises(EntryFetchError, match="not declared"):
         pipeline.fetch_declared(ctx, entry={"from": "ghost"}, category="skills")
 
 
 def test_fetch_declared_missing_session_is_loud(rig):
-    _, _, _, pipeline = rig
+    _, _, pipeline = rig
     ctx = make_context()
     with pytest.raises(EntryFetchError, match="no source session"):
         pipeline.fetch_declared(ctx, entry={"from": "x"}, category="skills")
 
 
 def test_strict_refuses_when_the_ref_moved(rig):
-    _, _, _, pipeline = rig
+    _, _, pipeline = rig
     git = _ScriptedGit()
     # An inline source's report identity is its repository URL, so that is
     # the key its baseline is read back by.
@@ -764,7 +664,7 @@ def test_strict_refuses_when_the_ref_moved(rig):
 
 
 def test_non_strict_records_the_move_in_the_note(rig):
-    _, _, _, pipeline = rig
+    _, _, pipeline = rig
     git = _ScriptedGit()
     ctx = make_context(
         source_session=_session(git, baselines={GIT_URL: "b" * 40})
@@ -780,7 +680,7 @@ def test_non_strict_records_the_move_in_the_note(rig):
 
 
 def test_strict_on_the_first_apply_has_no_opinion(rig):
-    _, _, _, pipeline = rig
+    _, _, pipeline = rig
     git = _ScriptedGit()
     ctx = make_context(source_session=_session(git))  # no baselines
     decl = pipeline.fetch_declared(
@@ -793,7 +693,7 @@ def test_strict_on_the_first_apply_has_no_opinion(rig):
 
 
 def test_digest_on_a_git_source_is_refused(rig):
-    _, _, _, pipeline = rig
+    _, _, pipeline = rig
     ctx = make_context(source_session=_session(_ScriptedGit()))
     with pytest.raises(EntryFetchError, match="digest"):
         pipeline.fetch_declared(
@@ -805,7 +705,7 @@ def test_digest_on_a_git_source_is_refused(rig):
 
 
 def test_git_keep_last_falls_back_to_the_baseline_receipt(rig):
-    content, _, credentials, pipeline = rig
+    content, credentials, pipeline = rig
     old_sha = "b" * 40
     baseline_url = git_receipt_url(GIT_URL, old_sha, "pkg")
     content.store(
@@ -832,7 +732,7 @@ def test_git_keep_last_falls_back_to_the_baseline_receipt(rig):
 
 
 def test_git_credentials_reach_the_transport_as_headers(rig):
-    _, fetcher, credentials, pipeline = rig
+    _, credentials, pipeline = rig
     git = _ScriptedGit()
     ctx = make_context(source_session=_session(git, sources={
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "auth": "ci-token"},
@@ -843,7 +743,7 @@ def test_git_credentials_reach_the_transport_as_headers(rig):
 
 
 def test_file_bytes_files_canonical_entry_bytes_with_the_store(rig):
-    content, _, _, pipeline = rig
+    content, _, pipeline = rig
     ctx = make_context(apply_id="apply-1")
     digest = pipeline.file_bytes(
         ctx, content=b"canonical-zip",
@@ -872,7 +772,7 @@ class _Ledger:
 
 
 def test_the_git_fetchs_declared_bytes_charge_the_apply_ledger_once(rig):
-    _, _, _, pipeline = rig
+    _, _, pipeline = rig
     git = _ScriptedGit()
     ctx = _with_budget(
         make_context(source_session=_session(git, sources={
@@ -891,7 +791,7 @@ def test_the_git_fetchs_declared_bytes_charge_the_apply_ledger_once(rig):
 
 
 def test_a_git_fetch_exhausting_the_byte_ledger_fails_the_entry(rig):
-    _, _, _, pipeline = rig
+    _, _, pipeline = rig
     git = _ScriptedGit()
     from agentclaw.community.core.bot_config_manifest.apply.budget import (
         ApplyFetchBudget,
@@ -918,7 +818,7 @@ def test_entry_subpath_composes_with_the_sources_on_the_git_road(rig):
     ``url``, ``ref`` and ``auth``, which is the drift named sources exist to
     remove. The two now compose, source's first.
     """
-    _, _, _, pipeline = rig
+    _, _, pipeline = rig
     git = _ScriptedGit()
     ctx = make_context(source_session=_session(git, sources={
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"},
@@ -933,7 +833,7 @@ def test_entry_subpath_composes_with_the_sources_on_the_git_road(rig):
 
 
 def test_a_source_with_no_subpath_takes_the_entrys_whole(rig):
-    _, _, _, pipeline = rig
+    _, _, pipeline = rig
     git = _ScriptedGit()
     ctx = make_context(source_session=_session(git, sources={
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main"},
@@ -952,7 +852,7 @@ def test_two_entries_off_one_git_source_share_a_checkout_and_a_sha(rig):
     an entry's subpath changes. If it did, the report would carry two rows for
     one declared source and the strict-mode baseline would have two answers.
     """
-    _, _, _, pipeline = rig
+    _, _, pipeline = rig
     git = _ScriptedGit()
     session = _session(git, sources={
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "kb"},
@@ -978,7 +878,7 @@ def test_a_composed_subpath_that_escapes_the_tree_is_refused(rig):
     composed value is re-checked by the schema's own predicate — not by a
     second, weaker rule here, which is how one gets through by satisfying the
     other."""
-    _, _, _, pipeline = rig
+    _, _, pipeline = rig
     ctx = make_context(source_session=_session(_ScriptedGit(), sources={
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"},
     }))
@@ -1015,7 +915,7 @@ def test_an_entry_subpath_is_not_part_of_an_object_stores_address(objects_rig):
 
 
 def test_entry_level_auth_on_an_inline_git_source_is_refused(rig):
-    _, _, _, pipeline = rig
+    _, _, pipeline = rig
     ctx = make_context(source_session=_session(_ScriptedGit()))
     with pytest.raises(EntryFetchError, match="'auth' is not supported on a git"):
         pipeline.fetch_declared(
@@ -1026,7 +926,7 @@ def test_entry_level_auth_on_an_inline_git_source_is_refused(rig):
 
 
 def test_file_bytes_files_the_credential_name_on_git_receipts(rig):
-    content, _, _, pipeline = rig
+    content, _, pipeline = rig
     ctx = make_context(apply_id="apply-1")
     pipeline.file_bytes(
         ctx, content=b"canonical-zip",
@@ -1039,7 +939,7 @@ def test_file_bytes_files_the_credential_name_on_git_receipts(rig):
 
 
 def test_the_git_road_carries_the_auth_and_the_category_limit(rig):
-    _, _, _, pipeline = rig
+    _, _, pipeline = rig
     git = _ScriptedGit()
     ctx = make_context(source_session=_session(git, sources={
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "auth": "ci-token"},

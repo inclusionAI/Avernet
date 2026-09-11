@@ -6,7 +6,8 @@ What these pin, by the work item's acceptance criteria:
   by the same ``SkillPackageValidator`` the router path uses, handed to
   ``upload_local_skill``, then direct activation — indistinguishable from a
   user's upload because it is one;
-- non-git skills are digest-pinned (validator + fetcher enforce it);
+- non-git skills are digest-pinned (the validator and the fetch
+  pipeline enforce it);
 - the package's own front-matter name must equal the entry's ``name``;
 - the area is the **active skill set**, narrowed by the Set-governed members
   (never removals, never declarable), tar.gz/subpath/unpack all land, one
@@ -36,19 +37,30 @@ from ._fakes import (
     FakeActivationService,
     FakeCapabilityReader,
     FakeCredentials,
-    FakeGuardedFetcher,
     FakeManifestContent,
     FakeSkillUploadService,
     build_skill_tgz,
     build_skill_zip,
     fetched_object,
     make_context,
+    object_session,
+    object_source,
     real_validator,
     skill_asset,
 )
-from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
+from tests.community.core.bot_config_manifest.apply._fakes import (
+    FakeObjectStore,
+    OBJECT_BUCKET,
+)
+from agentclaw.community.core.bot_config_manifest.apply.source_fetchers import (
+    object_receipt_url,
+)
 
-QC_URL = "https://content.example/skills/quality-check.zip"
+#: The object this suite's skill is declared from. A key in a bucket, because
+#: that is what a declared source names: the bare URL string these cases used
+#: to write is refused at ``PUT`` and has no road at apply.
+QC_KEY = "skills/quality-check.zip"
+QC_ADDRESS = object_receipt_url(OBJECT_BUCKET, QC_KEY)
 
 
 def _run(coro):
@@ -58,6 +70,9 @@ def _run(coro):
 def _ctx(**kwargs):
     kwargs.setdefault("engine_type", "openclaw")
     kwargs.setdefault("owner_id", "u_owner")
+    # Every declared source resolves through the apply's session, inline ones
+    # included: it is where a credential (and, on git, a checkout) comes from.
+    kwargs.setdefault("source_session", object_session())
     return make_context(**kwargs)
 
 
@@ -81,10 +96,14 @@ def skill_rig(
     packages: dict[str, bytes] | None = None,
     assets: list | None = None,
     member_ids: set[int] | None = None,
-    fetch_failures: dict[str, Exception] | None = None,
-    content_types: dict[str, str] | None = None,
+    unreachable: dict[str, str] | None = None,
 ) -> tuple:
-    """(materialiser, uploads, activation, reader, fetcher, content)."""
+    """(materialiser, uploads, activation, reader, objects, content).
+
+    ``packages`` maps an object KEY to its bytes; ``unreachable`` marks keys
+    whose reads answer ``UNAVAILABLE``, which is the object road's shape of
+    "the source is down" — the one failure ``keep_last`` is allowed to answer.
+    """
     from agentclaw.community.core.bot_config_manifest.apply.materialisers.skills import (
         SkillsMaterialiser,
     )
@@ -92,38 +111,36 @@ def skill_rig(
     uploads = FakeSkillUploadService()
     activation = FakeActivationService()
     reader = FakeCapabilityReader(assets=assets, member_ids=member_ids)
-    types = content_types or {}
-    fetcher = FakeGuardedFetcher(
-        responses={
-            url: fetched_object(
-                body, url=url, content_type=types.get(url, "application/zip")
-            )
-            for url, body in (packages or {}).items()
-        },
-        failures=fetch_failures or {},
-    )
+    objects = FakeObjectStore()
+    for key, body in (packages or {}).items():
+        objects.put(OBJECT_BUCKET, key, body)
+    for key, detail in (unreachable or {}).items():
+        objects.make_key_unavailable(OBJECT_BUCKET, key, detail)
     content = FakeManifestContent()
-    pipeline = EntryFetcher(fetcher, content, FakeCredentials(), FakeObjectStore())
+    pipeline = EntryFetcher(content, FakeCredentials(), objects)
     materialiser = SkillsMaterialiser(
         uploads, activation, reader, real_validator(), pipeline
     )
-    return materialiser, uploads, activation, reader, fetcher, content
+    return materialiser, uploads, activation, reader, objects, content
 
 
 QZ = build_skill_zip("quality-check")
 
 
-def _declared(name: str = "quality-check", url: str = QC_URL, digest: str | None = None):
-    entry = {"name": name, "source": url, "digest": digest or _digest_of(QZ)}
-    return entry
+def _declared(name: str = "quality-check", key: str = QC_KEY, digest: str | None = None):
+    return {
+        "name": name,
+        "source": object_source(key),
+        "digest": digest or _digest_of(QZ),
+    }
 
 
 # ── declarations upload and activate ────────────────────────────────────────
 
 
 def test_a_declared_skill_uploads_the_validated_package_and_activates():
-    materialiser, uploads, activation, _, fetcher, _ = skill_rig(
-        packages={QC_URL: QZ}
+    materialiser, uploads, activation, _, objects, _ = skill_rig(
+        packages={QC_KEY: QZ}
     )
     result, plan, written = _run(
         _apply(materialiser, _ctx(), [_declared()])
@@ -142,8 +159,8 @@ def test_a_declared_skill_uploads_the_validated_package_and_activates():
 
 
 def test_the_second_apply_of_an_unchanged_document_performs_no_writes():
-    materialiser, uploads, activation, reader, fetcher, content = skill_rig(
-        packages={QC_URL: QZ}
+    materialiser, uploads, activation, reader, objects, content = skill_rig(
+        packages={QC_KEY: QZ}
     )
     entries = [_declared()]
     _run(_apply(materialiser, _ctx(), entries))
@@ -158,7 +175,7 @@ def test_the_second_apply_of_an_unchanged_document_performs_no_writes():
     assert [e.outcome.value for e in second] == ["unchanged"]
     assert len(uploads.uploads) == 1  # zero further uploads
     assert activation.writes == 1  # and zero further activations
-    assert len(fetcher.requests) == 1  # only the first apply hit the network;
+    assert len(objects.calls) == 1  # only the first apply hit the network;
     # the second was answered by the platform's own copy of the pinned bytes
 
 
@@ -167,48 +184,49 @@ def test_an_inactive_same_name_skill_is_reinstated_as_created():
     ACTIVE set) does not contain it, so it is classed for creation — the
     upload service's same-name replace handles the row, the activation makes
     it active."""
-    materialiser, uploads, activation, _, _, _ = skill_rig(packages={QC_URL: QZ})
+    materialiser, uploads, activation, _, _, _ = skill_rig(packages={QC_KEY: QZ})
     result, plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
     assert [e.outcome.value for e in written] == ["created"]
     assert uploads.uploads and activation.skill_activations
 
 
 def test_one_failed_fetch_aborts_the_whole_category_no_writes():
-    other_url = "https://content.example/skills/order-lookup.zip"
+    other_key = "skills/order-lookup.zip"
     other = build_skill_zip("order-lookup")
-    materialiser, uploads, activation, _, fetcher, _ = skill_rig(
-        packages={QC_URL: QZ, other_url: other},
-        fetch_failures={other_url: FetchFailedError("source answered 404")},
+    materialiser, uploads, activation, _, objects, _ = skill_rig(
+        packages={QC_KEY: QZ, other_key: other},
+        unreachable={other_key: "the object store is unreachable"},
     )
     resolved = _run(
         materialiser.resolve(
             _ctx(),
             [
                 _declared(),
-                _declared(name="order-lookup", url=other_url, digest=_digest_of(other)),
+                _declared(name="order-lookup", key=other_key,
+                          digest=_digest_of(other)),
             ],
         )
     )
     assert not resolved.ok
     failures = {f.identity: f.reason for f in resolved.failures}
-    assert "source answered 404" in failures["order-lookup"]
+    assert "the object store is unreachable" in failures["order-lookup"]
     assert uploads.uploads == []
     assert activation.writes == 0
 
 
 def test_a_digest_that_the_source_no_longer_matches_fails_the_entry():
     stale_pin = "sha256:" + "1" * 64
-    materialiser, uploads, _, _, _, _ = skill_rig(packages={QC_URL: QZ})
+    materialiser, uploads, _, _, _, _ = skill_rig(packages={QC_KEY: QZ})
     resolved = _run(
         materialiser.resolve(_ctx(), [_declared(digest=stale_pin)])
     )
     assert not resolved.ok
-    assert "digest mismatch" in resolved.failures[0].reason
+    assert "the entry declared" in resolved.failures[0].reason
     assert uploads.uploads == []
 
 
 def test_the_packages_own_name_must_equal_the_declared_name():
-    materialiser, uploads, _, _, _, _ = skill_rig(packages={QC_URL: QZ})
+    materialiser, uploads, _, _, _, _ = skill_rig(packages={QC_KEY: QZ})
     resolved = _run(
         materialiser.resolve(_ctx(), [_declared(name="different-name")])
     )
@@ -239,8 +257,8 @@ def test_a_tar_gz_source_with_a_subpath_flattens_to_the_skill():
             ("pkg/README", b"wrapper readme the subtree must drop"),
         ]
     )
-    url = "https://content.example/skills/qc.tar.gz"
-    materialiser, uploads, activation, _, _, _ = skill_rig(packages={url: archive})
+    key = "skills/qc.tar.gz"
+    materialiser, uploads, activation, _, _, _ = skill_rig(packages={key: archive})
     result, plan, written = _run(
         _apply(
             materialiser,
@@ -248,7 +266,7 @@ def test_a_tar_gz_source_with_a_subpath_flattens_to_the_skill():
             [
                 {
                     "name": "quality-check",
-                    "source": url,
+                    "source": object_source(key),
                     "digest": _digest_of(archive),
                     "subpath": "pkg/quality-check",
                 }
@@ -263,16 +281,16 @@ def test_a_tar_gz_source_with_a_subpath_flattens_to_the_skill():
         assert ziparchive.namelist() == ["SKILL.md"]
 
 
-def test_a_declared_unpack_overrides_an_unhelpful_url():
-    url = "https://content.example/skills/get-package"
-    materialiser, uploads, _, _, _, _ = skill_rig(packages={url: QZ})
+def test_a_declared_unpack_overrides_an_unhelpful_key():
+    key = "skills/get-package"
+    materialiser, uploads, _, _, _, _ = skill_rig(packages={key: QZ})
     resolved = _run(
         materialiser.resolve(
             _ctx(),
             [
                 {
                     "name": "quality-check",
-                    "source": url,
+                    "source": object_source(key),
                     "digest": _digest_of(QZ),
                     "unpack": "zip",
                 }
@@ -283,22 +301,23 @@ def test_a_declared_unpack_overrides_an_unhelpful_url():
     assert resolved.intents[0].identity == "quality-check"
 
 
-def test_a_zip_url_is_detected_from_its_suffix_without_unpack():
-    url = "https://content.example/skills/anything.zip"
-    materialiser, _, _, _, _, _ = skill_rig(packages={url: QZ})
+def test_a_zip_key_is_detected_from_its_suffix_without_unpack():
+    key = "skills/anything.zip"
+    materialiser, _, _, _, _, _ = skill_rig(packages={key: QZ})
     resolved = _run(
-        materialiser.resolve(_ctx(), [_declared(url=url)])
+        materialiser.resolve(_ctx(), [_declared(key=key)])
     )
     assert resolved.ok
 
 
 def test_an_undetectable_archive_kind_fails_with_a_readable_reason():
-    url = "https://content.example/skills/get-package"
-    materialiser, uploads, _, _, _, _ = skill_rig(
-        packages={url: QZ}, content_types={url: "text/plain"}
-    )
+    """The object road reports no content type at all — the store client has
+    none to report — so a key whose name does not say what it holds leaves
+    nothing to detect from, and the entry is refused rather than guessed at."""
+    key = "skills/get-package"
+    materialiser, uploads, _, _, _, _ = skill_rig(packages={key: QZ})
     resolved = _run(
-        materialiser.resolve(_ctx(), [_declared(url=url)])
+        materialiser.resolve(_ctx(), [_declared(key=key)])
     )
     assert not resolved.ok
     assert "unpack" in resolved.failures[0].reason
@@ -307,15 +326,15 @@ def test_an_undetectable_archive_kind_fails_with_a_readable_reason():
 
 def test_a_subpath_that_selects_nothing_fails():
     archive = build_skill_tgz([("other/SKILL.md", _manifest_bytes("other"))])
-    url = "https://content.example/skills/qc.tar.gz"
-    materialiser, _, _, _, _, _ = skill_rig(packages={url: archive})
+    key = "skills/qc.tar.gz"
+    materialiser, _, _, _, _, _ = skill_rig(packages={key: archive})
     resolved = _run(
         materialiser.resolve(
             _ctx(),
             [
                 {
                     "name": "quality-check",
-                    "source": url,
+                    "source": object_source(key),
                     "digest": _digest_of(archive),
                     "subpath": "pkg/quality-check",
                 }
@@ -331,10 +350,10 @@ def test_an_oversized_package_fails_at_resolve_not_mid_write():
         "quality-check",
         extra=[("big.bin", b"x" * (10 * 1024 * 1024 + 1))],
     )
-    url = "https://content.example/skills/qc.zip"
-    materialiser, uploads, activation, _, _, _ = skill_rig(packages={url: huge})
+    key = "skills/qc.zip"
+    materialiser, uploads, activation, _, _, _ = skill_rig(packages={key: huge})
     resolved = _run(
-        materialiser.resolve(_ctx(), [_declared(url=url, digest=_digest_of(huge))])
+        materialiser.resolve(_ctx(), [_declared(key=key, digest=_digest_of(huge))])
     )
     assert not resolved.ok  # the package limit is the upload's, asked up front
     assert uploads.uploads == []
@@ -376,7 +395,7 @@ def test_a_declared_name_matching_a_set_governed_skill_fails_at_resolve():
     materialiser, uploads, activation, reader, _, _ = skill_rig(
         assets=[skill_asset(12, "quality-check")],
         member_ids={12},
-        packages={QC_URL: QZ},
+        packages={QC_KEY: QZ},
     )
     resolved = _run(materialiser.resolve(_ctx(), [_declared()]))
     assert not resolved.ok
@@ -391,7 +410,7 @@ def test_a_declared_name_matching_a_non_local_active_skill_fails():
     # before any bytes spend, because install would refuse it mid-write.
     materialiser, uploads, _, _, _, _ = skill_rig(
         assets=[skill_asset(9, "quality-check", git_path="git://default/x")],
-        packages={QC_URL: QZ},
+        packages={QC_KEY: QZ},
     )
     resolved = _run(materialiser.resolve(_ctx(), [_declared()]))
     assert not resolved.ok
@@ -408,7 +427,7 @@ def test_undeclared_members_of_the_area_are_removed_by_name():
             skill_asset(11, "some-other-skill"),
             skill_asset(12, "quality-check"),
         ],
-        packages={QC_URL: QZ},
+        packages={QC_KEY: QZ},
     )
     _, plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
     assert [e.outcome.value for e in written] == ["updated"]
@@ -463,15 +482,17 @@ def test_an_unpinned_skill_source_defaults_to_keep_last():
     """Omitted ``on_fetch_failure`` means ``keep_last`` (schema §2): a source
     that has since died still delivers the platform's own copy, and the
     entry materialises from it."""
-    materialiser, uploads, activation, reader, fetcher, content = skill_rig(
-        packages={QC_URL: QZ}
+    materialiser, uploads, activation, reader, objects, content = skill_rig(
+        packages={QC_KEY: QZ}
     )
     # First apply with an unpinned entry (no digest declared on identity-style
     # freedom is not allowed for skills — the validator pins URL sources — so
     # pin it and file the receipt, then kill the source).
     entries = [_declared()]
     _run(_apply(materialiser, _ctx(), entries))
-    fetcher.failures[QC_URL] = FetchFailedError("source transport failed")
+    objects.make_key_unavailable(
+        OBJECT_BUCKET, QC_KEY, "the object store is unreachable"
+    )
     qc_id = uploads.rows["quality-check"]["id"]
     reader.assets = (skill_asset(qc_id, "quality-check"),)
 
@@ -481,8 +502,8 @@ def test_an_unpinned_skill_source_defaults_to_keep_last():
 
 
 def test_the_receipts_link_the_apply_and_the_entry():
-    materialiser, uploads, activation, reader, fetcher, content = skill_rig(
-        packages={QC_URL: QZ}
+    materialiser, uploads, activation, reader, objects, content = skill_rig(
+        packages={QC_KEY: QZ}
     )
     _run(_apply(materialiser, _ctx(apply_id="apply-7"), [_declared()]))
     call = content.store_calls[0]
@@ -500,8 +521,8 @@ def test_a_dry_run_receipt_is_not_installation_evidence():
     UNCHANGED here would mean D2 silently never lands while the report says
     SUCCEEDED."""
     old_zip = build_skill_zip("quality-check", extra=[("v1.txt", b"old")])
-    materialiser, uploads, activation, reader, fetcher, content = skill_rig(
-        packages={QC_URL: QZ}
+    materialiser, uploads, activation, reader, objects, content = skill_rig(
+        packages={QC_KEY: QZ}
     )
     # World: installed and active is D1 (the OLD package).
     uploads.rows["quality-check"] = {"id": 12, "name": "quality-check"}
@@ -509,9 +530,9 @@ def test_a_dry_run_receipt_is_not_installation_evidence():
     reader.assets = (skill_asset(12, "quality-check"),)
     # The dry run's fetch of D2 filed its receipt…
     content.store(
-        fetched_object(QZ, url=QC_URL, content_type="application/zip"),
+        fetched_object(QZ, url=QC_ADDRESS, content_type=None),
         scope=None,
-        source_url=QC_URL,
+        source_url=QC_ADDRESS,
     )
 
     _, plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
@@ -528,14 +549,14 @@ def test_a_receipt_left_behind_by_an_aborted_write_is_not_evidence():
     """Apply #1's resolve filed this entry's receipt, its write stage then
     aborted (the category's other half failed): apply #2 must still WRITE,
     not read the leftover receipt as 'already installed'."""
-    materialiser, uploads, activation, reader, fetcher, content = skill_rig(
-        packages={QC_URL: QZ}
+    materialiser, uploads, activation, reader, objects, content = skill_rig(
+        packages={QC_KEY: QZ}
     )
     # The leftover receipt from the aborted apply…
     content.store(
-        fetched_object(QZ, url=QC_URL, content_type="application/zip"),
+        fetched_object(QZ, url=QC_ADDRESS, content_type=None),
         scope=None,
-        source_url=QC_URL,
+        source_url=QC_ADDRESS,
     )
     # …an active name (installed with the *older* package, because abort #1
     # never reached this entry's write)…
@@ -553,8 +574,8 @@ def test_an_unreadable_installed_package_is_treated_as_unknown():
     """Unreadable ≠ equal: a name whose installed package cannot be read back
     (or holds bytes that no longer form a package) must be classed for a
     full write, never guessed into UNCHANGED."""
-    materialiser, uploads, activation, reader, fetcher, content = skill_rig(
-        packages={QC_URL: QZ}
+    materialiser, uploads, activation, reader, objects, content = skill_rig(
+        packages={QC_KEY: QZ}
     )
     uploads.rows["quality-check"] = {"id": 12, "name": "quality-check"}
     # Installed bytes that are NOT this package: digest differs on purpose —
@@ -574,8 +595,8 @@ def test_a_deactivation_conflict_mid_write_reports_partially_written():
     partially-written semantics rather than pretending the area is whole.
     The engine's write-raise path classifies it; this drives it through the
     materialiser with W2's conflict shape the fake models."""
-    materialiser, uploads, activation, reader, fetcher, content = skill_rig(
-        packages={QC_URL: QZ},
+    materialiser, uploads, activation, reader, objects, content = skill_rig(
+        packages={QC_KEY: QZ},
     )
     # The area holds one direct skill the document does not declare…
     reader.assets = (skill_asset(31, "stale-skill"),)

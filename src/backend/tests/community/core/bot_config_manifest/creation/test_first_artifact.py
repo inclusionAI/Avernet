@@ -10,6 +10,7 @@ real one over the index — and handing it to ``create_teclaw_bot``.
 """
 from __future__ import annotations
 
+import hashlib
 from contextlib import contextmanager
 from typing import Any
 from unittest.mock import MagicMock
@@ -69,12 +70,12 @@ from ..apply._fakes import (
     FakeActivationService,
     FakeCredentials,
     FakeGitClient,
-    FakeGuardedFetcher,
     FakeManifestContent,
     FakeMcpAuth,
+    FakeObjectStore,
     FakeStartupScriptService,
+    OBJECT_BUCKET,
     build_skill_zip,
-    fetched_object,
     real_validator,
 )
 from ..managed_files._fakes import FakeObjectStorage
@@ -85,9 +86,15 @@ from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStor
 _OWNER = "u_owner"
 _BOT = "b_first"
 _ENTITY = _OWNER
-_QC_URL = "https://example.test/skills/quality-check.zip"
+_QC_KEY = "skills/quality-check.zip"
 _QZ = build_skill_zip("quality-check", extra=[("scripts/run.sh", b"echo ok\n")])
+_QC_DIGEST = "sha256:" + hashlib.sha256(_QZ).hexdigest()
 _DOCUMENT = f"""schema_version: 1
+sources:
+  packages:
+    protocol: oss
+    bucket: {OBJECT_BUCKET}
+    auth: oss-cred
 manifest:
   identity:
     - type: RULES.md
@@ -97,7 +104,9 @@ manifest:
       content: 'Q: ?'
   skills:
     - name: quality-check
-      source: {_QC_URL}
+      from: packages
+      key: {_QC_KEY}
+      digest: {_QC_DIGEST}
 """
 _BASE = "teclaw/dev/bolt_data"
 _REF_ROOT = f"staff_{_OWNER}/{_BOT}_manifest/teclaw"
@@ -183,12 +192,11 @@ def _build(db):
     scripts = FakeStartupScriptService()
     validator = real_validator()
 
+    objects = FakeObjectStore()
+    objects.put(OBJECT_BUCKET, _QC_KEY, _QZ)
+
     def fetcher():
-        return EntryFetcher(
-            FakeGuardedFetcher(responses={_QC_URL: fetched_object(_QZ, url=_QC_URL, content_type="application/zip")}),
-            FakeManifestContent(),
-            FakeCredentials(),
-        FakeObjectStore(),)
+        return EntryFetcher(FakeManifestContent(), FakeCredentials(), objects)
 
     def platform_ports() -> MaterialiserPorts:
         return MaterialiserPorts(

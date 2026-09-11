@@ -1,22 +1,17 @@
 """One entry's fetch, from a declared source to materialisable bytes.
 
-The second half of ``resolve`` for every fetch-consuming category: substitute
-``${BOT_*}``, consult the platform's own copy before the network, fetch through
-the guarded transport under a named credential, and file the result with the
-content store so delivery and audit share one copy.
+The second half of ``resolve`` for every fetch-consuming category: resolve the
+entry's declared source, consult the platform's own copy before the network,
+read it through the protocol's own transport under a named credential, and file
+the result with the content store so delivery and audit share one copy.
 
-**The four entry points**, and which is which:
-
-``fetch(ctx, *, source_url=…)``
-    Called by :meth:`EntryFetcher.fetch_declared` on the legacy bare-string
-    ``source:`` road, and by nothing else in this package. Its ``source_url``
-    is a plain ``https://…`` URL, never ``oss://`` and never ``git+…``. Files
-    a receipt. Charges the budget on a real fetch, not on a store hit.
+**The three entry points**, and which is which:
 
 ``fetch_declared(ctx, *, entry=…)``
     The front door every fetching materialiser calls. Takes no URL at all: it
-    reads the entry, resolves the declaration and dispatches. Files a receipt
-    and charges the budget through whichever road it picked.
+    reads the entry, resolves the declaration and dispatches on its
+    ``protocol``. Files a receipt and charges the budget through whichever road
+    it picked.
 
 ``acquire_object(ctx, *, target=…, key=…)``
     Called by ``source_fetchers.ObjectStoreFetcher``. Takes an
@@ -25,29 +20,26 @@ content store so delivery and audit share one copy.
     a real read.
 
 ``file_bytes(ctx, *, content=…, source_url=…)``
-    Called by the ``resources`` and ``skills`` materialisers for the git
-    road's canonical bytes. Its ``source_url`` is the caller's own receipt
-    identity, normally a ``git+…`` one. Files a receipt and always charges,
-    because the caller is declaring what the entry cost.
+    Called by the ``resources``, ``skills`` and ``cli_tools`` materialisers for
+    the git road's canonical bytes. Its ``source_url`` is the caller's own
+    receipt identity, normally a ``git+…`` one. Files a receipt and always
+    charges, because the caller is declaring what the entry cost.
 
-**Three ``source_url`` shapes exist**, and which method sees which matters::
-
-    "https://example.com/tools/qc-v2.zip"
-        the inline bare-string source, and the ONLY shape ``fetch`` ever
-        takes as its ``source_url=`` argument. Never ``oss://``, never
-        ``git+…``.
+**Two ``source_url`` shapes exist**, and both are receipt identities rather
+than fetchable URLs — the address bytes are *filed* under, never an address
+this module dials::
 
     "oss://team-artifacts/tools/qc/v2.tgz"
         built by ``source_fetchers.object_receipt_url`` inside
-        ``acquire_object``. A receipt identity, not a fetchable URL: the
-        endpoint is deliberately absent.
+        ``acquire_object``. The endpoint is deliberately absent: it comes off
+        the credential row, not off the document.
 
     "git+https://code.example.com/team/content.git@<40-hex sha>:kb/faq.csv"
-        built by ``fetch/git_source.git_receipt_url``. Also a receipt
-        identity. Ends in a bare colon when there is no subpath.
+        built by ``fetch/git_source.git_receipt_url``. Keyed on the resolved
+        sha, and ends in a bare colon when there is no subpath.
 
-``FetchedEntry.source_url`` and every receipt ``source_url`` can be any of the
-three, because they are written by whichever road ran.
+``FetchedEntry.source_url`` and every receipt ``source_url`` is one of the two,
+because they are written by whichever road ran.
 
 Fetch lives here **and only here** — the registry's contract says ``resolve``
 is where a category's failures are collected before anything is written, and a
@@ -59,49 +51,50 @@ platform's own record of what a bot was served, true whether or not the apply
 proceeds).
 
 Pinned vs unpinned is a declared-digest question, and it decides the
-store-first vs fetch-first policy:
+store-first vs read-first policy:
 
 * **pinned** (the entry declares a ``digest``) — a receipt for this bot and
-  source URL *matching the declaration* is the bytes, by content addressing:
-  no network is consulted to acquire what the platform already holds. A
-  source that has since moved is irrelevant — the declaration asks for the
-  pinned bytes, and a re-fetch of them would only fail the pin.
+  source address *matching the declaration* is the bytes, by content
+  addressing: no network is consulted to acquire what the platform already
+  holds. A source that has since moved is irrelevant — the declaration asks
+  for the pinned bytes, and a re-read of them would only fail the pin.
 * **unpinned** — the entry wants whatever is there *now*; every apply
-  re-fetches so it converges to the source, and ``keep_last`` exists for the
-  day that fetch fails.
+  re-reads so it converges to the source, and ``keep_last`` exists for the
+  day that read fails.
 
-``keep_last`` (on a real fetch failure) reads the latest receipt: bytes that
+``keep_last`` (on a real read failure) reads the latest receipt: bytes that
 are entitled to be reused when the declaration pinned nothing, and bytes that
 must match the pin when it did — a receipt that disagrees with a declared
 digest is not "last", it is stale, and supplying it would silently pin bytes
 the declaration never named.
 
-**Which failures may fall back is fixed by class, and the ruling is:**
-``FetchFailedError`` — the wire was reached and the source failed — may
-fall back; ``FetchRefusedError`` and credential errors may not. A refusal
-happens *before* any wire contact (non-public address, refused scheme, hop
-budget, declared-digest vocabulary): it is a statement about the document's
-configuration, while keep_last exists for statements about the *source's
-availability*. Masking a refusal with stored bytes would answer SUCCEEDED
-to a document the platform just refused on policy grounds; the same ruling
-keeps a deleted credential name loud — configuration drift is for the
-author to fix, not for the stored copy to absorb.
+**Which failures may fall back is fixed by what they are a statement about,
+and the ruling is:** the source was reachable and could not serve — an
+unreachable object store, a git fetch that failed — may fall back; a refusal
+may not. A refusal (an object the document names that is not there, a
+credential the store will not accept, an object past the category's cap) is a
+statement about the document's or the credential's *configuration*, while
+keep_last exists for statements about the source's *availability*. Masking a
+refusal with stored bytes would answer SUCCEEDED to a document the platform
+just refused; the same ruling keeps a deleted credential name loud —
+configuration drift is for the author to fix, not for the stored copy to
+absorb.
 
 **Every interaction with the content store — lookup, both reads, the
-re-file after a fetch — is translated here** into :class:`EntryFetchError`:
+re-file after a read — is translated here** into :class:`EntryFetchError`:
 a store-side fault answers as that ENTRY's failure with the store's own
 message, never as an unrelated exception escaping resolve to abort the
 whole category under a wrapped surprise. The one leniency: a pinned
-store-hit whose blob has gone missing falls through to the guarded fetch —
-the pin is byte-provable, so a re-fetch re-filed with the store heals the
+store-hit whose blob has gone missing falls through to the source —
+the pin is byte-provable, so a re-read re-filed with the store heals the
 address and nobody upstream learns anything happened.
 
-W7 adds the declared-source front door, :meth:`fetch_declared`: the ``from``
+W7 is the declared-source front door, :meth:`fetch_declared`: the ``from``
 and inline-source roads resolve through the apply's source session, and the git
 road returns a :class:`GitEntrySource` — the tree is the entry's to
 interpret (a file? a package?) — while its canonical, entry-level bytes are
 filed with the store via :meth:`file_bytes`, so audit and ``keep_last`` read
-the same receipts the URL roads always have.
+the same receipts the object road files on its way past.
 
 **Dispatch is on the declared protocol**, read through the one parser the
 ``PUT`` validator also uses. It used to be on which key a source mapping
@@ -109,6 +102,11 @@ happened to carry, which meant this module and the validator each derived the
 protocol their own way — and the digest rule derived it from a third place
 again, against the source *form*, which is how ``from:`` a git source came to
 be charged the object-store pin (D5).
+
+A ``source:`` that is a plain string used to be a fourth road — an HTTPS GET
+performed here. It is gone: the schema refuses that spelling at ``PUT``, the
+management APIs take the content itself, and every source a document can
+declare is now an object with a ``protocol``.
 """
 from __future__ import annotations
 
@@ -118,7 +116,6 @@ from typing import TYPE_CHECKING, Any, Mapping, Optional, Protocol, runtime_chec
 
 
 from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
-    BlobDelivery,
     EntryDelivery,
     EntryFetchError,
     FetchedEntry,
@@ -128,7 +125,6 @@ from agentclaw.community.core.bot_config_manifest.apply.source_fetchers import (
     DeclaredFetch,
     build_fetchers,
     object_receipt_url,
-    substitute,
 )
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
@@ -141,12 +137,6 @@ from agentclaw.community.core.bot_config_manifest.content.errors import (
 from agentclaw.community.core.bot_config_manifest.content.models import (
     ContentScope,
 )
-from agentclaw.community.core.bot_config_manifest.credentials.errors import (
-    CredentialError,
-)
-from agentclaw.community.core.bot_config_manifest.credentials.policy import (
-    PrefixAuthorizationError,
-)
 from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
     GitSourceSpec,
     git_receipt_url,
@@ -156,11 +146,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.limits import (
     FetchCategory,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
-    FetchFailedError,
-    FetchRefusedError,
     FetchedObject,
-    GuardedFetcher,
-    FetchRequest,
 )
 from agentclaw.community.core.bot_config_manifest.schema.sources import (
     parse_source,
@@ -263,12 +249,10 @@ class EntryFetcher:
 
     def __init__(
         self,
-        fetcher: GuardedFetcher,
         content: ManifestContentServiceProtocol,
         credentials: SourceCredentialServiceProtocol,
         objects: AliyunObjectStore,
     ) -> None:
-        self._fetcher = fetcher
         self._content = content
         self._credentials = credentials
         # Required, not defaulted. It was ``Optional[...] = None`` so that
@@ -283,203 +267,6 @@ class EntryFetcher:
         # same collaborators, so every road files receipts under one policy
         # and W11's lineage cannot answer differently by protocol.
         self._fetchers = build_fetchers(self)
-
-    def fetch(
-        self,
-        ctx: FetchContext,
-        *,
-        source_url: str,
-        digest: Optional[str] = None,
-        auth: Optional[str] = None,
-        category: str,
-        keep_last: bool = False,
-        entry_identity: Optional[str] = None,
-    ) -> FetchedEntry:
-        """Acquire one entry's bytes over HTTPS. Raises :class:`EntryFetchError`.
-
-        ``source_url`` is a plain ``https://…`` URL — the legacy bare-string
-        ``source:`` spelling, which the schema now refuses at ``PUT`` but which
-        stored documents still carry. It is never ``oss://`` and never
-        ``git+…``; those roads have their own entry points. ``${BOT_*}`` is
-        substituted here, so the argument may still contain placeholders::
-
-            fetch(ctx,
-                  source_url="https://cdn.example.com/${BOT_ENV}/kb.zip",
-                  digest="sha256:9f86d081...",   # or None when unpinned
-                  auth="cdn-prod",               # a credential NAME, or None
-                  category="resources_file",
-                  keep_last=True,
-                  entry_identity="data/faq.csv")
-            # -> FetchedEntry(..., source_url="https://cdn.example.com/prod/kb.zip")
-
-        Substitution happens **before** the fetch and therefore
-        before prefix authorization: the W3 policy re-authorises every hop
-        against the URL the request will actually name, so a substituted URL
-        cannot steer the request outside its credential's prefixes (or inside
-        them, unseen).
-
-        ``category`` and ``entry_identity`` are REQUIRED keyword-only
-        (no defaults): the W11 linkage columns exist so a receipt can name
-        the fetch's apply, category and entry — a default here would let a
-        future call site silently file unattributed receipts, and the
-        linkage's whole point is that there are none. ``entry_identity``
-        may still be ``None`` (the fetch pipeline genuinely does not know
-        on keep_last reuse of a hand-driven fetch), but a caller must say
-        so explicitly rather than by omission.
-        """
-        expired = ctx.budget.expired() if ctx.budget is not None else None
-        if expired is not None:
-            # Checked BEFORE the network: a budget-exhausted apply must end
-            # in bounded time, because its apply lock is held for its whole
-            # duration and the stale-lock reaper is TTL-based — the audit's
-            # finding was exactly a legitimate apply outrunning the TTL and
-            # the reaper handing a live apply's lock to a second one.
-            raise EntryFetchError(expired)
-
-        target = substitute(ctx, source_url)
-        scope = scope_of(ctx)
-        try:
-            receipt = self._content.latest_receipt(scope, source_url=target)
-        except (ContentStoreError, ContentStoreFault) as exc:
-            # Even the lookup is the entry's own failure with the store's own
-            # message — the alternative is a raw exception escaping resolve,
-            # which the orchestrator answers by aborting the WHOLE category
-            # under a wrapped message nobody can act on.
-            raise EntryFetchError(str(exc)) from exc
-
-        if digest is not None and receipt is not None and receipt.digest == digest:
-            # Pinned and in the platform's copy: content addressing makes the
-            # stored bytes *the* declared bytes. Serving them is not a cache
-            # nicety — a re-fetch of a pin can only succeed by redownloading
-            # the same bytes, or fail loudly, so the store is the strictly
-            # more available source of the same truth.
-            try:
-                return FetchedEntry(
-                    content=self._content.read(digest),
-                    digest=digest,
-                    from_store=True,
-                    content_type=receipt.content_type,
-                    source_url=target,
-                )
-            except ContentMissingError:
-                # The platform's copy of the pinned bytes is gone. Fall
-                # THROUGH to the guarded fetch: the pin is byte-provable, so
-                # the fetch re-acquires exactly these bytes and the re-file
-                # below heals the address — a self-repairing cache miss, not
-                # a caller-visible failure.
-                logger.warning(
-                    "[manifest.fetch] the pinned blob is missing; refetching "
-                    "to heal the platform's copy, digest=%s",
-                    digest,
-                )
-            except (ContentStoreError, ContentStoreFault) as exc:
-                # Present but unreadable — e.g. corrupted on disk. Not
-                # healable by re-fetching (the dedup write skips same-size
-                # files), so it stays what it is: platform-side damage,
-                # failed loudly on this entry with its reason.
-                raise EntryFetchError(
-                    "the platform's copy of the pinned content could not be "
-                    f"read: {exc}"
-                ) from exc
-
-        try:
-            fetched = self._fetch(ctx, target=target, digest=digest, auth=auth,
-                                  category=category)
-        except FetchRefusedError as exc:
-            # A refusal never left the wire — see the module docstring's
-            # ruling. Policy and configuration are not availability, and
-            # keep_last must not mask them with stored bytes: a document the
-            # platform refuses on policy grounds answers today's failure,
-            # not a silent SUCCEEDED out of the store.
-            raise EntryFetchError(str(exc)) from exc
-        except FetchFailedError as exc:
-            if (
-                keep_last
-                and receipt is not None
-                and (digest is None or receipt.digest == digest)
-            ):
-                logger.info(
-                    "[manifest.fetch] keep_last reused the platform copy, "
-                    "url_host=%s, digest=%s",
-                    target.rpartition("//")[2].partition("/")[0],
-                    receipt.digest,
-                )
-                try:
-                    return FetchedEntry(
-                        content=self._content.read(receipt.digest),
-                        digest=receipt.digest,
-                        from_store=True,
-                        content_type=receipt.content_type,
-                        source_url=target,
-                        # Visible in the report, not only in the log: the
-                        # source was tried and failed, and the stored bytes
-                        # stood in. The receipt's agreement with the pin
-                        # (checked above) is what makes standing in
-                        # legitimate; the reason is what makes it honest.
-                        fallback_reason=(
-                            "delivered from the platform's stored copy "
-                            "(keep_last): the source fetch failed — %s" % exc
-                        ),
-                    )
-                except (ContentStoreError, ContentStoreFault) as read_exc:
-                    # Both halves, named: why the source was tried, and why
-                    # the fallback could not be read either — dropping
-                    # either half would leave the caller fixing the wrong
-                    # thing.
-                    raise EntryFetchError(
-                        f"{exc}; the keep_last fallback copy could not be "
-                        f"read: {read_exc}"
-                    ) from read_exc
-            raise EntryFetchError(str(exc)) from exc
-        except CredentialError as exc:
-            # A deleted or unknown credential name is configuration drift —
-            # the same ruling as a policy refusal: loud, for the author to
-            # fix, not absorbed by the stored copy.
-            raise EntryFetchError(str(exc)) from exc
-        except PrefixAuthorizationError as exc:
-            # Raised per hop by the W3 policy (the initial target and every
-            # redirect): the substituted URL, or a redirect, stepped outside
-            # the credential's authorized prefixes. It is a refusal with a
-            # report-safe reason (W3 names the credential, never the value)
-            # — the entry fails, exactly like a refused address.
-            raise EntryFetchError(str(exc)) from exc
-
-        try:
-            self._content.store(
-                fetched,
-                scope=scope,
-                source_url=target,
-                credential_name=auth,
-                modifier=ctx.actor_id,
-                apply_id=ctx.apply_id,
-                category=category,
-                entry_identity=entry_identity,
-            )
-        except (ContentStoreError, ContentStoreFault) as exc:
-            # The bytes were fetched and verified but could not be filed —
-            # the reachable shape: a redirect destination whose sanitized
-            # form exceeds the provenance column, something admission could
-            # not see. THIS entry's failure, with the store's message (which
-            # never echoes the URL) — not the category's abort.
-            raise EntryFetchError(
-                "the fetched bytes could not be filed with the platform's "
-                f"store: {exc}"
-            ) from exc
-        if ctx.budget is not None:
-            # Network bytes only: a store-hit answers a read, not a fetch,
-            # which is why the fast path is free.
-            ctx.budget.charge(fetched.size_bytes)
-        return FetchedEntry(
-            content=fetched.bytes,
-            digest=fetched.sha256,
-            from_store=False,
-            source_url=target,
-            # The object's own content type is what the source served; the
-            # receipt's is the width-checked column copy of the same. Either
-            # may be None, and the caller's archive detection treats that as
-            # "the source did not say".
-            content_type=fetched.content_type,
-        )
 
     def fetch_declared(
         self,
@@ -504,10 +291,6 @@ class EntryFetcher:
                                       "key": "qc/v2.tgz"}}
                 # an inline declaration. Needs a source session.
 
-            {"path": "data/kb.zip", "source": "https://example.com/kb.zip"}
-                # the legacy bare string: straight to ``fetch``, no session
-                # needed.
-
         ``category`` is a :class:`FetchCategory` value as a string, e.g.
         ``"resources_file"``; it is coerced to the enum here, so a misspelling
         is a loud ``ValueError`` at the front door rather than a quiet fall
@@ -524,40 +307,40 @@ class EntryFetcher:
         what keeps the roads from drifting — two fetchers each deciding what
         ``keep_last`` means would both look correct and disagree.
 
-        One road never reaches a fetcher: a bare-string ``source`` is a URL
-        with no declaration to parse, so it goes straight to :meth:`fetch`.
-        The schema now **refuses** that spelling at ``PUT``, so no new document
-        can take it. It survives here for the documents already stored under
-        the old grammar, which an apply still has to be able to read; delete it
-        only once those are known to be gone.
+        **Every road goes through a fetcher**, because every declarable source
+        is an object with a ``protocol``. A ``source:`` that is a plain string
+        is not one: it names no protocol, so there is nothing to dispatch on
+        and it is refused here with the declaration form it should have taken.
+        The schema refuses that spelling at ``PUT`` too, so only a document
+        stored under the old grammar can still reach this refusal.
         """
         expired = ctx.budget.expired() if ctx.budget is not None else None
         if expired is not None:
             raise EntryFetchError(expired)
 
         # The entry's own inline ``source:`` — the alternative to naming a
-        # declared one with ``from:``. Three shapes reach here, and the type
-        # is the dispatch::
+        # declared one with ``from:``. One shape is a declaration::
         #
         #     source: {protocol: git, url: ..., ref: v1.2.0}   # Mapping
         #     source: {protocol: oss, bucket: b, key: k}       # Mapping
-        #     source: "https://example.com/x.zip"              # str, legacy
         #
-        # ``None`` when the entry used ``from:`` or inline ``content:``.
+        # ``None`` when the entry used ``from:`` or inline ``content:``, and
+        # anything else — a plain string most of all — is refused below.
         inline = entry.get("source")
-        # Only the roads that read the session require one: a ``from`` name
-        # is looked up in ``session.sources`` and a git road checks out
-        # through it. The inline-URL road never touches it, and refusing it
-        # over a missing session would break the URL-only applies (and
-        # their rigs) that W5 shipped — the message says who it is for.
+        # Both roads that name a source read the session: a ``from`` name is
+        # looked up in ``session.sources``, and a declaration's own fetcher
+        # resolves its credential (and, on git, its checkout) through it. The
+        # condition is therefore "the entry declares a source at all"; an entry
+        # that declares none fails on its shape below rather than on the
+        # session, which is the failure its author can act on.
         needs_session = isinstance(entry.get("from"), str) or isinstance(
             inline, Mapping
         )
         session = ctx.source_session
         if needs_session and session is None:
             raise EntryFetchError(
-                "this apply carries no source session: a 'from' or git "
-                "source needs one (the apply service builds it per apply)"
+                "this apply carries no source session: a declared source "
+                "needs one (the apply service builds it per apply)"
             )
 
         keep_last = entry.get("on_fetch_failure", "keep_last") == "keep_last"
@@ -572,23 +355,13 @@ class EntryFetcher:
                     f"'from' names source {name!r}, which is not declared "
                     "under 'sources'"
                 )
-        elif isinstance(inline, str):
-            return BlobDelivery(
-                self.fetch(
-                    ctx,
-                    source_url=inline,
-                    digest=entry.get("digest"),
-                    auth=entry.get("auth"),
-                    category=category,
-                    keep_last=keep_last,
-                    entry_identity=entry_identity,
-                )
-            )
         elif isinstance(inline, Mapping):
             raw = inline
         else:
             raise EntryFetchError(
-                "an entry must name one of 'from', 'source' or 'content'"
+                "an entry must name one of 'from', 'source' or 'content': "
+                "'source' must be a declaration object with a 'protocol' "
+                "(git or oss), and a bare URL is not accepted"
             )
         assert raw is not None
 
@@ -715,15 +488,15 @@ class EntryFetcher:
         ``content_type`` is always ``None`` on this road: the store client
         reports none.
 
-        The same shape :meth:`fetch` has on the URL road — pinned fast path,
-        acquire, ``keep_last``, file — with the transport swapped and four of
-        the guarded fetcher's six protections gone *because they have nothing
-        left to guard*: there is no tenant-supplied URL to shape-check, no
-        host to resolve and pin, and no redirect to re-validate, since the
-        endpoint comes off the credential row and the store client owns the
-        wire. The two that survive are the two that were never about the URL:
-        the byte cap (enforced inside the client, while streaming) and the
-        content address computed here.
+        The shape the module docstring's policy describes — pinned fast path,
+        acquire, ``keep_last``, file — over the object store's transport, where
+        four of the guarded fetcher's six protections are gone *because they
+        have nothing left to guard*: there is no tenant-supplied URL to
+        shape-check, no host to resolve and pin, and no redirect to
+        re-validate, since the endpoint comes off the credential row and the
+        store client owns the wire. The two that survive are the two that were
+        never about a URL: the byte cap (enforced inside the client, while
+        streaming) and the content address computed here.
         """
         expired = ctx.budget.expired() if ctx.budget is not None else None
         if expired is not None:
@@ -739,7 +512,7 @@ class EntryFetcher:
         if digest is not None and receipt is not None and receipt.digest == digest:
             # Content addressing makes the stored bytes *the* declared bytes,
             # so the store is the strictly more available source of the same
-            # truth — the identical ruling the URL road records.
+            # truth — the ruling the module docstring records.
             try:
                 return FetchedEntry(
                     content=self._content.read(digest),
@@ -866,9 +639,9 @@ class EntryFetcher:
             # -> "sha256:2c26b46b68ffc68ff99b453c1d30413413422d70..."
 
         ``credential_name`` threads the acquisition's auth into the W11
-        lineage exactly as the URL road's store call does, so a git-sourced
+        lineage exactly as the object road's store call does, so a git-sourced
         receipt answers "which named credential distributed this content"
-        the same way a URL-sourced one answers it.
+        the same way an object-sourced one answers it.
 
         Returns the content digest. Raises :class:`EntryFetchError` on a
         store fault; the charge against the apply budget keeps the ledger
@@ -896,32 +669,6 @@ class EntryFetcher:
             ctx.budget.charge(len(content))
         return digest
 
-    def _fetch(
-        self,
-        ctx: FetchContext,
-        *,
-        target: str,
-        digest: Optional[str],
-        auth: Optional[str],
-        category: str,
-    ) -> FetchedObject:
-        """One guarded request, carrying a named credential if one is declared.
-
-        The binding object satisfies both of the fetcher's seams — headers to
-        present, and per-hop re-authorization — which is W3's composition: the
-        same binding refreshes from the stored row on every hop, so rotation
-        lands on the very next fetch with no signal needed.
-        """
-        binding = self._credentials.binding(name=auth) if auth else None
-        return self._fetcher.fetch(
-            FetchRequest(
-                url=target,
-                expected_digest=digest,
-                category=category,
-                injector=binding,
-                policy=binding,
-            )
-        )
 
 
 def declared_protocol(
@@ -933,7 +680,6 @@ def declared_protocol(
     ==============================================  ====================
     ``entry``                                       Answer
     ==============================================  ====================
-    ``{"source": "https://example.com/kb.zip"}``    ``SourceKind.OSS``
     ``{"source": {"protocol": "oss", "bucket":      ``SourceKind.OSS``
     "b", "key": "k", "auth": "a"}}``
     ``{"source": {"protocol": "git", "url":         ``SourceKind.GIT``
@@ -944,13 +690,14 @@ def declared_protocol(
     ``{"source": {"protocol": "oss", "bucket":      ``None``
     "b"}}`` — incomplete; ``oss`` requires
     ``auth``, so it does not parse                  
+    ``{"source": "https://example.com/kb.zip"}``    ``None``
     ``{"content": "inline text"}``                  ``None``
     ==============================================  ====================
 
-    A bare-string ``source`` answers ``OSS`` because that legacy road is served
-    by the object-store side of the pipeline, even though it fetches over
-    HTTPS. Anything that does not parse cleanly answers ``None``, which is why
-    an incomplete declaration reads the same as an absent one here.
+    Anything that is not a declaration answers ``None`` — an incomplete one, a
+    bare URL, an absent one — which is exactly what the callers below want:
+    ``None`` means "cannot say from the declaration alone", and the fetch is
+    then the thing that raises the real error with the real message.
 
     Called by: ``materialisers/resources``, which validates an archive's
     ``unpack`` before spending a fetch that a missing one guarantees to waste,
@@ -958,14 +705,9 @@ def declared_protocol(
     applies.
 
     Read through the same parser the ``PUT`` validator and ``fetch_declared``
-    use, so a fourth derivation cannot appear. ``None`` means "cannot say from
-    the declaration alone"; the caller then falls through to the fetch, which
-    raises the real error with the real message.
+    use, so a fourth derivation cannot appear.
     """
-    inline = entry.get("source")
-    if isinstance(inline, str):
-        return SourceKind.OSS
-    raw: Any = inline
+    raw: Any = entry.get("source")
     if isinstance(entry.get("from"), str):
         session = ctx.source_session
         raw = (getattr(session, "sources", None) or {}).get(entry["from"])

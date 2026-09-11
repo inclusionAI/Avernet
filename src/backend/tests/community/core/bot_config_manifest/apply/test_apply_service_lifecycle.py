@@ -63,7 +63,6 @@ from ._fakes import (
     FakeCapabilityReader,
     FakeCredentials,
     FakeGitClient,
-    FakeGuardedFetcher,
     FakeIdentityService,
     FakeManifestContent,
     FakeMcpAuth,
@@ -203,8 +202,8 @@ def world():
         capability_reader_provider=lambda: FakeCapabilityReader(),
         package_validator_provider=lambda: real_validator(),
         entry_fetcher_provider=lambda: EntryFetcher(
-            FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
-        , FakeObjectStore()),
+            FakeManifestContent(), FakeCredentials(), FakeObjectStore()
+        ),
         # W6's materialiser: this suite's document declares no resources,
         # so the write chain is never reached — but it must exist for the
         # registry to register.

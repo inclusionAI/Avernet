@@ -48,7 +48,6 @@ from ..apply._fakes import (
     FakeCapabilityReader,
     FakeCredentials,
     FakeGitClient,
-    FakeGuardedFetcher,
     FakeIdentityService,
     FakeManifestContent,
     FakeMcpAuth,
@@ -123,7 +122,7 @@ def _build(db):
     )
     queue = _InlineQueue()
     bots = _Bots()
-    fetcher = lambda: EntryFetcher(FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials(), FakeObjectStore())  # noqa: E731
+    fetcher = lambda: EntryFetcher(FakeManifestContent(), FakeCredentials(), FakeObjectStore())  # noqa: E731
 
     def platform_ports() -> MaterialiserPorts:
         return MaterialiserPorts(
