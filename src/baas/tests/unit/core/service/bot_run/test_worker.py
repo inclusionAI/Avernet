@@ -136,6 +136,40 @@ class _RequeuedExecutor:
         raise RequeuedToPendingError(record.run_id, self._session_id)
 
 
+class _CancellableBlockingExecutor:
+    """阻塞在事件上，执行/取消时分别设置事件。"""
+
+    def __init__(self):
+        self.gate = asyncio.Event()
+        self.started = asyncio.Event()
+        self.cancelled = asyncio.Event()
+
+    async def execute(self, record: BotRunQueueRecord) -> None:
+        self.started.set()
+        try:
+            await self.gate.wait()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
+
+
+class _CancellableBlockingExecutor:
+    """阻塞在事件上，被取消时设置事件。"""
+
+    def __init__(self):
+        self.gate = asyncio.Event()
+        self.started = 0
+        self.cancelled = asyncio.Event()
+
+    async def execute(self, record: BotRunQueueRecord) -> None:
+        self.started += 1
+        try:
+            await self.gate.wait()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
+
+
 def _insert(
     repo: OrmBotRunRepository, queue: OrmBotRunQueueRepository, bot_id: str
 ) -> str:
@@ -1203,7 +1237,65 @@ async def test_abort_runs_by_session_without_run_repo_skips_update_error(repo, q
     assert queue.get_by_run_id(run_id).status == "DONE"
 
 
-# ── bot 维度收窄：群聊多 bot 共 session 不误杀 ──────────────────────
+async def test_abort_runs_by_session_remote_worker_marks_abort_meta(
+    repo, queue
+):
+    """非本机 RUNNING run 被 abort 时，应写 abort_requested 到 meta 并 force_done。"""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
+    claimed = queue.claim_pending_by_bot("bot-1", "worker-a", candidates=5)
+    assert claimed is not None and claimed.run_id == run_id
+
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    # worker-b 没有本地 task，模拟多机场景
+    worker_b = _worker(queue, repo, ex, worker_id="worker-b", run_repository=repo)
+
+    outcome = await worker_b.abort_runs_by_session("sess-abort", "bot-1")
+
+    assert outcome.aborted_run_ids == [run_id]
+    assert outcome.had_terminal is False
+    assert queue.get_by_run_id(run_id).status == "DONE"
+    assert repo.get_by_run_id(run_id).status == "FAILED"
+    assert queue.is_abort_requested(run_id) is True
+
+
+
+
+async def test_abort_poll_loop_cancels_run_task_and_force_done(repo, queue):
+    """_abort_poll_loop 感知到 abort 信号后取消 task 并 force_done。"""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
+    record = queue.get_by_run_id(run_id)
+
+    worker = _worker(
+        queue,
+        repo,
+        _CompletingExecutor(repo),
+        worker_id="worker-1",
+        config=BotRequestWorkerConfig(abort_poll_interval_seconds=0.05),
+    )
+
+    run_cancelled = asyncio.Event()
+
+    async def _fake_run():
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            run_cancelled.set()
+            raise
+
+    run_task = asyncio.create_task(_fake_run())
+    poll_task = asyncio.create_task(worker._abort_poll_loop(record, run_task))
+
+    # 给轮询一点时间进入等待
+    await asyncio.sleep(0.1)
+    queue.update_meta(run_id, {"abort_requested": True})
+
+    # 轮询任务应在感知到信号后退出
+    await asyncio.wait_for(poll_task, timeout=2)
+    # run_task 应被取消
+    await asyncio.wait_for(run_cancelled.wait(), timeout=2)
+
+    assert queue.get_by_run_id(run_id).status == "DONE"
+
 
 
 async def test_abort_runs_by_session_group_chat_other_bot_running_not_killed(
