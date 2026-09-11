@@ -758,8 +758,8 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
     def _last_resolutions(
         self, *, entity_id: str, bot_id: str
     ) -> dict[tuple[str, str], str]:
-        """Each ``(url, ref)``'s SHA as the last apply that RESOLVED it (W7
-        strict).
+        """Each ``(url, ref)``'s SHA as the last apply that RESOLVED it — the
+        pair, never the row's ``name`` (W7; ``apply/source_session`` says why).
 
         The reports are where "what did we resolve" already lives
         (``ApplyReport.sources``), so strict mode reads them back rather than
@@ -769,20 +769,10 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         it — a failed fetch or a strict refusal adopts nothing), and reading
         only that row would wipe the baseline, silently disarming strict mode
         and the ``keep_last`` receipt after one outage. Per key, the newest
-        report that carries it wins; a report with no resolutions — or no
-        reports — yields no opinions.
-
-        The key is ``(url, ref)`` and not the row's ``name``, because that is
-        the question strict mode asks. One report may hold several rows under
-        one key — the report has a row per declaration, so two ``from`` names
-        over one repository are two rows — and they always carry the same sha,
-        because one apply resolves a ``(url, ref)`` once. Any of them
-        therefore serves, and the ``setdefault`` that keeps the newest report's
-        answer keeps the first of them too.
-
-        A row carrying no ``url`` contributes nothing: that is a report written
-        before the field existed, and inventing a baseline out of a name would
-        be guessing which repository it meant.
+        report that carries it wins; rows sharing a key (the report holds one
+        per declaration) carry the same sha, so any serves. No reports, no
+        resolutions in them, or no ``url`` on a row — an older one, whose name
+        names no repository to pin — all yield no opinion.
         """
         records = self._applies.recent(
             env=get_current_env(),
@@ -798,12 +788,9 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             for source in report.sources:
                 if source.url is None or source.resolved_sha is None:
                     continue
-                # Newest wins: an earlier walk-back entry is not overwritten.
-                # ``ref`` is normalised the way the spec normalises it, so a
-                # source that declared none keys on "HEAD" in both directions.
-                baselines.setdefault(
-                    (source.url, source.ref or "HEAD"), source.resolved_sha
-                )
+                # Newest wins; "HEAD" normalised the way the spec does it.
+                key = (source.url, source.ref or "HEAD")
+                baselines.setdefault(key, source.resolved_sha)
         return baselines
 
     # ── internals ───────────────────────────────────────────────────────────
