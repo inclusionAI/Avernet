@@ -81,7 +81,22 @@ def _service(*, content=_TOOL, digest=_DIGEST, delivery=None):
 
 
 def _entry(**kwargs) -> dict:
-    base = {"name": "mycli", "source": "https://x/mycli", "digest": _DIGEST}
+    """One tool declared over an object-store source.
+
+    A declaration object, because that is what a ``source`` is: the bare URL
+    string this suite used to write is refused at ``PUT`` and no longer has a
+    road at apply either.
+    """
+    base = {
+        "name": "mycli",
+        "source": {
+            "protocol": "oss",
+            "bucket": "tools",
+            "key": "mycli",
+            "auth": "oss-prod",
+        },
+        "digest": _DIGEST,
+    }
     base.update(kwargs)
     return base
 
@@ -146,13 +161,27 @@ def test_the_apply_context_is_carried_whole_into_the_service() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_placeholder_in_a_source_is_substituted_before_the_fetch() -> None:
+async def test_the_entry_reaches_the_fetch_funnel_unrewritten() -> None:
+    """The materialiser hands down the entry it was given, placeholders and
+    all.
+
+    ``${BOT_*}`` in a declared source is the funnel's to substitute, on the
+    road that knows which of a declaration's fields are addresses — and it is
+    the only thing that can substitute into a ``from``-named source, whose
+    fields this materialiser never sees. A second substitution here produced a
+    *copy* of the address, and a copy is something a later reader can acquire
+    from instead of the entry.
+    """
     service, _, _, fetcher = _service()
     mat = CliToolsMaterialiser(service)
-    await _apply(
-        mat, _ctx(), [_entry(**{"source": "https://x/${BOT_ENGINE_TYPE}/mycli"})]
-    )
-    assert fetcher.calls[0]["source_url"] == "https://x/openclaw/mycli"
+    declared = {
+        "protocol": "oss",
+        "bucket": "tools",
+        "key": "${BOT_ENGINE_TYPE}/mycli",
+        "auth": "oss-prod",
+    }
+    await _apply(mat, _ctx(), [_entry(source=declared)])
+    assert fetcher.calls[0]["declaration"] == declared
 
 
 # ── convergence ───────────────────────────────────────────────────────────
@@ -251,15 +280,20 @@ async def test_an_entry_without_a_digest_is_refused_at_apply_too() -> None:
 @pytest.mark.asyncio
 async def test_the_api_and_apply_refuse_the_same_hostile_declaration() -> None:
     """The equivalence that makes "one implementation" a fact rather than a
-    claim: both arms reach the same service, so a wrong-architecture binary
+    claim: the API uploads and a manifest declares, but both arms reach the
+    same pipeline once the bytes are in hand, so a wrong-architecture binary
     fails identically whichever door it came through."""
     payload = elf(machine=0xB7)
     digest = "sha256:" + hashlib.sha256(payload).hexdigest()
 
     service, repo, _, _ = _service(content=payload, digest=digest)
-    decl = CliToolDecl(name="mycli", source_url="https://x/mycli", digest=digest)
 
-    direct = await service.install(context_for(_ctx()), decl, installed_by="u2")
+    direct = await service.install_upload(
+        context_for(_ctx()),
+        CliToolDecl(name="mycli", digest=digest),
+        data=payload,
+        installed_by="u2",
+    )
     _, _, results = await _apply(
         CliToolsMaterialiser(service), _ctx(), [_entry(digest=digest)]
     )
@@ -350,8 +384,8 @@ async def test_a_tool_from_a_named_git_source_applies_without_a_digest() -> None
     )
     assert resolved.ok, resolved.failures
     assert [r.reason for r in results] == [None]
-    assert fetcher.calls[0]["source_url"] == _REPO
-    assert fetcher.calls[0].get("git") is True
+    assert fetcher.calls[0]["source_address"] == _REPO
+    assert fetcher.calls[0]["protocol"] == "git"
     # The source's subpath and the entry's composed, so one declared source can
     # serve more than one tool out of one repository.
     assert fetcher.filed[0]["entry_identity"] == "mycli"
@@ -364,10 +398,41 @@ async def test_the_digest_belt_still_refuses_an_unpinned_object_store_tool() -> 
     service, _, _, _ = _service()
     mat = CliToolsMaterialiser(service)
     resolved = await mat.resolve(
-        _git_ctx(), [{"name": "mycli", "source": "https://x/mycli"}]
+        _git_ctx(),
+        [{"name": "mycli", "source": {"protocol": "oss", "bucket": "b",
+                                      "key": "mycli", "auth": "oss-prod"}}],
     )
     assert not resolved.ok
     assert "requires a 'digest'" in resolved.failures[0].reason
+
+
+@pytest.mark.asyncio
+async def test_a_bare_url_source_fails_the_entry_rather_than_being_fetched() -> None:
+    """The spelling the grammar dropped.
+
+    ``declared_protocol`` cannot name a protocol for a string, so the digest
+    belt sees an unpinned entry and refuses it there; an entry that *did* carry
+    a digest gets no further either — the funnel has no road for a bare URL and
+    says which form a source must take. Both refusals are the point: the
+    platform never fetches an address a document merely wrote down.
+    """
+    service, repo, _, fetcher = _service()
+    mat = CliToolsMaterialiser(service)
+
+    unpinned = await mat.resolve(
+        _git_ctx(), [{"name": "mycli", "source": "https://x/mycli"}]
+    )
+    assert not unpinned.ok
+    assert "requires a 'digest'" in unpinned.failures[0].reason
+
+    _, _, results = await _apply(
+        mat,
+        _git_ctx(),
+        [{"name": "mycli", "source": "https://x/mycli", "digest": _DIGEST}],
+    )
+    assert [r.outcome for r in results] == [EntryOutcome.FAILED]
+    assert "declaration object" in (results[0].reason or "")
+    assert repo.rows == {}
 
 
 @pytest.mark.asyncio
@@ -489,5 +554,7 @@ async def test_an_inline_git_source_is_exempt_from_the_digest_belt_too() -> None
     )
     assert resolved.ok, resolved.failures
     assert [r.reason for r in results] == [None]
-    assert fetcher.calls[0]["source_url"] == "https://code.example.com/team/tools.git"
-    assert fetcher.calls[0].get("git") is True
+    assert fetcher.calls[0]["source_address"] == (
+        "https://code.example.com/team/tools.git"
+    )
+    assert fetcher.calls[0]["protocol"] == "git"

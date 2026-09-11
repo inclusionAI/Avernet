@@ -227,7 +227,14 @@ class FakeGitEntrySource(GitEntrySource):
 
 
 class FakeEntryFetcher:
-    """Answers with canned bytes; records the keyword arguments it was given."""
+    """Answers a declared entry with canned bytes; records what it resolved.
+
+    It resolves the entry the way the real ``fetch_declared`` does — a ``from``
+    name against the session's ``sources``, an inline declaration, a git source
+    answering with a tree — and **refuses anything else**, including the bare
+    URL string the grammar used to allow. A double that quietly served a string
+    would let the one road the service no longer has go on passing its tests.
+    """
 
     def __init__(self, *, content: bytes = b"", digest: str = "", error=None) -> None:
         self.content = content
@@ -236,23 +243,7 @@ class FakeEntryFetcher:
         self.calls: list[dict] = []
         self.filed: list[dict] = []
 
-    def fetch(self, ctx, **kwargs):
-        self.calls.append(kwargs)
-        if self.error is not None:
-            raise self.error
-        return FakeFetchedEntry(self.content, self.digest or kwargs.get("digest") or "")
-
     def fetch_declared(self, ctx, *, entry, category, entry_identity=None):
-        """The declared-source door, in the double.
-
-        A manifest-sourced declaration comes through here rather than through
-        ``fetch``, so the double resolves the entry the way the real fetcher
-        does — an inline URL, a ``from`` name against the session's ``sources``,
-        or a git source answering with a tree — and records the *resolved*
-        address. A double that just forwarded to ``fetch`` would have kept
-        passing while a source name went on the wire as a URL, which is the
-        defect this door closes.
-        """
         decl = None
         if isinstance(entry.get("from"), str):
             session = getattr(ctx, "source_session", None)
@@ -265,31 +256,34 @@ class FakeEntryFetcher:
                 )
         elif isinstance(entry.get("source"), Mapping):
             decl = entry["source"]
-
-        if decl is not None and decl.get("protocol") == "git":
-            self.calls.append(
-                {
-                    "source_url": decl["url"],
-                    "category": category,
-                    "entry_identity": entry_identity,
-                    "git": True,
-                }
+        else:
+            raise EntryFetchError(
+                "an entry must name one of 'from', 'source' or 'content': "
+                "'source' must be a declaration object with a 'protocol' "
+                "(git or oss), and a bare URL is not accepted"
             )
-            if self.error is not None:
-                raise self.error
-            return GitDelivery(FakeGitEntrySource(self.content, decl, entry))
 
-        return BlobDelivery(
-            self.fetch(
-                ctx,
-                source_url=(decl or {}).get("url") or entry.get("source"),
-                digest=entry.get("digest"),
-                auth=(decl or {}).get("auth", entry.get("auth")),
-                category=category,
-                keep_last=(
+        self.calls.append(
+            {
+                "declaration": dict(decl),
+                "protocol": decl.get("protocol"),
+                "source_address": decl.get("url") or decl.get("key"),
+                "digest": entry.get("digest"),
+                "auth": decl.get("auth"),
+                "category": category,
+                "entry_identity": entry_identity,
+                "keep_last": (
                     entry.get("on_fetch_failure", "keep_last") == "keep_last"
                 ),
-                entry_identity=entry_identity,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        if decl.get("protocol") == "git":
+            return GitDelivery(FakeGitEntrySource(self.content, decl, entry))
+        return BlobDelivery(
+            FakeFetchedEntry(
+                self.content, self.digest or entry.get("digest") or ""
             )
         )
 

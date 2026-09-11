@@ -284,12 +284,18 @@ CLI_TOOL_WRITE_RESPONSES: dict[int | str, dict[str, object]] = {
         "description": "The bot already has a CLI tool by that name.",
         **error_example(409, "The bot already has a CLI tool with this name"),
     },
+    413: {
+        "model": ErrorEnvelope,
+        "description": "The uploaded tool is past the 200 MiB a CLI tool may "
+        "be. Refused while the body is still arriving.",
+        **error_example(413, "The uploaded CLI tool is too large"),
+    },
     422: {
         "model": ErrorEnvelope,
-        "description": "The declaration, the fetched bytes or the engine "
-        "refused the install — an unpinned digest, a source that did not match "
-        "it, an archive member that is not there, a binary built for another "
-        "architecture, or an engine that would not take it.",
+        "description": "The uploaded bytes or the engine refused the install — "
+        "bytes that do not match the declared digest, an archive member that "
+        "is not there, a binary built for another architecture, or an engine "
+        "that would not take it.",
         **error_example(422, "The CLI tool could not be installed"),
     },
 }
