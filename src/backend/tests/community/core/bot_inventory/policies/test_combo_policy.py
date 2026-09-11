@@ -123,8 +123,10 @@ def test_application_coding_rejects_aicoding_engine() -> None:
 
 
 @pytest.mark.unit
-def test_application_coding_rejects_service_and_local() -> None:
-    assert not assert_application_coding_create(
+def test_application_coding_admits_service_and_rejects_local() -> None:
+    # cloud + service: the mirror admits the combo (the strategy layer
+    # additionally refuses service for hand-written configs —工厂快照直建 legal).
+    assert assert_application_coding_create(
         engine="claude_code",
         bot_type="service",
         space_kind="personal",
@@ -135,4 +137,10 @@ def test_application_coding_rejects_service_and_local() -> None:
         bot_type="personal",
         space_kind="personal",
         deployment_mode=DeployMode.LOCAL,
+    ).ok
+    assert not assert_application_coding_create(
+        engine="claude_code",
+        bot_type="desktop",
+        space_kind="personal",
+        deployment_mode=DeployMode.CLOUD,
     ).ok

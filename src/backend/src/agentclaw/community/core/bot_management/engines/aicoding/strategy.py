@@ -14,6 +14,7 @@ import uuid
 from typing import Any, Dict, Mapping, TYPE_CHECKING
 
 from agentclaw.community.core.bot_management.capabilities import (
+    can_create_service_with_template,
     is_template_factory_config,
 )
 from agentclaw.community.core.bot_management.errors import (
@@ -220,9 +221,9 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             raise BotCombinationUnsupportedError(
                 f"application coding does not support engine: {engine_type}"
             )
-        if bot_type != "personal":
+        if bot_type not in {"personal", "service"}:
             raise BotCombinationUnsupportedError(
-                "application coding bot must be personal"
+                f"application coding bot must be personal or service, got: {bot_type}"
             )
         # No space-kind gate: coding bots may be created in any business space
         # the caller is a member of (personal or team). ``space_kind`` stays in
@@ -231,10 +232,30 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
 
         template = engine_properties["template_config"]
         if self._is_factory_snapshot(template):
+            if bot_type == "service" and not can_create_service_with_template(
+                declarative_type, template
+            ):
+                # 直建准入与 BCN 注册面同源(capabilities.py)——拒绝可创建
+                # 但注册不了 provider 的组合，不给静默半成品留门。
+                raise BotCombinationUnsupportedError(
+                    "coding factory template cannot be created as a service "
+                    "bot: capabilities do not allow BCN provider registration"
+                )
             return self._prepare_factory_snapshot(
                 declarative_type=declarative_type,
                 template=template,
                 template_validation_mode=template_validation_mode,
+            )
+
+        if bot_type == "service":
+            # Factory snapshots may build service bots directly; the
+            # hand-written application-coding surface keeps the personal-only
+            # shape — its workspace-hosting support (allocation + soft-delete
+            # rollback) was only ever built for the personal form (#1403
+            # first phase), so a service ask is answered, not half-run.
+            raise BotCombinationUnsupportedError(
+                "application coding service bots must use a template "
+                "factory snapshot, not a hand-written config"
             )
 
         if declarative_type is not None and declarative_type != "applicationCoding":
