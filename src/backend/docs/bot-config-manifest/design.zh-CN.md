@@ -346,7 +346,11 @@ apply 在平台侧执行，天然产出结构化记录（#935 的 `last-start` �
   "apply_id": "…", "bot_id": "…", "trigger": "create|republish|restart|explicit",
   "started_at": "…", "finished_at": "…", "result": "SUCCEEDED|PARTIAL|FAILED",
   "sources": [
-    {"name": "content", "ref": "v1.2.0", "resolved_sha": "9c1f4ae…"}
+    {"name": "content", "url": "https://code.example.com/team/content.git",
+     "ref": "v1.2.0", "mode": "strict", "resolved_sha": "9c1f4ae…"},
+    {"name": "https://code.example.com/team/tools.git@main",
+     "url": "https://code.example.com/team/tools.git",
+     "ref": "main", "mode": "non_strict", "resolved_sha": "7e3b91c…"}
   ],
   "entries": [
     {"category": "skills", "name": "reviewer",
@@ -356,9 +360,11 @@ apply 在平台侧执行，天然产出结构化记录（#935 的 `last-start` �
 }
 ```
 
-命名源的解析结果记在顶层 `sources`（声明的 `ref` + 解析出的
-`resolved_sha`）——「这批 bot 线上跑的是哪一版内容」由此可查；条目层记
-`from`（来自哪个源）或 `source_digest`（URL 源）。
+git 源的解析结果记在顶层 `sources`（`url` + 声明的 `ref` + 解析出的
+`resolved_sha`）——「这批 bot 线上跑的是哪一版内容」由此可查；**每条声明一行**，
+内联源没有名字，记成 `url@ref`。`strict` 的基线按 `(url, ref, mode)` 从这里读回去
+（schema §2.3），跟这一行叫什么名字无关。条目层记 `from`（来自哪个源）或
+`source_digest`（URL 源）。
 
 经 `GET …/config-manifest/last-apply` 暴露。script 的输出维持现状：容器内
 `/home/admin/logs/startup_script.log`。

@@ -521,7 +521,7 @@ def test_a_moved_ref_on_the_git_road_lands_in_the_note():
     ctx = _git_ctx(
         git,
         sources={"id": IDENTITY_GIT_SOURCE},
-        baselines={"id": "b" * 40},
+        baselines={("https://git.corp/id.git", "main", "non_strict"): "b" * 40},
     )
     resolved = _run(materialiser.resolve(ctx, [{"type": "RULES.md", "from": "id"}]))
     assert resolved.ok

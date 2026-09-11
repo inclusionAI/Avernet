@@ -1,13 +1,35 @@
 """One apply's named-source state.
 
 The four things a single apply needs and nothing more: the document's
-``sources`` declarations, the strict-mode baselines read back from the last
-apply that resolved each source, a checkout cache keyed on the substituted
-``(url, ref)``, and the :class:`SourceResolution` records the report will
-carry. It hangs on ``ApplyContext`` beside ``budget``, mutable by design inside
-a frozen context, because the fetcher is a DI singleton (state there would leak
-across applies) and a re-resolution per entry would break "the same
-``(url, ref)`` is pulled once per apply".
+``sources`` declarations, the strict-mode baselines read back — keyed on the
+substituted ``(url, ref, mode)`` — from the last apply that resolved that
+triple, a checkout cache keyed on ``(url, ref)``, and the
+:class:`SourceResolution` records the report will carry. It hangs on ``ApplyContext`` beside ``budget``, mutable
+by design inside a frozen context, because the fetcher is a DI singleton (state
+there would leak across applies) and a re-resolution per entry would break "the
+same ``(url, ref)`` is pulled once per apply".
+
+A baseline is a fact about a **repository at a ref**, not about what the
+document called it: strict mode asks "has this ``(url, ref)`` resolved
+differently since we last stood behind it", and renaming a source, or pointing
+one at another repository, does not make that a different question about the
+same pair. Keying on the pair is also what makes the document the way out of a
+strict refusal — editing ``ref`` asks about a pair no apply has an opinion on,
+so a deliberate re-pin passes where a ref that moved underneath the same pair
+still does not.
+
+``mode`` is the third of the key for one reason, and it is not symmetry: **a
+pin may only be advanced by an apply that stood behind it under the same
+mode.** One document may legally declare the same ``(url, ref)`` twice, once
+``strict`` and once ``non_strict`` — two sources, two entries, one repository.
+When the ref then moves, the lax declaration delivers and records the new sha
+while the pinned one refuses it. Were the two to share a baseline, that
+recorded sha would become the pin's baseline, and the next apply would hand the
+pinned entry the very commit it had just rejected — strict mode degraded to
+"refuse each move exactly once, then deliver it", which is the failure the
+adoption order elsewhere in this feature exists to prevent. Keyed with the
+mode, the two declarations keep their own histories: the lax one advances, the
+pinned one goes on refusing until the document re-pins it.
 
 A checkout and its resolution are **deliberately two events**. Fetching the
 tree answers "what does the ref name right now"; adopting it answers "and this
@@ -77,20 +99,31 @@ class SourceSession:
     #: Empty when the document declares no ``sources``; an entry naming one
     #: then fails with "is not declared under 'sources'".
     sources: Mapping[str, Mapping[str, Any]]
-    #: Display name → the 40-character SHA the last apply that resolved that
-    #: source recorded. Read back out of ``ApplyReport.sources`` through the
-    #: report history, so the keys are ``SourceResolution.name`` values: the
-    #: declared ``from`` name for a named source, the repository URL for an
-    #: inline one::
+    #: ``(substituted repository url, ref, mode)`` → the 40-character SHA the
+    #: last apply that resolved that triple recorded. Read back out of
+    #: ``ApplyReport.sources`` through the report history, off each row's
+    #: ``url``, ``ref`` and ``mode``::
     #:
     #:     {
-    #:         "content": "4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187",
-    #:         "https://code.example.com/solo.git": "9b1c...",
+    #:         ("https://code.example.com/team/content.git", "v1.2.0",
+    #:          "strict"): "4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187",
+    #:         ("https://code.example.com/solo.git", "HEAD", "non_strict"):
+    #:             "9b1c...",
     #:     }
     #:
-    #: A source absent here has no strict opinion yet, so strict mode admits
-    #: its first resolution and ``keep_last`` has no baseline receipt to reuse.
-    baselines: Mapping[str, str]
+    #: **Not** keyed on the report's display name. The name is how a document
+    #: refers to a source; the baseline answers "did this repository's ref move
+    #: under us", and a rename, a re-pointed ``url`` or an edited ``ref`` all
+    #: change the name's answer without changing the pair's. ``mode`` is in the
+    #: key so that a ``non_strict`` declaration of a repository cannot advance
+    #: the baseline a ``strict`` declaration of the same repository is pinned
+    #: against — see the module docstring.
+    #:
+    #: A triple absent here has no strict opinion yet, so strict mode admits
+    #: its first resolution and ``keep_last`` has no baseline receipt to reuse —
+    #: which is exactly what an edited ``ref`` produces, and why re-pinning the
+    #: document is how a strict source is advanced.
+    baselines: Mapping[tuple[str, str, str], str]
     #: The git transport; injected so tests script it and production gets the
     #: subprocess client via the DI provider.
     git: GitSourceClient
@@ -118,18 +151,44 @@ class SourceSession:
     _checkouts: dict[tuple[str, str], GitCheckout] = field(default_factory=dict)
     #: The report's ``sources`` rows, in the order they were adopted.
     _resolutions: list[SourceResolution] = field(default_factory=list)
-    #: The display names already in ``_resolutions``. Makes :meth:`adopt`
-    #: idempotent per source, so ten entries naming one source produce one row::
+    #: The ``(display, url, ref, mode)`` tuples already in ``_resolutions``.
+    #: Makes :meth:`adopt` idempotent per declaration, so ten entries naming
+    #: one source produce one row — and two declarations of one repository
+    #: produce two, which is what "one row per declaration" means::
     #:
-    #:     {"content", "https://code.example.com/solo.git"}
-    _recorded: set[str] = field(default_factory=set)
+    #:     {("content", "https://code.example.com/team/content.git",
+    #:       "v1.2.0", "strict"),
+    #:      ("https://code.example.com/solo.git@main",
+    #:       "https://code.example.com/solo.git", "main", "non_strict")}
+    #:
+    #: The rule this shape exists to satisfy: **the recording identity must be
+    #: at least as fine as the key the recording feeds.** What it feeds is the
+    #: next apply's baseline, keyed on ``(url, ref, mode)``; collapse two rows
+    #: the baseline would have told apart and the loser records nothing, so —
+    #: if the loser is the ``strict`` one — a pin never establishes a baseline
+    #: and therefore never refuses anything.
+    #:
+    #: The identity simply **contains** that key, rather than something
+    #: believed to imply it. Two weaker shapes were tried and both had holes,
+    #: which is the argument for not trying a third:
+    #:
+    #: * ``display`` alone. An inline display is ``url@ref``, so it cannot see
+    #:   ``mode`` at all: one repository at one ref declared both ``strict``
+    #:   and ``non_strict`` collapsed onto one row.
+    #: * ``(display, mode)``. The ``@`` join is not injective — ``@`` is legal
+    #:   in a URL path and in a refname — so ``url="…/a@b", ref="c"`` and
+    #:   ``url="…/a", ref="b@c"`` still share a display and still collapsed.
+    #:
+    #: ``display`` stays in the tuple because it is not implied by the key
+    #: either: two ``from`` names over one ``(url, ref, mode)`` are two
+    #: declarations and must stay two rows.
+    _recorded: set[tuple[str, str, str, str]] = field(default_factory=set)
 
     def checkout(
         self,
         spec: GitSourceSpec,
         *,
         headers: Mapping[str, str],
-        display: str,
     ) -> "tuple[GitCheckout, bool]":
         """The checkout for one ``(url, ref)``, fetching only the first time.
 
@@ -150,11 +209,9 @@ class SourceSession:
         cache hit answers ``False``, because those bytes were charged when they
         actually moved.
 
-        ``display`` is the report's name for the source — the declared ``from``
-        name, or the repository URL for an inline one — and is the same key
-        ``baselines`` is read by, so strict mode and the report agree on
-        identity. It is not part of the cache key and nothing is recorded here:
-        see :meth:`adopt`.
+        The report's name for the source plays no part here and nothing is
+        recorded: a checkout answers "what does this ref name right now", and
+        standing behind that answer is a separate event — see :meth:`adopt`.
 
         ``headers`` carries the credential's injected headers, or is empty for
         an anonymous fetch.
@@ -186,7 +243,9 @@ class SourceSession:
                   auth_name="git-prod")
 
             # _resolutions now ends with
-            SourceResolution(name="content", ref="v1.2.0",
+            SourceResolution(name="content",
+                             url="https://code.example.com/team/content.git",
+                             ref="v1.2.0", mode="strict",
                              resolved_sha="4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187",
                              auth="git-prod")
 
@@ -196,16 +255,22 @@ class SourceSession:
         for the entry — a refused move is not adopted, so the report of a
         refusing (failed) apply carries no poisoned baseline, and the last
         apply's record keeps refusing the moved ref until the document is
-        re-pinned. Idempotent per display: every entry that names the source
-        stands behind the same resolution.
+        re-pinned. Idempotent per ``(display, url, ref, mode)``, so every entry
+        that names one source stands behind one resolution and two names over
+        one repository record one row each. The identity contains the whole
+        baseline key rather than a display believed to imply it — see
+        ``_recorded`` for the two narrower shapes that turned out not to.
         """
-        if display in self._recorded:
+        key = (display, spec.url, spec.ref, spec.mode)
+        if key in self._recorded:
             return
-        self._recorded.add(display)
+        self._recorded.add(key)
         self._resolutions.append(
             SourceResolution(
                 name=display,
+                url=spec.url,
                 ref=spec.ref,
+                mode=spec.mode,
                 resolved_sha=checkout.sha,
                 auth=auth_name,
             )
@@ -217,13 +282,18 @@ class SourceSession:
         git source, which includes every object-store-only document."""
         return tuple(self._resolutions)
 
-    def baseline(self, display: str) -> Optional[str]:
-        """The SHA the last apply that resolved this source found, or ``None``.
+    def baseline(self, url: str, ref: str, mode: str) -> Optional[str]:
+        """The SHA the last apply that resolved this ``(url, ref, mode)``
+        found, or ``None``.
 
-        ``baseline("content")`` → ``"4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187"``
-        for a source resolved before, ``None`` for one seen the first time.
+        ``baseline("https://code.example.com/team/content.git", "v1.2.0",
+        "strict")`` → ``"4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187"`` for a
+        triple resolved before, ``None`` for one seen the first time — which
+        includes a pair the document has just re-pinned onto, and a repository
+        this document reads at one mode and the last apply recorded at the
+        other.
         """
-        return self.baselines.get(display)
+        return self.baselines.get((url, ref, mode))
 
     def close(self) -> None:
         """Remove every checkout's temporary tree from disk and empty the

@@ -626,10 +626,13 @@ def test_resolve_missing_session_is_loud(rig):
 def test_strict_refuses_when_the_ref_moved(rig):
     _, _, pipeline = rig
     git = _ScriptedGit()
-    # An inline source's report identity is its repository URL, so that is
-    # the key its baseline is read back by.
+    # The baseline is keyed on the repository and the ref, not on what the
+    # document called the source — so the same pair, resolving to a different
+    # commit, is the one thing strict mode refuses.
     ctx = make_context(
-        source_session=_session(git, baselines={GIT_URL: "b" * 40})
+        source_session=_session(
+            git, baselines={(GIT_URL, "main", "strict"): "b" * 40}
+        )
     )
     with pytest.raises(EntryFetchError, match="moved"):
         pipeline.resolve(
@@ -648,7 +651,9 @@ def test_non_strict_records_the_move_in_the_note(rig):
     _, _, pipeline = rig
     git = _ScriptedGit()
     ctx = make_context(
-        source_session=_session(git, baselines={GIT_URL: "b" * 40})
+        source_session=_session(
+            git, baselines={(GIT_URL, "main", "non_strict"): "b" * 40}
+        )
     )
     decl = pipeline.resolve(
         ctx,
@@ -667,6 +672,340 @@ def test_strict_on_the_first_apply_has_no_opinion(rig):
     decl = pipeline.resolve(
         ctx,
         entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "main", "mode": "strict"}},
+        category="skills",
+    )
+    assert isinstance(decl, GitDelivery)
+    assert decl.note() is None
+
+
+def test_an_inline_source_is_named_url_at_ref(rig):
+    """An inline declaration has no name to report under, so it is named by
+    the repository and the ref it asked for. The URL alone would not do: two
+    entries reading one repository at two refs would collapse into one row
+    naming neither of them, and a reader could not tell which ref the sha
+    belonged to."""
+    _, _, pipeline = rig
+    git = _ScriptedGit()
+    ctx = make_context(source_session=_session(git))
+    for ref in ("a", "b"):
+        pipeline.resolve(
+            ctx,
+            entry={"source": {"protocol": "git", "url": GIT_URL, "ref": ref}},
+            category="skills",
+        )
+    records = ctx.source_session.resolution_records()
+    assert [r.name for r in records] == [f"{GIT_URL}@a", f"{GIT_URL}@b"]
+    # The url rides its own field, so a reader never has to split the name.
+    assert [(r.url, r.ref) for r in records] == [(GIT_URL, "a"), (GIT_URL, "b")]
+
+
+def test_an_inline_strict_refusal_names_the_ref_it_refused(rig):
+    """The refusal message uses the display, which for an inline source now
+    says which ref moved — the difference between "this repository moved" and
+    a sentence a reader can act on when the document names it twice."""
+    _, _, pipeline = rig
+    git = _ScriptedGit()
+    ctx = make_context(
+        source_session=_session(
+            git, baselines={(GIT_URL, "main", "strict"): "b" * 40}
+        )
+    )
+    with pytest.raises(EntryFetchError, match=f"{GIT_URL}@main"):
+        pipeline.resolve(
+            ctx,
+            entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "main",
+                              "mode": "strict"}},
+            category="skills",
+        )
+
+
+def test_two_names_over_one_repository_are_two_rows_and_one_baseline(rig):
+    """Report rows are per declaration; baselines are per ``(url, ref, mode)``.
+    A document that names one repository twice at one mode gets both names back
+    in the report — each author finds the name they wrote — and one checkout,
+    one sha, and one baseline key behind them."""
+    _, _, pipeline = rig
+    git = _ScriptedGit()
+    session = _session(git, sources={
+        "content": {"protocol": "git", "url": GIT_URL, "ref": "main"},
+        "docs": {"protocol": "git", "url": GIT_URL, "ref": "main"},
+    })
+    ctx = make_context(source_session=session)
+    for name in ("content", "docs"):
+        pipeline.resolve(ctx, entry={"from": name}, category="skills")
+    records = session.resolution_records()
+    assert [r.name for r in records] == ["content", "docs"]
+    assert {r.resolved_sha for r in records} == {_FAKE_SHA}
+    # One key, so the next apply reads one baseline for both rows — the apply
+    # service's own test pins that the collapse survives the report round trip.
+    assert {(r.url, r.ref, r.mode) for r in records} == {
+        (GIT_URL, "main", "non_strict")
+    }
+    assert len(git.specs) == 1, "one checkout per (url, ref) per apply"
+
+
+def test_an_at_sign_in_a_url_or_ref_does_not_collide_two_declarations(rig):
+    """The ``@`` join that names an inline source is not injective.
+
+    ``@`` is legal in a URL path and legal in a refname, so
+    ``url="…/a@b", ref="c"`` and ``url="…/a", ref="b@c"`` produce the same
+    display, ``…/a@b@c`` — two genuinely different repositories-at-refs with
+    one name. De-duplicating the report on anything derived from that join
+    dropped the second declaration, and a dropped ``strict`` declaration never
+    establishes a baseline, so it accepts every move thereafter.
+
+    Exotic inputs, ordinary rule: the recording identity contains the baseline
+    key outright rather than a display believed to imply it.
+    """
+    _, _, pipeline = rig
+    first = {"protocol": "git", "url": "https://git.corp/a@b", "ref": "c",
+             "mode": "strict"}
+    second = {"protocol": "git", "url": "https://git.corp/a", "ref": "b@c",
+              "mode": "strict"}
+
+    git = _ScriptedGit()
+    session = _session(git)
+    ctx = make_context(source_session=session)
+    pipeline.resolve(ctx, entry={"source": first}, category="skills")
+    pipeline.resolve(ctx, entry={"source": second}, category="skills")
+
+    rows = session.resolution_records()
+    # Both recorded. The display really does collide — that is the point — so
+    # the rows are told apart by the url and ref they carry in their own right.
+    assert [r.name for r in rows] == [
+        "https://git.corp/a@b@c", "https://git.corp/a@b@c"
+    ]
+    assert [(r.url, r.ref) for r in rows] == [
+        ("https://git.corp/a@b", "c"), ("https://git.corp/a", "b@c")
+    ]
+
+    # So the second declaration has a baseline of its own, and its pin holds
+    # when its ref moves.
+    rebuilt = {(r.url, r.ref, r.mode): r.resolved_sha for r in rows}
+    assert rebuilt == {
+        ("https://git.corp/a@b", "c", "strict"): _FAKE_SHA,
+        ("https://git.corp/a", "b@c", "strict"): _FAKE_SHA,
+    }
+    moved = _ScriptedGit(sha="c" * 40)
+    with pytest.raises(EntryFetchError, match="moved"):
+        pipeline.resolve(
+            make_context(source_session=_session(moved, baselines=rebuilt)),
+            entry={"source": second},
+            category="skills",
+        )
+
+
+def test_two_inline_declarations_at_two_modes_are_two_rows(rig):
+    """The same alias hazard, on the road where the display is not unique.
+
+    A named source's display is its ``from`` name, which maps to exactly one
+    ``(url, ref, mode)``. An inline source's display is ``url@ref`` — mode-blind
+    — so two inline declarations of one repository at one ref but two modes
+    share it. De-duplicated on the display alone, whichever resolved first took
+    the slot and the other recorded nothing; when the loser was the ``strict``
+    one, it never established a baseline, and a pin with no baseline never
+    refuses anything. The rule that closes it: **the recording identity must be
+    at least as fine as the key the recording feeds.**
+    """
+    _, _, pipeline = rig
+    loose = {"protocol": "git", "url": GIT_URL, "ref": "main",
+             "mode": "non_strict"}
+    pinned = {"protocol": "git", "url": GIT_URL, "ref": "main", "mode": "strict"}
+
+    # Apply N, the bot's first: the lax declaration resolves first and would
+    # have taken the shared display slot.
+    git = _ScriptedGit()
+    session = _session(git)
+    ctx = make_context(source_session=session)
+    pipeline.resolve(ctx, entry={"source": loose}, category="skills")
+    pipeline.resolve(ctx, entry={"source": pinned}, category="skills")
+
+    rows = session.resolution_records()
+    # Two rows. They share a name — ``url@ref`` is what an inline source is
+    # called — and are told apart by the mode each was resolved under.
+    assert [(r.name, r.mode, r.resolved_sha) for r in rows] == [
+        (f"{GIT_URL}@main", "non_strict", _FAKE_SHA),
+        (f"{GIT_URL}@main", "strict", _FAKE_SHA),
+    ]
+
+    # Apply N+1: the ref has moved. The pin has a baseline to refuse against.
+    rebuilt = {(r.url, r.ref, r.mode): r.resolved_sha for r in rows}
+    assert rebuilt == {
+        (GIT_URL, "main", "non_strict"): _FAKE_SHA,
+        (GIT_URL, "main", "strict"): _FAKE_SHA,
+    }
+    moved = _ScriptedGit(sha="c" * 40)
+    with pytest.raises(EntryFetchError, match="moved"):
+        pipeline.resolve(
+            make_context(source_session=_session(moved, baselines=rebuilt)),
+            entry={"source": pinned},
+            category="skills",
+        )
+
+
+def test_a_non_strict_alias_cannot_advance_a_strict_pin(rig):
+    """One repository, one ref, declared twice at two modes — and the pin holds.
+
+    This configuration is legal and not even exotic: an author says "these
+    entries may follow the branch, that one may not", and both read the same
+    repository. When the ref moves, the lax declaration delivers the new commit
+    and records it; the pinned one refuses.
+
+    The danger is what the *next* apply then reads. If both declarations shared
+    a baseline, the sha the lax one recorded would become the pin's baseline,
+    and the next apply — with nothing in the document changed — would hand the
+    pinned entry the very commit it had just rejected. That is strict mode
+    degraded to "refuse each move exactly once, then deliver it", which is the
+    failure the adopt-after-the-gate ordering exists to prevent; it would just
+    have come in sideways, through a different declaration, one apply later.
+
+    ``mode`` is in the baseline key so the two keep separate histories.
+    """
+    _, _, pipeline = rig
+    old = "b" * 40
+    sources = {
+        "pinned": {"protocol": "git", "url": GIT_URL, "ref": "main",
+                   "mode": "strict"},
+        "loose": {"protocol": "git", "url": GIT_URL, "ref": "main",
+                  "mode": "non_strict"},
+    }
+
+    # Apply N: the ref has moved off `old`, and both declarations see it.
+    git = _ScriptedGit()
+    session = _session(
+        git, sources=sources,
+        baselines={
+            (GIT_URL, "main", "strict"): old,
+            (GIT_URL, "main", "non_strict"): old,
+        },
+    )
+    ctx = make_context(source_session=session)
+
+    loose = pipeline.resolve(ctx, entry={"from": "loose"}, category="skills")
+    assert isinstance(loose, GitDelivery)
+    assert loose.note() and old in loose.note()  # delivered, and the move noted
+    with pytest.raises(EntryFetchError, match="moved"):
+        pipeline.resolve(ctx, entry={"from": "pinned"}, category="skills")
+
+    # The report carries the lax delivery — provenance is not sacrificed — but
+    # it is stamped with the mode it was resolved under, and the refused
+    # declaration adopted nothing.
+    rows = session.resolution_records()
+    assert [(r.name, r.mode, r.resolved_sha) for r in rows] == [
+        ("loose", "non_strict", _FAKE_SHA)
+    ]
+
+    # Apply N+1, document unchanged: the baselines the service rebuilds from
+    # that report leave the strict key untouched, so the pin still refuses.
+    rebuilt = {(r.url, r.ref, r.mode): r.resolved_sha for r in rows}
+    # Stated as an equality rather than "the strict key is absent": absent is
+    # also what an empty map gives, and a map that silently stopped carrying
+    # the mode would satisfy the weaker form for the wrong reason.
+    assert rebuilt == {(GIT_URL, "main", "non_strict"): _FAKE_SHA}
+    next_session = _session(
+        git, sources=sources,
+        baselines={**{(GIT_URL, "main", "strict"): old}, **rebuilt},
+    )
+    with pytest.raises(EntryFetchError, match="moved"):
+        pipeline.resolve(
+            make_context(source_session=next_session),
+            entry={"from": "pinned"},
+            category="skills",
+        )
+
+
+def test_strict_passes_when_the_document_re_pins_the_ref(rig):
+    """Editing ``ref`` is how a strict source is advanced, and it has to be:
+    a baseline is a fact about a ``(url, ref)`` pair, and the pair the
+    document now names is one no apply has resolved yet. Keyed on the source's
+    name instead, this could never pass — the name did not change — and the
+    only way out of a strict pin would be to flip the source to
+    ``non_strict``, apply once, and flip it back."""
+    _, _, pipeline = rig
+    git = _ScriptedGit()
+    ctx = make_context(
+        source_session=_session(
+            git, baselines={(GIT_URL, "v1", "strict"): "b" * 40}
+        )
+    )
+    decl = pipeline.resolve(
+        ctx,
+        entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "v2",
+                          "mode": "strict"}},
+        category="skills",
+    )
+    assert isinstance(decl, GitDelivery)
+    # Not a move: nothing is noted, and the new pair is what this apply now
+    # stands behind, so the next apply pins against v2.
+    assert decl.note() is None
+    recorded = ctx.source_session.resolution_records()
+    assert [(r.url, r.ref, r.resolved_sha) for r in recorded] == [
+        (GIT_URL, "v2", _FAKE_SHA)
+    ]
+
+
+def test_strict_passes_when_the_document_re_points_the_url(rig):
+    """The other half of the same rule. A baseline from one repository has no
+    standing over another — keyed on the name, a re-pointed ``url`` would
+    silently inherit the old repository's SHA and refuse a commit that never
+    could have matched it."""
+    _, _, pipeline = rig
+    git = _ScriptedGit()
+    other = "https://git.corp/other.git"
+    ctx = make_context(
+        source_session=_session(
+            git, baselines={(GIT_URL, "main", "strict"): "b" * 40}
+        )
+    )
+    decl = pipeline.resolve(
+        ctx,
+        entry={"source": {"protocol": "git", "url": other, "ref": "main",
+                          "mode": "strict"}},
+        category="skills",
+    )
+    assert isinstance(decl, GitDelivery)
+    assert decl.note() is None
+    recorded = ctx.source_session.resolution_records()
+    assert [(r.url, r.ref) for r in recorded] == [(other, "main")]
+
+
+def test_a_sha_shaped_ref_trips_neither_branch(rig):
+    """What the schema doc has always promised: ``mode`` is "accepted but
+    inert" on a ``ref`` that is already a commit. It holds by construction
+    rather than by a special case — a SHA resolves to itself, so the pair
+    ``(url, <sha>)`` always answers with the sha its baseline holds."""
+    _, _, pipeline = rig
+    git = _ScriptedGit()
+    ctx = make_context(
+        source_session=_session(
+            git, baselines={(GIT_URL, _FAKE_SHA, "strict"): _FAKE_SHA}
+        )
+    )
+    decl = pipeline.resolve(
+        ctx,
+        entry={"source": {"protocol": "git", "url": GIT_URL, "ref": _FAKE_SHA,
+                          "mode": "strict"}},
+        category="skills",
+    )
+    assert isinstance(decl, GitDelivery)
+    assert decl.note() is None
+
+
+def test_non_strict_does_not_call_a_re_pin_a_move(rig):
+    """The note answers "the ref moved under you". A document that edited its
+    own ``ref`` moved it deliberately and does not need telling — and a note
+    naming the previous ref's commit as what this one drifted from would be
+    describing a drift that never happened."""
+    _, _, pipeline = rig
+    git = _ScriptedGit()
+    ctx = make_context(
+        source_session=_session(
+            git, baselines={(GIT_URL, "v1", "non_strict"): "b" * 40}
+        )
+    )
+    decl = pipeline.resolve(
+        ctx,
+        entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "v2"}},
         category="skills",
     )
     assert isinstance(decl, GitDelivery)
@@ -698,7 +1037,7 @@ def test_git_keep_last_falls_back_to_the_baseline_receipt(rig):
     ctx = make_context(source_session=_session(
         git,
         sources={"app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"}},
-        baselines={"app": old_sha},
+        baselines={(GIT_URL, "main", "non_strict"): old_sha},
     ))
     result = pipeline.resolve(
         ctx,
@@ -710,6 +1049,37 @@ def test_git_keep_last_falls_back_to_the_baseline_receipt(rig):
     assert result.single() == b"stored-tree-zip"
     assert result.content_type() == "application/zip"
     assert result.note() and "keep_last" in result.note()
+
+
+def test_git_keep_last_has_no_receipt_to_reuse_after_a_re_pin(rig):
+    """``keep_last`` reuses the stored copy of *what this pair last
+    resolved to*. After a re-pin there is no such copy — the baseline under
+    the old ``(url, ref)`` belongs to the ref the document just stopped
+    naming — so the fetch failure stands rather than delivering the previous
+    pin's bytes under the new one's name."""
+    content, _, pipeline = rig
+    old_sha = "b" * 40
+    baseline_url = git_receipt_url(GIT_URL, old_sha, "pkg")
+    content.store(
+        fetched_object(b"stored-tree-zip", url=baseline_url,
+                       content_type="application/zip"),
+        scope=None, source_url=baseline_url,
+    )
+    git = _ScriptedGit(error=FetchFailedError("git fetch failed"))
+    ctx = make_context(source_session=_session(
+        git,
+        sources={"app": {"protocol": "git", "url": GIT_URL, "ref": "v2",
+                         "subpath": "pkg"}},
+        # Recorded against the ref the document used to name.
+        baselines={(GIT_URL, "v1", "non_strict"): old_sha},
+    ))
+    with pytest.raises(EntryFetchError, match="git fetch failed"):
+        pipeline.resolve(
+            ctx,
+            entry={"from": "app", "on_fetch_failure": "keep_last"},
+            category="skills",
+            entry_identity="s1",
+        )
 
 
 def test_git_credentials_reach_the_transport_as_headers(rig):
@@ -851,10 +1221,10 @@ def test_a_source_with_no_subpath_takes_the_entrys_whole(rig):
 def test_two_entries_off_one_git_source_share_a_checkout_and_a_sha(rig):
     """One source, two paths, one fetch, one ``resolved_sha``.
 
-    The composition must not cost a second checkout: the cache and the report
-    identity key on ``(url, ref)`` and on the source's *name*, neither of which
-    an entry's subpath changes. If it did, the report would carry two rows for
-    one declared source and the strict-mode baseline would have two answers.
+    The composition must not cost a second checkout: the cache keys on
+    ``(url, ref)`` and the report row on the source's *display*, neither of
+    which an entry's subpath changes. If it did, the report would carry two
+    rows for one declared source.
     """
     _, _, pipeline = rig
     git = _ScriptedGit()
