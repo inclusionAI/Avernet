@@ -56,7 +56,9 @@ def test_custom_staff_id_is_reflected(client: TestClient, monkeypatch) -> None:
     assert jar.get("staff_id") == "abc-123"
 
 
-def test_cookie_injection_in_staff_id_is_rejected(client: TestClient, monkeypatch) -> None:
+def test_cookie_injection_in_staff_id_is_rejected(
+    client: TestClient, monkeypatch
+) -> None:
     monkeypatch.setenv("SERVER_ENV", "local")
     response = client.get("/_dev/login", params={"staff_id": "001; Path=/evil"})
     assert response.status_code == 400
@@ -74,8 +76,12 @@ def test_invalid_next_port_is_rejected(client: TestClient, monkeypatch) -> None:
     assert response.status_code == 400
 
 
-def test_nick_name_is_urlquoted_into_the_cookie(client: TestClient, monkeypatch) -> None:
+def test_nick_name_is_urlquoted_into_the_cookie(
+    client: TestClient, monkeypatch
+) -> None:
     monkeypatch.setenv("SERVER_ENV", "local")
-    jar = _set_cookie_values(client.get("/_dev/login", params={"nick_name": "测试 dev"}))
+    jar = _set_cookie_values(
+        client.get("/_dev/login", params={"nick_name": "测试 dev"})
+    )
     # dev_cookie strategy URL-decodes when reading; the wire format is quoted.
     assert jar.get("nick_name") == "%E6%B5%8B%E8%AF%95%20dev"
