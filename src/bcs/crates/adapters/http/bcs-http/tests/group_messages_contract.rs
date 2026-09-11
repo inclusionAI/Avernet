@@ -870,6 +870,7 @@ async fn build_group_app_with_identity_and_session_status(
         Arc::new(NoopFriendCoreService),
     ));
     let services = Services::builder()
+        .bot_query(Arc::new(bcs_bot::Bot::new(registry.clone())))
         .registry(registry)
         .group(group_store.clone())
         .routing(routing.clone())
@@ -1522,6 +1523,111 @@ async fn participant_session_history_merges_own_legacy_one_shot_response_snapsho
     assert_eq!(views.len(), 1);
     assert_eq!(views[0].actor_id, "human_123");
     assert_eq!(views[0].scope, bcs_domain::MessageViewScope::Participant);
+}
+
+async fn scoped_session_history_app(
+    strategy: GroupStrategy,
+    scope: bcs_domain::MessageViewScope,
+) -> (
+    axum::Router,
+    Arc<RecordingGroupMessageHistory>,
+    Arc<RecordingStateMachineHistoryRuntime>,
+    TempDir,
+) {
+    let temp_dir = TempDir::new().unwrap();
+    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    for (bot_id, owner) in [
+        ("owner-bot", "123"),
+        ("other-bot", "456"),
+        ("outside-bot", "123"),
+    ] {
+        registry.register(bot_id.to_string(), BotCapabilities::default()).await.unwrap();
+        registry.save_created_by(bot_id, owner, true).await.unwrap();
+    }
+    let mut human = Participant::human("human_123", ParticipantRole::Observer);
+    human.message_view_scope = scope;
+    let participants = vec![
+        Participant::bot("owner-bot", ParticipantRole::Driver),
+        Participant::bot("other-bot", ParticipantRole::Consultant),
+        human,
+        Participant::human("human_456", ParticipantRole::Observer),
+    ];
+    let mut group = Group::new("scoped-group", "owner-bot", participants.clone());
+    group.group_strategy = strategy;
+    group.status = GroupStatus::Active;
+    let group_store = Arc::new(GroupStore::new());
+    group_store.upsert(group).await.unwrap();
+    let session = test_session("scoped-group:abcdef12", "scoped-group", participants);
+    let history = Arc::new(RecordingGroupMessageHistory::default());
+    let runtime = Arc::new(RecordingStateMachineHistoryRuntime {
+        calls: Mutex::new(Vec::new()),
+        human_views: Mutex::new(Vec::new()),
+        result: SessionHistoryResult {
+            session_id: session.id.clone(),
+            messages: rich_session_messages(),
+            limit: 20,
+            before: None,
+            next_before: None,
+        },
+    });
+    let mut services = Services::noop();
+    services.bot_query = Arc::new(bcs_bot::Bot::new(registry.clone()));
+    services.registry = registry;
+    services.group = group_store;
+    services.session_management = Arc::new(StaticSessionManagement::new(session));
+    services.group_message_history = history.clone();
+    services.collaboration_runtime = runtime.clone();
+    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
+        ChainUserIdentityPort::new(static_auth_chain("123", "Owner")),
+    )));
+    (app, history, runtime, temp_dir)
+}
+
+#[tokio::test]
+async fn session_messages_bot_view_is_independent_of_human_scope() {
+    for strategy in [GroupStrategy::Chat, GroupStrategy::ManagerWorker, GroupStrategy::StateMachine] {
+        for scope in [bcs_domain::MessageViewScope::Full, bcs_domain::MessageViewScope::Participant] {
+            let (app, history, runtime, _temp_dir) = scoped_session_history_app(strategy, scope).await;
+            let response = app.oneshot(
+                Request::builder()
+                    .uri("/sessions/scoped-group:abcdef12/messages?view_bot_id=owner-bot&limit=20")
+                    .body(Body::empty()).unwrap(),
+            ).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{strategy:?}, {scope:?}");
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(),
+                serde_json::to_value(rich_session_messages()).unwrap());
+            assert!(runtime.human_views.lock().await.is_empty(), "Bot tab must not use Human projection");
+            if strategy == GroupStrategy::StateMachine {
+                assert!(history.session_calls.lock().await.is_empty());
+                assert_eq!(runtime.calls.lock().await.len(), 1);
+            } else {
+                let calls = history.session_calls.lock().await;
+                assert_eq!(calls.len(), 1);
+                assert_eq!(calls[0].view_bot_id.as_deref(), Some("owner-bot"));
+                assert!(runtime.calls.lock().await.is_empty(), "Bot tab must not merge Human snapshots");
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn session_messages_explicit_view_requires_owned_session_bot() {
+    for strategy in [GroupStrategy::Chat, GroupStrategy::ManagerWorker, GroupStrategy::StateMachine] {
+        for scope in [bcs_domain::MessageViewScope::Full, bcs_domain::MessageViewScope::Participant] {
+            let (app, history, runtime, _temp_dir) = scoped_session_history_app(strategy, scope).await;
+            for actor in ["other-bot", "outside-bot", "missing-bot", "human_456"] {
+                let response = app.clone().oneshot(
+                    Request::builder()
+                        .uri(format!("/sessions/scoped-group:abcdef12/messages?view_bot_id={actor}&limit=20"))
+                        .body(Body::empty()).unwrap(),
+                ).await.unwrap();
+                assert_eq!(response.status(), StatusCode::FORBIDDEN, "{strategy:?}, {scope:?}, {actor}");
+            }
+            assert!(history.session_calls.lock().await.is_empty());
+            assert!(runtime.calls.lock().await.is_empty());
+        }
+    }
 }
 
 #[tokio::test]

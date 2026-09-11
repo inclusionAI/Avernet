@@ -1734,7 +1734,7 @@ pub async fn get_session_messages(
     };
 
     let resolved_view =
-        match resolve_session_history_view(&sess, &caller, query.view_bot_id.as_deref()) {
+        match resolve_session_history_view(&state, &sess, &caller, query.view_bot_id.as_deref()).await {
             Ok(view) => view,
             Err(response) => return response,
         };
@@ -1862,7 +1862,8 @@ struct ResolvedSessionHistoryView {
     human_view: Option<HumanMessageView>,
 }
 
-fn resolve_session_history_view(
+async fn resolve_session_history_view(
+    state: &HttpAppState,
     session: &bcs_service_api::Session,
     caller: &bcs_service_api::CallerContext,
     requested_view_actor_id: Option<&str>,
@@ -1880,6 +1881,25 @@ fn resolve_session_history_view(
 
     match caller {
         bcs_service_api::CallerContext::Human(human) => {
+            if let Some(requested) = requested_view_actor_id.filter(|id| *id != human.actor_id) {
+                // The authenticated Human authorizes the selected Bot; its
+                // own message scope applies only when viewing the Human tab.
+                if !session.participants.iter().any(|participant| {
+                    participant.bot_uuid == requested && participant.actor_kind == ActorKind::Bot
+                }) {
+                    return Err(forbidden());
+                }
+                let owned = state.services.bot_query.list_bots_by_creator(&human.staff_no)
+                    .await
+                    .map_err(|error| super::bots::bot_use_case_error_to_http(error).into_response())?;
+                if !owned.iter().any(|bot| bot.bot_uuid == requested) {
+                    return Err(forbidden());
+                }
+                return Ok(ResolvedSessionHistoryView {
+                    view_actor_id: Some(requested.to_string()),
+                    human_view: None,
+                });
+            }
             let participant_view = session
                 .participants
                 .iter()
@@ -1889,9 +1909,6 @@ fn resolve_session_history_view(
                         && participant.message_view_scope == MessageViewScope::Participant
                 });
             if let Some(participant) = participant_view {
-                if requested_view_actor_id.is_some_and(|requested| requested != human.actor_id) {
-                    return Err(forbidden());
-                }
                 return Ok(ResolvedSessionHistoryView {
                     view_actor_id: Some(human.actor_id.clone()),
                     human_view: Some(HumanMessageView {
@@ -1903,8 +1920,7 @@ fn resolve_session_history_view(
             }
 
             // Full is the compatibility mode. Preserve the pre-feature
-            // behavior exactly: do not infer a Human View Actor and leave an
-            // explicitly requested legacy view unchanged.
+            // behavior: do not infer a Human View Actor for an omitted view.
             Ok(ResolvedSessionHistoryView {
                 view_actor_id: requested_view_actor_id.map(str::to_string),
                 human_view: None,
