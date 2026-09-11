@@ -35,9 +35,6 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetcher,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
-    FetchFailedError,
-)
 
 from ._fakes import (
     FakeActivationService,
@@ -51,7 +48,6 @@ from ._fakes import (
     FakeResourceFileService,
     FakeSkillUploadService,
     FakeStartupScriptService,
-    fetched_object,
     make_context,
     real_validator,
 )
@@ -772,14 +768,19 @@ async def test_a_fetching_document_applies_all_four_categories_in_order():
     the partial delivery.
     """
     from ._fakes import (
+        FakeObjectCredentials,
+        OSS_AUTH,
+        OSS_BUCKET,
         SOUL_BODY as _SOUL_BODY,
-        SOUL_URL as _SOUL_URL,
+        SOUL_KEY as _SOUL_KEY,
         build_skill_zip,
+        declared_session,
+        seeded_object_store,
     )
 
     qc_zip = build_skill_zip("quality-check")
-    qc_url = "https://content.example/skills/quality-check.zip"
-    rules_url = "https://content.example/identity/rules.md"
+    qc_key = "skills/quality-check.zip"
+    rules_key = "identity/rules.md"
     import hashlib
 
     qc_digest = "sha256:" + hashlib.sha256(qc_zip).hexdigest()
@@ -787,14 +788,9 @@ async def test_a_fetching_document_applies_all_four_categories_in_order():
     uploads = FakeSkillUploadService()
     activation = FakeActivationService()
     reader = FakeCapabilityReader()
-    fetcher = FakeGuardedFetcher(
-        responses={
-            _SOUL_URL: fetched_object(_SOUL_BODY, url=_SOUL_URL),
-            qc_url: fetched_object(qc_zip, url=qc_url, content_type="application/zip"),
-            # identity rules fetch: the source is gone — a real outage shape.
-        },
-        failures={rules_url: FetchFailedError("source answered 404")},
-    )
+    objects = seeded_object_store({_SOUL_KEY: _SOUL_BODY, qc_key: qc_zip})
+    # identity rules fetch: its bucket is unreachable — a real outage shape.
+    objects.make_unavailable("rules-bucket", "source answered 404")
     engine = ApplyOrchestrator(
         build_materialisers(
             script_service=FakeStartupScriptService(),
@@ -805,8 +801,11 @@ async def test_a_fetching_document_applies_all_four_categories_in_order():
             capability_reader=reader,
             package_validator=real_validator(),
             entry_fetcher=EntryFetcher(
-                fetcher, FakeManifestContent(), FakeCredentials()
-            , FakeObjectStore()),
+                FakeGuardedFetcher(responses={}),
+                FakeManifestContent(),
+                FakeObjectCredentials(),
+                objects,
+            ),
             resource_service=FakeResourceFileService(),
             cli_tool_service=object(),
         ),
@@ -819,17 +818,31 @@ async def test_a_fetching_document_applies_all_four_categories_in_order():
 manifest:
   identity:
     - type: SOUL.md
-      source: "{_SOUL_URL}"
+      source:
+        protocol: oss
+        bucket: "{OSS_BUCKET}"
+        key: "{_SOUL_KEY}"
+        auth: "{OSS_AUTH}"
     - type: RULES.md
-      source: "{rules_url}"
+      source:
+        protocol: oss
+        bucket: rules-bucket
+        key: "{rules_key}"
+        auth: "{OSS_AUTH}"
   skills:
     - name: quality-check
-      source: "{qc_url}"
+      source:
+        protocol: oss
+        bucket: "{OSS_BUCKET}"
+        key: "{qc_key}"
+        auth: "{OSS_AUTH}"
       digest: "{qc_digest}"
 script:
   body: "echo hi"
 """,
-        ctx=make_context(engine_type="openclaw"),
+        ctx=make_context(
+            engine_type="openclaw", source_session=declared_session()
+        ),
     )
 
     # identity aborted on the failed RULES fetch — nothing written there;

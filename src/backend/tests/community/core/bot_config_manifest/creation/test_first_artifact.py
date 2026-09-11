@@ -67,25 +67,26 @@ from agentclaw.community.kernel.bot_config import StoreRef
 
 from ..apply._fakes import (
     FakeActivationService,
-    FakeCredentials,
     FakeGitClient,
     FakeGuardedFetcher,
     FakeManifestContent,
     FakeMcpAuth,
+    FakeObjectCredentials,
     FakeStartupScriptService,
+    OSS_AUTH,
+    OSS_BUCKET,
     build_skill_zip,
-    fetched_object,
     real_validator,
+    seeded_object_store,
 )
 from ..managed_files._fakes import FakeObjectStorage
 from ..managed_files.test_skill_port import FakeSkillRepository, LiveCapabilityReader
 from tests.community.core.config_compose.test_collector import _reader_over, _registry_over
-from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 
 _OWNER = "u_owner"
 _BOT = "b_first"
 _ENTITY = _OWNER
-_QC_URL = "https://example.test/skills/quality-check.zip"
+_QC_KEY = "skills/quality-check.zip"
 _QZ = build_skill_zip("quality-check", extra=[("scripts/run.sh", b"echo ok\n")])
 _DOCUMENT = f"""schema_version: 1
 manifest:
@@ -97,7 +98,11 @@ manifest:
       content: 'Q: ?'
   skills:
     - name: quality-check
-      source: {_QC_URL}
+      source:
+        protocol: oss
+        bucket: "{OSS_BUCKET}"
+        key: "{_QC_KEY}"
+        auth: "{OSS_AUTH}"
 """
 _BASE = "teclaw/dev/bolt_data"
 _REF_ROOT = f"staff_{_OWNER}/{_BOT}_manifest/teclaw"
@@ -185,10 +190,11 @@ def _build(db):
 
     def fetcher():
         return EntryFetcher(
-            FakeGuardedFetcher(responses={_QC_URL: fetched_object(_QZ, url=_QC_URL, content_type="application/zip")}),
+            FakeGuardedFetcher(responses={}),
             FakeManifestContent(),
-            FakeCredentials(),
-        FakeObjectStore(),)
+            FakeObjectCredentials(),
+            seeded_object_store({_QC_KEY: _QZ}),
+        )
 
     def platform_ports() -> MaterialiserPorts:
         return MaterialiserPorts(
