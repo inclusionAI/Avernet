@@ -1,10 +1,10 @@
 """ActivateBotService — reactivate a RECYCLED bot.
 
 Flow:
-  1. Fetch bot, check state.
-  2. REACTIVATING → friendly early return (idempotent).
-  3. non-RECYCLED  → InvalidBotStateError.
-  4. RECYCLED      → update_status(REACTIVATING) + spawn background thread
+  1. Fetch the exact owner-scoped personal managed-cloud Bot.
+  2. ACTIVE / REACTIVATING → typed idempotent result.
+  3. Other non-RECYCLED states → BotInvalidLifecycleStateError.
+  4. RECYCLED → update_status(REACTIVATING) + spawn background thread
                       that calls passport unfreeze, verifies the runtime token,
                       then starts the bot;
                       on failure rolls back: passport freeze + RECYCLED.
@@ -16,6 +16,12 @@ import threading
 from injector import inject
 
 from agentclaw.community.core.bot_dormant.protocols import BotServiceProtocol
+from agentclaw.community.core.bot_dormant.types import BotLifecycleResult
+from agentclaw.community.core.bot_management.services.bot_service import (
+    BotInvalidLifecycleStateError,
+    BotNotFoundError,
+    BotOperationNotAllowedError,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.passport import PassportError, PassportPlugin
 from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
@@ -24,15 +30,9 @@ from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 logger = get_logger()
 
 
-class InvalidBotStateError(Exception):
-    """Raised when activate is called on a bot that is not RECYCLED."""
-
-
-class BotNotFoundError(Exception):
-    """Raised when the requested bot does not exist for the owner."""
-
-
 class ActivateBotService:
+    """Start the existing asynchronous reactivation orchestration."""
+
     @inject
     def __init__(
         self,
@@ -42,65 +42,99 @@ class ActivateBotService:
         self._bot_service = bot_service
         self._passport = passport_plugin
 
-    def activate(self, bot_id: str, user_id: str, nick_name: str | None = None) -> dict:
+    def activate(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        owner_name: str | None = None,
+    ) -> BotLifecycleResult:
         """Activate a RECYCLED bot.
 
-        Returns a dict with keys ``status`` and ``message``.
+        Returns the current lifecycle state and whether this call changed it.
         Raises ``BotNotFoundError`` if the bot does not exist and
-        ``InvalidBotStateError`` if it is not RECYCLED (or REACTIVATING).
+        ``BotInvalidLifecycleStateError`` for unsupported current states.
         """
-        bot = self._bot_service.get_bot(bot_id=bot_id, user_id=user_id)
+        bot = self._bot_service.get_bot(bot_id=bot_id, user_id=owner_id)
         if not bot:
             logger.warning(
                 "[activate] bot not found bot_id=%s user_id=%s",
-                bot_id, user_id,
+                bot_id, owner_id,
             )
             raise BotNotFoundError(f"bot not found: {bot_id}")
+
+        if bot.get("bot_type") != "personal":
+            raise BotOperationNotAllowedError(
+                "dormant activation only supports personal bots"
+            )
+        if self._bot_service.is_teclaw_bot(bot.get("active_engine")):
+            raise BotOperationNotAllowedError(
+                "teclaw bots use their engine-owned lifecycle"
+            )
 
         status = bot.get("status")
         logger.info(
             "[activate] request bot_id=%s user_id=%s status=%s nick_name=%s",
-            bot_id, user_id, status, nick_name,
+            bot_id, owner_id, status, owner_name,
         )
+
+        if status == "ACTIVE":
+            return BotLifecycleResult(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                status="ACTIVE",
+                changed=False,
+            )
 
         # Idempotent: already in progress → friendly return without side-effects
         if status == "REACTIVATING":
             logger.info(
                 "[activate] already reactivating bot_id=%s user_id=%s",
-                bot_id, user_id,
+                bot_id, owner_id,
             )
-            return {"status": "REACTIVATING", "message": "激活中，请稍候"}
+            return BotLifecycleResult(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                status="REACTIVATING",
+                changed=False,
+            )
 
         if status != "RECYCLED":
             logger.warning(
                 "[activate] invalid status bot_id=%s user_id=%s status=%s",
-                bot_id, user_id, status,
+                bot_id, owner_id, status,
             )
-            raise InvalidBotStateError(
-                f"only RECYCLED bot can be activated, current: {status}"
+            raise BotInvalidLifecycleStateError(
+                bot_id=bot_id,
+                current_status=str(status or "UNKNOWN"),
             )
 
         # Transition to REACTIVATING synchronously so the caller gets a loading state.
         logger.info(
             "[activate] update status to REACTIVATING bot_id=%s user_id=%s",
-            bot_id, user_id,
+            bot_id, owner_id,
         )
         self._bot_service.update_status(
-            bot_id=bot_id, user_id=user_id, status="REACTIVATING"
+            bot_id=bot_id, user_id=owner_id, status="REACTIVATING"
         )
 
         # Launch background task: unfreeze passport → start_bot; rollback on failure.
         thread = threading.Thread(
             target=bind_current_avernet_tenant(self._reactivate_async),
-            args=(bot_id, user_id, nick_name or user_id),
+            args=(bot_id, owner_id, owner_name or owner_id),
             daemon=True,
         )
         thread.start()
         logger.info(
             "[activate] background reactivation dispatched bot_id=%s user_id=%s",
-            bot_id, user_id,
+            bot_id, owner_id,
         )
-        return {"status": "REACTIVATING", "message": "激活中"}
+        return BotLifecycleResult(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            status="REACTIVATING",
+            changed=True,
+        )
 
     def _reactivate_async(self, bot_id: str, user_id: str, nick_name: str) -> None:
         """Background task: unfreeze passport then start the bot."""

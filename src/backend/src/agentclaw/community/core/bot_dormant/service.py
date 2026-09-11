@@ -35,6 +35,7 @@ from agentclaw.community.core.bot_dormant.scan_policy import (
     DormantScanPolicyService,
     resolve_scan_window,
 )
+from agentclaw.community.core.bot_dormant.recycle_service import RecycleBotService
 from agentclaw.community.core.bot_dormant.sqlite_models import (
     DormantCheckAudit,
     DormantNotifyLog,
@@ -42,7 +43,6 @@ from agentclaw.community.core.bot_dormant.sqlite_models import (
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel
-from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.utils.env_utils import get_current_env
 
 
@@ -81,13 +81,6 @@ class RunSummary:
 # ---------------------------------------------------------------------------
 
 
-class RecycleReleaseFailed(RuntimeError):
-    """stop_bot returned False — the bot's device was not cleanly released
-    so we refuse to advance the status to RECYCLED. The caller (process_run
-    outer try/except) records an 'error' audit row and the next cron run
-    will retry."""
-
-
 class DormantBotService:
     """Orchestrates a dormant-bot scan+decision run.
 
@@ -106,7 +99,7 @@ class DormantBotService:
         bot_service: BotServiceProtocol for stop_bot / update_status calls.
         N: Dormant threshold (days). Bots inactive >= N days enter the warn window.
         M: Recycle margin (days). Bots inactive >= N+M days are recycled.
-        passport_plugin: Optional passport plugin for credential freeze calls.
+        recycle_service: Shared personal Bot recycle operation.
     """
 
     @inject
@@ -115,7 +108,7 @@ class DormantBotService:
         db: DatabasePlugin,
         baas_client: BaasDormantClient,
         bot_service: BotServiceProtocol,
-        passport_plugin: PassportPlugin,
+        recycle_service: RecycleBotService,
         scan_policy: DormantScanPolicyService,
         common_whitelist_service: CommonWhiteListService,
         N: int = DEFAULT_INACTIVE_THRESHOLD_DAYS,
@@ -135,7 +128,7 @@ class DormantBotService:
         self._default_M = M
         self._N = N
         self._M = M
-        self._passport_plugin = passport_plugin
+        self._recycle_service = recycle_service
         self._dry_run_override = dry_run
         self._scan_policy = scan_policy
         self._common_whitelist_service = common_whitelist_service
@@ -173,6 +166,7 @@ class DormantBotService:
         dry_run: bool = False,
         error_msg: str | None = None,
         source: str = "dormant_bot_service",
+        commit: bool = True,
     ) -> None:
         row = DormantCheckAudit(
             run_id=run_id,
@@ -186,11 +180,20 @@ class DormantBotService:
             dry_run=1 if dry_run else 0,
         )
         session.add(row)
-        session.commit()
+        if commit:
+            session.commit()
+        else:
+            session.flush()
         logger.info(
-            "[dormant.run=%s] event=audit_written audit_id=%s bot_id=%s "
+            "[dormant.run=%s] event=%s audit_id=%s bot_id=%s "
             "owner_id=%s check_result=%s action_taken=%s source=%s dry_run=%s",
-            run_id, row.id, bot_id, owner_id, check_result, action_taken,
+            run_id,
+            "audit_written" if commit else "audit_staged",
+            row.id,
+            bot_id,
+            owner_id,
+            check_result,
+            action_taken,
             source, dry_run,
         )
 
@@ -321,68 +324,6 @@ class DormantBotService:
             candidate.bot_id, candidate.owner_id,
             days_inactive, dry_run,
         )
-
-    def _execute_recycle(self, candidate: Candidate, dry_run: bool) -> None:
-        """Recycle a single bot.
-
-        Sequence (NOT a DB transaction — the backend uses autocommit and
-        the calls fan out to BaaS / license service):
-
-        1. stop_bot
-           - returns True if both DB row reset AND device released cleanly
-           - returns False if status was reset but device-release failed.
-             False means resources may still be charged — we must not pretend
-             the bot is RECYCLED. Raise so the caller writes an 'error'
-             audit row and skips this bot. Next cron run will retry.
-           - raises on hard errors (e.g. BotServiceError) — also bubbles up.
-        2. update_status='RECYCLED'
-           - only reached when stop_bot succeeded. If THIS raises, the bot
-             is left at PENDING (set by stop_bot) with no binding/device.
-             That state is benign — bot is effectively unusable, next cron
-             will pick it up and retry.
-        3. passport.freeze_agent_passport (best-effort)
-           - failures are logged but do NOT raise: the device is already
-             released; not freezing the license is at worst a billing
-             leak the cron will retry via re-classification next day.
-        """
-        if dry_run:
-            logger.info(
-                "[DormantBotService._execute_recycle] dry_run=True, skipping recycle for bot_id=%s",
-                candidate.bot_id,
-            )
-            return
-
-        release_ok = self._bot_service.stop_bot(
-            bot_id=candidate.bot_id,
-            user_id=candidate.owner_id,
-            release_reason="dormant_recycle",
-        )
-        # bot_service.stop_bot returns False when the device release failed
-        # but status was reset to PENDING; treat as a recoverable error so
-        # the candidate is recorded as 'error' and we retry tomorrow.
-        if release_ok is False:
-            raise RecycleReleaseFailed(
-                f"stop_bot reported release failure for bot_id={candidate.bot_id}; "
-                "device may still hold resources, refusing to mark RECYCLED"
-            )
-
-        self._bot_service.update_status(
-            bot_id=candidate.bot_id, user_id=candidate.owner_id, status="RECYCLED"
-        )
-
-        try:
-            self._passport_plugin.freeze_agent_passport(
-                bot_id=candidate.bot_id,
-                owner_workno=candidate.owner_id,
-                reason="dormant recycle",
-            )
-        except Exception as exc:
-            logger.warning(
-                "[DormantBotService._execute_recycle] passport freeze failed "
-                "bot_id=%s: %s — continuing (recycle considered complete)",
-                candidate.bot_id,
-                exc,
-            )
 
     def _enqueue_external_warn(
         self, session, row: DormantExternalInput, bot_name: str, owner_id: str,
@@ -553,6 +494,30 @@ class DormantBotService:
                     )
                     continue
 
+                if self._bot_service.is_teclaw_bot(bot.active_engine):
+                    logger.info(
+                        "[dormant.run=%s] event=external_skip reason=teclaw "
+                        "bot_id=%s owner_id=%s",
+                        run_id,
+                        row.bot_id,
+                        row.owner_id,
+                    )
+                    row.processed = 1
+                    self._write_audit(
+                        session,
+                        run_id=run_id,
+                        bot_id=row.bot_id,
+                        owner_id=row.owner_id,
+                        check_result="unsupported",
+                        action_taken="skipped",
+                        dry_run=dry_run,
+                        source="external_input",
+                        commit=False,
+                    )
+                    session.commit()
+                    summary.skipped += 1
+                    continue
+
                 # dt is 'YYYYMMDD' string
                 try:
                     input_date = _datetime.strptime(row.dt, "%Y%m%d").date()
@@ -643,7 +608,10 @@ class DormantBotService:
                         bot_name=bot.bot_name,
                         gmt_create=bot.gmt_create,
                     )
-                    self._execute_recycle(candidate, dry_run=False)
+                    self._recycle_service.recycle(
+                        bot_id=candidate.bot_id,
+                        owner_id=candidate.owner_id,
+                    )
                     # mark processed only after stop_bot returned cleanly
                     row.processed = 1
                     session.commit()
@@ -766,10 +734,26 @@ class DormantBotService:
         protected_candidates, candidates = partition_by_protected_owner(
             candidates, protected_owner_ids
         )
+        teclaw_candidates: list[Candidate] = []
+        managed_candidates: list[Candidate] = []
+        for candidate in candidates:
+            target = (
+                teclaw_candidates
+                if self._bot_service.is_teclaw_bot(candidate.active_engine)
+                else managed_candidates
+            )
+            target.append(candidate)
+        candidates = managed_candidates
         summary.scanned = len(candidates)
         logger.info("[dormant.run=%s] event=protected_owners_filtered skipped=%d sample=%s",
                     run_id, len(protected_candidates),
                     [f"{c.bot_id}@{c.owner_id}" for c in protected_candidates[:5]])
+        logger.info(
+            "[dormant.run=%s] event=teclaw_candidates_filtered skipped=%d sample=%s",
+            run_id,
+            len(teclaw_candidates),
+            [f"{c.bot_id}@{c.owner_id}" for c in teclaw_candidates[:5]],
+        )
 
         # Sample a few candidate bot_ids so operators can verify filtering
         # without dumping the whole list.
@@ -985,7 +969,16 @@ class DormantBotService:
 
         # cooldown_days >= M → 冷静期到了, 正式 recycle
         self._enqueue_recycle(session, c, days_inactive, dry_run)
-        self._execute_recycle(c, dry_run)
+        if dry_run:
+            logger.info(
+                "[DormantBotService] dry_run=True, skipping recycle for bot_id=%s",
+                c.bot_id,
+            )
+        else:
+            self._recycle_service.recycle(
+                bot_id=c.bot_id,
+                owner_id=c.owner_id,
+            )
         self._write_audit(
             session,
             run_id=run_id,

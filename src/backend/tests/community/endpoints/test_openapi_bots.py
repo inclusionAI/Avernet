@@ -28,9 +28,16 @@ import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.bot_dormant_service import (
+    BotDormantRecycleServiceProtocol,
+)
 from agentclaw.community.api.data_init_service import DataInitServiceProtocol
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_dormant.types import BotLifecycleResult
+from agentclaw.community.core.bot_management.services.bot_service import (
+    BotInvalidLifecycleStateError,
+)
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
@@ -277,7 +284,7 @@ _HAPPY_CASES = (
         "POST",
         f"{_BASE_PATH}/{{bot_id}}/activate",
         CaseInput(path_params=_PATH_PARAMS, query_params=_QUERY, headers=_HEADERS),
-        200,
+        202,
     ),
     (
         "POST",
@@ -357,7 +364,12 @@ _HAPPY_BODIES = {
     ("GET", f"{_BASE_PATH}/{{bot_id}}/engine/config"): {"data": {"model": "default"}},
     ("PUT", f"{_BASE_PATH}/{{bot_id}}/engine/config"): {"data": {"model": "default"}},
     ("POST", f"{_BASE_PATH}/{{bot_id}}/activate"): {
-        "data": {"bot_id": _BOT_ID, "status": "REACTIVATING"}
+        "data": {
+            "bot_id": _BOT_ID,
+            "owner_id": _OWNER,
+            "status": "REACTIVATING",
+            "changed": False,
+        }
     },
     ("POST", f"{_BASE_PATH}/{{bot_id}}/restart"): {"data": {"bot_id": _BOT_ID}},
     ("POST", f"{_BASE_PATH}/{{bot_id}}/data-init"): {
@@ -377,6 +389,71 @@ for _method, _path, _input, _status in _HAPPY_CASES:
             status=_status, json_contains=_HAPPY_BODIES[(_method, _path)]
         ),
     )(lambda: None)
+
+
+def _seed_recycle_result(world, *, error: bool) -> None:
+    _seed_verifier(world)
+    make_bot(
+        world,
+        bot_id=_BOT_ID,
+        owner_id=_OWNER,
+        bot_type="personal",
+        status="ACTIVE",
+        active_engine=_ENGINE,
+    )
+
+    def recycle(_self, **_kwargs):
+        if error:
+            raise BotInvalidLifecycleStateError(
+                bot_id=_BOT_ID,
+                current_status="PENDING",
+            )
+        return BotLifecycleResult(
+            bot_id=_BOT_ID,
+            owner_id=_OWNER,
+            status="RECYCLED",
+            changed=True,
+        )
+
+    bind_overrides(
+        world,
+        BotDormantRecycleServiceProtocol,
+        {"recycle": recycle},
+    )
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE_PATH}/{{bot_id}}/recycle",
+    scenario="happy",
+    input=CaseInput(path_params=_PATH_PARAMS, query_params=_QUERY, headers=_HEADERS),
+    seed=lambda world: _seed_recycle_result(world, error=False),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "data": {
+                "bot_id": _BOT_ID,
+                "owner_id": _OWNER,
+                "status": "RECYCLED",
+                "changed": True,
+            }
+        },
+    ),
+)
+def recycle_bot_happy():
+    """The framework owns invocation."""
+
+
+@endpoint_test(
+    method="POST",
+    path=f"{_BASE_PATH}/{{bot_id}}/recycle",
+    scenario="invalid_state",
+    input=CaseInput(path_params=_PATH_PARAMS, query_params=_QUERY, headers=_HEADERS),
+    seed=lambda world: _seed_recycle_result(world, error=True),
+    expect=ExpectError(status=409, json_contains={"data": None}),
+)
+def recycle_bot_invalid_state():
+    """The framework owns invocation."""
 
 
 # The refusal every user-scoped operation on this surface owes: ``user_id``

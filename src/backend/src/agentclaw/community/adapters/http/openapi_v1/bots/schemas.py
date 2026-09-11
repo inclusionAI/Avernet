@@ -985,13 +985,3 @@ class BotInventoryItem(BaseModel):
         default=None,
         description="Current Bot-level collaborative edit lock for an operable service Bot; null for other cards.",
     )
-
-
-class BotActivateResult(BaseModel):
-    """Acknowledgement that a recycled personal cloud bot is reactivating."""
-
-    bot_id: str = Field(description="Bot whose reactivation was started.")
-    status: str = Field(description="Current reactivation status.")
-    message: str | None = Field(
-        default=None, description="Additional reactivation detail, when available."
-    )
