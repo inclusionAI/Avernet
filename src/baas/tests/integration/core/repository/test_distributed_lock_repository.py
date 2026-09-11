@@ -230,7 +230,42 @@ class TestDistributedLockRepositoryProtocol:
         deleted = distributed_lock_repository.delete_lock("nonexistent-lock")
         assert deleted is False
 
-    # ── 8. Full lifecycle: acquire → get → renew → delete ──
+    # ── 8. fail-fast precheck leaves holder untouched ──
+
+    def test_try_acquire_failfast_leaves_holder_untouched_when_held_unexpired(
+        self,
+        distributed_lock_repository: DistributedLockRepository,
+        db_transaction,
+    ):
+        """A second caller against an unexpired held lock returns False and the
+        existing holder row is left untouched (the fail-fast precheck short-
+        circuits before the upsert, so no ``gmt_modified`` bump and no 1205).
+        """
+        lock_name = f"failfast_{_generate_uuid()[:12]}"
+        holder_a = f"holder_{_generate_uuid()[:8]}"
+        holder_b = f"holder_{_generate_uuid()[:8]}"
+        expire_time = datetime.now() + timedelta(minutes=5)
+
+        acquired_a = distributed_lock_repository.try_acquire_lock(
+            lock_name=lock_name, lock_holder=holder_a, expire_time=expire_time
+        )
+        assert acquired_a is True
+
+        before = distributed_lock_repository.get_by_lock_name(lock_name)
+        assert before is not None
+
+        acquired_b = distributed_lock_repository.try_acquire_lock(
+            lock_name=lock_name, lock_holder=holder_b, expire_time=expire_time
+        )
+        assert acquired_b is False
+
+        after = distributed_lock_repository.get_by_lock_name(lock_name)
+        assert after is not None
+        assert after.lock_holder == holder_a
+        # Holder row not overwritten by a no-op upsert.
+        assert after.gmt_modified == before.gmt_modified
+
+    # ── 9. Full lifecycle: acquire → get → renew → delete ──
 
     def test_full_lifecycle_acquire_get_renew_delete(
         self,
