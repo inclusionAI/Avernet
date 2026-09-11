@@ -11,6 +11,7 @@ from agentclaw.community.core.bot_dormant.scan_policy import (
 )
 from agentclaw.community.core.common_config import CommonWhiteListService
 from agentclaw.community.core.bot_dormant.service import DormantBotService
+from agentclaw.community.core.bot_dormant.recycle_service import RecycleBotService
 
 
 def _svc(value=None, *, enable="1"):
@@ -155,11 +156,12 @@ def test_policy_accessor_methods_return_effective_values():
 def test_dormant_bot_service_reads_dry_run_from_scan_policy():
     scan_policy = MagicMock()
     scan_policy.dry_run.return_value = False
+    bot_service = MagicMock()
     service = DormantBotService(
         db=MagicMock(),
         baas_client=MagicMock(),
-        bot_service=MagicMock(),
-        passport_plugin=MagicMock(),
+        bot_service=bot_service,
+        recycle_service=RecycleBotService(bot_service, MagicMock()),
         scan_policy=scan_policy,
         common_whitelist_service=MagicMock(spec=CommonWhiteListService),
     )

@@ -682,7 +682,6 @@ fn bot(bot_uuid: &str, name: &str, visibility: &str, created_by: Option<&str>) -
             visibility: visibility.to_string(),
             ..Default::default()
         },
-        dynamic_status: BotDynamicStatus::default(),
         env: None,
         created_by: created_by.map(str::to_string),
         actor_kind: ActorKind::Bot,
@@ -709,7 +708,6 @@ impl BotRegistryCoreService for FakeRegistry {
             RegisteredBot {
                 bot_uuid: bot_id,
                 capabilities,
-                dynamic_status: BotDynamicStatus::default(),
                 env: None,
                 created_by: None,
                 actor_kind: ActorKind::Bot,

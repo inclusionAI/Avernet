@@ -189,7 +189,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED,
     ("PUT", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/activate"): OWNER_SCOPED,
+    ("POST", "/openapi/v1/bots/{bot_id}/activate"): Check(PermissionLevel.OWNER),
+    ("POST", "/openapi/v1/bots/{bot_id}/recycle"): Check(PermissionLevel.OWNER),
     ("GET", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(PermissionLevel.MEMBER),
     ("PUT", "/openapi/v1/bots/{bot_id}/approvals/mode"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/approvals/modes"): Check(PermissionLevel.MEMBER),
@@ -416,7 +417,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
     ("GET", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
     ("PUT", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}/status"): OWNER_SCOPED,
+    ("GET", "/openapi/v1/bots/{bot_id}/status"): Check(PermissionLevel.OWNER),
 
     # ── Operations that address no bot ────────────────────────────────────
     ("GET", "/openapi/v1/org/user"): NoCheck("the caller's own verified identity"),

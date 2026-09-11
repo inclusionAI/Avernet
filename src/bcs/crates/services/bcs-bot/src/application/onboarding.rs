@@ -692,7 +692,6 @@ mod tests {
                         visibility: "protected".to_string(),
                         ..Default::default()
                     },
-                    dynamic_status: BotDynamicStatus::default(),
                     env: None,
                     created_by: Some(staff_no.to_string()),
                     actor_kind: ActorKind::Human,
@@ -784,7 +783,6 @@ mod tests {
         RegisteredBot {
             bot_uuid: bot_uuid.into(),
             capabilities,
-            dynamic_status: BotDynamicStatus::default(),
             env: None,
             created_by: None,
             actor_kind: ActorKind::Bot,

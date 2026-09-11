@@ -162,6 +162,18 @@ _避免使用_: Bot 技能绑定、固定版本策略
 
 ## 生命周期
 
+**Bot 回收（Bot Recycling）**:
+由个人 Bot Owner 主动停止 Bot 的平台托管运行资源，并将 Bot 转入 `RECYCLED` 状态的生命周期操作。Bot 回收不同于平台基于活动度执行的沉寂治理；当前仅适用于由平台管理运行资源的 personal Bot，不适用于 desktop、service 或 Teclaw Bot。
+_避免使用_: Bot 删除、Bot 重启、沉寂扫描
+
+**Bot 重新激活（Bot Reactivation）**:
+由个人 Bot Owner 将 `RECYCLED` Bot 恢复到可运行状态的异步生命周期操作。接口接受操作后，调用方必须查询 Bot 状态，直到 Bot 达到 `ACTIVE` 且运行时就绪，或进入失败状态。
+_避免使用_: Bot 重启、许可证单独上线、同步激活
+
+**沉寂治理（Dormant Governance）**:
+平台依据 Bot 活动度、预警冷静期及保护策略自动决定是否预警和回收的治理流程。沉寂治理受 Bot 白名单和 Owner 保护名单约束；Owner 主动发起的 Bot 回收不属于沉寂治理，也不受这些保护配置阻断。
+_避免使用_: Owner 主动回收、单 Bot 运维回收
+
 **取消技能创建（Skill Creation Cancellation）**:
 删除一个从未提交发布、没有发布尝试、外部映射、已发布版本或历史引用的纯草稿技能。它表示本次创建从未形成可保留的对外历史，是普通流程中唯一允许物理移除技能身份的场景。
 _避免使用_: 删除已发布技能、技能退役

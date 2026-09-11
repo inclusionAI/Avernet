@@ -644,7 +644,6 @@ impl FakeRegistryService {
             RegisteredBot {
                 bot_uuid: id.to_string(),
                 capabilities,
-                dynamic_status: BotDynamicStatus::default(),
                 env: None,
                 created_by: None,
                 actor_kind: if id.starts_with("human_") {
@@ -722,7 +721,6 @@ impl BotRegistryCoreService for FakeRegistryService {
             RegisteredBot {
                 bot_uuid: bot_id,
                 capabilities,
-                dynamic_status: BotDynamicStatus::default(),
                 env: None,
                 created_by: None,
                 actor_kind: ActorKind::Bot,

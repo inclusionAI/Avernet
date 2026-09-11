@@ -8,7 +8,6 @@ use bcs_bot::{Bot, BotControlPlaneCore, BotCore};
 use bcs_config::resolve_env_str;
 use bcs_domain::edge_permission::EdgeGrant;
 use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore, PersistentBotRepo};
-use bcs_cache_local::InMemoryCachePlugin;
 use bcs_db_api::{DbPlugin, DbSqlFlavor, DbStatement, DbValue as Value};
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::{BotCapabilities, BotControlPlaneCoreService, BotQueryService, BotRegistryCoreService, BotRepoPort, BotSearchFriendshipFilter, BotUseCaseError, SearchBotsCommand, ServiceResult};
@@ -214,8 +213,7 @@ async fn seed_search_bot<R>(
 #[tokio::test]
 async fn search_bots_tc_bot_filter_keeps_only_owner_suffixed_bots() {
     let db = sqlite_db().await;
-    let cache = Arc::new(InMemoryCachePlugin::new());
-    let repo = Arc::new(PersistentBotRepo::with_plugins_flavor(cache, db.clone(), DbSqlFlavor::Sqlite));
+    let repo = Arc::new(PersistentBotRepo::with_sql_flavor(db.clone(), DbSqlFlavor::Sqlite));
     let core = Arc::new(BotCore::with_repo(repo.clone()));
     let providers = Arc::new(MemoryProviderStore::new());
     let control_plane = Arc::new(BotControlPlaneCore::new(repo.clone(), providers.clone(), providers));
@@ -311,9 +309,8 @@ async fn search_bots_applies_exact_bot_uuid_candidates() {
 
 #[tokio::test]
 async fn search_bots_excludes_soft_deleted_persistent_rows_even_if_memory_has_bot() {
-    let cache = Arc::new(InMemoryCachePlugin::new());
     let db = sqlite_db().await;
-    let repo = Arc::new(PersistentBotRepo::with_plugins_flavor(cache, db, DbSqlFlavor::Sqlite));
+    let repo = Arc::new(PersistentBotRepo::with_sql_flavor(db, DbSqlFlavor::Sqlite));
     let core = Arc::new(BotCore::with_repo(repo.clone()));
     let providers = Arc::new(MemoryProviderStore::new());
     let control_plane = Arc::new(BotControlPlaneCore::new(repo.clone(), providers.clone(), providers));

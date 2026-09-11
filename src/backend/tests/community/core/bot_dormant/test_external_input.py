@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from agentclaw.community.core.bot_dormant.baas_client import AliveResult, BaasDormantClient
 from agentclaw.community.core.common_config import CommonWhiteListService
 from agentclaw.community.core.bot_dormant.service import DormantBotService
+from agentclaw.community.core.bot_dormant.recycle_service import RecycleBotService
 from agentclaw.community.core.bot_dormant.sqlite_models import (
     DormantCheckAudit,
     DormantExternalInput,
@@ -51,11 +52,13 @@ def _insert_bot(
     entity_id="123",
     owner_id="ow",
     env=None,
+    active_engine="openclaw",
 ):
     session.add(BotModel(
         bot_id=bot_id, entity_id=entity_id, entity_type="staff",
         creator_id=owner_id, owner_id=owner_id, bot_name=bot_id,
         bot_type="personal", status="ACTIVE", is_delete=0,
+        active_engine=active_engine,
         **({"env": env} if env is not None else {}),
         gmt_create=_now() - timedelta(days=30),
         gmt_modified=_now(),
@@ -87,13 +90,22 @@ def _make_service(session, *, dry_run=False, protected_owner_ids=frozenset()):
     bot_svc = MagicMock()
     bot_svc.stop_bot = MagicMock(return_value=True)
     bot_svc.update_status = MagicMock()
+    bot_svc.is_teclaw_bot.return_value = False
+    bot_svc.get_bot.side_effect = lambda *args, **kwargs: {
+        "bot_id": kwargs.get("bot_id") or (args[0] if args else "bot1"),
+        "owner_id": kwargs.get("user_id") or "ow",
+        "bot_type": "personal",
+        "active_engine": "openclaw",
+        "status": "ACTIVE",
+    }
+    passport = MagicMock()
     scan_policy = MagicMock()
     scan_policy.dry_run.return_value = dry_run
     common_whitelist = MagicMock(spec=CommonWhiteListService)
     common_whitelist.get_owner_ids.return_value = frozenset(protected_owner_ids)
     return DormantBotService(
         db=FakeDB(session), baas_client=baas, bot_service=bot_svc,
-        passport_plugin=MagicMock(), scan_policy=scan_policy,
+        recycle_service=RecycleBotService(bot_svc, passport), scan_policy=scan_policy,
         common_whitelist_service=common_whitelist,
         N=N, M=M,
     )
@@ -126,6 +138,45 @@ def test_external_warn_when_today():
         DormantExternalInput.id == rid
     ).first()
     assert row.processed == 0
+
+
+@pytest.mark.unit
+def test_external_teclaw_is_marked_processed_without_notification_or_action():
+    session = _make_session()
+    _insert_bot(session, active_engine="teclaw")
+    row_id = _insert_external(session)
+    service = _make_service(session)
+    service._bot_service.is_teclaw_bot.side_effect = (
+        lambda engine: engine == "teclaw"
+    )
+
+    summary = _run(service.process_run(dry_run=True, run_id="external-teclaw"))
+
+    row = session.get(DormantExternalInput, row_id)
+    assert row.processed == 1
+    assert summary.skipped == 1
+    assert session.query(DormantNotifyLog).count() == 0
+    audit = session.query(DormantCheckAudit).one()
+    assert audit.check_result == "unsupported"
+    assert audit.action_taken == "skipped"
+    service._bot_service.stop_bot.assert_not_called()
+
+
+@pytest.mark.unit
+def test_external_teclaw_processed_flag_rolls_back_when_audit_write_fails():
+    session = _make_session()
+    _insert_bot(session, active_engine="teclaw")
+    row_id = _insert_external(session)
+    service = _make_service(session)
+    service._bot_service.is_teclaw_bot.side_effect = (
+        lambda engine: engine == "teclaw"
+    )
+    service._write_audit = MagicMock(side_effect=RuntimeError("audit failed"))
+
+    summary = _run(service.process_run(dry_run=True, run_id="external-teclaw"))
+
+    assert session.get(DormantExternalInput, row_id).processed == 0
+    assert summary.errors == 1
 
 
 @pytest.mark.unit

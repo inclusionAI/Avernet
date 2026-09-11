@@ -19,8 +19,12 @@ from injector import Injector, Module
 import importlib
 
 from tests.community.adapters.http.openapi_v1.conftest import (
+    SeamCollaborators,
     mount_public_error_handlers,
     user_scoped_client,
+)
+from agentclaw.community.core.bot_collaborator.protocols import (
+    CollaboratorServiceProtocol,
 )
 from agentclaw.community.adapters.http.openapi_v1.bots.engine_config import (
     router as engine_config_router,
@@ -246,6 +250,7 @@ def client(
             binder.bind(PassportPlugin, to=passport)
             binder.bind(EngineConfigServiceProtocol, to=engine_config)
             binder.bind(BotRepository, to=bot_repo)
+            binder.bind(CollaboratorServiceProtocol, to=SeamCollaborators())
             binder.bind(SkillSetServiceFactoryProtocol, to=skill_set_factory)
             binder.bind(AuthRelationshipPlugin, to=auth_rel)
             binder.bind(BotStartupScriptServiceProtocol, to=startup_script)
@@ -2261,4 +2266,3 @@ def test_startup_script_audit_names_the_application_not_the_delegating_user():
     actor = _audit_actor(app, "alice")
     assert actor != "alice", "an app's write must not read as the user's own"
     assert "7" in actor and "alice" in actor, "name the app, keep who it acted for"
-

@@ -173,8 +173,6 @@ struct RegisteredBotInner {
     last_heartbeat: Instant,
     /// Bot capabilities for discovery.
     capabilities: BotCapabilities,
-    /// Dynamic status updated periodically.
-    dynamic_status: BotDynamicStatus,
     /// Active streaming connection (if connected).
     ws_connection: Option<BotConnection>,
     /// Session token (persists across connections for reconnection).
@@ -243,7 +241,6 @@ impl RegisteredBotInner {
         RegisteredBot {
             bot_uuid: self.bot_id.clone(),
             capabilities,
-            dynamic_status: self.dynamic_status.clone(),
             env: self.env.clone().or_else(|| Some(resolve_env())),
             created_by: self.created_by.clone(),
             actor_kind: self.actor_kind,
@@ -528,7 +525,6 @@ impl BotRepoPort for MemoryBotRepo {
                     bot_id: bot_id.clone(),
                     last_heartbeat: Instant::now(),
                     capabilities,
-                    dynamic_status: BotDynamicStatus::default(),
                     ws_connection: None,
                     session_token: None,
                     env: Some(resolve_env()),
@@ -691,7 +687,6 @@ impl BotRepoPort for MemoryBotRepo {
                         bot_id: bot_id.clone(),
                         last_heartbeat: Instant::now(),
                         capabilities,
-                        dynamic_status: BotDynamicStatus::default(),
                         ws_connection: None,
                         session_token: Some(token.to_string()),
                         env: Some(resolve_env()),
@@ -723,13 +718,12 @@ impl BotRepoPort for MemoryBotRepo {
         Ok(())
     }
 
-    async fn update_status(&self, bot_id: &str, status: BotDynamicStatus) -> bool {
+    async fn update_status(&self, bot_id: &str, _status: BotDynamicStatus) -> bool {
         let mut bots = self.bots.write().await;
 
         if let Some(bot) = bots.get_mut(bot_id) {
-            bot.dynamic_status = status;
             bot.last_heartbeat = Instant::now();
-            debug!(bot_id = %bot_id, "Bot dynamic status updated");
+            debug!(bot_id = %bot_id, "Bot heartbeat renewed");
             true
         } else {
             debug!(bot_id = %bot_id, "Bot not found for status update");
@@ -900,10 +894,6 @@ impl BotRepoPort for MemoryBotRepo {
                     .unwrap_or(false)
                 // Check summary
                 || b.capabilities.summary.as_ref()
-                    .map(|s| s.to_lowercase().contains(&query_lower))
-                    .unwrap_or(false)
-                // Check dynamic summary (highest priority - real-time info)
-                || b.dynamic_status.dynamic_summary.as_ref()
                     .map(|s| s.to_lowercase().contains(&query_lower))
                     .unwrap_or(false)
                 // Check domains
@@ -1134,7 +1124,6 @@ impl BotRepoPort for MemoryBotRepo {
                 bot_id: bot_uuid.clone(),
                 last_heartbeat: Instant::now(),
                 capabilities: caps,
-                dynamic_status: BotDynamicStatus::default(),
                 ws_connection: None,
                 session_token: Some(session_token),
                 env: Some(resolve_env()),
@@ -1197,7 +1186,6 @@ impl BotRepoPort for MemoryBotRepo {
                 RegisteredBot {
                     bot_uuid: b.bot_id.clone(),
                     capabilities,
-                    dynamic_status: b.dynamic_status.clone(),
                     env: b.env.clone(),
                     created_by: b.created_by.clone(),
                     actor_kind: b.actor_kind.clone(),
@@ -1530,7 +1518,6 @@ impl BotRepoPort for MemoryBotRepo {
                         bot_id: bot_id.clone(),
                         last_heartbeat: Instant::now(),
                         capabilities: BotCapabilities::default(),
-                        dynamic_status: BotDynamicStatus::default(),
                         ws_connection: Some(BotConnection {
                             session_token: session_token.clone(),
                             connected_at: Instant::now(),
@@ -1593,7 +1580,6 @@ impl BotRepoPort for MemoryBotRepo {
                             bot_id: bot_id.clone(),
                             last_heartbeat: Instant::now(),
                             capabilities: BotCapabilities::default(),
-                            dynamic_status: BotDynamicStatus::default(),
                             status: bcs_service_api::ActorStatus::Online,
                             actor_kind: bcs_service_api::ActorKind::Bot,
                             created_by: None,
@@ -1675,7 +1661,6 @@ impl BotRepoPort for MemoryBotRepo {
                     bot_id: bot_id.clone(),
                     last_heartbeat: Instant::now(),
                     capabilities: BotCapabilities::default(),
-                    dynamic_status: BotDynamicStatus::default(),
                     ws_connection: Some(BotConnection {
                         session_token: session_token.clone(),
                         connected_at: Instant::now(),
@@ -1740,7 +1725,6 @@ impl BotRepoPort for MemoryBotRepo {
                     bot_id: bot_id.clone(),
                     last_heartbeat: Instant::now(),
                     capabilities: BotCapabilities::default(),
-                    dynamic_status: BotDynamicStatus::default(),
                     ws_connection: Some(BotConnection {
                         session_token: existing_token.clone(),
                         connected_at: Instant::now(),
@@ -1830,7 +1814,6 @@ impl BotRepoPort for MemoryBotRepo {
                         bot_id: bot_id.clone(),
                         last_heartbeat: Instant::now(),
                         capabilities: BotCapabilities::default(),
-                        dynamic_status: BotDynamicStatus::default(),
                         ws_connection: None,
                         session_token: Some(token.clone()),
                         env: Some(resolve_env()),
@@ -2490,7 +2473,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_dynamic_status() {
+    async fn heartbeat_renews_registration_without_retaining_dynamic_status() {
         let registry = MemoryBotRepo::new();
 
         let caps = BotCapabilities {
@@ -2506,16 +2489,14 @@ mod tests {
             load: Some(0.7),
             updated_at: Some(1234567890),
         };
+        registry.bots.write().await.get_mut("dba").unwrap().last_heartbeat =
+            Instant::now() - BOT_EXPIRY - Duration::from_secs(1);
         let updated = registry.update_status("dba", status.clone()).await;
         assert!(updated);
 
         let bot = registry.get("dba").await.unwrap();
-        assert_eq!(bot.dynamic_status.status, "busy");
-        assert_eq!(
-            bot.dynamic_status.dynamic_summary,
-            Some("Processing deadlock request".to_string())
-        );
-        assert_eq!(bot.dynamic_status.load, Some(0.7));
+        assert!(serde_json::to_value(bot).unwrap().get("dynamic_status").is_none());
+        assert!(!registry.bots.read().await["dba"].is_expired());
 
         let not_found = registry
             .update_status("unknown", BotDynamicStatus::default())
@@ -2781,7 +2762,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn discover_by_dynamic_summary() {
+    async fn discovery_ignores_dynamic_summary() {
         let registry = MemoryBotRepo::new();
 
         let caps = BotCapabilities {
@@ -2799,10 +2780,9 @@ mod tests {
         };
         registry.update_status("dba", status).await;
 
-        // Should find by dynamic summary content
-        let results = registry.discover("deadlock analysis").await;
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].bot_uuid, "dba");
+        // Heartbeat descriptions are not part of the discovery contract.
+        assert!(registry.discover("deadlock analysis").await.is_empty());
+        assert_eq!(registry.discover("DBA").await.len(), 1);
     }
 
     #[tokio::test]

@@ -180,8 +180,8 @@ where
     deserializer.deserialize_seq(SkillsVisitor)
 }
 
-/// Dynamic bot status for real-time discovery.
-/// This is updated periodically (less frequently than heartbeat).
+/// Legacy status heartbeat payload accepted for wire compatibility.
+/// Repositories refresh liveness without retaining this payload.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BotDynamicStatus {
     /// Current status (e.g., "idle", "busy", "offline").
@@ -221,8 +221,6 @@ pub struct RegisteredBot {
     pub bot_uuid: String,
     /// Bot capabilities for discovery.
     pub capabilities: BotCapabilities,
-    /// Dynamic status updated periodically.
-    pub dynamic_status: BotDynamicStatus,
     /// Server environment (prod, gray, pre, dev).
     pub env: Option<String>,
     /// User who created this bot (staff_no). Set during onboard, immutable.

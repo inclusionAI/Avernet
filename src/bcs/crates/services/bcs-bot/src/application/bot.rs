@@ -16,7 +16,7 @@ use bcs_service_api::{
     BotRuntimeConnectOutcome, BotRuntimeConnectionService, BotRuntimeDisconnectCommand,
     BotRuntimeStatusCommand, BotRuntimeStatusOutcome, BotStatusUpdateCommand,
     BotStatusUpdateResult, BotUseCaseError, BotVisibilityCommand, BotVisibilityQueryCommand,
-    BotVisibilityQueryResult, BotVisibilityResult, ConnectionKind, BotDynamicStatus,
+    BotVisibilityQueryResult, BotVisibilityResult, ConnectionKind,
     DynamicStatusResponse, FriendCoreService, KickReason, ProviderBotBinding,
     ProviderBotDiscoverySelector, RegisteredBot, RelationCoreService, ServiceError, ServiceResult,
     SwitchDeliveryToProviderCommand, SwitchDeliveryToProviderResult,
@@ -945,7 +945,6 @@ impl Bot {
                     .map(|bot| RegisteredBot {
                         bot_uuid: bot.bot_uuid,
                         capabilities: bot.capabilities,
-                        dynamic_status: BotDynamicStatus::default(),
                         env: None,
                         created_by: None,
                         actor_kind: bot.actor_kind,
@@ -1375,11 +1374,6 @@ fn matches_query(bot: &RegisteredBot, query: &str) -> bool {
         || bot
             .capabilities
             .summary
-            .as_deref()
-            .is_some_and(|value| contains_ignore_case(value, query))
-        || bot
-            .dynamic_status
-            .dynamic_summary
             .as_deref()
             .is_some_and(|value| contains_ignore_case(value, query))
         || bot
