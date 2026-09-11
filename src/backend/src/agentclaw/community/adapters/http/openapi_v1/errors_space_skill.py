@@ -97,7 +97,7 @@ SPACE_SKILL_HTTP_ERRORS = {
     ),
     SkillNameChangedError: (422, SpacePublicErrorMessage.SKILL_NAME_CHANGED),
     SkillPackageInvalidError: (422, SpacePublicErrorMessage.SKILL_PACKAGE_INVALID),
-    SkillPackageTooLargeError: (422, SpacePublicErrorMessage.SKILL_PACKAGE_INVALID),
+    SkillPackageTooLargeError: (422, SpacePublicErrorMessage.SKILL_PACKAGE_TOO_LARGE),
     GitSnapshotInvalidError: (422, SpacePublicErrorMessage.SKILL_PACKAGE_INVALID),
     GitSnapshotError: (502, SpacePublicErrorMessage.SKILL_GIT_UNAVAILABLE),
     DraftContentStoreError: (
@@ -161,7 +161,7 @@ SPACE_SKILL_ERROR_CODES = {
     DraftSourceNotRefreshableError: SpaceErrorCode.DRAFT_SOURCE_NOT_REFRESHABLE,
     SkillNameChangedError: SpaceErrorCode.SKILL_NAME_CHANGED,
     SkillPackageInvalidError: SpaceErrorCode.SKILL_PACKAGE_INVALID,
-    SkillPackageTooLargeError: SpaceErrorCode.SKILL_PACKAGE_INVALID,
+    SkillPackageTooLargeError: SpaceErrorCode.SKILL_PACKAGE_TOO_LARGE,
     GitSnapshotInvalidError: SpaceErrorCode.SKILL_PACKAGE_INVALID,
     GitSnapshotError: SpaceErrorCode.SKILL_GIT_UNAVAILABLE,
     DraftContentStoreError: SpaceErrorCode.SKILL_DRAFT_STORE_UNAVAILABLE,
