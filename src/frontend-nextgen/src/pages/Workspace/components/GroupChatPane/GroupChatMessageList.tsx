@@ -2,9 +2,11 @@ import { Button } from '@/components/ui';
 import { MessageSelectionToolbar } from '@/components/Workspace/MessageInteractionToolbar';
 import type { GroupView, SessionView } from '@/domain/collaboration';
 import type { MessageInteractions } from '@/pages/Workspace/hooks/useMessageInteractions';
+import { useStickToBottom } from '@/pages/Workspace/hooks/useStickToBottom';
 import type { ChatMessage } from '@tc-chat/core';
 import { BubbleList } from '@tc-chat/ui/es/BubbleList';
 import { ArrowDown } from 'lucide-react';
+import { useCallback, useRef, type MutableRefObject } from 'react';
 import { GroupChatBubble, ThinkingBubble } from './GroupChatBubble';
 
 interface GroupChatMessageListProps {
@@ -50,6 +52,18 @@ export function GroupChatMessageList({
   const showThinkingBubble =
     (isRequesting || groupBootstrapProcessing) &&
     (!lastMessage || lastMessage.role !== 'assistant' || lastMessage.status !== 'streaming');
+  const isStreaming = isRequesting || groupBootstrapProcessing;
+  // BubbleList 的 isStreaming 贴底 effect 不随流式内容增长重跑（依赖只有 messages.length），
+  // 应用层补跟随：用户在底部附近时任何内容增高都持续贴底。
+  const listRootRef = useRef<HTMLDivElement | null>(null);
+  useStickToBottom(listRootRef);
+  const setListRootRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      listRootRef.current = node;
+      (interactions.rootRef as MutableRefObject<HTMLDivElement | null>).current = node;
+    },
+    [interactions.rootRef],
+  );
   const processingLabel =
     group.kind === 'task_master_slave'
       ? 'Manager 正在理解群聊目标…'
@@ -58,11 +72,12 @@ export function GroupChatMessageList({
       : '正在初始化协作任务…';
 
   return (
-    <div ref={interactions.rootRef} className="flex min-h-0 flex-1 flex-col bg-background">
+    <div ref={setListRootRef} className="flex min-h-0 flex-1 flex-col bg-background">
       <BubbleList
         messages={messages}
         computeItemKey={(message) => message.id}
-        isStreaming={isRequesting || groupBootstrapProcessing}
+        isStreaming={isStreaming}
+        followOutput="auto"
         hasMore={hasMoreHistory}
         isLoadingMore={isLoadingMoreHistory}
         className="h-full bg-background px-3 py-3 sm:px-6 sm:py-4"

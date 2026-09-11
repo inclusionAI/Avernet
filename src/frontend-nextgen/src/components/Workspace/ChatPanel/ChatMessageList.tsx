@@ -8,13 +8,14 @@ import { getMessageSpacingClass } from '@/components/Workspace/messagePresentati
 import { MessageSenderLayout, MessageSenderMeta } from '@/components/Workspace/MessageSenderMeta';
 import type { MessageInteractions } from '@/pages/Workspace/hooks/useMessageInteractions';
 import { getLatestUserMessageId, getMessageText } from '@/pages/Workspace/hooks/useMessageInteractions';
+import { useStickToBottom } from '@/pages/Workspace/hooks/useStickToBottom';
 import type { Block, ChatMessage } from '@tc-chat/core';
 import { Bubble } from '@tc-chat/ui/es/Bubble';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import { aixUiPlugin, fileRefPlugin } from '@tc-chat/ui/es/MarkdownRender';
 import { SystemNotice } from '@tc-chat/ui/es/SystemNotice';
 import { ArrowDown } from 'lucide-react';
-import { useRef, type ReactNode } from 'react';
+import { useCallback, useRef, type MutableRefObject, type ReactNode } from 'react';
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
@@ -46,6 +47,18 @@ export function ChatMessageList({
   const latestUserMessageId = getLatestUserMessageId(messages);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
+  // BubbleList（ChatLayout.List 内核）的 isStreaming 贴底 effect 不随流式内容增长重跑
+  //（依赖只有 messages.length），流式结束后的最终渲染/图片加载/输入框增高也不跟随；
+  // 应用层补跟随：用户在底部附近时任何内容增高都持续贴底。
+  const listRootRef = useRef<HTMLDivElement | null>(null);
+  useStickToBottom(listRootRef);
+  const setListRootRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      listRootRef.current = node;
+      (interactions.rootRef as MutableRefObject<HTMLDivElement | null>).current = node;
+    },
+    [interactions.rootRef],
+  );
 
   const getCurrentMessageText = (messageId: string, fallbackText: string) => {
     const currentMessage = messagesRef.current.find((message) => message.id === messageId);
@@ -54,7 +67,7 @@ export function ChatMessageList({
 
   return (
     <div
-      ref={interactions.rootRef}
+      ref={setListRootRef}
       data-workspace-message-list="single-chat"
       className="flex min-h-0 flex-1 flex-col bg-background"
     >
@@ -69,6 +82,7 @@ export function ChatMessageList({
             messages={messages}
             computeItemKey={(message) => message.id}
             isStreaming={isRequesting}
+            followOutput="auto"
             emptyPlaceholder="发送一条消息开始对话"
             renderItem={(message, index) => {
               if (message.role === 'system') {

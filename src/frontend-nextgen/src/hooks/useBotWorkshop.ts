@@ -5,7 +5,7 @@ import { useBotWorkshopNavigation } from '@/hooks/useBotWorkshopNavigation';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
 import { useVisibleInterval } from '@/hooks/useVisibleInterval';
 import { botHealthCheckService } from '@/services/botHealthCheck';
-import type { BotCreateInput, BotDomain } from '@/services/botWorkshop';
+import type { BotDomain } from '@/services/botWorkshop';
 import { botWorkshopService, getBotActionAvailability, getInventoryActionAvailability } from '@/services/botWorkshop';
 import { botManagementService } from '@/services/botWorkshop/botManagementService';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
@@ -13,11 +13,11 @@ import { getBotManagementErrorMessage } from '@/services/botWorkshop/botWorkshop
 import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history } from '@umijs/max';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { useAgentCodingTemplates } from './useAgentCodingTemplates';
-import { useBotCreateAuthorization } from './useBotCreateAuthorization';
 import { useBotWorkshopAccess } from './useBotWorkshopAccess';
+import { useBotWorkshopCreateFlow } from './useBotWorkshopCreateFlow';
 
 /** 动作名即路由键：新增动词时补一行 runner/toast，漏补会在编译期报错而非静默无操作。 */
 const RUN_ACTION_RUNNER: Record<BotManagementVerb, (bot: BotDomain) => Promise<void>> = {
@@ -47,7 +47,6 @@ export function useBotWorkshop() {
   const spaceError = useSpaceContext((space) => space.error);
   const spaceId = currentSpaceId === undefined ? '' : String(currentSpaceId);
   const loadSequence = useRef(0);
-  const [creating, setCreating] = useState(false);
   const { keyword, engine, deployment, serviceMode, page, pageSize } = state;
   const canUseAgentCoding = getCapabilities()
     .getBotEngineOptions()
@@ -112,40 +111,12 @@ export function useBotWorkshop() {
   useEffect(() => {
     void load();
   }, [load]);
+  const createFlow = useBotWorkshopCreateFlow({ load, setCreateScenario: state.setCreateScenario });
   const refreshVisibleList = useCallback(() => void load({ silent: true }), [load]);
-  useVisibleInterval(refreshVisibleList, 30_000, requestIdentity.ready && spaceInitialized && Boolean(spaceId));
-  const handleCreated = useCallback(
-    async (bot: BotDomain) => {
-      state.setCreateScenario(undefined);
-      toast.success(`${bot.name} 已创建`);
-      await load();
-    },
-    [load, state.setCreateScenario],
-  );
-  const createAuthorization = useBotCreateAuthorization(handleCreated);
-  const submitCreate = useCallback(
-    async (input: BotCreateInput) => {
-      setCreating(true);
-      try {
-        const result = await botWorkshopService.create(input);
-        if (result.type === 'authorization_required') {
-          createAuthorization.beginAuthorization(result);
-          return;
-        }
-        if (result.type === 'created_with_pending_after_create') {
-          const actions = result.afterCreateFailures.map((failure) => failure.key).join('、');
-          toast.warning(`Bot 已创建，但后续配置未全部完成${actions ? `：${actions}` : ''}`);
-        }
-        await handleCreated(result.bot);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Bot 创建失败';
-        toast.error(message);
-        throw error;
-      } finally {
-        setCreating(false);
-      }
-    },
-    [createAuthorization.beginAuthorization, handleCreated],
+  useVisibleInterval(
+    refreshVisibleList,
+    30_000,
+    requestIdentity.ready && spaceInitialized && Boolean(spaceId) && !createFlow.creating && !createFlow.authorization,
   );
   const accessControl = useBotWorkshopAccess(currentOpenApiUserId, load);
   const openHealthCheck = useCallback(
@@ -209,8 +180,8 @@ export function useBotWorkshop() {
       if (bot.ownerId) params.set('owner_id', bot.ownerId);
       history.push(`/bot-workshop/logs?${params.toString()}`);
     },
-    creating,
-    createAuthorization: createAuthorization.authorization,
+    creating: createFlow.creating,
+    createAuthorization: createFlow.authorization,
     agentCodingTemplates: agentCodingTemplates.templates,
     agentCodingTemplatesLoading: agentCodingTemplates.loading,
     agentCodingTemplatesError: agentCodingTemplates.error,
@@ -233,10 +204,10 @@ export function useBotWorkshop() {
     openCreateLocal: () => state.setCreateScenario('local'),
     openCreateCloud: () => state.setCreateScenario('cloud'),
     closeCreate: () => {
-      createAuthorization.cancelAuthorization();
+      createFlow.cancelAuthorization();
       state.setCreateScenario(undefined);
     },
-    submitCreate,
+    submitCreate: createFlow.submitCreate,
     runAction,
     claimLock,
     ...accessControl,

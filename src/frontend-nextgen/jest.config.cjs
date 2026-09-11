@@ -41,6 +41,9 @@ module.exports = {
   transform,
   moduleNameMapper,
   transformIgnorePatterns,
+  // Radix UI 的 Popper/Select/Popover/Tooltip 在 jsdom 下异步渲染较慢，
+  // 默认 5000ms 超时不足，统一设为 30000ms 避免环境性超时。
+  testTimeout: 30000,
   // 标记 `@jest-environment` docblock生效；test 目录中带 `/** @jest-environment jsdom */` 的测试自动使用 jsdom
   projects: [
     {
@@ -50,6 +53,7 @@ module.exports = {
       transform,
       moduleNameMapper,
       transformIgnorePatterns,
+      testTimeout: 30000,
     },
   ],
 };

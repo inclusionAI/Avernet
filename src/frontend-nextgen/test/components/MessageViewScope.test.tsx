@@ -52,13 +52,14 @@ describe('MessageViewScopeBadge', () => {
 });
 
 describe('MessageViewScopeField', () => {
-  it('受控 value=full 时首个 radio 选中；切换回调 participant', () => {
+  it('受控 value=full 时展示完整视角；下拉切换回调 participant', () => {
     const onChange = jest.fn();
     render(<MessageViewScopeField value="full" onChange={onChange} />);
-    const radios = screen.getAllByRole('radio');
-    expect(radios).toHaveLength(2);
-    expect(radios[0]).toBeChecked();
-    fireEvent.click(radios[1]);
+    const trigger = screen.getByRole('button', { name: '消息视角' });
+    expect(trigger).toHaveTextContent('完整视角');
+    expect(screen.getByText('消息视角')).toHaveClass('text-foreground');
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole('option', { name: /参与者视角/ }));
     expect(onChange).toHaveBeenCalledWith('participant');
   });
 });

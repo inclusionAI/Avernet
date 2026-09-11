@@ -68,6 +68,20 @@ const sourceTypeLabelMap: Record<string, string> = {
   api: 'API 发起',
 };
 
+/** runtime_stage 标签颜色：draft 草稿 / verify 验证 / online 线上。 */
+export function getRoutineStageTone(stage?: string): 'neutral' | 'warning' | 'success' | 'outline' {
+  switch (stage) {
+    case 'draft':
+      return 'neutral';
+    case 'verify':
+      return 'warning';
+    case 'online':
+      return 'success';
+    default:
+      return 'outline';
+  }
+}
+
 export function getBotDisplayName(
   botNameMap: Record<string, string>,
   botId?: string | null,

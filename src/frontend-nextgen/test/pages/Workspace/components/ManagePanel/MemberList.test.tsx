@@ -4,7 +4,7 @@ import { MemberList } from '@/pages/Workspace/components/ManagePanel/MemberList'
 import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 
 const baseParticipant: ParticipantView = {
   actorId: 'bot-driver',
@@ -35,6 +35,12 @@ function memberRow(actorId: string) {
 }
 
 describe('MemberList', () => {
+  it('uses body-sized member names below the card heading hierarchy', () => {
+    renderMembers([baseParticipant]);
+
+    expect(within(memberRow('bot-driver')).getByText('驱动 Bot')).toHaveClass('text-xs', 'font-medium');
+  });
+
   it('自由聊天群仅在第二行展示成员类型与群主标签，不展示成员模式', () => {
     renderMembers(
       [
@@ -54,10 +60,9 @@ describe('MemberList', () => {
     expect(memberRow('bot-driver').textContent).toContain('驱动 Bot');
     expect(memberRow('bot-driver').textContent).toContain('Bot');
     expect(memberRow('bot-driver').textContent).toContain('群主');
-    // 标签分类型着色：成员类型默认蓝（primary），群主/主节点紫（purple），Badge 默认字号。
-    expect(screen.getByText('Bot')).toHaveClass('text-[11px]', 'bg-primary/10', 'text-primary');
-    expect(screen.getByText('群主')).toHaveClass('text-[11px]', 'bg-purple/10', 'text-purple');
-    expect(screen.getByText('Bot')).not.toHaveClass('text-[10px]');
+    // 标签分类型着色：成员类型默认蓝（primary），群主/主节点紫（purple），管理面板内字号统一为 10px。
+    expect(screen.getByText('Bot')).toHaveClass('text-[10px]', 'bg-primary/10', 'text-primary');
+    expect(screen.getByText('群主')).toHaveClass('text-[10px]', 'bg-purple/10', 'text-purple');
     // bot 图标对齐 Bot 工坊信息列：主色软底圆形首字母（不再黑底 bg-foreground）。
     expect(screen.getByText('驱')).toHaveClass('bg-primary/10', 'text-primary', 'font-semibold');
     expect(memberRow('bot-driver').textContent).not.toContain('禁言');
@@ -185,8 +190,8 @@ describe('MemberList', () => {
     expect(memberRow('human-participant').textContent).toContain('参与者视角');
     expect(memberRow('human-full').textContent).toContain('完整视角');
     // 视角标签色：full 主色蓝（primary），participant 灰（neutral）。
-    expect(screen.getByText('完整视角')).toHaveClass('bg-primary/10', 'text-primary');
-    expect(screen.getByText('参与者视角')).toHaveClass('bg-muted', 'text-muted-foreground');
+    expect(screen.getByText('完整视角')).toHaveClass('text-[10px]', 'bg-primary/10', 'text-primary');
+    expect(screen.getByText('参与者视角')).toHaveClass('text-[10px]', 'bg-muted', 'text-muted-foreground');
   });
 
   it('human 成员无 messageViewScope 回显时不展示视角标签', () => {
