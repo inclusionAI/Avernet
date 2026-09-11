@@ -5,7 +5,10 @@ import { toast } from 'sonner';
 
 export type BotCreateAuthorizationView = BotCreateAuthorization & { message?: string; error?: string };
 
-export function useBotCreateAuthorization(onCreated: (bot: BotDomain) => Promise<void>) {
+export function useBotCreateAuthorization(
+  onCreated: (bot: BotDomain) => Promise<void>,
+  onTerminated: (status: string, message?: string) => void | Promise<void>,
+) {
   const [authorization, setAuthorization] = useState<BotCreateAuthorizationView>();
 
   useEffect(() => {
@@ -40,9 +43,8 @@ export function useBotCreateAuthorization(onCreated: (bot: BotDomain) => Promise
           return;
         }
         terminal = true;
-        setAuthorization((current) =>
-          current ? { ...current, error: `授权未完成（${result.status}），请关闭后重新创建` } : current,
-        );
+        setAuthorization(undefined);
+        await onTerminated(result.status, result.message);
       } catch (error) {
         if (active) {
           setAuthorization((current) =>
@@ -61,7 +63,7 @@ export function useBotCreateAuthorization(onCreated: (bot: BotDomain) => Promise
       active = false;
       window.clearInterval(timer);
     };
-  }, [authorization?.botId, authorization?.request, onCreated]);
+  }, [authorization?.botId, authorization?.request, onCreated, onTerminated]);
 
   return {
     authorization,

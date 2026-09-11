@@ -1,8 +1,8 @@
-import { MessageViewScopeField } from '@/components/MessageViewScope';
 import type { IdentityView } from '@/domain/collaboration';
-import { DEFAULT_MESSAGE_VIEW_SCOPE } from '@/domain/collaboration/messageViewScope';
+import { DEFAULT_MESSAGE_VIEW_SCOPE, MESSAGE_VIEW_SCOPE_OPTIONS } from '@/domain/collaboration/messageViewScope';
 import type { MessageViewScope } from '@/domain/collaboration/types';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { GroupLeaderSelect } from './GroupLeaderSelect';
 
 export interface CreateGroupViewScopeProps {
   activeIdentity?: IdentityView | null;
@@ -11,12 +11,24 @@ export interface CreateGroupViewScopeProps {
 }
 
 /**
- * 建群面板的「消息视角」radio —— 仅 human（kind==='user'）身份展示。
+ * 建群面板的「消息视角」下拉选择 —— 仅 human（kind==='user'）身份展示。
  * bot 身份建群不显示；后端默认会话视角仅对 human 建群链路生效。
  */
 export function CreateGroupViewScope({ activeIdentity, value, onChange }: CreateGroupViewScopeProps) {
   if (activeIdentity?.kind !== 'user') return null;
-  return <MessageViewScopeField value={value} onChange={onChange} />;
+  return (
+    <GroupLeaderSelect
+      id="create-group-view-scope"
+      label="消息视角"
+      value={value}
+      options={MESSAGE_VIEW_SCOPE_OPTIONS.map((option) => ({
+        id: option.value,
+        name: option.label,
+        description: option.description,
+      }))}
+      onChange={(scope) => onChange(scope as MessageViewScope)}
+    />
+  );
 }
 
 export interface UseCreateGroupViewScopeResult {

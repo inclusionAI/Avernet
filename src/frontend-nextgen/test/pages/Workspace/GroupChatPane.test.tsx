@@ -534,6 +534,62 @@ describe('GroupChatBubble message actions', () => {
   });
 });
 
+describe('GroupChatBubble 多 Bot 并发流式', () => {
+  it('非最后一条的流式 assistant 消息也进入 streaming 态（并发输出各自展示「…」动画）', () => {
+    mockBubbleRenders.length = 0;
+    render(
+      <>
+        <GroupChatBubble
+          message={
+            {
+              id: 'm-bot-a',
+              role: 'assistant',
+              content: '',
+              status: 'streaming',
+              extra: { botUuid: 'bot-a' },
+            } as never
+          }
+          isLastMessage={false}
+          isRequesting
+          group={group}
+          participants={[]}
+        />
+        <GroupChatBubble
+          message={
+            {
+              id: 'm-bot-b',
+              role: 'assistant',
+              content: '',
+              status: 'streaming',
+              extra: { botUuid: 'bot-b' },
+            } as never
+          }
+          isLastMessage
+          isRequesting
+          group={group}
+          participants={[]}
+        />
+      </>,
+    );
+    expect(mockBubbleRenders[0].isStreaming).toBe(true);
+    expect(mockBubbleRenders[1].isStreaming).toBe(true);
+  });
+
+  it('已完成（done）的非最后一条消息不因全局 isRequesting 进入 streaming 态', () => {
+    mockBubbleRenders.length = 0;
+    render(
+      <GroupChatBubble
+        message={{ id: 'm-done', role: 'assistant', content: '已完成', status: 'done' } as never}
+        isLastMessage={false}
+        isRequesting
+        group={group}
+        participants={[]}
+      />,
+    );
+    expect(mockBubbleRenders[0].isStreaming).toBe(false);
+  });
+});
+
 describe('GroupChatBubble avatar wiring', () => {
   it('把顶栏用户头像传给用户消息，Bot 消息不复用该头像', () => {
     mockBubbleRenders.length = 0;

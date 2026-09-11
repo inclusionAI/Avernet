@@ -1,8 +1,8 @@
-import { Button } from '@/components/ui';
 import { Modal, ModalContent } from '@/components/ui/Modal';
 import type { GroupView, IdentityView } from '@/domain/collaboration';
 import { resolveAuthenticatedDisplayName } from '@/domain/userIdentity';
 import { GROUP_CREATE_VIA_EXECUTE } from '@/services/workspace/groupCreateConfig';
+import { cn } from '@/utils/cn';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAllAvailableBots } from '../../hooks/useAllAvailableBots';
 import { useCollaborationTemplates } from '../../hooks/useCollaborationTemplates';
@@ -12,13 +12,13 @@ import { useParticipantBinding } from '../../hooks/useParticipantBinding';
 import { BindingSlot, YamlValidateButton } from './BindingSlot';
 import { CollaborationFlowAside } from './CollaborationFlowAside';
 import { CollaborationTemplatePicker } from './CollaborationTemplatePicker';
+import { CreateGroupFooter } from './CreateGroupFooter';
 import { CreateGroupHeader } from './CreateGroupHeader';
 import { CreateGroupViewScope, useCreateGroupViewScope } from './CreateGroupViewScope';
 import { GroupConfigFields, type GroupStrategyKind } from './GroupConfigFields';
 import type { GroupLeaderOption } from './GroupLeaderSelect';
 import { formatAutoGroupName } from './groupNaming';
 import { GroupParticipantPicker } from './GroupParticipantPicker';
-import { summarizeYaml } from './groupYamlUtils';
 
 export interface CreateGroupModalProps {
   open: boolean;
@@ -65,11 +65,6 @@ export function CreateGroupModal({
   const { reset: resetTemplates } = templates;
   const binding = useParticipantBinding(kind === 'task_dag');
 
-  const yamlSummary = useMemo(() => {
-    if (kind !== 'task_dag' || !definitionYaml.trim()) return [];
-    const keys = summarizeYaml(definitionYaml);
-    return keys.filter((k) => k === 'participants' || k === 'roles');
-  }, [kind, definitionYaml]);
   const selectedBots = useMemo(() => {
     const map = new Map<string, { id: string; name: string }>();
     [...picker.friends, ...picker.mine, ...picker.candidates].forEach((bot) => {
@@ -156,6 +151,7 @@ export function CreateGroupModal({
     <BindingSlot visible={kind === 'task_dag' && supportsStateMachine} binding={binding} botNameResolver={allBotName} />
   );
   const showFlowAside = kind === 'task_dag' && binding.yamlValidation.isValidated;
+  const yamlValidationError = kind === 'task_dag' ? binding.yamlValidation.validationError : undefined;
 
   const templateSlot: ReactNode =
     kind === 'task_dag' && supportsStateMachine ? (
@@ -210,16 +206,21 @@ export function CreateGroupModal({
   return (
     <Modal open={open} onOpenChange={(next) => !next && onClose()}>
       <ModalContent
-        size={showFlowAside ? 'xl' : 'lg'}
+        size="lg"
         closeLabel="关闭发起协作弹窗"
-        className="min-w-0 gap-0 overflow-hidden p-0"
+        className={cn(
+          'h-[min(860px,calc(100vh-2rem))] min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0',
+          showFlowAside && 'xl:left-[calc(50%-208px)] xl:overflow-visible',
+        )}
       >
         <CreateGroupHeader />
-
         <div className="flex min-h-0 min-w-0 max-w-full overflow-x-hidden">
           <div
             data-testid="create-group-modal-body"
-            className="app-scrollbar max-h-[560px] min-w-0 max-w-full flex-1 space-y-5 overflow-x-hidden overflow-y-auto px-6 py-6"
+            className={cn(
+              'app-scrollbar flex h-full min-h-0 min-w-0 max-w-full flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto px-6 py-6',
+              showFlowAside ? 'lg:overflow-y-auto' : 'lg:overflow-y-hidden',
+            )}
           >
             <GroupConfigFields
               kind={kind}
@@ -229,7 +230,6 @@ export function CreateGroupModal({
               managerBotId={managerBotId}
               deliveryPolicy={deliveryPolicy}
               definitionYaml={definitionYaml}
-              yamlSummary={yamlSummary}
               yamlValidated={kind === 'task_dag' && binding.yamlValidation.isValidated}
               leaderOptions={leaderOptions}
               supportsStateMachine={supportsStateMachine}
@@ -259,7 +259,6 @@ export function CreateGroupModal({
               }}
             />
             <CreateGroupViewScope activeIdentity={activeIdentity} value={viewScope} onChange={changeViewScope} />
-
             {(kind !== 'task_dag' || binding.yamlValidation.isValidated) && (
               <GroupParticipantPicker
                 picker={picker}
@@ -273,24 +272,24 @@ export function CreateGroupModal({
                     ? { id: activeIdentity.id, name: activeIdentity.displayName }
                     : null
                 }
+                listViewportClassName={showFlowAside ? 'max-h-[420px]' : undefined}
+                fillAvailableHeight={!showFlowAside}
               />
             )}
-
             {friendlyError && (
               <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{friendlyError}</p>
             )}
           </div>
-          {showFlowAside && <CollaborationFlowAside leaderOptions={allAvailableBots} binding={binding} />}
         </div>
+        {showFlowAside && <CollaborationFlowAside leaderOptions={allAvailableBots} binding={binding} />}
 
-        <div className="flex items-center justify-end gap-2 border-t border-border px-6 py-4">
-          <Button variant="secondary" size="md" disabled={creating} onClick={onClose}>
-            取消
-          </Button>
-          <Button size="md" loading={creating} disabled={creating || !canSubmit} onClick={handleSubmit}>
-            确认创建
-          </Button>
-        </div>
+        <CreateGroupFooter
+          yamlValidationError={yamlValidationError}
+          creating={creating}
+          canSubmit={canSubmit}
+          onClose={onClose}
+          onSubmit={handleSubmit}
+        />
       </ModalContent>
     </Modal>
   );

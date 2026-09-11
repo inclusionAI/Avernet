@@ -16,6 +16,8 @@ export interface YamlCodeEditorProps {
   className?: string;
   /** 固定高度（px），内部可上下滚动；缺省 320。 */
   height?: number;
+  /** 在 Flex 表单区中占满剩余高度，并以 320px 作为最小高度。 */
+  fillAvailableHeight?: boolean;
 }
 
 /** 带语法高亮的 YAML 编辑器（CodeMirror lazy load），固定高度、内部可滚动。 */
@@ -27,9 +29,18 @@ export function YamlCodeEditor({
   loading = false,
   className,
   height = 320,
+  fillAvailableHeight = false,
 }: YamlCodeEditorProps) {
   return (
-    <div className={cn('overflow-hidden rounded-lg border border-border bg-background', className)} style={{ height }}>
+    <div
+      data-testid="yaml-code-editor"
+      className={cn(
+        'overflow-hidden rounded-lg border border-border bg-background',
+        fillAvailableHeight && 'min-h-[320px] flex-1',
+        className,
+      )}
+      style={fillAvailableHeight ? undefined : { height }}
+    >
       {loading ? (
         <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
           <span>加载模板内容...</span>

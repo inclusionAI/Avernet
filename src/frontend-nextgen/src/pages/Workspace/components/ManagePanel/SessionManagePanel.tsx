@@ -107,17 +107,17 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
             <div className="mt-3 space-y-2 rounded-lg bg-muted px-3 py-2">
               <div>
                 <p className="m-0 text-[11px] font-medium text-muted-foreground">成员数量</p>
-                <p className="m-0 mt-1 text-sm font-medium text-foreground">
+                <p className="m-0 mt-1 text-xs font-medium text-foreground">
                   {session.participantCount || session.participants.length}
                 </p>
               </div>
               <div>
                 <p className="m-0 text-[11px] font-medium text-muted-foreground">群 ID</p>
-                <p className="m-0 mt-1 break-all text-xs font-medium text-foreground">{session.groupId}</p>
+                <p className="m-0 mt-1 break-all font-mono text-xs text-foreground">{session.groupId}</p>
               </div>
               <div>
                 <p className="m-0 text-[11px] font-medium text-muted-foreground">会话 ID</p>
-                <p className="m-0 mt-1 break-all text-xs font-medium text-foreground">{session.sessionId}</p>
+                <p className="m-0 mt-1 break-all font-mono text-xs text-foreground">{session.sessionId}</p>
               </div>
             </div>
           </Card>
@@ -147,7 +147,7 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
               <Button
                 variant="ghost"
                 onClick={() => void handleShare()}
-                className="h-auto w-full justify-start rounded-lg border border-primary/25 bg-background px-3 py-2 text-left text-sm text-primary hover:bg-primary/10 hover:text-primary"
+                className="h-auto w-full justify-start rounded-lg border border-primary/25 bg-background px-3 py-2 text-left text-xs text-primary hover:bg-primary/10 hover:text-primary"
               >
                 <LinkIcon className="h-4 w-4 shrink-0" />
                 <span className="flex flex-col items-start">
@@ -167,7 +167,7 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
                 >
                   <Button
                     variant="ghost"
-                    className="h-auto w-full justify-start rounded-lg border border-destructive/30 bg-background px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10"
+                    className="h-auto w-full justify-start rounded-lg border border-destructive/30 bg-background px-3 py-2 text-left text-xs text-destructive hover:bg-destructive/10"
                   >
                     <Trash2 className="h-4 w-4 shrink-0" />
                     <span className="flex flex-col items-start">
@@ -191,7 +191,7 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
                   <Button
                     variant="ghost"
                     disabled={!activeIdentity}
-                    className="h-auto w-full justify-start rounded-lg border border-destructive/30 bg-background px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10"
+                    className="h-auto w-full justify-start rounded-lg border border-destructive/30 bg-background px-3 py-2 text-left text-xs text-destructive hover:bg-destructive/10"
                   >
                     <LogOut className="h-4 w-4 shrink-0" />
                     <span className="flex flex-col items-start">

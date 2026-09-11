@@ -15,6 +15,10 @@ export interface GroupParticipantPickerProps {
   excludeId?: string | null;
   /** 置顶 Bot（如发起方 bot）；在 task_dag 模式下将此 Bot 放到列表首位。 */
   prependBot?: { id: string; name: string } | null;
+  /** 候选列表滚动视口的局部高度覆盖。 */
+  listViewportClassName?: string;
+  /** 在固定高度面板中占满 Footer 上方的剩余空间。 */
+  fillAvailableHeight?: boolean;
 }
 
 function matchesSearch(bot: CollaborationBotView, keyword: string): boolean {
@@ -37,6 +41,8 @@ export function GroupParticipantPicker({
   onToggle,
   excludeId,
   prependBot,
+  listViewportClassName,
+  fillAvailableHeight = false,
 }: GroupParticipantPickerProps) {
   const visibleBots = useMemo(() => {
     const source = picker.tab === 'friends' ? picker.friends : picker.tab === 'mine' ? picker.mine : picker.candidates;
@@ -63,9 +69,12 @@ export function GroupParticipantPicker({
   const selectedBots = selectedOptions.filter((bot) => selectedIds.includes(bot.id));
 
   return (
-    <div data-testid="group-participant-picker" className="w-full min-w-0 max-w-full">
+    <div
+      data-testid="group-participant-picker"
+      className={cn('w-full min-w-0 max-w-full', fillAvailableHeight && 'flex min-h-0 flex-1 flex-col')}
+    >
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-semibold text-muted-foreground">
+        <span className="text-xs font-semibold text-foreground">
           成员 Bot <span className="text-destructive">*</span>
         </span>
         <span className="rounded-lg border border-primary/20 bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
@@ -74,24 +83,24 @@ export function GroupParticipantPicker({
       </div>
 
       {selectedBots.length > 0 && (
-        <div className="mb-3 flex min-w-0 max-w-full flex-wrap gap-2">
+        <div
+          data-testid="group-participant-selected"
+          className="app-scrollbar mb-3 flex max-h-24 min-w-0 max-w-full flex-wrap gap-2 overflow-y-auto pr-1"
+        >
           {selectedBots.map((bot) => (
             <span
               key={bot.id}
-              className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 py-1 pl-2 pr-1"
+              className="inline-flex items-center gap-1 rounded-md border border-primary/20 bg-primary/10 py-0.5 pl-1.5 pr-0.5"
             >
-              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
-                {avatarText(bot.name)}
-              </span>
               <span className="max-w-30 truncate text-xs font-semibold text-primary">{bot.name}</span>
               <Button
                 variant="ghost"
                 size="sm"
                 aria-label={`移除${bot.name}`}
-                className="h-5 w-5 rounded-full border-0 p-0 text-primary hover:bg-primary/10"
+                className="h-4 w-4 rounded-md border-0 p-0 text-primary hover:bg-primary/10"
                 onClick={() => onToggle(bot.id)}
               >
-                <X className="h-3 w-3" aria-hidden />
+                <X className="h-2.5 w-2.5" aria-hidden />
               </Button>
             </span>
           ))}
@@ -122,12 +131,6 @@ export function GroupParticipantPicker({
         />
       </div>
 
-      {picker.tab === 'candidates' && (
-        <div className="mb-3 rounded-lg border border-border bg-primary/10 px-3 py-2 text-xs leading-5 text-muted-foreground">
-          可协作 Bot 范围：公开 Bot 与已接受好友的集合。
-        </div>
-      )}
-
       {picker.error ? (
         <div className="flex items-center justify-between rounded-lg bg-destructive/5 px-3 py-2 text-sm text-destructive">
           <span>{picker.error}</span>
@@ -156,12 +159,16 @@ export function GroupParticipantPicker({
           className={cn(
             'min-w-0 w-full max-w-full overflow-hidden rounded-lg border border-border bg-card',
             cardMode && 'border-0 bg-transparent',
+            fillAvailableHeight && 'min-h-0 flex-1',
           )}
         >
           <div
+            data-testid="group-participant-list"
             className={cn(
-              'app-scrollbar max-h-[320px] overflow-y-auto',
+              'app-scrollbar min-h-[180px] max-h-[320px] overflow-y-auto pb-2',
               cardMode ? 'space-y-1.5' : 'divide-y divide-border',
+              fillAvailableHeight && 'h-full max-h-none',
+              listViewportClassName,
             )}
             onScroll={(event) => {
               const target = event.currentTarget;
@@ -201,7 +208,7 @@ export function GroupParticipantPicker({
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="flex min-w-0 items-center gap-2">
-                      <span className="truncate text-sm font-semibold text-foreground">{bot.name}</span>
+                      <span className="truncate text-xs font-semibold text-foreground">{bot.name}</span>
                       {isOriginator && (
                         <span className="shrink-0 rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
                           发起方

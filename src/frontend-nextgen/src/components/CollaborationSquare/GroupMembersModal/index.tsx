@@ -32,8 +32,8 @@ function MemberAvatar({ member }: { member: PublicGroupMember }) {
     <div
       className={
         member.type === 'bot'
-          ? 'grid size-8 flex-none place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary shadow-sm'
-          : 'grid size-8 flex-none place-items-center rounded-full bg-brand/15 text-xs font-medium text-brand shadow-sm'
+          ? 'grid size-7 flex-none place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary'
+          : 'grid size-7 flex-none place-items-center rounded-full bg-brand/15 text-xs font-medium text-brand'
       }
     >
       {symbol}
@@ -57,25 +57,24 @@ export function GroupMembersModal({ open, group, members, loading, onClose }: Gr
         ) : members.length === 0 ? (
           <p className="m-0 text-sm leading-6 text-muted-foreground">暂无成员信息。</p>
         ) : (
-          <div className="space-y-2">
-            {members.map((member) => {
+          <div className="max-h-[400px] overflow-y-auto rounded-lg border border-border">
+            {members.map((member, index) => {
               const roleBadge = getRoleBadge(member.role, group?.typeLabel);
+              const isLast = index === members.length - 1;
               return (
                 <div
                   key={member.id}
-                  className="flex items-center gap-2 rounded-lg border border-border bg-card p-2 shadow-sm"
+                  className={`flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/50${
+                    isLast ? '' : ' border-b border-border'
+                  }`}
                 >
                   <MemberAvatar member={member} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center">
-                      <span className="max-w-full truncate text-sm font-semibold text-foreground">
-                        {member.displayName}
-                      </span>
-                    </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                      <Badge tone="primary">{member.type === 'bot' ? 'Bot' : '用户'}</Badge>
-                      <Badge tone={roleBadge.tone}>{roleBadge.label}</Badge>
-                    </div>
+                  <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
+                    {member.displayName}
+                  </span>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <Badge tone="primary">{member.type === 'bot' ? 'Bot' : '用户'}</Badge>
+                    <Badge tone={roleBadge.tone}>{roleBadge.label}</Badge>
                   </div>
                 </div>
               );

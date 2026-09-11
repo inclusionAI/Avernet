@@ -60,3 +60,101 @@ it('renders an unresolved collaboration friend as a disabled unknown option', ()
   fireEvent.click(option);
   expect(onToggle).not.toHaveBeenCalled();
 });
+
+it('fills the remaining modal height without extending beneath the footer', () => {
+  render(
+    <GroupParticipantPicker
+      picker={makePicker([
+        {
+          id: 'b1',
+          name: 'Alpha',
+          online: true,
+          status: 'online',
+          reachability: 'reachable',
+          visibility: 'public',
+          isFriend: true,
+        },
+      ])}
+      selectedIds={[]}
+      selectedOptions={[]}
+      showMineTab={false}
+      fillAvailableHeight
+      onToggle={jest.fn()}
+    />,
+  );
+
+  expect(screen.getByTestId('group-participant-picker')).toHaveClass('flex', 'min-h-0', 'flex-1', 'flex-col');
+  expect(screen.getByTestId('group-participant-list').parentElement).toHaveClass('min-h-0', 'flex-1');
+  expect(screen.getByTestId('group-participant-list')).toHaveClass('h-full', 'max-h-none', 'pb-2');
+});
+
+it('keeps the bot list readable when many selected bots wrap into multiple rows', () => {
+  const selectedOptions = Array.from({ length: 14 }, (_, index) => ({
+    id: `bot-${index}`,
+    name: `Bot ${index}`,
+  }));
+
+  render(
+    <GroupParticipantPicker
+      picker={makePicker([
+        {
+          id: 'candidate-1',
+          name: 'Candidate 1',
+          online: true,
+          status: 'online',
+          reachability: 'reachable',
+          visibility: 'public',
+          isFriend: true,
+        },
+      ])}
+      selectedIds={selectedOptions.map((bot) => bot.id)}
+      selectedOptions={selectedOptions}
+      showMineTab={false}
+      fillAvailableHeight
+      onToggle={jest.fn()}
+    />,
+  );
+
+  expect(screen.getByTestId('group-participant-selected')).toHaveClass('max-h-24', 'overflow-y-auto');
+  expect(screen.getByTestId('group-participant-list')).toHaveClass('min-h-[180px]');
+});
+
+it('shows selected member bots by name only and uses a compact list typography', () => {
+  render(
+    <GroupParticipantPicker
+      picker={makePicker([
+        {
+          id: 'candidate-1',
+          name: 'Candidate 1',
+          online: true,
+          status: 'online',
+          reachability: 'reachable',
+          visibility: 'public',
+          isFriend: true,
+        },
+      ])}
+      selectedIds={['selected-1']}
+      selectedOptions={[{ id: 'selected-1', name: 'Selected Bot' }]}
+      showMineTab={false}
+      onToggle={jest.fn()}
+    />,
+  );
+
+  expect(screen.getByTestId('group-participant-selected').querySelector('span.flex.h-5')).toBeNull();
+  expect(screen.getByText('Selected Bot').parentElement).toHaveClass('rounded-md', 'py-0.5');
+  expect(screen.getByText('Candidate 1')).toHaveClass('text-xs');
+});
+
+it('does not show the redundant collaboration Bot range hint', () => {
+  render(
+    <GroupParticipantPicker
+      picker={{ ...makePicker([]), tab: 'candidates', candidates: [] }}
+      selectedIds={[]}
+      selectedOptions={[]}
+      showMineTab={false}
+      onToggle={jest.fn()}
+    />,
+  );
+
+  expect(screen.queryByText('可协作 Bot 范围：公开 Bot 与已接受好友的集合。')).not.toBeInTheDocument();
+});

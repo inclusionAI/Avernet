@@ -92,6 +92,9 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
     }
   };
 
+  // AgentPass 授权沿用老版全屏承载方式。此时必须卸载创建 Modal，避免其遮罩、内容框和关闭按钮覆盖授权页。
+  if (authorization) return <AuthorizationPanel authorization={authorization} />;
+
   return (
     <Modal open={open} onOpenChange={(nextOpen) => !nextOpen && !creating && onClose()}>
       <ModalContent
@@ -99,43 +102,39 @@ const CreateBotModal: React.FC<CreateBotModalProps> = ({
         aria-describedby="create-bot-description"
         className="overlay-scrollbar max-h-[calc(100vh-3rem)] max-w-[710px] p-4"
       >
-        {authorization ? (
-          <AuthorizationPanel authorization={authorization} />
-        ) : (
-          <>
-            <ModalHeader className="flex-row items-center gap-2.5 space-y-0">
-              <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                {isLocal ? <Laptop aria-hidden className="size-5" /> : <Cloud aria-hidden className="size-5" />}
-              </div>
-              <div className="min-w-0 space-y-1">
-                <ModalTitle className="text-base leading-6">{isLocal ? '创建本地 Bot' : '创建云端 Bot'}</ModalTitle>
-                <ModalDescription id="create-bot-description" className="text-xs leading-5">
-                  {isLocal
-                    ? 'Bot 在个人设备中运行，不提供服务化能力。'
-                    : 'Bot 在云端运行，可按引擎能力选择是否提供服务。'}
-                </ModalDescription>
-              </div>
-            </ModalHeader>
-            <CreateBotFormFields
-              values={values}
-              setValues={setValues}
-              spaces={spaces}
-              creating={creating}
-              error={error}
-              agentCodingError={agentCodingError}
-              agentCodingTemplates={agentCodingTemplates}
-              agentCodingTemplatesLoading={agentCodingTemplatesLoading}
-              agentCodingTemplatesError={agentCodingTemplatesError}
-              onRetryAgentCodingTemplates={onRetryAgentCodingTemplates}
-              onValidateReady={(validator) => {
-                agentCodingValidatorRef.current = validator;
-              }}
-              onAgentCodingErrorChange={setAgentCodingError}
-              onCancel={onClose}
-              onSubmit={submit}
-            />
-          </>
-        )}
+        <>
+          <ModalHeader className="flex-row items-center gap-2.5 space-y-0">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              {isLocal ? <Laptop aria-hidden className="size-5" /> : <Cloud aria-hidden className="size-5" />}
+            </div>
+            <div className="min-w-0 space-y-1">
+              <ModalTitle className="text-base leading-6">{isLocal ? '创建本地 Bot' : '创建云端 Bot'}</ModalTitle>
+              <ModalDescription id="create-bot-description" className="text-xs leading-5">
+                {isLocal
+                  ? 'Bot 在个人设备中运行，不提供服务化能力。'
+                  : 'Bot 在云端运行，可按引擎能力选择是否提供服务。'}
+              </ModalDescription>
+            </div>
+          </ModalHeader>
+          <CreateBotFormFields
+            values={values}
+            setValues={setValues}
+            spaces={spaces}
+            creating={creating}
+            error={error}
+            agentCodingError={agentCodingError}
+            agentCodingTemplates={agentCodingTemplates}
+            agentCodingTemplatesLoading={agentCodingTemplatesLoading}
+            agentCodingTemplatesError={agentCodingTemplatesError}
+            onRetryAgentCodingTemplates={onRetryAgentCodingTemplates}
+            onValidateReady={(validator) => {
+              agentCodingValidatorRef.current = validator;
+            }}
+            onAgentCodingErrorChange={setAgentCodingError}
+            onCancel={onClose}
+            onSubmit={submit}
+          />
+        </>
       </ModalContent>
     </Modal>
   );
