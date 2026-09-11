@@ -14,10 +14,13 @@ the command as it will be invoked. Both source spellings are accepted, and a
           digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b...
           version: "2.1.0"           # a label only; never decides convergence
 
-        # an inline source
+        # an inline source: a declaration object, like every source
         - name: mycli
-          source: https://x/mycli
-          digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b...
+          source:
+            protocol: git
+            url: https://code.example.com/team/tools.git
+            ref: v1.0.0
+          subpath: bin/mycli
 
         # over git the resolved commit SHA is the pin, so 'digest' is
         # refused rather than required
@@ -25,8 +28,8 @@ the command as it will be invoked. Both source spellings are accepted, and a
           from: content
           subpath: bin/tool
 
-An entry reaches ``resolve`` as the raw mapping, e.g. ``{"name": "mycli",
-"source": "https://x/mycli", "digest": "sha256:…"}``.
+An entry reaches ``resolve`` as the raw mapping, e.g. ``{"name": "qc",
+"from": "artifacts", "key": "qc/v2.tgz", "digest": "sha256:…"}``.
 
 This materialiser fetches nothing, verifies nothing, stores nothing and
 delivers nothing. It translates: manifest entries into ``CliToolDecl``s on the
@@ -258,11 +261,12 @@ class CliToolsMaterialiser(Materialiser):
                 )
                 continue
 
-            # Substituted into BOTH halves, so the address the report shows and
-            # the entry the acquisition reads are one string. The fetch funnel
-            # substitutes again on its own road, which is harmless (the result
-            # is a fixed point) and is what covers a ``from``-named source's
-            # URL — a value this materialiser never sees.
+            # ``source_url`` is the declared address the report echoes, and it
+            # is what the API-driven install road hands to the transport, so
+            # it is substituted here. The entry itself is carried through
+            # untouched: the fetch funnel substitutes again on its own road,
+            # which is what covers a ``from``-named source's URL — a value
+            # this materialiser never sees.
             substituted = placeholders.resolve(
                 decl.source_url,
                 engine_type=ctx.engine_type,
@@ -270,8 +274,6 @@ class CliToolsMaterialiser(Materialiser):
                 tenant=ctx.tenant,
             )
             resolved_entry = dict(entry)
-            if isinstance(resolved_entry.get("source"), str):
-                resolved_entry["source"] = substituted
             intents.append(
                 Intent(
                     name,

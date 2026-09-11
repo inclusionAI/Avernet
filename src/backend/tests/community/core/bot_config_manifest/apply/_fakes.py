@@ -299,6 +299,85 @@ class FakeCredentials:
         )
 
 
+# ── the declared object-source rig ──────────────────────────────────────────
+# A ``source`` is a declaration: ``{protocol: oss, bucket, key, auth}`` or
+# ``{protocol: git, ...}``. The object road is the one a consumer test reaches
+# for when what it is really pinning is the *fetch* — pinning, keep_last,
+# budget, receipts — so these constants and helpers give every such test one
+# bucket, one credential and one spelling of the declaration.
+
+#: The bucket the rigs seed. A document names it; the endpoint never appears
+#: in a document, which is the whole security property of this road.
+OSS_BUCKET = "manifest-fixtures"
+#: The credential name a declared source carries — ``auth`` is mandatory on
+#: this road, since the endpoint is a property of the credential row.
+OSS_AUTH = "oss-cred"
+OSS_ENDPOINT = "https://oss-cn-shanghai.aliyuncs.com"
+#: Deliberately short and with no provider prefix. Nothing on this road
+#: validates a key id's shape — the store fake compares it as an opaque
+#: string — while anything token-shaped, or merely 12+ characters with a
+#: little entropy, trips ``scripts/ci/check_secrets.py`` on the field name
+#: alone and blocks every push that touches this line.
+OSS_ACCESS_KEY_ID = "fake-ak"
+
+
+class FakeObjectCredentials(FakeCredentials):
+    """:class:`FakeCredentials` plus the half only the object road reads.
+
+    The base fake's binding answers the two header seams; an ``oss`` source
+    also asks it for an :class:`ObjectStoreTarget`, and *that* is where the
+    endpoint and the key pair come from — never from the document.
+    """
+
+    def binding(self, *, name: str):
+        binding = super().binding(name=name)
+        binding.object_store_target = lambda bucket: ObjectStoreTarget(
+            endpoint=OSS_ENDPOINT,
+            bucket=bucket,
+            access_key_id=OSS_ACCESS_KEY_ID,
+            secret_access_key="fake-sk",  # short, for the reason above
+            region="cn-shanghai",
+        )
+        return binding
+
+
+def oss_source(
+    key: str, *, bucket: str = OSS_BUCKET, auth: str | None = OSS_AUTH
+) -> dict[str, Any]:
+    """The declared ``source`` an entry carries to read one object."""
+    decl: dict[str, Any] = {"protocol": "oss", "bucket": bucket, "key": key}
+    if auth is not None:
+        decl["auth"] = auth
+    return decl
+
+
+def seeded_object_store(objects: dict[str, bytes] | None = None) -> FakeObjectStore:
+    """A store holding ``key → bytes`` under :data:`OSS_BUCKET`, readable by
+    the key pair :class:`FakeObjectCredentials` presents."""
+    store = FakeObjectStore()
+    for key, body in (objects or {}).items():
+        store.put(OSS_BUCKET, key, body, access_key_id=OSS_ACCESS_KEY_ID)
+    return store
+
+
+def declared_session(**kwargs):
+    """The per-apply source session a declared source needs.
+
+    Every entry that reaches a fetcher carries one — the ``from`` road reads
+    ``sources`` out of it and the git road checks out through it — so a rig
+    driving a declared source hands the context one even when the object road
+    it takes never looks inside.
+    """
+    from agentclaw.community.core.bot_config_manifest.apply.source_session import (
+        SourceSession,
+    )
+
+    kwargs.setdefault("sources", {})
+    kwargs.setdefault("baselines", {})
+    kwargs.setdefault("git", None)
+    return SourceSession(**kwargs)
+
+
 class FakeIdentityService:
     """Stands in for ``IdentityService``: files held, writes counted.
 
@@ -386,9 +465,11 @@ class FakeIdentityService:
 
 
 def identity_rig(files: dict[str, str] | None = None):
-    """A materialiser over fakes: (materialiser, identity fake, fetcher fake).
+    """A materialiser over fakes: (materialiser, identity fake, object store,
+    content store).
 
-    The fetched URL ``SOUL_URL`` serves ``SOUL_BODY`` for identity tests.
+    The declared source :data:`SOUL_SOURCE` reads :data:`SOUL_KEY` out of the
+    seeded bucket and serves :data:`SOUL_BODY`.
     """
     from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
         EntryFetcher,
@@ -398,13 +479,19 @@ def identity_rig(files: dict[str, str] | None = None):
     )
 
     identity = FakeIdentityService(files)
-    fetcher = FakeGuardedFetcher(responses={SOUL_URL: fetched_object(SOUL_BODY)})
+    objects = seeded_object_store({SOUL_KEY: SOUL_BODY})
     content = FakeManifestContent()
-    pipeline = EntryFetcher(fetcher, content, FakeCredentials(), FakeObjectStore())
-    return IdentityMaterialiser(identity, pipeline), identity, fetcher, content
+    pipeline = EntryFetcher(
+        FakeGuardedFetcher(responses={}),
+        content,
+        FakeObjectCredentials(),
+        objects,
+    )
+    return IdentityMaterialiser(identity, pipeline), identity, objects, content
 
 
-SOUL_URL = "https://content.example/identity/soul.md"
+SOUL_KEY = "identity/soul.md"
+SOUL_SOURCE = oss_source(SOUL_KEY)
 SOUL_BODY = b"# team charter\nServe the customer honestly.\n"
 
 

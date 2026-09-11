@@ -8,10 +8,13 @@ content store so delivery and audit share one copy.
 **The four entry points**, and which is which:
 
 ``fetch(ctx, *, source_url=…)``
-    Called by :meth:`EntryFetcher.fetch_declared` on the legacy bare-string
-    ``source:`` road, and by nothing else in this package. Its ``source_url``
-    is a plain ``https://…`` URL, never ``oss://`` and never ``git+…``. Files
-    a receipt. Charges the budget on a real fetch, not on a store hit.
+    Called by the ``cli_tools`` service's API-driven install
+    (``cli_tools/service.py::_acquire``, the ``decl.entry is None`` branch),
+    where a caller hands the platform a plain URL with no manifest and no
+    ``sources`` map — and by nothing in this package, because no manifest
+    road reaches it. Its ``source_url`` is a plain ``https://…`` URL, never
+    ``oss://`` and never ``git+…``. Files a receipt. Charges the budget on a
+    real fetch, not on a store hit.
 
 ``fetch_declared(ctx, *, entry=…)``
     The front door every fetching materialiser calls. Takes no URL at all: it
@@ -33,9 +36,9 @@ content store so delivery and audit share one copy.
 **Three ``source_url`` shapes exist**, and which method sees which matters::
 
     "https://example.com/tools/qc-v2.zip"
-        the inline bare-string source, and the ONLY shape ``fetch`` ever
-        takes as its ``source_url=`` argument. Never ``oss://``, never
-        ``git+…``.
+        the plain URL the API-driven install hands over, and the ONLY shape
+        ``fetch`` ever takes as its ``source_url=`` argument. Never
+        ``oss://``, never ``git+…``.
 
     "oss://team-artifacts/tools/qc/v2.tgz"
         built by ``source_fetchers.object_receipt_url`` inside
@@ -101,7 +104,7 @@ and inline-source roads resolve through the apply's source session, and the git
 road returns a :class:`GitEntrySource` — the tree is the entry's to
 interpret (a file? a package?) — while its canonical, entry-level bytes are
 filed with the store via :meth:`file_bytes`, so audit and ``keep_last`` read
-the same receipts the URL roads always have.
+the same receipts every fetching road files.
 
 **Dispatch is on the declared protocol**, read through the one parser the
 ``PUT`` validator also uses. It used to be on which key a source mapping
@@ -118,7 +121,6 @@ from typing import TYPE_CHECKING, Any, Mapping, Optional, Protocol, runtime_chec
 
 
 from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
-    BlobDelivery,
     EntryDelivery,
     EntryFetchError,
     FetchedEntry,
@@ -297,9 +299,10 @@ class EntryFetcher:
     ) -> FetchedEntry:
         """Acquire one entry's bytes over HTTPS. Raises :class:`EntryFetchError`.
 
-        ``source_url`` is a plain ``https://…`` URL — the legacy bare-string
-        ``source:`` spelling, which the schema now refuses at ``PUT`` but which
-        stored documents still carry. It is never ``oss://`` and never
+        ``source_url`` is a plain ``https://…`` URL — the address the
+        API-driven ``cli_tools`` install hands over, which is the only caller
+        left: no manifest entry reaches this method, because a manifest names
+        its source as a declaration. It is never ``oss://`` and never
         ``git+…``; those roads have their own entry points. ``${BOT_*}`` is
         substituted here, so the argument may still contain placeholders::
 
@@ -501,12 +504,13 @@ class EntryFetcher:
 
             {"name": "qc", "source": {"protocol": "oss",
                                       "bucket": "team-artifacts",
-                                      "key": "qc/v2.tgz"}}
+                                      "key": "qc/v2.tgz",
+                                      "auth": "oss-prod"}}
                 # an inline declaration. Needs a source session.
 
             {"path": "data/kb.zip", "source": "https://example.com/kb.zip"}
-                # the legacy bare string: straight to ``fetch``, no session
-                # needed.
+                # NOT a road: ``source`` is a declaration object, so this is
+                # refused here, the way ``PUT`` refuses it.
 
         ``category`` is a :class:`FetchCategory` value as a string, e.g.
         ``"resources_file"``; it is coerced to the enum here, so a misspelling
@@ -524,40 +528,41 @@ class EntryFetcher:
         what keeps the roads from drifting — two fetchers each deciding what
         ``keep_last`` means would both look correct and disagree.
 
-        One road never reaches a fetcher: a bare-string ``source`` is a URL
-        with no declaration to parse, so it goes straight to :meth:`fetch`.
-        The schema now **refuses** that spelling at ``PUT``, so no new document
-        can take it. It survives here for the documents already stored under
-        the old grammar, which an apply still has to be able to read; delete it
-        only once those are known to be gone.
+        **Every source that reaches here is a declaration**, and there is no
+        road around that: ``source`` is a Mapping carrying a ``protocol``, or
+        ``from`` names one under the apply's ``sources``. A ``source`` of any
+        other type — a URL written as a plain string, the spelling the ``PUT``
+        validator refuses (§2.2 — declare ``protocol: git`` or
+        ``protocol: oss``) — is refused here too, so both surfaces answer a
+        stored document the same way.
         """
         expired = ctx.budget.expired() if ctx.budget is not None else None
         if expired is not None:
             raise EntryFetchError(expired)
 
         # The entry's own inline ``source:`` — the alternative to naming a
-        # declared one with ``from:``. Three shapes reach here, and the type
-        # is the dispatch::
+        # declared one with ``from:``. One shape reaches here, a declaration
+        # object, and its ``protocol`` is the dispatch::
         #
-        #     source: {protocol: git, url: ..., ref: v1.2.0}   # Mapping
-        #     source: {protocol: oss, bucket: b, key: k}       # Mapping
-        #     source: "https://example.com/x.zip"              # str, legacy
+        #     source: {protocol: git, url: ..., ref: v1.2.0}
+        #     source: {protocol: oss, bucket: b, key: k}
         #
         # ``None`` when the entry used ``from:`` or inline ``content:``.
         inline = entry.get("source")
-        # Only the roads that read the session require one: a ``from`` name
-        # is looked up in ``session.sources`` and a git road checks out
-        # through it. The inline-URL road never touches it, and refusing it
-        # over a missing session would break the URL-only applies (and
-        # their rigs) that W5 shipped — the message says who it is for.
-        needs_session = isinstance(entry.get("from"), str) or isinstance(
+        # Every road that reaches a fetcher reads the session — a ``from``
+        # name is looked up in ``session.sources``, and a declared source is
+        # acquired through it — so the requirement is exactly "this entry
+        # declares a source". An entry that declares none is refused below on
+        # its own terms rather than blamed on the missing session, and the
+        # message says who builds one, for the rig that arrives without it.
+        declares_source = isinstance(entry.get("from"), str) or isinstance(
             inline, Mapping
         )
         session = ctx.source_session
-        if needs_session and session is None:
+        if declares_source and session is None:
             raise EntryFetchError(
-                "this apply carries no source session: a 'from' or git "
-                "source needs one (the apply service builds it per apply)"
+                "this apply carries no source session: a declared 'from' or "
+                "'source' needs one (the apply service builds it per apply)"
             )
 
         keep_last = entry.get("on_fetch_failure", "keep_last") == "keep_last"
@@ -572,23 +577,14 @@ class EntryFetcher:
                     f"'from' names source {name!r}, which is not declared "
                     "under 'sources'"
                 )
-        elif isinstance(inline, str):
-            return BlobDelivery(
-                self.fetch(
-                    ctx,
-                    source_url=inline,
-                    digest=entry.get("digest"),
-                    auth=entry.get("auth"),
-                    category=category,
-                    keep_last=keep_last,
-                    entry_identity=entry_identity,
-                )
-            )
         elif isinstance(inline, Mapping):
             raw = inline
         else:
             raise EntryFetchError(
-                "an entry must name one of 'from', 'source' or 'content'"
+                "an entry must name one of 'from', 'source' or 'content', "
+                "and 'source' is a declaration object carrying a 'protocol' "
+                "(declare 'protocol: git' or 'protocol: oss') — a URL written "
+                "as a plain string is not one"
             )
         assert raw is not None
 
@@ -933,7 +929,7 @@ def declared_protocol(
     ==============================================  ====================
     ``entry``                                       Answer
     ==============================================  ====================
-    ``{"source": "https://example.com/kb.zip"}``    ``SourceKind.OSS``
+    ``{"source": "https://example.com/kb.zip"}``    ``None``
     ``{"source": {"protocol": "oss", "bucket":      ``SourceKind.OSS``
     "b", "key": "k", "auth": "a"}}``
     ``{"source": {"protocol": "git", "url":         ``SourceKind.GIT``
@@ -947,10 +943,9 @@ def declared_protocol(
     ``{"content": "inline text"}``                  ``None``
     ==============================================  ====================
 
-    A bare-string ``source`` answers ``OSS`` because that legacy road is served
-    by the object-store side of the pipeline, even though it fetches over
-    HTTPS. Anything that does not parse cleanly answers ``None``, which is why
-    an incomplete declaration reads the same as an absent one here.
+    Anything that is not a parseable declaration answers ``None`` — a
+    ``source`` that is not a Mapping at all reads the same here as an
+    incomplete one, and the same as an absent one.
 
     Called by: ``materialisers/resources``, which validates an archive's
     ``unpack`` before spending a fetch that a missing one guarantees to waste,
@@ -959,13 +954,12 @@ def declared_protocol(
 
     Read through the same parser the ``PUT`` validator and ``fetch_declared``
     use, so a fourth derivation cannot appear. ``None`` means "cannot say from
-    the declaration alone"; the caller then falls through to the fetch, which
-    raises the real error with the real message.
+    the declaration alone" — anything that is not a parseable declaration
+    (a malformed source, an undeclared one, a ``source`` that is not a
+    Mapping at all) answers ``None``; the caller then falls through to the
+    fetch, which raises the real error with the real message.
     """
-    inline = entry.get("source")
-    if isinstance(inline, str):
-        return SourceKind.OSS
-    raw: Any = inline
+    raw: Any = entry.get("source")
     if isinstance(entry.get("from"), str):
         session = ctx.source_session
         raw = (getattr(session, "sources", None) or {}).get(entry["from"])

@@ -51,6 +51,16 @@ def _elf() -> bytes:
 _TOOL = _elf()
 _DIGEST = "sha256:" + hashlib.sha256(_TOOL).hexdigest()
 
+#: The object source a plain ``_entry()`` names. A cli_tools entry declares a
+#: source the way every other category does; the endpoint and the key pair
+#: come off the credential the source names, never out of the document.
+_OBJECT_SOURCE = {
+    "protocol": "oss",
+    "bucket": "tool-artifacts",
+    "key": "bin/",
+    "auth": "oss-cred",
+}
+
 
 def _ctx(**kwargs) -> ApplyContext:
     base = dict(
@@ -61,6 +71,8 @@ def _ctx(**kwargs) -> ApplyContext:
             is_teclaw=lambda e: (e or "") == "teclaw",
         ),
         apply_id="ap1",
+        # A declared source resolves against the apply's source session.
+        source_session=SimpleNamespace(sources={"tools": _OBJECT_SOURCE}),
     )
     base.update(kwargs)
     return ApplyContext(**base)
@@ -81,7 +93,7 @@ def _service(*, content=_TOOL, digest=_DIGEST, delivery=None):
 
 
 def _entry(**kwargs) -> dict:
-    base = {"name": "mycli", "source": "https://x/mycli", "digest": _DIGEST}
+    base = {"name": "mycli", "from": "tools", "key": "mycli", "digest": _DIGEST}
     base.update(kwargs)
     return base
 
@@ -146,13 +158,27 @@ def test_the_apply_context_is_carried_whole_into_the_service() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_placeholder_in_a_source_is_substituted_before_the_fetch() -> None:
-    service, _, _, fetcher = _service()
+async def test_a_placeholder_in_a_declared_address_is_substituted() -> None:
+    """The address the report echoes — and the one the API-driven install road
+    hands the transport — carries the substitution this materialiser performs.
+    The fetch funnel substitutes again on its own road, over the source's own
+    fields, which is what covers a ``from``-named source."""
+    service, _, _, _ = _service()
     mat = CliToolsMaterialiser(service)
-    await _apply(
-        mat, _ctx(), [_entry(**{"source": "https://x/${BOT_ENGINE_TYPE}/mycli"})]
+    resolved = await mat.resolve(
+        _ctx(source_session=SimpleNamespace(sources={})),
+        [{
+            "name": "mycli",
+            "source": {
+                "protocol": "git",
+                "url": "https://x/${BOT_ENGINE_TYPE}/tools.git",
+                "ref": "v1.0.0",
+            },
+            "subpath": "bin/mycli",
+        }],
     )
-    assert fetcher.calls[0]["source_url"] == "https://x/openclaw/mycli"
+    assert resolved.ok, resolved.failures
+    assert resolved.intents[0].value.source_url == "https://x/openclaw/tools.git"
 
 
 # ── convergence ───────────────────────────────────────────────────────────
@@ -364,7 +390,7 @@ async def test_the_digest_belt_still_refuses_an_unpinned_object_store_tool() -> 
     service, _, _, _ = _service()
     mat = CliToolsMaterialiser(service)
     resolved = await mat.resolve(
-        _git_ctx(), [{"name": "mycli", "source": "https://x/mycli"}]
+        _ctx(), [{"name": "mycli", "from": "tools", "key": "mycli"}]
     )
     assert not resolved.ok
     assert "requires a 'digest'" in resolved.failures[0].reason

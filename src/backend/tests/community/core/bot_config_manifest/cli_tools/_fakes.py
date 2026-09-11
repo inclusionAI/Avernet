@@ -247,11 +247,13 @@ class FakeEntryFetcher:
 
         A manifest-sourced declaration comes through here rather than through
         ``fetch``, so the double resolves the entry the way the real fetcher
-        does — an inline URL, a ``from`` name against the session's ``sources``,
-        or a git source answering with a tree — and records the *resolved*
-        address. A double that just forwarded to ``fetch`` would have kept
-        passing while a source name went on the wire as a URL, which is the
-        defect this door closes.
+        does — a ``from`` name against the session's ``sources`` or an inline
+        declaration object, a git source answering with a tree and an object
+        source with its bucket address — and records the *resolved* address. A
+        double that just forwarded to ``fetch`` would have kept passing while
+        a source name went on the wire as a URL, which is the defect this door
+        closes. A ``source`` that is not a declaration object is refused here
+        exactly as the real door refuses it.
         """
         decl = None
         if isinstance(entry.get("from"), str):
@@ -265,8 +267,34 @@ class FakeEntryFetcher:
                 )
         elif isinstance(entry.get("source"), Mapping):
             decl = entry["source"]
+        else:
+            raise EntryFetchError(
+                "an entry must name one of 'from', 'source' or 'content', "
+                "and 'source' is a declaration object carrying a 'protocol'"
+            )
 
-        if decl is not None and decl.get("protocol") == "git":
+        if decl.get("protocol") == "oss":
+            key = "/".join(
+                part.strip("/")
+                for part in (decl.get("key"), entry.get("key"))
+                if part
+            )
+            self.calls.append(
+                {
+                    "source_url": f"oss://{decl.get('bucket')}/{key}",
+                    "digest": entry.get("digest"),
+                    "auth": decl.get("auth"),
+                    "category": category,
+                    "entry_identity": entry_identity,
+                }
+            )
+            if self.error is not None:
+                raise self.error
+            return BlobDelivery(
+                FakeFetchedEntry(self.content, self.digest or entry.get("digest") or "")
+            )
+
+        if decl.get("protocol") == "git":
             self.calls.append(
                 {
                     "source_url": decl["url"],
@@ -282,9 +310,9 @@ class FakeEntryFetcher:
         return BlobDelivery(
             self.fetch(
                 ctx,
-                source_url=(decl or {}).get("url") or entry.get("source"),
+                source_url=decl.get("url"),
                 digest=entry.get("digest"),
-                auth=(decl or {}).get("auth", entry.get("auth")),
+                auth=decl.get("auth", entry.get("auth")),
                 category=category,
                 keep_last=(
                     entry.get("on_fetch_failure", "keep_last") == "keep_last"

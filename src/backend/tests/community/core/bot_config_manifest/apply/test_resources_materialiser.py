@@ -58,12 +58,23 @@ def _run(coro):
     return asyncio.run(coro)
 
 
+#: The bucket the fetch cases read. A resources entry names a declared
+#: source; ``key`` is the object, and the stub addresses it the way the real
+#: object road files it — ``oss://<bucket>/<key>``.
+_BUCKET = "cdn"
+
+
+def _src(key: str, **extra) -> dict:
+    """The declared ``source`` an entry carries to read one object."""
+    return {"protocol": "oss", "bucket": _BUCKET, "key": key, "auth": "oss-cred", **extra}
+
+
 class _StubEntryFetcher:
     """``EntryFetcher``'s test double, every call recorded.
 
-    URLs ending in ``gone`` stand in for unreachable sources. With
-    ``fixed_body``, every URL serves the same bytes (an archive); without it,
-    the URL's own ``bytes-of-<url>``. It answers in the pipeline's own
+    Addresses ending in ``gone`` stand in for unreachable sources. With
+    ``fixed_body``, every address serves the same bytes (an archive); without
+    it, the address's own ``bytes-of-<address>``. It answers in the pipeline's own
     currency — a real :class:`FetchedEntry` — because the materialiser
     consumes ``.content``; a stub answering in the transport's
     ``FetchedObject`` shape would pass collection and fail on the first real
@@ -131,8 +142,9 @@ class _StubEntryFetcher:
         ``from`` name or an inline ``source`` object resolves through
         ``sources`` on the apply context, and a git protocol answers with a
         tree rather than bytes — which is the branch the materialiser has to
-        get right. Anything else falls through to the URL road's ``fetch``,
-        so every existing case still exercises the code it always did.
+        get right. A ``source`` that is not a declaration object is refused
+        here exactly as the real door refuses it, so the double cannot serve
+        a spelling production no longer accepts.
         """
         if getattr(self, "declared_override", None) is not None:
             return BlobDelivery(self.declared_override)
@@ -148,6 +160,11 @@ class _StubEntryFetcher:
                 )
         elif isinstance(entry.get("source"), dict):
             decl = dict(entry["source"])
+        else:
+            raise EntryFetchError(
+                "an entry must name one of 'from', 'source' or 'content', "
+                "and 'source' is a declaration object carrying a 'protocol'"
+            )
 
         if decl is not None and decl.get("protocol") == "git":
             key = decl["url"]
@@ -173,7 +190,7 @@ class _StubEntryFetcher:
                 )
             )
 
-        url = decl["url"] if decl is not None else entry.get("source")
+        url = decl.get("url") or f"oss://{decl.get('bucket')}/{decl.get('key')}"
         return BlobDelivery(
             self.fetch(
                 ctx,
@@ -319,28 +336,28 @@ def test_fake_resource_service_records_uploads_and_deletes():
     )
 
 
-# --- file entries: URL fetch and inline content (Task 2) ---
+# --- file entries: a declared fetch and inline content (Task 2) ---
 
 
-def test_file_entry_from_url_resolves_to_intent_bytes():
+def test_file_entry_from_a_declared_source_resolves_to_intent_bytes():
     svc = FakeResourceFileService()
     stub = _StubEntryFetcher()
     m = ResourcesMaterialiser(svc, stub)
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
-        m.resolve(ctx, [{"path": "data/a.md", "source": "https://x/a.bin"}])
+        m.resolve(ctx, [{"path": "data/a.md", "source": _src("a.bin")}])
     )
     assert resolved.ok
     assert [i.identity for i in resolved.intents] == ["data/a.md"]
-    assert resolved.intents[0].value == b"bytes-of-https://x/a.bin"
+    assert resolved.intents[0].value == b"bytes-of-oss://cdn/a.bin"
     # The funnel saw the entry's own identity under the file form's own
     # category — the W11 apply/entry linkage — with keep_last as the
     # declared default.
     assert stub.calls == [
         {
-            "source_url": "https://x/a.bin",
+            "source_url": "oss://cdn/a.bin",
             "digest": None,
-            "auth": None,
+            "auth": "oss-cred",
             "category": "resources_file",
             "keep_last": True,
             "entry_identity": "data/a.md",
@@ -368,8 +385,8 @@ def test_fetch_failure_aborts_whole_category():
         m.resolve(
             ctx,
             [
-                {"path": "data/a.md", "source": "https://x/a.bin"},
-                {"path": "data/gone.md", "source": "https://x/gone"},
+                {"path": "data/a.md", "source": _src("a.bin")},
+                {"path": "data/gone.md", "source": _src("gone")},
             ],
         )
     )
@@ -401,7 +418,7 @@ def test_dir_entry_expands_members_under_path():
                     "path": "wrap/",
                     "unpack": "tar.gz",
                     "strip_components": 1,
-                    "source": "https://x/tree.tgz",
+                    "source": _src("tree.tgz"),
                 }
             ],
         )
@@ -427,7 +444,7 @@ def test_bad_archive_is_a_resolve_failure_and_nothing_reaches_the_bot():
     resolved = _run(
         m.resolve(
             ctx,
-            [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/tree.tgz"}],
+            [{"path": "wrap/", "unpack": "tar.gz", "source": _src("tree.tgz")}],
         )
     )
     assert not resolved.ok
@@ -440,7 +457,7 @@ def test_dir_unpack_missing_is_rejected_at_resolve():
     m = ResourcesMaterialiser(svc, _StubEntryFetcher(_tgz({"a.txt": b"x"})))
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
-        m.resolve(ctx, [{"path": "wrap/", "source": "https://x/tree.tgz"}])
+        m.resolve(ctx, [{"path": "wrap/", "source": _src("tree.tgz")}])
     )
     assert not resolved.ok
     assert "unpack" in resolved.failures[0].reason
@@ -457,9 +474,9 @@ def test_nested_paths_abort_category():
                 {
                     "path": "wrap/",
                     "unpack": "tar.gz",
-                    "source": "https://x/t.tgz",
+                    "source": _src("t.tgz"),
                 },
-                {"path": "wrap/inner.txt", "source": "https://x/i.txt"},
+                {"path": "wrap/inner.txt", "source": _src("i.txt")},
             ],
         )
     )
@@ -478,8 +495,8 @@ def test_plan_classifies_present_as_updated_and_new_as_created():
         m.resolve(
             ctx,
             [
-                {"path": "data/a.md", "source": "https://x/a.bin"},
-                {"path": "data/new.md", "source": "https://x/new.bin"},
+                {"path": "data/a.md", "source": _src("a.bin")},
+                {"path": "data/new.md", "source": _src("new.bin")},
             ],
         )
     )
@@ -512,7 +529,7 @@ def test_plan_addresses_the_bot_owner_not_the_manifest_storage_key():
         engine_type="claude_code",
     )
     resolved = _run(
-        m.resolve(ctx, [{"path": "data/a.md", "source": "https://x/a.bin"}])
+        m.resolve(ctx, [{"path": "data/a.md", "source": _src("a.bin")}])
     )
     assert resolved.ok, [f.reason for f in resolved.failures]
     _run(m.plan(ctx, resolved.intents))
@@ -549,12 +566,12 @@ def test_declared_trees_report_as_removals_not_member_rows():
                 {
                     "path": "established/",
                     "unpack": "tar.gz",
-                    "source": "https://x/old.tgz",
+                    "source": _src("old.tgz"),
                 },
                 {
                     "path": "fresh/",
                     "unpack": "tar.gz",
-                    "source": "https://x/new.tgz",
+                    "source": _src("new.tgz"),
                 },
             ],
         )
@@ -593,7 +610,7 @@ def test_write_replaces_the_tree_then_uploads_every_member():
     plan, results = _write_through(
         m,
         ctx,
-        [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/t.tgz"}],
+        [{"path": "wrap/", "unpack": "tar.gz", "source": _src("t.tgz")}],
     )
     # One delete per declared tree, first: the replace removes everything
     # under "wrap/" — including files the new archive no longer ships and
@@ -627,7 +644,7 @@ def test_write_deletes_the_declared_tree_without_the_trailing_slash():
     m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
     ctx = make_context(engine_type="claude_code")
     _write_through(
-        m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/t"}]
+        m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": _src("t")}]
     )
     assert [c["path"] for c in svc.delete_calls] == ["wrap"]
 
@@ -650,7 +667,7 @@ def test_a_silently_failed_tree_delete_fails_its_members():
         m,
         ctx,
         [
-            {"path": "tools/", "unpack": "tar.gz", "source": "https://x/t.tgz"},
+            {"path": "tools/", "unpack": "tar.gz", "source": _src("t.tgz")},
             {"path": "notes/r.md", "content": "# rules"},
         ],
     )
@@ -677,7 +694,7 @@ def test_a_failed_delete_of_an_absent_tree_is_not_a_failure():
     plan, results = _write_through(
         m,
         ctx,
-        [{"path": "tools/", "unpack": "tar.gz", "source": "https://x/t.tgz"}],
+        [{"path": "tools/", "unpack": "tar.gz", "source": _src("t.tgz")}],
     )
     assert [r.outcome.value for r in results] == ["created"]
     assert svc.writes == {("tools", "a.md"): b"A"}
@@ -695,7 +712,7 @@ def test_write_addresses_the_bot_owner():
         engine_type="claude_code",
     )
     _write_through(
-        m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/t"}]
+        m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": _src("t")}]
     )
     assert svc.delete_calls == [
         {
@@ -733,7 +750,7 @@ def test_write_is_player_setup_convergent():
         _write_through(
             m,
             ctx,
-            [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/t.tgz"}],
+            [{"path": "wrap/", "unpack": "tar.gz", "source": _src("t.tgz")}],
         )
     assert svc.writes == {("wrap", "a.txt"): b"AAA"}
     assert svc.deleted == ["wrap", "wrap"]
@@ -753,7 +770,7 @@ def test_write_failure_yields_failed_entry_per_member():
     plan, results = _write_through(
         m,
         ctx,
-        [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/t.tgz"}],
+        [{"path": "wrap/", "unpack": "tar.gz", "source": _src("t.tgz")}],
     )
     outcomes = {(r.identity, r.outcome.value) for r in results}
     assert ("wrap/b.txt", "failed") in outcomes
@@ -839,11 +856,11 @@ def test_each_form_fetches_under_its_own_category():
         m.resolve(
             ctx,
             [
-                {"path": "data/a.md", "source": "https://x/a.bin"},
+                {"path": "data/a.md", "source": _src("a.bin")},
                 {
                     "path": "tools/",
                     "unpack": "tar.gz",
-                    "source": "https://x/t.tgz",
+                    "source": _src("t.tgz"),
                 },
             ],
         )
@@ -882,7 +899,7 @@ def test_keep_last_fallback_surfaces_as_the_entries_note():
     m = ResourcesMaterialiser(svc, _FallingBack())
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
-        m.resolve(ctx, [{"path": "data/a.md", "source": "https://x/a.bin"}])
+        m.resolve(ctx, [{"path": "data/a.md", "source": _src("a.bin")}])
     )
     assert resolved.ok, [f.reason for f in resolved.failures]
     assert (
@@ -910,7 +927,7 @@ def test_write_carries_the_note_onto_the_report_row():
     m = ResourcesMaterialiser(svc, _FallingBack())
     ctx = make_context(engine_type="claude_code")
     plan, results = _write_through(
-        m, ctx, [{"path": "data/a.md", "source": "https://x/a.bin"}]
+        m, ctx, [{"path": "data/a.md", "source": _src("a.bin")}]
     )
     assert [r.note for r in results] == ["fell back (keep_last)"]
 
@@ -934,7 +951,7 @@ def test_an_archive_member_the_chain_would_refuse_fails_at_resolve():
     resolved = _run(
         m.resolve(
             ctx,
-            [{"path": "tools/", "unpack": "tar.gz", "source": "https://x/t.tgz"}],
+            [{"path": "tools/", "unpack": "tar.gz", "source": _src("t.tgz")}],
         )
     )
     # The whole category aborts (§3.2): one undeliverable member means the
@@ -991,7 +1008,7 @@ def test_strip_components_of_the_wrong_type_is_a_resolve_failure():
                     "path": "tools/",
                     "unpack": "tar.gz",
                     "strip_components": "one",
-                    "source": "https://x/t.tgz",
+                    "source": _src("t.tgz"),
                 }
             ],
         )
@@ -1024,7 +1041,7 @@ def test_a_failed_tree_replacement_fails_its_members_in_composed_words():
             {
                 "path": "tools/",
                 "unpack": "tar.gz",
-                "source": "https://x/t.tgz",
+                "source": _src("t.tgz"),
             },
             {"path": "notes/r.md", "content": "# rules"},
         ],
@@ -1067,7 +1084,7 @@ _DOCUMENT = {
             {
                 "path": "wrap/",
                 "unpack": "tar.gz",
-                "source": "https://x/t.tgz",
+                "source": _src("t.tgz"),
             },
             {"path": "notes/r.md", "content": "# rules"},
         ]
@@ -1139,7 +1156,7 @@ def test_an_empty_archive_still_audits_the_tree_removal():
                         {
                             "path": "gone/",
                             "unpack": "tar.gz",
-                            "source": "https://x/empty.tgz",
+                            "source": _src("empty.tgz"),
                         }
                     ]
                 },
@@ -1158,7 +1175,7 @@ def test_an_empty_archive_still_audits_the_tree_removal():
                         {
                             "path": "gone/",
                             "unpack": "tar.gz",
-                            "source": "https://x/empty.tgz",
+                            "source": _src("empty.tgz"),
                         }
                     ]
                 },
@@ -1204,7 +1221,7 @@ def test_a_refused_member_blames_the_declared_entry_in_the_report():
                         {
                             "path": "tools/",
                             "unpack": "tar.gz",
-                            "source": "https://x/t.tgz",
+                            "source": _src("t.tgz"),
                         },
                         {"path": "notes/r.md", "content": "# rules"},
                     ]
@@ -1248,7 +1265,7 @@ def test_routed_bots_address_the_runtime_engine_workspace():
         engine_type="claude_code", bot={"template_type": "applicationCoding"}
     )
     _write_through(
-        m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/t"}]
+        m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": _src("t")}]
     )
     assert svc.delete_calls[0]["engine_type"] == "aicoding"
     assert all(c["engine_type"] == "aicoding" for c in svc.upload_calls)
@@ -1269,7 +1286,7 @@ def test_unrouted_bots_keep_the_active_engine():
         m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
         ctx = make_context(engine_type="claude_code", bot=overlay)
         _write_through(
-            m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/t"}]
+            m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": _src("t")}]
         )
         assert svc.delete_calls[0]["engine_type"] == "claude_code"
 
@@ -1277,7 +1294,7 @@ def test_unrouted_bots_keep_the_active_engine():
     m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
     ctx = make_context(engine_type="openclaw")
     _write_through(
-        m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/t"}]
+        m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": _src("t")}]
     )
     assert svc.delete_calls[0]["engine_type"] == "openclaw"
 
@@ -1291,7 +1308,7 @@ def test_an_engineless_bot_record_falls_back_to_the_context_engine():
     m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
     ctx = make_context(engine_type="openclaw", bot={"active_engine": None})
     _write_through(
-        m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/t"}]
+        m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": _src("t")}]
     )
     assert svc.delete_calls[0]["engine_type"] == "openclaw"
 
@@ -1334,7 +1351,7 @@ def test_duplicate_declared_paths_abort_the_category():
             ctx,
             [
                 {"path": "data/a.md", "content": "first"},
-                {"path": "data/a.md", "source": "https://x/a"},
+                {"path": "data/a.md", "source": _src("a")},
             ],
         )
     )
@@ -1357,7 +1374,7 @@ def test_an_unknown_unpack_kind_is_refused():
                 {
                     "path": "wrap/",
                     "unpack": "tgz",
-                    "source": "https://x/t.tgz",
+                    "source": _src("t.tgz"),
                 }
             ],
         )
@@ -1444,7 +1461,7 @@ def test_an_unhashable_unpack_kind_is_refused_not_raised():
                 {
                     "path": "wrap/",
                     "unpack": ["zip"],
-                    "source": "https://x/t.tgz",
+                    "source": _src("t.tgz"),
                 }
             ],
         )
@@ -1456,8 +1473,8 @@ def test_an_unhashable_unpack_kind_is_refused_not_raised():
 # --- resources over git (defect D1) -----------------------------------------
 #
 # The category that could not name a source. Every case below is a shape the
-# URL road already had and ``resources`` could not reach, plus the one shape
-# only git gives: a tree that arrives as a tree.
+# object road already had and ``resources`` could not reach, plus the one
+# shape only git gives: a tree that arrives as a tree.
 
 _REPO = "https://code.example.com/team/content.git"
 
@@ -1765,7 +1782,7 @@ def test_a_real_archive_still_takes_the_unpack_road():
             make_context(engine_type="claude_code"),
             [{
                 "path": "data/kb/",
-                "source": "https://cdn.example.com/kb.tgz",
+                "source": _src("kb.tgz"),
                 "unpack": "tar.gz",
                 "strip_components": 1,
             }],
@@ -1786,7 +1803,7 @@ def test_an_oss_directory_entry_is_refused_before_the_network_is_touched():
     resolved = _run(
         m.resolve(
             make_context(engine_type="claude_code"),
-            [{"path": "data/kb/", "source": "https://cdn.example.com/kb.zip"}],
+            [{"path": "data/kb/", "source": _src("kb.zip")}],
         )
     )
     assert not resolved.ok
@@ -1803,7 +1820,7 @@ def test_an_invalid_strip_components_is_also_refused_before_the_fetch():
             make_context(engine_type="claude_code"),
             [{
                 "path": "data/kb/",
-                "source": "https://cdn.example.com/kb.zip",
+                "source": _src("kb.zip"),
                 "unpack": "zip",
                 "strip_components": -1,
             }],
