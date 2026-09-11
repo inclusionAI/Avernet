@@ -142,6 +142,35 @@ class TestDistributedLockSqliteOrmEquivalence:
         repo = get_container().repository.distributed_lock_repository()
         assert repo.delete_lock(f"nonexistent_{_generate_uuid()}") is False
 
+    def test_try_acquire_failfast_leaves_holder_untouched_when_held_unexpired(self):
+        """A second caller against an unexpired held lock returns False; the
+        fail-fast precheck short-circuits before the upsert so the existing
+        holder row is left untouched (no ``gmt_modified`` bump, no 1205 path).
+        """
+        repo = get_container().repository.distributed_lock_repository()
+        lock_name = f"failfast_{_generate_uuid()[:12]}"
+        holder_a = _generate_uuid()
+        holder_b = _generate_uuid()
+        expire_time = datetime.now() + timedelta(minutes=5)
+
+        acquired_a = repo.try_acquire_lock(
+            lock_name=lock_name, lock_holder=holder_a, expire_time=expire_time
+        )
+        assert acquired_a is True
+
+        before = repo.get_by_lock_name(lock_name)
+        assert before is not None
+
+        acquired_b = repo.try_acquire_lock(
+            lock_name=lock_name, lock_holder=holder_b, expire_time=expire_time
+        )
+        assert acquired_b is False
+
+        after = repo.get_by_lock_name(lock_name)
+        assert after is not None
+        assert after.lock_holder == holder_a
+        assert after.gmt_modified == before.gmt_modified
+
     def test_concurrent_acquire_same_new_lock_no_conflict_raised(self):
         """Two holders racing for the same brand-new lock must not raise and
         must serialize via the upsert: exactly one acquires, the other gets
