@@ -14,13 +14,14 @@ the command as it will be invoked. Both source spellings are accepted, and a
           digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b...
           version: "2.1.0"           # a label only; never decides convergence
 
-        # an inline source: a declaration object, like every source
+        # an inline source declaration
         - name: mycli
           source:
-            protocol: git
-            url: https://code.example.com/team/tools.git
-            ref: v1.0.0
-          subpath: bin/mycli
+            protocol: oss
+            bucket: team-artifacts
+            key: tools/mycli
+            auth: oss-prod
+          digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b...
 
         # over git the resolved commit SHA is the pin, so 'digest' is
         # refused rather than required
@@ -28,8 +29,14 @@ the command as it will be invoked. Both source spellings are accepted, and a
           from: content
           subpath: bin/tool
 
-An entry reaches ``resolve`` as the raw mapping, e.g. ``{"name": "qc",
-"from": "artifacts", "key": "qc/v2.tgz", "digest": "sha256:…"}``.
+An entry reaches ``resolve`` as the raw mapping, e.g. ``{"name": "mycli",
+"source": {"protocol": "oss", "bucket": "team-artifacts", "key": "tools/mycli",
+"auth": "oss-prod"}, "digest": "sha256:…"}``.
+
+**The API is the other caller, and it does not declare a source at all**: it
+uploads the binary. Both doors converge inside :class:`CliToolService` once
+the bytes are in hand, which is the property that keeps them refusing the same
+executable for the same reason.
 
 This materialiser fetches nothing, verifies nothing, stores nothing and
 delivers nothing. It translates: manifest entries into ``CliToolDecl``s on the
@@ -89,7 +96,6 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     declared_protocol,
 )
-from agentclaw.community.core.bot_config_manifest.schema import placeholders
 from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
 
 #: ``CliToolStatus`` → the :class:`~...outcomes.EntryOutcome` its report row
@@ -189,7 +195,7 @@ class CliToolsMaterialiser(Materialiser):
     async def resolve(
         self, ctx: ApplyContext, entries: Sequence[dict[str, Any]]
     ) -> ResolveResult:
-        """Substitution and the syntactic checks. **No fetch here.**
+        """The syntactic checks, and nothing else. **No fetch here.**
 
         The other fetching categories fetch in ``resolve`` because that is where
         their failures belong. This one does not, and the difference is
@@ -255,37 +261,19 @@ class CliToolsMaterialiser(Materialiser):
                     )
                 )
                 continue
-            if not decl.source_url:
+            if not entry.get("from") and not entry.get("source"):
                 failures.append(
                     ResolveFailure(name, "a cli_tools entry must name a source")
                 )
                 continue
 
-            # ``source_url`` is the declared address the report echoes, and it
-            # is what the API-driven install road hands to the transport, so
-            # it is substituted here. The entry itself is carried through
-            # untouched: the fetch funnel substitutes again on its own road,
-            # which is what covers a ``from``-named source's URL — a value
-            # this materialiser never sees.
-            substituted = placeholders.resolve(
-                decl.source_url,
-                engine_type=ctx.engine_type,
-                env=ctx.env,
-                tenant=ctx.tenant,
-            )
-            resolved_entry = dict(entry)
-            intents.append(
-                Intent(
-                    name,
-                    CliToolDecl(
-                        **{
-                            **decl.__dict__,
-                            "source_url": substituted,
-                            "entry": resolved_entry,
-                        }
-                    ),
-                )
-            )
+            # No substitution here. ``${BOT_*}`` in a declared source is the
+            # fetch funnel's to resolve, on its own road — which is also the
+            # only road that can see a ``from``-named source's fields at all.
+            # This materialiser used to substitute a copy of the address for
+            # itself, and that copy is what a stale reader could acquire from;
+            # the entry it passes down is now the entry it was given.
+            intents.append(Intent(name, decl))
 
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
 

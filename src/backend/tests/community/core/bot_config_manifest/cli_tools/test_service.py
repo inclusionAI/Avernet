@@ -97,8 +97,36 @@ def _service(*, content=_TOOL, digest=_DIGEST, fetch_error=None, delivery=None, 
     return service, repo, delivery, fetcher, oss
 
 
+def _entry(**kwargs) -> dict:
+    """A manifest entry declaring one tool over an object-store source.
+
+    The only source form a document can take besides git: a declaration object
+    with a ``protocol``. It is what the manifest road resolves, and building
+    the declaration *from an entry* is what keeps these tests on that road
+    rather than on a shape only a test can make.
+    """
+    entry = {
+        "name": "mycli",
+        "source": {
+            "protocol": "oss",
+            "bucket": "tools",
+            "key": "mycli",
+            "auth": "oss-prod",
+        },
+        "digest": _DIGEST,
+    }
+    entry.update(kwargs)
+    return entry
+
+
 def _decl(**kwargs) -> CliToolDecl:
-    base = {"name": "mycli", "source_url": "https://x/mycli", "digest": _DIGEST}
+    """The manifest road's declaration."""
+    return CliToolDecl.from_entry(_entry(**kwargs))
+
+
+def _upload_decl(**kwargs) -> CliToolDecl:
+    """The upload road's: the same vocabulary, with no entry to resolve."""
+    base = {"name": "mycli", "digest": _DIGEST}
     base.update(kwargs)
     return CliToolDecl(**base)
 
@@ -143,17 +171,30 @@ async def test_bytes_are_written_to_oss_before_delivery() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_fetch_goes_through_the_entry_fetcher_under_this_category() -> None:
-    """One funnel — a category that fetched its own way would acquire bytes
-    the platform's provenance log never saw."""
+async def test_the_fetch_goes_through_the_declared_source_door() -> None:
+    """One funnel, one door — a category that resolved a source its own way
+    would acquire bytes the platform's provenance log never saw, and would be
+    the second place that decides what a declaration means."""
     service, _, _, fetcher, _ = _service()
-    await service.install(_CTX, _decl(auth="tok"), installed_by="u2")
+    await service.install(_CTX, _decl(), installed_by="u2")
     call = fetcher.calls[0]
     assert call["category"] == FETCH_CATEGORY == "cli_tools"
-    assert (call["source_url"], call["digest"], call["auth"]) == (
-        "https://x/mycli", _DIGEST, "tok",
+    assert (call["protocol"], call["source_address"], call["auth"]) == (
+        "oss", "mycli", "oss-prod",
     )
-    assert call["entry_identity"] == "mycli"
+    assert (call["digest"], call["entry_identity"]) == (_DIGEST, "mycli")
+
+
+@pytest.mark.asyncio
+async def test_a_declaration_with_no_entry_is_refused_on_the_manifest_road() -> None:
+    """``install`` *is* the manifest road, and its first act is to resolve an
+    entry. Handed a declaration that carries none — an upload's — it says so
+    rather than fetching nothing, which is the failure mode the two roads were
+    separated to make impossible."""
+    service, repo, delivery, fetcher, _ = _service()
+    outcome = await service.install(_CTX, _upload_decl(), installed_by="u2")
+    assert outcome.status is CliToolStatus.FAILED
+    assert fetcher.calls == [] and repo.rows == {} and delivery.installed == []
 
 
 # ── the pin ───────────────────────────────────────────────────────────────
@@ -161,10 +202,15 @@ async def test_the_fetch_goes_through_the_entry_fetcher_under_this_category() ->
 
 @pytest.mark.asyncio
 async def test_install_enforces_the_declared_sha256() -> None:
-    """The one category that distributes an executable checks the content
-    address the fetch already computed — the belt costs nothing, and keep_last
-    is the road where stored bytes could stand in for what was declared."""
-    service, repo, delivery, _, _ = _service(digest="sha256:" + "0" * 64)
+    """The one category that distributes an executable hashes what it is about
+    to install and compares it with what was declared.
+
+    The belt behind the fetch pipeline's own pin, and it is over the *bytes* —
+    not over what the road that delivered them said about itself. ``keep_last``
+    is why it is worth having: a stored copy standing in for an unreachable
+    source is the path where bytes other than the declared ones can arrive."""
+    delivered = _elf(payload=b"\x09" * 64)
+    service, repo, delivery, _, _ = _service(content=delivered)
     outcome = await service.install(_CTX, _decl(), installed_by="u2")
     assert outcome.status is CliToolStatus.FAILED
     assert _DIGEST in outcome.detail
@@ -177,6 +223,96 @@ async def test_a_fetch_failure_records_nothing() -> None:
     outcome = await service.install(_CTX, _decl(), installed_by="u2")
     assert outcome.status is CliToolStatus.FAILED and "404" in outcome.detail
     assert repo.rows == {} and oss.puts == [] and delivery.installed == []
+
+
+# ── the upload road ───────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_an_upload_installs_without_acquiring_anything() -> None:
+    """The management API's road: the bytes came with the request.
+
+    The assertion that matters is the empty ``fetcher.calls`` — the road has no
+    source, so nothing resolves one, and a service that reached for the funnel
+    anyway would be fetching against an address nobody declared."""
+    service, repo, delivery, fetcher, oss = _service()
+    outcome = await service.install_upload(
+        _CTX, _upload_decl(version="1.4.2"), data=_TOOL, installed_by="u2"
+    )
+
+    assert outcome.status is CliToolStatus.INSTALLED
+    assert fetcher.calls == [] and fetcher.filed == []
+    assert delivery.installed == [("mycli", _TOOL)]
+    assert oss.objects[_key()] == _TOOL
+    record = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli")
+    assert (record.md5, record.size_bytes) == (
+        hashlib.md5(_TOOL).hexdigest(), len(_TOOL),
+    )
+    assert (record.digest, record.version) == (_DIGEST, "1.4.2")
+    # Nothing was declared, so the audit column says nothing rather than
+    # inventing an address for bytes that never had one.
+    assert record.source == ""
+
+
+@pytest.mark.asyncio
+async def test_an_upload_that_is_not_what_its_digest_says_is_refused() -> None:
+    """On this road the digest is the *only* statement of what the caller meant
+    to send, so it is the one thing standing between a truncated upload and an
+    installed executable nobody named."""
+    service, repo, delivery, _, oss = _service()
+    outcome = await service.install_upload(
+        _CTX, _upload_decl(), data=_TOOL[:-8], installed_by="u2"
+    )
+    assert outcome.status is CliToolStatus.FAILED and _DIGEST in outcome.detail
+    assert repo.rows == {} and oss.puts == [] and delivery.installed == []
+
+
+@pytest.mark.asyncio
+async def test_an_uploaded_archive_is_unpacked_the_same_way_a_fetched_one_is() -> None:
+    """One pipeline after the bytes are in hand: the archive rules, the
+    selection and the ELF gate cannot answer differently by road, because there
+    is only one implementation of them to answer with."""
+    archive = _targz({"README.md": b"not a tool", "bin/mycli": _TOOL})
+    digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+    service, repo, delivery, _, _ = _service()
+    outcome = await service.install_upload(
+        _CTX,
+        _upload_decl(digest=digest, unpack="tar.gz", subpath="bin/mycli"),
+        data=archive,
+        installed_by="u2",
+    )
+    assert outcome.status is CliToolStatus.INSTALLED
+    assert delivery.installed == [("mycli", _TOOL)]
+    record = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli")
+    # The archive's digest — what was uploaded and pinned — with the member's
+    # own md5 and size, which is the same split the fetched road records.
+    assert (record.digest, record.subpath) == (digest, "bin/mycli")
+    assert record.size_bytes == len(_TOOL)
+
+
+@pytest.mark.asyncio
+async def test_an_uploaded_binary_for_another_architecture_is_refused() -> None:
+    """The gate is the pipeline's, not the road's."""
+    other = _elf(machine=0xB7)
+    digest = "sha256:" + hashlib.sha256(other).hexdigest()
+    service, repo, delivery, _, _ = _service()
+    outcome = await service.install_upload(
+        _CTX, _upload_decl(digest=digest), data=other, installed_by="u2"
+    )
+    assert outcome.status is CliToolStatus.FAILED
+    assert repo.rows == {} and delivery.installed == []
+
+
+@pytest.mark.asyncio
+async def test_an_upload_defaults_to_insert_only() -> None:
+    """A single install is not a replacement, and on this road that default is
+    the service's rather than something each caller must remember to ask for."""
+    service, _, _, _, _ = _service()
+    await service.install_upload(_CTX, _upload_decl(), data=_TOOL, installed_by="u2")
+    outcome = await service.install_upload(
+        _CTX, _upload_decl(), data=_TOOL, installed_by="u3"
+    )
+    assert outcome.status is CliToolStatus.CONFLICT
 
 
 # ── archives ──────────────────────────────────────────────────────────────
@@ -512,28 +648,45 @@ def test_the_context_is_what_the_fetch_funnel_asks_for() -> None:
 
 def test_a_manifest_entry_becomes_a_declaration() -> None:
     """The materialiser and the HTTP route reach the service through one type,
-    which is what keeps the two callers from drifting."""
+    which is what keeps the two callers from drifting. What the entry does
+    *not* become is an address: the declaration carries the entry itself, so
+    the one thing that can resolve a source is the one thing that does."""
+    source = {"protocol": "git", "url": "https://x/t.git", "ref": "v1"}
     decl = CliToolDecl.from_entry({
-        "name": "mycli", "source": "https://x/t.zip", "digest": _DIGEST,
-        "subpath": "bin/mycli", "unpack": "zip", "version": "1.4.2", "auth": "tok",
+        "name": "mycli", "source": source, "digest": _DIGEST,
+        "subpath": "bin/mycli", "unpack": "zip", "version": "1.4.2",
     })
     assert decl == CliToolDecl(
-        name="mycli", source_url="https://x/t.zip", digest=_DIGEST,
-        subpath="bin/mycli", unpack="zip", version="1.4.2", auth="tok",
+        name="mycli", digest=_DIGEST,
+        subpath="bin/mycli", unpack="zip", version="1.4.2",
     )
+    assert decl.entry["source"] == source
     assert decl.keep_last is True
 
 
-def test_an_entry_naming_its_source_the_other_way_reads_the_same() -> None:
-    assert CliToolDecl.from_entry(
-        {"name": "c", "source": "https://x/c", "digest": _DIGEST}
-    ).source_url == "https://x/c"
+def test_the_declared_address_is_echoed_but_never_resolved() -> None:
+    """The audit column's value, and the report's. Each source form answers in
+    its own words — a ``from`` in the source's name, a git source in its URL,
+    an object-store one in bucket and key — and an upload, which declared no
+    source at all, in nothing."""
+    named = CliToolDecl.from_entry(
+        {"name": "c", "from": "artifacts", "key": "c", "digest": _DIGEST}
+    )
+    git = CliToolDecl.from_entry(
+        {"name": "c", "source": {"protocol": "git", "url": "https://x/c.git"}}
+    )
+    assert (named.declared_address, git.declared_address) == (
+        "artifacts", "https://x/c.git",
+    )
+    assert _decl().declared_address == "tools/mycli"
+    assert _upload_decl().declared_address == ""
 
 
 def test_on_fetch_failure_fail_turns_keep_last_off() -> None:
     decl = CliToolDecl.from_entry(
-        {"name": "c", "source": "https://x/c", "digest": _DIGEST,
-         "on_fetch_failure": "fail"}
+        {"name": "c", "source": {"protocol": "oss", "bucket": "b", "key": "c",
+                                 "auth": "a"},
+         "digest": _DIGEST, "on_fetch_failure": "fail"}
     )
     assert decl.keep_last is False
 
@@ -826,7 +979,7 @@ async def test_a_refused_push_puts_a_removed_row_back() -> None:
 
 
 @pytest.mark.asyncio
-async def test_insert_only_refuses_a_name_taken_during_the_fetch() -> None:
+async def test_insert_only_refuses_a_name_taken_during_the_install() -> None:
     """The finding this mode exists for.
 
     The API's pre-check happens before a fetch that can take minutes; the name
@@ -840,10 +993,9 @@ async def test_insert_only_refuses_a_name_taken_during_the_fetch() -> None:
 
     other = _elf(payload=b"\x02" * 64)
     other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
-    service._fetcher.content, service._fetcher.digest = other, other_digest
 
-    outcome = await service.install(
-        _CTX, _decl(digest=other_digest), installed_by="u2", expect_absent=True
+    outcome = await service.install_upload(
+        _CTX, _upload_decl(digest=other_digest), data=other, installed_by="u2"
     )
 
     assert outcome.status is CliToolStatus.CONFLICT and outcome.failed
@@ -862,9 +1014,8 @@ async def test_a_conflicting_install_leaves_no_object_behind() -> None:
 
     other = _elf(payload=b"\x02" * 64)
     other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
-    service._fetcher.content, service._fetcher.digest = other, other_digest
-    await service.install(
-        _CTX, _decl(digest=other_digest), installed_by="u2", expect_absent=True
+    await service.install_upload(
+        _CTX, _upload_decl(digest=other_digest), data=other, installed_by="u2"
     )
 
     loser_key = _key(digest=other_digest)
@@ -903,8 +1054,8 @@ async def test_a_conflict_over_identical_bytes_keeps_the_winners_object() -> Non
     service, repo, _, _, oss = _service()
     await service.install(_CTX, _decl(), installed_by="someone-else")
 
-    outcome = await service.install(
-        _CTX, _decl(), installed_by="u2", expect_absent=True
+    outcome = await service.install_upload(
+        _CTX, _upload_decl(), data=_TOOL, installed_by="u2"
     )
 
     assert outcome.status is CliToolStatus.CONFLICT
@@ -982,14 +1133,18 @@ async def test_a_failed_record_leaves_the_previous_version_intact() -> None:
 async def test_a_successful_install_reports_where_the_time_went(caplog) -> None:
     """Three networks move the binary — the source, the object store, the
     engine — and "which of the three was slow" is the first question when an
-    apply drags. A single total cannot answer it."""
+    apply drags. A single total cannot answer it.
+
+    ``acquire`` rather than ``fetch``, because on the upload road there is no
+    fetch: the phase is "how long until the bytes were in hand", which is a
+    real number on one road and zero on the other."""
     service, *_ = _service()
 
     with caplog.at_level("INFO"):
         await service.install(_CTX, _decl(), installed_by="u2")
 
     line = next(m for m in caplog.messages if "installed bot=" in m)
-    for phase in ("fetch=", "store=", "deliver=", "total="):
+    for phase in ("acquire=", "store=", "deliver=", "total="):
         assert phase in line, f"{phase} missing from {line!r}"
 
 

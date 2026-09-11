@@ -16,6 +16,7 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.service_protocol imp
     CliToolNotFoundError,
     CliToolOutcome,
     CliToolRefusedError,
+    CliToolTooLargeError,
     CliToolUnsupportedError,
 )
 
@@ -27,5 +28,6 @@ __all__ = [
     "CliToolNotFoundError",
     "CliToolOutcome",
     "CliToolRefusedError",
+    "CliToolTooLargeError",
     "CliToolUnsupportedError",
 ]

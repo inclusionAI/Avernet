@@ -29,7 +29,6 @@ from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
 
 from tests.community.core.bot_config_manifest.apply._fakes import (
     FakeActivationService,
-    FakeGuardedFetcher,
     FakeManifestContent,
     FakeObjectCredentials,
     OSS_BUCKET,
@@ -125,12 +124,7 @@ def _rig(packages: dict[str, bytes]):
         skill_repository=skills,
     )
     objects = seeded_object_store(packages)
-    pipeline = EntryFetcher(
-        FakeGuardedFetcher(responses={}),
-        FakeManifestContent(),
-        FakeObjectCredentials(),
-        objects,
-    )
+    pipeline = EntryFetcher(FakeManifestContent(), FakeObjectCredentials(), objects)
     materialiser = SkillsMaterialiser(
         port, activation, LiveCapabilityReader(skills, activation), real_validator(), pipeline
     )

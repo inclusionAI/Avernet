@@ -42,7 +42,6 @@ from ._fakes import (
     FakeCapabilityReader,
     FakeCredentials,
     FakeGitClient,
-    FakeGuardedFetcher,
     FakeIdentityService,
     FakeManifestContent,
     FakeMcpAuth,
@@ -149,8 +148,8 @@ def _world(*, bot, platform_managed, platform_activation=None, redeliver=None):
             capability_reader=FakeCapabilityReader(),
             package_validator=real_validator(),
             entry_fetcher=EntryFetcher(
-                FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
-            , FakeObjectStore()),
+                FakeManifestContent(), FakeCredentials(), FakeObjectStore()
+            ),
             resource_service=FakeResourceFileService(),
             cli_tool_service=object(),
         )
@@ -167,8 +166,8 @@ def _world(*, bot, platform_managed, platform_activation=None, redeliver=None):
         capability_reader_provider=lambda: FakeCapabilityReader(),
         package_validator_provider=lambda: real_validator(),
         entry_fetcher_provider=lambda: EntryFetcher(
-            FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
-        , FakeObjectStore()),
+            FakeManifestContent(), FakeCredentials(), FakeObjectStore()
+        ),
         resource_service_provider=lambda: FakeResourceFileService(),
         cli_tool_service_factory=lambda family: None,
         git_client_provider=lambda: FakeGitClient(),

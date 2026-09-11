@@ -536,10 +536,6 @@ def _seed_bot_with_resource_manifest(world) -> None:
         modifier=_OWNER,
     )
 
-    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-        EntryFetcher,
-        FetchedEntry,
-    )
     from agentclaw.community.core.bot_config_manifest.credentials.service_protocol import (  # noqa: E501
         SourceCredentialServiceProtocol,
     )
@@ -556,9 +552,6 @@ def _seed_bot_with_resource_manifest(world) -> None:
     archive = _TOOL_ARCHIVE
     uploads: list[dict] = []
     deletes: list[str] = []
-
-    def fetch(_self, ctx, **kwargs):
-        return FetchedEntry(content=archive, digest="sha256:stub", from_store=False)
 
     async def upload_file(_self, **kwargs):
         uploads.append(
@@ -584,11 +577,6 @@ def _seed_bot_with_resource_manifest(world) -> None:
     world.injector.binder.bind(AliyunObjectStore, to=objects, scope=singleton)
     bind_overrides(
         world,
-        EntryFetcher,
-        {"fetch": fetch},
-    )
-    bind_overrides(
-        world,
         ResourceFileService,
         {"upload_file": upload_file, "delete": delete, "exists": exists},
     )
@@ -609,9 +597,8 @@ def _seed_bot_with_resource_manifest(world) -> None:
     # The oss road is left REAL up to the wire here — credential resolution,
     # the composed key, the read through the funnel — with only the store
     # itself doubled and the bucket's contents seeded. That is the point of an
-    # endpoint test: the URL transport's double (``fetch``) does not stand in
-    # for it, because the object road does not go through the URL transport
-    # at all.
+    # endpoint test: there is nothing left to stand in for the road, and
+    # nothing to stand in with — the funnel's URL transport is gone.
     objects.put("mirror", "tools.tgz", archive)
     world.get(SourceCredentialServiceProtocol).put(
         name="oss-cred",

@@ -9,15 +9,18 @@ route: two implementations of "install a tool" would diverge on exactly the
 checks that matter — the digest, the architecture, whether a failed placement
 still writes a row.
 
-**The order is the design.**
+**Two doors, one pipeline.** A manifest entry is resolved through
+``fetch_declared``; an upload arrives with its bytes already in hand. From
+there they are the same call:
 
-    fetch → digest → unpack → select subpath → verify ELF → md5
-          → store in OSS → deliver → record
+    [acquire] → digest → unpack → select subpath → verify ELF → md5
+              → store in OSS → deliver → record
 
 The OSS write comes *before* delivery because on teclaw it **is** the delivery:
 the composed artifact references the stored object (spec D-4). On ARCA it is
-what makes a later redelivery possible without re-fetching a source URL that
-may have rotated. The row is written *last* because the table is the platform's
+what makes a later redelivery possible without going back to a source that may
+have rotated — or, for an upload, without asking anyone to send the file
+again. The row is written *last* because the table is the platform's
 claim that the bot has the tool, and a claim made before the engine accepted it
 is a claim that can be false. Nothing is recorded for a step that failed.
 
@@ -43,7 +46,6 @@ from pathlib import Path
 from typing import Callable, Mapping, Optional, Sequence
 
 from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
-    BlobDelivery,
     EntryFetchError,
 )
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
@@ -158,7 +160,13 @@ class CliToolService:
         expect_absent: bool = False,
         deliver: bool = True,
     ) -> CliToolOutcome:
-        """Fetch, verify, store, record and deliver one tool.
+        """**The manifest road.** Acquire, verify, store, record and deliver.
+
+        ``decl.entry`` is the manifest entry, and it is required: this method's
+        first act is to resolve that entry through ``fetch_declared``, the same
+        door every other fetching category uses. A declaration with no entry
+        names no source, so it is refused rather than half-acquired — the
+        upload road is :meth:`install_upload`, which carries its bytes.
 
         Every failure comes back as a ``FAILED`` outcome carrying the reason,
         rather than as an exception: a full override installing four tools must
@@ -180,6 +188,12 @@ class CliToolService:
             checked_name(decl.name)
         except ValueError as error:
             return CliToolOutcome(decl.name, CliToolStatus.FAILED, str(error))
+        if decl.entry is None:
+            return CliToolOutcome(
+                decl.name,
+                CliToolStatus.FAILED,
+                f"{decl.name!r}: no manifest entry to acquire the tool from",
+            )
 
         # Three phases move a binary that can be a few hundred megabytes, over
         # three different networks: the source, the object store, the engine.
@@ -189,13 +203,102 @@ class CliToolService:
         # multi-minute fetch would otherwise produce a negative duration.
         started = time.monotonic()
         try:
-            data = await self._acquire(ctx, decl)
+            data, from_tree = await self._acquire(ctx, decl)
+        except (EntryFetchError, ValueError) as error:
+            return CliToolOutcome(decl.name, CliToolStatus.FAILED, str(error))
+        return await self._install_bytes(
+            ctx,
+            decl,
+            data,
+            installed_by=installed_by,
+            expect_absent=expect_absent,
+            deliver=deliver,
+            started=started,
+            acquired_at=time.monotonic(),
+            selected=from_tree,
+        )
+
+    async def install_upload(
+        self,
+        ctx: CliToolContext,
+        decl: CliToolDecl,
+        *,
+        data: bytes,
+        installed_by: str,
+        expect_absent: bool = True,
+    ) -> CliToolOutcome:
+        """**The upload road.** The caller already holds the bytes.
+
+        What the management API calls: the request carried the binary (or the
+        archive ``subpath`` selects from), so there is nothing to fetch, no
+        source to name and no credential to fetch under. Everything after
+        "bytes in hand" is the same pipeline the manifest road runs — the
+        digest, the unpack, the selection, the ELF gate, the platform's copy,
+        the row and the engine call — because the two doors must refuse the
+        same bytes for the same reason.
+
+        ``digest`` is not optional here either: on this road it is the
+        client's statement of what it meant to send, and checking it is how a
+        truncated upload becomes a refusal instead of an installed executable
+        nobody named.
+
+        ``expect_absent`` defaults to ``True``, unlike the manifest road's:
+        a single POST is an install, not a replacement.
+        """
+        try:
+            checked_name(decl.name)
+        except ValueError as error:
+            return CliToolOutcome(decl.name, CliToolStatus.FAILED, str(error))
+        started = time.monotonic()
+        return await self._install_bytes(
+            ctx,
+            decl,
+            data,
+            installed_by=installed_by,
+            expect_absent=expect_absent,
+            deliver=True,
+            started=started,
+            # Nothing was acquired: the upload is already in hand, so the
+            # phase that would be the fetch took no time at all and the log
+            # says so rather than attributing the request's own transfer to it.
+            acquired_at=started,
+            selected=False,
+        )
+
+    async def _install_bytes(
+        self,
+        ctx: CliToolContext,
+        decl: CliToolDecl,
+        data: bytes,
+        *,
+        installed_by: str,
+        expect_absent: bool,
+        deliver: bool,
+        started: float,
+        acquired_at: float,
+        selected: bool,
+    ) -> CliToolOutcome:
+        """Everything both roads share, from the bytes in hand::
+
+            digest -> unpack -> select -> verify ELF
+                   -> md5 -> store in OSS -> record -> deliver
+
+        One pipeline, deliberately: an upload and a manifest entry are two ways
+        of *obtaining* a binary and exactly one set of rules about what may be
+        installed. A second implementation would diverge on the checks that
+        matter — the pin, the architecture, whether a failed placement still
+        writes a row — and the divergence would be invisible from either side.
+
+        ``selected`` says the ``subpath`` has already done its work, which is
+        true only of a git checkout: there ``single()`` returned the one file
+        the composed subpath named, so there is no archive left to select from.
+        """
+        try:
+            data = await asyncio.to_thread(self._shape, data, decl, selected)
         except (
-            EntryFetchError, UnpackError, CliToolSubpathError,
-            CliToolVerificationError, ValueError,
+            UnpackError, CliToolSubpathError, CliToolVerificationError, ValueError,
         ) as error:
             return CliToolOutcome(decl.name, CliToolStatus.FAILED, str(error))
-        fetched_at = time.monotonic()
 
         md5 = hashlib.md5(data).hexdigest()
         # The digest the STORE and the row are keyed by, which is not always
@@ -241,7 +344,12 @@ class CliToolService:
                 entity_id=ctx.entity_id,
                 bot_id=ctx.bot_id,
                 name=decl.name,
-                source=decl.source_url,
+                # The *declared* address, echoed for audit — a ``from`` name, a
+                # git URL, a bucket/key, and empty on the upload road, where
+                # the caller declared no source at all. Nothing reads it back
+                # to acquire anything; the column is the document's own word
+                # for where these bytes were said to come from.
+                source=decl.declared_address,
                 digest=content_digest,
                 subpath=decl.subpath,
                 md5=md5,
@@ -289,11 +397,11 @@ class CliToolService:
         if not deliver:
             logger.info(
                 "[cli_tools] recorded bot=%s name=%s size=%d by=%s "
-                "fetch=%.2fs store=%.2fs record=%.2fs — delivery deferred to "
-                "the whole-set call",
+                "acquire=%.2fs store=%.2fs record=%.2fs — delivery deferred "
+                "to the whole-set call",
                 ctx.bot_id, decl.name, len(data), installed_by,
-                fetched_at - started,
-                stored_at - fetched_at,
+                acquired_at - started,
+                stored_at - acquired_at,
                 recorded_at - stored_at,
             )
             return CliToolOutcome(
@@ -320,10 +428,10 @@ class CliToolService:
         delivered_at = time.monotonic()
         logger.info(
             "[cli_tools] installed bot=%s name=%s size=%d by=%s "
-            "fetch=%.2fs store=%.2fs record=%.2fs deliver=%.2fs total=%.2fs",
+            "acquire=%.2fs store=%.2fs record=%.2fs deliver=%.2fs total=%.2fs",
             ctx.bot_id, decl.name, len(data), installed_by,
-            fetched_at - started,
-            stored_at - fetched_at,
+            acquired_at - started,
+            stored_at - acquired_at,
             recorded_at - stored_at,
             delivered_at - recorded_at,
             delivered_at - started,
@@ -623,42 +731,30 @@ class CliToolService:
 
     # ── the pipeline ─────────────────────────────────────────────────────
 
-    async def _acquire(self, ctx: CliToolContext, decl: CliToolDecl) -> bytes:
-        """Fetch, confirm the pin, unpack if declared, select and verify.
+    async def _acquire(
+        self, ctx: CliToolContext, decl: CliToolDecl
+    ) -> tuple[bytes, bool]:
+        """The manifest entry's bytes, and whether its ``subpath`` is spent.
 
-        A declaration that came from a manifest entry goes through
-        ``fetch_declared`` — the same door every other fetching category uses,
-        and the only one that resolves a ``from`` name or a ``protocol: git``
-        source. Reading ``decl.source_url`` instead is what used to put a
-        *source name* on the wire as though it were a URL: accepted at ``PUT``,
+        One door: ``fetch_declared``, the same one every other fetching
+        category uses, and the only one that resolves a ``from`` name or a
+        ``protocol: git`` source. There is no second road to pick between —
+        reading an address off the declaration instead is what used to put a
+        source *name* on the wire as though it were a URL: accepted at ``PUT``,
         failed at apply, the one construct that broke "accepted means
         appliable".
+
+        The flag is the git road's: on a checkout ``single()`` has already
+        returned the one file the composed subpath named, so the shaping step
+        must not look for an archive member of the same name.
         """
-        if decl.entry is not None:
-            delivery = await asyncio.to_thread(
-                self._fetcher.fetch_declared,
-                ctx,
-                entry=decl.entry,
-                category=FETCH_CATEGORY,
-                entry_identity=decl.name,
-            )
-        else:
-            # The API-driven install: a plain URL from the caller, no manifest
-            # and no ``sources`` map to resolve against. ``fetch`` answers in
-            # the transport's currency, so it is wrapped here — one type
-            # reaches the rest of this method whichever door it came through.
-            delivery = BlobDelivery(
-                await asyncio.to_thread(
-                    self._fetcher.fetch,
-                    ctx,
-                    source_url=decl.source_url,
-                    digest=decl.digest,
-                    auth=decl.auth,
-                    category=FETCH_CATEGORY,
-                    keep_last=decl.keep_last,
-                    entry_identity=decl.name,
-                )
-            )
+        delivery = await asyncio.to_thread(
+            self._fetcher.fetch_declared,
+            ctx,
+            entry=decl.entry,
+            category=FETCH_CATEGORY,
+            entry_identity=decl.name,
+        )
         data = await asyncio.to_thread(delivery.single)
         if delivery.needs_receipt():
             # A tree's bytes are not filed by the fetch — only the caller
@@ -674,29 +770,41 @@ class CliToolService:
                 entry_identity=decl.name,
                 credential_name=delivery.auth(),
             )
-        if decl.digest and delivery.digest() != decl.digest:
-            # The fetch pipeline enforces the pin; this compares the content
-            # address it already computed, so the belt costs nothing. It is
-            # here because this is the one category that distributes an
-            # executable, and a keep_last fallback is the path where stored
-            # bytes could stand in for what was declared.
-            raise ValueError(
-                f"{decl.name!r}: the bytes are {delivery.digest()}, the entry "
-                f"declared {decl.digest}"
-            )
+        return data, delivery.is_tree()
+
+    @staticmethod
+    def _shape(data: bytes, decl: CliToolDecl, selected: bool) -> bytes:
+        """The bytes in hand, turned into the one file that is the command.
+
+        ``digest`` first, over what arrived: on the manifest road that is a
+        belt behind the fetch pipeline's own pin — free, and the path worth
+        belting, because ``keep_last`` is where stored bytes could stand in for
+        what was declared. On the upload road it is the *only* check of what
+        the client sent, which is why it is here rather than on one side.
+
+        Then the archive, if one was declared, then the architecture. Nothing
+        below this line knows which road it is on.
+        """
+        if decl.digest:
+            acquired = "sha256:" + hashlib.sha256(data).hexdigest()
+            if acquired != decl.digest:
+                raise ValueError(
+                    f"{decl.name!r}: the bytes are {acquired}, "
+                    f"{decl.digest} was declared"
+                )
         if decl.unpack:
-            data = await asyncio.to_thread(self._select, data, decl)
-        elif decl.subpath and not delivery.is_tree():
+            data = CliToolService._select(data, decl)
+        elif decl.subpath and not selected:
             # ``subpath`` on a tree already did its work — it selected the one
             # file out of the checkout, which is what ``single()`` returned.
-            # On a single delivered object it selects an archive member, so
-            # without an ``unpack`` there is no archive for it to select from
-            # and the selection would be silently ignored.
+            # On a single object it selects an archive member, so without an
+            # ``unpack`` there is no archive for it to select from and the
+            # selection would be silently ignored.
             raise CliToolSubpathError(
                 f"{decl.name!r}: 'subpath' selects a member of an archive, "
-                "but the entry declares no 'unpack' — without it the fetched "
-                "object is the command itself and the selection would be "
-                "silently ignored"
+                "but no 'unpack' is declared — without it the object in hand "
+                "is the command itself and the selection would be silently "
+                "ignored"
             )
         verify_amd64_elf(data, name=decl.name)
         return data

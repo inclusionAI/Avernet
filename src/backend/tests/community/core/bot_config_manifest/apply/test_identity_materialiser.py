@@ -36,7 +36,6 @@ from agentclaw.community.core.bot_config_manifest.apply.source_fetchers import (
 )
 
 from ._fakes import (
-    FakeGuardedFetcher,
     FakeIdentityService,
     FakeManifestContent,
     FakeObjectCredentials,
@@ -217,12 +216,7 @@ def test_one_failed_fetch_aborts_the_whole_category_no_writes():
     objects.make_unavailable("down-bucket", "source answered 404")
     materialiser = IdentityMaterialiser(
         identity,
-        EntryFetcher(
-            FakeGuardedFetcher(responses={}),
-            FakeManifestContent(),
-            FakeObjectCredentials(),
-            objects,
-        ),
+        EntryFetcher(FakeManifestContent(), FakeObjectCredentials(), objects),
     )
 
     resolved = _run(
@@ -255,12 +249,7 @@ def test_keep_last_reuses_the_platform_copy_when_the_source_is_down():
     objects.make_unavailable(OSS_BUCKET, "source transport failed")
     materialiser = IdentityMaterialiser(
         identity,
-        EntryFetcher(
-            FakeGuardedFetcher(responses={}),
-            content,
-            FakeObjectCredentials(),
-            objects,
-        ),
+        EntryFetcher(content, FakeObjectCredentials(), objects),
     )
 
     result, plan, written = _run(
@@ -392,12 +381,7 @@ def test_an_omitted_on_fetch_failure_defaults_to_keep_last():
     objects.make_unavailable(OSS_BUCKET, "source transport failed")
     materialiser = IdentityMaterialiser(
         identity,
-        EntryFetcher(
-            FakeGuardedFetcher(responses={}),
-            content,
-            FakeObjectCredentials(),
-            objects,
-        ),
+        EntryFetcher(content, FakeObjectCredentials(), objects),
     )
 
     result, _, written = _run(

@@ -63,7 +63,6 @@ from ..apply._fakes import (
     FakeCapabilityReader,
     FakeCredentials,
     FakeGitClient,
-    FakeGuardedFetcher,
     FakeIdentityService,
     FakeManifestContent,
     FakeMcpAuth,
@@ -220,8 +219,8 @@ def _build(db, *, scripts=None):
         capability_reader_provider=lambda: FakeCapabilityReader(),
         package_validator_provider=lambda: real_validator(),
         entry_fetcher_provider=lambda: EntryFetcher(
-            FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
-        , FakeObjectStore()),
+            FakeManifestContent(), FakeCredentials(), FakeObjectStore()
+        ),
         # W6's resources materialiser and W7's git transport: unreached by
         # this suite's document, but the registry registers them and the
         # session is built per apply regardless.

@@ -68,7 +68,6 @@ from agentclaw.community.kernel.bot_config import StoreRef
 from ..apply._fakes import (
     FakeActivationService,
     FakeGitClient,
-    FakeGuardedFetcher,
     FakeManifestContent,
     FakeMcpAuth,
     FakeObjectCredentials,
@@ -189,12 +188,7 @@ def _build(db):
     validator = real_validator()
 
     def fetcher():
-        return EntryFetcher(
-            FakeGuardedFetcher(responses={}),
-            FakeManifestContent(),
-            FakeObjectCredentials(),
-            seeded_object_store({_QC_KEY: _QZ}),
-        )
+        return EntryFetcher(FakeManifestContent(), FakeObjectCredentials(), seeded_object_store({_QC_KEY: _QZ}))
 
     def platform_ports() -> MaterialiserPorts:
         return MaterialiserPorts(

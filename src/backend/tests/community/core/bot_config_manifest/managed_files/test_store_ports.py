@@ -27,7 +27,6 @@ from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
 
 from tests.community.core.bot_config_manifest.apply._fakes import (
     FakeCredentials,
-    FakeGuardedFetcher,
     FakeManifestContent,
     make_context,
 )
@@ -50,7 +49,7 @@ def _store():
 
 
 def _fetcher():
-    return EntryFetcher(FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials(), FakeObjectStore())
+    return EntryFetcher(FakeManifestContent(), FakeCredentials(), FakeObjectStore())
 
 
 async def _apply(materialiser, ctx, entries):

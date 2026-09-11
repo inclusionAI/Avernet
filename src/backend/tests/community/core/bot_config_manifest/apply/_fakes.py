@@ -481,12 +481,7 @@ def identity_rig(files: dict[str, str] | None = None):
     identity = FakeIdentityService(files)
     objects = seeded_object_store({SOUL_KEY: SOUL_BODY})
     content = FakeManifestContent()
-    pipeline = EntryFetcher(
-        FakeGuardedFetcher(responses={}),
-        content,
-        FakeObjectCredentials(),
-        objects,
-    )
+    pipeline = EntryFetcher(content, FakeObjectCredentials(), objects)
     return IdentityMaterialiser(identity, pipeline), identity, objects, content
 
 

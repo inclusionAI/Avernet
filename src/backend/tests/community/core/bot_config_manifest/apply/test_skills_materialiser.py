@@ -38,7 +38,6 @@ from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
 from ._fakes import (
     FakeActivationService,
     FakeCapabilityReader,
-    FakeGuardedFetcher,
     FakeManifestContent,
     FakeObjectCredentials,
     FakeSkillUploadService,
@@ -111,12 +110,7 @@ def skill_rig(
     reader = FakeCapabilityReader(assets=assets, member_ids=member_ids)
     objects = seeded_object_store(packages)
     content = FakeManifestContent()
-    pipeline = EntryFetcher(
-        FakeGuardedFetcher(responses={}),
-        content,
-        FakeObjectCredentials(),
-        objects,
-    )
+    pipeline = EntryFetcher(content, FakeObjectCredentials(), objects)
     materialiser = SkillsMaterialiser(
         uploads, activation, reader, real_validator(), pipeline
     )

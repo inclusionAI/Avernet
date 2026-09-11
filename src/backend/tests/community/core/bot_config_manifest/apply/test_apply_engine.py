@@ -41,7 +41,6 @@ from ._fakes import (
     FakeCapabilityReader,
     FakeCredentials,
     FakeGitClient,
-    FakeGuardedFetcher,
     FakeIdentityService,
     FakeManifestContent,
     FakeMcpAuth,
@@ -78,9 +77,7 @@ def _engine(scripts=None, activations=None, auth=None):
 def _dummy_entry_fetcher():
     """The engine tests never declare skills/identity sources, so the fetcher
     the registry holds for them can be a never-called placeholder."""
-    return EntryFetcher(
-        FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
-    , FakeObjectStore())
+    return EntryFetcher(FakeManifestContent(), FakeCredentials(), FakeObjectStore())
 
 
 async def _apply(engine, document, *, ctx=None, dry_run=False, phases=None):
@@ -800,12 +797,7 @@ async def test_a_fetching_document_applies_all_four_categories_in_order():
             upload_service=uploads,
             capability_reader=reader,
             package_validator=real_validator(),
-            entry_fetcher=EntryFetcher(
-                FakeGuardedFetcher(responses={}),
-                FakeManifestContent(),
-                FakeObjectCredentials(),
-                objects,
-            ),
+            entry_fetcher=EntryFetcher(FakeManifestContent(), FakeObjectCredentials(), objects),
             resource_service=FakeResourceFileService(),
             cli_tool_service=object(),
         ),
