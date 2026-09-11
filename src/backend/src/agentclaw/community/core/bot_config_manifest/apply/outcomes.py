@@ -139,7 +139,7 @@ class EntryResult:
     Construct        Key read           Example ``identity``
     ===============  =================  ==================================
     ``skills``       ``name``           ``"code-review"``
-    ``identity``     ``type``           ``"avatar"``
+    ``identity``     ``type``           ``"SOUL.md"``
     ``resources``    ``path``           ``"data/faq.csv"``
     ``mcp``          ``server_code``    ``"gh"``
     ``cli_tools``    ``name``           ``"qc"``
@@ -168,7 +168,10 @@ class EntryResult:
             construct=ManifestCategory.RESOURCES,
             identity="data/prices/",
             outcome=EntryOutcome.SKIPPED,
-            reason="another entry in this category failed",
+            reason=(
+                "not written: another entry in this category could not be "
+                "materialized, and a category is written in full or not at all"
+            ),
             note=None,
         )
 

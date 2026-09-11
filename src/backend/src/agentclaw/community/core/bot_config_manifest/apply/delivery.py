@@ -68,7 +68,11 @@ from agentclaw.community.core.bot_config_manifest.apply.order import (
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyReport
 from agentclaw.community.core.bot_config_manifest.capabilities import ManifestSection
 
-#: The yaml key under ``user_config.bot_config_manifest``.
+#: The yaml key under ``user_config.bot_config_manifest``::
+#:
+#:     user_config:
+#:       bot_config_manifest:
+#:         teclaw_platform_managed: true
 TECLAW_PLATFORM_MANAGED_KEY = "teclaw_platform_managed"
 
 
@@ -96,11 +100,17 @@ class CreationSequence(StrEnum):
 class MaterialiserPorts:
     """The write targets a strategy hands ``build_materialisers``.
 
-    Field for field the keyword arguments that function takes; a strategy
-    differs from another by which objects sit behind these names, never by
-    which materialisers exist. Each field is typed by the narrow port the
-    materialiser calls through, so a device-backed service and a store-backed
-    port are interchangeable by shape.
+    Ten fields, matching that function's keyword arguments name for name, so
+    :meth:`as_kwargs` can splat them straight in. A strategy differs from
+    another by which **objects** sit behind these names, never by which
+    materialisers exist: ARCA binds device-backed services, platform-managed
+    teclaw binds store-backed ports, and each field is typed by the narrow port
+    the materialiser calls through so the two are interchangeable by shape.
+
+    Created by: ``ArcaDelivery.ports`` and ``TeclawDelivery.ports``, each
+    delegating to a lazy callable bound by the composition root.
+    Consumed by: ``apply/registry.build_materialisers``, via
+    :meth:`as_kwargs`.
     """
 
     script_service: BotStartupScriptServiceProtocol
@@ -118,6 +128,10 @@ class MaterialiserPorts:
     cli_tool_service: CliToolService
 
     def as_kwargs(self) -> dict[str, Any]:
+        """The same ten fields as a plain dict, ready to splat into
+        ``build_materialisers(**ports.as_kwargs())``. Written out by hand
+        rather than derived, so adding a field here without adding a
+        materialiser parameter is a visible edit."""
         return {
             "script_service": self.script_service,
             "activation_service": self.activation_service,
@@ -135,6 +149,32 @@ class MaterialiserPorts:
 class DeliveryStrategy(Protocol):
     """What differs between engine families, and nothing else.
 
+    The four things it owns, and how the two implementations answer:
+
+    ======================  =====================  ========================
+    Member                  ``ArcaDelivery``       ``TeclawDelivery``
+                                                   (platform-managed on)
+    ======================  =====================  ========================
+    ``family``              ``"arca"``             ``"teclaw"``
+    ``creation_sequence``   ``CREATE_BETWEEN_``    ``RECORD_APPLY_``
+                            ``PHASES``             ``PROVISION``
+    ``phase_of(step)``      the table's own        ``PRE_CONTAINER`` for
+                            ``step.phase``         everything but ``script``
+    ``needs_container()``   ``True``               ``False``
+    ``ports()``             device-backed          store-backed
+    ``finish()``            ``None``               one whole-artifact
+                                                   redeliver
+    ======================  =====================  ========================
+
+    With the switch **off**, ``TeclawDelivery`` answers the ARCA column for
+    every row except ``family`` and ``ports`` — that is the point of the
+    switch.
+
+    Created by: ``DeliveryStrategyFactory.for_engine`` / ``for_bot``.
+    Consumed by: the apply service (``ports``, ``finish``), the orchestrator
+    (``steps_for``), and the creation job (``creation_sequence``,
+    ``needs_container``).
+
     Implemented by ``ArcaDelivery`` and ``TeclawDelivery`` below, which
     subclass it explicitly so the implementations are one jump away.
     """
@@ -150,31 +190,52 @@ class DeliveryStrategy(Protocol):
         ...
 
     @property
-    def creation_sequence(self) -> CreationSequence: ...
+    def creation_sequence(self) -> CreationSequence:
+        """Which of the two creation orders this family runs."""
+        ...
 
     def phase_of(self, step: ApplyStep) -> ApplyPhase:
-        """Which phase this family delivers the step's construct in."""
+        """Which phase this family delivers the step's construct in.
+
+        May disagree with ``step.phase``, which is the ARCA reading.
+        """
         ...
 
     def steps_for(
         self, phases: frozenset[ApplyPhase] | None = None
     ) -> tuple[ApplyStep, ...]:
-        """The steps in the requested phases, in position order."""
+        """The steps in the requested phases, in position order.
+
+        Same contract as ``apply.order.steps_for``, but filtered through this
+        family's :meth:`phase_of` rather than the table's own column. This is
+        the callable handed to ``ApplyOrchestrator``.
+        """
         ...
 
     def needs_container(self) -> bool:
-        """Whether any construct of this family lands only after the container."""
+        """Whether any construct of this family lands only after the container.
+
+        ``False`` means the creation job may skip waiting for ``ACTIVE`` and
+        run no post-container phase.
+        """
         ...
 
     def ports(self) -> MaterialiserPorts:
-        """The write targets for this family's materialisers."""
+        """The write targets for this family's materialisers.
+
+        Called per apply, not cached: the callables behind it reach the device
+        graph, which is resolved lazily.
+        """
         ...
 
     async def finish(self, ctx: ApplyContext, report: ApplyReport) -> Optional[str]:
         """Close an apply after every category is written.
 
-        Returns a note for the report (a failure that must not raise — §2.7),
-        or ``None`` when there is nothing to say.
+        Answers a string that becomes one of ``ApplyReport.notes``, or ``None``
+        when there is nothing to say. ARCA always answers ``None``; teclaw
+        answers ``None`` on success and the redeliver's failure text otherwise.
+        A failure here must **not** raise: every category is already written,
+        and losing the report would be worse than recording the note.
         """
         ...
 
@@ -192,7 +253,12 @@ def _steps(
 
 
 class ArcaDelivery(DeliveryStrategy):
-    """Today's behaviour, named: the phase table is ``APPLY_ORDER``'s own."""
+    """The container family: the phase table is ``APPLY_ORDER``'s own.
+
+    Every answer is the table's, unchanged — ``phase_of`` returns
+    ``step.phase``, ``needs_container`` is ``True``, and ``finish`` has
+    nothing to do because the owning services project as they write.
+    """
 
     family = "arca"
     creation_sequence = CreationSequence.CREATE_BETWEEN_PHASES
@@ -220,10 +286,18 @@ class ArcaDelivery(DeliveryStrategy):
         return None
 
 
-#: The closing step for a platform-managed teclaw apply: one whole-artifact
-#: redeliver to the running container, or nothing when the bot has no live
-#: binding (provisioning composes the first artifact instead). Returns a note
-#: on failure.
+#: The closing step for a platform-managed teclaw apply. Takes the apply's
+#: context and answers ``None`` on success, or a report-safe note on failure::
+#:
+#:     async def redeliver(ctx: ApplyContext) -> Optional[str]: ...
+#:
+#: One whole-artifact redeliver to the running container, or nothing at all
+#: when the bot has no live binding — on the creation path, provisioning
+#: composes the first artifact instead, so there is nothing to redeliver to.
+#: The note it answers becomes one of ``ApplyReport.notes``.
+#:
+#: Implemented by: ``apply/redeliver``. Consumed by:
+#: :meth:`TeclawDelivery.finish`.
 Redeliver = Callable[[ApplyContext], Awaitable[Optional[str]]]
 
 
@@ -231,12 +305,24 @@ Redeliver = Callable[[ApplyContext], Awaitable[Optional[str]]]
 class TeclawPlatformBindings:
     """What the platform-managed teclaw path needs bound, as one DI value.
 
-    The store-backed ports and the closing redeliver are built in the
-    manifest-fetch graph (beside the store they write) and handed to the apply
-    service, whose own module is at its size cap, as a single parameter.
+    Two fields, both callables, so nothing is resolved until an apply actually
+    runs on a teclaw bot::
+
+        TeclawPlatformBindings(
+            platform_ports=lambda: MaterialiserPorts(...),  # store-backed
+            redeliver=<an async (ApplyContext) -> Optional[str]>,
+        )
+
+    Created by: the composition root, in the manifest-fetch graph beside the
+    store these ports write to.
+    Consumed by: the apply service, which unpacks it into
+    ``DeliveryStrategyFactory``.
     """
 
+    #: Builds the store-backed port bundle. Lazy: it reaches the object store
+    #: graph.
     platform_ports: Callable[[], MaterialiserPorts]
+    #: The closing whole-artifact redeliver. See :data:`Redeliver`.
     redeliver: Redeliver
 
 
@@ -344,6 +430,25 @@ _FALSE_SCALARS = frozenset({"false", "no", "off", "0"})
 def teclaw_platform_managed_from_config(tree: Mapping[str, Any] | None) -> bool:
     """The switch, read from the ``user_config`` tree. Absent is off.
 
+    ``tree`` is the merged ``user_config`` mapping; the block this reads is
+    ``tree["bot_config_manifest"][TECLAW_PLATFORM_MANAGED_KEY]``.
+
+    ============================================  =====================
+    Value at that key                             Result
+    ============================================  =====================
+    absent, or the block is missing/not a         ``False``
+    mapping, or ``tree`` is ``None``
+    ``None`` (``teclaw_platform_managed:``        ``False``
+    with nothing after it)
+    ``True`` / ``False``                          as written
+    ``"true"``, ``"yes"``, ``"on"``, ``"1"``      ``True``
+    ``"false"``, ``"no"``, ``"off"``, ``"0"``     ``False``
+    ``0`` / ``1``                                 ``False`` / ``True``
+    anything else                                 raises ``ValueError``
+    ============================================  =====================
+
+    Called by: the composition root, at boot.
+
     Strict, and the strictness is the point: YAML may hand back a string, and
     ``bool("false")`` is ``True``. A switch that turns a delivery path on
     because someone quoted ``"off"`` would fail every teclaw apply in a
@@ -381,7 +486,17 @@ def teclaw_platform_managed_from_config(tree: Mapping[str, Any] | None) -> bool:
 
 
 class DeliveryStrategyFactory:
-    """Pick the strategy for a bot. The one reader of the switch."""
+    """Pick the strategy for a bot. The one reader of the switch.
+
+    ``for_engine("claude_code")`` answers an :class:`ArcaDelivery`;
+    ``for_engine("teclaw")`` answers a :class:`TeclawDelivery` carrying the
+    switch. ``for_bot(bot)`` is the same thing keyed off
+    ``bot["active_engine"]``.
+
+    Raises ``RuntimeError`` when the switch is on and no platform ports are
+    bound: a misconfiguration should be loud, not a quiet fallback to writing
+    into a container through the device ports.
+    """
 
     def __init__(
         self,
