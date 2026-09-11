@@ -744,6 +744,54 @@ def test_two_names_over_one_repository_are_two_rows_and_one_baseline(rig):
     assert len(git.specs) == 1, "one checkout per (url, ref) per apply"
 
 
+def test_two_inline_declarations_at_two_modes_are_two_rows(rig):
+    """The same alias hazard, on the road where the display is not unique.
+
+    A named source's display is its ``from`` name, which maps to exactly one
+    ``(url, ref, mode)``. An inline source's display is ``url@ref`` — mode-blind
+    — so two inline declarations of one repository at one ref but two modes
+    share it. De-duplicated on the display alone, whichever resolved first took
+    the slot and the other recorded nothing; when the loser was the ``strict``
+    one, it never established a baseline, and a pin with no baseline never
+    refuses anything. The rule that closes it: **the recording identity must be
+    at least as fine as the key the recording feeds.**
+    """
+    _, _, pipeline = rig
+    loose = {"protocol": "git", "url": GIT_URL, "ref": "main",
+             "mode": "non_strict"}
+    pinned = {"protocol": "git", "url": GIT_URL, "ref": "main", "mode": "strict"}
+
+    # Apply N, the bot's first: the lax declaration resolves first and would
+    # have taken the shared display slot.
+    git = _ScriptedGit()
+    session = _session(git)
+    ctx = make_context(source_session=session)
+    pipeline.resolve(ctx, entry={"source": loose}, category="skills")
+    pipeline.resolve(ctx, entry={"source": pinned}, category="skills")
+
+    rows = session.resolution_records()
+    # Two rows. They share a name — ``url@ref`` is what an inline source is
+    # called — and are told apart by the mode each was resolved under.
+    assert [(r.name, r.mode, r.resolved_sha) for r in rows] == [
+        (f"{GIT_URL}@main", "non_strict", _FAKE_SHA),
+        (f"{GIT_URL}@main", "strict", _FAKE_SHA),
+    ]
+
+    # Apply N+1: the ref has moved. The pin has a baseline to refuse against.
+    rebuilt = {(r.url, r.ref, r.mode): r.resolved_sha for r in rows}
+    assert rebuilt == {
+        (GIT_URL, "main", "non_strict"): _FAKE_SHA,
+        (GIT_URL, "main", "strict"): _FAKE_SHA,
+    }
+    moved = _ScriptedGit(sha="c" * 40)
+    with pytest.raises(EntryFetchError, match="moved"):
+        pipeline.resolve(
+            make_context(source_session=_session(moved, baselines=rebuilt)),
+            entry={"source": pinned},
+            category="skills",
+        )
+
+
 def test_a_non_strict_alias_cannot_advance_a_strict_pin(rig):
     """One repository, one ref, declared twice at two modes — and the pin holds.
 

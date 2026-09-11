@@ -1774,6 +1774,8 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 
 **一条声明一行**：两个 `from` 名指向同一个 `(url, ref)` 就是两行（各自带着作者
 写下的那个名字），`resolved_sha` 相同；同一个仓库内联声明两个 `ref` 也是两行。
+同一个 `(url, ref)` 内联声明两次、只有 `mode` 不同，同样是两行——内联源的 `name`
+都是 `url@ref`，这两行靠 `mode` 区分。
 
 `categories[]`：
 

@@ -151,13 +151,26 @@ class SourceSession:
     _checkouts: dict[tuple[str, str], GitCheckout] = field(default_factory=dict)
     #: The report's ``sources`` rows, in the order they were adopted.
     _resolutions: list[SourceResolution] = field(default_factory=list)
-    #: The display names already in ``_resolutions``. Makes :meth:`adopt`
-    #: idempotent per display, so ten entries naming one source produce one
-    #: row — and two declarations of one repository produce two, which is what
-    #: "one row per declaration" means::
+    #: The ``(display, mode)`` pairs already in ``_resolutions``. Makes
+    #: :meth:`adopt` idempotent per declaration, so ten entries naming one
+    #: source produce one row — and two declarations of one repository produce
+    #: two, which is what "one row per declaration" means::
     #:
-    #:     {"content", "https://code.example.com/solo.git@main"}
-    _recorded: set[str] = field(default_factory=set)
+    #:     {("content", "strict"),
+    #:      ("https://code.example.com/solo.git@main", "non_strict")}
+    #:
+    #: ``mode`` is in here for the same reason it is in the baseline key, and
+    #: the rule is worth stating on its own: **the recording identity must be
+    #: at least as fine as the key the recording feeds.** A named source's
+    #: display is its ``from`` name, which maps to exactly one
+    #: ``(url, ref, mode)``, so it is already fine enough. An inline source's
+    #: display is ``url@ref``, which is not: two inline declarations of one
+    #: repository at one ref but two modes share it. De-duplicated on the
+    #: display alone, whichever resolved first would take the slot and the
+    #: other would record nothing — leaving, if the loser was the ``strict``
+    #: one, a pin that never establishes a baseline and therefore never
+    #: refuses anything.
+    _recorded: set[tuple[str, str]] = field(default_factory=set)
 
     def checkout(
         self,
@@ -230,13 +243,16 @@ class SourceSession:
         for the entry — a refused move is not adopted, so the report of a
         refusing (failed) apply carries no poisoned baseline, and the last
         apply's record keeps refusing the moved ref until the document is
-        re-pinned. Idempotent per display; a display is a name or ``url@ref``,
-        so every entry that names one source stands behind one resolution, and
-        two names over one repository record one row each.
+        re-pinned. Idempotent per ``(display, mode)``; a display is a name or
+        ``url@ref``, so every entry that names one source stands behind one
+        resolution, and two names over one repository record one row each. The
+        mode is part of that identity rather than a detail of the row: see
+        ``_recorded``.
         """
-        if display in self._recorded:
+        key = (display, spec.mode)
+        if key in self._recorded:
             return
-        self._recorded.add(display)
+        self._recorded.add(key)
         self._resolutions.append(
             SourceResolution(
                 name=display,
