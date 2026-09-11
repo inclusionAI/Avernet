@@ -1568,6 +1568,7 @@ async fn agentpass_resolve_returns_agent_code_binding_and_bot() {
     assert_eq!(body["provider_bot_binding"]["bot_uuid"], registered.bot_uuid);
     assert_eq!(body["bot"]["bot_uuid"], registered.bot_uuid);
     assert_eq!(body["bot"]["capabilities"]["name"], "Code Reviewer");
+    assert!(body["bot"].get("dynamic_status").is_none());
 }
 
 #[tokio::test]

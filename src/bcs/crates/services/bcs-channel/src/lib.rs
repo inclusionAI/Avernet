@@ -7205,7 +7205,6 @@ mod tests {
                 agent_code: None,
                 agent_token: None,
             },
-            dynamic_status: BotDynamicStatus::default(),
             env: Some("dev".to_string()),
             created_by: None,
             actor_kind: ActorKind::Bot,

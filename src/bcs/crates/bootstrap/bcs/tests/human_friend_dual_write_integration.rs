@@ -56,7 +56,6 @@ impl TestRegistry {
         let row = RegisteredBot {
             bot_uuid: bot_uuid.to_string(),
             capabilities: caps,
-            dynamic_status: BotDynamicStatus::default(),
             env: None,
             created_by: None,
             actor_kind,

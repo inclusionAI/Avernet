@@ -355,7 +355,6 @@ fn search_hit(
                 visibility: "public".to_string(),
                 ..Default::default()
             },
-            dynamic_status: Default::default(),
             env: None,
             created_by: None,
             actor_kind: ActorKind::Bot,

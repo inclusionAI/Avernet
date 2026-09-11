@@ -1,7 +1,6 @@
 //! Plugin-backed bot repository implementation.
 //!
 //! This module provides a bot repository backed by:
-//! - **Cache plugin**: Dynamic status with TTL for failover recovery
 //! - **Database plugin**: Persistent storage for bot capabilities and tokens
 //! - **Process Memory**: streaming connection state and heartbeat tracking
 //!
@@ -9,20 +8,19 @@
 //!
 //! ```text
 //! Layer 1 (Memory):    ws_connection, last_heartbeat, token_to_bot mapping
-//! Layer 2 (Cache):     dynamic_status (TTL 600s)
-//! Layer 3 (Database):  bot_info JSON, session_token, name
+//! Layer 2 (Database):  bot_info JSON, session_token, name
 //! ```
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, oneshot};
 use tracing::{debug, info, warn};
 
-use bcs_cache_api::{CacheError, CachePlugin};
+use bcs_cache_api::CachePlugin;
 use bcs_config::resolve_env_str as resolve_env;
 use bcs_db_api::{
     DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue as Value, db_get_column, db_get_column_opt,
@@ -45,21 +43,16 @@ fn log_bot_cache_source(source: &'static str) {
 pub mod memory;
 pub mod provider;
 
+#[cfg(test)]
+#[path = "../tests/unit/heartbeat.rs"]
+mod heartbeat_tests;
+
 pub use bcs_service_api::port::repo::BotRepoPort;
 pub use memory::MemoryBotRepo;
 pub use provider::{DbProviderStore, MemoryProviderStore};
 
 /// Maximum time before a bot registration expires (5 minutes).
 const BOT_EXPIRY: Duration = Duration::from_secs(300);
-
-/// Cache TTL for dynamic status (10 minutes = 10x heartbeat interval).
-const STATUS_CACHE_TTL_SECONDS: i64 = 600;
-
-/// Default cache key prefix used by legacy constructors.
-const DEFAULT_CACHE_KEY_PREFIX: &str = "bcs:";
-
-/// Cache key namespace for bot status.
-const STATUS_CACHE_KEY_NAMESPACE: &str = "status:";
 
 fn bot_info_json_set(
     updates: Vec<(&'static str, serde_json::Value)>,
@@ -154,8 +147,6 @@ struct RegisteredBotInner {
     last_heartbeat: Instant,
     /// Bot capabilities (loaded from database).
     capabilities: BotCapabilities,
-    /// Dynamic status (synced to cache).
-    dynamic_status: BotDynamicStatus,
     /// Active streaming connection (if connected).
     ws_connection: Option<BotConnection>,
     /// Session token (persisted in database).
@@ -218,7 +209,6 @@ impl RegisteredBotInner {
         RegisteredBot {
             bot_uuid: self.bot_uuid.clone(),
             capabilities,
-            dynamic_status: self.dynamic_status.clone(),
             env: self.env.clone(),
             created_by: self.created_by.clone(),
             actor_kind: self.actor_kind,
@@ -227,12 +217,11 @@ impl RegisteredBotInner {
     }
 }
 
-/// Persistent bot repository backed by cache and DB plugins.
+/// Persistent bot repository backed by a DB plugin.
 ///
-/// Uses a three-layer storage architecture:
-/// - Layer 1: Process memory for WebSocket connections and heartbeats
-/// - Layer 2: Cache plugin for dynamic status with TTL
-/// - Layer 3: Database plugin for persistent capabilities and tokens
+/// Process memory holds WebSocket connections and heartbeat timestamps;
+/// the database holds persistent capabilities and tokens. Heartbeat payloads
+/// are neither retained nor written to an external cache.
 pub struct PersistentBotRepo {
     // Layer 1: Process Memory
     /// Bot connections and state.
@@ -244,13 +233,7 @@ pub struct PersistentBotRepo {
     /// Process-local runtime info, e.g. client_kind from bot.connect.
     bot_info_overrides: RwLock<HashMap<(String, String), String>>,
 
-    // Layer 2: Cache
-    /// Cache plugin for dynamic status storage.
-    cache: Arc<dyn CachePlugin>,
-    /// Business cache key prefix resolved from configuration.
-    cache_key_prefix: String,
-
-    // Layer 3: Database
+    // Layer 2: Database
     /// DB plugin for persistent storage.
     db: Arc<dyn DbPlugin>,
 
@@ -262,7 +245,7 @@ pub struct PersistentBotRepo {
 }
 
 impl PersistentBotRepo {
-    /// Create a new persistent bot repository with cache and DB plugins.
+    /// Create a DB-backed repository; the legacy cache argument is unused.
     pub fn with_plugins(
         cache: Arc<dyn CachePlugin>,
         db: Arc<dyn DbPlugin>,
@@ -270,38 +253,33 @@ impl PersistentBotRepo {
         Self::with_plugins_flavor(cache, db, DbSqlFlavor::Mysql)
     }
 
-    /// Create a new persistent bot repository with cache, DB plugins, and SQL flavor.
+    /// Create a DB-backed repository with the selected SQL flavor.
+    /// The legacy cache argument is accepted for composition-root compatibility
+    /// but is not retained or used by the repository.
     pub fn with_plugins_flavor(
-        cache: Arc<dyn CachePlugin>,
+        _cache: Arc<dyn CachePlugin>,
         db: Arc<dyn DbPlugin>,
         flavor: DbSqlFlavor,
-    ) -> Self {
-        Self::with_plugins_flavor_and_cache_key_prefix(
-            cache,
-            db,
-            flavor,
-            DEFAULT_CACHE_KEY_PREFIX,
-        )
-    }
-
-    /// Create a new distributed registry with an explicit business cache key prefix.
-    pub fn with_plugins_flavor_and_cache_key_prefix(
-        cache: Arc<dyn CachePlugin>,
-        db: Arc<dyn DbPlugin>,
-        flavor: DbSqlFlavor,
-        cache_key_prefix: impl Into<String>,
     ) -> Self {
         Self {
             bots: RwLock::new(HashMap::new()),
             token_to_bot: RwLock::new(HashMap::new()),
             binding_channel_index: Arc::new(RwLock::new(HashMap::new())),
             bot_info_overrides: RwLock::new(HashMap::new()),
-            cache,
-            cache_key_prefix: cache_key_prefix.into(),
             db,
             flavor,
             pending_requests: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Compatibility constructor; the former status-cache prefix is ignored.
+    pub fn with_plugins_flavor_and_cache_key_prefix(
+        cache: Arc<dyn CachePlugin>,
+        db: Arc<dyn DbPlugin>,
+        flavor: DbSqlFlavor,
+        _cache_key_prefix: impl Into<String>,
+    ) -> Self {
+        Self::with_plugins_flavor(cache, db, flavor)
     }
 
     /// Create a new distributed registry.
@@ -311,28 +289,6 @@ impl PersistentBotRepo {
         _legacy_db: String,
     ) -> Self {
         Self::with_plugins(cache, db)
-    }
-
-    /// Get current timestamp in milliseconds.
-    fn current_timestamp() -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0)
-    }
-
-    /// Build cache key for bot status.
-    #[cfg(test)]
-    fn status_cache_key(bot_uuid: &str) -> String {
-        Self::status_cache_key_with_prefix(DEFAULT_CACHE_KEY_PREFIX, bot_uuid)
-    }
-
-    fn configured_status_cache_key(&self, bot_uuid: &str) -> String {
-        Self::status_cache_key_with_prefix(&self.cache_key_prefix, bot_uuid)
-    }
-
-    fn status_cache_key_with_prefix(cache_key_prefix: &str, bot_uuid: &str) -> String {
-        format!("{}{}{}", cache_key_prefix, STATUS_CACHE_KEY_NAMESPACE, bot_uuid)
     }
 
     async fn db_query(&self, sql: &str, params: Vec<Value>) -> bcs_db_api::DbResult<Vec<DbRow>> {
@@ -348,19 +304,6 @@ impl PersistentBotRepo {
             .execute(DbStatement::with_params(sql, params))
             .await
             .map(|result| result.affected_rows)
-    }
-
-    fn cache_hash_to_strings(
-        fields: BTreeMap<String, Vec<u8>>,
-    ) -> Result<HashMap<String, String>, CacheError> {
-        fields
-            .into_iter()
-            .map(|(field, value)| {
-                String::from_utf8(value)
-                    .map(|value| (field, value))
-                    .map_err(|err| CacheError::Backend(err.to_string()))
-            })
-            .collect()
     }
 
     /// Save bot capabilities to the configured database.
@@ -654,87 +597,6 @@ impl PersistentBotRepo {
             .flatten()
     }
 
-    /// Save dynamic status to the configured cache.
-    async fn save_status_to_cache(&self, bot_uuid: &str, status: &BotDynamicStatus) {
-        let key = self.configured_status_cache_key(bot_uuid);
-        let now = Self::current_timestamp();
-        let started = Instant::now();
-        let mut failed_commands = 0u64;
-
-        // HSET multiple fields
-        if let Err(..) = self
-            .cache
-            .hash_set(&key, "status", status.status.as_bytes().to_vec())
-            .await
-        {
-            warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), failed_commands = 1, outcome = "error", duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bot_status.save.finished");
-            return;
-        }
-
-        if let Some(ref summary) = status.dynamic_summary {
-            let result = self
-                .cache
-                .hash_set(&key, "dynamic_summary", summary.as_bytes().to_vec())
-                .await;
-            failed_commands += u64::from(result.is_err());
-        }
-        if let Some(load) = status.load {
-            let result = self
-                .cache
-                .hash_set(&key, "load", load.to_string().into_bytes())
-                .await;
-            failed_commands += u64::from(result.is_err());
-        }
-        let result = self
-            .cache
-            .hash_set(&key, "updated_at", now.to_string().into_bytes())
-            .await;
-        failed_commands += u64::from(result.is_err());
-
-        // Set TTL
-        let result = self
-            .cache
-            .expire(&key, Duration::from_secs(STATUS_CACHE_TTL_SECONDS as u64))
-            .await;
-        failed_commands += u64::from(result.is_err());
-
-        if failed_commands > 0 {
-            warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), failed_commands, outcome = "partial_failure", duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bot_status.save.finished");
-        } else {
-            debug!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), failed_commands, outcome = "success", duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bot_status.save.finished");
-        }
-    }
-
-    /// Load dynamic status from the configured cache.
-    async fn load_status_from_cache(&self, bot_uuid: &str) -> BotDynamicStatus {
-        let key = self.configured_status_cache_key(bot_uuid);
-
-        let raw = match bcs_observability::observe_result("bot_status.cache_read", self.cache.hash_get_all(&key)).await {
-            Ok(raw) => raw,
-            Err(_) => {
-                bcs_observability::count("bot_status.fallback", "cache_error");
-                warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), outcome = "cache_error", fallback = "default_status", "bot_status.load.fallback");
-                return BotDynamicStatus::default();
-            }
-        };
-        match bcs_observability::observe_result("bot_status.decode", async { Self::cache_hash_to_strings(raw) }).await {
-            Ok(map) => {
-                bcs_observability::count("bot_status.cache", if map.is_empty() { "empty" } else { "hit" });
-                BotDynamicStatus {
-                    status: map.get("status").cloned().unwrap_or_default(),
-                    dynamic_summary: map.get("dynamic_summary").cloned(),
-                    load: map.get("load").and_then(|s| s.parse().ok()),
-                    updated_at: map.get("updated_at").and_then(|s| s.parse().ok()),
-                }
-            }
-            Err(_) => {
-                bcs_observability::count("bot_status.fallback", "decode_error");
-                warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), outcome = "decode_error", fallback = "default_status", "bot_status.load.fallback");
-                BotDynamicStatus::default()
-            }
-        }
-    }
-
     /// Read the `bot_info` JSON column for a given bot, parsed as a JSON object.
     /// Returns `None` if the row is missing, the column is NULL, or JSON parsing fails.
     async fn read_bot_info_json(&self, bot_uuid: &str) -> Option<serde_json::Value> {
@@ -895,7 +757,6 @@ impl PersistentBotRepo {
                         agent_code: None,
                         agent_token: None,
                     },
-                    dynamic_status: BotDynamicStatus::default(),
                     env,
                     created_by,
                     actor_kind,
@@ -1209,7 +1070,6 @@ impl PersistentBotRepo {
                     agent_code: None,
                     agent_token: None,
                 },
-                dynamic_status: BotDynamicStatus::default(),
                 env,
                 created_by,
                 actor_kind,
@@ -1368,7 +1228,6 @@ impl BotRepoPort for PersistentBotRepo {
                     bot_uuid: bot_id.clone(),
                     last_heartbeat: Instant::now(),
                     capabilities: caps,
-                    dynamic_status: BotDynamicStatus::default(),
                     ws_connection: None,
                     session_token: None,
                     env: Some(resolve_env()),
@@ -1491,7 +1350,6 @@ impl BotRepoPort for PersistentBotRepo {
                         bot_uuid: bot_id.clone(),
                         last_heartbeat: Instant::now(),
                         capabilities: caps,
-                        dynamic_status: BotDynamicStatus::default(),
                         ws_connection: None,
                         session_token: Some(token.to_string()),
                         env: Some(resolve_env()),
@@ -1515,12 +1373,11 @@ impl BotRepoPort for PersistentBotRepo {
         Ok(())
     }
 
-    async fn update_status(&self, bot_id: &str, status: BotDynamicStatus) -> bool {
+    async fn update_status(&self, bot_id: &str, _status: BotDynamicStatus) -> bool {
         // Update memory
         {
             let mut bots = self.bots.write().await;
             if let Some(bot) = bots.get_mut(bot_id) {
-                bot.dynamic_status = status.clone();
                 bot.last_heartbeat = Instant::now();
             } else {
                 debug!(bot_id = %bot_id, "Bot not found for status update");
@@ -1528,10 +1385,7 @@ impl BotRepoPort for PersistentBotRepo {
             }
         }
 
-        // Save to cache with TTL
-        self.save_status_to_cache(bot_id, &status).await;
-
-        debug!(bot_id = %bot_id, "Bot dynamic status updated");
+        debug!(bot_id = %bot_id, "Bot heartbeat renewed");
         true
     }
 
@@ -1568,7 +1422,7 @@ impl BotRepoPort for PersistentBotRepo {
             }
         }
 
-        // Fallback: load from database + cache
+        // Fallback: load persistent registration details from the database
         drop(bots);
         log_bot_cache_source("memory_miss");
 
@@ -1580,7 +1434,6 @@ impl BotRepoPort for PersistentBotRepo {
         else {
             return Ok(None);
         };
-        let dynamic_status = self.load_status_from_cache(bot_id).await;
 
         // 清除敏感字段，防止通过常规接口泄露
         capabilities.agent_token = None;
@@ -1588,7 +1441,6 @@ impl BotRepoPort for PersistentBotRepo {
         Ok(Some(RegisteredBot {
             bot_uuid: bot_id.to_string(),
             capabilities,
-            dynamic_status,
             env,
             created_by,
             actor_kind,
@@ -1618,7 +1470,6 @@ impl BotRepoPort for PersistentBotRepo {
 
         let (mut capabilities, env, _hidden, created_by, actor_kind, status) =
             self.load_from_db(bot_id, true).await?;
-        let dynamic_status = self.load_status_from_cache(bot_id).await;
 
         // 清除敏感字段，防止通过常规接口泄露
         capabilities.agent_code = None;
@@ -1627,7 +1478,6 @@ impl BotRepoPort for PersistentBotRepo {
         Some(RegisteredBot {
             bot_uuid: bot_id.to_string(),
             capabilities,
-            dynamic_status,
             env,
             created_by,
             actor_kind,
@@ -1802,7 +1652,6 @@ impl BotRepoPort for PersistentBotRepo {
                         agent_code: None,
                         agent_token: None,
                     },
-                    dynamic_status: BotDynamicStatus::default(),
                     env,
                     created_by,
                     actor_kind,
@@ -1815,8 +1664,8 @@ impl BotRepoPort for PersistentBotRepo {
     async fn list_bots_by_creator(&self, created_by: &str) -> Vec<RegisteredBot> {
         let current_env = resolve_env();
         // D-F: unified DB query — always query the database to include offline bots.
-        // InMemory dynamic_status is supplemented at the handler layer via
-        // `bot_is_effectively_online`, not here.
+        // User-facing online status is computed from runtime connectivity at
+        // the application layer, not persisted heartbeat payloads.
         match self
             .list_bots_by_creator_from_db(created_by, &current_env)
             .await
@@ -1852,11 +1701,6 @@ impl BotRepoPort for PersistentBotRepo {
                     .unwrap_or(false)
                     || b.capabilities
                         .summary
-                        .as_ref()
-                        .map(|s| s.to_lowercase().contains(&query_lower))
-                        .unwrap_or(false)
-                    || b.dynamic_status
-                        .dynamic_summary
                         .as_ref()
                         .map(|s| s.to_lowercase().contains(&query_lower))
                         .unwrap_or(false)
@@ -2346,7 +2190,6 @@ impl BotRepoPort for PersistentBotRepo {
                         agent_code: None,
                         agent_token: None,
                     },
-                    dynamic_status: BotDynamicStatus::default(),
                     env: Some(env.to_string()),
                     created_by,
                     actor_kind,
@@ -2565,7 +2408,6 @@ impl BotRepoPort for PersistentBotRepo {
                         bot_uuid: bot_id.clone(),
                         last_heartbeat: Instant::now(),
                         capabilities: BotCapabilities::default(),
-                        dynamic_status: BotDynamicStatus::default(),
                         status: bcs_service_api::ActorStatus::Online,
                         actor_kind: bcs_service_api::ActorKind::Bot,
                         ws_connection: Some(BotConnection {
@@ -2626,7 +2468,6 @@ impl BotRepoPort for PersistentBotRepo {
                             bot_uuid: bot_id.clone(),
                             last_heartbeat: Instant::now(),
                             capabilities: BotCapabilities::default(),
-                            dynamic_status: BotDynamicStatus::default(),
                             status: bcs_service_api::ActorStatus::Online,
                             actor_kind: bcs_service_api::ActorKind::Bot,
                             ws_connection: Some(BotConnection {
@@ -2710,7 +2551,6 @@ impl BotRepoPort for PersistentBotRepo {
                     bot_uuid: bot_id.clone(),
                     last_heartbeat: Instant::now(),
                     capabilities: BotCapabilities::default(),
-                    dynamic_status: BotDynamicStatus::default(),
                     status: bcs_service_api::ActorStatus::Online,
                     actor_kind: bcs_service_api::ActorKind::Bot,
                     ws_connection: Some(BotConnection {
@@ -2767,7 +2607,7 @@ impl BotRepoPort for PersistentBotRepo {
             bot.last_heartbeat = Instant::now();
             info!(bot_id = %bot_id, "reconnect_streaming: updated existing bot in memory");
         } else {
-            // Bot not in memory - load from database and cache
+            // Bot not in memory - load persistent registration details from the database
             drop(bots);
 
             // Code-Review fix #1: capture actor_kind/status from the database so the
@@ -2782,7 +2622,6 @@ impl BotRepoPort for PersistentBotRepo {
                     bcs_service_api::ActorKind::Bot,
                     bcs_service_api::ActorStatus::Online,
                 ));
-            let dynamic_status = self.load_status_from_cache(&bot_id).await;
 
             info!(bot_id = %bot_id, caps_loaded = capabilities.name.is_some(), "reconnect_streaming: loaded capabilities from storage");
 
@@ -2793,7 +2632,6 @@ impl BotRepoPort for PersistentBotRepo {
                     bot_uuid: bot_id.clone(),
                     last_heartbeat: Instant::now(),
                     capabilities,
-                    dynamic_status,
                     ws_connection: Some(BotConnection {
                         session_token: existing_token.clone(),
                         connected_at: Instant::now(),
@@ -2873,7 +2711,6 @@ impl BotRepoPort for PersistentBotRepo {
                         bot_uuid: bot_id.clone(),
                         last_heartbeat: Instant::now(),
                         capabilities: BotCapabilities::default(),
-                        dynamic_status: BotDynamicStatus::default(),
                         ws_connection: None,
                         session_token: Some(token.clone()),
                         env: Some(resolve_env()),
@@ -3673,41 +3510,11 @@ mod tests {
     }
 
     #[test]
-    fn test_status_cache_key_format() {
-        let key = PersistentBotRepo::status_cache_key("bot-123");
-        assert_eq!(key, "bcs:status:bot-123");
-    }
-
-    #[test]
-    fn test_status_cache_key_uses_configured_prefix() {
-        let key = PersistentBotRepo::status_cache_key_with_prefix("tenant:", "bot-123");
-        assert_eq!(key, "tenant:status:bot-123");
-    }
-
-    #[test]
-    fn test_registry_status_cache_key_uses_constructor_prefix() {
-        let cache = Arc::new(bcs_cache_local::InMemoryCachePlugin::new());
-        let db = Arc::new(bcs_db_local::LocalSqliteDbPlugin::new().unwrap());
-        let registry = PersistentBotRepo::with_plugins_flavor_and_cache_key_prefix(
-            cache,
-            db,
-            DbSqlFlavor::Sqlite,
-            "tenant:",
-        );
-
-        assert_eq!(
-            registry.configured_status_cache_key("bot-123"),
-            "tenant:status:bot-123"
-        );
-    }
-
-    #[test]
     fn test_bot_inner_expiry() {
         let bot = RegisteredBotInner {
             bot_uuid: "test".to_string(),
             last_heartbeat: Instant::now(),
             capabilities: BotCapabilities::default(),
-            dynamic_status: BotDynamicStatus::default(),
             ws_connection: None,
             session_token: None,
             env: None,
@@ -3732,7 +3539,6 @@ mod tests {
                 skills: vec![Skill::new("SQL Analysis"), Skill::new("Deadlock Debugging")],
                 ..Default::default()
             },
-            dynamic_status: BotDynamicStatus::default(),
             ws_connection: None,
             session_token: None,
             env: None,
@@ -3757,7 +3563,6 @@ mod tests {
                 domains: vec!["Database".to_string(), "MySQL".to_string()],
                 ..Default::default()
             },
-            dynamic_status: BotDynamicStatus::default(),
             ws_connection: None,
             session_token: None,
             env: None,
@@ -3781,7 +3586,6 @@ mod tests {
                 scopes: vec!["database:read".to_string(), "database:write".to_string()],
                 ..Default::default()
             },
-            dynamic_status: BotDynamicStatus::default(),
             ws_connection: None,
             session_token: None,
             env: None,
@@ -3805,11 +3609,6 @@ mod tests {
                 name: Some("Test Bot".to_string()),
                 ..Default::default()
             },
-            dynamic_status: BotDynamicStatus {
-                status: "busy".to_string(),
-                load: Some(0.5),
-                ..Default::default()
-            },
             ws_connection: None,
             session_token: None,
             env: Some("prod".to_string()),
@@ -3822,8 +3621,6 @@ mod tests {
         let registered = bot.to_registered_bot();
         assert_eq!(registered.bot_uuid, "test-uuid");
         assert_eq!(registered.capabilities.name, Some("Test Bot".to_string()));
-        assert_eq!(registered.dynamic_status.status, "busy");
-        assert_eq!(registered.dynamic_status.load, Some(0.5));
         assert_eq!(registered.env, Some("prod".to_string()));
     }
 
@@ -3871,24 +3668,6 @@ mod tests {
     }
 
     #[test]
-    fn test_status_cache_key_with_special_chars() {
-        let key = PersistentBotRepo::status_cache_key("bot-with-dashes_123");
-        assert_eq!(key, "bcs:status:bot-with-dashes_123");
-
-        let key = PersistentBotRepo::status_cache_key("中文机器人");
-        assert_eq!(key, "bcs:status:中文机器人");
-    }
-
-    #[test]
-    fn test_current_timestamp() {
-        let ts = PersistentBotRepo::current_timestamp();
-        // Should be a reasonable timestamp (after 2020)
-        assert!(ts > 1577836800000); // 2020-01-01 in ms
-        // Should be before 2100
-        assert!(ts < 4102444800000); // 2100-01-01 in ms
-    }
-
-    #[test]
     fn test_bot_inner_has_skill_partial_match() {
         let bot = RegisteredBotInner {
             bot_uuid: "test".to_string(),
@@ -3897,7 +3676,6 @@ mod tests {
                 skills: vec![Skill::new("SQL_Analysis_Expert")],
                 ..Default::default()
             },
-            dynamic_status: BotDynamicStatus::default(),
             ws_connection: None,
             session_token: None,
             env: None,
@@ -3925,7 +3703,6 @@ mod tests {
                 domains: vec!["Database-Administration".to_string()],
                 ..Default::default()
             },
-            dynamic_status: BotDynamicStatus::default(),
             ws_connection: None,
             session_token: None,
             env: None,
@@ -3946,7 +3723,6 @@ mod tests {
             bot_uuid: "empty".to_string(),
             last_heartbeat: Instant::now(),
             capabilities: BotCapabilities::default(),
-            dynamic_status: BotDynamicStatus::default(),
             ws_connection: None,
             session_token: None,
             env: None,
@@ -4041,28 +3817,6 @@ mod tests {
         //
         // let bot = registry.get("test-bot").await.unwrap();
         // assert_eq!(bot.capabilities.name, Some("Test Bot".into()));
-    }
-
-    #[tokio::test]
-    #[ignore = "Requires external cache and database connections"]
-    async fn integration_test_status_updates_to_cache() {
-        // This test documents the expected workflow:
-        // 1. Update bot status (which goes to cache with TTL)
-        // 2. Verify TTL is set correctly (600s)
-        // 3. After failover, status can be recovered from cache
-        //
-        // Example:
-        // let status = BotDynamicStatus {
-        //     status: "busy".into(),
-        //     dynamic_summary: Some("Processing request".into()),
-        //     load: Some(0.7),
-        //     ..Default::default()
-        // };
-        // registry.update_status("test-bot", status).await;
-        //
-        // // Status should be in cache with key "bcs:status:test-bot"
-        // let recovered = registry.load_status_from_cache("test-bot").await;
-        // assert_eq!(recovered.status, "busy");
     }
 
     #[tokio::test]

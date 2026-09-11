@@ -1541,7 +1541,6 @@ mod tests {
                         agent_code: None,
                         agent_token: None,
                     },
-                    dynamic_status: BotDynamicStatus::default(),
                     env: None,
                     created_by: None,
                     actor_kind: bcs_service_api::ActorKind::default(),
