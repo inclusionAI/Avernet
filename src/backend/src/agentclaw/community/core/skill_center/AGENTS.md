@@ -175,6 +175,7 @@ Engine 拥有物理布局。Backend 通过 `community/core/skills_pool/` 的版�
 | AICoding | Pool | `.claude/skills` | `.aicoding/workspace/skills-pool/skills-local` | `.aicoding/workspace/skills-pool/skills-repo` | `.aicoding/workspace/skills-pool/skill-center` |
 | Hermes | Legacy | `.hermes/skills` | `.hermes/workspace/skills/skills-local` | `.hermes/skills-repo` | `.hermes/workspace/skills-pool/skill-center` |
 | Hermes | Pool | `.hermes/skills` | `.hermes/workspace/skills-pool/skills-local` | `.hermes/workspace/skills-pool/skills-repo` | `.hermes/workspace/skills-pool/skill-center` |
+| DeepSeek Harness | Legacy | `.dsh/skills` | `.dsh/workspace/skills/skills-local` | `.dsh/workspace/skills/skills-repo` | 不支持 |
 
 目录语义与排查规则：
 
@@ -184,6 +185,7 @@ Engine 拥有物理布局。Backend 通过 `community/core/skills_pool/` 的版�
 - 迁移中的实际来源选择按 `community/core/skills_pool/types.py::runtime_uses_pool_paths` 和 Engine evidence 判断，不能只看配置、目录是否存在或 DB `active_layout`。数据面 cutover 已完成而 DB 尚未最终提交时，也可能必须读取 Pool。
 - 产品 `active_engine=claude_code` 可能实际运行 AICoding 模板；先用 `runtime_layout_engine_for_bot` 解析实际文件型身份，再选择路径，不能仅凭产品 Engine 字符串套 Claude Code 行。
 - Teclaw 是 Artifact capability：使用 Whole Artifact/StoreRef，不使用这张文件型 active-root 表，也不需要伪造 Legacy/Pool 文件目录。
+- DeepSeek Harness 当前只参与 Legacy Local/Repo 软链投影；Engine 在 `.dsh/skills` 下维护指向 `workspace/skills` 内容库的结构桥。它尚未参与 Skills Pool、Center 或 Service Artifact，不能从基础同步能力推导这些范围已支持。
 - Hermes 的 `.hermes/skills-repo` 是准备期 Legacy Repo 地址，不是 Pool 稳态
   内容根。Pool 激活后逐 Skill 映射直接指向 canonical Pool Repo，Engine/启动
   路径只退休仍指向该 canonical Repo 的平台软链；用户实体或意外链接保留并
