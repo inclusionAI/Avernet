@@ -1,6 +1,6 @@
 {
   "name": "@avernet-assets/bcs-panel",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Prebuilt BCS side-panel components distributed as a UMD asset.",
   "main": "./dist/index.umd.js",
   "browser": "./dist/index.umd.js",
