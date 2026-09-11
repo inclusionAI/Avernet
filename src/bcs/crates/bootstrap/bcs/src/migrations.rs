@@ -1947,6 +1947,25 @@ mod tests {
         Ok(!rows.is_empty())
     }
 
+    #[test]
+    fn mysql_queue_tables_preserve_business_keys_with_audit_columns() {
+        let deliveries = include_str!("../../../../migrations/mysql/021_message_deliveries.sql");
+        let policy = include_str!("../../../../migrations/mysql/022_message_delivery_policy.sql");
+        for sql in [deliveries, policy] {
+            assert!(sql.contains("id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT"));
+            assert!(sql.contains("gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"));
+            assert!(sql.contains("gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"));
+            assert!(sql.contains("PRIMARY KEY (id)"));
+            assert!(sql.contains("updated_at_ms BIGINT NOT NULL"));
+        }
+        assert!(deliveries.contains("UNIQUE KEY uk_delivery_env_id (env, delivery_id)"));
+        assert!(deliveries.contains("created_at_ms BIGINT NOT NULL"));
+        for key in ["env, source_message_id, target_bot_id", "env, run_id", "env, idempotency_key", "env, request_id"] {
+            assert!(deliveries.contains(&format!("UNIQUE ({key})")));
+        }
+        assert!(policy.contains("UNIQUE KEY uk_delivery_policy_env (env)"));
+    }
+
     async fn migration_rows(db: &dyn DbPlugin) -> DbResult<Vec<(i64, String, String)>> {
         let rows = db
             .query(DbStatement::new(

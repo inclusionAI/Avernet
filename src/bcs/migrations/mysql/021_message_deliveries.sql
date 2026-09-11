@@ -1,5 +1,8 @@
 -- Managed message deliveries. Deploy before enabling any queue flow.
 CREATE TABLE IF NOT EXISTS bcs_message_deliveries (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    gmt_create TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    gmt_modified TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     delivery_id VARCHAR(128) NOT NULL,
     env VARCHAR(64) NOT NULL,
     source_message_id VARCHAR(128) NOT NULL,
@@ -36,7 +39,8 @@ CREATE TABLE IF NOT EXISTS bcs_message_deliveries (
     last_error_code VARCHAR(128),
     semantic_projection_json JSON NOT NULL,
     transport_context_json JSON,
-    PRIMARY KEY (env, delivery_id),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_delivery_env_id (env, delivery_id),
     UNIQUE (env, source_message_id, target_bot_id),
     UNIQUE (env, run_id),
     UNIQUE (env, idempotency_key),

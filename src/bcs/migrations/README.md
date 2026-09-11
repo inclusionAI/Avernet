@@ -2,6 +2,18 @@
 
 This directory contains BCS database schema migrations.
 
+MySQL/OceanBase queue tables (021/022) follow the existing `bcs_chat_runs`
+convention: auto-increment `id` primary key and database-managed `gmt_create` /
+`gmt_modified`. Business identity remains unique on `(env, delivery_id)` and
+`env`, respectively. Queue `created_at_ms` / `updated_at_ms` remain application
+timestamps; repositories neither write nor use the surrogate/audit columns.
+SQLite schema and public delivery IDs are unchanged.
+
+The 021/022 definitions were corrected before the planned first production
+deployment. If the earlier PR DDL has already been applied, do not replay these
+CREATE statements or replace recorded checksums: reconcile with an explicit
+reviewed ALTER migration first. Fresh deployments use the corrected files.
+
 Run reply normalization adds SQLite `027_run_reply_segments.sql` and MySQL/OceanBase
 `026_run_reply_segments.sql`: an additive env/session/sender/run/sequence index.
 The `run_reply` type uses existing message columns, with no historical backfill.
