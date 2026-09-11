@@ -310,7 +310,9 @@ class BaasBotService(BotService):
             ) from e
 
         # Step 2: Get or create adapter session
-        session_client = self._create_session_client(conn_info, engine_type, metadata=metadata)
+        session_client = self._create_session_client(
+            conn_info, engine_type, metadata=metadata
+        )
 
         # 评测流量：eval_id 存在且调用方未传 session_id 时，
         # 用 consistency_key（结构化格式，含 evalId）作为 session_id 传给 adapter，
@@ -457,7 +459,14 @@ class BaasBotService(BotService):
             ) from e
 
         pool_key = conn_info.target
-        headers = {"x-proxypass-token": conn_info.token}
+        headers: dict[str, str] = {"x-proxypass-token": conn_info.token}
+        if chat_metadata:
+            eval_id = chat_metadata.get("eval_id")
+            if eval_id:
+                headers["X-Eval-Id"] = str(eval_id)
+            default_tag = chat_metadata.get("default_tag")
+            if default_tag:
+                headers["X-Agentclaw-Default-Tag"] = str(default_tag)
 
         client = await self._client_pool.get(pool_key, conn_info.ws_url, headers)
         try:
@@ -544,7 +553,14 @@ class BaasBotService(BotService):
             ) from e
 
         pool_key = conn_info.target
-        headers = {"x-proxypass-token": conn_info.token}
+        headers: dict[str, str] = {"x-proxypass-token": conn_info.token}
+        if chat_metadata:
+            eval_id = chat_metadata.get("eval_id")
+            if eval_id:
+                headers["X-Eval-Id"] = str(eval_id)
+            default_tag = chat_metadata.get("default_tag")
+            if default_tag:
+                headers["X-Agentclaw-Default-Tag"] = str(default_tag)
 
         client = await self._client_pool.get(pool_key, conn_info.ws_url, headers)
         auth_token = context.build_auth_token() if context else None
