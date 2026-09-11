@@ -1,13 +1,22 @@
 """One apply's named-source state.
 
 The four things a single apply needs and nothing more: the document's
-``sources`` declarations, the strict-mode baselines read back from the last
-apply that resolved each source, a checkout cache keyed on the substituted
-``(url, ref)``, and the :class:`SourceResolution` records the report will
-carry. It hangs on ``ApplyContext`` beside ``budget``, mutable by design inside
-a frozen context, because the fetcher is a DI singleton (state there would leak
-across applies) and a re-resolution per entry would break "the same
-``(url, ref)`` is pulled once per apply".
+``sources`` declarations, the strict-mode baselines read back — keyed on the
+substituted ``(url, ref)`` — from the last apply that resolved that pair, a
+checkout cache keyed the same way, and the :class:`SourceResolution` records
+the report will carry. It hangs on ``ApplyContext`` beside ``budget``, mutable
+by design inside a frozen context, because the fetcher is a DI singleton (state
+there would leak across applies) and a re-resolution per entry would break "the
+same ``(url, ref)`` is pulled once per apply".
+
+A baseline is a fact about a **repository at a ref**, not about what the
+document called it: strict mode asks "has this ``(url, ref)`` resolved
+differently since we last stood behind it", and renaming a source, or pointing
+one at another repository, does not make that a different question about the
+same pair. Keying on the pair is also what makes the document the way out of a
+strict refusal — editing ``ref`` asks about a pair no apply has an opinion on,
+so a deliberate re-pin passes where a ref that moved underneath the same pair
+still does not.
 
 A checkout and its resolution are **deliberately two events**. Fetching the
 tree answers "what does the ref name right now"; adopting it answers "and this
@@ -77,20 +86,27 @@ class SourceSession:
     #: Empty when the document declares no ``sources``; an entry naming one
     #: then fails with "is not declared under 'sources'".
     sources: Mapping[str, Mapping[str, Any]]
-    #: Display name → the 40-character SHA the last apply that resolved that
-    #: source recorded. Read back out of ``ApplyReport.sources`` through the
-    #: report history, so the keys are ``SourceResolution.name`` values: the
-    #: declared ``from`` name for a named source, the repository URL for an
-    #: inline one::
+    #: ``(substituted repository url, ref)`` → the 40-character SHA the last
+    #: apply that resolved that pair recorded. Read back out of
+    #: ``ApplyReport.sources`` through the report history, off each row's
+    #: ``url`` and ``ref``::
     #:
     #:     {
-    #:         "content": "4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187",
-    #:         "https://code.example.com/solo.git": "9b1c...",
+    #:         ("https://code.example.com/team/content.git", "v1.2.0"):
+    #:             "4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187",
+    #:         ("https://code.example.com/solo.git", "HEAD"): "9b1c...",
     #:     }
     #:
-    #: A source absent here has no strict opinion yet, so strict mode admits
-    #: its first resolution and ``keep_last`` has no baseline receipt to reuse.
-    baselines: Mapping[str, str]
+    #: **Not** keyed on the report's display name. The name is how a document
+    #: refers to a source; the baseline answers "did this repository's ref move
+    #: under us", and a rename, a re-pointed ``url`` or an edited ``ref`` all
+    #: change the name's answer without changing the pair's.
+    #:
+    #: A pair absent here has no strict opinion yet, so strict mode admits its
+    #: first resolution and ``keep_last`` has no baseline receipt to reuse —
+    #: which is exactly what an edited ``ref`` produces, and why re-pinning the
+    #: document is how a strict source is advanced.
+    baselines: Mapping[tuple[str, str], str]
     #: The git transport; injected so tests script it and production gets the
     #: subprocess client via the DI provider.
     git: GitSourceClient
@@ -198,8 +214,9 @@ class SourceSession:
         for the entry — a refused move is not adopted, so the report of a
         refusing (failed) apply carries no poisoned baseline, and the last
         apply's record keeps refusing the moved ref until the document is
-        re-pinned. Idempotent per display: every entry that names the source
-        stands behind the same resolution.
+        re-pinned. Idempotent per display; a display is a name or ``url@ref``,
+        so every entry that names one source stands behind one resolution, and
+        two names over one repository record one row each.
         """
         if display in self._recorded:
             return
@@ -220,13 +237,16 @@ class SourceSession:
         git source, which includes every object-store-only document."""
         return tuple(self._resolutions)
 
-    def baseline(self, display: str) -> Optional[str]:
-        """The SHA the last apply that resolved this source found, or ``None``.
+    def baseline(self, url: str, ref: str) -> Optional[str]:
+        """The SHA the last apply that resolved this ``(url, ref)`` found, or
+        ``None``.
 
-        ``baseline("content")`` → ``"4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187"``
-        for a source resolved before, ``None`` for one seen the first time.
+        ``baseline("https://code.example.com/team/content.git", "v1.2.0")`` →
+        ``"4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187"`` for a pair resolved
+        before, ``None`` for one seen the first time — which includes a pair
+        the document has just re-pinned onto.
         """
-        return self.baselines.get(display)
+        return self.baselines.get((url, ref))
 
     def close(self) -> None:
         """Remove every checkout's temporary tree from disk and empty the

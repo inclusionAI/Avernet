@@ -671,8 +671,9 @@ def test_a_strict_baseline_is_read_back_from_report_history(world, monkeypatch):
     Strict mode reads "what did we resolve last time" out of
     ``ApplyReport.sources`` rather than a second table, so the two cannot
     drift. No report — and a report with no resolutions — yield no
-    opinions; a recorded resolution yields its SHA by name; and the walk is
-    bounded by the history window rather than one row (see the next test).
+    opinions; a recorded resolution yields its SHA under its ``(url, ref)``;
+    and the walk is bounded by the history window rather than one row (see
+    the next test).
     """
     service, _applies, _locks, _scripts, _manifests = world
 
@@ -687,7 +688,11 @@ def test_a_strict_baseline_is_read_back_from_report_history(world, monkeypatch):
     assert service._last_resolutions(entity_id=_ENTITY, bot_id=_BOT) == {}
 
     charts = SourceResolution(
-        name="charts", ref="main", resolved_sha="f" * 40, auth="ci-token"
+        name="charts",
+        url="https://git.corp/charts.git",
+        ref="main",
+        resolved_sha="f" * 40,
+        auth="ci-token",
     )
     monkeypatch.setattr(
         service._applies,
@@ -698,7 +703,44 @@ def test_a_strict_baseline_is_read_back_from_report_history(world, monkeypatch):
     )
     assert service._last_resolutions(
         entity_id=_ENTITY, bot_id=_BOT
-    ) == {"charts": "f" * 40}
+    ) == {("https://git.corp/charts.git", "main"): "f" * 40}
+
+
+def test_baselines_are_read_by_url_and_ref_and_skip_rows_without_a_url(
+    world, monkeypatch
+):
+    """The key is the repository and the ref, which has two consequences here.
+
+    Several rows in one report may share a key — the report carries one row
+    per *declaration*, so two ``from`` names over one repository are two rows
+    — and they always carry the same sha, because one apply resolves a
+    ``(url, ref)`` once. And a row with no ``url`` is skipped outright: that
+    is a report written before the url was recorded, and there is no honest
+    way to guess which repository its name meant.
+    """
+    service, _applies, _locks, _scripts, _manifests = world
+    url = "https://git.corp/charts.git"
+    rows = [
+        SourceResolution(name="charts", url=url, ref="main",
+                         resolved_sha="f" * 40),
+        # A second declaration of the same repository at the same ref.
+        SourceResolution(name="dashboards", url=url, ref="main",
+                         resolved_sha="f" * 40),
+        # Same repository, another ref: its own key, its own answer.
+        SourceResolution(name="pinned", url=url, ref="v1",
+                         resolved_sha="c" * 40),
+        # Pre-existing history: no url, so no baseline.
+        SourceResolution(name="legacy", ref="main", resolved_sha="d" * 40),
+    ]
+    monkeypatch.setattr(
+        service._applies,
+        "recent",
+        lambda *, env, entity_id, bot_id, limit: [_row(_report_with_sources(rows))],
+    )
+    assert service._last_resolutions(entity_id=_ENTITY, bot_id=_BOT) == {
+        (url, "main"): "f" * 40,
+        (url, "v1"): "c" * 40,
+    }
 
 
 def test_a_failed_apply_does_not_wipe_a_strict_baseline(world, monkeypatch):
@@ -708,7 +750,12 @@ def test_a_failed_apply_does_not_wipe_a_strict_baseline(world, monkeypatch):
     mode for the apply after it — the record one row back still holds the
     baseline, and the newest row that carries a source wins per source."""
     service, _applies, _locks, _scripts, _manifests = world
-    charts = SourceResolution(name="charts", ref="main", resolved_sha="e" * 40)
+    charts = SourceResolution(
+        name="charts",
+        url="https://git.corp/charts.git",
+        ref="main",
+        resolved_sha="e" * 40,
+    )
     empty_failed = _report_with_sources(
         [], status=ApplyStatus.FAILED, apply_id="failed-1"
     )
@@ -722,11 +769,16 @@ def test_a_failed_apply_does_not_wipe_a_strict_baseline(world, monkeypatch):
     )
     assert service._last_resolutions(
         entity_id=_ENTITY, bot_id=_BOT
-    ) == {"charts": "e" * 40}
+    ) == {("https://git.corp/charts.git", "main"): "e" * 40}
 
     # Newest wins per source: a newer report that re-resolved the source is
     # the baseline, not an older one.
-    moved = SourceResolution(name="charts", ref="main", resolved_sha="b" * 40)
+    moved = SourceResolution(
+        name="charts",
+        url="https://git.corp/charts.git",
+        ref="main",
+        resolved_sha="b" * 40,
+    )
     monkeypatch.setattr(
         service._applies,
         "recent",
@@ -736,7 +788,7 @@ def test_a_failed_apply_does_not_wipe_a_strict_baseline(world, monkeypatch):
     )
     assert service._last_resolutions(
         entity_id=_ENTITY, bot_id=_BOT
-    ) == {"charts": "b" * 40}
+    ) == {("https://git.corp/charts.git", "main"): "b" * 40}
 
 
 

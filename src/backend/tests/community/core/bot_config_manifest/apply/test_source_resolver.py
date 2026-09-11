@@ -626,10 +626,11 @@ def test_resolve_missing_session_is_loud(rig):
 def test_strict_refuses_when_the_ref_moved(rig):
     _, _, pipeline = rig
     git = _ScriptedGit()
-    # An inline source's report identity is its repository URL, so that is
-    # the key its baseline is read back by.
+    # The baseline is keyed on the repository and the ref, not on what the
+    # document called the source — so the same pair, resolving to a different
+    # commit, is the one thing strict mode refuses.
     ctx = make_context(
-        source_session=_session(git, baselines={GIT_URL: "b" * 40})
+        source_session=_session(git, baselines={(GIT_URL, "main"): "b" * 40})
     )
     with pytest.raises(EntryFetchError, match="moved"):
         pipeline.resolve(
@@ -648,7 +649,7 @@ def test_non_strict_records_the_move_in_the_note(rig):
     _, _, pipeline = rig
     git = _ScriptedGit()
     ctx = make_context(
-        source_session=_session(git, baselines={GIT_URL: "b" * 40})
+        source_session=_session(git, baselines={(GIT_URL, "main"): "b" * 40})
     )
     decl = pipeline.resolve(
         ctx,
@@ -667,6 +668,96 @@ def test_strict_on_the_first_apply_has_no_opinion(rig):
     decl = pipeline.resolve(
         ctx,
         entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "main", "mode": "strict"}},
+        category="skills",
+    )
+    assert isinstance(decl, GitDelivery)
+    assert decl.note() is None
+
+
+def test_strict_passes_when_the_document_re_pins_the_ref(rig):
+    """Editing ``ref`` is how a strict source is advanced, and it has to be:
+    a baseline is a fact about a ``(url, ref)`` pair, and the pair the
+    document now names is one no apply has resolved yet. Keyed on the source's
+    name instead, this could never pass — the name did not change — and the
+    only way out of a strict pin would be to flip the source to
+    ``non_strict``, apply once, and flip it back."""
+    _, _, pipeline = rig
+    git = _ScriptedGit()
+    ctx = make_context(
+        source_session=_session(git, baselines={(GIT_URL, "v1"): "b" * 40})
+    )
+    decl = pipeline.resolve(
+        ctx,
+        entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "v2",
+                          "mode": "strict"}},
+        category="skills",
+    )
+    assert isinstance(decl, GitDelivery)
+    # Not a move: nothing is noted, and the new pair is what this apply now
+    # stands behind, so the next apply pins against v2.
+    assert decl.note() is None
+    recorded = ctx.source_session.resolution_records()
+    assert [(r.url, r.ref, r.resolved_sha) for r in recorded] == [
+        (GIT_URL, "v2", _FAKE_SHA)
+    ]
+
+
+def test_strict_passes_when_the_document_re_points_the_url(rig):
+    """The other half of the same rule. A baseline from one repository has no
+    standing over another — keyed on the name, a re-pointed ``url`` would
+    silently inherit the old repository's SHA and refuse a commit that never
+    could have matched it."""
+    _, _, pipeline = rig
+    git = _ScriptedGit()
+    other = "https://git.corp/other.git"
+    ctx = make_context(
+        source_session=_session(git, baselines={(GIT_URL, "main"): "b" * 40})
+    )
+    decl = pipeline.resolve(
+        ctx,
+        entry={"source": {"protocol": "git", "url": other, "ref": "main",
+                          "mode": "strict"}},
+        category="skills",
+    )
+    assert isinstance(decl, GitDelivery)
+    assert decl.note() is None
+    recorded = ctx.source_session.resolution_records()
+    assert [(r.url, r.ref) for r in recorded] == [(other, "main")]
+
+
+def test_a_sha_shaped_ref_trips_neither_branch(rig):
+    """What the schema doc has always promised: ``mode`` is "accepted but
+    inert" on a ``ref`` that is already a commit. It holds by construction
+    rather than by a special case — a SHA resolves to itself, so the pair
+    ``(url, <sha>)`` always answers with the sha its baseline holds."""
+    _, _, pipeline = rig
+    git = _ScriptedGit()
+    ctx = make_context(
+        source_session=_session(git, baselines={(GIT_URL, _FAKE_SHA): _FAKE_SHA})
+    )
+    decl = pipeline.resolve(
+        ctx,
+        entry={"source": {"protocol": "git", "url": GIT_URL, "ref": _FAKE_SHA,
+                          "mode": "strict"}},
+        category="skills",
+    )
+    assert isinstance(decl, GitDelivery)
+    assert decl.note() is None
+
+
+def test_non_strict_does_not_call_a_re_pin_a_move(rig):
+    """The note answers "the ref moved under you". A document that edited its
+    own ``ref`` moved it deliberately and does not need telling — and a note
+    naming the previous ref's commit as what this one drifted from would be
+    describing a drift that never happened."""
+    _, _, pipeline = rig
+    git = _ScriptedGit()
+    ctx = make_context(
+        source_session=_session(git, baselines={(GIT_URL, "v1"): "b" * 40})
+    )
+    decl = pipeline.resolve(
+        ctx,
+        entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "v2"}},
         category="skills",
     )
     assert isinstance(decl, GitDelivery)
@@ -698,7 +789,7 @@ def test_git_keep_last_falls_back_to_the_baseline_receipt(rig):
     ctx = make_context(source_session=_session(
         git,
         sources={"app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"}},
-        baselines={"app": old_sha},
+        baselines={(GIT_URL, "main"): old_sha},
     ))
     result = pipeline.resolve(
         ctx,
@@ -710,6 +801,37 @@ def test_git_keep_last_falls_back_to_the_baseline_receipt(rig):
     assert result.single() == b"stored-tree-zip"
     assert result.content_type() == "application/zip"
     assert result.note() and "keep_last" in result.note()
+
+
+def test_git_keep_last_has_no_receipt_to_reuse_after_a_re_pin(rig):
+    """``keep_last`` reuses the stored copy of *what this pair last
+    resolved to*. After a re-pin there is no such copy — the baseline under
+    the old ``(url, ref)`` belongs to the ref the document just stopped
+    naming — so the fetch failure stands rather than delivering the previous
+    pin's bytes under the new one's name."""
+    content, _, pipeline = rig
+    old_sha = "b" * 40
+    baseline_url = git_receipt_url(GIT_URL, old_sha, "pkg")
+    content.store(
+        fetched_object(b"stored-tree-zip", url=baseline_url,
+                       content_type="application/zip"),
+        scope=None, source_url=baseline_url,
+    )
+    git = _ScriptedGit(error=FetchFailedError("git fetch failed"))
+    ctx = make_context(source_session=_session(
+        git,
+        sources={"app": {"protocol": "git", "url": GIT_URL, "ref": "v2",
+                         "subpath": "pkg"}},
+        # Recorded against the ref the document used to name.
+        baselines={(GIT_URL, "v1"): old_sha},
+    ))
+    with pytest.raises(EntryFetchError, match="git fetch failed"):
+        pipeline.resolve(
+            ctx,
+            entry={"from": "app", "on_fetch_failure": "keep_last"},
+            category="skills",
+            entry_identity="s1",
+        )
 
 
 def test_git_credentials_reach_the_transport_as_headers(rig):

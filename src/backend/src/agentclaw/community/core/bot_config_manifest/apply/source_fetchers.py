@@ -265,7 +265,8 @@ class DeclaredFetch:
     #: The declared ``from`` name, e.g. ``"content"``, or ``None`` for an
     #: inline source. The git road falls back to the repository URL when this
     #: is ``None``, and the result is the ``display`` that names the source in
-    #: the report and keys its baseline.
+    #: the report. The baseline is not read by it: that is keyed on the
+    #: substituted ``(url, ref)``.
     name: Optional[str]
 
 
@@ -531,10 +532,11 @@ class GitSourceFetcher(SourceFetcher):
     entry-level ``auth`` (declare it inside the source object).
 
     The ref resolves once through the apply's source session, ``mode`` is
-    enforced against the last apply's resolved SHA, and what comes back is a
-    tree for the entry to interpret. ``keep_last`` falls back under the same
-    ruling wire failures get: a *refusal* is configuration and must not be
-    masked, a *failure* is the transport and may be.
+    enforced against the last apply's resolved SHA for the same ``(url, ref)``,
+    and what comes back is a tree for the entry to interpret. ``keep_last``
+    falls back under the same ruling wire failures get: a *refusal* is
+    configuration and must not be masked, a *failure* is the transport and may
+    be.
     """
 
     def __init__(
@@ -597,7 +599,6 @@ class GitSourceFetcher(SourceFetcher):
                 ctx,
                 session=session,
                 spec=spec,
-                display=display,
                 keep_last=request.keep_last,
             )
             if fallback is not None:
@@ -616,7 +617,7 @@ class GitSourceFetcher(SourceFetcher):
                 if expired is not None:
                     raise EntryFetchError(expired)
 
-        baseline = session.baseline(display)
+        baseline = session.baseline(spec.url, spec.ref)
         if (
             spec.mode == "strict"
             and baseline is not None
@@ -630,7 +631,11 @@ class GitSourceFetcher(SourceFetcher):
         # Adopted AFTER the strict gate: a refused move must not write the
         # moved SHA into this apply's report, because the next apply reads
         # its baseline from there — adopting here would turn strict mode
-        # into "refuse each move exactly once, then deliver it".
+        # into "refuse each move exactly once, then deliver it". The baseline
+        # is the one recorded for this (url, ref), so editing either in the
+        # document asks about a pair nothing has an opinion on yet: a
+        # deliberate re-pin passes, and only a pair that resolved differently
+        # under its own name is a move.
         session.adopt(
             display=display, spec=spec, checkout=checkout, auth_name=auth
         )
@@ -666,24 +671,24 @@ class GitSourceFetcher(SourceFetcher):
         *,
         session: SourceSession,
         spec: GitSourceSpec,
-        display: str,
         keep_last: bool,
     ) -> Optional[FetchedEntry]:
         """``keep_last`` for the git road: the receipt of the *last-resolved*
         SHA, when there was one.
 
-        Looks the baseline up by ``display`` and reads the receipt filed under
-        ``git+<url>@<baseline sha>:<subpath>``. Answers ``None`` — meaning
+        Looks the baseline up by ``(url, ref)`` and reads the receipt filed
+        under ``git+<url>@<baseline sha>:<subpath>``. Answers ``None`` — meaning
         "no fallback, let the failure stand" — in three cases: ``keep_last`` is
-        off, the source has no baseline (a first-time source has no stored copy
-        entitled to answer for it), or no receipt exists at that address.
+        off, the pair has no baseline (a first-time pair has no stored copy
+        entitled to answer for it, and a freshly re-pinned ``ref`` is a
+        first-time pair), or no receipt exists at that address.
 
         On a hit the :class:`FetchedEntry` carries ``from_store=True`` and a
         ``fallback_reason``, which is what the report's note comes from.
         """
         if not keep_last:
             return None
-        baseline = session.baseline(display)
+        baseline = session.baseline(spec.url, spec.ref)
         if baseline is None:
             return None
         target = git_receipt_url(spec.url, baseline, spec.subpath)

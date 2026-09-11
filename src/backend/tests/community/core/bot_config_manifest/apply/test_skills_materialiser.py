@@ -715,7 +715,7 @@ def test_a_moved_ref_note_survives_into_the_package():
     ctx = _git_ctx(
         git,
         sources={"src": SKILL_GIT_SOURCE},
-        baselines={"src": "b" * 40},
+        baselines={("https://git.corp/skills.git", "main"): "b" * 40},
     )
     result, _, written = _run(_apply(materialiser, ctx, [{"name": "demo", "from": "src"}]))
     assert result.ok
@@ -739,7 +739,7 @@ def test_git_keep_last_serves_the_stored_zip_through_the_zip_road():
     ctx = _git_ctx(
         git,
         sources={"src": SKILL_GIT_SOURCE},
-        baselines={"src": "b" * 40},
+        baselines={("https://git.corp/skills.git", "main"): "b" * 40},
     )
     result, _, written = _run(
         _apply(

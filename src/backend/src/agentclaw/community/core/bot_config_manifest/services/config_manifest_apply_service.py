@@ -757,8 +757,9 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
 
     def _last_resolutions(
         self, *, entity_id: str, bot_id: str
-    ) -> dict[str, str]:
-        """Each source's SHA as the last apply that RESOLVED it (W7 strict).
+    ) -> dict[tuple[str, str], str]:
+        """Each ``(url, ref)``'s SHA as the last apply that RESOLVED it (W7
+        strict).
 
         The reports are where "what did we resolve" already lives
         (``ApplyReport.sources``), so strict mode reads them back rather than
@@ -767,9 +768,21 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         have failed to fetch a source (its report carries no resolution for
         it — a failed fetch or a strict refusal adopts nothing), and reading
         only that row would wipe the baseline, silently disarming strict mode
-        and the ``keep_last`` receipt after one outage. Per source, the
-        newest report that carries it wins; a report with no resolutions —
-        or no reports — yields no opinions.
+        and the ``keep_last`` receipt after one outage. Per key, the newest
+        report that carries it wins; a report with no resolutions — or no
+        reports — yields no opinions.
+
+        The key is ``(url, ref)`` and not the row's ``name``, because that is
+        the question strict mode asks. One report may hold several rows under
+        one key — the report has a row per declaration, so two ``from`` names
+        over one repository are two rows — and they always carry the same sha,
+        because one apply resolves a ``(url, ref)`` once. Any of them
+        therefore serves, and the ``setdefault`` that keeps the newest report's
+        answer keeps the first of them too.
+
+        A row carrying no ``url`` contributes nothing: that is a report written
+        before the field existed, and inventing a baseline out of a name would
+        be guessing which repository it meant.
         """
         records = self._applies.recent(
             env=get_current_env(),
@@ -777,16 +790,20 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             bot_id=bot_id,
             limit=_BASELINE_HISTORY_APPLIES,
         )
-        baselines: dict[str, str] = {}
+        baselines: dict[tuple[str, str], str] = {}
         for record in records:
             report = self._to_report(record, entity_id=entity_id, bot_id=bot_id)
             if report is None:
                 continue
             for source in report.sources:
-                if source.resolved_sha is None:
+                if source.url is None or source.resolved_sha is None:
                     continue
                 # Newest wins: an earlier walk-back entry is not overwritten.
-                baselines.setdefault(source.name, source.resolved_sha)
+                # ``ref`` is normalised the way the spec normalises it, so a
+                # source that declared none keys on "HEAD" in both directions.
+                baselines.setdefault(
+                    (source.url, source.ref or "HEAD"), source.resolved_sha
+                )
         return baselines
 
     # ── internals ───────────────────────────────────────────────────────────
