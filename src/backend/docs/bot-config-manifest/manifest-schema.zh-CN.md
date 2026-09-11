@@ -725,8 +725,15 @@ script:
 > 本类目**始终由平台托管**（与 `mcp` 同列），与 `teclaw_platform_managed`
 > 开关无关：平台自己取源、验签、留一份字节副本，表里那行就是期望状态。
 > 除清单外，还有一组同源的管理 API：`POST` / `GET` /
-> `DELETE /openapi/v1/bots/{bot_id}/cli-tools`。两个入口调的是同一个组件，
-> 因此对同一份声明给出同样的拒绝理由。
+> `DELETE /openapi/v1/bots/{bot_id}/cli-tools`。
+>
+> **两个入口，字节的来路不同，之后完全相同。**清单这边**声明一个源**（本节的
+> `oss` 或 git 声明），由平台去取；管理 API 那边**直接上传**二进制或压缩包
+> （`multipart/form-data`，无 `source`、无 `auth`——那条路平台不取任何东西）。
+> 「字节到手」之后是同一条流水线：验 `digest` → 解包取 `subpath` → 验
+> x86-64 ELF → 算 md5 → 存平台副本 → 交付 → 记录。所以同样的字节在两个入口
+> 得到同样的拒绝理由——这正是它们共用一个组件的意义。API 的请求契约见
+> `user-manual.zh-CN.md` §B.5.1。
 
 ```yaml
 cli_tools:
