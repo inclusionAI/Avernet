@@ -744,6 +744,57 @@ def test_two_names_over_one_repository_are_two_rows_and_one_baseline(rig):
     assert len(git.specs) == 1, "one checkout per (url, ref) per apply"
 
 
+def test_an_at_sign_in_a_url_or_ref_does_not_collide_two_declarations(rig):
+    """The ``@`` join that names an inline source is not injective.
+
+    ``@`` is legal in a URL path and legal in a refname, so
+    ``url="…/a@b", ref="c"`` and ``url="…/a", ref="b@c"`` produce the same
+    display, ``…/a@b@c`` — two genuinely different repositories-at-refs with
+    one name. De-duplicating the report on anything derived from that join
+    dropped the second declaration, and a dropped ``strict`` declaration never
+    establishes a baseline, so it accepts every move thereafter.
+
+    Exotic inputs, ordinary rule: the recording identity contains the baseline
+    key outright rather than a display believed to imply it.
+    """
+    _, _, pipeline = rig
+    first = {"protocol": "git", "url": "https://git.corp/a@b", "ref": "c",
+             "mode": "strict"}
+    second = {"protocol": "git", "url": "https://git.corp/a", "ref": "b@c",
+              "mode": "strict"}
+
+    git = _ScriptedGit()
+    session = _session(git)
+    ctx = make_context(source_session=session)
+    pipeline.resolve(ctx, entry={"source": first}, category="skills")
+    pipeline.resolve(ctx, entry={"source": second}, category="skills")
+
+    rows = session.resolution_records()
+    # Both recorded. The display really does collide — that is the point — so
+    # the rows are told apart by the url and ref they carry in their own right.
+    assert [r.name for r in rows] == [
+        "https://git.corp/a@b@c", "https://git.corp/a@b@c"
+    ]
+    assert [(r.url, r.ref) for r in rows] == [
+        ("https://git.corp/a@b", "c"), ("https://git.corp/a", "b@c")
+    ]
+
+    # So the second declaration has a baseline of its own, and its pin holds
+    # when its ref moves.
+    rebuilt = {(r.url, r.ref, r.mode): r.resolved_sha for r in rows}
+    assert rebuilt == {
+        ("https://git.corp/a@b", "c", "strict"): _FAKE_SHA,
+        ("https://git.corp/a", "b@c", "strict"): _FAKE_SHA,
+    }
+    moved = _ScriptedGit(sha="c" * 40)
+    with pytest.raises(EntryFetchError, match="moved"):
+        pipeline.resolve(
+            make_context(source_session=_session(moved, baselines=rebuilt)),
+            entry={"source": second},
+            category="skills",
+        )
+
+
 def test_two_inline_declarations_at_two_modes_are_two_rows(rig):
     """The same alias hazard, on the road where the display is not unique.
 

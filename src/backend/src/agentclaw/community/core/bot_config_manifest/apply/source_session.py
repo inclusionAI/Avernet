@@ -151,26 +151,38 @@ class SourceSession:
     _checkouts: dict[tuple[str, str], GitCheckout] = field(default_factory=dict)
     #: The report's ``sources`` rows, in the order they were adopted.
     _resolutions: list[SourceResolution] = field(default_factory=list)
-    #: The ``(display, mode)`` pairs already in ``_resolutions``. Makes
-    #: :meth:`adopt` idempotent per declaration, so ten entries naming one
-    #: source produce one row — and two declarations of one repository produce
-    #: two, which is what "one row per declaration" means::
+    #: The ``(display, url, ref, mode)`` tuples already in ``_resolutions``.
+    #: Makes :meth:`adopt` idempotent per declaration, so ten entries naming
+    #: one source produce one row — and two declarations of one repository
+    #: produce two, which is what "one row per declaration" means::
     #:
-    #:     {("content", "strict"),
-    #:      ("https://code.example.com/solo.git@main", "non_strict")}
+    #:     {("content", "https://code.example.com/team/content.git",
+    #:       "v1.2.0", "strict"),
+    #:      ("https://code.example.com/solo.git@main",
+    #:       "https://code.example.com/solo.git", "main", "non_strict")}
     #:
-    #: ``mode`` is in here for the same reason it is in the baseline key, and
-    #: the rule is worth stating on its own: **the recording identity must be
-    #: at least as fine as the key the recording feeds.** A named source's
-    #: display is its ``from`` name, which maps to exactly one
-    #: ``(url, ref, mode)``, so it is already fine enough. An inline source's
-    #: display is ``url@ref``, which is not: two inline declarations of one
-    #: repository at one ref but two modes share it. De-duplicated on the
-    #: display alone, whichever resolved first would take the slot and the
-    #: other would record nothing — leaving, if the loser was the ``strict``
-    #: one, a pin that never establishes a baseline and therefore never
-    #: refuses anything.
-    _recorded: set[tuple[str, str]] = field(default_factory=set)
+    #: The rule this shape exists to satisfy: **the recording identity must be
+    #: at least as fine as the key the recording feeds.** What it feeds is the
+    #: next apply's baseline, keyed on ``(url, ref, mode)``; collapse two rows
+    #: the baseline would have told apart and the loser records nothing, so —
+    #: if the loser is the ``strict`` one — a pin never establishes a baseline
+    #: and therefore never refuses anything.
+    #:
+    #: The identity simply **contains** that key, rather than something
+    #: believed to imply it. Two weaker shapes were tried and both had holes,
+    #: which is the argument for not trying a third:
+    #:
+    #: * ``display`` alone. An inline display is ``url@ref``, so it cannot see
+    #:   ``mode`` at all: one repository at one ref declared both ``strict``
+    #:   and ``non_strict`` collapsed onto one row.
+    #: * ``(display, mode)``. The ``@`` join is not injective — ``@`` is legal
+    #:   in a URL path and in a refname — so ``url="…/a@b", ref="c"`` and
+    #:   ``url="…/a", ref="b@c"`` still share a display and still collapsed.
+    #:
+    #: ``display`` stays in the tuple because it is not implied by the key
+    #: either: two ``from`` names over one ``(url, ref, mode)`` are two
+    #: declarations and must stay two rows.
+    _recorded: set[tuple[str, str, str, str]] = field(default_factory=set)
 
     def checkout(
         self,
@@ -243,13 +255,13 @@ class SourceSession:
         for the entry — a refused move is not adopted, so the report of a
         refusing (failed) apply carries no poisoned baseline, and the last
         apply's record keeps refusing the moved ref until the document is
-        re-pinned. Idempotent per ``(display, mode)``; a display is a name or
-        ``url@ref``, so every entry that names one source stands behind one
-        resolution, and two names over one repository record one row each. The
-        mode is part of that identity rather than a detail of the row: see
-        ``_recorded``.
+        re-pinned. Idempotent per ``(display, url, ref, mode)``, so every entry
+        that names one source stands behind one resolution and two names over
+        one repository record one row each. The identity contains the whole
+        baseline key rather than a display believed to imply it — see
+        ``_recorded`` for the two narrower shapes that turned out not to.
         """
-        key = (display, spec.mode)
+        key = (display, spec.url, spec.ref, spec.mode)
         if key in self._recorded:
             return
         self._recorded.add(key)
