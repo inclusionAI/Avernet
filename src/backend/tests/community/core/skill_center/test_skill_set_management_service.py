@@ -3747,7 +3747,7 @@ async def test_explicit_desktop_offline_is_pending_without_error_traceback(
     plan = ResolvedSkillPlan(
         bot_id="desktop-a",
         owner_id="owner-a",
-        bot={"status": bot_status},
+        bot={"status": bot_status, "bot_type": "desktop"},
         engine="hermes",
         projection=RuntimeSkillProjection(skill_mappings=(), skill_assets=()),
     )
@@ -3769,6 +3769,41 @@ async def test_explicit_desktop_offline_is_pending_without_error_traceback(
     calls = getattr(log, log_method).call_args_list
     assert any("Desktop device offline" in str(call.args[0]) for call in calls)
     log.exception.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_non_desktop_no_active_device_keeps_generic_runtime_contract() -> None:
+    from agentclaw.community.core.devices.services.device_context import (
+        DeviceOfflineError,
+    )
+    from agentclaw.community.core.skill_center.runtime_projection_contract import (
+        ResolvedSkillPlan,
+    )
+    from agentclaw.community.core.skill_center.runtime_resolver import (
+        RuntimeSkillProjection,
+    )
+    from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import (
+        PerDomainRuntimeProjection,
+    )
+
+    delivery = MagicMock()
+    delivery.deliver = AsyncMock(side_effect=DeviceOfflineError("offline"))
+    projection = PerDomainRuntimeProjection(skill_delivery=delivery)
+    plan = ResolvedSkillPlan(
+        bot_id="service-a",
+        owner_id="owner-a",
+        bot={"status": "ACTIVE", "bot_type": "service"},
+        engine="openclaw",
+        projection=RuntimeSkillProjection(skill_mappings=(), skill_assets=()),
+    )
+
+    result = await projection.apply(
+        plan=plan,
+        scope=ProjectionScope(skills=True),
+        service_factory=MagicMock(),
+    )
+
+    assert result.issues[0].code == "SKILL_RUNTIME_UNAVAILABLE"
 
 
 @pytest.mark.asyncio

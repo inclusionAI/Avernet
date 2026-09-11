@@ -830,9 +830,12 @@ def test_reference_set_and_track_latest_share_one_task_for_latest_combined_plan(
     assert projector.applied == [combined]
 
 
-def test_ensure_uses_minimal_payload_and_thirty_minute_deadline() -> None:
+@pytest.mark.parametrize("status", ["ACTIVE", "PENDING"])
+def test_ensure_uses_minimal_payload_and_thirty_minute_deadline(
+    status: str,
+) -> None:
     bots = MagicMock()
-    bots.get_by_id_and_owner.return_value = _bot()
+    bots.get_by_id_and_owner.return_value = _bot(status=status)
     tasks = MagicMock()
     service = DesktopSkillRecoveryService(bots=bots, tasks=tasks)
 
@@ -859,9 +862,14 @@ def test_ensure_does_not_create_recovery_for_non_runnable_status(status: str) ->
     tasks.enqueue.assert_not_called()
 
 
-def test_handler_completes_explicit_offline_without_runtime_io() -> None:
+@pytest.mark.parametrize(
+    "status", ["OFFLINE", "FAILED", "RELEASING", "RELEASED", "UNKNOWN"]
+)
+def test_handler_completes_non_runnable_status_without_runtime_io(
+    status: str,
+) -> None:
     bots = MagicMock()
-    bots.get_by_id_and_owner.return_value = _bot(status="OFFLINE")
+    bots.get_by_id_and_owner.return_value = _bot(status=status)
     projector = MagicMock()
     handler = DesktopSkillRecoveryTaskHandler(
         bots=bots,
@@ -877,11 +885,16 @@ def test_handler_completes_explicit_offline_without_runtime_io() -> None:
     projector.resolve_plan.assert_not_called()
 
 
-def test_handler_rechecks_offline_after_prepare_before_runtime_io() -> None:
+@pytest.mark.parametrize(
+    "status", ["OFFLINE", "FAILED", "RELEASING", "RELEASED", "UNKNOWN"]
+)
+def test_handler_rechecks_non_runnable_status_after_prepare_before_runtime_io(
+    status: str,
+) -> None:
     bots = MagicMock()
     bots.get_by_id_and_owner.side_effect = [
         _bot(status="ACTIVE"),
-        _bot(status="OFFLINE"),
+        _bot(status=status),
     ]
     projector = _Projector()
     layouts = MagicMock()
@@ -907,6 +920,19 @@ def test_explicit_device_offline_result_waits_for_reconnect_event() -> None:
         RuntimeProjectionResult.pending(
             code="DESKTOP_DEVICE_OFFLINE",
             reason="offline",
+        ),
+        prepare_pending=False,
+        prepare_retryable_error=False,
+    )
+
+    assert isinstance(outcome, Complete)
+
+
+def test_unknown_retryable_issue_does_not_authorize_task_retry() -> None:
+    outcome = DesktopSkillRecoveryTaskHandler._outcome(
+        RuntimeProjectionResult.pending(
+            code="UNKNOWN_RUNTIME_WAIT",
+            reason="unknown",
         ),
         prepare_pending=False,
         prepare_retryable_error=False,
@@ -941,6 +967,40 @@ def test_terminal_recovery_releases_the_bot_key_for_a_later_sweep(
     assert second is not None
     assert second.created is True
     assert second.record.id != first.record.id
+
+
+@pytest.mark.integration
+def test_existing_live_task_drains_when_bot_is_now_offline(recovery_queue) -> None:
+    bots = MagicMock()
+    bots.get_by_id_and_owner.side_effect = [
+        _bot(status="ACTIVE"),
+        _bot(status="OFFLINE"),
+    ]
+    recovery = DesktopSkillRecoveryService(bots=bots, tasks=recovery_queue)
+    enqueued = recovery.ensure(owner_id="owner-a", bot_id="bot-a")
+    assert enqueued is not None
+    claimed = recovery_queue._repo.claim_batch(
+        worker_id="worker-1",
+        env="dev",
+        app=DEFAULT_APP,
+        limit=1,
+        lease_seconds=60,
+    )
+    handler = DesktopSkillRecoveryTaskHandler(
+        bots=bots,
+        projector=MagicMock(),
+        distribution=MagicMock(),
+        layouts=MagicMock(),
+        env_provider=lambda: "dev",
+    )
+
+    outcome = handler.handle(claimed[0].payload)
+
+    assert isinstance(outcome, Complete)
+    assert recovery_queue._repo.complete(
+        task_id=claimed[0].id,
+        worker_id="worker-1",
+    )
 
 
 def test_sweeper_pages_all_live_bound_desktop_bots_and_only_ensures() -> None:

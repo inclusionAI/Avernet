@@ -25,6 +25,11 @@ import re
 import time
 
 import httpx
+from agentclaw.community.core.service_bot.baas_service_errors import (
+    BaasNoActiveDevicesError,
+    BaasServiceError,
+    BaasTransientServiceError,
+)
 from agentclaw.community.core.caller_identity.credential import (
     CALLER_CREDENTIAL_REQUEST_INVALID,
     CALLER_OUTBOUND_INVALID,
@@ -197,28 +202,6 @@ class BaasOutboundTargetError(ValueError):
     def __init__(self, reason: str) -> None:
         self.reason = reason
         super().__init__(reason)
-
-
-class BaasServiceError(Exception):
-    """BaaS service error."""
-    pass
-
-
-class BaasNoActiveDevicesError(BaasServiceError):
-    """BaaS confirms that the Bot currently has no active device."""
-
-    error_code = "NO_ACTIVE_DEVICES"
-
-    def __init__(self, *, status_code: int) -> None:
-        self.status_code = status_code
-        super().__init__(
-            f"BaaS device is offline: status={status_code} "
-            f"error={self.error_code}"
-        )
-
-
-class BaasTransientServiceError(BaasServiceError):
-    """BaaS transport or 5xx failure that may succeed on a later attempt."""
 
 
 def _is_no_active_devices_response(response: httpx.Response) -> bool:

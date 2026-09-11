@@ -11,7 +11,7 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceConnectionUnavailableError,
     DeviceOfflineError,
 )
-from agentclaw.community.core.service_bot.services.baas_service import (
+from agentclaw.community.core.service_bot.baas_service_errors import (
     BaasNoActiveDevicesError,
     BaasTransientServiceError,
 )

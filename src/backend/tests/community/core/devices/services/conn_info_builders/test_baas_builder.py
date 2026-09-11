@@ -2,14 +2,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from agentclaw.community.core.service_bot.baas_service_errors import (
+    BaasNoActiveDevicesError,
+    BaasTransientServiceError,
+)
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
     DeviceConnectionUnavailableError,
     DeviceOfflineError,
-)
-from agentclaw.community.core.service_bot.services.baas_service import (
-    BaasNoActiveDevicesError,
-    BaasTransientServiceError,
 )
 from agentclaw.community.core.devices.services.conn_info_builders.baas_builder import (
     BaasConnInfoBuilder,

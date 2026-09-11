@@ -16,15 +16,15 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
-    ManagedDeployConfigComposer,
-)
-from agentclaw.community.core.service_bot.services.baas_service import (
+from agentclaw.community.core.service_bot.baas_service_errors import (
     BaasNoActiveDevicesError,
-    BaasService,
     BaasServiceError,
     BaasTransientServiceError,
 )
+from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
+    ManagedDeployConfigComposer,
+)
+from agentclaw.community.core.service_bot.services.baas_service import BaasService
 
 
 def _make_service_raising(
@@ -126,6 +126,7 @@ class TestGetWsInfoErrorLogging:
         ("status_code", "body"),
         [
             (404, '{"detail":{"error":"BOT_NOT_FOUND"}}'),
+            (401, '{"detail":{"error":"NO_ACTIVE_DEVICES"}}'),
             (403, '{"detail":{"error":"NO_ACTIVE_DEVICES"}}'),
             (500, '{"detail":{"error":"NO_ACTIVE_DEVICES"}}'),
             (503, '{"detail":{"error":"SOME_OTHER_ERROR"}}'),
