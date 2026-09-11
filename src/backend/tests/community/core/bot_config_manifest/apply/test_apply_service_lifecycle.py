@@ -55,8 +55,8 @@ from agentclaw.community.core.repository.implementations.bot.config_manifest_app
     BotConfigManifestApplyRepository,
 )
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-    EntryFetcher,
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+    DeclaredSourceResolver,
 )
 from ._fakes import (
     FakeActivationService,
@@ -201,7 +201,7 @@ def world():
         upload_service_provider=lambda: FakeSkillUploadService(),
         capability_reader_provider=lambda: FakeCapabilityReader(),
         package_validator_provider=lambda: real_validator(),
-        entry_fetcher_provider=lambda: EntryFetcher(
+        entry_fetcher_provider=lambda: DeclaredSourceResolver(
             FakeManifestContent(), FakeCredentials(), FakeObjectStore()
         ),
         # W6's materialiser: this suite's document declares no resources,

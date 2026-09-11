@@ -59,7 +59,8 @@ class CliToolDecl:
 
     **Where the bytes come from is not one of its fields.** There are two
     roads and each carries its own payload: a manifest entry goes through
-    ``fetch_declared`` — see :attr:`entry` — and an upload arrives as bytes the
+    ``DeclaredSourceResolver.resolve`` — see :attr:`entry` — and an upload
+    arrives as bytes the
     caller already holds. Neither is a URL this type could hold, and holding
     one is precisely how a source *name* once went on the wire as though it
     were an address.
@@ -80,8 +81,9 @@ class CliToolDecl:
     keep_last: bool = True
     #: The manifest entry this was read from — **the manifest road's payload**.
     #:
-    #: Present ⇒ the acquisition goes through ``fetch_declared``, which is the
-    #: only thing that can resolve a ``from`` name or a ``protocol: git``
+    #: Present ⇒ the acquisition goes through
+    #: ``DeclaredSourceResolver.resolve``, which is the only thing that can
+    #: resolve a ``from`` name or a ``protocol: git``
     #: source. ``CliToolService.install`` requires it, because that method *is*
     #: the manifest road; the upload road has its own entry point and carries
     #: bytes instead, so a decl built for it leaves this ``None`` and never

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Any
 
 from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
@@ -69,8 +70,43 @@ def _src(key: str, **extra) -> dict:
     return {"protocol": "oss", "bucket": _BUCKET, "key": key, "auth": "oss-cred", **extra}
 
 
-class _StubEntryFetcher:
-    """``EntryFetcher``'s test double, every call recorded.
+class _RecordingStore:
+    """The content store a :class:`GitDelivery` files through, recorded.
+
+    The git road's delivery now writes its own receipt, so the double that
+    used to record ``file_bytes`` records the store call instead — in the
+    store's own vocabulary, which is what the real one receives.
+    """
+
+    def __init__(self, filed: list[dict[str, Any]]) -> None:
+        self._filed = filed
+
+    def store(
+        self,
+        fetched,
+        *,
+        scope,
+        source_url,
+        credential_name=None,
+        modifier="",
+        apply_id=None,
+        category=None,
+        entry_identity=None,
+    ):
+        self._filed.append(
+            {
+                "content": fetched.bytes,
+                "source_url": source_url,
+                "category": category,
+                "entry_identity": entry_identity,
+                "credential_name": credential_name,
+            }
+        )
+        return SimpleNamespace(digest=fetched.sha256)
+
+
+class _StubDeclaredSourceResolver:
+    """``DeclaredSourceResolver``'s test double, every call recorded.
 
     Addresses ending in ``gone`` stand in for unreachable sources. With
     ``fixed_body``, every address serves the same bytes (an archive); without
@@ -94,9 +130,11 @@ class _StubEntryFetcher:
         #: repository url → the whole tree it delivers, path → bytes.
         self.git_trees = git_trees or {}
         self.moved_from = moved_from
-        #: When set, ``fetch_declared`` answers with it verbatim — the way to
-        #: stand in for what ``_git_keep_last`` hands back.
+        #: When set, ``resolve`` answers with it verbatim — the way to
+        #: stand in for what the git road's ``_keep_last`` hands back.
         self.declared_override = None
+        #: The store a git delivery files through, recording into ``filed``.
+        self.store = _RecordingStore(self.filed)
 
     def fetch(
         self,
@@ -128,7 +166,7 @@ class _StubEntryFetcher:
         )
         return FetchedEntry(content=body, digest="sha256:stub", from_store=False)
 
-    def fetch_declared(
+    def resolve(
         self,
         ctx: Any,
         *,
@@ -187,7 +225,8 @@ class _StubEntryFetcher:
                     auth=decl.get("auth"),
                     url=key,
                     moved=self.moved_from,
-                )
+                ),
+                self.store,
             )
 
         url = decl.get("url") or f"oss://{decl.get('bucket')}/{decl.get('key')}"
@@ -205,32 +244,11 @@ class _StubEntryFetcher:
             )
         )
 
-    def file_bytes(
-        self,
-        ctx: Any,
-        *,
-        content: bytes,
-        source_url: str,
-        category: str,
-        entry_identity: str | None = None,
-        content_type: str | None = None,
-        credential_name: str | None = None,
-    ) -> str:
-        """Records the audit copy the git road files, exactly as the real one."""
-        self.filed.append(
-            {
-                "content": content,
-                "source_url": source_url,
-                "category": category,
-                "entry_identity": entry_identity,
-                "credential_name": credential_name,
-            }
-        )
-        return "sha256:filed"
+
 
 
 def _compose(source_subpath: str | None, entry_subpath: str | None) -> str | None:
-    """The composition ``EntryFetcher`` performs, so the double addresses the
+    """The composition ``DeclaredSourceResolver`` performs, so the double addresses the
     same tree the real fetcher would."""
     if entry_subpath is None:
         return source_subpath
@@ -341,7 +359,7 @@ def test_fake_resource_service_records_uploads_and_deletes():
 
 def test_file_entry_from_a_declared_source_resolves_to_intent_bytes():
     svc = FakeResourceFileService()
-    stub = _StubEntryFetcher()
+    stub = _StubDeclaredSourceResolver()
     m = ResourcesMaterialiser(svc, stub)
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
@@ -367,7 +385,7 @@ def test_file_entry_from_a_declared_source_resolves_to_intent_bytes():
 
 def test_file_entry_inline_content_never_fetches():
     svc = FakeResourceFileService()
-    stub = _StubEntryFetcher()
+    stub = _StubDeclaredSourceResolver()
     m = ResourcesMaterialiser(svc, stub)
     ctx = make_context(engine_type="claude_code")
     resolved = _run(m.resolve(ctx, [{"path": "notes/r.md", "content": "# rules"}]))
@@ -379,7 +397,7 @@ def test_file_entry_inline_content_never_fetches():
 
 def test_fetch_failure_aborts_whole_category():
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher())
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver())
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
         m.resolve(
@@ -396,7 +414,7 @@ def test_fetch_failure_aborts_whole_category():
 
 def test_bad_path_entry_is_a_resolve_failure():
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher())
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver())
     ctx = make_context(engine_type="claude_code")
     resolved = _run(m.resolve(ctx, [{"path": 123}]))
     assert not resolved.ok
@@ -408,7 +426,7 @@ def test_bad_path_entry_is_a_resolve_failure():
 def test_dir_entry_expands_members_under_path():
     archive = _tgz({"top/a.txt": b"AAA", "top/sub/b.txt": b"BBB"})
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
         m.resolve(
@@ -439,7 +457,7 @@ def test_dir_entry_expands_members_under_path():
 
 def test_bad_archive_is_a_resolve_failure_and_nothing_reaches_the_bot():
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(b"not-an-archive"))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(b"not-an-archive"))
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
         m.resolve(
@@ -454,7 +472,7 @@ def test_bad_archive_is_a_resolve_failure_and_nothing_reaches_the_bot():
 
 def test_dir_unpack_missing_is_rejected_at_resolve():
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(_tgz({"a.txt": b"x"})))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(_tgz({"a.txt": b"x"})))
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
         m.resolve(ctx, [{"path": "wrap/", "source": _src("tree.tgz")}])
@@ -465,7 +483,7 @@ def test_dir_unpack_missing_is_rejected_at_resolve():
 
 def test_nested_paths_abort_category():
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(_tgz({"a.txt": b"x"})))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(_tgz({"a.txt": b"x"})))
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
         m.resolve(
@@ -489,7 +507,7 @@ def test_nested_paths_abort_category():
 
 def test_plan_classifies_present_as_updated_and_new_as_created():
     svc = FakeResourceFileService(exists_paths={"data/a.md"})
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher())
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver())
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
         m.resolve(
@@ -521,7 +539,7 @@ def test_plan_addresses_the_bot_owner_not_the_manifest_storage_key():
     derives. A test that left them equal would never catch the swap.
     """
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher())
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver())
     ctx = make_context(
         bot_id="b_1",
         owner_id="u_owner",
@@ -557,7 +575,7 @@ def test_declared_trees_report_as_removals_not_member_rows():
     """
     archive = _tgz({"a.txt": b"AAA"})
     svc = FakeResourceFileService(exists_paths={"established/a.txt"})
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
         m.resolve(
@@ -605,7 +623,7 @@ def _write_through(m, ctx, entries):
 def test_write_replaces_the_tree_then_uploads_every_member():
     svc = FakeResourceFileService(exists_paths={"wrap/old.txt"})
     archive = _tgz({"a.txt": b"AAA", "sub/b.txt": b"BBB"})
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(engine_type="claude_code")
     plan, results = _write_through(
         m,
@@ -641,7 +659,7 @@ def test_write_deletes_the_declared_tree_without_the_trailing_slash():
     """
     svc = FakeResourceFileService(exists_paths={"wrap/old.txt"})
     archive = _tgz({"a.txt": b"AAA"})
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(engine_type="claude_code")
     _write_through(
         m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": _src("t")}]
@@ -661,7 +679,7 @@ def test_a_silently_failed_tree_delete_fails_its_members():
         exists_paths={"tools"}, fail_deletes={"tools"}
     )
     archive = _tgz({"a.md": b"A"})
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(engine_type="claude_code")
     plan, results = _write_through(
         m,
@@ -689,7 +707,7 @@ def test_a_failed_delete_of_an_absent_tree_is_not_a_failure():
     """
     svc = FakeResourceFileService(fail_deletes={"tools"})
     archive = _tgz({"a.md": b"A"})
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(engine_type="claude_code")
     plan, results = _write_through(
         m,
@@ -704,7 +722,7 @@ def test_write_addresses_the_bot_owner():
     """The write chain gets the owner's address, the router's own way."""
     svc = FakeResourceFileService()
     archive = _tgz({"a.txt": b"AAA"})
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(
         bot_id="b_1",
         owner_id="u_owner",
@@ -745,7 +763,7 @@ def test_write_is_player_setup_convergent():
     archive = _tgz({"a.txt": b"AAA"})
     svc = FakeResourceFileService()
     for _ in range(2):
-        m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+        m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(archive))
         ctx = make_context(engine_type="claude_code")
         _write_through(
             m,
@@ -765,7 +783,7 @@ def test_write_failure_yields_failed_entry_per_member():
 
     svc = _Buggy(exists_paths=set())
     archive = _tgz({"a.txt": b"A", "b.txt": "B".encode()})
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(engine_type="claude_code")
     plan, results = _write_through(
         m,
@@ -849,7 +867,7 @@ def test_each_form_fetches_under_its_own_category():
     """
     archive = _tgz({"a.txt": b"x"})
     svc = FakeResourceFileService()
-    stub = _StubEntryFetcher(archive)
+    stub = _StubDeclaredSourceResolver(archive)
     m = ResourcesMaterialiser(svc, stub)
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
@@ -882,7 +900,7 @@ def test_keep_last_fallback_surfaces_as_the_entries_note():
     the contract broken quietly.
     """
 
-    class _FallingBack(_StubEntryFetcher):
+    class _FallingBack(_StubDeclaredSourceResolver):
         def fetch(self, ctx, **kwargs):
             entry = super().fetch(ctx, **kwargs)
             return FetchedEntry(
@@ -912,7 +930,7 @@ def test_write_carries_the_note_onto_the_report_row():
     """The note reaches the report row — stating a keep_last fallback only in
     the log is §9.6 broken quietly."""
 
-    class _FallingBack(_StubEntryFetcher):
+    class _FallingBack(_StubDeclaredSourceResolver):
         def fetch(self, ctx, **kwargs):
             entry = super().fetch(ctx, **kwargs)
             return FetchedEntry(
@@ -946,7 +964,7 @@ def test_an_archive_member_the_chain_would_refuse_fails_at_resolve():
     """
     archive = _tgz({"a.md": b"ok", "run.sh": b"#!/bin/sh\n"})
     svc = FakeResourceFileService(exists_paths={"tools/old.md"})
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
         m.resolve(
@@ -965,7 +983,7 @@ def test_an_archive_member_the_chain_would_refuse_fails_at_resolve():
 
 def test_an_extensionless_inline_file_fails_at_resolve():
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher())
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver())
     ctx = make_context(engine_type="claude_code")
     resolved = _run(m.resolve(ctx, [{"path": "data/LICENSE", "content": "MIT"}]))
     assert not resolved.ok
@@ -982,7 +1000,7 @@ def test_inline_content_over_the_size_cap_fails_at_resolve(
 
     monkeypatch.setattr(fs, "MAX_FILE_SIZE", 16)
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher())
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver())
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
         m.resolve(ctx, [{"path": "data/big.md", "content": "x" * 32}])
@@ -998,7 +1016,7 @@ def test_strip_components_of_the_wrong_type_is_a_resolve_failure():
     may escape ``resolve`` — the orchestrator would abort the category with
     the exception's text in it."""
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(_tgz({"a.md": b"x"})))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(_tgz({"a.md": b"x"})))
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
         m.resolve(
@@ -1032,7 +1050,7 @@ def test_a_failed_tree_replacement_fails_its_members_in_composed_words():
 
     archive = _tgz({"a.md": b"A"})
     svc = _BuggyTreeDelete(exists_paths=set())
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(engine_type="claude_code")
     plan, results = _write_through(
         m,
@@ -1104,7 +1122,7 @@ def test_dry_run_and_apply_report_the_same_resources_shape():
     """
     archive = _tgz({"a.txt": b"AAA"})
     svc = FakeResourceFileService()
-    engine = _resources_engine(svc, _StubEntryFetcher(archive))
+    engine = _resources_engine(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(engine_type="claude_code")
 
     dry = _run(
@@ -1143,7 +1161,7 @@ def test_an_empty_archive_still_audits_the_tree_removal():
     """
     archive = _tgz({})
     svc = FakeResourceFileService(exists_paths={"gone/old.md"})
-    engine = _resources_engine(svc, _StubEntryFetcher(archive))
+    engine = _resources_engine(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(engine_type="claude_code")
 
     dry = _run(
@@ -1208,7 +1226,7 @@ def test_a_refused_member_blames_the_declared_entry_in_the_report():
     """
     archive = _tgz({"a.md": b"ok", "run.sh": b"#!/bin/sh\n"})
     svc = FakeResourceFileService(exists_paths={"tools/old.md"})
-    engine = _resources_engine(svc, _StubEntryFetcher(archive))
+    engine = _resources_engine(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(engine_type="claude_code")
 
     report = _run(
@@ -1260,7 +1278,7 @@ def test_routed_bots_address_the_runtime_engine_workspace():
     """
     archive = _tgz({"a.txt": b"A"})
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(
         engine_type="claude_code", bot={"template_type": "applicationCoding"}
     )
@@ -1283,7 +1301,7 @@ def test_unrouted_bots_keep_the_active_engine():
     ]
     for overlay in cases:
         svc = FakeResourceFileService()
-        m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+        m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(archive))
         ctx = make_context(engine_type="claude_code", bot=overlay)
         _write_through(
             m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": _src("t")}]
@@ -1291,7 +1309,7 @@ def test_unrouted_bots_keep_the_active_engine():
         assert svc.delete_calls[0]["engine_type"] == "claude_code"
 
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(engine_type="openclaw")
     _write_through(
         m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": _src("t")}]
@@ -1305,7 +1323,7 @@ def test_an_engineless_bot_record_falls_back_to_the_context_engine():
     factory would compose into the bot root instead of an engine dir."""
     archive = _tgz({"a.txt": b"A"})
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(archive))
     ctx = make_context(engine_type="openclaw", bot={"active_engine": None})
     _write_through(
         m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": _src("t")}]
@@ -1322,7 +1340,7 @@ def test_a_tilde_path_is_refused_at_resolve():
     "/" is, and the old belt (only "/", ".." segments) let it through to
     the write chain."""
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher())
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver())
     ctx = make_context(engine_type="claude_code")
     resolved = _run(m.resolve(ctx, [{"path": "~/x.md", "content": "x"}]))
     assert not resolved.ok
@@ -1332,7 +1350,7 @@ def test_a_tilde_path_is_refused_at_resolve():
 
 def test_a_windows_drive_path_is_refused_at_resolve():
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher())
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver())
     ctx = make_context(engine_type="claude_code")
     resolved = _run(m.resolve(ctx, [{"path": "C:evil.md", "content": "x"}]))
     assert not resolved.ok
@@ -1344,7 +1362,7 @@ def test_duplicate_declared_paths_abort_the_category():
     re-ask it, or two entries at one path produce two intents with one
     identity, two report rows, and a last-write-wins order no rule defines."""
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher())
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver())
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
         m.resolve(
@@ -1365,7 +1383,7 @@ def test_duplicate_declared_paths_abort_the_category():
 
 def test_an_unknown_unpack_kind_is_refused():
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(_tgz({"a.md": b"x"})))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(_tgz({"a.md": b"x"})))
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
         m.resolve(
@@ -1391,7 +1409,7 @@ def test_refusals_quote_the_write_chains_own_words():
     about what they admit.
     """
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher())
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver())
     ctx = make_context(engine_type="claude_code")
     resolved = _run(m.resolve(ctx, [{"path": "data/run.sh", "content": "#"}]))
     assert not resolved.ok
@@ -1452,7 +1470,7 @@ def test_an_unhashable_unpack_kind_is_refused_not_raised():
     path instead of the stage's own words.
     """
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(_tgz({"a.md": b"x"})))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(_tgz({"a.md": b"x"})))
     ctx = make_context(engine_type="claude_code")
     resolved = _run(
         m.resolve(
@@ -1502,7 +1520,7 @@ def _git_ctx(*, subpath=None, auth=None):
 def test_a_file_entry_reads_one_file_out_of_a_git_source():
     """D1's simplest half: ``from:`` resolves, and one file lands at ``path``."""
     svc = FakeResourceFileService()
-    stub = _StubEntryFetcher(git_trees={_REPO: _TREE})
+    stub = _StubDeclaredSourceResolver(git_trees={_REPO: _TREE})
     m = ResourcesMaterialiser(svc, stub)
     resolved = _run(
         m.resolve(
@@ -1525,7 +1543,7 @@ def test_a_directory_entry_over_git_takes_the_tree_recursively():
     and quietly truncate real trees.
     """
     svc = FakeResourceFileService()
-    stub = _StubEntryFetcher(git_trees={_REPO: _TREE})
+    stub = _StubDeclaredSourceResolver(git_trees={_REPO: _TREE})
     m = ResourcesMaterialiser(svc, stub)
     resolved = _run(
         m.resolve(
@@ -1550,7 +1568,7 @@ def test_a_directory_entry_over_git_declares_no_unpack():
     over a real tree, so requiring it here would be asking the caller to
     configure a packaging step that does not happen."""
     svc = FakeResourceFileService()
-    stub = _StubEntryFetcher(git_trees={_REPO: _TREE})
+    stub = _StubDeclaredSourceResolver(git_trees={_REPO: _TREE})
     m = ResourcesMaterialiser(svc, stub)
     resolved = _run(
         m.resolve(_git_ctx(subpath="kb"), [{"path": "data/kb/", "from": "content"}])
@@ -1562,14 +1580,14 @@ def test_a_file_removed_upstream_disappears_on_the_next_apply():
     """A directory entry owns its tree: the declared area is replaced wholesale,
     not merged. Modelled as two applies over a shrinking repository."""
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(git_trees={_REPO: _TREE}))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(git_trees={_REPO: _TREE}))
     first = _run(
         m.resolve(_git_ctx(subpath="kb"), [{"path": "data/kb/", "from": "content"}])
     )
     assert "data/kb/pricing.csv" in {i.identity for i in first.intents}
 
     shrunk = {k: v for k, v in _TREE.items() if k != "kb/pricing.csv"}
-    m2 = ResourcesMaterialiser(svc, _StubEntryFetcher(git_trees={_REPO: shrunk}))
+    m2 = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(git_trees={_REPO: shrunk}))
     second = _run(
         m2.resolve(_git_ctx(subpath="kb"), [{"path": "data/kb/", "from": "content"}])
     )
@@ -1586,7 +1604,7 @@ def test_a_member_refused_by_admission_aborts_with_the_tree_still_standing():
     deterministically deletes the tree and then fails to refill it."""
     svc = FakeResourceFileService()
     oversized = {"kb/ok.md": b"fine\n", "kb/bad.exe": b"\x00" * 8}
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(git_trees={_REPO: oversized}))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(git_trees={_REPO: oversized}))
     resolved = _run(
         m.resolve(_git_ctx(subpath="kb"), [{"path": "data/kb/", "from": "content"}])
     )
@@ -1599,7 +1617,7 @@ def test_two_entries_share_one_declared_git_source():
     """The declare-once-reference-many mechanism, which ``resources`` was
     excluded from: one source block, two entries, two different subpaths."""
     svc = FakeResourceFileService()
-    stub = _StubEntryFetcher(git_trees={_REPO: _TREE})
+    stub = _StubDeclaredSourceResolver(git_trees={_REPO: _TREE})
     m = ResourcesMaterialiser(svc, stub)
     resolved = _run(
         m.resolve(
@@ -1626,7 +1644,7 @@ def test_a_git_sourced_entry_files_its_bytes_with_the_platform_store():
     bytes. The credential **name** rides with it — never a value — so the
     lineage answers "which credential distributed this" on both roads."""
     svc = FakeResourceFileService()
-    stub = _StubEntryFetcher(git_trees={_REPO: _TREE})
+    stub = _StubDeclaredSourceResolver(git_trees={_REPO: _TREE})
     m = ResourcesMaterialiser(svc, stub)
     _run(
         m.resolve(
@@ -1646,7 +1664,7 @@ def test_a_git_sourced_tree_files_one_receipt_not_one_per_member():
     """A 5000-file tree is one delivery. One receipt per member would make the
     audit log describe the transport instead of the entry."""
     svc = FakeResourceFileService()
-    stub = _StubEntryFetcher(git_trees={_REPO: _TREE})
+    stub = _StubDeclaredSourceResolver(git_trees={_REPO: _TREE})
     m = ResourcesMaterialiser(svc, stub)
     _run(
         m.resolve(_git_ctx(subpath="kb"), [{"path": "data/kb/", "from": "content"}])
@@ -1670,7 +1688,7 @@ def test_a_git_sourced_tree_files_one_receipt_not_one_per_member():
 def test_a_moved_ref_rides_into_the_entrys_note():
     """§9.6: a non-strict source that moved reports the move on the entry."""
     svc = FakeResourceFileService()
-    stub = _StubEntryFetcher(git_trees={_REPO: _TREE}, moved_from="deadbeef")
+    stub = _StubDeclaredSourceResolver(git_trees={_REPO: _TREE}, moved_from="deadbeef")
     m = ResourcesMaterialiser(svc, stub)
     resolved = _run(
         m.resolve(
@@ -1684,7 +1702,7 @@ def test_a_moved_ref_rides_into_the_entrys_note():
 
 def test_an_undeclared_from_fails_the_entry_not_the_process():
     svc = FakeResourceFileService()
-    m = ResourcesMaterialiser(svc, _StubEntryFetcher(git_trees={_REPO: _TREE}))
+    m = ResourcesMaterialiser(svc, _StubDeclaredSourceResolver(git_trees={_REPO: _TREE}))
     resolved = _run(
         m.resolve(_git_ctx(), [{"path": "data/x.md", "from": "nowhere"}])
     )
@@ -1744,7 +1762,7 @@ def test_keep_last_delivers_a_stored_git_tree_instead_of_failing():
 
     tree = [("faq.csv", b"q,a\n"), ("deep/notes.md", b"# nested\n")]
     svc = FakeResourceFileService()
-    stub = _StubEntryFetcher()
+    stub = _StubDeclaredSourceResolver()
     # What `_git_keep_last` hands back: the baseline receipt's bytes, carrying
     # the fallback reason the report must state (§9.6).
     stub.declared_override = FetchedEntry(
@@ -1775,7 +1793,7 @@ def test_a_real_archive_still_takes_the_unpack_road():
     """Recognising a stored tree must not swallow the archive case: an oss
     directory entry with a genuine zip goes on unpacking exactly as before."""
     svc = FakeResourceFileService()
-    stub = _StubEntryFetcher(_tgz({"kb/faq.csv": b"q,a\n"}))
+    stub = _StubDeclaredSourceResolver(_tgz({"kb/faq.csv": b"q,a\n"}))
     m = ResourcesMaterialiser(svc, stub)
     resolved = _run(
         m.resolve(
@@ -1798,7 +1816,7 @@ def test_an_oss_directory_entry_is_refused_before_the_network_is_touched():
     apply's byte budget and its lock TTL. An entry a missing `unpack`
     guarantees to reject must not spend one."""
     svc = FakeResourceFileService()
-    stub = _StubEntryFetcher()
+    stub = _StubDeclaredSourceResolver()
     m = ResourcesMaterialiser(svc, stub)
     resolved = _run(
         m.resolve(
@@ -1813,7 +1831,7 @@ def test_an_oss_directory_entry_is_refused_before_the_network_is_touched():
 
 def test_an_invalid_strip_components_is_also_refused_before_the_fetch():
     svc = FakeResourceFileService()
-    stub = _StubEntryFetcher()
+    stub = _StubDeclaredSourceResolver()
     m = ResourcesMaterialiser(svc, stub)
     resolved = _run(
         m.resolve(
@@ -1835,7 +1853,7 @@ def test_a_git_directory_entry_still_fetches_without_declaring_unpack():
     """The pre-fetch gate must not leak onto the git road, where `unpack` is
     refused at PUT and a tree needs no packaging at all."""
     svc = FakeResourceFileService()
-    stub = _StubEntryFetcher(git_trees={_REPO: _TREE})
+    stub = _StubDeclaredSourceResolver(git_trees={_REPO: _TREE})
     m = ResourcesMaterialiser(svc, stub)
     resolved = _run(
         m.resolve(_git_ctx(subpath="kb"), [{"path": "data/kb/", "from": "content"}])

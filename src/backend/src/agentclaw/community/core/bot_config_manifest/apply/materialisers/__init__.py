@@ -21,7 +21,7 @@ Module             ``identity`` from  ``Intent.value``
 =================  =================  ====================================
 
 ``script`` and ``mcp`` fetch nothing. ``identity``, ``skills`` and
-``resources`` fetch in ``resolve``, through the one ``EntryFetcher`` funnel.
+``resources`` fetch in ``resolve``, through the one ``DeclaredSourceResolver`` funnel.
 ``cli_tools`` is the exception: it fetches in ``write``, because the service
 it translates for owns fetching for both of its callers.
 

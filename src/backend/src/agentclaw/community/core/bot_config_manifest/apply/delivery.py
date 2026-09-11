@@ -37,7 +37,7 @@ from agentclaw.community.core.ports.activation_port import (
     ActivationPort,
 )
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.ports.identity_file_port import (
     IdentityFilePort,
 )
@@ -120,7 +120,7 @@ class MaterialiserPorts:
     upload_service: SkillPackageUploadPort
     capability_reader: BotCapabilityStateReaderProtocol
     package_validator: SkillPackageValidator
-    entry_fetcher: EntryFetcher
+    entry_fetcher: DeclaredSourceResolver
     resource_service: ResourceFilePort
     #: W9. One field for a whole category, because the service already holds
     #: the family's delivery port — so the ``cli_tools`` materialiser takes one

@@ -55,8 +55,8 @@ identity area two removal semantics where every reader of the area sees one.
 A reserved name never receives even an empty write.
 
 Fetch (for ``source`` entries — a declared ``source``, or a ``from`` name,
-both through W7's ``fetch_declared``) happens in ``resolve`` through
-:class:`~agentclaw.community.core.bot_config_manifest.apply.entry_fetch.EntryFetcher`;
+both through W7's declared-source door) happens in ``resolve`` through
+:class:`~agentclaw.community.core.bot_config_manifest.apply.source_resolver.DeclaredSourceResolver`;
 a failure aborts the whole category before the first write — §3.2's
 all-or-nothing, by construction, never by discipline. The bytes are decoded
 to text here rather than in the fetch pipeline because "is this UTF-8" is a
@@ -68,9 +68,9 @@ import asyncio
 from typing import TYPE_CHECKING, Any, Optional, Sequence
 
 from agentclaw.community.core.bot_config_manifest.fetch.limits import FetchCategory
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
     EntryFetchError,
-    EntryFetcher,
+    DeclaredSourceResolver,
 )
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     EntryOutcome,
@@ -136,9 +136,11 @@ class IdentityMaterialiser(Materialiser):
 
     construct = ManifestCategory.IDENTITY
 
-    def __init__(self, identity_service: Any, fetcher: "EntryFetcher") -> None:
+    def __init__(
+        self, identity_service: Any, resolver: "DeclaredSourceResolver"
+    ) -> None:
         self._identity = identity_service
-        self._fetcher = fetcher
+        self._resolver = resolver
 
     async def resolve(
         self, ctx: "ApplyContext", entries: Sequence[dict[str, Any]]
@@ -221,7 +223,7 @@ class IdentityMaterialiser(Materialiser):
                 # which the adapter awaits inline; a hung source must not
                 # park every concurrent request.
                 delivery = await asyncio.to_thread(
-                    self._fetcher.fetch_declared,
+                    self._resolver.resolve,
                     ctx,
                     entry=entry,
                     category=_FETCH_CATEGORY,
@@ -233,19 +235,17 @@ class IdentityMaterialiser(Materialiser):
 
             def _read_and_file() -> bytes:
                 body = delivery.single()
-                if delivery.needs_receipt():
-                    # The one file's bytes go through the same store the
-                    # object road files with — auth included, so the
-                    # lineage's answer to "which credential served this" is
-                    # the same on both roads.
-                    self._fetcher.file_bytes(
-                        ctx,
-                        content=body,
-                        source_url=delivery.receipt_url(),
-                        category=_FETCH_CATEGORY,
-                        entry_identity=file_type,
-                        credential_name=delivery.auth(),
-                    )
+                # The one file's bytes go through the same store the object
+                # road files with — auth included, so the lineage's answer to
+                # "which credential served this" is the same on both roads.
+                # Unconditional: a road that filed on the way past writes
+                # nothing here, and the caller no longer has to ask which.
+                delivery.file(
+                    ctx,
+                    body,
+                    category=_FETCH_CATEGORY,
+                    entry_identity=file_type,
+                )
                 return body
 
             try:

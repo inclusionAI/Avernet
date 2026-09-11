@@ -10,7 +10,7 @@ checks that matter — the digest, the architecture, whether a failed placement
 still writes a row.
 
 **Two doors, one pipeline.** A manifest entry is resolved through
-``fetch_declared``; an upload arrives with its bytes already in hand. From
+``resolve``; an upload arrives with its bytes already in hand. From
 there they are the same call:
 
     [acquire] → digest → unpack → select subpath → verify ELF → md5
@@ -48,8 +48,8 @@ from typing import Callable, Mapping, Optional, Sequence
 from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
     EntryFetchError,
 )
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-    EntryFetcher,
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+    DeclaredSourceResolver,
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools.context import (
     CliToolContext,
@@ -108,12 +108,12 @@ class CliToolService:
         repo: BotCliToolRepositoryProtocol,
         store: CliToolStore,
         delivery: CliToolDeliveryPort,
-        entry_fetcher: EntryFetcher,
+        entry_fetcher: DeclaredSourceResolver,
     ) -> None:
         self._repo = repo
         self._store = store
         self._delivery = delivery
-        self._fetcher = entry_fetcher
+        self._resolver = entry_fetcher
 
     # ── reads ────────────────────────────────────────────────────────────
 
@@ -163,8 +163,9 @@ class CliToolService:
         """**The manifest road.** Acquire, verify, store, record and deliver.
 
         ``decl.entry`` is the manifest entry, and it is required: this method's
-        first act is to resolve that entry through ``fetch_declared``, the same
-        door every other fetching category uses. A declaration with no entry
+        first act is to resolve that entry through
+        ``DeclaredSourceResolver.resolve``, the same door every other fetching
+        category uses. A declaration with no entry
         names no source, so it is refused rather than half-acquired — the
         upload road is :meth:`install_upload`, which carries its bytes.
 
@@ -736,8 +737,8 @@ class CliToolService:
     ) -> tuple[bytes, bool]:
         """The manifest entry's bytes, and whether its ``subpath`` is spent.
 
-        One door: ``fetch_declared``, the same one every other fetching
-        category uses, and the only one that resolves a ``from`` name or a
+        One door: ``DeclaredSourceResolver.resolve``, the same one every other
+        fetching category uses, and the only one that resolves a ``from`` name or a
         ``protocol: git`` source. There is no second road to pick between —
         reading an address off the declaration instead is what used to put a
         source *name* on the wire as though it were a URL: accepted at ``PUT``,
@@ -749,27 +750,26 @@ class CliToolService:
         must not look for an archive member of the same name.
         """
         delivery = await asyncio.to_thread(
-            self._fetcher.fetch_declared,
+            self._resolver.resolve,
             ctx,
             entry=decl.entry,
             category=FETCH_CATEGORY,
             entry_identity=decl.name,
         )
         data = await asyncio.to_thread(delivery.single)
-        if delivery.needs_receipt():
-            # A tree's bytes are not filed by the fetch — only the caller
-            # knows which of them this entry delivers, and here that is the
-            # one file the composed subpath named. Auth included, so the
-            # lineage answers "which credential served this" on both roads.
-            await asyncio.to_thread(
-                self._fetcher.file_bytes,
-                ctx,
-                content=data,
-                source_url=delivery.receipt_url(),
-                category=FETCH_CATEGORY,
-                entry_identity=decl.name,
-                credential_name=delivery.auth(),
-            )
+        # A tree's bytes are not filed by the fetch — only the caller knows
+        # which of them this entry delivers, and here that is the one file the
+        # composed subpath named. The delivery files them under its own
+        # identity, auth included, so the lineage answers "which credential
+        # served this" on both roads; the road that already filed writes
+        # nothing, which is why this is no longer a question the service asks.
+        await asyncio.to_thread(
+            delivery.file,
+            ctx,
+            data,
+            category=FETCH_CATEGORY,
+            entry_identity=decl.name,
+        )
         return data, delivery.is_tree()
 
     @staticmethod

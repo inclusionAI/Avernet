@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.bot_config_manifest.apply.materialisers.identity import (
     IdentityMaterialiser,
 )
@@ -49,7 +49,7 @@ def _store():
 
 
 def _fetcher():
-    return EntryFetcher(FakeManifestContent(), FakeCredentials(), FakeObjectStore())
+    return DeclaredSourceResolver(FakeManifestContent(), FakeCredentials(), FakeObjectStore())
 
 
 async def _apply(materialiser, ctx, entries):

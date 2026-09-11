@@ -28,6 +28,8 @@ from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     FetchRefusedError,
 )
 
+from ._fakes import FakeManifestContent, make_context
+
 
 def _blob(content: bytes = b"body", **kw) -> BlobDelivery:
     return BlobDelivery(
@@ -58,6 +60,7 @@ def _git(
     moved_from: str | None = None,
     auth: str | None = None,
     refuse: str | None = None,
+    store=None,
 ) -> GitDelivery:
     def _read(subpath=None, file_limit=None):
         if refuse is not None:
@@ -76,7 +79,10 @@ def _git(
             subpath=subpath,
             moved_from=moved_from,
             auth=auth,
-        )
+        ),
+        # The store the git road is handed when its fetcher builds the
+        # delivery: this is the road that still owes a write.
+        store if store is not None else FakeManifestContent(),
     )
 
 
@@ -94,15 +100,23 @@ def test_both_implementations_satisfy_the_protocol(delivery):
 
 
 def test_the_two_roads_disagree_on_exactly_the_two_questions_that_differ():
-    """``is_tree`` and ``needs_receipt`` are the whole discriminating surface.
+    """``is_tree`` and what ``file`` does are the whole discriminating surface.
 
-    Everything else is answered on both roads. If a third question ever needs
-    asking, this is where it becomes visible as a design decision rather than
-    an ``isinstance`` sneaking back in.
+    Everything else is answered on both roads. ``needs_receipt`` used to be the
+    second question and it was the caller's to ask; now the delivery answers it
+    by *acting* — the git road writes, the object road does not — and the only
+    question left on the seam is the one ``skills`` genuinely needs. If a third
+    ever needs asking, this is where it becomes visible as a design decision
+    rather than an ``isinstance`` sneaking back in.
     """
-    blob, git = _blob(), _git()
-    assert (blob.is_tree(), blob.needs_receipt()) == (False, False)
-    assert (git.is_tree(), git.needs_receipt()) == (True, True)
+    blob, git = _blob(), _git(store=FakeManifestContent())
+    ctx = make_context()
+    assert blob.is_tree() is False
+    assert git.is_tree() is True
+
+    blob.file(ctx, b"body", category="skills", entry_identity="s1")
+    git.file(ctx, b"body", category="skills", entry_identity="s1")
+    assert git.store.store_calls and not hasattr(blob, "store")
 
 
 # ── BlobDelivery ─────────────────────────────────────────────────────────────
@@ -161,8 +175,6 @@ def test_the_blob_road_answers_the_remaining_questions_off_its_payload():
     assert delivery.content_type() == "application/zip"
     assert delivery.note() == "stood in (keep_last)"
     assert delivery.source_url() == "https://content.example/x.zip"
-    # No second write is owed, so no credential name rides one.
-    assert delivery.auth() is None
 
 
 # ── GitDelivery ──────────────────────────────────────────────────────────────
@@ -198,11 +210,54 @@ def test_a_moved_ref_becomes_the_note_and_names_both_shas():
     assert note is not None and "b" * 40 in note and "c" * 40 in note
 
 
-def test_a_tree_carries_its_receipt_identity_and_credential_name():
-    delivery = _git(auth="ci-token", subpath="pkg")
-    assert delivery.auth() == "ci-token"
-    receipt = delivery.receipt_url()
-    assert "c" * 40 in receipt and "pkg" in receipt
+def test_a_tree_files_under_its_receipt_identity_and_credential_name():
+    """What the caller used to assemble out of ``receipt_url`` and ``auth``,
+    the delivery now puts on the receipt row itself."""
+    content = FakeManifestContent()
+    delivery = _git(auth="ci-token", subpath="pkg", store=content)
+
+    digest = delivery.file(
+        make_context(apply_id="apply-1"),
+        b"canonical-zip",
+        category="skills",
+        entry_identity="s1",
+        content_type="application/zip",
+    )
+
+    import hashlib
+
+    assert digest == "sha256:" + hashlib.sha256(b"canonical-zip").hexdigest()
+    call = content.store_calls[-1]
+    assert call["credential_name"] == "ci-token"
+    assert "c" * 40 in call["source_url"] and "pkg" in call["source_url"]
+    assert call["apply_id"] == "apply-1"
+    assert call["entry_identity"] == "s1"
+
+
+def test_a_blob_files_nothing_and_answers_with_its_own_digest():
+    """The object road filed what it read on its way past, so a second write
+    would be one entry with two receipts and ``keep_last`` reading whichever it
+    found.
+
+    Structural, not merely observed: this road holds no store to write
+    through, which is the strongest form the statement takes. The digest is
+    the delivery's own rather than a hash of the caller's bytes — the receipt
+    this entry answers for is the one already in the store — so the caller's
+    bytes here are deliberately *different* ones, and the answer is still the
+    fetch's digest. ``test_source_resolver`` pins the same property end to end:
+    one fetch, one receipt, `file` adds none.
+    """
+    delivery = _blob(b"body", digest="sha256:feed")
+
+    digest = delivery.file(
+        make_context(),
+        b"some-other-bytes",
+        category="skills",
+        entry_identity="s1",
+    )
+
+    assert digest == "sha256:feed"
+    assert not hasattr(delivery, "store")
 
 
 def test_a_tree_offers_no_digest_for_the_pin_belt_to_compare():

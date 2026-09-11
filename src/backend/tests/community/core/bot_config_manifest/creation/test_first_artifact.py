@@ -20,7 +20,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.bot_config_manifest.apply.delivery import MaterialiserPorts
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.apply.activation_delegates import (
@@ -188,7 +188,7 @@ def _build(db):
     validator = real_validator()
 
     def fetcher():
-        return EntryFetcher(FakeManifestContent(), FakeObjectCredentials(), seeded_object_store({_QC_KEY: _QZ}))
+        return DeclaredSourceResolver(FakeManifestContent(), FakeObjectCredentials(), seeded_object_store({_QC_KEY: _QZ}))
 
     def platform_ports() -> MaterialiserPorts:
         return MaterialiserPorts(

@@ -14,7 +14,7 @@ import zipfile
 
 import pytest
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
     EntryFetchError,
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools import (
@@ -39,7 +39,7 @@ from ._fakes import (
     elf,
     FakeCliToolRepo,
     FakeDelivery,
-    FakeEntryFetcher,
+    FakeDeclaredSourceResolver,
     FakeObjectStorage,
     code_of,
 )
@@ -89,7 +89,7 @@ def _service(*, content=_TOOL, digest=_DIGEST, fetch_error=None, delivery=None, 
     oss = oss or FakeObjectStorage()
     repo = FakeCliToolRepo()
     delivery = delivery if delivery is not None else FakeDelivery()
-    fetcher = FakeEntryFetcher(content=content, digest=digest, error=fetch_error)
+    fetcher = FakeDeclaredSourceResolver(content=content, digest=digest, error=fetch_error)
     store = CliToolStore(object_storage=oss, store_base=lambda: _BASE)
     service = CliToolService(
         repo=repo, store=store, delivery=delivery, entry_fetcher=fetcher
@@ -635,7 +635,7 @@ def test_the_service_composes_no_filesystem_path_for_a_bot() -> None:
 def test_the_context_is_what_the_fetch_funnel_asks_for() -> None:
     """An HTTP-driven install and a manifest apply fetch through one funnel;
     the seam that makes that true is a declared protocol, not a coincidence."""
-    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+    from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
         FetchContext,
     )
 
@@ -816,7 +816,7 @@ async def test_a_failed_replacement_leaves_the_installed_tools_bytes_intact() ->
     other = _elf(payload=b"\x02" * 64)
     other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
     service._delivery.install_error = CliToolPlacementError("nope")
-    service._fetcher.content, service._fetcher.digest = other, other_digest
+    service._resolver.content, service._resolver.digest = other, other_digest
 
     outcome = await service.install(
         _CTX, _decl(digest=other_digest), installed_by="u2"
@@ -854,7 +854,7 @@ async def test_a_successful_replacement_collects_the_version_it_replaced() -> No
 
     other = _elf(payload=b"\x02" * 64)
     other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
-    service._fetcher.content, service._fetcher.digest = other, other_digest
+    service._resolver.content, service._resolver.digest = other, other_digest
     outcome = await service.install(
         _CTX, _decl(digest=other_digest), installed_by="u2"
     )
@@ -1031,7 +1031,7 @@ async def test_a_manifest_apply_still_replaces_rather_than_conflicting() -> None
 
     other = _elf(payload=b"\x02" * 64)
     other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
-    service._fetcher.content, service._fetcher.digest = other, other_digest
+    service._resolver.content, service._resolver.digest = other, other_digest
     outcomes = await service.replace_all(
         _CTX, [_decl(digest=other_digest)], installed_by="manifest"
     )
@@ -1118,7 +1118,7 @@ async def test_a_failed_record_leaves_the_previous_version_intact() -> None:
 
     other = _elf(payload=b"\x02" * 64)
     other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
-    service._fetcher.content, service._fetcher.digest = other, other_digest
+    service._resolver.content, service._resolver.digest = other, other_digest
     repo.write_error = RuntimeError("connection reset")
 
     outcome = await service.install(
@@ -1165,7 +1165,7 @@ async def test_a_per_name_refusal_puts_that_tools_row_back() -> None:
 
     other = _elf(payload=b"\x02" * 64)
     other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
-    service._fetcher.content, service._fetcher.digest = other, other_digest
+    service._resolver.content, service._resolver.digest = other, other_digest
     delivery.replace_failures = {"mycli": "not executable"}
 
     outcomes = await service.replace_all(
@@ -1190,7 +1190,7 @@ async def test_a_per_name_refusal_keeps_the_last_known_good_binary() -> None:
 
     other = _elf(payload=b"\x02" * 64)
     other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
-    service._fetcher.content, service._fetcher.digest = other, other_digest
+    service._resolver.content, service._resolver.digest = other, other_digest
     delivery.replace_failures = {"mycli": "not executable"}
 
     await service.replace_all(_CTX, [_decl(digest=other_digest)], installed_by="manifest")

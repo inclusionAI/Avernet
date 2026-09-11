@@ -1,6 +1,6 @@
 """The protocol table: exhaustive, and consulted rather than branched on.
 
-The per-protocol *behaviour* is pinned by ``test_entry_fetch.py`` — those
+The per-protocol *behaviour* is pinned by ``test_source_resolver.py`` — those
 tests drive real declarations through the front door and assert what came
 back, and they did not change when the branch became a table, which is the
 strongest statement available that the refactor moved nothing.
@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-    EntryFetcher,
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+    DeclaredSourceResolver,
 )
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
@@ -50,10 +50,14 @@ def _session(sources=None) -> SourceSession:
 
 
 @pytest.fixture
-def pipeline() -> EntryFetcher:
-    return EntryFetcher(
-        FakeManifestContent(), FakeCredentials(), FakeObjectStore()
-    )
+def collaborators():
+    """The three a pipeline is composed over: store, credentials, objects."""
+    return FakeManifestContent(), FakeCredentials(), FakeObjectStore()
+
+
+@pytest.fixture
+def pipeline(collaborators) -> DeclaredSourceResolver:
+    return DeclaredSourceResolver(*collaborators)
 
 
 # ── the table ────────────────────────────────────────────────────────────────
@@ -93,21 +97,27 @@ def test_a_protocol_with_no_fetcher_is_refused_at_import():
     "kind,expected",
     [(SourceKind.OSS, ObjectStoreFetcher), (SourceKind.GIT, GitSourceFetcher)],
 )
-def test_the_bound_table_holds_one_fetcher_per_protocol(pipeline, kind, expected):
-    bound = build_fetchers(pipeline)
+def test_the_bound_table_holds_one_fetcher_per_protocol(
+    collaborators, kind, expected
+):
+    bound = build_fetchers(*collaborators)
     assert isinstance(bound[kind], expected)
     assert isinstance(bound[kind], SourceFetcher)
 
 
-def test_the_fetchers_share_the_pipelines_collaborators(pipeline):
-    """Strategies over one pipeline, not independent pipelines.
+def test_the_fetchers_share_the_pipelines_collaborators(collaborators):
+    """Strategies over one apply's collaborators, not independent pipelines.
 
     Two fetchers that each built their own content store would file receipts
     under two policies, and W11's lineage would answer "which credential
-    served this" differently depending on which road an entry took.
+    served this" differently depending on which road an entry took. They are
+    handed the collaborators now rather than an owner to reach through, so
+    what this asserts is that one call binds both roads to the same objects.
     """
-    bound = build_fetchers(pipeline)
-    assert all(f._owner is pipeline for f in bound.values())
+    content, credentials, _ = collaborators
+    bound = build_fetchers(*collaborators)
+    assert all(f._content is content for f in bound.values())
+    assert all(f._credentials is credentials for f in bound.values())
 
 
 # ── dispatch ─────────────────────────────────────────────────────────────────
@@ -150,7 +160,7 @@ def test_dispatch_selects_the_fetcher_the_declaration_names(
     others = {k: _Recorder() for k in FETCHER_TYPES if k is not kind}
     pipeline._fetchers = {kind: recorder, **others}
 
-    result = pipeline.fetch_declared(
+    result = pipeline.resolve(
         make_context(source_session=_session()),
         entry={"source": source},
         category="resources_file",
@@ -169,7 +179,7 @@ def test_the_request_carries_what_the_front_door_resolved(pipeline):
     recorder = _Recorder()
     pipeline._fetchers = {SourceKind.OSS: recorder, SourceKind.GIT: _Recorder()}
 
-    pipeline.fetch_declared(
+    pipeline.resolve(
         make_context(source_session=_session()),
         entry={
             "source": {
@@ -209,7 +219,7 @@ def test_a_named_source_carries_its_name_for_the_report(pipeline):
         )
     )
 
-    pipeline.fetch_declared(
+    pipeline.resolve(
         ctx,
         entry={"from": "content"},
         category="resources_file",
@@ -259,7 +269,7 @@ def test_a_git_source_naming_an_object_store_credential_fails_one_entry():
         def binding(self, *, name):
             return _AksKBinding()
 
-    pipeline = EntryFetcher(
+    pipeline = DeclaredSourceResolver(
         FakeManifestContent(), _WrongTypeCredentials(), FakeObjectStore()
     )
     ctx = make_context(
@@ -278,6 +288,6 @@ def test_a_git_source_naming_an_object_store_credential_fails_one_entry():
     # EntryFetchError, not ValueError: the materialiser turns this into one
     # entry's ResolveFailure. Anything else aborts the category.
     with pytest.raises(EntryFetchError, match="oss-cred"):
-        pipeline.fetch_declared(
+        pipeline.resolve(
             ctx, entry={"from": "repo"}, category="identity", entry_identity="x"
         )

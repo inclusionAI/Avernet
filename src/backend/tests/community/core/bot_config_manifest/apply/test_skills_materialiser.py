@@ -22,8 +22,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-    EntryFetcher,
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+    DeclaredSourceResolver,
 )
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
@@ -110,7 +110,7 @@ def skill_rig(
     reader = FakeCapabilityReader(assets=assets, member_ids=member_ids)
     objects = seeded_object_store(packages)
     content = FakeManifestContent()
-    pipeline = EntryFetcher(content, FakeObjectCredentials(), objects)
+    pipeline = DeclaredSourceResolver(content, FakeObjectCredentials(), objects)
     materialiser = SkillsMaterialiser(
         uploads, activation, reader, real_validator(), pipeline
     )

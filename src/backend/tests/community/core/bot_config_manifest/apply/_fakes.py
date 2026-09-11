@@ -471,8 +471,8 @@ def identity_rig(files: dict[str, str] | None = None):
     The declared source :data:`SOUL_SOURCE` reads :data:`SOUL_KEY` out of the
     seeded bucket and serves :data:`SOUL_BODY`.
     """
-    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-        EntryFetcher,
+    from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+        DeclaredSourceResolver,
     )
     from agentclaw.community.core.bot_config_manifest.apply.materialisers.identity import (
         IdentityMaterialiser,
@@ -481,7 +481,7 @@ def identity_rig(files: dict[str, str] | None = None):
     identity = FakeIdentityService(files)
     objects = seeded_object_store({SOUL_KEY: SOUL_BODY})
     content = FakeManifestContent()
-    pipeline = EntryFetcher(content, FakeObjectCredentials(), objects)
+    pipeline = DeclaredSourceResolver(content, FakeObjectCredentials(), objects)
     return IdentityMaterialiser(identity, pipeline), identity, objects, content
 
 

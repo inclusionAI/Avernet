@@ -13,7 +13,7 @@ import hashlib
 from types import SimpleNamespace
 from typing import Any
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.bot_config_manifest.apply.materialisers.skills import (
     SkillsMaterialiser,
 )
@@ -124,7 +124,7 @@ def _rig(packages: dict[str, bytes]):
         skill_repository=skills,
     )
     objects = seeded_object_store(packages)
-    pipeline = EntryFetcher(FakeManifestContent(), FakeObjectCredentials(), objects)
+    pipeline = DeclaredSourceResolver(FakeManifestContent(), FakeObjectCredentials(), objects)
     materialiser = SkillsMaterialiser(
         port, activation, LiveCapabilityReader(skills, activation), real_validator(), pipeline
     )

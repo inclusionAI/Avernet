@@ -8,7 +8,7 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
     BlobDelivery,
     GitDelivery,
 )
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
     EntryFetchError,
     GitEntrySource,
 )
@@ -226,10 +226,45 @@ class FakeGitEntrySource(GitEntrySource):
         )
 
 
-class FakeEntryFetcher:
+class _RecordingStore:
+    """The content store a :class:`GitDelivery` files through, recorded.
+
+    The git road's delivery writes its own receipt now, so what used to be a
+    ``file_bytes`` recording on the fetcher is a store call here — in the
+    store's own vocabulary, which is what the real one receives.
+    """
+
+    def __init__(self, filed: list[dict]) -> None:
+        self._filed = filed
+
+    def store(
+        self,
+        fetched,
+        *,
+        scope,
+        source_url,
+        credential_name=None,
+        modifier="",
+        apply_id=None,
+        category=None,
+        entry_identity=None,
+    ):
+        self._filed.append(
+            {
+                "content": fetched.bytes,
+                "source_url": source_url,
+                "category": category,
+                "entry_identity": entry_identity,
+                "credential_name": credential_name,
+            }
+        )
+        return SimpleNamespace(digest=fetched.sha256)
+
+
+class FakeDeclaredSourceResolver:
     """Answers a declared entry with canned bytes; records what it resolved.
 
-    It resolves the entry the way the real ``fetch_declared`` does — a ``from``
+    It resolves the entry the way the real ``resolve`` does — a ``from``
     name against the session's ``sources``, an inline declaration, a git source
     answering with a tree — and **refuses anything else**, including the bare
     URL string the grammar used to allow. A double that quietly served a string
@@ -242,8 +277,10 @@ class FakeEntryFetcher:
         self.error = error
         self.calls: list[dict] = []
         self.filed: list[dict] = []
+        #: The store a git delivery files its own receipt through.
+        self.store = _RecordingStore(self.filed)
 
-    def fetch_declared(self, ctx, *, entry, category, entry_identity=None):
+    def resolve(self, ctx, *, entry, category, entry_identity=None):
         decl = None
         if isinstance(entry.get("from"), str):
             session = getattr(ctx, "source_session", None)
@@ -281,16 +318,16 @@ class FakeEntryFetcher:
         if self.error is not None:
             raise self.error
         if decl.get("protocol") == "git":
-            return GitDelivery(FakeGitEntrySource(self.content, decl, entry))
+            return GitDelivery(
+                FakeGitEntrySource(self.content, decl, entry), self.store
+            )
         return BlobDelivery(
             FakeFetchedEntry(
                 self.content, self.digest or entry.get("digest") or ""
             )
         )
 
-    def file_bytes(self, ctx, **kwargs):
-        self.filed.append(kwargs)
-        return "sha256:filed"
+
 
 
 def code_of(module) -> str:
