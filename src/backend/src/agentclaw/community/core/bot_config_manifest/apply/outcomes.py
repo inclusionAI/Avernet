@@ -342,25 +342,23 @@ class SourceResolution:
     Only the git road produces these: an object-store source resolves no ref,
     so it contributes no row. A named source::
 
-        SourceResolution(
-            name="content",             # the 'from' name
-            ref="v1.2.0",               # the declared ref, verbatim
-            resolved_sha="4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187",
-            auth="git-prod",            # the credential NAME
-        )
+        SourceResolution(name="content",
+                         url="https://code.example.com/team/content.git",
+                         ref="v1.2.0", resolved_sha="7c1d…", auth="gh-readonly")
 
-    An inline git source has no ``from`` name, so it is recorded under its
-    repository URL instead::
+    An inline git source has no ``from`` name, so it is named by the repository
+    and the ref it declared, joined by ``@``::
 
-        SourceResolution(
-            name="https://code.example.com/team/content.git",
-            ref="HEAD",
-            resolved_sha="4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187",
-            auth=None,
-        )
+        SourceResolution(name="https://code.example.com/team/content.git@main",
+                         url="https://code.example.com/team/content.git",
+                         ref="main", resolved_sha="9e8d…", auth=None)
 
-    ``name`` is the same key the strict-mode baselines are read back by, so the
-    report and ``SourceSession.baselines`` agree on a source's identity.
+    ``name`` is the **display**: one row per declaration, so two names pointing
+    at one repository are two rows and two inline declarations of one
+    repository at two refs are two rows. ``(url, ref)`` is what the strict-mode
+    baselines are read back by — the display plays no part in that, because
+    "has this repository's ref moved since we last resolved it" is not a
+    question about what the document called the source.
 
     Created by: ``apply/source_session.SourceSession.adopt``, one per distinct
     ``display`` name, returned through ``resolution_records()``.
@@ -371,8 +369,13 @@ class SourceResolution:
     support engineer reads, so this is a security property rather than tidiness.
     """
 
-    #: The ``from`` name, or the repository URL for an inline source.
+    #: The ``from`` name, or ``<url>@<ref>`` for an inline source.
     name: str
+    #: The substituted repository URL — no credentials, which this record is
+    #: structurally unable to carry anyway: it holds names, never values. It is
+    #: half of the key the next apply reads its baseline by, and is ``None``
+    #: only on a row written before this field existed.
+    url: str | None = None
     #: The ref as declared: a tag, a branch, or a full SHA. ``"HEAD"`` when the
     #: source declared none.
     ref: str | None = None
@@ -384,6 +387,7 @@ class SourceResolution:
     def as_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
+            "url": self.url,
             "ref": self.ref,
             "resolved_sha": self.resolved_sha,
             "auth": self.auth,
@@ -415,6 +419,7 @@ class ApplyReport:
             sources=(
                 SourceResolution(
                     name="content",
+                    url="https://code.example.com/team/content.git",
                     ref="v1.2.0",
                     resolved_sha="4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187",
                     auth="git-prod",
@@ -472,7 +477,9 @@ class ApplyReport:
                 "result": "PARTIAL",
                 "started_at": "2026-03-01T09:00:00+00:00",
                 "finished_at": "2026-03-01T09:00:04+00:00",
-                "sources": [{"name": "content", "ref": "v1.2.0",
+                "sources": [{"name": "content",
+                             "url": "https://code.example.com/team/content.git",
+                             "ref": "v1.2.0",
                              "resolved_sha": "4f2a9c1b...", "auth": "git-prod"}],
                 "categories": [{"category": "mcp", "aborted": False,
                                 "partially_written": False, "removed": []}],

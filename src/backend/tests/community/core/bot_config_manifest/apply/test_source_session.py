@@ -79,7 +79,11 @@ def test_adoption_records_the_resolution_once_per_display():
         session.adopt(display="src", spec=_spec(), checkout=checkout, auth_name="ci")
     assert session.resolution_records() == (
         SourceResolution(
-            name="src", ref="main", resolved_sha="a" * 40, auth="ci"
+            name="src",
+            url="https://git.corp/r.git",
+            ref="main",
+            resolved_sha="a" * 40,
+            auth="ci",
         ),
     )
 

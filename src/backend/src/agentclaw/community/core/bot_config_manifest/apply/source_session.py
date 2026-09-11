@@ -186,7 +186,9 @@ class SourceSession:
                   auth_name="git-prod")
 
             # _resolutions now ends with
-            SourceResolution(name="content", ref="v1.2.0",
+            SourceResolution(name="content",
+                             url="https://code.example.com/team/content.git",
+                             ref="v1.2.0",
                              resolved_sha="4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187",
                              auth="git-prod")
 
@@ -205,6 +207,7 @@ class SourceSession:
         self._resolutions.append(
             SourceResolution(
                 name=display,
+                url=spec.url,
                 ref=spec.ref,
                 resolved_sha=checkout.sha,
                 auth=auth_name,

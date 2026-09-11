@@ -35,6 +35,7 @@ from .schemas_config_manifest_apply import (
     ConfigManifestApply,
     ConfigManifestApplyCategory,
     ConfigManifestApplyEntry,
+    ConfigManifestApplySource,
 )
 from .schemas import (
     ConfigManifestApplyStarted,
@@ -257,7 +258,9 @@ def apply_payload(report: ApplyReport) -> ConfigManifestApply:
         result=payload["result"],
         started_at=report.started_at,
         finished_at=report.finished_at,
-        sources=payload["sources"],
+        sources=[
+            ConfigManifestApplySource(**source) for source in payload["sources"]
+        ],
         categories=[
             ConfigManifestApplyCategory(**category)
             for category in payload["categories"]

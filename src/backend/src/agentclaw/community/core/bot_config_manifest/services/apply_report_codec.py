@@ -84,6 +84,7 @@ def report_from_payload(
         sources=tuple(
             SourceResolution(
                 name=source.get("name", ""),
+                url=source.get("url"),
                 ref=source.get("ref"),
                 resolved_sha=source.get("resolved_sha"),
                 auth=source.get("auth"),

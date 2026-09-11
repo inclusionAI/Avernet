@@ -876,7 +876,11 @@ async def test_the_sessions_resolutions_ride_into_the_report():
     """
     engine = _engine()
     resolution = SourceResolution(
-        name="charts", ref="main", resolved_sha="f" * 40, auth="ci-token"
+        name="charts",
+        url="https://git.corp/charts.git",
+        ref="main",
+        resolved_sha="f" * 40,
+        auth="ci-token",
     )
     # The test-visible seam for a checkout that a materialiser's resolve
     # would have recorded: the session's own record list, appended directly.
@@ -892,6 +896,7 @@ async def test_the_sessions_resolutions_ride_into_the_report():
     assert report.as_payload()["sources"] == [
         {
             "name": "charts",
+            "url": "https://git.corp/charts.git",
             "ref": "main",
             "resolved_sha": "f" * 40,
             "auth": "ci-token",
