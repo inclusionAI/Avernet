@@ -890,7 +890,8 @@ def test_folder_creation_caps_each_file_before_multipart_spooling(
     )
 
     assert response.status_code == 422
-    assert response.json()["code"] == 422202
+    assert response.json()["code"] == 422209
+    assert response.json()["message"] == "Skill package is too large"
     skill_application_service.create_from_folder.assert_not_called()
 
 
@@ -938,7 +939,7 @@ def test_folder_creation_caps_aggregate_files_before_multipart_spooling(
     )
 
     assert response.status_code == 422
-    assert response.json()["code"] == 422202
+    assert response.json()["code"] == 422209
     skill_application_service.create_from_folder.assert_not_called()
 
 
@@ -961,7 +962,7 @@ def test_folder_creation_caps_file_count_during_multipart_parsing(
     )
 
     assert response.status_code == 422
-    assert response.json()["code"] == 422202
+    assert response.json()["code"] == 422209
     skill_application_service.create_from_folder.assert_not_called()
 
 
@@ -992,7 +993,7 @@ def test_folder_creation_rejects_oversized_multipart_body_before_spooling(
     )
 
     assert response.status_code == 422
-    assert response.json()["code"] == 422202
+    assert response.json()["code"] == 422209
     skill_application_service.create_from_folder.assert_not_called()
 
 
@@ -1036,7 +1037,7 @@ def test_folder_creation_caps_streamed_body_without_content_length(
     )
 
     assert response.status_code == 422
-    assert response.json()["code"] == 422202
+    assert response.json()["code"] == 422209
     skill_application_service.create_from_folder.assert_not_called()
 
 
@@ -1141,7 +1142,7 @@ def test_draft_file_save_caps_streamed_json_before_fastapi_parsing(
     )
 
     assert response.status_code == 422
-    assert response.json()["code"] == 422202
+    assert response.json()["code"] == 422209
     skill_application_service.save_draft_file.assert_not_called()
 
 
@@ -1163,7 +1164,7 @@ def test_draft_file_save_rejects_decoded_utf8_content_without_full_copy(
     )
 
     assert response.status_code == 422
-    assert response.json()["code"] == 422202
+    assert response.json()["code"] == 422209
     skill_application_service.save_draft_file.assert_not_called()
 
 
