@@ -814,6 +814,57 @@ class BaasBotService(BotService):
                 f"Failed to list sessions: {_safe_client_msg(e)}"
             ) from e
 
+    async def abort(
+        self,
+        *,
+        session_id: str,
+        run_id: str | None = None,
+        binding_info: BotBindingInfo,
+    ) -> None:
+        """Best-effort 通知 engine 中止 session/run。
+
+        复用 send_message 的连接解析与连接池逻辑，发送 ``chat.abort``。
+        失败仅记录日志，不影响 abort 主流程。
+
+        Args:
+            session_id: 会话 ID（engine 侧 sessionKey）
+            run_id: 可选 run ID，透传给 engine
+            binding_info: 已解析的 binding 信息
+        """
+        try:
+            conn_info = await self._resolve_ws_connection_for_binding(
+                binding_info, session_id, context=None
+            )
+        except Exception as e:
+            logger.warning(
+                "[BaasBotService.abort] failed to resolve WS connection: "
+                "session_id=%s run_id=%s error=%s",
+                session_id,
+                run_id,
+                e,
+            )
+            return
+
+        pool_key = conn_info.target
+        headers = {"x-proxypass-token": conn_info.token}
+
+        try:
+            client = await self._client_pool.get(pool_key, conn_info.ws_url, headers)
+            await client.chat_abort(session_key=session_id, run_id=run_id)
+            logger.info(
+                "[BaasBotService.abort] engine abort sent: session_id=%s run_id=%s",
+                session_id,
+                run_id,
+            )
+        except Exception as e:
+            logger.warning(
+                "[BaasBotService.abort] failed to send chat.abort: "
+                "session_id=%s run_id=%s error=%s",
+                session_id,
+                run_id,
+                e,
+            )
+
     # ── 私有方法 ─────────────────────────────────────────────────────────────
 
     def _adapter_for(self, engine_type: str | None) -> BotEngineAdapter | None:

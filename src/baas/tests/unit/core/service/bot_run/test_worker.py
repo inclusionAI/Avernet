@@ -8,6 +8,8 @@ asyncio_mode=auto，异步用例直接 async def。
 from __future__ import annotations
 
 import asyncio
+from typing import Any
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -23,6 +25,7 @@ from secbaas.community.core.service.bot_run._bot_concurrency import (
     FixedMachineCountProvider,
 )
 from secbaas.community.core.service.bot_run._executor import ResultGuardExecutor
+from secbaas.community.core.service.bot_run import BotRunner
 from secbaas.community.core.service.bot_run._worker import (
     BotRequestWorker,
     BotRequestWorkerConfig,
@@ -345,7 +348,7 @@ async def test_disabled_worker_does_not_start(repo, queue):
 # ── trace context propagation tests ───────────────────────────────
 
 
-from unittest.mock import MagicMock, patch  # noqa: E402
+from unittest.mock import patch  # noqa: E402
 
 from secbaas.community.core.service.bot_run._worker import (  # noqa: E402
     _trace_context_from_meta,
@@ -1397,3 +1400,121 @@ async def test_abort_runs_by_session_calls_repo_with_bot_session_args(repo, queu
     assert find_running_calls == [("sess-abort", "bot-1")]
     # 有可取消 run 时不调用 find_terminal_by_bot_session
     assert find_terminal_calls == []
+
+
+async def test_abort_poll_loop_awaits_engine_notifier(
+    repo, queue
+):
+    """_abort_poll_loop 感知 abort 信号后会 await engine_abort_notifier。"""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
+    record = queue.get_by_run_id(run_id)
+
+    notified = asyncio.Event()
+    captured: dict[str, str | None] = {}
+
+    async def engine_notifier(session_id: str, rid: str | None) -> None:
+        captured["session_id"] = session_id
+        captured["run_id"] = rid
+        notified.set()
+
+    worker = _worker(
+        queue,
+        repo,
+        _CompletingExecutor(repo),
+        worker_id="worker-1",
+        config=BotRequestWorkerConfig(abort_poll_interval_seconds=0.05),
+        engine_abort_notifier=engine_notifier,
+    )
+
+    run_cancelled = asyncio.Event()
+
+    async def _fake_run():
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            run_cancelled.set()
+            raise
+
+    run_task = asyncio.create_task(_fake_run())
+    poll_task = asyncio.create_task(worker._abort_poll_loop(record, run_task))
+
+    await asyncio.sleep(0.1)
+    queue.update_meta(run_id, {"abort_requested": True})
+
+    await asyncio.wait_for(poll_task, timeout=2)
+    await asyncio.wait_for(run_cancelled.wait(), timeout=2)
+
+    assert notified.is_set(), "engine notifier must be awaited"
+    assert captured["session_id"] == "sess-abort"
+    assert captured["run_id"] == run_id
+
+
+async def test_bot_runner_abort_propagates_to_bot_service(
+    repo, queue
+):
+    """BotRunner.abort 解析 binding、选择 service 并调用 service.abort。"""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
+    repo.update_session_id(run_id, "agent:main:sess-real")
+
+    class _FakeBotService:
+        def __init__(self):
+            self.calls: list[dict[str, Any]] = []
+
+        async def abort(
+            self,
+            *,
+            session_id: str,
+            run_id: str | None,
+            binding_info: Any,
+        ) -> None:
+            self.calls.append(
+                {
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "binding_info": binding_info,
+                }
+            )
+
+    fake_service = _FakeBotService()
+
+    class _FakeSelector:
+        def select(self, binding_info: Any) -> Any:
+            return fake_service
+
+    class _FakePlugin:
+        async def get_binding(self, bot_id: str, owner_id: str, stage: str):
+            from secbaas.community.spi.bot_service import BotBindingData
+            return BotBindingData(
+                bot_id="bot-1",
+                owner_id="entity-1",
+                bot_type="personal",
+                engine_type="openclaw",
+                binding_id=1,
+                device_provider="baas",
+                device_id="device-1",
+            )
+
+        async def report(self, payload: Any) -> None:
+            pass
+
+    from secbaas.community.core.service.bot_run._noop_message_dispatcher import (
+        NoopMessageDispatcher,
+    )
+    from secbaas.community.plugins.eval_env.stub import NoopEvalSessionLog
+
+    runner = BotRunner(
+        bot_service_selector=_FakeSelector(),
+        run_repository=repo,
+        bot_service_plugin=_FakePlugin(),
+        dispatchers=[NoopMessageDispatcher()],
+        system_config_service=MagicMock(),  # type: ignore[arg-type]
+        eval_session_log=NoopEvalSessionLog(),
+    )
+
+    await runner.abort(session_id="sess-abort", run_id=run_id)
+
+    assert len(fake_service.calls) == 1
+    call = fake_service.calls[0]
+    assert call["run_id"] == run_id
+    assert call["session_id"] == "agent:main:sess-real"
+    assert call["binding_info"].device_id == "device-1"
