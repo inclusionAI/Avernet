@@ -365,6 +365,16 @@ export BOT_DATA_DIR=/path/to/bot/data
 | `/health` | GET | Health check |
 | `/ws/bot` | GET | WebSocket for bot connections |
 | `/ws` | GET | WebSocket for client events |
+
+> Removed endpoints (Breaking): `POST /bot/events/coordination` — the
+> HTTP Provider coordination callback was removed in favor of the WS
+> agent-event / `tool_call_end` SSE echo path
+> (`maybe_handle_coordination_echo` → `CoordinationCall::from_stdout` →
+> `task.*`). The sibling `POST /bot/events` route remains for general bot
+> event callbacks. See `src/bcs/CHANGELOG.md`.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
 | `/bots/onboard` | POST | Register bot capabilities |
 | `/bots` | GET | List all bots |
 | `/bots/{id}` | GET | Get bot info |

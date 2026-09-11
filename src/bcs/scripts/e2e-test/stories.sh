@@ -1529,12 +1529,12 @@ print("1" if any(i.get("bot_uuid") == target for i in d.get("items", [])) else "
     require_status "late provider callback is rejected for an unknown run" "404" || return
     assert_json_eq "late provider callback reports run_not_found" "$RESPONSE" "error" "run_not_found"
 
-    api_request_headers POST "/bot/events/coordination" \
-        "{\"run_id\":\"${missing_run}\",\"tool_call_id\":\"tool-1\",\"kind\":\"coordination_intent\",\"intent\":{\"v\":1,\"tool\":\"bcs_send_task_message\",\"arguments\":{\"message\":\"done\"}}}" \
-        "X-BCN-Provider-Id: ${provider_id}" \
-        "Authorization: Bearer ${runtime_token}"
-    require_status "late coordination callback is rejected for an unknown run" "404" || return
-    assert_json_eq "late coordination callback reports run_not_found" "$RESPONSE" "error" "run_not_found"
+    # NOTE: `POST /bot/events/coordination` was removed (Breaking). The HTTP
+    # coordination callback path is gone; coordination results are surfaced
+    # via the WS agent-event / `tool_call_end` SSE echo path, whose regression
+    # is covered by the bcs-message-flow unit/contract tests
+    # (`agent_tool_result_coordination_echo_dispatches_task`,
+    # `duplicate_agent_tool_result_coordination_echo_dispatches_once`).
 
     api_request_headers POST "/providers/${provider_id}/delivery/switch-bot" \
         "{\"bot_id\":\"${BOT_QA_UUID}\",\"provider_bot_ref\":\"${provider_bot_ref}\"}" \

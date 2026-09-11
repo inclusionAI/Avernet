@@ -1,4 +1,4 @@
-use bcs_service_api::port::{CoordinationIntentPort, CoordinationContext, CoordinationClaim, CoordinationResult, CoordinationStatus};
+use bcs_service_api::port::CoordinationIntentPort;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -6,11 +6,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use bcs_service_api::{
     BotEventCommand, BotRunContext, BotRunContextPort, ChatEventState, CollaborationRuntimeError,
-    CollaborationRuntimeService, CoordinationMode, HandleBotTerminalEventCommand,
-    MessageFlowService, ProviderBotCoordinationCommand, ProviderBotCoordinationOutcome,
+    CollaborationRuntimeService, HandleBotTerminalEventCommand,
+    MessageFlowService,
     ProviderBotCoreService, ProviderBotEventCommand, ProviderBotEventCredential,
     ProviderBotEventError, ProviderBotEventOutcome, ProviderBotEventService,
-    ProviderCoordinationConfig, ProviderCoordinationEventKind, ProviderCoordinationIntent,
     ProviderEventIngestCommand, ProviderEventIngestService, ProviderEventSource,
     ProviderRunTransport, RuntimeBotIdentity, ServiceError, ServiceResult, TaskCompleteCommand,
     TaskDispatchCommand, TaskMessageCommand,
@@ -24,12 +23,6 @@ use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use tracing::instrument::WithSubscriber;
 
-use bcs_protocol::CoordinationCall;
-const CONTRACT_VERSION: u64 = 1;
-const TOOL_ASSIGN_TASK: &str = "bcs_assign_task";
-const TOOL_SEND_TASK_MESSAGE: &str = "bcs_send_task_message";
-const TOOL_TASK_COMPLETE: &str = "bcs_task_complete";
-const COORDINATION_PROCESSED_TTL_MS: u64 = 10 * 60 * 1000;
 const STATE_MACHINE_VISIBLE_TEXT_RETENTION_MS: u64 = 24 * 60 * 60 * 1000;
 
 type StateMachineTerminalKey = (String, String, i32);
@@ -68,8 +61,14 @@ pub struct ProviderBotEvents {
     bot_run_context: Arc<dyn BotRunContextPort>,
     message_flow: Arc<dyn MessageFlowService>,
     collaboration_runtime: Option<Arc<dyn CollaborationRuntimeService>>,
+    /// Coordination intent port previously consumed by the removed
+    /// HTTP coordination callback. The field and setter
+    /// are retained so existing composition roots (`bcs-bootstrap`) keep
+    /// compiling; the value is no longer read by this service after the HTTP
+    /// callback path was deleted. Tracked for cleanup with bcs-bootstrap
+    /// follow-up that drops the wiring.
+    #[allow(dead_code)]
     pub(crate) coordination_intents: Option<Arc<dyn CoordinationIntentPort>>,
-    coordination_seen: Arc<Mutex<HashMap<String, u64>>>,
     state_machine_terminals_inflight: Arc<StdMutex<HashSet<StateMachineTerminalKey>>>,
     state_machine_visible_text: Arc<Mutex<HashMap<String, StateMachineVisibleText>>>,
 }
@@ -86,7 +85,6 @@ impl ProviderBotEvents {
             message_flow,
             collaboration_runtime: None,
             coordination_intents: None,
-            coordination_seen: Arc::new(Mutex::new(HashMap::new())),
             state_machine_terminals_inflight: Arc::new(StdMutex::new(HashSet::new())),
             state_machine_visible_text: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -142,119 +140,6 @@ impl ProviderBotEvents {
     ) -> Result<RuntimeBotIdentity, ProviderBotEventError> {
         self.authenticate_credential(&command.provider_id, &command.credential)
             .await
-    }
-
-    async fn authenticate_coordination(
-        &self,
-        command: &ProviderBotCoordinationCommand,
-    ) -> Result<RuntimeBotIdentity, ProviderBotEventError> {
-        self.authenticate_credential(&command.provider_id, &command.credential)
-            .await
-    }
-
-    async fn dispatch_coordination_call(
-        &self,
-        caller_bot_id: &str,
-        context: &BotRunContext,
-        call: &CoordinationCall,
-    ) -> Result<Option<String>, ProviderBotEventError> {
-        let mut task_id = None;
-        match call.tool.as_str() {
-            TOOL_ASSIGN_TASK => {
-                let target_bot_id =
-                    coordination_argument_str(call, "target_bot").ok_or_else(|| {
-                        ProviderBotEventError::InvalidRequest(
-                            "bcs_assign_task requires target_bot".to_string(),
-                        )
-                    })?;
-                let message = coordination_argument_str(call, "message").ok_or_else(|| {
-                    ProviderBotEventError::InvalidRequest(
-                        "bcs_assign_task requires message".to_string(),
-                    )
-                })?;
-                let mut payload = json!({
-                    "message": message,
-                });
-                if let Some(response_mode) = coordination_argument_str(call, "response_mode") {
-                    payload["response_mode"] = serde_json::Value::String(response_mode.to_string());
-                }
-                if let Some(session_id) = context.bcs_session_id.as_deref() {
-                    payload["bcs_session_id"] = serde_json::Value::String(session_id.to_string());
-                }
-                let outcome = self.message_flow
-                    .handle_task_dispatch(TaskDispatchCommand {
-                        driver_bot_id: caller_bot_id.to_string(),
-                        group_id: context.group_id.clone(),
-                        target_bot_id: target_bot_id.to_string(),
-                        target_bot_name: None,
-                        payload,
-                    })
-                    .await
-                    .map_err(map_service_error)?;
-                task_id = Some(outcome.task_id);
-            }
-            TOOL_SEND_TASK_MESSAGE => {
-                let session_id = context.bcs_session_id.as_deref().ok_or_else(|| {
-                    ProviderBotEventError::InvalidRequest(
-                        "bcs_send_task_message requires bcs_session_id".to_string(),
-                    )
-                })?;
-                let message = coordination_argument_str(call, "message").ok_or_else(|| {
-                    ProviderBotEventError::InvalidRequest(
-                        "bcs_send_task_message requires message".to_string(),
-                    )
-                })?;
-                self.message_flow
-                    .handle_task_message(TaskMessageCommand {
-                        worker_bot_id: caller_bot_id.to_string(),
-                        group_id: context.group_id.clone(),
-                        payload: json!({
-                            "message": message,
-                            "bcs_session_id": session_id,
-                        }),
-                    })
-                    .await
-                    .map_err(map_service_error)?;
-            }
-            TOOL_TASK_COMPLETE => {
-                let summary = coordination_argument_str(call, "summary").ok_or_else(|| {
-                    ProviderBotEventError::InvalidRequest(
-                        "bcs_task_complete requires summary".to_string(),
-                    )
-                })?;
-                let mut payload = json!({
-                    "group_id": context.group_id.clone(),
-                    "summary": summary,
-                    "status": "completed",
-                });
-                if let Some(session_id) = context.bcs_session_id.as_deref() {
-                    payload["bcs_session_id"] = serde_json::Value::String(session_id.to_string());
-                }
-                let outcome = self
-                    .message_flow
-                    .handle_task_complete(TaskCompleteCommand {
-                        task_id: context.group_id.clone(),
-                        bot_id: caller_bot_id.to_string(),
-                        via_echo: true,
-                        payload,
-                    })
-                    .await
-                    .map_err(map_service_error)?;
-                if outcome.blocked {
-                    return Err(ProviderBotEventError::InvalidRequest(format!(
-                        "task completion blocked; pending={:?}",
-                        outcome.pending
-                    )));
-                }
-            }
-            _ => {
-                return Err(ProviderBotEventError::InvalidRequest(format!(
-                    "unsupported coordination tool '{}'",
-                    call.tool
-                )));
-            }
-        }
-        Ok(task_id)
     }
 
     async fn ingest_event(
@@ -794,132 +679,6 @@ impl ProviderBotEventService for ProviderBotEvents {
         })
     }
 
-    async fn submit_coordination(
-        &self,
-        command: ProviderBotCoordinationCommand,
-    ) -> Result<ProviderBotCoordinationOutcome, ProviderBotEventError> {
-        if command.run_id.trim().is_empty() {
-            return Err(ProviderBotEventError::InvalidRequest(
-                "run_id is required".to_string(),
-            ));
-        }
-        if command.tool_call_id.trim().is_empty() {
-            return Err(ProviderBotEventError::InvalidRequest(
-                "tool_call_id is required".to_string(),
-            ));
-        }
-
-        let context = self
-            .bot_run_context
-            .get_context(&command.run_id)
-            .await
-            .ok_or_else(|| ProviderBotEventError::RunNotFound("run_not_found".to_string()))?;
-        let now = now_ms();
-        if context.terminal || now > context.deadline_ms {
-            return Err(ProviderBotEventError::RunTerminated(
-                "run_terminated".to_string(),
-            ));
-        }
-
-        let identity = self.authenticate_coordination(&command).await?;
-        if identity.bot_uuid != context.bot_id {
-            warn!(
-                request_id = %bcs_observability::CurrentRequestId,
-                provider_id = %command.provider_id,
-                run_id = %command.run_id,
-                provider_bot_id = %identity.bot_uuid,
-                run_bot_id = %context.bot_id,
-                "provider callback: coordination runtime identity mismatch"
-            );
-            return Err(ProviderBotEventError::Forbidden(
-                "runtime identity does not match run".to_string(),
-            ));
-        }
-
-        let coordination = self
-            .provider_bot_core
-            .get_provider_coordination_config(&command.provider_id)
-            .await
-            .map_err(map_service_error)?;
-        let call = coordination_call_from_command(&coordination, &command)?;
-
-        if let Some(intent_id) = call.intent_id.as_deref() {
-            let port = self.coordination_intents.as_ref().ok_or_else(||
-                ProviderBotEventError::Internal("coordination_store_unavailable".into()))?;
-            let consumer = CoordinationContext { bot_id: context.bot_id.clone(),
-                group_id: context.group_id.clone(), session_id: context.bcs_session_id.clone(),
-                run_id: context.run_id.clone(), tool_call_id: command.tool_call_id.trim().to_string() };
-            let lease = match port.resolve_and_claim(intent_id, &call.tool, &consumer, context.deadline_ms)
-                .await.map_err(map_service_error)? {
-                CoordinationClaim::Acquired(lease) => lease,
-                CoordinationClaim::Duplicate(Some(result)) if result.status == CoordinationStatus::Applied =>
-                    return Ok(ProviderBotCoordinationOutcome { processed: true, duplicate: true }),
-                CoordinationClaim::Duplicate(_) => return Err(ProviderBotEventError::Internal(
-                    "coordination_previous_outcome_unknown_or_failed".into())),
-            };
-            if !self.bot_run_context.get_context(&context.run_id).await.is_some_and(|run|
-                !run.terminal && run.deadline_ms > now_ms() && run.bot_id == consumer.bot_id
-                && run.group_id == consumer.group_id && run.bcs_session_id == consumer.session_id) {
-                port.finish(intent_id, &consumer, &lease.claim_token, &CoordinationResult {
-                    status: CoordinationStatus::Failed, task_id: None,
-                    error_code: Some("run_terminated_before_execution".into()),
-                }).await.map_err(map_service_error)?;
-                return Err(ProviderBotEventError::RunTerminated("run_terminated".into()));
-            }
-            let mut resolved = call.clone();
-            resolved.arguments = lease.arguments;
-            let dispatched = self.dispatch_coordination_call(&identity.bot_uuid, &context, &resolved).await;
-            let result = match &dispatched {
-                Ok(task_id) => CoordinationResult { status: CoordinationStatus::Applied,
-                    task_id: task_id.clone(), error_code: None },
-                Err(_) => CoordinationResult { status: CoordinationStatus::Unknown,
-                    task_id: None, error_code: Some("coordination_execution_not_confirmed".into()) },
-            };
-            port.finish(intent_id, &consumer, &lease.claim_token, &result).await.map_err(map_service_error)?;
-            dispatched?;
-            return Ok(ProviderBotCoordinationOutcome { processed: true, duplicate: false });
-        }
-
-        let dedup_key = format!("{}:{}", command.run_id.trim(), command.tool_call_id.trim());
-        {
-            let mut seen = self.coordination_seen.lock().await;
-            seen.retain(|_, seen_at| now.saturating_sub(*seen_at) <= COORDINATION_PROCESSED_TTL_MS);
-            if seen.contains_key(&dedup_key) {
-                info!(
-                    provider_id = %command.provider_id,
-                    run_id = %command.run_id,
-                    tool_call_id = %command.tool_call_id,
-                    dedup_key = %dedup_key,
-                    "provider callback: duplicate coordination event skipped"
-                );
-                return Ok(ProviderBotCoordinationOutcome {
-                    processed: true,
-                    duplicate: true,
-                });
-            }
-            seen.insert(dedup_key.clone(), now);
-        }
-
-        self.dispatch_coordination_call(&identity.bot_uuid, &context, &call)
-            .await?;
-
-        info!(
-            provider_id = %command.provider_id,
-            run_id = %command.run_id,
-            tool_call_id = %command.tool_call_id,
-            bot_id = %identity.bot_uuid,
-            group_id = %context.group_id,
-            bcs_session_id = ?context.bcs_session_id,
-            tool = %call.tool,
-            "provider callback: coordination event processed"
-        );
-
-        Ok(ProviderBotCoordinationOutcome {
-            processed: true,
-            duplicate: false,
-        })
-    }
-
     async fn cleanup_expired(&self, now_ms: u64) -> usize {
         let mut runs = self.state_machine_visible_text.lock().await;
         cleanup_expired_visible_text_entries(&mut runs, now_ms)
@@ -981,181 +740,6 @@ fn map_auth_error(error: ServiceError) -> ProviderBotEventError {
     }
 }
 
-fn coordination_call_from_command(
-    coordination: &ProviderCoordinationConfig,
-    command: &ProviderBotCoordinationCommand,
-) -> Result<CoordinationCall, ProviderBotEventError> {
-    match coordination.mode {
-        CoordinationMode::McporterMcp => {
-            if command.kind != ProviderCoordinationEventKind::ToolResult {
-                return Err(ProviderBotEventError::InvalidRequest(
-                    "mcporter_mcp coordination requires tool_result callbacks".to_string(),
-                ));
-            }
-            let result_text = command
-                .result_text
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| {
-                    ProviderBotEventError::InvalidRequest(
-                        "tool_result callback requires result_text".to_string(),
-                    )
-                })?;
-            let call = CoordinationCall::from_provider_stdout(result_text).ok_or_else(|| {
-                ProviderBotEventError::InvalidRequest(
-                    "tool_result did not contain a BCS coordination echo".to_string(),
-                )
-            })?;
-            if call.v == 2 && command.tool_name.as_deref().is_some_and(|name| !name.trim().is_empty()
-                && !matches!(name.trim().to_ascii_lowercase().as_str(), "bash" | "exec" | "shell" | "mcporter")) {
-                return Err(ProviderBotEventError::Forbidden("unsupported coordination source tool".into()));
-            }
-            Ok(call)
-        }
-        CoordinationMode::NativeMcp => {
-            let expected_server = coordination
-                .mcp_server
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| {
-                    ProviderBotEventError::InvalidRequest(
-                        "native_mcp coordination is missing mcp_server config".to_string(),
-                    )
-                })?;
-            if let Some(actual_server) = command
-                .mcp_server
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                && actual_server != expected_server
-            {
-                return Err(ProviderBotEventError::Forbidden(format!(
-                    "mcp_server mismatch: expected '{expected_server}'"
-                )));
-            }
-            match command.kind {
-                ProviderCoordinationEventKind::CoordinationIntent => {
-                    if command
-                        .mcp_server
-                        .as_deref()
-                        .map(str::trim)
-                        .map_or(true, |value| value.is_empty())
-                    {
-                        return Err(ProviderBotEventError::InvalidRequest(
-                            "native_mcp coordination_intent requires mcp_server".to_string(),
-                        ));
-                    }
-                    coordination_intent_to_call(command.intent.as_ref())
-                }
-                ProviderCoordinationEventKind::ToolResult => {
-                    let provider_tool_name = command
-                        .tool_name
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty())
-                        .ok_or_else(|| {
-                            ProviderBotEventError::InvalidRequest(
-                                "native_mcp tool_result requires tool_name".to_string(),
-                            )
-                        })?;
-                    // COSEC: only an exact provider-configured tool name may
-                    // translate an authenticated tool result into a BCS side effect.
-                    let canonical_tool_name = coordination
-                        .tool_name_mapping
-                        .get(provider_tool_name)
-                        .ok_or_else(|| {
-                            ProviderBotEventError::Forbidden(
-                                "native_mcp tool_name is not configured for coordination"
-                                    .to_string(),
-                            )
-                        })?;
-                    let result_text = command
-                        .result_text
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty())
-                        .ok_or_else(|| {
-                            ProviderBotEventError::InvalidRequest(
-                                "native_mcp tool_result requires result_text".to_string(),
-                            )
-                        })?;
-                    let call = CoordinationCall::from_provider_stdout(result_text).ok_or_else(|| {
-                        ProviderBotEventError::InvalidRequest(
-                            "tool_result did not contain a BCS coordination echo".to_string(),
-                        )
-                    })?;
-                    if call.tool != *canonical_tool_name {
-                        return Err(ProviderBotEventError::Forbidden(
-                            "native_mcp tool result does not match configured canonical tool"
-                                .to_string(),
-                        ));
-                    }
-                    Ok(call)
-                }
-            }
-        }
-        CoordinationMode::NativeTool => {
-            if command.kind != ProviderCoordinationEventKind::CoordinationIntent {
-                return Err(ProviderBotEventError::InvalidRequest(
-                    "native_tool coordination requires coordination_intent callbacks".to_string(),
-                ));
-            }
-            if command
-                .mcp_server
-                .as_deref()
-                .map(str::trim)
-                .is_some_and(|value| !value.is_empty())
-            {
-                return Err(ProviderBotEventError::InvalidRequest(
-                    "native_tool coordination must not set mcp_server".to_string(),
-                ));
-            }
-            coordination_intent_to_call(command.intent.as_ref())
-        }
-        CoordinationMode::Disabled => Err(ProviderBotEventError::InvalidRequest(
-            "provider coordination is disabled".to_string(),
-        )),
-        CoordinationMode::LegacyUpstream => Err(ProviderBotEventError::InvalidRequest(
-            "legacy_upstream is not a provider coordination mode".to_string(),
-        )),
-    }
-}
-
-fn coordination_intent_to_call(
-    intent: Option<&ProviderCoordinationIntent>,
-) -> Result<CoordinationCall, ProviderBotEventError> {
-    let intent = intent.ok_or_else(|| {
-        ProviderBotEventError::InvalidRequest(
-            "coordination_intent callback requires intent".to_string(),
-        )
-    })?;
-    if intent.v != CONTRACT_VERSION {
-        return Err(ProviderBotEventError::InvalidRequest(format!(
-            "unsupported coordination intent version {}",
-            intent.v
-        )));
-    }
-    if intent.tool.trim().is_empty() {
-        return Err(ProviderBotEventError::InvalidRequest(
-            "coordination intent tool is required".to_string(),
-        ));
-    }
-    Ok(CoordinationCall {
-        magic: true, v: 1, status: "received".to_string(), intent_id: None,
-        tool: intent.tool.trim().to_string(),
-        arguments: intent.arguments.clone(),
-    })
-}
-
-fn coordination_argument_str<'a>(call: &'a CoordinationCall, key: &str) -> Option<&'a str> {
-    call.arguments
-        .get(key)
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-}
 
 fn map_service_error(error: ServiceError) -> ProviderBotEventError {
     match error {
@@ -1235,30 +819,5 @@ mod tests {
         );
         assert!(runs.is_empty());
         assert_eq!(cleanup_expired_visible_text_entries(&mut runs, u64::MAX), 0);
-    }
-}
-
-#[cfg(test)]
-mod coordination_legacy_compatibility_tests {
-    use super::*;
-
-    #[test]
-    fn callback_source_restriction_applies_only_to_v2() {
-        let coordination: ProviderCoordinationConfig = serde_json::from_value(json!({
-            "mode": "mcporter_mcp"
-        })).unwrap();
-        let mut command = ProviderBotCoordinationCommand {
-            provider_id: "provider".into(), credential: ProviderBotEventCredential::StaticBearer("test".into()),
-            run_id: "run".into(), tool_call_id: "tool".into(),
-            kind: ProviderCoordinationEventKind::ToolResult, tool_name: Some("legacy_wrapper".into()),
-            result_text: Some(json!({"__bcs_coordination__":true,"v":1,
-                "tool":" bcs_task_complete ","arguments":{"summary":"done"},"status":null}).to_string()),
-            mcp_server: None, intent: None,
-        };
-        assert_eq!(coordination_call_from_command(&coordination, &command).unwrap().tool, "bcs_task_complete");
-        command.result_text = Some(json!({"__bcs_coordination__":true,"v":2,
-            "tool":"bcs_task_complete","status":"stored",
-            "intent_id":"bcs_intent_0123456789abcdef0123456789abcdef"}).to_string());
-        assert!(matches!(coordination_call_from_command(&coordination, &command), Err(ProviderBotEventError::Forbidden(_))));
     }
 }

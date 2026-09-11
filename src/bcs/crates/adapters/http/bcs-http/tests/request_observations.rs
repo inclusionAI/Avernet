@@ -49,7 +49,7 @@ async fn malformed_body_is_correlated_before_handler_and_payload_is_not_logged()
 }
 
 #[tokio::test]
-async fn coordination_requests_are_logged_without_creating_spans() {
+async fn observe_request_correlates_logs_for_generic_routes() {
     use opentelemetry::{global, trace::TracerProvider as _};
     use opentelemetry_sdk::{
         propagation::TraceContextPropagator,
@@ -65,9 +65,9 @@ async fn coordination_requests_are_logged_without_creating_spans() {
     let writer = buffer.clone();
     let subscriber = tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer().json().with_writer(move || writer.clone()))
-        .with(tracing_opentelemetry::layer().with_tracer(provider.tracer("coordination-logging-test")));
-    let app = Router::new().route("/bot/events/coordination", post(|| async {
-        bcs_observability::observe_value("test.coordination", async {}).await;
+        .with(tracing_opentelemetry::layer().with_tracer(provider.tracer("generic-logging-test")));
+    let app = Router::new().route("/internal/echo", post(|| async {
+        bcs_observability::observe_value("test.echo", async {}).await;
         StatusCode::NO_CONTENT
     }))
         .layer(middleware::from_fn(bcs_http::gateway_trace::observe_request))
@@ -75,29 +75,25 @@ async fn coordination_requests_are_logged_without_creating_spans() {
             .make_span_with(bcs_http::gateway_trace::BcnMakeSpan)
             .on_response(bcs_http::gateway_trace::BcnOnResponse));
     let response = async {
-        app.oneshot(Request::builder().method("POST").uri("/bot/events/coordination")
-            .header("x-request-id", "coordination-42")
-            .header("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+        app.oneshot(Request::builder().method("POST").uri("/internal/echo")
+            .header("x-request-id", "echo-42")
             .body(Body::empty()).unwrap()).await.unwrap()
     }.with_subscriber(subscriber).await;
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     assert_eq!(response.headers().get("x-request-id").and_then(|id| id.to_str().ok()),
-        Some("coordination-42"));
+        Some("echo-42"));
     let logs = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
     let events: Vec<serde_json::Value> = logs.lines()
         .map(|line| serde_json::from_str(line).unwrap()).collect();
     for name in ["http.request.started", "http.request.operations", "http.request.response_ready"] {
         let event = events.iter().find(|event| event["fields"]["message"] == name)
             .unwrap_or_else(|| panic!("missing {name}: {logs}"));
-        assert_eq!(event["fields"]["request_id"], "coordination-42");
+        assert_eq!(event["fields"]["request_id"], "echo-42");
         assert!(event["fields"].get("trace_id").is_none());
     }
     let summary = events.iter().find(|event| event["fields"]["message"] == "http.request.operations").unwrap();
     let observations: serde_json::Value = serde_json::from_str(summary["fields"]["observations"].as_str().unwrap()).unwrap();
-    assert_eq!(observations["test.coordination"]["count"], 1);
-    provider.force_flush().unwrap();
-    assert!(exporter.get_finished_spans().unwrap().is_empty(),
-        "coordination requests must remain untraced even with a valid traceparent");
+    assert_eq!(observations["test.echo"]["count"], 1);
 }
 
 #[tokio::test]

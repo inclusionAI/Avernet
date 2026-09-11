@@ -175,12 +175,12 @@ pub use onboard::{
     EnsureBotCommand, EnsureBotResult, OnboardActorIdentity,
 };
 pub use application::{
-    DeleteProviderBotCommand, DeleteProviderBotOutcome, ProviderBotCoordinationCommand,
-    ProviderBotCoordinationOutcome, ProviderBotEventCommand, ProviderBotEventCredential,
+    DeleteProviderBotCommand, DeleteProviderBotOutcome,
+    ProviderBotEventCommand, ProviderBotEventCredential,
     ProviderBotEventError, ProviderBotEventOutcome, ProviderBotEventService,
     ProviderBotRosterItem, ProviderBotTaskModesFilter,
     ProviderEventIngestService,
-    ProviderCoordinationEventKind, ProviderCoordinationIntent, ProviderManagementService,
+    ProviderManagementService,
     RegisterProviderBotCommand, RegisterProviderBotOutcome, RegisterProviderCommand,
     RegisterProviderOutcome, UpdateProviderBotCommand, UpdateProviderBotOutcome,
     UpdateProviderCommand, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,

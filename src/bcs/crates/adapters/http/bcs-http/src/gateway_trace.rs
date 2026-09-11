@@ -65,9 +65,6 @@ impl<B> MakeSpan<B> for BcnMakeSpan {
     fn make_span(&mut self, request: &axum::http::Request<B>) -> Span {
         let method = request.method().as_str();
         let path = request.uri().path();
-        if path == "/bot/events/coordination" {
-            return Span::none();
-        }
         let Some(operation) = classify_business_request(path) else {
             return debug_span!(
                 target: "bcs_http_access",
@@ -392,7 +389,6 @@ mod tests {
             classify_business_request("/bot/events"),
             Some(BusinessTraceOperation::BotResponse)
         );
-        assert_eq!(classify_business_request("/bot/events/coordination"), None);
         assert_eq!(classify_business_request("/chat/runs/run-1"), None);
     }
 
@@ -412,23 +408,6 @@ mod tests {
         assert_request_creates_no_span("/bot/events", None);
         assert_request_creates_no_span("/bots/bot-1/chat-async", Some("malformed"));
         assert_request_creates_no_span("/bot/events", Some("malformed"));
-    }
-
-    #[test]
-    fn coordination_route_returns_disabled_span_even_with_traceparent() {
-        global::set_text_map_propagator(TraceContextPropagator::new());
-        let request = axum::http::Request::builder()
-            .method("POST")
-            .uri("/bot/events/coordination")
-            .header(
-                "traceparent",
-                "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
-            )
-            .body(())
-            .unwrap();
-        let mut make_span = BcnMakeSpan::default();
-
-        assert!(make_span.make_span(&request).is_disabled());
     }
 
     fn assert_request_span_parent(path: &str, expected_name: &str) {

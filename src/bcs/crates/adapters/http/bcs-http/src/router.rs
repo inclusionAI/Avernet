@@ -114,10 +114,6 @@ fn build_api_routes() -> Router<HttpAppState> {
         )
         .route("/bot/events", post(routes::bot_events::post_bot_event))
         .route(
-            "/bot/events/coordination",
-            post(routes::bot_events::post_coordination_event),
-        )
-        .route(
             "/channels/bindings",
             get(routes::channel::list_bindings).post(routes::channel::create_binding),
         )
