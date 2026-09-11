@@ -90,7 +90,7 @@ class PromptContractsTest(unittest.TestCase):
         cases = [
             ([4, 1, 1, 1, 1, 1], 1, "eulogy"),
             ([2, 4, 2, 2, 2, 2], 2, "standby"),
-            ([2, 3, 4, 5, 6, 1], None, "standby"),
+            ([None] * 6, None, "standby"),
         ]
         for votes, eliminated, ping_kind in cases:
             with self.subTest(eliminated=eliminated):
@@ -108,7 +108,7 @@ class PromptContractsTest(unittest.TestCase):
                 self.assertNotIn("session complete", result["next_action"])
 
     def test_round_limit_win_uses_same_terminal_guidance(self) -> None:
-        result, state = self.vote([2, 3, 4, 5, 6, 1], round_number=6)
+        result, state = self.vote([None] * 6, round_number=6)
         self.assertEqual((result["verdict"], result["winner"], state["phase"]), ("finished", "undercover", "FINISHED"))
         self.assertIn("reveal --session", result["next_action"])
         self.assertNotIn("open-round", result["next_action"])

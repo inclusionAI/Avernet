@@ -14,7 +14,7 @@
 - 只使用本次 GroupContext 的 session ID，普通唤醒查 status；节点按正文，写入由脚本验阶段。
 - NODE_TASK 的类型在激活内固定，不会因 phase 变成 FINISHED 而变成 ECHO。
 - collect/tally 不开下一轮、不派任务；非终局下一步由最终产物回灌触发。
-- 仅有 Bot 出局且游戏继续才派遗言；平票或 human 出局时回灌后直接开下一轮，不派预备任务。
+- 仅有 Bot 出局且游戏继续才派遗言；常规正票平票时回灌后开始 PK；PK 无人出局、常规零有效票或 human 出局时回灌后开下一轮，不派预备任务。
 - open-* 内部检查 permission 和协作槽位；不要重复执行底层查询或提交。
 - open-* / bcs_assign_task 是本次最后一个工具调用。派遗言时身后不能有排队节点。
 - IN_COLLECT_NODE / IN_TALLY_NODE 立即结束，不重试、sleep 或轮询。重开只走阶段机 SX，最多两次。

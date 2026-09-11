@@ -13,7 +13,7 @@ interface SessionFile {
 
 export interface PublicGameResult {
   kind: 'undercover.game-result'; version: 1; status: 'finished';
-  gameSessionId: string; hostActorId: string; round: number; attempt: number;
+  stage?: 'regular' | 'pk'; gameSessionId: string; hostActorId: string; round: number; attempt: number;
   winner: 'civilian' | 'undercover'; reason: string; summary: string;
 }
 
@@ -21,7 +21,8 @@ export function parsePublicGameResult(value: unknown, params: UndercoverGamePane
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('终局结果格式无效。');
   const result = value as Record<string, unknown>;
   if (result.kind !== 'undercover.game-result' || result.version !== 1) throw new Error('不支持的终局结果版本。');
-  if (result.status !== 'finished' || result.gameSessionId !== (params.gameSessionId ?? params.sessionId)
+  if ((result.stage ?? 'regular') !== (params.phase.startsWith('pk_') ? 'pk' : 'regular')
+    || result.status !== 'finished' || result.gameSessionId !== (params.gameSessionId ?? params.sessionId)
     || result.hostActorId !== params.host.actorId || result.round !== params.round || result.attempt !== params.attempt
     || !Number.isInteger(result.round) || !Number.isInteger(result.attempt)
     || typeof result.winner !== 'string' || !['civilian', 'undercover'].includes(result.winner)

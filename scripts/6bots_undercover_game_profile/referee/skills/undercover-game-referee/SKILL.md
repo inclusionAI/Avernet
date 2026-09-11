@@ -40,10 +40,10 @@ BCS_AUTH_FAILED / BCS_FORBIDDEN / 身份或名单不符：报告故障并结束�
 
 | node_id | 本次动作 |
 | --- | --- |
-| collect | 全座位原话交 `uc speeches-set --session "$session_id" --json '<JSON>'`；按返回 label/text 念遮蔽后的汇总，结束；不在这里 open-vote |
-| tally | 全座位原始票面交 `uc votes-set --session "$session_id" --json '<JSON>'`；结构化 human 票面保留为文本。continue 念开票稿后结束；finished 按下述终局步骤收尾 |
+| collect | 本阶段发言原话交节点指定的 speeches-set 命令（保留 --round/--stage/--attempt）；按返回 label/text 念遮蔽后的汇总，结束；不在这里 open-vote |
+| tally | 全体存活玩家原始票面交节点指定的 votes-set 命令（保留 --round/--stage/--attempt）；结构化 human 票面保留为文本。pk 报票向与 PK 名单后结束，回灌再开 PK；continue 念开票稿后结束；finished 按下述终局步骤收尾 |
 
-脚本校验当前阶段。节点命令报阶段不符时停止，不把迟到任务当作新阶段执行。
+脚本校验当前阶段与运行尝试；沿用节点提供的 --round/--stage/--attempt，不能改参数套用迟到产物。节点命令报阶段不符时停止，不把迟到任务当作新阶段执行。
 
 ### tally 刚判胜
 
@@ -67,6 +67,8 @@ BCS_AUTH_FAILED / BCS_FORBIDDEN / 身份或名单不符：报告故障并结束�
 | --- | --- |
 | NO_GAME | `uc begin --session "$session_id" --referee-uuid "$referee_uuid"`；human 未 Present 时提示加入；已加入则说开场规则，等待“开始” |
 | AWAIT_START + 人类“开始” | 执行 begin 返回的 init_command；在工具调用前的消息中告诉 human 座位和 human_word；最后 `uc open-round --session "$session_id"` |
+| AWAIT_PK_SPEAK_START + 开票稿回灌 | `uc open-round --session "$session_id"` 开始同轮 PK 发言，结束 |
+| AWAIT_PK_VOTE_START + 汇总稿回灌 | `uc open-vote --session "$session_id"` 开始 PK 投票，结束 |
 | AWAIT_VOTE_START + 汇总稿回灌/人类消息 | `uc open-vote --session "$session_id"`，结束 |
 | AWAIT_NEXT_ROUND + 开票稿回灌 | pending_ping 非空：`uc render-ping --session "$session_id"`，将 message 原样 bcs_assign_task 给 target_bot，结束；为空：最后 `uc open-round --session "$session_id"` |
 | AWAIT_NEXT_ROUND + 遗言回执 | `uc mask --session "$session_id" --seat N --text '<原话>'`；只念返回 text，不附和；最后 `uc open-round --session "$session_id"` |
@@ -77,7 +79,7 @@ BCS_AUTH_FAILED / BCS_FORBIDDEN / 身份或名单不符：报告故障并结束�
 若 NO_GAME 收到的消息已明确要求开始，begin 后继续发牌；否则保留人类确认开始的步骤。
 
 开场按 begin 返回的配置说明人数与卧底数、只给词不告知身份、轮流发言后同时投票、
-平票不重投及胜负规则（默认 6 人 1 卧底，卧底全出局平民胜，剩两人或轮数用完卧底仍在则卧底胜）。
+一次平票 PK 及胜负规则（默认 6 人 1 卧底，卧底全出局平民胜，剩两人或轮数用完卧底仍在则卧底胜）。
 还须说明：human 先加入当前会话；每轮在副屏发言、投票；不点他人节点看词；
 超过五分钟无进展回复“卡住了”。话术用中文、名字带号数，不输出命令或内部状态。
 
@@ -91,7 +93,7 @@ open-round 成功后播报 announcement；open-vote 提交后按返回提示立�
 提交失败如实报告，不播报成功开场；submitted=true 也不代表任何玩家已完成。
 派遗言时身后不能有等待执行的节点。遗言回执公开，词与身份不可泄露。
 
-“卡住了”：查 status，SPEAK_RUNNING 用 open-round --retry；VOTE_RUNNING 用 open-vote --retry；
-AWAIT_VOTE_START 用 open-vote（不加 --retry）。都带当前 --session。
+“卡住了”：查 status，SPEAK_RUNNING / PK_SPEAK_RUNNING 用 open-round --retry；VOTE_RUNNING / PK_VOTE_RUNNING 用 open-vote --retry；
+AWAIT_VOTE_START / AWAIT_PK_VOTE_START 用 open-vote；AWAIT_PK_SPEAK_START 用 open-round（都不加 --retry）。都带当前 --session。
 IN_COLLECT_NODE / IN_TALLY_NODE 立即结束，不重试；RUN_SLOT_BUSY 说明仍在等待，结束。
 重开最多两次，按对应阶段的开场告知旧票/发言作废；仍失败请新建会话，不猜测推进。细节见阶段机 SX。
