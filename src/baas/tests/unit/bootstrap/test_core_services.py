@@ -5,12 +5,15 @@ config.from_dict.  Services requiring repo/infra deps are verified
 structurally — they exist and accept overrides.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from secbaas.community.api.health_check.bot import BotHealthCheckerConfig
-from secbaas.community.bootstrap._core_services import CoreServiceContainer
+from secbaas.community.bootstrap._core_services import (
+    CoreServiceContainer,
+    _make_engine_abort_notifier,
+)
 
 
 class TestCoreServiceContainerStandalone:
@@ -246,3 +249,16 @@ class TestSandboxDeviceRouterDIResolution:
         assert callable(getattr(router, "query_active_sandboxes", None))
         assert callable(getattr(router, "warn_device", None))
         assert callable(getattr(router, "renew_ttl", None))
+
+
+class TestEngineAbortNotifier:
+    """`_make_engine_abort_notifier` wires BotRunner.abort into the worker."""
+
+    async def test_notifier_delegates_to_bot_runner(self):
+        runner = MagicMock()
+        runner.abort = AsyncMock()
+
+        notifier = _make_engine_abort_notifier(runner)
+        await notifier("sess-1", "run-1")
+
+        runner.abort.assert_awaited_once_with(session_id="sess-1", run_id="run-1")

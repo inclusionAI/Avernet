@@ -465,6 +465,33 @@ class AsyncChatClient:
             if self._concurrency_sem is not None:
                 self._concurrency_sem.release()
 
+    async def chat_abort(
+        self,
+        session_key: str,
+        run_id: str | None = None,
+    ) -> dict[str, Any]:
+        """发送 chat.abort 请求， Best-effort 通知 engine 取消 session/run。
+
+        Args:
+            session_key: 会话 key
+            run_id: 可选的 run ID，透传给 engine
+
+        Returns:
+            engine 返回的原始响应 dict
+
+        Raises:
+            NotConnectedError: 连接未建立或已断开
+        """
+        if not self.is_connected:
+            raise NotConnectedError(
+                "Not connected. Call connect() first or wait for reconnection."
+            )
+        assert self._client is not None
+        return await self._client.chat_abort(
+            session_key=session_key,
+            run_id=run_id,
+        )
+
     async def send_message_stream(
         self,
         message: str,

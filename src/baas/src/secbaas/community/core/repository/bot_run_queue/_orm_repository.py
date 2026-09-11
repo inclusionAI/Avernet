@@ -325,6 +325,44 @@ class OrmBotRunQueueRepository(OrmConnectionMixin, BotRunQueueRepository):
         return True
 
     @with_orm_session
+    def request_abort(self, run_id: str) -> bool:
+        """写入 abort 请求信号（meta 层）。返回是否成功写入。"""
+        row = (
+            self._session.query(BotRunQueueModel)
+            .filter(BotRunQueueModel.run_id == run_id)
+            .first()
+        )
+        if row is None:
+            return False
+        current = {}
+        if row.meta:
+            try:
+                current = json.loads(row.meta)
+            except (json.JSONDecodeError, TypeError):
+                current = {}
+        current["abort_requested"] = True
+        row.meta = json.dumps(current, ensure_ascii=False)
+        row.gmt_modified = func.now()
+        self._session.flush()
+        return True
+
+    @with_orm_session
+    def is_abort_requested(self, run_id: str) -> bool:
+        """查询指定 run 是否已被请求 abort。"""
+        row = (
+            self._session.query(BotRunQueueModel)
+            .filter(BotRunQueueModel.run_id == run_id)
+            .first()
+        )
+        if row is None or not row.meta:
+            return False
+        try:
+            meta = json.loads(row.meta)
+        except (json.JSONDecodeError, TypeError):
+            return False
+        return bool(meta.get("abort_requested"))
+
+    @with_orm_session
     def scan_timeout(self, limit: int = 200) -> list[BotRunQueueRecord]:
         """扫描 PENDING/RUNNING 中已超时的工作项。
 

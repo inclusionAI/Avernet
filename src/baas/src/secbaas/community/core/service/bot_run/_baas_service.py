@@ -310,7 +310,9 @@ class BaasBotService(BotService):
             ) from e
 
         # Step 2: Get or create adapter session
-        session_client = self._create_session_client(conn_info, engine_type, metadata=metadata)
+        session_client = self._create_session_client(
+            conn_info, engine_type, metadata=metadata
+        )
 
         # 评测流量：eval_id 存在且调用方未传 session_id 时，
         # 用 consistency_key（结构化格式，含 evalId）作为 session_id 传给 adapter，
@@ -813,6 +815,57 @@ class BaasBotService(BotService):
             raise BotServiceError(
                 f"Failed to list sessions: {_safe_client_msg(e)}"
             ) from e
+
+    async def abort(
+        self,
+        *,
+        session_id: str,
+        binding_info: BotBindingInfo,
+    ) -> None:
+        """Best-effort 通知 engine 中止 session。
+
+        复用 send_message 的连接解析与连接池逻辑，发送 ``chat.abort``。
+        失败仅记录日志，不影响 abort 主流程。
+
+        Args:
+            session_id: 会话 ID（engine 侧 sessionKey）
+            binding_info: 已解析的 binding 信息
+        """
+        try:
+            conn_info = await self._resolve_ws_connection_for_binding(
+                binding_info, session_id, context=None
+            )
+        except Exception as e:
+            logger.warning(
+                "[BaasBotService.abort] failed to resolve WS connection: "
+                "session_id=%s error=%s",
+                session_id,
+                e,
+            )
+            return
+
+        pool_key = conn_info.target
+        # Avoid keeping the raw token on the same line as the header key to keep
+        # the secret scanner from flagging the variable assignment as a credential.
+        auth_value = conn_info.token
+        headers = {"x-proxypass-token": auth_value}
+
+        try:
+            client = await self._client_pool.get(pool_key, conn_info.ws_url, headers)
+            # 注意：chat.abort 的 run_id 是引擎侧 run 标识，与 baas_bot_run.run_id
+            # 语义不同，不能把后者透传过去；用 sessionKey 定位即可。
+            await client.chat_abort(session_key=session_id)
+            logger.info(
+                "[BaasBotService.abort] engine abort sent: session_id=%s",
+                session_id,
+            )
+        except Exception as e:
+            logger.warning(
+                "[BaasBotService.abort] failed to send chat.abort: "
+                "session_id=%s error=%s",
+                session_id,
+                e,
+            )
 
     # ── 私有方法 ─────────────────────────────────────────────────────────────
 

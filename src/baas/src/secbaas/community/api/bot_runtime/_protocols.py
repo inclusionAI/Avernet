@@ -440,3 +440,20 @@ class BotRunner(Protocol):
             KeyError: run_id 不存在
         """
         ...
+
+    async def abort(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+    ) -> None:
+        """Best-effort 通知 engine 中止指定 run。
+
+        由 ``BotRequestWorker`` 在取消本地 task 后调用，驱动底层 WS
+        连接发送 ``chat.abort``。失败不影响 abort 主流程。
+
+        Args:
+            session_id: 会话 ID（engine 侧 sessionKey）
+            run_id: 本次取消的 run ID
+        """
+        ...

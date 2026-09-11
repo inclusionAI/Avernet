@@ -1,3 +1,5 @@
+from collections.abc import Awaitable, Callable
+
 from dependency_injector import containers, providers
 
 from secbaas.community.api.health_check.bot import BotHealthCheckerConfig
@@ -161,6 +163,17 @@ def _stub_engine_adapter_registry():
             "claude_code": NoopClaudeCodeAdapter(),
         }
     )
+
+
+def _make_engine_abort_notifier(
+    bot_runner: BotRunner,
+) -> "Callable[[str, str | None], Awaitable[None]]":
+    """构造 ``BotRequestWorker`` 用的 engine abort 通知器。"""
+
+    async def notifier(session_id: str, run_id: str | None) -> None:
+        await bot_runner.abort(session_id=session_id, run_id=run_id)
+
+    return notifier
 
 
 class CoreServiceContainer(containers.DeclarativeContainer):
@@ -690,6 +703,11 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         count=config.bot_run_queue.machine_count,
     )
 
+    engine_abort_notifier = providers.Callable(
+        _make_engine_abort_notifier,
+        bot_runner,
+    )
+
     bot_request_worker = providers.Singleton(
         BotRequestWorker,
         queue_repository=bot_run_queue_repository,
@@ -704,6 +722,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         ),
         machine_count_provider=machine_count_provider,
         config=bot_request_worker_config,
+        engine_abort_notifier=engine_abort_notifier,
     )
 
     # BCN 下行服务依赖 bot_request_worker 作为 chat.abort 的取消接入面
