@@ -1464,13 +1464,7 @@ pub async fn handle_web_send(
         primary_run_id,
         status: if active_run_ids.is_empty() {
             match &admission {
-                Some(result) if !result.deliveries.is_empty() && result.deliveries.iter().all(|d|
-                    matches!(d.state.status, bcs_domain::message_delivery::MessageDeliveryStatus::Failed | bcs_domain::message_delivery::MessageDeliveryStatus::RejectedCapacity))
-                    && result.deliveries.iter().any(|d| d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Failed) => "failed",
-                Some(result) if result.deliveries.iter().any(|d| d.state.kind == DeliveryType::Send)
-                    && result.deliveries.iter().filter(|d| d.state.kind == DeliveryType::Send).all(|d| d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::RejectedCapacity) => "rejected_capacity",
-                Some(result) if result.deliveries.iter().all(|d| d.state.kind == DeliveryType::Inject) => "context_saved",
-                Some(_) => "queued",
+                Some(result) => queue_admission_status(result.deliveries.iter().map(|d| (d.state.kind, d.state.status))),
                 None => "started",
             }
         } else { "started" }.to_string(),
@@ -1489,6 +1483,47 @@ pub async fn handle_web_send(
             .count(),
         delivery_results,
     })
+}
+
+/// Observer context cannot make a rejected reply-producing Send look queued.
+fn queue_admission_status(deliveries: impl Iterator<Item = (DeliveryType, bcs_domain::message_delivery::MessageDeliveryStatus)>) -> &'static str {
+    use bcs_domain::message_delivery::MessageDeliveryStatus as Status;
+    let deliveries: Vec<_> = deliveries.collect();
+    let sends: Vec<_> = deliveries.iter().filter(|(kind, _)| *kind == DeliveryType::Send).collect();
+    let relevant: Vec<_> = if sends.is_empty() { deliveries.iter().collect() } else { sends };
+    if !relevant.is_empty() && relevant.iter().all(|(_, status)| matches!(status, Status::Failed | Status::RejectedCapacity)) {
+        return if relevant.iter().any(|(_, status)| *status == Status::Failed) { "failed" } else { "rejected_capacity" };
+    }
+    if !deliveries.is_empty() && deliveries.iter().all(|(kind, _)| *kind == DeliveryType::Inject) {
+        "context_saved"
+    } else {
+        "queued"
+    }
+}
+
+#[cfg(test)]
+mod queue_admission_status_tests {
+    use super::queue_admission_status;
+    use bcs_domain::{DeliveryType::{Send, Inject}, message_delivery::MessageDeliveryStatus::{Failed, RejectedCapacity, Queued, PendingContext}};
+
+    #[test]
+    fn aggregates_reply_producing_targets_without_observer_masking() {
+        for (deliveries, expected) in [
+            (vec![(Send, Failed), (Inject, PendingContext)], "failed"),
+            (vec![(Send, Failed), (Send, RejectedCapacity), (Inject, PendingContext)], "failed"),
+            (vec![(Send, Failed), (Send, Failed)], "failed"),
+            (vec![(Send, Failed), (Send, Queued)], "queued"),
+            (vec![(Send, Queued), (Inject, Failed)], "queued"),
+            (vec![(Send, Queued), (Inject, PendingContext)], "queued"),
+            (vec![(Send, RejectedCapacity), (Inject, PendingContext)], "rejected_capacity"),
+            (vec![(Send, RejectedCapacity), (Send, RejectedCapacity)], "rejected_capacity"),
+            (vec![(Inject, PendingContext)], "context_saved"),
+            (vec![(Inject, Failed)], "failed"),
+            (vec![], "queued"),
+        ] {
+            assert_eq!(queue_admission_status(deliveries.clone().into_iter()), expected, "{deliveries:?}");
+        }
+    }
 }
 
 pub async fn handle_group_chat(

@@ -35,6 +35,7 @@ async fn fixture() -> (support::FlowTestSupport, Arc<BcsMessageFlow>, Arc<Manage
 async fn rejects_only_provider_target_without_persisting_unsupported_values() {
     let (support, flow, service) = fixture().await;
     let result = flow.handle_web_send(command("reject", "cookie", "do-not-persist")).await.unwrap();
+    assert_eq!(result.status, "failed", "accepted observer context cannot produce a reply");
     let view = result.queue_admission.unwrap();
     let provider = view.deliveries.iter().find(|d| d.target_bot_id == "bot-driver").unwrap();
     assert_eq!(provider.status, Status::Failed);
@@ -46,6 +47,26 @@ async fn rejects_only_provider_target_without_persisting_unsupported_values() {
     }
     assert!(support.bot_delivery.frames().await.is_empty());
     assert!(!serde_json::to_string(&view).unwrap().contains("do-not-persist"));
+}
+
+#[tokio::test]
+async fn accepted_send_targets_keep_queued_or_legacy_started_status() {
+    for legacy in [false, true] {
+        let (_, mut flow, _) = fixture().await;
+        if legacy {
+            Arc::get_mut(&mut flow).unwrap().group_delivery_limits.remove("bot-observer");
+        }
+        let mut request = command("partial", "cookie", "do-not-persist");
+        request.mentions.push("bot-observer".into());
+        let result = flow.handle_web_send(request).await.unwrap();
+        assert_eq!(result.status, if legacy { "started" } else { "queued" });
+        assert_eq!(result.active_run_ids.is_empty(), !legacy);
+        let view = result.queue_admission.unwrap();
+        assert_eq!(view.deliveries.iter().find(|d| d.target_bot_id == "bot-driver").unwrap().status, Status::Failed);
+        if !legacy {
+            assert_eq!(view.deliveries.iter().find(|d| d.target_bot_id == "bot-observer").unwrap().status, Status::Queued);
+        }
+    }
 }
 
 #[tokio::test]
