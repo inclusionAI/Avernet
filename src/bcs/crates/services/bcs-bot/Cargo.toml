@@ -33,7 +33,6 @@ bcs-user-directory-api = { workspace = true }
 
 [dev-dependencies]
 bcs-test-support = { workspace = true }
-bcs-cache-local = { workspace = true }
 bcs-db-api = { workspace = true }
 bcs-db-local = { workspace = true }
 bcs-organization = { workspace = true }

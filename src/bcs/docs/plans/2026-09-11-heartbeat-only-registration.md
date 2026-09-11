@@ -14,14 +14,14 @@
 - Remove dynamic-summary matching from application discovery and both repository implementations. Static names, summaries, skills, domains, scopes, visibility, and organization filters keep their semantics.
 - Keep the existing 300-second `last_heartbeat` expiry and all connection/lifecycle-based `active`/`offline` calculations. Do not add cleanup scheduling or change disconnect policy.
 - Remove status hash construction, serialization, reads, writes, and TTL refreshes. Existing keys expire naturally; no Redis cleanup commands or migrations are needed.
-- Keep existing persistent-repository constructor signatures for downstream composition roots. Legacy cache/prefix arguments are accepted but neither retained nor used. Other stores still use the shared cache normally.
+- Use DB-only persistent-repository constructors: `new(db)` and `with_sql_flavor(db, flavor)`. Remove unused cache/prefix/legacy database-name arguments and the cache dependency. Update the shared bootstrap and callers; other stores still use the shared cache normally.
 - `/providers/agentpass/resolve` serializes registration details without `bot.dynamic_status`, as explicitly authorized for this diagnostic endpoint. `POST /bots/status` retains its echo response; WS status acknowledgements remain `{ "updated": true }`.
 - Update public Rust fixtures constructing `RegisteredBot`. OCB internal sources have no dynamic-status consumers or literals; no OCB code or gitlink changes are required.
 
 ## Task 1: Regressions before implementation
 
 1. Run the existing bot-store unit tests as a baseline.
-2. Add a cache implementation that fails any call and exercise real SQLite-backed registration, heartbeat, DB fallback, soft-delete enrichment, and reconnect through it.
+2. Exercise real SQLite-backed registration, heartbeat, DB fallback, soft-delete enrichment, and reconnect without constructing or injecting a cache. The initial removal was also checked with a cache implementation that failed any call; the DB-only API now removes that dependency entirely.
 3. Add heartbeat-expiry tests using manually aged private registration timestamps, including a previously renewed Bot and rejection of unknown Bot heartbeats.
 4. Add repository/application discovery tests that reject a keyword present only in the inbound dynamic summary while still matching static metadata.
 5. Extend the AgentPass HTTP contract test to assert absence of dynamic state and preserve identity/capability fields; preserve HTTP status echo and computed online-state tests.
@@ -31,7 +31,7 @@
 
 1. Remove the snapshot field from `bcs-domain::RegisteredBot` and both private registration records; update affected struct literals and obsolete snapshot assertions.
 2. Change both `update_status` implementations to refresh only `last_heartbeat`, retaining known/unknown Bot outcomes.
-3. Delete persistent status-cache helpers and their obsolete unit tests. Keep source-compatible constructors without retaining cache references.
+3. Delete persistent status-cache helpers and their obsolete unit tests. Remove unused constructor arguments and cache dependencies, and update all constructor callers.
 4. Remove dynamic-summary selector branches. Keep the wire payload and echo types.
 5. Update contract comments and current API documentation; remove obsolete cache-observation documentation caused by this change.
 
@@ -78,3 +78,22 @@ correctly separates test implementations; the final static R25 findings match
 the clean base exactly. No architecture checks or baselines were weakened.
 
 No OCB sources or gitlink changes are needed for this implementation.
+
+### DB-only constructor follow-up
+
+The constructor compatibility arguments were subsequently removed: the final
+API is `new(db)` or `with_sql_flavor(db, flavor)`. Shared bootstrap wiring and
+all callers use the new API. `bcs-bot-store` no longer depends directly on
+`bcs-cache-api` or `bcs-cache-local`; dependent test fixtures also drop their
+unused cache setup. The SQLite heartbeat regressions retain their liveness and
+fallback checks without injecting any cache implementation.
+
+- `cargo test -p bcs-bot-store -p bcs-bot -p bcs-app-group -p bcs-app-session`:
+  452 passed, 4 ignored, no failures.
+- `cargo check --workspace --tests`: passed with the DB-only constructors.
+- `cargo tree -p bcs-bot-store -e normal --depth 1`: no cache-plugin dependency.
+- `scripts/ci/check-store-boundaries.sh` and `git diff --check`: passed.
+- Constructor/dependency review found no functional issues; stale cache-related
+  comments in the integration examples were corrected.
+- OCB internal sources on the inspected `origin/dev` have no direct
+  `PersistentBotRepo` constructor calls; they use the shared bootstrap.

@@ -12,7 +12,6 @@ use async_trait::async_trait;
 use bcs_app_session::{SessionServiceConfig, SessionServiceImpl};
 use bcs_bot::BotCore;
 use bcs_bot_store::PersistentBotRepo;
-use bcs_cache_local::InMemoryCachePlugin;
 use bcs_db_api::{
     DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement, DbTransactionStep,
     DbTransactionStepResult,
@@ -1066,7 +1065,7 @@ async fn session_detail_preserves_legacy_json_input_and_metadata() {
 #[tokio::test]
 async fn session_detail_propagates_owned_bot_lookup_database_failure() {
     let bots = Arc::new(BotCore::with_repo(Arc::new(
-        PersistentBotRepo::with_plugins(Arc::new(InMemoryCachePlugin::new()), Arc::new(FailingDb)),
+        PersistentBotRepo::new(Arc::new(FailingDb)),
     )));
     let fixture = Fixture::new_with_bots(bots).await;
     fixture.store_group("g1", "driver", None).await;

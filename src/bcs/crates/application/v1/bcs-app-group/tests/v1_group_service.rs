@@ -5,7 +5,6 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use bcs_bot::BotCore;
 use bcs_bot_store::PersistentBotRepo;
-use bcs_cache_local::InMemoryCachePlugin;
 use bcs_db_api::{
     DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement, DbTransactionStep,
     DbTransactionStepResult, DbValue,
@@ -1261,7 +1260,7 @@ async fn get_public_group_readable_without_participation() {
 #[tokio::test]
 async fn group_detail_propagates_owned_bot_lookup_database_failure() {
     let bots = Arc::new(BotCore::with_repo(Arc::new(
-        PersistentBotRepo::with_plugins(Arc::new(InMemoryCachePlugin::new()), Arc::new(FailingDb)),
+        PersistentBotRepo::new(Arc::new(FailingDb)),
     )));
     let fixture = Fixture::new_with_bots(bots).await;
     fixture
@@ -2245,7 +2244,7 @@ async fn explicit_view_requires_the_target_bot_to_exist_and_be_owned() {
 #[tokio::test]
 async fn explicit_view_propagates_registry_database_failure() {
     let bots = Arc::new(BotCore::with_repo(Arc::new(
-        PersistentBotRepo::with_plugins(Arc::new(InMemoryCachePlugin::new()), Arc::new(FailingDb)),
+        PersistentBotRepo::new(Arc::new(FailingDb)),
     )));
     let fixture = Fixture::new_with_bots(bots).await;
 
@@ -2307,10 +2306,7 @@ async fn create_group_propagates_quota_lookup_database_failure() {
 #[tokio::test]
 async fn create_group_propagates_non_driver_registry_database_failure() {
     let bots = Arc::new(BotCore::with_repo(Arc::new(
-        PersistentBotRepo::with_plugins(
-            Arc::new(InMemoryCachePlugin::new()),
-            Arc::new(DriverThenFailingDb::default()),
-        ),
+        PersistentBotRepo::new(Arc::new(DriverThenFailingDb::default())),
     )));
     let fixture = Fixture::new_with_bots(bots).await;
 
@@ -2350,10 +2346,7 @@ async fn create_group_propagates_non_driver_registry_database_failure() {
 #[tokio::test]
 async fn bot_dm_propagates_caller_registry_failure_after_target_validation() {
     let bots = Arc::new(BotCore::with_repo(Arc::new(
-        PersistentBotRepo::with_plugins(
-            Arc::new(InMemoryCachePlugin::new()),
-            Arc::new(DriverThenFailingDb::default()),
-        ),
+        PersistentBotRepo::new(Arc::new(DriverThenFailingDb::default())),
     )));
     let fixture = Fixture::new_with_bots(bots).await;
 

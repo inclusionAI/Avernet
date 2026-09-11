@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use bcs_bot_store::{PersistentBotRepo, MemoryBotRepo};
-use bcs_cache_local::InMemoryCachePlugin;
 use bcs_db_api::{
     DbError, DbExecuteResult, DbHealth, DbPlugin, DbRow, DbStatement, DbTransactionStep,
     DbTransactionStepResult, DbValue as Value,
@@ -16,9 +15,8 @@ use bcs_test_support::contract::repo::bot_repo_port_contract_tests;
 
 #[tokio::test]
 async fn persistent_bot_repo_passes_bot_repo_contract() {
-    let cache = Arc::new(InMemoryCachePlugin::new());
     let db = sqlite_db().await;
-    let repo = PersistentBotRepo::with_plugins(cache, db);
+    let repo = PersistentBotRepo::new(db);
 
     bot_repo_port_contract_tests(&repo).await;
 }
@@ -58,9 +56,8 @@ async fn memory_unregister_soft_deletes_bot_from_default_reads() {
 
 #[tokio::test]
 async fn persistent_bot_repo_unregister_marks_is_deleted_and_filters_default_reads() {
-    let cache = Arc::new(InMemoryCachePlugin::new());
     let db = sqlite_db().await;
-    let repo = PersistentBotRepo::with_plugins(cache, db.clone());
+    let repo = PersistentBotRepo::new(db.clone());
     repo.register_with_owner_and_token(
         "soft-delete-bot".to_string(),
         BotCapabilities {
@@ -99,12 +96,11 @@ async fn persistent_bot_repo_unregister_marks_is_deleted_and_filters_default_rea
 
 #[tokio::test]
 async fn persistent_bot_repo_list_active_fails_closed_when_tombstone_query_fails() {
-    let cache = Arc::new(InMemoryCachePlugin::new());
     let inner_db = sqlite_db().await;
     let db = Arc::new(FailActiveBotIdsQueryDb {
         inner: inner_db.clone(),
     });
-    let repo = PersistentBotRepo::with_plugins(cache, db);
+    let repo = PersistentBotRepo::new(db);
     repo.register_with_owner_and_token(
         "soft-delete-bot".to_string(),
         BotCapabilities {
@@ -154,9 +150,8 @@ async fn persistent_bot_repo_list_active_fails_closed_when_tombstone_query_fails
 
 #[tokio::test]
 async fn persistent_bot_repo_register_after_soft_delete_does_not_clear_is_deleted_column() {
-    let cache = Arc::new(InMemoryCachePlugin::new());
     let db = sqlite_db().await;
-    let repo = PersistentBotRepo::with_plugins(cache, db.clone());
+    let repo = PersistentBotRepo::new(db.clone());
     repo.register_with_owner_and_token(
         "soft-delete-bot".to_string(),
         BotCapabilities {
@@ -204,9 +199,8 @@ async fn persistent_bot_repo_register_after_soft_delete_does_not_clear_is_delete
 
 #[tokio::test]
 async fn persistent_bot_repo_passes_bot_metrics_snapshot_contract() {
-    let cache = Arc::new(InMemoryCachePlugin::new());
     let db = sqlite_db().await;
-    let repo = PersistentBotRepo::with_plugins(cache, db.clone());
+    let repo = PersistentBotRepo::new(db.clone());
 
     seed_metrics_bot(&repo).await;
     seed_metrics_human_row(db.as_ref()).await;
@@ -371,9 +365,8 @@ async fn connect_or_promote_streaming_promote_persists_real_token_to_db_survives
     // be in `bcs_bots` (not the stale MOCK), so a fresh repo built on the same DB
     // resolves the bot by the promoted token — i.e. no half-state where memory
     // holds the real token while the DB still keeps the MOCK.
-    let cache = Arc::new(InMemoryCachePlugin::new());
     let db = sqlite_db().await;
-    let repo = PersistentBotRepo::with_plugins(cache.clone(), db.clone());
+    let repo = PersistentBotRepo::new(db.clone());
 
     // provider pre-registers a plugin bot → DB holds MOCK
     let mock = mock_token();
@@ -399,7 +392,7 @@ async fn connect_or_promote_streaming_promote_persists_real_token_to_db_survives
     assert!(!bcs_service_api::is_mock_token(&promoted));
 
     // Simulate a BCS restart: a fresh repo reading the SAME DB.
-    let repo_after = PersistentBotRepo::with_plugins(cache.clone(), db);
+    let repo_after = PersistentBotRepo::new(db);
     let persisted = repo_after
         .load_token("plugin-bot:alice")
         .await
@@ -464,9 +457,8 @@ async fn connect_or_promote_streaming_refuses_real_token_connected_with_already_
 
 #[tokio::test]
 async fn persistent_repo_update_capabilities_replaces_in_memory_and_db() {
-    let cache = Arc::new(InMemoryCachePlugin::new());
     let db = sqlite_db().await;
-    let repo = PersistentBotRepo::with_plugins(cache, db.clone());
+    let repo = PersistentBotRepo::new(db.clone());
 
     repo.register(
         "update-cap-bot".to_string(),
@@ -516,8 +508,7 @@ async fn persistent_repo_update_capabilities_replaces_in_memory_and_db() {
     );
     assert_eq!(stored.capabilities.visibility, "protected");
 
-    let db_reader = PersistentBotRepo::with_plugins(
-        Arc::new(InMemoryCachePlugin::new()),
+    let db_reader = PersistentBotRepo::new(
         db,
     );
     let persisted = db_reader
@@ -532,8 +523,7 @@ async fn persistent_repo_update_capabilities_replaces_in_memory_and_db() {
 #[tokio::test]
 async fn persistent_repo_update_capabilities_updates_db_when_memory_is_absent() {
     let db = sqlite_db().await;
-    let registering_repo = PersistentBotRepo::with_plugins(
-        Arc::new(InMemoryCachePlugin::new()),
+    let registering_repo = PersistentBotRepo::new(
         db.clone(),
     );
     registering_repo
@@ -551,8 +541,7 @@ async fn persistent_repo_update_capabilities_updates_db_when_memory_is_absent() 
 
     // A separate repository instance models a pod that shares the database
     // but has never loaded this bot into its process-local registry.
-    let updating_repo = PersistentBotRepo::with_plugins(
-        Arc::new(InMemoryCachePlugin::new()),
+    let updating_repo = PersistentBotRepo::new(
         db.clone(),
     );
     updating_repo
@@ -569,8 +558,7 @@ async fn persistent_repo_update_capabilities_updates_db_when_memory_is_absent() 
         .await
         .expect("database-only capability update must succeed");
 
-    let verifying_repo = PersistentBotRepo::with_plugins(
-        Arc::new(InMemoryCachePlugin::new()),
+    let verifying_repo = PersistentBotRepo::new(
         db,
     );
     let stored = verifying_repo
@@ -597,8 +585,7 @@ async fn persistent_repo_update_capabilities_updates_db_when_memory_is_absent() 
 #[tokio::test]
 async fn persistent_repo_update_capabilities_updates_memory_without_inserting_db_row() {
     let db = sqlite_db().await;
-    let repo = PersistentBotRepo::with_plugins(
-        Arc::new(InMemoryCachePlugin::new()),
+    let repo = PersistentBotRepo::new(
         db.clone(),
     );
     repo.register(
@@ -661,9 +648,8 @@ async fn persistent_repo_update_capabilities_updates_memory_without_inserting_db
 
 #[tokio::test]
 async fn persistent_repo_update_capabilities_returns_not_found_for_unknown_bot() {
-    let cache = Arc::new(InMemoryCachePlugin::new());
     let db = sqlite_db().await;
-    let repo = PersistentBotRepo::with_plugins(cache, db.clone());
+    let repo = PersistentBotRepo::new(db.clone());
 
     let err = repo
         .update_capabilities(

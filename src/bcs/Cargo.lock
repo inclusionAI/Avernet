@@ -491,7 +491,6 @@ dependencies = [
  "async-trait",
  "bcs-bot",
  "bcs-bot-store",
- "bcs-cache-local",
  "bcs-db-api",
  "bcs-friend",
  "bcs-group",
@@ -558,7 +557,6 @@ dependencies = [
  "async-trait",
  "bcs-bot",
  "bcs-bot-store",
- "bcs-cache-local",
  "bcs-db-api",
  "bcs-domain",
  "bcs-friend",
@@ -711,7 +709,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bcs-bot-store",
- "bcs-cache-local",
  "bcs-config",
  "bcs-db-api",
  "bcs-db-local",
@@ -737,8 +734,6 @@ name = "bcs-bot-store"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "bcs-cache-api",
- "bcs-cache-local",
  "bcs-config",
  "bcs-db-api",
  "bcs-db-local",

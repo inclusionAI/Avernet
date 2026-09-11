@@ -45,7 +45,10 @@ reconnect. Old `bcs:status:*` keys (or the configured prefix equivalent) expire
 using their existing TTL; no explicit deletion or migration is required.
 Other cache consumers, including election, are unaffected.
 
-Legacy `PersistentBotRepo` constructor cache and prefix arguments remain
-accepted to preserve downstream composition-root compatibility, but the
-repository neither retains nor calls the cache. OCB can adopt the public change
-without editing its repository constructor calls.
+`PersistentBotRepo::new(db)` uses the MySQL dialect;
+`PersistentBotRepo::with_sql_flavor(db, flavor)` selects a dialect explicitly.
+The old cache/prefix constructors and the unused legacy database-name argument
+are removed. The repository has no cache-plugin dependency, and its tests need
+only a database. Composition roots must use these DB-only constructors; the
+shared bootstrap and all in-repository callers are updated. OCB internal source
+has no direct constructor calls and consumes the shared bootstrap.

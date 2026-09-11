@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_bot_store::{MemoryBotRepo, PersistentBotRepo};
-use bcs_cache_local::InMemoryCachePlugin;
 use bcs_db_api::{
     DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbSqlFlavor, DbStatement,
     DbTransactionStep, DbTransactionStepResult, DbValue as Value, db_get_column, db_get_column_opt,
@@ -593,11 +592,9 @@ async fn persistent_control_plane_owned_filters_and_patch_replace_descriptor_arr
 
 #[tokio::test]
 async fn persistent_control_plane_patch_returns_existing_row_when_mysql_changes_nothing() {
-    let repo = PersistentBotRepo::with_plugins_flavor_and_cache_key_prefix(
-        Arc::new(InMemoryCachePlugin::new()),
+    let repo = PersistentBotRepo::with_sql_flavor(
         Arc::new(UnchangedUpdateDb),
         DbSqlFlavor::Mysql,
-        "test:",
     );
 
     let updated = repo
@@ -874,11 +871,9 @@ async fn persistent_control_plane_concurrent_partial_patches_preserve_both_chang
         inner: db,
         snapshot_read_barrier: Barrier::new(2),
     });
-    let repo = Arc::new(PersistentBotRepo::with_plugins_flavor_and_cache_key_prefix(
-        Arc::new(InMemoryCachePlugin::new()),
+    let repo = Arc::new(PersistentBotRepo::with_sql_flavor(
         synchronized_db,
         DbSqlFlavor::Sqlite,
-        "test:",
     ));
 
     let visibility_repo = repo.clone();
@@ -1003,11 +998,9 @@ impl DbPlugin for UnchangedUpdateDb {
 
 async fn fixture() -> (PersistentBotRepo, Arc<dyn DbPlugin>) {
     let db = sqlite_db().await;
-    let repo = PersistentBotRepo::with_plugins_flavor_and_cache_key_prefix(
-        Arc::new(InMemoryCachePlugin::new()),
+    let repo = PersistentBotRepo::with_sql_flavor(
         db.clone(),
         DbSqlFlavor::Sqlite,
-        "test:",
     );
     (repo, db)
 }
