@@ -1,0 +1,4 @@
+interface:
+  display_name: "Clawweb 预发部署"
+  short_description: "轮询 Clawweb PR 合并、构建交付物并安全部署到预发环境"
+  default_prompt: "Use $clawweb-pre-deploy to wait for my Clawweb PR and deploy its exact commit to pre-production."

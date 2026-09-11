@@ -1,0 +1,4 @@
+interface:
+  display_name: "ClawWeb Verification Agent"
+  short_description: "在 AIStudio 中基于新 Session 验收并回写治理结果"
+  default_prompt: "Use $clawweb-verification to inspect repaired ClawWeb improvements, verify post-repair NAS sessions, and safely write the acceptance outcome."
