@@ -1,13 +1,9 @@
 """One fetcher per protocol, and the table that picks between them.
 
-``fetch_declared`` used to end in ``if decl.protocol is not SourceKind.GIT:``
-with the object road above it and ninety lines of git below. Adding a protocol
-meant editing that branch, and every consumer downstream with it.
-
-Here the front door does the work that is the same on every road — budget,
-session, ``keep_last``, and parsing the declaration once — then looks the
-protocol up in :data:`FETCHERS` and calls it. Adding a protocol is a class and
-a row; the branch has no third arm to grow.
+The front door (``entry_fetch.fetch_declared``) does the work that is the same
+on every road — budget, session, ``keep_last``, and parsing the declaration
+once — then looks the protocol up in :data:`FETCHER_TYPES` and calls it.
+Adding a protocol is a class and a row; the branch has no third arm to grow.
 
 **The table is exhaustive by construction**, the discipline
 ``support_matrix._build_matrix`` already uses: a :class:`SourceKind` with no
@@ -96,55 +92,135 @@ class DeclaredFetch:
               key: qc/v2.tgz
               on_fetch_failure: keep_last
 
-    the front door hands :class:`ObjectStoreFetcher` a ``DeclaredFetch``
-    whose ``decl`` is the parsed ``artifacts`` declaration, ``entry`` is the
-    ``qc`` mapping, ``name`` is ``"artifacts"``, ``category`` is
-    ``FetchCategory.CLI_TOOLS`` and ``keep_last`` is ``True``.
+    (``auth`` is mandatory on an ``oss`` source: the endpoint and the key pair
+    come off the named credential, so a declaration without one does not parse.)
+
+    the front door hands :class:`ObjectStoreFetcher`::
+
+        DeclaredFetch(
+            ctx=<the ApplyContext>,
+            decl=SourceDecl(protocol=SourceKind.OSS, bucket="team-artifacts",
+                            key="tools/", auth="oss-prod"),
+            entry={"name": "qc", "from": "artifacts", "key": "qc/v2.tgz",
+                   "on_fetch_failure": "keep_last"},
+            category=FetchCategory.CLI_TOOLS,
+            entry_identity="qc",
+            keep_last=True,
+            session=<the SourceSession>,
+            name="artifacts",
+        )
+
+    The git road differs only in ``decl`` and in the entry's own keys. For::
+
+        sources:
+          content:
+            protocol: git
+            url: https://code.example.com/team/content.git
+            ref: v1.2.0
+            subpath: kb
+            auth: git-prod
+
+        manifest:
+          resources:
+            - path: data/faq.csv
+              from: content
+              subpath: faq.csv
+
+    :class:`GitSourceFetcher` is handed::
+
+        DeclaredFetch(
+            ctx=<the ApplyContext>,
+            decl=SourceDecl(protocol=SourceKind.GIT,
+                            url="https://code.example.com/team/content.git",
+                            ref="v1.2.0", subpath="kb", auth="git-prod",
+                            mode="non_strict"),
+            entry={"path": "data/faq.csv", "from": "content",
+                   "subpath": "faq.csv"},
+            category=FetchCategory.RESOURCES_FILE,
+            entry_identity="data/faq.csv",
+            keep_last=True,          # the default when unspecified
+            session=<the SourceSession>,
+            name="content",
+        )
+
+    An **inline** source differs in exactly one field: ``name`` is ``None`` and
+    ``decl`` is parsed from the entry's own ``source:`` mapping.
+
+    Created by: ``apply/entry_fetch.EntryFetcher.fetch_declared``, the only
+    place one is built.
+    Consumed by: :meth:`SourceFetcher.fetch` — that is, both fetchers below.
 
     Assembled once, by the front door, so no fetcher re-derives it — two
     fetchers each deciding what ``keep_last`` means, or each looking up the
     ``from`` name, is how the roads drift apart while both look correct.
     """
 
+    #: This apply's context. Read for ``env``/``tenant``/``engine_type``
+    #: (placeholder substitution) and for ``budget``.
     ctx: FetchContext
+    #: The source declaration, already parsed by ``schema.sources.parse_source``
+    #: — whether it came from the ``sources`` map or from the entry's own
+    #: inline ``source:`` mapping.
     decl: SourceDecl
+    #: The manifest entry itself, raw as parsed from YAML. The fetcher reads
+    #: only the keys its protocol owns: ``key``/``digest`` on the object road,
+    #: ``subpath``/``digest``/``auth`` on the git road.
     entry: Mapping[str, Any]
-    #: The fetch category, as the closed vocabulary rather than a bare
-    #: string. Review asked whether an enum for this already existed — it
-    #: does, and every caller was already passing its members (some as
-    #: ``.value``), so only the annotation was loose. Typing it here makes
-    #: ``FETCH_ENTRY_LIMITS`` a total lookup below instead of one guarded by
-    #: a default that silently narrowed a mis-typed category to the file cap.
+    #: The fetch category, as the closed vocabulary rather than a bare string,
+    #: e.g. ``FetchCategory.CLI_TOOLS``. Typed rather than loose so
+    #: ``FETCH_ENTRY_LIMITS`` is a total lookup instead of one guarded by a
+    #: default that would silently narrow a mis-typed category to the file cap.
     category: FetchCategory
+    #: How the entry names itself in the report, e.g. ``"qc"`` or
+    #: ``"data/faq.csv"``. Rides into the receipt as the linkage's entry half.
+    #: ``None`` when the caller genuinely does not know.
     entry_identity: Optional[str]
-    #: ``on_fetch_failure`` already resolved to its boolean.
+    #: ``on_fetch_failure`` already resolved to its boolean: ``True`` for
+    #: ``keep_last`` (the default when the entry says nothing), ``False``
+    #: otherwise.
     keep_last: bool
-    #: ``None`` only on roads that need no session; a fetcher that reads it
-    #: is one the front door already refused without one.
+    #: This apply's source session. ``None`` only on roads that need no
+    #: session; a fetcher that reads it is one the front door already refused
+    #: without one, so :class:`GitSourceFetcher` asserts rather than branches.
     session: Optional[SourceSession]
-    #: The declared ``from`` name, or ``None`` for an inline source. The
-    #: report's name for the source, and the key its baseline is read by.
+    #: The declared ``from`` name, e.g. ``"content"``, or ``None`` for an
+    #: inline source. The git road falls back to the repository URL when this
+    #: is ``None``, and the result is the ``display`` that names the source in
+    #: the report and keys its baseline.
     name: Optional[str]
 
 
 @runtime_checkable
 class SourceFetcher(Protocol):
-    """Acquire one entry's content over one protocol."""
+    """Acquire one entry's content over one protocol.
+
+    One method, one argument, one return type: :class:`DeclaredFetch` in,
+    :class:`~...entry_delivery.EntryDelivery` out. Two implementations ship,
+    below.
+    """
 
     @abstractmethod
     def fetch(self, request: DeclaredFetch) -> EntryDelivery:
-        """Raises :class:`EntryFetchError` with a report-safe reason."""
+        """The delivery, or :class:`EntryFetchError` with a report-safe reason.
+
+        The reason lands verbatim on the entry's report row, so it may name a
+        credential but never carry its value.
+        """
         ...
 
 
 class ObjectStoreFetcher(SourceFetcher):
     """``protocol: oss`` — one request, one object, addressed by the source.
 
-    The source carries the credential (W7 — the declaration, not the entry).
-    An entry's ``subpath`` is **not** part of the address: on this road it
-    selects inside the fetched object, which the materialiser applies after
-    unpacking. One rule, both protocols — ``subpath`` selects within what the
-    source delivered; git delivers a tree, an object store delivers an object.
+    Always answers a :class:`~...entry_delivery.BlobDelivery`. The address is
+    ``bucket`` from the declaration plus the composed ``key``; the endpoint and
+    the key pair come off the named credential, so there is no anonymous road.
+
+    The source carries the credential — the declaration, not the entry. An
+    entry's ``subpath`` is **not** part of the address: on this road it selects
+    inside the fetched object, which the materialiser applies after unpacking.
+    One rule, both protocols — ``subpath`` selects within what the source
+    delivered; git delivers a tree, an object store delivers an object.
     """
 
     def __init__(self, owner: EntryFetcher) -> None:
@@ -196,12 +272,19 @@ class ObjectStoreFetcher(SourceFetcher):
 class GitSourceFetcher(SourceFetcher):
     """``protocol: git`` — one checkout per ``(url, ref)`` per apply.
 
+    Answers a :class:`~...entry_delivery.GitDelivery` on success, and a
+    :class:`~...entry_delivery.BlobDelivery` when the fetch failed and
+    ``keep_last`` stood in with the baseline SHA's stored tree.
+
+    Refuses two entry keys outright, both with report-safe reasons: ``digest``
+    (pin by writing the commit SHA as the source's ref instead) and
+    entry-level ``auth`` (declare it inside the source object).
+
     The ref resolves once through the apply's source session, ``mode`` is
     enforced against the last apply's resolved SHA, and what comes back is a
-    tree for the entry to interpret. ``keep_last`` falls back to the
-    baseline-SHA receipt under the same keep_last-only ruling wire failures
-    get: a *refusal* is configuration and must not be masked, a *failure* is
-    the transport and may be.
+    tree for the entry to interpret. ``keep_last`` falls back under the same
+    ruling wire failures get: a *refusal* is configuration and must not be
+    masked, a *failure* is the transport and may be.
     """
 
     def __init__(self, owner: EntryFetcher) -> None:
@@ -317,9 +400,17 @@ class GitSourceFetcher(SourceFetcher):
         )
 
 
-#: Which fetcher serves which protocol. ``CONTENT`` is absent on purpose: it
-#: is a :class:`SourceKind` but never a *source* — inline text is written on
-#: the entry and there is nothing to acquire.
+#: Which fetcher **class** serves which protocol — the types, not instances::
+#:
+#:     {
+#:         SourceKind.OSS: ObjectStoreFetcher,
+#:         SourceKind.GIT: GitSourceFetcher,
+#:     }
+#:
+#: :func:`build_fetchers` is what turns it into instances bound to one
+#: pipeline. ``CONTENT`` is absent on purpose: it is a :class:`SourceKind` but
+#: never a *source* — inline text is written on the entry and there is nothing
+#: to acquire. The import-time check below refuses any other omission.
 FETCHER_TYPES: Mapping[SourceKind, type] = MappingProxyType(
     {
         SourceKind.OSS: ObjectStoreFetcher,
@@ -341,21 +432,35 @@ if _UNSERVED:
 
 
 def build_fetchers(owner: EntryFetcher) -> Mapping[SourceKind, SourceFetcher]:
-    """The table, bound to one pipeline's collaborators."""
+    """The table, bound to one pipeline's collaborators::
+
+        {
+            SourceKind.OSS: ObjectStoreFetcher(owner),
+            SourceKind.GIT: GitSourceFetcher(owner),
+        }
+
+    Called once per :class:`~...entry_fetch.EntryFetcher`, in its constructor.
+    """
     return MappingProxyType(
         {kind: cls(owner) for kind, cls in FETCHER_TYPES.items()}
     )
 
 
 def object_receipt_url(bucket: str, key: str) -> str:
-    """The W11 identity for bytes read out of a bucket.
+    """The receipt identity for bytes read out of a bucket::
 
-    ``oss://bucket/key`` — deliberately not a fetchable URL. It is a stable
-    *name* for a delivery, the way ``git_receipt_url`` names a tree at a
-    commit: the endpoint is not part of it, because the same object read
-    through an internal and an external endpoint is the same object, and a
-    receipt keyed on the endpoint would file it twice and let ``keep_last``
-    miss its own copy.
+        object_receipt_url("team-artifacts", "tools/qc/v2.tgz")
+        # -> "oss://team-artifacts/tools/qc/v2.tgz"
+
+        object_receipt_url("team-artifacts", "/leading/slash.tgz")
+        # -> "oss://team-artifacts/leading/slash.tgz"
+
+    **The endpoint is deliberately not part of it**, and this is not an
+    omission: the same object read through an internal and an external endpoint
+    is the same object, so a receipt keyed on the endpoint would file it twice
+    and let ``keep_last`` miss its own copy. The result is therefore a stable
+    *name*, not a fetchable URL — the way ``git_receipt_url`` names a tree at a
+    commit.
     """
     return f"oss://{bucket}/{key.lstrip('/')}"
 
@@ -363,7 +468,24 @@ def object_receipt_url(bucket: str, key: str) -> str:
 def compose_key(source_key: Optional[str], entry_key: Any) -> Optional[str]:
     """The source's key prefix, then the entry's — one object name.
 
-    Exactly ``compose_subpath``'s rule on the other road, and re-checked by
+    ====================  ==============  ====================================
+    ``source_key``        ``entry_key``   Result
+    ====================  ==============  ====================================
+    ``"tools/"``          ``"qc/v2.tgz"`` ``"tools/qc/v2.tgz"``
+    ``None``              ``"qc/v2.tgz"`` ``"qc/v2.tgz"``
+    ``"tools/"``          ``None``        ``"tools/"`` (the prefix is the
+                                          whole name)
+    ``None``              ``None``        ``None`` (the caller then refuses:
+                                          the entry named no object)
+    ``"tools"``           ``"/qc.tgz"``   ``"tools/qc.tgz"`` (one slash; the
+                                          join strips both sides)
+    ====================  ==============  ====================================
+
+    ``entry_key`` is typed ``Any`` because it comes raw from YAML: a non-string
+    or an empty string raises :class:`EntryFetchError`, as does a composition
+    that fails the schema's path predicate.
+
+    Exactly :func:`compose_subpath`'s rule on the other road, and re-checked by
     the same pure predicate for the same reason: two safe halves can compose
     into an unsafe whole, and a second weaker rule here is how a traversal
     gets through one layer by satisfying the other.
@@ -391,20 +513,32 @@ def compose_subpath(
 ) -> Optional[str]:
     """The source's ``subpath``, then the entry's — one path, re-checked.
 
-    **This is what lets one source serve many entries.** Before it, an entry
-    ``subpath`` beside a git source was refused at apply time (defect D3), so a
-    source addressed exactly one file and a second file from the same
-    repository needed a second source block carrying duplicate ``url``, ``ref``
-    and ``auth`` — reintroducing precisely the drift named sources exist to
-    remove. ``resources`` over git is not useful without it: a resources entry
-    names a workspace ``path`` *and* a source path, and those differ per entry
-    by construction.
+    ====================  ================  ==================================
+    ``source_subpath``    ``entry_subpath`` Result
+    ====================  ================  ==================================
+    ``"kb"``              ``"faq.csv"``     ``"kb/faq.csv"``
+    ``None``              ``"faq.csv"``     ``"faq.csv"``
+    ``"kb"``              ``None``          ``"kb"``
+    ``None``              ``None``          ``None`` (the whole tree)
+    ``"kb"``              ``"../etc"``      raises: "...compose to
+                                            'kb/../etc', which is refused:
+                                            subpath must not contain a '..'
+                                            segment"
+    ====================  ================  ==================================
+
+    ``entry_subpath`` is typed ``Any`` because it comes raw from YAML: a
+    non-string or an empty string raises :class:`EntryFetchError`.
+
+    **This is what lets one source serve many entries**: ``resources`` over git
+    is not useful without it, because a resources entry names a workspace
+    ``path`` *and* a source path, and those differ per entry by construction.
+    Without composition each file needs its own source block carrying duplicate
+    ``url``, ``ref`` and ``auth``.
 
     The composed value is re-checked by the schema's own pure predicate rather
-    than by a local rule. Two safe segments can compose into an unsafe path
-    (``a/b`` under ``..``-free halves is fine, but the join is what the
-    checkout is finally asked to read), and a second, weaker rule here is
-    exactly how a traversal gets through one layer by satisfying the other.
+    than by a local rule. Two safe segments can compose into an unsafe path,
+    and a second, weaker rule here is exactly how a traversal gets through one
+    layer by satisfying the other.
     """
     if entry_subpath is None:
         return source_subpath
@@ -425,7 +559,18 @@ def compose_subpath(
 
 
 def substitute(ctx: FetchContext, source_url: str) -> str:
-    """``${BOT_*}`` in a source URL, against this apply's deployment context.
+    """``${BOT_*}`` in one string, against this apply's deployment context.
+
+    Despite the parameter name it is used on every addressing string, not only
+    URLs — the object road substitutes the bucket and the composed key too::
+
+        substitute(ctx, "https://cdn.example.com/${BOT_ENV}/kb.zip")
+        # -> "https://cdn.example.com/prod/kb.zip"
+
+        substitute(ctx, "${BOT_TENANT}-artifacts")     # a bucket
+        # -> "acme-artifacts"
+
+    The three axes come off the context: ``engine_type``, ``env``, ``tenant``.
 
     Unknown names are left untouched by the resolver itself — they cannot
     reach here through a stored document, because the write path refuses
