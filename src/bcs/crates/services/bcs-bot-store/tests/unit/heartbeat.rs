@@ -1,24 +1,5 @@
 use super::*;
-use std::collections::BTreeMap;
-use bcs_cache_api::{CacheResult, CacheSetMode, CacheTtl};
 use bcs_db_local::LocalSqliteDbPlugin;
-
-// Any cache access is a regression, including reads that silently fall back.
-struct ForbiddenCache;
-
-#[async_trait]
-impl CachePlugin for ForbiddenCache {
-    async fn get_value(&self, _: &str) -> CacheResult<Option<Vec<u8>>> { panic!("unexpected cache GET") }
-    async fn set_value(&self, _: &str, _: Vec<u8>, _: Option<Duration>, _: CacheSetMode) -> CacheResult<bool> { panic!("unexpected cache SET") }
-    async fn delete(&self, _: &str) -> CacheResult<bool> { panic!("unexpected cache DEL") }
-    async fn expire(&self, _: &str, _: Duration) -> CacheResult<bool> { panic!("unexpected cache EXPIRE") }
-    async fn ttl(&self, _: &str) -> CacheResult<CacheTtl> { panic!("unexpected cache TTL") }
-    async fn hash_get(&self, _: &str, _: &str) -> CacheResult<Option<Vec<u8>>> { panic!("unexpected cache HGET") }
-    async fn hash_get_all(&self, _: &str) -> CacheResult<BTreeMap<String, Vec<u8>>> { panic!("unexpected cache HGETALL") }
-    async fn hash_set(&self, _: &str, _: &str, _: Vec<u8>) -> CacheResult<()> { panic!("unexpected cache HSET") }
-    async fn hash_set_many(&self, _: &str, _: BTreeMap<String, Vec<u8>>) -> CacheResult<()> { panic!("unexpected cache hash write") }
-    async fn hash_delete(&self, _: &str, _: &str) -> CacheResult<bool> { panic!("unexpected cache HDEL") }
-}
 
 async fn database() -> Arc<dyn DbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
@@ -35,9 +16,7 @@ async fn database() -> Arc<dyn DbPlugin> {
 }
 
 fn repository(db: Arc<dyn DbPlugin>) -> PersistentBotRepo {
-    PersistentBotRepo::with_plugins_flavor_and_cache_key_prefix(
-        Arc::new(ForbiddenCache), db, DbSqlFlavor::Sqlite, "custom-prefix:",
-    )
+    PersistentBotRepo::with_sql_flavor(db, DbSqlFlavor::Sqlite)
 }
 
 async fn register(repo: &PersistentBotRepo) {

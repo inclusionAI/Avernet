@@ -20,7 +20,6 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{RwLock, oneshot};
 use tracing::{debug, info, warn};
 
-use bcs_cache_api::CachePlugin;
 use bcs_config::resolve_env_str as resolve_env;
 use bcs_db_api::{
     DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue as Value, db_get_column, db_get_column_opt,
@@ -246,19 +245,13 @@ pub struct PersistentBotRepo {
 }
 
 impl PersistentBotRepo {
-    /// Create a DB-backed repository; the legacy cache argument is unused.
-    pub fn with_plugins(
-        cache: Arc<dyn CachePlugin>,
-        db: Arc<dyn DbPlugin>,
-    ) -> Self {
-        Self::with_plugins_flavor(cache, db, DbSqlFlavor::Mysql)
+    /// Create a DB-backed repository using the MySQL dialect.
+    pub fn new(db: Arc<dyn DbPlugin>) -> Self {
+        Self::with_sql_flavor(db, DbSqlFlavor::Mysql)
     }
 
     /// Create a DB-backed repository with the selected SQL flavor.
-    /// The legacy cache argument is accepted for composition-root compatibility
-    /// but is not retained or used by the repository.
-    pub fn with_plugins_flavor(
-        _cache: Arc<dyn CachePlugin>,
+    pub fn with_sql_flavor(
         db: Arc<dyn DbPlugin>,
         flavor: DbSqlFlavor,
     ) -> Self {
@@ -271,25 +264,6 @@ impl PersistentBotRepo {
             flavor,
             pending_requests: RwLock::new(HashMap::new()),
         }
-    }
-
-    /// Compatibility constructor; the former status-cache prefix is ignored.
-    pub fn with_plugins_flavor_and_cache_key_prefix(
-        cache: Arc<dyn CachePlugin>,
-        db: Arc<dyn DbPlugin>,
-        flavor: DbSqlFlavor,
-        _cache_key_prefix: impl Into<String>,
-    ) -> Self {
-        Self::with_plugins_flavor(cache, db, flavor)
-    }
-
-    /// Create a new distributed registry.
-    pub fn new(
-        cache: Arc<dyn CachePlugin>,
-        db: Arc<dyn DbPlugin>,
-        _legacy_db: String,
-    ) -> Self {
-        Self::with_plugins(cache, db)
     }
 
     async fn db_query(&self, sql: &str, params: Vec<Value>) -> bcs_db_api::DbResult<Vec<DbRow>> {
@@ -2330,7 +2304,7 @@ impl BotRepoPort for PersistentBotRepo {
         let result = self.find_bot_by_token_in_db(token).await;
         if result.is_none() {
             let prefix = &token[..8.min(token.len())];
-            warn!(request_id = %bcs_observability::CurrentRequestId, token_prefix = %prefix, "find_bot_by_token: token not found in any layer (cache/memory/database)");
+            warn!(request_id = %bcs_observability::CurrentRequestId, token_prefix = %prefix, "find_bot_by_token: token not found in memory or database");
         }
         result
     }
@@ -3484,7 +3458,7 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
 mod tests {
     use super::*;
 
-    // Note: These tests require external cache and database connections.
+    // Note: These tests require external database connections.
     // Run with: cargo test --package bcs-bot -- --ignored
 
     #[test]
@@ -3794,14 +3768,14 @@ mod tests {
         assert_eq!(parsed.scopes, bot_info.scopes);
     }
 
-    // ===== Integration tests (require external cache and database) =====
+    // ===== Integration tests (require external database) =====
     // Run with: cargo test --package bcs-bot -- --ignored
 
     #[tokio::test]
-    #[ignore = "Requires external cache and database connections"]
+    #[ignore = "Requires external database connections"]
     async fn integration_test_register_and_retrieve() {
         // This test documents the expected workflow:
-        // 1. Create PersistentBotRepo with CachePlugin and DbPlugin handles
+        // 1. Create PersistentBotRepo with a DbPlugin handle
         // 2. Register a bot
         // 3. Retrieve the bot from memory (fast path)
         // 4. Verify capabilities are persisted to the database
@@ -3821,7 +3795,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Requires external cache and database connections"]
+    #[ignore = "Requires external database connections"]
     async fn integration_test_token_persistence() {
         // This test documents the expected workflow:
         // 1. Register WS connection (generates token)
@@ -3838,14 +3812,14 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Requires external cache and database connections"]
+    #[ignore = "Requires external database connections"]
     async fn integration_test_reconnect_streaming_recover_from_storage() {
         // This test documents the failover recovery workflow:
-        // 1. Bot connects and has capabilities in database, status in cache
+        // 1. Bot connects and persists capabilities and its token in the database
         // 2. WS disconnects (but token is preserved)
         // 3. Server restarts (memory cleared)
         // 4. Bot reconnects with existing token
-        // 5. Server recovers capabilities from database and status from cache
+        // 5. Server recovers capabilities and its token from the database, then renews liveness
         //
         // Example:
         // let (tx, _rx) = mpsc::channel(10);
@@ -3861,7 +3835,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "Requires external cache and database connections"]
+    #[ignore = "Requires external database connections"]
     async fn integration_test_sql_injection_protection() {
         // This test documents SQL injection protection:
         // Bot IDs and other fields are escaped before SQL queries

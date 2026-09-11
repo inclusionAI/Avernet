@@ -4108,11 +4108,9 @@ impl BcsServer {
             .unwrap_or_else(|| Arc::new(bcs_cache_local::InMemoryCachePlugin::new()));
         let cache_key_prefix = config.cache.redis.effective_key_prefix();
         info!(db_plugin = %db_kind, "Initializing DB-backed bot registry");
-        let bot_repo = Arc::new(PersistentBotRepo::with_plugins_flavor_and_cache_key_prefix(
-            cache_plugin.clone(),
+        let bot_repo = Arc::new(PersistentBotRepo::with_sql_flavor(
             db_plugin.clone(),
             db_flavor,
-            cache_key_prefix.clone(),
         ));
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();

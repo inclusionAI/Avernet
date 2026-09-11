@@ -21,7 +21,6 @@ tracing = { workspace = true }
 [dev-dependencies]
 bcs-bot = { workspace = true }
 bcs-bot-store = { workspace = true }
-bcs-cache-local = { workspace = true }
 bcs-db-api = { workspace = true }
 bcs-friend = { workspace = true }
 bcs-group = { workspace = true }
