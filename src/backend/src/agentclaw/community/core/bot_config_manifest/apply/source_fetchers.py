@@ -266,7 +266,7 @@ class DeclaredFetch:
     #: inline source. The git road falls back to ``<url>@<ref>`` when this is
     #: ``None``, and the result is the ``display`` that names the source in the
     #: report — one row per declaration. The baseline is not read by it: that
-    #: is keyed on the substituted ``(url, ref)``.
+    #: is keyed on the substituted ``(url, ref, mode)``.
     name: Optional[str]
 
 
@@ -532,7 +532,8 @@ class GitSourceFetcher(SourceFetcher):
     entry-level ``auth`` (declare it inside the source object).
 
     The ref resolves once through the apply's source session, ``mode`` is
-    enforced against the last apply's resolved SHA for the same ``(url, ref)``,
+    enforced against the last apply's resolved SHA for the same
+    ``(url, ref, mode)``,
     and what comes back is a tree for the entry to interpret. ``keep_last``
     falls back under the same ruling wire failures get: a *refusal* is
     configuration and must not be masked, a *failure* is the transport and may
@@ -622,7 +623,7 @@ class GitSourceFetcher(SourceFetcher):
                 if expired is not None:
                     raise EntryFetchError(expired)
 
-        baseline = session.baseline(spec.url, spec.ref)
+        baseline = session.baseline(spec.url, spec.ref, spec.mode)
         if (
             spec.mode == "strict"
             and baseline is not None
@@ -637,10 +638,13 @@ class GitSourceFetcher(SourceFetcher):
         # moved SHA into this apply's report, because the next apply reads
         # its baseline from there — adopting here would turn strict mode
         # into "refuse each move exactly once, then deliver it". The baseline
-        # is the one recorded for this (url, ref), so editing either in the
-        # document asks about a pair nothing has an opinion on yet: a
-        # deliberate re-pin passes, and only a pair that resolved differently
-        # under its own name is a move.
+        # is the one recorded for this (url, ref, mode), so editing url or ref
+        # asks about a pair nothing has an opinion on yet: a deliberate re-pin
+        # passes, and only a pair that resolved differently under its own name
+        # is a move. ``mode`` is in that key so the same degradation cannot
+        # come in sideways either: a non_strict declaration of this repository
+        # records under its own key and cannot hand a strict one the commit it
+        # just refused.
         session.adopt(
             display=display, spec=spec, checkout=checkout, auth_name=auth
         )
@@ -681,7 +685,7 @@ class GitSourceFetcher(SourceFetcher):
         """``keep_last`` for the git road: the receipt of the *last-resolved*
         SHA, when there was one.
 
-        Looks the baseline up by ``(url, ref)`` and reads the receipt filed
+        Looks the baseline up by ``(url, ref, mode)`` and reads the receipt filed
         under ``git+<url>@<baseline sha>:<subpath>``. Answers ``None`` — meaning
         "no fallback, let the failure stand" — in three cases: ``keep_last`` is
         off, the pair has no baseline (a first-time pair has no stored copy
@@ -693,7 +697,7 @@ class GitSourceFetcher(SourceFetcher):
         """
         if not keep_last:
             return None
-        baseline = session.baseline(spec.url, spec.ref)
+        baseline = session.baseline(spec.url, spec.ref, spec.mode)
         if baseline is None:
             return None
         target = git_receipt_url(spec.url, baseline, spec.subpath)

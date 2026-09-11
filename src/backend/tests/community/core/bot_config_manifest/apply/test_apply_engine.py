@@ -879,6 +879,7 @@ async def test_the_sessions_resolutions_ride_into_the_report():
         name="charts",
         url="https://git.corp/charts.git",
         ref="main",
+        mode="strict",
         resolved_sha="f" * 40,
         auth="ci-token",
     )
@@ -898,6 +899,7 @@ async def test_the_sessions_resolutions_ride_into_the_report():
             "name": "charts",
             "url": "https://git.corp/charts.git",
             "ref": "main",
+            "mode": "strict",
             "resolved_sha": "f" * 40,
             "auth": "ci-token",
         }

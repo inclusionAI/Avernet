@@ -86,6 +86,7 @@ def report_from_payload(
                 name=source.get("name", ""),
                 url=source.get("url"),
                 ref=source.get("ref"),
+                mode=source.get("mode"),
                 resolved_sha=source.get("resolved_sha"),
                 auth=source.get("auth"),
             )

@@ -679,10 +679,10 @@ GET /openapi/v1/bots/{bot_id}/with-manifest/status
   "result": "SUCCEEDED|PARTIAL|FAILED",
   "sources": [
     {"name": "content", "url": "https://code.example.com/team/content.git",
-     "ref": "v1.2.0", "resolved_sha": "9c1f4ae…"},
+     "ref": "v1.2.0", "mode": "strict", "resolved_sha": "9c1f4ae…"},
     {"name": "https://code.example.com/team/tools.git@main",
      "url": "https://code.example.com/team/tools.git",
-     "ref": "main", "resolved_sha": "7e3b91c…"}
+     "ref": "main", "mode": "non_strict", "resolved_sha": "7e3b91c…"}
   ],
   "entries": [
     {"category": "identity", "name": "SOUL.md", "action": "updated", "from": "content"},
@@ -1024,11 +1024,16 @@ schema 已定稿（见 `manifest-schema.zh-CN.md` §3.4），但**第一期没�
 | `mode` | 行为 |
 | --- | --- |
 | `non_strict`（**默认**） | 应用新内容，并在 apply 报告里对该条目**告警**，写明前后两个 SHA |
-| `strict` | 同一个 `(url, ref)` 这次解析出的 SHA 与上次 apply 记录的不同时，该条目**失败**，bot 继续跑它现在跑的 |
+| `strict` | 同一个 `(url, ref, mode)` 这次解析出的 SHA 与上次 apply 记录的不同时，该条目**失败**，bot 继续跑它现在跑的 |
 
-- **基线按 `(url, ref)` 记**，不按源名。两个分支问的都是同一件事：「这个仓库的
-  这个 ref，在我们上次解析它之后动过没有」——源叫什么是你文档里的事，跟这个问题
+- **基线按 `(url, ref, mode)` 记**，不按源名。两个分支问的都是同一件事：「这个仓库
+  的这个 ref，在我们上次解析它之后动过没有」——源叫什么是你文档里的事，跟这个问题
   无关。改名不丢基线；把 `url` 指到另一个仓库也不会继承前一个仓库的 SHA。
+- **`mode` 在键里**：同一个 `(url, ref)` 你可以声明两次，一条 `strict`、一条
+  `non_strict`（「这几个条目可以跟着分支走，那个不行」）。ref 动了以后，宽松的那条
+  正常下发并记下新 SHA，钉死的那条拒绝——两者**各记各的基线**，所以宽松的那条不会
+  把钉死的那条的基线推上去。否则下一次 apply（你一个字都没改）就会把刚被拒绝的那个
+  commit 交给钉死的条目。
 - **改 `ref`（或改 `url`）就是一次重新钉扎**：新的 `(url, ref)` 没有任何一次
   apply 对它有意见，所以既不拒绝也不告警，照常解析并被这次 apply 记下。
   **这就是 `strict` 源的升版方式**——不用先切 `non_strict` 应用一次再切回来。
@@ -1761,8 +1766,9 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
 | `name` | string | 源名（`sources.<name>` 里的那个名字）；**内联 `source` 没有名字，记成 `url@ref`**（省略 `ref` 时是 `url@HEAD`） |
-| `url` | string \| null | 仓库地址，`${BOT_*}` 已替换。与 `ref` 合起来就是 `strict` 基线的键（§6.2） |
+| `url` | string \| null | 仓库地址，`${BOT_*}` 已替换。与 `ref`、`mode` 合起来就是 `strict` 基线的键（§6.2） |
 | `ref` | string \| null | 声明的 ref：tag / branch / commit SHA |
+| `mode` | string \| null | 这一次解析所用的 `strict` / `non_strict`。它是基线键的一部分，不是备注（§6.2） |
 | `resolved_sha` | string \| null | 这一次**实际解析到**的 commit。`ref: main` 这种会动的引用，下周就是另一个值 |
 | `auth` | string \| null | 用到的凭证**名**。**永远只有名字，没有值** |
 

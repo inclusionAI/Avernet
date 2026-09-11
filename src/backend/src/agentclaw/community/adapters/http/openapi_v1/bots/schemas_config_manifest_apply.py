@@ -67,8 +67,8 @@ class ConfigManifestApplySource(BaseModel):
     """One git source this apply resolved — one row per declaration.
 
     Named per declaration, keyed on the repository: two `from` names pointing at
-    the same `(url, ref)` are two rows carrying the same `resolved_sha`, and two
-    inline declarations of one repository at two refs are two rows too.
+    the same `(url, ref, mode)` are two rows carrying the same `resolved_sha`,
+    and two inline declarations of one repository at two refs are two rows too.
     """
 
     name: str = Field(
@@ -78,14 +78,21 @@ class ConfigManifestApplySource(BaseModel):
     url: str | None = Field(
         default=None,
         description="The repository URL, with any `${BOT_*}` placeholder "
-        "already substituted. Together with `ref` it is what strict mode "
-        "compares the next apply against — so re-pointing either is a re-pin, "
-        "not a moved ref.",
+        "already substituted. Together with `ref` and `mode` it is what strict "
+        "mode compares the next apply against — so re-pointing url or ref is a "
+        "re-pin, not a moved ref.",
     )
     ref: str | None = Field(
         default=None,
         description="The ref as declared: a tag, a branch, or a commit SHA. "
         "`HEAD` when the source declared none.",
+    )
+    mode: str | None = Field(
+        default=None,
+        description="`strict` or `non_strict`, as the source declared it. Part "
+        "of the baseline key, so a `non_strict` declaration of a repository "
+        "never advances the baseline a `strict` declaration of the same "
+        "repository is pinned against.",
     )
     resolved_sha: str | None = Field(
         default=None,

@@ -82,6 +82,7 @@ def test_adoption_records_the_resolution_once_per_display():
             name="src",
             url="https://git.corp/r.git",
             ref="main",
+            mode="non_strict",
             resolved_sha="a" * 40,
             auth="ci",
         ),
@@ -127,17 +128,23 @@ def test_close_is_idempotent_and_deregisters(monkeypatch):
     assert removed == [Path("/tmp/x")]
 
 
-def test_baseline_reads_the_map_by_url_and_ref():
-    """The key is the repository and the ref, never the document's name for
-    them: strict mode asks "did this pair resolve differently", and a rename
-    is not that question."""
+def test_baseline_reads_the_map_by_url_ref_and_mode():
+    """The key is the repository, the ref and the mode — never the document's
+    name for them: strict mode asks "did this pair resolve differently under
+    this mode", and a rename is not that question."""
     session = SourceSession(
         sources={},
-        baselines={("https://git.corp/r.git", "main"): "b" * 40},
+        baselines={("https://git.corp/r.git", "main", "strict"): "b" * 40},
         git=FakeGitClient(),
     )
-    assert session.baseline("https://git.corp/r.git", "main") == "b" * 40
+    assert (
+        session.baseline("https://git.corp/r.git", "main", "strict") == "b" * 40
+    )
     # Same repository, another ref — a re-pin, so no opinion.
-    assert session.baseline("https://git.corp/r.git", "v2") is None
+    assert session.baseline("https://git.corp/r.git", "v2", "strict") is None
     # Same ref, another repository — likewise.
-    assert session.baseline("https://git.corp/other.git", "main") is None
+    assert session.baseline("https://git.corp/other.git", "main", "strict") is None
+    # Same pair, the OTHER mode: a separate history, so no opinion either. This
+    # is what stops a non_strict declaration of a repository from handing a
+    # strict declaration of it the commit the strict one just refused.
+    assert session.baseline("https://git.corp/r.git", "main", "non_strict") is None

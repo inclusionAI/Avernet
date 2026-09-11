@@ -344,21 +344,23 @@ class SourceResolution:
 
         SourceResolution(name="content",
                          url="https://code.example.com/team/content.git",
-                         ref="v1.2.0", resolved_sha="7c1d…", auth="gh-readonly")
+                         ref="v1.2.0", mode="strict",
+                         resolved_sha="7c1d…", auth="gh-readonly")
 
     An inline git source has no ``from`` name, so it is named by the repository
     and the ref it declared, joined by ``@``::
 
         SourceResolution(name="https://code.example.com/team/content.git@main",
                          url="https://code.example.com/team/content.git",
-                         ref="main", resolved_sha="9e8d…", auth=None)
+                         ref="main", mode="non_strict",
+                         resolved_sha="9e8d…", auth=None)
 
     ``name`` is the **display**: one row per declaration, so two names pointing
     at one repository are two rows and two inline declarations of one
-    repository at two refs are two rows. ``(url, ref)`` is what the strict-mode
-    baselines are read back by — the display plays no part in that, because
-    "has this repository's ref moved since we last resolved it" is not a
-    question about what the document called the source.
+    repository at two refs are two rows. ``(url, ref, mode)`` is what the
+    strict-mode baselines are read back by — the display plays no part in that,
+    because "has this repository's ref moved since we last resolved it" is not
+    a question about what the document called the source.
 
     Created by: ``apply/source_session.SourceSession.adopt``, one per distinct
     ``display`` name, returned through ``resolution_records()``.
@@ -372,15 +374,24 @@ class SourceResolution:
     #: The ``from`` name, or ``<url>@<ref>`` for an inline source.
     name: str
     #: The substituted repository URL — no credentials, which this record is
-    #: structurally unable to carry anyway: it holds names, never values. It is
-    #: half of the key the next apply reads its baseline by, and is ``None``
-    #: only on a row written before this field existed.
+    #: structurally unable to carry anyway: it holds names, never values. Part
+    #: of the key the next apply reads its baseline by, and ``None`` only on a
+    #: row written before this field existed.
     url: str | None = None
     #: The ref as declared: a tag, a branch, or a full SHA. ``"HEAD"`` when the
     #: source declared none.
     ref: str | None = None
     #: The 40-character commit id the ref actually resolved to.
     resolved_sha: str | None = None
+    #: The ``mode`` this resolution was made under, ``"strict"`` or
+    #: ``"non_strict"``. The last third of the baseline key, and load-bearing
+    #: rather than informational: a pin may only be advanced by an apply that
+    #: stood behind it under the *same* mode. Were it left out, a document
+    #: naming one ``(url, ref)`` twice — once ``strict``, once ``non_strict`` —
+    #: would let the lax declaration record a moved sha that the pinned one had
+    #: just refused, and the next apply would hand the pinned entry the very
+    #: commit it rejected: "refuse each move once, then deliver it".
+    mode: str | None = None
     #: The credential's name, never its value. ``None`` for an anonymous fetch.
     auth: str | None = None
 
@@ -389,6 +400,7 @@ class SourceResolution:
             "name": self.name,
             "url": self.url,
             "ref": self.ref,
+            "mode": self.mode,
             "resolved_sha": self.resolved_sha,
             "auth": self.auth,
         }
@@ -421,6 +433,7 @@ class ApplyReport:
                     name="content",
                     url="https://code.example.com/team/content.git",
                     ref="v1.2.0",
+                    mode="strict",
                     resolved_sha="4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187",
                     auth="git-prod",
                 ),
@@ -479,7 +492,7 @@ class ApplyReport:
                 "finished_at": "2026-03-01T09:00:04+00:00",
                 "sources": [{"name": "content",
                              "url": "https://code.example.com/team/content.git",
-                             "ref": "v1.2.0",
+                             "ref": "v1.2.0", "mode": "strict",
                              "resolved_sha": "4f2a9c1b...", "auth": "git-prod"}],
                 "categories": [{"category": "mcp", "aborted": False,
                                 "partially_written": False, "removed": []}],

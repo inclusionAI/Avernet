@@ -630,7 +630,9 @@ def test_strict_refuses_when_the_ref_moved(rig):
     # document called the source — so the same pair, resolving to a different
     # commit, is the one thing strict mode refuses.
     ctx = make_context(
-        source_session=_session(git, baselines={(GIT_URL, "main"): "b" * 40})
+        source_session=_session(
+            git, baselines={(GIT_URL, "main", "strict"): "b" * 40}
+        )
     )
     with pytest.raises(EntryFetchError, match="moved"):
         pipeline.resolve(
@@ -649,7 +651,9 @@ def test_non_strict_records_the_move_in_the_note(rig):
     _, _, pipeline = rig
     git = _ScriptedGit()
     ctx = make_context(
-        source_session=_session(git, baselines={(GIT_URL, "main"): "b" * 40})
+        source_session=_session(
+            git, baselines={(GIT_URL, "main", "non_strict"): "b" * 40}
+        )
     )
     decl = pipeline.resolve(
         ctx,
@@ -702,7 +706,9 @@ def test_an_inline_strict_refusal_names_the_ref_it_refused(rig):
     _, _, pipeline = rig
     git = _ScriptedGit()
     ctx = make_context(
-        source_session=_session(git, baselines={(GIT_URL, "main"): "b" * 40})
+        source_session=_session(
+            git, baselines={(GIT_URL, "main", "strict"): "b" * 40}
+        )
     )
     with pytest.raises(EntryFetchError, match=f"{GIT_URL}@main"):
         pipeline.resolve(
@@ -714,10 +720,10 @@ def test_an_inline_strict_refusal_names_the_ref_it_refused(rig):
 
 
 def test_two_names_over_one_repository_are_two_rows_and_one_baseline(rig):
-    """Report rows are per declaration; baselines are per ``(url, ref)``. A
-    document that names one repository twice gets both names back in the
-    report — each author finds the name they wrote — and one checkout, one
-    sha, and one baseline key behind them."""
+    """Report rows are per declaration; baselines are per ``(url, ref, mode)``.
+    A document that names one repository twice at one mode gets both names back
+    in the report — each author finds the name they wrote — and one checkout,
+    one sha, and one baseline key behind them."""
     _, _, pipeline = rig
     git = _ScriptedGit()
     session = _session(git, sources={
@@ -732,8 +738,81 @@ def test_two_names_over_one_repository_are_two_rows_and_one_baseline(rig):
     assert {r.resolved_sha for r in records} == {_FAKE_SHA}
     # One key, so the next apply reads one baseline for both rows — the apply
     # service's own test pins that the collapse survives the report round trip.
-    assert {(r.url, r.ref) for r in records} == {(GIT_URL, "main")}
+    assert {(r.url, r.ref, r.mode) for r in records} == {
+        (GIT_URL, "main", "non_strict")
+    }
     assert len(git.specs) == 1, "one checkout per (url, ref) per apply"
+
+
+def test_a_non_strict_alias_cannot_advance_a_strict_pin(rig):
+    """One repository, one ref, declared twice at two modes — and the pin holds.
+
+    This configuration is legal and not even exotic: an author says "these
+    entries may follow the branch, that one may not", and both read the same
+    repository. When the ref moves, the lax declaration delivers the new commit
+    and records it; the pinned one refuses.
+
+    The danger is what the *next* apply then reads. If both declarations shared
+    a baseline, the sha the lax one recorded would become the pin's baseline,
+    and the next apply — with nothing in the document changed — would hand the
+    pinned entry the very commit it had just rejected. That is strict mode
+    degraded to "refuse each move exactly once, then deliver it", which is the
+    failure the adopt-after-the-gate ordering exists to prevent; it would just
+    have come in sideways, through a different declaration, one apply later.
+
+    ``mode`` is in the baseline key so the two keep separate histories.
+    """
+    _, _, pipeline = rig
+    old = "b" * 40
+    sources = {
+        "pinned": {"protocol": "git", "url": GIT_URL, "ref": "main",
+                   "mode": "strict"},
+        "loose": {"protocol": "git", "url": GIT_URL, "ref": "main",
+                  "mode": "non_strict"},
+    }
+
+    # Apply N: the ref has moved off `old`, and both declarations see it.
+    git = _ScriptedGit()
+    session = _session(
+        git, sources=sources,
+        baselines={
+            (GIT_URL, "main", "strict"): old,
+            (GIT_URL, "main", "non_strict"): old,
+        },
+    )
+    ctx = make_context(source_session=session)
+
+    loose = pipeline.resolve(ctx, entry={"from": "loose"}, category="skills")
+    assert isinstance(loose, GitDelivery)
+    assert loose.note() and old in loose.note()  # delivered, and the move noted
+    with pytest.raises(EntryFetchError, match="moved"):
+        pipeline.resolve(ctx, entry={"from": "pinned"}, category="skills")
+
+    # The report carries the lax delivery — provenance is not sacrificed — but
+    # it is stamped with the mode it was resolved under, and the refused
+    # declaration adopted nothing.
+    rows = session.resolution_records()
+    assert [(r.name, r.mode, r.resolved_sha) for r in rows] == [
+        ("loose", "non_strict", _FAKE_SHA)
+    ]
+
+    # Apply N+1, document unchanged: the baselines the service rebuilds from
+    # that report leave the strict key untouched, so the pin still refuses.
+    rebuilt = {(r.url, r.ref, r.mode): r.resolved_sha for r in rows}
+    # Stated as an equality rather than "the strict key is absent": absent is
+    # also what an empty map gives, and a map that silently stopped carrying
+    # the mode would satisfy the weaker form for the wrong reason.
+    assert rebuilt == {(GIT_URL, "main", "non_strict"): _FAKE_SHA}
+    next_session = _session(
+        git, sources=sources,
+        baselines={**{(GIT_URL, "main", "strict"): old}, **rebuilt},
+    )
+    with pytest.raises(EntryFetchError, match="moved"):
+        pipeline.resolve(
+            make_context(source_session=next_session),
+            entry={"from": "pinned"},
+            category="skills",
+        )
 
 
 def test_strict_passes_when_the_document_re_pins_the_ref(rig):
@@ -746,7 +825,9 @@ def test_strict_passes_when_the_document_re_pins_the_ref(rig):
     _, _, pipeline = rig
     git = _ScriptedGit()
     ctx = make_context(
-        source_session=_session(git, baselines={(GIT_URL, "v1"): "b" * 40})
+        source_session=_session(
+            git, baselines={(GIT_URL, "v1", "strict"): "b" * 40}
+        )
     )
     decl = pipeline.resolve(
         ctx,
@@ -773,7 +854,9 @@ def test_strict_passes_when_the_document_re_points_the_url(rig):
     git = _ScriptedGit()
     other = "https://git.corp/other.git"
     ctx = make_context(
-        source_session=_session(git, baselines={(GIT_URL, "main"): "b" * 40})
+        source_session=_session(
+            git, baselines={(GIT_URL, "main", "strict"): "b" * 40}
+        )
     )
     decl = pipeline.resolve(
         ctx,
@@ -795,7 +878,9 @@ def test_a_sha_shaped_ref_trips_neither_branch(rig):
     _, _, pipeline = rig
     git = _ScriptedGit()
     ctx = make_context(
-        source_session=_session(git, baselines={(GIT_URL, _FAKE_SHA): _FAKE_SHA})
+        source_session=_session(
+            git, baselines={(GIT_URL, _FAKE_SHA, "strict"): _FAKE_SHA}
+        )
     )
     decl = pipeline.resolve(
         ctx,
@@ -815,7 +900,9 @@ def test_non_strict_does_not_call_a_re_pin_a_move(rig):
     _, _, pipeline = rig
     git = _ScriptedGit()
     ctx = make_context(
-        source_session=_session(git, baselines={(GIT_URL, "v1"): "b" * 40})
+        source_session=_session(
+            git, baselines={(GIT_URL, "v1", "non_strict"): "b" * 40}
+        )
     )
     decl = pipeline.resolve(
         ctx,
@@ -851,7 +938,7 @@ def test_git_keep_last_falls_back_to_the_baseline_receipt(rig):
     ctx = make_context(source_session=_session(
         git,
         sources={"app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"}},
-        baselines={(GIT_URL, "main"): old_sha},
+        baselines={(GIT_URL, "main", "non_strict"): old_sha},
     ))
     result = pipeline.resolve(
         ctx,
@@ -885,7 +972,7 @@ def test_git_keep_last_has_no_receipt_to_reuse_after_a_re_pin(rig):
         sources={"app": {"protocol": "git", "url": GIT_URL, "ref": "v2",
                          "subpath": "pkg"}},
         # Recorded against the ref the document used to name.
-        baselines={(GIT_URL, "v1"): old_sha},
+        baselines={(GIT_URL, "v1", "non_strict"): old_sha},
     ))
     with pytest.raises(EntryFetchError, match="git fetch failed"):
         pipeline.resolve(
