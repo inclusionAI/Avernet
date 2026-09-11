@@ -23,6 +23,16 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
 class ApplyPhase(StrEnum):
     """Whether a construct can be materialised before a container exists.
 
+    Two values, lowercase on the wire::
+
+        ApplyPhase.PRE_CONTAINER.value == "pre_container"
+        ApplyPhase.ON_CONTAINER.value  == "on_container"
+
+    Created by: this module's :data:`APPLY_ORDER` table, one phase per step.
+    Consumed by: :func:`steps_for` as the filter, the creation job (which
+    passes one at a time), and ``apply/delivery``, which re-phases every
+    non-script step to ``PRE_CONTAINER`` for teclaw.
+
     The split is not organisational. The two halves have **opposite**
     delivery-time constraints, and an orchestrator that ignored that would be
     one W13 has to bypass:
@@ -47,10 +57,24 @@ class ApplyPhase(StrEnum):
 
 @dataclass(frozen=True)
 class ApplyStep:
-    """One construct's place in the order."""
+    """One construct's place in the order::
 
+        ApplyStep(ManifestSection.SCRIPT, ApplyPhase.PRE_CONTAINER, 0)
+        ApplyStep(ManifestCategory.IDENTITY, ApplyPhase.ON_CONTAINER, 1)
+
+    Created by: :data:`APPLY_ORDER`, and rebuilt with a swapped ``phase`` by
+    ``apply/delivery`` for the teclaw family.
+    Consumed by: :func:`steps_for` and ``apply/orchestrator``, which walks the
+    steps in order.
+    """
+
+    #: Which construct this step applies.
     construct: ApplyConstruct
+    #: Which half of the creation path it belongs to. The **ARCA** family's
+    #: answer; teclaw's delivery strategy overrides it.
     phase: ApplyPhase
+    #: The sort key, 0-6, unique across the table. Shared by both families —
+    #: only the phase is family-specific.
     position: int
 
 
@@ -91,12 +115,21 @@ ALL_PHASES: frozenset[ApplyPhase] = frozenset(ApplyPhase)
 
 
 def steps_for(phases: frozenset[ApplyPhase] | None = None) -> tuple[ApplyStep, ...]:
-    """The steps in the requested phases, in position order.
+    """The steps in the requested phases, in position order::
+
+        steps_for()                                     # all seven, 0..6
+        steps_for(ALL_PHASES)                           # the same
+        steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))
+        # -> (ApplyStep(ManifestSection.SCRIPT, PRE_CONTAINER, 0),)
+        steps_for(frozenset({ApplyPhase.ON_CONTAINER}))
+        # -> the other six, positions 1..6
+
+    Called by: ``apply/orchestrator`` and ``apply/delivery``.
 
     ``None`` means both, which is what an ordinary apply on an existing bot
-    wants. W13 passes one at a time — ``PRE_CONTAINER`` before the start command
-    is composed, ``ON_CONTAINER`` once the container is up — and gets one report
-    from each.
+    wants. The creation job passes one at a time — ``PRE_CONTAINER`` before the
+    start command is composed, ``ON_CONTAINER`` once the container is up — and
+    gets one report from each.
     """
     wanted = ALL_PHASES if phases is None else phases
     return tuple(

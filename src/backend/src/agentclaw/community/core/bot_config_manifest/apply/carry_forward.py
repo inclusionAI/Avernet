@@ -30,6 +30,27 @@ def carry_forward(
 ) -> ApplyReport:
     """Fold an earlier apply's categories into this one's report.
 
+    Answers a **new** :class:`~...outcomes.ApplyReport` that keeps this
+    apply's own identity (``apply_id``, ``trigger``, both timestamps) and
+    concatenates the earlier apply's ``categories``, ``sources`` and ``notes``
+    in front of this one's, re-deriving ``status`` over the union::
+
+        # phase A wrote script and failed it; phase B wrote mcp cleanly
+        carry_forward(phase_b_report, ctx=ctx,
+                      carry_from_apply_id="ap_phaseA", ...)
+        # -> ApplyReport(apply_id="ap_phaseB",
+        #                status=ApplyStatus.PARTIAL,      # re-derived
+        #                categories=(<script, aborted>, <mcp, clean>))
+
+    ``applies`` is the apply record repository (its ``get`` is called with
+    ``env``/``entity_id``/``bot_id``/``apply_id``) and ``to_report`` is the
+    codec that decodes a record back into a report. Both are passed in rather
+    than imported, so this module needs no part of the apply service.
+
+    Returns ``report`` unchanged, never raising, when
+    ``carry_from_apply_id`` is falsy, names no record for this bot, or decodes
+    to nothing.
+
     One creation produces **two** applies — the pre-container phase writes
     ``script``, the post-container phase writes everything else — separated by
     the whole of container provisioning. Each mints its own ``apply_id`` and its

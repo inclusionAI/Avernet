@@ -49,7 +49,27 @@ def declared_entries(
 ) -> Sequence[dict[str, Any]] | None:
     """What the document declares for one construct, or ``None`` if it does not.
 
-    The distinction this returns is the load-bearing one in §3.2, and it is why
+    ``parsed`` is the whole validated document. Worked through for one
+    document::
+
+        parsed = {
+            "schema_version": 1,
+            "script": {"body": "echo hi"},
+            "manifest": {"mcp": [{"server_code": "gh"}], "skills": []},
+        }
+
+        declared_entries(parsed, ManifestSection.SCRIPT)
+        # -> [{"body": "echo hi"}]      a section arrives as a one-entry list
+        declared_entries(parsed, ManifestCategory.MCP)
+        # -> [{"server_code": "gh"}]
+        declared_entries(parsed, ManifestCategory.SKILLS)
+        # -> []                         declared empty: remove everything
+        declared_entries(parsed, ManifestCategory.RESOURCES)
+        # -> None                       not declared: do not touch the area
+
+    Called by: :meth:`ApplyOrchestrator.apply`, once per step it walks.
+
+    The distinction this returns is the load-bearing one, and it is why
     the return type is ``None``-or-list rather than just a list:
 
     * ``None`` — **not declared**. No opinion; the area is untouched and nothing
@@ -85,9 +105,15 @@ def declared_entries(
 class ApplyOrchestrator:
     """Applies a parsed manifest to one bot, category by category.
 
+    Constructed with the registry map (construct → materialiser) and a
+    ``steps`` callable, which is the engine family's phase table: ARCA passes
+    ``apply.order.steps_for``, teclaw passes its delivery strategy's re-phased
+    version. There is no default, so the table in use is always visible at the
+    call site.
+
     Holds no per-apply state: everything is passed in and the report comes back
-    out. That is what lets W13 call it twice — once per phase, around container
-    provisioning — and get one report from each.
+    out. That is what lets the creation job call it twice — once per phase,
+    around container provisioning — and get one report from each.
     """
 
     def __init__(
@@ -116,6 +142,11 @@ class ApplyOrchestrator:
         dry_run: bool = False,
     ) -> ApplyReport:
         """Walk the order, apply what is declared, and report what happened.
+
+        Answers one :class:`~...outcomes.ApplyReport` carrying one
+        :class:`~...outcomes.CategoryResult` per **declared** construct — a
+        construct the document does not mention contributes no row at all, so
+        a report's ``categories`` is usually shorter than the order table.
 
         ``phases`` selects which half runs; ``None`` is both, which is what an
         apply on an existing bot wants. ``dry_run`` stops each construct after
@@ -170,10 +201,22 @@ class ApplyOrchestrator:
     ) -> CategoryResult:
         """One declared construct, through the three stages.
 
-        Every failure path here leaves the construct's area **exactly as it
-        was**. That is §3.2's all-or-nothing rule, and under overwrite it is not
-        a nicety: writing ``{A}`` when the declaration was ``{A, B}`` deletes B,
-        so a partially-materialised category is a *destructive* one.
+        The five exits, and what each answers:
+
+        * no materialiser registered → aborted, every entry ``FAILED`` with
+          ``NO_MATERIALISER_REASON``;
+        * ``resolve`` raised, or ``plan`` raised → aborted, every entry
+          ``FAILED`` with ``"resolve failed: …"`` / ``"plan failed: …"``;
+        * ``resolve`` returned failures → aborted, the named entries
+          ``FAILED``, their neighbours ``SKIPPED``;
+        * ``dry_run`` → the plan, shaped as the result it predicts, not
+          aborted;
+        * ``write`` raised → aborted **and** ``partially_written=True``.
+
+        Every failure path except the last leaves the construct's area exactly
+        as it was. That is the all-or-nothing rule, and under overwrite it is
+        not a nicety: writing ``{A}`` when the declaration was ``{A, B}``
+        deletes B, so a partially-materialised category is a *destructive* one.
         """
         materialiser = self._materialisers.get(construct)
         if materialiser is None:
@@ -268,6 +311,11 @@ class ApplyOrchestrator:
     ) -> CategoryResult:
         """The category was not written. Report every entry, blame precisely.
 
+        Exactly one of ``cause`` and ``reason`` is meaningful. ``reason`` is a
+        whole-category cause, so every entry carries it verbatim; ``cause``
+        carries per-entry failures, so the named entries get their own reason
+        and the rest are ``SKIPPED``.
+
         The entry that *caused* the abort is ``FAILED`` with its own reason;
         every other declared entry is ``SKIPPED`` — "not written because its
         category was aborted". Getting that split right is what makes a report
@@ -322,7 +370,14 @@ class ApplyOrchestrator:
     def _projected(
         self, construct: ApplyConstruct, plan: CategoryPlan
     ) -> CategoryResult:
-        """A dry run's answer: the plan, shaped as the result it predicts."""
+        """A dry run's answer: the plan, shaped as the result it predicts.
+
+        Each :class:`~...registry.PlannedEntry` becomes an
+        :class:`~...outcomes.EntryResult` carrying the same outcome, with no
+        ``reason`` and no ``note`` — a projection cannot know what a write
+        would have reported. ``aborted`` is ``False``: a plan that could be
+        computed is not a failure.
+        """
         return CategoryResult(
             construct=construct,
             entries=tuple(

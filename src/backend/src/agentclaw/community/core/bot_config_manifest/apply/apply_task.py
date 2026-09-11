@@ -40,13 +40,16 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-#: The registry key. One type for all three cases (module docstring).
+#: The registry key, ``"config_manifest.apply"``. One type for all three cases
+#: (see the module docstring); the apply record's ``trigger`` column is what
+#: distinguishes them.
 APPLY_TASK_TYPE = "config_manifest.apply"
 
-#: Give-up horizon for one apply. Generous on purpose: this bounds a *task*, and
-#: an apply that legitimately takes minutes (W5 fetching several sources) must
-#: not be retired mid-write. It sits inside the apply lock's own TTL so a task
-#: retired here cannot outlive the lock that a later apply would reap.
+#: Give-up horizon for one apply, in seconds: 1200, i.e. 20 minutes. Generous
+#: on purpose — this bounds a *task*, and an apply that legitimately takes
+#: minutes fetching several sources must not be retired mid-write. It sits
+#: inside the apply lock's own 30-minute TTL, so a task retired here cannot
+#: outlive the lock that a later apply would reap.
 APPLY_TASK_DEADLINE_SECONDS = 20 * 60
 
 
@@ -68,6 +71,32 @@ def build_apply_task_payload(
     bot_type: Optional[str] = None,
 ) -> dict[str, Any]:
     """The task payload: identifiers, never state.
+
+    A plain JSON-safe dict, stored in ``ac_task_queue.payload``::
+
+        {
+            "apply_id": "ap_01HZX8",
+            "entity_id": "ent_7",
+            "bot_id": "bot_42",
+            "owner_id": "usr_owner",
+            "actor_id": "usr_collaborator",
+            "env": "prod",
+            "tenant": "acme",
+            "trigger": "create:pre_container",
+            "lock_token": "lk_3f9c...",
+            "started_at": "2026-03-01T09:00:00+00:00",
+            "phases": ["pre_container"],     # sorted .value strings
+            "carry_from_apply_id": None,     # or an earlier phase's apply_id
+            "engine_type": "claude_code",    # only read when there is no
+            "bot_type": "arca",              # bot record yet
+        }
+
+    ``phases`` is sorted so two enqueues of one apply cannot differ by set
+    iteration order, and is never ``None``: what an apply covers is always
+    stated rather than reconstructed from a default at the far end.
+
+    Consumed by: :meth:`ApplyTaskHandler.handle`, which passes it straight to
+    ``BotConfigManifestApplyService.run_apply_task``.
 
     Two things are deliberately absent, and both would be bugs to add.
 
@@ -117,7 +146,16 @@ def build_apply_task_payload(
 
 
 def phases_from_payload(value: Sequence[str]) -> frozenset[ApplyPhase]:
-    """The phases the payload names. Always present — see the builder."""
+    """The phases the payload names, back as enum members::
+
+        phases_from_payload(["pre_container"])
+        # -> frozenset({ApplyPhase.PRE_CONTAINER})
+        phases_from_payload(["on_container", "pre_container"])
+        # -> ALL_PHASES
+
+    Raises ``ValueError`` on an unknown phase name rather than dropping it.
+    Always present in a payload — see the builder.
+    """
     return frozenset(ApplyPhase(item) for item in value)
 
 

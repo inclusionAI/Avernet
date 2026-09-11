@@ -35,7 +35,34 @@ if TYPE_CHECKING:  # pragma: no cover — see the module docstring
 
 
 class DeviceResource(ResourceFilePort):
-    """The ARCA resource road: workspace files onto the bot's live container."""
+    """The ARCA resource road: workspace files onto the bot's live container.
+
+    Three methods, each forwarded verbatim. What a call looks like from the
+    ``resources`` materialiser::
+
+        await port.upload_file(
+            entity_id="ent_7", bot_id="bot_42",
+            engine_type="claude_code",
+            target_dir="data",            # the directory part of the path
+            filename="faq.csv",           # the file part
+            data=b"q,a\n...",
+        )                                  # -> the service's own result dict
+
+        await port.exists(entity_id="ent_7", bot_id="bot_42",
+                          engine_type="claude_code",
+                          path="data/faq.csv")     # -> True | False
+
+        await port.delete(entity_id="ent_7", bot_id="bot_42",
+                          engine_type="claude_code",
+                          path="data/faq.csv")     # -> True | False
+
+    ``entity_type`` defaults to ``"staff"`` on all three; apply never passes
+    anything else.
+
+    Bound as ``MaterialiserPorts.resource_service`` for the ARCA family. Its
+    platform-managed counterpart is ``PlatformResource`` in
+    ``managed_files/ports.py``.
+    """
 
     def __init__(self, inner: ResourceFileService) -> None:
         self._inner = inner
