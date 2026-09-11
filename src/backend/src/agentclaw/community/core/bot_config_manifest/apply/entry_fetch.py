@@ -199,27 +199,19 @@ class EntryFetcher:
             )
 
         keep_last = entry.get("on_fetch_failure", "keep_last") == "keep_last"
-        name: Optional[str] = None
-        raw: Optional[Mapping[str, Any]] = None
-
-        if isinstance(entry.get("from"), str):
-            name = entry["from"]
-            raw = session.sources.get(name)
-            if raw is None:
+        name, raw = _raw_declaration(ctx, entry)
+        if raw is None:
+            if name is not None:
                 raise EntryFetchError(
                     f"'from' names source {name!r}, which is not declared "
                     "under 'sources'"
                 )
-        elif isinstance(inline, Mapping):
-            raw = inline
-        else:
             raise EntryFetchError(
                 "an entry must name one of 'from', 'source' or 'content', "
                 "and 'source' is a declaration object carrying a 'protocol' "
                 "(declare 'protocol: git' or 'protocol: oss') — a URL written "
                 "as a plain string is not one"
             )
-        assert raw is not None
 
         # The one place a stored declaration is read. The PUT validator parses
         # through the same pure function, so a document that was accepted
@@ -261,6 +253,43 @@ class EntryFetcher:
         )
 
 
+def _raw_declaration(
+    ctx: FetchContext, entry: Mapping[str, Any]
+) -> tuple[Optional[str], Any]:
+    """The declaration an entry names, unparsed, and the name it named it by::
+
+        _raw_declaration(ctx, {"from": "content", "subpath": "faq.csv"})
+        # -> ("content", {"protocol": "git", "url": "https://..."})
+
+        _raw_declaration(ctx, {"source": {"protocol": "oss", ...}})
+        # -> (None, {"protocol": "oss", ...})
+
+        _raw_declaration(ctx, {"content": "inline text"})
+        # -> (None, None)
+
+    Two callers, one lookup: :meth:`EntryFetcher.fetch_declared` and
+    :func:`declared_protocol`. They used to each spell out "a ``from`` name in
+    ``session.sources``, else the entry's own ``source`` mapping", which is two
+    places for one rule to be true in — and the two of them must agree, because
+    the second exists precisely to predict what the first will do.
+
+    **A ``from`` name's value comes back exactly as ``sources`` holds it**,
+    Mapping or not, while an inline ``source`` that is not a Mapping comes back
+    as ``None``. That asymmetry is the callers' existing behaviour and worth
+    keeping: a *declared* source that does not parse deserves the parser's
+    reason rather than "which is not declared under 'sources'", while an entry
+    whose ``source`` is a bare URL string has declared nothing at all. Each
+    caller narrows on its own terms.
+    """
+    from_name = entry["from"] if isinstance(entry.get("from"), str) else None
+    if from_name is not None:
+        return from_name, (getattr(ctx.source_session, "sources", None) or {}).get(
+            from_name
+        )
+    inline = entry.get("source")
+    return None, inline if isinstance(inline, Mapping) else None
+
+
 def declared_protocol(
     ctx: FetchContext, entry: Mapping[str, Any]
 ) -> Optional[SourceKind]:
@@ -295,15 +324,14 @@ def declared_protocol(
     applies.
 
     Read through the same parser the ``PUT`` validator and ``fetch_declared``
-    use, so a fourth derivation cannot appear.
+    use, and off the same lookup ``fetch_declared`` uses
+    (:func:`_raw_declaration`), so a fourth derivation cannot appear and this
+    cannot drift from the road it predicts.
     """
-    raw: Any = entry.get("source")
-    if isinstance(entry.get("from"), str):
-        session = ctx.source_session
-        raw = (getattr(session, "sources", None) or {}).get(entry["from"])
+    _, raw = _raw_declaration(ctx, entry)
     if not isinstance(raw, Mapping):
         return None
-    decl, _ = parse_source(raw)
+    decl, _violations = parse_source(raw)
     return None if decl is None else decl.protocol
 
 
