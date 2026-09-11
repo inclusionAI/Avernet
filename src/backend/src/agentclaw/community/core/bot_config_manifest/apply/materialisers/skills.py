@@ -1,6 +1,29 @@
 """``skills`` → local upload + direct activation — the active skill set.
 
-The area is the one work-items §3.2 names: the bot's **active** skill set —
+**The entry shape.** ``identity`` for this category is the entry's ``name``,
+which must equal the name in the package's own ``SKILL.md`` front matter.
+Both source spellings are accepted::
+
+    manifest:
+      skills:
+        # a named source
+        - name: quality-check
+          from: packages
+          subpath: quality-check     # selects a subtree, then re-packed
+          on_fetch_failure: keep_last
+
+        # an inline source; the legacy bare-string spelling shown here is
+        # what the tests drive, and is still readable from stored documents
+        - name: quality-check
+          source: https://content.example/skills/quality-check.zip
+          digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b...
+
+An entry reaches ``resolve`` as the raw mapping, e.g.
+``{"name": "quality-check", "source": "https://…/quality-check.zip",
+"digest": "sha256:…"}``.
+
+The area is the one the all-or-nothing rule names: the bot's **active** skill
+set —
 ``BotCapabilityStateReader.active_skill_assets`` after its flush, the same
 read the public listing answers from. Declared and not active ⇒ uploaded and
 activated. Active and no longer declared ⇒ deactivated. Active and unchanged
@@ -95,16 +118,25 @@ logger = get_logger()
 
 _FETCH_CATEGORY = FetchCategory.SKILLS
 
-#: URL path suffix → archive kind. Ordered so the longer tar suffix is tried
-#: before a hypothetical shorter one; ``.tgz`` is the autoroute of the same
-#: kind.
+#: URL path suffix → the archive kind ``unpack_archive`` takes::
+#:
+#:     "https://content.example/skills/quality-check.zip"  -> "zip"
+#:     "https://content.example/skills/qc.tar.gz"          -> "tar.gz"
+#:     "https://content.example/skills/qc.tgz"             -> "tar.gz"
+#:
+#: Matched against the delivery's ``source_url``, which on the object road is
+#: the ``oss://bucket/key`` form — so the key's own extension is what decides.
+#: Tried before :data:`_KIND_BY_CONTENT_TYPE`.
 _KIND_BY_SUFFIX: tuple[tuple[str, str], ...] = (
     (".zip", "zip"),
     (".tar.gz", "tar.gz"),
     (".tgz", "tar.gz"),
 )
 
-#: Fallback when the URL does not say: the media type the source served.
+#: Fallback when the URL does not say: the media type the source served, as
+#: ``EntryDelivery.content_type()`` reports it. ``None`` there — which is
+#: always the case on the git road and usual on the object road — means the
+#: source said nothing, and the entry is refused rather than guessed at.
 _KIND_BY_CONTENT_TYPE: tuple[tuple[str, str], ...] = (
     ("application/zip", "zip"),
     ("application/x-zip-compressed", "zip"),
@@ -115,11 +147,46 @@ _KIND_BY_CONTENT_TYPE: tuple[tuple[str, str], ...] = (
 
 
 class _PackageRefusal(Exception):
-    """The fetched bytes can never become a skill package — refuse the entry."""
+    """The fetched bytes can never become a skill package — refuse the entry.
+
+    Internal to this module: raised by the packaging helpers and caught in
+    ``resolve``, which turns ``str(exc)`` into the entry's
+    :class:`~...registry.ResolveFailure` reason. Distinct from
+    :class:`~...entry_delivery.EntryFetchError`, which means the bytes never
+    arrived at all.
+    """
 
 
 class _SkillPackage:
-    """One entry's validated, upload-ready package — the intent's value."""
+    """One entry's validated, upload-ready package — the intent's value.
+
+    Carried as ``Intent.value``, so a planned entry reads
+    ``planned.intent.value.canonical_zip``::
+
+        _SkillPackage(
+            name="quality-check",          # from the package's SKILL.md
+            canonical_zip=b"PK\x03\x04...",  # what upload_local_skill takes
+            from_store=False,
+            note=None,
+        )
+        # .content_digest is derived, not passed:
+        #   "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b..."
+
+    On a ``keep_last`` fallback the same object carries the reason, which the
+    write puts on the entry's report row::
+
+        _SkillPackage(
+            name="quality-check",
+            canonical_zip=b"PK\x03\x04...",
+            from_store=True,
+            note=("delivered from the platform's stored copy (keep_last): "
+                  "the source fetch failed — ..."),
+        )
+
+    Created by: :meth:`SkillsMaterialiser.resolve`.
+    Consumed by: that materialiser's ``plan`` (``content_digest``) and
+    ``write`` (``canonical_zip``, ``name``, ``note``).
+    """
 
     __slots__ = ("name", "canonical_zip", "content_digest", "from_store", "note")
 
@@ -149,7 +216,21 @@ class _SkillPackage:
 
 
 class SkillsMaterialiser(Materialiser):
-    """Converges the bot's active skills toward the declared package set."""
+    """Converges the bot's active skills toward the declared package set.
+
+    ``identity`` is the entry's ``name``, e.g. ``"quality-check"``, and
+    ``Intent.value`` is a :class:`_SkillPackage`. The three stages, for one
+    entry naming a skill the bot does not yet have::
+
+        resolve -> ResolveResult(intents=(Intent(
+                       identity="quality-check",
+                       value=_SkillPackage("quality-check", b"PK...", ...)),))
+        plan    -> CategoryPlan(
+                       entries=(PlannedEntry(<that intent>, "created"),),
+                       removals=("retired-skill",))
+        write   -> (EntryResult(ManifestCategory.SKILLS, "quality-check",
+                                EntryOutcome.CREATED),)
+    """
 
     construct = ManifestCategory.SKILLS
 

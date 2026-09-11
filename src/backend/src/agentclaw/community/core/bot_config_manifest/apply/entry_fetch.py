@@ -860,7 +860,7 @@ class EntryFetcher:
                        content=b"acm-tree-v1\n5:a.txt2:hi...",
                        source_url=("git+https://code.example.com/team/"
                                    "content.git@4f2a9c1b...:kb"),
-                       category="resources_unpacked",
+                       category="resources_archive",
                        entry_identity="data/prices/",
                        credential_name="git-prod")
             # -> "sha256:2c26b46b68ffc68ff99b453c1d30413413422d70..."

@@ -1,6 +1,36 @@
 """``resources`` → ``ResourceFileService``: workspace files and directory trees.
 
-Three invariants, all from the W6 work item:
+**The entry shape.** ``identity`` for this category is the entry's ``path``,
+verbatim including any trailing slash. The trailing slash is the **form
+discriminator**: ``data/faq.csv`` is a file entry, ``data/prices/`` is a
+directory entry. Three source spellings are accepted::
+
+    manifest:
+      resources:
+        # inline content: no fetch at all
+        - path: notes/hello.txt
+          content: |
+            hello
+
+        # a named source, file form
+        - path: data/faq.csv
+          from: content
+          subpath: faq.csv          # composes with the source's subpath
+
+        # a named source, directory form. Over 'oss' the tree must travel
+        # as an archive, so 'unpack' is required; over git it is refused,
+        # because a repository hands over a real tree.
+        - path: data/prices/
+          from: artifacts
+          key: prices.tgz
+          unpack: tar.gz
+          strip_components: 1
+
+An entry reaches ``resolve`` as the raw mapping, e.g. ``{"path":
+"data/prices/", "from": "artifacts", "key": "prices.tgz", "unpack":
+"tar.gz", "strip_components": 1}``.
+
+Three invariants:
 
 - **One write chain for both engine families.** ``ResourceFileService``'s
   dispatcher already fans out per transport (arca / baas: device sync; teclaw:
@@ -101,6 +131,14 @@ class _DeclaredTree:
     """The declared-tree marker intent's value — an explicit object, never
     ``None``.
 
+    Carries no data: it exists so ``write`` can tell "delete this whole tree
+    first" from an ordinary member write. One directory entry produces one
+    marker intent plus one intent per member::
+
+        Intent(identity="data/prices/", value=_DECLARED_TREE)
+        Intent(identity="data/prices/2026.csv", value=b"date,price\n...")
+        Intent(identity="data/prices/2025.csv", value=b"date,price\n...")
+
     ``None`` is ``Intent.value``'s dataclass *default*, so keying the tree
     marker on it would let any future intent constructed without an
     explicit value silently promise a whole-tree deletion at write time.
@@ -110,13 +148,40 @@ class _DeclaredTree:
     __slots__ = ()
 
 
-#: The single marker instance: ``Intent.value`` for a declared directory,
-#: identity the declared path with its trailing slash.
+#: The single marker instance, shared by every declared directory. Compared by
+#: identity, so there is deliberately only ever one. ``Intent.value`` for a
+#: declared directory; the intent's ``identity`` is the declared path with its
+#: trailing slash, e.g. ``"data/prices/"``.
 _DECLARED_TREE = _DeclaredTree()
 
 
 class ResourcesMaterialiser(Materialiser):
-    """Converges declared workspace resources toward the declaration."""
+    """Converges declared workspace resources toward the declaration.
+
+    ``identity`` is the entry's ``path``; ``Intent.value`` is the member's
+    ``bytes``, or :data:`_DECLARED_TREE` for a directory marker. A directory
+    entry fans out into several intents, so a plan usually carries more
+    entries than the document declared::
+
+        # from one entry, path "data/prices/", whose archive ships two files
+        resolve -> ResolveResult(intents=(
+                       Intent("data/prices/", _DECLARED_TREE),
+                       Intent("data/prices/2026.csv", b"date,price\n..."),
+                       Intent("data/prices/2025.csv", b"date,price\n...")))
+        plan    -> CategoryPlan(entries=(
+                       PlannedEntry(<2026>, "created"),
+                       PlannedEntry(<2025>, "created")),
+                       removals=("data/prices/",))
+        write   -> (EntryResult(RESOURCES, "data/prices/2026.csv", CREATED),
+                    EntryResult(RESOURCES, "data/prices/2025.csv", CREATED))
+
+    The marker does **not** become a ``PlannedEntry``: it leaves ``resolve``
+    as an intent and leaves ``plan`` as a ``removals`` row, which is what
+    gives the destructive tree replacement its audit row.
+
+    ``plan`` never answers ``unchanged`` for this category: every apply
+    rewrites every member, so the category is never ``is_noop``.
+    """
 
     construct = ManifestCategory.RESOURCES
 
