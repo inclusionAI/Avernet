@@ -5,6 +5,41 @@ by itself does not change the running UI. Select `FRONTEND_VARIANT=nextgen`
 for **every** setup/start/stop/status invocation, or persist it in the checkout's
 untracked `.env.local`. Do not copy secrets between worktrees.
 
+## FRONTEND_VARIANT=teamclaw: the external internal-UI checkout
+
+`src/frontend-nextgen` is the exported open-core subset of the TeamClaw UI —
+internal-only capabilities are deliberately stripped by the exporter. To run
+the **full internal frontend** (the product UI under development), use the
+`teamclaw` variant, which serves an external checkout through the same
+Gateway composition:
+
+```bash
+# .env.local of the Avernet checkout:
+FRONTEND_VARIANT=teamclaw
+TEAMCLAW_DIR=~/IdeaProjects/teamClawPre/teamclaw   # path to the internal checkout
+# TEAMCLAW_FRONTEND_AUTOUPDATE=0                    # default 1; see below
+```
+
+Then `bash scripts/singlebox.sh start frontend` (or `start all`) will:
+
+1. **Auto-update the checkout**: `git fetch origin`, then fast-forward the
+   current branch to its upstream — only when the tree is clean; a dirty or
+   detached checkout is left untouched with a warning naming the exact
+   `git merge --ff-only` command to run yourself. `TEAMCLAW_FRONTEND_AUTOUPDATE=0`
+   fetches and reports only. Updating never blocks startup.
+2. Install dependencies when missing or stale (`npm install
+   --legacy-peer-deps` — the internal graph is not lockfile-pinned and carries
+   sibling peer ranges that a plain install refuses).
+3. Start the dev server with the same Gateway defaults as nextgen
+   (`TEAMCLAW_GW_BASE`/`ADMIN`/private-chat/clawweb/aixharness → the Singlebox
+   Gateway; `TEAMCLAW_DEV_USER=001` matching the `/_dev/login` identity), then
+   run it through the standard readiness check (root element + `/umi.js`).
+
+The checkout's branch is yours to pick (the sprint branch is the usual line);
+auto-update follows whatever branch the checkout is on. The internal-only
+planes (private chat, clawweb, aix harness) have no singlebox counterpart —
+their panels fail visibly at the gateway instead of dangling on a placeholder.
+
 ## Sync the source, not an unrelated checkout
 
 The upstream TeamClaw repository owns the export. Use its clean, pinned source
