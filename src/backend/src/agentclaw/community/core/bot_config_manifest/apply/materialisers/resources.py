@@ -263,20 +263,19 @@ class ResourcesMaterialiser(Materialiser):
                 if isinstance(members, str):
                     failures.append(ResolveFailure(path, members))
                     continue
-                if delivery.needs_receipt():
-                    # The members are filed as **one canonical blob** under the
-                    # tree's receipt URL — the same shape the skills
-                    # materialiser files a package as, and for the same reason:
-                    # §2.8's audit and ``keep_last`` read one receipt per entry,
-                    # and a receipt per member would make a 5000-file tree 5000
-                    # rows describing one delivery.
-                    try:
-                        await asyncio.to_thread(
-                            self._file_tree, ctx, delivery, members, path
-                        )
-                    except EntryFetchError as exc:
-                        failures.append(ResolveFailure(path, exc.reason))
-                        continue
+                # The members are filed as **one canonical blob** under the
+                # tree's receipt URL — the same shape the skills materialiser
+                # files a package as, and for the same reason: §2.8's audit and
+                # ``keep_last`` read one receipt per entry, and a receipt per
+                # member would make a 5000-file tree 5000 rows describing one
+                # delivery.
+                try:
+                    await asyncio.to_thread(
+                        self._file_tree, ctx, delivery, members, path
+                    )
+                except EntryFetchError as exc:
+                    failures.append(ResolveFailure(path, exc.reason))
+                    continue
                 note = delivery.note()
                 # The declared-tree marker intent rides first so plan routes
                 # the tree into ``removals`` and write replaces it before
@@ -326,10 +325,9 @@ class ResourcesMaterialiser(Materialiser):
                     ctx, entry, path, _FETCH_CATEGORY_FILE
                 )
                 data = await asyncio.to_thread(delivery.single)
-                if delivery.needs_receipt():
-                    await asyncio.to_thread(
-                        self._file_one, ctx, delivery, data, path
-                    )
+                await asyncio.to_thread(
+                    self._file_one, ctx, delivery, data, path
+                )
             except EntryFetchError as exc:
                 failures.append(ResolveFailure(str(path), exc.reason))
                 continue
@@ -384,18 +382,17 @@ class ResourcesMaterialiser(Materialiser):
     ) -> None:
         """File a delivered tree with the store, as one canonical blob.
 
-        Only the roads that still owe a receipt reach here — the object road
-        filed what arrived inside the fetch. The credential name rides along,
-        so the lineage answers "which credential served this" identically on
-        both roads.
+        Unconditional, and the delivery decides what that means: the object
+        road filed what arrived inside the fetch and writes nothing again,
+        while the git road files these bytes under its own receipt identity
+        with the source's credential name riding along — so the lineage
+        answers "which credential served this" identically on both roads.
         """
-        self._fetcher.file_bytes(
+        delivery.file(
             ctx,
-            content=canonical_tree_bytes(members),
-            source_url=delivery.receipt_url(),
+            canonical_tree_bytes(members),
             category=_FETCH_CATEGORY_ARCHIVE,
             entry_identity=path,
-            credential_name=delivery.auth(),
         )
 
     def _file_one(
@@ -406,13 +403,11 @@ class ResourcesMaterialiser(Materialiser):
         path: str,
     ) -> None:
         """File one delivered file with the store. Same rule as the tree's."""
-        self._fetcher.file_bytes(
+        delivery.file(
             ctx,
-            content=data,
-            source_url=delivery.receipt_url(),
+            data,
             category=_FETCH_CATEGORY_FILE,
             entry_identity=path,
-            credential_name=delivery.auth(),
         )
 
     def _entry_failure(

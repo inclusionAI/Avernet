@@ -651,7 +651,13 @@ class GitSourceFetcher(SourceFetcher):
                 # assertion, so every member has a cap and a missing one is a
                 # bug to raise on rather than to paper over with the file cap.
                 file_limit=FETCH_ENTRY_LIMITS[request.category],
-            )
+            ),
+            # The one road that still owes the store a write: a checkout is
+            # not bytes, so what this entry delivers is the caller's to decide
+            # and the delivery's to file. Handed the same store this fetcher
+            # reads ``keep_last`` receipts from, so one entry's read and its
+            # write cannot end up on two policies.
+            self._content,
         )
 
     def _keep_last(

@@ -226,6 +226,41 @@ class FakeGitEntrySource(GitEntrySource):
         )
 
 
+class _RecordingStore:
+    """The content store a :class:`GitDelivery` files through, recorded.
+
+    The git road's delivery writes its own receipt now, so what used to be a
+    ``file_bytes`` recording on the fetcher is a store call here — in the
+    store's own vocabulary, which is what the real one receives.
+    """
+
+    def __init__(self, filed: list[dict]) -> None:
+        self._filed = filed
+
+    def store(
+        self,
+        fetched,
+        *,
+        scope,
+        source_url,
+        credential_name=None,
+        modifier="",
+        apply_id=None,
+        category=None,
+        entry_identity=None,
+    ):
+        self._filed.append(
+            {
+                "content": fetched.bytes,
+                "source_url": source_url,
+                "category": category,
+                "entry_identity": entry_identity,
+                "credential_name": credential_name,
+            }
+        )
+        return SimpleNamespace(digest=fetched.sha256)
+
+
 class FakeEntryFetcher:
     """Answers a declared entry with canned bytes; records what it resolved.
 
@@ -242,6 +277,8 @@ class FakeEntryFetcher:
         self.error = error
         self.calls: list[dict] = []
         self.filed: list[dict] = []
+        #: The store a git delivery files its own receipt through.
+        self.store = _RecordingStore(self.filed)
 
     def fetch_declared(self, ctx, *, entry, category, entry_identity=None):
         decl = None
@@ -281,16 +318,16 @@ class FakeEntryFetcher:
         if self.error is not None:
             raise self.error
         if decl.get("protocol") == "git":
-            return GitDelivery(FakeGitEntrySource(self.content, decl, entry))
+            return GitDelivery(
+                FakeGitEntrySource(self.content, decl, entry), self.store
+            )
         return BlobDelivery(
             FakeFetchedEntry(
                 self.content, self.digest or entry.get("digest") or ""
             )
         )
 
-    def file_bytes(self, ctx, **kwargs):
-        self.filed.append(kwargs)
-        return "sha256:filed"
+
 
 
 def code_of(module) -> str:

@@ -448,7 +448,7 @@ def test_the_funnel_requires_a_category_by_keyword():
         assert category.default is inspect.Parameter.empty
 
 
-# --- the W7 declared-source front door: fetch_declared / file_bytes ---
+# --- the W7 declared-source front door: fetch_declared ---
 
 GIT_URL = "https://git.corp/repo.git"
 _FAKE_SHA = "a" * 40
@@ -723,12 +723,35 @@ def test_git_credentials_reach_the_transport_as_headers(rig):
     assert git.headers == [{"X-Custom-Auth": "payload-of-ci-token"}]
 
 
-def test_file_bytes_files_canonical_entry_bytes_with_the_store(rig):
+def _git_delivery(pipeline, ctx, *, subpath="pkg", auth=None):
+    """The delivery the git road hands back for a source named ``"app"``.
+
+    Built by ``GitSourceFetcher`` rather than by hand, so the store it files
+    through is the one the fetcher bound it to — which is the whole of what
+    replaced the caller reaching for ``receipt_url`` and ``auth``.
+    """
+    return pipeline.fetch_declared(
+        ctx, entry={"from": "app"}, category="skills", entry_identity="s1"
+    )
+
+
+def _git_source_ctx(*, subpath="pkg", auth=None, **kwargs):
+    source = {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": subpath}
+    if auth is not None:
+        source["auth"] = auth
+    return make_context(
+        source_session=_session(_ScriptedGit(), sources={"app": source}),
+        **kwargs,
+    )
+
+
+def test_a_git_delivery_files_canonical_entry_bytes_with_the_store(rig):
     content, _, pipeline = rig
-    ctx = make_context(apply_id="apply-1")
-    digest = pipeline.file_bytes(
-        ctx, content=b"canonical-zip",
-        source_url=git_receipt_url(GIT_URL, _FAKE_SHA, "pkg"),
+    ctx = _git_source_ctx(apply_id="apply-1")
+    delivery = _git_delivery(pipeline, ctx)
+
+    digest = delivery.file(
+        ctx, b"canonical-zip",
         category="skills", entry_identity="s1",
         content_type="application/zip",
     )
@@ -906,21 +929,45 @@ def test_entry_level_auth_on_an_inline_git_source_is_refused(rig):
         )
 
 
-def test_file_bytes_files_the_credential_name_on_git_receipts(rig):
+def test_a_git_delivery_files_the_credential_name_on_git_receipts(rig):
     content, _, pipeline = rig
-    ctx = make_context(apply_id="apply-1")
-    pipeline.file_bytes(
-        ctx, content=b"canonical-zip",
-        source_url=git_receipt_url(GIT_URL, _FAKE_SHA, "pkg"),
-        category="skills", entry_identity="s1", credential_name="ci-token",
+    ctx = _git_source_ctx(auth="ci-token", apply_id="apply-1")
+    delivery = _git_delivery(pipeline, ctx)
+
+    delivery.file(
+        ctx, b"canonical-zip", category="skills", entry_identity="s1",
     )
     # The lineage answers "which named credential distributed this content"
-    # identically on the URL and git roads.
+    # identically on the object and git roads — and the caller no longer
+    # threads the name, because the source the delivery came from carries it.
     assert content.store_calls[-1]["credential_name"] == "ci-token"
 
 
+def test_the_object_road_files_once_and_its_delivery_adds_nothing(objects_rig):
+    """The other half of the seam's filing rule, end to end.
+
+    The fetch filed what it read on its way past, so the caller's
+    unconditional ``file`` must not make a second receipt for one entry —
+    ``keep_last`` would then read whichever it found first.
+    """
+    content, objects, pipeline = objects_rig
+    objects.put("b", "k", BODY, access_key_id=_OBJ_AK)
+    ctx = _oss_ctx()
+
+    delivery = pipeline.fetch_declared(
+        ctx, entry={"from": "s"}, category="identity", entry_identity="soul"
+    )
+    assert len(content.store_calls) == 1
+
+    digest = delivery.file(
+        ctx, delivery.single(), category="identity", entry_identity="soul"
+    )
+    assert len(content.store_calls) == 1
+    assert digest == DIGEST
+
+
 def test_the_git_road_carries_the_auth_and_the_category_limit(rig):
-    _, _, pipeline = rig
+    content, _, pipeline = rig
     git = _ScriptedGit()
     ctx = make_context(source_session=_session(git, sources={
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "auth": "ci-token"},
@@ -931,7 +978,10 @@ def test_the_git_road_carries_the_auth_and_the_category_limit(rig):
     # refuses a member by DECLARED size against the category number, the
     # same vocabulary the URL road's transport enforces.
     assert decl.source.file_limit == 1 * 1024 * 1024
-    assert decl.auth() == "ci-token"
+    # The credential NAME rides the source, and it is what lands on the
+    # receipt when the caller asks this delivery to file its bytes.
+    decl.file(ctx, b"one-file", category="identity", entry_identity="x")
+    assert content.store_calls[-1]["credential_name"] == "ci-token"
 
 
 # --- the oss road carries a signing credential (defect D4) ------------------

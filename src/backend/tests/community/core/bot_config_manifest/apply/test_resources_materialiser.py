@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Any
 
 from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
@@ -69,6 +70,41 @@ def _src(key: str, **extra) -> dict:
     return {"protocol": "oss", "bucket": _BUCKET, "key": key, "auth": "oss-cred", **extra}
 
 
+class _RecordingStore:
+    """The content store a :class:`GitDelivery` files through, recorded.
+
+    The git road's delivery now writes its own receipt, so the double that
+    used to record ``file_bytes`` records the store call instead — in the
+    store's own vocabulary, which is what the real one receives.
+    """
+
+    def __init__(self, filed: list[dict[str, Any]]) -> None:
+        self._filed = filed
+
+    def store(
+        self,
+        fetched,
+        *,
+        scope,
+        source_url,
+        credential_name=None,
+        modifier="",
+        apply_id=None,
+        category=None,
+        entry_identity=None,
+    ):
+        self._filed.append(
+            {
+                "content": fetched.bytes,
+                "source_url": source_url,
+                "category": category,
+                "entry_identity": entry_identity,
+                "credential_name": credential_name,
+            }
+        )
+        return SimpleNamespace(digest=fetched.sha256)
+
+
 class _StubEntryFetcher:
     """``EntryFetcher``'s test double, every call recorded.
 
@@ -95,8 +131,10 @@ class _StubEntryFetcher:
         self.git_trees = git_trees or {}
         self.moved_from = moved_from
         #: When set, ``fetch_declared`` answers with it verbatim — the way to
-        #: stand in for what ``_git_keep_last`` hands back.
+        #: stand in for what the git road's ``_keep_last`` hands back.
         self.declared_override = None
+        #: The store a git delivery files through, recording into ``filed``.
+        self.store = _RecordingStore(self.filed)
 
     def fetch(
         self,
@@ -187,7 +225,8 @@ class _StubEntryFetcher:
                     auth=decl.get("auth"),
                     url=key,
                     moved=self.moved_from,
-                )
+                ),
+                self.store,
             )
 
         url = decl.get("url") or f"oss://{decl.get('bucket')}/{decl.get('key')}"
@@ -205,28 +244,7 @@ class _StubEntryFetcher:
             )
         )
 
-    def file_bytes(
-        self,
-        ctx: Any,
-        *,
-        content: bytes,
-        source_url: str,
-        category: str,
-        entry_identity: str | None = None,
-        content_type: str | None = None,
-        credential_name: str | None = None,
-    ) -> str:
-        """Records the audit copy the git road files, exactly as the real one."""
-        self.filed.append(
-            {
-                "content": content,
-                "source_url": source_url,
-                "category": category,
-                "entry_identity": entry_identity,
-                "credential_name": credential_name,
-            }
-        )
-        return "sha256:filed"
+
 
 
 def _compose(source_subpath: str | None, entry_subpath: str | None) -> str | None:

@@ -20,12 +20,17 @@ first place, and it survives intact:
     what "the entry's bytes" are (a file? a package? a canonical zip?) is a
     *category* question the fetch layer must not answer.
 
-**Reads are pure — nothing here files a receipt.** That is deliberate, and
-``skills`` is why: its deliverable is a *canonical zip* that only exists after
-validation, so the bytes worth a receipt are not the bytes that arrived. Filing
-therefore belongs to whoever decides what the receipt stands for, which is the
-caller. :meth:`EntryDelivery.receipt_url` and :meth:`EntryDelivery.auth` are
-here so that caller can file under the right identity on either road.
+**Reads are pure, and filing is never automatic.** ``skills`` is why: its
+deliverable is a *canonical zip* that only exists after validation, so the
+bytes worth a receipt are not the bytes that arrived. Deciding what the
+receipt stands for therefore belongs to the caller, and it stays the caller's:
+no read here writes anything.
+
+What a delivery *can* do is file on instruction. :meth:`EntryDelivery.file`
+takes the bytes the caller has decided are the deliverable and puts them under
+the right identity for the road that served them — which means the caller
+states what the receipt is *for* without having to know which road that was,
+or whether one is owed at all.
 
 **One discriminator survives, and it is not a type check.** ``skills`` runs two
 validators by design — a fetched zip with no ``subpath`` goes byte-for-byte
@@ -42,17 +47,31 @@ two copies of one grammar drift, and the document is the one users read.
 """
 from __future__ import annotations
 
+import hashlib
 import tempfile
 from abc import abstractmethod
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Protocol, runtime_checkable
 
+from agentclaw.community.core.bot_config_manifest.apply.fetch_context import (
+    FetchContext,
+    scope_of,
+)
+from agentclaw.community.core.bot_config_manifest.content.errors import (
+    ContentStoreError,
+    ContentStoreFault,
+)
+from agentclaw.community.core.bot_config_manifest.content.service_protocol import (
+    ManifestContentServiceProtocol,
+)
 from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
     GitCheckout,
     git_receipt_url,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+    FetchedObject,
     FetchRefusedError,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.unpack import (
@@ -133,8 +152,8 @@ class FetchedEntry:
             ),
         )
 
-    Created by: ``apply/entry_fetch.EntryFetcher`` — ``fetch``,
-    ``acquire_object`` and ``_git_keep_last``.
+    Created by: ``apply/source_fetchers`` — ``ObjectStoreFetcher._acquire``
+    and ``GitSourceFetcher._keep_last``.
     Consumed by: ``apply/entry_delivery.BlobDelivery``, which is the only thing
     that wraps one.
     """
@@ -291,22 +310,20 @@ class EntryDelivery(Protocol):
                          fallback reason
     ``digest()``         the content digest      ``None``; git declares no
                                                  digest
-    ``receipt_url()``    ``https://…`` or        ``git+…@<sha>:<subpath>``
-                         ``oss://…``
-    ``auth()``           ``None``; the fetch     the credential name
-                         already filed it
+    ``file()``           nothing to write; the   the bytes filed under
+                         fetch filed on its way  ``git+…@<sha>:<subpath>``,
+                         past                    under the source's credential
     ``source_url()``     the fetched URL         the repository URL
     ``content_type()``   what the source said    ``None``
     ``from_store()``     ``True`` on a store     always ``False``
                          hit
-    ``needs_receipt()``  ``False``               ``True``
     ===================  ======================  =========================
 
     Which category asks which: ``skills`` alone calls ``is_tree``,
     ``source_url``, ``content_type`` and ``from_store``; ``resources`` calls
     ``members``; ``resources``, ``identity`` and ``cli_tools`` call
     ``single``; ``cli_tools`` alone calls ``digest``; and all four call
-    ``note``, ``receipt_url``, ``auth`` and ``needs_receipt``.
+    ``note`` and ``file``.
 
     Created by: ``apply/source_fetchers`` (both fetchers), and by
     ``cli_tools/service`` around a ``fetch`` on the API-driven install road.
@@ -377,16 +394,29 @@ class EntryDelivery(Protocol):
         ...
 
     @abstractmethod
-    def receipt_url(self) -> Optional[str]:
-        """The W11 identity to file this entry's bytes under."""
-        ...
+    def file(
+        self,
+        ctx: FetchContext,
+        content: bytes,
+        *,
+        category: str,
+        entry_identity: Optional[str],
+        content_type: Optional[str] = None,
+    ) -> str:
+        """File ``content`` as this entry's deliverable and return its digest.
+        No-op on a road that filed on the way past.
 
-    @abstractmethod
-    def auth(self) -> Optional[str]:
-        """The credential **name** the acquisition rode, for the receipt.
+        All four fetching categories call it, unconditionally, with whatever
+        they decided the entry delivers — a tree canonicalised, one file out
+        of it, a validated zip. The delivery knows the rest: which identity
+        the bytes are filed under, which credential name rides with them, and
+        whether a write is owed at all. That last one used to be the caller's
+        question (``needs_receipt`` then ``receipt_url`` then ``auth``), which
+        made every caller re-derive the road it had deliberately stopped
+        asking about.
 
-        Never a value. The lineage's answer to "which credential served this"
-        is the same on both roads because both thread this.
+        Raises :class:`EntryFetchError` on a store fault, so a filing that
+        fails is this entry's failure and not the category's.
         """
         ...
 
@@ -415,19 +445,6 @@ class EntryDelivery(Protocol):
         """
         ...
 
-    @abstractmethod
-    def needs_receipt(self) -> bool:
-        """Does the caller still owe this delivery's bytes to the store?
-
-        All four fetching categories ask. ``False`` on the object road: the
-        fetch filed what arrived on its way past, so a second write would be
-        one entry with two receipts and ``keep_last`` reading whichever it
-        found. ``True`` on the git road, where a checkout is not bytes and
-        only the caller knows which bytes this entry actually delivers — the
-        tree canonicalised, one file out of it, or a validated zip.
-        """
-        ...
-
 
 @dataclass(frozen=True)
 class BlobDelivery(EntryDelivery):
@@ -445,10 +462,9 @@ class BlobDelivery(EntryDelivery):
             source_url="oss://team-artifacts/tools/qc/v2.tgz",
         ))
 
-    Differs from :class:`GitDelivery` in four answers: ``is_tree`` is
-    ``False``, ``digest`` is a real content address, ``needs_receipt`` is
-    ``False`` (the fetch already filed these bytes) and ``auth`` is ``None``
-    (there is no second write for a credential name to ride on).
+    Differs from :class:`GitDelivery` in three answers: ``is_tree`` is
+    ``False``, ``digest`` is a real content address, and ``file`` writes
+    nothing — the fetch already filed these bytes, credential and all.
     """
 
     #: The bytes and their provenance. Every method here is a read of this.
@@ -489,14 +505,28 @@ class BlobDelivery(EntryDelivery):
     def digest(self) -> Optional[str]:
         return self.fetched.digest
 
-    def receipt_url(self) -> Optional[str]:
-        return self.fetched.source_url
+    def file(
+        self,
+        ctx: FetchContext,
+        content: bytes,
+        *,
+        category: str,
+        entry_identity: Optional[str],
+        content_type: Optional[str] = None,
+    ) -> str:
+        """Nothing to write, and the digest these bytes are already filed under.
 
-    def auth(self) -> Optional[str]:
-        # Nothing downstream re-files these bytes (``needs_receipt`` is False),
-        # so there is no second write for a credential name to ride on: the
-        # fetch already filed the receipt, credential and all.
-        return None
+        The object road filed what it read on its way past, and a ``keep_last``
+        hit is by definition already in the store — so a write here would be
+        one entry with two receipts and ``keep_last`` reading whichever it
+        found. There is no second write for a credential name to ride on
+        either, which is why this road never carried one.
+
+        The answer is this delivery's own digest rather than a hash of
+        ``content``: the receipt this entry answers for is the one the fetch
+        filed, and computing a second address would name bytes no receipt has.
+        """
+        return self.fetched.digest
 
     def source_url(self) -> Optional[str]:
         return self.fetched.source_url
@@ -506,9 +536,6 @@ class BlobDelivery(EntryDelivery):
 
     def from_store(self) -> bool:
         return self.fetched.from_store
-
-    def needs_receipt(self) -> bool:
-        return False
 
 
 @dataclass(frozen=True)
@@ -527,16 +554,20 @@ class GitDelivery(EntryDelivery):
             file_limit=104857600,
         ))
 
-    Differs from :class:`BlobDelivery` in four answers: ``is_tree`` is
+    Differs from :class:`BlobDelivery` in three answers: ``is_tree`` is
     ``True``, ``digest`` is ``None`` (the schema refuses ``digest`` on a git
-    source, so there is nothing for the pin belt to compare), ``needs_receipt``
-    is ``True`` (a checkout is not bytes, and only the caller knows which bytes
-    this entry delivers) and ``auth`` is the credential name, because those
-    bytes are still owed to the store.
+    source, so there is nothing for the pin belt to compare) and ``file``
+    really writes — a checkout is not bytes, only the caller knows which bytes
+    this entry delivers, and the source's credential name rides with them.
     """
 
     #: The checkout and the entry's view into it.
     source: GitEntrySource
+    #: W11's store, to file the caller's deliverable with. Held by the
+    #: delivery rather than reached back through the pipeline: this is the one
+    #: road that still owes the store a write, so this is where the store
+    #: belongs.
+    store: ManifestContentServiceProtocol
 
     def is_tree(self) -> bool:
         return True
@@ -568,11 +599,58 @@ class GitDelivery(EntryDelivery):
         # nothing here for the pin belt to compare and ``None`` says so.
         return None
 
-    def receipt_url(self) -> Optional[str]:
-        return self.source.receipt_url()
+    def file(
+        self,
+        ctx: FetchContext,
+        content: bytes,
+        *,
+        category: str,
+        entry_identity: Optional[str],
+        content_type: Optional[str] = None,
+    ) -> str:
+        """File entry-level bytes the wire never fetched — the git road's
+        canonical form (a package's canonical zip, a single file's bytes)
+        — so audit and ``keep_last`` read the same store everyone else does.
 
-    def auth(self) -> Optional[str]:
-        return self.source.auth
+        The identity is this delivery's own :meth:`GitEntrySource.receipt_url`,
+        the ``git+…@<sha>:<subpath>`` one, and the source's credential **name**
+        rides with it into the W11 lineage exactly as the object road's store
+        call threads its own — so a git-sourced receipt answers "which named
+        credential distributed this content" the same way an object-sourced
+        one answers it::
+
+            delivery.file(ctx,
+                          b"acm-tree-v1\n5:a.txt2:hi...",
+                          category="resources_archive",
+                          entry_identity="data/prices/")
+            # -> "sha256:2c26b46b68ffc68ff99b453c1d30413413422d70..."
+
+        Returns the content digest. Raises :class:`EntryFetchError` on a
+        store fault; the charge against the apply budget keeps the ledger
+        honest about what the entry cost, disk-read or not.
+        """
+        source_url = self.source.receipt_url()
+        digest = "sha256:" + hashlib.sha256(content).hexdigest()
+        obj = FetchedObject(
+            bytes=content, sha256=digest, url=source_url,
+            content_type=content_type,
+            fetched_at=datetime.now(timezone.utc), size_bytes=len(content),
+        )
+        try:
+            self.store.store(
+                obj, scope=scope_of(ctx), source_url=source_url,
+                credential_name=self.source.auth,
+                modifier=ctx.actor_id, apply_id=ctx.apply_id,
+                category=category, entry_identity=entry_identity,
+            )
+        except (ContentStoreError, ContentStoreFault) as exc:
+            raise EntryFetchError(
+                "the bytes could not be filed with the platform's store: "
+                f"{exc}"
+            ) from exc
+        if ctx.budget is not None:
+            ctx.budget.charge(len(content))
+        return digest
 
     def source_url(self) -> Optional[str]:
         return self.source.source_url
@@ -582,9 +660,6 @@ class GitDelivery(EntryDelivery):
 
     def from_store(self) -> bool:
         return False
-
-    def needs_receipt(self) -> bool:
-        return True
 
 
 # ── the shared mechanics ─────────────────────────────────────────────────────

@@ -566,19 +566,16 @@ class SkillsMaterialiser(Materialiser):
         if isinstance(files, str):
             raise _PackageRefusal(files)
         validated = self._validate(self._validator.validate_directory, files)
-        if delivery.needs_receipt():
-            try:
-                self._fetcher.file_bytes(
-                    ctx,
-                    content=validated.canonical_zip,
-                    source_url=delivery.receipt_url(),
-                    category=_FETCH_CATEGORY,
-                    entry_identity=name,
-                    content_type="application/zip",
-                    credential_name=delivery.auth(),
-                )
-            except EntryFetchError as exc:
-                raise _PackageRefusal(str(exc)) from exc
+        try:
+            delivery.file(
+                ctx,
+                validated.canonical_zip,
+                category=_FETCH_CATEGORY,
+                entry_identity=name,
+                content_type="application/zip",
+            )
+        except EntryFetchError as exc:
+            raise _PackageRefusal(str(exc)) from exc
         return _SkillPackage(
             validated.name,
             validated.canonical_zip,

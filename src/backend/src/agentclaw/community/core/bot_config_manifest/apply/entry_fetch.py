@@ -5,19 +5,10 @@ entry's declared source, consult the platform's own copy before the network,
 read it through the protocol's own transport under a named credential, and file
 the result with the content store so delivery and audit share one copy.
 
-**The two entry points**, and which is which:
-
-``fetch_declared(ctx, *, entry=…)``
-    The front door every fetching materialiser calls. Takes no URL at all: it
-    reads the entry, resolves the declaration and dispatches on its
-    ``protocol``. Files a receipt and charges the budget through whichever road
-    it picked.
-
-``file_bytes(ctx, *, content=…, source_url=…)``
-    Called by the ``resources``, ``skills`` and ``cli_tools`` materialisers for
-    the git road's canonical bytes. Its ``source_url`` is the caller's own
-    receipt identity, normally a ``git+…`` one. Files a receipt and always
-    charges, because the caller is declaring what the entry cost.
+**One entry point**, ``fetch_declared(ctx, *, entry=…)``: the front door
+every fetching materialiser calls. It takes no URL at all — it reads the
+entry, resolves the declaration and dispatches on its ``protocol``. A receipt
+is filed and the budget charged through whichever road it picked.
 
 **What each road does with the source it was handed lives in
 ``apply/source_fetchers.py``**, and so does the policy it runs under: the two
@@ -38,8 +29,9 @@ W7 is the declared-source front door, :meth:`fetch_declared`: the ``from``
 and inline-source roads resolve through the apply's source session, and the git
 road returns a :class:`GitEntrySource` — the tree is the entry's to
 interpret (a file? a package?) — while its canonical, entry-level bytes are
-filed with the store via :meth:`file_bytes`, so audit and ``keep_last`` read
-the same receipts the object road files on its way past.
+filed with the store by the delivery itself, on the materialiser's
+instruction, so audit and ``keep_last`` read the same receipts the object road
+files on its way past.
 
 **Dispatch is on the declared protocol**, read through the one parser the
 ``PUT`` validator also uses. It used to be on which key a source mapping
@@ -55,8 +47,6 @@ declare is now an object with a ``protocol``.
 """
 from __future__ import annotations
 
-import hashlib
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Mapping, Optional
 
 
@@ -74,15 +64,8 @@ from agentclaw.community.core.bot_config_manifest.apply.source_fetchers import (
     DeclaredFetch,
     build_fetchers,
 )
-from agentclaw.community.core.bot_config_manifest.content.errors import (
-    ContentStoreError,
-    ContentStoreFault,
-)
 from agentclaw.community.core.bot_config_manifest.fetch.limits import (
     FetchCategory,
-)
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
-    FetchedObject,
 )
 from agentclaw.community.core.bot_config_manifest.schema.sources import (
     parse_source,
@@ -105,9 +88,9 @@ class EntryFetcher:
     """Fetches one manifest entry's bytes on a bot's behalf.
 
     The one funnel every fetching category goes through: ``skills``,
-    ``resources``, ``identity`` and ``cli_tools``. Two public entry points,
-    tabulated in this module's docstring; ``fetch_declared`` is the one a
-    materialiser normally calls.
+    ``resources``, ``identity`` and ``cli_tools``. One public entry point,
+    :meth:`fetch_declared`; it holds no collaborators of its own, only the
+    table of roads it dispatches to.
 
     Composed once per apply — the transport is stateless per hop, so there is
     nothing to hold between entries — and handed to every materialiser that
@@ -121,10 +104,6 @@ class EntryFetcher:
         credentials: SourceCredentialServiceProtocol,
         objects: AliyunObjectStore,
     ) -> None:
-        # Kept because the front door itself still reads it — see
-        # :meth:`file_bytes`. The roads read their own copy of it, handed to
-        # them below.
-        self._content = content
         # Bound once, from this pipeline's three collaborators: the fetchers
         # are strategies over the same store, the same credentials and the
         # same object-store client, so every road files receipts under one
@@ -280,65 +259,6 @@ class EntryFetcher:
                 name=name,
             )
         )
-
-    def file_bytes(
-        self,
-        ctx: FetchContext,
-        *,
-        content: bytes,
-        source_url: str,
-        category: str,
-        entry_identity: Optional[str] = None,
-        content_type: Optional[str] = None,
-        credential_name: Optional[str] = None,
-    ) -> str:
-        """File entry-level bytes the wire never fetched — the git road's
-        canonical form (a package's canonical zip, a single file's bytes)
-        — so audit and ``keep_last`` read the same store everyone else does.
-
-        ``source_url`` is the caller's own receipt identity, normally the
-        ``git+…`` one from ``GitDelivery.receipt_url()``::
-
-            file_bytes(ctx,
-                       content=b"acm-tree-v1\n5:a.txt2:hi...",
-                       source_url=("git+https://code.example.com/team/"
-                                   "content.git@4f2a9c1b...:kb"),
-                       category="resources_archive",
-                       entry_identity="data/prices/",
-                       credential_name="git-prod")
-            # -> "sha256:2c26b46b68ffc68ff99b453c1d30413413422d70..."
-
-        ``credential_name`` threads the acquisition's auth into the W11
-        lineage exactly as the object road's store call does, so a git-sourced
-        receipt answers "which named credential distributed this content"
-        the same way an object-sourced one answers it.
-
-        Returns the content digest. Raises :class:`EntryFetchError` on a
-        store fault; the charge against the apply budget keeps the ledger
-        honest about what the entry cost, disk-read or not.
-        """
-        digest = "sha256:" + hashlib.sha256(content).hexdigest()
-        obj = FetchedObject(
-            bytes=content, sha256=digest, url=source_url,
-            content_type=content_type,
-            fetched_at=datetime.now(timezone.utc), size_bytes=len(content),
-        )
-        try:
-            self._content.store(
-                obj, scope=scope_of(ctx), source_url=source_url,
-                credential_name=credential_name,
-                modifier=ctx.actor_id, apply_id=ctx.apply_id,
-                category=category, entry_identity=entry_identity,
-            )
-        except (ContentStoreError, ContentStoreFault) as exc:
-            raise EntryFetchError(
-                "the bytes could not be filed with the platform's store: "
-                f"{exc}"
-            ) from exc
-        if ctx.budget is not None:
-            ctx.budget.charge(len(content))
-        return digest
-
 
 
 def declared_protocol(

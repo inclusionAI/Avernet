@@ -12,9 +12,8 @@ Created by: ``services/config_manifest_apply_service`` (both the apply and the
 dry-run path) as ``ApplyFetchBudget(deadline=time.monotonic() +
 APPLY_BUDGET_S, total_bytes=APPLY_FETCH_TOTAL_LIMIT)`` — 300 seconds and
 500 MiB, from ``fetch/limits.py``.
-Consumed by: ``apply/entry_fetch.EntryFetcher`` (``fetch``,
-``fetch_declared``, ``acquire_object``, ``file_bytes``) and
-``apply/source_fetchers.GitSourceFetcher.fetch``.
+Consumed by: ``apply/entry_fetch.EntryFetcher.fetch_declared``, both fetchers
+in ``apply/source_fetchers``, and ``apply/entry_delivery.GitDelivery.file``.
 
 Deliberately mutable: it is a ledger threaded through an immutable context,
 the way a run's writes are a ledger threaded through an immutable bot id.
@@ -48,15 +47,15 @@ class ApplyFetchBudget:
 
     What a ``charge`` looks like on each road:
 
-    * object store and HTTPS URL — ``ctx.budget.charge(fetched.size_bytes)``
-      in ``entry_fetch.fetch``, and ``charge(len(content))`` in
-      ``acquire_object``: the bytes that came over the wire.
+    * object store — ``charge(len(content))`` in
+      ``source_fetchers.ObjectStoreFetcher._acquire``: the bytes that came
+      over the wire.
     * git — ``ctx.budget.charge(checkout.tree_bytes)`` in
       ``source_fetchers.GitSourceFetcher.fetch``: the whole tree's declared
       size, charged only when *this* call did the fetching.
     * canonical bytes filed back — ``charge(len(content))`` in
-      ``entry_fetch.file_bytes``, so a git entry's canonical form is on the
-      ledger too.
+      ``entry_delivery.GitDelivery.file``, so a git entry's canonical form is
+      on the ledger too.
 
     What is deliberately **not** charged:
 

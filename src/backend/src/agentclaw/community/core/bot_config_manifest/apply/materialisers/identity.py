@@ -233,19 +233,17 @@ class IdentityMaterialiser(Materialiser):
 
             def _read_and_file() -> bytes:
                 body = delivery.single()
-                if delivery.needs_receipt():
-                    # The one file's bytes go through the same store the
-                    # object road files with — auth included, so the
-                    # lineage's answer to "which credential served this" is
-                    # the same on both roads.
-                    self._fetcher.file_bytes(
-                        ctx,
-                        content=body,
-                        source_url=delivery.receipt_url(),
-                        category=_FETCH_CATEGORY,
-                        entry_identity=file_type,
-                        credential_name=delivery.auth(),
-                    )
+                # The one file's bytes go through the same store the object
+                # road files with — auth included, so the lineage's answer to
+                # "which credential served this" is the same on both roads.
+                # Unconditional: a road that filed on the way past writes
+                # nothing here, and the caller no longer has to ask which.
+                delivery.file(
+                    ctx,
+                    body,
+                    category=_FETCH_CATEGORY,
+                    entry_identity=file_type,
+                )
                 return body
 
             try:

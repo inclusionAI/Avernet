@@ -48,9 +48,9 @@ class SourceSession:
     Created by: ``services/config_manifest_apply_service``, at ``start_apply``
     and ``dry_run``, and closed in every terminal path including launch
     failure.
-    Consumed by: ``apply/source_fetchers.GitSourceFetcher.fetch`` and
-    ``apply/entry_fetch`` (``fetch_declared``, ``_git_keep_last``,
-    ``declared_protocol``).
+    Consumed by: ``apply/source_fetchers`` (``GitSourceFetcher.fetch``,
+    ``GitSourceFetcher._keep_last``) and ``apply/entry_fetch``
+    (``fetch_declared``, ``declared_protocol``).
     """
 
     #: The stored document's top-level ``sources`` map, verbatim and frozen at

@@ -756,20 +756,19 @@ class CliToolService:
             entry_identity=decl.name,
         )
         data = await asyncio.to_thread(delivery.single)
-        if delivery.needs_receipt():
-            # A tree's bytes are not filed by the fetch — only the caller
-            # knows which of them this entry delivers, and here that is the
-            # one file the composed subpath named. Auth included, so the
-            # lineage answers "which credential served this" on both roads.
-            await asyncio.to_thread(
-                self._fetcher.file_bytes,
-                ctx,
-                content=data,
-                source_url=delivery.receipt_url(),
-                category=FETCH_CATEGORY,
-                entry_identity=decl.name,
-                credential_name=delivery.auth(),
-            )
+        # A tree's bytes are not filed by the fetch — only the caller knows
+        # which of them this entry delivers, and here that is the one file the
+        # composed subpath named. The delivery files them under its own
+        # identity, auth included, so the lineage answers "which credential
+        # served this" on both roads; the road that already filed writes
+        # nothing, which is why this is no longer a question the service asks.
+        await asyncio.to_thread(
+            delivery.file,
+            ctx,
+            data,
+            category=FETCH_CATEGORY,
+            entry_identity=decl.name,
+        )
         return data, delivery.is_tree()
 
     @staticmethod
