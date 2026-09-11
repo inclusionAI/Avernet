@@ -128,6 +128,12 @@ function isAutoRepair(item: ImprovementView): boolean {
   return item.actionType === "DIRECT_EVOLUTION";
 }
 
+function evolveTaskPath(taskId: string): string {
+  return taskId.toUpperCase().startsWith("REPAIR-")
+    ? `/evolve/repair-runs/${encodeURIComponent(taskId)}`
+    : `/evolve/runs/${encodeURIComponent(taskId)}`;
+}
+
 function repairCreatePath(item: ImprovementView): string {
   return `/evolve/new?type=repair&improvementId=${encodeURIComponent(item.improvementId)}`;
 }
@@ -1064,7 +1070,7 @@ export default function ImprovementItems({
                             key={link.evolveTaskId}
                             onClick={() =>
                               navigate(
-                                `/evolve/runs/${encodeURIComponent(link.evolveTaskId)}`,
+                                evolveTaskPath(link.evolveTaskId),
                               )
                             }
                             className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left hover:bg-gray-50"
