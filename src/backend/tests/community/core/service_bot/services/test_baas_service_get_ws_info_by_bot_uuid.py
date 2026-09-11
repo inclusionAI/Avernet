@@ -339,8 +339,8 @@ class TestGetWsInfoByBotUuid:
         assert _ws_info_by_bot_uuid_logged_calls(spy, "warning"), "404 should log at WARNING"
         assert not _ws_info_by_bot_uuid_logged_calls(spy, "error"), "404 must NOT log at ERROR"
 
-    def test_503_logs_warning_not_error(self):
-        """503 HTTP error logs at WARNING, not ERROR."""
+    def test_503_no_active_devices_logs_info_not_warning_or_error(self):
+        """Structured NO_ACTIVE_DEVICES is a normal external waiting state."""
         body = (
             '{"detail":{"error":"NO_ACTIVE_DEVICES",'
             '"message":"No active devices available"}}'
@@ -352,7 +352,8 @@ class TestGetWsInfoByBotUuid:
             with pytest.raises(BaasServiceError):
                 service.get_ws_info_by_bot_uuid(bot_uuid="BOT-xyz")
 
-        assert _ws_info_by_bot_uuid_logged_calls(spy, "warning"), "503 should log at WARNING"
+        assert _ws_info_by_bot_uuid_logged_calls(spy, "info"), "503 should log at INFO"
+        assert not _ws_info_by_bot_uuid_logged_calls(spy, "warning")
         assert not _ws_info_by_bot_uuid_logged_calls(spy, "error"), "503 must NOT log at ERROR"
 
     def test_http_error_still_raises_baas_service_error(self):

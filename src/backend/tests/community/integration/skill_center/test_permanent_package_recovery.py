@@ -76,6 +76,7 @@ class _Projector:
                 "bot_type": "desktop",
                 "active_engine": "openclaw",
                 "binding_id": 17,
+                "status": "ACTIVE",
             },
             engine="openclaw",
             projection=RuntimeSkillProjection(
