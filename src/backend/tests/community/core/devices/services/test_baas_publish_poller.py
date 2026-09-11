@@ -1,6 +1,9 @@
 """Tests for BaasPublishPoller — 轮询 BaaS publish 状态、触发 PENDING→ACTIVE."""
-from unittest.mock import MagicMock
+
+import threading
 import time
+from unittest.mock import MagicMock
+
 import pytest
 
 from agentclaw.community.core.devices.services.baas_publish_poller import BaasPublishPoller
@@ -157,3 +160,76 @@ def test_poll_multiple_pending_then_success_calls_alive_once(fake_baas, fake_dev
 
     assert fake_device_service.report_device_alive.call_count == 1
     assert fake_baas.get_publish_progress.call_count == 3
+
+
+def test_shutdown_interrupts_sleep_and_waits_for_the_poller_thread(
+    fake_baas, fake_device_service
+):
+    provider_called = threading.Event()
+
+    def device_service_provider():
+        provider_called.set()
+        return fake_device_service
+
+    fake_baas.get_publish_progress.return_value = {"status": "PENDING"}
+    poller = BaasPublishPoller(
+        baas_service=fake_baas,
+        device_service_provider=device_service_provider,
+        poll_interval_seconds=60,
+        poll_timeout_seconds=180,
+    )
+
+    poller.start(publish_id="pub-shutdown", device_id="dev-shutdown", binding_id=48)
+    assert provider_called.wait(timeout=1)
+
+    assert poller.shutdown(timeout_seconds=1) is True
+    fake_baas.get_publish_progress.assert_not_called()
+    fake_device_service.report_device_alive.assert_not_called()
+    fake_device_service._mark_service_start_failed.assert_not_called()
+
+
+def test_shutdown_during_progress_check_skips_device_database_work(
+    fake_baas, fake_device_service
+):
+    progress_started = threading.Event()
+    release_progress = threading.Event()
+
+    def get_publish_progress(_publish_id):
+        progress_started.set()
+        assert release_progress.wait(timeout=1)
+        return {"status": "SUCCESS"}
+
+    fake_baas.get_publish_progress.side_effect = get_publish_progress
+    poller = BaasPublishPoller(
+        baas_service=fake_baas,
+        device_service_provider=lambda: fake_device_service,
+        poll_interval_seconds=0,
+        poll_timeout_seconds=1.0,
+    )
+    poller.start(publish_id="pub-in-flight", device_id="dev-in-flight", binding_id=49)
+    assert progress_started.wait(timeout=1)
+
+    shutdown_result = []
+    shutdown_thread = threading.Thread(
+        target=lambda: shutdown_result.append(poller.shutdown(timeout_seconds=1))
+    )
+    shutdown_thread.start()
+    release_progress.set()
+    shutdown_thread.join(timeout=1)
+
+    assert shutdown_result == [True]
+    fake_device_service.report_device_alive.assert_not_called()
+    fake_device_service._mark_service_start_failed.assert_not_called()
+
+
+def test_start_rejects_work_after_shutdown(fake_baas, fake_device_service):
+    poller = BaasPublishPoller(
+        baas_service=fake_baas,
+        device_service_provider=lambda: fake_device_service,
+        poll_interval_seconds=0.01,
+        poll_timeout_seconds=1.0,
+    )
+    assert poller.shutdown(timeout_seconds=1) is True
+
+    with pytest.raises(RuntimeError, match="shut down"):
+        poller.start(publish_id="pub-late", device_id="dev-late", binding_id=50)

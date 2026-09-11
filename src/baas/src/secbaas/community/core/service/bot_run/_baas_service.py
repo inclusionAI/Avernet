@@ -1226,7 +1226,7 @@ class BaasBotService(BotService):
         if engine_type == "openclaw":
             # Fixed prefix 'agent:main:'
             return f"agent:main:session:{session_key}:user:{user_id}"
-        elif engine_type == "claude_code":
+        elif engine_type in {"claude_code", "deepseek_harness"}:
             return f"agent:{tc_bot_id}:session:{session_key}:user:{user_id}"
         elif engine_type == "teclaw":
             # 仅评测流量（eval_id 存在）时构造结构化 key，

@@ -18,9 +18,21 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.models import BotSkillInstallation, Skill, SkillSet, SkillSetSkill
+from agentclaw.community.core.models import (
+    BotSkillInstallation,
+    Skill,
+    SkillDraftEditLease,
+    SkillGrant,
+    SkillPublicationAttempt,
+    SkillSet,
+    SkillSetSkill,
+    SkillSpaceBinding,
+    SkillVersion,
+)
+from agentclaw.community.core.models.space_skill import SkillDraftUpgradeRequest
 from agentclaw.community.core.skill_center.errors import (
     ActiveSkillSetReferenceError,
+    SkillAssetInUseError,
     SkillOfflineError,
 )
 from agentclaw.community.core.models.mcp import SkillSetMCPServer
@@ -74,6 +86,12 @@ def db(tmp_path):
         DefaultSkillsetSkillExclusion,
         BotModel,
         AcSkillMember,
+        SkillSpaceBinding,
+        SkillGrant,
+        SkillDraftEditLease,
+        SkillDraftUpgradeRequest,
+        SkillVersion,
+        SkillPublicationAttempt,
     ):
         m.__table__.create(engine)
     return _FileSqliteDB(engine)
@@ -127,7 +145,7 @@ def test_legacy_add_refuses_offline_skill_before_membership_write(skills, sets, 
         assert session.query(SkillSetSkill).count() == 0
 
 
-def test_delete_removes_all_associations_for_active_and_inactive_local_skills(
+def test_delete_rejects_active_and_inactive_memberships_without_changing_state(
     skills, sets, db
 ):
     active_skill = skills.create(
@@ -151,12 +169,17 @@ def test_delete_removes_all_associations_for_active_and_inactive_local_skills(
         )
     sets.add_skill_to_set(inactive_set["id"], inactive_skill["id"])
 
-    assert skills.delete(active_skill["id"]) is True
-    assert skills.delete(inactive_skill["id"]) is True
+    with pytest.raises(SkillAssetInUseError) as active_error:
+        skills.delete(active_skill["id"])
+    with pytest.raises(SkillAssetInUseError) as inactive_error:
+        skills.delete(inactive_skill["id"])
+
+    assert active_error.value.blocker_counts == {"membership": 2}
+    assert inactive_error.value.blocker_counts == {"membership": 1}
 
     with db.orm_session() as session:
-        assert session.query(SkillSetSkill).count() == 0
-        assert session.query(Skill).count() == 0
+        assert session.query(SkillSetSkill).count() == 3
+        assert session.query(Skill).count() == 2
 
 
 def test_delete_succeeds_for_skill_without_an_association(skills, db):
@@ -171,35 +194,140 @@ def test_delete_succeeds_for_skill_without_an_association(skills, db):
         assert session.query(Skill).count() == 0
 
 
-def test_delete_rolls_back_when_association_cleanup_fails(skills, sets, db):
-    skill = skills.create({"name": "rollback-association"})
-    skill_set = sets.create({"name": "set"})
-    sets.add_skill_to_set(skill_set["id"], skill["id"])
-
-    def fail_association_delete(
-        _conn, _cursor, statement, _parameters, _context, _executemany
-    ):
-        if statement.lstrip().lower().startswith("delete from ac_skill_set_skill"):
-            raise RuntimeError("injected association delete failure")
-
-    event.listen(db.engine, "before_cursor_execute", fail_association_delete)
-    try:
-        with pytest.raises(RuntimeError, match="injected association delete failure"):
-            skills.delete(skill["id"])
-    finally:
-        event.remove(db.engine, "before_cursor_execute", fail_association_delete)
-
+def test_delete_rejects_an_installed_skill_without_changing_state(skills, db):
+    skill = skills.create({"name": "installed", "git_path": "git://installed"})
     with db.orm_session() as session:
-        assert session.query(SkillSetSkill).count() == 1
+        session.add(
+            BotSkillInstallation(
+                env="dev",
+                owner_id="owner",
+                bot_id="bot",
+                skill_id=int(skill["id"]),
+                avernet_tenant="teamclaw",
+            )
+        )
+
+    with pytest.raises(SkillAssetInUseError) as raised:
+        skills.delete(skill["id"])
+
+    assert raised.value.blocker_counts == {"installation": 1}
+    with db.orm_session() as session:
         assert session.query(Skill).count() == 1
+        assert session.query(BotSkillInstallation).count() == 1
 
 
-def test_delete_rolls_back_association_cleanup_when_skill_delete_fails(
+def test_delete_rejects_published_version_lineage(skills, db):
+    skill = skills.create(
+        {"name": "published", "skill_uuid": "published-uuid", "status": "PUBLISHED"}
+    )
+    with db.orm_session() as session:
+        session.add(
+            SkillVersion(
+                skill_id=int(skill["id"]),
+                version_ordinal=1,
+                status="PUBLISHED",
+                sc_version_number="1.0.0",
+                name="published",
+                created_by="owner",
+                env="dev",
+            )
+        )
+
+    with pytest.raises(SkillAssetInUseError) as raised:
+        skills.delete(skill["id"])
+
+    assert raised.value.blocker_counts == {"version": 1}
+
+
+def test_delete_reports_space_draft_publication_and_governance_blockers(skills, db):
+    skill = skills.create(
+        {
+            "name": "space-draft",
+            "skill_uuid": "space-draft-uuid",
+            "draft_status": "EDITING",
+        }
+    )
+    skill_id = int(skill["id"])
+    with db.orm_session() as session:
+        session.query(Skill).filter(Skill.id == skill_id).one().draft_status = "EDITING"
+        session.add_all(
+            [
+                SkillSpaceBinding(skill_id=skill_id, space_id=7, created_by="owner", env="dev"),
+                SkillGrant(
+                    skill_id=skill_id,
+                    user_id="owner",
+                    role="OWNER",
+                    status="ACTIVE",
+                    owner_slot=1,
+                    granted_by="owner",
+                    env="dev",
+                ),
+                SkillDraftEditLease(skill_id=skill_id, fencing_token=1, env="dev"),
+                SkillDraftUpgradeRequest(
+                    skill_id=skill_id,
+                    space_id=7,
+                    request_id="upgrade-1",
+                    target_version_ordinal=2,
+                    status="ACTIVE",
+                    created_by="owner",
+                    env="dev",
+                ),
+                SkillPublicationAttempt(
+                    skill_id=skill_id,
+                    request_id="publish-1",
+                    target_version_ordinal=1,
+                    status="FAILED",
+                    created_by="owner",
+                    env="dev",
+                ),
+            ]
+        )
+
+    with pytest.raises(SkillAssetInUseError) as raised:
+        skills.delete(skill["id"])
+
+    assert raised.value.blocker_counts == {
+        "grant": 1,
+        "space_binding": 1,
+        "draft": 3,
+        "publication": 1,
+    }
+
+
+def test_bot_local_delete_rejects_an_inactive_membership_without_changing_state(
     skills, sets, db
 ):
+    skill = skills.create(
+        {
+            "name": "local-member",
+            "git_path": "local:///skills/local-member",
+            "user_id": "owner",
+            "bolt_id": "bot",
+        }
+    )
+    skill_set = sets.create(
+        {
+            "name": "saved",
+            "user_id": "owner",
+            "bolt_id": "bot",
+            "is_active": False,
+        }
+    )
+    sets.add_skill_to_set(skill_set["id"], skill["id"], user_id="owner")
+
+    with pytest.raises(SkillAssetInUseError) as raised:
+        skills.delete_bot_local_skill(
+            skill_id=skill["id"], owner_id="owner", bot_id="bot"
+        )
+
+    assert raised.value.blocker_counts == {"membership": 1}
+    with db.orm_session() as session:
+        assert session.query(Skill).count() == 1
+        assert session.query(SkillSetSkill).count() == 1
+
+
+def test_delete_rolls_back_when_skill_delete_fails(skills, db):
     skill = skills.create({"name": "rollback-skill"})
-    skill_set = sets.create({"name": "set"})
-    sets.add_skill_to_set(skill_set["id"], skill["id"])
 
     def fail_skill_delete(
         _conn, _cursor, statement, _parameters, _context, _executemany
@@ -215,7 +343,6 @@ def test_delete_rolls_back_association_cleanup_when_skill_delete_fails(
         event.remove(db.engine, "before_cursor_execute", fail_skill_delete)
 
     with db.orm_session() as session:
-        assert session.query(SkillSetSkill).count() == 1
         assert session.query(Skill).count() == 1
 
 
@@ -568,21 +695,55 @@ def test_delete_by_name_with_cascade(skills, db):
                             skill_uuid="cu1"))
         s.add(AcSkillMember(skill_uuid="cu1", user_id="u",
                             role="member"))
-    res = skills.delete_by_name_with_cascade("casc")
-    assert res["deleted_skill_count"] == 1
-    assert res["cleaned_set_skill"] == 1
-    assert res["cleaned_member"] == 1
+    with pytest.raises(SkillAssetInUseError) as raised:
+        skills.delete_by_name_with_cascade("casc")
+    assert raised.value.blocker_counts == {"membership": 1, "grant": 1}
     with db.orm_session() as s:
-        assert s.query(SkillSetSkill).count() == 0
-        assert s.query(AcSkillMember).count() == 0
-        assert s.query(Skill).count() == 0
+        assert s.query(SkillSetSkill).count() == 1
+        assert s.query(AcSkillMember).count() == 1
+        assert s.query(Skill).count() == 1
+
+
+def test_delete_by_name_with_cascade_deletes_only_unreferenced_assets(skills, db):
+    skills.create({"name": "unreferenced-cascade", "skill_uuid": "cu2"})
+
+    result = skills.delete_by_name_with_cascade("unreferenced-cascade")
+
+    assert result == {
+        "deleted_skill_count": 1,
+        "cleaned_set_skill": 0,
+        "cleaned_member": 0,
+    }
+    with db.orm_session() as session:
+        assert session.query(Skill).count() == 0
+
+
+def test_delete_rejects_live_legacy_member_reference(skills, db):
+    skill = skills.create(
+        {"name": "legacy-member", "skill_uuid": "legacy-member-uuid"}
+    )
+    with db.orm_session() as session:
+        session.add(
+            AcSkillMember(
+                skill_uuid="legacy-member-uuid", user_id="member", role="member"
+            )
+        )
+
+    with pytest.raises(SkillAssetInUseError) as raised:
+        skills.delete(skill["id"])
+
+    assert raised.value.blocker_counts == {"grant": 1}
+    with db.orm_session() as session:
+        assert session.query(Skill).count() == 1
+        assert session.query(AcSkillMember).count() == 1
 
 
 def test_delete_by_bot_id(skills):
-    skills.create({"name": "b1", "bolt_id": "bot-x"})
-    skills.create({"name": "b2", "bolt_id": "bot-x"})
-    assert skills.delete_by_bot_id("bot-x") == 2
-    assert skills.list_skills(bolt_id="bot-x") == []
+    skills.create({"name": "b1", "bolt_id": "bot-x", "user_id": "owner"})
+    skills.create({"name": "b2", "bolt_id": "bot-x", "user_id": "owner"})
+    skills.create({"name": "other", "bolt_id": "bot-x", "user_id": "other"})
+    assert skills.delete_by_bot_id("bot-x", "owner") == 2
+    assert [row["name"] for row in skills.list_skills(bolt_id="bot-x")] == ["other"]
 
 
 def test_list_skill_set_references_includes_active_and_inactive_sets(
@@ -981,11 +1142,11 @@ def test_get_excluded_skills_empty(sets, db):
 
 
 def test_skillset_delete_by_bot_id_cascade(sets, db):
-    s1 = sets.create({"name": "s1", "bolt_id": "botz"})
+    s1 = sets.create({"name": "s1", "bolt_id": "botz", "user_id": "owner"})
     sets.add_mcp_to_set(s1["id"], "mcp.a", "A")
     with db.orm_session() as s:
         s.add(SkillSetSkill(skill_set_id=int(s1["id"]), skill_id=1))
-    assert sets.delete_by_bot_id("botz") == 1
+    assert sets.delete_by_bot_id("botz", "owner") == 1
     with db.orm_session() as s:
         assert s.query(SkillSet).count() == 0
         assert s.query(SkillSetSkill).count() == 0

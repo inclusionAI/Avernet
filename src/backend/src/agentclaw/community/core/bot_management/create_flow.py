@@ -47,11 +47,6 @@ from agentclaw.community.core.bot_management.errors import (
     ApplicationCodingUnavailableError,
     BotTemplateInvalidError,
 )
-from agentclaw.community.core.bot_management.service_intake import (
-    ServiceIntakeSeam,
-    finish_service_intake,
-    prepare_service_intake,
-)
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
     validate_bot_name,
@@ -418,7 +413,6 @@ def create_bot_with_authorization(
     passport_plugin: PassportPlugin,
     auth_rel_plugin: AuthRelationshipPlugin,
     skill_set_factory: SkillSetServiceFactory,
-    service_intake_seam: ServiceIntakeSeam | None = None,
 ) -> Created | AuthPending:
     """Run the create + Passport-authorization flow for an already-allocated id.
 
@@ -433,7 +427,6 @@ def create_bot_with_authorization(
     downstream memoryos call still relies on it; the public ``/openapi/v1``
     surface does not pass it. Remove once the internal path stops needing it.
     """
-    spec, service_intake = prepare_service_intake(spec, context, service_intake_seam)
 
     # Creation policy is evaluated here, rather than in either transport, so no
     # caller can bypass template/combination rules before Passport or writes.
@@ -535,11 +528,6 @@ def create_bot_with_authorization(
         auth_rel_plugin, user_id=user_id, agent_code=agent_code,
         nick_name=nick_name, bot_id=bot_id,
     )
-
-    if service_intake:
-        result = finish_service_intake(
-            bot_id=bot_id, user_id=user_id, bot_service=bot_service, seam=service_intake_seam
-        )
 
     return Created(
         bot=result,
@@ -854,7 +842,6 @@ def complete_bot_authorization(
     passport_plugin: PassportPlugin,
     auth_rel_plugin: AuthRelationshipPlugin,
     provision: bool = True,
-    service_intake_seam: ServiceIntakeSeam | None = None,
 ) -> AuthStatusResult:
     """Poll Passport authorization for a pending bot; complete creation on ISSUED.
 
@@ -869,7 +856,6 @@ def complete_bot_authorization(
     ``cookie`` carries the browser session into the service layer — **bad
     practice**, see :func:`create_bot_with_authorization`; internal path only.
     """
-    spec, service_intake = prepare_service_intake(spec, context, service_intake_seam)
 
     # Re-run the same policy on authorization completion because callers echo
     # the creation attributes and must not bypass the original create contract.
@@ -913,10 +899,5 @@ def complete_bot_authorization(
         auth_rel_plugin, user_id=user_id, agent_code=agent_code,
         nick_name=nick_name, bot_id=bot_id,
     )
-
-    if service_intake:
-        result = finish_service_intake(
-            bot_id=bot_id, user_id=user_id, bot_service=bot_service, seam=service_intake_seam
-        )
 
     return AuthStatusResult(status=AuthStatus.ISSUED, bot=result)

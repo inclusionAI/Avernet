@@ -247,6 +247,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillEngineNotSupportedError,
     SkillParameterValidationError,
     SkillRuntimeNameConflictError,
+    SkillAssetInUseError,
     SkillOfflineBlockedError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneLockUnavailableError,
@@ -623,6 +624,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillInvalidPackageError: (400, "Invalid Skill package"),
     LocalSkillNotReadyError: (409, "Bot is not ready"),
     LocalSkillActiveError: (409, "Skill is active"),
+    SkillAssetInUseError: (409, "Skill is still in use"),
     LocalSkillDuplicateError: (409, "Local Skill already exists"),
     LocalSkillTooLargeError: (413, "Skill package is too large"),
     LocalSkillStorageError: (502, "Skill storage operation failed"),
@@ -837,6 +839,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     LocalSkillInvalidPackageError: 400101,
     LocalSkillNotReadyError: 409101,
     LocalSkillActiveError: 409102,
+    SkillAssetInUseError: 409105,
     LocalSkillDuplicateError: 409103,
     LocalSkillTooLargeError: 413101,
     LocalSkillStorageError: 502101,
@@ -1044,6 +1047,8 @@ def _error_data(exc: Exception) -> object | None:
     """
     if isinstance(exc, SkillOfflineBlockedError):
         return exc.impact
+    if isinstance(exc, SkillAssetInUseError):
+        return {"blockers": exc.blocker_counts}
     if isinstance(exc, ManifestValidationError):
         # The all-or-nothing refusal. The fixed message says a document was
         # rejected; this says which entries and why, in the caller's own terms.

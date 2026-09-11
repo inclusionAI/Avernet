@@ -1,9 +1,9 @@
 """End-to-end read-path tests for the resources file routes on a local bot.
 
 Covers the thin ``file_router`` → ``ResourceFileService`` delegation for a local
-(pathlib) bot: directory listing (with hidden-file filtering + skills-local
-injection), preview, download, delete, and mkdir — plus the per-provider
-``absolute_path`` presentation (host workspace path for local). teclaw/arca write
+(pathlib) bot: exact directory listing, preview, download, delete, and mkdir — plus
+the per-provider ``absolute_path`` presentation (host workspace path for local).
+teclaw/arca write
 paths are covered in test_resources_teclaw_writes.py; teclaw reads in
 test_resources_teclaw_reads.py.
 
@@ -44,24 +44,23 @@ def _seed_local_bot(world) -> None:
     ws = _ws(world)
     (ws / "data").mkdir(parents=True, exist_ok=True)
     (ws / "data" / "report.csv").write_bytes(_CSV)
-    (ws / "AGENTS.md").write_text("identity", encoding="utf-8")   # hidden basename at root
-    (ws / ".hidden").write_text("x", encoding="utf-8")            # dotfile
-    # skills-local lives under the hidden "skills" dir → must be injected at root
+    (ws / "AGENTS.md").write_text("identity", encoding="utf-8")
+    (ws / ".hidden").write_text("x", encoding="utf-8")
     (ws / "skills" / "skills-local").mkdir(parents=True, exist_ok=True)
 
 
-# ── list (root): filtering + skills-local injection + absolute_path ───────────
+# ── list (root): exact entries + absolute_path ───────────────────────────────
 
 
 def _assert_root_listing(response, world) -> None:
     body = response.json()
     assert body["success"] is True
     by_path = {i["path"]: i for i in body["items"]}
-    # hidden basename + dotfile filtered; real dir kept; skills-local injected
-    assert "AGENTS.md" not in by_path
-    assert ".hidden" not in by_path
+    assert "AGENTS.md" in by_path
+    assert ".hidden" in by_path
     assert "data" in by_path
-    assert "skills/skills-local" in by_path
+    assert "skills" in by_path
+    assert "skills/skills-local" not in by_path
     # absolute_path is the device's own absolute path — for a local bot that's the
     # host workspace path (the pathlib entry's ``path``).
     assert by_path["data"]["absolute_path"] == f"{_ws(world)}/data"
@@ -80,7 +79,7 @@ def _assert_root_listing(response, world) -> None:
     extra_assertions=(_assert_root_listing,),
 )
 def local_list_root():
-    """Root listing filters hidden files, keeps real dirs, injects skills-local."""
+    """Root listing preserves the workspace's real entries and hierarchy."""
 
 
 # ── preview ──────────────────────────────────────────────────────────────────

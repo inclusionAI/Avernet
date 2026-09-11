@@ -59,7 +59,6 @@ if TYPE_CHECKING:
     from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import CronAutoSetupService
     from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
     from agentclaw.community.core.common_config.service import CommonConfigService
-    from agentclaw.community.core.devices.protocols import McpSyncProtocol
     from agentclaw.community.core.skill_center.runtime_projection_contract import (
         BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
     )
@@ -105,6 +104,9 @@ from agentclaw.community.core.service_bot.services.arca_image_pin import (
 )
 from agentclaw.community.utils.avernet_tenant import (
     bind_current_avernet_tenant,
+)
+from agentclaw.community.core.service_bot.services.publish_exceptions import (
+    PublishAlreadyExistsError,
 )
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.devices.errors import (
@@ -437,6 +439,49 @@ class BotService(BotServiceProtocol):
         self._skill_set_factory.initialize_installations(
             bot_id=bot_id, owner_id=owner_id, bot=bot
         )
+
+    def _backfill_service_publish_record(
+        self, *, bot_id: str, user_id: str, bot: Dict[str, Any]
+    ) -> None:
+        """为已存在的 service bot 补建缺失的发布单（幂等收敛）。
+
+        直接创建即服务（一步式直建）的发布单是调用方发布编排的载体：
+        create 时持久化失败会抛错（调用方重试时软删后的行一般不存在，
+        走全新创建），但并发窗口或历史上吞错的存量行可能留下"service
+        bot 无发布单"的可恢复状态——重放 create 的重试在这里收敛它，
+        而不是返回一个无法发布的假成功。补齐失败照常上抛，让重试继续
+        可见；另一事务已建时以幂等收尾。
+        """
+        try:
+            existing = self._bot_publish_repo.get_by_publish_bot_id(
+                bot_id, user_id, get_current_env()
+            )
+            if existing is not None:
+                return
+            self._bot_publish_provider().create_first_publish_for_bot(
+                bot_id=bot_id,
+                owner_id=user_id,
+                name=bot.get("bot_name") or bot_id,
+                permission_owner="owner",
+                description=bot.get("bot_desc"),
+                owner_name=bot.get("owner_name"),
+            )
+            logger.info(
+                "[bot_service.create_bot] Backfilled publish record for service "
+                "bot %s",
+                bot_id,
+            )
+        except PublishAlreadyExistsError:
+            # 并发重放：另一事务先建好了发布单。
+            logger.info(
+                "[bot_service.create_bot] Publish record already exists for "
+                "service bot %s",
+                bot_id,
+            )
+        except Exception as e:
+            raise BotServiceError(
+                f"Failed to backfill publish record for service bot {bot_id}"
+            ) from e
 
     def _service_bot_image_policy_enabled(self) -> bool:
         """Whether draft create/restart should opt into image policy."""
@@ -1363,6 +1408,14 @@ class BotService(BotServiceProtocol):
                 self._initialize_capability_installations(
                     bot_id=bot_id, owner_id=user_id, bot=existing_bot
                 )
+                if existing_bot.get("bot_type") == "service":
+                    # 直接创建即服务的补齐路径：发布单创建失败曾使 create 抛错
+                    # （重试时软删行一般不存在、走全新创建），但并发窗口或历史
+                    # 存量可能留下"service bot 无发布单"的可恢复状态——重放在
+                    # 此收敛，使同一 bot 的重试不必重建。
+                    self._backfill_service_publish_record(
+                        bot_id=bot_id, user_id=user_id, bot=existing_bot
+                    )
                 logger.info(f"[bot_service.create_bot] Bot {bot_id} already exists for user {user_id}, returning existing bot")
                 return existing_bot
             # 不存在，继续创建流程，使用传入的 bot_id
@@ -1894,7 +1947,19 @@ class BotService(BotServiceProtocol):
                     logger.info(f"[bot_service.create_bot] Created publish record for service bot {bot_id}")
 
                 except Exception as e:
-                    logger.error(f"[bot_service.create_bot] Failed to create publish record for service bot {bot_id}: {e}")
+                    # 发布单是服务化治理的载体，直接创建即服务的口径依赖它存在；
+                    # 持久化失败不能静默返回成功（那会留下一个无法发布、无法被
+                    # 编排推进的"服务 bot"）。与 workspace-hosting 失败同惯例：
+                    # 软删除已插入行并上抛。auth-status 的重放会为同一 bot 补建
+                    # 缺失的发布单（见幂等重入分支）。
+                    logger.exception(
+                        "[bot_service.create_bot] Failed to create publish record for service bot %s",
+                        bot_id,
+                    )
+                    self._repository.soft_delete_by_owner(bot_id, user_id)
+                    raise BotServiceError(
+                        f"Failed to create publish record for service bot {bot_id}"
+                    ) from e
 
                 # teclaw service bot：把即时备容器时投递的初始 artifact 回填到
                 # 刚创建的草稿发布单 ext.config_artifact，使草稿期也有当前配置的
@@ -1946,6 +2011,11 @@ class BotService(BotServiceProtocol):
                 )
 
             return bot_record
+        except BotServiceError:
+            # 内部路径（workspace-hosting 失败、发布单持久化失败等）已完成各自的
+            # 清理并给出了语义准确的错误；这里透传，不再二次软删，也避免"设备
+            # 申请失败"文案误读真实失败源。
+            raise
         except (ResourceInsufficientError, DeviceAllocateError, DeviceLimitExceededError) as e:
             # 设备申请失败，删除 bot 记录并立即抛出错误（default bot 除外）
             logger.error(f"[bot_service.create_bot] Device allocation failed for bot {bot_id}: {e}")
@@ -4131,6 +4201,8 @@ class BotService(BotServiceProtocol):
             "skills_deleted": 0,
             "skill_sets_deleted": 0,
             "resources_deleted": 0,
+            "skill_installations_deleted": 0,
+            "mcp_installations_deleted": 0,
             "errors": []
         }
 
@@ -4141,12 +4213,27 @@ class BotService(BotServiceProtocol):
             result["skills_deleted"] = cleanup_result.get("skills_deleted", 0)
             result["skill_sets_deleted"] = cleanup_result.get("skill_sets_deleted", 0)
             result["resources_deleted"] = cleanup_result.get("resources_deleted", 0)
-
-            logger.info(
-                f"[bot_service._cleanup_bot_associated_data] Cleanup completed for bot {bot_id}: "
-                f"skills={result['skills_deleted']}, skill_sets={result['skill_sets_deleted']}, "
-                f"resources={result['resources_deleted']}"
+            result["skill_installations_deleted"] = cleanup_result.get(
+                "skill_installations_deleted", 0
             )
+            result["mcp_installations_deleted"] = cleanup_result.get(
+                "mcp_installations_deleted", 0
+            )
+            result["errors"].extend(cleanup_result.get("errors", []))
+
+            if result["errors"]:
+                logger.warning(
+                    "[bot_service._cleanup_bot_associated_data] Cleanup incomplete "
+                    "for bot %s: errors=%s",
+                    bot_id,
+                    result["errors"],
+                )
+            else:
+                logger.info(
+                    f"[bot_service._cleanup_bot_associated_data] Cleanup completed for bot {bot_id}: "
+                    f"skills={result['skills_deleted']}, skill_sets={result['skill_sets_deleted']}, "
+                    f"resources={result['resources_deleted']}"
+                )
 
         except Exception as e:
             error_msg = f"Cleanup error for bot {bot_id}: {e}"

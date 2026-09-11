@@ -18,6 +18,7 @@ consumes:
   - DeviceBindingRepository
   - ExpertChatInstanceRepository
 internal_dependencies:
+  - agentclaw.community.log
   - agentclaw.community.core.engine_runtime.stage
 ```
 

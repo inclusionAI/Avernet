@@ -19,11 +19,10 @@ statement shape and predicates:
   ac_skill_set have no soft-delete column). Single UPDATEs stay
   single. ``gmt_modified=func.now()`` matches prod's literal
   ``NOW()``.
-- ``delete_by_name_with_cascade`` / ``delete_by_bot_id`` /
-  ``set_active_skill_set`` keep prod's multi-statement shape; each
-  prod statement group runs in its own ``orm_session`` exactly as
-  prod opened a fresh connection per group (faithful reproduction —
-  not artificially fused).
+- Asset hard-delete methods now deliberately supersede the historical
+  cascade behavior: they lock exact Skill rows, reject durable references,
+  and delete only zero-reference assets in one transaction. They never
+  silently remove Installation or Membership rows.
 - ``add_default_mcp_exclusion`` is the **only** genuine upsert in S4
   (prod ``INSERT ... ON DUPLICATE KEY UPDATE`` on
   ``uk_user_bot_skillset_mcp``). Implemented with the live
@@ -53,7 +52,7 @@ from sqlalchemy import and_, func, or_
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.skill_center.errors import (
-    ActiveSkillSetReferenceError,
+    SkillAssetInUseError,
     SkillSetControlPlaneConflictError,
 )
 from agentclaw.community.core.skill_center.offline_policy import require_skill_online
@@ -760,25 +759,156 @@ class SkillRepository(
         return self.get_by_id(skill_id)
 
     def delete(self, skill_id: str) -> bool:
-        """Delete one Skill and its set associations as one transaction.
-
-        This remains a bulk-delete repository method, so SQLAlchemy cannot
-        apply ``Skill.skill_sets``' ORM cascade. Remove matching association
-        rows explicitly before deleting the Skill. A real transaction keeps
-        association cleanup and the Skill-row delete atomic and propagates
-        every database error to the caller.
-        """
+        """Delete one unreferenced Skill, or fail closed."""
         with self._db.transactional_orm_session() as db:
-            self._delete_skill_set_associations(db, int(skill_id))
-            rowcount = (
+            skill = (
                 db.query(self.Skill)
                 .filter(
                     self.Skill.id == int(skill_id),
                     self.Skill.env == get_current_env(),
                 )
-                .delete(synchronize_session=False)
+                .with_for_update()
+                .one_or_none()
             )
-            return rowcount > 0
+            if skill is None:
+                return False
+            self._require_unreferenced_for_delete(db, skill)
+            db.delete(skill)
+            db.flush()
+            return True
+
+    def require_unreferenced_for_delete(self, skill_id: str) -> None:
+        """Preflight external cleanup; ``delete`` repeats this under its lock."""
+        with self._db.transactional_orm_session() as db:
+            skill = (
+                db.query(self.Skill)
+                .filter(
+                    self.Skill.id == int(skill_id),
+                    self.Skill.env == get_current_env(),
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if skill is not None:
+                self._require_unreferenced_for_delete(db, skill)
+
+    @staticmethod
+    def _require_unreferenced_for_delete(db, skill, *, env: str | None = None) -> None:
+        """Recheck database blockers while the exact Skill row is locked."""
+        from agentclaw.community.core.models import (
+            BotSkillInstallation,
+            SkillDraftEditLease,
+            SkillGrant,
+            SkillPublicationAttempt,
+            SkillSetSkill,
+            SkillSpaceBinding,
+            SkillVersion,
+        )
+        from agentclaw.community.core.models.space_skill import (
+            SkillDraftUpgradeRequest,
+        )
+        from agentclaw.community.core.models.skill import AcSkillMember
+
+        effective_env = env or get_current_env()
+        installation_count = (
+            db.query(BotSkillInstallation.id)
+            .filter(
+                BotSkillInstallation.env == effective_env,
+                BotSkillInstallation.skill_id == int(skill.id),
+            )
+            .count()
+        )
+        membership_identity = SkillSetSkill.skill_id == int(skill.id)
+        if skill.skill_uuid:
+            membership_identity = or_(
+                membership_identity,
+                SkillSetSkill.skill_uuid == skill.skill_uuid,
+            )
+        membership_count = (
+            db.query(SkillSetSkill.id)
+            .filter(
+                SkillSetSkill.env == effective_env,
+                membership_identity,
+            )
+            .count()
+        )
+        # ac_skill_member predates tenant/env columns. It is still served by
+        # the legacy member APIs, so a matching UUID remains a global,
+        # fail-closed grant blocker until that table is retired.
+        grant_count = 0
+        if skill.skill_uuid:
+            grant_count = (
+                db.query(AcSkillMember.id)
+                .filter(AcSkillMember.skill_uuid == skill.skill_uuid)
+                .count()
+            )
+        space_binding_count = (
+            db.query(SkillSpaceBinding.id)
+            .filter(
+                SkillSpaceBinding.env == effective_env,
+                SkillSpaceBinding.skill_id == int(skill.id),
+            )
+            .count()
+        )
+        grant_count += (
+            db.query(SkillGrant.id)
+            .filter(
+                SkillGrant.env == effective_env,
+                SkillGrant.skill_id == int(skill.id),
+            )
+            .count()
+        )
+        version_count = (
+            db.query(SkillVersion.id)
+            .filter(
+                SkillVersion.env == effective_env,
+                SkillVersion.skill_id == int(skill.id),
+            )
+            .count()
+        )
+        # Replayable Service Artifacts carry exact Center refs only. Every
+        # such ref is produced from an immutable SkillVersion, so Version is
+        # the dominant database blocker for hard deletion. Offline impact
+        # still scans Artifact lineage to show the authorized product detail;
+        # the repository intentionally does not depend on service_bot I/O.
+        publication_count = (
+            db.query(SkillPublicationAttempt.id)
+            .filter(
+                SkillPublicationAttempt.env == effective_env,
+                SkillPublicationAttempt.skill_id == int(skill.id),
+            )
+            .count()
+        )
+        draft_count = int(skill.draft_status is not None)
+        draft_count += (
+            db.query(SkillDraftEditLease.id)
+            .filter(
+                SkillDraftEditLease.env == effective_env,
+                SkillDraftEditLease.skill_id == int(skill.id),
+            )
+            .count()
+        )
+        draft_count += (
+            db.query(SkillDraftUpgradeRequest.id)
+            .filter(
+                SkillDraftUpgradeRequest.env == effective_env,
+                SkillDraftUpgradeRequest.skill_id == int(skill.id),
+            )
+            .count()
+        )
+        blockers = {
+            "installation": installation_count,
+            "membership": membership_count,
+            "grant": grant_count,
+            "space_binding": space_binding_count,
+            "draft": draft_count,
+            "publication": publication_count,
+            "version": version_count,
+        }
+        if any(blockers.values()):
+            raise SkillAssetInUseError(
+                blockers
+            )
 
     def replace_bot_local_skill(
         self,
@@ -816,16 +946,6 @@ class SkillRepository(
             db.flush()
             return _skill_to_dict(skill)
 
-    @staticmethod
-    def _delete_skill_set_associations(db, skill_id: int) -> None:
-        """Apply #684's association cleanup inside the caller's transaction."""
-        from agentclaw.community.core.models import SkillSetSkill
-
-        db.query(SkillSetSkill).filter(
-            SkillSetSkill.skill_id == skill_id,
-            SkillSetSkill.env == get_current_env(),
-        ).delete(synchronize_session=False)
-
     def delete_bot_local_skill(
         self,
         *,
@@ -834,42 +954,29 @@ class SkillRepository(
         bot_id: str,
     ) -> bool | None:
         """Atomically delete one inactive Local Skill and its scoped state."""
-        from agentclaw.community.core.models import SkillSetSkill
         from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
 
         with self._db.transactional_orm_session() as db:
-            skill = db.query(self.Skill).filter(
-                self.Skill.id == int(skill_id),
-                self.Skill.env == get_current_env(),
-                self.Skill.user_id == _normalize_user_id(owner_id),
-                self.Skill.bolt_id == bot_id,
-                self.Skill.git_path.like("local://%"),
-            ).one_or_none()
-            if skill is None:
-                return None
-            active_custom_reference = (
-                db.query(self.SkillSet.id)
-                .join(SkillSetSkill, SkillSetSkill.skill_set_id == self.SkillSet.id)
+            skill = (
+                db.query(self.Skill)
                 .filter(
-                    SkillSetSkill.skill_id == int(skill_id),
-                    SkillSetSkill.env == get_current_env(),
-                    self.SkillSet.env == get_current_env(),
-                    self.SkillSet.user_id == _normalize_user_id(owner_id),
-                    self.SkillSet.bolt_id == bot_id,
-                    self.SkillSet.is_default == False,  # noqa: E712
-                    self.SkillSet.is_active == True,  # noqa: E712
+                    self.Skill.id == int(skill_id),
+                    self.Skill.env == get_current_env(),
+                    self.Skill.user_id == _normalize_user_id(owner_id),
+                    self.Skill.bolt_id == bot_id,
+                    self.Skill.git_path.like("local://%"),
                 )
                 .with_for_update()
-                .first()
+                .one_or_none()
             )
-            if active_custom_reference is not None:
-                raise ActiveSkillSetReferenceError()
+            if skill is None:
+                return None
+            self._require_unreferenced_for_delete(db, skill)
             db.query(DefaultSkillsetSkillExclusion).filter(
                 DefaultSkillsetSkillExclusion.user_id == _normalize_user_id(owner_id),
                 DefaultSkillsetSkillExclusion.bot_id == bot_id,
                 DefaultSkillsetSkillExclusion.skill_id == int(skill_id),
             ).delete(synchronize_session=False)
-            self._delete_skill_set_associations(db, int(skill_id))
             db.delete(skill)
             db.flush()
             return True
@@ -906,57 +1013,30 @@ class SkillRepository(
     def delete_by_name_with_cascade(
         self, name: str, env: Optional[str] = None
     ) -> dict:
-        from agentclaw.community.core.models import SkillSetSkill
-        from agentclaw.community.core.models.skill import AcSkillMember
-
         effective_env = env or get_current_env()
-
-        # 1. collect skill_uuids (own session — prod opens fresh conn)
-        with self._db.orm_session() as db:
-            uuids = [
-                r[0]
-                for r in db.query(self.Skill.skill_uuid)
-                .filter(
-                    self.Skill.name == name,
-                    self.Skill.env == effective_env,
-                )
-                .distinct()
-                .all()
-                if r[0]
-            ]
-
-        cleaned_set_skill = 0
-        cleaned_member = 0
-
-        # 2. clean association tables by skill_uuid (one transaction)
-        if uuids:
-            with self._db.orm_session() as db:
-                cleaned_set_skill = (
-                    db.query(SkillSetSkill)
-                    .filter(SkillSetSkill.skill_uuid.in_(uuids))
-                    .delete(synchronize_session=False)
-                )
-                cleaned_member = (
-                    db.query(AcSkillMember)
-                    .filter(AcSkillMember.skill_uuid.in_(uuids))
-                    .delete(synchronize_session=False)
-                )
-
-        # 3. delete the main table (all versions)
-        with self._db.orm_session() as db:
-            deleted_count = (
+        with self._db.transactional_orm_session() as db:
+            skills = (
                 db.query(self.Skill)
                 .filter(
                     self.Skill.name == name,
                     self.Skill.env == effective_env,
                 )
-                .delete(synchronize_session=False)
+                .order_by(self.Skill.id)
+                .with_for_update()
+                .all()
             )
+            for skill in skills:
+                self._require_unreferenced_for_delete(
+                    db, skill, env=effective_env
+                )
+            for skill in skills:
+                db.delete(skill)
+            db.flush()
 
         return {
-            "deleted_skill_count": deleted_count,
-            "cleaned_set_skill": cleaned_set_skill,
-            "cleaned_member": cleaned_member,
+            "deleted_skill_count": len(skills),
+            "cleaned_set_skill": 0,
+            "cleaned_member": 0,
         }
 
     def update_risk_tags(
@@ -997,23 +1077,26 @@ class SkillRepository(
             )
         return self.get_by_id(skill_id)
 
-    def delete_by_bot_id(self, bot_id: str) -> int:
+    def delete_by_bot_id(self, bot_id: str, owner_id: str) -> int:
         env = get_current_env()
-        with self._db.orm_session() as db:
-            count = (
+        with self._db.transactional_orm_session() as db:
+            skills = (
                 db.query(self.Skill)
                 .filter(
                     self.Skill.bolt_id == bot_id,
+                    self.Skill.user_id == _normalize_user_id(owner_id),
                     self.Skill.env == env,
                 )
-                .count()
+                .order_by(self.Skill.id)
+                .with_for_update()
+                .all()
             )
-            if count > 0:
-                db.query(self.Skill).filter(
-                    self.Skill.bolt_id == bot_id,
-                    self.Skill.env == env,
-                ).delete(synchronize_session=False)
-            return count
+            for skill in skills:
+                self._require_unreferenced_for_delete(db, skill, env=env)
+            for skill in skills:
+                db.delete(skill)
+            db.flush()
+            return len(skills)
 
     def list_skill_set_references(
         self,
@@ -2441,7 +2524,7 @@ class SkillSetRepository(
                 )
             )
 
-    def delete_by_bot_id(self, bot_id: str) -> int:
+    def delete_by_bot_id(self, bot_id: str, owner_id: str) -> int:
         env = get_current_env()
         with self._db.orm_session() as db:
             ids = [
@@ -2449,6 +2532,7 @@ class SkillSetRepository(
                 for r in db.query(self.SkillSet.id)
                 .filter(
                     self.SkillSet.bolt_id == bot_id,
+                    self.SkillSet.user_id == _normalize_user_id(owner_id),
                     self.SkillSet.env == env,
                 )
                 .all()
@@ -2485,6 +2569,7 @@ class SkillSetRepository(
                     raise
             db.query(self.SkillSet).filter(
                 self.SkillSet.bolt_id == bot_id,
+                self.SkillSet.user_id == _normalize_user_id(owner_id),
                 self.SkillSet.env == env,
             ).delete(synchronize_session=False)
             return count

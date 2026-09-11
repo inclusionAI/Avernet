@@ -174,10 +174,10 @@ def _seed_delete(world, *, active: bool) -> None:
                 "source_type": "upload",
             }
         )
-        world.get(SkillSetRepository).add_skill_to_set(
-            default_set["id"], skill["id"], user_id=_OWNER
-        )
         if active:
+            world.get(SkillSetRepository).add_skill_to_set(
+                default_set["id"], skill["id"], user_id=_OWNER
+            )
             with world.get(DatabasePlugin).transactional_orm_session() as session:
                 skill_installations.install(
                     session, env="dev", owner_id=_OWNER, bot_id=_BOT_ID,
@@ -235,6 +235,29 @@ def _seed_inactive_skill_in_active_custom_set(world) -> None:
         )
 
 
+def _seed_inactive_skill_in_inactive_custom_set(world) -> None:
+    _seed_delete(world, active=False)
+    with avernet_tenant_scope(_TENANT):
+        skill = world.get(SkillRepository).get_bot_local_skill(
+            skill_id="1", bot_id=_BOT_ID, user_id=_OWNER
+        )
+        assert skill is not None
+        inactive_set = world.get(SkillSetRepository).create(
+            {
+                "name": "Saved custom",
+                "user_id": _OWNER,
+                "bolt_id": _BOT_ID,
+                "is_default": False,
+                "is_builtin": False,
+                "is_active": False,
+                "engine_type": "openclaw",
+            }
+        )
+        world.get(SkillSetRepository).add_skill_to_set(
+            inactive_set["id"], skill["id"], user_id=_OWNER
+        )
+
+
 @endpoint_test(
     method="DELETE",
     path="/openapi/v1/bots/{bot_id}/skills/{skill_id}",
@@ -263,7 +286,11 @@ def delete_inactive_local_skill():
     seed=_seed_active_delete,
     expect=ExpectError(
         status=409,
-        json_contains={"code": 409102, "message": "Skill is active", "data": None},
+        json_contains={
+            "code": 409105,
+            "message": "Skill is still in use",
+            "data": {"blockers": {"installation": 1, "membership": 1}},
+        },
     ),
 )
 def delete_active_local_skill_is_rejected():
@@ -282,11 +309,38 @@ def delete_active_local_skill_is_rejected():
     seed=_seed_inactive_skill_in_active_custom_set,
     expect=ExpectError(
         status=409,
-        json_contains={"code": 409102, "message": "Skill is active", "data": None},
+        json_contains={
+            "code": 409105,
+            "message": "Skill is still in use",
+            "data": {"blockers": {"membership": 1}},
+        },
     ),
 )
 def delete_skill_referenced_by_active_custom_set_is_rejected():
     """Default exclusion cannot override an active custom SkillSet reference."""
+
+
+@endpoint_test(
+    method="DELETE",
+    path="/openapi/v1/bots/{bot_id}/skills/{skill_id}",
+    scenario="rejects_skill_referenced_only_by_inactive_set",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID, "skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
+    seed=_seed_inactive_skill_in_inactive_custom_set,
+    expect=ExpectError(
+        status=409,
+        json_contains={
+            "code": 409105,
+            "message": "Skill is still in use",
+            "data": {"blockers": {"membership": 1}},
+        },
+    ),
+)
+def delete_skill_referenced_by_inactive_set_is_rejected():
+    """Saved inactive configuration is a reference, not deletion cleanup."""
 
 
 # The retiring address, driven for the same reason as the state commands: it
@@ -322,7 +376,11 @@ def legacy_delete_resolves_the_bot_from_the_skill():
     seed=_seed_active_delete,
     expect=ExpectError(
         status=409,
-        json_contains={"code": 409102, "message": "Skill is active", "data": None},
+        json_contains={
+            "code": 409105,
+            "message": "Skill is still in use",
+            "data": {"blockers": {"installation": 1, "membership": 1}},
+        },
     ),
 )
 def legacy_delete_active_local_skill_is_rejected():

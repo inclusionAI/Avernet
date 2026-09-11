@@ -50,7 +50,7 @@ def assert_application_coding_create(
     space_kind: str,
     deployment_mode: DeployMode,
 ) -> ComboDecision:
-    """Application-coding create combo: cloud + personal + non-service + claude_code.
+    """Application-coding create combo: cloud + personal/service + claude_code.
 
     ``deployment_mode`` and ``space_kind`` are explicit rather than inferred from
     the calling endpoint, so the rule is self-contained and unit-testable.
@@ -62,7 +62,11 @@ def assert_application_coding_create(
     ``AicodingProvisioningStrategy.prepare_create`` (same order, same
     messages). This copy has no production caller today — keep the two in
     sync, or single-source them once bot_inventory may depend on
-    bot_management.
+    bot_management. The mirror only sees the combo tuple, not the template
+    input shape: the strategy layer additionally refuses ``service`` for
+    hand-written application-coding configs (factory snapshots may build
+    service bots directly), because workspace hosting was only ever built for
+    the personal form.
 
     No space-kind gate: coding bots may be created in any business space
     (``space_kind`` stays a parameter to mirror the strategy signature).
@@ -73,6 +77,9 @@ def assert_application_coding_create(
         return ComboDecision(
             False, f"application coding does not support engine: {engine}"
         )
-    if bot_type != "personal":
-        return ComboDecision(False, "application coding bot must be personal")
+    if bot_type not in {"personal", "service"}:
+        return ComboDecision(
+            False,
+            f"application coding bot must be personal or service, got: {bot_type}",
+        )
     return ComboDecision(True)

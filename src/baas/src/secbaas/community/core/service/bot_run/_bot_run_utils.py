@@ -14,7 +14,14 @@ if TYPE_CHECKING:
 logger = get_logger("core-bot-run")
 
 _SUPPORTED_ENGINES = frozenset(
-    {"openclaw", "teclaw", "aicoding", "hermes", "claude_code"}
+    {
+        "openclaw",
+        "teclaw",
+        "aicoding",
+        "hermes",
+        "claude_code",
+        "deepseek_harness",
+    }
 )
 
 

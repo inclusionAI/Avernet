@@ -637,6 +637,7 @@ def _build_manager_worker_group(bot_ids: list[str]) -> GroupFormation:
         collab_mode="manager_worker",
         group_name="任务主从协作群",
         members_info=members_info,
+        extend_props={"dynamic_task_node_protocol": True},
     )
 
 
@@ -853,10 +854,13 @@ def _parse_search_result(run: dict) -> SearchResult:
             )
         gf = GroupFormation(
             bot_ids=bot_ids,
-            collab_mode=str(data.get("collab_mode") or "chat"),
+            # 动态规划当前的默认协作实现是 BCS 主从群。策略可显式返回
+            # chat/state_machine（以及将来的群形态），执行编排核只透传，
+            # 不在下游以默认值或强制改写掩盖策略选择。
+            collab_mode=str(data.get("collab_mode") or "manager_worker"),
             group_name=data.get("group_name"),
             members_info=data.get("members_info"),
-            extend_props={},
+            extend_props={"dynamic_task_node_protocol": True},
         )
         def_yaml = data.get("definition_yaml")
         if def_yaml:

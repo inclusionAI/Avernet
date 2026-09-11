@@ -65,6 +65,40 @@ class _Database:
             session.close()
 
 
+def test_purge_bot_installations_is_exactly_owner_bot_env_scoped() -> None:
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        session.add_all(
+            [
+                BotSkillInstallation(
+                    owner_id="owner", bot_id="default", skill_id=1, env="dev"
+                ),
+                BotSkillInstallation(
+                    owner_id="other", bot_id="default", skill_id=2, env="dev"
+                ),
+                BotMCPInstallation(
+                    owner_id="owner", bot_id="default", server_code="mcp.mine", env="dev"
+                ),
+                BotMCPInstallation(
+                    owner_id="other", bot_id="default", server_code="mcp.other", env="dev"
+                ),
+            ]
+        )
+
+    result = CapabilityDesiredStateRepository(db).purge_bot_installations(
+        owner_id="owner", bot_id="default", env="dev"
+    )
+
+    assert result == {"skills": 1, "mcps": 1}
+    with db.orm_session() as session:
+        assert [row.owner_id for row in session.query(BotSkillInstallation)] == [
+            "other"
+        ]
+        assert [row.owner_id for row in session.query(BotMCPInstallation)] == [
+            "other"
+        ]
+
+
 def test_legacy_scope_resolution_returns_only_ordinary_set_address() -> None:
     db = _Database()
     with db.transactional_orm_session() as session:
@@ -463,6 +497,7 @@ def test_mcp_membership_is_independent_for_two_owners_sharing_default_bot_id():
         )
 
     result = CapabilityDesiredStateRepository(db).add_mcp(
+        platform_default_codes=frozenset(),
         bot_id="default",
         owner_id="owner-a",
         set_id=str(owner_a.id),
@@ -640,6 +675,31 @@ def test_database_allows_system_default_and_one_ordinary_membership():
         )
 
 
+@pytest.mark.parametrize("excluded", [False, True])
+@pytest.mark.parametrize("active", [False, True])
+def test_code_policy_mcp_cannot_join_ordinary_set_without_default_membership(active, excluded):
+    db = _Database()
+    repository = CapabilityDesiredStateRepository(db)
+    with db.transactional_orm_session() as session:
+        ordinary = SkillSet(name="ordinary", user_id="owner", bolt_id="bot", is_active=active, env="dev", engine_type="openclaw")
+        default = SkillSet(name="default", is_default=True, engine_type="openclaw", env="dev")
+        session.add_all([ordinary, default])
+        session.flush()
+        if excluded:
+            session.add(DefaultSkillsetMcpExclusion(
+                user_id="owner", bot_id="bot", skill_set_id=default.id, server_code="mcp.policy"
+            ))
+    with pytest.raises(SkillSetControlPlaneConflictError, match="RESOURCE_MANAGED_BY_PLATFORM_POLICY"):
+        repository.add_mcp(
+            bot_id="bot", owner_id="owner", set_id=str(ordinary.id), server_code="mcp.policy",
+            name="Policy", description=None, icon=None,
+            platform_default_codes=frozenset({"mcp.policy"}), engine_type="openclaw",
+        )
+    with db.orm_session() as session:
+        assert session.query(SkillSetMCPServer).count() == 0
+        assert session.query(BotMCPInstallation).count() == 0
+
+
 def test_active_skill_set_mutates_mcp_membership_and_installation_atomically():
     db = _Database()
     repository = CapabilityDesiredStateRepository(db)
@@ -649,6 +709,7 @@ def test_active_skill_set_mutates_mcp_membership_and_installation_atomically():
         session.flush()
 
     added = repository.add_mcp(
+        platform_default_codes=frozenset(),
         bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather",
         name="Weather MCP", description="Weather tools",
         icon="https://example.test/weather.png",
@@ -656,6 +717,7 @@ def test_active_skill_set_mutates_mcp_membership_and_installation_atomically():
     assert added.changed is True
     assert added.mcp_codes == frozenset({"mcp.weather"})
     unchanged_add = repository.add_mcp(
+        platform_default_codes=frozenset(),
         bot_id="bot", owner_id="owner", set_id=str(skill_set.id),
         server_code="mcp.weather", name="Weather MCP",
         description="Weather tools", icon="https://example.test/weather.png",
@@ -703,6 +765,7 @@ def test_mcp_direct_and_skill_set_ownership_conflicts_are_enforced():
         SkillSetControlPlaneConflictError, match="RESOURCE_DIRECT_ACTIVE"
     ):
         repository.add_mcp(
+            platform_default_codes=frozenset(),
             bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather",
             name="Weather", description=None, icon=None,
         )
@@ -711,6 +774,7 @@ def test_mcp_direct_and_skill_set_ownership_conflicts_are_enforced():
         platform_default_codes=frozenset(),
     ).changed
     assert repository.add_mcp(
+        platform_default_codes=frozenset(),
         bot_id="bot", owner_id="owner", set_id=str(skill_set.id), server_code="mcp.weather",
         name="Weather", description=None, icon=None,
     ).changed
@@ -2299,6 +2363,7 @@ def test_a_default_set_mcp_member_cannot_join_an_ordinary_set():
 
     with pytest.raises(SkillSetControlPlaneConflictError) as error:
         CapabilityDesiredStateRepository(db).add_mcp(
+            platform_default_codes=frozenset(),
             bot_id="bot",
             owner_id="owner",
             set_id=str(ordinary.id),

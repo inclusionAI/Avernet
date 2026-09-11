@@ -11,6 +11,7 @@ SUPPORTED_ENGINE_TYPES = [
     "moltis",
     "openclaw",
     "hermes",
+    "deepseek_harness",
     "aicoding",
     "claude_code",
     "teclaw",
@@ -36,7 +37,7 @@ def _get_engine_types() -> list[str]:
     2. SUPPORTED_ENGINE_TYPES 默认列表
 
     Returns:
-        list[str]: 引擎类型列表，如 ["moltis", "openclaw", "hermes", "aicoding", "teclaw"]
+        list[str]: 引擎类型列表，如 ["moltis", "openclaw", "deepseek_harness"]
     """
     env_engines = os.getenv("ENGINE_TYPES", "")
     if env_engines:

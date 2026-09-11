@@ -59,3 +59,27 @@ def can_join_bcn_as_provider(template_config: Optional[Dict[str, Any]]) -> bool:
         "bcn",
         "join_as_provider",
     )
+
+
+#: Legacy template types whose BCN provider registration is guaranteed without a
+#: declared capabilities node — the ``bot_service`` legacy registration bucket.
+LEGACY_BCN_CAPABLE_TEMPLATE_TYPES = frozenset({"personalCoding", "normalCC"})
+
+
+def can_create_service_with_template(
+    declarative_type: Optional[str],
+    template_config: Optional[Dict[str, Any]],
+) -> bool:
+    """Whether a factory snapshot may create a service bot directly.
+
+    Mirrors the BCN provider-registration surface (``BotService.
+    _should_register_bcn_provider``): declared capabilities are the only truth
+    source — a service create needs provider join allowed; without a
+    capabilities node only the legacy registration bucket
+    (personalCoding / normalCC) covers claude_code templates. Keeps the
+    direct-create allowed surface and the registration surface one surface,
+    so no combination can build silently unbound service bots.
+    """
+    if has_declared_capabilities(template_config):
+        return can_join_bcn_as_provider(template_config)
+    return declarative_type in LEGACY_BCN_CAPABLE_TEMPLATE_TYPES

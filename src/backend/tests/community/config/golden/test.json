@@ -253,6 +253,7 @@
       "aicoding_root": "~/.aicoding",
       "claude_code_root": "~/.claude_code",
       "claude_code_session_root": "/home/admin/.claude",
+      "deepseek_harness_root": "/home/admin/.dsh",
       "hermes_root": "~/.hermes",
       "openclaw_root": "~/.openclaw"
     },

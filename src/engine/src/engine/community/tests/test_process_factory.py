@@ -216,3 +216,24 @@ class TestFactoryFromEngineJson:
         settings = load_engine_process_settings("claude-code", path=cfg)
         proc = create_engine_process("claude-code", settings=settings)
         assert isinstance(proc, NoOpEngineProcess)
+
+    def test_dsh_with_empty_start_command_yields_noop(self, tmp_path):
+        cfg = _write_json(
+            tmp_path,
+            {
+                "engines": {
+                    "deepseek_harness": {
+                        "process": {
+                            "start_cmd": [],
+                            "stop_cmd": [],
+                            "restart_cmd": [],
+                        }
+                    }
+                }
+            },
+        )
+        settings = load_engine_process_settings("deepseek_harness", path=cfg)
+
+        proc = create_engine_process("deepseek_harness", settings=settings)
+
+        assert isinstance(proc, NoOpEngineProcess)
