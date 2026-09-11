@@ -91,13 +91,17 @@ async def dev_login(
     if not _STAFF_ID.match(staff_id):
         # Not a sanitizing rejection: a value that fails this check is trying
         # to carry cookie structure or length beyond what a staff id is.
-        raise HTTPException(status_code=400, detail="staff_id must be [A-Za-z0-9_-]{1,64}")
+        raise HTTPException(
+            status_code=400, detail="staff_id must be [A-Za-z0-9_-]{1,64}"
+        )
     if not _NEXT_PORT.match(next):
         raise HTTPException(status_code=400, detail="next must be a port number")
 
     nick = nick_name.strip()[:_NICK_MAX]
     if any(ord(ch) < 0x20 or ch == "\x7f" for ch in nick):
-        raise HTTPException(status_code=400, detail="nick_name must not contain control characters")
+        raise HTTPException(
+            status_code=400, detail="nick_name must not contain control characters"
+        )
 
     continue_url = f"{_host_redirect_base(request)}:{next}/"
 
