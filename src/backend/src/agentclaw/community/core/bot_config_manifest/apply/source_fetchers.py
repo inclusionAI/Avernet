@@ -263,10 +263,10 @@ class DeclaredFetch:
     #: without one, so :class:`GitSourceFetcher` asserts rather than branches.
     session: Optional[SourceSession]
     #: The declared ``from`` name, e.g. ``"content"``, or ``None`` for an
-    #: inline source. The git road falls back to the repository URL when this
-    #: is ``None``, and the result is the ``display`` that names the source in
-    #: the report. The baseline is not read by it: that is keyed on the
-    #: substituted ``(url, ref)``.
+    #: inline source. The git road falls back to ``<url>@<ref>`` when this is
+    #: ``None``, and the result is the ``display`` that names the source in the
+    #: report — one row per declaration. The baseline is not read by it: that
+    #: is keyed on the substituted ``(url, ref)``.
     name: Optional[str]
 
 
@@ -576,7 +576,14 @@ class GitSourceFetcher(SourceFetcher):
             subpath=compose_subpath(decl.subpath, entry.get("subpath")),
             mode=decl.mode,
         )
-        display = request.name if request.name is not None else spec.url
+        # One report row per declaration. An inline source has no name to
+        # report under, and the URL alone is not one: two entries reading one
+        # repository at two refs would collapse into a single row naming
+        # neither ref. ``spec.ref`` is already normalised ("HEAD" when the
+        # declaration omitted it), so the display is stable across applies.
+        display = (
+            request.name if request.name is not None else f"{spec.url}@{spec.ref}"
+        )
         auth = decl.auth
 
         try:
@@ -585,9 +592,7 @@ class GitSourceFetcher(SourceFetcher):
                 binding = self._credentials.binding(name=auth)
                 binding.reauthorize(httpx.URL(spec.url))
                 headers = dict(binding.headers_for(httpx.URL(spec.url)))
-            checkout, fresh = session.checkout(
-                spec, headers=headers, display=display
-            )
+            checkout, fresh = session.checkout(spec, headers=headers)
         except CredentialError as exc:
             raise EntryFetchError(str(exc)) from exc
         except PrefixAuthorizationError as exc:

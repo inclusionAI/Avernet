@@ -57,8 +57,8 @@ def _spec(url: str = "https://git.corp/r.git", ref: str = "main") -> GitSourceSp
 def test_one_url_ref_pair_is_fetched_once_and_freshness_is_reported():
     git = FakeGitClient(result=CHECKOUT)
     session = SourceSession(sources={}, baselines={}, git=git)
-    first, fresh = session.checkout(_spec(), headers={}, display="src")
-    second, again = session.checkout(_spec(), headers={}, display="src")
+    first, fresh = session.checkout(_spec(), headers={})
+    second, again = session.checkout(_spec(), headers={})
     # Same checkout object back, one underlying fetch for the pair — and only
     # the first caller is told it moved the bytes, so the ledger charges once.
     assert first is second
@@ -73,7 +73,7 @@ def test_one_url_ref_pair_is_fetched_once_and_freshness_is_reported():
 def test_adoption_records_the_resolution_once_per_display():
     git = FakeGitClient(result=CHECKOUT)
     session = SourceSession(sources={}, baselines={}, git=git)
-    checkout, _ = session.checkout(_spec(), headers={}, display="src")
+    checkout, _ = session.checkout(_spec(), headers={})
     session.adopt(display="src", spec=_spec(), checkout=checkout, auth_name="ci")
     for _ in range(2):
         session.adopt(display="src", spec=_spec(), checkout=checkout, auth_name="ci")
@@ -91,11 +91,9 @@ def test_adoption_records_the_resolution_once_per_display():
 def test_distinct_refs_or_urls_fetch_distinctly():
     git = FakeGitClient(result=CHECKOUT)
     session = SourceSession(sources={}, baselines={}, git=git)
-    session.checkout(_spec(), headers={}, display="src")
-    session.checkout(_spec(ref="dev"), headers={}, display="src")
-    session.checkout(
-        _spec(url="https://git.corp/other.git"), headers={}, display="src2"
-    )
+    session.checkout(_spec(), headers={})
+    session.checkout(_spec(ref="dev"), headers={})
+    session.checkout(_spec(url="https://git.corp/other.git"), headers={})
     assert len(git.requests) == 3
 
 
@@ -103,7 +101,7 @@ def test_a_fetch_failure_is_raised_and_caches_nothing():
     git = FakeGitClient(error=FetchFailedError("git fetch failed"))
     session = SourceSession(sources={}, baselines={}, git=git)
     try:
-        session.checkout(_spec(), headers={}, display="src")
+        session.checkout(_spec(), headers={})
         raise AssertionError("expected FetchFailedError")
     except FetchFailedError:
         pass
@@ -123,7 +121,7 @@ def test_close_is_idempotent_and_deregisters(monkeypatch):
     )
     git = FakeGitClient(result=CHECKOUT)
     session = SourceSession(sources={}, baselines={}, git=git)
-    session.checkout(_spec(), headers={}, display="src")
+    session.checkout(_spec(), headers={})
     session.close()
     session.close()
     assert removed == [Path("/tmp/x")]

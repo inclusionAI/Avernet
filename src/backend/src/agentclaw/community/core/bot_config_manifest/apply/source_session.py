@@ -135,9 +135,11 @@ class SourceSession:
     #: The report's ``sources`` rows, in the order they were adopted.
     _resolutions: list[SourceResolution] = field(default_factory=list)
     #: The display names already in ``_resolutions``. Makes :meth:`adopt`
-    #: idempotent per source, so ten entries naming one source produce one row::
+    #: idempotent per display, so ten entries naming one source produce one
+    #: row — and two declarations of one repository produce two, which is what
+    #: "one row per declaration" means::
     #:
-    #:     {"content", "https://code.example.com/solo.git"}
+    #:     {"content", "https://code.example.com/solo.git@main"}
     _recorded: set[str] = field(default_factory=set)
 
     def checkout(
@@ -145,7 +147,6 @@ class SourceSession:
         spec: GitSourceSpec,
         *,
         headers: Mapping[str, str],
-        display: str,
     ) -> "tuple[GitCheckout, bool]":
         """The checkout for one ``(url, ref)``, fetching only the first time.
 
@@ -166,11 +167,9 @@ class SourceSession:
         cache hit answers ``False``, because those bytes were charged when they
         actually moved.
 
-        ``display`` is the report's name for the source — the declared ``from``
-        name, or the repository URL for an inline one — and is the same key
-        ``baselines`` is read by, so strict mode and the report agree on
-        identity. It is not part of the cache key and nothing is recorded here:
-        see :meth:`adopt`.
+        The report's name for the source plays no part here and nothing is
+        recorded: a checkout answers "what does this ref name right now", and
+        standing behind that answer is a separate event — see :meth:`adopt`.
 
         ``headers`` carries the credential's injected headers, or is empty for
         an anonymous fetch.

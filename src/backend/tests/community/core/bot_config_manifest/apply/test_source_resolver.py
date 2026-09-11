@@ -674,6 +674,68 @@ def test_strict_on_the_first_apply_has_no_opinion(rig):
     assert decl.note() is None
 
 
+def test_an_inline_source_is_named_url_at_ref(rig):
+    """An inline declaration has no name to report under, so it is named by
+    the repository and the ref it asked for. The URL alone would not do: two
+    entries reading one repository at two refs would collapse into one row
+    naming neither of them, and a reader could not tell which ref the sha
+    belonged to."""
+    _, _, pipeline = rig
+    git = _ScriptedGit()
+    ctx = make_context(source_session=_session(git))
+    for ref in ("a", "b"):
+        pipeline.resolve(
+            ctx,
+            entry={"source": {"protocol": "git", "url": GIT_URL, "ref": ref}},
+            category="skills",
+        )
+    records = ctx.source_session.resolution_records()
+    assert [r.name for r in records] == [f"{GIT_URL}@a", f"{GIT_URL}@b"]
+    # The url rides its own field, so a reader never has to split the name.
+    assert [(r.url, r.ref) for r in records] == [(GIT_URL, "a"), (GIT_URL, "b")]
+
+
+def test_an_inline_strict_refusal_names_the_ref_it_refused(rig):
+    """The refusal message uses the display, which for an inline source now
+    says which ref moved — the difference between "this repository moved" and
+    a sentence a reader can act on when the document names it twice."""
+    _, _, pipeline = rig
+    git = _ScriptedGit()
+    ctx = make_context(
+        source_session=_session(git, baselines={(GIT_URL, "main"): "b" * 40})
+    )
+    with pytest.raises(EntryFetchError, match=f"{GIT_URL}@main"):
+        pipeline.resolve(
+            ctx,
+            entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "main",
+                              "mode": "strict"}},
+            category="skills",
+        )
+
+
+def test_two_names_over_one_repository_are_two_rows_and_one_baseline(rig):
+    """Report rows are per declaration; baselines are per ``(url, ref)``. A
+    document that names one repository twice gets both names back in the
+    report — each author finds the name they wrote — and one checkout, one
+    sha, and one baseline key behind them."""
+    _, _, pipeline = rig
+    git = _ScriptedGit()
+    session = _session(git, sources={
+        "content": {"protocol": "git", "url": GIT_URL, "ref": "main"},
+        "docs": {"protocol": "git", "url": GIT_URL, "ref": "main"},
+    })
+    ctx = make_context(source_session=session)
+    for name in ("content", "docs"):
+        pipeline.resolve(ctx, entry={"from": name}, category="skills")
+    records = session.resolution_records()
+    assert [r.name for r in records] == ["content", "docs"]
+    assert {r.resolved_sha for r in records} == {_FAKE_SHA}
+    # One key, so the next apply reads one baseline for both rows — the apply
+    # service's own test pins that the collapse survives the report round trip.
+    assert {(r.url, r.ref) for r in records} == {(GIT_URL, "main")}
+    assert len(git.specs) == 1, "one checkout per (url, ref) per apply"
+
+
 def test_strict_passes_when_the_document_re_pins_the_ref(rig):
     """Editing ``ref`` is how a strict source is advanced, and it has to be:
     a baseline is a fact about a ``(url, ref)`` pair, and the pair the
@@ -973,10 +1035,10 @@ def test_a_source_with_no_subpath_takes_the_entrys_whole(rig):
 def test_two_entries_off_one_git_source_share_a_checkout_and_a_sha(rig):
     """One source, two paths, one fetch, one ``resolved_sha``.
 
-    The composition must not cost a second checkout: the cache and the report
-    identity key on ``(url, ref)`` and on the source's *name*, neither of which
-    an entry's subpath changes. If it did, the report would carry two rows for
-    one declared source and the strict-mode baseline would have two answers.
+    The composition must not cost a second checkout: the cache keys on
+    ``(url, ref)`` and the report row on the source's *display*, neither of
+    which an entry's subpath changes. If it did, the report would carry two
+    rows for one declared source.
     """
     _, _, pipeline = rig
     git = _ScriptedGit()
