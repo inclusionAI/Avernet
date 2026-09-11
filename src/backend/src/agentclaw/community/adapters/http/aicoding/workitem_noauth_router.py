@@ -6,7 +6,7 @@ import logging
 from typing import Any, Optional
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field, field_validator
 
 from agentclaw.community.api.workitem_service import WorkItemServiceProtocol
@@ -28,8 +28,7 @@ class CreateWorkItemRequest(BaseModel):
 class CreateRelationRequest(BaseModel):
     """添加工作项关联关系请求（仅 common 类型）。"""
 
-    # operator 为签名鉴权要求的必传字段，实际不校验内容，任意非空值均可调通
-    operator: str = Field("100000", description="操作人工号（实际不校验内容，任意非空值均可）")
+    operator: str = Field("100000", description="操作人工号")
     relation_identifier: Optional[str] = Field(None, alias="relationIdentifier", description="关联类型标识")
     source_identifier: str = Field(..., alias="sourceIdentifier", description="源工作项标识")
     relation_id: Optional[str] = Field(None, alias="relationId", description="关联关系 ID")
@@ -50,7 +49,7 @@ class CreateRelationRequest(BaseModel):
 class UpdateWorkItemRequest(BaseModel):
     """工作项关联 URL 请求 — 专用于给工作项添加 URL 关联。"""
 
-    operator: str = Field("100000", description="操作人工号（实际不校验内容，任意非空值均可）")
+    operator: str = Field("100000", description="操作人工号")
     work_item_id: str = Field(..., alias="dimaId", description="工作项标识")
     url: str = Field(..., description="要关联的 URL")
 
@@ -60,6 +59,16 @@ class UpdateWorkItemRequest(BaseModel):
     @classmethod
     def validate_url(cls, value: str) -> str:
         return normalize_dima_http_url(value)
+
+
+class DeleteRelationRequest(BaseModel):
+    """删除工作项关联关系请求（精确按 relationRecordId 删单条）。"""
+
+    operator: str = Field("100000", description="操作人工号")
+    relation_identifier: str = Field(..., alias="relationIdentifier", description="关联类型标识，如 URL / COMMON 等")
+    relation_record_id: str = Field(..., alias="relationRecordId", description="要删除的关联记录 ID（来自 list 查询）")
+
+    model_config = {"extra": "allow", "populate_by_name": True}
 
 
 class DimaUpdateWorkItemDocumentRequest(BaseModel):
@@ -110,7 +119,7 @@ def normalize_dima_http_url(raw_url: str) -> str:
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/public/dima", tags=["dima-noauth"])
+router = APIRouter(prefix="/api/public/dima", tags=["dima"])
 
 
 @router.post("/work-items/create", response_model=WorkItemApiResponse)
@@ -123,7 +132,7 @@ async def create_work_item(
     请求体中 staffId 为必填，其余字段直接透传到 OpenAPI。
     """
     logger.info(
-        "[workitem_noauth.create] staffId=%s, keys=%s",
+        "[workitem.create] staffId=%s, keys=%s",
         req.staff_id, list(req.model_dump(by_alias=True, exclude_none=True).keys()),
     )
     try:
@@ -147,7 +156,7 @@ async def create_work_item(
         )
         return WorkItemApiResponse(success=True, code="200", message="Work item created", data=result.get("data"))
     except Exception as e:
-        logger.error("[workitem_noauth.create] Failed: %s", e, exc_info=True)
+        logger.error("[workitem.create] Failed: %s", e, exc_info=True)
         return WorkItemApiResponse(success=False, code="500", message=str(e))
 
 
@@ -169,7 +178,7 @@ async def create_work_item_relation(
     }
     """
     logger.info(
-        "[workitem_noauth.create_relation] operator=%s, sourceIdentifier=%s",
+        "[workitem.create_relation] operator=%s, sourceIdentifier=%s",
         req.operator, req.source_identifier,
     )
     try:
@@ -181,7 +190,7 @@ async def create_work_item_relation(
         )
         return WorkItemApiResponse(success=True, code="200", message="Relation created", data=result.get("data"))
     except Exception as e:
-        logger.error("[workitem_noauth.create_relation] Failed: %s", e, exc_info=True)
+        logger.error("[workitem.create_relation] Failed: %s", e, exc_info=True)
         return WorkItemApiResponse(success=False, code="500", message=str(e))
 
 
@@ -200,7 +209,7 @@ async def append_file_to_work_item(
     }
     """
     logger.info(
-        "[workitem_noauth.append_file] operator=%s, dimaId=%s, url=%s",
+        "[workitem.append_file] operator=%s, dimaId=%s, url=%s",
         req.operator, req.work_item_id, req.url,
     )
     try:
@@ -217,9 +226,72 @@ async def append_file_to_work_item(
         )
         return WorkItemApiResponse(success=True, code="200", message="URL linked", data=result.get("data"))
     except Exception as e:
-        logger.error("[workitem_noauth.append_file] Failed: %s", e, exc_info=True)
+        logger.error("[workitem.append_file] Failed: %s", e, exc_info=True)
         return WorkItemApiResponse(success=False, code="500", message=str(e))
 
+
+@router.post("/work-items/relation/delete", response_model=WorkItemApiResponse)
+async def delete_work_item_relation(
+    req: DeleteRelationRequest,
+    service: WorkItemServiceProtocol = Injected(WorkItemServiceProtocol),
+) -> WorkItemApiResponse:
+    """删除工作项关联关系（精确按 relationRecordId 删单条）。
+
+    POST /api/public/dima/work-items/relation/delete
+    Body: {
+        "operator": "100000",
+        "relationIdentifier": "URL",
+        "relationRecordId": "2024041800100538244"
+    }
+
+    调用方需先经 list 查询拿到要删记录的 relationRecordId；本接口不替调用方决定删哪条。
+    """
+    logger.info(
+        "[workitem.delete_relation] operator=%s, relationIdentifier=%s, relationRecordId=%s",
+        req.operator, req.relation_identifier, req.relation_record_id,
+    )
+    try:
+        body = req.model_dump(by_alias=True, exclude_none=True)
+        operator = body.pop("operator")
+        result = service.delete_work_item_relation(
+            operator=operator,
+            request_body=body,
+        )
+        return WorkItemApiResponse(success=True, code="200", message="Relation deleted", data=result.get("data"))
+    except Exception as e:
+        logger.error("[workitem.delete_relation] Failed: %s", e, exc_info=True)
+        return WorkItemApiResponse(success=False, code="500", message=str(e))
+
+
+@router.get("/work-items/relation/list", response_model=WorkItemApiResponse)
+async def list_work_item_relations(
+    workItemId: str = Query(..., description="工作项 ID"),
+    operator: str = Query("100000", description="操作人工号"),
+    service: WorkItemServiceProtocol = Injected(WorkItemServiceProtocol),
+) -> WorkItemApiResponse:
+    """查询工作项关联记录（按 relationIdentifier 分组）。
+
+    GET /api/public/dima/work-items/relation/list?workItemId=&operator=
+
+    返回 data 为按 relationIdentifier 分组的 dict，例如：
+        {"SUB": [...], "PARENT": [...], "COMMON": [...], "URL": [...], "ATTACHMENT": [...]}
+
+    每条记录含 relationRecordId / relationId / relationName / url / identifier 等。
+    调用方据此自行决定要 delete 哪条（本接口不替调用方做选择）。
+    """
+    logger.info(
+        "[workitem.list_relation] operator=%s, workItemId=%s",
+        operator, workItemId,
+    )
+    try:
+        result = service.list_work_item_relations(
+            work_item_id=workItemId,
+            operator=operator,
+        )
+        return WorkItemApiResponse(success=True, code="200", message="OK", data=result.get("data"))
+    except Exception as e:
+        logger.error("[workitem.list_relation] Failed: %s", e, exc_info=True)
+        return WorkItemApiResponse(success=False, code="500", message=str(e))
 
 @router.post("/work-items/document/update", response_model=WorkItemApiResponse)
 async def update_work_item_document(
@@ -238,7 +310,7 @@ async def update_work_item_document(
     }
     """
     logger.info(
-        "[dima_noauth.update_document] staffId=%s, workItemId=%s, formatType=%s",
+        "[dima.update_document] staffId=%s, workItemId=%s, formatType=%s",
         req.staff_id, req.work_item_id, req.format_type,
     )
     try:
@@ -260,7 +332,7 @@ async def update_work_item_document(
             data=result.get("data"),
         )
     except Exception as e:
-        logger.error("[dima_noauth.update_document] Failed: %s", e, exc_info=True)
+        logger.error("[dima.update_document] Failed: %s", e, exc_info=True)
         return WorkItemApiResponse(success=False, code="500", message=str(e))
 
 
@@ -305,7 +377,7 @@ async def upload_file_to_arkgw(
             url=url,
         )
     except Exception as e:
-        logger.error("[workitem_noauth.arkgw_upload] Failed: %s", e, exc_info=True)
+        logger.error("[workitem.arkgw_upload] Failed: %s", e, exc_info=True)
         return WorkItemApiResponse(success=False, code="500", message=str(e))
 
     return WorkItemApiResponse(
