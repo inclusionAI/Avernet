@@ -1,3 +1,5 @@
+import { monitoringDdl } from "./monitoring-schema.js";
+
 /**
  * Schema DDL for ClawWeb.
  *
@@ -28,6 +30,8 @@ export type DbType = "sqlite" | "mysql" | "zdas";
  * are only needed for SQLite.
  */
 export const sqliteTriggers: string[] = [
+  `CREATE TRIGGER IF NOT EXISTS trg_insight_monitoring_diagnoses_update AFTER UPDATE ON insight_monitoring_diagnoses FOR EACH ROW BEGIN UPDATE insight_monitoring_diagnoses SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END`,
+  `CREATE TRIGGER IF NOT EXISTS trg_insight_monitoring_bot_checks_update AFTER UPDATE ON insight_monitoring_bot_checks FOR EACH ROW BEGIN UPDATE insight_monitoring_bot_checks SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END`,
   `CREATE TRIGGER IF NOT EXISTS trg_flow_events_update AFTER UPDATE ON flow_events FOR EACH ROW BEGIN UPDATE flow_events SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END`,
   `CREATE TRIGGER IF NOT EXISTS trg_flow_metrics_update AFTER UPDATE ON flow_metrics FOR EACH ROW BEGIN UPDATE flow_metrics SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END`,
   `CREATE TRIGGER IF NOT EXISTS trg_triggered_alerts_update AFTER UPDATE ON triggered_alerts FOR EACH ROW BEGIN UPDATE triggered_alerts SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END`,
@@ -93,6 +97,11 @@ export const sqliteTriggers: string[] = [
  * identically to TEXT so this is fully compatible.
  */
 export const migrations: ReadonlyArray<{ version: number; description: string; sql: string[]; sqliteOnly?: boolean; mysqlOnly?: boolean }> = [
+  {
+    version: 121,
+    description: "ClawInsight: agent monitoring tables",
+    sql: monitoringDdl,
+  },
   {
     version: 1,
     description: "ClawFlow: flow_events, flow_metrics, triggered_alerts",

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "claw-monitoring/diagnosis-event/v1",
+  "eventId": "mock-diag-oc-unresolved-003",
+  "diagnosisId": "mock-diag-oc-unresolved-003",
+  "botId": "mock-bot-oc",
+  "engine": "OC",
+  "sessionKey": "agent:main:mock-session-003",
+  "sessionId": null,
+  "traceId": null,
+  "occurredAt": null,
+  "diagnosedAt": "2026-09-09T09:10:18Z",
+  "decision": "UNRESOLVED",
+  "tcFaultLabel": null,
+  "confidence": null,
+  "businessProblemCategory": null,
+  "businessProblemSubtype": null,
+  "systemDiagnosis": "诊断模型暂不可用，无法生成有效结论。",
+  "businessDiagnosis": null,
+  "handlerName": null,
+  "humanIntervention": false
+}

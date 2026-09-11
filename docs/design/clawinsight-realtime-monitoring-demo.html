@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentEvolve · 效果中心 · Agent 监控自愈</title>
+  <style>
+    :root {
+      --page: #f5f7fb;
+      --card: #fff;
+      --line: #e8edf3;
+      --line-strong: #d9e1ec;
+      --text: #1b2a42;
+      --muted: #7b8798;
+      --subtle: #9aa6b5;
+      --blue: #2161e8;
+      --blue-2: #edf4ff;
+      --blue-3: #cfe0ff;
+      --red: #d94756;
+      --red-2: #fff0f1;
+      --orange: #d98219;
+      --orange-2: #fff7e9;
+      --green: #15966a;
+      --green-2: #eaf9f2;
+      --gray-2: #f2f4f7;
+      --shadow: 0 1px 2px rgba(29, 49, 82, .04), 0 8px 22px rgba(29, 49, 82, .045);
+      --radius: 14px;
+      --app-nav-height: 50px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-width: 320px; min-height: 100%; }
+    body {
+      background: var(--page);
+      color: var(--text);
+      font: 14px -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+
+    .app-nav {
+      position: sticky; top: 0; z-index: 30; height: var(--app-nav-height);
+      display: flex; align-items: center; gap: 30px; border-bottom: 1px solid #e5e7eb;
+      background: #fff; padding: 0 24px;
+    }
+    .app-brand { color: #202938; font-size: 17px; font-weight: 700; white-space: nowrap; }
+    .app-links { align-self: stretch; display: flex; align-items: stretch; gap: 25px; }
+    .app-link {
+      position: relative; display: inline-flex; align-items: center; border: 0; background: transparent;
+      color: #687386; padding: 0 1px; font-size: 13px; font-weight: 600;
+    }
+    .app-link:hover { color: #284f9c; }
+    .app-link.active { color: var(--blue); }
+    .app-link.active::after { content: ""; position: absolute; right: 0; bottom: 0; left: 0; height: 2px; background: var(--blue); }
+
+    .shell { min-height: calc(100vh - var(--app-nav-height)); display: flex; }
+    .sidebar {
+      position: sticky; top: var(--app-nav-height); height: calc(100vh - var(--app-nav-height)); width: 216px; flex: 0 0 216px;
+      display: flex; flex-direction: column; overflow: hidden;
+      border-right: 1px solid var(--line); background: #fff; padding: 23px 13px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px; margin-bottom: 35px; }
+    .brand-mark {
+      width: 35px; height: 35px; display: grid; place-items: center; flex: 0 0 35px;
+      border-radius: 10px; background: var(--blue); color: #fff;
+      box-shadow: 0 4px 10px rgba(33, 97, 232, .2);
+    }
+    .brand-mark svg { width: 19px; height: 19px; }
+    .brand-title { color: #202f47; font-size: 15px; font-weight: 700; line-height: 1.2; }
+    .brand-sub { margin-top: 4px; color: #a2acba; font-size: 10px; }
+    .side-label { padding: 0 10px 9px; color: #a3adbc; font-size: 11px; font-weight: 650; }
+    .side-nav { display: flex; flex-direction: column; gap: 4px; }
+    .side-item {
+      width: 100%; display: flex; align-items: center; gap: 10px; border: 0; border-radius: 9px;
+      background: transparent; color: #68768b; padding: 11px 10px; text-align: left;
+      font-size: 13px; font-weight: 600;
+    }
+    .side-item:hover { background: #f5f7fb; color: #2b5fcf; }
+    .side-item.active { background: #edf4ff; color: var(--blue); }
+    .side-icon { width: 18px; height: 18px; display: grid; place-items: center; flex: 0 0 18px; }
+    .side-icon svg { width: 17px; height: 17px; }
+    .side-item .chevron { margin-left: auto; color: #a0aaba; font-size: 18px; line-height: 1; }
+    .side-item.active .chevron { color: var(--blue); }
+
+    .main { min-width: 0; flex: 1; }
+    .main-inner { max-width: 1240px; margin: 0 auto; padding: 33px 34px 56px; }
+    .breadcrumb { color: #a0aaba; font-size: 11px; }
+    .breadcrumb b { color: #65748a; font-weight: 650; }
+    .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-top: 10px; }
+    .page-head h1 { margin: 0; font-size: 28px; letter-spacing: -.03em; }
+    .page-head p { margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .head-actions { display: flex; align-items: center; gap: 9px; }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+      border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; color: #5c6b80;
+      padding: 9px 12px; font-size: 12px; font-weight: 650; box-shadow: 0 1px 2px rgba(30, 50, 82, .03);
+    }
+    .btn:hover { background: #fafcff; }
+    .btn.primary { border-color: var(--blue); background: var(--blue); color: #fff; box-shadow: 0 4px 10px rgba(33, 97, 232, .15); }
+    .btn.primary:hover { background: #1a53cc; }
+    .btn svg { width: 14px; height: 14px; }
+
+    .card { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow); }
+    .section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+    .section-title { color: #273850; font-size: 14px; font-weight: 700; }
+    .section-help { margin-top: 5px; color: var(--subtle); font-size: 11px; line-height: 1.55; }
+    .bot-count { margin-left: 7px; color: var(--blue); font-size: 12px; font-weight: 700; }
+
+    .filter-card { margin-top: 25px; padding: 19px 20px; }
+    .monitor-filters { display: grid; grid-template-columns: minmax(200px, 1fr) 168px 168px auto; align-items: end; gap: 16px; }
+    .filter-field { display: flex; min-width: 0; flex-direction: column; gap: 8px; color: #79869a; font-size: 12px; }
+    .filter-field select, .filter-field input { width: 100%; min-width: 0; height: 42px; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; padding: 0 12px; color: #35455c; font-size: 13px; }
+    .filter-field input:focus, .filter-field select:focus { outline: 2px solid var(--blue-3); outline-offset: 1px; }
+    .monitor-filters .btn { height: 42px; padding: 0 16px; font-size: 12px; }
+    .filter-error { color: var(--red); font-size: 12px; margin-top: 10px; }
+    .demo-badge { color: #8c99ac; border: 1px solid var(--line-strong); border-radius: 5px; padding: 3px 7px; font-size: 10px; white-space: nowrap; }
+
+    .current-card {
+      display: flex; align-items: center; justify-content: space-between; gap: 18px;
+      margin-top: 15px; border-color: var(--blue-3); background: linear-gradient(90deg, #f2f7ff, #fbfdff); padding: 15px 17px;
+    }
+    .current-main { min-width: 0; }
+    .current-title { display: flex; align-items: center; gap: 9px; color: #264e9e; font-size: 14px; font-weight: 700; }
+    .bot-logo { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; background: var(--blue); color: #fff; flex: 0 0 auto; }
+    .bot-logo svg { width: 17px; height: 17px; }
+    .current-title .current-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .current-title small { color: #8da0bc; font-size: 11px; font-weight: 500; }
+    .current-title small:empty { display: none; }
+    .current-context { padding-left: 9px; border-left: 1px solid #cbdaf3; color: #9aa6b5 !important; }
+    .current-meta { display: flex; flex-wrap: wrap; gap: 6px 19px; margin: 6px 0 0 37px; color: #8391a5; font-size: 11px; }
+    .current-meta b { color: #526681; font-weight: 650; }
+    .current-status { display: flex; align-items: center; gap: 11px; flex: 0 0 auto; }
+    .status-box { text-align: right; }
+    .status-pill { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; background: var(--green-2); color: #08784e; padding: 6px 10px; font-size: 11px; font-weight: 700; }
+    .status-pill.paused { background: var(--gray-2); color: #69768b; }
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .status-note { margin-top: 5px; color: #9aa6b5; font-size: 10px; }
+
+    .diagnosis-card { margin-top: 16px; overflow: hidden; }
+    .diagnosis-head { padding: 17px 18px 14px; border-bottom: 1px solid #f0f2f5; }
+    .diagnosis-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+    .seg { display: inline-flex; gap: 2px; border-radius: 8px; background: #f3f5f8; padding: 3px; }
+    .seg button { border: 0; border-radius: 6px; background: transparent; color: #7a879a; padding: 6px 10px; font-size: 10px; font-weight: 650; }
+    .seg button.active { background: #fff; color: var(--blue); box-shadow: 0 1px 3px rgba(35, 54, 86, .1); }
+    .history-filter { display: flex; gap: 8px; align-items: center; }
+    .history-filter input, .history-filter select, .page-size {
+      height: 32px; border: 1px solid var(--line-strong); border-radius: 7px; outline: 0;
+      color: #65748b; background: #fff; padding: 0 9px; font-size: 10px;
+    }
+    .history-filter input { width: 225px; }
+
+    .record-list { padding: 2px 18px 10px; }
+    .record { border-bottom: 1px solid #f0f2f5; padding: 15px 0 14px; cursor: pointer; }
+    .record:last-child { border-bottom: 0; }
+    .record-summary { display: grid; grid-template-columns: 86px minmax(0, 1fr) auto 16px; gap: 14px; align-items: center; }
+    .record:hover .record-title { color: var(--blue); }
+    .record-time { line-height: 1.7; color: #8996a7; font-size: 11px; white-space: nowrap; }
+    .record-main { min-width: 0; }
+    .record-title { overflow: hidden; color: #40516a; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+    .record-meta { overflow: hidden; margin-top: 5px; color: #9aa6b5; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .record-side { display: flex; align-items: center; }
+    .tag { display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; padding: 4px 7px; font-size: 10px; font-weight: 700; white-space: nowrap; }
+    .tag.alert { background: var(--red-2); color: #b23240; }
+    .tag.pass { background: var(--green-2); color: #087c50; }
+    .tag.unresolved { background: var(--gray-2); color: #69768b; }
+    .record-chevron { color: #9ba7b6; font-size: 17px; line-height: 1; transition: transform .16s ease; }
+    .record.open .record-chevron { transform: rotate(180deg); color: var(--blue); }
+    .record-detail { display: none; margin: 14px 0 2px 100px; border: 1px solid #edf1f6; border-radius: 10px; background: #fcfdff; padding: 14px; }
+    .record.open .record-detail { display: block; }
+    .detail-grid { display: grid; grid-template-columns: 1.15fr 1.45fr 1fr 1fr; gap: 13px 17px; }
+    .kv label { display: block; color: #a0a8b5; font-size: 10px; }
+    .kv p { margin: 5px 0 0; color: #465a76; font-size: 11px; font-weight: 650; line-height: 1.5; word-break: break-all; }
+    .kv p.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; font-weight: 500; }
+    .kv p.red { color: var(--red); }
+    .kv p.orange { color: var(--orange); }
+    .diagnosis-text { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+    .text-block { border: 1px solid #f0e3e5; border-radius: 8px; background: #fffafa; padding: 10px 11px; }
+    .text-block.neutral { border-color: #e8edf3; background: #fff; }
+    .text-block h3 { margin: 0; color: #8a6670; font-size: 10px; }
+    .text-block.neutral h3 { color: #758397; }
+    .text-block p { margin: 6px 0 0; color: #5d6879; font-size: 11px; line-height: 1.7; }
+    .record-foot { display: flex; align-items: center; gap: 9px; margin-top: 12px; color: #8e9aaa; font-size: 10px; }
+    .record-foot .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--green); }
+
+    .empty { padding: 44px 20px; color: #9aa6b4; text-align: center; font-size: 12px; }
+    .diagnosis-footer {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+      border-top: 1px solid #f0f2f5; padding: 12px 18px; color: #9ba6b4; font-size: 10px;
+    }
+    .diagnosis-footer strong { color: #66758a; font-weight: 650; }
+    .pagination-wrap { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+    .page-buttons { display: inline-flex; align-items: center; gap: 4px; }
+    .page-btn {
+      min-width: 29px; height: 29px; display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; color: #65748a; padding: 0 7px; font-size: 10px;
+    }
+    .page-btn:hover:not(:disabled) { border-color: #a9c2f5; color: var(--blue); }
+    .page-btn.active { border-color: var(--blue); background: var(--blue); color: #fff; }
+    .page-ellipsis { width: 24px; color: #9aa6b5; text-align: center; }
+
+    .toast {
+      position: fixed; left: 50%; bottom: 24px; z-index: 50; transform: translate(-50%, 15px);
+      border-radius: 8px; background: #253753; color: #fff; padding: 10px 14px; font-size: 11px;
+      box-shadow: 0 8px 22px rgba(20, 37, 65, .2); opacity: 0; pointer-events: none;
+      transition: opacity .18s ease, transform .18s ease;
+    }
+    .toast.show { transform: translate(-50%, 0); opacity: 1; }
+
+    @media (max-width: 920px) {
+      .sidebar { width: 194px; flex-basis: 194px; }
+      .main-inner { padding-left: 24px; padding-right: 24px; }
+      .page-head { align-items: flex-start; flex-direction: column; }
+      .head-actions { width: 100%; }
+      .monitor-filters { grid-template-columns: 1fr 1fr; }
+      .filter-bot { grid-column: 1 / -1; }
+      .monitor-filters .btn { grid-column: 1 / -1; }
+      .detail-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 700px) {
+      .app-nav { position: static; height: auto; flex-wrap: wrap; gap: 8px 18px; padding: 10px 14px 0; }
+      .app-brand { padding-bottom: 10px; }
+      .app-links { width: 100%; height: 38px; gap: 18px; order: 2; overflow-x: auto; }
+      .app-link { white-space: nowrap; }
+      .sidebar { position: static; width: 100%; height: auto; flex-basis: auto; padding: 14px 12px; }
+      .shell { display: block; }
+      .brand { margin-bottom: 16px; }
+      .side-nav { flex-direction: row; overflow-x: auto; }
+      .side-item { min-width: 132px; }
+      .main-inner { padding: 22px 14px 38px; }
+      .head-actions .btn { flex: 1; }
+      .current-card { align-items: flex-start; flex-direction: column; }
+      .current-status { width: 100%; justify-content: space-between; }
+      .status-box { text-align: left; }
+      .current-title { flex-wrap: wrap; }
+      .record-summary { grid-template-columns: 70px minmax(0, 1fr) 16px; gap: 10px; }
+      .record-side { grid-column: 2 / 3; }
+      .record-detail { margin-left: 0; }
+      .diagnosis-tools { align-items: stretch; flex-direction: column; }
+      .history-filter { justify-content: space-between; }
+      .history-filter input { flex: 1; width: auto; }
+      .diagnosis-text { grid-template-columns: 1fr; }
+      .diagnosis-footer { align-items: flex-start; flex-direction: column; }
+      .pagination-wrap { width: 100%; justify-content: flex-start; }
+    }
+    @media (max-width: 460px) {
+      .detail-grid { grid-template-columns: 1fr; }
+      .monitor-filters { gap: 12px; }
+      .filter-card { padding: 16px 14px; }
+      .history-filter { align-items: stretch; flex-direction: column; }
+      .history-filter input, .history-filter select { width: 100%; }
+      .seg { width: 100%; overflow-x: auto; }
+      .seg button { flex: 1; white-space: nowrap; }
+      .pagination-wrap { align-items: flex-start; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-nav">
+    <strong class="app-brand">AgentEvolve</strong>
+    <nav class="app-links" aria-label="AgentEvolve 主导航">
+      <button class="app-link" onclick="showTopNavNotice('任务护航')">任务护航</button>
+      <button class="app-link active" aria-current="page">效果中心</button>
+      <button class="app-link" onclick="showTopNavNotice('Claw进化')">Claw进化</button>
+    </nav>
+  </header>
+
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h3l2-5 3 10 2-5h6"/><path d="M12 3v2M12 19v2"/></svg></span>
+        <div><div class="brand-title">效果中心</div><div class="brand-sub">ClawWeb Insight Center</div></div>
+      </div>
+
+      <div class="side-label">功能</div>
+      <nav class="side-nav" aria-label="效果中心功能">
+        <button class="side-item" id="governanceNav" onclick="showGovernanceNotice()">
+          <span class="side-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/><path d="m4 8 5-3 6 4 5-5"/></svg></span>
+          <span>Agent 治理</span><span class="chevron">›</span>
+        </button>
+        <button class="side-item active" id="monitorNav" aria-current="page">
+          <span class="side-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><circle cx="12" cy="12" r="4"/><path d="m5.6 5.6 2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8"/></svg></span>
+          <span>Agent 监控自愈</span><span class="chevron">›</span>
+        </button>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="breadcrumb">效果中心 <span> / </span> <b>Agent 监控自愈</b></div>
+        <div class="page-head">
+          <div>
+            <h1>Agent 监控自愈</h1>
+            <p>查看会话诊断，快速定位异常。</p>
+          </div>
+          <span class="demo-badge">示例数据</span>
+        </div>
+
+        <section class="card filter-card" aria-label="监控筛选">
+          <div class="monitor-filters">
+            <label class="filter-field filter-bot" for="botSelect">Bot
+              <select id="botSelect" onchange="switchBot(this.value)"></select>
+            </label>
+            <label class="filter-field" for="startDate">开始日期
+              <input type="date" id="startDate" aria-describedby="dateError" title="按会话时间筛选，使用北京时间" onchange="onDateChange()">
+            </label>
+            <label class="filter-field" for="endDate">结束日期
+              <input type="date" id="endDate" aria-describedby="dateError" title="按会话时间筛选，使用北京时间" onchange="onDateChange()">
+            </label>
+            <button class="btn" id="refreshButton" onclick="refreshAll()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/></svg>刷新</button>
+          </div>
+          <div class="filter-error" id="dateError" role="alert" hidden>开始日期不能晚于结束日期，请调整时间范围。</div>
+        </section>
+
+        <section class="card current-card">
+          <div class="current-main">
+            <div class="current-title">
+              <span class="bot-logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="7" width="16" height="12" rx="3"/><path d="M9 12h.01M15 12h.01M8 16h8M12 3v4"/></svg></span>
+              <span class="current-id" id="selectedBotId">20260810_4vqhaw2p</span>
+
+              <small class="current-context">当前监控对象</small>
+            </div>
+            <div class="current-meta">
+              <span>最近监控检查：<b id="watermark">2026-09-08 10:24:30（北京时间）</b></span>
+              <span>全部诊断：<b id="currentRecordTotal">128 条</b></span>
+            </div>
+          </div>
+          <div class="current-status">
+            <div class="status-box">
+              <div class="status-pill" id="statusPill"><span class="status-dot"></span><span id="monitorStatus">监控正常</span></div>
+              <div class="status-note" id="statusNote">最近一次监控检查成功</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card diagnosis-card" id="diagnosis">
+          <div class="diagnosis-head">
+            <div class="section-head">
+              <div>
+                <div class="section-title">诊断记录 <span class="bot-count">当前 Bot</span></div>
+                <div class="section-help">按会话时间倒序排列，点击记录可展开查看完整诊断信息。</div>
+              </div>
+              <div class="section-help" id="recordHint" aria-live="polite">共 128 条记录</div>
+            </div>
+            <div class="diagnosis-tools">
+              <div class="seg" id="historySeg">
+                <button class="active" data-filter="all" onclick="filterHistory('all', this)">全部</button>
+                <button data-filter="alert" onclick="filterHistory('alert', this)">告警</button>
+                <button data-filter="pass" onclick="filterHistory('pass', this)">通过</button>
+                <button data-filter="unresolved" onclick="filterHistory('unresolved', this)">无法判断</button>
+              </div>
+              <div class="history-filter">
+                <input id="historySearch" aria-label="搜索诊断记录" placeholder="搜索 Session Key / Trace ID" oninput="onFilterChange()">
+              </div>
+            </div>
+          </div>
+
+          <div class="record-list" id="recordList"></div>
+
+          <div class="diagnosis-footer">
+            <span id="rangeText">第 1–10 条，共 <strong>128</strong> 条 · 当前 Bot：<strong id="historyBot">20260810_4vqhaw2p</strong></span>
+            <div class="pagination-wrap">
+              <select class="page-size" id="pageSize" aria-label="每页条数" onchange="changePageSize()">
+                <option value="10">10 条/页</option>
+                <option value="20">20 条/页</option>
+                <option value="50">50 条/页</option>
+              </select>
+              <div class="page-buttons" id="pagination" aria-label="诊断记录分页"></div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status"></div>
+
+  <script>
+    const initialBots = [
+      { id: '20260810_4vqhaw2p', running: true, total: 128 },
+      { id: '20260731_0gu2ft1f', name: null, running: true, total: 76 },
+      { id: '20260622_z00hf5y1', name: '订单查询助手', running: false, total: 43 }
+    ];
+
+    let bots = initialBots.map(bot => ({ ...bot }));
+    let selectedBot = initialBots[0].id;
+    let currentHistoryFilter = 'all';
+    let currentPage = 1;
+    let pageSize = 10;
+    let appliedStartDate = '';
+    let appliedEndDate = '';
+    const recordCache = new Map();
+
+    function buildRecords(bot) {
+      if (recordCache.has(bot.id)) return recordCache.get(bot.id);
+      const records = [];
+      const start = new Date('2026-09-07T17:46:17+08:00');
+
+      for (let index = 0; index < bot.total; index++) {
+        const date = new Date(start.getTime() - index * 4.7 * 60 * 60 * 1000);
+        const seq = String(index + 1).padStart(4, '0');
+        const traceId = `trace_${bot.id.slice(-4)}_${seq}`;
+        const sessionKey = `agent:main:bcs-cli:${bot.id}:${460000 + index}:${traceId.slice(-8)}`;
+        let kind = 'pass';
+        if (index % 11 === 4) kind = 'unresolved';
+        else if (index % 5 === 0) kind = 'alert';
+
+        records.push({
+          id: `${bot.id}-${index}`,
+          kind,
+          date,
+          traceId,
+          sessionKey,
+          title: kind === 'alert' ? (index % 2 === 0 ? '外部服务异常 · 数据获取失败' : '外部服务异常 · 工具调用异常') : kind === 'unresolved' ? '证据不足 · 无法判断' : '任务诊断通过',
+          tag: kind === 'alert' ? 'TC ALERT' : kind === 'unresolved' ? 'UNRESOLVED' : 'TC PASS',
+          confidence: kind === 'alert' ? `${72 + index % 19}.0%` : '—',
+          faultLabel: kind === 'alert' ? (index % 2 === 0 ? 'TC.MCP.DATA' : 'TC.MCP.CALL') : kind === 'unresolved' ? 'TC.EVIDENCE.MISSING' : '—',
+          issueType: kind === 'alert' ? '外部服务异常' : kind === 'unresolved' ? '证据不完整' : '未发现业务故障',
+          issueSubtype: kind === 'alert' ? (index % 2 === 0 ? '数据获取失败' : '工具调用异常') : kind === 'unresolved' ? '关键 Span 缺失' : '—',
+          systemText: kind === 'alert' ? '外部工具返回结果不满足预期结构，任务执行过程中出现异常，TC 根据完整链路证据生成故障诊断。' : kind === 'unresolved' ? '当前 Trace 缺少关键输入或工具输出，现有证据不足以形成可靠诊断。' : '输入、输出及工具调用证据完整，TC 未发现需要告警的异常。',
+          businessText: kind === 'alert' ? 'Agent 未能获得完整的外部服务结果，业务流程未正常完成。' : kind === 'unresolved' ? '暂时无法确认业务目标是否达成，建议等待会话证据补齐后重新诊断。' : '本次会话正常完成，业务结果符合预期。',
+          handler: kind === 'alert' ? '仲彦' : '—',
+          humanIntervention: kind === 'alert' && index % 3 === 0
+        });
+      }
+
+      if (bot.id === '20260810_4vqhaw2p') {
+        records[0] = {
+          id: `${bot.id}-0`, kind: 'alert', date: new Date('2026-09-07T17:46:17+08:00'),
+          traceId: 'trace_7f8e03',
+          sessionKey: 'agent:main:bcs-cli:20260514_6ln39h2j:461514:b0dad5f7',
+          title: '外部服务异常 · 数据获取失败', tag: 'TC ALERT', confidence: '80.0%',
+          faultLabel: 'TC.MCP.DATA', issueType: '外部服务异常', issueSubtype: '数据获取失败',
+          systemText: 'MCP 服务 risk_evaluation_toolkit 返回空响应，脚本 JSON 解析失败，海豚活动数据未能获取，分发任务以关单结束。',
+          businessText: '用户发起海豚评审流水线（id:23800115），脚本执行过程中 MCP 返回内容为空导致活动数据获取失败，任务未成功提交，最终以关单收尾。',
+          handler: '仲彦', humanIntervention: true
+        };
+      }
+
+      recordCache.set(bot.id, records);
+      return records;
+    }
+
+    function getSelectedBot() {
+      return bots.find(bot => bot.id === selectedBot);
+    }
+
+    function renderBots() {
+      const select = document.getElementById('botSelect');
+      select.innerHTML = bots.map(bot => `<option value="${escapeHtml(bot.id)}">${escapeHtml(bot.name ? bot.name + ' · ' + bot.id : bot.id)}</option>`).join('');
+      select.value = selectedBot;
+    }
+
+    function updateSelectedBotView() {
+      const bot = getSelectedBot();
+      document.getElementById('selectedBotId').textContent = bot.id;
+      document.getElementById('selectedBotName').textContent = bot.name || '';
+      document.getElementById('historyBot').textContent = bot.id;
+      document.getElementById('currentRecordTotal').textContent = bot.total + ' 条';
+      document.getElementById('monitorStatus').textContent = bot.running ? '监控正常' : '监控已暂停';
+      document.getElementById('statusPill').classList.toggle('paused', !bot.running);
+      document.getElementById('statusNote').textContent = bot.running ? '最近一次监控检查成功' : '仍可查看已保存的诊断记录';
+    }
+
+    function switchBot(id) {
+      selectedBot = id;
+      currentPage = 1;
+      currentHistoryFilter = 'all';
+      document.getElementById('historySearch').value = '';
+      document.querySelectorAll('#historySeg button').forEach(btn => btn.classList.toggle('active', btn.dataset.filter === 'all'));
+      renderBots();
+      updateSelectedBotView();
+      renderRecords();
+      const bot = getSelectedBot();
+      toast('已切换到 ' + (bot.name || bot.id));
+    }
+
+    function onDateChange() {
+      const start = document.getElementById('startDate').value;
+      const end = document.getElementById('endDate').value;
+      const invalid = Boolean(start && end && start > end);
+      document.getElementById('dateError').hidden = !invalid;
+      document.getElementById('refreshButton').disabled = invalid;
+      ['startDate', 'endDate'].forEach(id => document.getElementById(id).setAttribute('aria-invalid', String(invalid)));
+      if (invalid) return false;
+      appliedStartDate = start;
+      appliedEndDate = end;
+      currentPage = 1;
+      renderRecords();
+      return true;
+    }
+
+    function getMatchingRecords() {
+      const query = document.getElementById('historySearch').value.trim().toLowerCase();
+      // 北京时间自然日：[开始日 00:00, 结束日次日 00:00)。留空不限制该方向。
+      const start = appliedStartDate ? Date.parse(appliedStartDate + 'T00:00:00+08:00') : -Infinity;
+      const end = appliedEndDate ? Date.parse(appliedEndDate + 'T00:00:00+08:00') + 86400000 : Infinity;
+      return buildRecords(getSelectedBot()).filter(record => {
+        const searchText = `${record.sessionKey} ${record.traceId} ${record.title} ${record.faultLabel}`.toLowerCase();
+        return (!query || searchText.includes(query)) && record.date.getTime() >= start && record.date.getTime() < end;
+      });
+    }
+
+    function getFilteredRecords() {
+      return getMatchingRecords().filter(record => currentHistoryFilter === 'all' || record.kind === currentHistoryFilter);
+    }
+
+    function recordDetailHtml(record) {
+      const alert = record.kind === 'alert';
+      return `
+        <div class="record-detail">
+          <div class="detail-grid">
+            <div class="kv"><label>处理人</label><p>${escapeHtml(record.handler)}</p></div>
+            <div class="kv"><label>Session Key</label><p class="mono">${escapeHtml(record.sessionKey)}</p></div>
+            <div class="kv"><label>会话时间</label><p>${formatDateTime(record.date)}</p></div>
+            <div class="kv"><label>TC 故障标签</label><p class="${alert ? 'red' : ''}">${escapeHtml(record.faultLabel)}</p></div>
+            <div class="kv"><label>诊断置信度</label><p class="${alert ? 'red' : ''}">${escapeHtml(record.confidence)}</p></div>
+            <div class="kv"><label>业务问题类型</label><p>${escapeHtml(record.issueType)}</p></div>
+            <div class="kv"><label>业务问题子类型</label><p>${escapeHtml(record.issueSubtype)}</p></div>
+            <div class="kv"><label>是否人工干预</label><p class="${record.humanIntervention ? 'orange' : ''}">${record.humanIntervention ? '是' : '否'}</p></div>
+          </div>
+          <div class="diagnosis-text">
+            <div class="text-block ${alert ? '' : 'neutral'}"><h3>系统诊断文本</h3><p>${escapeHtml(record.systemText)}</p></div>
+            <div class="text-block ${alert ? '' : 'neutral'}"><h3>业务诊断文本</h3><p>${escapeHtml(record.businessText)}</p></div>
+          </div>
+        </div>`;
+    }
+
+    function renderRecords() {
+      const filtered = getFilteredRecords();
+      const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+      if (currentPage > totalPages) currentPage = totalPages;
+      const start = (currentPage - 1) * pageSize;
+      const currentRows = filtered.slice(start, start + pageSize);
+      const list = document.getElementById('recordList');
+
+      if (!currentRows.length) {
+        list.innerHTML = '<div class="empty">没有符合当前条件的诊断记录</div>';
+      } else {
+        list.innerHTML = currentRows.map((record, index) => `
+          <article class="record ${currentPage === 1 && index === 0 ? 'open' : ''}" data-kind="${record.kind}">
+            <div class="record-summary" onclick="toggleRecord(this.parentElement)">
+              <div class="record-time">${formatListTime(record.date)}</div>
+              <div class="record-main">
+                <div class="record-title">${escapeHtml(record.title)}</div>
+                <div class="record-meta">${escapeHtml(record.traceId)} · ${escapeHtml(shortSession(record.sessionKey))} · 诊断置信度 ${escapeHtml(record.confidence)}</div>
+              </div>
+              <div class="record-side"><span class="tag ${record.kind}">${escapeHtml(record.tag)}</span></div>
+              <span class="record-chevron">⌄</span>
+            </div>
+            ${recordDetailHtml(record)}
+          </article>`).join('');
+      }
+
+      document.getElementById('recordHint').textContent = `共 ${filtered.length} 条记录`;
+      const end = Math.min(start + pageSize, filtered.length);
+      document.getElementById('rangeText').innerHTML = filtered.length
+        ? `第 ${start + 1}–${end} 条，共 <strong>${filtered.length}</strong> 条 · 当前 Bot：<strong id="historyBot">${escapeHtml(selectedBot)}</strong>`
+        : `共 <strong>0</strong> 条 · 当前 Bot：<strong id="historyBot">${escapeHtml(selectedBot)}</strong>`;
+      renderPagination(totalPages);
+      updateFilterLabels();
+    }
+
+    function renderPagination(totalPages) {
+      const pages = paginationItems(currentPage, totalPages);
+      document.getElementById('pagination').innerHTML = `
+        <button class="page-btn" onclick="goToPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''} aria-label="上一页">‹</button>
+        ${pages.map(page => page === '…'
+          ? '<span class="page-ellipsis">…</span>'
+          : `<button class="page-btn ${page === currentPage ? 'active' : ''}" onclick="goToPage(${page})" aria-current="${page === currentPage ? 'page' : 'false'}">${page}</button>`).join('')}
+        <button class="page-btn" onclick="goToPage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''} aria-label="下一页">›</button>`;
+    }
+
+    function paginationItems(page, totalPages) {
+      if (totalPages <= 7) return Array.from({ length: totalPages }, (_, index) => index + 1);
+      if (page <= 4) return [1, 2, 3, 4, 5, '…', totalPages];
+      if (page >= totalPages - 3) return [1, '…', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+      return [1, '…', page - 1, page, page + 1, '…', totalPages];
+    }
+
+    function updateFilterLabels() {
+      const records = getMatchingRecords();
+      const counts = records.reduce((result, record) => {
+        result.all++;
+        result[record.kind]++;
+        return result;
+      }, { all: 0, alert: 0, pass: 0, unresolved: 0 });
+      const labels = { all: '全部', alert: '告警', pass: '通过', unresolved: '无法判断' };
+      document.querySelectorAll('#historySeg button').forEach(button => {
+        const kind = button.dataset.filter;
+        button.textContent = `${labels[kind]} (${counts[kind]})`;
+      });
+    }
+
+    function goToPage(page) {
+      const totalPages = Math.max(1, Math.ceil(getFilteredRecords().length / pageSize));
+      if (page < 1 || page > totalPages || page === currentPage) return;
+      currentPage = page;
+      renderRecords();
+      document.getElementById('diagnosis').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function changePageSize() {
+      pageSize = Number(document.getElementById('pageSize').value);
+      currentPage = 1;
+      renderRecords();
+    }
+
+    function filterHistory(kind, button) {
+      currentHistoryFilter = kind;
+      currentPage = 1;
+      document.querySelectorAll('#historySeg button').forEach(btn => btn.classList.toggle('active', btn === button));
+      renderRecords();
+    }
+
+    function onFilterChange() {
+      currentPage = 1;
+      renderRecords();
+    }
+
+    function toggleRecord(record) {
+      document.querySelectorAll('.record.open').forEach(openRecord => {
+        if (openRecord !== record) openRecord.classList.remove('open');
+      });
+      record.classList.toggle('open');
+    }
+
+    function refreshAll() {
+      if (!onDateChange()) return;
+      updateSelectedBotView();
+      const bot = getSelectedBot();
+      // Demo 不访问后端，不把用户点击刷新伪装成后台监控心跳。
+      toast('已刷新 ' + (bot.name || bot.id) + ' 的示例记录');
+    }
+
+    function showGovernanceNotice() {
+      toast('Agent 治理保留效果概览、问题证据和我的待办');
+    }
+
+    function showTopNavNotice(name) {
+      toast(name + ' 为 AgentEvolve 顶层栏目');
+    }
+
+    function formatDateTime(date) {
+      const beijing = new Date(date.getTime() + 8 * 60 * 60 * 1000);
+      const pad = value => String(value).padStart(2, '0');
+      return `${beijing.getUTCFullYear()}-${pad(beijing.getUTCMonth() + 1)}-${pad(beijing.getUTCDate())} ${pad(beijing.getUTCHours())}:${pad(beijing.getUTCMinutes())}:${pad(beijing.getUTCSeconds())}`;
+    }
+
+    function formatListTime(date) {
+      const value = formatDateTime(date);
+      return `${value.slice(0, 10)}<br>${value.slice(11)}`;
+    }
+
+    function shortSession(value) {
+      return value.length > 40 ? `${value.slice(0, 30)}...${value.slice(-8)}` : value;
+    }
+
+    function toast(message) {
+      const el = document.getElementById('toast');
+      el.textContent = message;
+      el.classList.add('show');
+      clearTimeout(window.__toast);
+      window.__toast = setTimeout(() => el.classList.remove('show'), 2200);
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
+    }
+
+    function escapeAttr(value) {
+      return String(value).replace(/'/g, '&#39;');
+    }
+
+    renderBots();
+    updateSelectedBotView();
+    renderRecords();
+  </script>
+</body>
+</html>

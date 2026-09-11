@@ -1,0 +1,42 @@
+CREATE TABLE `insight_monitoring_diagnoses` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '内部自增主键，不作为页面记录编号',
+  `event_id` VARCHAR(128) CHARACTER SET latin1 COLLATE latin1_bin NOT NULL COMMENT '稳定上报编号，等于公共接口diagnosisId',
+  `schema_version` VARCHAR(64) NOT NULL COMMENT '上报格式版本',
+  `bot_id` VARCHAR(128) CHARACTER SET latin1 COLLATE latin1_bin NOT NULL COMMENT '固定监控Bot的业务ID',
+  `engine` VARCHAR(2) NOT NULL COMMENT '引擎类型：OC或TE',
+  `session_key` VARCHAR(1024) DEFAULT NULL COMMENT '上游会话键，无可靠值时为空',
+  `session_id` VARCHAR(255) DEFAULT NULL COMMENT '上游真实Session ID',
+  `trace_id` VARCHAR(255) DEFAULT NULL COMMENT 'AI Vision Trace ID，TE上报必填',
+  `occurred_at_ms` BIGINT DEFAULT NULL COMMENT '会话时间，UTC Unix毫秒，无可靠值时为空',
+  `diagnosed_at_ms` BIGINT NOT NULL COMMENT '最终诊断完成时间，UTC Unix毫秒',
+  `decision` VARCHAR(16) NOT NULL COMMENT '诊断结论：ALERT、PASS或UNRESOLVED',
+  `tc_fault_label` VARCHAR(128) DEFAULT NULL COMMENT '主要TC故障标签',
+  `confidence_json` VARCHAR(32) DEFAULT NULL COMMENT '置信度规范JSON数字文本，接口转为number或null',
+  `business_problem_category` VARCHAR(128) DEFAULT NULL COMMENT '业务问题大类',
+  `business_problem_subtype` VARCHAR(128) DEFAULT NULL COMMENT '业务问题子类',
+  `system_diagnosis` TEXT COMMENT '脱敏系统诊断文本，接口最多8000码点',
+  `business_diagnosis` TEXT COMMENT '脱敏业务诊断文本，接口最多8000码点',
+  `handler_name` VARCHAR(128) DEFAULT NULL COMMENT '可选处理人归属信息，不代表已处理',
+  `human_intervention` BIGINT NOT NULL COMMENT '当前输入是否人工追问重试纠正前序任务：0否1是',
+  `received_at_ms` BIGINT NOT NULL COMMENT '服务端首次接收时间，UTC Unix毫秒',
+  `gmt_create` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '数据库行创建时间',
+  `gmt_modified` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '数据库行最后修改时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_monitor_diag_event` (`event_id`),
+  KEY `idx_monitor_diag_bot_time` (`bot_id`, `occurred_at_ms`, `event_id`),
+  KEY `idx_monitor_diag_bot_dec_time` (`bot_id`, `decision`, `occurred_at_ms`, `event_id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT='Agent监控诊断记录，不保存会话原文和通知状态';
+
+CREATE TABLE `insight_monitoring_bot_checks` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '内部自增主键',
+  `bot_id` VARCHAR(128) CHARACTER SET latin1 COLLATE latin1_bin NOT NULL COMMENT '固定监控Bot的业务ID，每Bot仅一行',
+  `engine` VARCHAR(2) NOT NULL COMMENT '引擎类型：OC或TE',
+  `checked_at_ms` BIGINT NOT NULL COMMENT '本次检查时间，UTC Unix毫秒，用于新旧判断',
+  `last_successful_check_at_ms` BIGINT DEFAULT NULL COMMENT '最近成功检查时间，UTC Unix毫秒',
+  `status` VARCHAR(16) NOT NULL COMMENT '检查状态：HEALTHY、ERROR、UNKNOWN或PAUSED',
+  `received_at_ms` BIGINT NOT NULL COMMENT '最新有效检查上报的服务端接收时间，UTC Unix毫秒',
+  `gmt_create` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '数据库行创建时间',
+  `gmt_modified` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '数据库行最后修改时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_monitor_check_bot` (`bot_id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT='Agent监控每Bot最新检查状态，不保存心跳历史';

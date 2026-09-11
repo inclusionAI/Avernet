@@ -1,8 +1,47 @@
 @import "tailwindcss";
 @source "../../../modules/workflow/web";
+@source "../../../modules/clawinsight/web";
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+}
+
+/* Public host branding follows the internal host. Private menus and user identity
+   remain the responsibility of the internal bootstrap; never mock them here. */
+.clawweb-header {
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+  box-shadow: 0 1px 2px #182c4610;
+}
+.clawweb-header-inner {
+  display: flex;
+  align-items: center;
+  max-width: 1536px;
+  min-height: 64px;
+  margin: auto;
+  padding: 0 32px;
+}
+.clawweb-brand { display: flex; flex-shrink: 0; align-items: center; gap: 8px; }
+.clawweb-brand svg { width: 32px; height: 32px; }
+.clawweb-brand span {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -.5px;
+  background: linear-gradient(90deg, #4f46e5, #06b6d4);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+.clawweb-primary-nav { display: flex; gap: 2px; margin-left: 20px; min-width: 0; overflow-x: auto; }
+.clawweb-primary-nav a { white-space: nowrap; padding: 19px 9px 17px; border-bottom: 2px solid transparent; color: #6b7280; font-size: 14px; font-weight: 500; }
+.clawweb-primary-nav a:hover { color: #2463eb; }
+.clawweb-primary-nav a.active { border-bottom-color: #2463eb; color: #2463eb; }
+.clawweb-header a:focus-visible { outline: 3px solid #8eb1ff; outline-offset: 2px; }
+@media (max-width: 650px) {
+  .clawweb-header-inner { padding: 0 16px; flex-wrap: wrap; }
+  .clawweb-brand { min-height: 56px; }
+  .clawweb-primary-nav { flex-basis: 100%; margin-left: 0; gap: 15px; }
+  .clawweb-primary-nav a { padding: 10px 2px; font-size: 12px; }
 }

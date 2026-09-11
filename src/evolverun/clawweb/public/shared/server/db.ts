@@ -1275,4 +1275,6 @@ export async function closeDatabase(): Promise<void> {
   }
 }
 
-export { SqliteDatabase, runMigrations };
+// MysqlDatabase/MysqlTransactionDb are exported for composition roots that must reuse the
+// production adapter without running the migration set (for example scoped verification tools).
+export { MysqlDatabase, SqliteDatabase, runMigrations };
