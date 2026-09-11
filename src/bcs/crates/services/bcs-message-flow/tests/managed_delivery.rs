@@ -18,7 +18,7 @@ fn admit(id: &str, kind: DeliveryType) -> AdmitMessageDeliveries {
         now_ms: 100,
         expire_at_ms: None,
         event: None,
-        targets: vec![DeliveryAdmissionTarget {
+        targets: vec![DeliveryAdmissionTarget { rejection: None,
             target_bot_id: "bot".into(),
             kind,
             max_queued: 20,
@@ -64,7 +64,7 @@ async fn send_start_rechecks_cross_session_capacity_under_mutation_lock() -> Res
     let repo = Arc::new(MemoryMessageRepo::new());
     let mut initial = DeliveryPolicyRecord::default();
     initial.policy.flow_enabled.group = true; initial.policy.defaults.mode = BotDeliveryMode::Enforce; initial.policy.defaults.max_running = 1;
-    let policy = Arc::new(bcs_message_flow::delivery_policy::LiveDeliveryPolicy::new(repo.clone(), initial, false));
+    let policy = Arc::new(bcs_message_flow::delivery_policy::LiveDeliveryPolicy::new(repo.clone(), initial));
     let service = ManagedMessageDelivery::new(repo).with_policy(policy);
     let mut a = admit("race-a", DeliveryType::Send); a.message.session_id = "a".into();
     let mut b = admit("race-b", DeliveryType::Send); b.message.session_id = "b".into();

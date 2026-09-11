@@ -10,6 +10,9 @@ use bcs_domain::message_delivery::PersistedMessageDelivery;
 /// nonces. State versions let clients discard reordered best-effort events.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DeliveryStatusView {
+    /// Stable admission error code only; never arbitrary transport errors.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub admission_error: Option<&'static str>,
     pub delivery_id: String,
     pub message_id: String,
     pub target_bot_id: String,
@@ -24,6 +27,8 @@ pub struct DeliveryStatusView {
 impl From<&PersistedMessageDelivery> for DeliveryStatusView {
     fn from(row: &PersistedMessageDelivery) -> Self {
         Self {
+            admission_error: (row.last_error_code.as_deref() == Some("delivery_provider_headers_unsupported"))
+                .then_some("delivery_provider_headers_unsupported"),
             delivery_id: row.delivery_id.clone(),
             message_id: row.source_message_id.clone(),
             target_bot_id: row.target_bot_id.clone(),

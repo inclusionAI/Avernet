@@ -69,11 +69,11 @@ async fn terminal_storage_faults_preserve_reply_and_publish_after_commit_even_if
             message: NewMessage { visibility_domain: bcs_domain::MessageVisibilityDomain::Chat, audience: None, group_id: "group-1".into(), session_id: "group-1:retry".into(), sender_id: "human".into(),
                 sender_type: SenderType::Human, message_type: "chat".into(), content: json!({"text":"question"}),
                 client_msg_id: Some("input".into()), owner_bot_id: None, created_at: 1, run_id: String::new() },
-            flow_kind: DeliveryFlowKind::Group, targets: vec![DeliveryAdmissionTarget { target_bot_id: "bot-driver".into(), kind: DeliveryType::Send,
+            flow_kind: DeliveryFlowKind::Group, targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-driver".into(), kind: DeliveryType::Send,
                 max_queued: 100, semantic_projection_json: json!({"version":1}) }], now_ms: 1, expire_at_ms: None, event: None }).await.unwrap().deliveries.remove(0);
         let started = service.transition(DeliveryTransitionCommand { delivery_id: input.delivery_id.clone(), expected_state_version: 1,
             event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend, now_ms: 2, request_id: None, actor_id: None,
-            reply: None, transport_context_json: Some(json!({"version":1,"kind":"websocket"})), deadline_at_ms: Some(i64::MAX) }).await.unwrap();
+            reply: None, transport_context_json: Some(json!({"version":1,"owner":{"kind":"web_socket"},"connection_id":"test","downstream_session_key":"session"})), deadline_at_ms: Some(i64::MAX) }).await.unwrap();
         let mut terminal = BotEventCommand { bot_id: "bot-driver".into(), run_id: started.run_id.clone().unwrap(), group_id: "group-1".into(),
             bcs_session_id: Some("group-1:retry".into()), state: ChatEventState::Delta, event_type: "chat".into(), event_payload: json!({"delta_text":"保留的正文"}) };
         flow.handle_bot_event(terminal.clone()).await.unwrap();
@@ -138,12 +138,12 @@ async fn mixed_final_modes_reconstruct_one_reply_and_preserve_visible_history() 
             message_id: format!("input-{index}"), message: NewMessage { visibility_domain: bcs_domain::MessageVisibilityDomain::Chat, audience: None, group_id: "group-1".into(), session_id: "group-1:reply".into(),
                 sender_id: "human".into(), sender_type: SenderType::Human, message_type: "chat".into(), content: json!({"text":"question"}),
                 client_msg_id: Some(format!("input-{index}")), owner_bot_id: None, created_at: 1, run_id: String::new() },
-            flow_kind: DeliveryFlowKind::Group, targets: vec![DeliveryAdmissionTarget { target_bot_id: "bot-driver".into(), kind: DeliveryType::Send,
+            flow_kind: DeliveryFlowKind::Group, targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-driver".into(), kind: DeliveryType::Send,
                 max_queued: 100, semantic_projection_json: json!({"version":1}) }], now_ms: 1, expire_at_ms: None, event: None }).await.unwrap();
         let input = &source.deliveries[0];
         let started = service.transition(DeliveryTransitionCommand { delivery_id: input.delivery_id.clone(), expected_state_version: 1,
             event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::StartSend, now_ms: 2, request_id: None, actor_id: None,
-            reply: None, transport_context_json: Some(json!({"version":1,"kind":"websocket"})), deadline_at_ms: Some(i64::MAX) }).await.unwrap();
+            reply: None, transport_context_json: Some(json!({"version":1,"owner":{"kind":"web_socket"},"connection_id":"test","downstream_session_key":"session"})), deadline_at_ms: Some(i64::MAX) }).await.unwrap();
         let run = started.run_id.as_ref().unwrap();
         let event = |state, event_type: &str, payload| BotEventCommand { bot_id: "bot-driver".into(), run_id: run.clone(), group_id: "group-1".into(),
             bcs_session_id: Some("group-1:reply".into()), state, event_type: event_type.into(), event_payload: payload };

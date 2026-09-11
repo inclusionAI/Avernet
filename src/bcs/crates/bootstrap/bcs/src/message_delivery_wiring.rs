@@ -60,7 +60,9 @@ pub async fn wire(
     let initial = repository.load_policy().await.map_err(|_| invalid("cannot load durable delivery policy"))?;
     initial.policy.validate().map_err(|e| invalid(&e.to_string()))?;
     let durable = repository.is_durable();
-    let live = Arc::new(LiveDeliveryPolicy::new(repository.clone(), initial.clone(), !config.provider_http.bypass_headers.is_empty()));
+    config.provider_http.validate().map_err(|e| invalid(&e))?;
+    flow.queue_persistable_headers = config.provider_http.queue_persistable_headers.clone();
+    let live = Arc::new(LiveDeliveryPolicy::new(repository.clone(), initial.clone()));
     let service = ManagedMessageDelivery::new(repository).with_policy(live.clone());
     let metrics = Arc::new(crate::delivery_metrics::DeliveryMetrics::default());
     let service = service.with_instrumentation(metrics.clone());
@@ -80,9 +82,6 @@ pub async fn wire(
         }
         return Ok(flow);
     }
-    if live.provider_headers_configured && initial.policy.needs_scheduler() {
-        return Err(invalid("delivery_provider_headers_unsupported"));
-    }
     let (completion_sender, completion_receiver) = tokio::sync::watch::channel(false);
     let guard = SchedulerGuard { service: service.clone(), policy: live.clone(), completion: completion_sender };
     service.recover(chrono::Utc::now().timestamp_millis()).await.map_err(|_| invalid("message delivery startup recovery failed"))?;
@@ -91,7 +90,6 @@ pub async fn wire(
         service: service.clone(),
         preparation: Arc::new(QueuedGroupPreparation {
             flow: Arc::downgrade(&flow), deliveries: service.clone(),
-            provider_bypass_headers_configured: live.provider_headers_configured,
         }),
         transport: flow.bot_delivery.clone(),
         config: DeliveryRuntimeConfig {
@@ -149,6 +147,8 @@ mod tests {
         let admin = || CallerContext::Human(HumanActor { actor_id: "human_operator".into(), staff_no: "operator".into() });
         let mut config = crate::BcsConfig::default();
         config.metrics.enabled = false;
+        config.provider_http.bypass_headers = vec!["x-routing-zone".into()];
+        config.provider_http.queue_persistable_headers = vec!["x-routing-zone".into()];
         let mut policy = DeliveryPolicy::default();
         policy.flow_enabled.group = true;
         policy.defaults.mode = BotDeliveryMode::Enforce;
@@ -226,7 +226,7 @@ mod tests {
                 now_ms: 1,
                 expire_at_ms: None,
                 event: None,
-                targets: vec![DeliveryAdmissionTarget {
+                targets: vec![DeliveryAdmissionTarget { rejection: None,
                     target_bot_id: "bot-driver".into(),
                     kind: DeliveryType::Send,
                     max_queued: 10,

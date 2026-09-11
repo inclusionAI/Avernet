@@ -8,7 +8,7 @@ fn admission(id: &str, bot: &str) -> AdmitMessageDeliveries {
         now_ms: 1, expire_at_ms: None, event: None,
         message: NewMessage { visibility_domain: bcs_domain::MessageVisibilityDomain::Chat, audience: None, group_id: "group".into(), session_id: "session".into(), sender_id: "human".into(), sender_type: SenderType::Human,
             message_type: "chat".into(), content: serde_json::json!({"text":id}), client_msg_id: Some(id.into()), owner_bot_id: None, created_at: 1, run_id: String::new() },
-        targets: vec![DeliveryAdmissionTarget { target_bot_id: bot.into(), kind: DeliveryType::Send, max_queued: 100, semantic_projection_json: serde_json::json!({"version":1}) }] }
+        targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: bot.into(), kind: DeliveryType::Send, max_queued: 100, semantic_projection_json: serde_json::json!({"version":1}) }] }
 }
 fn transition(row: &PersistedMessageDelivery, event: Event) -> DeliveryTransitionCommand {
     DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version, event, now_ms: 2,

@@ -12,13 +12,12 @@ pub struct LiveDeliveryPolicy {
     repository: Arc<dyn MessageDeliveryRepoPort>,
     updates: Arc<tokio::sync::Semaphore>,
     pub scheduler_available: Arc<AtomicBool>,
-    pub provider_headers_configured: bool,
 }
 
 impl LiveDeliveryPolicy {
-    pub fn new(repository: Arc<dyn MessageDeliveryRepoPort>, initial: DeliveryPolicyRecord, provider_headers_configured: bool) -> Self {
+    pub fn new(repository: Arc<dyn MessageDeliveryRepoPort>, initial: DeliveryPolicyRecord) -> Self {
         Self { snapshot: Arc::new(tokio::sync::RwLock::new(initial)), repository, updates: Arc::new(tokio::sync::Semaphore::new(8)),
-            scheduler_available: Arc::new(AtomicBool::new(false)), provider_headers_configured }
+            scheduler_available: Arc::new(AtomicBool::new(false)) }
     }
 
     fn human(caller: &CallerContext) -> ServiceResult<&str> {
@@ -74,9 +73,6 @@ impl LiveDeliveryPolicy {
             if current.version != expected { return Err(invalid("delivery_policy_version_conflict")); }
             if policy.needs_scheduler() && !self.scheduler_available.load(Ordering::SeqCst) {
                 return Err(invalid("delivery_scheduler_unavailable: durable storage and a healthy scheduler are required"));
-            }
-            if self.provider_headers_configured && policy.needs_scheduler() {
-                return Err(invalid("delivery_provider_headers_unsupported"));
             }
             let version = expected.checked_add(1).filter(|v| *v <= i64::MAX as u64).ok_or_else(|| invalid("delivery policy version exhausted"))?;
             let record = DeliveryPolicyRecord { version, policy, updated_by: actor.into(), updated_at_ms: chrono::Utc::now().timestamp_millis() };

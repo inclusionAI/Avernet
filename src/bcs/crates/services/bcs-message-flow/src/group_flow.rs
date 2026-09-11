@@ -76,6 +76,7 @@ pub struct BcsMessageFlow {
     pub group_delivery_limits: BTreeMap<String, u32>,
     pub delivery_policy: Option<Arc<crate::delivery_policy::LiveDeliveryPolicy>>,
     pub delivery_queue_ttl_ms: Option<i64>,
+    pub queue_persistable_headers: Vec<String>,
     /// Retained policy for replies from already-admitted Group runs during drain.
     pub group_reply_delivery_limits: BTreeMap<String, u32>,
     pub delivery_shutdown: OnceLock<(tokio::sync::watch::Sender<bool>, tokio::sync::watch::Receiver<bool>)>,
@@ -119,6 +120,7 @@ impl BcsMessageFlow {
             delivery_policy: None,
             delivery_queue_ttl_ms: None,
             group_reply_delivery_limits: BTreeMap::new(),
+            queue_persistable_headers: Vec::new(),
             delivery_shutdown: OnceLock::new(),
             delivery_event_locks: Default::default(),
             terminal_owner: OnceLock::new(),
@@ -1462,6 +1464,9 @@ pub async fn handle_web_send(
         primary_run_id,
         status: if active_run_ids.is_empty() {
             match &admission {
+                Some(result) if !result.deliveries.is_empty() && result.deliveries.iter().all(|d|
+                    matches!(d.state.status, bcs_domain::message_delivery::MessageDeliveryStatus::Failed | bcs_domain::message_delivery::MessageDeliveryStatus::RejectedCapacity))
+                    && result.deliveries.iter().any(|d| d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Failed) => "failed",
                 Some(result) if result.deliveries.iter().any(|d| d.state.kind == DeliveryType::Send)
                     && result.deliveries.iter().filter(|d| d.state.kind == DeliveryType::Send).all(|d| d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::RejectedCapacity) => "rejected_capacity",
                 Some(result) if result.deliveries.iter().all(|d| d.state.kind == DeliveryType::Inject) => "context_saved",
@@ -1615,7 +1620,7 @@ pub async fn handle_persistent_group_send(
         }
         let mut routed_to: Vec<_> = outcome.delivery_results.iter().filter(|r| r.success).map(|r| r.bot_uuid.clone()).collect();
         if let Some(admission) = &outcome.queue_admission {
-            routed_to.extend(admission.deliveries.iter().filter(|d| d.status != bcs_domain::message_delivery::MessageDeliveryStatus::RejectedCapacity).map(|d| d.target_bot_id.clone()));
+            routed_to.extend(admission.deliveries.iter().filter(|d| !matches!(d.status, bcs_domain::message_delivery::MessageDeliveryStatus::RejectedCapacity | bcs_domain::message_delivery::MessageDeliveryStatus::Failed)).map(|d| d.target_bot_id.clone()));
         }
         routed_to.sort(); routed_to.dedup();
         return Ok(PersistentGroupSendOutcome { queue_admission: outcome.queue_admission, message_id, routed_to, mentions: outcome.mentions });
@@ -2411,20 +2416,15 @@ pub async fn handle_chat_abort(
     }
 
     if !provider_runs.is_empty() {
-        // Empty snapshots remain valid for runs created before routing headers
-        // were persisted. Any non-empty snapshots must agree for one scoped
-        // Provider abort request to have an unambiguous route.
-        let mut header_sets = provider_runs.iter().filter_map(|context| {
-            if context.provider_bypass_headers.is_empty() {
-                return None;
-            }
+        // Empty means the default route, not a wildcard: every run in a
+        // scope-wide abort must agree, including recovered managed runs.
+        let mut header_sets = provider_runs.iter().map(|context| {
             let mut headers = context.provider_bypass_headers.clone();
             headers.sort();
-            Some(headers)
+            headers
         });
         let provider_bypass_headers = header_sets.next().unwrap_or_default();
-        let provider_headers_match = header_sets.all(|headers| headers == provider_bypass_headers)
-            && (provider_bypass_headers.is_empty() || !provider_runs.iter().any(|run| managed_abort.owned.contains_key(&run.canonical_run_id)));
+        let provider_headers_match = header_sets.all(|headers| headers == provider_bypass_headers);
         let provider_session_keys: HashSet<_> = provider_runs.iter().map(|run|
             run.downstream_session_key.clone().unwrap_or_else(|| cmd.session_id.clone())).collect();
         let expected_by_downstream: HashMap<String, ActiveBotRunContext> = provider_runs

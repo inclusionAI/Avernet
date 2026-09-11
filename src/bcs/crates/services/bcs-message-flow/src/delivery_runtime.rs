@@ -296,7 +296,8 @@ impl DeliveryRuntime {
                             if !matches!(selected.action, Some(DeliveryScheduleAction::Prepare { ref delivery_id, .. }) if delivery_id == &row.delivery_id) { continue; }
                             if !tokio::time::timeout(self.config.io_timeout, self.preparation.still_valid(&prepared)).await.unwrap_or(false) { continue; }
                             if prepared.command.target_bot_id() != bot || prepared.command.run_id.as_str() != row.run_id.as_deref().unwrap_or("")
-                                || !prepared.command.provider_bypass_headers.is_empty() { return Err(ManagedDeliveryError::Conflict); }
+                                || prepared.transport_context_json.get("provider_route_headers").cloned().unwrap_or_else(|| serde_json::json!([]))
+                                    != serde_json::json!(prepared.command.provider_bypass_headers) { return Err(ManagedDeliveryError::Conflict); }
                             let mut command = event(row, Event::StartSend);
                             if let Some(version) = policy_version { prepared.transport_context_json["policy_version"] = serde_json::json!(version); }
                             command.transport_context_json = Some(prepared.transport_context_json);

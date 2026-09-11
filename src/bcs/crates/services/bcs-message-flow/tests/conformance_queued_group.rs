@@ -76,7 +76,7 @@ async fn queue_status_respects_participant_message_audience() {
                 sender_id: "bot-driver".into(), sender_type: SenderType::Bot, message_type: "chat".into(),
                 content: json!({"text":id}), client_msg_id: Some(id.into()), owner_bot_id: None,
                 created_at: 100, run_id: id.into(), visibility_domain: MessageVisibilityDomain::ManagerWorker, audience: Some(audience) },
-            targets: vec![DeliveryAdmissionTarget { target_bot_id: "bot-observer".into(), kind: DeliveryType::Inject,
+            targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot-observer".into(), kind: DeliveryType::Inject,
                 max_queued: 10, semantic_projection_json: json!({"version":1}) }],
         }).await.unwrap();
         let result = flow.query_message_deliveries(DeliveryStatusQuery {
@@ -95,7 +95,7 @@ async fn conformance_live_group_admission_uses_defaults_and_blocks_drain_bypass(
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let group = support.group.get("group-1").await.unwrap();
     let repo = Arc::new(bcs_message_store::MemoryMessageRepo::new());
-    let live = Arc::new(LiveDeliveryPolicy::new(repo.clone(), Default::default(), false));
+    let live = Arc::new(LiveDeliveryPolicy::new(repo.clone(), Default::default()));
     live.scheduler_available.store(true, std::sync::atomic::Ordering::SeqCst);
     let service = Arc::new(ManagedMessageDelivery::new(repo.clone()).with_policy(live.clone()));
     let mut flow = BcsMessageFlow::new(support.group.clone(), support.routing.clone(), support.registry.clone(), support.bot_delivery.clone(), support.frontend_delivery.clone())
@@ -235,7 +235,7 @@ async fn conformance_queued_group_preparation_and_ingress() {
             now_ms: 1,
             expire_at_ms: None,
             event: None,
-            targets: vec![DeliveryAdmissionTarget {
+            targets: vec![DeliveryAdmissionTarget { rejection: None,
                 target_bot_id: "bot-driver".into(),
                 kind: DeliveryType::Send,
                 max_queued: 10,
@@ -290,7 +290,6 @@ async fn conformance_queued_group_preparation_and_ingress() {
     let preparer = QueuedGroupPreparation {
         flow: Arc::downgrade(&flow),
         deliveries: service.clone(),
-        provider_bypass_headers_configured: false,
     };
     bcs_test_support::contract::application::message_delivery::managed_delivery_preparation_service_contract_tests(&preparer, &row).await.unwrap();
     let mut prepared = preparer.prepare(&row).await.unwrap();

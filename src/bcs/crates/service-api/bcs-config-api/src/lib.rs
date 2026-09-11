@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod bcsfuse;
 pub mod message_delivery;
+pub mod queued_provider_headers;
 pub mod mysql;
 pub mod redis;
 pub mod redis_route_type;

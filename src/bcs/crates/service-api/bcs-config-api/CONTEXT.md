@@ -2,6 +2,10 @@
 
 ## Provides
 
+`queued_provider_headers` defines the explicit non-sensitive routing allowlist,
+credential-name restrictions and bounded canonical snapshots shared by bootstrap
+validation and queued application preparation. It does not acquire credentials.
+
 DeliveryPolicy's environment-level max_context_messages/max_context_bytes use
 24/131072 defaults for legacy JSON; validated positive bounded values constrain
 only each Send's appended Inject history, not ingress backlog or model tokens.

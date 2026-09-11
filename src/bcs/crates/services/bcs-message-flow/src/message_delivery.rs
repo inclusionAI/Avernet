@@ -37,7 +37,7 @@ fn valid(state: MessageDeliveryState) -> bool {
             !state.may_have_been_sent
                 && matches!(
                     state.status,
-                    PendingContext | Bound | Consumed | DiscardedContext | Cancelled | Expired
+                    PendingContext | Bound | Consumed | DiscardedContext | Cancelled | Expired | Failed
                 )
         }
         DeliveryType::Send => match state.status {

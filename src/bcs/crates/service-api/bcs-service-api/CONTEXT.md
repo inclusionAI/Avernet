@@ -2,6 +2,10 @@
 
 ## Provides
 
+DeliveryAdmissionTarget carries a typed per-recipient rejection, committed as an
+unsent Failed delivery without aborting other recipients. DeliveryStatusView
+adds optional fixed admission_error codes, never arbitrary transport error text.
+
 - `CoordinationIntentPort` with authenticated consumer identity and immutable execution receipts.
 
 MessageRepoPort adds scoped run_chat_segments reconstruction with fail-closed

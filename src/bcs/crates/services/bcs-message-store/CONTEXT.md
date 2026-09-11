@@ -2,6 +2,10 @@
 
 ## Provides
 
+Application-supplied admission rejections commit as unsent Failed rows (Send or
+Inject), with a fixed last_error_code, alongside other admitted recipients.
+Stores do not inspect Header values or decide Header policy.
+
 Opt-in `bcs_reply_profile` DEBUG timing separates delivery_writer wait from
 hold time. A held-writer span lets the isolated load test attribute SQLite SQL
 category timings/counts to the critical section without logging SQL or payloads.

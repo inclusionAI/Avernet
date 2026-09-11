@@ -57,7 +57,7 @@
   Workbench UI 明确后置，是否仍混入了前端实现或页面验收要求。
 - 是否接受首版无 outbox、外部 IM 状态提示可能漏发；ChatRun 查询校准及业务回调的
   既有恢复/人工处理边界是否明确。
-- Provider bypass header TODO 是否阻塞对应 Bot 的生产启用。
+- Provider 路由 Header 持久化白名单是否仅含非敏感字段，以及敏感凭证拒绝边界。
 - 按业务类型灰度时，是否接受限流/顺序只约束受管请求；关闭类型共享 Bot/Session 时的
   上下文边界和 Provider scope Abort 风险是否已明确。
 - Direct A2A/state-machine 未就绪时拒绝启用、类型停用前 drain，以及已入队请求的所有权是否明确。
@@ -1264,7 +1264,7 @@ policy_json 包含 flow_enabled、defaults、bots、queue_ttl_ms、safe_retry、
 
 - GET /admin/message-delivery/policy：读取完整生效记录。
 - PUT 同一路径：提交 expected_version + 完整 policy，不是任意 JSON merge patch。
-- PUT 校验继承后的每个策略、就绪类型、调度能力及 Provider header 限制。
+- PUT 校验继承后的每个策略、就绪类型、调度能力；实际 Provider header 在逐目标准入时校验。
 - DB CAS 匹配预期版本、递增版本并保存操作者/时间；写失败不发布。
 - 进程内写锁跨越事务提交和快照发布；准入在提交前复核策略，prepared send 在 send-start
   前复核策略版本，旧版本准备结果不能绕过新 pause/限额。
@@ -1305,8 +1305,8 @@ SQLite/MySQL/OceanBase 持久化模式下，默认 off 也启动空闲调度器�
 再通过 API 开启。策略更新本身不迁移旧 ChatRun、不重新发送历史、不回填已直发 inject。
 未接入类型仍走原路径，不承诺其与队列之间共同限流/有序；不能开一个标志代替消息持久化接入。
 
-provider_http.bypass_headers 非空时首版保守拒绝开启队列策略，防止默认策略覆盖未来
-Provider Bot 后才发现不能恢复 header。后续再评审按 Bot capability 或加密 run context。
+非敏感 Provider 路由 Header 通过独立持久化允许列表接入，逐目标准入失败不回滚其他目标；
+敏感凭证继续拒绝，具体规则见第 17.3 节。
 
 ### 14.3 动态调整、停用与 drain
 
@@ -1603,7 +1603,7 @@ MySQL/OceanBase、Bot 引擎/IM 账号及 Singlebox 全链路验收仍须单独�
   不承诺与受管消息全局 FIFO，旧 inject 不回填重放。
 - 停用某类型不联动关闭其他类型；已有跨类型 inject 绑定、查询和取消可继续处理。
 - 热更新关闭但有积压时拒绝切换；重启配置已关闭时仍恢复旧 delivery，并阻止新直发越过。
-- Provider header 非空时禁止启用，不能默默丢弃。
+- 未批准的 Provider header 按目标拒绝；批准路由字段完整恢复，不能默默丢弃。
 - 当前开启业务类型的全部子入口都进入统一准入；关闭类型保留原路径。后续分别开启
   Direct A2A/state-machine 的验收独立进行，不要求二者同时迁移或同时启用。
 
@@ -1661,22 +1661,30 @@ inject 积压治理需要结合真实消息量、下游上下文窗口和压缩�
 替代语义处理。后续评审需明确何时压缩、如何保留原始消息及因果关系、摘要如何绑定到 send，
 以及如何避免重放已消费的上下文；这些不是首版实现要求。
 
-### 17.3 Provider bypass header TODO
+### 17.3 Provider 路由 Header 与敏感凭证边界
 
-当前仓库 example/local 配置未启用 `provider_http.bypass_headers`；实际部署是否非空仍需核实。
-队列延迟和 BCS 重启会让仅存于入站 HTTP 请求中的 header 丢失，现有 Abort 又需要沿用原始
-Provider routing header。因此它仍是明确的生产启用门槛，而不是单实例就可以忽略的问题。
+`provider_http.queue_persistable_headers` 默认空，必须是 `bypass_headers` 子集；部署者明确
+批准其中的值属于非敏感路由信息。公共默认不预设内部环境 Header。标准凭证和 token/key/
+secret 等名称禁止加入；自定义名字仍需评审其实际内容，不能仅凭名字保证无敏感信息。
 
-首版规则：
+- Header 名大小写归一化，最多 16 个、单值 1024 字节、总计 8192 字节；拒绝重复名和控制字符。
+- 不再全局禁止 enforce。实际 Provider 投递携带未批准值时，仅该 delivery 原子写为 failed，
+  `last_error_code` 与公开 `admission_error` 为固定 `delivery_provider_headers_unsupported`；
+  不保存拒绝值、不回滚其他目标、不绕过队列。Inject 的准入失败同样是未发送的终态。
+- 允许值只进入内部 delivery 投影，send-start 固化到原运行 transport context；不进入
+  bcs_messages、模型、History、状态响应或日志。旧数据缺字段默认空，无需新表或 DDL。
+- 每条 Send 使用自己的路由；Inject 不覆盖承载 Send 的 Header。受管 Bot 回复从父 run
+  持久化上下文继承，不采信任意回调 HTTP Header。
+  WS 中间跳仅保留已批准的内部因果路由，不放入 WS frame；实际 Provider Header 与接力
+  路由分别使用 transport context 的 provider_route_headers / relay_route_headers。
+- Worker 发送前重新校验允许列表；收紧配置不能静默删除原值后发送到默认路由。
+- scoped abort 使用原运行 Header，包括重启后的恢复。全部运行的 Header（包括空值）必须
+  一致，否则明确拒绝歧义取消；精确 Provider abort 仍不支持，不扩大取消范围。
+- Bot off 或未就绪类型沿用原路径，不宣称拥有 durable queue/恢复能力。
+- 回滚旧二进制前需排空含新投影字段的队列；旧版 deny_unknown_fields 无法解析新记录。
 
-- 不持久化 header 明文，不写入 delivery、消息来源元数据或日志。
-- 实际 allowlist 非空的 Provider Bot 不允许开启 enforce，返回明确兼容性错误。
-- Bot off 或类型关闭的请求可以沿用原路径，但不能宣称拥有本方案的 durable queue/恢复能力。
-- 已选择受管路径的请求不允许因 header 缺失临时 bypass 调度器、改写 flow_kind 或切换 transport owner。
-- 即使 allowlist 原先为空，运行中配置变为非空也必须阻止新的队列发送，先完成兼容性评审。
-
-后续另行评审：run-scoped AEAD 加密上下文，或明确拒绝需要延迟透传 header 的请求。
-不在本次首版顺带实现凭据存储系统。
+后续单独评审敏感凭证：优先服务认证/委托 Token，必要时使用加密凭证引用。
+本次不实现 Cookie 持久化、凭证刷新或通用凭据存储系统。
 
 ### 17.4 实现前需要确认的事项
 

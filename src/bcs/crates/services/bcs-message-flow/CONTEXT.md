@@ -1,5 +1,12 @@
 # bcs-message-flow Context
 
+Queued Provider routing snapshots are opt-in non-sensitive headers, bounded and
+normalized by the shared config contract. Admission rejects only unsupported
+Provider recipients, without retaining rejected values or bypassing the queue.
+Send-start and scoped abort retain the original route; empty and named routes
+cannot share an ambiguous scope abort. Inject does not overwrite its carrier's
+route. Header metadata is excluded from protocol/model and public status views.
+
 Queued group preparation captures versioned routing intent without copying
 message text, attachments or credentials into deliveries. It rebuilds protocol
 frames from canonical messages, reapplies current session membership and

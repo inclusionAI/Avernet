@@ -190,10 +190,14 @@ pub struct ProviderHttpConfig {
     /// Empty by default; matching is case-insensitive.
     #[serde(default)]
     pub bypass_headers: Vec<String>,
+    /// Non-sensitive routing headers explicitly approved for durable queues.
+    #[serde(default)]
+    pub queue_persistable_headers: Vec<String>,
 }
 
 impl ProviderHttpConfig {
     pub fn validate(&self) -> Result<(), String> {
+        bcs_config_api::queued_provider_headers::validate_config(&self.bypass_headers, &self.queue_persistable_headers)?;
         for raw_name in &self.bypass_headers {
             let name = raw_name.trim();
             if name.is_empty() {
@@ -1922,12 +1926,14 @@ botchat_url = "${BCS_TEST_FROM_FILE_MISSING}"
     fn provider_http_bypass_headers_parse_and_default() {
         let default_config = BcsConfig::default();
         assert!(default_config.provider_http.bypass_headers.is_empty());
+        assert!(default_config.provider_http.queue_persistable_headers.is_empty());
 
         let toml = r#"
             bots_base_dir = "/bots"
 
             [provider_http]
             bypass_headers = ["X-Sandbox-Bypass"]
+            queue_persistable_headers = ["x-sandbox-bypass"]
         "#;
         let config: BcsConfig = toml::from_str(toml).expect("parse [provider_http]");
         assert_eq!(
@@ -1956,6 +1962,7 @@ botchat_url = "${BCS_TEST_FROM_FILE_MISSING}"
             "x-bcn-protocol-version",
         ] {
             let config = ProviderHttpConfig {
+                queue_persistable_headers: Vec::new(),
                 bypass_headers: vec![name.to_string()],
             };
             assert!(

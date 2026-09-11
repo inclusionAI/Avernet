@@ -30,7 +30,7 @@ fn command(id: &str, targets: &[(&str, DeliveryType)]) -> AdmitMessageDeliveries
         },
         targets: targets
             .iter()
-            .map(|(bot, kind)| DeliveryAdmissionTarget {
+            .map(|(bot, kind)| DeliveryAdmissionTarget { rejection: None,
                 target_bot_id: (*bot).into(),
                 kind: *kind,
                 max_queued: 1,
@@ -326,5 +326,21 @@ async fn run_reply_contract<T: MessageDeliveryRepoPort + MessageRepoPort>(repo: 
     let segments = repo.run_chat_segments(&summary.message.session_id, "reply-bot", "shared-run").await?;
     assert_eq!(segments.iter().map(|m| m.content.as_str().unwrap()).collect::<Vec<_>>(), vec!["before", "after"]);
     assert!(repo.run_chat_segments("other-session", "reply-bot", "shared-run").await?.is_empty());
+    let mut rejected = command("header-rejection", &[("header-send", DeliveryType::Send), ("header-context", DeliveryType::Inject), ("accepted", DeliveryType::Send)]);
+    rejected.targets[0].rejection = Some(DeliveryAdmissionRejection::ProviderHeadersUnsupported);
+    rejected.targets[1].rejection = Some(DeliveryAdmissionRejection::ProviderHeadersUnsupported);
+    rejected.targets[2].semantic_projection_json = serde_json::json!({"version":1,"provider_route_headers":[["x-routing-zone","blue"]]});
+    let admitted = repo.admit(rejected.clone()).await?;
+    for row in &admitted.deliveries[..2] {
+        assert_eq!(row.state.status, Status::Failed);
+        assert!(!row.state.may_have_been_sent);
+        assert_eq!(row.last_error_code.as_deref(), Some("delivery_provider_headers_unsupported"));
+        assert_eq!(row.terminal_at_ms, Some(100));
+        assert!(repo.lookup(DeliveryLookup::BotPending(row.target_bot_id.clone())).await?.is_empty());
+    }
+    let accepted = &admitted.deliveries[2];
+    assert_eq!(accepted.state.status, Status::Queued);
+    assert_eq!(repo.get_delivery(&accepted.delivery_id).await?.unwrap().semantic_projection_json, rejected.targets[2].semantic_projection_json);
+    assert!(repo.admit(rejected).await?.duplicate);
     Ok(())
 }

@@ -21,7 +21,7 @@ pub async fn managed_message_delivery_service_contract_tests<
             now_ms: 1,
             expire_at_ms: None,
             event: None,
-            targets: vec![DeliveryAdmissionTarget {
+            targets: vec![DeliveryAdmissionTarget { rejection: None,
                 target_bot_id: "bot".into(),
                 kind: DeliveryType::Send,
                 max_queued: 10,
