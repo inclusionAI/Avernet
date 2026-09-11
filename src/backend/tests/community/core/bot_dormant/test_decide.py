@@ -32,6 +32,10 @@ from agentclaw.community.core.bot_dormant.baas_client import (
 )
 from agentclaw.community.core.bot_dormant import ops_service as ops_service_module
 from agentclaw.community.core.bot_dormant.ops_service import DormantOpsService
+from agentclaw.community.core.bot_dormant.recycle_service import RecycleBotService
+from agentclaw.community.core.bot_management.services.bot_service import (
+    BotOperationNotAllowedError,
+)
 from agentclaw.community.core.common_config import CommonWhiteListService
 from agentclaw.community.core.common_config.models import CommonConfigRecord
 from agentclaw.community.core.common_config.service import CommonConfigService
@@ -151,6 +155,14 @@ def _make_service(
         bot_service = MagicMock()
         bot_service.stop_bot = MagicMock(return_value=True)
         bot_service.update_status = MagicMock()
+    bot_service.is_teclaw_bot.return_value = False
+    bot_service.get_bot.side_effect = lambda *args, **kwargs: {
+        "bot_id": kwargs.get("bot_id") or (args[0] if args else "bot1"),
+        "owner_id": kwargs.get("user_id") or "owner1",
+        "bot_type": "personal",
+        "active_engine": "openclaw",
+        "status": "ACTIVE",
+    }
     if passport_plugin is None:
         passport_plugin = MagicMock()
     scan_policy = MagicMock()
@@ -158,11 +170,15 @@ def _make_service(
     if common_whitelist_service is None:
         common_whitelist_service = MagicMock(spec=CommonWhiteListService)
         common_whitelist_service.get_owner_ids.return_value = protected_owner_ids
+    recycle_service = RecycleBotService(
+        bot_service=bot_service,
+        passport_plugin=passport_plugin,
+    )
     return DormantBotService(
         db=FakeDB(session),
         baas_client=baas_client,
         bot_service=bot_service,
-        passport_plugin=passport_plugin,
+        recycle_service=recycle_service,
         scan_policy=scan_policy,
         common_whitelist_service=common_whitelist_service,
         N=N,
@@ -218,6 +234,7 @@ def _insert_bot_record(
     bot_name: str = "Test Bot",
     gmt_create: datetime | None = None,
     env: str | None = None,
+    active_engine: str = "openclaw",
 ) -> BotModel:
     values = dict(
         bot_id=bot_id,
@@ -231,6 +248,7 @@ def _insert_bot_record(
         bot_type=bot_type,
         gmt_create=gmt_create or (_now() - timedelta(days=30)),
         gmt_modified=_now(),
+        active_engine=active_engine,
     )
     if env is not None:
         values["env"] = env
@@ -238,6 +256,37 @@ def _insert_bot_record(
     session.add(bot)
     session.commit()
     return bot
+
+
+@pytest.mark.unit
+def test_internal_scan_excludes_teclaw_before_alive_check(monkeypatch):
+    session = _make_session()
+    _insert_bot_record(
+        session,
+        bot_id="teclaw_bot",
+        owner_id="owner1",
+        entity_id="100001",
+        env="prod",
+        active_engine="teclaw",
+    )
+    baas = AsyncMock(spec=BaasDormantClient)
+    bot_service = MagicMock()
+    bot_service.is_teclaw_bot.side_effect = lambda engine: engine == "teclaw"
+    service = _make_service(
+        session,
+        baas_client=baas,
+        bot_service=bot_service,
+    )
+    monkeypatch.setattr(
+        "agentclaw.community.core.bot_dormant.service.get_current_env",
+        lambda: "prod",
+    )
+
+    summary = _run(service.process_run(dry_run=True, run_id="teclaw-scan"))
+
+    assert summary.scanned == 0
+    baas.check_alive.assert_not_awaited()
+    bot_service.stop_bot.assert_not_called()
 
 
 @pytest.mark.unit
@@ -387,7 +436,7 @@ def test_manual_recycle_one_reuses_recycle_side_effects_and_writes_audit():
         passport_plugin=passport,
         protected_owner_ids=frozenset({"owner1"}),
     )
-    ops_service = DormantOpsService(service, passport)
+    ops_service = DormantOpsService(service, passport, service._recycle_service)
 
     result = ops_service.recycle_one(
         bot_id="ops_bot",
@@ -436,7 +485,7 @@ def test_manual_recycle_one_dry_run_skips_side_effects_but_records_intent():
         bot_service=bot_service,
         passport_plugin=passport,
     )
-    ops_service = DormantOpsService(service, passport)
+    ops_service = DormantOpsService(service, passport, service._recycle_service)
 
     result = ops_service.recycle_one(
         bot_id="ops_bot",
@@ -458,7 +507,8 @@ def test_manual_recycle_one_dry_run_skips_side_effects_but_records_intent():
 def test_manual_recycle_one_rejects_missing_bot():
     """Manual ops recycle should fail clearly when bot_id + owner_id misses."""
     session = _make_session()
-    ops_service = DormantOpsService(_make_service(session), MagicMock())
+    service = _make_service(session)
+    ops_service = DormantOpsService(service, MagicMock(), service._recycle_service)
 
     with pytest.raises(ValueError, match="bot not found"):
         ops_service.recycle_one(
@@ -482,9 +532,9 @@ def test_manual_recycle_one_rejects_cross_environment_bot_before_side_effects(
     )
     service = _make_service(session)
     service._enqueue_recycle = MagicMock()
-    service._execute_recycle = MagicMock()
+    service._recycle_service.recycle = MagicMock()
     service._write_audit = MagicMock()
-    ops_service = DormantOpsService(service, MagicMock())
+    ops_service = DormantOpsService(service, MagicMock(), service._recycle_service)
     monkeypatch.setattr(
         ops_service_module,
         "get_current_env",
@@ -500,7 +550,7 @@ def test_manual_recycle_one_rejects_cross_environment_bot_before_side_effects(
         )
 
     service._enqueue_recycle.assert_not_called()
-    service._execute_recycle.assert_not_called()
+    service._recycle_service.recycle.assert_not_called()
     service._write_audit.assert_not_called()
     assert session.query(DormantCheckAudit).count() == 0
     assert session.query(DormantNotifyLog).count() == 0
@@ -516,7 +566,8 @@ def test_manual_recycle_one_rejects_non_active_bot():
         owner_id="owner1",
         status="RECYCLED",
     )
-    ops_service = DormantOpsService(_make_service(session), MagicMock())
+    service = _make_service(session)
+    ops_service = DormantOpsService(service, MagicMock(), service._recycle_service)
 
     with pytest.raises(ValueError, match="only ACTIVE bot"):
         ops_service.recycle_one(
@@ -536,7 +587,8 @@ def test_manual_recycle_one_rejects_non_personal_bot():
         owner_id="owner1",
         bot_type="team",
     )
-    ops_service = DormantOpsService(_make_service(session), MagicMock())
+    service = _make_service(session)
+    ops_service = DormantOpsService(service, MagicMock(), service._recycle_service)
 
     with pytest.raises(ValueError, match="only personal bot"):
         ops_service.recycle_one(
@@ -544,6 +596,34 @@ def test_manual_recycle_one_rejects_non_personal_bot():
             owner_id="owner1",
             dry_run=False,
         )
+
+
+@pytest.mark.unit
+def test_manual_recycle_one_rejects_teclaw_even_in_dry_run():
+    session = _make_session()
+    _insert_bot_record(
+        session,
+        bot_id="ops_teclaw",
+        owner_id="owner1",
+        active_engine="teclaw",
+    )
+    service = _make_service(session)
+    service._bot_service.is_teclaw_bot.side_effect = (
+        lambda engine: engine == "teclaw"
+    )
+    ops_service = DormantOpsService(
+        service, MagicMock(), service._recycle_service
+    )
+
+    with pytest.raises(BotOperationNotAllowedError):
+        ops_service.recycle_one(
+            bot_id="ops_teclaw",
+            owner_id="owner1",
+            dry_run=True,
+        )
+
+    assert session.query(DormantNotifyLog).count() == 0
+    assert session.query(DormantCheckAudit).count() == 0
 
 
 # ---------------------------------------------------------------------------

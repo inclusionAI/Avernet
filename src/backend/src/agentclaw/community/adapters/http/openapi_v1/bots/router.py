@@ -49,8 +49,10 @@ from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
     UserIdDep,
     refuse_app_only_caller,
+    require_granted_addressed_bot,
     require_granted_own_bot,
 )
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import OwnerIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     accepted,
     created,
@@ -102,9 +104,6 @@ from agentclaw.community.plugin_api.passport import PassportError, PassportPlugi
 from agentclaw.community.api.bot_inventory_service import (
     BotInventoryServiceProtocol,
 )
-from agentclaw.community.api.bot_dormant_service import (
-    BotDormantActivateServiceProtocol,
-)
 from agentclaw.community.core.bot_inventory.errors import (
     BotInventoryPermissionError,
 )
@@ -137,7 +136,6 @@ from .schemas import (
     Bot,
     BotMetadata,
     BotMetadataQueries,
-    BotActivateResult,
     BotAuthPending,
     BotAuthStatus,
     BotAuthStatusPoll,
@@ -173,6 +171,7 @@ logger = get_logger()
 #: authority on which route is which; ``test_admission_inventory.py`` fails if
 #: a declaration and a mode disagree.
 _GRANT_CHECKED_OWN_BOT = [Depends(require_granted_own_bot)]
+_GRANT_CHECKED_ADDRESSED_BOT = [Depends(require_granted_addressed_bot)]
 
 #: What a ``REFUSED`` operation declares: no caller without an end user. The
 #: refusal already happens centrally in ``require_principal`` — this makes the
@@ -862,72 +861,6 @@ async def list_inventory(
     return page(total, [_to_inventory_item(item) for item in items], request)
 
 
-# ── Dormant Bot activation ─────────────────────────────────────────────────
-# ``POST /openapi/v1/bots/{bot_id}/activate`` — a two-segment sub-resource of
-# the bot record (like ``/{bot_id}/restart``), so it follows ``/{bot_id}`` and
-# needs no literal guard. The handler does the owner lookup + bot_type guard
-# itself and delegates only the reactivation orchestration to
-# ``BotDormantActivateServiceProtocol`` (``ActivateBotService.activate``);
-# local bots are never reclaimed by dormant so they are refused here (409),
-# service bots go through their own publish flow.
-
-
-def _require_personal_cloud_bot(bot: dict[str, Any]) -> None:
-    """Refuse dormant activation for non-personal-cloud bots (→ 409).
-
-    ``bot_type`` is the only field that distinguishes a personal cloud bot from
-    a desktop or service bot at this layer; ``status`` is checked downstream
-    by ``ActivateBotService.activate`` (RECYCLED only).
-    """
-    bot_type = bot.get("bot_type") or ""
-    if bot_type == "desktop":
-        raise BotOperationNotAllowedError(
-            "local bots are not reclaimed by dormant activation"
-        )
-    if bot_type == "service":
-        raise BotOperationNotAllowedError(
-            "service bot lifecycle is owned by the publish flow"
-        )
-    if bot_type != "personal":
-        raise BotOperationNotAllowedError(
-            f"dormant activation is not supported for bot_type: {bot_type or 'unknown'}"
-        )
-
-
-@router.post(
-    "/{bot_id}/activate",
-    response_model=Envelope[BotActivateResult],
-    responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_OWN_BOT,
-)
-@envelope_errors
-async def activate_dormant_bot(
-    bot_id: BotIdPath,
-    request: Request,
-    owner_id: UserIdDep,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    activate_service: BotDormantActivateServiceProtocol = Injected(
-        BotDormantActivateServiceProtocol
-    ),
-) -> Envelope[BotActivateResult]:
-    """Activate a recycled personal cloud bot.
-
-    Returns 404 when the bot is not visible to the caller and 409 when the bot
-    is not a recycled personal cloud bot.
-    """
-    bot = bot_service.get_bot(bot_id, owner_id)
-    _require_personal_cloud_bot(bot)
-    result = activate_service.activate(bot_id=bot_id, user_id=owner_id)
-    return envelope(
-        BotActivateResult(
-            bot_id=bot_id,
-            status=str(result.get("status") or ""),
-            message=result.get("message"),
-        ),
-        request,
-    )
-
-
 @router.get(
     "/{bot_id}",
     response_model=Envelope[Bot],
@@ -1282,13 +1215,14 @@ async def poll_bot_auth_status(
     "/{bot_id}/status",
     response_model=Envelope[BotStatus],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_OWN_BOT,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def get_bot_status(
     bot_id: BotIdPath,
     request: Request,
-    owner_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    user_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[BotStatus]:
     """Get a bot's runtime / device readiness."""

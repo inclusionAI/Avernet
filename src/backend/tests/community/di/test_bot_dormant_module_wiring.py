@@ -30,3 +30,7 @@ def test_dormant_bot_service_adapter_normalizes_not_found_and_forwards_operation
 
     bot_service.start_bot.return_value = {"status": "RUNNING"}
     assert adapter.start_bot(bot_id="bot-1") == {"status": "RUNNING"}
+
+    bot_service.is_teclaw_bot.return_value = True
+    assert adapter.is_teclaw_bot("teclaw") is True
+    bot_service.is_teclaw_bot.assert_called_once_with("teclaw")

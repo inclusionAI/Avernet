@@ -111,6 +111,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
     DeviceLimitError,
 )
+from agentclaw.community.core.bot_dormant.recycle_service import RecycleReleaseFailed
 from agentclaw.community.core.bot_management.bot_quota import (
     BotQuotaBusyError,
     BotQuotaExceededError,
@@ -143,7 +144,6 @@ from agentclaw.community.core.bot_inventory.errors import (
     BotInventoryPermissionError,
     BotInventoryUpstreamError,
 )
-from agentclaw.community.core.bot_dormant.activate_service import InvalidBotStateError
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
     DeviceNotBoundError,
@@ -556,9 +556,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Bot is not in a valid state for this operation",
     ),
     BotOperationNotAllowedError: (409, "Operation not supported for this bot"),
+    RecycleReleaseFailed: (502, "Bot resource release failed"),
     BotInventoryOperationNotAllowedError: (409, "Operation not supported for this bot"),
-    # Dormant activate: a bot that is not RECYCLED cannot be reactivated.
-    InvalidBotStateError: (409, "Operation not supported for this bot"),
     BotInventoryPermissionError: (404, "Not found"),
     BotInventoryUpstreamError: (502, "Desktop service error"),
     ServicePublicationConflictError: (

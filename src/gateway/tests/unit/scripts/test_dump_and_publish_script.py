@@ -39,9 +39,22 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
 
     assert result.returncode == 0, result.stdout + result.stderr
     document = json.loads((tmp_path / "bcn.openapi.json").read_text(encoding="utf-8"))
-    # 59 pre-existing collaboration operations + the five public auth operations
-    # exposed by the new authentication facade.
-    assert sum(len(path_item) for path_item in document["paths"].values()) == 64
+    # 62 collaboration operations + the five public auth operations exposed by
+    # the authentication facade.
+    assert sum(len(path_item) for path_item in document["paths"].values()) == 67
+    assert (
+        "get"
+        in document["paths"][
+            "/openapi/v1/collaboration/bots/{bot_id}/eligible-candidates"
+        ]
+    )
+    assert (
+        "patch"
+        in document["paths"][
+            "/openapi/v1/collaboration/groups/{group_id}/participants/{actor_id}"
+        ]
+    )
+    assert "post" in document["paths"]["/openapi/v1/collaboration/invite-codes/claim"]
     assert "get" in document["paths"]["/openapi/v1/auth/url"]
     assert "get" in document["paths"]["/openapi/v1/auth/callback/{provider}"]
     assert "get" in document["paths"]["/openapi/v1/auth/user"]
@@ -101,6 +114,7 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
         "Collaboration / Sessions",
         "Collaboration / Register",
         "Collaboration / Invitations",
+        "Collaboration / Invite Codes",
         "Collaboration / Channels",
         "Collaboration / Event Subscriptions",
     ]

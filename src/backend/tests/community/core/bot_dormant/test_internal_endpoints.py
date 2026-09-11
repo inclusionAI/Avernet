@@ -11,7 +11,12 @@ from injector import Injector, InstanceProvider, singleton
 
 from agentclaw.community.adapters.http.bot_dormant import router as dormant_router_module
 from agentclaw.community.adapters.http.bot_dormant.auth import verify_dormant_internal_token
-from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService, InvalidBotStateError
+from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
+from agentclaw.community.core.bot_dormant.types import BotLifecycleResult
+from agentclaw.community.core.bot_management.services.bot_service import (
+    BotInvalidLifecycleStateError,
+    BotOperationNotAllowedError,
+)
 from agentclaw.community.core.bot_dormant.internal_service import DormantInternalService
 from agentclaw.community.core.bot_dormant.ops_service import DormantOpsService
 from agentclaw.community.core.bot_dormant.service import DormantBotService
@@ -271,10 +276,17 @@ def test_recycle_one_forwards_to_manual_recycle_service():
 
 
 @pytest.mark.unit
-def test_recycle_one_returns_400_for_rejected_bot():
+@pytest.mark.parametrize(
+    "error",
+    [
+        ValueError("only ACTIVE bot can be manually recycled"),
+        BotOperationNotAllowedError("teclaw bots use their engine-owned lifecycle"),
+    ],
+)
+def test_recycle_one_returns_400_for_rejected_bot(error):
     """ops recycle-one should surface domain validation as a 400."""
     ops_svc = MagicMock(spec=DormantOpsService)
-    ops_svc.recycle_one.side_effect = ValueError("only ACTIVE bot can be manually recycled")
+    ops_svc.recycle_one.side_effect = error
 
     client = _build_app(ops_svc=ops_svc)
     r = client.post(
@@ -284,7 +296,7 @@ def test_recycle_one_returns_400_for_rejected_bot():
     )
 
     assert r.status_code == 400
-    assert "only ACTIVE" in r.json()["detail"]
+    assert r.json()["detail"] == str(error)
 
 
 @pytest.mark.unit
@@ -389,10 +401,9 @@ def test_unfreeze_passport_one_rejects_blank_fields(field: str):
 def test_activate_one_forwards_to_activate_service():
     """ops activate-one should reuse the normal RECYCLED bot activation path."""
     activate_svc = MagicMock(spec=ActivateBotService)
-    activate_svc.activate.return_value = {
-        "status": "REACTIVATING",
-        "message": "激活中",
-    }
+    activate_svc.activate.return_value = BotLifecycleResult(
+        bot_id="b1", owner_id="u1", status="REACTIVATING", changed=True
+    )
 
     client = _build_app(activate_svc=activate_svc)
     r = client.post(
@@ -402,12 +413,14 @@ def test_activate_one_forwards_to_activate_service():
     )
 
     assert r.status_code == 200
-    assert r.json()["ok"] is True
-    assert r.json()["data"]["status"] == "REACTIVATING"
+    assert r.json() == {
+        "ok": True,
+        "data": {"status": "REACTIVATING", "message": "激活中，请稍候"},
+    }
     activate_svc.activate.assert_called_once_with(
         bot_id="b1",
-        user_id="u1",
-        nick_name="ops",
+        owner_id="u1",
+        owner_name="ops",
     )
 
 
@@ -415,7 +428,9 @@ def test_activate_one_forwards_to_activate_service():
 def test_activate_one_returns_400_for_invalid_state():
     """ops activate-one should reuse ActivateBotService's state validation."""
     activate_svc = MagicMock(spec=ActivateBotService)
-    activate_svc.activate.side_effect = InvalidBotStateError("仅回收状态的 Bot 可激活")
+    activate_svc.activate.side_effect = BotInvalidLifecycleStateError(
+        bot_id="b1", current_status="PENDING"
+    )
 
     client = _build_app(activate_svc=activate_svc)
     r = client.post(
