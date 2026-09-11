@@ -267,6 +267,32 @@ class TestRestartGuardOrchestration:
         start.assert_not_called()
 
     @pytest.mark.parametrize(
+        ("status", "binding_id"),
+        [("ACTIVE", 42), ("FAILED", 42), ("PENDING", 42), ("FAILED", None)],
+        ids=["active-with-binding", "failed-with-binding", "pending-with-binding", "failed-without-binding"],
+    )
+    def test_teclaw_restart_rejected_before_any_side_effects(
+        self, status, binding_id
+    ):
+        """teclaw bots must be rejected before stop/start/lock — no side effects."""
+        repo = FakeRestartLockRepo()
+        svc = _make_service(repo)
+        bot = _make_bot(status=status, active_engine="teclaw", binding_id=binding_id)
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        with patch.object(svc, "stop_bot") as stop, \
+             patch.object(svc, "start_bot") as start, \
+             patch.object(svc, "_resolve_current_device_restart_context") as resolve_ctx:
+            with pytest.raises(BotOperationNotAllowedError, match="teclaw"):
+                svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        # No lock acquired, no stop/start called, no binding context resolved
+        assert repo.acquire_calls == 0
+        stop.assert_not_called()
+        start.assert_not_called()
+        resolve_ctx.assert_not_called()
+
+    @pytest.mark.parametrize(
         ("binding_id", "device_id"),
         [(None, None), (42, "device-42")],
         ids=["without-binding", "pending-binding"],
