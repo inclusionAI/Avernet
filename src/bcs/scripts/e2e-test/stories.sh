@@ -673,6 +673,20 @@ _story_complete_and_invoke_sessions() {
     assert_not_empty "release sign-off session is created" "$session_id"
     [[ -n "$session_id" ]] || return
 
+    # An ordinary (queue-disabled) session remains usable with the additive
+    # status API. The API must not fabricate a delivery or cancel a legacy run
+    # when the requested canonical message does not exist.
+    bot_get "/openapi/v1/collaboration/messages/not-a-message/deliveries?session_id=${session_id}" PM
+    require_status "participant can inspect an unmanaged message without fabricated queue state" "200" || return
+    assert_eq "unmanaged message has no delivery rows" "$RESPONSE" "[]"
+    bot_post "/openapi/v1/collaboration/sessions/${session_id}/message-deliveries/query" PM '{"message_ids":["not-a-message"]}'
+    require_status "participant can batch-query delivery state" "200" || return
+    assert_eq "batch query does not fabricate delivery rows" "$RESPONSE" "[]"
+    bot_post "/messages/not-a-message/deliveries/not-a-delivery/cancel" PM "{\"session_id\":\"${session_id}\"}"
+    require_status "target cancellation rejects a missing canonical message" "400" || return
+    bot_post "/messages/not-a-message/deliveries/cancel" PM "{\"session_id\":\"${session_id}\"}"
+    require_status "message cancellation rejects a missing canonical message" "400" || return
+
     bot_post "/sessions/${session_id}/complete" PM \
         '{"output":{"summary":"release approved"}}'
     require_status "group driver completes the sign-off session" "200" || return

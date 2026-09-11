@@ -41,6 +41,25 @@ pub enum MessageRepoError {
 /// Message history persistence port.
 #[async_trait]
 pub trait MessageRepoPort: Send + Sync + 'static {
+    /// Internal reconstruction read: exact env/session/sender/run, chat only,
+    /// ordered by session_seq. Includes legacy string bodies, excludes summaries
+    /// and tool records. Implementations must not substitute a limited history page.
+    async fn run_chat_segments(&self, session: &str, sender: &str, run: &str) -> Result<Vec<PersistedMessage>, MessageRepoError> {
+        let _ = (session, sender, run);
+        Err(MessageRepoError::StorageError("run text reconstruction unavailable".into()))
+    }
+    /// Internal canonical payload read, not public history projection. SQL
+    /// implementations batch IDs (including attachments) rather than N+1 reads.
+    async fn get_messages_by_ids(&self, session_id: &str, ids: &[String]) -> Result<Vec<PersistedMessage>, MessageRepoError> {
+        let mut messages = Vec::new();
+        for id in ids { if let Some(message) = self.get_message_by_id(session_id, id).await? { messages.push(message); } }
+        Ok(messages)
+    }
+    /// The same store instance owns canonical message/delivery transactions.
+    /// None denotes a legacy implementation that cannot host durable queues.
+    fn delivery_repository(self: std::sync::Arc<Self>) -> Option<std::sync::Arc<dyn super::message_delivery::MessageDeliveryRepoPort>> {
+        None
+    }
     /// Append a message to a session. Allocates `session_seq` atomically.
     async fn append_message(&self, msg: NewMessage) -> Result<PersistedMessage, MessageRepoError>;
 

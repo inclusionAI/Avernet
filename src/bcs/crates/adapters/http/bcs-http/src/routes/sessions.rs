@@ -1635,6 +1635,7 @@ pub async fn session_chat(
             "group_id": outcome.group_id,
             "driver_bot": outcome.driver_bot_id,
             "delivered_count": outcome.delivered_count,
+            "queue_admission": outcome.queue_admission,
             "failed_count": outcome.failed_count,
             "delivery_results": delivery_results_json(&outcome.delivery_results),
             "mentions": outcome.mentions,

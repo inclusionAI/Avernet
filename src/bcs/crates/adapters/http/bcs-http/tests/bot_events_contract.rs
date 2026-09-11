@@ -746,6 +746,26 @@ async fn bot_events_accepts_static_bearer_final_for_matching_run() {
 }
 
 #[tokio::test]
+async fn managed_late_terminal_uses_durable_context_after_cache_loss() {
+    let TestApp { app, provider_core, provider_bot_core, run_context, message_flow, _temp_dir, .. } = test_app(Arc::new(StaticAgentpassResolver::default()));
+    let registered = register_provider_bot(provider_core.as_ref(), provider_bot_core.as_ref(), ProviderAuthMode::StaticBearer, "late-terminal").await;
+    *message_flow.managed_context.lock().await = Some((registered.provider_id.clone(), BotRunContext {
+        run_id: "durable-run".into(), bot_id: registered.bot_uuid, group_id: "original-group".into(),
+        bcs_session_id: Some("original-session".into()), deadline_ms: u64::MAX, terminal: false,
+    }));
+    assert!(run_context.get_context("durable-run").await.is_none());
+    let response = app.oneshot(Request::builder().method("POST").uri("/bot/events")
+        .header("content-type", "application/json").header("X-BCN-Provider-Id", registered.provider_id)
+        .header("authorization", format!("Bearer {}", registered.bot_runtime_token.unwrap()))
+        .body(Body::from(json!({"run_id":"durable-run","state":"final","message":{"text":"late result"}}).to_string())).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let events = message_flow.events.lock().await;
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].group_id, "original-group");
+    assert_eq!(events[0].bcs_session_id.as_deref(), Some("original-session"));
+}
+
+#[tokio::test]
 async fn bot_events_defaults_missing_message_to_empty_text() {
     let TestApp {
         app,
@@ -3013,6 +3033,7 @@ impl BotRunContextPort for RecordingRunContext {
 
 #[derive(Default)]
 struct RecordingMessageFlow {
+    managed_context: Mutex<Option<(String, BotRunContext)>>,
     events: Mutex<Vec<BotEventCommand>>,
     sources: Mutex<Vec<ProviderEventSource>>,
     task_dispatches: Mutex<Vec<TaskDispatchCommand>>,
@@ -3023,6 +3044,9 @@ struct RecordingMessageFlow {
 
 #[async_trait::async_trait]
 impl MessageFlowService for RecordingMessageFlow {
+    async fn resolve_managed_provider_run(&self, run_id: &str, provider_id: &str, bot_id: &str) -> ServiceResult<Option<BotRunContext>> {
+        Ok(self.managed_context.lock().await.as_ref().filter(|(provider, context)| provider == provider_id && context.bot_id == bot_id && context.run_id == run_id).map(|(_, context)| context.clone()))
+    }
     async fn handle_web_send(&self, _cmd: WebSendCommand) -> ServiceResult<WebSendOutcome> {
         unreachable!("not used by this contract")
     }

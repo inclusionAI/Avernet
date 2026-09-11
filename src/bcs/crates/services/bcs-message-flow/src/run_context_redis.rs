@@ -197,7 +197,9 @@ impl BotRunContextPort for RedisBotRunContextStore {
     }
 
     async fn get_context(&self, run_id: &str) -> Option<BotRunContext> {
-        self.read_context(run_id).await
+        if let Some(context) = self.read_context(run_id).await { return Some(context); }
+        let active = self.find_active_run(run_id).await.ok()??;
+        self.read_context(&active.canonical_run_id).await
     }
 
     async fn try_begin_terminal(&self, run_id: &str) -> bool {
@@ -364,6 +366,23 @@ impl BotRunContextPort for RedisBotRunContextStore {
         } else {
             Ok(None)
         }
+    }
+
+    async fn bind_request_alias(&self, canonical_run_id: &str, request_id: &str) -> ServiceResult<bool> {
+        if request_id.is_empty() { return Ok(false); }
+        let Some(context) = self.find_active_run(canonical_run_id).await? else { return Ok(false); };
+        let key = self.active_alias_key(request_id);
+        let inserted = self.cache.set_value(&key, canonical_run_id.as_bytes().to_vec(),
+            Some(self.lifecycle_ttl(context.deadline_ms)), CacheSetMode::InsertOnly)
+            .await.map_err(|error| Self::cache_error("set request alias", error))?;
+        if !inserted && self.cache.get_value(&key).await
+            .map_err(|error| Self::cache_error("read request alias", error))?
+            .as_deref() != Some(canonical_run_id.as_bytes()) {
+            return Err(ServiceError::InvalidOperation {
+                message: "request alias belongs to another Bot run".into(), request_id: None,
+            });
+        }
+        Ok(true)
     }
 
     async fn bind_downstream_run_id(

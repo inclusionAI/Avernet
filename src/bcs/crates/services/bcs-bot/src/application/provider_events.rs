@@ -675,10 +675,20 @@ impl ProviderBotEventService for ProviderBotEvents {
         }
         }
 
-        let context = self
+        let identity = self.authenticate_event(&command).await?;
+        let managed_context = self.message_flow.resolve_managed_provider_run(&command.run_id, &command.provider_id, &identity.bot_uuid)
+            .await.map_err(map_service_error)?;
+        let managed = managed_context.is_some();
+        let cached_context = self
             .bot_run_context
             .get_context(&command.run_id)
-            .await
+            .await;
+        // A durable Unknown run can accept a trusted late terminal even after
+        // cache expiry/restart. Do not resume an unnegotiated streaming source.
+        if managed && cached_context.is_none() && !is_terminal {
+            return Err(ProviderBotEventError::RunNotFound("run_not_found".into()));
+        }
+        let context = managed_context.or(cached_context)
             .ok_or_else(|| ProviderBotEventError::RunNotFound("run_not_found".to_string()))?;
         let context_group_id = context.group_id.clone();
         let context_bot_id = context.bot_id.clone();
@@ -700,8 +710,6 @@ impl ProviderBotEventService for ProviderBotEvents {
             ));
         }
 
-        let identity = self.authenticate_event(&command).await?;
-
         if identity.bot_uuid != context_bot_id {
             warn!(
                 request_id = %bcs_observability::CurrentRequestId,
@@ -720,7 +728,7 @@ impl ProviderBotEventService for ProviderBotEvents {
         // run. Non-terminal callback-streaming events (tool result, thinking,
         // chat delta) flow through the pipeline without terminating the run —
         // the run stays open until a chat final/error/aborted arrives (§11.1.1).
-        if is_terminal
+        if is_terminal && !managed
             && !self
                 .bot_run_context
                 .try_begin_terminal(&command.run_id)

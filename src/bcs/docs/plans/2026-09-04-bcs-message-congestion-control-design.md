@@ -18,8 +18,8 @@
 - 受管消息在写入正文时同步将附件写入 `bcs_messages.content.attachments`，与 delivery 同事务提交；
   实际发送统一从消息表读取附件，不依赖入站请求内存。IM 同样保存入站附件及其已有 URL，
   首版不处理排队期间的 URL 过期、刷新或文件转存。
-- 首版不实现 context 数量/字节限制或全局积压上限，不新增相应统计字段；inject 总积压治理、
-  上下文压缩及摘要后续单独评审，不在首版静默截断或压缩消息。
+- 单次 Send 附加的 Inject 历史默认最多 24 条、128 KiB，优先保留最新历史，正序发送，
+  超限按第 9.3 节显式省略；不限制 Inject 总积压，不自动摘要或压缩。
 - MySQL/OceanBase 是生产事实源，SQLite 用于本地单实例；不引入外部 MQ 或 Redis。
 - 调度归属和计数使用可重建的进程内状态；不引入 Worker lease、续租、分布式 fencing 或领导者选举。
 - 首版新增的核心业务表只有 delivery 表；不引入 outbox 表、通知扫描或重放任务，
@@ -39,7 +39,8 @@
   消息持久化/事务整合另行完成后，可分别开启或关闭队列，不阻塞其他已就绪类型上线。
 - 业务类型开关使用 `flow_kind`，不与 `kind=send/inject` 混用。已经入队的 delivery 始终由
   调度器管理，关开关不删除积压，也不将已有请求改为直接发送。
-- 本次仅通过 Draft PR 提交设计文档供评审，不实现运行时代码；方案评审后再单独推进实现。
+- 同一 Draft PR 先提交设计文档，再推进首版后端与 IM 实现；不另拆一个仅文档 PR。
+  当前实现进度见 16.1，未完成持久化与恢复闭环前不允许开启 enforce。
 
 ## 评审重点
 
@@ -89,8 +90,8 @@
 - 一个进程中有一个负责状态决策的调度循环。
 - 网络发送、Abort 和通知可以并发执行，但只把结果返回调度循环，不直接决定下一条消息何时发送。
 - 服务管理器使用先停旧进程、确认退出、再启动新进程的升级方式；首版不支持重叠式滚动升级。
-- 同机部署使用配置指定路径上的操作系统独占文件锁，随进程退出释放；锁获取失败则启动失败。
-  该锁不解决跨机器竞争，不能把它当作分布式锁。
+- 同机与跨机都不使用文件锁或分布式锁，也不自动检测第二个调度实例；同一 DB 仅一个实例及
+  发布不重叠由部署系统保证，不能仅凭本实现防止错误部署。
 - 新进程恢复数据库状态完成前，不接受新的调度准入，也不发送新请求。
 - 如果未来需要多副本或跨机接管，必须重新评审调度所有权和 fencing，不能直接增加副本数。
 
@@ -324,14 +325,15 @@ completed。调度器不要求所有中间阶段按顺序观察到。
 ### 5.2 inject 状态
 
 ~~~text
-pending_context -> bound -> consumed
+pending_context -> bound -> consumed | discarded_context
 pending_context -> cancelled | expired
 bound -> pending_context   （承载 send 被证明未发出且永久结束）
 ~~~
 
 `inject` 不占 Bot active 容量，也不参与 send 的队列位置或 max_queued 计数。
-首版不设独立的 context 数量/字节上限，不因 Bot 的 send 队列已满而拒绝 inject。
-已可能发送的 bound context 不再解绑给下一条 send。其承载 send 终止时统一 consumed。
+Inject 准入不设总数量/字节配额，不因 Bot 的 send 队列已满而拒绝 inject；单次发送预算见第 9.3 节。
+已可能发送的 bound context 不再解绑给下一条 send。其承载 send 终止时按第 9.3 节区分
+consumed 与 discarded_context，后者表示因 context_limit 未被附加。
 
 ### 5.3 等待原因与终态竞争
 
@@ -401,6 +403,7 @@ UNIQUE(env, session_id, session_seq)
 | 执行恢复 | run_deadline_at_ms、terminal_at_ms、发送时的 connection identity |
 | 取消 | cancel_requested_at_ms/by/reason、abort_request_id、abort_started_at_ms、cancel_deadline_at_ms、last_abort_result |
 | 上下文 | bound_to_delivery_id；仅 inject 使用 |
+| 历史选择 | context_selection_json；Send 使用，策略快照、选中引用/版本/UTF-8 起点、总数及历史 bytes |
 | 诊断 | last_error_code、脱敏摘要、必要的未发出判定依据 |
 
 语义约束：
@@ -548,9 +551,9 @@ Bot queue cap 统计尚未发送的 queued send；active 数独立限制。准�
   这是 BCS 本地调度速率，不承诺经过网络缓冲后 Bot 实际接收时刻仍严格等间隔。
 - `max_queued`：每个 Bot 的未发送 send 数量上限，不包含 inject。
 
-首版不设置 context 数量/字节预算或全局积压上限，不新增字节统计字段、预算计数或配套配置。
-既有单条消息大小校验和下游协议的载荷限制继续生效，但不作为新的积压配额；组合载荷无法
-发送时按第 9、10 节明确失败，不自动裁剪。inject 总积压治理及压缩后置，见第 17.2 节。
+单次 Send 的 Inject 历史条数/字节预算见第 9.3 节；它不是总积压配额，也不是模型 token 限制。
+既有单条消息大小校验和下游协议限制继续生效。当前 Send 正文不裁剪，组合后的完整请求若仍
+超出下游限制，按第 9、10 节明确失败。Inject 总积压治理及压缩后置，见第 17.2 节。
 有界调度入口和准备/发送任务并发限制仍保留，它们限制进程内即时工作量，不是持久化积压上限。
 
 不支持额外 burst、优先级或 aging。不同 Bot/session 使用轮转避免单个繁忙会话持续抢占。
@@ -569,6 +572,58 @@ Unknown 和取消未确认状态继续计入 active，因此可能占满 Bot 全
 - 确认未发出的瞬时失败：回到 queued，设置固定的有界退避时间和次数上限，不增加 retry_wait 状态。
 - running 超时走取消/Unknown 处理，不能变成 queued 自动重跑。
 - 人工 pause 只停止新 dispatch；查询、terminal ingestion 和 Abort 继续工作。
+
+### 8.4 单实例有界查询优化（2026-09-08）
+
+100 ms tick 是调度机会，不再代表每轮加载全部未完成记录。SQL 仓储按用途查询：
+
+| 用途 | 默认批次与范围 |
+| --- | --- |
+| queued Bot | 只查存在 queued Send 的 Bot，每批 32 个；非初始游标返回空页时同轮回绕一次，共享原任务/时间预算 |
+| session 候选 | 指定 Bot，每批最多 8 个合法队首，只返回标量；轮转越过离线、满载、退避会话 |
+| active 容量 | 指定 Bot 的完整 COUNT，不对 active 集合分页截断 |
+| 到期 | 每轮最多 100 条；queued/pending_context 独立到期索引范围，各保留处理份额 |
+| 运行/取消控制 | 合计 32 条；发送超时、运行超时、待 abort、abort 超时各预留 8 条，空余份额可借用；独立于 Send 暂停开关 |
+| 启动恢复 | 每批 200 条需要恢复的运行，不加载全部 context/正文 |
+| ACK/终态/取消 | 按 request/run/delivery/message ID 定位；仅读取关联 context、必要后继 |
+
+新工作有 50 ms 软预算，耗尽后不启动下一批；不是强制打断正在执行的 SQL。
+Control 不再按全局 delivery ID 游标扫描：超时类按状态/deadline 索引读取，待 abort
+按状态/abort_request_id/ID 索引读取。成功处理退出待办集；每轮从最早待办开始。
+补查借用份额时仅重读有界前缀并去重，不使用深 OFFSET。SQLite 024 / MySQL 023
+增加待 abort 索引；已有 deadline 索引继续复用，远端部署前需应用 DDL 并核对执行计划。
+准备/发送并发仍为 32，Abort I/O 并发为 2。公平游标不是发送序号；同 lane 的 FIFO
+仍由数据库“没有更早未完成 Send”和发送前精确检查保证。发送前在按 Bot 的进程 mutations
+锁内复核版本、TTL、lane、最新策略和 active 容量，提交 CAS 后才允许网络 I/O。
+同一 Bot 的不同 session 共用锁；终态回复需同时锁定原 Bot 和全部回复目标 Bot，
+按 Bot ID 排序去重后加锁，并在持锁后重新读取状态。ACK、准入、等待原因更新使用相同锁目录。
+仓储内部事务写锁改为按 session 分锁，继续保护消息序号、幂等和事务组装。
+涉及 Send 的变更和准入额外获取目标 Bot 容量锁，避免跨 session 准入超卖；容量键在前、
+session 键在后，排序去重，目录弱引用定期回收。提交开始后，即使调用方任务取消，
+Bot/session 锁也保留至数据库操作结束；取消等待不等于事务回滚，不据此盲重试。
+文件型 SQLite 使用 5 个连接，内存型仍使用 1 个独立连接；SQL 在阻塞线程池执行，
+写事务以 BEGIN IMMEDIATE 开始并固定使用一个连接。每个文件连接启用 WAL、foreign_keys
+和 5000 ms busy_timeout；不降低持久化设置。SQLite 依然只有一个写者，连接池主要提供
+读写并发机会，不等于多写者或分布式并发控制。
+
+普通调度不加载 Inject 或 JSON；选中 Send 才读取完整投递和绑定上下文。正文/附件按
+message ID 可批量读取；Inject 准备按第 9.3 节有界 metadata 从新到旧逐条加载，到预算即停止，
+不加载所有绑定正文，不让分页之外的消息被误标为已消费。
+准入对目标 Bot 聚合 queued 数，只加载该 lane 可绑定的 pending_context；终态与回复准入
+仍在同一事务提交。SQL 回调使用索引标量 `downstream_run_id`，它是 transport JSON 的
+派生投影，同事务更新；不增加新的运行身份语义。升级执行 SQLite 022 / MySQL 021，
+包含旧 JSON 别名回填和查询索引；不修改已经应用的历史迁移。
+
+Provider 绑定（含“没有绑定”的负缓存）、Provider 配置和按 kind 读取的凭据使用
+有界进程内缓存：binding 4096、Provider/凭据各 1024，TTL 30 秒。凭据仅在进程内，
+不写入 delivery/日志/指标；按 secret 的入站认证查询不使用此缓存。DB 错误和坏记录
+不缓存成“无 Provider”。同 key 合并加载；提交后失效，旧加载的 generation 不允许回填。
+不同环境缓存键隔离。直接改 DB 最多滞后一个 TTL，应用更新会立即失效本实例缓存。
+准备完成及真实 I/O 前重新解析并比较目标/连接，变更时丢弃旧准备，不切换已发运行的
+transport owner。WebSocket 在线状态始终读取当前内存连接表，不缓存 online=true。
+
+不引入 Redis、MQ、lease、outbox 或自动消费参数调整。Memory 仓储保持相同查询语义，
+仅作为测试/开发实现；生产性能保证针对 SQL 仓储，不将内存测试的遍历成本视为生产实现。
 
 ## 9. inject 到 send 的绑定
 
@@ -603,14 +658,15 @@ M3 即使在 M2 尚未物理发送时到达，也不能加入 M2。绑定时只�
   首次 send-start 的合适后继；没有后继则保持 pending_context。
   不能只等待下一次新准入，导致已经排队的下一条 send 漏掉这些上下文。
   后继绑定变化时递增其 state_version；旧版本的准备结果丢弃并重新物化，不能发送旧载荷。
-- 承载 send 已可能发出：context 留在 bound，不向其他 send 重放；承载 send 终态时 consumed。
+- 承载 send 已可能发出：context 留在 bound，不向其他 send 重放；承载 send 终态时实际
+  附加的上下文 consumed，预算舍弃的上下文 discarded_context（context_limit）。
 - active run 期间新到的 inject 留给下一条 send，不调用引擎 inject。
 - bound context 的独立 TTL 不在运行中拆开已发送载荷；是否能进入载荷在绑定和首次发送前检查。
 - 被用户撤销的 bound inject，在承载 send 尚未首次 send-start 时可原子移除绑定并更新投影。
   一旦开始过发送，不支持“从 Bot 上下文中撤回一部分”；返回已可能发送，不承诺下游撤销。
 - 已开始投递的 context 集合不因安全重试重新选取；若必须撤销，应先取消整个承载 send。
-- 不对 inject 总数或总字节数做配额拒绝。既有单条消息校验照常执行；若绑定后组合载荷
-  超过下游已知限制，明确报告承载 send 失败，不静默截断、丢弃或自动压缩上下文。
+- 不对 inject 总数或总字节数做配额拒绝。先按第 9.3 节执行单次历史预算；既有单条消息校验
+  照常执行，若完整请求仍超过下游已知限制，明确报告承载 send 失败，不自动压缩。
   发送前已确定的不可重试准备失败不能一直留在 queued 或自动重试；有效 context 按上述
   “确认未发出且永久失败”规则保留和解绑，原始消息不删除。
 
@@ -618,6 +674,45 @@ M3 即使在 M2 尚未物理发送时到达，也不能加入 M2。绑定时只�
 绑定 inject 的附件从其原始消息的 content.attachments 读取，按消息 sequence 和消息内附件
 顺序组合。保留原 inject 对该目标的附件可见性规则，不能因承载请求最终使用 chat.send，
 就将原本不允许该目标访问的文件一并发送。首版保留已有附件 URL，不实现排队期间的刷新。
+
+### 9.3 单次 Inject 历史预算（2026-09-09 增补）
+
+环境级 DB 策略增加 `max_context_messages=24`、`max_context_bytes=131072`，不增加 Bot 覆盖。
+旧 policy JSON 缺字段时使用默认值；显式 0 不代表无限制，拒绝保存。
+条数范围 1～1024，字节范围 512～16777216（16 MiB），避免无效包装预算及配置整数溢出。
+
+只限制本次 Send 附加的 Inject 历史，按实际拼装历史文本 UTF-8 字节计量，包括标题、发送者、
+序号、分隔符和省略提示。不裁当前 Send 正文；不计引擎已有历史、系统提示词、多模态 token
+成本，所以 128 KiB 不是整个模型窗口或端到端请求大小保证。
+
+1. 从本次绑定集合按 sequence 倒序读取最多 `max_context_messages + 1` 条 metadata，并聚合总数。
+   不在准备阶段加载全部绑定正文。逐条读取 canonical message，达到预算就停止。
+2. 优先保留最新完整消息；遇到下一条会超预算就停止，不跳过该消息挑更早的小消息。
+3. 若最新一条本身超限，按 UTF-8 字符边界只保留其尾部，并加“该条历史前部已省略”。
+   若极端包装自身无法容纳，则不附加该条正文；不突破预算。
+4. 最终按 sequence 正序输出。舍弃较早消息时增加“部分较早历史因上下文限制已省略。”。
+   所有提示均计入预算。原 bcs_messages 永远保留，不截断数据库正文。
+5. 只有选中历史的附件参与附加，并沿用 Inject 禁止 File 附件的既有规则；被截尾但选中的
+   最新消息仍保留允许的附件。被整条舍弃的历史附件不得泄漏到 Send 中。
+
+Send 增加 nullable `context_selection_json`（SQLite 023 / MySQL 022），保存版本、策略快照、
+bound 总数、选中的 delivery ID/状态版本/投影文本 UTF-8 起点及实际历史 bytes；不复制正文、
+附件 URL 或完整协议 frame。选择在准备阶段生成，send-start 时与 dispatching 一起提交，
+提交前复核 carrier 版本、总数、选中版本和策略，准备期间取消/重绑会使旧结果失效。
+
+安全重试保留选择及偏移，修改策略不会改变已开始过发送的逻辑运行载荷。首次 send-start 后
+即使明确未发出回到 queued，也不单独撤回某条 bound Inject；应取消整个 carrier，避免同一
+幂等键换载荷。未开始发送的 queued carrier 取消、过期或准备失败，全部绑定历史（包括本来
+准备舍弃的部分）仍按既有规则释放/重绑。unknown/cancel_unknown 不释放、不重选。
+
+可能已发送的 carrier 终态事务中，选中的 Inject → consumed，未选中的 → discarded_context，
+后者 `last_error_code=context_limit`；均记录终态时间并保留 carrier 引用。没有 selection 的
+升级前已运行消息沿用原语义全部 consumed。重复终态幂等，不让舍弃历史在后续 Send 复活。
+
+这是单次读取/发送预算，不是硬内存上限：单条 canonical message 的原始 JSON 仍可能很大；
+准入绑定和终态更新仍需要处理全部关联 metadata，后续另评估总积压治理。
+独立 `message-delivery.log` 保持 15 列 v1，增加 type=5 的选中条数、历史 bytes、舍弃条数、
+裁剪 Send 累计量，详细口径见 Service API 文档，不记录正文或 URL。
 
 ## 10. 发送、ACK 与终态处理
 
@@ -634,7 +729,7 @@ M3 即使在 M2 尚未物理发送时到达，也不能加入 M2。绑定时只�
 刷新或转存，也不复用历史展示中“附件补全失败仍返回无 URL”的容错逻辑。
 下游实际报告的附件错误仍按既有可信错误处理；不因附件错误绕过发送结果判定或自动重跑 Bot。
 
-沿用既有校验及下游已知的载荷限制，不为此新增持久化 context 字节统计。如果准备阶段已经
+沿用既有校验及下游已知的载荷限制，context_selection_json 记录本次历史预算结果。如果准备阶段已经
 确定组合载荷过大等不可重试错误，回到调度循环校验状态/版本后直接提交 failed，按第 9.2 节
 处理 context；不创建本次发送调用，也不提交 send-start。只有下游才知道的限制仍按其可信
 错误处理，不能把已经尝试发送的请求当作“确认未发出”。
@@ -709,7 +804,14 @@ Bot 回复的 sequence、目标 delivery 和 inject 绑定需要一起准入，�
 
 如果回复路由准备明确失败，仍记录可信 terminal 和可展示的 canonical 回复，记录/通知路由失败，
 不回滚 Bot 已完成这个事实，也不自动补入过期顺序位置的投递。用户可将其作为新消息重新转发。
-数据库提交失败则不发布成功、不释放 lane，等待 callback 重试或恢复处理。
+数据库提交失败则不发布成功、不释放 lane，在当前进程保留已收到的终态并退避重试保存。
+初始 run 关联查询、全文历史读取和终态 CAS 均处理短暂存储失败；不重跑整个事件流程，
+更不能重发 Bot 请求。保持回复 ID、规范化正文和 expected state_version，提交不明确时
+通过冲突后的状态查询确认终态，防止重复插入。已保存终态的前端通知先于辅助 context 清理。
+
+共享 MessageFlow 由装配层启用终态接管，最多 64 个并发后台任务，满额时入口背压。
+已接管事件不因原调用方断开而中断保存，尚未取得名额的事件不承诺断连后留存。
+没有新增持久化 inbox/outbox；停机/崩溃仍可能丢失内存待保存结果，需要迟到事件或人工核实。
 
 ChatRun 更新或状态通知失败不改变已经提交的 delivery terminal；查询可从 delivery 和已落库
 回复恢复事实，不补发遗失的状态通知，也不通过重新处理 Bot final 来重做后续副作用。
@@ -762,11 +864,11 @@ run ID 和幂等键，重新获得队列位置；不重新打开原终态，不�
 
 ### 11.2 进程启动与重启恢复
 
-服务取得本机单实例锁后，先进入恢复阶段：
+部署系统确认旧调度实例已退出后启动服务；服务先进入恢复阶段：
 
 1. 禁止新准入和新 dispatch；恢复期间查询可返回已有快照及恢复标记。
-2. 扫描全部非终态 delivery，加载其 Bot 策略、队列、context、原始 transport 和 run 索引，
-   不按当前 flow_enabled/Bot 开关过滤；既有 delivery 就是曾被准入的事实。
+2. 每批 200 条读取需要恢复的 dispatching/running/cancelling，不加载全部待发送消息或
+   context；不按当前 flow_enabled/Bot 开关过滤，既有 delivery 就是曾被准入的事实。
 3. queued 保持 queued；运行期间的内存准备任务随旧进程退出，不会再发出。
 4. dispatching/running 先改为 unknown，保留原接收时间/发送证据；
    cancelling 或已发出 Abort 但未确认的记录改为 cancel_unknown。
@@ -784,6 +886,12 @@ Bot/Provider 在 BCS 重启后仍可能继续执行，所以“BCS 已重启”�
 
 单实例故障期间服务不可用，首版不承诺无损自动接管或透明继续流式响应。
 queued 数据可恢复；外部执行结果可能需要迟到事件、已有状态查询能力或人工核实才能收敛。
+
+运行期单次数据库 Storage 错误不再退出调度循环：仅重试当前数据库读取/CAS，
+100 ms 起指数退避、最大间隔 5 s；保留在途任务、已收到的 send/abort 结果及限速历史。
+数据库恢复后继续原流程，不重新执行网络动作。首次失败及其后每 30 s 最多一次 WARN，
+恢复时记录摘要；shutdown 可打断退避。非存储错误保持既有处理，初始配置/策略/存储
+检查仍 fail-closed。永久坏数据不会被自动忽略或释放，须由运维修复，不等于自动隔离。
 
 ### 11.3 Unknown、断连和运行截止时间
 
@@ -915,6 +1023,7 @@ Direct A2A 后续接入并创建 delivery 后，queued 取消可以投影为 Cha
 | running | Bot 正在处理 |
 | pending_context / bound | 已保存为上下文，不单独等待回复 |
 | consumed | 上下文已归入该次处理，不再重复投递；不承诺模型实际采用 |
+| discarded_context | 因历史上下文限制省略，不再重复投递；原消息仍保留 |
 | unknown | 处理状态暂时无法确认，后续请求已暂停 |
 | cancelling | 正在停止 |
 | cancel_unknown | 停止结果暂时无法确认，后续请求已暂停 |
@@ -1131,99 +1240,92 @@ Direct A2A/state-machine 的消息持久化整合和队列启用另行交付；�
 
 ## 14. 配置与灰度
 
-### 14.1 Bot 开关与业务类型开关
+### 14.1 DB 策略、默认值与 Bot 局部覆盖
 
-保留 Bot 级 `mode=off|enforce`，新增全局业务类型布尔开关 `message_delivery.flow_enabled`。
-新请求只有同时满足 Bot 为 enforce、对应类型为 true 才入队；首版不增加 Bot × 类型的 override
-矩阵，不做 shadow observe。全部类型的默认值都是 false。
+队列业务策略不再以 YAML/TOML 为事实源。新增环境级表 `bcs_message_delivery_policy`，
+每个 env 一行，保存 version、policy_json、updated_by、updated_at_ms。
+policy_json 包含 flow_enabled、defaults、bots、queue_ttl_ms、safe_retry、pause_dispatch；
+不包含凭证、Provider header 或消息正文。首版记录最新修改人和时间，不另建通用配置平台。
 
-示例仅表示“group 已完成接入、其他类型尚未启用”；目标 Bot 仍需单独设置 enforce：
+- defaults 给出所有 Bot 的 mode / max_running / min_send_interval_ms / max_queued。
+- bots 是少量例外的局部覆盖，缺少或 null 字段继承 defaults；删除条目恢复继承。
+- 新注册 Bot 自动继承默认策略，不要求预枚举所有 UUID。
+- 所有业务类型初始 false，defaults 初始 off / 1 / 1000 ms / 20；这些限额是开发起点，
+  不宣称生产压测结论，生产开启前必须核对。
+- 只有对应类型开启且有效 Bot mode=enforce 才受管，类型由服务端业务入口分类。
+- Group（自由聊天、主从群）就绪；Direct A2A/task/system/state-machine 当前未全部接入，
+  设置为 true 返回 queue_flow_not_ready。default enforce 不会绕过就绪检查。
+- queue_ttl_ms 省略/null 表示未发送消息不自动过期；safe_retry 省略/null 表示不自动重试。
+- 本地不再需要队列配置；旧 lock_path 字段删除，残留时按 deny_unknown_fields 报错，升级前必须删除。
+  运行超时、tick、全局准备/发送上限、Abort 并发和优雅停机时间
+  保留既有宿主机/运行时边界，不新增 lease、heartbeat、GCRA 或分布式配置。
 
-~~~toml
-[message_delivery.flow_enabled]
-group = true
-direct_a2a = false
-task = false
-system = false
-state_machine = false
-~~~
+管理接口：
 
-- 当前 direct_a2a、state_machine 未接入 bcs_messages，必须保持 false。
-- group/task/system 也不是默认自动开启，必须先验证本类型的全部业务子入口。
-- 后续 direct_a2a 接入完成，可只把 direct_a2a 改为 true，不要求 state_machine 同时开启；
-  反向亦然。任一类型可以独立停用，已有积压按 14.3 处理。
-- 配置未知类型/拼写错误要报错，不归到 system；省略已知项按 false。
-- 类型由服务端真实业务来源确定。客户端不得通过传入另一 flow_kind 绕过队列或触发尚未就绪类型。
+- GET /admin/message-delivery/policy：读取完整生效记录。
+- PUT 同一路径：提交 expected_version + 完整 policy，不是任意 JSON merge patch。
+- PUT 校验继承后的每个策略、就绪类型、调度能力及 Provider header 限制。
+- DB CAS 匹配预期版本、递增版本并保存操作者/时间；写失败不发布。
+- 进程内写锁跨越事务提交和快照发布；准入在提交前复核策略，prepared send 在 send-start
+  前复核策略版本，旧版本准备结果不能绕过新 pause/限额。
+- 冲突返回 409；非法配置或调度能力不可用返回 400；存储失败返回 503。
+  不能返回成功却等待后台任务将来应用，也不支持直接 SQL 修改后自动热加载。
 
-启用必须同时满足：canonical message/session 可用、正文/附件与 delivery 原子准入、
-发送可从消息表恢复附件字段、run 关联与取消/ChatRun（若适用）可对接、相关 contract tests
-通过。IM URL 续期、可重新获取外部文件或提前转存不作为首版启用条件。
-代码/部署尚不支持的类型被设置为 true 时，启动或配置更新明确返回 `queue_flow_not_ready`，
-不静默忽略，不改走直发。
-这些错误码是本方案拟新增的配置/应用错误，不宣称已有同名实现。
+鉴权改为复用可信 Human 认证入口；HTTP 和应用层双层校验，只有 authenticated Human
+可以查询/修改整个环境的队列策略，不要求 owner/群成员/admin role。
+Bot、Provider、ServiceKey 不是 Human，不能通过本地 mock 或身份投影取得此权限。
+updated_by 记录认证产生的 human_<user_id/staff_no>，请求体不允许自报身份字段。
+未认证 401、已认证非 Human 403。不再使用 ServiceKey 或 message_delivery:manage scope；
+旧 /openapi/v1/admin/message-delivery/policy 路径删除，不保留 alias。
 
-其余最小配置继续保留：
+生产依赖部署中已配置的 Cookie/OAuth Human 认证链；本地沿用 LocalAuthPlugin：
+固定 mock_user_id 会将无 Cookie 请求模拟为该 Human，仅显式开启 allow_mock_headers
+时插件才接受 X-Mock-User-Id。这是可信开发环境能力，生产不得据此声称真实认证。
+接口拒绝显式机器凭证回落本地 mock，不信任任意 header、Bot owner 或客户端 actor。
 
-- max_running、min_send_interval_ms、max_queued：按 Bot 在所有已开启类型间共享。
-- queue TTL、安全重试次数及固定退避。
-- send/ACK timeout、run deadline、cancel deadline。
-- 调度 tick、全局准备/发送任务上限、独立的小型 Abort 并发上限。
-- 单实例锁路径、优雅停机 drain timeout。
+PUT 审计包含操作者、时间、预期/前后版本、变更字段名和成功/失败；不记录凭证或整段策略。
+认证/格式拒绝也记录失败，无法确认的操作者或版本标为未知。DB updated_by/time/version
+记录最新变更，不增加单独审计表。完整身份来源和 JSON 契约见 [Service API](../message-delivery-service-api.md)。
 
-所有启用值必须完整解析且校验合法；默认数值在实现压测后确认。
-不增加 lease TTL、heartbeat、claim batch、priority、GCRA burst、circuit 或多节点配置。
+### 14.2 启动和类型逐步启用
 
-### 14.2 按类型逐步启用
+先部署 MySQL/OceanBase 019+020 或 SQLite 020+021 schema，启动读取 DB；
+空表返回关闭的 version 0。读取失败、非法已存策略、恢复失败都阻止启动，不静默回退文件配置。
+SQLite/MySQL/OceanBase 持久化模式下，默认 off 也启动空闲调度器，
+之后 Human API 启用无需本地锁配置或再次重启。Memory 不启动生产调度器，enforce 明确拒绝。
+调度任务失败或退出后仍关闭准入和动态启用，并通知生命周期等待者；不因删除文件锁而删除故障保护。
+同一 DB 只能有一个 BCS 调度实例、升级必须非重叠，均由部署系统保证；本实现不检测同机或跨机竞争。
 
-类型开关与 Bot mode 都是新请求准入策略，不是既有 delivery 的生命周期开关。
-可以先开启 group 并选择少量 enforce Bot，而 Direct A2A/state-machine 继续使用原路径；
-必须明确这不是全 Bot 流量限流，相关风险见 2.6 和 11.5。
+旧文件中的非默认 flow_enabled/bots/TTL/retry/pause 值会明确拒绝启动，不隐式导入，
+避免双源优先级歧义。迁移流程：停止相关新入口并确认旧运行；备份策略；
+从文件移除业务字段和旧 lock_path；部署迁移并启动；通过管理 API 写入策略。
+已有 delivery 无论策略开关如何都要恢复，不能删除表或忽略原 Unknown。
 
-每次启用一个类型，流程如下：
+启用新类型或新增 enforce 范围前，运维需暂缓该范围的新请求并确认 legacy 在途已完成，
+再通过 API 开启。策略更新本身不迁移旧 ChatRun、不重新发送历史、不回填已直发 inject。
+未接入类型仍走原路径，不承诺其与队列之间共同限流/有序；不能开一个标志代替消息持久化接入。
 
-1. 验证该类型的持久化/事务/运行关联接入已完成，不等待其他关闭类型迁移。
-2. 明确本次受影响的“类型 × enforce Bot”范围；短暂停止该范围的新请求，返回切换中的临时错误。
-3. 等待该范围原路径在途请求结束或取得可信终止证据，确认不会再有旧路径调用晚到后发出。
-4. 设置切换边界；旧消息、已有 ChatRun 和已直接 inject 的上下文不回填为新队列工作。
-5. 应用类型开关，恢复该范围新请求，观察排队、限流、取消和重启。
-6. 其他类型开关不联动；增加 enforce Bot 时，对该 Bot 当前开启类型执行相同切换检查。
+provider_http.bypass_headers 非空时首版保守拒绝开启队列策略，防止默认策略覆盖未来
+Provider Bot 后才发现不能恢复 header。后续再评审按 Bot capability 或加密 run context。
 
-如果其他关闭类型继续与受管消息共享 Bot/Session，不承诺它们之间有序，也不能凭空将
-其 active 数纳入队列限额。部署若要求所有流量有序/限流，应先接入相关类型或隔离作用域，
-不能仅将配置开关设为 true 来代替接入实现。
+### 14.3 动态调整、停用与 drain
 
-未知/不支持 Abort 的目标不能进入受管准入；首版优先用受控部署版本和现有 Provider 配置确认，
-不为此强制增加 capability 协商协议。将来新增 capability 必须更新正式 contract。
-能力降级时暂停相关新队列发送，保留已准入运行的查询和终态处理。
-全量类型迁移完成前，保留明确的原路径分支；不能提前移除 Direct A2A/state-machine 所需路径。
+- 降低并发只影响后续调度，不主动 abort 已有 active；超过新上限时等待自然完成。
+- 降低队列容量只影响新准入，不删除/拒绝已经排队的记录。
+- 修改发送间隔使用原 last-send 单调时间重算，不重置历史，也不沿用旧策略计算的未来截止点。
+- 修改 TTL 仅作用于新准入，已有 expire_at 不追溯改变。
+- pause_dispatch 停止新的 send-start；查询、终态、过期和 Abort 继续。
+- 类型/Bot 关闭更新可落库成功，但仅代表不再接受新受管请求，不代表旧工作已经排空。
+  旧 queued/active/context 及其产生的正常回复仍走受管路径；同 Bot 有旧工作时新请求
+  返回 queue_draining，不切换 legacy 越过队列。
+- 未绑定 inject 需要显式取消或消费；Unknown/cancel_unknown 必须取得可信终止证据，
+  不能因关闭配置释放。关闭后如需继续消费上下文，可重新开启该范围再投递 Send。
+- 重启仍从数据库恢复未结束工作，调度限额使用当前 defaults+overrides；删除 override
+  只是恢复默认限额，不会丢失该 Bot 的旧队列或调度资格。
+- 调度器任务异常退出后新准入 fail closed；管理接口也不能假装重新开启失效调度器。
 
-### 14.3 类型停用、暂停与回退
-
-紧急 pause 只停止新的受管 dispatch，不关闭 terminal、查询或 Abort。
-降低 max_running 不主动终止已有受管运行，等占用降到新上限以内。
-
-停用一个类型不能让其新直发请求越过旧队列；使用先 drain、后应用关闭配置的流程：
-
-1. 暂停受影响“类型 × Bot”的新外部发起请求，其他类型继续工作；不要立即让该范围的新请求直发。
-   已准入运行的回包、终态和正常回复目标准入仍按原受管路径完成；由此产生的积压也要处理完，
-   不能为结束 drain 而丢掉回复或将它改为原路径发送。
-2. 保持原调度所有权，处理或显式取消该范围的 queued、active 和未消费 inject。
-   Unknown/cancel_unknown 必须先取得终止证据，不能因停用类型直接释放。
-3. bound inject 可能被其他已开启类型的 send 携带；须等待其消费，或在允许的发送前边界
-   处理绑定，不能因关闭来源类型就从已发送载荷中删除。其他类型可继续执行，不强制清空它们。
-4. 该范围没有未完成 delivery/context 和旧路径在途任务后，应用 false，再允许后续新请求走原路径。
-5. 关闭整个 Bot mode 时，对该 Bot 的全部受管类型执行同样流程。
-
-直接热更新为 false 但仍有积压时，拒绝该次配置切换并保留原生效策略，给出待 drain 范围。
-首版不新增持久化切换任务平台；可以由运维暂停新请求、等待 drain 后再次应用配置。
-重启时即使文件配置已经 false，也必须恢复数据库中的既有 delivery，并阻止该范围的新直发，
-直到完成同样的排空流程。不能按当前开关过滤掉旧队列记录。
-
-对于本来就未启用且无积压的 Direct A2A/state-machine，关闭不需要 drain，立即保持原路径。
-停用/再启用不重发历史消息、不更换既有 run ID，也不自动把原路径请求补入队列。
-
-全局升级仍必须先停旧进程再启动新进程。数据库中尚有受管积压时，不能部署会忽略 delivery
-表的旧代码；关类型开关不是这种代码回退的安全替代。
+不增加持久化切换工作流平台。切换完成以 delivery/context 排空为准，不以 PUT 成功为准。
+全局升级仍先停旧进程再启动，数据库有受管积压时不能回退到忽略 delivery 表的旧版本。
 
 ## 15. 可观测性与运维
 
@@ -1255,9 +1357,133 @@ Unknown、可观测的通知发送不明和 ChatRun 校准失败需要告警；�
 首版不能逐条识别漏发提示，也不承诺自动把所有异常恢复成成功。
 完整 attempt 检索、跨节点看板、自动熔断、自动隔离与容量自动调参都后置。
 
+### 15.1 独立队列监控日志（2026-09-09）
+
+队列监控改为独立 `message-delivery.log`，不是 Prometheus 指标，不依赖 metrics feature/
+enabled；其他 BCS Prometheus 不变。每 10 秒后台 SQL 聚合，超时 5 秒；快照失败保持
+最后成功值、标记失败且不推进最后成功时间。首次失败与真正空队列必须区分；成功空结果
+归零旧分组。通过现有 logging.outputs 的 raw/message-only 格式器，只写逗号分隔的事件
+message，不含字段名、表头、额外时间/level/target 前缀。
+
+使用固定 15 列 v1 协议：版本、采样毫秒、boot ID、记录类型、flow、kind、status、
+等待原因、指标编码、value、count、sum、max、采集成功、最后成功毫秒。每轮多条同构
+记录，通过有限数值编码分别表达总览、深度、事件、worker 操作和 Provider cache。
+逐列定义、全部编码、单位、样例和调参方法以 `../message-delivery-service-api.md` 为准。
+
+- queued Send、active Send、pending/bound Inject 分开；active 含 unknown/cancelling/
+  cancel_unknown。保留最老排队秒数、等待原因、uncertain 阻塞数量。
+- 记录 scheduler available、paused、policy version、采集成功和 freshness。
+- 准入结果、每次 send-start、各终态累计计数；拒绝不是成功接收，重启不回放历史。
+- 排队/运行时长和 worker 操作采用累计 count/sum/max（秒），可计算均值，不能计算 P95。
+  worker 保留调用、失败、返回量和 budget_exhausted。Provider 保留六种缓存累计量。
+- 仅有限维度，无 Bot/session/message ID、正文、凭据或 header；环境归属由部署采集标签
+  确定，boot ID 标识 counter 重置。Bot 定位继续使用已有状态/发送日志。
+- 作为现有 logging.outputs 的独立输出 name=message-delivery，支持 path/file/保留天数；
+  旧配置缺项时补入普通输出，路径取 main/第一项或 ./logs/7 天。使用同一个 logging.rs、
+  RotatingFileWriter、buffered_writer（4096 有界 lossy 缓冲）、每日轮转/每小时清理，
+  没有独立文件设施。专用 target 不混入其他文件和 console；原有 Text/Json 保持兼容。
+  记录丢弃及写入错误累计，文件停更也需监控；不阻塞消息调度或事务。
+- 正常停止先等待 sampler，现有进程 LoggingGuard 随后统一 flush；启动文件打开失败
+  在日志初始化中明确报错，不静默失去监控。
+  强杀可能丢失未落盘监控，日志不是 durable outbox 或审计账本。
+
+吞吐观察不授权自动提高并发：先区分 Bot 慢、限速、离线、不确定占用、人工暂停和 worker
+预算不足，再人工调整策略。
+
 ## 16. 测试与验收计划
 
 ### 16.1 实施切片
+
+2026-09-07 已将实现分支 rebase 到最新 `origin/dev`（`15484b260fc7`），无冲突。
+本次上游核对要求实现保留以下行为：
+
+- IM 已支持 `group_chat_new_session_per_message`。lane 必须使用该条消息真正创建/命中的
+  canonical session ID，不能用 IM conversation ID 合并独立 session；旧消息的回复来源也不能
+  改用“会话当前最新 session”反查。
+- scoped `chat.abort` 与观测包装层的 abort 转发已进入 dev。复用其授权、canonical/downstream
+  session 区分及 Provider scope 限制，不能因每 lane 单 active 假设而漏掉关闭类型的原路径运行。
+- `PendingGroupMessage` 是运行中 Bot 回复的展示缓冲，不是入站队列；`ChatRun.original_request`
+  是审计数据，也不替代 `bcs_messages` 与 delivery 的事实源。
+- 数据库运行时 DDL 已进一步收紧。生产 delivery 建表必须走部署迁移，本地 SQLite 单独迁移。
+- 已有消息持久化后的 human mention 通知需保留；队列幂等重入不能再次触发同一业务通知。
+
+当前已落地的切片：领域状态模型、纯生命周期与调度决策、默认关闭的类型/Bot 配置及
+代码控制的就绪校验；delivery 建表迁移、Memory/SQLite/MySQL 仓储实现；消息/目标准入、
+上下文绑定及条件更新事务；取消后的上下文转移与准备结果失效；单循环有界调度、send-start
+和 abort-start 先持久化、启动/退出恢复，以及从 canonical 消息恢复附件的载荷读取。
+随后补充了群聊发送准备实现：版本化路由投影、canonical 正文/附件及 IM 来源读取、当前
+Session/成员和安全策略校验、复用既有协议构帧。WebSocket 增加不含凭证的连接 identity，
+send/abort 选择连接时原子校验，禁止旧请求落到重连后的新连接；TransportMux 和观测包装
+同步转发该能力。request alias 与实际 downstream run ID 分离，ACK 的实际 run ID 先写
+delivery 再更新运行索引，取消使用原 downstream session key；运行索引过期不作为已停止证据。
+后续已接入真实 Group 准入、终态回复事务、生产启动装配及授权查询/取消。bootstrap 的 ready
+类型列表为 `group`，所有类型和 Bot 仍默认关闭；Direct A2A、task、system、state-machine
+尚未完成对应类型接入，误开时报 `queue_flow_not_ready`，不会静默降级。
+
+本轮基础切片验证：`cargo test -p bcs-message-flow -p bcs-config-api` 共 370 项通过，
+`cargo test -p bcs --lib config` 共 119 项通过，配置校验 gate 与 `git diff --check` 通过。
+新增状态/调度测试已接入统一 contract harness。后续仓储和应用切片的契约/单元测试已通过，
+有记录能力的假 Bot 验证了持久化先于 I/O、FIFO 等待终态、取消和 Unknown 不重放。
+`cargo check --workspace --all-targets` 通过（仍有现有告警）。远程 MySQL live conformance
+因未提供测试数据库而未执行，不能把驱动编译及 SQLite 测试表述为 MySQL/OceanBase 实测。
+全量架构检查未通过：依赖检查脚本报错，
+并报告现有导入边界、trait 命名及 conformance 缺项；其全 workspace 测试发现步骤已停止，
+不能将本轮结果表述为全量架构或端到端验收通过。真实 Bot/IM 故障恢复尚未验收。
+
+DB plugin 已增加 `ExecuteChecked`：CAS 不匹配在提交前回滚，普通 Execute 的既有语义不变。
+SQLite/MySQL 插件均实现该约束，共享 conformance 验证前置写入回滚及后续步骤不执行。
+生产迁移为 MySQL 019，本地为 SQLite 020；不在生产仓储构造期间执行建表。
+
+新增群聊准备测试验证原始附件 URL（包括已过期 URL）不丢失、投影不复制正文/URL、请求
+alias 不覆盖引擎 run ID、abort 使用原协议 session key。WS 重连测试验证旧 identity 的 send
+及 abort 均不会进入新连接。message-flow 和 WS 模块测试通过；这不替代真实 Bot/IM 验收。
+
+本轮进一步落地：
+
+- Group 的 WS、HTTP、普通持久群消息及 IM 入站进入统一准入，响应返回 `queue_admission`；
+  重复 client ID 返回原结果，不再次发给 Bot。原有独立 system callback 不归入 Group 开关。
+- final/error/aborted 更新 delivery，并在同一事务中写入 canonical 回复、准入回复目标；
+  同一 run 的事件串行处理，ACK 并发导致版本变化时仅重试数据库事务，不重发网络消息。
+- 新的队列回复使用内部 `run_reply` 消息保存完整可见正文，普通 `chat` 保存最后展示段；
+  二者与目标准入、输入 delivery 终态一起提交。汇总不产生 `message.created`，不在 history
+  中展示。旧数据的 `content.queue_display_text` 历史投影仍兼容，不回填旧消息或替换旧引用。
+- SQL/SQLite 启动装配默认运行空闲调度器；部署系统保证唯一实例。关闭配置仍恢复旧工作。新入口不能越过 drain 中的
+  旧队列；已准入运行的后续回复继续按保留策略处理。策略读取或恢复失败时启动失败。
+- `pause_dispatch` 暂停新 send，不阻止查询、取消和终态。配置按启动时加载，未新增热更新平台。
+  准入最多 64 个进程内等待槽；准备/发送和 Abort 使用独立有界任务池。
+- 调度扫描只读 SQL 未完成集合，不随终态历史无限增长；等待原因和状态版本持久化。
+  后台任务不强持有整个服务，启动失败/服务退出时关闭准入并完成退出恢复、通知生命周期等待者。
+- 后端查询、client ID 查询和按消息/目标取消校验当前成员、加入序号、私有可见性和原发送者。
+  `message.delivery.updated` 只投递给授权的 Session actor 集合，不回退到更大的广播范围。
+- IM 排队 2 秒提示、多 Bot 聚合、离线/失败/取消/不确定状态提示走提交后有界通知通道；
+  无 outbox、通知失败不回滚、重启不回放。Workbench 前端仍明确不在范围内。
+- scope `chat.abort` 合并 durable active 与原路径 active，保留原连接/Provider 所有权和下游
+  session key。显式 scope abort 将取消意图和 abort-start 原子提交，不与后台 Abort worker 争抢。
+  显式再次请求可为 `cancel_unknown` 创建新 abort ID；不是调度器自动重试。Provider 精确目标
+  取消拒绝扩大 scope，空结果不会释放 lane。
+- Provider 迟到终态在认证后核对 durable 原绑定，不仅依赖已过期的缓存；不重启未知来源的
+  流式输出。Group 未关联 ChatRun 时不伪造链接；Direct A2A 的 ChatRun 迁移仍不在本版范围内。
+
+部署配置、实际 API 路径及错误边界见 [Service API v1](../message-delivery-service-api.md)。
+补充配置已接线：可选 `queue_ttl_ms` 在原消息及回复准入时计算并持久化；可选
+`safe_retry.max_retries/backoff_ms` 只重试 transport I/O 前的注册失败，固定退避持久化，
+次数跨重启保留。省略时分别表示不自动过期、不自动重试；准备失败和模糊网络结果不重试。
+旧 scope abort 的迟到结果必须匹配当前 abort ID，不能覆盖显式再次发起的停止请求。
+
+最终集成验证记录（2026-09-07）：
+
+- `cargo check --workspace --all-targets` 通过；仍有本次修改范围之外的现有告警。
+- message-flow、message-store、config-api、bcs-bot 单元/契约测试通过；HTTP Group、
+  Provider callback、WebSocket 相关契约及 bootstrap 装配/恢复测试通过。
+- Singlebox 已实际尝试默认全模块命令，但测试栈在 Backend 启动阶段失败，未进入 BCS
+  E2E 和覆盖率计算。新增路由故事仅完成语法检查，不能声明现场验收通过。
+- 全量架构 gate 仍报告依赖检查脚本、现有导入/trait 及契约发现问题；未修改或跳过 gate。
+  新的领域、仓储、调度和应用契约均保留对应 conformance 测试。
+
+本地测试已覆盖真实应用入口、SQL/SQLite 恢复、取消与 scope abort 和 IM 通知；真实
+MySQL/OceanBase、Bot 引擎/IM 账号及 Singlebox 全链路验收仍须单独运行，不能以 mock 测试替代。
+
+完整实施顺序：
 
 1. 固化现有 send/inject 路由、服务端 flow_kind 分类、run 关联和 chat.abort 兼容测试。
 2. 增加 delivery schema 和 repository 原子事务，覆盖 Memory/SQLite/MySQL；同步补齐
@@ -1304,9 +1530,9 @@ Unknown、可观测的通知发送不明和 ChatRun 校准失败需要告警；�
 - 承载 send 取消时，已排队但尚未开始的最早后继获得重新绑定的 context；无后继时继续暂存。
 - 可能已发出的 context 不给后续 send 重放。
 - recall/删除/过期/取消的 context 不在允许撤回阶段进入 payload，已可能发送后不承诺撤回。
-- 不引入 context 数量/字节配额检查；既有单条消息大小校验继续生效。
+- 验证单次历史 24 条/128 KiB 预算、UTF-8 尾部截取、附件筛选及舍弃终态；既有单条校验仍生效。
 - 组合载荷超过下游已知限制时，准备失败直接结束承载 send，不启动发送或自动重试；
-  原始消息和有效 context 保留，解绑/重新绑定遵循同一因果规则，不静默截断或压缩。
+  原始消息和有效 context 保留，解绑/重新绑定遵循同一因果规则；历史裁剪遵循第 9.3 节。
 - inject 的附件随原始消息落库，绑定、解绑和重启后均从原消息读取；合并进 send 不改变
   原目标的附件可见范围，不因最终 wire 方法是 chat.send 而扩大文件访问权限。
 
@@ -1320,7 +1546,7 @@ Unknown、可观测的通知发送不明和 ChatRun 校准失败需要告警；�
 - ACK 丢失时下游仍只收到一次调用，进入 Unknown，不通过换 run ID 重发。
 - queued 阶段崩溃可以恢复；send-start 后任意点崩溃都不能盲重发。
 - 重启恢复完成前不 dispatch；Unknown 占用容量重建正确。
-- 双进程争用本机锁时第二个启动失败；升级测试确认旧进程已退出。
+- 部署验收确认同一 DB 只有一个调度实例、升级启动新实例前旧实例已退出；应用不检测或拒绝第二实例。
 - 数据库故障不提前 ACK Provider terminal；WS 无法恢复的事件丢失明确进入人工核实。
 - terminal、回复消息及回复目标准入不会让后序 send 越过尚未插入的前序 delivery。
 - 在终态事务提交后、ChatRun 更新或通知发送前崩溃：回复与目标 delivery 仍已落库，
@@ -1391,7 +1617,7 @@ Workbench 排队 UI、typing 动画、输入框行为、页面轮询和取消按
 不保证附件 URL 在等待或重启后仍有效，也不承诺下游最终一定能下载外部文件。
 
 不以 outbox、通知可靠补发、通用可靠回调、多副本、高可用接管、完整 attempt 审计、shadow observe、
-优先级或自动故障修复作为首版验收项；也不要求 context 数量/字节配额、全局积压上限或自动压缩。
+优先级或自动故障修复作为首版验收项；也不要求 Inject 总积压配额、全局积压上限或自动压缩。
 max_queued 只约束受管 send，不承诺 inject 总积压量或整体存储规模有界。
 实现时运行受影响的单元/仓储/协议兼容和业务测试；本次仅文档变更，执行文档 diff/结构检查即可。
 
@@ -1419,7 +1645,7 @@ max_queued 只约束受管 send，不承诺 inject 总积压量或整体存储�
 - shadow observe 灰度、自动容量调优、自动 runtime 隔离和无证据释放。
 - 已失败/取消运行的自动重跑、重新打开 terminal delivery。
 - 下游幂等重放/状态查询协议扩展、跨重启透明流式恢复、不可重试事件的 durable inbox。
-- inject 总积压治理、context 数量/字节预算、全局积压保护，以及上下文压缩/摘要策略。
+- inject 总积压治理、全局积压保护、模型 token 自适应预算，以及上下文压缩/摘要策略。
 - 附件（包括 IM）URL 的排队期间过期处理、刷新/重新签发、外部文件重新获取及提前转存。
   首版直接持久化入站附件字段并在发送时读回，不将这些后置能力作为队列接入前置条件。
 - 精确 ETA。
@@ -1449,7 +1675,7 @@ Provider routing header。因此它仍是明确的生产启用门槛，而不是
 
 ### 17.4 实现前需要确认的事项
 
-- 生产启动器、本机锁路径和非重叠升级流程的实际配置。
+- 生产部署系统的单实例约束和非重叠升级流程的实际配置。
 - 每个 Bot 的 max_running、max_queued、发送间隔与超时初值，通过真实 Bot 延迟和数据库压测确认。
 - 现有 DB transaction、消息来源和 ChatRun 查询校准是否足够；缺口只做必要扩展，不引入 outbox。
 - 各受管入口的附件字段是否完整进入 content.attachments，发送路径和存储/历史投影是否
@@ -1468,7 +1694,30 @@ Provider routing header。因此它仍是明确的生产启用门槛，而不是
 
 ### 17.5 交付边界
 
-本文件是本次 Draft PR 的唯一预期变更，保留中文和 Draft for Review 状态，目标分支为 dev。
+同一个 `feat(bcs): add message congestion control` Draft PR 承载本文档和后续实现，目标分支为 dev。
+文档保留中文和 Draft for Review 状态；是否可以生产启用以完成项、测试及兼容检查为准。
 方案的首版实现范围是后端拥塞控制/查询/取消能力与 IM 简化提示，不包含 Workbench UI 实现。
-本次仅提交、推送本文档并创建 Draft PR，供同学先评审方案；不合并 PR，不实现运行时代码。
-具体 reviewer 后续指定，前端和后端实现均在方案评审后另行交付。
+文档是首个提交，不代表 PR 最终仅包含文档。后端与 IM 按 16.1 逐步实现并验证；
+Workbench 前端后续独立交付。具体 reviewer 后续指定，不自动转 ready 或合并 PR。
+
+### 17.6 Run 完整回复与历史分段（2026-09-10 补充）
+
+Group 成功回复的队列正文改为内部 `run_reply`，同一逻辑回复按目标 Bot 各生成一条 delivery。
+数据库仍保留原始可见 `chat` 分段和 `tool_call` 过程；汇总不属于展示消息，不额外广播。
+准入事务可携带一个最后展示段，先写该段及其消息事件，再写汇总、准入目标、提交输入终态，
+所有写入共同回滚，重复终态不生成新汇总或目标记录。
+
+final 不要求 Provider 统一语义。已结束可见段 H（以单换行组装）、当前段 C、final F 按顺序
+判断：空 F 保留 H+C；F 以前文完整累计正文开头则采用全文；否则 C 非空且 F 以 C 开头则用
+H+F；其他按新增 delta 用 H+C+F。delta 字节直接追加，不自动插入换行，不使用子串/模糊去重。
+这种启发式对重复短句优先去重，对改写快照不能无损判断，歧义时保留内容。内部记录版本、分支、
+原始 final 和已落库段引用用于排查，不将这些诊断字段输出为前端/IM 消息。
+
+Worker 仍按 `source_message_id` 读取 `content.text`，24 条/128 KB 限制作用于 Inject 发送
+组装，不截断持久化完整回复。history 两种查询均在 SQL 分页之前过滤 `run_reply`，序号可有
+间隙；旧 `queue_display_text` 投影兼容保留，不回填旧消息。内部按 ID 读取不做该过滤。
+
+H 的重建必须限定 env/session/sender/run 并按序读取，兼容字符串和对象正文，排除工具及汇总。
+SQLite 025/MySQL 024 为该读取增加索引。重启可恢复已落库段，不保证尚未持久化 delta 的恢复。
+本轮不更改 task/A2A 专有完成语义；普通非受管 Group 归一化展示末段，但不额外写队列汇总。
+回滚二进制须保留内部类型过滤，否则可能在历史接口暴露汇总正文及诊断信息。

@@ -2,6 +2,13 @@
 
 This directory contains BCS database schema migrations.
 
+Run reply normalization adds SQLite `027_run_reply_segments.sql` and MySQL/OceanBase
+`026_run_reply_segments.sql`: an additive env/session/sender/run/sequence index.
+The `run_reply` type uses existing message columns, with no historical backfill.
+Apply remote DDL before enabling the updated queue path; SQLite bootstrap applies
+its migration automatically. Rollback binaries must retain history filtering for
+`run_reply` so internal summaries/diagnostic metadata are not exposed as chat.
+
 The open-source v1 baseline starts from a single MySQL/OceanBase init schema:
 
 | Version | File | Purpose |
@@ -24,6 +31,22 @@ The open-source v1 baseline starts from a single MySQL/OceanBase init schema:
 | 016 | `mysql/016_session_callback_lease.sql` | Add activation-aware callback delivery lease columns and recovery index |
 | 017 | `mysql/017_state_machine_rerun_lineage.sql` | Add State Machine Run lineage, activation identity, and natural rerun idempotency |
 | 018 | `mysql/018_one_shot_opening_message_override.sql` | Persist request-level opening-message overrides for one-shot State Machine Runs |
+| 019 | `mysql/019_invite_code.sql` | Invite-code schema |
+| 020 | `mysql/020_human_participant_message_visibility.sql` | Human participant message visibility |
+| 021 | `mysql/021_message_deliveries.sql` | Canonical-message target deliveries (SQLite version 022) |
+| 022 | `mysql/022_message_delivery_policy.sql` | Environment-scoped live queue policy (SQLite version 023) |
+| 023 | `mysql/023_delivery_worker_queries.sql` | Bounded worker query indexes (SQLite version 024) |
+| 024 | `mysql/024_delivery_context_selection.sql` | Bounded inject selection (SQLite version 025) |
+| 025 | `mysql/025_delivery_pending_abort.sql` | Pending abort lookup (SQLite version 026) |
+| 026 | `mysql/026_run_reply_segments.sql` | Run reply reconstruction index (SQLite version 027) |
+
+The Draft queue branch originally used MySQL 019–024 and SQLite 020–025.
+After rebasing onto the invite-code/visibility migrations, its versions move by
+two; upstream versions are never reassigned. A test database already migrated
+with the old Draft must not be upgraded by deleting migration records or
+blindly rerunning DDL. Back up and reconcile its schema/version records separately,
+or use a fresh disposable test database. The normal checksum/name validation
+remains fail-closed; this rebase does not modify any running local database.
 
 The previous internal incremental SQL files were removed from the public
 migration path and replaced by the v1 baseline. New public migrations should be
@@ -153,6 +176,21 @@ Seed data belongs in a separate seed path or command, for example:
 - `bcs-admin seed`
 
 ## Rollback
+
+Control-query optimization adds MySQL `025_delivery_pending_abort.sql` and
+SQLite `026_delivery_pending_abort.sql`. Apply before the new worker starts;
+SQLite applies it through bootstrap, remote databases require deployment DDL.
+This adds only the `(env, status, abort_request_id, delivery_id)` index. Existing
+run/cancel deadline indexes are reused. A binary downgrade can retain this index;
+there is no data backfill or additional persisted delivery state in this migration.
+
+Delivery worker optimization adds MySQL `023_delivery_worker_queries.sql` and
+SQLite `024_delivery_worker_queries.sql` (dialect numbering differs due to the
+earlier SQLite-only history). Apply before the optimized worker starts. The new
+`downstream_run_id` column is a derived index projection of transport JSON, not
+a new logical run identity. Older binaries do not maintain this projection;
+mixed-version concurrent writers are unsupported, and a downgrade/re-upgrade
+requires a reviewed alias-projection reconciliation before resuming the worker.
 
 Migrations are forward-only. If a production migration must be reverted, author
 a reviewed paired revert migration or DBA change plan. Automatic rollback is not

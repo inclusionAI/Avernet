@@ -305,6 +305,7 @@ impl MessageFlowService for RecordingMessageFlow {
     async fn handle_web_send(&self, cmd: WebSendCommand) -> ServiceResult<WebSendOutcome> {
         self.web_sends.lock().await.push(cmd);
         Ok(WebSendOutcome {
+            queue_admission: None,
             primary_run_id: "run-web-1".to_string(),
             active_run_ids: vec!["run-web-1".to_string()],
             status: "accepted".to_string(),

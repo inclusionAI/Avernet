@@ -20,6 +20,8 @@ pub mod invite;
 pub mod manifest;
 pub mod me;
 pub mod messages;
+pub mod message_deliveries;
+pub mod delivery_policy;
 pub mod onboard;
 pub mod organizations;
 pub mod providers;

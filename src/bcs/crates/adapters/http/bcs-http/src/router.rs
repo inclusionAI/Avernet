@@ -388,6 +388,11 @@ fn build_api_routes() -> Router<HttpAppState> {
                 .patch(routes::sessions::update_session_participant_mode),
         )
         .route("/sessions/{sid}/chat", post(routes::sessions::session_chat))
+        .route("/admin/message-delivery/policy", get(routes::delivery_policy::get).put(routes::delivery_policy::put))
+        .route("/openapi/v1/collaboration/messages/{message_id}/deliveries", get(routes::message_deliveries::get))
+        .route("/openapi/v1/collaboration/sessions/{session_id}/message-deliveries/query", post(routes::message_deliveries::query))
+        .route("/messages/{message_id}/deliveries/{delivery_id}/cancel", post(routes::message_deliveries::cancel_one))
+        .route("/messages/{message_id}/deliveries/cancel", post(routes::message_deliveries::cancel_message))
         .route(
             "/sessions/{sid}/messages",
             get(routes::sessions::get_session_messages),

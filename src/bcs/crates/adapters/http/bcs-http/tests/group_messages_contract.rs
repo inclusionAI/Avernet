@@ -427,6 +427,7 @@ impl MessageFlowService for RecordingMessageFlow {
     async fn handle_web_send(&self, cmd: WebSendCommand) -> ServiceResult<WebSendOutcome> {
         self.web_sends.lock().await.push(cmd);
         Ok(WebSendOutcome {
+            queue_admission: None,
             primary_run_id: "run-web".to_string(),
             status: "started".to_string(),
             active_run_ids: vec!["run-web".to_string()],
@@ -459,6 +460,7 @@ impl MessageFlowService for RecordingMessageFlow {
             return Err(error);
         }
         Ok(GroupChatOutcome {
+            queue_admission: None,
             group_id: "group-1".to_string(),
             driver_bot_id: "owner-bot".to_string(),
             mentions: vec!["target-bot".to_string()],
@@ -491,6 +493,7 @@ impl MessageFlowService for RecordingMessageFlow {
             return Err(error);
         }
         Ok(PersistentGroupSendOutcome {
+            queue_admission: None,
             message_id: "flow-message-1".to_string(),
             routed_to: vec!["target-bot".to_string()],
             mentions: vec!["target-bot".to_string()],
@@ -743,6 +746,21 @@ async fn build_group_app() -> (
 ) {
     let chain = static_auth_chain("123", "Owner");
     build_group_app_with_identity(Arc::new(ChainUserIdentityPort::new(chain))).await
+}
+
+#[tokio::test]
+async fn delivery_status_and_cancel_require_authenticated_caller() {
+    let (app, ..) = build_group_app_with_identity(Arc::new(NoUserIdentity)).await;
+    for (method, path, body) in [
+        ("GET", "/openapi/v1/collaboration/messages/m/deliveries?session_id=group-1:abcdef12", ""),
+        ("POST", "/openapi/v1/collaboration/sessions/group-1:abcdef12/message-deliveries/query", r#"{"message_ids":["m"]}"#),
+        ("POST", "/messages/m/deliveries/d/cancel", r#"{"session_id":"group-1:abcdef12"}"#),
+        ("POST", "/messages/m/deliveries/cancel", r#"{"session_id":"group-1:abcdef12"}"#),
+    ] {
+        let response = app.clone().oneshot(Request::builder().method(method).uri(path)
+            .header("content-type", "application/json").body(Body::from(body)).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{method} {path}");
+    }
 }
 
 async fn build_group_app_with_identity(

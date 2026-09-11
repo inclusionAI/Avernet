@@ -14,7 +14,7 @@ use bcs_service_api::{
     BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, BotEventCommand,
     BotEventOutcome, BotRegistryCoreService, BotRunContext, BotRunContextPort, BotRunScope,
     BotRunTransportOwner, BotTerminalObserverPort, CallerContext, ChannelService, ChatAbortCommand,
-    ChatAbortFailure, ChatAbortOutcome, ChatAbortScope, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
+    ChatAbortFailure, ChatAbortOutcome, ChatAbortScope, ChatEventState, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     DeliveryBlockContext, DeliveryBlockReason, DeliveryBlockSurface, DeliveryMetricKind,
     DeliveryMetricTarget, DeliveryType, FrontendDeliveryCommand, FrontendDeliveryKind,
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget, Group,
@@ -41,7 +41,7 @@ use chrono::{SecondsFormat, TimeZone, Utc};
 use futures::{StreamExt, stream};
 use regex::Regex;
 use serde_json::Value;
-use tracing::{info, warn};
+use tracing::{info, warn, Instrument};
 
 use crate::MSG_LOG_TARGET;
 use crate::protocol_context::{group_context_input, group_type_wire};
@@ -71,6 +71,17 @@ pub struct BcsMessageFlow {
     pub channel: Arc<OnceLock<Arc<dyn ChannelService>>>,
     pub bot_terminal_observer: Arc<dyn BotTerminalObserverPort>,
     pub human_mention_notify: Option<Arc<dyn HumanMentionNotifyPort>>,
+    pub managed_deliveries: Option<Arc<dyn bcs_service_api::application::message_delivery::ManagedMessageDeliveryService>>,
+    /// Composition supplies only Bots enabled for new Group admissions.
+    pub group_delivery_limits: BTreeMap<String, u32>,
+    pub delivery_policy: Option<Arc<crate::delivery_policy::LiveDeliveryPolicy>>,
+    pub delivery_queue_ttl_ms: Option<i64>,
+    /// Retained policy for replies from already-admitted Group runs during drain.
+    pub group_reply_delivery_limits: BTreeMap<String, u32>,
+    pub delivery_shutdown: OnceLock<(tokio::sync::watch::Sender<bool>, tokio::sync::watch::Receiver<bool>)>,
+    pub(crate) delivery_event_locks: tokio::sync::Mutex<BTreeMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>,
+    terminal_owner: OnceLock<std::sync::Weak<BcsMessageFlow>>,
+    terminal_slots: Arc<tokio::sync::Semaphore>,
 }
 
 impl BcsMessageFlow {
@@ -103,6 +114,15 @@ impl BcsMessageFlow {
             channel: Arc::new(OnceLock::new()),
             bot_terminal_observer: Arc::new(NoopBotTerminalObserver),
             human_mention_notify: None,
+            managed_deliveries: None,
+            group_delivery_limits: BTreeMap::new(),
+            delivery_policy: None,
+            delivery_queue_ttl_ms: None,
+            group_reply_delivery_limits: BTreeMap::new(),
+            delivery_shutdown: OnceLock::new(),
+            delivery_event_locks: Default::default(),
+            terminal_owner: OnceLock::new(),
+            terminal_slots: Arc::new(tokio::sync::Semaphore::new(64)),
         }
     }
 
@@ -113,6 +133,23 @@ impl BcsMessageFlow {
 
     pub fn channel_slot(&self) -> Arc<OnceLock<Arc<dyn ChannelService>>> {
         self.channel.clone()
+    }
+
+    /// Composition installs a weak self-reference so accepted terminal work
+    /// can survive a disconnected caller without retaining the service forever.
+    pub fn retain_terminal_events(self: &Arc<Self>) {
+        let _ = self.terminal_owner.set(Arc::downgrade(self));
+    }
+
+    pub fn with_managed_deliveries(mut self, service: Arc<dyn bcs_service_api::application::message_delivery::ManagedMessageDeliveryService>) -> Self {
+        self.managed_deliveries = Some(service);
+        self
+    }
+
+    pub fn with_group_delivery_limits(mut self, limits: BTreeMap<String, u32>) -> Self {
+        self.group_reply_delivery_limits = limits.clone();
+        self.group_delivery_limits = limits;
+        self
     }
 
     pub fn pending_message_port(
@@ -310,7 +347,7 @@ impl BcsMessageFlow {
     }
 }
 
-fn request_session_key(frame: &BcsFrame) -> Option<String> {
+pub(crate) fn request_session_key(frame: &BcsFrame) -> Option<String> {
     let BcsFrame::Request(request) = frame else {
         return None;
     };
@@ -324,6 +361,55 @@ fn request_session_key(frame: &BcsFrame) -> Option<String> {
 
 #[async_trait]
 impl MessageFlowService for BcsMessageFlow {
+    async fn get_delivery_policy(&self, caller: CallerContext) -> ServiceResult<bcs_config_api::message_delivery::DeliveryPolicyRecord> {
+        self.delivery_policy.as_ref().ok_or_else(|| ServiceError::InternalError("delivery policy unavailable".into()))?.get(caller).await
+    }
+    async fn replace_delivery_policy(&self, caller: CallerContext, expected: u64, policy: bcs_config_api::message_delivery::DeliveryPolicy) -> ServiceResult<bcs_config_api::message_delivery::DeliveryPolicyRecord> {
+        self.delivery_policy.as_ref().ok_or_else(|| ServiceError::InternalError("delivery policy unavailable".into()))?.replace(caller, expected, policy).await
+    }
+    async fn resolve_managed_provider_run(&self, run_id: &str, provider_id: &str, bot_id: &str) -> ServiceResult<Option<BotRunContext>> {
+        let Some(service) = &self.managed_deliveries else { return Ok(None); };
+        for row in service.lookup(bcs_service_api::port::repo::message_delivery::DeliveryLookup::Run { bot: bot_id.into(), alias: run_id.into() }).await.map_err(|_| ServiceError::InternalError("managed Provider run lookup failed".into()))? {
+            if !matches!(row.state.status, bcs_domain::message_delivery::MessageDeliveryStatus::Dispatching | bcs_domain::message_delivery::MessageDeliveryStatus::Running | bcs_domain::message_delivery::MessageDeliveryStatus::Unknown | bcs_domain::message_delivery::MessageDeliveryStatus::Cancelling | bcs_domain::message_delivery::MessageDeliveryStatus::CancelUnknown) { continue; }
+            if !row.state.may_have_been_sent || row.target_bot_id != bot_id { continue; }
+            let Some(metadata) = row.transport_context_json.as_ref() else { continue; };
+            if metadata.get("owner").and_then(|v| v.get("provider_id")).and_then(Value::as_str) != Some(provider_id) { continue; }
+            if row.run_id.as_deref() != Some(run_id) && row.request_id.as_deref() != Some(run_id)
+                && metadata.get("downstream_run_id").and_then(Value::as_str) != Some(run_id) { continue; }
+            let owner: BotRunTransportOwner = serde_json::from_value(metadata.get("owner").cloned().unwrap_or(Value::Null))?;
+            if !provider_owner_matches_target(&owner, &self.registry.resolve_delivery_target(bot_id).await?) {
+                return Err(ServiceError::Forbidden("original Provider binding changed".into()));
+            }
+            return Ok(Some(BotRunContext {
+                run_id: row.run_id.unwrap_or_default(), bot_id: row.target_bot_id, group_id: row.group_id,
+                bcs_session_id: Some(row.session_id), deadline_ms: u64::MAX, terminal: false,
+            }));
+        }
+        Ok(None)
+    }
+    async fn query_message_deliveries(&self, query: bcs_service_api::application::message_delivery::DeliveryStatusQuery) -> ServiceResult<Vec<bcs_service_api::application::message_delivery::DeliveryStatusView>> {
+        crate::delivery_control::query(self, query).await
+    }
+    async fn cancel_message_deliveries(&self, command: bcs_service_api::application::message_delivery::CancelMessageDeliveryCommand) -> ServiceResult<Vec<bcs_service_api::application::message_delivery::CancelMessageDeliveryResult>> {
+        crate::delivery_control::cancel(self, command).await
+    }
+    async fn shutdown_managed_delivery(&self) -> ServiceResult<()> {
+        if let Some((sender, completion)) = self.delivery_shutdown.get() {
+            let _ = sender.send(true);
+            let mut completion = completion.clone();
+            tokio::time::timeout(std::time::Duration::from_secs(60), completion.wait_for(|done| *done)).await
+                .map_err(|_| ServiceError::InternalError("queue shutdown timed out".into()))?
+                .map_err(|_| ServiceError::InternalError("queue shutdown completion unavailable".into()))?;
+        }
+        Ok(())
+    }
+    async fn record_delivery_acceptance(&self, request_id: &str, bot_id: &str, downstream_run_id: Option<&str>) -> ServiceResult<()> {
+        if let Some(service) = &self.managed_deliveries {
+            service.accept_run(request_id, bot_id, downstream_run_id, Utc::now().timestamp_millis())
+                .await.map_err(|_| ServiceError::InternalError("managed delivery ACK persistence failed".into()))?;
+        }
+        Ok(())
+    }
     async fn handle_web_send(&self, cmd: WebSendCommand) -> ServiceResult<WebSendOutcome> {
         handle_web_send(self, cmd).await
     }
@@ -340,6 +426,22 @@ impl MessageFlowService for BcsMessageFlow {
     }
 
     async fn handle_bot_event(&self, cmd: BotEventCommand) -> ServiceResult<BotEventOutcome> {
+        if self.managed_deliveries.is_some()
+            && matches!(cmd.state, ChatEventState::Final | ChatEventState::Error | ChatEventState::Aborted)
+            && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
+            && let Some(owner) = self.terminal_owner.get().and_then(std::sync::Weak::upgrade)
+        {
+            // Bound retained payloads. While full, apply backpressure instead
+            // of spawning an unbounded terminal retry queue.
+            let permit = self.terminal_slots.clone().acquire_owned().await
+                .map_err(|_| ServiceError::InternalError("terminal processing unavailable".into()))?;
+            return tokio::spawn(async move {
+                let _permit = permit;
+                let result = crate::bot_event::handle_bot_event(&owner, cmd).await;
+                if result.is_err() { tracing::warn!("retained terminal processing failed; delivery state remains authoritative"); }
+                result
+            }.in_current_span()).await.map_err(|error| ServiceError::InternalError(format!("terminal processing task failed: {error}")))?;
+        }
         crate::bot_event::handle_bot_event(self, cmd).await
     }
 
@@ -493,39 +595,7 @@ pub(crate) async fn try_persist_group_message(
     } else {
         session_id.unwrap_or_default().to_string()
     };
-    let visibility_domain = match group_strategy {
-        GroupStrategy::Chat => MessageVisibilityDomain::Chat,
-        GroupStrategy::ManagerWorker => MessageVisibilityDomain::ManagerWorker,
-        GroupStrategy::StateMachine => MessageVisibilityDomain::StateMachine,
-    };
-    let audience = match visibility_domain {
-        MessageVisibilityDomain::Chat => None,
-        MessageVisibilityDomain::ManagerWorker => Some(
-            manager_worker_message_audience(
-                group.as_ref(),
-                sender_id,
-                sender_type,
-                message_type,
-                owner_bot_id.as_deref(),
-            )
-            .map_err(|error| ServiceError::InternalError(error.to_string()))?,
-        ),
-        MessageVisibilityDomain::StateMachine => Some(
-            if sender_type == SenderType::Human {
-                MessageAudience::directed([sender_id.to_string()])
-                    .map_err(|error| ServiceError::InternalError(error.to_string()))?
-            } else if message_type == "chat"
-                && group
-                    .as_ref()
-                    .and_then(|group| group.get_participant(sender_id))
-                    .is_some_and(|participant| participant.role == ParticipantRole::Manager)
-            {
-                MessageAudience::Public
-            } else {
-                MessageAudience::FullOnly
-            },
-        ),
-    };
+    let (visibility_domain, audience) = persisted_message_visibility(group.as_ref(), sender_id, sender_type, message_type, owner_bot_id.as_deref())?;
     let msg = NewMessage {
         group_id: group_id.to_string(),
         session_id: effective_session_id.clone(),
@@ -652,6 +722,42 @@ pub(crate) async fn try_persist_group_message(
         "group message persisted"
     );
     Ok(Some(persisted))
+}
+
+pub(crate) fn persisted_message_visibility(group: Option<&Group>, sender_id: &str, sender_type: SenderType, message_type: &str, owner_bot_id: Option<&str>) -> ServiceResult<(MessageVisibilityDomain, Option<MessageAudience>)> {
+    let visibility_domain = match group.map(|g| g.group_strategy).unwrap_or(GroupStrategy::ManagerWorker) {
+        GroupStrategy::Chat => MessageVisibilityDomain::Chat,
+        GroupStrategy::ManagerWorker => MessageVisibilityDomain::ManagerWorker,
+        GroupStrategy::StateMachine => MessageVisibilityDomain::StateMachine,
+    };
+    let audience = match visibility_domain {
+        MessageVisibilityDomain::Chat => None,
+        MessageVisibilityDomain::ManagerWorker => Some(
+            manager_worker_message_audience(
+                group,
+                sender_id,
+                sender_type,
+                message_type,
+                owner_bot_id,
+            )
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?,
+        ),
+        MessageVisibilityDomain::StateMachine => Some(
+            if sender_type == SenderType::Human {
+                MessageAudience::directed([sender_id.to_string()])
+                    .map_err(|error| ServiceError::InternalError(error.to_string()))?
+            } else if message_type == "chat"
+                && group
+                    .and_then(|group| group.get_participant(sender_id))
+                    .is_some_and(|participant| participant.role == ParticipantRole::Manager)
+            {
+                MessageAudience::Public
+            } else {
+                MessageAudience::FullOnly
+            },
+        ),
+    };
+    Ok((visibility_domain, audience))
 }
 
 fn manager_worker_message_audience(
@@ -826,7 +932,7 @@ pub(crate) async fn manager_worker_self_owner(
     None
 }
 
-async fn apply_session_participant_scope(
+pub(crate) async fn apply_session_participant_scope(
     flow: &BcsMessageFlow,
     group: &mut Group,
     session_id: Option<&str>,
@@ -861,7 +967,7 @@ async fn apply_session_participant_scope(
 
 pub async fn handle_web_send(
     flow: &BcsMessageFlow,
-    cmd: WebSendCommand,
+    mut cmd: WebSendCommand,
 ) -> ServiceResult<WebSendOutcome> {
     log_message_received(&cmd, MessageLogMode::FreeChat);
 
@@ -871,6 +977,7 @@ pub async fn handle_web_send(
         .await
         .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
 
+    cmd.session_id = crate::queued_admission::resolve_group_session(flow, &group, cmd.session_id.take()).await?;
     if group.status == GroupStatus::Inactive {
         crate::update_group_status(
             flow.group.as_ref(),
@@ -937,6 +1044,22 @@ pub async fn handle_web_send(
     } else {
         SenderType::Bot
     };
+    let admission = match crate::queued_admission::prepare_group_admission(flow, &group, &cmd, &decision,
+        &sender_display_name, from_bot_owner.clone()).await? {
+        Some(command) => Some(flow.managed_deliveries.as_ref().ok_or_else(|| ServiceError::InternalError("queue service unavailable".into()))?
+            .admit(command).await.map_err(|_| ServiceError::InternalError("queue admission persistence failed".into()))?),
+        None => None,
+    };
+    if let Some(result) = admission.as_ref().filter(|r| r.duplicate) {
+        return Ok(WebSendOutcome {
+            queue_admission: Some(result.into()),
+            primary_run_id: result.deliveries.iter().find_map(|d| d.run_id.clone()).unwrap_or_default(),
+            status: "accepted".into(), active_run_ids: Vec::new(), bot_deliveries: Vec::new(),
+            frontend_deliveries: Vec::new(), mentions: decision.mentions, hidden_mentions: decision.hidden_mentions,
+            delivered_count: 0, failed_count: 0, delivery_results: Vec::new(),
+        });
+    }
+    if admission.is_none() {
     try_persist_group_message(
         flow,
         &cmd.group_id,
@@ -950,6 +1073,7 @@ pub async fn handle_web_send(
         "", // run_id: user messages don't associate with bot runs
     )
     .await?;
+    }
     // Notify @-mentioned humans only after the message is accepted and
     // persisted, and only if the content passes the outbound policy that
     // governs bot deliveries of the same message.
@@ -983,6 +1107,9 @@ pub async fn handle_web_send(
     let mut delivery_results = Vec::new();
 
     for target in &decision.targets {
+        if admission.as_ref().is_some_and(|result| result.deliveries.iter().any(|d| d.target_bot_id == target.bot_uuid)) {
+            continue;
+        }
         let run_id = uuid::Uuid::new_v4().to_string();
         let target_bot_id = target.bot_uuid.clone();
         let delivery_type = target.delivery_type;
@@ -1327,11 +1454,21 @@ pub async fn handle_web_send(
     let primary_run_id = active_run_ids
         .first()
         .cloned()
+        .or_else(|| admission.as_ref().and_then(|a| a.deliveries.iter().find_map(|d| d.run_id.clone())))
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
     Ok(WebSendOutcome {
+        queue_admission: admission.as_ref().map(Into::into),
         primary_run_id,
-        status: "started".to_string(),
+        status: if active_run_ids.is_empty() {
+            match &admission {
+                Some(result) if result.deliveries.iter().any(|d| d.state.kind == DeliveryType::Send)
+                    && result.deliveries.iter().filter(|d| d.state.kind == DeliveryType::Send).all(|d| d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::RejectedCapacity) => "rejected_capacity",
+                Some(result) if result.deliveries.iter().all(|d| d.state.kind == DeliveryType::Inject) => "context_saved",
+                Some(_) => "queued",
+                None => "started",
+            }
+        } else { "started" }.to_string(),
         active_run_ids,
         bot_deliveries,
         frontend_deliveries,
@@ -1387,6 +1524,7 @@ pub async fn handle_group_chat(
     .await?;
 
     Ok(GroupChatOutcome {
+        queue_admission: outcome.queue_admission,
         group_id: cmd.group_id,
         driver_bot_id: group.driver_bot,
         delivered_count: outcome.delivered_count,
@@ -1418,6 +1556,14 @@ pub async fn handle_persistent_group_send(
 
     backfill_bot_names(flow.registry.as_ref(), &mut group).await;
 
+    if flow.managed_deliveries.is_some() && group.group_strategy != GroupStrategy::StateMachine && cmd.message_type == GroupMessageType::Bot {
+        let preview = if group.group_kind == GroupKind::Dm {
+            let overlay = build_route_overlay(flow, &group).await;
+            flow.routing.route_dm_with_overlay(&group, &cmd.content, &cmd.sender, &overlay).await
+        } else { flow.routing.route(&group, &cmd.content, Some(&cmd.sender)).await };
+        crate::queued_admission::guard_legacy_targets(flow, &preview.targets).await?;
+    }
+
     if group.status != GroupStatus::Active {
         return Err(ServiceError::InvalidOperation {
             message: format!(
@@ -1446,6 +1592,34 @@ pub async fn handle_persistent_group_send(
         }
     }
 
+    if group.group_strategy != GroupStrategy::StateMachine
+        && crate::queued_admission::manages_any(flow, &group).await
+        && cmd.message_type == GroupMessageType::Bot
+    {
+        let outcome = handle_web_send(flow, WebSendCommand {
+            caller: cmd.caller.clone(), group_id: cmd.group_id.clone(), session_id: None,
+            from_actor_id: cmd.sender.clone(), from_name: None, message: cmd.content.clone(),
+            mentions: Vec::new(), attachments: None, thinking: None, idempotency_key: None,
+            source_im_message_id: None, channel_sender_identity: None, sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
+        }).await?;
+        let message_id = outcome.queue_admission.as_ref().map(|a| a.message_id.clone())
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        flow.group.increment_message_count(&cmd.group_id).await?;
+        if cmd.store_messages {
+            flow.group.add_message(&cmd.group_id, GroupMessage {
+                id: message_id.clone(), timestamp: now_ms(), sender: cmd.sender, content: cmd.content,
+                message_type: cmd.message_type, bot_name: None, role: cmd.role, run_id: outcome.primary_run_id,
+                history_meta: None, metadata: None, attachments: None,
+            }).await?;
+        }
+        let mut routed_to: Vec<_> = outcome.delivery_results.iter().filter(|r| r.success).map(|r| r.bot_uuid.clone()).collect();
+        if let Some(admission) = &outcome.queue_admission {
+            routed_to.extend(admission.deliveries.iter().filter(|d| d.status != bcs_domain::message_delivery::MessageDeliveryStatus::RejectedCapacity).map(|d| d.target_bot_id.clone()));
+        }
+        routed_to.sort(); routed_to.dedup();
+        return Ok(PersistentGroupSendOutcome { queue_admission: outcome.queue_admission, message_id, routed_to, mentions: outcome.mentions });
+    }
     let _ = flow.group.increment_message_count(&cmd.group_id).await;
 
     let message = GroupMessage {
@@ -1640,6 +1814,7 @@ pub async fn handle_persistent_group_send(
     }
 
     Ok(PersistentGroupSendOutcome {
+        queue_admission: None,
         message_id: message.id,
         routed_to,
         mentions: decision.mentions,
@@ -2148,6 +2323,7 @@ pub async fn handle_chat_abort(
         bot_id: cmd.bot_id.clone(),
     };
     let mut active = run_context.list_active_runs(&scope).await?;
+    let managed_abort = crate::delivery_abort::select(flow, &cmd, &mut active).await?;
     if let Some(requested_run_id) = cmd.run_id.as_deref() {
         active.retain(|context| {
             context.canonical_run_id == requested_run_id
@@ -2160,7 +2336,7 @@ pub async fn handle_chat_abort(
             aborted_run_ids: Vec::new(),
             bot_deliveries: Vec::new(),
             frontend_deliveries: Vec::new(),
-            failures: Vec::new(),
+            failures: managed_abort.failures,
         });
     }
 
@@ -2170,12 +2346,13 @@ pub async fn handle_chat_abort(
     let plugin_results = stream::iter(plugin_runs.into_iter().map(|context| {
         let delivery = flow.bot_delivery.clone();
         let scope = scope.clone();
+        let managed = managed_abort.owned.get(&context.canonical_run_id).cloned();
         async move {
             let command = BotAbortDeliveryCommand {
                 target: BotDeliveryTarget::WebSocket {
                     bot_id: scope.bot_id.clone(),
                 },
-                command_id: uuid::Uuid::new_v4().to_string(),
+                command_id: managed.as_ref().and_then(|row| row.abort_request_id.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
                 group_id: scope.group_id,
                 session_id: context
                     .downstream_session_key
@@ -2185,7 +2362,13 @@ pub async fn handle_chat_abort(
                 provider_bypass_headers: Vec::new(),
                 timeout_ms: ABORT_DELIVERY_TIMEOUT_MS,
             };
-            (context, delivery.abort(command).await)
+            let result = if let Some(row) = managed {
+                match row.transport_context_json.as_ref().and_then(|v| v.get("connection_id")).and_then(Value::as_str) {
+                    Some(id) => delivery.abort_on_connection(command, id).await,
+                    None => Err(ServiceError::InvalidOperation { message: "original Bot connection identity missing".into(), request_id: Some(context.canonical_run_id.clone()) }),
+                }
+            } else { delivery.abort(command).await };
+            (context, result)
         }
     }))
     .buffer_unordered(MAX_PLUGIN_ABORT_CONCURRENCY)
@@ -2194,14 +2377,15 @@ pub async fn handle_chat_abort(
 
     let mut bot_deliveries = Vec::new();
     let mut confirmed = Vec::new();
-    let mut failures = Vec::new();
+    let mut failures = managed_abort.failures;
     for (context, result) in plugin_results {
         match result {
             Ok(result) => {
-                let acknowledged = result
+                let acknowledged = result.target_bot_id == cmd.bot_id && result
                     .aborted_run_ids
                     .iter()
-                    .any(|run_id| run_id == &context.downstream_run_id);
+                    .any(|run_id| run_id == &context.downstream_run_id)
+                    && (!managed_abort.owned.contains_key(&context.canonical_run_id) || result.aborted_run_ids.len() == 1);
                 bot_deliveries.push(BotDeliveryResult {
                     target_bot_id: result.target_bot_id,
                     delivered: true,
@@ -2239,7 +2423,10 @@ pub async fn handle_chat_abort(
             Some(headers)
         });
         let provider_bypass_headers = header_sets.next().unwrap_or_default();
-        let provider_headers_match = header_sets.all(|headers| headers == provider_bypass_headers);
+        let provider_headers_match = header_sets.all(|headers| headers == provider_bypass_headers)
+            && (provider_bypass_headers.is_empty() || !provider_runs.iter().any(|run| managed_abort.owned.contains_key(&run.canonical_run_id)));
+        let provider_session_keys: HashSet<_> = provider_runs.iter().map(|run|
+            run.downstream_session_key.clone().unwrap_or_else(|| cmd.session_id.clone())).collect();
         let expected_by_downstream: HashMap<String, ActiveBotRunContext> = provider_runs
             .iter()
             .cloned()
@@ -2256,7 +2443,7 @@ pub async fn handle_chat_abort(
                 request_id: cmd.run_id.clone(),
             }),
             (true, 1, Ok(target))
-                if provider_owner_matches_target(
+                if provider_session_keys.len() == 1 && provider_owner_matches_target(
                     owners.iter().next().expect("one owner"),
                     &target,
                 ) =>
@@ -2266,7 +2453,7 @@ pub async fn handle_chat_abort(
                         target,
                         command_id: uuid::Uuid::new_v4().to_string(),
                         group_id: cmd.group_id.clone(),
-                        session_id: cmd.session_id.clone(),
+                        session_id: provider_session_keys.iter().next().cloned().unwrap_or_else(|| cmd.session_id.clone()),
                         run_id: None,
                         provider_bypass_headers,
                         timeout_ms: ABORT_DELIVERY_TIMEOUT_MS,
@@ -2287,7 +2474,7 @@ pub async fn handle_chat_abort(
             Ok(result) => {
                 let mut invalid_ids = Vec::new();
                 for downstream_run_id in result.aborted_run_ids {
-                    if let Some(context) = expected_by_downstream.get(&downstream_run_id) {
+                    if let Some(context) = expected_by_downstream.get(&downstream_run_id).filter(|_| result.target_bot_id == cmd.bot_id) {
                         confirmed.push(context.clone());
                     } else {
                         invalid_ids.push(downstream_run_id);
@@ -2325,8 +2512,14 @@ pub async fn handle_chat_abort(
     }
 
     let mut aborted_run_ids = Vec::new();
+    let confirmed_managed: HashSet<_> = confirmed.iter().map(|c| c.canonical_run_id.clone()).collect();
+    for (run_id, row) in &managed_abort.owned {
+        if crate::delivery_abort::finish(flow, row, confirmed_managed.contains(run_id)).await? {
+            aborted_run_ids.push(run_id.clone());
+        }
+    }
     for context in confirmed {
-        if commit_aborted_run(run_context.as_ref(), &context).await? {
+        if commit_aborted_run(run_context.as_ref(), &context).await? && !managed_abort.owned.contains_key(&context.canonical_run_id) {
             aborted_run_ids.push(context.canonical_run_id);
         }
     }
@@ -3044,12 +3237,12 @@ async fn frame_for_target(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ContextProjection {
+pub(crate) enum ContextProjection {
     Group,
     DirectBot,
 }
 
-async fn context_projection_for_delivery(
+pub(crate) async fn context_projection_for_delivery(
     flow: &BcsMessageFlow,
     group: &Group,
     session_id: Option<&str>,
@@ -3099,7 +3292,7 @@ fn context_projection_from_meta(meta: Option<&Value>) -> Option<ContextProjectio
     }
 }
 
-fn frame_protocol_version(protocol_version: u32, target: &BotDeliveryTarget) -> u32 {
+pub(crate) fn frame_protocol_version(protocol_version: u32, target: &BotDeliveryTarget) -> u32 {
     if target.is_http_provider() {
         protocol_version.max(3)
     } else {

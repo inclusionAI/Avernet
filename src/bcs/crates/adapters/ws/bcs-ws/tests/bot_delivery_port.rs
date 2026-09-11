@@ -9,6 +9,36 @@ use bcs_ws::bot::BotConnectionRegistry;
 use tokio::sync::mpsc;
 
 #[tokio::test]
+async fn pinned_operations_never_cross_a_bot_reconnection() {
+    let registry = BotConnectionRegistry::new();
+    let target = BotDeliveryTarget::WebSocket { bot_id: "pinned-bot".into() };
+    let (old_tx, mut old_rx) = mpsc::channel(2);
+    registry.connect("pinned-bot".into(), old_tx).await;
+    let old_id = registry.connection_identity(&target).await.unwrap();
+    let (new_tx, mut new_rx) = mpsc::channel(2);
+    registry.connect("pinned-bot".into(), new_tx).await;
+    let new_id = registry.connection_identity(&target).await.unwrap();
+    assert_ne!(old_id, new_id);
+    let command = || BotDeliveryCommand {
+        target: target.clone(), run_id: "run-pinned".into(),
+        frame: BcsFrame::Request(RequestFrame::new("request-pinned", "chat.send", None)),
+        delivery_kind: BotDeliveryKind::Send,
+        provider_transport: Default::default(), provider_bypass_headers: Vec::new(),
+    };
+    assert!(!registry.deliver_on_connection(command(), &old_id).await.unwrap().delivered);
+    let aborted = registry.abort_on_connection(BotAbortDeliveryCommand {
+        target: target.clone(), command_id: "abort-pinned".into(), group_id: "g".into(),
+        session_id: "original-session-key".into(), run_id: Some("run-pinned".into()),
+        provider_bypass_headers: Vec::new(), timeout_ms: 100,
+    }, &old_id).await;
+    assert!(aborted.is_err());
+    assert!(new_rx.try_recv().is_err());
+    assert!(old_rx.try_recv().is_err());
+    assert!(registry.deliver_on_connection(command(), &new_id).await.unwrap().delivered);
+    assert!(new_rx.recv().await.unwrap().contains("request-pinned"));
+}
+
+#[tokio::test]
 async fn bot_registry_delivers_frame_to_connected_bot() {
     let registry = BotConnectionRegistry::new();
     let (tx, mut rx) = mpsc::channel(1);

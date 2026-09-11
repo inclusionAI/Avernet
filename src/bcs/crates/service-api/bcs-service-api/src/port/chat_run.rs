@@ -91,6 +91,16 @@ pub trait BotRunContextPort: Send + Sync {
         Ok(false)
     }
 
+    /// Correlate a per-attempt request without changing the engine's run id.
+    /// The alias is registered before I/O; it is not an ACK or proof of receipt.
+    async fn bind_request_alias(
+        &self,
+        _canonical_run_id: &str,
+        _request_id: &str,
+    ) -> ServiceResult<bool> {
+        Ok(false)
+    }
+
     async fn remove_active_run(
         &self,
         _scope: &BotRunScope,

@@ -3,6 +3,31 @@
 ## Provides
 
 - `CoordinationIntentPort` with authenticated consumer identity and immutable execution receipts.
+
+MessageRepoPort adds scoped run_chat_segments reconstruction with fail-closed
+defaults. AdmitMessageDeliveries accepts an optional visible display companion
+for internal run_reply admission; its message/event commit with summary, targets,
+and lifecycle CAS. Public history excludes internal summaries before pagination;
+canonical ID reads remain unfiltered. Memory/SQL implementations and caller/test
+construction propagate this internal contract change together.
+
+Control work_batch ignores the legacy ID cursor and reserves per-action shares
+under one total limit; timeout classes use deadline order. This internal contract
+change propagates to the runtime and both SQL/Memory repositories, with shared
+conformance coverage. Recovery cursor semantics and external wire APIs are unchanged.
+
+Managed/repository bounded_contexts returns a bounded newest-first metadata
+page and complete bound count. Persisted Send selections and Inject's additive
+discarded_context terminal propagate to queue preparation, storage, status
+consumers and the fixed-column monitoring hook without changing Bot wire APIs.
+
+Managed delivery query contracts distinguish scalar scheduling candidates,
+complete active counts, scoped lifecycle reads and queue statistics. The
+DeliveryInstrumentation hook observes fixed-name operations and post-commit
+events without prescribing a metrics implementation or exposing payload labels.
+
+MessageFlowService exposes Human-only environment-wide delivery-policy read/replace operations; policy values use the leaf bcs-config-api contract, and the delivery repository owns durable version CAS. Application validation rejects non-Human callers independently of HTTP.
+
 - Application, core, and port trait contracts for BCS.
 - Shared contract-level DTOs, error types, and service container types.
 - Default `Noop*` implementations used to keep contract boundaries explicit in tests and local wiring.

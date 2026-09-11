@@ -14,6 +14,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::sync::{OnceLock, atomic::{AtomicU64, Ordering}};
 use std::time::{Duration, SystemTime};
 use time::macros::format_description;
 use tracing::Level;
@@ -22,6 +23,77 @@ use tracing_subscriber::{
     layer::SubscriberExt, util::SubscriberInitExt,
     EnvFilter, Layer,
 };
+
+pub(crate) const DELIVERY_MONITOR_TARGET: &str = "bcs_message_delivery_monitor";
+const DELIVERY_MONITOR_OUTPUT: &str = "message-delivery";
+static DELIVERY_MONITOR_DROPS: OnceLock<tracing_appender::non_blocking::ErrorCounter> = OnceLock::new();
+static DELIVERY_MONITOR_ERRORS: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn delivery_monitor_statistics() -> (usize, u64) {
+    (DELIVERY_MONITOR_DROPS.get().map_or(0, |counter| counter.dropped_lines()), DELIVERY_MONITOR_ERRORS.load(Ordering::Relaxed))
+}
+
+/// Older explicit output lists predate the monitor. Register its normal logging
+/// output beside the main/first file unless the operator supplied one explicitly.
+pub(crate) fn effective_outputs(config: &LoggingConfig) -> Vec<LogOutputConfig> {
+    let mut outputs = config.outputs.clone();
+    if !outputs.iter().any(|output| output.name == DELIVERY_MONITOR_OUTPUT) {
+        let base = outputs.iter().find(|output| output.name == "main").or(outputs.first());
+        outputs.push(LogOutputConfig {
+            name: DELIVERY_MONITOR_OUTPUT.into(),
+            path: base.map_or_else(|| "./logs".into(), |output| output.path.clone()),
+            file: "message-delivery.log".into(), level: "info".into(), rotation: "daily".into(),
+            format: LogOutputFormat::Raw, targets: vec![DELIVERY_MONITOR_TARGET.into()],
+            max_keep_days: base.map_or(7, |output| output.max_keep_days),
+        });
+    }
+    outputs
+}
+
+/// Message-only format for positional monitor records. All non-message fields,
+/// span metadata and the ordinary timestamp/level/target prefix are omitted.
+struct RawMessageFormat;
+impl<S, N> tracing_subscriber::fmt::FormatEvent<S, N> for RawMessageFormat
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+    N: for<'a> tracing_subscriber::fmt::FormatFields<'a> + 'static,
+{
+    fn format_event(&self, _ctx: &tracing_subscriber::fmt::FmtContext<'_, S, N>, mut writer: tracing_subscriber::fmt::format::Writer<'_>, event: &tracing::Event<'_>) -> std::fmt::Result {
+        #[derive(Default)]
+        struct Message(String);
+        impl tracing::field::Visit for Message {
+            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+                if field.name() == "message" { self.0 = format!("{value:?}"); }
+            }
+            fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+                if field.name() == "message" { self.0 = value.to_string(); }
+            }
+        }
+        let mut message = Message::default(); event.record(&mut message);
+        writeln!(writer, "{}", message.0.trim_end_matches('\n'))
+    }
+}
+
+struct ObservedMonitorWriter(RotatingFileWriter);
+impl Write for ObservedMonitorWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let result = self.0.write(bytes);
+        if let Err(error) = &result {
+            DELIVERY_MONITOR_ERRORS.fetch_add(1, Ordering::Relaxed);
+            // Avoid recursively logging from the logging writer thread.
+            eprintln!("[logging] message-delivery write/rotation failed: {error}");
+        }
+        result
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        let result = self.0.flush();
+        if let Err(error) = &result {
+            DELIVERY_MONITOR_ERRORS.fetch_add(1, Ordering::Relaxed);
+            eprintln!("[logging] message-delivery flush failed: {error}");
+        }
+        result
+    }
+}
 
 /// Parse a log level string into a `tracing::Level`.
 fn parse_level(s: &str) -> Level {
@@ -35,7 +107,7 @@ fn parse_level(s: &str) -> Level {
 }
 
 /// Expand `~` prefix to the user's home directory.
-fn expand_tilde(path: &str) -> String {
+pub(crate) fn expand_tilde(path: &str) -> String {
     if path.starts_with("~/") || path == "~" {
         if let Some(home) = std::env::var_os("HOME") {
             return path.replacen('~', &home.to_string_lossy(), 1);
@@ -46,16 +118,24 @@ fn expand_tilde(path: &str) -> String {
 
 /// Build an `EnvFilter` from config: default_level + modules + tags + RUST_LOG overlay.
 fn build_env_filter(config: &LoggingConfig) -> EnvFilter {
-    let mut directives = vec![config.default_level.clone()];
+    build_env_filter_with_overlay(config, std::env::var("RUST_LOG").ok().as_deref())
+}
+
+fn build_env_filter_with_overlay(config: &LoggingConfig, rust_log: Option<&str>) -> EnvFilter {
+    // SQL/run stage profiling is high-volume: global DEBUG must not enable it.
+    // An explicit tag/module or RUST_LOG target directive can opt back in.
+    let mut directives = vec![config.default_level.clone(), "bcs_reply_profile=off".into()];
     for (target, level) in &config.modules {
         directives.push(format!("{target}={level}"));
     }
     for (tag, level) in &config.tags {
         directives.push(format!("{tag}={level}"));
     }
-    if let Ok(rust_log) = std::env::var("RUST_LOG") {
-        directives.push(rust_log);
+    if let Some(rust_log) = rust_log {
+        directives.push(rust_log.to_owned());
     }
+    // Dedicated positional records must not leak to console, even with RUST_LOG.
+    directives.push(format!("{DELIVERY_MONITOR_TARGET}=off"));
     EnvFilter::new(directives.join(","))
 }
 
@@ -65,7 +145,11 @@ fn build_env_filter(config: &LoggingConfig) -> EnvFilter {
 /// target with `!` excludes it from that output, e.g. `["*", "!bcs_chat_digest"]`.
 fn build_output_targets_filter(output: &LogOutputConfig) -> Targets {
     let level = parse_level(&output.level);
-    let mut filter = Targets::new();
+    if output.name == DELIVERY_MONITOR_OUTPUT {
+        return Targets::new().with_target(DELIVERY_MONITOR_TARGET, level);
+    }
+    // Wildcard DEBUG outputs exclude profiling unless the target is named.
+    let mut filter = Targets::new().with_target("bcs_reply_profile", LevelFilter::OFF);
 
     for target in &output.targets {
         let target = target.trim();
@@ -90,7 +174,7 @@ fn build_output_targets_filter(output: &LogOutputConfig) -> Targets {
         }
     }
 
-    filter
+    filter.with_target(DELIVERY_MONITOR_TARGET, LevelFilter::OFF)
 }
 
 /// Get today's date string in local time (YYYY-MM-DD).
@@ -159,15 +243,14 @@ impl<'a> Write for RotatingWriterGuard<'a> {
             let current_path = inner.dir.join(&inner.file_name);
             let rotated = inner.dir.join(format!("{}.{}", inner.file_name, inner.current_date));
 
-            // Close current file, rename, open new
-            let placeholder = File::options().append(true).open("/dev/null");
-            if let Ok(tmp) = placeholder {
-                let old = std::mem::replace(&mut inner.file, tmp);
-                drop(old);
-                let _ = fs::rename(&current_path, &rotated);
-                if let Ok(new_file) = OpenOptions::new().create(true).append(true).open(&current_path) {
-                    inner.file = new_file;
-                }
+            inner.file.flush()?;
+            let rotated = if rotated.exists() {
+                inner.dir.join(format!("{}.{}.{}", inner.file_name, inner.current_date, uuid::Uuid::new_v4().simple()))
+            } else { rotated };
+            fs::rename(&current_path, &rotated)?;
+            match OpenOptions::new().create(true).append(true).open(&current_path) {
+                Ok(file) => inner.file = file,
+                Err(error) => { let _ = fs::rename(&rotated, &current_path); return Err(error); }
             }
             inner.current_date = today;
         }
@@ -233,13 +316,16 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) -> LoggingGuard {
         "[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:3]"
     ));
 
-    let file_layers: Vec<Box<dyn Layer<_> + Send + Sync>> = config
-        .outputs
+    let outputs = effective_outputs(config);
+    let file_layers: Vec<Box<dyn Layer<_> + Send + Sync>> = outputs
         .iter()
         .filter_map(|output| {
             let path = expand_tilde(&output.path);
             let dir = PathBuf::from(&path);
             if let Err(e) = fs::create_dir_all(&dir) {
+                if output.name == DELIVERY_MONITOR_OUTPUT {
+                    panic!("Failed to create delivery monitor log directory '{}': {}", path, e);
+                }
                 eprintln!(
                     "[logging] WARNING: failed to create log directory '{}': {}. Output '{}' disabled.",
                     path, e, output.name
@@ -247,12 +333,28 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) -> LoggingGuard {
                 return None;
             }
 
-            let (writer, guard) = buffered_writer(RotatingFileWriter::new(&dir, &output.file));
+            let rotating = RotatingFileWriter::new(&dir, &output.file);
+            let (writer, guard) = if output.name == DELIVERY_MONITOR_OUTPUT {
+                let pair = buffered_writer(ObservedMonitorWriter(rotating));
+                let _ = DELIVERY_MONITOR_DROPS.set(pair.0.error_counter());
+                pair
+            } else { buffered_writer(rotating) };
             workers.push(guard);
 
             let filter = build_output_targets_filter(output);
             let output_timer = timer_for_output(&output.name, &timer, &millisecond_timer);
-            match output.format {
+            // Preserve the monitor's positional contract even for a legacy
+            // explicit output that omitted format (which otherwise defaults text).
+            let format = if output.name == DELIVERY_MONITOR_OUTPUT { LogOutputFormat::Raw } else { output.format };
+            match format {
+                LogOutputFormat::Raw => Some(
+                    tracing_subscriber::fmt::layer()
+                        .event_format(RawMessageFormat)
+                        .with_writer(writer)
+                        .with_ansi(false)
+                        .with_filter(filter)
+                        .boxed(),
+                ),
                 LogOutputFormat::Text => Some(
                     tracing_subscriber::fmt::layer()
                         .with_writer(writer)
@@ -347,6 +449,7 @@ fn cleanup_old_logs(output: &LogOutputConfig) {
 
         if modified < cutoff {
             if let Err(e) = fs::remove_file(entry.path()) {
+                if output.name == DELIVERY_MONITOR_OUTPUT { DELIVERY_MONITOR_ERRORS.fetch_add(1, Ordering::Relaxed); }
                 tracing::warn!(
                     file = %entry.path().display(),
                     error = %e,
@@ -367,6 +470,94 @@ mod tests {
     use super::*;
     use std::ffi::OsStr;
     use tracing_subscriber::layer::SubscriberExt;
+
+    #[test]
+    fn reply_profile_requires_explicit_target_even_at_global_debug() {
+        for explicit in [false, true] {
+            let mut config = LoggingConfig::default();
+            config.default_level = "debug".into();
+            if explicit { config.tags.insert("bcs_reply_profile".into(), "debug".into()); }
+            let console = tracing_subscriber::registry().with(
+                tracing_subscriber::fmt::layer().with_writer(std::io::sink).with_filter(build_env_filter_with_overlay(&config, None))
+            );
+            tracing::subscriber::with_default(console, || {
+                assert_eq!(tracing::enabled!(target: "bcs_reply_profile", Level::DEBUG), explicit);
+                assert!(tracing::enabled!(target: "ordinary_test", Level::DEBUG));
+                assert!(!tracing::enabled!(target: DELIVERY_MONITOR_TARGET, Level::INFO));
+            });
+            let mut output = config.outputs[0].clone();
+            output.name = "main".into(); output.level = "debug".into();
+            output.targets = vec!["*".into()];
+            if explicit { output.targets.push("bcs_reply_profile".into()); }
+            let file = tracing_subscriber::registry().with(
+                tracing_subscriber::fmt::layer().with_writer(std::io::sink).with_filter(build_output_targets_filter(&output))
+            );
+            tracing::subscriber::with_default(file, || {
+                assert_eq!(tracing::enabled!(target: "bcs_reply_profile", Level::DEBUG), explicit);
+                assert!(tracing::enabled!(target: "ordinary_test", Level::DEBUG));
+                assert!(!tracing::enabled!(target: DELIVERY_MONITOR_TARGET, Level::INFO));
+            });
+        }
+    }
+
+    #[test]
+    fn monitor_uses_existing_raw_layer_worker_and_excludes_other_outputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = LoggingConfig::default();
+        config.outputs.retain(|output| output.name == DELIVERY_MONITOR_OUTPUT);
+        let output = &mut config.outputs[0];
+        output.path = dir.path().to_string_lossy().into_owned();
+        let output = output.clone();
+        let mut main = output.clone(); main.name = "main".into(); main.file = "bcs.log".into(); main.targets = vec!["*".into()]; main.format = LogOutputFormat::Text;
+        let (writer, guard) = buffered_writer(RotatingFileWriter::new(dir.path(), &output.file));
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::layer().event_format(RawMessageFormat).with_writer(writer).with_filter(build_output_targets_filter(&output)))
+            .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(RotatingFileWriter::new(dir.path(), &main.file)).with_filter(build_output_targets_filter(&main)))
+            .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(RotatingFileWriter::new(dir.path(), "console.log")).with_filter(build_env_filter(&config)));
+        let dispatch = tracing::Dispatch::new(subscriber);
+        let rows = "1,1000,boot,0,0,0,0,0,1,3,0,0,0,1,1000\n1,1000,boot,0,0,0,0,0,2,1,0,0,0,1,1000";
+        tracing::dispatcher::with_default(&dispatch, || {
+            tracing::info!(target: DELIVERY_MONITOR_TARGET, ignored = "never-written", "{rows}");
+            tracing::error!("ordinary message");
+        });
+        drop(guard);
+        let monitor = fs::read_to_string(dir.path().join("message-delivery.log")).unwrap();
+        assert_eq!(monitor, format!("{rows}\n"));
+        assert!(monitor.lines().all(|line| line.split(',').count() == 15));
+        for file in ["bcs.log", "console.log"] {
+            let text = fs::read_to_string(dir.path().join(file)).unwrap();
+            assert!(text.contains("ordinary message"), "{file}: {text:?}"); assert!(!text.contains("1,1000,boot"));
+        }
+    }
+
+    #[test]
+    fn monitor_output_reuses_explicit_config_or_registers_beside_main() {
+        let mut config = LoggingConfig::default();
+        config.outputs.retain(|output| output.name == DELIVERY_MONITOR_OUTPUT);
+        config.outputs[0].path = "/configured/logs".into(); config.outputs[0].file = "custom-monitor.log".into();
+        assert_eq!(effective_outputs(&config)[0].file, "custom-monitor.log");
+        config.outputs[0].name = "main".into();
+        let outputs = effective_outputs(&config);
+        assert_eq!(outputs.len(), 2); assert_eq!(outputs[1].path, "/configured/logs");
+        assert_eq!(outputs[1].file, "message-delivery.log"); assert_eq!(outputs[1].format, LogOutputFormat::Raw);
+    }
+
+    #[test]
+    fn shared_rotating_writer_preserves_monitor_records_and_retention() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut writer = RotatingFileWriter::new(dir.path(), "message-delivery.log");
+        writer.write_all(b"old\n").unwrap();
+        writer.inner.lock().unwrap().current_date = "2000-01-01".into();
+        writer.write_all(b"new\n").unwrap(); writer.flush().unwrap();
+        let rotated = dir.path().join("message-delivery.log.2000-01-01");
+        assert_eq!(fs::read_to_string(&rotated).unwrap(), "old\n");
+        assert_eq!(fs::read_to_string(dir.path().join("message-delivery.log")).unwrap(), "new\n");
+        File::open(&rotated).unwrap().set_times(fs::FileTimes::new().set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1))).unwrap();
+        let mut output = LoggingConfig::default().outputs.into_iter().find(|o| o.name == DELIVERY_MONITOR_OUTPUT).unwrap();
+        output.path = dir.path().to_string_lossy().into_owned();
+        cleanup_old_logs(&output);
+        assert!(!rotated.exists()); assert!(dir.path().join("message-delivery.log").exists());
+    }
 
     #[test]
     fn worker_guard_flushes_all_queued_file_lines() {

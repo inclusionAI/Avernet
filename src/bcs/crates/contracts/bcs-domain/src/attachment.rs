@@ -12,8 +12,10 @@ pub enum AttachmentType {
 
 /// A temporary attachment reference carried through the message flow.
 ///
-/// The URL is an ephemeral capability and must not be persisted. Persisted
-/// message history should use [`Attachment::stable_metadata`] instead.
+/// The URL is an ephemeral capability. Public history/events use
+/// [`Attachment::stable_metadata`]. Managed queue admission separately persists
+/// the original URL in canonical content.attachments for delayed delivery;
+/// that private persistence must not be reused as a public history projection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Attachment {
     pub attachment_id: String,

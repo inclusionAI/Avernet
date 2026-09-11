@@ -5,6 +5,11 @@
 - Infrastructure database plugin contract for BCS services.
 - Shared DB error types and async trait boundary.
 - A driver-level SQL execution surface for local and remote implementations.
+- `ExecuteChecked` transaction steps require an exact affected-row count before
+  commit; mismatch returns `DbError::ConditionFailed` and rolls back every step.
+  Existing Execute semantics are unchanged. Plugins must implement the new enum
+  variant explicitly; services use version-changing CAS to avoid no-op UPDATE
+  affected-row differences between MySQL and SQLite.
 
 ## Consumes
 

@@ -1228,6 +1228,27 @@ async fn handle_accepted_run_id_response(
     res: &ResponseFrame,
     registered_bot_id: &Option<String>,
 ) {
+    // A managed send has a per-attempt request id distinct from its canonical
+    // run id. Resolve it before projecting the engine's accepted run alias.
+    if let Some(bot_id) = registered_bot_id.as_deref() {
+        let downstream = res.payload.as_ref().and_then(|p| p.get("run_id")).and_then(|v| v.as_str());
+        if let Err(error) = state.message_flow.record_delivery_acceptance(run_id, bot_id, downstream).await {
+            warn!(%error, "failed to persist Bot delivery ACK; alias projection withheld");
+            return;
+        }
+    }
+    let active = match state.bot_run_context.find_active_run(run_id).await {
+        Ok(active) => active,
+        Err(error) => {
+            warn!(%error, "failed to resolve accepted request alias");
+            return;
+        }
+    };
+    if active.as_ref().is_some_and(|a| registered_bot_id.as_deref() != Some(a.scope.bot_id.as_str())) {
+        warn!("accepted request alias does not belong to responding Bot");
+        return;
+    }
+    let run_id = active.as_ref().map(|a| a.canonical_run_id.as_str()).unwrap_or(run_id);
     if let Some(sub_run_id) = res
         .payload
         .as_ref()

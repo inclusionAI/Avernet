@@ -1,5 +1,7 @@
 //! Application service contract harnesses.
 
+pub mod message_delivery;
+
 use bcs_service_api::application::v1::{
     AuthenticatedBotIdentity, AuthenticatedCaller, BotService, CreateEventSubscription,
     EventSubscriptionDesiredStatus, EventSubscriptionService, EventSubscriptionStatus,

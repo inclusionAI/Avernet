@@ -50,6 +50,8 @@ async fn metrics_wrappers_record_expected_labels_and_preserve_results() {
 
     let flow = Arc::new(MessageFlowFake);
     let flow = InstrumentedMessageFlowService::new(flow, env.clone());
+    assert!(flow.record_delivery_acceptance("attempt", "bot-target", Some("engine-run")).await.is_err(),
+        "ACK persistence errors must not be swallowed by instrumentation");
     assert_eq!(
         flow.handle_web_send(web_send_cmd()).await.unwrap().status,
         "ok"
@@ -312,8 +314,12 @@ struct MessageFlowFake;
 
 #[async_trait]
 impl MessageFlowService for MessageFlowFake {
+    async fn record_delivery_acceptance(&self, _request_id: &str, _bot_id: &str, _downstream_run_id: Option<&str>) -> ServiceResult<()> {
+        Err(ServiceError::InternalError("test ACK persistence failure".into()))
+    }
     async fn handle_web_send(&self, _cmd: WebSendCommand) -> ServiceResult<WebSendOutcome> {
         Ok(WebSendOutcome {
+            queue_admission: None,
             primary_run_id: "run-wrapper".to_string(),
             status: "ok".to_string(),
             active_run_ids: vec![],
@@ -329,6 +335,7 @@ impl MessageFlowService for MessageFlowFake {
 
     async fn handle_group_chat(&self, _cmd: GroupChatCommand) -> ServiceResult<GroupChatOutcome> {
         Ok(GroupChatOutcome {
+            queue_admission: None,
             group_id: "group-wrapper".to_string(),
             driver_bot_id: "bot-driver".to_string(),
             delivered_count: 0,
@@ -344,6 +351,7 @@ impl MessageFlowService for MessageFlowFake {
         _cmd: PersistentGroupSendCommand,
     ) -> ServiceResult<PersistentGroupSendOutcome> {
         Ok(PersistentGroupSendOutcome {
+            queue_admission: None,
             message_id: "msg-wrapper".to_string(),
             routed_to: vec![],
             mentions: vec![],

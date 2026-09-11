@@ -63,6 +63,58 @@ impl RecordingChannelService {
     }
 }
 
+#[tokio::test]
+async fn queued_im_hints_aggregate_targets_and_do_not_replay_on_restart() {
+    use bcs_domain::{DeliveryType, NewMessage, SenderType, message_delivery::DeliveryFlowKind};
+    use bcs_service_api::{ManagedMessageDeliveryService, DeliveryTransitionCommand};
+    use bcs_service_api::port::repo::message_delivery::{AdmitMessageDeliveries, DeliveryAdmissionTarget};
+    let fixture = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let repo = Arc::new(bcs_message_store::MemoryMessageRepo::new());
+    let service = Arc::new(bcs_message_flow::managed_delivery::ManagedMessageDelivery::new(repo.clone()));
+    let flow = Arc::new(BcsMessageFlow::new(fixture.group, fixture.routing, fixture.registry, fixture.bot_delivery, fixture.frontend_delivery)
+        .with_message_repo(repo).with_managed_deliveries(service.clone()));
+    let channel = Arc::new(RecordingChannelService::default());
+    assert!(flow.channel_slot().set(channel.clone()).is_ok());
+    let (shutdown, receiver) = tokio::sync::watch::channel(false);
+    let notifications = tokio::spawn(bcs_message_flow::delivery_notifications::run(Arc::downgrade(&flow), service.subscribe(), receiver));
+    let now = chrono::Utc::now().timestamp_millis();
+    let admitted = service.admit(AdmitMessageDeliveries {
+        display_message: None,
+        message_id: "im-queue".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now - 3_000, expire_at_ms: None, event: None,
+        targets: [("bot-driver", DeliveryType::Send), ("bot-observer", DeliveryType::Send), ("context-only", DeliveryType::Inject)].into_iter()
+            .map(|(bot, kind)| DeliveryAdmissionTarget { target_bot_id: bot.into(), kind, max_queued: 10, semantic_projection_json: json!({"version":1}) }).collect(),
+        message: NewMessage { visibility_domain: MessageVisibilityDomain::Chat, audience: None, group_id: "group-1".into(), session_id: "group-1:im-original".into(), sender_id: "human_1".into(), sender_type: SenderType::Human,
+            message_type: "chat".into(), content: json!({"text":"hello","source_im_message_id":"im-original"}), client_msg_id: None, owner_bot_id: None, created_at: (now - 3_000) as u64, run_id: String::new() },
+    }).await.unwrap();
+    timeout(Duration::from_secs(2), async {
+        while channel.outbound().await.is_empty() { tokio::time::sleep(Duration::from_millis(10)).await; }
+    }).await.unwrap();
+    let messages = channel.outbound().await;
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].source_im_message_id.as_deref(), Some("im-original"));
+    assert_eq!(messages[0].bcs_session_id, "group-1:im-original");
+    let text = messages[0].text.as_ref().unwrap();
+    assert!(text.contains("bot-driver") && text.contains("bot-observer") && text.contains("已排队"));
+    assert!(!text.contains("context-only"));
+    let row = &admitted.deliveries[0];
+    service.transition(DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
+        event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,
+        now_ms: now, request_id: None, actor_id: Some("human_1".into()), reply: None, transport_context_json: None, deadline_at_ms: None,
+    }).await.unwrap();
+    timeout(Duration::from_secs(2), async {
+        while channel.outbound().await.len() < 2 { tokio::time::sleep(Duration::from_millis(10)).await; }
+    }).await.unwrap();
+    assert!(channel.outbound().await[1].text.as_ref().unwrap().contains("已取消"));
+    shutdown.send(true).unwrap();
+    notifications.await.unwrap();
+    let (shutdown, receiver) = tokio::sync::watch::channel(false);
+    let restarted = tokio::spawn(bcs_message_flow::delivery_notifications::run(Arc::downgrade(&flow), service.subscribe(), receiver));
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(channel.outbound().await.len(), 2, "notifications are not replayed from durable state");
+    shutdown.send(true).unwrap();
+    restarted.await.unwrap();
+}
+
 #[async_trait::async_trait]
 impl ChannelService for RecordingChannelService {
     async fn handle_inbound(
@@ -4935,6 +4987,11 @@ impl RecordingMessageRepo {
 
 #[async_trait::async_trait]
 impl bcs_service_api::port::repo::MessageRepoPort for RecordingMessageRepo {
+    async fn run_chat_segments(&self, session: &str, sender: &str, run: &str) -> Result<Vec<bcs_domain::PersistedMessage>, bcs_service_api::port::repo::MessageRepoError> {
+        let memory = bcs_message_store::MemoryMessageRepo::new();
+        for message in self.appended.read().await.iter().cloned() { memory.append_message(message).await?; }
+        memory.run_chat_segments(session, sender, run).await
+    }
     async fn append_message(
         &self,
         msg: bcs_domain::NewMessage,
@@ -5026,6 +5083,11 @@ impl BlockingMessageRepo {
 
 #[async_trait::async_trait]
 impl bcs_service_api::port::repo::MessageRepoPort for BlockingMessageRepo {
+    async fn run_chat_segments(&self, session: &str, sender: &str, run: &str) -> Result<Vec<bcs_domain::PersistedMessage>, bcs_service_api::port::repo::MessageRepoError> {
+        let memory = bcs_message_store::MemoryMessageRepo::new();
+        for message in self.appended.read().await.iter().cloned() { memory.append_message(message).await?; }
+        memory.run_chat_segments(session, sender, run).await
+    }
     async fn append_message(
         &self,
         msg: bcs_domain::NewMessage,

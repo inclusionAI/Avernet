@@ -760,6 +760,33 @@ impl InstrumentedMessageFlowService {
 #[cfg(feature = "prometheus-metrics")]
 #[async_trait::async_trait]
 impl MessageFlowService for InstrumentedMessageFlowService {
+    async fn resolve_managed_provider_run(&self, run_id: &str, provider_id: &str, bot_id: &str) -> ServiceResult<Option<bcs_service_api::BotRunContext>> {
+        self.inner.resolve_managed_provider_run(run_id, provider_id, bot_id).await
+    }
+    async fn query_message_deliveries(&self, query: bcs_service_api::application::message_delivery::DeliveryStatusQuery) -> ServiceResult<Vec<bcs_service_api::application::message_delivery::DeliveryStatusView>> {
+        self.inner.query_message_deliveries(query).await
+    }
+    async fn cancel_message_deliveries(&self, command: bcs_service_api::application::message_delivery::CancelMessageDeliveryCommand) -> ServiceResult<Vec<bcs_service_api::application::message_delivery::CancelMessageDeliveryResult>> {
+        self.inner.cancel_message_deliveries(command).await
+    }
+    async fn shutdown_managed_delivery(&self) -> ServiceResult<()> {
+        self.inner.shutdown_managed_delivery().await
+    }
+    async fn get_delivery_policy(&self, caller: bcs_service_api::CallerContext) -> ServiceResult<bcs_config_api::message_delivery::DeliveryPolicyRecord> {
+        self.inner.get_delivery_policy(caller).await
+    }
+    async fn replace_delivery_policy(&self, caller: bcs_service_api::CallerContext, expected: u64, policy: bcs_config_api::message_delivery::DeliveryPolicy) -> ServiceResult<bcs_config_api::message_delivery::DeliveryPolicyRecord> {
+        self.inner.replace_delivery_policy(caller, expected, policy).await
+    }
+    async fn record_delivery_acceptance(
+        &self,
+        request_id: &str,
+        bot_id: &str,
+        downstream_run_id: Option<&str>,
+    ) -> ServiceResult<()> {
+        self.inner.record_delivery_acceptance(request_id, bot_id, downstream_run_id).await
+    }
+
     async fn handle_web_send(&self, cmd: WebSendCommand) -> ServiceResult<WebSendOutcome> {
         let result = self.inner.handle_web_send(cmd).await;
         self.record(
@@ -1000,6 +1027,42 @@ impl MetricsBotDeliveryPort {
 #[cfg(feature = "prometheus-metrics")]
 #[async_trait::async_trait]
 impl BotDeliveryPort for MetricsBotDeliveryPort {
+    async fn connection_identity(&self, target: &BotDeliveryTarget) -> Option<String> {
+        self.inner.connection_identity(target).await
+    }
+
+    async fn deliver_on_connection(
+        &self,
+        cmd: BotDeliveryCommand,
+        connection_id: &str,
+    ) -> ServiceResult<BotDeliveryResult> {
+        let kind = bot_delivery_metric_kind(&cmd.delivery_kind);
+        let start = Instant::now();
+        let result = self.inner.deliver_on_connection(cmd, connection_id).await;
+        let (outcome, code) = match &result {
+            Ok(r) if r.delivered => (DeliveryOutcome::Delivered, DeliveryErrorCode::None),
+            Ok(r) => (DeliveryOutcome::Failed, r.error.as_ref().map(service_error_code).unwrap_or(DeliveryErrorCode::Unknown)),
+            Err(e) => (DeliveryOutcome::Failed, service_error_code(e)),
+        };
+        record_delivery(&self.env, DeliveryMetricTarget::Bot, kind, outcome, code, start.elapsed());
+        result
+    }
+
+    async fn abort_on_connection(
+        &self,
+        cmd: BotAbortDeliveryCommand,
+        connection_id: &str,
+    ) -> ServiceResult<BotAbortDeliveryResult> {
+        let start = Instant::now();
+        let result = self.inner.abort_on_connection(cmd, connection_id).await;
+        let (outcome, code) = match &result {
+            Ok(_) => (DeliveryOutcome::Delivered, DeliveryErrorCode::None),
+            Err(e) => (DeliveryOutcome::Failed, service_error_code(e)),
+        };
+        record_delivery(&self.env, DeliveryMetricTarget::Bot, DeliveryMetricKind::Abort, outcome, code, start.elapsed());
+        result
+    }
+
     async fn is_available(&self, target: &BotDeliveryTarget) -> bool {
         self.inner.is_available(target).await
     }
@@ -1978,6 +2041,12 @@ fn install_recorder_once() -> Result<PrometheusHandle> {
     }
 
     let builder = PrometheusBuilder::new()
+        .set_buckets_for_metric(Matcher::Full("bcs_delivery_queue_wait_seconds".into()), &[0.1, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0])
+        .map_err(|e| BcsError::InvalidConfig(format!("invalid queue metrics buckets: {e}")))?
+        .set_buckets_for_metric(Matcher::Full("bcs_delivery_run_seconds".into()), &[0.1, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0])
+        .map_err(|e| BcsError::InvalidConfig(format!("invalid queue metrics buckets: {e}")))?
+        .set_buckets_for_metric(Matcher::Full("bcs_delivery_worker_batch_rows".into()), &[0.0, 1.0, 8.0, 32.0, 100.0, 200.0])
+        .map_err(|e| BcsError::InvalidConfig(format!("invalid queue metrics buckets: {e}")))?
         .set_buckets_for_metric(
             Matcher::Full("bcs_http_request_duration_seconds".to_string()),
             HTTP_DURATION_BUCKETS_SECONDS,
