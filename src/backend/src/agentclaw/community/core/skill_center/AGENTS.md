@@ -148,6 +148,8 @@ SC Public 引用已是持久异步批量 Operation：
 
 `services/skill_symlink_listener.py` 处理设备激活和重投影事件；通过正式 Projector 恢复当前 Desired State。既有兼容 fallback 不是新增业务写入入口。
 
+Desktop Skill Recovery 使用 Bot 级持久任务，但明确设备离线不是当前任务可修复的故障：`ACTIVE/PENDING` 可运行，`OFFLINE` 等待重连事件，`FAILED/RELEASING/RELEASED` 与未知状态停止。BaaS 仅按可信非 2xx JSON 的精确 `detail.error=NO_ACTIVE_DEVICES` 产生结构化离线错误；Runtime 返回 `DESKTOP_DEVICE_OFFLINE / PENDING / retryable=true`，其中 `retryable` 表示未来再次投影可能恢复，不授权当前任务高频重试。当前任务结束并释放 live key，健康扫描实际提交 `OFFLINE -> ACTIVE` 后发布 `RuntimeProjectionRequestedEvent` 立即唤醒，约十分钟 Sweeper 只为可运行状态兜底。timeout/5xx 继续故障退避，Center 正常下载仍按五秒进度跟进。
+
 Service Bot 的边界在 `community/core/service_bot/services/`：
 
 - `publish_flow/build_stage.py` 与 `deploy/artifact_build_request.py`：文件型 Producer 使用本次 Runtime layout observation。

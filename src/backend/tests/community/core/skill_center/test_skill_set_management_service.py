@@ -9,7 +9,7 @@ import pathlib
 import re
 from dataclasses import replace
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -3717,6 +3717,107 @@ async def test_failed_skill_delivery_does_not_skip_the_mcp_half():
     assert result.status.value == "PENDING"
     assert result.issues[0].code == "SKILL_RUNTIME_UNAVAILABLE"
     assert len(factory.service.mcp_projections) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("bot_status", "log_method"),
+    [("OFFLINE", "info"), ("ACTIVE", "warning")],
+)
+async def test_explicit_desktop_offline_is_pending_without_error_traceback(
+    bot_status: str, log_method: str
+) -> None:
+    from agentclaw.community.core.devices.services.device_context import (
+        DeviceOfflineError,
+    )
+    from agentclaw.community.core.skill_center.runtime_projection_contract import (
+        ResolvedSkillPlan,
+        RuntimeProjectionStatus,
+    )
+    from agentclaw.community.core.skill_center.runtime_resolver import (
+        RuntimeSkillProjection,
+    )
+    from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import (
+        PerDomainRuntimeProjection,
+    )
+
+    delivery = MagicMock()
+    delivery.deliver = AsyncMock(side_effect=DeviceOfflineError("offline"))
+    projection = PerDomainRuntimeProjection(skill_delivery=delivery)
+    plan = ResolvedSkillPlan(
+        bot_id="desktop-a",
+        owner_id="owner-a",
+        bot={"status": bot_status},
+        engine="hermes",
+        projection=RuntimeSkillProjection(skill_mappings=(), skill_assets=()),
+    )
+
+    with patch(
+        "agentclaw.community.core.skill_center.services.runtime_projections."
+        "per_domain.logger"
+    ) as log:
+        result = await projection.apply(
+            plan=plan,
+            scope=ProjectionScope(skills=True),
+            service_factory=MagicMock(),
+        )
+
+    assert result.status is RuntimeProjectionStatus.PENDING
+    assert result.issues[0].code == "DESKTOP_DEVICE_OFFLINE"
+    assert result.issues[0].retryable is True
+    assert "上线后自动同步" in result.issues[0].reason
+    calls = getattr(log, log_method).call_args_list
+    assert any("Desktop device offline" in str(call.args[0]) for call in calls)
+    log.exception.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_transient_desktop_connection_failure_is_retryable_warning() -> None:
+    from agentclaw.community.core.devices.services.device_context import (
+        DeviceConnectionUnavailableError,
+    )
+    from agentclaw.community.core.skill_center.runtime_projection_contract import (
+        ResolvedSkillPlan,
+        RuntimeProjectionStatus,
+    )
+    from agentclaw.community.core.skill_center.runtime_resolver import (
+        RuntimeSkillProjection,
+    )
+    from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import (
+        PerDomainRuntimeProjection,
+    )
+
+    delivery = MagicMock()
+    delivery.deliver = AsyncMock(
+        side_effect=DeviceConnectionUnavailableError("timeout")
+    )
+    projection = PerDomainRuntimeProjection(skill_delivery=delivery)
+    plan = ResolvedSkillPlan(
+        bot_id="desktop-a",
+        owner_id="owner-a",
+        bot={"status": "ACTIVE"},
+        engine="openclaw",
+        projection=RuntimeSkillProjection(skill_mappings=(), skill_assets=()),
+    )
+
+    with patch(
+        "agentclaw.community.core.skill_center.services.runtime_projections."
+        "per_domain.logger"
+    ) as log:
+        result = await projection.apply(
+            plan=plan,
+            scope=ProjectionScope(skills=True),
+            service_factory=MagicMock(),
+        )
+
+    assert result.status is RuntimeProjectionStatus.PENDING
+    assert result.issues[0].code == "SKILL_RUNTIME_UNAVAILABLE"
+    assert result.issues[0].retryable is True
+    assert any(
+        "transient" in str(call.args[0]).lower()
+        for call in log.warning.call_args_list
+    )
+    log.exception.assert_not_called()
 
 
 # ── Skill mutations carry the Skill's MCP dependencies ───────────────

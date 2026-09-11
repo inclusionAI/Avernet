@@ -26,6 +26,8 @@ from agentclaw.community.core.desktop_bot.errors import (
 from agentclaw.community.core.desktop_bot.status_mapping import StatusDecision
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.device_service import DeviceService
+from agentclaw.community.core.events.bus import get_event_bus
+from agentclaw.community.core.events.types import RuntimeProjectionRequestedEvent
 from agentclaw.community.core.mcp.services.passport_scope import filter_passport_mcp_codes
 from agentclaw.community.core.service_bot.services.baas_service import (
     BaasService,
@@ -223,6 +225,12 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 owner_id=owner_id,
                 status=decision.target_status,
             )
+            if current_status == "OFFLINE" and decision.target_status == "ACTIVE":
+                self._request_runtime_projection_after_reconnect(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    binding_id=binding_id,
+                )
         if decision.release_reason:
             self._merge_bot_ext(bot_id, owner_id, {
                 "release_reason": decision.release_reason,
@@ -237,6 +245,53 @@ class DesktopBotService(DesktopBotServiceProtocol):
         self._merge_bot_ext(bot_id, owner_id, {
             "last_health_check": datetime.now().isoformat(),
         })
+
+    def _request_runtime_projection_after_reconnect(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        binding_id: int | str | None,
+    ) -> None:
+        """Wake current desired-state projection after a confirmed reconnect."""
+
+        if binding_id is None:
+            return
+        try:
+            bot = self._bot_repo.get_by_id_and_owner(
+                bot_id=bot_id,
+                owner_id=owner_id,
+            )
+            if (
+                bot is None
+                or str(bot.get("status") or "").upper() != "ACTIVE"
+                or str(bot.get("binding_id")) != str(binding_id)
+            ):
+                return
+            binding = self._binding_repo.get_by_id(binding_id=int(binding_id))
+            if (
+                binding is None
+                or str(binding.status or "").upper() != "ACTIVE"
+            ):
+                return
+            get_event_bus().publish(
+                RuntimeProjectionRequestedEvent(
+                    device_id=binding.device_id,
+                    binding_id=binding.id,
+                    entity_id=binding.entity_id,
+                    entity_type=binding.entity_type,
+                    device_provider=binding.device_provider,
+                    sandbox_id=(binding.device_props or {}).get("sandbox_id"),
+                )
+            )
+        except Exception:
+            logger.exception(
+                "[health-check] runtime projection wake-up failed "
+                "bot_id=%s owner_id=%s binding_id=%s",
+                bot_id,
+                owner_id,
+                binding_id,
+            )
 
     def _merge_bot_ext(self, bot_id: str, owner_id: str, patch: dict) -> None:
         """Read-modify-write bot ext field, merging only specified keys."""

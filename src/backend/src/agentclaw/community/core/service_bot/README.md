@@ -14,6 +14,8 @@ provides:
   - "BotProcessRegistry"
   - "BotPublishService"
   - "BaasService"
+  - "BaasNoActiveDevicesError"
+  - "BaasTransientServiceError"
   - "ServiceSkillsManifestBuilder"
   - "ResolvedSharedCorpusDelivery"
   - "ArtifactBuildRequest"

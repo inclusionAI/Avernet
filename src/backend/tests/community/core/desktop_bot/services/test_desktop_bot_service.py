@@ -1555,6 +1555,117 @@ def _make_service_with_mocks():
     return service, mocks
 
 
+def test_offline_to_active_health_transition_requests_runtime_projection() -> None:
+    from agentclaw.community.core.desktop_bot.status_mapping import StatusDecision
+    from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
+    from agentclaw.community.core.events.types import RuntimeProjectionRequestedEvent
+
+    service, mocks = _make_service_with_mocks()
+    binding = MagicMock(
+        id=17,
+        device_id="BOT-desktop-a",
+        entity_id="owner-a",
+        entity_type="staff",
+        device_provider="baas",
+        device_props={},
+        status="ACTIVE",
+    )
+    mocks["binding_repo"].get_by_id.return_value = binding
+    mocks["bot_repo"].get_by_id_and_owner.return_value = {
+        "bot_id": "desktop-a",
+        "owner_id": "owner-a",
+        "binding_id": 17,
+        "status": "ACTIVE",
+    }
+    projected: list[RuntimeProjectionRequestedEvent] = []
+    reset_event_bus()
+    get_event_bus().subscribe(RuntimeProjectionRequestedEvent, projected.append)
+    try:
+        service._apply_decision(
+            "desktop-a",
+            "owner-a",
+            17,
+            "OFFLINE",
+            StatusDecision(target_status="ACTIVE"),
+        )
+    finally:
+        reset_event_bus()
+
+    assert projected == [
+        RuntimeProjectionRequestedEvent(
+            device_id="BOT-desktop-a",
+            binding_id=17,
+            entity_id="owner-a",
+            entity_type="staff",
+            device_provider="baas",
+            sandbox_id=None,
+        )
+    ]
+
+
+def test_active_health_heartbeat_does_not_repeat_runtime_projection() -> None:
+    from agentclaw.community.core.desktop_bot.status_mapping import StatusDecision
+    from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
+    from agentclaw.community.core.events.types import RuntimeProjectionRequestedEvent
+
+    service, _mocks = _make_service_with_mocks()
+    projected: list[RuntimeProjectionRequestedEvent] = []
+    reset_event_bus()
+    get_event_bus().subscribe(RuntimeProjectionRequestedEvent, projected.append)
+    try:
+        service._apply_decision(
+            "desktop-a",
+            "owner-a",
+            17,
+            "ACTIVE",
+            StatusDecision(target_status="ACTIVE"),
+        )
+    finally:
+        reset_event_bus()
+
+    assert projected == []
+
+
+def test_reconnect_event_failure_does_not_rollback_active_status() -> None:
+    from agentclaw.community.core.desktop_bot.status_mapping import StatusDecision
+
+    service, mocks = _make_service_with_mocks()
+    mocks["bot_repo"].get_by_id_and_owner.return_value = {
+        "bot_id": "desktop-a",
+        "owner_id": "owner-a",
+        "binding_id": 17,
+        "status": "ACTIVE",
+    }
+    mocks["binding_repo"].get_by_id.return_value = MagicMock(
+        id=17,
+        device_id="BOT-desktop-a",
+        entity_id="owner-a",
+        entity_type="staff",
+        device_provider="baas",
+        device_props={},
+        status="ACTIVE",
+    )
+
+    with patch(
+        "agentclaw.community.core.desktop_bot.services.desktop_bot_service."
+        "get_event_bus"
+    ) as event_bus:
+        event_bus.return_value.publish.side_effect = RuntimeError("listener down")
+        service._apply_decision(
+            "desktop-a",
+            "owner-a",
+            17,
+            "OFFLINE",
+            StatusDecision(target_status="ACTIVE"),
+        )
+
+    mocks["bot_repo"].update_by_owner.assert_any_call(
+        bot_id="desktop-a",
+        owner_id="owner-a",
+        update_data={"status": "ACTIVE"},
+    )
+
+
 def _setup_local_lookup(mocks, bot_id, device_id="m-001", active_engine="openclaw"):
     """Set up the mocks for _lookup_local success case."""
     binding = MagicMock(id=1, entity_id="staff_u001", entity_type="staff")

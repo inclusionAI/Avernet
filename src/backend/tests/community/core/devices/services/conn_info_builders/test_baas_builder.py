@@ -2,7 +2,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentclaw.community.core.devices.services.device_context import ConnInfoBuildError
+from agentclaw.community.core.devices.services.device_context import (
+    ConnInfoBuildError,
+    DeviceConnectionUnavailableError,
+    DeviceOfflineError,
+)
+from agentclaw.community.core.service_bot.services.baas_service import (
+    BaasNoActiveDevicesError,
+    BaasTransientServiceError,
+)
 from agentclaw.community.core.devices.services.conn_info_builders.baas_builder import (
     BaasConnInfoBuilder,
 )
@@ -101,6 +109,30 @@ def test_build_raises_conn_info_build_error_on_get_ws_info_failure(
     builder = _make_builder(fake_baas_service, fake_bot_repo, fake_device_repo)
 
     with pytest.raises(ConnInfoBuildError):
+        builder.build(fake_binding, user_id="user-1")
+
+
+def test_build_preserves_explicit_device_offline_as_provider_neutral_error(
+    fake_binding, fake_baas_service, fake_bot_repo, fake_device_repo
+):
+    fake_baas_service.get_ws_info.side_effect = BaasNoActiveDevicesError(
+        status_code=404
+    )
+    builder = _make_builder(fake_baas_service, fake_bot_repo, fake_device_repo)
+
+    with pytest.raises(DeviceOfflineError):
+        builder.build(fake_binding, user_id="user-1")
+
+
+def test_build_preserves_transient_connection_failure_without_calling_it_offline(
+    fake_binding, fake_baas_service, fake_bot_repo, fake_device_repo
+):
+    fake_baas_service.get_ws_info.side_effect = BaasTransientServiceError(
+        "BaaS transport timeout"
+    )
+    builder = _make_builder(fake_baas_service, fake_bot_repo, fake_device_repo)
+
+    with pytest.raises(DeviceConnectionUnavailableError):
         builder.build(fake_binding, user_id="user-1")
 
 
