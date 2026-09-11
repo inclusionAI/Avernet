@@ -121,20 +121,23 @@ class EntryFetcher:
         credentials: SourceCredentialServiceProtocol,
         objects: AliyunObjectStore,
     ) -> None:
+        # Kept because the front door itself still reads it — see
+        # :meth:`file_bytes`. The roads read their own copy of it, handed to
+        # them below.
         self._content = content
-        self._credentials = credentials
-        # Required, not defaulted. It was ``Optional[...] = None`` so that
-        # rigs driving only the git road need not assemble a store — but
-        # the composition root always binds one, so the type said "may be
-        # absent" about a value that never is, and bought a ``None`` branch
-        # in the object road that production could not reach. Rigs pass
+        # Bound once, from this pipeline's three collaborators: the fetchers
+        # are strategies over the same store, the same credentials and the
+        # same object-store client, so every road files receipts under one
+        # policy and W11's lineage cannot answer differently by protocol.
+        #
+        # ``objects`` is required, not defaulted. It was ``Optional[...] =
+        # None`` so that rigs driving only the git road need not assemble a
+        # store — but the composition root always binds one, so the type said
+        # "may be absent" about a value that never is, and bought a ``None``
+        # branch in the object road that production could not reach. Rigs pass
         # ``FakeObjectStore()``; it costs them one line and buys everyone an
         # honest signature.
-        self._objects = objects
-        # Bound once, to this pipeline: the fetchers are strategies over these
-        # same collaborators, so every road files receipts under one policy
-        # and W11's lineage cannot answer differently by protocol.
-        self._fetchers = build_fetchers(self)
+        self._fetchers = build_fetchers(content, credentials, objects)
 
     def fetch_declared(
         self,

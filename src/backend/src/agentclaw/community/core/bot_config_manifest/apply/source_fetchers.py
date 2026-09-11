@@ -10,11 +10,13 @@ Adding a protocol is a class and a row; the branch has no third arm to grow.
 fetcher raises at import rather than ``KeyError``-ing at apply time, in front
 of a bot, with the apply lock held.
 
-Each fetcher holds the :class:`~...entry_fetch.EntryFetcher` that owns it —
-its transport, its content store, its credentials. They are strategies over
-one pipeline's collaborators, not independent pipelines: two fetchers that
-each built their own store would file receipts under two policies, and W11's
-lineage would answer differently depending on which road served an entry.
+Each fetcher is handed the collaborators its own road needs — the content
+store and W3's credentials, plus the object-store client on the road that has
+one. They are strategies over **one apply's** collaborators, not independent
+pipelines: :func:`build_fetchers` binds them all from the same three, so two
+fetchers cannot each end up with their own store, filing receipts under two
+policies while W11's lineage answers differently depending on which road
+served an entry.
 
 **Two ``source_url`` shapes exist**, both built here, and both are receipt
 identities rather than fetchable URLs — the address bytes are *filed* under,
@@ -82,7 +84,7 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Mapping, Optional, Protocol, runtime_checkable
+from typing import Any, Mapping, Optional, Protocol, runtime_checkable
 
 import httpx
 
@@ -101,6 +103,9 @@ from agentclaw.community.core.bot_config_manifest.apply.fetch_context import (
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
 )
+from agentclaw.community.core.bot_config_manifest.content.service_protocol import (
+    ManifestContentServiceProtocol,
+)
 from agentclaw.community.core.bot_config_manifest.content.errors import (
     ContentMissingError,
     ContentStoreError,
@@ -108,6 +113,9 @@ from agentclaw.community.core.bot_config_manifest.content.errors import (
 )
 from agentclaw.community.core.bot_config_manifest.credentials.errors import (
     CredentialError,
+)
+from agentclaw.community.core.bot_config_manifest.credentials.service_protocol import (
+    SourceCredentialServiceProtocol,
 )
 from agentclaw.community.core.bot_config_manifest.credentials.policy import (
     PrefixAuthorizationError,
@@ -126,6 +134,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.limits import (
     FetchCategory,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
+    AliyunObjectStore,
     ObjectFetchStatus,
     ObjectStoreTarget,
 )
@@ -136,11 +145,6 @@ from agentclaw.community.core.bot_config_manifest.schema._support import (
 from agentclaw.community.core.bot_config_manifest.schema.sources import SourceDecl
 from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
 from agentclaw.community.log import get_logger
-
-if TYPE_CHECKING:
-    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-        EntryFetcher,
-    )
 
 logger = get_logger()
 
@@ -298,8 +302,15 @@ class ObjectStoreFetcher(SourceFetcher):
     delivered; git delivers a tree, an object store delivers an object.
     """
 
-    def __init__(self, owner: EntryFetcher) -> None:
-        self._owner = owner
+    def __init__(
+        self,
+        content: ManifestContentServiceProtocol,
+        credentials: SourceCredentialServiceProtocol,
+        objects: AliyunObjectStore,
+    ) -> None:
+        self._content = content
+        self._credentials = credentials
+        self._objects = objects
 
     def fetch(self, request: DeclaredFetch) -> EntryDelivery:
         decl, entry = request.decl, request.entry
@@ -325,7 +336,7 @@ class ObjectStoreFetcher(SourceFetcher):
                 "the key pair come from the named credential"
             )
         try:
-            target = self._owner._credentials.binding(
+            target = self._credentials.binding(
                 name=decl.auth
             ).object_store_target(substitute(request.ctx, decl.bucket or ""))
         except CredentialError as exc:
@@ -393,7 +404,7 @@ class ObjectStoreFetcher(SourceFetcher):
         address = object_receipt_url(target.bucket, key)
         scope = scope_of(ctx)
         try:
-            receipt = self._owner._content.latest_receipt(
+            receipt = self._content.latest_receipt(
                 scope, source_url=address
             )
         except (ContentStoreError, ContentStoreFault) as exc:
@@ -405,7 +416,7 @@ class ObjectStoreFetcher(SourceFetcher):
             # truth — the ruling the module docstring records.
             try:
                 return FetchedEntry(
-                    content=self._owner._content.read(digest),
+                    content=self._content.read(digest),
                     digest=digest,
                     from_store=True,
                     content_type=receipt.content_type,
@@ -430,7 +441,7 @@ class ObjectStoreFetcher(SourceFetcher):
         # to raise on rather than to paper over with the file cap. The git
         # road's ``file_limit=`` line reads the table the same way.
         limit = FETCH_ENTRY_LIMITS[category]
-        result = self._owner._objects.get(target, key, byte_limit=limit)
+        result = self._objects.get(target, key, byte_limit=limit)
 
         if result.is_refusal:
             # NOT_FOUND, DENIED, TOO_LARGE — the document or the credential is
@@ -447,7 +458,7 @@ class ObjectStoreFetcher(SourceFetcher):
             ):
                 try:
                     return FetchedEntry(
-                        content=self._owner._content.read(receipt.digest),
+                        content=self._content.read(receipt.digest),
                         digest=receipt.digest,
                         from_store=True,
                         content_type=receipt.content_type,
@@ -483,7 +494,7 @@ class ObjectStoreFetcher(SourceFetcher):
             fetched_at=datetime.now(timezone.utc),
         )
         try:
-            self._owner._content.store(
+            self._content.store(
                 fetched,
                 scope=scope,
                 source_url=address,
@@ -526,8 +537,13 @@ class GitSourceFetcher(SourceFetcher):
     masked, a *failure* is the transport and may be.
     """
 
-    def __init__(self, owner: EntryFetcher) -> None:
-        self._owner = owner
+    def __init__(
+        self,
+        content: ManifestContentServiceProtocol,
+        credentials: SourceCredentialServiceProtocol,
+    ) -> None:
+        self._content = content
+        self._credentials = credentials
 
     def fetch(self, request: DeclaredFetch) -> EntryDelivery:
         ctx, decl, entry = request.ctx, request.decl, request.entry
@@ -564,7 +580,7 @@ class GitSourceFetcher(SourceFetcher):
         try:
             headers: dict[str, str] = {}
             if auth:
-                binding = self._owner._credentials.binding(name=auth)
+                binding = self._credentials.binding(name=auth)
                 binding.reauthorize(httpx.URL(spec.url))
                 headers = dict(binding.headers_for(httpx.URL(spec.url)))
             checkout, fresh = session.checkout(
@@ -666,13 +682,13 @@ class GitSourceFetcher(SourceFetcher):
             return None
         target = git_receipt_url(spec.url, baseline, spec.subpath)
         try:
-            receipt = self._owner._content.latest_receipt(
+            receipt = self._content.latest_receipt(
                 scope_of(ctx), source_url=target
             )
             if receipt is None:
                 return None
             return FetchedEntry(
-                content=self._owner._content.read(receipt.digest),
+                content=self._content.read(receipt.digest),
                 digest=receipt.digest,
                 from_store=True,
                 content_type=receipt.content_type,
@@ -721,18 +737,31 @@ if _UNSERVED:
     )
 
 
-def build_fetchers(owner: EntryFetcher) -> Mapping[SourceKind, SourceFetcher]:
-    """The table, bound to one pipeline's collaborators::
+def build_fetchers(
+    content: ManifestContentServiceProtocol,
+    credentials: SourceCredentialServiceProtocol,
+    objects: AliyunObjectStore,
+) -> Mapping[SourceKind, SourceFetcher]:
+    """The table above, bound to one apply's collaborators::
 
         {
-            SourceKind.OSS: ObjectStoreFetcher(owner),
-            SourceKind.GIT: GitSourceFetcher(owner),
+            SourceKind.OSS: ObjectStoreFetcher(content, credentials, objects),
+            SourceKind.GIT: GitSourceFetcher(content, credentials),
         }
+
+    One row per :data:`FETCHER_TYPES` key, spelled out rather than built by
+    comprehension, because the two roads do not take the same collaborators:
+    only the object road reaches a store client. The table above is still the
+    record of *which* protocols are served, and still what the import-time
+    check holds exhaustive; this binds them.
 
     Called once per :class:`~...entry_fetch.EntryFetcher`, in its constructor.
     """
     return MappingProxyType(
-        {kind: cls(owner) for kind, cls in FETCHER_TYPES.items()}
+        {
+            SourceKind.OSS: ObjectStoreFetcher(content, credentials, objects),
+            SourceKind.GIT: GitSourceFetcher(content, credentials),
+        }
     )
 
 

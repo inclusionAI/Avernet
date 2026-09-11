@@ -50,10 +50,14 @@ def _session(sources=None) -> SourceSession:
 
 
 @pytest.fixture
-def pipeline() -> EntryFetcher:
-    return EntryFetcher(
-        FakeManifestContent(), FakeCredentials(), FakeObjectStore()
-    )
+def collaborators():
+    """The three a pipeline is composed over: store, credentials, objects."""
+    return FakeManifestContent(), FakeCredentials(), FakeObjectStore()
+
+
+@pytest.fixture
+def pipeline(collaborators) -> EntryFetcher:
+    return EntryFetcher(*collaborators)
 
 
 # ── the table ────────────────────────────────────────────────────────────────
@@ -93,21 +97,27 @@ def test_a_protocol_with_no_fetcher_is_refused_at_import():
     "kind,expected",
     [(SourceKind.OSS, ObjectStoreFetcher), (SourceKind.GIT, GitSourceFetcher)],
 )
-def test_the_bound_table_holds_one_fetcher_per_protocol(pipeline, kind, expected):
-    bound = build_fetchers(pipeline)
+def test_the_bound_table_holds_one_fetcher_per_protocol(
+    collaborators, kind, expected
+):
+    bound = build_fetchers(*collaborators)
     assert isinstance(bound[kind], expected)
     assert isinstance(bound[kind], SourceFetcher)
 
 
-def test_the_fetchers_share_the_pipelines_collaborators(pipeline):
-    """Strategies over one pipeline, not independent pipelines.
+def test_the_fetchers_share_the_pipelines_collaborators(collaborators):
+    """Strategies over one apply's collaborators, not independent pipelines.
 
     Two fetchers that each built their own content store would file receipts
     under two policies, and W11's lineage would answer "which credential
-    served this" differently depending on which road an entry took.
+    served this" differently depending on which road an entry took. They are
+    handed the collaborators now rather than an owner to reach through, so
+    what this asserts is that one call binds both roads to the same objects.
     """
-    bound = build_fetchers(pipeline)
-    assert all(f._owner is pipeline for f in bound.values())
+    content, credentials, _ = collaborators
+    bound = build_fetchers(*collaborators)
+    assert all(f._content is content for f in bound.values())
+    assert all(f._credentials is credentials for f in bound.values())
 
 
 # ── dispatch ─────────────────────────────────────────────────────────────────
