@@ -49,7 +49,7 @@ Running → Completed
 在 Group 内创建新的 Session：
 
 ```bash
-bcs session create --group "<group_id>" [--title "<标题>"] [--kind chat|service_invocation] [--input '<json>'] [--meta '<json>']
+bcs session create --group "<group_id>" [--title "<标题>"] [--kind chat|service_invocation] [--input '<json>'] [--meta '<json>'] [--group-context-delivery send|inject]
 ```
 
 **示例：**
@@ -57,6 +57,14 @@ bcs session create --group "<group_id>" [--title "<标题>"] [--kind chat|servic
 ```bash
 bcs session create --group "grp-001" --title "第二轮讨论"
 ```
+
+`--group-context-delivery` 控制初始 `<GroupContext>` 发给 Driver 时的投递方式：
+
+- `send`（默认）：要求 Driver 主动响应。
+- `inject`：Driver 静默接收上下文。
+
+其他参与者仍然通过 `chat.inject` 接收初始上下文。ManagerWorker Group
+始终通过 `chat.send` 向 Manager 投递上下文，不受该参数影响。
 
 ---
 

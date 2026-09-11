@@ -1782,6 +1782,10 @@ enum SessionCommands {
         /// Optional metadata (JSON)
         #[arg(long)]
         meta: Option<String>,
+
+        /// Initial GroupContext delivery for the driver (send or inject)
+        #[arg(long, value_parser = ["send", "inject"])]
+        group_context_delivery: Option<String>,
     },
 
     /// List sessions under a group.
@@ -4250,6 +4254,7 @@ pub async fn run() -> Result<()> {
                     kind,
                     input,
                     meta,
+                    group_context_delivery,
                 } => {
                     let input_json = input
                         .as_deref()
@@ -4271,6 +4276,7 @@ pub async fn run() -> Result<()> {
                             "session_kind": &kind,
                             "input": &input_json,
                             "meta": &meta_json,
+                            "group_context_delivery": &group_context_delivery,
                         })
                     );
 
@@ -4281,6 +4287,7 @@ pub async fn run() -> Result<()> {
                             kind.as_deref(),
                             input_json.as_ref(),
                             meta_json.as_ref(),
+                            group_context_delivery.as_deref(),
                         )
                         .await?;
 
@@ -6392,6 +6399,7 @@ mod tests {
                         kind,
                         input,
                         meta,
+                        group_context_delivery,
                     },
                 ..
             } => {
@@ -6400,9 +6408,58 @@ mod tests {
                 assert!(kind.is_none());
                 assert!(input.is_none());
                 assert!(meta.is_none());
+                assert!(group_context_delivery.is_none());
             }
             _ => panic!("expected session create command"),
         }
+    }
+
+    #[test]
+    fn test_session_create_accepts_group_context_delivery() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "session",
+            "create",
+            "--group",
+            "g-1",
+            "--group-context-delivery",
+            "inject",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Session {
+                command:
+                    SessionCommands::Create {
+                        group_context_delivery,
+                        ..
+                    },
+                ..
+            } => {
+                assert_eq!(group_context_delivery.as_deref(), Some("inject"));
+            }
+            _ => panic!("expected session create command"),
+        }
+    }
+
+    #[test]
+    fn test_session_create_rejects_invalid_group_context_delivery() {
+        let err = match Cli::try_parse_from([
+            "bcs-cli",
+            "session",
+            "create",
+            "--group",
+            "g-1",
+            "--group-context-delivery",
+            "silent",
+        ]) {
+            Ok(_) => panic!("expected invalid delivery mode to be rejected"),
+            Err(err) => err,
+        };
+
+        assert_eq!(err.kind(), ErrorKind::InvalidValue);
+        assert!(err.to_string().contains("send"));
+        assert!(err.to_string().contains("inject"));
     }
 
     #[test]

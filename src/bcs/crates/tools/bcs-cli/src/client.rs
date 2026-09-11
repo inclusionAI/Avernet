@@ -2204,6 +2204,7 @@ impl BcsClient {
         session_kind: Option<&str>,
         input: Option<&serde_json::Value>,
         meta: Option<&serde_json::Value>,
+        group_context_delivery: Option<&str>,
     ) -> Result<serde_json::Value> {
         let url = format!("{}/groups/{}/sessions", self.base_url, group_id);
         let mut payload = serde_json::Map::new();
@@ -2218,6 +2219,12 @@ impl BcsClient {
         }
         if let Some(meta) = meta {
             payload.insert("meta".to_string(), meta.clone());
+        }
+        if let Some(delivery) = group_context_delivery {
+            payload.insert(
+                "group_context_delivery".to_string(),
+                serde_json::json!(delivery),
+            );
         }
 
         let response = self
@@ -4201,6 +4208,38 @@ mod tests {
             "Content-Type must match the prepared upload content type, but the request was:\n{}",
             request
         );
+    }
+
+    #[tokio::test]
+    async fn create_session_sends_group_context_delivery() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/groups/g-1/sessions"))
+            .respond_with(
+                ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                    "id": "g-1:abcdef12",
+                    "session_id": "g-1:abcdef12",
+                })),
+            )
+            .mount(&server)
+            .await;
+
+        let client = BcsClient::with_token(&server.uri(), "bot-token");
+        client
+            .create_session("g-1", None, None, None, None, Some("inject"))
+            .await
+            .expect("create session should succeed");
+
+        let requests = server.received_requests().await.expect("captured requests");
+        let req = requests
+            .iter()
+            .find(|r| r.method.as_str() == "POST" && r.url.path() == "/groups/g-1/sessions")
+            .expect("create session POST request");
+        let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+        assert_eq!(body["group_context_delivery"], "inject");
     }
 
     // Regression: `share --ttl N` must send `ttl_seconds` (the ShareRequest DTO
