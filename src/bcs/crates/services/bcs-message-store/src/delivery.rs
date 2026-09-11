@@ -284,7 +284,9 @@ pub(crate) fn plan_admission(
                     && d.state.status == Status::Queued
             })
             .count());
-        let status = if target.kind == DeliveryType::Inject {
+        let status = if target.rejection.is_some() {
+            Status::Failed
+        } else if target.kind == DeliveryType::Inject {
             Status::PendingContext
         } else if queued >= target.max_queued as usize {
             Status::RejectedCapacity
@@ -320,7 +322,7 @@ pub(crate) fn plan_admission(
             submitted_at_ms: None,
             accepted_at_ms: None,
             run_deadline_at_ms: None,
-            terminal_at_ms: (status == Status::RejectedCapacity).then_some(command.now_ms),
+            terminal_at_ms: matches!(status, Status::RejectedCapacity | Status::Failed).then_some(command.now_ms),
             bound_to_delivery_id: None,
             cancel_requested_at_ms: None,
             cancel_requested_by: None,
@@ -328,7 +330,7 @@ pub(crate) fn plan_admission(
             abort_request_id: None,
             abort_started_at_ms: None,
             cancel_deadline_at_ms: None,
-            last_error_code: None,
+            last_error_code: target.rejection.map(|r| r.code().to_owned()),
             semantic_projection_json: target.semantic_projection_json.clone(),
             transport_context_json: None,
             context_selection_json: None,

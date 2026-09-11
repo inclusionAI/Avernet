@@ -3800,7 +3800,7 @@ async fn chat_abort_provider_sends_one_scope_request_for_parallel_runs() {
             },
         )
         .await;
-        if canonical == "bcs-run-2" {
+        {
             let mut context = run_context
                 .find_active_run(canonical)
                 .await

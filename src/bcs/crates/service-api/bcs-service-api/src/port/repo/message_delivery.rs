@@ -42,10 +42,18 @@ pub struct BoundDeliveryContexts {
 
 #[derive(Debug, Clone)]
 pub struct DeliveryAdmissionTarget {
+    /// Application rejection committed atomically with other recipients.
+    pub rejection: Option<DeliveryAdmissionRejection>,
     pub target_bot_id: String,
     pub kind: DeliveryType,
     pub max_queued: u32,
     pub semantic_projection_json: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum DeliveryAdmissionRejection { ProviderHeadersUnsupported }
+impl DeliveryAdmissionRejection {
+    pub fn code(self) -> &'static str { "delivery_provider_headers_unsupported" }
 }
 
 #[derive(Debug, Clone)]

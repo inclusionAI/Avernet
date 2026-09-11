@@ -247,7 +247,7 @@ fn command(id: &str, session: &str) -> AdmitMessageDeliveries {
             created_at: 1,
             run_id: String::new(),
         },
-        targets: vec![DeliveryAdmissionTarget {
+        targets: vec![DeliveryAdmissionTarget { rejection: None,
             target_bot_id: "bot".into(),
             kind: DeliveryType::Send,
             max_queued: 10,
@@ -364,7 +364,7 @@ async fn live_policy_enables_empty_scheduler_recalculates_interval_and_drains_of
     use bcs_service_api::{HumanActor, CallerContext};
     let admin = || CallerContext::Human(HumanActor { actor_id: "human_operator".into(), staff_no: "operator".into() });
     let repo = Arc::new(MemoryMessageRepo::new());
-    let live = Arc::new(LiveDeliveryPolicy::new(repo.clone(), Default::default(), false));
+    let live = Arc::new(LiveDeliveryPolicy::new(repo.clone(), Default::default()));
     live.scheduler_available.store(true, std::sync::atomic::Ordering::SeqCst);
     let service = Arc::new(ManagedMessageDelivery::new(repo).with_policy(live.clone()));
     let io = Arc::new(RecordingIo { service: service.clone(), sent: Default::default(), aborts: Default::default(), fail_send: false, fail_registration: false });
@@ -486,7 +486,7 @@ async fn lowering_live_limits_preserves_existing_work_and_only_blocks_new_capaci
     use bcs_service_api::{HumanActor, CallerContext};
     let admin = || CallerContext::Human(HumanActor { actor_id: "human_operator".into(), staff_no: "operator".into() });
     let repo = Arc::new(MemoryMessageRepo::new());
-    let live = Arc::new(LiveDeliveryPolicy::new(repo.clone(), Default::default(), false));
+    let live = Arc::new(LiveDeliveryPolicy::new(repo.clone(), Default::default()));
     live.scheduler_available.store(true, std::sync::atomic::Ordering::SeqCst);
     let mut policy = DeliveryPolicy::default();
     policy.flow_enabled.group = true;

@@ -82,7 +82,7 @@ async fn queued_im_hints_aggregate_targets_and_do_not_replay_on_restart() {
         display_message: None,
         message_id: "im-queue".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now - 3_000, expire_at_ms: None, event: None,
         targets: [("bot-driver", DeliveryType::Send), ("bot-observer", DeliveryType::Send), ("context-only", DeliveryType::Inject)].into_iter()
-            .map(|(bot, kind)| DeliveryAdmissionTarget { target_bot_id: bot.into(), kind, max_queued: 10, semantic_projection_json: json!({"version":1}) }).collect(),
+            .map(|(bot, kind)| DeliveryAdmissionTarget { rejection: None, target_bot_id: bot.into(), kind, max_queued: 10, semantic_projection_json: json!({"version":1}) }).collect(),
         message: NewMessage { visibility_domain: MessageVisibilityDomain::Chat, audience: None, group_id: "group-1".into(), session_id: "group-1:im-original".into(), sender_id: "human_1".into(), sender_type: SenderType::Human,
             message_type: "chat".into(), content: json!({"text":"hello","source_im_message_id":"im-original"}), client_msg_id: None, owner_bot_id: None, created_at: (now - 3_000) as u64, run_id: String::new() },
     }).await.unwrap();

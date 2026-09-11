@@ -117,7 +117,7 @@ async fn pooled_file_sqlite_preserves_contract_and_concurrent_capacity() -> Resu
             created_at: 100, run_id: String::new(),
         },
         flow_kind: DeliveryFlowKind::Group, now_ms: 100, expire_at_ms: None, event: None,
-        targets: vec![DeliveryAdmissionTarget {
+        targets: vec![DeliveryAdmissionTarget { rejection: None,
             target_bot_id: "capacity-bot".into(), kind, max_queued: 3,
             semantic_projection_json: serde_json::json!({"version":1}),
         }],

@@ -42,7 +42,7 @@ impl MessageDeliveryRepoPort for SlowPolicyRepo {
 #[tokio::test]
 async fn disconnected_management_request_still_finishes_commit_and_publication() {
     let repo = Arc::new(SlowPolicyRepo { inner: MemoryMessageRepo::new(), started: Default::default(), release: Default::default() });
-    let live = Arc::new(LiveDeliveryPolicy::new(repo.clone(), Default::default(), false));
+    let live = Arc::new(LiveDeliveryPolicy::new(repo.clone(), Default::default()));
     let request_live = live.clone();
     let request = tokio::spawn(async move { request_live.replace(admin(), 0, DeliveryPolicy::default()).await });
     tokio::time::timeout(std::time::Duration::from_secs(1), repo.started.notified()).await.unwrap();
@@ -57,7 +57,7 @@ async fn disconnected_management_request_still_finishes_commit_and_publication()
 #[tokio::test]
 async fn policy_management_auth_cas_and_live_publication() {
     let repo = Arc::new(MemoryMessageRepo::new());
-    let live = LiveDeliveryPolicy::new(repo.clone(), DeliveryPolicyRecord::default(), false);
+    let live = LiveDeliveryPolicy::new(repo.clone(), DeliveryPolicyRecord::default());
     assert!(live.get(CallerContext::Public).await.is_err());
     assert!(live.replace(CallerContext::Public, 0, DeliveryPolicy::default()).await.is_err());
     for caller in [
@@ -91,8 +91,8 @@ async fn policy_management_auth_cas_and_live_publication() {
 }
 
 #[tokio::test]
-async fn provider_headers_and_unready_flows_are_rejected() {
-    let live = LiveDeliveryPolicy::new(Arc::new(MemoryMessageRepo::new()), Default::default(), true);
+async fn unready_flows_are_rejected_but_group_activation_is_allowed() {
+    let live = LiveDeliveryPolicy::new(Arc::new(MemoryMessageRepo::new()), Default::default());
     live.scheduler_available.store(true, Ordering::SeqCst);
     let mut policy = DeliveryPolicy::default();
     policy.flow_enabled.state_machine = true;
@@ -100,5 +100,5 @@ async fn provider_headers_and_unready_flows_are_rejected() {
     let mut policy = DeliveryPolicy::default();
     policy.flow_enabled.group = true;
     policy.defaults.mode = BotDeliveryMode::Enforce;
-    assert!(live.replace(admin(), 0, policy).await.is_err());
+    assert!(live.replace(admin(), 0, policy).await.is_ok());
 }

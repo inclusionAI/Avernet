@@ -61,6 +61,11 @@ pub struct QueuedGroupProjection {
     reply_context: Option<bcs_protocol::GroupContext>,
     #[serde(default)]
     forward_hop: Option<u32>,
+    /// Internal transport metadata; never part of model context or history.
+    #[serde(default)]
+    provider_route_headers: Vec<(String, String)>,
+    #[serde(skip)]
+    pub(crate) admission_rejection: Option<bcs_service_api::port::repo::message_delivery::DeliveryAdmissionRejection>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -72,12 +77,16 @@ pub struct QueuedTransportContext {
     pub downstream_session_key: String,
     #[serde(default)]
     pub downstream_run_id: Option<String>,
+    #[serde(default)]
+    pub provider_route_headers: Vec<(String, String)>,
+    /// Causal routing metadata also crosses WS runs without entering their frames.
+    #[serde(default)]
+    pub relay_route_headers: Option<Vec<(String, String)>>,
 }
 
 pub struct QueuedGroupPreparation {
     pub flow: std::sync::Weak<BcsMessageFlow>,
     pub deliveries: Arc<dyn ManagedMessageDeliveryService>,
-    pub provider_bypass_headers_configured: bool,
 }
 
 #[async_trait::async_trait]
@@ -121,7 +130,6 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
             delivery,
             &contexts.rows,
             contexts.total,
-            self.provider_bypass_headers_configured,
         )
         .await
     }
@@ -172,7 +180,7 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
             }
             _ => false,
         };
-        if !matches_owner || !command.provider_bypass_headers.is_empty() {
+        if !matches_owner || command.provider_bypass_headers != transport.provider_route_headers {
             return Err(invalid("queue original transport owner mismatch"));
         }
         // Preparation may outlive a Provider mutation or WS reconnect. Resolve
@@ -226,7 +234,7 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
                     bot_id: delivery.target_bot_id.clone(),
                 },
                 transport_owner: transport.owner,
-                provider_bypass_headers: Vec::new(),
+                provider_bypass_headers: transport.provider_route_headers,
                 deadline_ms,
             })
             .await?;
@@ -347,11 +355,14 @@ impl QueuedGroupProjection {
         if command.session_id.as_deref().is_none_or(|s| s.is_empty()) {
             return Err(invalid("queue admission requires a canonical session"));
         }
-        if !command.provider_bypass_headers.is_empty() {
-            return Err(invalid(
-                "queue admission does not retain Provider bypass headers",
-            ));
-        }
+        let is_provider = flow.registry.resolve_delivery_target(&target.bot_uuid).await?.is_http_provider();
+        // WS does not consume Provider-only headers. Preserve only explicitly
+        // approved routing metadata for a later Bot relay, never credentials.
+        let headers: Vec<_> = command.provider_bypass_headers.iter().filter(|(name, _)|
+            is_provider || flow.queue_persistable_headers.iter().any(|a| a.eq_ignore_ascii_case(name))).cloned().collect();
+        let header_snapshot = bcs_config_api::queued_provider_headers::snapshot(&headers, &flow.queue_persistable_headers);
+        let admission_rejection = header_snapshot.as_ref().err().map(|_| bcs_service_api::port::repo::message_delivery::DeliveryAdmissionRejection::ProviderHeadersUnsupported);
+        let provider_route_headers = header_snapshot.unwrap_or_default();
         let participant = group
             .participants
             .iter()
@@ -360,6 +371,8 @@ impl QueuedGroupProjection {
         let snapshot = crate::protocol_context::group_context_input(group);
         Ok(Self {
             policy_version: None,
+            provider_route_headers,
+            admission_rejection,
             version: 1,
             reply_context: None,
             forward_hop: None,
@@ -439,9 +452,8 @@ pub async fn prepare_queued_group(
     flow: &BcsMessageFlow,
     row: &PersistedMessageDelivery,
     contexts: &[PersistedMessageDelivery],
-    provider_bypass_headers_configured: bool,
 ) -> ServiceResult<PreparedManagedDelivery> {
-    prepare_queued_group_bounded(flow, row, contexts, contexts.len() as u64, provider_bypass_headers_configured).await
+    prepare_queued_group_bounded(flow, row, contexts, contexts.len() as u64).await
 }
 
 async fn prepare_queued_group_bounded(
@@ -449,7 +461,6 @@ async fn prepare_queued_group_bounded(
     row: &PersistedMessageDelivery,
     contexts: &[PersistedMessageDelivery],
     total: u64,
-    provider_bypass_headers_configured: bool,
 ) -> ServiceResult<PreparedManagedDelivery> {
     let projection = QueuedGroupProjection::decode(row).map_err(|e| invalid(&e))?;
     let repo = flow
@@ -534,11 +545,9 @@ async fn prepare_queued_group_bounded(
         .registry
         .resolve_delivery_target(&row.target_bot_id)
         .await?;
-    if delivery_target.is_http_provider() && provider_bypass_headers_configured {
-        return Err(invalid(
-            "Provider queue cannot enforce with bypass headers configured",
-        ));
-    }
+    let relay_route_headers = bcs_config_api::queued_provider_headers::snapshot(&projection.provider_route_headers, &flow.queue_persistable_headers)
+        .map_err(invalid)?;
+    let provider_route_headers = if delivery_target.is_http_provider() { relay_route_headers.clone() } else { Vec::new() };
     let connection_id = match &delivery_target {
         BotDeliveryTarget::WebSocket { .. } => Some(
             flow.bot_delivery
@@ -676,6 +685,8 @@ async fn prepare_queued_group_bounded(
         },
     };
     let transport = QueuedTransportContext {
+        provider_route_headers: provider_route_headers.clone(),
+        relay_route_headers: Some(relay_route_headers),
         version: 1,
         owner,
         connection_id,
@@ -692,7 +703,7 @@ async fn prepare_queued_group_bounded(
             frame,
             delivery_kind: BotDeliveryKind::Send,
             provider_transport: Default::default(),
-            provider_bypass_headers: Vec::new(),
+            provider_bypass_headers: provider_route_headers,
         },
         transport_context_json: transport_json,
     })

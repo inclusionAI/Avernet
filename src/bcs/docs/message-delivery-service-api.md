@@ -195,8 +195,22 @@ TTL / safe_retry 可为 null，分别表示不自动过期、不自动安全重�
 持久群普通 Bot 消息、IM 入站及其回复路由。system callback、task、Direct A2A、
 state-machine 保留原路径；误开启未就绪类型返回 queue_flow_not_ready。
 
-provider_http.bypass_headers 非空时首版拒绝开启队列策略，避免默认策略覆盖未来 Provider
-Bot 后产生无法持久化的 header 依赖；不保存 header 明文。
+`provider_http.queue_persistable_headers`（默认空）是 `bypass_headers` 的子集，
+用于显式批准可明文持久化的非敏感路由 Header。名称大小写无关；最多 16 个、单值
+1024 字节、名称和值总计 8192 字节，禁止重复名称、控制字符和已知凭证类名称。
+自定义字段是否含敏感信息仍需部署者评审；Cookie/Authorization 不支持持久化。
+不再因透传白名单非空全局禁止 enforce。实际 HTTP Provider 目标携带未批准 Header 时，
+在准入事务中仅将该目标记为 `failed`，响应中的 `admission_error` 为
+`delivery_provider_headers_unsupported`；不保存其值、不回滚其他目标、不退回老链路。
+WebSocket 目标不使用 Provider Header，队列关闭的目标保留原行为。
+允许值只存 delivery 内部投影 `provider_route_headers`，send-start 固化到 transport context；
+旧记录缺字段按空处理。Worker、恢复后的 scope abort 和受管 Bot 回复接力复用原运行快照。
+transport context 的 `relay_route_headers` 保留因果路由，`provider_route_headers` 只记录
+实际 HTTP 路由；受管 WS 中间跳只保留前者，不把 Header 放入 WS frame，避免接力丢失 lane。
+Inject 不覆盖承载 Send 的路由；配置收紧导致未发请求失败，不静默删除 Header 改路由。
+scope abort 要求全部原运行路由（包括空路由）一致，精确 Provider abort 仍不支持。
+Header 值不进入消息正文、模型、History、状态响应或日志。无需数据库 DDL 迁移；
+回滚旧二进制前必须排空新增 Header 投影的队列，否则旧版本无法读取这些字段。
 附件存于 bcs_messages.content.attachments，实际发送重新读取 canonical 消息；
 历史、事件和状态不暴露保留的签名 URL。本轮不处理排队期间 URL 过期。
 

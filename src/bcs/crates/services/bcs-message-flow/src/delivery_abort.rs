@@ -133,7 +133,7 @@ pub async fn select(
                 bot_id: row.target_bot_id,
             },
             transport_owner: metadata.owner,
-            provider_bypass_headers: Vec::new(),
+            provider_bypass_headers: metadata.provider_route_headers,
             deadline_ms: now.saturating_add(60_000) as u64,
         });
         selection.owned.insert(run_id, started);

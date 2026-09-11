@@ -225,6 +225,17 @@ pub(crate) async fn commit_routed_reply(
         .or_else(|| event.bcs_session_id.clone())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| ServiceError::InternalError("queue reply Session missing".into()))?;
+    let provider_bypass_headers = if let Some(row) = &original {
+        let context: crate::queued_group::QueuedTransportContext = serde_json::from_value(row.transport_context_json.clone()
+            .ok_or_else(|| ServiceError::InternalError("original queue transport missing".into()))?)
+            .map_err(|_| ServiceError::InternalError("invalid original queue transport metadata".into()))?;
+        context.relay_route_headers.unwrap_or(context.provider_route_headers)
+    } else if let Some(contexts) = &flow.bot_run_context {
+        contexts.find_active_run(&event.run_id).await?
+            .filter(|context| context.scope.bot_id == event.bot_id && context.scope.group_id == group.id
+                && context.scope.session_id == session_id)
+            .map(|context| context.provider_bypass_headers).unwrap_or_default()
+    } else { Vec::new() };
     let command = WebSendCommand {
         caller: bcs_service_api::CallerContext::Public,
         group_id: group.id.clone(),
@@ -239,7 +250,7 @@ pub(crate) async fn commit_routed_reply(
         source_im_message_id: None,
         channel_sender_identity: None,
         sender_conn_id: None,
-        provider_bypass_headers: Vec::new(),
+        provider_bypass_headers,
     };
     let mut targets = Vec::new();
     for (target, context, limit) in selected {
@@ -254,7 +265,7 @@ pub(crate) async fn commit_routed_reply(
         )
         .await?
         .with_reply_context(context, forward_hop, strip_mentions);
-        targets.push(DeliveryAdmissionTarget {
+        targets.push(DeliveryAdmissionTarget { rejection: projection.admission_rejection,
             target_bot_id: target.bot_uuid,
             kind: target.delivery_type,
             max_queued: limit,
@@ -366,7 +377,8 @@ pub(crate) async fn commit_routed_reply(
     let rows = crate::storage_retry::retry(crate::storage_retry::shutdown(flow), "relay_admission_lookup",
         crate::storage_retry::managed_storage, || service.lookup(bcs_service_api::port::repo::message_delivery::DeliveryLookup::Message(reply_message_id.clone())))
         .await.map_err(|_| ServiceError::InternalError("queue relay admission lookup failed".into()))?;
-    let relayed = fresh && rows.iter().any(|row| row.state.status != bcs_domain::message_delivery::MessageDeliveryStatus::RejectedCapacity);
+    let relayed = fresh && rows.iter().any(|row| !matches!(row.state.status,
+        bcs_domain::message_delivery::MessageDeliveryStatus::RejectedCapacity | bcs_domain::message_delivery::MessageDeliveryStatus::Failed));
     Ok(Some(QueuedReply { target_ids, relayed }))
 }
 
@@ -460,9 +472,10 @@ pub async fn prepare_group_admission(
             sender_owner.clone(),
         )
         .await?;
+        let rejection = projection.admission_rejection;
         let mut projection = serde_json::to_value(projection)?;
         if let Some(policy) = &policy { projection["policy_version"] = serde_json::json!(policy.version); }
-        targets.push(DeliveryAdmissionTarget {
+        targets.push(DeliveryAdmissionTarget { rejection,
             target_bot_id: target.bot_uuid.clone(),
             kind: target.delivery_type,
             max_queued: limit,

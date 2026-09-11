@@ -20,7 +20,7 @@ async fn policy_audit_records_human_versions_fields_and_both_outcomes() {
     tracing::subscriber::set_global_default(subscriber).unwrap();
     async {
         let caller = || CallerContext::Human(HumanActor { actor_id: "human_audit_operator".into(), staff_no: "audit_operator".into() });
-        let live = LiveDeliveryPolicy::new(Arc::new(MemoryMessageRepo::new()), Default::default(), false);
+        let live = LiveDeliveryPolicy::new(Arc::new(MemoryMessageRepo::new()), Default::default());
         let mut policy = DeliveryPolicy::default();
         policy.defaults.max_queued = 50;
         live.replace(caller(), 0, policy.clone()).await.unwrap();
