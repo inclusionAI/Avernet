@@ -29,21 +29,18 @@ from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
 
 from tests.community.core.bot_config_manifest.apply._fakes import (
     FakeActivationService,
-    FakeCredentials,
     FakeManifestContent,
+    FakeObjectCredentials,
+    OSS_BUCKET,
     build_skill_zip,
-    fetched_object,
+    declared_session,
     make_context,
+    oss_source,
     real_validator,
+    seeded_object_store,
 )
 
 from ._fakes import FakeObjectStorage
-from tests.community.core.bot_config_manifest.apply._fakes import (
-    FakeObjectStore,
-    OBJECT_BUCKET,
-    object_session,
-    object_source,
-)
 
 _BASE = "teclaw/dev/bolt_data"
 _SCOPE = ManagedFileScope(entity_type="staff", entity_id="u_owner", bot_id="b_1")
@@ -113,6 +110,8 @@ class LiveCapabilityReader:
 
 
 def _rig(packages: dict[str, bytes]):
+    """``packages`` is object key → package bytes, seeded into the bucket the
+    declared ``oss`` source reads."""
     oss = FakeObjectStorage()
     store = ManagedFilesStore(
         object_storage=oss, store_base=lambda: _BASE
@@ -124,10 +123,8 @@ def _rig(packages: dict[str, bytes]):
         validator=real_validator(),
         skill_repository=skills,
     )
-    objects = FakeObjectStore()
-    for key, body in packages.items():
-        objects.put(OBJECT_BUCKET, key, body)
-    pipeline = EntryFetcher(FakeManifestContent(), FakeCredentials(), objects)
+    objects = seeded_object_store(packages)
+    pipeline = EntryFetcher(FakeManifestContent(), FakeObjectCredentials(), objects)
     materialiser = SkillsMaterialiser(
         port, activation, LiveCapabilityReader(skills, activation), real_validator(), pipeline
     )
@@ -144,14 +141,17 @@ async def _apply(materialiser, ctx, entries):
 
 def _ctx():
     return make_context(
-        engine_type="teclaw", owner_id="u_owner", source_session=object_session()
+        engine_type="teclaw",
+        owner_id="u_owner",
+        # A declared source resolves against the apply's source session.
+        source_session=declared_session(),
     )
 
 
 def _declared(key: str = QC_KEY, body: bytes = QZ):
     return {
         "name": "quality-check",
-        "source": object_source(key),
+        "source": oss_source(key),
         "digest": _digest_of(body),
     }
 
@@ -213,7 +213,7 @@ def test_a_changed_package_is_replaced_in_place() -> None:
     created_id = skills.creates[0]["id"]
 
     # The same URL now serves a new package (a moved pin).
-    objects.put(OBJECT_BUCKET, QC_KEY, QZ_V2)
+    objects.put(OSS_BUCKET, QC_KEY, QZ_V2)
     plan, written = _run(_apply(materialiser, _ctx(), [_declared(body=QZ_V2)]))
 
     assert [e.outcome.value for e in written] == ["updated"]

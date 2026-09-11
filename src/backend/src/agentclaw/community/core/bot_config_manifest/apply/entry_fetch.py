@@ -288,8 +288,13 @@ class EntryFetcher:
 
             {"name": "qc", "source": {"protocol": "oss",
                                       "bucket": "team-artifacts",
-                                      "key": "qc/v2.tgz"}}
+                                      "key": "qc/v2.tgz",
+                                      "auth": "oss-prod"}}
                 # an inline declaration. Needs a source session.
+
+            {"path": "data/kb.zip", "source": "https://example.com/kb.zip"}
+                # NOT a road: ``source`` is a declaration object, so this is
+                # refused here, the way ``PUT`` refuses it.
 
         ``category`` is a :class:`FetchCategory` value as a string, e.g.
         ``"resources_file"``; it is coerced to the enum here, so a misspelling
@@ -319,28 +324,28 @@ class EntryFetcher:
             raise EntryFetchError(expired)
 
         # The entry's own inline ``source:`` — the alternative to naming a
-        # declared one with ``from:``. One shape is a declaration::
+        # declared one with ``from:``. One shape reaches here, a declaration
+        # object, and its ``protocol`` is the dispatch::
         #
-        #     source: {protocol: git, url: ..., ref: v1.2.0}   # Mapping
-        #     source: {protocol: oss, bucket: b, key: k}       # Mapping
+        #     source: {protocol: git, url: ..., ref: v1.2.0}
+        #     source: {protocol: oss, bucket: b, key: k}
         #
-        # ``None`` when the entry used ``from:`` or inline ``content:``, and
-        # anything else — a plain string most of all — is refused below.
+        # ``None`` when the entry used ``from:`` or inline ``content:``.
         inline = entry.get("source")
-        # Both roads that name a source read the session: a ``from`` name is
-        # looked up in ``session.sources``, and a declaration's own fetcher
-        # resolves its credential (and, on git, its checkout) through it. The
-        # condition is therefore "the entry declares a source at all"; an entry
-        # that declares none fails on its shape below rather than on the
-        # session, which is the failure its author can act on.
-        needs_session = isinstance(entry.get("from"), str) or isinstance(
+        # Every road that reaches a fetcher reads the session — a ``from``
+        # name is looked up in ``session.sources``, and a declared source is
+        # acquired through it — so the requirement is exactly "this entry
+        # declares a source". An entry that declares none is refused below on
+        # its own terms rather than blamed on the missing session, and the
+        # message says who builds one, for the rig that arrives without it.
+        declares_source = isinstance(entry.get("from"), str) or isinstance(
             inline, Mapping
         )
         session = ctx.source_session
-        if needs_session and session is None:
+        if declares_source and session is None:
             raise EntryFetchError(
-                "this apply carries no source session: a declared source "
-                "needs one (the apply service builds it per apply)"
+                "this apply carries no source session: a declared 'from' or "
+                "'source' needs one (the apply service builds it per apply)"
             )
 
         keep_last = entry.get("on_fetch_failure", "keep_last") == "keep_last"
@@ -359,9 +364,10 @@ class EntryFetcher:
             raw = inline
         else:
             raise EntryFetchError(
-                "an entry must name one of 'from', 'source' or 'content': "
-                "'source' must be a declaration object with a 'protocol' "
-                "(git or oss), and a bare URL is not accepted"
+                "an entry must name one of 'from', 'source' or 'content', "
+                "and 'source' is a declaration object carrying a 'protocol' "
+                "(declare 'protocol: git' or 'protocol: oss') — a URL written "
+                "as a plain string is not one"
             )
         assert raw is not None
 

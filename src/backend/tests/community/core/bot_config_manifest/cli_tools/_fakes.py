@@ -258,9 +258,10 @@ class FakeEntryFetcher:
             decl = entry["source"]
         else:
             raise EntryFetchError(
-                "an entry must name one of 'from', 'source' or 'content': "
-                "'source' must be a declaration object with a 'protocol' "
-                "(git or oss), and a bare URL is not accepted"
+                "an entry must name one of 'from', 'source' or 'content', "
+                "and 'source' is a declaration object carrying a 'protocol' "
+                "(declare 'protocol: git' or 'protocol: oss') — a URL written "
+                "as a plain string is not one"
             )
 
         self.calls.append(

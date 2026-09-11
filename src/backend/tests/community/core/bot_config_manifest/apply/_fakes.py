@@ -170,13 +170,6 @@ class FakeGuardedFetcher:
         return response
 
 
-#: The endpoint every :class:`FakeCredentials` binding hands out for the object
-#: road. A constant rather than a per-test value on purpose: it comes off the
-#: credential in production, and a double that let a test choose it would erase
-#: the property that says so.
-OBJECT_ENDPOINT = "https://objects.internal.example"
-
-
 @dataclass
 class FakeBucket:
     """One bucket's contents and the credential entitled to read it."""
@@ -187,11 +180,6 @@ class FakeBucket:
     access_key_id: str | None = None
     #: When set, every read answers ``UNAVAILABLE`` with this detail.
     unavailable: str | None = None
-    #: Per-key ``UNAVAILABLE``, for the suites that need one object in a bucket
-    #: to be unreachable while its neighbours answer — "this source is down and
-    #: that one is not" is a per-entry story, and a bucket-wide switch cannot
-    #: tell it.
-    unavailable_keys: dict[str, str] = field(default_factory=dict)
 
 
 class FakeObjectStore:
@@ -238,12 +226,6 @@ class FakeObjectStore:
     def make_unavailable(self, bucket: str, detail: str = "endpoint unreachable") -> None:
         self.buckets.setdefault(bucket, FakeBucket()).unavailable = detail
 
-    def make_key_unavailable(
-        self, bucket: str, key: str, detail: str = "endpoint unreachable"
-    ) -> None:
-        """One object unreachable, the rest of the bucket fine."""
-        self.buckets.setdefault(bucket, FakeBucket()).unavailable_keys[key] = detail
-
     def reset(self) -> None:
         self.buckets.clear()
         self.calls.clear()
@@ -264,11 +246,10 @@ class FakeObjectStore:
             return ObjectFetchResult(
                 ObjectFetchStatus.DENIED, detail=f"{where}: not authorized"
             )
-        unavailable = bucket.unavailable or bucket.unavailable_keys.get(key)
-        if unavailable is not None:
+        if bucket.unavailable is not None:
             return ObjectFetchResult(
                 ObjectFetchStatus.UNAVAILABLE,
-                detail=f"{where}: {unavailable}",
+                detail=f"{where}: {bucket.unavailable}",
             )
         if (
             bucket.access_key_id is not None
@@ -315,19 +296,86 @@ class FakeCredentials:
         return SimpleNamespace(
             headers_for=lambda url: {"X-Custom-Auth": f"payload-of-{name}"},
             reauthorize=lambda url: None,
-            # The object road's half of a binding: the endpoint and the key
-            # pair are properties of the *credential*, never of the document,
-            # so a suite driving that road gets them from here — the same
-            # arrangement production has, where nothing a manifest writes can
-            # move the host its credential is presented to.
-            object_store_target=lambda bucket: ObjectStoreTarget(
-                endpoint=OBJECT_ENDPOINT,
-                bucket=bucket,
-                access_key_id=f"ak-of-{name}",
-                secret_access_key="the-secret-half",
-                region="cn-shanghai",
-            ),
         )
+
+
+# ── the declared object-source rig ──────────────────────────────────────────
+# A ``source`` is a declaration: ``{protocol: oss, bucket, key, auth}`` or
+# ``{protocol: git, ...}``. The object road is the one a consumer test reaches
+# for when what it is really pinning is the *fetch* — pinning, keep_last,
+# budget, receipts — so these constants and helpers give every such test one
+# bucket, one credential and one spelling of the declaration.
+
+#: The bucket the rigs seed. A document names it; the endpoint never appears
+#: in a document, which is the whole security property of this road.
+OSS_BUCKET = "manifest-fixtures"
+#: The credential name a declared source carries — ``auth`` is mandatory on
+#: this road, since the endpoint is a property of the credential row.
+OSS_AUTH = "oss-cred"
+OSS_ENDPOINT = "https://oss-cn-shanghai.aliyuncs.com"
+#: Deliberately short and with no provider prefix. Nothing on this road
+#: validates a key id's shape — the store fake compares it as an opaque
+#: string — while anything token-shaped, or merely 12+ characters with a
+#: little entropy, trips ``scripts/ci/check_secrets.py`` on the field name
+#: alone and blocks every push that touches this line.
+OSS_ACCESS_KEY_ID = "fake-ak"
+
+
+class FakeObjectCredentials(FakeCredentials):
+    """:class:`FakeCredentials` plus the half only the object road reads.
+
+    The base fake's binding answers the two header seams; an ``oss`` source
+    also asks it for an :class:`ObjectStoreTarget`, and *that* is where the
+    endpoint and the key pair come from — never from the document.
+    """
+
+    def binding(self, *, name: str):
+        binding = super().binding(name=name)
+        binding.object_store_target = lambda bucket: ObjectStoreTarget(
+            endpoint=OSS_ENDPOINT,
+            bucket=bucket,
+            access_key_id=OSS_ACCESS_KEY_ID,
+            secret_access_key="fake-sk",  # short, for the reason above
+            region="cn-shanghai",
+        )
+        return binding
+
+
+def oss_source(
+    key: str, *, bucket: str = OSS_BUCKET, auth: str | None = OSS_AUTH
+) -> dict[str, Any]:
+    """The declared ``source`` an entry carries to read one object."""
+    decl: dict[str, Any] = {"protocol": "oss", "bucket": bucket, "key": key}
+    if auth is not None:
+        decl["auth"] = auth
+    return decl
+
+
+def seeded_object_store(objects: dict[str, bytes] | None = None) -> FakeObjectStore:
+    """A store holding ``key → bytes`` under :data:`OSS_BUCKET`, readable by
+    the key pair :class:`FakeObjectCredentials` presents."""
+    store = FakeObjectStore()
+    for key, body in (objects or {}).items():
+        store.put(OSS_BUCKET, key, body, access_key_id=OSS_ACCESS_KEY_ID)
+    return store
+
+
+def declared_session(**kwargs):
+    """The per-apply source session a declared source needs.
+
+    Every entry that reaches a fetcher carries one — the ``from`` road reads
+    ``sources`` out of it and the git road checks out through it — so a rig
+    driving a declared source hands the context one even when the object road
+    it takes never looks inside.
+    """
+    from agentclaw.community.core.bot_config_manifest.apply.source_session import (
+        SourceSession,
+    )
+
+    kwargs.setdefault("sources", {})
+    kwargs.setdefault("baselines", {})
+    kwargs.setdefault("git", None)
+    return SourceSession(**kwargs)
 
 
 class FakeIdentityService:
@@ -420,9 +468,8 @@ def identity_rig(files: dict[str, str] | None = None):
     """A materialiser over fakes: (materialiser, identity fake, object store,
     content store).
 
-    The object ``SOUL_KEY`` serves ``SOUL_BODY`` for identity tests — a key in
-    a bucket, because a declared source is a declaration and the bare URL these
-    tests used to write has no road left.
+    The declared source :data:`SOUL_SOURCE` reads :data:`SOUL_KEY` out of the
+    seeded bucket and serves :data:`SOUL_BODY`.
     """
     from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
         EntryFetcher,
@@ -432,14 +479,14 @@ def identity_rig(files: dict[str, str] | None = None):
     )
 
     identity = FakeIdentityService(files)
-    objects = FakeObjectStore()
-    objects.put(OBJECT_BUCKET, SOUL_KEY, SOUL_BODY)
+    objects = seeded_object_store({SOUL_KEY: SOUL_BODY})
     content = FakeManifestContent()
-    pipeline = EntryFetcher(content, FakeCredentials(), objects)
+    pipeline = EntryFetcher(content, FakeObjectCredentials(), objects)
     return IdentityMaterialiser(identity, pipeline), identity, objects, content
 
 
 SOUL_KEY = "identity/soul.md"
+SOUL_SOURCE = oss_source(SOUL_KEY)
 SOUL_BODY = b"# team charter\nServe the customer honestly.\n"
 
 
@@ -977,43 +1024,3 @@ class FakeResourceFileService:
             }
         )
         return path in self._exists
-
-
-#: The bucket the fetching suites declare their objects in, and the credential
-#: name they read them under. One pair, shared, so a reader moving between
-#: suites recognises the road at a glance.
-OBJECT_BUCKET = "content"
-OBJECT_AUTH = "oss-cred"
-
-
-def object_source(key: str, *, bucket: str = OBJECT_BUCKET, **extra) -> dict:
-    """An inline ``protocol: oss`` source declaration for one object::
-
-        {"protocol": "oss", "bucket": "content", "key": "skills/qc.zip",
-         "auth": "oss-cred"}
-
-    What a manifest entry's ``source:`` is, now that the grammar's only other
-    spelling is git. Suites that used to write a bare URL here write this.
-    """
-    return {
-        "protocol": "oss",
-        "bucket": bucket,
-        "key": key,
-        "auth": OBJECT_AUTH,
-        **extra,
-    }
-
-
-def object_session(**sources):
-    """A :class:`SourceSession` for the object road, with no git client.
-
-    ``fetch_declared`` requires a session for every declared source — the
-    ``from`` road looks its name up here, and a declaration's own fetcher
-    resolves through it — so a suite driving inline ``oss`` sources needs one
-    even when it names nothing under ``sources``.
-    """
-    from agentclaw.community.core.bot_config_manifest.apply.source_session import (
-        SourceSession,
-    )
-
-    return SourceSession(sources=dict(sources), baselines={}, git=None)

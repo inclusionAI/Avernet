@@ -12,11 +12,11 @@ inline body and a fetched one are accepted::
           content: |
             # rules
 
-        # an inline source declaration
+        # an inline source: a declaration object, like every source
         - type: SOUL.md
           source:
             protocol: oss
-            bucket: content
+            bucket: team-artifacts
             key: identity/soul.md
             auth: oss-prod
 
@@ -27,8 +27,8 @@ inline body and a fetched one are accepted::
           subpath: okr.md
 
 An entry reaches ``resolve`` as the raw mapping, e.g. ``{"type": "SOUL.md",
-"source": {"protocol": "oss", "bucket": "content", "key": "identity/soul.md",
-"auth": "oss-prod"}}``.
+"source": {"protocol": "oss", "bucket": "team-artifacts",
+"key": "identity/soul.md", "auth": "oss-prod"}}``.
 
 The area this overwrites is the bot's identity
 file set, minus ``MEMORY.md`` / ``IDENTITY.md`` — engine-generated runtime
@@ -54,8 +54,8 @@ IdentityService exposes no delete, and inventing one in apply would give the
 identity area two removal semantics where every reader of the area sees one.
 A reserved name never receives even an empty write.
 
-Fetch (for ``source`` entries — an inline declaration, or a ``from`` name,
-both via W7's ``fetch_declared``) happens in ``resolve`` through
+Fetch (for ``source`` entries — a declared ``source``, or a ``from`` name,
+both through W7's ``fetch_declared``) happens in ``resolve`` through
 :class:`~agentclaw.community.core.bot_config_manifest.apply.entry_fetch.EntryFetcher`;
 a failure aborts the whole category before the first write — §3.2's
 all-or-nothing, by construction, never by discipline. The bytes are decoded

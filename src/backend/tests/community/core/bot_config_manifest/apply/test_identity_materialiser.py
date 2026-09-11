@@ -28,33 +28,32 @@ from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
-    FetchFailedError,
     FetchRefusedError,
 )
 
-from ._fakes import (
-    FakeCredentials,
-    FakeIdentityService,
-    FakeManifestContent,
-    fetched_object,
-    identity_rig,
-    make_context,
-    object_session,
-    object_source,
-    SOUL_BODY,
-    SOUL_KEY,
-)
-from tests.community.core.bot_config_manifest.apply._fakes import (
-    FakeObjectStore,
-    OBJECT_BUCKET,
-)
 from agentclaw.community.core.bot_config_manifest.apply.source_fetchers import (
     object_receipt_url,
 )
 
-#: Where a receipt for the identity object is filed — the address the object
-#: road builds, not a fetchable URL.
-SOUL_ADDRESS = object_receipt_url(OBJECT_BUCKET, SOUL_KEY)
+from ._fakes import (
+    FakeIdentityService,
+    FakeManifestContent,
+    FakeObjectCredentials,
+    OSS_BUCKET,
+    declared_session,
+    fetched_object,
+    identity_rig,
+    make_context,
+    oss_source,
+    seeded_object_store,
+    SOUL_BODY,
+    SOUL_KEY,
+    SOUL_SOURCE,
+)
+
+#: The W11 identity the seeded object's bytes are filed under — what a
+#: pre-filed keep_last copy is keyed by.
+SOUL_RECEIPT = object_receipt_url(OSS_BUCKET, SOUL_KEY)
 
 
 def _run(coro):
@@ -67,8 +66,8 @@ def _ctx(**kwargs):
     # turn every RULES/SOUL test into a legality test.
     kwargs.setdefault("engine_type", "openclaw")
     kwargs.setdefault("owner_id", "u_owner")
-    # Every declared source resolves through the apply's session.
-    kwargs.setdefault("source_session", object_session())
+    # Every declared source is resolved against the apply's source session.
+    kwargs.setdefault("source_session", declared_session())
     return make_context(**kwargs)
 
 
@@ -82,7 +81,7 @@ async def _apply(materialiser, ctx, entries):
     return resolved, plan, written
 
 
-DECLARED = {"type": "SOUL.md", "source": object_source(SOUL_KEY)}
+DECLARED = {"type": "SOUL.md", "source": SOUL_SOURCE}
 
 
 # ── resolve: entries, both source forms ─────────────────────────────────────
@@ -118,15 +117,17 @@ def test_a_sourced_entry_fetches_then_writes():
 
 
 def test_placeholder_substitution_reaches_the_identity_fetch():
+    """A per-env key prefix is the whole reason the placeholders exist, so
+    the substitution has to land in the address the store is asked for."""
     materialiser, identity, objects, _ = identity_rig()
     substituted = "identity/dev/soul.md"
-    objects.put(OBJECT_BUCKET, substituted, SOUL_BODY)
+    objects.put(OSS_BUCKET, substituted, SOUL_BODY, access_key_id=None)
 
     result, _, _ = _run(
         _apply(
             materialiser,
             _ctx(),
-            [{"type": "SOUL.md", "source": object_source("identity/${BOT_ENV}/soul.md")}],
+            [{"type": "SOUL.md", "source": oss_source("identity/${BOT_ENV}/soul.md")}],
         )
     )
     assert result.ok
@@ -136,7 +137,7 @@ def test_placeholder_substitution_reaches_the_identity_fetch():
 def test_a_non_utf8_identity_source_fails_the_entry():
     materialiser, identity, objects, _ = identity_rig()
     binary = bytes([0xFF, 0xFE, 0x00, 0x01])
-    objects.put(OBJECT_BUCKET, SOUL_KEY, binary)
+    objects.put(OSS_BUCKET, SOUL_KEY, binary)
 
     resolved = _run(materialiser.resolve(_ctx(), [DECLARED]))
     assert not resolved.ok
@@ -209,26 +210,26 @@ def test_an_entry_without_either_source_form_is_refused():
 def test_one_failed_fetch_aborts_the_whole_category_no_writes():
     identity = FakeIdentityService()
     ok_key = "identity/rules.md"
-    objects = FakeObjectStore()
-    objects.put(OBJECT_BUCKET, ok_key, b"# rules")
-    objects.make_key_unavailable(
-        OBJECT_BUCKET, SOUL_KEY, "the object store is unreachable"
-    )
+    objects = seeded_object_store({ok_key: b"# rules"})
+    # The second entry reads a bucket the store cannot reach — a transport
+    # failure with nothing filed to fall back to.
+    objects.make_unavailable("down-bucket", "source answered 404")
     materialiser = IdentityMaterialiser(
-        identity, EntryFetcher(FakeManifestContent(), FakeCredentials(), objects)
+        identity,
+        EntryFetcher(FakeManifestContent(), FakeObjectCredentials(), objects),
     )
 
     resolved = _run(
         materialiser.resolve(
             _ctx(),
             [
-                {"type": "RULES.md", "source": object_source(ok_key)},
-                {"type": "SOUL.md", "source": object_source(SOUL_KEY)},
+                {"type": "RULES.md", "source": oss_source(ok_key)},
+                {"type": "SOUL.md", "source": oss_source(SOUL_KEY, bucket="down-bucket")},
             ],
         )
     )
     assert not resolved.ok
-    assert "the object store is unreachable" in resolved.failures[0].reason
+    assert "source answered 404" in resolved.failures[0].reason
     # Refused in resolve ⇒ no plan, no write — the all-or-nothing property
     # holds by construction, not by a mid-write undo.
     assert identity.writes == []
@@ -240,16 +241,15 @@ def test_keep_last_reuses_the_platform_copy_when_the_source_is_down():
     content = FakeManifestContent()
     # A prior apply fetched and filed the bytes; since then, the source died.
     content.store(
-        fetched_object(SOUL_BODY, url=SOUL_ADDRESS, content_type=None),
+        fetched_object(SOUL_BODY, url=SOUL_RECEIPT, content_type="text/markdown"),
         scope=None,
-        source_url=SOUL_ADDRESS,
+        source_url=SOUL_RECEIPT,
     )
-    objects = FakeObjectStore()
-    objects.make_key_unavailable(
-        OBJECT_BUCKET, SOUL_KEY, "the object store is unreachable"
-    )
+    objects = seeded_object_store({SOUL_KEY: SOUL_BODY})
+    objects.make_unavailable(OSS_BUCKET, "source transport failed")
     materialiser = IdentityMaterialiser(
-        identity, EntryFetcher(content, FakeCredentials(), objects)
+        identity,
+        EntryFetcher(content, FakeObjectCredentials(), objects),
     )
 
     result, plan, written = _run(
@@ -259,7 +259,7 @@ def test_keep_last_reuses_the_platform_copy_when_the_source_is_down():
             [
                 {
                     "type": "SOUL.md",
-                    "source": object_source(SOUL_KEY),
+                    "source": SOUL_SOURCE,
                     "on_fetch_failure": "keep_last",
                 },
                 {"type": "RULES.md", "content": "# rules"},
@@ -276,12 +276,11 @@ def test_a_declared_digest_that_the_source_no_longer_matches_fails():
     other = "sha256:" + "1" * 64
     resolved = _run(
         materialiser.resolve(
-            _ctx(),
-            [{"type": "SOUL.md", "source": object_source(SOUL_KEY), "digest": other}],
+            _ctx(), [{"type": "SOUL.md", "source": SOUL_SOURCE, "digest": other}]
         )
     )
     assert not resolved.ok  # the pin disagrees with what is actually served
-    assert "the entry declared" in resolved.failures[0].reason
+    assert other in resolved.failures[0].reason
     assert identity.writes == []
 
 
@@ -374,16 +373,15 @@ def test_an_omitted_on_fetch_failure_defaults_to_keep_last():
     identity = FakeIdentityService()
     content = FakeManifestContent()
     content.store(
-        fetched_object(SOUL_BODY, url=SOUL_ADDRESS, content_type=None),
+        fetched_object(SOUL_BODY, url=SOUL_RECEIPT, content_type="text/markdown"),
         scope=None,
-        source_url=SOUL_ADDRESS,
+        source_url=SOUL_RECEIPT,
     )
-    objects = FakeObjectStore()
-    objects.make_key_unavailable(
-        OBJECT_BUCKET, SOUL_KEY, "the object store is unreachable"
-    )
+    objects = seeded_object_store({SOUL_KEY: SOUL_BODY})
+    objects.make_unavailable(OSS_BUCKET, "source transport failed")
     materialiser = IdentityMaterialiser(
-        identity, EntryFetcher(content, FakeCredentials(), objects)
+        identity,
+        EntryFetcher(content, FakeObjectCredentials(), objects),
     )
 
     result, _, written = _run(

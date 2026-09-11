@@ -12,18 +12,18 @@ Both source spellings are accepted::
           subpath: quality-check     # selects a subtree, then re-packed
           on_fetch_failure: keep_last
 
-        # an inline source declaration
+        # an inline source: a declaration object, like every source
         - name: quality-check
           source:
             protocol: oss
-            bucket: content
+            bucket: team-artifacts
             key: skills/quality-check.zip
             auth: oss-prod
           digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b...
 
 An entry reaches ``resolve`` as the raw mapping, e.g.
-``{"name": "quality-check", "source": {"protocol": "oss", "bucket": "content",
-"key": "skills/quality-check.zip", "auth": "oss-prod"},
+``{"name": "quality-check", "source": {"protocol": "oss", "bucket":
+"team-artifacts", "key": "skills/quality-check.zip", "auth": "oss-prod"},
 "digest": "sha256:…"}``.
 
 The area is the one the all-or-nothing rule names: the bot's **active** skill

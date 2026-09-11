@@ -26,9 +26,9 @@ from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
 )
 from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+    declared_protocol,
     EntryFetchError,
     EntryFetcher,
-    declared_protocol,
 )
 from agentclaw.community.core.bot_config_manifest.apply.source_fetchers import (
     object_receipt_url,
@@ -430,41 +430,6 @@ def test_the_funnel_requires_a_category_by_keyword():
         category = inspect.signature(entry_point).parameters["category"]
         assert category.kind is inspect.Parameter.KEYWORD_ONLY
         assert category.default is inspect.Parameter.empty
-
-
-# --- the road that is gone -----------------------------------------------
-
-
-def test_a_bare_url_source_is_refused_with_the_form_it_should_have_taken(rig):
-    """A ``source`` that is a plain string names no protocol, so there is
-    nothing to dispatch on. It used to be an HTTPS GET performed by this
-    module; the refusal names the declaration form instead of guessing that a
-    string is an address worth dialling."""
-    _, _, pipeline = rig
-    ctx = make_context(source_session=_session(_ScriptedGit()))
-
-    with pytest.raises(EntryFetchError) as excinfo:
-        pipeline.fetch_declared(
-            ctx, entry={"source": "https://content.example/kb.zip"},
-            category="identity",
-        )
-    assert "declaration object" in excinfo.value.reason
-    assert "bare URL is not accepted" in excinfo.value.reason
-
-
-def test_declared_protocol_cannot_name_one_for_a_bare_url(rig):
-    """And the pre-fetch question answers ``None`` rather than ``OSS``: a
-    string is not a declaration, so nothing can be said about it without
-    reaching the refusal above. The callers read ``None`` as "cannot say", and
-    that is the honest answer."""
-    _, _, pipeline = rig
-    ctx = make_context()
-    assert declared_protocol(ctx, {"source": "https://content.example/kb.zip"}) is None
-    assert declared_protocol(ctx, {"content": "inline text"}) is None
-    assert declared_protocol(
-        ctx,
-        {"source": {"protocol": "oss", "bucket": "b", "key": "k", "auth": "a"}},
-    ) is SourceKind.OSS
 
 
 # --- the W7 declared-source front door: fetch_declared / file_bytes ---
@@ -974,3 +939,54 @@ def test_an_oss_source_without_auth_is_refused_before_any_read(objects_rig):
     assert objects.calls == []  # refused before the store was touched
 
 
+
+
+# --- 'source' is a declaration, and nothing else ----------------------------
+
+
+def test_a_source_written_as_a_plain_url_string_is_refused(rig):
+    """The supported set is exactly three roads — inline ``content``, a
+    declared ``oss`` object, a declared ``git`` repository — and a ``source``
+    naming a URL directly is none of them.
+
+    The ``PUT`` validator has refused that spelling for some time; the apply
+    pipeline kept a read-side branch for documents already stored under the
+    old grammar, and there are none left. The refusal names the shape the
+    author has to write instead, because the entry it is refusing was
+    written by a person, not produced by the platform.
+    """
+    _, _, pipeline = rig
+    ctx = make_context(source_session=_session(_ScriptedGit()))
+    with pytest.raises(EntryFetchError) as raised:
+        pipeline.fetch_declared(
+            ctx,
+            entry={"source": "https://example.com/x.zip"},
+            category="skills",
+        )
+    reason = raised.value.reason
+    assert "declaration object" in reason and "protocol" in reason
+    assert "protocol: git" in reason and "protocol: oss" in reason
+    # Refused at the front door — and there is no longer a URL transport to
+    # have asked in the first place: the entry point that dialled one is gone.
+    assert not hasattr(pipeline, "_fetcher")
+
+
+def test_declared_protocol_cannot_answer_for_a_source_that_is_not_a_declaration():
+    """``declared_protocol`` answers from the declaration or not at all.
+
+    It used to call a string ``source`` ``OSS``, which was the legacy road's
+    classification. ``None`` — "cannot say from the declaration alone" — is
+    what the callers already handle: they fall through to the fetch, which
+    raises the real error with the real message rather than a rule derived
+    from a shape nothing supports.
+    """
+    ctx = make_context()
+    assert declared_protocol(ctx, {"source": "https://example.com/x.zip"}) is None
+    assert declared_protocol(ctx, {"content": "inline text"}) is None
+    assert (
+        declared_protocol(
+            ctx,
+            {"source": {"protocol": "oss", "bucket": "b", "key": "k", "auth": "c"}},
+        )
+        is SourceKind.OSS
+    )

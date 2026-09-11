@@ -51,6 +51,16 @@ def _elf() -> bytes:
 _TOOL = _elf()
 _DIGEST = "sha256:" + hashlib.sha256(_TOOL).hexdigest()
 
+#: The object source a plain ``_entry()`` names. A cli_tools entry declares a
+#: source the way every other category does; the endpoint and the key pair
+#: come off the credential the source names, never out of the document.
+_OBJECT_SOURCE = {
+    "protocol": "oss",
+    "bucket": "tool-artifacts",
+    "key": "bin/",
+    "auth": "oss-cred",
+}
+
 
 def _ctx(**kwargs) -> ApplyContext:
     base = dict(
@@ -61,6 +71,8 @@ def _ctx(**kwargs) -> ApplyContext:
             is_teclaw=lambda e: (e or "") == "teclaw",
         ),
         apply_id="ap1",
+        # A declared source resolves against the apply's source session.
+        source_session=SimpleNamespace(sources={"tools": _OBJECT_SOURCE}),
     )
     base.update(kwargs)
     return ApplyContext(**base)

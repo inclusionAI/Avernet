@@ -35,9 +35,6 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetcher,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
-    FetchFailedError,
-)
 
 from ._fakes import (
     FakeActivationService,
@@ -50,7 +47,6 @@ from ._fakes import (
     FakeResourceFileService,
     FakeSkillUploadService,
     FakeStartupScriptService,
-    fetched_object,
     make_context,
     real_validator,
 )
@@ -81,9 +77,7 @@ def _engine(scripts=None, activations=None, auth=None):
 def _dummy_entry_fetcher():
     """The engine tests never declare skills/identity sources, so the fetcher
     the registry holds for them can be a never-called placeholder."""
-    return EntryFetcher(
-        FakeManifestContent(), FakeCredentials(), FakeObjectStore()
-    )
+    return EntryFetcher(FakeManifestContent(), FakeCredentials(), FakeObjectStore())
 
 
 async def _apply(engine, document, *, ctx=None, dry_run=False, phases=None):
@@ -771,11 +765,14 @@ async def test_a_fetching_document_applies_all_four_categories_in_order():
     the partial delivery.
     """
     from ._fakes import (
-        OBJECT_BUCKET,
+        FakeObjectCredentials,
+        OSS_AUTH,
+        OSS_BUCKET,
         SOUL_BODY as _SOUL_BODY,
         SOUL_KEY as _SOUL_KEY,
         build_skill_zip,
-        object_session,
+        declared_session,
+        seeded_object_store,
     )
 
     qc_zip = build_skill_zip("quality-check")
@@ -788,13 +785,9 @@ async def test_a_fetching_document_applies_all_four_categories_in_order():
     uploads = FakeSkillUploadService()
     activation = FakeActivationService()
     reader = FakeCapabilityReader()
-    objects = FakeObjectStore()
-    objects.put(OBJECT_BUCKET, _SOUL_KEY, _SOUL_BODY)
-    objects.put(OBJECT_BUCKET, qc_key, qc_zip)
-    # identity rules read: the source is gone — a real outage shape.
-    objects.make_key_unavailable(
-        OBJECT_BUCKET, rules_key, "the object store is unreachable"
-    )
+    objects = seeded_object_store({_SOUL_KEY: _SOUL_BODY, qc_key: qc_zip})
+    # identity rules fetch: its bucket is unreachable — a real outage shape.
+    objects.make_unavailable("rules-bucket", "source answered 404")
     engine = ApplyOrchestrator(
         build_materialisers(
             script_service=FakeStartupScriptService(),
@@ -804,9 +797,7 @@ async def test_a_fetching_document_applies_all_four_categories_in_order():
             upload_service=uploads,
             capability_reader=reader,
             package_validator=real_validator(),
-            entry_fetcher=EntryFetcher(
-                FakeManifestContent(), FakeCredentials(), objects
-            ),
+            entry_fetcher=EntryFetcher(FakeManifestContent(), FakeObjectCredentials(), objects),
             resource_service=FakeResourceFileService(),
             cli_tool_service=object(),
         ),
@@ -816,36 +807,33 @@ async def test_a_fetching_document_applies_all_four_categories_in_order():
     report = await _apply(
         engine,
         f"""schema_version: 1
-sources:
-  content:
-    protocol: oss
-    bucket: {OBJECT_BUCKET}
-    auth: oss-cred
 manifest:
   identity:
     - type: SOUL.md
-      from: content
-      key: "{_SOUL_KEY}"
+      source:
+        protocol: oss
+        bucket: "{OSS_BUCKET}"
+        key: "{_SOUL_KEY}"
+        auth: "{OSS_AUTH}"
     - type: RULES.md
-      from: content
-      key: "{rules_key}"
+      source:
+        protocol: oss
+        bucket: rules-bucket
+        key: "{rules_key}"
+        auth: "{OSS_AUTH}"
   skills:
     - name: quality-check
-      from: content
-      key: "{qc_key}"
+      source:
+        protocol: oss
+        bucket: "{OSS_BUCKET}"
+        key: "{qc_key}"
+        auth: "{OSS_AUTH}"
       digest: "{qc_digest}"
 script:
   body: "echo hi"
 """,
         ctx=make_context(
-            engine_type="openclaw",
-            source_session=object_session(
-                content={
-                    "protocol": "oss",
-                    "bucket": OBJECT_BUCKET,
-                    "auth": "oss-cred",
-                }
-            ),
+            engine_type="openclaw", source_session=declared_session()
         ),
     )
 

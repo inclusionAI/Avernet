@@ -159,13 +159,14 @@ class FetchedEntry:
     #: entry's note. A plain store-hit (from_store, no note) is the
     #: legitimate pinned fast path and stays silent.
     fallback_reason: Optional[str] = None
-    #: The address these bytes are filed under, in one of two shapes
+    #: The address these bytes are filed under, in one of three shapes
     #: depending on the road that produced them::
     #:
+    #:     "https://example.com/tools/qc-v2.zip"       # the API install road
     #:     "oss://team-artifacts/tools/qc/v2.tgz"      # object store road
     #:     "git+https://code.example.com/team/content.git@<40-hex sha>:kb"
     #:
-    #: Both are receipt identities, not fetchable URLs. Callers also
+    #: The last two are receipt identities, not fetchable URLs. Callers also
     #: read this to infer an archive's kind from its extension (the skills
     #: materialiser). ``None`` on the roads that never knew one.
     source_url: Optional[str] = None
@@ -307,7 +308,8 @@ class EntryDelivery(Protocol):
     ``single``; ``cli_tools`` alone calls ``digest``; and all four call
     ``note``, ``receipt_url``, ``auth`` and ``needs_receipt``.
 
-    Created by: ``apply/source_fetchers`` (both fetchers).
+    Created by: ``apply/source_fetchers`` (both fetchers), and by
+    ``cli_tools/service`` around a ``fetch`` on the API-driven install road.
     Consumed by: every fetching materialiser — ``skills``, ``resources``,
     ``identity``, ``cli_tools``.
 
@@ -431,9 +433,9 @@ class EntryDelivery(Protocol):
 class BlobDelivery(EntryDelivery):
     """One object's bytes, however they were acquired.
 
-    The object-store road, and every ``keep_last`` fallback — including a git
-    one, whose stored bytes arrive here as a canonical tree blob rather than as
-    a checkout::
+    The object-store road, the API install road's plain URL, and every
+    ``keep_last`` fallback — including a git one, whose stored bytes arrive
+    here as a canonical tree blob rather than as a checkout::
 
         BlobDelivery(fetched=FetchedEntry(
             content=b"PK\x03\x04...",
