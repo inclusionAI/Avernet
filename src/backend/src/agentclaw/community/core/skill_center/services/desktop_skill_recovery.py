@@ -70,6 +70,22 @@ _NORMAL_PENDING_CODES = frozenset(
 )
 _POOL_TRANSITION_CODE = "SKILLS_POOL_TRANSITION_OWNS_MAPPING"
 _DEVICE_OFFLINE_CODE = "DESKTOP_DEVICE_OFFLINE"
+_TRANSIENT_FAILURE_CODES = frozenset(
+    {
+        "CENTER_CONTENT_DESCRIPTOR_WRITE_FAILED",
+        "CENTER_CONTENT_DNS_UNAVAILABLE",
+        "CENTER_CONTENT_DOWNLOAD_FAILED",
+        "CENTER_CONTENT_DOWNLOAD_START_FAILED",
+        "CENTER_CONTENT_LOOKUP_FAILED",
+        "CENTER_CONTENT_PACKAGE_WRITE_FAILED",
+        "CENTER_CONTENT_SIGNING_FAILED",
+        "CENTER_RUNTIME_RESTART_REQUIRED",
+        "MANAGED_SOURCE_MISSING",
+        "MAPPING_PUBLISH_IO_ERROR",
+        "SKILL_MAPPING_RUNTIME_UNAVAILABLE",
+        "SKILL_RUNTIME_UNAVAILABLE",
+    }
+)
 _KEY_DIGEST_CHARS = 32
 logger = get_logger()
 
@@ -431,12 +447,12 @@ class DesktopSkillRecoveryTaskHandler:
         elif any(issue.code == _POOL_TRANSITION_CODE for issue in retryable):
             continuation = RecoveryContinuation.RESCHEDULE_FOR_PROGRESS
         else:
-            abnormal = tuple(
+            transient = tuple(
                 issue
                 for issue in retryable
-                if not is_normal_center_content_wait(issue.code)
+                if issue.code in _TRANSIENT_FAILURE_CODES
             )
-            if prepare_retryable_error or abnormal:
+            if prepare_retryable_error or transient:
                 continuation = RecoveryContinuation.RETRY_WITH_BACKOFF
             elif prepare_pending or any(
                 is_normal_center_content_wait(issue.code) for issue in retryable
@@ -444,6 +460,19 @@ class DesktopSkillRecoveryTaskHandler:
                 continuation = RecoveryContinuation.RESCHEDULE_FOR_PROGRESS
             else:
                 continuation = RecoveryContinuation.COMPLETE_PERMANENT
+                unknown_retryable = sorted(
+                    {
+                        issue.code
+                        for issue in retryable
+                        if not is_normal_center_content_wait(issue.code)
+                    }
+                )
+                if unknown_retryable:
+                    logger.warning(
+                        "[DesktopSkillRecovery] unsupported retryable issues "
+                        "will not authorize task retry codes=%s",
+                        unknown_retryable,
+                    )
 
         if continuation is RecoveryContinuation.COMPLETE_WAITING_FOR_EVENT:
             return Complete()
@@ -454,7 +483,7 @@ class DesktopSkillRecoveryTaskHandler:
                 {
                     issue.code
                     for issue in retryable
-                    if not is_normal_center_content_wait(issue.code)
+                    if issue.code in _TRANSIENT_FAILURE_CODES
                 }
             )
             return Retry(
