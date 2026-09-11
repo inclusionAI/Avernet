@@ -142,6 +142,54 @@ for profile in host guest empty; do
     assert_content "${OPENCLAW_PROFILE_ROOT}/${profile}/.bcs/session.json" 'preserved session'
 done
 
+# Source links must never expose an external store or leave a live dependency
+# in the active workspace. Rejection must preserve both skills and ownership.
+cp -R "${HOST_WORKSPACE}/skills" "${TEMPORARY}/expected-skills"
+cp -R "${HOST_WORKSPACE}/.singlebox-profile-skills" "${TEMPORARY}/expected-managed"
+mkdir -p "${TEMPORARY}/external-store/private-skill"
+printf '%s\n' 'external content' > "${TEMPORARY}/external-store/private-skill/SKILL.md"
+assert_symlinked_source_rejected() {
+    : > "${TEMPORARY}/events"
+    if bots_start > "${TEMPORARY}/source-symlink.log" 2>&1; then
+        fail "startup accepted a source symlink: $1"
+    fi
+    grep -Fq 'Profile skills must not contain symlinks:' "${TEMPORARY}/source-symlink.log" \
+        || fail "missing source symlink diagnostic: $1"
+    [ ! -s "${TEMPORARY}/events" ] || fail "gateway started with a source symlink: $1"
+    diff -r "${TEMPORARY}/expected-skills" "${HOST_WORKSPACE}/skills"
+    diff -r "${TEMPORARY}/expected-managed" "${HOST_WORKSPACE}/.singlebox-profile-skills"
+    assert_content "${TEMPORARY}/external-store/private-skill/SKILL.md" 'external content'
+}
+
+ln -s "${TEMPORARY}/external-store" "${HOST_SOURCE}/shared-store"
+assert_symlinked_source_rejected 'top-level skill directory'
+rm "${HOST_SOURCE}/shared-store"
+
+ln -s "${TEMPORARY}/external-store" "${HOST_SOURCE}/game/.shared-store"
+assert_symlinked_source_rejected 'hidden nested directory'
+rm "${HOST_SOURCE}/game/.shared-store"
+
+ln -s "${TEMPORARY}/external-store/private-skill/SKILL.md" "${HOST_SOURCE}/game/references/external.md"
+assert_symlinked_source_rejected 'nested file'
+rm "${HOST_SOURCE}/game/references/external.md"
+
+ln -s ../SKILL.md "${HOST_SOURCE}/game/references/internal.md"
+assert_symlinked_source_rejected 'relative link within the profile'
+rm "${HOST_SOURCE}/game/references/internal.md"
+
+ln -s missing.md "${HOST_SOURCE}/game/references/broken.md"
+assert_symlinked_source_rejected 'dangling nested link'
+rm "${HOST_SOURCE}/game/references/broken.md"
+
+mv "$HOST_SOURCE" "${TEMPORARY}/saved-source-skills"
+ln -s "${TEMPORARY}/saved-source-skills" "$HOST_SOURCE"
+assert_symlinked_source_rejected 'skills root directory'
+rm "$HOST_SOURCE"
+ln -s "${TEMPORARY}/missing-skills" "$HOST_SOURCE"
+assert_symlinked_source_rejected 'dangling skills root'
+rm "$HOST_SOURCE"
+mv "${TEMPORARY}/saved-source-skills" "$HOST_SOURCE"
+
 # Copy errors must fail startup before any gateway starts, preserving old skills.
 (
     cp() {
