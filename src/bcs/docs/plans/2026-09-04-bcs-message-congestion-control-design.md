@@ -1316,10 +1316,15 @@ Provider Bot 后才发现不能恢复 header。后续再评审按 Bot capability
 - 修改 TTL 仅作用于新准入，已有 expire_at 不追溯改变。
 - pause_dispatch 停止新的 send-start；查询、终态、过期和 Abort 继续。
 - 类型/Bot 关闭更新可落库成功，但仅代表不再接受新受管请求，不代表旧工作已经排空。
-  旧 queued/active/context 及其产生的正常回复仍走受管路径；同 Bot 有旧工作时新请求
+  旧 queued/active Send 及其产生的正常回复仍走受管路径；同 Bot 有未完成 Send 时新请求
   返回 queue_draining，不切换 legacy 越过队列。
-- 未绑定 inject 需要显式取消或消费；Unknown/cancel_unknown 必须取得可信终止证据，
-  不能因关闭配置释放。关闭后如需继续消费上下文，可重新开启该范围再投递 Send。
+- 已绑定 Inject 随原 Send 消费或释放。旧 Send 排空后，恢复 legacy 的入口按每批最多
+  100 条将剩余未绑定 Inject 标记为 cancelled，不发送、不删除正文；处理失败返回错误。
+  仅有 Inject 不再构成无限等待条件。Unknown/cancel_unknown Send 仍必须取得可信终止证据，
+  不能因关闭配置释放。
+- bot_relay_turn_limit 对队列与 legacy 均生效：一次回复有新接受的受管目标或成功的
+  legacy 投递时计一次；多目标、混合投递不重复计数，重复终态与全目标容量拒绝不计数。
+  受管路径以持久化准入为计数点，不等 Worker 发出，因此后续取消也不退回轮数。
 - 重启仍从数据库恢复未结束工作，调度限额使用当前 defaults+overrides；删除 override
   只是恢复默认限额，不会丢失该 Bot 的旧队列或调度资格。
 - 调度器任务异常退出后新准入 fail closed；管理接口也不能假装重新开启失效调度器。

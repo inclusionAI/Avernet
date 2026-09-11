@@ -746,7 +746,7 @@ async fn relay_final_chat_event(
     }
 
     for target in &decision.targets {
-        if queued_reply_targets.as_ref().is_some_and(|targets| targets.contains(&target.bot_uuid)) { continue; }
+        if queued_reply_targets.as_ref().is_some_and(|reply| reply.target_ids.contains(&target.bot_uuid)) { continue; }
         let directive = build_response_directive(
             target,
             &routing_source,
@@ -979,7 +979,10 @@ async fn relay_final_chat_event(
         }
     }
 
-    if bot_deliveries.iter().any(|delivery| delivery.delivered) {
+    // Queue acceptance is the relay boundary for managed targets. Count one
+    // logical reply even for fan-out or mixed managed/legacy recipients.
+    if queued_reply_targets.as_ref().is_some_and(|reply| reply.relayed)
+        || bot_deliveries.iter().any(|delivery| delivery.delivered) {
         flow.group.increment_message_count(&cmd.group_id).await?;
     }
 

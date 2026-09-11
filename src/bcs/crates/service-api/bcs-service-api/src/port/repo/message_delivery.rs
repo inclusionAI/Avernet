@@ -16,7 +16,10 @@ pub enum DeliveryLookup {
     Run { bot: String, alias: String },
     Bound(String),
     Lane { bot: String, session: String },
+    /// At most one unfinished Send; Inject must not block legacy drain.
     BotPending(String),
+    /// At most 100 unbound contexts for drain cleanup after all Sends settle.
+    BotPendingContexts(String),
     Message(String),
     Successor { bot: String, session: String, after_seq: i64, exclude: String, now_ms: i64 },
 }

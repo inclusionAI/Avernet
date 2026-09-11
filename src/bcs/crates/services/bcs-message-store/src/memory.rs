@@ -834,10 +834,11 @@ impl bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort for 
             Q::Run { bot, alias } => d.target_bot_id == *bot && (d.run_id.as_ref() == Some(alias) || d.request_id.as_ref() == Some(alias) || d.transport_context_json.as_ref().and_then(|v| v.get("downstream_run_id")).and_then(|v| v.as_str()) == Some(alias.as_str())),
             Q::Bound(id) => d.bound_to_delivery_id.as_ref() == Some(id) && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Bound,
             Q::Lane { bot, session } => d.target_bot_id == *bot && d.session_id == *session && d.state.kind == bcs_domain::DeliveryType::Send && super::delivery::unfinished(d),
-            Q::BotPending(bot) => d.target_bot_id == *bot && super::delivery::unfinished(d),
+            Q::BotPending(bot) => d.target_bot_id == *bot && d.state.kind == bcs_domain::DeliveryType::Send && super::delivery::unfinished(d),
+            Q::BotPendingContexts(bot) => d.target_bot_id == *bot && d.state.kind == bcs_domain::DeliveryType::Inject && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::PendingContext,
             Q::Message(id) => d.source_message_id == *id,
             Q::Successor { bot, session, after_seq, exclude, now_ms } => d.target_bot_id == *bot && d.session_id == *session && d.source_session_seq > *after_seq && d.delivery_id != *exclude && d.state.kind == bcs_domain::DeliveryType::Send && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Queued && !d.state.may_have_been_sent && d.expire_at_ms.is_none_or(|t| t > *now_ms),
-        }).take(if matches!(scope, Q::BotPending(_) | Q::Successor { .. }) { 1 } else { usize::MAX }).collect())
+        }).take(match scope { Q::BotPending(_) | Q::Successor { .. } => 1, Q::BotPendingContexts(_) => 100, _ => usize::MAX }).collect())
     }
     async fn queued_bots(&self, after: &str, limit: usize) -> Result<Vec<String>, bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
         Ok(self.list_deliveries(None).await?.into_iter().filter(|d| d.state.kind == bcs_domain::DeliveryType::Send && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Queued && d.target_bot_id.as_str() > after).map(|d| d.target_bot_id).collect::<std::collections::BTreeSet<_>>().into_iter().take(limit.min(256)).collect())

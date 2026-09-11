@@ -61,6 +61,23 @@ pub async fn guard_legacy_targets(
             request_id: None,
         });
     }
+    // No old Send can carry these contexts. Settle them instead of waiting
+    // for a managed Send that disabled admission will never create.
+    for target in legacy {
+        loop {
+            let contexts = service.lookup(bcs_service_api::port::repo::message_delivery::DeliveryLookup::BotPendingContexts(target.bot_uuid.clone())).await
+                .map_err(|_| ServiceError::InternalError("queue context drain lookup failed".into()))?;
+            if contexts.is_empty() { break; }
+            for row in contexts {
+                service.transition(bcs_service_api::DeliveryTransitionCommand {
+                    delivery_id: row.delivery_id, expected_state_version: row.state.state_version,
+                    event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,
+                    now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: None,
+                    reply: None, transport_context_json: None, deadline_at_ms: None,
+                }).await.map_err(|_| ServiceError::InternalError("queue context drain failed".into()))?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -136,8 +153,14 @@ pub async fn find_managed_run(
     Ok(None)
 }
 
-/// Returns the admitted target ids so the caller does not run legacy sends for
-/// them. Some(empty) still means the canonical reply was committed here.
+pub(crate) struct QueuedReply {
+    pub target_ids: Vec<String>,
+    /// A newly admitted logical relay, not a count of recipients or attempts.
+    pub relayed: bool,
+}
+
+/// Returns handled target ids, including capacity rejections, so they cannot
+/// bypass admission via legacy delivery. Only fresh accepted work counts.
 pub(crate) async fn commit_routed_reply(
     flow: &BcsMessageFlow,
     group: &Group,
@@ -150,7 +173,7 @@ pub(crate) async fn commit_routed_reply(
     forward_hop: Option<u32>,
     strip_mentions: bool,
     normalized: Option<&crate::run_reply::RunReply>,
-) -> ServiceResult<Option<Vec<String>>> {
+) -> ServiceResult<Option<QueuedReply>> {
     if group.group_strategy == GroupStrategy::StateMachine {
         return Ok(None);
     }
@@ -168,13 +191,11 @@ pub(crate) async fn commit_routed_reply(
                 | bcs_domain::message_delivery::MessageDeliveryStatus::Expired
         )
     }) {
-        return Ok(Some(
-            decision
+        return Ok(Some(QueuedReply { relayed: false, target_ids: decision
                 .targets
                 .iter()
                 .map(|t| t.bot_uuid.clone())
-                .collect(),
-        ));
+                .collect() }));
     }
     let policy = match &flow.delivery_policy { Some(live) => Some(live.snapshot.read().await.clone()), None => None };
     let reply_limits = if original.is_some() {
@@ -298,6 +319,8 @@ pub(crate) async fn commit_routed_reply(
         event: record,
     };
     drop(build_timing);
+    let reply_message_id = reply.message_id.clone();
+    let mut fresh = true;
     if let Some(mut row) = original {
         use bcs_service_api::core::message_delivery::DeliveryLifecycleEvent;
         use bcs_service_api::{DeliveryTransitionCommand, ManagedDeliveryError};
@@ -323,7 +346,7 @@ pub(crate) async fn commit_routed_reply(
                 row = find_managed_run(flow, event).await?.ok_or_else(|| ServiceError::InternalError("queue terminal run disappeared".into()))?;
                 if matches!(row.state.status, bcs_domain::message_delivery::MessageDeliveryStatus::Completed
                     | bcs_domain::message_delivery::MessageDeliveryStatus::Failed | bcs_domain::message_delivery::MessageDeliveryStatus::Cancelled) {
-                    return Ok(Some(decision.targets.iter().map(|t| t.bot_uuid.clone()).collect()));
+                    return Ok(Some(QueuedReply { relayed: false, target_ids: decision.targets.iter().map(|t| t.bot_uuid.clone()).collect() }));
                 }
             }
         }
@@ -334,12 +357,17 @@ pub(crate) async fn commit_routed_reply(
             ));
         }
     } else {
-        service
+        let admitted = service
             .admit(reply)
             .await
             .map_err(|_| ServiceError::InternalError("queue reply admission failed".into()))?;
+        fresh = !admitted.duplicate;
     }
-    Ok(Some(target_ids))
+    let rows = crate::storage_retry::retry(crate::storage_retry::shutdown(flow), "relay_admission_lookup",
+        crate::storage_retry::managed_storage, || service.lookup(bcs_service_api::port::repo::message_delivery::DeliveryLookup::Message(reply_message_id.clone())))
+        .await.map_err(|_| ServiceError::InternalError("queue relay admission lookup failed".into()))?;
+    let relayed = fresh && rows.iter().any(|row| row.state.status != bcs_domain::message_delivery::MessageDeliveryStatus::RejectedCapacity);
+    Ok(Some(QueuedReply { target_ids, relayed }))
 }
 
 pub(crate) async fn settle_without_relay(

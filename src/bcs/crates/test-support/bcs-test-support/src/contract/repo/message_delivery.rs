@@ -68,6 +68,9 @@ pub async fn message_delivery_repo_port_contract_tests<
         .await?;
     assert_eq!(context.deliveries[0].state.status, Status::PendingContext);
     assert!(context.deliveries[0].run_id.is_none());
+    assert!(repo.lookup(DeliveryLookup::BotPending("A".into())).await?.is_empty(),
+        "unbound Inject does not block Send drain");
+    assert_eq!(repo.lookup(DeliveryLookup::BotPendingContexts("A".into())).await?.len(), 1);
     let first = repo
         .admit(command(
             "first",
@@ -91,6 +94,10 @@ pub async fn message_delivery_repo_port_contract_tests<
     assert_eq!(heads[0].delivery_id, first.deliveries[0].delivery_id);
     assert!(repo.queued_heads("A", &heads[0].session_id, 8).await?.is_empty());
     assert_eq!(repo.lookup(DeliveryLookup::Bound(first.deliveries[0].delivery_id.clone())).await?.len(), 1);
+    assert_eq!(repo.lookup(DeliveryLookup::BotPending("A".into())).await?.len(), 1,
+        "bound Inject cannot mask an unfinished Send in the limited lookup");
+    assert!(repo.lookup(DeliveryLookup::BotPendingContexts("A".into())).await?.is_empty(),
+        "bound contexts stay with their existing carrier while Sends drain");
     assert_eq!(repo.lookup(DeliveryLookup::Message(first.message.message_id.clone())).await?.len(), 2);
     let stats = repo.queue_statistics().await?;
     assert_eq!(stats.iter().filter(|s| s.status == "queued").map(|s| s.count).sum::<u64>(), 2);

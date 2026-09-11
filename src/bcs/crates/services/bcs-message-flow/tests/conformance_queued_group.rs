@@ -14,6 +14,40 @@ mod support;
 use session_support::{StaticSessionManagement, test_session};
 
 #[tokio::test]
+async fn queued_relay_enforces_group_turn_limit() {
+    use bcs_service_api::ManagedMessageDeliveryService;
+    for all_managed in [false, true] {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    support.group.reset_message_count("group-1").await.unwrap();
+    let group = support.group.get("group-1").await.unwrap();
+    let repo = Arc::new(bcs_message_store::MemoryMessageRepo::new());
+    let service = Arc::new(bcs_message_flow::managed_delivery::ManagedMessageDelivery::new(repo.clone()));
+    let mut limits = std::collections::BTreeMap::from([("bot-observer".into(), 10)]);
+    if all_managed { limits.insert("bot-driver".into(), 10); }
+    let flow = BcsMessageFlow::new(support.group.clone(), support.routing.clone(), support.registry.clone(), support.bot_delivery.clone(), support.frontend_delivery.clone())
+        .with_message_repo(repo).with_managed_deliveries(service.clone())
+        .with_group_delivery_limits(limits)
+        .with_bot_relay_turn_limit(1)
+        .with_session_management(Arc::new(StaticSessionManagement::new(test_session("group-1:limit", "group-1", group.participants))));
+    let mut event = BotEventCommand {
+        bot_id: "bot-driver".into(), run_id: "relay-1".into(), group_id: "group-1".into(),
+        event_type: "chat".into(), state: ChatEventState::Final, bcs_session_id: Some("group-1:limit".into()),
+        event_payload: json!({"message":{"role":"assistant","content":[{"type":"text","text":"@Observer 请检查"}]}}),
+    };
+    flow.handle_bot_event(event.clone()).await.unwrap();
+    assert_eq!(support.group.message_count("group-1").await.unwrap(), 1);
+    let count = service.snapshot(None).await.unwrap().len();
+    assert!(count > 0);
+    assert_eq!(support.bot_delivery.frames().await.is_empty(), all_managed);
+    event.run_id = "relay-2".into();
+    flow.handle_bot_event(event).await.unwrap();
+    assert_eq!(support.group.get("group-1").await.unwrap().status, bcs_domain::GroupStatus::Inactive);
+    assert_eq!(service.snapshot(None).await.unwrap().len(), count, "limit prevents another queued relay");
+    assert_eq!(support.group.message_count("group-1").await.unwrap(), 1);
+    }
+}
+
+#[tokio::test]
 async fn queue_status_respects_participant_message_audience() {
     use bcs_domain::{DeliveryType, MessageAudience, MessageVisibilityDomain, MessageViewScope, NewMessage, SenderType};
     use bcs_service_api::{DeliveryStatusQuery, ManagedMessageDeliveryService};
@@ -88,8 +122,21 @@ async fn conformance_live_group_admission_uses_defaults_and_blocks_drain_bypass(
     flow.replace_delivery_policy(admin(), 1, policy).await.unwrap();
     let mut next = command;
     next.idempotency_key = Some("live-2".into());
-    assert!(flow.handle_web_send(next).await.is_err_and(|e| e.to_string().contains("queue_draining")));
+    assert!(flow.handle_web_send(next.clone()).await.is_err_and(|e| e.to_string().contains("queue_draining")));
     assert_eq!(service.snapshot(None).await.unwrap().len(), 2);
+    // The unmentioned observer has only an unbound Inject. Once the old Send
+    // settles, that context must not permanently block legacy ingress.
+    let send = service.snapshot(None).await.unwrap().into_iter()
+        .find(|row| row.state.kind == bcs_domain::DeliveryType::Send).unwrap();
+    service.transition(bcs_service_api::DeliveryTransitionCommand {
+        delivery_id: send.delivery_id, expected_state_version: send.state.state_version,
+        event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,
+        now_ms: 100, request_id: None, actor_id: None, reply: None, transport_context_json: None, deadline_at_ms: None,
+    }).await.unwrap();
+    assert!(flow.handle_web_send(next).await.unwrap().queue_admission.is_none());
+    assert!(!support.bot_delivery.frames().await.is_empty());
+    assert!(service.snapshot(None).await.unwrap().iter().all(|row|
+        row.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Cancelled));
 }
 
 #[tokio::test]
@@ -305,7 +352,10 @@ async fn conformance_queued_group_preparation_and_ingress() {
         bcs_session_id: Some("group-1:queued".into()),
         event_payload: json!({"message":{"role":"assistant","content":[{"type":"text","text":"@Observer 收到，请检查"}]}}),
     };
+    let count_before = support.group.message_count("group-1").await.unwrap();
     let terminal = flow.handle_bot_event(final_event.clone()).await.unwrap();
+    assert_eq!(support.group.message_count("group-1").await.unwrap(), count_before + 1,
+        "queued reply advances the relay limit once");
     assert!(
         terminal.bot_deliveries.is_empty(),
         "reply routing must also avoid legacy sends for queued targets"
@@ -344,6 +394,8 @@ async fn conformance_queued_group_preparation_and_ingress() {
         "inject file permissions must survive context binding"
     );
     flow.handle_bot_event(final_event).await.unwrap();
+    assert_eq!(support.group.message_count("group-1").await.unwrap(), count_before + 1,
+        "duplicate final must not count the relay twice");
     assert_eq!(
         service.snapshot(None).await.unwrap().len(),
         after_terminal.len(),

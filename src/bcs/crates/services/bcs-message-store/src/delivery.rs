@@ -711,7 +711,8 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
             }
             DeliveryLookup::Bound(id) => { params.push(id.into()); "bound_to_delivery_id = ? AND status = 'bound'" }
             DeliveryLookup::Lane { bot, session } => { params.extend([bot.into(), session.into()]); "target_bot_id = ? AND session_id = ? AND kind = 'send' AND status IN ('queued','dispatching','running','unknown','cancelling','cancel_unknown')" }
-            DeliveryLookup::BotPending(bot) => { params.push(bot.into()); "target_bot_id = ? AND status IN ('queued','dispatching','running','unknown','cancelling','cancel_unknown','pending_context','bound') LIMIT 1" }
+            DeliveryLookup::BotPending(bot) => { params.push(bot.into()); "target_bot_id = ? AND kind = 'send' AND status IN ('queued','dispatching','running','unknown','cancelling','cancel_unknown') LIMIT 1" }
+            DeliveryLookup::BotPendingContexts(bot) => { params.push(bot.into()); "target_bot_id = ? AND kind = 'inject' AND status = 'pending_context' LIMIT 100" }
             DeliveryLookup::Message(id) => { params.push(id.into()); "source_message_id = ?" }
             DeliveryLookup::Successor { bot, session, after_seq, exclude, now_ms } => {
                 params.extend([bot.into(), session.into(), after_seq.into(), exclude.into(), now_ms.into()]);
