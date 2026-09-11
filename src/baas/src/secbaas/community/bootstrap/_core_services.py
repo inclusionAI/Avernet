@@ -165,6 +165,17 @@ def _stub_engine_adapter_registry():
     )
 
 
+def _make_engine_abort_notifier(
+    bot_runner: BotRunner,
+) -> "Callable[[str, str | None], Awaitable[None]]":
+    """构造 ``BotRequestWorker`` 用的 engine abort 通知器。"""
+
+    async def notifier(session_id: str, run_id: str | None) -> None:
+        await bot_runner.abort(session_id=session_id, run_id=run_id)
+
+    return notifier
+
+
 class CoreServiceContainer(containers.DeclarativeContainer):
     config = providers.Configuration()
 
@@ -691,16 +702,6 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         FixedMachineCountProvider,
         count=config.bot_run_queue.machine_count,
     )
-
-    def _make_engine_abort_notifier(
-        bot_runner: BotRunner,
-    ) -> "Callable[[str, str | None], Awaitable[None]]":
-        """构造 ``BotRequestWorker`` 用的 engine abort 通知器。"""
-
-        async def notifier(session_id: str, run_id: str | None) -> None:
-            await bot_runner.abort(session_id=session_id, run_id=run_id)
-
-        return notifier
 
     engine_abort_notifier = providers.Callable(
         _make_engine_abort_notifier,
