@@ -22,18 +22,53 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
 
 #: What a construct is, for the purposes of applying it: one of the six
 #: categories under ``manifest``, or the top-level ``script`` section.
+#:
+#: Always an enum member, never a bare string. ``.value`` is both the wire form
+#: and the manifest key::
+#:
+#:     ManifestCategory.SKILLS         # .value == "skills"
+#:     ManifestCategory.RESOURCES      # .value == "resources"
+#:     ManifestCategory.IDENTITY       # .value == "identity"
+#:     ManifestCategory.MCP            # .value == "mcp"
+#:     ManifestCategory.CLI_TOOLS      # .value == "cli_tools"
+#:     ManifestCategory.ENGINE_CONFIG  # .value == "engine_config"
+#:     ManifestSection.SCRIPT          # .value == "script"
+#:
+#: Created by: ``apply/order.APPLY_ORDER`` (one row per construct) and each
+#: materialiser's own ``construct`` class attribute.
+#: Consumed by: ``apply/registry.build_materialisers`` (as the map key),
+#: ``EntryResult.as_dict`` and ``CategoryResult.as_dict`` (as ``.value``).
 ApplyConstruct = ManifestCategory | ManifestSection
 
 
 class EntryOutcome(StrEnum):
-    """What happened to one **declared** entry.
+    """What happened to one **declared** entry. A lowercase string on the wire.
+
+    The five values, and what triggers each:
+
+    ==============  ==========================================================
+    Value           Trigger
+    ==============  ==========================================================
+    ``created``     The entry was not in the bot's area; it was written.
+    ``updated``     It was there with different content; it was overwritten.
+    ``unchanged``   It was there and already matched; no write was made.
+    ``skipped``     Its category was aborted by *another* entry's failure.
+    ``failed``      This entry itself could not be resolved or written.
+    ==============  ==========================================================
+
+    Example::
+
+        EntryOutcome.CREATED.value == "created"
+
+    Created by: each materialiser's ``plan`` and ``write`` for the first three;
+    ``apply/orchestrator`` assigns ``FAILED`` and ``SKIPPED``.
+    Consumed by: ``outcomes.derive_status``, and ``EntryResult.as_dict`` as the
+    wire field ``action``.
 
     ``SKIPPED`` means *"not written because its category was aborted"* — the
-    all-or-nothing rule in work-items §3.2 refusing to write a partial set. It
-    no longer means "the author allowed this one to be missing": that reading
-    belonged to ``on_fetch_failure: skip``, which was removed when §3.2 became
-    category overwrite, because under overwrite "skip this entry" would mean
-    "delete it" — the opposite of the name.
+    all-or-nothing rule refusing to write a partial set. It does not mean "the
+    author allowed this one to be missing": under category overwrite, "skip
+    this entry" would mean "delete it", the opposite of the name.
 
     The entry that *caused* an abort is ``FAILED``; its blameless neighbours in
     the same category are ``SKIPPED``.
@@ -47,17 +82,35 @@ class EntryOutcome(StrEnum):
 
 
 class ApplyStatus(StrEnum):
-    """The report's own state.
+    """The report's own state. Upper case on the wire, unlike
+    :class:`EntryOutcome`.
+
+    ===============  ========================================================
+    Value            Meaning
+    ===============  ========================================================
+    ``RUNNING``      Still working; no terminal value decided yet.
+    ``SUCCEEDED``    Every declared entry was delivered, or nothing was
+                     declared at all.
+    ``PARTIAL``      Some entries were delivered and some were not.
+    ``FAILED``       Nothing was delivered.
+    ===============  ========================================================
+
+    Example::
+
+        ApplyStatus.PARTIAL.value == "PARTIAL"
+
+    Created by: the apply service at start (``RUNNING``), then
+    :func:`derive_status` for the three terminal values.
+    Consumed by: ``ApplyReport.as_payload`` as the wire field ``result``, and
+    by whoever polls the apply record.
 
     ``RUNNING`` exists because apply is **started, not awaited**: the route
     answers ``202`` with an id and the work continues on a background thread, so
-    a poller needs to tell "still working" from "finished, and partially" — the
-    distinction W13's ``APPLYING`` state is built on.
+    a poller needs to tell "still working" from "finished, and partially".
 
     The three terminal values are **derived** from the entry outcomes once every
     decision has been made. Nothing in this engine branches on one, and nothing
-    writes one to a bot record (§2.7). They are a summary for whoever reads the
-    report.
+    writes one to a bot record. They are a summary for whoever reads the report.
     """
 
     RUNNING = "RUNNING"
@@ -78,12 +131,68 @@ NO_MATERIALISER_REASON = (
 
 @dataclass(frozen=True)
 class EntryResult:
-    """One declared entry's outcome.
+    """One declared entry's outcome — one row of the report's ``entries`` list.
 
-    ``identity`` is whatever its category keys entries by — a skill ``name``, an
-    identity ``type``, a resource ``path``, an mcp ``server_code``. The report
-    names entries the way their author wrote them, so a reader can find the line
-    they need to fix.
+    ``identity`` is the value of whichever key that category names entries by:
+
+    ===============  =================  ==================================
+    Construct        Key read           Example ``identity``
+    ===============  =================  ==================================
+    ``skills``       ``name``           ``"code-review"``
+    ``identity``     ``type``           ``"avatar"``
+    ``resources``    ``path``           ``"data/faq.csv"``
+    ``mcp``          ``server_code``    ``"gh"``
+    ``cli_tools``    ``name``           ``"qc"``
+    ``script``       none; fixed        ``"script"``
+    ===============  =================  ==================================
+
+    ``script`` has no entity key of its own, because there is one script, so it
+    reports under the section's own name (``materialisers/script._IDENTITY``).
+    A malformed entry carrying none of those keys falls back to
+    :func:`entry_identity`'s positional form, ``"[0]"``.
+
+    Three states, all real. A failure, the entry that caused its category's
+    abort::
+
+        EntryResult(
+            construct=ManifestCategory.RESOURCES,
+            identity="data/faq.csv",
+            outcome=EntryOutcome.FAILED,
+            reason="the git tree has no file at subpath 'kb/faq.csv'",
+            note=None,
+        )
+
+    A blameless neighbour in that same aborted category::
+
+        EntryResult(
+            construct=ManifestCategory.RESOURCES,
+            identity="data/prices/",
+            outcome=EntryOutcome.SKIPPED,
+            reason="another entry in this category failed",
+            note=None,
+        )
+
+    A success carrying a note::
+
+        EntryResult(
+            construct=ManifestSection.SCRIPT,
+            identity="script",
+            outcome=EntryOutcome.CREATED,
+            reason=None,
+            note=(
+                "delivered now; executes at this bot's next device "
+                "provisioning (create, restart or republish). Apply does "
+                "not run it."
+            ),
+        )
+
+    Created by: each materialiser's ``write``; ``apply/orchestrator`` builds the
+    ``FAILED`` and ``SKIPPED`` rows.
+    Consumed by: ``CategoryResult.entries`` and ``ApplyReport.entries``, then
+    :meth:`as_dict`.
+
+    The report names entries the way their author wrote them, so a reader can
+    find the line they need to fix.
     """
 
     construct: ApplyConstruct
@@ -101,7 +210,16 @@ class EntryResult:
     note: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        """The wire shape for one entry."""
+        """The wire shape for one entry. The keys are renamed on the way out::
+
+            {
+                "category": "resources",     # construct.value
+                "name": "data/faq.csv",      # identity
+                "action": "failed",          # outcome.value
+                "error": "the git tree has no file at subpath 'kb/faq.csv'",
+                "note": None,
+            }
+        """
         return {
             "category": self.construct.value,
             "name": self.identity,
@@ -115,12 +233,54 @@ class EntryResult:
 class CategoryResult:
     """One construct's entries, plus what overwriting its area removed.
 
-    ``removals`` is its own field rather than a sixth :class:`EntryOutcome`, and
-    the distinction is precision rather than taste: the five outcomes classify
-    **declared** entries, and a removal has no declared entry to classify —
-    ``skills: []`` deletes every skill while declaring none of them. Folding
-    removals into the enum would either invent a value the acceptance criteria
-    do not list, or leave the destructive half of overwrite unaudited.
+    ``aborted`` and ``partially_written`` together say what the bot's area now
+    holds:
+
+    ===========  ==================  ======================================
+    ``aborted``  ``partially_``      What it means for the bot's area
+                 ``written``
+    ===========  ==================  ======================================
+    False        False               Converged. The area is what the
+                                     document declared.
+    True         False               Nothing was written. The area is
+                                     exactly as it was before this apply.
+    True         True                Some writes landed. Do not trust the
+                                     area; re-apply to converge it.
+    False        True                Never produced. ``partially_written``
+                                     is only ever set alongside an abort.
+    ===========  ==================  ======================================
+
+    A converged category::
+
+        CategoryResult(
+            construct=ManifestCategory.MCP,
+            entries=(EntryResult(ManifestCategory.MCP, "gh",
+                                 EntryOutcome.CREATED),),
+            removals=("old-server",),
+            aborted=False,
+            partially_written=False,
+        )
+
+    One aborted in ``resolve``, before any write::
+
+        CategoryResult(
+            construct=ManifestCategory.RESOURCES,
+            entries=(<the FAILED entry>, <its SKIPPED neighbours>),
+            removals=(),
+            aborted=True,
+            partially_written=False,
+        )
+
+    Created by: ``apply/orchestrator`` (one per construct it walks).
+    Consumed by: ``ApplyReport.categories``, :func:`derive_status`, and
+    :meth:`as_dict`.
+
+    ``removals`` is its own field rather than a sixth :class:`EntryOutcome`: the
+    five outcomes classify **declared** entries, and a removal has no declared
+    entry to classify — ``skills: []`` deletes every skill while declaring none
+    of them. Folding removals into the enum would either invent a value the
+    acceptance criteria do not list, or leave the destructive half of overwrite
+    unaudited.
     """
 
     construct: ApplyConstruct
@@ -153,7 +313,17 @@ class CategoryResult:
     partially_written: bool = False
 
     def as_dict(self) -> dict[str, Any]:
-        """The wire shape for one category's summary."""
+        """The wire shape for one category's summary. Note that the entries are
+        **not** nested here — they are flattened into the report's own
+        ``entries`` list::
+
+            {
+                "category": "resources",
+                "aborted": True,
+                "partially_written": False,
+                "removed": [],
+            }
+        """
         return {
             "category": self.construct.value,
             "aborted": self.aborted,
@@ -164,17 +334,48 @@ class CategoryResult:
 
 @dataclass(frozen=True)
 class SourceResolution:
-    """A named source, and what its ref resolved to.
+    """A git source this apply resolved, and the commit it landed on.
 
-    Empty in v1's URL wave — sources are inline URLs only — and filled by
-    W7, the wave that resolves named and git sources. Records the
-    credential's **name** and never its value: the report is what a support
-    engineer reads, so this is a security property rather than tidiness.
+    Only the git road produces these: an object-store source resolves no ref,
+    so it contributes no row. A named source::
+
+        SourceResolution(
+            name="content",             # the 'from' name
+            ref="v1.2.0",               # the declared ref, verbatim
+            resolved_sha="4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187",
+            auth="git-prod",            # the credential NAME
+        )
+
+    An inline git source has no ``from`` name, so it is recorded under its
+    repository URL instead::
+
+        SourceResolution(
+            name="https://code.example.com/team/content.git",
+            ref="HEAD",
+            resolved_sha="4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187",
+            auth=None,
+        )
+
+    ``name`` is the same key the strict-mode baselines are read back by, so the
+    report and ``SourceSession.baselines`` agree on a source's identity.
+
+    Created by: ``apply/source_session.SourceSession.adopt``, one per distinct
+    ``display`` name, returned through ``resolution_records()``.
+    Consumed by: ``ApplyReport.sources``, and read back by the apply service to
+    build the next apply's ``SourceSession.baselines``.
+
+    Records the credential's **name** and never its value: the report is what a
+    support engineer reads, so this is a security property rather than tidiness.
     """
 
+    #: The ``from`` name, or the repository URL for an inline source.
     name: str
+    #: The ref as declared: a tag, a branch, or a full SHA. ``"HEAD"`` when the
+    #: source declared none.
     ref: str | None = None
+    #: The 40-character commit id the ref actually resolved to.
     resolved_sha: str | None = None
+    #: The credential's name, never its value. ``None`` for an anonymous fetch.
     auth: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -188,29 +389,64 @@ class SourceResolution:
 
 @dataclass(frozen=True)
 class ApplyReport:
-    """Everything one apply produced. Shape follows design §7.
+    """Everything one apply produced. Apply's only output.
 
-    Apply's only output. It is not a projection of some richer internal state —
-    there is no richer state, because §2.7 makes the per-entry records the whole
-    of what apply knows.
+    One filled-in example, an apply whose ``mcp`` converged and whose
+    ``resources`` aborted::
+
+        ApplyReport(
+            apply_id="ap_01HZX8",
+            bot_id="bot_42",
+            trigger="explicit",
+            status=ApplyStatus.PARTIAL,
+            started_at=datetime(2026, 3, 1, 9, 0, 0, tzinfo=timezone.utc),
+            finished_at=datetime(2026, 3, 1, 9, 0, 4, tzinfo=timezone.utc),
+            categories=(
+                CategoryResult(ManifestCategory.MCP, entries=(...,)),
+                CategoryResult(
+                    ManifestCategory.RESOURCES,
+                    entries=(...,),
+                    aborted=True,
+                ),
+            ),
+            sources=(
+                SourceResolution(
+                    name="content",
+                    ref="v1.2.0",
+                    resolved_sha="4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187",
+                    auth="git-prod",
+                ),
+            ),
+            notes=(),
+        )
+
+    Created by: ``apply/orchestrator`` at the end of an apply, and by
+    ``apply/apply_task`` for the background path.
+    Consumed by: :meth:`as_payload` for the HTTP response, and the apply record
+    the poller reads.
+
+    It is not a projection of some richer internal state — there is no richer
+    state, because the per-entry records are the whole of what apply knows.
     """
 
+    #: This apply's own id, as ``ApplyContext.apply_id`` carried it.
     apply_id: str
     bot_id: str
-    #: What started the apply. The vocabulary lives in ``apply/triggers.py``:
-    #: ``explicit``, ``put`` (W8), and W13's ``create:pre_container`` /
-    #: ``create:on_container``. Restart and republish are not triggers in
-    #: iteration 1 (spec D-1).
+    #: What started the apply, as one of ``apply/triggers.ALL_TRIGGERS``:
+    #: ``"explicit"``, ``"put"``, ``"create:pre_container"`` or
+    #: ``"create:on_container"``. Restart and republish are not triggers.
     trigger: str
     status: ApplyStatus
     started_at: datetime
     finished_at: datetime | None = None
+    #: One per construct the apply walked, in ``APPLY_ORDER`` position order.
     categories: tuple[CategoryResult, ...] = ()
-    #: Resolved named sources. Empty in v1's URL wave; W7 fills it.
+    #: One per distinct git source this apply resolved. Empty when the document
+    #: names no git source, which includes every object-store-only document.
     sources: tuple[SourceResolution, ...] = field(default=())
-    #: Apply-level notes that belong to no category — today only the delivery
-    #: strategy's closing step (W8): a teclaw redeliver that failed after every
-    #: category was written is recorded here rather than raised (§2.7).
+    #: Apply-level notes belonging to no category. Today's only producer is the
+    #: delivery strategy's closing step: a teclaw redeliver that failed after
+    #: every category was written is recorded here rather than raised.
     notes: tuple[str, ...] = field(default=())
 
     @property
@@ -222,6 +458,26 @@ class ApplyReport:
 
     def as_payload(self) -> dict[str, Any]:
         """The wire shape, defined here and nowhere else.
+
+        ``status`` is emitted as ``result``, the timestamps as ISO strings, and
+        the categories' entries are flattened into one top-level list::
+
+            {
+                "apply_id": "ap_01HZX8",
+                "bot_id": "bot_42",
+                "trigger": "explicit",
+                "result": "PARTIAL",
+                "started_at": "2026-03-01T09:00:00+00:00",
+                "finished_at": "2026-03-01T09:00:04+00:00",
+                "sources": [{"name": "content", "ref": "v1.2.0",
+                             "resolved_sha": "4f2a9c1b...", "auth": "git-prod"}],
+                "categories": [{"category": "mcp", "aborted": False,
+                                "partially_written": False, "removed": []}],
+                "entries": [{"category": "mcp", "name": "gh",
+                             "action": "created", "error": None,
+                             "note": None}],
+                "notes": [],
+            }
 
         Every field is named explicitly. There is no passthrough of a declared
         entry or of a materialiser's internals, which is what makes it
@@ -244,10 +500,11 @@ class ApplyReport:
         }
 
 
-#: The entity-key field each category names its entries by, in the order they
-#: are tried. Schema §3 gives each category its own key — ``skills.name``,
-#: ``identity.type``, ``resources.path``, ``mcp.server_code`` — and a report
-#: that could not name an entry would be one a caller cannot act on.
+#: The entity-key fields an entry may name itself by, in the order they are
+#: tried. One list for every category rather than a per-category lookup: each
+#: category's entries carry exactly one of these, so the first hit is that
+#: category's key — ``skills.name``, ``identity.type``, ``resources.path``,
+#: ``mcp.server_code``, ``cli_tools.name``.
 #:
 #: Lives here rather than in the orchestrator on purpose: which field to *print*
 #: is vocabulary, and the orchestrator is held to naming no category at all.
@@ -257,9 +514,25 @@ _ENTITY_KEY_FIELDS: tuple[str, ...] = ("name", "type", "path", "server_code")
 def entry_identity(entry: Any, index: int) -> str:
     """How an entry names itself in a report.
 
-    Falls back to the entry's position, and the fallback is load-bearing: a
-    category can be aborted over a document whose entries are malformed, and
-    those entries still have to appear in the report.
+    Takes the raw entry mapping and its position in the declared list, and
+    answers the string :class:`EntryResult` will carry as ``identity``::
+
+        entry_identity({"name": "code-review", "from": "pkgs"}, 0)
+        # -> "code-review"
+        entry_identity({"path": "data/faq.csv"}, 1)
+        # -> "data/faq.csv"
+
+        # No recognised key, or not a mapping at all: the position, in
+        # brackets. This is what a malformed entry reports as.
+        entry_identity({"nmae": "typo"}, 2)   # -> "[2]"
+        entry_identity("not a mapping", 0)    # -> "[0]"
+
+    Called by: ``apply/orchestrator``, when building the ``FAILED`` and
+    ``SKIPPED`` rows for an aborted category.
+
+    The fallback is load-bearing: a category can be aborted over a document
+    whose entries are malformed, and those entries still have to appear in the
+    report.
     """
     if isinstance(entry, dict):
         for key in _ENTITY_KEY_FIELDS:
@@ -272,9 +545,14 @@ def entry_identity(entry: Any, index: int) -> str:
 def derive_status(categories: tuple[CategoryResult, ...]) -> ApplyStatus:
     """The summary, computed once every decision has already been made.
 
+    Takes every :class:`CategoryResult` the apply produced and answers one of
+    the three terminal :class:`ApplyStatus` values (never ``RUNNING``).
+
+    Called by: ``apply/orchestrator`` and ``apply/apply_task``, once, at the end.
+
     Deliberately a free function taking the finished results: it cannot be
     consulted mid-apply, which is the mechanical form of "the summary decides
-    nothing" (§2.7).
+    nothing".
 
     * Nothing declared at all ⇒ ``SUCCEEDED``. A bot with no manifest, or one
       whose manifest declares no category, applied everything it was asked to.

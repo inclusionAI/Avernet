@@ -84,12 +84,72 @@ class EntryFetchError(Exception):
 
 @dataclass(frozen=True)
 class FetchedEntry:
-    """One entry's bytes, their content address, and where they came from."""
+    """One entry's bytes, their content address, and where they came from.
 
+    Three states, and a caller tells them apart by ``from_store`` and
+    ``fallback_reason``.
+
+    A **fresh fetch** — the wire moved and the bytes were filed with the
+    store::
+
+        FetchedEntry(
+            content=b"PK\x03\x04...",
+            digest="sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b...",
+            from_store=False,
+            content_type="application/zip",
+            fallback_reason=None,
+            source_url="https://example.com/tools/qc-v2.zip",
+        )
+
+    A **pinned store hit** — the entry declared a ``digest``, the platform
+    already held those exact bytes, and no network was touched. Silent by
+    design: this is the legitimate fast path, so there is no note::
+
+        FetchedEntry(
+            content=b"PK\x03\x04...",
+            digest="sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b...",
+            from_store=True,
+            content_type="application/zip",
+            fallback_reason=None,
+            source_url="oss://team-artifacts/tools/qc/v2.tgz",
+        )
+
+    A **keep_last fallback** — the source was fetched, it failed, and the
+    stored copy stood in. ``from_store`` is true *and* a reason is set, which
+    is the only combination that means "fallback"::
+
+        FetchedEntry(
+            content=b"acm-tree-v1\n...",
+            digest="sha256:2c26b46b68ffc68ff99b453c1d30413413422d70...",
+            from_store=True,
+            content_type=None,
+            fallback_reason=(
+                "delivered from the platform's stored copy (keep_last): "
+                "the git fetch failed"
+            ),
+            source_url=(
+                "git+https://code.example.com/team/content.git"
+                "@4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187:kb"
+            ),
+        )
+
+    Created by: ``apply/entry_fetch.EntryFetcher`` — ``fetch``,
+    ``acquire_object`` and ``_git_keep_last``.
+    Consumed by: ``apply/entry_delivery.BlobDelivery``, which is the only thing
+    that wraps one.
+    """
+
+    #: The entry's bytes, whole and in memory. For a stored git tree these are
+    #: the canonical framing :func:`canonical_tree_bytes` produced, not a file.
     content: bytes
+    #: ``"sha256:"`` followed by 64 lowercase hex characters, over ``content``.
     digest: str
     #: True when the platform's own copy answered — no network was touched.
+    #: True for both a pinned hit and a ``keep_last`` fallback;
+    #: ``fallback_reason`` is what separates them.
     from_store: bool
+    #: What the source said the bytes are, e.g. ``"application/zip"``, or
+    #: ``None`` when it said nothing. The object-store road never sets one.
     content_type: Optional[str] = None
     #: Set only when the platform's copy answered as a ``keep_last``
     #: FALLBACK — the source was fetched and failed, the stored bytes stood
@@ -99,9 +159,16 @@ class FetchedEntry:
     #: entry's note. A plain store-hit (from_store, no note) is the
     #: legitimate pinned fast path and stays silent.
     fallback_reason: Optional[str] = None
-    #: The URL the bytes came by, when the caller needs it for shape
-    #: inference (the skills materialiser's archive-kind detection). ``None``
-    #: on the roads that never knew one.
+    #: The address these bytes are filed under, in one of three shapes
+    #: depending on the road that produced them::
+    #:
+    #:     "https://example.com/tools/qc-v2.zip"       # inline URL road
+    #:     "oss://team-artifacts/tools/qc/v2.tgz"      # object store road
+    #:     "git+https://code.example.com/team/content.git@<40-hex sha>:kb"
+    #:
+    #: The last two are receipt identities, not fetchable URLs. Callers also
+    #: read this to infer an archive's kind from its extension (the skills
+    #: materialiser). ``None`` on the roads that never knew one.
     source_url: Optional[str] = None
 
 
@@ -109,24 +176,55 @@ class FetchedEntry:
 class GitEntrySource:
     """A fresh git checkout for one entry to consume — files, not bytes.
 
+    One example, a ``resources`` entry reading ``kb/faq.csv`` out of a source
+    whose ref moved since the last apply::
+
+        GitEntrySource(
+            checkout=GitCheckout(
+                root=PosixPath("/tmp/acm-git-x9"),
+                sha="4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187",
+                url="https://code.example.com/team/content.git",
+                ref="v1.2.0",
+                members=(("100644", "kb/faq.csv", 812),),
+            ),
+            source_url="https://code.example.com/team/content.git",
+            subpath="kb/faq.csv",
+            moved_from="1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+            auth="git-prod",
+            file_limit=104857600,      # FETCH_ENTRY_LIMITS["resources_file"]
+        )
+
+    Created by: ``apply/source_fetchers.GitSourceFetcher.fetch``.
+    Consumed by: ``apply/entry_delivery.GitDelivery``, which is the only thing
+    that wraps one.
+
     The object road hands back bytes because there was exactly one blob to
     read; the git road hands back a proven tree and lets the materialiser read
     it, because what "the entry's bytes" are is a *category* question this
     layer must not answer.
-
-    ``file_limit`` is the category's per-entry byte cap (the same
-    ``FETCH_ENTRY_LIMITS`` number the object road enforces at the transport) —
-    the tree's readers refuse a member by its *declared* size against it.
-    ``auth`` is the credential **name** the acquisition rode, threaded to the
-    receipts so W11's lineage attributes git-sourced bytes the way it does
-    object-sourced ones.
     """
 
+    #: The fetched tree on disk, its members already enumerated and proven
+    #: plain files. Shared with every other entry on the same ``(url, ref)``.
     checkout: GitCheckout
+    #: The **repository** URL, substituted, with no ``git+`` prefix and no sha.
+    #: :meth:`receipt_url` is what turns it into the receipt identity.
     source_url: str
+    #: The composed path to read out of the tree: the source's ``subpath``
+    #: then the entry's, e.g. ``"kb/faq.csv"``. ``None`` means the whole tree.
     subpath: Optional[str]
+    #: The SHA the last apply recorded, when this apply resolved a different
+    #: one — the non-strict road's "the ref moved" signal, surfaced by
+    #: :meth:`moved_note`. ``None`` when the ref did not move, or had no
+    #: baseline to move from.
     moved_from: Optional[str]
+    #: The credential's **name**, never its value, threaded to the receipts so
+    #: lineage attributes git-sourced bytes the way it does object-sourced
+    #: ones. ``None`` for an anonymous fetch.
     auth: Optional[str] = None
+    #: The category's per-entry byte cap, in bytes — the same
+    #: ``FETCH_ENTRY_LIMITS`` number the object road enforces at the transport.
+    #: The tree's readers refuse a member by its *declared* size against it.
     file_limit: Optional[int] = None
 
     def files(self) -> list[tuple[str, bytes]]:
@@ -142,11 +240,25 @@ class GitEntrySource:
             raise EntryFetchError(str(exc)) from exc
 
     def receipt_url(self) -> str:
-        """The W11 identity for this entry's git-sourced bytes."""
+        """The receipt identity for this entry's git-sourced bytes::
+
+            "git+https://code.example.com/team/content.git"
+            "@4f2a9c1b8e7d6a5c4b3a2918f7e6d5c4b3a29187:kb/faq.csv"
+
+        Keyed on the *resolved* sha, so a moved ref is a different address and
+        a bare source with no subpath ends in a trailing colon.
+        """
         return git_receipt_url(self.source_url, self.checkout.sha, self.subpath)
 
     def moved_note(self) -> Optional[str]:
-        """The non-strict road's report line about a moved ref."""
+        """The non-strict road's report line about a moved ref, or ``None``::
+
+            "ref moved: the last apply recorded 1a2b3c4d..., this one
+             resolved 4f2a9c1b..."
+
+        Surfaces as the entry's ``note`` on a **successful** row. Strict mode
+        never reaches here: it refuses the entry instead.
+        """
         if self.moved_from is None:
             return None
         return (
@@ -162,11 +274,42 @@ class GitEntrySource:
 class EntryDelivery(Protocol):
     """What one entry's source delivered, read on the category's terms.
 
-    Every member below has exactly one caller family, named in its docstring.
-    The surface is wide because the four fetching categories genuinely want
+    Two implementations: :class:`BlobDelivery` (an HTTPS GET or one object
+    read) and :class:`GitDelivery` (a proven checkout). What each member
+    answers, per road:
+
+    ==================  =====================  ==========================  ==========================
+    Method              Called by              ``BlobDelivery`` answers    ``GitDelivery`` answers
+    ==================  =====================  ==========================  ==========================
+    ``is_tree()``       ``skills``             ``False``                   ``True``
+    ``members()``       ``resources``          the archive unpacked, or    every file under the
+                                               a stored tree decoded       composed ``subpath``
+    ``single()``        ``resources``,         the whole blob              the one file ``subpath``
+                        ``identity``,                                      names
+                        ``cli_tools``
+    ``note()``          all four               the ``keep_last``           the moved-ref note
+                                               fallback reason
+    ``digest()``        ``cli_tools``          the content digest          ``None`` (git has no
+                                                                           declarable digest)
+    ``receipt_url()``   all four               ``https://…`` or            ``git+…@<sha>:<subpath>``
+                                               ``oss://…``
+    ``auth()``          all four               ``None`` (the fetch         the credential name
+                                               already filed it)
+    ``source_url()``    ``skills``             the fetched URL             the repository URL
+    ``content_type()``  ``skills``             what the source said        ``None``
+    ``from_store()``    ``skills``             True on a store hit         always ``False``
+    ``needs_receipt()`` all four               ``False``                   ``True``
+    ==================  =====================  ==========================  ==========================
+
+    Created by: ``apply/source_fetchers`` (both fetchers) and
+    ``apply/entry_fetch.fetch_declared`` on the legacy inline-URL road.
+    Consumed by: every fetching materialiser — ``skills``, ``resources``,
+    ``identity``, ``cli_tools``.
+
+    Every member has exactly one caller family, named in its docstring. The
+    surface is wide because the four fetching categories genuinely want
     different things out of one delivery — but it is not *open*: a member with
-    no caller does not belong here, the same discipline
-    ``plugin_api/object_storage.py`` states for its own protocol.
+    no caller does not belong here.
     """
 
     @abstractmethod
@@ -281,8 +424,27 @@ class EntryDelivery(Protocol):
 
 @dataclass(frozen=True)
 class BlobDelivery(EntryDelivery):
-    """One object's bytes, however they were acquired."""
+    """One object's bytes, however they were acquired.
 
+    The object-store road, the legacy inline-URL road, and every ``keep_last``
+    fallback — including a git one, whose stored bytes arrive here as a
+    canonical tree blob rather than as a checkout::
+
+        BlobDelivery(fetched=FetchedEntry(
+            content=b"PK\x03\x04...",
+            digest="sha256:9f86d081...",
+            from_store=False,
+            content_type="application/zip",
+            source_url="oss://team-artifacts/tools/qc/v2.tgz",
+        ))
+
+    Differs from :class:`GitDelivery` in four answers: ``is_tree`` is
+    ``False``, ``digest`` is a real content address, ``needs_receipt`` is
+    ``False`` (the fetch already filed these bytes) and ``auth`` is ``None``
+    (there is no second write for a credential name to ride on).
+    """
+
+    #: The bytes and their provenance. Every method here is a read of this.
     fetched: FetchedEntry
 
     def is_tree(self) -> bool:
@@ -344,8 +506,29 @@ class BlobDelivery(EntryDelivery):
 
 @dataclass(frozen=True)
 class GitDelivery(EntryDelivery):
-    """A checked-out tree, read on the category's terms."""
+    """A checked-out tree, read on the category's terms.
 
+    The git road, and only a *successful* one: a git fetch that failed and fell
+    back to ``keep_last`` comes back as a :class:`BlobDelivery` instead::
+
+        GitDelivery(source=GitEntrySource(
+            checkout=<the shared checkout>,
+            source_url="https://code.example.com/team/content.git",
+            subpath="kb/faq.csv",
+            moved_from=None,
+            auth="git-prod",
+            file_limit=104857600,
+        ))
+
+    Differs from :class:`BlobDelivery` in four answers: ``is_tree`` is
+    ``True``, ``digest`` is ``None`` (the schema refuses ``digest`` on a git
+    source, so there is nothing for the pin belt to compare), ``needs_receipt``
+    is ``True`` (a checkout is not bytes, and only the caller knows which bytes
+    this entry delivers) and ``auth`` is the credential name, because those
+    bytes are still owed to the store.
+    """
+
+    #: The checkout and the entry's view into it.
     source: GitEntrySource
 
     def is_tree(self) -> bool:
@@ -403,12 +586,36 @@ class GitDelivery(EntryDelivery):
 def archive_refusal(unpack: object, strip_components: object) -> Optional[str]:
     """The archive fields a directory entry over ``oss`` must carry, or why not.
 
-    Pure, and asked twice on purpose: once by ``resources`` **before** the
-    fetch, so a doomed entry costs no network against this apply's byte budget
-    and lock TTL, and once by :meth:`BlobDelivery.members` after, for the entry
-    whose protocol that belt could not determine up front. Two calls of one
-    function, never two rules — which is why it takes the two *values* rather
-    than the entry: the pre-fetch caller has an entry, the delivery does not.
+    Both arguments are the entry's declared values, **unvalidated** — typed
+    ``object`` because they came straight out of parsed YAML and may be
+    anything. ``None`` means they are acceptable; a string is the refusal::
+
+        archive_refusal("zip", 0)        -> None
+        archive_refusal("tar.gz", 1)     -> None
+        archive_refusal(None, 0)         -> "a directory entry fetched over
+                                             'oss' must declare
+                                             'unpack: zip|tar.gz' — ..."
+        archive_refusal(["zip"], 0)      -> the same refusal (unhashable, so
+                                            the str check has to come first)
+        archive_refusal("zip", -1)       -> "'strip_components' must be a
+                                             non-negative integer"
+        archive_refusal("zip", True)     -> the same; bool is rejected even
+                                            though it is an int
+
+    The values reach here from a ``resources`` entry::
+
+        - path: data/prices/
+          from: artifacts
+          key: prices.tgz
+          unpack: tar.gz          # <- unpack
+          strip_components: 1     # <- strip_components
+
+    Called by: ``materialisers/resources`` before the fetch, so a doomed entry
+    costs no network against this apply's byte budget and lock TTL, and
+    :meth:`BlobDelivery.members` after it, for the entry whose protocol that
+    belt could not determine up front. Two calls of one function, never two
+    rules — which is why it takes the two *values* rather than the entry: the
+    pre-fetch caller has an entry, the delivery does not.
     """
     # Str first: ``VALID_UNPACK`` is a frozenset, and an unhashable ``unpack``
     # (a YAML list) would raise on the membership test where this owes a
@@ -433,14 +640,30 @@ def unpack_members(
 ) -> list[tuple[str, bytes]] | str:
     """The guarded unpack, platform-side, into a throwaway directory.
 
+    ``archive`` is the fetched bytes. ``kind`` and ``strip_components`` are the
+    entry's own ``unpack`` and ``strip_components``, already proven well-formed
+    by :func:`archive_refusal` — ``kind`` is one of ``VALID_UNPACK``
+    (``"zip"`` or ``"tar.gz"``) and ``strip_components`` a non-negative int.
+    Both reach here from the entry via :meth:`BlobDelivery.members`, which is
+    handed them by the materialiser that read them off the YAML.
+
+    Answers either the members or a refusal string::
+
+        unpack_members(<a tar.gz of qc-v2/bin/qc and qc-v2/README>,
+                       "tar.gz", 1)
+        # -> [("bin/qc", b"..."), ("README", b"...")]
+        #    strip_components=1 dropped the "qc-v2/" prefix
+
+        unpack_members(b"not an archive", "zip", 0)
+        # -> "..." the UnpackError's own message
+
+    Paths are relative and directories are structural, so only files come back.
+
     The bot is never a scratch space: ``unpack_archive`` writes only into a
-    fresh temporary directory, so a bad or oversized archive (W1's member /
+    fresh temporary directory, so a bad or oversized archive (the member and
     unpacked-size limits live inside it) fails before anything is delivered.
-    Returned members are ``(relative path, bytes)`` with ``strip_components``
-    already applied — the bytes are read back before the throwaway dir goes
-    away; a refusal comes back as its reason string rather than an exception,
-    keeping every failure in ``resolve``'s currency and the bot's tree
-    untouched.
+    A refusal comes back as its reason string rather than an exception, keeping
+    every failure in ``resolve``'s currency and the bot's tree untouched.
     """
     try:
         with tempfile.TemporaryDirectory(prefix="manifest-resources-") as tmp:
@@ -457,16 +680,36 @@ def unpack_members(
         return str(exc)
 
 
-#: Marks the stored form of a git-delivered tree. Self-describing on purpose:
-#: ``keep_last`` reads a receipt back as plain bytes with no idea what shape
-#: they are, and "guess from the URL" is not identification. The version digit
-#: is what lets the framing change later without a stored copy being decoded
-#: under the wrong rules.
+#: Marks the stored form of a git-delivered tree, and opens every blob
+#: :func:`canonical_tree_bytes` produces.
+#:
+#: The framing after it is ``<path length>:<path><byte length>:<bytes>``
+#: repeated, members sorted by path, all lengths in decimal ASCII and paths in
+#: UTF-8. A two-file tree, byte for byte::
+#:
+#:     canonical_tree_bytes([("faq.csv", b"q,a\n"), ("a.txt", b"hi")])
+#:     # -> b'acm-tree-v1\n5:a.txt2:hi7:faq.csv4:q,a\n'
+#:     #       magic       ^^^^^^^^^^^^ "a.txt" (5 bytes) -> b"hi" (2 bytes)
+#:     #                               ^^^^^^^^^^^^^^^^^ "faq.csv" (7) ->
+#:     #                                                 b"q,a\n" (4)
+#:
+#: Note the sort: ``a.txt`` is emitted first although it was passed second.
+#:
+#: Self-describing on purpose: ``keep_last`` reads a receipt back as plain
+#: bytes with no idea what shape they are, and "guess from the URL" is not
+#: identification. The version digit is what lets the framing change later
+#: without a stored copy being decoded under the wrong rules.
 TREE_MAGIC = b"acm-tree-v1\n"
 
 
 def canonical_tree_bytes(members: list[tuple[str, bytes]]) -> bytes:
     """One deterministic byte string standing for a whole delivered tree.
+
+    Takes ``(relative path, bytes)`` pairs in any order and answers the framing
+    :data:`TREE_MAGIC` documents, which shows a worked two-file example.
+
+    Called by: ``materialisers/resources`` and ``materialisers/skills``, for the
+    bytes a git-delivered entry owes the store.
 
     Two jobs, and the second is why it is **reversible**:
 
@@ -492,7 +735,16 @@ def canonical_tree_bytes(members: list[tuple[str, bytes]]) -> bytes:
 
 
 def decode_tree_bytes(blob: bytes) -> Optional[list[tuple[str, bytes]]]:
-    """The members back out, or ``None`` when these are not a canonical tree.
+    """The members back out, or ``None`` when these are not a canonical tree::
+
+        decode_tree_bytes(b"acm-tree-v1\n5:a.txt2:hi7:faq.csv4:q,a\n")
+        # -> [("a.txt", b"hi"), ("faq.csv", b"q,a\n")]
+
+        decode_tree_bytes(b"PK\x03\x04...")   # a zip; no magic
+        # -> None
+
+    Called by: :meth:`BlobDelivery.members`, first thing, to tell a stored git
+    tree from an archive.
 
     ``None`` rather than an exception: the caller is asking "is this a stored
     git tree or an archive?", and a shape it does not recognise is an answer,

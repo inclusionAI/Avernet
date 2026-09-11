@@ -1,9 +1,53 @@
 """One entry's fetch, from a declared source to materialisable bytes.
 
 The second half of ``resolve`` for every fetch-consuming category: substitute
-``${BOT_*}``, consult the platform's own copy (W11) before the network, fetch
-through the guarded transport (W2) under a named credential (W3), and file the
-result with the content store so delivery and audit share one copy (§2.8).
+``${BOT_*}``, consult the platform's own copy before the network, fetch through
+the guarded transport under a named credential, and file the result with the
+content store so delivery and audit share one copy.
+
+**The four entry points**, and which is which:
+
+``fetch(ctx, *, source_url=…)``
+    Called by :meth:`EntryFetcher.fetch_declared` on the legacy bare-string
+    ``source:`` road, and by nothing else in this package. Its ``source_url``
+    is a plain ``https://…`` URL, never ``oss://`` and never ``git+…``. Files
+    a receipt. Charges the budget on a real fetch, not on a store hit.
+
+``fetch_declared(ctx, *, entry=…)``
+    The front door every fetching materialiser calls. Takes no URL at all: it
+    reads the entry, resolves the declaration and dispatches. Files a receipt
+    and charges the budget through whichever road it picked.
+
+``acquire_object(ctx, *, target=…, key=…)``
+    Called by ``source_fetchers.ObjectStoreFetcher``. Takes an
+    ``ObjectStoreTarget`` and a key rather than a URL, and builds the
+    ``oss://`` receipt identity itself. Files a receipt. Charges the budget on
+    a real read.
+
+``file_bytes(ctx, *, content=…, source_url=…)``
+    Called by the ``resources`` and ``skills`` materialisers for the git
+    road's canonical bytes. Its ``source_url`` is the caller's own receipt
+    identity, normally a ``git+…`` one. Files a receipt and always charges,
+    because the caller is declaring what the entry cost.
+
+**Three ``source_url`` shapes exist**, and which method sees which matters::
+
+    "https://example.com/tools/qc-v2.zip"
+        the inline bare-string source, and the ONLY shape ``fetch`` ever
+        takes as its ``source_url=`` argument. Never ``oss://``, never
+        ``git+…``.
+
+    "oss://team-artifacts/tools/qc/v2.tgz"
+        built by ``source_fetchers.object_receipt_url`` inside
+        ``acquire_object``. A receipt identity, not a fetchable URL: the
+        endpoint is deliberately absent.
+
+    "git+https://code.example.com/team/content.git@<40-hex sha>:kb/faq.csv"
+        built by ``fetch/git_source.git_receipt_url``. Also a receipt
+        identity. Ends in a bare colon when there is no subpath.
+
+``FetchedEntry.source_url`` and every receipt ``source_url`` can be any of the
+three, because they are written by whichever road ran.
 
 Fetch lives here **and only here** — the registry's contract says ``resolve``
 is where a category's failures are collected before anything is written, and a
@@ -147,41 +191,58 @@ logger = get_logger()
 class FetchContext(Protocol):
     """Exactly what a fetch reads off its caller's context, and nothing more.
 
-    :class:`~agentclaw.community.core.bot_config_manifest.apply.context.ApplyContext`
-    is the original and still the usual one. It is not the only one: W9's
-    ``cli_tools`` service is called by an HTTP route as well as by a
-    materialiser, and both must fetch through *this* funnel — a second fetch
-    path is how two callers of one feature drift apart.
+    Nine attributes, no methods. ``ApplyContext`` satisfies it structurally and
+    is the usual one; the ``cli_tools`` service passes its own object, because
+    it is called by an HTTP route as well as by a materialiser and both must
+    fetch through *this* funnel.
 
-    Declaring the seam rather than leaving the annotation reading
-    ``"ApplyContext"`` while a second type is passed makes the dependency
-    honest in the one direction that matters: a maintainer who adds a
+    A minimal satisfying value::
+
+        ctx.bot_id        == "bot_42"
+        ctx.entity_id     == "ent_7"
+        ctx.env           == "prod"
+        ctx.tenant        == "acme"
+        ctx.engine_type   == "claude_code"
+        ctx.actor_id      == "usr_collaborator"
+        ctx.apply_id      == "ap_01HZX8"   # or None
+        ctx.budget        == ApplyFetchBudget(...)   # or None
+        ctx.source_session == SourceSession(...)     # or None
+
+    The first six are read for the store scope, placeholder substitution and
+    the receipt's ``modifier``. The last three are legitimately ``None`` for a
+    caller that is not an apply: an unbudgeted single install files a receipt
+    with no apply linkage, which is what that column's nullability means.
+
+    Declaring the seam rather than annotating ``"ApplyContext"`` while a second
+    type is passed keeps the dependency honest: a maintainer who adds a
     ``ctx.something`` read below adds it here too, and the other caller fails
     to type-check instead of failing at apply time.
-
-    ``budget``, ``apply_id`` and ``source_session`` are legitimately ``None``
-    for a caller that is not an apply — an unbudgeted single install files a
-    receipt with no apply linkage, which is what that column's nullability
-    means.
     """
 
     bot_id: str
+    #: Storage key for the bot; one axis of the content store's scope.
     entity_id: str
     env: str
     tenant: str
     engine_type: str
+    #: Who is fetching. Lands on the receipt as ``modifier``.
     actor_id: str
+    #: Stamped into every receipt this fetch files. ``None`` off the apply path.
     apply_id: Optional[str]
     budget: Optional[ApplyFetchBudget]
     source_session: Optional[SourceSession]
 
 
 def scope_of(ctx: FetchContext) -> ContentScope:
-    """The store scope for the bot an apply runs against.
+    """The store scope for the bot an apply runs against::
 
-    The three axes the bot record already carries — the same scope every store
-    event for this apply is filed under, so the receipts this pipeline reads
-    and the ones it writes are one log.
+        scope_of(ctx)
+        # -> ContentScope(env="prod", entity_id="ent_7", bot_id="bot_42")
+
+    Three axes, all read straight off the context. Every receipt this pipeline
+    reads and every one it writes is filed under this scope, so they are one
+    log. Called by ``fetch``, ``acquire_object``, ``file_bytes`` and
+    ``_git_keep_last``.
     """
     return ContentScope(env=ctx.env, entity_id=ctx.entity_id, bot_id=ctx.bot_id)
 
@@ -189,11 +250,15 @@ def scope_of(ctx: FetchContext) -> ContentScope:
 class EntryFetcher:
     """Fetches one manifest entry's bytes on a bot's behalf.
 
+    The one funnel every fetching category goes through: ``skills``,
+    ``resources``, ``identity`` and ``cli_tools``. Four public entry points,
+    tabulated in this module's docstring; ``fetch_declared`` is the one a
+    materialiser normally calls.
+
     Composed once per apply — the transport is stateless per hop, so there is
     nothing to hold between entries — and handed to every materialiser that
-    fetches. One funnel for W5's two categories and W6's ``resources`` when it
-    arrives; a category that bypassed it would acquire unrecorded bytes, and
-    §2.8's audit and ``keep_last`` both read from exactly this log.
+    fetches. A category that bypassed it would acquire unrecorded bytes, and
+    both the audit log and ``keep_last`` read from exactly this log.
     """
 
     def __init__(
@@ -230,9 +295,24 @@ class EntryFetcher:
         keep_last: bool = False,
         entry_identity: Optional[str] = None,
     ) -> FetchedEntry:
-        """Acquire one entry's bytes. Raises :class:`EntryFetchError`.
+        """Acquire one entry's bytes over HTTPS. Raises :class:`EntryFetchError`.
 
-        ``${BOT_*}`` substitution happens **before** the fetch and therefore
+        ``source_url`` is a plain ``https://…`` URL — the legacy bare-string
+        ``source:`` spelling, which the schema now refuses at ``PUT`` but which
+        stored documents still carry. It is never ``oss://`` and never
+        ``git+…``; those roads have their own entry points. ``${BOT_*}`` is
+        substituted here, so the argument may still contain placeholders::
+
+            fetch(ctx,
+                  source_url="https://cdn.example.com/${BOT_ENV}/kb.zip",
+                  digest="sha256:9f86d081...",   # or None when unpinned
+                  auth="cdn-prod",               # a credential NAME, or None
+                  category="resources_file",
+                  keep_last=True,
+                  entry_identity="data/faq.csv")
+            # -> FetchedEntry(..., source_url="https://cdn.example.com/prod/kb.zip")
+
+        Substitution happens **before** the fetch and therefore
         before prefix authorization: the W3 policy re-authorises every hop
         against the URL the request will actually name, so a substituted URL
         cannot steer the request outside its credential's prefixes (or inside
@@ -412,6 +492,31 @@ class EntryFetcher:
         """Resolve one entry's declared source — inline, or by ``from`` name —
         and acquire it. Raises :class:`EntryFetchError`.
 
+        ``entry`` is the raw manifest mapping. Which of its keys is present
+        decides the road::
+
+            {"path": "data/faq.csv", "from": "content", "subpath": "faq.csv"}
+                # a named source: looked up in session.sources, then parsed.
+                # Needs a source session.
+
+            {"name": "qc", "source": {"protocol": "oss",
+                                      "bucket": "team-artifacts",
+                                      "key": "qc/v2.tgz"}}
+                # an inline declaration. Needs a source session.
+
+            {"path": "data/kb.zip", "source": "https://example.com/kb.zip"}
+                # the legacy bare string: straight to ``fetch``, no session
+                # needed.
+
+        ``category`` is a :class:`FetchCategory` value as a string, e.g.
+        ``"resources_file"``; it is coerced to the enum here, so a misspelling
+        is a loud ``ValueError`` at the front door rather than a quiet fall
+        back to the file cap inside a fetcher.
+
+        Answers an :class:`~...entry_delivery.EntryDelivery` on every road —
+        see ``apply/entry_delivery.py`` for why the caller does not branch on
+        which one it got.
+
         **The front door does what every road shares, then dispatches.** The
         budget check, the source-session requirement, ``keep_last``, the
         ``from`` lookup and parsing the declaration happen once, here; the
@@ -421,15 +526,10 @@ class EntryFetcher:
 
         One road never reaches a fetcher: a bare-string ``source`` is a URL
         with no declaration to parse, so it goes straight to :meth:`fetch`.
-        The schema now **refuses** that spelling at ``PUT`` (§2.2 — declare
-        ``protocol: git`` or ``protocol: oss``), so no new document can take
-        it. It survives here for the documents already stored under the old
-        grammar, which an apply still has to be able to read; delete it only
-        once those are known to be gone.
-
-        Every road answers with an :class:`EntryDelivery` — see
-        ``apply/entry_delivery.py`` for why the caller does not branch on
-        which one it got.
+        The schema now **refuses** that spelling at ``PUT``, so no new document
+        can take it. It survives here for the documents already stored under
+        the old grammar, which an apply still has to be able to read; delete it
+        only once those are known to be gone.
         """
         expired = ctx.budget.expired() if ctx.budget is not None else None
         if expired is not None:
@@ -540,9 +640,18 @@ class EntryFetcher:
         display: str,
         keep_last: bool,
     ) -> Optional[FetchedEntry]:
-        """`keep_last` for the git road: the receipt of the *last-resolved*
-        SHA, when there was one. A first-time source has no baseline — and
-        therefore no stored copy entitled to answer for it."""
+        """``keep_last`` for the git road: the receipt of the *last-resolved*
+        SHA, when there was one.
+
+        Looks the baseline up by ``display`` and reads the receipt filed under
+        ``git+<url>@<baseline sha>:<subpath>``. Answers ``None`` — meaning
+        "no fallback, let the failure stand" — in three cases: ``keep_last`` is
+        off, the source has no baseline (a first-time source has no stored copy
+        entitled to answer for it), or no receipt exists at that address.
+
+        On a hit the :class:`FetchedEntry` carries ``from_store=True`` and a
+        ``fallback_reason``, which is what the report's note comes from.
+        """
         if not keep_last:
             return None
         baseline = session.baseline(display)
@@ -586,6 +695,25 @@ class EntryFetcher:
         entry_identity: Optional[str],
     ) -> FetchedEntry:
         """One object out of a tenant-named bucket, through the object store.
+
+        Takes the resolved ``ObjectStoreTarget`` (bucket plus the endpoint and
+        key pair off the credential row) and the already-composed, already
+        substituted ``key``. The address it files under is built here::
+
+            acquire_object(ctx,
+                           target=ObjectStoreTarget(bucket="team-artifacts",
+                                                    ...),
+                           key="tools/qc/v2.tgz",
+                           digest=None,
+                           auth="oss-prod",
+                           category="cli_tools",
+                           keep_last=True,
+                           entry_identity="qc")
+            # -> FetchedEntry(...,
+            #        source_url="oss://team-artifacts/tools/qc/v2.tgz")
+
+        ``content_type`` is always ``None`` on this road: the store client
+        reports none.
 
         The same shape :meth:`fetch` has on the URL road — pinned fast path,
         acquire, ``keep_last``, file — with the transport swapped and four of
@@ -725,6 +853,18 @@ class EntryFetcher:
         canonical form (a package's canonical zip, a single file's bytes)
         — so audit and ``keep_last`` read the same store everyone else does.
 
+        ``source_url`` is the caller's own receipt identity, normally the
+        ``git+…`` one from ``GitDelivery.receipt_url()``::
+
+            file_bytes(ctx,
+                       content=b"acm-tree-v1\n5:a.txt2:hi...",
+                       source_url=("git+https://code.example.com/team/"
+                                   "content.git@4f2a9c1b...:kb"),
+                       category="resources_unpacked",
+                       entry_identity="data/prices/",
+                       credential_name="git-prod")
+            # -> "sha256:2c26b46b68ffc68ff99b453c1d30413413422d70..."
+
         ``credential_name`` threads the acquisition's auth into the W11
         lineage exactly as the URL road's store call does, so a git-sourced
         receipt answers "which named credential distributed this content"
@@ -790,17 +930,37 @@ def declared_protocol(
     """Which protocol :meth:`EntryFetcher.fetch_declared` will take, **without
     fetching anything**.
 
-    A caller needs this when a rule has to be decided *before* the network is
-    touched — the resources materialiser validates an archive's ``unpack``
-    before spending a fetch that a missing one guarantees to waste, and the
-    ``cli_tools`` materialiser asks whether the digest rule applies. Both used
-    to answer it their own way, or after the fact.
+    ==============================================  ====================
+    ``entry``                                       Answer
+    ==============================================  ====================
+    ``{"source": "https://example.com/kb.zip"}``    ``SourceKind.OSS``
+    ``{"source": {"protocol": "oss", "bucket":      ``SourceKind.OSS``
+    "b", "key": "k", "auth": "a"}}``
+    ``{"source": {"protocol": "git", "url":         ``SourceKind.GIT``
+    "https://x/y.git"}}``                           
+    ``{"from": "content"}`` naming a git source     ``SourceKind.GIT``
+    ``{"from": "nope"}``, not under ``sources``     ``None``
+    ``{"source": {"protocol": "bogus"}}``           ``None``
+    ``{"source": {"protocol": "oss", "bucket":      ``None``
+    "b"}}`` — incomplete; ``oss`` requires
+    ``auth``, so it does not parse                  
+    ``{"content": "inline text"}``                  ``None``
+    ==============================================  ====================
+
+    A bare-string ``source`` answers ``OSS`` because that legacy road is served
+    by the object-store side of the pipeline, even though it fetches over
+    HTTPS. Anything that does not parse cleanly answers ``None``, which is why
+    an incomplete declaration reads the same as an absent one here.
+
+    Called by: ``materialisers/resources``, which validates an archive's
+    ``unpack`` before spending a fetch that a missing one guarantees to waste,
+    and ``materialisers/cli_tools``, which asks whether the digest rule
+    applies.
 
     Read through the same parser the ``PUT`` validator and ``fetch_declared``
     use, so a fourth derivation cannot appear. ``None`` means "cannot say from
-    the declaration alone" — an inline URL string is ``OSS`` and a malformed or
-    undeclared source is ``None``; the caller then falls through to the fetch,
-    which raises the real error with the real message.
+    the declaration alone"; the caller then falls through to the fetch, which
+    raises the real error with the real message.
     """
     inline = entry.get("source")
     if isinstance(inline, str):
