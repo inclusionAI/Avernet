@@ -1,6 +1,31 @@
 """``identity`` → ``IdentityService`` — the file set, minus the reserved names.
 
-The area this overwrites is the one work-items §3.2 names: the bot's identity
+**The entry shape.** ``identity`` for this category is the entry's ``type``,
+which is a whitelisted **filename** — ``SOUL.md``, ``RULES.md``, ``OKR.md``
+and the rest of ``VALID_IDENTITY_FILES`` — not a free-form label. Both an
+inline body and a fetched one are accepted::
+
+    manifest:
+      identity:
+        # inline content: no fetch at all
+        - type: RULES.md
+          content: |
+            # rules
+
+        # an inline source, the legacy bare-string spelling
+        - type: SOUL.md
+          source: https://content.example/identity/soul.md
+
+        # a named source: the entry's subpath must name ONE file, because
+        # this category delivers a single body per entry
+        - type: OKR.md
+          from: content
+          subpath: okr.md
+
+An entry reaches ``resolve`` as the raw mapping, e.g. ``{"type": "SOUL.md",
+"source": "https://content.example/identity/soul.md"}``.
+
+The area this overwrites is the bot's identity
 file set, minus ``MEMORY.md`` / ``IDENTITY.md`` — engine-generated runtime
 state that apply never writes and never removes, whatever a document says.
 The validator refuses their *declaration*; this module refuses to reach them
@@ -67,6 +92,9 @@ if TYPE_CHECKING:
         ApplyContext,
     )
 
+#: The fetch category every entry here is charged and capped under. The
+#: identity cap is the smallest of the six, 1 MiB, because these are text
+#: files.
 _FETCH_CATEGORY = FetchCategory.IDENTITY
 
 
@@ -82,7 +110,24 @@ def _decode_utf8(body: bytes) -> Optional[str]:
 
 
 class IdentityMaterialiser(Materialiser):
-    """Converges the bot's identity file set toward the declaration."""
+    """Converges the bot's identity file set toward the declaration.
+
+    ``identity`` is the entry's ``type``; ``Intent.value`` is the decoded
+    **text** body, a ``str``, not bytes — this is the one category that
+    insists its bytes are UTF-8::
+
+        resolve -> ResolveResult(intents=(Intent(
+                       identity="SOUL.md", value="# who I am\n"),))
+        plan    -> CategoryPlan(
+                       entries=(PlannedEntry(<that intent>, "updated"),),
+                       removals=("OKR.md",))
+        write   -> (EntryResult(ManifestCategory.IDENTITY, "SOUL.md",
+                                EntryOutcome.UPDATED),)
+
+    A removal is an **empty write**, not a delete: the domain reads absent and
+    empty as one state, and ``IdentityService`` exposes no delete. A reserved
+    name (``MEMORY.md``, ``IDENTITY.md``) never receives even that.
+    """
 
     construct = ManifestCategory.IDENTITY
 

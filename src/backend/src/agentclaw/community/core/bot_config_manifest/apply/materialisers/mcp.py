@@ -1,6 +1,18 @@
 """``mcp`` → ``DirectActivationService``. Converges the enabled-server set.
 
-The area this overwrites is the one work-items §3.2 names for this category —
+**The entry shape.** ``identity`` for this category is the entry's
+``server_code``, and that is the entry's only key: this category fetches
+nothing, so it has no source spelling at all::
+
+    manifest:
+      mcp:
+        - server_code: gh
+        - server_code: slack
+
+An entry reaches ``resolve`` as ``{"server_code": "gh"}``. A category
+declared empty (``mcp: []``) deactivates every server the manifest owns.
+
+The area this overwrites is the enabled-server set for this category —
 "the enabled-server set" — the MCP servers active on *this bot*, stored in
 ``ac_bot_mcp_installation`` and keyed ``(bot_id, owner_id, env, server_code)``.
 Declared and not active ⇒ activated. Active and no longer declared ⇒
@@ -44,7 +56,22 @@ from agentclaw.community.core.ports.activation_port import ActivationPort
 
 
 class McpMaterialiser(Materialiser):
-    """Converges this bot's enabled MCP servers toward the declaration."""
+    """Converges this bot's enabled MCP servers toward the declaration.
+
+    ``identity`` and ``Intent.value`` are both the server code — there is
+    nothing else to write, so the value carries no extra shape::
+
+        resolve -> ResolveResult(intents=(Intent("gh", "gh"),))
+        plan    -> CategoryPlan(
+                       entries=(PlannedEntry(Intent("gh", "gh"), "unchanged"),),
+                       removals=("old",))
+        write   -> (EntryResult(ManifestCategory.MCP, "gh",
+                                EntryOutcome.UNCHANGED),)
+
+    ``plan`` answers only ``unchanged`` or ``created``: a server is either in
+    the installed set or it is not, so there is no third state to call
+    ``updated``.
+    """
 
     construct = ManifestCategory.MCP
 

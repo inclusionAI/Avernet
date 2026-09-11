@@ -278,28 +278,35 @@ class EntryDelivery(Protocol):
     read) and :class:`GitDelivery` (a proven checkout). What each member
     answers, per road:
 
-    ==================  =====================  ==========================  ==========================
-    Method              Called by              ``BlobDelivery`` answers    ``GitDelivery`` answers
-    ==================  =====================  ==========================  ==========================
-    ``is_tree()``       ``skills``             ``False``                   ``True``
-    ``members()``       ``resources``          the archive unpacked, or    every file under the
-                                               a stored tree decoded       composed ``subpath``
-    ``single()``        ``resources``,         the whole blob              the one file ``subpath``
-                        ``identity``,                                      names
-                        ``cli_tools``
-    ``note()``          all four               the ``keep_last``           the moved-ref note
-                                               fallback reason
-    ``digest()``        ``cli_tools``          the content digest          ``None`` (git has no
-                                                                           declarable digest)
-    ``receipt_url()``   all four               ``https://…`` or            ``git+…@<sha>:<subpath>``
-                                               ``oss://…``
-    ``auth()``          all four               ``None`` (the fetch         the credential name
-                                               already filed it)
-    ``source_url()``    ``skills``             the fetched URL             the repository URL
-    ``content_type()``  ``skills``             what the source said        ``None``
-    ``from_store()``    ``skills``             True on a store hit         always ``False``
-    ``needs_receipt()`` all four               ``False``                   ``True``
-    ==================  =====================  ==========================  ==========================
+    ===================  ======================  =========================
+    Method               ``BlobDelivery``        ``GitDelivery``
+    ===================  ======================  =========================
+    ``is_tree()``        ``False``               ``True``
+    ``members()``        the archive unpacked,   every file under the
+                         or a stored tree        composed ``subpath``
+                         decoded
+    ``single()``         the whole blob          the one file ``subpath``
+                                                 names
+    ``note()``           the ``keep_last``       the moved-ref note
+                         fallback reason
+    ``digest()``         the content digest      ``None``; git declares no
+                                                 digest
+    ``receipt_url()``    ``https://…`` or        ``git+…@<sha>:<subpath>``
+                         ``oss://…``
+    ``auth()``           ``None``; the fetch     the credential name
+                         already filed it
+    ``source_url()``     the fetched URL         the repository URL
+    ``content_type()``   what the source said    ``None``
+    ``from_store()``     ``True`` on a store     always ``False``
+                         hit
+    ``needs_receipt()``  ``False``               ``True``
+    ===================  ======================  =========================
+
+    Which category asks which: ``skills`` alone calls ``is_tree``,
+    ``source_url``, ``content_type`` and ``from_store``; ``resources`` calls
+    ``members``; ``resources``, ``identity`` and ``cli_tools`` call
+    ``single``; ``cli_tools`` alone calls ``digest``; and all four call
+    ``note``, ``receipt_url``, ``auth`` and ``needs_receipt``.
 
     Created by: ``apply/source_fetchers`` (both fetchers) and
     ``apply/entry_fetch.fetch_declared`` on the legacy inline-URL road.

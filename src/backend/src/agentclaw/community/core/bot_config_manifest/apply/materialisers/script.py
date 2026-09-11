@@ -1,5 +1,19 @@
 """``script`` → ``BotStartupScriptService``. One row write, and nothing else.
 
+**The entry shape.** ``script`` is a top-level *section*, not a category, so it
+is one object rather than a list and it has no entity key: its ``identity`` is
+always the fixed string ``"script"``. It fetches nothing, so there is no source
+spelling::
+
+    script:
+      body: |
+        #!/bin/sh
+        echo "${BOT_ENV}"
+
+The orchestrator wraps the section in a one-entry list, so ``resolve`` receives
+``[{"body": "#!/bin/sh\necho \"${BOT_ENV}\"\n"}]``. An explicitly-null
+``script:`` arrives as ``[]`` and means "remove the row".
+
 **Apply never triggers the script's execution.** Writing the
 ``ac_bot_startup_script`` row is the whole of this materialiser: no restart, no
 republish, no payload rebuild, no call to anything that would run it. That is
@@ -58,7 +72,27 @@ DELIVERY_NOTE = (
 
 
 class ScriptMaterialiser(Materialiser):
-    """Writes the bot's startup script row. Runs nothing."""
+    """Writes the bot's startup script row. Runs nothing.
+
+    ``identity`` is always ``"script"``; ``Intent.value`` is the
+    **substituted** body text, or ``None`` for a declared-empty section::
+
+        resolve -> ResolveResult(intents=(Intent(
+                       identity="script", value="#!/bin/sh\necho prod\n"),))
+        plan    -> CategoryPlan(
+                       entries=(PlannedEntry(<that intent>, "created"),))
+        write   -> (EntryResult(ManifestSection.SCRIPT, "script",
+                                EntryOutcome.CREATED, note=DELIVERY_NOTE),)
+
+    A declared-empty section inverts that: ``resolve`` answers
+    ``Intent("script", None)``, ``plan`` answers
+    ``CategoryPlan(entries=(), removals=("script",))``, and ``write`` deletes
+    the row and returns no rows at all.
+
+    Every successful row carries :data:`DELIVERY_NOTE`, including an
+    ``unchanged`` one — the timing caveat is true whether or not this apply
+    wrote anything.
+    """
 
     construct = ManifestSection.SCRIPT
 

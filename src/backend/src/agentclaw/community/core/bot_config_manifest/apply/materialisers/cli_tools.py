@@ -1,5 +1,33 @@
 """``cli_tools`` → ``CliToolService``. The manifest as a second caller.
 
+**The entry shape.** ``identity`` for this category is the entry's ``name``,
+the command as it will be invoked. Both source spellings are accepted, and a
+``digest`` is mandatory on everything but git::
+
+    manifest:
+      cli_tools:
+        # a named object-store source. The source's key is a prefix and the
+        # entry's is the rest, so this reads oss://team-artifacts/tools/qc/v2.tgz
+        - name: qc
+          from: artifacts
+          key: qc/v2.tgz
+          digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b...
+          version: "2.1.0"           # a label only; never decides convergence
+
+        # an inline source
+        - name: mycli
+          source: https://x/mycli
+          digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b...
+
+        # over git the resolved commit SHA is the pin, so 'digest' is
+        # refused rather than required
+        - name: tool
+          from: content
+          subpath: bin/tool
+
+An entry reaches ``resolve`` as the raw mapping, e.g. ``{"name": "mycli",
+"source": "https://x/mycli", "digest": "sha256:…"}``.
+
 This materialiser fetches nothing, verifies nothing, stores nothing and
 delivers nothing. It translates: manifest entries into ``CliToolDecl``s on the
 way in, and the service's per-tool outcomes into report rows on the way out.
@@ -61,9 +89,21 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
 from agentclaw.community.core.bot_config_manifest.schema import placeholders
 from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
 
-#: How the service's four outcomes read on a report row. ``REMOVED`` has no
-#: declared entry to attach to — the orchestrator reports removals from the
-#: plan — so it never reaches this map.
+#: ``CliToolStatus`` → the :class:`~...outcomes.EntryOutcome` its report row
+#: carries::
+#:
+#:     CliToolStatus.INSTALLED -> EntryOutcome.UPDATED
+#:     CliToolStatus.UNCHANGED -> EntryOutcome.UNCHANGED
+#:     CliToolStatus.FAILED    -> EntryOutcome.FAILED
+#:     CliToolStatus.CONFLICT  -> EntryOutcome.FAILED
+#:
+#: Note that ``INSTALLED`` maps to ``UPDATED``, not ``CREATED``: the service
+#: reports that it wrote the tool, not whether one was there before, and the
+#: created/updated split is decided in ``plan`` from the current area instead.
+#:
+#: ``CliToolStatus.REMOVED`` is deliberately absent: a removal has no declared
+#: entry to attach to, so the orchestrator reports it from the plan's
+#: ``removals`` and it never reaches this map.
 _OUTCOMES = {
     CliToolStatus.INSTALLED: EntryOutcome.UPDATED,
     CliToolStatus.UNCHANGED: EntryOutcome.UNCHANGED,
@@ -76,7 +116,23 @@ _OUTCOMES = {
 
 
 def context_for(ctx: ApplyContext) -> CliToolContext:
-    """The apply's identity, in the service's vocabulary.
+    """The apply's identity, in the service's vocabulary::
+
+        context_for(ctx)
+        # -> CliToolContext(
+        #        bot_id="bot_42", owner_id="usr_owner",
+        #        actor_id="usr_collaborator", entity_id="ent_7",
+        #        env="prod", engine_type=<the bot's engine>, tenant="acme",
+        #        apply_id="ap_01HZX8",        # None off the apply path
+        #        budget=ApplyFetchBudget(...),      # None likewise
+        #        source_session=SourceSession(...), # None likewise
+        #    )
+
+    Ten fields, all copied straight off :class:`ApplyContext`. The service
+    itself satisfies ``FetchContext`` through this object, which is how its
+    fetch is charged to this apply's budget. ``engine_type`` is carried but
+    never compared here: this module must not name an engine, and a structural
+    test pins that against its whole source, docstrings included.
 
     ``actor_id`` stays the person applying — the audit field must not lose that
     a collaborator, not the owner, ran this — while ``installed_by`` is the
@@ -104,7 +160,23 @@ def context_for(ctx: ApplyContext) -> CliToolContext:
 
 
 class CliToolsMaterialiser(Materialiser):
-    """Converges this bot's installed CLI tools toward the declaration."""
+    """Converges this bot's installed CLI tools toward the declaration.
+
+    ``identity`` is the entry's ``name``; ``Intent.value`` is a
+    ``CliToolDecl``, the service's own declaration type. Unlike the other
+    fetching categories, ``resolve`` performs **no fetch** — the service owns
+    fetching for both of its callers — so a source that is down produces a
+    ``FAILED`` row out of ``write`` rather than aborting the category::
+
+        resolve -> ResolveResult(intents=(Intent(
+                       identity="mycli",
+                       value=CliToolDecl(name="mycli", ...)),))
+        plan    -> CategoryPlan(
+                       entries=(PlannedEntry(<that intent>, "created"),),
+                       removals=("retired-tool",))
+        write   -> (EntryResult(ManifestCategory.CLI_TOOLS, "mycli",
+                                EntryOutcome.CREATED),)
+    """
 
     construct = ManifestCategory.CLI_TOOLS
 
