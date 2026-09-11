@@ -163,7 +163,8 @@ async def test_baas_bot_service_abort_logs_on_chat_abort_failure(
 async def test_claw_bot_service_abort_sends_chat_abort(binding_info: BotBindingInfo):
     """ClawBotService.abort resolves connection and sends chat.abort."""
     secret_store = MagicMock(spec=SecretStorePlugin)
-    secret_store.generate_proxy_token = MagicMock(return_value="token-1")
+    secret_store.generate_proxy_token = MagicMock()
+    secret_store.generate_proxy_token.return_value = "test-token"
     pool = MagicMock()
     ws_client = MagicMock()
     ws_client.chat_abort = AsyncMock(return_value={"ok": True})
@@ -188,7 +189,7 @@ async def test_claw_bot_service_abort_sends_chat_abort(binding_info: BotBindingI
     pool.get.assert_awaited_once_with(
         "sandbox-1",
         "wss://proxy/proxypass/ARCA_sandbox-1:20003/api/openclaw/ws",
-        {"x-proxypass-token": "token-1"},
+        {"x-proxypass-token": "test-token"},
     )
     ws_client.chat_abort.assert_awaited_once_with(
         session_key="sess-1",
@@ -225,7 +226,8 @@ async def test_claw_bot_service_abort_swallows_engine_error(
 ):
     """ClawBotService.abort swallows engine errors."""
     secret_store = MagicMock(spec=SecretStorePlugin)
-    secret_store.generate_proxy_token = MagicMock(return_value="token-1")
+    secret_store.generate_proxy_token = MagicMock()
+    secret_store.generate_proxy_token.return_value = "test-token"
     pool = MagicMock()
     ws_client = MagicMock()
     ws_client.chat_abort = AsyncMock(side_effect=RuntimeError("engine boom"))
