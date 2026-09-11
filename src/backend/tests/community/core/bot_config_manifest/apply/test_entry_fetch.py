@@ -9,7 +9,8 @@ and that a secret cannot ride out through an error.
 W2's guarded HTTPS transport is no longer one of them. It served the
 bare-string ``source:`` road, which had one caller left (``cli_tools``, whose
 management API now takes an upload) and no way to be declared; the road and its
-entry point are gone, and the policy above lives on ``acquire_object``.
+entry point are gone, and the policy above lives on the object road's own
+fetcher, reached here through the front door the way production reaches it.
 """
 from __future__ import annotations
 
@@ -31,6 +32,7 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetcher,
 )
 from agentclaw.community.core.bot_config_manifest.apply.source_fetchers import (
+    ObjectStoreFetcher,
     object_receipt_url,
 )
 from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
@@ -114,18 +116,16 @@ def rig():
     return content, credentials, EntryFetcher(content, credentials, FakeObjectStore())
 
 
-#: The object road's coordinates, and the address a receipt for them is filed
-#: under. The endpoint and the key pair come off the credential in production;
-#: the tests that go through ``fetch_declared`` prove that, and the ones that
-#: call :meth:`EntryFetcher.acquire_object` directly are past the point where
-#: it was resolved.
-_TARGET = ObjectStoreTarget(
-    endpoint=_OBJ_ENDPOINT,
-    bucket="b",
-    access_key_id=_OBJ_AK,
-    secret_access_key="the-secret-half",
-    region="cn-shanghai",
-)
+#: The object road's coordinates, as a document declares them, and the address
+#: a receipt for them is filed under. The endpoint and the key pair are absent
+#: on purpose: they come off the credential in production, which is what
+#: driving these tests through the front door proves.
+_OSS_SOURCE = {
+    "protocol": "oss",
+    "bucket": "b",
+    "key": "k",
+    "auth": "oss-cred",
+}
 _ADDRESS = object_receipt_url("b", "k")
 
 
@@ -139,17 +139,33 @@ def _store_holding(content: FakeManifestContent, body: bytes = BODY) -> None:
     content.store_calls.clear()
 
 
-def _acquire(pipeline, *, ctx=None, digest=None, keep_last=False, auth="oss-cred"):
-    return pipeline.acquire_object(
-        ctx if ctx is not None else make_context(),
-        target=_TARGET,
-        key="k",
-        digest=digest,
-        auth=auth,
-        category="identity",
-        keep_last=keep_last,
-        entry_identity="data/faq.csv",
+def _oss_ctx(**kwargs):
+    """A context whose session declares :data:`_OSS_SOURCE` as ``"s"``."""
+    return make_context(
+        source_session=_session(_ScriptedGit(), sources={"s": _OSS_SOURCE}),
+        **kwargs,
     )
+
+
+def _acquire(pipeline, *, ctx=None, digest=None, keep_last=False):
+    """One object-road fetch, driven the way production reaches it.
+
+    Through the front door with a declared ``oss`` source — so the credential
+    resolves the target, exactly as it does in an apply — and unwrapped back to
+    the :class:`FetchedEntry` these tests make their statements about. The road
+    itself lives on ``source_fetchers.ObjectStoreFetcher``; reaching it through
+    the dispatcher is what keeps these tests pinned to the pipeline rather than
+    to one class's private method.
+    """
+    entry = {"from": "s", "on_fetch_failure": "keep_last" if keep_last else "fail"}
+    if digest is not None:
+        entry["digest"] = digest
+    return pipeline.fetch_declared(
+        ctx if ctx is not None else _oss_ctx(),
+        entry=entry,
+        category="identity",
+        entry_identity="data/faq.csv",
+    ).fetched
 
 
 # --- the store-first policy, on the road that still has a network ---------
@@ -386,7 +402,7 @@ def test_a_time_exhausted_budget_refuses_before_touching_the_network(
 
     objects.put("b", "k", BODY, access_key_id=_OBJ_AK)
     ctx = _with_budget(
-        make_context(), ApplyFetchBudget(deadline=0.0, total_bytes=10**9)
+        _oss_ctx(), ApplyFetchBudget(deadline=0.0, total_bytes=10**9)
     )
 
     with pytest.raises(EntryFetchError) as excinfo:
@@ -405,7 +421,7 @@ def test_a_byte_exhausted_budget_refuses_the_next_entry(objects_rig):
 
     objects.put("b", "k", BODY, access_key_id=_OBJ_AK)
     budget = ApplyFetchBudget(deadline=1e18, total_bytes=len(BODY), clock=lambda: 0.0)
-    ctx = _with_budget(make_context(), budget)
+    ctx = _with_budget(_oss_ctx(), budget)
 
     first = _acquire(pipeline, ctx=ctx)
     assert first.content == BODY  # the first read fits exactly
@@ -426,7 +442,7 @@ def test_the_funnel_requires_a_category_by_keyword():
     the PR's two blocking-level type issues)."""
     import inspect
 
-    for entry_point in (EntryFetcher.fetch_declared, EntryFetcher.acquire_object):
+    for entry_point in (EntryFetcher.fetch_declared, ObjectStoreFetcher._acquire):
         category = inspect.signature(entry_point).parameters["category"]
         assert category.kind is inspect.Parameter.KEYWORD_ONLY
         assert category.default is inspect.Parameter.empty

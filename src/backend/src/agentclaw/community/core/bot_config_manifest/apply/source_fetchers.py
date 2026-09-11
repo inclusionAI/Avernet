@@ -16,14 +16,71 @@ one pipeline's collaborators, not independent pipelines: two fetchers that
 each built their own store would file receipts under two policies, and W11's
 lineage would answer differently depending on which road served an entry.
 
+**Two ``source_url`` shapes exist**, both built here, and both are receipt
+identities rather than fetchable URLs — the address bytes are *filed* under,
+never an address a fetcher dials::
+
+    "oss://team-artifacts/tools/qc/v2.tgz"
+        built by :func:`object_receipt_url` inside
+        :meth:`ObjectStoreFetcher._acquire`. The endpoint is deliberately
+        absent: it comes off the credential row, not off the document.
+
+    "git+https://code.example.com/team/content.git@<40-hex sha>:kb/faq.csv"
+        built by ``fetch/git_source.git_receipt_url``. Keyed on the resolved
+        sha, and ends in a bare colon when there is no subpath.
+
+``FetchedEntry.source_url`` and every receipt ``source_url`` is one of the two,
+because they are written by whichever road ran.
+
+Pinned vs unpinned is a declared-digest question, and it decides the
+store-first vs read-first policy:
+
+* **pinned** (the entry declares a ``digest``) — a receipt for this bot and
+  source address *matching the declaration* is the bytes, by content
+  addressing: no network is consulted to acquire what the platform already
+  holds. A source that has since moved is irrelevant — the declaration asks
+  for the pinned bytes, and a re-read of them would only fail the pin.
+* **unpinned** — the entry wants whatever is there *now*; every apply
+  re-reads so it converges to the source, and ``keep_last`` exists for the
+  day that read fails.
+
+``keep_last`` (on a real read failure) reads the latest receipt: bytes that
+are entitled to be reused when the declaration pinned nothing, and bytes that
+must match the pin when it did — a receipt that disagrees with a declared
+digest is not "last", it is stale, and supplying it would silently pin bytes
+the declaration never named.
+
+**Which failures may fall back is fixed by what they are a statement about,
+and the ruling is:** the source was reachable and could not serve — an
+unreachable object store, a git fetch that failed — may fall back; a refusal
+may not. A refusal (an object the document names that is not there, a
+credential the store will not accept, an object past the category's cap) is a
+statement about the document's or the credential's *configuration*, while
+keep_last exists for statements about the source's *availability*. Masking a
+refusal with stored bytes would answer SUCCEEDED to a document the platform
+just refused; the same ruling keeps a deleted credential name loud —
+configuration drift is for the author to fix, not for the stored copy to
+absorb.
+
+**Every interaction with the content store — lookup, both reads, the
+re-file after a read — is translated here** into :class:`EntryFetchError`:
+a store-side fault answers as that ENTRY's failure with the store's own
+message, never as an unrelated exception escaping resolve to abort the
+whole category under a wrapped surprise. The one leniency: a pinned
+store-hit whose blob has gone missing falls through to the source —
+the pin is byte-provable, so a re-read re-filed with the store heals the
+address and nobody upstream learns anything happened.
+
 Grammar reference: ``docs/bot-config-manifest/manifest-schema.zh-CN.md``
 — §2.2 (``protocol``), §5 (per-entry limits). Cite a section rather than restating the grammar here;
 two copies of one grammar drift, and the document is the one users read.
 """
 from __future__ import annotations
 
+import hashlib
 from abc import abstractmethod
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Protocol, runtime_checkable
 
@@ -33,11 +90,21 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
     BlobDelivery,
     EntryDelivery,
     EntryFetchError,
+    FetchedEntry,
     GitDelivery,
     GitEntrySource,
 )
+from agentclaw.community.core.bot_config_manifest.apply.fetch_context import (
+    FetchContext,
+    scope_of,
+)
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
+)
+from agentclaw.community.core.bot_config_manifest.content.errors import (
+    ContentMissingError,
+    ContentStoreError,
+    ContentStoreFault,
 )
 from agentclaw.community.core.bot_config_manifest.credentials.errors import (
     CredentialError,
@@ -47,8 +114,10 @@ from agentclaw.community.core.bot_config_manifest.credentials.policy import (
 )
 from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
     GitSourceSpec,
+    git_receipt_url,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+    FetchedObject,
     FetchFailedError,
     FetchRefusedError,
 )
@@ -56,18 +125,24 @@ from agentclaw.community.core.bot_config_manifest.fetch.limits import (
     FETCH_ENTRY_LIMITS,
     FetchCategory,
 )
+from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
+    ObjectFetchStatus,
+    ObjectStoreTarget,
+)
 from agentclaw.community.core.bot_config_manifest.schema import placeholders
 from agentclaw.community.core.bot_config_manifest.schema._support import (
     relative_path_refusal,
 )
 from agentclaw.community.core.bot_config_manifest.schema.sources import SourceDecl
 from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
+from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
         EntryFetcher,
-        FetchContext,
     )
+
+logger = get_logger()
 
 
 @dataclass(frozen=True)
@@ -256,7 +331,7 @@ class ObjectStoreFetcher(SourceFetcher):
         except CredentialError as exc:
             raise EntryFetchError(str(exc)) from exc
         return BlobDelivery(
-            self._owner.acquire_object(
+            self._acquire(
                 request.ctx,
                 target=target,
                 key=key,
@@ -266,6 +341,170 @@ class ObjectStoreFetcher(SourceFetcher):
                 keep_last=request.keep_last,
                 entry_identity=request.entry_identity,
             )
+        )
+
+    def _acquire(
+        self,
+        ctx: FetchContext,
+        *,
+        target: ObjectStoreTarget,
+        key: str,
+        digest: Optional[str],
+        auth: Optional[str],
+        category: FetchCategory,
+        keep_last: bool,
+        entry_identity: Optional[str],
+    ) -> FetchedEntry:
+        """One object out of a tenant-named bucket, through the object store.
+
+        Takes the resolved ``ObjectStoreTarget`` (bucket plus the endpoint and
+        key pair off the credential row) and the already-composed, already
+        substituted ``key``. The address it files under is built here::
+
+            _acquire(ctx,
+                     target=ObjectStoreTarget(bucket="team-artifacts",
+                                              ...),
+                     key="tools/qc/v2.tgz",
+                     digest=None,
+                     auth="oss-prod",
+                     category=FetchCategory.CLI_TOOLS,
+                     keep_last=True,
+                     entry_identity="qc")
+            # -> FetchedEntry(...,
+            #        source_url="oss://team-artifacts/tools/qc/v2.tgz")
+
+        ``content_type`` is always ``None`` on this road: the store client
+        reports none.
+
+        The shape the module docstring's policy describes — pinned fast path,
+        acquire, ``keep_last``, file — over the object store's transport, where
+        four of the guarded fetcher's six protections are gone *because they
+        have nothing left to guard*: there is no tenant-supplied URL to
+        shape-check, no host to resolve and pin, and no redirect to
+        re-validate, since the endpoint comes off the credential row and the
+        store client owns the wire. The two that survive are the two that were
+        never about a URL: the byte cap (enforced inside the client, while
+        streaming) and the content address computed here.
+        """
+        expired = ctx.budget.expired() if ctx.budget is not None else None
+        if expired is not None:
+            raise EntryFetchError(expired)
+
+        address = object_receipt_url(target.bucket, key)
+        scope = scope_of(ctx)
+        try:
+            receipt = self._owner._content.latest_receipt(
+                scope, source_url=address
+            )
+        except (ContentStoreError, ContentStoreFault) as exc:
+            raise EntryFetchError(str(exc)) from exc
+
+        if digest is not None and receipt is not None and receipt.digest == digest:
+            # Content addressing makes the stored bytes *the* declared bytes,
+            # so the store is the strictly more available source of the same
+            # truth — the ruling the module docstring records.
+            try:
+                return FetchedEntry(
+                    content=self._owner._content.read(digest),
+                    digest=digest,
+                    from_store=True,
+                    content_type=receipt.content_type,
+                    source_url=address,
+                )
+            except ContentMissingError:
+                logger.warning(
+                    "[manifest.object_store] the pinned blob is missing; "
+                    "re-reading to heal the platform's copy, digest=%s",
+                    digest,
+                )
+            except (ContentStoreError, ContentStoreFault) as exc:
+                raise EntryFetchError(
+                    "the platform's copy of the pinned content could not be "
+                    f"read: {exc}"
+                ) from exc
+
+        # Total, not ``.get`` with a fallback: ``category`` is the
+        # ``FetchCategory`` the front door already coerced, and
+        # ``FETCH_ENTRY_LIMITS`` is bound to that enum by the limits module's
+        # own assertion — so every member has a cap and a missing one is a bug
+        # to raise on rather than to paper over with the file cap. The git
+        # road's ``file_limit=`` line reads the table the same way.
+        limit = FETCH_ENTRY_LIMITS[category]
+        result = self._owner._objects.get(target, key, byte_limit=limit)
+
+        if result.is_refusal:
+            # NOT_FOUND, DENIED, TOO_LARGE — the document or the credential is
+            # wrong. keep_last must not mask any of them: a denied credential
+            # quietly serving last apply's bytes for a year is exactly the
+            # outcome that ruling exists to prevent.
+            raise EntryFetchError(result.detail)
+
+        if result.status is not ObjectFetchStatus.FOUND:
+            # UNAVAILABLE: the store could not be reached, which is what
+            # keep_last is for.
+            if keep_last and receipt is not None and (
+                digest is None or receipt.digest == digest
+            ):
+                try:
+                    return FetchedEntry(
+                        content=self._owner._content.read(receipt.digest),
+                        digest=receipt.digest,
+                        from_store=True,
+                        content_type=receipt.content_type,
+                        source_url=address,
+                        fallback_reason=(
+                            "delivered from the platform's stored copy "
+                            f"(keep_last): {result.detail}"
+                        ),
+                    )
+                except (ContentStoreError, ContentStoreFault) as read_exc:
+                    raise EntryFetchError(
+                        f"{result.detail}; the keep_last fallback copy could "
+                        f"not be read: {read_exc}"
+                    ) from read_exc
+            raise EntryFetchError(result.detail)
+
+        content = result.content or b""
+        computed = "sha256:" + hashlib.sha256(content).hexdigest()
+        if digest is not None and computed != digest:
+            # The pin, checked here rather than in the client: a transport has
+            # no business knowing what a manifest digest is, and this is the
+            # one place both roads agree on what "the declared bytes" means.
+            raise EntryFetchError(
+                f"the object's bytes are {computed}, the entry declared {digest}"
+            )
+
+        fetched = FetchedObject(
+            bytes=content,
+            sha256=computed,
+            size_bytes=len(content),
+            url=address,
+            content_type=None,
+            fetched_at=datetime.now(timezone.utc),
+        )
+        try:
+            self._owner._content.store(
+                fetched,
+                scope=scope,
+                source_url=address,
+                credential_name=auth,
+                modifier=ctx.actor_id,
+                apply_id=ctx.apply_id,
+                category=category,
+                entry_identity=entry_identity,
+            )
+        except (ContentStoreError, ContentStoreFault) as exc:
+            raise EntryFetchError(
+                "the fetched bytes could not be filed with the platform's "
+                f"store: {exc}"
+            ) from exc
+        if ctx.budget is not None:
+            ctx.budget.charge(len(content))
+        return FetchedEntry(
+            content=content,
+            digest=computed,
+            from_store=False,
+            source_url=address,
         )
 
 
@@ -338,7 +577,7 @@ class GitSourceFetcher(SourceFetcher):
         except FetchRefusedError as exc:
             raise EntryFetchError(str(exc)) from exc
         except FetchFailedError as exc:
-            fallback = self._owner._git_keep_last(
+            fallback = self._keep_last(
                 ctx,
                 session=session,
                 spec=spec,
@@ -398,6 +637,57 @@ class GitSourceFetcher(SourceFetcher):
                 file_limit=FETCH_ENTRY_LIMITS[request.category],
             )
         )
+
+    def _keep_last(
+        self,
+        ctx: FetchContext,
+        *,
+        session: SourceSession,
+        spec: GitSourceSpec,
+        display: str,
+        keep_last: bool,
+    ) -> Optional[FetchedEntry]:
+        """``keep_last`` for the git road: the receipt of the *last-resolved*
+        SHA, when there was one.
+
+        Looks the baseline up by ``display`` and reads the receipt filed under
+        ``git+<url>@<baseline sha>:<subpath>``. Answers ``None`` — meaning
+        "no fallback, let the failure stand" — in three cases: ``keep_last`` is
+        off, the source has no baseline (a first-time source has no stored copy
+        entitled to answer for it), or no receipt exists at that address.
+
+        On a hit the :class:`FetchedEntry` carries ``from_store=True`` and a
+        ``fallback_reason``, which is what the report's note comes from.
+        """
+        if not keep_last:
+            return None
+        baseline = session.baseline(display)
+        if baseline is None:
+            return None
+        target = git_receipt_url(spec.url, baseline, spec.subpath)
+        try:
+            receipt = self._owner._content.latest_receipt(
+                scope_of(ctx), source_url=target
+            )
+            if receipt is None:
+                return None
+            return FetchedEntry(
+                content=self._owner._content.read(receipt.digest),
+                digest=receipt.digest,
+                from_store=True,
+                content_type=receipt.content_type,
+                source_url=target,
+                # The failure is named, never quoted: the git road's transport
+                # error text is report-safe on its own ("git fetch failed"),
+                # and re-embedding it here would just restate the same words —
+                # the reason keep_last fired stays one clean sentence.
+                fallback_reason=(
+                    "delivered from the platform's stored copy (keep_last): "
+                    "the git fetch failed"
+                ),
+            )
+        except (ContentStoreError, ContentStoreFault) as exc:
+            raise EntryFetchError(str(exc)) from exc
 
 
 #: Which fetcher **class** serves which protocol — the types, not instances::
