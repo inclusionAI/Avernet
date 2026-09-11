@@ -224,7 +224,16 @@ worker 的 `bcs_send_task_message(message)` 阶段性同步说明；manager 文�
 
 ## 7. Provider 协同回传
 
-Provider downlink 平台可以通过 `/bot/events` 或后续独立 endpoint 回传协同事件。回传必须和 Provider 的
+> 本节描述的 `POST /bot/events/coordination` HTTP 回调入口已于 2026-09 移除
+> （commit on `cb-dev-avernet-change-6a92c1d4`）。Provider 协同结果现在只通过
+> WS agent-event / `tool_call_end` SSE echo 入口回传（`maybe_handle_coordination_echo`
+> → `CoordinationCall::from_stdout` → canonical `task.*`）。下方各小节保留下来用于
+> 描述 WS echo 路径继续沿用的 `coordination.mode` 匹配矩阵与 `CoordinationCall`
+> 字段语义；所有“通过 `/bot/events/coordination` 回传”的 wire 例子已不再可用，
+> 外部 Provider 应迁移到 WS echo。详见 `src/bcs/CHANGELOG.md` 的 Breaking 项。
+
+Provider downlink 平台原本可以通过独立的 `/bot/events/coordination` HTTP 回调回传协同事件；
+该入口已被移除，回传统一走运行流中的 `agent` / `tool_call_end` SSE echo。回传必须和 Provider 的
 `coordination.mode` 匹配。
 
 ### 7.1 `mcporter_mcp`

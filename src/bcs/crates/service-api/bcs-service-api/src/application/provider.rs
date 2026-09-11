@@ -5,7 +5,7 @@ use bcs_domain::{
     ProviderRecord, Skill,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::{ServiceResult, TaskModeMatch};
 
@@ -180,38 +180,6 @@ pub struct ProviderBotEventOutcome {
     pub failed_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProviderCoordinationEventKind {
-    ToolResult,
-    CoordinationIntent,
-}
-
-#[derive(Debug, Clone)]
-pub struct ProviderCoordinationIntent {
-    pub v: u64,
-    pub tool: String,
-    pub arguments: Map<String, Value>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ProviderBotCoordinationCommand {
-    pub provider_id: String,
-    pub credential: ProviderBotEventCredential,
-    pub run_id: String,
-    pub tool_call_id: String,
-    pub kind: ProviderCoordinationEventKind,
-    pub tool_name: Option<String>,
-    pub result_text: Option<String>,
-    pub mcp_server: Option<String>,
-    pub intent: Option<ProviderCoordinationIntent>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ProviderBotCoordinationOutcome {
-    pub processed: bool,
-    pub duplicate: bool,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderBotEventError {
     #[error("Unauthorized: {0}")]
@@ -338,11 +306,6 @@ pub trait ProviderBotEventService: Send + Sync {
         &self,
         command: ProviderBotEventCommand,
     ) -> Result<ProviderBotEventOutcome, ProviderBotEventError>;
-
-    async fn submit_coordination(
-        &self,
-        command: ProviderBotCoordinationCommand,
-    ) -> Result<ProviderBotCoordinationOutcome, ProviderBotEventError>;
 
     async fn cleanup_expired(&self, _now_ms: u64) -> usize {
         0
