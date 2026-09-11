@@ -1645,7 +1645,6 @@ impl MemoryRegistry {
                     visibility: visibility.to_string(),
                     ..BotCapabilities::default()
                 },
-                dynamic_status: BotDynamicStatus::default(),
                 env: None,
                 created_by: created_by.map(str::to_string),
                 actor_kind: ActorKind::Bot,
@@ -1663,7 +1662,6 @@ impl BotRegistryCoreService for MemoryRegistry {
             RegisteredBot {
                 bot_uuid: bot_id,
                 capabilities,
-                dynamic_status: BotDynamicStatus::default(),
                 env: None,
                 created_by: None,
                 actor_kind: ActorKind::Bot,

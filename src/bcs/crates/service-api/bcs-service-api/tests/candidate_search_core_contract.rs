@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use bcs_service_api::{
-    ActorKind, ActorStatus, BotCandidateVisibility, BotCapabilities, BotDynamicStatus,
+    ActorKind, ActorStatus, BotCandidateVisibility, BotCapabilities,
     RegisteredBot, ServiceResult, WorkerProfile as RootWorkerProfile,
     WorkerProfileService as RootWorkerProfileService,
     WorkerRecommendCommand as RootWorkerRecommendCommand,
@@ -45,7 +45,6 @@ fn candidate_hit() -> BotCandidateSearchHit {
         bot: RegisteredBot {
             bot_uuid: "bot-2".to_string(),
             capabilities: BotCapabilities::default(),
-            dynamic_status: BotDynamicStatus::default(),
             env: Some("pre".to_string()),
             created_by: Some("staff-1".to_string()),
             actor_kind: ActorKind::Bot,

@@ -1521,10 +1521,7 @@ async fn bot_runtime_connection_service_manages_streaming_lifecycle() {
         .get("runtime-bot")
         .await
         .expect("stored bot");
-    assert_eq!(
-        stored.dynamic_status.dynamic_summary,
-        status.dynamic_summary
-    );
+    assert!(serde_json::to_value(stored).unwrap().get("dynamic_status").is_none());
 
     service
         .disconnect_streaming(BotRuntimeDisconnectCommand {
@@ -1537,7 +1534,7 @@ async fn bot_runtime_connection_service_manages_streaming_lifecycle() {
 }
 
 #[tokio::test]
-async fn update_status_uses_dynamic_status() {
+async fn update_status_echoes_payload_without_retaining_it() {
     let fixture = RegistryFixture::new();
     let service = fixture.service();
 
@@ -1571,14 +1568,15 @@ async fn update_status_uses_dynamic_status() {
         result.status.dynamic_summary.as_deref(),
         Some("Working on a task")
     );
+    assert_eq!(result.status.load, status.load);
+    assert_eq!(result.status.updated_at, status.updated_at);
 
     let stored = fixture
         .registry
         .get("status-bot")
         .await
         .expect("stored bot");
-    assert_eq!(stored.dynamic_status.status, status.status);
-    assert_eq!(stored.dynamic_status.load, status.load);
+    assert!(serde_json::to_value(stored).unwrap().get("dynamic_status").is_none());
 }
 
 #[tokio::test]
@@ -1669,12 +1667,6 @@ async fn update_status_rejects_caller_mismatch() {
         Err(BotUseCaseError::Forbidden(message))
             if message.contains("not the owner")
     ));
-    let stored = fixture
-        .registry
-        .get("status-bot")
-        .await
-        .expect("stored bot");
-    assert_eq!(stored.dynamic_status.status, "");
 }
 
 #[tokio::test]
@@ -1995,4 +1987,25 @@ fn caps_with_skills(
             .collect(),
         ..caps(name, summary, visibility)
     }
+}
+
+#[tokio::test]
+async fn discovery_ignores_heartbeat_summary_and_keeps_static_metadata() {
+    let fixture = RegistryFixture::new();
+    register_bot(&fixture.registry, "summary-bot",
+        caps(Some("Database Helper"), Some("Static SQL expertise"), "public"), None).await;
+    fixture.registry.update_status("summary-bot", bcs_service_api::BotDynamicStatus {
+        status: "busy".into(), dynamic_summary: Some("ephemeral-only-marker".into()),
+        load: Some(1.0), updated_at: Some(123),
+    }).await;
+    let service = fixture.service();
+    let ignored = service.discover_bots(BotDiscoveryCommand {
+        q: Some("ephemeral-only-marker".into()), ..Default::default()
+    }).await.unwrap();
+    assert_eq!(ignored.count, 0);
+    let matched = service.discover_bots(BotDiscoveryCommand {
+        q: Some("Static SQL".into()), ..Default::default()
+    }).await.unwrap();
+    assert_eq!(matched.count, 1);
+    assert_eq!(matched.bots[0].bot_uuid, "summary-bot");
 }
