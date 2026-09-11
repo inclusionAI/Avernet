@@ -8,6 +8,7 @@
 # registered as standalone default cases.
 
 E2E_TESTS_STORIES=(
+    "story_human_manages_delivery_policy"
     "story_user_prepares_agent_network"
     "story_user_builds_trusted_team"
     "story_user_operates_group_workspace"
@@ -35,6 +36,60 @@ require_status() {
         warn "response: $(printf '%s' "$RESPONSE" | head -c 300)"
     fi
     [[ "$HTTP_STATUS" = "$expected" ]]
+}
+
+# Human operators can read and replace the queue policy with optimistic locking.
+# Preserve flow switches and Bot modes: this story must not enable queues for
+# the other stories. Restore the original policy (not its historical version).
+story_human_manages_delivery_policy() {
+    info "Story: human manages queue policy; Bot credentials cannot administer it"
+    local path="/admin/message-delivery/policy"
+    local original version next_version updated body restore_body
+    api_get "$path"
+    require_status "human reads delivery policy" "200" || return
+    original=$(printf '%s' "$RESPONSE" | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["policy"], sort_keys=True, separators=(",", ":")))') || return
+    version=$(json_path "$RESPONSE" "version")
+    [[ "$version" =~ ^[0-9]+$ ]] || { assert_eq "policy version is an integer" "$version" "integer"; return 1; }
+    next_version=$((version + 1))
+    updated=$(printf '%s' "$original" | python3 -c 'import json,sys; p=json.load(sys.stdin); p["max_context_messages"]=23 if p["max_context_messages"] != 23 else 24; print(json.dumps(p, sort_keys=True, separators=(",", ":")))') || return
+    body="{\"expected_version\":${version},\"policy\":${updated}}"
+    restore_body="{\"expected_version\":${next_version},\"policy\":${original}}"
+
+    bot_get "$path" CEO
+    assert_status "Bot cannot read administrative delivery policy" "403"
+    bot_put "$path" CEO "$body"
+    assert_status "Bot cannot replace administrative delivery policy" "403"
+    api_get "$path"
+    require_status "human reads policy after denied Bot writes" "200" || return
+    assert_json_eq "denied write preserves version" "$RESPONSE" "version" "$version"
+    assert_json_eq "denied write preserves policy" "$RESPONSE" "policy" "$original"
+
+    # Do not return early after attempting a write: always attempt the CAS
+    # restoration, including when a write response is lost or malformed.
+    api_put "$path" "$body"
+    assert_status "human replaces policy with matching version" "200"
+    assert_json_eq "successful update increments version" "$RESPONSE" "version" "$next_version"
+    assert_json_eq "update records the human operator" "$RESPONSE" "updated_by" "human_${BCS_MOCK_USER_ID}"
+    assert_json_eq "update returns complete policy" "$RESPONSE" "policy" "$updated"
+    api_get "$path"
+    assert_status "human reads back updated policy" "200"
+    assert_json_eq "readback exposes new version" "$RESPONSE" "version" "$next_version"
+    assert_json_eq "readback exposes complete updated policy" "$RESPONSE" "policy" "$updated"
+
+    api_put "$path" "$body"
+    assert_status "stale policy replacement is rejected" "409"
+    assert_json_eq "stale write has explicit conflict error" "$RESPONSE" "error" "delivery_policy_version_conflict"
+    api_get "$path"
+    assert_status "human reads policy after stale write" "200"
+    assert_json_eq "conflict does not increment version" "$RESPONSE" "version" "$next_version"
+    assert_json_eq "conflict does not alter policy" "$RESPONSE" "policy" "$updated"
+
+    api_put "$path" "$restore_body"
+    assert_status "human restores original policy" "200"
+    api_get "$path"
+    assert_status "human verifies restored policy" "200"
+    assert_json_eq "restoration increments version again" "$RESPONSE" "version" "$((next_version + 1))"
+    assert_json_eq "original policy is restored for following stories" "$RESPONSE" "policy" "$original"
 }
 
 json_path() {
