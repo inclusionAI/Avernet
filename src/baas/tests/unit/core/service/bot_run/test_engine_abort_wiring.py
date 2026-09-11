@@ -88,7 +88,6 @@ async def test_baas_bot_service_abort_sends_chat_abort(binding_info: BotBindingI
 
     await service.abort(
         session_id="sess-1",
-        run_id="run-1",
         binding_info=binding_info,
     )
 
@@ -99,7 +98,6 @@ async def test_baas_bot_service_abort_sends_chat_abort(binding_info: BotBindingI
     )
     ws_client.chat_abort.assert_awaited_once_with(
         session_key="sess-1",
-        run_id="run-1",
     )
 
 
@@ -120,7 +118,6 @@ async def test_baas_bot_service_abort_logs_on_resolution_failure(
 
     await service.abort(
         session_id="sess-1",
-        run_id="run-1",
         binding_info=binding_info,
     )
 
@@ -148,7 +145,6 @@ async def test_baas_bot_service_abort_logs_on_chat_abort_failure(
 
     await service.abort(
         session_id="sess-1",
-        run_id="run-1",
         binding_info=binding_info,
     )
 
@@ -177,7 +173,6 @@ async def test_claw_bot_service_abort_sends_chat_abort(binding_info: BotBindingI
 
     await service.abort(
         session_id="sess-1",
-        run_id="run-1",
         binding_info=binding_info,
     )
 
@@ -188,7 +183,6 @@ async def test_claw_bot_service_abort_sends_chat_abort(binding_info: BotBindingI
     )
     ws_client.chat_abort.assert_awaited_once_with(
         session_key="sess-1",
-        run_id="run-1",
     )
 
 
@@ -211,7 +205,6 @@ async def test_claw_bot_service_abort_without_sandbox_id_is_noop(
 
     await service.abort(
         session_id="sess-1",
-        run_id="run-1",
         binding_info=no_sandbox,
     )
 
@@ -241,7 +234,6 @@ async def test_claw_bot_service_abort_swallows_engine_error(
 
     await service.abort(
         session_id="sess-1",
-        run_id="run-1",
         binding_info=binding_info,
     )
 

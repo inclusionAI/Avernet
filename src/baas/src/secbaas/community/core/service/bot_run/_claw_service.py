@@ -489,17 +489,15 @@ class ClawBotService(BotService):
         self,
         *,
         session_id: str,
-        run_id: str | None = None,
         binding_info: BotBindingInfo,
     ) -> None:
-        """Best-effort 通知 engine 中止 session/run。
+        """Best-effort 通知 engine 中止 session。
 
         复用 send_message 的连接逻辑，从连接池获取 AsyncChatClient
         并发送 ``chat.abort``。失败仅记录日志，不影响 abort 主流程。
 
         Args:
             session_id: 会话 ID（engine 侧 sessionKey）
-            run_id: 可选 run ID，透传给 engine
             binding_info: 已解析的 binding 信息
         """
         sandbox_id = binding_info.sandbox_id
@@ -507,9 +505,8 @@ class ClawBotService(BotService):
         if sandbox_id is None:
             logger.warning(
                 "[ClawBotService.abort] sandbox_id is required for abort: "
-                "session_id=%s run_id=%s",
+                "session_id=%s",
                 session_id,
-                run_id,
             )
             return
 
@@ -518,18 +515,18 @@ class ClawBotService(BotService):
 
         try:
             client = await self._client_pool.get(sandbox_id, url, headers)
-            await client.chat_abort(session_key=session_id, run_id=run_id)
+            # 注意：chat.abort 的 run_id 是引擎侧 run 标识，与 baas_bot_run.run_id
+            # 语义不同，不能把后者透传过去；用 sessionKey 定位即可。
+            await client.chat_abort(session_key=session_id)
             logger.info(
-                "[ClawBotService.abort] engine abort sent: session_id=%s run_id=%s",
+                "[ClawBotService.abort] engine abort sent: session_id=%s",
                 session_id,
-                run_id,
             )
         except Exception as e:
             logger.warning(
                 "[ClawBotService.abort] failed to send chat.abort: "
-                "session_id=%s run_id=%s error=%s",
+                "session_id=%s error=%s",
                 session_id,
-                run_id,
                 e,
             )
 

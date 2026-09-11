@@ -818,17 +818,15 @@ class BaasBotService(BotService):
         self,
         *,
         session_id: str,
-        run_id: str | None = None,
         binding_info: BotBindingInfo,
     ) -> None:
-        """Best-effort 通知 engine 中止 session/run。
+        """Best-effort 通知 engine 中止 session。
 
         复用 send_message 的连接解析与连接池逻辑，发送 ``chat.abort``。
         失败仅记录日志，不影响 abort 主流程。
 
         Args:
             session_id: 会话 ID（engine 侧 sessionKey）
-            run_id: 可选 run ID，透传给 engine
             binding_info: 已解析的 binding 信息
         """
         try:
@@ -838,9 +836,8 @@ class BaasBotService(BotService):
         except Exception as e:
             logger.warning(
                 "[BaasBotService.abort] failed to resolve WS connection: "
-                "session_id=%s run_id=%s error=%s",
+                "session_id=%s error=%s",
                 session_id,
-                run_id,
                 e,
             )
             return
@@ -850,18 +847,18 @@ class BaasBotService(BotService):
 
         try:
             client = await self._client_pool.get(pool_key, conn_info.ws_url, headers)
-            await client.chat_abort(session_key=session_id, run_id=run_id)
+            # 注意：chat.abort 的 run_id 是引擎侧 run 标识，与 baas_bot_run.run_id
+            # 语义不同，不能把后者透传过去；用 sessionKey 定位即可。
+            await client.chat_abort(session_key=session_id)
             logger.info(
-                "[BaasBotService.abort] engine abort sent: session_id=%s run_id=%s",
+                "[BaasBotService.abort] engine abort sent: session_id=%s",
                 session_id,
-                run_id,
             )
         except Exception as e:
             logger.warning(
                 "[BaasBotService.abort] failed to send chat.abort: "
-                "session_id=%s run_id=%s error=%s",
+                "session_id=%s error=%s",
                 session_id,
-                run_id,
                 e,
             )
 

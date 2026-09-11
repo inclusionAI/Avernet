@@ -1464,13 +1464,11 @@ async def test_bot_runner_abort_propagates_to_bot_service(
             self,
             *,
             session_id: str,
-            run_id: str | None,
             binding_info: Any,
         ) -> None:
             self.calls.append(
                 {
                     "session_id": session_id,
-                    "run_id": run_id,
                     "binding_info": binding_info,
                 }
             )
@@ -1515,6 +1513,5 @@ async def test_bot_runner_abort_propagates_to_bot_service(
 
     assert len(fake_service.calls) == 1
     call = fake_service.calls[0]
-    assert call["run_id"] == run_id
     assert call["session_id"] == "agent:main:sess-real"
     assert call["binding_info"].device_id == "device-1"

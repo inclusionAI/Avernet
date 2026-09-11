@@ -212,18 +212,20 @@ class BotService(Protocol):
         self,
         *,
         session_id: str,
-        run_id: str | None = None,
         binding_info: BotBindingInfo,
     ) -> None:
-        """Best-effort 通知 engine 中止 session/run。
+        """Best-effort 通知 engine 中止 session。
 
         由 ``BotRequestWorker`` 在本地 task 取消后调用，通过底层 WS 连接
-        发送 ``chat.abort`` 通知 engine 侧结束当前会话或指定 run。
+        发送 ``chat.abort`` 通知 engine 侧结束当前会话。
         失败仅记录日志，不影响 abort 主流程。
+
+        注意：不接收也不透传 ``run_id``。``chat.abort`` 的 ``run_id`` 是引擎
+        侧 run 标识，与 ``baas_bot_run.run_id`` 语义不同，因此只在 Runner
+        层用 ``run_id`` 查记录/日志，Service 层只用 ``session_id`` 定位 engine。
 
         Args:
             session_id: 会话 ID（作为 engine 侧 sessionKey）
-            run_id: 可选的 run ID，透传给 engine
             binding_info: 已解析的 binding 信息（用于定位 WS 连接）
         """
         ...

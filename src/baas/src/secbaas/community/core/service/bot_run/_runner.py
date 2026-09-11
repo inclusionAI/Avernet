@@ -601,7 +601,6 @@ class BotRunner:
         try:
             await bot_service.abort(
                 session_id=session_id,
-                run_id=run_id,
                 binding_info=binding_info,
             )
             logger.info(
