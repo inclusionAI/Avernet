@@ -15,6 +15,7 @@ import pytest
 from secbaas.community.api.bot_runtime import BotBindingInfo, WsConnectionInfo
 from secbaas.community.core.service.bot_run._async_chat_client import (
     AsyncChatClient,
+    NotConnectedError,
 )
 from secbaas.community.core.service.bot_run._baas_service import (
     BaasBotService,
@@ -66,6 +67,14 @@ async def test_async_chat_client_chat_abort_delegates_to_ws_client():
         session_key="sess-1",
         run_id="run-1",
     )
+
+
+async def test_async_chat_client_chat_abort_raises_when_not_connected():
+    """AsyncChatClient.chat_abort raises NotConnectedError when not connected."""
+    client = AsyncChatClient(uri="wss://example.com/ws")
+
+    with pytest.raises(NotConnectedError, match="Not connected"):
+        await client.chat_abort(session_key="sess-1")
 
 
 async def test_baas_bot_service_abort_sends_chat_abort(binding_info: BotBindingInfo):
