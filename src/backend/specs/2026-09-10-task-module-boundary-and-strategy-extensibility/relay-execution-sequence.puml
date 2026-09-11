@@ -1,0 +1,56 @@
+@startuml
+!theme plain
+autonumber
+hide footbox
+
+title 接力规划模式：基于 static_plan 参照逻辑的目标事件时序
+
+actor "执行 Bot A\n上游节点" as bot_a
+database "TaskGraphService" as graph
+queue "Outbox / Event Bus" as events
+participant "TaskPlanner\nRelayPlanningStrategy" as planner
+participant "TaskDispatcher" as dispatcher
+participant "TaskRunner" as runner
+actor "接力 Bot B" as bot_b
+
+== A 完成，图谱产生下一次规划请求 ==
+bot_a -> graph : report(TaskCallbackData\nEXECUTION_RESULT, A result, graph_version=18)
+graph -> graph : 校验版本、幂等、状态机\n持久化 A=SUCCESS 与输出
+graph -> events : 原子写 PLAN_REQUESTED(TaskContext v19)
+events -> planner : 消费 PLAN_REQUESTED(context)
+
+note right of planner
+参照 static_plan：根据已完成产出、依赖、
+验收/gap 和策略决定下一步。
+TaskPlanner 只看 TaskContext，不读写完整图谱。
+end note
+
+planner -> graph : report(TaskCallbackData\nPLAN, PlanResult)
+graph -> graph : 校验接力策略、版本、深度、规则
+graph -> events : 原子写 DISPATCH_REQUESTED(relay node B)
+
+== 派发接力节点并启动 ==
+events -> dispatcher : 消费 DISPATCH_REQUESTED(node B)
+dispatcher -> dispatcher : 选择接力 Bot / run_mode
+dispatcher -> graph : report(TaskCallbackData\nDISPATCH, TaskNodePatch)
+graph -> events : 原子写 EXECUTION_REQUESTED(node B)
+events -> runner : 消费 EXECUTION_REQUESTED(node B)
+runner -> bot_b : 启动既有 executor\n(允许的节点上下文)
+runner -> graph : report(TaskCallbackData\nEXECUTION_STARTED 或 START_FAILED)
+
+== B 基于最新上下文继续接力规划 ==
+bot_b -> graph : report(TaskCallbackData\nPLAN, PlanResult, graph_version=current)
+graph -> graph : 校验归属/租约、版本、幂等、\n节点边关系与深度
+graph -> events : 原子写 DISPATCH_REQUESTED(child C)
+events -> dispatcher : dispatch(node C)
+dispatcher -> graph : report(DISPATCH, TaskNodePatch)
+graph -> events : EXECUTION_REQUESTED(node C)
+events -> runner : run(node C)
+
+note over graph,runner
+任何完成、失败或恢复事实都会回到统一 report 入口，
+由图谱状态决定下一条语义事件。版本过期、重复或越权的接力规划
+被拒绝，不会直接增删节点，也不会触发外部执行副作用。
+end note
+
+@enduml
