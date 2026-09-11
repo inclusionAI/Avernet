@@ -209,13 +209,20 @@ Bot 在一次激活里写的**每一段**文字都会被转发成群里的一条
     └── skills/undercover-game-player/SKILL.md
 ```
 
-`<source>/skills/<name>/` 会被 `scripts/modules/bots.sh` 装配进该 Bot 的运行时 workspace，和 `bcs-coordination` 并列。
+每次 `singlebox.sh start bots --profile-dir <dir>`（Bot 已停止时）或 `restart bots --profile-dir <dir>`，
+都会将 `<dir>/<source>/skills/` 的内容复制到该 Bot 的运行时 workspace `skills/`，
+不按 `bots.json` 的 `skills` 能力描述筛选；保留已有 `openclaw.json` 也不会跳过技能刷新。
+同名技能目录完整替换，源码中删除的文件不会残留；之前由 profile 同步、后来从源码删除的技能也会移除。
+其他自行安装的技能保留，公共 `bcs-coordination` 始终从 BCS 源码刷新（优先于 profile 中的同名技能）。
+workspace 的 `.singlebox-profile-skills/` 记录同步归属，不应手动修改；游戏状态保存在 Bot 数据目录，
+技能刷新不影响已有游戏状态。
 
 ## 回归测试
 
 面板/事实层回归不需要起服务：
 
 ```bash
+bash scripts/test_singlebox_profile_skills.sh
 python3 -m unittest discover -s scripts/6bots_undercover_game_profile/referee/skills/undercover-game-referee/tests -v
 cd src/bcs/assets/panel && npm run verify
 ```
