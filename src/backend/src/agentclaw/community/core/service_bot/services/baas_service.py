@@ -14,8 +14,7 @@ this concrete class conforms to it structurally (verified by
 
 The dataclasses (``BotWsConnectionInfoResponse``, ``HttpConnectionInfo``,
 ``Storage``, ``BotDeployConfig``, ``MountPointEntry``, ``BotConfig``) and the
-``BaasServiceError`` exception are defined here and imported from ~15 call
-sites.
+``BaasServiceError`` hierarchy are defined here and imported by callers.
 """
 from __future__ import annotations
 
@@ -203,6 +202,38 @@ class BaasOutboundTargetError(ValueError):
 class BaasServiceError(Exception):
     """BaaS service error."""
     pass
+
+
+class BaasNoActiveDevicesError(BaasServiceError):
+    """BaaS confirms that the Bot currently has no active device."""
+
+    error_code = "NO_ACTIVE_DEVICES"
+
+    def __init__(self, *, status_code: int) -> None:
+        self.status_code = status_code
+        super().__init__(
+            f"BaaS device is offline: status={status_code} "
+            f"error={self.error_code}"
+        )
+
+
+class BaasTransientServiceError(BaasServiceError):
+    """BaaS transport or 5xx failure that may succeed on a later attempt."""
+
+
+def _is_no_active_devices_response(response: httpx.Response) -> bool:
+    """Recognize only the trusted BaaS structured offline contract."""
+
+    if response.status_code not in {404, 503}:
+        return False
+    try:
+        payload = response.json()
+    except (ValueError, TypeError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    detail = payload.get("detail")
+    return isinstance(detail, dict) and detail.get("error") == "NO_ACTIVE_DEVICES"
 
 
 @dataclass
@@ -2002,6 +2033,19 @@ class BaasService:  # pragma: no cover
             # intermittent redirects by bot/tenant/target device — the data
             # needed to tell a partial-instance/routing fault apart from a
             # blanket auth requirement.
+            if _is_no_active_devices_response(e.response):
+                logger.info(
+                    "[BaasService.get_ws_info_by_bot_uuid] no active device: "
+                    "status=%s bot_uuid=%s tenant=%s device_affinity=%s",
+                    e.response.status_code,
+                    bot_uuid,
+                    effective_tenant,
+                    device_affinity,
+                )
+                raise BaasNoActiveDevicesError(
+                    status_code=e.response.status_code
+                ) from e
+
             location = e.response.headers.get("location")
             logger.warning(
                 f"[BaasService.get_ws_info_by_bot_uuid] "
@@ -2010,9 +2054,25 @@ class BaasService:  # pragma: no cover
                 f"device_affinity={device_affinity}, location={location!r} - "
                 f"{e.response.text}"
             )
+            if e.response.status_code >= 500:
+                raise BaasTransientServiceError(
+                    f"BaaS API transient error: {e.response.status_code}"
+                ) from e
             raise BaasServiceError(
                 f"BaaS API error: {e.response.status_code} - {e.response.text}"
             )
+        except httpx.RequestError as e:
+            logger.warning(
+                "[BaasService.get_ws_info_by_bot_uuid] transport failure: "
+                "bot_uuid=%s tenant=%s device_affinity=%s error_type=%s",
+                bot_uuid,
+                effective_tenant,
+                device_affinity,
+                type(e).__name__,
+            )
+            raise BaasTransientServiceError(
+                f"BaaS transport failure: {type(e).__name__}"
+            ) from e
         except Exception as e:
             logger.error(
                 f"[BaasService.get_ws_info_by_bot_uuid] "
@@ -3797,6 +3857,8 @@ class BaasService:  # pragma: no cover
 __all__ = [
     "BaasService",
     "BaasServiceError",
+    "BaasNoActiveDevicesError",
+    "BaasTransientServiceError",
     "BotWsConnectionInfoResponse",
     "HttpConnectionInfo",
     "Storage",

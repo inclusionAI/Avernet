@@ -20,6 +20,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.devices
   - agentclaw.community.core.errors
+  - agentclaw.community.core.events
   - agentclaw.community.core.mcp
   - agentclaw.community.core.service_bot
   - agentclaw.community.core.skill_center
@@ -36,3 +37,8 @@ internal_dependencies:
 ### Change impact
 
 DesktopBot lifecycle is a parallel track to standard bot; refactors that unify the two need to touch this domain carefully.
+When the health reconciliation commits an ``OFFLINE -> ACTIVE`` transition for
+the current Bot and binding, it publishes the existing
+``RuntimeProjectionRequestedEvent`` as a best-effort wake-up. Event delivery
+failure never rolls back the confirmed ACTIVE state; Desktop Skill Recovery's
+low-frequency sweep is the missed-event fallback.

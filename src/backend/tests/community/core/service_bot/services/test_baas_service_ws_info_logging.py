@@ -1,11 +1,9 @@
 """Log-level coverage for BaasService.get_ws_info on HTTP errors.
 
-get_ws_info re-raises every HTTP error as BaasServiceError, and all callers
-(connection handler, device plugin, identity) catch and degrade. The common
-cases — 404 BOT_NOT_FOUND (bot released/expired) and 503 NO_ACTIVE_DEVICES
-(device still coming up) — are expected, self-healing business states, NOT
-faults. They must be logged at WARNING, never ERROR, so they don't flood the
-alarm/ticket pipeline. These tests pin that contract.
+get_ws_info keeps every HTTP failure inside the BaasServiceError hierarchy.
+Structured NO_ACTIVE_DEVICES is a normal external waiting state and logs at
+INFO; transport/5xx failures are transient and log at WARNING; malformed or
+unexpected failures keep the ERROR path. These tests pin that classification.
 
 The module logger is a SOFAPy logger (propagate=False, own handlers), so caplog
 can't see it — assert on the logger method called instead, which is what we
@@ -22,8 +20,10 @@ from agentclaw.community.core.service_bot.services.deploy.managed_composer impor
     ManagedDeployConfigComposer,
 )
 from agentclaw.community.core.service_bot.services.baas_service import (
+    BaasNoActiveDevicesError,
     BaasService,
     BaasServiceError,
+    BaasTransientServiceError,
 )
 
 
@@ -77,7 +77,7 @@ def _make_service_raising(
 
 
 def _ws_info_logged_calls(spy: MagicMock, level: str) -> list:
-    """get_ws_info log calls at the given level (warning/error)."""
+    """get_ws_info log calls at the requested level."""
     return [
         c for c in getattr(spy, level).call_args_list
         if c.args and "get_ws_info" in str(c.args[0])
@@ -101,26 +101,65 @@ class TestGetWsInfoErrorLogging:
         assert _ws_info_logged_calls(spy, "warning"), "404 should log at WARNING"
         assert not _ws_info_logged_calls(spy, "error"), "404 must NOT log at ERROR"
 
-    def test_503_no_active_devices_logs_warning_not_error(self):
+    @pytest.mark.parametrize("status_code", [404, 503])
+    def test_no_active_devices_is_structured_and_logs_info(
+        self, status_code: int
+    ) -> None:
         body = (
             '{"detail":{"error":"NO_ACTIVE_DEVICES",'
             '"message":"No active devices available"}}'
         )
-        service = _make_service_raising(503, body)
+        service = _make_service_raising(status_code, body)
         with patch(
             "agentclaw.community.core.service_bot.services.baas_service.logger"
         ) as spy:
-            with pytest.raises(BaasServiceError):
+            with pytest.raises(BaasNoActiveDevicesError) as raised:
                 service.get_ws_info(bind_id=1)
 
-        assert _ws_info_logged_calls(spy, "warning"), "503 should log at WARNING"
-        assert not _ws_info_logged_calls(spy, "error"), "503 must NOT log at ERROR"
+        assert raised.value.status_code == status_code
+        assert raised.value.error_code == "NO_ACTIVE_DEVICES"
+        assert _ws_info_logged_calls(spy, "info")
+        assert not _ws_info_logged_calls(spy, "warning")
+        assert not _ws_info_logged_calls(spy, "error")
+
+    @pytest.mark.parametrize(
+        ("status_code", "body"),
+        [
+            (404, '{"detail":{"error":"BOT_NOT_FOUND"}}'),
+            (403, '{"detail":{"error":"NO_ACTIVE_DEVICES"}}'),
+            (500, '{"detail":{"error":"NO_ACTIVE_DEVICES"}}'),
+            (503, '{"detail":{"error":"SOME_OTHER_ERROR"}}'),
+            (503, "not-json"),
+        ],
+    )
+    def test_other_http_errors_do_not_become_device_offline(
+        self, status_code: int, body: str
+    ) -> None:
+        service = _make_service_raising(status_code, body)
+
+        with pytest.raises(BaasServiceError) as raised:
+            service.get_ws_info(bind_id=1)
+
+        assert not isinstance(raised.value, BaasNoActiveDevicesError)
 
     def test_still_raises_baas_service_error(self):
         """Behavior unchanged: the HTTP error is still surfaced to callers."""
         service = _make_service_raising(500, "boom")
-        with pytest.raises(BaasServiceError):
+        with pytest.raises(BaasTransientServiceError):
             service.get_ws_info(bind_id=1)
+
+    def test_transport_timeout_is_transient_and_logs_warning(self) -> None:
+        service = _make_service_raising(500, "unused")
+        service._http.get.side_effect = httpx.ReadTimeout("timeout")
+
+        with patch(
+            "agentclaw.community.core.service_bot.services.baas_service.logger"
+        ) as spy:
+            with pytest.raises(BaasTransientServiceError):
+                service.get_ws_info(bind_id=1)
+
+        assert _ws_info_logged_calls(spy, "warning")
+        assert not _ws_info_logged_calls(spy, "error")
 
     def test_302_redirect_logs_location_and_correlation_fields(self):
         """A gateway 302 (Spanner) must surface the redirect ``Location`` plus

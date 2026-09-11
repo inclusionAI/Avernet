@@ -6,7 +6,8 @@ import asyncio
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, call
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from sqlalchemy import create_engine
@@ -99,7 +100,7 @@ from agentclaw.community.plugin_api.skill_center_gateway import (
 _UUID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 
 
-def _bot(*, binding_id: int = 17) -> dict:
+def _bot(*, binding_id: int = 17, status: str = "ACTIVE") -> dict:
     return {
         "bot_id": "bot-a",
         "owner_id": "owner-a",
@@ -108,6 +109,7 @@ def _bot(*, binding_id: int = 17) -> dict:
         "bot_type": "desktop",
         "active_engine": "openclaw",
         "binding_id": binding_id,
+        "status": status,
     }
 
 
@@ -844,6 +846,75 @@ def test_ensure_uses_minimal_payload_and_thirty_minute_deadline() -> None:
     assert "delay_seconds" not in tasks.enqueue.call_args.kwargs
 
 
+@pytest.mark.parametrize(
+    "status", ["OFFLINE", "FAILED", "RELEASING", "RELEASED", "UNKNOWN"]
+)
+def test_ensure_does_not_create_recovery_for_non_runnable_status(status: str) -> None:
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = _bot(status=status)
+    tasks = MagicMock()
+    service = DesktopSkillRecoveryService(bots=bots, tasks=tasks)
+
+    assert service.ensure(owner_id="owner-a", bot_id="bot-a") is None
+    tasks.enqueue.assert_not_called()
+
+
+def test_handler_completes_explicit_offline_without_runtime_io() -> None:
+    bots = MagicMock()
+    bots.get_by_id_and_owner.return_value = _bot(status="OFFLINE")
+    projector = MagicMock()
+    handler = DesktopSkillRecoveryTaskHandler(
+        bots=bots,
+        projector=projector,
+        distribution=MagicMock(),
+        layouts=MagicMock(),
+        env_provider=lambda: "dev",
+    )
+
+    outcome = handler.handle({"owner_id": "owner-a", "bot_id": "bot-a"})
+
+    assert isinstance(outcome, Complete)
+    projector.resolve_plan.assert_not_called()
+
+
+def test_handler_rechecks_offline_after_prepare_before_runtime_io() -> None:
+    bots = MagicMock()
+    bots.get_by_id_and_owner.side_effect = [
+        _bot(status="ACTIVE"),
+        _bot(status="OFFLINE"),
+    ]
+    projector = _Projector()
+    layouts = MagicMock()
+    layouts.get.return_value = BotSkillLayoutState.legacy_default(
+        BotSkillLayoutScope(env="dev", entity_id="owner-a", bot_id="bot-a")
+    )
+    handler = DesktopSkillRecoveryTaskHandler(
+        bots=bots,
+        projector=projector,
+        distribution=_Distribution(),
+        layouts=layouts,
+        env_provider=lambda: "dev",
+    )
+
+    outcome = handler.handle({"owner_id": "owner-a", "bot_id": "bot-a"})
+
+    assert isinstance(outcome, Complete)
+    assert projector.applied == []
+
+
+def test_explicit_device_offline_result_waits_for_reconnect_event() -> None:
+    outcome = DesktopSkillRecoveryTaskHandler._outcome(
+        RuntimeProjectionResult.pending(
+            code="DESKTOP_DEVICE_OFFLINE",
+            reason="offline",
+        ),
+        prepare_pending=False,
+        prepare_retryable_error=False,
+    )
+
+    assert isinstance(outcome, Complete)
+
+
 @pytest.mark.integration
 def test_terminal_recovery_releases_the_bot_key_for_a_later_sweep(
     recovery_queue,
@@ -878,22 +949,62 @@ def test_sweeper_pages_all_live_bound_desktop_bots_and_only_ensures() -> None:
         (
             3,
             [
-                {"owner_id": "o1", "bot_id": "b1", "binding_id": 1},
-                {"owner_id": "o2", "bot_id": "b2", "binding_id": None},
+                {
+                    "owner_id": "o1",
+                    "bot_id": "b1",
+                    "binding_id": 1,
+                    "status": "ACTIVE",
+                },
+                {
+                    "owner_id": "o2",
+                    "bot_id": "b2",
+                    "binding_id": None,
+                    "status": "PENDING",
+                },
             ],
         ),
-        (3, [{"owner_id": "o3", "bot_id": "b3", "binding_id": 3}]),
+        (
+            4,
+            [
+                {
+                    "owner_id": "o3",
+                    "bot_id": "b3",
+                    "binding_id": 3,
+                    "status": "OFFLINE",
+                },
+                {
+                    "owner_id": "o4",
+                    "bot_id": "b4",
+                    "binding_id": 4,
+                    "status": "PENDING",
+                },
+            ],
+        ),
     ]
     recovery = MagicMock()
-    recovery.ensure.return_value = object()
+    recovery.ensure.side_effect = [
+        SimpleNamespace(created=True),
+        SimpleNamespace(created=False),
+    ]
     sweeper = DesktopSkillRecoverySweeper(
         bots=bots,
         recovery=recovery,
         config=DesktopSkillRecoveryConfig(sweep_page_size=2),
     )
 
-    assert sweeper.sweep_once() == (2, 2)
+    with patch(
+        "agentclaw.community.core.skill_center.services."
+        "desktop_skill_recovery.logger"
+    ) as log:
+        assert sweeper.sweep_once() == (2, 2)
+
     assert recovery.ensure.call_args_list == [
         call(owner_id="o1", bot_id="b1"),
-        call(owner_id="o3", bot_id="b3"),
+        call(owner_id="o4", bot_id="b4"),
     ]
+    summary = next(
+        call
+        for call in log.info.call_args_list
+        if "sweep completed" in str(call.args[0])
+    )
+    assert summary.args[1:9] == (4, 2, 1, 0, 0, 1, 1, 0)

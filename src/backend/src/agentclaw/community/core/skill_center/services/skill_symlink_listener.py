@@ -16,6 +16,10 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceConnectionUnavailableError,
+    DeviceOfflineError,
+)
 from agentclaw.community.core.events.types import (
     DeviceActivatedEvent,
     RuntimeProjectionRequestedEvent,
@@ -150,6 +154,13 @@ class SkillSymlinkListener(LifecycleBase):
                     is_desktop=is_desktop,
                 )
             initial_authority = self._resolve_desktop_layout_authority(bot)
+            if is_desktop and self._desktop_skill_recovery_wakeup is not None:
+                # Persist the level-triggered recovery before any live-device
+                # lookup. A reconnect may race BaaS connection visibility; the
+                # durable handler will re-read the current Bot and binding.
+                self._enqueue_desktop_skill_recovery(
+                    owner_id=str(owner_id), bot_id=str(bot_id)
+                )
             ctx = self._resolver.resolve_for_bot(bot_id, owner_id)
             if ctx.binding_id != event.binding_id:
                 logger.info(
@@ -161,14 +172,6 @@ class SkillSymlinkListener(LifecycleBase):
                     ctx.binding_id,
                 )
                 return
-
-            if is_desktop and self._desktop_skill_recovery_wakeup is not None:
-                # This wake is independent of the Pool migration wake above.
-                # The durable recovery handler re-checks Pool transition
-                # ownership before writing Skill mappings.
-                self._enqueue_desktop_skill_recovery(
-                    owner_id=str(owner_id), bot_id=str(bot_id)
-                )
 
             if initial_authority == _TRANSITION_AUTHORITY:
                 logger.info(
@@ -236,6 +239,21 @@ class SkillSymlinkListener(LifecycleBase):
                 "[skill_symlink_listener] sync result: success=%s message=%s",
                 result.get("success"),
                 result.get("message"),
+            )
+        except DeviceOfflineError:
+            logger.warning(
+                "[skill_symlink_listener] device still offline after runtime "
+                "wake; durable recovery will wait for the next reconnect: "
+                "device_id=%s binding_id=%s",
+                event.device_id,
+                event.binding_id,
+            )
+        except DeviceConnectionUnavailableError:
+            logger.warning(
+                "[skill_symlink_listener] device connection is temporarily "
+                "unavailable after runtime wake: device_id=%s binding_id=%s",
+                event.device_id,
+                event.binding_id,
             )
         except Exception as exc:
             logger.exception(

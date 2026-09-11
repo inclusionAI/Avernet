@@ -6,7 +6,15 @@ from typing import TYPE_CHECKING, Any
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
-from agentclaw.community.core.devices.services.device_context import ConnInfoBuildError
+from agentclaw.community.core.devices.services.device_context import (
+    ConnInfoBuildError,
+    DeviceConnectionUnavailableError,
+    DeviceOfflineError,
+)
+from agentclaw.community.core.service_bot.services.baas_service import (
+    BaasNoActiveDevicesError,
+    BaasTransientServiceError,
+)
 from agentclaw.community.core.devices.services.baas_conn_info import build_baas_conn_info_for_http
 from agentclaw.community.core.devices.services.baas_template_resolver import (
     SystemConfigBaasTemplateResolver,
@@ -29,7 +37,8 @@ class BaasConnInfoBuilder:
     """provider=baas 的 conn_info 计算器。
 
     底层复用 ``baas_service.get_ws_info`` + ``build_baas_conn_info_for_http``,
-    不重写。失败统一包成 :class:`ConnInfoBuildError`。
+    不重写。明确离线和暂时连接失败保留为 ``ConnInfoBuildError`` 的窄子类，
+    其它失败仍统一包成 :class:`ConnInfoBuildError`。
     """
 
     def __init__(
@@ -57,6 +66,14 @@ class BaasConnInfoBuilder:
                 device_affinity=user_id,
                 device_uuid=device_uuid,
             )
+        except BaasNoActiveDevicesError as error:
+            raise DeviceOfflineError(
+                f"No active device for binding={binding.id}"
+            ) from error
+        except BaasTransientServiceError as error:
+            raise DeviceConnectionUnavailableError(
+                f"Device connection is temporarily unavailable for binding={binding.id}"
+            ) from error
         except Exception as e:
             raise ConnInfoBuildError(
                 f"BaasConnInfoBuilder: get_ws_info failed for binding={binding.id}: {e}"
