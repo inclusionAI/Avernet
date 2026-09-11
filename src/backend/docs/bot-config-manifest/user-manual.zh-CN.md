@@ -678,7 +678,11 @@ GET /openapi/v1/bots/{bot_id}/with-manifest/status
   "started_at": "…", "finished_at": "…",
   "result": "SUCCEEDED|PARTIAL|FAILED",
   "sources": [
-    {"name": "content", "ref": "v1.2.0", "resolved_sha": "9c1f4ae…"}
+    {"name": "content", "url": "https://code.example.com/team/content.git",
+     "ref": "v1.2.0", "resolved_sha": "9c1f4ae…"},
+    {"name": "https://code.example.com/team/tools.git@main",
+     "url": "https://code.example.com/team/tools.git",
+     "ref": "main", "resolved_sha": "7e3b91c…"}
   ],
   "entries": [
     {"category": "identity", "name": "SOUL.md", "action": "updated", "from": "content"},
@@ -1020,12 +1024,20 @@ schema 已定稿（见 `manifest-schema.zh-CN.md` §3.4），但**第一期没�
 | `mode` | 行为 |
 | --- | --- |
 | `non_strict`（**默认**） | 应用新内容，并在 apply 报告里对该条目**告警**，写明前后两个 SHA |
-| `strict` | 解析出的 SHA 与上次 apply 记录的不同时，该条目**失败**，bot 继续跑它现在跑的 |
+| `strict` | 同一个 `(url, ref)` 这次解析出的 SHA 与上次 apply 记录的不同时，该条目**失败**，bot 继续跑它现在跑的 |
 
+- **基线按 `(url, ref)` 记**，不按源名。两个分支问的都是同一件事：「这个仓库的
+  这个 ref，在我们上次解析它之后动过没有」——源叫什么是你文档里的事，跟这个问题
+  无关。改名不丢基线；把 `url` 指到另一个仓库也不会继承前一个仓库的 SHA。
+- **改 `ref`（或改 `url`）就是一次重新钉扎**：新的 `(url, ref)` 没有任何一次
+  apply 对它有意见，所以既不拒绝也不告警，照常解析并被这次 apply 记下。
+  **这就是 `strict` 源的升版方式**——不用先切 `non_strict` 应用一次再切回来。
+  `strict` 拒绝的只有一种情况：**你没改文档，而 ref 在脚下动了**。
+- **SHA 形式的 ref 两个分支都触发不了**——它只会解析成它自己。是「接受但无效」，
+  不是报错。
 - **写在源上**，不是按 bot、也不是按清单——要描述的性质是「这个 ref 允不允许在我
   脚下移动」，它属于持有 ref 的那个东西。一份清单里同时有一个钉死的外部依赖和一个
   快速变动的内部仓库是常态。
-- **SHA 形式的 ref 忽略这个模式**（它动不了）——是「接受但无效」，不是报错。
 - 拼错的取值会被拒绝，不会静默落到默认值。
 
 ### 6.3 `digest`：哪里强制、哪里非法
@@ -1233,7 +1245,8 @@ bot 也是队列上的一个任务。所以部署里必须满足两个前提：
 
 - 用的是 **tag 且没动**？那就是没变——改 `ref`（§4.8）。
 - 用的是 **branch 且 `mode: strict`**？SHA 变了会让该条目**失败**，这是你要的钉扎
-  语义。看报告里的前后 SHA。
+  语义。看报告里的前后 SHA。要让它跟上，就在文档里把 `ref` 改成你真正想要的那个
+  tag 或 commit——换了 `ref` 就是一次重新钉扎，不会被拒绝（§6.2）。
 - 取源失败并落到了 **`keep_last`**？报告里那一条会写明。
 
 ---
@@ -1738,7 +1751,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | `result` | enum \| `""` | `RUNNING` / `SUCCEEDED` / `PARTIAL` / `FAILED`，见 B.7。终态是从逐条结果**推导出来的摘要，给人看的**。**空报告时是空串** |
 | `started_at` | datetime \| null | 开始时间；bot 从没 apply 过时 `null` |
 | `finished_at` | datetime \| null | 结束时间。**`null` 有两个原因，别拿它判「在跑」**：`result` 是 `RUNNING`（真的在跑），或者这是一份**空报告**（`result` 为空串）。要判在飞的活，读 `result == "RUNNING"`，不要读 `finished_at == null` |
-| `sources` | object[] | 命名源的溯源，每个源一行，见下。**「这批 bot 线上跑的到底是哪一版内容」看这里** |
+| `sources` | object[] | git 源的溯源，**每条声明一行**，见下。**「这批 bot 线上跑的到底是哪一版内容」看这里** |
 | `categories` | object[] | 每个**被声明的**类目一行，见下。文档没提的类目不出现，因为它根本没被碰 |
 | `entries` | object[] | 每个**被声明的条目**一行，跨所有类目，见下 |
 | `notes` | string[] | 不属于任何条目的 apply 级说明。今天只有一处：teclaw 上「所有类目都写完了、最后整包 artifact 重投失败」记在这里，而不是让整次 apply 失败。ARCA 上恒为空 |
@@ -1747,10 +1760,14 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `name` | string | 源名（`sources.<name>` 里的那个名字） |
+| `name` | string | 源名（`sources.<name>` 里的那个名字）；**内联 `source` 没有名字，记成 `url@ref`**（省略 `ref` 时是 `url@HEAD`） |
+| `url` | string \| null | 仓库地址，`${BOT_*}` 已替换。与 `ref` 合起来就是 `strict` 基线的键（§6.2） |
 | `ref` | string \| null | 声明的 ref：tag / branch / commit SHA |
 | `resolved_sha` | string \| null | 这一次**实际解析到**的 commit。`ref: main` 这种会动的引用，下周就是另一个值 |
 | `auth` | string \| null | 用到的凭证**名**。**永远只有名字，没有值** |
+
+**一条声明一行**：两个 `from` 名指向同一个 `(url, ref)` 就是两行（各自带着作者
+写下的那个名字），`resolved_sha` 相同；同一个仓库内联声明两个 `ref` 也是两行。
 
 `categories[]`：
 
