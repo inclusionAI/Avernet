@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
@@ -7,11 +9,16 @@ from agentclaw.community.core.task.domain.models import (
     Metadata,
     RuntimeInfo,
     Status,
+    TaskExecutionGraph,
     TaskNode,
     TaskSpec,
 )
+from agentclaw.community.core.task.task_dispatch.dispatcher import TaskDispatcher
+from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
+from agentclaw.community.core.task.task_plan.static_plan_runtime import StaticPlanRuntime
 from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import (
     OpenApiAuthError,
+    OpenApiBadRequestError,
 )
 from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
     PromptFormatterImpl,
@@ -45,10 +52,11 @@ def _node(assignee="bot9:ent1", extend_props=None):
 
 
 class _Bot:
-    def __init__(self, run_id="mid_1", session_id=None, grant_fail=False):
+    def __init__(self, run_id="mid_1", session_id=None, grant_fail=False, send_error=None):
         self._rid = run_id
         self._sid = session_id
         self._gf = grant_fail
+        self._send_error = send_error
         self.sent = []
 
     async def ensure_grant(self, bot_id):
@@ -61,6 +69,8 @@ class _Bot:
             BotSendResult,
         )
 
+        if self._send_error is not None:
+            raise self._send_error
         self.sent.append((bot_id, message, metadata))
         return BotSendResult(run_id=self._rid, session_id=self._sid)
 
@@ -111,6 +121,30 @@ def test_dispatch_single_bot_registers_handle():
     assert bot.sent[0][0] == "bot9:ent1"
     assert poller.registered[0].run_id == "mid_1"
     assert poller.registered[0].loop_task_id == "t1::c1"
+
+
+@pytest.mark.parametrize(
+    "send_error",
+    [OpenApiAuthError("403"), OpenApiBadRequestError("400")],
+    ids=["auth", "bad-request"],
+)
+def test_dispatch_single_bot_rejects_non_retryable_openapi_error(send_error):
+    """不可重试的 OpenAPI 4xx 派发失败应留给 harness，不能注册虚假执行句柄。"""
+    bot = _Bot(send_error=send_error)
+    poller = _Poller()
+    executor = TaskExecutor(
+        bot=bot,
+        bcs=None,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=poller,
+        task_settings=_TaskSettingsOff(),
+    )
+
+    assert _run(executor.dispatch([_node()])) == [False]
+    assert bot.sent == []
+    assert poller.registered == []
 
 
 
@@ -242,6 +276,11 @@ def test_prompt_formatter_skill_report_on_uses_http_post():
     assert '"success": true' not in s
     assert '"verdict": "DONE"' in s
     assert '"acceptances_metric"' in s
+    assert "阶段1 在本条消息正文给出的真实业务产出" in s
+    assert "收到 HTTP 200 即视为本节点上报完成" in s
+    assert "严禁在收尾轮再次贴出阶段1执行产出" in s
+    assert "上报只能用 exec/curl" in s
+    assert "不得对同一节点重复 POST" in s
 
 def test_prompt_formatter_relay_appends_protocol_and_chinese_constraint():
     """# 接自 接力分支(static_plan):交接正文 + 执行闭环(禁联网/平台回收/接力交接,不含 HTTP 上报协议)+ 中文输出约束。"""
@@ -280,6 +319,30 @@ def test_prompt_formatter_relay_appends_protocol_and_chinese_constraint():
     assert "按问题智能匹配能力" not in s
     # 中文输出约束
     assert "必须使用中文" in s
+
+
+def test_static_relay_prompt_waits_for_every_member_and_preserves_markdown():
+    """静态协作接力必须在全员完成后唯一汇总，并要求结构化 Markdown 产出。"""
+    relay = (
+        "# 接自:上游Bot\n"
+        "## 群组成\n- driver Bot\n- consultant Bot\n"
+        "## 上游产出正文\n上游结论\n"
+        "## 本角色任务\n联合完成评审"
+    )
+    node = _node()
+    node.task_spec.metadata.instruction = relay
+
+    prompt = PromptFormatterImpl().format_execute(
+        {"mode": "execute", "node_instruction": relay},
+        node,
+    )
+
+    assert "只有当所有成员(含 driver 作 worker)都已在本群回复各自产出后" in prompt
+    assert "若仍有成员未回复,继续等待,不得提前收尾" in prompt
+    assert "执行产出与 gap交接只在此轮给出" in prompt
+    assert "正文须保留 markdown 排版" in prompt
+    assert "标题、段落、列表、表格、加粗" in prompt
+    assert "4) 汇总与交接" not in prompt
 
 
 
@@ -332,6 +395,63 @@ class _TaskSettingsOff:
 
     def set_enabled(self, *, setting_type, enabled, env, operator=None):
         return False
+
+
+def test_static_plan_owner_reaches_final_openapi_bot_identity():
+    """static plan owner 透传必须跨 runtime、dispatcher 和 executor 到达最终 Bot ID。"""
+    definition = StaticPlanDefinition.from_yaml(
+        """
+        template_id: owner-propagation
+        nodes:
+          - id: worker
+            type: bot
+            bot_id: worker-bot
+            task: 完成执行
+        """
+    )
+    graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.RUNNING,
+        task_id="t1",
+        extend_props={"owner_user_id": "owner-1"},
+    )
+    root = TaskNode(
+        node_id="t1",
+        task_id="t1",
+        status=Status.PLANNING,
+        task_spec=TaskSpec(
+            Metadata("t1", "root", "root"),
+            Context(""),
+            Goal("root", []),
+        ),
+        run_info=RuntimeInfo(),
+        node_run_graph=graph,
+    )
+    graph.tasks.append(root)
+    runtime = StaticPlanRuntime(definition, {})
+    graph.tasks.extend(runtime.nodes("t1", root.task_spec))
+    ready = list(runtime.ready(graph).ready)
+
+    class _GraphView:
+        def query_task_dashboard(self, task_id):
+            assert task_id == "t1"
+            return graph
+
+    dispatched = _run(TaskDispatcher(_GraphView()).dispatch(ready))
+    bot = _Bot()
+    executor = TaskExecutor(
+        bot=bot,
+        bcs=None,
+        formatter=PromptFormatterImpl(),
+        context=_Ctx(),
+        sink=None,
+        poller=_Poller(),
+        task_settings=_TaskSettingsOff(),
+    )
+
+    assert _run(executor.dispatch(dispatched)) == [True]
+    assert bot.sent[0][0] == "worker-bot:owner-1"
 
 
 def test_dispatch_skill_report_on_skips_poller_registration():

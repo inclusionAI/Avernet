@@ -1,7 +1,6 @@
 """Declarative endpoint coverage for internal collaboration task routes."""
 from __future__ import annotations
 
-from datetime import datetime
 from types import SimpleNamespace
 
 from agentclaw.community.api.task.task_service import TaskServiceProtocol
@@ -14,12 +13,7 @@ from agentclaw.community.api.task.task_grant_service import (
 )
 from agentclaw.community.core.task.domain.models import (
     NodeOpResult,
-    Status,
-    TaskExecutionGraph,
     TaskOpResult,
-)
-from agentclaw.community.core.task.repository.types import (
-    TaskInfoRecord,
 )
 from agentclaw.community.core.task.task_discovery.discovery_service import DiscoveryService
 from agentclaw.community.core.task.task_discovery.scheduler import TaskDiscoveryScheduler
@@ -68,7 +62,7 @@ class _CallbackTaskService:
         self.callback = _CallbackSink()
 
 
-def _seed_task_service(world, *, expected_owner=None) -> None:
+def _seed_task_service(world) -> None:
     async def execute(_self, _task_info):
         return TaskOpResult(
             task_id="task-endpoint-1",
@@ -76,30 +70,6 @@ def _seed_task_service(world, *, expected_owner=None) -> None:
             run_id=1,
             extend_props={"group_id": "bcs_grp_endpoint_1"},
         )
-
-    def dashboard(_self, _task_id, _node_id=None):
-        return TaskExecutionGraph(run_id=1, loop_round=0, status=Status.PENDING)
-
-    def list_tasks(_self, _status=None, owner_user_id=None):
-        assert owner_user_id == expected_owner
-        return [
-            TaskInfoRecord(
-                id=1,
-                task_id="task-endpoint-1",
-                source_type="bot",
-                owner_user_id="user-endpoint-1",
-                owner_bot_id="bot-endpoint-1",
-                execution_config={"task_type": "dynamic"},
-                task_spec=_TASK_SPEC,
-                status=Status.PENDING,
-                gmt_create=datetime(2026, 8, 22, 10, 0, 0),
-                gmt_modified=datetime(2026, 8, 22, 10, 0, 0),
-            )
-        ]
-
-    def list_tasks_page(_self, status=None, owner_user_id=None, page=1, page_size=20):
-        items = list_tasks(_self, status, owner_user_id=owner_user_id)
-        return items[:page_size], len(items)
 
     def claim(_self, task_id, _bot_id):
         return NodeOpResult(task_id=task_id, node_id="root", success=True)
@@ -115,9 +85,6 @@ def _seed_task_service(world, *, expected_owner=None) -> None:
         TaskServiceProtocol,
         {
             "execute": execute,
-            "get_task_dashboard": dashboard,
-            "list_tasks": list_tasks,
-            "list_tasks_page": list_tasks_page,
             "claim_bbs_task": claim,
             "attach_bbs_node": attach,
             "report_bbs_result": result,
@@ -187,6 +154,39 @@ def execute_happy():
     expect=ExpectError(status=422),
 )
 def execute_error():
+    pass
+
+
+# Query surfaces are public-only. Keep the unauthenticated internal mirror from
+# being reintroduced accidentally; live/singlebox readers use /openapi/v1.
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/dashboard",
+    scenario="not_exposed",
+    input=CaseInput(query_params={"task_id": "task-endpoint-1"}),
+    expect=ExpectError(status=404),
+)
+def dashboard_not_exposed():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/list",
+    scenario="not_exposed",
+    expect=ExpectError(status=404),
+)
+def list_not_exposed():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/bbs/list",
+    scenario="not_exposed",
+    expect=ExpectError(status=404),
+)
+def bbs_list_not_exposed():
     pass
 
 
