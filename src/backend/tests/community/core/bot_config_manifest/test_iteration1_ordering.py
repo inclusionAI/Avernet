@@ -24,7 +24,6 @@ from agentclaw.community.core.bot_config_manifest.apply.delivery import (
 from agentclaw.community.core.bot_config_manifest.apply.order import (
     APPLY_ORDER,
     ApplyPhase,
-    steps_for,
 )
 from agentclaw.community.core.bot_config_manifest.apply.triggers import (
     ALL_TRIGGERS,
@@ -38,12 +37,13 @@ def _ports() -> MaterialiserPorts:
 
 
 def test_on_arca_the_script_is_the_only_pre_container_construct() -> None:
-    pre = steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))
+    arca = ArcaDelivery(_ports)
+    pre = arca.steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))
     assert [s.construct for s in pre] == [ManifestSection.SCRIPT]
-    on = steps_for(frozenset({ApplyPhase.ON_CONTAINER}))
+    on = arca.steps_for(frozenset({ApplyPhase.ON_CONTAINER}))
     assert ManifestSection.SCRIPT not in {s.construct for s in on}
-    # The strategy says the same thing the table does.
-    assert ArcaDelivery(_ports).steps_for(frozenset({ApplyPhase.PRE_CONTAINER})) == pre
+    # Between them the two phases walk the whole table, once each.
+    assert len(pre) + len(on) == len(APPLY_ORDER)
 
 
 def test_on_arca_the_script_runs_first() -> None:

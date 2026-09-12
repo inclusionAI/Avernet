@@ -1,7 +1,9 @@
 """The delivery seam (W8): what differs between engine families, and only that.
 
-Three configurations, three phase tables. ARCA is ``APPLY_ORDER`` verbatim.
-teclaw with the switch on puts every non-script construct before the container,
+Three configurations, three phase tables — and the tables live on the
+strategies, not on ``APPLY_ORDER``, which carries only construct and position.
+ARCA is ``_ARCA_PHASES``: ``script`` before the container, everything else
+after. teclaw with the switch on puts every non-script construct before it,
 because the artifact is the delivery; with it off, after, because that is the
 shape it ran before W8.
 """
@@ -10,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    _ARCA_PHASES,
     ArcaDelivery,
     CreationSequence,
     DeliveryStrategyFactory,
@@ -21,7 +24,6 @@ from agentclaw.community.core.bot_config_manifest.apply.order import (
     ALL_PHASES,
     APPLY_ORDER,
     ApplyPhase,
-    steps_for,
 )
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCategory,
@@ -39,16 +41,34 @@ _IS_TECLAW = lambda engine: (engine or "").lower() == "teclaw"  # noqa: E731
 # ── phase tables ──────────────────────────────────────────────────────────
 
 
-def test_arca_phases_are_the_order_tables_own() -> None:
+def test_arca_phases_are_the_strategys_own_table() -> None:
     arca = ArcaDelivery(lambda: _ports("arca"))
+    assert [(s.construct, arca.phase_of(s)) for s in APPLY_ORDER] == [
+        (ManifestSection.SCRIPT, ApplyPhase.PRE_CONTAINER),
+        (ManifestCategory.IDENTITY, ApplyPhase.ON_CONTAINER),
+        (ManifestCategory.RESOURCES, ApplyPhase.ON_CONTAINER),
+        (ManifestCategory.SKILLS, ApplyPhase.ON_CONTAINER),
+        (ManifestCategory.MCP, ApplyPhase.ON_CONTAINER),
+        (ManifestCategory.ENGINE_CONFIG, ApplyPhase.ON_CONTAINER),
+        (ManifestCategory.CLI_TOOLS, ApplyPhase.ON_CONTAINER),
+    ]
     for step in APPLY_ORDER:
-        assert arca.phase_of(step) is step.phase
-    assert arca.steps_for(None) == steps_for(None)
-    assert arca.steps_for(frozenset({ApplyPhase.PRE_CONTAINER})) == steps_for(
-        frozenset({ApplyPhase.PRE_CONTAINER})
+        assert arca.phase_of(step) is _ARCA_PHASES[step.construct]
+    assert arca.steps_for(None) == tuple(
+        sorted(APPLY_ORDER, key=lambda s: s.position)
     )
+    assert [s.construct for s in arca.steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))] == [
+        ManifestSection.SCRIPT
+    ]
     assert arca.creation_sequence is CreationSequence.CREATE_BETWEEN_PHASES
     assert arca.needs_container()
+
+
+def test_the_arca_phase_table_names_every_construct_in_the_order() -> None:
+    """The import-time assertion in ``delivery.py``, named here too: adding a
+    construct to ``APPLY_ORDER`` without giving ARCA a phase for it is a
+    ``KeyError`` at the first apply that walks it."""
+    assert set(_ARCA_PHASES) == {step.construct for step in APPLY_ORDER}
 
 
 def test_teclaw_on_puts_every_non_script_construct_before_the_container() -> None:
@@ -101,8 +121,8 @@ def test_teclaw_off_is_the_pre_w8_shape() -> None:
 
 
 def test_cli_tools_is_on_container_on_arca() -> None:
-    """The order table's phase is the ARCA reading, and W9 did not change it:
-    an ARCA tool is a write into a live container."""
+    """W9 did not change the ARCA reading: an ARCA tool is a write into a live
+    container."""
     arca = ArcaDelivery(lambda: _ports("arca"))
     step = next(s for s in APPLY_ORDER if s.construct is ManifestCategory.CLI_TOOLS)
     assert arca.phase_of(step) is ApplyPhase.ON_CONTAINER
@@ -189,11 +209,34 @@ def test_a_teclaw_strategy_with_no_cli_service_bound_leaves_the_bundle_alone() -
     assert teclaw.ports() == _ports("device")
 
 
-def test_the_order_table_itself_is_untouched_by_w9() -> None:
-    """``order.py`` carries the ARCA reading; the per-family rule lives in the
-    strategy. A change here would silently re-phase ARCA too."""
+def test_the_arca_table_itself_is_untouched_by_w9() -> None:
+    """The per-family rule lives in ``TeclawDelivery``; ARCA's own table still
+    says ``ON_CONTAINER``, and the position is the shared one. A change here
+    would silently re-phase ARCA too."""
     step = next(s for s in APPLY_ORDER if s.construct is ManifestCategory.CLI_TOOLS)
-    assert (step.phase, step.position) == (ApplyPhase.ON_CONTAINER, 6)
+    assert (_ARCA_PHASES[step.construct], step.position) == (
+        ApplyPhase.ON_CONTAINER,
+        6,
+    )
+
+
+@pytest.mark.parametrize("switch", [True, False])
+def test_script_is_pre_container_on_teclaw_under_either_switch(switch) -> None:
+    """``script`` is unsupported on teclaw, but the phase is still answered —
+    and answered without consulting any shared table, since ``ApplyStep``
+    carries none. A step that fell out of both phases would be skipped
+    silently instead of walking the orchestrator's no-support path and being
+    reported."""
+    teclaw = TeclawDelivery(
+        platform_managed=switch,
+        platform_ports=lambda: _ports("store"),
+        device_ports=lambda: _ports("device"),
+    )
+    step = next(s for s in APPLY_ORDER if s.construct is ManifestSection.SCRIPT)
+    assert teclaw.phase_of(step) is ApplyPhase.PRE_CONTAINER
+    assert ManifestSection.SCRIPT in {
+        s.construct for s in teclaw.steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))
+    }
 
 
 def test_both_phases_walk_every_construct_on_every_strategy() -> None:
