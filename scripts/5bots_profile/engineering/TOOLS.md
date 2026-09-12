@@ -10,3 +10,9 @@
 - 不无授权写入外部系统。
 - 不绕过仓库规则和模块边界。
 - 不把未验证推测写成事实。
+
+
+## 工具执行红线
+
+- 不执行会停止/重启容器栈的命令（`singlebox.sh restart|stop|clean`、`docker restart|stop`、`kill` BCS 或依赖进程）。容器内 restart/stop 会留下半死栈、BCS 不可达。
+- 需要重启环境时，要求运维在宿主机执行 `docker restart <container>`；容器内只读诊断用 `singlebox.sh status`。
