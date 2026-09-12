@@ -1,6 +1,8 @@
 import type { EvolveRunDiagnosis } from '@avernet/clawweb-shared/web/api/client'
+import type { IssueGroupView } from './issue-groups'
 
 export type DiagnosisCluster = {
+  aggregation?: IssueGroupView
   key: string
   workflowId: string
   signature: string

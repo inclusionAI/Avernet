@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   useEvolveLessons,
-  useEvolveDiagnoses,
   useEvolveSuggestions,
   useRecordSuggestionAction,
   useEligibleBotsForSuggestion,
@@ -14,6 +13,8 @@ import {
 import type { EvolveSuggestion, SuggestionApplyTask } from '@avernet/clawweb-shared/web/api/client'
 import RunEvolutionAnalysis from '../evolution/RunEvolutionAnalysis'
 import { aggregateDiagnoses, diffWorkflowPatchOperations, timeValue, type DiagnosisCluster } from './evolution-utils'
+import { groupDiagnoses, useIssueGroups } from './issue-groups'
+import IssueSummary from './IssueSummary'
 
 export type EvoTab = 'diagnosis' | 'remedies'
 
@@ -146,24 +147,25 @@ function IssueDetailDrawer({ cluster, suggestion, task, previousTask, selectedFl
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600">{cluster.mode}</span>
             {status ? <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${status.cls}`}>{status.label}</span> : <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">观察中</span>}
           </div>
-          <p className="mt-1 text-xs text-slate-400">{cluster.diagnoses.length} 次出现 · 影响 {cluster.runIds.length} 个运行</p>
+          <p className="mt-1 text-xs text-slate-400">影响 {cluster.runIds.length} 个运行</p>
         </div>
         <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="关闭">×</button>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-        <section>
-          <p className="text-xs font-semibold text-slate-900">聚合结论</p>
+        {cluster.aggregation ? <IssueSummary group={cluster.aggregation} /> : <section>
+          <p className="text-xs font-semibold text-slate-900">最新诊断结论</p>
           <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{summary}</p>
           <p className="mt-2 truncate font-mono text-[10px] text-slate-400" title={cluster.signature}>{cluster.signature}</p>
-        </section>
+        </section>}
 
         <section className="mt-6 border-t border-slate-100 pt-5">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-xs font-semibold text-slate-900">当前建议</p>
+            <p className="text-xs font-semibold text-slate-900">已有建议</p>
             {suggestion && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600">{REMEDY_KIND[suggestion.kind] ?? suggestion.kind}</span>}
           </div>
           {suggestion ? <>
+            <p className="mt-2 text-xs text-amber-700">建议与聚合结论独立；应用或验证此建议不代表所有原因均已解决。</p>
             <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{suggestion.description}</p>
             {suggestion.verificationStatus === 'recurrence_detected' && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs leading-5 text-red-600">应用后再次出现 {suggestion.recurrenceCount ?? 1} 次，需要重新判断。</p>}
             {proposalDiff && (proposalDiff.added.length + proposalDiff.changed.length + proposalDiff.removed.length > 0) && <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50/60 px-3 py-2 text-xs leading-5 text-slate-600">
@@ -206,11 +208,11 @@ function IssueDetailDrawer({ cluster, suggestion, task, previousTask, selectedFl
           {cluster.instances.length > 10 && <p className="mt-2 text-[10px] text-slate-400">仅展示最近 10 条分析记录</p>}
         </section>
 
-        {selectedInstance?.analysisId !== 'legacy' && <section className="mt-6 border-t border-slate-100 pt-5">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
+        {selectedInstance?.analysisId !== 'legacy' && <details open className="mt-6 border-t border-slate-100 pt-5">
+          <summary className="flex cursor-pointer flex-wrap items-baseline justify-between gap-2">
             <p className="text-xs font-semibold text-slate-900">所选分析详情</p>
             <p className="font-mono text-[10px] text-slate-400">{selectedInstance.analysisId}</p>
-          </div>
+          </summary>
           {instanceAnalysis.isLoading && <p className="mt-2 text-xs text-slate-500">加载所选分析...</p>}
           {instanceAnalysis.isError && <p className="mt-2 text-xs text-red-600">分析结果加载失败</p>}
           {!instanceAnalysis.isLoading && !instanceAnalysis.isError && !instanceAnalysis.data?.analysis && (
@@ -224,7 +226,7 @@ function IssueDetailDrawer({ cluster, suggestion, task, previousTask, selectedFl
             focusDiagnosisId={selectedInstance.diagnosisId}
             focusFailureSignature={cluster.signature}
           /></div>}
-        </section>}
+        </details>}
       </div>
 
       {suggestion && <footer className="flex min-h-16 items-center justify-end gap-2 border-t border-slate-200 bg-white px-5 py-3">
@@ -261,8 +263,8 @@ function DiagnosisPanel({
   onApply: (ids: string[]) => void
   canEdit: boolean
 }) {
-  const { data, isLoading } = useEvolveDiagnoses({ workflowId, limit: 100 })
-  const diagnoses = data?.diagnoses ?? []
+  const { data, isLoading, isError, refetch } = useIssueGroups(workflowId)
+  const diagnoses = (data?.groups ?? []).flatMap(groupDiagnoses)
   const [nodeFilter, setNodeFilter] = useState<string>('all')
   const [modeFilter, setModeFilter] = useState<string>('all')
   const [stateFilter, setStateFilter] = useState<IssueState | 'all'>('all')
@@ -270,19 +272,24 @@ function DiagnosisPanel({
   const [selectedSuggestionIds, setSelectedSuggestionIds] = useState<string[]>([])
 
   if (isLoading || suggestionsLoading) return <div className="p-4 text-xs text-slate-500">加载问题与建议...</div>
+  if (isError) return <div role="alert" className="p-4 text-xs text-red-600">问题分组加载失败，不能显示为没有问题。<button type="button" onClick={() => void refetch()} className="ml-2 underline">重试</button></div>
 
   const clusters = aggregateDiagnoses(diagnoses)
+  for (const cluster of clusters) cluster.aggregation = data?.groups.find(group => group.signature === cluster.signature)
   const nodes = Array.from(new Set(clusters.map((cluster) => cluster.node))).sort()
   const modes = Array.from(new Set(clusters.map((cluster) => cluster.mode).filter(Boolean)))
   const suggestionBySignature = new Map(suggestions.map((suggestion) => {
     const status = resolveSuggestionStatus(suggestion, localStatus, applyTaskMap[suggestion.id])
     return [suggestion.signature, { ...suggestion, status }] as const
   }))
+  const clusterSignatures = new Set(clusters.map(cluster => cluster.signature))
+  const standaloneSuggestions = suggestions
+    .filter(suggestion => !clusterSignatures.has(suggestion.signature))
+    .map(suggestion => ({ ...suggestion, status: resolveSuggestionStatus(suggestion, localStatus, applyTaskMap[suggestion.id]) }))
   const enriched = clusters.map((cluster) => {
     const suggestion = suggestionBySignature.get(cluster.signature)
     const runIds = Array.from(new Set([
       ...cluster.runIds,
-      ...(suggestion?.evidenceRuns ?? []),
     ]))
     const instances = [
       ...cluster.instances,
@@ -293,7 +300,7 @@ function DiagnosisPanel({
         occurredAtMs: timeValue(cluster.latest.gmt_create),
         diagnosis: cluster.latest,
       })),
-    ]
+    ].filter((instance, index, all) => all.findIndex(item => item.flowId === instance.flowId) === index)
     return {
       cluster: { ...cluster, runIds, instances },
       suggestion,
@@ -331,7 +338,7 @@ function DiagnosisPanel({
         <p className="mt-1 text-xs leading-5 text-slate-500">同类异常按失败特征聚合；建议只在具备可执行方案时出现，应用完成后仍需验证实际效果。</p>
       </div>
 
-      {diagnoses.length === 0 && (
+      {diagnoses.length === 0 && standaloneSuggestions.length === 0 && (
         <div className="rounded-xl border border-slate-200 bg-white p-5 text-xs text-slate-500">
           当前工作流暂无已记录异常。任务护航会分析失败运行，也会保留成功运行中的异常和退化信号。
         </div>
@@ -401,7 +408,7 @@ function DiagnosisPanel({
         <div className="divide-y divide-slate-100">
           {filtered.map(({ cluster, suggestion }) => {
           const status = suggestion ? SUGGESTION_STATUS[suggestion.status] ?? SUGGESTION_STATUS.pending : null
-          const summary = cluster.latest.error_text ?? cluster.latest.reasoning ?? cluster.mode
+          const summary = cluster.aggregation?.summary?.summary ?? '聚合结论尚未生成，查看单次运行分析。'
           const task = suggestion ? applyTaskMap[suggestion.id] : undefined
           const selectable = canEdit && suggestion != null && ['pending', 'adopted', 'failed'].includes(suggestion.status)
           return <article key={cluster.signature} data-layout="compact-issue-row" className="px-4 py-3 transition-colors hover:bg-slate-50/70">
@@ -428,7 +435,6 @@ function DiagnosisPanel({
                 {suggestion?.verificationStatus === 'recurrence_detected' && <p className="mt-1.5 text-[11px] text-red-600">应用后再次出现 {suggestion.recurrenceCount ?? 1} 次，需要重新判断。</p>}
                 <ApplyTaskStatusBadge task={task} />
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 text-[10px] text-slate-400">
-                  <span>{cluster.diagnoses.length} 次出现</span>
                   <span>影响 {cluster.runIds.length} 个运行</span>
                   <span>{new Date(timeValue(cluster.latest.gmt_create)).toLocaleString()}</span>
                 </div>
@@ -443,6 +449,32 @@ function DiagnosisPanel({
               </button>
             </div>
           </article>
+          })}
+        </div>
+      </section>}
+
+      {standaloneSuggestions.length > 0 && <section aria-label="已有建议跟进" className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <h3 className="text-sm font-semibold text-slate-900">已有建议跟进</h3>
+          <p className="mt-1 text-xs leading-5 text-slate-500">最新分析已无对应诊断；已有建议和任务仍需独立跟进，不代表修复已验证有效。</p>
+        </div>
+        <div className="divide-y divide-slate-100">
+          {standaloneSuggestions.map(suggestion => {
+            const status = SUGGESTION_STATUS[suggestion.status] ?? SUGGESTION_STATUS.pending
+            return <article key={suggestion.id} className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold text-slate-900">{suggestion.weakNode || '工作流建议'}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${status.cls}`}>{status.label}</span>
+                </div>
+                <p className="mt-1.5 break-words text-xs leading-5 text-slate-600">{suggestion.description}</p>
+                <p className="mt-1 break-all text-[10px] text-slate-400">{suggestion.signature}</p>
+                <ApplyTaskStatusBadge task={applyTaskMap[suggestion.id]} />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <SuggestionActions suggestion={suggestion} canEdit={canEdit} onAction={onAction} onApply={onApply} />
+              </div>
+            </article>
           })}
         </div>
       </section>}
