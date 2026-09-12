@@ -25,7 +25,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchFailedError,
     FetchRefusedError,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+from agentclaw.community.core.bot_config_manifest.fetch.endpoint_guard import (
     AuthorizationPolicy,
     CredentialInjector,
     FetchRequest,

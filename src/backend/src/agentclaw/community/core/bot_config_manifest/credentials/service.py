@@ -46,7 +46,7 @@ from agentclaw.community.core.bot_config_manifest.credentials.policy import (
 from agentclaw.community.core.bot_config_manifest.credentials.service_protocol import (
     SourceCredentialServiceProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+from agentclaw.community.core.bot_config_manifest.fetch.endpoint_guard import (
     endpoint_refusal,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.limits import Resolver
