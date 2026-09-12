@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import time
 from collections.abc import Callable
+from enum import StrEnum
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.skills_pool import (
@@ -67,8 +69,63 @@ _NORMAL_PENDING_CODES = frozenset(
     }
 )
 _POOL_TRANSITION_CODE = "SKILLS_POOL_TRANSITION_OWNS_MAPPING"
+_DEVICE_OFFLINE_CODE = "DESKTOP_DEVICE_OFFLINE"
+_TRANSIENT_FAILURE_CODES = frozenset(
+    {
+        "CENTER_CONTENT_DESCRIPTOR_WRITE_FAILED",
+        "CENTER_CONTENT_DNS_UNAVAILABLE",
+        "CENTER_CONTENT_DOWNLOAD_FAILED",
+        "CENTER_CONTENT_DOWNLOAD_START_FAILED",
+        "CENTER_CONTENT_LOOKUP_FAILED",
+        "CENTER_CONTENT_PACKAGE_WRITE_FAILED",
+        "CENTER_CONTENT_SIGNING_FAILED",
+        "CENTER_RUNTIME_RESTART_REQUIRED",
+        "MANAGED_SOURCE_MISSING",
+        "MAPPING_PUBLISH_IO_ERROR",
+        "SKILL_MAPPING_RUNTIME_UNAVAILABLE",
+        "SKILL_RUNTIME_UNAVAILABLE",
+    }
+)
 _KEY_DIGEST_CHARS = 32
 logger = get_logger()
+
+
+class DesktopRecoveryDisposition(StrEnum):
+    """Whether a Bot is eligible for Desktop Skill recovery work."""
+
+    RUN = "RUN"
+    WAIT_FOR_DEVICE = "WAIT_FOR_DEVICE"
+    STOP = "STOP"
+
+
+class RecoveryContinuation(StrEnum):
+    """What the current durable recovery task should do next."""
+
+    COMPLETE_WAITING_FOR_EVENT = "COMPLETE_WAITING_FOR_EVENT"
+    RETRY_WITH_BACKOFF = "RETRY_WITH_BACKOFF"
+    RESCHEDULE_FOR_PROGRESS = "RESCHEDULE_FOR_PROGRESS"
+    COMPLETE_PERMANENT = "COMPLETE_PERMANENT"
+
+
+_RUN_STATUSES = frozenset({"ACTIVE", "PENDING"})
+_WAIT_STATUSES = frozenset({"OFFLINE"})
+_STOP_STATUSES = frozenset({"FAILED", "RELEASING", "RELEASED"})
+
+
+def _desktop_recovery_disposition(status: object) -> DesktopRecoveryDisposition:
+    """Classify persisted Bot status without guessing unknown values."""
+
+    normalized = str(status or "").upper()
+    if normalized in _RUN_STATUSES:
+        return DesktopRecoveryDisposition.RUN
+    if normalized in _WAIT_STATUSES:
+        return DesktopRecoveryDisposition.WAIT_FOR_DEVICE
+    return DesktopRecoveryDisposition.STOP
+
+
+def _is_unknown_recovery_status(status: object) -> bool:
+    normalized = str(status or "").upper()
+    return normalized not in _RUN_STATUSES | _WAIT_STATUSES | _STOP_STATUSES
 
 
 def _required_text(value: object, field: str) -> str:
@@ -104,6 +161,17 @@ class DesktopSkillRecoveryService(DesktopSkillRecoveryServiceProtocol):
         bot_id = _required_text(bot_id, "bot_id")
         bot = self._bots.get_by_id_and_owner(bot_id, owner_id)
         if bot is None or bot.get("bot_type") != "desktop":
+            return None
+        disposition = _desktop_recovery_disposition(bot.get("status"))
+        if disposition is not DesktopRecoveryDisposition.RUN:
+            if _is_unknown_recovery_status(bot.get("status")):
+                logger.warning(
+                    "[DesktopSkillRecovery] skip unknown Bot status "
+                    "owner_id=%s bot_id=%s status=%r",
+                    owner_id,
+                    bot_id,
+                    bot.get("status"),
+                )
             return None
         return self._tasks.enqueue(
             DESKTOP_SKILL_RECOVERY_TASK,
@@ -159,6 +227,8 @@ class DesktopSkillRecoveryTaskHandler:
         bot = self._current_desktop(owner_id=owner_id, bot_id=bot_id)
         if bot is None:
             return Complete()
+        if self._stop_for_status(bot, phase="start"):
+            return Complete()
         if bot.get("binding_id") is None:
             return Retry("Desktop Bot has no current binding")
         if self._pool_transition_owns_mappings(bot):
@@ -210,6 +280,8 @@ class DesktopSkillRecoveryTaskHandler:
         # mutable targeting facts before the only Runtime write.
         latest_bot = self._current_desktop(owner_id=owner_id, bot_id=bot_id)
         if latest_bot is None:
+            return Complete()
+        if self._stop_for_status(latest_bot, phase="before_apply"):
             return Complete()
         if latest_bot.get("binding_id") is None:
             return Retry("Desktop Bot has no current binding after prepare")
@@ -339,6 +411,30 @@ class DesktopSkillRecoveryTaskHandler:
         )
 
     @staticmethod
+    def _stop_for_status(bot: dict, *, phase: str) -> bool:
+        disposition = _desktop_recovery_disposition(bot.get("status"))
+        if disposition is DesktopRecoveryDisposition.RUN:
+            return False
+        if disposition is DesktopRecoveryDisposition.WAIT_FOR_DEVICE:
+            logger.info(
+                "[DesktopSkillRecovery] waiting for Desktop reconnect "
+                "owner_id=%s bot_id=%s phase=%s",
+                bot.get("owner_id"),
+                bot.get("bot_id"),
+                phase,
+            )
+        elif _is_unknown_recovery_status(bot.get("status")):
+            logger.warning(
+                "[DesktopSkillRecovery] stop unknown Bot status "
+                "owner_id=%s bot_id=%s status=%r phase=%s",
+                bot.get("owner_id"),
+                bot.get("bot_id"),
+                bot.get("status"),
+                phase,
+            )
+        return True
+
+    @staticmethod
     def _outcome(
         projection: RuntimeProjectionResult,
         *,
@@ -346,21 +442,54 @@ class DesktopSkillRecoveryTaskHandler:
         prepare_retryable_error: bool,
     ) -> TaskOutcome:
         retryable = tuple(issue for issue in projection.issues if issue.retryable)
-        if any(issue.code == _POOL_TRANSITION_CODE for issue in retryable):
+        if any(issue.code == _DEVICE_OFFLINE_CODE for issue in retryable):
+            continuation = RecoveryContinuation.COMPLETE_WAITING_FOR_EVENT
+        elif any(issue.code == _POOL_TRANSITION_CODE for issue in retryable):
+            continuation = RecoveryContinuation.RESCHEDULE_FOR_PROGRESS
+        else:
+            transient = tuple(
+                issue
+                for issue in retryable
+                if issue.code in _TRANSIENT_FAILURE_CODES
+            )
+            if prepare_retryable_error or transient:
+                continuation = RecoveryContinuation.RETRY_WITH_BACKOFF
+            elif prepare_pending or any(
+                is_normal_center_content_wait(issue.code) for issue in retryable
+            ):
+                continuation = RecoveryContinuation.RESCHEDULE_FOR_PROGRESS
+            else:
+                continuation = RecoveryContinuation.COMPLETE_PERMANENT
+                unknown_retryable = sorted(
+                    {
+                        issue.code
+                        for issue in retryable
+                        if not is_normal_center_content_wait(issue.code)
+                    }
+                )
+                if unknown_retryable:
+                    logger.warning(
+                        "[DesktopSkillRecovery] unsupported retryable issues "
+                        "will not authorize task retry codes=%s",
+                        unknown_retryable,
+                    )
+
+        if continuation is RecoveryContinuation.COMPLETE_WAITING_FOR_EVENT:
+            return Complete()
+        if continuation is RecoveryContinuation.RESCHEDULE_FOR_PROGRESS:
             return Reschedule(DESKTOP_SKILL_RECOVERY_DELAY_SECONDS)
-        abnormal = tuple(
-            issue for issue in retryable if not is_normal_center_content_wait(issue.code)
-        )
-        if prepare_retryable_error or abnormal:
-            codes = sorted({issue.code for issue in abnormal})
+        if continuation is RecoveryContinuation.RETRY_WITH_BACKOFF:
+            abnormal_codes = sorted(
+                {
+                    issue.code
+                    for issue in retryable
+                    if issue.code in _TRANSIENT_FAILURE_CODES
+                }
+            )
             return Retry(
                 "Desktop Skill recovery transient failure"
-                + (f": {','.join(codes)}" if codes else "")
+                + (f": {','.join(abnormal_codes)}" if abnormal_codes else "")
             )
-        if prepare_pending or any(
-            is_normal_center_content_wait(issue.code) for issue in retryable
-        ):
-            return Reschedule(DESKTOP_SKILL_RECOVERY_DELAY_SECONDS)
         if (
             projection.status is RuntimeProjectionStatus.PENDING
             and not projection.issues
@@ -421,8 +550,16 @@ class DesktopSkillRecoverySweeper(LifecycleBase):
 
     def sweep_once(self) -> tuple[int, int]:
         """Return ``(eligible, ensured)`` for deterministic tests/monitoring."""
+        started_at = time.monotonic()
+        scanned = 0
         eligible = 0
         ensured = 0
+        skipped_offline = 0
+        skipped_terminal = 0
+        skipped_unknown_status = 0
+        task_created = 0
+        task_joined_existing = 0
+        ensure_failed = 0
         page = 1
         while True:
             total, bots = self._bots.search_bots(
@@ -431,6 +568,7 @@ class DesktopSkillRecoverySweeper(LifecycleBase):
                 page_size=self._config.sweep_page_size,
             )
             for bot in bots:
+                scanned += 1
                 owner_id = bot.get("owner_id")
                 bot_id = bot.get("bot_id")
                 if (
@@ -439,14 +577,37 @@ class DesktopSkillRecoverySweeper(LifecycleBase):
                     or not isinstance(bot_id, str)
                 ):
                     continue
+                disposition = _desktop_recovery_disposition(bot.get("status"))
+                if disposition is DesktopRecoveryDisposition.WAIT_FOR_DEVICE:
+                    skipped_offline += 1
+                    continue
+                if disposition is DesktopRecoveryDisposition.STOP:
+                    if _is_unknown_recovery_status(bot.get("status")):
+                        skipped_unknown_status += 1
+                        logger.warning(
+                            "[DesktopSkillRecovery] sweep skipped unknown Bot "
+                            "status owner_id=%s bot_id=%s status=%r",
+                            owner_id,
+                            bot_id,
+                            bot.get("status"),
+                        )
+                    else:
+                        skipped_terminal += 1
+                    continue
                 eligible += 1
                 try:
-                    if self._recovery.ensure(
+                    result = self._recovery.ensure(
                         owner_id=owner_id,
                         bot_id=bot_id,
-                    ) is not None:
+                    )
+                    if result is not None:
                         ensured += 1
+                        if bool(getattr(result, "created", False)):
+                            task_created += 1
+                        else:
+                            task_joined_existing += 1
                 except Exception:
+                    ensure_failed += 1
                     logger.exception(
                         "[DesktopSkillRecovery] sweep ensure failed "
                         "owner_id=%s bot_id=%s",
@@ -456,6 +617,21 @@ class DesktopSkillRecoverySweeper(LifecycleBase):
             if not bots or page * self._config.sweep_page_size >= total:
                 break
             page += 1
+        logger.info(
+            "[DesktopSkillRecovery] sweep completed scanned=%s eligible=%s "
+            "skipped_offline=%s skipped_terminal=%s "
+            "skipped_unknown_status=%s task_created=%s "
+            "task_joined_existing=%s ensure_failed=%s duration_ms=%s",
+            scanned,
+            eligible,
+            skipped_offline,
+            skipped_terminal,
+            skipped_unknown_status,
+            task_created,
+            task_joined_existing,
+            ensure_failed,
+            round((time.monotonic() - started_at) * 1000, 3),
+        )
         return eligible, ensured
 
 

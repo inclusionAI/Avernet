@@ -165,6 +165,36 @@ class TestHandleDeviceActivated:
 
         recovery.assert_called_once_with("owner-1", "desktop-1")
 
+    def test_restart_wakes_durable_recovery_before_connection_resolution(self):
+        from agentclaw.community.core.devices.services.device_context import (
+            DeviceOfflineError,
+        )
+
+        event = RuntimeProjectionRequestedEvent(
+            device_id="staff_u001_default",
+            binding_id=42,
+            entity_id="u001",
+            entity_type="staff",
+            device_provider="baas",
+        )
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "bot_id": "desktop-1",
+            "owner_id": "owner-1",
+            "bot_type": "desktop",
+        }
+        recovery = MagicMock()
+        listener, _, _, resolver = _make_listener(
+            bot_query=bot_query,
+            desktop_skill_recovery_wakeup=recovery,
+            runtime_reconcile=MagicMock(),
+        )
+        resolver.resolve_for_bot.side_effect = DeviceOfflineError("offline")
+
+        listener.handle(event)
+
+        recovery.assert_called_once_with("owner-1", "desktop-1")
+
     def test_restart_projection_trigger_is_layout_agnostic(self):
         bot_query = MagicMock()
         bot_query.get_by_binding_id.return_value = {
