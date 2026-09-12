@@ -1507,14 +1507,7 @@ async fn resolve_token_secret_secret(
     secret_access: &dyn SecretAccessPort,
     field: &str,
 ) -> crate::Result<Option<String>> {
-    let Some(name) = secret_key.map(str::trim).filter(|v| !v.is_empty()) else { return Ok(None); };
-    let record = secret_access.get_secret(name).await.map_err(|e| {
-        crate::BcsError::InvalidConfig(format!("{field} '{name}' unavailable: {e}"))
-    })?;
-    if record.value.trim().is_empty() {
-        return Err(crate::BcsError::InvalidConfig(format!("{field} '{name}' is empty")));
-    }
-    Ok(Some(record.value))
+    resolve_secret_value(secret_key, secret_access, field).await
 }
 
 fn resolve_invite_token_secret(config: &BcsConfig) -> Vec<u8> {
@@ -4121,25 +4114,20 @@ impl BcsServer {
             config.session_files.share.token_secret = resolve_token_secret_secret(config.session_files.share.token_secret_secret.as_deref(), group_session_secret_access.as_ref(), "session_files.share.token_secret_secret").await?;
         }
         for account in &mut config.dingtalk_accounts {
-            if let Some(name) = account.client_secret_secret.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
-                let record = group_session_secret_access.get_secret(name).await.map_err(|e| crate::BcsError::InvalidConfig(format!("dingtalk account '{}' secret unavailable: {e}", account.account_id)))?;
-                if record.value.trim().is_empty() { return Err(crate::BcsError::InvalidConfig(format!("dingtalk account '{}' secret is empty", account.account_id))); }
-                account.client_secret = Some(Secret::new(record.value));
+            if let Some(value) = resolve_secret_value(account.client_secret_secret.as_deref(), group_session_secret_access.as_ref(), "dingtalk_accounts.client_secret_secret").await? {
+                account.client_secret = Some(Secret::new(value));
             }
         }
         if let Some(logger) = config.group_logger.as_mut() {
-            if let Some(name) = logger.client_secret_secret.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
-                let record = group_session_secret_access.get_secret(name).await.map_err(|e| crate::BcsError::InvalidConfig(format!("group_logger.client_secret_secret '{name}' unavailable: {e}")))?;
-                if record.value.trim().is_empty() { return Err(crate::BcsError::InvalidConfig(format!("group_logger.client_secret_secret '{name}' is empty"))); }
-                logger.client_secret = record.value;
+            if let Some(value) = resolve_secret_value(logger.client_secret_secret.as_deref(), group_session_secret_access.as_ref(), "group_logger.client_secret_secret").await? {
+                logger.client_secret = value;
             }
         }
         if let Some(oauth) = config.auth.oauth.as_mut() {
             for (provider_name, provider) in &mut oauth.providers {
-                if let Some(name) = provider.client_secret_secret.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
-                    let record = group_session_secret_access.get_secret(name).await.map_err(|e| crate::BcsError::InvalidConfig(format!("auth.oauth.providers.{provider_name}.client_secret_secret unavailable: {e}")))?;
-                    if record.value.trim().is_empty() { return Err(crate::BcsError::InvalidConfig(format!("auth.oauth.providers.{provider_name}.client_secret_secret is empty"))); }
-                    provider.client_secret = Some(Secret::new(record.value));
+                let field = format!("auth.oauth.providers.{provider_name}.client_secret_secret");
+                if let Some(value) = resolve_secret_value(provider.client_secret_secret.as_deref(), group_session_secret_access.as_ref(), &field).await? {
+                    provider.client_secret = Some(Secret::new(value));
                 }
             }
         }
