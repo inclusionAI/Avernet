@@ -1784,6 +1784,9 @@ mod gateway_principal_tests {
         config.dingtalk_accounts = vec![account];
         let mut logger = ding_logger::GroupLoggerConfig { enabled: true, client_id: "id".into(), client_secret: String::new(), client_secret_secret: Some("logger".into()), group_ids: vec!["g".into()] };
         config.group_logger = Some(logger.clone());
+        let mut human_options = BTreeMap::new();
+        human_options.insert("client_secret_secret".into(), serde_json::Value::String("human".into()));
+        config.human_notify.providers.insert("dingtalk".into(), bcs_config_api::HumanNotifyProviderConfig { enabled: true, options: human_options });
         let mut providers = BTreeMap::new();
         providers.insert("google".into(), ProviderSettings { kind: None, client_id: "id".into(), client_secret: None, client_secret_secret: Some("oauth".into()), private_key: None, alipay_public_key: None });
         config.auth.oauth = Some(OAuthSettings { providers, ..OAuthSettings::default() });
@@ -1791,7 +1794,7 @@ mod gateway_principal_tests {
             ("auth", String::new(), "auth-value".into()), ("llm", String::new(), "llm-value".into()),
             ("invite", String::new(), "invite-value".into()), ("share", String::new(), "share-value".into()),
             ("ding", String::new(), "ding-value".into()), ("logger", String::new(), "logger-value".into()),
-            ("oauth", String::new(), "oauth-value".into()),
+            ("oauth", String::new(), "oauth-value".into()), ("human", String::new(), "human-value".into()),
         ]);
         resolve_config_secrets(&mut config, &access).await.unwrap();
         assert_eq!(config.auth_sdk.secret_key.as_deref(), Some("auth-value"));
@@ -1800,6 +1803,8 @@ mod gateway_principal_tests {
         assert_eq!(config.session_files.share.token_secret.as_deref(), Some("share-value"));
         assert_eq!(config.dingtalk_accounts[0].client_secret.as_ref().map(|v| v.expose_secret().as_str()), Some("ding-value"));
         assert_eq!(config.group_logger.as_ref().unwrap().client_secret, "logger-value");
+        assert_eq!(config.human_notify.providers["dingtalk"].options["client_secret"], serde_json::Value::String("human-value".into()));
+        assert!(!config.human_notify.providers["dingtalk"].options.contains_key("client_secret_secret"));
         assert_eq!(config.auth.oauth.as_ref().unwrap().providers["google"].client_secret.as_ref().map(|v| v.expose_secret().as_str()), Some("oauth-value"));
     }
 
@@ -1826,6 +1831,30 @@ mod gateway_principal_tests {
         let access = InMemorySecretAccess::with_entries([("auth", String::new(), "auth-value".to_string())]);
         assert_eq!(resolve_secret_value(Some(" auth "), &access, "auth_sdk.secret_key_secret").await.unwrap().as_deref(), Some("auth-value"));
         assert!(resolve_secret_value(Some("missing"), &InMemorySecretAccess::new(), "llm.api_key_secret").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn config_secret_resolution_preserves_legacy_values_without_references() {
+        use std::collections::BTreeMap;
+        let mut config = BcsConfig::default();
+        config.auth_sdk.secret_key = Some("legacy-auth".into());
+        config.llm.api_key = Some(Secret::new("legacy-llm".into()));
+        config.invite.token_secret = Some("legacy-invite".into());
+        config.session_files.share.token_secret = Some("legacy-share".into());
+        let mut options = BTreeMap::new();
+        options.insert("client_secret".into(), serde_json::Value::String("legacy-human".into()));
+        config.human_notify.providers.insert(
+            "dingtalk".into(),
+            bcs_config_api::HumanNotifyProviderConfig { enabled: true, options },
+        );
+
+        resolve_config_secrets(&mut config, &InMemorySecretAccess::new()).await.unwrap();
+
+        assert_eq!(config.auth_sdk.secret_key.as_deref(), Some("legacy-auth"));
+        assert_eq!(config.llm.api_key.as_ref().map(|v| v.expose_secret().as_str()), Some("legacy-llm"));
+        assert_eq!(config.invite.token_secret.as_deref(), Some("legacy-invite"));
+        assert_eq!(config.session_files.share.token_secret.as_deref(), Some("legacy-share"));
+        assert_eq!(config.human_notify.providers["dingtalk"].options["client_secret"], serde_json::Value::String("legacy-human".into()));
     }
 
     #[test]
@@ -4133,7 +4162,6 @@ impl BcsServer {
         use bcs_service_api::BotRegistryCoreService;
 
         let group_session_secret_access = crate::http_adapter::build_secret_access(&config).await?;
-        resolve_config_secrets(&mut config, group_session_secret_access.as_ref()).await?;
         let invite_token_secret = resolve_invite_token_secret(&config);
         let gateway_principal_verifier = build_gateway_principal_verifier_from_secret_access(
             &config.gateway_principal,
@@ -6563,7 +6591,9 @@ impl IntoResponse for crate::BcsError {
 
         (status, body).into_response()
     }
-}async fn resolve_config_secrets(config: &mut BcsConfig, access: &dyn SecretAccessPort) -> crate::Result<()> {
+}
+
+pub async fn resolve_config_secrets(config: &mut BcsConfig, access: &dyn SecretAccessPort) -> crate::Result<()> {
     if let Some(value) = resolve_secret_value(config.auth_sdk.secret_key_secret.as_deref(), access, "auth_sdk.secret_key_secret").await? {
         config.auth_sdk.secret_key = Some(value);
     }
@@ -6585,6 +6615,14 @@ impl IntoResponse for crate::BcsError {
     if let Some(logger) = config.group_logger.as_mut() {
         if let Some(value) = resolve_secret_value(logger.client_secret_secret.as_deref(), access, "group_logger.client_secret_secret").await? {
         logger.client_secret = value;
+        }
+    }
+    for (provider_name, provider) in &mut config.human_notify.providers {
+        let Some(name) = provider.options.get("client_secret_secret").and_then(|v| v.as_str()) else { continue; };
+        let field = format!("human_notify.providers.{provider_name}.client_secret_secret");
+        if let Some(value) = resolve_secret_value(Some(name), access, &field).await? {
+            provider.options.insert("client_secret".to_string(), serde_json::Value::String(value));
+            provider.options.remove("client_secret_secret");
         }
     }
     if let Some(oauth) = config.auth.oauth.as_mut() {
