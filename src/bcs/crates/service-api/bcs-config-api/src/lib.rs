@@ -889,6 +889,8 @@ pub struct AuthSdkConfig {
     #[serde(default)]
     pub secret_key: Option<String>,
     #[serde(default)]
+    pub secret_key_secret: Option<String>,
+    #[serde(default)]
     pub app_key: Option<String>,
     #[serde(default)]
     pub app_name: Option<String>,
@@ -1081,6 +1083,8 @@ pub struct ProviderSettings {
         deserialize_with = "deserialize_optional_secret"
     )]
     pub client_secret: Option<Secret<String>>,
+    #[serde(default)]
+    pub client_secret_secret: Option<String>,
     /// RSA private key in PEM format — used by Alipay for request signing.
     #[serde(
         default,
@@ -1296,6 +1300,8 @@ pub struct DingTalkAccountConfig {
         deserialize_with = "deserialize_optional_secret"
     )]
     pub client_secret: Option<Secret<String>>,
+    #[serde(default)]
+    pub client_secret_secret: Option<String>,
     pub robot_code: Option<String>,
     pub card_template_id: Option<String>,
     #[serde(default = "default_card_key")]
@@ -1381,6 +1387,7 @@ impl Default for DingTalkAccountConfig {
             account_id: String::new(),
             client_id: None,
             client_secret: None,
+            client_secret_secret: None,
             robot_code: None,
             card_template_id: None,
             card_template_key: default_card_key(),
@@ -1544,6 +1551,8 @@ pub struct LlmConfig {
         deserialize_with = "deserialize_optional_secret"
     )]
     pub api_key: Option<Secret<String>>,
+    #[serde(default)]
+    pub api_key_secret: Option<String>,
     #[serde(default = "default_llm_model")]
     pub model: String,
     #[serde(default = "default_llm_timeout_ms")]
@@ -1563,6 +1572,7 @@ impl Default for LlmConfig {
             base_url: default_llm_base_url(),
             api_key_env: default_llm_api_key_env(),
             api_key: None,
+            api_key_secret: None,
             model: default_llm_model(),
             timeout_ms: default_llm_timeout_ms(),
             temperature: default_llm_temperature(),
@@ -1605,6 +1615,18 @@ impl Default for SqliteConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn secret_reference_fields_deserialize_and_default() {
+        let cfg: AuthSdkConfig = toml::from_str("client_id = \"id\"\nsecret_key_secret = \"auth-key\"").unwrap();
+        assert_eq!(cfg.secret_key_secret.as_deref(), Some("auth-key"));
+        let llm: LlmConfig = toml::from_str("api_key_secret = \"llm-key\"").unwrap();
+        assert_eq!(llm.api_key_secret.as_deref(), Some("llm-key"));
+        let account: DingTalkAccountConfig = toml::from_str("account_id = \"a\"\nclient_secret_secret = \"ding-key\"").unwrap();
+        assert_eq!(account.client_secret_secret.as_deref(), Some("ding-key"));
+        let provider: ProviderSettings = toml::from_str("client_id = \"id\"\nclient_secret_secret = \"oauth-key\"").unwrap();
+        assert_eq!(provider.client_secret_secret.as_deref(), Some("oauth-key"));
+    }
 
     #[test]
     fn channel_config_accepts_nested_dingtalk_switch() {

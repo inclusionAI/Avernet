@@ -179,12 +179,54 @@ pub const BCS_VERSION: &str = concat!(
     ")",
 );
 
+async fn resolve_group_logger_secret(
+    logger: &mut ding_logger::GroupLoggerConfig,
+    access: &dyn bcs_service_api::port::SecretAccessPort,
+) -> Result<()> {
+    let Some(name) = logger.client_secret_secret.as_deref().map(str::trim).filter(|v| !v.is_empty()) else { return Ok(()); };
+    let record = access.get_secret(name).await.map_err(|e| BcsError::InvalidConfig(format!("group_logger.client_secret_secret '{name}' unavailable: {e}")))?;
+    if record.value.trim().is_empty() {
+        return Err(BcsError::InvalidConfig(format!("group_logger.client_secret_secret '{name}' is empty")));
+    }
+    logger.client_secret = record.value;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bcs_secret_local::InMemorySecretAccess;
+
+    #[tokio::test]
+    async fn group_logger_secret_is_resolved_and_validated() {
+        let mut logger = ding_logger::GroupLoggerConfig { enabled: true, client_id: "id".into(), client_secret: String::new(), client_secret_secret: Some(" logger-key ".into()), group_ids: vec!["g".into()] };
+        let access = InMemorySecretAccess::with_entries([ ("logger-key", String::new(), "resolved".into()) ]);
+        resolve_group_logger_secret(&mut logger, &access).await.unwrap();
+        assert_eq!(logger.client_secret, "resolved");
+    }
+
+    #[tokio::test]
+    async fn group_logger_secret_missing_or_empty_fails_and_legacy_is_preserved() {
+        let mut legacy = ding_logger::GroupLoggerConfig { enabled: true, client_id: "id".into(), client_secret: "legacy".into(), client_secret_secret: None, group_ids: vec!["g".into()] };
+        resolve_group_logger_secret(&mut legacy, &InMemorySecretAccess::new()).await.unwrap();
+        assert_eq!(legacy.client_secret, "legacy");
+        let mut missing = legacy.clone(); missing.client_secret_secret = Some("missing".into());
+        assert!(resolve_group_logger_secret(&mut missing, &InMemorySecretAccess::new()).await.is_err());
+        let mut empty = legacy; empty.client_secret_secret = Some("empty".into());
+        let access = InMemorySecretAccess::with_entries([ ("empty", String::new(), "  ".into()) ]);
+        assert!(resolve_group_logger_secret(&mut empty, &access).await.is_err());
+    }
+}
+
 pub async fn run_from_env() -> Result<()> {
     run_from_env_with_config_dir(None).await
 }
 
 pub async fn run_from_env_with_config_dir(config_dir: Option<&std::path::PathBuf>) -> Result<()> {
-    let mut config = BcsConfig::load_with_env(config_dir);
+    run_with_config(BcsConfig::load_with_env(config_dir)).await
+}
+
+pub async fn run_with_config(mut config: BcsConfig) -> Result<()> {
     config
         .validate_api_keys()
         .map_err(BcsError::InvalidConfig)?;
@@ -218,7 +260,11 @@ pub async fn run_from_env_with_config_dir(config_dir: Option<&std::path::PathBuf
             "MySQL/OceanBase database backend selected; remote migrations are not auto-applied at service startup"
         );
     }
-    let group_logger = config.group_logger.take();
+    let mut group_logger = config.group_logger.take();
+    if let Some(logger) = group_logger.as_mut() {
+        let access = http_adapter::build_secret_access(&config).await?;
+        resolve_group_logger_secret(logger, access.as_ref()).await?;
+    }
     let server = BcsServer::new_with_storage(config).await?;
 
     if let Some(logger_cfg) = group_logger {

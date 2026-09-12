@@ -10,7 +10,11 @@ pub struct GroupLoggerConfig {
     pub client_id: String,
 
     /// DingTalk App Secret (client_secret).
+    #[serde(default)]
     pub client_secret: String,
+
+    #[serde(default)]
+    pub client_secret_secret: Option<String>,
 
     /// Allowlist of openConversationId values to monitor.
     pub group_ids: Vec<String>,
