@@ -479,3 +479,66 @@ class WorkspaceHostingClient:
 
         result = self._make_request("POST", path, staff_id, data=data, params=params, allow_empty_data=True)
         return result
+
+    def list_work_item_relations(
+        self,
+        work_item_id: str,
+        operator: str = "100000",
+    ) -> Dict[str, Any]:
+        """查询工作项关联记录（透传模式）。
+
+        GET /arkcooprod/openapi/workItem/relation/record/list?workItemId=&operator=
+
+        返回的 data 为按 relationIdentifier 分组的 dict，例如：
+            {"SUB": [...], "PARENT": [...], "COMMON": [...], "URL": [...], "ATTACHMENT": [...]}
+
+        每条记录含 relationId / relationRecordId / identifier / url 等。
+
+        Args:
+            work_item_id: 工作项 ID
+            operator: 操作人工号
+
+        Returns:
+            DIMA API 响应
+        """
+        logger.info(
+            "[workspace_hosting_client] Listing work item relations: "
+            "workItemId=%s, operator=%s",
+            work_item_id,
+            operator,
+        )
+        path = "/arkcooprod/openapi/workItem/relation/record/list"
+        params = {"workItemId": work_item_id, "operator": operator}
+        return self._make_request(
+            "GET", path, operator, params=params, allow_empty_data=True,
+        )
+
+    def delete_work_item_relation(
+        self,
+        operator: str,
+        request_body: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """删除工作项关联关系（透传模式）。
+
+        POST /arkcooprod/openapi/workItem/relation/record/delete?operator=
+        body: { relationIdentifier, relationRecordId }
+
+        Args:
+            operator: 操作人工号
+            request_body: DIMA API 请求体（包含 relationIdentifier, relationRecordId）
+
+        Returns:
+            DIMA API 响应（成功通常返回空 data）
+        """
+        logger.info(
+            "[workspace_hosting_client] Deleting work item relation: "
+            "operator=%s, body_keys=%s",
+            operator,
+            list(request_body.keys()),
+        )
+        path = "/arkcooprod/openapi/workItem/relation/record/delete"
+        params = {"operator": operator}
+        return self._make_request(
+            "POST", path, operator, data=request_body, params=params,
+            allow_empty_data=True,
+        )
