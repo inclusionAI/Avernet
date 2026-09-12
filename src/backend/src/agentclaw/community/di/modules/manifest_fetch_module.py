@@ -52,9 +52,6 @@ from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
     GitSourceClient,
     SubprocessGitClient,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
-    GuardedFetcher,
-)
 from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
     AliyunObjectStore,
 )
@@ -230,21 +227,6 @@ class ManifestFetchModule(Module):
                 BotConfigManifestServiceProtocol
             ),
             platform_managed=lambda: manifest_config.teclaw_platform_managed,
-        )
-
-    @singleton
-    @provider
-    def manifest_guarded_fetcher(
-        self, manifest_config: cfg.BotConfigManifestConfig
-    ) -> GuardedFetcher:
-        """The W2 transport, constructed from the typed config cluster.
-
-        The allowlist is a deployment decision (an internal mirror or proxy);
-        everything else about the fetcher — scheme, address pinning, redirect
-        budget — is the shipped default and not configurable from here.
-        """
-        return GuardedFetcher(
-            transport_allowlist=manifest_config.fetch_transport_allowlist
         )
 
     @singleton

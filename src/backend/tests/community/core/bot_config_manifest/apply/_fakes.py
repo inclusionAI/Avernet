@@ -21,7 +21,6 @@ from agentclaw.community.core.bot_config_manifest.credentials.errors import (
     CredentialNotFoundError,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
-    FetchFailedError,
     FetchedObject,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
@@ -35,7 +34,7 @@ def fetched_object(
     body: bytes, *, url: str = "https://content.example/a.bin",
     content_type: str | None = "application/octet-stream",
 ) -> FetchedObject:
-    """A receipt-bearing fetch result, the shape ``GuardedFetcher`` returns."""
+    """A receipt-bearing fetch result, the shape a source fetcher returns."""
     return FetchedObject(
         bytes=body,
         sha256="sha256:" + hashlib.sha256(body).hexdigest(),
@@ -132,42 +131,6 @@ class FakeManifestContent:
             if record.source_url == source_url:
                 return record
         return None
-
-
-class FakeGuardedFetcher:
-    """Stands in for the W2 transport: scripted successes or real error types.
-
-    Records every request so tests can assert what the wire actually saw —
-    the substituted URL, the declared digest, the credential binding.
-
-    Implements the one rule of W2's contract a caller can lean on: a declared
-    ``expected_digest`` is verified against the served bytes, and a mismatch
-    is a fetch failure — never a "success with corrupted bytes". Without that
-    in the fake, a materialiser relying on the pin would pass here while the
-    real transport refused.
-    """
-
-    def __init__(
-        self,
-        responses: dict[str, FetchedObject] | None = None,
-        failures: dict[str, Exception] | None = None,
-    ) -> None:
-        self.responses = dict(responses or {})
-        self.failures = dict(failures or {})
-        self.requests: list[Any] = []
-
-    def fetch(self, request):
-        self.requests.append(request)
-        failure = self.failures.get(request.url)
-        if failure is not None:
-            raise failure
-        response = self.responses[request.url]
-        if (
-            request.expected_digest is not None
-            and response.sha256 != request.expected_digest
-        ):
-            raise FetchFailedError("digest mismatch")
-        return response
 
 
 @dataclass
