@@ -83,39 +83,48 @@ before the rule was written down.
 
 ## The fetch side (W2): transport safety only
 
-The guarded fetcher answers "the platform fetched THESE bytes from THAT
-validated source, within THESE limits, pinned and hashed" — and stops there. It
-does not store (W11), does not materialize (W5/W6), does not resolve credentials
-(W3 binds the injector protocol declared here), and schedules nothing (W4
-carries the budget in).
+The fetch side answers "the platform fetched THESE bytes from THAT source,
+within THESE limits, hashed" — and stops there. It does not store (W11), does
+not materialize (W5/W6), does not decide credentials (W3 owns those), and
+schedules nothing (W4 carries the budget in).
+
+Two roads remain, each a plain core class: `object_store.py` (a tenant bucket
+over Aliyun's native protocol) and `git_source.py` (a git checkout through the
+CLI). The HTTPS-GET transport that once sat beside them is gone — the
+bare-string `source:` spelling and the cli-tools URL API went first, and the
+transport followed with its last caller. What it guaranteed and who guarantees
+it now is the substance of this section.
 
 It owns, for every byte the platform fetches on a manifest's behalf:
 
-- **the address is public and pinned**: URL shape first, DNS resolution next
-  (every resolved address must be globally routable — the deployment
-  allowlist in `application.yaml`'s `user_config.bot_config_manifest`
-  block can exempt a named internal mirror, exact-host), and the
-  connection goes to the *validated*
-  address with the original Host header and SNI preserved, so a hostname
-  re-resolving between check and connect cannot reach a refused target;
-- **every redirect hop re-validated** (scheme, address, authorization
-  policy) with a hard hop budget;
-- **limits enforced while streaming** — per-entry byte caps are counted
-  as bytes arrive, never trusted from a declared `Content-Length`; timeouts
-  and the apply-time budget/concurrency come in as an injected
-  `FetchBudget` (W4 will pass one; the default is per-entry only);
-- **the digest is the receipt**: sha256 computed on the same pass as the
-  byte cap; a declared digest that does not match is a *fetch failure*, not
-  a corrupted success — the fetcher never hands back bytes it was told to
-  pin and did not.
+- **refusal before the wire**: an https-only scheme check happens before any
+  subprocess or SDK call, so a refused scheme costs no network at all, and the
+  scheme alone is named — never the URL, whose query strings are where
+  signed-source tokens live;
+- **the endpoint was validated before it was ever stored**: an object-store
+  credential's endpoint passes `endpoint_guard.endpoint_refusal` at *write*
+  time — URL shape, then every resolved address must be globally routable —
+  because the platform will connect to whatever a stored credential names on
+  the next apply. The deployment allowlist in `application.yaml`'s
+  `user_config.bot_config_manifest` block exempts a named internal endpoint,
+  exact-host, and nothing else;
+- **limits enforced while streaming** — per-entry byte caps are counted as
+  bytes arrive, never trusted from a declared length, and a git tree has its
+  own member and unpacked-size caps; timeouts and the apply-time
+  budget/concurrency come in as an injected `FetchBudget`;
+- **the digest is the receipt**: sha256 is computed over the fetched bytes and
+  a declared digest that does not match is a *fetch failure*, not a corrupted
+  success — the pipeline never hands back bytes it was told to pin and did
+  not.
 
 It deliberately does not own:
 
-- **credential presentation** — a `CredentialInjector` protocol is declared
-  here (headers for a URL) and nothing more; W3 binds it, because prefix
-  authorization is a credentials concern, not a transport concern. The
-  transport *calls* it per request and per redirect hop (a credential that
-  leaves its authorized prefixes across a redirect is refused).
+- **credential presentation** — W3's `SourceCredentialBinding` offers exactly
+  two methods, `headers_for(url)` (what to present when fetching `url`) and
+  `reauthorize(url)` (raising to refuse a URL outside the credential's
+  authorized prefixes). The git road calls both directly on the binding;
+  prefix authorization is a credentials concern, not a transport concern, so
+  there is no protocol here for it to satisfy.
 - **unpacked semantics** — `unpack.py` turns a fetched archive into a file
   tree with zip-slip/symlink/device guards, member and size caps, exact
   `strip_components`, and flattened permissions. What the tree *means*
@@ -630,13 +639,10 @@ provides:
   - MAX_DOCUMENT_BYTES
   - MAX_ENTRIES_PER_CATEGORY
   - MAX_INLINE_CONTENT_BYTES
-  - GuardedFetcher
-  - FetchRequest
   - FetchedObject
   - FetchBudget
   - Resolver
-  - CredentialInjector
-  - AuthorizationPolicy
+  - endpoint_refusal
   - FetchRefusedError
   - FetchFailedError
   - unpack_archive
@@ -690,7 +696,7 @@ consumes:
 consumed_by:
   - "adapters/http/openapi_v1/bots — the public read/replace/clear/capabilities surface, and the create-with-manifest pair (W13), which reaches the seam and never the task queue"
   - "core.bot_management create_flow — submission calls the creation seam (preflight, persist, start the job); the dependency runs one way, so the seam is handed its job operations at construction rather than importing them"
-  - "the apply orchestration (`apply/`, W4 #1472 + W5 #1473) — di/modules/manifest_fetch_module.py constructor-injects the transport_allowlist and the content store root (read via the W2/W11 pure parsers over config_module's seam) and holds the one DeclaredSourceResolver over the fetcher, the store, and W3's credentials"
+  - "the apply orchestration (`apply/`, W4 #1472 + W5 #1473) — di/modules/manifest_fetch_module.py constructor-injects the content store root and the fetch_transport_allowlist (read via the W11/W2 pure parsers over config_module's seam; the allowlist now reaches SourceCredentialService as endpoint_allow_hosts, its one consumer) and holds the one DeclaredSourceResolver over the object store, the content store, and W3's credentials"
   - "adapters/http/openapi_v1/source_credentials — the public tenant credential register/rotate/read/delete surface (OPEN admission; app-operated — the edge requires an app credential, owner-app guarded)"
 internal_dependencies:
   - agentclaw.community.core.base

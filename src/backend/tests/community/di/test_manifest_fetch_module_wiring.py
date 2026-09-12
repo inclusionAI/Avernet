@@ -45,8 +45,8 @@ def test_the_entry_fetcher_reads_the_oss_road_through_the_one_object_store(
 
     ``DeclaredSourceResolver`` is the funnel every fetch-consuming category
     shares, and it takes the object store by constructor — a plain core class
-    since the plugin seam went, exactly as it takes ``GuardedFetcher`` — then
-    hands it to the one road that reads through it. Asserted on the wired
+    since the plugin seam went — then hands it to the one road that reads
+    through it. Asserted on the wired
     instance rather than the module source: what matters is that the singleton
     the injector binds is the one the funnel reads through, so a test that
     substitutes the store on the injector substitutes it for every apply.

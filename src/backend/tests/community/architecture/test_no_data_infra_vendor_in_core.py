@@ -65,7 +65,7 @@ _TERM_ALLOWLIST_FILES = {
     # neutral S3 client can speak. One implementation, so no plugin seam and
     # no neutral name to hide the vendor behind (the guard matches the bare
     # product name in its import line too). Its consumer names the class it
-    # takes, exactly as it names ``GuardedFetcher``.
+    # takes, the way it names every other collaborator it constructs with.
     "core/bot_config_manifest/fetch/object_store.py": "manifest oss road — Aliyun-native transport (oss2)",
     "core/bot_config_manifest/apply/source_resolver.py": "manifest oss road — constructor-injects AliyunObjectStore",
     # Same rationale one layer down: the dispatcher hands the store to the

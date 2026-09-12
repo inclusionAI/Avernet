@@ -26,7 +26,7 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
     GitDelivery,
     GitEntrySource,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchRefusedError,
 )
 from agentclaw.community.core.bot_config_manifest.apply.materialisers.resources import (

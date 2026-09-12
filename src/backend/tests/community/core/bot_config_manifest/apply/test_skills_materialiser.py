@@ -31,7 +31,7 @@ from agentclaw.community.core.bot_config_manifest.apply.source_session import (
 from agentclaw.community.core.bot_config_manifest.apply.source_fetchers import (
     object_receipt_url,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchFailedError,
 )
 

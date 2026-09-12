@@ -19,7 +19,7 @@ if TYPE_CHECKING:
         ContentScope,
         StoredContentRecord,
     )
-    from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+    from agentclaw.community.core.bot_config_manifest.fetch.errors import (
         FetchedObject,
     )
     from agentclaw.community.core.repository.protocols.bot import (

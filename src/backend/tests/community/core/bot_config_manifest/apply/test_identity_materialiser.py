@@ -27,7 +27,7 @@ from agentclaw.community.core.bot_config_manifest.apply.materialisers.identity i
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchRefusedError,
 )
 
