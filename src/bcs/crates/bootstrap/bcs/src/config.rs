@@ -2207,6 +2207,7 @@ x-collector-route = "collector-local"
             kind: None, // defaults to the instance name "google"
             client_id: "gid".to_string(),
             client_secret: None,
+            client_secret_secret: None,
             private_key: None,
             alipay_public_key: None,
         };
@@ -2221,6 +2222,7 @@ x-collector-route = "collector-local"
             kind: Some("github".to_string()),
             client_id: "ghid".to_string(),
             client_secret: None,
+            client_secret_secret: None,
             private_key: None,
             alipay_public_key: None,
         };
@@ -2238,6 +2240,7 @@ x-collector-route = "collector-local"
             kind: Some("facebook".to_string()),
             client_id: "id".to_string(),
             client_secret: None,
+            client_secret_secret: None,
             private_key: None,
             alipay_public_key: None,
         };
@@ -2257,6 +2260,7 @@ x-collector-route = "collector-local"
             kind: None,
             client_id: "  ".to_string(),
             client_secret: None,
+            client_secret_secret: None,
             private_key: None,
             alipay_public_key: None,
         };
