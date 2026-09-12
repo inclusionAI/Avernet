@@ -13,6 +13,14 @@ _ALL_SH_LOADED=1
 SETUP_ORDER=(baas backend bcs bcsfuse bots frontend)
 START_ORDER=(baas backend bcsfuse bcs bots demo_bot frontend)
 STOP_ORDER=(frontend demo_bot bots bcsfuse bcs backend baas)
+# Nextgen and the external teamclaw checkout consume Gateway OpenAPI/auth
+# routes; the legacy UI keeps its existing direct-service topology and
+# startup order unchanged.
+if [ "${FRONTEND_VARIANT:-legacy}" != legacy ]; then
+    SETUP_ORDER=(baas backend bcs bcsfuse bots gateway frontend)
+    START_ORDER=(baas backend bcsfuse bcs bots demo_bot gateway frontend)
+    STOP_ORDER=(frontend gateway demo_bot bots bcsfuse bcs backend baas)
+fi
 
 all_setup() {
     for svc in "${SETUP_ORDER[@]}"; do

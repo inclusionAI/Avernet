@@ -167,6 +167,7 @@ source "${SCRIPT_DIR}/modules/engine.sh"
 source "${SCRIPT_DIR}/modules/baas.sh"
 source "${SCRIPT_DIR}/modules/backend.sh"
 source "${SCRIPT_DIR}/modules/frontend.sh"
+frontend_select_variant || exit 1
 source "${SCRIPT_DIR}/modules/gateway.sh"
 source "${SCRIPT_DIR}/modules/bcs.sh"
 source "${SCRIPT_DIR}/modules/bcsfuse.sh"
@@ -789,13 +790,15 @@ setup_all_and_start() {
         show_local_mode_info
     fi
 
-    # 根据模式设置环境变量
+    # 根据模式设置环境变量。
+    # SERVER_ENV 不在这层 export：backend 的启动命令自带 SERVER_ENV=dev
+    # (modules/backend.sh)，而 gateway 视它为用户输入、local 兜底——这里
+    # 一旦 export 会把 gateway 推去读不存在的 application-dev.yaml，并跳过
+    # app.sh 仅在 local 分支武装的 dev 签名密钥（见 test_singlebox_server_env_dispatch.sh）。
     if [ "$LOCAL_MODE" = true ]; then
-        export SERVER_ENV=dev
         export LOCAL_DEV_MODE=true
     else
         export DATABASE_MODE=mysql
-        export SERVER_ENV=dev
     fi
     resolve_bcs_server_env
 
@@ -1014,13 +1017,11 @@ main() {
         esac
     done
 
-    # 根据模式设置环境变量
+    # 根据模式设置环境变量（SERVER_ENV 不 export 的原因见上方 setup_all_and_start 内注释）
     if [ "$LOCAL_MODE" = true ]; then
-        export SERVER_ENV=dev
         export LOCAL_DEV_MODE=true
     else
         export DATABASE_MODE=mysql
-        export SERVER_ENV=dev
     fi
     apply_singlebox_mode_defaults
     resolve_bcs_server_env

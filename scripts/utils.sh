@@ -39,6 +39,12 @@ print_frontend_ready_banner() {
     echo -e "${GREEN}  FRONTEND READY${NC}"
     echo -e "${CYAN}  Open the workbench:${NC}"
     echo -e "${CYAN}  http://localhost:${FRONTEND_PORT:-8000}/${NC}"
+    if [ "${FRONTEND_VARIANT:-legacy}" != legacy ] && [ "${GATEWAY_AUTH_MOCK:-0}" = "1" ]; then
+        # nextgen 的登录态来自 gateway dev_cookie 策略的 staff_id cookie；
+        # /_dev/login 是设置它的浏览器入口（仅 local/dev/test 环境存在）。
+        echo -e "${CYAN}  Dev login (set local identity):${NC}"
+        echo -e "${CYAN}  http://localhost:${GATEWAY_PORT:-8889}/_dev/login?next=${FRONTEND_PORT:-8000}${NC}"
+    fi
     echo -e "${GREEN}============================================================${NC}"
     echo ""
 }
@@ -183,6 +189,12 @@ process_command() {
 # background job or an explicit subshell; `exec` replaces that wrapper so the
 # recorded PID is the actual service process and no shell is left waiting.
 start_in_detached_session() {
+    # macOS hosts may disable the bundled Perl executable. Use the installed
+    # Python 3 runtime there; Linux retains its existing Perl prerequisite.
+    # Both branches exec argv directly and preserve the owned service PID.
+    if [ "$(uname -s)" = Darwin ]; then
+        exec python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' "$@"
+    fi
     exec perl -MPOSIX=setsid -e 'setsid() or die "setsid failed: $!\\n"; exec @ARGV' "$@"
 }
 

@@ -3,6 +3,114 @@
 [[ -n "${_FRONTEND_SH_LOADED:-}" ]] && return 0
 _FRONTEND_SH_LOADED=1
 
+# Explicit composition-root choice; never accept an arbitrary source path.
+frontend_select_variant() {
+    case "${FRONTEND_VARIANT:-legacy}" in
+        legacy)
+            FRONTEND_DIR="${PROJECT_ROOT}/src/frontend"
+            FRONTEND_DEFAULT_SCRIPT="devs:local:oss"
+            FRONTEND_ROOT_ID="root-master"
+            ;;
+        nextgen)
+            FRONTEND_DIR="${PROJECT_ROOT}/src/frontend-nextgen"
+            FRONTEND_DEFAULT_SCRIPT="dev:local"
+            FRONTEND_ROOT_ID="root"
+            ;;
+        teamclaw)
+            # The internal product UI lives in an external checkout; the dir is
+            # an operator input (.env.local), and demanding it here fail-fasts
+            # a misconfigured start before anything is built.
+            if [ -z "${TEAMCLAW_DIR:-}" ]; then
+                printf '%s\n' 'FRONTEND_VARIANT=teamclaw requires TEAMCLAW_DIR (path to the teamclaw checkout, best set in .env.local)' >&2
+                return 1
+            fi
+            if [ ! -d "${TEAMCLAW_DIR}" ]; then
+                printf '%s\n' "TEAMCLAW_DIR does not exist: ${TEAMCLAW_DIR}" >&2
+                return 1
+            fi
+            FRONTEND_DIR="${TEAMCLAW_DIR}"
+            FRONTEND_DEFAULT_SCRIPT="devs:local"
+            FRONTEND_ROOT_ID="root"
+            ;;
+        *) printf '%s\n' 'FRONTEND_VARIANT must be legacy, nextgen or teamclaw' >&2; return 1 ;;
+    esac
+}
+
+# teamclaw frontend auto-update: fetch + fast-forward the checkout's current
+# branch toward its upstream before the dev server compiles it. Never blocks
+# startup: on a dirty or detached checkout it warns and keeps the tree as-is,
+# because ff-only protects the operator's uncommitted work, and a pull that
+# hides in the start path must never be the thing that ate someone's WIP.
+# Set TEAMCLAW_FRONTEND_AUTOUPDATE=0 to fetch-and-report only.
+frontend_teamclaw_sync_latest() {
+    local dir="${TEAMCLAW_DIR}" branch upstream behind
+    [ -n "$dir" ] && [ -d "$dir" ] || return 0
+    command -v git >/dev/null 2>&1 || return 0
+    git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+        log_warn "TEAMCLAW_DIR is not a git checkout; skipping frontend auto-update"
+        return 0
+    }
+    if ! git -C "$dir" fetch --quiet origin 2>/dev/null; then
+        log_warn "teamclaw frontend: git fetch failed; continuing with current tree"
+        return 0
+    fi
+    branch="$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    upstream="$(git -C "$dir" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || true)"
+    if [ -z "${upstream:-}" ] || [ "$upstream" = "HEAD" ]; then
+        log_warn "teamclaw frontend: branch '${branch:-unknown}' has no upstream; skipping auto-update"
+        return 0
+    fi
+    behind="$(git -C "$dir" rev-list --count "HEAD..@{upstream}" 2>/dev/null || echo 0)"
+    if [ "${behind:-0}" -eq 0 ]; then
+        log_info "teamclaw frontend up to date: ${branch}@$(git -C "$dir" rev-parse --short HEAD)"
+        return 0
+    fi
+    if [ "${TEAMCLAW_FRONTEND_AUTOUPDATE:-1}" != "1" ]; then
+        log_info "teamclaw frontend is ${behind} commit(s) behind ${upstream} (auto-update disabled); continuing with ${branch}@$(git -C "$dir" rev-parse --short HEAD)"
+        return 0
+    fi
+    if [ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" ]; then
+        log_warn "teamclaw frontend is ${behind} commit(s) behind ${upstream}, but the checkout is dirty; not updating. Commit/stash, then run: git -C \"$dir\" merge --ff-only ${upstream}"
+        return 0
+    fi
+    if git -C "$dir" merge --ff-only '@{upstream}' >/dev/null 2>&1; then
+        log_info "teamclaw frontend updated to ${branch}@$(git -C "$dir" rev-parse --short HEAD) (was ${behind} behind)"
+    else
+        log_warn "teamclaw frontend ff-merge failed (diverged?); continuing with ${branch}@$(git -C "$dir" rev-parse --short HEAD)"
+    fi
+    return 0
+}
+
+# Bind the public frontend to the Singlebox Gateway, not the exported
+# localhost:8888 placeholder (which is Backend, not Gateway). Other optional
+# upstreams remain explicit operator settings; never invent proxy services.
+frontend_configure_upstreams() {
+    case "${FRONTEND_VARIANT:-legacy}" in
+        nextgen|teamclaw) ;;
+        *) return 0 ;;
+    esac
+    export TEAMCLAW_GW_BASE="${TEAMCLAW_GW_BASE:-http://127.0.0.1:${GATEWAY_PORT:-8889}}"
+    export TEAMCLAW_ADMIN_BASE="${TEAMCLAW_ADMIN_BASE:-${TEAMCLAW_GW_BASE}}"
+    export TASK_ENGINE_UPSTREAM="${TASK_ENGINE_UPSTREAM:-${TEAMCLAW_GW_BASE}}"
+    export BCS_ENDPOINT_PRE="${BCS_ENDPOINT_PRE:-http://127.0.0.1:${BCS_PORT:-21000}}"
+    export BCS_ENDPOINT_PROD="${BCS_ENDPOINT_PROD:-http://127.0.0.1:${BCS_PORT:-21000}}"
+    if [ "${FRONTEND_VARIANT:-legacy}" = teamclaw ]; then
+        # Internal-only planes singlebox has no service for (private chat,
+        # clawweb, aix harness). Defaulting them to the Gateway makes their
+        # panels fail fast (404/502) inside the stack instead of silently
+        # targeting an unrelated 8888 placeholder; explicit env always wins.
+        export TEAMCLAW_PRIVATE_CHAT_MANAGEMENT_BASE="${TEAMCLAW_PRIVATE_CHAT_MANAGEMENT_BASE:-${TEAMCLAW_GW_BASE}}"
+        export TEAMCLAW_PRIVATE_CHAT_SESSION_BASE="${TEAMCLAW_PRIVATE_CHAT_SESSION_BASE:-${TEAMCLAW_GW_BASE}}"
+        export TEAMCLAW_LEGACY_AGENTCLAW_BASE="${TEAMCLAW_LEGACY_AGENTCLAW_BASE:-${TEAMCLAW_GW_BASE}}"
+        export TEAMCLAW_AIXHARNESS_BASE="${TEAMCLAW_AIXHARNESS_BASE:-${TEAMCLAW_GW_BASE}}"
+        export TEAMCLAW_CLAWWEB_BASE="${TEAMCLAW_CLAWWEB_BASE:-${TEAMCLAW_GW_BASE}}"
+        # Same local identity the gateway dev_cookie strategy resolves; aligned
+        # with /_dev/login's default cookie so header and cookie strategies
+        # agree on one user.
+        export TEAMCLAW_DEV_USER="${TEAMCLAW_DEV_USER:-001}"
+    fi
+}
+
 # Service-specific constants
 FRONTEND_LOG="${LOG_DIR}/frontend.log"
 # 前端 dev server 端口（umi 读 PORT 环境变量）。默认 8000，可用 FRONTEND_PORT 覆盖；
@@ -25,6 +133,12 @@ frontend_setup() {
     if ! check_command npm; then
         log_error "npm not found. Install Node.js with npm first."
         return 1
+    fi
+
+    # teamclaw is an external checkout that owns its own branch state: pull it
+    # to (or report on) the latest before anything compiles it.
+    if [ "${FRONTEND_VARIANT:-legacy}" = teamclaw ]; then
+        frontend_teamclaw_sync_latest || true
     fi
 
     cd "${FRONTEND_DIR}"
@@ -58,19 +172,26 @@ frontend_deps_ready() {
     fi
     # The local dev command is provided by devDependencies. A production-only
     # install can still contain all runtime packages while being unable to run
-    # `cross-env ... max dev`.
+    # the dev command. The internal teamclaw repo drives umi through bigfish,
+    # the in-repo frontends through @umijs/max directly.
+    local dev_bin="max"
+    if [ "${FRONTEND_VARIANT:-legacy}" = teamclaw ]; then
+        dev_bin="bigfish"
+    fi
     if [ ! -x "${FRONTEND_DIR}/node_modules/.bin/cross-env" ] ||
-       [ ! -x "${FRONTEND_DIR}/node_modules/.bin/max" ]; then
+       [ ! -x "${FRONTEND_DIR}/node_modules/.bin/${dev_bin}" ]; then
         return 1
     fi
 
     (
         cd "${FRONTEND_DIR}" &&
             node -e '
-                for (const pkg of ["@aix-chat/adapters", "@aix-chat/core", "@aix-chat/ui"]) {
+                const variant = process.argv[1];
+                const scope = variant === "nextgen" || variant === "teamclaw" ? "@tc-chat" : "@aix-chat";
+                for (const pkg of ["adapters", "core", "ui"].map(name => `${scope}/${name}`)) {
                     require.resolve(`${pkg}/package.json`);
                 }
-            '
+            ' "${FRONTEND_VARIANT:-legacy}"
     ) >/dev/null 2>&1
 }
 
@@ -96,7 +217,11 @@ install_frontend_deps() {
         fi
     else
         log_warn "No package-lock.json; falling back to 'npm install' (will generate a lockfile)."
-        if ! HUSKY=0 npm install --include=dev --registry="${NPM_REGISTRY_URL}" --no-audit --no-fund; then
+        # --legacy-peer-deps: an un-locked internal dependency graph routinely
+        # carries sibling peer ranges (styled-components 5 vs 6 across umi
+        # plugins and private extensions) that ERESOLVE on a plain install;
+        # teammates' tnpm resolves them leniently and npm must too.
+        if ! HUSKY=0 npm install --include=dev --legacy-peer-deps --registry="${NPM_REGISTRY_URL}" --no-audit --no-fund; then
             log_error "Failed to install frontend dependencies"
             return 1
         fi
@@ -114,7 +239,8 @@ frontend_start() {
     frontend_setup || return 1
 
     cd "${FRONTEND_DIR}"
-    local frontend_script="${FRONTEND_DEV_SCRIPT:-devs:local:oss}"
+    frontend_configure_upstreams
+    local frontend_script="${FRONTEND_DEV_SCRIPT:-${FRONTEND_DEFAULT_SCRIPT:-devs:local:oss}}"
 
     stop_port_processes_if_owned "${FRONTEND_PORT}" "${FRONTEND_DIR}" "existing frontend"
     if port_is_listening "${FRONTEND_PORT}"; then
@@ -171,7 +297,7 @@ frontend_start() {
 frontend_http_ready() {
     local html
     html="$(curl --noproxy '*' --connect-timeout 1 --max-time 2 -fsS "http://127.0.0.1:${FRONTEND_PORT}/" 2>/dev/null)" || return 1
-    printf '%s' "$html" | grep -q 'id="root-master"' || return 1
+    printf '%s' "$html" | grep -Fq "id=\"${FRONTEND_ROOT_ID:-root-master}\"" || return 1
     printf '%s' "$html" | grep -q 'src="/umi.js"' || return 1
     if printf '%s' "$html" | grep -qi 'Bundling'; then
         return 1
@@ -249,5 +375,5 @@ frontend_prereqs() {
 }
 
 frontend_help() {
-    echo "frontend - Web UI workbench (port ${FRONTEND_PORT})"
+    echo "frontend - Web UI workbench (port ${FRONTEND_PORT}; FRONTEND_VARIANT=legacy|nextgen)"
 }
