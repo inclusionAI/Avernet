@@ -1771,6 +1771,39 @@ mod gateway_principal_tests {
     }
 
     #[tokio::test]
+    async fn all_config_secret_references_resolve_together() {
+        use bcs_config_api::{OAuthSettings, ProviderSettings};
+        use std::collections::BTreeMap;
+        let mut config = BcsConfig::default();
+        config.auth_sdk.secret_key_secret = Some("auth".into());
+        config.llm.api_key_secret = Some("llm".into());
+        config.invite.token_secret_secret = Some("invite".into());
+        config.session_files.share.token_secret_secret = Some("share".into());
+        let mut account = config.dingtalk_accounts.first().cloned().unwrap_or_default();
+        account.client_secret_secret = Some("ding".into());
+        config.dingtalk_accounts = vec![account];
+        let mut logger = ding_logger::GroupLoggerConfig { enabled: true, client_id: "id".into(), client_secret: String::new(), client_secret_secret: Some("logger".into()), group_ids: vec!["g".into()] };
+        config.group_logger = Some(logger.clone());
+        let mut providers = BTreeMap::new();
+        providers.insert("google".into(), ProviderSettings { kind: None, client_id: "id".into(), client_secret: None, client_secret_secret: Some("oauth".into()), private_key: None, alipay_public_key: None });
+        config.auth.oauth = Some(OAuthSettings { providers, ..OAuthSettings::default() });
+        let access = InMemorySecretAccess::with_entries([
+            ("auth", String::new(), "auth-value".into()), ("llm", String::new(), "llm-value".into()),
+            ("invite", String::new(), "invite-value".into()), ("share", String::new(), "share-value".into()),
+            ("ding", String::new(), "ding-value".into()), ("logger", String::new(), "logger-value".into()),
+            ("oauth", String::new(), "oauth-value".into()),
+        ]);
+        resolve_config_secrets(&mut config, &access).await.unwrap();
+        assert_eq!(config.auth_sdk.secret_key.as_deref(), Some("auth-value"));
+        assert_eq!(config.llm.api_key.as_ref().map(|v| v.expose_secret().as_str()), Some("llm-value"));
+        assert_eq!(config.invite.token_secret.as_deref(), Some("invite-value"));
+        assert_eq!(config.session_files.share.token_secret.as_deref(), Some("share-value"));
+        assert_eq!(config.dingtalk_accounts[0].client_secret.as_ref().map(|v| v.expose_secret().as_str()), Some("ding-value"));
+        assert_eq!(config.group_logger.as_ref().unwrap().client_secret, "logger-value");
+        assert_eq!(config.auth.oauth.as_ref().unwrap().providers["google"].client_secret.as_ref().map(|v| v.expose_secret().as_str()), Some("oauth-value"));
+    }
+
+    #[tokio::test]
     async fn token_secret_reference_resolves_and_rejects_missing_or_empty() {
         let access = InMemorySecretAccess::with_entries([("invite-key", String::new(), "resolved".to_string())]);
         let resolved = resolve_token_secret_secret(Some(" invite-key "), &access, "invite.token_secret_secret")
