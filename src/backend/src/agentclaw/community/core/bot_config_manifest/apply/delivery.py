@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Any, Awaitable, Callable, Mapping, Optional, Protocol
 
 from agentclaw.community.core.ports.activation_port import (
@@ -65,7 +66,10 @@ from agentclaw.community.core.bot_config_manifest.apply.order import (
     ApplyPhase,
     ApplyStep,
 )
-from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyReport
+from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
+    ApplyConstruct,
+    ApplyReport,
+)
 from agentclaw.community.core.bot_config_manifest.capabilities import ManifestSection
 
 #: The yaml key under ``user_config.bot_config_manifest``::
@@ -158,8 +162,8 @@ class DeliveryStrategy(Protocol):
     ``family``              ``"arca"``             ``"teclaw"``
     ``creation_sequence``   ``CREATE_BETWEEN_``    ``RECORD_APPLY_``
                             ``PHASES``             ``PROVISION``
-    ``phase_of(step)``      the table's own        ``PRE_CONTAINER`` for
-                            ``step.phase``         everything but ``script``
+    ``phase_of(step)``      :data:`_ARCA_PHASES`   ``PRE_CONTAINER`` for
+                                                   every construct
     ``needs_container()``   ``True``               ``False``
     ``ports()``             device-backed          store-backed
     ``finish()``            ``None``               one whole-artifact
@@ -197,7 +201,8 @@ class DeliveryStrategy(Protocol):
     def phase_of(self, step: ApplyStep) -> ApplyPhase:
         """Which phase this family delivers the step's construct in.
 
-        May disagree with ``step.phase``, which is the ARCA reading.
+        The phase table is the strategy's own — :data:`ApplyStep` carries no
+        phase, so the two families are free to disagree and routinely do.
         """
         ...
 
@@ -206,9 +211,11 @@ class DeliveryStrategy(Protocol):
     ) -> tuple[ApplyStep, ...]:
         """The steps in the requested phases, in position order.
 
-        Same contract as ``apply.order.steps_for``, but filtered through this
-        family's :meth:`phase_of` rather than the table's own column. This is
-        the callable handed to ``ApplyOrchestrator``.
+        :data:`~agentclaw.community.core.bot_config_manifest.apply.order.APPLY_ORDER`
+        sorted by position and filtered through this family's
+        :meth:`phase_of`. ``None`` means both phases, which is what an ordinary
+        apply on an existing bot wants; the creation job passes one at a time.
+        This is the callable handed to ``ApplyOrchestrator``.
         """
         ...
 
@@ -240,6 +247,28 @@ class DeliveryStrategy(Protocol):
         ...
 
 
+#: The container family's phase per construct. ``script`` is the only
+#: construct that needs no container; everything else lands after it is up.
+_ARCA_PHASES: Mapping[ApplyConstruct, ApplyPhase] = MappingProxyType({
+    ManifestSection.SCRIPT: ApplyPhase.PRE_CONTAINER,
+    ManifestCategory.IDENTITY: ApplyPhase.ON_CONTAINER,
+    ManifestCategory.RESOURCES: ApplyPhase.ON_CONTAINER,
+    ManifestCategory.SKILLS: ApplyPhase.ON_CONTAINER,
+    ManifestCategory.MCP: ApplyPhase.ON_CONTAINER,
+    ManifestCategory.ENGINE_CONFIG: ApplyPhase.ON_CONTAINER,
+    ManifestCategory.CLI_TOOLS: ApplyPhase.ON_CONTAINER,
+})
+
+# The no-drift assertion ``source_fetchers.FETCHER_TYPES`` and ``fetch/limits``
+# set the precedent for: adding a construct to APPLY_ORDER without giving this
+# family a phase for it would otherwise be a KeyError on the first apply that
+# walked it, on whichever bot happened to declare it first.
+assert set(_ARCA_PHASES) == {step.construct for step in APPLY_ORDER}, (
+    "_ARCA_PHASES and APPLY_ORDER must name the same set of constructs — a "
+    "construct in the order with no phase here has no ARCA delivery at all"
+)
+
+
 def _steps(
     phase_of: Callable[[ApplyStep], ApplyPhase],
     phases: frozenset[ApplyPhase] | None,
@@ -253,11 +282,11 @@ def _steps(
 
 
 class ArcaDelivery(DeliveryStrategy):
-    """The container family: the phase table is ``APPLY_ORDER``'s own.
+    """The container family: the phase table is :data:`_ARCA_PHASES`.
 
-    Every answer is the table's, unchanged — ``phase_of`` returns
-    ``step.phase``, ``needs_container`` is ``True``, and ``finish`` has
-    nothing to do because the owning services project as they write.
+    ``script`` before the container, every other construct after it;
+    ``needs_container`` is ``True``, and ``finish`` has nothing to do because
+    the owning services project as they write.
     """
 
     family = "arca"
@@ -267,7 +296,7 @@ class ArcaDelivery(DeliveryStrategy):
         self._ports = ports
 
     def phase_of(self, step: ApplyStep) -> ApplyPhase:
-        return step.phase
+        return _ARCA_PHASES[step.construct]
 
     def steps_for(
         self, phases: frozenset[ApplyPhase] | None = None
@@ -329,6 +358,10 @@ class TeclawPlatformBindings:
 class TeclawDelivery(DeliveryStrategy):
     """The artifact family.
 
+    Its phase table is not a literal like :data:`_ARCA_PHASES` but computed in
+    :meth:`phase_of` from the platform-managed switch plus the two per-construct
+    rules that ignore it (``script`` and ``cli_tools``).
+
     With ``platform_managed`` on, every non-script construct is
     ``PRE_CONTAINER``: it writes platform state and needs no container. The
     apply is closed by one redeliver. Off, the strategy reproduces the shape
@@ -383,9 +416,10 @@ class TeclawDelivery(DeliveryStrategy):
     def phase_of(self, step: ApplyStep) -> ApplyPhase:
         if step.construct == ManifestSection.SCRIPT:
             # Unsupported on teclaw (the capability resolver refuses it); the
-            # phase is kept as the table says so a declared script still walks
-            # the orchestrator's no-support path and is reported, not skipped.
-            return step.phase
+            # phase is stated anyway, and stated as the ARCA one, so a declared
+            # script still walks the orchestrator's no-support path and is
+            # reported, not skipped.
+            return ApplyPhase.PRE_CONTAINER
         if step.construct == ManifestCategory.CLI_TOOLS:
             # The artifact is teclaw's delivery and it is composed before
             # provisioning, so this category is PRE_CONTAINER whatever the

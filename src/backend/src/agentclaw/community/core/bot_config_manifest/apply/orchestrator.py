@@ -106,10 +106,10 @@ class ApplyOrchestrator:
     """Applies a parsed manifest to one bot, category by category.
 
     Constructed with the registry map (construct → materialiser) and a
-    ``steps`` callable, which is the engine family's phase table: ARCA passes
-    ``apply.order.steps_for``, teclaw passes its delivery strategy's re-phased
-    version. There is no default, so the table in use is always visible at the
-    call site.
+    ``steps`` callable, which is always a delivery strategy's ``steps_for`` —
+    the engine family's phase table applied to the shared order. There is no
+    table-level default, so the family whose phases are in use is always
+    visible at the call site.
 
     Holds no per-apply state: everything is passed in and the report comes back
     out. That is what lets the creation job call it twice — once per phase,
@@ -125,9 +125,9 @@ class ApplyOrchestrator:
         self._materialisers = dict(materialisers)
         # Which construct belongs to which phase is the engine family's to say
         # (``apply/delivery.py``, W8): every caller hands the strategy's
-        # ``steps_for`` in — there is no default, so the phase table in use is
-        # always visible at the call site. The order table's own reading,
-        # ``apply.order.steps_for``, is ARCA's.
+        # ``steps_for`` in. ``apply.order`` has no phase column and no
+        # ``steps_for`` of its own, so there is nothing to default to and the
+        # phase table in use is always visible at the call site.
         self._steps = steps
 
     async def apply(

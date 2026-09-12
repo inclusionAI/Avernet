@@ -33,7 +33,7 @@ from agentclaw.community.core.bot_config_manifest.apply.materialisers.resources 
     _DECLARED_TREE,
     ResourcesMaterialiser,
 )
-from agentclaw.community.core.bot_config_manifest.apply.order import steps_for
+from agentclaw.community.core.bot_config_manifest.apply.delivery import ArcaDelivery
 from agentclaw.community.core.bot_config_manifest.apply.orchestrator import (
     ApplyOrchestrator,
 )
@@ -53,6 +53,13 @@ from ._fakes import (
     make_context,
     real_validator,
 )
+
+
+#: The orchestrator is always handed a delivery strategy's ``steps_for``; these
+#: tests exercise the ARCA family, so they hand it ARCA's. The ports callable is
+#: never reached — ``steps_for`` only phases and sorts ``APPLY_ORDER``.
+_arca_steps = ArcaDelivery(lambda: None).steps_for
+
 
 
 def _run(coro):
@@ -1091,7 +1098,7 @@ def _resources_engine(svc, fetcher):
             resource_service=svc,
             cli_tool_service=object(),
         ),
-        steps=steps_for
+        steps=_arca_steps
     )
 
 
