@@ -95,7 +95,11 @@ def validate_prefixes(prefixes: list[str]) -> tuple[CanonicalPrefix, ...]:
 
 
 class PrefixAuthorizationPolicy:
-    """W2 AuthorizationPolicy implementation bound to one credential."""
+    """``reauthorize(url)`` for one credential: refuse outside its prefixes.
+
+    The binding the git road holds delegates here, which is where "this
+    credential may not leave its prefixes" is decided.
+    """
 
     def __init__(self, credential_name: str, prefixes: list[str]) -> None:
         self.credential_name = credential_name
