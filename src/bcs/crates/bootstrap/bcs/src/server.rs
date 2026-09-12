@@ -4100,37 +4100,7 @@ impl BcsServer {
         use bcs_service_api::BotRegistryCoreService;
 
         let group_session_secret_access = crate::http_adapter::build_secret_access(&config).await?;
-        if let Some(value) = resolve_secret_value(config.auth_sdk.secret_key_secret.as_deref(), group_session_secret_access.as_ref(), "auth_sdk.secret_key_secret").await? {
-            config.auth_sdk.secret_key = Some(value);
-        }
-        if let Some(value) = resolve_secret_value(config.llm.api_key_secret.as_deref(), group_session_secret_access.as_ref(), "llm.api_key_secret").await? {
-            config.llm.api_key = Some(Secret::new(value));
-            config.llm.api_key_env = None;
-        }
-        if config.invite.token_secret_secret.as_deref().is_some_and(|v| !v.trim().is_empty()) {
-            config.invite.token_secret = resolve_token_secret_secret(config.invite.token_secret_secret.as_deref(), group_session_secret_access.as_ref(), "invite.token_secret_secret").await?;
-        }
-        if config.session_files.share.token_secret_secret.as_deref().is_some_and(|v| !v.trim().is_empty()) {
-            config.session_files.share.token_secret = resolve_token_secret_secret(config.session_files.share.token_secret_secret.as_deref(), group_session_secret_access.as_ref(), "session_files.share.token_secret_secret").await?;
-        }
-        for account in &mut config.dingtalk_accounts {
-            if let Some(value) = resolve_secret_value(account.client_secret_secret.as_deref(), group_session_secret_access.as_ref(), "dingtalk_accounts.client_secret_secret").await? {
-                account.client_secret = Some(Secret::new(value));
-            }
-        }
-        if let Some(logger) = config.group_logger.as_mut() {
-            if let Some(value) = resolve_secret_value(logger.client_secret_secret.as_deref(), group_session_secret_access.as_ref(), "group_logger.client_secret_secret").await? {
-                logger.client_secret = value;
-            }
-        }
-        if let Some(oauth) = config.auth.oauth.as_mut() {
-            for (provider_name, provider) in &mut oauth.providers {
-                let field = format!("auth.oauth.providers.{provider_name}.client_secret_secret");
-                if let Some(value) = resolve_secret_value(provider.client_secret_secret.as_deref(), group_session_secret_access.as_ref(), &field).await? {
-                    provider.client_secret = Some(Secret::new(value));
-                }
-            }
-        }
+        resolve_config_secrets(&mut config, group_session_secret_access.as_ref()).await?;
         let invite_token_secret = resolve_invite_token_secret(&config);
         let gateway_principal_verifier = build_gateway_principal_verifier_from_secret_access(
             &config.gateway_principal,
@@ -6560,4 +6530,37 @@ impl IntoResponse for crate::BcsError {
 
         (status, body).into_response()
     }
+}async fn resolve_config_secrets(config: &mut BcsConfig, access: &dyn SecretAccessPort) -> crate::Result<()> {
+    if let Some(value) = resolve_secret_value(config.auth_sdk.secret_key_secret.as_deref(), access, "auth_sdk.secret_key_secret").await? {
+        config.auth_sdk.secret_key = Some(value);
+    }
+    if let Some(value) = resolve_secret_value(config.llm.api_key_secret.as_deref(), access, "llm.api_key_secret").await? {
+        config.llm.api_key = Some(Secret::new(value));
+        config.llm.api_key_env = None;
+    }
+    if config.invite.token_secret_secret.as_deref().is_some_and(|v| !v.trim().is_empty()) {
+        config.invite.token_secret = resolve_token_secret_secret(config.invite.token_secret_secret.as_deref(), access, "invite.token_secret_secret").await?;
+    }
+    if config.session_files.share.token_secret_secret.as_deref().is_some_and(|v| !v.trim().is_empty()) {
+        config.session_files.share.token_secret = resolve_token_secret_secret(config.session_files.share.token_secret_secret.as_deref(), access, "session_files.share.token_secret_secret").await?;
+    }
+    for account in &mut config.dingtalk_accounts {
+        if let Some(value) = resolve_secret_value(account.client_secret_secret.as_deref(), access, "dingtalk_accounts.client_secret_secret").await? {
+        account.client_secret = Some(Secret::new(value));
+        }
+    }
+    if let Some(logger) = config.group_logger.as_mut() {
+        if let Some(value) = resolve_secret_value(logger.client_secret_secret.as_deref(), access, "group_logger.client_secret_secret").await? {
+        logger.client_secret = value;
+        }
+    }
+    if let Some(oauth) = config.auth.oauth.as_mut() {
+        for (provider_name, provider) in &mut oauth.providers {
+        let field = format!("auth.oauth.providers.{provider_name}.client_secret_secret");
+        if let Some(value) = resolve_secret_value(provider.client_secret_secret.as_deref(), access, &field).await? {
+            provider.client_secret = Some(Secret::new(value));
+        }
+        }
+    }
+    Ok(())
 }
