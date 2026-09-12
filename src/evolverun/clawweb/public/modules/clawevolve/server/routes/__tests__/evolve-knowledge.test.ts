@@ -67,6 +67,32 @@ afterEach(async () => {
 });
 
 describe("evolve knowledge endpoints", () => {
+  it.each([false, true])('refreshes removed run-set sources with partial findings=%s', async (partial) => {
+    const insert = async (id: string, flows: string[], findings: string[], time: number) => {
+      const result = { schemaVersion: 'workflow-evolution-analysis/v1', analysisId: id, facts: [], inferences: [], unknowns: [],
+        diagnoses: findings.map(flow => ({ diagnosisId: flow, flowIds: [flow], nodeId: 'fetch', failureSignature: 'timeout · cli · fetch',
+          failureMode: 'timeout', severity: 'high', reasoning: 'network delay', evidenceEventIds: [] })) };
+      await db.exec(`INSERT INTO workflow_evolution_analysis_runs
+        (analysis_id, request_key, scope_type, scope_json, workflow_id, status, analysis_version, result_json, requested_at_ms, completed_at_ms)
+        VALUES (?, ?, 'run_set', ?, 'wf', 'completed', 'v1', ?, ?, ?)`,
+      [id, id, JSON.stringify({ flowIds: flows }), JSON.stringify(result), time, time]);
+    };
+    await insert('old', ['run-a', 'run-b'], ['run-a', 'run-b'], 1);
+    const aggregates = new IssueAggregationRepository(db);
+    const [old] = await aggregates.prepare('old');
+    await aggregates.complete('old', old.id, { summary: 'Old conclusion', unknowns: [], causes: [{
+      title: 'Network', conclusion: 'Slow upstream', certainty: 'hypothesis', sourceIds: old.input.sources.map(s => s.sourceId),
+    }] });
+    await insert('replacement', ['run-a', 'run-c'], partial ? ['run-c'] : [], 2);
+    // A partial result uses a different signature, so it cannot accidentally refresh the removed cause.
+    if (partial) await db.exec("UPDATE workflow_evolution_analysis_runs SET result_json = replace(result_json, 'timeout · cli · fetch', 'timeout · approval · review') WHERE analysis_id = 'replacement'");
+    const jobs = await aggregates.prepare('replacement');
+    const refreshed = jobs.find(job => job.input.signature === 'timeout · cli · fetch');
+    expect(refreshed?.input.flowIds).toEqual(['run-b']);
+    expect(refreshed?.input.sources.map(s => s.flowId)).toEqual(['run-b']);
+    expect(jobs).toHaveLength(partial ? 2 : 1);
+    expect(await aggregates.prepare('replacement')).toEqual([]);
+  });
   it('retains competing cause proposals without overwriting a single executable suggestion', async () => {
     const analyses = new WorkflowEvolutionRepository(db);
     await analyses.createAnalysisRun({ analysisId: 'multi', requestKey: 'multi', workflowId: 'wf', flowId: 'run', scopeType: 'single_run', scope: { flowIds: ['run'] }, analysisVersion: 'v1', requestedAtMs: 1 });

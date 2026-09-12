@@ -72,6 +72,9 @@ Groups exceeding 500 source diagnoses or 180,000 UTF-8 input bytes report
 Historical groups are not automatically backfilled merely by opening a page.
 Run analysis triggers affected groups; reanalyzing an associated run refreshes
 them. There is no separate browser model-dispatch or bulk backfill endpoint in v1.
+Refresh selection includes every declared `scope.flowIds` entry, even when a
+completed run-set result contains no diagnosis for that flow. Existing summaries
+that reference removed flows are regenerated if other runs keep the group alive.
 
 ## Suggestions
 
@@ -84,6 +87,10 @@ suggestions, not executable group actions. Existing suggestion lifecycle remains
 independent and does not mark all aggregate causes resolved. Supporting multiple
 independently executable suggestions for a signature requires a separate schema
 and lifecycle migration; this change does not perform that migration.
+If a signature no longer has a current diagnosis group, its independently stored
+suggestion remains visible in a separate lifecycle section with the existing
+apply/verify controls and task progress. It is not counted as a current issue or
+treated as verified merely because the latest analysis removed its diagnosis.
 
 ## Verification
 

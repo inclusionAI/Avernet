@@ -71,7 +71,9 @@ export class IssueAggregationRepository {
       WHERE workflow_id = ? AND scope_type = ? AND status = 'queued' AND requested_at_ms < ?`, [parent.workflow_id, SCOPE, Date.now() - 600_000]);
     const groups = await this.list(parent.workflow_id);
     const parentResult = validateWorkflowEvolutionAnalysisResult(JSON.parse(parent.result_json!));
-    const affectedFlows = new Set([...(parent.flow_id ? [parent.flow_id] : []), ...parentResult.diagnoses.flatMap(d => d.flowIds)]);
+    const parentScope = JSON.parse(parent.scope_json) as { flowIds?: unknown };
+    const declaredFlows = Array.isArray(parentScope.flowIds) ? parentScope.flowIds.map(String) : [];
+    const affectedFlows = new Set([...declaredFlows, ...(parent.flow_id ? [parent.flow_id] : []), ...parentResult.diagnoses.flatMap(d => d.flowIds)]);
     const affectedSignatures = new Set(parentResult.diagnoses.map(d => d.failureSignature));
     const jobs: Array<{ id: string; input: IssueGroup }> = [];
     for (const { summary: _summary, summarySources: _sources, stale: _stale, aggregationStatus, aggregationId: previousId, ...input } of groups) {

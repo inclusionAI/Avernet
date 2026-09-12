@@ -282,6 +282,10 @@ function DiagnosisPanel({
     const status = resolveSuggestionStatus(suggestion, localStatus, applyTaskMap[suggestion.id])
     return [suggestion.signature, { ...suggestion, status }] as const
   }))
+  const clusterSignatures = new Set(clusters.map(cluster => cluster.signature))
+  const standaloneSuggestions = suggestions
+    .filter(suggestion => !clusterSignatures.has(suggestion.signature))
+    .map(suggestion => ({ ...suggestion, status: resolveSuggestionStatus(suggestion, localStatus, applyTaskMap[suggestion.id]) }))
   const enriched = clusters.map((cluster) => {
     const suggestion = suggestionBySignature.get(cluster.signature)
     const runIds = Array.from(new Set([
@@ -334,7 +338,7 @@ function DiagnosisPanel({
         <p className="mt-1 text-xs leading-5 text-slate-500">同类异常按失败特征聚合；建议只在具备可执行方案时出现，应用完成后仍需验证实际效果。</p>
       </div>
 
-      {diagnoses.length === 0 && (
+      {diagnoses.length === 0 && standaloneSuggestions.length === 0 && (
         <div className="rounded-xl border border-slate-200 bg-white p-5 text-xs text-slate-500">
           当前工作流暂无已记录异常。任务护航会分析失败运行，也会保留成功运行中的异常和退化信号。
         </div>
@@ -445,6 +449,32 @@ function DiagnosisPanel({
               </button>
             </div>
           </article>
+          })}
+        </div>
+      </section>}
+
+      {standaloneSuggestions.length > 0 && <section aria-label="已有建议跟进" className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 px-4 py-3">
+          <h3 className="text-sm font-semibold text-slate-900">已有建议跟进</h3>
+          <p className="mt-1 text-xs leading-5 text-slate-500">最新分析已无对应诊断；已有建议和任务仍需独立跟进，不代表修复已验证有效。</p>
+        </div>
+        <div className="divide-y divide-slate-100">
+          {standaloneSuggestions.map(suggestion => {
+            const status = SUGGESTION_STATUS[suggestion.status] ?? SUGGESTION_STATUS.pending
+            return <article key={suggestion.id} className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold text-slate-900">{suggestion.weakNode || '工作流建议'}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${status.cls}`}>{status.label}</span>
+                </div>
+                <p className="mt-1.5 break-words text-xs leading-5 text-slate-600">{suggestion.description}</p>
+                <p className="mt-1 break-all text-[10px] text-slate-400">{suggestion.signature}</p>
+                <ApplyTaskStatusBadge task={applyTaskMap[suggestion.id]} />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <SuggestionActions suggestion={suggestion} canEdit={canEdit} onAction={onAction} onApply={onApply} />
+              </div>
+            </article>
           })}
         </div>
       </section>}

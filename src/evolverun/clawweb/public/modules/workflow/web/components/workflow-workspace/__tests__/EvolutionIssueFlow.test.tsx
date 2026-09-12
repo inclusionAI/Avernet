@@ -1,13 +1,16 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const lifecycle = vi.hoisted(() => ({ hideGroups: false, status: 'pending', canEdit: true }))
+afterEach(() => { lifecycle.hideGroups = false; lifecycle.status = 'pending'; lifecycle.canEdit = true })
 
 vi.mock('../issue-groups', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../issue-groups')>();
   const hooks = await import('../../../api/hooks');
   return { ...actual, useIssueGroups: () => {
-    const rows = hooks.useEvolveDiagnoses().data!.diagnoses;
+    const rows = lifecycle.hideGroups ? [] : hooks.useEvolveDiagnoses().data!.diagnoses;
     const signatures = [...new Set(rows.map(row => row.failure_signature))];
     return { isLoading: false, isError: false, data: { groups: signatures.map(signature => ({
       workflowId: 'wf-1', signature, flowIds: rows.filter(r => r.failure_signature === signature).map(r => r.flow_id),
@@ -175,7 +178,7 @@ vi.mock('../../../api/hooks', () => ({
           impactRuns: 2,
           evidenceRuns: ['run-1', 'run-4'],
           description: '将超时阈值调整为 90 秒',
-          status: 'pending',
+          status: lifecycle.status,
           proposalDigest: 'a'.repeat(64),
         },
         {
@@ -197,7 +200,7 @@ vi.mock('../../../api/hooks', () => ({
     refetch: vi.fn(),
   }),
   useSuggestionApplyTasks: applyTasks,
-  useWorkflowAccess: () => ({ data: { canEdit: true } }),
+  useWorkflowAccess: () => ({ data: { canEdit: lifecycle.canEdit } }),
   useRecordSuggestionAction: () => ({ mutate }),
   useEligibleBotsForSuggestion: eligibleBots,
   useApplySuggestion: () => ({ mutateAsync: vi.fn() }),
@@ -209,6 +212,35 @@ vi.mock('../../../api/hooks', () => ({
 import EvolutionTab from '../EvolutionTab'
 
 describe('issue and optimization flow', () => {
+  it.each(['pending', 'applying', 'applied_unverified'])('preserves suggestion-only controls for %s', async (status) => {
+    lifecycle.hideGroups = true
+    lifecycle.status = status
+    render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    const row = screen.getByText('将超时阈值调整为 90 秒').closest('article')!
+    expect(row).not.toBeNull()
+    expect(screen.queryByText(/当前工作流暂无已记录异常/)).not.toBeInTheDocument()
+    if (status === 'pending') {
+      await userEvent.click(within(row).getByRole('button', { name: '应用建议' }))
+      expect(screen.getByRole('dialog', { name: '选择 Bot 自动应用建议' })).toBeInTheDocument()
+    } else if (status === 'applied_unverified') {
+      expect(within(row).getByRole('button', { name: '确认有效' })).toBeInTheDocument()
+      expect(within(row).getByRole('button', { name: '未达预期' })).toBeInTheDocument()
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+      await userEvent.click(within(row).getByRole('button', { name: '确认有效' }))
+      expect(mutate).toHaveBeenLastCalledWith(expect.objectContaining({ suggestionId: 's-1', action: 'verified' }), expect.anything())
+      confirm.mockRestore()
+    } else {
+      expect(within(row).getByText('应用中')).toBeInTheDocument()
+      expect(within(row).queryByRole('button', { name: '应用建议' })).not.toBeInTheDocument()
+    }
+  })
+  it('keeps suggestion-only controls read-only without workflow edit permission', () => {
+    lifecycle.hideGroups = true
+    lifecycle.canEdit = false
+    render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
+    expect(screen.getByText('将超时阈值调整为 90 秒')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '应用建议' })).not.toBeInTheDocument()
+  })
   it('keeps the list compact and opens problem actions in a detail drawer', async () => {
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
 
@@ -218,6 +250,7 @@ describe('issue and optimization flow', () => {
     expect(within(actionableIssue!).getByText('将超时阈值调整为 90 秒')).toBeInTheDocument()
     expect(within(actionableIssue!).getByText('将超时阈值调整为 90 秒')).toHaveClass('line-clamp-2')
     expect(within(actionableIssue!).getByText('建议')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '已有建议跟进' })).not.toBeInTheDocument()
     expect(within(actionableIssue!).queryByRole('button', { name: '采纳' })).not.toBeInTheDocument()
 
     await userEvent.click(within(actionableIssue!).getByRole('button', { name: '查看' }))
@@ -334,7 +367,8 @@ describe('issue and optimization flow', () => {
     })
   })
 
-  it('shows the selected Bot and current application progress', async () => {
+  it.each([false, true])('shows application progress with diagnosis groups removed=%s', async (hideGroups) => {
+    lifecycle.hideGroups = hideGroups
     const now = Date.now()
     applyTasks.mockReturnValueOnce({
       data: {
