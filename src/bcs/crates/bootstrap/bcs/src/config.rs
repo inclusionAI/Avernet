@@ -175,6 +175,7 @@ impl Default for SessionFilesShareConfig {
     fn default() -> Self {
         Self {
             token_secret: None,
+            token_secret_secret: None,
             default_ttl_seconds: default_session_files_share_ttl(),
             share_base_url: None,
             history_attachment_ttl_seconds: default_history_attachment_ttl(),
