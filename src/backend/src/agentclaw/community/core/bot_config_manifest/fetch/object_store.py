@@ -2,9 +2,9 @@
 
 A manifest source on ``protocol: oss`` names a bucket and a key; the endpoint,
 the region and the AK/SK come from the tenant's stored credential. This module
-turns that pair into a read. It is the third transport beside
-:mod:`guarded_fetcher` (HTTPS) and :mod:`git_source` (git), and like them it
-is a plain core class: there is one implementation, Aliyun OSS's native
+turns that pair into a read. It is one of the two transports that remain —
+the other is :mod:`git_source` (git) — and like it, it is a plain core
+class: there is one implementation, Aliyun OSS's native
 protocol through ``oss2``, and nothing for a deploy profile to select.
 
 **Why one implementation, and why this one.** The store that matters serves
@@ -286,10 +286,10 @@ class AliyunObjectStore:
     and doing it there turns that into a refusal for one entry instead of
     aborting the apply that merely named the credential.
 
-    ``_open`` is the test seam, the way :class:`GuardedFetcher` takes a
-    ``resolver``: production opens a real bucket, a unit test hands in one
-    whose ``get_object`` raises a synthesised SDK error or serves a scripted
-    stream. Nothing else about the class is configurable.
+    ``_open`` is the test seam, the way :func:`.endpoint_guard.endpoint_refusal`
+    takes a ``resolver``: production opens a real bucket, a unit test hands in
+    one whose ``get_object`` raises a synthesised SDK error or serves a
+    scripted stream. Nothing else about the class is configurable.
 
     Two things this must get right, both carried over from the guarded
     fetcher because dropping the request signer must not drop the protections

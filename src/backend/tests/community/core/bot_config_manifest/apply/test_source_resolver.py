@@ -176,7 +176,7 @@ def _acquire(pipeline, *, ctx=None, digest=None, keep_last=False):
 # from the platform's copy, unpinned ones re-read, ``keep_last`` answers only
 # when it may, and every store fault is *this entry's* failure. The ones that
 # were about the URL transport itself (per-hop prefix authorization, a refused
-# address, a header injector) went with it: they pinned ``GuardedFetcher``'s
+# address, a header injector) went with it: they pinned that transport's own
 # seams, which this module no longer has.
 
 
