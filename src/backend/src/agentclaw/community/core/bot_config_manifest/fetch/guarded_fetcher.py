@@ -1,19 +1,27 @@
-"""Fetch-road failure vocabulary and the credential endpoint guard (W2, #1470).
+"""The credential endpoint guard — the SSRF rule applied before a write.
 
-Two things live here, and only one of them ever had a transport. The
-``FetchRefusedError`` / ``FetchFailedError`` pair is the vocabulary both
-remaining roads — the object store and git — classify their outcomes with,
-and ``FetchedObject`` is the receipt-bearing record the content store takes.
-``endpoint_refusal`` is the SSRF rule the credential surface runs before it
-will persist an object-store endpoint.
+An object-store credential carries an endpoint, and the platform will connect
+to whatever that endpoint names on the next apply. :func:`endpoint_refusal` is
+the rule the credential surface runs *before persisting* one, which is the
+only point at which refusing costs nobody an apply.
 
-Defense order, where it still applies:
+Two checks, in this order, because the cheap one is host-independent:
 
-1. **URL shape** (scheme, host, userinfo) — cheap, host-independent
-   refusals happen before DNS.
-2. **Resolution and address validation** — every address the name resolves
-   to must be globally routable (loopback/link-local/ULA/multicast/reserved
-   are all refused).
+1. **URL shape** — scheme, host, userinfo — refused before any DNS.
+2. **Resolution and address validation** — every address the name resolves to
+   must be globally routable; loopback, link-local, ULA, private, multicast
+   and reserved are all refused. Every address is validated, not a lucky
+   first one.
+
+The deployment transport allowlist
+(``user_config.bot_config_manifest.fetch_transport_allowlist``, parsed by
+:func:`~agentclaw.community.core.bot_config_manifest.fetch.limits.transport_allowlist_from_config`
+and handed to ``SourceCredentialService`` by the composition root) exempts
+an exact host from the public-only and https-only rules and from nothing
+else: an internal object store is a destination the deployment declared, so
+its endpoint stays registrable. Matching is exact-host — the DNS-rebinding
+lesson: a hostname on the list is the hostname exempted, with no pattern
+semantics to reason about.
 
 Precedent: the engine repo's ``resource_materialization.py`` guarded
 downloader — same layering (shape → global-only resolution), re-implemented
@@ -23,12 +31,13 @@ from __future__ import annotations
 
 import ipaddress
 import socket
-from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Iterable, Optional
 
 import httpx
 
+from agentclaw.community.core.bot_config_manifest.fetch.errors import (
+    FetchRefusedError,
+)
 from agentclaw.community.core.bot_config_manifest.fetch.limits import SAFE_SCHEMES
 from agentclaw.community.core.bot_config_manifest.fetch.limits import (
     Resolver as ResolverType,
@@ -38,23 +47,6 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 
-class FetchRefusedError(Exception):
-    """The request never left: transport policy refused it.
-
-    A configuration-class answer (refused scheme/address/policy/budget),
-    and no internal text rides out — the fetching side reports the rule,
-    not the site's or the caller's data.
-    """
-
-
-class FetchFailedError(Exception):
-    """The request was attempted and the source failed it.
-
-    Non-2xx terminal statuses, transport failures, and a digest mismatch —
-    the last is deliberately this, not a "success with corrupted bytes".
-    """
-
-
 #: Default resolution is real DNS; tests inject deterministic answers.
 def _resolve_via_socket(host: str) -> list[str]:
     try:
@@ -62,18 +54,6 @@ def _resolve_via_socket(host: str) -> list[str]:
     except OSError as exc:
         raise FetchRefusedError(f"cannot resolve host: {host!r}") from exc
     return sorted({info[4][0] for info in infos})
-
-
-@dataclass(frozen=True)
-class FetchedObject:
-    """Fetched bytes with their receipt — write-or-hash material, never run."""
-
-    bytes: bytes
-    sha256: str
-    url: str
-    content_type: Optional[str]
-    fetched_at: datetime
-    size_bytes: int
 
 
 def endpoint_refusal(
@@ -88,17 +68,17 @@ def endpoint_refusal(
     credential surface **before persisting** an endpoint, which is the only
     point at which refusing costs nobody an apply.
 
-    It exists because of a wrong assumption. The object-store road drops the
-    fetcher's SSRF machinery on the argument that its endpoint comes from a
-    credential rather than from a tenant's document — but a credential is
+    It exists because of a wrong assumption: that an object-store endpoint
+    needs no SSRF machinery, on the argument that it comes from a credential
+    rather than from a tenant's document — but a credential is
     itself written by an authenticated tenant application through the API, so
     "not from the document" is not "not from the tenant". Without this,
     ``http://169.254.169.254/`` is a storable endpoint and the platform will
     connect to it on the next apply.
 
-    **A host that will not resolve is not refused**, and that divergence from
-    the fetch road is deliberate. There, resolution failure is a statement of
-    fact: the hop cannot happen, so refusing it describes reality. Here it
+    **A host that will not resolve is not refused**, and that concession is
+    deliberate. At fetch time a resolution failure is a statement of fact:
+    the read cannot happen, so refusing it describes reality. Here it
     would be a prediction — the pod that stores a credential is not the pod
     that later reads with it, and split-horizon DNS, a private zone, or a
     minute's outage are all ordinary reasons a good endpoint does not answer
@@ -115,8 +95,8 @@ def endpoint_refusal(
     name that *does* resolve somewhere private, and every shape rule above it.
 
     ``resolver`` defaults to real DNS; tests inject. A host on the deployment
-    transport allowlist is exempt from the public-only rule, exactly as it is
-    on the fetch road — the deployment declared that destination.
+    transport allowlist is exempt from the public-only rule — the deployment
+    declared that destination.
     """
     if any(ch in endpoint for ch in "\r\n\x00"):
         return "endpoint must not contain control characters"
@@ -162,8 +142,7 @@ def endpoint_refusal(
         )
         return None
     if any(_refused_address(ip) for ip in addresses):
-        # Every address, not a lucky first one — the same rule the fetch road
-        # applies, for the same reason.
+        # Every address, not a lucky first one.
         return f"endpoint host resolves to a non-public address: {host!r}"
     return None
 

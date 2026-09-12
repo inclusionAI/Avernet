@@ -20,7 +20,7 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
 from agentclaw.community.core.bot_config_manifest.credentials.errors import (
     CredentialNotFoundError,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchedObject,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.object_store import (

@@ -32,7 +32,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
     _GitCommandError,
     _real_run_git,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchFailedError,
     FetchRefusedError,
 )

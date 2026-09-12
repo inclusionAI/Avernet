@@ -24,7 +24,7 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
     canonical_tree_bytes,
     decode_tree_bytes,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchRefusedError,
 )
 

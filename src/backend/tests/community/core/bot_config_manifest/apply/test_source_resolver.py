@@ -43,7 +43,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
     GitSourceSpec,
     git_receipt_url,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchFailedError,
 )
 from ._fakes import (
