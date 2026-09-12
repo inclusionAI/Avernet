@@ -76,6 +76,7 @@ pub fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
         metrics: Default::default(),
         invite: bcs::InviteConfig {
             token_secret: Some("test-invite-secret-32-bytes!!!!".to_string()),
+            token_secret_secret: None,
             invite_code_gate_enabled: false,
             public_claim_enabled: false,
             public_claim_max_count: 1_000,
