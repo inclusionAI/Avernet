@@ -1491,6 +1491,25 @@ fn build_invite_code_service(
     ))
 }
 
+async fn resolve_secret_value(
+    name: Option<&str>,
+    access: &dyn SecretAccessPort,
+    field: &str,
+) -> crate::Result<Option<String>> {
+    let Some(name) = name.map(str::trim).filter(|v| !v.is_empty()) else { return Ok(None); };
+    let record = access.get_secret(name).await.map_err(|e| crate::BcsError::InvalidConfig(format!("{field} '{name}' unavailable: {e}")))?;
+    if record.value.trim().is_empty() { return Err(crate::BcsError::InvalidConfig(format!("{field} '{name}' is empty"))); }
+    Ok(Some(record.value))
+}
+
+async fn resolve_token_secret_secret(
+    secret_key: Option<&str>,
+    secret_access: &dyn SecretAccessPort,
+    field: &str,
+) -> crate::Result<Option<String>> {
+    resolve_secret_value(secret_key, secret_access, field).await
+}
+
 fn resolve_invite_token_secret(config: &BcsConfig) -> Vec<u8> {
     config
         .invite
@@ -1749,6 +1768,71 @@ mod gateway_principal_tests {
             resolve_invite_token_secret(&config),
             b"configured-invite-secret"
         );
+    }
+
+    #[tokio::test]
+    async fn all_config_secret_references_resolve_together() {
+        use bcs_config_api::{OAuthSettings, ProviderSettings};
+        use std::collections::BTreeMap;
+        let mut config = BcsConfig::default();
+        config.auth_sdk.secret_key_secret = Some("auth".into());
+        config.llm.api_key_secret = Some("llm".into());
+        config.invite.token_secret_secret = Some("invite".into());
+        config.session_files.share.token_secret_secret = Some("share".into());
+        let mut account = config.dingtalk_accounts.first().cloned().unwrap_or_default();
+        account.client_secret_secret = Some("ding".into());
+        config.dingtalk_accounts = vec![account];
+        let mut logger = ding_logger::GroupLoggerConfig { enabled: true, client_id: "id".into(), client_secret: String::new(), client_secret_secret: Some("logger".into()), group_ids: vec!["g".into()] };
+        config.group_logger = Some(logger.clone());
+        let mut providers = BTreeMap::new();
+        providers.insert("google".into(), ProviderSettings { kind: None, client_id: "id".into(), client_secret: None, client_secret_secret: Some("oauth".into()), private_key: None, alipay_public_key: None });
+        config.auth.oauth = Some(OAuthSettings { providers, ..OAuthSettings::default() });
+        let access = InMemorySecretAccess::with_entries([
+            ("auth", String::new(), "auth-value".into()), ("llm", String::new(), "llm-value".into()),
+            ("invite", String::new(), "invite-value".into()), ("share", String::new(), "share-value".into()),
+            ("ding", String::new(), "ding-value".into()), ("logger", String::new(), "logger-value".into()),
+            ("oauth", String::new(), "oauth-value".into()),
+        ]);
+        resolve_config_secrets(&mut config, &access).await.unwrap();
+        assert_eq!(config.auth_sdk.secret_key.as_deref(), Some("auth-value"));
+        assert_eq!(config.llm.api_key.as_ref().map(|v| v.expose_secret().as_str()), Some("llm-value"));
+        assert_eq!(config.invite.token_secret.as_deref(), Some("invite-value"));
+        assert_eq!(config.session_files.share.token_secret.as_deref(), Some("share-value"));
+        assert_eq!(config.dingtalk_accounts[0].client_secret.as_ref().map(|v| v.expose_secret().as_str()), Some("ding-value"));
+        assert_eq!(config.group_logger.as_ref().unwrap().client_secret, "logger-value");
+        assert_eq!(config.auth.oauth.as_ref().unwrap().providers["google"].client_secret.as_ref().map(|v| v.expose_secret().as_str()), Some("oauth-value"));
+    }
+
+    #[tokio::test]
+    async fn token_secret_reference_resolves_and_rejects_missing_or_empty() {
+        let access = InMemorySecretAccess::with_entries([("invite-key", String::new(), "resolved".to_string())]);
+        let resolved = resolve_token_secret_secret(Some(" invite-key "), &access, "invite.token_secret_secret")
+            .await
+            .expect("secret resolves");
+        assert_eq!(resolved.as_deref(), Some("resolved"));
+
+        let missing = resolve_token_secret_secret(Some("missing"), &InMemorySecretAccess::new(), "invite.token_secret_secret")
+            .await
+            .expect_err("missing secret fails");
+        assert!(missing.to_string().contains("invite.token_secret_secret"));
+
+        let empty_access = InMemorySecretAccess::with_entries([("empty", String::new(), "  ".to_string())]);
+        let empty = resolve_token_secret_secret(Some("empty"), &empty_access, "invite.token_secret_secret")
+            .await
+            .expect_err("empty secret fails");
+        assert!(empty.to_string().contains("is empty"));
+
+        assert_eq!(resolve_token_secret_secret(None, &InMemorySecretAccess::new(), "field").await.unwrap(), None);
+        let access = InMemorySecretAccess::with_entries([("auth", String::new(), "auth-value".to_string())]);
+        assert_eq!(resolve_secret_value(Some(" auth "), &access, "auth_sdk.secret_key_secret").await.unwrap().as_deref(), Some("auth-value"));
+        assert!(resolve_secret_value(Some("missing"), &InMemorySecretAccess::new(), "llm.api_key_secret").await.is_err());
+    }
+
+    #[test]
+    fn legacy_token_secret_is_preserved_without_secret_reference() {
+        let mut config = BcsConfig::default();
+        config.invite.token_secret = Some("legacy-invite".to_string());
+        assert_eq!(resolve_invite_token_secret(&config), b"legacy-invite");
     }
 
     #[test]
@@ -4042,14 +4126,15 @@ impl BcsServer {
 
     /// Create a new BCS server with externally supplied infrastructure plugins.
     pub async fn new_with_infrastructure(
-        config: BcsConfig,
+        mut config: BcsConfig,
         infrastructure_plugins: InfrastructurePlugins,
         extensions: BcsServerExtensions,
     ) -> crate::Result<Self> {
         use bcs_service_api::BotRegistryCoreService;
 
-        let invite_token_secret = resolve_invite_token_secret(&config);
         let group_session_secret_access = crate::http_adapter::build_secret_access(&config).await?;
+        resolve_config_secrets(&mut config, group_session_secret_access.as_ref()).await?;
+        let invite_token_secret = resolve_invite_token_secret(&config);
         let gateway_principal_verifier = build_gateway_principal_verifier_from_secret_access(
             &config.gateway_principal,
             group_session_secret_access.clone(),
@@ -6478,4 +6563,37 @@ impl IntoResponse for crate::BcsError {
 
         (status, body).into_response()
     }
+}async fn resolve_config_secrets(config: &mut BcsConfig, access: &dyn SecretAccessPort) -> crate::Result<()> {
+    if let Some(value) = resolve_secret_value(config.auth_sdk.secret_key_secret.as_deref(), access, "auth_sdk.secret_key_secret").await? {
+        config.auth_sdk.secret_key = Some(value);
+    }
+    if let Some(value) = resolve_secret_value(config.llm.api_key_secret.as_deref(), access, "llm.api_key_secret").await? {
+        config.llm.api_key = Some(Secret::new(value));
+        config.llm.api_key_env = None;
+    }
+    if config.invite.token_secret_secret.as_deref().is_some_and(|v| !v.trim().is_empty()) {
+        config.invite.token_secret = resolve_token_secret_secret(config.invite.token_secret_secret.as_deref(), access, "invite.token_secret_secret").await?;
+    }
+    if config.session_files.share.token_secret_secret.as_deref().is_some_and(|v| !v.trim().is_empty()) {
+        config.session_files.share.token_secret = resolve_token_secret_secret(config.session_files.share.token_secret_secret.as_deref(), access, "session_files.share.token_secret_secret").await?;
+    }
+    for account in &mut config.dingtalk_accounts {
+        if let Some(value) = resolve_secret_value(account.client_secret_secret.as_deref(), access, "dingtalk_accounts.client_secret_secret").await? {
+        account.client_secret = Some(Secret::new(value));
+        }
+    }
+    if let Some(logger) = config.group_logger.as_mut() {
+        if let Some(value) = resolve_secret_value(logger.client_secret_secret.as_deref(), access, "group_logger.client_secret_secret").await? {
+        logger.client_secret = value;
+        }
+    }
+    if let Some(oauth) = config.auth.oauth.as_mut() {
+        for (provider_name, provider) in &mut oauth.providers {
+        let field = format!("auth.oauth.providers.{provider_name}.client_secret_secret");
+        if let Some(value) = resolve_secret_value(provider.client_secret_secret.as_deref(), access, &field).await? {
+            provider.client_secret = Some(Secret::new(value));
+        }
+        }
+    }
+    Ok(())
 }

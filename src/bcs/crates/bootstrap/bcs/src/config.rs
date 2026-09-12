@@ -31,6 +31,9 @@ pub struct InviteConfig {
     #[serde(default)]
     pub token_secret: Option<String>,
 
+    #[serde(default)]
+    pub token_secret_secret: Option<String>,
+
     /// Whether the invite-code access gate is enabled.
     /// When false or unset, protected routes do not enforce invite-code binding.
     #[serde(default)]
@@ -61,6 +64,7 @@ impl Default for InviteConfig {
     fn default() -> Self {
         Self {
             token_secret: None,
+            token_secret_secret: None,
             invite_code_gate_enabled: false,
             public_claim_enabled: false,
             public_claim_max_count: default_public_claim_max_count(),
@@ -148,6 +152,9 @@ pub struct SessionFilesShareConfig {
     #[serde(default)]
     pub token_secret: Option<String>,
 
+    #[serde(default)]
+    pub token_secret_secret: Option<String>,
+
     /// Default share-token TTL in seconds. Clamped to `[60, 604800]` at mint.
     #[serde(default = "default_session_files_share_ttl")]
     pub default_ttl_seconds: u64,
@@ -168,6 +175,7 @@ impl Default for SessionFilesShareConfig {
     fn default() -> Self {
         Self {
             token_secret: None,
+            token_secret_secret: None,
             default_ttl_seconds: default_session_files_share_ttl(),
             share_base_url: None,
             history_attachment_ttl_seconds: default_history_attachment_ttl(),
@@ -2199,6 +2207,7 @@ x-collector-route = "collector-local"
             kind: None, // defaults to the instance name "google"
             client_id: "gid".to_string(),
             client_secret: None,
+            client_secret_secret: None,
             private_key: None,
             alipay_public_key: None,
         };
@@ -2213,6 +2222,7 @@ x-collector-route = "collector-local"
             kind: Some("github".to_string()),
             client_id: "ghid".to_string(),
             client_secret: None,
+            client_secret_secret: None,
             private_key: None,
             alipay_public_key: None,
         };
@@ -2230,6 +2240,7 @@ x-collector-route = "collector-local"
             kind: Some("facebook".to_string()),
             client_id: "id".to_string(),
             client_secret: None,
+            client_secret_secret: None,
             private_key: None,
             alipay_public_key: None,
         };
@@ -2249,6 +2260,7 @@ x-collector-route = "collector-local"
             kind: None,
             client_id: "  ".to_string(),
             client_secret: None,
+            client_secret_secret: None,
             private_key: None,
             alipay_public_key: None,
         };
