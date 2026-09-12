@@ -1491,6 +1491,17 @@ fn build_invite_code_service(
     ))
 }
 
+async fn resolve_secret_value(
+    name: Option<&str>,
+    access: &dyn SecretAccessPort,
+    field: &str,
+) -> crate::Result<Option<String>> {
+    let Some(name) = name.map(str::trim).filter(|v| !v.is_empty()) else { return Ok(None); };
+    let record = access.get_secret(name).await.map_err(|e| crate::BcsError::InvalidConfig(format!("{field} '{name}' unavailable: {e}")))?;
+    if record.value.trim().is_empty() { return Err(crate::BcsError::InvalidConfig(format!("{field} '{name}' is empty"))); }
+    Ok(Some(record.value))
+}
+
 async fn resolve_token_secret_secret(
     secret_key: Option<&str>,
     secret_access: &dyn SecretAccessPort,
@@ -1786,6 +1797,9 @@ mod gateway_principal_tests {
         assert!(empty.to_string().contains("is empty"));
 
         assert_eq!(resolve_token_secret_secret(None, &InMemorySecretAccess::new(), "field").await.unwrap(), None);
+        let access = InMemorySecretAccess::with_entries([("auth", String::new(), "auth-value".to_string())]);
+        assert_eq!(resolve_secret_value(Some(" auth "), &access, "auth_sdk.secret_key_secret").await.unwrap().as_deref(), Some("auth-value"));
+        assert!(resolve_secret_value(Some("missing"), &InMemorySecretAccess::new(), "llm.api_key_secret").await.is_err());
     }
 
     #[test]
@@ -4093,15 +4107,11 @@ impl BcsServer {
         use bcs_service_api::BotRegistryCoreService;
 
         let group_session_secret_access = crate::http_adapter::build_secret_access(&config).await?;
-        if let Some(name) = config.auth_sdk.secret_key_secret.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
-            let record = group_session_secret_access.get_secret(name).await.map_err(|e| crate::BcsError::InvalidConfig(format!("auth_sdk.secret_key_secret '{name}' unavailable: {e}")))?;
-            if record.value.trim().is_empty() { return Err(crate::BcsError::InvalidConfig(format!("auth_sdk.secret_key_secret '{name}' is empty"))); }
-            config.auth_sdk.secret_key = Some(record.value);
+        if let Some(value) = resolve_secret_value(config.auth_sdk.secret_key_secret.as_deref(), group_session_secret_access.as_ref(), "auth_sdk.secret_key_secret").await? {
+            config.auth_sdk.secret_key = Some(value);
         }
-        if let Some(name) = config.llm.api_key_secret.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
-            let record = group_session_secret_access.get_secret(name).await.map_err(|e| crate::BcsError::InvalidConfig(format!("llm.api_key_secret '{name}' unavailable: {e}")))?;
-            if record.value.trim().is_empty() { return Err(crate::BcsError::InvalidConfig(format!("llm.api_key_secret '{name}' is empty"))); }
-            config.llm.api_key = Some(Secret::new(record.value));
+        if let Some(value) = resolve_secret_value(config.llm.api_key_secret.as_deref(), group_session_secret_access.as_ref(), "llm.api_key_secret").await? {
+            config.llm.api_key = Some(Secret::new(value));
             config.llm.api_key_env = None;
         }
         if config.invite.token_secret_secret.as_deref().is_some_and(|v| !v.trim().is_empty()) {
