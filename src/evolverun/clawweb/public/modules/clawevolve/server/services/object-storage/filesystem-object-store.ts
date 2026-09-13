@@ -1,6 +1,9 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rename, rm, stat, realpath } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
+import { createReadStream, createWriteStream } from "node:fs";
+import { Transform, type Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import type { ObjectStore, StoredObject } from "./oss-object-store.js";
 
 const MAX_OBJECT_BYTES = 10 * 1024 * 1024;
@@ -18,7 +21,8 @@ export class FilesystemObjectStore implements ObjectStore {
   private readonly root: string;
   private readonly signingKey = randomBytes(32);
 
-  constructor(root: string) {
+  constructor(root: string, private readonly publicBaseUrl = "", private readonly maxObjectBytes = MAX_OBJECT_BYTES) {
+    if (!Number.isSafeInteger(maxObjectBytes) || maxObjectBytes < 1) throw new Error("Invalid artifact size limit");
     this.root = resolve(root);
   }
 
@@ -31,7 +35,7 @@ export class FilesystemObjectStore implements ObjectStore {
 
   async getObject(objectKey: string): Promise<StoredObject> {
     const content = await readFile(this.pathFor(objectKey));
-    if (content.byteLength > MAX_OBJECT_BYTES) throw new Error("Artifact exceeds the 10 MiB limit");
+    if (content.byteLength > this.maxObjectBytes) throw new Error("Artifact exceeds the configured size limit");
     return {
       content,
       etag: createHash("sha256").update(content).digest("hex"),
@@ -45,11 +49,43 @@ export class FilesystemObjectStore implements ObjectStore {
     _contentType: string,
   ): Promise<{ etag: string }> {
     const payload = typeof content === "string" ? Buffer.from(content) : Buffer.from(content);
-    if (payload.byteLength > MAX_OBJECT_BYTES) throw new Error("Artifact exceeds the 10 MiB limit");
+    if (payload.byteLength > this.maxObjectBytes) throw new Error("Artifact exceeds the configured size limit");
     const target = this.pathFor(objectKey);
     await mkdir(dirname(target), { recursive: true, mode: 0o700 });
     await writeFile(target, payload, { mode: 0o600 });
     return { etag: createHash("sha256").update(payload).digest("hex") };
+  }
+
+  async putStream(objectKey: string, source: Readable): Promise<{ etag: string }> {
+    const target = this.pathFor(objectKey);
+    await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+    const root = await realpath(this.root);
+    const parent = await realpath(dirname(target));
+    // COSEC: do not follow a redirected artifact directory, and publish only complete uploads.
+    if (parent !== root && !parent.startsWith(`${root}${sep}`)) throw new Error("Artifact path escaped its root");
+    const temp = `${target}.${randomBytes(12).toString("hex")}.upload`;
+    const hash = createHash("sha256");
+    let bytes = 0;
+    const limit = this.maxObjectBytes;
+    const counter = new Transform({ transform(chunk: Buffer, _encoding, callback) {
+      bytes += chunk.length;
+      if (bytes > limit) { callback(new Error("Artifact exceeds the configured size limit")); return; }
+      hash.update(chunk); callback(null, chunk);
+    } });
+    try {
+      await pipeline(source, counter, createWriteStream(temp, { flags: "wx", mode: 0o600 }));
+      await rename(temp, target);
+      return { etag: hash.digest("hex") };
+    } finally { await rm(temp, { force: true }); }
+  }
+
+  async openStream(objectKey: string) {
+    const file = await realpath(this.pathFor(objectKey));
+    const root = await realpath(this.root);
+    if (!file.startsWith(`${root}${sep}`)) throw new Error("Artifact path escaped its root");
+    const info = await stat(file);
+    if (!info.isFile() || info.size > this.maxObjectBytes) throw new Error("Artifact exceeds the configured size limit or is not a file");
+    return { size: info.size, stream: createReadStream(file) };
   }
 
   async createSignedUrl(
@@ -66,7 +102,7 @@ export class FilesystemObjectStore implements ObjectStore {
       expiresAt: Date.now() + expiresSeconds * 1000,
     })).toString("base64url");
     const signature = createHmac("sha256", this.signingKey).update(payload).digest("base64url");
-    return `/api/singlebox/artifacts/${payload}.${signature}`;
+    return `${this.publicBaseUrl}/api/singlebox/artifacts/${payload}.${signature}`;
   }
 
   resolveSignedRequest(token: string, method: string): string {

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Evolve Tune"
+  short_description: "根据优化集 bench 和策略 spec 执行一轮自进化调优。"
+  default_prompt: "使用 clawevolve-tune，根据 round_dir 中的 objective、spec-vN 和 optimization_result 对当前 workspace 做一轮小而可解释的调优，并写出 tune_report、changed_files 和 diff。"

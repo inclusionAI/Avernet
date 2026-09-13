@@ -396,7 +396,7 @@ describe("ClawEvolve step protocol", () => {
       body: JSON.stringify({
         taskName: "Blog Bench Evolution", userId: "user-1", botId: "bot-1",
         objective: "提升博客质量并保证测试集不回退",
-        trainBenchDomainId: "blog-train", testBenchDomainId: "blog-test", maxRounds: 3,
+        trainBenchDomainId: "blog-train", testBenchDomainId: "blog-test", model: "antchat/GLM-5.2", maxRounds: 3,
       }),
     });
     const body = await response.json() as Record<string, unknown>;
@@ -408,12 +408,14 @@ describe("ClawEvolve step protocol", () => {
     expect(steps[0].command).toContain("--train-domain-id blog-train");
     expect(steps[0].command).toContain("--test-domain-id blog-test");
     expect(steps[0].command).toContain("--owner-id user-1");
+    expect(steps[0].command).toContain("--model antchat/GLM-5.2");
     expect(steps[0].command).not.toContain("--final-action loop");
     expect(steps[0].command).not.toContain("提升博客质量");
     const saved = await repo.findTask(String(body.task_id));
     const config = JSON.parse(saved!.config_json) as Record<string, unknown>;
     expect(config).toEqual(expect.objectContaining({
       trainBenchDomainId: "blog-train", testBenchDomainId: "blog-test",
+      model: "antchat/GLM-5.2",
       objective: "提升博客质量并保证测试集不回退",
       pinnedBenchDomains: expect.objectContaining({
         "blog-train": [{ templateName: "blog-train-case", templateVersion: 1 }],
@@ -455,6 +457,7 @@ describe("ClawEvolve step protocol", () => {
     expect(updatedSteps[1].command).toContain("/clawevolve-workflow --stage optimize");
     expect(updatedSteps[1].command).toContain("--train-bench-domain-id blog-train");
     expect(updatedSteps[1].command).toContain("--test-bench-domain-id blog-test");
+    expect(updatedSteps[1].command).toContain("--model antchat/GLM-5.2");
   });
 
   it("creates a Bench task from a published domain using existing tables", async () => {
@@ -1332,6 +1335,7 @@ describe("ClawEvolve step protocol", () => {
         taskName: "一句话目标进化",
         userId: "user-1",
         botId: "bot-1",
+        model: "antchat/GLM-5.1",
         goal: "将工具调用任务完成率提升到 90% 以上",
         maxRounds: 3,
       }),
@@ -1339,12 +1343,13 @@ describe("ClawEvolve step protocol", () => {
     expect(response.status).toBe(201);
     const body = await response.json() as {
       task_id: string;
-      config: { inputMode: string; goal: string; diagnoseIntent?: string; nodeCommands: Record<string, string> };
+      config: { inputMode: string; goal: string; model: string; diagnoseIntent?: string; nodeCommands: Record<string, string> };
       steps: Array<{ stepType: string; command: string }>;
     };
     expect(body.config).toEqual(expect.objectContaining({
       inputMode: "direct_goal",
       goal: "将工具调用任务完成率提升到 90% 以上",
+      model: "antchat/GLM-5.1",
     }));
     expect(body.config.diagnoseIntent).toBeUndefined();
     expect(body.config.nodeCommands.diagnose).toBeUndefined();
@@ -1352,6 +1357,7 @@ describe("ClawEvolve step protocol", () => {
     expect(body.steps[0].stepType).toBe("plan");
     expect(body.steps[0].command).toContain("/clawevolve-plan");
     expect(body.steps[0].command).toContain("--goal '将工具调用任务完成率提升到 90% 以上'");
+    expect(body.steps[0].command).toContain("--model antchat/GLM-5.1");
     expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       stepType: "plan",
       command: body.steps[0].command,
@@ -1739,12 +1745,14 @@ describe("ClawEvolve step protocol", () => {
       headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
       body: JSON.stringify({
         taskName: "百轮优化测试", userId: "user-1", botId: "bot-1",
-        sourceDiagnosisTaskIds: [sourceTaskId], maxRounds: 100,
+        sourceDiagnosisTaskIds: [sourceTaskId], model: "antchat/GLM-5.2", maxRounds: 100,
       }),
     });
     expect(accepted.status).toBe(201);
-    const acceptedBody = await accepted.json() as { config: { maxRounds: number } };
+    const acceptedBody = await accepted.json() as { config: { maxRounds: number; model: string }; steps: Array<{ command: string }> };
     expect(acceptedBody.config.maxRounds).toBe(100);
+    expect(acceptedBody.config.model).toBe("antchat/GLM-5.2");
+    expect(acceptedBody.steps[0].command).toContain("--model antchat/GLM-5.2");
 
     for (const maxRounds of [0, 101, 1.5]) {
       const rejected = await fetch(`${baseUrl}/api/evolve/optimizations`, {
@@ -2285,6 +2293,8 @@ describe("ClawEvolve step protocol", () => {
       headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
       body: JSON.stringify({
         taskName: "清理历史进化记录", userId: "owner-1", botId: "bot-1", botEnv: "pre", forceCleanup,
+        // A client cannot select openversion on an internal router.
+        version: "openversion",
       }),
     });
     const blocked = await create(false);

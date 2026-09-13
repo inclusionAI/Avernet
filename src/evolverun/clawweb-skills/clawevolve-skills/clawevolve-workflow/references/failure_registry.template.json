@@ -1,0 +1,5 @@
+{
+  "schema_version": "evolution.failure_registry.v1",
+  "failures": [],
+  "notes": "Runtime entries use capability/failure signatures only; validation case ids and answers are forbidden."
+}

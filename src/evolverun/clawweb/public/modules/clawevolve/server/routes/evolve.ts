@@ -86,6 +86,8 @@ type Dispatch = typeof dispatchEvolveCommand;
 type DispatchTaskLogArchive = typeof dispatchEvolveTaskLogArchive;
 type CancelExecution = typeof cancelEvolveExecution;
 export type EvolveRouterDeps = {
+  /** Never read from HTTP input; absent means unchanged internal behavior. */
+  version?: "openversion" | "internalversion";
   db?: IDatabase;
   dispatch?: Dispatch;
   dispatchTaskLogArchive?: DispatchTaskLogArchive;
@@ -711,7 +713,7 @@ async function createInitialPlanStep(
 ) {
   const config = (parseJson(task.config_json) as {
     dispatchMode?: "message" | "run"; nodeCommands?: NodeCommandYamls; forceMessage?: boolean;
-    runtimeMaintenance?: boolean; clawwebUrl?: string; goal?: string;
+    runtimeMaintenance?: boolean; clawwebUrl?: string; goal?: string; model?: string;
   } | null) ?? {};
   const stepId = id("STEP");
   const command = renderCommand(
@@ -722,6 +724,7 @@ async function createInitialPlanStep(
       ["bot-id", task.bot_id],
       ["clawweb-url", config.clawwebUrl ?? getClawWebPublicBaseUrl()],
       ["goal", quoteCommandArgument(config.goal ?? "")],
+      ...(config.model ? [["model", config.model] as [string, string]] : []),
     ],
   );
   const step = await repo.createStep({
@@ -762,7 +765,7 @@ async function createOptimizeStep(
   }
   const config = parseJson(task.config_json) as {
     dispatchMode?: "message" | "run"; trainBenchDomainId?: string; testBenchDomainId?: string;
-    ownerUserId?: string; nodeCommands?: NodeCommandYamls; forceMessage?: boolean; runtimeMaintenance?: boolean; clawwebUrl?: string; openclawExecutionMode?: "local" | "gateway";
+    ownerUserId?: string; model?: string; nodeCommands?: NodeCommandYamls; forceMessage?: boolean; runtimeMaintenance?: boolean; clawwebUrl?: string; openclawExecutionMode?: "local" | "gateway";
   } | null;
   const dispatchMode = config?.dispatchMode ?? await repo.resolveBotDispatchMode(task.user_id, task.bot_id, taskBotEnv(task));
   const stepId = id("STEP");
@@ -1343,7 +1346,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       res.status(400).json({ error: "任务名称不能超过128字，备注不能超过1000字" }); return;
     }
     const diagnoseModel = String(model);
-    if (requiresDiagnose && (!diagnoseModel.trim() || diagnoseModel.length > 128 || /[\0\r\n\s]/.test(diagnoseModel))) {
+    const requiresModel = requiresDiagnose || (taskType === "full" && inputMode === "direct_goal");
+    if (requiresModel && (!diagnoseModel.trim() || diagnoseModel.length > 128 || /[\0\r\n\s]/.test(diagnoseModel))) {
       res.status(400).json({ error: "model 必须是 1 到 128 字符且不能包含空白字符" }); return;
     }
     if (requiresDiagnose && judgeBackend === "api" && !DIAGNOSE_MODELS.has(diagnoseModel)) {
@@ -1470,7 +1474,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const diagnoseTemplate = nodeCommands.diagnose ?? defaultNodeCommand("diagnose");
     const config = {
       ...(taskType === "full" ? { inputMode } : {}),
-      ...(requiresDiagnose ? { model: diagnoseModel, diagnoseIntent, maxSessions } : {}),
+      ...(requiresModel ? { model: diagnoseModel } : {}),
+      ...(requiresDiagnose ? { diagnoseIntent, maxSessions } : {}),
       ...(requiresDiagnose ? { sessionSource: { mode: sessionSourceMode } } : {}),
       maxRounds: rounds,
       ...(taskType === "full" && goal ? { goal } : {}),
@@ -1593,6 +1598,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!repo) { res.status(503).json({ error: "数据库不可用" }); return; }
     const {
       taskName, remark, userId, botId, botEnv, sourceDiagnosisTaskIds, maxRounds = 3, nodeCommandYamls,
+      model = "antchat/GLM-5.1",
       forceMessage: rawForceMessage, runtimeMaintenance: rawRuntimeMaintenance,
       openclawExecutionMode: rawOpenClawExecutionMode,
     } = req.body ?? {};
@@ -1622,6 +1628,9 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!sourceIds.length) {
       res.status(400).json({ error: "诊断进化必须选择一个已完成 Plan 的诊断任务" }); return;
     }
+    let selectedModel: string;
+    try { selectedModel = safeBenchCommandValue("model", model); }
+    catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); return; }
     if (await rejectUnsupportedBotEngine(repo, res, String(userId), String(botId), String(botEnv ?? ""))) return;
     let primaryBenchDomains: BenchDomains | null = null;
     for (const [index, sourceTaskId] of sourceIds.entries()) {
@@ -1646,6 +1655,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const taskId = evolveTaskId();
     const clawwebUrl = getClawWebPublicBaseUrl();
     const dispatchMode = await repo.resolveBotDispatchMode(String(userId), String(botId), String(botEnv ?? ""));
+    const optimizeTemplate = nodeCommands.optimize ?? defaultNodeCommand("optimize")
+      .replace("antchat/GLM-5.1", selectedModel);
     await repo.createTask({
       taskId, taskType: "optimize", userId: String(userId), botId: String(botId),
       taskName: String(taskName).trim(), remark: String(remark ?? "").trim() || null,
@@ -1653,8 +1664,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         sourceDiagnosisTaskIds: sourceIds,
         trainBenchDomainId: primaryBenchDomains?.trainBenchDomainId,
         testBenchDomainId: primaryBenchDomains?.testBenchDomainId,
-        maxRounds: rounds, dispatchMode, forceMessage, runtimeMaintenance: rawRuntimeMaintenance !== false, clawwebUrl, openclawExecutionMode, botEnv: String(botEnv ?? ""),
-        nodeCommands: { optimize: nodeCommands.optimize ?? defaultNodeCommand("optimize") },
+        model: selectedModel, maxRounds: rounds, dispatchMode, forceMessage, runtimeMaintenance: rawRuntimeMaintenance !== false, clawwebUrl, openclawExecutionMode, botEnv: String(botEnv ?? ""),
+        nodeCommands: { optimize: optimizeTemplate },
       }),
       createdBy: String(req.header("X-User-Id") || userId),
     });
@@ -1670,7 +1681,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
     const {
       taskName, remark, userId, botId, botEnv, objective, trainBenchDomainId, testBenchDomainId,
-      maxRounds = 3, nodeCommandYamls, forceMessage: rawForceMessage, runtimeMaintenance: rawRuntimeMaintenance,
+      model = "antchat/GLM-5.1", maxRounds = 3, nodeCommandYamls, forceMessage: rawForceMessage, runtimeMaintenance: rawRuntimeMaintenance,
       openclawExecutionMode: rawOpenClawExecutionMode,
     } = req.body ?? {};
     const ownerUserId = String(userId ?? "").trim();
@@ -1690,6 +1701,9 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!Number.isSafeInteger(rounds) || rounds < 1 || rounds > 100) {
       res.status(400).json({ error: "maxRounds 必须是 1 到 100 的整数" }); return;
     }
+    let selectedModel: string;
+    try { selectedModel = safeBenchCommandValue("model", model); }
+    catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); return; }
     const actorUserId = resolveRequestUserId(req);
     if (!actorUserId) { res.status(401).json({ error: "无法识别当前登录用户" }); return; }
     if (actorUserId !== ownerUserId) {
@@ -1720,7 +1734,10 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const dispatchMode = await repo.resolveBotDispatchMode(ownerUserId, String(botId), String(botEnv ?? ""));
     const forceMessage = rawForceMessage === true;
     const runtimeMaintenance = rawRuntimeMaintenance !== false;
-    const commandTemplate = nodeCommands.bench_plan ?? defaultNodeCommand("bench_plan");
+    const commandTemplate = nodeCommands.bench_plan ?? defaultNodeCommand("bench_plan")
+      .replace("antchat/GLM-5.1", selectedModel);
+    const optimizeTemplate = nodeCommands.optimize ?? defaultNodeCommand("optimize")
+      .replace("antchat/GLM-5.1", selectedModel);
     const command = renderCommand(commandTemplate, {
       train_bench_domain_id: trainDomainId, test_bench_domain_id: testDomainId,
     }, [
@@ -1734,10 +1751,10 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       taskName: String(taskName).trim(), remark: String(remark ?? "").trim() || null,
       configJson: JSON.stringify({
         objective: objectiveText, ownerUserId, trainBenchDomainId: trainDomainId, testBenchDomainId: testDomainId,
-        pinnedBenchDomains: pinnedDomains, maxRounds: rounds,
+        pinnedBenchDomains: pinnedDomains, model: selectedModel, maxRounds: rounds,
         nodeCommands: {
           bench_plan: commandTemplate,
-          optimize: nodeCommands.optimize ?? defaultNodeCommand("optimize"),
+          optimize: optimizeTemplate,
         },
         dispatchMode, forceMessage, runtimeMaintenance, clawwebUrl, openclawExecutionMode, botEnv: String(botEnv ?? ""),
       }),
@@ -1888,7 +1905,14 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
     if (await rejectUnsupportedBotEngine(repo, res, ownerUserId, targetBotId, targetBotEnv)) return;
 
-    const activeTasks = (await repo.listActiveBotEvolveTasks(ownerUserId, targetBotId))
+    // COSEC: only the trusted openversion composition can skip the activity guard.
+    // Manual confirmation is still required because active evolution sessions may be removed.
+    const openCleanup = deps.version === "openversion";
+    if (openCleanup && !forceCleanup) {
+      res.status(422).json({ error: "请确认手动清理：不重启 Gateway、不检查运行任务，可能中断正在进行的进化任务" });
+      return;
+    }
+    const activeTasks = openCleanup ? [] : (await repo.listActiveBotEvolveTasks(ownerUserId, targetBotId))
       .filter((task) => !targetBotEnv || taskBotEnv(task) === targetBotEnv);
     if (activeTasks.length && !forceCleanup) {
       res.status(409).json({
@@ -1909,6 +1933,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       taskName: String(taskName).trim(), remark: String(remark ?? "").trim() || null,
       configJson: JSON.stringify({
         scope: "bot_history", forceCleanup, dispatchMode, runtimeMaintenance: false,
+        ...(openCleanup ? { version: "openversion", gatewayRestart: false, activeTaskCheck: false } : {}),
         clawwebUrl, botEnv: targetBotEnv,
       }),
       createdBy: actor,

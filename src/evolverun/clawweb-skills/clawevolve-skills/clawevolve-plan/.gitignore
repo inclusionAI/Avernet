@@ -1,0 +1,68 @@
+# Keep this repository limited to the skill source, docs, references, agent metadata, and scripts.
+# Do not commit local runtime outputs, generated templates, upload bundles, caches, or secrets.
+
+# OS / editor noise
+.DS_Store
+.AppleDouble
+.LSOverride
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Python caches / tooling
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+
+# Virtualenvs / packaging
+.venv/
+venv/
+env/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# Secrets / local env
+.env
+.env.*
+*.pem
+*.key
+*.token
+secrets.*
+
+# Logs
+*.log
+logs/
+
+# Plan runtime outputs
+clawevolve_plan_out/
+out/
+outputs/
+runs/
+run_*/
+*_summary.json
+*_plan_input.json
+*_optimization_spec*.json
+*_optimization_spec*.md
+objective.md
+objective.json
+specs/
+plan/input/
+plan/output/
+
+# Temporary files
+.tmp/
+tmp/
+*.tmp
+*.bak

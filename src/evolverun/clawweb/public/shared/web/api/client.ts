@@ -996,7 +996,7 @@ export const api = {
       taskType: 'full';
       inputMode: 'direct_goal';
       taskName: string; remark?: string;
-      userId: string; botId: string; botEnv?: string; maxRounds: number;
+      userId: string; botId: string; botEnv?: string; model: string; maxRounds: number;
       goal: string; nodeCommandYamls?: Record<string, string>;
       forceMessage?: boolean;
       runtimeMaintenance?: boolean;
@@ -1026,6 +1026,7 @@ export const api = {
     createOptimization(input: {
       taskName: string; remark?: string;
       userId: string; botId: string; botEnv?: string; sourceDiagnosisTaskIds: string[];
+      model: string;
       maxRounds: number; nodeCommandYamls?: Record<string, string>;
       forceMessage?: boolean;
       runtimeMaintenance?: boolean;
@@ -1083,6 +1084,7 @@ export const api = {
       userId: string; botId: string; botEnv?: string;
       objective: string;
       trainBenchDomainId: string; testBenchDomainId: string;
+      model: string;
       maxRounds: number;
       nodeCommandYamls?: Record<string, string>; forceMessage?: boolean; runtimeMaintenance?: boolean;
       openclawExecutionMode?: 'local' | 'gateway';
