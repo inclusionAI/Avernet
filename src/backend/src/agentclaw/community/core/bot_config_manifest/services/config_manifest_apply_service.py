@@ -63,10 +63,7 @@ from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     build_apply_task_payload,
     phase_from_payload,
 )
-from agentclaw.community.core.bot_config_manifest.apply.triggers import (
-    CREATE_ON_CONTAINER,
-    CREATE_PRE_CONTAINER,
-)
+from agentclaw.community.core.bot_config_manifest.apply.triggers import require_phase_matches_trigger
 from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
     DeclaredSourceResolver,
 )
@@ -83,9 +80,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.limits import (
     APPLY_BUDGET_S,
     APPLY_FETCH_TOTAL_LIMIT,
 )
-from agentclaw.community.core.bot_config_manifest.apply.order import (
-    ApplyPhase,
-)
+from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.orchestrator import (
     ApplyOrchestrator,
 )
@@ -347,17 +342,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         collaborator rows and found nobody. It defaults to ``actor_id`` so a
         caller with nothing to distinguish keeps the obvious behaviour.
         """
-        # Before the lock and before an id: a trigger and a phase that disagree
-        # are a call-site bug, and the cheapest place to see one is here rather
-        # than in a report nobody reads. A creation trigger delivers exactly one
-        # half of an apply and says which; every other trigger delivers the
-        # whole document and has no half to name.
-        creation = trigger in (CREATE_PRE_CONTAINER, CREATE_ON_CONTAINER)
-        if creation != (phase is not None):
-            raise ValueError(
-                "a creation trigger names the phase it delivers and no other "
-                f"trigger does: trigger={trigger!r}, phase={phase!r}"
-            )
+        require_phase_matches_trigger(trigger, phase)
         env = get_current_env()
         lock = self._locks.acquire(
             env=env, entity_id=entity_id, bot_id=bot_id, holder_user_id=actor_id

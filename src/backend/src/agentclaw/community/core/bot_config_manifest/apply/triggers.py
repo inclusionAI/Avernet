@@ -37,6 +37,7 @@ every value here fits.
 """
 from __future__ import annotations
 
+from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER,
     CREATE_PRE_CONTAINER_TRIGGER,
@@ -65,6 +66,33 @@ ALL_TRIGGERS: tuple[str, ...] = (
 #: trigger above fits with room to spare.
 TRIGGER_COLUMN_WIDTH = 32
 
+
+def require_phase_matches_trigger(trigger: str, phase: ApplyPhase | None) -> None:
+    """Refuse a trigger and a phase that contradict each other.
+
+    The table above is the rule, read as a two-way one: the two creation
+    triggers each deliver exactly one half of an apply and name which, and
+    every other trigger delivers the whole document and has no half to name.
+    So a phase is a creation-path argument, and ``None`` is not an omission —
+    it is the statement "this apply is not a creation half".
+
+    Lives here rather than in the apply service because the pairing is a fact
+    about the trigger vocabulary, and this module exists so a trigger is
+    spelled once. ``start_apply`` calls it before the lock is taken and before
+    an ``apply_id`` is minted, so a mismatch leaves neither a record a caller
+    could poll nor a lock the next apply would wait out.
+
+    Raises ``ValueError``: a mismatch is a programming error at a call site,
+    not a condition an end user can reach or act on.
+    """
+    creation = trigger in (CREATE_PRE_CONTAINER, CREATE_ON_CONTAINER)
+    if creation != (phase is not None):
+        raise ValueError(
+            "a creation trigger names the phase it delivers and no other "
+            f"trigger does: trigger={trigger!r}, phase={phase!r}"
+        )
+
+
 __all__ = [
     "ALL_TRIGGERS",
     "CREATE_ON_CONTAINER",
@@ -72,4 +100,5 @@ __all__ = [
     "EXPLICIT",
     "PUT",
     "TRIGGER_COLUMN_WIDTH",
+    "require_phase_matches_trigger",
 ]
