@@ -36,8 +36,11 @@ from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     APPLY_TASK_DEADLINE_SECONDS,
     APPLY_TASK_TYPE,
     ApplyTaskHandler,
+    LEGACY_PHASES_KEY,
+    PHASE_KEY,
     build_apply_task_payload,
     phase_from_payload,
+    phase_of_payload,
 )
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
@@ -282,6 +285,88 @@ def test_an_unknown_phase_name_in_a_payload_raises():
     """Dropping it would silently narrow or widen what an apply covers."""
     with pytest.raises(ValueError):
         phase_from_payload("mid_container")
+
+
+# ── reading a payload the previous version enqueued ────────────────────────
+#
+# The queue is durable and a rollout is not atomic, so for one deploy a worker
+# running the scalar contract can claim a task written under the list one.
+# These pin the translation; delete them with ``LEGACY_PHASES_KEY`` once no
+# queue can hold such a payload.
+
+
+@pytest.mark.parametrize(
+    "legacy, expected",
+    [
+        (["pre_container"], ApplyPhase.PRE_CONTAINER),
+        (["on_container"], ApplyPhase.ON_CONTAINER),
+        # What ALL_PHASES serialised to, in the builder's sorted order.
+        (["on_container", "pre_container"], None),
+        # Order was never meaningful; a payload is a payload either way round.
+        (["pre_container", "on_container"], None),
+    ],
+)
+def test_a_legacy_payload_keeps_the_half_it_named(legacy, expected):
+    """The widening this prevents is the one that matters.
+
+    A creation's pre-container task read as a whole apply would walk the
+    container-bound constructs before any container exists — the ordering
+    failure ``ApplyPhase`` exists to prevent — and it would do it silently,
+    because nothing downstream re-checks what the enqueuer meant.
+    """
+    assert phase_of_payload({"phases": legacy}) is expected
+
+
+def test_the_scalar_key_wins_and_its_null_is_not_an_absence():
+    """Presence of ``"phase"``, not its value, says which contract is spoken.
+
+    The builder always writes the key, so a payload carrying ``None`` there is
+    stating "not a creation half" — it must never fall through to the legacy
+    branch, even in the transitional case where both keys somehow appear.
+    """
+    assert phase_of_payload({"phase": None}) is None
+    assert phase_of_payload({"phase": "pre_container"}) is ApplyPhase.PRE_CONTAINER
+    assert phase_of_payload({"phase": None, "phases": ["pre_container"]}) is None
+
+
+def test_a_payload_naming_no_phase_at_all_is_a_whole_apply():
+    """Neither key: nothing to widen, so the whole apply is the honest read."""
+    assert phase_of_payload({}) is None
+
+
+@pytest.mark.parametrize("legacy", [[], ["mid_container"]])
+def test_an_unreadable_legacy_payload_raises_rather_than_guessing(legacy):
+    """An empty list named an apply covering nothing — no caller meant that,
+    and the scalar cannot express it. An unknown name is not silently dropped
+    either: both would change what the apply covers without saying so."""
+    with pytest.raises(ValueError):
+        phase_of_payload({"phases": legacy})
+
+
+def test_the_service_reads_a_legacy_payload_through_the_translation(world):
+    """End to end through ``run_apply_task``, the path a worker actually takes.
+
+    This suite's document declares only ``script``, which is ``PRE_CONTAINER``
+    on ARCA — so a legacy payload naming the *post*-container half must write
+    nothing at all. Widening it to a whole apply is exactly what writes the
+    script here, which makes ``scripts.writes`` a direct read on the bug: 0 if
+    the half survived the decode, 1 if it was widened.
+    """
+    service, queue, scripts, _locks = world
+    _start(service)
+
+    legacy = dict(queue.payloads[0])
+    legacy["trigger"] = "create:on_container"
+    del legacy[PHASE_KEY]
+    legacy[LEGACY_PHASES_KEY] = ["on_container"]
+
+    service.run_apply_task(legacy)
+
+    assert scripts.writes == 0, (
+        "a legacy post-container payload was widened into a whole apply; on a "
+        "creation's pre-container half the same widening would run the "
+        "container-bound constructs before any container exists"
+    )
 
 
 # ── re-running ─────────────────────────────────────────────────────────────

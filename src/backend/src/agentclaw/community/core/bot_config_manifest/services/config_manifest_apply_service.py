@@ -61,7 +61,7 @@ from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     APPLY_TASK_DEADLINE_SECONDS,
     APPLY_TASK_TYPE,
     build_apply_task_payload,
-    phase_from_payload,
+    phase_of_payload,
 )
 from agentclaw.community.core.bot_config_manifest.apply.triggers import require_phase_matches_trigger
 from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
@@ -597,7 +597,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 apply_id=str(payload["apply_id"]),
                 trigger=str(payload["trigger"]),
                 started_at=parse_started_at(payload.get("started_at")),
-                phase=phase_from_payload(payload.get("phase")),
+                phase=phase_of_payload(payload),
                 lock_token=str(payload["lock_token"]),
                 carry_from_apply_id=payload.get("carry_from_apply_id"),
             )
