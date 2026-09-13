@@ -588,7 +588,7 @@ class BotCreateWithManifestHandler:
                 owner_id=str(payload["user_id"]),
                 actor_id=str(payload["user_id"]),
                 trigger=CREATE_ON_CONTAINER_TRIGGER,
-                phases=frozenset({ApplyPhase.ON_CONTAINER}),
+                phase=ApplyPhase.ON_CONTAINER,
                 carry_from_apply_id=self._pre_container_apply_id(
                     entity_id=entity_id, bot_id=bot_id
                 ),

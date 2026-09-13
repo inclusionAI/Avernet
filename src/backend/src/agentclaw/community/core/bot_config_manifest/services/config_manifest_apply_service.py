@@ -61,7 +61,11 @@ from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     APPLY_TASK_DEADLINE_SECONDS,
     APPLY_TASK_TYPE,
     build_apply_task_payload,
-    phases_from_payload,
+    phase_from_payload,
+)
+from agentclaw.community.core.bot_config_manifest.apply.triggers import (
+    CREATE_ON_CONTAINER,
+    CREATE_PRE_CONTAINER,
 )
 from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
     DeclaredSourceResolver,
@@ -304,7 +308,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         actor_id: str,
         audit_actor: Optional[str] = None,
         trigger: str = "explicit",
-        phases: frozenset[ApplyPhase],
+        phase: ApplyPhase | None = None,
         engine_type: Optional[str] = None,
         bot_type: Optional[str] = None,
         carry_from_apply_id: Optional[str] = None,
@@ -343,6 +347,17 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         collaborator rows and found nobody. It defaults to ``actor_id`` so a
         caller with nothing to distinguish keeps the obvious behaviour.
         """
+        # Before the lock and before an id: a trigger and a phase that disagree
+        # are a call-site bug, and the cheapest place to see one is here rather
+        # than in a report nobody reads. A creation trigger delivers exactly one
+        # half of an apply and says which; every other trigger delivers the
+        # whole document and has no half to name.
+        creation = trigger in (CREATE_PRE_CONTAINER, CREATE_ON_CONTAINER)
+        if creation != (phase is not None):
+            raise ValueError(
+                "a creation trigger names the phase it delivers and no other "
+                f"trigger does: trigger={trigger!r}, phase={phase!r}"
+            )
         env = get_current_env()
         lock = self._locks.acquire(
             env=env, entity_id=entity_id, bot_id=bot_id, holder_user_id=actor_id
@@ -438,7 +453,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                     trigger=trigger,
                     lock_token=lock.lock_token,
                     started_at=started_at.isoformat(),
-                    phases=phases,
+                    phase=phase,
                     engine_type=engine_type,
                     bot_type=bot_type,
                     carry_from_apply_id=carry_from_apply_id,
@@ -478,7 +493,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         apply_id: str,
         trigger: str,
         started_at: datetime,
-        phases: frozenset[ApplyPhase],
+        phase: ApplyPhase | None = None,
         lock_token: str,
         carry_from_apply_id: Optional[str] = None,
     ) -> None:
@@ -499,7 +514,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                     apply_id=apply_id,
                     trigger=trigger,
                     started_at=started_at,
-                    phases=phases,
+                    phase=phase,
                 )
             )
         except Exception as exc:  # noqa: BLE001 - a daemon thread has no caller
@@ -597,7 +612,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 apply_id=str(payload["apply_id"]),
                 trigger=str(payload["trigger"]),
                 started_at=parse_started_at(payload.get("started_at")),
-                phases=phases_from_payload(payload["phases"]),
+                phase=phase_from_payload(payload.get("phase")),
                 lock_token=str(payload["lock_token"]),
                 carry_from_apply_id=payload.get("carry_from_apply_id"),
             )
@@ -858,7 +873,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         apply_id: str,
         trigger: str,
         started_at: datetime,
-        phases: frozenset[ApplyPhase],
+        phase: ApplyPhase | None = None,
     ) -> ApplyReport:
         """Walk the categories, then let the strategy close the apply.
 
@@ -872,7 +887,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             apply_id=apply_id,
             trigger=trigger,
             started_at=started_at,
-            phases=phases,
+            phase=phase,
         )
         try:
             note = await strategy.finish(ctx, report)
