@@ -35,8 +35,9 @@ class ApplyPhase(StrEnum):
 
     Created by: each ``DeliveryStrategy.phase_of`` in ``apply/delivery`` —
     the phase is the engine family's answer, not the order table's.
-    Consumed by: ``apply/delivery._steps`` as the filter, the creation job
-    (which passes one at a time), and the HTTP routes.
+    Consumed by: ``apply/delivery._steps`` as the filter, and the creation job,
+    which names one half per call. Everywhere else the phase is ``None`` and
+    the whole apply runs.
 
     The split is not organisational. The two halves have **opposite**
     delivery-time constraints, and an orchestrator that ignored that would be
@@ -108,7 +109,4 @@ APPLY_ORDER: tuple[ApplyStep, ...] = (
     ApplyStep(ManifestCategory.CLI_TOOLS, 6),
 )
 
-#: Both phases — what the HTTP route passes, and the default everywhere.
-ALL_PHASES: frozenset[ApplyPhase] = frozenset(ApplyPhase)
-
-__all__ = ["ALL_PHASES", "APPLY_ORDER", "ApplyPhase", "ApplyStep"]
+__all__ = ["APPLY_ORDER", "ApplyPhase", "ApplyStep"]
