@@ -42,6 +42,12 @@ from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     phase_from_payload,
     phase_of_payload,
 )
+from agentclaw.community.core.bot_config_manifest.apply.triggers import (
+    CREATE_ON_CONTAINER,
+    CREATE_PRE_CONTAINER,
+    EXPLICIT,
+    require_phase_matches_trigger,
+)
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 
@@ -343,6 +349,40 @@ def test_an_unreadable_legacy_payload_raises_rather_than_guessing(legacy):
         phase_of_payload({"phases": legacy})
 
 
+@pytest.mark.parametrize(
+    "phase, expected",
+    [
+        (None, ["on_container", "pre_container"]),
+        (ApplyPhase.PRE_CONTAINER, ["pre_container"]),
+        (ApplyPhase.ON_CONTAINER, ["on_container"]),
+    ],
+)
+def test_the_payload_also_speaks_the_shape_the_previous_version_reads(
+    phase, expected
+):
+    """The emit half of the migration: old worker, new row.
+
+    A rolling deployment runs both versions against one queue, and the previous
+    one reads ``payload["phases"]`` unconditionally — so a payload carrying only
+    the scalar would ``KeyError`` there and be retried until the task deadline
+    retired it. Long enough for a creation's pre-container phase to miss the
+    window before the start command is composed, which boots a bot with no
+    script at all.
+
+    Sorted, because that is how the previous version wrote it and two enqueues
+    of one apply must not differ by iteration order in a payload it may read.
+    """
+    payload = build_apply_task_payload(
+        apply_id="a1", entity_id=_ENTITY, bot_id=_BOT, owner_id=_ENTITY,
+        actor_id=_ENTITY, env="dev", tenant="t1", trigger="explicit",
+        lock_token="tok", started_at="2026-09-01T00:00:00", phase=phase,
+    )
+    assert payload[LEGACY_PHASES_KEY] == expected
+    # And the two spellings agree, which is the whole point of writing both.
+    assert phase_of_payload(payload) is phase
+    assert phase_of_payload({LEGACY_PHASES_KEY: payload[LEGACY_PHASES_KEY]}) is phase
+
+
 def test_the_service_reads_a_legacy_payload_through_the_translation(world):
     """End to end through ``run_apply_task``, the path a worker actually takes.
 
@@ -483,3 +523,40 @@ def test_an_apply_that_cannot_be_rebuilt_releases_its_lock(world):
     report = service.last_apply(entity_id=_ENTITY, bot_id=_BOT)
     assert report is not None and report.status is ApplyStatus.FAILED
     assert scripts.writes == 0, "nothing should have been applied"
+
+
+# ── the trigger and the phase must agree exactly ───────────────────────────
+
+
+@pytest.mark.parametrize(
+    "trigger, phase",
+    [
+        (CREATE_PRE_CONTAINER, ApplyPhase.PRE_CONTAINER),
+        (CREATE_ON_CONTAINER, ApplyPhase.ON_CONTAINER),
+        (EXPLICIT, None),
+        ("put", None),
+    ],
+)
+def test_a_trigger_carrying_the_half_it_delivers_is_accepted(trigger, phase):
+    require_phase_matches_trigger(trigger, phase)
+
+
+@pytest.mark.parametrize(
+    "trigger, phase",
+    [
+        # The crossed pairs: a phase *is* present, so a check that asked only
+        # "was one supplied?" would wave these through and run the opposite
+        # half under a trigger saying otherwise.
+        (CREATE_PRE_CONTAINER, ApplyPhase.ON_CONTAINER),
+        (CREATE_ON_CONTAINER, ApplyPhase.PRE_CONTAINER),
+        # A creation trigger naming no half at all.
+        (CREATE_PRE_CONTAINER, None),
+        (CREATE_ON_CONTAINER, None),
+        # A non-creation trigger naming one.
+        (EXPLICIT, ApplyPhase.PRE_CONTAINER),
+        ("put", ApplyPhase.ON_CONTAINER),
+    ],
+)
+def test_a_trigger_and_a_phase_that_disagree_are_refused(trigger, phase):
+    with pytest.raises(ValueError):
+        require_phase_matches_trigger(trigger, phase)

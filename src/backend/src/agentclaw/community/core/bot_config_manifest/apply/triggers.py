@@ -37,6 +37,9 @@ every value here fits.
 """
 from __future__ import annotations
 
+from types import MappingProxyType
+from typing import Mapping
+
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER,
@@ -67,6 +70,16 @@ ALL_TRIGGERS: tuple[str, ...] = (
 TRIGGER_COLUMN_WIDTH = 32
 
 
+#: The phase each creation trigger delivers — the table above as a lookup.
+#: A trigger absent from it delivers the whole document and names no half, so
+#: ``.get`` answering ``None`` is the right answer for every other trigger
+#: rather than a missing entry.
+_PHASE_BY_CREATION_TRIGGER: Mapping[str, ApplyPhase] = MappingProxyType({
+    CREATE_PRE_CONTAINER: ApplyPhase.PRE_CONTAINER,
+    CREATE_ON_CONTAINER: ApplyPhase.ON_CONTAINER,
+})
+
+
 def require_phase_matches_trigger(trigger: str, phase: ApplyPhase | None) -> None:
     """Refuse a trigger and a phase that contradict each other.
 
@@ -75,6 +88,14 @@ def require_phase_matches_trigger(trigger: str, phase: ApplyPhase | None) -> Non
     every other trigger delivers the whole document and has no half to name.
     So a phase is a creation-path argument, and ``None`` is not an omission —
     it is the statement "this apply is not a creation half".
+
+    **The pairing is exact, not merely present.** Asking only whether some
+    phase accompanied a creation trigger would accept
+    ``create:pre_container`` carrying ``ON_CONTAINER``, which runs the
+    container-bound half under a trigger saying the opposite — the pre-container
+    work before any container exists, recorded as though it were the other
+    phase. So each creation trigger is compared against the one phase it
+    delivers, and ``None`` is what every other trigger must carry.
 
     Lives here rather than in the apply service because the pairing is a fact
     about the trigger vocabulary, and this module exists so a trigger is
@@ -85,11 +106,12 @@ def require_phase_matches_trigger(trigger: str, phase: ApplyPhase | None) -> Non
     Raises ``ValueError``: a mismatch is a programming error at a call site,
     not a condition an end user can reach or act on.
     """
-    creation = trigger in (CREATE_PRE_CONTAINER, CREATE_ON_CONTAINER)
-    if creation != (phase is not None):
+    expected = _PHASE_BY_CREATION_TRIGGER.get(trigger)
+    if phase is not expected:
         raise ValueError(
-            "a creation trigger names the phase it delivers and no other "
-            f"trigger does: trigger={trigger!r}, phase={phase!r}"
+            "a creation trigger delivers exactly the half it names, and no "
+            f"other trigger names one: trigger={trigger!r} delivers "
+            f"phase={expected!r}, but was given phase={phase!r}"
         )
 
 

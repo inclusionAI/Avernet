@@ -52,6 +52,15 @@ APPLY_TASK_TYPE = "config_manifest.apply"
 #: outlive the lock that a later apply would reap.
 APPLY_TASK_DEADLINE_SECONDS = 20 * 60
 
+#: The key every payload this version enqueues carries, ``null`` included.
+PHASE_KEY = "phase"
+
+#: The key a payload carried before :data:`PHASE_KEY` existed: a list of one or
+#: both phase names. Still **written** as well as read, because a rolling
+#: deployment runs both versions at once against one queue — see the builder
+#: and :func:`phase_of_payload`. Both go when no such deployment remains.
+LEGACY_PHASES_KEY = "phases"
+
 
 def build_apply_task_payload(
     *,
@@ -86,6 +95,7 @@ def build_apply_task_payload(
             "lock_token": "lk_3f9c...",
             "started_at": "2026-03-01T09:00:00+00:00",
             "phase": "pre_container",        # or "on_container", or None
+            "phases": ["pre_container"],     # the same fact, older spelling
             "carry_from_apply_id": None,     # or an earlier phase's apply_id
             "engine_type": "claude_code",    # only read when there is no
             "bot_type": "arca",              # bot record yet
@@ -95,6 +105,23 @@ def build_apply_task_payload(
     reconstructed from a default at the far end: one of the two phase names for
     a creation half, and ``null`` — a stated value, not an absence — for the
     whole apply.
+
+    **Both spellings are written, and that is deliberate.** A rolling
+    deployment runs two versions against one app-scoped queue, so a payload
+    this version enqueues can be claimed by a worker still running the previous
+    one — and that worker reads ``payload["phases"]`` unconditionally. Sending
+    only :data:`PHASE_KEY` would raise ``KeyError`` there, and the worker would
+    retry the task until :data:`APPLY_TASK_DEADLINE_SECONDS` retires it: long
+    enough for a creation's pre-container phase to miss the window before the
+    start command is composed, which boots the bot with no script. So
+    :data:`LEGACY_PHASES_KEY` is written alongside as the same fact in the
+    older shape. It is never read by this version —
+    :func:`phase_of_payload` prefers :data:`PHASE_KEY` — and exists only so the
+    previous one can still decode what this one enqueues.
+
+    This is the emit half of an expand/contract migration whose read half is
+    :func:`phase_of_payload`. **Both halves come out together**, one deploy on,
+    once no worker and no queued row can predate :data:`PHASE_KEY`.
 
     Consumed by: :meth:`ApplyTaskHandler.handle`, which passes it straight to
     ``BotConfigManifestApplyService.run_apply_task``.
@@ -138,7 +165,14 @@ def build_apply_task_payload(
         # What this apply covers, always stated: a phase name for a creation
         # half, ``null`` for the whole apply. Never reconstructed from a
         # default at the far end.
-        "phase": phase.value if phase is not None else None,
+        PHASE_KEY: phase.value if phase is not None else None,
+        # The same fact in the shape the previous version reads, so a worker
+        # that has not been restarted yet can still decode this row. Sorted,
+        # as that version wrote it. Unread here; delete with the decoder's
+        # legacy branch.
+        LEGACY_PHASES_KEY: sorted(
+            p.value for p in (tuple(ApplyPhase) if phase is None else (phase,))
+        ),
         "carry_from_apply_id": carry_from_apply_id,
         "engine_type": engine_type,
         "bot_type": bot_type,
@@ -157,15 +191,6 @@ def phase_from_payload(value: str | None) -> ApplyPhase | None:
     Always present in a payload — see the builder.
     """
     return ApplyPhase(value) if value is not None else None
-
-
-#: The key a payload carried before :data:`PHASE_KEY` existed: a list of one or
-#: both phase names. Read only by :func:`phase_of_payload`, and only until no
-#: queue can still hold one.
-LEGACY_PHASES_KEY = "phases"
-
-#: The key every payload this version enqueues carries, ``null`` included.
-PHASE_KEY = "phase"
 
 
 def phase_of_payload(payload: Mapping[str, Any]) -> ApplyPhase | None:
