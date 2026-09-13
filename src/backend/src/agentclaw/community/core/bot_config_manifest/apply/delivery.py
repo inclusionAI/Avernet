@@ -61,7 +61,6 @@ from agentclaw.community.core.skill_center.capability_state_contract import (
 )
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.core.bot_config_manifest.apply.order import (
-    ALL_PHASES,
     APPLY_ORDER,
     ApplyPhase,
     ApplyStep,
@@ -206,16 +205,14 @@ class DeliveryStrategy(Protocol):
         """
         ...
 
-    def steps_for(
-        self, phases: frozenset[ApplyPhase] | None = None
-    ) -> tuple[ApplyStep, ...]:
-        """The steps in the requested phases, in position order.
+    def steps_for(self, phase: ApplyPhase | None = None) -> tuple[ApplyStep, ...]:
+        """The steps in the requested phase, in position order.
 
         :data:`~agentclaw.community.core.bot_config_manifest.apply.order.APPLY_ORDER`
         sorted by position and filtered through this family's
-        :meth:`phase_of`. ``None`` means both phases, which is what an ordinary
-        apply on an existing bot wants; the creation job passes one at a time.
-        This is the callable handed to ``ApplyOrchestrator``.
+        :meth:`phase_of`. ``None`` means the whole apply, which is what an
+        ordinary apply on an existing bot wants; the creation job passes one
+        half. This is the callable handed to ``ApplyOrchestrator``.
         """
         ...
 
@@ -271,13 +268,12 @@ assert set(_ARCA_PHASES) == {step.construct for step in APPLY_ORDER}, (
 
 def _steps(
     phase_of: Callable[[ApplyStep], ApplyPhase],
-    phases: frozenset[ApplyPhase] | None,
+    phase: ApplyPhase | None,
 ) -> tuple[ApplyStep, ...]:
-    wanted = ALL_PHASES if phases is None else phases
     return tuple(
         step
         for step in sorted(APPLY_ORDER, key=lambda s: s.position)
-        if phase_of(step) in wanted
+        if phase is None or phase_of(step) is phase
     )
 
 
@@ -298,10 +294,8 @@ class ArcaDelivery(DeliveryStrategy):
     def phase_of(self, step: ApplyStep) -> ApplyPhase:
         return _ARCA_PHASES[step.construct]
 
-    def steps_for(
-        self, phases: frozenset[ApplyPhase] | None = None
-    ) -> tuple[ApplyStep, ...]:
-        return _steps(self.phase_of, phases)
+    def steps_for(self, phase: ApplyPhase | None = None) -> tuple[ApplyStep, ...]:
+        return _steps(self.phase_of, phase)
 
     def needs_container(self) -> bool:
         return True
@@ -435,10 +429,8 @@ class TeclawDelivery(DeliveryStrategy):
             return ApplyPhase.PRE_CONTAINER
         return ApplyPhase.ON_CONTAINER
 
-    def steps_for(
-        self, phases: frozenset[ApplyPhase] | None = None
-    ) -> tuple[ApplyStep, ...]:
-        return _steps(self.phase_of, phases)
+    def steps_for(self, phase: ApplyPhase | None = None) -> tuple[ApplyStep, ...]:
+        return _steps(self.phase_of, phase)
 
     def needs_container(self) -> bool:
         return not self._platform_managed
