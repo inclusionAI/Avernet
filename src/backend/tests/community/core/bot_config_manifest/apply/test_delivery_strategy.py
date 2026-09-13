@@ -21,7 +21,6 @@ from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     teclaw_platform_managed_from_config,
 )
 from agentclaw.community.core.bot_config_manifest.apply.order import (
-    ALL_PHASES,
     APPLY_ORDER,
     ApplyPhase,
 )
@@ -57,7 +56,7 @@ def test_arca_phases_are_the_strategys_own_table() -> None:
     assert arca.steps_for(None) == tuple(
         sorted(APPLY_ORDER, key=lambda s: s.position)
     )
-    assert [s.construct for s in arca.steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))] == [
+    assert [s.construct for s in arca.steps_for(ApplyPhase.PRE_CONTAINER)] == [
         ManifestSection.SCRIPT
     ]
     assert arca.creation_sequence is CreationSequence.CREATE_BETWEEN_PHASES
@@ -77,7 +76,7 @@ def test_teclaw_on_puts_every_non_script_construct_before_the_container() -> Non
         platform_ports=lambda: _ports("store"),
         device_ports=lambda: _ports("device"),
     )
-    pre = teclaw.steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))
+    pre = teclaw.steps_for(ApplyPhase.PRE_CONTAINER)
     assert {s.construct for s in pre} == {
         ManifestSection.SCRIPT,
         ManifestCategory.IDENTITY,
@@ -87,7 +86,7 @@ def test_teclaw_on_puts_every_non_script_construct_before_the_container() -> Non
         ManifestCategory.ENGINE_CONFIG,
         ManifestCategory.CLI_TOOLS,
     }
-    assert teclaw.steps_for(frozenset({ApplyPhase.ON_CONTAINER})) == ()
+    assert teclaw.steps_for(ApplyPhase.ON_CONTAINER) == ()
     # Position order survives the re-phasing.
     assert [s.position for s in pre] == sorted(s.position for s in pre)
     assert teclaw.creation_sequence is CreationSequence.RECORD_APPLY_PROVISION
@@ -105,13 +104,13 @@ def test_teclaw_off_is_the_pre_w8_shape() -> None:
         platform_ports=lambda: _ports("store"),
         device_ports=lambda: _ports("device"),
     )
-    on = teclaw.steps_for(frozenset({ApplyPhase.ON_CONTAINER}))
+    on = teclaw.steps_for(ApplyPhase.ON_CONTAINER)
     assert {s.construct for s in on} == {
         s.construct
         for s in APPLY_ORDER
         if s.construct not in (ManifestSection.SCRIPT, ManifestCategory.CLI_TOOLS)
     }
-    assert [s.construct for s in teclaw.steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))] == [
+    assert [s.construct for s in teclaw.steps_for(ApplyPhase.PRE_CONTAINER)] == [
         ManifestSection.SCRIPT,
         ManifestCategory.CLI_TOOLS,
     ]
@@ -164,7 +163,7 @@ def test_a_teclaw_creation_installs_tools_before_it_composes(switch) -> None:
         platform_ports=lambda: _ports("store"),
         device_ports=lambda: _ports("device"),
     )
-    pre = teclaw.steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))
+    pre = teclaw.steps_for(ApplyPhase.PRE_CONTAINER)
     assert ManifestCategory.CLI_TOOLS in {s.construct for s in pre}
 
 
@@ -235,19 +234,45 @@ def test_script_is_pre_container_on_teclaw_under_either_switch(switch) -> None:
     step = next(s for s in APPLY_ORDER if s.construct is ManifestSection.SCRIPT)
     assert teclaw.phase_of(step) is ApplyPhase.PRE_CONTAINER
     assert ManifestSection.SCRIPT in {
-        s.construct for s in teclaw.steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))
+        s.construct for s in teclaw.steps_for(ApplyPhase.PRE_CONTAINER)
     }
 
 
-def test_both_phases_walk_every_construct_on_every_strategy() -> None:
-    for strategy in (
+def _every_strategy():
+    return (
         ArcaDelivery(lambda: _ports("a")),
         TeclawDelivery(platform_managed=True, platform_ports=lambda: _ports("s"), device_ports=lambda: _ports("d")),
         TeclawDelivery(platform_managed=False, platform_ports=lambda: _ports("s"), device_ports=lambda: _ports("d")),
-    ):
-        assert strategy.steps_for(ALL_PHASES) == tuple(
-            sorted(APPLY_ORDER, key=lambda s: s.position)
-        )
+    )
+
+
+def test_no_phase_walks_every_construct_on_every_strategy() -> None:
+    """``None`` — stated or defaulted — is the whole apply, on every family.
+
+    The two spellings must not drift: an omitted phase and an explicit ``None``
+    are the same statement, and a family that answered them differently would
+    make the HTTP routes and the orchestrator's default disagree.
+    """
+    whole = tuple(sorted(APPLY_ORDER, key=lambda s: s.position))
+    for strategy in _every_strategy():
+        assert strategy.steps_for() == whole
+        assert strategy.steps_for(None) == whole
+        assert len(whole) == len(APPLY_ORDER) == 7
+
+
+def test_the_two_phases_partition_the_whole_apply_on_every_strategy() -> None:
+    """Each half, re-sorted together, is exactly the whole apply.
+
+    This is what lets the creation job deliver in two calls and the HTTP routes
+    in one without either losing or repeating a construct. A step that fell out
+    of both phases, or into both, would break one of the two.
+    """
+    whole = tuple(sorted(APPLY_ORDER, key=lambda s: s.position))
+    for strategy in _every_strategy():
+        pre = strategy.steps_for(ApplyPhase.PRE_CONTAINER)
+        on = strategy.steps_for(ApplyPhase.ON_CONTAINER)
+        assert tuple(sorted(pre + on, key=lambda s: s.position)) == whole
+        assert set(pre).isdisjoint(on)
 
 
 # ── the closing step ──────────────────────────────────────────────────────

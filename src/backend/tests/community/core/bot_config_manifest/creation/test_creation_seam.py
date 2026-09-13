@@ -14,6 +14,7 @@ import pytest
 from agentclaw.community.core.bot_config_manifest.create_job import (
     DEFAULT_CREATE_DEADLINE_SECONDS,
 )
+from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_PRE_CONTAINER_TRIGGER,
     BotCreationManifestSeam,
@@ -125,7 +126,7 @@ def test_the_pre_container_apply_needs_no_bot_record():
     )
     assert call["engine_type"] == "claude_code"
     assert call["trigger"] == CREATE_PRE_CONTAINER_TRIGGER
-    assert [p.value for p in call["phases"]] == ["pre_container"]
+    assert call["phase"] is ApplyPhase.PRE_CONTAINER
 
 
 def test_the_pre_container_apply_never_raises_so_it_cannot_abort_creation():

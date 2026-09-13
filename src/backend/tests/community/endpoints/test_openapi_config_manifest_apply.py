@@ -203,6 +203,18 @@ def _await_the_background_apply(_response, world) -> None:
         if task.task_type == APPLY_TASK_TYPE
     ]
     assert enqueued, "the accepted apply enqueued no task"
+    for task in enqueued:
+        # The route applies a whole document to a bot that already exists, so it
+        # names no phase and the payload says so. A phase here would mean the
+        # route had quietly become a creation half and delivered a fraction of
+        # what the caller asked for.
+        assert "phase" in task.payload, (
+            "the payload left out what the apply covers"
+        )
+        assert task.payload["phase"] is None, (
+            "the explicit-apply route reached the service with a phase; it must "
+            f"pass none, got {task.payload['phase']!r}"
+        )
     apply_service = world.get(BotConfigManifestApplyServiceProtocol)
     for task in enqueued:
         apply_service.run_apply_task(task.payload)

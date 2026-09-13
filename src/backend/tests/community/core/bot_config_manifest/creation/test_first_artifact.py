@@ -282,7 +282,7 @@ def test_the_first_artifact_carries_the_manifest(world):
     # The deferred creation's single phase, against the record.
     accepted = applies.start_apply(
         entity_id=_ENTITY, bot_id=_BOT, bot=dict(_RECORD), owner_id=_OWNER, actor_id=_OWNER,
-        trigger=CREATE_PRE_CONTAINER_TRIGGER, phases=frozenset({ApplyPhase.PRE_CONTAINER}),
+        trigger=CREATE_PRE_CONTAINER_TRIGGER, phase=ApplyPhase.PRE_CONTAINER,
     )
     report = applies.last_apply(entity_id=_ENTITY, bot_id=_BOT)
     assert report is not None and report.apply_id == accepted.apply_id

@@ -25,10 +25,7 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
 )
-from agentclaw.community.core.bot_config_manifest.apply.order import (
-    ALL_PHASES,
-    ApplyPhase,
-)
+from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
     ManifestApplyInProgressError,
@@ -228,7 +225,6 @@ def _start(service):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        phases=ALL_PHASES,
     )
 
 
@@ -462,7 +458,6 @@ def test_the_audit_label_is_recorded_without_becoming_the_principal(world):
         owner_id=_ENTITY,
         actor_id=_ENTITY,
         audit_actor=label,
-        phases=ALL_PHASES,
     )
     report = _drain(service)
 
@@ -485,7 +480,6 @@ def test_the_audit_label_defaults_to_the_principal(world):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        phases=ALL_PHASES,
     )
     _drain(service)
 
@@ -582,7 +576,6 @@ def test_an_enqueue_that_fails_terminates_the_report_and_frees_the_lock(
             bot=_BOT_RECORD,
             owner_id=_ENTITY,
             actor_id=_ENTITY,
-            phases=ALL_PHASES,
         )
 
     # The report is terminal, not stranded RUNNING.
@@ -598,7 +591,6 @@ def test_an_enqueue_that_fails_terminates_the_report_and_frees_the_lock(
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        phases=ALL_PHASES,
     )
     assert accepted.status is ApplyStatus.RUNNING
 
@@ -867,6 +859,88 @@ def test_a_dry_run_closes_its_session(world, monkeypatch):
 # at the end has to account for both or the manifest looks half-vanished.
 
 
+# ── the trigger and the phase must agree ───────────────────────────────────
+#
+# A phase is a creation-path argument and nothing else: creation splits one
+# apply in two around container provisioning, and each half says which it is.
+# Every other caller delivers the whole document and has no half to name. The
+# two are checked against each other so that ``phase=None`` is a statement ("not
+# a creation half") rather than a default a caller inherited without noticing.
+
+
+def test_a_phase_on_a_non_creation_trigger_is_refused_before_anything_is_minted(
+    world,
+):
+    """The explicit apply has no half to deliver, so naming one is a call bug.
+
+    Refused *before* the id and the lock, like every other refusal here: a
+    caller must never be handed a handle to an apply that never ran, and a
+    rejected call must never leave the bot locked against the next one.
+    """
+    service, applies, _locks, _scripts, _manifests = world
+
+    with pytest.raises(ValueError):
+        service.start_apply(
+            entity_id=_ENTITY,
+            bot_id=_BOT,
+            bot=_BOT_RECORD,
+            owner_id=_ENTITY,
+            actor_id=_ENTITY,
+            trigger="explicit",
+            phase=ApplyPhase.PRE_CONTAINER,
+        )
+
+    assert (
+        applies.latest(env=get_current_env(), entity_id=_ENTITY, bot_id=_BOT)
+        is None
+    ), "an apply record exists for a call that was refused"
+    # The lock is free: the next apply starts rather than raising
+    # ManifestApplyInProgressError for 30 minutes of stale-lock TTL.
+    accepted = service.start_apply(
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        bot=_BOT_RECORD,
+        owner_id=_ENTITY,
+        actor_id=_ENTITY,
+    )
+    assert accepted.apply_id
+
+
+def test_a_creation_trigger_with_no_phase_is_refused_the_same_way(world):
+    """The other half of the pairing.
+
+    A creation trigger that named no phase would deliver the whole document on
+    the pre-container call — every construct that needs a container, before one
+    exists — which is the failure ``ApplyPhase`` exists to prevent.
+    """
+    service, applies, _locks, _scripts, _manifests = world
+
+    with pytest.raises(ValueError):
+        service.start_apply(
+            entity_id=_ENTITY,
+            bot_id=_BOT,
+            bot=_BOT_RECORD,
+            owner_id=_ENTITY,
+            actor_id=_ENTITY,
+            trigger="create:pre_container",
+        )
+
+    assert (
+        applies.latest(env=get_current_env(), entity_id=_ENTITY, bot_id=_BOT)
+        is None
+    ), "an apply record exists for a call that was refused"
+    accepted = service.start_apply(
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        bot=_BOT_RECORD,
+        owner_id=_ENTITY,
+        actor_id=_ENTITY,
+        trigger="create:on_container",
+        phase=ApplyPhase.ON_CONTAINER,
+    )
+    assert accepted.apply_id
+
+
 def test_the_second_phase_report_carries_the_first_phases_categories(world):
     service, applies, _locks, _scripts, _manifests = world
 
@@ -877,7 +951,7 @@ def test_the_second_phase_report_carries_the_first_phases_categories(world):
         owner_id=_ENTITY,
         actor_id=_ENTITY,
         trigger="create:pre_container",
-        phases=frozenset({ApplyPhase.PRE_CONTAINER}),
+        phase=ApplyPhase.PRE_CONTAINER,
     )
     second = service.start_apply(
         entity_id=_ENTITY,
@@ -886,7 +960,7 @@ def test_the_second_phase_report_carries_the_first_phases_categories(world):
         owner_id=_ENTITY,
         actor_id=_ENTITY,
         trigger="create:on_container",
-        phases=frozenset({ApplyPhase.ON_CONTAINER}),
+        phase=ApplyPhase.ON_CONTAINER,
         carry_from_apply_id=first.apply_id,
     )
 
@@ -918,8 +992,8 @@ def test_a_missing_carry_id_is_ignored_rather_than_failing_the_apply(world):
         owner_id=_ENTITY,
         actor_id=_ENTITY,
         trigger="create:on_container",
+        phase=ApplyPhase.ON_CONTAINER,
         carry_from_apply_id="does-not-exist",
-        phases=ALL_PHASES,
     )
 
     report = service.get_apply(
@@ -958,7 +1032,7 @@ def test_a_failed_first_phase_survives_the_merge_and_re_derives_the_summary(worl
         owner_id=_ENTITY,
         actor_id=_ENTITY,
         trigger="create:pre_container",
-        phases=frozenset({ApplyPhase.PRE_CONTAINER}),
+        phase=ApplyPhase.PRE_CONTAINER,
     )
     assert (
         service.get_apply(
@@ -974,7 +1048,7 @@ def test_a_failed_first_phase_survives_the_merge_and_re_derives_the_summary(worl
         owner_id=_ENTITY,
         actor_id=_ENTITY,
         trigger="create:on_container",
-        phases=frozenset({ApplyPhase.ON_CONTAINER}),
+        phase=ApplyPhase.ON_CONTAINER,
         carry_from_apply_id=first.apply_id,
     )
     merged = service.get_apply(
@@ -1062,7 +1136,6 @@ def test_an_apply_that_cannot_be_rebuilt_terminates_instead_of_looping(world):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        phases=ALL_PHASES,
     )
     # A second apply, whose rebuild will fail.
     def _refuse(**_kwargs):
@@ -1080,7 +1153,7 @@ def test_an_apply_that_cannot_be_rebuilt_terminates_instead_of_looping(world):
         "trigger": "explicit",
         "lock_token": "no-such-token",
         "started_at": None,
-        "phases": None,
+        "phase": None,
         "carry_from_apply_id": None,
         "engine_type": None,
         "bot_type": None,

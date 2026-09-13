@@ -38,9 +38,9 @@ def _ports() -> MaterialiserPorts:
 
 def test_on_arca_the_script_is_the_only_pre_container_construct() -> None:
     arca = ArcaDelivery(_ports)
-    pre = arca.steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))
+    pre = arca.steps_for(ApplyPhase.PRE_CONTAINER)
     assert [s.construct for s in pre] == [ManifestSection.SCRIPT]
-    on = arca.steps_for(frozenset({ApplyPhase.ON_CONTAINER}))
+    on = arca.steps_for(ApplyPhase.ON_CONTAINER)
     assert ManifestSection.SCRIPT not in {s.construct for s in on}
     # Between them the two phases walk the whole table, once each.
     assert len(pre) + len(on) == len(APPLY_ORDER)
@@ -56,8 +56,8 @@ def test_on_teclaw_with_the_switch_on_there_is_no_first_boot_ordering() -> None:
     teclaw = TeclawDelivery(
         platform_managed=True, platform_ports=_ports, device_ports=_ports
     )
-    assert teclaw.steps_for(frozenset({ApplyPhase.ON_CONTAINER})) == ()
-    assert {s.construct for s in teclaw.steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))} == {
+    assert teclaw.steps_for(ApplyPhase.ON_CONTAINER) == ()
+    assert {s.construct for s in teclaw.steps_for(ApplyPhase.PRE_CONTAINER)} == {
         s.construct for s in APPLY_ORDER
     }
 

@@ -37,12 +37,9 @@ from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     APPLY_TASK_TYPE,
     ApplyTaskHandler,
     build_apply_task_payload,
-    phases_from_payload,
+    phase_from_payload,
 )
-from agentclaw.community.core.bot_config_manifest.apply.order import (
-    ALL_PHASES,
-    ApplyPhase,
-)
+from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 
 # Imported for side effect: registers the models on ``Base.metadata``.
@@ -220,7 +217,6 @@ def _start(service):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        phases=ALL_PHASES,
     )
 
 
@@ -246,7 +242,7 @@ def test_the_payload_carries_identifiers_and_not_the_document():
         trigger="explicit",
         lock_token="tok",
         started_at="2026-09-01T00:00:00",
-        phases=ALL_PHASES,
+        phase=None,
     )
     assert "document" not in payload and "parsed" not in payload
     assert "bot" not in payload
@@ -255,30 +251,37 @@ def test_the_payload_carries_identifiers_and_not_the_document():
     assert payload["tenant"] == "t1"
 
 
-def test_the_payloads_phases_are_stable_across_two_enqueues():
-    """A set's iteration order must not leak into a persisted payload.
+def test_the_payload_states_the_phase_and_round_trips_it():
+    """What an apply covers is written down, never inferred at the far end.
 
-    Two enqueues of the same apply that differ only by that would look like
-    different work to anyone comparing rows.
+    ``null`` is one of the stated values, not an absence: it says this apply is
+    not a creation half, which is the whole document.
     """
-    both = frozenset({ApplyPhase.ON_CONTAINER, ApplyPhase.PRE_CONTAINER})
-    first = build_apply_task_payload(
-        apply_id="a1", entity_id=_ENTITY, bot_id=_BOT, owner_id=_ENTITY,
-        actor_id=_ENTITY, env="dev", tenant="t1", trigger="explicit",
-        lock_token="tok", started_at="2026-09-01T00:00:00", phases=both,
+    def payload_for(phase):
+        return build_apply_task_payload(
+            apply_id="a1", entity_id=_ENTITY, bot_id=_BOT, owner_id=_ENTITY,
+            actor_id=_ENTITY, env="dev", tenant="t1", trigger="explicit",
+            lock_token="tok", started_at="2026-09-01T00:00:00", phase=phase,
+        )
+
+    whole = payload_for(None)
+    assert "phase" in whole, (
+        "the payload left out what the apply covers; the far end would have to "
+        "reconstruct it from a default"
     )
-    second = build_apply_task_payload(
-        apply_id="a1", entity_id=_ENTITY, bot_id=_BOT, owner_id=_ENTITY,
-        actor_id=_ENTITY, env="dev", tenant="t1", trigger="explicit",
-        lock_token="tok", started_at="2026-09-01T00:00:00", phases=both,
-    )
-    assert first["phases"] == second["phases"]
-    assert phases_from_payload(first["phases"]) == both
-    # Always written, never inferred. ``phases`` is a required argument, so a
-    # payload cannot leave what an apply covers to a default at the far end —
-    # which is what an absent value used to mean.
-    assert first["phases"] is not None
-    assert phases_from_payload(first["phases"]) == ALL_PHASES
+    assert whole["phase"] is None
+    assert phase_from_payload(whole["phase"]) is None
+
+    for phase in ApplyPhase:
+        written = payload_for(phase)["phase"]
+        assert written == phase.value
+        assert phase_from_payload(written) is phase
+
+
+def test_an_unknown_phase_name_in_a_payload_raises():
+    """Dropping it would silently narrow or widen what an apply covers."""
+    with pytest.raises(ValueError):
+        phase_from_payload("mid_container")
 
 
 # ── re-running ─────────────────────────────────────────────────────────────
