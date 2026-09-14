@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { request } from "node:http";
@@ -9,7 +10,7 @@ import { database } from "../../services/monitoring/__tests__/test-database.js";
 import { createMonitoringRuntime } from "../../services/monitoring/monitoring-runtime.js";
 import { createInsightRouter } from "../insight.js";
 
-const fixture = (name: string) => JSON.parse(readFileSync(new URL(`../../fixtures/monitoring/${name}.json`, import.meta.url), "utf8"));
+const fixture = (name: string) => JSON.parse(readFileSync(fileURLToPath(new URL(`../../fixtures/monitoring/${name}.json`, import.meta.url)), "utf8"));
 const alert = fixture("alert"), pass = fixture("pass"), unresolved = fixture("unresolved");
 const now = Date.parse("2026-09-10T09:00:00Z");
 const check = { schemaVersion: "claw-monitoring/bot-check/v1", botId: "mock-bot-te", engine: "TE",

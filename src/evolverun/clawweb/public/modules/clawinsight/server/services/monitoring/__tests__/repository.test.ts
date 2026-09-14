@@ -1,5 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runMigrations, type IDatabase } from "@avernet/clawweb-shared/server/db";
@@ -8,7 +9,7 @@ import { monitoringDdl } from "../../../../../../shared/server/monitoring-schema
 import { MonitoringRepository } from "../../../repositories/monitoring-repository.js";
 import { parseDiagnosis, parseQuery, parseCheck } from "../validation.js";
 import { database } from "./test-database.js";
-const fixture = (name: string) => JSON.parse(readFileSync(new URL(`../../../fixtures/monitoring/${name}.json`, import.meta.url), "utf8"));
+const fixture = (name: string) => JSON.parse(readFileSync(fileURLToPath(new URL(`../../../fixtures/monitoring/${name}.json`, import.meta.url)), "utf8"));
 const alert = fixture("alert"), pass = fixture("pass"), unresolved = fixture("unresolved");
 const now = Date.parse("2026-09-10T09:00:00Z");
 let db: IDatabase, repo: MonitoringRepository, dir: string;
