@@ -587,6 +587,7 @@ export type WorkflowTypeRow = {
   last_status: string | null
   last_run_at: number | null
   updated_at: number | null
+  owner_id?: string | null
 }
 
 export interface WorkflowTypesResponse {

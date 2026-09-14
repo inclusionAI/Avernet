@@ -139,7 +139,18 @@ export default function WorkflowWorkspace() {
                 <span>{VIEW_META[activeView as Exclude<WorkspaceView, 'dashboard'>].description}</span><span>·</span><span className="font-mono">{selectedWorkflow.workflow_id}</span><span>·</span><span>{selectedWorkflow.run_count} 次运行</span><StatusBadge status={(selectedWorkflow.last_status as import('@avernet/clawweb-shared/web/types').NodeStatus) ?? 'pending'} />
               </div>
             </div>
-            <div className="relative shrink-0">
+            <div className="relative flex shrink-0 items-center gap-3">
+              {selectedWorkflow.owner_id && (
+                <span
+                  className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600"
+                  title="负责人"
+                >
+                  负责人{" "}
+                  <span className="font-mono text-slate-700">
+                    {selectedWorkflow.owner_id}
+                  </span>
+                </span>
+              )}
               <button type="button" onClick={() => setLegacyOpen((open) => !open)} title="旧版入口" className="rounded-lg px-2 py-1 text-sm text-slate-300 hover:bg-slate-100 hover:text-slate-500">···</button>
               {legacyOpen && <><div className="fixed inset-0 z-10" onClick={() => setLegacyOpen(false)} /><div className="absolute right-0 top-full z-20 mt-1 w-40 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg"><button onClick={() => { setLegacyOpen(false); navigate('/workflows') }} className="block w-full px-3 py-2 text-left text-xs text-slate-600 hover:bg-slate-50">旧版工作流</button><button onClick={() => { setLegacyOpen(false); navigate('/editor') }} className="block w-full px-3 py-2 text-left text-xs text-slate-600 hover:bg-slate-50">旧版编辑器</button>{isAdmin && <button onClick={() => { setLegacyOpen(false); navigate('/workflow-management') }} className="block w-full px-3 py-2 text-left text-xs text-slate-600 hover:bg-slate-50">旧版工作流管理</button>}</div></>}
             </div>
