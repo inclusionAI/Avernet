@@ -2417,7 +2417,7 @@ function WorkflowNodeInspector({ step }: { step: EvolveStep }) {
       </div>
       {step.summary && <p className="mt-3 text-xs text-gray-700">{step.summary}</p>}
       {step.error && <p className="mt-3 rounded-lg bg-red-50 p-3 text-xs text-red-700">{step.error.code ? `${step.error.code}: ` : ''}{step.error.message}</p>}
-      {step.output && <StepDeliverables output={step.output} taskId={step.taskId} stepId={step.stepId} stepType={step.stepType} />}
+      {step.output && !(step.stepType === 'stage_extension' && step.status === 'waiting_context') && <StepDeliverables output={step.output} taskId={step.taskId} stepId={step.stepId} stepType={step.stepType} />}
       <details className="mt-3">
         <summary className="cursor-pointer text-[11px] font-medium text-blue-600">查看命令与运行标识</summary>
         <div className="mt-2 grid gap-2 rounded-lg border border-gray-200 bg-white p-3 text-[10px] sm:grid-cols-2">
@@ -2494,7 +2494,7 @@ function StepCard({ step, label, children, canRetry = false, canCancel = false, 
       {step.summary && <p className="mt-3 text-sm text-gray-700">{step.summary}</p>}
       {children}
       {step.error && <p className="mt-3 rounded-lg bg-red-50 p-3 text-xs text-red-700">{step.error.code ? `${step.error.code}: ` : ''}{step.error.message}</p>}
-      {step.output && <StepDeliverables output={step.output} taskId={step.taskId} stepId={step.stepId} stepType={step.stepType} />}
+      {step.output && !(step.stepType === 'stage_extension' && step.status === 'waiting_context') && <StepDeliverables output={step.output} taskId={step.taskId} stepId={step.stepId} stepType={step.stepType} />}
       <details className="mt-3 border-t border-gray-100 pt-3">
         <summary className="cursor-pointer text-xs text-gray-400 hover:text-gray-600">技术信息</summary>
         <div className="mt-2 rounded-lg bg-gray-50 px-3 py-2 font-mono text-[10px] leading-5 text-gray-600">{step.command}</div>

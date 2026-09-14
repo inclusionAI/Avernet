@@ -21,7 +21,7 @@ export default function SkillHardeningDetail({ task, implementationId, renderSta
     const binding = (step as EvolveStep & { stageExtension?: {
       stage: string; mode: string; implementationId: string
     } | null }).stageExtension
-    return step.stepType === 'stage_extension' && binding?.stage === 'diagnose'
+    return step.status === 'succeeded' && step.stepType === 'stage_extension' && binding?.stage === 'diagnose'
       && binding.mode === 'preprocess' && binding.implementationId === implementationId
   })
   // Interaction ownership is independent of the output/presentation filter.

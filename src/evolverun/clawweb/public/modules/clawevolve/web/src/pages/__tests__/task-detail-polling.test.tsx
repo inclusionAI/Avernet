@@ -27,6 +27,36 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals() })
 
 describe('Task detail live updates', () => {
+  it('keeps the StageTest HTML form and errors while withholding waiting HITL output as deliverables', async () => {
+    const question = { format: 'html', tag: 'scope', content: '<form><input name="scope"><input type="hidden" name="payload" value="HIDDEN_PAYLOAD_SENTINEL"><button>提交</button></form>' }
+    const waiting = { ...task('waiting_human'), task_type: 'stage_test', user_id: 'viewer',
+      config: { stageTest: { stage: 'diagnose', mode: 'preprocess' } },
+      steps: [{ stepId: 'STEP-1', taskId: 'TASK-1', stepType: 'stage_extension', status: 'waiting_context', command: 'stage test',
+        error: { code: 'CONTEXT', message: '保留步骤错误' }, output: { hitl: { question } } }],
+      interactions: [{ interactionId: 'HITL-1', stepId: 'STEP-1', status: 'waiting', question }],
+    }
+    api.evolve.getTask.mockResolvedValueOnce(waiting).mockResolvedValue({ ...waiting, status: 'completed',
+      steps: [{ ...waiting.steps[0], status: 'succeeded', output: { summary: '最终交付结果' } }],
+      interactions: [{ ...waiting.interactions[0], status: 'answered', answer: { scope: '已确认' } }],
+    })
+    const view = open(); await tick()
+    const frame = view.container.querySelector('iframe')!
+    expect(frame).toBeTruthy()
+    expect(frame.getAttribute('sandbox')).toBe('allow-forms allow-scripts')
+    expect(frame.srcdoc).toContain('HIDDEN_PAYLOAD_SENTINEL')
+    expect(screen.getByText('等待回答')).toBeTruthy()
+    expect(screen.getAllByText('等待补充上下文').length).toBeGreaterThan(0)
+    expect(screen.getByText('CONTEXT: 保留步骤错误')).toBeTruthy()
+    expect(screen.queryByText('自定义 Stage 交付结果')).toBeNull()
+    const rawOutputs = Array.from(view.container.querySelectorAll('pre')).filter((el) => el.textContent?.includes('HIDDEN_PAYLOAD_SENTINEL'))
+    expect(rawOutputs.length).toBeGreaterThan(0)
+    expect(rawOutputs.every((el) => el.closest('details')?.open === false)).toBe(true)
+    await tick(3000)
+    expect(screen.getByText('自定义 Stage 交付结果')).toBeTruthy()
+    expect(screen.getByText('最终交付结果')).toBeTruthy()
+    expect(screen.getByTitle('Stage 已回答的交互表单')).toBeTruthy()
+  })
+
   it('folds legacy Stage test preparation and artifacts while preserving its original step and answered interaction', async () => {
     const step = (stepId: string, stepType: string) => ({ stepId, taskId: 'TASK-1', stepType, status: 'succeeded', command: 'original command', summary: 'original ' + stepType })
     const history = { ...task('completed', true), task_type: 'stage_test', config: { ...task('completed', true).config, stageTest: { stage: 'diagnose', mode: 'replace' } },

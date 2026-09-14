@@ -56,6 +56,29 @@ it('renders only the exact diagnose preprocess Markdown and file list while pres
   expect(api.evolve.answerStageInteraction).toHaveBeenCalledWith('TASK', 'OTHER', 'QUESTION', { tag: 'scope', content: '确认范围' })
 })
 
+it.each(['waiting_context', 'running', 'failed', 'canceled'] as const)('excludes matching %s output until succeeded, even when the Task later fails', (status) => {
+  const task = fixture()
+  task.steps![0].status = status
+  task.interactions![0].stepId = 'PRE'
+  const renderDetail = () => <SkillHardeningDetail task={task} implementationId="HARDEN" renderStatus={(value) => value}
+    renderInteractions={(stepId) => <StepInteractions task={task} stepId={stepId} canOperate onUpdated={async () => {}} />} />
+  const view = render(renderDetail())
+  const results = within(screen.getByRole('region', { name: '诊断前置结果' }))
+  expect(results.queryByRole('heading', { name: '加固结论' })).toBeNull()
+  expect(results.queryByText('scripts/check.py')).toBeNull()
+  expect(results.getByText('尚无可关联的诊断前置输出')).toBeTruthy()
+  expect(within(screen.getByRole('region', { name: '主流程状态' })).getAllByText(status).length).toBeGreaterThan(0)
+  expect(screen.getByText('BROKEN: 诊断主流程失败')).toBeTruthy()
+  fireEvent.change(screen.getByPlaceholderText('填写回答'), { target: { value: '确认范围' } })
+  expect((screen.getByRole('button', { name: '提交并继续' }) as HTMLButtonElement).disabled).toBe(false)
+  task.steps![0].status = 'succeeded'
+  view.rerender(renderDetail())
+  expect(results.getByRole('heading', { name: '加固结论' })).toBeTruthy()
+  expect(results.getByText('scripts/check.py')).toBeTruthy()
+  expect(screen.getByText('后续主流程失败')).toBeTruthy()
+  expect(screen.getByText('BROKEN: 诊断主流程失败')).toBeTruthy()
+})
+
 it('uses the focused view only for the frozen presentation policy, preserving the task failure and generic form', async () => {
   api.evolve.getTask.mockResolvedValue(fixture())
   render(<MemoryRouter initialEntries={['/evolve/runs/TASK']}><Evolve /></MemoryRouter>)

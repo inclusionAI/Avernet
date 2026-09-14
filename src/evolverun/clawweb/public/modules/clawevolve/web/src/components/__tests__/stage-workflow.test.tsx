@@ -151,6 +151,8 @@ it('opens the existing form and result in the task detail workflow without dupli
   const graph = within(heading.closest('section')!)
   fireEvent.click(graph.getByRole('button', { name: /前置.*PRE/ }))
   expect(graph.getByText('请选择诊断范围')).toBeTruthy()
+  expect(graph.queryByText('自定义 Stage 交付结果')).toBeNull()
+  expect(graph.queryByText('receipt is not a status')).toBeNull()
   expect(screen.getAllByText('请选择诊断范围')).toHaveLength(1)
   fireEvent.click(graph.getByRole('button', { name: /后置.*POST/ }))
   expect(graph.getByText('实际后置产物')).toBeTruthy()
