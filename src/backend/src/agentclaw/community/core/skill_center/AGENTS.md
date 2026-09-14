@@ -18,7 +18,7 @@
 | 共享资产 README、兼容发布状态 | 同文件独立 Router：`/skills/{skill_id}/readme`、发布状态资源 | README 不要求目标 Bot；不要和 Bot 参数值、Space Publication Attempt 混用 |
 | SkillSet 管理与 Skill/MCP 成员 | `skill_sets/router.py`：`/{bot_id}/skill-sets` | `SkillSetManagementService` → Desired-State UoW → Runtime Projector |
 | SC Public 懒引用 | `skill_sets/skill_center_references.py`：`/{bot_id}/skill-sets/{set_id}/skill-center-references` | `SkillCenterReferenceService` → 持久任务 → `SkillCenterReferenceProcessor` |
-| TeamClaw 市场、SC Public 市场、手动巡检 | `market/router.py`：POST `/market/skills`、`/market/skill-center/skills`、`/market/skill-center/sync` | `SkillMarketService`、`SkillCenterGatewayService`、`SkillCenterSyncService` |
+| TeamClaw 市场、SC Public 市场、手动巡检 | `market/router.py`：POST `/market/skills`、`/market/skill-center/skills`、`/market/skill-center/sync`；SC Public 搜索省略 `sortBy` 时默认 `hottest` | `SkillMarketService`、`SkillCenterGatewayService`、`SkillCenterSyncService` |
 | Space Skill 创建、列表、详情、Version、下线、复制 | `spaces/skill_routes.py` | `SpaceSkillApplicationService`、`SpaceSkillQueryService`、`SpaceSkillVersionQueryService`、`SpaceSkillOfflineService` |
 | Draft 文件、升级、Git 刷新、删除 | `spaces/router.py`：`/spaces/{space_id}/skills/{skill_id}/draft/...` | `SpaceSkillApplicationService` → Draft Repository + `DraftContentStore` |
 | Owner/Manager、编辑租约、编辑权限申请 | `spaces/router.py`：Skill grants/managers/owner、`draft/lease`、`editor-requests` | `SpaceSkillGrantService`、`DraftEditLeaseService`、`SpaceSkillEditorRequestService` |
