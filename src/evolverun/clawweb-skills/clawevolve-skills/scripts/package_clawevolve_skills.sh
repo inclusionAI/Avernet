@@ -83,7 +83,10 @@ for name in "${SKILLS[@]}"; do
   version="$(tr -d '[:space:]' < "$version_file")"
   [[ "$version" =~ ^[A-Za-z0-9._-]{1,128}$ ]] || { echo "invalid skill version: ${name}=${version}" >&2; exit 1; }
   digest="$(skill_digest "$source_dir")"
+  previous_version="$version"
   version="$(version_for_release "$version")"
+  printf '%s\n' "$version" > "$version_file"
+  echo "version bumped: ${name} ${previous_version} -> ${version}"
 
   cp -R "$source_dir" "$STAGING_DIR/skills/$name"
   find "$STAGING_DIR/skills/$name" -name '.DS_Store' -delete
