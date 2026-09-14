@@ -50,24 +50,26 @@ def test_claude_code_merges_aicoding_research_mcps():
         "mcp.ant.alipaybase-antlogsmcp.mcp-server",
         "mcp.ant.arkai.assistantmcpserver",
         "mcp.ant.faas.aixjiter.AixCodingMemoryMCP",
+        "mcp.ant.faas.aixjiter.CodeUserMCP",
         "mcp.ant.rgmcpserver.rgfastcheckmcpserver",
     )
     for code in aicoding_only:
         assert code in codes, f"missing aicoding-only MCP in claude_code: {code}"
     # 无重复。
     assert len(codes) == len(set(codes))
-    # 12 原有 + 5 研发 MCP + 1 应用信息 MCP + 1 clawmind = 19。
-    assert len(codes) == 19
+    # 12 原有 + 6 研发 MCP + 1 应用信息 MCP + 1 clawmind = 20。
+    assert len(codes) == 20
 
 
 def test_aicoding_has_its_own_list():
     servers = get_default_mcp_servers("aicoding")
     codes = [s["server_code"] for s in servers]
     assert isinstance(servers, list)
-    assert len(servers) == 19
+    assert len(servers) == 20
     assert "mcp.ant.arkai.assistantmcpserver" in codes
     assert "mcp.ant.arkai.dimamcpserver" in codes
     assert "mcp.ant.faas.aixjiter.AixCodingMemoryMCP" in codes
+    assert "mcp.ant.faas.aixjiter.CodeUserMCP" in codes
     assert "mcp.ant.rgmcpserver.rgfastcheckmcpserver" in codes
     assert "mcp.ant.antcodemcp.code.mcpserver" in codes
     assert "mcp.ant.antprocessai.anttaskmcp" in codes
