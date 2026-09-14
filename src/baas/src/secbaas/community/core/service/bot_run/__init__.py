@@ -29,6 +29,7 @@ from ._bot_run_utils import (
 )
 from ._bot_service_selector import BotServiceSelector
 from ._bot_websocket_client import BotWebSocketClient, ChatRequestError
+from ._caller_service import CallerBotService
 from ._claw_service import BotServiceConfig, ClawBotService
 from ._engine_adapter_registry import BotEngineAdapterRegistry
 from ._executor import BotRunRequestExecutor, ResultGuardExecutor, SerializingExecutor
@@ -58,6 +59,7 @@ __all__ = [
     "BotWebSocketClient",
     "ChatRequestError",
     "ClawBotService",
+    "CallerBotService",
     "BotSessionError",
     "ConcurrentSessionError",
     "NotConnectedError",

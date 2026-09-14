@@ -102,6 +102,7 @@ class TaskMessageDispatcher:
         context: BotChatContext | None = None,
         timeout: float,
         bot_id: str = "",
+        chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
         session_pending: bool = False,
     ) -> AsyncIterator[StreamChunk]:
@@ -127,6 +128,7 @@ class TaskMessageDispatcher:
                     binding_info=binding_info,
                     context=context,
                     timeout=timeout,
+                    chat_metadata=chat_metadata,
                     attachments=attachments,
                     session_pending=session_pending,
                 ):

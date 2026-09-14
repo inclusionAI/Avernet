@@ -49,14 +49,14 @@ class BotEngineAdapter(Protocol):
         tc_bot_id: str,
         user_id: str,
         run_id: str,
-        session_id: str | None = None,
     ) -> str | None:
         """返回 device 亲和一致性哈希字符串（传给 `_wss_resolver` 的 ``device_affinity``）。
 
-        语义为路由亲和字符串（**非**去重 tuple）。``session_id`` 非空时优先返回它。
+        语义为路由亲和字符串（**非**去重 tuple）。显式 ``session_id`` 由调用方
+        （``plan_session_id``）前置短路处理，本方法仅在无显式 session_id 时被调用。
 
-        - aicoding → ``None``
-        - claude_code / hermes → ``f"agent:{tc_bot_id}:session:{run_id}:user:{user_id}"``
+        - aicoding（基类默认）→ ``None``
+        - claude_code / hermes / aicoding(real) → ``f"agent:{tc_bot_id}:session:{run_id}:user:{user_id}"``
         """
         ...
 

@@ -97,20 +97,5 @@ def test_ws_path_returns_str(factory: type) -> None:
     ids=[f"{f.__name__}" for f, _ in ADAPTER_CASES],
 )
 def test_session_consistency_key_returns_str_or_none(factory: type) -> None:
-    key = factory().session_consistency_key(
-        tc_bot_id="b1", user_id="u1", run_id="r1", session_id=None
-    )
+    key = factory().session_consistency_key(tc_bot_id="b1", user_id="u1", run_id="r1")
     assert key is None or isinstance(key, str)
-
-
-@pytest.mark.parametrize(
-    "factory",
-    [f for f, _ in ADAPTER_CASES],
-    ids=[f"{f.__name__}" for f, _ in ADAPTER_CASES],
-)
-def test_session_consistency_key_prefers_explicit_session_id(factory: type) -> None:
-    """session_id 非空时优先透传（Mock 语义；Noop 恒 None）。"""
-    key = factory().session_consistency_key(
-        tc_bot_id="b1", user_id="u1", run_id="r1", session_id="s-fixed"
-    )
-    assert key in ("s-fixed", None)

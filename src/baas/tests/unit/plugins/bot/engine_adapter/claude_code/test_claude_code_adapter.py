@@ -47,13 +47,6 @@ def test_session_consistency_key(cls: type) -> None:
         adapter.session_consistency_key(tc_bot_id="b1", user_id="u1", run_id="r1")
         == "agent:b1:session:r1:user:u1"
     )
-    # session_id 非空优先透传
-    assert (
-        adapter.session_consistency_key(
-            tc_bot_id="b1", user_id="u1", run_id="r1", session_id="s1"
-        )
-        == "s1"
-    )
 
 
 @pytest.mark.asyncio
@@ -95,12 +88,7 @@ def test_noop_returns_safe_zero_values(noop_cls: type) -> None:
     """Noop 不抛异常、返回安全零值。"""
     a = noop_cls()
     assert isinstance(a.ws_path(), str)
-    assert (
-        a.session_consistency_key(
-            tc_bot_id="b1", user_id="u1", run_id="r1", session_id="s1"
-        )
-        is None
-    )
+    assert a.session_consistency_key(tc_bot_id="b1", user_id="u1", run_id="r1") is None
 
 
 class TestNoopClaudeCodeAdapterCreateSession:

@@ -32,10 +32,9 @@ class BaseEngineAdapter:
         tc_bot_id: str,
         user_id: str,
         run_id: str,
-        session_id: str | None = None,
     ) -> str | None:
-        """默认：session_id 优先，否则无 device 亲和（aicoding 语义）。"""
-        return session_id
+        """默认：无 device 亲和（aicoding 语义）。显式 session_id 由调用方前置处理。"""
+        return None
 
     async def create_adapter_session(
         self,

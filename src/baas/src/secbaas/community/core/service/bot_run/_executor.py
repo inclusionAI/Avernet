@@ -31,7 +31,6 @@ from secbaas.community.api.bot_runtime import (
     BotBindingInfo,
     BotChatContext,
 )
-from secbaas.community.api.device_manage import ErrorCode, PaasError
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.api_gateway import APIKeyRepository
 from secbaas.community.core.repository.bot_run import BotRunRepository
@@ -41,10 +40,9 @@ from secbaas.community.spi.bot_service import BotServicePlugin
 from secbaas.community.spi.eval_env import EvalSessionLog
 
 from ._bot_run_utils import (
-    binding_data_to_info,
+    CALLER_SANDBOX_META_KEY,
     build_chat_metadata,
-    extract_lifecycle_stage,
-    parse_bot_id,
+    resolve_binding,
     resolve_bot_id,
 )
 from ._bot_service_selector import BotServiceSelector
@@ -300,8 +298,12 @@ class BotRunRequestExecutor:
         context = _rebuild_context(
             run.api_key_prefix, self._api_key_repository, metadata
         )
-        lifecycle_stage = extract_lifecycle_stage(metadata)
-        binding_info = await self._resolve_binding(run.bot_id, lifecycle_stage)
+        binding_info = await resolve_binding(
+            self._bot_service_plugin,
+            bot_id=run.bot_id,
+            metadata=metadata,
+            caller_sandbox_id=queue_meta.get(CALLER_SANDBOX_META_KEY),
+        )
 
         if binding_info is None:
             self._repo.update_error(run.run_id, f"binding not found: {run.bot_id}")
@@ -370,6 +372,7 @@ class BotRunRequestExecutor:
                     context,
                     attachments=attachments,
                     session_pending=session_pending,
+                    chat_metadata=chat_metadata,
                 )
             else:
                 await self._do_send(
@@ -456,6 +459,7 @@ class BotRunRequestExecutor:
         context: BotChatContext,
         attachments: list[Any] | None = None,
         session_pending: bool = False,
+        chat_metadata: dict[str, str] | None = None,
     ) -> None:
         """流式发送：消费 bot_service.send_message_stream，逐 chunk 写 chunk 表 + ZCache watermark。
 
@@ -577,6 +581,7 @@ class BotRunRequestExecutor:
             binding_info=binding_info,
             context=context,
             timeout=timeout_sec,
+            chat_metadata=chat_metadata,
             attachments=attachments,
             session_pending=session_pending,
         )
@@ -656,28 +661,3 @@ class BotRunRequestExecutor:
             content_long="",
             extra={"session_id": session_id, "injected": "true"},
         )
-
-    async def _resolve_binding(
-        self, bot_id: str, lifecycle_stage: str
-    ) -> BotBindingInfo | None:
-        real_bot_id, entity_id = parse_bot_id(bot_id)
-        if not real_bot_id:
-            return None
-        try:
-            data = await self._bot_service_plugin.get_binding(
-                bot_id=real_bot_id,
-                owner_id=entity_id or "",
-                stage=lifecycle_stage,
-            )
-        except PaasError as e:
-            if e.code == ErrorCode.NOT_FOUND:
-                logger.warning(
-                    "[BotRunExecutor] Bot binding unavailable: bot_id=%s, "
-                    "lifecycle_stage=%s, error=%s",
-                    bot_id,
-                    lifecycle_stage,
-                    e,
-                )
-                return None
-            raise
-        return binding_data_to_info(data)

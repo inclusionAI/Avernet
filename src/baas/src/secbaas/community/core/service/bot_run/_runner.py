@@ -35,7 +35,6 @@ from secbaas.community.api.bot_runtime import (
     MessageInfo,
     SessionInfo,
 )
-from secbaas.community.api.device_manage import ErrorCode, PaasError
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.bot_run import BotRunRecord, BotRunRepository
 from secbaas.community.logger import get_logger
@@ -44,13 +43,11 @@ from secbaas.community.spi.eval_env import EvalSessionLog
 
 from ..config import SystemConfigKey
 from ._bot_run_utils import (
-    binding_data_to_info,
     build_chat_metadata,
-    extract_lifecycle_stage,
     extract_session_id_from_record,
-    parse_bot_id,
     parse_wait_result,
     plan_session_id,
+    resolve_binding,
     resolve_bot_id,
     resolve_user_id,
 )
@@ -449,6 +446,10 @@ class BotRunner:
                 context=context,
             )
 
+            chat_metadata = build_chat_metadata(
+                metadata, run_id=message_id, eval_session_log=self._eval_session_log
+            )
+
             # 委托 dispatcher 流式发送
             stream_iter = self._select_dispatcher(
                 bot_id,
@@ -464,6 +465,7 @@ class BotRunner:
                 context=context,
                 timeout=timeout,
                 bot_id=bot_id,
+                chat_metadata=chat_metadata,
                 attachments=attachments,
                 session_pending=session_pending,
             )
@@ -601,10 +603,11 @@ class BotRunner:
 
         bot_id = record.bot_id
         metadata = record.metadata or {}
-        lifecycle_stage = extract_lifecycle_stage(metadata)
 
         try:
-            binding_info = await self._resolve_binding(bot_id, lifecycle_stage)
+            binding_info = await resolve_binding(
+                self._bot_service_plugin, bot_id=bot_id, metadata=metadata
+            )
         except Exception as e:
             logger.warning(
                 "[runner.abort] binding resolution failed: run_id=%s bot_id=%s %s",
@@ -615,11 +618,9 @@ class BotRunner:
             return
         if binding_info is None:
             logger.warning(
-                "[runner.abort] binding not found: run_id=%s bot_id=%s "
-                "lifecycle_stage=%s",
+                "[runner.abort] binding not found: run_id=%s bot_id=%s",
                 run_id,
                 bot_id,
-                lifecycle_stage,
             )
             return
 
@@ -806,17 +807,16 @@ class BotRunner:
     ) -> _BotRoute:
         """解析 binding → 选择 BotService → 解析 bot_id
 
+        binding 解析策略由 ``_resolve_binding`` 统一处理（caller 模式见该方法）。
+
         Raises:
             BotBindingNotFoundError: binding 不存在
         """
-        lifecycle_stage = extract_lifecycle_stage(metadata)
-        binding_info = await self._resolve_binding(bot_id, lifecycle_stage)
+        binding_info = await resolve_binding(
+            self._bot_service_plugin, bot_id=bot_id, metadata=metadata
+        )
         if binding_info is None:
-            logger.warning(
-                "[runner] Bot binding not found: bot_id=%s, lifecycle_stage=%s",
-                bot_id,
-                lifecycle_stage,
-            )
+            logger.warning("[runner] Bot binding not found: bot_id=%s", bot_id)
             raise BotBindingNotFoundError(bot_id)
 
         logger.info(
@@ -901,114 +901,45 @@ class BotRunner:
         route: _BotRoute,
         context: BotChatContext,
     ) -> tuple[str, bool]:
-        """解析 session_id：优先提前构造，失败则走同步创建。
+        """解析 session_id：复用显式值 > 提前构造计划值。
+
+        非 teclaw 引擎的默认前提：显式传入 session_id 即视为会话已存在，
+        直接复用、不物化（与旧 create_session 复用分支语义一致）。
+        teclaw 无此前提（引擎侧 sessionKey 语义不同），仍走
+        plan/materialize 的 get-or-create。
 
         Returns:
             (actual_session_id, session_pending)
             session_pending=True 表示 session_id 为计划值，尚未在 adapter 侧物化。
         """
-        planned = self._plan_session(
-            run_id=run_id,
-            session_id=session_id,
-            metadata=metadata,
-            route=route,
-            context=context,
-        )
-        if planned is not None:
-            return planned, True
-        actual = await self._create_session(
-            run_id=run_id,
-            session_id=session_id,
-            metadata=metadata,
-            route=route,
-            context=context,
-        )
-        return actual, False
-
-    def _plan_session(
-        self,
-        *,
-        run_id: str,
-        session_id: str | None,
-        metadata: dict[str, Any],
-        route: _BotRoute,
-        context: BotChatContext,
-    ) -> str | None:
-        """提前构造 session_id 并落库。
-
-        返回 None 表示该引擎不支持提前构造（如 teclaw 生产流量），
-        调用方应走同步 _create_session 旧路径。
-        """
+        if session_id is not None and route.binding_info.engine_type != "teclaw":
+            self._run_repository.update_session_id(run_id, session_id)
+            logger.info(
+                "[runner._resolve_session] reuse existing session_id=%s, run_id=%s",
+                session_id,
+                run_id,
+            )
+            return session_id, False
         user_id = resolve_user_id(
             metadata, route.binding_info, context, route.route_bot_id
         )
-        planned = plan_session_id(
-            engine_type=route.binding_info.engine_type,
-            tc_bot_id=route.binding_info.bot_id,
-            user_id=user_id,
-            run_id=run_id,
-            session_id=session_id,
-            eval_id=metadata.get("eval_id"),
-        )
-        if planned is not None:
-            self._run_repository.update_session_id(run_id, planned)
-            logger.info(
-                "[runner._plan_session] planned session_id=%s for run_id=%s",
-                planned,
-                run_id,
-            )
-        return planned
-
-    async def _create_session(
-        self,
-        *,
-        run_id: str,
-        session_id: str | None,
-        metadata: dict[str, Any],
-        route: _BotRoute,
-        context: BotChatContext,
-    ) -> str:
-        """创建会话，成功后持久化 session_id。
-
-        失败时仅记录日志并上抛，由调用方统一将 run 标记为 FAILED。
-        """
-        try:
-            session = await route.bot_service.create_session(
-                bot_id=route.route_bot_id,
-                session_id=session_id,
-                metadata=metadata,
-                binding_info=route.binding_info,
-                context=context,
+        # teclaw + 显式 session_id 透传（物化时 get-or-create）；
+        # 其余到达此处的 session_id 恒为 None
+        planned_session_id = (
+            session_id
+            if session_id is not None
+            else plan_session_id(
+                engine_type=route.binding_info.engine_type,
+                tc_bot_id=route.binding_info.bot_id,
+                user_id=user_id,
                 run_id=run_id,
+                eval_id=metadata.get("eval_id"),
             )
-            actual_session_id = session.session_id
-            self._run_repository.update_session_id(run_id, actual_session_id)
-            return actual_session_id
-        except Exception:
-            logger.exception(
-                "[runner] Session creation failed: run_id=%s, bot_id=%s",
-                run_id,
-                route.route_bot_id,
-            )
-            raise
-
-    async def _resolve_binding(
-        self,
-        bot_id: str,
-        lifecycle_stage: str = "online",
-    ) -> BotBindingInfo | None:
-        """解析 bot_id 的 binding 信息（通过 BotServicePlugin）"""
-        real_bot_id, entity_id = parse_bot_id(bot_id)
-        if not real_bot_id:
-            return None
-        try:
-            data = await self._bot_service_plugin.get_binding(
-                bot_id=real_bot_id,
-                owner_id=entity_id or "",
-                stage=lifecycle_stage,
-            )
-        except PaasError as e:
-            if e.code == ErrorCode.NOT_FOUND:
-                return None
-            raise
-        return binding_data_to_info(data)
+        )
+        self._run_repository.update_session_id(run_id, planned_session_id)
+        logger.info(
+            "[runner._resolve_session] planned_session_id session_id=%s for run_id=%s",
+            planned_session_id,
+            run_id,
+        )
+        return planned_session_id, True

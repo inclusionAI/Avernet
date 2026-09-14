@@ -23,8 +23,5 @@ class ClaudeCodeAdapter(BaseEngineAdapter):
         tc_bot_id: str,
         user_id: str,
         run_id: str,
-        session_id: str | None = None,
     ) -> str | None:
-        if session_id is not None:
-            return session_id
         return f"agent:{tc_bot_id}:session:{run_id}:user:{user_id}"

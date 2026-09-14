@@ -16,3 +16,12 @@ class AICodingAdapter(BaseEngineAdapter):
 
     engine_type = "aicoding"
     _WS_PATH = "/api/ws"
+
+    def session_consistency_key(
+        self,
+        *,
+        tc_bot_id: str,
+        user_id: str,
+        run_id: str,
+    ) -> str | None:
+        return f"agent:{tc_bot_id}:session:{run_id}:user:{user_id}"

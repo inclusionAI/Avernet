@@ -26,7 +26,6 @@ class NoopHermesAdapter:
         tc_bot_id: str,
         user_id: str,
         run_id: str,
-        session_id: str | None = None,
     ) -> str | None:
         return None
 
@@ -70,13 +69,8 @@ class MockHermesAdapter:
         tc_bot_id: str,
         user_id: str,
         run_id: str,
-        session_id: str | None = None,
     ) -> str | None:
-        self.calls.append(
-            ("session_consistency_key", tc_bot_id, user_id, run_id, session_id)
-        )
-        if session_id is not None:
-            return session_id
+        self.calls.append(("session_consistency_key", tc_bot_id, user_id, run_id))
         return f"agent:{tc_bot_id}:session:{run_id}:user:{user_id}"
 
     async def create_adapter_session(

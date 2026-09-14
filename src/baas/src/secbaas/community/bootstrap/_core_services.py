@@ -31,6 +31,7 @@ from secbaas.community.core.service.bot_run import (
     BotRunRequestExecutor,
     BotServiceConfig,
     BotServiceSelector,
+    CallerBotService,
     ClawBotService,
     QueueTaskMessageDispatcher,
     ResultGuardExecutor,
@@ -425,6 +426,13 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         engine_adapter_registry=engine_adapter_registry,
     )
 
+    # caller 模式：容器由 caller-connection 显式指定（binding.device_provider=="caller"），
+    # 传输层复用 claw，caller 专属校验在 CallerBotService 内（见 _caller_service.py）。
+    caller_bot_service = providers.Singleton(
+        CallerBotService,
+        inner=claw_bot_service,
+    )
+
     # ── Service providers ─────────────────────────────────────────────────────
 
     device_template_service = providers.Singleton(
@@ -554,6 +562,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         BotServiceSelector,
         claw_service=claw_bot_service,
         baas_service=baas_bot_service,
+        caller_service=caller_bot_service,
     )
 
     task_concurrency_pool = providers.Singleton(

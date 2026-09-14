@@ -18,7 +18,9 @@ from secbaas.community.core.service.bot_run import (
 from secbaas.community.plugins.bot.engine_adapter.aicoding import MockAICodingAdapter
 
 
-def _service(registry: BotEngineAdapterRegistry | None) -> BaasBotService:
+def _service(registry: BotEngineAdapterRegistry) -> BaasBotService:
+    from secbaas.community.plugins.eval_env.stub import NoopEvalConsistencyCheck
+
     return BaasBotService(
         config=BaasBotServiceConfig(
             adapter_port=20003,
@@ -30,6 +32,7 @@ def _service(registry: BotEngineAdapterRegistry | None) -> BaasBotService:
         wss_resolver=MagicMock(),
         session_service=MagicMock(),
         engine_adapter_registry=registry,
+        eval_consistency_check=NoopEvalConsistencyCheck(),
     )
 
 
@@ -54,8 +57,9 @@ def test_adapter_for_legacy_engines_return_none(registry) -> None:
     assert svc._adapter_for("unknown") is None
 
 
-def test_adapter_for_none_registry_returns_none() -> None:
-    svc = _service(None)
+def test_adapter_for_empty_registry_returns_none() -> None:
+    # 空 registry（无任何注册）→ 恒 None → 走 else 原始分支
+    svc = _service(BotEngineAdapterRegistry({}))
     assert svc._adapter_for("aicoding") is None
 
 

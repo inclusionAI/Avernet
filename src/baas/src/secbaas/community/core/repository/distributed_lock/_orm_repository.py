@@ -243,8 +243,7 @@ class OrmDistributedLockRepository(OrmConnectionMixin, DistributedLockRepository
             if existing is not None:
                 held_by_other = existing.lock_holder != lock_holder
                 unexpired = (
-                    existing.expire_time is not None
-                    and existing.expire_time > now
+                    existing.expire_time is not None and existing.expire_time > now
                 )
                 if held_by_other and unexpired:
                     log.info(
