@@ -87,6 +87,9 @@ _STAGE_ADDRESSED_ELSEWHERE = {
 #: **not** take ``stage``: there is no runtime in question when you are
 #: recording who may reach a bot, or listing a bot's stored skills.
 _OWNER_ADDRESSED_ELSEWHERE = {
+    ("get", "/openapi/v1/bots/{bot_id}/status"),
+    ("post", "/openapi/v1/bots/{bot_id}/activate"),
+    ("post", "/openapi/v1/bots/{bot_id}/recycle"),
     ("get", "/openapi/v1/bots/{bot_id}/caller-context"),
     ("patch", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type"),
     ("patch", "/openapi/v1/bots/{bot_id}/clis/{cli_code}/call-type"),

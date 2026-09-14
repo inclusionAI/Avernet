@@ -28,7 +28,7 @@ export function ManagePanelTabs<T extends string>({ value, options, onChange }: 
             aria-selected={active}
             onClick={() => onChange(option.value)}
             className={cn(
-              'relative h-10 justify-center rounded-none border-0 px-3 pb-3 text-sm font-medium',
+              'relative h-10 justify-center rounded-none border-0 px-3 pb-3 text-xs font-medium',
               active ? 'text-primary' : 'text-muted-foreground hover:bg-transparent hover:text-foreground',
             )}
           >

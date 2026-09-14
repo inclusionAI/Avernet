@@ -27,10 +27,10 @@ export function MessageViewScopeMenuButton({ onSelect, selected, disabled }: Mes
         <IconButton
           label="新建会话"
           size="sm"
-          icon={<Plus className="h-4 w-4" />}
+          icon={<Plus className="h-3.5 w-3.5" />}
           disabled={disabled}
           onClick={(event) => event.stopPropagation()}
-          className="rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
+          className="h-6 w-6 rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
         />
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-1">
@@ -52,8 +52,8 @@ export function MessageViewScopeMenuButton({ onSelect, selected, disabled }: Mes
               aria-hidden="true"
             />
             <span className="min-w-0">
-              <span className="block text-sm font-medium text-foreground">{option.label}</span>
-              <span className="mt-0.5 block text-xs text-muted-foreground">{option.description}</span>
+              <span className="block text-xs font-medium text-foreground">{option.label}</span>
+              <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">{option.description}</span>
             </span>
           </Button>
         ))}

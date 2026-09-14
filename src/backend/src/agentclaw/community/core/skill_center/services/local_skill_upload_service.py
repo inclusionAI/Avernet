@@ -32,6 +32,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillLayoutRollbackError,
     LocalSkillNotReadyError,
     LocalSkillStorageError,
+    SkillAssetInUseError,
     LocalSkillTooLargeError,
 )
 from agentclaw.community.core.skill_center.factories import (
@@ -294,6 +295,8 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             if skill is not None:
                 try:
                     self._skill_repo.delete(skill["id"])
+                except SkillAssetInUseError as conflict:
+                    raise conflict from exc
                 except Exception:
                     pass
             try:

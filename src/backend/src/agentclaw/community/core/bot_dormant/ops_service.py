@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from injector import inject
 
 from agentclaw.community.core.bot_dormant.service import Candidate, DormantBotService
+from agentclaw.community.core.bot_dormant.recycle_service import RecycleBotService
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugin_api.passport import PassportPlugin
@@ -24,9 +25,11 @@ class DormantOpsService:
         self,
         dormant_service: DormantBotService,
         passport_plugin: PassportPlugin,
+        recycle_service: RecycleBotService,
     ) -> None:
         self._dormant_service = dormant_service
         self._passport = passport_plugin
+        self._recycle_service = recycle_service
 
     def unfreeze_passport_one(
         self,
@@ -127,6 +130,7 @@ class DormantOpsService:
                 raise ValueError(
                     f"only personal bot can be manually recycled, current: {bot_type}"
                 )
+            self._recycle_service.ensure_supported(bot.to_dict())
 
             now = datetime.now(UTC).replace(tzinfo=None)
             gmt_create = getattr(bot, "gmt_create", None) or now
@@ -141,7 +145,11 @@ class DormantOpsService:
             self._dormant_service._enqueue_recycle(
                 session, candidate, days_inactive, dry_run
             )
-            self._dormant_service._execute_recycle(candidate, dry_run)
+            if not dry_run:
+                self._recycle_service.recycle(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                )
             self._dormant_service._write_audit(
                 session,
                 run_id=run_id,

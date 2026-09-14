@@ -162,6 +162,7 @@ pub async fn group_chat(
         "group_id": outcome.group_id,
         "driver_bot": outcome.driver_bot_id,
         "delivered_count": outcome.delivered_count,
+        "queue_admission": outcome.queue_admission,
         "failed_count": outcome.failed_count,
         "delivery_results": delivery_results_json(&outcome.delivery_results),
         "mentions": outcome.mentions,
@@ -237,6 +238,7 @@ pub async fn send_message(
     Ok(Json(serde_json::json!({
         "message_id": outcome.message_id,
         "routed_to": outcome.routed_to,
+        "queue_admission": outcome.queue_admission,
         "mentions": outcome.mentions,
     })))
 }

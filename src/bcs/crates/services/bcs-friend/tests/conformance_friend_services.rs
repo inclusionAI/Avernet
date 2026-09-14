@@ -428,7 +428,6 @@ impl BotRegistryCoreService for StaticRegistry {
                     visibility: visibility.clone(),
                     ..Default::default()
                 },
-                dynamic_status: Default::default(),
                 env: None,
                 created_by: None,
                 actor_kind: *actor_kind,

@@ -23,7 +23,8 @@ def _bare_baas_service() -> BaasService:
     return object.__new__(BaasService)
 
 
-def test_caller_identity_uses_supplied_binding_or_falls_back_to_resolution() -> None:
+@pytest.mark.parametrize("provider", ["arca", "baas"])
+def test_caller_identity_uses_supplied_binding_or_falls_back_to_resolution(provider) -> None:
     service = _bare_baas_service()
     service._bot_repo = MagicMock()
     service._bot_repo.get_by_id_and_entity.return_value = {
@@ -35,9 +36,14 @@ def test_caller_identity_uses_supplied_binding_or_falls_back_to_resolution() -> 
     }
     service._device_binding_repo = MagicMock()
     service._device_binding_repo.get_by_id.return_value = SimpleNamespace(
+        id=9,
+        device_provider="baas",
         status="ACTIVE",
         device_id="baas-bot-1",
     )
+    binding = service._device_binding_repo.get_by_id.return_value
+    binding.device_provider = provider
+    binding.device_props = {"sandbox_id": "ARCA-SANDBOX-direct@002"}
     service._outbound_rule_provider = MagicMock()
     service._outbound_rule_provider.build_caller_rule.return_value = (
         OutBoundOperationRule(
@@ -91,7 +97,13 @@ def test_caller_identity_uses_supplied_binding_or_falls_back_to_resolution() -> 
         caller_token="caller-token"
     )
     paas_device_id, outbound_rule = service.append_caller_outbound_rule.call_args.args
-    assert paas_device_id == "device-1@template-1"
+    if provider == "arca":
+        assert paas_device_id == "ARCA-SANDBOX-direct@002"
+        service.list_devices_by_bot_uuid.assert_not_called()
+    else:
+        assert paas_device_id == "device-1@template-1"
+        assert service.list_devices_by_bot_uuid.call_count == 2
+        service.list_devices_by_bot_uuid.assert_called_with("baas-bot-1", timeout=3.0)
     assert outbound_rule.header_operation_rules[0].header_name == "x-caller-token"
     assert outbound_rule.header_operation_rules[0].action == "set"
     assert outbound_rule.header_operation_rules[0].value == "caller-token"
@@ -165,6 +177,8 @@ def test_caller_identity_test_exchange_allows_active_personal_bot() -> None:
     }
     service._device_binding_repo = MagicMock()
     service._device_binding_repo.get_by_id.return_value = SimpleNamespace(
+        id=9,
+        device_provider="baas",
         status="ACTIVE",
         device_id="baas-bot-1",
     )

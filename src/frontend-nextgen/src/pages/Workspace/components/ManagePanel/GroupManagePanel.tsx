@@ -96,7 +96,7 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
   };
 
   return (
-    <aside className="flex h-full flex-col bg-background">
+    <aside className="flex h-full w-full flex-col bg-background">
       <ManagePanelHeader
         title="群管理"
         subtitle={group.name}
@@ -133,19 +133,19 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
               <div className="mt-3 space-y-2 rounded-lg bg-muted px-3 py-2">
                 <div>
                   <p className="m-0 text-[11px] font-medium text-muted-foreground">成员数量</p>
-                  <p className="m-0 mt-1 text-sm font-medium text-foreground">
+                  <p className="m-0 mt-1 text-xs font-medium text-foreground">
                     {group.participantCount || group.participants.length}
                   </p>
                 </div>
                 <div>
                   <p className="m-0 text-[11px] font-medium text-muted-foreground">创建时间</p>
-                  <p className="m-0 mt-1 text-sm font-medium text-foreground">
+                  <p className="m-0 mt-1 text-xs font-medium text-foreground">
                     {new Date(group.createdAt).toLocaleDateString()}
                   </p>
                 </div>
                 <div>
                   <p className="m-0 text-[11px] font-medium text-muted-foreground">群 ID</p>
-                  <p className="m-0 mt-1 break-all text-xs font-medium text-foreground">{group.groupId}</p>
+                  <p className="m-0 mt-1 break-all font-mono text-xs text-foreground">{group.groupId}</p>
                 </div>
               </div>
             </Card>
@@ -153,8 +153,8 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
             <Card className="rounded-lg bg-card p-3 shadow-sm">
               <div className="flex items-center justify-between gap-2">
                 <div>
-                  <p className="m-0 text-sm font-medium text-foreground">公开群</p>
-                  <p className="m-0 mt-0.5 text-xs text-muted-foreground">公开群允许通过邀请链接加入。</p>
+                  <p className="m-0 text-sm font-semibold text-foreground">公开群</p>
+                  <p className="m-0 mt-0.5 text-[11px] text-muted-foreground">公开群允许通过邀请链接加入。</p>
                 </div>
                 <Switch
                   checked={group.isPublic}
@@ -192,7 +192,7 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
                 <Button
                   variant="ghost"
                   onClick={() => void handleShare()}
-                  className="h-auto w-full justify-start rounded-lg border border-primary/25 bg-background px-3 py-2 text-left text-sm text-primary hover:bg-primary/10 hover:text-primary"
+                  className="h-auto w-full justify-start rounded-lg border border-primary/25 bg-background px-3 py-2 text-left text-xs text-primary hover:bg-primary/10 hover:text-primary"
                 >
                   <LinkIcon className="h-4 w-4 shrink-0" />
                   <span className="flex flex-col items-start">
@@ -210,7 +210,7 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
                   >
                     <Button
                       variant="ghost"
-                      className="h-auto w-full justify-start rounded-lg border border-destructive/30 bg-background px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10"
+                      className="h-auto w-full justify-start rounded-lg border border-destructive/30 bg-background px-3 py-2 text-left text-xs text-destructive hover:bg-destructive/10"
                     >
                       <Trash2 className="h-4 w-4 shrink-0" />
                       <span className="flex flex-col items-start">
@@ -236,7 +236,7 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
                     <Button
                       variant="ghost"
                       disabled={!activeIdentity}
-                      className="h-auto w-full justify-start rounded-lg border border-destructive/30 bg-background px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10"
+                      className="h-auto w-full justify-start rounded-lg border border-destructive/30 bg-background px-3 py-2 text-left text-xs text-destructive hover:bg-destructive/10"
                     >
                       <LogOut className="h-4 w-4 shrink-0" />
                       <span className="flex flex-col items-start">

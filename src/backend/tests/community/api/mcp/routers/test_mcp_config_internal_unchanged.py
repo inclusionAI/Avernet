@@ -27,6 +27,7 @@ from agentclaw.community.api.mcp_config_service import MCPConfigServiceProtocol
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.mcp_sync_service import MCPSyncServiceProtocol
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
+from agentclaw.community.di.config import McpRuntimeCredentialsConfig
 from agentclaw.community.core.models.mcp import UserMCPConfig
 from agentclaw.community.core.repository.implementations.bot.user_mcp_config import UserMCPConfigRepository
 from agentclaw.community.utils.env_utils import get_current_env
@@ -76,6 +77,8 @@ def config_service(repo):
         user_mcp_config_repo=repo,
         mcp_center=mcp_center,
         bot_repo=MagicMock(),
+        mcp_runtime_credentials=McpRuntimeCredentialsConfig(),
+        secret_resolver=MagicMock(),
     )
 
 

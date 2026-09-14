@@ -229,3 +229,38 @@ expand into a bubble; other completed speakers have clickable small bubbles. The
 completed-speech check sprite and check prefix are removed. Other lifecycle markers
 (vote, eliminated, retry, action required) remain distinct. Preview `mode=markers`
 to inspect a running speaker alongside completed speeches.
+
+### Tie-break PK contract
+
+`pk_speaking` and `pk_voting` are subphases of the existing `round`.
+`attempt` remains a retry counter within the current subphase. PK is never a retry
+of the ordinary vote and does not invalidate the first ballot.
+
+- `pkCandidates?: string[]` contains the tied players' actor IDs. PK phases require
+  at least two distinct living candidates. The original `seatOrder` is unchanged.
+- In PK speech, `turnOrder` and player `nodeActorMap` entries contain only PK
+  speakers. A non-PK Human watches without an input task. PK voting uses all living
+  players; `voteCandidates` contains only PK candidates other than the voter.
+- The private vote context has `allowAbstain: false`; PK never displays an
+  abstention option. The referee independently rejects abstention, self-votes and
+  non-PK targets, without requesting replacement votes.
+- `publicHistory[].stage?: 'regular' | 'pk'` distinguishes two speech groups in
+  the same round. Omitted stage means regular. Both histories remain inspectable.
+- `voteHistory?: Array<{ round, stage, votes, counts }>` carries **already tallied**
+  ballots only. `stage` is `regular` or `pk`; each vote is
+  `{ seatNumber, displayName, text }`, where text is the referee's normalized
+  ballot, and each count is `{ seatNumber, votes }`. These records contain no raw
+  vote reasoning, words or roles. The next phase carries previous tallies; the
+  current tally is visible through the host broadcast. Terminal summaries include
+  both ballots. In-flight player artifacts still display only “已投票”.
+
+PK final files use `undercover-result-v1-r<round>-pk-a<attempt>.json` and include
+`stage: 'pk'`. The parser matches stage as well as session, host, round and attempt;
+a missing stage means regular for existing results. The ordinary file name and
+existing v1 fields stay compatible. Publish the updated panel before activating
+this profile for new games; hot migration of an in-flight old collaboration is
+not validated. No BCS server, shared collaboration protocol or database change
+is required.
+
+Preview PK with `?width=560&height=800&mode=pk-vote` or
+`?width=360&height=600&mode=pk-speech`; these fixtures use simulated API responses.

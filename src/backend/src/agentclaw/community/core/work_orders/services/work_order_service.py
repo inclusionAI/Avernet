@@ -354,10 +354,15 @@ class WorkOrderService(WorkOrderServiceProtocol):
             raise WorkOrderNotFoundError("bot not found")
         if applicant_user_id == str(bot.get("owner_id") or ""):
             raise WorkOrderApplicantAlreadyEditorError("Bot owner already has access")
-        if not self._member_management.can_manage_collaborators(bot, bot_id):
-            raise WorkOrderBotEditorRequestNotAllowedError(
-                "Bot does not support editor management"
-            )
+        # COSEC: the Team Space, not the engine/template capability flags, is the
+        # collaboration contract here. A Bot assigned to a Team Space accepts
+        # editor requests from Space members regardless of engine form
+        # (personal/openclaw/teclaw/...). Approval inserts the Collaborator
+        # relation transactionally and operable permission is re-resolved from
+        # that relation plus live Space membership, so engine capability
+        # (``can_manage_collaborators``) plays no role on this path — gating on
+        # it locked plain Team Space Bots out of the editor workflow while the
+        # independent edit-lock and Collaborator CRUD policies stayed unchanged.
         raw_space_id = bot.get("space_id")
         try:
             space = self._access.require_space_reference(space_ref=str(raw_space_id))

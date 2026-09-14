@@ -62,12 +62,15 @@ async function selectLeader(label: string, optionName: RegExp) {
   fireEvent.click(await screen.findByRole('option', { name: optionName }));
 }
 
-it('用户身份建群展示视角 radio，选参与者视角后 human 参与者条目携带 scope', async () => {
+it('用户身份建群展示视角下拉框，选参与者视角后 human 参与者条目携带 scope', async () => {
   render(<CreateGroupModal open activeIdentity={userIdentity} onClose={jest.fn()} onCreated={jest.fn()} />);
-  const radios = screen.getAllByRole('radio', { name: /完整视角|参与者视角/ });
-  expect(radios).toHaveLength(2);
-  expect(radios[0]).toBeChecked();
-  fireEvent.click(radios[1]);
+  const scopeSelect = screen.getByRole('button', { name: '消息视角' });
+  expect(scopeSelect).toHaveTextContent('完整视角');
+  fireEvent.click(scopeSelect);
+  const participantOption = await screen.findByRole('option', { name: /参与者视角/ });
+  expect(participantOption).toHaveClass('text-xs');
+  expect(screen.getByText('仅显示公共及与您相关的消息')).toBeInTheDocument();
+  fireEvent.click(participantOption);
 
   fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
   await selectLeader('群主 Bot', /Alpha/);
@@ -82,9 +85,9 @@ it('用户身份建群展示视角 radio，选参与者视角后 human 参与者
   );
 }, 30_000);
 
-it('bot 身份建群不展示视角 radio 且参与者不携带 scope', async () => {
+it('bot 身份建群不展示视角下拉框且参与者不携带 scope', async () => {
   render(<CreateGroupModal open activeIdentity={botIdentity} onClose={jest.fn()} onCreated={jest.fn()} />);
-  expect(screen.queryAllByRole('radio', { name: /完整视角|参与者视角/ })).toHaveLength(0);
+  expect(screen.queryByRole('button', { name: '消息视角' })).not.toBeInTheDocument();
   fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
   fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
   await waitFor(() =>

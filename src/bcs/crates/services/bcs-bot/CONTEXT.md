@@ -40,6 +40,11 @@ The crate owns registry business rules, status/connectivity semantics, and Bot
 control-plane persistence orchestration such as Provider hydration. It does not
 own socket runtime state or transport handling.
 
+Provider event ingestion authenticates the Provider/Bot binding before asking
+the message-flow application contract to reconcile a durable managed run. Late
+terminal events can survive an expired run cache; this service does not own the
+delivery state machine or resume nonterminal streams from durable metadata.
+
 ## Tests
 
 - `cargo test --package bcs-bot --manifest-path src/bcs/Cargo.toml`

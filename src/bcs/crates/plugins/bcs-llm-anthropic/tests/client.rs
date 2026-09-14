@@ -484,6 +484,7 @@ fn test_config(base_url: &str, structured_output: StructuredOutputMode) -> LlmCo
         base_url: base_url.to_string(),
         api_key_env: None,
         api_key: Some(Secret::new("anthropic-key".to_string())),
+        api_key_secret: None,
         model: "claude-sonnet-4-6".to_string(),
         timeout_ms: 10_000,
         temperature: 0.0,

@@ -57,6 +57,7 @@ pub struct WebSendCommand {
 
 #[derive(Debug)]
 pub struct WebSendOutcome {
+    pub queue_admission: Option<super::message_delivery::DeliveryAdmissionView>,
     pub primary_run_id: String,
     pub status: String,
     pub active_run_ids: Vec<String>,
@@ -81,6 +82,7 @@ pub struct GroupChatCommand {
 
 #[derive(Debug)]
 pub struct GroupChatOutcome {
+    pub queue_admission: Option<super::message_delivery::DeliveryAdmissionView>,
     pub group_id: String,
     pub driver_bot_id: String,
     pub delivered_count: usize,
@@ -104,6 +106,7 @@ pub struct PersistentGroupSendCommand {
 
 #[derive(Debug)]
 pub struct PersistentGroupSendOutcome {
+    pub queue_admission: Option<super::message_delivery::DeliveryAdmissionView>,
     pub message_id: String,
     pub routed_to: Vec<String>,
     pub mentions: Vec<String>,
@@ -328,6 +331,29 @@ pub struct ConflictPosition {
 
 #[async_trait]
 pub trait MessageFlowService: Send + Sync {
+    async fn get_delivery_policy(&self, _caller: CallerContext) -> ServiceResult<bcs_config_api::message_delivery::DeliveryPolicyRecord> {
+        Err(service_not_configured("delivery policy management"))
+    }
+    async fn replace_delivery_policy(&self, _caller: CallerContext, _expected_version: u64, _policy: bcs_config_api::message_delivery::DeliveryPolicy) -> ServiceResult<bcs_config_api::message_delivery::DeliveryPolicyRecord> {
+        Err(service_not_configured("delivery policy management"))
+    }
+    /// Internal callback recovery after Provider authentication; checks the
+    /// persisted owner against the authenticated Bot's current binding.
+    async fn resolve_managed_provider_run(&self, _run_id: &str, _provider_id: &str, _bot_id: &str) -> ServiceResult<Option<crate::BotRunContext>> { Ok(None) }
+    async fn query_message_deliveries(&self, _query: super::message_delivery::DeliveryStatusQuery) -> ServiceResult<Vec<super::message_delivery::DeliveryStatusView>> {
+        Err(service_not_configured("message delivery status"))
+    }
+    async fn cancel_message_deliveries(&self, _command: super::message_delivery::CancelMessageDeliveryCommand) -> ServiceResult<Vec<super::message_delivery::CancelMessageDeliveryResult>> {
+        Err(service_not_configured("message delivery cancellation"))
+    }
+    async fn shutdown_managed_delivery(&self) -> ServiceResult<()> { Ok(()) }
+    async fn record_delivery_acceptance(
+        &self,
+        _request_id: &str,
+        _bot_id: &str,
+        _downstream_run_id: Option<&str>,
+    ) -> ServiceResult<()> { Ok(()) }
+
     async fn handle_web_send(&self, cmd: WebSendCommand) -> ServiceResult<WebSendOutcome>;
 
     async fn handle_group_chat(&self, _cmd: GroupChatCommand) -> ServiceResult<GroupChatOutcome> {

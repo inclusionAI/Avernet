@@ -21,6 +21,7 @@ def test_workspace_resolves_relative_roots_before_engine_injection(
                 "claude_code_root": "./data/workspace/claude_code",
                 "aicoding_root": "./data/workspace/aicoding",
                 "hermes_root": "./data/workspace/hermes",
+                "deepseek_harness_root": "./data/workspace/dsh",
             }
         },
     )
@@ -31,6 +32,7 @@ def test_workspace_resolves_relative_roots_before_engine_injection(
     assert workspace.claude_code_root == str(tmp_path / "data/workspace/claude_code")
     assert workspace.aicoding_root == str(tmp_path / "data/workspace/aicoding")
     assert workspace.hermes_root == str(tmp_path / "data/workspace/hermes")
+    assert workspace.deepseek_harness_root == str(tmp_path / "data/workspace/dsh")
 
 
 def test_workspace_keeps_absolute_sandbox_roots_stable(monkeypatch) -> None:
@@ -43,3 +45,4 @@ def test_workspace_keeps_absolute_sandbox_roots_stable(monkeypatch) -> None:
     assert workspace.claude_code_root == defaults.claude_code_root
     assert workspace.aicoding_root == defaults.aicoding_root
     assert workspace.hermes_root == defaults.hermes_root
+    assert workspace.deepseek_harness_root == defaults.deepseek_harness_root

@@ -54,10 +54,20 @@ impl PendingGroupMessagePort for PendingMessageReader {
         let tool_starts = self.tracker.snapshot_tool_call_starts().await;
         let mut pending = Vec::with_capacity(chat_bufs.len() + tool_starts.len());
 
-        for (run_id, text) in chat_bufs {
+        for (key, text) in chat_bufs {
             if text.is_empty() {
                 continue;
             }
+            let scoped = serde_json::from_str::<(String, Option<String>, String, String)>(&key).ok();
+            if let Some((ref group, ref session, ref bot, ref run)) = scoped {
+                if group != group_id || session_id.is_some_and(|s| session.as_deref() != Some(s)) { continue; }
+                let Some(context) = self.matching_context(run, group_id, session_id).await else { continue; };
+                if context.bot_id != *bot { continue; }
+                pending.push(PendingGroupMessage { run_id: run.clone(), bot_id: bot.clone(), session_id: session.clone(),
+                    created_at_ms: snapshot_at_ms, kind: PendingGroupMessageKind::Chat { text } });
+                continue;
+            }
+            let run_id = key;
             let Some(context) = self
                 .matching_context(&run_id, group_id, session_id)
                 .await

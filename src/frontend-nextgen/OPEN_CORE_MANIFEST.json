@@ -1,6 +1,6 @@
 {
   "sourceRepository": "teamclaw",
-  "sourceCommit": "3414cb6b39ea6780e76fb79926e58be3a2c99ae9",
+  "sourceCommit": "3a4e389334f0e411daf2d7343be3c6cf54a35276",
   "sourceDirty": false,
   "exportSchemaVersion": 1,
   "target": "src/frontend-nextgen",

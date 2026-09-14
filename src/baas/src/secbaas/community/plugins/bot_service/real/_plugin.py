@@ -30,7 +30,14 @@ from secbaas.community.spi.bot_service import (
 logger = get_logger("plugin-bot-service")
 
 _SUPPORTED_RUNTIME_ENGINE_TYPES = frozenset(
-    {"openclaw", "teclaw", "aicoding", "hermes", "claude_code"}
+    {
+        "openclaw",
+        "teclaw",
+        "aicoding",
+        "hermes",
+        "claude_code",
+        "deepseek_harness",
+    }
 )
 _CLAUDE_CODE_NORMAL_TEMPLATE = "normalCC"
 _BINDING_MAX_ATTEMPTS = 2

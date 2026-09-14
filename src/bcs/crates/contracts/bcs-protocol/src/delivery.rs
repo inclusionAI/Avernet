@@ -20,5 +20,7 @@ pub enum FrontendDeliveryKind {
 pub enum FrontendDeliveryTarget {
     Group { group_id: String },
     Session { session_id: String },
+    /// Application-authorized recipients; never fall back to a wider scope.
+    SessionActors { session_id: String, actor_ids: Vec<String> },
     Run { run_id: String },
 }

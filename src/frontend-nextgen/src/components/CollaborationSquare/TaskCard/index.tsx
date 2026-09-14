@@ -111,7 +111,7 @@ export default function TaskCard({ task, onOpenDetail }: TaskCardProps) {
                     onOpenDetail(task);
                   }
                 }}
-                className="m-0 line-clamp-2 cursor-pointer break-words text-sm leading-5 text-muted-foreground transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+                className="m-0 line-clamp-2 break-words text-sm leading-5 text-muted-foreground transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
               >
                 {task.goal || '暂无任务目标'}
               </p>

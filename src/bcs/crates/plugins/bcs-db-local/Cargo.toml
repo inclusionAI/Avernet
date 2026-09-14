@@ -13,7 +13,10 @@ workspace = true
 bcs-db-api = { workspace = true }
 async-trait = { workspace = true }
 rusqlite   = { workspace = true }
+tracing    = { workspace = true }
+tokio      = { workspace = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
 bcs-test-support = { workspace = true }
 tokio            = { workspace = true, features = ["macros", "rt"] }

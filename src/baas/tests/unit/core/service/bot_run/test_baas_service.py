@@ -280,6 +280,21 @@ class TestSessionRoutingAffinityPrefix:
             == f"agent:{BOT_UUID}:session:run-1:user:u-1"
         )
 
+    @pytest.mark.parametrize("eval_id", [None, "eval-abc123"])
+    def test_deepseek_harness_uses_structured_affinity_key(self, service, eval_id):
+        session_key = eval_id or "run-1"
+        assert (
+            service._create_session_consistency_key(
+                engine_type="deepseek_harness",
+                tc_bot_id=BOT_UUID,
+                user_id="u-1",
+                run_id="run-1",
+                session_id=None,
+                eval_id=eval_id,
+            )
+            == f"agent:{BOT_UUID}:session:{session_key}:user:u-1"
+        )
+
     def test_eval_id_ignored_when_session_id_provided(self, service):
         """session_id 已传入时直接返回，eval_id 不生效。"""
         assert (
@@ -3415,3 +3430,156 @@ class TestCreateSessionClientEvalIdHeader:
         conn_info = _make_conn_info()
         client = service._create_session_client(conn_info, engine_type="openclaw")
         assert "X-Eval-Id" not in client.headers
+
+
+class TestSendMessageEvalHeaders:
+    """send_message / send_message_stream propagate eval headers in WS handshake."""
+
+    @pytest.mark.asyncio
+    async def test_send_message_injects_eval_headers(self, service, mock_pool):
+        """chat_metadata 含 eval_id + default_tag 时，WS 握手 headers 注入对应 header。"""
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+        mock_client = AsyncMock()
+        mock_client.send_message = AsyncMock(return_value=("ok", "done"))
+        mock_pool.get.return_value = mock_client
+
+        with patch.object(
+            service,
+            "_resolve_ws_connection_for_binding",
+            return_value=_make_conn_info(),
+        ):
+            await service.send_message(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+                chat_metadata={
+                    "eval_id": "eval-abc123",
+                    "default_tag": "eval",
+                },
+            )
+        # mock_pool.get(pool_key, ws_url, headers) — 验证第三个参数
+        call_args = mock_pool.get.call_args
+        headers = call_args[0][2] if call_args[0] else call_args.kwargs.get("headers")
+        assert headers["X-Eval-Id"] == "eval-abc123"
+        assert headers["X-Agentclaw-Default-Tag"] == "eval"
+
+    @pytest.mark.asyncio
+    async def test_send_message_no_eval_headers_without_metadata(
+        self, service, mock_pool
+    ):
+        """chat_metadata 为 None 时，WS 握手 headers 不含评测 header。"""
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+        mock_client = AsyncMock()
+        mock_client.send_message = AsyncMock(return_value=("ok", "done"))
+        mock_pool.get.return_value = mock_client
+
+        with patch.object(
+            service,
+            "_resolve_ws_connection_for_binding",
+            return_value=_make_conn_info(),
+        ):
+            await service.send_message(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+            )
+        call_args = mock_pool.get.call_args
+        headers = call_args[0][2] if call_args[0] else call_args.kwargs.get("headers")
+        assert "X-Eval-Id" not in headers
+        assert "X-Agentclaw-Default-Tag" not in headers
+
+    @pytest.mark.asyncio
+    async def test_send_message_only_eval_id(self, service, mock_pool):
+        """chat_metadata 只含 eval_id 时，只注入 X-Eval-Id。"""
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+        mock_client = AsyncMock()
+        mock_client.send_message = AsyncMock(return_value=("ok", "done"))
+        mock_pool.get.return_value = mock_client
+
+        with patch.object(
+            service,
+            "_resolve_ws_connection_for_binding",
+            return_value=_make_conn_info(),
+        ):
+            await service.send_message(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+                chat_metadata={"eval_id": "eval-xyz"},
+            )
+        call_args = mock_pool.get.call_args
+        headers = call_args[0][2] if call_args[0] else call_args.kwargs.get("headers")
+        assert headers["X-Eval-Id"] == "eval-xyz"
+        assert "X-Agentclaw-Default-Tag" not in headers
+
+    @pytest.mark.asyncio
+    async def test_send_message_stream_injects_eval_headers(self, service, mock_pool):
+        """send_message_stream: chat_metadata 含 eval_id + default_tag 时注入对应 header。"""
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+        mock_client = AsyncMock()
+
+        async def _fake_stream(**kwargs):
+            from secbaas.community.api.sse._models import StreamChunk
+
+            yield StreamChunk(type="delta", content="hi")
+
+        mock_client.send_message_stream = _fake_stream
+        mock_pool.get.return_value = mock_client
+
+        with patch.object(
+            service,
+            "_resolve_ws_connection_for_binding",
+            return_value=_make_conn_info(),
+        ):
+            chunks = []
+            async for chunk in service.send_message_stream(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+                chat_metadata={
+                    "eval_id": "eval-stream-1",
+                    "default_tag": "eval",
+                },
+            ):
+                chunks.append(chunk)
+        call_args = mock_pool.get.call_args
+        headers = call_args[0][2] if call_args[0] else call_args.kwargs.get("headers")
+        assert headers["X-Eval-Id"] == "eval-stream-1"
+        assert headers["X-Agentclaw-Default-Tag"] == "eval"
+
+    @pytest.mark.asyncio
+    async def test_send_message_stream_no_eval_headers_without_metadata(
+        self, service, mock_pool
+    ):
+        """send_message_stream: chat_metadata 为 None 时不含评测 header。"""
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+        mock_client = AsyncMock()
+
+        async def _fake_stream(**kwargs):
+            from secbaas.community.api.sse._models import StreamChunk
+
+            yield StreamChunk(type="delta", content="hi")
+
+        mock_client.send_message_stream = _fake_stream
+        mock_pool.get.return_value = mock_client
+
+        with patch.object(
+            service,
+            "_resolve_ws_connection_for_binding",
+            return_value=_make_conn_info(),
+        ):
+            async for _ in service.send_message_stream(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+            ):
+                pass
+        call_args = mock_pool.get.call_args
+        headers = call_args[0][2] if call_args[0] else call_args.kwargs.get("headers")
+        assert "X-Eval-Id" not in headers
+        assert "X-Agentclaw-Default-Tag" not in headers

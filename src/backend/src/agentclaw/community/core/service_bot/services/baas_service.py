@@ -72,6 +72,7 @@ from agentclaw.community.kernel.device_dto import (
 )
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
     from agentclaw.community.core.bot_startup_script.protocols import (
         StartupScriptReaderProtocol,
     )
@@ -189,6 +190,14 @@ def _redact_payload_for_log(payload: Dict[str, Any]) -> Dict[str, Any]:
         "after_create_cmd_hook": elided,
     }
     return redacted
+
+
+class BaasOutboundTargetError(ValueError):
+    """Token target resolution failure with a stable, non-sensitive reason."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(reason)
 
 
 class BaasServiceError(Exception):
@@ -3155,6 +3164,76 @@ class BaasService:  # pragma: no cover
         logger.info("caller_outbound_append_succeeded")
         return True
 
+    def resolve_token_outbound_device_id(
+        self, binding: DeviceBindingRecord | None,
+    ) -> str:
+        """Resolve an authorized runtime binding to its token append target.
+
+        BaaS requires one current device; ARCA uses the stored sandbox ID
+        with its numeric template suffix intact. No template lookup is made.
+        Domain failures raise BaasOutboundTargetError; query failures propagate.
+        """
+        started_at = time.monotonic()
+        binding_id = getattr(binding, "id", None)
+        provider = getattr(binding, "device_provider", None)
+        # COSEC: unknown provider values may contain secrets or log controls.
+        safe_provider = provider if provider in ("baas", "arca") else "unsupported"
+        logger.info(
+            "token_outbound_target_resolution_started binding_id=%s provider=%s "
+            "reason=pending error_type=none",
+            binding_id, safe_provider,
+        )
+        try:
+            if binding is None or str(getattr(binding, "status", "")).upper() != "ACTIVE":
+                raise BaasOutboundTargetError("binding_unavailable")
+            if provider not in ("baas", "arca"):
+                raise BaasOutboundTargetError("unsupported_provider")
+            if provider == "baas":
+                bot_uuid = getattr(binding, "device_id", None)
+                if not bot_uuid:
+                    raise BaasOutboundTargetError("target_not_found")
+                # COSEC: the logical ID also enters a fixed relative URL.
+                if not isinstance(bot_uuid, str) or not re.fullmatch(
+                    r"[A-Za-z0-9._~-]+", bot_uuid,
+                ):
+                    raise BaasOutboundTargetError("invalid_target")
+                devices = self.list_devices_by_bot_uuid(bot_uuid, timeout=3.0)
+                if not devices:
+                    raise BaasOutboundTargetError("target_not_found")
+                if len(devices) != 1:
+                    raise BaasOutboundTargetError("target_ambiguous")
+                target = devices[0].get("provider_device_id")
+            else:
+                props = getattr(binding, "device_props", None)
+                target = props.get("sandbox_id") if isinstance(props, dict) else None
+                if target is None or target == "":
+                    raise BaasOutboundTargetError("target_not_found")
+            if not self._is_valid_paas_device_id(target):
+                raise BaasOutboundTargetError("invalid_target")
+            assert isinstance(target, str)
+            # COSEC: BaaS parses ARCA's @suffix as an integer template ID.
+            # Reject fallback-to-template-0 inputs, without restricting BaaS IDs.
+            if provider == "arca" and (
+                not target.startswith("ARCA-SANDBOX-")
+                or not all("0" <= char <= "9" for char in target.rpartition("@")[2])
+            ):
+                raise BaasOutboundTargetError("invalid_target")
+        except Exception as exc:
+            reason = exc.reason if isinstance(exc, BaasOutboundTargetError) else "query_failed"
+            logger.warning(
+                "token_outbound_target_resolution_failed binding_id=%s provider=%s "
+                "reason=%s error_type=%s duration_ms=%.1f",
+                binding_id, safe_provider, reason, type(exc).__name__,
+                (time.monotonic() - started_at) * 1000,
+            )
+            raise
+        logger.info(
+            "token_outbound_target_resolution_succeeded binding_id=%s provider=%s "
+            "reason=resolved error_type=none duration_ms=%.1f",
+            binding_id, safe_provider, (time.monotonic() - started_at) * 1000,
+        )
+        return target
+
     def update_caller_identity(
         self,
         *,
@@ -3211,21 +3290,15 @@ class BaasService:  # pragma: no cover
             )
         )
         binding = self._device_binding_repo.get_by_id(resolved_binding_id)
-        if (
-            binding is None
-            or str(getattr(binding, "status", "")).upper() != "ACTIVE"
-            or not str(getattr(binding, "device_id", ""))
-        ):
-            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
-
-        devices = self.list_devices_by_bot_uuid(str(binding.device_id), timeout=3.0)
-        if not devices:
-            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
-        if len(devices) != 1:
-            raise CallerCredentialError(CALLER_TARGET_AMBIGUOUS)
-        paas_device_id = devices[0].get("provider_device_id")
-        if not self._is_valid_paas_device_id(paas_device_id):
-            raise CallerCredentialError(CALLER_TARGET_NOT_FOUND)
+        try:
+            paas_device_id = self.resolve_token_outbound_device_id(binding)
+        except BaasOutboundTargetError as exc:
+            code = (
+                CALLER_TARGET_AMBIGUOUS
+                if exc.reason == "target_ambiguous"
+                else CALLER_TARGET_NOT_FOUND
+            )
+            raise CallerCredentialError(code) from exc
 
         caller_rule = self._outbound_rule_provider.build_caller_rule(
             caller_token=caller_token.access_token,

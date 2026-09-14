@@ -1485,6 +1485,7 @@ function RepairDetail({
       || (retryFailedPlanAvailable && !canReuseCurrentExecution)
       || pendingDecisionResumeAvailable
       || (['waiting_approval', 'waiting_acceptance'].includes(task.status) && !canReuseCurrentExecution))
+  const inputSessionIds = task.issue?.sessionIds ?? task.insightSource?.sessionIds ?? []
   const agentModel = task.agentMode === 'cfuse'
     ? (task.cfuseModel || '—')
     : (task.llmUseDefault ? '默认 LLM 配置' : (task.llmModel || '—'))
@@ -1566,7 +1567,7 @@ function RepairDetail({
 
       {task.insightSource && <section className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div><h2 className="text-sm font-semibold text-indigo-950">来自效果中心的改进项</h2><p className="mt-1 text-xs leading-5 text-indigo-800">问题描述、Session 和冻结证据已作为本次 Repair 的输入；Agent 会优先读取完整 Evidence 后再生成方案。</p></div>
+          <div><h2 className="text-sm font-semibold text-indigo-950">来自效果中心的改进项</h2><p className="mt-1 text-xs leading-5 text-indigo-800">关联的 Session、任务标题、判定和修复方向已保存为任务输入；完整 Evidence 可由 Agent 通过上下文接口读取。</p></div>
           <span className="rounded-full bg-white px-2.5 py-1 font-mono text-[10px] text-indigo-700">#{task.insightSource.improvementId}</span>
         </div>
         <div className="mt-4 grid gap-3 text-xs sm:grid-cols-2">
@@ -1686,7 +1687,22 @@ function RepairDetail({
           {task.status === 'waiting_acceptance' && !pendingDecision && <section className="rounded-2xl border border-violet-200 bg-white p-5 shadow-sm"><h2 className="text-sm font-semibold text-gray-900">结果确认</h2><p className="mt-2 text-xs leading-5 text-gray-500">{!task.executionSupported ? '当前执行器已停用；你仍可采纳已有结果，但不能继续修复。' : canReuseCurrentExecution ? `当前 AIS 容器会等待至 ${formatTime(task.execution?.decisionDeadlineAt)}；选择“仍未修好”将复用当前 Job 和 Agent 会话。` : '等待窗口已结束。采纳结果不受影响；选择“仍未修好”将启动新 AIS 容器并从历史产物恢复。'}</p>{activeFeedbackIntent === 'retry_result' ? <div className="mt-4"><label className="block text-xs font-medium text-gray-600">未解决的问题<textarea aria-label="继续修复反馈" disabled={!canOperate} className={`${inputClass} mt-1.5 min-h-24 resize-y disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400`} maxLength={4000} value={feedback} onChange={(event) => setFeedback(event.target.value)} placeholder="说明仍未解决的现象，Agent 会据此重新规划" /></label><div className="mt-3 grid gap-2"><button disabled={!canContinue || Boolean(busyAction) || !feedback.trim()} title={ownerOnlyTitle} className={primaryButton} onClick={() => void decideResult('retry')}>{busyAction === 'retry' ? '正在提交…' : '提交反馈并继续'}</button><button disabled={!canOperate || Boolean(busyAction)} title={ownerOnlyTitle} className={secondaryButton} onClick={() => { setFeedbackIntent(null); setFeedbackContext(''); setFeedback(''); setDecisionError('') }}>取消</button></div></div> : <div className="mt-4 grid gap-2"><button disabled={!canOperate || Boolean(busyAction)} title={ownerOnlyTitle} className={primaryButton} onClick={() => void decideResult('accept')}>{busyAction === 'accept' ? '正在确认…' : '采纳修复结果'}</button>{task.executionSupported && <button disabled={!canContinue || Boolean(busyAction)} title={ownerOnlyTitle} className={secondaryButton} onClick={() => { setFeedback(''); setFeedbackContext(decisionContext); setFeedbackIntent('retry_result'); setDecisionError('') }}>仍未修好，继续</button>}</div>}</section>}
           {task.executionSupported && task.status === 'waiting_context' && <section className="rounded-2xl border border-orange-200 bg-white p-5 shadow-sm"><h2 className="text-sm font-semibold text-gray-900">恢复上下文收集</h2><p className="mt-2 text-xs leading-5 text-gray-500">此前浏览器未能及时履行 OCB 请求，旧容器已释放。恢复后会创建新的 Step 和 AIS 容器；新容器需要登录 cfuse 时，本页面会显示授权入口。</p><button disabled={!canContinue || Boolean(busyAction)} title={ownerOnlyTitle} className={`${primaryButton} mt-4 w-full`} onClick={() => void resume()}>{busyAction === 'resume' ? '正在恢复…' : '恢复 Repair'}</button></section>}
           <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="text-sm font-semibold text-gray-900">修复对象与配置</h2><p className="mt-1 text-[11px] leading-5 text-gray-500">这里仅展示贯穿整个任务的固定信息；步骤与 AIS 容器关系在工作流的容器抽屉中查看。</p><dl className="mt-4 space-y-1"><DetailRow label="Bot" value={task.botId} mono /><DetailRow label="环境" value={task.targetEnvironment} /><DetailRow label="诊断权限" value={task.diagnosticMode === 'deep' ? '深度诊断 Shell' : '广泛只读观察'} /><DetailRow label="执行器" value={task.agentMode === 'cfuse' ? 'cfuse' : 'OpenClaw'} /><DetailRow label="模型" value={agentModel} />{task.agentMode === 'cfuse' ? <DetailRow label="cfuse Engine" value={task.cfuseEngine || '—'} /> : <DetailRow label="Token" value={task.openclawUsesCustomApiKey ? '本次使用自定义 Token（不展示）' : '使用 Snapshot 默认配置'} />}<DetailRow label="创建时间" value={formatTime(task.createdAt)} /><DetailRow label="更新时间" value={formatTime(task.updatedAt)} /></dl>{task.error && <p className="mt-4 rounded-lg bg-red-50 p-3 text-xs text-red-700">{task.error}</p>}</section>
-          {task.issue && <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><h2 className="text-sm font-semibold text-gray-900">输入线索</h2><dl className="mt-4 space-y-1"><DetailRow label="Trace ID" value={task.issue.traceId || '—'} mono /><DetailRow label="相关任务" value={task.issue.relatedTaskId || '—'} mono /><DetailRow label="时间范围" value={`${formatTime(task.issue.timeRange.from)} 至 ${formatTime(task.issue.timeRange.to)}`} /></dl>{task.issue.errorText && <pre className="mt-4 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-gray-50 p-3 text-xs leading-5 text-gray-700">{task.issue.errorText}</pre>}</section>}
+          {task.issue && <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <h2 className="text-sm font-semibold text-gray-900">输入线索</h2>
+            <dl className="mt-4 space-y-1">
+              <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-4 py-1.5 text-xs">
+                <dt className="text-gray-500">Session ID</dt>
+                <dd className="min-w-0 text-right font-mono font-medium text-gray-900">{inputSessionIds.length > 0
+                  ? <ul className="space-y-2">{inputSessionIds.map((sessionId) => <li key={sessionId} className="break-all">{sessionId}</li>)}</ul>
+                  : '—'}</dd>
+              </div>
+              <DetailRow label="Trace ID" value={task.issue.traceId || '—'} mono />
+              <DetailRow label="相关任务" value={task.issue.relatedTaskId || '—'} mono />
+              <DetailRow label="时间范围" value={`${formatTime(task.issue.timeRange.from)} 至 ${formatTime(task.issue.timeRange.to)}`} />
+            </dl>
+            {inputSessionIds.length > 0 && <p className="mt-3 text-[11px] leading-5 text-gray-500">Session 对应的逐条标题、判定和修复方向随任务输入提供给 Agent。此时间范围仅用于运行日志查询，不限制关联的历史证据。</p>}
+            {task.issue.errorText && <pre className="mt-4 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-gray-50 p-3 text-xs leading-5 text-gray-700">{task.issue.errorText}</pre>}
+          </section>}
         </aside>
       </div>
       {selectedAisJobId && aisContainers.length > 0 && <AisContainersDrawer containers={aisContainers} selectedJobId={selectedAisJobId} selectedFromStep={selectedAisSource === 'step'} currentJobId={task.currentStep?.aisJobId} execution={task.execution} onClose={closeAisContainers} />}

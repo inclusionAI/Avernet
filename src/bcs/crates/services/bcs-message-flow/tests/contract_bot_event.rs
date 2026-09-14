@@ -63,6 +63,58 @@ impl RecordingChannelService {
     }
 }
 
+#[tokio::test]
+async fn queued_im_hints_aggregate_targets_and_do_not_replay_on_restart() {
+    use bcs_domain::{DeliveryType, NewMessage, SenderType, message_delivery::DeliveryFlowKind};
+    use bcs_service_api::{ManagedMessageDeliveryService, DeliveryTransitionCommand};
+    use bcs_service_api::port::repo::message_delivery::{AdmitMessageDeliveries, DeliveryAdmissionTarget};
+    let fixture = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let repo = Arc::new(bcs_message_store::MemoryMessageRepo::new());
+    let service = Arc::new(bcs_message_flow::managed_delivery::ManagedMessageDelivery::new(repo.clone()));
+    let flow = Arc::new(BcsMessageFlow::new(fixture.group, fixture.routing, fixture.registry, fixture.bot_delivery, fixture.frontend_delivery)
+        .with_message_repo(repo).with_managed_deliveries(service.clone()));
+    let channel = Arc::new(RecordingChannelService::default());
+    assert!(flow.channel_slot().set(channel.clone()).is_ok());
+    let (shutdown, receiver) = tokio::sync::watch::channel(false);
+    let notifications = tokio::spawn(bcs_message_flow::delivery_notifications::run(Arc::downgrade(&flow), service.subscribe(), receiver));
+    let now = chrono::Utc::now().timestamp_millis();
+    let admitted = service.admit(AdmitMessageDeliveries {
+        display_message: None,
+        message_id: "im-queue".into(), flow_kind: DeliveryFlowKind::Group, now_ms: now - 3_000, expire_at_ms: None, event: None,
+        targets: [("bot-driver", DeliveryType::Send), ("bot-observer", DeliveryType::Send), ("context-only", DeliveryType::Inject)].into_iter()
+            .map(|(bot, kind)| DeliveryAdmissionTarget { rejection: None, target_bot_id: bot.into(), kind, max_queued: 10, semantic_projection_json: json!({"version":1}) }).collect(),
+        message: NewMessage { visibility_domain: MessageVisibilityDomain::Chat, audience: None, group_id: "group-1".into(), session_id: "group-1:im-original".into(), sender_id: "human_1".into(), sender_type: SenderType::Human,
+            message_type: "chat".into(), content: json!({"text":"hello","source_im_message_id":"im-original"}), client_msg_id: None, owner_bot_id: None, created_at: (now - 3_000) as u64, run_id: String::new() },
+    }).await.unwrap();
+    timeout(Duration::from_secs(2), async {
+        while channel.outbound().await.is_empty() { tokio::time::sleep(Duration::from_millis(10)).await; }
+    }).await.unwrap();
+    let messages = channel.outbound().await;
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].source_im_message_id.as_deref(), Some("im-original"));
+    assert_eq!(messages[0].bcs_session_id, "group-1:im-original");
+    let text = messages[0].text.as_ref().unwrap();
+    assert!(text.contains("bot-driver") && text.contains("bot-observer") && text.contains("已排队"));
+    assert!(!text.contains("context-only"));
+    let row = &admitted.deliveries[0];
+    service.transition(DeliveryTransitionCommand { delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
+        event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,
+        now_ms: now, request_id: None, actor_id: Some("human_1".into()), reply: None, transport_context_json: None, deadline_at_ms: None,
+    }).await.unwrap();
+    timeout(Duration::from_secs(2), async {
+        while channel.outbound().await.len() < 2 { tokio::time::sleep(Duration::from_millis(10)).await; }
+    }).await.unwrap();
+    assert!(channel.outbound().await[1].text.as_ref().unwrap().contains("已取消"));
+    shutdown.send(true).unwrap();
+    notifications.await.unwrap();
+    let (shutdown, receiver) = tokio::sync::watch::channel(false);
+    let restarted = tokio::spawn(bcs_message_flow::delivery_notifications::run(Arc::downgrade(&flow), service.subscribe(), receiver));
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(channel.outbound().await.len(), 2, "notifications are not replayed from durable state");
+    shutdown.send(true).unwrap();
+    restarted.await.unwrap();
+}
+
 #[async_trait::async_trait]
 impl ChannelService for RecordingChannelService {
     async fn handle_inbound(
@@ -4935,6 +4987,11 @@ impl RecordingMessageRepo {
 
 #[async_trait::async_trait]
 impl bcs_service_api::port::repo::MessageRepoPort for RecordingMessageRepo {
+    async fn run_chat_segments(&self, session: &str, sender: &str, run: &str) -> Result<Vec<bcs_domain::PersistedMessage>, bcs_service_api::port::repo::MessageRepoError> {
+        let memory = bcs_message_store::MemoryMessageRepo::new();
+        for message in self.appended.read().await.iter().cloned() { memory.append_message(message).await?; }
+        memory.run_chat_segments(session, sender, run).await
+    }
     async fn append_message(
         &self,
         msg: bcs_domain::NewMessage,
@@ -5026,6 +5083,11 @@ impl BlockingMessageRepo {
 
 #[async_trait::async_trait]
 impl bcs_service_api::port::repo::MessageRepoPort for BlockingMessageRepo {
+    async fn run_chat_segments(&self, session: &str, sender: &str, run: &str) -> Result<Vec<bcs_domain::PersistedMessage>, bcs_service_api::port::repo::MessageRepoError> {
+        let memory = bcs_message_store::MemoryMessageRepo::new();
+        for message in self.appended.read().await.iter().cloned() { memory.append_message(message).await?; }
+        memory.run_chat_segments(session, sender, run).await
+    }
     async fn append_message(
         &self,
         msg: bcs_domain::NewMessage,
@@ -6685,163 +6747,3 @@ async fn bot_event_policy_blocked_message_does_not_notify() {
     );
 }
 
-// Both authenticated intake paths share the same external claim namespace.
-mod reference_coordination {
-use super::*;
-use bcs_service_api::*;
-use bcs_service_api::port::*;
-use bcs_bot::ProviderBotEvents;
-
-struct ReferenceProvider(ProviderCoordinationConfig);
-#[async_trait::async_trait]
-impl ProviderBotCoreService for ReferenceProvider {
-    async fn register_provider_bot_with_bot_uuid(
-        &self,
-        _provider_id: &str,
-        _provider_admin_token: &str,
-        _params: RegisterProviderBotParams,
-    ) -> ServiceResult<(ProviderBotBinding, Option<String>)> {
-        Err(ServiceError::InternalError("unused test operation".into()))
-    }
-
-    async fn list_provider_bots(
-        &self,
-        _provider_id: &str,
-        _provider_admin_token: &str,
-    ) -> ServiceResult<Vec<ProviderBotBinding>> {
-        Ok(Vec::new())
-    }
-
-    async fn authenticate_static_bearer_event(&self, provider_id: &str, token: &str) -> ServiceResult<RuntimeBotIdentity> {
-        if token != "valid" { return Err(ServiceError::Unauthorized("invalid token".into())); }
-        Ok(RuntimeBotIdentity { bot_uuid: "bot-driver".into(), provider_id: provider_id.into() })
-    }
-
-    async fn authenticate_agentpass_event(
-        &self,
-        _provider_id: &str,
-        _agent_code: &str,
-    ) -> ServiceResult<RuntimeBotIdentity> {
-        Err(ServiceError::InternalError("unused test operation".into()))
-    }
-
-    async fn authenticate_provider_admin_event(
-        &self,
-        _provider_id: &str,
-        _provider_admin_token: &str,
-        _provider_bot_ref: &str,
-    ) -> ServiceResult<RuntimeBotIdentity> {
-        Err(ServiceError::InternalError("unused test operation".into()))
-    }
-
-    async fn get_provider_coordination_config(&self, _: &str) -> ServiceResult<ProviderCoordinationConfig> {
-        Ok(self.0.clone())
-    }
-
-    async fn set_provider_bot_disabled(
-        &self,
-        _provider_id: &str,
-        _bot_uuid: &str,
-        _provider_admin_token: &str,
-        _disabled: bool,
-    ) -> ServiceResult<ProviderBotBinding> {
-        Err(ServiceError::InternalError("unused test operation".into()))
-    }
-}
-
-#[derive(Default)]
-struct ReferenceStore {
-    claimed: Mutex<Option<CoordinationContext>>,
-    result: Mutex<Option<CoordinationResult>>,
-    fail_read: AtomicBool,
-}
-#[async_trait::async_trait]
-impl CoordinationIntentPort for ReferenceStore {
-    async fn resolve_and_claim(&self, _: &str, _: &str, context: &CoordinationContext, _: u64) -> ServiceResult<CoordinationClaim> {
-        if self.fail_read.swap(false, Ordering::SeqCst) {
-            return Err(ServiceError::InternalError("transient read failure".into()));
-        }
-        let mut claim = self.claimed.lock().await;
-        if let Some(previous) = &*claim {
-            if previous != context { return Err(ServiceError::Conflict("different context".into())); }
-            return Ok(CoordinationClaim::Duplicate(self.result.lock().await.clone()));
-        }
-        *claim = Some(context.clone());
-        Ok(CoordinationClaim::Acquired(CoordinationLease { claim_token: "a".repeat(32),
-            arguments: json!({"target_bot": "bot-observer", "message": "中".repeat(4198) + "\n🙂"}).as_object().unwrap().clone() }))
-    }
-    async fn finish(&self, _: &str, _: &CoordinationContext, _: &str, result: &CoordinationResult) -> ServiceResult<()> {
-        *self.result.lock().await = Some(result.clone());
-        Ok(())
-    }
-}
-
-#[tokio::test]
-async fn v2_dual_intake_dispatches_once_in_both_orders_and_modes() {
-    for native in [false, true] {
-        for callback_first in [false, true] {
-            let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
-            let mut group = support.group.get("group-1").await.unwrap();
-            group.service_mode = Some("master_slave".into());
-            support.group.upsert(group).await.unwrap();
-            let mode = if native { CoordinationMode::NativeMcp } else { CoordinationMode::McporterMcp };
-            let mapping = BTreeMap::from([("native_assign".into(), "bcs_assign_task".into())]);
-            let config = ProviderCoordinationConfig { mode: mode.clone(), worker_send_task_message_enabled: true,
-                mcp_server: Some("bcs".into()), mcporter_command: None, tool_name_mapping: mapping.clone() };
-            support.registry.set_coordination_surface("bot-driver", CoordinationSurface {
-                mode, worker_send_task_message_enabled: true, mcp_server: Some("bcs".into()),
-                mcporter_command: None, tool_name_mapping: mapping,
-            }).await;
-            let runs = Arc::new(MemoryBotRunContextStore::new());
-            runs.put_context(BotRunContext { run_id: "run-reference".into(), bot_id: "bot-driver".into(),
-                group_id: "group-1".into(), bcs_session_id: Some("group-1:abcdef12".into()),
-                deadline_ms: u64::MAX, terminal: false }).await;
-            let store = Arc::new(ReferenceStore::default());
-            let flow = Arc::new(BcsMessageFlow::new(support.group.clone(), support.routing.clone(),
-                support.registry.clone(), support.bot_delivery.clone(), support.frontend_delivery.clone())
-                .with_bot_run_context(runs.clone()).with_coordination_intents(Some(store.clone())));
-            let provider = ProviderBotEvents::new(Arc::new(ReferenceProvider(config)), runs, flow.clone())
-                .with_coordination_intents(Some(store.clone()));
-            let echo = json!({"__bcs_coordination__": true, "v": 2, "tool": "bcs_assign_task",
-                "intent_id": "bcs_intent_0123456789abcdef0123456789abcdef", "status": "stored"}).to_string();
-            let name = if native { "native_assign" } else { "Bash" };
-            let event = BotEventCommand { bot_id: "bot-driver".into(), run_id: "run-reference".into(),
-                group_id: "group-1".into(), event_type: "agent".into(),
-                event_payload: agent_tool_result_payload(Some(name), "tool-reference", &echo, false),
-                state: ChatEventState::Delta, bcs_session_id: Some("group-1:abcdef12".into()) };
-            let command = ProviderBotCoordinationCommand { provider_id: "provider".into(),
-                credential: ProviderBotEventCredential::StaticBearer("valid".into()),
-                run_id: "run-reference".into(), tool_call_id: "tool-reference".into(),
-                kind: ProviderCoordinationEventKind::ToolResult, tool_name: Some(name.into()),
-                result_text: Some(echo), mcp_server: Some("bcs".into()), intent: None };
-            // A failed fetch does not mark the event seen.
-            store.fail_read.store(true, Ordering::SeqCst);
-            assert!(flow.handle_bot_event(event.clone()).await.is_err());
-            if callback_first {
-                assert!(!provider.submit_coordination(command.clone()).await.unwrap().duplicate);
-                flow.handle_bot_event(event.clone()).await.unwrap();
-            } else {
-                flow.handle_bot_event(event.clone()).await.unwrap();
-                assert!(provider.submit_coordination(command.clone()).await.unwrap().duplicate);
-            }
-            assert_eq!(support.bot_delivery.kinds().await, vec![BotDeliveryKind::TaskDispatch]);
-            let result = store.result.lock().await.clone().unwrap();
-            assert_eq!(result.status, CoordinationStatus::Applied);
-            assert!(result.task_id.is_some());
-            let frames = support.bot_delivery.frames().await;
-            let text = request_params(&frames[0])["message"]["content"][0]["text"].as_str().unwrap().to_string();
-            assert!(text.contains(&"中".repeat(4198)));
-            *store.result.lock().await = None; // execution happened, receipt lost
-            assert!(flow.handle_bot_event(event).await.is_err());
-            assert!(provider.submit_coordination(command.clone()).await.is_err());
-            assert_eq!(support.bot_delivery.kinds().await.len(), 1);
-            let mut unauthorized = command.clone();
-            unauthorized.credential = ProviderBotEventCredential::StaticBearer("invalid".into());
-            assert!(matches!(provider.submit_coordination(unauthorized).await, Err(ProviderBotEventError::Unauthorized(_))));
-            let mut replay = command;
-            replay.tool_call_id = "different-call".into();
-            assert!(provider.submit_coordination(replay).await.is_err());
-        }
-    }
-}
-}

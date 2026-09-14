@@ -3,7 +3,9 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentclaw.community.adapters.http.skill_center.batch_sync import router
+from agentclaw.community.adapters.http.skill_center import batch_sync
+
+router = batch_sync.router
 
 
 def _client() -> TestClient:
@@ -34,3 +36,24 @@ def test_every_batch_sync_surface_is_permanently_retired() -> None:
             "Legacy batch sync is retired; use "
             "POST /openapi/v1/bots/market/skill-center/sync"
         )
+
+
+def test_every_legacy_batch_delete_surface_is_permanently_retired() -> None:
+    client = _client()
+
+    responses = (
+        client.post(
+            "/api/v1/skill-center/batch-delete",
+            json={"skill_codes": ["legacy-delete"]},
+        ),
+        client.get(
+            "/api/v1/skill-center/batch-delete",
+            params={"skill_codes": "legacy-delete"},
+        ),
+        client.get("/api/v1/skill-center/batch-delete/status/old-task"),
+        client.get("/api/v1/skill-center/batch-delete/report/old-task"),
+    )
+
+    assert {response.status_code for response in responses} == {410}
+    for response in responses:
+        assert response.json()["detail"] == batch_sync._BATCH_DELETE_RETIRED

@@ -16,7 +16,6 @@ from agentclaw.community.core.models.space_skill import (
     SkillGrant,
     SkillSpaceBinding,
     SkillPublicationAttempt,
-    SkillPublicationAttemptStatus,
     SkillVersion,
 )
 from agentclaw.community.core.repository.protocols.skill_center import (
@@ -555,10 +554,7 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
                 .all()
             )
             external = (
-                any(
-                    attempt.status != SkillPublicationAttemptStatus.FAILED
-                    for attempt in publication_attempts
-                )
+                bool(publication_attempts)
                 or any(
                     session.query(model)
                     .filter(model.skill_id == skill_id, model.env == env)

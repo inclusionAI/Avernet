@@ -1699,7 +1699,6 @@ impl BotRegistryCoreService for ProviderTargetRegistry {
                 visibility: "protected".to_string(),
                 ..BotCapabilities::default()
             },
-            dynamic_status: BotDynamicStatus::default(),
             env: None,
             created_by: self.created_by.map(str::to_string),
             actor_kind: ActorKind::Bot,

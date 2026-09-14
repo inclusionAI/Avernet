@@ -5,6 +5,8 @@ import type { WorkflowSpec, KnowledgeBaseCreateInput, KnowledgeBaseUpdateInput, 
 
 export function useFlowRuns(params?: {
   status?: string
+  statuses?: string[]
+  query?: string
   workflowId?: string
   limit?: number
   offset?: number

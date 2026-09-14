@@ -37,6 +37,12 @@ pub use core::{
     WorkerRecommendResult, WorkerRecommendation,
 };
 pub use application::SystemMessageService;
+pub use application::message_delivery::{
+    CancelMessageDeliveryCommand, CancelMessageDeliveryResult, DeliveryAdmissionView,
+    DeliveryStatusQuery, DeliveryStatusView, DeliveryTransitionCommand,
+    ManagedDeliveryError, ManagedDeliveryPreparationService, ManagedMessageDeliveryService,
+    PreparedManagedDelivery,
+};
 pub use application::v1::{
     BindInviteCode, BindInviteCodeResult, BotInternalAttributes, FriendCheckInStrategy,
     GetMyInviteCodeBinding, InitInviteCodes, InitInviteCodesResult,
@@ -169,12 +175,12 @@ pub use onboard::{
     EnsureBotCommand, EnsureBotResult, OnboardActorIdentity,
 };
 pub use application::{
-    DeleteProviderBotCommand, DeleteProviderBotOutcome, ProviderBotCoordinationCommand,
-    ProviderBotCoordinationOutcome, ProviderBotEventCommand, ProviderBotEventCredential,
+    DeleteProviderBotCommand, DeleteProviderBotOutcome,
+    ProviderBotEventCommand, ProviderBotEventCredential,
     ProviderBotEventError, ProviderBotEventOutcome, ProviderBotEventService,
     ProviderBotRosterItem, ProviderBotTaskModesFilter,
     ProviderEventIngestService,
-    ProviderCoordinationEventKind, ProviderCoordinationIntent, ProviderManagementService,
+    ProviderManagementService,
     RegisterProviderBotCommand, RegisterProviderBotOutcome, RegisterProviderCommand,
     RegisterProviderOutcome, UpdateProviderBotCommand, UpdateProviderBotOutcome,
     UpdateProviderCommand, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,

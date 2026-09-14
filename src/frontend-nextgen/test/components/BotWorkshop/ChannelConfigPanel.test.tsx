@@ -85,3 +85,39 @@ test('按绑定方式分栏展示渠道，并在 BCN 表单回显对应配置', 
   expect(screen.getByDisplayValue('robot-2')).toBeInTheDocument();
   expect(screen.getByText('群内共享会话')).toBeInTheDocument();
 });
+
+test('按老版渠道表格展示草稿环境、机器人标识、状态和操作', () => {
+  render(
+    <ChannelConfigPanel
+      editable
+      channels={[
+        {
+          id: 3,
+          type: 'dingding',
+          bindingMode: 'plugin',
+          description: '发布通知群',
+          status: 'active',
+          clientId: 'ding-app-3',
+          hasSecret: true,
+          enableStreamingCards: false,
+          dmPolicy: 'open',
+          allowlist: ['*'],
+          replyToMessage: true,
+          aixEnable: true,
+          includeSenderName: true,
+          createdAt: '2026-09-10T08:00:00Z',
+        },
+      ]}
+      onCreate={jest.fn()}
+      onUpdate={jest.fn()}
+      onToggle={jest.fn()}
+      onDelete={jest.fn()}
+    />,
+  );
+
+  expect(screen.getByText('场景描述')).toBeInTheDocument();
+  expect(screen.getByText('绑定环境')).toBeInTheDocument();
+  expect(screen.getByText('机器人 ID')).toBeInTheDocument();
+  expect(screen.getByText('草稿态')).toBeInTheDocument();
+  expect(screen.getByText('ding-app-3')).toBeInTheDocument();
+});

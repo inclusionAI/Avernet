@@ -32,6 +32,7 @@ async def test_seeds_singlebox_baas_template_mapping():
         "hermes",
         "aicoding",
         "claude_code",
+        "deepseek_harness",
     }
     assert config_service.set_config.call_args.kwargs["env"] == "dev"
 

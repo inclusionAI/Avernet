@@ -46,12 +46,14 @@ from agentclaw.community.core.bot_config_manifest.credentials.policy import (
 from agentclaw.community.core.bot_config_manifest.credentials.service_protocol import (
     SourceCredentialServiceProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+from agentclaw.community.core.bot_config_manifest.fetch.endpoint_guard import (
     endpoint_refusal,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.limits import Resolver
 from agentclaw.community.core.bot_management.token_vault import TokenVault
-from agentclaw.community.plugin_api.object_store_client import ObjectStoreTarget
+from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
+    ObjectStoreTarget,
+)
 from agentclaw.community.core.repository.protocols.bot.source_credential import (
     SourceCredentialRepositoryProtocol,
 )
@@ -338,13 +340,13 @@ class SourceCredentialService(SourceCredentialServiceProtocol):
 
 
 class SourceCredentialBinding:
-    """The W2 fetcher seams for one named credential.
+    """The fetch-time seams for one named credential.
 
-    Duck-satisfies the guarded fetcher's ``CredentialInjector`` /
-    ``AuthorizationPolicy`` protocols (structural typing — no import of the
-    fetcher module; whichever of W2/W3 lands first, this binds at use):
-    ``headers_for(url) -> {header: value}`` and ``reauthorize(url) -> None``
-    (raising to refuse the hop).
+    Two methods, which is the whole of what the git road asks of a binding:
+    ``headers_for(url) -> {header: value}`` — what to present when fetching
+    ``url`` — and ``reauthorize(url) -> None``, which raises to refuse a URL
+    that has walked out of the credential's authorized prefixes. Both are
+    called directly on the binding; there is no Protocol to type against.
 
     Both methods re-read the row per call, on purpose: rotation is a re-PUT
     with no signal, and "next fetch uses the new value" is the observable
@@ -412,6 +414,16 @@ class SourceCredentialBinding:
                 f"credential {self.name!r} is a {row.credential_type.value!r} "
                 "credential; an object store source needs one of type "
                 f"{CredentialType.OSS_AKSK.value!r}"
+            )
+        if not row.region:
+            # Required at PUT since signature version 4 landed, so only a row
+            # written before that rule can reach here without one. Refused
+            # here, before any client is built: the store cannot sign a
+            # request without a region, and the entry fails naming the
+            # credential to rotate rather than a bucket to inspect.
+            raise CredentialError(
+                f"credential {self.name!r} has no region; an object store "
+                "source needs one, so rotate the credential with its region"
             )
         return ObjectStoreTarget(
             endpoint=row.endpoint or "",

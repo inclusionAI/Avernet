@@ -94,6 +94,9 @@ impl FrontendDeliveryPort for WorkbenchFrontendDelivery {
             FrontendDeliveryTarget::Session { session_id } => {
                 self.publish_group_or_fallback(session_id, &cmd).await
             }
+            FrontendDeliveryTarget::SessionActors { session_id, actor_ids } => {
+                self.connections.broadcast_visible_to_actors(session_id, &cmd.event_json, actor_ids, cmd.exclude_conn_id, cmd.visibility_domain, cmd.audience.as_ref()).await
+            }
             FrontendDeliveryTarget::Run { run_id } => {
                 let sent = match cmd.delivery_kind {
                     FrontendDeliveryKind::RunEvent | FrontendDeliveryKind::WorkbenchEvent => {

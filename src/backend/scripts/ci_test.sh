@@ -83,7 +83,7 @@ fi
 pytest_workers="${BACKEND_CI_PYTEST_WORKERS:-auto}"
 xdist_args=()
 if [[ "$pytest_workers" != "0" ]]; then
-  xdist_args=(-n "$pytest_workers" --dist loadfile)
+  xdist_args=(-n "$pytest_workers" --dist loadfile --max-worker-restart=0)
 fi
 
 # Coverage measurement core. ``sysmon`` is coverage.py's PEP 669 (sys.monitoring)

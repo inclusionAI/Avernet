@@ -23,6 +23,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
     LocalSkillNotReadyError,
     LocalSkillStorageError,
+    SkillAssetInUseError,
 )
 from agentclaw.community.core.skill_center.factories import SkillServiceFactory
 from agentclaw.community.core.repository.protocols.skill_center import (
@@ -94,24 +95,7 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
                 raise LocalSkillNotFoundError()
             if not is_bot_ready(bot):
                 raise LocalSkillNotReadyError()
-            if bool(skill["active"]):
-                raise LocalSkillActiveError()
-            active_custom_set_ids = {
-                str(skill_set["id"])
-                for skill_set in self._skill_set_repo.get_all_active_skill_sets_for_env(
-                    user_id=resolved_owner_id,
-                    bolt_id=bot_id,
-                    engine_type=bot.get("active_engine"),
-                    env=str(bot["env"]),
-                )
-                if not skill_set.get("is_default")
-            }
-            referenced_set_ids = {
-                reference["skill_set_id"]
-                for reference in self._skill_repo.list_skill_set_references(skill_id)
-            }
-            if active_custom_set_ids & referenced_set_ids:
-                raise LocalSkillActiveError()
+            self._skill_repo.require_unreferenced_for_delete(skill_id)
             locator = str(skill["git_path"])[len("local://") :]
             is_teclaw = self._is_teclaw(bot_id=bot_id, owner_id=resolved_owner_id)
             package = self._package_for_locator(
@@ -156,6 +140,8 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
                     raise LocalSkillStorageError() from exc
                 if isinstance(exc, ActiveSkillSetReferenceError):
                     raise LocalSkillActiveError() from exc
+                if isinstance(exc, SkillAssetInUseError):
+                    raise
                 raise LocalSkillStorageError() from exc
             await self._discard(quarantine)
         finally:

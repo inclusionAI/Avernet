@@ -23,25 +23,47 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-#: ``(bot_id, owner_id) -> DeviceContext``; raises ``not_bound`` when the bot
-#: has no active binding.
+#: ``(bot_id, owner_id) -> DeviceContext``, called positionally and
+#: **synchronously** (the redeliver runs it on a worker thread). Raises the
+#: ``not_bound`` exception type when the bot has no active binding::
+#:
+#:     resolve("bot_42", "usr_owner")   # -> a DeviceContext, or raises
+#:
+#: Typed ``Any`` on the device side because this package does not depend on
+#: ``core.devices``; DI binds the real callable.
 ResolveDeviceContext = Callable[[str, str], Any]
-#: ``DeviceContext -> TeclawDeviceSyncService`` — the dispatcher's
-#: ``dispatch``, which answers the teclaw service for a teclaw device; the
-#: redeliver calls its ``deliver_manifest_apply``.
+#: ``DeviceContext -> TeclawDeviceSyncService`` — the device dispatcher's
+#: ``dispatch``, which answers the teclaw sync service for a teclaw device.
+#: The redeliver then calls that service's ``deliver_manifest_apply()``::
+#:
+#:     dispatch(device).deliver_manifest_apply()
+#:     # -> {"success": True} | {"success": False, "message": "..."}
 DispatchDeviceSync = Callable[[Any], Any]
 
 
 class TeclawRedeliver:
     """Deliver the whole artifact to the bot's running container, once.
 
+    Satisfies :data:`~...delivery.Redeliver`: called with the apply's context
+    and answering ``None`` on success or a report-safe note on failure::
+
+        await redeliver(ctx)
+        # -> None                       delivered, or no container to deliver to
+        # -> "artifact could not be redelivered to the running container: <why>"
+
+    Three outcomes, and only the third produces a note: the bot has no active
+    binding (``None``, not an error), the delivery succeeded (``None``), or the
+    sync service answered ``{"success": False, ...}``.
+
+    Created by: the composition root, bound as
+    ``TeclawPlatformBindings.redeliver``.
+    Consumed by: ``TeclawDelivery.finish``.
+
     "Re-deliver" because the container already received an artifact when it
-    was provisioned (and on every runtime edit since); after a manifest apply
+    was provisioned, and on every runtime edit since; after a manifest apply
     changed platform state, the same delivery is made again so the container
-    catches up. A bot with an active device binding — a live container — gets
-    it; a bot without one (still being created, or its container gone) gets
-    nothing, because provisioning composes the first artifact from the
-    platform state itself.
+    catches up. A bot without a live container gets nothing, because
+    provisioning composes the first artifact from the platform state itself.
     """
 
     def __init__(

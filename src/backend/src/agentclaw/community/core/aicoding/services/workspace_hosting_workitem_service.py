@@ -73,3 +73,23 @@ class WorkspaceHostingWorkItemService:
             format_type=format_type,
             editor_type=editor_type,
         )
+
+    def list_work_item_relations(
+        self,
+        work_item_id: str,
+        operator: str = "100000",
+    ) -> Dict[str, Any]:
+        return self._client.list_work_item_relations(
+            work_item_id=work_item_id,
+            operator=operator,
+        )
+
+    def delete_work_item_relation(
+        self,
+        operator: str,
+        request_body: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return self._client.delete_work_item_relation(
+            operator=operator,
+            request_body=request_body,
+        )

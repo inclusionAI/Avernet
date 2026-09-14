@@ -50,16 +50,52 @@ class BaasPublishPoller:
             if poll_timeout_seconds is not None
             else self.DEFAULT_POLL_TIMEOUT_SECONDS
         )
+        self._stop_event = threading.Event()
+        self._threads_lock = threading.Lock()
+        self._threads: set[threading.Thread] = set()
 
     def start(self, *, publish_id: str, device_id: str, binding_id: int) -> None:
         """启动后台 thread 轮询，daemon=True 不阻塞进程退出。"""
         thread = threading.Thread(
-            target=bind_current_avernet_tenant(self._poll),
+            target=bind_current_avernet_tenant(self._run_tracked),
             args=(publish_id, device_id, binding_id),
             daemon=True,
             name=f"baas-poll-{publish_id}",
         )
-        thread.start()
+        with self._threads_lock:
+            if self._stop_event.is_set():
+                raise RuntimeError("BaasPublishPoller is shut down")
+            self._threads.add(thread)
+            thread.start()
+
+    def shutdown(self, *, timeout_seconds: float | None = None) -> bool:
+        """Stop accepting work and wait for every active poller thread."""
+        self._stop_event.set()
+        deadline = (
+            time.monotonic() + timeout_seconds
+            if timeout_seconds is not None
+            else None
+        )
+        with self._threads_lock:
+            threads = tuple(self._threads)
+        for thread in threads:
+            remaining = (
+                max(0.0, deadline - time.monotonic())
+                if deadline is not None
+                else None
+            )
+            thread.join(remaining)
+        with self._threads_lock:
+            return not self._threads
+
+    def _run_tracked(
+        self, publish_id: str, device_id: str, binding_id: int
+    ) -> None:
+        try:
+            self._poll(publish_id, device_id, binding_id)
+        finally:
+            with self._threads_lock:
+                self._threads.discard(threading.current_thread())
 
     def _poll(self, publish_id: str, device_id: str, binding_id: int) -> None:
         try:
@@ -67,7 +103,8 @@ class BaasPublishPoller:
             device_service = self._device_service_provider()
 
             while (time.monotonic() - start) < self._poll_timeout:
-                time.sleep(self._poll_interval)
+                if self._stop_event.wait(self._poll_interval):
+                    return
                 try:
                     progress = self._baas_service.get_publish_progress(publish_id)
                     status = (progress or {}).get("status", "")
@@ -78,6 +115,8 @@ class BaasPublishPoller:
                     )
                     continue
 
+                if self._stop_event.is_set():
+                    return
                 if status == "SUCCESS":
                     try:
                         device_service.report_device_alive(
@@ -101,8 +140,9 @@ class BaasPublishPoller:
                                 )
                         else:
                             logger.warning(
-                                f"[BaasPublishPoller] device_service has no _mark_alive_active_fallback "
-                                f"helper; device may remain PENDING"
+                                "[BaasPublishPoller] device_service has no "
+                                "_mark_alive_active_fallback helper; device may "
+                                "remain PENDING"
                             )
                     return
 
@@ -113,6 +153,8 @@ class BaasPublishPoller:
                     )
                     return
 
+            if self._stop_event.is_set():
+                return
             # 循环退出 = 超时
             device_service._mark_service_start_failed(
                 binding_id=binding_id,

@@ -930,7 +930,8 @@ mod tests {
             let mut locked_scope_ids = Vec::new();
             for step in &plan.steps {
                 let statement = match step {
-                    DbTransactionStep::Query(statement) | DbTransactionStep::Execute(statement) => {
+                    DbTransactionStep::Query(statement) | DbTransactionStep::Execute(statement)
+                    | DbTransactionStep::ExecuteChecked { statement, .. } => {
                         statement
                     }
                 };

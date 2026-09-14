@@ -960,7 +960,14 @@ class TestAiohttpBotServicePluginRuntimeEngineSelection:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "runtime_engine_type",
-        ["openclaw", "teclaw", "aicoding", "hermes", "claude_code"],
+        [
+            "openclaw",
+            "teclaw",
+            "aicoding",
+            "hermes",
+            "claude_code",
+            "deepseek_harness",
+        ],
     )
     async def test_supported_runtime_engine_overrides_original_engine(
         self, runtime_engine_type

@@ -58,13 +58,14 @@ provides:
   - "InstallationBackfillServiceProtocol"
   - "BotRuntimeProjector"
   - "BotRuntimeProjectorProtocol"
+  - "RecoveringBotRuntimeProjector"
   - "SkillRuntimeDelivery"
   - "RuntimeServiceFactoryBoundary"
   - "LocalSkillCleanupWorkModel"
-  - "SkillActivationSyncAction"
-  - "SkillActivationSyncScope"
-  - "SkillActivationSyncTaskHandler"
-  - "SkillActivationSyncWork"
+  - "DesktopSkillRecoveryServiceProtocol"
+  - "DesktopSkillRecoveryService"
+  - "DesktopSkillRecoveryTaskHandler"
+  - "DesktopSkillRecoverySweeper"
   - "SkillParser"
   - "SkillMetadata"
   - "SkillManifestError"
@@ -86,10 +87,7 @@ provides:
   - "CenterContentRequest"
   - "CenterContentURLSigner"
   - "CanonicalCenterContentDistribution"
-  - "enqueue_skill_activation_sync"
-  - "build_skill_activation_sync_payload"
-  - "parse_skill_activation_sync_payload"
-  - "build_skill_activation_sync_idempotency_key"
+  - "build_desktop_skill_recovery_key"
 consumes:
   - "BotRepository"
   - "BotCollabLogRepositoryProtocol"
@@ -123,6 +121,7 @@ consumes:
   - "SkillVersionMaterializationRepositoryProtocol"
   - "SpaceSkillPublicationRepositoryProtocol"
   - "HttpClient"
+  - "DesktopSkillRecoveryConfig"
   - "ServiceArtifactLineageReaderProtocol"
 internal_dependencies:
   - agentclaw.community.core.bot_config_surface    # BotConfigCoords, the shared config-category address type
@@ -166,6 +165,7 @@ internal_dependencies:
   - agentclaw.community.core.task_queue    # durable enqueue for Bot-level activation sync
   - agentclaw.community.core.workspace
   - agentclaw.community.di.modules
+  - agentclaw.community.di.config
   - agentclaw.community.di.runtime_mode
   - agentclaw.community.kernel
   - agentclaw.community.log
@@ -415,18 +415,34 @@ deletion and Pool cutover/rollback paths. Phase 1 intentionally has no
 cache-backed cross-command Bot mutation fence; durable serialization is
 deferred to the task-queue design.
 
-`skill_activation_sync_task.py` is the enqueue half of that durable design:
-`skill_center.activation_sync`, one task type shared by every
-activation-shaped operation, discriminated by the payload's `action_type` and
-deduped on the Bot — `(env, entity_id, bot_id)` — so at most one
-synchronization per Bot is ever live. A second operation arriving mid-sync
-joins the live task and gets `created=False`; that is only correct while the
-handler reconciles against desired state read from the database, so the
-handler that consumes these rows must not replay `action_args` as its
-desired-state write. `SkillActivationSyncTaskHandler` is a skeleton: it owns
-the registry key and the payload validation, and its `_run` seam reports
-`Fail` until the body lands. It is not registered, and no call site enqueues,
-so the control plane's inline mutate-then-reconcile path is unchanged.
+`desktop_skill_recovery.py` owns the durable level-triggered follow-up:
+`skill_center.desktop_skill_recovery`, one task type deduped by
+`(env, app, owner_id, bot_id)`. Its payload contains only `owner_id + bot_id`;
+it never freezes an action, Version, mapping, or signed URL. Set/Direct
+mutation completion (including Reference final-add), Track Latest Center
+waiting, and current-binding startup/reconnect events all call the same
+`DesktopSkillRecoveryService.ensure` seam. A low-frequency paged sweeper calls
+that same seam for live bound Desktop Bots and performs no download or Runtime
+projection itself.
+
+Ordinary `project` and direct `apply_plan` calls pass through
+`RecoveringBotRuntimeProjector`, so callers such as active Local replacement
+cannot bypass the same recovery completion. The recovery task alone receives
+the undecorated projector; its own attempt returns `Reschedule`/`Retry` rather
+than enqueueing itself again.
+
+Each handler attempt checks the current Bot/binding and yields while Skills
+Pool transition owns mappings, resolves the current Skill-only plan, prepares
+its exact Center packages, then discards that plan and resolves again before
+the only Runtime write. Healthy package/download/capacity waiting uses a
+five-second `Reschedule`; transient storage/network/device failures use queue
+`Retry`; permanent exact-package preparation issues replace any derived
+package-pending observation for that same current mapping, while other
+recoverable mappings continue. Permanent degraded items do not pin the live key. The task deadline
+is 30 minutes, and terminal Queue transitions release the Bot-level key.
+Skill recovery never declares MCP scope or updates Passport. Pool migration
+retains its independent `skills_pool.reconcile` task and exclusive mapping
+ownership during transition.
 
 Phase 1 does not run a global Local Installation backfill. Normal
 SkillSet/Direct commands continue to maintain Installation synchronously; the

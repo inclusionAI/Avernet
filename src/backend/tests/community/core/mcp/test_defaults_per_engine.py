@@ -1,6 +1,6 @@
 from agentclaw.community.core.mcp.services._defaults import (
     _UCT_SERVER_CODE,
-    _uct_auth_header,
+    get_default_cli_items,
     get_default_mcp_server_codes,
     get_default_mcp_servers,
 )
@@ -124,67 +124,22 @@ def test_default_engine_fallback():
     assert get_default_mcp_server_codes() == get_default_mcp_server_codes("openclaw")
 
 
-# ── uctmcptools auth-token config injection ────────────────────────────────
-
-
-class _FakeConfig:
-    """Minimal stand-in for the lazy ``sofa_config`` proxy."""
-
-    def __init__(self, user_config):
-        self.user_config = user_config
-
-
 def _uct_entry(servers):
     return next(s for s in servers if s["server_code"] == _UCT_SERVER_CODE)
 
 
-def _patch_config(monkeypatch, user_config):
-    # _uct_auth_header does ``from ...config.sofa import sofa_config`` at call
-    # time, so patching the module attribute is picked up on the next call.
-    monkeypatch.setattr(
-        "agentclaw.community.core.config.sofa.sofa_config",
-        _FakeConfig(user_config),
-    )
+def test_uct_is_a_header_free_default_for_supported_engines():
+    for engine in ("openclaw", "claude_code", "hermes", "aicoding"):
+        assert "headers" not in _uct_entry(get_default_mcp_servers(engine))
 
 
-def test_uct_auth_header_absent_when_token_unset():
-    # Community / test profile ships no token → header omitted, entry stays bare.
-    assert _uct_auth_header() == {}
-    assert "headers" not in _uct_entry(get_default_mcp_servers("openclaw"))
-
-
-def test_uct_auth_header_injected_when_token_configured(monkeypatch):
-    _patch_config(monkeypatch, {"mcp": {"uct_auth_token": "Bearer TESTTOKEN"}})
-    assert _uct_auth_header() == {"x-ling-auth": "Bearer TESTTOKEN"}
-    # Injected onto the uctmcptools entry for every engine that lists it.
-    for engine in ("openclaw", "claude_code", "hermes"):
-        assert _uct_entry(get_default_mcp_servers(engine))["headers"] == {
-            "x-ling-auth": "Bearer TESTTOKEN"
-        }
-    # Other default entries stay header-free.
-    others = [
-        s
-        for s in get_default_mcp_servers("openclaw")
-        if s["server_code"] != _UCT_SERVER_CODE
-    ]
-    assert all("headers" not in s for s in others)
-
-
-def test_uct_auth_header_ignores_blank_or_nonstring_token(monkeypatch):
-    _patch_config(monkeypatch, {"mcp": {"uct_auth_token": "   "}})
-    assert _uct_auth_header() == {}
-    _patch_config(monkeypatch, {"mcp": {"uct_auth_token": 123}})
-    assert _uct_auth_header() == {}
-    _patch_config(monkeypatch, {})  # no mcp block at all
-    assert _uct_auth_header() == {}
+def test_uct_is_not_a_default_for_other_engines():
+    for engine in ("teclaw", "moltis"):
+        assert _UCT_SERVER_CODE not in get_default_mcp_server_codes(engine)
 
 
 
 # ── 默认 CLI 列表（aicoding 链路：aicoding 引擎 / claude_code 研发模板）──
-
-from agentclaw.community.core.mcp.services._defaults import (
-    get_default_cli_items,
-)
 
 _EXPECTED_CLI_CODES = (
     "adev-cli", "acli", "antcode-cli", "linke-cli",

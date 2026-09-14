@@ -283,6 +283,18 @@ class SecretNamesConfig:
     aicoding_theta_master_key: str = ""
 
 
+@dataclass(frozen=True)
+class McpRuntimeCredentialsConfig:
+    """Secret references for platform-managed MCP request headers.
+
+    The nested mapping is ``server_code -> header_name -> secret_name``.  It
+    contains registry names only; values are resolved lazily through the active
+    ``SecretResolver`` when an MCP payload is built.
+    """
+
+    header_secrets: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
+
+
 def _default_cors_origins() -> list[str]:
     """Neutral localhost CORS origins (each deploy adds its own via the yaml)."""
     return [
@@ -544,6 +556,21 @@ class DesktopBotPeriodicScanConfig:
 
 
 @dataclass(frozen=True)
+class DesktopSkillRecoveryConfig:
+    """Low-frequency safety net for missed Desktop Skill recovery wakes."""
+
+    enabled: bool = True
+    sweep_interval_seconds: float = 10 * 60
+    sweep_page_size: int = 100
+
+    def __post_init__(self) -> None:
+        if self.sweep_interval_seconds <= 0:
+            raise ValueError("sweep_interval_seconds must be positive")
+        if self.sweep_page_size <= 0:
+            raise ValueError("sweep_page_size must be positive")
+
+
+@dataclass(frozen=True)
 class AixConfig:
     """AIX preview config for dingding channels (the ``aix`` user_config block).
 
@@ -654,6 +681,7 @@ class WorkspaceConfig:
         claude_code_root: Same shape, for Claude Code bots.
         aicoding_root: Same shape, for AICoding bots.
         hermes_root: Same shape, for Hermes bots.
+        deepseek_harness_root: Same shape, for DeepSeek Harness bots.
     """
 
     openclaw_root: str = "/home/admin/.openclaw"
@@ -661,6 +689,7 @@ class WorkspaceConfig:
     claude_code_session_root: str = "/home/admin/.claude"
     aicoding_root: str = "/home/admin/.aicoding"
     hermes_root: str = "/home/admin/.hermes"
+    deepseek_harness_root: str = "/home/admin/.dsh"
 
 
 # ── Creating a bot with its configuration manifest (W13) ─────────────────
@@ -930,15 +959,17 @@ class BotConfigManifestConfig:
     block).
 
     Both fields are consumed by apply's machine parts, each through its own
-    pure parser: the guarded fetcher (W2) takes the transport allowlist, the
-    content store (W11) takes the blob tree root. Neutral defaults ship with
-    the neutral base — a deployment's env overlay decides a mirror or a NAS
-    volume.
+    pure parser: the credential service (W3) takes the transport allowlist,
+    the content store (W11) takes the blob tree root. Neutral defaults ship
+    with the neutral base — a deployment's env overlay decides an internal
+    endpoint or a NAS volume.
 
     Attributes:
-        fetch_transport_allowlist: Hosts exempt from the https-only and
-            public-only transport rules (exact-host matches, sorted for a
-            stable resolution order).
+        fetch_transport_allowlist: Hosts the credential endpoint guard exempts
+            from its https-only and public-only rules, so an object-store
+            endpoint resolving to an internal address stays registrable
+            (exact-host matches, sorted for a stable order). The name is the
+            fetch road's; the value now serves the endpoint guard alone.
         content_store_dir: The content store's blob root — relative paths
             resolve against the process working directory, ``~`` expands.
         teclaw_platform_managed: The W8 switch (see the field comment).

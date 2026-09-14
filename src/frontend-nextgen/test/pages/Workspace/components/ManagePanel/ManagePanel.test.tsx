@@ -16,7 +16,7 @@ import type { PolicyResult } from '@/services/workspace/groupService';
 import { expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 const allowed: PolicyResult = { allowed: true };
 
@@ -119,6 +119,33 @@ it('group panel advanced tab renders dingtalk binding form', () => {
   expect(screen.getByText('高级配置')).toBeInTheDocument();
 });
 
+it('group panel root fills the manage panel width so advanced cards do not leave trailing space', () => {
+  const { container } = render(<GroupManagePanel {...groupProps()} />);
+  expect(container.querySelector('aside')).toHaveClass('w-full');
+});
+
+it('group panel uses a clear 16/14/12/11px typography hierarchy', () => {
+  render(<GroupManagePanel {...groupProps()} />);
+
+  expect(screen.getByText('群管理')).toHaveClass('text-base', 'font-semibold');
+  expect(screen.getByRole('tab', { name: '基础信息' })).toHaveClass('text-xs', 'font-medium');
+  expect(screen.getByText('群成员管理')).toHaveClass('text-sm', 'font-semibold');
+  expect(screen.getByText('公开群', { selector: 'p' })).toHaveClass('text-sm', 'font-semibold');
+  expect(screen.getByText('公开群允许通过邀请链接加入。')).toHaveClass('text-[11px]');
+  expect(screen.getByText('g1')).toHaveClass('text-xs', 'font-mono');
+  expect(screen.getByRole('button', { name: /分享协作群/ })).toHaveClass('text-xs');
+  expect(screen.getByText('用户可以通过链接加入群组')).toHaveClass('text-[11px]');
+});
+
+it('group advanced config keeps card headings above control content', () => {
+  render(<GroupManagePanel {...groupProps()} />);
+  fireEvent.click(screen.getByRole('tab', { name: '高级配置' }));
+
+  expect(screen.getByText('钉钉机器人配置')).toHaveClass('text-sm', 'font-semibold');
+  expect(screen.getByText('启用流式卡片')).toHaveClass('text-xs', 'font-medium');
+  expect(screen.getByText('开启后使用流式卡片模板输出。')).toHaveClass('text-[11px]');
+});
+
 it('group panel hides advanced tab when advanced config is disabled', () => {
   render(<GroupManagePanel {...groupProps()} advancedConfigEnabled={false} />);
   expect(screen.queryByRole('tab', { name: '高级配置' })).not.toBeInTheDocument();
@@ -167,6 +194,16 @@ const sessionProps = (): SessionManagePanelProps => ({
   onAddMember: jest.fn(async () => true),
   onRemoveMember: jest.fn(async () => true),
   onShare: jest.fn(async () => ({ ok: true as const, data: { invitationUrl: 'http://example.com/s1' } })),
+});
+
+it('session panel uses the same typography hierarchy as group management', () => {
+  render(<SessionManagePanel {...sessionProps()} />);
+
+  expect(screen.getByText('会话管理')).toHaveClass('text-base', 'font-semibold');
+  expect(screen.getByText('会话成员管理')).toHaveClass('text-sm', 'font-semibold');
+  expect(screen.getByText('s1')).toHaveClass('text-xs', 'font-mono');
+  expect(screen.getByRole('button', { name: /分享会话/ })).toHaveClass('text-xs');
+  expect(screen.getByText('生成会话邀请链接，供成员通过链接加入')).toHaveClass('text-[11px]');
 });
 
 it('session panel renders basic info, members, share and delete', () => {
@@ -257,4 +294,100 @@ it.each(['manage', 'sessionManage'] as const)('%s 入口将认证名称传递到
   expect(screen.getByText('其他成员')).toBeInTheDocument();
   expect(screen.getByText('协作 Bot')).toBeInTheDocument();
   expect(screen.queryByText('旧用户名称')).not.toBeInTheDocument();
+});
+
+// 点击面板外部自动收起：pointerdown 命中面板本体 / 齿轮开关（data-manage-panel-trigger）/
+// 浮层（role=dialog|menu|alertdialog）之外的区域时触发 onClose；命中面板本体或开关时不关闭。
+describe('WorkspaceManagePanels 点击外部自动收起', () => {
+  const buildProps = (activePanel: 'manage' | 'sessionManage', onClose: () => void): WorkspaceManagePanelsProps => {
+    const groupHandlers = groupProps();
+    const sessionHandlers = sessionProps();
+    return {
+      activePanel,
+      group,
+      session,
+      groupAdvancedConfigEnabled: true,
+      canManage: allowed,
+      identities: [],
+      activeIdentity: identity,
+      onClose,
+      onUpdateGroup: groupHandlers.onUpdate,
+      onDissolveGroup: groupHandlers.onDissolve,
+      onLeaveGroup: groupHandlers.onLeaveGroup,
+      onAddGroupMember: groupHandlers.onAddMember,
+      onRemoveGroupMember: groupHandlers.onRemoveMember,
+      onShareGroup: groupHandlers.onShare,
+      onSaveDingTalk: groupHandlers.onSaveDingTalk,
+      onToggleDingTalkActive: groupHandlers.onToggleDingTalkActive,
+      onDeleteDingTalk: groupHandlers.onDeleteDingTalk,
+      dingTalkBinding: null,
+      dingTalkLoading: false,
+      onRenameSession: sessionHandlers.onRename,
+      onDeleteSession: sessionHandlers.onDelete,
+      onLeaveSession: sessionHandlers.onLeaveSession,
+      onAddSessionMember: sessionHandlers.onAddMember,
+      onRemoveSessionMember: sessionHandlers.onRemoveMember,
+      onShareSession: sessionHandlers.onShare,
+    };
+  };
+
+  it('点击面板外部区域时关闭管理面板', () => {
+    const onClose = jest.fn();
+    render(
+      <div>
+        <div data-testid="outside">外部区域</div>
+        <WorkspaceManagePanels {...buildProps('manage', onClose)} />
+      </div>,
+    );
+    fireEvent.pointerDown(screen.getByTestId('outside'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('点击面板本体时不关闭', () => {
+    const onClose = jest.fn();
+    render(<WorkspaceManagePanels {...buildProps('manage', onClose)} />);
+    const panel = document.querySelector('[data-manage-panel="true"]');
+    expect(panel).not.toBeNull();
+    fireEvent.pointerDown(panel as Element);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('点击面板开关（data-manage-panel-trigger）时不由外部收起逻辑关闭', () => {
+    const onClose = jest.fn();
+    render(
+      <div>
+        <button type="button" data-manage-panel-trigger>
+          齿轮
+        </button>
+        <WorkspaceManagePanels {...buildProps('sessionManage', onClose)} />
+      </div>,
+    );
+    fireEvent.pointerDown(screen.getByRole('button', { name: '齿轮' }));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('点击浮层（role=dialog）内部时不关闭', () => {
+    const onClose = jest.fn();
+    render(
+      <div>
+        <div role="dialog">浮层内容</div>
+        <WorkspaceManagePanels {...buildProps('manage', onClose)} />
+      </div>,
+    );
+    fireEvent.pointerDown(screen.getByRole('dialog'));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('activePanel=none 时不监听外部点击', () => {
+    const onClose = jest.fn();
+    const props = { ...buildProps('manage', onClose), activePanel: 'none' as const };
+    render(
+      <div>
+        <div data-testid="outside">外部区域</div>
+        <WorkspaceManagePanels {...props} />
+      </div>,
+    );
+    fireEvent.pointerDown(screen.getByTestId('outside'));
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });

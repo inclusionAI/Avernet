@@ -5,6 +5,7 @@ import { PermissionCard } from '@/components/CollaborationPrivacy/PermissionCard
 import { PublicationEditor } from '@/components/CollaborationPrivacy/PublicationEditor';
 import { ScopeViewer } from '@/components/CollaborationPrivacy/ScopeViewer';
 import { PageHeader } from '@/components/Common/PageHeader';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -45,6 +46,22 @@ export default function CollaborationPrivacyPage() {
           title="协作权限"
           description="管理用户信息，以及归属于当前用户的所有 Bot 在 BCN 网络中的各类协作状态及好友审批策略"
         />
+        {privacy.activeIdentity && !privacy.loading && !privacy.error && overview && (
+          <Card className="border-primary/20 bg-primary/5">
+            <div className="flex flex-wrap items-center gap-2 p-3 text-xs text-foreground">
+              <span className="font-medium">当前工作身份：{privacy.activeIdentity.displayName}</span>
+              <Badge tone={privacy.activeIdentity.kind === 'user' ? 'primary' : 'neutral'}>
+                {privacy.activeIdentity.kind === 'user' ? '用户' : 'Bot'}
+              </Badge>
+              <span className="text-muted-foreground">
+                {privacy.activeIdentity.kind === 'user'
+                  ? '下方展示你的个人信息，切换至 Bot 身份可配置对应 Bot 的协作权限。'
+                  : '下方展示该 Bot 的协作能力、可见性与好友审批配置；切换至用户身份可查看个人信息。'}
+              </span>
+              <span className="text-muted-foreground">请使用左上角工作身份切换。</span>
+            </div>
+          </Card>
+        )}
         {privacy.loading && <LoadingState />}
         {!privacy.loading && privacy.error && (
           <Card>

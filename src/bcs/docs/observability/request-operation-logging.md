@@ -45,7 +45,7 @@ wall-clock time as CPU time.
 | Area | Observations |
 | --- | --- |
 | `/bots/query` | auth, batch load, per-bot status enrichment, input/unique/returned counts, response conversion |
-| Bot repository | memory hit/miss, memory lock wait, DB load, cache read, decode, omitted-load and default-status fallbacks, partial status-write failures |
+| Bot repository | memory hit/miss, memory lock wait, DB load and omitted-load fallbacks; status heartbeats only renew process-local liveness and perform no status-cache operations |
 | chat / chat-async acceptance | Bot/human auth, run-channel/context registration, ownership/organization/reachability, target/availability, Run create/state update, credentials, security and delivery |
 | Auth chain | plugin order, skipped/no-match/success/error, plugin and elapsed chain duration |
 | Internal waits | Run-channel registry read lock, enqueue backpressure, event-delivery semaphore permit |

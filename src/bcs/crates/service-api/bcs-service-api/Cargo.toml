@@ -21,6 +21,7 @@ time        = { workspace = true, features = ["parsing"] }
 tokio       = { workspace = true }
 uuid        = { workspace = true }
 bcs-domain   = { workspace = true }
+bcs-config-api = { workspace = true }
 bcs-protocol = { workspace = true }
 bcs-storage-api = { workspace = true }
 

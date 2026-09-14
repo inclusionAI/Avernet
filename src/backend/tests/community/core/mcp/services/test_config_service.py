@@ -1,8 +1,20 @@
 """Tests for MCPConfigService."""
 import pytest
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
+from agentclaw.community.di.config import McpRuntimeCredentialsConfig
+
+
+def _service(*, repo=None, center=None, credentials=None, resolver=None):
+    return MCPConfigService(
+        user_mcp_config_repo=repo or MagicMock(),
+        mcp_center=center or MagicMock(),
+        bot_repo=MagicMock(),
+        mcp_runtime_credentials=credentials or McpRuntimeCredentialsConfig(),
+        secret_resolver=resolver or MagicMock(),
+    )
 
 
 class TestMCPConfigServiceGetConfig:
@@ -19,11 +31,7 @@ class TestMCPConfigServiceGetConfig:
                 "transport_protocol": "SSE",
             },
         }
-        svc = MCPConfigService(
-            user_mcp_config_repo=repo,
-            mcp_center=MagicMock(),
-            bot_repo=MagicMock(),
-        )
+        svc = _service(repo=repo)
         result = svc.get_user_unified_config("user1", "mcp.test")
         assert result["api_key"] == "secret"
         assert result["headers"] == {"x-foo": "bar"}
@@ -33,11 +41,7 @@ class TestMCPConfigServiceGetConfig:
     def test_get_config_returns_none_when_not_found(self):
         repo = MagicMock()
         repo.get_by_user_and_server_code.return_value = None
-        svc = MCPConfigService(
-            user_mcp_config_repo=repo,
-            mcp_center=MagicMock(),
-            bot_repo=MagicMock(),
-        )
+        svc = _service(repo=repo)
         assert svc.get_user_unified_config("user1", "mcp.test") is None
 
     def test_get_config_parses_json_string_extra_config(self):
@@ -46,11 +50,7 @@ class TestMCPConfigServiceGetConfig:
             "id": "1",
             "extra_config": '{"api_key": "key2", "headers": {}, "endpoint_env": "PROD"}',
         }
-        svc = MCPConfigService(
-            user_mcp_config_repo=repo,
-            mcp_center=MagicMock(),
-            bot_repo=MagicMock(),
-        )
+        svc = _service(repo=repo)
         result = svc.get_user_unified_config("user1", "mcp.test")
         assert result["api_key"] == "key2"
 
@@ -61,33 +61,21 @@ class TestMCPConfigServiceValidateHeaders:
     def test_validate_headers_success(self):
         center = MagicMock()
         center.get_mcp_detail.return_value = {"serverCode": "mcp.test"}
-        svc = MCPConfigService(
-            user_mcp_config_repo=MagicMock(),
-            mcp_center=center,
-            bot_repo=MagicMock(),
-        )
+        svc = _service(center=center)
         result = svc.validate_headers_for_mcp("mcp.test", {"x-foo": "bar"})
         assert result["valid"] is True
 
     def test_validate_headers_server_not_found(self):
         center = MagicMock()
         center.get_mcp_detail.return_value = None
-        svc = MCPConfigService(
-            user_mcp_config_repo=MagicMock(),
-            mcp_center=center,
-            bot_repo=MagicMock(),
-        )
+        svc = _service(center=center)
         result = svc.validate_headers_for_mcp("mcp.test", {"x-foo": "bar"})
         assert result["valid"] is False
 
     def test_validate_headers_empty_key(self):
         center = MagicMock()
         center.get_mcp_detail.return_value = {"serverCode": "mcp.test"}
-        svc = MCPConfigService(
-            user_mcp_config_repo=MagicMock(),
-            mcp_center=center,
-            bot_repo=MagicMock(),
-        )
+        svc = _service(center=center)
         result = svc.validate_headers_for_mcp("mcp.test", {"": "bar"})
         assert result["valid"] is False
 
@@ -100,11 +88,7 @@ class TestMCPConfigServiceUpdateConfig:
         repo.get_by_user_and_server_code.return_value = None
         repo.create.return_value = {"id": "1"}
 
-        svc = MCPConfigService(
-            user_mcp_config_repo=repo,
-            mcp_center=MagicMock(),
-            bot_repo=MagicMock(),
-        )
+        svc = _service(repo=repo)
         old = svc.update_user_unified_config(
             user_id="user1",
             server_code="mcp.test",
@@ -120,12 +104,8 @@ class TestMCPConfigServiceUpdateConfig:
         repo = MagicMock()
         repo.get_by_user_and_server_code.return_value = {"id": "1"}
 
-        svc = MCPConfigService(
-            user_mcp_config_repo=repo,
-            mcp_center=MagicMock(),
-            bot_repo=MagicMock(),
-        )
-        old = svc.update_user_unified_config(
+        svc = _service(repo=repo)
+        svc.update_user_unified_config(
             user_id="user1",
             server_code="mcp.test",
             api_key="new-key",
@@ -140,11 +120,7 @@ class TestMCPConfigServiceUpdateConfig:
         repo = MagicMock()
         repo.get_by_user_and_server_code.return_value = {"id": "1"}
 
-        svc = MCPConfigService(
-            user_mcp_config_repo=repo,
-            mcp_center=MagicMock(),
-            bot_repo=MagicMock(),
-        )
+        svc = _service(repo=repo)
         svc.rollback_unified_config(
             user_id="user1",
             server_code="mcp.test",
@@ -156,11 +132,7 @@ class TestMCPConfigServiceUpdateConfig:
         repo = MagicMock()
         repo.get_by_user_and_server_code.return_value = {"id": "1"}
 
-        svc = MCPConfigService(
-            user_mcp_config_repo=repo,
-            mcp_center=MagicMock(),
-            bot_repo=MagicMock(),
-        )
+        svc = _service(repo=repo)
         svc.rollback_unified_config(
             user_id="user1",
             server_code="mcp.test",
@@ -188,11 +160,7 @@ class TestMCPConfigServiceBuildPayload:
             }
         }
 
-        svc = MCPConfigService(
-            user_mcp_config_repo=repo,
-            mcp_center=MagicMock(),
-            bot_repo=MagicMock(),
-        )
+        svc = _service(repo=repo)
 
         monkeypatch.setattr(
             "agentclaw.community.core.mcp.services._defaults.get_default_mcp_servers",
@@ -212,11 +180,7 @@ class TestMCPConfigServiceBuildPayload:
         repo = MagicMock()
         repo.get_by_user_and_server_code.return_value = None
 
-        svc = MCPConfigService(
-            user_mcp_config_repo=repo,
-            mcp_center=MagicMock(),
-            bot_repo=MagicMock(),
-        )
+        svc = _service(repo=repo)
 
         monkeypatch.setattr(
             "agentclaw.community.core.mcp.services._defaults.get_default_mcp_servers",
@@ -231,3 +195,88 @@ class TestMCPConfigServiceBuildPayload:
         assert headers == {"x-default": "2"}
         assert endpoint_env == "PROD"
         assert transport_protocol is None
+
+    def test_managed_header_overrides_user_header_case_insensitively(self, monkeypatch):
+        repo = MagicMock()
+        repo.get_by_user_and_server_code.return_value = {
+            "extra_config": {"headers": {"X-Ling-Auth": "user-value"}}
+        }
+        resolver = MagicMock()
+        resolver.get_secret.return_value = SimpleNamespace(secret_value="managed-value")
+        svc = _service(
+            repo=repo,
+            credentials=McpRuntimeCredentialsConfig(
+                header_secrets={"mcp.test": {"x-ling-auth": "test-secret"}}
+            ),
+            resolver=resolver,
+        )
+        monkeypatch.setattr(
+            "agentclaw.community.core.mcp.services._defaults.get_default_mcp_servers",
+            lambda _engine: [
+                {"server_code": "mcp.test", "headers": {"x-default": "1"}}
+            ],
+        )
+
+        _, headers, _, _ = svc.build_mcp_sync_payload(
+            user_id="user1", mcp_data={"serverCode": "mcp.test"}
+        )
+
+        assert headers == {"x-default": "1", "x-ling-auth": "managed-value"}
+
+    def test_managed_header_success_is_cached_for_process_lifetime(self):
+        resolver = MagicMock()
+        resolver.get_secret.return_value = SimpleNamespace(secret_value="managed-value")
+        svc = _service(
+            credentials=McpRuntimeCredentialsConfig(
+                header_secrets={"mcp.test": {"authorization": "shared-secret"}}
+            ),
+            resolver=resolver,
+        )
+
+        for _ in range(2):
+            _, headers, _, _ = svc.build_mcp_sync_payload(
+                user_id="user1", mcp_data={"serverCode": "mcp.test"}
+            )
+
+        assert headers["authorization"] == "managed-value"
+        resolver.get_secret.assert_called_once_with("shared-secret")
+
+    def test_managed_header_failure_is_not_cached(self):
+        resolver = MagicMock()
+        resolver.get_secret.side_effect = [
+            None,
+            SimpleNamespace(secret_value="recovered-value"),
+        ]
+        svc = _service(
+            credentials=McpRuntimeCredentialsConfig(
+                header_secrets={"mcp.test": {"authorization": "test-secret"}}
+            ),
+            resolver=resolver,
+        )
+
+        with pytest.raises(RuntimeError, match="managed MCP Header secret is unavailable"):
+            svc.build_mcp_sync_payload(
+                user_id="user1", mcp_data={"serverCode": "mcp.test"}
+            )
+
+        _, headers, _, _ = svc.build_mcp_sync_payload(
+            user_id="user1", mcp_data={"serverCode": "mcp.test"}
+        )
+        assert headers["authorization"] == "recovered-value"
+        assert resolver.get_secret.call_count == 2
+
+    def test_unmapped_server_does_not_read_secret_backend(self):
+        resolver = MagicMock()
+        svc = _service(
+            credentials=McpRuntimeCredentialsConfig(
+                header_secrets={"mcp.other": {"authorization": "test-secret"}}
+            ),
+            resolver=resolver,
+        )
+
+        _, headers, _, _ = svc.build_mcp_sync_payload(
+            user_id="user1", mcp_data={"serverCode": "mcp.test"}
+        )
+
+        assert headers == {}
+        resolver.get_secret.assert_not_called()

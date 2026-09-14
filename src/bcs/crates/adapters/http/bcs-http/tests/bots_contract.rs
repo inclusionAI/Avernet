@@ -1311,6 +1311,10 @@ async fn search_bots_route_defaults_to_public_and_protected_without_bearer() {
         commands[0].visibility.as_ref().unwrap(),
         &vec!["public".to_string(), "protected".to_string()]
     );
+    assert_eq!(
+        commands[0].user_visibility.as_ref().unwrap(),
+        &vec!["public".to_string(), "protected".to_string()]
+    );
 }
 
 #[tokio::test]

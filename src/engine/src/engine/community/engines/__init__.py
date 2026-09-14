@@ -8,9 +8,10 @@ Profile-driven engine set (mutual exclusion on the ``claude_code`` name):
     18900 relay). The community claude_code engine lives in
     ``community/engines/claude_code/`` and self-registers on import. GitHub
     export ships this set.
-  - **corp**: OpenClaw + aicoding + hermes + claude_code (corp impl). The corp
-    ``engines/`` packages live under ``corp/engines/`` and are present only in
-    the OCB internal checkout (excluded from GitHub export).
+  - **corp**: OpenClaw + aicoding + hermes + deepseek_harness + claude_code
+    (corp impl). The corp ``engines/`` packages live under ``corp/engines/``
+    and are present only in the OCB internal checkout (excluded from GitHub
+    export).
 
 Loading claude_code by profile avoids a same-name registration conflict: both
 ``ClaudeCodeEngine`` (corp) and ``ClaudeCodeCommunityEngine`` (community)
@@ -53,7 +54,7 @@ _profile = EngineProfile.detect()
 if _profile is EngineProfile.CORP:
     _optional_import_module("engine.corp.engines.claude_code", label="claude_code (corp)")
     # Other internal legacy engines: present in OCB, excluded from GitHub export.
-    for _name in ("aicoding", "hermes"):
+    for _name in ("aicoding", "hermes", "deepseek_harness"):
         _optional_import_module(f"engine.corp.engines.{_name}", label=_name)
 else:  # community / test
     # Community claude_code engine: composition root under

@@ -14,23 +14,30 @@
 | `AWAIT_VOTE_START` | 其余（`ECHO` / `HUMAN_MSG` / `WORKER_MSG`） | [S3 开投](#s3-开投)。转述稿的回灌就是开投的信号，不用等人类说话 |
 | `VOTE_RUNNING` | `NODE_TASK`（开票） | [S4 开票](#s4-开票) |
 | `VOTE_RUNNING` | `HUMAN_MSG` | 回一句还在等谁投；说"卡住了"就走 [SX](#sx-卡住诊断) |
+| `AWAIT_PK_SPEAK_START` | `NODE_TASK`（常规开票尚未结束） | 只报 PK 名单后结束；不启动运行 |
+| `AWAIT_PK_SPEAK_START` | `ECHO` / `HUMAN_MSG` | `uc open-round` 开同轮 PK 发言 |
+| `PK_SPEAK_RUNNING` | `NODE_TASK`（PK 汇总） | 按节点固定的 --round/--stage/--attempt 调 speeches-set，汇总后结束 |
+| `AWAIT_PK_VOTE_START` | `NODE_TASK`（PK 汇总尚未结束） | 结束当前激活，不开投 |
+| `AWAIT_PK_VOTE_START` | `ECHO` / `HUMAN_MSG` | `uc open-vote` 开 PK 投票 |
+| `PK_VOTE_RUNNING` | `NODE_TASK`（PK 开票） | 按节点固定的 --round/--stage/--attempt 调 votes-set，执行 S4 |
 | `AWAIT_NEXT_ROUND` | `WORKER_MSG`（遗言回执） | [S5 念遗言并开下一轮](#s5-念遗言并开下一轮) |
 | `AWAIT_NEXT_ROUND` **且 `pending_ping` 非空**（有 Bot 出局，要念遗言） | 其余（`ECHO` / `HUMAN_MSG`） | [S4b 派遗言任务](#s4b-派遗言任务) |
-| `AWAIT_NEXT_ROUND` **且 `pending_ping` 为空**（平票，或出局的是人类） | 其余（`ECHO` / `HUMAN_MSG`） | [S4c 直接开下一轮](#s4c-直接开下一轮) |
+| `AWAIT_NEXT_ROUND` **且 `pending_ping` 为空**（PK 无人出局、常规零有效票或出局的是人类） | 其余（`ECHO` / `HUMAN_MSG`） | [S4c 直接开下一轮](#s4c-直接开下一轮) |
 | `AWAIT_NEXT_ROUND` | `HUMAN_MSG` 说"继续" | 跳过遗言，直接做 S5 的第 2 步 |
 | `FINISHED` | 任意 | 只说一句"本局已结束，新建会话再来一局"。**不 `reveal`、不 `bcs_task_complete`、不调任何脚本**——终局稿在 S4 里已经说过了 |
 
 任何格子里没写的组合：说清当前进行到哪、人类可以做什么，**不推进**。
 
-`SPEAK_RUNNING` / `VOTE_RUNNING` 下的 `WORKER_MSG` 一律是迟到的回执，回一句无关紧要的话即可，**绝不推进阶段、绝不调用任何脚本命令**，没有例外。
+`SPEAK_RUNNING` / `VOTE_RUNNING` / `PK_SPEAK_RUNNING` / `PK_VOTE_RUNNING` 下的 `WORKER_MSG` 一律是迟到的回执，回一句无关紧要的话即可，**绝不推进阶段、绝不调用任何脚本命令**，没有例外。
 
 **节点唤醒按节点正文执行，写入命令由脚本校验当前阶段。** 运行失败之后，失败前派出去的节点仍可能迟到几十秒才把产物送回来。命令报告阶段不符就只回一句"这条是迟到的回执，已忽略"，不继续写入、不念稿——照着它往下走会让人类以为一切正常。
 
 **`AWAIT_VOTE_START` 这两行的差别是本文件里最要紧的一条。** `speeches-set` 一跑完 phase 就是 `AWAIT_VOTE_START` 了，但那一刻我还在发言运行的末节点里、还占着协作槽位——那个运行要等我这次激活结束才算完成。在那里 `open-vote` 会 `RUN_SLOT_BUSY`，而重试、`sleep`、轮询只会让这次激活不结束，于是运行永远完不成、槽位永远不放，整局死在这一步（2026-08-30 第 2 轮实际发生过）。**判据是「这次激活是被什么叫醒的」，不是 phase。**
 
-**`ECHO`（发送者是我自己）也先查 `uc status`：** 只有 `AWAIT_VOTE_START` 和 `AWAIT_NEXT_ROUND` 这两个 phase 要做事，其余一律直接结束激活，不输出、不调脚本：
+**`ECHO`（发送者是我自己）也先查 `uc status`：** 只有 `AWAIT_VOTE_START`、`AWAIT_PK_SPEAK_START`、`AWAIT_PK_VOTE_START` 和 `AWAIT_NEXT_ROUND` 要做事，其余一律直接结束激活，不输出、不调脚本：
 
-- `AWAIT_VOTE_START` → S3 开投。
+- `AWAIT_VOTE_START` / `AWAIT_PK_VOTE_START` → S3 开投。
+- `AWAIT_PK_SPEAK_START` → open-round 开同轮 PK 发言。
 - `AWAIT_NEXT_ROUND` 且 `pending_ping` **非空** → S4b 派遗言任务。
 - `AWAIT_NEXT_ROUND` 且 `pending_ping` **为空** → S4c 直接开下一轮。
 
@@ -147,6 +154,8 @@ uc open-vote
 
 ## S4 开票
 
+以下命令示例省略范围参数；实际必须保留当前节点的 --round / --stage / --attempt。PK 重试仅重开当前子阶段，不使常规投票作废。AWAIT_PK_SPEAK_START 恢复用 open-round（不加 --retry）。
+
 被"开票"节点唤醒，`[Upstream Outputs]` 里是全部玩家的投票，每条只有票号。
 
 1. ```bash
@@ -155,9 +164,10 @@ uc open-vote
 
    解析、计票、平票规则、出局判定、胜负判定一次做完。**不要自己数票，不要自己判胜负。**
 2. 看返回的 `verdict`：
+   - `pk` → 按 pk_candidates 宣布 PK 名单，结束当前节点。回灌后 open-round，仅平票玩家额外发言。
    - `continue` → 说"开票结果"那段（逐条报票向、报票数、宣布出局、身份暂不公布、报剩下谁）。
      **玩家只交了票号，没有理由，不许替他们编。**
-     `tie` 为真就是平票：**本轮没有人出局，直接进下一轮，没有重投。**
+     此分支 `tie` 为真表示 PK 仍平票或零有效票：本轮无人出局，不追加 PK。
    - `finished` → 先 `uc reveal --session "$session_id"`，再说"终局"那段，然后执行 `uc finish --session "$session_id"` 结束会话，失败如实报告。当前 tally 是 state_machine 上下文，不提供 `bcs_task_complete`；禁止 `bcs_route` 或路由给自己寻找工具。
      **这是全局唯一一处可以 `reveal` 和结束会话的地方**：只有在我自己刚跑完 `votes-set`、
      它返回 `finished` 的这次激活里才做。被唤醒时看到 `FINISHED` 而这次激活里我一轮都没
@@ -170,7 +180,7 @@ uc open-vote
 
 ## S4b 派遗言任务
 
-**只在有 Bot 出局、要念遗言的那一轮走这里。** 平票、或者出局的是人类玩家时，
+**只在有 Bot 出局、要念遗言的那一轮走这里。** PK 无人出局、常规零有效票或出局的是人类玩家时，
 `pending_ping` 是空的——那一轮不派任何任务，走 [S4c](#s4c-直接开下一轮)。
 
 开票稿会以我的身份发成群消息，再回灌成一次针对我的唤醒——**那次激活就是派遗言的地方**。
@@ -194,7 +204,7 @@ uc render-ping --session "$session_id"
 
 ## S4c 直接开下一轮
 
-`phase = AWAIT_NEXT_ROUND` 且 `pending_ping` **为空**：平票（没有人出局），或者出局的
+`phase = AWAIT_NEXT_ROUND` 且 `pending_ping` **为空**：PK 无人出局、常规零有效票，或者出局的
 是人类玩家（人类拿不到任务，也就没有遗言回执）。这两种情况下**没有遗言要念，也就不需要
 任何人来叫醒我**——开票稿的回灌已经把我叫醒了，我就在这一拍里直接开下一轮：
 
@@ -259,11 +269,11 @@ uc status --session "$session_id"
 然后按 `phase` 直接尝试重开当前这一轮——`open-*` 自己会先查协作槽位，所以这一条命令同时是诊断和恢复：
 
 ```bash
-# phase = SPEAK_RUNNING
+# phase = SPEAK_RUNNING 或 PK_SPEAK_RUNNING
 uc open-round --session "$session_id" --retry
-# phase = AWAIT_VOTE_START —— 注意这里**不带** --retry：这一轮的投票还没开过
+# phase = AWAIT_VOTE_START 或 AWAIT_PK_VOTE_START —— 注意这里**不带** --retry：这一轮的投票还没开过
 uc open-vote  --session "$session_id"
-# phase = VOTE_RUNNING
+# phase = VOTE_RUNNING 或 PK_VOTE_RUNNING
 uc open-vote  --session "$session_id" --retry
 ```
 

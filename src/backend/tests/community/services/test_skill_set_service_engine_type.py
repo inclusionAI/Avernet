@@ -127,6 +127,65 @@ class TestSkillSetServiceEngineTypeThreading:
             }
         ]
 
+    async def test_get_symlink_mappings_uses_deepseek_harness_skill_root(
+        self, skill_set_service, monkeypatch
+    ):
+        monkeypatch.setattr(
+            "agentclaw.community.utils.env_utils.is_local_mode", lambda: False
+        )
+        skill_set_service.engine_type = "deepseek_harness"
+        skill_set_service.runtime_engine_type = "deepseek_harness"
+        skill_set_service.is_desktop = False
+        skill_set_service.get_active_skills = MagicMock(
+            return_value=[
+                {"name": "reviewer", "git_path": "git://business/reviewer"}
+            ]
+        )
+
+        mappings = skill_set_service.get_symlink_mappings()
+
+        assert [mapping.to_dict() for mapping in mappings] == [
+            {
+                "source": "/home/admin/.dsh/skills/skills-repo/business/reviewer",
+                "target": "/home/admin/.dsh/skills/reviewer",
+                "skill_uuid": None,
+                "version": None,
+            }
+        ]
+
+    async def test_get_symlink_mappings_uses_local_deepseek_harness_skill_root(
+        self, skill_set_service, monkeypatch, tmp_path
+    ):
+        engine_root = tmp_path / "deepseek_harness"
+        monkeypatch.setattr(
+            "agentclaw.community.utils.env_utils.is_local_mode", lambda: True
+        )
+        monkeypatch.setattr(
+            "agentclaw.community.core.workspace.path_factory.get_bot_engine_dir",
+            lambda *_args, **_kwargs: engine_root,
+        )
+        skill_set_service.engine_type = "deepseek_harness"
+        skill_set_service.runtime_engine_type = "deepseek_harness"
+        skill_set_service.is_desktop = False
+        skill_set_service.get_active_skills = MagicMock(
+            return_value=[
+                {"name": "reviewer", "git_path": "git://business/reviewer"}
+            ]
+        )
+
+        mappings = skill_set_service.get_symlink_mappings()
+
+        assert [mapping.to_dict() for mapping in mappings] == [
+            {
+                "source": str(
+                    engine_root / "skills/skills-repo/business/reviewer"
+                ),
+                "target": str(engine_root / "skills/reviewer"),
+                "skill_uuid": None,
+                "version": None,
+            }
+        ]
+
 
     async def test_get_symlink_mappings_unknown_engine_falls_back_to_default(
         self, skill_set_service

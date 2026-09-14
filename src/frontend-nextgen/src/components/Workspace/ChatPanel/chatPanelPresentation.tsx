@@ -26,7 +26,7 @@ function renderAvatar(name: string, avatarUrl?: string, fallbackAvatar?: string)
     return <img src={avatarUrl} alt={name} className="h-8 w-8 shrink-0 rounded-full object-cover" />;
   }
   return (
-    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-semibold text-background">
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
       {fallbackAvatar || name.charAt(0)}
     </span>
   );
@@ -45,8 +45,7 @@ export function resolveSingleSender(
   }
   const senderId = typeof message.extra?.senderId === 'string' ? message.extra.senderId : undefined;
   const senderName = typeof message.extra?.senderName === 'string' ? message.extra.senderName.trim() : '';
-  const isCurrentUser =
-    !senderId || isSameHumanIdentity(senderId, authenticatedUserId, 'human');
+  const isCurrentUser = !senderId || isSameHumanIdentity(senderId, authenticatedUserId, 'human');
   const name = isCurrentUser
     ? authenticatedUserName?.trim() || (viewer?.kind === 'user' ? viewer.displayName : '') || senderName || '未命名成员'
     : senderName || senderId || '未命名成员';

@@ -28,6 +28,7 @@ class Candidate:
     owner_id: str
     bot_name: str | None
     gmt_create: datetime
+    active_engine: str | None = None
 
 
 def owner_is_protected(
@@ -120,6 +121,7 @@ def filter_candidates(session: Session, N: int, env: str) -> list[Candidate]:
             owner_id=r.owner_id,
             bot_name=r.bot_name,
             gmt_create=r.gmt_create,
+            active_engine=r.active_engine,
         )
         for r in rows
     ]

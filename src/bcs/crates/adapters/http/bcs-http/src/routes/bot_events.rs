@@ -6,14 +6,9 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bcs_auth_api::is_jwt_format;
-use bcs_protocol::{
-    BCN_PROVIDER_BOT_REF_HEADER, BCN_PROVIDER_ID_HEADER, ProviderCoordinationEventKindDto,
-    ProviderCoordinationEventRequest,
-};
+use bcs_protocol::{BCN_PROVIDER_BOT_REF_HEADER, BCN_PROVIDER_ID_HEADER};
 use bcs_service_api::{
-    ChatEventState, ProviderBotCoordinationCommand, ProviderBotEventCommand,
-    ProviderBotEventCredential, ProviderBotEventError, ProviderCoordinationEventKind,
-    ProviderCoordinationIntent,
+    ChatEventState, ProviderBotEventCommand, ProviderBotEventCredential, ProviderBotEventError,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -344,49 +339,6 @@ pub async fn post_bot_event(
     })))
 }
 
-pub async fn post_coordination_event(
-    State(state): State<HttpAppState>,
-    headers: HeaderMap,
-    Json(req): Json<ProviderCoordinationEventRequest>,
-) -> Result<Json<Value>, BotEventRouteError> {
-    let provider_id = header_required(&headers, BCN_PROVIDER_ID_HEADER)?;
-    let credential = credential_from_headers(&state, &headers, &provider_id).await?;
-    info!(
-        provider_id = %provider_id,
-        run_id = %req.run_id,
-        tool_call_id = %req.tool_call_id,
-        kind = ?req.kind,
-        tool_name = ?req.tool_name,
-        mcp_server = ?req.mcp_server,
-        "provider callback: received coordination event"
-    );
-    let outcome = state
-        .services
-        .provider_bot_events
-        .submit_coordination(ProviderBotCoordinationCommand {
-            provider_id: provider_id.clone(),
-            credential,
-            run_id: req.run_id,
-            tool_call_id: req.tool_call_id,
-            kind: coordination_kind_from_wire(req.kind),
-            tool_name: req.tool_name,
-            result_text: req.result_text,
-            mcp_server: req.mcp_server,
-            intent: req.intent.map(|intent| ProviderCoordinationIntent {
-                v: intent.v,
-                tool: intent.tool,
-                arguments: intent.arguments,
-            }),
-        })
-        .await
-        .map_err(bot_event_error)?;
-    Ok(Json(json!({
-        "ok": true,
-        "processed": outcome.processed,
-        "duplicate": outcome.duplicate,
-    })))
-}
-
 fn record_bot_response_auth_failure(
     callback_content: &str,
     finish_reason: Option<&str>,
@@ -508,17 +460,6 @@ async fn credential_from_headers(
     }
 
     Ok(ProviderBotEventCredential::StaticBearer(token))
-}
-
-fn coordination_kind_from_wire(
-    kind: ProviderCoordinationEventKindDto,
-) -> ProviderCoordinationEventKind {
-    match kind {
-        ProviderCoordinationEventKindDto::ToolResult => ProviderCoordinationEventKind::ToolResult,
-        ProviderCoordinationEventKindDto::CoordinationIntent => {
-            ProviderCoordinationEventKind::CoordinationIntent
-        }
-    }
 }
 
 fn bot_event_error(error: ProviderBotEventError) -> BotEventRouteError {

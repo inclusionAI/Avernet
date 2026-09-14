@@ -1,6 +1,7 @@
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotEditorCli, BotEditorMcp, BotEditorSkill } from '@/domain/botEditor';
 import { FileCheck, FileText, Loader2, Plus, Terminal, Trash2, User } from 'lucide-react';
 import { useState } from 'react';
@@ -11,6 +12,7 @@ interface CapabilityMembersProps {
   editable: boolean;
   identities?: Record<string, 'caller' | 'owner'>;
   identityEditable?: boolean;
+  identityDisabledReason?: string;
   updatingIdentityId?: string;
   onIdentity?: (id: string, identity: 'caller' | 'owner') => Promise<void>;
   onAdd?: () => void;
@@ -24,6 +26,7 @@ export function CapabilityMembers({
   identities = {},
   onIdentity,
   identityEditable = false,
+  identityDisabledReason,
   updatingIdentityId,
   onAdd,
   onRemove,
@@ -66,7 +69,7 @@ export function CapabilityMembers({
               )}
               <span className="min-w-0 flex-1 truncate text-xs">{item.name}</span>
               {'version' in item && item.version ? <Badge>{item.version}</Badge> : null}
-              {kind === 'mcp' ? (
+              {kind === 'mcp' && identityEditable ? (
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button
@@ -119,6 +122,25 @@ export function CapabilityMembers({
                     </Button>
                   </PopoverContent>
                 </Popover>
+              ) : kind === 'mcp' ? (
+                <TooltipProvider delayDuration={0}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span data-testid={`mcp-identity-disabled-${id}`} className="inline-flex" tabIndex={0}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled
+                          aria-label={`${item.name}访问方式不可切换`}
+                          leftIcon={<User className="size-3.5" />}
+                        >
+                          Owner
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{identityDisabledReason || '当前 Bot 不支持切换 MCP 访问方式'}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               ) : null}
               {kind !== 'cli' ? (
                 <Button

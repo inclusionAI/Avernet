@@ -2892,4 +2892,12 @@ END`,
       `CREATE INDEX IF NOT EXISTS idx_flow_runs_origin_id ON flow_runs (origin_bot_id, id)`,
     ],
   },
+  {
+    version: 120,
+    description: "Add owner_id to workflow_specs so save can persist the current user alongside deploy history",
+    sql: [
+      `ALTER TABLE workflow_specs ADD COLUMN owner_id VARCHAR(255) DEFAULT NULL`,
+      `CREATE INDEX IF NOT EXISTS idx_workflow_specs_owner_id ON workflow_specs (owner_id)`,
+    ],
+  },
 ];

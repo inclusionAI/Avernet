@@ -86,6 +86,8 @@ export type RepairInsightSource = {
 
 export type RepairIssueInput = {
   symptom: string;
+  /** Projected from frozen Insight evidence, not accepted as a Trace/task ID. */
+  sessionIds?: string[];
   traceId: string | null;
   relatedTaskId: string | null;
   errorText: string | null;

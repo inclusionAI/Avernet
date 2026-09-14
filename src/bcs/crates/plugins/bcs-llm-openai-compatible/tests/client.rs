@@ -209,6 +209,7 @@ fn test_config(
         base_url: base_url.to_string(),
         api_key_env: None,
         api_key: Some(Secret::new("openai-key".to_string())),
+        api_key_secret: None,
         model: "gpt-4.1-mini".to_string(),
         timeout_ms,
         temperature: 0.0,

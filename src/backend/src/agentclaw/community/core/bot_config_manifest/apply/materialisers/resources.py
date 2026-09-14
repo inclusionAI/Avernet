@@ -1,6 +1,36 @@
 """``resources`` → ``ResourceFileService``: workspace files and directory trees.
 
-Three invariants, all from the W6 work item:
+**The entry shape.** ``identity`` for this category is the entry's ``path``,
+verbatim including any trailing slash. The trailing slash is the **form
+discriminator**: ``data/faq.csv`` is a file entry, ``data/prices/`` is a
+directory entry. Three source spellings are accepted::
+
+    manifest:
+      resources:
+        # inline content: no fetch at all
+        - path: notes/hello.txt
+          content: |
+            hello
+
+        # a named source, file form
+        - path: data/faq.csv
+          from: content
+          subpath: faq.csv          # composes with the source's subpath
+
+        # a named source, directory form. Over 'oss' the tree must travel
+        # as an archive, so 'unpack' is required; over git it is refused,
+        # because a repository hands over a real tree.
+        - path: data/prices/
+          from: artifacts
+          key: prices.tgz
+          unpack: tar.gz
+          strip_components: 1
+
+An entry reaches ``resolve`` as the raw mapping, e.g. ``{"path":
+"data/prices/", "from": "artifacts", "key": "prices.tgz", "unpack":
+"tar.gz", "strip_components": 1}``.
+
+Three invariants:
 
 - **One write chain for both engine families.** ``ResourceFileService``'s
   dispatcher already fans out per transport (arca / baas: device sync; teclaw:
@@ -58,7 +88,7 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
     archive_refusal,
     canonical_tree_bytes,
 )
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
     declared_protocol,
 )
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
@@ -101,6 +131,14 @@ class _DeclaredTree:
     """The declared-tree marker intent's value — an explicit object, never
     ``None``.
 
+    Carries no data: it exists so ``write`` can tell "delete this whole tree
+    first" from an ordinary member write. One directory entry produces one
+    marker intent plus one intent per member::
+
+        Intent(identity="data/prices/", value=_DECLARED_TREE)
+        Intent(identity="data/prices/2026.csv", value=b"date,price\n...")
+        Intent(identity="data/prices/2025.csv", value=b"date,price\n...")
+
     ``None`` is ``Intent.value``'s dataclass *default*, so keying the tree
     marker on it would let any future intent constructed without an
     explicit value silently promise a whole-tree deletion at write time.
@@ -110,19 +148,46 @@ class _DeclaredTree:
     __slots__ = ()
 
 
-#: The single marker instance: ``Intent.value`` for a declared directory,
-#: identity the declared path with its trailing slash.
+#: The single marker instance, shared by every declared directory. Compared by
+#: identity, so there is deliberately only ever one. ``Intent.value`` for a
+#: declared directory; the intent's ``identity`` is the declared path with its
+#: trailing slash, e.g. ``"data/prices/"``.
 _DECLARED_TREE = _DeclaredTree()
 
 
 class ResourcesMaterialiser(Materialiser):
-    """Converges declared workspace resources toward the declaration."""
+    """Converges declared workspace resources toward the declaration.
+
+    ``identity`` is the entry's ``path``; ``Intent.value`` is the member's
+    ``bytes``, or :data:`_DECLARED_TREE` for a directory marker. A directory
+    entry fans out into several intents, so a plan usually carries more
+    entries than the document declared::
+
+        # from one entry, path "data/prices/", whose archive ships two files
+        resolve -> ResolveResult(intents=(
+                       Intent("data/prices/", _DECLARED_TREE),
+                       Intent("data/prices/2026.csv", b"date,price\n..."),
+                       Intent("data/prices/2025.csv", b"date,price\n...")))
+        plan    -> CategoryPlan(entries=(
+                       PlannedEntry(<2026>, "created"),
+                       PlannedEntry(<2025>, "created")),
+                       removals=("data/prices/",))
+        write   -> (EntryResult(RESOURCES, "data/prices/2026.csv", CREATED),
+                    EntryResult(RESOURCES, "data/prices/2025.csv", CREATED))
+
+    The marker does **not** become a ``PlannedEntry``: it leaves ``resolve``
+    as an intent and leaves ``plan`` as a ``removals`` row, which is what
+    gives the destructive tree replacement its audit row.
+
+    ``plan`` never answers ``unchanged`` for this category: every apply
+    rewrites every member, so the category is never ``is_noop``.
+    """
 
     construct = ManifestCategory.RESOURCES
 
-    def __init__(self, resource_service: Any, fetcher: Any) -> None:
+    def __init__(self, resource_service: Any, resolver: Any) -> None:
         self._resources = resource_service
-        self._fetcher = fetcher
+        self._resolver = resolver
 
     async def resolve(
         self, ctx: ApplyContext, entries: Sequence[dict[str, Any]]
@@ -198,20 +263,19 @@ class ResourcesMaterialiser(Materialiser):
                 if isinstance(members, str):
                     failures.append(ResolveFailure(path, members))
                     continue
-                if delivery.needs_receipt():
-                    # The members are filed as **one canonical blob** under the
-                    # tree's receipt URL — the same shape the skills
-                    # materialiser files a package as, and for the same reason:
-                    # §2.8's audit and ``keep_last`` read one receipt per entry,
-                    # and a receipt per member would make a 5000-file tree 5000
-                    # rows describing one delivery.
-                    try:
-                        await asyncio.to_thread(
-                            self._file_tree, ctx, delivery, members, path
-                        )
-                    except EntryFetchError as exc:
-                        failures.append(ResolveFailure(path, exc.reason))
-                        continue
+                # The members are filed as **one canonical blob** under the
+                # tree's receipt URL — the same shape the skills materialiser
+                # files a package as, and for the same reason: §2.8's audit and
+                # ``keep_last`` read one receipt per entry, and a receipt per
+                # member would make a 5000-file tree 5000 rows describing one
+                # delivery.
+                try:
+                    await asyncio.to_thread(
+                        self._file_tree, ctx, delivery, members, path
+                    )
+                except EntryFetchError as exc:
+                    failures.append(ResolveFailure(path, exc.reason))
+                    continue
                 note = delivery.note()
                 # The declared-tree marker intent rides first so plan routes
                 # the tree into ``removals`` and write replaces it before
@@ -261,10 +325,9 @@ class ResourcesMaterialiser(Materialiser):
                     ctx, entry, path, _FETCH_CATEGORY_FILE
                 )
                 data = await asyncio.to_thread(delivery.single)
-                if delivery.needs_receipt():
-                    await asyncio.to_thread(
-                        self._file_one, ctx, delivery, data, path
-                    )
+                await asyncio.to_thread(
+                    self._file_one, ctx, delivery, data, path
+                )
             except EntryFetchError as exc:
                 failures.append(ResolveFailure(str(path), exc.reason))
                 continue
@@ -286,7 +349,8 @@ class ResourcesMaterialiser(Materialiser):
     ):
         """One entry's content through the W2/W3/W11 funnel.
 
-        ``fetch_declared``, not ``fetch``: this is the whole of defect D1. The
+        ``DeclaredSourceResolver.resolve``, not ``fetch``: this is the whole of
+        defect D1. The
         URL-only call this replaced is why ``resources`` was the one fetching
         category that could not name a source — not just git, but ``from:``
         pointing at anything, since a named source has no ``source:`` URL for
@@ -303,7 +367,7 @@ class ResourcesMaterialiser(Materialiser):
         source.
         """
         return await asyncio.to_thread(
-            self._fetcher.fetch_declared,
+            self._resolver.resolve,
             ctx,
             entry=entry,
             category=category,
@@ -319,18 +383,17 @@ class ResourcesMaterialiser(Materialiser):
     ) -> None:
         """File a delivered tree with the store, as one canonical blob.
 
-        Only the roads that still owe a receipt reach here — the object road
-        filed what arrived inside the fetch. The credential name rides along,
-        so the lineage answers "which credential served this" identically on
-        both roads.
+        Unconditional, and the delivery decides what that means: the object
+        road filed what arrived inside the fetch and writes nothing again,
+        while the git road files these bytes under its own receipt identity
+        with the source's credential name riding along — so the lineage
+        answers "which credential served this" identically on both roads.
         """
-        self._fetcher.file_bytes(
+        delivery.file(
             ctx,
-            content=canonical_tree_bytes(members),
-            source_url=delivery.receipt_url(),
+            canonical_tree_bytes(members),
             category=_FETCH_CATEGORY_ARCHIVE,
             entry_identity=path,
-            credential_name=delivery.auth(),
         )
 
     def _file_one(
@@ -341,13 +404,11 @@ class ResourcesMaterialiser(Materialiser):
         path: str,
     ) -> None:
         """File one delivered file with the store. Same rule as the tree's."""
-        self._fetcher.file_bytes(
+        delivery.file(
             ctx,
-            content=data,
-            source_url=delivery.receipt_url(),
+            data,
             category=_FETCH_CATEGORY_FILE,
             entry_identity=path,
-            credential_name=delivery.auth(),
         )
 
     def _entry_failure(

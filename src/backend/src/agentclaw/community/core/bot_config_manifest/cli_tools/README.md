@@ -22,7 +22,7 @@ code never reaches the feature through the platform's own HTTP endpoints.
 - `declarations.py` — `CliToolDecl` / `CliToolOutcome` / `CliToolDrift`: what a
   caller declares and what one operation reports back.
 - `context.py` — `CliToolContext`: who and what an operation runs as. It also
-  satisfies `apply/entry_fetch.py`'s `FetchContext`, which is what lets an
+  satisfies `apply/fetch_context.py`'s `FetchContext`, which is what lets an
   HTTP-driven install fetch through the same funnel a manifest apply does.
 - `verify.py` — `verify_amd64_elf` and `select_subpath`. The digest answers
   "are these the bytes you asked for"; these answer "can this machine run

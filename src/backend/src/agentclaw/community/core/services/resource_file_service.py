@@ -12,8 +12,8 @@ What the service owns (moved out of ``adapters/http/resources/file_router.py``):
 - resolve the device context (draft via ``resolve_for_bot``; publish-stage via
   ``resolve_for_binding`` — added in a follow-up task) and dispatch by the
   ``workspace`` namespace;
-- the file-browser rules: dotfile / hidden-dir / hidden-file filtering, read-only
-  flagging, the ``skills-local`` root injection;
+- directory-listing projection and read-only path classification; listings preserve
+  the provider's real entries, while search/archive keep their own curated policies;
 - the ``absolute_path`` field: the device's own absolute path for the entry — the
   engine returns it per listing entry (``path``: container path for arca/openclaw/
   aicoding/claude_code, host path for local). teclaw doesn't expose an absolute path
@@ -29,7 +29,6 @@ The HTTP adapter maps the returned plain dicts / bytes to its response schemas.
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 from typing import Any, AsyncIterator
 
 from injector import inject
@@ -69,22 +68,21 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 
-# ── File-browser rules (shared with the sibling search/zip router) ────────────
+# -- Search/archive and write-policy rules -----------------------------------
 
-# "skills" is hidden, but "skills/skills-local" is injected into root listings so
-# users can browse/edit their local skill files (arca/local layout). teclaw keeps
-# local skills flat at /workspace/skills-local, so it needs no injection.
+# Search and archive operations retain their curated view of local skill files.
+# Directory listings themselves expose the provider's real workspace hierarchy.
 _SKILLS_LOCAL_RELPATH = "skills/skills-local"
 _POOL_SKILLS_LOCAL_RELPATH = "skills-pool/skills-local"
 
-# System files hidden from the resource browser (OpenClaw identity/config .md files).
+# System files excluded from search/archive and protected from deletion.
 _HIDDEN_BASENAMES = {
     "AGENTS.md", "RULES.md", "OKR.md", "SAFETY.md", "SOUL.md",
     "OUTPUT.md", "MEMORY.md", "IDENTITY.md", "USER.md", "TOOLS.md",
     "HEARTBEAT.md", "BOOTSTRAP.md",
 }
 
-# Hidden directories (system state, skill symlinks, per-engine config dirs).
+# System directories excluded from search/archive.
 _HIDDEN_DIRNAMES = {
     "state",
     "skills",
@@ -362,9 +360,10 @@ class ResourceFileService:
     ) -> list[dict[str, Any]]:
         """List a directory under the workspace, provider-blind.
 
-        Returns plain dicts shaped for the ``FileItem`` schema. Applies the
-        dotfile / hidden-dir / hidden-file filtering, read-only flagging, and the
-        ``skills-local`` root injection (non-teclaw).
+        Returns plain dicts shaped for the ``FileItem`` schema. Entries preserve
+        the provider's real directory contents, including dotfiles and system
+        paths; no synthetic shortcut nodes are added. ``readonly`` remains an
+        operation policy rather than a visibility policy.
 
         ``device_uuid`` (optional) locks a specific instance for multi-instance
         service bots; omitted → provider auto-selects an active instance.
@@ -385,13 +384,7 @@ class ResourceFileService:
         items: list[dict[str, Any]] = []
         for e in entries:
             name = e.get("name", "")
-            if name.startswith("."):
-                continue
             is_dir = e.get("is_dir", False)
-            if is_dir and not path and name in _HIDDEN_DIRNAMES:
-                continue
-            if not path and name in _HIDDEN_BASENAMES:
-                continue
             rel = self._rel_path(path, e)
             items.append({
                 "name": name,
@@ -405,52 +398,6 @@ class ResourceFileService:
                 "size_human": e.get("size_human") if not is_dir else None,
                 "modified_at": e.get("modified_at"),
             })
-
-        # skills-local injection (arca/local nest it under the hidden "skills" dir,
-        # so it must be injected; teclaw keeps it flat at /workspace/skills-local and
-        # lists naturally; baas/desktop never injected — don't probe it for them).
-        if not path and ctx.provider in ("arca", "local", "baas"):
-            for local_relpath in (
-                _SKILLS_LOCAL_RELPATH,
-                _POOL_SKILLS_LOCAL_RELPATH,
-            ):
-                parent = local_relpath.rsplit("/", 1)[0]
-                try:
-                    skills_entries = await device_fs.list_dir(
-                        f"{WORKSPACE_NS}/{parent}"
-                    )
-                except Exception as e:
-                    # Either layout may be absent. Keep probing the other one
-                    # and never fail the root listing for this optional entry.
-                    logger.warning(
-                        "[list_dir] skills-local probe skipped path=%s: %s",
-                        parent,
-                        e,
-                    )
-                    continue
-                skill_local = next(
-                    (
-                        entry
-                        for entry in skills_entries or []
-                        if entry.get("name") == "skills-local"
-                        and entry.get("is_dir", False)
-                    ),
-                    None,
-                )
-                if skill_local is not None:
-                    items.append({
-                        "name": "skills-local",
-                        "path": local_relpath,
-                        # the probed entry's own absolute path (logic-view fallback).
-                        "absolute_path": skill_local.get("path")
-                        or self._logical(local_relpath),
-                        "is_dir": True,
-                        "readonly": False,
-                        "size": None,
-                        "size_human": None,
-                        "modified_at": None,
-                    })
-                    break
 
         return items
 
@@ -505,11 +452,9 @@ class ResourceFileService:
         level-by-level because no engine's ``recursive`` flag is trusted
         anywhere in the repo.
 
-        Filtering mirrors ``list_dir``: dotfiles skipped at every level, the
-        hidden system names only at the workspace root — a root download
-        contains what the file browser shows, no more. The ``skills-local``
-        injection is *not* reproduced: it is a listing-level synthetic, and a
-        download must contain what the device actually holds.
+        Directory downloads intentionally retain their curated archive policy:
+        dotfiles are skipped at every level and system names at the workspace
+        root. Interactive listings are independent and expose the real entries.
 
         Caps are enforced twice — from the listing's sizes before any byte is
         read, then against the bytes actually streamed — and both raise
@@ -545,10 +490,8 @@ class ResourceFileService:
                 if name.startswith("."):
                     continue
                 is_dir = bool(entry.get("is_dir", False))
-                # The hidden system names are a *workspace-root* rule in
-                # ``list_dir`` — the first level of a root walk is exactly
-                # that listing; deeper levels and sub-directory walks keep
-                # everything non-dot.
+                # Hidden system names are excluded only from a workspace-root
+                # archive; deeper levels and sub-directory archives keep them.
                 if not current and not path:
                     if is_dir and name in _HIDDEN_DIRNAMES:
                         continue
@@ -675,10 +618,9 @@ class ResourceFileService:
         answering "not a directory" — so probing directly would turn every file
         delete into an error.
 
-        Uses the raw device listing, not this class's filtered ``list_dir``, so
-        the hidden system names stay deletable exactly as before. A listing
-        failure answers "not a directory": the delete then takes the file
-        branch, which is what it did unconditionally until now.
+        Uses the device listing directly to avoid an extra context resolution and
+        projection pass. A listing failure answers "not a directory": the delete
+        then takes the file branch, which is what it did unconditionally until now.
         """
         parent, _, leaf = path.rpartition("/")
         try:

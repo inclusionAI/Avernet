@@ -496,9 +496,7 @@ class BotRunRequestExecutor:
                     content=content,
                     metadata=metadata_json,
                 )
-                self._cache_plugin.set(
-                    cache_key, f"{seq}:{cur_type}", ttl_seconds=120
-                )
+                self._cache_plugin.set(cache_key, f"{seq}:{cur_type}", ttl_seconds=120)
                 cur_payloads = []
                 cur_engine_type = None
 
@@ -546,9 +544,7 @@ class BotRunRequestExecutor:
             elif chunk.type == "agent":
                 agent_payload = chunk.metadata or {}
                 pending.append(("agent", agent_payload, chunk.engine_type))
-                pending_bytes += len(
-                    json.dumps(agent_payload, ensure_ascii=False)
-                )
+                pending_bytes += len(json.dumps(agent_payload, ensure_ascii=False))
             elif chunk.type == "final":
                 final_content = chunk.content
                 _write_chunk(chunk)

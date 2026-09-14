@@ -39,7 +39,7 @@ try {
  await act(async()=>panel.unmount());panel=null;status='completed';
  // Source errors cannot be masked by valid legacy prose.
  legacyProse='游戏结束！平民胜利！';
- for(const invalid of [{...result,version:2},{...result,gameSessionId:'other'},{...result,attempt:2},{...result,round:2},{...result,winner:'unknown'},{...result,winner:['civilian']},'bad-json']) {
+ for(const invalid of [{...result,stage:'pk'},{...result,version:2},{...result,gameSessionId:'other'},{...result,attempt:2},{...result,round:2},{...result,winner:'unknown'},{...result,winner:['civilian']},'bad-json']) {
   body=invalid;await act(async()=>{panel=mount(params);await settle(10)});
   assert.equal(Boolean(dialog(panel)),false);assert.match(panel.container.querySelector('[role="alert"]').textContent,/结算结果加载失败/);
   await act(async()=>panel.unmount());panel=null;

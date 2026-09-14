@@ -34,6 +34,10 @@ pub type DbResult<T> = Result<T, DbError>;
 /// Database plugin failures.
 #[derive(Debug, Error)]
 pub enum DbError {
+    /// A transactional conditional write did not match its required row count.
+    /// This error must be returned before committing, with all steps rolled back.
+    #[error("transaction condition failed: expected {expected} affected rows, got {actual}")]
+    ConditionFailed { expected: u64, actual: u64 },
     /// The caller provided invalid SQL, parameters, or transaction steps.
     #[error("invalid database input: {0}")]
     InvalidInput(String),
@@ -598,6 +602,11 @@ pub enum DbTransactionStep {
     /// business failure.
     Query(DbStatement),
     Execute(DbStatement),
+    /// Execute and require exactly this many affected rows before proceeding.
+    /// Mismatch rolls back the entire transaction, including earlier writes.
+    /// Callers must use genuinely changing CAS updates (e.g. increment version)
+    /// to avoid backend differences for no-op UPDATEs.
+    ExecuteChecked { statement: DbStatement, expected_affected_rows: u64 },
 }
 
 /// Result for a single transaction step.

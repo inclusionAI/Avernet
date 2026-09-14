@@ -17,6 +17,7 @@ pub mod human_actor;
 pub mod interaction;
 pub mod invite;
 pub mod message_flow;
+pub mod message_delivery;
 pub mod message_log;
 pub mod organization;
 pub mod principal;

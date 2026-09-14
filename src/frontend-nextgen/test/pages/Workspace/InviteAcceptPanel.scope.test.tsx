@@ -30,11 +30,12 @@ function renderPanel() {
 }
 
 describe('InviteAcceptPanel 视角选择', () => {
-  it('确认页展示 radio，默认完整视角；选参与者视角后确认加入传 scope', () => {
+  it('确认页展示下拉框，默认完整视角；选参与者视角后确认加入传 scope', () => {
     renderPanel();
-    const radios = screen.getAllByRole('radio');
-    expect(radios[0]).toBeChecked();
-    fireEvent.click(radios[1]);
+    const scopeSelect = screen.getByRole('button', { name: '消息视角' });
+    expect(scopeSelect).toHaveTextContent('完整视角');
+    fireEvent.click(scopeSelect);
+    fireEvent.click(screen.getByRole('option', { name: /参与者视角/ }));
     fireEvent.click(screen.getByRole('button', { name: '确认加入' }));
     expect(acceptMock).toHaveBeenCalledWith('participant');
   });

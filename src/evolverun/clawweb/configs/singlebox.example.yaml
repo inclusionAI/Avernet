@@ -1,0 +1,21 @@
+# Local service settings only; select an existing Backend personal Bot in the UI.
+# Relative paths resolve against this file. Do not commit local credentials.
+userId: "mock-user"
+# singlebox: reuse Avernet Backend Bots; openclaw: use one local OpenClaw home.
+botSource: "singlebox"
+# Initial selection; the dropdown catalog is maintained by the Clawevolve
+# module's config/model-options.json and still allows a custom model name.
+model: "your-configured-provider/model"
+backendDb: "/path/to/Avernet/scripts/.dependencies/data/backend.db"
+# Required only when botSource is openclaw:
+# openclawHome: "/Users/you/.openclaw"
+# Optional: defaults to the public Skills shipped in this Avernet checkout.
+# skillsRoot: "/absolute/path/to/a/custom/clawevolve-skills"
+dataDirectory: "/path/to/clawweb-local-data"
+port: 5173
+# Optional: defaults to Avernet/test-bots/aidesktop/aidesktop_singlebox/bolt_data,
+# inferred from the standard backendDb location. Set only for a custom Singlebox root.
+# botsRoot: "/path/to/local/bolt_data"
+
+# Optional disk/resource guard for streamed artifacts; default 512 MiB.
+# maxArtifactBytes: 536870912

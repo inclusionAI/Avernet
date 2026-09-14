@@ -168,6 +168,21 @@ class TestDispatchParserWiring:
         assert sr.group_formation.bot_ids == ["aBot", "bBot"]
         assert sr.group_formation.extend_props["manager_bot_id"] == "aBot"
 
+    def test_multi_bots_defaults_to_manager_worker_but_keeps_explicit_mode(self):
+        from agentclaw.community.core.task.task_dispatch.strategies import _parse_search_result
+
+        default_mode = _parse_search_result({
+            "status": "COMPLETED",
+            "result": {"content": '{"outcome":"HIT_MULTI_BOTS","bot_ids":["a","b"]}'},
+        })
+        explicit_chat = _parse_search_result({
+            "status": "COMPLETED",
+            "result": {"content": '{"outcome":"HIT_MULTI_BOTS","bot_ids":["a","b"],"collab_mode":"chat"}'},
+        })
+
+        assert default_mode.group_formation.collab_mode == "manager_worker"
+        assert explicit_chat.group_formation.collab_mode == "chat"
+
     def test_unparseable_returns_miss_parse_error(self):
         from agentclaw.community.core.task.task_dispatch.strategies import _parse_search_result, SearchOutcome
         sr = _parse_search_result({"status": "COMPLETED", "result": {"content": "prose no json"}})

@@ -154,7 +154,7 @@ openingAnnouncement；副屏确认预备节点完成后显示。主持人本次�
 uc render-speak-run --session S [--retry]
 ```
 
-只能在 `AWAIT_START` 或 `AWAIT_NEXT_ROUND` 调。**渲染即推进**：它自己把轮次加一、建好本轮记录、把 phase 推到 `SPEAK_RUNNING`。
+常规在 `AWAIT_START` 或 `AWAIT_NEXT_ROUND` 调。**渲染即推进**：它自己把轮次加一、建好本轮记录、把 phase 推到 `SPEAK_RUNNING`。
 
 返回 `yaml_path`、`input_path`、`binding_args`、`attempt`，以及一条拼好的 `run_command`。
 **仅供维护者测试；主持人不能用它绕过 open-round 失败。**
@@ -167,9 +167,9 @@ uc render-speak-run --session S [--retry]
 uc speeches-set --session S --json '{"1":"...","2":"..."}' [--flag 3=谈论了身份]
 ```
 
-只能在 `SPEAK_RUNNING` 调。座位号必须和本轮存活名单完全一致。
+可在 `SPEAK_RUNNING` / `PK_SPEAK_RUNNING` 调。常规提交全体存活玩家，PK 仅提交 PK 玩家。
 
-对每条发言做泄词判定并遮蔽，返回 `speeches[]`：`seat` / `player` / `label` / `kind` / `text`（**遮蔽后的可展示文本**）/ `violation`。phase 推到 `AWAIT_VOTE_START`。
+对每条发言做泄词判定并遮蔽，返回 `speeches[]`：`seat` / `player` / `label` / `kind` / `text`（**遮蔽后的可展示文本**）/ `violation`。phase 推到 `AWAIT_VOTE_START` / `AWAIT_PK_VOTE_START`。
 
 **phase 变成 `AWAIT_VOTE_START` 不等于现在就能开投。** 这条命令只可能在「本轮发言汇总」
 节点里跑，而那个节点是发言运行的末节点：念完稿子结束激活，开投是下一次（回灌）激活的事。
@@ -188,7 +188,7 @@ uc speeches-set --session S --json '{"1":"...","2":"..."}' [--flag 3=谈论了�
 uc render-vote-run --session S [--retry]
 ```
 
-只能在 `AWAIT_VOTE_START` 调，同样渲染即推进，phase 到 `VOTE_RUNNING`。返回字段同
+可在 `AWAIT_VOTE_START` / `AWAIT_PK_VOTE_START` 调，同样渲染即推进，到对应的 `VOTE_RUNNING` / `PK_VOTE_RUNNING`。返回字段同
 `render-speak-run`。**仅供维护者测试；主持人不能用它绕过 open-vote 失败。**
 
 `--retry` 用来重开当前这一轮的投票，只能在 `VOTE_RUNNING` 调。**没有它，卡住诊断走不通**——不带 `--retry` 时阶段卫兵只认 `AWAIT_VOTE_START`，而这时 phase 早就是 `VOTE_RUNNING` 了。重开后之前投过的票作废，要向人类说明。
@@ -209,14 +209,14 @@ JSON 字符串时原样保留；如果上游提供对象，先用 `json.dumps()`
 脚本兼容被剥掉 JSON 外壳的裸 actor_id：先精确匹配本局名单，再检查自投和存活状态。
 未知 ASCII 标识符不会按其中的数字猜座位；正常票面仍应传完整 JSON 字符串。
 
-只能在 `VOTE_RUNNING` 调。一次做完解析、计票、平票规则、出局、胜负判定。返回：
+可在 `VOTE_RUNNING` / `PK_VOTE_RUNNING` 调。一次做完解析、计票、平票规则、出局、胜负判定。返回：
 
 - `votes[]`：`seat` / `player` / `label` / `text`（**规范化后的票面**）/ `target_seat` / `target_player` / `target_label` / `violation` / `note`
 - `counts[]`：按票数降序的 `seat` / `player` / `label` / `votes`
 - `tie`、`eliminated`（带 `label`）、`alive[]`（带 `label`）
-- `verdict`：`continue` 或 `finished`；`winner`、`win_reason`
+- `verdict`：`pk`、`continue` 或 `finished`；`winner`、`win_reason`
 - `ping`：继续时给出该派谁、派什么类型
-- phase 推到 `AWAIT_NEXT_ROUND` 或 `FINISHED`
+- phase 推到 `AWAIT_PK_SPEAK_START`、`AWAIT_NEXT_ROUND` 或 `FINISHED`
 
 `text` 一律是规范化的票面——`我投N号`、`我弃权` 或 `无效票`，**永远不是玩家的原话**。
 玩家这一轮只被要求交票号，但指令是软的：万一有谁多写了半句理由，这里也会被抹掉，
@@ -225,9 +225,16 @@ JSON 字符串时原样保留；如果上游提供对象，先用 `json.dumps()`
 投票内容如果泄词，该票直接作废（`target_seat` 为 null，`text` 是 `无效票`）。
 超字不作废，只在 `violation` 里记一笔。
 
-**`tie` 为真就是平票：本轮没有人出局，直接进下一轮。** 没有重投，也不会在平票者里
-随机挑人——`eliminated` 一定是 null。这是有意的：平票不减员但照样烧掉一轮，而轮数
-用完判卧底赢，所以平票是纯粹的平民损失。要调平衡就调 `--max-rounds`。
+`verdict=pk` 表示常规最高正票数并列，`pk_candidates` 给出全部并列席位；本次不淘汰、不判轮数上限。PK 再平票或零有效票无人出局、不追加 PK；常规零有效票不触发 PK。最终唯一最高票出局后按原胜负优先级结算，最后一轮同样先完成 PK。
+
+### PK 阶段与提交范围
+
+- `open-round` / `render-speak-run` 在 `AWAIT_PK_SPEAK_START` 开同轮 PK，不增加 round；重试在 `PK_SPEAK_RUNNING` 使用 --retry。
+- `open-vote` / `render-vote-run` 在 `AWAIT_PK_VOTE_START` 开 PK 投票；重试在 `PK_VOTE_RUNNING` 使用 --retry。重试只使当前 PK 阶段产物作废。
+- `speeches-set` / `votes-set` 使用节点固定的 `--round R --stage regular|pk --attempt N`。缺省 stage=regular 兼容旧普通节点；PK 必须携带匹配的 round 与 attempt。WRONG_STAGE / STALE_ROUND / STALE_ATTEMPT 说明产物过期，停止且不修改参数重交。
+- PK 发言仍限 25 字且允许基于公开信息辩解；发言保存于独立 PK 记录。PK 投票由所有存活玩家参加，脚本仅接受 PK 候选且禁止自投、弃权；违规票作废不补投。
+- 两次发言、票面及各自 renders 分别保存。PK 的文件路径使用 pk-speak / pk-vote，终局文件为 `undercover-result-v1-rN-pk-aM.json`，普通文件名保持原样。
+- 当前 `status` 返回 PK 阶段及 next_action；所有 collect/tally 的收尾纪律保持，下一运行只在回灌后提交。
 
 ### `render-ping`
 

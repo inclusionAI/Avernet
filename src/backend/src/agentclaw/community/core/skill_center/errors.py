@@ -23,6 +23,16 @@ class SkillDeleteConsistencyError(RuntimeError):
     """A Skill delete could not safely converge filesystem and database state."""
 
 
+class SkillAssetInUseError(RuntimeError):
+    """Asset Deletion found durable references that must be removed first."""
+
+    def __init__(self, blocker_counts: dict[str, int]) -> None:
+        self.blocker_counts = {
+            kind: count for kind, count in blocker_counts.items() if count > 0
+        }
+        super().__init__("SKILL_ASSET_IN_USE")
+
+
 class SkillReferencedBySkillSetError(RuntimeError):
     """A Skill cannot be deleted while any SkillSet still references it."""
 

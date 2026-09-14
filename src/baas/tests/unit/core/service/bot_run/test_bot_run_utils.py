@@ -565,6 +565,7 @@ class TestBindingDataToInfoEngineNormalization:
             # 其他已知引擎以 active_engine 为准,不受 template_type 影响
             ("hermes", "applicationCoding", "hermes"),
             ("openclaw", None, "openclaw"),
+            ("deepseek_harness", None, "deepseek_harness"),
             # 空 / 未知 active_engine 兜底 openclaw(与旧行为等价)
             ("", None, "openclaw"),
             ("unknown_engine", None, "openclaw"),

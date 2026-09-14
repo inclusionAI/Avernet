@@ -37,7 +37,42 @@ if TYPE_CHECKING:  # pragma: no cover — see the module docstring
 
 
 class DeviceIdentity(IdentityFilePort):
-    """The ARCA identity road: files onto the bot's live container."""
+    """The ARCA identity road: files onto the bot's live container.
+
+    Three methods, each forwarded verbatim, and the only one in this package
+    whose arguments are **positional**. What a call looks like from the
+    ``identity`` materialiser::
+
+        await port.list_bot_files(
+            "staff", "ent_7", "bot_42", "usr_owner",
+            engine_type="claude_code", stage="draft",
+        )   # -> [("SOUL.md", True), ("RULES.md", False), ...]
+            #    one (file_type, exists) pair per name in
+            #    VALID_IDENTITY_FILES, the WHOLE whitelist, not just the
+            #    files that exist. "exists" is bool(content), so an empty
+            #    file reports False.
+
+        await port.read_identity_file(
+            "staff", "ent_7", "bot_42", "SOUL.md", "usr_owner",
+            engine_type="claude_code", stage="draft",
+        )   # -> the file's text, or "" when it is missing
+
+        await port.update_bot_file(
+            "staff", "ent_7", "bot_42", "SOUL.md", "# who I am\n",
+            "usr_collaborator",           # the operator: the ACTOR, not owner
+            "claude_code", stage="draft",
+        )
+
+    The ``file_type`` is a whitelisted filename — ``"SOUL.md"``,
+    ``"RULES.md"``, ``"MEMORY.md"`` and so on — which is also the ``type`` an
+    identity entry declares and the ``identity`` its report row carries.
+    Content is ``str`` here, not ``bytes``: identity files are text. Removal is
+    an empty write, because the domain reads absent and empty as one state.
+
+    Bound as ``MaterialiserPorts.identity_service`` for the ARCA family. Its
+    platform-managed counterpart is ``PlatformIdentity`` in
+    ``managed_files/ports.py``.
+    """
 
     def __init__(self, inner: IdentityService) -> None:
         self._inner = inner

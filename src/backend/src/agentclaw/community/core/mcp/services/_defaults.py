@@ -6,7 +6,6 @@ be present in that engine's default skill set.
 """
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict, List, Mapping, Optional
 
 from agentclaw.community.core.default_capabilities import (
@@ -17,14 +16,6 @@ from agentclaw.community.core.bot_management.engines.registry import (
     get_mcp_defaults_resolver_registry,
 )
 
-logger = logging.getLogger(__name__)
-
-
-# The uctmcptools MCP server authenticates with an ``x-ling-auth`` header whose
-# token is a per-deployment SECRET. It is never baked into source: community
-# ships no token (the header is omitted), and a corp deployment supplies it via
-# ``user_config.mcp.uct_auth_token`` in its config overlay. See
-# ``_uct_auth_header``.
 _UCT_SERVER_CODE = "mcp.ant.agentix.150490.uctmcptools"
 
 
@@ -125,30 +116,6 @@ _DEFAULT_MCP_SERVERS_BY_ENGINE: Dict[str, List[dict]] = {
 }
 
 
-def _uct_auth_header() -> Dict[str, str]:
-    """Per-deployment ``x-ling-auth`` header for the uctmcptools MCP server.
-
-    Reads the token from ``user_config.mcp.uct_auth_token``. Community ships no
-    token, so this returns ``{}`` (the header is omitted); a corp deployment sets
-    the key in its config overlay and gets ``{"x-ling-auth": <token>}``.
-
-    The config read is defensive: config may be unavailable in bare unit tests or
-    early boot, so any failure falls back to ``{}`` (the safe, token-absent path).
-    """
-    try:
-        from agentclaw.community.core.config.sofa import sofa_config
-
-        mcp_block = (getattr(sofa_config, "user_config", None) or {}).get("mcp") or {}
-        token = mcp_block.get("uct_auth_token")
-    except Exception as exc:  # pragma: no cover — defensive; config may be absent
-        logger.warning("uct_auth_token unavailable from config: %s", exc)
-        return {}
-    if isinstance(token, str) and token.strip():
-        return {"x-ling-auth": token}
-    return {}
-
-
-
 class _EngineMcpDefaultsResolver:
     """Engine hook for deriving effective default MCP configs.
 
@@ -224,9 +191,7 @@ def get_default_mcp_servers(
 ) -> List[dict]:
     """Return the default MCP server configs for the given engine.
 
-    Unknown engines get an empty list (fail-closed, not a crash). The uctmcptools
-    entry gets its secret ``x-ling-auth`` header injected from config when one is
-    set (see :func:`_uct_auth_header`); otherwise it is returned header-free.
+    Unknown engines get an empty list (fail-closed, not a crash).
     """
     engine_bucket = _resolve_default_mcp_engine_bucket(
         engine_type,
@@ -238,11 +203,6 @@ def get_default_mcp_servers(
         _DEFAULT_MCP_SERVERS_BY_ENGINE.get(engine_bucket, []),
         ext_info,
     )
-    auth_header = _uct_auth_header()
-    if auth_header:
-        for cfg in servers:
-            if cfg.get("server_code") == _UCT_SERVER_CODE:
-                cfg["headers"] = {**cfg.get("headers", {}), **auth_header}
     return servers
 
 

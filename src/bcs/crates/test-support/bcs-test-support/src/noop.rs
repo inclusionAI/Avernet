@@ -536,15 +536,6 @@ impl ProviderBotEventService for NoopProviderBotEventService {
             service_not_configured("provider bot event service").to_string(),
         ))
     }
-
-    async fn submit_coordination(
-        &self,
-        _command: ProviderBotCoordinationCommand,
-    ) -> Result<ProviderBotCoordinationOutcome, ProviderBotEventError> {
-        Err(ProviderBotEventError::Internal(
-            service_not_configured("provider bot event service").to_string(),
-        ))
-    }
 }
 
 #[derive(Debug, Default)]

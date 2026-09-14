@@ -491,6 +491,13 @@ function issueOf(input: RepairCreateTaskInput): RepairIssueInput {
   };
 }
 
+/** Also projects legacy tasks without rewriting their frozen configuration. */
+function issueWithInsightSessions(task: Pick<RepairTaskConfig, "issue" | "insightSource">): RepairIssueInput {
+  return task.insightSource
+    ? { ...task.issue, sessionIds: [...task.insightSource.sessionIds] }
+    : task.issue;
+}
+
 function optionalPositiveInteger(value: unknown, field: string): number | null {
   if (value == null || value === "") return null;
   const parsed = Number(value);
@@ -1516,7 +1523,8 @@ function safeTaskEnvelope(
       resumeSessionId: task.execution.ccSessionId,
     },
     input: {
-      issue: task.issue,
+      issue: issueWithInsightSessions(task),
+      ...(task.insightSource ? { insightSource: task.insightSource } : {}),
       agent,
       authorizationScope: task.authorizationScope,
       authorizationScopeDigest: task.authorizationScopeDigest,
@@ -4090,7 +4098,7 @@ export class RepairTaskService {
         stepId: step.step_id,
         attempt: config.current.attempt,
         phase: config.current.phase,
-        issue: config.issue,
+        issue: issueWithInsightSessions(config),
         authorizationScope: config.authorizationScope,
         authorizationScopeDigest: config.authorizationScopeDigest,
         target: config.runtimeTarget.target,
@@ -5412,7 +5420,7 @@ export class RepairTaskService {
       openclawUsesCustomApiKey: config.openclawUsesCustomApiKey,
       cfuseEngine: config.cfuseEngine,
       cfuseModel: config.cfuseModel,
-      issue: config.issue,
+      issue: issueWithInsightSessions(config),
       target: {
         environment: config.runtimeTarget.target.environment,
         botId: config.runtimeTarget.target.botId,

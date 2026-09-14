@@ -1597,9 +1597,7 @@ async def test_executor_stream_interaction_and_error_chunks_written_inline():
     )
 
     insert_calls = chunk_repo.insert_chunk.call_args_list
-    interaction_calls = [
-        c for c in insert_calls if c[1]["chunk_type"] == "interaction"
-    ]
+    interaction_calls = [c for c in insert_calls if c[1]["chunk_type"] == "interaction"]
     error_calls = [c for c in insert_calls if c[1]["chunk_type"] == "error"]
     delta_calls = [c for c in insert_calls if c[1]["chunk_type"] == "delta"]
 

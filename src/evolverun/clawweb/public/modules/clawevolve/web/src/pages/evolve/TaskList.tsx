@@ -69,7 +69,8 @@ function CreateMenuItem({
   )
 }
 
-export function TaskList() {
+export function TaskList({ version = 'internalversion' }: { version?: 'openversion' | 'internalversion' } = {}) {
+  const openVersion = version === 'openversion'
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { enabled: adminMode, ownerUserId } = useEvolveAdminScope()
@@ -146,8 +147,6 @@ export function TaskList() {
 
   return (
     <div className="w-full px-3 py-6 sm:px-4 lg:px-5">
-      <p className="mb-4 text-sm font-medium text-red-600">功能体验中，有任何问题和有诉求联系@山宗</p>
-
       <PageTitle
         action={
           <div className="flex items-center gap-2">
@@ -171,16 +170,16 @@ export function TaskList() {
                     <div className="grid gap-y-6 md:grid-cols-2 xl:grid-cols-5">
                       <CreateMenuGroup title="诊断">
                         <CreateMenuItem icon="target" title="Bot诊断" description="生成 Goal、Spec v0 和 Bench Case" onClick={() => navigate('/evolve/new?type=diagnose')} />
-                        <CreateMenuItem icon="file" title="会话诊断" description="诊断单个 Session，或导出多个 Session" onClick={() => navigate('/evolve/new?type=session_analysis')} />
+                        {!openVersion && <CreateMenuItem icon="file" title="会话诊断" description="诊断单个 Session，或导出多个 Session" onClick={() => navigate('/evolve/new?type=session_analysis')} />}
                         <CreateMenuItem icon="chart" title="Bench诊断" description="单独运行一次 Bench，查看指标和评测报告" onClick={() => navigate('/evolve/new?type=bench')} />
                       </CreateMenuGroup>
-                      <CreateMenuGroup title="修复">
+                      {!openVersion && <CreateMenuGroup title="修复">
                         <CreateMenuItem icon="code" title="Bot修复" badge="Beta" description="深度诊断、方案生成、多轮交互和执行修复" onClick={() => navigate('/evolve/new?type=repair')} />
-                      </CreateMenuGroup>
+                      </CreateMenuGroup>}
                       <CreateMenuGroup title="优化">
                         <CreateMenuItem icon="spark" title="诊断后优化" description="复用已完成的诊断和规划，继续执行优化 Loop" onClick={() => navigate('/evolve/new?type=optimize')} />
                         <CreateMenuItem icon="chart" title="Bench优化" description="使用训练和测试 Domain 驱动优化" onClick={() => navigate('/evolve/new?type=bench_optimize')} />
-                        <CreateMenuItem icon="target" title="治理优化" description="选择治理项，生成 Spec 并执行优化" onClick={() => navigate('/evolve/new?type=full&source=improvement')} />
+                        {!openVersion && <CreateMenuItem icon="target" title="治理优化" description="选择治理项，生成 Spec 并执行优化" onClick={() => navigate('/evolve/new?type=full&source=improvement')} />}
                       </CreateMenuGroup>
                       <CreateMenuGroup title="应用部署">
                         <CreateMenuItem icon="package" title="创建Pack" description="为当前 Bot 环境创建可恢复快照" onClick={() => navigate('/evolve/new?type=pack')} />

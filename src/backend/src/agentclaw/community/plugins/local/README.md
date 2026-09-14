@@ -80,7 +80,6 @@ internal_dependencies:
   - agentclaw.community.plugin_api.model_api
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.object_storage
-  - agentclaw.community.plugin_api.object_store_client
   - agentclaw.community.plugin_api.outbound_rules
   - agentclaw.community.plugin_api.passport
   - agentclaw.community.plugin_api.sandbox_runtime

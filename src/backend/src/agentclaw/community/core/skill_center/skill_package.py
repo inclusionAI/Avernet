@@ -332,6 +332,7 @@ class SkillPackageValidator:
         return (
             name == ".DS_Store"
             or parts[0] == "__MACOSX"
+            or ".git" in parts
             or "__pycache__" in parts
             or name.endswith((".pyc", ".pyo"))
         )

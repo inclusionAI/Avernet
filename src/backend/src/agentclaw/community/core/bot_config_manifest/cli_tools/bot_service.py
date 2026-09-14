@@ -1,11 +1,17 @@
 """``BotCliToolService`` — the CLI-tools surface addressed by ``bot_id``.
 
 What the HTTP routes call. It resolves one bot's storage coordinates and engine
-family, refuses a bot whose engine takes no CLI tools, and hands the work to
-:class:`CliToolService` — the same component the manifest's ``cli_tools``
-materialiser calls. It implements no step of the install itself, which is the
-whole point: the API and a manifest apply must refuse the same declaration for
-the same reason, and they can only do that by sharing the code that decides.
+family, refuses a bot whose engine takes no CLI tools, and hands the uploaded
+bytes to :class:`CliToolService` — the same component the manifest's
+``cli_tools`` materialiser calls, through that class's other door. It implements
+no step of the install itself, which is the whole point: the API and a manifest
+apply must refuse the same executable for the same reason, and they can only do
+that by sharing the code that decides.
+
+**This surface uploads; it does not fetch.** A caller sends the tool's bytes,
+so nothing here names a source or a credential. Fetching belongs to the
+manifest road, where a source is *declared* — and both roads meet inside
+``CliToolService`` the moment the bytes are in hand.
 
 **The bot lookup is the ownership guard as well as the address.**
 ``bot_service.get_bot(bot_id, owner_id)`` resolves the bot only for the named
@@ -101,7 +107,13 @@ class BotCliToolService(BotCliToolServiceProtocol):
     # ── the surface ──────────────────────────────────────────────────────
 
     async def install(
-        self, *, bot_id: str, owner_id: str, actor_id: str, decl: CliToolDecl
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        decl: CliToolDecl,
+        data: bytes,
     ) -> BotCliToolRecord:
         service, ctx = self._resolve(bot_id, owner_id, actor_id)
         conflict = CliToolConflictError(
@@ -110,9 +122,9 @@ class BotCliToolService(BotCliToolServiceProtocol):
             "replaces the whole set"
         )
         # Asked twice, and both are needed. This read is the *cheap* answer —
-        # it refuses before a fetch that could take minutes and hundreds of
+        # it refuses before unpacking, verifying and storing hundreds of
         # megabytes. It is not the authoritative one: the name can be taken
-        # during that fetch, so the write itself is an insert whose UNIQUE
+        # while that runs, so the write itself is an insert whose UNIQUE
         # constraint decides. 409 rather than a silent replacement either way —
         # a manifest apply *does* replace, because a full override is its
         # declared semantics, but a single POST is not, and overwriting a tool
@@ -120,8 +132,8 @@ class BotCliToolService(BotCliToolServiceProtocol):
         # "install".
         if service.get(ctx, decl.name) is not None:
             raise conflict
-        outcome = await service.install(
-            ctx, decl, installed_by=actor_id, expect_absent=True
+        outcome = await service.install_upload(
+            ctx, decl, data=data, installed_by=actor_id, expect_absent=True
         )
         if outcome.status is CliToolStatus.CONFLICT:
             raise conflict

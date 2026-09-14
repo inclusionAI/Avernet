@@ -33,7 +33,6 @@ _CORP_ONLY_PACKAGES = (
     "arca",
     "mist",
     "layotto",
-    "oss2",
     "daas",
     "daas_sdk",
     "ant_skills_scan_sdk",

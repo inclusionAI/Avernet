@@ -51,7 +51,7 @@ from types import MappingProxyType
 from typing import Callable, Mapping, Optional, Protocol, Sequence, Tuple
 from urllib.parse import urlparse
 
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchFailedError,
     FetchRefusedError,
 )

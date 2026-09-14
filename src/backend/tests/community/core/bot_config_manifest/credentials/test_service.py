@@ -36,6 +36,7 @@ from agentclaw.community.core.repository.implementations.bot.source_credential i
 )
 # Side effect: registers the model on Base.metadata for create_all.
 from agentclaw.community.core.bot_config_manifest.credentials.models import (  # noqa: F401
+    CredentialType,
     SourceCredentialModel,
 )
 from tests.community.core.bot_config_manifest.credentials.repo_helper import (
@@ -346,6 +347,7 @@ _AKSK_PREFIXES: list[str] = []
 _AK = "LTAI5tExampleKeyId"
 _SK = "an-object-store-secret-key"
 _ENDPOINT = "https://objects.example-corp.com"
+_REGION = "cn-hangzhou"
 
 
 def _put_aksk(service, name="oss-artifacts", **overrides):
@@ -354,6 +356,7 @@ def _put_aksk(service, name="oss-artifacts", **overrides):
         credential_type="oss_aksk",
         access_key_id=_AK,
         endpoint=_ENDPOINT,
+        region=_REGION,
         secret=_SK,
         allowed_prefixes=_AKSK_PREFIXES,
         owner_app_id=OWNER_APP,
@@ -389,9 +392,17 @@ def test_the_secret_key_is_stored_ciphered_and_never_read_back(service):
         assert record.access_key_id == _AK
 
 
-def test_a_region_is_optional_and_rides_the_record(service):
-    assert _put_aksk(service).region is None
-    assert _put_aksk(service, region="cn-hangzhou").region == "cn-hangzhou"
+def test_a_region_is_required_and_rides_the_record(service):
+    """The store's signature scheme scopes every signature to a region and its
+    client refuses to sign without one — so a credential stored without a
+    region would be accepted here and fail every apply, which is the one thing
+    this surface must never do. Refused at PUT, where refusing costs nobody an
+    apply."""
+    assert _put_aksk(service).region == _REGION
+    for absent in (None, ""):
+        with pytest.raises(CredentialError, match="requires 'region'"):
+            _put_aksk(service, name="regionless", region=absent)
+        assert service._repository.get(name="regionless") is None
 
 
 @pytest.mark.parametrize(
@@ -403,6 +414,7 @@ def test_a_region_is_optional_and_rides_the_record(service):
         # a caller believing they had configured signing.
         (dict(access_key_id=None), "requires 'access_key_id'"),
         (dict(access_key_id=""), "requires 'access_key_id'"),
+        (dict(region=None), "requires 'region'"),
         (dict(secret=""), "secret must not be empty"),
         (dict(header_name="PRIVATE-TOKEN"), "belongs to a 'header' credential"),
         (dict(access_key_id="x" * 257), "access_key_id over"),
@@ -449,6 +461,28 @@ def test_an_aksk_binding_hands_over_a_target_and_never_a_header(service):
     assert target.bucket == "bkt"
     assert target.access_key_id == _AK
     assert target.secret_access_key == _SK  # reaches the client, nothing else
+
+
+def test_a_row_stored_before_region_was_required_is_refused_at_binding(service):
+    """A legacy row with no region cannot be used: signature version 4 cannot
+    sign without one. It is refused here, before any store client is built,
+    so the entry fails naming the credential to rotate rather than reaching
+    the SDK and being reported as a store-side refusal. Written straight to
+    the repository because the service itself no longer accepts such a row."""
+    service._repository.upsert(
+        name="legacy-aksk",
+        credential_type=CredentialType.OSS_AKSK,
+        header_name="",
+        access_key_id=_AK,
+        endpoint=_ENDPOINT,
+        region=None,
+        allowed_prefixes=[],
+        secret_ciphertext=_SK,
+        owner_app_id=OWNER_APP,
+        modifier="alice",
+    )
+    with pytest.raises(CredentialError, match="has no region"):
+        service.binding(name="legacy-aksk").object_store_target("bkt")
 
 
 def test_the_target_redacts_the_secret_when_it_is_printed(service):

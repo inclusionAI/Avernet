@@ -1,7 +1,12 @@
 import type { ComponentType } from "react";
 
-export declare const Evolve: ComponentType;
-export declare const ClawevolveApp: ComponentType;
+export type EvolvePresentationVersion = "openversion" | "internalversion";
+export interface EvolveProps {
+  version?: EvolvePresentationVersion;
+  singleboxModel?: string;
+}
+export declare const Evolve: ComponentType<EvolveProps>;
+export declare const ClawevolveApp: ComponentType<EvolveProps>;
 export declare const BenchAdmin: ComponentType;
 export declare const BenchDomains: ComponentType;
 export declare const BenchRunDetail: ComponentType;

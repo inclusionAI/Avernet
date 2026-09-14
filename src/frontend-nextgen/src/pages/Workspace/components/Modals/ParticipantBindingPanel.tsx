@@ -1,7 +1,7 @@
-import { Button } from '@/components/ui';
+import { Badge, Button } from '@/components/ui';
 import type { ParticipantDefinition } from '@/services/workspace/collaborationDefinitionService';
 import { cn } from '@/utils/cn';
-import { X } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 export interface ParticipantBindingPanelProps {
   definitions: ParticipantDefinition[];
@@ -9,83 +9,94 @@ export interface ParticipantBindingPanelProps {
   bindings: Record<string, string>;
   activeKey: string;
   onActiveKeyChange: (key: string) => void;
-  /** 通过 botId 解析展示名称。 */
+  /** 保留兼容：Bot 名称在下方成员选择器的已选项中展示。 */
   botNameResolver?: (botId: string) => string | undefined;
-  /** 解除某角色的绑定。 */
+  /** 保留兼容：解绑由下方当前角色的已选 Bot 移除入口完成。 */
   onUnbind?: (key: string) => void;
 }
 
-/** 角色绑定面板：每个角色一行，显示角色名 + 已绑定 Bot（可移除）或未绑定状态。 */
+/** 横向角色绑定选择器：切换当前角色后，在下方 Bot 列表完成绑定或解绑。 */
 export function ParticipantBindingPanel({
   definitions,
   bindings,
   activeKey,
   onActiveKeyChange,
-  botNameResolver,
-  onUnbind,
 }: ParticipantBindingPanelProps) {
-  const boundCount = Object.values(bindings).filter(Boolean).length;
+  const boundCount = definitions.filter((definition) => Boolean(bindings[definition.key])).length;
+  const botCount = new Set(Object.values(bindings).filter(Boolean)).size;
+  const currentIndex = Math.max(
+    0,
+    definitions.findIndex((definition) => definition.key === activeKey),
+  );
+
+  const move = (offset: number) => {
+    const target = definitions[currentIndex + offset];
+    if (target) onActiveKeyChange(target.key);
+  };
+
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border bg-background p-3">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-muted-foreground">角色绑定</span>
-        <span className="text-[11px] text-muted-foreground">
-          已绑定 {boundCount} / {definitions.length} 个角色
+    <div className="overflow-hidden rounded-lg border border-border bg-background">
+      <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2.5">
+        <span className="text-xs font-semibold text-foreground">角色绑定</span>
+        <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary">
+          已绑定 {boundCount} / {definitions.length} 个角色，共 {botCount} 个 Bot
         </span>
       </div>
-      <div className="space-y-1.5">
-        {definitions.map((def) => {
-          const isActive = def.key === activeKey;
-          const boundBotId = bindings[def.key];
-          const bound = Boolean(boundBotId);
-          const label = def.displayName || def.key;
-          const botName = boundBotId ? botNameResolver?.(boundBotId) ?? boundBotId : undefined;
-          return (
-            <div
-              key={def.key}
-              role="button"
-              tabIndex={0}
-              onClick={() => onActiveKeyChange(def.key)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  onActiveKeyChange(def.key);
-                }
-              }}
-              className={cn(
-                'flex min-w-0 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors',
-                isActive ? 'border-primary bg-primary/10' : 'border-border bg-background hover:border-primary/30',
-              )}
-            >
-              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className={cn('text-xs font-semibold', isActive ? 'text-primary' : 'text-foreground')}>
-                  {label}
-                  {def.required && <span className="text-destructive"> *</span>}
-                </span>
-                {bound && botName ? (
-                  <span className="truncate text-[11px] text-primary">@{botName}</span>
-                ) : (
-                  <span className="text-[10px] text-muted-foreground">{def.required ? '未绑定' : '可选'}</span>
+      <div className="flex items-stretch gap-2 p-3">
+        <Button
+          variant="secondary"
+          size="icon"
+          aria-label="上一个角色"
+          disabled={currentIndex <= 0}
+          className="size-10 shrink-0"
+          onClick={() => move(-1)}
+        >
+          <ChevronLeft className="size-4" aria-hidden />
+        </Button>
+        <div data-testid="role-binding-strip" className="app-scrollbar flex min-w-0 flex-1 gap-2 overflow-x-auto">
+          {definitions.map((definition) => {
+            const active = definition.key === activeKey;
+            const bound = Boolean(bindings[definition.key]);
+            const label = definition.displayName || definition.key;
+            return (
+              <Button
+                key={definition.key}
+                variant="ghost"
+                size="sm"
+                aria-label={`选择角色 ${label}`}
+                aria-pressed={active}
+                className={cn(
+                  'h-10 min-w-[150px] flex-1 justify-between rounded-lg border px-3 text-left',
+                  active
+                    ? 'border-primary bg-primary/10 text-primary hover:bg-primary/10'
+                    : 'border-border bg-background text-foreground hover:border-primary/30 hover:bg-primary/10',
                 )}
-              </div>
-              {bound && onUnbind && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  aria-label={`移除${label}的绑定`}
-                  className="h-6 w-6 shrink-0 rounded-full border-0 p-0 text-muted-foreground hover:bg-muted"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onUnbind(def.key);
-                  }}
+                onClick={() => onActiveKeyChange(definition.key)}
+              >
+                <span className="min-w-0 truncate text-xs font-semibold">
+                  {label}
+                  {definition.required ? <span className="text-destructive"> *</span> : null}
+                </span>
+                <Badge
+                  className="shrink-0 text-[10px]"
+                  tone={bound ? 'success' : definition.required ? 'warning' : 'neutral'}
                 >
-                  <X className="h-3 w-3" aria-hidden />
-                </Button>
-              )}
-            </div>
-          );
-        })}
+                  {bound ? '已绑定' : definition.required ? '需绑定' : '可选'}
+                </Badge>
+              </Button>
+            );
+          })}
+        </div>
+        <Button
+          variant="secondary"
+          size="icon"
+          aria-label="下一个角色"
+          disabled={currentIndex >= definitions.length - 1}
+          className="size-10 shrink-0"
+          onClick={() => move(1)}
+        >
+          <ChevronRight className="size-4" aria-hidden />
+        </Button>
       </div>
     </div>
   );

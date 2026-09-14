@@ -19,7 +19,7 @@ from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     MaterialiserPorts,
     TeclawDelivery,
 )
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.repository.apply_models import (  # noqa: F401
@@ -42,7 +42,6 @@ from ._fakes import (
     FakeCapabilityReader,
     FakeCredentials,
     FakeGitClient,
-    FakeGuardedFetcher,
     FakeIdentityService,
     FakeManifestContent,
     FakeMcpAuth,
@@ -51,7 +50,7 @@ from ._fakes import (
     FakeStartupScriptService,
     real_validator,
 )
-from agentclaw.community.plugins.local.object_store_client import InMemoryObjectStoreClientFactory
+from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 
 _ENTITY = "u_owner"
 _BOT = "b_teclaw"
@@ -148,9 +147,9 @@ def _world(*, bot, platform_managed, platform_activation=None, redeliver=None):
             upload_service=FakeSkillUploadService(),
             capability_reader=FakeCapabilityReader(),
             package_validator=real_validator(),
-            entry_fetcher=EntryFetcher(
-                FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
-            , InMemoryObjectStoreClientFactory()),
+            entry_fetcher=DeclaredSourceResolver(
+                FakeManifestContent(), FakeCredentials(), FakeObjectStore()
+            ),
             resource_service=FakeResourceFileService(),
             cli_tool_service=object(),
         )
@@ -166,9 +165,9 @@ def _world(*, bot, platform_managed, platform_activation=None, redeliver=None):
         upload_service_provider=lambda: FakeSkillUploadService(),
         capability_reader_provider=lambda: FakeCapabilityReader(),
         package_validator_provider=lambda: real_validator(),
-        entry_fetcher_provider=lambda: EntryFetcher(
-            FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
-        , InMemoryObjectStoreClientFactory()),
+        entry_fetcher_provider=lambda: DeclaredSourceResolver(
+            FakeManifestContent(), FakeCredentials(), FakeObjectStore()
+        ),
         resource_service_provider=lambda: FakeResourceFileService(),
         cli_tool_service_factory=lambda family: None,
         git_client_provider=lambda: FakeGitClient(),

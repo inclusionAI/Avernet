@@ -34,7 +34,7 @@ from agentclaw.community.utils.avernet_tenant import (
     avernet_tenant_scope,
     get_current_avernet_tenant,
 )
-from agentclaw.community.plugins.local.object_store_client import InMemoryObjectStoreClientFactory
+from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 
 #: Deliberately not :data:`DEFAULT_AVERNET_TENANT`. See the module docstring —
 #: a test written under the default cannot distinguish "the scope was
@@ -126,15 +126,14 @@ def _real_apply_service(manifests):
         BotConfigManifestApplyRepository,
     )
 
-    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-        EntryFetcher,
+    from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+        DeclaredSourceResolver,
     )
     from ..apply._fakes import (
         FakeActivationService,
         FakeCapabilityReader,
         FakeCredentials,
         FakeGitClient,
-        FakeGuardedFetcher,
         FakeIdentityService,
         FakeManifestContent,
         FakeMcpAuth,
@@ -182,9 +181,9 @@ def _real_apply_service(manifests):
         upload_service_provider=lambda: FakeSkillUploadService(),
         capability_reader_provider=lambda: FakeCapabilityReader(),
         package_validator_provider=lambda: real_validator(),
-        entry_fetcher_provider=lambda: EntryFetcher(
-            FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
-        , InMemoryObjectStoreClientFactory()),
+        entry_fetcher_provider=lambda: DeclaredSourceResolver(
+            FakeManifestContent(), FakeCredentials(), FakeObjectStore()
+        ),
         # W6's resources materialiser and W7's git transport: unreached by
         # this suite's document, but the registry registers them and the
         # session is built per apply regardless.

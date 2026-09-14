@@ -31,7 +31,6 @@ describe('WorkflowVersionDiff', () => {
       expect.objectContaining({ type: 'skip' }),
     ]))
   })
-
   it('does not flag reordered YAML fields as an undeployed change', () => {
     expect(specsEqual('id: support\ntitle: 支持\nnodes: []\n', 'nodes: []\ntitle: 支持\nid: support\n')).toBe(true)
     expect(specsEqual('id: support\ntitle: 支持\n', 'id: support\ntitle: 新支持\n')).toBe(false)

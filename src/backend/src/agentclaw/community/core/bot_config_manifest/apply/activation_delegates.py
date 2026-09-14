@@ -41,12 +41,23 @@ from agentclaw.community.core.skill_center.direct_activation_service_protocol im
 class _DelegatingActivation(ActivationPort):
     """Forwards the port's six methods to the service, pinning ``project``.
 
+    Six methods: two reads (``list_installed_mcps``,
+    ``platform_default_mcp_codes``) passed through untouched, and four async
+    writes (``activate_mcp``, ``deactivate_mcp``, ``activate_skill``,
+    ``deactivate_skill``) that gain ``project=self._PROJECT``.
+
+    ``list_installed_mcps`` answers a ``set[str]`` of server codes, e.g.
+    ``{"gh", "old"}``; ``platform_default_mcp_codes`` answers an iterable of
+    the same. The four writes answer the service's own result dict, which
+    ``mcp`` and ``skills`` discard.
+
     Subclasses set ``_PROJECT`` and add nothing else; writing the delegation
     twice would let the two families drift apart in a method neither subclass
     is about.
     """
 
-    #: The ``project`` value every write is forwarded with.
+    #: The ``project`` value every write is forwarded with. ``True`` projects
+    #: the row onto the live container, ``False`` writes the row only.
     _PROJECT: bool
 
     def __init__(self, inner: DirectActivationServiceProtocol) -> None:
@@ -102,13 +113,22 @@ class _DelegatingActivation(ActivationPort):
 
 
 class DeviceActivation(_DelegatingActivation):
-    """ARCA: write the rows, then project onto the live container (pre-W8)."""
+    """ARCA: write the rows, then project onto the live container.
+
+    Bound as ``MaterialiserPorts.activation_service`` for the ARCA family, and
+    for teclaw while the platform-managed switch is off.
+    """
 
     _PROJECT = True
 
 
 class PlatformActivation(_DelegatingActivation):
-    """Platform-managed teclaw: write the rows only; the artifact delivers."""
+    """Platform-managed teclaw: write the rows only; the artifact delivers.
+
+    Bound as ``MaterialiserPorts.activation_service`` in the store-backed
+    bundle. The projection the ``True`` variant would make per skill and per
+    MCP server is replaced by the strategy's single closing redeliver.
+    """
 
     _PROJECT = False
 

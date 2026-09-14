@@ -288,6 +288,63 @@ def test_create_bot_editor_request_enforces_eligibility_and_delegates() -> None:
     )
 
 
+def test_create_bot_editor_request_allows_team_space_bot_without_engine_capability() -> None:
+    """A Team Space Bot accepts editor requests regardless of engine/template form.
+
+    真实缺陷（预发 2026-09-09）：bot 20260902_07czoyk5 为 bot_type=personal、
+    active_engine=openclaw、template_type=None，被 can_manage_collaborators
+    以 "Bot does not support editor management" 拒绝。Team Space 的编辑协作契约
+    由空间归属决定（成员申请、Owner 审批、协作者直插），不依赖引擎能力标记。
+    """
+    (
+        service,
+        repository,
+        access,
+        _,
+        bots,
+        collaborator_repository,
+        _,
+        member_management,
+    ) = _bot_editor_service()
+    bots.get_by_id_and_owner.return_value = {
+        "id": 17,
+        "bot_id": "bot-17",
+        "bot_name": "Team Plain Bot",
+        "bot_type": "personal",
+        "owner_id": "owner-1",
+        "space_id": 7,
+        "active_engine": "openclaw",
+        "template_type": None,
+    }
+    member_management.can_manage_collaborators.return_value = False
+    access.require_space_reference.return_value = _space()
+    collaborator_repository.get_by_bot_and_user.return_value = None
+    repository.create_bot_editor_request.return_value = _work_order()
+
+    result = service.create_bot_editor_request(
+        bot_id="bot-17",
+        owner_id="owner-1",
+        applicant_user_id="applicant-1",
+        reason="joint editing",
+    )
+
+    assert result == _work_order()
+    access.require_space_member.assert_called_once_with(
+        space_id=7, user_id="applicant-1"
+    )
+    repository.create_bot_editor_request.assert_called_once_with(
+        bot_pk=17,
+        bot_id="bot-17",
+        bot_name="Team Plain Bot",
+        owner_id="owner-1",
+        space_id=7,
+        applicant_user_id="applicant-1",
+        applicant_name="applicant-1",
+        apply_reason="joint editing",
+        env="dev",
+    )
+
+
 def test_bot_owner_cannot_request_editor_access() -> None:
     service, repository, _, _, bots, _, _, _ = _bot_editor_service()
     bots.get_by_id_and_owner.return_value = {

@@ -485,6 +485,51 @@ class ClawBotService(BotService):
         except Exception as e:
             raise BotServiceError(f"Failed to list sessions: {e}") from e
 
+    async def abort(
+        self,
+        *,
+        session_id: str,
+        binding_info: BotBindingInfo,
+    ) -> None:
+        """Best-effort 通知 engine 中止 session。
+
+        复用 send_message 的连接逻辑，从连接池获取 AsyncChatClient
+        并发送 ``chat.abort``。失败仅记录日志，不影响 abort 主流程。
+
+        Args:
+            session_id: 会话 ID（engine 侧 sessionKey）
+            binding_info: 已解析的 binding 信息
+        """
+        sandbox_id = binding_info.sandbox_id
+        engine_type = binding_info.engine_type
+        if sandbox_id is None:
+            logger.warning(
+                "[ClawBotService.abort] sandbox_id is required for abort: "
+                "session_id=%s",
+                session_id,
+            )
+            return
+
+        url = self._build_ws_url(sandbox_id, engine_type or "openclaw")
+        headers = self._get_headers(sandbox_id)
+
+        try:
+            client = await self._client_pool.get(sandbox_id, url, headers)
+            # 注意：chat.abort 的 run_id 是引擎侧 run 标识，与 baas_bot_run.run_id
+            # 语义不同，不能把后者透传过去；用 sessionKey 定位即可。
+            await client.chat_abort(session_key=session_id)
+            logger.info(
+                "[ClawBotService.abort] engine abort sent: session_id=%s",
+                session_id,
+            )
+        except Exception as e:
+            logger.warning(
+                "[ClawBotService.abort] failed to send chat.abort: "
+                "session_id=%s error=%s",
+                session_id,
+                e,
+            )
+
     # ── 私有方法 ─────────────────────────────────────────────────────────────
 
     def _adapter_for(self, engine_type: str | None) -> BotEngineAdapter | None:

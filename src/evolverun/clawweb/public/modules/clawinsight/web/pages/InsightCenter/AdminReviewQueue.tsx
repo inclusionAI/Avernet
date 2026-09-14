@@ -3,9 +3,9 @@ import { insightApi } from "../../api/insight";
 import type { FailureTaskIndex, ImprovementDetail, ImprovementView } from "../../types/insight";
 import FailureTaskDrawer from "./FailureTaskDrawer";
 import { EmptyPanel, ErrorPanel, InsightIcon, LoadingPanel } from "./InsightUi";
-import { createRequestId, failureClassText, formatDateTime } from "./utils";
+import { createRequestId, failureClassText, formatDateTime, resolveBotName } from "./utils";
 
-type BotOption = { botId: string; botName: string };
+type BotOption = { botId: string; botName: string; ownerUserId?: string };
 type ReviewFilter = "PENDING" | "APPROVED" | "REJECTED" | "ALL" | "ALL_ITEMS";
 type ReviewDecision = "APPROVE" | "REJECT";
 
@@ -48,10 +48,6 @@ export default function AdminReviewQueue({
   const [executeMessage, setExecuteMessage] = useState("");
   const [consentLink, setConsentLink] = useState<{ url: string; expiresAt: string } | null>(null);
   const [consentLinkLoading, setConsentLinkLoading] = useState(false);
-  const botNames = useMemo(
-    () => new Map(botOptions.map((bot) => [bot.botId, bot.botName])),
-    [botOptions],
-  );
 
   useEffect(() => {
     let active = true;
@@ -152,7 +148,7 @@ export default function AdminReviewQueue({
       sourceDt,
       ownerUserId: improvement.botOwnerUserId,
       botId: improvement.botId,
-      botName: botNames.get(improvement.botId) || improvement.botId,
+      botName: resolveBotName(botOptions, improvement.botOwnerUserId, improvement.botId),
       sessionId: evidence.sessionId,
       taskIndex: evidence.taskIndex,
       taskDescription: evidence.taskDescription,
@@ -227,7 +223,7 @@ export default function AdminReviewQueue({
                     <p className="truncate text-sm font-semibold text-gray-900">{item.title}</p>
                     <span className={`rounded-full px-2.5 py-1 text-[10px] font-medium ${item.actionType === "DIRECT_EVOLUTION" ? "bg-emerald-50 text-emerald-700" : "bg-orange-50 text-orange-700"}`}>{item.actionType === "DIRECT_EVOLUTION" ? "自动优化" : "手动优化"}</span>
                   </div>
-                  <p className="mt-1 text-xs text-gray-500">{botNames.get(item.botId) || item.botId} · {item.sessionCount} 个 Session · 规则 {item.sourceRuleId || "—"}</p>
+                  <p className="mt-1 text-xs text-gray-500">{resolveBotName(botOptions, item.botOwnerUserId, item.botId)} · {item.sessionCount} 个 Session · 规则 {item.sourceRuleId || "—"}</p>
                   <p className="mt-2 line-clamp-2 text-xs leading-5 text-gray-600">{item.rootCauseSummary || item.assignmentReason || item.userGuidance || "暂无补充说明"}</p>
                   <span className="mt-2 inline-block text-xs font-medium text-blue-600">查看改进项详情</span>
                 </button>

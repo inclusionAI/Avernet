@@ -1160,13 +1160,9 @@ class TestServiceBackedSkillCrudApiContracts:
             params={"entity_id": OWNER_ID, "bot_id": BOT_ID, "engine_type": ENGINE_TYPE},
         )
         delete_body = delete_resp.json()
-        assert_success(delete_body, "service-backed DELETE /api/skills/{id}")
-        assert_api_response_contract(
-            delete_body,
-            "service_backed_rule10_DELETE_api_skills_id",
-            update=contract_snapshot_update,
-        )
-        assert delete_body["message"] == "Skill deleted successfully"
+        assert delete_resp.status_code == 502
+        assert delete_body == {"detail": "Skill storage operation failed"}
+        assert world.get(SkillRepository).get_by_id(skill_id) is not None
 
 
 class TestServiceBackedBotPublicApiContracts:

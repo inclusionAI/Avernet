@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.core.bot_config_manifest.apply.delivery import MaterialiserPorts
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.create_job import (
     DEFAULT_CREATE_DEADLINE_SECONDS,
@@ -48,7 +48,6 @@ from ..apply._fakes import (
     FakeCapabilityReader,
     FakeCredentials,
     FakeGitClient,
-    FakeGuardedFetcher,
     FakeIdentityService,
     FakeManifestContent,
     FakeMcpAuth,
@@ -59,7 +58,7 @@ from ..apply._fakes import (
 )
 from ..managed_files._fakes import FakeObjectStorage
 from .test_creation_ordering import _Db, _InlineQueue, _IssuedPassport, _RecordedRelationship
-from agentclaw.community.plugins.local.object_store_client import InMemoryObjectStoreClientFactory
+from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 
 _ENTITY = "u_owner"
 _BOT = "b_teclaw"
@@ -123,7 +122,7 @@ def _build(db):
     )
     queue = _InlineQueue()
     bots = _Bots()
-    fetcher = lambda: EntryFetcher(FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials(), InMemoryObjectStoreClientFactory())  # noqa: E731
+    fetcher = lambda: DeclaredSourceResolver(FakeManifestContent(), FakeCredentials(), FakeObjectStore())  # noqa: E731
 
     def platform_ports() -> MaterialiserPorts:
         return MaterialiserPorts(

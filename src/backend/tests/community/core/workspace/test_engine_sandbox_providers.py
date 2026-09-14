@@ -15,6 +15,9 @@ import pytest
 
 from agentclaw.community.core.workspace.engines.aicoding import AICodingSandboxProvider
 from agentclaw.community.core.workspace.engines.claude_code import ClaudeCodeSandboxProvider
+from agentclaw.community.core.workspace.engines.deepseek_harness import (
+    DeepSeekHarnessSandboxProvider,
+)
 from agentclaw.community.core.workspace.engines.openclaw import OpenClawSandboxProvider
 from agentclaw.community.core.workspace.engines.hermes import HermesSandboxProvider
 from agentclaw.community.core.workspace.engines import create_engine_sandbox_registry
@@ -48,6 +51,7 @@ def _device_fs(mapping: dict[str, list[dict]]):
         ClaudeCodeSandboxProvider,
         AICodingSandboxProvider,
         HermesSandboxProvider,
+        DeepSeekHarnessSandboxProvider,
     ),
 )
 def test_list_directory_provider_signature_matches_runtime_contract(
@@ -353,6 +357,105 @@ class TestHermesProvider:
         assert contract["pool_repo"].removeprefix(
             f"{provider.get_base_path()}/"
         ) in plan.rsync_excludes
+
+
+@pytest.mark.unit
+class TestDeepSeekHarnessProvider:
+    def test_uses_dsh_home_and_session_layout(self):
+        provider = DeepSeekHarnessSandboxProvider(workspace=_workspace())
+
+        assert provider.get_base_path() == "/home/admin/.dsh/workspace"
+        assert provider.get_sessions_dir() == "/home/admin/.dsh/sessions"
+        assert provider.get_default_read_only_rules() == []
+
+    def test_composition_registry_resolves_provider_without_fallback(self):
+        provider = create_engine_sandbox_registry(_workspace()).resolve(
+            "deepseek_harness"
+        )
+
+        assert isinstance(provider, DeepSeekHarnessSandboxProvider)
+
+    def test_service_build_plan_is_explicitly_unsupported(self):
+        provider = DeepSeekHarnessSandboxProvider(workspace=_workspace())
+
+        with pytest.raises(ValueError, match="service bot builds"):
+            provider.get_build_plan(["custom"], bot={"bot_id": "b1"})
+
+    @pytest.mark.parametrize("sub_path", ("../escape", "/etc/passwd", "bad\x00path"))
+    def test_invalid_sub_path_is_rejected(self, sub_path):
+        provider = DeepSeekHarnessSandboxProvider(workspace=_workspace())
+
+        with pytest.raises(ValueError):
+            provider._normalize_sub_path(sub_path)
+
+    @pytest.mark.parametrize("sub_path", ("", ".", "./"))
+    def test_empty_sub_path_is_normalized(self, sub_path):
+        provider = DeepSeekHarnessSandboxProvider(workspace=_workspace())
+
+        assert provider._normalize_sub_path(sub_path) == ""
+
+    @pytest.mark.asyncio
+    async def test_list_directory_with_device_fs_walks_recursively(self):
+        base = f"{cfg.WorkspaceConfig().deepseek_harness_root}/workspace"
+        provider = DeepSeekHarnessSandboxProvider(workspace=_workspace())
+
+        items = await provider.list_directory(
+            recursive=True,
+            device_fs=_device_fs({
+                base: [
+                    {"name": "skills", "is_dir": True},
+                    {"name": "AGENTS.md", "is_dir": False},
+                    {"name": "", "is_dir": False},
+                ],
+                f"{base}/skills": [
+                    {"name": "local-skill", "is_dir": True},
+                ],
+                f"{base}/skills/local-skill": [],
+            }),
+        )
+
+        assert {item.path for item in items} == {
+            "skills",
+            "skills/local-skill",
+            "AGENTS.md",
+        }
+
+    @pytest.mark.asyncio
+    async def test_list_directory_walks_local_filesystem(self, tmp_path):
+        root = tmp_path / ".dsh"
+        workspace = root / "workspace"
+        workspace.mkdir(parents=True)
+        (workspace / "AGENTS.md").write_text("instructions", encoding="utf-8")
+        provider = DeepSeekHarnessSandboxProvider(
+            workspace=cfg.WorkspaceConfig(deepseek_harness_root=str(root)),
+        )
+
+        top_level = await provider.list_directory()
+        recursive = await provider.list_directory(recursive=True)
+
+        assert [item.path for item in top_level] == ["AGENTS.md"]
+        assert {item.path for item in recursive} == {"AGENTS.md"}
+
+    @pytest.mark.asyncio
+    async def test_list_directory_does_not_expose_dsh_credentials(self, tmp_path):
+        root = tmp_path / ".dsh"
+        (root / "workspace").mkdir(parents=True)
+        (root / ".credentials.yaml").write_text("secret", encoding="utf-8")
+        provider = DeepSeekHarnessSandboxProvider(
+            workspace=cfg.WorkspaceConfig(deepseek_harness_root=str(root)),
+        )
+
+        assert await provider.list_directory() == []
+
+    @pytest.mark.asyncio
+    async def test_list_directory_missing_local_root_returns_empty(self, tmp_path):
+        provider = DeepSeekHarnessSandboxProvider(
+            workspace=cfg.WorkspaceConfig(
+                deepseek_harness_root=str(tmp_path / "missing")
+            ),
+        )
+
+        assert await provider.list_directory() == []
 
 _OPENCLAW_ROOT = cfg.WorkspaceConfig().openclaw_root
 _CLAUDE_CODE_ROOT = cfg.WorkspaceConfig().claude_code_root

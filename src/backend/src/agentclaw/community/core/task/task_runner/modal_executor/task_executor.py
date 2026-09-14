@@ -30,6 +30,7 @@ from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter impor
 from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
     _no_callback_instruction,
     _static_relay_closure,
+    format_task_node_business_instruction,
 )
 from agentclaw.community.core.task.domain.prompt_constants import (
     OUTPUT_LANGUAGE_CONSTRAINT,
@@ -343,14 +344,6 @@ class TaskExecutor(TaskExecutorBbsMixin):
             node.task_id, node.node_id, openapi_bot_id, assignee_owner_id, loop_task_id,
         )
         ctx = dict(self._context.build(node.task_id, node.node_id) or {})
-        ctx.update({
-            "task_id": node.task_id,
-            "node_id": node.node_id,
-            "execution_mode": "single_bot",
-            "skill_report_enabled": self._skill_report_enabled(),
-            "backend": self._api_base_url,
-        })
-        message = self._formatter.format_execute(ctx, node)
         # manager_worker 群:single bot 作 manager(自管自执行,无 worker);人类 owner 以观察者
         # participant 入群(_HUMAN_OBSERVER_MODES 含 manager_worker)。driver/originator 用纯 bot_id
         # 且不设人类(BCS 拒人类建群)。manager_worker 带 event_subscriptions → BCS require_human,
@@ -363,8 +356,18 @@ class TaskExecutor(TaskExecutorBbsMixin):
             members_info=[{"bot_id": driver_bot, "role": "manager"}],
             extend_props={
                 "manager_bot_id": driver_bot,
+                "dynamic_task_node_protocol": True,
                 "loop_task_id": loop_task_id,
-                "task_instruction": message,
+                # manager_worker 群在 form_coop_group 统一生成业务节点协议；这里仅透传
+                # 原始节点事实，避免 single_bot 和 multi_bot 产生两份不同的任务指令。
+                "task_id": node.task_id,
+                "task_objective": node.task_spec.goal.objective,
+                "task_instruction": node.task_spec.metadata.instruction,
+                "acceptances": [
+                    {"id": item.id, "description": item.description}
+                    for item in node.task_spec.goal.acceptances
+                ],
+                "upstream_outputs": ctx.get("sibling_outputs") or {},
             },
         )
         task_owner_id = self._resolve_owner_user_id(gf)
@@ -791,7 +794,32 @@ class TaskExecutor(TaskExecutorBbsMixin):
         )
         _task_instruction = str(gf.extend_props.get("task_instruction") or "")
         if _task_objective or _task_instruction or _loop_task_id:
-            if str(_task_instruction).lstrip().startswith("# 接自"):
+            if (
+                mode == "manager_worker"
+                and bool(gf.extend_props.get("dynamic_task_node_protocol"))
+                and not str(_task_instruction).lstrip().startswith("# 接自")
+            ):
+                # 所有 manager_worker 群（单 bot 的退化群和多 bot 群）使用同一业务协议。
+                # BCS 的 bcs_assign_task/bcs_task_complete 系统指令不在此重复，避免业务 prompt
+                # 与协调运行时争夺时序；driver 仍在协议内被明确要求参与执行、汇总、验收和回投。
+                try:
+                    _task_id, _node_id = str(_loop_task_id).split("::", 1)
+                except ValueError:
+                    _task_id = str(gf.extend_props.get("task_id") or "<task_id>")
+                    _node_id = "<node_id>"
+                req_kwargs["context"] = format_task_node_business_instruction(
+                    task_id=_task_id,
+                    node_id=_node_id,
+                    backend=str(self._api_base_url or _sink_base or "{backend}"),
+                    objective=_task_objective,
+                    instruction=_task_instruction,
+                    acceptances=_acceptances,
+                    upstream_outputs=gf.extend_props.get("upstream_outputs") or {},
+                    reporter_bot_id=_reporter_bot_id,
+                    executor_bot_ids=[str(bot_id) for bot_id in bot_ids],
+                    skill_report_enabled=_skill_report,
+                )
+            elif str(_task_instruction).lstrip().startswith("# 接自"):
                 # 接力协作群(static_plan):## 本群任务 正文(承接/执行/gap交接三步)已具备。但真正多 bot
                 # 协作群的 task_instruction 由 engine 直取 raw metadata.instruction,未走 format_execute,
                 # 缺 _static_relay_closure(承接→执行→交接三步硬约束)+ 中文输出约束——导致协作群 bot 塌缩

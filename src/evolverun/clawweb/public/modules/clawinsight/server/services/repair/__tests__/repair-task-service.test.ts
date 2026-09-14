@@ -613,7 +613,12 @@ it("freezes an explicit ADMIN_ONCE execution scope for administrator delegation"
   }));
 });
 
-it.each([false, true])("preserves frozen evidence through plan/apply when sourceUnavailable=%s", async (sourceUnavailable) => {
+it.each([
+  { sourceUnavailable: false, newJob: false },
+  { sourceUnavailable: true, newJob: false },
+  { sourceUnavailable: false, newJob: true },
+  { sourceUnavailable: true, newJob: true },
+])("sends frozen evidence to AIS and bootstrap with sourceUnavailable=$sourceUnavailable, newJob=$newJob", async ({ sourceUnavailable, newJob }) => {
   const detail = {
     improvementId: 42,
     ownerUserId: ACTOR,
@@ -723,21 +728,61 @@ it.each([false, true])("preserves frozen evidence through plan/apply when source
     requestId: "insight-repair-run-1",
   }));
 
+  const expectedIssue = { ...created.config.issue, sessionIds: ["session-42", "session-43"] };
+  // Exercise the actual executeSnapshot parameters, not just browser metadata.
+  const dispatched = parseSnapshotEnvelope(harness.execute.mock.calls[0][1] as Record<string, string>);
+  expect(dispatched.input).toMatchObject({
+    issue: expectedIssue,
+    insightSource: created.config.insightSource,
+  });
+  expect(() => assertRepairAuditSecretFree(dispatched.input, "input")).not.toThrow();
+  expect(harness.insightBridge.resolvePlanSource).not.toHaveBeenCalled();
+  expect(await harness.service.getTask(ACTOR, created.taskId)).toMatchObject({ issue: expectedIssue });
+  // Older persisted issue records need no migration or mutable source lookup.
+  expect(created.config.issue).not.toHaveProperty("sessionIds");
+  const persisted = await harness.repo.findTask(created.taskId);
+  expect(JSON.parse(persisted!.config_json).issue).toEqual(created.config.issue);
+  expect(harness.insightBridge.getDetail).toHaveBeenCalledTimes(1);
+
   const bootstrap = await harness.service.bootstrap(created.identity);
   expect(bootstrap).toEqual(expect.objectContaining({
+    issue: expectedIssue,
     insightSource: expect.objectContaining({ improvementId: 42, title: detail.title, sessionIds: ["session-42", "session-43"], evidenceTaskRefs }),
     insightPlanSource: sourceUnavailable ? expect.objectContaining({ status: "unavailable", reason: "source_unavailable" }) : { status: "ready" },
   }));
   expect(() => assertRepairAuditSecretFree(bootstrap, "bootstrap")).not.toThrow();
   // Mutating the source after creation must not change the frozen repair hints.
   detail.evidence[0].taskDescription = "已修改的源任务";
-  const applyConfig = await advanceToApply(created);
+  const written = await reportPlanReady(created);
+  if (newJob) harness.now.value = 2_000;
+  await harness.service.decidePlan({
+    actorUserId: ACTOR,
+    authHeaders: { cookie: "SSO=decision-cookie" },
+    taskId: created.taskId,
+    body: { decision: "approve", artifactDigest: written.digest },
+  });
+  let applyEnvelope: SnapshotEnvelope;
+  if (newJob) {
+    expect(harness.execute).toHaveBeenCalledTimes(2);
+    applyEnvelope = parseSnapshotEnvelope(harness.execute.mock.calls[1][1] as Record<string, string>);
+  } else {
+    const claim = await harness.service.claimDecision(created.identity);
+    expect(claim).toMatchObject({ status: "claimed", reusedJob: true });
+    expect(harness.execute).toHaveBeenCalledTimes(1);
+    applyEnvelope = claim.continuation as SnapshotEnvelope;
+  }
+  expect(applyEnvelope).toMatchObject({
+    execution: { action: "repair_apply" },
+    input: { issue: expectedIssue, insightSource: created.config.insightSource },
+  });
+  const row = await harness.repo.findTask(created.taskId);
+  const applyConfig = JSON.parse(row!.config_json) as RepairTaskConfig;
   const applyBootstrap = await harness.service.bootstrap({
     taskId: created.taskId,
     stepId: applyConfig.current.stepId,
     executionId: applyConfig.execution.executionId,
   });
-  expect(applyBootstrap).toMatchObject({ insightSource: { evidenceTaskRefs } });
+  expect(applyBootstrap).toMatchObject({ issue: expectedIssue, insightSource: { evidenceTaskRefs } });
   expect(applyBootstrap).not.toHaveProperty("insightPlanSource");
 });
 
@@ -1960,6 +2005,9 @@ describe("RepairTaskService execution contract", () => {
       },
       runtime: { executionTicket: expect.stringMatching(/^ce_repair_/) },
     });
+    expect(envelope.input.issue).toEqual(created.config.issue);
+    expect(envelope.input).not.toHaveProperty("insightSource");
+    expect(envelope.input.issue).not.toHaveProperty("sessionIds");
     expect(JSON.stringify(envelope)).not.toContain("modelApiKey");
     expect(JSON.stringify(envelope)).not.toContain(CREATE_COOKIE);
     expect(harness.createSignedUrl.mock.calls).toEqual(expect.arrayContaining([

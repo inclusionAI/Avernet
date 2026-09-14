@@ -8,6 +8,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_PATH = REPO_ROOT / ".github/workflows/unit-tests.yml"
+BACKEND_CI_PATH = REPO_ROOT / "src/backend/scripts/ci_test.sh"
 PR_MERGE_PARENT_EXPRESSION = (
     "${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}"
 )
@@ -38,6 +39,16 @@ def _write(repository: Path, relative_path: str, content: str) -> None:
 
 
 class UnitTestWorkflowDiffTest(unittest.TestCase):
+    def test_backend_worker_crashes_fail_fast(self) -> None:
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        backend_job = workflow.split("\n  backend:\n", 1)[1].split(
+            "\n  engine:\n", 1
+        )[0]
+        backend_ci = BACKEND_CI_PATH.read_text(encoding="utf-8")
+
+        self.assertIn("    timeout-minutes: 25\n", backend_job)
+        self.assertIn("--max-worker-restart=0", backend_ci)
+
     def test_pr_module_diffs_use_the_checked_out_merge_parent(self) -> None:
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         for env_name, module_path in MODULE_JOBS.values():

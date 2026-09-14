@@ -256,7 +256,7 @@ describe('GroupSidebar', () => {
     expect(onToggleGroupExpanded).not.toHaveBeenCalled();
     const createSessionButton = screen.getByRole('button', { name: '新建会话' });
     const scopeButton = screen.getByRole('button', { name: '会话范围：全部会话' });
-    expect(scopeButton).toHaveClass('h-7', 'w-7');
+    expect(scopeButton).toHaveClass('h-6', 'w-6');
     expect(scopeButton.querySelector('svg.lucide-list-filter')).toBeInTheDocument();
     fireEvent.click(createSessionButton);
     fireEvent.click(screen.getByText('参与者视角'));
@@ -315,9 +315,8 @@ describe('GroupSidebar', () => {
       'shadow-md',
     );
     expect(filterPanel).not.toHaveClass('mx-[18px]', 'mt-2');
-    const sidebarScrollArea = screen
-      .getByLabelText('协作群会话列表：主站群')
-      .parentElement?.parentElement?.parentElement;
+    const sidebarScrollArea =
+      screen.getByLabelText('协作群会话列表：主站群').parentElement?.parentElement?.parentElement;
     expect(sidebarScrollArea).not.toContainElement(filterPanel);
     expect(screen.getByRole('radiogroup', { name: '协作群类型' })).toHaveClass('min-w-0');
     expect(screen.getByRole('radiogroup', { name: '协作群类型' }).querySelector('.flex')).toHaveClass(
@@ -566,13 +565,16 @@ describe('GroupSidebar', () => {
     const filterButton = screen.getByRole('button', { name: '筛选' });
     await user.click(filterButton);
     expect(screen.getByRole('radio', { name: '全部' })).toBeInTheDocument();
-    await user.click(document.body);
+    // Radix Popover 的 outside click 检测依赖 pointerdown 事件；
+    // userEvent.click(document.body) 在 jsdom 下会挂起不返回，改用 fireEvent。
+    fireEvent.pointerDown(document.body);
+    fireEvent.pointerUp(document.body);
     expect(screen.queryByRole('radio', { name: '全部' })).not.toBeInTheDocument();
 
     await user.click(filterButton);
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('radio', { name: '全部' })).not.toBeInTheDocument();
-  });
+  }, 60000);
 
   it('marks the filter button when a filter is applied', () => {
     render(<GroupSidebar {...makeProps({ membership: 'session_only' })} />);

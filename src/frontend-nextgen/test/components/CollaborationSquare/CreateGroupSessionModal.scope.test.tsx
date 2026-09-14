@@ -8,15 +8,17 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 const group = { id: 'g1', name: '公开群' } as PublicGroup;
 
-describe('CreateGroupSessionModal 消息视角 radio', () => {
+describe('CreateGroupSessionModal 消息视角下拉框', () => {
   it('默认完整视角；选参与者视角后提交值携带 messageViewScope', () => {
     const onSubmit = jest.fn();
     render(<CreateGroupSessionModal open group={group} loading={false} onClose={jest.fn()} onSubmit={onSubmit} />);
-    const radios = screen.getAllByRole('radio');
-    expect(radios[0]).toBeChecked();
+    const scopeSelect = screen.getByRole('button', { name: '消息视角' });
+    expect(scopeSelect).toHaveTextContent('完整视角');
+    expect(screen.getByText('消息视角')).toHaveClass('text-foreground');
     fireEvent.change(screen.getByLabelText(/会话名称/), { target: { value: '会话A' } });
     fireEvent.change(screen.getByLabelText(/协作目标/), { target: { value: '目标B' } });
-    fireEvent.click(radios[1]);
+    fireEvent.click(scopeSelect);
+    fireEvent.click(screen.getByRole('option', { name: /参与者视角/ }));
     fireEvent.click(screen.getByRole('button', { name: '创建会话' }));
     expect(onSubmit).toHaveBeenCalledWith({ title: '会话A', query: '目标B', messageViewScope: 'participant' });
   });

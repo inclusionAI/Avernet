@@ -441,15 +441,15 @@ describe('BotSessionSidebar', () => {
     const createSessionButton = screen.getByRole('button', { name: '新建会话' });
     expect(createSessionButton).toBeInTheDocument();
     expect(createSessionButton).toHaveClass(
-      'h-7',
-      'w-7',
+      'h-6',
+      'w-6',
       'rounded-md',
       'text-muted-foreground',
       'hover:bg-primary/10',
       'hover:text-primary',
     );
     const scopeButton = screen.getByRole('button', { name: '会话范围：全部会话' });
-    expect(scopeButton).toHaveClass('h-7', 'w-7');
+    expect(scopeButton).toHaveClass('h-6', 'w-6');
     expect(scopeButton.querySelector('svg.lucide-list-filter')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Bot操作' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '管理 Bot' })).not.toBeInTheDocument();

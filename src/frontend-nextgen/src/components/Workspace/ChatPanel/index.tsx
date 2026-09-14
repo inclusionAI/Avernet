@@ -197,7 +197,7 @@ export function ChatPanel({
           className="flex h-16 border-b border-border bg-card px-3 sm:px-5"
           slotLeft={
             <div className="flex min-w-0 items-center gap-3">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-sm font-semibold text-primary-foreground">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
                 {target.avatar}
               </span>
               <div className="min-w-0">

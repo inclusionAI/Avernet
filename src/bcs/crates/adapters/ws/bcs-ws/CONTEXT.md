@@ -13,6 +13,9 @@
   tenant/User/Group/Session scope into the existing Workbench connection loop.
 - Shared connection-state helpers under `src/shared/`.
 - Implementations of `BotDeliveryPort` and `FrontendDeliveryPort`.
+- Opaque, per-connection identities and pinned send/abort operations. Selection
+  checks the original identity under the registry lock and never redirects to
+  a replacement connection. Tokens are not connection identities.
 
 ## Consumes
 
@@ -50,6 +53,10 @@ scope on completion or cancellation; log correlation owns no span handles.
 The adapter owns WebSocket streams, `mpsc::Sender`, connection registries,
 frontend envelope stamping, and disconnect cleanup. It does not own routing or
 message lifecycle business decisions.
+
+Successful send ACKs are passed to the message-flow application before alias
+projection. The application owns durable delivery/run identity correlation;
+the adapter does not update delivery tables.
 
 ## Tests
 

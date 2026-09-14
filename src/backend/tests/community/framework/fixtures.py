@@ -104,6 +104,12 @@ def app_with_testing_modules(request) -> FastAPI:
     try:
         yield app
     finally:
+        from agentclaw.community.core.devices.services.baas_publish_poller import (
+            BaasPublishPoller,
+        )
+
+        poller = injector.get(BaasPublishPoller)
+        poller_stopped = poller.shutdown(timeout_seconds=5)
         _CURRENT_TEST_INJECTOR.pop(id(request.node), None)
         if prev_app is not None:
             attach_injector(app, prev_app)
@@ -113,6 +119,10 @@ def app_with_testing_modules(request) -> FastAPI:
         # Dispose the per-test engine deterministically; ``reset_for_tests``
         # on the NEXT injector build would do this anyway, but explicit
         # disposal here keeps connection lifecycle observable.
+        if not poller_stopped:
+            raise RuntimeError(
+                "BaasPublishPoller threads did not stop before test database disposal"
+            )
         engine.dispose()
 
 

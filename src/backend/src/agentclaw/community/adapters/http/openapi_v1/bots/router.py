@@ -49,8 +49,10 @@ from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
     UserIdDep,
     refuse_app_only_caller,
+    require_granted_addressed_bot,
     require_granted_own_bot,
 )
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import OwnerIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     accepted,
     created,
@@ -73,7 +75,6 @@ from agentclaw.community.core.bot_management.create_flow import (
     BotCreateDeploymentMode,
     BotCreateSpec,
     BotCreateTemplateValidationMode,
-    ServiceIntakeSeam,
     complete_bot_authorization,
     create_bot_with_authorization,
 )
@@ -89,12 +90,6 @@ from agentclaw.community.api.bot_startup_script_service import (
     SUPPORTED,
     BotStartupScriptServiceProtocol,
 )
-from agentclaw.community.api.service_publication_facade import (
-    ServicePublicationFacadeProtocol,
-)
-from agentclaw.community.core.service_bot.errors import (
-    ServicePublicationConflictError,
-)
 from agentclaw.community.api.data_init_service import DataInitServiceProtocol
 from agentclaw.community.core.workspace.constants import (
     DEFAULT_ENGINE_TYPE,
@@ -108,9 +103,6 @@ from agentclaw.community.plugin_api.passport import PassportError, PassportPlugi
 
 from agentclaw.community.api.bot_inventory_service import (
     BotInventoryServiceProtocol,
-)
-from agentclaw.community.api.bot_dormant_service import (
-    BotDormantActivateServiceProtocol,
 )
 from agentclaw.community.core.bot_inventory.errors import (
     BotInventoryPermissionError,
@@ -144,7 +136,6 @@ from .schemas import (
     Bot,
     BotMetadata,
     BotMetadataQueries,
-    BotActivateResult,
     BotAuthPending,
     BotAuthStatus,
     BotAuthStatusPoll,
@@ -180,6 +171,7 @@ logger = get_logger()
 #: authority on which route is which; ``test_admission_inventory.py`` fails if
 #: a declaration and a mode disagree.
 _GRANT_CHECKED_OWN_BOT = [Depends(require_granted_own_bot)]
+_GRANT_CHECKED_ADDRESSED_BOT = [Depends(require_granted_addressed_bot)]
 
 #: What a ``REFUSED`` operation declares: no caller without an end user. The
 #: refusal already happens centrally in ``require_principal`` — this makes the
@@ -205,32 +197,6 @@ def _require_service_capable_engine(bot_type: str, engine: str) -> None:
         raise ServicePublicationUnsupportedError(
             decision.reason or "engine cannot be used by a service bot"
         )
-
-
-class _FacadeServiceIntakeSeam:
-    """Adapt the publication facade to the create flow's service intake seam.
-
-    The completion poll is the retry surface for a create-as-service request,
-    so a replayed conversion hits the facade's already-service conflict — for
-    intake that is success (the goal state is reached), not a failure to
-    surface to the caller.
-    """
-
-    def __init__(self, facade: ServicePublicationFacadeProtocol) -> None:
-        self._facade = facade
-
-    def convert(self, bot_id: str, *, actor_id: str, owner_id: str) -> None:
-        try:
-            self._facade.convert_to_service(
-                bot_id, actor_id=actor_id, owner_id=owner_id
-            )
-        except ServicePublicationConflictError as exc:
-            logger.info(
-                "[service_intake] conversion replay for already-serviced bot: "
-                "bot_id=%s, reason=%s",
-                bot_id,
-                exc,
-            )
 
 
 def _to_bot(d: dict[str, Any], *, space: dict[str, Any] | None = None) -> Bot:
@@ -541,9 +507,6 @@ async def create_bot(
     space_context: BusinessSpaceContextProtocol = Injected(
         BusinessSpaceContextProtocol
     ),
-    service_publication_facade: ServicePublicationFacadeProtocol = Injected(
-        ServicePublicationFacadeProtocol
-    ),
 ):
     """Create a bot (201), or 202 with authorization URLs when consent is needed.
 
@@ -555,10 +518,11 @@ async def create_bot(
     creation.
 
     A coding template with bot_type "service" (开启服务) is fulfilled
-    orchestratively: the bot is created by the personal-only template path and
-    immediately upgraded to a service bot, which is what the 201 reports. If
-    the upgrade fails the response is a 502 naming the created-as-personal
-    bot — retry via the lifecycle upgrade instead of re-creating.
+    directly: the strategy gate admits service for factory-snapshot template
+    creates, so the bot is provisioned in its service shape (one BaaS call —
+    service-shaped container, BCN registration, draft publish record) with no
+    follow-up upgrade. Hand-written application-coding configs stay
+    personal-only and answer 409 for bot_type="service".
     """
     # Engine-owned creation input is passed through opaquely below; the
     # engine-selected Core strategy owns its semantics and validation, so this
@@ -594,13 +558,11 @@ async def create_bot(
             deployment_mode=BotCreateDeploymentMode.CLOUD,
             space_kind=current_space.kind,
             space_quota=True,
-            service_intake=True,
         ),
         bot_service=bot_service,
         passport_plugin=passport_plugin,
         auth_rel_plugin=auth_rel_plugin,
         skill_set_factory=skill_set_factory,
-        service_intake_seam=_FacadeServiceIntakeSeam(service_publication_facade),
     )
 
     if isinstance(outcome, AuthPending):
@@ -899,72 +861,6 @@ async def list_inventory(
     return page(total, [_to_inventory_item(item) for item in items], request)
 
 
-# ── Dormant Bot activation ─────────────────────────────────────────────────
-# ``POST /openapi/v1/bots/{bot_id}/activate`` — a two-segment sub-resource of
-# the bot record (like ``/{bot_id}/restart``), so it follows ``/{bot_id}`` and
-# needs no literal guard. The handler does the owner lookup + bot_type guard
-# itself and delegates only the reactivation orchestration to
-# ``BotDormantActivateServiceProtocol`` (``ActivateBotService.activate``);
-# local bots are never reclaimed by dormant so they are refused here (409),
-# service bots go through their own publish flow.
-
-
-def _require_personal_cloud_bot(bot: dict[str, Any]) -> None:
-    """Refuse dormant activation for non-personal-cloud bots (→ 409).
-
-    ``bot_type`` is the only field that distinguishes a personal cloud bot from
-    a desktop or service bot at this layer; ``status`` is checked downstream
-    by ``ActivateBotService.activate`` (RECYCLED only).
-    """
-    bot_type = bot.get("bot_type") or ""
-    if bot_type == "desktop":
-        raise BotOperationNotAllowedError(
-            "local bots are not reclaimed by dormant activation"
-        )
-    if bot_type == "service":
-        raise BotOperationNotAllowedError(
-            "service bot lifecycle is owned by the publish flow"
-        )
-    if bot_type != "personal":
-        raise BotOperationNotAllowedError(
-            f"dormant activation is not supported for bot_type: {bot_type or 'unknown'}"
-        )
-
-
-@router.post(
-    "/{bot_id}/activate",
-    response_model=Envelope[BotActivateResult],
-    responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_OWN_BOT,
-)
-@envelope_errors
-async def activate_dormant_bot(
-    bot_id: BotIdPath,
-    request: Request,
-    owner_id: UserIdDep,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    activate_service: BotDormantActivateServiceProtocol = Injected(
-        BotDormantActivateServiceProtocol
-    ),
-) -> Envelope[BotActivateResult]:
-    """Activate a recycled personal cloud bot.
-
-    Returns 404 when the bot is not visible to the caller and 409 when the bot
-    is not a recycled personal cloud bot.
-    """
-    bot = bot_service.get_bot(bot_id, owner_id)
-    _require_personal_cloud_bot(bot)
-    result = activate_service.activate(bot_id=bot_id, user_id=owner_id)
-    return envelope(
-        BotActivateResult(
-            bot_id=bot_id,
-            status=str(result.get("status") or ""),
-            message=result.get("message"),
-        ),
-        request,
-    )
-
-
 @router.get(
     "/{bot_id}",
     response_model=Envelope[Bot],
@@ -1174,11 +1070,6 @@ def _complete_auth_status(
     passport_plugin: PassportPlugin,
     auth_rel_plugin: AuthRelationshipPlugin,
     space_context: BusinessSpaceContextProtocol,
-    # The POST spelling passes the orchestrating seam so an echoed
-    # bot_type=service coding create completes the upgrade; the retiring GET
-    # is plain-bot-only (no engine_properties to echo), so it passes nothing
-    # and keeps its historical behavior.
-    service_intake_seam: ServiceIntakeSeam | None = None,
 ) -> Envelope[BotAuthStatus] | JSONResponse:
     """Validate the echoed attributes, poll Passport, and map the outcome.
 
@@ -1227,12 +1118,10 @@ def _complete_auth_status(
                 deployment_mode=BotCreateDeploymentMode.CLOUD,
                 space_kind=current_space.kind,
                 space_quota=True,
-                service_intake=True,
             ),
             bot_service=bot_service,
             passport_plugin=passport_plugin,
             auth_rel_plugin=auth_rel_plugin,
-            service_intake_seam=service_intake_seam,
         )
     except AuthStatusUnavailableError:
         # The passport service answered with no status at all — typically the
@@ -1282,9 +1171,6 @@ async def poll_bot_auth_status(
     space_context: BusinessSpaceContextProtocol = Injected(
         BusinessSpaceContextProtocol
     ),
-    service_publication_facade: ServicePublicationFacadeProtocol = Injected(
-        ServicePublicationFacadeProtocol
-    ),
 ) -> Envelope[BotAuthStatus]:
     """Poll authorization for a pending creation; the bot is created on ISSUED.
 
@@ -1300,7 +1186,7 @@ async def poll_bot_auth_status(
     the same engine registry check, the same engine/cluster pairing, the same
     personal/service restriction on bot_type, and the same business-space
     resolution. An echoed bot_type "service" coding create completes the
-    same orchestrated upgrade the create endpoint offers.
+    same direct service-create the create endpoint offers.
 
     While the authorization service has no status for the bot yet — the
     Passport is not ready — the poll answers PENDING with a message saying
@@ -1322,7 +1208,6 @@ async def poll_bot_auth_status(
         passport_plugin=passport_plugin,
         auth_rel_plugin=auth_rel_plugin,
         space_context=space_context,
-        service_intake_seam=_FacadeServiceIntakeSeam(service_publication_facade),
     )
 
 
@@ -1330,13 +1215,14 @@ async def poll_bot_auth_status(
     "/{bot_id}/status",
     response_model=Envelope[BotStatus],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_OWN_BOT,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def get_bot_status(
     bot_id: BotIdPath,
     request: Request,
-    owner_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    user_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[BotStatus]:
     """Get a bot's runtime / device readiness."""

@@ -295,7 +295,7 @@ async fn cli_create_session_emits_id_and_session_id_keys() {
     let client = BcsClient::with_token(&server.base_url, &server.token);
 
     let body = client
-        .create_session("g-1", Some("hello"), None, None, None)
+        .create_session("g-1", Some("hello"), None, None, None, None)
         .await
         .expect("create_session should succeed against the in-process server");
 
@@ -326,7 +326,7 @@ async fn cli_list_sessions_returns_items_array_and_group_id() {
 
     // Create one session so the list isn't empty.
     let _ = client
-        .create_session("g-1", Some("title"), None, None, None)
+        .create_session("g-1", Some("title"), None, None, None, None)
         .await
         .unwrap();
 
@@ -363,7 +363,7 @@ async fn cli_get_session_returns_full_row() {
     let client = BcsClient::with_token(&server.base_url, &server.token);
 
     let created = client
-        .create_session("g-1", None, None, None, None)
+        .create_session("g-1", None, None, None, None, None)
         .await
         .unwrap();
     let sid = created.get("id").and_then(|v| v.as_str()).unwrap();
@@ -384,7 +384,7 @@ async fn cli_session_messages_returns_array() {
     let client = BcsClient::with_token(&server.base_url, &server.token);
 
     let created = client
-        .create_session("g-1", None, None, None, None)
+        .create_session("g-1", None, None, None, None, None)
         .await
         .unwrap();
     let sid = created.get("id").and_then(|v| v.as_str()).unwrap();

@@ -30,7 +30,28 @@ from agentclaw.community.core.skill_center.local_skill_upload_service_protocol i
 
 
 class DeviceSkillPackageUpload(SkillPackageUploadPort):
-    """The ARCA upload road: package files onto the bot's device."""
+    """The ARCA upload road: package files onto the bot's device.
+
+    Two methods. What a call looks like from the ``skills`` materialiser::
+
+        await port.upload_local_skill(
+            bot_id="bot_42", owner_id="usr_owner",
+            actor_id="usr_collaborator",
+            package=b"PK\x03\x04...",     # the validated canonical zip
+        )                                   # -> the service's result dict
+
+        await port.installed_package_digest(
+            bot=ctx.bot, bot_id="bot_42", owner_id="usr_owner",
+            name="code-review",             # the skill's manifest name
+        )   # -> "sha256:9f86d081..." when that skill is installed,
+            #    None when it is not — which the materialiser reads as
+            #    "nothing to compare", so the entry is written.
+
+    Bound as ``MaterialiserPorts.upload_service`` for the ARCA family. Its
+    platform-managed counterpart is ``PlatformSkillPackageUpload`` in
+    ``managed_files/ports.py``; unlike the activation delegates, the two share
+    no body — only the port and the skill row they record.
+    """
 
     def __init__(self, inner: LocalSkillUploadServiceProtocol) -> None:
         self._inner = inner

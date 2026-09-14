@@ -47,6 +47,11 @@ export function GroupChatBubble({
   }
   const sender = resolveSender(message, group, participants, userAvatarUrl, userIdentityId, userIdentityName);
   const messageText = getMessageText(message);
+  // 多 Bot 并发输出时每条流式消息各自展示「…」/光标：streaming 态按消息自身 status 判定，
+  // 不再用 isLastMessage 当代理（旧实现只认最后一条，并发中的其他 Bot 气泡不显示动画）。
+  // 保留 isLastMessage && isRequesting 兜底，覆盖最后一条消息 status 尚未进入 streaming 的时序间隙。
+  const isStreamingMessage =
+    message.role === 'assistant' && (message.status === 'streaming' || (isLastMessage && isRequesting));
   const messageActionsProps = {
     onCopy: () => onCopy?.(messageText),
     onEdit,
@@ -82,10 +87,8 @@ export function GroupChatBubble({
           blocks={getMessageBlocks(message, sessionId)}
           preset="openclaw"
           markdown={{ preset: 'full', extensions: [aixUiPlugin, fileRefPlugin] }}
-          tool={{ defaultCollapsed: !(isLastMessage && isRequesting) }}
-          isStreaming={
-            isLastMessage && message.role === 'assistant' && (isRequesting || message.status === 'streaming')
-          }
+          tool={{ defaultCollapsed: !isStreamingMessage }}
+          isStreaming={isStreamingMessage}
           actions={message.role === 'assistant' ? messageActions : undefined}
         />
       </MessageSenderLayout>

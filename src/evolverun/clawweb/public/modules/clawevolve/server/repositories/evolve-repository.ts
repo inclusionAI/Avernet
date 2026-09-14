@@ -246,7 +246,10 @@ export type AccessibleEvolveBotRuntime = {
 };
 
 export class EvolveRepository {
-  constructor(private readonly db: IDatabase) {}
+  constructor(
+    private readonly db: IDatabase,
+    private readonly botDb: Pick<IDatabase, "query"> = db,
+  ) {}
 
   async createTaskLogArchive(input: { archiveId: string; taskId: string; requestedBy: string }): Promise<EvolveTaskLogArchiveRow> {
     // ce_task_log_archives deliberately stores portable unix seconds in BIGINT
@@ -1647,7 +1650,7 @@ export class EvolveRepository {
   }
 
   async listEvolveBots(userId: string): Promise<EvolveBotOption[]> {
-    const rows = await this.db.query<{ id: number; bot_id: string; bot_name: string | null; env: string | null; active_engine: string | null; bot_type: string | null }>(
+    const rows = await this.botDb.query<{ id: number; bot_id: string; bot_name: string | null; env: string | null; active_engine: string | null; bot_type: string | null }>(
       `SELECT id, bot_id, bot_name, env, active_engine, bot_type FROM ac_bots
        WHERE (owner_id = ? OR entity_id = ?) AND is_delete = 0
          AND bot_id IS NOT NULL AND bot_id <> '' ORDER BY id DESC`,
@@ -1663,7 +1666,7 @@ export class EvolveRepository {
     const owned = (await this.listEvolveBots(userId)).map((bot) => ({
       ...bot, ownerId: userId, accessType: "owner" as const,
     }));
-    const collaborated = await this.db.query<{
+    const collaborated = await this.botDb.query<{
       bot_id: string; bot_name: string | null; env: string | null;
       active_engine: string | null; bot_type: string | null; owner_id: string | null;
     }>(
@@ -1696,7 +1699,7 @@ export class EvolveRepository {
   ): Promise<AccessibleEvolveBotRuntime | null> {
     const owned = await this.resolveOwnedEvolveBotRuntime(userId, botId, env);
     if (owned) return { runtime: owned, ownerId: userId, accessType: "owner" };
-    const collaborator = (await this.db.query<{ owner_id: string | null }>(
+    const collaborator = (await this.botDb.query<{ owner_id: string | null }>(
       `SELECT c.owner_id
        FROM ac_bot_collaborator c
        JOIN ac_bots b ON b.bot_id = c.bot_id
@@ -1734,7 +1737,7 @@ export class EvolveRepository {
   }
 
   private async resolveOwnedEvolveBotRuntime(userId: string, botId: string, env?: string): Promise<EvolveBotRuntime | null> {
-    const rows = await this.db.query<{
+    const rows = await this.botDb.query<{
       active_engine: string | null; bot_type: string | null; bot_status: string | null; binding_id: string | number | null;
       device_provider: string | null; device_id: string | null;
       device_props: unknown; binding_status: string | null; env: string | null;
@@ -1770,7 +1773,7 @@ export class EvolveRepository {
     const arcaInstanceId = typeof rawArcaInstanceId === "string" || typeof rawArcaInstanceId === "number"
       ? String(rawArcaInstanceId).trim() || null
       : null;
-    const publishedRows = await this.db.query<{ published_count: number | string | Buffer }>(
+    const publishedRows = await this.botDb.query<{ published_count: number | string | Buffer }>(
       `SELECT COUNT(*) AS published_count
        FROM ac_bot_publish p
        JOIN ac_bots b ON b.id = p.source_bot_pk AND b.env = p.env

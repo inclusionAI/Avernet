@@ -3,7 +3,6 @@ use std::sync::{Arc, Mutex};
 
 use bcs_bot_store::{MemoryBotRepo, PersistentBotRepo};
 use bcs_bot_store::provider::DbProviderStore;
-use bcs_cache_local::InMemoryCachePlugin;
 use bcs_db_api::{
     DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement,
     DbTransactionStep, DbTransactionStepResult, DbValue,
@@ -91,7 +90,7 @@ impl DbPlugin for ScriptedDb {
 }
 
 fn repository(db: Arc<ScriptedDb>) -> PersistentBotRepo {
-    PersistentBotRepo::with_plugins(Arc::new(InMemoryCachePlugin::new()), db)
+    PersistentBotRepo::new(db)
 }
 
 fn warning<'a>(events: &'a [Value], message: &str) -> &'a Value {

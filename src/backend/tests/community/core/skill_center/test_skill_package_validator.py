@@ -86,10 +86,16 @@ def test_directory_and_zip_ignore_metadata_before_applying_file_limits(
     validator = SkillPackageValidator(SkillParser())
     manifest = _skill_md()
     monkeypatch.setattr(package_module, "MAX_FILES", 2)
+    monkeypatch.setattr(package_module, "MAX_FILE_BYTES", 100)
     entries = [
         ("weather/SKILL.md", manifest),
         ("weather/script.py", b"pass"),
         ("weather/.DS_Store", b"metadata"),
+        ("weather/.git/config", b"metadata"),
+        (
+            "weather/.git/objects/pack/large.pack",
+            b"x" * 101,
+        ),
         ("__MACOSX/._SKILL.md", b"metadata"),
         ("weather/__pycache__/script.pyc", b"metadata"),
     ]

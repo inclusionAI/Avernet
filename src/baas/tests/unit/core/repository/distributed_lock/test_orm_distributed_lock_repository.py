@@ -355,6 +355,9 @@ class TestTryAcquireLock:
 
     def test_acquire_emits_mysql_upsert_with_bindparams(self):
         repo, mock_session = _make_repo("mysql")
+        # All executes (precheck SELECT, upsert, confirm read) return this row.
+        # The precheck sees holder-A == caller → not held_by_other → falls
+        # through to the upsert + confirming read.
         mock_session.execute.return_value = _make_exec_result(
             _make_model(lock_holder="holder-A", expire_time=FUTURE)
         )
@@ -364,9 +367,11 @@ class TestTryAcquireLock:
         )
 
         assert result is True
-        assert mock_session.execute.call_count == 2
+        # precheck SELECT + upsert + confirming read
+        assert mock_session.execute.call_count == 3
 
-        upsert_stmt = mock_session.execute.call_args_list[0][0][0]
+        # call_args_list[0] is the precheck SELECT; [1] is the upsert.
+        upsert_stmt = mock_session.execute.call_args_list[1][0][0]
         compiled = upsert_stmt.compile(dialect=mysql.dialect())
         sql_text = str(compiled)
 
@@ -404,7 +409,8 @@ class TestTryAcquireLock:
         )
 
         assert result is True
-        upsert_stmt = mock_session.execute.call_args_list[0][0][0]
+        # [0] = precheck SELECT, [1] = upsert.
+        upsert_stmt = mock_session.execute.call_args_list[1][0][0]
         compiled = upsert_stmt.compile(dialect=sqlite.dialect())
         sql_text = str(compiled)
 
@@ -431,7 +437,8 @@ class TestTryAcquireLock:
             lock_name="cf-lock", lock_holder="holder-A", expire_time=FUTURE
         )
 
-        confirm_stmt = mock_session.execute.call_args_list[1][0][0]
+        # [0] = precheck SELECT, [1] = upsert, [2] = confirming read.
+        confirm_stmt = mock_session.execute.call_args_list[2][0][0]
         compiled = confirm_stmt.compile(dialect=mysql.dialect())
         assert "SELECT" in str(compiled)
         assert "ac_lock_table" in str(compiled)
@@ -450,6 +457,8 @@ class TestTryAcquireLock:
 
     def test_acquire_returns_false_when_held_by_other(self):
         repo, mock_session = _make_repo("mysql")
+        # Precheck returns a row held by another, unexpired caller: the
+        # fail-fast path returns False without dispatching the upsert.
         mock_session.execute.return_value = _make_exec_result(
             _make_model(lock_holder="holder-B", expire_time=FUTURE)
         )
@@ -459,7 +468,11 @@ class TestTryAcquireLock:
         )
 
         assert result is False
-        # No rollback on a clean not-acquired outcome.
+        # Only the precheck SELECT was dispatched; no upsert, no confirming read.
+        assert mock_session.execute.call_count == 1
+        precheck_stmt = mock_session.execute.call_args_list[0][0][0]
+        assert "SELECT" in str(precheck_stmt.compile(dialect=mysql.dialect()))
+        # No rollback on a clean fail-fast outcome.
         mock_session.rollback.assert_not_called()
 
     def test_acquire_returns_false_when_confirm_read_missing(self):
@@ -496,7 +509,11 @@ class TestTryAcquireLock:
         orig.__str__.return_value = (
             "Lock wait timeout exceeded; try restarting transaction"
         )
-        mock_session.execute.side_effect = SADatabaseError("INSERT ...", {}, orig)
+        # Precheck SELECT succeeds (no existing row); the upsert then hits 1205.
+        mock_session.execute.side_effect = [
+            _make_exec_result(None),
+            SADatabaseError("INSERT ...", {}, orig),
+        ]
 
         result = repo.try_acquire_lock(
             lock_name="busy-lock", lock_holder="holder-A", expire_time=FUTURE
@@ -512,12 +529,159 @@ class TestTryAcquireLock:
         orig = MagicMock()
         orig.errno = 1146  # not a lock-wait-timeout
         orig.__str__.return_value = "Table doesn't exist"
-        mock_session.execute.side_effect = SADatabaseError("INSERT ...", {}, orig)
+        # Precheck SELECT succeeds; the upsert then raises a non-1205 error.
+        mock_session.execute.side_effect = [
+            _make_exec_result(None),
+            SADatabaseError("INSERT ...", {}, orig),
+        ]
 
         with pytest.raises(SADatabaseError):
             repo.try_acquire_lock(
                 lock_name="err-lock", lock_holder="holder-A", expire_time=FUTURE
             )
+
+    # ── fail-fast precheck branches (U1–U5 + null-expire semantics) ──
+
+    def test_failfast_returns_false_and_skips_upsert_when_held_by_other_unexpired(
+        self,
+    ):
+        # U1: existing row held by another, unexpired → False, only the precheck
+        # SELECT is dispatched, no upsert is compiled.
+        repo, mock_session = _make_repo("mysql")
+        mock_session.execute.return_value = _make_exec_result(
+            _make_model(lock_holder="holder-B", expire_time=FUTURE)
+        )
+
+        result = repo.try_acquire_lock(
+            lock_name="held-lock", lock_holder="holder-A", expire_time=FUTURE
+        )
+
+        assert result is False
+        assert mock_session.execute.call_count == 1
+        precheck_stmt = mock_session.execute.call_args_list[0][0][0]
+        sql_text = str(precheck_stmt.compile(dialect=mysql.dialect()))
+        assert "SELECT" in sql_text
+        assert "ac_lock_table" in sql_text
+        assert "INSERT INTO ac_lock_table" not in sql_text
+        mock_session.rollback.assert_not_called()
+
+    def test_failfast_passes_when_no_existing_row_then_acquires(self):
+        # U2: precheck sees no row → falls through → upsert → confirm shows self.
+        repo, mock_session = _make_repo("mysql")
+        mock_session.execute.side_effect = [
+            _make_exec_result(None),
+            _make_exec_result(
+                _make_model(lock_holder="holder-A", expire_time=FUTURE)
+            ),
+            _make_exec_result(
+                _make_model(lock_holder="holder-A", expire_time=FUTURE)
+            ),
+        ]
+
+        result = repo.try_acquire_lock(
+            lock_name="free-lock", lock_holder="holder-A", expire_time=FUTURE
+        )
+
+        assert result is True
+        assert mock_session.execute.call_count == 3
+        precheck_stmt = mock_session.execute.call_args_list[0][0][0]
+        assert "SELECT" in str(precheck_stmt.compile(dialect=mysql.dialect()))
+        upsert_stmt = mock_session.execute.call_args_list[1][0][0]
+        assert "INSERT INTO ac_lock_table" in str(
+            upsert_stmt.compile(dialect=mysql.dialect())
+        )
+
+    def test_failfast_passes_when_existing_row_expired(self):
+        # U3: existing row held by another but expired → precheck falls through
+        # → upsert takes over → confirm shows the new holder.
+        repo, mock_session = _make_repo("mysql")
+        mock_session.execute.side_effect = [
+            _make_exec_result(_make_model(lock_holder="holder-B", expire_time=PAST)),
+            _make_exec_result(
+                _make_model(lock_holder="holder-A", expire_time=FUTURE)
+            ),
+            _make_exec_result(
+                _make_model(lock_holder="holder-A", expire_time=FUTURE)
+            ),
+        ]
+
+        result = repo.try_acquire_lock(
+            lock_name="expired-lock", lock_holder="holder-A", expire_time=FUTURE
+        )
+
+        assert result is True
+        assert mock_session.execute.call_count == 3
+
+    def test_failfast_passes_when_existing_row_same_holder(self):
+        # U4: existing row held by the same caller → precheck falls through
+        # → upsert renews → confirm shows self.
+        repo, mock_session = _make_repo("mysql")
+        mock_session.execute.side_effect = [
+            _make_exec_result(
+                _make_model(lock_holder="holder-A", expire_time=FUTURE)
+            ),
+            _make_exec_result(
+                _make_model(lock_holder="holder-A", expire_time=FUTURE)
+            ),
+            _make_exec_result(
+                _make_model(lock_holder="holder-A", expire_time=FUTURE)
+            ),
+        ]
+
+        result = repo.try_acquire_lock(
+            lock_name="renew-lock", lock_holder="holder-A", expire_time=FUTURE
+        )
+
+        assert result is True
+        assert mock_session.execute.call_count == 3
+
+    def test_toctou_upsert_guard_still_returns_false_when_confirm_read_shows_other(
+        self,
+    ):
+        # U5: precheck sees no row, but a concurrent caller grabs the lock
+        # before the upsert (TOCTOU). The upsert's CASE guard makes it a no-op,
+        # the confirming read shows the other holder → False. Correctness does
+        # not depend on the precheck.
+        repo, mock_session = _make_repo("mysql")
+        mock_session.execute.side_effect = [
+            _make_exec_result(None),
+            _make_exec_result(
+                _make_model(lock_holder="holder-A", expire_time=FUTURE)
+            ),
+            _make_exec_result(
+                _make_model(lock_holder="holder-B", expire_time=FUTURE)
+            ),
+        ]
+
+        result = repo.try_acquire_lock(
+            lock_name="race-lock", lock_holder="holder-A", expire_time=FUTURE
+        )
+
+        assert result is False
+        assert mock_session.execute.call_count == 3
+        mock_session.rollback.assert_not_called()
+
+    def test_failfast_skips_when_existing_row_has_null_expire_time(self):
+        # expire_time IS NULL is treated as "held, only same holder may
+        # overwrite" (aligned with the upsert acquirable predicate): the
+        # precheck does not short-circuit on a null expire row held by another.
+        repo, mock_session = _make_repo("mysql")
+        mock_session.execute.side_effect = [
+            _make_exec_result(_make_model(lock_holder="holder-B", expire_time=None)),
+            _make_exec_result(
+                _make_model(lock_holder="holder-A", expire_time=FUTURE)
+            ),
+            _make_exec_result(
+                _make_model(lock_holder="holder-A", expire_time=FUTURE)
+            ),
+        ]
+
+        result = repo.try_acquire_lock(
+            lock_name="no-ttl-lock", lock_holder="holder-A", expire_time=FUTURE
+        )
+
+        assert result is True
+        assert mock_session.execute.call_count == 3
 
 
 # ==================== DistributedLockRepository Protocol Tests ====================
@@ -701,11 +865,15 @@ class TestEdgeCases:
         assert result.lock_holder == ""
 
     def test_consecutive_try_acquire_different_names(self, repository, mock_session):
-        # Each try_acquire issues upsert + confirming read; both executes for
-        # one logical call report that call's caller as the holder.
+        # Each try_acquire now issues precheck + upsert + confirming read; the
+        # precheck sees the same holder as the caller (not held_by_other) and
+        # falls through, so both executes for one logical call report that
+        # call's caller as the holder.
         mock_session.execute.side_effect = [
             _make_exec_result(_make_model(lock_holder="h1", expire_time=FUTURE)),
             _make_exec_result(_make_model(lock_holder="h1", expire_time=FUTURE)),
+            _make_exec_result(_make_model(lock_holder="h1", expire_time=FUTURE)),
+            _make_exec_result(_make_model(lock_holder="h2", expire_time=FUTURE)),
             _make_exec_result(_make_model(lock_holder="h2", expire_time=FUTURE)),
             _make_exec_result(_make_model(lock_holder="h2", expire_time=FUTURE)),
         ]
