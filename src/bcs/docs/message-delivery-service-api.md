@@ -3,6 +3,16 @@
 本文描述单实例消息拥塞控制的后端契约，不包含 Workbench 前端实现。
 详细设计见 [设计方案](plans/2026-09-04-bcs-message-congestion-control-design.md)。
 
+## Provider 运行 ID 与队列尝试 ID
+
+`bcs_message_deliveries.run_id` 标识逻辑运行，`request_id` 标识当前发送尝试。
+Worker 的 `chat.send` 帧 ID 保持为 attempt request ID；HTTP Provider 适配器
+将对外 `chat.send.id` 映射为 canonical `run_id`，回调和 SSE 继续关联该运行。
+WebSocket 帧 ID 以及 Provider 的 inject、history、abort 请求 ID 不受影响。
+发送结果回写仍校验当前 attempt request ID，禁止旧 attempt 覆盖新 attempt。
+复用 run ID 不代表 Provider 支持幂等：仅证明未发出的请求允许安全自动重试，
+Unknown 不自动重发。本调整不新增 DB 字段，不要求 Provider 升级协议。
+
 ## Master 调度与接管
 
 多实例部署复用已有 `LeaderElectionPort`，只允许当前 master 执行队列恢复、

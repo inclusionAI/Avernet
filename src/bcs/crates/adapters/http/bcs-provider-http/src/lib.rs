@@ -340,20 +340,26 @@ impl BotDeliveryPort for HttpProviderTransport {
                 | BotDeliveryKind::TaskMessage
                 | BotDeliveryKind::TaskResult
         ) {
-            let BcsFrame::Request(request) = &cmd.frame else {
+            let BcsFrame::Request(_) = &cmd.frame else {
                 return Err(ServiceError::InvalidOperation {
                     message: "chat.send provider delivery requires request frame".to_string(),
                     request_id: None,
                 });
             };
-            if request.id != cmd.run_id {
+        }
+        let mut body = provider_request_from_frame(&cmd.target, &cmd.frame, self.chat_run_timeout_ms)?;
+        if body.method == "chat.send" {
+            if cmd.run_id.is_empty() {
                 return Err(ServiceError::InvalidOperation {
-                    message: "chat.send frame id must match run_id".to_string(),
-                    request_id: Some(request.id.clone()),
+                    message: "chat.send provider delivery requires canonical run_id".to_string(),
+                    request_id: Some(body.id.clone()),
                 });
             }
+            // Queue frames carry a per-attempt request id. Provider requests,
+            // callbacks and SSE contexts use the canonical run id instead.
+            // Do not rewrite non-running requests (inject/history/abort).
+            body.id = cmd.run_id.clone();
         }
-        let body = provider_request_from_frame(&cmd.target, &cmd.frame, self.chat_run_timeout_ms)?;
         let provider_id = body.to_bot.provider_id.clone();
         let provider_bot_ref = body.to_bot.provider_bot_ref.clone();
         let method = body.method.clone();

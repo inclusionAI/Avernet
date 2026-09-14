@@ -755,7 +755,10 @@ async fn provider_delivery_logs_policy_rejection_with_provider_url_ip_and_reason
 
 #[tokio::test]
 async fn provider_delivery_protocol2_sse_ingests_events() {
-    let app = Router::new().route("/webhook", post(capture_sse));
+    let app = Router::new().route("/webhook", post(|Json(body): Json<Value>| async move {
+        assert_eq!(body["id"], "run-sse");
+        capture_sse().await
+    }));
     let (webhook_url, server) = spawn_server(app).await;
 
     let message_flow = Arc::new(RecordingMessageFlow::default());
@@ -778,7 +781,7 @@ async fn provider_delivery_protocol2_sse_ingests_events() {
             target: provider_target_with_protocol(webhook_url, "2.0"),
             run_id: "run-sse".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(
-                "run-sse",
+                "attempt-sse-1",
                 "chat.send",
                 Some(json!({
                     "session_key": "group:sse",
@@ -869,7 +872,7 @@ async fn provider_delivery_protocol2_task_kinds_sse_ingest_events() {
                 target: provider_target_with_protocol(webhook_url.clone(), "2.0"),
                 run_id: run_id.clone(),
                 frame: BcsFrame::Request(RequestFrame::new(
-                    run_id.clone(),
+                    format!("attempt-{suffix}-1"),
                     "chat.send",
                     Some(json!({
                         "session_key": "group:sse",
@@ -1151,7 +1154,7 @@ async fn provider_delivery_posts_chat_inject_body_with_bcn_group_id() {
     let result = transport
         .deliver(BotDeliveryCommand {
             target: provider_target(webhook_url),
-            run_id: "run-2".to_string(),
+            run_id: "logical-inject-run".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(
                 "run-2",
                 "chat.inject",
@@ -1206,7 +1209,7 @@ async fn provider_delivery_posts_chat_inject_body_with_bcn_group_id() {
 }
 
 #[tokio::test]
-async fn provider_delivery_rejects_chat_send_when_frame_id_differs_from_run_id() {
+async fn provider_delivery_maps_attempt_frame_id_to_canonical_run_id() {
     let captured: CapturedState = Arc::new(Mutex::new(None));
     let app = Router::new()
         .route("/webhook", post(capture_ack))
@@ -1214,7 +1217,7 @@ async fn provider_delivery_rejects_chat_send_when_frame_id_differs_from_run_id()
     let (webhook_url, server) = spawn_server(app).await;
 
     let transport = HttpProviderTransport::allowing_private_networks_for_tests();
-    let err = transport
+    let result = transport
         .deliver(BotDeliveryCommand {
             target: provider_target(webhook_url),
             run_id: "run-1".to_string(),
@@ -1233,11 +1236,34 @@ async fn provider_delivery_rejects_chat_send_when_frame_id_differs_from_run_id()
             provider_bypass_headers: Vec::new(),
         })
         .await
-        .expect_err("chat.send frame id must match run_id");
+        .expect("queue attempt id must not prevent provider delivery");
 
-    assert!(err.to_string().contains("chat.send frame id"));
+    assert!(result.delivered);
+    let request = captured.lock().await.clone().unwrap();
+    assert_eq!(request.body["id"], "run-1");
+    assert_eq!(request.body["method"], "chat.send");
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn provider_delivery_rejects_empty_canonical_run_before_network_io() {
+    let captured: CapturedState = Arc::new(Mutex::new(None));
+    let app = Router::new()
+        .route("/webhook", post(capture_ack))
+        .with_state(captured.clone());
+    let (webhook_url, server) = spawn_server(app).await;
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+    let error = transport.deliver(BotDeliveryCommand {
+        target: provider_target(webhook_url),
+        run_id: String::new(),
+        frame: BcsFrame::Request(RequestFrame::new("attempt-1", "chat.send", Some(json!({})))),
+        delivery_kind: BotDeliveryKind::Send,
+        provider_transport: Default::default(),
+        provider_bypass_headers: Vec::new(),
+    }).await.expect_err("canonical run identity is required");
+    assert!(error.to_string().contains("requires canonical run_id"));
     assert!(captured.lock().await.is_none());
-
     server.abort();
 }
 
@@ -1649,7 +1675,7 @@ async fn provider_delivery_2_0_chat_send_advertises_sse_and_binds_json_fallback(
             target: provider_target_v2(webhook_url),
             run_id: "run-sse".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(
-                "run-sse",
+                "attempt-sse-1",
                 "chat.send",
                 Some(json!({
                     "bcs_session_id": "group-1:feedbeef",
@@ -1698,7 +1724,7 @@ async fn provider_delivery_2_0_chat_send_honors_callback_preference() {
             target: provider_target_v2(webhook_url),
             run_id: "run-callback".to_string(),
             frame: BcsFrame::Request(RequestFrame::new(
-                "run-callback",
+                "attempt-callback-1",
                 "chat.send",
                 Some(json!({
                     "bcs_session_id": "group-1:feedbeef",
@@ -1715,6 +1741,7 @@ async fn provider_delivery_2_0_chat_send_honors_callback_preference() {
 
     assert!(result.delivered);
     let request = captured.lock().await.clone().unwrap();
+    assert_eq!(request.body["id"], "run-callback");
     assert_eq!(request.protocol_version.as_deref(), Some("2.0"));
     assert_eq!(request.accept.as_deref(), Some("application/json"));
     assert_eq!(request.transport.as_deref(), Some("callback"));

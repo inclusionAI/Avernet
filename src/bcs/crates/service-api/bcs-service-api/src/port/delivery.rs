@@ -16,7 +16,12 @@ pub enum ProviderTransportPreference {
 #[derive(Debug, Clone)]
 pub struct BotDeliveryCommand {
     pub target: BotDeliveryTarget,
+    /// Canonical logical run identity. HTTP Provider chat.send uses this as
+    /// its wire id and callback/SSE correlation key, not the attempt frame id.
     pub run_id: String,
+    /// The frame id may identify a queue attempt and differ from run_id.
+    /// WebSocket delivery preserves it; HTTP Provider normalizes chat.send
+    /// to run_id while preserving ids for non-running requests.
     pub frame: BcsFrame,
     pub delivery_kind: BotDeliveryKind,
     /// Request-scoped transport preference for HTTP Provider `chat.send`.
