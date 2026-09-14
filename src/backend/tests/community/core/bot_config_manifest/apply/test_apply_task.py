@@ -78,6 +78,9 @@ from ._fakes import (
     FakeSkillUploadService,
     FakeStartupScriptService,
     real_validator,
+    arca_only_engine_test,
+    unreachable_platform_ports,
+    unreachable_redeliver,
 )
 from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 
@@ -192,6 +195,9 @@ def _service(db, *, scripts, manifests=None, queue=None):
         git_client_provider=lambda: FakeGitClient(),
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(),
+        is_teclaw=arca_only_engine_test,
+        teclaw_platform_ports_provider=unreachable_platform_ports,
+        redeliver=unreachable_redeliver,
     )
 
 

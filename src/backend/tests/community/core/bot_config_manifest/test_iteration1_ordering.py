@@ -30,6 +30,11 @@ from agentclaw.community.core.bot_config_manifest.apply.triggers import (
     TRIGGER_COLUMN_WIDTH,
 )
 from agentclaw.community.core.bot_config_manifest.capabilities import ManifestSection
+async def _no_redeliver(ctx) -> None:
+    """The closing step, doing nothing. Required on every teclaw strategy —
+    the composition root always binds one — so a test that is not about the
+    redeliver still has to say which one it means."""
+    return None
 
 
 def _ports() -> MaterialiserPorts:
@@ -54,7 +59,8 @@ def test_on_arca_the_script_runs_first() -> None:
 
 def test_on_teclaw_with_the_switch_on_there_is_no_first_boot_ordering() -> None:
     teclaw = TeclawDelivery(
-        platform_managed=True, platform_ports=_ports, device_ports=_ports
+        platform_managed=True, platform_ports=_ports, device_ports=_ports,
+        redeliver=_no_redeliver,
     )
     assert teclaw.steps_for(frozenset({ApplyPhase.ON_CONTAINER})) == ()
     assert {s.construct for s in teclaw.steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))} == {

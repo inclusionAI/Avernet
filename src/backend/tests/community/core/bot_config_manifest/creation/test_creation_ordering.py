@@ -29,6 +29,9 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyStatus,
     EntryOutcome,
 )
+from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    CreationSequence,
+)
 from agentclaw.community.core.bot_config_manifest.create_job import (
     DEFAULT_CREATE_DEADLINE_SECONDS,
     BotCreateWithManifestHandler,
@@ -70,6 +73,9 @@ from ..apply._fakes import (
     FakeSkillUploadService,
     FakeStartupScriptService,
     real_validator,
+    arca_only_engine_test,
+    unreachable_platform_ports,
+    unreachable_redeliver,
 )
 from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 
@@ -229,6 +235,9 @@ def _build(db, *, scripts=None):
         git_client_provider=lambda: FakeGitClient(),
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(),
+        is_teclaw=arca_only_engine_test,
+        teclaw_platform_ports_provider=unreachable_platform_ports,
+        redeliver=unreachable_redeliver,
     )
     queue.service = applies
 
@@ -275,6 +284,9 @@ def _build(db, *, scripts=None):
         passport_plugin_provider=lambda: _IssuedPassport(),
         bot_service_provider=lambda: None,
         auth_relationship_provider=_RecordedRelationship,
+        # The ARCA order, said rather than defaulted: the composition root,
+        # always passes the delivery strategy's own answer.,
+        creation_sequence=lambda _engine: CreationSequence.CREATE_BETWEEN_PHASES,
     )
     return handler, applies, order, seen_at_creation, scripts
 

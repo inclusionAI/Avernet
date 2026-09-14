@@ -8,9 +8,19 @@ existing parsers — ``get_symlink_mappings``, ``collect_bot_active_mcps`` +
 ``IdentityService.list_*_files`` — and is wired at DI time. Keeping it behind a
 Protocol means the composer needs no cross-module imports and is unit-testable
 with a fake collector.
+
+Every member here is ``@abstractmethod``, and each implementation **inherits**
+the Protocol it serves rather than merely satisfying it structurally — the same
+rule ``core/ports/identity_file_port.py`` and ``apply/registry.py``'s
+``Materialiser`` record. The backend runs no static type checker, so a
+structurally-satisfied Protocol is verified by nothing at all: a renamed or
+dropped method resolves to the inherited ``...`` stub and silently returns
+``None`` mid-compose. Inheriting with abstract members turns that into a
+``TypeError`` at construction, naming the missing method.
 """
 from __future__ import annotations
 
+from abc import abstractmethod
 from typing import Any, Collection, Protocol, runtime_checkable
 
 from agentclaw.community.core.config_compose.models import (
@@ -44,6 +54,7 @@ class PlatformOwnershipReader(Protocol):
     collector asks without knowing the engine.
     """
 
+    @abstractmethod
     def platform_owns(self, req: ComposeRequest) -> bool: ...
 
 
@@ -56,15 +67,19 @@ class ManagedFilesReader(Protocol):
     composer consults it only when the platform owns the compose.
     """
 
+    @abstractmethod
     def identity_files(self, req: ComposeRequest) -> list[CollectedFile]: ...
 
+    @abstractmethod
     def resources(self, req: ComposeRequest) -> list[CollectedFile]: ...
 
+    @abstractmethod
     def skills(self, req: ComposeRequest) -> list[CollectedSkill]:
         """Every local package the platform holds — the collector keeps only
         the active ones."""
         ...
 
+    @abstractmethod
     def skill_files(self, req: ComposeRequest, names: Collection[str]) -> list[CollectedFile]:
         """The named packages' files, as resources refs."""
         ...
@@ -79,22 +94,27 @@ class ComposeInputCollector(Protocol):
     job, not the collector's.
     """
 
+    @abstractmethod
     def skills(self, req: ComposeRequest) -> list[CollectedSkill]:
         """Active skills (shared + user) with container-view sources."""
         ...
 
+    @abstractmethod
     def mcps(self, req: ComposeRequest) -> list[McpComposeInput]:
         """Active MCP servers with merged per-server config (api_key/headers/…)."""
         ...
 
+    @abstractmethod
     def resources(self, req: ComposeRequest) -> list[CollectedFile]:
         """Bot resource files (or URL resources) with their sources."""
         ...
 
+    @abstractmethod
     def identity_files(self, req: ComposeRequest) -> list[CollectedFile]:
         """User/platform-authored identity files (NOT engine-generated ones)."""
         ...
 
+    @abstractmethod
     def cli_tools(self, req: ComposeRequest) -> list[CollectedCliTool]:
         """Platform-managed command-line tools, from ``ac_bot_cli_tool`` (W9).
 
@@ -105,6 +125,7 @@ class ComposeInputCollector(Protocol):
         """
         ...
 
+    @abstractmethod
     def engine_overrides(self, req: ComposeRequest) -> dict[str, Any]:
         """Bot-level engine override config (free-form, engine-interpreted)."""
         ...

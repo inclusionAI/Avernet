@@ -701,6 +701,7 @@ consumed_by:
 internal_dependencies:
   - agentclaw.community.core.base
   - agentclaw.community.core.config_compose.models  # the collector-shaped refs the managed-files reader yields to the teclaw composer (W8)
+  - agentclaw.community.core.config_compose.protocols  # ManagedFilesReader + PlatformOwnershipReader — the two compose seams the managed-files reader inherits, rather than satisfying structurally (W8)
   - agentclaw.community.kernel.bot_config  # OwnershipCategory — the artifact's own category names the managed-files reader answers the composer in (W8)
   - agentclaw.community.plugin_api.object_storage  # the bot-data object store the managed-files store writes a teclaw bot's manifest-delivered files into (W8), and the cli_tools store keeps a bot's tool bytes in (W9)
   - agentclaw.community.core.bot_startup_script

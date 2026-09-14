@@ -155,8 +155,8 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         overrides_reader: ChannelEngineOverridesReader,
         center_store: CanonicalCenterVersionStore,
         cli_tool_repository: BotCliToolRepositoryProtocol,
+        managed_files_reader: ManagedFilesReader,
         local_mcp_registry: LocalMCPRegistry | None = None,
-        managed_files_reader: ManagedFilesReader | None = None,
     ) -> None:
         self._skill_set_service_factory = skill_set_service_factory
         self._mcp_config_service = mcp_config_service
@@ -174,15 +174,20 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         # endpoint that never existed. Injectable for tests.
         self._local_mcp_registry = local_mcp_registry or LocalMCPRegistry()
         # W8: the platform's own copy of a teclaw bot's manifest-delivered
-        # files, and whether the platform owns a given compose. None (the
-        # bare/unit collector) means the engine owns every compose, and every
-        # teclaw branch below answers as it did before W8.
+        # files, and whether the platform owns a given compose. Required, like
+        # the tool repository below: the composition root always binds one, so
+        # an optional reader described a value that is never absent and bought
+        # a ``None`` branch production could not reach. Ownership is still a
+        # per-compose answer — the reader decides it, from the engine family
+        # and the occasion — and a caller that wants every compose engine-owned
+        # passes a reader that says so.
         self._managed_files = managed_files_reader
-        # W9: ``ac_bot_cli_tool``. Required rather than defaulted, unlike the
-        # readers above: this collector missing it is exactly the bug review
-        # found — every production compose returned no tool refs while the
-        # tests, which wired it, passed. A bot with no tools is an empty table,
-        # which is a different thing from a collector that cannot see one.
+        # W9: ``ac_bot_cli_tool``. Required, and the first of the collaborators
+        # here to be made so: this collector missing it is exactly the bug
+        # review found — every production compose returned no tool refs while
+        # the tests, which wired it, passed. A bot with no tools is an empty
+        # table, which is a different thing from a collector that cannot see
+        # one.
         self._cli_tool_repository = cli_tool_repository
 
     # ── platform ownership (W8) ─────────────────────────────────────────
@@ -191,15 +196,12 @@ class ConfigComposerInputCollector(ComposeInputCollector):
 
         Read once per compose from the managed-files reader, which decides
         for its own engine family and from the compose's occasion; ``False``
-        when no reader is bound (the bare/unit collector), for an engine the
-        reader does not serve, for a runtime edit, and while the
-        platform-managed switch is off. The composer turns it into the
+        for an engine the reader does not serve, for a runtime edit, and while
+        the platform-managed switch is off. The composer turns it into the
         artifact's ``ownership`` map; the three file-category branches below
         read the store when it holds and answer as before W8 when it does
         not. The collector itself never names an engine.
         """
-        if self._managed_files is None:
-            return False
         reader = self._managed_files
         return req.memoized("platform_owns", lambda: bool(reader.platform_owns(req)))
 

@@ -53,13 +53,18 @@ class ConfigComposer:
         *,
         mcporter_composer: McporterComposer,
         collector: ComposeInputCollector,
-        stores: dict[str, StoreRef] | None = None,
+        stores: dict[str, StoreRef],
     ) -> None:
         self._mcporter = mcporter_composer
         self._collector = collector
         # store_id -> physical coordinates (location only, no credentials). Only
         # the stores actually referenced by a source are embedded in the artifact.
-        self._stores = dict(stores or {})
+        #
+        # Required, not defaulted: the composition root always passes the
+        # deployment's store table, and a composer with none refuses every
+        # artifact that references a store — which is every artifact. The
+        # empty table stays expressible for a caller that means it.
+        self._stores = dict(stores)
 
     def compose(self, req: ComposeRequest) -> BotConfigArtifact:
         """Build the artifact for ``req``. ``engine_ext`` is left to the producer.

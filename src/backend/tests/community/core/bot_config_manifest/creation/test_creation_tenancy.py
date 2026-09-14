@@ -26,6 +26,9 @@ import pytest
 from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     ApplyTaskHandler,
 )
+from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    CreationSequence,
+)
 from agentclaw.community.core.bot_config_manifest.create_job import (
     BotCreateWithManifestHandler,
 )
@@ -141,6 +144,9 @@ def _real_apply_service(manifests):
         FakeSkillUploadService,
         FakeStartupScriptService,
         real_validator,
+        arca_only_engine_test,
+        unreachable_platform_ports,
+        unreachable_redeliver,
     )
 
     engine = create_engine(
@@ -192,6 +198,9 @@ def _real_apply_service(manifests):
         git_client_provider=lambda: FakeGitClient(),
         task_queue_provider=lambda: None,
         bot_repository=_NoBot(),
+        is_teclaw=arca_only_engine_test,
+        teclaw_platform_ports_provider=unreachable_platform_ports,
+        redeliver=unreachable_redeliver,
     )
 
 
@@ -261,6 +270,9 @@ def _job(passport):
         passport_plugin_provider=lambda: passport,
         bot_service_provider=lambda: None,
         auth_relationship_provider=lambda: _RecordedRelationship(),
+        # The ARCA order, said rather than defaulted: the composition root,
+        # always passes the delivery strategy's own answer.,
+        creation_sequence=lambda _engine: CreationSequence.CREATE_BETWEEN_PHASES,
     )
 
 

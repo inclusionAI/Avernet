@@ -987,3 +987,35 @@ class FakeResourceFileService:
             }
         )
         return path in self._exists
+
+
+# ── the delivery seam's required collaborators (W8) ──────────────────────
+#
+# ``BotConfigManifestApplyService`` takes ``is_teclaw``, the platform ports and
+# the closing redeliver as **required** arguments: the composition root binds
+# every one of them, so an optional default would describe a value that is
+# never absent. A rig that only exercises the ARCA family still has to say so,
+# and these three say it — the two that belong to the teclaw path raise if the
+# suite ever reaches them, which is the thing worth catching.
+
+
+def arca_only_engine_test(_engine: str | None) -> bool:
+    """Every bot is ARCA. What ``is_teclaw=None`` used to fall back to."""
+    return False
+
+
+def unreachable_platform_ports():
+    raise AssertionError(
+        "this rig is ARCA-only: the teclaw platform ports are never built"
+    )
+
+
+async def unreachable_redeliver(ctx) -> None:
+    raise AssertionError(
+        "this rig is ARCA-only: the closing redeliver is never reached"
+    )
+
+
+async def no_redeliver(ctx) -> None:
+    """The closing step, doing nothing — for a teclaw rig that is not about it."""
+    return None

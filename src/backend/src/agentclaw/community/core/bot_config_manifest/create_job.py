@@ -316,7 +316,7 @@ class BotCreateWithManifestHandler:
         complete_authorization: Callable[..., Any],
         bot_service_provider: Callable[[], Any],
         auth_relationship_provider: Callable[[], Any],
-        creation_sequence: Optional[Callable[[Optional[str]], CreationSequence]] = None,
+        creation_sequence: Callable[[Optional[str]], CreationSequence],
     ) -> None:
         self._seam_provider = manifest_seam_provider
         self._applies_provider = apply_service_provider
@@ -326,11 +326,12 @@ class BotCreateWithManifestHandler:
         self._bot_service_provider = bot_service_provider
         self._auth_relationship_provider = auth_relationship_provider
         # W8: which order this engine's creation runs in — the delivery
-        # strategy's ``creation_sequence``. Absent (the pre-W8 wiring and the
-        # suites built on it) means ``CREATE_BETWEEN_PHASES``, today's order.
-        self._creation_sequence = creation_sequence or (
-            lambda _engine: CreationSequence.CREATE_BETWEEN_PHASES
-        )
+        # strategy's ``creation_sequence``. Required: the composition root
+        # always binds the strategy's own answer, so the optional default
+        # described a value that is never absent — and it was not an inert
+        # one, because falling back to ``CREATE_BETWEEN_PHASES`` would run a
+        # platform-managed teclaw creation in the container family's order.
+        self._creation_sequence = creation_sequence
 
     @property
     def task_type(self) -> str:

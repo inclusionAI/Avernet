@@ -111,10 +111,10 @@ def test_an_arca_artifact_carries_no_map() -> None:
 
 
 def test_a_teclaw_artifact_from_a_collector_that_owns_nothing_reads_engine() -> None:
-    # The bare collector cannot answer "does the platform own this compose":
-    # every category is the engine's except the two that are the platform's on
-    # every occasion (``mcp``, and ``cli_tools`` since W9) — pre-W8 behaviour
-    # named, whatever the occasion.
+    # A collector that answers "the platform owns no compose": every category
+    # is the engine's except the two that are the platform's on every occasion
+    # (``mcp``, and ``cli_tools`` since W9) — pre-W8 behaviour named, whatever
+    # the occasion.
     for occasion in ComposeOccasion:
         artifact = _composer(_FakeCollector()).compose(_req(occasion=occasion))
         assert artifact.ownership == _ALL_ENGINE, occasion
@@ -149,7 +149,9 @@ def test_the_map_follows_the_operation_not_the_categories() -> None:
 # ── the collector's teclaw branches ────────────────────────────────────────
 
 
-def test_teclaw_without_a_reader_answers_as_before_w8() -> None:
+def test_teclaw_under_a_reader_that_owns_nothing_answers_as_before_w8() -> None:
+    """The default reader in ``_collector`` owns no compose, which is how a
+    deployment with the platform-managed switch off reads."""
     collector = _collector(skill_set_service=_skills_svc([{"git_path": "local://skills-local/x", "name": "x"}]))
     req = _req()
     assert collector.platform_owns(req) is False

@@ -31,6 +31,13 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
 )
 
 
+async def _no_redeliver(ctx) -> None:
+    """The closing step, doing nothing. Required on every teclaw strategy —
+    the composition root always binds one — so a test that is not about the
+    redeliver still has to say which one it means."""
+    return None
+
+
 def _ports(tag: str) -> MaterialiserPorts:
     return MaterialiserPorts(*([tag] * 10))
 
@@ -76,6 +83,7 @@ def test_teclaw_on_puts_every_non_script_construct_before_the_container() -> Non
         platform_managed=True,
         platform_ports=lambda: _ports("store"),
         device_ports=lambda: _ports("device"),
+        redeliver=_no_redeliver,
     )
     pre = teclaw.steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))
     assert {s.construct for s in pre} == {
@@ -104,6 +112,7 @@ def test_teclaw_off_is_the_pre_w8_shape() -> None:
         platform_managed=False,
         platform_ports=lambda: _ports("store"),
         device_ports=lambda: _ports("device"),
+        redeliver=_no_redeliver,
     )
     on = teclaw.steps_for(frozenset({ApplyPhase.ON_CONTAINER}))
     assert {s.construct for s in on} == {
@@ -143,6 +152,7 @@ def test_cli_tools_is_pre_container_on_teclaw_under_either_switch(switch) -> Non
         platform_managed=switch,
         platform_ports=lambda: _ports("store"),
         device_ports=lambda: _ports("device"),
+        redeliver=_no_redeliver,
     )
     step = next(s for s in APPLY_ORDER if s.construct is ManifestCategory.CLI_TOOLS)
     assert teclaw.phase_of(step) is ApplyPhase.PRE_CONTAINER
@@ -163,6 +173,7 @@ def test_a_teclaw_creation_installs_tools_before_it_composes(switch) -> None:
         platform_managed=switch,
         platform_ports=lambda: _ports("store"),
         device_ports=lambda: _ports("device"),
+        redeliver=_no_redeliver,
     )
     pre = teclaw.steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))
     assert ManifestCategory.CLI_TOOLS in {s.construct for s in pre}
@@ -185,6 +196,7 @@ def test_teclaw_always_gets_the_teclaw_cli_port_whatever_the_switch(switch) -> N
         platform_ports=lambda: _ports("store"),
         device_ports=lambda: _ports("device"),
         cli_tool_service=teclaw_cli,
+        redeliver=_no_redeliver,
     )
     ports = teclaw.ports()
     assert ports.cli_tool_service is teclaw_cli
@@ -205,6 +217,7 @@ def test_a_teclaw_strategy_with_no_cli_service_bound_leaves_the_bundle_alone() -
         platform_managed=False,
         platform_ports=lambda: _ports("store"),
         device_ports=lambda: _ports("device"),
+        redeliver=_no_redeliver,
     )
     assert teclaw.ports() == _ports("device")
 
@@ -231,6 +244,7 @@ def test_script_is_pre_container_on_teclaw_under_either_switch(switch) -> None:
         platform_managed=switch,
         platform_ports=lambda: _ports("store"),
         device_ports=lambda: _ports("device"),
+        redeliver=_no_redeliver,
     )
     step = next(s for s in APPLY_ORDER if s.construct is ManifestSection.SCRIPT)
     assert teclaw.phase_of(step) is ApplyPhase.PRE_CONTAINER
@@ -242,8 +256,8 @@ def test_script_is_pre_container_on_teclaw_under_either_switch(switch) -> None:
 def test_both_phases_walk_every_construct_on_every_strategy() -> None:
     for strategy in (
         ArcaDelivery(lambda: _ports("a")),
-        TeclawDelivery(platform_managed=True, platform_ports=lambda: _ports("s"), device_ports=lambda: _ports("d")),
-        TeclawDelivery(platform_managed=False, platform_ports=lambda: _ports("s"), device_ports=lambda: _ports("d")),
+        TeclawDelivery(platform_managed=True, platform_ports=lambda: _ports("s"), device_ports=lambda: _ports("d"), redeliver=_no_redeliver),
+        TeclawDelivery(platform_managed=False, platform_ports=lambda: _ports("s"), device_ports=lambda: _ports("d"), redeliver=_no_redeliver),
     ):
         assert strategy.steps_for(ALL_PHASES) == tuple(
             sorted(APPLY_ORDER, key=lambda s: s.position)
@@ -287,6 +301,7 @@ def test_factory_picks_by_the_engine_authority() -> None:
         is_teclaw=_IS_TECLAW,
         teclaw_platform_managed=False,
         arca_ports=lambda: _ports("a"),
+        redeliver=_no_redeliver,
     )
     assert isinstance(factory.for_engine("openclaw"), ArcaDelivery)
     assert isinstance(factory.for_engine("claude_code"), ArcaDelivery)
@@ -296,13 +311,15 @@ def test_factory_picks_by_the_engine_authority() -> None:
 
 def test_factory_reads_the_switch_once_and_refuses_an_unbound_platform_path() -> None:
     off = DeliveryStrategyFactory(
-        is_teclaw=_IS_TECLAW, teclaw_platform_managed=False, arca_ports=lambda: _ports("a")
+        is_teclaw=_IS_TECLAW, teclaw_platform_managed=False, arca_ports=lambda: _ports("a"),
+        redeliver=_no_redeliver,
     )
     assert not off.for_engine("teclaw").platform_managed
     # On without platform ports is a misconfiguration, not a silent fallback
     # into the container.
     on_unbound = DeliveryStrategyFactory(
-        is_teclaw=_IS_TECLAW, teclaw_platform_managed=True, arca_ports=lambda: _ports("a")
+        is_teclaw=_IS_TECLAW, teclaw_platform_managed=True, arca_ports=lambda: _ports("a"),
+        redeliver=_no_redeliver,
     )
     with pytest.raises(RuntimeError):
         on_unbound.for_engine("teclaw")
@@ -311,6 +328,7 @@ def test_factory_reads_the_switch_once_and_refuses_an_unbound_platform_path() ->
         teclaw_platform_managed=True,
         arca_ports=lambda: _ports("a"),
         teclaw_platform_ports=lambda: _ports("s"),
+        redeliver=_no_redeliver,
     )
     strategy = on.for_engine("teclaw")
     assert strategy.platform_managed

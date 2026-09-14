@@ -42,6 +42,9 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Iterable
 
+from agentclaw.community.core.bot_startup_script.protocols import (
+    TeclawEngineTestProtocol,
+)
 from agentclaw.community.core.config_compose.models import ComposeOccasion
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.bot_management.services.teclaw_publish_task_handler import (
@@ -89,8 +92,17 @@ class TeclawProvisionResult:
     config_artifact: dict[str, Any] | None = None
 
 
-class TeclawProvisionService:
-    """Provisions a teclaw container at bot creation (create + approve)."""
+class TeclawProvisionService(TeclawEngineTestProtocol):
+    """Provisions a teclaw container at bot creation (create + approve).
+
+    Inherits :class:`~agentclaw.community.core.bot_startup_script.protocols.TeclawEngineTestProtocol`
+    — the one-method contract every consumer that only asks "does this engine
+    run in a teclaw container?" depends on, declared away from this class
+    because importing it closes a real import cycle. That protocol module
+    imports nothing but ``abc`` and ``typing``, so naming it as a base here
+    closes nothing; and its member is abstract, so this class stays the single
+    definition of the answer rather than merely resembling it.
+    """
 
     def __init__(
         self,

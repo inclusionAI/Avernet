@@ -33,13 +33,23 @@ from agentclaw.community.core.config_compose.models import (
     ComposeOccasion,
     ComposeRequest,
 )
+from agentclaw.community.core.config_compose.protocols import (
+    ManagedFilesReader,
+    PlatformOwnershipReader,
+)
 #: The engine family this store serves. The reader answers for it alone, so
 #: the collector never has to know which engine a compose is for.
 SERVED_ENGINE = "teclaw"
 
 
-class ManagedFilesComposeReader:
-    """Implements ``PlatformOwnershipReader`` and ``ManagedFilesReader``."""
+class ManagedFilesComposeReader(PlatformOwnershipReader, ManagedFilesReader):
+    """The compose-side reader for both seams the composer asks about.
+
+    Both Protocols are inherited rather than merely satisfied: the composer
+    reaches this object only through DI, so a renamed method here would
+    otherwise surface as an empty category in a bot's artifact rather than as
+    an error. Their members are abstract, so a drop fails at construction.
+    """
 
     def __init__(
         self,

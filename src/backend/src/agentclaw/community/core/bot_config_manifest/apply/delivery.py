@@ -32,6 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from types import MappingProxyType
+from abc import abstractmethod
 from typing import Any, Awaitable, Callable, Mapping, Optional, Protocol
 
 from agentclaw.community.core.ports.activation_port import (
@@ -180,10 +181,17 @@ class DeliveryStrategy(Protocol):
     ``needs_container``).
 
     Implemented by ``ArcaDelivery`` and ``TeclawDelivery`` below, which
-    subclass it explicitly so the implementations are one jump away.
+    subclass it explicitly so the implementations are one jump away — and
+    every member here is ``@abstractmethod``, so that subclassing is load-
+    bearing rather than decorative. The backend runs no static type checker
+    (the reason ``core/ports/identity_file_port.py`` records): without abstract
+    members a family that dropped ``finish`` would inherit the ``...`` stub and
+    return ``None``, silently skipping the closing redeliver of every apply it
+    ran.
     """
 
     @property
+    @abstractmethod
     def family(self) -> str:
         """The engine family's name: ``"arca"`` or ``"teclaw"``.
 
@@ -194,10 +202,12 @@ class DeliveryStrategy(Protocol):
         ...
 
     @property
+    @abstractmethod
     def creation_sequence(self) -> CreationSequence:
         """Which of the two creation orders this family runs."""
         ...
 
+    @abstractmethod
     def phase_of(self, step: ApplyStep) -> ApplyPhase:
         """Which phase this family delivers the step's construct in.
 
@@ -206,6 +216,7 @@ class DeliveryStrategy(Protocol):
         """
         ...
 
+    @abstractmethod
     def steps_for(
         self, phases: frozenset[ApplyPhase] | None = None
     ) -> tuple[ApplyStep, ...]:
@@ -219,6 +230,7 @@ class DeliveryStrategy(Protocol):
         """
         ...
 
+    @abstractmethod
     def needs_container(self) -> bool:
         """Whether any construct of this family lands only after the container.
 
@@ -227,6 +239,7 @@ class DeliveryStrategy(Protocol):
         """
         ...
 
+    @abstractmethod
     def ports(self) -> MaterialiserPorts:
         """The write targets for this family's materialisers.
 
@@ -235,6 +248,7 @@ class DeliveryStrategy(Protocol):
         """
         ...
 
+    @abstractmethod
     async def finish(self, ctx: ApplyContext, report: ApplyReport) -> Optional[str]:
         """Close an apply after every category is written.
 
@@ -377,7 +391,7 @@ class TeclawDelivery(DeliveryStrategy):
         platform_managed: bool,
         platform_ports: Callable[[], MaterialiserPorts],
         device_ports: Callable[[], MaterialiserPorts],
-        redeliver: Optional[Redeliver] = None,
+        redeliver: Redeliver,
         cli_tool_service: Optional[CliToolService] = None,
     ) -> None:
         self._platform_managed = platform_managed
@@ -401,6 +415,11 @@ class TeclawDelivery(DeliveryStrategy):
         # does nothing — so it owns a port, and a port selected by a switch
         # this category ignores is the exact mismatch corrected here.
         self._cli_tool_service = cli_tool_service
+        # Required, not defaulted: the factory always carries one, so the type
+        # said "may be absent" about a value that never is. Whether it *runs*
+        # is the switch's business, below — an absent closing step and a
+        # switched-off family were two ways of writing the same thing, and only
+        # one of them was reachable.
         self._redeliver = redeliver
 
     @property
@@ -452,7 +471,9 @@ class TeclawDelivery(DeliveryStrategy):
         return replace(bundle, cli_tool_service=self._cli_tool_service)
 
     async def finish(self, ctx: ApplyContext, report: ApplyReport) -> Optional[str]:
-        if not self._platform_managed or self._redeliver is None:
+        if not self._platform_managed:
+            # Off, this family runs the ARCA shape: the device-backed ports
+            # projected as they wrote, so there is nothing left to close.
             return None
         return await self._redeliver(ctx)
 
@@ -538,8 +559,8 @@ class DeliveryStrategyFactory:
         is_teclaw: Callable[[Optional[str]], bool],
         teclaw_platform_managed: bool,
         arca_ports: Callable[[], MaterialiserPorts],
+        redeliver: Redeliver,
         teclaw_platform_ports: Optional[Callable[[], MaterialiserPorts]] = None,
-        redeliver: Optional[Redeliver] = None,
         teclaw_cli_tool_service: Optional[Callable[[], CliToolService]] = None,
     ) -> None:
         self._is_teclaw = is_teclaw
@@ -550,6 +571,11 @@ class DeliveryStrategyFactory:
         # a container through the device ports — a misconfiguration should be
         # loud, not a quiet fallback.
         self._teclaw_platform_ports = teclaw_platform_ports
+        # Required: every composition of this factory binds one. ``teclaw_
+        # platform_ports`` above stays optional because it names a real
+        # configuration state — the switch on with nothing bound, which the
+        # guard below refuses loudly — where this one never had a second state
+        # to name.
         self._redeliver = redeliver
         # W9: the teclaw-bound CLI service, handed to every teclaw strategy
         # whatever the switch says. A lazy callable for the reason every other

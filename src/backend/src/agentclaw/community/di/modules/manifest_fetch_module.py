@@ -319,25 +319,16 @@ class ManifestFetchModule(Module):
         ``service_bot_module`` records at its own use: the identity module
         reaches the device dispatcher graph at import time, and this
         module's import must not trigger that chain.
+
+        No drift guard here any more: ``IdentityService`` inherits
+        ``IdentityFilePort`` and the port's members are abstract, so a
+        renamed or dropped method fails when the injector constructs the
+        service, naming the method. This provider used to carry a hand-rolled
+        ``isinstance`` check because the two were related only structurally.
         """
-        from agentclaw.community.core.ports.identity_file_port import (
-            IdentityFilePort,
-        )
         from agentclaw.community.core.services.identity import IdentityService
 
-        def _identity() -> IdentityFilePort:
-            service = injector.get(IdentityService)
-            if not isinstance(service, IdentityFilePort):
-                # Structural check at wiring time: the port has no
-                # implementation relationship to the service, so nothing
-                # else would notice a renamed method until mid-apply. The
-                # drift guard belongs where the two first meet.
-                raise TypeError(
-                    "IdentityService no longer satisfies IdentityFilePort"
-                )
-            return service
-
-        return _identity
+        return lambda: injector.get(IdentityService)
 
     @singleton
     @provider
@@ -401,24 +392,15 @@ class ManifestFetchModule(Module):
         Lazy with a function-level import for the reason the identity
         factory above records: the resource file service module reaches the
         device dispatcher graph at import time, and this module's import
-        must not trigger that chain. Structural check at wiring time for
-        the same reason as there — the port has no implementation
-        relationship to the service, so nothing else would notice a rename
-        until mid-apply.
+        must not trigger that chain. No drift guard here either, and for the
+        same reason as there: ``ResourceFileService`` inherits
+        ``ResourceFilePort``, whose members are abstract.
         """
         from agentclaw.community.core.services.resource_file_service import (
             ResourceFileService,
         )
 
-        def _resources() -> ResourceFilePort:
-            service = injector.get(ResourceFileService)
-            if not isinstance(service, ResourceFilePort):
-                raise TypeError(
-                    "ResourceFileService no longer satisfies ResourceFilePort"
-                )
-            return service
-
-        return _resources
+        return lambda: injector.get(ResourceFileService)
 
     @singleton
     @provider
@@ -561,9 +543,10 @@ class ManifestFetchModule(Module):
         """
         from agentclaw.community.core.bot_config_manifest.cli_tools.bot_service import (
             BotCliToolService,
+            BotLookupPort,
         )
 
-        class _Bots:
+        class _Bots(BotLookupPort):
             """Defers the bot-service lookup to the call, not to DI time."""
 
             def get_bot(self, bot_id: str, owner_id: str) -> dict:

@@ -77,6 +77,7 @@ from ..apply._fakes import (
     build_skill_zip,
     real_validator,
     seeded_object_store,
+    no_redeliver,
 )
 from ..managed_files._fakes import FakeObjectStorage
 from ..managed_files.test_skill_port import FakeSkillRepository, LiveCapabilityReader
@@ -225,6 +226,7 @@ def _build(db):
         is_teclaw=lambda engine: engine == "teclaw",
         teclaw_platform_managed=True,
         teclaw_platform_ports_provider=platform_ports,
+        redeliver=no_redeliver,
     )
     queue.service = applies
 

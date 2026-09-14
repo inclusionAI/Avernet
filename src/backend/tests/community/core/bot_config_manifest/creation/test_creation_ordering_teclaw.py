@@ -55,6 +55,7 @@ from ..apply._fakes import (
     FakeSkillUploadService,
     FakeStartupScriptService,
     real_validator,
+    no_redeliver,
 )
 from ..managed_files._fakes import FakeObjectStorage
 from .test_creation_ordering import _Db, _InlineQueue, _IssuedPassport, _RecordedRelationship
@@ -158,6 +159,7 @@ def _build(db):
         is_teclaw=lambda engine: engine == "teclaw",
         teclaw_platform_managed=True,
         teclaw_platform_ports_provider=platform_ports,
+        redeliver=no_redeliver,
     )
     queue.service = applies
 

@@ -219,10 +219,10 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         task_queue_provider: Callable[[], "TaskQueueService"],
         bot_repository: BotRepository,
         *,
-        is_teclaw: Optional[Callable[[Optional[str]], bool]] = None,
+        is_teclaw: Callable[[Optional[str]], bool],
+        teclaw_platform_ports_provider: Callable[[], MaterialiserPorts],
+        redeliver: Redeliver,
         teclaw_platform_managed: bool = False,
-        teclaw_platform_ports_provider: Optional[Callable[[], MaterialiserPorts]] = None,
-        redeliver: Optional[Redeliver] = None,
     ) -> None:
         self._manifests = manifest_service
         self._applies = apply_repository
@@ -276,13 +276,13 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         # W8: the delivery seam. The factory is the one reader of the
         # platform-managed switch; ARCA's ports are the providers above, held
         # as a thunk so they are resolved per apply like everything else here.
-        # ``is_teclaw`` is the engine authority (``TeclawProvisionService``),
-        # passed in by the DI module; ``None`` — a test constructing the
-        # service without one — makes every bot ARCA, which is the pre-W8
-        # behaviour and never a silent teclaw misroute in production, where
-        # the module always binds it.
+        # ``is_teclaw`` is the engine authority (``TeclawProvisionService``).
+        # It, the platform ports and the redeliver are **required**: the
+        # composition root binds all three, and defaulting ``is_teclaw`` was
+        # not inert — "every bot is ARCA" routed a teclaw apply through the
+        # container ports silently. The switch stays defaulted; off is real.
         self._strategies = DeliveryStrategyFactory(
-            is_teclaw=is_teclaw or (lambda _engine: False),
+            is_teclaw=is_teclaw,
             teclaw_platform_managed=teclaw_platform_managed,
             arca_ports=self._arca_ports,
             teclaw_platform_ports=teclaw_platform_ports_provider,

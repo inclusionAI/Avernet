@@ -34,6 +34,7 @@ taken here.
 """
 from __future__ import annotations
 
+from abc import abstractmethod
 from typing import Any, Callable, Optional, Protocol, Sequence
 
 from agentclaw.community.core.bot_config_manifest.capabilities import (
@@ -82,8 +83,14 @@ class BotLookupPort(Protocol):
     Named rather than imported for the reason ``core/ports/resource_file_port.py``
     records: the concrete bot service reaches the device graph at import time,
     and this package is imported by the DI graph that builds it.
+
+    The one implementation — the deferring adapter the composition root defines
+    beside this surface's provider — **inherits** it, and the member is
+    ``@abstractmethod``, so a rename here fails at DI time rather than on the
+    first management-API call that resolves a bot.
     """
 
+    @abstractmethod
     def get_bot(self, bot_id: str, owner_id: str) -> dict: ...
 
 
