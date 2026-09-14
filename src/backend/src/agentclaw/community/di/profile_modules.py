@@ -107,6 +107,17 @@ def modules_for(profile: DeployProfile) -> list[Module]:
 
         return get_corp_modules()
 
+    if profile is DeployProfile.LOCAL_K8S:
+        # local-k8s = corp sofa boot path with the community local data plugins.
+        # The corp-side registry (modules_bootstrap) is populated by
+        # register_corp_modules(LOCAL_K8S) → install_local_k8s_column() before
+        # build_injector, which registers local_k8s_column() (fork of
+        # corp_column() with the prod data plugins swapped for community
+        # MariaDB/Redis/env). Names no infrastructure.corp module here (B8).
+        from agentclaw.community.di.modules_bootstrap import get_corp_modules
+
+        return get_corp_modules()
+
     if profile in (DeployProfile.TEST, DeployProfile.SINGLEBOX):
         # B11 (3.2): the test/singlebox column is **corp-free** — every concern that
         # the corp-flavored column borrowed from corp is bound to a community/neutral

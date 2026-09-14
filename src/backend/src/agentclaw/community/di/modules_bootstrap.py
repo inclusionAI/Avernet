@@ -79,6 +79,10 @@ def register_corp_modules(profile: DeployProfile) -> None:
         from importlib import import_module
 
         import_module("agentclaw.corp.di.corp_bootstrap").install_corp_column()
+    elif profile is DeployProfile.LOCAL_K8S:
+        from importlib import import_module
+
+        import_module("agentclaw.corp.di.corp_bootstrap").install_local_k8s_column()
     elif profile is DeployProfile.CORP_TEST:
         from importlib import import_module
 

@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator, Generator
 from contextlib import AbstractContextManager, contextmanager
 from typing import Any
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -142,8 +142,37 @@ class MariaDbOrmPlugin(DataSourcePlugin):
         _tables = [t for t in Base.metadata.sorted_tables if t.name in _owned_tables]
         if not _tables:
             raise RuntimeError("No gateway-owned ORM tables registered")
-        for _table in _tables:
-            _table.create(self._sync_engine, checkfirst=True)
+        # Serialize schema bootstrap across workers with a MySQL named lock (same
+        # pattern as backend/baas). One worker builds the schema, the others wait
+        # then skip via checkfirst — avoiding 1050 "already exists" and 1146
+        # "table doesn't exist" under concurrent create_all.
+        lock_name = "gateway_schema_bootstrap"
+        conn = self._sync_engine.connect()
+        try:
+            acquired = conn.execute(
+                text("SELECT GET_LOCK(:name, 120)"), {"name": lock_name}
+            ).scalar()
+            if not acquired:
+                raise RuntimeError(
+                    "MariaDbOrmPlugin: could not acquire named lock for create_all"
+                )
+            for _table in _tables:
+                _table.create(self._sync_engine, checkfirst=True)
+        except Exception as _exc:  # pragma: no cover - multi-worker cold-start race
+            # sofapy boots several workers that create the schema concurrently;
+            # two can pass checkfirst for the same table and one hits "already
+            # exists" (MySQL/MariaDB 1050). The table exists, so treat as success.
+            if "already exists" in str(_exc).lower() or "1050" in str(_exc):
+                logger.warning(
+                    "MariaDbOrmPlugin: table already exists during concurrent "
+                    "create_all (multi-worker race) — treating as success: %s",
+                    _exc,
+                )
+            else:
+                raise
+        finally:
+            conn.execute(text("SELECT RELEASE_LOCK(:name)"), {"name": lock_name})
+            conn.close()
 
         logger.info(
             "MariaDbOrmPlugin: tables created (%s)",

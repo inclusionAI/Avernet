@@ -19,7 +19,7 @@ from collections.abc import AsyncIterator, Generator
 from contextlib import AbstractContextManager, contextmanager
 from typing import Any
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -98,10 +98,19 @@ class MariaDbOrmPlugin(DataSourcePlugin):
         logger.info("MariaDbOrmPlugin engines initialized")
 
     def create_all(self) -> None:
-        """Create all ORM tables using native MySQL/MariaDB dialect."""
+        """Create BAAS-owned ORM tables using native MySQL/MariaDB dialect.
+
+        Only tables with a ``baas_`` prefix are created here. The ``ac_*``
+        tables (``ac_bots`` / ``ac_bot_publish`` / ``ac_entity_device_binding``
+        / ``ac_lock_table``) are owned by the backend's community ``Base.metadata``
+        — its ``BotModel`` is the authoritative, newer schema with ``space_id`` /
+        ``call_type`` / ``caller_config_revision`` / ``avernet_tenant``. If BAAS
+        created an ``ac_bots`` first with its older ``AcBotModel``, the backend
+        would later fail queries against columns it expects but the stale table
+        lacks. Filtering by prefix (rather than listing models) also covers any
+        ``ac_*`` model that other code imports into the shared metadata.
+        """
         _orm_models = [
-            "secbaas.community.core.repository.ac_bot._orm_model",
-            "secbaas.community.core.repository.ac_bot_publish._orm_model",
             "secbaas.community.core.repository.api_gateway._orm_model",
             "secbaas.community.core.repository.arca_ttl._orm_model",
             "secbaas.community.core.repository.bot._orm_model",
@@ -129,8 +138,38 @@ class MariaDbOrmPlugin(DataSourcePlugin):
 
         from secbaas.community.spi.database import Base
 
-        Base.metadata.create_all(self._sync_engine)
-        logger.info("MariaDbOrmPlugin: tables created")
+        baas_tables = [
+            t for t in Base.metadata.sorted_tables if t.name.startswith("baas_")
+        ]
+        # Serialize schema bootstrap across workers with a MySQL named lock, so
+        # one worker builds the whole schema and the others wait, then skip via
+        # checkfirst. Without it, concurrent create_all races produce "already
+        # exists" (1050) and, worse, a worker's startup query can hit a table
+        # before the owning worker has finished creating it (1146).
+        lock_name = "secbaas_schema_bootstrap"
+        conn = self._sync_engine.connect()
+        try:
+            acquired = conn.execute(
+                text("SELECT GET_LOCK(:name, 120)"), {"name": lock_name}
+            ).scalar()
+            if not acquired:
+                raise RuntimeError(
+                    "MariaDbOrmPlugin: could not acquire named lock for create_all"
+                )
+            Base.metadata.create_all(self._sync_engine, tables=baas_tables)
+        except Exception as _exc:  # pragma: no cover - multi-worker cold-start race
+            if "already exists" in str(_exc).lower() or "1050" in str(_exc):
+                logger.warning(
+                    "MariaDbOrmPlugin: table already exists during concurrent "
+                    "create_all (multi-worker race) — treating as success: %s",
+                    _exc,
+                )
+            else:
+                raise
+        finally:
+            conn.execute(text("SELECT RELEASE_LOCK(:name)"), {"name": lock_name})
+            conn.close()
+        logger.info("MariaDbOrmPlugin: BAAS tables created (%d)", len(baas_tables))
 
     def sync_connection(self, datasource_name: str) -> AbstractContextManager[Any]:
         if self._sync_engine is None:

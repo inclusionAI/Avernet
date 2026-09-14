@@ -102,8 +102,6 @@ class SqliteOrmPlugin(DataSourcePlugin):
         This replaces the previous bootstrap-level model import.
         """
         _orm_models = [
-            "secbaas.community.core.repository.ac_bot._orm_model",
-            "secbaas.community.core.repository.ac_bot_publish._orm_model",
             "secbaas.community.core.repository.api_gateway._orm_model",
             "secbaas.community.core.repository.arca_ttl._orm_model",
             "secbaas.community.core.repository.bot._orm_model",
@@ -133,12 +131,30 @@ class SqliteOrmPlugin(DataSourcePlugin):
 
         from secbaas.community.spi.database import Base
 
-        for table in Base.metadata.sorted_tables:
+        # BAAS owns only its `baas_*` tables; the shared `ac_*` tables are owned
+        # by the backend (see the mariadb plugin's create_all for the rationale).
+        baas_tables = [
+            t for t in Base.metadata.sorted_tables if t.name.startswith("baas_")
+        ]
+        for table in baas_tables:
             for col in table.primary_key.columns.values():
                 if str(col.type).upper() == "BIGINT":
                     col.type = Integer()
 
-        Base.metadata.create_all(self._sync_engine)
+        try:
+            Base.metadata.create_all(self._sync_engine, tables=baas_tables)
+        except Exception as _exc:  # pragma: no cover - multi-worker cold-start race
+            # sofapy boots several workers that create the schema concurrently; two
+            # can pass checkfirst for the same table and one hits "already exists"
+            # (MySQL/MariaDB 1050; SQLite analogous). The table exists, so succeed.
+            if "already exists" in str(_exc).lower() or "1050" in str(_exc):
+                logger.warning(
+                    "SqliteOrmPlugin: table already exists during concurrent "
+                    "create_all (multi-worker race) — treating as success: %s",
+                    _exc,
+                )
+            else:
+                raise
 
         logger.info("SqliteOrmPlugin: tables created")
 

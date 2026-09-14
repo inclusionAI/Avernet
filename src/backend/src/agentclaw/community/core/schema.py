@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import Index, MetaData, String, UniqueConstraint
+from sqlalchemy import Index, MetaData, String, UniqueConstraint, text
 from sqlalchemy.engine import Engine
 
 logger = logging.getLogger(__name__)
@@ -99,13 +99,25 @@ _UTF8MB4_BYTES_PER_CHAR = 4
 
 
 def _effective_widths(columns, existing: dict[str, int] | None) -> dict[str, int]:
-    """Each string column's indexed width, honouring any prefix already applied."""
+    """Each string column's indexed width, honouring any prefix already applied.
+
+    ``Text`` columns are included with a default width (65535) so an index
+    built over a TEXT column gets a bounded prefix too — without it, MySQL
+    rejects the CREATE INDEX with "Specified key was too long" (1071). The
+    resulting prefix stays well under the 768-char InnoDB budget.
+    """
+    from sqlalchemy import Text
+
     existing = existing or {}
-    return {
-        col.name: existing.get(col.name, col.type.length)
-        for col in columns
-        if isinstance(col.type, String) and col.type.length
-    }
+    widths: dict[str, int] = {}
+    for col in columns:
+        if existing.get(col.name):
+            widths[col.name] = existing[col.name]
+        elif isinstance(col.type, String) and col.type.length:
+            widths[col.name] = col.type.length
+        elif isinstance(col.type, Text):
+            widths[col.name] = 65535
+    return widths
 
 
 def _prefix_lengths(
@@ -184,12 +196,53 @@ def prepare_for_mysql(metadata: MetaData) -> list[str]:
 
 
 def create_all(engine: Engine, *, mysql: bool = False) -> None:
-    """Create every table on ``engine``. Idempotent (``checkfirst=True``)."""
+    """Create every table on ``engine``. Idempotent (``checkfirst=True``).
+
+    Serializes schema bootstrap across workers. sofapy boots several web
+    workers, each running ``create_all`` concurrently against a fresh schema.
+    Two problems arise without coordination:
+      1. two workers pass checkfirst for the same table at once → "table
+         already exists" (MySQL/MariaDB 1050);
+      2. worse, a worker's ``startup`` phase (e.g. ``_recover_pending_bots``
+         JOINing ``ac_bot_publish``) can query a table before the worker that
+         owns bootstrap has finished creating it → 1146 "table doesn't exist".
+    A MySQL named lock (``GET_LOCK``) makes bootstrap a critical section: one
+    worker builds the whole schema, the others wait, then skip via checkfirst.
+    """
     import_all_models()
-    for metadata in _metadatas():
+    metadatas = _metadatas()
+    lock_name = "agentclaw_schema_bootstrap"
+    conn = None
+    acquired = False
+    try:
         if mysql:
-            adjusted = prepare_for_mysql(metadata)
-            for entry in adjusted:
-                logger.info("schema: MySQL index key capped — %s", entry)
-        metadata.create_all(engine)
-    logger.info("schema: create_all complete")
+            conn = engine.connect()
+            row = conn.execute(
+                text("SELECT GET_LOCK(:name, 120)"), {"name": lock_name}
+            ).scalar()
+            acquired = bool(row)
+            if not acquired:
+                raise RuntimeError(
+                    "schema: could not acquire named lock for concurrent create_all"
+                )
+        for metadata in metadatas:
+            if mysql:
+                adjusted = prepare_for_mysql(metadata)
+                for entry in adjusted:
+                    logger.info("schema: MySQL index key capped — %s", entry)
+            metadata.create_all(engine)
+        logger.info("schema: create_all complete")
+    except Exception as exc:  # pragma: no cover - race only on cold start
+        if "already exists" in str(exc).lower() or "1050" in str(exc):
+            logger.warning(
+                "schema: table already exists during concurrent create_all "
+                "(multi-worker race) — treating as success: %s",
+                exc,
+            )
+        else:
+            raise
+    finally:
+        if mysql and conn is not None:
+            if acquired:
+                conn.execute(text("SELECT RELEASE_LOCK(:name)"), {"name": lock_name})
+            conn.close()
