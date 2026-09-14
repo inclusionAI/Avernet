@@ -8,6 +8,8 @@ import type { BenchTemplateRepository } from "../repositories/bench-template-rep
 import type { BenchRunRepository } from "../repositories/bench-run-repository.js";
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { WorkflowEvolutionRepository } from "../repositories/workflow-evolution-repository.js";
+import { IssueAggregationRepository } from '../repositories/issue-aggregation-repository.js';
+import { repairCandidates, selectRepairCandidates, type RepairSelection } from '../services/evolution/group-repair.js';
 import {
   digestCanonicalJson,
   validateWorkflowEvolutionAnalysisResult,
@@ -2355,6 +2357,9 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!task || !failedStep || failedStep.task_id !== taskId) {
       res.status(404).json({ error: "任务或 Step 不存在" }); return;
     }
+    if ((parseJson(task.config_json) as { applicationMode?: string } | null)?.applicationMode === 'issue_group_repair') {
+      res.status(409).json({ error: 'group_repair_reconfirmation_required', message: '请回到问题组重新核对最新候选建议后发起修复' }); return;
+    }
     if (!new Set(["failed", "canceled"]).has(failedStep.status)) {
       res.status(409).json({ error: `只有失败或已取消的 Step 可以继续执行: ${failedStep.status}` }); return;
     }
@@ -3966,12 +3971,13 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     userId: string,
     suggestions: EvolveSuggestionRow[],
     body: Record<string, unknown>,
+    repairSelection?: RepairSelection,
   ): Promise<{ taskId: string; stepId: string; status: string; reportUrl: string; suggestionIds: string[] } | null> => {
     if (!repo) return null;
-    const workflowId = suggestions[0]?.workflow_id;
+    const workflowId = repairSelection?.workflowId ?? suggestions[0]?.workflow_id;
     const botId = String(body.botId ?? "").trim();
     const botEnv = body.botEnv ? String(body.botEnv) : undefined;
-    if (!workflowId || suggestions.length === 0) { res.status(400).json({ error: "suggestionIds 为必填项" }); return null; }
+    if (!workflowId || (!repairSelection && suggestions.length === 0)) { res.status(400).json({ error: "suggestionIds 为必填项" }); return null; }
     if (!botId) { res.status(400).json({ error: "botId 为必填项" }); return null; }
     const eligible = await repo.listEligibleBotsForSuggestion(userId, workflowId);
     if (!eligible.some((b) => b.botId === botId && (botEnv == null || b.env === botEnv))) {
@@ -3980,7 +3986,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
 
     const suggestionIds = suggestions.map((suggestion) => String(suggestion.id));
-    const existingTasks = await repo.listSuggestionApplyTasks(suggestionIds);
+    const existingTasks = suggestionIds.length ? await repo.listSuggestionApplyTasks(suggestionIds) : [];
     const activeTask = existingTasks.find((task) =>
       ["created", "pending", "dispatching", "dispatched", "running", "applying"].includes(task.status));
     if (activeTask) {
@@ -4046,7 +4052,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       }
     }
 
-    const defaultSpec = suggestions
+    const defaultSpec = repairSelection ? '处理所选问题组建议；先读取当前 YAML，冲突无法确定时停止部署并逐项说明。' : suggestions
       .map((suggestion) => suggestion.fix_spec?.trim() || `${suggestion.failure_signature}（未提供具体修复说明）`)
       .join("\n");
     const applicationSpec = typeof body.applicationSpec === "string" ? body.applicationSpec.trim() : defaultSpec;
@@ -4057,7 +4063,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const edited = applicationSpec !== defaultSpec;
     const taskId = evolveTaskId();
     const stepId = `${taskId}-step-apply`;
-    const taskName = suggestions.length === 1
+    const taskName = repairSelection ? `问题组修复：${repairSelection.candidates.length} 条建议` : suggestions.length === 1
       ? `应用建议：${suggestions[0].failure_signature.slice(0, 40)}`
       : `批量应用 ${suggestions.length} 条工作流建议`;
     const baseUrl = getClawWebPublicBaseUrl();
@@ -4097,18 +4103,21 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       : `[suggestion-apply] batch · ${suggestions.length} suggestions`;
 
     await repo.createTaskWithStep({
+      ...(repairSelection ? { exclusiveWorkflowId: workflowId } : {}),
       task: {
         taskId, taskType: "suggestion_apply", userId, botId, taskName,
+        ...(repairSelection ? { remark: `group-repair:${workflowId}` } : {}),
         configJson: JSON.stringify({
           suggestionId: suggestionIds[0],
           suggestionIds,
           workflowId,
           botId,
           botEnv: botEnv ?? null,
-          applicationMode: "task_guard_orchestrated",
+          applicationMode: repairSelection ? 'issue_group_repair' : "task_guard_orchestrated",
           claimTokenDigest,
           suggestionRevisions,
           applicationInput: {
+            ...(repairSelection ? { repairSelection } : {}),
             workflowId,
             spec: applicationSpec,
             edited,
@@ -4175,6 +4184,51 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     await repo.markDispatched(stepId, dispatchResult.runId, dispatchResult.sessionId, dispatchResult.platformResponse);
     return { taskId, stepId, status: "running", reportUrl, suggestionIds };
   };
+
+  router.get('/group-repairs', asyncHandler(async (req: Request, res: Response) => {
+    if (!db || !repo || !botWorkflowPermissionRepo) { res.status(503).json({ error: 'service_unavailable' }); return; }
+    const userId = resolveRequestUserId(req);
+    if (!userId) { res.status(401).json({ error: 'unauthorized' }); return; }
+    const workflowId = typeof req.query.workflowId === 'string' ? req.query.workflowId : '';
+    const signature = typeof req.query.signature === 'string' ? req.query.signature : '';
+    if (!workflowId || !signature) { res.status(400).json({ error: 'invalid_group' }); return; }
+    if (!await requireWorkflowAccess(req, res, botWorkflowPermissionRepo, workflowId, 'edit')) return;
+    const group = (await new IssueAggregationRepository(db).list(workflowId)).find(group => group.signature === signature);
+    const rows = await db.query<{ task_id: string; config_json: string; status: string; output_json: string | null; summary: string | null }>(
+      `SELECT t.task_id, t.config_json, s.status, s.output_json, s.summary FROM ce_tasks t JOIN ce_steps s ON s.task_id = t.task_id
+       WHERE t.remark = ? ORDER BY t.id DESC LIMIT 50`, [`group-repair:${workflowId}`]);
+    const tasks = rows.flatMap(row => {
+      const config = JSON.parse(row.config_json);
+      if (config.applicationInput?.repairSelection?.signature !== signature) return [];
+      const output = JSON.parse(row.output_json ?? 'null');
+      return [{ taskId: row.task_id, status: row.status, summary: row.summary, selection: config.applicationInput.repairSelection,
+        progress: output?.applicationProgress, outcomes: output?.repairOutcomes ?? [], deployResult: output?.deployResult }];
+    });
+    res.json({ capability: 'issue-group-repair/v1', inputDigest: group?.inputDigest ?? null, candidates: group ? repairCandidates(group) : [],
+      uncovered: group?.sources.filter(source => !source.proposal).length ?? 0,
+      bots: await repo.listEligibleBotsForSuggestion(userId, workflowId), tasks });
+  }));
+
+  router.post('/group-repairs', asyncHandler(async (req: Request, res: Response) => {
+    if (!db || !repo || !botWorkflowPermissionRepo) { res.status(503).json({ error: 'service_unavailable' }); return; }
+    const userId = resolveRequestUserId(req);
+    if (!userId) { res.status(401).json({ error: 'unauthorized' }); return; }
+    const body = req.body ?? {};
+    if (typeof body.workflowId !== 'string' || typeof body.signature !== 'string') { res.status(400).json({ error: 'invalid_group' }); return; }
+    if (!await requireWorkflowAccess(req, res, botWorkflowPermissionRepo, body.workflowId, 'edit')) return;
+    const group = (await new IssueAggregationRepository(db).list(body.workflowId)).find(group => group.signature === body.signature);
+    if (!group) { res.status(409).json({ error: 'group_changed' }); return; }
+    let selection: RepairSelection;
+    try { selection = selectRepairCandidates(group, body.inputDigest, body.candidateIds); }
+    catch (error) { res.status(409).json({ error: error instanceof Error ? error.message : 'invalid_selection' }); return; }
+    try {
+      const result = await dispatchSuggestionApplication(res, userId, [], body, selection);
+      if (result) res.json({ ok: true, ...result });
+    } catch (error) {
+      if (error instanceof Error && ['group_repair_active', 'workflow_spec_unavailable', 'selection_too_large'].includes(error.message)) { res.status(409).json({ error: error.message }); return; }
+      throw error;
+    }
+  }));
 
   router.post("/suggestions/apply-batch", asyncHandler(async (req: Request, res: Response) => {
     if (!repo || !botWorkflowPermissionRepo) {

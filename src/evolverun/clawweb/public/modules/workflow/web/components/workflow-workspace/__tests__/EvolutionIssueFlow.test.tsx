@@ -247,15 +247,15 @@ describe('issue and optimization flow', () => {
     const actionableIssue = screen.getByText('fetch-data', { selector: 'span' }).closest('article')
     expect(actionableIssue).not.toBeNull()
     expect(actionableIssue).toHaveAttribute('data-layout', 'compact-issue-row')
-    expect(within(actionableIssue!).getByText('将超时阈值调整为 90 秒')).toBeInTheDocument()
-    expect(within(actionableIssue!).getByText('将超时阈值调整为 90 秒')).toHaveClass('line-clamp-2')
-    expect(within(actionableIssue!).getByText('建议')).toBeInTheDocument()
+    expect(within(actionableIssue!).getByText(/查看建议总览与原始候选建议/)).toBeInTheDocument()
+    expect(within(actionableIssue!).queryByText('将超时阈值调整为 90 秒')).not.toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '已有建议跟进' })).not.toBeInTheDocument()
     expect(within(actionableIssue!).queryByRole('button', { name: '采纳' })).not.toBeInTheDocument()
 
     await userEvent.click(within(actionableIssue!).getByRole('button', { name: '查看' }))
     const drawer = screen.getByRole('dialog', { name: '问题详情' })
-    expect(within(drawer).getByText('聚合结论')).toBeInTheDocument()
+    expect(within(drawer).getByText('建议总览')).toBeInTheDocument()
+    expect(within(drawer).getByText('本次修复范围')).toBeInTheDocument()
     expect(within(drawer).getByText('已有建议')).toBeInTheDocument()
     expect(within(drawer).getByText('相关分析记录')).toBeInTheDocument()
     expect(within(drawer).getByText('所选分析详情')).toBeInTheDocument()
@@ -263,11 +263,12 @@ describe('issue and optimization flow', () => {
     expect(within(drawer).queryByText('完整问题')).not.toBeInTheDocument()
     expect(within(drawer).queryByText('完整建议')).not.toBeInTheDocument()
     expect(within(drawer).queryByText('本次分析')).not.toBeInTheDocument()
+    await userEvent.click(within(drawer).getByText('历史建议与任务（独立于本次修复）'))
     expect(within(drawer).getByRole('button', { name: '应用建议' })).toBeInTheDocument()
 
     const observingIssue = screen.getByText('render-report', { selector: 'span' }).closest('article')
     expect(observingIssue).not.toBeNull()
-    expect(within(observingIssue!).getByText(/暂无可执行建议/)).toBeInTheDocument()
+    expect(within(observingIssue!).getByText(/查看建议总览与原始候选建议/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '查看建议' })).not.toBeInTheDocument()
   })
 
@@ -338,33 +339,14 @@ describe('issue and optimization flow', () => {
     expect(within(drawer).getByText('未找到所选分析详情，请重试或打开关联运行查看。')).toBeInTheDocument()
   })
 
-  it('selects pending suggestions and applies them as one batch', async () => {
+  it('opens group selection instead of applying the fixed historical suggestions from the list', async () => {
     render(<MemoryRouter><EvolutionTab workflowId="wf-1" section="diagnosis" /></MemoryRouter>)
 
-    await userEvent.click(screen.getByRole('checkbox', { name: '选择 fetch-data 的建议' }))
-    await userEvent.click(screen.getByRole('checkbox', { name: '选择 write-report 的建议' }))
-
-    expect(screen.getByRole('button', { name: '应用 2 条建议' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '采纳' })).not.toBeInTheDocument()
-
-    await userEvent.click(screen.getByRole('button', { name: '应用 2 条建议' }))
-
-    expect(screen.getByRole('heading', { name: '批量应用 2 条建议' })).toBeInTheDocument()
-    expect(screen.getByText(/使用 clawmind-workflow skill/)).toBeInTheDocument()
-    expect(eligibleBots).toHaveBeenLastCalledWith('s-1', true)
-    expect(screen.getByLabelText('本次修复要求')).toHaveValue('将超时阈值调整为 90 秒\n避免无差别重复写入')
-
-    await userEvent.click(screen.getByRole('radio', { name: /修复 Bot/ }))
-    await userEvent.clear(screen.getByLabelText('本次修复要求'))
-    await userEvent.type(screen.getByLabelText('本次修复要求'), '仅修改超时与重试，保留其他配置')
-    applyBatch.mockResolvedValueOnce({ ok: true, status: 'running', taskId: 'EVAP-1' })
-    await userEvent.click(screen.getByRole('button', { name: '确认应用 2 条' }))
-    expect(applyBatch).toHaveBeenCalledWith({
-      suggestionIds: ['s-1', 's-2'],
-      botId: 'bot-1',
-      botEnv: 'pre',
-      applicationSpec: '仅修改超时与重试，保留其他配置',
-    })
+    expect(screen.queryByRole('checkbox', { name: '选择 fetch-data 的建议' })).not.toBeInTheDocument()
+    const issue = screen.getByText('fetch-data', { selector: 'span' }).closest('article')!
+    await userEvent.click(within(issue).getByRole('button', { name: '查看' }))
+    expect(screen.getByRole('region', { name: '本次修复范围' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '应用 2 条建议' })).not.toBeInTheDocument()
   })
 
   it.each([false, true])('shows application progress with diagnosis groups removed=%s', async (hideGroups) => {

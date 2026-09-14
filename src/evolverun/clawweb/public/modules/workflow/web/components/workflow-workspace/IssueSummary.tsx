@@ -6,8 +6,9 @@ export default function IssueSummary({ group }: { group: IssueGroupView }) {
     : group.aggregationStatus === 'too_large' ? '诊断输入过多，暂不能生成完整聚合；请查看单次分析。'
     : '尚未生成聚合结论；下一次运行分析完成后更新。';
   const sources = group.summarySources ?? group.sources;
-  return <section aria-label="聚合结论">
-    <h4 className="text-xs font-semibold text-slate-900">聚合结论</h4>
+  return <section aria-label="建议总览">
+    <h4 className="text-xs font-semibold text-slate-900">建议总览</h4>
+    <p className="mt-2 text-xs text-slate-500">模型汇总的问题原因与依据，仅供参考；实际修复以勾选的原始建议为准。</p>
     {group.aggregationStatus !== 'completed' && <p role="status" className="mt-2 text-xs text-amber-700">{statusText}</p>}
     {group.stale && <p className="mt-2 text-xs text-amber-700">以下为上次聚合，尚未覆盖最新分析。</p>}
     {group.summary && <>
