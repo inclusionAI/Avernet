@@ -15,6 +15,7 @@ import { buildInterventionMessage, type InterventionAction } from "../services/i
 import type { WorkflowSpecRepository } from "../repositories/workflow-spec-repository.js";
 import { ExecutionStepLogRepository } from "../repositories/execution-step-log-repository.js";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
+import { resolveWorkflowActorId } from "@avernet/clawweb-shared/server/services/workflow-access.js";
 
 /**
  * Fix total_duration_ms values that were inflated 1000x by a bug in
@@ -923,7 +924,7 @@ export function createRunsRouter(
       return;
     }
     // Require an authenticated identity; only admins can delete flow runs.
-    if (!req.userId) {
+    if (!resolveWorkflowActorId(req) && !req.isAdmin) {
       res.status(401).json({ error: "Unauthorized", message: "User identity required" });
       return;
     }
