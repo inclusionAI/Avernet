@@ -16,6 +16,7 @@
 - As a 规划策略开发者, I want to receive a stable task context rather than graph internals, so that I can add centralized or relay planning without coupling to graph persistence.
 - As a 派发策略开发者, I want to dispatch one atomic task node at a time, so that decisions, retries and audit are independent per node.
 - As an 执行适配开发者, I want to reuse the TaskRunner single-bot, group and BBS executor structure, so that new executors do not alter graph state rules.
+- As a B 端平台管理员, I want to register tenant-approved TaskPlanner、TaskDispatcher 和 TaskRunner executor extensions and bind them declaratively, so that a task uses a governed strategy combination without exposing implementation choices to TaskCli callers.
 - As a task platform maintainer, I want every graph mutation to enter one report path and every next step to be triggered from a persisted graph event, so that lifecycle progression is traceable and recoverable.
 
 ## Acceptance Criteria
@@ -29,6 +30,10 @@
 - [ ] TaskPlanner, TaskDispatcher and TaskRunner do not directly call each other. They subscribe respectively to `PLAN_REQUESTED`、`DISPATCH_REQUESTED`、`EXECUTION_REQUESTED` events.
 - [ ] Stale planning or dispatch reports are rejected using the source `graph_version`, change no graph state, and are retried only from a later graph event.
 - [ ] Centralized planning, master-slave execution and relay planning work through the same report/event chain; they differ only in registered planning or dispatch strategies.
+- [ ] A third-party plugin may contribute `TaskPlanningStrategy`、`TaskDispatchStrategy` or `TaskRunnerStrategy` (executor extension), each reusing the TaskPlanner/TaskDispatcher/TaskRunner module input and output contracts.
+- [ ] A tenant-scoped, declarative `TaskRuntimeProfile` selects approved strategy and executor versions; TaskService resolves and freezes the selected profile and plugin digests when creating a task.
+- [ ] A TaskDispatcher strategy chain evaluates alternatives before reporting: only the final `TaskNodePatch` is reported; a TaskRunner strategy is selected exactly once by run mode and is never automatically retried by another strategy after an external start attempt.
+- [ ] Plugin adapters cannot directly invoke graph write/query operations, TaskService execution, or another task module; all task facts still enter through `TaskGraphService.report`.
 - [ ] TaskCli exposes an interactive `task [goal]` creation conversation plus `task get` and `task list`; it exposes no `workflow_id`、YAML、task type、run mode、draft/intake ID、graph control or internal execution command.
 - [ ] TaskCli does not use AixUI cards. Its internal clarification draft is not a formal task and is not exposed as a normal user-facing object.
 - [ ] `TaskNode`、`TaskSpec`、`PlanResult`、`TaskNodePatch`、`TaskCallbackData`、`TaskOpResult`、`NodeOpResult` 和 TaskRunner executor 分层被复用；仅 `TaskContext` 作为图谱到 TaskPlanner 的上下文契约。
@@ -40,6 +45,7 @@
 - Graph-state-driven TaskPlanner, TaskDispatcher, TaskRunner and report/event interfaces.
 - Reusable task recognition, four-element clarification and confirmation policy.
 - Centralized, master-slave and relay strategy support.
+- B-side plugin registration, tenant activation and declarative TaskRuntimeProfile strategy composition.
 - Reuse Task graph、TaskDispatcher 和 TaskRunner 的领域模型与 executor 分层。
 - Architecture and contract tests that enforce the intended dependency and event directions.
 
@@ -50,6 +56,7 @@
 - Exposing Workflow, YAML, BBS or run-mode selection to TaskCli callers.
 - Rebuilding Bot, BCS, BCN or external execution infrastructure.
 - Defining the business prompts, model selection or ranking algorithms of specific strategies.
+- Allowing a plugin to reorder the planning → dispatch → execution lifecycle, merge multiple planner results, or introduce TaskCli task commands.
 
 ## Open Questions
 
