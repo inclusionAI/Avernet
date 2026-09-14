@@ -71,6 +71,9 @@ pub async fn message_delivery_repo_port_contract_tests<
     assert!(repo.lookup(DeliveryLookup::BotPending("A".into())).await?.is_empty(),
         "unbound Inject does not block Send drain");
     assert_eq!(repo.lookup(DeliveryLookup::BotPendingContexts("A".into())).await?.len(), 1);
+    assert_eq!(repo.lookup(DeliveryLookup::LanePendingContexts { bot: "A".into(), session: context.message.session_id.clone() }).await?.len(), 1);
+    assert!(repo.lookup(DeliveryLookup::LanePendingContexts { bot: "A".into(), session: "another-session".into() }).await?.is_empty());
+    assert!(repo.lookup(DeliveryLookup::LanePending { bot: "A".into(), session: context.message.session_id.clone() }).await?.is_empty());
     let first = repo
         .admit(command(
             "first",
@@ -78,6 +81,8 @@ pub async fn message_delivery_repo_port_contract_tests<
         ))
         .await?;
     assert_eq!(first.deliveries.len(), 2);
+    assert_eq!(repo.lookup(DeliveryLookup::LanePending { bot: "A".into(), session: first.message.session_id.clone() }).await?.len(), 1);
+    assert!(repo.lookup(DeliveryLookup::LanePending { bot: "A".into(), session: "another-session".into() }).await?.is_empty());
     assert!(
         first
             .deliveries

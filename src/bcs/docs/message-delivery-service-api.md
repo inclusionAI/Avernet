@@ -205,9 +205,13 @@ TTL / safe_retry 可为 null，分别表示不自动过期、不自动安全重�
 - 发送间隔基于保留的上次 send-start 单调时间重算，不重置历史。
 - TTL 只用于新准入的 expire_at，不追溯改写已有记录。
 - pause_dispatch 仅暂停新 send；状态、终态、取消、过期处理继续。
-- 关闭类型或 Bot 后，已准入消息及其回复继续受管 drain；存在未完成工作时
-  对应 Bot 的新请求返回 queue_draining，不能转到 legacy 越过旧队列。
-  未消费 context 需要显式取消/消费，Unknown 必须取得可信结束证据。
+- 关闭类型或 Bot 后，已准入消息及其回复继续受管 drain；存在未完成 Send 时，
+  **同一目标 Bot/session** 的新请求返回 queue_draining，其他 session 不受此 drain 检查阻塞。
+  检查只取一条未完成 Send，不加载整个 lane；孤立 pending_context 不阻塞 drain，
+  当前 lane 的 Send 排空后分批取消这些 context，不清理其他 session 的 context。
+  确实没有 canonical session 的旧入口仍保守检查整个 Bot，不能猜测 session 后放行。
+  Unknown 不自动到期，需要可信结束事件或下述人工处置。受管调度的 Bot 级 max_running
+  仍统计 unknown 的占用；收窄 drain 不代表取消 Bot 并发限制，也不代表 legacy 受共同限流。
 - 开启前仍应确认原 legacy 运行已结束；新策略不接管旧 ChatRun、不补发历史消息。
   未接入类型与受管类型之间不承诺共同限流或有序。
 
@@ -273,9 +277,14 @@ Header 值不进入消息正文、模型、History、状态响应或日志。无
 状态为 `rejected_capacity`，其他目标仍提交。原有 delivered 数不包含尚未发送的目标。
 提供 client message ID 的入口按 Session、发送者及该 ID 去重；响应丢失时查询原结果，
 不要生成新 ID 重发。send 重试复用逻辑 run ID，但每次网络 attempt 使用新 request ID。
-当前自动重试仅用于 send-start 后、transport I/O 前的运行索引注册失败；退避时间持久化，
-次数跨重启保留，context 绑定不变。准备失败直接结束；调用 transport 后的错误/超时进入
-Unknown，不使用此重试预算。TTL 到期不触发运行中请求的强制释放。
+自动重试仅用于可证明没有发送的暂时性失败；退避时间持久化，次数跨重启保留，context 绑定不变。
+准备失败直接结束。transport 用 `ServiceError::DeliveryNotSent { code, retryable }` 明确表达
+未提交且不存在仍可能发送的后台任务；不能仅凭 HTTP 错误码、超时或字符串推断未发送。
+Provider 的请求帧/参数/run ID 校验、URL 安全校验、HTTP 请求构建失败均发生在提交前：
+永久性失败直接 `failed`，仅 DNS 解析等明确暂时性未发送失败允许使用配置的安全重试预算。
+永久性失败不会被 safe_retry 配置改为重试。重复的 Provider run 注册不是“未发送”的证明，
+仍保守处理。网络 execute 开始后的未分类错误/超时保持 Unknown，禁止自动重发。
+TTL 到期不触发运行中请求或 Unknown 的强制释放。
 
 ## 查询与取消
 
@@ -288,6 +297,7 @@ Unknown，不使用此重试预算。TTL 到期不触发运行中请求的强制
 | `POST /openapi/v1/collaboration/sessions/{session_id}/message-deliveries/query` | `{"message_ids":["..."]}` 或 `{"client_msg_id":"..."}` | `DeliveryStatusView[]` |
 | `POST /messages/{message_id}/deliveries/{delivery_id}/cancel` | `{"session_id":"..."}` | 每个目标的 `delivery` 和可选 `error` |
 | `POST /messages/{message_id}/deliveries/cancel` | `{"session_id":"..."}` | 同上，覆盖该消息的全部目标 |
+| `POST /messages/{message_id}/deliveries/{delivery_id}/resolve` | 见下文 | 单条 `DeliveryStatusView` |
 
 批量查询最多 100 个 ID，两种选择器不能混用。client ID 查询仅匹配调用者自己的原消息。
 这些查询/取消接口使用 401、403、404、400、503 表达认证、权限、Session 不存在、无效参数和
@@ -303,6 +313,36 @@ active Provider 的精确 delivery 取消返回 `exact_abort_not_supported`，�
 必须匹配原 Provider/Bot 绑定和 session key，使用明确返回的 run ID 确认终止，空响应不是
 成功证据。显式再次调用 scope abort 可以重新尝试 `cancel_unknown`，分配新的 abort ID；
 调度器本身不会自动重发结果不明的 abort。全部网络 I/O 均在 abort-start 提交之后发生。
+
+### 人工处置 Unknown（2026-09-14）
+
+这是普通 Human API，不是 OpenAPI；不向 Bot、Integration 或 Admin 身份隐式开放。
+调用者必须是当前 session 成员、可见原消息，且为原发送者或目标 Bot 所有者。
+请求示例：
+
+```json
+{
+  "session_id": "group:session",
+  "expected_state_version": 3,
+  "resolution": "confirmed_not_sent",
+  "reason": "核对日志确认请求在本地校验阶段拒绝，未发送至引擎"
+}
+```
+
+- `confirmed_not_sent`：人工已确认此次 attempt 未发送，`unknown → failed`，
+  `cancel_unknown → cancelled`；释放绑定 context，按原规则重新绑定后续 queued Send。
+- `confirmed_stopped`：人工已确认下游执行停止，转为 `cancelled`；可能已经送达的 context
+  按原选择结果消费/舍弃，不能作为未发送上下文再次投递。
+- 仅接受 Send 的 `unknown / cancel_unknown`。`expected_state_version` 必填，
+  与可信 ACK/final/abort 并发时依赖持久化 CAS，冲突返回 409，先查询新状态再决定是否处置。
+- `reason` 去空白后非空，原请求最多 1024 UTF-8 字节。处置理由不要包含 Cookie、Token 或正文。
+  actor、reason、resolution、处置时间及原版本与终态同事务保存在现有
+  `transport_context_json.manual_resolution`，保留 owner、下游别名等原元数据，不新增表。
+  日志只记录 actor/delivery/session、操作和新版本，不输出 reason 或 transport 元数据。
+- 操作只终结旧投递，不自动重试、不创建新 run，不替用户执行 abort，也不证明引擎实际采用了内容。
+  未确认停止时不能用此接口强制放行。迟到生命周期事件不能重新打开终态 delivery。
+  响应丢失后查询状态，不使用更新版本盲目重复处置。
+- 本版不新增告警、自动过期或自动处置；部署前遗留的 Unknown 不会因升级自动变更状态。
 
 ## 状态与通知
 

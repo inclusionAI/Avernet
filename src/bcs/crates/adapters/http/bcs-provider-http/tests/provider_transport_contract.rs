@@ -699,7 +699,7 @@ async fn provider_delivery_rejects_private_webhook_url_before_request() {
 
     assert!(
         err.to_string()
-            .contains("provider webhook_url is not allowed")
+            .contains("provider_url_preflight_failed")
     );
 }
 
@@ -727,7 +727,7 @@ async fn provider_delivery_logs_policy_rejection_with_provider_url_ip_and_reason
 
     assert!(
         err.to_string()
-            .contains("provider webhook_url is not allowed")
+            .contains("provider_url_preflight_failed")
     );
     let events = logs.lock().unwrap();
     let event = events
@@ -1262,7 +1262,24 @@ async fn provider_delivery_rejects_empty_canonical_run_before_network_io() {
         provider_transport: Default::default(),
         provider_bypass_headers: Vec::new(),
     }).await.expect_err("canonical run identity is required");
-    assert!(error.to_string().contains("requires canonical run_id"));
+    assert!(matches!(error, bcs_service_api::ServiceError::DeliveryNotSent { code: "provider_canonical_run_id_required", retryable: false }));
+    assert!(captured.lock().await.is_none());
+    server.abort();
+}
+
+#[tokio::test]
+async fn invalid_request_headers_are_definitely_not_sent() {
+    let captured: CapturedState = Arc::new(Mutex::new(None));
+    let app = Router::new().route("/webhook", post(capture_ack)).with_state(captured.clone());
+    let (webhook_url, server) = spawn_server(app).await;
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+    let error = transport.deliver(BotDeliveryCommand {
+        target: provider_target(webhook_url), run_id: "invalid-header-run".into(),
+        frame: BcsFrame::Request(RequestFrame::new("attempt", "chat.send", Some(json!({})))),
+        delivery_kind: BotDeliveryKind::Send, provider_transport: Default::default(),
+        provider_bypass_headers: vec![("x-agent-lane".into(), "invalid\nvalue".into())],
+    }).await.expect_err("invalid header must fail at build, before execute");
+    assert!(matches!(error, bcs_service_api::ServiceError::DeliveryNotSent { code: "provider_request_build_failed", retryable: false }));
     assert!(captured.lock().await.is_none());
     server.abort();
 }

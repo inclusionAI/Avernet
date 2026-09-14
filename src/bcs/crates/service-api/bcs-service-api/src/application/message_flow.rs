@@ -346,6 +346,9 @@ pub trait MessageFlowService: Send + Sync {
     async fn cancel_message_deliveries(&self, _command: super::message_delivery::CancelMessageDeliveryCommand) -> ServiceResult<Vec<super::message_delivery::CancelMessageDeliveryResult>> {
         Err(service_not_configured("message delivery cancellation"))
     }
+    async fn resolve_message_delivery(&self, _command: super::message_delivery::ResolveMessageDeliveryCommand) -> ServiceResult<super::message_delivery::DeliveryStatusView> {
+        Err(service_not_configured("message delivery resolution"))
+    }
     async fn shutdown_managed_delivery(&self) -> ServiceResult<()> { Ok(()) }
     async fn record_delivery_acceptance(
         &self,

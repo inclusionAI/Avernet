@@ -124,6 +124,17 @@ async fn conformance_live_group_admission_uses_defaults_and_blocks_drain_bypass(
     next.idempotency_key = Some("live-2".into());
     assert!(flow.handle_web_send(next.clone()).await.is_err_and(|e| e.to_string().contains("queue_draining")));
     assert_eq!(service.snapshot(None).await.unwrap().len(), 2);
+    let legacy_targets = [bcs_service_api::RoutingTarget {
+        bot_uuid: "bot-driver".into(), url: String::new(), is_driver: true,
+        delivery_type: bcs_domain::DeliveryType::Send,
+    }, bcs_service_api::RoutingTarget {
+        bot_uuid: "bot-observer".into(), url: String::new(), is_driver: false,
+        delivery_type: bcs_domain::DeliveryType::Inject,
+    }];
+    bcs_message_flow::queued_admission::guard_legacy_targets(&flow, &legacy_targets, Some("group-1:other")).await.unwrap();
+    assert!(bcs_message_flow::queued_admission::guard_legacy_targets(&flow, &legacy_targets, None).await.is_err(), "missing canonical session stays conservative");
+    assert!(service.snapshot(None).await.unwrap().iter().any(|row|
+        row.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::PendingContext), "another lane must not discard this lane's contexts");
     // The unmentioned observer has only an unbound Inject. Once the old Send
     // settles, that context must not permanently block legacy ingress.
     let send = service.snapshot(None).await.unwrap().into_iter()
@@ -137,6 +148,57 @@ async fn conformance_live_group_admission_uses_defaults_and_blocks_drain_bypass(
     assert!(!support.bot_delivery.frames().await.is_empty());
     assert!(service.snapshot(None).await.unwrap().iter().all(|row|
         row.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Cancelled));
+}
+
+#[tokio::test]
+async fn manual_resolution_checks_human_scope_ownership_and_version() {
+    use bcs_service_api::{ManagedMessageDeliveryService, DeliveryTransitionCommand, ResolveMessageDeliveryCommand, DeliveryResolution, ServiceError};
+    use bcs_service_api::core::message_delivery::DeliveryLifecycleEvent as Event;
+    use bcs_domain::message_delivery::MessageDeliveryStatus as Status;
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let group = support.group.get("group-1").await.unwrap();
+    let repo = Arc::new(bcs_message_store::MemoryMessageRepo::new());
+    let service = Arc::new(bcs_message_flow::managed_delivery::ManagedMessageDelivery::new(repo.clone()));
+    let flow = BcsMessageFlow::new(support.group.clone(), support.routing.clone(), support.registry.clone(), support.bot_delivery.clone(), support.frontend_delivery.clone())
+        .with_message_repo(repo).with_managed_deliveries(service.clone())
+        .with_group_delivery_limits(std::collections::BTreeMap::from([("bot-driver".into(), 10)]))
+        .with_session_management(Arc::new(StaticSessionManagement::new(test_session("group-1:resolve", "group-1", group.participants))));
+    let human = CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "1".into() });
+    let admitted = flow.handle_web_send(WebSendCommand {
+        caller: human.clone(), group_id: "group-1".into(), session_id: Some("group-1:resolve".into()), from_actor_id: "human_1".into(),
+        from_name: None, message: "resolve test".into(), mentions: vec!["bot-driver".into()], attachments: None,
+        thinking: None, idempotency_key: Some("resolve".into()), source_im_message_id: None, channel_sender_identity: None,
+        sender_conn_id: None, provider_bypass_headers: vec![],
+    }).await.unwrap().queue_admission.unwrap();
+    let row = service.snapshot(None).await.unwrap().into_iter().find(|r| r.state.kind == bcs_domain::DeliveryType::Send).unwrap();
+    let transition = |row: &bcs_domain::message_delivery::PersistedMessageDelivery, event| DeliveryTransitionCommand {
+        delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version, event,
+        now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: None, reply: None,
+        transport_context_json: None, deadline_at_ms: None,
+    };
+    let row = service.transition(transition(&row, Event::StartSend)).await.unwrap();
+    let mut command = ResolveMessageDeliveryCommand {
+        caller: human, session_id: row.session_id.clone(), message_id: admitted.message_id,
+        delivery_id: row.delivery_id.clone(), expected_state_version: row.state.state_version,
+        resolution: DeliveryResolution::ConfirmedNotSent, reason: "confirmed preflight rejection".into(),
+    };
+    assert!(matches!(flow.resolve_message_delivery(command.clone()).await, Err(ServiceError::Conflict(_))), "cannot resolve dispatching");
+    let row = service.transition(transition(&row, Event::TransportUnknown)).await.unwrap();
+    assert!(matches!(flow.resolve_message_delivery(command.clone()).await, Err(ServiceError::Conflict(_))), "stale version");
+    command.expected_state_version = row.state.state_version;
+    let mut denied = command.clone(); denied.caller = CallerContext::Bot(bcs_service_api::BotActor { bot_uuid: "bot-driver".into() });
+    assert!(matches!(flow.resolve_message_delivery(denied).await, Err(ServiceError::Forbidden(_))), "Bot cannot attest manual resolution");
+    let mut denied = command.clone(); denied.caller = CallerContext::Human(HumanActor { actor_id: "outsider".into(), staff_no: "outside".into() });
+    assert!(matches!(flow.resolve_message_delivery(denied).await, Err(ServiceError::Forbidden(_))));
+    let mut denied = command.clone(); denied.caller = CallerContext::Human(HumanActor { actor_id: "bot-observer".into(), staff_no: "unrelated-owner".into() });
+    assert!(matches!(flow.resolve_message_delivery(denied).await, Err(ServiceError::Forbidden(_))), "membership alone is insufficient");
+    let mut denied = command.clone(); denied.session_id = "group-1:other".into();
+    assert!(flow.resolve_message_delivery(denied).await.is_err());
+    let mut denied = command.clone(); denied.reason = " ".into();
+    assert!(matches!(flow.resolve_message_delivery(denied).await, Err(ServiceError::InvalidOperation { .. })));
+    assert_eq!(flow.resolve_message_delivery(command.clone()).await.unwrap().status, Status::Failed);
+    assert!(matches!(flow.resolve_message_delivery(command).await, Err(ServiceError::Conflict(_))));
+    assert_eq!(service.active_count("bot-driver").await.unwrap(), 0);
 }
 
 #[tokio::test]

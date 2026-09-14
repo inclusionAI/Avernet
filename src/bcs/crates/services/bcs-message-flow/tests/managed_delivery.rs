@@ -78,6 +78,67 @@ async fn send_start_rechecks_cross_session_capacity_under_mutation_lock() -> Res
 }
 
 #[tokio::test]
+async fn manual_resolution_is_atomic_audited_and_preserves_transport_metadata() -> Result<(), Box<dyn std::error::Error>> {
+    for event in [Event::ResolveNotSent, Event::ResolveStopped] {
+        let service = ManagedMessageDelivery::new(Arc::new(MemoryMessageRepo::new()));
+        let context = service.admit(admit("context", DeliveryType::Inject)).await?.deliveries.remove(0);
+        let row = service.admit(admit("send", DeliveryType::Send)).await?.deliveries.remove(0);
+        let mut start = transition(&row, Event::StartSend);
+        start.transport_context_json = Some(serde_json::json!({"owner":{"kind":"http_provider"}}));
+        let row = service.transition(start).await?;
+        let row = service.transition(transition(&row, Event::TransportUnknown)).await?;
+        let successor = service.admit(admit("successor", DeliveryType::Send)).await?.deliveries.remove(0);
+        assert!(service.lane_blocked(&successor).await?);
+        assert!(service.transition(transition(&row, event)).await.is_err(), "audit reason required");
+        let mut resolve = transition(&row, event);
+        resolve.request_id = row.request_id.clone();
+        resolve.transport_context_json = Some(serde_json::json!({"reason":"verified downstream evidence"}));
+        let settled = service.transition(resolve.clone()).await?;
+        assert!(service.transition(resolve).await.is_err(), "stale manual resolution must conflict");
+        assert!(!service.lane_blocked(&successor).await?);
+        let metadata = settled.transport_context_json.as_ref().unwrap();
+        assert_eq!(metadata["owner"]["kind"], "http_provider");
+        assert_eq!(metadata["manual_resolution"]["actor_id"], "human");
+        assert_eq!(metadata["manual_resolution"]["reason"], "verified downstream evidence");
+        assert!(settled.terminal_at_ms.is_some());
+        let context = service.lookup(DeliveryLookup::Id(context.delivery_id)).await?.remove(0);
+        if event == Event::ResolveNotSent {
+            assert_eq!(context.state.status, Status::Bound);
+            assert_eq!(context.bound_to_delivery_id.as_ref(), Some(&successor.delivery_id));
+        } else {
+            assert_eq!(context.state.status, Status::Consumed);
+        }
+        let late = service.transition(transition(&settled, Event::Completed)).await?;
+        assert_eq!(late.state, settled.state);
+        assert_eq!(late.transport_context_json, settled.transport_context_json);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn configured_retry_must_not_override_permanent_not_sent() -> Result<(), Box<dyn std::error::Error>> {
+    use bcs_config_api::message_delivery::{DeliveryPolicyRecord, BotDeliveryMode, SafeRetryConfig};
+    let repo = Arc::new(MemoryMessageRepo::new());
+    let mut initial = DeliveryPolicyRecord::default();
+    initial.policy.flow_enabled.group = true;
+    initial.policy.defaults.mode = BotDeliveryMode::Enforce;
+    initial.policy.safe_retry = Some(SafeRetryConfig { max_retries: 3, backoff_ms: 1000 });
+    let policy = Arc::new(bcs_message_flow::delivery_policy::LiveDeliveryPolicy::new(repo.clone(), initial));
+    let service = ManagedMessageDelivery::new(repo).with_policy(policy);
+    let row = service.admit(admit("permanent", DeliveryType::Send)).await?.deliveries.remove(0);
+    let mut start = transition(&row, Event::StartSend);
+    start.transport_context_json = Some(serde_json::json!({"policy_version":0}));
+    let row = service.transition(start).await?;
+    let mut failure = transition(&row, Event::DefinitelyNotSent { retry: false });
+    failure.request_id = row.request_id.clone();
+    let row = service.transition(failure).await?;
+    assert_eq!(row.state.status, Status::Failed);
+    assert_eq!(row.attempt_no, 1);
+    assert!(!row.state.may_have_been_sent);
+    Ok(())
+}
+
+#[tokio::test]
 async fn instrumentation_counts_only_committed_nonduplicate_events() -> Result<(), Box<dyn std::error::Error>> {
     #[derive(Default)] struct Hook(std::sync::Mutex<Vec<&'static str>>);
     impl bcs_service_api::application::message_delivery::DeliveryInstrumentation for Hook {

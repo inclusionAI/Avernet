@@ -37,6 +37,7 @@ fn error(error: ServiceError) -> Response {
         ServiceError::Forbidden(_) => StatusCode::FORBIDDEN,
         ServiceError::SessionNotFound(_) | ServiceError::GroupNotFound(_) => StatusCode::NOT_FOUND,
         ServiceError::InvalidOperation { .. } => StatusCode::BAD_REQUEST,
+        ServiceError::Conflict(_) => StatusCode::CONFLICT,
         _ => StatusCode::SERVICE_UNAVAILABLE,
     };
     (
@@ -146,4 +147,33 @@ pub async fn cancel_message(
     Json(scope): Json<SessionScope>,
 ) -> Response {
     cancel(state, headers, uri, message_id, None, scope).await
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResolveBody {
+    session_id: String,
+    expected_state_version: u64,
+    resolution: bcs_service_api::DeliveryResolution,
+    reason: String,
+}
+
+pub async fn resolve_one(
+    State(state): State<HttpAppState>,
+    Path((message_id, delivery_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    Json(body): Json<ResolveBody>,
+) -> Response {
+    let caller = match resolve_group_chat_caller(&state, &headers, &uri).await {
+        Ok(c) => group_chat_caller_context(&c),
+        Err(e) => return e.into_response(),
+    };
+    match state.services.message_flow.resolve_message_delivery(bcs_service_api::ResolveMessageDeliveryCommand {
+        caller, session_id: body.session_id, message_id, delivery_id,
+        expected_state_version: body.expected_state_version, resolution: body.resolution, reason: body.reason,
+    }).await {
+        Ok(result) => Json(result).into_response(),
+        Err(e) => error(e),
+    }
 }

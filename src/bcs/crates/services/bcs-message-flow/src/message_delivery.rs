@@ -127,6 +127,11 @@ impl MessageDeliveryCoreService for MessageDeliveryCore {
                     result.state.may_have_been_sent = false;
                     status
                 }
+                Event::ResolveNotSent if matches!(current.status, Status::Unknown | Status::CancelUnknown) => {
+                    result.state.may_have_been_sent = false;
+                    if current.status == Status::CancelUnknown { Status::Cancelled } else { Status::Failed }
+                }
+                Event::ResolveStopped if matches!(current.status, Status::Unknown | Status::CancelUnknown) => Status::Cancelled,
                 Event::TransportUnknown => match current.status {
                     Status::Dispatching | Status::Running | Status::Unknown => Status::Unknown,
                     Status::Cancelling | Status::CancelUnknown => Status::CancelUnknown,

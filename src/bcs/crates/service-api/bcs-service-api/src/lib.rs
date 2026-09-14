@@ -39,6 +39,7 @@ pub use core::{
 pub use application::SystemMessageService;
 pub use application::message_delivery::{
     CancelMessageDeliveryCommand, CancelMessageDeliveryResult, DeliveryAdmissionView,
+    DeliveryResolution, ResolveMessageDeliveryCommand,
     DeliveryStatusQuery, DeliveryStatusView, DeliveryTransitionCommand,
     ManagedDeliveryError, ManagedDeliveryPreparationService, ManagedMessageDeliveryService,
     PreparedManagedDelivery,

@@ -341,18 +341,17 @@ impl BotDeliveryPort for HttpProviderTransport {
                 | BotDeliveryKind::TaskResult
         ) {
             let BcsFrame::Request(_) = &cmd.frame else {
-                return Err(ServiceError::InvalidOperation {
-                    message: "chat.send provider delivery requires request frame".to_string(),
-                    request_id: None,
+                return Err(ServiceError::DeliveryNotSent {
+                    code: "provider_request_frame_required", retryable: false,
                 });
             };
         }
-        let mut body = provider_request_from_frame(&cmd.target, &cmd.frame, self.chat_run_timeout_ms)?;
+        let mut body = provider_request_from_frame(&cmd.target, &cmd.frame, self.chat_run_timeout_ms)
+            .map_err(|_| ServiceError::DeliveryNotSent { code: "provider_request_invalid", retryable: false })?;
         if body.method == "chat.send" {
             if cmd.run_id.is_empty() {
-                return Err(ServiceError::InvalidOperation {
-                    message: "chat.send provider delivery requires canonical run_id".to_string(),
-                    request_id: Some(body.id.clone()),
+                return Err(ServiceError::DeliveryNotSent {
+                    code: "provider_canonical_run_id_required", retryable: false,
                 });
             }
             // Queue frames carry a per-attempt request id. Provider requests,
@@ -1230,14 +1229,14 @@ async fn send_provider_request_with_policy(
                 reason = %error,
                 "provider downlink: webhook blocked by outbound URL policy"
             );
-            return Err(ServiceError::InvalidOperation {
-                message: format!("provider webhook_url is not allowed: {error}"),
-                request_id: Some(body.id.clone()),
+            return Err(ServiceError::DeliveryNotSent {
+                code: "provider_url_preflight_failed",
+                retryable: matches!(error, OutboundUrlError::ResolveFailed(_)),
             });
         }
     };
-    let pinned_client = provider_client_for_url(&guarded_url, client_policy).map_err(|error| {
-        ServiceError::InternalError(format!("provider HTTP client build failed: {error}"))
+    let pinned_client = provider_client_for_url(&guarded_url, client_policy).map_err(|_| {
+        ServiceError::DeliveryNotSent { code: "provider_client_build_failed", retryable: false }
     })?;
     let dns_pinned = pinned_client.is_some();
     let request_client = pinned_client.as_ref().unwrap_or(client);
@@ -1307,7 +1306,12 @@ async fn send_provider_request_with_policy(
         propagator.inject_context(&context, &mut HeaderInjector(&mut trace_headers));
     });
     request = request.headers(trace_headers);
-    let send = request.json(body).send();
+    // Build errors (including invalid headers) are known to precede any HTTP
+    // submission. Errors after execute starts remain ambiguous.
+    let request = request.json(body).build().map_err(|_| ServiceError::DeliveryNotSent {
+        code: "provider_request_build_failed", retryable: false,
+    })?;
+    let send = request_client.execute(request);
     let response_result =
         if let Some(response_header_timeout) = client_policy.response_header_timeout {
             match tokio::time::timeout(response_header_timeout, send).await {

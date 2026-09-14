@@ -741,6 +741,9 @@ _story_complete_and_invoke_sessions() {
     require_status "target cancellation rejects a missing canonical message" "400" || return
     bot_post "/messages/not-a-message/deliveries/cancel" PM "{\"session_id\":\"${session_id}\"}"
     require_status "message cancellation rejects a missing canonical message" "400" || return
+    bot_post "/messages/not-a-message/deliveries/not-a-delivery/resolve" PM \
+        "{\"session_id\":\"${session_id}\",\"expected_state_version\":3,\"resolution\":\"confirmed_not_sent\",\"reason\":\"Bot must not manually release uncertain work\"}"
+    require_status "Bot cannot use Human-only manual queue resolution" "403" || return
 
     bot_post "/sessions/${session_id}/complete" PM \
         '{"output":{"summary":"release approved"}}'

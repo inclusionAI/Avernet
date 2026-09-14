@@ -388,6 +388,7 @@ fn build_api_routes() -> Router<HttpAppState> {
         .route("/openapi/v1/collaboration/messages/{message_id}/deliveries", get(routes::message_deliveries::get))
         .route("/openapi/v1/collaboration/sessions/{session_id}/message-deliveries/query", post(routes::message_deliveries::query))
         .route("/messages/{message_id}/deliveries/{delivery_id}/cancel", post(routes::message_deliveries::cancel_one))
+        .route("/messages/{message_id}/deliveries/{delivery_id}/resolve", post(routes::message_deliveries::resolve_one))
         .route("/messages/{message_id}/deliveries/cancel", post(routes::message_deliveries::cancel_message))
         .route(
             "/sessions/{sid}/messages",

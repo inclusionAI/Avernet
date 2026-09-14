@@ -139,9 +139,9 @@ impl ManagedMessageDelivery {
         let primary = self.repo.get_delivery(&command.delivery_id).await?.ok_or(ManagedDeliveryError::NotFound)?;
         if primary.target_bot_id != owner { return Err(ManagedDeliveryError::Conflict); }
         let mut rows = vec![primary.clone()];
-        if primary.state.kind == DeliveryType::Send && matches!(command.event, Event::CancelRequested | Event::Completed | Event::Failed | Event::Aborted | Event::PreparationFailed | Event::QueueExpired | Event::DefinitelyNotSent { .. }) {
+        if primary.state.kind == DeliveryType::Send && matches!(command.event, Event::CancelRequested | Event::Completed | Event::Failed | Event::Aborted | Event::PreparationFailed | Event::QueueExpired | Event::DefinitelyNotSent { .. } | Event::ResolveNotSent | Event::ResolveStopped) {
             rows.extend(self.repo.lookup(DeliveryLookup::Bound(primary.delivery_id.clone())).await?);
-            if !primary.state.may_have_been_sent || matches!(command.event, Event::DefinitelyNotSent { .. }) {
+            if !primary.state.may_have_been_sent || matches!(command.event, Event::DefinitelyNotSent { .. } | Event::ResolveNotSent) {
                 rows.extend(self.repo.lookup(DeliveryLookup::Successor { bot: primary.target_bot_id.clone(), session: primary.session_id.clone(), after_seq: primary.source_session_seq, exclude: primary.delivery_id.clone(), now_ms: command.now_ms }).await?);
             }
         }
@@ -196,7 +196,14 @@ impl ManagedMessageDelivery {
             return Err(ManagedDeliveryError::Conflict);
         }
         let mut event = command.event;
-        if matches!(event, Event::DefinitelyNotSent { .. }) {
+        let manual = matches!(event, Event::ResolveNotSent | Event::ResolveStopped);
+        if manual && (!matches!(original.state.status, Status::Unknown | Status::CancelUnknown)
+            || command.actor_id.as_ref().is_none_or(|id| id.trim().is_empty())
+            || command.transport_context_json.as_ref().and_then(|v| v.get("reason")).and_then(|v| v.as_str())
+                .is_none_or(|reason| reason.trim().is_empty() || reason.len() > 1024)) {
+            return Err(ManagedDeliveryError::Conflict);
+        }
+        if matches!(event, Event::DefinitelyNotSent { retry: true }) {
             if let Some(policy) = &policy {
                 event = Event::DefinitelyNotSent { retry: original.attempt_no <= policy.policy.safe_retry.as_ref().map_or(0, |retry| retry.max_retries) };
             }
@@ -245,6 +252,19 @@ impl ManagedMessageDelivery {
         }
         let mut primary = original.clone();
         primary.state = outcome.state;
+        if manual {
+            let metadata = primary.transport_context_json.get_or_insert_with(|| serde_json::json!({}));
+            let metadata = metadata.as_object_mut().ok_or(ManagedDeliveryError::Conflict)?;
+            let resolution = if event == Event::ResolveNotSent { "confirmed_not_sent" } else { "confirmed_stopped" };
+            metadata.insert("manual_resolution".into(), serde_json::json!({
+                "resolution": resolution,
+                "actor_id": command.actor_id,
+                "reason": command.transport_context_json.as_ref().and_then(|v| v.get("reason")),
+                "resolved_at_ms": command.now_ms,
+                "previous_state_version": original.state.state_version,
+            }));
+            primary.last_error_code = Some(format!("manually_{resolution}"));
+        }
         if event == (Event::DefinitelyNotSent { retry: true })
             && primary.state.status == Status::Queued
         {

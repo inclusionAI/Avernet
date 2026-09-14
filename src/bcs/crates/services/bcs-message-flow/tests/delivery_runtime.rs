@@ -114,6 +114,40 @@ struct RecordingIo {
     fail_registration: bool,
 }
 
+#[tokio::test]
+async fn transport_not_sent_is_terminal_unless_explicitly_retryable() -> Result<(), Box<dyn std::error::Error>> {
+    struct NotSentIo { retryable: bool, nested: bool, calls: std::sync::atomic::AtomicUsize }
+    #[async_trait]
+    impl BotDeliveryPort for NotSentIo {
+        async fn is_available(&self, _: &BotDeliveryTarget) -> bool { true }
+        async fn deliver(&self, cmd: BotDeliveryCommand) -> ServiceResult<BotDeliveryResult> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let error = ServiceError::DeliveryNotSent { code: "preflight_rejected", retryable: self.retryable };
+            if self.nested { Ok(BotDeliveryResult { target_bot_id: cmd.target_bot_id().into(), delivered: false, error: Some(error) }) } else { Err(error) }
+        }
+    }
+    for retryable in [false, true] {
+        for nested in [false, true] {
+            let service = Arc::new(ManagedMessageDelivery::new(Arc::new(MemoryMessageRepo::new())).with_retry_backoff(1));
+            service.admit(command("not-sent", "a")).await?;
+            let io = Arc::new(RecordingIo { service: service.clone(), sent: Default::default(), aborts: Default::default(), fail_send: false, fail_registration: false });
+            let mut worker = runtime(service.clone(), io);
+            let transport = Arc::new(NotSentIo { retryable, nested, calls: Default::default() });
+            worker.transport = transport.clone();
+            worker.config.max_safe_retries = 1;
+            let (stop, shutdown) = tokio::sync::watch::channel(false);
+            let task = tokio::spawn(worker.run(shutdown));
+            let failed = wait_status(&service, "not-sent", Status::Failed).await?;
+            assert!(!failed.state.may_have_been_sent);
+            assert_eq!(failed.attempt_no, if retryable { 2 } else { 1 });
+            assert_eq!(transport.calls.load(std::sync::atomic::Ordering::SeqCst), failed.attempt_no as usize);
+            assert_eq!(service.active_count("bot").await?, 0);
+            stop.send(true)?; task.await??;
+        }
+    }
+    Ok(())
+}
+
 #[async_trait]
 impl ManagedDeliveryPreparationService for RecordingIo {
     async fn is_available(&self, _: &str) -> bool {

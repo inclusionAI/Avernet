@@ -249,6 +249,7 @@ fn clone_bot_use_case_error(error: &BotUseCaseError) -> BotUseCaseError {
 
 fn clone_service_error(error: &ServiceError) -> ServiceError {
     match error {
+        ServiceError::DeliveryNotSent { code, retryable } => ServiceError::DeliveryNotSent { code, retryable: *retryable },
         ServiceError::BotNotFound(bot_id) => ServiceError::BotNotFound(bot_id.clone()),
         ServiceError::BotNotRegistered(bot_id) => ServiceError::BotNotRegistered(bot_id.clone()),
         ServiceError::BotNotConnected(bot_id) => ServiceError::BotNotConnected(bot_id.clone()),

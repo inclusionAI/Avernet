@@ -23,6 +23,7 @@ pub async fn manages_any(flow: &BcsMessageFlow, group: &Group) -> bool {
 pub async fn guard_legacy_targets(
     flow: &BcsMessageFlow,
     targets: &[bcs_service_api::RoutingTarget],
+    session_id: Option<&str>,
 ) -> ServiceResult<()> {
     let Some(service) = &flow.managed_deliveries else {
         return Ok(());
@@ -37,7 +38,12 @@ pub async fn guard_legacy_targets(
     }
     let mut rows = Vec::new();
     for target in &legacy {
-        rows.extend(service.lookup(bcs_service_api::port::repo::message_delivery::DeliveryLookup::BotPending(target.bot_uuid.clone())).await.map_err(|_| ServiceError::InternalError("queue drain lookup failed".into()))?);
+        use bcs_service_api::port::repo::message_delivery::DeliveryLookup;
+        let scope = match session_id {
+            Some(session) => DeliveryLookup::LanePending { bot: target.bot_uuid.clone(), session: session.into() },
+            None => DeliveryLookup::BotPending(target.bot_uuid.clone()),
+        };
+        rows.extend(service.lookup(scope).await.map_err(|_| ServiceError::InternalError("queue drain lookup failed".into()))?);
     }
     use bcs_domain::message_delivery::MessageDeliveryStatus as Status;
     if rows.iter().any(|row| {
@@ -56,7 +62,7 @@ pub async fn guard_legacy_targets(
             )
     }) {
         return Err(ServiceError::InvalidOperation {
-            message: "queue_draining: existing Bot work must settle before legacy delivery resumes"
+            message: "queue_draining: existing work in the target lane must settle before legacy delivery resumes"
                 .into(),
             request_id: None,
         });
@@ -65,7 +71,12 @@ pub async fn guard_legacy_targets(
     // for a managed Send that disabled admission will never create.
     for target in legacy {
         loop {
-            let contexts = service.lookup(bcs_service_api::port::repo::message_delivery::DeliveryLookup::BotPendingContexts(target.bot_uuid.clone())).await
+            use bcs_service_api::port::repo::message_delivery::DeliveryLookup;
+            let scope = match session_id {
+                Some(session) => DeliveryLookup::LanePendingContexts { bot: target.bot_uuid.clone(), session: session.into() },
+                None => DeliveryLookup::BotPendingContexts(target.bot_uuid.clone()),
+            };
+            let contexts = service.lookup(scope).await
                 .map_err(|_| ServiceError::InternalError("queue context drain lookup failed".into()))?;
             if contexts.is_empty() { break; }
             for row in contexts {
@@ -180,7 +191,7 @@ pub(crate) async fn commit_routed_reply(
     let original = find_managed_run(flow, event).await?;
     let build_timing = crate::reply_timing::Timer::new("final.reply_build_and_admission_reads");
     if original.is_none() {
-        guard_legacy_targets(flow, &decision.targets).await?;
+        guard_legacy_targets(flow, &decision.targets, event.bcs_session_id.as_deref()).await?;
     }
     if original.as_ref().is_some_and(|row| {
         matches!(
@@ -432,7 +443,7 @@ pub async fn prepare_group_admission(
     if group.group_strategy == GroupStrategy::StateMachine {
         return Ok(None);
     }
-    guard_legacy_targets(flow, &decision.targets).await?;
+    guard_legacy_targets(flow, &decision.targets, command.session_id.as_deref()).await?;
     let policy = match &flow.delivery_policy { Some(live) => Some(live.snapshot.read().await.clone()), None => None };
     let selected: Vec<_> = decision
         .targets

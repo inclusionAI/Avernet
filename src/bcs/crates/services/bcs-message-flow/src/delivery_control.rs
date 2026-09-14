@@ -7,6 +7,66 @@ use bcs_service_api::{
     DeliveryStatusView, DeliveryTransitionCommand, ManagedDeliveryError,
 };
 
+pub async fn resolve(
+    flow: &BcsMessageFlow,
+    command: bcs_service_api::ResolveMessageDeliveryCommand,
+) -> ServiceResult<DeliveryStatusView> {
+    use bcs_domain::message_delivery::MessageDeliveryStatus as Status;
+    use bcs_service_api::{DeliveryResolution, core::message_delivery::DeliveryLifecycleEvent as Event};
+    let CallerContext::Human(human) = &command.caller else {
+        return Err(ServiceError::Forbidden("manual resolution requires a Human".into()));
+    };
+    if command.reason.trim().is_empty() || command.reason.len() > 1024 {
+        return Err(ServiceError::InvalidOperation {
+            message: "resolution reason must contain 1..1024 bytes".into(), request_id: None,
+        });
+    }
+    let (session, actor) = authorize_session(flow, &command.caller, &command.session_id).await?;
+    let repo = flow.message_repo.as_ref()
+        .ok_or_else(|| ServiceError::InternalError("message store unavailable".into()))?;
+    let message = repo.get_message_by_id(&session.id, &command.message_id).await
+        .map_err(|_| ServiceError::InternalError("message ownership lookup failed".into()))?
+        .ok_or_else(|| ServiceError::InvalidOperation { message: "message not found".into(), request_id: None })?;
+    visible(flow, &command.caller, &session, &actor, &message).await?;
+    let service = flow.managed_deliveries.as_ref()
+        .ok_or_else(|| ServiceError::Conflict("message is not queue-managed".into()))?;
+    let row = service.lookup(bcs_service_api::port::repo::message_delivery::DeliveryLookup::Message(command.message_id.clone())).await
+        .map_err(|_| ServiceError::InternalError("delivery resolution lookup failed".into()))?
+        .into_iter().find(|row| row.delivery_id == command.delivery_id && row.session_id == session.id)
+        .ok_or_else(|| ServiceError::Conflict("delivery not found".into()))?;
+    if message.sender_id != actor && !flow.registry.get(&row.target_bot_id).await
+        .is_some_and(|bot| bot.created_by.as_deref() == Some(human.staff_no.as_str())) {
+        return Err(ServiceError::Forbidden("only the sender or target Bot owner can resolve delivery".into()));
+    }
+    if row.state.kind != bcs_domain::DeliveryType::Send
+        || !matches!(row.state.status, Status::Unknown | Status::CancelUnknown)
+        || row.state.state_version != command.expected_state_version {
+        return Err(ServiceError::Conflict("delivery state changed; refresh before resolving".into()));
+    }
+    let event = match command.resolution {
+        DeliveryResolution::ConfirmedNotSent => Event::ResolveNotSent,
+        DeliveryResolution::ConfirmedStopped => Event::ResolveStopped,
+    };
+    let updated = service.transition(DeliveryTransitionCommand {
+        delivery_id: row.delivery_id.clone(), expected_state_version: command.expected_state_version,
+        event, now_ms: chrono::Utc::now().timestamp_millis(), request_id: row.request_id.clone(),
+        actor_id: Some(actor.clone()), reply: None,
+        transport_context_json: Some(serde_json::json!({"reason": command.reason.trim()})),
+        deadline_at_ms: None,
+    }).await.map_err(|error| match error {
+        ManagedDeliveryError::Repository(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Storage(_)) =>
+            ServiceError::InternalError("delivery resolution persistence failed".into()),
+        _ => ServiceError::Conflict("delivery state changed; refresh before resolving".into()),
+    })?;
+    if let (Some(contexts), Some(run_id)) = (&flow.bot_run_context, &updated.run_id) {
+        let _ = contexts.mark_terminal(run_id).await;
+        contexts.mark_provider_transport_terminal(run_id).await;
+    }
+    tracing::info!(actor_id = %actor, delivery_id = %updated.delivery_id, session_id = %updated.session_id,
+        resolution = ?command.resolution, state_version = updated.state.state_version, "delivery manually resolved");
+    Ok((&updated).into())
+}
+
 async fn authorize_session(
     flow: &BcsMessageFlow,
     caller: &CallerContext,

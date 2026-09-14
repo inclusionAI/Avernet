@@ -16,6 +16,10 @@ pub enum DeliveryLifecycleEvent {
         retry: bool,
     },
     TransportUnknown,
+    /// Authorized human certifies that this uncertain attempt never sent.
+    ResolveNotSent,
+    /// Authorized human certifies that the downstream run has stopped.
+    ResolveStopped,
     CancelRequested,
     /// Explicit operator/user scope abort, never a scheduler retry.
     ScopeAbortRequested,

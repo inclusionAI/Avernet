@@ -71,6 +71,25 @@ pub struct CancelMessageDeliveryResult {
     pub error: Option<String>,
 }
 
+/// Human attestation, not an instruction to retry or blindly unlock a live run.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeliveryResolution {
+    ConfirmedNotSent,
+    ConfirmedStopped,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolveMessageDeliveryCommand {
+    pub caller: super::CallerContext,
+    pub session_id: String,
+    pub message_id: String,
+    pub delivery_id: String,
+    pub expected_state_version: u64,
+    pub resolution: DeliveryResolution,
+    pub reason: String,
+}
+
 impl From<&DeliveryAdmissionResult> for DeliveryAdmissionView {
     fn from(result: &DeliveryAdmissionResult) -> Self {
         Self {

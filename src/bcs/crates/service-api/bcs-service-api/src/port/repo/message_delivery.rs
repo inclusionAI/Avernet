@@ -18,8 +18,11 @@ pub enum DeliveryLookup {
     Lane { bot: String, session: String },
     /// At most one unfinished Send; Inject must not block legacy drain.
     BotPending(String),
+    /// At most one unfinished Send in this Bot/session lane.
+    LanePending { bot: String, session: String },
     /// At most 100 unbound contexts for drain cleanup after all Sends settle.
     BotPendingContexts(String),
+    LanePendingContexts { bot: String, session: String },
     Message(String),
     Successor { bot: String, session: String, after_seq: i64, exclude: String, now_ms: i64 },
 }

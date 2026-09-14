@@ -395,6 +395,9 @@ impl MessageFlowService for BcsMessageFlow {
     async fn cancel_message_deliveries(&self, command: bcs_service_api::application::message_delivery::CancelMessageDeliveryCommand) -> ServiceResult<Vec<bcs_service_api::application::message_delivery::CancelMessageDeliveryResult>> {
         crate::delivery_control::cancel(self, command).await
     }
+    async fn resolve_message_delivery(&self, command: bcs_service_api::application::message_delivery::ResolveMessageDeliveryCommand) -> ServiceResult<bcs_service_api::application::message_delivery::DeliveryStatusView> {
+        crate::delivery_control::resolve(self, command).await
+    }
     async fn shutdown_managed_delivery(&self) -> ServiceResult<()> {
         if let Some((sender, completion)) = self.delivery_shutdown.get() {
             let _ = sender.send(true);
@@ -1601,7 +1604,7 @@ pub async fn handle_persistent_group_send(
             let overlay = build_route_overlay(flow, &group).await;
             flow.routing.route_dm_with_overlay(&group, &cmd.content, &cmd.sender, &overlay).await
         } else { flow.routing.route(&group, &cmd.content, Some(&cmd.sender)).await };
-        crate::queued_admission::guard_legacy_targets(flow, &preview.targets).await?;
+        crate::queued_admission::guard_legacy_targets(flow, &preview.targets, None).await?;
     }
 
     if group.status != GroupStatus::Active {

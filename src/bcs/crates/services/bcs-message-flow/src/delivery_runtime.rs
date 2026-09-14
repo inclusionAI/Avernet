@@ -341,8 +341,24 @@ impl DeliveryRuntime {
                                 // Submission is not ACK. A delivered=true result keeps
                                 // dispatching until a trusted Bot event proves receipt.
                                 {
-                                    let submitted = matches!(result, Some(Ok(ref result)) if result.delivered);
-                                    let mut command = event(&row, if submitted { Event::Submitted } else { Event::TransportUnknown });
+                                    let failure = match &result {
+                                        Some(Err(error)) => Some(error),
+                                        Some(Ok(result)) if !result.delivered => result.error.as_ref(),
+                                        _ => None,
+                                    };
+                                    let next = match failure {
+                                        Some(bcs_service_api::ServiceError::DeliveryNotSent { code, retryable }) => {
+                                            tracing::warn!(delivery_id = %id, %request_id, code, retryable, "delivery failed before submission");
+                                            let (_, _, retries, _) = self.policies(&[row.target_bot_id.clone()]).await;
+                                            Event::DefinitelyNotSent { retry: *retryable && row.attempt_no <= retries }
+                                        }
+                                        _ if matches!(result, Some(Ok(ref result)) if result.delivered) => Event::Submitted,
+                                        _ => {
+                                            tracing::warn!(delivery_id = %id, %request_id, "delivery outcome unknown; no automatic resend");
+                                            Event::TransportUnknown
+                                        }
+                                    };
+                                    let mut command = event(&row, next);
                                     command.request_id = Some(request_id);
                                     storage!(self.transition(command.clone()));
                                 }

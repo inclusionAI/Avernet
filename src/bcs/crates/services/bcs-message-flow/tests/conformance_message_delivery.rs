@@ -79,6 +79,28 @@ fn queued_cancellation_never_requests_abort() -> Result<(), DeliveryLifecycleErr
 }
 
 #[test]
+fn manual_resolution_only_settles_uncertain_sends() -> Result<(), DeliveryLifecycleError> {
+    for status in [Status::Unknown, Status::CancelUnknown] {
+        for (event, context) in [(Event::ResolveNotSent, Context::Release), (Event::ResolveStopped, Context::Consume)] {
+            let settled = step(send(status), event)?;
+            assert!(settled.release_active);
+            assert!(!settled.request_abort);
+            assert_eq!(settled.context_action, context);
+            assert_eq!(settled.state.status, if event == Event::ResolveNotSent && status == Status::Unknown { Status::Failed } else { Status::Cancelled });
+            for late in [Event::Completed, Event::Accepted, Event::TransportUnknown] {
+                assert!(!step(settled.state, late)?.changed);
+            }
+        }
+    }
+    for status in [Status::Queued, Status::Running, Status::Dispatching, Status::Cancelling] {
+        assert!(step(send(status), Event::ResolveNotSent).is_err());
+        assert!(step(send(status), Event::ResolveStopped).is_err());
+    }
+    assert!(step(inject(Status::PendingContext), Event::ResolveNotSent).is_err());
+    Ok(())
+}
+
+#[test]
 fn uncertain_states_hold_lane_until_proven_terminal() -> Result<(), DeliveryLifecycleError> {
     let unknown = step(send(Status::Dispatching), Event::TransportUnknown)?;
     assert_eq!(unknown.state.status, Status::Unknown);

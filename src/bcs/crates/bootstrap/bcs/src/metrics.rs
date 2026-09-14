@@ -769,6 +769,9 @@ impl MessageFlowService for InstrumentedMessageFlowService {
     async fn cancel_message_deliveries(&self, command: bcs_service_api::application::message_delivery::CancelMessageDeliveryCommand) -> ServiceResult<Vec<bcs_service_api::application::message_delivery::CancelMessageDeliveryResult>> {
         self.inner.cancel_message_deliveries(command).await
     }
+    async fn resolve_message_delivery(&self, command: bcs_service_api::application::message_delivery::ResolveMessageDeliveryCommand) -> ServiceResult<bcs_service_api::application::message_delivery::DeliveryStatusView> {
+        self.inner.resolve_message_delivery(command).await
+    }
     async fn shutdown_managed_delivery(&self) -> ServiceResult<()> {
         self.inner.shutdown_managed_delivery().await
     }
@@ -1642,6 +1645,7 @@ fn delivery_error_code_label(error_code: DeliveryErrorCode) -> &'static str {
 #[cfg(feature = "prometheus-metrics")]
 fn service_error_code(error: &ServiceError) -> DeliveryErrorCode {
     match error {
+        ServiceError::DeliveryNotSent { .. } => DeliveryErrorCode::InvalidOperation,
         ServiceError::BotNotFound(_)
         | ServiceError::GroupNotFound(_)
         | ServiceError::ProposalNotFound(_)

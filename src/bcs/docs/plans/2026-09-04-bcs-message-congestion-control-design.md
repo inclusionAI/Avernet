@@ -1,11 +1,15 @@
 # BCS 消息拥塞控制设计
 
 - **日期：** 2026-09-04
-- **修订日期：** 2026-09-07
+- **修订日期：** 2026-09-14
 - **状态：** 待评审（Draft for Review）
 - **范围：** 单实例 BCS 的消息准入、Bot 限流、有序投递、上下文暂存、后端状态/取消能力与 IM 提示；Workbench UI 后置
 
 ## 决策摘要
+
+本次修订补充：发送前确定失败分类、Bot/session 级 drain，以及受鉴权与审计的人工处置。
+具体 API、错误边界与示例以 [消息投递 Service API](../message-delivery-service-api.md) 为准；
+本版不新增告警，不使 Unknown 自动过期或自动重发。
 
 - 本版只面向一个 BCS 进程、一个调度循环；允许多个异步发送任务，不允许两个调度进程同时运行。
 - 纳入队列的逻辑消息只在 `bcs_messages` 中保存一次；每个受管“消息 × 目标 Bot”对应一条
@@ -900,8 +904,13 @@ queued 数据可恢复；外部执行结果可能需要迟到事件、已有状�
 - run deadline 到达：持久化取消意图，再通过后台任务尝试现有 Abort。
 - Abort 无法确认：cancel_unknown，不自动释放，也不无限循环 Abort。
 - 同 Bot 其他 lane 在剩余 active 容量内可继续；如果容量已被 Unknown 占满，则整个 Bot 等待。
-- 终态记录或已验证停止旧 runtime 的证据可以用于人工恢复；操作需鉴权、记录操作者、
-  原因和证据引用，并清理原运行关联后再释放。
+- 人工恢复提供普通 Human API `POST /messages/{message_id}/deliveries/{delivery_id}/resolve`。
+  只接受 `unknown / cancel_unknown` Send，要求 session 成员及消息可见性，且调用者为
+  原发送者或目标 Bot 所有者；携带 expected_state_version 和非空 reason。
+  `confirmed_not_sent` 确认未发送后终结旧 delivery 并释放 context；`confirmed_stopped`
+  确认下游停止后标记 cancelled、按原选择消费/舍弃 context。两者均不自动重发。
+  actor、reason、处置方式及原版本与终态同事务记录在现有 transport_context_json，
+  保留原运行别名用于关联与拒绝迟到事件；不得把删除记录作为恢复手段。
 - 本地暂停、修改数据库标志、重连或 timeout 都不构成旧执行已终止的证据。
   首版不提供“忽略风险直接 force release”按钮，也不自动重启/隔离外部 Bot。
 
@@ -1316,10 +1325,12 @@ SQLite/MySQL/OceanBase 持久化模式下，默认 off 也启动空闲调度器�
 - 修改 TTL 仅作用于新准入，已有 expire_at 不追溯改变。
 - pause_dispatch 停止新的 send-start；查询、终态、过期和 Abort 继续。
 - 类型/Bot 关闭更新可落库成功，但仅代表不再接受新受管请求，不代表旧工作已经排空。
-  旧 queued/active Send 及其产生的正常回复仍走受管路径；同 Bot 有未完成 Send 时新请求
+  旧 queued/active Send 及其产生的正常回复仍走受管路径；同 Bot/session 有未完成 Send 时新请求
   返回 queue_draining，不切换 legacy 越过队列。
+  检查只取该 lane 一条 Send，其他 session 不因 drain 被阻塞；无法提供 canonical session
+  的旧入口保留 Bot 级保守检查。受管 worker 的 Bot active 容量限制保持不变。
 - 已绑定 Inject 随原 Send 消费或释放。旧 Send 排空后，恢复 legacy 的入口按每批最多
-  100 条将剩余未绑定 Inject 标记为 cancelled，不发送、不删除正文；处理失败返回错误。
+  100 条将当前 Bot/session 剩余未绑定 Inject 标记为 cancelled，不发送、不删除正文；处理失败返回错误。
   仅有 Inject 不再构成无限等待条件。Unknown/cancel_unknown Send 仍必须取得可信终止证据，
   不能因关闭配置释放。
 - bot_relay_turn_limit 对队列与 legacy 均生效：一次回复有新接受的受管目标或成功的
@@ -1358,7 +1369,7 @@ SQLite/MySQL/OceanBase 持久化模式下，默认 off 也启动空闲调度器�
 - 查询启动恢复和 ChatRun 校准失败；根据既有业务状态与 delivery 核实未推进流程。
   调度状态不一致时暂停并重建，不在线自动“猜测修复”计数。
 
-Unknown、可观测的通知发送不明和 ChatRun 校准失败需要告警；进程在通知发送前崩溃时，
+Unknown、可观测的通知发送不明和 ChatRun 校准失败的告警留待后续由运维配置，本版不实现；进程在通知发送前崩溃时，
 首版不能逐条识别漏发提示，也不承诺自动把所有异常恢复成成功。
 完整 attempt 检索、跨节点看板、自动熔断、自动隔离与容量自动调参都后置。
 
