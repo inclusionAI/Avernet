@@ -155,11 +155,11 @@ def delivery_or_none(
     """The bot's delivery strategy for the response's notes, or ``None``.
 
     The same defensive shape as ``start_put_apply``: by the time the
-    response is being built the document is stored, and a ``200`` is owed.
-    Resolving the strategy can fail on a misconfigured deployment (the
-    platform-managed switch on with no platform ports bound) — the apply
-    itself already reported ``not_started`` for that, and the warnings must
-    not turn it into a ``500`` after the write.
+    response is being built the document is stored, and a ``200`` is owed, so
+    nothing this function does may raise. The lookup itself no longer can —
+    every family has a strategy bound at boot — but it calls the engine
+    authority to name the bot's family, and a note on a response is never
+    worth a ``500`` after the write.
     """
     try:
         return apply_service.delivery_for_bot(bot)
