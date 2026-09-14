@@ -38,13 +38,15 @@ class TaskContext:
     target_node_id: str | None
     graph_version: int
     task_spec: TaskSpec
-    relevant_dependency_state: ...
-    completed_outputs: ...
-    acceptance_and_gap: ...
-    constraints: ...
+    node_and_dependency_state: ...
+    relevant_completed_outputs: ...
+    acceptance_criteria_and_current_gap: ...
+    constraints_resources_and_authorization_scope: ...
 ```
 
 `graph_version` 属于 `TaskExecutionGraph`，随 `TaskContext` 或 `TaskNode` 携带，用于上报时的乐观并发校验，不是独立业务参数。
+
+`TaskContext` 是面向本次规划的最新完整任务投影：它同时包含任务目标与验收标准、图谱/节点/依赖状态、与本次决策相关的已完成产出、当前未满足的 GAP，以及约束、资源和授权边界。接力模式中，刚完成节点 A 的结果是触发新规划的最新增量，A 的 Bot 仍必须以图谱生成的这个完整投影计算 GAP；不得用 A 的本地结果替代整个上下文。
 
 ## 4. 统一上报和图谱写入
 
@@ -81,6 +83,8 @@ EXECUTION_REQUESTED(TaskNode)
 TASK_TERMINATED(...)
 ```
 
+事件契约只声明业务 payload。Graph 与 Event Bus 可以在内部使用投递目标完成定向投递：中心化模式投递给 Master runtime，接力模式投递给刚完成上游节点的 Bot runtime；该投递信息不进入 `TaskContext`、`TaskNode` 或下列模块 API。接力上报的合法性由 Graph 基于报告身份、`TaskContext` / `TaskNode` 已有的 `graph_version`、父节点关系、深度和既有回调幂等机制校验。Dispatcher 写入 `TaskNodePatch` 的 `run_mode`、`assignee` 已固化在后续 `TaskNode` 中，故不另设 `execution_carrier` 入参。
+
 ```python
 class TaskPlanner(Protocol):
     async def plan(self, context: TaskContext) -> PlanResult: ...
@@ -101,17 +105,47 @@ class TaskRunner(Protocol):
 3. TaskPlanner 上报 `PLAN`；图谱接纳后为就绪节点产生 `DISPATCH_REQUESTED(TaskNode)`。
 4. TaskDispatcher 上报 `DISPATCH`；图谱接纳后产生 `EXECUTION_REQUESTED(TaskNode)`。
 5. TaskRunner 启动 executor，并上报启动事实；执行实体上报最终结果。
-6. 图谱根据节点状态、依赖、验收和策略产生下一轮规划、派发、执行或终态事件。
+6. 图谱根据节点状态、依赖、验收和策略产生下一轮规划、派发、执行或终态事件。每次执行结果先被图谱接纳，再由图谱生成最新 `TaskContext`；没有模块可以以本地结果直接触发下一模块。
 
-## 7. 策略扩展
+## 7. 统一逻辑链与不同物理执行拓扑
 
-| 模式 | 图谱/策略事实 | 公共闭环 |
+每个任务都使用同一逻辑职责和因果顺序：`TaskGraphService → TaskPlanner → TaskDispatcher → TaskRunner → TaskGraphService.report`。中心化动态规划与接力规划不是两套执行架构；差异仅在 Graph 将事件定向投递到哪个实际运行时，以及该运行时挂载哪种策略。
+
+| 逻辑角色 | 中心化动态规划 / Master-Slave 的实际执行者 | 接力规划的实际执行者 |
 | --- | --- | --- |
-| 中心化动态规划 | TaskPlanner 根据 `TaskContext` 产生阶段性 `PlanResult` | 规划、派发、执行、回报 |
-| Master-Slave | Master 产生 worker 节点；依赖满足使汇总节点就绪 | 规划、派发、执行、回报 |
-| 接力规划 | 节点完成触发新的规划请求；接力 Bot 以 `PLAN` 报告下一步 | 图谱校验版本、授权、深度后继续闭环 |
+| TaskPlanner | Master Bot runtime 的中心化规划策略 | 上一个节点完成者的 Bot runtime 中的 relay 规划策略 |
+| TaskDispatcher | 中心化 Dispatcher runtime / 策略 | 同一上游 Bot runtime 中的 relay 派发策略 |
+| TaskRunner | 被派发的单 Bot、协作组或 BBS 的 Runner strategy | 被派发的下一执行 carrier 的 Runner strategy |
 
-策略只替换 TaskPlanner/TaskDispatcher/TaskRunner 内部决策，不改变报告入口、事件类型或图谱状态机。接力 Bot 无权直接增删节点或修改图谱。
+物理同驻不改变逻辑边界：接力 Bot runtime 可以同时挂载 TaskRunner、TaskPlanner 和 TaskDispatcher 的策略 adapter，但它们只能分别响应 `EXECUTION_REQUESTED`、`PLAN_REQUESTED` 和 `DISPATCH_REQUESTED`。它们不可以在内存中直接从 Runner 调 Planner/Dispatcher，也不可以直接改图谱。
+
+### 7.1 中心化动态规划与 Master-Slave
+
+Master runtime 消费 `PLAN_REQUESTED(TaskContext)` 并以 `PLAN` 上报阶段性 `PlanResult`；图谱为就绪节点生成 `DISPATCH_REQUESTED`，中心化 Dispatcher 决定 execution carrier，TaskRunner 在被选 carrier 侧实际执行。Master-Slave 只是 PlanResult 中存在多个 worker 节点以及依赖解锁汇总节点，仍使用这一条事件链。
+
+### 7.2 接力规划：完整上下文驱动的续接
+
+以 A 完成、规划后续工作 B 为例：
+
+1. 承载 A 的 TaskRunner/执行实体通过 `report(EXECUTION_RESULT)` 上报 A 的事实。
+2. TaskGraphService 原子接纳 A 的结果，更新图谱，并生成包含全局最新信息的 `TaskContext(v+1)`；它不是 A 的结果快照。
+3. Graph 将 `PLAN_REQUESTED(TaskContext)` 定向投递给 A runtime；A runtime 的 TaskPlanner relay strategy 计算“最新任务上下文相对任务验收标准”的 GAP，并以 `report(PLAN, PlanResult)` 上报下一步工作 B。
+4. Graph 基于报告身份、`graph_version`、父节点关系、深度和既有回调幂等机制校验报告后，必要时将 `DISPATCH_REQUESTED(B)` 定向投递给 A runtime；A runtime 的 TaskDispatcher 策略只决定 B 的执行方式与执行主体，并以最终 `DISPATCH` patch 上报。
+5. Graph 接纳派发后发布 `EXECUTION_REQUESTED(B)` 给 B 的实际 carrier。B 完成后，再从第 1 步开始下一轮。
+
+接力策略只替换 TaskPlanner/TaskDispatcher/TaskRunner 的内部决策，不改变报告入口、事件类型或图谱状态机。接力 Bot 无权直接增删节点、直接启动下一执行者或直接修改图谱。
+
+### 7.3 Execution carrier 与 BBS 升级
+
+Dispatcher 的输出不是“必须找到 Bot B”，而是为单节点确定 execution carrier：
+
+| 搜推结果 | `TaskNodePatch` 中的派发结果 | 后续执行 |
+| --- | --- | --- |
+| 匹配单 Bot | `run_mode=single_bot`、Bot assignee | single-bot Runner strategy |
+| 匹配协作组 | `run_mode=coop_group`、group assignee | coop-group Runner strategy |
+| 单 Bot/协作组均无可用匹配 | `run_mode=bbs`、BBS carrier 与候选失败诊断 | BBS Runner strategy |
+
+三种情况均只上报一次最终 `DISPATCH` patch。BBS 的建群、招募、成员认领和内部协作是 BBS Runner strategy 的执行职责；Graph 只接收其指定协调者的启动/结果事实。BBS 执行失败后由 Graph 状态策略决定重试、重新规划、挂起或终态，Dispatcher 不直接写终态。
 
 ## 8. B 端策略插件与组合编排
 

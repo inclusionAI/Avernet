@@ -3,54 +3,57 @@
 autonumber
 hide footbox
 
-title 接力规划模式：基于 static_plan 参照逻辑的目标事件时序
+title 接力规划：统一逻辑链、Graph 定向投递与执行主体升级
 
-actor "执行 Bot A\n上游节点" as bot_a
+actor "执行主体 A\n上游节点" as carrier_a
 database "TaskGraphService" as graph
 queue "Outbox / Event Bus" as events
-participant "TaskPlanner\nRelayPlanningStrategy" as planner
-participant "TaskDispatcher" as dispatcher
+participant "TaskPlanner\nRelayPlanningStrategy\n(Bot A runtime)" as planner_a
+participant "TaskDispatcher\nRelay Dispatch Strategy\n(Bot A runtime)" as dispatcher_a
 participant "TaskRunner" as runner
-actor "接力 Bot B" as bot_b
+actor "下一执行 carrier B\n单 Bot / 协作组 / BBS" as carrier_b
 
-== A 完成，图谱产生下一次规划请求 ==
-bot_a -> graph : report(TaskCallbackData\nEXECUTION_RESULT, A result, graph_version=18)
-graph -> graph : 校验版本、幂等、状态机\n持久化 A=SUCCESS 与输出
-graph -> events : 原子写 PLAN_REQUESTED(TaskContext v19)
-events -> planner : 消费 PLAN_REQUESTED(context)
+== A 的结果先成为图谱事实 ==
+carrier_a -> graph : report(TaskCallbackData\nEXECUTION_RESULT(A), graph_version=18)
+graph -> graph : 校验版本、幂等、状态机\n原子持久化 A=SUCCESS 与输出
+graph -> graph : 生成 TaskContext v19\n目标 + 验收标准 + 全局节点/依赖状态\n相关产出（含 A，但不只 A）+ 当前 GAP + 授权边界
+graph -> events : PLAN_REQUESTED(TaskContext v19)\n内部定向投递至 Bot A runtime
 
-note right of planner
-参照 static_plan：根据已完成产出、依赖、
-验收/gap 和策略决定下一步。
-TaskPlanner 只看 TaskContext，不读写完整图谱。
+== 接力规划：A runtime 只承担 Planner 逻辑角色 ==
+events -> planner_a : 消费 PLAN_REQUESTED(context)
+note right of planner_a
+基于最新完整 TaskContext 与验收标准计算 GAP，
+而非仅基于 A 的本地结果。
+生成下一步工作 B 的 PlanResult。
 end note
+planner_a -> graph : report(TaskCallbackData\nPLAN, PlanResult, graph_version=19)
+graph -> graph : 校验报告身份、版本、父节点、深度与幂等
+graph -> events : DISPATCH_REQUESTED(node B)\n必要时内部定向投递至 Bot A runtime
 
-planner -> graph : report(TaskCallbackData\nPLAN, PlanResult)
-graph -> graph : 校验接力策略、版本、深度、规则
-graph -> events : 原子写 DISPATCH_REQUESTED(relay node B)
+== 接力派发：A runtime 只承担 Dispatcher 逻辑角色 ==
+events -> dispatcher_a : 消费 DISPATCH_REQUESTED(node B)
+dispatcher_a -> dispatcher_a : 搜推并决定 execution carrier
+alt 匹配单 Bot
+  dispatcher_a -> graph : report(DISPATCH,\nPatch(run_mode=single_bot, assignee=Bot B))
+else 匹配协作组
+  dispatcher_a -> graph : report(DISPATCH,\nPatch(run_mode=coop_group, assignee=Group B))
+else 无单 Bot/协作组匹配
+  dispatcher_a -> graph : report(DISPATCH,\nPatch(run_mode=bbs, diagnosis=候选失败))
+end
+graph -> graph : 校验 Profile、状态机与派发字段
+graph -> events : EXECUTION_REQUESTED(node B)
 
-== 派发接力节点并启动 ==
-events -> dispatcher : 消费 DISPATCH_REQUESTED(node B)
-dispatcher -> dispatcher : 选择接力 Bot / run_mode
-dispatcher -> graph : report(TaskCallbackData\nDISPATCH, TaskNodePatch)
-graph -> events : 原子写 EXECUTION_REQUESTED(node B)
+== B 的实际执行：Runner 逻辑角色在选中 carrier 侧执行 ==
 events -> runner : 消费 EXECUTION_REQUESTED(node B)
-runner -> bot_b : 启动既有 executor\n(允许的节点上下文)
-runner -> graph : report(TaskCallbackData\nEXECUTION_STARTED 或 START_FAILED)
-
-== B 基于最新上下文继续接力规划 ==
-bot_b -> graph : report(TaskCallbackData\nPLAN, PlanResult, graph_version=current)
-graph -> graph : 校验归属/租约、版本、幂等、\n节点边关系与深度
-graph -> events : 原子写 DISPATCH_REQUESTED(child C)
-events -> dispatcher : dispatch(node C)
-dispatcher -> graph : report(DISPATCH, TaskNodePatch)
-graph -> events : EXECUTION_REQUESTED(node C)
-events -> runner : run(node C)
+runner -> carrier_b : 启动对应 Runner strategy\n(single-bot / coop-group / BBS)
+runner -> graph : report(EXECUTION_STARTED 或 START_FAILED)
+carrier_b -> graph : report(EXECUTION_RESULT(B), graph_version=current)
 
 note over graph,runner
-任何完成、失败或恢复事实都会回到统一 report 入口，
-由图谱状态决定下一条语义事件。版本过期、重复或越权的接力规划
-被拒绝，不会直接增删节点，也不会触发外部执行副作用。
+同一 Bot runtime 可物理挂载 Runner、Planner、Dispatcher，
+但只能按各自 Graph 事件执行，不可直接互调或直接修改图谱。
+每个 B 的完成结果再次由 Graph 生成完整最新 TaskContext，开始下一轮接力。
+BBS 的建群、招募、认领和内部协作属于 BBS Runner strategy；失败后的重试、重规划、挂起或终态由 Graph 状态策略决定。
 end note
 
 @enduml

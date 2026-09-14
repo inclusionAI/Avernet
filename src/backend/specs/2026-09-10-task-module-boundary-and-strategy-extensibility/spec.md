@@ -2,7 +2,7 @@
 
 ## Summary
 
-将任务模块重构为图谱状态驱动的事件反应链。`TaskGraphService` 是图谱事实、状态机、统一上报入口和事件源；TaskPlanner、TaskDispatcher、TaskRunner 分别订阅规划、派发、执行事件，处理后通过同一 report 接口回报图谱，不直接互调、不直接读写图谱实现。
+将任务模块重构为图谱状态驱动的事件反应链。`TaskGraphService` 是图谱事实、状态机、统一上报入口和事件源；TaskPlanner、TaskDispatcher、TaskRunner 分别订阅规划、派发、执行事件，处理后通过同一 report 接口回报图谱，不直接互调、不直接读写图谱实现。所有模式都遵循同一逻辑链“规划 → 派发 → 执行”；模式只改变每个逻辑角色的实际执行者及 Graph 对事件的定向投递目标。
 
 `TaskCli` 是人和 Agent 的统一、极简入口：一条自然语言目标在 CLI 内部完成识别、四要素澄清和确认，确认后才创建正式执行任务并返回 `task_id`。主动任务发现仍是独立能力；主动输入后的识别与澄清属于统一入口。
 
@@ -16,6 +16,7 @@
 - As a 规划策略开发者, I want to receive a stable task context rather than graph internals, so that I can add centralized or relay planning without coupling to graph persistence.
 - As a 派发策略开发者, I want to dispatch one atomic task node at a time, so that decisions, retries and audit are independent per node.
 - As an 执行适配开发者, I want to reuse the TaskRunner single-bot, group and BBS executor structure, so that new executors do not alter graph state rules.
+- As a 接力执行 Bot, I want to receive the latest complete task context after my node result is accepted, so that I plan the next step from the global acceptance GAP rather than from my own output alone.
 - As a B 端平台管理员, I want to register tenant-approved TaskPlanner、TaskDispatcher 和 TaskRunner executor extensions and bind them declaratively, so that a task uses a governed strategy combination without exposing implementation choices to TaskCli callers.
 - As a task platform maintainer, I want every graph mutation to enter one report path and every next step to be triggered from a persisted graph event, so that lifecycle progression is traceable and recoverable.
 
@@ -29,7 +30,11 @@
 - [ ] A graph report atomically persists its accepted fact and emits the next semantic event through a reliable outbox or equivalent mechanism.
 - [ ] TaskPlanner, TaskDispatcher and TaskRunner do not directly call each other. They subscribe respectively to `PLAN_REQUESTED`、`DISPATCH_REQUESTED`、`EXECUTION_REQUESTED` events.
 - [ ] Stale planning or dispatch reports are rejected using the source `graph_version`, change no graph state, and are retried only from a later graph event.
-- [ ] Centralized planning, master-slave execution and relay planning work through the same report/event chain; they differ only in registered planning or dispatch strategies.
+- [ ] Centralized planning, master-slave execution and relay planning work through the same logical TaskPlanner → TaskDispatcher → TaskRunner report/event chain; they differ in strategy, actual handler and event affinity, rather than adding direct module calls.
+- [ ] In relay mode, a node result accepted by the graph creates a versioned `PLAN_REQUESTED` targeted to the completing Bot runtime. Its `TaskContext` contains the task goal and acceptance criteria, graph/node/dependency state, relevant completed outputs (including but not limited to that node's output), current GAP, and applicable constraints/resource/authorization scope.
+- [ ] In relay mode, Graph 定向投递规划、必要时派发事件给上游完成者 runtime；Graph 根据报告身份、`graph_version`、父节点关系、深度和既有回调幂等机制校验续接。过期、重复或越权报告不改变图谱，也不启动 executor。
+- [ ] Dispatch resolves an execution carrier, not only a Bot: it may select a single Bot, a cooperation group, or escalate to BBS when no eligible single Bot/group matches. The selected `run_mode` and diagnosis are reported in the final dispatch patch.
+- [ ] BBS creation, recruitment, claim and internal collaboration belong to the BBS TaskRunner strategy. Its designated coordinator reports execution facts through the unified report interface; a BBS failure is handled by graph state policy, not by dispatcher-side terminal mutation.
 - [ ] A third-party plugin may contribute `TaskPlanningStrategy`、`TaskDispatchStrategy` or `TaskRunnerStrategy` (executor extension), each reusing the TaskPlanner/TaskDispatcher/TaskRunner module input and output contracts.
 - [ ] A tenant-scoped, declarative `TaskRuntimeProfile` selects approved strategy and executor versions; TaskService resolves and freezes the selected profile and plugin digests when creating a task.
 - [ ] A TaskDispatcher strategy chain evaluates alternatives before reporting: only the final `TaskNodePatch` is reported; a TaskRunner strategy is selected exactly once by run mode and is never automatically retried by another strategy after an external start attempt.
@@ -44,7 +49,7 @@
 - TaskCli unified entry and the internal recognition, four-element clarification and confirmation flow.
 - Graph-state-driven TaskPlanner, TaskDispatcher, TaskRunner and report/event interfaces.
 - Reusable task recognition, four-element clarification and confirmation policy.
-- Centralized, master-slave and relay strategy support.
+- Centralized, master-slave and relay strategy support, including Graph-controlled targeted delivery and continuation validation for relay execution.
 - B-side plugin registration, tenant activation and declarative TaskRuntimeProfile strategy composition.
 - Reuse Task graph、TaskDispatcher 和 TaskRunner 的领域模型与 executor 分层。
 - Architecture and contract tests that enforce the intended dependency and event directions.

@@ -26,8 +26,12 @@
 - [ ] Master-Slave 通过依赖解锁汇总节点，并使用同一事件链。
 - [ ] 接力规划通过 `PLAN` 报告产生下一步节点。
 - [ ] 图谱拒绝接力规划中的过期版本、越权归属、非法关系和超深度请求。
+- [ ] 接力节点 A 的执行结果被图谱接纳后，Graph 生成包含任务目标、验收标准、全局节点/依赖状态、相关已完成产出、当前 GAP 与授权边界的最新 `TaskContext`；A 的结果只是其中一项输入。
+- [ ] 接力模式由 Graph 将 `PLAN_REQUESTED`、必要时 `DISPATCH_REQUESTED` 定向投递给上游完成者 runtime；Graph 基于报告身份、已有 `graph_version`、父节点、深度和既有回调幂等机制防止重复或越权续接。
+- [ ] 接力 runtime 即使物理同驻 Planner、Dispatcher、Runner，也仅按各自事件执行；不存在 Runner 直接调用规划/派发或直接写图谱的旁路。
+- [ ] Dispatcher 选择 execution carrier：单 Bot、协作组，或在两者没有可用匹配时上报 BBS 升级 patch；BBS 的内部协作和回报属于 BBS Runner strategy。
 
-验收：三种模式只替换策略实现，不增加跨模块直连或图谱写入旁路。
+验收：三种模式保持同一逻辑 TaskPlanner → TaskDispatcher → TaskRunner 链，只改变策略、实际 handler 和 Graph 的事件定向投递；不增加跨模块直连或图谱写入旁路。
 
 ## 4. B 端插件和 Profile 组合
 
@@ -55,6 +59,8 @@
 - [ ] 依赖检查限制 TaskPlanner、TaskDispatcher、TaskRunner 访问 Graph 模块或彼此实现。
 - [ ] 契约测试覆盖报告类型、事件投递、版本与幂等。
 - [ ] 策略闭环测试覆盖中心化、Master-Slave 与接力模式。
+- [ ] 接力闭环测试覆盖“A 执行结果 report → Graph 生成完整新 TaskContext → A runtime 定向规划 → 定向派发 → 下一 execution carrier 执行”，以及过期、重复、越权续接不产生外部执行副作用。
+- [ ] Dispatcher 契约测试覆盖单 Bot、协作组和无匹配时 BBS 升级三种最终 Patch；BBS 失败由 Graph 状态策略驱动后续事件。
 - [ ] 插件契约、租户激活、Profile 校验、冻结版本、Dispatcher 链和 Runner 路由均有自动化测试。
 - [ ] CLI 会话测试覆盖澄清四要素、确认、执行和查询。
 

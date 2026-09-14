@@ -80,6 +80,8 @@ end note
 note bottom of events
 TaskPlanner、TaskDispatcher、TaskRunner 彼此不调用。
 不存在承担业务推进的中心化编排器。
+中心化与接力模式共用规划→派发→执行逻辑链；
+仅 Graph 的事件定向投递目标和实际策略执行者不同。
 end note
 
 @enduml
