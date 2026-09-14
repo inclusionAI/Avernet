@@ -33,6 +33,8 @@ from agentclaw.community.api.human_bot_friendship_service import (
 )
 from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
 from agentclaw.community.core.engine_runtime.models import BotFacts, EngineResult
+from agentclaw.community.core.engine_runtime.session_key import SessionKeyCodecRegistry
+from agentclaw.community.di.modules.engine_runtime_module import EngineRuntimeModule
 
 OWNER = "u1"
 BOT = "b1"
@@ -128,6 +130,21 @@ class FakeRelay:
             bot_id=BOT, bot_type=bot_type, active_engine="openclaw", owner_id=OWNER
         )
 
+    def set_active_engine(self, active_engine: str) -> None:
+        """Re-seed the bot with another engine, keeping everything else.
+
+        The engine is a fact handlers read *before* forwarding — a session id's
+        wire form is one engine's business (``core/engine_runtime/session_key``)
+        — so it has to be settable here rather than only in core's own tests.
+        """
+        current = self.bots[(BOT, OWNER)]
+        self.bots[(BOT, OWNER)] = BotFacts(
+            bot_id=current.bot_id,
+            bot_type=current.bot_type,
+            active_engine=active_engine,
+            owner_id=current.owner_id,
+        )
+
     def add_operator(
         self, caller_id: str, *, bot_id: str = BOT, owner_id: str = OWNER
     ) -> None:
@@ -143,6 +160,19 @@ class FakeRelay:
     def paths(self) -> list[str]:
         """Forwards that actually reached the transport."""
         return [c["path"] for c in self.calls]
+
+
+def bind_session_key_codecs(binder) -> None:
+    """Bind the production session-key codec registry.
+
+    The real composition, not a stand-in: which engine gets which codec is
+    ``EngineRuntimeModule``'s decision, so a registration dropped there has to
+    fail these tests too rather than being re-declared here and agreeing with
+    itself. Every app in this package hosts a router that resolves it.
+    """
+    binder.bind(
+        SessionKeyCodecRegistry, to=EngineRuntimeModule().session_key_codec_registry()
+    )
 
 
 def bind_seam_from_relay(binder, relay: FakeRelay) -> None:
@@ -316,6 +346,7 @@ def make_client(relay, friendships, expert):
                 binder.bind(EngineRuntimeRelayProtocol, to=relay)
                 binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
                 binder.bind(ExpertChatServiceProtocol, to=expert)
+                bind_session_key_codecs(binder)
                 bind_seam_from_relay(binder, relay)
 
         app = FastAPI()
