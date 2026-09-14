@@ -57,3 +57,6 @@ task_name: app-caller-connection
 
 ## Ship Spec
 仅 GitHub 源码 PR，无部署/合并/OCB gitlink。worktree 位于 /Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/feat-app-caller-connection-rel20260915。完成本地验证和独立 review/regression 后重新 fetch，rebase 最新 origin/REL20260915 为底，核对仅本任务 commits，再 push topic 并创建目标 REL20260915 PR。按 tc-pr 英文 title/Problem/Solution/Validation；读取实际远端 checks 与评论，修复合理失败；pending 不写 PASS。无 schema 迁移，回滚本次 commit 恢复旧行为。
+
+## PR Singlebox 验证补全
+远端 Backend CI通过后，Singlebox发现 expert_chat Core 60.80% < 原阈值61.18%；BCS指标全部通过。新增真实HTTP验收故事覆盖：APP无grant/无实例拒绝、private caller无当前权限拒绝、public caller仍受已有实例限制、有效实例进入原未发布错误语义、撤权即时拒绝且实例无副作用；另复用原admin Caller provision流程，再用实签APP仅应用身份返回同一个已创建实例，断言success/need_poll/connection形状，撤权后403。两条故事均使用实际Backend+DB+BaaS Singlebox链路，不mock新业务方法、不降低或排除覆盖率。manifest router_api.items登记新增app-caller-connection，新增路由分母由真实HTTP请求覆盖。本地collection/static与API regression可执行，完整live结果必须以远端Singlebox复跑为准。

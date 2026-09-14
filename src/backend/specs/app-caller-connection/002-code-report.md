@@ -50,3 +50,18 @@ iteration: 1
 - 普通HTTP维持verify_audience=False；签名/issuer/exp/主体结构及各Principal外层tenant一致性仍按现有verifier。内嵌app.tenant与外层tenant的对照不属于现有校验，本次没有扩大规则。
 - 未授权和首次创建拒绝先于instance连接读取及生命周期；已有效实例允许原force_upgrade和need_poll语义。
 - 授权失败HTTP 200 ApiResponse error_code=403；认证失败HTTP 401；非法参数422；非权限业务失败5999。
+
+## 全量回归修复（iteration 2）
+- 首次full回归18,578 passed / 2 failed；失败为core→api导入门禁与新增endpoint未登记框架happy/error。
+- 核心服务改为导入owning core Protocol；public api只是相同对象的转导出，HTTP consumer不变。同步Spec/README，不添加waiver、不弱化门禁。
+- 在tests/community/endpoints/test_expert_chat_caller_connection.py新增真实框架APP成功与无Principal401用例：真实DI、grant/instance仓储、现有LocalHttpClient外部BaaS替身；成功断言success/error_code/need_poll=False。
+- focused验证 `.venv/bin/python -m pytest tests/community/endpoints/test_expert_chat_caller_connection.py tests/community/architecture/test_architecture_compliance.py tests/community/framework/test_coverage_gate.py tests/community/architecture/test_module_boundaries.py --no-cov -q`: **38 passed**，日志 /tmp/app-caller-gate-fixes.log。
+- full最终结果以独立003b报告为准。
+
+## PR Singlebox coverage 修复
+- 根因证据: GitHub Singlebox run 34821523568 job 103904087146日志 `expert_chat core coverage 60.80% < 61.18%`，并非BCS或cleanup失败。
+- 新增2条live acceptance故事，原文件tests/community/acceptance/expert_chat/test_caller_connection_api.py：安全拒绝与无副作用链路；admin实际provision后APP-only复用同一实例及撤权拒绝。全部实签JWT、真实HTTP、真实仓储；使用Singlebox已有BaaS配置，无新业务mock。
+- manifest登记新HTTP endpoint，原阈值不变；spec同步验证范围。
+- 预期真实命中: get_application_caller_connection的grant missing/live、owner/public/当前collaborator权限拒绝、authorized日志与非admin已有实例链路；HTTP新路由成功/拒绝/错误处理。现有生命周期真实provision+reuse由正向故事断言。
+- 本地collection: 16 tests collected（含2条新故事）；Ruff F/E9、manifest checker、git diff --check通过。未在本地启动完整Singlebox，不声明live PASS；远端复跑负责最终覆盖率/功能验证。
+- 后续本地API/framework focused: 27 passed（/tmp/app-caller-post-singlebox-focused.log）。额外Singlebox脚本单测25 passed、2个已核对base存量失败：report test期待resources模块但REL20260915 manifest无该模块；workflow test期待src/bcs paths filter而base workflow无该段。两测试/workflow与base字节一致，manifest仅新增本次router item，未修改无关基线；不把该组写PASS。
