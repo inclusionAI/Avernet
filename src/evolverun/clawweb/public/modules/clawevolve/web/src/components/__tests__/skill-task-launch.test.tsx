@@ -54,14 +54,14 @@ describe('Skill task launch confirmation', () => {
     await within(dialog).findByText(defaults[action].goal)
     expect(within(dialog).getByText('original-owner')).toBeTruthy()
     expect(within(dialog).queryByText('viewer-not-owner')).toBeNull()
-    expect(within(dialog).getByText(/GLM-5.1/)).toBeTruthy()
+    expect(within(dialog).getByText(/GLM-5.2/)).toBeTruthy()
     expect(within(dialog).queryByRole('combobox')).toBeNull()
     fireEvent.click(within(dialog).getByRole('button', { name: action === 'diagnose' ? '确认诊断' : '确认优化' }))
     await waitFor(() => expect(api.evolve.createTask).toHaveBeenCalledTimes(1))
     const [input, key] = api.evolve.createTask.mock.calls[0]
     expect(input).toMatchObject({ taskType: action === 'diagnose' ? 'diagnose' : 'full',
       targetSkillAssetId: asset.assetId, botId: 'bot-1', userId: 'original-owner', goal: defaults[action].goal,
-      diagnoseIntent: defaults[action].goal, model: 'GLM-5.1', judgeBackend: 'subagent', maxSessions: 10,
+      diagnoseIntent: defaults[action].goal, model: 'GLM-5.2', judgeBackend: 'subagent', maxSessions: 10,
       runtimeMaintenance: false, stageSelection: { diagnose: true, plan: true, optimize: action === 'optimize' } })
     expect(input).not.toHaveProperty('disableStages')
     expect(input).not.toHaveProperty('skipPlan')

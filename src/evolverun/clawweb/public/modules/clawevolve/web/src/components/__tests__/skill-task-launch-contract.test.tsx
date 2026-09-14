@@ -81,7 +81,7 @@ describe('defaults HTTP router → launch dialog → task client contract', () =
     fireEvent.click(screen.getByRole('button', { name: action === 'diagnose' ? '确认诊断' : '确认优化' }))
     await waitFor(() => expect(submissions).toHaveLength(1))
     expect(submissions[0]).toMatchObject({ targetSkillAssetId: asset.assetId, userId: 'original-owner', botId: asset.botId,
-      taskType: action === 'diagnose' ? 'diagnose' : 'full', model: 'GLM-5.1' })
+      taskType: action === 'diagnose' ? 'diagnose' : 'full', model: 'GLM-5.2' })
     if (action === 'optimize') expect(submissions[0]).toMatchObject({ stageSelection: { diagnose: true, plan: true, optimize: true },
       stageExtensions: { diagnose: { preprocess: { enabled: true, implementationId: 'verified-97-v1' } } } })
     else expect(submissions[0]).not.toHaveProperty('stageExtensions')

@@ -5,7 +5,7 @@ import { createRequestId } from '../utils/request-id'
 
 export type SkillTaskAction = 'diagnose' | 'optimize'
 const actionName = { diagnose: '诊断', optimize: '优化' } as const
-const defaultModel = 'GLM-5.1'
+const defaultModel = 'GLM-5.2'
 
 function dateValue(offsetDays = 0): string {
   const date = new Date()
