@@ -170,7 +170,7 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
     expect((await get()).body.total).toBe(1);
   });
   it("ignores legacy reporting credentials without re-enabling token checks", async () => {
-    await stop(); env.MONITORING_REPORT_TOKEN = "legacy-unused"; await start();
+    await stop(); env.MONITORING_REPORT_TOKEN = "dummy"; await start();
     expect((await post(alert, "diagnosis-events", { Authorization: "Bearer legacy-other" })).status).toBe(201);
     expect((await post(check, "bot-checks", { Authorization: "Bearer legacy-other" })).status).toBe(200);
   });
