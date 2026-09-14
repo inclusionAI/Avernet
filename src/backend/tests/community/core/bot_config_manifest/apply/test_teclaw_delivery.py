@@ -1,7 +1,13 @@
-"""``TeclawDelivery``'s ports and closing step, and their two helpers (W8 Task 12).
+"""The teclaw strategies' ports and closing step, and their two helpers (W8 Task 12).
 
-Four combinations of the switch and the binding, plus the record-only
-activation wrapper and the redeliver's own answers.
+Both shapes a deployment can run — ``TeclawPlatformDelivery`` and
+``TeclawDeviceDelivery`` — across the redeliver's bound/unbound/failed answers,
+plus the record-only activation wrapper.
+
+Each strategy is built with its own collaborators and no mode of its own, so
+"what the deployment chose" is which class the rig names, not an argument
+either class carries. The table that makes that choice is exercised separately,
+in ``test_delivery_strategy``.
 """
 from __future__ import annotations
 
@@ -12,9 +18,12 @@ from typing import Any
 import pytest
 
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (
-    DeliveryStrategyFactory,
     MaterialiserPorts,
-    TeclawDelivery,
+    TeclawDeliveryBindings,
+    TeclawDeliveryMode,
+    TeclawDeviceDelivery,
+    TeclawPlatformDelivery,
+    teclaw_delivery_for_mode,
 )
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyReport,
@@ -89,41 +98,76 @@ def _redeliver(*, bound: bool, result: Any = {"success": True}):
 # ── ports ──────────────────────────────────────────────────────────────────
 
 
-def test_switch_on_hands_the_platform_ports_and_off_the_device_ports() -> None:
-    on = TeclawDelivery(
-        platform_managed=True, platform_ports=lambda: _ports("store"), device_ports=lambda: _ports("device"),
-        redeliver=_no_redeliver,
+def test_each_strategy_hands_out_its_own_bundle() -> None:
+    """Neither is handed the other's, so neither has to choose.
+
+    The platform one writes to the store; the device one writes into the
+    container, through the bundle ARCA also runs on — with the CLI port
+    substituted, because that category is always platform-managed on this
+    family whatever the deployment runs.
+    """
+    platform = TeclawPlatformDelivery(
+        ports=lambda: _ports("store"), redeliver=_no_redeliver
     )
-    off = TeclawDelivery(
-        platform_managed=False, platform_ports=lambda: _ports("store"), device_ports=lambda: _ports("device"),
-        redeliver=_no_redeliver,
+    device = TeclawDeviceDelivery(
+        ports=lambda: _ports("device"), cli_tool_service=lambda: "teclaw-cli"
     )
-    assert on.ports().identity_service == "store"
-    assert off.ports().identity_service == "device"
+    assert platform.ports().identity_service == "store"
+    assert device.ports().identity_service == "device"
+    assert device.ports().cli_tool_service == "teclaw-cli"
+    # The store-backed bundle is already built teclaw-side, so the platform
+    # strategy substitutes nothing.
+    assert platform.ports().cli_tool_service == "store"
 
 
-def test_the_factory_binds_the_platform_ports_and_the_redeliver() -> None:
-    redeliver, sync, _ = _redeliver(bound=True)
-    factory = DeliveryStrategyFactory(
-        is_teclaw=lambda e: e == "teclaw",
-        teclaw_platform_managed=True,
-        arca_ports=lambda: _ports("device"),
-        teclaw_platform_ports=lambda: _ports("store"),
+def _bindings(redeliver) -> TeclawDeliveryBindings:
+    return TeclawDeliveryBindings(
+        platform_ports=lambda: _ports("store"),
+        device_ports=lambda: _ports("device"),
         redeliver=redeliver,
+        cli_tool_service=lambda: "teclaw-cli",
     )
-    strategy = factory.for_engine("teclaw")
+
+
+def test_the_table_binds_the_platform_ports_and_the_redeliver() -> None:
+    """``PLATFORM`` selects the strategy that carries both."""
+    redeliver, sync, _ = _redeliver(bound=True)
+    strategy = teclaw_delivery_for_mode(
+        TeclawDeliveryMode.PLATFORM, _bindings(redeliver)
+    )
+    assert isinstance(strategy, TeclawPlatformDelivery)
     assert strategy.ports().upload_service == "store"
     assert _run(strategy.finish(make_context(engine_type="teclaw"), _report())) is None
     assert sync.calls == ["deliver_manifest_apply"]
 
 
-# ── finish: the four combinations ──────────────────────────────────────────
+def test_the_device_row_never_sees_the_redeliver_at_all() -> None:
+    """``DEVICE`` selects a strategy whose constructor does not take one.
+
+    The redeliver is still bound — the bundle carries every field both rows
+    could want — and the row that does not need it never reads it, which is why
+    a device-backed deployment cannot redeliver by accident.
+    """
+    redeliver, sync, resolved = _redeliver(bound=True)
+    strategy = teclaw_delivery_for_mode(
+        TeclawDeliveryMode.DEVICE, _bindings(redeliver)
+    )
+    assert isinstance(strategy, TeclawDeviceDelivery)
+    assert strategy.ports().upload_service == "device"
+    assert _run(strategy.finish(make_context(engine_type="teclaw"), _report())) is None
+    assert sync.calls == [] and resolved == []
 
 
-def _strategy(*, on: bool, redeliver) -> TeclawDelivery:
-    return TeclawDelivery(
-        platform_managed=on, platform_ports=lambda: _ports("store"),
-        device_ports=lambda: _ports("device"), redeliver=redeliver,
+# ── finish: the redeliver's answers ────────────────────────────────────────
+
+
+def _strategy(*, on: bool, redeliver):
+    if on:
+        return TeclawPlatformDelivery(
+            ports=lambda: _ports("store"), redeliver=redeliver
+        )
+    return TeclawDeviceDelivery(
+        ports=lambda: _ports("device"), cli_tool_service=lambda: "teclaw-cli"
     )
 
 
@@ -151,7 +195,8 @@ def test_on_and_a_failed_delivery_is_a_note_not_a_raise() -> None:
     assert sync.calls == ["deliver_manifest_apply"]
 
 
-def test_off_is_a_no_op_even_when_bound() -> None:
+def test_the_device_shape_closes_nothing_even_when_a_container_is_bound() -> None:
+    """Its ports projected as they wrote; there is nothing left to close."""
     redeliver, sync, resolved = _redeliver(bound=True)
     ctx = make_context(engine_type="teclaw")
     assert _run(_strategy(on=False, redeliver=redeliver).finish(ctx, _report())) is None

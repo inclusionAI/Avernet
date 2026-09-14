@@ -19,7 +19,7 @@ from __future__ import annotations
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     ArcaDelivery,
     MaterialiserPorts,
-    TeclawDelivery,
+    TeclawPlatformDelivery,
 )
 from agentclaw.community.core.bot_config_manifest.apply.order import (
     APPLY_ORDER,
@@ -31,9 +31,7 @@ from agentclaw.community.core.bot_config_manifest.apply.triggers import (
 )
 from agentclaw.community.core.bot_config_manifest.capabilities import ManifestSection
 async def _no_redeliver(ctx) -> None:
-    """The closing step, doing nothing. Required on every teclaw strategy —
-    the composition root always binds one — so a test that is not about the
-    redeliver still has to say which one it means."""
+    """The closing step, doing nothing — this test is not about it."""
     return None
 
 
@@ -57,11 +55,8 @@ def test_on_arca_the_script_runs_first() -> None:
     assert all(s.position > 0 for s in APPLY_ORDER if s is not script)
 
 
-def test_on_teclaw_with_the_switch_on_there_is_no_first_boot_ordering() -> None:
-    teclaw = TeclawDelivery(
-        platform_managed=True, platform_ports=_ports, device_ports=_ports,
-        redeliver=_no_redeliver,
-    )
+def test_on_platform_managed_teclaw_there_is_no_first_boot_ordering() -> None:
+    teclaw = TeclawPlatformDelivery(ports=_ports, redeliver=_no_redeliver)
     assert teclaw.steps_for(ApplyPhase.ON_CONTAINER) == ()
     assert {s.construct for s in teclaw.steps_for(ApplyPhase.PRE_CONTAINER)} == {
         s.construct for s in APPLY_ORDER

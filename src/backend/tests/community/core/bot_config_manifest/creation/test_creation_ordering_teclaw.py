@@ -48,14 +48,18 @@ from ..apply._fakes import (
     FakeCapabilityReader,
     FakeCredentials,
     FakeGitClient,
-    FakeIdentityService,
     FakeManifestContent,
     FakeMcpAuth,
     FakeResourceFileService,
     FakeSkillUploadService,
     FakeStartupScriptService,
     real_validator,
+    delivery_strategies,
     no_redeliver,
+    teclaw_engine_test,
+)
+from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    TeclawPlatformDelivery,
 )
 from ..managed_files._fakes import FakeObjectStorage
 from .test_creation_ordering import _Db, _InlineQueue, _IssuedPassport, _RecordedRelationship
@@ -143,23 +147,17 @@ def _build(db):
         manifest_service=_Manifests(),
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
-        script_service_provider=lambda: scripts,
-        activation_service_provider=lambda: FakeActivationService(),
-        mcp_auth_service_provider=lambda: FakeMcpAuth(),
-        identity_service_provider=lambda: FakeIdentityService(),
-        upload_service_provider=lambda: FakeSkillUploadService(),
-        capability_reader_provider=lambda: FakeCapabilityReader(),
-        package_validator_provider=lambda: real_validator(),
-        entry_fetcher_provider=fetcher,
-        resource_service_provider=lambda: FakeResourceFileService(),
-        cli_tool_service_factory=lambda family: None,
         git_client_provider=lambda: FakeGitClient(),
         task_queue_provider=lambda: queue,
         bot_repository=bots,
-        is_teclaw=lambda engine: engine == "teclaw",
-        teclaw_platform_managed=True,
-        teclaw_platform_ports_provider=platform_ports,
-        redeliver=no_redeliver,
+        # The platform-managed deployment: the store-backed bundle above, and
+        # no device-backed row — an ARCA bot in this rig would be a bug.
+        delivery_strategies=delivery_strategies(
+            teclaw=TeclawPlatformDelivery(
+                ports=platform_ports, redeliver=no_redeliver
+            ),
+            is_teclaw=teclaw_engine_test,
+        ),
     )
     queue.service = applies
 

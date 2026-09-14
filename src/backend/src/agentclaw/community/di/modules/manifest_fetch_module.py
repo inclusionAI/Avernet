@@ -16,7 +16,8 @@ remain defined together.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
+from types import MappingProxyType
+from typing import Callable, Mapping
 
 from injector import Injector, Module, inject, provider, singleton
 
@@ -75,18 +76,41 @@ from agentclaw.community.core.bot_config_manifest.credentials.service_protocol i
 )
 from agentclaw.community.di import config as cfg
 from agentclaw.community.core.bot_config_manifest.managed_files import (
+    EngineOwnedComposeReader,
     ManagedFilesComposeReader,
     ManagedFilesStore,
+)
+from agentclaw.community.core.bot_config_manifest.delivery_mode import (
+    TeclawDeliveryMode,
+)
+from agentclaw.community.core.config_compose.protocols import (
+    ComposeManagedFilesReader,
 )
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import (
     BotConfigManifestServiceProtocol,
 )
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    ArcaDelivery,
+    DeliveryStrategyFactory,
+    EngineFamily,
     MaterialiserPorts,
+    TeclawDeliveryBindings,
     TeclawPlatformBindings,
+    family_from_engine_test,
+    teclaw_delivery_for_mode,
 )
 from agentclaw.community.core.bot_config_manifest.apply.activation_delegates import (
+    DeviceActivation,
     PlatformActivation,
+)
+from agentclaw.community.core.bot_config_manifest.apply.identity_files import (
+    DeviceIdentity,
+)
+from agentclaw.community.core.bot_config_manifest.apply.resource_files import (
+    DeviceResource,
+)
+from agentclaw.community.core.bot_config_manifest.apply.skill_package_upload import (
+    DeviceSkillPackageUpload,
 )
 from agentclaw.community.core.bot_config_manifest.apply.redeliver import TeclawRedeliver
 from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
@@ -109,6 +133,36 @@ from agentclaw.community.di.modules.config_module import read_user_config
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 
 
+#: Which compose-side reader a deployment's delivery mode binds.
+#:
+#: The compose seam's half of the mode, and the same shape as the apply seam's
+#: ``TECLAW_DELIVERY_BY_MODE``: one row per mode, and what the row builds is an
+#: object that already knows the answer. ``PLATFORM`` reads the managed-files
+#: store and asserts ownership per occasion; ``DEVICE`` owns no compose at all,
+#: which is what the composer did before W8 and what an engine without the
+#: ``ownership`` map still needs. Neither implementation is handed the mode.
+_COMPOSE_READER_BY_MODE: Mapping[
+    TeclawDeliveryMode,
+    Callable[
+        [ManagedFilesStore, Callable[[], BotConfigManifestServiceProtocol]],
+        ComposeManagedFilesReader,
+    ],
+] = MappingProxyType({
+    TeclawDeliveryMode.PLATFORM: lambda store, manifests: ManagedFilesComposeReader(
+        store=store, manifest_service_provider=manifests
+    ),
+    TeclawDeliveryMode.DEVICE: lambda store, manifests: EngineOwnedComposeReader(),
+})
+
+_UNREAD_MODES = set(TeclawDeliveryMode) - set(_COMPOSE_READER_BY_MODE)
+if _UNREAD_MODES:
+    raise RuntimeError(
+        "every teclaw delivery mode needs a compose-side reader; missing: "
+        + ", ".join(sorted(m.value for m in _UNREAD_MODES))
+    )
+
+
+
 class ManifestFetchModule(Module):
     """Wire the fetch pipeline the ``skills`` and ``identity`` materialisers run on."""
 
@@ -126,8 +180,8 @@ class ManifestFetchModule(Module):
         consumers stay defined together. This provider is only the one sofa
         read, through config_module's public seam.
         """
-        from agentclaw.community.core.bot_config_manifest.apply.delivery import (
-            teclaw_platform_managed_from_config,
+        from agentclaw.community.core.bot_config_manifest.delivery_mode import (
+            teclaw_delivery_mode_from_config,
         )
         from agentclaw.community.core.bot_config_manifest.content.settings import (
             content_store_root_from_config,
@@ -143,8 +197,10 @@ class ManifestFetchModule(Module):
             ),
             content_store_dir=str(content_store_root_from_config(tree)),
             # W8's switch, parsed by the delivery seam's own reader so the yaml
-            # key and its consumer stay defined together.
-            teclaw_platform_managed=teclaw_platform_managed_from_config(tree),
+            # key and its consumer stay defined together — and parsed straight
+            # into the mode that names a strategy, so no boolean survives the
+            # read.
+            teclaw_delivery_mode=teclaw_delivery_mode_from_config(tree),
         )
 
     # ── the machine parts ──────────────────────────────────────────────────
@@ -219,16 +275,20 @@ class ManifestFetchModule(Module):
         store: ManagedFilesStore,
         injector: Injector,
         manifest_config: cfg.BotConfigManifestConfig,
-    ) -> ManagedFilesComposeReader:
+    ) -> ComposeManagedFilesReader:
         """W8: what the teclaw composer reads — which categories the platform
-        asserts, and the refs it holds for them. The manifest service is lazy
-        for the cycle reason every other manifest collaborator is."""
-        return ManagedFilesComposeReader(
-            store=store,
-            manifest_service_provider=lambda: injector.get(
-                BotConfigManifestServiceProtocol
-            ),
-            platform_managed=lambda: manifest_config.teclaw_platform_managed,
+        asserts, and the refs it holds for them.
+
+        Bound under the Protocol pair the collector asks through, because the
+        deployment's delivery mode decides *which reader* answers: the
+        managed-files one, or the reader that owns no compose at all. Selected
+        by table, like the apply seam's strategy, so neither implementation
+        carries the mode. The manifest service is lazy for the cycle reason
+        every other manifest collaborator is.
+        """
+        return _COMPOSE_READER_BY_MODE[manifest_config.teclaw_delivery_mode](
+            store,
+            lambda: injector.get(BotConfigManifestServiceProtocol),
         )
 
     @singleton
@@ -419,7 +479,7 @@ class ManifestFetchModule(Module):
 
         * ``"arca"`` — the engine's CLI endpoints, for either caller.
         * ``"teclaw"`` — the apply path. The port makes **no** artifact push,
-          because ``TeclawDelivery.finish`` makes exactly one at the end of the
+          because ``TeclawPlatformDelivery.finish`` makes exactly one at the end of the
           apply, covering every category it wrote. A push from the port would
           arrive mid-apply and be followed by the correct one.
         * ``"teclaw-live"`` — the management API. There is no closing step on
@@ -660,4 +720,87 @@ class ManifestFetchModule(Module):
             redeliver=TeclawRedeliver(
                 resolve=resolve, dispatch=dispatch, not_bound=DeviceNotBoundError
             ),
+        )
+
+    @singleton
+    @provider
+    @inject
+    def manifest_delivery_strategies(
+        self,
+        script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
+        activation_service_provider: Callable[[], DirectActivationServiceProtocol],
+        mcp_auth_service_provider: Callable[[], MCPAuthServiceProtocol],
+        identity_service_provider: Callable[[], IdentityFilePort],
+        upload_service_provider: Callable[[], LocalSkillUploadServiceProtocol],
+        capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
+        package_validator_provider: Callable[[], SkillPackageValidator],
+        entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
+        resource_service_provider: Callable[[], ResourceFilePort],
+        cli_tool_service_factory: CliToolServiceFactory,
+        teclaw_bindings: TeclawPlatformBindings,
+        teclaw_engine_test_factory: Callable[[], TeclawEngineTestProtocol],
+        manifest_config: cfg.BotConfigManifestConfig,
+    ) -> DeliveryStrategyFactory:
+        """W8: one built delivery strategy per engine family, and the lookup over them.
+
+        Two things are assembled here, and both used to be assembled elsewhere.
+
+        **The device-backed port bundle.** The sibling of
+        ``manifest_teclaw_platform_bindings``' store-backed bundle, and built
+        the same way: one bundle, in the composition root, where the delegates
+        that wrap each service into its narrow port belong. It was previously
+        assembled inside the apply service, out of ten lazy providers that
+        service held for no other purpose — a wiring decision made by a
+        component rather than by the root that wires it. It stays a thunk
+        rather than a value: every provider behind it reaches the device graph,
+        so a bundle built at boot would resolve that graph at boot. It is
+        called once per apply, exactly as before.
+
+        **The strategies, one per family.** This is the only place the
+        deployment's teclaw delivery mode is consulted. It selects a strategy
+        through ``TECLAW_DELIVERY_BY_MODE`` — a table, so adding or retiring a
+        shape is a row — and what leaves this provider is an object that
+        already knows how it delivers. Nothing downstream holds the mode, asks
+        for it, or branches on it: the apply service takes the factory and
+        looks a bot's family up in it. The mode that is not selected builds
+        nothing; binding both port bundles is free because both are thunks.
+
+        The family key comes from the same engine authority the capability
+        resolver and the CLI-tool surface take, adapted once by
+        ``family_from_engine_test``, so the three cannot disagree about what a
+        bot is.
+        """
+        def device_ports() -> MaterialiserPorts:
+            return MaterialiserPorts(
+                script_service=script_service_provider(),
+                activation_service=DeviceActivation(activation_service_provider()),
+                mcp_auth_service=mcp_auth_service_provider(),
+                identity_service=DeviceIdentity(identity_service_provider()),
+                upload_service=DeviceSkillPackageUpload(upload_service_provider()),
+                capability_reader=capability_reader_provider(),
+                package_validator=package_validator_provider(),
+                entry_fetcher=entry_fetcher_provider(),
+                resource_service=DeviceResource(resource_service_provider()),
+                cli_tool_service=cli_tool_service_factory("arca"),
+            )
+
+        return DeliveryStrategyFactory(
+            family_of=family_from_engine_test(
+                lambda engine: teclaw_engine_test_factory().is_teclaw(engine)
+            ),
+            strategies={
+                EngineFamily.ARCA: ArcaDelivery(device_ports),
+                EngineFamily.TECLAW: teclaw_delivery_for_mode(
+                    manifest_config.teclaw_delivery_mode,
+                    TeclawDeliveryBindings(
+                        platform_ports=teclaw_bindings.platform_ports,
+                        device_ports=device_ports,
+                        redeliver=teclaw_bindings.redeliver,
+                        # W9: the teclaw-bound CLI service, so a teclaw bot
+                        # never gets the ARCA delivery port for a category that
+                        # is always platform-managed.
+                        cli_tool_service=lambda: cli_tool_service_factory("teclaw"),
+                    ),
+                ),
+            },
         )

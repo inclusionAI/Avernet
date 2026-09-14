@@ -103,27 +103,11 @@ from agentclaw.community.core.bot_config_manifest.creation import (
 from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
     BotConfigManifestApplyService,
 )
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
-from agentclaw.community.core.bot_config_manifest.cli_tools.service import CliToolPurger, CliToolServiceFactory
-from agentclaw.community.core.ports.identity_file_port import (
-    IdentityFilePort,
-)
-from agentclaw.community.core.ports.resource_file_port import (
-    ResourceFilePort,
-)
+from agentclaw.community.core.bot_config_manifest.cli_tools.service import CliToolPurger
 from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
     GitSourceClient,
 )
 from agentclaw.community.core.bot_management.manifest_seam import ManifestCreationSeam
-from agentclaw.community.core.skill_center.capability_state_contract import (
-    BotCapabilityStateReaderProtocol,
-)
-from agentclaw.community.core.skill_center.local_skill_upload_service_protocol import (
-    LocalSkillUploadServiceProtocol,
-)
-from agentclaw.community.core.skill_center.skill_package import (
-    SkillPackageValidator,
-)
 from agentclaw.community.core.bot_app_grant.services import (
     BotAppGrantService,
 )
@@ -210,7 +194,7 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 )
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (
-    TeclawPlatformBindings,
+    DeliveryStrategyFactory,
 )
 from agentclaw.community.core.bot_config_manifest.managed_files import ManagedFilesStore
 from agentclaw.community.di import config as cfg
@@ -718,52 +702,28 @@ class BotManagementModule(Module):
         manifest_service: BotConfigManifestServiceProtocol,
         apply_repository: BotConfigManifestApplyRepositoryProtocol,
         lock_repository: BotConfigManifestApplyLockRepositoryProtocol,
-        script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
-        activation_service_provider: Callable[[], DirectActivationServiceProtocol],
-        mcp_auth_service_provider: Callable[[], MCPAuthServiceProtocol],
-        # What W5's two fetch-consuming materialisers need, all supplied by
-        # manifest_fetch_module as lazy factories for the same cycle reason the
-        # three above are.
-        identity_service_provider: Callable[[], IdentityFilePort],
-        upload_service_provider: Callable[[], LocalSkillUploadServiceProtocol],
-        capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
-        package_validator_provider: Callable[[], SkillPackageValidator],
-        entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
-        # W6's resources materialiser and W7's git transport, from the same
-        # module and lazy for the same reason.
-        resource_service_provider: Callable[[], ResourceFilePort],
-        cli_tool_service_factory: CliToolServiceFactory,  # W9, keyed by family
         git_client_provider: Callable[[], GitSourceClient],
         task_queue_provider: Callable[[], TaskQueueService],
         bot_repository: BotRepository,
-        teclaw_engine_test_factory: Callable[[], TeclawEngineTestProtocol],
-        manifest_config: cfg.BotConfigManifestConfig,
-        teclaw_bindings: TeclawPlatformBindings,
+        delivery_strategies: DeliveryStrategyFactory,
     ) -> BotConfigManifestApplyService:
+        """The apply lifecycle, over a delivery seam it does not assemble.
+
+        The ten lazy service providers this used to thread through — the write
+        targets every materialiser calls — are gone from here and from the
+        service: they were only ever the ARCA port bundle's ingredients, and a
+        bundle is a wiring decision. ``manifest_fetch_module`` builds both
+        bundles and both strategies beside the store one of them writes to, and
+        hands over the finished seam.
+        """
         return BotConfigManifestApplyService(
             manifest_service,
             apply_repository,
             lock_repository,
-            script_service_provider,
-            activation_service_provider,
-            mcp_auth_service_provider,
-            identity_service_provider,
-            upload_service_provider,
-            capability_reader_provider,
-            package_validator_provider,
-            entry_fetcher_provider,
-            resource_service_provider,
-            cli_tool_service_factory,
             git_client_provider,
             task_queue_provider,
             bot_repository,
-            # W8: the delivery seam. The engine authority is the same factory
-            # the capability resolver and the creation seam take; the switch is
-            # the config cluster's, read once here.
-            is_teclaw=lambda engine: teclaw_engine_test_factory().is_teclaw(engine),
-            teclaw_platform_managed=manifest_config.teclaw_platform_managed,
-            teclaw_platform_ports_provider=teclaw_bindings.platform_ports,
-            redeliver=teclaw_bindings.redeliver,
+            delivery_strategies=delivery_strategies,
         )
 
     @singleton

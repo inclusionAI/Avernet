@@ -417,12 +417,17 @@ the W13 job runs, and the step that closes an apply — and nothing else. The
 orchestrator sees phases and the materialisers see ports; neither learns the
 family.
 
-|  | ARCA (`ArcaDelivery`) | teclaw, switch **on** (`TeclawDelivery`) | teclaw, switch **off** |
+|  | ARCA (`ArcaDelivery`) | teclaw, `PLATFORM` (`TeclawPlatformDelivery`) | teclaw, `DEVICE` (`TeclawDeviceDelivery`) |
 | --- | --- | --- | --- |
-| Phases | `script` PRE_CONTAINER, the rest ON_CONTAINER — `APPLY_ORDER`'s own table | every construct PRE_CONTAINER (`script` is refused by the validator) | the rest ON_CONTAINER, as before W8 |
-| Ports | the device-backed services | the store-backed ports over `managed_files/` + record-only activation | the device-backed services |
+| Phases | `script` PRE_CONTAINER, the rest ON_CONTAINER — `_ARCA_PHASES` | every construct PRE_CONTAINER (`script` is refused by the validator) | the rest ON_CONTAINER, as before W8 |
+| Ports | the device-backed services | the store-backed ports over `managed_files/` + record-only activation | the device-backed services, with the teclaw CLI port |
 | Closing step | none — the owning services project as they write | one whole-artifact redeliver to the running container, none when unbound | none |
 | Creation sequence | `CREATE_BETWEEN_PHASES`: phase A, create + provision, wait ACTIVE, phase B | `RECORD_APPLY_PROVISION`: record, the single phase against it, provision, wait ACTIVE | `CREATE_BETWEEN_PHASES` |
+| Compose-side reader | n/a — ARCA artifacts carry no `ownership` map | `ManagedFilesComposeReader` | `EngineOwnedComposeReader` — owns no compose |
+
+Each row is answered by a **table lookup**, not a branch: the phase from the
+strategy's own `Mapping[ApplyConstruct, ApplyPhase]`, the rest from the object
+itself. None of the three carries a mode, a switch or a flag.
 
 **The platform is the source of truth for what a manifest applies, on both
 families** (spec D-3). On ARCA that was already so. On teclaw the artifact is
@@ -442,10 +447,20 @@ since W12); ARCA artifacts carry no map. A local skill the manifest installs
 rides as a `SkillRef` with a store address (R-O3) plus its files as resources
 refs; the collector emits it only while the bot has the skill active.
 
-**The switch.** `user_config.bot_config_manifest.teclaw_platform_managed`
-(default `false`), read once at boot by `DeliveryStrategyFactory` and nowhere
-else, strict about booleans. It stays off until the teclaw engine implements
-the `ownership` map (R-O1/R-O2/R-O3); off, teclaw runs the shape it ran before
+**The switch, and where it stops being one.**
+`user_config.bot_config_manifest.teclaw_platform_managed` (default `false`) is
+still what a deployment writes, and it is still strict about booleans — but it
+is read exactly once, at boot, by `delivery_mode.teclaw_delivery_mode_from_config`,
+which answers a `TeclawDeliveryMode` (`PLATFORM` / `DEVICE`) rather than a
+boolean. The composition root then looks that mode up in two tables —
+`TECLAW_DELIVERY_BY_MODE` for the apply seam, `_COMPOSE_READER_BY_MODE` for the
+compose seam — and binds *one* strategy and *one* reader. The mode is not a
+field on anything built from it, and the shape that was not selected is never
+constructed: a deployment-time fact is settled at deployment time, so no
+component re-decides it per apply, per compose, or per bot.
+
+It stays `DEVICE` until the teclaw engine implements
+the `ownership` map (R-O1/R-O2/R-O3); there, teclaw runs the shape it ran before
 W8 and the only artifact change is an all-`engine` map. **Before flipping it on
 an existing deployment, explicitly apply each teclaw bot's manifest once** so
 the store carries its files: the next apply's redeliver asserts `platform`

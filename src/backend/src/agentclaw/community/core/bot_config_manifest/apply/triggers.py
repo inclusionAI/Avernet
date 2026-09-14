@@ -28,8 +28,8 @@ One module so a trigger is spelled once. The two creation triggers stay in
 ``creation.py``, which owns the creation job's recognition of its own phases;
 they are re-exported here for readers, not redefined.
 
-On teclaw with the platform-managed switch on, only ``create:pre_container``
-occurs: the whole manifest is delivered before the container exists.
+On platform-managed teclaw only ``create:pre_container`` occurs: the whole
+manifest is delivered before the container exists.
 
 Restart and republish are **not** triggers: nothing previously applied is lost
 on either path, so a re-apply there was deferred. The column is ``String(32)``;
