@@ -44,7 +44,13 @@ from agentclaw.community.core.repository.implementations.bot.bot import BotRepos
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
-from .conftest import BOT, OWNER, FakeRelay, bind_seam_from_relay
+from .conftest import (
+    BOT,
+    OWNER,
+    FakeRelay,
+    bind_seam_from_relay,
+    bind_session_key_codecs,
+)
 
 TENANT_A = "tenant-a"
 TENANT_B = "tenant-b"
@@ -122,6 +128,7 @@ def client(relay: FakeRelay, connections: _FakeConnections, friendships, expert)
             binder.bind(EngineConnectionServiceProtocol, to=connections)
             binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
             binder.bind(ExpertChatServiceProtocol, to=expert)
+            bind_session_key_codecs(binder)
             # The gate reads the same ``relay.bots`` this sweep drives, so a
             # foreign bot is foreign to both and the refusal stays one answer.
             bind_seam_from_relay(binder, relay)

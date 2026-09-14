@@ -15,11 +15,14 @@ the request ever reaches the engine::
 So a teclaw session id has to travel base64-encoded. That is **one engine's
 rule**, not a branch every handler should carry, so it lives here as a
 strategy rather than as an ``if`` at each call site: the registry answers with
-:class:`PassThroughSessionKeyCodec` for every engine that has not registered
-anything — the session id exactly as the caller passed it, which is what every
-engine but teclaw wants — and ``teclaw`` registers
-:class:`Base64SessionKeyCodec`. An engine that later needs its own rule
-registers a codec here; no handler changes.
+its default codec for every engine that has not registered anything — the
+session id exactly as the caller passed it, which is what every engine but
+teclaw wants — and ``teclaw`` registers :class:`Base64SessionKeyCodec`. An
+engine that later needs its own rule registers a codec; no handler changes.
+
+Which codecs exist and which engine each is bound to is the **composition
+root's** call, not this module's: ``EngineRuntimeModule`` builds the registry
+and injects it. Nothing here is process-wide state.
 
 The encoded form is the one the engine reverses in ``decode_session_key``
 (``src/engine/src/engine/community/shared/utils.py``): URL-safe base64 with the
@@ -33,6 +36,7 @@ id is accepted wherever a raw one is.
 from __future__ import annotations
 
 import base64
+from abc import abstractmethod
 from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.bot_management.engines.registry import (
@@ -50,27 +54,33 @@ TECLAW_ENGINE_TYPE = "teclaw"
 
 @runtime_checkable
 class SessionKeyCodec(Protocol):
-    """Turn a public session id into the form one engine's routes accept."""
+    """Turn a public session id into the form one engine's routes accept.
 
+    Implementations **inherit** this rather than satisfying it structurally, so
+    a codec that never implements :meth:`encode` fails at construction instead
+    of at the first forward, and the registry's contract has one declaration.
+    """
+
+    @abstractmethod
     def encode(self, session_key: str) -> str:
         """Return the wire form of ``session_key`` for this engine."""
         ...
 
 
-class PassThroughSessionKeyCodec:
-    """The default: the engine takes the session id verbatim.
+class PassThroughSessionKeyCodec(SessionKeyCodec):
+    """The engine takes the session id verbatim — every engine but teclaw.
 
-    Every engine but teclaw. Deliberately identity rather than
-    percent-encoding: the ids these engines answer with are already routed
-    as-is today, and re-encoding them here would change the bytes on the wire
-    for every bot on the surface to fix one engine's problem.
+    Deliberately identity rather than percent-encoding: the ids these engines
+    answer with are already routed as-is today, and re-encoding them here would
+    change the bytes on the wire for every bot on the surface to fix one
+    engine's problem.
     """
 
     def encode(self, session_key: str) -> str:
         return session_key
 
 
-class Base64SessionKeyCodec:
+class Base64SessionKeyCodec(SessionKeyCodec):
     """URL-safe, unpadded base64 — the engine's own ``encode_session_key``.
 
     Mirrors ``engine.community.shared.utils.encode_session_key`` byte for byte,
@@ -82,53 +92,51 @@ class Base64SessionKeyCodec:
 
 
 class SessionKeyCodecRegistry:
-    """Which codec an engine's session ids go through, by engine type."""
+    """Which codec an engine's session ids go through, by engine type.
 
-    def __init__(self, default: SessionKeyCodec | None = None) -> None:
-        self._default: SessionKeyCodec = default or PassThroughSessionKeyCodec()
+    ``default`` is required: the composition root always has one to hand, and a
+    registry that invented its own would decide a wire format the composition
+    root thought it owned.
+    """
+
+    def __init__(self, default: SessionKeyCodec) -> None:
+        self._default = default
         self._codecs: dict[str, SessionKeyCodec] = {}
 
     def register(self, engine_type: str, codec: SessionKeyCodec) -> None:
         """Bind ``codec`` to ``engine_type``, refusing a silent overwrite."""
-        key = normalize_engine_type(engine_type, default="")
+        key = self._key(engine_type)
         if key in self._codecs:
             raise ValueError(f"session key codec already registered: {key}")
         self._codecs[key] = codec
 
-    def resolve(self, engine_type: str | None) -> SessionKeyCodec:
-        """Return the codec for ``engine_type``, or the pass-through default.
+    def resolve(self, engine_type: str) -> SessionKeyCodec:
+        """Return the codec bound to ``engine_type``, or the default.
 
-        An unknown, empty or missing engine resolves to the default on
-        purpose: not knowing which engine a bot runs is not a reason to change
-        what its session ids look like.
+        An engine nobody registered a codec for gets the default — that is the
+        registry's whole point. An **empty** engine type is not that case and
+        raises: ``ac_bots.active_engine`` is ``NOT NULL`` with a default, so a
+        blank one is corrupt data rather than a bot whose engine happens to be
+        unremarkable, and guessing a wire format for it would send a request
+        somewhere on the strength of a value nobody wrote.
         """
-        return self._codecs.get(
-            normalize_engine_type(engine_type, default=""), self._default
-        )
+        return self._codecs.get(self._key(engine_type), self._default)
 
+    @staticmethod
+    def _key(engine_type: str) -> str:
+        """Normalise an engine's spelling, refusing an absent one.
 
-def _build_default_registry() -> SessionKeyCodecRegistry:
-    """Assemble the process-wide registry with every engine that has a rule.
-
-    Pure and side-effect free — it only instantiates stateless codecs — so it
-    is built eagerly at import, like ``EngineProvisioningRegistry``.
-    """
-    registry = SessionKeyCodecRegistry()
-    registry.register(TECLAW_ENGINE_TYPE, Base64SessionKeyCodec())
-    return registry
-
-
-_REGISTRY: SessionKeyCodecRegistry = _build_default_registry()
-
-
-def get_session_key_codec_registry() -> SessionKeyCodecRegistry:
-    """Return the process-wide session-key codec registry."""
-    return _REGISTRY
-
-
-def encode_session_key(engine_type: str | None, session_key: str) -> str:
-    """Return ``session_key`` in the form ``engine_type``'s routes accept."""
-    return get_session_key_codec_registry().resolve(engine_type).encode(session_key)
+        ``normalize_engine_type`` substitutes a default engine for a missing
+        value, which is the wrong answer on both sides of this registry: a
+        registration keyed on a fallback binds the codec to an engine the
+        caller never named, and a lookup on one picks that engine's wire format
+        for a bot we cannot identify. So the fallback is never taken — an
+        engine type that is empty or blank is refused instead.
+        """
+        key = normalize_engine_type(engine_type, default="")
+        if not key:
+            raise ValueError("engine type is required to resolve a session key codec")
+        return key
 
 
 __all__ = [
@@ -137,6 +145,4 @@ __all__ = [
     "SessionKeyCodec",
     "SessionKeyCodecRegistry",
     "TECLAW_ENGINE_TYPE",
-    "encode_session_key",
-    "get_session_key_codec_registry",
 ]

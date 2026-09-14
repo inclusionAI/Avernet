@@ -33,6 +33,8 @@ from agentclaw.community.api.human_bot_friendship_service import (
 )
 from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
 from agentclaw.community.core.engine_runtime.models import BotFacts, EngineResult
+from agentclaw.community.core.engine_runtime.session_key import SessionKeyCodecRegistry
+from agentclaw.community.di.modules.engine_runtime_module import EngineRuntimeModule
 
 OWNER = "u1"
 BOT = "b1"
@@ -158,6 +160,19 @@ class FakeRelay:
     def paths(self) -> list[str]:
         """Forwards that actually reached the transport."""
         return [c["path"] for c in self.calls]
+
+
+def bind_session_key_codecs(binder) -> None:
+    """Bind the production session-key codec registry.
+
+    The real composition, not a stand-in: which engine gets which codec is
+    ``EngineRuntimeModule``'s decision, so a registration dropped there has to
+    fail these tests too rather than being re-declared here and agreeing with
+    itself. Every app in this package hosts a router that resolves it.
+    """
+    binder.bind(
+        SessionKeyCodecRegistry, to=EngineRuntimeModule().session_key_codec_registry()
+    )
 
 
 def bind_seam_from_relay(binder, relay: FakeRelay) -> None:
@@ -331,6 +346,7 @@ def make_client(relay, friendships, expert):
                 binder.bind(EngineRuntimeRelayProtocol, to=relay)
                 binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
                 binder.bind(ExpertChatServiceProtocol, to=expert)
+                bind_session_key_codecs(binder)
                 bind_seam_from_relay(binder, relay)
 
         app = FastAPI()

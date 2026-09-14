@@ -3,8 +3,9 @@
 The registry is the whole point of the module: the rule that teclaw's runtime
 refuses a colon-bearing path segment lives in one registration instead of an
 ``if`` at every handler that builds a session path. These tests pin both
-halves — that an unregistered engine is untouched, and that the teclaw form is
-exactly what the engine's own ``decode_session_key`` reverses.
+halves — that an engine nobody registered is untouched, and that the teclaw
+form is exactly what the engine's own ``decode_session_key`` reverses — plus
+the two things the registry refuses rather than guesses.
 """
 
 from __future__ import annotations
@@ -14,16 +15,23 @@ import base64
 import pytest
 
 from agentclaw.community.core.engine_runtime.session_key import (
+    TECLAW_ENGINE_TYPE,
     Base64SessionKeyCodec,
     PassThroughSessionKeyCodec,
     SessionKeyCodec,
     SessionKeyCodecRegistry,
-    encode_session_key,
-    get_session_key_codec_registry,
 )
 
 #: The id from the failing production request, verbatim.
 TECLAW_SESSION_ID = "agent:default:default:c_01M2F998Z1BQ9VDKVQ52N9RXQP:user:272471"
+
+
+@pytest.fixture
+def registry() -> SessionKeyCodecRegistry:
+    """The registry as the composition root assembles it."""
+    built = SessionKeyCodecRegistry(PassThroughSessionKeyCodec())
+    built.register(TECLAW_ENGINE_TYPE, Base64SessionKeyCodec())
+    return built
 
 
 def _decode(session_id: str) -> str:
@@ -43,34 +51,35 @@ def _decode(session_id: str) -> str:
 
 
 @pytest.mark.parametrize("engine", ["openclaw", "claude_code", "hermes", "aicoding"])
-def test_an_engine_without_a_codec_gets_the_session_id_verbatim(engine):
-    assert encode_session_key(engine, TECLAW_SESSION_ID) == TECLAW_SESSION_ID
+def test_an_engine_without_a_codec_gets_the_session_id_verbatim(registry, engine):
+    assert registry.resolve(engine).encode(TECLAW_SESSION_ID) == TECLAW_SESSION_ID
 
 
-@pytest.mark.parametrize("engine", [None, "", "   ", "an_engine_we_never_shipped"])
-def test_an_unknown_engine_falls_back_to_pass_through(engine):
-    assert encode_session_key(engine, TECLAW_SESSION_ID) == TECLAW_SESSION_ID
+def test_an_engine_nobody_ever_shipped_still_falls_back_to_the_default(registry):
+    encoded = registry.resolve("an_engine_we_never_shipped").encode(TECLAW_SESSION_ID)
+
+    assert encoded == TECLAW_SESSION_ID
 
 
 # ── teclaw ────────────────────────────────────────────────────────────────────
 
 
-def test_teclaw_session_ids_travel_base64_encoded():
-    encoded = encode_session_key("teclaw", TECLAW_SESSION_ID)
+def test_teclaw_session_ids_travel_base64_encoded(registry):
+    encoded = registry.resolve(TECLAW_ENGINE_TYPE).encode(TECLAW_SESSION_ID)
 
     assert encoded != TECLAW_SESSION_ID
     assert ":" not in encoded
 
 
-def test_the_teclaw_form_is_what_the_engine_decodes_back():
-    encoded = encode_session_key("teclaw", TECLAW_SESSION_ID)
+def test_the_teclaw_form_is_what_the_engine_decodes_back(registry):
+    encoded = registry.resolve(TECLAW_ENGINE_TYPE).encode(TECLAW_SESSION_ID)
 
     assert _decode(encoded) == TECLAW_SESSION_ID
 
 
-def test_the_teclaw_form_is_a_single_path_segment():
+def test_the_teclaw_form_is_a_single_path_segment(registry):
     """URL-safe alphabet, unpadded: no "/" to split the segment, nothing to quote."""
-    encoded = encode_session_key("teclaw", TECLAW_SESSION_ID)
+    encoded = registry.resolve(TECLAW_ENGINE_TYPE).encode(TECLAW_SESSION_ID)
 
     assert "/" not in encoded
     assert "+" not in encoded
@@ -78,39 +87,61 @@ def test_the_teclaw_form_is_a_single_path_segment():
 
 
 @pytest.mark.parametrize("spelling", ["teclaw", "TECLAW", "  TeClaw  "])
-def test_the_engine_spelling_is_normalised_before_lookup(spelling):
-    assert encode_session_key(spelling, TECLAW_SESSION_ID) == encode_session_key(
-        "teclaw", TECLAW_SESSION_ID
-    )
+def test_the_engine_spelling_is_normalised_before_lookup(registry, spelling):
+    assert registry.resolve(spelling).encode(TECLAW_SESSION_ID) == registry.resolve(
+        TECLAW_ENGINE_TYPE
+    ).encode(TECLAW_SESSION_ID)
 
 
-# ── the registry ──────────────────────────────────────────────────────────────
+# ── what the registry refuses ────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("engine", ["", "   "])
+def test_resolving_without_an_engine_is_an_error_not_a_default(registry, engine):
+    """``ac_bots.active_engine`` is NOT NULL with a default, so a blank one is
+    corrupt data — picking a wire format for it would forward on the strength
+    of a value nobody wrote."""
+    with pytest.raises(ValueError, match="engine type is required"):
+        registry.resolve(engine)
+
+
+@pytest.mark.parametrize("engine", ["", "   "])
+def test_registering_without_an_engine_is_an_error_not_a_default(registry, engine):
+    with pytest.raises(ValueError, match="engine type is required"):
+        registry.register(engine, Base64SessionKeyCodec())
+
+
+def test_a_double_registration_is_refused_rather_than_silently_overwriting(registry):
+    with pytest.raises(ValueError, match="already registered"):
+        registry.register(TECLAW_ENGINE_TYPE, PassThroughSessionKeyCodec())
 
 
 def test_registering_an_engine_overrides_the_default_for_it_alone():
-    class _Upper:
+    class _Upper(SessionKeyCodec):
         def encode(self, session_key: str) -> str:
             return session_key.upper()
 
-    registry = SessionKeyCodecRegistry()
-    registry.register("shouty", _Upper())
+    built = SessionKeyCodecRegistry(PassThroughSessionKeyCodec())
+    built.register("shouty", _Upper())
 
-    assert registry.resolve("shouty").encode("abc") == "ABC"
-    assert registry.resolve("openclaw").encode("abc") == "abc"
-
-
-def test_a_double_registration_is_refused_rather_than_silently_overwriting():
-    registry = SessionKeyCodecRegistry()
-    registry.register("teclaw", Base64SessionKeyCodec())
-
-    with pytest.raises(ValueError, match="already registered"):
-        registry.register("teclaw", PassThroughSessionKeyCodec())
+    assert built.resolve("shouty").encode("abc") == "ABC"
+    assert built.resolve("openclaw").encode("abc") == "abc"
 
 
-def test_the_process_wide_registry_is_one_instance():
-    assert get_session_key_codec_registry() is get_session_key_codec_registry()
+# ── the contract itself ──────────────────────────────────────────────────────
 
 
-def test_the_bundled_codecs_satisfy_the_protocol():
-    assert isinstance(PassThroughSessionKeyCodec(), SessionKeyCodec)
-    assert isinstance(Base64SessionKeyCodec(), SessionKeyCodec)
+def test_the_bundled_codecs_inherit_the_protocol():
+    """Inheritance, not duck typing: the contract has one declaration."""
+    assert issubclass(PassThroughSessionKeyCodec, SessionKeyCodec)
+    assert issubclass(Base64SessionKeyCodec, SessionKeyCodec)
+
+
+def test_a_codec_that_never_implements_encode_cannot_be_constructed():
+    """The abstract method is what makes the inheritance load-bearing."""
+
+    class _Hollow(SessionKeyCodec):
+        pass
+
+    with pytest.raises(TypeError, match="abstract"):
+        _Hollow()

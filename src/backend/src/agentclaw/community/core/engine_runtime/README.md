@@ -13,7 +13,7 @@ provides:
   - "gate — who may operate a bot, and which bot types/stages the operator surfaces serve"
   - "stage — which runtime a stage names (draft workspace vs published bindings)"
   - "EngineResult / ConnectionResult / SocketInfo value objects"
-  - "SessionKeyCodecRegistry / encode_session_key — the engine-specific wire form of a session id"
+  - "SessionKeyCodec / SessionKeyCodecRegistry — the engine-specific wire form of a session id (assembled by EngineRuntimeModule)"
   - "Engine-runtime domain errors (no HTTP status; the adapter maps them)"
 consumes:
   - "BotService — owner-scoped bot lookup; the isolation seam"

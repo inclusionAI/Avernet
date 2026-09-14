@@ -42,6 +42,7 @@ from .conftest import (
     FakeFriendships,
     FakeRelay,
     bind_seam_from_relay,
+    bind_session_key_codecs,
 )
 
 COLLABORATOR = "u-collab"
@@ -141,6 +142,7 @@ def make_caller(relay, connections, friendships, expert):
                 binder.bind(EngineConnectionServiceProtocol, to=connections)
                 binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
                 binder.bind(ExpertChatServiceProtocol, to=expert)
+                bind_session_key_codecs(binder)
                 bind_seam_from_relay(binder, relay)
 
         app = FastAPI()
@@ -269,6 +271,7 @@ def test_the_seam_is_what_decides_on_a_migrated_route(
             binder.bind(EngineConnectionServiceProtocol, to=connections)
             binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
             binder.bind(ExpertChatServiceProtocol, to=expert)
+            bind_session_key_codecs(binder)
             bind_seam_from_relay(binder, relay)
             # Overrides the collaborator double the line above bound.
             binder.bind(
