@@ -1,11 +1,19 @@
-# AgentEvolve screenshot checklist
+# AgentEvolve screenshots
 
-Add screenshots here in a later documentation pass. Recommended files:
+The public English and Chinese guides use the following screenshots:
 
-- `agent-evolve-overview.png`: navigation, task center, and personal Bot selector;
-- `agent-evolve-create-task.png`: evolution type, Bot, and model selection;
-- `agent-evolve-run-detail.png`: Step status, diagnosis, Plan, and optimization rounds;
-- `agent-evolve-bench-result.png`: Bench metrics, cases, sessions, and analysis state;
-- `agent-evolve-pack-management.png`: Pack creation, version list, and Apply flow.
+- `agent-evolve-overview.png`: task center and available evolution entry points;
+- `agent-evolve-cli_start.png`: interactive local startup and Bot-source selection;
+- `agent-evolve-create-task.png`: Bot, evolution mode, model, and objective selection;
+- `agent-evolve-run-detail.png`: planning, optimization rounds, diffs, metrics, and Pack;
+- `agent-evolve-bench-result.png`: Bench template, version, and historical runs;
+- `agent-evolve-pack-management.png`: version comparison, Diff, download, and Apply actions.
 
-Use relative image links, descriptive alternative text, and sample data without private identifiers, endpoints, or credentials.
+Before adding or replacing an image:
+
+1. use sample data only;
+2. remove private usernames, machine paths, endpoints, tokens, and credentials;
+3. keep the AgentEvolve public branding visible;
+4. use relative image links and descriptive alternative text.
+
+Terminal captures should avoid credentials, private endpoints, and unrelated shell history.

@@ -6,6 +6,15 @@ English documentation: [README.md](README.md)
 
 > 仓库中的历史技术目录、脚本名和配置字段仍可能保留 `clawweb`，它们是兼容路径，不代表产品名称。
 
+## 文档导航
+
+- [产品能力总览](#产品能力总览)
+- [快速开始](#快速开始)
+- [功能使用说明](#功能使用说明)
+- [如何阅读任务结果](#如何阅读任务结果)
+- [配置说明](#配置说明)
+- [常见问题](#常见问题)
+
 ## 产品能力总览
 
 | 能力 | 用途 | 开源版状态 |
@@ -20,6 +29,10 @@ English documentation: [README.md](README.md)
 | 任务与版本管理 | 查看任务步骤、运行输出、评估结果、变更和 Pack 版本 | 可用 |
 
 服务 Bot、会话专项诊断、Bot 修复、治理优化以及依赖内部环境的能力不属于当前开源版。页面只展示已经接通的公开能力。
+
+![AgentEvolve 进化任务与能力入口](assets/agent-evolve-overview.png)
+
+*进化任务页集中展示任务、评估和版本入口，并仅开放当前版本已接通的能力。*
 
 ## 工作方式
 
@@ -61,6 +74,10 @@ cd ../../..
 bash src/evolverun/clawweb/scripts/start-clawweb-open.sh
 ```
 
+![通过命令行启动 AgentEvolve](assets/agent-evolve-cli_start.png)
+
+*启动脚本通过交互式选项选择 Bot 来源，并准备 AgentEvolve 本地运行环境。*
+
 脚本会提示选择 Bot 来源：
 
 1. **自动检测（推荐）**：存在 Avernet Singlebox 数据库时复用，否则使用 `~/.openclaw`；
@@ -92,6 +109,15 @@ bash src/evolverun/clawweb/scripts/start-clawweb-open.sh \
 
 启动脚本只启动 AgentEvolve，不会启动、停止或重启 Avernet Singlebox 或 OpenClaw Gateway。若端口 `5173` 已被占用，脚本会退出而不是覆盖已有进程；可使用 `--port` 更换端口。
 
+### 建议首次体验
+
+1. 确认页面能够展示一个个人 Bot；
+2. 先运行 **Bench 诊断**，验证模型、Bot workspace 和评估链路；
+3. 再使用 **Bot 自进化 → 按目标进化** 完成一次小范围修改；
+4. 在任务详情中检查 Diff 和 Bench 结果，确认符合预期后再创建 Pack。
+
+首次体验建议使用可快速验证、容易回退的目标，不要直接修改重要 Bot。
+
 ## 功能使用说明
 
 ### Bot 自进化：按一句话目标优化
@@ -104,6 +130,10 @@ bash src/evolverun/clawweb/scripts/start-clawweb-open.sh \
 4. 输入目标、成功标准和必要约束；
 5. 提交任务，依次检查 Plan、Baseline、优化轮次和验证结果；
 6. 确认改动有效后创建 Pack。
+
+![创建 Bot 自进化任务](assets/agent-evolve-create-task.png)
+
+*创建任务时选择个人 Bot、进化方式、执行模型和优化目标。*
 
 一句话目标会由规划阶段转换为可执行 Spec 和 Bench Case，但不会要求生成文本逐字复制输入。最终是否达标以验证 Case 和实际输出为准。
 
@@ -128,6 +158,10 @@ Bot 诊断本身只读取 Session 并生成结论，不应修改目标 Bot works
 3. 选择目标 Bot、模型和已发布模板；
 4. 运行后查看总体指标、每个 Case 的结果、Session 和原始输出；
 5. 报告能力未启用时，页面会提示报告未配置，但不影响查看评测结果。
+
+![Bench 模板与历史运行结果](assets/agent-evolve-bench-result.png)
+
+*Bench 页面保留模板内容、版本以及历史运行指标，便于复现和比较。*
 
 ### 诊断后优化
 
@@ -157,6 +191,10 @@ Bot 诊断本身只读取 Session 并生成结论，不应修改目标 Bot works
 
 应用 Pack 会修改目标 Bot。执行前应核对 Bot、Pack 来源、Diff 和评估结果，并保留可回退版本。
 
+![AgentEvolve Pack 版本管理](assets/agent-evolve-pack-management.png)
+
+*版本页用于比较评估结果、查看 Diff，并下载或应用可恢复的 Pack。*
+
 ## 如何阅读任务结果
 
 任务详情页是排查和验收的主要入口：
@@ -169,6 +207,10 @@ Bot 诊断本身只读取 Session 并生成结论，不应修改目标 Bot works
 - **Pack**：记录版本来源、摘要、大小和应用状态。
 
 不要只根据总分决定是否应用版本。关键 Case、失败模式和实际 Diff 同样需要人工确认。
+
+![AgentEvolve 任务执行详情](assets/agent-evolve-run-detail.png)
+
+*任务详情按阶段展示规划、优化轮次、Diff、Bench 指标与 Pack，便于逐步验收。*
 
 ## 本地数据与产物
 
@@ -230,7 +272,3 @@ npm test
 - **找不到 Session/workspace**：确认目标 Bot 已创建 workspace，并已产生可读取的本地 Session。
 - **页面样式或 native binding 异常**：删除 `node_modules`，在当前操作系统和 CPU 上使用受支持的 Node/npm 重新执行 `npm ci`，不要跨平台复用依赖目录。
 - **端口被占用**：复用现有进程或使用 `--port` 指定其他端口。
-
-## 截图
-
-后续截图的建议名称与内容见 [assets/README.md](assets/README.md)。

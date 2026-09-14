@@ -6,6 +6,15 @@ For Chinese documentation, see [README.zh-CN.md](README.zh-CN.md).
 
 > Historical source paths, script names, and configuration fields may still contain `clawweb` for compatibility. AgentEvolve is the public product name.
 
+## Documentation map
+
+- [Product overview](#product-overview)
+- [Quick start](#quick-start)
+- [Feature guide](#feature-guide)
+- [Reading a task result](#reading-a-task-result)
+- [Configuration](#configuration)
+- [Troubleshooting](#troubleshooting)
+
 ## Product overview
 
 | Capability | Purpose | Open-source edition |
@@ -20,6 +29,10 @@ For Chinese documentation, see [README.zh-CN.md](README.zh-CN.md).
 | Task and version management | Inspect steps, outputs, evaluation results, diffs, and Pack versions | Available |
 
 Service-Bot flows, dedicated session diagnosis, Bot repair, governance optimization, and internal-environment integrations are not included in the current open-source edition.
+
+![AgentEvolve task center and evolution entry points](assets/agent-evolve-overview.png)
+
+*The task center brings tasks, evaluations, and versions together while exposing only the capabilities available in the current edition.*
 
 ## How it works
 
@@ -57,6 +70,10 @@ cd ../../..
 bash src/evolverun/clawweb/scripts/start-clawweb-open.sh
 ```
 
+![Start AgentEvolve from the command line](assets/agent-evolve-cli_start.png)
+
+*The interactive launcher selects the Bot source and prepares the local AgentEvolve runtime.*
+
 The launcher asks which Bot source to use:
 
 1. **Auto (recommended):** reuse an existing Avernet Singlebox database, otherwise use `~/.openclaw`;
@@ -86,6 +103,15 @@ Open <http://127.0.0.1:5173/> and select a personal Bot.
 
 The launcher starts only AgentEvolve. It does not start, stop, or restart Avernet Singlebox or an OpenClaw gateway. If port `5173` is occupied, it exits instead of replacing the running process; use `--port` to select another port.
 
+### Recommended first run
+
+1. Confirm that the page lists a personal Bot.
+2. Run **Bench diagnosis** first to verify the model, Bot workspace, and evaluation path.
+3. Run **Bot self-evolution → direct-goal evolution** with one small, reversible objective.
+4. Review the diff and Bench result on the task page before creating a Pack.
+
+For the first run, avoid making changes to an important Bot; use an objective that is easy to verify and roll back.
+
 ## Feature guide
 
 ### Direct-goal self-evolution
@@ -98,6 +124,10 @@ Use this when the desired behavior is already clear.
 4. Enter the objective, success criteria, and constraints.
 5. Review the plan, baseline, optimization rounds, and validation cases.
 6. Create a Pack only after the result and diff are acceptable.
+
+![Create a Bot self-evolution task](assets/agent-evolve-create-task.png)
+
+*Select the personal Bot, evolution mode, execution model, and objective when creating a task.*
 
 The planning stage converts the user's goal into an executable Spec and Bench cases. Acceptance is based on actual validation, not literal text matching between the input and generated documents.
 
@@ -122,6 +152,10 @@ Diagnosis reads session history and must not modify the target workspace.
 
 When report generation is not configured, AgentEvolve shows a neutral unavailable state; the evaluation data remains available.
 
+![Bench template and historical run results](assets/agent-evolve-bench-result.png)
+
+*Bench pages retain the template, version, and historical metrics for repeatable comparisons.*
+
 ### Diagnosis-driven optimization
 
 1. Select a completed diagnosis task and the target Bot.
@@ -144,6 +178,10 @@ When report generation is not configured, AgentEvolve shows a neutral unavailabl
 
 Applying a Pack changes the target Bot. Verify the Bot, Pack source, diff, and evaluation result first, and keep a rollback version.
 
+![AgentEvolve Pack version management](assets/agent-evolve-pack-management.png)
+
+*Compare evaluation results, inspect diffs, and download or apply recoverable Packs from the version page.*
+
 ## Reading a task result
 
 - **Step status:** locate the stage that stopped and inspect its error and technical output.
@@ -154,6 +192,10 @@ Applying a Pack changes the target Bot. Verify the Bot, Pack source, diff, and e
 - **Pack:** record its source, digest, size, and application status.
 
 Do not accept a version based on aggregate score alone. Critical cases and the actual diff also require review.
+
+![AgentEvolve task execution detail](assets/agent-evolve-run-detail.png)
+
+*The task detail groups planning, optimization rounds, diffs, Bench metrics, and Packs for step-by-step review.*
 
 ## Local data and artifacts
 
@@ -209,7 +251,3 @@ npm test
 - **Sessions or workspace are missing:** verify that the selected Bot has a workspace and local session history.
 - **Styles or native bindings are missing:** remove `node_modules` and run `npm ci` on the current OS/CPU with a supported Node/npm version.
 - **The port is occupied:** reuse the running process or pass another port with `--port`.
-
-## Screenshots
-
-Planned screenshots and naming guidance are in [assets/README.md](assets/README.md).
