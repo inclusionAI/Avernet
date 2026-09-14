@@ -39,6 +39,7 @@ import {
 import {
   parseNodeCommandYamls,
   normalizeDiagnoseIntent,
+  diagnoseIntentWithDates,
   normalizeEvolutionGoal,
   quoteCommandArgument,
   readDiagnoseJudgeBackend,
@@ -988,6 +989,7 @@ async function createBuiltinDiagnoseStep(
     forceMessage?: boolean;
   } | null) ?? {};
   const judgeBackend = config.judgeBackend ?? "subagent";
+  const effectiveDiagnoseIntent = diagnoseIntentWithDates(config.diagnoseIntent ?? "", config.startDate, config.endDate);
   const diagnoseApiKey = String(options.diagnoseApiKey ?? "").trim();
   if (judgeBackend === "api" && !diagnoseApiKey) throw new Error("API Judge 缺少临时 API Key");
   const stepId = id("STEP");
@@ -1008,7 +1010,7 @@ async function createBuiltinDiagnoseStep(
     {
       api_key: "******",
       model: config.model ?? "GLM-5.2",
-      diagnose_intent: quoteCommandArgument(config.diagnoseIntent ?? ""),
+      diagnose_intent: quoteCommandArgument(effectiveDiagnoseIntent),
       start_date: config.startDate ?? "",
       end_date: config.endDate ?? "",
     },
@@ -1019,7 +1021,7 @@ async function createBuiltinDiagnoseStep(
     {
       api_key: judgeBackend === "api" ? diagnoseApiKey : "******",
       model: config.model ?? "GLM-5.2",
-      diagnose_intent: quoteCommandArgument(config.diagnoseIntent ?? ""),
+      diagnose_intent: quoteCommandArgument(effectiveDiagnoseIntent),
       start_date: config.startDate ?? "",
       end_date: config.endDate ?? "",
     },
@@ -3728,9 +3730,10 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         }
         const commonValues = {
           model: config.model ?? "GLM-5.2",
-          diagnose_intent: config.diagnoseIntent
-            ? quoteCommandArgument(normalizeDiagnoseIntent(config.diagnoseIntent))
-            : "",
+          diagnose_intent: quoteCommandArgument(diagnoseIntentWithDates(
+            config.diagnoseIntent ? normalizeDiagnoseIntent(config.diagnoseIntent) : "",
+            config.startDate, config.endDate,
+          )),
           start_date: config.startDate ?? "",
           end_date: config.endDate ?? "",
         };

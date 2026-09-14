@@ -73,6 +73,14 @@ export function quoteCommandArgument(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
+export function diagnoseIntentWithDates(intent: string, startDate?: string, endDate?: string): string {
+  if (!startDate || !endDate) return intent;
+  const range = `${startDate} 至 ${endDate}`;
+  // The advanced form already includes this range. Keep its wording intact.
+  if (intent.includes(range)) return intent;
+  return `时间范围：${range}。${intent}`;
+}
+
 export function parseNodeCommandYaml(value: unknown, node: NodeCommandKey): string | undefined {
   if (value == null || value === "") return undefined;
   if (typeof value !== "string") throw new Error(`${node} 节点 YAML 必须是字符串`);

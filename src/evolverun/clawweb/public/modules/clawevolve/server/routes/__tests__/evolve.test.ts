@@ -1678,6 +1678,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
       method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
       body: JSON.stringify({ taskType: "diagnose", taskName: "Skill 诊断任务", userId: "user-1", botId: "bot-arca", botEnv: "pre",
         judgeBackend: "subagent", model: "GLM-5.2", diagnoseIntent: "检查日报真实执行", targetSkillAssetId: "SKILL-DIAGNOSE",
+        startDate: "2026-09-11", endDate: "2026-09-14",
         ...(plan === undefined ? {} : { stageSelection: { plan } }),
         ...(implementationId ? { stageExtensions: { diagnose: { preprocess: { enabled: true, implementationId } } } } : {}) }),
     });
@@ -1707,6 +1708,11 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
       next = processed.body.nextStep as typeof next;
     }
     expect(next.stepType).toBe("diagnose");
+    const detailResponse = await fetch(`${baseUrl}/api/evolve/tasks/${task.task_id}`);
+    expect(detailResponse.status).toBe(200);
+    const detail = await detailResponse.json() as { steps: Array<{ stepId: string; command: string }> };
+    expect(detail.steps.find((step) => step.stepId === next.stepId)?.command)
+      .toContain("--intent '时间范围：2026-09-11 至 2026-09-14。检查日报真实执行'");
     const diagnoseInput = await fetch(`${baseUrl}/api/evolve/internal/tasks/${task.task_id}/steps/${next.stepId}/input`);
     expect(diagnoseInput.status).toBe(200);
     expect((await diagnoseInput.json()).task.config.targetSkill.candidate.prepared).toMatchObject({
@@ -2950,6 +2956,84 @@ describe("ClawEvolve step protocol", () => {
     }));
     expect(dispatch.mock.calls[0]?.[0].command).toContain("--model GLM-5.1");
     expect(JSON.stringify(body)).not.toContain("temporary-secret");
+  });
+
+  it("includes structured diagnosis dates in the default command intent", async () => {
+    const response = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
+      body: JSON.stringify({
+        taskType: "diagnose", taskName: "指定日期诊断", userId: "user-1", botId: "bot-1",
+        judgeBackend: "subagent", model: "GLM-5.2", goal: "检查日报准确性",
+        diagnoseIntent: "检查日报准确性", startDate: "2026-09-11", endDate: "2026-09-14",
+      }),
+    });
+    expect(response.status).toBe(201);
+    const task = await response.json() as { task_id: string };
+    const detail = await fetch(`${baseUrl}/api/evolve/tasks/${task.task_id}`);
+    expect(detail.status).toBe(200);
+    const body = await detail.json() as { steps: Array<{ stepType: string; command: string }> };
+    const command = body.steps.find((step) => step.stepType === "diagnose")?.command;
+    expect(command).toMatch(/--intent '[^']*2026-09-11[^']*2026-09-14[^']*'/);
+    expect(command).toContain("检查日报准确性");
+    expect(dispatch.mock.calls.at(-1)?.[0].command).toBe(command);
+  });
+
+  it("preserves structured diagnosis dates when retrying a failed default command", async () => {
+    const response = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
+      body: JSON.stringify({
+        taskType: "diagnose", taskName: "日期诊断重试", userId: "user-1", botId: "bot-1",
+        judgeBackend: "subagent", model: "GLM-5.2", goal: "检查日报准确性",
+        diagnoseIntent: "检查日报准确性", startDate: "2026-09-11", endDate: "2026-09-14",
+      }),
+    });
+    expect(response.status).toBe(201);
+    const task = await response.json() as { task_id: string; steps: Array<{ stepId: string }> };
+    const failedStepId = task.steps[0].stepId;
+    const failed = await callback(task.task_id, failedStepId, {
+      status: "failed", error: { code: "TEST_FAILURE", message: "retry fixture" },
+    });
+    expect(failed.response.status).toBe(200);
+    const retried = await fetch(`${baseUrl}/api/evolve/tasks/${task.task_id}/steps/${failedStepId}/retry`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
+      body: "{}",
+    });
+    expect(retried.status).toBe(201);
+    const body = await retried.json() as { step: { command: string } };
+    expect(body.step.command).toContain("--intent '时间范围：2026-09-11 至 2026-09-14。检查日报准确性'");
+    expect(dispatch.mock.calls.at(-1)?.[0].command).toBe(body.step.command);
+  });
+
+  it.each([
+    { name: "advanced form range", intent: "扫描2026-09-11 至 2026-09-14的历史 session；检查日报。", dates: { startDate: "2026-09-11", endDate: "2026-09-14" }, expected: "扫描2026-09-11 至 2026-09-14的历史 session；检查日报。" },
+    { name: "no structured dates", intent: "检查日报准确性", dates: {}, expected: "检查日报准确性" },
+    { name: "same-day range", intent: "检查日报准确性", dates: { startDate: "2026-09-11", endDate: "2026-09-11" }, expected: "时间范围：2026-09-11 至 2026-09-11。检查日报准确性" },
+  ])("keeps compatible diagnosis intent for $name", async ({ intent, dates, expected }) => {
+    const response = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
+      body: JSON.stringify({ taskType: "full", taskName: "诊断日期兼容", userId: "user-1", botId: "bot-1",
+        judgeBackend: "subagent", model: "GLM-5.2", goal: "检查日报准确性", diagnoseIntent: intent, ...dates }),
+    });
+    expect(response.status).toBe(201);
+    const body = await response.json() as { steps: Array<{ command: string }> };
+    expect(body.steps[0].command).toContain(`--intent '${expected}' --judge-backend`);
+    expect(dispatch.mock.calls.at(-1)?.[0].command).toBe(body.steps[0].command);
+  });
+
+  it.each([
+    { startDate: "2026-09-11" }, { endDate: "2026-09-14" },
+    { startDate: "2026-09-14", endDate: "2026-09-11" },
+  ])("rejects incomplete or reversed structured diagnosis dates: %j", async (dates) => {
+    const response = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
+      body: JSON.stringify({ taskType: "diagnose", taskName: "非法诊断日期", userId: "user-1", botId: "bot-1",
+        judgeBackend: "subagent", model: "GLM-5.2", diagnoseIntent: "检查日报准确性", ...dates }),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "开始和结束日期必须同时提供，且开始日期不能晚于结束日期" });
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
   it("creates Bot Diagnose with the default Subagent Judge and no API key", async () => {
