@@ -276,11 +276,11 @@ def test_prompt_formatter_skill_report_on_uses_http_post():
     assert '"success": true' not in s
     assert '"verdict": "DONE"' in s
     assert '"acceptances_metric"' in s
-    assert "阶段1 在本条消息正文给出的真实业务产出" in s
-    assert "收到 HTTP 200 即视为本节点上报完成" in s
-    assert "严禁在收尾轮再次贴出阶段1执行产出" in s
-    assert "上报只能用 exec/curl" in s
-    assert "不得对同一节点重复 POST" in s
+    assert "每位执行者（包括 driver）完成分内真实业务推理并给出可复核产出" in s
+    assert "HTTP 200 且响应明确表示成功，才算回投成功" in s
+    assert "不得重贴完整输出" in s
+    assert "仅唯一回投者可使用 exec/curl，以 POST JSON 请求固定地址" in s
+    assert "收到 HTTP 200 后立即停止，不得再次 POST" in s
 
 def test_prompt_formatter_relay_appends_protocol_and_chinese_constraint():
     """# 接自 接力分支(static_plan):交接正文 + 执行闭环(禁联网/平台回收/接力交接,不含 HTTP 上报协议)+ 中文输出约束。"""
