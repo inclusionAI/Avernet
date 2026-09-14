@@ -30,7 +30,7 @@ English documentation: [agent-evolve.md](agent-evolve.md)
 
 服务 Bot、会话专项诊断、Bot 修复、治理优化以及依赖内部环境的能力不属于当前开源版。页面只展示已经接通的公开能力。
 
-![AgentEvolve 进化任务与能力入口](images/agent-evolve-overview.png)
+![AgentEvolve 进化任务与能力入口](images/agent-evolve/agent-evolve-overview.png)
 
 *进化任务页集中展示任务、评估和版本入口，并仅开放当前版本已接通的能力。*
 
@@ -74,7 +74,7 @@ cd ../../..
 bash src/evolverun/clawweb/scripts/start-clawweb-open.sh
 ```
 
-![通过命令行启动 AgentEvolve](images/agent-evolve-cli-start.png)
+![通过命令行启动 AgentEvolve](images/agent-evolve/agent-evolve-cli-start.png)
 
 *启动脚本通过交互式选项选择 Bot 来源，并准备 AgentEvolve 本地运行环境。*
 
@@ -131,7 +131,7 @@ bash src/evolverun/clawweb/scripts/start-clawweb-open.sh \
 5. 提交任务，依次检查 Plan、Baseline、优化轮次和验证结果；
 6. 确认改动有效后创建 Pack。
 
-![创建 Bot 自进化任务](images/agent-evolve-create-task.png)
+![创建 Bot 自进化任务](images/agent-evolve/agent-evolve-create-task.png)
 
 *创建任务时选择个人 Bot、进化方式、执行模型和优化目标。*
 
@@ -159,7 +159,7 @@ Bot 诊断本身只读取 Session 并生成结论，不应修改目标 Bot works
 4. 运行后查看总体指标、每个 Case 的结果、Session 和原始输出；
 5. 报告能力未启用时，页面会提示报告未配置，但不影响查看评测结果。
 
-![Bench 模板与历史运行结果](images/agent-evolve-bench-result.png)
+![Bench 模板与历史运行结果](images/agent-evolve/agent-evolve-bench-result.png)
 
 *Bench 页面保留模板内容、版本以及历史运行指标，便于复现和比较。*
 
@@ -191,7 +191,7 @@ Bot 诊断本身只读取 Session 并生成结论，不应修改目标 Bot works
 
 应用 Pack 会修改目标 Bot。执行前应核对 Bot、Pack 来源、Diff 和评估结果，并保留可回退版本。
 
-![AgentEvolve Pack 版本管理](images/agent-evolve-pack-management.png)
+![AgentEvolve Pack 版本管理](images/agent-evolve/agent-evolve-pack-management.png)
 
 *版本页用于比较评估结果、查看 Diff，并下载或应用可恢复的 Pack。*
 
@@ -208,7 +208,7 @@ Bot 诊断本身只读取 Session 并生成结论，不应修改目标 Bot works
 
 不要只根据总分决定是否应用版本。关键 Case、失败模式和实际 Diff 同样需要人工确认。
 
-![AgentEvolve 任务执行详情](images/agent-evolve-run-detail.png)
+![AgentEvolve 任务执行详情](images/agent-evolve/agent-evolve-run-detail.png)
 
 *任务详情按阶段展示规划、优化轮次、Diff、Bench 指标与 Pack，便于逐步验收。*
 

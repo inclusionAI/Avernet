@@ -70,9 +70,10 @@ Avernet 为跨应用、跨运行时和跨人机协作工作流的 **持久化、
   ![Context](https://img.shields.io/badge/Context-Planned-lightgrey)
   ![Memory](https://img.shields.io/badge/Memory-Planned-lightgrey)
   ![Orchestration](https://img.shields.io/badge/Orchestration-Planned-lightgrey)
-  ![Evaluation](https://img.shields.io/badge/Evaluation-Planned-lightgrey)
-  ![Evolution](https://img.shields.io/badge/Evolution-Planned-lightgrey)  
-  支持上下文、记忆、编排、评测和持续改进。
+  ![Evaluation](https://img.shields.io/badge/Evaluation-Available-brightgreen)
+  ![Evolution](https://img.shields.io/badge/Evolution-Available-brightgreen)
+
+  已通过 [AgentEvolve](docs/agent-evolve.zh-CN.md) 提供 Bot 诊断、可重复 Bench 评测、按目标或诊断驱动的优化，以及可恢复的 Pack 版本；上下文、记忆和通用编排能力仍在规划中。
 
 - **应用构建模块**  
   ![Apps](https://img.shields.io/badge/Apps-Planned-lightgrey)
@@ -199,6 +200,7 @@ ocb/
 
 ## 文档
 
+- [AgentEvolve](docs/agent-evolve.zh-CN.md)
 - [快速开始](docs/quick-start.zh-CN.md)
 - [依赖说明](docs/dependencies.zh-CN.md)
 - [Docker 指南](docs/docker.zh-CN.md)

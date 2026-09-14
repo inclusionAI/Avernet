@@ -70,9 +70,10 @@ It is built for teams that need to:
   ![Context](https://img.shields.io/badge/Context-Planned-lightgrey)
   ![Memory](https://img.shields.io/badge/Memory-Planned-lightgrey)
   ![Orchestration](https://img.shields.io/badge/Orchestration-Planned-lightgrey)
-  ![Evaluation](https://img.shields.io/badge/Evaluation-Planned-lightgrey)
-  ![Evolution](https://img.shields.io/badge/Evolution-Planned-lightgrey)  
-  Context, memory, orchestration, evaluation, and continuous improvement over time.
+  ![Evaluation](https://img.shields.io/badge/Evaluation-Available-brightgreen)
+  ![Evolution](https://img.shields.io/badge/Evolution-Available-brightgreen)
+
+  Bot diagnosis, repeatable Bench evaluation, goal- or diagnosis-driven optimization, and recoverable Pack versions are available through [AgentEvolve](docs/agent-evolve.md). Context, memory, and general-purpose orchestration remain planned.
 
 - **Application building blocks**  
   ![Apps](https://img.shields.io/badge/Apps-Planned-lightgrey)
@@ -199,6 +200,7 @@ ocb/
 
 ## Documentation
 
+- [AgentEvolve](docs/agent-evolve.md)
 - [Quick Start](docs/quick-start.md)
 - [Dependencies](docs/dependencies.md)
 - [Docker Guide](docs/docker.md)

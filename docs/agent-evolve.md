@@ -30,7 +30,7 @@ For Chinese documentation, see [agent-evolve.zh-CN.md](agent-evolve.zh-CN.md).
 
 Service-Bot flows, dedicated session diagnosis, Bot repair, governance optimization, and internal-environment integrations are not included in the current open-source edition.
 
-![AgentEvolve task center and evolution entry points](images/agent-evolve-overview.png)
+![AgentEvolve task center and evolution entry points](images/agent-evolve/agent-evolve-overview.png)
 
 *The task center brings tasks, evaluations, and versions together while exposing only the capabilities available in the current edition.*
 
@@ -70,7 +70,7 @@ cd ../../..
 bash src/evolverun/clawweb/scripts/start-clawweb-open.sh
 ```
 
-![Start AgentEvolve from the command line](images/agent-evolve-cli-start.png)
+![Start AgentEvolve from the command line](images/agent-evolve/agent-evolve-cli-start.png)
 
 *The interactive launcher selects the Bot source and prepares the local AgentEvolve runtime.*
 
@@ -125,7 +125,7 @@ Use this when the desired behavior is already clear.
 5. Review the plan, baseline, optimization rounds, and validation cases.
 6. Create a Pack only after the result and diff are acceptable.
 
-![Create a Bot self-evolution task](images/agent-evolve-create-task.png)
+![Create a Bot self-evolution task](images/agent-evolve/agent-evolve-create-task.png)
 
 *Select the personal Bot, evolution mode, execution model, and objective when creating a task.*
 
@@ -152,7 +152,7 @@ Diagnosis reads session history and must not modify the target workspace.
 
 When report generation is not configured, AgentEvolve shows a neutral unavailable state; the evaluation data remains available.
 
-![Bench template and historical run results](images/agent-evolve-bench-result.png)
+![Bench template and historical run results](images/agent-evolve/agent-evolve-bench-result.png)
 
 *Bench pages retain the template, version, and historical metrics for repeatable comparisons.*
 
@@ -178,7 +178,7 @@ When report generation is not configured, AgentEvolve shows a neutral unavailabl
 
 Applying a Pack changes the target Bot. Verify the Bot, Pack source, diff, and evaluation result first, and keep a rollback version.
 
-![AgentEvolve Pack version management](images/agent-evolve-pack-management.png)
+![AgentEvolve Pack version management](images/agent-evolve/agent-evolve-pack-management.png)
 
 *Compare evaluation results, inspect diffs, and download or apply recoverable Packs from the version page.*
 
@@ -193,7 +193,7 @@ Applying a Pack changes the target Bot. Verify the Bot, Pack source, diff, and e
 
 Do not accept a version based on aggregate score alone. Critical cases and the actual diff also require review.
 
-![AgentEvolve task execution detail](images/agent-evolve-run-detail.png)
+![AgentEvolve task execution detail](images/agent-evolve/agent-evolve-run-detail.png)
 
 *The task detail groups planning, optimization rounds, diffs, Bench metrics, and Packs for step-by-step review.*
 
