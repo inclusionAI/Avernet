@@ -101,7 +101,7 @@ export const routeMetaList: RouteMeta[] = [
   },
   {
     path: '/admin/work-orders',
-    title: '工单中心',
+    title: '通知中心',
     section: 'manage',
     navKey: 'admin',
     openCore: true,

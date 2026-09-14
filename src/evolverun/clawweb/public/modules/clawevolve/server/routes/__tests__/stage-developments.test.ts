@@ -36,7 +36,7 @@ async function setup() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ stage: "diagnose", mode: "preprocess", flow: "skill_evolution" }),
     });
-    expect(response.status).toBe(201); return response.json();
+    expect(response.status, await response.clone().text()).toBe(201); return response.json();
   };
   const upload = async (id: string, stage = "diagnose", owner = "owner") => {
     const bytes = await new JSZip().file("SKILL.md", "# 自定义处理\n检查输入并返回处理结果。\n").generateAsync({ type: "uint8array" });
@@ -56,7 +56,7 @@ describe("independent Stage development record", () => {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ stage: "plan", mode: "replace", flow }),
       });
-      expect(response.status).toBe(201);
+      expect(response.status, await response.clone().text()).toBe(201);
       const draft = await response.json();
       const old = await test.repo.createImplementation({
         stageSkillId: draft.stageSkillId, implementationId: `OLD-${flow}`, ownerUserId: "owner",
@@ -120,12 +120,75 @@ describe("independent Stage development record", () => {
           expect(guide).toContain(`${flow === "skill_evolution" ? "Skill" : "Bot"} 自进化任务用于`);
           expect(guide.match(/^## /gm)).toHaveLength(4);
           const input = JSON.parse([...guide.matchAll(/```json\n([\s\S]*?)\n```/g)][0]![1]!);
-          expect(Boolean(input.target_skill)).toBe(flow === "skill_evolution");
+          const planBusiness = flow === "skill_evolution" && stage === "plan" && mode === "replace";
+          if (planBusiness) {
+            expect(Object.keys(input).sort()).toEqual(["input", "output_requirements", "phase"]);
+            expect(input.phase).toBe("discovery");
+            expect(input.input.allowed_targets).toEqual([expect.any(String)]);
+          }
+          expect(Boolean(input.target_skill)).toBe(flow === "skill_evolution" && !planBusiness);
           expect(Boolean(input.builtin_result)).toBe(mode === "postprocess");
           expect(guide).toContain("<form>");
         }
       }
     }
+  });
+
+  it("delivers all four Plan business input/output pairs through the developer package route", async () => {
+    const test = await setup();
+    const response = await test.request("/stage-skills/developer-package?flow=skill_evolution&stage=plan&mode=replace");
+    expect(response.status).toBe(200);
+    const zip = await JSZip.loadAsync(await response.arrayBuffer());
+    expect(Object.keys(zip.files)).toEqual(["SKILL.md"]);
+    const guide = await zip.file("SKILL.md")!.async("string");
+    const blocks = [...guide.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) => JSON.parse(match[1]!));
+    const inputs = blocks.filter((block) => block.phase);
+    expect(inputs.map((input) => input.phase)).toEqual([
+      "discovery", "case_contract", "objective_document", "spec_document",
+    ]);
+    const inputFields = [
+      ["allowed_targets", "source_path", "source_sha256", "workspace_root"],
+      ["case", "discovery_notes", "goal", "user_intent", "validation_error"],
+      ["context", "objective", "objective_template"],
+      ["context", "objective_markdown", "spec", "spec_template"],
+    ];
+    const outputs = inputs.map((input, index) => {
+      expect(Object.keys(input).sort()).toEqual(["input", "output_requirements", "phase"]);
+      expect(input.output_requirements).toEqual(expect.any(String));
+      expect(input.output_requirements.length).toBeGreaterThan(0);
+      expect(Object.keys(input.input).sort()).toEqual(inputFields[index]);
+      const output = blocks[blocks.indexOf(input) + 1];
+      for (const field of ["result", "goal", "spec", "benchCases", "benchDomains"]) {
+        expect(output).not.toHaveProperty(field);
+      }
+      return output;
+    });
+    expect(outputs[0]).toMatchObject({
+      schema_version: "clawevolve.plan.discovery.v1",
+      workspace_root: inputs[0].input.workspace_root,
+      analysis_summary: expect.any(Object), case_findings: [expect.any(Object)],
+      target_findings: [expect.any(Object)], merged_targets: [expect.any(String)],
+    });
+    expect(Object.keys(outputs[1])).toEqual(["contracts"]);
+    expect(outputs[1].contracts).toHaveLength(1);
+    const contract = outputs[1].contracts[0];
+    expect(contract.schema_version).toBe("clawevolve.case-contract.v1");
+    for (const field of ["case_id", "template_id", "case_type", "split", "source_session_id"]) {
+      expect(contract[field]).toBe(inputs[1].input.case[field]);
+    }
+    expect(Object.keys(contract.task_contract).sort()).toEqual([
+      "acceptable_approaches", "acceptable_failure_handling", "completion_signals", "forbidden_behaviors",
+      "required_actions", "required_evidence", "required_outcomes", "user_intent",
+    ]);
+    expect(contract.grading_strategy.criteria.reduce((sum: number, criterion: { weight: number }) => sum + criterion.weight, 0)).toBe(100);
+    for (const criterion of contract.grading_strategy.criteria) {
+      for (const field of ["score_1", "score_075", "score_05", "score_025", "score_0"]) {
+        expect(criterion[field]).toEqual(expect.any(String));
+        expect(criterion[field].length).toBeGreaterThan(0);
+      }
+    }
+    expect(outputs[2]).toEqual({ objective_markdown: expect.any(String) });
+    expect(outputs[3]).toEqual({ spec_markdown: expect.any(String) });
   });
 
   it("uses the frozen development selection even if query parameters request another background", async () => {

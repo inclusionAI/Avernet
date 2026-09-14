@@ -48,7 +48,11 @@ pub struct MessageTracker {
     /// once per run so audience classification and channel rendering do not
     /// repeatedly read Group storage on the hot path.
     bot_event_run_info: Mutex<HashMap<String, BotEventRunInfo>>,
-    /// run_id → text buffered for the CURRENT open chat segment.
+    /// Scoped run key → text buffered for the CURRENT open chat segment.
+    /// Group ingestion encodes (group, session, sender Bot, run) as a JSON tuple;
+    /// legacy test/direct callers may still use a plain run ID. Pending history
+    /// decodes scoped keys before consulting run context. Channel/tool tracking
+    /// retains its separate existing identity contract.
     ///
     /// Two producers write here, depending on what the upstream frame carries:
     /// - **Plugin (WS) path**: frames carry already-sliced per-segment text in

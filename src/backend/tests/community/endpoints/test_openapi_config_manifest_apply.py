@@ -11,12 +11,15 @@ in ``tests/community/core/bot_config_manifest/apply/``. What these cover is the
 
 from __future__ import annotations
 
+import hashlib
+
 import io
 import json
 import tarfile
 import time
 
 import jwt
+from injector import singleton
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.api.bot_config_manifest_apply_service import (
@@ -200,6 +203,18 @@ def _await_the_background_apply(_response, world) -> None:
         if task.task_type == APPLY_TASK_TYPE
     ]
     assert enqueued, "the accepted apply enqueued no task"
+    for task in enqueued:
+        # The route applies a whole document to a bot that already exists, so it
+        # names no phase and the payload says so. A phase here would mean the
+        # route had quietly become a creation half and delivered a fraction of
+        # what the caller asked for.
+        assert "phase" in task.payload, (
+            "the payload left out what the apply covers"
+        )
+        assert task.payload["phase"] is None, (
+            "the explicit-apply route reached the service with a phase; it must "
+            f"pass none, got {task.payload['phase']!r}"
+        )
     apply_service = world.get(BotConfigManifestApplyServiceProtocol)
     for task in enqueued:
         apply_service.run_apply_task(task.payload)
@@ -482,6 +497,17 @@ def _tool_archive() -> bytes:
     return buf.getvalue()
 
 
+#: Built **once**. ``tarfile``'s gzip header carries an mtime, so two calls to
+#: :func:`_tool_archive` do not produce the same bytes — and the digest below
+#: has to be the address of the very bytes the fixture serves.
+_TOOL_ARCHIVE = _tool_archive()
+
+#: The archive's real content address. The old fixture stubbed the transport
+#: and returned a fixed digest, so the pin in this document was never actually
+#: compared. The oss road computes it for real, and a placeholder now fails
+#: the entry — correctly.
+_TOOL_ARCHIVE_DIGEST = "sha256:" + hashlib.sha256(_TOOL_ARCHIVE).hexdigest()
+
 _RESOURCE_DOCUMENT = (
     "schema_version: 1\n"
     "manifest:\n"
@@ -492,8 +518,12 @@ _RESOURCE_DOCUMENT = (
     "    - path: tools/\n"
     "      unpack: tar.gz\n"
     "      strip_components: 1\n"
-    "      source: https://mirror.example.test/tools.tgz\n"
-    "      digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+    "      source:\n"
+    "        protocol: oss\n"
+    "        bucket: mirror\n"
+    "        key: tools.tgz\n"
+    "        auth: oss-cred\n"
+    f"      digest: {_TOOL_ARCHIVE_DIGEST}\n"
     "script:\n"
     '  body: "echo hello"\n'
 )
@@ -518,20 +548,22 @@ def _seed_bot_with_resource_manifest(world) -> None:
         modifier=_OWNER,
     )
 
-    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-        EntryFetcher,
-        FetchedEntry,
+    from agentclaw.community.core.bot_config_manifest.credentials.service_protocol import (  # noqa: E501
+        SourceCredentialServiceProtocol,
     )
     from agentclaw.community.core.services.resource_file_service import (
         ResourceFileService,
     )
+    from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
+        AliyunObjectStore,
+    )
+    from tests.community.core.bot_config_manifest.apply._fakes import (
+        FakeObjectStore,
+    )
 
-    archive = _tool_archive()
+    archive = _TOOL_ARCHIVE
     uploads: list[dict] = []
     deletes: list[str] = []
-
-    def fetch(_self, ctx, **kwargs):
-        return FetchedEntry(content=archive, digest="sha256:stub", from_store=False)
 
     async def upload_file(_self, **kwargs):
         uploads.append(
@@ -550,11 +582,11 @@ def _seed_bot_with_resource_manifest(world) -> None:
     async def exists(_self, **_kwargs):
         return False
 
-    bind_overrides(
-        world,
-        EntryFetcher,
-        {"fetch": fetch},
-    )
+    # The object store is doubled BEFORE the fetch funnel is first resolved:
+    # the funnel is a singleton built over whatever store the injector holds
+    # at that moment, and a fake bound afterwards would never be consulted.
+    objects = FakeObjectStore()
+    world.injector.binder.bind(AliyunObjectStore, to=objects, scope=singleton)
     bind_overrides(
         world,
         ResourceFileService,
@@ -565,6 +597,33 @@ def _seed_bot_with_resource_manifest(world) -> None:
     # attributes carry the recorders to the assertion — the framework builds
     # a fresh injector per case, so there is no shared fixture to hang
     # them on.
+    # Registered last, after the overrides are bound: resolving a service off
+    # the injector part-builds the graph, and doing it earlier displaced the
+    # apply task handler's registration — the apply then finished PARTIAL for
+    # a reason that had nothing to do with the road under test.
+    #
+    # The credential itself is required because the oss road resolves it
+    # before reading anything: the endpoint and the key pair are the
+    # credential's, not the document's. That ordering is the point, so the
+    # name the manifest cites has to exist even when the read is doubled.
+    # The oss road is left REAL up to the wire here — credential resolution,
+    # the composed key, the read through the funnel — with only the store
+    # itself doubled and the bucket's contents seeded. That is the point of an
+    # endpoint test: there is nothing left to stand in for the road, and
+    # nothing to stand in with — the funnel's URL transport is gone.
+    objects.put("mirror", "tools.tgz", archive)
+    world.get(SourceCredentialServiceProtocol).put(
+        name="oss-cred",
+        credential_type="oss_aksk",
+        access_key_id="LTAI5tEndpointTest",
+        endpoint="https://objects.example.test",
+        region="cn-hangzhou",
+        secret="the-secret-half",
+        allowed_prefixes=[],
+        owner_app_id=1,
+        modifier=_OWNER,
+    )
+
     _seed_bot_with_resource_manifest.uploads = uploads
     _seed_bot_with_resource_manifest.deletes = deletes
 

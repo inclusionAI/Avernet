@@ -344,7 +344,9 @@ class SyncSkillsResult(BaseModel):
     updated: int
     deleted: int
     failed: int
+    skipped: int = 0
     errors: List[str]
+    blocked: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class SyncSkillsResponse(BaseModel):

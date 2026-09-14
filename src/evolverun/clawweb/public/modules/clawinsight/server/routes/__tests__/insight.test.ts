@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import express from "express";
 import Database from "better-sqlite3";
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { cp, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,7 +16,7 @@ import { InsightService } from "../../services/insight/insight-service.js";
 import type { DingTalkSender } from "../../services/insight/dingtalk-sender.js";
 import { InsightAgentAuthorizer } from "../../services/insight/agent-auth.js";
 import { GovernanceRuleProvider } from "../../services/insight/governance-rule-provider.js";
-import { InsightAutoRepairRepository } from "../../repositories/insight-auto-repair-repository.js";
+import { InsightAutoRepairRepository, upsertRuleTrust } from "../../repositories/insight-auto-repair-repository.js";
 import { readAutoRepairRule } from "../../services/insight/auto-repair-policy.js";
 import type { InsightTaskService } from "../../services/evolve/insight-task-service.js";
 import type { RepairTaskService } from "../../services/repair/repair-runtime.js";
@@ -229,6 +229,58 @@ function ownerHeaders(
   return { "X-User-Id": "dev_local", ...extra };
 }
 
+const agentSecret = "test-only-insight-agent-secret";
+
+/**
+ * Signs a request the same way the production Agent client must. `path` is the
+ * path inside the router (the router is mounted at /api/insight/v1), matching
+ * `req.path` at the point `InsightAgentAuthorizer.authorize` runs.
+ */
+function signedAgentHeaders(input: {
+  method: string;
+  path: string;
+  body?: Record<string, unknown>;
+  agentId?: string;
+  secret?: string;
+}): Record<string, string> {
+  const agentId = input.agentId ?? "insight-bot";
+  const timestamp = Date.now();
+  const nonce = `nonce-${createHash("sha256").update(`${input.path}:${timestamp}:${Math.random()}`).digest("hex").slice(0, 16)}`;
+  const content = input.body && typeof input.body === "object" ? JSON.stringify(input.body) : "";
+  const bodyDigest = createHash("sha256").update(content).digest("hex");
+  const canonical = [input.method.toUpperCase(), input.path, String(timestamp), nonce, bodyDigest].join("\n");
+  const signature = createHmac("sha256", input.secret ?? agentSecret).update(canonical).digest("hex");
+  return {
+    "X-Agent-Id": agentId,
+    "X-Agent-Timestamp": String(timestamp),
+    "X-Agent-Nonce": nonce,
+    "X-Agent-Body-SHA256": bodyDigest,
+    "X-Agent-Signature": signature,
+  };
+}
+
+/** Mirrors the real InsightTaskService Idempotency-Key dedup for dispatch replays. */
+function dedupingEvolveTaskService(getRepo: () => InsightImprovementRepository) {
+  const linked = new Set<string>();
+  const create = vi.fn(async (input: Parameters<InsightTaskService["create"]>[0]) => {
+    const improvementId = Number(input.improvementId);
+    const requestId = String(input.idempotencyKey);
+    const evolveTaskId = `EV-AGENT-${String(improvementId)}`;
+    if (!linked.has(requestId)) {
+      linked.add(requestId);
+      await getRepo().linkEvolveTask({
+        improvementId,
+        ownerUserId: String(input.userId),
+        evolveTaskId,
+        requestId,
+        createdBy: input.createdByOverride ?? "insight-auto-repair",
+      });
+    }
+    return { task: { task_id: evolveTaskId } } as unknown as Awaited<ReturnType<InsightTaskService["create"]>>;
+  });
+  return { service: { create } as unknown as InsightTaskService, create };
+}
+
 function improvementBody(title = "补齐画眉 Token 与无浏览器环境鉴权") {
   return {
     botId: BOT_ID,
@@ -318,7 +370,7 @@ describe("Insight Center local contract", () => {
     }, null, { insightTaskService: { create } as unknown as InsightTaskService });
   });
 
-  it("routes an administrator's one-time Improvement action into Bot Repair", async () => {
+  it.each(["deep", "observe", undefined] as const)("routes an administrator's one-time action into Bot Repair with diagnosticMode=%s", async (diagnosticMode) => {
     const createRepair = vi.fn(async (input: Record<string, unknown>) => ({
       taskId: "REPAIR-ADMIN-ONCE-1",
       taskName: "管理员代处理 · Bot 修复",
@@ -345,6 +397,15 @@ describe("Insight Center local contract", () => {
       });
       expect(created.response.status).toBe(201);
 
+      const invalidMode = await jsonRequestAt(isolatedBaseUrl,
+        `/api/insight/v1/admin/improvements/${created.body.improvementId}/execute-once`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-User-Id": "admin-1", "Idempotency-Key": "admin-repair-invalid-mode" },
+          body: JSON.stringify({ reason: "检查配置", diagnosticMode: "unrestricted" }),
+        });
+      expect(invalidMode.response.status).toBe(400);
+      expect(createRepair).not.toHaveBeenCalled();
+
       const executed = await jsonRequestAt(
         isolatedBaseUrl,
         `/api/insight/v1/admin/improvements/${created.body.improvementId}/execute-once`,
@@ -354,6 +415,7 @@ describe("Insight Center local contract", () => {
           body: JSON.stringify({
             reason: "用户长期未处理，改由管理员发起一次 Bot Repair",
             repairDirection: "只修改测试 Bot 的配置模板",
+            diagnosticMode,
           }),
         },
       );
@@ -371,6 +433,7 @@ describe("Insight Center local contract", () => {
           targetUserId: "dev_local",
           adminOverrideReason: "用户长期未处理，改由管理员发起一次 Bot Repair",
           repairDirection: "只修改测试 Bot 的配置模板",
+          diagnosticMode: diagnosticMode ?? "observe",
           insightImprovementId: created.body.improvementId,
         }),
       }));
@@ -2153,6 +2216,205 @@ describe("Insight Center local contract", () => {
     );
   });
 
+  it("closes open items with zero new sessions only after the observation window and without recurrence evidence", async () => {
+    await withIsolatedFixture(
+      async () => undefined,
+      async ({ baseUrl: isolatedBaseUrl, db: isolatedDb }) => {
+        const createOpenItem = (key: string, title: string) => jsonRequestAt(
+          isolatedBaseUrl,
+          "/api/insight/v1/improvements",
+          {
+            method: "POST",
+            headers: ownerHeaders({
+              "Content-Type": "application/json",
+              "Idempotency-Key": key,
+            }),
+            body: JSON.stringify(improvementBody(title)),
+          },
+        );
+        const backdateModified = (id: number, days: number) => isolatedDb.exec(
+          "UPDATE insight_improvement_item SET gmt_modified = ? WHERE id = ?",
+          [Math.floor(Date.now() / 1000) - days * 24 * 60 * 60, id],
+        );
+        const submitOpen = (improvementId: number, version: number, extra: Record<string, unknown>) => jsonRequestAt(
+          isolatedBaseUrl,
+          "/api/insight/v1/internal/governance/verification-results/open",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              improvementId,
+              version,
+              outcome: "DISAPPEARED",
+              newSessionCount: 0,
+              ...extra,
+            }),
+          },
+        );
+
+        const settled = await createOpenItem("open-zero-settled", "开放项无新Session关单");
+        expect(settled.response.status).toBe(201);
+        const settledId = Number(settled.body.improvementId);
+        await backdateModified(settledId, 8);
+        const closed = await submitOpen(settledId, settled.body.version as number, {});
+        expect(closed.response.status).toBe(200);
+        expect(closed.body.improvement).toEqual(expect.objectContaining({
+          improvementId: settledId,
+          status: "RESOLVED",
+          verificationStatus: "VERIFIED",
+          resolvedSource: "AUTO_VERIFIED",
+        }));
+
+        const fresh = await createOpenItem("open-zero-too-early", "观察期未满的开放项");
+        expect(fresh.response.status).toBe(201);
+        const freshId = Number(fresh.body.improvementId);
+        const premature = await submitOpen(freshId, fresh.body.version as number, {});
+        expect(premature.response.status).toBe(409);
+        expect(premature.body.code).toBe("OPEN_VERIFICATION_TOO_EARLY");
+
+        const recurring = await createOpenItem("open-zero-recurrence", "携带复现证据的开放项");
+        expect(recurring.response.status).toBe(201);
+        const recurringId = Number(recurring.body.improvementId);
+        await backdateModified(recurringId, 8);
+        const recurrence = await submitOpen(recurringId, recurring.body.version as number, {
+          lastRecurrenceAt: "2026-08-30T00:00:00+08:00",
+        });
+        expect(recurrence.response.status).toBe(409);
+        expect(recurrence.body.code).toBe("RECURRENCE_FOUND");
+        const recurrenceWithFlag = await submitOpen(recurringId, recurring.body.version as number, {
+          allowZeroSession: true,
+          lastRecurrenceAt: "2026-08-30T00:00:00+08:00",
+        });
+        expect(recurrenceWithFlag.response.status).toBe(409);
+        expect(recurrenceWithFlag.body.code).toBe("RECURRENCE_FOUND");
+
+        const stillSettled = await createOpenItem("open-still-zero", "仍有复现的开放项");
+        expect(stillSettled.response.status).toBe(201);
+        const stillId = Number(stillSettled.body.improvementId);
+        await backdateModified(stillId, 8);
+        const stillPresent = await jsonRequestAt(
+          isolatedBaseUrl,
+          "/api/insight/v1/internal/governance/verification-results/open",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              improvementId: stillId,
+              version: stillSettled.body.version,
+              outcome: "STILL_PRESENT",
+              newSessionCount: 0,
+            }),
+          },
+        );
+        expect(stillPresent.response.status).toBe(400);
+
+        const negative = await submitOpen(freshId, fresh.body.version as number, { newSessionCount: -1 });
+        expect(negative.response.status).toBe(400);
+
+        const standard = await createOpenItem("open-standard-item", "已回传修复的标准项");
+        expect(standard.response.status).toBe(201);
+        const standardId = Number(standard.body.improvementId);
+        await isolatedDb.exec(
+          "UPDATE insight_improvement_item SET status = 'IN_PROGRESS', user_guidance = user_guidance || ? WHERE id = ?",
+          ["\n\n[用户已处理]\n时间：2026-08-20T00:00:00+08:00", standardId],
+        );
+        const standardToOpen = await submitOpen(standardId, standard.body.version as number, { newSessionCount: 1 });
+        expect(standardToOpen.response.status).toBe(409);
+        expect(standardToOpen.body.code).toBe("CONFLICT");
+
+        const withSessions = await createOpenItem("open-with-sessions", "带新Session的正常开放项验收");
+        expect(withSessions.response.status).toBe(201);
+        const withSessionsId = Number(withSessions.body.improvementId);
+        await backdateModified(withSessionsId, 8);
+        const normalClosure = await submitOpen(withSessionsId, withSessions.body.version as number, { newSessionCount: 3 });
+        expect(normalClosure.response.status).toBe(200);
+        expect(normalClosure.body.improvement).toEqual(expect.objectContaining({
+          improvementId: withSessionsId,
+          status: "RESOLVED",
+          verificationStatus: "VERIFIED",
+        }));
+      },
+    );
+  });
+
+  it("requires explicit allowZeroSession and no recurrence evidence for zero-session closure of standard items", async () => {
+    await withIsolatedFixture(
+      async () => undefined,
+      async ({ baseUrl: isolatedBaseUrl, db: isolatedDb }) => {
+        const createHandledItem = async (key: string, title: string) => {
+          const created = await jsonRequestAt(
+            isolatedBaseUrl,
+            "/api/insight/v1/improvements",
+            {
+              method: "POST",
+              headers: ownerHeaders({
+                "Content-Type": "application/json",
+                "Idempotency-Key": key,
+              }),
+              body: JSON.stringify(improvementBody(title)),
+            },
+          );
+          expect(created.response.status).toBe(201);
+          const id = Number(created.body.improvementId);
+          await isolatedDb.exec(
+            "UPDATE insight_improvement_item SET status = 'IN_PROGRESS', gmt_modified = ?, user_guidance = user_guidance || ? WHERE id = ?",
+            [
+              Math.floor(Date.now() / 1000) - 8 * 24 * 60 * 60,
+              "\n\n[用户已处理]\n时间：2026-08-20T00:00:00+08:00",
+              id,
+            ],
+          );
+          return { id, version: created.body.version as number };
+        };
+        const submitStandard = (improvementId: number, version: number, extra: Record<string, unknown>) => jsonRequestAt(
+          isolatedBaseUrl,
+          "/api/insight/v1/internal/governance/verification-results",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              improvementId,
+              version,
+              outcome: "DISAPPEARED",
+              newSessionCount: 0,
+              ...extra,
+            }),
+          },
+        );
+
+        const implicit = await createHandledItem("standard-zero-implicit", "未显式确认的无Session关单");
+        const implicitAttempt = await submitStandard(implicit.id, implicit.version, {});
+        expect(implicitAttempt.response.status).toBe(400);
+
+        const confirmed = await submitStandard(implicit.id, implicit.version, { allowZeroSession: true });
+        expect(confirmed.response.status).toBe(200);
+        expect(confirmed.body.improvement).toEqual(expect.objectContaining({
+          improvementId: implicit.id,
+          status: "RESOLVED",
+          verificationStatus: "VERIFIED",
+          resolvedSource: "AUTO_VERIFIED",
+        }));
+
+        const recurrent = await createHandledItem("standard-zero-recurrence", "携带复现证据的标准项");
+        const recurrenceAttempt = await submitStandard(recurrent.id, recurrent.version, {
+          allowZeroSession: true,
+          lastRecurrenceAt: "2026-08-30T00:00:00+08:00",
+        });
+        expect(recurrenceAttempt.response.status).toBe(409);
+        expect(recurrenceAttempt.body.code).toBe("RECURRENCE_FOUND");
+
+        const withSessions = await createHandledItem("standard-with-sessions", "带新Session的正常标准项验收");
+        const withSessionsAttempt = await submitStandard(withSessions.id, withSessions.version, { newSessionCount: 3 });
+        expect(withSessionsAttempt.response.status).toBe(200);
+        expect(withSessionsAttempt.body.improvement).toEqual(expect.objectContaining({
+          improvementId: withSessions.id,
+          status: "RESOLVED",
+          verificationStatus: "VERIFIED",
+        }));
+      },
+    );
+  });
+
   it("filters improvement work views on the server and returns complete status counts", async () => {
     await withIsolatedFixture(
       async () => undefined,
@@ -3011,6 +3273,364 @@ describe("Insight Center local contract", () => {
       expect(createAuthorizedTask).toHaveBeenCalledTimes(1);
       expect(sendImprovementNotification).toHaveBeenCalledTimes(2);
     }, dingTalkSender, { insightTaskService });
+  });
+
+  it("lets an Agent read and auto-approve only trusted or Owner-consented Actions, then dispatch them", async () => {
+    let improvementRepo: InsightImprovementRepository | null = null;
+    const { service: insightTaskService, create: createAuthorizedTask } = dedupingEvolveTaskService(() => improvementRepo!);
+    await withDbInsightServer(async ({ baseUrl: isolatedBaseUrl, db: isolatedDb, autoRepairRepo, ruleProvider }) => {
+      improvementRepo = new InsightImprovementRepository(isolatedDb);
+      const failureItem = await realFailureFixtureItem();
+      await jsonRequestAt(isolatedBaseUrl, "/api/insight/v1/internal/failure-tasks/upsert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: [failureItem] }),
+      });
+
+      const action = await jsonRequestAt(isolatedBaseUrl, "/api/insight/v1/internal/governance/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": "agent-review-flow-1" },
+        body: JSON.stringify({
+          ...improvementBody("Agent 自动审核候选"),
+          ownerUserId: "dev_local",
+          sourceOwnerUserId: "dev_local",
+          sourceRuleId: "tool.utoo-proxy.unsupported",
+          actionType: "DIRECT_EVOLUTION",
+          assignmentReason: "规则确定且范围固定",
+          rootCauseSummary: "错误使用 UTOO_PROXY",
+          suggestedAction: "更新 tools.md。",
+        }),
+      });
+      expect(action.response.status).toBe(201);
+      expect(action.body).toEqual(expect.objectContaining({ status: "PENDING_ADMIN", adminReviewStatus: "PENDING" }));
+      const improvementId = Number(action.body.improvementId);
+      const actionPath = `/internal/governance/actions/${improvementId}`;
+
+      const read = await jsonRequestAt(isolatedBaseUrl, `/api/insight/v1${actionPath}`, { headers: ownerHeaders() });
+      expect(read.response.status).toBe(200);
+      expect(read.body).toEqual(expect.objectContaining({
+        improvementId,
+        adminReviewStatus: "PENDING",
+        version: action.body.version,
+      }));
+
+      // Untrusted rule and no Owner consent: the Agent must not replace the human gate.
+      const refused = await jsonRequestAt(isolatedBaseUrl, `/api/insight/v1${actionPath}/review`, {
+        method: "POST",
+        headers: ownerHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ decision: "APPROVE", version: action.body.version }),
+      });
+      expect(refused.response.status).toBe(401);
+      expect(refused.body.message).toContain("人工审核");
+
+      // Rejection is a safe triage decision and stays available without any trust.
+      const rejectCandidate = await jsonRequestAt(isolatedBaseUrl, "/api/insight/v1/internal/governance/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": "agent-review-flow-reject" },
+        body: JSON.stringify({
+          ...improvementBody("Agent 驳回候选"),
+          ownerUserId: "dev_local",
+          sourceOwnerUserId: "dev_local",
+          sourceRuleId: "tool.utoo-proxy.unsupported",
+          actionType: "DIRECT_EVOLUTION",
+          assignmentReason: "规则确定且范围固定",
+          rootCauseSummary: "误报",
+          suggestedAction: "无需处理。",
+        }),
+      });
+      const rejectedId = Number(rejectCandidate.body.improvementId);
+      const rejected = await jsonRequestAt(isolatedBaseUrl, `/api/insight/v1/internal/governance/actions/${rejectedId}/review`, {
+        method: "POST",
+        headers: ownerHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ decision: "REJECT", comment: "非有效问题", version: rejectCandidate.body.version }),
+      });
+      expect(rejected.response.status).toBe(200);
+      expect(rejected.body).toEqual(expect.objectContaining({
+        adminReviewStatus: "REJECTED",
+        adminReviewedBy: "agent:local-dev",
+      }));
+
+      // A trusted rule lets the Agent approve, but dispatch still needs an Owner grant.
+      const rule = await readAutoRepairRule(ruleProvider, "tool.utoo-proxy.unsupported", "DIRECT_EVOLUTION");
+      expect(rule).not.toBeNull();
+      await upsertRuleTrust(isolatedDb, rule!, "admin-1");
+
+      const approved = await jsonRequestAt(isolatedBaseUrl, `/api/insight/v1${actionPath}/review`, {
+        method: "POST",
+        headers: ownerHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ decision: "APPROVE", version: action.body.version }),
+      });
+      expect(approved.response.status).toBe(200);
+      expect(approved.body).toEqual(expect.objectContaining({
+        status: "ACTIVE",
+        adminReviewStatus: "APPROVED",
+        adminReviewedBy: "agent:local-dev",
+        autoRepairStarted: false,
+      }));
+      expect(createAuthorizedTask).not.toHaveBeenCalled();
+
+      const grant = await autoRepairRepo.grant({
+        ownerUserId: "dev_local",
+        botId: "agent-evolve-bot",
+        rule: rule!,
+        sourceImprovementId: improvementId,
+        grantedBy: "dev_local",
+        autoExecute: true,
+      });
+
+      const evolved = await jsonRequestAt(isolatedBaseUrl, `/api/insight/v1${actionPath}/evolve`, {
+        method: "POST",
+        headers: ownerHeaders(),
+      });
+      expect(evolved.response.status).toBe(202);
+      expect(evolved.body).toEqual(expect.objectContaining({
+        improvementId,
+        taskId: `EV-AGENT-${String(improvementId)}`,
+        grantId: grant.grantId,
+        requestId: `insight-auto:${improvementId}:grant:${grant.grantId}`,
+        dispatched: true,
+      }));
+      expect(createAuthorizedTask).toHaveBeenCalledTimes(1);
+      expect(createAuthorizedTask).toHaveBeenCalledWith(expect.objectContaining({
+        actorUserId: null,
+        authorizationGrantId: grant.grantId,
+        userId: "dev_local",
+        botId: "agent-evolve-bot",
+        crossBotConfirmed: true,
+        createdByOverride: "insight-auto-repair",
+      }));
+
+      const replay = await jsonRequestAt(isolatedBaseUrl, `/api/insight/v1${actionPath}/evolve`, {
+        method: "POST",
+        headers: ownerHeaders(),
+      });
+      expect(replay.response.status).toBe(202);
+      expect(replay.body.taskId).toBe(`EV-AGENT-${String(improvementId)}`);
+      expect(createAuthorizedTask.mock.calls[1]?.[0].idempotencyKey)
+        .toBe(createAuthorizedTask.mock.calls[0]?.[0].idempotencyKey);
+
+      const after = await jsonRequestAt(isolatedBaseUrl, `/api/insight/v1${actionPath}`, { headers: ownerHeaders() });
+      expect(after.body).toEqual(expect.objectContaining({ status: "IN_PROGRESS" }));
+      const evolveLink = await improvementRepo!.findLatestEvolveLinkByImprovementId(improvementId);
+      expect(evolveLink?.evolve_task_id).toBe(`EV-AGENT-${String(improvementId)}`);
+      expect(evolveLink?.request_id).toBe(`insight-auto:${improvementId}:grant:${grant.grantId}`);
+    }, null, { insightTaskService });
+  });
+
+  it("guards Agent evolve dispatch on Action type, review state, rule and Owner auto-execution consent", async () => {
+    let improvementRepo: InsightImprovementRepository | null = null;
+    const { service: insightTaskService, create: createAuthorizedTask } = dedupingEvolveTaskService(() => improvementRepo!);
+    await withDbInsightServer(async ({ baseUrl: isolatedBaseUrl, db: isolatedDb, autoRepairRepo, ruleProvider }) => {
+      improvementRepo = new InsightImprovementRepository(isolatedDb);
+      const failureItem = await realFailureFixtureItem();
+      await jsonRequestAt(isolatedBaseUrl, "/api/insight/v1/internal/failure-tasks/upsert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: [failureItem] }),
+      });
+      const createAction = async (idempotencyKey: string, body: Record<string, unknown>) => {
+        const created = await jsonRequestAt(isolatedBaseUrl, "/api/insight/v1/internal/governance/actions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+          body: JSON.stringify(body),
+        });
+        expect(created.response.status).toBe(201);
+        return created;
+      };
+
+      const assignOwner = await createAction("agent-evolve-guard-assign", {
+        ...improvementBody("需要 Owner 处理"),
+        ownerUserId: "dev_local",
+        sourceOwnerUserId: "dev_local",
+        sourceRuleId: "tool.web-search.use-asap",
+        actionType: "ASSIGN_OWNER",
+        assignmentReason: "需要 Owner 确认配置",
+        rootCauseSummary: "外网搜索配置缺失",
+        suggestedAction: "配置外网访问。",
+      });
+      const assignId = Number(assignOwner.body.improvementId);
+      const assignEvolve = await jsonRequestAt(isolatedBaseUrl, `/api/insight/v1/internal/governance/actions/${assignId}/evolve`, {
+        method: "POST",
+        headers: ownerHeaders(),
+      });
+      expect(assignEvolve.response.status).toBe(409);
+      expect(assignEvolve.body.message).toContain("DIRECT_EVOLUTION");
+
+      const direct = await createAction("agent-evolve-guard-direct", {
+        ...improvementBody("直连进化候选"),
+        ownerUserId: "dev_local",
+        sourceOwnerUserId: "dev_local",
+        sourceRuleId: "tool.utoo-proxy.unsupported",
+        actionType: "DIRECT_EVOLUTION",
+        assignmentReason: "规则确定且范围固定",
+        rootCauseSummary: "错误使用 UTOO_PROXY",
+        suggestedAction: "更新 tools.md。",
+      });
+      const directId = Number(direct.body.improvementId);
+
+      const pendingEvolve = await jsonRequestAt(isolatedBaseUrl, `/api/insight/v1/internal/governance/actions/${directId}/evolve`, {
+        method: "POST",
+        headers: ownerHeaders(),
+      });
+      expect(pendingEvolve.response.status).toBe(409);
+      expect(pendingEvolve.body.message).toContain("审批");
+
+      const adminApproved = await jsonRequestAt(isolatedBaseUrl, `/api/insight/v1/admin/improvements/${directId}/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-User-Id": "admin-1" },
+        body: JSON.stringify({ decision: "APPROVE", version: direct.body.version }),
+      });
+      expect(adminApproved.response.status).toBe(200);
+      expect(adminApproved.body.adminReviewStatus).toBe("APPROVED");
+
+      const noGrant = await jsonRequestAt(isolatedBaseUrl, `/api/insight/v1/internal/governance/actions/${directId}/evolve`, {
+        method: "POST",
+        headers: ownerHeaders(),
+      });
+      expect(noGrant.response.status).toBe(409);
+      expect(noGrant.body.message).toContain("未授权");
+
+      const rule = await readAutoRepairRule(ruleProvider, "tool.utoo-proxy.unsupported", "DIRECT_EVOLUTION");
+      expect(rule).not.toBeNull();
+      const manualGrant = await autoRepairRepo.grant({
+        ownerUserId: "dev_local",
+        botId: "guard-bot",
+        rule: rule!,
+        sourceImprovementId: directId,
+        grantedBy: "dev_local",
+      });
+      expect(manualGrant.autoExecute).toBe(false);
+      const notAuto = await jsonRequestAt(isolatedBaseUrl, `/api/insight/v1/internal/governance/actions/${directId}/evolve`, {
+        method: "POST",
+        headers: ownerHeaders(),
+      });
+      expect(notAuto.response.status).toBe(409);
+      expect(notAuto.body.message).toContain("自动执行");
+
+      const autoGrant = await autoRepairRepo.grant({
+        ownerUserId: "dev_local",
+        botId: "guard-bot",
+        rule: rule!,
+        sourceImprovementId: directId,
+        grantedBy: "dev_local",
+        autoExecute: true,
+      });
+      expect(autoGrant.grantId).toBe(manualGrant.grantId);
+
+      const evolved = await jsonRequestAt(isolatedBaseUrl, `/api/insight/v1/internal/governance/actions/${directId}/evolve`, {
+        method: "POST",
+        headers: ownerHeaders(),
+      });
+      expect(evolved.response.status).toBe(202);
+      expect(evolved.body).toEqual(expect.objectContaining({
+        improvementId: directId,
+        grantId: autoGrant.grantId,
+        dispatched: true,
+      }));
+      expect(createAuthorizedTask).toHaveBeenCalledTimes(1);
+    }, null, { insightTaskService });
+  });
+
+  it("requires Agent machine signatures and the action scope for the governance Agent endpoints", async () => {
+    const lockedAuthorizer = new InsightAgentAuthorizer({ clients: {}, allowLocalUnsigned: false });
+    await withDbInsightServer(async ({ baseUrl: isolatedBaseUrl }) => {
+      const read = await jsonRequestAt(isolatedBaseUrl, "/api/insight/v1/internal/governance/actions/1");
+      expect(read.response.status).toBe(401);
+      const review = await jsonRequestAt(isolatedBaseUrl, "/api/insight/v1/internal/governance/actions/1/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision: "REJECT", comment: "x", version: 1 }),
+      });
+      expect(review.response.status).toBe(401);
+      const evolve = await jsonRequestAt(isolatedBaseUrl, "/api/insight/v1/internal/governance/actions/1/evolve", { method: "POST" });
+      expect(evolve.response.status).toBe(401);
+    }, null, { agentAuthorizer: lockedAuthorizer });
+
+    const scopedAuthorizer = new InsightAgentAuthorizer({
+      clients: { "insight-bot": { secret: agentSecret, scopes: ["action.read", "action.review"] } },
+      allowLocalUnsigned: false,
+    });
+    await withDbInsightServer(async ({ baseUrl: isolatedBaseUrl }) => {
+      const failureItem = await realFailureFixtureItem();
+      await jsonRequestAt(isolatedBaseUrl, "/api/insight/v1/internal/failure-tasks/upsert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: [failureItem] }),
+      });
+      const action = await jsonRequestAt(isolatedBaseUrl, "/api/insight/v1/internal/governance/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": "agent-hmac-candidate" },
+        body: JSON.stringify({
+          ...improvementBody("Agent 签名候选"),
+          ownerUserId: "dev_local",
+          sourceOwnerUserId: "dev_local",
+          sourceRuleId: "tool.utoo-proxy.unsupported",
+          actionType: "DIRECT_EVOLUTION",
+          assignmentReason: "规则确定且范围固定",
+          rootCauseSummary: "错误使用 UTOO_PROXY",
+          suggestedAction: "更新 tools.md。",
+        }),
+      });
+      const improvementId = Number(action.body.improvementId);
+      const actionPath = `/internal/governance/actions/${improvementId}`;
+
+      const read = await jsonRequestAt(isolatedBaseUrl, `/api/insight/v1${actionPath}`, {
+        headers: signedAgentHeaders({ method: "GET", path: actionPath }),
+      });
+      expect(read.response.status).toBe(200);
+      expect(read.body).toEqual(expect.objectContaining({ improvementId, adminReviewStatus: "PENDING" }));
+
+      const rejectBody = { decision: "REJECT", comment: "非有效问题", version: action.body.version };
+      const rejectPath = `${actionPath}/review`;
+      const rejected = await jsonRequestAt(isolatedBaseUrl, `/api/insight/v1${rejectPath}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...signedAgentHeaders({ method: "POST", path: rejectPath, body: rejectBody }) },
+        body: JSON.stringify(rejectBody),
+      });
+      expect(rejected.response.status).toBe(200);
+      expect(rejected.body).toEqual(expect.objectContaining({
+        adminReviewStatus: "REJECTED",
+        adminReviewedBy: "agent:insight-bot",
+      }));
+
+      const evolvePath = `${actionPath}/evolve`;
+      const denied = await jsonRequestAt(isolatedBaseUrl, `/api/insight/v1${evolvePath}`, {
+        method: "POST",
+        headers: signedAgentHeaders({ method: "POST", path: evolvePath }),
+      });
+      expect(denied.response.status).toBe(401);
+      expect(denied.body.message).toContain("action.evolve");
+    }, null, { agentAuthorizer: scopedAuthorizer });
+  });
+
+  it("answers Agent evolve dispatch with 503 when no Repair or Evolve service is configured", async () => {
+    await withDbInsightServer(async ({ baseUrl: isolatedBaseUrl }) => {
+      const failureItem = await realFailureFixtureItem();
+      await jsonRequestAt(isolatedBaseUrl, "/api/insight/v1/internal/failure-tasks/upsert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: [failureItem] }),
+      });
+      const action = await jsonRequestAt(isolatedBaseUrl, "/api/insight/v1/internal/governance/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": "agent-evolve-no-service" },
+        body: JSON.stringify({
+          ...improvementBody("缺少派发服务"),
+          ownerUserId: "dev_local",
+          sourceOwnerUserId: "dev_local",
+          sourceRuleId: "tool.utoo-proxy.unsupported",
+          actionType: "DIRECT_EVOLUTION",
+          assignmentReason: "规则确定且范围固定",
+          rootCauseSummary: "错误使用 UTOO_PROXY",
+          suggestedAction: "更新 tools.md。",
+        }),
+      });
+      const evolved = await jsonRequestAt(isolatedBaseUrl, `/api/insight/v1/internal/governance/actions/${Number(action.body.improvementId)}/evolve`, {
+        method: "POST",
+        headers: ownerHeaders(),
+      });
+      expect(evolved.response.status).toBe(503);
+    });
   });
 
   it("keeps Admin-rejected governance Actions out of the Owner worklist", async () => {

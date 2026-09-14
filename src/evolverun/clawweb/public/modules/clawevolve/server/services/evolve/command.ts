@@ -102,7 +102,7 @@ export function parseNodeCommandYaml(value: unknown, node: NodeCommandKey): stri
   return command;
 }
 
-export function readNodeCommandOption(command: string, name: "model" | "suite" | "judge"): string | undefined {
+export function readNodeCommandOption(command: string, name: "model" | "suite" | "judge" | "domain-id" | "template-name" | "template-version" | "scene" | "source-task-id" | "source-kind" | "source-round" | "round" | "train-domain-id" | "test-domain-id" | "train-bench-domain-id" | "test-bench-domain-id"): string | undefined {
   const match = command.match(new RegExp(`(?:^|\\s)--${name}(?:=|\\s+)([^\\s]+)`));
   return match?.[1];
 }

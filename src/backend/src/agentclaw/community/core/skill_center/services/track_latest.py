@@ -14,6 +14,9 @@ from agentclaw.community.core.skill_center.bot_runtime_projector_protocol import
     BotRuntimeProjectorProtocol,
 )
 from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
+from agentclaw.community.core.skill_center.desktop_skill_recovery_protocol import (
+    DesktopSkillRecoveryServiceProtocol,
+)
 from agentclaw.community.core.skill_center.materialization_contract import (
     PublishedMaterializedSkillVersion,
 )
@@ -40,6 +43,10 @@ TRACK_LATEST_FANOUT_TASK = "skill_center.track_latest_fanout"
 BOT_TRACK_LATEST_RECONCILE_TASK = "skill_center.bot_track_latest_reconcile"
 TRACK_LATEST_DEADLINE_SECONDS = 30 * 60
 logger = get_logger()
+
+
+def _is_center_content_recovery_issue(code: str) -> bool:
+    return code.startswith("CENTER_CONTENT_")
 
 
 class TrackLatestService(TrackLatestServiceProtocol):
@@ -113,11 +120,13 @@ class BotTrackLatestReconcileTaskHandler:
         reader: BotCapabilityStateReaderProtocol,
         projector: BotRuntimeProjectorProtocol,
         latest: TrackLatestRepositoryProtocol,
+        recovery: DesktopSkillRecoveryServiceProtocol,
         env_provider: Callable[[], str] = get_current_env,
     ) -> None:
         self._reader = reader
         self._projector = projector
         self._latest = latest
+        self._recovery = recovery
         self._env_provider = env_provider
 
     @property
@@ -171,11 +180,28 @@ class BotTrackLatestReconcileTaskHandler:
                 released_mcp=delta.released_mcp,
             ),
         )
-        if (
-            projection is not None
-            and projection.status is RuntimeProjectionStatus.PENDING
-        ):
-            return Retry("Track Latest runtime projection pending")
+        if projection is not None:
+            center_waiting = tuple(
+                issue
+                for issue in projection.issues
+                if issue.retryable
+                and issue.status is RuntimeProjectionStatus.PENDING
+                and _is_center_content_recovery_issue(issue.code)
+            )
+            if center_waiting:
+                self._recovery.ensure(owner_id=owner_id, bot_id=bot_id)
+            other_pending = tuple(
+                issue
+                for issue in projection.issues
+                if issue.retryable
+                and issue.status is RuntimeProjectionStatus.PENDING
+                and not _is_center_content_recovery_issue(issue.code)
+            )
+            if other_pending or (
+                projection.status is RuntimeProjectionStatus.PENDING
+                and not center_waiting
+            ):
+                return Retry("Track Latest runtime projection pending")
         if (
             projection is not None
             and projection.status is RuntimeProjectionStatus.DEGRADED

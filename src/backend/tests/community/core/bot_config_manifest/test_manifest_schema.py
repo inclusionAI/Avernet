@@ -72,14 +72,26 @@ manifest:
         # Who I am
         Reads ${{HOME}} literally — inline content is not scanned.
     - type: RULES.md
-      source: https://cdn.example.com/bots/${{BOT_ENV}}/rules.md
+      source:
+        protocol: oss
+        bucket: cdn
+        key: bots/${{BOT_ENV}}/rules.md
+        auth: oss-cred
   skills:
     - name: quality-check
-      source: https://cdn.example.com/skills/qc.zip
+      source:
+        protocol: oss
+        bucket: cdn
+        key: skills/qc.zip
+        auth: oss-cred
       digest: "{_DIGEST}"
   resources:
     - path: data/kb/
-      source: https://cdn.example.com/kb.zip
+      source:
+        protocol: oss
+        bucket: cdn
+        key: kb.zip
+        auth: oss-cred
       unpack: zip
       strip_components: 1
 script:
@@ -141,7 +153,11 @@ def test_two_sources_on_one_entry_are_refused():
 manifest:
   skills:
     - name: qc
-      source: https://cdn.example.com/qc.zip
+      source:
+        protocol: oss
+        bucket: cdn
+        key: qc.zip
+        auth: oss-cred
       content: "inline"
       digest: "{_DIGEST}"
 """
@@ -253,7 +269,11 @@ def test_a_resources_directory_over_oss_still_needs_unpack():
 manifest:
   resources:
     - path: data/kb/
-      source: https://cdn.example.com/kb.zip
+      source:
+        protocol: oss
+        bucket: cdn
+        key: kb.zip
+        auth: oss-cred
 """
     assert ("manifest.resources[0]", "missing_unpack") in _reject(document)
 
@@ -264,7 +284,9 @@ def test_a_declared_but_unreferenced_source_is_a_warning_not_a_refusal():
 sources:
   content:
     protocol: oss
-    url: https://cdn.example.com/content/
+    bucket: cdn
+    key: content/
+    auth: oss-cred
 manifest:
   skills: []
 """
@@ -277,15 +299,24 @@ manifest:
 
 def test_a_source_url_with_userinfo_is_refused():
     """The one rule with real teeth: a token in a URL is a secret in a document
-    that is stored as written and read back verbatim."""
+    that is stored as written and read back verbatim.
+
+    Asked of a **git** source now — after the bare-URL spelling went away, a
+    repository address is the only URL a manifest still writes, and it is as
+    capable of carrying userinfo as any other.
+    """
     document = """schema_version: 1
 manifest:
   identity:
     - type: SOUL.md
-      source: https://alice:t0ken@cdn.example.com/soul.md
+      source:
+        protocol: git
+        url: https://alice:t0ken@code.example.com/team/x.git
+        ref: v1
+        subpath: soul.md
 """
     assert (
-        "manifest.identity[0].source",
+        "manifest.identity[0].source.url",
         "source_url_has_userinfo",
     ) in _reject(document)
 
@@ -295,7 +326,9 @@ def test_auth_on_a_from_entry_is_refused():
 sources:
   content:
     protocol: oss
-    url: https://cdn.example.com/content/
+    bucket: cdn
+    key: content/
+    auth: oss-cred
 manifest:
   identity:
     - type: SOUL.md
@@ -360,7 +393,11 @@ def test_a_url_skill_without_a_digest_is_refused():
 manifest:
   skills:
     - name: qc
-      source: https://cdn.example.com/qc.zip
+      source:
+        protocol: oss
+        bucket: cdn
+        key: qc.zip
+        auth: oss-cred
 """
     assert ("manifest.skills[0]", "missing_digest") in _reject(document)
 
@@ -398,7 +435,11 @@ def test_the_dropped_on_fetch_failure_value_is_refused():
 manifest:
   skills:
     - name: qc
-      source: https://cdn.example.com/qc.zip
+      source:
+        protocol: oss
+        bucket: cdn
+        key: qc.zip
+        auth: oss-cred
       digest: "{_DIGEST}"
       on_fetch_failure: skip
 """
@@ -415,7 +456,11 @@ def test_the_surviving_on_fetch_failure_values_are_accepted(value):
 manifest:
   skills:
     - name: qc
-      source: https://cdn.example.com/qc.zip
+      source:
+        protocol: oss
+        bucket: cdn
+        key: qc.zip
+        auth: oss-cred
       digest: "{_DIGEST}"
       on_fetch_failure: {value}
 """
@@ -465,7 +510,9 @@ def test_mode_is_refused_on_an_object_store_source():
 sources:
   assets:
     protocol: oss
-    url: https://cdn.example.com/assets/
+    bucket: cdn
+    key: assets/
+    auth: oss-cred
     mode: strict
 manifest:
   skills: []
@@ -480,7 +527,9 @@ def test_ref_is_refused_on_an_object_store_source():
 sources:
   assets:
     protocol: oss
-    url: https://cdn.example.com/assets/
+    bucket: cdn
+    key: assets/
+    auth: oss-cred
     ref: v1.2.0
 manifest:
   skills: []
@@ -513,7 +562,9 @@ def test_apply_once_is_refused_at_any_depth():
 sources:
   assets:
     protocol: oss
-    url: https://cdn.example.com/assets/
+    bucket: cdn
+    key: assets/
+    auth: oss-cred
     apply_once: true
 manifest:
   skills: []
@@ -529,10 +580,17 @@ def test_an_unknown_placeholder_is_refused():
 manifest:
   identity:
     - type: SOUL.md
-      source: https://cdn.example.com/${BOT_NAME}/soul.md
+      source:
+        protocol: git
+        url: https://code.example.com/${BOT_NAME}/x.git
+        ref: v1
+        subpath: soul.md
 """
     locations = _reject(document)
-    assert ("manifest.identity[0].source", "unknown_placeholder") in locations
+    assert (
+        "manifest.identity[0].source.url",
+        "unknown_placeholder",
+    ) in locations
 
 
 def test_the_old_prefix_is_no_longer_a_placeholder():
@@ -543,7 +601,11 @@ def test_the_old_prefix_is_no_longer_a_placeholder():
 manifest:
   identity:
     - type: SOUL.md
-      source: https://cdn.example.com/${OCB_BOT_ID}/soul.md
+      source:
+        protocol: oss
+        bucket: cdn
+        key: ${OCB_BOT_ID}/soul.md
+        auth: oss-cred
 """
     assert "unknown_placeholder" in _codes(document)
 
@@ -557,7 +619,11 @@ def test_every_whitelisted_placeholder_is_accepted(name):
 manifest:
   identity:
     - type: SOUL.md
-      source: https://cdn.example.com/${{{name}}}/soul.md
+      source:
+        protocol: oss
+        bucket: cdn
+        key: ${{{name}}}/soul.md
+        auth: oss-cred
 """
     )
 
@@ -600,7 +666,11 @@ def test_bot_id_is_not_a_placeholder():
 manifest:
   identity:
     - type: SOUL.md
-      source: https://cdn.example.com/bots/${BOT_ID}/soul.md
+      source:
+        protocol: oss
+        bucket: cdn
+        key: bots/${BOT_ID}/soul.md
+        auth: oss-cred
 """
     assert "unknown_placeholder" in _codes(document)
 
@@ -621,7 +691,11 @@ def test_an_escaping_resource_path_is_refused(path, code):
 manifest:
   resources:
     - path: {path}
-      source: https://cdn.example.com/x
+      source:
+        protocol: oss
+        bucket: cdn
+        key: x
+        auth: oss-cred
 """
     assert ("manifest.resources[0].path", code) in _reject(document)
 
@@ -633,7 +707,11 @@ def test_a_dotdot_prefixed_directory_name_is_not_a_traversal():
 manifest:
   resources:
     - path: data/..config
-      source: https://cdn.example.com/x
+      source:
+        protocol: oss
+        bucket: cdn
+        key: x
+        auth: oss-cred
 """
     )
 
@@ -645,10 +723,18 @@ def test_a_resource_nested_under_a_directory_entry_is_refused():
 manifest:
   resources:
     - path: data/kb/
-      source: https://cdn.example.com/kb.zip
+      source:
+        protocol: oss
+        bucket: cdn
+        key: kb.zip
+        auth: oss-cred
       unpack: zip
     - path: data/kb/extra.csv
-      source: https://cdn.example.com/extra.csv
+      source:
+        protocol: oss
+        bucket: cdn
+        key: extra.csv
+        auth: oss-cred
 """
     assert ("manifest.resources", "nested_resource_path") in _reject(document)
 
@@ -658,7 +744,11 @@ def test_a_directory_entry_from_a_url_must_declare_unpack():
 manifest:
   resources:
     - path: data/kb/
-      source: https://cdn.example.com/kb.zip
+      source:
+        protocol: oss
+        bucket: cdn
+        key: kb.zip
+        auth: oss-cred
 """
     assert ("manifest.resources[0]", "missing_unpack") in _reject(document)
 
@@ -714,11 +804,19 @@ def test_two_tools_with_the_same_name_are_refused():
 manifest:
   cli_tools:
     - name: tk
-      source: https://cdn.example.com/toolkit.tar.gz
+      source:
+        protocol: oss
+        bucket: cdn
+        key: toolkit.tar.gz
+        auth: oss-cred
       subpath: bin/tk
       digest: "{_DIGEST}"
     - name: tk
-      source: https://cdn.example.com/other.tar.gz
+      source:
+        protocol: oss
+        bucket: cdn
+        key: other.tar.gz
+        auth: oss-cred
       subpath: bin/tk
       digest: "{_DIGEST}"
 """
@@ -734,7 +832,11 @@ def test_the_retired_entrypoints_field_is_refused_rather_than_ignored():
 manifest:
   cli_tools:
     - name: toolkit
-      source: https://cdn.example.com/toolkit.tar.gz
+      source:
+        protocol: oss
+        bucket: cdn
+        key: toolkit.tar.gz
+        auth: oss-cred
       unpack: tar.gz
       digest: "{_DIGEST}"
       entrypoints: [bin/tk, bin/tk-helper]
@@ -753,7 +855,11 @@ def test_the_archive_form_selects_its_one_file_with_subpath():
 manifest:
   cli_tools:
     - name: tk
-      source: https://cdn.example.com/toolkit.tar.gz
+      source:
+        protocol: oss
+        bucket: cdn
+        key: toolkit.tar.gz
+        auth: oss-cred
       subpath: bin/tk
       unpack: tar.gz
       digest: "{_DIGEST}"
@@ -768,7 +874,11 @@ def test_cli_tools_requires_a_digest():
 manifest:
   cli_tools:
     - name: mycli
-      source: https://cdn.example.com/mycli
+      source:
+        protocol: oss
+        bucket: cdn
+        key: mycli
+        auth: oss-cred
 """
     assert ("manifest.cli_tools[0]", "missing_digest") in _reject(document)
 
@@ -791,7 +901,11 @@ def test_a_well_formed_cli_tools_document_is_accepted_since_w9():
 manifest:
   cli_tools:
     - name: mycli
-      source: https://cdn.example.com/mycli
+      source:
+        protocol: oss
+        bucket: cdn
+        key: mycli
+        auth: oss-cred
       digest: "{_DIGEST}"
 """
     assert _accept(document).parsed["manifest"]["cli_tools"][0]["name"] == "mycli"
@@ -874,7 +988,11 @@ def test_every_reason_is_reported_at_once():
 manifest:
   cli_tools:
     - name: mycli
-      source: https://cdn.example.com/mycli
+      source:
+        protocol: oss
+        bucket: cdn
+        key: mycli
+        auth: oss-cred
   engine_config:
     config:
       model: m
@@ -882,7 +1000,11 @@ manifest:
     - type: MEMORY.md
       content: "hi"
     - type: SOUL.md
-      source: https://user:token@cdn.example.com/soul.md
+      source:
+        protocol: git
+        url: https://user:token@code.example.com/team/x.git
+        ref: v1
+        subpath: soul.md
 """
     codes = _codes(document)
     assert {
@@ -934,20 +1056,27 @@ def test_an_oversized_source_url_is_refused_at_put_not_after_a_fetch():
     the store: the expensive order, and a document every apply point rejects
     — the exact shape "this surface never accepts something it cannot apply"
     forbids."""
-    long_url = "https://content.example/" + "a" * 3000 + ".bin"
+    long_url = "https://code.example.com/" + "a" * 3000 + ".git"
     document = f"""schema_version: 1
 manifest:
   identity:
     - type: SOUL.md
-      source: "{long_url}"
+      source:
+        protocol: git
+        url: "{long_url}"
+        ref: v1
+        subpath: soul.md
 """
-    assert ("manifest.identity[0].source", "source_url_too_long") in _reject(
-        document
-    )
+    assert (
+        "manifest.identity[0].source.url",
+        "source_url_too_long",
+    ) in _reject(document)
 
 
 def test_a_source_url_at_just_under_the_limit_is_accepted():
-    prefix, suffix = "https://content.example/", ".bin"
+    """The boundary is inclusive — 2048 is the provenance column's width, and
+    a URL exactly that long stores without truncation."""
+    prefix, suffix = "https://code.example.com/", ".git"
     boundary = prefix + "b" * (2048 - len(prefix) - len(suffix)) + suffix
     assert len(boundary) == 2048
     _accept(
@@ -955,7 +1084,11 @@ def test_a_source_url_at_just_under_the_limit_is_accepted():
 manifest:
   identity:
     - type: SOUL.md
-      source: "{boundary}"
+      source:
+        protocol: git
+        url: "{boundary}"
+        ref: v1
+        subpath: soul.md
 """
     )
 
@@ -1024,8 +1157,10 @@ def test_a_non_https_source_is_still_refused():
     document = """schema_version: 1
 sources:
   s:
-    protocol: oss
-    url: http://cdn.example.com/a.md
+    protocol: git
+    url: http://code.example.com/team/x.git
+    ref: v1
+    subpath: a.md
 manifest:
   identity:
     - type: SOUL.md
@@ -1111,7 +1246,9 @@ def test_an_unknown_key_on_a_source_is_refused_not_ignored():
 sources:
   s:
     protocol: oss
-    url: https://cdn.example.com/a.md
+    bucket: cdn
+    key: a.md
+    auth: oss-cred
     nonsense: 1
 manifest:
   identity:
@@ -1132,7 +1269,9 @@ _OSS_SOURCE = """schema_version: 1
 sources:
   artifacts:
     protocol: oss
-    url: https://artifacts.example.com/tools/pkg.zip
+    bucket: artifacts
+    key: tools/pkg.zip
+    auth: oss-cred
 manifest:
 """
 
@@ -1229,3 +1368,31 @@ def test_subpath_is_always_meaningful_on_a_git_source(category, entry):
         "    ref: v1.2.0\n"
         f"manifest:\n  {category}:\n{entry}"
     )
+
+
+def test_one_mistake_on_a_source_field_is_one_violation():
+    """Absence and malformedness are different mistakes with different fixes,
+    and each gets exactly one message.
+
+    The required-field check used to fire alongside the per-field one, so an
+    empty ``url`` produced both "must declare 'url'" and "'url' must be a
+    non-empty string" — and for a wrong-typed value the first was actively
+    false, since the field *is* declared. Same anti-duplication rule the
+    misplaced-key path already followed.
+    """
+    from agentclaw.community.core.bot_config_manifest.schema.sources import (
+        parse_source,
+    )
+
+    for raw, expected in [
+        ({"protocol": "git", "url": ""}, "non-empty"),
+        ({"protocol": "git", "url": 123}, "non-empty"),
+        ({"protocol": "git"}, "must declare"),
+        # ``auth`` has its own wording; what is pinned is the count.
+        ({"protocol": "oss", "bucket": "b", "auth": ""}, "credential"),
+        ({"protocol": "oss", "bucket": "b"}, "must declare"),
+    ]:
+        decl, violations = parse_source(raw)
+        assert decl is None
+        assert len(violations) == 1, (raw, [v.message for v in violations])
+        assert expected in violations[0].message, (raw, violations[0].message)

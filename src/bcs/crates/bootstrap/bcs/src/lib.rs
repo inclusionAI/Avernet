@@ -139,6 +139,8 @@ mod identity_wiring;
 pub mod lifecycle;
 pub mod metrics;
 pub mod migrations;
+mod message_delivery_wiring;
+mod delivery_metrics;
 pub mod plugins;
 pub mod server;
 pub mod state_machine_timeout_scanner;
@@ -165,7 +167,7 @@ pub use config::{
 };
 pub use error::{BcsError, Result};
 pub use plugins::{CachePluginKind, DbPluginKind, InfrastructurePlugins};
-pub use server::{BcsServer, BcsServerExtensions};
+pub use server::{resolve_config_secrets, BcsServer, BcsServerExtensions};
 pub use http_adapter::set_health_version;
 
 pub const BCS_VERSION: &str = concat!(
@@ -182,14 +184,23 @@ pub async fn run_from_env() -> Result<()> {
 }
 
 pub async fn run_from_env_with_config_dir(config_dir: Option<&std::path::PathBuf>) -> Result<()> {
-    let mut config = BcsConfig::load_with_env(config_dir);
+    run_with_config(BcsConfig::load_with_env(config_dir)).await
+}
+
+pub async fn run_with_config(mut config: BcsConfig) -> Result<()> {
+    let access = http_adapter::build_secret_access(&config).await?;
+    resolve_config_secrets(&mut config, access.as_ref()).await?;
+    run_with_resolved_config(config).await
+}
+
+pub async fn run_with_resolved_config(mut config: BcsConfig) -> Result<()> {
     config
         .validate_api_keys()
         .map_err(BcsError::InvalidConfig)?;
 
     let telemetry = telemetry::Telemetry::init(&config.telemetry);
     let _logging_guard = logging::init(&config.logging, telemetry.tracer());
-    logging::spawn_cleanup_task(config.logging.outputs.clone());
+    logging::spawn_cleanup_task(logging::effective_outputs(&config.logging));
 
     tracing::info!(
         version = %BCS_VERSION,

@@ -1,4 +1,5 @@
-import { Button, IconButton } from '@/components/ui';
+import { MessageViewScopeMenuButton } from '@/components/MessageViewScope';
+import { Badge, Button, IconButton } from '@/components/ui';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,13 +19,21 @@ import { AvatarTile } from '../AvatarTile';
 import { ShareDialog } from '../ManagePanel/ShareDialog';
 import { SessionScopeFilter } from '../SessionScopeFilter';
 import type { GroupItemProps, SessionTab } from './GroupItem.types';
-import { KIND_LABEL, MEMBERSHIP_LABEL } from './GroupItem.types';
+import { KIND_LABEL, MEMBERSHIP_LABEL, SIDEBAR_TAG_CLASS } from './GroupItem.types';
 import { GroupSessionsList } from './GroupSessionsList';
 
 export type { SessionTab } from './GroupItem.types';
 
+/** 群类型标签配色：自由聊天=蓝、自定义协同=绿、任务协作=橙。 */
+const KIND_TONE: Record<GroupItemProps['group']['kind'], 'primary' | 'success' | 'warning'> = {
+  free_chat: 'primary',
+  task_dag: 'success',
+  task_master_slave: 'warning',
+};
+
 export const GroupItem = React.memo(function GroupItem({
   group,
+  viewerKind,
   expanded,
   sessions,
   sessionTab,
@@ -127,21 +136,19 @@ export const GroupItem = React.memo(function GroupItem({
                 <TooltipTrigger asChild>
                   <div
                     aria-label={`协作群标签：${metadataLabel}`}
-                    className="mt-1 flex min-w-0 items-center gap-1 truncate text-xs leading-4 text-muted-foreground"
+                    className="mt-1 flex min-w-0 items-center gap-1 truncate text-xs leading-4"
                   >
                     {group.isPublic && (
-                      <>
-                        <span className="shrink-0 text-primary">公开</span>
-                        <span aria-hidden="true" className="text-muted-foreground/50">
-                          ·
-                        </span>
-                      </>
+                      <Badge tone="success" className={SIDEBAR_TAG_CLASS}>
+                        公开
+                      </Badge>
                     )}
-                    <span className="shrink-0">{KIND_LABEL[group.kind]}</span>
-                    <span aria-hidden="true" className="text-muted-foreground/50">
-                      ·
-                    </span>
-                    <span className="shrink-0">{membershipLabel}</span>
+                    <Badge tone={KIND_TONE[group.kind]} className={SIDEBAR_TAG_CLASS}>
+                      {KIND_LABEL[group.kind]}
+                    </Badge>
+                    <Badge tone="primary" className={SIDEBAR_TAG_CLASS}>
+                      {membershipLabel}
+                    </Badge>
                   </div>
                 </TooltipTrigger>
                 <TooltipContent>{metadataLabel}</TooltipContent>
@@ -149,62 +156,69 @@ export const GroupItem = React.memo(function GroupItem({
             </TooltipProvider>
           </div>
         </Button>
-        <IconButton
-          label="新建会话"
-          size="sm"
-          icon={<Plus className="h-4 w-4" />}
-          className="rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
-          onClick={(event) => {
-            event.stopPropagation();
-            onCreateSession(group.groupId);
-          }}
-        />
-        <SessionScopeFilter
-          value={sessionTab}
-          onChange={handleSessionScopeChange}
-          allCount={totalSessionCount}
-          favoriteCount={favoriteCount}
-        />
-        <Popover open={actionsOpen} onOpenChange={setActionsOpen}>
-          <PopoverTrigger asChild>
+        <div className="flex shrink-0 items-center gap-0.5" onClick={(event) => event.stopPropagation()}>
+          {viewerKind === 'user' ? (
+            <MessageViewScopeMenuButton onSelect={(scope) => onCreateSession(group.groupId, scope)} />
+          ) : (
             <IconButton
-              label="协作群操作"
+              label="新建会话"
               size="sm"
-              icon={<MoreHorizontal className="h-4 w-4" />}
-              className="rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
-              onClick={(event) => event.stopPropagation()}
-            />
-          </PopoverTrigger>
-          <PopoverContent align="end" className="w-44 p-1">
-            <Button
-              variant="ghost"
-              className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
-              onClick={() => {
-                setActionsOpen(false);
-                onManageGroup(group.groupId);
+              icon={<Plus className="h-3.5 w-3.5" />}
+              className="h-6 w-6 rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
+              onClick={(event) => {
+                event.stopPropagation();
+                onCreateSession(group.groupId);
               }}
-            >
-              <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
-              管理协作群
-            </Button>
-            <Button
-              variant="ghost"
-              className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
-              onClick={() => void handleShare()}
-            >
-              <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
-              分享协作群
-            </Button>
-            <Button
-              variant="ghost"
-              className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs text-destructive"
-              onClick={openDissolveConfirm}
-            >
-              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-              解散协作群
-            </Button>
-          </PopoverContent>
-        </Popover>
+            />
+          )}
+          <SessionScopeFilter
+            compact
+            value={sessionTab}
+            onChange={handleSessionScopeChange}
+            allCount={totalSessionCount}
+            favoriteCount={favoriteCount}
+          />
+          <Popover open={actionsOpen} onOpenChange={setActionsOpen}>
+            <PopoverTrigger asChild>
+              <IconButton
+                label="协作群操作"
+                size="sm"
+                icon={<MoreHorizontal className="h-3.5 w-3.5" />}
+                className="h-6 w-6 rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
+                onClick={(event) => event.stopPropagation()}
+              />
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-44 p-1">
+              <Button
+                variant="ghost"
+                className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
+                onClick={() => {
+                  setActionsOpen(false);
+                  onManageGroup(group.groupId);
+                }}
+              >
+                <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
+                管理协作群
+              </Button>
+              <Button
+                variant="ghost"
+                className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
+                onClick={() => void handleShare()}
+              >
+                <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+                分享协作群
+              </Button>
+              <Button
+                variant="ghost"
+                className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs text-destructive"
+                onClick={openDissolveConfirm}
+              >
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                解散协作群
+              </Button>
+            </PopoverContent>
+          </Popover>
+        </div>
       </div>
 
       {expanded && (

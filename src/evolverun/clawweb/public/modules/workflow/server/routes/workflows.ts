@@ -195,7 +195,7 @@ export function createWorkflowsRouter(
       let row;
       if (idChanged) {
         // ID changed: update by original ID + cascade related tables
-        const updated = await workflowSpecRepo.updateByOriginalId(originalWorkflowId!, workflowId, packId ?? existingRow?.pack_id ?? null, specJson);
+        const updated = await workflowSpecRepo.updateByOriginalId(originalWorkflowId!, workflowId, packId ?? existingRow?.pack_id ?? null, specJson, resolvedBotOwnerId);
         if (!updated) {
           res.status(404).json({ error: "Not Found", message: `Workflow "${originalWorkflowId}" not found` });
           return;
@@ -212,7 +212,7 @@ export function createWorkflowsRouter(
           await httpCallbackConfigRepo.updateWorkflowId(originalWorkflowId!, workflowId);
         }
       } else {
-        row = await workflowSpecRepo.upsert(workflowId, packId ?? existingRow?.pack_id ?? null, specJson);
+        row = await workflowSpecRepo.upsert(workflowId, packId ?? existingRow?.pack_id ?? null, specJson, resolvedBotOwnerId);
       }
 
       // Persist facade binding (slash command) if provided and repo available
@@ -443,8 +443,19 @@ export function createWorkflowsRouter(
     if (!await requireWorkflowAccess(req, res, botPermRepo, workflowId, "view")) return;
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string ?? "20", 10)));
     if (isNaN(limit)) { res.status(400).json({ error: "Bad Request" }); return; }
-    const rows = await wfdhRepo.listHistory(workflowId, limit);
-    const history = rows.map((r) => ({
+    const releaseOnly = String(req.query.releaseOnly ?? "") === "true";
+    const rows = await wfdhRepo.listHistory(workflowId, limit, { releaseOnly });
+    const toHistoryItem = (r: {
+      deploy_number: number;
+      version: number;
+      tag_name: string | null;
+      action: string;
+      from_deploy_number?: number | null;
+      note?: string | null;
+      bot_id?: string | null;
+      owner_id?: string | null;
+      gmt_create: Date | string | number | null;
+    }, isActive = false) => ({
       deployNumber: r.deploy_number,
       version: r.version,
       tagName: r.tag_name,
@@ -453,10 +464,15 @@ export function createWorkflowsRouter(
       note: r.note,
       botId: r.bot_id,
       ownerId: r.owner_id,
-      isActive: !!(r as any).is_active,
+      isActive,
       gmtCreate: toEpochSec(r.gmt_create),
-    }));
-    res.json({ workflowId, history });
+    });
+    const history = rows.map((r) => toHistoryItem(r, !!r.is_active));
+    // `history` is a bounded page, while an explicitly selected online version
+    // may be older than that page. Return it separately so clients do not
+    // accidentally compare against the newest release instead.
+    const active = await wfdhRepo.findActiveByWorkflowId(workflowId);
+    res.json({ workflowId, history, active: active ? toHistoryItem(active, true) : null });
   }));
 
   /** GET /:workflowId/history/diff — compare two deploy records (returns both spec_json; frontend renders diff).
@@ -557,6 +573,7 @@ export function createWorkflowsRouter(
   router.post("/:workflowId/versions/:v/activate", asyncHandler(async (req: Request, res: Response) => {
     if (!wfdhRepo) { res.status(503).json({ error: "Service Unavailable" }); return; }
     const workflowId = String(req.params.workflowId);
+    if (!await requireWorkflowAccess(req, res, botPermRepo, workflowId, "edit")) return;
     const version = parseInt(String(req.params.v), 10);
     if (isNaN(version)) { res.status(400).json({ error: "Bad Request", message: "Invalid version" }); return; }
     const ok = await wfdhRepo.setActive(workflowId, version);
@@ -607,6 +624,12 @@ export function createWorkflowsRouter(
           const updatedAtMs = toEpochMs(row.gmt_modified);
           if (updatedAtMs > 0) {
             spec.updatedAt = updatedAtMs;
+          }
+
+          // Attach the synced deploy version so API-mode ClawMind can populate
+          // flow_runs.workflow_version when falling back to workflow_specs.
+          if (row.version != null) {
+            spec.version = row.version;
           }
 
           res.json(spec);

@@ -97,8 +97,15 @@ PUT_BODY = {
 AKSK_BODY = {
     "type": "oss_aksk",
     "access_key_id": "LTAI5tExampleKeyId",
+    # Issued with the key pair and stored beside it, so a tenant's manifest
+    # chooses which bucket it reads and never which host it reaches.
+    "endpoint": "https://objects.example-corp.com",
+    "region": "cn-shanghai",
     "secret": "an-object-store-secret-key",
-    "allowed_prefixes": ["https://artifacts.example-corp.com/tools"],
+    # Empty, and refused if not: this mechanism presents its secret to
+    # nothing, and its endpoint does not come from the document — there is no
+    # tenant-supplied host for a prefix to constrain.
+    "allowed_prefixes": [],
 }
 _BAD_PREFIX_BODY = {
     "type": "header",
@@ -408,6 +415,23 @@ def put_aksk_credential_happy():
 )
 def put_aksk_credential_missing_key_id_error_shape():
     """Signing needs both halves; one half is not a credential."""
+
+
+@endpoint_test(
+    method="PUT",
+    path=f"{_BASE}/{{name}}",
+    scenario="an_aksk_credential_without_its_region_is_refused",
+    input=CaseInput(
+        path_params={"name": "oss-artifacts"},
+        headers=_HEADERS,
+        json_body={k: v for k, v in AKSK_BODY.items() if k != "region"},
+    ),
+    seed=_seed_verifier,
+    expect=ExpectError(status=422, json_contains={"data": None}),
+)
+def put_aksk_credential_missing_region_error_shape():
+    """The signature scheme scopes to a region; a credential without one
+    cannot read anything, so it is refused here rather than on every apply."""
 
 
 @endpoint_test(

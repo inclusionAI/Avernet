@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::{Attachment, Skill, deserialize_skills};
 
@@ -84,36 +84,6 @@ pub struct ProviderCoordinationConfigDto {
 pub struct ProviderOrganizationManagementConfigDto {
     #[serde(default)]
     pub authorized_manager_provider_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ProviderCoordinationEventKindDto {
-    ToolResult,
-    CoordinationIntent,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderCoordinationIntentDto {
-    pub v: u64,
-    pub tool: String,
-    #[serde(default)]
-    pub arguments: Map<String, Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderCoordinationEventRequest {
-    pub run_id: String,
-    pub tool_call_id: String,
-    pub kind: ProviderCoordinationEventKindDto,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub result_text: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mcp_server: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub intent: Option<ProviderCoordinationIntentDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

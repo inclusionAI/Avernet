@@ -18,6 +18,23 @@ bcs collaborate run ./phase.yaml \
 
 Public parameters include the complete original roster, explicit `seatNumber`, stable `seatOrder`, living `turnOrder`, referee node mappings, sanitized `publicHistory`, public rules, and eligible non-self vote candidates. They never include words, roles, raw speech, raw votes, or private reasoning.
 
+## Vote opening announcement
+
+`openingAnnouncement?: string` is an optional public, script-generated notice for
+new vote runs. It contains only phase/round guidance and, on retry, invalidation
+of earlier votes. The referee authorizes voting by submitting the run and ends
+that activation without an extra opening speech.
+
+The single entry `vote_start` is a neutral acknowledgement by a living player
+Bot, followed by parallel `vote_N` nodes and the referee's `tally`. Keep
+`vote_start` out of `nodeActorMap`: its output is neither speech nor a vote and
+must not affect player completion counts. The panel displays the announcement
+only for the matching running run after `vote_start` completes. Before that it
+shows preparation; failed/aborted runs show failure rather than completion.
+Existing runs without this optional field retain their previous presentation.
+No BCS Service or Plugin API changes are required. Deploy the updated panel and
+referee profile together for the new notice; old running graphs are unchanged.
+
 ## Private HumanInput context
 
 The current viewer's pending HumanInput instruction may append a delimited `UNDERCOVER_UI_CONTEXT_V1` JSON block. The panel parses that authenticated, viewer-private boundary to show the owning player's word, speech limits, round/seat context, or vote action. Unsupported or malformed recognized blocks produce a safe recoverable error. Private values are not placed in public params, storage, URLs, console output, errors, or `onInteraction` records.
@@ -117,9 +134,71 @@ a round progress bar, independent host broadcasts, and a persistent action foote
 
 The room uses original paneled walls, parquet, brass-trimmed green felt, a geometric rug and warm window lighting with the existing CC0 characters. All art remains embedded in the UMD bundle.
 
-The game-over dialog opens after a completed run only when the phase explicitly denotes a whole-game finish (`complete`, `completed`, `finished`, `game_over`), or the current run has a non-pending mapped host output with an explicit Chinese game-end declaration and a civilian/undercover victory verdict. Ordinary phase completion, player claims, unmapped artifacts and conditional rule explanations do not trigger it. This is a conservative compatibility path for the existing host prose, not an inference from player count or round number. Other wording remains available in the host broadcast without an automatic popup.
+New vote panels may specify `resultFile: "undercover-result-v1-r<round>-a<attempt>.json"`.
+The referee's `reveal` command generates and uploads that immutable public JSON
+using the existing Session File API. This is a versioned game-to-panel payload,
+not a new BCS Service API or Plugin API. BCS owns file storage and membership;
+the game script owns verdicts and disclosure, and the panel owns presentation.
 
-The dialog shows only the existing public host summary and honors `showPublicReveal` and `showHostOutput`. It traps keyboard focus, supports Escape and “回到圆桌”, and can be reopened via “查看终局”. Dismissal is scoped to the mounted game session and survives refreshes and phase updates; no private data is persisted.
+The V1 payload has these required fields:
+
+```json
+{
+  "kind": "undercover.game-result",
+  "version": 1,
+  "status": "finished",
+  "gameSessionId": "example-session",
+  "hostActorId": "example-host",
+  "round": 1,
+  "attempt": 1,
+  "winner": "civilian",
+  "reason": "卧底已经全部出局",
+  "summary": "游戏结束！平民阵营获胜。\n公开的词对和身份清单……"
+}
+```
+
+Only an exact-name, ready file owned by the current host Bot in the current
+session is consumed. Session, host, round and vote-render attempt must match
+panel params. The filename is scoped by the authenticated session and changes
+on every new round or re-render; no result filename or private result is carried
+by speech panels. Legacy `Bot`/`Ready` and V1 `bot`/`ready` metadata are supported.
+Other owners and other sessions are ignored before reading content. Malformed,
+unsupported, mismatched or conflicting results show a recoverable error, without
+falling back to prose. Files are limited to 64 KiB. Duplicate identical results
+are accepted for upload-response recovery.
+
+Both list and content use the configured `apiBaseUrl` and existing
+`/sessions/{sessionId}/files` routes. Content is read with same-origin credentials:
+BCS receives the current login, while redirected presigned storage reads do not
+send cookies. Presign backends must allow browser reads from the application's
+origin via their existing CORS configuration; no new proxy endpoint is assumed.
+Transient network failures display an error and retain conservative prose
+compatibility. A successfully parsed structured result takes precedence.
+
+A published result represents a finished game independently of the run and chat
+session closing. A failed `finish` does not remove it. Polling continues for up
+to five terminal snapshots when a result file is absent or unavailable, then
+stops; manual refresh can recover a later publication. Completed outputs and a
+successfully loaded immutable result are cached per mounted run. Panels without
+`resultFile` make no file requests.
+
+For old games, a completed run still needs an explicit final phase or a
+non-pending mapped host output containing both an end declaration and a victory
+verdict. Compatibility includes `终局揭晓`, `本局结束——平民赢了`, and verdicts
+followed by a separate explanatory sentence, such as
+`平民胜利！卧底在第一轮就被精准揪出。`. Ordinary phase completion, player claims,
+unmapped artifacts, conditional rules, quoted verdicts and contradictory winners
+do not trigger the dialog.
+
+The dialog honors `showPublicReveal` and `showHostOutput`, traps focus, supports
+Escape and “回到圆桌”, and can be reopened via “查看终局”. Dismissal is scoped to
+the mounted game session and survives refreshes and phase updates.
+
+Release the compatible panel first, then activate the updated referee profile
+for new games. Existing games keep using prose compatibility. This change does
+not require a BCS server or database migration. The final review can still be
+read in the host broadcast; the structured dialog summary comes directly from
+script facts, independently of the model's prose.
 
 Preview `?width=760&height=660&mode=finished` for the finale fixture, or `?width=900&height=950&mode=observe` for the club room.
 
@@ -150,3 +229,38 @@ expand into a bubble; other completed speakers have clickable small bubbles. The
 completed-speech check sprite and check prefix are removed. Other lifecycle markers
 (vote, eliminated, retry, action required) remain distinct. Preview `mode=markers`
 to inspect a running speaker alongside completed speeches.
+
+### Tie-break PK contract
+
+`pk_speaking` and `pk_voting` are subphases of the existing `round`.
+`attempt` remains a retry counter within the current subphase. PK is never a retry
+of the ordinary vote and does not invalidate the first ballot.
+
+- `pkCandidates?: string[]` contains the tied players' actor IDs. PK phases require
+  at least two distinct living candidates. The original `seatOrder` is unchanged.
+- In PK speech, `turnOrder` and player `nodeActorMap` entries contain only PK
+  speakers. A non-PK Human watches without an input task. PK voting uses all living
+  players; `voteCandidates` contains only PK candidates other than the voter.
+- The private vote context has `allowAbstain: false`; PK never displays an
+  abstention option. The referee independently rejects abstention, self-votes and
+  non-PK targets, without requesting replacement votes.
+- `publicHistory[].stage?: 'regular' | 'pk'` distinguishes two speech groups in
+  the same round. Omitted stage means regular. Both histories remain inspectable.
+- `voteHistory?: Array<{ round, stage, votes, counts }>` carries **already tallied**
+  ballots only. `stage` is `regular` or `pk`; each vote is
+  `{ seatNumber, displayName, text }`, where text is the referee's normalized
+  ballot, and each count is `{ seatNumber, votes }`. These records contain no raw
+  vote reasoning, words or roles. The next phase carries previous tallies; the
+  current tally is visible through the host broadcast. Terminal summaries include
+  both ballots. In-flight player artifacts still display only “已投票”.
+
+PK final files use `undercover-result-v1-r<round>-pk-a<attempt>.json` and include
+`stage: 'pk'`. The parser matches stage as well as session, host, round and attempt;
+a missing stage means regular for existing results. The ordinary file name and
+existing v1 fields stay compatible. Publish the updated panel before activating
+this profile for new games; hot migration of an in-flight old collaboration is
+not validated. No BCS server, shared collaboration protocol or database change
+is required.
+
+Preview PK with `?width=560&height=800&mode=pk-vote` or
+`?width=360&height=600&mode=pk-speech`; these fixtures use simulated API responses.

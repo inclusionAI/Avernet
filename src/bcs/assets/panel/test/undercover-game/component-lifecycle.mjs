@@ -44,6 +44,24 @@ try{
  const votePosts=[];const voteParams={...base,phase:'voting',voteCandidates:[{actorId:'b',displayName:'小乙',seatNumber:2,eligible:true},{actorId:'c',displayName:'小丙',seatNumber:3,eligible:false,eliminated:true}]};const voteInstruction=`投票\n[UNDERCOVER_UI_CONTEXT_V1]\n{"action":"vote","round":1,"seatNumber":1,"word":"苹果","allowAbstain":true}\n[/UNDERCOVER_UI_CONTEXT_V1]`;globalThis.fetch=fetchFor([{graph:{run:{run_id:'run-component',status:'running'},nodes:[{node_id:'node-a',status:'ready'},{node_id:'node-b',status:'completed'}]},pending:[{node_id:'node-a',instruction:voteInstruction}],artifacts:{'node-b':'{"kind":"vote","target_actor_id":"b"}'}}],votePosts);let v;await act(async()=>{v=mount(voteParams);await settle(5)});assert.match(text(v),/2号 · 小乙/);assert.doesNotMatch(text(v),/3号 · 小丙.*选择投票对象/);assert.doesNotMatch(text(v),/target_actor_id/);
  const radio=v.container.querySelector('input[value="b"]');const confirm=v.container.querySelector('input[type="checkbox"]');await act(async()=>{radio.click();confirm.click();await settle();v.container.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));await settle(5)});assert.deepEqual(votePosts,[{content:'{"kind":"vote","target_actor_id":"b"}'}]);await act(async()=>v.unmount());
 
+ // PK preserves the first ballot, restricts candidates, and offers no abstention.
+ const pkParams={...voteParams,phase:'pk_voting',pkCandidates:['a','b'],voteHistory:[{round:1,stage:'regular',votes:[{seatNumber:1,displayName:'小甲',text:'我投2号'}],counts:[{seatNumber:2,votes:1}]},{round:1,stage:'pk',votes:[{seatNumber:2,displayName:'小乙',text:'我投1号'}],counts:[{seatNumber:1,votes:1}]}]};
+ const pkPosts=[];globalThis.fetch=fetchFor([{graph:{run:{run_id:base.runId,status:'running'},nodes:[{node_id:'node-a',status:'ready'}]},pending:[{node_id:'node-a',instruction:voteInstruction.replace('"allowAbstain":true','"allowAbstain":false')}]}],pkPosts);
+ let pkPanel;await act(async()=>{pkPanel=mount(pkParams);await settle(5)});
+ assert.match(text(pkPanel),/PK 投票/);assert.equal(pkPanel.container.querySelector('input[value="__abstain__"]'),null);
+ assert.match(text(pkPanel),/常规投票/);assert.match(text(pkPanel),/小甲：我投2号/);assert.match(text(pkPanel),/小乙：我投1号/);
+ assert.equal(pkPanel.container.querySelectorAll('[data-pk-candidate="true"]').length,2);
+ await act(async()=>{pkPanel.container.querySelector('input[value="b"]').click();pkPanel.container.querySelector('input[type="checkbox"]').click();await settle();pkPanel.container.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));await settle(5)});
+ assert.deepEqual(pkPosts,[{content:'{"kind":"vote","target_actor_id":"b"}'}]);await act(async()=>pkPanel.unmount());
+
+ // A non-PK Human observes the two speakers and can inspect both speech stages.
+ const pkSpeechHistory=[{round:1,speeches:[{actorId:'b',seatNumber:2,displayName:'小乙',text:'普通描述'}]},{round:1,stage:'pk',speeches:[{actorId:'b',seatNumber:2,displayName:'小乙',text:'补充辩解'}]}];
+ globalThis.fetch=fetchFor([{graph:{run:{run_id:base.runId,status:'running'},nodes:[{node_id:'node-b',status:'ready'}]},pending:[]}],[]);
+ let observer;await act(async()=>{observer=mount({...base,phase:'pk_speaking',players:base.players.map(p=>({...p,alive:true,eliminated:false})),pkCandidates:['b','c'],turnOrder:['b','c'],nodeActorMap:{'node-b':'b','node-c':'c','node-host':'host'},publicHistory:pkSpeechHistory});await settle(5)});
+ assert.match(text(observer),/PK 发言/);assert.match(text(observer),/0\/2 已完成/);assert.equal(observer.container.querySelector('textarea'),null);
+ await act(async()=>{button(observer,'2号 · 小乙').click();await settle(5)});assert.match(text(observer),/普通描述/);assert.match(text(observer),/第 1 轮 PK：补充辩解/);
+ await act(async()=>observer.unmount());
+
  const abstainPosts=[];globalThis.fetch=fetchFor([{graph:{run:{run_id:'run-component',status:'running'},nodes:[{node_id:'node-a',status:'ready'}]},pending:[{node_id:'node-a',instruction:voteInstruction}]}],abstainPosts);let a;await act(async()=>{a=mount(voteParams);await settle(5)});await act(async()=>{a.container.querySelector('input[value="__abstain__"]').click();a.container.querySelector('input[type="checkbox"]').click();await settle();a.container.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));await settle(5)});assert.deepEqual(abstainPosts,[{content:'{"kind":"vote","abstain":true}'}]);await act(async()=>a.unmount());
 
  const actions=[];globalThis.fetch=fetchFor([{graph:{run:{run_id:'run-component',status:'completed'},nodes:[]},pending:[]}],[]);let r;await act(async()=>{r=mount({...base,onAction:async x=>{actions.push(x)}});await settle(5)});assert.match(text(r),/主持人正在打开投票/);await act(async()=>{button(r,'告诉主持人卡住了').click();button(r,'告诉主持人卡住了').click();await settle(5)});assert.deepEqual(actions,[{type:'send_message',content:'卡住了'}]);assert.match(text(r),/主持人已收到/);await act(async()=>r.unmount());
@@ -86,6 +104,9 @@ try{
  for(const snapshot of [
    hostSnapshot('投票已收齐，主持人正在计票或准备下一轮。'),
    hostSnapshot('如果游戏结束，平民胜利就公布身份。'),
+   hostSnapshot('终局揭晓\n平民胜利就公布身份。'),
+   hostSnapshot('终局揭晓\n> 平民胜利！'),
+   hostSnapshot('终局揭晓\n平民胜利！\n卧底胜利！'),
    {graph:{...finishGraph,nodes:[{node_id:'node-host',status:'running'}]},pending:[],artifacts:{'node-host':finale}},
    {graph:{...finishGraph,nodes:[{node_id:'node-b',status:'completed'}]},pending:[],artifacts:{'node-b':finale}},
    {graph:{...finishGraph,nodes:[{node_id:'unmapped',status:'completed'}]},pending:[],artifacts:{unmapped:finale}},
@@ -95,6 +116,13 @@ try{
    await act(async()=>{ordinary=mount({...base,runId:'run-finale',phase:'voting'});await settle(5)});
    assert.equal(ordinary.container.querySelector('[aria-label="游戏结束"]'),null);
    await act(async()=>ordinary.unmount());
+ }
+ // Production prose and the documented referee board are valid finales.
+ for(const content of ['🔔 终局揭晓\n平民胜利！卧底在第一轮就被精准揪出。','🏁 本局结束——**平民赢了**。']) {
+   globalThis.fetch=fetchFor([hostSnapshot(content)],[]);let legacy;
+   await act(async()=>{legacy=mount({...base,runId:'run-finale',phase:'voting'});await settle(5)});
+   assert.ok(legacy.container.querySelector('[aria-label="游戏结束"]'),content);
+   await act(async()=>legacy.unmount());
  }
  globalThis.fetch=fetchFor([hostSnapshot(finale)],[]);
  let finalePanel;await act(async()=>{finalePanel=mount({...base,runId:'run-finale',phase:'voting'});await settle(5)});
@@ -141,6 +169,23 @@ try{
  assert.ok(markers.container.querySelector('[aria-label="回看 2号 小乙 的发言"]'));
  assert.match(markers.container.querySelector('[data-region="speech-bubble"]').textContent,/3号 小丙/);
  await act(async()=>markers.unmount());
+
+ // The unmapped preparation node never counts as a vote or exposes its output.
+ const opening='第 2 轮投票开始。本轮之前的票作废，请重新投票。';
+ for(const [runStatus,startStatus,opened] of [['pending','pending',false],['running','running',false],['running','completed',true],['failed','failed',false],['aborted','completed',false]]){
+  const graph={run:{run_id:'run-vote-start',status:runStatus},nodes:[{node_id:'vote_start',kind:'bot_task',status:startStatus,assignee_bot_id:'b'},{node_id:'node-a',status:opened?'running':'pending'},{node_id:'node-b',status:'pending'},{node_id:'node-host',status:'pending'}]};
+  globalThis.fetch=fetchFor([{graph,pending:opened?[{node_id:'node-a',instruction:'投票'}]:[],artifacts:{vote_start:'收到'}}],[]);
+  let starting;await act(async()=>{starting=mount({...base,phase:'voting',runId:'run-vote-start',round:2,openingAnnouncement:opening});await settle(5)});
+  assert.equal(text(starting).includes(opening),opened);
+  assert.match(text(starting),/0\/2/);
+  assert.doesNotMatch(text(starting),/收到/);
+  if(opened)assert.ok(starting.container.querySelector('[aria-label="选择投票对象"]'));
+  if(runStatus==='failed'||runStatus==='aborted'){
+   assert.match(text(starting),/本阶段未正常完成/);
+   assert.doesNotMatch(text(starting),/本阶段已完成/);
+  }
+  await act(async()=>starting.unmount());
+ }
 
 }finally{globalThis.fetch=originalFetch}
 console.log('Component lifecycle tests passed: dock speech/vote/abstain, privacy, compact layout, focus, transition, and recovery.');

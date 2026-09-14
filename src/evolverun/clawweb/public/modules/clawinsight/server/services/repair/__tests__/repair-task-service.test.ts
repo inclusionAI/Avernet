@@ -613,7 +613,12 @@ it("freezes an explicit ADMIN_ONCE execution scope for administrator delegation"
   }));
 });
 
-it("creates an Insight-backed Repair run with frozen evidence hints", async () => {
+it.each([
+  { sourceUnavailable: false, newJob: false },
+  { sourceUnavailable: true, newJob: false },
+  { sourceUnavailable: false, newJob: true },
+  { sourceUnavailable: true, newJob: true },
+])("sends frozen evidence to AIS and bootstrap with sourceUnavailable=$sourceUnavailable, newJob=$newJob", async ({ sourceUnavailable, newJob }) => {
   const detail = {
     improvementId: 42,
     ownerUserId: ACTOR,
@@ -623,8 +628,8 @@ it("creates an Insight-backed Repair run with frozen evidence hints", async () =
     userGuidance: "只修改测试 Bot 的查询模板",
     sourceType: "USER_SELECTED",
     sourceRuleId: null,
-    evidenceCount: 1,
-    sessionCount: 1,
+    evidenceCount: 3,
+    sessionCount: 2,
     dataStartTime: null,
     dataEndTime: null,
     dataAsOf: "2026-08-17T00:00:00.000Z",
@@ -666,10 +671,32 @@ it("creates an Insight-backed Repair run with frozen evidence hints", async () =
       payloadRef: "oss://fixture/session-42.json",
       payloadEtag: "etag-42",
       payloadVersionId: "v1",
+    }, {
+      sessionId: "session-42",
+      taskIndex: 1,
+      ordinal: 1,
+      taskDescription: "检查网关状态",
+      failureClass: "TOOL_FAILURE",
+      reasoningSummary: "诊断请求失败 token=secret-test-value 应检查工具授权",
+      payloadRef: "oss://fixture/session-42.json",
+      payloadEtag: "etag-42",
+      payloadVersionId: "v1",
+    }, {
+      sessionId: "session-43",
+      taskIndex: 0,
+      ordinal: 2,
+      taskDescription: "重新执行打包任务",
+      failureClass: "CONFIG_MISSING",
+      reasoningSummary: null,
+      payloadRef: "oss://fixture/session-43.json",
+      payloadEtag: "etag-43",
+      payloadVersionId: "v1",
     }],
     evolveLinks: [],
   } as unknown as ImprovementDetail;
   harness.insightBridge.getDetail.mockResolvedValue(detail);
+
+  if (sourceUnavailable) harness.insightBridge.resolvePlanSource.mockRejectedValue(new Error("source unavailable"));
 
   const created = await createTask({
     insightImprovementId: 42,
@@ -677,11 +704,17 @@ it("creates an Insight-backed Repair run with frozen evidence hints", async () =
     repairDirection: "只允许修改 workflow_engine_dispatch 查询模板",
   });
 
+  const evidenceTaskRefs = [
+    { sessionId: "session-42", taskIndex: 0, ordinal: 0, taskDescription: "执行打包任务", failureClass: "CONFIG_MISSING", reasoningSummary: "字段不存在" },
+    { sessionId: "session-42", taskIndex: 1, ordinal: 1, taskDescription: "检查网关状态", failureClass: "TOOL_FAILURE", reasoningSummary: "诊断请求失败 [REDACTED_SECRET_TEXT] 应检查工具授权" },
+    { sessionId: "session-43", taskIndex: 0, ordinal: 2, taskDescription: "重新执行打包任务", failureClass: "CONFIG_MISSING", reasoningSummary: null },
+  ];
   expect(created.config.insightSource).toEqual(expect.objectContaining({
     improvementId: 42,
     requestId: "insight-repair-run-1",
-    evidenceCount: 1,
-    sessionIds: ["session-42"],
+    evidenceCount: 3,
+    sessionIds: ["session-42", "session-43"],
+    evidenceTaskRefs,
     authorizationMode: "ONCE",
     repairDirection: "只允许修改 workflow_engine_dispatch 查询模板",
   }));
@@ -695,11 +728,62 @@ it("creates an Insight-backed Repair run with frozen evidence hints", async () =
     requestId: "insight-repair-run-1",
   }));
 
+  const expectedIssue = { ...created.config.issue, sessionIds: ["session-42", "session-43"] };
+  // Exercise the actual executeSnapshot parameters, not just browser metadata.
+  const dispatched = parseSnapshotEnvelope(harness.execute.mock.calls[0][1] as Record<string, string>);
+  expect(dispatched.input).toMatchObject({
+    issue: expectedIssue,
+    insightSource: created.config.insightSource,
+  });
+  expect(() => assertRepairAuditSecretFree(dispatched.input, "input")).not.toThrow();
+  expect(harness.insightBridge.resolvePlanSource).not.toHaveBeenCalled();
+  expect(await harness.service.getTask(ACTOR, created.taskId)).toMatchObject({ issue: expectedIssue });
+  // Older persisted issue records need no migration or mutable source lookup.
+  expect(created.config.issue).not.toHaveProperty("sessionIds");
+  const persisted = await harness.repo.findTask(created.taskId);
+  expect(JSON.parse(persisted!.config_json).issue).toEqual(created.config.issue);
+  expect(harness.insightBridge.getDetail).toHaveBeenCalledTimes(1);
+
   const bootstrap = await harness.service.bootstrap(created.identity);
   expect(bootstrap).toEqual(expect.objectContaining({
-    insightSource: expect.objectContaining({ improvementId: 42, sessionIds: ["session-42"] }),
-    insightPlanSource: { status: "ready" },
+    issue: expectedIssue,
+    insightSource: expect.objectContaining({ improvementId: 42, title: detail.title, sessionIds: ["session-42", "session-43"], evidenceTaskRefs }),
+    insightPlanSource: sourceUnavailable ? expect.objectContaining({ status: "unavailable", reason: "source_unavailable" }) : { status: "ready" },
   }));
+  expect(() => assertRepairAuditSecretFree(bootstrap, "bootstrap")).not.toThrow();
+  // Mutating the source after creation must not change the frozen repair hints.
+  detail.evidence[0].taskDescription = "已修改的源任务";
+  const written = await reportPlanReady(created);
+  if (newJob) harness.now.value = 2_000;
+  await harness.service.decidePlan({
+    actorUserId: ACTOR,
+    authHeaders: { cookie: "SSO=decision-cookie" },
+    taskId: created.taskId,
+    body: { decision: "approve", artifactDigest: written.digest },
+  });
+  let applyEnvelope: SnapshotEnvelope;
+  if (newJob) {
+    expect(harness.execute).toHaveBeenCalledTimes(2);
+    applyEnvelope = parseSnapshotEnvelope(harness.execute.mock.calls[1][1] as Record<string, string>);
+  } else {
+    const claim = await harness.service.claimDecision(created.identity);
+    expect(claim).toMatchObject({ status: "claimed", reusedJob: true });
+    expect(harness.execute).toHaveBeenCalledTimes(1);
+    applyEnvelope = claim.continuation as SnapshotEnvelope;
+  }
+  expect(applyEnvelope).toMatchObject({
+    execution: { action: "repair_apply" },
+    input: { issue: expectedIssue, insightSource: created.config.insightSource },
+  });
+  const row = await harness.repo.findTask(created.taskId);
+  const applyConfig = JSON.parse(row!.config_json) as RepairTaskConfig;
+  const applyBootstrap = await harness.service.bootstrap({
+    taskId: created.taskId,
+    stepId: applyConfig.current.stepId,
+    executionId: applyConfig.execution.executionId,
+  });
+  expect(applyBootstrap).toMatchObject({ issue: expectedIssue, insightSource: { evidenceTaskRefs } });
+  expect(applyBootstrap).not.toHaveProperty("insightPlanSource");
 });
 
 it("records a secret-safe Insight projection in the bootstrap audit", async () => {
@@ -1921,6 +2005,9 @@ describe("RepairTaskService execution contract", () => {
       },
       runtime: { executionTicket: expect.stringMatching(/^ce_repair_/) },
     });
+    expect(envelope.input.issue).toEqual(created.config.issue);
+    expect(envelope.input).not.toHaveProperty("insightSource");
+    expect(envelope.input.issue).not.toHaveProperty("sessionIds");
     expect(JSON.stringify(envelope)).not.toContain("modelApiKey");
     expect(JSON.stringify(envelope)).not.toContain(CREATE_COOKIE);
     expect(harness.createSignedUrl.mock.calls).toEqual(expect.arrayContaining([

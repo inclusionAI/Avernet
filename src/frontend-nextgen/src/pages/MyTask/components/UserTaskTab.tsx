@@ -32,11 +32,6 @@ function Td({ className, ...props }: React.TdHTMLAttributes<HTMLTableCellElement
   return <td className={cn('border-t border-border px-4 py-3 align-top text-xs', className)} {...props} />;
 }
 
-function formatTaskTitle(title: string): string {
-  const chars = Array.from(title);
-  return chars.length > 8 ? `${chars.slice(0, 8).join('')}...` : title;
-}
-
 export interface UserTaskTabProps {
   taskRecords: TaskListItem[];
   total: number;
@@ -92,7 +87,7 @@ export function UserTaskTab({
 
   return (
     <section className="space-y-4">
-      <div className="grid gap-3 border-y border-border py-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2">
         <div className="relative min-w-0">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -130,23 +125,22 @@ export function UserTaskTab({
                 <tr className="bg-muted/30 text-left text-xs font-medium text-muted-foreground">
                   <Th>任务</Th>
                   <Th>Owner Bot / 来源</Th>
-                  <Th>类型</Th>
                   <Th>状态</Th>
                   <Th>创建时间</Th>
                   <Th>完成时间</Th>
-                  <Th className="text-center">操作</Th>
+                  <Th className="text-right">操作</Th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={7} className="p-0">
+                    <td colSpan={6} className="p-0">
                       <Spin tip="加载用户任务中…" className="py-16" />
                     </td>
                   </tr>
                 ) : error ? (
                   <tr>
-                    <td colSpan={7} className="p-0">
+                    <td colSpan={6} className="p-0">
                       <Empty
                         title="用户任务加载失败"
                         description={error}
@@ -160,7 +154,7 @@ export function UserTaskTab({
                   </tr>
                 ) : filteredTaskRecords.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="p-0">
+                    <td colSpan={6} className="p-0">
                       <Empty
                         title="暂无符合条件的用户任务"
                         description={
@@ -185,43 +179,41 @@ export function UserTaskTab({
                       >
                         <Td className="max-w-[22rem]">
                           <div className="space-y-1">
-                            <div className="flex min-w-0 items-center gap-2">
-                              <TooltipProvider delayDuration={300}>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <span className="shrink-0 font-medium text-foreground">
-                                      {formatTaskTitle(getUserTaskTitle(record))}
-                                    </span>
-                                  </TooltipTrigger>
-                                  <TooltipContent>{getUserTaskTitle(record)}</TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
-                              <code className="min-w-0 truncate rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
-                                {record.task_id}
-                              </code>
-                            </div>
+                            <TooltipProvider delayDuration={300}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="block max-w-[20rem] truncate font-medium leading-5 text-foreground">
+                                    {getUserTaskTitle(record)}
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <div className="space-y-1">
+                                    <div>{getUserTaskTitle(record)}</div>
+                                    <div className="font-mono text-muted-foreground">{record.task_id}</div>
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
                             <UserTaskGoalMeta record={record} />
                           </div>
                         </Td>
-                        <Td className="text-center">
+                        <Td>
                           <div className="space-y-1">
-                            <div className="text-center text-foreground">
+                            <div className="text-xs leading-5 text-foreground">
                               <span className="font-medium">{ownerBotName}</span>
                             </div>
-                            <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                               {sourceTypeBadge(record.source_type ?? '—')}
+                              {taskTypeBadge(record.execution_config?.task_type ?? '—')}
                             </div>
                           </div>
                         </Td>
-                        <Td>
-                          <div className="space-y-2">{taskTypeBadge(record.execution_config?.task_type ?? '—')}</div>
-                        </Td>
                         <Td className="whitespace-nowrap">{taskStatusBadge(record.status)}</Td>
                         <Td>
-                          <div className="text-xs text-foreground">{formatDateTime(record.gmt_create)}</div>
+                          <div className="text-xs leading-5 text-foreground">{formatDateTime(record.gmt_create)}</div>
                         </Td>
                         <Td>
-                          <div className="space-y-1 text-xs text-foreground">
+                          <div className="space-y-1 text-xs leading-5 text-foreground">
                             <div>{formatDateTime(record.gmt_modified)}</div>
                             <div className="text-xs text-muted-foreground">
                               耗时：{formatDuration(record.gmt_create, record.gmt_modified)}
@@ -230,7 +222,7 @@ export function UserTaskTab({
                         </Td>
                         <Td>
                           <div
-                            className="flex flex-col items-center justify-center gap-2"
+                            className="flex flex-row items-center justify-end gap-2"
                             onClick={(event) => event.stopPropagation()}
                           >
                             <ViewSessionButton record={record} />

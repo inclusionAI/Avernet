@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { api, type EvolveStageMode, type EvolveStageSkill, type EvolveStageDevelopment } from '../api/client'
 import { Icon, PageTitle, Status } from './evolve/common'
 import { formatStepTime, primaryButton } from './evolve/helpers'
+import { spaceLabel } from '../components/SpaceSelector'
 import SkillListPagination, { skillListPageSize } from '../components/SkillListPagination'
 
 const modeName: Record<EvolveStageMode, string> = {
@@ -90,7 +91,7 @@ export default function StageSkillManagement() {
     ...drafts.map((draft) => ({ id: draft.stageSkillId, current: undefined as EvolveStageSkill | undefined, draft })),
   ].sort((a, b) => timestamp((b.current ?? b.draft!).updatedAt) - timestamp((a.current ?? a.draft!).updatedAt)).filter(({ current, draft }) => {
     const record = current ?? draft!
-    const matches = [record.displayName, record.ownerId, record.stageName].some((value) => value?.toLowerCase().includes(query.trim().toLowerCase()))
+    const matches = [record.displayName, record.spaceName, record.ownerId, record.stageName].some((value) => value?.toLowerCase().includes(query.trim().toLowerCase()))
     return matches && (filter === 'all' || (filter === 'draft' ? !!draft : current?.status === filter || current?.integrationTestStatus === filter))
   })
   const visiblePage = Math.min(page, Math.max(1, Math.ceil(rows.length / skillListPageSize)))
@@ -109,7 +110,7 @@ export default function StageSkillManagement() {
             const record = current ?? draft!
             const open = () => navigate(current ? '/evolve/stage-skills/' + current.implementationId : '/evolve/stage-skills/new?developmentId=' + encodeURIComponent(id))
             return <tr key={id} className="group transition hover:bg-gray-50/70">
-              <td className="px-5 py-4"><div className="flex items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><Icon name="code" /></span><div className="min-w-0"><button onClick={open} className="block max-w-full truncate text-left font-medium text-gray-900 hover:text-blue-600 hover:underline">{record.displayName}</button><p className="mt-0.5 text-xs text-gray-400">{modeName[record.mode]}</p></div></div></td>
+              <td className="px-5 py-4"><div className="flex items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><Icon name="code" /></span><div className="min-w-0"><button onClick={open} className="block max-w-full truncate text-left font-medium text-gray-900 hover:text-blue-600 hover:underline">{record.displayName}</button><p className="mt-0.5 text-xs text-gray-400">{modeName[record.mode]}</p><p className="mt-0.5 truncate text-xs text-gray-500" title={spaceLabel(record)}>{spaceLabel(record)}</p></div></div></td>
               <td className="px-5 py-4"><span className={`inline-flex whitespace-nowrap rounded-md border px-2 py-1 text-xs font-medium ${stageTagStyle[record.stage] ?? 'border-gray-200 bg-gray-50 text-gray-600'}`}>{record.stageName}</span></td>
               <td className="px-5 py-4"><span className="inline-block max-w-full truncate rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] text-gray-600">{record.ownerId ?? '—'}</span></td>
               <td className="px-4 py-4">{current ? <span className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">{current.version}</span> : <span className="text-xs text-gray-400">—</span>}</td>
@@ -119,7 +120,7 @@ export default function StageSkillManagement() {
             </tr>
           })}</tbody>
         </table></div>
-        {!loading && rows.length === 0 && <div className="px-5 py-16 text-center text-sm text-gray-400">{query || filter !== 'all' ? '没有匹配的自定义实现' : '还没有自定义实现，点击右上角开始接入。'}</div>}
+        {!loading && !error && rows.length === 0 && <div className="px-5 py-16 text-center text-sm text-gray-400">{query || filter !== 'all' ? '没有匹配的自定义实现' : '还没有自定义实现，点击右上角开始接入。'}</div>}
         {loading && <div className="px-5 py-16 text-center text-sm text-gray-400">正在加载…</div>}
         <SkillListPagination total={rows.length} page={visiblePage} onChange={setPage} />
       </section>

@@ -71,6 +71,16 @@ def _fs():
     return fs, baas
 
 
+@pytest.mark.asyncio
+async def test_read_preserve_errors_distinguishes_transport_failure_from_absence():
+    fs, baas = _fs()
+    baas.invoke_http.side_effect = httpx.ConnectError("unavailable")
+
+    assert await fs.read_file(_DEVICE_PATH) is None
+    with pytest.raises(httpx.ConnectError, match="unavailable"):
+        await fs.read_file(_DEVICE_PATH, preserve_read_errors=True)
+
+
 # ── write (per-file upload, no OSS / no redeliver) ────────────────────
 
 @pytest.mark.asyncio

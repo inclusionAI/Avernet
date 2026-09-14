@@ -805,13 +805,17 @@ export default function BenchRunDetail({ basePath = '/bench' }: { basePath?: str
               </div>
             ) : (
               <div className="text-sm text-gray-500 space-y-2">
-                <p>暂无分析报告</p>
-                {run.summary?.reportError && (
+                {String(run.summary?.reportError ?? '').toLowerCase() === 'report disabled' ? (
+                  <div className="rounded-md bg-gray-50 px-3 py-2 text-gray-600">
+                    当前运行未启用自动分析报告，可查看任务结果、Session 和原始数据。
+                  </div>
+                ) : <p>暂无分析报告</p>}
+                {run.summary?.reportError && String(run.summary.reportError).toLowerCase() !== 'report disabled' && (
                   <div className="rounded-md bg-red-50 p-2 text-xs text-red-700">
                     报告生成失败: {String(run.summary.reportError)}
                   </div>
                 )}
-                {run.summary?.reportPromptPath && (
+                {run.summary?.reportPromptPath && String(run.summary?.reportError ?? '').toLowerCase() !== 'report disabled' && (
                   <div className="text-xs text-gray-400">
                     Prompt path: {String(run.summary.reportPromptPath)}
                   </div>

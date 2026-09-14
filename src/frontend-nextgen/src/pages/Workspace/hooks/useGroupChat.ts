@@ -20,6 +20,9 @@ import { useConnectionStatusSmoothing } from './useConnectionStatusSmoothing';
 import { useGroupBootstrapProcessing } from './useGroupBootstrapProcessing';
 import { useHumanOnlyChatRequests } from './useHumanOnlyChatRequests';
 import { useManifestHistoryLoader } from './useManifestHistoryLoader';
+import { useProviderStateSubscriptions } from './useProviderStateSubscriptions';
+import { useViewScopeChangedNotice } from './useViewScopeChangedNotice';
+import { useWsReconnectNonce } from './useWsReconnectNonce';
 
 /**
  * useGroupChat —— 协作群对话 Hook。
@@ -99,18 +102,8 @@ export function useGroupChat(session: SessionView | null) {
       }),
   });
 
-  // 订阅 Provider 阶段状态 + WebSocket 连接状态。
-  useEffect(() => {
-    if (!provider) return;
-    const offState = provider.subscribeToSupportState(setSupportState);
-    const offStatus = provider.subscribeToConnectionStatus((event: { status: ProviderConnectionStatus }) =>
-      setConnectionStatus(event.status),
-    );
-    return () => {
-      offState();
-      offStatus();
-    };
-  }, [provider]);
+  // 订阅 Provider 阶段状态 + WebSocket 连接状态（拆至 useProviderStateSubscriptions，行为不变）。
+  useProviderStateSubscriptions(provider, setSupportState, setConnectionStatus);
 
   // 切换会话时清理旧会话副屏；连接、history hydration 与 WS 暂存由
   // useManifestHistoryLoader 作为同一个可取消初始化流程统一管理。
@@ -189,6 +182,10 @@ export function useGroupChat(session: SessionView | null) {
       toast.error(error instanceof Error ? error.message : '加载历史消息失败');
     }
   };
+
+  // 视角切换成功重连后 / 服务端 view_scope_changed 推送后，以不变参数刷新历史消息（两路径回调重叠可接受）。
+  useWsReconnectNonce(provider, () => void reloadHistory());
+  useViewScopeChangedNotice(provider, () => void reloadHistory());
 
   // 向上翻页加载更早的历史消息：provider 以当前最旧时间戳为 before 游标拉取上一页，
   // 这里按 id 去重后前置拼接到 SDK chat.messages（旧→新升序），并由 BubbleList

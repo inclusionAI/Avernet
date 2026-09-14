@@ -1,16 +1,20 @@
+import { MessageViewScopeField } from '@/components/MessageViewScope';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Textarea } from '@/components/ui/Textarea';
+import { DEFAULT_MESSAGE_VIEW_SCOPE } from '@/domain/collaboration/messageViewScope';
+import type { MessageViewScope } from '@/domain/collaboration/types';
 import type { PublicGroup } from '@/domain/collaborationSquare/types';
 import { MessagesSquare } from 'lucide-react';
 import type { FormEvent } from 'react';
 import { useEffect, useState } from 'react';
 
-/** 创建公开协作群会话的表单值（对应接口 body：title + input.query）。 */
+/** 创建公开协作群会话的表单值（对应接口 body：title + input.query + message_view_scope）。 */
 export interface CreateGroupSessionFormValues {
   title: string;
   query: string;
+  messageViewScope: MessageViewScope;
 }
 
 export interface CreateGroupSessionModalProps {
@@ -32,12 +36,14 @@ export interface CreateGroupSessionModalProps {
 export function CreateGroupSessionModal({ open, group, loading, onClose, onSubmit }: CreateGroupSessionModalProps) {
   const [title, setTitle] = useState('');
   const [query, setQuery] = useState('');
+  const [viewScope, setViewScope] = useState<MessageViewScope>(DEFAULT_MESSAGE_VIEW_SCOPE);
 
   // 弹窗打开/切换目标群时重置表单，避免上一群残留输入。
   useEffect(() => {
     if (open) {
       setTitle('');
       setQuery('');
+      setViewScope(DEFAULT_MESSAGE_VIEW_SCOPE);
     }
   }, [open, group?.id]);
 
@@ -48,7 +54,7 @@ export function CreateGroupSessionModal({ open, group, loading, onClose, onSubmi
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     if (!canSubmit) return;
-    onSubmit({ title: trimmedTitle, query: trimmedQuery });
+    onSubmit({ title: trimmedTitle, query: trimmedQuery, messageViewScope: viewScope });
   };
 
   return (
@@ -99,6 +105,7 @@ export function CreateGroupSessionModal({ open, group, loading, onClose, onSubmi
               onChange={(event) => setQuery(event.target.value)}
             />
           </label>
+          <MessageViewScopeField value={viewScope} onChange={setViewScope} disabled={loading} />
           <div className="flex items-center justify-end gap-2">
             <Button type="button" variant="secondary" disabled={loading} onClick={onClose}>
               取消

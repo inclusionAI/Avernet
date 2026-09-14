@@ -1456,6 +1456,7 @@ class SkillSetService:
             "openclaw": "/home/admin/.openclaw/workspace/skills",
             "moltis": "/home/admin/.moltis/skills",
             "hermes": "/home/admin/.hermes/skills",
+            "deepseek_harness": "/home/admin/.dsh/skills",
         }
         # aicoding 引擎的 skills-repo 实际存储位置不同
         ENGINE_SKILLS_REPO_DIR_MAP = {
@@ -1500,17 +1501,18 @@ class SkillSetService:
         from agentclaw.community.utils.env_utils import is_local_mode
         if is_local_mode() and not self.is_desktop:
             from agentclaw.community.core.workspace.path_factory import get_bot_engine_dir
-            per_bot_skills_root = (
-                get_bot_engine_dir(
-                    self.entity_id or "default",
-                    self.bot_id,
-                    self.runtime_engine_type,
-                    self.entity_type or "staff",
-                )
-                / "workspace"
-                / "skills"
+            per_bot_engine_root = get_bot_engine_dir(
+                self.entity_id or "default",
+                self.bot_id,
+                self.runtime_engine_type,
+                self.entity_type or "staff",
             )
-            container_root = Path("/home/admin/.openclaw/workspace/skills")
+            if self.runtime_engine_type == "deepseek_harness":
+                per_bot_skills_root = per_bot_engine_root / "skills"
+                container_root = Path("/home/admin/.dsh/skills")
+            else:
+                per_bot_skills_root = per_bot_engine_root / "workspace" / "skills"
+                container_root = Path("/home/admin/.openclaw/workspace/skills")
             if base_skills_dir.is_relative_to(container_root):
                 base_skills_dir = per_bot_skills_root / base_skills_dir.relative_to(container_root)
             if skills_repo_dir.is_relative_to(container_root):

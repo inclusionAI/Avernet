@@ -34,8 +34,13 @@ def _skill_report_instruction(context: dict[str, Any], *, task_id: str, node_id:
     )
     return "\n".join([
         "【强制执行闭环，不得跳过】",
+        "产出为本:本节点的全部价值=阶段1 在本条消息正文给出的真实业务产出;阶段2-4 只是对该产出的校验与回投,不是任务本身。"
+        "若阶段1 正文没有可直接阅读的真实业务内容(只见标题/阶段名,或内容被外置到工具写文件/写代码里而不在正文),"
+        "则整轮作废,不得进入阶段2-4,更不得靠自我背书的空壳去抢上报——那是无产出的假闭环。",
         "执行约束:严禁调用联网搜索/web_search 工具或联网浏览外部资源获取信息(任务指定的上报接口除外),仅依据给定上下文与自身知识产出。",
-        "阶段1 执行：先完成上面的任务指令，形成完整执行产出。",
+        "阶段1 执行：在本条消息正文完整完成上面任务指令、给出完整执行产出(完整分析/结论/内容正文),正文必须可直接读到真实业务内容;"
+        "禁止:①只写小标题或阶段名(如 阶段1:完成分析文档)就跳过;②仅靠调用工具(写文件/写代码/写表格)后即视为完成而正文无内容;"
+        "③把产出只放进后续上报请求体却不出现在对话正文。产出完整后再进入阶段2。阶段4 上报时把这份完整产出原样填入 output 字段。",
         "阶段2 校验：执行完成后，必须逐条对照当前 goal.acceptances，明确判断每条是否满足；不能只凭‘看起来完成’结束。",
         "阶段3 验收：整理完整 output；验收全部满足则 status=SUCCESS，否则 status=DONE，并在 acceptance_result.gaps 写明差距；只有执行失败才使用 status=FAILED。",
         "阶段4 上报：必须真正发起 HTTP POST，不能只在对话中输出‘完成’或只返回 JSON。",
@@ -57,7 +62,75 @@ def _skill_report_instruction(context: dict[str, Any], *, task_id: str, node_id:
             "extend_props": {},
         }, ensure_ascii=False),
         "上报前自检：task_id/node_id 必须使用当前节点值；status 只能是 SUCCESS(验收通过)/DONE(验收未通过)/FAILED(执行失败)；验收通过时 verdict=DONE 且 gaps=[]，验收未通过时 verdict=FAILED 且 gaps 非空；acceptances_metric 必须是数组，不要改成 {验收项ID:{passed,summary}} 映射；收到 HTTP 200 前不得认为上报完成。",
+        "收尾轮约束:收到 HTTP 200 即视为本节点上报完成;此后回复只能是**一句话确认**(如 已上报成功),严禁在收尾轮再次贴出阶段1执行产出、验收正文、上报请求体或任何此前已产出的内容——执行产出只在阶段1给出一次,不得重复。",
+        "上报工具与方法:上报只能用 exec/curl 以 JSON body 发起 POST 到回调地址;严禁用 web_fetch / web_search 等工具调用上报接口(它们是 GET/检索,会 405);收到 HTTP 200 立即停止,不得对同一节点重复 POST、不得换工具重试、不得在 200 之后再发起任何上报或收尾调用。",
     ])
+
+
+def format_task_node_business_instruction(
+    *,
+    task_id: str,
+    node_id: str,
+    backend: str,
+    objective: str,
+    instruction: str,
+    acceptances: list[dict[str, Any]],
+    upstream_outputs: dict[str, Any] | None = None,
+    reporter_bot_id: str = "",
+    executor_bot_ids: list[str] | None = None,
+    skill_report_enabled: bool = True,
+) -> str:
+    """Build the one business protocol shared by every manager-worker node.
+
+    BCS owns member assignment and group completion through its system context.
+    This text deliberately contains no ``bcs_*`` instruction: it only defines
+    the business work, acceptance and node callback owned by the task module.
+    """
+    backend = backend.rstrip("/") or "{backend}"
+    reporter = reporter_bot_id or "BCS 系统上下文标识为 manager/driver 的 Bot"
+    executors = executor_bot_ids or ([reporter_bot_id] if reporter_bot_id else [])
+    callback = f"{backend}/api/v1/collaboration/tasks/callback/report"
+    payload = {
+        "task_id": task_id,
+        "node_id": node_id,
+        "status": "SUCCESS",
+        "output": "driver 汇总后的完整节点最终输出",
+        "acceptance_result": {
+            "verdict": "DONE",
+            "acceptances_metric": [
+                {"id": "验收项ID", "passed": True, "summary": "可核验的证据摘要"}
+            ],
+            "gaps": [],
+        },
+        "extend_props": {},
+    }
+    parts = [
+        "[task-execute]",
+        "【业务节点执行协议】本协议只约束业务执行、验收和回投；成员派发、消息收集与群收尾由系统上下文处理，不要自行调用或复述这些调度动作。",
+        f"[task-loop] loop_task_id={task_id}::{node_id}; backend={backend}",
+        f"唯一回投者: {reporter}。除唯一回投者外，任何成员都不得调用节点 callback。",
+        f"本群执行者: {json.dumps(executors, ensure_ascii=False)}。driver/manager 同时是执行者，必须完成自己的业务推理，不得只派发后等待成员。",
+        f"目标:{objective}",
+        f"指令:{instruction}",
+        f"验收标准:{json.dumps(acceptances, ensure_ascii=False)}",
+        f"上游产出:{json.dumps(upstream_outputs or {}, ensure_ascii=False, default=str)}",
+        "执行顺序不可跳过：1) 每位执行者（包括 driver）完成分内真实业务推理并给出可复核产出；2) driver 在收到所有成员结果后汇总，不能照抄成员原文或替未回复成员编造结果；3) driver 用汇总结果逐条核验全部验收项；4) driver 形成一次且仅一次的节点最终 output 与验收结论；5) driver 回投并确认成功。",
+        "验收项覆盖要求：acceptances_metric 必须逐条且仅一次覆盖上面的每个验收项 id；每项包含 id、passed（布尔值）和 summary（证据摘要）。全部通过：status=SUCCESS、verdict=DONE、gaps=[]；存在未满足项：status=DONE、verdict=FAILED、gaps 必须逐条说明；只有实际执行异常才可使用 status=FAILED。",
+        "执行约束：禁止联网检索、浏览外部网页或访问外部 API 获取信息；仅依据给定上下文与自身知识完成业务。下方指定的唯一节点回投接口不受此限制，必须按规定调用。",
+    ]
+    if not skill_report_enabled:
+        parts.append(_no_callback_instruction())
+        return "\n".join(parts)
+    parts.extend([
+        "【唯一允许的节点回投】仅唯一回投者可使用 exec/curl，以 POST JSON 请求固定地址；不得使用 web_search、web_fetch、浏览器、群调度工具或任何猜测的 URL/字段进行回投。",
+        f"POST {callback}",
+        "请求体必须且只能包含以下六个顶层字段；loop_task_id 已由 task_id/node_id 在服务端还原，严禁放入请求体：",
+        json.dumps(payload, ensure_ascii=False),
+        "回投前必须将示例中的 task_id/node_id 替换为当前节点值，将 output 替换为完整汇总结果，并填入完整验收结果。HTTP 200 且响应明确表示成功，才算回投成功。",
+        "失败处理：仅可对同一固定 URL、同一字段结构做一次原样重试；不得改 URL、换工具、猜字段或重复生成 output。收到 HTTP 200 后立即停止，不得再次 POST，不得重贴完整输出；若需回复，只能一句话确认已上报。",
+        OUTPUT_LANGUAGE_CONSTRAINT,
+    ])
+    return "\n".join(parts)
 
 
 def _no_callback_instruction() -> str:
@@ -127,30 +200,18 @@ class PromptFormatterImpl(PromptFormatter):
             {"id": acceptance.id, "description": acceptance.description}
             for acceptance in node.task_spec.goal.acceptances
         ]
-        parts = [
-            "[task-execute]",
-            NO_WEB_SEARCH_CONSTRAINT.rstrip(),
-            OUTPUT_LANGUAGE_CONSTRAINT,
-            "请严格按以下阶段执行，执行、校验、验收、上报均不可跳过。",
-            f"目标:{goal}",
-            f"指令:{instr}",
-            f"验收标准:{json.dumps(acceptances, ensure_ascii=False)}",
-        ]
-        # 所有执行模式统一由 skill_report_enabled 决定是否主动 callback；
-        # 关闭时只告诉 Bot 不要主动 callback，平台内部回收格式不注入 prompt。
-        if context.get("skill_report_enabled", True):
-            parts.append(_skill_report_instruction(
-                context,
-                task_id=str(context.get("task_id") or node.task_id),
-                node_id=str(context.get("node_id") or node.node_id),
-            ))
-            parts.append("HTTP 上报完成后，回复中只需确认上报结果；不要用回复文本替代 HTTP POST。")
-        else:
-            parts.append(_no_callback_instruction())
-        if siblings:
-            parts.append(f"上游产出:{json.dumps(siblings, ensure_ascii=False, default=str)}")
-        parts.append(NO_WEB_SEARCH_CONSTRAINT)
-        return "\n".join(parts)
+        return format_task_node_business_instruction(
+            task_id=str(context.get("task_id") or node.task_id),
+            node_id=str(context.get("node_id") or node.node_id),
+            backend=str(context.get("backend") or "{backend}"),
+            objective=goal,
+            instruction=str(instr),
+            acceptances=acceptances,
+            upstream_outputs=siblings,
+            reporter_bot_id=str(context.get("reporter_bot_id") or node.run_info.assignee or ""),
+            executor_bot_ids=[str(node.run_info.assignee)] if node.run_info.assignee else None,
+            skill_report_enabled=bool(context.get("skill_report_enabled", True)),
+        )
 
     def format_verify(self, context: dict[str, Any], node: TaskNode) -> str:
         child_outputs = context.get("child_outputs") or {}

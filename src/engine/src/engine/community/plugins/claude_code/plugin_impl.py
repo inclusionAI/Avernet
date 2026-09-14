@@ -15,14 +15,19 @@ operations execute locally in the Engine filesystem.
 type-checkers verify full facade conformance. Importing ``plugin_api`` from
 ``plugins`` is the allowed DIP edge (leaf → abstraction).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 
 from engine.community.plugins.claude_code.symlinks import LocalSkillSymlinks
+from engine.community.kernel.center_content import CenterContentAdapter
 
 from engine.community.plugin_api.claude_code.plugin import ClaudeCodePlugin
-from engine.community.plugins.claude_code._base import ClaudeCodePortBase, ClaudeCodeRelayClient
+from engine.community.plugins.claude_code._base import (
+    ClaudeCodePortBase,
+    ClaudeCodeRelayClient,
+)
 from engine.community.plugins.claude_code._chat import _ChatPortMixin
 from engine.community.plugins.claude_code._commands import _CommandsPortMixin
 from engine.community.plugins.claude_code._cron import _CronPortMixin
@@ -53,10 +58,18 @@ class ClaudeCodePluginImpl(
     fresh ``ClaudeCodeRelayClient`` on first use.
     """
 
-    def __init__(self, client: ClaudeCodeRelayClient | None = None, *, file_roots: tuple[Path, ...] = (), skills_root: Path = Path("/home/admin/.claude/skills")) -> None:
+    def __init__(
+        self,
+        client: ClaudeCodeRelayClient | None = None,
+        *,
+        center_content_adapter: CenterContentAdapter,
+        file_roots: tuple[Path, ...] = (),
+        skills_root: Path = Path("/home/admin/.claude/skills"),
+    ) -> None:
         super().__init__(client=client)
         self._file_roots = tuple(root.resolve() for root in file_roots)
         self._local_symlinks = LocalSkillSymlinks(self._file_roots, skills_root)
+        self._center_content_adapter = center_content_adapter
 
 
 __all__ = ["ClaudeCodePluginImpl"]

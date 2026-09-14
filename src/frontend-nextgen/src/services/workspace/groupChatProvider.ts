@@ -9,7 +9,7 @@ import {
 } from '@tc-chat/adapters';
 import type { AixContext, ChatMessage, ChatProvider } from '@tc-chat/core';
 import { GroupChatHistoryPaginator } from './groupChatHistoryPaginator';
-import { buildGroupChatPayload, buildGroupWsUrl } from './groupChatProviderHelpers';
+import { buildGroupChatPayload, buildGroupWsUrl, isViewScopeChangedFrame } from './groupChatProviderHelpers';
 
 /** 透出 WS URL 构造器，保持既有 import 路径稳定（历史分页等纯函数已下沉到独立模块）。 */
 export { buildGroupWsUrl } from './groupChatProviderHelpers';
@@ -86,8 +86,11 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
   private readonly options: GroupChatProviderOptions;
   private inner: SdkGroupChatProvider | null = null;
   private initializePromise: Promise<SdkGroupChatProvider> | null = null;
+  /** reconnect in-flight 守卫：并发重连共享同一 promise（只重拉一次 token）。 */
+  private reconnectPromise: Promise<void> | null = null;
   private connectionListeners = new Set<(event: ConnectionStatusEvent) => void>();
   private stateListeners = new Set<(state: GroupChatState) => void>();
+  private viewScopeListeners = new Set<() => void>();
   private unsubscribeInnerConnection?: () => void;
   private state: GroupChatState = { phase: 'idle', error: null };
   private bufferLiveEvents = true;
@@ -139,6 +142,18 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     };
   }
 
+  /** 订阅服务端 view_scope_changed 关闭事件（scope 在线变更，前端需重连）。 */
+  subscribeToViewScopeChanged(listener: () => void): () => void {
+    this.viewScopeListeners.add(listener);
+    return () => {
+      this.viewScopeListeners.delete(listener);
+    };
+  }
+
+  private emitViewScopeChanged(): void {
+    this.viewScopeListeners.forEach((listener) => listener());
+  }
+
   /**
    * 拉取一次性 session token；失败直接抛出——不降级为 owner 匿名请求（详见 brief 行为要求 2）。
    */
@@ -184,6 +199,7 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     // 当前已安装 SDK 的 GroupChatProvider 类型和运行时只处理 group_id，
     // 传入的 sessionId 会被忽略；在包装层保留会话级帧适配，避免重连后落到默认 main 会话。
     this.patchSessionFrames(inner);
+    this.patchIncomingFrames(inner);
 
     if (this.historyHydrationActive) {
       (inner as HydrationCapableGroupChatProvider).beginHistoryHydration?.();
@@ -225,8 +241,28 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
       if (target.method !== 'connect' && target.method !== 'chat.send') return originalSend(frame);
 
       const params: Record<string, unknown> = { ...target.params, session_id: sessionId };
+      if (target.method === 'connect') params.view_actor_id = this.options.identityId;
       if (target.method === 'chat.send') params.sessionKey = sessionId;
       return originalSend({ ...target, params });
+    };
+  }
+
+  /**
+   * 拦截入站帧识别 view_scope_changed 关闭事件：通知订阅者并整体重连
+   * （重连会重拉一次性 token；旧 inner 被 disconnect 后其内部重连尝试自然失效）。
+   * 事件帧不透传给 SDK parser。
+   */
+  private patchIncomingFrames(inner: SdkGroupChatProvider): void {
+    const transport = (inner as unknown as { transport?: { onMessage?: (msg: unknown) => void } }).transport;
+    if (!transport || typeof transport.onMessage !== 'function') return;
+    const originalOnMessage = transport.onMessage.bind(transport);
+    transport.onMessage = (msg: unknown) => {
+      if (isViewScopeChangedFrame(msg)) {
+        this.emitViewScopeChanged();
+        void this.reconnect();
+        return;
+      }
+      return originalOnMessage(msg);
     };
   }
 
@@ -312,8 +348,20 @@ export class GroupChatProvider implements ChatProvider<GroupChatRequest> {
     return typeof hydrateRun === 'function' ? hydrateRun.call(inner, message) : message;
   }
 
-  /** 重置初始化状态并重新连接——供业务层在断线恢复时主动调用。 */
+  /**
+   * 重置初始化状态并重新连接——供业务层在断线恢复时主动调用。
+   * in-flight 守卫：并发调用（视角切换 bump + view_scope_changed 帧 + 手动重连）
+   * 共享同一 promise，只重拉一次 token / 只重建一次 SDK Provider。
+   */
   async reconnect(): Promise<void> {
+    if (this.reconnectPromise) return this.reconnectPromise;
+    this.reconnectPromise = this.reconnectInner().finally(() => {
+      this.reconnectPromise = null;
+    });
+    return this.reconnectPromise;
+  }
+
+  private async reconnectInner(): Promise<void> {
     this.unsubscribeInnerConnection?.();
     this.unsubscribeInnerConnection = undefined;
     this.inner?.disconnect();

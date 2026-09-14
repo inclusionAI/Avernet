@@ -4,24 +4,30 @@
 存储位置：SKILL_PARAMETERS_FILE_PATH（容器内固定路径）
 通过 DeviceFileSystem 读写，自动适配 local/arca
 """
+
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.skill_center.errors import LocalSkillStorageError
 
 
 logger = get_logger()
 
 # 容器内的参数文件路径 (用于 Arca 模式)
-SKILL_PARAMETERS_FILE_PATH = "/home/admin/.openclaw/workspace/skills/skill_parameters.json"
+SKILL_PARAMETERS_FILE_PATH = (
+    "/home/admin/.openclaw/workspace/skills/skill_parameters.json"
+)
 DEFAULT_PARAMETERS_PATH = SKILL_PARAMETERS_FILE_PATH
 
 
 class SkillParameterService:
     """技能参数管理服务 - 通过 DeviceFileSystem 读写文件"""
 
-    def __init__(self, device_fs, file_path: str | None = None, *, engine_io_enabled: bool = True):
+    def __init__(
+        self, device_fs, file_path: str | None = None, *, engine_io_enabled: bool = True
+    ):
         """
         初始化服务
 
@@ -43,25 +49,44 @@ class SkillParameterService:
         """异步加载参数文件"""
         if not self._engine_io_enabled:
             self._data = {"parameters": {}}
-            logger.info("[SkillParameterService] engine IO disabled (teclaw); skipping load")
+            logger.info(
+                "[SkillParameterService] engine IO disabled (teclaw); skipping load"
+            )
             return
         try:
-            content = await self._device_fs.read_file(self._file_path)
-            if content:
-                self._data = json.loads(content.decode("utf-8"))
-                logger.info(f"[SkillParameterService] Loaded parameters, size={len(content)}")
-            else:
+            content = await self._device_fs.read_file(
+                self._file_path,
+                preserve_read_errors=True,
+            )
+            if content is None:
                 self._data = {"parameters": {}}
-                logger.info("[SkillParameterService] No existing parameters, initialized empty")
+                logger.info(
+                    "[SkillParameterService] No existing parameters, initialized empty"
+                )
+                return
+            value = json.loads(content.decode("utf-8"))
+            if not isinstance(value, dict) or not isinstance(
+                value.get("parameters"), dict
+            ):
+                raise ValueError("parameter file must contain an object 'parameters'")
+            if any(
+                not isinstance(name, str) or not isinstance(parameters, dict)
+                for name, parameters in value["parameters"].items()
+            ):
+                raise ValueError("each Skill parameter value must be an object")
+            self._data = value
+            logger.info(
+                "[SkillParameterService] Loaded parameters, size=%d", len(content)
+            )
         except FileNotFoundError:
             self._data = {"parameters": {}}
             logger.info("[SkillParameterService] File not found, initialized empty")
-        except json.JSONDecodeError as e:
-            logger.warning(f"[SkillParameterService] Failed to parse parameters JSON: {e}")
-            self._data = {"parameters": {}}
-        except Exception as e:
-            logger.warning(f"[SkillParameterService] Failed to load parameters: {e}")
-            self._data = {"parameters": {}}
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            logger.warning("[SkillParameterService] Invalid parameters file: %s", exc)
+            raise LocalSkillStorageError() from exc
+        except Exception as exc:
+            logger.warning("[SkillParameterService] Failed to load parameters: %s", exc)
+            raise LocalSkillStorageError() from exc
 
     async def async_save(self) -> bool:
         """异步保存参数文件
@@ -70,13 +95,23 @@ class SkillParameterService:
             bool: 保存是否成功
         """
         if not self._engine_io_enabled:
-            logger.info("[SkillParameterService] engine IO disabled (teclaw); skipping save")
+            logger.info(
+                "[SkillParameterService] engine IO disabled (teclaw); skipping save"
+            )
             return False
         try:
-            self._data["updated_at"] = datetime.utcnow().isoformat()
-            content = json.dumps(self._data, indent=2, ensure_ascii=False).encode("utf-8")
+            candidate = {
+                **self._data,
+                "updated_at": datetime.now(UTC).isoformat(),
+            }
+            content = json.dumps(candidate, indent=2, ensure_ascii=False).encode(
+                "utf-8"
+            )
             await self._device_fs.write_file(self._file_path, content)
-            logger.info(f"[SkillParameterService] Saved parameters, size={len(content)}")
+            self._data = candidate
+            logger.info(
+                f"[SkillParameterService] Saved parameters, size={len(content)}"
+            )
             return True
         except Exception as e:
             logger.error(f"[SkillParameterService] Failed to save parameters: {e}")
@@ -86,7 +121,9 @@ class SkillParameterService:
         """获取指定技能的参数（同步方法，需要先调用 async_load）"""
         return self._data.get("parameters", {}).get(skill_name, {})
 
-    async def save_skill_parameters(self, skill_name: str, parameters: dict[str, Any]) -> bool:
+    async def save_skill_parameters(
+        self, skill_name: str, parameters: dict[str, Any]
+    ) -> bool:
         """保存指定技能的参数
 
         Args:
@@ -96,11 +133,18 @@ class SkillParameterService:
         Returns:
             bool: 保存是否成功
         """
-        if "parameters" not in self._data:
-            self._data["parameters"] = {}
-
-        self._data["parameters"][skill_name] = parameters
-        return await self.async_save()
+        previous = self._data
+        self._data = {
+            **previous,
+            "parameters": {
+                **previous.get("parameters", {}),
+                skill_name: parameters,
+            },
+        }
+        saved = await self.async_save()
+        if not saved:
+            self._data = previous
+        return saved
 
     async def delete_skill_parameters(self, skill_name: str) -> bool:
         """删除指定技能的参数
@@ -109,15 +153,23 @@ class SkillParameterService:
             bool: 保存是否成功
         """
         if "parameters" in self._data:
-            self._data["parameters"].pop(skill_name, None)
-            return await self.async_save()
+            previous = self._data
+            remaining = dict(previous["parameters"])
+            remaining.pop(skill_name, None)
+            self._data = {**previous, "parameters": remaining}
+            saved = await self.async_save()
+            if not saved:
+                self._data = previous
+            return saved
         return True
 
     def get_all_parameters(self) -> dict[str, dict[str, Any]]:
         """获取所有技能参数（同步方法，需要先调用 async_load）"""
         return self._data.get("parameters", {})
 
-    def check_parameters_required(self, skill_name: str, parameter_schema: list) -> tuple:
+    def check_parameters_required(
+        self, skill_name: str, parameter_schema: list
+    ) -> tuple:
         """检查技能是否需要配置参数
 
         Returns: (是否需要配置，未配置的参数列表)
@@ -129,7 +181,7 @@ class SkillParameterService:
 
         missing_params = []
         for param in parameter_schema:
-            if param.get('required') and not user_parameters.get(param['name']):
+            if param.get("required") and not user_parameters.get(param["name"]):
                 missing_params.append(param)
 
         return len(missing_params) > 0, missing_params

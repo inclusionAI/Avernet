@@ -16,14 +16,14 @@ afterEach(() => {
 it('预发 Tern 身份就绪后同步 user_id 并开放编辑页请求', async () => {
   mockedUseHumanIdentity.mockReturnValue({
     status: 'ready',
-    identity: { userId: '327325', displayName: '测试用户', online: true },
+    identity: { userId: '900003', displayName: '测试用户', online: true },
   });
 
   const { result } = renderHook(() => useBotWorkshopEditorIdentity());
 
   expect(result.current.ready).toBe(true);
-  expect(result.current.userId).toBe('327325');
-  await waitFor(() => expect(useIdentityStore.getState().currentIdentityId).toBe('327325'));
+  expect(result.current.userId).toBe('900003');
+  await waitFor(() => expect(useIdentityStore.getState().currentIdentityId).toBe('900003'));
 });
 
 it('身份加载期间暂停编辑页请求', () => {

@@ -43,6 +43,9 @@ from engine.community.config import (
 )
 from engine.community.plugins.claude_code._base import ClaudeCodeRelayClient
 from engine.community.plugins.claude_code.plugin_impl import ClaudeCodePluginImpl
+from engine.community.plugins.skills_pool.center_content import (
+    MountedCenterContentAdapter,
+)
 
 log = logging.getLogger("claude-code-community-engine")
 
@@ -147,7 +150,14 @@ class ClaudeCodeCommunityEngine(BaseEngine):
         self._injected_client = client  # None in production; set only by tests
 
         # The single community transport impl shared by every adapter.
-        self._port = ClaudeCodePluginImpl(client=client, file_roots=load_claude_code_file_roots(), skills_root=load_claude_code_skills_root())
+        self._port = ClaudeCodePluginImpl(
+            client=client,
+            file_roots=load_claude_code_file_roots(),
+            skills_root=load_claude_code_skills_root(),
+            # Claude Code is not part of the Desktop download rollout. Keep its
+            # existing mounted-content behavior explicit at this composition root.
+            center_content_adapter=MountedCenterContentAdapter(),
+        )
 
         # ACL adapters implementing the core *Service protocols.
         self._chat = ClaudeCodeChatAdapter(self._port)

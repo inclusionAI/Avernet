@@ -112,7 +112,6 @@
       ],
       "panel": {
         "runId": "{{bcs.run_id}}",
-        "apiBaseUrl": "/bcnproxy",
         "groupId": "group-game",
         "sessionId": "group-game:session-1",
         "gameSessionId": "group-game:session-1",
@@ -224,7 +223,7 @@
       "baseline_chars": 6933
     },
     "vote": {
-      "yaml": "name: \"谁是卧底 第1轮 投票\"\nmetadata:\n  description: \"存活玩家根据全部发言并行投票，主持人计票\"\nparticipants:\n  seat1:\n    display_name: \"1号 玩家1\"\n    required: true\n  seat3:\n    display_name: \"3号 玩家3\"\n    required: true\n  seat4:\n    display_name: \"4号 玩家4\"\n    required: true\n  seat5:\n    display_name: \"5号 玩家5\"\n    required: true\n  seat6:\n    display_name: \"6号 玩家6\"\n    required: true\n  referee:\n    display_name: \"主持人\"\n    required: true\nruntime:\n  kind: state_machine\n  state_machine:\n    version: 1\n    graph_mode: acyclic\n    defaults:\n      node_timeout_ms: 420000\n      max_attempts: 1\n    nodes:\n      vote_open:\n        kind: bot_task\n        display_name: \"开投\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 900000\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [vote_1, vote_2, vote_3, vote_4, vote_5, vote_6]\n      vote_1:\n        kind: bot_task\n        display_name: \"1号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat1\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_2:\n        kind: human_input\n        display_name: \"👤 你的投票（2号 · 人类玩家）\"\n        node_timeout_ms: 900000\n        instruction: |\n          【你的词语】隐词甲\n\n          第 1 轮投票 · 你是 2 号。\n          大家说过的话，主持人刚在群里念过一遍。\n\n          可以投的人：1号、3号、4号、5号、6号，不能投自己。\n          只写「我投N号」，N 是阿拉伯数字，不用写理由。\n          不想投就写「我弃权」。\n\n          [UNDERCOVER_UI_CONTEXT_V1]\n          {\"action\":\"vote\",\"round\":1,\"seatNumber\":2,\"word\":\"隐词甲\",\"allowAbstain\":true}\n          [/UNDERCOVER_UI_CONTEXT_V1]\n        transitions:\n          complete:\n            targets: [tally]\n      vote_3:\n        kind: bot_task\n        display_name: \"3号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat3\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_4:\n        kind: bot_task\n        display_name: \"4号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat4\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_5:\n        kind: bot_task\n        display_name: \"5号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat5\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_6:\n        kind: bot_task\n        display_name: \"6号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat6\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      tally:\n        kind: bot_task\n        display_name: \"开票\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 600000\n        final_output: true\n        instruction: |\n          <BOT_INSTRUCTION>\n",
+      "yaml": "name: \"谁是卧底 第1轮 投票\"\nmetadata:\n  description: \"存活玩家根据全部发言并行投票，主持人计票\"\nparticipants:\n  seat1:\n    display_name: \"1号 玩家1\"\n    required: true\n  seat3:\n    display_name: \"3号 玩家3\"\n    required: true\n  seat4:\n    display_name: \"4号 玩家4\"\n    required: true\n  seat5:\n    display_name: \"5号 玩家5\"\n    required: true\n  seat6:\n    display_name: \"6号 玩家6\"\n    required: true\n  referee:\n    display_name: \"主持人\"\n    required: true\nruntime:\n  kind: state_machine\n  state_machine:\n    version: 1\n    graph_mode: acyclic\n    defaults:\n      node_timeout_ms: 420000\n      max_attempts: 1\n    nodes:\n      vote_start:\n        kind: bot_task\n        display_name: \"投票预备确认\"\n        assignee:\n          type: bot_binding\n          binding: seat1\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [vote_1, vote_2, vote_3, vote_4, vote_5, vote_6]\n      vote_1:\n        kind: bot_task\n        display_name: \"1号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat1\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_2:\n        kind: human_input\n        display_name: \"👤 你的投票（2号 · 人类玩家）\"\n        node_timeout_ms: 900000\n        instruction: |\n          【你的词语】隐词甲\n\n          第 1 轮投票 · 你是 2 号。\n          大家说过的话，主持人刚在群里念过一遍。\n\n          可以投的人：1号、3号、4号、5号、6号，不能投自己。\n          只写「我投N号」，N 是阿拉伯数字，不用写理由。\n          不想投就写「我弃权」。\n\n          [UNDERCOVER_UI_CONTEXT_V1]\n          {\"action\":\"vote\",\"round\":1,\"seatNumber\":2,\"word\":\"隐词甲\",\"allowAbstain\":true}\n          [/UNDERCOVER_UI_CONTEXT_V1]\n        transitions:\n          complete:\n            targets: [tally]\n      vote_3:\n        kind: bot_task\n        display_name: \"3号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat3\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_4:\n        kind: bot_task\n        display_name: \"4号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat4\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_5:\n        kind: bot_task\n        display_name: \"5号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat5\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_6:\n        kind: bot_task\n        display_name: \"6号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat6\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      tally:\n        kind: bot_task\n        display_name: \"开票\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 600000\n        final_output: true\n        instruction: |\n          <BOT_INSTRUCTION>\n",
       "bindings": [
         "seat1=bot-1",
         "seat3=bot-3",
@@ -235,7 +234,6 @@
       ],
       "panel": {
         "runId": "{{bcs.run_id}}",
-        "apiBaseUrl": "/bcnproxy",
         "groupId": "group-game",
         "sessionId": "group-game:session-1",
         "gameSessionId": "group-game:session-1",
@@ -319,7 +317,6 @@
           "vote_4": "bot-4",
           "vote_5": "bot-5",
           "vote_6": "bot-6",
-          "vote_open": "referee-1",
           "tally": "referee-1"
         },
         "publicHistory": [],
@@ -371,7 +368,9 @@
             "seatNumber": 6,
             "eligible": true
           }
-        ]
+        ],
+        "openingAnnouncement": "第 1 轮投票开始，请在副屏投票，全部提交后统一计票。",
+        "resultFile": "undercover-result-v1-r1-a1.json"
       },
       "tab": {
         "id": "undercover-game-group-game-session-1",
@@ -491,7 +490,6 @@
       ],
       "panel": {
         "runId": "{{bcs.run_id}}",
-        "apiBaseUrl": "/bcnproxy",
         "groupId": "group-game",
         "sessionId": "group-game:session-1",
         "gameSessionId": "group-game:session-1",
@@ -601,7 +599,7 @@
       "baseline_chars": 5723
     },
     "vote": {
-      "yaml": "name: \"谁是卧底 第2轮 投票\"\nmetadata:\n  description: \"存活玩家根据全部发言并行投票，主持人计票\"\nparticipants:\n  seat3:\n    display_name: \"3号 玩家3\"\n    required: true\n  seat4:\n    display_name: \"4号 玩家4\"\n    required: true\n  seat5:\n    display_name: \"5号 玩家5\"\n    required: true\n  seat6:\n    display_name: \"6号 玩家6\"\n    required: true\n  referee:\n    display_name: \"主持人\"\n    required: true\nruntime:\n  kind: state_machine\n  state_machine:\n    version: 1\n    graph_mode: acyclic\n    defaults:\n      node_timeout_ms: 420000\n      max_attempts: 1\n    nodes:\n      vote_open:\n        kind: bot_task\n        display_name: \"开投\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 900000\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [vote_2, vote_3, vote_4, vote_5, vote_6]\n      vote_2:\n        kind: human_input\n        display_name: \"👤 你的投票（2号 · 人类玩家）\"\n        node_timeout_ms: 900000\n        instruction: |\n          【你的词语】隐词甲\n\n          第 2 轮投票 · 你是 2 号。\n          大家说过的话，主持人刚在群里念过一遍。\n\n          可以投的人：3号、4号、5号、6号，不能投自己。\n          只写「我投N号」，N 是阿拉伯数字，不用写理由。\n          不想投就写「我弃权」。\n\n          [UNDERCOVER_UI_CONTEXT_V1]\n          {\"action\":\"vote\",\"round\":2,\"seatNumber\":2,\"word\":\"隐词甲\",\"allowAbstain\":true}\n          [/UNDERCOVER_UI_CONTEXT_V1]\n        transitions:\n          complete:\n            targets: [tally]\n      vote_3:\n        kind: bot_task\n        display_name: \"3号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat3\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_4:\n        kind: bot_task\n        display_name: \"4号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat4\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_5:\n        kind: bot_task\n        display_name: \"5号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat5\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_6:\n        kind: bot_task\n        display_name: \"6号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat6\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      tally:\n        kind: bot_task\n        display_name: \"开票\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 600000\n        final_output: true\n        instruction: |\n          <BOT_INSTRUCTION>\n",
+      "yaml": "name: \"谁是卧底 第2轮 投票\"\nmetadata:\n  description: \"存活玩家根据全部发言并行投票，主持人计票\"\nparticipants:\n  seat3:\n    display_name: \"3号 玩家3\"\n    required: true\n  seat4:\n    display_name: \"4号 玩家4\"\n    required: true\n  seat5:\n    display_name: \"5号 玩家5\"\n    required: true\n  seat6:\n    display_name: \"6号 玩家6\"\n    required: true\n  referee:\n    display_name: \"主持人\"\n    required: true\nruntime:\n  kind: state_machine\n  state_machine:\n    version: 1\n    graph_mode: acyclic\n    defaults:\n      node_timeout_ms: 420000\n      max_attempts: 1\n    nodes:\n      vote_start:\n        kind: bot_task\n        display_name: \"投票预备确认\"\n        assignee:\n          type: bot_binding\n          binding: seat3\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [vote_2, vote_3, vote_4, vote_5, vote_6]\n      vote_2:\n        kind: human_input\n        display_name: \"👤 你的投票（2号 · 人类玩家）\"\n        node_timeout_ms: 900000\n        instruction: |\n          【你的词语】隐词甲\n\n          第 2 轮投票 · 你是 2 号。\n          大家说过的话，主持人刚在群里念过一遍。\n\n          可以投的人：3号、4号、5号、6号，不能投自己。\n          只写「我投N号」，N 是阿拉伯数字，不用写理由。\n          不想投就写「我弃权」。\n\n          [UNDERCOVER_UI_CONTEXT_V1]\n          {\"action\":\"vote\",\"round\":2,\"seatNumber\":2,\"word\":\"隐词甲\",\"allowAbstain\":true}\n          [/UNDERCOVER_UI_CONTEXT_V1]\n        transitions:\n          complete:\n            targets: [tally]\n      vote_3:\n        kind: bot_task\n        display_name: \"3号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat3\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_4:\n        kind: bot_task\n        display_name: \"4号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat4\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_5:\n        kind: bot_task\n        display_name: \"5号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat5\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_6:\n        kind: bot_task\n        display_name: \"6号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat6\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      tally:\n        kind: bot_task\n        display_name: \"开票\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 600000\n        final_output: true\n        instruction: |\n          <BOT_INSTRUCTION>\n",
       "bindings": [
         "seat3=bot-3",
         "seat4=bot-4",
@@ -611,7 +609,6 @@
       ],
       "panel": {
         "runId": "{{bcs.run_id}}",
-        "apiBaseUrl": "/bcnproxy",
         "groupId": "group-game",
         "sessionId": "group-game:session-1",
         "gameSessionId": "group-game:session-1",
@@ -693,7 +690,6 @@
           "vote_4": "bot-4",
           "vote_5": "bot-5",
           "vote_6": "bot-6",
-          "vote_open": "referee-1",
           "tally": "referee-1"
         },
         "publicHistory": [],
@@ -739,7 +735,9 @@
             "seatNumber": 6,
             "eligible": true
           }
-        ]
+        ],
+        "openingAnnouncement": "第 2 轮投票开始，请在副屏投票，全部提交后统一计票。",
+        "resultFile": "undercover-result-v1-r2-a1.json"
       },
       "tab": {
         "id": "undercover-game-group-game-session-1",
@@ -858,7 +856,6 @@
       ],
       "panel": {
         "runId": "{{bcs.run_id}}",
-        "apiBaseUrl": "/bcnproxy",
         "groupId": "group-game",
         "sessionId": "group-game:session-1",
         "gameSessionId": "group-game:session-1",
@@ -962,7 +959,7 @@
       "baseline_chars": 4788
     },
     "vote": {
-      "yaml": "name: \"谁是卧底 第3轮 投票\"\nmetadata:\n  description: \"存活玩家根据全部发言并行投票，主持人计票\"\nparticipants:\n  seat3:\n    display_name: \"3号 玩家3\"\n    required: true\n  seat4:\n    display_name: \"4号 玩家4\"\n    required: true\n  seat5:\n    display_name: \"5号 玩家5\"\n    required: true\n  seat6:\n    display_name: \"6号 玩家6\"\n    required: true\n  referee:\n    display_name: \"主持人\"\n    required: true\nruntime:\n  kind: state_machine\n  state_machine:\n    version: 1\n    graph_mode: acyclic\n    defaults:\n      node_timeout_ms: 420000\n      max_attempts: 1\n    nodes:\n      vote_open:\n        kind: bot_task\n        display_name: \"开投\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 900000\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [vote_3, vote_4, vote_5, vote_6]\n      vote_3:\n        kind: bot_task\n        display_name: \"3号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat3\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_4:\n        kind: bot_task\n        display_name: \"4号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat4\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_5:\n        kind: bot_task\n        display_name: \"5号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat5\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_6:\n        kind: bot_task\n        display_name: \"6号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat6\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      tally:\n        kind: bot_task\n        display_name: \"开票\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 600000\n        final_output: true\n        instruction: |\n          <BOT_INSTRUCTION>\n",
+      "yaml": "name: \"谁是卧底 第3轮 投票\"\nmetadata:\n  description: \"存活玩家根据全部发言并行投票，主持人计票\"\nparticipants:\n  seat3:\n    display_name: \"3号 玩家3\"\n    required: true\n  seat4:\n    display_name: \"4号 玩家4\"\n    required: true\n  seat5:\n    display_name: \"5号 玩家5\"\n    required: true\n  seat6:\n    display_name: \"6号 玩家6\"\n    required: true\n  referee:\n    display_name: \"主持人\"\n    required: true\nruntime:\n  kind: state_machine\n  state_machine:\n    version: 1\n    graph_mode: acyclic\n    defaults:\n      node_timeout_ms: 420000\n      max_attempts: 1\n    nodes:\n      vote_start:\n        kind: bot_task\n        display_name: \"投票预备确认\"\n        assignee:\n          type: bot_binding\n          binding: seat3\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [vote_3, vote_4, vote_5, vote_6]\n      vote_3:\n        kind: bot_task\n        display_name: \"3号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat3\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_4:\n        kind: bot_task\n        display_name: \"4号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat4\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_5:\n        kind: bot_task\n        display_name: \"5号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat5\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_6:\n        kind: bot_task\n        display_name: \"6号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat6\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      tally:\n        kind: bot_task\n        display_name: \"开票\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 600000\n        final_output: true\n        instruction: |\n          <BOT_INSTRUCTION>\n",
       "bindings": [
         "seat3=bot-3",
         "seat4=bot-4",
@@ -972,7 +969,6 @@
       ],
       "panel": {
         "runId": "{{bcs.run_id}}",
-        "apiBaseUrl": "/bcnproxy",
         "groupId": "group-game",
         "sessionId": "group-game:session-1",
         "gameSessionId": "group-game:session-1",
@@ -1052,7 +1048,6 @@
           "vote_4": "bot-4",
           "vote_5": "bot-5",
           "vote_6": "bot-6",
-          "vote_open": "referee-1",
           "tally": "referee-1"
         },
         "publicHistory": [],
@@ -1068,7 +1063,9 @@
           "showVoteResults": false,
           "showHostOutput": true,
           "showTimer": true
-        }
+        },
+        "openingAnnouncement": "第 3 轮投票开始，请在副屏投票，全部提交后统一计票。",
+        "resultFile": "undercover-result-v1-r3-a1.json"
       },
       "tab": {
         "id": "undercover-game-group-game-session-1",

@@ -15,8 +15,11 @@ from agentclaw.community.adapters.http.bot_dormant.schemas import (
 from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
 from agentclaw.community.core.bot_dormant.activate_service import (
     ActivateBotService,
+)
+from agentclaw.community.core.bot_management.services.bot_service import (
+    BotInvalidLifecycleStateError,
     BotNotFoundError,
-    InvalidBotStateError,
+    BotOperationNotAllowedError,
 )
 from agentclaw.community.core.bot_dormant.whitelist_service import WhitelistService
 from agentclaw.community.di import Injected
@@ -47,12 +50,25 @@ async def activate_bot(
     user_id = owner_id or operator_id
     try:
         result = service.activate(
-            bot_id=bot_id, user_id=user_id, nick_name=ctx.nick_name
+            bot_id=bot_id, owner_id=user_id, owner_name=ctx.nick_name
         )
-        return ApiResponse(success=True, data=ActivateBotResponse(**result))
+        if result.status == "ACTIVE":
+            message = "Bot 已激活"
+        else:
+            message = "激活中" if result.changed else "激活中，请稍候"
+        return ApiResponse(
+            success=True,
+            data=ActivateBotResponse(status=result.status, message=message),
+        )
     except BotNotFoundError:
         return ApiResponse(success=False, message="Bot 不存在", error_code=404)
-    except InvalidBotStateError as e:
+    except BotInvalidLifecycleStateError as e:
+        return ApiResponse(
+            success=False,
+            message=f"Bot 必须处于回收状态才能激活，当前状态: {e.current_status}",
+            error_code=400,
+        )
+    except BotOperationNotAllowedError as e:
         return ApiResponse(success=False, message=str(e), error_code=400)
     except Exception:
         logger.exception("[activate] unexpected error bot_id=%s", bot_id)
@@ -178,7 +194,7 @@ async def recycle_one(
             reason=body.reason,
         )
         return {"ok": True, "data": data}
-    except ValueError as e:
+    except (ValueError, BotOperationNotAllowedError) as e:
         logger.warning(
             "[dormant.ops.recycle_one] rejected bot_id=%s owner_id=%s error=%s",
             body.bot_id, body.owner_id, e,
@@ -238,16 +254,27 @@ async def activate_one(
     try:
         data = service.activate(
             bot_id=body.bot_id,
-            user_id=body.owner_id,
-            nick_name=body.nick_name,
+            owner_id=body.owner_id,
+            owner_name=body.nick_name,
         )
-        return {"ok": True, "data": data}
-    except InvalidBotStateError as e:
+        message = (
+            "Bot 已激活" if data.status == "ACTIVE" else "激活中，请稍候"
+        )
+        return {
+            "ok": True,
+            "data": {"status": data.status, "message": message},
+        }
+    except (BotInvalidLifecycleStateError, BotOperationNotAllowedError) as e:
         logger.warning(
             "[dormant.ops.activate_one] rejected bot_id=%s owner_id=%s error=%s",
             body.bot_id, body.owner_id, e,
         )
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        detail = (
+            f"Bot 必须处于回收状态才能激活，当前状态: {e.current_status}"
+            if isinstance(e, BotInvalidLifecycleStateError)
+            else str(e)
+        )
+        raise HTTPException(status_code=400, detail=detail) from e
     except Exception as e:
         logger.exception(
             "[dormant.ops.activate_one] failed bot_id=%s owner_id=%s",

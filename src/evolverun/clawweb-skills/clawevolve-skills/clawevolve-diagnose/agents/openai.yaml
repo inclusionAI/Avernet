@@ -1,0 +1,6 @@
+interface:
+  display_name: "ClawEvolve Diagnose"
+  short_description: "从本地 sessions 抽取评测 cases"
+  default_prompt: "Use $clawevolve-diagnose to mine local OpenClaw sessions into diagnosed good/bad evaluation cases and plan_input for clawevolve-plan."
+policy:
+  allow_implicit_invocation: true

@@ -50,24 +50,24 @@ describe('PublicBotCatalogPanel identity display', () => {
       <PublicBotCatalogPanel
         vm={buildVm()}
         scrollRootRef={{ current: null }}
-        activeIdentity={{ id: 'human_447147', name: '447147', kind: 'user' }}
-        authenticatedUserId="447147"
-        authenticatedUserName="风太"
+        activeIdentity={{ id: 'human_900004', name: '900004', kind: 'user' }}
+        authenticatedUserId="900004"
+        authenticatedUserName="示例用户"
       />,
     );
-    expect(screen.getByText('当前工作身份：风太')).toBeInTheDocument();
+    expect(screen.getByText('当前工作身份：示例用户')).toBeInTheDocument();
 
     rerender(
       <PublicBotCatalogPanel
         vm={buildVm()}
         scrollRootRef={{ current: null }}
         activeIdentity={{ id: 'human_447148', name: '其他用户', kind: 'user' }}
-        authenticatedUserId="447147"
-        authenticatedUserName="风太"
+        authenticatedUserId="900004"
+        authenticatedUserName="示例用户"
       />,
     );
     expect(screen.getByText('当前工作身份：其他用户')).toBeInTheDocument();
-    expect(screen.queryByText('当前工作身份：风太')).not.toBeInTheDocument();
+    expect(screen.queryByText('当前工作身份：示例用户')).not.toBeInTheDocument();
   });
 
   it('does not replace a Bot identity whose compound id contains the human id', () => {
@@ -75,12 +75,12 @@ describe('PublicBotCatalogPanel identity display', () => {
       <PublicBotCatalogPanel
         vm={buildVm()}
         scrollRootRef={{ current: null }}
-        activeIdentity={{ id: 'bot_xxx:447147', name: '协作 Bot', kind: 'bot' }}
-        authenticatedUserId="447147"
-        authenticatedUserName="风太"
+        activeIdentity={{ id: 'bot_xxx:900004', name: '协作 Bot', kind: 'bot' }}
+        authenticatedUserId="900004"
+        authenticatedUserName="示例用户"
       />,
     );
     expect(screen.getByText('当前工作身份：协作 Bot')).toBeInTheDocument();
-    expect(screen.queryByText('当前工作身份：风太')).not.toBeInTheDocument();
+    expect(screen.queryByText('当前工作身份：示例用户')).not.toBeInTheDocument();
   });
 });

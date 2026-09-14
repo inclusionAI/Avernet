@@ -3,16 +3,8 @@
 在 CORP profile 下绑定 Prod 实现。
 """
 
-from injector import Binder, Module, provider, singleton
+from injector import Binder, Module
 
-from agentclaw.community.plugin_api.eval_env import (
-    EvalBcsCliTagProtocol,
-    EvalBindingResolverProtocol,
-    EvalEnvLifecycleProtocol,
-    EvalMcpGatewayProtocol,
-    EvalTagPropagationProtocol,
-    EvalVersionSyncProtocol,
-)
 
 
 class CommunityEvalEnvModule(Module):

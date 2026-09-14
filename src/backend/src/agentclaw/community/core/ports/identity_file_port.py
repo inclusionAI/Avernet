@@ -21,14 +21,16 @@ delivery families split on everywhere else:
 **Signatures are positional, unlike this package's other ports.** They mirror
 ``IdentityService``'s own contract — ``(entity_type, entity_id, bot_id, …)``
 then the operation's arguments, then owner or operator — because the device
-implementation forwards to that service verbatim. A drift there surfaces as a
-``TypeError`` at wiring time (the DI provider's structural check) rather than
-mid-apply.
+implementation forwards to that service verbatim.
 
-Members are ``@abstractmethod`` on purpose. The backend runs no static type
-checker, so a structurally-satisfied Protocol is verified by nothing at all;
-abstract members make a dropped or renamed method fail at construction instead
-of resolving to an inherited ``...`` stub that silently returns ``None``.
+Members are ``@abstractmethod`` on purpose, and every implementation —
+``IdentityService`` included — **inherits** this port rather than merely
+satisfying it structurally. The backend runs no static type checker, so a
+structurally-satisfied Protocol is verified by nothing at all; abstract members
+make a dropped or renamed method fail at construction instead of resolving to
+an inherited ``...`` stub that silently returns ``None``. The DI provider used
+to carry a hand-rolled ``isinstance`` check for exactly that drift; the base
+class is the check now.
 """
 from __future__ import annotations
 

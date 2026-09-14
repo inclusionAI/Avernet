@@ -7,7 +7,7 @@ it('creates an empty audit table without projecting existing versions or tasks',
   const db = new Database(':memory:');
   try {
     db.exec("CREATE TABLE ce_skill_versions (version_id TEXT); INSERT INTO ce_skill_versions VALUES ('historical'); CREATE TABLE ce_tasks (task_id TEXT); INSERT INTO ce_tasks VALUES ('historical-task')");
-    const migration = migrations.find(item => item.version === 123)!;
+    const migration = migrations.find(item => item.description === 'Persist operation-time Skill audit records without historical backfill')!;
     for (const sql of migration.sql) db.exec(sql);
     expect(db.prepare('SELECT * FROM ce_skill_audit_events').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM ce_skill_versions').all()).toEqual([{ version_id: 'historical' }]);
@@ -16,7 +16,7 @@ it('creates an empty audit table without projecting existing versions or tasks',
 });
 
 it.each(['mysql', 'zdas'] as const)('renders the audit migration for %s without SQLite-only syntax', (type) => {
-  const ddl = migrations.find(item => item.version === 123)!.sql.map(sql => dialectFor(type).renderDdl(sql)).join('\n');
+  const ddl = migrations.find(item => item.description === 'Persist operation-time Skill audit records without historical backfill')!.sql.map(sql => dialectFor(type).renderDdl(sql)).join('\n');
   expect(ddl).toContain('AUTO_INCREMENT');
   expect(ddl).toContain('idempotency_key');
   expect(ddl).not.toMatch(/AUTOINCREMENT|unixepoch\(\)/i);

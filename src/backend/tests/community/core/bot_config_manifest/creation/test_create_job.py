@@ -14,6 +14,9 @@ from typing import Optional
 import pytest
 
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
+from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    CreationSequence,
+)
 from agentclaw.community.core.bot_config_manifest.create_job import (
     BOT_COULD_NOT_BE_PROVISIONED,
     CREATE_JOB_TASK_TYPE,
@@ -153,6 +156,9 @@ def _handler(
         passport_plugin_provider=lambda: _Passport(passport_status),
         bot_service_provider=lambda: None,
         auth_relationship_provider=lambda: relationships,
+        # The ARCA order, said rather than defaulted: the composition root,
+        # always passes the delivery strategy's own answer.,
+        creation_sequence=lambda _engine: CreationSequence.CREATE_BETWEEN_PHASES,
     )
     return handler, applies, seam, created
 
@@ -601,10 +607,6 @@ def test_an_apply_already_in_flight_is_waited_out_not_failed():
 
 
 # ── RECORD_APPLY_PROVISION: the record first, one phase, then provisioning (W8) ──
-
-from agentclaw.community.core.bot_config_manifest.apply.delivery import (  # noqa: E402
-    CreationSequence,
-)
 
 _TECLAW_PAYLOAD = {**_PAYLOAD, "spec": {"engine_type": "teclaw", "bot_type": "personal"}}
 

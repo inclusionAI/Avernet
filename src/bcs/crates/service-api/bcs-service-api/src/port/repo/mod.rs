@@ -11,6 +11,7 @@ pub mod friend;
 pub mod group;
 pub mod invite_code;
 pub mod message;
+pub mod message_delivery;
 pub mod organization;
 pub mod permission_profile;
 pub mod permission_request;

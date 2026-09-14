@@ -1659,6 +1659,87 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     expect(dispatch.mock.calls.length).toBe(callsBefore);
   });
 
+  it.each([false, true])("binds a real Skill to a diagnosis-only task without Plan, Optimize or finalize (preprocess=%s)", async (preprocess) => {
+    await seedArcaBot();
+    await skillAssetRepo.createAsset({
+      assetId: "SKILL-DIAGNOSE", versionId: "SKVER-DIAGNOSE", ownerUserId: "user-1",
+      botId: "bot-arca", ocbSkillId: "daily-report-zh", displayName: "日报",
+      packageRef: "oss://clawevolve-artifacts/evolve/skills/SKILL-DIAGNOSE/versions/v1/package.zip",
+      packageSha256: `sha256:${"0".repeat(64)}`,
+    });
+    const implementationId = preprocess ? await seedStageImplementation("preprocess") : undefined;
+    if (implementationId) await stageSkillRepo.updateIntegrationTest(implementationId, "TEST-DIAGNOSE", "test_passed");
+    const response = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ taskType: "diagnose", taskName: "Skill 仅诊断", userId: "user-1", botId: "bot-arca", botEnv: "pre",
+        judgeBackend: "subagent", model: "GLM-5.2", diagnoseIntent: "检查日报真实执行", targetSkillAssetId: "SKILL-DIAGNOSE",
+        ...(implementationId ? { stageExtensions: { diagnose: { preprocess: { enabled: true, implementationId } } } } : {}) }),
+    });
+    expect(response.status, await response.clone().text()).toBe(201);
+    const task = await response.json();
+    expect(task.task_type).toBe("diagnose");
+    expect(task.config.flow).toEqual({ key: "skill_evolution", version: "v1", stages: { diagnose: true, plan: false, optimize: false } });
+    expect(task.config.targetSkill).toMatchObject({ assetId: "SKILL-DIAGNOSE", skillId: "daily-report-zh", ownerUserId: "user-1",
+      baseline: { sha256: `sha256:${"a".repeat(64)}` } });
+    expect(ocbLocalSkills.exportLocalSkill).toHaveBeenCalledWith(expect.objectContaining({ botId: "bot-arca", skillId: "daily-report-zh" }));
+    expect(task.steps[0].stepType).toBe("skill_prepare");
+    const workspace = `/home/admin/.openclaw/clawevolve_workspaces/${task.task_id}/workspace`;
+    const prepared = await callback(task.task_id, task.steps[0].stepId, { status: "succeeded", output: {
+      prepared: true, workspace, targetSkillPath: `${workspace}/skills/skills-local/local-skill`,
+    } });
+    expect(prepared.response.status).toBe(200);
+    let next = prepared.body.nextStep as { stepId: string; stepType: string };
+    if (preprocess) {
+      expect(next.stepType).toBe("stage_extension");
+      const inputResponse = await fetch(`${baseUrl}/api/evolve/internal/tasks/${task.task_id}/steps/${next.stepId}/input`);
+      expect(inputResponse.status).toBe(200);
+      expect((await inputResponse.json()).input.target_skill).toMatchObject({ workspace, path: `${workspace}/skills/skills-local/local-skill` });
+      const processed = await callback(task.task_id, next.stepId, { status: "succeeded", output: {
+        hitl: false, result: { summary: "只读准备完成", changed: false },
+      } });
+      expect(processed.response.status).toBe(200);
+      next = processed.body.nextStep as typeof next;
+    }
+    expect(next.stepType).toBe("diagnose");
+    const diagnoseInput = await fetch(`${baseUrl}/api/evolve/internal/tasks/${task.task_id}/steps/${next.stepId}/input`);
+    expect(diagnoseInput.status).toBe(200);
+    expect((await diagnoseInput.json()).task.config.targetSkill.candidate.prepared).toMatchObject({
+      workspacePath: workspace, skillPath: `${workspace}/skills/skills-local/local-skill`,
+    });
+    const diagnosed = await callback(task.task_id, next.stepId, { status: "succeeded", output: diagnoseOutput("存在待诊断问题", 1) });
+    expect(diagnosed.response.status).toBe(200);
+    expect(diagnosed.body.nextStep).toBeNull();
+    expect((await repo.findTask(task.task_id))?.status).toBe("completed");
+    expect((await repo.listSteps(task.task_id)).map((step) => step.step_type)).toEqual(preprocess
+      ? ["skill_prepare", "stage_extension", "diagnose"] : ["skill_prepare", "diagnose"]);
+    expect(await skillAssetRepo.listVersions("SKILL-DIAGNOSE")).toHaveLength(1);
+    expect(ocbLocalSkills.replaceLocalSkill).not.toHaveBeenCalled();
+  });
+
+  it.each(["foreign-owner", "wrong-bot", "missing-asset", "enable-plan", "enable-optimize", "disable-diagnose"])(
+    "rejects invalid Skill diagnosis binding or scope before export/task/dispatch: %s", async (reason) => {
+      if (reason !== "missing-asset") await skillAssetRepo.createAsset({
+        assetId: "SKILL-DIAG-DENIED", versionId: "SKVER-DIAG-DENIED", ownerUserId: reason === "foreign-owner" ? "other" : "user-1",
+        botId: reason === "wrong-bot" ? "other-bot" : "bot-1", ocbSkillId: "daily-report-zh", displayName: "日报",
+        packageRef: "oss://clawevolve-artifacts/evolve/skills/SKILL-DIAG-DENIED/versions/v1/package.zip",
+        packageSha256: `sha256:${"0".repeat(64)}`,
+      });
+      const selection = reason === "enable-plan" ? { plan: true }
+        : reason === "enable-optimize" ? { optimize: true }
+          : reason === "disable-diagnose" ? { diagnose: false } : undefined;
+      const response = await fetch(`${baseUrl}/api/evolve/tasks`, {
+        method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+        body: JSON.stringify({ taskType: "diagnose", taskName: "禁止越界诊断", userId: "user-1", botId: "bot-1",
+          judgeBackend: "subagent", model: "GLM-5.2", diagnoseIntent: "检查真实执行", targetSkillAssetId: "SKILL-DIAG-DENIED",
+          stageSelection: selection, targetSkill: { ownerUserId: "user-1", spaceId: "forged-team", spaceType: "TEAM" } }),
+      });
+      expect(response.status, await response.clone().text()).toBe(selection ? 400 : 404);
+      expect(ocbLocalSkills.exportLocalSkill).not.toHaveBeenCalled();
+      expect(putObject).not.toHaveBeenCalled();
+      expect(dispatch).not.toHaveBeenCalled();
+      expect(await repo.listTasks()).toEqual([]);
+    });
+
   it("freezes the latest OCB Skill and ends without a candidate version when Diagnose finds no cases", async () => {
     await seedArcaBot();
     await skillAssetRepo.createAsset({
@@ -2447,7 +2528,12 @@ describe("ClawEvolve step protocol", () => {
     expect((await repo.findStep(businessStep.stepId))?.status).toBe("dispatched");
   });
 
-  it("creates a Bench evolution task with train and test domains", async () => {
+  it.each([
+    { model: "antchat/GLM-5.2", explicitModel: undefined },
+    { model: "antchat/Custom", explicitModel: undefined },
+    { model: "antchat/Custom", explicitModel: "antchat/Explicit" },
+  ])("creates a Bench evolution task with train and test domains ($model, $explicitModel)", async ({ model, explicitModel }) => {
+    const expectedModel = explicitModel ?? model;
     for (const domainId of ["blog-train", "blog-test"]) {
       await benchDomainRepo.create({ domainId, name: domainId, ownerUserId: "user-1" });
       await benchTemplateRepo.create({
@@ -2461,7 +2547,11 @@ describe("ClawEvolve step protocol", () => {
       body: JSON.stringify({
         taskName: "Blog Bench Evolution", userId: "user-1", botId: "bot-1",
         objective: "提升博客质量并保证测试集不回退",
-        trainBenchDomainId: "blog-train", testBenchDomainId: "blog-test", maxRounds: 3,
+        trainBenchDomainId: "blog-train", testBenchDomainId: "blog-test", model, maxRounds: 3,
+        ...(explicitModel ? { nodeCommandYamls: {
+          bench_plan: `version: "1.0"\ncommand: /clawevolve-workflow --stage bench-plan --model ${explicitModel}\n`,
+          optimize: `version: "1.0"\ncommand: /clawevolve-workflow --stage optimize --model ${explicitModel}\n`,
+        } } : {}),
       }),
     });
     const body = await response.json() as Record<string, unknown>;
@@ -2473,12 +2563,14 @@ describe("ClawEvolve step protocol", () => {
     expect(steps[0].command).toContain("--train-domain-id blog-train");
     expect(steps[0].command).toContain("--test-domain-id blog-test");
     expect(steps[0].command).toContain("--owner-id user-1");
+    expect([...steps[0].command.matchAll(/(?:^|\s)--model(?:=|\s+)([^\s]+)/g)].map((match) => match[1])).toEqual([expectedModel]);
     expect(steps[0].command).not.toContain("--final-action loop");
     expect(steps[0].command).not.toContain("提升博客质量");
     const saved = await repo.findTask(String(body.task_id));
     const config = JSON.parse(saved!.config_json) as Record<string, unknown>;
     expect(config).toEqual(expect.objectContaining({
       trainBenchDomainId: "blog-train", testBenchDomainId: "blog-test",
+      model,
       objective: "提升博客质量并保证测试集不回退",
       pinnedBenchDomains: expect.objectContaining({
         "blog-train": [{ templateName: "blog-train-case", templateVersion: 1 }],
@@ -2520,6 +2612,8 @@ describe("ClawEvolve step protocol", () => {
     expect(updatedSteps[1].command).toContain("/clawevolve-workflow --stage optimize");
     expect(updatedSteps[1].command).toContain("--train-bench-domain-id blog-train");
     expect(updatedSteps[1].command).toContain("--test-bench-domain-id blog-test");
+    expect([...updatedSteps[1].command.matchAll(/(?:^|\s)--model(?:=|\s+)([^\s]+)/g)].map((match) => match[1])).toEqual([expectedModel]);
+    expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ command: updatedSteps[1].command }));
   });
 
   it("creates a Bench task from a published domain using existing tables", async () => {
@@ -2654,7 +2748,13 @@ describe("ClawEvolve step protocol", () => {
     }));
   });
 
-  it("records reused Candidate Bench roles as warnings and schedules the explicitly requested next round", async () => {
+  it.each([
+    { model: "antchat/GLM-5.2", command: undefined, expectedModel: "antchat/GLM-5.2" },
+    { model: "antchat/GLM-5.2", command: "/clawevolve-workflow --stage optimize", expectedModel: "antchat/GLM-5.2" },
+    { model: "antchat/GLM-5.2", command: "/clawevolve-workflow --stage optimize --model antchat/GLM-5.1", expectedModel: "antchat/GLM-5.1" },
+    { model: "antchat/GLM-5.2", command: "/clawevolve-workflow --stage optimize --model=antchat/GLM-5.1", expectedModel: "antchat/GLM-5.1" },
+    { model: undefined, command: undefined, expectedModel: undefined },
+  ])("records reused Candidate Bench roles as warnings and schedules the explicitly requested next round ($command, $model)", async ({ model, command, expectedModel }) => {
     const taskId = "EV-OPTIMIZE-WARNING";
     const round1StepId = "STEP-OPTIMIZE-R1";
     const round2StepId = "STEP-OPTIMIZE-R2";
@@ -2662,7 +2762,8 @@ describe("ClawEvolve step protocol", () => {
       taskId, taskType: "optimize", userId: "user-1", botId: "bot-1",
       taskName: "Optimize warnings", remark: null,
       configJson: JSON.stringify({
-        maxRounds: 3, dispatchMode: "run",
+        maxRounds: 3, dispatchMode: "run", model,
+        ...(command ? { nodeCommands: { optimize: command } } : {}),
         trainBenchDomainId: "train-domain", testBenchDomainId: "test-domain",
       }),
       createdBy: "user-1",
@@ -2710,6 +2811,9 @@ describe("ClawEvolve step protocol", () => {
 
     expect(report.response.status).toBe(200);
     expect(report.body.nextStep).toEqual(expect.objectContaining({ stepType: "optimize", roundNo: 3 }));
+    const nextCommand = String(dispatch.mock.calls.at(-1)?.[0]?.command);
+    const modelOptions = [...nextCommand.matchAll(/(?:^|\s)--model(?:=|\s+)([^\s]+)/g)].map((match) => match[1]);
+    expect(modelOptions).toEqual(expectedModel ? [expectedModel] : []);
     const saved = JSON.parse((await repo.findStep(round2StepId))!.output_json!);
     expect(saved.clawwebWarnings).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "OPTIMIZE_BASELINE_RUN_WARNING" }),
@@ -3398,6 +3502,7 @@ describe("ClawEvolve step protocol", () => {
         taskName: "一句话目标进化",
         userId: "user-1",
         botId: "bot-1",
+        model: "antchat/GLM-5.1",
         goal: "将工具调用任务完成率提升到 90% 以上",
         maxRounds: 3,
       }),
@@ -3405,12 +3510,13 @@ describe("ClawEvolve step protocol", () => {
     expect(response.status).toBe(201);
     const body = await response.json() as {
       task_id: string;
-      config: { inputMode: string; goal: string; diagnoseIntent?: string; nodeCommands: Record<string, string> };
+      config: { inputMode: string; goal: string; model: string; diagnoseIntent?: string; nodeCommands: Record<string, string> };
       steps: Array<{ stepType: string; command: string }>;
     };
     expect(body.config).toEqual(expect.objectContaining({
       inputMode: "direct_goal",
       goal: "将工具调用任务完成率提升到 90% 以上",
+      model: "antchat/GLM-5.1",
     }));
     expect(body.config.diagnoseIntent).toBeUndefined();
     expect(body.config.nodeCommands.diagnose).toBeUndefined();
@@ -3418,6 +3524,7 @@ describe("ClawEvolve step protocol", () => {
     expect(body.steps[0].stepType).toBe("plan");
     expect(body.steps[0].command).toContain("/clawevolve-plan");
     expect(body.steps[0].command).toContain("--goal '将工具调用任务完成率提升到 90% 以上'");
+    expect(body.steps[0].command).toContain("--model antchat/GLM-5.1");
     expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       stepType: "plan",
       command: body.steps[0].command,
@@ -3765,6 +3872,28 @@ describe("ClawEvolve step protocol", () => {
     await expect(response.json()).resolves.toEqual({ error: "诊断进化必须选择一个已完成 Plan 的诊断任务" });
   });
 
+  it.each([
+    { nodeCommand: undefined, expectedModel: "antchat/Custom" },
+    { nodeCommand: "/clawevolve-workflow --stage optimize --model antchat/Explicit", expectedModel: "antchat/Explicit" },
+  ])("propagates the selected Optimize model unless a node command explicitly selects one ($expectedModel)", async ({ nodeCommand, expectedModel }) => {
+    const sourceTaskId = await seedPlannedDiagnosis();
+    const response = await fetch(`${baseUrl}/api/evolve/optimizations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
+      body: JSON.stringify({
+        taskName: "模型传播回归", userId: "user-1", botId: "bot-1",
+        sourceDiagnosisTaskIds: [sourceTaskId], model: "antchat/Custom", maxRounds: 1,
+        ...(nodeCommand ? { nodeCommandYamls: { optimize: `version: "1.0"\ncommand: ${nodeCommand}\n` } } : {}),
+      }),
+    });
+    expect(response.status, await response.clone().text()).toBe(201);
+    const body = await response.json() as { config: { model: string }; steps: Array<{ command: string }> };
+    expect(body.config.model).toBe("antchat/Custom");
+    for (const command of [body.steps[0].command, String(dispatch.mock.calls.at(-1)?.[0]?.command)]) {
+      expect([...command.matchAll(/(?:^|\s)--model(?:=|\s+)([^\s]+)/g)].map((match) => match[1])).toEqual([expectedModel]);
+    }
+  });
+
   it("rejects workflow control parameters in a node YAML", async () => {
     const sourceTaskId = await seedPlannedDiagnosis("EV-CONTROL-SOURCE");
     const response = await fetch(`${baseUrl}/api/evolve/optimizations`, {
@@ -3805,12 +3934,14 @@ describe("ClawEvolve step protocol", () => {
       headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
       body: JSON.stringify({
         taskName: "百轮优化测试", userId: "user-1", botId: "bot-1",
-        sourceDiagnosisTaskIds: [sourceTaskId], maxRounds: 100,
+        sourceDiagnosisTaskIds: [sourceTaskId], model: "antchat/GLM-5.2", maxRounds: 100,
       }),
     });
     expect(accepted.status).toBe(201);
-    const acceptedBody = await accepted.json() as { config: { maxRounds: number } };
+    const acceptedBody = await accepted.json() as { config: { maxRounds: number; model: string }; steps: Array<{ command: string }> };
     expect(acceptedBody.config.maxRounds).toBe(100);
+    expect(acceptedBody.config.model).toBe("antchat/GLM-5.2");
+    expect(acceptedBody.steps[0].command).toContain("--model antchat/GLM-5.2");
 
     for (const maxRounds of [0, 101, 1.5]) {
       const rejected = await fetch(`${baseUrl}/api/evolve/optimizations`, {
@@ -4352,6 +4483,8 @@ describe("ClawEvolve step protocol", () => {
       headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
       body: JSON.stringify({
         taskName: "清理历史进化记录", userId: "owner-1", botId: "bot-1", botEnv: "pre", forceCleanup,
+        // A client cannot select openversion on an internal router.
+        version: "openversion",
       }),
     });
     const blocked = await create(false);

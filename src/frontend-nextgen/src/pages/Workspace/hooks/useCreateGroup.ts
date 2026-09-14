@@ -1,4 +1,5 @@
 import type { GroupView } from '@/domain/collaboration';
+import type { MessageViewScope } from '@/domain/collaboration/types';
 import { resolveUserId } from '@/services/workspace/botSessionService';
 import { GROUP_CREATE_VIA_EXECUTE } from '@/services/workspace/groupCreateConfig';
 import { groupService } from '@/services/workspace/groupService';
@@ -13,7 +14,7 @@ export interface CreateGroupInput {
   definitionYaml?: string;
   driverBotUuid: string;
   originator: string;
-  participants: Array<{ actor_id: string }>;
+  participants: Array<{ actor_id: string; message_view_scope?: MessageViewScope }>;
   context?: string;
   participantBindings?: Array<{ binding: string; actor_ids: string[] }>;
 }

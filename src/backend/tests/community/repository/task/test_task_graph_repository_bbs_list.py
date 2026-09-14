@@ -1,6 +1,6 @@
 """``TaskGraphRepository.list_bbs_tasks_overview`` 契约测试。
 
-验证 GET /api/v1/collaboration/tasks/bbs/list 后端查询(忠实翻译给定 SQL):
+验证 GET /openapi/v1/collaboration/tasks/bbs/list 后端查询(忠实翻译给定 SQL):
 - ``task_node_run_info`` (run_mode='bbs') ⋈ ``task_node`` (task_id+node_id) 联合;
 - 逐行投影为 ``BbsTaskOverviewRecord``(assignee→assignee_id,node.status,n.task_spec,
   n.gmt_create→relay_create_time,r.gmt_create→relay_begin_time,r.gmt_modified→relay_end_time);

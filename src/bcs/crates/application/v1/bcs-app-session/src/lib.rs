@@ -1070,31 +1070,13 @@ impl SessionService for SessionServiceImpl {
                         .unwrap_or_else(|| ParticipantMode::default_for(ActorKind::Human)),
                 );
                 participant.message_view_scope = message_view_scope;
-                let lease = if message_view_scope == MessageViewScope::Participant {
-                    Some(
-                        self.participant_view_bindings
-                            .begin_scope_change(&command.session_id, &command.bot_uuid)
-                            .await
-                            .map_err(map_service_error)?,
-                    )
-                } else {
-                    None
-                };
-                let add_result = self
+                // Initial membership creation cannot have an existing
+                // participant-bound Session connection to invalidate.
+                let mut updated = self
                     .sessions
                     .add_participant(&command.session_id, participant)
                     .await
-                    .map_err(map_session_error);
-                let release_result = if let Some(lease) = lease {
-                    self.participant_view_bindings
-                        .finish_scope_change(lease)
-                        .await
-                        .map_err(map_service_error)
-                } else {
-                    Ok(())
-                };
-                let mut updated = add_result?;
-                release_result?;
+                    .map_err(map_session_error)?;
                 if let Some(mode) = command.mode {
                     let actor_name = self
                         .registry

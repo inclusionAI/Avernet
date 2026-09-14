@@ -1292,9 +1292,10 @@ export class InsightImprovementRepository {
     expectedVersion: number;
     outcome: "DISAPPEARED" | "STILL_PRESENT" | "INSUFFICIENT_DATA";
     newSessionCount: number;
+    allowZeroSession?: boolean;
     lastRecurrenceAt?: string | null;
     overrideActionType?: "ASSIGN_OWNER" | null;
-  }): Promise<ImprovementView | null | "VERSION_CONFLICT" | "STATE_CONFLICT" | "TOO_EARLY"> {
+  }): Promise<ImprovementView | null | "VERSION_CONFLICT" | "STATE_CONFLICT" | "TOO_EARLY" | "RECURRENCE_FOUND"> {
     const existing = await this.findItemById(input.improvementId);
     if (!existing) return null;
     if (existing.version !== input.expectedVersion) return "VERSION_CONFLICT";
@@ -1305,9 +1306,9 @@ export class InsightImprovementRepository {
       && isGovernanceSourceType(existing.source_type)
       && input.outcome === "STILL_PRESENT";
     if (!pendingVerification && !resolvedRecurrence) return "STATE_CONFLICT";
-    if (pendingVerification && input.outcome === "DISAPPEARED"
-      && !hasElapsed(existingView.handledAt, STANDARD_VERIFICATION_WAIT_SECONDS)) {
-      return "TOO_EARLY";
+    if (pendingVerification && input.outcome === "DISAPPEARED") {
+      if (!hasElapsed(existingView.handledAt, STANDARD_VERIFICATION_WAIT_SECONDS)) return "TOO_EARLY";
+      if (input.newSessionCount === 0 && (!input.allowZeroSession || input.lastRecurrenceAt)) return "RECURRENCE_FOUND";
     }
     const overriddenSourceType = input.overrideActionType === "ASSIGN_OWNER"
       ? assignOwnerGovernanceSourceType(existing.source_type)
@@ -1400,9 +1401,10 @@ export class InsightImprovementRepository {
     expectedVersion: number;
     outcome: "DISAPPEARED" | "STILL_PRESENT" | "INSUFFICIENT_DATA";
     newSessionCount: number;
+    allowZeroSession?: boolean;
     lastRecurrenceAt?: string | null;
     overrideActionType?: "ASSIGN_OWNER" | null;
-  }): Promise<ImprovementView | null | "VERSION_CONFLICT" | "STATE_CONFLICT" | "TOO_EARLY"> {
+  }): Promise<ImprovementView | null | "VERSION_CONFLICT" | "STATE_CONFLICT" | "TOO_EARLY" | "RECURRENCE_FOUND"> {
     const existing = await this.findItemById(input.improvementId);
     if (!existing) return null;
     if (existing.version !== input.expectedVersion) return "VERSION_CONFLICT";
@@ -1417,9 +1419,9 @@ export class InsightImprovementRepository {
     ].includes(currentStatus) || (currentStatus === "IN_PROGRESS" && existingView.handledAt)) {
       return "STATE_CONFLICT";
     }
-    if (input.outcome === "DISAPPEARED"
-      && !hasElapsed(existing.gmt_modified, OPEN_VERIFICATION_WAIT_SECONDS)) {
-      return "TOO_EARLY";
+    if (input.outcome === "DISAPPEARED") {
+      if (!hasElapsed(existing.gmt_modified, OPEN_VERIFICATION_WAIT_SECONDS)) return "TOO_EARLY";
+      if (input.newSessionCount === 0 && Boolean(input.lastRecurrenceAt)) return "RECURRENCE_FOUND";
     }
     const overriddenSourceType = input.overrideActionType === "ASSIGN_OWNER"
       ? assignOwnerGovernanceSourceType(existing.source_type)

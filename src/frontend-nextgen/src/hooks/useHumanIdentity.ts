@@ -11,6 +11,7 @@
 import type { HumanIdentity } from '@/capabilities';
 import { getCapabilities } from '@/capabilities';
 import { identityService } from '@/services/workspace/identityService';
+import { applyIdentityLoadResult } from '@/services/workspace/identityStore';
 import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useEffect, useState } from 'react';
@@ -77,7 +78,7 @@ export function useHumanIdentity(): UseHumanIdentityResult {
     void identityService.loadIdentities().then((res) => {
       if (cancelled) return;
       if (res.ok) {
-        useWorkspaceStore.getState().setIdentities(res.data.identities, res.data.defaultActiveId);
+        applyIdentityLoadResult(res.data);
       } else {
         setResult({ identity: null, status: 'error', error: res.error.friendlyMessage });
       }

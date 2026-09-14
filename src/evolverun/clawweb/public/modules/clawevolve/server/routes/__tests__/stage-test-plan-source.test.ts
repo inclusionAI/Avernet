@@ -75,7 +75,12 @@ describe("Optimize StageTest real Plan reference", () => {
       method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "owner" },
       body: JSON.stringify({ botId: "bot", caseInput: { round: 1 }, planSourceRef: { taskId: "SOURCE", stepId: "SOURCE-PLAN" }, ...body }),
     });
-    return { status: response.status, body: await response.json() };
+    const raw = await response.text();
+    const diagnostic = `StageTest HTTP ${response.status}; content-type=${response.headers.get("content-type")}; body=${JSON.stringify(raw)}`;
+    expect(response.headers.get("content-type"), diagnostic).toMatch(/application\/json/);
+    expect(raw.length, diagnostic).toBeGreaterThan(0);
+    try { return { status: response.status, body: JSON.parse(raw) }; }
+    catch { throw new Error(`Invalid JSON response: ${diagnostic}`); }
   }
   async function input(taskId: string, stepId: string) {
     const response = await fetch(`${base}/internal/tasks/${taskId}/steps/${stepId}/input`);
@@ -230,6 +235,10 @@ describe("Optimize StageTest real Plan reference", () => {
     }
     const tasksBefore = await repo.listTasks();
     const result = await start(body); expect(result.status).toBeGreaterThanOrEqual(400); expect(result.status).toBeLessThan(500);
+    if (bad === "manual") {
+      expect(result.status).toBe(400);
+      expect(result.body).toEqual({ error: "不能混用 planSourceRef 和手工 plan_result" });
+    }
     expect(await repo.listTasks()).toEqual(tasksBefore);
     expect((await stages.findImplementation("IMPL-OPT"))!.integration_test_status).toBe("untested");
     expect(dispatch).not.toHaveBeenCalled(); expect(putObject).not.toHaveBeenCalled();

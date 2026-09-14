@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api, type EvolveStageSkill } from '../api/client'
 
+import { spaceLabel } from '../components/SpaceSelector'
+
 const modeName = { preprocess: '前置处理', postprocess: '后置处理', replace: '整体替换' } as const
 type PackageContent = Awaited<ReturnType<typeof api.evolve.getStageSkillContent>>
 
@@ -53,6 +55,7 @@ export default function StageSkillDetail() {
           <div>
             <p className="text-sm font-medium text-blue-600">{item.stageName} · {modeName[item.mode]}</p>
             <h1 className="mt-1 text-2xl font-semibold text-gray-950">{item.displayName}</h1>
+            <p className="mt-2 text-sm text-gray-500">所属空间：{spaceLabel(item)}</p>
             <label className="mt-3 block text-sm text-gray-500">版本 <select aria-label="实现版本" value={implementationId} onChange={(event) => navigate(`/evolve/stage-skills/${encodeURIComponent(event.target.value)}`)} className="ml-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800">{versions.map((version) => <option key={version.implementationId} value={version.implementationId}>{version.version}</option>)}</select></label>
           </div>
           <div className="flex flex-wrap gap-3">

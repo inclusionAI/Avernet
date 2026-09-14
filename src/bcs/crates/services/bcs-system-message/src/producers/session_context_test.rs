@@ -37,7 +37,6 @@ impl NamedRegistry {
                             visibility: "protected".to_string(),
                             ..Default::default()
                         },
-                        dynamic_status: BotDynamicStatus::default(),
                         env: None,
                         created_by: None,
                         actor_kind: ActorKind::Bot,

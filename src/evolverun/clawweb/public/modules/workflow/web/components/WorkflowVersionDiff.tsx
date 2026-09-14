@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { api } from '@avernet/clawweb-shared/web/api/client'
 import type { VersionDiffResult } from '@avernet/clawweb-shared/web/types'
 
@@ -10,7 +11,7 @@ interface WorkflowVersionDiffProps {
 
 /** A single line in the unified diff view. */
 interface DiffLine {
-  type: 'add' | 'del' | 'ctx'
+  type: 'add' | 'del' | 'ctx' | 'skip'
   text: string
   // 1-indexed line number on the side that contains this line; 0 for del-only/add-only
   fromLine?: number
@@ -71,6 +72,105 @@ export function unifiedDiff(fromText: string, toText: string): DiffLine[] {
   return lines
 }
 
+/**
+ * Keep the change hunks visible by hiding unchanged lines far away from them.
+ * The full diff remains available in the UI for cases where surrounding context
+ * is needed.
+ */
+export function compactDiff(lines: DiffLine[], contextLines = 3): DiffLine[] {
+  const changedIndexes = lines
+    .map((line, index) => (line.type === 'add' || line.type === 'del' ? index : -1))
+    .filter((index) => index >= 0)
+
+  if (changedIndexes.length === 0) return lines
+
+  const visible = new Set<number>()
+  for (const index of changedIndexes) {
+    for (let nearby = Math.max(0, index - contextLines); nearby <= Math.min(lines.length - 1, index + contextLines); nearby++) {
+      visible.add(nearby)
+    }
+  }
+
+  const compacted: DiffLine[] = []
+  let previousIndex = -1
+  for (const index of [...visible].sort((a, b) => a - b)) {
+    if (index > previousIndex + 1) {
+      compacted.push({ type: 'skip', text: `… ${index - previousIndex - 1} 行未变更 …` })
+    }
+    compacted.push(lines[index])
+    previousIndex = index
+  }
+  if (previousIndex < lines.length - 1) {
+    compacted.push({ type: 'skip', text: `… ${lines.length - previousIndex - 1} 行未变更 …` })
+  }
+  return compacted
+}
+
+/** Turn stored JSON (or the legacy { content: yaml } wrapper) into readable YAML.
+ * The history API deliberately returns the original snapshot; formatting it here
+ * keeps the raw snapshot lossless while making line-level diff useful. */
+function stripSyntheticSpecFields(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  const { updatedAt: _updatedAt, version: _version, facade: _facade, ...persistedSpec } = value as Record<string, unknown>
+  return persistedSpec
+}
+
+/**
+ * Format a deploy-history snapshot in the same persisted-spec shape used for
+ * editor comparisons. `updatedAt`, `version`, and `facade` are enriched or
+ * synchronized metadata, not deployable workflow content.
+ */
+export function formatSpecForDiff(specJson: string): string {
+  try {
+    const parsed = JSON.parse(specJson)
+    if (parsed && typeof parsed === 'object' && typeof parsed.content === 'string' && !Array.isArray(parsed.nodes)) {
+      return stringifyYaml(stripSyntheticSpecFields(parseYaml(parsed.content)), { lineWidth: 0 })
+    }
+    return stringifyYaml(stripSyntheticSpecFields(parsed), { lineWidth: 0 })
+  } catch {
+    return specJson
+  }
+}
+
+/** Format the current editor value using the same persisted-spec shape as a deploy snapshot. */
+export function formatCurrentSpecForDiff(spec: unknown): string {
+  return stringifyYaml(stripSyntheticSpecFields(spec), { lineWidth: 0 })
+}
+
+function sortSpecValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortSpecValue)
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, nested]) => nested !== undefined)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, nested]) => [key, sortSpecValue(nested)]),
+    )
+  }
+  return value
+}
+
+/** Compare parsed specs so YAML field ordering and formatting do not create a false pending deploy. */
+export function specsEqual(fromText: string, toText: string): boolean {
+  try {
+    return JSON.stringify(sortSpecValue(parseYaml(fromText))) === JSON.stringify(sortSpecValue(parseYaml(toText)))
+  } catch {
+    return fromText === toText
+  }
+}
+
+function topLevelChanges(fromText: string, toText: string): string[] {
+  try {
+    const from = parseYaml(fromText) as Record<string, unknown>
+    const to = parseYaml(toText) as Record<string, unknown>
+    if (!from || !to || Array.isArray(from) || Array.isArray(to)) return []
+    return [...new Set([...Object.keys(from), ...Object.keys(to)])]
+      .filter((key) => JSON.stringify(from[key]) !== JSON.stringify(to[key]))
+  } catch {
+    return []
+  }
+}
+
 function formatTime(epochSec: number): string {
   if (!epochSec) return '-'
   return new Date(epochSec * 1000).toLocaleString()
@@ -84,12 +184,14 @@ export default function WorkflowVersionDiff({
   const [result, setResult] = useState<VersionDiffResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [showFullContext, setShowFullContext] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setError(null)
     setResult(null)
+    setShowFullContext(false)
     api.workflows
       .diffHistory(workflowId, fromDeploy, toDeploy)
       .then((r) => {
@@ -118,9 +220,13 @@ export default function WorkflowVersionDiff({
     return null
   }
 
-  const diffLines = unifiedDiff(result.from.specJson ?? '', result.to.specJson ?? '')
+  const fromText = formatSpecForDiff(result.from.specJson ?? '')
+  const toText = formatSpecForDiff(result.to.specJson ?? '')
+  const diffLines = unifiedDiff(fromText, toText)
   const additions = diffLines.filter((l) => l.type === 'add').length
   const deletions = diffLines.filter((l) => l.type === 'del').length
+  const changedFields = topLevelChanges(fromText, toText)
+  const displayedLines = showFullContext ? diffLines : compactDiff(diffLines)
 
   return (
     <div className="flex h-full flex-col">
@@ -140,17 +246,41 @@ export default function WorkflowVersionDiff({
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowFullContext((value) => !value)}
+            className="rounded border border-gray-300 bg-white px-2 py-0.5 text-[11px] text-gray-600 hover:bg-gray-50"
+          >
+            {showFullContext ? '仅看变更' : '完整内容'}
+          </button>
           <span className="text-green-600">+{additions}</span>
           <span className="text-red-500">-{deletions}</span>
         </div>
       </div>
+
+      {changedFields.length > 0 && (
+        <div className="border-b border-blue-100 bg-blue-50 px-3 py-2 text-xs text-slate-600">
+          <span className="mr-2 font-medium text-slate-700">变更字段</span>
+          {changedFields.map((field) => (
+            <span key={field} className="mr-1 inline-block rounded bg-white px-1.5 py-0.5 font-mono text-[11px] text-blue-700">
+              {field}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Unified diff body */}
       <div className="flex-1 overflow-auto bg-gray-900 font-mono text-xs leading-relaxed">
         {diffLines.length === 0 && (
           <div className="p-4 text-gray-400">两个版本内容完全相同</div>
         )}
-        {diffLines.map((line, idx) => {
+        {displayedLines.map((line, idx) => {
+          if (line.type === 'skip') {
+            return (
+              <div key={`skip-${idx}`} className="border-y border-gray-700 bg-gray-800 px-3 py-1 text-center text-gray-500">
+                {line.text}
+              </div>
+            )
+          }
           const bg =
             line.type === 'add'
               ? 'bg-green-900/30'

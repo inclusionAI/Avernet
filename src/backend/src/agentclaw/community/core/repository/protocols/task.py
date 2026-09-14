@@ -392,7 +392,7 @@ class TaskGraphRepositoryProtocol(Protocol):
         ``(task_id, node_id)``-ordered page slice (LIMIT/OFFSET). Optional filters (None → no
         filter): ``status`` (single value, equals ``task_node.status``); ``search_word``
         (case-insensitive LIKE on ``task_node.task_spec`` or ``task_node_run_info.extend_props``).
-        Read-only overview projection feeding ``GET /api/v1/collaboration/tasks/bbs/list``."""
+        Read-only overview projection feeding ``GET /openapi/v1/collaboration/tasks/bbs/list``."""
         ...
 
 

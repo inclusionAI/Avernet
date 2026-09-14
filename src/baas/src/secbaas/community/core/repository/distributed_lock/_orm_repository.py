@@ -2,6 +2,13 @@
 
 Uses @with_orm_session decorator for SQLAlchemy ORM Session lifecycle.
 Corresponds to ZdasDistributedLockRepository (ac_lock_table).
+
+``try_acquire_lock`` first runs a non-blocking fail-fast precheck SELECT on the
+same session: when the lock is held by another caller and unexpired, it returns
+``False`` without dispatching the ``uk_lock_name`` upsert that would wait on the
+row lock and trigger OB_MYSQL ``1205`` (Lock wait timeout exceeded). Correctness
+is unaffected — the precheck is an optimization path and the TOCTOU window is
+closed by the unique key + ``on_duplicate_key_update`` atomic semantics.
 """
 
 from datetime import datetime
@@ -184,13 +191,25 @@ class OrmDistributedLockRepository(OrmConnectionMixin, DistributedLockRepository
         lock_holder: str,
         expire_time: datetime,
     ) -> bool:
-        """Atomically try to acquire a lock with a single upsert.
+        """Atomically try to acquire a lock with a fail-fast precheck + upsert.
 
-        Issues one atomic upsert keyed on ``uk_lock_name``: a missing row is
-        initialized by INSERT, while an existing row is overwritten only when
-        it is acquirable (same holder, no ``expire_time``, or expired) and left
-        untouched otherwise. A confirming read SELECT then decides whether the
-        caller now holds the lock.
+        First emits a non-blocking read-only SELECT on the same ``self._session``
+        (same ``@with_orm_session`` transaction, no ``FOR UPDATE``): when an
+        existing row is held by a different caller and its ``expire_time`` has
+        not passed, return ``False`` immediately without dispatching the upsert
+        that would otherwise wait on the ``uk_lock_name`` row lock and trigger
+        OceanBase/MySQL-compatible ``1205`` (Lock wait timeout exceeded). Rows
+        that are missing, expired, or already held by the same caller fall
+        through to the atomic upsert.
+
+        The upsert keyed on ``uk_lock_name`` then initializes a missing row by
+        INSERT, or overwrites an existing row only when it is acquirable (same
+        holder, no ``expire_time``, or expired) and leaves it untouched
+        otherwise. A confirming read SELECT decides whether the caller now holds
+        the lock. The precheck is purely an optimization path: correctness does
+        not depend on it, and the TOCTOU window between precheck and upsert is
+        closed by ``uk_lock_name`` + ``on_duplicate_key_update``'s ``CASE WHEN
+        acquirable`` atomic semantics (at most one caller holds the lock).
 
         Replacing the former ``UPDATE → SELECT → INSERT`` three-step flow with
         a single upsert removes the concurrent INSERT that produced the
@@ -211,6 +230,32 @@ class OrmDistributedLockRepository(OrmConnectionMixin, DistributedLockRepository
         env = get_current_env()
 
         try:
+            # ── fail-fast 预检：复用同一 session，只读 SELECT（无 FOR UPDATE）──
+            # 若锁已被他方持有且未过期，直接返回 False，不再下发会等待
+            # uk_lock_name 行锁的 upsert，从根因消除 OB_MYSQL 1205。预检仅是
+            # 优化路径，TOCTOU 由 uk_lock_name + on_duplicate_key_update 兜底。
+            existing = self._session.execute(
+                select(DistributedLockModel).where(
+                    DistributedLockModel.lock_name == lock_name
+                )
+            ).scalar_one_or_none()
+
+            if existing is not None:
+                held_by_other = existing.lock_holder != lock_holder
+                unexpired = (
+                    existing.expire_time is not None
+                    and existing.expire_time > now
+                )
+                if held_by_other and unexpired:
+                    log.info(
+                        "[distributed-lock:try_acquire_lock] fail-fast: "
+                        "lock_name=%s held by %s",
+                        lock_name,
+                        existing.lock_holder,
+                    )
+                    return False
+            # 其余分支（无行 / 已过期 / 同 holder）继续走原子 upsert，
+            # 正确性不依赖预检。
             self._session.execute(
                 self._build_acquire_upsert(
                     lock_name, lock_holder, expire_time, env, now

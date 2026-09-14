@@ -94,7 +94,7 @@ it('joinSession 通过 PATCH participants/{bot_uuid} 将当前用户置为 prese
     ok = await result.current.joinSession();
   });
   expect(ok).toBe(true);
-  expect(updateMemberMode).toHaveBeenCalledWith('s1', 'human_1', 'present');
+  expect(updateMemberMode).toHaveBeenCalledWith('s1', 'human_1', 'present', undefined);
   expect(useWorkspaceStore.getState().activeIdentityId).toBe('human_1');
   expect(useWorkspaceStore.getState().selectedGroupId).toBe('g1');
   expect(useWorkspaceStore.getState().selectedSessionId).toBe('s1');
@@ -237,7 +237,7 @@ it('bot 视角加入会话：human 不在 participants 时用 store 人类身份
     ok = await result.current.joinSession();
   });
   expect(ok).toBe(true);
-  expect(updateMemberMode).toHaveBeenCalledWith('s1', 'human_1', 'present');
+  expect(updateMemberMode).toHaveBeenCalledWith('s1', 'human_1', 'present', undefined);
   // 加入后切换身份也必须命中 store 身份（规范化 id 精确匹配不到）。
   expect(useWorkspaceStore.getState().activeIdentityId).toBe('human_1');
 });
@@ -249,4 +249,68 @@ it('去发言：authenticatedUserId 无 human_ 前缀时 setActiveIdentity 仍�
   useWorkspaceStore.getState().selectSession('s1');
   act(() => result.current.switchToHuman());
   expect(useWorkspaceStore.getState().activeIdentityId).toBe('human_1');
+});
+
+it('humanViewScope 回显 human 成员的 messageViewScope（缺失为 null）', () => {
+  const withScope = makeSession([
+    { actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'present', messageViewScope: 'full' },
+  ]);
+  const { result } = renderHook(() => useCollabPanel(withScope, humanIdentity, updateMemberMode));
+  expect(result.current.humanViewScope).toBe('full');
+
+  const withoutScope = makeSession([
+    { actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'present' },
+  ]);
+  const { result: result2 } = renderHook(() => useCollabPanel(withoutScope, humanIdentity, updateMemberMode));
+  expect(result2.current.humanViewScope).toBeNull();
+});
+
+it('setViewScope("participant") 调 updateMemberScope、递增 wsReconnectNonce 并返回 true', async () => {
+  const session = makeSession([
+    { actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'present', messageViewScope: 'full' },
+  ]);
+  const updateMemberScope = jest.fn<any>().mockResolvedValue(true);
+  const { result } = renderHook(() =>
+    useCollabPanel(session, humanIdentity, updateMemberMode, undefined, undefined, updateMemberScope),
+  );
+  const before = useWorkspaceStore.getState().wsReconnectNonce;
+  let ok = false;
+  await act(async () => {
+    ok = await result.current.setViewScope('participant');
+  });
+  expect(ok).toBe(true);
+  expect(updateMemberScope).toHaveBeenCalledWith('s1', 'human_1', 'participant');
+  expect(useWorkspaceStore.getState().wsReconnectNonce).toBe(before + 1);
+});
+
+it('updateMemberScope 失败时 setViewScope 返回 false 且不递增 wsReconnectNonce', async () => {
+  const session = makeSession([
+    { actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'present', messageViewScope: 'full' },
+  ]);
+  const updateMemberScope = jest.fn<any>().mockResolvedValue(false);
+  const { result } = renderHook(() =>
+    useCollabPanel(session, humanIdentity, updateMemberMode, undefined, undefined, updateMemberScope),
+  );
+  const before = useWorkspaceStore.getState().wsReconnectNonce;
+  let ok = true;
+  await act(async () => {
+    ok = await result.current.setViewScope('participant');
+  });
+  expect(ok).toBe(false);
+  expect(useWorkspaceStore.getState().wsReconnectNonce).toBe(before);
+});
+
+it('未注入 updateMemberScope 时 setViewScope 返回 false 且不调用', async () => {
+  const session = makeSession([
+    { actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'present', messageViewScope: 'full' },
+  ]);
+  const { result } = renderHook(() => useCollabPanel(session, humanIdentity, updateMemberMode));
+  const before = useWorkspaceStore.getState().wsReconnectNonce;
+  let ok = true;
+  await act(async () => {
+    ok = await result.current.setViewScope('participant');
+  });
+  expect(ok).toBe(false);
+  expect(updateMemberMode).not.toHaveBeenCalled();
+  expect(useWorkspaceStore.getState().wsReconnectNonce).toBe(before);
 });

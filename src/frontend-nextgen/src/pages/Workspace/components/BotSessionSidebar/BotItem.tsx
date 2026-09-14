@@ -1,4 +1,4 @@
-import { Button, IconButton, Skeleton } from '@/components/ui';
+import { Badge, Button, IconButton, Skeleton } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { getBotEngineLabel } from '@/domain/botEngine';
 import { getBotTypeLabel } from '@/domain/botType';
@@ -8,6 +8,7 @@ import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import type { BotSessionPageMeta } from '../../hooks/useBotSessionMap';
 import { AvatarTile } from '../AvatarTile';
+import { SIDEBAR_TAG_CLASS } from '../GroupSidebar/GroupItem.types';
 import { ListErrorState } from '../ListErrorState';
 import { SessionScopeFilter } from '../SessionScopeFilter';
 import { BotSessionItem } from './BotSessionItem';
@@ -124,28 +125,16 @@ export const BotItem = React.memo(function BotItem({
             </TooltipProvider>
             <div className="mt-1 flex min-w-0 items-center gap-1 truncate text-xs leading-4 text-muted-foreground">
               {(bot.isAgentCodingBot ? bot.templateName || 'AgentCoding' : botEngineLabel) && (
-                <span className="shrink-0">
+                <Badge tone="primary" className={SIDEBAR_TAG_CLASS}>
                   {bot.isAgentCodingBot ? bot.templateName || 'AgentCoding' : botEngineLabel}
-                </span>
+                </Badge>
               )}
               {(bot.isAgentCodingBot ? bot.templateName || 'AgentCoding' : botEngineLabel) && botTypeLabel && (
-                <>
-                  <span aria-hidden="true" className="text-muted-foreground/50">
-                    ·
-                  </span>
-                  <span className="shrink-0">{botTypeLabel}</span>
-                </>
+                <Badge tone="primary" className={SIDEBAR_TAG_CLASS}>
+                  {botTypeLabel}
+                </Badge>
               )}
-              {isUnavailable && (
-                <>
-                  {(botEngineLabel || botTypeLabel) && (
-                    <span aria-hidden="true" className="text-muted-foreground/50">
-                      ·
-                    </span>
-                  )}
-                  <span className="shrink-0">暂不支持单聊</span>
-                </>
-              )}
+              {isUnavailable && <span className="shrink-0">暂不支持单聊</span>}
             </div>
           </div>
           {bot.chatable &&
@@ -157,24 +146,25 @@ export const BotItem = React.memo(function BotItem({
             ))}
         </Button>
         {bot.chatable && !bot.isAgentCodingBot && (
-          <>
+          <div className="flex shrink-0 items-center gap-0.5" onClick={(event) => event.stopPropagation()}>
             <IconButton
               label="新建会话"
               size="sm"
-              icon={<Plus className="h-4 w-4" />}
-              className="rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
+              icon={<Plus className="h-3.5 w-3.5" />}
+              className="h-6 w-6 rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
               onClick={(event) => {
                 event.stopPropagation();
                 onCreateSession(bot.botId);
               }}
             />
             <SessionScopeFilter
+              compact
               value={sessionTab}
               onChange={handleSessionScopeChange}
               allCount={allSessionMeta?.total}
               favoriteCount={favoriteSessionMeta?.total}
             />
-          </>
+          </div>
         )}
       </div>
 

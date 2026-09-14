@@ -48,6 +48,7 @@ pub trait BotRepoPort: Send + Sync {
         self.register(bot_id.to_string(), capabilities).await
     }
 
+    /// Renew a known registration heartbeat. The legacy payload is not retained.
     async fn update_status(&self, bot_id: &str, status: BotDynamicStatus) -> bool;
     async fn get(&self, bot_id: &str) -> Option<RegisteredBot>;
 

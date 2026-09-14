@@ -1329,6 +1329,8 @@ the other six: this is what "done" looks like per category.
 | PUT | `/openapi/v1/bots/{bot_id}/space` | Change the Bot's owning Business Space | `Envelope[BotSpaceAssignment]` |
 | DELETE | `/openapi/v1/bots/{bot_id}` | Delete bot | `Envelope[Deleted]` |
 | POST | `/openapi/v1/bots/{bot_id}/restart` | Restart (re-provision device) | `Envelope[Bot]` |
+| POST | `/openapi/v1/bots/{bot_id}/recycle` | Release an ACTIVE personal managed-cloud Bot and enter RECYCLED | `200 Envelope[BotRecycleResult]` |
+| POST | `/openapi/v1/bots/{bot_id}/activate` | Start reactivation of a RECYCLED personal managed-cloud Bot | `202 Envelope[BotActivateResult]`, or `200` when already ACTIVE |
 | POST | `/openapi/v1/bots/{bot_id}/auth-status` | Poll Passport auth (attributes echoed in the body); completes creation when ISSUED — a write, hence a POST | `Envelope[BotAuthStatus]` |
 | GET | `/openapi/v1/bots/{bot_id}/auth-status` | Retiring spelling of the poll (attributes in the query string); deprecated — use the POST | `Envelope[BotAuthStatus]` |
 | GET | `/openapi/v1/bots/{bot_id}/status` | Runtime / device readiness | `Envelope[BotStatus]` |
@@ -1342,6 +1344,12 @@ the other six: this is what "done" looks like per category.
 | PUT | `/openapi/v1/bots/{bot_id}/config-manifest` | Set/replace it; all-or-nothing, `422` lists every violation | `Envelope[ConfigManifest]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/config-manifest` | Clear it | `Envelope[Deleted]` |
 | GET | `/openapi/v1/bots/{bot_id}/config-manifest/capabilities` | Which manifest constructs this bot accepts | `Envelope[ConfigManifestCapabilities]` |
+
+Dormant lifecycle operations and the status poll take optional `owner_id`
+(defaulting to the caller) because `bot_id` is not globally unique. They use
+the shared addressed-Bot authorization mechanism, but require OWNER permission;
+ADMIN and MEMBER collaborators cannot recycle or activate the Bot. Teclaw,
+desktop and service Bots are outside this lifecycle.
 
 #### Space-scoped Bot quota
 
@@ -1694,27 +1702,37 @@ bounds the response, not the device round trip, and a later page costs what the
 first one costs. That is proportionate only because listing is non-recursive; a
 `recursive=true` option would have to revisit it._
 
-### 🟪 totalfrank + lucas-xzp · P3 — skills, co-owned (six ratified operations) · `openapi_v1/skills/router.py`
+### 🟪 totalfrank + lucas-xzp · P3 — skills, co-owned · `openapi_v1/skills/router.py`
 
-The public surface is a Bot-owned `local://` Local Skill lifecycle. It is not a
-catalog, marketplace, Git/Center installation surface, or a general Skill Set
-API. The collection's optional `active` filter is the only Active-list
-mechanism. Every operation requires a verified principal, is owner/Bot scoped,
-and uses the standard `Envelope` / `Page` contract.
+For the Desktop shared-Center detail, content, parameters, Direct desired-state,
+and asynchronous Reference integration contract, see the
+[Chinese frontend guide](desktop-center-skills.zh-CN.md).
+
+Upload and delete are the Bot-owned `local://` lifecycle. Authorized Local,
+Repo, and Center assets share detail, content, parameters, and Direct desired
+state; catalog, marketplace, publication, asynchronous Center Reference, and
+general SkillSet operations retain their separate APIs. The collection's
+optional `active` filter is the Active-list mechanism. Every operation requires
+a verified principal, is owner/Bot scoped, and uses the standard `Envelope` /
+`Page` contract.
 
 | Method | Path | Purpose | Success |
 |---|---|---|---|
 | GET | `/openapi/v1/bots/{bot_id}/skills` | List exact Bot-owned Local Skill metadata (`bot_id`, optional owner locator, `active`, `keyword`, paged) | `Envelope[Page[Skill]]` |
 | POST | `/openapi/v1/bots/{bot_id}/skills` | Create or safely replace one raw `application/zip` Local Skill package | `201 Envelope[SkillUpload]` / `200` replacement |
+| POST | `/openapi/v1/bots/{bot_id}/skills/upload-folder` | Create or replace one browser-selected Local Skill directory | `201 Envelope[SkillUpload]` / `200` replacement |
 | GET | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | Read public metadata for one deployment-wide Skill ID | `Envelope[Skill]` |
+| GET | `/openapi/v1/bots/{bot_id}/skills/{skill_id}/content` | Read the authorized asset's expected content | `Envelope[SkillContent]` |
+| GET/PUT | `/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters` | Read or replace this Bot's name-keyed parameters | `Envelope[SkillParameters]` |
 | POST | `/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate` | Set desired Active state and synchronously reconcile runtime | `Envelope[SkillState]` |
 | POST | `/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate` | Set desired Inactive state and synchronously reconcile runtime | `Envelope[SkillState]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | Recoverably delete one Inactive Local Skill | `Envelope[Deleted]` |
+| GET | `/openapi/v1/bots/skills/{skill_id}/readme` | Read visible shared or Local documentation without selecting a Bot | `Envelope[SkillContent]` |
 
 `413101` is documented only on raw ZIP upload. The stable Local Skill business
 subcodes are `400101`, `404000`, `409101`–`409104`, `413101`, `502101`, and
 `502102`; existing public categories retain their `xxx000` codes. Generated
-OpenAPI is contract-tested to expose exactly these six operations.
+OpenAPI remains derived from the Backend Router and DTOs.
 
 **Release gate — do not mark Track B complete yet.** The cleanup-work table DDL
 from #725 must be applied and verified before application rollout, and the real

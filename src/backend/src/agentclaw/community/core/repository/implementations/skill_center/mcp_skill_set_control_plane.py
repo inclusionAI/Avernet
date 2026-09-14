@@ -19,6 +19,7 @@ from agentclaw.community.core.repository.capability_desired_state_types import (
 from agentclaw.community.core.skill_center.policies.capability_ownership import (
     require_direct_mcp_control_allowed,
     require_can_join_set,
+    require_non_platform_mcp,
 )
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
@@ -66,6 +67,7 @@ class McpSkillSetControlPlaneCommands:
 
     def add_mcp(
         self, *, bot_id: str, owner_id: str, set_id: str, server_code: str,
+        platform_default_codes: frozenset[str],
         name: str, description: str | None, icon: str | None,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
@@ -73,6 +75,9 @@ class McpSkillSetControlPlaneCommands:
         with self._db.transactional_orm_session() as session:
             row = self._set(session, bot_id=bot_id, owner_id=owner_id, set_id=set_id, engine_type=engine_type, default_engine_types=default_engine_types, locked=True)
             self._ordinary(row)
+            require_non_platform_mcp(
+                server_code=server_code, platform_default_codes=platform_default_codes
+            )
             old = self._snapshot(session, bot_id, owner_id, engine_type=engine_type)
             current = (
                 self._scope(session.query(SkillSetMCPServer), SkillSetMCPServer)

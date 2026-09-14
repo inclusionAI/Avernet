@@ -45,6 +45,7 @@ pub struct WorkbenchConnectionRegistry {
 impl std::fmt::Debug for WorkbenchConnectionRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WorkbenchConnectionRegistry")
+            .field("cluster_scope_changes_enabled", &!self.scope_changes_disabled)
             .finish_non_exhaustive()
     }
 }
@@ -204,6 +205,18 @@ impl WorkbenchConnectionRegistry {
         audience: Option<&MessageAudience>,
         exclude_conn_id: Option<u64>,
     ) -> usize {
+        self.broadcast_selected(session_id, event_json, visibility_domain, audience, exclude_conn_id, None).await
+    }
+
+    pub async fn broadcast_to_actors(&self, session_id: &str, event_json: &str, actor_ids: &[String], exclude_conn_id: Option<u64>) -> usize {
+        self.broadcast_selected(session_id, event_json, MessageVisibilityDomain::Chat, None, exclude_conn_id, Some(actor_ids)).await
+    }
+
+    pub async fn broadcast_visible_to_actors(&self, session_id: &str, event_json: &str, actor_ids: &[String], exclude_conn_id: Option<u64>, visibility_domain: MessageVisibilityDomain, audience: Option<&MessageAudience>) -> usize {
+        self.broadcast_selected(session_id, event_json, visibility_domain, audience, exclude_conn_id, Some(actor_ids)).await
+    }
+
+    async fn broadcast_selected(&self, session_id: &str, event_json: &str, visibility_domain: MessageVisibilityDomain, audience: Option<&MessageAudience>, exclude_conn_id: Option<u64>, actor_ids: Option<&[String]>) -> usize {
         let mut sessions = self.sessions.write().await;
         let Some(connections) = sessions.get_mut(session_id) else {
             return 0;
@@ -212,6 +225,9 @@ impl WorkbenchConnectionRegistry {
         let mut delivered = 0usize;
         let mut disconnected = Vec::new();
         for conn in connections.iter() {
+            if actor_ids.is_some_and(|ids| conn.user_id.as_ref().is_none_or(|actor| !ids.contains(actor))) {
+                continue;
+            }
             if conn.shutdown.is_cancelled() {
                 continue;
             }
@@ -297,12 +313,6 @@ impl ParticipantViewBindingPort for WorkbenchConnectionRegistry {
         scope_id: &str,
         human_actor_id: &str,
     ) -> ServiceResult<ParticipantViewScopeChangeLease> {
-        if self.scope_changes_disabled {
-            return Err(ServiceError::InvalidOperation {
-                message: "view_scope_change_requires_cluster_binding".to_string(),
-                request_id: None,
-            });
-        }
         let lease_id = NEXT_SCOPE_CHANGE_LEASE_ID.fetch_add(1, Ordering::Relaxed);
         let mut barriers = self.scope_change_barriers.lock().await;
         if barriers
@@ -375,5 +385,43 @@ pub fn stamp_silent_true(event_json: &str) -> String {
             serde_json::to_string(&Value::Object(map)).unwrap_or_else(|_| event_json.to_string())
         }
         _ => event_json.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod delivery_recipient_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn targeted_status_obeys_human_visibility() {
+        let registry = WorkbenchConnectionRegistry::new();
+        let (tx, mut rx) = mpsc::channel(2);
+        registry.subscribe("session".into(), tx, Some("member".into()), Some(HumanMessageView {
+            actor_id: "member".into(), scope: bcs_domain::MessageViewScope::Participant,
+            allow_legacy_unclassified_chat: false,
+        })).await.unwrap();
+        let actors = vec!["member".into()];
+        assert_eq!(registry.broadcast_visible_to_actors("session", "{}", &actors, None,
+            MessageVisibilityDomain::ManagerWorker, Some(&MessageAudience::FullOnly)).await, 0);
+        assert!(rx.try_recv().is_err());
+        assert_eq!(registry.broadcast_visible_to_actors("session", "{}", &actors, None,
+            MessageVisibilityDomain::ManagerWorker, Some(&MessageAudience::Public)).await, 1);
+        assert_eq!(rx.try_recv().unwrap(), "{}");
+    }
+
+    #[tokio::test]
+    async fn targeted_status_never_reaches_unselected_or_anonymous_subscribers() {
+        let registry = WorkbenchConnectionRegistry::new();
+        let (allowed, mut allowed_rx) = mpsc::channel(2);
+        let (denied, mut denied_rx) = mpsc::channel(2);
+        let (anonymous, mut anonymous_rx) = mpsc::channel(2);
+        registry.subscribe("session".into(), allowed, Some("member".into()), None).await.unwrap();
+        registry.subscribe("session".into(), denied, Some("other".into()), None).await.unwrap();
+        registry.subscribe("session".into(), anonymous, None, None).await.unwrap();
+        assert_eq!(registry.broadcast_to_actors("session", "{}", &["member".into()], None).await, 1);
+        assert_eq!(allowed_rx.try_recv().unwrap(), "{}");
+        assert!(denied_rx.try_recv().is_err());
+        assert!(anonymous_rx.try_recv().is_err());
+        assert_eq!(registry.broadcast_to_actors("session", "{}", &[], None).await, 0);
     }
 }

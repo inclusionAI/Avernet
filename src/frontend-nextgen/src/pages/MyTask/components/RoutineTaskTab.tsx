@@ -5,13 +5,14 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
 import { Pagination } from '@/components/ui/Pagination';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { ScheduledRoutineRecord } from '@/services/scheduledTasks';
 import { cn } from '@/utils/cn';
 import { Eye, Play, Search } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { makeRoutineKey } from '../hooks/routineTaskUtils';
-import { formatDateTime, getBotDisplayName } from '../userTaskUtils';
+import { formatDateTime, getBotDisplayName, getRoutineStageTone } from '../userTaskUtils';
 import { RoutineBotSelector, type RoutineBotOption } from './RoutineBotSelector';
 
 export interface RoutineTaskTabProps {
@@ -31,20 +32,6 @@ export interface RoutineTaskTabProps {
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
   botNameMap: Record<string, string>;
-}
-
-/** runtime_stage 标签颜色：draft 草稿 / verify 验证 / online 线上。 */
-function getRoutineStageTone(stage?: string): 'neutral' | 'warning' | 'success' | 'outline' {
-  switch (stage) {
-    case 'draft':
-      return 'neutral';
-    case 'verify':
-      return 'warning';
-    case 'online':
-      return 'success';
-    default:
-      return 'outline';
-  }
 }
 
 function Th({ className, ...props }: React.ThHTMLAttributes<HTMLTableCellElement>) {
@@ -95,15 +82,21 @@ export function RoutineTaskTab({
   const visibleRoutines = routineList;
   const visibleTotal = total;
 
+  /** 触发一次定时任务执行并 toast 结果；由「立即触发」ConfirmDialog 的 onConfirm 调用。 */
+  const handleTriggerRoutine = async (routine: ScheduledRoutineRecord) => {
+    try {
+      await onRunRoutine(routine);
+      toast.success(`已触发一次 ${routine.name}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '定时任务触发失败';
+      toast.error(message);
+    }
+  };
+
   return (
     <section className="space-y-4">
       <div className="space-y-3">
-        <div
-          className={cn(
-            'grid gap-3 border-y border-border py-3',
-            showBotSelector ? 'md:grid-cols-3' : 'md:grid-cols-1',
-          )}
-        >
+        <div className={cn('grid gap-3', showBotSelector ? 'md:grid-cols-3' : 'md:grid-cols-1 max-w-md')}>
           <div className="relative min-w-0">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -170,6 +163,25 @@ export function RoutineTaskTab({
                 ) : (
                   visibleRoutines.map((item) => {
                     const ownerBotName = getBotDisplayName(botNameMap, item.botId, item.botName);
+                    const triggerDisabled = item.enabled === false;
+                    const triggerDialog = (
+                      <ConfirmDialog
+                        title={`立即触发「${item.name}」`}
+                        disabled={triggerDisabled}
+                        description="当前页面会调用真实 routines 接口触发一次执行。"
+                        confirmText="立即触发"
+                        onConfirm={() => handleTriggerRoutine(item)}
+                      >
+                        <Button
+                          variant="default"
+                          size="sm"
+                          leftIcon={<Play className="size-4" />}
+                          disabled={triggerDisabled}
+                        >
+                          立即触发
+                        </Button>
+                      </ConfirmDialog>
+                    );
                     return (
                       <tr
                         key={makeRoutineKey(item.botId, item.id, item.runtimeStage)}
@@ -177,7 +189,7 @@ export function RoutineTaskTab({
                       >
                         <Td className="max-w-[24rem]">
                           <div className="space-y-1">
-                            <div className="truncate font-medium text-foreground">{item.name}</div>
+                            <div className="truncate text-xs font-medium leading-5 text-foreground">{item.name}</div>
                             {item.prompt ? (
                               <p className="m-0 line-clamp-2 text-xs leading-5 text-muted-foreground">{item.prompt}</p>
                             ) : null}
@@ -193,27 +205,36 @@ export function RoutineTaskTab({
                         </Td>
                         <Td>
                           <div className="space-y-1">
-                            <div className="text-foreground">
-                              <span className="font-medium">{ownerBotName}</span>
-                            </div>
-                            <div className="text-xs text-muted-foreground">Bot ID：{item.botId}</div>
-                            <div className="text-xs text-muted-foreground">模型：{item.model}</div>
+                            <TooltipProvider delayDuration={300}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="text-xs font-medium leading-5 text-foreground">{ownerBotName}</span>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  <div className="space-y-1">
+                                    <div>{ownerBotName}</div>
+                                    <div className="font-mono text-muted-foreground">{item.botId}</div>
+                                  </div>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                            <div className="text-xs leading-5 text-muted-foreground">模型：{item.model}</div>
                           </div>
                         </Td>
                         <Td>
-                          <div className="space-y-1 text-xs text-foreground">
+                          <div className="space-y-1 text-xs leading-5 text-foreground">
                             <div>{item.frequency}</div>
-                            <div className="text-xs text-muted-foreground">{item.timezone ?? '—'}</div>
+                            <div className="text-xs leading-5 text-muted-foreground">{item.timezone ?? '—'}</div>
                           </div>
                         </Td>
                         <Td>
-                          <div className="text-xs text-foreground">{formatDateTime(item.nextRunAt)}</div>
+                          <div className="text-xs leading-5 text-foreground">{formatDateTime(item.nextRunAt)}</div>
                         </Td>
                         <Td>
-                          <div className="text-xs text-foreground">{formatDateTime(item.lastRunAt)}</div>
+                          <div className="text-xs leading-5 text-foreground">{formatDateTime(item.lastRunAt)}</div>
                         </Td>
                         <Td>
-                          <div className="text-xs text-foreground">
+                          <div className="text-xs leading-5 text-foreground">
                             {item.enabled === true ? '是' : item.enabled === false ? '否' : '—'}
                           </div>
                         </Td>
@@ -227,31 +248,18 @@ export function RoutineTaskTab({
                             >
                               查看实例
                             </Button>
-                            <ConfirmDialog
-                              title={`立即触发「${item.name}」`}
-                              disabled={item.enabled === false}
-                              description="当前页面会调用真实 routines 接口触发一次执行。"
-                              confirmText="立即触发"
-                              onConfirm={async () => {
-                                try {
-                                  await onRunRoutine(item);
-                                  toast.success(`已触发一次 ${item.name}`);
-                                } catch (err) {
-                                  const message = err instanceof Error ? err.message : '定时任务触发失败';
-                                  toast.error(message);
-                                }
-                              }}
-                            >
-                              <Button
-                                variant="primary"
-                                size="sm"
-                                leftIcon={<Play className="size-4" />}
-                                disabled={item.enabled === false}
-                                title={item.enabled === false ? '定时任务未启用，不能立即触发' : undefined}
-                              >
-                                立即触发
-                              </Button>
-                            </ConfirmDialog>
+                            {triggerDisabled ? (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span className="inline-flex">{triggerDialog}</span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>定时任务未启用，不能立即触发</TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            ) : (
+                              triggerDialog
+                            )}
                           </div>
                         </Td>
                       </tr>

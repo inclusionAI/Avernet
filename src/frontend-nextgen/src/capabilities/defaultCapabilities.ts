@@ -198,7 +198,7 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: { adminEntry: true, spaceSwitcher: false, notificationBell: true },
   }),
-  // Open Core（阿里云部署）管理后台页内分区：隐藏【空间管理】Tab、仅保留【工单中心】
+  // Open Core（阿里云部署）管理后台页内分区：隐藏【空间管理】Tab、仅保留【通知中心】
   // （管理后台入口已开放，空间管理收敛在页内完成；空间数据链路不受影响）。
   // internal overlay 覆盖为 { spaces:true, workOrders:true }（extensions/internal.ts），内部形态两 Tab 均在。
   getAdminSections: (): CapabilityResult<AdminSections> => ({

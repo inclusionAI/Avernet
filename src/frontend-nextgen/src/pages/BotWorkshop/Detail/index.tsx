@@ -220,6 +220,9 @@ const BotWorkshopDetailPage: React.FC = () => {
               onMcp={editor.setSkillSetMcp}
               mcpCallTypes={editor.mcpCallTypes}
               callerContextEditable={editor.callerContextEditable}
+              mcpIdentityDisabledReason={
+                bot.serviceMode === 'service' ? undefined : '个人 Bot 固定使用 Owner 模式，不支持切换 MCP 访问方式'
+              }
               updatingCallType={editor.updatingCallType}
               onMcpCallType={editor.updateMcpCallType}
             />

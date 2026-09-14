@@ -110,6 +110,10 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
   const workflowId = workflow.workflow_id
   const [days, setDays] = useState<7 | 30>(7)
   const [page, setPage] = useState(0)
+  const [statusFilter, setStatusFilter] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const [query, setQuery] = useState('')
+  const hasFilters = Boolean(statusFilter || query)
   const [windowEnd] = useState(() => Math.floor(Date.now() / 1000))
   const [activeSubTab, setActiveSubTab] = useState<'runs' | 'nodes'>('runs')
   const [highlightNodeId, setHighlightNodeId] = useState<string | null>(null)
@@ -119,6 +123,18 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
   } = useWorkflowHealth(workflowId, days)
   const pageSize = 20
   const windowStart = windowEnd - days * 86400
+  const {
+    data: metricsData,
+    isPending: isMetricsPending,
+    isError: isMetricsError,
+    isFetching: isMetricsFetching,
+    refetch: refetchMetrics,
+  } = useFlowRuns({
+    workflowId,
+    limit: 1,
+    from: String(windowStart),
+    to: String(windowEnd),
+  })
   const {
     data,
     isLoading,
@@ -130,15 +146,16 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
     workflowId,
     limit: pageSize,
     offset: page * pageSize,
-    from: String(windowStart),
-    to: String(windowEnd),
+    status: statusFilter && statusFilter !== 'cancelled' ? statusFilter : undefined,
+    statuses: statusFilter === 'cancelled' ? ['cancelled', 'canceled'] : undefined,
+    query: query || undefined,
   })
 
   const runs = useMemo(() => data?.runs ?? [], [data?.runs])
   const totalCount = data?.total ?? 0
 
   const stats = useMemo(() => {
-    const counts = data?.statusCounts ?? {}
+    const counts = metricsData?.statusCounts ?? {}
     const succeededRuns = counts.succeeded ?? 0
     const abnormalRuns = (counts.failed ?? 0) + (counts.aborted ?? 0) + (counts.cancelled ?? 0) + (counts.canceled ?? 0)
     const terminalRuns = succeededRuns + abnormalRuns
@@ -152,16 +169,19 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
       blockedRuns: counts.blocked ?? 0,
       queuedRuns: counts.queued ?? 0,
     }
-  }, [data?.statusCounts])
+  }, [metricsData?.statusCounts])
 
-  const currentSuccessRate = stats.terminalRuns > 0 ? `${stats.successRate}%` : '—'
-  const currentDetail = `${stats.succeededRuns} / ${stats.terminalRuns} 个终态运行`
+  const hasMetrics = !isMetricsPending && !isMetricsError && metricsData?.statusCounts != null
+  const currentSuccessRate = hasMetrics && stats.terminalRuns > 0 ? `${stats.successRate}%` : '—'
+  const currentDetail = hasMetrics
+    ? `${stats.succeededRuns} / ${stats.terminalRuns} 个终态运行`
+    : isMetricsError ? '运行指标加载失败' : '运行指标加载中'
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
   const currentPage = Math.min(page + 1, totalPages)
+  const isRefreshing = isFetching || isMetricsFetching
 
   const changeDays = (nextDays: 7 | 30) => {
     setDays(nextDays)
-    setPage(0)
   }
 
   return (
@@ -179,7 +199,7 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
       <section aria-label="工作流关键指标" className="grid grid-cols-2 divide-x divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white lg:grid-cols-4 lg:divide-y-0">
         <MetricCell label="健康度" value={health ? String(health.overallScore) : '—'} detail={health ? (health.overallScore >= 80 ? '运行稳定' : health.overallScore >= 60 ? '需要关注' : '建议优先处理') : '等待健康数据'} emphasis={health && health.overallScore < 60 ? 'danger' : 'default'} />
         <MetricCell label="运行成功率" value={currentSuccessRate} detail={`近 ${days} 天 · 成功 / 终态`} />
-        <MetricCell label="异常结束" value={String(stats.abnormalRuns)} detail="失败、终止或取消" emphasis={stats.abnormalRuns > 0 ? 'danger' : 'default'} />
+        <MetricCell label="异常结束" value={hasMetrics ? String(stats.abnormalRuns) : '—'} detail="失败、终止或取消" emphasis={hasMetrics && stats.abnormalRuns > 0 ? 'danger' : 'default'} />
         <MetricCell label="节点耗时 P95" value={health ? formatDuration(health.p95DurationMs) : '—'} detail="最慢节点 P95 口径" />
       </section>
 
@@ -191,10 +211,17 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
           ['排队中', stats.queuedRuns, 'bg-violet-50 text-violet-700'],
         ].map(([label, count, cls]) => (
           <div key={String(label)} className={`rounded-lg px-3 py-2 text-xs font-medium ${cls}`}>
-            {`${label} ${count}`}
+            {`${label} ${hasMetrics ? count : '—'}`}
           </div>
         ))}
       </section>
+
+      {isMetricsError ? (
+        <div role="alert" className="flex items-center justify-between rounded-lg border border-rose-100 bg-rose-50 px-4 py-2 text-xs text-rose-600">
+          <span>运行指标加载失败；运行列表仍可继续查看。</span>
+          <button type="button" onClick={() => void refetchMetrics()} disabled={isMetricsFetching} className="shrink-0 rounded px-2 py-1 font-medium hover:bg-rose-100 disabled:opacity-50">重试指标</button>
+        </div>
+      ) : isMetricsPending && <p role="status" className="px-4 text-xs text-slate-500">运行指标加载中…</p>}
 
       {isHealthError && <div className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-2 text-xs text-rose-600">健康指标加载失败；运行列表仍可继续查看。</div>}
 
@@ -231,12 +258,13 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
             </button>
           </div>
           <button
-            onClick={() => void refetch()}
-            disabled={isFetching}
+            onClick={() => { void refetch(); void refetchMetrics() }}
+            disabled={isRefreshing}
+            aria-busy={isRefreshing}
             className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <svg
-              className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`}
+              className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`}
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -251,6 +279,30 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
             刷新
           </button>
         </div>
+
+        {activeSubTab === 'runs' && (
+          <form
+            aria-label="运行记录筛选"
+            onSubmit={(event) => { event.preventDefault(); setQuery(searchInput.trim()); setPage(0) }}
+            className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3"
+          >
+            <select aria-label="运行状态" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(0) }} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+              <option value="">全部状态</option>
+              <option value="running">运行中</option>
+              <option value="succeeded">成功</option>
+              <option value="failed">失败</option>
+              <option value="waiting">等待中</option>
+              <option value="blocked">阻塞</option>
+              <option value="queued">排队中</option>
+              <option value="cancelled">取消</option>
+              <option value="aborted">终止</option>
+            </select>
+            <input type="search" aria-label="搜索运行记录" placeholder="搜索 Run ID / 发起方 / Bot ID" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} className="min-w-0 flex-1 basis-64 rounded-md border border-slate-200 px-3 py-2 text-xs text-slate-700 sm:max-w-sm" />
+            <button type="submit" className="rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700">搜索</button>
+            <button type="button" disabled={!hasFilters && !searchInput} onClick={() => { setStatusFilter(''); setSearchInput(''); setQuery(''); setPage(0) }} className="rounded-md px-3 py-2 text-xs text-slate-500 hover:bg-slate-50 disabled:opacity-40">重置筛选</button>
+            {!isLoading && !isError && <span className="ml-auto text-xs text-slate-400" aria-live="polite">{hasFilters ? '匹配' : '共'} {totalCount} 条</span>}
+          </form>
+        )}
 
         {activeSubTab === 'nodes' && workflowId ? (
           <div className="p-4">
@@ -269,7 +321,7 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
           </div>
         ) : runs.length === 0 ? (
           <div className="p-6">
-            <EmptyState title="暂无运行" description="该工作流尚未执行过" />
+            <EmptyState title={hasFilters ? '没有匹配的运行' : '暂无运行'} description={hasFilters ? '请调整筛选条件或重置筛选' : '该工作流尚未执行过'} />
           </div>
         ) : (
           <div className="overflow-x-auto">

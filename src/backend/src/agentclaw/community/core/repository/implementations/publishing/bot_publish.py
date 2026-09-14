@@ -366,7 +366,10 @@ class BotPublishRepository(
                 db.query(self.Model)
                 .filter(
                     self.Model.source_bot_id == source_bot_id,
-                    self.Model.status == PublishStatus.BUILT.value,
+                    self.Model.status.in_([
+                        PublishStatus.BUILT.value,
+                        PublishStatus.VALIDATING.value,
+                    ]),
                     self.Model.env == env,
                 )
                 .order_by(self.Model.id.desc())

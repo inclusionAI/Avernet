@@ -1,7 +1,6 @@
 """Endpoint-framework coverage for Local Skill desired-state commands."""
 
 from __future__ import annotations
-
 import time
 
 import jwt
@@ -10,12 +9,16 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_
 from agentclaw.community.api.direct_activation_service import (
     DirectActivationServiceProtocol,
 )
+from agentclaw.community.api.skill_query_service import SkillQueryServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.capability_desired_state import (
     CapabilityDesiredStateRepositoryProtocol,
 )
 from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
     BotCapabilityStateReader,
+)
+from agentclaw.community.core.skill_center.desktop_skill_recovery_protocol import (
+    DesktopSkillRecoveryServiceProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import (
     BotCollabLogRepositoryProtocol,
@@ -176,7 +179,7 @@ def _seed_state(world, *, runtime_success: bool) -> None:
         to=DirectActivationService(
             world.get(CapabilityDesiredStateRepositoryProtocol),
             world.get(BotRepository),
-            world.get(SkillRepository),
+            world.get(SkillQueryServiceProtocol),
             runtime_factory._runtime,
             world.get(BotCapabilityAuthorizationHookProtocol),
             world.get(BotCollabLogRepositoryProtocol),
@@ -188,6 +191,7 @@ def _seed_state(world, *, runtime_success: bool) -> None:
                 version_resolver=PassthroughSkillVersionResolver(),
             ),
             PlatformDefaultMcpPolicy(lambda _bot_id: None),
+            world.get(DesktopSkillRecoveryServiceProtocol),
         ),
         scope=None,
     )

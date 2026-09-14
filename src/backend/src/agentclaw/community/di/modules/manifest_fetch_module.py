@@ -20,8 +20,15 @@ from typing import Callable
 
 from injector import Injector, Module, inject, provider, singleton
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-    EntryFetcher,
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+    DeclaredSourceResolver,
+)
+from agentclaw.community.core.bot_config_manifest.credentials.service import (
+    SourceCredentialService,
+)
+from agentclaw.community.core.bot_management.token_vault import TokenVault
+from agentclaw.community.core.repository.protocols.bot.source_credential import (
+    SourceCredentialRepositoryProtocol,
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
     CliToolPurger,
@@ -45,8 +52,8 @@ from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
     GitSourceClient,
     SubprocessGitClient,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
-    GuardedFetcher,
+from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
+    AliyunObjectStore,
 )
 from agentclaw.community.core.repository.protocols.bot.cli_tool import (
     BotCliToolRepositoryProtocol,
@@ -145,6 +152,49 @@ class ManifestFetchModule(Module):
     @singleton
     @provider
     @inject
+    def source_credential_service(
+        self,
+        repository: SourceCredentialRepositoryProtocol,
+        vault: TokenVault,
+        manifest_config: cfg.BotConfigManifestConfig,
+    ) -> SourceCredentialServiceProtocol:
+        """W3 (#1471): the profile decides the fail-closed posture.
+
+        Production columns (corp, community) refuse credential writes when the
+        vault has no master key — TokenVault's plaintext passthrough is right
+        for local, catastrophic for tenant tokens at rest. The local/test
+        columns keep the permissive default; corp_test runs the Mist-backed
+        vault anyway and benefits from the same guard.
+
+        **It binds here, next to the config it reads.** The service takes the
+        deployment's transport allowlist off the
+        ``user_config.bot_config_manifest`` block, because the endpoint guard
+        refuses a host resolving to a private address, which is exactly what an
+        internal object store endpoint does. This line is now that key's only
+        consumer: the fetch road it was first written for is gone, and the
+        allowlist survives as the deployment's escape hatch for registering
+        such an endpoint. That escape hatch existed on the service and nothing
+        passed through it while the provider lived a module away from the
+        config: an internal endpoint was unregistrable by any configuration.
+        The repository it reads through still binds with its siblings in
+        ``bot_management_module``.
+        """
+        from agentclaw.community.di.profile import DeployProfile
+
+        fail_closed = DeployProfile.detect() in (
+            DeployProfile.CORP,
+            DeployProfile.COMMUNITY,
+        )
+        return SourceCredentialService(
+            repository,
+            vault,
+            fail_closed=fail_closed,
+            endpoint_allow_hosts=manifest_config.fetch_transport_allowlist,
+        )
+
+    @singleton
+    @provider
+    @inject
     def manifest_managed_files_store(
         self, object_storage: ObjectStoragePlugin
     ) -> ManagedFilesStore:
@@ -183,18 +233,15 @@ class ManifestFetchModule(Module):
 
     @singleton
     @provider
-    def manifest_guarded_fetcher(
-        self, manifest_config: cfg.BotConfigManifestConfig
-    ) -> GuardedFetcher:
-        """The W2 transport, constructed from the typed config cluster.
+    def manifest_object_store(self) -> AliyunObjectStore:
+        """The ``oss`` road: the object store's native client.
 
-        The allowlist is a deployment decision (an internal mirror or proxy);
-        everything else about the fetcher — scheme, address pinning, redirect
-        budget — is the shipped default and not configurable from here.
+        Nothing about it is configurable from here. The endpoint, the region
+        and the key pair are properties of each tenant credential rather than
+        of the deployment, so there is no config block to read and no backend
+        to select — one road, taken.
         """
-        return GuardedFetcher(
-            transport_allowlist=manifest_config.fetch_transport_allowlist
-        )
+        return AliyunObjectStore()
 
     @singleton
     @provider
@@ -215,35 +262,39 @@ class ManifestFetchModule(Module):
     @inject
     def manifest_entry_fetcher(
         self,
-        fetcher: GuardedFetcher,
         content: ManifestContentServiceProtocol,
         credentials: SourceCredentialServiceProtocol,
-    ) -> EntryFetcher:
+        objects: AliyunObjectStore,
+    ) -> DeclaredSourceResolver:
         """The one fetch funnel the fetch-consuming materialisers share.
 
-        One instance over the three singletons: the transport, the store, and
-        W3's credentials — so every category that fetches reads the same
-        receipts and files the same provenance rows.
+        One instance over three singletons: the store, W3's credentials, and
+        the object-store client — so every category that fetches reads the
+        same receipts and files the same provenance rows, whichever protocol
+        served it. The guarded HTTPS transport is no longer among them: the
+        funnel's last URL road went with the bare-string ``source``, and the
+        two roads that remain reach their sources through the object store and
+        through git.
         """
-        return EntryFetcher(fetcher, content, credentials)
+        return DeclaredSourceResolver(content, credentials, objects)
 
     @singleton
     @provider
     def manifest_git_source_client(self) -> GitSourceClient:
         """W7's git transport: the CLI subprocess client.
 
-        Like ``GuardedFetcher``, everything about it except construction is
-        the shipped default — https-only scheme, hermetic env, header-only
-        credential injection — and not configurable from here.
+        Everything about it except construction is the shipped default —
+        https-only scheme, hermetic env, header-only credential injection —
+        and not configurable from here.
 
         The base subprocess environment is read **here**, the composition
         root, per the repo rule that raw environment access belongs to
         configuration loading and composition roots, never to core. The
         client drops every ``GIT_*`` key this snapshot still carries and adds
         its own hermetic overrides, so this env is a plain inheritance
-        surface: proxy settings ride along exactly as they do for the W2
-        httpx transport (``trust_env`` is that client's default), while an
-        operator's ``insteadOf`` rewrite or upload-pack default cannot.
+        surface: proxy settings ride along exactly as they do for the object
+        store's own SDK client, while an operator's ``insteadOf`` rewrite or
+        upload-pack default cannot.
         """
         import os
 
@@ -268,25 +319,16 @@ class ManifestFetchModule(Module):
         ``service_bot_module`` records at its own use: the identity module
         reaches the device dispatcher graph at import time, and this
         module's import must not trigger that chain.
+
+        No drift guard here any more: ``IdentityService`` inherits
+        ``IdentityFilePort`` and the port's members are abstract, so a
+        renamed or dropped method fails when the injector constructs the
+        service, naming the method. This provider used to carry a hand-rolled
+        ``isinstance`` check because the two were related only structurally.
         """
-        from agentclaw.community.core.ports.identity_file_port import (
-            IdentityFilePort,
-        )
         from agentclaw.community.core.services.identity import IdentityService
 
-        def _identity() -> IdentityFilePort:
-            service = injector.get(IdentityService)
-            if not isinstance(service, IdentityFilePort):
-                # Structural check at wiring time: the port has no
-                # implementation relationship to the service, so nothing
-                # else would notice a renamed method until mid-apply. The
-                # drift guard belongs where the two first meet.
-                raise TypeError(
-                    "IdentityService no longer satisfies IdentityFilePort"
-                )
-            return service
-
-        return _identity
+        return lambda: injector.get(IdentityService)
 
     @singleton
     @provider
@@ -335,9 +377,9 @@ class ManifestFetchModule(Module):
     @inject
     def manifest_entry_fetcher_factory(
         self, injector: Injector
-    ) -> Callable[[], EntryFetcher]:
+    ) -> Callable[[], DeclaredSourceResolver]:
         """The lazy lookup the apply service's registry wiring asks for."""
-        return lambda: injector.get(EntryFetcher)
+        return lambda: injector.get(DeclaredSourceResolver)
 
     @singleton
     @provider
@@ -350,24 +392,15 @@ class ManifestFetchModule(Module):
         Lazy with a function-level import for the reason the identity
         factory above records: the resource file service module reaches the
         device dispatcher graph at import time, and this module's import
-        must not trigger that chain. Structural check at wiring time for
-        the same reason as there — the port has no implementation
-        relationship to the service, so nothing else would notice a rename
-        until mid-apply.
+        must not trigger that chain. No drift guard here either, and for the
+        same reason as there: ``ResourceFileService`` inherits
+        ``ResourceFilePort``, whose members are abstract.
         """
         from agentclaw.community.core.services.resource_file_service import (
             ResourceFileService,
         )
 
-        def _resources() -> ResourceFilePort:
-            service = injector.get(ResourceFileService)
-            if not isinstance(service, ResourceFilePort):
-                raise TypeError(
-                    "ResourceFileService no longer satisfies ResourceFilePort"
-                )
-            return service
-
-        return _resources
+        return lambda: injector.get(ResourceFileService)
 
     @singleton
     @provider
@@ -376,7 +409,7 @@ class ManifestFetchModule(Module):
         self,
         injector: Injector,
         object_storage: ObjectStoragePlugin,
-        entry_fetcher_provider: Callable[[], EntryFetcher],
+        entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
     ) -> CliToolServiceFactory:
         """W9: the one component both callers install a CLI tool through.
 
@@ -510,9 +543,10 @@ class ManifestFetchModule(Module):
         """
         from agentclaw.community.core.bot_config_manifest.cli_tools.bot_service import (
             BotCliToolService,
+            BotLookupPort,
         )
 
-        class _Bots:
+        class _Bots(BotLookupPort):
             """Defers the bot-service lookup to the call, not to DI time."""
 
             def get_bot(self, bot_id: str, owner_id: str) -> dict:
@@ -565,7 +599,7 @@ class ManifestFetchModule(Module):
         mcp_auth_service_provider: Callable[[], MCPAuthServiceProtocol],
         capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
-        entry_fetcher_provider: Callable[[], EntryFetcher],
+        entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
         cli_tool_service_factory: CliToolServiceFactory,
     ) -> TeclawPlatformBindings:
         """The store-backed ports and the closing redeliver (W8, spec D-7).

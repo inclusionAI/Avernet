@@ -11,6 +11,7 @@ version = { workspace = true }
 async-trait = { workspace = true }
 bcs-db-api = { workspace = true }
 bcs-domain = { workspace = true }
+bcs-config-api = { workspace = true }
 bcs-event-store = { workspace = true }
 bcs-service-api = { workspace = true }
 serde_json = { workspace = true }
@@ -20,6 +21,7 @@ uuid = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
 bcs-test-support = { workspace = true }
 bcs-db-local = { workspace = true }
 # migrations.rs is pulled into integration tests via #[path]; it needs sha2/hex

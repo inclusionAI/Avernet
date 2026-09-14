@@ -23,7 +23,10 @@ from agentclaw.community.core.runtime_binding.models import (
     RuntimeBindingSource,
     RuntimeBindingTarget,
 )
+from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
+
+logger = get_logger()
 
 _CALLER_INSTANCE_STATUS = "success"
 
@@ -166,16 +169,23 @@ class RuntimeBindingResolutionService:
         ):
             raise CallerInstanceNotReadyError("Caller instance is not ready")
         binding = self._require_active_binding(binding_id)
-        if (
-            self._value(getattr(binding, "env", "")) != environment
-            or self._value(getattr(binding, "entity_id", "")) != request.owner_id
-            or self._value(getattr(binding, "apply_reason", ""))
-            != f"caller_instance:{request.bot_id}"
-            or self._value(getattr(binding, "applied_by", ""))
-            != request.actor_user_id
-            or self._value(getattr(binding, "device_provider", "")) != "baas"
-        ):
-            raise RuntimeBindingNotFoundError("Caller binding scope is invalid")
+        # COSEC: Preserve identity case; enum normalization must not widen scope.
+        scope_checks = (
+            ("env", self._value(getattr(binding, "env", "")), environment),
+            ("entity_id", getattr(binding, "entity_id", ""), request.owner_id),
+            ("apply_reason", getattr(binding, "apply_reason", ""),
+             f"caller_instance:{request.bot_id}"),
+            ("applied_by", getattr(binding, "applied_by", ""), request.actor_user_id),
+            ("device_provider", self._value(getattr(binding, "device_provider", "")), "baas"),
+        )
+        for field, actual, expected in scope_checks:
+            if actual != expected:
+                logger.warning(
+                    "caller_binding_scope_invalid binding_id=%s field=%s",
+                    binding_id,
+                    field,
+                )
+                raise RuntimeBindingNotFoundError("Caller binding scope is invalid")
         return binding_id
 
     def _require_active_binding(self, binding_id: int) -> Any:

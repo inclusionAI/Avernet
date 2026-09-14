@@ -8,6 +8,7 @@ import {
   type EvolveStageDevelopment,
 } from '../api/client'
 import { useClientUser } from '../hooks/useClientUser'
+import SpaceSelector, { spaceLabel } from '../components/SpaceSelector'
 import type { TCLogBot } from '../types'
 
 const modeName: Record<EvolveStageMode, string> = {
@@ -80,6 +81,10 @@ export default function StageSkillDevelopment() {
   const upgradeId = new URLSearchParams(location.search).get('upgrade') ?? ''
   const resumeId = new URLSearchParams(location.search).get('implementationId') ?? ''
   const developmentId = new URLSearchParams(location.search).get('developmentId') ?? ''
+  const [spaceId, setSpaceId] = useState('')
+  const [displayName, setDisplayName] = useState('')
+  const [upgradeSource, setUpgradeSource] = useState<EvolveStageSkill | null>(null)
+  const [ready, setReady] = useState(false)
   const [development, setDevelopment] = useState<EvolveStageDevelopment | null>(null)
   const [catalog, setCatalog] = useState<EvolveStageCatalog | null>(null)
   const [bots, setBots] = useState<TCLogBot[]>([])
@@ -100,6 +105,11 @@ export default function StageSkillDevelopment() {
 
   useEffect(() => {
     let active = true
+    setReady(false)
+    setUpgradeSource(null)
+    setSpaceId('')
+    setDisplayName('')
+    setCatalog(null)
     setImplementation(null)
     setDevelopment(null)
     setPackageFile(null)
@@ -139,6 +149,9 @@ export default function StageSkillDevelopment() {
         if (latest) {
           setStage(latest.stage)
           setMode(latest.mode)
+          setUpgradeSource(latest)
+        } else {
+          throw new Error('原自定义实现不存在，不能创建升级版本')
         }
       } else {
         const firstOpenStage = stageCatalog.stages.find((item) => item.extensionModes.length > 0)
@@ -147,6 +160,7 @@ export default function StageSkillDevelopment() {
           setMode(firstOpenStage.extensionModes[0])
         }
       }
+      setReady(true)
     }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : '开发信息加载失败') })
     return () => { active = false }
   }, [resumeId, upgradeId, developmentId, user?.userId])
@@ -216,11 +230,11 @@ export default function StageSkillDevelopment() {
   }
 
   const startDevelopment = async () => {
-    if (busy) return
+    if (busy || !ready || locked) return
     setBusy('create')
     setError('')
     try {
-      const created = await api.evolve.createStageDevelopment({ stage, mode, flow })
+      const created = await api.evolve.createStageDevelopment({ stage, mode, flow, ...(spaceId ? { spaceId } : {}), ...(displayName.trim() ? { displayName: displayName.trim() } : {}) })
       navigate(`/evolve/stage-skills/new?developmentId=${encodeURIComponent(created.stageSkillId)}`, { replace: true })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '创建开发记录失败')
@@ -228,6 +242,7 @@ export default function StageSkillDevelopment() {
   }
 
   const download = async () => {
+    if (!ready || busy) return
     setBusy('download')
     setError('')
     try {
@@ -258,7 +273,7 @@ export default function StageSkillDevelopment() {
   }
 
   const upload = async () => {
-    if (resumeId || busy || !started) return
+    if (resumeId || busy || !started || !ready) return
     if (!packageFile) { setError('请选择开发完成的 ZIP'); return }
     setBusy('upload')
     setError('')
@@ -354,8 +369,14 @@ export default function StageSkillDevelopment() {
             </select>
           </label>
         </div>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          {locked || started ? <p className="text-sm text-gray-500">所属空间：{ready ? spaceLabel(implementation ?? development ?? upgradeSource ?? {}) : '尚未加载'}{upgradeId && ready && <span className="ml-2 text-xs">升级继承原空间，不可修改</span>}</p> : <>
+            <label><span className="mb-1.5 block text-xs font-medium text-gray-600">实现名称（可选）</span><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} disabled={Boolean(busy)} className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm" /></label>
+            <SpaceSelector value={spaceId} onChange={setSpaceId} disabled={Boolean(busy)} />
+          </>}
+        </div>
         {stageDefinition && <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3"><p className="text-sm font-medium text-blue-950">{stageDefinition.name} · {modeName[mode]}</p><p className="mt-1 text-xs leading-5 text-blue-800">{stageDefinition.description} {modeDescription[mode]}</p></div>}
-        {!started && <button disabled={!catalog || Boolean(busy)} onClick={() => void startDevelopment()} className="mt-4 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50">{busy === 'create' ? '正在创建…' : '确认并开始开发'}</button>}
+        {!started && <button disabled={!ready || Boolean(busy)} onClick={() => void startDevelopment()} className="mt-4 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white disabled:opacity-50">{busy === 'create' ? '正在创建…' : '确认并开始开发'}</button>}
         {development && <p className="mt-3 text-xs text-gray-500">开发记录已保存，可随时从“自定义 Stage”列表继续。</p>}
       </section>
 
@@ -367,7 +388,7 @@ export default function StageSkillDevelopment() {
             <h2 className="text-base font-semibold text-gray-900">下载开发包</h2>
             <p className="mt-1 text-xs leading-5 text-gray-500">平台根据“{flowDefinition?.name ?? '当前流程'} / {stageDefinition?.name ?? '当前 Stage'} / {modeName[mode]}”生成开发包，包含 SKILL.md，说明本次开发背景、输入输出要求和平台提供的能力。</p>
             <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button disabled={!catalog || busy === 'download'} onClick={() => void download()} className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{busy === 'download' ? '正在生成…' : '下载开发包'}</button>
+              <button disabled={!ready || Boolean(busy)} onClick={() => void download()} className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">{busy === 'download' ? '正在生成…' : '下载开发包'}</button>
               <button onClick={() => setShowGuide(true)} className="text-xs font-medium text-blue-600 hover:text-blue-700">先查看完整开发说明 ↗</button>
             </div>
             <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
@@ -386,7 +407,7 @@ export default function StageSkillDevelopment() {
             <p className="mt-1 text-xs leading-5 text-gray-500">{resumeId ? '继续操作此精确版本，不会重新上传或创建新版本。修改实现请返回详情选择升级。' : '上传包含 SKILL.md 的完整 ZIP；平台检查压缩包和入口文件，并关联当前开发记录。无需编写平台声明文件。'}</p>
             {!resumeId && <div className="mt-3 flex flex-wrap items-center gap-3">
               <input type="file" accept=".zip,application/zip" onChange={(event) => setPackageFile(event.target.files?.[0] ?? null)} className="min-w-0 flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm" />
-              <button disabled={busy === 'upload'} onClick={() => void upload()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">上传并校验</button>
+              <button disabled={!ready || Boolean(busy)} onClick={() => void upload()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">上传并校验</button>
             </div>}
             {implementation && <p className="mt-3 text-xs text-gray-500">当前实现：<span className="font-medium text-gray-800">{implementation.displayName}</span> · {implementation.version}</p>}
             {resumeId && implementation && <button onClick={() => navigate(`/evolve/stage-skills/${encodeURIComponent(implementation.implementationId)}`)} className="mt-2 text-xs font-medium text-blue-600">查看此版本内容 ↗</button>}

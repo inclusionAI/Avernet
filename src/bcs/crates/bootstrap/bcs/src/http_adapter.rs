@@ -170,7 +170,7 @@ async fn build_secret_service(config: &crate::config::BcsConfig) -> crate::Resul
     Ok(Arc::new(DefaultSecretService::new(access)))
 }
 
-pub(crate) async fn build_secret_access(
+pub async fn build_secret_access(
     config: &crate::config::BcsConfig,
 ) -> crate::Result<Arc<dyn SecretAccessPort>> {
     let provider = resolve_secret_provider(config);

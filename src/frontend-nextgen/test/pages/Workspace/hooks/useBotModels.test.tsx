@@ -40,16 +40,16 @@ beforeEach(() => {
 
 it('托管 Bot 会话保持拉取模型列表', async () => {
   const { result } = renderHook(() =>
-    useBotModels(managedBot, { ...session, botId: managedBot.botId }, 'human_327325', jest.fn()),
+    useBotModels(managedBot, { ...session, botId: managedBot.botId }, 'human_900003', jest.fn()),
   );
 
   await waitFor(() => expect(result.current.isLoadingModels).toBe(false));
-  expect(mockedListModels).toHaveBeenCalledWith(managedBot, 'human_327325');
+  expect(mockedListModels).toHaveBeenCalledWith(managedBot, 'human_900003');
   expect(result.current.activeModelId).toBe('session-model');
 });
 
 it('好友 Bot 会话不拉取模型列表，保留会话模型只读展示', async () => {
-  const { result } = renderHook(() => useBotModels(friendBot, session, 'human_327325', jest.fn()));
+  const { result } = renderHook(() => useBotModels(friendBot, session, 'human_900003', jest.fn()));
 
   await waitFor(() => expect(result.current.isLoadingModels).toBe(false));
   expect(mockedListModels).not.toHaveBeenCalled();
@@ -62,7 +62,7 @@ it('好友 Bot 的模型选择按钮禁用', () => {
     <BotModelSelectorContainer
       chatBots={[friendBot]}
       session={session}
-      activeIdentityId="human_327325"
+      activeIdentityId="human_900003"
       onSessionModelChange={jest.fn()}
     />,
   );

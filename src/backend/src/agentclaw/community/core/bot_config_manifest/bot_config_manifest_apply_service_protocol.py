@@ -29,10 +29,7 @@ from dataclasses import dataclass
 from typing import Optional, Protocol, runtime_checkable
 
 from agentclaw.community.core.bot_config_manifest.apply.delivery import DeliveryStrategy
-from agentclaw.community.core.bot_config_manifest.apply.order import (
-    ALL_PHASES,
-    ApplyPhase,
-)
+from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyConstruct,
     ApplyReport,
@@ -69,7 +66,6 @@ class ApplyAccepted:
 
 
 __all__ = [
-    "ALL_PHASES",
     "ApplyAccepted",
     "ApplyPhase",
     "ApplyReport",
@@ -93,7 +89,7 @@ class BotConfigManifestApplyServiceProtocol(Protocol):
         actor_id: str,
         audit_actor: Optional[str] = None,
         trigger: str = "explicit",
-        phases: frozenset[ApplyPhase],
+        phase: ApplyPhase | None = None,
         engine_type: Optional[str] = None,
         bot_type: Optional[str] = None,
         carry_from_apply_id: Optional[str] = None,
@@ -119,16 +115,30 @@ class BotConfigManifestApplyServiceProtocol(Protocol):
         ``apply_id`` for an apply that did not start, and never has to poll to
         discover their document was bad.
 
-        ``phases`` is **required, with no default**. An omitted-means-both
-        default read fine at the one call site that wanted both and badly
-        everywhere else: what an apply covers is the single most consequential
-        thing about it — W13's pre-container phase writing the startup-script
-        row before the container exists is the whole ordering guarantee — and a
-        caller that leaves it out is not stating a choice, it is inheriting one.
-        The explicit ``POST .../apply`` passes ``ALL_PHASES``, which says the
-        same thing the default said and says it where the reader is.
+        ``phase`` is **one optional value, and ``None`` is a statement**. What
+        an apply covers is the single most consequential thing about it —
+        W13's pre-container phase writing the startup-script row before the
+        container exists is the whole ordering guarantee — so the concern that
+        kept a required set here was the right one: a caller must never
+        *inherit* which half of an apply it is asking for. A set with a silent
+        default did let it. A scalar does not. ``None`` does not mean "both, if
+        you like"; it means **this apply is not a creation half**, which is the
+        literal truth at every call site that passes it, and the creation job
+        names its half explicitly.
+
+        The pairing is enforced rather than trusted: ``start_apply`` refuses a
+        creation trigger with no phase and a non-creation trigger with one. So
+        the phase an apply covers is still always stated — by the trigger and
+        the phase together, checked against each other — and there is nothing
+        left for a caller to inherit. What the required set bought, a scalar
+        and one check buy — without asking four call sites to spell out a set
+        whose only legal values were "all" and a singleton.
 
         Raises:
+            ValueError: ``trigger`` and ``phase`` disagree — a creation trigger
+                that names no phase, or any other trigger that names one. A
+                programming error at a call site, raised before the lock is
+                taken and before an ``apply_id`` exists.
             ManifestApplyInProgressError: Another apply holds this bot's lock.
             ManifestValidationError: The stored document no longer validates for
                 this bot. Re-validated rather than trusted from the ``PUT`` that

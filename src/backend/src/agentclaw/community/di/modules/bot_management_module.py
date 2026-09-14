@@ -103,7 +103,7 @@ from agentclaw.community.core.bot_config_manifest.creation import (
 from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
     BotConfigManifestApplyService,
 )
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.bot_config_manifest.cli_tools.service import CliToolPurger, CliToolServiceFactory
 from agentclaw.community.core.ports.identity_file_port import (
     IdentityFilePort,
@@ -239,13 +239,6 @@ from agentclaw.community.core.repository.implementations.bot.manifest_content im
 )
 from agentclaw.community.core.repository.implementations.bot.source_credential import (
     SourceCredentialRepository,
-)
-from agentclaw.community.api.source_credential_service import (
-    SourceCredentialServiceProtocol,
-)
-from agentclaw.community.core.bot_management.token_vault import TokenVault
-from agentclaw.community.core.bot_config_manifest.credentials.service import (
-    SourceCredentialService,
 )
 
 from agentclaw.community.core.repository.implementations.bot.config_manifest_apply import (
@@ -735,7 +728,7 @@ class BotManagementModule(Module):
         upload_service_provider: Callable[[], LocalSkillUploadServiceProtocol],
         capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
-        entry_fetcher_provider: Callable[[], EntryFetcher],
+        entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
         # W6's resources materialiser and W7's git transport, from the same
         # module and lazy for the same reason.
         resource_service_provider: Callable[[], ResourceFilePort],
@@ -973,27 +966,3 @@ class BotManagementModule(Module):
         self, svc: DataInitService
     ) -> DataInitServiceProtocol:
         return svc
-
-    @singleton
-    @provider
-    @inject
-    def _source_credential_service_protocol(
-        self,
-        repository: SourceCredentialRepositoryProtocol,
-        vault: TokenVault,
-    ) -> SourceCredentialServiceProtocol:
-        """W3 (#1471): the profile decides the fail-closed posture.
-
-        Production columns (corp, community) refuse credential writes when
-        the vault has no master key — TokenVault's plaintext passthrough
-        is right for local, catastrophic for tenant tokens at rest. The
-        local/test columns keep the permissive default; corp_test runs the
-        Mist-backed vault anyway and benefits from the same guard.
-        """
-        from agentclaw.community.di.profile import DeployProfile
-
-        fail_closed = DeployProfile.detect() in (
-            DeployProfile.CORP,
-            DeployProfile.COMMUNITY,
-        )
-        return SourceCredentialService(repository, vault, fail_closed=fail_closed)

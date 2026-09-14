@@ -22,6 +22,9 @@ import {
   type EvolutionFlowKey,
 } from "../services/evolve/evolution-flow.js";
 import { skillPackageView } from "../services/evolve/skill-package-view.js";
+import type { OcbSpacePort } from "../internal/module-api.js";
+import { spaceRequestIdentity } from "./evolve-spaces.js";
+import { canReadSpaceRecord, registrationSpace, spaceColumns, type SpaceOwnedRecord } from "../services/evolve/space-access.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -31,6 +34,7 @@ const upload = multer({
 type StageSkillsRouterInput = {
   repo: StageSkillRepository;
   artifactStore?: ObjectStore;
+  ocbSpaces?: OcbSpacePort;
 };
 
 function actor(req: Request): string | null {
@@ -43,6 +47,7 @@ function implementationView(row: Awaited<ReturnType<StageSkillRepository["findIm
   const stage = findOfficialStage(row.stage_key);
   return {
     stageSkillId: row.stage_skill_id,
+    spaceId: row.space_id ?? null, spaceType: row.space_type ?? null, spaceName: row.space_name ?? null,
     ownerId: row.owner_user_id,
     implementationId: row.implementation_id,
     displayName: row.display_name,
@@ -63,6 +68,7 @@ function implementationView(row: Awaited<ReturnType<StageSkillRepository["findIm
 function developmentView(row: StageDevelopmentRow) {
   return {
     stageSkillId: row.stage_skill_id, ownerId: row.owner_user_id,
+    spaceId: row.space_id ?? null, spaceType: row.space_type ?? null, spaceName: row.space_name ?? null,
     displayName: row.display_name, flow: row.flow_key, stage: row.stage_key,
     stageName: findOfficialStage(row.stage_key)?.name ?? row.stage_key,
     mode: row.extension_mode, createdAt: row.gmt_create, updatedAt: row.gmt_modified,
@@ -82,6 +88,12 @@ function packageObjectKey(ref: string): string {
 
 export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
   const router = Router();
+
+  async function readable(row: SpaceOwnedRecord, req: Request): Promise<boolean> {
+    const identity = spaceRequestIdentity(req);
+    return !!identity && canReadSpaceRecord(row, identity.userId,
+      row.space_id ? await input.ocbSpaces?.listAccessibleSpaces({ identity }) ?? [] : []);
+  }
 
   router.get("/stage-catalog", (req, res) => {
     const taskType: "diagnose" | "full" = req.query.taskType === "diagnose" ? "diagnose" : "full";
@@ -118,9 +130,13 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
       res.status(400).json({ error: "当前流程不包含该 Stage" }); return;
     }
     const names = { preprocess: "前置处理", postprocess: "后置处理", replace: "整体替换" };
+    const space = await registrationSpace(input.ocbSpaces, spaceRequestIdentity(req)!, req.body?.spaceId);
+    const displayName = typeof req.body?.displayName === "string" ? req.body.displayName.trim() : "";
+    if (displayName.length > 255) { res.status(400).json({ error: "名称不能超过 255 个字符" }); return; }
     const row = await input.repo.createDevelopment({
       stageSkillId: `STAGESKILL-${randomUUID().slice(0, 12).toUpperCase()}`,
-      ownerUserId: owner, displayName: `${stage.name}${names[mode]}自定义实现`,
+      ownerUserId: owner, displayName: displayName || `${stage.name}${names[mode]}自定义实现`,
+      ...spaceColumns(space),
       flow, stage: stage.stage, mode,
     });
     res.status(201).json(developmentView(row));
@@ -129,12 +145,15 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
   router.get("/stage-developments", asyncHandler(async (req, res) => {
     const owner = actor(req);
     if (!owner) { res.status(401).json({ error: "无法识别当前用户" }); return; }
-    res.json({ items: (await input.repo.listDevelopments(owner)).map(developmentView) });
+    const spaces = await input.ocbSpaces?.listAccessibleSpaces({ identity: spaceRequestIdentity(req)! }) ?? [];
+    const rows = (await input.repo.listDevelopments(owner))
+      .filter((row) => canReadSpaceRecord(row, owner, spaces));
+    res.json({ items: rows.map(developmentView) });
   }));
 
   router.get("/stage-developments/:id", asyncHandler(async (req, res) => {
     const row = await input.repo.findDevelopment(String(req.params.id));
-    if (!row || row.owner_user_id !== actor(req)) {
+    if (!row || row.owner_user_id !== actor(req) || !await readable(row, req)) {
       res.status(404).json({ error: "开发记录不存在" }); return;
     }
     res.json(developmentView(row));
@@ -142,7 +161,9 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
 
   router.delete("/stage-developments/:id", asyncHandler(async (req, res) => {
     const owner = actor(req);
-    if (!owner || !await input.repo.deleteDraft(String(req.params.id), owner)) {
+    const row = await input.repo.findDevelopment(String(req.params.id));
+    if (!owner || !row || row.owner_user_id !== owner || !await readable(row, req)
+      || !await input.repo.deleteDraft(row.stage_skill_id, owner)) {
       res.status(409).json({ error: "开发记录不存在或已有上传版本，请在详情中管理版本" }); return;
     }
     res.json({ deleted: true });
@@ -152,7 +173,7 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
     const developmentId = String(req.query.developmentId ?? "");
     if (developmentId) {
       const row = await input.repo.findDevelopment(developmentId);
-      if (!row || row.owner_user_id !== actor(req)) {
+      if (!row || row.owner_user_id !== actor(req) || !await readable(row, req)) {
         res.status(404).json({ error: "开发记录不存在" }); return;
       }
       const archive = await createStageDevelopmentPackage({ stage: row.stage_key, mode: row.extension_mode, flow: row.flow_key });
@@ -175,14 +196,18 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
   router.get("/stage-skills", asyncHandler(async (req, res) => {
     const owner = actor(req);
     if (!owner) { res.status(401).json({ error: "无法识别当前用户" }); return; }
-    const rows = await input.repo.listImplementations(owner);
+    const spaces = await input.ocbSpaces?.listAccessibleSpaces({ identity: spaceRequestIdentity(req)! }) ?? [];
+    const search = String(req.query.search ?? "").trim().toLocaleLowerCase();
+    const rows = (await input.repo.listImplementations(owner, spaces.filter((space) => space.type === "TEAM").map((space) => space.id)))
+      .filter((row) => canReadSpaceRecord(row, owner, spaces)
+        && (!search || `${row.display_name} ${row.stage_skill_id} ${row.space_name ?? ""}`.toLocaleLowerCase().includes(search)));
     res.json({ items: rows.map(implementationView) });
   }));
 
   router.get("/stage-skills/:implementationId", asyncHandler(async (req, res) => {
     const owner = actor(req);
     const row = await input.repo.findImplementation(String(req.params.implementationId));
-    if (!owner || !row || row.owner_user_id !== owner) {
+    if (!owner || !row || !await readable(row, req)) {
       res.status(404).json({ error: "Stage Skill 不存在" }); return;
     }
     res.json(implementationView(row));
@@ -191,7 +216,7 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
   router.get("/stage-skills/:implementationId/content", asyncHandler(async (req, res) => {
     const owner = actor(req);
     const row = await input.repo.findImplementation(String(req.params.implementationId));
-    if (!owner || !row || row.owner_user_id !== owner || row.status === "deleted") {
+    if (!owner || !row || !await readable(row, req) || row.status === "deleted") {
       res.status(404).json({ error: "Stage Skill 不存在" }); return;
     }
     if (!input.artifactStore) {
@@ -227,6 +252,7 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
         : null;
       const binding = development ?? existingStageSkill;
       if (!requestedStageSkillId || !binding || binding.owner_user_id !== owner
+        || !await readable(binding, req)
         || binding.stage_key !== stage || binding.extension_mode !== mode) {
         res.status(404).json({ error: "要升级的 Stage Skill 不存在，或与当前 Stage/接入方式不一致" }); return;
       }
@@ -240,6 +266,7 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
         stageSkillId,
         implementationId,
         ownerUserId: owner,
+        spaceId: binding.space_id, spaceType: binding.space_type, spaceName: binding.space_name,
         displayName,
         stage,
         mode,
@@ -262,7 +289,7 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
   router.post("/stage-skills/:implementationId/register", asyncHandler(async (req, res) => {
     const owner = actor(req);
     const current = await input.repo.findImplementation(String(req.params.implementationId));
-    if (!owner || !current || current.owner_user_id !== owner) {
+    if (!owner || !current || current.owner_user_id !== owner || !await readable(current, req)) {
       res.status(404).json({ error: "Stage Skill 不存在" }); return;
     }
     const row = await input.repo.registerImplementation(current.implementation_id);
@@ -274,7 +301,9 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
 
   router.delete("/stage-skills/:implementationId", asyncHandler(async (req, res) => {
     const owner = actor(req);
-    if (!owner || !await input.repo.deleteImplementation(String(req.params.implementationId), owner)) {
+    const row = await input.repo.findImplementation(String(req.params.implementationId));
+    if (!owner || !row || row.owner_user_id !== owner || !await readable(row, req)
+      || !await input.repo.deleteImplementation(row.implementation_id, owner)) {
       res.status(404).json({ error: "Stage Skill 不存在" }); return;
     }
     res.json({ deleted: true });

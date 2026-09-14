@@ -26,12 +26,12 @@ function setUserIdentity(value: { userId: string; displayName?: string | null } 
 
 beforeEach(() => {
   jest.resetAllMocks();
-  // 命中缓存用例取能力 user_id='327325'；未就绪用例（setUserIdentity(null)）走 ensureUserId 补拉，默认失败降级为 error（不发业务请求）。
+  // 命中缓存用例取能力 user_id='900003'；未就绪用例（setUserIdentity(null)）走 ensureUserId 补拉，默认失败降级为 error（不发业务请求）。
   (identityService.loadIdentities as unknown as jest.Mock<any>).mockResolvedValue({
     ok: false,
     error: { code: 'IDENTITY_LOAD_FAILED', friendlyMessage: '', canRetry: true },
   });
-  setUserIdentity({ userId: '327325', displayName: null });
+  setUserIdentity({ userId: '900003', displayName: null });
 });
 
 describe('adminService 网络参数对齐 clawweb=Avernet', () => {
@@ -39,7 +39,7 @@ describe('adminService 网络参数对齐 clawweb=Avernet', () => {
     sc.listSpaces.mockResolvedValue({ success: true, data: { items: [], total: 0 } });
     await adminService.listSpaces({ page: 2, pageSize: 10, keyword: '风控' });
     expect(sc.listSpaces).toHaveBeenCalledWith({
-      user_id: '327325',
+      user_id: '900003',
       page_no: 2,
       page_size: 10,
       keyword: '风控',
@@ -50,7 +50,7 @@ describe('adminService 网络参数对齐 clawweb=Avernet', () => {
     sc.listSpaces.mockResolvedValue({ success: true, data: { items: [], total: 0 } });
     await adminService.listSpaces({ page: 1, pageSize: 100, scope: 'accessible' });
     expect(sc.listSpaces).toHaveBeenCalledWith({
-      user_id: '327325',
+      user_id: '900003',
       page_no: 1,
       page_size: 100,
       scope: 'accessible',
@@ -59,7 +59,7 @@ describe('adminService 网络参数对齐 clawweb=Avernet', () => {
     sc.listSpaces.mockClear();
     await adminService.listSpaces({ page: 1, pageSize: 20 });
     expect(sc.listSpaces).toHaveBeenCalledWith({
-      user_id: '327325',
+      user_id: '900003',
       page_no: 1,
       page_size: 20,
     });
@@ -67,13 +67,13 @@ describe('adminService 网络参数对齐 clawweb=Avernet', () => {
 
   it('createTeamSpace 传 user_id + user_name(花名) query + body space_name', async () => {
     // 能力命中花名缓存（不调 loadIdentities）。
-    setUserIdentity({ userId: '327325', displayName: '风太' });
+    setUserIdentity({ userId: '900003', displayName: '示例用户' });
     sc.createSpace.mockResolvedValue({
       success: true,
       data: { space_id: 1, space_name: '新团队', space_type: 'TEAM' },
     });
     await adminService.createTeamSpace({ spaceName: '新团队' });
-    expect(sc.createSpace).toHaveBeenCalledWith({ space_name: '新团队' }, { user_id: '327325', user_name: '风太' });
+    expect(sc.createSpace).toHaveBeenCalledWith({ space_name: '新团队' }, { user_id: '900003', user_name: '示例用户' });
   });
 
   it('createTeamSpace 取不到花名时不传 user_name（仅 user_id）', async () => {
@@ -83,7 +83,7 @@ describe('adminService 网络参数对齐 clawweb=Avernet', () => {
       data: { space_id: 1, space_name: '新团队', space_type: 'TEAM' },
     });
     await adminService.createTeamSpace({ spaceName: '新团队' });
-    expect(sc.createSpace).toHaveBeenCalledWith({ space_name: '新团队' }, { user_id: '327325' });
+    expect(sc.createSpace).toHaveBeenCalledWith({ space_name: '新团队' }, { user_id: '900003' });
   });
 
   it('addMember body 用 member_user_id + role=MEMBER，user_id 为操作者', async () => {
@@ -92,41 +92,41 @@ describe('adminService 网络参数对齐 clawweb=Avernet', () => {
     expect(sc.addSpaceMember).toHaveBeenCalledWith(
       10001,
       { member_user_id: 'u1', role: 'MEMBER' },
-      { user_id: '327325' },
+      { user_id: '900003' },
     );
   });
 
   it('addMember 传 userName(花名) 时 body 带 member_user_name', async () => {
     sc.addSpaceMember.mockResolvedValue({ success: true, data: { user_id: 'u1', role: 'MEMBER' } });
-    await adminService.addMember(10001, 'u1', 'MEMBER', '风太');
+    await adminService.addMember(10001, 'u1', 'MEMBER', '示例用户');
     expect(sc.addSpaceMember).toHaveBeenCalledWith(
       10001,
-      { member_user_id: 'u1', role: 'MEMBER', member_user_name: '风太' },
-      { user_id: '327325' },
+      { member_user_id: 'u1', role: 'MEMBER', member_user_name: '示例用户' },
+      { user_id: '900003' },
     );
   });
 
   it('removeMember path=被删成员，user_id=操作者', async () => {
     sc.removeSpaceMember.mockResolvedValue({ success: true, data: { deleted: true } });
     await adminService.removeMember(10001, 'u1');
-    expect(sc.removeSpaceMember).toHaveBeenCalledWith(10001, 'u1', { user_id: '327325' });
+    expect(sc.removeSpaceMember).toHaveBeenCalledWith(10001, 'u1', { user_id: '900003' });
   });
 
   it('updateRole path=被改成员，body role，user_id=操作者', async () => {
     sc.updateMemberRole.mockResolvedValue({ success: true, data: { user_id: 'u1', role: 'ADMIN' } });
     await adminService.updateRole(10001, 'u1', 'ADMIN');
-    expect(sc.updateMemberRole).toHaveBeenCalledWith(10001, 'u1', { role: 'ADMIN' }, { user_id: '327325' });
+    expect(sc.updateMemberRole).toHaveBeenCalledWith(10001, 'u1', { role: 'ADMIN' }, { user_id: '900003' });
   });
 
   it('requestJoin 传 user_id + user_name(花名) query + body reason', async () => {
     // 能力命中花名缓存（不调 loadIdentities）。
-    setUserIdentity({ userId: '327325', displayName: '风太' });
+    setUserIdentity({ userId: '900003', displayName: '示例用户' });
     sc.requestJoinSpace.mockResolvedValue({ success: true, data: {} });
     await adminService.requestJoin(10001, '希望加入');
     expect(sc.requestJoinSpace).toHaveBeenCalledWith(
       10001,
       { reason: '希望加入' },
-      { user_id: '327325', user_name: '风太' },
+      { user_id: '900003', user_name: '示例用户' },
     );
   });
 
@@ -134,7 +134,7 @@ describe('adminService 网络参数对齐 clawweb=Avernet', () => {
     // 默认 displayName=null → ensureUserName 返回 null，仅 user_id。
     sc.requestJoinSpace.mockResolvedValue({ success: true, data: {} });
     await adminService.requestJoin(10001, '希望加入');
-    expect(sc.requestJoinSpace).toHaveBeenCalledWith(10001, { reason: '希望加入' }, { user_id: '327325' });
+    expect(sc.requestJoinSpace).toHaveBeenCalledWith(10001, { reason: '希望加入' }, { user_id: '900003' });
   });
 
   it('listMembers 传 page_no + user_id', async () => {
@@ -142,7 +142,7 @@ describe('adminService 网络参数对齐 clawweb=Avernet', () => {
     await adminService.listMembers(10001, { page: 1, pageSize: 20 });
     expect(sc.listSpaceMembers).toHaveBeenCalledWith(
       10001,
-      expect.objectContaining({ user_id: '327325', page_no: 1, page_size: 20 }),
+      expect.objectContaining({ user_id: '900003', page_no: 1, page_size: 20 }),
     );
   });
 

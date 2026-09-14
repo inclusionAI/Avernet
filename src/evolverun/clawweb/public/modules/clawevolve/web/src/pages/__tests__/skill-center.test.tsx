@@ -7,13 +7,14 @@ import SkillCenter from '../SkillCenter'
 import SkillDetail from '../SkillDetail'
 import SkillEventLog from '../../components/SkillEventLog'
 
-const api = vi.hoisted(() => ({ evolve: { listSkillAssets: vi.fn(), listSkillEvents: vi.fn(), getSkillAsset: vi.fn(), getSkillVersionContent: vi.fn(), getSkillVersionDiff: vi.fn() }, tclog: { bots: vi.fn() } }))
+const api = vi.hoisted(() => ({ evolve: { listSpaces: vi.fn(), listSkillAssets: vi.fn(), listSkillEvents: vi.fn(), getSkillAsset: vi.fn(), getSkillVersionContent: vi.fn(), getSkillVersionDiff: vi.fn() }, tclog: { bots: vi.fn() } }))
 vi.mock('../../api/client', () => ({ api }))
 vi.mock('../../hooks/useClientUser', () => ({ useClientUser: () => ({ user: { userId: 'viewer' } }) }))
 const asset = { assetId: 'ASSET-1', name: 'Evidence Skill', description: 'Diagnose actual session evidence.', ownerId: 'owner', botId: 'BOT-1', skillId: '47', currentVersion: 'v2', updatedAt: 1789060000, versions: [{ versionId: 'VERSION-2', version: 'v2' }, { versionId: 'VERSION-1', version: 'v1' }] }
 function Location() { const location = useLocation(); return <output>{location.pathname}</output> }
 beforeEach(() => {
   vi.stubGlobal('React', React); vi.resetAllMocks()
+  api.evolve.listSpaces.mockResolvedValue({ items: [] })
   api.evolve.listSkillAssets.mockResolvedValue({ items: [asset] })
   api.tclog.bots.mockResolvedValue({ bots: [{ botId: 'BOT-1', botName: 'Evidence Bot' }] })
   api.evolve.listSkillEvents.mockResolvedValue({ items: [] })
@@ -26,7 +27,7 @@ describe('Skill center asset list and recorded events', () => {
     await screen.findByText('Evidence Skill')
     fireEvent.click(screen.getByRole('button', { name: '登记 Skill' }))
     expect(screen.getByRole('heading', { name: '登记 Bot 中已有 Skill' })).toBeTruthy()
-    expect(screen.getAllByRole('combobox')).toHaveLength(2)
+    expect(screen.getAllByRole('combobox')).toHaveLength(3)
     expect(screen.getByRole('button', { name: '登记' })).toBeTruthy()
     expect(screen.queryByText('平台从 OCB 读取完整 Skill，并保存登记时的 v1 冻结版本。')).toBeNull()
   })

@@ -33,7 +33,7 @@ from agentclaw.community.core.bot_config_manifest.content.settings import (
     DEFAULT_CONTENT_STORE_DIR,
     content_store_root_from_config,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchedObject,
 )
 

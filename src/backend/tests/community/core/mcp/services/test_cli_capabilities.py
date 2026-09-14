@@ -27,21 +27,41 @@ MANIFEST = (
 
 
 def test_supported_profiles_resolve_exactly_to_two_default_clis() -> None:
-    """Changing a Claude template must not silently grant Default CLIs."""
-    resolver = CliCapabilityManifestResolver(MANIFEST)
+    """Default CLIs are granted per the manifest's match + exclude policy.
 
-    assert [item["cli_code"] for item in resolver.required_cli_items("openclaw", None)] == [
-        "dataphin",
-        "deepinsight-cli",
-    ]
+    For ``claude_code`` the generalCC profile is an exact match; every other
+    non-empty template_type except ``normalCC`` is caught by the exclude-based
+    fallback profile. Empty/None template_type and ``normalCC`` are rejected.
+    """
+    resolver = CliCapabilityManifestResolver(MANIFEST)
+    expected = ["dataphin", "deepinsight-cli"]
+
+    # openclaw is a catch-all (no template_type constraint).
+    assert [item["cli_code"] for item in resolver.required_cli_items("openclaw", None)] == expected
+
+    # claude_code + generalCC — exact-match profile.
     assert [
-        item["cli_code"]
-        for item in resolver.required_cli_items("claude_code", "generalCC")
-    ] == ["dataphin", "deepinsight-cli"]
+        item["cli_code"] for item in resolver.required_cli_items("claude_code", "generalCC")
+    ] == expected
+
+    # claude_code + any non-empty, non-normalCC template — exclude-based profile.
+    assert [
+        item["cli_code"] for item in resolver.required_cli_items("claude_code", "mcptestpq")
+    ] == expected
+    assert resolver.is_supported_profile("claude_code", "mcptestpq") is True
+
+    # claude_code + normalCC — explicitly excluded.
     assert resolver.required_cli_items("claude_code", "normalCC") == []
+    assert resolver.is_supported_profile("claude_code", "normalCC") is False
+
+    # claude_code with empty/None template_type — unsupported (requires non-empty).
+    assert resolver.required_cli_items("claude_code", None) == []
+    assert resolver.is_supported_profile("claude_code", None) is False
+    assert resolver.required_cli_items("claude_code", "") == []
+
+    # Unknown engine — unsupported.
     assert resolver.required_cli_items("aicoding", None) == []
     assert resolver.is_supported_profile("openclaw", None) is True
-    assert resolver.is_supported_profile("claude_code", "normalCC") is False
 
 
 def test_generalcc_preserves_legacy_aicoding_clis_at_creation() -> None:
@@ -158,6 +178,9 @@ def test_manifest_rejects_unreadable_or_non_mapping_documents(
         "duplicate_profile_id",
         "bad_match",
         "bad_template",
+        "bad_exclude_not_list",
+        "bad_exclude_empty_entry",
+        "exclude_with_template_type",
         "duplicate_codes",
         "unknown_code",
     ],
@@ -193,6 +216,16 @@ def test_manifest_rejects_invalid_catalog_and_profile_schema(
         profile["match"] = {}
     elif case == "bad_template":
         profile["match"] = {"engine_type": "openclaw", "template_type": 3}
+    elif case == "bad_exclude_not_list":
+        profile["match"] = {"engine_type": "openclaw", "exclude_template_types": "normalCC"}
+    elif case == "bad_exclude_empty_entry":
+        profile["match"] = {"engine_type": "openclaw", "exclude_template_types": [""]}
+    elif case == "exclude_with_template_type":
+        profile["match"] = {
+            "engine_type": "openclaw",
+            "template_type": "generalCC",
+            "exclude_template_types": ["normalCC"],
+        }
     elif case == "duplicate_codes":
         profile["default_cli_codes"] = ["dataphin", "dataphin"]
     elif case == "unknown_code":

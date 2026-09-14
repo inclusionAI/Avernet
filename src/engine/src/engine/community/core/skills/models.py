@@ -9,6 +9,14 @@ from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 from typing import Any
 
+from engine.community.kernel.center_content import (
+    CenterContentPackage as PoolCenterContentPackage,
+    CenterContentPendingPackage as PoolCenterContentPendingPackage,
+    CenterContentReadyPackage as PoolCenterContentReadyPackage,
+    CenterContentRequest as PoolCenterContentRequest,
+    CenterContentUnavailablePackage as PoolCenterContentUnavailablePackage,
+)
+
 
 class SkillType(Enum):
     """How a skill is installed / supplied."""
@@ -311,6 +319,7 @@ class PoolMappingApplyRequest:
     mappings: tuple[PoolSkillMappingIntent, ...]
     retired_mappings: tuple[PoolSkillMappingIntent, ...]
     source_layout: PoolMappingSourceLayout
+    center_content: PoolCenterContentRequest | None = None
 
 
 class PoolMappingProjectionStatus(StrEnum):
@@ -433,6 +442,11 @@ __all__ = [
     "PoolLayoutProbeStatus",
     "PoolLayoutRollbackRequest",
     "PoolMappingApplyMode",
+    "PoolCenterContentPackage",
+    "PoolCenterContentPendingPackage",
+    "PoolCenterContentReadyPackage",
+    "PoolCenterContentRequest",
+    "PoolCenterContentUnavailablePackage",
     "PoolMappingApplyRequest",
     "PoolMappingApplyResult",
     "PoolMappingItemResult",

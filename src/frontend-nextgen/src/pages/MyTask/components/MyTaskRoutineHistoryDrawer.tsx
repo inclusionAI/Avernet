@@ -14,11 +14,11 @@ import { cn } from '@/utils/cn';
 import React from 'react';
 
 function Th({ className, ...props }: React.ThHTMLAttributes<HTMLTableCellElement>) {
-  return <th className={cn('px-4 py-3 text-xs font-medium', className)} {...props} />;
+  return <th className={cn('h-10 px-4 py-3 text-xs font-medium text-muted-foreground', className)} {...props} />;
 }
 
 function Td({ className, ...props }: React.TdHTMLAttributes<HTMLTableCellElement>) {
-  return <td className={cn('border-t border-[var(--color-border)] px-4 py-4 align-top', className)} {...props} />;
+  return <td className={cn('border-t border-border px-4 py-4 align-top', className)} {...props} />;
 }
 
 function formatDateTime(value?: string | null): string {
@@ -55,8 +55,8 @@ export function MyTaskRoutineHistoryDrawer({
     <Drawer open={Boolean(selectedRoutineHistoryId)} onOpenChange={(open) => !open && onCloseRoutineHistory()}>
       <DrawerContent side="right" size="lg" className="w-[min(100vw,60rem)]">
         <DrawerHeader>
-          <DrawerTitle className="text-xl font-semibold text-[var(--color-fg)]">历史任务</DrawerTitle>
-          <DrawerDescription className="mt-2 text-sm text-[var(--color-muted)]">
+          <DrawerTitle className="text-xl font-semibold text-foreground">历史任务</DrawerTitle>
+          <DrawerDescription className="mt-2 text-sm text-muted-foreground">
             查看所有定时任务的历史执行记录。每条历史任务都可继续查看对应实例，便于定位单次运行详情。
           </DrawerDescription>
         </DrawerHeader>
@@ -65,24 +65,24 @@ export function MyTaskRoutineHistoryDrawer({
             {historyError}
           </Card>
         ) : null}
-        <div className="overflow-hidden rounded-xl border border-[var(--color-border)]">
+        <div className="overflow-hidden rounded-lg border border-border">
           <div className="app-scrollbar overflow-x-auto">
             <table className="min-w-full border-separate border-spacing-0">
               <thead>
-                <tr className="bg-[var(--color-panel-strong)]/60 text-left text-xs font-medium text-[var(--color-muted)]">
-                  <Th className="rounded-tl-xl">历史任务</Th>
+                <tr className="bg-muted/30 text-left text-xs font-medium text-muted-foreground">
+                  <Th className="rounded-tl-lg">历史任务</Th>
                   <Th>计划触发</Th>
                   <Th>实际触发</Th>
                   <Th>耗时</Th>
                   <Th>关联任务</Th>
-                  <Th className="rounded-tr-xl text-right">操作</Th>
+                  <Th className="rounded-tr-lg text-right">操作</Th>
                 </tr>
               </thead>
               <tbody>
                 {historyLoading ? (
                   <tr>
                     <td colSpan={6} className="p-0">
-                      <div className="py-16 text-center text-sm text-[var(--color-muted)]">历史任务加载中…</div>
+                      <div className="py-16 text-center text-sm text-muted-foreground">历史任务加载中…</div>
                     </td>
                   </tr>
                 ) : historyError && historyRuns.length === 0 ? (
@@ -93,35 +93,30 @@ export function MyTaskRoutineHistoryDrawer({
                   </tr>
                 ) : historyRuns.length > 0 ? (
                   historyRuns.map((item) => (
-                    <tr
-                      key={item.id}
-                      className="border-b border-[var(--color-border)] text-xs transition-colors hover:bg-[var(--color-panel-muted)]/60"
-                    >
+                    <tr key={item.id} className="border-b border-border text-xs transition-colors hover:bg-muted/50">
                       <Td className="max-w-[18rem]">
                         <div className="space-y-1">
-                          <div className="truncate font-medium text-[var(--color-fg)]">{item.routineName}</div>
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-muted)]">
+                          <div className="truncate font-medium text-foreground">{item.routineName}</div>
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                             <span>{item.botName ?? item.botId}</span>
-                            <code className="rounded bg-[var(--color-panel-strong)] px-1.5 py-0.5">
-                              {item.instanceNo}
-                            </code>
+                            <code className="rounded bg-muted px-1.5 py-0.5">{item.instanceNo}</code>
                           </div>
-                          <p className="m-0 line-clamp-2 text-xs leading-5 text-[var(--color-muted)]">
+                          <p className="m-0 line-clamp-2 text-xs leading-5 text-muted-foreground">
                             {item.outputSummary ?? item.errorMessage ?? '历史任务执行记录'}
                           </p>
                         </div>
                       </Td>
                       <Td>
-                        <div className="text-xs text-[var(--color-fg)]">{formatDateTime(item.plannedTriggerAt)}</div>
+                        <div className="text-xs text-foreground">{formatDateTime(item.plannedTriggerAt)}</div>
                       </Td>
                       <Td>
-                        <div className="text-xs text-[var(--color-fg)]">{formatDateTime(item.actualTriggerAt)}</div>
+                        <div className="text-xs text-foreground">{formatDateTime(item.actualTriggerAt)}</div>
                       </Td>
                       <Td>
-                        <div className="text-xs text-[var(--color-fg)]">{item.duration ?? '—'}</div>
+                        <div className="text-xs text-foreground">{item.duration ?? '—'}</div>
                       </Td>
                       <Td>
-                        <div className="text-xs text-[var(--color-fg)]">{item.taskName ?? '—'}</div>
+                        <div className="text-xs text-foreground">{item.taskName ?? '—'}</div>
                       </Td>
                       <Td>
                         <div className="flex justify-end">
@@ -151,7 +146,9 @@ export function MyTaskRoutineHistoryDrawer({
           </div>
         </div>
         <DrawerFooter>
-          <Button onClick={onCloseRoutineHistory}>关闭</Button>
+          <Button variant="outline" onClick={onCloseRoutineHistory}>
+            关闭
+          </Button>
         </DrawerFooter>
       </DrawerContent>
     </Drawer>

@@ -44,6 +44,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+from abc import abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import mkdtemp
@@ -51,7 +52,7 @@ from types import MappingProxyType
 from typing import Callable, Mapping, Optional, Protocol, Sequence, Tuple
 from urllib.parse import urlparse
 
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchFailedError,
     FetchRefusedError,
 )
@@ -318,8 +319,12 @@ class GitCheckout:
             subpath = self.subpath
         _require_safe("subpath", subpath)
         if subpath is None or subpath == "":
+            # Worded for a report, not a stack trace: since the identity
+            # category stopped asking this question itself (it needed a
+            # git-only field to ask), this string is what an author reads
+            # when their entry selected no single file out of a tree.
             raise FetchRefusedError(
-                "read_file: the source's subpath must name a single file"
+                "the source's 'subpath' must name a single file"
             )
         hit = [
             (mode, name, size)
@@ -361,14 +366,23 @@ class GitCheckout:
 
 class GitSourceClient(Protocol):
     """The seam the apply pipeline speaks to; ``SubprocessGitClient`` is v1's
-    only implementation, and tests duck-type it."""
+    only implementation and **inherits** it.
 
+    The member is ``@abstractmethod`` for the reason
+    ``core/ports/identity_file_port.py`` records: the backend runs no static
+    type checker, so a structurally-satisfied Protocol is verified by nothing
+    at all. Renaming ``fetch`` here without renaming it on the client would
+    otherwise surface as an ``AttributeError`` mid-apply, on the first entry
+    that takes the git road.
+    """
+
+    @abstractmethod
     def fetch(
         self, spec: GitSourceSpec, *, headers: Mapping[str, str] = ...
     ) -> GitCheckout: ...
 
 
-class SubprocessGitClient:
+class SubprocessGitClient(GitSourceClient):
     """Shallow single-ref fetch through the git CLI.
 
     ``_run`` is the test seam (argv-shape tests script it; behaviour tests
@@ -386,14 +400,18 @@ class SubprocessGitClient:
         self,
         _run: Optional[Callable[..., str]] = None,
         *,
+        env: Mapping[str, str],
         allowed_schemes: frozenset[str] = frozenset({"https"}),
-        env: Optional[Mapping[str, str]] = None,
     ) -> None:
         self._run = _run if _run is not None else _real_run_git
         self._allowed_schemes = allowed_schemes
-        self._base_env: Mapping[str, str] = (
-            env if env is not None else MappingProxyType({})
-        )
+        # Required, not defaulted: the composition root owes this client its
+        # base environment and always passes one. A default of "no environment
+        # at all" was a value nothing in production ever held, and it hid the
+        # fact that the caller owes it — a rig that forgot got an empty map
+        # instead of a TypeError. An empty base is still expressible; it just
+        # has to be said.
+        self._base_env: Mapping[str, str] = env
 
     def fetch(
         self, spec: GitSourceSpec, *, headers: Mapping[str, str] = MappingProxyType({})

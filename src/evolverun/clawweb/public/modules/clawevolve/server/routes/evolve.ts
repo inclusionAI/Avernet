@@ -128,9 +128,14 @@ import {
 } from "../services/evolve/run-analysis-starter.js";
 
 type Dispatch = typeof dispatchEvolveCommand;
+import type { OcbSpace, OcbSpacePort } from "../internal/module-api.js";
+import { canReadSpaceRecord } from "../services/evolve/space-access.js";
+import { taskSpacePresentation, type SpacePresentationPolicy } from "../services/evolve/space-presentation.js";
 type DispatchTaskLogArchive = typeof dispatchEvolveTaskLogArchive;
 type CancelExecution = typeof cancelEvolveExecution;
 export type EvolveRouterDeps = {
+  /** Never read from HTTP input; absent means unchanged internal behavior. */
+  version?: "openversion" | "internalversion";
   db?: IDatabase;
   dispatch?: Dispatch;
   dispatchTaskLogArchive?: DispatchTaskLogArchive;
@@ -151,6 +156,8 @@ export type EvolveRouterDeps = {
   botWorkflowPermissionRepo?: BotWorkflowPermissionRepository | null;
   runAnalysisStarter?: RunAnalysisStarter | null;
   ocbLocalSkills?: OcbLocalSkillPort | null;
+  ocbSpaces?: OcbSpacePort;
+  spacePresentationPolicies?: readonly SpacePresentationPolicy[];
   stageSkillRepo?: StageSkillRepository | null;
   skillAssetRepo?: SkillAssetRepository | null;
 };
@@ -216,6 +223,7 @@ async function resolveFrozenStageExtensions(
   ownerUserId: string,
   repo: StageSkillRepository | null,
   requirePassedIntegrationTest = false,
+  spaces: readonly OcbSpace[] = [],
 ): Promise<FrozenTaskStageExtensions> {
   if (value == null) return {};
   if (!isRecord(value)) throw new Error("stageExtensions 必须是 JSON 对象");
@@ -239,7 +247,10 @@ async function resolveFrozenStageExtensions(
       const implementation = implementationId
         ? await repo.findImplementation(implementationId)
         : null;
-      if (!implementation || implementation.owner_user_id !== ownerUserId
+      if (implementation && !canReadSpaceRecord(implementation, ownerUserId, spaces)) {
+        throw Object.assign(new Error("无权使用所选 Stage Skill"), { status: 403 });
+      }
+      if (!implementation || !canReadSpaceRecord(implementation, ownerUserId, spaces)
         || implementation.status !== "registered"
         || (requirePassedIntegrationTest && implementation.integration_test_status !== "test_passed")
         || implementation.stage_key !== stage.stage
@@ -251,6 +262,10 @@ async function resolveFrozenStageExtensions(
       modes[modeValue] = {
         enabled: true,
         implementationId: implementation.implementation_id,
+        displayName: implementation.display_name,
+        stageSkillId: implementation.stage_skill_id,
+        ownerUserId: implementation.owner_user_id,
+        spaceId: implementation.space_id ?? null,
       };
     }
     const enabledModes = Object.entries(modes)
@@ -884,6 +899,20 @@ async function dispatchCreatedStep(
   }
 }
 
+function matchesFrozenStageOwner(
+  task: EvolveTaskRow, stage: StageKey, mode: StageExtensionMode,
+  implementation: { owner_user_id: string; implementation_id: string; space_id?: string | null; space_type?: string | null },
+): boolean {
+  const binding = taskExtensions(task, stage)[mode];
+  // Team use is authorized once at task creation and frozen server-side. Internal
+  // callbacks have no browser identity and must never re-interpret request claims.
+  if (binding?.enabled && binding.implementationId === implementation.implementation_id
+    && binding.ownerUserId && binding.spaceId && implementation.space_type === "TEAM") {
+    return binding.ownerUserId === implementation.owner_user_id && binding.spaceId === implementation.space_id;
+  }
+  return implementation.owner_user_id === task.user_id;
+}
+
 async function createStageExtensionStep(
   req: Request,
   repo: EvolveRepository,
@@ -911,7 +940,7 @@ async function createStageExtensionStep(
       === binding.implementationId;
   if (!implementation || implementation.status === "deleted"
     || (!testBinding && implementation.status !== "registered")
-    || implementation.owner_user_id !== task.user_id
+    || !matchesFrozenStageOwner(task, stage, mode, implementation)
     || implementation.stage_key !== stage || implementation.extension_mode !== mode) {
     throw new Error(`冻结的 ${stage} ${mode} Skill 实现不可用`);
   }
@@ -1092,7 +1121,7 @@ async function createOptimizeStep(
   }
   const config = parseJson(task.config_json) as {
     dispatchMode?: "message" | "run"; trainBenchDomainId?: string; testBenchDomainId?: string;
-    ownerUserId?: string; nodeCommands?: NodeCommandYamls; forceMessage?: boolean; runtimeMaintenance?: boolean; clawwebUrl?: string; openclawExecutionMode?: "local" | "gateway";
+    ownerUserId?: string; model?: string; nodeCommands?: NodeCommandYamls; forceMessage?: boolean; runtimeMaintenance?: boolean; clawwebUrl?: string; openclawExecutionMode?: "local" | "gateway";
     targetSkill?: FrozenSkillTarget;
   } | null;
   const dispatchMode = config?.dispatchMode ?? await repo.resolveBotDispatchMode(task.user_id, task.bot_id, taskBotEnv(task));
@@ -1111,7 +1140,10 @@ async function createOptimizeStep(
        ...(preparedTarget ? [["workspace", quoteCommandArgument(preparedTarget.workspacePath)] as [string, string]] : [])])
     : `/clawevolve-workflow --stage optimize --task-id ${task.task_id} --step-id ${stepId} --round ${roundNo} --train-bench-domain-id ${config?.trainBenchDomainId} --test-bench-domain-id ${config?.testBenchDomainId} --clawweb-url ${config?.clawwebUrl ?? getClawWebPublicBaseUrl()} --openclaw-execution-mode ${config?.openclawExecutionMode ?? "local"}${preparedTarget ? ` --workspace ${quoteCommandArgument(preparedTarget.workspacePath)}` : ""}`;
   const ownerUserId = safeBenchCommandValue("ownerId", config?.ownerUserId ?? task.user_id);
-  const commandWithOwner = `${command} --owner-id ${ownerUserId}`;
+  // Explicit node commands keep their model choice; older commands may omit it.
+  const modelArgument = config?.model && !readNodeCommandOption(command, "model")
+    ? ` --model ${safeBenchCommandValue("model", config.model)}` : "";
+  const commandWithOwner = `${command} --owner-id ${ownerUserId}${modelArgument}`;
   const stepNo = Math.max(0, ...existingSteps.map((item) => item.step_no)) + 1;
   const step = await repo.createStep({
     stepId, taskId: task.task_id, stepType: "optimize",
@@ -1398,7 +1430,7 @@ async function finishLogicalStage(
     return null;
   }
   const finishTask = async () => {
-    if (config?.targetSkill) {
+    if (config?.targetSkill && task.task_type === "full") {
       const finalStep = await createSkillLifecycleStep(req, repo, dispatch, task, "finalize");
       return { stepId: finalStep.step_id, stepType: finalStep.step_type };
     }
@@ -1942,9 +1974,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       res.status(400).json({ error: "inputMode 必须是 diagnose_goal 或 direct_goal" }); return;
     }
     const targetSkillAssetId = String(rawTargetSkillAssetId ?? "").trim();
-    if (targetSkillAssetId && taskType !== "full") {
-      res.status(400).json({ error: "待进化 Skill 只能用于完整自进化任务" }); return;
-    }
+    const skillDiagnosisOnly = Boolean(targetSkillAssetId) && taskType === "diagnose";
     let goal: string;
     try {
       goal = taskType === "full" ? normalizeEvolutionGoal(rawGoal) : "";
@@ -1960,7 +1990,14 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     } as const;
     let stageSelection: FrozenStageSelection;
     try {
-      stageSelection = flow.resolveSelection(flowStartInput, rawStageSelection);
+      // Reuse Diagnose switch validation while keeping the frozen Skill identity.
+      // Skill diagnosis does not inherit the legacy Bot diagnosis's optional Plan.
+      stageSelection = (skillDiagnosisOnly ? resolveEvolutionFlow(false) : flow)
+        .resolveSelection(flowStartInput, rawStageSelection);
+      if (skillDiagnosisOnly) {
+        if (rawStageSelection?.plan === true) throw new Error("Skill 诊断任务不能执行 Plan，请创建完整自进化任务");
+        stageSelection.plan = false;
+      }
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); return;
     }
@@ -2003,7 +2040,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       res.status(400).json({ error: "任务名称不能超过128字，备注不能超过1000字" }); return;
     }
     const diagnoseModel = String(model);
-    if (requiresDiagnose && (!diagnoseModel.trim() || diagnoseModel.length > 128 || /[\0\r\n\s]/.test(diagnoseModel))) {
+    const requiresModel = requiresDiagnose || (taskType === "full" && inputMode === "direct_goal");
+    if (requiresModel && (!diagnoseModel.trim() || diagnoseModel.length > 128 || /[\0\r\n\s]/.test(diagnoseModel))) {
       res.status(400).json({ error: "model 必须是 1 到 128 字符且不能包含空白字符" }); return;
     }
     if (requiresDiagnose && judgeBackend === "api" && !DIAGNOSE_MODELS.has(diagnoseModel)) {
@@ -2034,14 +2072,20 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
     let stageExtensions: FrozenTaskStageExtensions;
     try {
+      const actorId = resolveRequestUserId(req) ?? String(userId);
+      const spaces = rawStageExtensions == null ? [] : await deps.ocbSpaces?.listAccessibleSpaces({ identity: {
+        userId: actorId, authorization: req.header("Authorization"), cookie: req.header("Cookie"),
+      } }) ?? [];
       stageExtensions = await resolveFrozenStageExtensions(
         rawStageExtensions,
-        String(userId),
+        actorId,
         stageSkillRepo,
         Boolean(targetSkillAssetId),
+        spaces,
       );
     } catch (error) {
-      res.status(422).json({ error: error instanceof Error ? error.message : String(error) }); return;
+      res.status((error as { status?: number })?.status === 403 ? 403 : 422)
+        .json({ error: error instanceof Error ? error.message : String(error) }); return;
     }
     for (const stage of ["diagnose", "plan", "optimize"] as const) {
       if (!stageSelection[stage] && Object.values(stageExtensions[stage] ?? {})
@@ -2169,9 +2213,10 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
           assetId: targetSkillAssetId,
           skillAssetRepo,
           ocbLocalSkills,
+          ocbSpaces: deps.ocbSpaces,
           artifactStore: { putObject: deps.artifactStore.putObject.bind(deps.artifactStore) },
           identity: {
-            userId: String(userId),
+            userId: resolveRequestUserId(req) ?? String(userId),
             authorization: req.header("Authorization") || undefined,
             cookie: req.header("Cookie") || undefined,
           },
@@ -2182,10 +2227,13 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         }); return;
       }
     }
+    const presentation = taskSpacePresentation(targetSkill, stageExtensions, deps.spacePresentationPolicies ?? []);
     const config = {
       flow: freezeEvolutionFlow(flow, stageSelection),
+      ...(presentation ? { presentation } : {}),
       ...(taskType === "full" ? { inputMode } : {}),
-      ...(requiresDiagnose ? { model: diagnoseModel, diagnoseIntent, maxSessions, judgeBackend } : {}),
+      ...(requiresModel ? { model: diagnoseModel } : {}),
+      ...(requiresDiagnose ? { diagnoseIntent, maxSessions, judgeBackend } : {}),
       ...(requiresDiagnose ? { sessionSource: {
         mode: sessionSourceMode,
         ...(rawSessionIds === undefined ? {} : { session_ids: sessionIds }),
@@ -2516,6 +2564,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!repo) { res.status(503).json({ error: "数据库不可用" }); return; }
     const {
       taskName, remark, userId, botId, botEnv, sourceDiagnosisTaskIds, maxRounds = 3, nodeCommandYamls,
+      model = "antchat/GLM-5.1",
       forceMessage: rawForceMessage, runtimeMaintenance: rawRuntimeMaintenance,
       openclawExecutionMode: rawOpenClawExecutionMode,
     } = req.body ?? {};
@@ -2545,6 +2594,9 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!sourceIds.length) {
       res.status(400).json({ error: "诊断进化必须选择一个已完成 Plan 的诊断任务" }); return;
     }
+    let selectedModel: string;
+    try { selectedModel = safeBenchCommandValue("model", model); }
+    catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); return; }
     if (await rejectUnsupportedBotEngine(repo, res, String(userId), String(botId), String(botEnv ?? ""))) return;
     let primaryBenchDomains: BenchDomains | null = null;
     for (const [index, sourceTaskId] of sourceIds.entries()) {
@@ -2569,6 +2621,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const taskId = evolveTaskId();
     const clawwebUrl = getClawWebPublicBaseUrl();
     const dispatchMode = await repo.resolveBotDispatchMode(String(userId), String(botId), String(botEnv ?? ""));
+    const optimizeTemplate = nodeCommands.optimize ?? defaultNodeCommand("optimize")
+      .replace(/--model(?:=|\s+)\S+/, `--model ${selectedModel}`);
     await repo.createTask({
       taskId, taskType: "optimize", userId: String(userId), botId: String(botId),
       taskName: String(taskName).trim(), remark: String(remark ?? "").trim() || null,
@@ -2576,8 +2630,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         sourceDiagnosisTaskIds: sourceIds,
         trainBenchDomainId: primaryBenchDomains?.trainBenchDomainId,
         testBenchDomainId: primaryBenchDomains?.testBenchDomainId,
-        maxRounds: rounds, dispatchMode, forceMessage, runtimeMaintenance: rawRuntimeMaintenance !== false, clawwebUrl, openclawExecutionMode, botEnv: String(botEnv ?? ""),
-        nodeCommands: { optimize: nodeCommands.optimize ?? defaultNodeCommand("optimize") },
+        model: selectedModel, maxRounds: rounds, dispatchMode, forceMessage, runtimeMaintenance: rawRuntimeMaintenance !== false, clawwebUrl, openclawExecutionMode, botEnv: String(botEnv ?? ""),
+        nodeCommands: { optimize: optimizeTemplate },
       }),
       createdBy: String(req.header("X-User-Id") || userId),
     });
@@ -2593,7 +2647,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
     const {
       taskName, remark, userId, botId, botEnv, objective, trainBenchDomainId, testBenchDomainId,
-      maxRounds = 3, nodeCommandYamls, forceMessage: rawForceMessage, runtimeMaintenance: rawRuntimeMaintenance,
+      model = "antchat/GLM-5.1", maxRounds = 3, nodeCommandYamls, forceMessage: rawForceMessage, runtimeMaintenance: rawRuntimeMaintenance,
       openclawExecutionMode: rawOpenClawExecutionMode,
     } = req.body ?? {};
     const ownerUserId = String(userId ?? "").trim();
@@ -2613,6 +2667,9 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!Number.isSafeInteger(rounds) || rounds < 1 || rounds > 100) {
       res.status(400).json({ error: "maxRounds 必须是 1 到 100 的整数" }); return;
     }
+    let selectedModel: string;
+    try { selectedModel = safeBenchCommandValue("model", model); }
+    catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); return; }
     const actorUserId = resolveRequestUserId(req);
     if (!actorUserId) { res.status(401).json({ error: "无法识别当前登录用户" }); return; }
     if (actorUserId !== ownerUserId) {
@@ -2643,7 +2700,10 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const dispatchMode = await repo.resolveBotDispatchMode(ownerUserId, String(botId), String(botEnv ?? ""));
     const forceMessage = rawForceMessage === true;
     const runtimeMaintenance = rawRuntimeMaintenance !== false;
-    const commandTemplate = nodeCommands.bench_plan ?? defaultNodeCommand("bench_plan");
+    const commandTemplate = nodeCommands.bench_plan ?? defaultNodeCommand("bench_plan")
+      .replace(/--model(?:=|\s+)\S+/, `--model ${selectedModel}`);
+    const optimizeTemplate = nodeCommands.optimize ?? defaultNodeCommand("optimize")
+      .replace(/--model(?:=|\s+)\S+/, `--model ${selectedModel}`);
     const command = renderCommand(commandTemplate, {
       train_bench_domain_id: trainDomainId, test_bench_domain_id: testDomainId,
     }, [
@@ -2657,10 +2717,10 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       taskName: String(taskName).trim(), remark: String(remark ?? "").trim() || null,
       configJson: JSON.stringify({
         objective: objectiveText, ownerUserId, trainBenchDomainId: trainDomainId, testBenchDomainId: testDomainId,
-        pinnedBenchDomains: pinnedDomains, maxRounds: rounds,
+        pinnedBenchDomains: pinnedDomains, model: selectedModel, maxRounds: rounds,
         nodeCommands: {
           bench_plan: commandTemplate,
-          optimize: nodeCommands.optimize ?? defaultNodeCommand("optimize"),
+          optimize: optimizeTemplate,
         },
         dispatchMode, forceMessage, runtimeMaintenance, clawwebUrl, openclawExecutionMode, botEnv: String(botEnv ?? ""),
       }),
@@ -2811,7 +2871,14 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
     if (await rejectUnsupportedBotEngine(repo, res, ownerUserId, targetBotId, targetBotEnv)) return;
 
-    const activeTasks = (await repo.listActiveBotEvolveTasks(ownerUserId, targetBotId))
+    // COSEC: only the trusted openversion composition can skip the activity guard.
+    // Manual confirmation is still required because active evolution sessions may be removed.
+    const openCleanup = deps.version === "openversion";
+    if (openCleanup && !forceCleanup) {
+      res.status(422).json({ error: "请确认手动清理：不重启 Gateway、不检查运行任务，可能中断正在进行的进化任务" });
+      return;
+    }
+    const activeTasks = openCleanup ? [] : (await repo.listActiveBotEvolveTasks(ownerUserId, targetBotId))
       .filter((task) => !targetBotEnv || taskBotEnv(task) === targetBotEnv);
     if (activeTasks.length && !forceCleanup) {
       res.status(409).json({
@@ -2832,6 +2899,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       taskName: String(taskName).trim(), remark: String(remark ?? "").trim() || null,
       configJson: JSON.stringify({
         scope: "bot_history", forceCleanup, dispatchMode, runtimeMaintenance: false,
+        ...(openCleanup ? { version: "openversion", gatewayRestart: false, activeTaskCheck: false } : {}),
         clawwebUrl, botEnv: targetBotEnv,
       }),
       createdBy: actor,
@@ -3109,17 +3177,33 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!canReadTask(req, task)) { res.status(403).json({ code: "TASK_NOT_SHARED", error: "权限不足，请联系任务 Owner 开启分享" }); return; }
     const initialPack = (await repo.listPacks(task.user_id, task.bot_id)).find((pack) =>
       pack.source_task_id === task.task_id && pack.source_kind === "baseline" && pack.status === "available");
-    const view = await withTaskSource(
-      publicTask(
+    const taskView = publicTask(
         task as unknown as Record<string, unknown>,
         await repo.listSteps(task.task_id),
         true,
-      ),
+      );
+    const view = await withTaskSource(
+      taskView,
       task,
       taskSourceService,
     );
+    const extensionRuns = stageSkillRepo ? await stageSkillRepo.listExtensionRuns(task.task_id) : [];
+    const implementations = new Map(await Promise.all([...new Set(extensionRuns.map((run) => run.implementation_id))]
+      .map(async (implementationId) => [implementationId, await stageSkillRepo!.findImplementation(implementationId)] as const)));
+    const extensionByStep = new Map(extensionRuns.map((run) => [run.step_id, run]));
     res.json({
       ...view,
+      steps: taskView.steps?.map((step) => {
+        const run = extensionByStep.get(step.stepId);
+        const frozen = run ? taskExtensions(task, run.stage_key)[run.extension_mode] : undefined;
+        return { ...step, stageExtension: step.stepType === "stage_extension" && run ? {
+          stage: run.stage_key,
+          mode: run.extension_mode,
+          implementationId: run.implementation_id,
+          displayName: (frozen?.implementationId === run.implementation_id ? frozen.displayName : undefined)
+            ?? implementations.get(run.implementation_id)?.display_name ?? null,
+        } : null };
+      }),
       interactions: stageSkillRepo ? (await stageSkillRepo.listInteractions(task.task_id)).map((item) => ({
         interactionId: item.interaction_id,
         stepId: item.step_id,
@@ -3248,9 +3332,14 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       return;
     }
     const asset = await skillAssetRepo.findAsset(target.assetId);
-    if (!asset || asset.owner_user_id !== task.user_id || asset.bot_id !== task.bot_id
+    if (!asset || asset.owner_user_id !== (target.ownerUserId ?? task.user_id) || asset.bot_id !== task.bot_id
       || asset.ocb_skill_id !== target.skillId) {
       res.status(409).json({ error: "待更新的 OCB Skill 与任务冻结目标不一致" }); return;
+    }
+    if (asset.space_id && !canReadSpaceRecord(asset, actorId, await deps.ocbSpaces?.listAccessibleSpaces({ identity: {
+      userId: actorId, authorization: req.header("Authorization"), cookie: req.header("Cookie"),
+    } }) ?? [])) {
+      res.status(403).json({ error: "当前用户已无权访问该 Skill 所属空间" }); return;
     }
     const stored = await artifactStore.getObject(objectKeyFromEvolveRef(target.candidate.ref));
     const sha256 = createHash("sha256").update(stored.content).digest("hex");
@@ -4023,7 +4112,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       const implementation = run
         ? await stageSkillRepo.findImplementation(run.implementation_id)
         : null;
-      if (!run || !implementation || implementation.owner_user_id !== task.user_id
+      if (!run || !implementation || !matchesFrozenStageOwner(task, run.stage_key, run.extension_mode, implementation)
         || implementation.stage_key !== run.stage_key
         || implementation.extension_mode !== run.extension_mode) {
         res.status(409).json({ error: "Stage Skill 冻结绑定不存在或不一致" }); return;

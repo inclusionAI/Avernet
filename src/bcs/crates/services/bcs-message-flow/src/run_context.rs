@@ -45,7 +45,8 @@ impl BotRunContextPort for MemoryBotRunContextStore {
     }
 
     async fn get_context(&self, run_id: &str) -> Option<BotRunContext> {
-        self.runs.read().await.get(run_id).cloned()
+        let canonical = self.active_aliases.read().await.get(run_id).cloned();
+        self.runs.read().await.get(canonical.as_deref().unwrap_or(run_id)).cloned()
     }
 
     async fn try_begin_terminal(&self, run_id: &str) -> bool {
@@ -166,6 +167,21 @@ impl BotRunContextPort for MemoryBotRunContextStore {
         }
     }
 
+    async fn bind_request_alias(&self, canonical_run_id: &str, request_id: &str) -> ServiceResult<bool> {
+        let active = self.active_runs.read().await;
+        if !active.contains_key(canonical_run_id) || request_id.is_empty() {
+            return Ok(false);
+        }
+        let mut aliases = self.active_aliases.write().await;
+        if aliases.get(request_id).is_some_and(|id| id != canonical_run_id) {
+            return Err(ServiceError::InvalidOperation {
+                message: "request alias belongs to another Bot run".into(), request_id: None,
+            });
+        }
+        aliases.insert(request_id.to_string(), canonical_run_id.to_string());
+        Ok(true)
+    }
+
     async fn bind_downstream_run_id(
         &self,
         canonical_run_id: &str,
@@ -203,8 +219,7 @@ impl BotRunContextPort for MemoryBotRunContextStore {
             return Ok(false);
         };
         let mut aliases = self.active_aliases.write().await;
-        aliases.remove(canonical_run_id);
-        aliases.remove(&context.downstream_run_id);
+        aliases.retain(|_, canonical| canonical != &context.canonical_run_id);
         Ok(true)
     }
 

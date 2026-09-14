@@ -20,7 +20,6 @@ from agentclaw.community.core.repository.protocols.bot import (
 from agentclaw.community.core.repository.protocols.capability_desired_state import (
     CapabilityDesiredStateRepositoryProtocol,
 )
-from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.authorization_hook import (
     BotCapabilityAuthorizationHookProtocol,
 )
@@ -45,6 +44,9 @@ from agentclaw.community.core.skill_center.policies.platform_default_mcp import 
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
 )
+from agentclaw.community.core.skill_center.desktop_skill_recovery_protocol import (
+    DesktopSkillRecoveryServiceProtocol,
+)
 from agentclaw.community.core.skill_center.services._mutation_flow import (
     MutationProjectionFlow,
     mcp_claim_scope,
@@ -54,6 +56,9 @@ from agentclaw.community.core.skill_center.services._mutation_flow import (
 )
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.core.skill_center.direct_activation_service_protocol import DirectActivationServiceProtocol
+from agentclaw.community.core.skill_center.skill_query_service_protocol import (
+    SkillQueryServiceProtocol,
+)
 
 
 class DirectActivationService(DirectActivationServiceProtocol):
@@ -70,23 +75,28 @@ class DirectActivationService(DirectActivationServiceProtocol):
         self,
         repository: CapabilityDesiredStateRepositoryProtocol,
         bot_repo: BotRepository,
-        skill_repo: SkillRepository,
+        skill_query: SkillQueryServiceProtocol,
         runtime: BotRuntimeProjectorProtocol,
         authorization: BotCapabilityAuthorizationHookProtocol,
         audit_log_repo: BotCollabLogRepositoryProtocol,
         mcp_center: MCPCenterPlugin,
         reader: BotCapabilityStateReaderProtocol,
         platform_default_mcp_policy: PlatformDefaultMcpPolicy,
+        recovery: DesktopSkillRecoveryServiceProtocol,
     ) -> None:
         self._repository = repository
         self._bot_repo = bot_repo
-        self._skill_repo = skill_repo
+        self._skill_query = skill_query
         self._authorization = authorization
         self._audit_log_repo = audit_log_repo
         self._mcp_center = mcp_center
         self._reader = reader
         self._platform_default_mcp_policy = platform_default_mcp_policy
-        self._flow = MutationProjectionFlow(repository=repository, runtime=runtime)
+        self._flow = MutationProjectionFlow(
+            repository=repository,
+            runtime=runtime,
+            recovery=recovery,
+        )
 
     # ── Skills ──────────────────────────────────────────────────────
 
@@ -167,37 +177,16 @@ class DirectActivationService(DirectActivationServiceProtocol):
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Resolve the asset and authorize the actor against the Bot.
 
-        A Local row carries its own Bot/owner, so the addressed pair must be
-        exactly it; shared governed Repo rows are system-owned and take the
-        addressed pair. Authorization failure masks as not-found — the Local
-        wire's published behavior.
+        The query module owns Local, Repo and Center addressing and asset
+        visibility. Reusing it here prevents Direct writes from growing a
+        second source classifier or treating an Installation as permission.
         """
-        if not skill_id.isdecimal():
-            raise LocalSkillNotFoundError()
-        raw = self._skill_repo.get_by_id(skill_id)
-        if raw is None:
-            raise LocalSkillNotFoundError()
-        git_path = str(raw.get("git_path") or "")
-        if git_path.startswith("local://"):
-            if (
-                str(raw.get("user_id") or "") != owner_id
-                or str(raw.get("bolt_id") or "") != bot_id
-                or not raw.get("user_id")
-            ):
-                raise LocalSkillNotFoundError()
-            skill = self._skill_repo.get_bot_local_skill(
-                skill_id=skill_id, bot_id=bot_id, user_id=owner_id
-            )
-            if skill is None:
-                raise LocalSkillNotFoundError()
-        elif git_path.startswith("git://"):
-            # The old scanner persisted ``bolt_id=default`` on some rows; it
-            # is a storage sentinel, never ownership.
-            if raw.get("user_id"):
-                raise LocalSkillNotFoundError()
-            skill = {**raw, "bolt_id": bot_id, "user_id": owner_id}
-        else:
-            raise LocalSkillNotFoundError()
+        skill = self._skill_query.resolve_skill(
+            skill_id=skill_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            user_id=actor_id,
+        )
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
             raise LocalSkillNotFoundError()

@@ -6,6 +6,7 @@ import type { DomainResult } from '@/services/workspace/identityService';
 import type { ProviderConnectionStatus } from '@tc-chat/adapters';
 import { FolderOpen, RefreshCw, Settings2, Share2 } from 'lucide-react';
 import { useState } from 'react';
+import { KIND_LABEL } from './GroupSidebar/GroupItem.types';
 import { ShareDialog } from './ManagePanel/ShareDialog';
 
 export type GroupPanelKind = 'none' | 'members' | 'manage' | 'sessionManage' | 'resources';
@@ -30,7 +31,7 @@ function connectionCopy(status: ProviderConnectionStatus, support: GroupChatStat
   if (support.phase === 'error') return { label: '连接失败', tone: 'error' as const };
   switch (status) {
     case 'connected':
-      return { label: '在线', tone: 'success' as const };
+      return { label: '已连接', tone: 'success' as const };
     case 'connecting':
       return { label: '连接中', tone: 'warning' as const };
     case 'reconnecting':
@@ -40,7 +41,7 @@ function connectionCopy(status: ProviderConnectionStatus, support: GroupChatStat
     case 'error':
       return { label: '连接失败', tone: 'error' as const };
     default:
-      return { label: '离线', tone: 'neutral' as const };
+      return { label: '已断开', tone: 'neutral' as const };
   }
 }
 
@@ -62,7 +63,14 @@ export function GroupHeader({
   const copy = connectionCopy(connectionStatus, supportState);
   const showReconnect =
     connectionStatus === 'disconnected' || connectionStatus === 'error' || connectionStatus === 'reconnecting';
-  const memberCount = selectedGroup?.participants?.length ?? 0;
+  const memberCount = selectedGroup?.participants?.length || selectedGroup?.participantCount || 0;
+  const subtitleLabel = [
+    selectedSession && selectedGroup ? selectedGroup.name : null,
+    memberCount > 0 ? `${memberCount} 个成员` : null,
+    selectedGroup ? KIND_LABEL[selectedGroup.kind] : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   const handleShare = async (title: string, request: () => Promise<DomainResult<{ invitationUrl: string }>>) => {
     setShareOpen(true);
@@ -83,16 +91,11 @@ export function GroupHeader({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h2 className="m-0 truncate text-sm font-semibold text-foreground">
-              {selectedGroup?.name ?? '未选择协作群'}
+              {selectedSession?.title ?? selectedGroup?.name ?? '未选择协作群'}
             </h2>
             <Badge tone={copy.tone}>{copy.label}</Badge>
-            {selectedSession && (
-              <span className="truncate text-xs text-muted-foreground"># {selectedSession.title}</span>
-            )}
           </div>
-          <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">
-            {memberCount > 0 ? `${memberCount} 个成员` : '协作群 · 群组对话'}
-          </p>
+          <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">{subtitleLabel}</p>
         </div>
 
         <div className="flex items-center gap-1">
@@ -132,6 +135,7 @@ export function GroupHeader({
               icon={<Settings2 className="h-4 w-4" aria-hidden />}
               size="sm"
               variant={activePanel === 'sessionManage' ? 'primary' : 'ghost'}
+              data-manage-panel-trigger
               onClick={() => onTogglePanel(activePanel === 'sessionManage' ? 'none' : 'sessionManage')}
             />
           ) : selectedGroup ? (
@@ -140,6 +144,7 @@ export function GroupHeader({
               icon={<Settings2 className="h-4 w-4" aria-hidden />}
               size="sm"
               variant={activePanel === 'manage' ? 'primary' : 'ghost'}
+              data-manage-panel-trigger
               onClick={() => onTogglePanel(activePanel === 'manage' ? 'none' : 'manage')}
             />
           ) : null}

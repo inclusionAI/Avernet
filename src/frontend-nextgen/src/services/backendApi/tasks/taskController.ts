@@ -7,6 +7,7 @@
  * 测试场景可通过 baseUrl 直连本地 singlebox（localhost:8888），绕过 proxy。
  */
 import { getCapabilities } from '@/capabilities';
+import { TASK_READ_API_BASE } from '@/services/tasks/taskConfig';
 import type { Envelope, ExecuteTaskRequest, ExecuteTaskResponse, TaskListItem } from '@/services/tasks/taskModel';
 import { backendRequest } from '../httpClient';
 import type { BackendApiPage } from '../types';
@@ -34,7 +35,7 @@ export async function dashboardTask(
   includeActionLog = false,
   baseUrl: string = DEFAULT_BASE,
 ): Promise<Envelope<unknown>> {
-  const path = `${taskApiBase()}/dashboard`;
+  const path = `${TASK_READ_API_BASE}/dashboard`;
   const url = baseUrl ? `${baseUrl.replace(/\/+$/, '')}${path}` : path;
   return backendRequest<Envelope<unknown>>(url, {
     method: 'GET',
@@ -62,7 +63,7 @@ export async function listTasks(
   params: ListTasksParams,
   baseUrl: string = DEFAULT_BASE,
 ): Promise<Envelope<BackendApiPage<TaskListItem> | TaskListItem[]>> {
-  const path = `${taskApiBase()}/list`;
+  const path = `${TASK_READ_API_BASE}/list`;
   const url = baseUrl ? `${baseUrl.replace(/\/+$/, '')}${path}` : path;
   return backendRequest<Envelope<BackendApiPage<TaskListItem> | TaskListItem[]>>(url, {
     method: 'GET',

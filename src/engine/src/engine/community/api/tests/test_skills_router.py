@@ -55,6 +55,7 @@ from engine.community.core.skills.models import (
 )
 from engine.community.core.skills.protocol import SkillsService
 from engine.community.manager import EngineManager
+from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 
 
@@ -404,7 +405,7 @@ def test_runtime_layout_probe_rejects_real_openclaw_plugin_engine_mismatch(
     client,
     rich_manager,
 ) -> None:
-    rich_manager._active_engine._skills = OpenClawSkillsAdapter(OpenClawPluginImpl())
+    rich_manager._active_engine._skills = OpenClawSkillsAdapter(OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), ))
 
     response = client.post(
         "/api/skills/layout/probe",
@@ -825,7 +826,7 @@ def test_pool_mapping_routes_reject_v2_physical_shape_via_real_adapter(
     path: str,
     payload: dict[str, object],
 ) -> None:
-    rich_manager._active_engine._skills = OpenClawSkillsAdapter(OpenClawPluginImpl())
+    rich_manager._active_engine._skills = OpenClawSkillsAdapter(OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), ))
 
     response = client.post(path, json=payload)
 

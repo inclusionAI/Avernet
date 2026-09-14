@@ -26,6 +26,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { useGroupMembers } from '@/pages/GroupChat/hooks/useGroupMembers';
+import { useUserStore } from '@/stores/userStore';
 import { cn } from '@/utils/utils';
 import { EyeOff, Plus, X } from 'lucide-react';
 import React, { useState } from 'react';
@@ -71,6 +72,7 @@ const GroupMembersSection: React.FC<GroupMembersSectionProps> = ({
   isOwner,
   onClickAddMember,
 }) => {
+  const userId = useUserStore((state) => state.userId);
   const {
     removeGroupMember,
     updateGroupMemberScope,
@@ -134,7 +136,10 @@ const GroupMembersSection: React.FC<GroupMembersSectionProps> = ({
                 >
                   {member.actorKind === 'human' ? '用户' : 'Bot'}
                 </span>
-                {member.actorKind === 'human' && isOwner ? (
+                {member.actorKind === 'human' &&
+                (isOwner ||
+                  (!!userId &&
+                    (member.botUuid || member.id) === `human_${userId}`)) ? (
                   <select
                     aria-label={`设置 ${member.name} 的群级消息视角`}
                     value={member.messageViewScope || 'full'}

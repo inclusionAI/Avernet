@@ -1,4 +1,5 @@
-import type { OcbLocalSkillPort, OcbRequestIdentity } from "../../internal/module-api.js";
+import type { OcbLocalSkillPort, OcbRequestIdentity, OcbSpacePort } from "../../internal/module-api.js";
+import { canReadSpaceRecord } from "./space-access.js";
 import type { SkillAssetRepository } from "../../repositories/skill-asset-repository.js";
 import { getArtifactBucket, type ObjectStore } from "../object-storage/oss-object-store.js";
 
@@ -6,6 +7,9 @@ export type FrozenSkillTarget = {
   assetId: string;
   skillId: string;
   name: string;
+  ownerUserId?: string;
+  spaceId?: string | null;
+  spaceType?: "PERSONAL" | "TEAM" | null;
   baseline: { ref: string; sha256: string };
   candidate: {
     ref: string;
@@ -80,11 +84,13 @@ export async function freezeSkillTarget(input: {
   assetId: string;
   skillAssetRepo: SkillAssetRepository;
   ocbLocalSkills: OcbLocalSkillPort;
+  ocbSpaces?: OcbSpacePort;
   artifactStore: { putObject: NonNullable<ObjectStore["putObject"]> };
   identity: OcbRequestIdentity;
 }): Promise<FrozenSkillTarget> {
   const asset = await input.skillAssetRepo.findAsset(input.assetId);
-  if (!asset || asset.owner_user_id !== input.ownerUserId || asset.bot_id !== input.botId) {
+  const spaces = asset?.space_id ? await input.ocbSpaces?.listAccessibleSpaces({ identity: input.identity }) ?? [] : [];
+  if (!asset || !canReadSpaceRecord(asset, input.identity.userId, spaces) || asset.bot_id !== input.botId) {
     throw Object.assign(new Error("待处理 Skill 不存在，或不属于当前 Bot"), { status: 404 });
   }
   const exported = await input.ocbLocalSkills.exportLocalSkill({
@@ -97,6 +103,9 @@ export async function freezeSkillTarget(input: {
   await input.artifactStore.putObject(baselineKey, exported.packageBytes, "application/zip");
   return {
     assetId: asset.asset_id,
+    ownerUserId: asset.owner_user_id,
+    spaceId: asset.space_id ?? null,
+    spaceType: asset.space_type ?? null,
     skillId: asset.ocb_skill_id,
     name: exported.displayName,
     baseline: {

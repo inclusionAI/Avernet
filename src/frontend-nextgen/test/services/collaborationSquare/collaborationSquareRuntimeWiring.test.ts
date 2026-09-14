@@ -161,8 +161,8 @@ describe('collaboration square BOT runtime wiring', () => {
 
     await expect(
       collaborationSquareBotService.requestBotFriendship('bot-real-1', {
-        actorId: 'human_327325',
-        userId: '327325',
+        actorId: 'human_900003',
+        userId: '900003',
       }),
     ).resolves.toEqual({ status: 'applying' });
 
@@ -173,7 +173,7 @@ describe('collaboration square BOT runtime wiring', () => {
         method: 'POST',
         body: JSON.stringify({
           to_actor: { type: 'bot', id: 'bot-real-1' },
-          from_actor: { type: 'human', id: '327325' },
+          from_actor: { type: 'human', id: '900003' },
         }),
       }),
     );
@@ -203,14 +203,14 @@ describe('collaboration square BOT runtime wiring', () => {
 
     await expect(
       collaborationSquareBotService.openBotConversation('bot-real-1:2088', {
-        actorId: 'human_327325',
-        userId: '327325',
+        actorId: 'human_900003',
+        userId: '900003',
       }),
     ).resolves.toEqual({ sessionId: 'session-real-1' });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe(
-      '/openapi/v1/bots/bot-real-1/sessions?user_id=327325&owner_id=2088&f_user_id=327325',
+      '/openapi/v1/bots/bot-real-1/sessions?user_id=900003&owner_id=2088&f_user_id=900003',
     );
     expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({ method: 'POST', body: '{}' }));
     expect(

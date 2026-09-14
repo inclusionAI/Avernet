@@ -2,7 +2,8 @@ import type { PublicAudience, PublicScope } from '@/domain/collaborationPrivacy/
 
 export const botVisibilitySection = {
   title: 'Bot 可见性',
-  description: '控制其他用户和 Bot 是否可发现并申请当前 Bot 为好友。',
+  description:
+    '分别控制其他用户和其他 Bot 能否在协作广场看到当前 Bot，并决定其是否可以发起好友申请。两个对象的可见性可单独设置。',
   disabledFriendApprovalReason: '至少开启一种 Bot 可见性后，才能修改好友审批策略',
 } as const;
 
@@ -35,8 +36,10 @@ export const visibilityScopeLabels: Record<PublicScope, string> = {
   restricted: '限定组织可申请',
 } as const;
 
-export const visibilityEditorDescription =
-  '选择当前 Bot 在协作广场中的可见性，以及其他用户或 Bot 能否申请当前 Bot 为好友。';
+export const visibilityEditorDescription = {
+  leading: '选择当前 Bot 在',
+  trailing: '中的可见性，以及其他用户或 Bot 能否申请当前 Bot 为好友。',
+} as const;
 
 export const organizationScopeCopy = {
   editorTitle: '选择组织范围',
@@ -49,7 +52,8 @@ export const organizationScopeCopy = {
 
 export const botFriendApprovalSection = {
   title: 'Bot 好友审批',
-  description: '统一控制其他用户和其他 Bot 申请添加当前 Bot 为好友时的审批方式。',
-  policyDescription:
-    '统一控制其他用户和其他 Bot 申请添加当前 Bot 为好友时的审批方式。审批入口见「工单中心 - 待我处理」，也可通过顶栏铃铛「通知中心」查看。',
+  descriptionLeading: '在其他用户或其他 Bot 发起好友申请后，统一控制是否需要审批。待审批的申请可前往「',
+  approvalEntryLabel: '管理后台 / 通知中心 / 待我处理',
+  approvalEntryPath: '/admin?tab=work-orders',
+  descriptionTrailing: '」处理。',
 } as const;

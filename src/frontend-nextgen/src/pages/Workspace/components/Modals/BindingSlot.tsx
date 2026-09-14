@@ -45,16 +45,11 @@ export function BindingSlot({ visible, binding, botNameResolver }: BindingSlotPr
 
   return (
     <div className="mt-3 space-y-3">
-      {yamlValidation.validationError && !validated && (
-        <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          {yamlValidation.validationError}
-        </p>
-      )}
       {validated && (
         <>
           <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2">
             <div className="flex min-w-0 items-center gap-2">
-              <span className="text-sm font-medium text-foreground">协同剧本</span>
+              <span className="text-xs font-semibold text-foreground">协同剧本</span>
               <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
                 已解析 {yamlValidation.participantDefinitions.length} 个角色
               </span>

@@ -18,8 +18,8 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-    EntryFetcher,
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+    DeclaredSourceResolver,
 )
 from agentclaw.community.core.bot_config_manifest.apply.materialisers.identity import (
     IdentityMaterialiser,
@@ -27,21 +27,33 @@ from agentclaw.community.core.bot_config_manifest.apply.materialisers.identity i
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
-    FetchFailedError,
+from agentclaw.community.core.bot_config_manifest.fetch.errors import (
+    FetchRefusedError,
+)
+
+from agentclaw.community.core.bot_config_manifest.apply.source_fetchers import (
+    object_receipt_url,
 )
 
 from ._fakes import (
-    FakeCredentials,
-    FakeGuardedFetcher,
     FakeIdentityService,
     FakeManifestContent,
+    FakeObjectCredentials,
+    OSS_BUCKET,
+    declared_session,
     fetched_object,
     identity_rig,
     make_context,
+    oss_source,
+    seeded_object_store,
     SOUL_BODY,
-    SOUL_URL,
+    SOUL_KEY,
+    SOUL_SOURCE,
 )
+
+#: The W11 identity the seeded object's bytes are filed under — what a
+#: pre-filed keep_last copy is keyed by.
+SOUL_RECEIPT = object_receipt_url(OSS_BUCKET, SOUL_KEY)
 
 
 def _run(coro):
@@ -54,6 +66,8 @@ def _ctx(**kwargs):
     # turn every RULES/SOUL test into a legality test.
     kwargs.setdefault("engine_type", "openclaw")
     kwargs.setdefault("owner_id", "u_owner")
+    # Every declared source is resolved against the apply's source session.
+    kwargs.setdefault("source_session", declared_session())
     return make_context(**kwargs)
 
 
@@ -67,7 +81,7 @@ async def _apply(materialiser, ctx, entries):
     return resolved, plan, written
 
 
-DECLARED = {"type": "SOUL.md", "source": SOUL_URL}
+DECLARED = {"type": "SOUL.md", "source": SOUL_SOURCE}
 
 
 # ── resolve: entries, both source forms ─────────────────────────────────────
@@ -93,40 +107,37 @@ def test_an_inline_content_entry_materialises():
 
 
 def test_a_sourced_entry_fetches_then_writes():
-    materialiser, identity, fetcher, _ = identity_rig()
+    materialiser, identity, objects, _ = identity_rig()
     result, plan, written = _run(_apply(materialiser, _ctx(), [DECLARED]))
     assert result.ok
     assert [e.outcome.value for e in written] == ["created"]
-    assert fetcher.requests[0].url == SOUL_URL
+    assert objects.calls[0][1] == SOUL_KEY
     assert identity.writes[0]["file_type"] == "SOUL.md"
     assert identity.writes[0]["content"] == SOUL_BODY.decode("utf-8")
 
 
 def test_placeholder_substitution_reaches_the_identity_fetch():
-    materialiser, identity, fetcher, _ = identity_rig()
-    substituted = "https://content.example/identity/dev/soul.md"
-    fetcher.responses[substituted] = fetcher.responses.pop(SOUL_URL)
+    """A per-env key prefix is the whole reason the placeholders exist, so
+    the substitution has to land in the address the store is asked for."""
+    materialiser, identity, objects, _ = identity_rig()
+    substituted = "identity/dev/soul.md"
+    objects.put(OSS_BUCKET, substituted, SOUL_BODY, access_key_id=None)
 
     result, _, _ = _run(
         _apply(
             materialiser,
             _ctx(),
-            [
-                {
-                    "type": "SOUL.md",
-                    "source": "https://content.example/identity/${BOT_ENV}/soul.md",
-                }
-            ],
+            [{"type": "SOUL.md", "source": oss_source("identity/${BOT_ENV}/soul.md")}],
         )
     )
     assert result.ok
-    assert fetcher.requests[0].url == substituted
+    assert objects.calls[0][1] == substituted
 
 
 def test_a_non_utf8_identity_source_fails_the_entry():
-    materialiser, identity, fetcher, _ = identity_rig()
+    materialiser, identity, objects, _ = identity_rig()
     binary = bytes([0xFF, 0xFE, 0x00, 0x01])
-    fetcher.responses[SOUL_URL] = fetched_object(binary, url=SOUL_URL)
+    objects.put(OSS_BUCKET, SOUL_KEY, binary)
 
     resolved = _run(materialiser.resolve(_ctx(), [DECLARED]))
     assert not resolved.ok
@@ -198,21 +209,22 @@ def test_an_entry_without_either_source_form_is_refused():
 
 def test_one_failed_fetch_aborts_the_whole_category_no_writes():
     identity = FakeIdentityService()
-    ok_url = "https://content.example/identity/rules.md"
-    failing = FakeGuardedFetcher(
-        responses={ok_url: fetched_object(b"# rules", url=ok_url)},
-        failures={SOUL_URL: FetchFailedError("source answered 404")},
-    )
+    ok_key = "identity/rules.md"
+    objects = seeded_object_store({ok_key: b"# rules"})
+    # The second entry reads a bucket the store cannot reach — a transport
+    # failure with nothing filed to fall back to.
+    objects.make_unavailable("down-bucket", "source answered 404")
     materialiser = IdentityMaterialiser(
-        identity, EntryFetcher(failing, FakeManifestContent(), FakeCredentials())
+        identity,
+        DeclaredSourceResolver(FakeManifestContent(), FakeObjectCredentials(), objects),
     )
 
     resolved = _run(
         materialiser.resolve(
             _ctx(),
             [
-                {"type": "RULES.md", "source": ok_url},
-                {"type": "SOUL.md", "source": SOUL_URL},
+                {"type": "RULES.md", "source": oss_source(ok_key)},
+                {"type": "SOUL.md", "source": oss_source(SOUL_KEY, bucket="down-bucket")},
             ],
         )
     )
@@ -229,15 +241,15 @@ def test_keep_last_reuses_the_platform_copy_when_the_source_is_down():
     content = FakeManifestContent()
     # A prior apply fetched and filed the bytes; since then, the source died.
     content.store(
-        fetched_object(SOUL_BODY, url=SOUL_URL, content_type="text/markdown"),
+        fetched_object(SOUL_BODY, url=SOUL_RECEIPT, content_type="text/markdown"),
         scope=None,
-        source_url=SOUL_URL,
+        source_url=SOUL_RECEIPT,
     )
-    failing = FakeGuardedFetcher(
-        failures={SOUL_URL: FetchFailedError("source transport failed")}
-    )
+    objects = seeded_object_store({SOUL_KEY: SOUL_BODY})
+    objects.make_unavailable(OSS_BUCKET, "source transport failed")
     materialiser = IdentityMaterialiser(
-        identity, EntryFetcher(failing, content, FakeCredentials())
+        identity,
+        DeclaredSourceResolver(content, FakeObjectCredentials(), objects),
     )
 
     result, plan, written = _run(
@@ -247,7 +259,7 @@ def test_keep_last_reuses_the_platform_copy_when_the_source_is_down():
             [
                 {
                     "type": "SOUL.md",
-                    "source": SOUL_URL,
+                    "source": SOUL_SOURCE,
                     "on_fetch_failure": "keep_last",
                 },
                 {"type": "RULES.md", "content": "# rules"},
@@ -260,15 +272,15 @@ def test_keep_last_reuses_the_platform_copy_when_the_source_is_down():
 
 
 def test_a_declared_digest_that_the_source_no_longer_matches_fails():
-    materialiser, identity, fetcher, _ = identity_rig()
+    materialiser, identity, objects, _ = identity_rig()
     other = "sha256:" + "1" * 64
     resolved = _run(
         materialiser.resolve(
-            _ctx(), [{"type": "SOUL.md", "source": SOUL_URL, "digest": other}]
+            _ctx(), [{"type": "SOUL.md", "source": SOUL_SOURCE, "digest": other}]
         )
     )
     assert not resolved.ok  # the pin disagrees with what is actually served
-    assert "digest mismatch" in resolved.failures[0].reason
+    assert other in resolved.failures[0].reason
     assert identity.writes == []
 
 
@@ -361,15 +373,15 @@ def test_an_omitted_on_fetch_failure_defaults_to_keep_last():
     identity = FakeIdentityService()
     content = FakeManifestContent()
     content.store(
-        fetched_object(SOUL_BODY, url=SOUL_URL, content_type="text/markdown"),
+        fetched_object(SOUL_BODY, url=SOUL_RECEIPT, content_type="text/markdown"),
         scope=None,
-        source_url=SOUL_URL,
+        source_url=SOUL_RECEIPT,
     )
-    failing = FakeGuardedFetcher(
-        failures={SOUL_URL: FetchFailedError("source transport failed")}
-    )
+    objects = seeded_object_store({SOUL_KEY: SOUL_BODY})
+    objects.make_unavailable(OSS_BUCKET, "source transport failed")
     materialiser = IdentityMaterialiser(
-        identity, EntryFetcher(failing, content, FakeCredentials())
+        identity,
+        DeclaredSourceResolver(content, FakeObjectCredentials(), objects),
     )
 
     result, _, written = _run(
@@ -383,7 +395,7 @@ def test_the_receipts_link_the_apply_and_the_entry():
     """The linkage the W11 columns exist for: a fetch filed from an apply
     carries the apply key and the entry's identity, so "what did apply X
     fetch" and "what was fetched for this entry" are reads, not guesses."""
-    materialiser, identity, fetcher, content = identity_rig()
+    materialiser, identity, objects, content = identity_rig()
     ctx = _ctx(apply_id="apply-4")
     _run(_apply(materialiser, ctx, [DECLARED]))
     call = content.store_calls[0]
@@ -417,6 +429,10 @@ def test_the_real_identity_service_satisfies_the_port():
 # ── resolve: the git road (W7) ──────────────────────────────────────────────
 
 
+def _raise_no_subpath():
+    raise FetchRefusedError("the source's 'subpath' must name a single file")
+
+
 class _StaticGit:
     """A git client that serves one checkout with stable bytes.
 
@@ -424,6 +440,13 @@ class _StaticGit:
     reaches it: ``read_file``/``files`` take the source's subpath argument
     the way the guarded readers do, and the bytes are static so the intent,
     the note and the store filing can be asserted exactly.
+
+    ``read_file`` refuses a ``None`` subpath because the real one does. That
+    fidelity is load-bearing now: the materialiser used to ask "is the
+    subpath set?" itself before reading, so a permissive double still failed
+    the entry. It no longer asks — the question needed a git-only field on
+    the delivery seam — and a double that answered where the real checkout
+    refuses would let this test pass against code that cannot work.
     """
 
     def __init__(self, sha: str = "a" * 40, body: bytes = b"# rules\n") -> None:
@@ -439,7 +462,11 @@ class _StaticGit:
             url=spec.url,
             ref=spec.ref,
             files=lambda subpath=None, file_limit=None: [],
-            read_file=lambda subpath=None, file_limit=None: self.body,
+            read_file=lambda subpath=None, file_limit=None: (
+                self.body
+                if subpath
+                else _raise_no_subpath()
+            ),
         )
 
 
@@ -494,7 +521,7 @@ def test_a_moved_ref_on_the_git_road_lands_in_the_note():
     ctx = _git_ctx(
         git,
         sources={"id": IDENTITY_GIT_SOURCE},
-        baselines={"id": "b" * 40},
+        baselines={("https://git.corp/id.git", "main", "non_strict"): "b" * 40},
     )
     resolved = _run(materialiser.resolve(ctx, [{"type": "RULES.md", "from": "id"}]))
     assert resolved.ok

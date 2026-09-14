@@ -51,7 +51,7 @@ beforeEach(() => {
 });
 
 it('托管 Bot 的 / 命令保留 skill 入口', () => {
-  const { result } = renderHook(() => useBotSessionFilesFeature(bot, session, 'human_327325', jest.fn()));
+  const { result } = renderHook(() => useBotSessionFilesFeature(bot, session, 'human_900003', jest.fn()));
 
   const items = result.current.command.categories[0]?.items ?? [];
   expect(items.map((item) => item.name)).toContain('skill');
@@ -59,7 +59,7 @@ it('托管 Bot 的 / 命令保留 skill 入口', () => {
 
 it('好友 Bot 的 / 命令不展示 skill 入口', () => {
   const { result } = renderHook(() =>
-    useBotSessionFilesFeature({ ...bot, isFriendBot: true }, session, 'human_327325', jest.fn()),
+    useBotSessionFilesFeature({ ...bot, isFriendBot: true }, session, 'human_900003', jest.fn()),
   );
 
   const items = result.current.command.categories[0]?.items ?? [];

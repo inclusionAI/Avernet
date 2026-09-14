@@ -20,17 +20,20 @@ and it cannot resolve to a silent "unsupported": both are how a matrix rots.
 validator emits that object and the capabilities endpoint publishes it, so the
 two are the same string by construction rather than by review.
 
-**``SourceKind`` is not ``SourceForm``.**
-:class:`~agentclaw.community.core.bot_config_manifest.capabilities.SourceForm`
-(``url``/``git``/``named``/``content``) describes *how an entry is spelled* and
-stays exactly as it is — it is published contract on the ``constructs`` array.
+**``SourceKind`` is the only source axis now.** There was a second,
+``SourceForm`` (``oss``/``git``/``named``/``content``), describing *how an
+entry is spelled* and published on the ``constructs`` array. It is gone: no
+spelling ever carried a verdict of its own in any configuration, so its four
+rows could not disagree, and the per-entry violation it produced only restated
+the category's own refusal in the same words.
+
 ``SourceKind`` describes *what protocol the content travels by*, which is the
-axis support actually turns on. ``named`` is deliberately absent: a named source
+axis support actually turns on, and ``named`` was never one: a named source
 declares a protocol, and the protocol's cell is the one that governs. That
 identity is precisely what defect D5 got wrong — ``cli_tools`` reached by
 ``from:`` a git source was classified ``NAMED`` and charged the ``oss`` digest
-rule — and keying every rule here on ``SourceKind`` is what leaves the mistake
-nowhere to live.
+rule — and with the spelling axis removed the mistake has nowhere left to
+live, rather than merely being kept out of this table by discipline.
 """
 from __future__ import annotations
 

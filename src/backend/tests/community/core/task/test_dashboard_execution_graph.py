@@ -12,6 +12,8 @@ from injector import Injector, Module, provider, singleton
 
 from agentclaw.community.adapters.http.task.router import router as task_internal_router
 from agentclaw.community.adapters.http.openapi_v1.task.router import router as task_router
+from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.principal import require_user_id
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
 from agentclaw.community.core.repository.protocols.task import (
@@ -104,6 +106,9 @@ def harness():
     fake.by_session["s1"] = _cb(session="s1", execution_graph=_EG)
     app = FastAPI()
     app.include_router(task_router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": "dashboard-owner"}
+    app.dependency_overrides[require_user_id] = lambda: "dashboard-owner"
+
     app.include_router(task_internal_router)
     attach_injector(app, injector)
     return TestClient(app), injector
@@ -113,7 +118,7 @@ def test_dashboard_attaches_execution_graph_by_session(harness):
     c, inj = harness
     task_id = f"eg-{uuid.uuid4().hex[:6]}"
     _seed_root(inj, task_id, "s1")
-    d = c.get("/api/v1/collaboration/tasks/dashboard",
+    d = c.get("/openapi/v1/collaboration/tasks/dashboard",
               params={"task_id": task_id}).json()["data"]
     assert d["execution_graph"] == _EG
 
@@ -122,7 +127,7 @@ def test_dashboard_root_without_session_id_leaves_none(harness):
     c, inj = harness
     task_id = f"eg-{uuid.uuid4().hex[:6]}"
     _seed_root(inj, task_id, None)
-    d = c.get("/api/v1/collaboration/tasks/dashboard",
+    d = c.get("/openapi/v1/collaboration/tasks/dashboard",
               params={"task_id": task_id}).json()["data"]
     assert d.get("execution_graph") is None
 
@@ -131,6 +136,6 @@ def test_dashboard_no_callback_for_session_leaves_none(harness):
     c, inj = harness
     task_id = f"eg-{uuid.uuid4().hex[:6]}"
     _seed_root(inj, task_id, "s_missing")
-    d = c.get("/api/v1/collaboration/tasks/dashboard",
+    d = c.get("/openapi/v1/collaboration/tasks/dashboard",
               params={"task_id": task_id}).json()["data"]
     assert d.get("execution_graph") is None

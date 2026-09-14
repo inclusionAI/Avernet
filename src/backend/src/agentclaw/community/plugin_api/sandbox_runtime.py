@@ -41,6 +41,10 @@ class SandboxRuntimeUnavailableError(Exception):
     """Raised by impls for runtimes that are not available in this deployment."""
 
 
+class SandboxFileReadError(Exception):
+    """A sandbox file read failed for a reason other than file absence."""
+
+
 class SandboxRuntimeClient(Plugin, Protocol):
     """Create and operate bot sandboxes on a container runtime."""
 
@@ -121,8 +125,19 @@ class SandboxRuntimeClient(Plugin, Protocol):
     # ``path`` is already mapped by the caller (no ``path_mapper`` here). Return
     # types are neutral; the impl talks to the runtime's file API at its boundary.
 
-    async def read_file(self, *, sandbox_id: str, path: str) -> bytes | None:
-        """Read ``path`` in ``sandbox_id``; ``None`` if missing / unreadable."""
+    async def read_file(
+        self,
+        *,
+        sandbox_id: str,
+        path: str,
+        preserve_read_errors: bool = False,
+    ) -> bytes | None:
+        """Read a file; ``None`` means missing.
+
+        Compatibility callers may leave ``preserve_read_errors`` false and
+        receive ``None`` for other unreadable outcomes. When true, an adapter
+        must raise :class:`SandboxFileReadError` for non-missing failures.
+        """
         ...
 
     async def write_file(self, *, sandbox_id: str, path: str, content: bytes) -> None:

@@ -24,6 +24,7 @@ const modeCopy: Record<EvolveStageMode, { name: string; description: string }> =
 export default function SkillEvolutionFields({
   botId,
   includeTargetSkill,
+  targetLocked = false,
   assetId,
   onAssetIdChange,
   extensions,
@@ -38,6 +39,7 @@ export default function SkillEvolutionFields({
 }: {
   botId: string
   includeTargetSkill: boolean
+  targetLocked?: boolean
   assetId: string
   onAssetIdChange: (value: string) => void
   extensions: StageExtensionDraft
@@ -57,6 +59,7 @@ export default function SkillEvolutionFields({
   const [expanded, setExpanded] = useState(false)
   const [customizing, setCustomizing] = useState<Partial<Record<'diagnose' | 'plan' | 'optimize', boolean>>>({})
   const [pickerStage, setPickerStage] = useState<'diagnose' | 'plan' | 'optimize' | null>(null)
+  const [stageSearch, setStageSearch] = useState('')
 
   useEffect(() => {
     let active = true
@@ -74,14 +77,14 @@ export default function SkillEvolutionFields({
       setAssets(botAssets)
       if (stageCatalog) setCatalog(stageCatalog)
       setImplementations(implementationResult.items.filter((item) => item.status === 'registered'))
-      if (includeTargetSkill && section !== 'extensions'
+      if (includeTargetSkill && !targetLocked && section !== 'extensions'
         && botId && assetId && !botAssets.some((item) => item.assetId === assetId)) onAssetIdChange('')
       setError('')
     }).catch((reason) => {
       if (active) setError(reason instanceof Error ? reason.message : 'Skill 进化配置加载失败')
     })
     return () => { active = false }
-  }, [botId, includeTargetSkill, section, fullTask, inputMode, hasGoal])
+  }, [botId, includeTargetSkill, targetLocked, section, fullTask, inputMode, hasGoal])
 
   const flowDescription = catalog?.flows.find((flow) => flow.key === flowKey)
   const stagePolicy = (stage: 'diagnose' | 'plan' | 'optimize') =>
@@ -177,7 +180,7 @@ export default function SkillEvolutionFields({
       <h2 className="text-sm font-semibold text-gray-900">待进化 Skill</h2>
       <p className="mt-1 text-xs leading-5 text-gray-500">选择已在技能中心登记的 Skill。任务开始时平台会从 OCB 读取最新内容，并为本次任务创建独立候选版本。</p>
       <div className="mt-3 flex items-center gap-3">
-        <select value={assetId} onChange={(event) => onAssetIdChange(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500">
+        <select aria-label="待进化 Skill" disabled={targetLocked} value={assetId} onChange={(event) => onAssetIdChange(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500 disabled:bg-gray-50">
           <option value="">{botId ? '请选择待进化 Skill' : '请先选择目标 Bot'}</option>
           {assets.map((asset) => <option key={asset.assetId} value={asset.assetId}>{asset.name} · {asset.currentVersion}</option>)}
         </select>
@@ -207,6 +210,7 @@ export default function SkillEvolutionFields({
           const selectable = options
             .filter((item) => !selectedModes.has(item.mode))
             .filter((item) => hasReplace ? false : item.mode !== 'replace' || selected.length === 0)
+            .filter((item) => `${item.displayName} ${item.spaceName ?? '私有'} ${item.stageSkillId}`.toLocaleLowerCase().includes(stageSearch.trim().toLocaleLowerCase()))
           return <div key={stage.stage} className="rounded-xl border border-gray-200 bg-gray-50/40 p-4">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-gray-900">{stage.name}</p><p className="mt-1 text-xs leading-5 text-gray-500">{stage.description}</p></div>
@@ -226,6 +230,7 @@ export default function SkillEvolutionFields({
               <button type="button" onClick={() => setPickerStage(pickerStage === stageKey ? null : stageKey)} className="rounded-lg border border-dashed border-blue-300 px-3 py-2 text-xs font-medium text-blue-600">＋ 选择实现</button>
             </div>}
             {pickerStage === stageKey && customEnabled && <div className="mt-3 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+              <div className="border-b border-gray-100 p-3"><input aria-label={`搜索${stage.name}自定义实现`} value={stageSearch} onChange={(event) => setStageSearch(event.target.value)} placeholder="搜索名称、空间或 Skill ID" className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs" /></div>
               {selectable.length > 0 ? selectable.map((item) => <button type="button" key={item.implementationId} onClick={() => chooseImplementation(stageKey, item)} className="flex w-full items-center justify-between gap-4 border-b border-gray-100 px-4 py-3 text-left last:border-b-0 hover:bg-blue-50"><span><span className="block text-xs font-medium text-gray-900">{item.displayName} · {item.version}</span><span className="mt-0.5 block text-[10px] text-gray-400">{modeCopy[item.mode].name} · {modeCopy[item.mode].description}</span></span><span className="text-xs text-blue-600">选择</span></button>) : <div className="px-4 py-4 text-xs text-gray-500"><p>{options.length === 0 ? '暂无可用的自定义实现' : '当前组合下没有可添加的实现'}</p>{hasReplace && <p className="mt-1">整体替换不能与前置、后置处理同时使用。</p>}<Link to="/evolve/stage-skills/new" className="mt-2 inline-block font-medium text-blue-600 hover:text-blue-700">去接入自定义实现 ↗</Link></div>}
             </div>}
           </div>

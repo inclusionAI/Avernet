@@ -168,6 +168,7 @@ bcs-message = { workspace = true }
 bcs-message-store = { workspace = true }
 bcs-event-store = { workspace = true }
 bcs-eventing = { workspace = true }
+bcs-coordination-store = { workspace = true }
 bcs-webhook-client = { workspace = true }
 bcs-callback = { workspace = true }
 bcs-collaboration-template = { workspace = true }

@@ -97,14 +97,21 @@ class LocalDeviceFileSystem(DeviceFileSystem):
     # ── Public API: dispatches to _baas_* or _pathlib_* per ctor mode ──
 
     async def read_file(
-        self, file_path: str, *, enforce_download_limit: bool = False
+        self,
+        file_path: str,
+        *,
+        enforce_download_limit: bool = False,
+        preserve_read_errors: bool = False,
     ) -> bytes | None:
         # ``enforce_download_limit`` is for whole-file-into-memory impls (Arca); both
         # local modes here ignore it.
         file_path = self._path_mapper(file_path)
         if self._is_baas_mode:
             return await self._baas_read_file(file_path)
-        return await self._pathlib_read_file(file_path)
+        return await self._pathlib_read_file(
+            file_path,
+            preserve_read_errors=preserve_read_errors,
+        )
 
     async def write_file(self, file_path: str, content: bytes) -> None:
         file_path = self._path_mapper(file_path)
@@ -134,7 +141,12 @@ class LocalDeviceFileSystem(DeviceFileSystem):
 
     # ── Pathlib fallback (unchanged historical impl) ──────────────────
 
-    async def _pathlib_read_file(self, file_path: str) -> bytes | None:
+    async def _pathlib_read_file(
+        self,
+        file_path: str,
+        *,
+        preserve_read_errors: bool = False,
+    ) -> bytes | None:
         p = Path(file_path)
         logger.info("[LocalDeviceFileSystem.pathlib.read_file] %s (exists=%s, is_file=%s)", file_path, p.exists(), p.is_file())
         if not p.is_file():
@@ -145,6 +157,8 @@ class LocalDeviceFileSystem(DeviceFileSystem):
             return data
         except OSError as e:
             logger.warning("[LocalDeviceFileSystem.pathlib.read_file] %s: %s", file_path, e)
+            if preserve_read_errors:
+                raise
             return None
 
     async def _pathlib_write_file(self, file_path: str, content: bytes) -> None:

@@ -14,10 +14,10 @@ beforeEach(() => {
   useWorkspaceStore.getState().resetWorkspace();
   useWorkspaceStore.setState({
     identities: [
-      { id: 'human_327325', kind: 'user', displayName: '我', online: true },
-      { id: '20260528_udt1y38n:327325', kind: 'bot', displayName: '驾驶 Bot', online: true },
+      { id: 'human_900003', kind: 'user', displayName: '我', online: true },
+      { id: '20260528_udt1y38n:900003', kind: 'bot', displayName: '驾驶 Bot', online: true },
     ],
-    activeIdentityId: '20260528_udt1y38n:327325',
+    activeIdentityId: '20260528_udt1y38n:900003',
   });
   useWorkspaceStore.getState().selectGroup(null);
   useWorkspaceStore.getState().selectSession(null);
@@ -33,7 +33,7 @@ it('opens the created initial session without a fallback list request', async ()
   expect(ss.loadSessionsByIdsOrBcs).not.toHaveBeenCalled();
   expect(useWorkspaceStore.getState().selectedGroupId).toBe('g-new');
   expect(useWorkspaceStore.getState().selectedSessionId).toBe('s-initial');
-  expect(useWorkspaceStore.getState().activeIdentityId).toBe('20260528_udt1y38n:327325');
+  expect(useWorkspaceStore.getState().activeIdentityId).toBe('20260528_udt1y38n:900003');
 });
 
 it('opens the first default session of the created group', async () => {

@@ -8,6 +8,7 @@ nothing". Equal-looking output would prove neither.
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
@@ -19,9 +20,13 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
 from agentclaw.community.core.bot_config_manifest.credentials.errors import (
     CredentialNotFoundError,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
-    FetchFailedError,
+from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchedObject,
+)
+from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
+    ObjectFetchResult,
+    ObjectFetchStatus,
+    ObjectStoreTarget,
 )
 
 
@@ -29,7 +34,7 @@ def fetched_object(
     body: bytes, *, url: str = "https://content.example/a.bin",
     content_type: str | None = "application/octet-stream",
 ) -> FetchedObject:
-    """A receipt-bearing fetch result, the shape ``GuardedFetcher`` returns."""
+    """A receipt-bearing fetch result, the shape a source fetcher returns."""
     return FetchedObject(
         bytes=body,
         sha256="sha256:" + hashlib.sha256(body).hexdigest(),
@@ -128,40 +133,112 @@ class FakeManifestContent:
         return None
 
 
-class FakeGuardedFetcher:
-    """Stands in for the W2 transport: scripted successes or real error types.
+@dataclass
+class FakeBucket:
+    """One bucket's contents and the credential entitled to read it."""
 
-    Records every request so tests can assert what the wire actually saw —
-    the substituted URL, the declared digest, the credential binding.
+    objects: dict[str, bytes] = field(default_factory=dict)
+    #: ``None`` means "any credential reads this bucket" — the shape a test
+    #: that is not about authorisation wants.
+    access_key_id: str | None = None
+    #: When set, every read answers ``UNAVAILABLE`` with this detail.
+    unavailable: str | None = None
 
-    Implements the one rule of W2's contract a caller can lean on: a declared
-    ``expected_digest`` is verified against the served bytes, and a mismatch
-    is a fetch failure — never a "success with corrupted bytes". Without that
-    in the fake, a materialiser relying on the pin would pass here while the
-    real transport refused.
+
+class FakeObjectStore:
+    """Stands in for ``AliyunObjectStore``: in-memory buckets, every status
+    reachable by seeding, and every read recorded.
+
+    A test double, not a shipped implementation — the real client has one
+    road and this is where each :class:`ObjectFetchStatus` is given a shape a
+    consumer test can drive:
+
+    - an object that is present answers ``FOUND``
+    - one that is not answers ``NOT_FOUND``
+    - a target whose key pair does not match what the bucket was seeded with
+      answers ``DENIED`` — credentials are compared rather than ignored,
+      because a double that authorised everything would let a consumer
+      bypass the credential entirely and still pass
+    - an object over the caller's ``byte_limit`` answers ``TOO_LARGE``
+      **without the caller ever holding it**
+    - a bucket a test marks unreachable answers ``UNAVAILABLE``
+
+    ``calls`` records ``(target, key, byte_limit)`` per read — the evidence a
+    consumer test asserts on so a pipeline cannot bypass the store and pass.
     """
 
-    def __init__(
-        self,
-        responses: dict[str, FetchedObject] | None = None,
-        failures: dict[str, Exception] | None = None,
-    ) -> None:
-        self.responses = dict(responses or {})
-        self.failures = dict(failures or {})
-        self.requests: list[Any] = []
+    def __init__(self) -> None:
+        self.buckets: dict[str, FakeBucket] = {}
+        self.calls: list[tuple[ObjectStoreTarget, str, int]] = []
 
-    def fetch(self, request):
-        self.requests.append(request)
-        failure = self.failures.get(request.url)
-        if failure is not None:
-            raise failure
-        response = self.responses[request.url]
+    # --- seeding ------------------------------------------------------------
+
+    def put(
+        self,
+        bucket: str,
+        key: str,
+        content: bytes,
+        *,
+        access_key_id: str | None = None,
+    ) -> None:
+        holder = self.buckets.setdefault(bucket, FakeBucket())
+        holder.objects[key] = content
+        if access_key_id is not None:
+            holder.access_key_id = access_key_id
+
+    def make_unavailable(self, bucket: str, detail: str = "endpoint unreachable") -> None:
+        self.buckets.setdefault(bucket, FakeBucket()).unavailable = detail
+
+    def reset(self) -> None:
+        self.buckets.clear()
+        self.calls.clear()
+
+    # --- the read -----------------------------------------------------------
+
+    def get(
+        self, target: ObjectStoreTarget, key: str, *, byte_limit: int
+    ) -> ObjectFetchResult:
+        self.calls.append((target, key, byte_limit))
+        where = f"{target.bucket}/{key}"
+        bucket = self.buckets.get(target.bucket)
+
+        if bucket is None:
+            # An unknown bucket is not distinguishable from one this
+            # credential may not see, and guessing which would leak the
+            # difference. The store's own answer is the honest one.
+            return ObjectFetchResult(
+                ObjectFetchStatus.DENIED, detail=f"{where}: not authorized"
+            )
+        if bucket.unavailable is not None:
+            return ObjectFetchResult(
+                ObjectFetchStatus.UNAVAILABLE,
+                detail=f"{where}: {bucket.unavailable}",
+            )
         if (
-            request.expected_digest is not None
-            and response.sha256 != request.expected_digest
+            bucket.access_key_id is not None
+            and bucket.access_key_id != target.access_key_id
         ):
-            raise FetchFailedError("digest mismatch")
-        return response
+            return ObjectFetchResult(
+                ObjectFetchStatus.DENIED, detail=f"{where}: not authorized"
+            )
+
+        body = bucket.objects.get(key)
+        if body is None:
+            return ObjectFetchResult(
+                ObjectFetchStatus.NOT_FOUND, detail=f"{where}: no such object"
+            )
+        if len(body) > byte_limit:
+            # The bytes are NOT returned. A caller that received them would be
+            # holding exactly what the cap exists to keep out of memory, and a
+            # test asserting only on the status would not notice.
+            return ObjectFetchResult(
+                ObjectFetchStatus.TOO_LARGE,
+                detail=(
+                    f"{where}: object exceeds the {byte_limit}-byte cap "
+                    f"({len(body)} bytes)"
+                ),
+            )
+        return ObjectFetchResult(ObjectFetchStatus.FOUND, content=body)
 
 
 class FakeCredentials:
@@ -183,6 +260,85 @@ class FakeCredentials:
             headers_for=lambda url: {"X-Custom-Auth": f"payload-of-{name}"},
             reauthorize=lambda url: None,
         )
+
+
+# ── the declared object-source rig ──────────────────────────────────────────
+# A ``source`` is a declaration: ``{protocol: oss, bucket, key, auth}`` or
+# ``{protocol: git, ...}``. The object road is the one a consumer test reaches
+# for when what it is really pinning is the *fetch* — pinning, keep_last,
+# budget, receipts — so these constants and helpers give every such test one
+# bucket, one credential and one spelling of the declaration.
+
+#: The bucket the rigs seed. A document names it; the endpoint never appears
+#: in a document, which is the whole security property of this road.
+OSS_BUCKET = "manifest-fixtures"
+#: The credential name a declared source carries — ``auth`` is mandatory on
+#: this road, since the endpoint is a property of the credential row.
+OSS_AUTH = "oss-cred"
+OSS_ENDPOINT = "https://oss-cn-shanghai.aliyuncs.com"
+#: Deliberately short and with no provider prefix. Nothing on this road
+#: validates a key id's shape — the store fake compares it as an opaque
+#: string — while anything token-shaped, or merely 12+ characters with a
+#: little entropy, trips ``scripts/ci/check_secrets.py`` on the field name
+#: alone and blocks every push that touches this line.
+OSS_ACCESS_KEY_ID = "fake-ak"
+
+
+class FakeObjectCredentials(FakeCredentials):
+    """:class:`FakeCredentials` plus the half only the object road reads.
+
+    The base fake's binding answers the two header seams; an ``oss`` source
+    also asks it for an :class:`ObjectStoreTarget`, and *that* is where the
+    endpoint and the key pair come from — never from the document.
+    """
+
+    def binding(self, *, name: str):
+        binding = super().binding(name=name)
+        binding.object_store_target = lambda bucket: ObjectStoreTarget(
+            endpoint=OSS_ENDPOINT,
+            bucket=bucket,
+            access_key_id=OSS_ACCESS_KEY_ID,
+            secret_access_key="fake-sk",  # short, for the reason above
+            region="cn-shanghai",
+        )
+        return binding
+
+
+def oss_source(
+    key: str, *, bucket: str = OSS_BUCKET, auth: str | None = OSS_AUTH
+) -> dict[str, Any]:
+    """The declared ``source`` an entry carries to read one object."""
+    decl: dict[str, Any] = {"protocol": "oss", "bucket": bucket, "key": key}
+    if auth is not None:
+        decl["auth"] = auth
+    return decl
+
+
+def seeded_object_store(objects: dict[str, bytes] | None = None) -> FakeObjectStore:
+    """A store holding ``key → bytes`` under :data:`OSS_BUCKET`, readable by
+    the key pair :class:`FakeObjectCredentials` presents."""
+    store = FakeObjectStore()
+    for key, body in (objects or {}).items():
+        store.put(OSS_BUCKET, key, body, access_key_id=OSS_ACCESS_KEY_ID)
+    return store
+
+
+def declared_session(**kwargs):
+    """The per-apply source session a declared source needs.
+
+    Every entry that reaches a fetcher carries one — the ``from`` road reads
+    ``sources`` out of it and the git road checks out through it — so a rig
+    driving a declared source hands the context one even when the object road
+    it takes never looks inside.
+    """
+    from agentclaw.community.core.bot_config_manifest.apply.source_session import (
+        SourceSession,
+    )
+
+    kwargs.setdefault("sources", {})
+    kwargs.setdefault("baselines", {})
+    kwargs.setdefault("git", None)
+    return SourceSession(**kwargs)
 
 
 class FakeIdentityService:
@@ -272,25 +428,28 @@ class FakeIdentityService:
 
 
 def identity_rig(files: dict[str, str] | None = None):
-    """A materialiser over fakes: (materialiser, identity fake, fetcher fake).
+    """A materialiser over fakes: (materialiser, identity fake, object store,
+    content store).
 
-    The fetched URL ``SOUL_URL`` serves ``SOUL_BODY`` for identity tests.
+    The declared source :data:`SOUL_SOURCE` reads :data:`SOUL_KEY` out of the
+    seeded bucket and serves :data:`SOUL_BODY`.
     """
-    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-        EntryFetcher,
+    from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+        DeclaredSourceResolver,
     )
     from agentclaw.community.core.bot_config_manifest.apply.materialisers.identity import (
         IdentityMaterialiser,
     )
 
     identity = FakeIdentityService(files)
-    fetcher = FakeGuardedFetcher(responses={SOUL_URL: fetched_object(SOUL_BODY)})
+    objects = seeded_object_store({SOUL_KEY: SOUL_BODY})
     content = FakeManifestContent()
-    pipeline = EntryFetcher(fetcher, content, FakeCredentials())
-    return IdentityMaterialiser(identity, pipeline), identity, fetcher, content
+    pipeline = DeclaredSourceResolver(content, FakeObjectCredentials(), objects)
+    return IdentityMaterialiser(identity, pipeline), identity, objects, content
 
 
-SOUL_URL = "https://content.example/identity/soul.md"
+SOUL_KEY = "identity/soul.md"
+SOUL_SOURCE = oss_source(SOUL_KEY)
 SOUL_BODY = b"# team charter\nServe the customer honestly.\n"
 
 
@@ -828,3 +987,35 @@ class FakeResourceFileService:
             }
         )
         return path in self._exists
+
+
+# ── the delivery seam's required collaborators (W8) ──────────────────────
+#
+# ``BotConfigManifestApplyService`` takes ``is_teclaw``, the platform ports and
+# the closing redeliver as **required** arguments: the composition root binds
+# every one of them, so an optional default would describe a value that is
+# never absent. A rig that only exercises the ARCA family still has to say so,
+# and these three say it — the two that belong to the teclaw path raise if the
+# suite ever reaches them, which is the thing worth catching.
+
+
+def arca_only_engine_test(_engine: str | None) -> bool:
+    """Every bot is ARCA. What ``is_teclaw=None`` used to fall back to."""
+    return False
+
+
+def unreachable_platform_ports():
+    raise AssertionError(
+        "this rig is ARCA-only: the teclaw platform ports are never built"
+    )
+
+
+async def unreachable_redeliver(ctx) -> None:
+    raise AssertionError(
+        "this rig is ARCA-only: the closing redeliver is never reached"
+    )
+
+
+async def no_redeliver(ctx) -> None:
+    """The closing step, doing nothing — for a teclaw rig that is not about it."""
+    return None

@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import shutil
 import zipfile
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -18,13 +20,23 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
     LocalSkillVersionConflictError,
+    SkillAssetInUseError,
 )
 from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    RuntimeProjectionResult,
+)
 from agentclaw.community.core.skill_center.services import (
     local_skill_upload_service as upload_module,
 )
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
+)
+from agentclaw.community.core.skill_center.services.desktop_skill_recovery import (
+    DesktopSkillRecoveryService,
+)
+from agentclaw.community.core.skill_center.services.recovering_bot_runtime_projector import (
+    RecoveringBotRuntimeProjector,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
@@ -150,6 +162,61 @@ class _Filesystem:
 
     async def exists(self, path):
         return any(file_path.startswith(f"{path}/") for file_path in self.files)
+
+
+class _DiskFilesystem:
+    """Minimal Local-device fixture that persists package bytes under ``tmp_path``."""
+
+    def __init__(self, root: Path, *, fail_writes=(), fail_reads=()):
+        self._root = root
+        self._fail_writes = set(fail_writes)
+        self._fail_reads = set(fail_reads)
+
+    def _path(self, device_path: str) -> Path:
+        relative = Path(device_path.lstrip("/"))
+        target = self._root / relative
+        if (
+            relative.is_absolute()
+            or ".." in relative.parts
+            or not target.resolve().is_relative_to(self._root.resolve())
+        ):
+            raise OSError("invalid Local Skill test path")
+        return target
+
+    async def write_file(self, path, content):
+        if path in self._fail_writes:
+            raise OSError(f"device write failed: {path}")
+        target = self._path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+
+    async def read_file(self, path):
+        if path in self._fail_reads:
+            raise OSError(f"device read failed: {path}")
+        target = self._path(path)
+        return target.read_bytes() if target.is_file() else None
+
+    async def list_dir(self, path, *, recursive=False):
+        directory = self._path(path)
+        if not directory.is_dir():
+            return None
+        entries = directory.rglob("*") if recursive else directory.iterdir()
+        return [
+            {
+                "relative_path": entry.relative_to(directory).as_posix(),
+                "is_dir": entry.is_dir(),
+            }
+            for entry in entries
+        ]
+
+    async def delete_tree(self, path):
+        directory = self._path(path)
+        if directory.exists():
+            shutil.rmtree(directory)
+        return True
+
+    async def exists(self, path):
+        return self._path(path).exists()
 
 
 class _Factory:
@@ -519,6 +586,18 @@ class _ReplacementFactory(_Factory):
         return _Storage(self._filesystem, locator)
 
 
+class _DiskStorageFactory(_ReplacementFactory):
+    """Use the production package-storage port over the temporary Local disk."""
+
+    def local_skill_package_storage(self, **kwargs):
+        directory, _ = super().local_skill_package_storage(**kwargs)
+        return directory, LocalSkillPackageStorage(self._filesystem, directory)
+
+    def local_skill_package_storage_for_locator(self, *, locator, **kwargs):
+        self.locator_calls.append({"locator": locator, **kwargs})
+        return LocalSkillPackageStorage(self._filesystem, locator)
+
+
 class _ReplacementRuntime:
     def __init__(self, results):
         self.results = iter(results)
@@ -553,6 +632,7 @@ def _replacement_service(
     runtime,
     _unused_cleanup=None,
     guard=None,
+    factory=None,
     *,
     provider="local",
 ):
@@ -560,7 +640,7 @@ def _replacement_service(
         repo,
         _Bot(),
         _Collaborators(),
-        _ReplacementFactory(filesystem),
+        factory or _ReplacementFactory(filesystem),
         _Audit(),
         guard or _Guard(),
         lambda: _DeviceResolver(provider),
@@ -781,6 +861,102 @@ async def test_directory_upload_uses_the_same_create_flow_as_raw_zip():
 
 
 @pytest.mark.asyncio
+async def test_local_zip_folder_replace_and_io_failures_use_actual_filesystem(tmp_path):
+    """Exercise the Local ZIP/folder entry points over a real device directory.
+
+    This is intentionally a small product slice: the production validator,
+    create/replace service, and ``LocalSkillPackageStorage`` run unchanged;
+    only the device boundary is a temporary Local filesystem. The Desktop
+    invoke-http byte path has its matching Engine-facing contract test.
+    """
+    filesystem = _DiskFilesystem(tmp_path / "device")
+    factory = _DiskStorageFactory(filesystem)
+    raw_files = {
+        "SKILL.md": _skill_md("upload-skill", "raw archive"),
+        "docs/readme.txt": b"plain text\n",
+        "assets/icon.png": b"\x89PNG\r\n\x1a\n\xff\x00",
+        "assets/nonutf8.bin": b"\xff\x00\x80\xfe",
+        "assets/empty.txt": b"",
+    }
+    await _service(filesystem, factory=factory).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip(raw_files),
+    )
+
+    folder_files = {
+        "SKILL.md": _skill_md("folder-skill", "folder upload"),
+        "scripts/run.py": b"print('ok')\n",
+        "assets/nonutf8.bin": b"\x80\xff\x00",
+        "assets/empty.txt": b"",
+    }
+    await _service(filesystem, factory=factory).upload_local_skill_files(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        files=[
+            (f"folder-skill/{path}", content) for path, content in folder_files.items()
+        ],
+    )
+
+    raw_storage = LocalSkillPackageStorage(
+        filesystem, "/private/skills-local/upload-skill"
+    )
+    folder_storage = LocalSkillPackageStorage(
+        filesystem, "/private/skills-local/folder-skill"
+    )
+    assert dict(await raw_storage.read_package_files()) == raw_files
+    assert dict(await folder_storage.read_package_files()) == folder_files
+
+    replacement_files = {
+        "SKILL.md": _skill_md("upload-skill", "replacement archive"),
+        "docs/readme.txt": b"replacement text\n",
+        "assets/icon.png": b"\x89PNG\r\n\x1a\n\x00\xff",
+        "assets/nonutf8.bin": b"\x50\x4b\x03\x04\xff\x00\x01",
+        "assets/empty.txt": b"",
+    }
+    replacement = await _replacement_service(
+        filesystem,
+        _ReplacementRepo([_existing_skill(active=False)]),
+        _ReplacementRuntime([True]),
+        factory=factory,
+    ).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip(replacement_files),
+    )
+    assert replacement["operation"] == "updated"
+    actual_replacement = dict(await raw_storage.read_package_files())
+    assert {
+        path: hashlib.sha256(content).hexdigest()
+        for path, content in actual_replacement.items()
+    } == {
+        path: hashlib.sha256(content).hexdigest()
+        for path, content in replacement_files.items()
+    }
+
+    failed_write_path = "/private/failed/write.bin"
+    failed_write = LocalSkillPackageStorage(
+        _DiskFilesystem(tmp_path / "write-failure", fail_writes={failed_write_path}),
+        "/private/failed",
+    )
+    with pytest.raises(OSError, match="device write failed"):
+        await failed_write.write([("write.bin", b"no write")])
+
+    failed_read_path = "/private/read-failure/asset.bin"
+    failed_read_filesystem = _DiskFilesystem(tmp_path / "read-failure")
+    failed_read = LocalSkillPackageStorage(
+        failed_read_filesystem, "/private/read-failure"
+    )
+    await failed_read.write([("asset.bin", b"written first")])
+    failed_read_filesystem._fail_reads.add(failed_read_path)
+    with pytest.raises(OSError, match="device read failed"):
+        await failed_read.read_file("asset.bin")
+
+
+@pytest.mark.asyncio
 async def test_multipart_single_zip_keeps_legacy_auto_extract_behavior():
     filesystem = _Filesystem()
     archive = _zip({"SKILL.md": _skill_md("archive-skill")})
@@ -868,6 +1044,24 @@ async def test_failed_rollback_step_does_not_stop_package_cleanup():
     assert service._skill_service_factory._filesystem.deleted == [
         "/private/skills-local/upload-skill"
     ]
+
+
+@pytest.mark.asyncio
+async def test_compensation_preserves_package_when_asset_gained_a_reference():
+    package = _zip({"SKILL.md": _skill_md()})
+    repo = _Repo()
+    repo.delete = lambda *_args: (_ for _ in ()).throw(
+        SkillAssetInUseError({"membership": 1})
+    )
+    service = _service(_Filesystem(), repo=repo, audit=_FailAudit())
+
+    with pytest.raises(SkillAssetInUseError):
+        await service.upload_local_skill(
+            bot_id="bot", owner_id="owner", actor_id="owner", package=package
+        )
+
+    assert repo.created
+    assert service._skill_service_factory._filesystem.deleted == []
 
 
 @pytest.mark.asyncio
@@ -1248,6 +1442,101 @@ async def test_active_replacement_keeps_new_content_when_runtime_is_pending():
     assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"] == (
         _skill_md(description="new description")
     )
+
+
+@pytest.mark.asyncio
+async def test_active_replacement_pending_ensures_common_desktop_recovery():
+    class _PendingProjector:
+        calls = 0
+
+        async def project(self, **_kwargs):
+            self.calls += 1
+            return RuntimeProjectionResult.pending(
+                code="CENTER_CONTENT_DOWNLOAD_PENDING",
+                reason="Center package download is active",
+            )
+
+    class _Recovery:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def ensure(self, **kwargs):
+            self.calls.append(kwargs)
+
+    filesystem = _Filesystem()
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
+    recovery = _Recovery()
+    runtime = RecoveringBotRuntimeProjector(
+        delegate=_PendingProjector(),  # type: ignore[arg-type]
+        recovery=recovery,  # type: ignore[arg-type]
+    )
+
+    result = await _replacement_service(
+        filesystem,
+        _ReplacementRepo([_existing_skill(active=True)]),
+        runtime,
+    ).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip({"SKILL.md": _skill_md(description="new description")}),
+    )
+
+    assert result["runtime_projection"]["status"] == "PENDING"
+    assert recovery.calls == [{"owner_id": "owner", "bot_id": "bot"}]
+
+
+@pytest.mark.asyncio
+async def test_active_replacement_preserves_enqueue_failure_and_new_content(caplog):
+    class _PendingProjector:
+        async def project(self, **_kwargs):
+            return RuntimeProjectionResult.pending(
+                code="CENTER_CONTENT_DOWNLOAD_PENDING",
+                reason="Center package download is active",
+            )
+
+    class _DesktopBots:
+        def get_by_id_and_owner(self, bot_id, owner_id):
+            return {
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "bot_type": "desktop",
+            }
+
+    class _FailingTasks:
+        def enqueue(self, *_args, **_kwargs):
+            raise RuntimeError("task database unavailable")
+
+    filesystem = _Filesystem()
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
+    runtime = RecoveringBotRuntimeProjector(
+        delegate=_PendingProjector(),  # type: ignore[arg-type]
+        recovery=DesktopSkillRecoveryService(
+            bots=_DesktopBots(),  # type: ignore[arg-type]
+            tasks=_FailingTasks(),  # type: ignore[arg-type]
+        ),
+    )
+
+    result = await _replacement_service(
+        filesystem,
+        _ReplacementRepo([_existing_skill(active=True)]),
+        runtime,
+    ).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip({"SKILL.md": _skill_md(description="new description")}),
+    )
+
+    assert result["operation"] == "updated"
+    assert {issue["code"] for issue in result["runtime_projection"]["issues"]} == {
+        "CENTER_CONTENT_DOWNLOAD_PENDING",
+        "DESKTOP_SKILL_RECOVERY_ENQUEUE_FAILED",
+    }
+    assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"] == (
+        _skill_md(description="new description")
+    )
+    assert "task database unavailable" in caplog.text
 
 
 @pytest.mark.asyncio

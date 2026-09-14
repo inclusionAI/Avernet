@@ -32,6 +32,16 @@ class SpaceRecord(TypedDict):
     env: str
 
 
+class CenterSkillAccessRecord(TypedDict):
+    """Persisted facts used to adjudicate a shared Center Skill read."""
+
+    skill_id: int
+    skill_uuid: str
+    visibility: Literal["PUBLIC", "SPACE"]
+    space_id: int | None
+    offline_at: datetime | None
+
+
 class SpaceSkillCreateData(TypedDict):
     name: str
     env: str

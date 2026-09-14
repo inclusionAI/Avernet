@@ -52,12 +52,33 @@ class EditorPolicy:
         return bot
 
     def require_capability(self, *, bot: dict[str, Any], bot_id: str) -> None:
+        # COSEC: mirroring the work-order entry point, a Bot assigned to a Team
+        # Space is under the Space's collaboration contract — Editor requests,
+        # rosters, removals and self-exits are governed by Space membership and
+        # Bot permissions, not by engine capability flags. The engine capability
+        # check stays in charge for every other Bot, and an unresolvable Space
+        # reference falls back to it (fail-closed) rather than widening the rule.
+        if self._assigned_to_team_space(bot):
+            return
         if not self._member_management_capability_service.can_manage_collaborators(
             bot, bot_id
         ):
             raise BotNotServiceTypeError(
                 f"Bot 不是服务型且未开启成员管理: bot_id={bot_id}"
             )
+
+    def _assigned_to_team_space(self, bot: Mapping[str, Any]) -> bool:
+        """Whether ``bot`` carries a structural reference to a Team Space."""
+        raw_space_id = bot.get("space_id")
+        if raw_space_id in (None, "") or str(raw_space_id).startswith("personal:"):
+            return False
+        try:
+            space = self._space_access_service.require_space_reference(
+                space_ref=str(raw_space_id)
+            )
+        except (SpaceNotFoundError, ValueError):
+            return False
+        return space.space_type is SpaceType.TEAM
 
     def resolve_record(
         self,

@@ -26,16 +26,16 @@ function setUserIdentity(value: { userId: string; displayName?: string | null } 
 
 beforeEach(() => {
   jest.resetAllMocks();
-  // 命中缓存用例取能力 user_id='327325'；未就绪用例（setUserIdentity(null)）走 ensureUserId 补拉，默认失败降级为 unsupported（不发业务请求）。
+  // 命中缓存用例取能力 user_id='900003'；未就绪用例（setUserIdentity(null)）走 ensureUserId 补拉，默认失败降级为 unsupported（不发业务请求）。
   (identityService.loadIdentities as unknown as jest.Mock<any>).mockResolvedValue({
     ok: false,
     error: { code: 'IDENTITY_LOAD_FAILED', friendlyMessage: '', canRetry: true },
   });
-  setUserIdentity({ userId: '327325', displayName: null });
+  setUserIdentity({ userId: '900003', displayName: null });
 });
 
 describe('notificationService.fetchUnreadCount', () => {
-  it('走专用 unread-count 端点并读 data.badge_count（待审批+未读通知总数），注入 user_id=327325', async () => {
+  it('走专用 unread-count 端点并读 data.badge_count（待审批+未读通知总数），注入 user_id=900003', async () => {
     nc.fetchUnreadCount.mockResolvedValue({
       success: true,
       code: 'SUCCESS',
@@ -44,7 +44,7 @@ describe('notificationService.fetchUnreadCount', () => {
     });
     const r = await notificationService.fetchUnreadCount();
     expect(nc.fetchUnreadCount).toHaveBeenCalledTimes(1);
-    expect(nc.fetchUnreadCount).toHaveBeenCalledWith({ user_id: '327325' });
+    expect(nc.fetchUnreadCount).toHaveBeenCalledWith({ user_id: '900003' });
     expect(r.data).toBe(7);
     expect(r.error).toBeUndefined();
   });
@@ -94,7 +94,7 @@ describe('notificationService.fetchRecentNotifications', () => {
     });
     const r = await notificationService.fetchRecentNotifications(3);
     expect(nc.listNotificationsForBell).toHaveBeenCalledWith({
-      user_id: '327325',
+      user_id: '900003',
       item_type: 'ALL',
       page_no: 1,
       page_size: 3,

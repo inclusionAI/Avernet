@@ -68,7 +68,7 @@ export function TaskClarifyCard({ data }: { data: TaskCardData }) {
 
   return (
     <div className="p-1 w-full flex justify-start task-loop-card-root">
-      <div className="w-full max-w-[360px] bg-white border border-gray-100 shadow-md rounded-2xl overflow-hidden transition-all duration-500">
+      <div className="w-full max-w-[420px] bg-white border border-gray-100 shadow-md rounded-2xl overflow-hidden transition-all duration-500">
         {/* Header */}
         <div className="px-3.5 pt-3.5 pb-2 border-b border-gray-50">
           <div className="flex items-center gap-1">

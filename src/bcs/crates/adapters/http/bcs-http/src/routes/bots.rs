@@ -568,9 +568,14 @@ pub async fn search_bots(
             Some(user_visibility.unwrap_or_else(|| default_scope.clone())),
             viewer_actor_id.is_none(),
         ),
-        Some(ActorKind::Bot) | None => (
+        Some(ActorKind::Bot) => (
             Some(visibility.unwrap_or_else(|| default_scope.clone())),
             user_visibility,
+            false,
+        ),
+        None => (
+            Some(visibility.unwrap_or_else(|| default_scope.clone())),
+            Some(user_visibility.unwrap_or_else(|| default_scope.clone())),
             false,
         ),
     };

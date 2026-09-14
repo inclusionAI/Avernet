@@ -1,6 +1,36 @@
 """``identity`` → ``IdentityService`` — the file set, minus the reserved names.
 
-The area this overwrites is the one work-items §3.2 names: the bot's identity
+**The entry shape.** ``identity`` for this category is the entry's ``type``,
+which is a whitelisted **filename** — ``SOUL.md``, ``RULES.md``, ``OKR.md``
+and the rest of ``VALID_IDENTITY_FILES`` — not a free-form label. Both an
+inline body and a fetched one are accepted::
+
+    manifest:
+      identity:
+        # inline content: no fetch at all
+        - type: RULES.md
+          content: |
+            # rules
+
+        # an inline source: a declaration object, like every source
+        - type: SOUL.md
+          source:
+            protocol: oss
+            bucket: team-artifacts
+            key: identity/soul.md
+            auth: oss-prod
+
+        # a named source: the entry's subpath must name ONE file, because
+        # this category delivers a single body per entry
+        - type: OKR.md
+          from: content
+          subpath: okr.md
+
+An entry reaches ``resolve`` as the raw mapping, e.g. ``{"type": "SOUL.md",
+"source": {"protocol": "oss", "bucket": "team-artifacts",
+"key": "identity/soul.md", "auth": "oss-prod"}}``.
+
+The area this overwrites is the bot's identity
 file set, minus ``MEMORY.md`` / ``IDENTITY.md`` — engine-generated runtime
 state that apply never writes and never removes, whatever a document says.
 The validator refuses their *declaration*; this module refuses to reach them
@@ -24,9 +54,9 @@ IdentityService exposes no delete, and inventing one in apply would give the
 identity area two removal semantics where every reader of the area sees one.
 A reserved name never receives even an empty write.
 
-Fetch (for ``source`` entries — inline URL, or a ``from``/git source via W7's
-``fetch_declared``) happens in ``resolve`` through
-:class:`~agentclaw.community.core.bot_config_manifest.apply.entry_fetch.EntryFetcher`;
+Fetch (for ``source`` entries — a declared ``source``, or a ``from`` name,
+both through W7's declared-source door) happens in ``resolve`` through
+:class:`~agentclaw.community.core.bot_config_manifest.apply.source_resolver.DeclaredSourceResolver`;
 a failure aborts the whole category before the first write — §3.2's
 all-or-nothing, by construction, never by discipline. The bytes are decoded
 to text here rather than in the fetch pipeline because "is this UTF-8" is a
@@ -38,10 +68,9 @@ import asyncio
 from typing import TYPE_CHECKING, Any, Optional, Sequence
 
 from agentclaw.community.core.bot_config_manifest.fetch.limits import FetchCategory
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
     EntryFetchError,
-    EntryFetcher,
-    GitEntrySource,
+    DeclaredSourceResolver,
 )
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     EntryOutcome,
@@ -68,6 +97,9 @@ if TYPE_CHECKING:
         ApplyContext,
     )
 
+#: The fetch category every entry here is charged and capped under. The
+#: identity cap is the smallest of the six, 1 MiB, because these are text
+#: files.
 _FETCH_CATEGORY = FetchCategory.IDENTITY
 
 
@@ -83,13 +115,32 @@ def _decode_utf8(body: bytes) -> Optional[str]:
 
 
 class IdentityMaterialiser(Materialiser):
-    """Converges the bot's identity file set toward the declaration."""
+    """Converges the bot's identity file set toward the declaration.
+
+    ``identity`` is the entry's ``type``; ``Intent.value`` is the decoded
+    **text** body, a ``str``, not bytes — this is the one category that
+    insists its bytes are UTF-8::
+
+        resolve -> ResolveResult(intents=(Intent(
+                       identity="SOUL.md", value="# who I am\n"),))
+        plan    -> CategoryPlan(
+                       entries=(PlannedEntry(<that intent>, "updated"),),
+                       removals=("OKR.md",))
+        write   -> (EntryResult(ManifestCategory.IDENTITY, "SOUL.md",
+                                EntryOutcome.UPDATED),)
+
+    A removal is an **empty write**, not a delete: the domain reads absent and
+    empty as one state, and ``IdentityService`` exposes no delete. A reserved
+    name (``MEMORY.md``, ``IDENTITY.md``) never receives even that.
+    """
 
     construct = ManifestCategory.IDENTITY
 
-    def __init__(self, identity_service: Any, fetcher: "EntryFetcher") -> None:
+    def __init__(
+        self, identity_service: Any, resolver: "DeclaredSourceResolver"
+    ) -> None:
         self._identity = identity_service
-        self._fetcher = fetcher
+        self._resolver = resolver
 
     async def resolve(
         self, ctx: "ApplyContext", entries: Sequence[dict[str, Any]]
@@ -171,8 +222,8 @@ class IdentityMaterialiser(Materialiser):
                 # call from a coroutine. It matters on the `dry_run` path,
                 # which the adapter awaits inline; a hung source must not
                 # park every concurrent request.
-                decl = await asyncio.to_thread(
-                    self._fetcher.fetch_declared,
+                delivery = await asyncio.to_thread(
+                    self._resolver.resolve,
                     ctx,
                     entry=entry,
                     category=_FETCH_CATEGORY,
@@ -182,67 +233,41 @@ class IdentityMaterialiser(Materialiser):
                 failures.append(ResolveFailure(file_type, exc.reason))
                 continue
 
-            if isinstance(decl, GitEntrySource):
-                if decl.subpath is None:
-                    # Category knowledge stays here: identity reads exactly
-                    # one file, and the source's subpath is where it is named.
-                    failures.append(
-                        ResolveFailure(
-                            file_type,
-                            "an identity entry from a git source must set "
-                            "the source's 'subpath' to a single file",
-                        )
-                    )
-                    continue
-
-                def _read_and_file() -> bytes:
-                    body = decl.read_file()
-                    # The one file's bytes go through the same store the URL
-                    # road files with — auth included, so the lineage's
-                    # answer to "which credential served this" is the same
-                    # on both roads.
-                    self._fetcher.file_bytes(
-                        ctx,
-                        content=body,
-                        source_url=decl.receipt_url(),
-                        category=_FETCH_CATEGORY,
-                        entry_identity=file_type,
-                        credential_name=decl.auth,
-                    )
-                    return body
-
-                try:
-                    body = await asyncio.to_thread(_read_and_file)
-                except EntryFetchError as exc:
-                    failures.append(ResolveFailure(file_type, exc.reason))
-                    continue
-                text = _decode_utf8(body)
-                if text is None:
-                    failures.append(
-                        ResolveFailure(
-                            file_type,
-                            "the fetched identity source is not UTF-8 text",
-                        )
-                    )
-                    continue
-                intents.append(
-                    Intent(file_type, text, note=decl.moved_note())
+            def _read_and_file() -> bytes:
+                body = delivery.single()
+                # The one file's bytes go through the same store the object
+                # road files with — auth included, so the lineage's answer to
+                # "which credential served this" is the same on both roads.
+                # Unconditional: a road that filed on the way past writes
+                # nothing here, and the caller no longer has to ask which.
+                delivery.file(
+                    ctx,
+                    body,
+                    category=_FETCH_CATEGORY,
+                    entry_identity=file_type,
                 )
-                continue
+                return body
 
-            # The URL road, exactly as before: decode what the wire brought.
-            fetched = decl
-            text = _decode_utf8(fetched.content)
+            try:
+                body = await asyncio.to_thread(_read_and_file)
+            except EntryFetchError as exc:
+                # Includes the "must name a single file" refusal a tree
+                # delivery raises when nothing selected one file out of it.
+                # That check used to live here, worded for this category —
+                # but asking it needed a git-only field on the delivery,
+                # which is the seam leaking to save one sentence.
+                failures.append(ResolveFailure(file_type, exc.reason))
+                continue
+            text = _decode_utf8(body)
             if text is None:
                 failures.append(
                     ResolveFailure(
-                        file_type, "the fetched identity source is not UTF-8 text"
+                        file_type,
+                        "the fetched identity source is not UTF-8 text",
                     )
                 )
                 continue
-            intents.append(
-                Intent(file_type, text, note=fetched.fallback_reason)
-            )
+            intents.append(Intent(file_type, text, note=delivery.note()))
 
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
 

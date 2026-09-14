@@ -34,6 +34,13 @@ class PublishedSkillVersion:
 class SkillVersionResolverProtocol(Protocol):
     """Resolve latest or exact PUBLISHED Versions without side effects."""
 
+    def resolve_latest_published(
+        self,
+        *,
+        env: str,
+        skill_id: int,
+    ) -> PublishedSkillVersion: ...
+
     def resolve_latest_runtime_assets(
         self,
         *,

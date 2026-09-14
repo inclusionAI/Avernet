@@ -30,3 +30,17 @@ test('MCP 调用身份点击后展示说明并由用户明确选择', () => {
   fireEvent.click(screen.getByRole('button', { name: /Caller 模式/ }));
   expect(onIdentity).toHaveBeenCalledWith('mcp-1', 'caller');
 });
+
+test('个人 Bot 的 MCP 访问方式不可切换时展示原因', async () => {
+  render(
+    <CapabilityMembers
+      kind="mcp"
+      items={[{ serverCode: 'mcp-1', name: '知识检索', active: true }]}
+      editable
+      identityDisabledReason="个人 Bot 固定使用 Owner 模式，不支持切换访问方式"
+    />,
+  );
+
+  fireEvent.focus(screen.getByTestId('mcp-identity-disabled-mcp-1'));
+  expect(await screen.findByText('个人 Bot 固定使用 Owner 模式，不支持切换访问方式')).toBeInTheDocument();
+});

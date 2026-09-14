@@ -13,7 +13,6 @@ from urllib.parse import urlsplit
 
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCapabilities,
-    SourceForm,
 )
 from agentclaw.community.core.bot_config_manifest.schema.limits import (
     MAX_SOURCE_URL_CHARS,
@@ -73,19 +72,6 @@ class Context:
         self.violations.append(
             Violation(location=location, code=code, message=message)
         )
-
-    def require_source_support(self, location: str, form: SourceForm) -> bool:
-        """Refuse a source form nothing can resolve yet. True when supported."""
-        if self.capabilities.supports(form):
-            return True
-        self.add(
-            location,
-            "unsupported_source",
-            f"source form '{form.value}' is not supported: "
-            + self.capabilities.reason_for(form),
-        )
-        return False
-
 
 def check_placeholders(ctx: Context, location: str, value: Any) -> None:
     """Refuse any ``${...}`` name outside the whitelist.

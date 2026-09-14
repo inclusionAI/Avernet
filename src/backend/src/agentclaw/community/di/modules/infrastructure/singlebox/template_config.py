@@ -16,7 +16,14 @@ logger = get_logger()
 
 _LOCAL_TEMPLATE_UID = "local_default"
 _TEMPLATE_UID_ALIASES = (_LOCAL_TEMPLATE_UID, "aicoding")
-_SUPPORTED_ENGINES = ("openclaw", "moltis", "hermes", "aicoding", "claude_code")
+_SUPPORTED_ENGINES = (
+    "openclaw",
+    "moltis",
+    "hermes",
+    "aicoding",
+    "claude_code",
+    "deepseek_harness",
+)
 
 
 class SingleboxBaasTemplateConfigLifecycle(LifecycleBase):

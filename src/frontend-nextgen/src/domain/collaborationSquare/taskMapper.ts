@@ -141,7 +141,7 @@ function toTaskOutputText(raw: unknown): string | undefined {
 }
 
 /**
- * 将 BBS 任务列表项（{@link BbsTaskItem}，GET /api/v1/collaboration/tasks/bbs/list 的 data 元素）
+ * 将 BBS 任务列表项（{@link BbsTaskItem}，GET /openapi/v1/collaboration/tasks/bbs/list 的 data 元素）
  * 映射为只读 {@link PublicTask}。
  *
  * 字段映射（确定的）：

@@ -644,7 +644,6 @@ impl FakeRegistryService {
             RegisteredBot {
                 bot_uuid: id.to_string(),
                 capabilities,
-                dynamic_status: BotDynamicStatus::default(),
                 env: None,
                 created_by: None,
                 actor_kind: if id.starts_with("human_") {
@@ -722,7 +721,6 @@ impl BotRegistryCoreService for FakeRegistryService {
             RegisteredBot {
                 bot_uuid: bot_id,
                 capabilities,
-                dynamic_status: BotDynamicStatus::default(),
                 env: None,
                 created_by: None,
                 actor_kind: ActorKind::Bot,
@@ -953,6 +951,22 @@ impl RecordingBotDelivery {
 
 #[async_trait]
 impl BotDeliveryPort for RecordingBotDelivery {
+    async fn deliver_on_connection(&self, cmd: BotDeliveryCommand, connection_id: &str) -> ServiceResult<BotDeliveryResult> {
+        if self.connection_identity(&cmd.target).await.as_deref() != Some(connection_id) {
+            return Err(ServiceError::BotNotConnected(cmd.target_bot_id().to_string()));
+        }
+        self.deliver(cmd).await
+    }
+    async fn abort_on_connection(&self, cmd: BotAbortDeliveryCommand, connection_id: &str) -> ServiceResult<BotAbortDeliveryResult> {
+        if self.connection_identity(&cmd.target).await.as_deref() != Some(connection_id) {
+            return Err(ServiceError::BotNotConnected(cmd.target_bot_id().to_string()));
+        }
+        self.abort(cmd).await
+    }
+    async fn connection_identity(&self, target: &BotDeliveryTarget) -> Option<String> {
+        matches!(target, BotDeliveryTarget::WebSocket { .. }).then(|| format!("test-connection-{}", target.bot_id()))
+    }
+
     async fn is_available(&self, _target: &BotDeliveryTarget) -> bool {
         true
     }

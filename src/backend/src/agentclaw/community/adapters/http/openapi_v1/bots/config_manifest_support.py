@@ -12,7 +12,6 @@ from typing import Any, Optional, Sequence
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.api.bot_config_manifest_apply_service import (
-    ALL_PHASES,
     ApplyReport,
     BotConfigManifestApplyServiceProtocol,
     ManifestApplyInProgressError,
@@ -35,6 +34,7 @@ from .schemas_config_manifest_apply import (
     ConfigManifestApply,
     ConfigManifestApplyCategory,
     ConfigManifestApplyEntry,
+    ConfigManifestApplySource,
 )
 from .schemas import (
     ConfigManifestApplyStarted,
@@ -197,7 +197,6 @@ def start_put_apply(
             actor_id=actor_id,
             audit_actor=audit,
             trigger=PUT_TRIGGER,
-            phases=ALL_PHASES,
         )
     except ManifestApplyInProgressError:
         return ConfigManifestApplyStarted(
@@ -257,7 +256,9 @@ def apply_payload(report: ApplyReport) -> ConfigManifestApply:
         result=payload["result"],
         started_at=report.started_at,
         finished_at=report.finished_at,
-        sources=payload["sources"],
+        sources=[
+            ConfigManifestApplySource(**source) for source in payload["sources"]
+        ],
         categories=[
             ConfigManifestApplyCategory(**category)
             for category in payload["categories"]

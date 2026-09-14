@@ -103,7 +103,6 @@ from agentclaw.community.core.system_config import (
 )
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
-from agentclaw.community.di import config as cfg
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.drm import DRMReaderPlugin
 from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient

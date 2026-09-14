@@ -2894,6 +2894,14 @@ END`,
   },
   {
     version: 120,
+    description: "Add owner_id to workflow_specs so save can persist the current user alongside deploy history",
+    sql: [
+      `ALTER TABLE workflow_specs ADD COLUMN owner_id VARCHAR(255) DEFAULT NULL`,
+      `CREATE INDEX IF NOT EXISTS idx_workflow_specs_owner_id ON workflow_specs (owner_id)`,
+    ],
+  },
+  {
+    version: 121,
     description: "Add Stage Skill extensions, HITL audit, and registered Skill version assets",
     sql: [
       `CREATE TABLE IF NOT EXISTS ce_stage_skill_implementations (
@@ -2979,14 +2987,14 @@ END`,
     ],
   },
   {
-    version: 121,
+    version: 122,
     description: "Keep Stage Skill registration and integration-test verification as separate states",
     sql: [
       `ALTER TABLE ce_stage_skill_implementations ADD COLUMN integration_test_status VARCHAR(32) NOT NULL DEFAULT 'untested'`,
     ],
   },
   {
-    version: 122,
+    version: 123,
     description: "Persist custom Stage development before package upload",
     sql: [
       `ALTER TABLE ce_skill_assets ADD COLUMN description TEXT`,
@@ -3004,7 +3012,7 @@ END`,
     ],
   },
   {
-    version: 123,
+    version: 124,
     description: "Persist operation-time Skill audit records without historical backfill",
     sql: [
       `CREATE TABLE IF NOT EXISTS ce_skill_audit_events (
@@ -3031,6 +3039,28 @@ END`,
 )`,
       `CREATE INDEX IF NOT EXISTS idx_ce_skill_audit_owner ON ce_skill_audit_events (owner_user_id, gmt_create)`,
       `CREATE INDEX IF NOT EXISTS idx_ce_skill_audit_task ON ce_skill_audit_events (task_id, event_type)`,
+    ],
+  },
+  {
+    version: 125,
+    description: "Reconcile workflow ownership for pre-merge Stage Skill databases",
+    sql: [
+      // Existing feature databases recorded versions 120–123 before upstream
+      // version 120 added ownership. Reapply its idempotent DDL above that range.
+      `ALTER TABLE workflow_specs ADD COLUMN owner_id VARCHAR(255) DEFAULT NULL`,
+      `CREATE INDEX IF NOT EXISTS idx_workflow_specs_owner_id ON workflow_specs (owner_id)`,
+    ],
+  },
+  {
+    version: 126,
+    description: "Bind Evolve assets to OCB spaces without sharing historical private records",
+    sql: [
+      ...["ce_skill_assets", "ce_stage_developments", "ce_stage_skill_implementations"].flatMap((table) => [
+        `ALTER TABLE ${table} ADD COLUMN space_id VARCHAR(128) DEFAULT NULL`,
+        `ALTER TABLE ${table} ADD COLUMN space_type VARCHAR(16) DEFAULT NULL`,
+        `ALTER TABLE ${table} ADD COLUMN space_name VARCHAR(255) DEFAULT NULL`,
+        `CREATE INDEX IF NOT EXISTS idx_${table}_space ON ${table} (space_id)`,
+      ]),
     ],
   },
 ];

@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import pytest
 
+import agentclaw.community.core.bot_config_manifest.capabilities as capabilities_module
+
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ConstructKind,
     ManifestCategory,
     ManifestSection,
-    SourceForm,
     capabilities_for_bot,
     kind_of,
     resolve_capabilities,
@@ -38,7 +39,7 @@ def test_every_construct_in_the_vocabulary_has_a_verdict():
     """
     caps = _resolve()
     ruled_on = {c.construct for c in caps.constructs}
-    expected = {*ManifestCategory, *ManifestSection, *SourceForm}
+    expected = {*ManifestCategory, *ManifestSection}
     assert ruled_on == expected
 
 
@@ -50,7 +51,6 @@ def test_a_constructs_kind_is_its_type_not_a_second_field():
         assert capability.kind is kind_of(capability.construct)
     assert kind_of(ManifestCategory.MCP) is ConstructKind.CATEGORY
     assert kind_of(ManifestSection.SCRIPT) is ConstructKind.SECTION
-    assert kind_of(SourceForm.GIT) is ConstructKind.SOURCE
 
 
 def test_an_unsupported_construct_always_carries_a_reason():
@@ -103,20 +103,26 @@ def test_cli_tools_is_refused_on_an_unknown_engine():
     assert caps.reason_for(ManifestCategory.CLI_TOOLS)
 
 
-@pytest.mark.parametrize("source", [SourceForm.GIT, SourceForm.NAMED])
-def test_the_w7_source_forms_are_resolved(source):
-    """The point of answering per *construct* rather than per category.
+def test_no_construct_is_published_for_a_source_spelling():
+    """The ``source`` construct kind is gone, and this pins that it stays gone.
 
-    A source form with no resolver fails exactly the way an unsupported
-    category does, and W7 delivered resolvers for these two — the gate flip
-    this file pinned the other way around before the delivery was reachable.
-    The one (category, form) pair still undelivered — resources entries
-    naming git or named sources — is refused per entry by the schema, which
-    is where a category-aware reason can live.
+    It published one row per spelling (``oss``/``git``/``named``/``content``),
+    and review asked what ``named`` was doing there. The answer, measured
+    across every engine/bot-type/teclaw configuration: no spelling ever
+    carried a verdict of its own — the only refusal is bot-wide and hits all
+    four identically, and it is already reported per category. Four rows that
+    could never disagree, plus a per-entry violation restating the category's
+    own refusal in the same words.
+
+    Which ``(category, protocol)`` pairs are open is the question that was
+    actually being asked, and ``source_matrix`` answers it on ``SourceKind``.
     """
     caps = _resolve()
-    assert caps.supports(source)
-    assert caps.reason_for(source) == ""
+    assert {c.kind for c in caps.constructs} == {
+        ConstructKind.CATEGORY,
+        ConstructKind.SECTION,
+    }
+    assert not hasattr(capabilities_module, "SourceForm")
 
 
 def test_script_is_refused_for_a_teclaw_bot():

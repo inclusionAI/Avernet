@@ -34,6 +34,7 @@ export interface CapabilitySetManagerProps {
   candidatesLoading?: boolean;
   mcpCallTypes?: Record<string, 'caller' | 'owner'>;
   callerContextEditable?: boolean;
+  mcpIdentityDisabledReason?: string;
   updatingCallType?: string;
   onMcpCallType?: (serverCode: string, callType: 'caller' | 'owner') => Promise<void>;
 }
@@ -154,6 +155,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                       editable={editable}
                       identities={props.mcpCallTypes}
                       identityEditable={props.callerContextEditable}
+                      identityDisabledReason={props.mcpIdentityDisabledReason}
                       updatingIdentityId={props.updatingCallType}
                       onIdentity={props.onMcpCallType}
                       onAdd={set.isDefault || !canAddMcp ? undefined : () => openPicker(set, 'mcp')}

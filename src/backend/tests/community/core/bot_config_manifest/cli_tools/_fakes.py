@@ -4,7 +4,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Mapping, Optional
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
+    BlobDelivery,
+    GitDelivery,
+)
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
     EntryFetchError,
     GitEntrySource,
 )
@@ -222,8 +226,50 @@ class FakeGitEntrySource(GitEntrySource):
         )
 
 
-class FakeEntryFetcher:
-    """Answers with canned bytes; records the keyword arguments it was given."""
+class _RecordingStore:
+    """The content store a :class:`GitDelivery` files through, recorded.
+
+    The git road's delivery writes its own receipt now, so what used to be a
+    ``file_bytes`` recording on the fetcher is a store call here — in the
+    store's own vocabulary, which is what the real one receives.
+    """
+
+    def __init__(self, filed: list[dict]) -> None:
+        self._filed = filed
+
+    def store(
+        self,
+        fetched,
+        *,
+        scope,
+        source_url,
+        credential_name=None,
+        modifier="",
+        apply_id=None,
+        category=None,
+        entry_identity=None,
+    ):
+        self._filed.append(
+            {
+                "content": fetched.bytes,
+                "source_url": source_url,
+                "category": category,
+                "entry_identity": entry_identity,
+                "credential_name": credential_name,
+            }
+        )
+        return SimpleNamespace(digest=fetched.sha256)
+
+
+class FakeDeclaredSourceResolver:
+    """Answers a declared entry with canned bytes; records what it resolved.
+
+    It resolves the entry the way the real ``resolve`` does — a ``from``
+    name against the session's ``sources``, an inline declaration, a git source
+    answering with a tree — and **refuses anything else**, including the bare
+    URL string the grammar used to allow. A double that quietly served a string
+    would let the one road the service no longer has go on passing its tests.
+    """
 
     def __init__(self, *, content: bytes = b"", digest: str = "", error=None) -> None:
         self.content = content
@@ -231,24 +277,10 @@ class FakeEntryFetcher:
         self.error = error
         self.calls: list[dict] = []
         self.filed: list[dict] = []
+        #: The store a git delivery files its own receipt through.
+        self.store = _RecordingStore(self.filed)
 
-    def fetch(self, ctx, **kwargs):
-        self.calls.append(kwargs)
-        if self.error is not None:
-            raise self.error
-        return FakeFetchedEntry(self.content, self.digest or kwargs.get("digest") or "")
-
-    def fetch_declared(self, ctx, *, entry, category, entry_identity=None):
-        """The declared-source door, in the double.
-
-        A manifest-sourced declaration comes through here rather than through
-        ``fetch``, so the double resolves the entry the way the real fetcher
-        does — an inline URL, a ``from`` name against the session's ``sources``,
-        or a git source answering with a tree — and records the *resolved*
-        address. A double that just forwarded to ``fetch`` would have kept
-        passing while a source name went on the wire as a URL, which is the
-        defect this door closes.
-        """
+    def resolve(self, ctx, *, entry, category, entry_identity=None):
         decl = None
         if isinstance(entry.get("from"), str):
             session = getattr(ctx, "source_session", None)
@@ -261,33 +293,41 @@ class FakeEntryFetcher:
                 )
         elif isinstance(entry.get("source"), Mapping):
             decl = entry["source"]
-
-        if decl is not None and decl.get("protocol") == "git":
-            self.calls.append(
-                {
-                    "source_url": decl["url"],
-                    "category": category,
-                    "entry_identity": entry_identity,
-                    "git": True,
-                }
+        else:
+            raise EntryFetchError(
+                "an entry must name one of 'from', 'source' or 'content', "
+                "and 'source' is a declaration object carrying a 'protocol' "
+                "(declare 'protocol: git' or 'protocol: oss') — a URL written "
+                "as a plain string is not one"
             )
-            if self.error is not None:
-                raise self.error
-            return FakeGitEntrySource(self.content, decl, entry)
 
-        return self.fetch(
-            ctx,
-            source_url=(decl or {}).get("url") or entry.get("source"),
-            digest=entry.get("digest"),
-            auth=(decl or {}).get("auth", entry.get("auth")),
-            category=category,
-            keep_last=entry.get("on_fetch_failure", "keep_last") == "keep_last",
-            entry_identity=entry_identity,
+        self.calls.append(
+            {
+                "declaration": dict(decl),
+                "protocol": decl.get("protocol"),
+                "source_address": decl.get("url") or decl.get("key"),
+                "digest": entry.get("digest"),
+                "auth": decl.get("auth"),
+                "category": category,
+                "entry_identity": entry_identity,
+                "keep_last": (
+                    entry.get("on_fetch_failure", "keep_last") == "keep_last"
+                ),
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        if decl.get("protocol") == "git":
+            return GitDelivery(
+                FakeGitEntrySource(self.content, decl, entry), self.store
+            )
+        return BlobDelivery(
+            FakeFetchedEntry(
+                self.content, self.digest or entry.get("digest") or ""
+            )
         )
 
-    def file_bytes(self, ctx, **kwargs):
-        self.filed.append(kwargs)
-        return "sha256:filed"
+
 
 
 def code_of(module) -> str:

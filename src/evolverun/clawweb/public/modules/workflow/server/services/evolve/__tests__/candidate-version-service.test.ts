@@ -33,7 +33,7 @@ function createTestDb(): IDatabase {
     CREATE TABLE workflow_specs (
       id INTEGER PRIMARY KEY AUTOINCREMENT, workflow_id VARCHAR(255) NOT NULL,
       pack_id VARCHAR(255), spec_json TEXT NOT NULL, title VARCHAR(255),
-      version INTEGER DEFAULT 1,
+      version INTEGER DEFAULT 1, owner_id VARCHAR(255) DEFAULT NULL,
       gmt_create INTEGER NOT NULL DEFAULT (unixepoch()),
       gmt_modified INTEGER NOT NULL DEFAULT (unixepoch())
     );

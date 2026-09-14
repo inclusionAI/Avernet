@@ -251,18 +251,23 @@ class BotPublishRepositoryProtocol(Protocol):
         source_bot_id: str,
         env: str,
     ) -> Optional[BotPublishRecord]:
-        """Get the latest status=built publish record by source_bot_id (owner-agnostic).
+        """Get the latest non-online publish record by source_bot_id (owner-agnostic).
 
-        Used by the Eval environment to anchor the latest draft (built) version
-        rather than the latest online (success) version. Deliberately NOT filtered
-        by owner_id for the same reason as get_latest_success_by_source_bot_id.
+        Queries status IN ('built', 'validating') — the two stages that
+        precede online deployment. Used by the Eval environment to anchor
+        the latest draft or verify-stage version rather than the latest
+        online (success) version. Returns the highest-id row among
+        matching statuses.
+
+        Deliberately NOT filtered by owner_id for the same reason as
+        get_latest_success_by_source_bot_id.
 
         Args:
             source_bot_id: source bot_id
             env: environment
 
         Returns:
-            The latest built publish record, or None if not found.
+            The latest non-online publish record, or None if not found.
         """
         ...
 

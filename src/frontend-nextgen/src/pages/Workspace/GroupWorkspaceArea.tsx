@@ -1,6 +1,7 @@
 import { getCapabilities } from '@/capabilities';
 import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui';
 import type { WorkspaceView } from '@/domain/collaboration/availableViews';
+import type { MessageViewScope } from '@/domain/collaboration/types';
 import type { GroupPanelKind } from '@/pages/Workspace/components/GroupHeader';
 import { sessionService } from '@/services/workspace/sessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -62,8 +63,7 @@ export function GroupWorkspaceArea({
   const sessionTabsByGroup = useWorkspaceStore((s) => s.sessionTabsByGroup);
   const setSessionTabForGroup = useWorkspaceStore((s) => s.setSessionTabForGroup);
 
-  const selectedGroup = ws.selectedGroup;
-  const canManage = ws.canManageGroup;
+  const { selectedGroup, canManageGroup: canManage } = ws;
 
   // 管理面板打开期间跟随选中群补拉详情：打开面板（齿轮/「…」菜单）或面板保持打开时切群，
   // 都会为新选中群拉取 participants 等详情；否则列表项 participants 为空且 participantCount>0，
@@ -114,7 +114,8 @@ export function GroupWorkspaceArea({
           error: { code: 'GROUP_MISSING', friendlyMessage: '未选择协作群', canRetry: false },
         });
   const handleShareSession = () => sessionManage.createShare();
-  const handleCreateSession = (groupId: string) => void sessions.createSessionIn(groupId);
+  const handleCreateSession = (groupId: string, scope?: MessageViewScope) =>
+    void sessions.createSessionIn(groupId, undefined, undefined, scope);
   const handleCreateGroup = () => createGroupDialog.openModal();
   // 侧栏「…」菜单：群管理（选中该群并打开管理面板；详情由上方 effect 按需补拉）。
   const handleManageGroup = (groupId: string) => {
@@ -122,9 +123,7 @@ export function GroupWorkspaceArea({
     setActivePanel('manage');
   };
   // 头部齿轮切面板：打开群管理时详情由上方 effect 按需补拉。
-  const handleTogglePanel = (panel: GroupPanelKind) => {
-    setActivePanel(panel);
-  };
+  const handleTogglePanel = (panel: GroupPanelKind) => setActivePanel(panel);
   const handleManageSession = (groupId: string, sessionId: string) => {
     void ws.onSelectGroup(groupId);
     sessions.openSession(groupId, sessionId);
@@ -143,6 +142,8 @@ export function GroupWorkspaceArea({
   const groupSidebarProps: GroupSidebarProps = {
     view,
     onViewChange,
+    // 身份未加载完成（null）时按 human 兜底展示视角菜单。
+    viewerKind: ws.activeIdentity?.kind === 'bot' ? 'bot' : 'user',
     availableViews,
     groups: ws.groups,
     isLoading: ws.isLoadingGroups,
@@ -210,6 +211,7 @@ export function GroupWorkspaceArea({
         session={sessions.selectedSession}
         activeIdentity={ws.activeIdentity}
         updateMemberMode={sessions.updateMemberMode}
+        updateMemberScope={sessions.updateMemberScope}
         panelRef={chat.panelRef}
         chatBridge={chat.chatBridge}
         chat={chat.chat}

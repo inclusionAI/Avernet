@@ -9,6 +9,10 @@ import {
 export type FrozenStageExtensionBinding = {
   enabled: boolean;
   implementationId: string;
+  displayName?: string;
+  stageSkillId?: string;
+  ownerUserId?: string;
+  spaceId?: string | null;
 };
 
 export type FrozenStageExtensions = Partial<Record<StageExtensionMode, FrozenStageExtensionBinding>>;

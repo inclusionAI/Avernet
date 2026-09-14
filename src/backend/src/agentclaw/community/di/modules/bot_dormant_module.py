@@ -4,6 +4,7 @@ Bindings registered here:
   - BaasDormantClient   — HTTP client to BaaS health-checker (env-driven base_url)
   - DormantBotService   — scan-and-decision orchestrator
   - ActivateBotService  — reactivates RECYCLED bots
+  - RecycleBotService   — recycles ACTIVE personal managed-cloud bots
   - WhitelistService    — batch-adds bots to the dormant whitelist
   - DormantBotLifecycle — single-cron lifecycle participant (auto-discovered by
                           discover_lifecycle_participants via LifecycleBase)
@@ -20,8 +21,13 @@ from typing import Any
 from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.api.bot_service import BotServiceProtocol as _ApiBotServiceProtocol
-from agentclaw.community.api.bot_dormant_service import BotDormantActivateServiceProtocol
+from agentclaw.community.api.bot_dormant_service import (
+    BotDormantActivateServiceProtocol,
+    BotDormantAuditServiceProtocol,
+    BotDormantRecycleServiceProtocol,
+)
 from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
+from agentclaw.community.core.bot_dormant.audit_service import DormantAuditService
 from agentclaw.community.core.bot_dormant.baas_client import BaasDormantClient
 from agentclaw.community.core.bot_dormant.internal_service import DormantInternalService
 from agentclaw.community.core.bot_dormant.lifecycle import DormantBotLifecycle
@@ -29,6 +35,7 @@ from agentclaw.community.core.bot_dormant.ops_service import DormantOpsService
 from agentclaw.community.core.bot_dormant.protocols import (
     BotServiceProtocol as _DormantBotServiceProtocol,
 )
+from agentclaw.community.core.bot_dormant.recycle_service import RecycleBotService
 from agentclaw.community.core.bot_dormant.scan_policy import DormantScanPolicyService
 from agentclaw.community.core.bot_dormant.service import DormantBotService
 from agentclaw.community.core.bot_dormant.whitelist_service import WhitelistService
@@ -87,6 +94,9 @@ class _DormantBotServiceAdapter:
     def start_bot(self, *args: Any, **kwargs: Any) -> Any:
         return self._bot_service.start_bot(*args, **kwargs)
 
+    def is_teclaw_bot(self, active_engine: str | None) -> bool:
+        return self._bot_service.is_teclaw_bot(active_engine)
+
 
 class BotDormantModule(Module):
     """Production bindings for the dormant-bot subsystem."""
@@ -99,8 +109,9 @@ class BotDormantModule(Module):
         binder.bind(BaasDormantClient, to=BaasDormantClient, scope=singleton)
         binder.bind(WhitelistService, to=WhitelistService, scope=singleton)
         binder.bind(DormantInternalService, to=DormantInternalService, scope=singleton)
-        binder.bind(DormantOpsService, to=DormantOpsService, scope=singleton)
         binder.bind(DormantScanPolicyService, to=DormantScanPolicyService, scope=singleton)
+        binder.bind(RecycleBotService, to=RecycleBotService, scope=singleton)
+        binder.bind(DormantAuditService, to=DormantAuditService, scope=singleton)
 
     @singleton
     @provider
@@ -128,6 +139,38 @@ class BotDormantModule(Module):
     @singleton
     @provider
     @inject
+    def _recycle_bot_service_protocol(
+        self, service: RecycleBotService
+    ) -> BotDormantRecycleServiceProtocol:
+        """Bind the public recycle Protocol to the shared Core service."""
+        return service
+
+    @singleton
+    @provider
+    @inject
+    def _dormant_audit_service_protocol(
+        self, service: DormantAuditService
+    ) -> BotDormantAuditServiceProtocol:
+        return service
+
+    @singleton
+    @provider
+    @inject
+    def _dormant_ops_service(
+        self,
+        dormant_service: DormantBotService,
+        passport_plugin: PassportPlugin,
+        recycle_service: RecycleBotService,
+    ) -> DormantOpsService:
+        return DormantOpsService(
+            dormant_service=dormant_service,
+            passport_plugin=passport_plugin,
+            recycle_service=recycle_service,
+        )
+
+    @singleton
+    @provider
+    @inject
     def _bridge_bot_service_protocol(
         self,
         bot_service: _ApiBotServiceProtocol,
@@ -143,7 +186,7 @@ class BotDormantModule(Module):
         db: DatabasePlugin,
         baas_client: BaasDormantClient,
         bot_service: _DormantBotServiceProtocol,
-        passport_plugin: PassportPlugin,
+        recycle_service: RecycleBotService,
         scan_policy: DormantScanPolicyService,
         common_whitelist_service: CommonWhiteListService,
         config: DormantConfig,
@@ -158,7 +201,7 @@ class BotDormantModule(Module):
             db=db,
             baas_client=baas_client,
             bot_service=bot_service,
-            passport_plugin=passport_plugin,
+            recycle_service=recycle_service,
             scan_policy=scan_policy,
             common_whitelist_service=common_whitelist_service,
             dry_run=config.dry_run,

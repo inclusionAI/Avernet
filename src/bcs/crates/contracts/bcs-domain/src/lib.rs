@@ -20,6 +20,7 @@ pub mod group;
 pub mod group_id;
 pub mod invite;
 pub mod message;
+pub mod message_delivery;
 pub mod organization;
 pub mod opening_message;
 pub mod proposal;

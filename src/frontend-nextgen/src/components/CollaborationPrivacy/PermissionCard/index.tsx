@@ -1,14 +1,12 @@
 import { Badge } from '@/components/ui/Badge';
-import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { IconButton } from '@/components/ui/IconButton';
 import { Switch } from '@/components/ui/Switch';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { CollaborationBot, PublicAudience } from '@/domain/collaborationPrivacy/types';
 import type { DirectSetting } from '@/services/collaborationPrivacy';
-import { Copy, Info, RefreshCw } from 'lucide-react';
+import { Copy, RefreshCw } from 'lucide-react';
 import { botFriendApprovalSection, botVisibilitySection } from '../botVisibilityCopy';
-import { collaborationPrivacyTooltipDelayMs } from '../interaction';
+import { ControlStateTooltip, LabelHelpTooltip } from '../HelpTooltip';
 import { RelationCard } from '../RelationCard';
 import { RequestList } from '../RequestList';
 
@@ -39,35 +37,19 @@ function SettingRow({ label, description, checked, disabled, busy, status, statu
   return (
     <div className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="m-0 text-sm font-medium text-foreground">{label}</p>
-          {status && (
-            <TooltipProvider delayDuration={collaborationPrivacyTooltipDelayMs}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-6 gap-1 px-1 text-muted-foreground"
-                    aria-label={`${label}${status}说明`}
-                  >
-                    <Badge tone="neutral">{status}</Badge>
-                    <Info className="h-3.5 w-3.5" aria-hidden />
-                  </Button>
-                </TooltipTrigger>
-                {statusReason && <TooltipContent>{statusReason}</TooltipContent>}
-              </Tooltip>
-            </TooltipProvider>
-          )}
-        </div>
+        <p className="m-0 text-sm font-medium text-foreground">{label}</p>
         <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
       </div>
-      <Switch
-        checked={checked}
-        disabled={disabled || busy}
-        aria-label={`${checked ? '关闭' : '开启'}${label}`}
-        onCheckedChange={onChange}
-      />
+      <div className="flex shrink-0 items-center gap-2">
+        {status && <Badge tone="neutral">{status}</Badge>}
+        {status && statusReason && <ControlStateTooltip label={label} status={status} content={statusReason} />}
+        <Switch
+          checked={checked}
+          disabled={disabled || busy}
+          aria-label={`${checked ? '关闭' : '开启'}${label}`}
+          onCheckedChange={onChange}
+        />
+      </div>
     </div>
   );
 }
@@ -181,21 +163,7 @@ export function PermissionCard({
                 <h4 className="m-0 text-xs font-semibold tracking-wide text-muted-foreground">
                   {botVisibilitySection.title}
                 </h4>
-                <TooltipProvider delayDuration={collaborationPrivacyTooltipDelayMs}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-5 w-5 text-muted-foreground"
-                        aria-label="Bot 可见性说明"
-                      >
-                        <Info className="h-3.5 w-3.5" aria-hidden />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{botVisibilitySection.description}</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <LabelHelpTooltip label={botVisibilitySection.title} content={botVisibilitySection.description} />
               </div>
               <div className="divide-y divide-border">
                 <RelationCard
@@ -221,21 +189,21 @@ export function PermissionCard({
                 <h4 className="text-xs font-semibold tracking-wide text-muted-foreground">
                   {botFriendApprovalSection.title}
                 </h4>
-                <TooltipProvider delayDuration={collaborationPrivacyTooltipDelayMs}>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-5 w-5 text-muted-foreground"
-                        aria-label="Bot 好友审批说明"
+                <LabelHelpTooltip
+                  label={botFriendApprovalSection.title}
+                  content={
+                    <>
+                      {botFriendApprovalSection.descriptionLeading}
+                      <a
+                        href={botFriendApprovalSection.approvalEntryPath}
+                        className="font-medium text-primary hover:opacity-80"
                       >
-                        <Info className="h-3.5 w-3.5" aria-hidden />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>{botFriendApprovalSection.description}</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                        {botFriendApprovalSection.approvalEntryLabel}
+                      </a>
+                      {botFriendApprovalSection.descriptionTrailing}
+                    </>
+                  }
+                />
               </div>
               <RequestList
                 config={bot.friendApproval}

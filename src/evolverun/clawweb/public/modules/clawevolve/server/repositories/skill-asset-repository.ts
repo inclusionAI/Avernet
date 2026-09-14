@@ -5,6 +5,9 @@ export type SkillAssetRow = {
   id: number;
   asset_id: string;
   owner_user_id: string;
+  space_id: string | null;
+  space_type: "PERSONAL" | "TEAM" | null;
+  space_name: string | null;
   bot_id: string;
   ocb_skill_id: string;
   display_name: string;
@@ -55,10 +58,10 @@ export class SkillAssetRepository {
     ))[0] ?? null;
   }
 
-  async listAssets(ownerUserId: string): Promise<SkillAssetRow[]> {
+  async listAssets(ownerUserId: string, teamSpaceIds: readonly string[] = []): Promise<SkillAssetRow[]> {
     return this.db.query<SkillAssetRow>(
-      "SELECT * FROM ce_skill_assets WHERE owner_user_id = ? ORDER BY gmt_modified DESC, id DESC",
-      [ownerUserId],
+      `SELECT * FROM ce_skill_assets WHERE owner_user_id = ?${teamSpaceIds.length ? ` OR (space_type = 'TEAM' AND space_id IN (${teamSpaceIds.map(() => "?").join(",")}))` : ""} ORDER BY gmt_modified DESC, id DESC`,
+      [ownerUserId, ...teamSpaceIds],
     );
   }
 
@@ -66,6 +69,9 @@ export class SkillAssetRepository {
     assetId: string;
     versionId: string;
     ownerUserId: string;
+    spaceId?: string | null;
+    spaceType?: "PERSONAL" | "TEAM" | null;
+    spaceName?: string | null;
     actorId?: string;
     botId: string;
     ocbSkillId: string;
@@ -78,10 +84,11 @@ export class SkillAssetRepository {
       const now = tx.dialect.now();
       await tx.exec(
         `INSERT INTO ce_skill_assets
-         (asset_id, owner_user_id, bot_id, ocb_skill_id, display_name, description, current_version_no,
+         (asset_id, owner_user_id, space_id, space_type, space_name, bot_id, ocb_skill_id, display_name, description, current_version_no,
           current_package_ref, current_package_sha256, gmt_create, gmt_modified)
-         VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
-        [input.assetId, input.ownerUserId, input.botId, input.ocbSkillId, input.displayName, input.description ?? null,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+        [input.assetId, input.ownerUserId, input.spaceId ?? null, input.spaceType ?? null, input.spaceName ?? null,
+          input.botId, input.ocbSkillId, input.displayName, input.description ?? null,
           input.packageRef, input.packageSha256, now, now],
       );
       await tx.exec(

@@ -1,22 +1,16 @@
-"""Tests for ActivateBotService (Task 6).
-
-Six scenarios:
-  1. reject_active_bot          — ACTIVE → InvalidBotStateError
-  2. reactivating_friendly      — REACTIVATING → friendly dict (no update_status call)
-  3. recycled_kicks_async       — RECYCLED → update_status(REACTIVATING) + start_bot called
-  4. rollback_on_passport_error — passport unfreeze raises → status=RECYCLED,
-                                   start_bot NOT called
-  5. rollback_on_start_bot_fail — start_bot raises → passport freeze + status=RECYCLED
-  6. missing_token_after_unfreeze — token absent → freeze + RECYCLED before start
-"""
+"""Behavior tests for the shared personal Bot activation service."""
 from unittest.mock import MagicMock
 
 import pytest
 
 from agentclaw.community.core.bot_dormant.activate_service import (
     ActivateBotService,
+)
+from agentclaw.community.core.bot_dormant.types import BotLifecycleResult
+from agentclaw.community.core.bot_management.services.bot_service import (
+    BotInvalidLifecycleStateError,
     BotNotFoundError,
-    InvalidBotStateError,
+    BotOperationNotAllowedError,
 )
 
 
@@ -27,33 +21,121 @@ def test_activate_reports_missing_bot_through_dormant_contract():
     svc = ActivateBotService(bot_service, passport_plugin=MagicMock())
 
     with pytest.raises(BotNotFoundError):
-        svc.activate(bot_id="missing", user_id="u1")
+        svc.activate(bot_id="missing", owner_id="u1")
 
 
-def test_activate_rejects_active_bot():
-    """Non-RECYCLED/REACTIVATING bot → InvalidBotStateError."""
+def test_activate_active_bot_is_idempotent():
+    """ACTIVE returns the current state without dispatching another start."""
     bot_service = MagicMock()
-    bot_service.get_bot.return_value = {"bot_id": "b1", "status": "ACTIVE"}
+    bot_service.get_bot.return_value = {
+        "bot_id": "b1",
+        "owner_id": "u1",
+        "bot_type": "personal",
+        "active_engine": "openclaw",
+        "status": "ACTIVE",
+    }
+    bot_service.is_teclaw_bot.return_value = False
     svc = ActivateBotService(bot_service, passport_plugin=MagicMock())
-    with pytest.raises(InvalidBotStateError):
-        svc.activate(bot_id="b1", user_id="u1")
+
+    result = svc.activate(bot_id="b1", owner_id="u1")
+
+    assert result == BotLifecycleResult(
+        bot_id="b1",
+        owner_id="u1",
+        status="ACTIVE",
+        changed=False,
+    )
+    bot_service.update_status.assert_not_called()
+    bot_service.start_bot.assert_not_called()
+
+
+def test_activate_rejects_personal_teclaw_bot():
+    bot_service = MagicMock()
+    bot_service.get_bot.return_value = {
+        "bot_id": "b1",
+        "owner_id": "u1",
+        "bot_type": "personal",
+        "active_engine": "teclaw",
+        "status": "RECYCLED",
+    }
+    bot_service.is_teclaw_bot.return_value = True
+    svc = ActivateBotService(bot_service, passport_plugin=MagicMock())
+
+    with pytest.raises(BotOperationNotAllowedError):
+        svc.activate(bot_id="b1", owner_id="u1")
+
+    bot_service.update_status.assert_not_called()
+    bot_service.start_bot.assert_not_called()
+
+
+@pytest.mark.parametrize("bot_type", ["desktop", "service"])
+def test_activate_rejects_non_personal_bot(bot_type: str):
+    bot_service = MagicMock()
+    bot_service.get_bot.return_value = {
+        "bot_id": "b1",
+        "owner_id": "u1",
+        "bot_type": bot_type,
+        "active_engine": "openclaw",
+        "status": "RECYCLED",
+    }
+    svc = ActivateBotService(bot_service, passport_plugin=MagicMock())
+
+    with pytest.raises(BotOperationNotAllowedError):
+        svc.activate(bot_id="b1", owner_id="u1")
+
+
+@pytest.mark.parametrize("status", ["PENDING", "FAILED", "OFFLINE"])
+def test_activate_rejects_other_lifecycle_states(status: str):
+    bot_service = MagicMock()
+    bot_service.get_bot.return_value = {
+        "bot_id": "b1",
+        "owner_id": "u1",
+        "bot_type": "personal",
+        "active_engine": "openclaw",
+        "status": status,
+    }
+    bot_service.is_teclaw_bot.return_value = False
+    svc = ActivateBotService(bot_service, passport_plugin=MagicMock())
+
+    with pytest.raises(BotInvalidLifecycleStateError) as exc_info:
+        svc.activate(bot_id="b1", owner_id="u1")
+
+    assert exc_info.value.current_status == status
 
 
 def test_activate_reactivating_returns_friendly():
-    """Already REACTIVATING → friendly return, no state mutation."""
+    """Already REACTIVATING returns an unchanged typed result."""
     bot_service = MagicMock()
-    bot_service.get_bot.return_value = {"bot_id": "b1", "status": "REACTIVATING"}
+    bot_service.get_bot.return_value = {
+        "bot_id": "b1",
+        "owner_id": "u1",
+        "bot_type": "personal",
+        "active_engine": "openclaw",
+        "status": "REACTIVATING",
+    }
+    bot_service.is_teclaw_bot.return_value = False
     svc = ActivateBotService(bot_service, passport_plugin=MagicMock())
-    result = svc.activate(bot_id="b1", user_id="u1")
-    assert result["status"] == "REACTIVATING"
-    assert "稍候" in result["message"]
+    result = svc.activate(bot_id="b1", owner_id="u1")
+    assert result == BotLifecycleResult(
+        bot_id="b1",
+        owner_id="u1",
+        status="REACTIVATING",
+        changed=False,
+    )
     bot_service.update_status.assert_not_called()
 
 
 def test_activate_recycled_kicks_async(monkeypatch):
     """RECYCLED → update_status(REACTIVATING) + start_bot called via Thread."""
     bot_service = MagicMock()
-    bot_service.get_bot.return_value = {"bot_id": "b1", "status": "RECYCLED"}
+    bot_service.get_bot.return_value = {
+        "bot_id": "b1",
+        "owner_id": "u1",
+        "bot_type": "personal",
+        "active_engine": "openclaw",
+        "status": "RECYCLED",
+    }
+    bot_service.is_teclaw_bot.return_value = False
     passport_mock = MagicMock()
     passport_mock.unfreeze_agent_passport.return_value = None
     passport_mock.query_token.return_value = "token-b1"
@@ -74,7 +156,7 @@ def test_activate_recycled_kicks_async(monkeypatch):
         _SyncThread,
     )
 
-    result = svc.activate(bot_id="b1", user_id="u1")
+    result = svc.activate(bot_id="b1", owner_id="u1", owner_name="Tester")
 
     # Synchronous part: status set to REACTIVATING immediately
     bot_service.update_status.assert_any_call(
@@ -92,7 +174,15 @@ def test_activate_recycled_kicks_async(monkeypatch):
     )
     bot_service.start_bot.assert_called_once()
     # Return value is REACTIVATING
-    assert result["status"] == "REACTIVATING"
+    assert result == BotLifecycleResult(
+        bot_id="b1",
+        owner_id="u1",
+        status="REACTIVATING",
+        changed=True,
+    )
+    bot_service.start_bot.assert_called_once_with(
+        bot_id="b1", user_id="u1", nick_name="Tester"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +202,14 @@ class _SyncThread:
 def _make_svc_with_passport(bot_status: str, passport_mock: MagicMock):
     """Build an ActivateBotService with a pre-configured bot_service + passport mock."""
     bot_service = MagicMock()
-    bot_service.get_bot.return_value = {"bot_id": "b1", "status": bot_status}
+    bot_service.get_bot.return_value = {
+        "bot_id": "b1",
+        "owner_id": "u1",
+        "bot_type": "personal",
+        "active_engine": "openclaw",
+        "status": bot_status,
+    }
+    bot_service.is_teclaw_bot.return_value = False
     return ActivateBotService(bot_service=bot_service, passport_plugin=passport_mock), bot_service
 
 
@@ -132,7 +229,7 @@ def test_rollback_on_passport_error(monkeypatch):
         _SyncThread,
     )
 
-    result = svc.activate(bot_id="b1", user_id="u1")
+    result = svc.activate(bot_id="b1", owner_id="u1")
 
     # Synchronous step: status must have been set to REACTIVATING first
     bot_service.update_status.assert_any_call(
@@ -145,7 +242,7 @@ def test_rollback_on_passport_error(monkeypatch):
     # start_bot must NOT have been called (unfreeze never succeeded)
     bot_service.start_bot.assert_not_called()
     # Caller still gets REACTIVATING (rollback is async/transparent to caller)
-    assert result["status"] == "REACTIVATING"
+    assert result.status == "REACTIVATING"
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +264,7 @@ def test_rollback_on_start_bot_failure(monkeypatch):
         _SyncThread,
     )
 
-    result = svc.activate(bot_id="b1", user_id="u1")
+    result = svc.activate(bot_id="b1", owner_id="u1")
 
     # unfreeze must have been called (and succeeded)
     passport_mock.unfreeze_agent_passport.assert_called_once_with(
@@ -186,7 +283,7 @@ def test_rollback_on_start_bot_failure(monkeypatch):
         bot_id="b1", user_id="u1", status="RECYCLED"
     )
     # Caller still gets REACTIVATING
-    assert result["status"] == "REACTIVATING"
+    assert result.status == "REACTIVATING"
 
 
 def test_missing_token_after_unfreeze_rolls_back_before_start(monkeypatch):
@@ -202,7 +299,7 @@ def test_missing_token_after_unfreeze_rolls_back_before_start(monkeypatch):
         _SyncThread,
     )
 
-    result = svc.activate(bot_id="b1", user_id="u1")
+    result = svc.activate(bot_id="b1", owner_id="u1")
 
     passport_mock.query_token.assert_called_once_with(
         bot_id="b1",
@@ -217,4 +314,4 @@ def test_missing_token_after_unfreeze_rolls_back_before_start(monkeypatch):
     bot_service.update_status.assert_called_with(
         bot_id="b1", user_id="u1", status="RECYCLED"
     )
-    assert result["status"] == "REACTIVATING"
+    assert result.status == "REACTIVATING"

@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use bcs_bot::BotCore;
 use bcs_bot_store::PersistentBotRepo;
-use bcs_cache_local::InMemoryCachePlugin;
 use bcs_db_api::{DbPlugin, DbStatement};
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_service_api::port::repo::BotRepoPort;
@@ -41,9 +40,8 @@ fn test_caps() -> BotCapabilities {
 }
 
 async fn create_persistent_bot_repo() -> PersistentBotRepo {
-    let cache = Arc::new(InMemoryCachePlugin::new());
     let db = sqlite_db().await;
-    PersistentBotRepo::with_plugins(cache, db)
+    PersistentBotRepo::new(db)
 }
 
 #[tokio::test]

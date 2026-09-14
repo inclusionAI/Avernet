@@ -11,7 +11,7 @@ export function UserTaskGoalMeta({ record }: { record: TaskListItem }) {
         <TooltipProvider delayDuration={300}>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="line-clamp-1 cursor-default text-xs text-muted-foreground">
+              <div className="line-clamp-1 text-xs leading-5 text-muted-foreground">
                 目标：{getUserTaskGoal(record)}
               </div>
             </TooltipTrigger>
@@ -25,7 +25,7 @@ export function UserTaskGoalMeta({ record }: { record: TaskListItem }) {
         <TooltipProvider delayDuration={300}>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="line-clamp-1 cursor-default text-xs text-muted-foreground">
+              <div className="line-clamp-1 text-xs leading-5 text-muted-foreground">
                 验收标准：{getUserTaskAcceptanceText(record)}
               </div>
             </TooltipTrigger>

@@ -588,6 +588,7 @@ export type RepairBot = {
 
 export type RepairIssue = {
   symptom: string
+  sessionIds?: string[]
   traceId: string | null
   relatedTaskId: string | null
   errorText: string | null
@@ -741,7 +742,14 @@ export type RepairTask = {
     sourceBatchId: string
     evidenceCount: number
     sessionIds: string[]
-    evidenceTaskRefs: Array<{ sessionId: string; taskIndex: number; ordinal: number }>
+    evidenceTaskRefs: Array<{
+      sessionId: string
+      taskIndex: number
+      ordinal: number
+      taskDescription?: string
+      failureClass?: string
+      reasoningSummary?: string | null
+    }>
     repairDirection: string | null
     authorizationMode: 'ONCE' | 'PERSISTENT'
     authorizationGrantId?: number
@@ -1228,7 +1236,7 @@ export const api = {
       taskType: 'full';
       inputMode: 'direct_goal';
       taskName: string; remark?: string;
-      userId: string; botId: string; botEnv?: string; maxRounds: number;
+      userId: string; botId: string; botEnv?: string; model: string; maxRounds: number;
       goal: string; nodeCommandYamls?: Record<string, string>;
       forceMessage?: boolean;
       runtimeMaintenance?: boolean;
@@ -1264,6 +1272,7 @@ export const api = {
     createOptimization(input: {
       taskName: string; remark?: string;
       userId: string; botId: string; botEnv?: string; sourceDiagnosisTaskIds: string[];
+      model: string;
       maxRounds: number; nodeCommandYamls?: Record<string, string>;
       forceMessage?: boolean;
       runtimeMaintenance?: boolean;
@@ -1321,6 +1330,7 @@ export const api = {
       userId: string; botId: string; botEnv?: string;
       objective: string;
       trainBenchDomainId: string; testBenchDomainId: string;
+      model: string;
       maxRounds: number;
       nodeCommandYamls?: Record<string, string>; forceMessage?: boolean; runtimeMaintenance?: boolean;
       openclawExecutionMode?: 'local' | 'gateway';
@@ -1482,6 +1492,7 @@ export const api = {
   runs: {
     list(params?: {
       status?: string
+      query?: string
       statuses?: string[]
       workflowId?: string
       limit?: number
@@ -1495,6 +1506,7 @@ export const api = {
       const sp = new URLSearchParams()
       if (params?.status) sp.set('status', params.status)
       if (params?.statuses?.length) sp.set('statuses', params.statuses.join(','))
+      if (params?.query) sp.set('query', params.query)
       if (params?.workflowId) sp.set('workflowId', params.workflowId)
       if (params?.limit) sp.set('limit', String(params.limit))
       if (params?.offset) sp.set('offset', String(params.offset))
@@ -1668,6 +1680,8 @@ export const api = {
         originalWorkflowId?: string
         botOwnerId?: string
         botId?: string
+        /** Save the DB draft only; the caller owns any separately recorded release history. */
+        skipDeployHistory?: boolean
       },
     ): Promise<WorkflowSpec> {
       return fetchJson<WorkflowSpec>(`${BASE}/workflows/save`, {
@@ -1680,6 +1694,7 @@ export const api = {
           originalWorkflowId: options?.originalWorkflowId,
           botOwnerId: options?.botOwnerId,
           botId: options?.botId,
+          skipDeployHistory: options?.skipDeployHistory,
         }),
       })
     },
@@ -1692,8 +1707,10 @@ export const api = {
     },
 
     /** GET /api/workflows/:wf/history — deploy history list (no spec_json). */
-    getHistory(workflowId: string, limit = 50): Promise<{ workflowId: string; history: DeployHistoryItem[] }> {
-      return fetchJson(`${BASE}/workflows/${encodeURIComponent(workflowId)}/history?limit=${limit}`)
+    getHistory(workflowId: string, limit = 50, releaseOnly = false): Promise<{ workflowId: string; history: DeployHistoryItem[]; active: DeployHistoryItem | null }> {
+      const query = new URLSearchParams({ limit: String(limit) })
+      if (releaseOnly) query.set('releaseOnly', 'true')
+      return fetchJson(`${BASE}/workflows/${encodeURIComponent(workflowId)}/history?${query.toString()}`)
     },
 
     getAccess(workflowId: string): Promise<{ workflowId: string; canView: boolean; canEdit: boolean }> {

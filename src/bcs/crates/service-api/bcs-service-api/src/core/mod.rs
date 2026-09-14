@@ -7,6 +7,7 @@ pub mod fusion;
 pub mod group;
 pub mod interaction;
 pub mod message;
+pub mod message_delivery;
 pub mod organization;
 pub mod proposal;
 pub mod provider;

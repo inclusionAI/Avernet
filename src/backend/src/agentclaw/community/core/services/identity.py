@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from agentclaw.community.core.bot_config_surface.coords import BotConfigCoords
 from agentclaw.community.core.errors import InternalError
+from agentclaw.community.core.ports.identity_file_port import IdentityFilePort
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -229,8 +230,17 @@ def identity_coords_from_spec(bot_id: str, owner_id: str) -> BotConfigCoords:
     return identity_coords_from_record(bot_id, owner_id)
 
 
-class IdentityService:
-    """Business service for identity file management."""
+class IdentityService(IdentityFilePort):
+    """Business service for identity file management.
+
+    Inherits :class:`~agentclaw.community.core.ports.identity_file_port.IdentityFilePort`
+    — the narrow outbound port the ``identity`` materialiser reaches it
+    through. The port's members are abstract, so a rename or a signature drift
+    on one of those three methods fails when this class is constructed, naming
+    the method. It used to be satisfied structurally, and the composition root
+    carried a hand-rolled ``isinstance`` check to catch exactly that; the base
+    class is the check now.
+    """
 
     @inject
     def __init__(

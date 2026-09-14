@@ -5,6 +5,8 @@ import type { WorkflowSpec, KnowledgeBaseCreateInput, KnowledgeBaseUpdateInput, 
 
 export function useFlowRuns(params?: {
   status?: string
+  statuses?: string[]
+  query?: string
   workflowId?: string
   limit?: number
   offset?: number
@@ -282,7 +284,7 @@ export function useDbWorkflow(workflowId: string) {
 export function useSaveWorkflowToDb() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ workflowId, spec, packId, facade, originalWorkflowId, botOwnerId, botId }: {
+    mutationFn: ({ workflowId, spec, packId, facade, originalWorkflowId, botOwnerId, botId, skipDeployHistory }: {
       workflowId: string
       spec: WorkflowSpec
       packId?: string
@@ -290,8 +292,9 @@ export function useSaveWorkflowToDb() {
       originalWorkflowId?: string
       botOwnerId?: string
       botId?: string
+      skipDeployHistory?: boolean
     }) =>
-      api.workflows.save(workflowId, spec, { packId, facade, originalWorkflowId, botOwnerId, botId }),
+      api.workflows.save(workflowId, spec, { packId, facade, originalWorkflowId, botOwnerId, botId, skipDeployHistory }),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({ queryKey: ['db-workflows'] })
       void queryClient.invalidateQueries({ queryKey: ['facade-bindings'] })
@@ -317,6 +320,7 @@ export function useCreateWorkflow() {
         facade,
         botOwnerId,
         botId,
+        skipDeployHistory: true,
       }),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({ queryKey: ['workflow-types'] })

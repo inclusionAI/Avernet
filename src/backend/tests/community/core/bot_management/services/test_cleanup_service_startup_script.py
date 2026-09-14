@@ -22,6 +22,11 @@ def _make_service() -> BotCleanupService:
     return BotCleanupService(
         skill_repo=MagicMock(delete_by_bot_id=MagicMock(return_value=0)),
         skill_set_repo=MagicMock(delete_by_bot_id=MagicMock(return_value=0)),
+        desired_state_repo=MagicMock(
+            purge_bot_installations=MagicMock(
+                return_value={"skills": 0, "mcps": 0}
+            )
+        ),
         startup_script_purge=MagicMock(delete=MagicMock(return_value=True)),
     )
 
@@ -65,3 +70,46 @@ class TestStartupScriptPurge:
             BotCleanupService(  # type: ignore[call-arg]
                 skill_repo=MagicMock(), skill_set_repo=MagicMock()
             )
+
+
+def test_bot_cleanup_purges_installations_and_sets_before_owned_skill_assets():
+    events = []
+    service = _make_service()
+    service._desired_state_repo.purge_bot_installations.side_effect = (
+        lambda **kwargs: events.append(("installations", kwargs))
+        or {"skills": 2, "mcps": 1}
+    )
+    service._skill_set_repo.delete_by_bot_id.side_effect = (
+        lambda bot_id, owner_id: events.append(("sets", bot_id, owner_id)) or 1
+    )
+    service._skill_repo.delete_by_bot_id.side_effect = (
+        lambda bot_id, owner_id: events.append(("skills", bot_id, owner_id)) or 3
+    )
+
+    result = service.cleanup_single_bot_data("default", "owner")
+
+    assert events == [
+        (
+            "installations",
+            {"bot_id": "default", "owner_id": "owner", "env": "dev"},
+        ),
+        ("sets", "default", "owner"),
+        ("skills", "default", "owner"),
+    ]
+    assert result["skill_installations_deleted"] == 2
+    assert result["mcp_installations_deleted"] == 1
+
+
+def test_bot_cleanup_stops_when_installations_cannot_be_purged():
+    service = _make_service()
+    service._desired_state_repo.purge_bot_installations.side_effect = RuntimeError(
+        "db unavailable"
+    )
+
+    result = service.cleanup_single_bot_data("default", "owner")
+
+    assert result["errors"] == [
+        "Cleanup installations error for bot default: db unavailable"
+    ]
+    service._skill_set_repo.delete_by_bot_id.assert_not_called()
+    service._skill_repo.delete_by_bot_id.assert_not_called()

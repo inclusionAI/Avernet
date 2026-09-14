@@ -58,6 +58,7 @@ from agentclaw.community.api.bot_cli_tool_service import (
     CliToolConflictError,
     CliToolNotFoundError,
     CliToolRefusedError,
+    CliToolTooLargeError,
     CliToolUnsupportedError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
@@ -111,6 +112,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
     DeviceLimitError,
 )
+from agentclaw.community.core.bot_dormant.recycle_service import RecycleReleaseFailed
 from agentclaw.community.core.bot_management.bot_quota import (
     BotQuotaBusyError,
     BotQuotaExceededError,
@@ -143,7 +145,6 @@ from agentclaw.community.core.bot_inventory.errors import (
     BotInventoryPermissionError,
     BotInventoryUpstreamError,
 )
-from agentclaw.community.core.bot_dormant.activate_service import InvalidBotStateError
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
     DeviceNotBoundError,
@@ -247,6 +248,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillEngineNotSupportedError,
     SkillParameterValidationError,
     SkillRuntimeNameConflictError,
+    SkillAssetInUseError,
     SkillOfflineBlockedError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneLockUnavailableError,
@@ -556,9 +558,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         "Bot is not in a valid state for this operation",
     ),
     BotOperationNotAllowedError: (409, "Operation not supported for this bot"),
+    RecycleReleaseFailed: (502, "Bot resource release failed"),
     BotInventoryOperationNotAllowedError: (409, "Operation not supported for this bot"),
-    # Dormant activate: a bot that is not RECYCLED cannot be reactivated.
-    InvalidBotStateError: (409, "Operation not supported for this bot"),
     BotInventoryPermissionError: (404, "Not found"),
     BotInventoryUpstreamError: (502, "Desktop service error"),
     ServicePublicationConflictError: (
@@ -624,6 +625,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillInvalidPackageError: (400, "Invalid Skill package"),
     LocalSkillNotReadyError: (409, "Bot is not ready"),
     LocalSkillActiveError: (409, "Skill is active"),
+    SkillAssetInUseError: (409, "Skill is still in use"),
     LocalSkillDuplicateError: (409, "Local Skill already exists"),
     LocalSkillVersionConflictError: (409, "Skill package changed since it was read"),
     LocalSkillTooLargeError: (413, "Skill package is too large"),
@@ -689,6 +691,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     CliToolConflictError: (409, "The bot already has a CLI tool with this name"),
     CliToolUnsupportedError: (409, "This bot's engine cannot take CLI tools"),
     CliToolRefusedError: (422, "The CLI tool could not be installed"),
+    CliToolTooLargeError: (413, "The uploaded CLI tool is too large"),
     # Identity domain errors — ValueError subclasses raised by IdentityService
     # validate_entity_type / validate_file_type.
     InvalidIdentityEntityTypeError: (400, "Invalid entity type"),
@@ -839,6 +842,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     LocalSkillInvalidPackageError: 400101,
     LocalSkillNotReadyError: 409101,
     LocalSkillActiveError: 409102,
+    SkillAssetInUseError: 409105,
     LocalSkillDuplicateError: 409103,
     LocalSkillVersionConflictError: 409105,
     LocalSkillTooLargeError: 413101,
@@ -849,6 +853,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     CliToolConflictError: 409110,
     CliToolUnsupportedError: 409111,
     CliToolRefusedError: 422110,
+    CliToolTooLargeError: 413110,
     LocalSkillRuntimeSyncError: 502102,
     SkillRuntimeNameConflictError: 409106,
     SkillEngineNotSupportedError: 409107,
@@ -1047,6 +1052,8 @@ def _error_data(exc: Exception) -> object | None:
     """
     if isinstance(exc, SkillOfflineBlockedError):
         return exc.impact
+    if isinstance(exc, SkillAssetInUseError):
+        return {"blockers": exc.blocker_counts}
     if isinstance(exc, ManifestValidationError):
         # The all-or-nothing refusal. The fixed message says a document was
         # rejected; this says which entries and why, in the caller's own terms.

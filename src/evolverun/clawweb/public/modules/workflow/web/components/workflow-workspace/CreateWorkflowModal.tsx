@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { parse as parseYaml } from 'yaml'
 import type { WorkflowSpec } from '@avernet/clawweb-shared/web/types'
 
 interface CreateWorkflowModalProps {
@@ -13,6 +14,7 @@ interface CreateWorkflowModalProps {
 }
 
 const COMMAND_PATTERN = /^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$/
+type CreateSource = 'blank' | 'paste' | 'file'
 
 function buildInitialSpec(workflowId: string, title: string): WorkflowSpec {
   return {
@@ -36,6 +38,8 @@ export default function CreateWorkflowModal({ open, onClose, onSubmit, isPending
   const [remark, setRemark] = useState('')
   const [commandError, setCommandError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [source, setSource] = useState<CreateSource>('blank')
+  const [yamlInput, setYamlInput] = useState('')
 
   useEffect(() => {
     if (open) {
@@ -45,6 +49,8 @@ export default function CreateWorkflowModal({ open, onClose, onSubmit, isPending
       setRemark('')
       setCommandError(null)
       setError(null)
+      setSource('blank')
+      setYamlInput('')
     }
   }, [open])
 
@@ -70,8 +76,9 @@ export default function CreateWorkflowModal({ open, onClose, onSubmit, isPending
   }, [command])
 
   const canSubmit = useMemo(() => {
+    if (source !== 'blank') return !!yamlInput.trim()
     return !!workflowId.trim() && !!title.trim() && !idError && !commandError
-  }, [workflowId, title, idError, commandError])
+  }, [source, yamlInput, workflowId, title, idError, commandError])
 
   const handleClose = useCallback(() => {
     if (isPending) return
@@ -80,19 +87,39 @@ export default function CreateWorkflowModal({ open, onClose, onSubmit, isPending
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit || isPending) return
-    const id = workflowId.trim()
-    const displayTitle = title.trim() || id
-    const cmd = command.trim()
-    const facade = cmd ? { command: cmd, remark: remark.trim() || undefined } : undefined
-    const spec = buildInitialSpec(id, displayTitle)
-
     try {
-      await onSubmit({ workflowId: id, spec: spec as WorkflowSpec, facade })
+      if (source !== 'blank') {
+        const parsed = parseYaml(yamlInput) as WorkflowSpec
+        if (!parsed?.id || !parsed?.title || !parsed?.version || !Array.isArray(parsed.nodes)) {
+          throw new Error('YAML 必须包含 id、version、title 和 nodes。')
+        }
+        const facade = parsed.facade?.command
+          ? { command: parsed.facade.command, remark: parsed.facade.remark }
+          : undefined
+        await onSubmit({ workflowId: parsed.id, spec: parsed, facade })
+      } else {
+        const id = workflowId.trim()
+        const displayTitle = title.trim() || id
+        const cmd = command.trim()
+        const facade = cmd ? { command: cmd, remark: remark.trim() || undefined } : undefined
+        await onSubmit({ workflowId: id, spec: buildInitialSpec(id, displayTitle), facade })
+      }
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : '创建工作流失败')
     }
-  }, [canSubmit, isPending, workflowId, title, command, remark, onSubmit, onClose])
+  }, [canSubmit, isPending, source, yamlInput, workflowId, title, command, remark, onSubmit, onClose])
+
+  const handleImportFile = useCallback((file?: File) => {
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      setYamlInput(String(reader.result ?? ''))
+      setSource('file')
+      setError(null)
+    }
+    reader.readAsText(file)
+  }, [])
 
   if (!open) return null
 
@@ -118,11 +145,29 @@ export default function CreateWorkflowModal({ open, onClose, onSubmit, isPending
             </button>
           </div>
           <p className="mt-1 text-sm text-gray-500">
-            创建一个空白工作流，之后在编辑器中继续设计节点。
+            选择创建方式；已有工作流只在画布或 YAML 中修改。
           </p>
         </div>
 
         <div className="space-y-4 px-6 py-5">
+          <div className="grid grid-cols-3 gap-2" role="group" aria-label="创建方式">
+            {([
+              ['blank', '空白工作流'],
+              ['paste', '粘贴 YAML'],
+              ['file', '导入 YAML'],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => { setSource(value); setError(null) }}
+                className={`rounded-lg border px-2 py-2 text-xs font-medium transition-colors ${source === value ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {source === 'blank' ? <>
           <div>
             <label className="mb-1.5 block text-sm font-medium text-gray-700">
               工作流 ID <span className="text-red-500">*</span>
@@ -195,6 +240,36 @@ export default function CreateWorkflowModal({ open, onClose, onSubmit, isPending
               className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:bg-gray-50"
             />
           </div>
+          </> : (
+            <div>
+              {source === 'paste' ? (
+                <>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">Workflow YAML</label>
+                  <textarea
+                    value={yamlInput}
+                    onChange={(event) => setYamlInput(event.target.value)}
+                    rows={12}
+                    disabled={isPending}
+                    placeholder={'id: my-workflow\nversion: 1.0.0\ntitle: 我的工作流\nnodes: []'}
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-xs leading-5 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:bg-gray-50"
+                  />
+                  <p className="mt-1 text-xs text-gray-400">YAML 中的 ID、名称和节点配置会原样创建为草稿。</p>
+                </>
+              ) : (
+                <>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700">选择 YAML 文件</label>
+                  <input
+                    type="file"
+                    accept=".yaml,.yml,text/yaml,application/x-yaml"
+                    disabled={isPending}
+                    onChange={(event) => handleImportFile(event.target.files?.[0])}
+                    className="block w-full rounded-md border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 file:mr-3 file:rounded-md file:border-0 file:bg-blue-50 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-blue-700 hover:border-blue-300"
+                  />
+                  {yamlInput && <p className="mt-2 text-xs text-emerald-700">已读取 YAML，可创建工作流。</p>}
+                </>
+              )}
+            </div>
+          )}
 
           {error && (
             <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
@@ -220,7 +295,7 @@ export default function CreateWorkflowModal({ open, onClose, onSubmit, isPending
                 创建中…
               </>
             ) : (
-              '创建'
+              source === 'blank' ? '创建' : '从 YAML 创建'
             )}
           </button>
         </div>

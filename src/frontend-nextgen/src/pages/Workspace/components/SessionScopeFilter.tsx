@@ -11,6 +11,8 @@ interface SessionScopeFilterProps {
   onChange: (value: SessionScope) => void;
   allCount?: number;
   favoriteCount?: number;
+  /** 紧凑形态：按钮与图标调小，用于协作群条目行内按钮组。 */
+  compact?: boolean;
 }
 
 const SCOPE_OPTIONS: Array<{ value: SessionScope; label: string }> = [
@@ -18,9 +20,10 @@ const SCOPE_OPTIONS: Array<{ value: SessionScope; label: string }> = [
   { value: 'favorite', label: '已收藏会话' },
 ];
 
-export function SessionScopeFilter({ value, onChange, allCount, favoriteCount }: SessionScopeFilterProps) {
+export function SessionScopeFilter({ value, onChange, allCount, favoriteCount, compact }: SessionScopeFilterProps) {
   const [open, setOpen] = useState(false);
   const activeLabel = value === 'favorite' ? '已收藏会话' : '全部会话';
+  const iconSize = compact ? 'h-3.5 w-3.5' : 'h-4 w-4';
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -30,8 +33,8 @@ export function SessionScopeFilter({ value, onChange, allCount, favoriteCount }:
           size="sm"
           aria-pressed={value === 'favorite'}
           icon={
-            <span className="relative flex h-4 w-4 items-center justify-center">
-              <ListFilter className="h-4 w-4" aria-hidden="true" />
+            <span className={cn('relative flex items-center justify-center', iconSize)}>
+              <ListFilter className={iconSize} aria-hidden="true" />
               {value === 'favorite' && (
                 <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />
               )}
@@ -39,6 +42,7 @@ export function SessionScopeFilter({ value, onChange, allCount, favoriteCount }:
           }
           className={cn(
             'rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary',
+            compact && 'h-6 w-6',
             value === 'favorite' && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary',
           )}
           onClick={(event) => event.stopPropagation()}

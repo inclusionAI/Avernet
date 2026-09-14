@@ -26,6 +26,7 @@ from typing import Any
 import pytest
 
 from engine.community.kernel.frames import ResponseFrame
+from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 
 
@@ -91,7 +92,7 @@ class _FakePool:
 
 def _make_impl(responses: dict[str, Any]) -> tuple[OpenClawPluginImpl, _FakeClient]:
     client = _FakeClient(responses)
-    impl = OpenClawPluginImpl(pool=_FakePool(client))
+    impl = OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), pool=_FakePool(client))
     return impl, client
 
 
@@ -164,7 +165,7 @@ class TestSessionsList:
             async def get(self, token=None):
                 return _TransportErrorClient()
 
-        impl = OpenClawPluginImpl(pool=_TransportErrorPool())
+        impl = OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), pool=_TransportErrorPool())
 
         with pytest.raises(type(error), match=str(error)):
             await impl.sessions_list(token="tok")
@@ -729,7 +730,7 @@ class TestSessionDelete:
             async def get(self, token=None):
                 return _ConnErrClient()
 
-        impl = OpenClawPluginImpl(pool=_ConnErrPool())
+        impl = OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), pool=_ConnErrPool())
         result = await impl.session_delete(key="k", token="tok")
         assert result is False
 
@@ -786,7 +787,7 @@ class TestSessionReset:
             async def get(self, token=None):
                 raise RuntimeError("pool down")
 
-        impl = OpenClawPluginImpl(pool=_ErrorPool())
+        impl = OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), pool=_ErrorPool())
         result = await impl.session_reset(session_key="sk", token="tok")
         assert result["success"] is False
         assert result["error"]["code"] == "INTERNAL_ERROR"
@@ -807,7 +808,7 @@ class TestSessionReset:
             async def get(self, token=None):
                 return _ExplodingClient()
 
-        impl = OpenClawPluginImpl(pool=_ExplodingPool())
+        impl = OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), pool=_ExplodingPool())
         result = await impl.session_reset(session_key="sk", token="tok")
         assert result["success"] is False
         assert result["error"]["code"] == "INTERNAL_ERROR"
@@ -866,7 +867,7 @@ class TestChatHistory:
             async def get(self, token=None):
                 return _ConnErrClient()
 
-        impl = OpenClawPluginImpl(pool=_ConnErrPool())
+        impl = OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), pool=_ConnErrPool())
         result = await impl.chat_history(session_key="sk", token="tok")
         assert result == []
 

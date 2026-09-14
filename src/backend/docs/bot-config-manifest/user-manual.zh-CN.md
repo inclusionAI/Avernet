@@ -678,7 +678,11 @@ GET /openapi/v1/bots/{bot_id}/with-manifest/status
   "started_at": "…", "finished_at": "…",
   "result": "SUCCEEDED|PARTIAL|FAILED",
   "sources": [
-    {"name": "content", "ref": "v1.2.0", "resolved_sha": "9c1f4ae…"}
+    {"name": "content", "url": "https://code.example.com/team/content.git",
+     "ref": "v1.2.0", "mode": "strict", "resolved_sha": "9c1f4ae…"},
+    {"name": "https://code.example.com/team/tools.git@main",
+     "url": "https://code.example.com/team/tools.git",
+     "ref": "main", "mode": "non_strict", "resolved_sha": "7e3b91c…"}
   ],
   "entries": [
     {"category": "identity", "name": "SOUL.md", "action": "updated", "from": "content"},
@@ -825,7 +829,11 @@ resources:
 
   # 目录（归档形态：oss 协议）
   - path: data/manuals/
-    source: https://cms.example.com/kb/manuals.zip
+    source:
+      protocol: oss
+      bucket: cms
+      key: kb/manuals.zip
+      auth: oss-artifacts
     unpack: zip                  # zip | tar.gz —— oss 目录条目**必填**
     strip_components: 1          # 可选，默认 0
     auth: cms-token
@@ -934,7 +942,11 @@ payload。那一行会在这个 bot **下一次开设备**时被执行：创建�
 ```yaml
 cli_tools:
   - name: shopctl                 # 命令名；同一 bot 内唯一。字母/数字开头，只含字母数字与 . _ -，≤128
-    source: https://artifacts.example-corp.com/tools/shopctl/2.3.0/shopctl-linux-amd64
+    source:
+      protocol: oss
+      bucket: artifacts
+      key: tools/shopctl/2.3.0/shopctl-linux-amd64
+      auth: oss-artifacts
     digest: "sha256:9f2c…"        # 本类目强制
     version: "2.3.0"              # 元数据；**不参与收敛**
     auth: oss-artifacts           # 私有制品库时写凭证名（§4.2）
@@ -1012,12 +1024,25 @@ schema 已定稿（见 `manifest-schema.zh-CN.md` §3.4），但**第一期没�
 | `mode` | 行为 |
 | --- | --- |
 | `non_strict`（**默认**） | 应用新内容，并在 apply 报告里对该条目**告警**，写明前后两个 SHA |
-| `strict` | 解析出的 SHA 与上次 apply 记录的不同时，该条目**失败**，bot 继续跑它现在跑的 |
+| `strict` | 同一个 `(url, ref, mode)` 这次解析出的 SHA 与上次 apply 记录的不同时，该条目**失败**，bot 继续跑它现在跑的 |
 
+- **基线按 `(url, ref, mode)` 记**，不按源名。两个分支问的都是同一件事：「这个仓库
+  的这个 ref，在我们上次解析它之后动过没有」——源叫什么是你文档里的事，跟这个问题
+  无关。改名不丢基线；把 `url` 指到另一个仓库也不会继承前一个仓库的 SHA。
+- **`mode` 在键里**：同一个 `(url, ref)` 你可以声明两次，一条 `strict`、一条
+  `non_strict`（「这几个条目可以跟着分支走，那个不行」）。ref 动了以后，宽松的那条
+  正常下发并记下新 SHA，钉死的那条拒绝——两者**各记各的基线**，所以宽松的那条不会
+  把钉死的那条的基线推上去。否则下一次 apply（你一个字都没改）就会把刚被拒绝的那个
+  commit 交给钉死的条目。
+- **改 `ref`（或改 `url`）就是一次重新钉扎**：新的 `(url, ref)` 没有任何一次
+  apply 对它有意见，所以既不拒绝也不告警，照常解析并被这次 apply 记下。
+  **这就是 `strict` 源的升版方式**——不用先切 `non_strict` 应用一次再切回来。
+  `strict` 拒绝的只有一种情况：**你没改文档，而 ref 在脚下动了**。
+- **SHA 形式的 ref 两个分支都触发不了**——它只会解析成它自己。是「接受但无效」，
+  不是报错。
 - **写在源上**，不是按 bot、也不是按清单——要描述的性质是「这个 ref 允不允许在我
   脚下移动」，它属于持有 ref 的那个东西。一份清单里同时有一个钉死的外部依赖和一个
   快速变动的内部仓库是常态。
-- **SHA 形式的 ref 忽略这个模式**（它动不了）——是「接受但无效」，不是报错。
 - 拼错的取值会被拒绝，不会静默落到默认值。
 
 ### 6.3 `digest`：哪里强制、哪里非法
@@ -1225,7 +1250,8 @@ bot 也是队列上的一个任务。所以部署里必须满足两个前提：
 
 - 用的是 **tag 且没动**？那就是没变——改 `ref`（§4.8）。
 - 用的是 **branch 且 `mode: strict`**？SHA 变了会让该条目**失败**，这是你要的钉扎
-  语义。看报告里的前后 SHA。
+  语义。看报告里的前后 SHA。要让它跟上，就在文档里把 `ref` 改成你真正想要的那个
+  tag 或 commit——换了 `ref` 就是一次重新钉扎，不会被拒绝（§6.2）。
 - 取源失败并落到了 **`keep_last`**？报告里那一条会写明。
 
 ---
@@ -1334,7 +1360,8 @@ sources:
     mode: non_strict
   order-lookup:                              # 制品桶上的一个对象
     protocol: oss                            # oss:一次请求取一个对象，
-    url: https://artifacts.example-corp.com/tools/skills/order-lookup-1.4.0.zip
+    bucket: artifacts             # 桶名来自源
+    key: tools/skills/order-lookup-1.4.0.zip
     auth: oss-artifacts                      # 所以 url 指向对象本身
 
 manifest:
@@ -1438,6 +1465,7 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 | `409110` | 409 | **装 CLI 工具时同名冲突**（B.5.1） |
 | `409111` | 409 | **这个 bot 的引擎装不了 CLI 工具**（B.5.1） |
 | `422110` | 422 | CLI 工具装不上：digest 不匹配、包内没那个成员、架构不对、引擎拒绝（B.5.1） |
+| `413110` | 413 | 上传的 CLI 工具超过 200 MiB（B.5.1） |
 
 其余一律 `状态 × 1000`：`400000` / `401000` / `403000` / `404000` / `413000` / `423000` /
 `503000`。（`401` 也走这条回退——`MissingPrincipalError` 没有专属子码。）
@@ -1728,7 +1756,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | `result` | enum \| `""` | `RUNNING` / `SUCCEEDED` / `PARTIAL` / `FAILED`，见 B.7。终态是从逐条结果**推导出来的摘要，给人看的**。**空报告时是空串** |
 | `started_at` | datetime \| null | 开始时间；bot 从没 apply 过时 `null` |
 | `finished_at` | datetime \| null | 结束时间。**`null` 有两个原因，别拿它判「在跑」**：`result` 是 `RUNNING`（真的在跑），或者这是一份**空报告**（`result` 为空串）。要判在飞的活，读 `result == "RUNNING"`，不要读 `finished_at == null` |
-| `sources` | object[] | 命名源的溯源，每个源一行，见下。**「这批 bot 线上跑的到底是哪一版内容」看这里** |
+| `sources` | object[] | git 源的溯源，**每条声明一行**，见下。**「这批 bot 线上跑的到底是哪一版内容」看这里** |
 | `categories` | object[] | 每个**被声明的**类目一行，见下。文档没提的类目不出现，因为它根本没被碰 |
 | `entries` | object[] | 每个**被声明的条目**一行，跨所有类目，见下 |
 | `notes` | string[] | 不属于任何条目的 apply 级说明。今天只有一处：teclaw 上「所有类目都写完了、最后整包 artifact 重投失败」记在这里，而不是让整次 apply 失败。ARCA 上恒为空 |
@@ -1737,10 +1765,17 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `name` | string | 源名（`sources.<name>` 里的那个名字） |
+| `name` | string | 源名（`sources.<name>` 里的那个名字）；**内联 `source` 没有名字，记成 `url@ref`**（省略 `ref` 时是 `url@HEAD`） |
+| `url` | string \| null | 仓库地址，`${BOT_*}` 已替换。与 `ref`、`mode` 合起来就是 `strict` 基线的键（§6.2） |
 | `ref` | string \| null | 声明的 ref：tag / branch / commit SHA |
+| `mode` | string \| null | 这一次解析所用的 `strict` / `non_strict`。它是基线键的一部分，不是备注（§6.2） |
 | `resolved_sha` | string \| null | 这一次**实际解析到**的 commit。`ref: main` 这种会动的引用，下周就是另一个值 |
 | `auth` | string \| null | 用到的凭证**名**。**永远只有名字，没有值** |
+
+**一条声明一行**：两个 `from` 名指向同一个 `(url, ref)` 就是两行（各自带着作者
+写下的那个名字），`resolved_sha` 相同；同一个仓库内联声明两个 `ref` 也是两行。
+同一个 `(url, ref)` 内联声明两次、只有 `mode` 不同，同样是两行——内联源的 `name`
+都是 `url@ref`，这两行靠 `mode` 区分。
 
 `categories[]`：
 
@@ -2009,27 +2044,35 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 
 ### B.5 CLI 工具
 
-`…/cli-tools` 与清单的 `cli_tools` 类目**走同一个组件**，所以同一份声明得到同样的
-拒绝理由。区别只有一处：**清单 apply 是全量覆盖**（不再声明的工具会被移除，包括你
-用这组 API 装的），单次 `POST` 不是。语义见 §5.6。
+`…/cli-tools` 与清单的 `cli_tools` 类目**走同一个组件**，所以同样的字节得到同样的
+拒绝理由。两处区别：
+
+1. **字节从哪来。** 这组 API 是**上传**——你把二进制（或压缩包）放在请求里发上来，
+   平台不取源，因此这里既没有 URL 也没有凭证。要从**声明的源**（对象存储、git）
+   取的工具，写进 bot 的清单——`sources` 与凭证是那边的机制（§3.7）。两条路在
+   「字节到手」之后汇合到同一条流水线。
+2. **覆盖语义。** **清单 apply 是全量覆盖**（不再声明的工具会被移除，包括你用这组
+   API 装的），单次 `POST` 不是。语义见 §5.6。
 
 #### B.5.1 `POST /openapi/v1/bots/{bot_id}/cli-tools`
 
-装一个命令行工具。**权限：ADMIN。**
+上传并安装一个命令行工具。**权限：ADMIN。**
 
-**请求 body**：
+**请求**：`multipart/form-data`，一个文件分片加若干表单字段。
 
-| 字段 | 必填 | 类型 | 含义与取值 |
+| 分片 / 字段 | 必填 | 类型 | 含义与取值 |
 | --- | --- | --- | --- |
-| `name` | ✅ | string | agent 要敲的**命令名**，不含位置信息——落在哪由引擎决定。**语法是被强制的**：必须以字母或数字开头，之后只允许**字母、数字、`.`、`_`、`-`**，长度 ≤ 128。所以 `.hidden`、`-leading`、`a b`、`a/b` 一律 `422`（在取源之前就判掉） |
-| `source` | ✅ | string | 从哪里取。平台侧可达的 https |
-| `digest` | ✅ | string | `sha256:<64 位十六进制>`，**强制**。平台在代你分发可执行物，供应链必须钉死。它校验的是**取回来的那个对象**——二进制本身，或整个压缩包 |
-| `unpack` | ❌ | enum \| null | 源是压缩包时写 `zip` 或 `tar.gz`；省略则取回来的对象本身就是可执行文件 |
+| `file` | ✅ | 文件分片 | **工具的字节**：可执行文件本身，或装着它的 `zip` / `tar.gz`。上限 **200 MiB**（schema §5 给这个类目的宽度）——**超了在还在读的时候就拒**，不是读完再拒 |
+| `name` | ✅ | string | agent 要敲的**命令名**，不含位置信息——落在哪由引擎决定。**语法是被强制的**：必须以字母或数字开头，之后只允许**字母、数字、`.`、`_`、`-`**，长度 ≤ 128。所以 `.hidden`、`-leading`、`a b`、`a/b` 一律 `422` |
+| `digest` | ✅ | string | `sha256:<64 位十六进制>`，**强制**。平台在代你分发可执行物，供应链必须钉死；在这条路上它是**你对自己发了什么的声明**，所以传断了、传错了都会在这里被拒，而不是被装上去。它校验的是**上传上来的那个对象**——二进制本身，或整个压缩包 |
+| `unpack` | ❌ | enum \| null | 上传的是压缩包时写 `zip` 或 `tar.gz`；省略则上传的对象本身就是可执行文件 |
 | `subpath` | 见右 | string \| null | 包内哪个文件是这个命令。**给了 `unpack` 就必填，没给 `unpack` 就非法**——一个条目 = 一个命令 = 一个文件 |
 | `version` | ❌ | string \| null | **纯元数据，不参与收敛**：同样的字节换个 version 字符串，还是同一个工具，不会重新下发 |
-| `auth` | ❌ | string \| null | 取源时用的**凭证名**（B.4）。**永远不是 secret 值** |
 
-平台的动作顺序：取源 → 按 `digest` 验 → （有 `unpack` 时）解包取出 `subpath` 那一个
+> **没有 `source`，也没有 `auth`。** 这条路平台不取任何东西，也就没有「用哪个凭证去
+> 取」这件事。
+
+平台的动作顺序：按 `digest` 验上传的字节 → （有 `unpack` 时）解包取出 `subpath` 那一个
 文件 → 确认它是 **x86-64 ELF 可执行文件** → 留一份自己的副本 → 让引擎装上。
 **任何一步失败都不留记录**，所以 `200` 就意味着 bot 真的有这个命令了。
 
@@ -2039,7 +2082,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | --- | --- | --- |
 | `name` | string | 命令名 |
 | `version` | string \| null | 你声明的那个。元数据 |
-| `digest` | string | 取回对象被钉住的 digest |
+| `digest` | string | 平台拿到的那个对象被钉住的 digest——这条路上是上传的对象，清单 apply 装的则是取回的对象 |
 | `subpath` | string \| null | 哪个包内成员成了这个命令 |
 | `md5` | string | **交付出去的那个文件**的 md5，由平台在解包与选取**之后**算——所以是可执行文件的，不是压缩包的。引擎拿它做变更判断 |
 | `size_bytes` | int | 交付出去的那个文件的大小 |
@@ -2052,8 +2095,9 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | --- | --- |
 | `404` | bot 不存在，**或**协作者等级不到 ADMIN（不可区分，见 B.0） |
 | `409`，`code` = **`409110`** | 这个 bot 已经有同名工具——单次安装不会替换你没提到的东西，要换先删，或者用清单声明整套（清单 apply 是全量覆盖） |
-| `409`，`code` = **`409111`** | **这个 bot 的引擎根本装不了 CLI 工具**（如 desktop bot）。在**取源之前**就判掉 |
-| `422`，`code` = **`422110`** | **声明或字节本身**被拒：没钉 digest、源对不上 digest、包里没有那个成员、二进制是别的架构、或者引擎拒绝了**这一次**安装。注意它与 `409111` 的区别——那个是「这个引擎压根不支持这个能力」，这个是「支持，但这次不行」 |
+| `409`，`code` = **`409111`** | **这个 bot 的引擎根本装不了 CLI 工具**（如 desktop bot）。在**动这些字节之前**就判掉 |
+| `413`，`code` = **`413110`** | 上传的文件超过 **200 MiB**。**在请求体还没收完的时候**就拒——平台不会先把一份它已经决定不要的字节收进内存 |
+| `422`，`code` = **`422110`** | **字节本身**被拒：没钉 digest、上传的字节对不上 digest、包里没有那个成员、二进制是别的架构、或者引擎拒绝了**这一次**安装。注意它与 `409111` 的区别——那个是「这个引擎压根不支持这个能力」，这个是「支持，但这次不行」 |
 
 > 两个 `409` 的 HTTP 状态一样，**靠 `code` 区分**（`409110` vs `409111`），不要去匹配
 > `message`。
@@ -2304,7 +2348,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | `resources` | `path` | workspace 相对；`/` 结尾 = 目录条目；禁绝对路径/`../`；禁嵌套；**来源只能是内联 `source` URL 或 `content`** | **仅被声明的 `path` 子树** |
 | `mcp` | `server_code` | 平台注册表引用；**条目只有这一个字段** | 已启用的 server 集合 |
 | `engine_config` | `config` 对象 | **未开放**（附录 C） | 被声明的顶层键 |
-| `cli_tools` | `name` | 命令名，同 bot 内唯一；**字母或数字开头，只含字母数字与 `.` `_` `-`，≤128**；`digest` 强制；**来源只能是内联 `source` URL** | 清单下发的工具集合（含用 `…/cli-tools` API 装的） |
+| `cli_tools` | `name` | 命令名，同 bot 内唯一；**字母或数字开头，只含字母数字与 `.` `_` `-`，≤128**；来源是 `oss` 或 git 声明（内联 `source` 或 `from`）；**非 git 源 `digest` 强制**，git 源以 commit SHA 钉扎、写 `digest` 反而被拒 | 清单下发的工具集合（含用 `…/cli-tools` API 装的） |
 | `script` | `body` | 仅 ARCA 系 | —— |
 
 目录条目专用（`resources`，归档形态）：`unpack`（`zip` / `tar.gz`）、

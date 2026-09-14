@@ -74,6 +74,7 @@ _OPENCLAW_CONFIG_TEMPLATE = "scripts/openclaw.json"
 
 # Path to the hermes.yaml config template (relative to project root).
 _HERMES_CONFIG_TEMPLATE = "scripts/hermes.yaml"
+_SINGLEBOX_MODEL_API_KEY_ENV = "OPENCLAW_OPENAI_API_KEY"
 _BCN_PLUGIN_REPO_PATH = (
     Path("src") / "bcs" / "crates" / "plugins" / "openclaw-channel-bcn"
 )
@@ -374,6 +375,17 @@ class LocalProcessManager:
             )
             hermes_config = {}
 
+        # Keep the shared Singlebox model credential out of the repository.
+        # ``singlebox.sh`` exports values from the ignored root ``.env.local``;
+        # the Hermes process inherits that environment from this manager.
+        model_api_key = os.environ.get(_SINGLEBOX_MODEL_API_KEY_ENV, "").strip()
+        hermes_config["api_key"] = model_api_key
+        custom_providers = hermes_config.get("custom_providers", [])
+        if isinstance(custom_providers, list):
+            for provider in custom_providers:
+                if isinstance(provider, dict):
+                    provider["api_key"] = model_api_key
+
         # Set API server port for the dashboard
         hermes_config.setdefault("platforms", {})["api_server"] = {
             "enabled": True,
@@ -384,6 +396,7 @@ class LocalProcessManager:
         # Write config file
         with open(config_file, "w") as f:
             yaml.dump(hermes_config, f, default_flow_style=False, allow_unicode=True)
+        config_file.chmod(0o600)
 
         logger.info(
             "Created hermes config: %s, port=%s, workspace=%s",

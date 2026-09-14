@@ -20,7 +20,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.bot_config_manifest.apply.delivery import MaterialiserPorts
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.apply.activation_delegates import (
@@ -67,15 +67,17 @@ from agentclaw.community.kernel.bot_config import StoreRef
 
 from ..apply._fakes import (
     FakeActivationService,
-    FakeCredentials,
     FakeGitClient,
-    FakeGuardedFetcher,
     FakeManifestContent,
     FakeMcpAuth,
+    FakeObjectCredentials,
     FakeStartupScriptService,
+    OSS_AUTH,
+    OSS_BUCKET,
     build_skill_zip,
-    fetched_object,
     real_validator,
+    seeded_object_store,
+    no_redeliver,
 )
 from ..managed_files._fakes import FakeObjectStorage
 from ..managed_files.test_skill_port import FakeSkillRepository, LiveCapabilityReader
@@ -84,7 +86,7 @@ from tests.community.core.config_compose.test_collector import _reader_over, _re
 _OWNER = "u_owner"
 _BOT = "b_first"
 _ENTITY = _OWNER
-_QC_URL = "https://example.test/skills/quality-check.zip"
+_QC_KEY = "skills/quality-check.zip"
 _QZ = build_skill_zip("quality-check", extra=[("scripts/run.sh", b"echo ok\n")])
 _DOCUMENT = f"""schema_version: 1
 manifest:
@@ -96,7 +98,11 @@ manifest:
       content: 'Q: ?'
   skills:
     - name: quality-check
-      source: {_QC_URL}
+      source:
+        protocol: oss
+        bucket: "{OSS_BUCKET}"
+        key: "{_QC_KEY}"
+        auth: "{OSS_AUTH}"
 """
 _BASE = "teclaw/dev/bolt_data"
 _REF_ROOT = f"staff_{_OWNER}/{_BOT}_manifest/teclaw"
@@ -183,11 +189,7 @@ def _build(db):
     validator = real_validator()
 
     def fetcher():
-        return EntryFetcher(
-            FakeGuardedFetcher(responses={_QC_URL: fetched_object(_QZ, url=_QC_URL, content_type="application/zip")}),
-            FakeManifestContent(),
-            FakeCredentials(),
-        )
+        return DeclaredSourceResolver(FakeManifestContent(), FakeObjectCredentials(), seeded_object_store({_QC_KEY: _QZ}))
 
     def platform_ports() -> MaterialiserPorts:
         return MaterialiserPorts(
@@ -224,6 +226,7 @@ def _build(db):
         is_teclaw=lambda engine: engine == "teclaw",
         teclaw_platform_managed=True,
         teclaw_platform_ports_provider=platform_ports,
+        redeliver=no_redeliver,
     )
     queue.service = applies
 
@@ -281,7 +284,7 @@ def test_the_first_artifact_carries_the_manifest(world):
     # The deferred creation's single phase, against the record.
     accepted = applies.start_apply(
         entity_id=_ENTITY, bot_id=_BOT, bot=dict(_RECORD), owner_id=_OWNER, actor_id=_OWNER,
-        trigger=CREATE_PRE_CONTAINER_TRIGGER, phases=frozenset({ApplyPhase.PRE_CONTAINER}),
+        trigger=CREATE_PRE_CONTAINER_TRIGGER, phase=ApplyPhase.PRE_CONTAINER,
     )
     report = applies.last_apply(entity_id=_ENTITY, bot_id=_BOT)
     assert report is not None and report.apply_id == accepted.apply_id

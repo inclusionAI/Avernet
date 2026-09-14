@@ -4,6 +4,9 @@ import type { StageExtensionMode, StageKey } from "../services/evolve/stage-cata
 export type StageDevelopmentRow = {
   stage_skill_id: string;
   owner_user_id: string;
+  space_id: string | null;
+  space_type: "PERSONAL" | "TEAM" | null;
+  space_name: string | null;
   display_name: string;
   flow_key: "bot_evolution" | "skill_evolution";
   stage_key: StageKey;
@@ -17,6 +20,9 @@ export type StageSkillImplementationRow = {
   stage_skill_id: string;
   implementation_id: string;
   owner_user_id: string;
+  space_id: string | null;
+  space_type: "PERSONAL" | "TEAM" | null;
+  space_name: string | null;
   display_name: string;
   stage_key: StageKey;
   extension_mode: StageExtensionMode;
@@ -60,14 +66,16 @@ export class StageSkillRepository {
 
   async createDevelopment(input: {
     stageSkillId: string; ownerUserId: string; displayName: string;
+    spaceId?: string | null; spaceType?: "PERSONAL" | "TEAM" | null; spaceName?: string | null;
     flow: StageDevelopmentRow["flow_key"]; stage: StageKey; mode: StageExtensionMode;
   }): Promise<StageDevelopmentRow> {
     const now = this.db.dialect.now();
     await this.db.exec(
       `INSERT INTO ce_stage_developments
-       (stage_skill_id, owner_user_id, display_name, flow_key, stage_key, extension_mode, gmt_create, gmt_modified)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [input.stageSkillId, input.ownerUserId, input.displayName, input.flow, input.stage, input.mode, now, now],
+       (stage_skill_id, owner_user_id, space_id, space_type, space_name, display_name, flow_key, stage_key, extension_mode, gmt_create, gmt_modified)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [input.stageSkillId, input.ownerUserId, input.spaceId ?? null, input.spaceType ?? null, input.spaceName ?? null,
+        input.displayName, input.flow, input.stage, input.mode, now, now],
     );
     const row = await this.findDevelopment(input.stageSkillId);
     if (!row) throw new Error("开发记录创建失败");
@@ -112,6 +120,9 @@ export class StageSkillRepository {
     stageSkillId: string;
     implementationId: string;
     ownerUserId: string;
+    spaceId?: string | null;
+    spaceType?: "PERSONAL" | "TEAM" | null;
+    spaceName?: string | null;
     displayName: string;
     stage: StageKey;
     mode: StageExtensionMode;
@@ -123,10 +134,11 @@ export class StageSkillRepository {
     const now = this.db.dialect.now();
     await this.db.exec(
       `INSERT INTO ce_stage_skill_implementations
-       (implementation_id, owner_user_id, display_name, stage_key, extension_mode, version_no,
+       (implementation_id, owner_user_id, space_id, space_type, space_name, display_name, stage_key, extension_mode, version_no,
         stage_skill_id, status, package_ref, package_sha256, static_validation_json, gmt_create, gmt_modified)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'validated', ?, ?, ?, ?, ?)`,
-      [input.implementationId, input.ownerUserId, input.displayName, input.stage, input.mode,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'validated', ?, ?, ?, ?, ?)`,
+      [input.implementationId, input.ownerUserId, input.spaceId ?? null, input.spaceType ?? null, input.spaceName ?? null,
+        input.displayName, input.stage, input.mode,
         input.versionNo, input.stageSkillId,
         input.packageRef, input.packageSha256,
         JSON.stringify(input.staticValidation), now, now],
@@ -143,11 +155,11 @@ export class StageSkillRepository {
     ))[0] ?? null;
   }
 
-  async listImplementations(ownerUserId: string): Promise<StageSkillImplementationRow[]> {
+  async listImplementations(ownerUserId: string, teamSpaceIds: readonly string[] = []): Promise<StageSkillImplementationRow[]> {
     return this.db.query<StageSkillImplementationRow>(
-      `SELECT * FROM ce_stage_skill_implementations WHERE owner_user_id = ? AND status <> 'deleted'
+      `SELECT * FROM ce_stage_skill_implementations WHERE (owner_user_id = ?${teamSpaceIds.length ? ` OR (space_type = 'TEAM' AND space_id IN (${teamSpaceIds.map(() => "?").join(",")}))` : ""}) AND status <> 'deleted'
        ORDER BY stage_key, extension_mode, version_no DESC, id DESC`,
-      [ownerUserId],
+      [ownerUserId, ...teamSpaceIds],
     );
   }
 

@@ -1,8 +1,8 @@
-// 管理后台入口（单页 `/admin` + 顶部下划线 tab：空间管理 / 工单中心）。
+// 管理后台入口（单页 `/admin` + 顶部下划线 tab：空间管理 / 通知中心）。
 // 消费 `?tab=spaces|work-orders` query 切主 tab（PRD 单页意图，视觉规格 §1）。
 // 视觉对齐 PRD：主 tab 为下划线式，位于白色 header 条上；内容区灰底带内边距。
 // 形态级 Tab 可见性经 `getAdminSections` capability 解析：Open Core（阿里云部署）隐藏【空间管理】、
-// 仅留【工单中心】；internal overlay 两 Tab 均在。隐藏 Tab 的深链（?tab=spaces）回落首个可见 Tab。
+// 仅留【通知中心】；internal overlay 两 Tab 均在。隐藏 Tab 的深链（?tab=spaces）回落首个可见 Tab。
 import { getCapabilities } from '@/capabilities';
 import { UnderlineTabs } from '@/components/Admin/Tabs';
 import { useSearchParams } from '@umijs/max';
@@ -14,7 +14,7 @@ type AdminTab = 'spaces' | 'work-orders';
 
 const TAB_OPTIONS: { value: AdminTab; label: string }[] = [
   { value: 'spaces', label: '空间管理' },
-  { value: 'work-orders', label: '工单中心' },
+  { value: 'work-orders', label: '通知中心' },
 ];
 
 const AdminPage: React.FC = () => {

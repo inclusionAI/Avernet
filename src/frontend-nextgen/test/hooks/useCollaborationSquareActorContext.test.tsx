@@ -13,13 +13,13 @@ describe('useCollaborationSquareActorContext', () => {
     useWorkspaceStore.getState().reset();
     useWorkspaceStore.getState().setIdentities(
       [
-        { id: 'human_327325', kind: 'user', displayName: '当前用户', online: true },
-        { id: 'bot-1:327325', kind: 'bot', displayName: '当前 Bot', online: true },
+        { id: 'human_900003', kind: 'user', displayName: '当前用户', online: true },
+        { id: 'bot-1:900003', kind: 'bot', displayName: '当前 Bot', online: true },
       ],
-      'human_327325',
+      'human_900003',
     );
     mockedUseHumanIdentity.mockReturnValue({
-      identity: { userId: '327325', displayName: '当前用户', online: true },
+      identity: { userId: '900003', displayName: '当前用户', online: true },
       status: 'ready',
     });
   });
@@ -30,19 +30,19 @@ describe('useCollaborationSquareActorContext', () => {
 
     expect(result.current).toMatchObject({
       humanIdentityStatus: 'ready',
-      humanBotContext: { actorId: 'human_327325', userId: '327325' },
-      viewer: { viewerActorType: 'human', viewerActorId: '327325' },
-      activeActor: { type: 'human', id: '327325' },
+      humanBotContext: { actorId: 'human_900003', userId: '900003' },
+      viewer: { viewerActorType: 'human', viewerActorId: '900003' },
+      activeActor: { type: 'human', id: '900003' },
     });
     expect(reset).not.toHaveBeenCalled();
 
-    act(() => useWorkspaceStore.getState().setActiveIdentity('bot-1:327325'));
+    act(() => useWorkspaceStore.getState().setActiveIdentity('bot-1:900003'));
 
     expect(result.current).toMatchObject({
       humanIdentityStatus: 'ready',
-      humanBotContext: { actorId: 'bot-1:327325', userId: '327325' },
-      viewer: { viewerActorType: 'bot', viewerActorId: 'bot-1:327325' },
-      activeActor: { type: 'bot', id: 'bot-1:327325' },
+      humanBotContext: { actorId: 'bot-1:900003', userId: '900003' },
+      viewer: { viewerActorType: 'bot', viewerActorId: 'bot-1:900003' },
+      activeActor: { type: 'bot', id: 'bot-1:900003' },
     });
     expect(reset).toHaveBeenCalledTimes(1);
   });

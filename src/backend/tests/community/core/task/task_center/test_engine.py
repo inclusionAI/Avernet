@@ -183,6 +183,47 @@ class TestPrepareDispatchStartTime:
         assert root.run_info.start_time is not None
         assert side and side[0][0] == "miss"
 
+    def test_dynamic_group_keeps_chat_mode_and_marks_business_protocol(self, svc, graph):
+        """动态 HIT_MULTI 保留策略选定的群形态，仅补齐节点业务协议标记。"""
+
+        class _UnmarkedGroupDispatcher:
+            async def dispatch(self, nodes):
+                node = nodes[0]
+                node.run_info.run_mode = "coop_group"
+                node.run_info.extend_props["pending_group_formation"] = GroupFormation(
+                    bot_ids=["manager", "worker"], collab_mode="chat"
+                )
+                return [node]
+
+        eng = _engine(svc, dispatcher=_UnmarkedGroupDispatcher())
+        side: list[tuple] = []
+        _run(eng._prepare_into("t1", side))
+
+        assert side and side[0][0] == "group"
+        formation = side[0][2]
+        assert formation.collab_mode == "chat"
+        assert formation.extend_props["dynamic_task_node_protocol"] is True
+
+    def test_dynamic_state_machine_group_keeps_its_explicit_protocol(self, svc, graph):
+        """显式状态机群原样透传，仍走状态机执行路径。"""
+
+        class _StateMachineDispatcher:
+            async def dispatch(self, nodes):
+                node = nodes[0]
+                node.run_info.run_mode = "coop_group"
+                node.run_info.extend_props["pending_group_formation"] = GroupFormation(
+                    bot_ids=["driver", "worker"], collab_mode="state_machine"
+                )
+                return [node]
+
+        eng = _engine(svc, dispatcher=_StateMachineDispatcher())
+        side: list[tuple] = []
+        _run(eng._prepare_into("t1", side))
+
+        formation = side[0][2]
+        assert formation.collab_mode == "state_machine"
+        assert formation.extend_props["dynamic_task_node_protocol"] is True
+
 
 # ===== on_execute =====
 class TestDispatchStartTimeSemantics:
@@ -1086,3 +1127,23 @@ class TestPrepareModeCoverageSerial:
         node = svc._get_node(graph, "c1")
         assert node.run_info.extend_props.get("dispatch_error") is not None
         assert node.status == Status.PENDING
+
+    def test_start_run_exception_clears_assignment_and_keeps_node_pending(self, svc, graph):
+        """执行后端异常不能中断整轮；节点应清理在途执行者并留待 harness 重派。"""
+        class _RaisingRunner(StubRunner):
+            async def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
+                self.run_calls.append(list(toDoTaskList))
+                raise RuntimeError("transport unavailable")
+
+        planner = StubPlanner(lambda _graph: [_child("c1")])
+        runner = _RaisingRunner()
+        eng = _engine(svc, planner=planner, runner=runner)
+
+        _run(eng.on_execute("t1"))
+
+        node = svc._get_node(graph, "c1")
+        assert len(runner.run_calls) == 1
+        assert node.status == Status.PENDING
+        assert node.run_info.run_mode in (None, "")
+        assert node.run_info.assignee in (None, "")
+        assert node.run_info.extend_props["dispatch_error"] == "start_run_failed"

@@ -175,6 +175,28 @@
       },
       "relay_url": "ws://localhost:18900",
       "connection_timeout": 15.0
+    },
+    "deepseek_harness": {
+      "process": {
+        "start_cmd": [],
+        "stop_cmd": [],
+        "restart_cmd": [],
+        "startup_timeout_sec": 30,
+        "graceful_timeout_sec": 5
+      },
+      "sandbox_setup": {
+        "engine_dirs": ["dsh"],
+        "rsync_pairs": [
+          {
+            "name": "user",
+            "source": "/home/admin/.dsh",
+            "target": "/home/admin/nfs/bot-data/dsh",
+            "mode": "two-way",
+            "interval": 300,
+            "exclude": ["node_modules/", ".cache/", "*.tmp"]
+          }
+        ]
+      }
     }
   },
   "mcp_token_header_name": "x-moltis-mcp-token",

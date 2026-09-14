@@ -178,6 +178,7 @@ jobs:
   backend:
     name: Backend unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     env:
       # PR: compare against the checked-out merge commit's exact base tree.
       # push/dispatch: compare against dev (repo default branch) instead.

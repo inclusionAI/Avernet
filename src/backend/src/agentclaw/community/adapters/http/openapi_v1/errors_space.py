@@ -26,6 +26,7 @@ class SpaceErrorCode(IntEnum):
     DRAFT_NOT_FOUND = 404204
     SKILL_PATH_INVALID = 422207
     DRAFT_SOURCE_NOT_REFRESHABLE = 422208
+    SKILL_PACKAGE_TOO_LARGE = 422209
     SKILL_GIT_UNAVAILABLE = 502202
     SKILL_DRAFT_STORE_UNAVAILABLE = 503202
     PUBLICATION_ATTEMPT_NOT_FOUND = 404205
@@ -62,6 +63,7 @@ class SpacePublicErrorMessage(StrEnum):
     DRAFT_NOT_FOUND = "Not found"
     SKILL_PATH_INVALID = "Skill file path is invalid"
     DRAFT_SOURCE_NOT_REFRESHABLE = "Draft is not backed by a Git snapshot"
+    SKILL_PACKAGE_TOO_LARGE = "Skill package is too large"
     SKILL_GIT_UNAVAILABLE = "Git snapshot is unavailable"
     SKILL_DRAFT_STORE_UNAVAILABLE = "Draft content store is unavailable"
     PUBLICATION_ATTEMPT_NOT_FOUND = "Not found"

@@ -1,4 +1,5 @@
-// 通知铃铛：红点未读数 + Popover（最近3条 / 全部已读 / 查看全部通知）。
+// 通知铃铛：通知中心的快速预览入口。红点未读数 + Popover（最近3条 / 全部已读 / 查看全部）。
+// 与通知中心完整视图（/admin?tab=work-orders）同数据源：list 端点、未读 badge_count、WorkOrderDto 均共用。
 // 视觉规格：docs/specs/2026-08-17-admin-module/prd-visual-spec.md §4（Popover 约 360 宽）。
 import { Button, Empty, IconButton, Popover, PopoverContent, PopoverTrigger, Skeleton } from '@/components/ui';
 import type { NotificationSummary, WorkOrderCategory } from '@/domain/admin/models';
@@ -52,7 +53,7 @@ export function NotificationBell() {
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={8} className="w-[360px] max-w-[calc(100vw-1rem)] p-0">
         <div className="flex items-center justify-between px-4 pt-3 pb-2">
-          <p className="m-0 text-sm font-semibold text-foreground">通知中心</p>
+          <p className="m-0 text-sm font-semibold text-foreground">最近通知</p>
           {unreadCount > 0 && (
             <Button variant="ghost" size="sm" onClick={() => void markAllRead()}>
               全部已读
@@ -86,7 +87,7 @@ export function NotificationBell() {
         </div>
         <div className="border-t border-border px-4 py-2">
           <Button variant="ghost" size="sm" className="w-full" onClick={() => goWorkOrders()}>
-            查看全部通知
+            查看全部
           </Button>
         </div>
       </PopoverContent>

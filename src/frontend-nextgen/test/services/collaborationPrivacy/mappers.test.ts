@@ -46,7 +46,7 @@ describe('collaboration privacy service mappers', () => {
   it('maps the current user and Bot publication states from the real /mine fields', () => {
     const mapped = mapBotDtoToDomain(
       createBot({
-        bot_id: '20260715_vl4oht43:447147',
+        bot_id: '20260715_vl4oht43:900004',
         visibility: 'public',
         user_visibility: 'private',
         friend_ext: {},

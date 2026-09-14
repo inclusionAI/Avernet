@@ -22,9 +22,10 @@ type HistoryRow = Omit<WorkflowDeployHistoryRow, "spec_json"> & { spec_json: str
 function makeFakeRepo(rows: HistoryRow[]) {
   return {
     async insert() { /* noop */ },
-    async listHistory(workflowId: string, limit: number) {
+    async listHistory(workflowId: string, limit: number, options?: { releaseOnly?: boolean }) {
       return rows
         .filter((r) => r.workflow_id === workflowId)
+        .filter((r) => !options?.releaseOnly || r.action !== "edit")
         .sort((a, b) => b.deploy_number - a.deploy_number)
         .slice(0, limit)
         .map((r) => {
@@ -175,6 +176,28 @@ describe("workflow version history (read-only)", () => {
       await startApp(null);
       const res = await fetch(`${baseUrl}/api/workflows/tech-research/history`);
       expect(res.status).toBe(503);
+    });
+
+    it("filters old edit records before applying the release-history limit", async () => {
+      const res = await fetch(`${baseUrl}/api/workflows/tech-research/history?limit=1&releaseOnly=true`);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.history).toHaveLength(1);
+      expect(body.history[0]).toMatchObject({ deployNumber: 3, action: "deploy" });
+    });
+
+    it("returns an active release outside the bounded history page", async () => {
+      await stopApp();
+      await startApp(makeFakeRepo([
+        row({ deploy_number: 1, version: 1, is_active: 1 }),
+        ...Array.from({ length: 50 }, (_, index) => row({ deploy_number: index + 2, version: index + 2 })),
+      ]));
+      const res = await fetch(`${baseUrl}/api/workflows/tech-research/history?limit=50&releaseOnly=true`);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.history).toHaveLength(50);
+      expect(body.history.some((item: { deployNumber: number }) => item.deployNumber === 1)).toBe(false);
+      expect(body.active).toMatchObject({ deployNumber: 1, version: 1, isActive: true });
     });
   });
 

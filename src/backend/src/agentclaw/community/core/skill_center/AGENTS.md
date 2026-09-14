@@ -75,6 +75,7 @@ Bot 定位必须携带 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 - `policies/capability_ownership.py` 统一判定：Set 成员（含 inactive Set 和 excluded Default member）由 Set 控制；Direct-active 能力加入 Set 前先停用；同一 Bot 下只能属于一个 reaching Set（含 Default）。`RESOURCE_DIRECT_ACTIVE` 优先于另一个 Set 冲突。
 - Default member 被 exclusion 后仍属于 Default；重新启用走 un-exclude。Default 选择统一使用 `policies/default_skill_set_selection.py`，保留全局 Default 与 engine/template 兼容规则。
 - Engine/template 的代码型 Default MCP 是显式例外：`policies/platform_default_mcp.py` 管理政策事实，不能将它误认为都存在于 `ac_skill_set_mcp`。有效 MCP 还需合并政策默认项（应用 exclusion）及 active Skill dependencies；沿用 `collect_bot_active_mcps` 的统一入口。Platform Default MCP 拒绝 Direct control。
+- 普通技能集添加 MCP 同样必须拒绝目标 Bot 的代码型 Default MCP（按 `server_code`、engine/template/ext-info 判断，不减 exclusion）。Service 严格解析默认 codes，UoW 在写入前重检；返回 `RESOURCE_MANAGED_BY_PLATFORM_POLICY`。此校验不物化 Policy、不清理历史数据；默认集 un-exclude 及普通集移除历史重复成员仍可用。
 
 `services/_mutation_flow.py::MutationProjectionFlow` 先提交 DB，再尽力投影；Runtime 不可达、PENDING、DEGRADED 不补偿回滚已提交的 Installation。DB/权限/领域校验失败仍返回失败。响应中的 `runtime_projection` 由 `runtime_projection_contract.py` 定义，不能把接口成功解释成全部设备文件已收敛。
 
@@ -91,7 +92,7 @@ Bot 定位必须携带 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 - `center://<skill_code>`：SC 外部定位。`skill_code` 可为普通字符串，不要求 UUID，也不等于运行时名称。
 - `ac_skill.skill_uuid`：TeamClaw 内部稳定身份。Space 自建 Skill 发布时使用该 UUID 作为 SC code；Public 导入由 `public_center_identity.py` 基于 tenant/env/code 确定性派生内部 UUID。复用资产按来源身份，不能按名称复用 Local/Repo。
 - `ac_skill.name`：运行时名称，允许与 SC code 不同。Canonical 内容按内部 UUID + 精确 `sc_version_number` 寻址，不使用 name、latest/current 目录。
-- `SkillAssetKind.SPACE` 是当前 Center 消费分类；Space 管理权限仍需真实 Space Binding/Grant，不能从该分类推出“属于团队空间”。
+- `SkillAssetKind.CENTER` 是 Center 消费分类；Space 管理权限仍需真实 Space Binding/Grant，不能从该分类推出“属于团队空间”。
 
 ## 5. Space Draft、授权与发布
 
@@ -174,6 +175,7 @@ Engine 拥有物理布局。Backend 通过 `community/core/skills_pool/` 的版�
 | AICoding | Pool | `.claude/skills` | `.aicoding/workspace/skills-pool/skills-local` | `.aicoding/workspace/skills-pool/skills-repo` | `.aicoding/workspace/skills-pool/skill-center` |
 | Hermes | Legacy | `.hermes/skills` | `.hermes/workspace/skills/skills-local` | `.hermes/skills-repo` | `.hermes/workspace/skills-pool/skill-center` |
 | Hermes | Pool | `.hermes/skills` | `.hermes/workspace/skills-pool/skills-local` | `.hermes/workspace/skills-pool/skills-repo` | `.hermes/workspace/skills-pool/skill-center` |
+| DeepSeek Harness | Legacy | `.dsh/skills` | `.dsh/workspace/skills/skills-local` | `.dsh/workspace/skills/skills-repo` | 不支持 |
 
 目录语义与排查规则：
 
@@ -183,6 +185,7 @@ Engine 拥有物理布局。Backend 通过 `community/core/skills_pool/` 的版�
 - 迁移中的实际来源选择按 `community/core/skills_pool/types.py::runtime_uses_pool_paths` 和 Engine evidence 判断，不能只看配置、目录是否存在或 DB `active_layout`。数据面 cutover 已完成而 DB 尚未最终提交时，也可能必须读取 Pool。
 - 产品 `active_engine=claude_code` 可能实际运行 AICoding 模板；先用 `runtime_layout_engine_for_bot` 解析实际文件型身份，再选择路径，不能仅凭产品 Engine 字符串套 Claude Code 行。
 - Teclaw 是 Artifact capability：使用 Whole Artifact/StoreRef，不使用这张文件型 active-root 表，也不需要伪造 Legacy/Pool 文件目录。
+- DeepSeek Harness 当前只参与 Legacy Local/Repo 软链投影；Engine 在 `.dsh/skills` 下维护指向 `workspace/skills` 内容库的结构桥。它尚未参与 Skills Pool、Center 或 Service Artifact，不能从基础同步能力推导这些范围已支持。
 - Hermes 的 `.hermes/skills-repo` 是准备期 Legacy Repo 地址，不是 Pool 稳态
   内容根。Pool 激活后逐 Skill 映射直接指向 canonical Pool Repo，Engine/启动
   路径只退休仍指向该 canonical Repo 的平台软链；用户实体或意外链接保留并
@@ -199,6 +202,14 @@ Engine 拥有物理布局。Backend 通过 `community/core/skills_pool/` 的版�
 - 无法读取的历史 Artifact 是 warning，不作为已确认引用阻断；保留可诊断的信息，不能把 unknown 伪装成确定无引用。
 - Offline 只记录离线状态并保留历史 Version，不自动生成 Vn+1 Draft，不调用 SC 删除。
 - Offline 原身份不能直接升级/发布；Copy 读取选定已发布版本，创建新的 Skill UUID 和独立 V1 Draft。新副本发布使用新 UUID 作为 SC code。
+
+### Asset Deletion
+
+- Asset Deletion 只能删除零引用 Skill；Installation、任意 active/inactive SkillSet Membership、Space Binding/Grant、Draft、Publication Attempt 和 Version 都是 blocker。
+- 所有硬删除 primitive 必须先锁 exact Skill，再在同一事务内重检 blocker；不能依赖 Router 或 Service 的一次性预检查，也不能顺手删除 Membership/Installation。
+- Bot 删除是独立生命周期：按 exact `owner_id + bot_id + env` 先清 Skill/MCP Installation，再删 SkillSet，最后删 Bot-owned Skill。`bot_id=default` 不能单独作为删除范围。
+- Git 源消失且存在 blocker 时保留 Skill 和 Desired State，返回 `SOURCE_MISSING_IN_USE`；Runtime 继续使用既有 `MANAGED_SOURCE_MISSING` / `PENDING`，不要新增同义状态。
+- Service Artifact 当前只引用 exact Center Version；硬删除由 `SkillVersion` 作为 dominant blocker，Offline 影响展示才扫描 Artifact。新增无 Version 的 Artifact Skill 引用前，必须先补可事务校验的 lineage fact。
 
 ## 9. DI 与 Legacy 兼容入口
 
@@ -219,11 +230,12 @@ Engine 拥有物理布局。Backend 通过 `community/core/skills_pool/` 的版�
 
 Legacy `/api/skills`、`/api/skillsets` 位于 `community/adapters/http/skill_center/`，继续复用 Query、DirectActivation、SkillSetManagement。Legacy scope/reference resolution 与 Factory 负责旧参数、Default/exclusion、设备路径适配；保留其 wire compatibility，不恢复第二条 Installation 写路径。
 
-## 10. 当前缺口：不得写成已交付能力
+## 10. 当前边界：不得扩大成未交付能力
 
-- `SkillQueryService._kind_for` 将 Center 分类为 SPACE，但 `_adapters` 中 SPACE 仍注册 `_UnavailableAssetAdapter`。这不影响 Reader 的精确 Version 解析，却意味着通用 Bot 内容解析不能仅凭路由存在就认定支持 Center；Space Version 文件读取是另一条已实现链路。
-- `get_readme_by_skill` 当前支持 Repo 和 Local，Center 返回 not-found；Local 分支仍调用 `get_unique_by_id(bot_id)`，与 owner+bot 的目标约束不一致，shared default 需专项修复。文档更新不改变该行为。
-- Legacy Factory/fallback、配置迁移 gate、TaskQueue 提交窗口仍存在。以上规则描述如何维护当前实现，不表示历史数据全量迁移、运行时全引擎验收或发布消费端都已经验证。
+- `SkillQueryService` 已支持 Bot-facing Center 详情、内容、参数前置解析与 Direct 操作，并支持无 Bot 的共享 README。Center 内容只读最新 PUBLISHED 数据库 Version 对应的 Canonical 精确版本；读取不调用 Engine、不下载，也不证明 Runtime 已应用该版本。
+- Center 的 PUBLIC/Space/offline 事实由 `CenterSkillAccessRepositoryProtocol` 提供；Bot owner/member 与 Space member 分别校验。返回值可投影为当前 Bot 的只读视图，但不得修改共享 `ac_skill.user_id/bolt_id`。PRIVATE 且没有唯一 Space binding、PUBLIC 同时绑定 Space 等矛盾状态必须 fail closed。
+- 参数仍保存在 Bot Engine 的历史 name-keyed `skill_parameters.json`；它不是新数据库、原生注入或 observed-runtime 接口。只有明确缺失才能初始化为空，读取拒绝、损坏或异常必须零写；替换一个 Skill 时保留其它 Skill 与根元信息。
+- Local shared README 从 Skill 行的 `owner_id + bot_id` 精确定位，不使用全局唯一 bot_id 假设。Legacy Factory/fallback、配置迁移 gate、TaskQueue 提交窗口仍存在；上述实现不表示历史数据全量迁移、运行时全引擎验收或发布消费端都已经验证。
 
 ## 11. 修改后的验证与文档维护
 

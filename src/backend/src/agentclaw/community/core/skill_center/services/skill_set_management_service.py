@@ -24,8 +24,11 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneNotFoundError,
     SkillSetAccessDeniedError,
 )
-from agentclaw.community.core.mcp.services._defaults import (
-    get_default_mcp_server_codes,
+from agentclaw.community.core.skill_center.policies.capability_ownership import (
+    require_non_platform_mcp,
+)
+from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
+    PlatformDefaultMcpPolicy,
 )
 from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
@@ -36,12 +39,11 @@ from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
+    ProjectionScope,
 )
+from agentclaw.community.core.skill_center.desktop_skill_recovery_protocol import DesktopSkillRecoveryServiceProtocol
 from agentclaw.community.core.repository.capability_desired_state_types import (
     DesiredStateMutation,
-)
-from agentclaw.community.core.skill_center.runtime_projection_contract import (
-    ProjectionScope,
 )
 from agentclaw.community.core.skill_center.services._mutation_flow import (
     MutationProjectionFlow,
@@ -74,18 +76,21 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         mcp_center: MCPCenterPlugin,
         mcp_auth: MCPAuthPlugin,
         ext_info_provider: Callable[[str], Mapping[str, Any] | None],
+        recovery: DesktopSkillRecoveryServiceProtocol,
     ) -> None:
         self._repository = repository
         self._bot_repo = bot_repo
         self._runtime = runtime
-        self._flow = MutationProjectionFlow(repository=repository, runtime=runtime)
+        self._flow = MutationProjectionFlow(repository=repository, runtime=runtime, recovery=recovery)
         self._legacy_factory = legacy_factory
         self._passport = passport
         self._authorization = authorization
         self._audit_log_repo = audit_log_repo
         self._mcp_center = mcp_center
         self._mcp_auth = mcp_auth
-        self._ext_info_provider = ext_info_provider
+        self._platform_default_mcp_policy = PlatformDefaultMcpPolicy(
+            ext_info_provider
+        )
 
     def _bot(self, *, bot_id: str, owner_id: str, user_id: str) -> dict:
         """Resolve the exact addressed Bot before applying caller policy."""
@@ -653,6 +658,10 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
                     default_engine_types=self._default_engine_types(bot),
                 ),
             )
+        platform_default_codes = self._platform_default_mcp_codes(bot, bot_id)
+        require_non_platform_mcp(
+            server_code=server_code, platform_default_codes=platform_default_codes
+        )
         catalog = self._mcp_catalog_entry(server_code)
         return await self._mutate(
             bot=bot,
@@ -667,6 +676,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
                 set_id=set_id,
                 server_code=server_code,
                 name=catalog["name"],
+                platform_default_codes=platform_default_codes,
                 description=catalog["description"],
                 icon=catalog["icon"],
                 engine_type=self._engine(bot),
@@ -942,22 +952,8 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
             )
 
     def _platform_default_mcp_codes(self, bot: dict, bot_id: str) -> frozenset[str]:
-        """The unmaterialized platform Default MCP policy (spec A.2).
-
-        Resolved at write time with the same context the read-side union
-        uses — engine, template, ext info. A provider failure propagates
-        rather than degrading to base defaults: for a template-preset-only
-        default MCP, a silently narrowed set would make the exclusion
-        command mis-read the genuine member as a stray and no-op the
-        removal as ``changed=False`` — a wrong persisted answer, where an
-        error is merely a retry.
-        """
-        return frozenset(
-            get_default_mcp_server_codes(
-                self._engine(bot),
-                bot.get("template_type"),
-                ext_info=self._ext_info_provider(bot_id),
-            )
+        return self._platform_default_mcp_policy.server_codes_for(
+            {**bot, "bot_id": bot_id}
         )
 
     @staticmethod

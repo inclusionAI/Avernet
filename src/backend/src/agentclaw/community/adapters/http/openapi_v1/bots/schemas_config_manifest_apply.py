@@ -63,6 +63,49 @@ class ConfigManifestApplyEntry(BaseModel):
     )
 
 
+class ConfigManifestApplySource(BaseModel):
+    """One git source this apply resolved — one row per declaration.
+
+    Named per declaration, keyed on the repository: two `from` names pointing at
+    the same `(url, ref, mode)` are two rows carrying the same `resolved_sha`,
+    and two inline declarations of one repository at two refs are two rows too.
+    """
+
+    name: str = Field(
+        description="The `from` name, or `<url>@<ref>` for a source written "
+        "inline on an entry."
+    )
+    url: str | None = Field(
+        default=None,
+        description="The repository URL, with any `${BOT_*}` placeholder "
+        "already substituted. Together with `ref` and `mode` it is what strict "
+        "mode compares the next apply against — so re-pointing url or ref is a "
+        "re-pin, not a moved ref.",
+    )
+    ref: str | None = Field(
+        default=None,
+        description="The ref as declared: a tag, a branch, or a commit SHA. "
+        "`HEAD` when the source declared none.",
+    )
+    mode: str | None = Field(
+        default=None,
+        description="`strict` or `non_strict`, as the source declared it. Part "
+        "of the baseline key, so a `non_strict` declaration of a repository "
+        "never advances the baseline a `strict` declaration of the same "
+        "repository is pinned against.",
+    )
+    resolved_sha: str | None = Field(
+        default=None,
+        description="The commit that ref actually resolved to in this apply — "
+        "what tells you which version of the content this bot is running.",
+    )
+    auth: str | None = Field(
+        default=None,
+        description="The credential's name, never its value. Null for an "
+        "anonymous fetch.",
+    )
+
+
 class ConfigManifestApplyCategory(BaseModel):
     """One category's summary, including what overwriting it removed."""
 
@@ -131,14 +174,13 @@ class ConfigManifestApply(BaseModel):
     finished_at: datetime | None = Field(
         default=None, description="Null exactly while `result` is `RUNNING`."
     )
-    sources: list[dict] = Field(
+    sources: list[ConfigManifestApplySource] = Field(
         default_factory=list,
-        description="Provenance for the manifest's named remote sources: what "
-        "each `source` name actually resolved to, including the exact "
-        "`resolved_sha`, since a moving `ref` like `main` means something "
-        "different next week. Always empty in this release — nothing is fetched "
-        "yet — and filled once remote sources are supported. A credential "
-        "appears by name only, never by value.",
+        description="Provenance for the manifest's git sources: what each "
+        "declaration actually resolved to, including the exact `resolved_sha`, "
+        "since a moving `ref` like `main` means something different next week. "
+        "One row per declaration; empty when the document names no git source. "
+        "A credential appears by name only, never by value.",
     )
     categories: list[ConfigManifestApplyCategory] = Field(
         default_factory=list,

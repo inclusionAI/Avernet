@@ -1,4 +1,5 @@
 import type { SessionView } from '@/domain/collaboration';
+import type { MessageViewScope } from '@/domain/collaboration/types';
 import { extractLoginUrl, isAceLoginResponse } from '@/services/backendApi/aceLoginBody';
 import type { SessionParticipantMode } from '@/services/backendApi/collaboration/sessionController';
 import {
@@ -57,7 +58,12 @@ export interface VisibleSessionsOpts {
 }
 
 export const sessionService = {
-  async createNewSession(groupId: string, title?: string, contextQuery?: string): Promise<DomainResult<SessionView>> {
+  async createNewSession(
+    groupId: string,
+    title?: string,
+    contextQuery?: string,
+    messageViewScope?: MessageViewScope,
+  ): Promise<DomainResult<SessionView>> {
     try {
       // acting_bot_id 传当前角色 id（human_xxx 或 botId:ownerId），让后端以该身份创建会话。
       const actingBotId = useWorkspaceStore.getState().activeIdentityId || undefined;
@@ -65,6 +71,7 @@ export const sessionService = {
         title: title || undefined,
         input: contextQuery ? { query: contextQuery } : undefined,
         ...(actingBotId ? { acting_bot_id: actingBotId } : {}),
+        ...(messageViewScope ? { message_view_scope: messageViewScope } : {}),
       });
       return { ok: true, data: mapSessionListItem(resp.data!) };
     } catch (err) {
@@ -160,9 +167,13 @@ export const sessionService = {
     sessionId: string,
     actorId: string,
     mode: SessionParticipantMode,
+    messageViewScope?: MessageViewScope,
   ): Promise<DomainResult<SessionView>> {
     try {
-      await updateSessionMemberMode(sessionId, actorId, { mode });
+      await updateSessionMemberMode(sessionId, actorId, {
+        mode,
+        ...(messageViewScope ? { message_view_scope: messageViewScope } : {}),
+      });
       return this.getSessionDetail(sessionId);
     } catch (err) {
       const status = (err as { status?: number })?.status;
@@ -170,6 +181,24 @@ export const sessionService = {
         return { ok: false, error: toDomainError('SESSION_CONFLICT', '会话状态已变更，请刷新后重试。') };
       }
       return { ok: false, error: toDomainError('SESSION_MEMBER_MODE_FAILED', '更新会话成员状态失败，请稍后重试。') };
+    }
+  },
+
+  /** 仅修改成员消息可见域（不带 mode）；返回刷新后的会话详情。 */
+  async updateMemberScope(
+    sessionId: string,
+    actorId: string,
+    scope: MessageViewScope,
+  ): Promise<DomainResult<SessionView>> {
+    try {
+      await updateSessionMemberMode(sessionId, actorId, { message_view_scope: scope });
+      return this.getSessionDetail(sessionId);
+    } catch (err) {
+      const status = (err as { status?: number })?.status;
+      if (status === 409) {
+        return { ok: false, error: toDomainError('SESSION_CONFLICT', '会话状态已变更，请刷新后重试。') };
+      }
+      return { ok: false, error: toDomainError('SESSION_MEMBER_SCOPE_FAILED', '切换消息视角失败，请稍后重试。') };
     }
   },
 

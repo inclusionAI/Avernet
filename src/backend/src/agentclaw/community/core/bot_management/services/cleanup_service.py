@@ -14,6 +14,10 @@ from agentclaw.community.core.bot_startup_script.protocols import (
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.capability_desired_state import (
+    CapabilityDesiredStateRepositoryProtocol,
+)
+from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
 
@@ -26,17 +30,20 @@ class BotCleanupService:
         self,
         skill_repo: SkillRepository,
         skill_set_repo: SkillSetRepository,
+        desired_state_repo: CapabilityDesiredStateRepositoryProtocol,
         startup_script_purge: StartupScriptPurgeProtocol,
     ):
         """
         Args:
             skill_repo: SkillRepository 实例（支持 delete_by_bot_id）
             skill_set_repo: SkillSetRepository 实例（支持 delete_by_bot_id）
+            desired_state_repo: Bot lifecycle 的 Skill/MCP Installation 清理入口
             startup_script_purge: 启动脚本的删除side。必填而非可选——漏接的后果
                 是脚本行静默残留，正是本次要修的问题本身。
         """
         self._skill_repo = skill_repo
         self._skill_set_repo = skill_set_repo
+        self._desired_state_repo = desired_state_repo
         self._startup_script_purge = startup_script_purge
 
     def purge_startup_script(self, *, entity_id: str, bot_id: str) -> bool:
@@ -78,22 +85,41 @@ class BotCleanupService:
             "skills_deleted": 0,
             "skill_sets_deleted": 0,
             "resources_deleted": 0,
+            "skill_installations_deleted": 0,
+            "mcp_installations_deleted": 0,
             "errors": [],
         }
 
-        # 1. 清理技能
+        # 1. Bot lifecycle explicitly removes effective capability facts.
         try:
-            result["skills_deleted"] = self._skill_repo.delete_by_bot_id(bot_id)
+            purged = self._desired_state_repo.purge_bot_installations(
+                bot_id=bot_id, owner_id=user_id, env=get_current_env()
+            )
+            result["skill_installations_deleted"] = purged["skills"]
+            result["mcp_installations_deleted"] = purged["mcps"]
         except Exception as e:
-            error_msg = f"Cleanup skills error for bot {bot_id}: {e}"
+            error_msg = f"Cleanup installations error for bot {bot_id}: {e}"
+            logger.error(f"[BotCleanupService] {error_msg}")
+            result["errors"].append(error_msg)
+            return result
+
+        # 2. Remove saved SkillSet references before Bot-owned assets.
+        try:
+            result["skill_sets_deleted"] = self._skill_set_repo.delete_by_bot_id(
+                bot_id, user_id
+            )
+        except Exception as e:
+            error_msg = f"Cleanup skill_sets error for bot {bot_id}: {e}"
             logger.error(f"[BotCleanupService] {error_msg}")
             result["errors"].append(error_msg)
 
-        # 2. 清理技能集（含关联表）
+        # 3. Delete only assets owned by this exact owner + Bot scope.
         try:
-            result["skill_sets_deleted"] = self._skill_set_repo.delete_by_bot_id(bot_id)
+            result["skills_deleted"] = self._skill_repo.delete_by_bot_id(
+                bot_id, user_id
+            )
         except Exception as e:
-            error_msg = f"Cleanup skill_sets error for bot {bot_id}: {e}"
+            error_msg = f"Cleanup skills error for bot {bot_id}: {e}"
             logger.error(f"[BotCleanupService] {error_msg}")
             result["errors"].append(error_msg)
 

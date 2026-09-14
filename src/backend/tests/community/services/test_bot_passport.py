@@ -834,8 +834,13 @@ class TestCreateServiceBotPublish:
         # Verify: bot_record 中没有 publish 字段
         assert "publish" not in result
 
-    def test_create_service_bot_publish_failure_not_block_bot_creation(self, bot_service, mock_bot_repository, mock_device_service):
-        """Test publish record creation failure should NOT block bot creation."""
+    def test_create_service_bot_publish_failure_rolls_back_creation(self, bot_service, mock_bot_repository, mock_device_service):
+        """发布单持久化失败：直建即服务的口径依赖发布单存在，必须失败可见。
+
+        旧行为（静默吞错、返回成功）曾使调用方拿到无法发布/推进的"服务
+        bot"；现为 workspace-hosting 失败同惯例：软删已插入行并抛错，
+        auth-status 重放会为同一 bot 补建缺失发布单。
+        """
         # Setup: bot 不存在
         new_bot = {
             "id": 125,
@@ -869,9 +874,10 @@ class TestCreateServiceBotPublish:
         bot_service._bot_publish_provider = lambda: mock_publish_service
 
         with patch('agentclaw.community.core.bot_management.services.bot_service._get_engine_types', return_value=['moltis']), \
-             patch('agentclaw.community.core.bot_management.services.bot_service.DEFAULT_ENGINE_TYPE', 'moltis'):
+             patch('agentclaw.community.core.bot_management.services.bot_service.DEFAULT_ENGINE_TYPE', 'moltis'), \
+             pytest.raises(BotServiceError, match="publish record"):
 
-            result = bot_service.create_bot(
+            bot_service.create_bot(
                 user_id="123456",
                 nick_name="Test User",
                 bot_name="Service Bot 2",
@@ -879,13 +885,8 @@ class TestCreateServiceBotPublish:
                 bot_type="service",
             )
 
-        # Verify: bot 仍然创建成功
-        assert result["bot_id"] == "service_bot_002"
-        assert result["bot_type"] == "service"
-
-        # Verify: 发布单创建被尝试调用
+        # Verify: 发布单创建被尝试调用，失败后 bot 行被软删
         mock_publish_service.create_publish.assert_called_once()
-
-        # Verify: bot_record 中没有 publish 字段（因为创建失败）
-        assert "publish" not in result
-        assert "publish" not in result
+        mock_bot_repository.soft_delete_by_owner.assert_called_once_with(
+            "service_bot_002", "123456"
+        )

@@ -1491,6 +1491,25 @@ fn build_invite_code_service(
     ))
 }
 
+async fn resolve_secret_value(
+    name: Option<&str>,
+    access: &dyn SecretAccessPort,
+    field: &str,
+) -> crate::Result<Option<String>> {
+    let Some(name) = name.map(str::trim).filter(|v| !v.is_empty()) else { return Ok(None); };
+    let record = access.get_secret(name).await.map_err(|e| crate::BcsError::InvalidConfig(format!("{field} '{name}' unavailable: {e}")))?;
+    if record.value.trim().is_empty() { return Err(crate::BcsError::InvalidConfig(format!("{field} '{name}' is empty"))); }
+    Ok(Some(record.value))
+}
+
+async fn resolve_token_secret_secret(
+    secret_key: Option<&str>,
+    secret_access: &dyn SecretAccessPort,
+    field: &str,
+) -> crate::Result<Option<String>> {
+    resolve_secret_value(secret_key, secret_access, field).await
+}
+
 fn resolve_invite_token_secret(config: &BcsConfig) -> Vec<u8> {
     config
         .invite
@@ -1749,6 +1768,100 @@ mod gateway_principal_tests {
             resolve_invite_token_secret(&config),
             b"configured-invite-secret"
         );
+    }
+
+    #[tokio::test]
+    async fn all_config_secret_references_resolve_together() {
+        use bcs_config_api::{OAuthSettings, ProviderSettings};
+        use std::collections::BTreeMap;
+        let mut config = BcsConfig::default();
+        config.auth_sdk.secret_key_secret = Some("auth".into());
+        config.llm.api_key_secret = Some("llm".into());
+        config.invite.token_secret_secret = Some("invite".into());
+        config.session_files.share.token_secret_secret = Some("share".into());
+        let mut account = config.dingtalk_accounts.first().cloned().unwrap_or_default();
+        account.client_secret_secret = Some("ding".into());
+        config.dingtalk_accounts = vec![account];
+        let mut logger = ding_logger::GroupLoggerConfig { enabled: true, client_id: "id".into(), client_secret: String::new(), client_secret_secret: Some("logger".into()), group_ids: vec!["g".into()] };
+        config.group_logger = Some(logger.clone());
+        let mut human_options = BTreeMap::new();
+        human_options.insert("client_secret_secret".into(), serde_json::Value::String("human".into()));
+        config.human_notify.providers.insert("dingtalk".into(), bcs_config_api::HumanNotifyProviderConfig { enabled: true, options: human_options });
+        let mut providers = BTreeMap::new();
+        providers.insert("google".into(), ProviderSettings { kind: None, client_id: "id".into(), client_secret: None, client_secret_secret: Some("oauth".into()), private_key: None, alipay_public_key: None });
+        config.auth.oauth = Some(OAuthSettings { providers, ..OAuthSettings::default() });
+        let access = InMemorySecretAccess::with_entries([
+            ("auth", String::new(), "auth-value".into()), ("llm", String::new(), "llm-value".into()),
+            ("invite", String::new(), "invite-value".into()), ("share", String::new(), "share-value".into()),
+            ("ding", String::new(), "ding-value".into()), ("logger", String::new(), "logger-value".into()),
+            ("oauth", String::new(), "oauth-value".into()), ("human", String::new(), "human-value".into()),
+        ]);
+        resolve_config_secrets(&mut config, &access).await.unwrap();
+        assert_eq!(config.auth_sdk.secret_key.as_deref(), Some("auth-value"));
+        assert_eq!(config.llm.api_key.as_ref().map(|v| v.expose_secret().as_str()), Some("llm-value"));
+        assert_eq!(config.invite.token_secret.as_deref(), Some("invite-value"));
+        assert_eq!(config.session_files.share.token_secret.as_deref(), Some("share-value"));
+        assert_eq!(config.dingtalk_accounts[0].client_secret.as_ref().map(|v| v.expose_secret().as_str()), Some("ding-value"));
+        assert_eq!(config.group_logger.as_ref().unwrap().client_secret, "logger-value");
+        assert_eq!(config.human_notify.providers["dingtalk"].options["client_secret"], serde_json::Value::String("human-value".into()));
+        assert!(!config.human_notify.providers["dingtalk"].options.contains_key("client_secret_secret"));
+        assert_eq!(config.auth.oauth.as_ref().unwrap().providers["google"].client_secret.as_ref().map(|v| v.expose_secret().as_str()), Some("oauth-value"));
+    }
+
+    #[tokio::test]
+    async fn token_secret_reference_resolves_and_rejects_missing_or_empty() {
+        let access = InMemorySecretAccess::with_entries([("invite-key", String::new(), "resolved".to_string())]);
+        let resolved = resolve_token_secret_secret(Some(" invite-key "), &access, "invite.token_secret_secret")
+            .await
+            .expect("secret resolves");
+        assert_eq!(resolved.as_deref(), Some("resolved"));
+
+        let missing = resolve_token_secret_secret(Some("missing"), &InMemorySecretAccess::new(), "invite.token_secret_secret")
+            .await
+            .expect_err("missing secret fails");
+        assert!(missing.to_string().contains("invite.token_secret_secret"));
+
+        let empty_access = InMemorySecretAccess::with_entries([("empty", String::new(), "  ".to_string())]);
+        let empty = resolve_token_secret_secret(Some("empty"), &empty_access, "invite.token_secret_secret")
+            .await
+            .expect_err("empty secret fails");
+        assert!(empty.to_string().contains("is empty"));
+
+        assert_eq!(resolve_token_secret_secret(None, &InMemorySecretAccess::new(), "field").await.unwrap(), None);
+        let access = InMemorySecretAccess::with_entries([("auth", String::new(), "auth-value".to_string())]);
+        assert_eq!(resolve_secret_value(Some(" auth "), &access, "auth_sdk.secret_key_secret").await.unwrap().as_deref(), Some("auth-value"));
+        assert!(resolve_secret_value(Some("missing"), &InMemorySecretAccess::new(), "llm.api_key_secret").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn config_secret_resolution_preserves_legacy_values_without_references() {
+        use std::collections::BTreeMap;
+        let mut config = BcsConfig::default();
+        config.auth_sdk.secret_key = Some("legacy-auth".into());
+        config.llm.api_key = Some(Secret::new("legacy-llm".into()));
+        config.invite.token_secret = Some("legacy-invite".into());
+        config.session_files.share.token_secret = Some("legacy-share".into());
+        let mut options = BTreeMap::new();
+        options.insert("client_secret".into(), serde_json::Value::String("legacy-human".into()));
+        config.human_notify.providers.insert(
+            "dingtalk".into(),
+            bcs_config_api::HumanNotifyProviderConfig { enabled: true, options },
+        );
+
+        resolve_config_secrets(&mut config, &InMemorySecretAccess::new()).await.unwrap();
+
+        assert_eq!(config.auth_sdk.secret_key.as_deref(), Some("legacy-auth"));
+        assert_eq!(config.llm.api_key.as_ref().map(|v| v.expose_secret().as_str()), Some("legacy-llm"));
+        assert_eq!(config.invite.token_secret.as_deref(), Some("legacy-invite"));
+        assert_eq!(config.session_files.share.token_secret.as_deref(), Some("legacy-share"));
+        assert_eq!(config.human_notify.providers["dingtalk"].options["client_secret"], serde_json::Value::String("legacy-human".into()));
+    }
+
+    #[test]
+    fn legacy_token_secret_is_preserved_without_secret_reference() {
+        let mut config = BcsConfig::default();
+        config.invite.token_secret = Some("legacy-invite".to_string());
+        assert_eq!(resolve_invite_token_secret(&config), b"legacy-invite");
     }
 
     #[test]
@@ -2070,7 +2183,9 @@ impl Default for BcsServerState {
             ]));
         let state_machine_terminal_observer =
             Arc::new(DeferredStateMachineTerminalObserver::new(terminal_observer));
+        let coordination_intents = create_coordination_intents(Arc::new(bcs_cache_local::InMemoryCachePlugin::new()));
         let message_flow_builder = create_message_flow_builder(
+            coordination_intents.clone(),
             bot_registry.clone(),
             sessions.clone(),
             router.clone(),
@@ -2337,6 +2452,7 @@ impl Default for BcsServerState {
                 bot_run_context.clone(),
                 message_flow.clone(),
             )
+            .with_coordination_intents(coordination_intents.clone())
             .with_collaboration_runtime(collaboration_runtime.clone()),
         );
         let provider_event_ingest: Arc<dyn bcs_service_api::ProviderEventIngestService> =
@@ -2911,7 +3027,12 @@ impl BotTerminalObserverPort for DeferredStateMachineTerminalObserver {
     }
 }
 
+fn create_coordination_intents(cache: Arc<dyn bcs_cache_api::CachePlugin>) -> Option<Arc<dyn bcs_service_api::port::CoordinationIntentPort>> {
+    Some(Arc::new(bcs_coordination_store::CoordinationCacheStore::new(cache)))
+}
+
 fn create_message_flow_builder(
+    coordination_intents: Option<Arc<dyn bcs_service_api::port::CoordinationIntentPort>>,
     registry: Arc<dyn BotRegistryCoreService>,
     group: Arc<dyn GroupCoreService>,
     routing: Arc<dyn RoutingCoreService>,
@@ -2936,6 +3057,7 @@ fn create_message_flow_builder(
         bot_delivery.clone(),
         frontend_delivery.clone(),
     )
+    .with_coordination_intents(coordination_intents)
     .with_bot_relay_turn_limit(bot_relay_turn_limit)
     .with_interceptors(interceptors)
     .with_session_management(session_management)
@@ -3492,6 +3614,8 @@ impl BcsServer {
         let invite_token_secret = resolve_invite_token_secret(&config);
         let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         // Create service implementations (synchronous, in-memory mode)
+        assert!(!config.message_delivery.flow_enabled.group,
+            "managed Group delivery requires the durable async server constructor");
         let provider_repos = memory_provider_repos();
         let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(config.bots_base_dir.clone()));
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
@@ -3646,7 +3770,9 @@ impl BcsServer {
                  use BcsServer::new_with_storage to enable human mention notifications"
             );
         }
+        let coordination_intents = create_coordination_intents(Arc::new(bcs_cache_local::InMemoryCachePlugin::new()));
         let message_flow_builder = create_message_flow_builder(
+            coordination_intents.clone(),
             bot_registry.clone(),
             sessions.clone(),
             router.clone(),
@@ -3898,6 +4024,7 @@ impl BcsServer {
                 bot_run_context.clone(),
                 message_flow.clone(),
             )
+            .with_coordination_intents(coordination_intents.clone())
             .with_collaboration_runtime(collaboration_runtime.clone()),
         );
         let provider_event_ingest: Arc<dyn bcs_service_api::ProviderEventIngestService> =
@@ -4028,14 +4155,14 @@ impl BcsServer {
 
     /// Create a new BCS server with externally supplied infrastructure plugins.
     pub async fn new_with_infrastructure(
-        config: BcsConfig,
+        mut config: BcsConfig,
         infrastructure_plugins: InfrastructurePlugins,
         extensions: BcsServerExtensions,
     ) -> crate::Result<Self> {
         use bcs_service_api::BotRegistryCoreService;
 
-        let invite_token_secret = resolve_invite_token_secret(&config);
         let group_session_secret_access = crate::http_adapter::build_secret_access(&config).await?;
+        let invite_token_secret = resolve_invite_token_secret(&config);
         let gateway_principal_verifier = build_gateway_principal_verifier_from_secret_access(
             &config.gateway_principal,
             group_session_secret_access.clone(),
@@ -4094,11 +4221,9 @@ impl BcsServer {
             .unwrap_or_else(|| Arc::new(bcs_cache_local::InMemoryCachePlugin::new()));
         let cache_key_prefix = config.cache.redis.effective_key_prefix();
         info!(db_plugin = %db_kind, "Initializing DB-backed bot registry");
-        let bot_repo = Arc::new(PersistentBotRepo::with_plugins_flavor_and_cache_key_prefix(
-            cache_plugin.clone(),
+        let bot_repo = Arc::new(PersistentBotRepo::with_sql_flavor(
             db_plugin.clone(),
             db_flavor,
-            cache_key_prefix.clone(),
         ));
         let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
@@ -4476,7 +4601,9 @@ impl BcsServer {
             ]));
         let state_machine_terminal_observer =
             Arc::new(DeferredStateMachineTerminalObserver::new(terminal_observer));
+        let coordination_intents = create_coordination_intents(cache_plugin.clone());
         let message_flow_builder = create_message_flow_builder(
+            coordination_intents.clone(),
             bot_registry.clone(),
             sessions.clone(),
             router.clone(),
@@ -4587,8 +4714,10 @@ impl BcsServer {
             provider_stream_gray_list.clone(),
             profile_store.clone(),
         );
-        let (message_flow, channel_slot) =
-            finalize_message_flow(message_flow_builder, use_cases.system_message.clone());
+        let message_flow_builder = message_flow_builder.with_system_message(use_cases.system_message.clone());
+        let channel_slot = message_flow_builder.channel_slot();
+        let message_flow: Arc<dyn MessageFlowService> = crate::message_delivery_wiring::wire_with_leader(message_flow_builder, &config, leader_election.clone()).await?;
+        let mut delivery_startup_guard = crate::message_delivery_wiring::StartupGuard(Some(message_flow.clone()));
         frontend_connections
             .set_bot_query(use_cases.bot_query.clone())
             .await;
@@ -4771,6 +4900,7 @@ impl BcsServer {
                 bot_run_context.clone(),
                 message_flow.clone(),
             )
+            .with_coordination_intents(coordination_intents.clone())
             .with_collaboration_runtime(collaboration_runtime.clone()),
         );
         let provider_event_ingest: Arc<dyn bcs_service_api::ProviderEventIngestService> =
@@ -4885,6 +5015,7 @@ impl BcsServer {
             admission_service,
         });
 
+        delivery_startup_guard.0 = None;
         Ok(Self { config, state })
     }
 
@@ -5136,6 +5267,11 @@ impl BcsServer {
 
     /// Run the server with graceful shutdown support.
     pub async fn run(self) -> Result<()> {
+        // Also stop durable workers if address parsing, lifecycle setup or bind
+        // fails before the normal graceful-shutdown path is installed.
+        let _delivery_shutdown_guard = crate::message_delivery_wiring::StartupGuard(
+            Some(self.state.services.message_flow.clone()),
+        );
         let addr: SocketAddr = format!("{}:{}", self.config.bind, self.config.port)
             .parse()
             .map_err(|e| crate::BcsError::InvalidConfig(format!("Invalid address: {}", e)))?;
@@ -5209,8 +5345,10 @@ impl BcsServer {
         let final_lifecycle = self.state.lifecycle.clone();
         let shutdown_metrics = self.state.metrics.clone();
         let final_metrics = self.state.metrics.clone();
+        let shutdown_message_flow = self.state.services.message_flow.clone();
+        let final_message_flow = self.state.services.message_flow.clone();
 
-        axum::serve(
+        let serve_result = axum::serve(
             listener,
             app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
         )
@@ -5229,6 +5367,10 @@ impl BcsServer {
 
                 info!("Shutdown signal received, gracefully shutting down...");
 
+                if let Err(error) = shutdown_message_flow.shutdown_managed_delivery().await {
+                    warn!(%error, "message delivery shutdown failed");
+                }
+
                 if let Err(error) = shutdown_lifecycle.lock().await.shutdown_all().await {
                     warn!(error = %error, "service lifecycle shutdown failed");
                 }
@@ -5237,8 +5379,11 @@ impl BcsServer {
                 }
             })
             .await
-            .map_err(|e| crate::BcsError::InvalidConfig(e.to_string()))?;
+            .map_err(|e| crate::BcsError::InvalidConfig(e.to_string()));
 
+        if let Err(error) = final_message_flow.shutdown_managed_delivery().await {
+            warn!(%error, "message delivery final shutdown failed");
+        }
         if let Err(error) = final_lifecycle.lock().await.shutdown_all().await {
             warn!(error = %error, "service lifecycle shutdown failed");
         }
@@ -5247,7 +5392,7 @@ impl BcsServer {
         }
 
         info!("Bot Coordination Service stopped");
-        Ok(())
+        serve_result
     }
 
     /// Run the server on a random port and return the bound address.
@@ -6446,4 +6591,47 @@ impl IntoResponse for crate::BcsError {
 
         (status, body).into_response()
     }
+}
+
+pub async fn resolve_config_secrets(config: &mut BcsConfig, access: &dyn SecretAccessPort) -> crate::Result<()> {
+    if let Some(value) = resolve_secret_value(config.auth_sdk.secret_key_secret.as_deref(), access, "auth_sdk.secret_key_secret").await? {
+        config.auth_sdk.secret_key = Some(value);
+    }
+    if let Some(value) = resolve_secret_value(config.llm.api_key_secret.as_deref(), access, "llm.api_key_secret").await? {
+        config.llm.api_key = Some(Secret::new(value));
+        config.llm.api_key_env = None;
+    }
+    if config.invite.token_secret_secret.as_deref().is_some_and(|v| !v.trim().is_empty()) {
+        config.invite.token_secret = resolve_token_secret_secret(config.invite.token_secret_secret.as_deref(), access, "invite.token_secret_secret").await?;
+    }
+    if config.session_files.share.token_secret_secret.as_deref().is_some_and(|v| !v.trim().is_empty()) {
+        config.session_files.share.token_secret = resolve_token_secret_secret(config.session_files.share.token_secret_secret.as_deref(), access, "session_files.share.token_secret_secret").await?;
+    }
+    for account in &mut config.dingtalk_accounts {
+        if let Some(value) = resolve_secret_value(account.client_secret_secret.as_deref(), access, "dingtalk_accounts.client_secret_secret").await? {
+        account.client_secret = Some(Secret::new(value));
+        }
+    }
+    if let Some(logger) = config.group_logger.as_mut() {
+        if let Some(value) = resolve_secret_value(logger.client_secret_secret.as_deref(), access, "group_logger.client_secret_secret").await? {
+        logger.client_secret = value;
+        }
+    }
+    for (provider_name, provider) in &mut config.human_notify.providers {
+        let Some(name) = provider.options.get("client_secret_secret").and_then(|v| v.as_str()) else { continue; };
+        let field = format!("human_notify.providers.{provider_name}.client_secret_secret");
+        if let Some(value) = resolve_secret_value(Some(name), access, &field).await? {
+            provider.options.insert("client_secret".to_string(), serde_json::Value::String(value));
+            provider.options.remove("client_secret_secret");
+        }
+    }
+    if let Some(oauth) = config.auth.oauth.as_mut() {
+        for (provider_name, provider) in &mut oauth.providers {
+        let field = format!("auth.oauth.providers.{provider_name}.client_secret_secret");
+        if let Some(value) = resolve_secret_value(provider.client_secret_secret.as_deref(), access, &field).await? {
+            provider.client_secret = Some(Secret::new(value));
+        }
+        }
+    }
+    Ok(())
 }

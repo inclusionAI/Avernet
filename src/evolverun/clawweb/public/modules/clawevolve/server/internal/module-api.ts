@@ -108,6 +108,18 @@ export type OcbRequestIdentity = {
   userId: string;
 };
 
+/** OCB remains authoritative for space identity and live membership. */
+export type OcbSpace = {
+  id: string;
+  name: string;
+  type: "PERSONAL" | "TEAM";
+  role: "ADMIN" | "MEMBER";
+};
+
+export type OcbSpacePort = {
+  listAccessibleSpaces(input: { identity: OcbRequestIdentity }): Promise<OcbSpace[]>;
+};
+
 export type OcbLocalSkillSummary = {
   skillId: string;
   displayName: string;

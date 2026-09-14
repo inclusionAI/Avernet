@@ -152,6 +152,23 @@ def test_create_local_bot_returns_pending_authorization(client, desktop_service)
     assert desktop_service.apply_passport_before_create.call_args.kwargs["user_id"] == "u1"
 
 
+def test_create_local_hermes_uses_the_formal_desktop_workflow(client, desktop_service):
+    response = client.post(
+        "/openapi/v1/bots/local",
+        json={"bot_name": "Hermes", "machine_id": "m1", "engine": "hermes"},
+    )
+
+    assert response.status_code == 202, response.text
+    assert desktop_service.apply_passport_before_create.call_args.kwargs == {
+        "bot": {"bot_name": "Hermes", "bot_desc": None},
+        "user_id": "u1",
+        "machine_id": "m1",
+        "mount_path": None,
+        "avatar_url": None,
+        "engine_type": "hermes",
+    }
+
+
 def test_create_local_bot_rejects_non_personal_space(client):
     resp = client.post(
         "/openapi/v1/bots/local",

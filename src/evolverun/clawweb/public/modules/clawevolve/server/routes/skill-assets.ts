@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { Router, type Request, type ErrorRequestHandler } from "express";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
-import type { OcbLocalSkillPort, OcbRequestIdentity } from "../internal/module-api.js";
+import type { OcbLocalSkillPort, OcbRequestIdentity, OcbSpacePort } from "../internal/module-api.js";
+import { canReadSpaceRecord, registrationSpace, spaceColumns } from "../services/evolve/space-access.js";
 import type { SkillAssetRepository } from "../repositories/skill-asset-repository.js";
 import { skillEventTestBench } from "../repositories/skill-audit.js";
 import { getArtifactBucket, type ObjectStore } from "../services/object-storage/oss-object-store.js";
@@ -10,6 +11,7 @@ import { skillPackageDiff, skillPackageView } from "../services/evolve/skill-pac
 type SkillAssetsRouterInput = {
   repo: SkillAssetRepository;
   ocbLocalSkills: OcbLocalSkillPort | null;
+  ocbSpaces?: OcbSpacePort;
   artifactStore?: ObjectStore;
 };
 
@@ -29,6 +31,9 @@ function assetView(row: Awaited<ReturnType<SkillAssetRepository["findAsset"]>>, 
   if (!row) return null;
   return {
     assetId: row.asset_id,
+    spaceId: row.space_id ?? null,
+    spaceType: row.space_type ?? null,
+    spaceName: row.space_name ?? null,
     ownerId: metadata?.ownerId ?? null,
     createdAt: row.gmt_create,
     botId: row.bot_id,
@@ -64,6 +69,11 @@ async function readSnapshot(store: ObjectStore, ref: string) {
 
 export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
   const router = Router();
+
+  async function readable(asset: NonNullable<Awaited<ReturnType<SkillAssetRepository["findAsset"]>>>, requestIdentity: OcbRequestIdentity) {
+    return canReadSpaceRecord(asset, requestIdentity.userId,
+      asset.space_id ? await input.ocbSpaces?.listAccessibleSpaces({ identity: requestIdentity }) ?? [] : []);
+  }
 
   async function displayMetadata(botIds: string[], requestIdentity: OcbRequestIdentity, includeSkills = true) {
     // Request-scoped deduplication: two metadata calls per distinct Bot, never
@@ -110,7 +120,9 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
   router.get("/skill-assets", asyncHandler(async (req, res) => {
     const requestIdentity = identity(req);
     if (!requestIdentity) { res.status(401).json({ error: "无法识别当前用户" }); return; }
-    const assets = await input.repo.listAssets(requestIdentity.userId);
+    const spaces = await input.ocbSpaces?.listAccessibleSpaces({ identity: requestIdentity }) ?? [];
+    const assets = (await input.repo.listAssets(requestIdentity.userId, spaces.filter((space) => space.type === "TEAM").map((space) => space.id)))
+      .filter((asset) => canReadSpaceRecord(asset, requestIdentity.userId, spaces));
     const metadata = await displayMetadata(assets.map((asset) => asset.bot_id), requestIdentity);
     res.json({ items: assets.map((asset) => assetView(asset, metadata.get(asset.bot_id))) });
   }));
@@ -124,8 +136,12 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
     if (!input.ocbLocalSkills || !input.artifactStore?.putObject) {
       res.status(503).json({ error: "Skill 登记所需服务不可用" }); return;
     }
+    const space = await registrationSpace(input.ocbSpaces, requestIdentity, req.body?.spaceId);
     const existing = await input.repo.findByOcbSkill(requestIdentity.userId, botId, skillId);
     if (existing) {
+      if (space && existing.space_id !== space.id) {
+        res.status(409).json({ error: "该 Skill 已登记在其他空间，不能通过重复登记变更归属" }); return;
+      }
       const metadata = await displayMetadata([botId], requestIdentity);
       res.json({ ...assetView(existing, metadata.get(botId)), existing: true }); return;
     }
@@ -141,6 +157,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
       assetId,
       versionId: `SKVER-${randomUUID().slice(0, 12).toUpperCase()}`,
       ownerUserId: requestIdentity.userId,
+      ...spaceColumns(space),
       botId,
       ocbSkillId: skillId,
       displayName: exported.displayName,
@@ -156,7 +173,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
   router.get("/skill-assets/:assetId", asyncHandler(async (req, res) => {
     const requestIdentity = identity(req);
     const asset = await input.repo.findAsset(String(req.params.assetId));
-    if (!requestIdentity || !asset || asset.owner_user_id !== requestIdentity.userId) {
+    if (!requestIdentity || !asset || !await readable(asset, requestIdentity)) {
       res.status(404).json({ error: "Skill 不存在" }); return;
     }
     const metadata = await displayMetadata([asset.bot_id], requestIdentity);
@@ -176,7 +193,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
   router.get("/skill-assets/:assetId/versions/:versionId/content", asyncHandler(async (req, res) => {
     const requestIdentity = identity(req);
     const asset = await input.repo.findAsset(String(req.params.assetId));
-    if (!requestIdentity || !asset || asset.owner_user_id !== requestIdentity.userId) {
+    if (!requestIdentity || !asset || !await readable(asset, requestIdentity)) {
       res.status(404).json({ error: "Skill 不存在" }); return;
     }
     if (!input.artifactStore) { res.status(503).json({ error: "Skill 版本文件存储不可用" }); return; }
@@ -189,7 +206,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
   router.get("/skill-assets/:assetId/versions/:versionId/diff", asyncHandler(async (req, res) => {
     const requestIdentity = identity(req);
     const asset = await input.repo.findAsset(String(req.params.assetId));
-    if (!requestIdentity || !asset || asset.owner_user_id !== requestIdentity.userId) {
+    if (!requestIdentity || !asset || !await readable(asset, requestIdentity)) {
       res.status(404).json({ error: "Skill 不存在" }); return;
     }
     if (!input.artifactStore) { res.status(503).json({ error: "Skill 版本文件存储不可用" }); return; }

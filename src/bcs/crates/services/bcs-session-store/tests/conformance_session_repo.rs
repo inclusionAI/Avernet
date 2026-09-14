@@ -1,15 +1,23 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use bcs_db_api::{
     DbError, DbExecuteResult, DbHealth, DbPlugin, DbResult, DbRow, DbStatement, DbTransactionStep,
-    DbTransactionStepResult,
+    DbTransactionStepResult, DbValue,
 };
 use bcs_db_local::LocalSqliteDbPlugin;
-use bcs_service_api::port::repo::{NewSessionParams, SessionRepoPort};
-use bcs_service_api::{Participant, ParticipantRole, SessionKind};
+use bcs_service_api::port::NewEvent;
+use bcs_service_api::port::repo::{
+    AddSessionParticipantWithEvent, AppendEventRecord, NewSessionParams,
+    RemoveSessionParticipantWithEvent, SessionRepoPort,
+    UpdateSessionParticipantMessageViewScopeWithEvent,
+};
+use bcs_service_api::types::{
+    EVENT_SCHEMA_VERSION_V1, EventScope, EventSubject, MessageViewScope,
+};
+use bcs_service_api::{Participant, ParticipantMode, ParticipantRole, ServiceError, SessionKind};
 use bcs_session_store::{MemorySessionRepo, MySqlSessionStore};
 
 #[path = "../../../bootstrap/bcs/src/migrations.rs"]
@@ -273,4 +281,507 @@ async fn fallible_session_lookup_distinguishes_missing_rows_and_failures() {
     assert!(error.to_string().contains("forced session query failure"));
     let malformed = MySqlSessionStore::sqlite(Arc::new(MalformedMembershipRowDb), "dev".to_string());
     assert!(malformed.try_get("group_1:session").await.is_err());
+}
+
+fn scope_change_event(session_id: &str, group_id: &str) -> AppendEventRecord {
+    AppendEventRecord {
+        event: NewEvent {
+            event_id: "evt-scope-change-1".to_string(),
+            event_type: "session.participant.message_view_scope_changed".to_string(),
+            schema_version: EVENT_SCHEMA_VERSION_V1.to_string(),
+            producer: "session-store-test".to_string(),
+            producer_key: "evt-scope-change-1".to_string(),
+            occurred_at: "2026-09-10T00:00:00.000Z".to_string(),
+            subject: EventSubject {
+                subject_type: "session.participant".to_string(),
+                id: "human-1".to_string(),
+            },
+            scope: EventScope {
+                group_id: Some(group_id.to_string()),
+                session_id: Some(session_id.to_string()),
+                ..EventScope::default()
+            },
+            stream_key: format!("session:{session_id}"),
+            actor: None,
+            correlation_id: None,
+            causation_event_id: None,
+            trace_id: None,
+            data: BTreeMap::new(),
+        },
+        recorded_at: "2026-09-10T00:00:00.001Z".to_string(),
+        retention_until_ms: 2_000_000_000_000,
+        env: "dev".to_string(),
+    }
+}
+
+/// Rewrite the stored `participants` TEXT into pre-`message_view_scope` legacy
+/// bytes: structurally identical after parsing (the field defaults to `full`),
+/// but byte-different from what the current serializer produces.
+async fn rewrite_participants_as_legacy_bytes(db: &Arc<dyn DbPlugin>, session_id: &str) {
+    let rows = db
+        .query(DbStatement::with_params(
+            "SELECT participants FROM bcs_group_sessions WHERE env = ? AND session_id = ?",
+            vec![DbValue::from("dev"), DbValue::from(session_id)],
+        ))
+        .await
+        .expect("read participants");
+    let raw = rows[0]
+        .get_string("participants")
+        .expect("participants column")
+        .expect("participants not null");
+    let mut parsed: Vec<serde_json::Value> = serde_json::from_str(&raw).expect("participants json");
+    for participant in parsed.iter_mut() {
+        participant
+            .as_object_mut()
+            .expect("participant object")
+            .remove("message_view_scope");
+    }
+    let legacy = serde_json::to_string(&parsed).expect("legacy json");
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_group_sessions SET participants = ? WHERE env = ? AND session_id = ?",
+        vec![
+            DbValue::from(legacy.as_str()),
+            DbValue::from("dev"),
+            DbValue::from(session_id),
+        ],
+    ))
+    .await
+    .expect("rewrite legacy participants");
+}
+
+async fn create_legacy_scope_session(
+    repo: &MySqlSessionStore,
+    db: &Arc<dyn DbPlugin>,
+) -> bcs_service_api::Session {
+    let session = repo
+        .create(
+            "group-legacy",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("bot-1", ParticipantRole::Driver),
+                    Participant::human("human-1", ParticipantRole::Observer),
+                ],
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("create session");
+    rewrite_participants_as_legacy_bytes(db, &session.id).await;
+    session
+}
+
+#[tokio::test]
+async fn sqlite_scope_update_with_event_succeeds_on_legacy_participants_bytes() {
+    let db = sqlite_db().await;
+    let repo = MySqlSessionStore::sqlite(db.clone(), "dev".to_string());
+    let session = create_legacy_scope_session(&repo, &db).await;
+
+    let stored = repo.get(&session.id).await.expect("stored session");
+    let updated = repo
+        .update_participant_message_view_scope_with_event(
+            UpdateSessionParticipantMessageViewScopeWithEvent {
+                session_id: session.id.clone(),
+                expected_participants: stored.participants.clone(),
+                actor_id: "human-1".to_string(),
+                message_view_scope: MessageViewScope::Participant,
+                mode: None,
+                event: scope_change_event(&session.id, &session.group_id),
+            },
+        )
+        .await
+        .expect("legacy participants bytes must not break the scope CAS");
+
+    let human = updated
+        .participants
+        .iter()
+        .find(|participant| participant.bot_uuid == "human-1")
+        .expect("human participant");
+    assert_eq!(human.message_view_scope, MessageViewScope::Participant);
+
+    let reloaded = repo.get(&session.id).await.expect("reload session");
+    let stored_human = reloaded
+        .participants
+        .iter()
+        .find(|participant| participant.bot_uuid == "human-1")
+        .expect("human participant");
+    assert_eq!(
+        stored_human.message_view_scope,
+        MessageViewScope::Participant
+    );
+}
+
+#[tokio::test]
+async fn sqlite_mode_and_scope_update_succeeds_on_legacy_participants_bytes() {
+    let db = sqlite_db().await;
+    let repo = MySqlSessionStore::sqlite(db.clone(), "dev".to_string());
+    let session = create_legacy_scope_session(&repo, &db).await;
+
+    let updated = repo
+        .update_participant_mode_and_message_view_scope(
+            &session.id,
+            "human-1",
+            Some(ParticipantMode::Present),
+            MessageViewScope::Participant,
+        )
+        .await
+        .expect("legacy participants bytes must not break the scope CAS");
+
+    let human = updated
+        .participants
+        .iter()
+        .find(|participant| participant.bot_uuid == "human-1")
+        .expect("human participant");
+    assert_eq!(human.message_view_scope, MessageViewScope::Participant);
+    assert_eq!(human.mode, Some(ParticipantMode::Present));
+}
+
+/// Wraps a real DbPlugin and, when armed, mutates the session participants
+/// immediately before delegating a transaction — simulating a concurrent
+/// writer landing between the store's pre-check read and its lock step.
+struct ScopeRaceDb {
+    inner: Arc<dyn DbPlugin>,
+    sabotage: AtomicBool,
+    fail_transaction: AtomicBool,
+}
+
+#[async_trait]
+impl DbPlugin for ScopeRaceDb {
+    async fn query(&self, statement: DbStatement) -> DbResult<Vec<DbRow>> {
+        self.inner.query(statement).await
+    }
+
+    async fn execute(&self, statement: DbStatement) -> DbResult<DbExecuteResult> {
+        self.inner.execute(statement).await
+    }
+
+    async fn transaction(
+        &self,
+        steps: Vec<DbTransactionStep>,
+    ) -> DbResult<Vec<DbTransactionStepResult>> {
+        if self.fail_transaction.swap(false, Ordering::SeqCst) {
+            return Err(DbError::Backend("forced transaction failure".to_string()));
+        }
+        if self.sabotage.swap(false, Ordering::SeqCst) {
+            self.inner
+                .execute(DbStatement::with_params(
+                    "UPDATE bcs_group_sessions SET participants = ? WHERE env = ?",
+                    vec![DbValue::from("[]"), DbValue::from("dev")],
+                ))
+                .await?;
+        }
+        self.inner.transaction(steps).await
+    }
+
+    async fn health_check(&self) -> DbResult<DbHealth> {
+        self.inner.health_check().await
+    }
+}
+
+#[tokio::test]
+async fn sqlite_scope_update_race_reports_clean_conflict() {
+    let inner = sqlite_db().await;
+    let db = Arc::new(ScopeRaceDb {
+        inner,
+        sabotage: AtomicBool::new(false),
+        fail_transaction: AtomicBool::new(false),
+    });
+    let repo = MySqlSessionStore::sqlite(db.clone() as Arc<dyn DbPlugin>, "dev".to_string());
+    let session = repo
+        .create(
+            "group-race",
+            NewSessionParams {
+                participants: vec![Participant::human("human-1", ParticipantRole::Observer)],
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("create session");
+
+    let stored = repo.get(&session.id).await.expect("stored session");
+    db.sabotage.store(true, Ordering::SeqCst);
+
+    let error = repo
+        .update_participant_message_view_scope_with_event(
+            UpdateSessionParticipantMessageViewScopeWithEvent {
+                session_id: session.id.clone(),
+                expected_participants: stored.participants.clone(),
+                actor_id: "human-1".to_string(),
+                message_view_scope: MessageViewScope::Participant,
+                mode: None,
+                event: scope_change_event(&session.id, &session.group_id),
+            },
+        )
+        .await
+        .expect_err("concurrent writer must produce a conflict");
+
+    match &error {
+        ServiceError::Conflict(message) => {
+            assert!(
+                !message.contains("references missing row"),
+                "conflict must not leak transaction binding internals: {message}"
+            );
+            assert!(
+                !message.contains("transaction parameter"),
+                "conflict must not leak transaction binding internals: {message}"
+            );
+            assert!(
+                message.contains(&session.id),
+                "conflict should identify the session: {message}"
+            );
+        }
+        other => panic!("expected Conflict, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn sqlite_add_participant_with_event_succeeds_on_legacy_participants_bytes() {
+    let db = sqlite_db().await;
+    let repo = MySqlSessionStore::sqlite(db.clone(), "dev".to_string());
+    let session = create_legacy_scope_session(&repo, &db).await;
+
+    let stored = repo.get(&session.id).await.expect("stored session");
+    let updated = repo
+        .add_participant_with_event(AddSessionParticipantWithEvent {
+            session_id: session.id.clone(),
+            expected_participants: stored.participants.clone(),
+            participant: Participant::bot("bot-2", ParticipantRole::Consultant),
+            event: scope_change_event(&session.id, &session.group_id),
+        })
+        .await
+        .expect("legacy participants bytes must not break the addition CAS");
+
+    assert!(
+        updated
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == "bot-2")
+    );
+    let reloaded = repo.get(&session.id).await.expect("reload session");
+    assert!(
+        reloaded
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == "bot-2")
+    );
+}
+
+#[tokio::test]
+async fn sqlite_remove_participant_with_event_succeeds_on_legacy_participants_bytes() {
+    let db = sqlite_db().await;
+    let repo = MySqlSessionStore::sqlite(db.clone(), "dev".to_string());
+    let session = create_legacy_scope_session(&repo, &db).await;
+
+    let stored = repo.get(&session.id).await.expect("stored session");
+    let updated = repo
+        .remove_participant_with_event(RemoveSessionParticipantWithEvent {
+            session_id: session.id.clone(),
+            expected_participants: stored.participants.clone(),
+            bot_uuid: "human-1".to_string(),
+            event: scope_change_event(&session.id, &session.group_id),
+        })
+        .await
+        .expect("legacy participants bytes must not break the removal CAS");
+
+    assert!(
+        !updated
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == "human-1")
+    );
+    let reloaded = repo.get(&session.id).await.expect("reload session");
+    assert!(
+        !reloaded
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == "human-1")
+    );
+}
+
+#[tokio::test]
+async fn sqlite_add_participant_with_event_race_reports_clean_conflict() {
+    let inner = sqlite_db().await;
+    let db = Arc::new(ScopeRaceDb {
+        inner,
+        sabotage: AtomicBool::new(false),
+        fail_transaction: AtomicBool::new(false),
+    });
+    let repo = MySqlSessionStore::sqlite(db.clone() as Arc<dyn DbPlugin>, "dev".to_string());
+    let session = repo
+        .create(
+            "group-race",
+            NewSessionParams {
+                participants: vec![Participant::bot("bot-1", ParticipantRole::Driver)],
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("create session");
+
+    let stored = repo.get(&session.id).await.expect("stored session");
+    db.sabotage.store(true, Ordering::SeqCst);
+
+    let error = repo
+        .add_participant_with_event(AddSessionParticipantWithEvent {
+            session_id: session.id.clone(),
+            expected_participants: stored.participants.clone(),
+            participant: Participant::bot("bot-2", ParticipantRole::Consultant),
+            event: scope_change_event(&session.id, &session.group_id),
+        })
+        .await
+        .expect_err("concurrent writer must produce a conflict");
+
+    match &error {
+        ServiceError::Conflict(message) => {
+            assert!(
+                !message.contains("references missing row"),
+                "conflict must not leak transaction binding internals: {message}"
+            );
+            assert!(
+                !message.contains("transaction parameter"),
+                "conflict must not leak transaction binding internals: {message}"
+            );
+            assert!(
+                message.contains(&session.id),
+                "conflict should identify the session: {message}"
+            );
+        }
+        other => panic!("expected Conflict, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn sqlite_remove_participant_with_event_race_reports_clean_conflict() {
+    let inner = sqlite_db().await;
+    let db = Arc::new(ScopeRaceDb {
+        inner,
+        sabotage: AtomicBool::new(false),
+        fail_transaction: AtomicBool::new(false),
+    });
+    let repo = MySqlSessionStore::sqlite(db.clone() as Arc<dyn DbPlugin>, "dev".to_string());
+    let session = repo
+        .create(
+            "group-race",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("bot-1", ParticipantRole::Driver),
+                    Participant::human("human-1", ParticipantRole::Observer),
+                ],
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("create session");
+
+    let stored = repo.get(&session.id).await.expect("stored session");
+    db.sabotage.store(true, Ordering::SeqCst);
+
+    let error = repo
+        .remove_participant_with_event(RemoveSessionParticipantWithEvent {
+            session_id: session.id.clone(),
+            expected_participants: stored.participants.clone(),
+            bot_uuid: "human-1".to_string(),
+            event: scope_change_event(&session.id, &session.group_id),
+        })
+        .await
+        .expect_err("concurrent writer must produce a conflict");
+
+    match &error {
+        ServiceError::Conflict(message) => {
+            assert!(
+                !message.contains("references missing row"),
+                "conflict must not leak transaction binding internals: {message}"
+            );
+            assert!(
+                !message.contains("transaction parameter"),
+                "conflict must not leak transaction binding internals: {message}"
+            );
+            assert!(
+                message.contains(&session.id),
+                "conflict should identify the session: {message}"
+            );
+        }
+        other => panic!("expected Conflict, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn sqlite_add_participant_with_event_db_failure_maps_to_internal_error() {
+    let inner = sqlite_db().await;
+    let db = Arc::new(ScopeRaceDb {
+        inner,
+        sabotage: AtomicBool::new(false),
+        fail_transaction: AtomicBool::new(false),
+    });
+    let repo = MySqlSessionStore::sqlite(db.clone() as Arc<dyn DbPlugin>, "dev".to_string());
+    let session = repo
+        .create("group-db-fail", NewSessionParams::default())
+        .await
+        .expect("create session");
+
+    let stored = repo.get(&session.id).await.expect("stored session");
+    db.fail_transaction.store(true, Ordering::SeqCst);
+
+    let error = repo
+        .add_participant_with_event(AddSessionParticipantWithEvent {
+            session_id: session.id.clone(),
+            expected_participants: stored.participants.clone(),
+            participant: Participant::bot("bot-2", ParticipantRole::Consultant),
+            event: scope_change_event(&session.id, &session.group_id),
+        })
+        .await
+        .expect_err("db failure must propagate");
+
+    match &error {
+        ServiceError::InternalError(message) => {
+            assert!(
+                message.contains("forced transaction failure"),
+                "internal error should carry the db failure: {message}"
+            );
+        }
+        other => panic!("expected InternalError, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn sqlite_remove_participant_with_event_db_failure_maps_to_internal_error() {
+    let inner = sqlite_db().await;
+    let db = Arc::new(ScopeRaceDb {
+        inner,
+        sabotage: AtomicBool::new(false),
+        fail_transaction: AtomicBool::new(false),
+    });
+    let repo = MySqlSessionStore::sqlite(db.clone() as Arc<dyn DbPlugin>, "dev".to_string());
+    let session = repo
+        .create(
+            "group-db-fail",
+            NewSessionParams {
+                participants: vec![Participant::human("human-1", ParticipantRole::Observer)],
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("create session");
+
+    let stored = repo.get(&session.id).await.expect("stored session");
+    db.fail_transaction.store(true, Ordering::SeqCst);
+
+    let error = repo
+        .remove_participant_with_event(RemoveSessionParticipantWithEvent {
+            session_id: session.id.clone(),
+            expected_participants: stored.participants.clone(),
+            bot_uuid: "human-1".to_string(),
+            event: scope_change_event(&session.id, &session.group_id),
+        })
+        .await
+        .expect_err("db failure must propagate");
+
+    match &error {
+        ServiceError::InternalError(message) => {
+            assert!(
+                message.contains("forced transaction failure"),
+                "internal error should carry the db failure: {message}"
+            );
+        }
+        other => panic!("expected InternalError, got {other:?}"),
+    }
 }

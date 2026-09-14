@@ -77,7 +77,7 @@ describe('MyTaskPage work identity visibility', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockedUseHumanIdentity.mockReturnValue({
-      identity: { userId: '327325', displayName: '当前用户', online: true },
+      identity: { userId: '900003', displayName: '当前用户', online: true },
       status: 'ready',
     });
     mockedUseOwnedBots.mockReturnValue({
@@ -93,7 +93,7 @@ describe('MyTaskPage work identity visibility', () => {
 
   it('用户工作身份只展示用户任务，并禁止定时任务请求', () => {
     mockedUseWorkIdentityAccess.mockReturnValue(
-      access({ id: 'human_327325', kind: 'user', displayName: '当前用户', online: true }),
+      access({ id: 'human_900003', kind: 'user', displayName: '当前用户', online: true }),
     );
 
     render(<MyTaskPage />);
@@ -101,13 +101,13 @@ describe('MyTaskPage work identity visibility', () => {
     expect(screen.getByTestId('user-task-tab')).toBeInTheDocument();
     expect(screen.queryByTestId('routine-task-tab')).not.toBeInTheDocument();
     expect(screen.queryByText('定时任务')).not.toBeInTheDocument();
-    expect(mockedUseMyTaskTasks).toHaveBeenLastCalledWith('327325', 1, 10, 'all', true);
+    expect(mockedUseMyTaskTasks).toHaveBeenLastCalledWith('900003', 1, 10, 'all', true);
     expect(mockedUseRoutineTasks.mock.calls.at(-1)?.at(-1)).toBe(false);
   });
 
   it('Bot 工作身份只展示当前 Bot 的定时任务，并禁止用户任务请求', () => {
     mockedUseWorkIdentityAccess.mockReturnValue(
-      access({ id: 'bot-123:327325', kind: 'bot', displayName: '当前 Bot', online: true }),
+      access({ id: 'bot-123:900003', kind: 'bot', displayName: '当前 Bot', online: true }),
     );
 
     render(<MyTaskPage />);
@@ -130,12 +130,12 @@ describe('MyTaskPage work identity visibility', () => {
   });
 
   it('工作身份从用户切换为 Bot 后同步切换内容', () => {
-    let currentAccess = access({ id: 'human_327325', kind: 'user', displayName: '当前用户', online: true });
+    let currentAccess = access({ id: 'human_900003', kind: 'user', displayName: '当前用户', online: true });
     mockedUseWorkIdentityAccess.mockImplementation(() => currentAccess);
     const view = render(<MyTaskPage />);
     expect(screen.getByTestId('user-task-tab')).toBeInTheDocument();
 
-    currentAccess = access({ id: 'bot-456:327325', kind: 'bot', displayName: '切换后 Bot', online: true });
+    currentAccess = access({ id: 'bot-456:900003', kind: 'bot', displayName: '切换后 Bot', online: true });
     act(() => view.rerender(<MyTaskPage />));
 
     expect(screen.queryByTestId('user-task-tab')).not.toBeInTheDocument();

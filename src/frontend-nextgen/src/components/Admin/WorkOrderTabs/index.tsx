@@ -1,4 +1,4 @@
-// 工单中心：card 视图 tab + 分类 Segmented + 全部已读 + 列表（骨架/空态/错误）+ 分页 + 工单/通知详情 Drawer。
+// 通知中心完整视图：card 视图 tab + 分类 Segmented + 全部已读 + 列表（骨架/空态/错误）+ 分页 + 审批/通知详情 Drawer。
 // 视觉对齐 admin 视觉交互指南 §7.2/§7.4/§8。切视图/分类回第 1 页；详情用 typeLabel/statusLabel 本地化。
 import { Button, Card, Empty, Pagination, Skeleton } from '@/components/ui';
 import type { WorkOrder, WorkOrderCategory, WorkOrderView } from '@/domain/admin/models';

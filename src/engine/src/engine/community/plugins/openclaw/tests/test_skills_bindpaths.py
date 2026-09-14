@@ -2,6 +2,8 @@ from pathlib import Path
 
 import pytest
 
+from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
+
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 
 
@@ -9,7 +11,7 @@ from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 async def test_sync_bindpaths_rejects_missing_source_before_mutating_targets(
     tmp_path: Path,
 ) -> None:
-    plugin = OpenClawPluginImpl()
+    plugin = OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), )
     valid_source = tmp_path / "skills-pool" / "skills-local" / "valid"
     valid_source.mkdir(parents=True)
     missing_source = tmp_path / "skills-pool" / "skills-local" / "missing"
@@ -43,7 +45,7 @@ async def test_sync_bindpaths_rejects_missing_source_before_mutating_targets(
 async def test_sync_bindpaths_creates_link_when_every_source_exists(
     tmp_path: Path,
 ) -> None:
-    plugin = OpenClawPluginImpl()
+    plugin = OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), )
     source = tmp_path / "skills-pool" / "skills-local" / "writing"
     source.mkdir(parents=True)
     target = tmp_path / "skills" / "writing"

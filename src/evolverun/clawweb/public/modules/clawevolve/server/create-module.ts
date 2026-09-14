@@ -26,10 +26,18 @@ import { startRunAnalysisTimeoutSweeper } from "./services/evolve/run-analysis-t
 import { startSuggestionApplyTimeoutSweeper } from "./services/evolve/suggestion-apply-timeout.js";
 import { configureClawWebPublicBaseUrl } from "./env.js";
 import type { ClawEvolveInternalApi, ClawInsightInternalApi } from "./internal/module-api.js";
-import type { OcbLocalSkillPort } from "./internal/module-api.js";
+import type { OcbLocalSkillPort, OcbSpacePort } from "./internal/module-api.js";
+import { createEvolveSpacesRouter } from "./routes/evolve-spaces.js";
+import type { SpacePresentationPolicy } from "./services/evolve/space-presentation.js";
+import { createSkillTaskDefaultsRouter } from "./routes/skill-task-defaults.js";
+import { spaceAccessErrorHandler } from "./services/evolve/space-access.js";
 
 export type ClawevolveModuleOptions = {
+  /** Trusted composition-root selection; defaults to internalversion. */
+  version?: "openversion" | "internalversion";
   db: IDatabase;
+  /** Optional read-only Bot metadata connection for local Singlebox. */
+  botDb?: Pick<IDatabase, "query">;
   dispatch?: EvolveRouterDeps["dispatch"];
   dispatchTaskLogArchive?: EvolveRouterDeps["dispatchTaskLogArchive"];
   cancelExecution?: EvolveRouterDeps["cancelExecution"];
@@ -43,6 +51,8 @@ export type ClawevolveModuleOptions = {
   trustedPublicOrigins?: readonly string[];
   workflowRuntime?: InternalEvolveWorkflowRuntime;
   ocbLocalSkills?: OcbLocalSkillPort;
+  ocbSpaces?: OcbSpacePort;
+  spacePresentationPolicies?: readonly SpacePresentationPolicy[];
 };
 
 export type ClawevolveModule = {
@@ -74,7 +84,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
   configureClawWebPublicBaseUrl(options.publicBaseUrl, options.trustedPublicOrigins);
   configureArtifactBucket(options.artifactBucket);
 
-  const evolve = new EvolveRepository(db);
+  const evolve = new EvolveRepository(db, options.botDb);
   const clawInsight = options.clawInsight ?? null;
   const improvement = clawInsight?.improvementRepository ?? null;
   const benchDomain = new BenchDomainRepository(db);
@@ -92,6 +102,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
   const insightTaskService = options.insightTaskService ?? null;
 
   const publicRouter = createEvolveRouter(evolve, {
+    version: options.version,
     db,
     dispatch,
     dispatchTaskLogArchive: options.dispatchTaskLogArchive,
@@ -106,18 +117,26 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     artifactUrlStore: options.artifactUrlStore,
     botWorkflowPermissionRepo: botWorkflowPermission,
     ocbLocalSkills: options.ocbLocalSkills ?? null,
+    ocbSpaces: options.ocbSpaces,
+    spacePresentationPolicies: options.spacePresentationPolicies,
     stageSkillRepo: stageSkill,
     skillAssetRepo: skillAsset,
   });
   publicRouter.use(createStageSkillsRouter({
     repo: stageSkill,
     artifactStore: options.artifactStore,
+    ocbSpaces: options.ocbSpaces,
   }));
   publicRouter.use(createSkillAssetsRouter({
     repo: skillAsset,
     ocbLocalSkills: options.ocbLocalSkills ?? null,
     artifactStore: options.artifactStore,
+    ocbSpaces: options.ocbSpaces,
   }));
+  publicRouter.use(createEvolveSpacesRouter(options.ocbSpaces));
+  publicRouter.use(createSkillTaskDefaultsRouter({ skills: skillAsset, stages: stageSkill,
+    spaces: options.ocbSpaces, policies: options.spacePresentationPolicies ?? [] }));
+  publicRouter.use(spaceAccessErrorHandler);
 
   const internalRouter = createInternalEvolveRouter({
     db,

@@ -112,7 +112,7 @@ pub trait BotRegistryCoreService: Send + Sync {
         })
     }
 
-    /// Update a bot's dynamic status.
+    /// Renew a known registration heartbeat. The legacy payload is not retained.
     async fn update_status(&self, bot_id: &str, status: BotDynamicStatus) -> bool;
 
     /// Get a bot's registration info.

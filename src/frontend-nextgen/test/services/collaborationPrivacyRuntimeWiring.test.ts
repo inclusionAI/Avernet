@@ -33,7 +33,7 @@ function createBotDto(): CollaborationBotDto {
 
 function createUserDto(): OrgUserDto {
   return {
-    user_id: '447147',
+    user_id: '900004',
     username: 'S090011826218',
     display_name: '真实用户',
     full_name: '真实用户',
@@ -175,10 +175,10 @@ describe('collaboration privacy runtime wiring', () => {
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
     const signal = new AbortController().signal;
 
-    await expect(adapter.loadOverview('447147', signal)).resolves.toMatchObject({
+    await expect(adapter.loadOverview('900004', signal)).resolves.toMatchObject({
       currentUser: {
         displayName: '真实用户',
-        employeeNumber: '447147',
+        employeeNumber: '900004',
         departmentPath: ['蚂蚁集团-大安全-协作平台'],
       },
       bots: [
@@ -192,9 +192,9 @@ describe('collaboration privacy runtime wiring', () => {
       organizationOptions: [],
     });
 
-    expect(listManagedBots).toHaveBeenCalledWith({ kind: 'bot', user_id: '447147' }, signal);
+    expect(listManagedBots).toHaveBeenCalledWith({ kind: 'bot', user_id: '900004' }, signal);
     expect(getManagedBot).not.toHaveBeenCalled();
-    expect(getOrgUser).toHaveBeenCalledWith('447147', signal);
+    expect(getOrgUser).toHaveBeenCalledWith('900004', signal);
     expect(getWorkerConfig).toHaveBeenCalledWith('bot-real-1', signal);
   });
 
@@ -301,8 +301,8 @@ describe('collaboration privacy runtime wiring', () => {
     );
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
 
-    await expect(adapter.loadOverview('447147')).resolves.toMatchObject({
-      currentUser: { employeeNumber: '447147' },
+    await expect(adapter.loadOverview('900004')).resolves.toMatchObject({
+      currentUser: { employeeNumber: '900004' },
       bots: [expect.objectContaining({ profilePublic: false, profilePublicStatus: 'unavailable' })],
     });
   });
@@ -312,8 +312,8 @@ describe('collaboration privacy runtime wiring', () => {
     getWorkerConfig.mockRejectedValueOnce(new Error('BCSFuse unavailable'));
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
 
-    await expect(adapter.loadOverview('447147')).resolves.toMatchObject({
-      currentUser: { employeeNumber: '447147' },
+    await expect(adapter.loadOverview('900004')).resolves.toMatchObject({
+      currentUser: { employeeNumber: '900004' },
       bots: [expect.objectContaining({ id: 'bot-real-1', profilePublic: false, profilePublicStatus: 'unavailable' })],
     });
   });
@@ -328,7 +328,7 @@ describe('collaboration privacy runtime wiring', () => {
     listOrgDepts.mockImplementation(async () => pendingDepartments);
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
 
-    const loadPromise = adapter.loadOverview('447147');
+    const loadPromise = adapter.loadOverview('900004');
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 0);
     });
@@ -348,7 +348,7 @@ describe('collaboration privacy runtime wiring', () => {
     const controller = new AbortController();
     controller.abort();
 
-    await expect(adapter.loadOverview('447147', controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(adapter.loadOverview('900004', controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
   });
 
   it('refreshes one Bot through the detail endpoint without reloading the managed Bot list', async () => {
@@ -359,7 +359,7 @@ describe('collaboration privacy runtime wiring', () => {
       user_visibility: 'public',
     });
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
-    await adapter.loadOverview('447147');
+    await adapter.loadOverview('900004');
     listManagedBots.mockClear();
     const signal = new AbortController().signal;
 
@@ -420,7 +420,7 @@ describe('collaboration privacy runtime wiring', () => {
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
     const signal = new AbortController().signal;
 
-    await expect(adapter.loadOverview('447147', signal)).resolves.toMatchObject({
+    await expect(adapter.loadOverview('900004', signal)).resolves.toMatchObject({
       bots: [
         {
           publication: {
@@ -455,7 +455,7 @@ describe('collaboration privacy runtime wiring', () => {
       items: [
         {
           ...createBotDto(),
-          bot_id: '20260715_vl4oht43:447147',
+          bot_id: '20260715_vl4oht43:900004',
           visibility: 'public',
           user_visibility: 'private',
           friend_ext: {},
@@ -467,10 +467,10 @@ describe('collaboration privacy runtime wiring', () => {
     }));
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
 
-    await expect(adapter.loadOverview('447147')).resolves.toMatchObject({
+    await expect(adapter.loadOverview('900004')).resolves.toMatchObject({
       bots: [
         {
-          id: '20260715_vl4oht43:447147',
+          id: '20260715_vl4oht43:900004',
           publication: {
             user: { scope: 'none', organizationPaths: [] },
             bot: { scope: 'all', organizationPaths: [] },
@@ -503,7 +503,7 @@ describe('collaboration privacy runtime wiring', () => {
     }));
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
 
-    await expect(adapter.loadOverview('447147')).resolves.toMatchObject({
+    await expect(adapter.loadOverview('900004')).resolves.toMatchObject({
       bots: [
         {
           id: 'bot-real-1',
@@ -525,7 +525,7 @@ describe('collaboration privacy runtime wiring', () => {
       items: [
         {
           kind: 'human',
-          bot_id: 'human_447147',
+          bot_id: 'human_900004',
           name: '真实用户',
           visibility: 'private',
           status: 'online',
@@ -541,7 +541,7 @@ describe('collaboration privacy runtime wiring', () => {
     }));
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
 
-    await expect(adapter.loadOverview('447147')).resolves.toMatchObject({
+    await expect(adapter.loadOverview('900004')).resolves.toMatchObject({
       bots: [expect.objectContaining({ id: 'bot-real-1' })],
     });
   });
@@ -549,10 +549,10 @@ describe('collaboration privacy runtime wiring', () => {
   it('routes ready mutations and department search to real controllers', async () => {
     const { dependencies, apiAdapter, listOrgDepts, publishBotPublic } = createDependencies();
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
-    await adapter.loadOverview('447147');
+    await adapter.loadOverview('900004');
 
     const signal = new AbortController().signal;
-    await adapter.syncDepartment('447147', signal);
+    await adapter.syncDepartment('900004', signal);
     await adapter.searchDepartments('协作', signal);
     await adapter.updateDirectSetting({ botId: 'bot-real-1', setting: 'profilePublic', value: true }, signal);
     const publicationResult = await adapter.submitPublication(
@@ -574,7 +574,7 @@ describe('collaboration privacy runtime wiring', () => {
     expect(listOrgDepts).toHaveBeenCalledWith({ keyword: '协作' }, signal);
     expect(publishBotPublic).toHaveBeenCalledWith(
       'bot-real-1',
-      '447147',
+      '900004',
       {
         public_scope: 'user',
         visibility: 'public',
@@ -593,7 +593,7 @@ describe('collaboration privacy runtime wiring', () => {
       version: 2,
     });
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
-    await adapter.loadOverview('447147');
+    await adapter.loadOverview('900004');
 
     await expect(
       adapter.updateDirectSetting({ botId: 'bot-real-1', setting: 'profilePublic', value: true }),
@@ -605,7 +605,7 @@ describe('collaboration privacy runtime wiring', () => {
   it('maps Bot all-public to agent/public without department restrictions', async () => {
     const { dependencies, publishBotPublic } = createDependencies();
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
-    await adapter.loadOverview('447147');
+    await adapter.loadOverview('900004');
     const signal = new AbortController().signal;
 
     await adapter.submitPublication(
@@ -619,7 +619,7 @@ describe('collaboration privacy runtime wiring', () => {
 
     expect(publishBotPublic).toHaveBeenCalledWith(
       'bot-real-1',
-      '447147',
+      '900004',
       {
         public_scope: 'agent',
         visibility: 'public',
@@ -636,8 +636,8 @@ describe('collaboration privacy runtime wiring', () => {
       message: 'OK',
       data: {
         success: true,
-        puid: 'antprocess-agentclaw_botpublic_20260715-vl4oht43-44714720260825190956',
-        approval_url: 'https://approval.example.com/ticket/dispatch/publication-20260715-vl4oht43-44714720260825190956',
+        puid: 'antprocess-agentclaw_botpublic_20260715-vl4oht43-90000420260825190956',
+        approval_url: 'https://approval.example.com/ticket/dispatch/publication-20260715-vl4oht43-90000420260825190956',
         state: 'CREATED' as const,
         last_operate: null,
         error_msg: null,
@@ -646,7 +646,7 @@ describe('collaboration privacy runtime wiring', () => {
       request_id: '0be8c63017876561947632931e7aaa',
     }));
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
-    await adapter.loadOverview('447147');
+    await adapter.loadOverview('900004');
 
     await expect(
       adapter.submitPublication({
@@ -657,9 +657,9 @@ describe('collaboration privacy runtime wiring', () => {
     ).resolves.toMatchObject({
       status: 'pending',
       publication: {
-        id: 'antprocess-agentclaw_botpublic_20260715-vl4oht43-44714720260825190956',
+        id: 'antprocess-agentclaw_botpublic_20260715-vl4oht43-90000420260825190956',
         audience: 'user',
-        approvalUrl: 'https://approval.example.com/ticket/dispatch/publication-20260715-vl4oht43-44714720260825190956',
+        approvalUrl: 'https://approval.example.com/ticket/dispatch/publication-20260715-vl4oht43-90000420260825190956',
       },
     });
   });
@@ -676,7 +676,7 @@ describe('collaboration privacy runtime wiring', () => {
       },
     }));
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
-    await adapter.loadOverview('447147');
+    await adapter.loadOverview('900004');
 
     const result = await adapter.submitPublication({
       botId: 'bot-real-1',
@@ -711,7 +711,7 @@ describe('collaboration privacy runtime wiring', () => {
       },
     }));
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
-    await adapter.loadOverview('447147');
+    await adapter.loadOverview('900004');
 
     await expect(
       adapter.submitPublication({
@@ -741,7 +741,7 @@ describe('collaboration privacy runtime wiring', () => {
       },
     }));
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
-    await adapter.loadOverview('447147');
+    await adapter.loadOverview('900004');
 
     await expect(
       adapter.submitPublication({
@@ -769,7 +769,7 @@ describe('collaboration privacy runtime wiring', () => {
       },
     }));
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
-    await adapter.loadOverview('447147');
+    await adapter.loadOverview('900004');
 
     await expect(
       adapter.submitPublication({
@@ -786,7 +786,7 @@ describe('collaboration privacy runtime wiring', () => {
   it('routes task-claim and dream toggles through their correct paths', async () => {
     const { dependencies, patchManagedBot } = createDependencies();
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
-    await adapter.loadOverview('447147');
+    await adapter.loadOverview('900004');
 
     await expect(
       adapter.updateDirectSetting({ botId: 'bot-real-1', setting: 'taskClaimingEnabled', value: true }),
@@ -802,7 +802,7 @@ describe('collaboration privacy runtime wiring', () => {
   it('double-writes claim on (grant + PATCH) and accepts when both succeed', async () => {
     const { dependencies } = createDependencies();
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
-    await adapter.loadOverview('447147');
+    await adapter.loadOverview('900004');
 
     const updated = await adapter.enableTaskClaim('bot-real-1');
     expect(updated.taskClaimingEnabled).toBe(true);
@@ -818,7 +818,7 @@ describe('collaboration privacy runtime wiring', () => {
   it('rolls back the grant when the claim-on PATCH fails', async () => {
     const { dependencies, patchManagedBot } = createDependencies();
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
-    await adapter.loadOverview('447147');
+    await adapter.loadOverview('900004');
 
     patchManagedBot.mockRejectedValueOnce(new Error('patch down'));
     await expect(adapter.enableTaskClaim('bot-real-1')).rejects.toThrow('patch down');
@@ -828,7 +828,7 @@ describe('collaboration privacy runtime wiring', () => {
   it('patches friend approval through the real Bot controller while preserving all existing friend_ext fields', async () => {
     const { dependencies, patchManagedBot } = createDependencies();
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
-    await adapter.loadOverview('447147');
+    await adapter.loadOverview('900004');
     const signal = new AbortController().signal;
     const config: FriendApprovalConfig = {
       mode: 'partial_exempt',
@@ -864,7 +864,7 @@ describe('collaboration privacy runtime wiring', () => {
       friend_check_in_strategy: 'DEPT_FREE',
     });
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
-    await adapter.loadOverview('447147');
+    await adapter.loadOverview('900004');
 
     await adapter.updateFriendApproval({
       botId: 'bot-real-1',
@@ -900,7 +900,7 @@ describe('collaboration privacy runtime wiring', () => {
     const config: FriendApprovalConfig = { mode: 'all', exemptOrganizationPaths: [] };
 
     await expect(adapter.updateFriendApproval({ botId: 'bot-real-1', config })).rejects.toThrow('协作权限数据尚未加载');
-    await adapter.loadOverview('447147');
+    await adapter.loadOverview('900004');
     await expect(adapter.updateFriendApproval({ botId: 'missing-bot', config })).rejects.toThrow(
       '未找到要更新好友审批策略的 Bot',
     );
@@ -927,7 +927,7 @@ describe('collaboration privacy runtime wiring', () => {
       const { dependencies, patchManagedBot } = createDependencies();
       patchManagedBot.mockResolvedValueOnce(response);
       const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
-      await adapter.loadOverview('447147');
+      await adapter.loadOverview('900004');
 
       await expect(
         adapter.updateFriendApproval({
@@ -964,7 +964,7 @@ describe('collaboration privacy runtime wiring', () => {
     const { dependencies, patchManagedBot } = createDependencies();
     patchManagedBot.mockRejectedValueOnce(new Error('network failed'));
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
-    await adapter.loadOverview('447147');
+    await adapter.loadOverview('900004');
 
     await expect(
       adapter.updateFriendApproval({
@@ -1018,8 +1018,8 @@ describe('collaboration privacy load scope wiring', () => {
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
     const signal = new AbortController().signal;
 
-    await expect(adapter.loadOverview('447147', signal, { target: 'currentUser' })).resolves.toMatchObject({
-      currentUser: { employeeNumber: '447147', departmentPath: ['蚂蚁集团-大安全-协作平台'] },
+    await expect(adapter.loadOverview('900004', signal, { target: 'currentUser' })).resolves.toMatchObject({
+      currentUser: { employeeNumber: '900004', departmentPath: ['蚂蚁集团-大安全-协作平台'] },
       bots: [],
       organizationOptions: [],
     });
@@ -1037,7 +1037,7 @@ describe('collaboration privacy load scope wiring', () => {
     const signal = new AbortController().signal;
 
     await expect(
-      adapter.loadOverview('447147', signal, { target: 'activeBot', botId: 'bot-real-2:447147' }),
+      adapter.loadOverview('900004', signal, { target: 'activeBot', botId: 'bot-real-2:900004' }),
     ).resolves.toMatchObject({
       bots: [{ id: 'bot-real-2', name: 'Bot B', profilePublic: true, profilePublicStatus: 'ready' }],
     });
@@ -1059,9 +1059,9 @@ describe('collaboration privacy load scope wiring', () => {
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
 
     await expect(
-      adapter.loadOverview('447147', undefined, { target: 'activeBot', botId: 'bot-unknown' }),
+      adapter.loadOverview('900004', undefined, { target: 'activeBot', botId: 'bot-unknown' }),
     ).resolves.toMatchObject({
-      currentUser: { employeeNumber: '447147' },
+      currentUser: { employeeNumber: '900004' },
       bots: [],
     });
 
@@ -1075,7 +1075,7 @@ describe('collaboration privacy load scope wiring', () => {
     useThreeBotList(listManagedBots);
     const adapter = createCollaborationPrivacyRuntimeAdapter(dependencies);
 
-    await expect(adapter.loadOverview('447147')).resolves.toMatchObject({
+    await expect(adapter.loadOverview('900004')).resolves.toMatchObject({
       bots: [
         { id: 'bot-real-1', profilePublicStatus: 'ready' },
         { id: 'bot-real-2', profilePublicStatus: 'ready' },

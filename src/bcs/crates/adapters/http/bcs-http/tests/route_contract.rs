@@ -1111,7 +1111,7 @@ async fn cancel_chat_run_route_uses_a2a_run_service() {
 }
 
 #[tokio::test]
-async fn bot_status_route_updates_dynamic_status_with_bot_token() {
+async fn bot_status_route_accepts_payload_without_retaining_it() {
     let temp_dir = TempDir::new().unwrap();
     let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
     registry
@@ -1161,13 +1161,12 @@ async fn bot_status_route_updates_dynamic_status_with_bot_token() {
     assert_eq!(json["updated"], true);
     assert_eq!(json["bot_uuid"], "bot-alpha");
     assert_eq!(json["status"]["status"], "busy");
+    assert_eq!(json["status"]["dynamic_summary"], "running task");
+    assert_eq!(json["status"]["load"], 0.75);
+    assert_eq!(json["status"]["updated_at"], 42);
 
     let stored = registry.get("bot-alpha").await.unwrap();
-    assert_eq!(stored.dynamic_status.status, "busy");
-    assert_eq!(
-        stored.dynamic_status.dynamic_summary.as_deref(),
-        Some("running task")
-    );
+    assert!(serde_json::to_value(stored).unwrap().get("dynamic_status").is_none());
 }
 
 #[tokio::test]

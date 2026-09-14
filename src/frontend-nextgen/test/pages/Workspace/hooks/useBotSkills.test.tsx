@@ -23,13 +23,13 @@ beforeEach(() => {
 });
 
 it('托管 Bot 保持拉取 Skills', async () => {
-  renderHook(() => useBotSkills(bot, 'human_327325'));
+  renderHook(() => useBotSkills(bot, 'human_900003'));
 
-  await waitFor(() => expect(mockedListSkills).toHaveBeenCalledWith(bot, 'human_327325'));
+  await waitFor(() => expect(mockedListSkills).toHaveBeenCalledWith(bot, 'human_900003'));
 });
 
 it('好友 Bot 不拉取 Skills', async () => {
-  const { result } = renderHook(() => useBotSkills({ ...bot, isFriendBot: true }, 'human_327325'));
+  const { result } = renderHook(() => useBotSkills({ ...bot, isFriendBot: true }, 'human_900003'));
 
   await waitFor(() => expect(result.current.isLoading).toBe(false));
   expect(mockedListSkills).not.toHaveBeenCalled();

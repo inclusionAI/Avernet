@@ -13,6 +13,11 @@ profiles:
       engine_type: claude_code
       template_type: generalCC
     default_cli_codes: [dataphin, deepinsight-cli]
+  - id: claude-code-custom-default
+    match:
+      engine_type: claude_code
+      exclude_template_types: [normalCC]
+    default_cli_codes: [dataphin, deepinsight-cli]
 
 installers:
   acli:

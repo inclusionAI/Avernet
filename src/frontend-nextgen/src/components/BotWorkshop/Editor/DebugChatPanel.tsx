@@ -50,6 +50,7 @@ export function DebugChatPanel({ bot, runtimeStage }: { bot: BotDomain; runtimeS
   const [session, setSession] = useState<BotChatSessionView | null>(null);
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
+  const [creatingSession, setCreatingSession] = useState(false);
   const chatBot = useMemo<ChatBotView>(
     () => ({
       botId: bot.id,
@@ -85,13 +86,18 @@ export function DebugChatPanel({ bot, runtimeStage }: { bot: BotDomain; runtimeS
   }, [loadSessions]);
   const create = async () => {
     if (!identityId) return;
-    const result = await botSessionService.createSession(chatBot, identityId, 'Bot 工坊调试');
-    if (!result.ok) {
-      toast.error(result.error.friendlyMessage);
-      return;
+    setCreatingSession(true);
+    try {
+      const result = await botSessionService.createSession(chatBot, identityId, 'Bot 工坊调试');
+      if (!result.ok) {
+        toast.error(result.error.friendlyMessage);
+        return;
+      }
+      setSessions((items) => [result.data, ...items]);
+      setSession(result.data);
+    } finally {
+      setCreatingSession(false);
     }
-    setSessions((items) => [result.data, ...items]);
-    setSession(result.data);
   };
   const send = () => {
     if (!draft.trim()) return;
@@ -126,16 +132,17 @@ export function DebugChatPanel({ bot, runtimeStage }: { bot: BotDomain; runtimeS
           leftIcon={<RefreshCw className="size-4" />}
           onClick={() => void loadSessions()}
         />
-        <Button variant="secondary" size="sm" leftIcon={<Plus className="size-4" />} onClick={() => void create()}>
-          新建会话
-        </Button>
-      </div>
-      <div className="border-b border-border p-3">
         <Select
           value={session?.sessionId ?? ''}
-          onValueChange={(id) => setSession(sessions.find((item) => item.sessionId === id) ?? null)}
+          onValueChange={(id) => {
+            if (id === '__create_session__') {
+              void create();
+              return;
+            }
+            setSession(sessions.find((item) => item.sessionId === id) ?? null);
+          }}
         >
-          <SelectTrigger aria-label="调试会话">
+          <SelectTrigger className="w-44" aria-label="新建或切换调试会话" disabled={creatingSession}>
             <SelectValue placeholder="请选择或新建会话" />
           </SelectTrigger>
           <SelectContent>
@@ -144,6 +151,12 @@ export function DebugChatPanel({ bot, runtimeStage }: { bot: BotDomain; runtimeS
                 {item.title}
               </SelectItem>
             ))}
+            <SelectItem value="__create_session__">
+              <span className="inline-flex items-center gap-2 text-primary">
+                {creatingSession ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+                新建会话
+              </span>
+            </SelectItem>
           </SelectContent>
         </Select>
       </div>

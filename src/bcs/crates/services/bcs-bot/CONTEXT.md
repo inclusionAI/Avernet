@@ -2,6 +2,7 @@
 
 ## Provides
 
+- Authenticated provider coordination callbacks share reference claims with stream intake.
 - Bot service implementations for BCS, including the independent Bot
   control-plane Core.
 - Bot onboarding, discovery, status, connectivity, and binding metadata behavior.
@@ -38,6 +39,11 @@
 The crate owns registry business rules, status/connectivity semantics, and Bot
 control-plane persistence orchestration such as Provider hydration. It does not
 own socket runtime state or transport handling.
+
+Provider event ingestion authenticates the Provider/Bot binding before asking
+the message-flow application contract to reconcile a durable managed run. Late
+terminal events can survive an expired run cache; this service does not own the
+delivery state machine or resume nonterminal streams from durable metadata.
 
 ## Tests
 

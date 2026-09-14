@@ -68,6 +68,23 @@ class BotRunQueueRepository(Protocol):
         """合并更新队列工作项的 meta JSON 字段，返回是否成功。"""
         ...
 
+    def request_abort(self, run_id: str) -> bool:
+        """为指定 run 写入 abort 请求信号（meta 层）。
+
+        供 ``chat.abort`` 跨实例通知：本机只写信号，实际持有该 run 的 Worker 通过
+        ``is_abort_requested`` 轮询感知并取消本地 task。返回是否成功写入（行不存在
+        或已终态时可能返回 False）。
+        """
+        ...
+
+    def is_abort_requested(self, run_id: str) -> bool:
+        """查询指定 run 是否已被请求 abort。
+
+        由正在执行的 Worker 轮询调用，语义参考 ``bot_interaction.should_poll``：
+        只读检查 meta 中的 ``abort_requested`` 标志。
+        """
+        ...
+
     def scan_timeout(self, limit: int = 200) -> list[BotRunQueueRecord]:
         """扫描 PENDING/RUNNING 中已超时的工作项（meta.timeout 已过期）。"""
         ...

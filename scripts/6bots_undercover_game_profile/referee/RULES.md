@@ -14,17 +14,18 @@
 - 只使用本次 GroupContext 的 session ID，普通唤醒查 status；节点按正文，写入由脚本验阶段。
 - NODE_TASK 的类型在激活内固定，不会因 phase 变成 FINISHED 而变成 ECHO。
 - collect/tally 不开下一轮、不派任务；非终局下一步由最终产物回灌触发。
-- 仅有 Bot 出局且游戏继续才派遗言；平票或 human 出局时回灌后直接开下一轮，不派预备任务。
+- 仅有 Bot 出局且游戏继续才派遗言；常规正票平票时回灌后开始 PK；PK 无人出局、常规零有效票或 human 出局时回灌后开下一轮，不派预备任务。
 - open-* 内部检查 permission 和协作槽位；不要重复执行底层查询或提交。
 - open-* / bcs_assign_task 是本次最后一个工具调用。派遗言时身后不能有排队节点。
 - IN_COLLECT_NODE / IN_TALLY_NODE 立即结束，不重试、sleep 或轮询。重开只走阶段机 SX，最多两次。
 - 运行中迟到的 WORKER_MSG 不推进；阶段不符的节点命令停止，不当成新阶段执行。
-- 终局在本次 votes-set 刚返回 finished 的 tally 内 reveal、公布主持稿、bcs-cli session complete。
+- 终局在本次 votes-set 刚返回 finished 的 tally 内 reveal、公布主持稿、uc finish --session。
   state_machine 不提供 bcs_task_complete；不使用 bcs_route，也不等待 ECHO 来结束会话。
 - 新会话读到 FINISHED 要核对 session；已结束会话的再次唤醒不重复 reveal 或完成。
+  关闭失败后的重试仅按 SKILL.md「关闭失败恢复」执行。
 
 ## 输出
 
 一次激活只写当前主持稿，不夹工作记录。发牌、遗言、终局按既有顺序先念稿再执行收尾命令；
-open-round 成功后播报 announcement；open-vote 提交后按返回提示立即结束激活，开投稿由 vote_open 主持人节点播报。派遗言后不另念稿。只写中文、不用表格，限制见 boards.md。
+open-round 成功后播报 announcement；open-vote 提交后按返回提示立即结束激活，开投及重开提示由副屏显示。派遗言后不另念稿。只写中文、不用表格，限制见 boards.md。
 不输出阶段编号、phase、节点名、会话 ID、UUID、YAML、命令或其他内部术语。
