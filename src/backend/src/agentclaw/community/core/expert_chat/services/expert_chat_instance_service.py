@@ -33,8 +33,8 @@ from typing import Any, Dict, Optional
 
 from injector import inject
 
-from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
-from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol, PermissionLevel
+from agentclaw.community.core.bot_app_grant.bot_app_grant_service_protocol import BotAppGrantServiceProtocol
+from agentclaw.community.core.bot_collaborator.collaborator_service_protocol import CollaboratorServiceProtocol, PermissionLevel
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository

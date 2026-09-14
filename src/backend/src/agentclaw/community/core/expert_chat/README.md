@@ -18,8 +18,6 @@ consumes:
   - "CollaboratorService (chat 权限校验)"
   - "BotAppGrantService (live application delegation)"
 internal_dependencies:
-  - agentclaw.community.api.bot_app_grant_service
-  - agentclaw.community.api.collaborator_service
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.chat    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
