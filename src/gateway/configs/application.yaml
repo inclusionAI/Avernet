@@ -327,8 +327,7 @@ user_config:
     "WEBSOCKET /openapi/v1/collaboration/messages/ws": {}
     "WEBSOCKET /openapi/v1/bots/messages/ws/**": {}
     "/openapi/v1/harnessflow/**":
-      user: optional
-      app: optional
+      user: required
 
     # bcsfuse public surface (fusion + fusable worker-config queries). These
     # are human-driven management operations, so a user is required — same

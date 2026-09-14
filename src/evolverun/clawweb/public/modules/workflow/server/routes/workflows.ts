@@ -346,13 +346,21 @@ export function createWorkflowsRouter(
       const queryBotOwnerId = req.query.botOwnerId as string | undefined;
       const headerUserId = req.headers["x-user-id"] as string | undefined;
       const queryBotId = req.query.botId as string | undefined;
-      const botOwnerId = queryBotOwnerId?.trim() || headerUserId?.trim() || req.cookies?.staff_id?.trim() || "";
+      const botOwnerId = queryBotOwnerId?.trim() || headerUserId?.trim() || req.cookies?.staff_id?.trim() || resolveWorkflowActorId(req) || "";
       const botId = queryBotId?.trim() || undefined;
+
+      // Require an authenticated identity; reject anonymous callers.
+      if (!botOwnerId && !req.isAdmin) {
+        res.status(401).json({ error: "Unauthorized", message: "User identity required" });
+        return;
+      }
 
       type ViewPerm = { restrictedIds: Set<string>; viewableIds: Set<string> } | null;
       let viewPerm: ViewPerm = null;
       if (!req.isAdmin && botPermRepo && botOwnerId) {
         viewPerm = await botPermRepo.getViewByIdsForOwner(botOwnerId, botId);
+      } else if (!req.isAdmin && botPermRepo && !botOwnerId) {
+        viewPerm = { restrictedIds: new Set(), viewableIds: new Set() };
       }
 
       const filteredRows = viewPerm === null
@@ -392,13 +400,20 @@ export function createWorkflowsRouter(
         return;
       }
 
-      res.set("Cache-Control", "private, max-age=60, must-revalidate");
-
       const queryBotOwnerId = req.query.botOwnerId as string | undefined;
       const headerUserId = req.headers["x-user-id"] as string | undefined;
       const queryBotId = req.query.botId as string | undefined;
-      const botOwnerId = queryBotOwnerId?.trim() || headerUserId?.trim() || req.cookies?.staff_id?.trim() || "";
+      const botOwnerId = queryBotOwnerId?.trim() || headerUserId?.trim() || req.cookies?.staff_id?.trim() || resolveWorkflowActorId(req) || "";
       const botId = queryBotId?.trim() || undefined;
+
+      // Require an authenticated identity; reject anonymous callers.
+      if (!botOwnerId && !req.isAdmin) {
+        res.status(401).json({ error: "Unauthorized", message: "User identity required" });
+        return;
+      }
+
+      res.set("Cache-Control", "private, max-age=60, must-revalidate");
+
       const cacheKey = `list:${botOwnerId}:${botId ?? ""}:${req.isAdmin ? "admin" : "user"}`;
 
       const cached = workflowsCache.get(cacheKey);
@@ -415,6 +430,12 @@ export function createWorkflowsRouter(
         viewPerm = null;
       } else if (botPermRepo && botOwnerId) {
         viewPerm = await botPermRepo.getViewByIdsForOwner(botOwnerId, botId);
+      } else if (!botPermRepo) {
+        // No permission table configured: allow all (isolated/read-only deployments).
+        viewPerm = null;
+      } else {
+        // Has permission table but no owner id: show nothing.
+        viewPerm = { restrictedIds: new Set(), viewableIds: new Set() };
       }
 
       const result = rows
@@ -590,6 +611,9 @@ export function createWorkflowsRouter(
   router.get("/:workflowId", asyncHandler(async (req: Request, res: Response) => {
     try {
       const workflowId = String(req.params.workflowId);
+
+      // Require an authenticated identity and view permission.
+      if (!await requireWorkflowAccess(req, res, botPermRepo, workflowId, "view")) return;
 
       // Try database first
       if (workflowSpecRepo) {

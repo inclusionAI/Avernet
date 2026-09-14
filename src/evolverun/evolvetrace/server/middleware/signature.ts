@@ -1,9 +1,17 @@
 /**
  * Ed25519 signature verification middleware for internal API endpoints.
  * Configurable via EVOLVETRACE_INTERNAL_PUBLIC_KEY_B64.
+ *
+ * Security: when no public key is configured AND the environment is not a
+ * local dev/development env, the middleware rejects every request with 403.
+ * This prevents the /api/internal surface from becoming an unauthenticated
+ * write path in production deployments that forget to configure signing.
+ * In dev, the passthrough is preserved so the standalone server remains
+ * usable without an external signer.
  */
 import crypto from "node:crypto";
 import type { Request, Response, NextFunction } from "express";
+import { getCurrentEnv } from "../env.js";
 
 const MAX_AGE_MS = 5 * 60 * 1000;
 
@@ -17,8 +25,18 @@ export function signatureMiddleware(config?: Partial<SignatureConfig>) {
   const maxAgeMs = config?.maxAgeMs ?? MAX_AGE_MS;
 
   if (!publicKeyB64) {
-    return (_req: Request, _res: Response, next: NextFunction): void => {
-      next();
+    const env = getCurrentEnv();
+    const isDev = env === "dev" || env === "development";
+    if (isDev) {
+      // Dev fallback: allow unsigned internal calls for local development.
+      return (_req: Request, _res: Response, next: NextFunction): void => {
+        next();
+      };
+    }
+    // Production: no signing key configured = block all internal requests.
+    console.error("[evolvetrace] Internal API signature verification is not configured (EVOLVETRACE_INTERNAL_PUBLIC_KEY_B64 unset). All /api/internal requests will be rejected in non-dev environments.");
+    return (_req: Request, res: Response, _next: NextFunction): void => {
+      res.status(403).json({ error: "Forbidden", message: "Internal API signing is not configured" });
     };
   }
 
