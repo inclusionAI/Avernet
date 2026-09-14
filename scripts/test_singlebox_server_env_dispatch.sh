@@ -23,7 +23,10 @@ fail() {
 test_dispatch_trace_has_no_server_env_export() {
   local trace
   trace="$(bash -x "${SINGLEBOX}" status gateway 2>&1 || true)"
-  if grep -E '^[[:space:]]*\+[[:space:]]+export SERVER_ENV=' <<<"${trace}" | head -1 | grep -q .; then
+  # Plain `grep -qE` (no `| head -1 | grep -q .` pipeline): under `set -o
+  # pipefail`, a head that exits early can SIGPIPE the first grep and turn a
+  # real leak into a failing pipeline the if-branch reads as "no leak".
+  if grep -qE '^[[:space:]]*\+[[:space:]]+export SERVER_ENV=' <<<"${trace}"; then
     fail "singlebox dispatch leaked SERVER_ENV into the module environment"
   fi
 }
@@ -32,7 +35,7 @@ test_dispatch_trace_has_no_server_env_export() {
 # the no-argument default flow (setup_all_and_start) runs a second copy of the
 # block. A source-level invariant covers both sites.
 test_source_has_no_server_env_export() {
-  if grep -nE '^[[:space:]]*export[[:space:]]+SERVER_ENV=' "${ROOT}/scripts/singlebox.sh" | head -1 | grep -q .; then
+  if grep -qnE '^[[:space:]]*export[[:space:]]+SERVER_ENV=' "${ROOT}/scripts/singlebox.sh"; then
     fail "${ROOT}/scripts/singlebox.sh still exports SERVER_ENV (the gateway launcher must own that variable)"
   fi
 }

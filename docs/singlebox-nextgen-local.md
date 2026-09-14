@@ -81,7 +81,10 @@ FRONTEND_VARIANT=nextgen bash scripts/singlebox.sh start all
 FRONTEND_VARIANT=nextgen bash scripts/singlebox.sh restart frontend
 
 # Stop the selected UI BEFORE selecting another one: foreign/other-checkout
-# listeners are deliberately not killed by the frontend launcher.
+# listeners are deliberately not killed by the frontend launcher. `stop all`
+# always includes the Gateway regardless of the current variant (a stack
+# started as nextgen must stay stoppable from a shell without FRONTEND_VARIANT
+# set), so only the per-service stop needs the selected variant spelled out.
 FRONTEND_VARIANT=nextgen bash scripts/singlebox.sh stop frontend
 FRONTEND_VARIANT=legacy bash scripts/singlebox.sh start frontend
 ```
@@ -89,9 +92,11 @@ FRONTEND_VARIANT=legacy bash scripts/singlebox.sh start frontend
 Default URL: `http://127.0.0.1:8000/`. Use `FRONTEND_PORT` to select a different
 port. This is Singlebox's local Umi dev-server path, not an Nginx/Docker release.
 The launcher checks the selected root element and `/umi.js`, refusing the Umi
-`Bundling` placeholder. On macOS it uses Python 3 `setsid` + `execvp` for detached
-processes; Linux retains the existing Perl launcher. No authentication policy
-is changed by frontend selection.
+`Bundling` placeholder. On macOS it uses Python 3 `setsid` + `execvp` for
+detached processes when a working python3 is available, falling back to the
+bundled Perl launcher otherwise (the `/usr/bin/python3` xcode-select stub on a
+CLT-less host is not a working Python); Linux retains the existing Perl
+launcher. No authentication policy is changed by frontend selection.
 
 ## Local login (singlebox only)
 
@@ -111,7 +116,12 @@ open "http://127.0.0.1:8889/_dev/login?next=8000"
 The page redirects back to the workbench with the identity armed. It 404s
 outside `SERVER_ENV` local/dev/test, mirroring the strategy's own gating;
 `?staff_id=`/`?nick_name=` accept only cookie-safe validated values. The ready
-banner prints this URL for the nextgen variant when `GATEWAY_AUTH_MOCK=1`.
+banner prints this URL for every non-legacy variant (the `dev_cookie` strategy
+it arms is not gated by `GATEWAY_AUTH_MOCK`, and the Gateway is routinely started
+by a separate invocation whose env the frontend start cannot see). The banner
+URL uses `127.0.0.1`, the canonical host above — do not mix `localhost` and
+`127.0.0.1`: cookie jars are host-scoped, so an identity armed on one hostname
+is invisible to a tab on the other.
 
 ## API contract and verification boundary
 

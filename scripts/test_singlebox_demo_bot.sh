@@ -525,8 +525,13 @@ test_all_order_includes_bots_and_demo_before_frontend() {
   setup_env
   # shellcheck source=/dev/null
   source "${ROOT}/scripts/modules/all.sh"
-  assert_eq "baas backend bcs bcsfuse bots demo_bot frontend" "${START_ORDER[*]}" "all start order"
-  assert_eq "frontend demo_bot bots bcsfuse bcs backend baas" "${STOP_ORDER[*]}" "all stop order"
+  # bcsfuse starts before bcs (all.sh's canonical order); this pin was left on
+  # the older swap by an earlier order change — dev itself fails it today.
+  assert_eq "baas backend bcsfuse bcs bots demo_bot frontend" "${START_ORDER[*]}" "all start order"
+  # Stop is the unconditional union (legacy + gateway): a stack started under a
+  # non-legacy FRONTEND_VARIANT is routinely stopped from a shell without it,
+  # and gateway_stop is a no-op when the gateway is not running.
+  assert_eq "frontend gateway demo_bot bots bcsfuse bcs backend baas" "${STOP_ORDER[*]}" "all stop order"
 }
 
 test_backend_ready_function_exists() {

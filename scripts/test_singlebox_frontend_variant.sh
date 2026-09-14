@@ -76,8 +76,15 @@ frontend_configure_upstreams
 [[ "$TEAMCLAW_PRIVATE_CHAT_SESSION_BASE" == "$TEAMCLAW_GW_BASE" ]]
 [[ "$TEAMCLAW_DEV_USER" == "001" ]]
 FRONTEND_VARIANT=teamclaw
+# all.sh's _ALL_SH_LOADED guard makes a plain re-source a no-op — unset it so
+# the module body actually re-runs under teamclaw (the first source at the
+# top ran under nextgen), otherwise the order assertion below would compare
+# the leftover nextgen arrays and pass vacuously.
+unset _ALL_SH_LOADED
 source "$ROOT/scripts/modules/all.sh"
 [[ "${START_ORDER[*]}" == 'baas backend bcsfuse bcs bots demo_bot gateway frontend' ]]
+# Stop is the unconditional union (legacy + gateway), regardless of variant.
+[[ "${STOP_ORDER[*]}" == 'frontend gateway demo_bot bots bcsfuse bcs backend baas' ]]
 printf 'PASS: teamclaw variant mapping, upstreams and Gateway lifecycle order\n'
 
 # ---------------------------------------------------------------------------
@@ -123,22 +130,27 @@ TEAMCLAW_FRONTEND_AUTOUPDATE=0 frontend_teamclaw_sync_latest >/dev/null
     echo 'sync moved HEAD with auto-update disabled' >&2; exit 1; }
 printf 'PASS: teamclaw auto-update fast-forward, dirty-skip and opt-out\n'
 
-# The ready banner must surface the gateway dev-login entry for the nextgen
-# variant: without it, "logging in" locally is a DevTools instruction. The
-# legacy variant must not advertise a page it does not use.
+# The ready banner must surface the gateway dev-login entry for every
+# non-legacy variant, independent of GATEWAY_AUTH_MOCK (that flag gates the
+# dev principal header strategy, not the dev_cookie strategy the login page
+# arms — and the gateway is routinely started by another invocation, so the
+# export is not even visible here). The URL must carry 127.0.0.1, the docs'
+# canonical host: cookie jars are host-scoped, so localhost/127.0.0.1 must
+# never be mixed. The legacy variant must not advertise a page it does not use.
 source "$ROOT/scripts/utils.sh"
 FRONTEND_VARIANT=nextgen
-banner="$(FRONTEND_PORT=28800 GATEWAY_PORT=28801 GATEWAY_AUTH_MOCK=1 print_frontend_ready_banner)"
-grep -q "/_dev/login" <<<"$banner" || { echo 'nextgen banner missing dev-login entry' >&2; exit 1; }
-grep -q "28801" <<<"$banner" || { echo 'dev-login entry does not name the gateway port' >&2; exit 1; }
-grep -q "next=28800" <<<"$banner" || { echo 'dev-login entry does not name the frontend port' >&2; exit 1; }
+banner="$(FRONTEND_PORT=28800 GATEWAY_PORT=28801 print_frontend_ready_banner)"
+grep -q "http://127.0.0.1:28801/_dev/login?next=28800" <<<"$banner" || {
+    echo 'nextgen banner missing the exact dev-login entry' >&2; exit 1; }
+grep -q "http://127.0.0.1:28800/" <<<"$banner" || {
+    echo 'banner workbench URL must use 127.0.0.1 (cookie jars are host-scoped)' >&2; exit 1; }
 FRONTEND_VARIANT=teamclaw
-banner="$(FRONTEND_PORT=28800 GATEWAY_PORT=28801 GATEWAY_AUTH_MOCK=1 print_frontend_ready_banner)"
+banner="$(FRONTEND_PORT=28800 GATEWAY_PORT=28801 print_frontend_ready_banner)"
 grep -q "/_dev/login" <<<"$banner" || { echo 'teamclaw banner missing dev-login entry' >&2; exit 1; }
 FRONTEND_VARIANT=legacy
-banner="$(FRONTEND_PORT=28800 GATEWAY_PORT=28801 print_frontend_ready_banner)"
+banner="$(FRONTEND_PORT=28800 GATEWAY_PORT=28801 GATEWAY_AUTH_MOCK=1 print_frontend_ready_banner)"
 if grep -q "/_dev/login" <<<"$banner"; then
     echo 'legacy banner must not advertise the dev-login entry' >&2
     exit 1
 fi
-printf 'PASS: nextgen ready banner advertises the gateway dev-login entry\n'
+printf 'PASS: non-legacy ready banner advertises the gateway dev-login entry\n'

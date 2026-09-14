@@ -167,7 +167,20 @@ source "${SCRIPT_DIR}/modules/engine.sh"
 source "${SCRIPT_DIR}/modules/baas.sh"
 source "${SCRIPT_DIR}/modules/backend.sh"
 source "${SCRIPT_DIR}/modules/frontend.sh"
-frontend_select_variant || exit 1
+# Best-effort selection at source time: a broken variant config (typo'd
+# FRONTEND_VARIANT, a TEAMCLAW_DIR that was moved/deleted) must not brick
+# read-only and lifecycle commands — `stop all` has to keep working so a
+# running stack is never stranded without a script path to shut it down.
+# The selection falls back to the legacy mapping for those commands, while
+# FRONTEND_VARIANT keeps its (invalid) value: main() re-runs the strict
+# fail-fast for setup/start/restart, which fails with the same error as
+# before anything is built.
+if ! frontend_select_variant; then
+    log_warn "FRONTEND_VARIANT='${FRONTEND_VARIANT:-}' cannot be selected; using the legacy frontend mapping for read-only/lifecycle commands. start/setup will fail fast with the same error."
+    FRONTEND_DIR="${PROJECT_ROOT}/src/frontend"
+    FRONTEND_DEFAULT_SCRIPT="devs:local:oss"
+    FRONTEND_ROOT_ID="root-master"
+fi
 source "${SCRIPT_DIR}/modules/gateway.sh"
 source "${SCRIPT_DIR}/modules/bcs.sh"
 source "${SCRIPT_DIR}/modules/bcsfuse.sh"
@@ -1023,6 +1036,18 @@ main() {
     else
         export DATABASE_MODE=mysql
     fi
+
+    # Strict variant fail-fast HERE, before directories/hook/model prep —
+    # the source-time selection (top of file) is deliberately best-effort so
+    # stop/status/clean/help stay usable with a broken FRONTEND_VARIANT
+    # config (a live stack must always keep a script path to stop it), but
+    # building/launching must refuse before anything is built.
+    case "$command" in
+        setup|start|restart|"")
+            frontend_select_variant || exit 1
+            ;;
+    esac
+
     apply_singlebox_mode_defaults
     resolve_bcs_server_env
 
