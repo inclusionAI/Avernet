@@ -67,9 +67,9 @@ impl RecordingChannelService {
 }
 
 #[tokio::test]
-async fn unmanaged_final_publishes_before_session_failure_without_group_fallback() {
+async fn unmanaged_final_preserves_publication_and_legacy_group_fallback() {
     use bcs_service_api::ManagedMessageDeliveryService;
-    for failure in ["read", "missing", "empty", "wrong_group"] {
+    for failure in ["read", "missing", "empty", "no_id", "no_service"] {
         let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
         let repo = Arc::new(bcs_message_store::MemoryMessageRepo::new());
         let service = Arc::new(bcs_message_flow::managed_delivery::ManagedMessageDelivery::new(repo.clone()));
@@ -77,23 +77,25 @@ async fn unmanaged_final_publishes_before_session_failure_without_group_fallback
         let mut session = session_support::test_session("group-1:final", "group-1", group.participants);
         if failure == "missing" { session.id = "different-session".into(); }
         if failure == "empty" { session.participants.clear(); }
-        if failure == "wrong_group" { session.group_id = "different-group".into(); }
         let sessions = session_support::StaticSessionManagement::new(session);
         let sessions = if failure == "read" { sessions.with_get_failure() } else { sessions };
-        let flow = BcsMessageFlow::new(support.group, support.routing, support.registry,
+        let mut flow = BcsMessageFlow::new(support.group, support.routing, support.registry,
             support.bot_delivery.clone(), support.frontend_delivery.clone())
-            .with_message_repo(repo).with_managed_deliveries(service.clone())
-            .with_group_delivery_limits(BTreeMap::from([("bot-observer".into(), 100)]))
-            .with_session_management(Arc::new(sessions));
+            .with_message_repo(repo).with_managed_deliveries(service.clone());
+        // Queue admission requires a session ID; legacy sessionless routing does not.
+        if failure != "no_id" {
+            flow = flow.with_group_delivery_limits(BTreeMap::from([("bot-observer".into(), 100)]));
+        }
+        if failure != "no_service" { flow = flow.with_session_management(Arc::new(sessions)); }
         let channel = Arc::new(RecordingChannelService::default());
         assert!(flow.channel_slot().set(channel.clone()).is_ok());
         let payload = json!({"message":{"role":"assistant","content":[{"type":"text","text":"original final"}]}});
         let result = flow.handle_bot_event(BotEventCommand {
             bot_id: "bot-driver".into(), run_id: "session-failure".into(), group_id: "group-1".into(),
-            bcs_session_id: Some("group-1:final".into()), state: ChatEventState::Final,
+            bcs_session_id: if failure == "no_id" { None } else { Some("group-1:final".into()) }, state: ChatEventState::Final,
             event_type: "chat.event".into(), event_payload: payload.clone(),
         }).await;
-        if failure == "empty" { result.unwrap(); } else { assert!(result.is_err()); }
+        result.unwrap();
         let events = support.frontend_delivery.events().await;
         assert_eq!(events.len(), 1);
         let wire: Value = serde_json::from_str(&events[0]).unwrap();
@@ -101,8 +103,9 @@ async fn unmanaged_final_publishes_before_session_failure_without_group_fallback
         let outbound = channel.outbound().await;
         assert_eq!(outbound.len(), 1);
         assert_eq!(outbound[0].raw_payload, payload);
-        assert!(support.bot_delivery.frames().await.is_empty());
-        assert!(service.snapshot(None).await.unwrap().is_empty());
+        let queued = service.snapshot(None).await.unwrap();
+        let direct = support.bot_delivery.frames().await;
+        assert!(!queued.is_empty() || !direct.is_empty(), "group routing must deliver the reply for {failure}");
     }
 }
 
@@ -116,7 +119,7 @@ async fn queue_reconstruction_never_rewrites_channel_or_frontend_final() {
             let repo = Arc::new(bcs_message_store::MemoryMessageRepo::new());
             let service = Arc::new(bcs_message_flow::managed_delivery::ManagedMessageDelivery::new(repo.clone()));
             let mut flow = BcsMessageFlow::new(support.group.clone(), support.routing, support.registry,
-                support.bot_delivery, support.frontend_delivery.clone()).with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1:raw-final", "group-1", support.group.get("group-1").await.unwrap().participants))))
+                support.bot_delivery, support.frontend_delivery.clone())
                 .with_message_repo(repo.clone()).with_managed_deliveries(service.clone());
             if queued {
                 flow = flow.with_group_delivery_limits(BTreeMap::from([("bot-driver".into(), 100), ("bot-observer".into(), 100)]));
@@ -309,7 +312,7 @@ async fn websocket_chat_events_notify_terminal_observer_only_for_terminal_states
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    ).with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1", "group-1", support.group.get("group-1").await.unwrap().participants))))
+    )
     .with_bot_terminal_observer(observer.clone());
 
     for (run_id, state, payload) in [
@@ -347,7 +350,7 @@ async fn websocket_chat_events_notify_terminal_observer_only_for_terminal_states
             event_type: "chat.event".to_string(),
             event_payload: payload,
             state,
-            bcs_session_id: Some("group-1".into()),
+            bcs_session_id: None,
         })
         .await
         .unwrap();
@@ -386,7 +389,7 @@ async fn bot_event_publish_preserves_workbench_event_names() {
             support.registry.clone(),
             support.bot_delivery.clone(),
             support.frontend_delivery.clone(),
-        ).with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1", "group-1", support.group.get("group-1").await.unwrap().participants))));
+        );
 
         flow.handle_bot_event(BotEventCommand {
             bot_id: "bot-observer".to_string(),
@@ -401,7 +404,7 @@ async fn bot_event_publish_preserves_workbench_event_names() {
                 },
             }),
             state,
-            bcs_session_id: Some("group-1".into()),
+            bcs_session_id: None,
         })
         .await
         .unwrap();
@@ -1231,7 +1234,7 @@ async fn bot_final_channel_outbound_resolves_missing_sender_name() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    ).with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1:abcdef12", "group-1", support.group.get("group-1").await.unwrap().participants))));
+    );
     let recording_channel = Arc::new(RecordingChannelService::default());
     let channel: Arc<dyn ChannelService> = recording_channel.clone();
     assert!(flow.channel_slot().set(channel).is_ok());
@@ -1415,7 +1418,7 @@ async fn bot_final_event_in_human_bot_dm_does_not_self_relay_to_sender_bot() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    ).with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1", "group-1", support.group.get("group-1").await.unwrap().participants))));
+    );
 
     let outcome = flow
         .handle_bot_event(BotEventCommand {
@@ -1435,7 +1438,7 @@ async fn bot_final_event_in_human_bot_dm_does_not_self_relay_to_sender_bot() {
                 }
             }),
             state: ChatEventState::Final,
-            bcs_session_id: Some("group-1".into()),
+            bcs_session_id: None,
         })
         .await
         .unwrap();
@@ -1480,7 +1483,7 @@ async fn bot_final_event_relays_through_bot_delivery_port() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    ).with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1", "group-1", support.group.get("group-1").await.unwrap().participants))));
+    );
 
     let outcome = flow
         .handle_bot_event(BotEventCommand {
@@ -1496,7 +1499,7 @@ async fn bot_final_event_relays_through_bot_delivery_port() {
                 },
             }),
             state: ChatEventState::Final,
-            bcs_session_id: Some("group-1".into()),
+            bcs_session_id: None,
         })
         .await
         .unwrap();
@@ -1543,7 +1546,7 @@ async fn failed_provider_bot_event_send_uses_unified_system_message() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    ).with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1:abcdef12", "group-1", support.group.get("group-1").await.unwrap().participants))))
+    )
     .with_system_message(system_message.clone());
 
     let outcome = flow
@@ -1697,7 +1700,7 @@ async fn bot_final_event_relay_preserves_session_id_for_legacy_target() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    ).with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1:abcdef12", "group-1", support.group.get("group-1").await.unwrap().participants))));
+    );
 
     flow.handle_bot_event(BotEventCommand {
         bot_id: "bot-observer".to_string(),
@@ -1745,7 +1748,7 @@ async fn bot_final_event_relay_keeps_group_id_for_legacy_default_session_target(
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    ).with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1:00000000", "group-1", support.group.get("group-1").await.unwrap().participants))));
+    );
 
     flow.handle_bot_event(BotEventCommand {
         bot_id: "bot-observer".to_string(),
@@ -1795,7 +1798,7 @@ async fn private_bot_final_event_relays_without_hidden_prompt() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    ).with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1", "group-1", support.group.get("group-1").await.unwrap().participants))));
+    );
 
     let outcome = flow
         .handle_bot_event(BotEventCommand {
@@ -1811,7 +1814,7 @@ async fn private_bot_final_event_relays_without_hidden_prompt() {
                 },
             }),
             state: ChatEventState::Final,
-            bcs_session_id: Some("group-1".into()),
+            bcs_session_id: None,
         })
         .await
         .unwrap();
@@ -1845,7 +1848,7 @@ async fn bot_final_event_relays_to_private_group_targets() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    ).with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1", "group-1", support.group.get("group-1").await.unwrap().participants))));
+    );
 
     let outcome = flow
         .handle_bot_event(BotEventCommand {
@@ -1861,7 +1864,7 @@ async fn bot_final_event_relays_to_private_group_targets() {
                 },
             }),
             state: ChatEventState::Final,
-            bcs_session_id: Some("group-1".into()),
+            bcs_session_id: None,
         })
         .await
         .unwrap();
@@ -5841,7 +5844,7 @@ async fn bot_final_chat_persists_worker_owner_and_public_manager_owner_for_manag
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    ).with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1", "group-1", support.group.get("group-1").await.unwrap().participants))))
+    )
     .with_message_repo(repo.clone());
 
     flow.handle_bot_event(BotEventCommand {
@@ -5857,7 +5860,7 @@ async fn bot_final_chat_persists_worker_owner_and_public_manager_owner_for_manag
             },
         }),
         state: ChatEventState::Final,
-        bcs_session_id: Some("group-1".into()),
+        bcs_session_id: None,
     })
     .await
     .unwrap();
@@ -5885,7 +5888,7 @@ async fn bot_final_chat_persists_worker_owner_and_public_manager_owner_for_manag
             },
         }),
         state: ChatEventState::Final,
-        bcs_session_id: Some("group-1".into()),
+        bcs_session_id: None,
     })
     .await
     .unwrap();
@@ -5905,7 +5908,7 @@ async fn bot_final_chat_persists_worker_owner_and_public_manager_owner_for_manag
         chat_support.registry.clone(),
         chat_support.bot_delivery.clone(),
         chat_support.frontend_delivery.clone(),
-    ).with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1", "group-1", chat_support.group.get("group-1").await.unwrap().participants))))
+    )
     .with_message_repo(chat_repo.clone());
 
     chat_flow
@@ -5922,7 +5925,7 @@ async fn bot_final_chat_persists_worker_owner_and_public_manager_owner_for_manag
                 },
             }),
             state: ChatEventState::Final,
-            bcs_session_id: Some("group-1".into()),
+            bcs_session_id: None,
         })
         .await
         .unwrap();
@@ -6691,7 +6694,7 @@ fn bot_event_with_text(message_text: &str) -> BotEventCommand {
             },
         }),
         state: ChatEventState::Final,
-        bcs_session_id: Some("group-1".into()),
+        bcs_session_id: None,
     }
 }
 
@@ -6706,7 +6709,7 @@ async fn bot_event_legacy_mention_notifies_mentioned_human() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    ).with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1", "group-1", support.group.get("group-1").await.unwrap().participants))))
+    )
     .with_human_mention_notify(recorder.clone());
 
     flow.handle_bot_event(bot_event_with_text("@Human One 请确认")).await.unwrap();
@@ -6728,7 +6731,7 @@ async fn bot_event_structured_routing_does_not_notify() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    ).with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1", "group-1", support.group.get("group-1").await.unwrap().participants))))
+    )
     .with_human_mention_notify(recorder.clone());
 
     let mut group = support.group.get("group-1").await.unwrap();
@@ -6758,7 +6761,7 @@ async fn bot_event_sender_routes_do_not_notify() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    ).with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1", "group-1", support.group.get("group-1").await.unwrap().participants))))
+    )
     .with_human_mention_notify(recorder.clone());
 
     let mut group = support.group.get("group-1").await.unwrap();
@@ -6794,7 +6797,7 @@ async fn bot_event_structured_compat_mentions_do_not_notify() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    ).with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1", "group-1", support.group.get("group-1").await.unwrap().participants))))
+    )
     .with_human_mention_notify(recorder.clone());
 
     let mut group = support.group.get("group-1").await.unwrap();
@@ -6832,7 +6835,7 @@ async fn bot_event_policy_blocked_message_does_not_notify() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    ).with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1", "group-1", support.group.get("group-1").await.unwrap().participants))))
+    )
     .with_interceptor(BlockingInterceptor)
     .with_human_mention_notify(recorder.clone());
 

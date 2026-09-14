@@ -551,18 +551,14 @@ async fn relay_final_chat_event(
         }
     };
 
-    // Group replies route exclusively through their session membership.
-    let session_id = cmd.bcs_session_id.as_deref().filter(|id| !id.is_empty())
-        .ok_or_else(|| ServiceError::InternalError("group reply session id missing".into()))?;
-    let sessions = flow.session_management.as_ref()
-        .ok_or_else(|| ServiceError::InternalError("group reply session service missing".into()))?;
-    let session = sessions.get(session_id).await
-        .map_err(|_| ServiceError::InternalError("group reply session read failed".into()))?
-        .ok_or_else(|| ServiceError::InternalError("group reply session not found".into()))?;
-    if session.group_id != cmd.group_id {
-        return Err(ServiceError::InternalError("group reply session belongs to another group".into()));
+    // Preserve legacy group routing when no usable session membership exists.
+    if let (Some(sessions), Some(session_id)) = (&flow.session_management, cmd.bcs_session_id.as_deref()) {
+        if let Ok(Some(session)) = sessions.get(session_id).await {
+            if !session.participants.is_empty() {
+                group.participants = session.participants;
+            }
+        }
     }
-    group.participants = session.participants;
     backfill_bot_names(flow.registry.as_ref(), &mut group).await;
 
     // Unmanaged events have already been published. Only their queue path

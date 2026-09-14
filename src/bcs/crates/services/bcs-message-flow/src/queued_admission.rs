@@ -164,7 +164,7 @@ pub async fn find_managed_run(
     Ok(None)
 }
 
-/// Reuse the authoritative session participants already loaded for routing.
+/// Reuse the session or legacy group participants already resolved for routing.
 pub(crate) async fn needs_reply(flow: &BcsMessageFlow, group: &Group) -> bool {
     flow.managed_deliveries.is_some() && group.group_strategy != GroupStrategy::StateMachine
         && manages_any(flow, group).await
