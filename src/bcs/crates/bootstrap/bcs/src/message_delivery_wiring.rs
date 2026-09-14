@@ -155,7 +155,8 @@ async fn run_on_master(
         tracing::info!("delivery master epoch started");
         let epoch = runtime.clone().run(shutdown.clone());
         let sampler = crate::delivery_metrics::run(service.clone(), policy.clone(), metrics.clone(), shutdown.clone());
-        tokio::pin!(epoch, sampler);
+        let reconciliation = reconcile_policy(policy.clone());
+        tokio::pin!(epoch, sampler, reconciliation);
         loop {
             tokio::select! { biased;
                 _ = shutdown.changed() => return Ok(()),
@@ -167,6 +168,26 @@ async fn run_on_master(
                 }
                 result = &mut epoch => return result,
                 _ = &mut sampler => return Err(bcs_service_api::ManagedDeliveryError::Conflict),
+                _ = &mut reconciliation => return Err(bcs_service_api::ManagedDeliveryError::Conflict),
+            }
+        }
+    }
+}
+
+/// This future belongs to the master epoch, so demotion/shutdown also cancels
+/// slow reconciliation without blocking leadership checks or restarting runs.
+async fn reconcile_policy(policy: Arc<bcs_message_flow::delivery_policy::LiveDeliveryPolicy>) {
+    let period = Duration::from_secs(5);
+    let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut last_warning = None;
+    loop {
+        ticker.tick().await;
+        if !matches!(tokio::time::timeout(period, policy.reconcile_durable_version()).await, Ok(Ok(()))) {
+            let now = tokio::time::Instant::now();
+            if last_warning.is_none_or(|at| now.duration_since(at) >= Duration::from_secs(30)) {
+                tracing::warn!(operation = "policy_reconciliation", "delivery policy DB check failed; retaining snapshot and retrying in 5 seconds");
+                last_warning = Some(now);
             }
         }
     }
@@ -178,6 +199,32 @@ async fn master(leader: &Arc<dyn bcs_service_api::LeaderElectionPort>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn master_reconciles_policy_after_five_seconds() {
+        use bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort;
+        let repo = Arc::new(bcs_message_store::MemoryMessageRepo::new());
+        let policy = Arc::new(bcs_message_flow::delivery_policy::LiveDeliveryPolicy::new(repo.clone(), Default::default()));
+        let reconciliation = reconcile_policy(policy.clone());
+        tokio::pin!(reconciliation);
+        let mut stored = bcs_config_api::message_delivery::DeliveryPolicyRecord::default();
+        stored.version = 1;
+        stored.policy.pause_dispatch = true;
+        repo.replace_policy(0, stored).await.unwrap();
+        tokio::select! { _ = &mut reconciliation => panic!("reconciliation exited"), _ = tokio::time::sleep(Duration::from_millis(100)) => {} }
+        assert_eq!(policy.snapshot.read().await.version, 0, "no eager reload before 5-second interval");
+        let observed = async {
+            loop {
+                if policy.snapshot.read().await.version == 1 { break; }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+        tokio::select! {
+            _ = &mut reconciliation => panic!("reconciliation exited"),
+            result = tokio::time::timeout(Duration::from_secs(6), observed) => result.unwrap(),
+        }
+        assert!(policy.snapshot.read().await.policy.pause_dispatch);
+    }
 
     struct TestLeader(std::sync::atomic::AtomicU8);
     #[async_trait::async_trait]

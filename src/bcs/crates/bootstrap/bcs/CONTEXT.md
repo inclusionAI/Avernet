@@ -2,6 +2,12 @@
 
 ## Provides
 
+Master epochs reconcile the durable policy version every five seconds to observe
+late writes from the previous replica. Failed checks retain the last snapshot
+and retry; they do not restart runs. Reconciliation is cancelled on demotion.
+The monitor boot ID belongs to the cumulative metrics object, not a sampler epoch,
+and remains stable when the same process regains leadership.
+
 - Coordination store composition using the selected cache plugin without additional settings.
 
 Durable delivery composition installs a post-commit in-memory instrumentation

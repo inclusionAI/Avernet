@@ -86,6 +86,33 @@ async fn failed_takeover_read_does_not_publish_a_default_policy() {
 }
 
 #[tokio::test]
+async fn reconciliation_observes_previous_masters_late_commit() {
+    let repo = Arc::new(SlowPolicyRepo { inner: MemoryMessageRepo::new(), fail_read: Default::default(), started: Default::default(), release: Default::default() });
+    let old = Arc::new(LiveDeliveryPolicy::new(repo.clone(), Default::default()));
+    let next = LiveDeliveryPolicy::new(repo.clone(), Default::default());
+    let writing = old.clone();
+    let update = tokio::spawn(async move {
+        let mut policy = DeliveryPolicy::default();
+        policy.pause_dispatch = true;
+        writing.replace(admin(), 0, policy).await
+    });
+    repo.started.notified().await;
+    next.refresh_for_takeover().await.unwrap();
+    assert_eq!(next.snapshot.read().await.version, 0);
+    repo.release.notify_one();
+    let committed = update.await.unwrap().unwrap();
+    assert!(!next.snapshot.read().await.policy.pause_dispatch);
+    repo.fail_read.store(true, Ordering::SeqCst);
+    assert!(next.reconcile_durable_version().await.is_err());
+    assert_eq!(next.snapshot.read().await.version, 0);
+    repo.fail_read.store(false, Ordering::SeqCst);
+    next.reconcile_durable_version().await.unwrap();
+    assert_eq!(*next.snapshot.read().await, committed);
+    next.reconcile_durable_version().await.unwrap();
+    assert_eq!(*next.snapshot.read().await, committed);
+}
+
+#[tokio::test]
 async fn policy_management_auth_cas_and_live_publication() {
     let repo = Arc::new(MemoryMessageRepo::new());
     let live = LiveDeliveryPolicy::new(repo.clone(), DeliveryPolicyRecord::default());
