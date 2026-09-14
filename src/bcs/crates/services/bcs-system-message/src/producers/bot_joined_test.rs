@@ -148,6 +148,12 @@ impl BotRegistryCoreService for MockRegistry {
 }
 
 #[tokio::test]
+async fn mock_registry_update_status_rejects_heartbeat_renewal() {
+    let registry = MockRegistry::default();
+    assert!(!registry.update_status("heartbeat-renewal-unsupported").await);
+}
+
+#[tokio::test]
 async fn bot_joined_produces_context_injection_and_notification() {
     let driver = Participant::bot("driver-id", ParticipantRole::Driver);
     let consultant = Participant::bot("consultant-id", ParticipantRole::Consultant);

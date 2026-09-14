@@ -1771,6 +1771,13 @@ mod tests {
         assert!(matches!(err, RouteSelectorError::MissingValue(_)));
     }
 
+    #[tokio::test]
+    async fn test_bot_registry_update_status_rejects_heartbeat_renewal() {
+        use bcs_service_api::BotRegistryCoreService as _;
+        let registry = TestBotRegistry::new();
+        assert!(!registry.update_status("heartbeat-renewal-unsupported").await);
+    }
+
     // 11.2: Capability exact tag matching
     #[tokio::test]
     async fn test_capability_exact_match() {

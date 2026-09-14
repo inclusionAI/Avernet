@@ -7221,6 +7221,12 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn recording_registry_update_status_rejects_heartbeat_renewal() {
+        let registry = Arc::new(RecordingRegistry::default());
+        assert!(!registry.update_status("heartbeat-renewal-unsupported").await);
+    }
+
+    #[tokio::test]
     async fn group_new_session_per_message_respects_scope_target_and_direct_chats() -> TestResult {
         for target in [
             BindingTarget::Group { group_id: "group_1".to_string() },

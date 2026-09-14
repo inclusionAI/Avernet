@@ -266,6 +266,12 @@ async fn manager_worker_session_context_messages_with_ledger(
 }
 
 #[tokio::test]
+async fn named_registry_update_status_rejects_heartbeat_renewal() {
+    let registry = NamedRegistry::new(&[]);
+    assert!(!registry.update_status("heartbeat-renewal-unsupported").await);
+}
+
+#[tokio::test]
 async fn manager_worker_session_context_backfills_placeholder_names() {
     let (manager_id, _worker_id, messages) = manager_worker_session_context_messages().await;
 

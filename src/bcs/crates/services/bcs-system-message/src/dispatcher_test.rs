@@ -279,6 +279,12 @@ impl bcs_service_api::port::repo::MessageRepoPort for RecordingMessageRepo {
 }
 
 #[tokio::test]
+async fn provider_target_registry_update_status_rejects_heartbeat_renewal() {
+    let registry = Arc::new(ProviderTargetRegistry::default());
+    assert!(!registry.update_status("heartbeat-renewal-unsupported").await);
+}
+
+#[tokio::test]
 async fn dispatch_bot_joined_delivers_to_all_participants() {
     let new_bot_id = "new-bot-001".to_string();
     let existing_bot_id = "existing-bot-001".to_string();

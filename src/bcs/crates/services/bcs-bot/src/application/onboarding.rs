@@ -817,6 +817,12 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn static_registry_update_status_rejects_heartbeat_renewal() {
+        let registry = Arc::new(StaticRegistry::new(vec![]));
+        assert!(!registry.update_status("heartbeat-renewal-unsupported").await);
+    }
+
+    #[tokio::test]
     async fn partial_update_preserves_existing_fields() {
         let registry = Arc::new(StaticRegistry::new(vec![bot(
             "target",
