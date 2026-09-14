@@ -33,6 +33,10 @@ from typing import Any, Dict, Optional
 
 from injector import inject
 
+from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
+from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol, PermissionLevel
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.caller_identity.contracts import CallerIdentityStage
@@ -93,7 +97,11 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         token_provider: CallerTokenProviderProtocol,
         runtime_updater: CallerRuntimeUpdaterProtocol,
         common_config_service: CommonConfigService,
+        app_grants: BotAppGrantServiceProtocol,
+        collaborator_service: CollaboratorServiceProtocol,
     ) -> None:
+        self._app_grants = app_grants
+        self._collaborator_service = collaborator_service
         self._instance_repo = instance_repo
         self._baas = baas_service
         self._publish_repo = bot_publish_repo
@@ -129,6 +137,50 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
     # ------------------------------------------------------------------
     # Public entry
     # ------------------------------------------------------------------
+    async def get_application_caller_connection(
+        self,
+        *,
+        app_id: int,
+        tenant: str,
+        user_id: str,
+        bot_id: str,
+        owner_id: str,
+        force_upgrade: bool = False,
+    ) -> Dict[str, Any]:
+        """Authorize a live application delegation to an existing caller instance."""
+        # COSEC: reject tenant confusion before any repository or grant lookup.
+        if tenant != get_current_avernet_tenant():
+            raise self._caller_permission_error("tenant_mismatch")
+        grant = self._app_grants.find(
+            app_id=app_id, user_id=user_id, bot_id=bot_id, owner_id=owner_id,
+        )
+        if grant is None:
+            raise self._caller_permission_error("application_grant_required")
+        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        if bot is None:
+            raise self._caller_permission_error("bot_not_found")
+        # COSEC: delegation never preserves access revoked from its user.
+        if user_id != owner_id and bot.get("public") != "1":
+            try:
+                permission = self._collaborator_service.check_collaborator_permission(
+                    bot_id=bot_id, owner_id=owner_id, user_id=user_id,
+                    required_level=PermissionLevel.MEMBER,
+                )
+            except Exception:
+                raise self._caller_permission_error("collaborator_check_failed") from None
+            if not permission.get("has_permission", False):
+                raise self._caller_permission_error("caller_access_revoked")
+        logger.info(
+            "event=expert_chat.application_authorized system=backend "
+            "operation=app_caller_connection tenant=%s app_id=%s "
+            "bot_id=%s owner_id=%s user_id=%s",
+            tenant, app_id, bot_id, owner_id, user_id,
+        )
+        return await self.get_authorized_caller_connection(
+            operator_id=user_id, user_id=user_id, bot_id=bot_id,
+            owner_id=owner_id, is_super_admin=False, force_upgrade=force_upgrade,
+        )
+
     async def get_authorized_caller_connection(
         self,
         *,
