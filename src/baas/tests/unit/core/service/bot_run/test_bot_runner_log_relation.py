@@ -13,14 +13,24 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from secbaas.community.api.bot_runtime import BotChatContext
-from secbaas.community.core.service.bot_run import BotRunner, BotServiceSelector
+from secbaas.community.core.service.bot_run import (
+    BotEngineAdapterRegistry,
+    BotRunner,
+    BotServiceSelector,
+)
 from secbaas.community.core.service.bot_run._internal_protocols import MessageDispatcher
+from secbaas.community.plugins.bot.engine_adapter.openclaw.real import (
+    OpenClawAdapter,
+)
 from secbaas.community.plugins.eval_env.stub import NoopEvalSessionLog
 from secbaas.community.spi.bot_service import (
     BotBindingData,
     BotServicePlugin,
     LogRelationPayload,
 )
+
+# openclaw 走 adapter 表达亲和键（agent:main: 前缀），对齐生产装配
+_OPENCLAW_REGISTRY = BotEngineAdapterRegistry({"openclaw": OpenClawAdapter()})
 
 # ==================== Fixtures ====================
 
@@ -114,6 +124,7 @@ def _make_runner(
         dispatchers=[dispatcher],
         system_config_service=MagicMock(),
         eval_session_log=NoopEvalSessionLog(),
+        engine_adapter_registry=_OPENCLAW_REGISTRY,
     )
 
 

@@ -46,6 +46,32 @@ class BotServicePlugin(Protocol):
         """
         ...
 
+    async def get_caller_connection(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+        token: str,
+    ) -> str:
+        """caller 模式：按 (bot_id, owner_id, user_id) 拉起一个新容器，返回 sandbox_id。
+
+        依赖外部 caller-connection 接口；``token`` 为调用方带来的身份令牌，透传鉴权。
+
+        Args:
+            bot_id: Bot 标识（bare，不含 entity 后缀）。
+            owner_id: 容器归属实体。
+            user_id: 使用者标识。
+            token: caller 身份令牌。
+
+        Returns:
+            新建容器的 sandbox_id。
+
+        Raises:
+            PaasError: On transport failure, HTTP error, or envelope failure.
+        """
+        ...
+
     async def close(self) -> None:
         """Release underlying resources (HTTP sessions, etc.)."""
         ...

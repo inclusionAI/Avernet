@@ -80,5 +80,33 @@ class LocalBotServicePlugin(BotServicePlugin):
             f"bot_id={bot_id}, owner_id={owner_id}, stage={stage}",
         )
 
+    async def get_caller_connection(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+        token: str,
+    ) -> str:
+        """Not available in local mode — raises PaasError.
+
+        In local/singlebox mode there is no remote caller-connection service.
+
+        Raises:
+            PaasError: Always, with PLATFORM_UNAVAILABLE.
+        """
+        logger.debug(
+            "[bot-service-local] get_caller_connection: bot_id=%s owner_id=%s "
+            "user_id=%s",
+            bot_id,
+            owner_id,
+            user_id,
+        )
+        raise PaasError(
+            ErrorCode.PLATFORM_UNAVAILABLE,
+            f"caller-connection not available in local mode: "
+            f"bot_id={bot_id}, owner_id={owner_id}, user_id={user_id}",
+        )
+
     async def close(self) -> None:
         """No-op: no external resources to release."""

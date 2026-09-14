@@ -65,6 +65,7 @@ class NoopMessageDispatcher:
         context: BotChatContext | None = None,
         timeout: float,
         bot_id: str = "",
+        chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
         session_pending: bool = False,
     ) -> AsyncIterator[StreamChunk]:

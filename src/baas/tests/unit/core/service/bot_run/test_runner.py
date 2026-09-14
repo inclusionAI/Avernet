@@ -32,6 +32,7 @@ from secbaas.community.api.device_manage import ErrorCode, PaasError
 from secbaas.community.api.sse import SseEvent, StreamChunk
 from secbaas.community.core.service.bot_run import (
     BotBindingNotFoundError,
+    BotEngineAdapterRegistry,
     BotRunner,
     BotServiceSelector,
 )
@@ -42,10 +43,16 @@ from secbaas.community.core.service.bot_run._task_concurrency_pool import (
 from secbaas.community.core.service.bot_run._task_message_dispatcher import (
     TaskMessageDispatcher,
 )
+from secbaas.community.plugins.bot.engine_adapter.openclaw.real import (
+    OpenClawAdapter,
+)
 from secbaas.community.plugins.eval_env.stub import NoopEvalSessionLog
 from secbaas.community.spi.bot_service import BotBindingData
 
 # ==================== Fixtures ====================
+
+# openclaw 走 adapter 表达亲和键（agent:main: 前缀），对齐生产装配
+_OPENCLAW_REGISTRY = BotEngineAdapterRegistry({"openclaw": OpenClawAdapter()})
 
 BOT_ID = "test-bot-000001"
 ENTITY_ID = "test-entity-001"
@@ -156,6 +163,7 @@ def _make_runner(
         dispatchers=[dispatcher],
         system_config_service=_make_config_service(),
         eval_session_log=MagicMock(),
+        engine_adapter_registry=_OPENCLAW_REGISTRY,
     )
 
 
@@ -177,6 +185,7 @@ def _make_runner_with_task_dispatcher(
         dispatchers=[dispatcher],
         system_config_service=_make_config_service(),
         eval_session_log=MagicMock(),
+        engine_adapter_registry=_OPENCLAW_REGISTRY,
     )
 
 
@@ -735,18 +744,13 @@ class TestDBFirstFlow:
         arca_binding_data,
         context,
     ):
-        """When create_session fails, the PENDING record is marked FAILED."""
-        teclaw_binding = BotBindingData(
-            bot_id=BOT_ID,
-            owner_id=ENTITY_ID,
-            bot_type="service",
-            engine_type="teclaw",
-            binding_id=100101,
-            device_provider="baas",
-            device_id=APP_ID_BAAS,
-        )
-        mock_bot_service_plugin.get_binding.return_value = teclaw_binding
-        mock_bot_service.create_session.side_effect = RuntimeError(
+        """When session resolution fails, the PENDING record is marked FAILED.
+
+        plan_session_id 精简后不再返回 None，runner 主链路的 _create_session
+        仅在 _plan_session 内部异常时不可达；同步路径的失败语义改由
+        binding 解析失败覆盖，此处保留对异常路径的 FAILED 标记验证。
+        """
+        mock_bot_service_plugin.get_binding.side_effect = RuntimeError(
             "session creation failed"
         )
 
@@ -894,6 +898,78 @@ class TestDBFirstFlow:
         mock_bot_service.create_session.assert_not_called()
         # No insert_run for idempotent hit
         mock_run_repo.insert_run.assert_not_called()
+
+
+# ==================== Tests: explicit session_id reuse ====================
+
+
+class TestExplicitSessionIdReuse:
+    @pytest.mark.asyncio
+    async def test_explicit_session_id_non_teclaw_reused_no_pending(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """非 teclaw 引擎显式传入 session_id：视为已存在，直接复用、不物化。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        mock_run_repo.get_by_run_id.return_value = None
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hello",
+            context=context,
+            metadata={"session_id": "existing-sess-777"},
+            message_id="msg-explicit-1",
+        )
+
+        # 显式 session_id 直接复用：不走 create_session，也不标记 pending
+        mock_bot_service.create_session.assert_not_called()
+        kw = runner._dispatchers[0].dispatch_send.call_args.kwargs
+        assert kw["session_id"] == "existing-sess-777"
+        assert kw["session_pending"] is False
+        mock_run_repo.update_session_id.assert_called_once_with(
+            "msg-explicit-1", "existing-sess-777"
+        )
+
+    @pytest.mark.asyncio
+    async def test_explicit_session_id_teclaw_keeps_pending(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        context,
+    ):
+        """teclaw 显式传入 session_id：无"传入即存在"前提，仍走物化 get-or-create。"""
+        teclaw_binding = BotBindingData(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            bot_type="service",
+            engine_type="teclaw",
+            binding_id=100101,
+            device_provider="baas",
+            device_id=APP_ID_BAAS,
+        )
+        mock_bot_service_plugin.get_binding.return_value = teclaw_binding
+        mock_run_repo.get_by_run_id.return_value = None
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hello",
+            context=context,
+            metadata={"session_id": "teclaw-sess-777"},
+            message_id="msg-explicit-2",
+        )
+
+        kw = runner._dispatchers[0].dispatch_send.call_args.kwargs
+        assert kw["session_id"] == "teclaw-sess-777"
+        assert kw["session_pending"] is True
 
 
 # ==================== Tests: inject_message idempotency ====================
@@ -1544,6 +1620,7 @@ def _make_runner_with_config(
         dispatchers=dispatchers,
         system_config_service=config_service,
         eval_session_log=MagicMock(),
+        engine_adapter_registry=_OPENCLAW_REGISTRY,
     )
 
 

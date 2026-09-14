@@ -1,8 +1,8 @@
 """BotEngineAdapter 注册表。
 
 ``BotEngineAdapterRegistry`` 按 ``engine_type`` 查对应 adapter。
-openclaw / teclaw 不注册(``has()`` 返回 False),其请求在 ``BaasBotService``
-内走原始分支。
+全部引擎（openclaw / teclaw / aicoding / hermes / claude_code）注册 adapter，
+``plan_session_id`` 纯委托 adapter 表达引擎亲和键差异。
 
 具体 adapter 实现的装配由 bootstrap 完成(core 不得 import plugins)。
 """

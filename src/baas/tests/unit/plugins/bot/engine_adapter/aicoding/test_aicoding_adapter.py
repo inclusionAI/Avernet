@@ -41,46 +41,25 @@ def test_ws_path_is_api_ws(factory: type) -> None:
 
 
 @pytest.mark.parametrize("factory", ADAPTERS)
-def test_session_consistency_key_none_without_session_id(factory: type) -> None:
+def test_session_consistency_key_returns_structured_key(factory: type) -> None:
+    """real aicoding 覆写返回结构化亲和键（与 claude_code/hermes 同形）。"""
     key = factory().session_consistency_key(tc_bot_id="b1", user_id="u1", run_id="r1")
-    assert key is None
-
-
-@pytest.mark.parametrize("factory", ADAPTERS)
-def test_session_consistency_key_prefers_session_id(factory: type) -> None:
-    key = factory().session_consistency_key(
-        tc_bot_id="b1", user_id="u1", run_id="r1", session_id="s1"
-    )
-    assert key == "s1"
+    assert key == "agent:b1:session:r1:user:u1"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("factory", ADAPTERS)
-async def test_create_adapter_session_reuses_existing(factory: type) -> None:
-    client = _FakeSessionClient()
-    sid, reused = await factory().create_adapter_session(
-        session_client=client,
-        session_id="existing-sess",
-        user_id="u1",
-        metadata={},
-        bot_id="agent-1",
-        run_id="run-1",
-    )
-    assert (sid, reused) == ("existing-sess", True)
-    assert client.create_calls == []  # 复用不触发创建
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("factory", ADAPTERS)
-async def test_create_adapter_session_creates_new(factory: type) -> None:
+async def test_create_adapter_session_resolves_key_and_creates(
+    factory: type,
+) -> None:
+    """从 planned_id 解析裸 key 以 uuid 新建（无前缀）。"""
     client = _FakeSessionClient(created_id="new-sess")
     sid, reused = await factory().create_adapter_session(
         session_client=client,
-        session_id=None,
+        planned_id="agent:b1:session:run-1:user:u1",
         user_id="u1",
         metadata={"title": "t", "model": "m"},
         bot_id="agent-1",
-        run_id="run-1",
     )
     assert (sid, reused) == ("new-sess", False)
     assert len(client.create_calls) == 1
@@ -92,16 +71,47 @@ async def test_create_adapter_session_creates_new(factory: type) -> None:
     assert not sid.startswith("agent:main:")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("factory", ADAPTERS)
+async def test_create_adapter_session_plain_id_used_as_uuid(factory: type) -> None:
+    """非 planned 格式的显式 id 原样作为 uuid 创建（引擎侧幂等）。"""
+    client = _FakeSessionClient()
+    sid, reused = await factory().create_adapter_session(
+        session_client=client,
+        planned_id="existing-sess",
+        user_id="u1",
+        metadata={},
+        bot_id="agent-1",
+    )
+    assert (sid, reused) == ("created-sess", False)
+    assert client.create_calls[0]["uuid"] == "existing-sess"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("factory", ADAPTERS)
+async def test_create_adapter_session_explicit_id_reuses(factory: type) -> None:
+    """session_pending=False（显式 id，会话已存在）：直接复用，不触发创建。"""
+    client = _FakeSessionClient()
+    sid, reused = await factory().create_adapter_session(
+        session_client=client,
+        planned_id="agent:main:session:existing-key:user:u1",
+        user_id="u1",
+        metadata={},
+        bot_id="agent-1",
+        session_pending=False,
+    )
+    assert (sid, reused) == ("agent:main:session:existing-key:user:u1", True)
+    assert client.create_calls == []
+
+
 @pytest.mark.parametrize("noop_cls", [NoopAICodingAdapter])
 def test_noop_returns_safe_zero_values(noop_cls: type) -> None:
     """Noop 不抛异常、返回安全零值。"""
     a = noop_cls()
     assert isinstance(a.ws_path(), str)
     assert (
-        a.session_consistency_key(
-            tc_bot_id="b1", user_id="u1", run_id="r1", session_id="s1"
-        )
-        is None
+        a.session_consistency_key(tc_bot_id="b1", user_id="u1", run_id="r1")
+        == "agent:b1:session:r1:user:u1"
     )
 
 
@@ -114,11 +124,10 @@ class TestNoopAICodingAdapterCreateSession:
         with pytest.raises(RuntimeError, match="simulated session creation failure"):
             await adapter.create_adapter_session(
                 session_client=_FakeSessionClient(),
-                session_id=None,
+                planned_id="p1",
                 user_id="u1",
                 metadata={},
                 bot_id="agent-1",
-                run_id="run-1",
             )
 
     @pytest.mark.asyncio
@@ -128,11 +137,10 @@ class TestNoopAICodingAdapterCreateSession:
 
         sid, reused = await adapter.create_adapter_session(
             session_client=_FakeSessionClient(),
-            session_id=None,
+            planned_id="p1",
             user_id="u1",
             metadata={},
             bot_id="agent-1",
-            run_id="run-1",
         )
 
         assert (sid, reused) == ("", True)

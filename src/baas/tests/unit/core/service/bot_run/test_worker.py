@@ -8,8 +8,9 @@ asyncio_mode=auto，异步用例直接 async def。
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -1811,3 +1812,135 @@ async def test_abort_poll_loop_logs_when_queue_lookup_fails(repo, queue):
 
     worker._queue.get_by_run_id = original_get_by_run_id
     assert queue.get_by_run_id(run_id).status == "DONE"
+
+
+# ==================== Tests: scan lock / tick cap / post-run ====================
+
+
+class _NotAcquiredLockCtx:
+    acquired = False
+
+    def __enter__(self) -> _NotAcquiredLockCtx:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+
+class _NotAcquiredLockService:
+    """测试用假锁服务：try_lock 恒未获取。"""
+
+    def try_lock(self, *, lock_name, expire_seconds, block=False):
+        return _NotAcquiredLockCtx()
+
+
+async def test_timeout_scan_skips_when_lock_not_acquired(repo, queue):
+    """全局超时扫描未抢到单飞锁时直接跳过，不做任何对账。"""
+    worker = _worker(
+        queue, repo, _CompletingExecutor(repo), lock_service=_NotAcquiredLockService()
+    )
+    scan = MagicMock()
+    queue.scan_timeout = scan
+    await worker._timeout_scan_once()
+    scan.assert_not_called()
+
+
+async def test_abort_continues_when_update_error_fails(repo, queue):
+    """update_error 抛异常时 abort 仍继续 request_abort + force_done。"""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort-dberr")
+    queue.claim_pending_by_bot("bot-1", "wA", candidates=5)
+    repo.update_error = MagicMock(side_effect=RuntimeError("db down"))
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(queue, repo, ex, run_repository=repo)
+
+    outcome = await worker.abort_runs_by_session("sess-abort-dberr", "bot-1")
+
+    assert outcome.aborted_run_ids == [run_id]
+    assert queue.get_by_run_id(run_id).status == "DONE"
+    assert queue.is_abort_requested(run_id) is True
+
+
+async def test_tick_breaks_at_max_concurrent(repo, queue):
+    """本机并发额度占满后，本轮不再认领后续 bot 的 PENDING。"""
+    run_a = _insert(repo, queue, "bot-1")
+    run_b = _insert(repo, queue, "bot-2")
+    ex = _BlockingExecutor()
+    worker = _worker(queue, repo, ex, config=BotRequestWorkerConfig(max_concurrent=1))
+    mgr = _qpm()
+    mgr._configs = {"bot-1": 600, "bot-2": 600}
+    worker._qpm = mgr
+    try:
+        dispatched = await worker._tick()
+        assert dispatched == 1
+        await asyncio.sleep(0)  # 让已派发 task 进入 execute（挂起在 gate）
+        assert ex.started == 1
+        statuses = {
+            queue.get_by_run_id(run_a).status,
+            queue.get_by_run_id(run_b).status,
+        }
+        assert statuses == {"RUNNING", "PENDING"}
+    finally:
+        ex.gate.set()
+        await _drain(20)
+
+
+async def test_tick_skips_bot_without_qpm_config(repo, queue):
+    """无并发上限配置的 bot 本轮跳过（不认领），有配置的照常派发。"""
+    run_1 = _insert(repo, queue, "bot-1")
+    run_x = _insert(repo, queue, "bot-x")
+    ex = _CompletingExecutor(repo)
+    worker = _worker(queue, repo, ex, config=BotRequestWorkerConfig(max_concurrent=5))
+
+    dispatched = await worker._tick()
+    await _drain(10)
+
+    assert dispatched == 1
+    assert ex.executed == [run_1]
+    assert queue.get_by_run_id(run_x).status == "PENDING"
+
+
+def test_maybe_log_cap_throttled_within_interval(repo, queue):
+    """节流窗口内的第二次调用直接返回空。"""
+    worker = _worker(queue, repo, _CompletingExecutor(repo))
+    worker._last_cap_warn = time.monotonic()
+    assert worker._maybe_log_cap(["bot-1"]) == []
+
+
+def test_maybe_log_cap_reports_capped_bot(repo, queue):
+    """RUNNING 在途数达到该 bot 并发上限时被判定为 capped。"""
+    _insert(repo, queue, "bot-1")
+    queue.claim_pending_by_bot("bot-1", "wA", candidates=5)
+    worker = _worker(queue, repo, _CompletingExecutor(repo))
+    worker._qpm = _qpm(bot_qpm=1)
+    assert worker._maybe_log_cap(["bot-1"]) == ["bot-1"]
+
+
+def test_maybe_log_cap_skips_bot_without_qpm(repo, queue):
+    """无 qpm 配置的 bot 不做 capped 判定。"""
+    worker = _worker(queue, repo, _CompletingExecutor(repo))
+    assert worker._maybe_log_cap(["bot-x"]) == []
+
+
+def test_maybe_log_cap_swallows_count_error(repo, queue):
+    """count_running_by_bot 抛异常仅记录日志，不向上抛。"""
+    worker = _worker(queue, repo, _CompletingExecutor(repo))
+    queue.count_running_by_bot = MagicMock(side_effect=RuntimeError("db boom"))
+    assert worker._maybe_log_cap(["bot-1"]) == []
+
+
+async def test_post_run_awaits_callback(repo, queue):
+    """有回调时 post_run await 执行并传入 run_id。"""
+    worker = _worker(queue, repo, _CompletingExecutor(repo))
+    record = queue.get_by_run_id(_insert(repo, queue, "bot-1"))
+    cb = AsyncMock()
+    await worker._post_run(record, cb)
+    cb.assert_awaited_once_with(record.run_id)
+
+
+async def test_post_run_swallows_callback_error(repo, queue):
+    """回调抛异常仅记录日志，不影响主流程。"""
+    worker = _worker(queue, repo, _CompletingExecutor(repo))
+    record = queue.get_by_run_id(_insert(repo, queue, "bot-1"))
+    cb = AsyncMock(side_effect=RuntimeError("cb boom"))
+    await worker._post_run(record, cb)
+    cb.assert_awaited_once_with(record.run_id)

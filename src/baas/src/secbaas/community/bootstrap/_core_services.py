@@ -31,6 +31,7 @@ from secbaas.community.core.service.bot_run import (
     BotRunRequestExecutor,
     BotServiceConfig,
     BotServiceSelector,
+    CallerBotService,
     ClawBotService,
     QueueTaskMessageDispatcher,
     ResultGuardExecutor,
@@ -120,9 +121,11 @@ def _create_system_default_paas_service(factory: PaasServiceFactory):
 
 
 def _real_engine_adapter_registry():
-    """装配 3 个 real adapter(连真实 engine/proxy 通道)。
+    """装配 5 个 real adapter(连真实 engine/proxy 通道)。
 
     延迟 import:core 层不得 module-level import plugins,故装配在 bootstrap 完成。
+    openclaw/teclaw 的 plan 亲和键与 session 创建语义亦经 adapter 表达
+    (plan_session_id 纯委托 adapter,不再持有引擎 if-else)。
     """
     from secbaas.community.core.service.bot_run import BotEngineAdapterRegistry
     from secbaas.community.plugins.bot.engine_adapter.aicoding.real import (
@@ -132,9 +135,17 @@ def _real_engine_adapter_registry():
         ClaudeCodeAdapter,
     )
     from secbaas.community.plugins.bot.engine_adapter.hermes.real import HermesAdapter
+    from secbaas.community.plugins.bot.engine_adapter.openclaw.real import (
+        OpenClawAdapter,
+    )
+    from secbaas.community.plugins.bot.engine_adapter.teclaw.real import (
+        TeClawAdapter,
+    )
 
     return BotEngineAdapterRegistry(
         {
+            "openclaw": OpenClawAdapter(),
+            "teclaw": TeClawAdapter(),
             "aicoding": AICodingAdapter(),
             "hermes": HermesAdapter(),
             "claude_code": ClaudeCodeAdapter(),
@@ -143,7 +154,7 @@ def _real_engine_adapter_registry():
 
 
 def _stub_engine_adapter_registry():
-    """装配 3 个 Noop adapter(安全零值,不连真实 engine;用于测试/本地)。"""
+    """装配 5 个 Noop adapter(安全零值,不连真实 engine;用于测试/本地)。"""
     from secbaas.community.core.service.bot_run import BotEngineAdapterRegistry
     from secbaas.community.plugins.bot.engine_adapter.aicoding.stub import (
         NoopAICodingAdapter,
@@ -154,9 +165,17 @@ def _stub_engine_adapter_registry():
     from secbaas.community.plugins.bot.engine_adapter.hermes.stub import (
         NoopHermesAdapter,
     )
+    from secbaas.community.plugins.bot.engine_adapter.openclaw.stub import (
+        NoopOpenClawAdapter,
+    )
+    from secbaas.community.plugins.bot.engine_adapter.teclaw.stub import (
+        NoopTeClawAdapter,
+    )
 
     return BotEngineAdapterRegistry(
         {
+            "openclaw": NoopOpenClawAdapter(),
+            "teclaw": NoopTeClawAdapter(),
             "aicoding": NoopAICodingAdapter(),
             "hermes": NoopHermesAdapter(),
             "claude_code": NoopClaudeCodeAdapter(),
@@ -425,6 +444,13 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         engine_adapter_registry=engine_adapter_registry,
     )
 
+    # caller 模式：容器由 caller-connection 显式指定（binding.device_provider=="caller"），
+    # 传输层复用 claw，caller 专属校验在 CallerBotService 内（见 _caller_service.py）。
+    caller_bot_service = providers.Singleton(
+        CallerBotService,
+        inner=claw_bot_service,
+    )
+
     # ── Service providers ─────────────────────────────────────────────────────
 
     device_template_service = providers.Singleton(
@@ -554,6 +580,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         BotServiceSelector,
         claw_service=claw_bot_service,
         baas_service=baas_bot_service,
+        caller_service=caller_bot_service,
     )
 
     task_concurrency_pool = providers.Singleton(
@@ -650,6 +677,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         system_config_service=system_config_service,
         default_request_timeout=config.bot_runner.default_timeout,
         eval_session_log=eval_session_log,
+        engine_adapter_registry=engine_adapter_registry,
     )
 
     # ── SSE stream converter factory ────────────────────────────────────────

@@ -8,7 +8,6 @@ from typing import Literal
 
 from secbaas.community.api.bot_interaction import InteractionResolution
 
-JsonObject = dict[str, object]
 InteractionEventName = Literal[
     "interaction.requested",
     "interaction.resolved",
@@ -24,7 +23,7 @@ class EngineInteractionRequestedEvent:
 
     session_key: str
     interaction_id: str
-    envelope: JsonObject
+    envelope: dict[str, object]
     allowed_decisions: tuple[str, ...]
     expires_at_ms: int | None
 
@@ -33,7 +32,7 @@ class EngineInteractionRequestedEvent:
         cls,
         *,
         session_key: str,
-        payload: JsonObject,
+        payload: dict[str, object],
     ) -> EngineInteractionRequestedEvent:
         return cls(
             session_key=_required_identity(session_key, "sessionKey"),
@@ -50,14 +49,14 @@ class EngineInteractionResolvedEvent:
 
     session_key: str
     interaction_id: str
-    envelope: JsonObject
+    envelope: dict[str, object]
 
     @classmethod
     def from_payload(
         cls,
         *,
         session_key: str,
-        payload: JsonObject,
+        payload: dict[str, object],
     ) -> EngineInteractionResolvedEvent:
         return cls(
             session_key=_required_identity(session_key, "sessionKey"),
@@ -70,7 +69,7 @@ class EngineInteractionResolvedEvent:
         cls,
         *,
         session_key: str,
-        payload: JsonObject,
+        payload: dict[str, object],
     ) -> EngineInteractionResolvedEvent:
         if payload.get("kind") != "mode_switch":
             raise ValueError("mode transition resolved kind must be mode_switch")
@@ -85,8 +84,8 @@ class EngineInteractionResolvedEvent:
 class EngineInteractionResolveExchange:
     """Validated engine RPC request/response pair."""
 
-    request: JsonObject
-    response: JsonObject
+    request: dict[str, object]
+    response: dict[str, object]
     accepted: bool
     error_message: str | None
 
@@ -94,8 +93,8 @@ class EngineInteractionResolveExchange:
     def from_frames(
         cls,
         *,
-        request: JsonObject,
-        response: JsonObject,
+        request: dict[str, object],
+        response: dict[str, object],
     ) -> EngineInteractionResolveExchange:
         request_id = _required_str(request, "id")
         if response.get("type") != "res":
@@ -118,7 +117,7 @@ def build_interaction_resolve_request(
     request_id: str,
     interaction_id: str,
     resolution: InteractionResolution,
-) -> JsonObject:
+) -> dict[str, object]:
     """Build the exact engine request frame sent over websocket."""
     identity_key = (
         "transitionId" if resolution.kind == "mode_switch" else "interactionId"
@@ -128,7 +127,7 @@ def build_interaction_resolve_request(
         if resolution.kind == "mode_switch"
         else "interaction.resolve"
     )
-    params: JsonObject = {
+    params: dict[str, object] = {
         identity_key: _required_identity(interaction_id, identity_key),
         "decision": resolution.decision,
     }
@@ -153,7 +152,7 @@ def build_interaction_resolve_request(
     }
 
 
-def _interaction_id(payload: JsonObject) -> str:
+def _interaction_id(payload: dict[str, object]) -> str:
     value = payload.get("interactionId")
     if value is None:
         value = payload.get("id")
@@ -162,14 +161,16 @@ def _interaction_id(payload: JsonObject) -> str:
     return value
 
 
-def _event_envelope(event: InteractionEventName, payload: JsonObject) -> JsonObject:
-    envelope: JsonObject = {"type": "event", "event": event, "payload": payload}
+def _event_envelope(
+    event: InteractionEventName, payload: dict[str, object]
+) -> dict[str, object]:
+    envelope: dict[str, object] = {"type": "event", "event": event, "payload": payload}
     if "seq" in payload:
         envelope["seq"] = payload["seq"]
     return envelope
 
 
-def _allowed_decisions(payload: JsonObject) -> tuple[str, ...]:
+def _allowed_decisions(payload: dict[str, object]) -> tuple[str, ...]:
     kind = payload.get("kind")
     if kind == "ask_user":
         return ("submit", "cancel")
@@ -207,7 +208,7 @@ def _non_empty_str(value: object) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
 
-def _optional_int(payload: JsonObject, key: str) -> int | None:
+def _optional_int(payload: dict[str, object], key: str) -> int | None:
     if key not in payload:
         return None
     value = payload[key]
@@ -216,7 +217,7 @@ def _optional_int(payload: JsonObject, key: str) -> int | None:
     return value
 
 
-def _required_str(value: JsonObject, key: str) -> str:
+def _required_str(value: dict[str, object], key: str) -> str:
     item = value.get(key)
     if not isinstance(item, str) or not item:
         raise ValueError(f"interaction frame is missing {key}")

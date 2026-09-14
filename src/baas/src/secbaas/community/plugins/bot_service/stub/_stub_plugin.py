@@ -66,5 +66,25 @@ class StubBotServicePlugin(BotServicePlugin):
             device_id=os.getenv("BAAS_STUB_DEVICE_ID", "stub-device"),
         )
 
+    async def get_caller_connection(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+        token: str,
+    ) -> str:
+        """Return a deterministic stub sandbox_id, or simulate failure.
+
+        Env overrides: ``BAAS_STUB_CALLER_SANDBOX_ID`` sets the id;
+        ``BAAS_STUB_CALLER_ERROR=1`` raises ``PaasError``.
+        """
+        if os.getenv("BAAS_STUB_CALLER_ERROR"):
+            raise PaasError(
+                code=ErrorCode.PAAS_ERROR,
+                message="stub: simulated caller-connection failure",
+            )
+        return os.getenv("BAAS_STUB_CALLER_SANDBOX_ID", f"stub-caller-{bot_id}")
+
     async def close(self) -> None:
         """No-op: no resources to release."""

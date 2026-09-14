@@ -22,7 +22,11 @@ from secbaas.community.api.bot_runtime import (
     BotServiceError,
     SessionInfo,
 )
-from secbaas.community.core.service.bot_run import BotServiceConfig, ClawBotService
+from secbaas.community.core.service.bot_run import (
+    BotEngineAdapterRegistry,
+    BotServiceConfig,
+    ClawBotService,
+)
 from secbaas.community.core.service.bot_run._async_chat_client import (
     AsyncChatClient,
     ConcurrentSessionError,
@@ -47,6 +51,17 @@ def _make_config():
         proxy_base_url="https://proxy.test.com",
         proxy_ws_base_url="wss://proxy.test.com",
         adapter_port=20003,
+    )
+
+
+def _make_context():
+    from secbaas.community.api.bot_runtime import BotChatContext
+
+    return BotChatContext(
+        api_key_prefix="key-abc",
+        app_id="",
+        app_type="baas",
+        tenant="",
     )
 
 
@@ -95,6 +110,7 @@ def service(mock_pool):
         config=_make_config(),
         client_pool=mock_pool,
         secret_store=_make_secret_store(),
+        engine_adapter_registry=BotEngineAdapterRegistry({}),
     )
 
 
@@ -102,19 +118,33 @@ def service(mock_pool):
 
 
 class TestBindingInfoRequired:
+    """binding_info/metadata/context 已是协议必传参数（类型收紧），
+    此处验证缺 sandbox_id 时的运行时校验仍生效。"""
+
     @pytest.mark.asyncio
-    async def test_missing_binding_info_raises_error(self, service):
-        with pytest.raises(BotServiceError, match="requires binding_info"):
+    async def test_binding_info_without_sandbox_raises_error(self, service):
+        binding = BotBindingInfo(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            sandbox_id=None,
+            device_provider="baas",
+            device_id=BAAS_DEVICE_ID,
+        )
+        with pytest.raises(BotServiceError, match="requires sandbox_id"):
             await service.create_session(
                 bot_id=f"{BOT_ID}:{ENTITY_ID}",
+                metadata={},
+                binding_info=binding,
+                context=_make_context(),
             )
 
     @pytest.mark.asyncio
-    async def test_binding_info_none_raises_error(self, service):
-        with pytest.raises(BotServiceError, match="requires binding_info"):
+    async def test_missing_required_kwargs_raises_type_error(self, service):
+        """缺 binding_info/context 必传参数时抛 TypeError（协议契约）。"""
+        with pytest.raises(TypeError, match="missing"):
             await service.create_session(
                 bot_id=f"{BOT_ID}:{ENTITY_ID}",
-                binding_info=None,
+                metadata={},
             )
 
 
@@ -137,7 +167,9 @@ class TestSandboxIdHandling:
 
         session = await service.create_session(
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            metadata={},
             binding_info=arca_binding,
+            context=_make_context(),
         )
         assert session is not None
         assert session.status == "active"
@@ -147,7 +179,9 @@ class TestSandboxIdHandling:
         with pytest.raises(BotServiceError, match="requires sandbox_id"):
             await service.create_session(
                 bot_id=f"{BOT_ID}:{ENTITY_ID}",
+                metadata={},
                 binding_info=baas_binding,
+                context=_make_context(),
             )
 
 
@@ -166,7 +200,10 @@ class TestUrlBuilding:
             adapter_port=18789,
         )
         svc = ClawBotService(
-            config=config, secret_store=_make_secret_store(), client_pool=mock_pool
+            config=config,
+            secret_store=_make_secret_store(),
+            client_pool=mock_pool,
+            engine_adapter_registry=BotEngineAdapterRegistry({}),
         )
         result = svc._get_path_target("sb-abc")
         assert result == "ARCA_sb-abc:18789"
@@ -250,7 +287,10 @@ class TestSessionClientCreation:
             request_timeout=60,
         )
         svc = ClawBotService(
-            config=config, secret_store=_make_secret_store(), client_pool=mock_pool
+            config=config,
+            secret_store=_make_secret_store(),
+            client_pool=mock_pool,
+            engine_adapter_registry=BotEngineAdapterRegistry({}),
         )
         with patch.object(
             svc, "_get_headers", return_value={"x-proxypass-token": "tk"}
@@ -540,7 +580,9 @@ class TestCreateSessionFullFlow:
         ):
             await service.create_session(
                 bot_id=f"{BOT_ID}:{ENTITY_ID}",
+                metadata={},
                 binding_info=arca_binding,
+                context=_make_context(),
             )
 
     @pytest.mark.asyncio
@@ -559,7 +601,9 @@ class TestCreateSessionFullFlow:
 
         session = await service.create_session(
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            metadata={},
             binding_info=arca_binding,
+            context=_make_context(),
         )
         assert session is not None
         assert session.session_id == "agent:main:new-sess"
@@ -578,7 +622,9 @@ class TestCreateSessionFullFlow:
         session = await service.create_session(
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
             session_id=SESSION_ID,
+            metadata={},
             binding_info=arca_binding,
+            context=_make_context(),
         )
         assert session.session_id == SESSION_ID
         assert session.status == "active"
@@ -666,3 +712,157 @@ class TestListSessions:
 
         with pytest.raises(BotServiceError, match="already wrapped"):
             await service.list_sessions(binding_info=arca_binding)
+
+
+# ==================== Session-pending materialization ====================
+
+
+class TestSessionPendingMaterialization:
+    """send/stream/inject 在 session_pending 时先物化 planned session。"""
+
+    @pytest.mark.asyncio
+    async def test_send_message_materializes_pending_session(
+        self, service, arca_binding
+    ):
+        mat = AsyncMock()
+        client = AsyncMock()
+        client.send_message = AsyncMock(return_value=("hi", []))
+        service._client_pool.get = AsyncMock(return_value=client)
+        with patch.object(service, "_materialize_session", mat):
+            resp = await service.send_message(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=arca_binding,
+                context=_make_context(),
+                timeout=1.0,
+                session_pending=True,
+            )
+        assert resp.content == "hi"
+        mat.assert_awaited_once()
+        assert mat.await_args.kwargs["session_id"] == SESSION_ID
+
+    @pytest.mark.asyncio
+    async def test_send_message_stream_materializes_pending_session(
+        self, service, arca_binding
+    ):
+        mat = AsyncMock()
+
+        class _EmptyAsyncIter:
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+        client = MagicMock()
+        client.send_message_stream = MagicMock(return_value=_EmptyAsyncIter())
+        service._client_pool.get = AsyncMock(return_value=client)
+        with patch.object(service, "_materialize_session", mat):
+            async for _ in service.send_message_stream(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=arca_binding,
+                context=_make_context(),
+                timeout=1.0,
+                session_pending=True,
+            ):
+                pass
+        mat.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_inject_message_materializes_pending_session(
+        self, service, arca_binding
+    ):
+        mat = AsyncMock()
+        client = AsyncMock()
+        service._client_pool.get = AsyncMock(return_value=client)
+        with patch.object(service, "_materialize_session", mat):
+            await service.inject_message(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=arca_binding,
+                context=_make_context(),
+                session_pending=True,
+            )
+        mat.assert_awaited_once()
+
+
+# ==================== Adapter routing & materialization ====================
+
+
+class TestAdapterFor:
+    """_adapter_for：仅 aicoding/hermes/claude_code 命中已注册 adapter。"""
+
+    def test_returns_registered_adapter(self, service):
+        registry = MagicMock()
+        adapter = MagicMock()
+        registry.has.return_value = True
+        registry.get.return_value = adapter
+        service._engine_adapter_registry = registry
+        assert service._adapter_for("aicoding") is adapter
+
+    def test_returns_none_when_not_registered(self, service):
+        registry = MagicMock()
+        registry.has.return_value = False
+        service._engine_adapter_registry = registry
+        assert service._adapter_for("openclaw") is None
+
+
+class TestGetOrCreateAdapterSessionOpenclawPrefix:
+    """新建 openclaw adapter session 补 agent:main: 前缀。"""
+
+    @pytest.mark.asyncio
+    async def test_openclaw_session_id_gets_agent_main_prefix(self, service):
+        session_client = AsyncMock()
+        adapter_session = MagicMock()
+        adapter_session.id = "sess-1"
+        session_client.create_session = AsyncMock(return_value=adapter_session)
+
+        adapter_session_id, reused = await service._get_or_create_adapter_session(
+            session_client=session_client,
+            session_id=None,
+            user_id="u-1",
+            metadata={},
+            engine_type="openclaw",
+            bot_id=BOT_ID,
+            run_id="run-1",
+        )
+        assert adapter_session_id == "agent:main:sess-1"
+        assert reused is False
+
+
+class TestMaterializeSession:
+    """claw 版物化：用裸 key 在 adapter 侧创建 planned session。"""
+
+    @pytest.mark.asyncio
+    async def test_creates_with_bare_key(self, service, arca_binding, monkeypatch):
+        session_client = AsyncMock()
+        session_client.__aenter__ = AsyncMock(return_value=session_client)
+        session_client.__aexit__ = AsyncMock(return_value=False)
+        session_client.create_session = AsyncMock()
+        monkeypatch.setattr(service, "_create_session_client", lambda x: session_client)
+        await service._materialize_session(
+            session_id="agent:main:session:abc-1:user:u-1",
+            binding_info=arca_binding,
+            user_id="u-1",
+            metadata={"title": "t"},
+        )
+        session_client.create_session.assert_awaited_once_with(
+            title="t", user_id="u-1", model=None, uuid="abc-1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_wraps_failure_as_bot_service_error(
+        self, service, arca_binding, monkeypatch
+    ):
+        session_client = AsyncMock()
+        session_client.__aenter__ = AsyncMock(return_value=session_client)
+        session_client.__aexit__ = AsyncMock(return_value=False)
+        session_client.create_session = AsyncMock(side_effect=RuntimeError("net"))
+        monkeypatch.setattr(service, "_create_session_client", lambda x: session_client)
+        with pytest.raises(BotServiceError, match="Failed to materialize"):
+            await service._materialize_session(
+                session_id="agent:main:session:abc-1:user:u-1",
+                binding_info=arca_binding,
+                user_id="u-1",
+            )

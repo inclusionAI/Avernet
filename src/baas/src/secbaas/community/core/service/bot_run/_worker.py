@@ -85,6 +85,7 @@ class BotRequestWorkerConfig:
     cap_warn_interval_seconds: float = 30.0  # 全局并发上限拦截日志的节流间隔
     timeout_scan_lock_name: str = "bot_run_timeout_scan_lock"  # 全局超时扫描单飞锁
     timeout_scan_lock_expire_seconds: int = 60  # 单飞锁过期时间（秒）
+    abort_poll_interval_seconds: float = 1.0  # abort 信号轮询间隔
 
 
 #: Engine 通知回调类型：``chat.abort`` best-effort 通知 engine 取消 session/run。
@@ -300,9 +301,11 @@ class BotRequestWorker:
 
         复用 ``_terminate_local_timeout`` 的 cancel+force_done 模板，顺序：
         1. ``run_repository.update_error(run_id, ...)`` 标 FAILED（幂等：已终态时 no-op）；
-        2. ``queue.force_done(run_id)`` 终结队列工作项（幂等）；
-        3. 若 ``assigned_worker == 本 worker``，cancel 本机 ``_running_tasks[run_id]``；
-        4. best-effort 通知 engine（``engine_abort_notifier``），失败仅记录日志。
+        2. ``queue.request_abort(run_id)`` 写跨实例信号（持有该 run 的 Worker 通过
+           ``_abort_poll_loop`` 轮询感知后 cancel 本机 task）；
+        3. ``queue.force_done(run_id)`` 终结队列工作项（幂等）；
+        4. 若 ``assigned_worker == 本 worker``，cancel 本机 ``_running_tasks[run_id]``；
+        5. best-effort 通知 engine（``engine_abort_notifier``），失败仅记录日志。
 
         群聊多 bot 共享同一 ``session_id`` 时仅取消目标 bot 的 RUNNING run；PENDING
         不命中（由 ``_timeout_scan_once`` 超时路径兜底）。非本机 RUNNING run 无法本机
@@ -335,10 +338,13 @@ class BotRequestWorker:
                     e,
                     exc_info=True,
                 )
-            # 2. force_done 终结队列工作项（幂等）
+            # 2. 写跨实例 abort 信号（持有该 run 的 Worker 轮询感知后 cancel 本机 task）
+            with contextlib.suppress(Exception):
+                self._queue.request_abort(run_id)
+            # 3. force_done 终结队列工作项（幂等）
             with contextlib.suppress(Exception):
                 self._queue.force_done(run_id)
-            # 3. cancel 本机正在执行的 task
+            # 4. cancel 本机正在执行的 task
             if record.assigned_worker == self._worker_id:
                 running_task = self._running_tasks.get(run_id)
                 if running_task is not None and not running_task.done():
@@ -358,7 +364,7 @@ class BotRequestWorker:
                 record.assigned_worker,
             )
 
-        # 4. best-effort 通知 engine（一次 维度通知，run_id 取首个）
+        # 5. best-effort 通知 engine（一次 维度通知，run_id 取首个）
         if self._engine_abort_notifier is not None and aborted_run_ids:
             try:
                 await self._engine_abort_notifier(session_id, aborted_run_ids[0])
@@ -479,8 +485,14 @@ class BotRequestWorker:
         """
         post_run_callback = self._resolve_callback(record)
 
+        run_task = asyncio.current_task()
         guardian = asyncio.create_task(
             self._run_guardian(record, self._record_deadline(record))
+        )
+        abort_poll_task = (
+            asyncio.create_task(self._abort_poll_loop(record, run_task))
+            if run_task is not None
+            else None
         )
         try:
             with _trace_context_from_meta(record.meta):
@@ -497,6 +509,10 @@ class BotRequestWorker:
             guardian.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await guardian
+            if abort_poll_task is not None:
+                abort_poll_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await abort_poll_task
             self._active -= 1
 
     @staticmethod
@@ -576,6 +592,54 @@ class BotRequestWorker:
                 record.run_id,
                 self._worker_id,
             )
+
+    async def _abort_poll_loop(
+        self, record: BotRunQueueRecord, run_task: asyncio.Task[None]
+    ) -> None:
+        """轮询 meta 的 ``abort_requested`` 信号，感知后取消本机执行 task。
+
+        供 chat.abort 跨实例通知：``abort_runs_by_session`` 写入
+        ``request_abort`` 信号 + force_done 后，实际持有该 run 的 Worker 由
+        本循环感知信号并 cancel 本机 task；engine 通知 best-effort，失败
+        仅记录日志。run_task 结束（正常完成/超时/被取消）时循环自然退出。
+        """
+        interval = self._config.abort_poll_interval_seconds
+        run_id = record.run_id
+        while not run_task.done():
+            await asyncio.sleep(interval)
+            try:
+                if self._queue.get_by_run_id(run_id) is None:
+                    continue
+                if not self._queue.is_abort_requested(run_id):
+                    continue
+            except Exception as e:
+                logger.warning(
+                    "[BotRequestWorker] abort poll failed run_id=%s: %s",
+                    run_id,
+                    e,
+                )
+                continue
+            logger.info(
+                "[BotRequestWorker] abort signal detected, cancelling local task "
+                "run_id=%s session_id=%s",
+                run_id,
+                record.session_id,
+            )
+            if not run_task.done():
+                run_task.cancel()
+            with contextlib.suppress(Exception):
+                self._queue.force_done(run_id)
+            if self._engine_abort_notifier is not None:
+                try:
+                    await self._engine_abort_notifier(record.session_id, run_id)
+                except Exception as e:
+                    logger.warning(
+                        "[BotRequestWorker] abort engine notify failed run_id=%s: %s",
+                        run_id,
+                        e,
+                        exc_info=True,
+                    )
+            return
 
     async def _run_guardian(
         self, record: BotRunQueueRecord, deadline: datetime | None

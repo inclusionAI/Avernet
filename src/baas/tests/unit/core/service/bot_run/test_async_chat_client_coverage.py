@@ -56,8 +56,8 @@ def mock_bot_ws_instance(mock_bot_ws):
         return_value={"server": {"host": "srv"}, "features": {}}
     )
     instance.close = AsyncMock()
-    instance.chat_send = AsyncMock()
-    instance.chat_inject = AsyncMock()
+    instance.chat_send = AsyncMock(return_value={"ok": True})
+    instance.chat_inject = AsyncMock(return_value={"ok": True})
     instance.connected = True
     return instance
 
@@ -925,6 +925,7 @@ class TestSendMessageStream:
                     StreamChunk(type="delta", content="chunk1")
                 )
                 state.stream_queue.put_nowait(StreamChunk(type="final", content="done"))
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = push_chunks
 
@@ -955,6 +956,7 @@ class TestSendMessageStream:
             state = client._sessions.get(sk)
             if state and state.stream_queue:
                 state.stream_queue.put_nowait(StreamChunk(type="error", content="bad"))
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = push_error
 
@@ -976,6 +978,7 @@ class TestSendMessageStream:
             if state and state.stream_queue:
                 state.stream_queue.put_nowait(StreamChunk(type="delta", content="d1"))
                 state.stream_queue.put_nowait(StreamChunk(type="final", content="end"))
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = push_chunks
 
@@ -993,7 +996,7 @@ class TestSendMessageStream:
         await client.connect()
 
         async def never_push(*args, **kwargs):
-            pass  # Don't push any chunks
+            return {"ok": True}  # Don't push any chunks
 
         mock_bot_ws_instance.chat_send.side_effect = never_push
 
@@ -1019,6 +1022,7 @@ class TestSendMessageStream:
             state = client._sessions.get(sk)
             if state and state.stream_queue:
                 state.stream_queue.put_nowait(StreamChunk(type="final", content="ok"))
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = push_final
 
@@ -1040,6 +1044,7 @@ class TestSendMessageStream:
 
         async def never_push(*args, **kwargs):
             await asyncio.sleep(10)
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = never_push
 
@@ -1186,6 +1191,7 @@ class TestSendMessageAdditional:
             state = client._sessions.get(sk)
             if state:
                 state.chat_complete.set()
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = fire_complete
 
@@ -1213,6 +1219,7 @@ class TestSendMessageAdditional:
             state = client._sessions.get(sk)
             if state:
                 state.chat_complete.set()
+            return {"ok": True}
 
         mock_bot_ws_instance.chat_send.side_effect = fire_complete
 
