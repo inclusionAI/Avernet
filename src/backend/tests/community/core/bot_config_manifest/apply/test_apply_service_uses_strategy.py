@@ -365,3 +365,119 @@ def test_the_api_payload_carries_the_notes() -> None:
         started_at=datetime.now(), notes=("redeliver failed",),
     )
     assert apply_payload(report).notes == ["redeliver failed"]
+
+
+def _folded(earlier, later):
+    """``carry_forward`` over two hand-built reports, with the read stubbed out."""
+    from agentclaw.community.core.bot_config_manifest.apply.carry_forward import (
+        carry_forward,
+    )
+
+    class _Applies:
+        def get(self, **_kw):
+            return object()
+
+    return carry_forward(
+        later,
+        ctx=type("C", (), {"env": "dev", "entity_id": _ENTITY, "bot_id": _BOT})(),
+        carry_from_apply_id="a",
+        applies=_Applies(),
+        to_report=lambda record, **_kw: earlier,
+    )
+
+
+def _phase_report(apply_id, trigger, *, sources=(), categories=()):
+    from datetime import datetime
+
+    from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyReport
+
+    return ApplyReport(
+        apply_id=apply_id,
+        bot_id=_BOT,
+        trigger=trigger,
+        status=ApplyStatus.SUCCEEDED,
+        started_at=datetime.now(),
+        sources=tuple(sources),
+        categories=tuple(categories),
+    )
+
+
+def test_one_source_used_by_both_phases_is_one_row() -> None:
+    """The invariant the fold used to break: one declaration, one row.
+
+    A creation's two applies carry two ``SourceSession``s, so a source serving
+    categories on both sides of container provisioning is adopted twice — once
+    per session, each idempotent only within itself. Concatenating the two
+    reports used to publish it twice, against what the schema and
+    ``SourceResolution`` both promise a reader.
+    """
+    from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
+        SourceResolution,
+    )
+
+    content = SourceResolution(
+        name="content",
+        url="https://git.corp/manifest-testing.git",
+        ref="main",
+        mode="non_strict",
+        resolved_sha="7" * 40,
+        auth="gh-readonly",
+    )
+    merged = _folded(
+        _phase_report("a", "create:pre_container", sources=[content]),
+        _phase_report("b", "create:on_container", sources=[content]),
+    )
+    assert merged.sources == (content,)
+
+
+def test_two_resolutions_of_one_moving_ref_stay_two_rows() -> None:
+    """Dedup is on the whole row, so a ref that moved between phases keeps both.
+
+    ``(url, ref, mode)`` would collapse these, and collapsing them would report
+    a delivery that did not happen: phase A served its categories from one
+    commit and phase B served its own from another. Both are true, and the
+    carried row goes first because that is the order they were resolved in.
+    """
+    from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
+        SourceResolution,
+    )
+
+    url = "https://git.corp/manifest-testing.git"
+    before = SourceResolution(name="content", url=url, ref="main",
+                              mode="non_strict", resolved_sha="7" * 40)
+    after = SourceResolution(name="content", url=url, ref="main",
+                             mode="non_strict", resolved_sha="9" * 40)
+    merged = _folded(
+        _phase_report("a", "create:pre_container", sources=[before]),
+        _phase_report("b", "create:on_container", sources=[after]),
+    )
+    assert merged.sources == (before, after)
+
+
+def test_the_folded_category_order_is_untouched() -> None:
+    """Only ``sources`` is deduped; ``categories`` still concatenates in order.
+
+    The carried categories go first because that is ``APPLY_ORDER``'s own
+    order — ``script`` is position 0 — and it is what keeps a pre-container
+    ``script`` from reading as though it had vanished.
+    """
+    from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
+        CategoryResult,
+    )
+    from agentclaw.community.core.bot_config_manifest.capabilities import (
+        ManifestCategory,
+        ManifestSection,
+    )
+
+    script = CategoryResult(construct=ManifestSection.SCRIPT)
+    mcp = CategoryResult(construct=ManifestCategory.MCP)
+    skills = CategoryResult(construct=ManifestCategory.SKILLS)
+    merged = _folded(
+        _phase_report("a", "create:pre_container", categories=[script]),
+        _phase_report("b", "create:on_container", categories=[mcp, skills]),
+    )
+    assert [c.construct for c in merged.categories] == [
+        ManifestSection.SCRIPT,
+        ManifestCategory.MCP,
+        ManifestCategory.SKILLS,
+    ]
