@@ -13,6 +13,7 @@ provides:
   - "gate — who may operate a bot, and which bot types/stages the operator surfaces serve"
   - "stage — which runtime a stage names (draft workspace vs published bindings)"
   - "EngineResult / ConnectionResult / SocketInfo value objects"
+  - "SessionKeyCodec / SessionKeyCodecRegistry — the engine-specific wire form of a session id (assembled by EngineRuntimeModule)"
   - "Engine-runtime domain errors (no HTTP status; the adapter maps them)"
 consumes:
   - "BotService — owner-scoped bot lookup; the isolation seam"
@@ -22,6 +23,7 @@ consumes:
   - "DeviceBindingRepository — the active binding id, without building conn info"
   - "BotPublishRepository — a service bot's published stage bindings (ext.binding.{verify,online})"
 internal_dependencies:
+  - agentclaw.community.core.bot_management.engines    # engine-type spelling normalisation
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module

@@ -3,8 +3,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schemas import Message, Session
-from agentclaw.community.core.engine_runtime.errors import EngineHistoryDepthExceededError
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schemas import (
+    Message,
+    Session,
+    SessionFile,
+)
+from agentclaw.community.core.engine_runtime.errors import (
+    EngineHistoryDepthExceededError,
+    EngineResourceNotFoundError,
+)
+from agentclaw.community.core.session_resources.types import SessionResourceRecord
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -260,3 +268,59 @@ def _history_page(
     if reported is not None:
         return reported, visible
     return n, visible
+
+
+# ── session files ────────────────────────────────────────────────────────────
+# Shaping helpers for the Session Files routes, which live on the same router.
+# Here rather than beside those routes for the reason this module exists: they
+# are pure mapping — a record to its public shape, an upstream error code to the
+# one a caller may see, an upstream header bag to the ones this surface will
+# forward — and the router had outgrown its single-responsibility cap.
+
+
+def _session_file_resource(record: SessionResourceRecord) -> SessionFile:
+    return SessionFile(
+        resource_id=record.resource_id,
+        display_name=record.display_name,
+        status=record.status.value,
+        size_bytes=record.size_bytes,
+        content_hash=record.client_content_hash,
+        task_version=record.task_version,
+        error_code=_session_file_public_error(record.error_code),
+    )
+
+
+def _session_file_public_error(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if value in {"dispatch_failed", "engine_unavailable"}:
+        return value
+    return "materialization_failed"
+
+
+def _session_file_not_found(exc: ValueError) -> EngineResourceNotFoundError:
+    raise EngineResourceNotFoundError("session file is unavailable") from exc
+
+
+def _session_file_headers(headers: object) -> dict[str, str]:
+    if not hasattr(headers, "items"):
+        return {"Content-Type": "application/octet-stream"}
+    # COSEC: the upstream header bag is untrusted at this public boundary;
+    # forward only a fixed response-header allowlist after rejecting CR/LF.
+    allowed = {"content-type", "content-length", "content-disposition", "retry-after", "cache-control"}
+    safe: dict[str, str] = {}
+    for key, value in headers.items():
+        normalized = str(key).lower()
+        if normalized not in allowed or not isinstance(value, str):
+            continue
+        if "\r" in value or "\n" in value:
+            continue
+        if normalized == "content-length" and not value.isdecimal():
+            continue
+        if normalized == "retry-after" and not value.isdecimal():
+            continue
+        if normalized == "cache-control" and value.lower() != "no-store":
+            continue
+        safe["-".join(part.capitalize() for part in normalized.split("-"))] = value
+    safe.setdefault("Content-Type", "application/octet-stream")
+    return safe

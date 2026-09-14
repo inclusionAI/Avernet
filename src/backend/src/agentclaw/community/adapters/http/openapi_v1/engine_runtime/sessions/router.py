@@ -44,6 +44,9 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schema
     _map_session,
     _page,
     _require_within_depth,
+    _session_file_headers,
+    _session_file_not_found,
+    _session_file_resource,
     _window,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.converter_creation import reconcile_created_session
@@ -75,12 +78,12 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineResourceNotFoundError,
     EngineUpstreamError,
 )
+from agentclaw.community.core.engine_runtime.session_key import SessionKeyCodecRegistry
 from agentclaw.community.core.resources.service import FileTooLargeError
 from agentclaw.community.core.expert_chat.errors import (
     BotNotFoundError as ExpertBotNotFoundError,
     ConnectionError as ExpertConnectionError,
 )
-from agentclaw.community.core.session_resources.types import SessionResourceRecord
 from agentclaw.community.di import Injected
 router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/sessions",
@@ -357,13 +360,17 @@ async def get_session(
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
+    codecs: SessionKeyCodecRegistry = Injected(SessionKeyCodecRegistry),
 ) -> Envelope[Session]:
     """Get one session.
 
     Pass the `session_id` exactly as the list endpoint returned it. The value
     may contain colons; no encoding is required.
     """
-    # A colon is legal in a path segment (RFC 3986), so ids route as-is. An id
+    # A colon is legal in a path segment (RFC 3986), so ids route as-is to
+    # every engine that takes them that way. An engine whose runtime does not —
+    # teclaw, whose proxy answers 400 — registers a codec in
+    # ``core/engine_runtime/session_key.py`` and its ids travel encoded. An id
     # containing "/" would not be addressable, but no engine id format has one.
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
@@ -385,7 +392,7 @@ async def get_session(
         facts=facts,
         stage=stage.value,
         method="GET",
-        path=f"/api/sessions/{session_id}",
+        path=f"/api/sessions/{codecs.resolve(facts.active_engine).encode(session_id)}",
     )
     if not isinstance(result.data, dict):
         raise EngineResourceNotFoundError(f"no session {session_id}")
@@ -404,6 +411,7 @@ async def _set_session_favorite(
     relay: EngineRuntimeRelayProtocol,
     friendships: HumanBotFriendshipServiceProtocol,
     expert: ExpertChatServiceProtocol,
+    codecs: SessionKeyCodecRegistry,
     request: Request,
 ) -> SessionFavorite:
     facts = await _resolve_session_backend(
@@ -420,7 +428,9 @@ async def _set_session_favorite(
         except Exception as error:
             _raise_expert_error(error)
         return SessionFavorite(session_id=session_id, favorited=favorited)
-    encoded_session_id = quote(session_id, safe="")
+    encoded_session_id = quote(
+        codecs.resolve(facts.active_engine).encode(session_id), safe=""
+    )
     await relay.call(
         bot_id=bot_id,
         owner_id=owner_id,
@@ -446,6 +456,7 @@ async def add_session_favorite(
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
+    codecs: SessionKeyCodecRegistry = Injected(SessionKeyCodecRegistry),
 ) -> Envelope[SessionFavorite]:
     """Idempotently favorite one session for the acting user."""
     result = await _set_session_favorite(
@@ -459,6 +470,7 @@ async def add_session_favorite(
         relay=relay,
         friendships=friendships,
         expert=expert,
+        codecs=codecs,
         request=request,
     )
     return envelope(result, request)
@@ -477,6 +489,7 @@ async def remove_session_favorite(
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
+    codecs: SessionKeyCodecRegistry = Injected(SessionKeyCodecRegistry),
 ) -> Envelope[SessionFavorite]:
     """Idempotently remove the acting user's favorite marker."""
     result = await _set_session_favorite(
@@ -490,6 +503,7 @@ async def remove_session_favorite(
         relay=relay,
         friendships=friendships,
         expert=expert,
+        codecs=codecs,
         request=request,
     )
     return envelope(result, request)
@@ -509,6 +523,7 @@ async def update_session(
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
+    codecs: SessionKeyCodecRegistry = Injected(SessionKeyCodecRegistry),
 ) -> Envelope[Session]:
     """Update a session. Omitted fields are left unchanged."""
     # Publicly a PATCH on the resource; the engine models the same operation as
@@ -539,7 +554,7 @@ async def update_session(
         # there is no Body(...) on it. Sending a body is silently discarded and
         # the endpoint answers 200 with the unchanged session: a no-op that
         # looks like success.
-        path=f"/api/sessions/{session_id}/update",
+        path=f"/api/sessions/{codecs.resolve(facts.active_engine).encode(session_id)}/update",
         params=payload,
     )
     if not isinstance(result.data, dict):
@@ -560,6 +575,7 @@ async def delete_session(
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
+    codecs: SessionKeyCodecRegistry = Injected(SessionKeyCodecRegistry),
 ) -> Envelope[Deleted]:
     """Delete a session."""
     facts = await _resolve_session_backend(
@@ -581,7 +597,7 @@ async def delete_session(
         facts=facts,
         stage=stage.value,
         method="DELETE",
-        path=f"/api/sessions/{session_id}",
+        path=f"/api/sessions/{codecs.resolve(facts.active_engine).encode(session_id)}",
     )
     return deleted(request)
 
@@ -602,54 +618,6 @@ DispositionQuery = Annotated[
         description="Render the file inline or download it as an attachment.",
     ),
 ]
-
-
-def _session_file_resource(record: SessionResourceRecord) -> SessionFile:
-    return SessionFile(
-        resource_id=record.resource_id,
-        display_name=record.display_name,
-        status=record.status.value,
-        size_bytes=record.size_bytes,
-        content_hash=record.client_content_hash,
-        task_version=record.task_version,
-        error_code=_session_file_public_error(record.error_code),
-    )
-
-
-def _session_file_public_error(value: str | None) -> str | None:
-    if value is None:
-        return None
-    if value in {"dispatch_failed", "engine_unavailable"}:
-        return value
-    return "materialization_failed"
-
-
-def _session_file_not_found(exc: ValueError) -> EngineResourceNotFoundError:
-    raise EngineResourceNotFoundError("session file is unavailable") from exc
-
-
-def _session_file_headers(headers: object) -> dict[str, str]:
-    if not hasattr(headers, "items"):
-        return {"Content-Type": "application/octet-stream"}
-    # COSEC: the upstream header bag is untrusted at this public boundary;
-    # forward only a fixed response-header allowlist after rejecting CR/LF.
-    allowed = {"content-type", "content-length", "content-disposition", "retry-after", "cache-control"}
-    safe: dict[str, str] = {}
-    for key, value in headers.items():
-        normalized = str(key).lower()
-        if normalized not in allowed or not isinstance(value, str):
-            continue
-        if "\r" in value or "\n" in value:
-            continue
-        if normalized == "content-length" and not value.isdecimal():
-            continue
-        if normalized == "retry-after" and not value.isdecimal():
-            continue
-        if normalized == "cache-control" and value.lower() != "no-store":
-            continue
-        safe["-".join(part.capitalize() for part in normalized.split("-"))] = value
-    safe.setdefault("Content-Type", "application/octet-stream")
-    return safe
 
 
 @router.post(
@@ -904,6 +872,7 @@ async def list_session_messages(
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
+    codecs: SessionKeyCodecRegistry = Injected(SessionKeyCodecRegistry),
 ) -> Envelope[MessagePage]:
     """Read a session's message history, newest page first.
 
@@ -941,7 +910,7 @@ async def list_session_messages(
         facts=facts,
         stage=stage.value,
         method="GET",
-        path=f"/api/sessions/{session_id}/messages",
+        path=f"/api/sessions/{codecs.resolve(facts.active_engine).encode(session_id)}/messages",
         # The history route tail-limits rather than paginating, so the offset is
         # applied here instead of being sent. See ``_history_window``.
         params=_history_window(page),
@@ -967,6 +936,7 @@ async def clear_session_messages(
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
+    codecs: SessionKeyCodecRegistry = Injected(SessionKeyCodecRegistry),
 ) -> Envelope[Deleted]:
     """Clear a session's message history, keeping the session."""
     facts = await _resolve_session_backend(
@@ -989,6 +959,6 @@ async def clear_session_messages(
         facts=facts,
         stage=stage.value,
         method="DELETE",
-        path=f"/api/sessions/{session_id}/messages",
+        path=f"/api/sessions/{codecs.resolve(facts.active_engine).encode(session_id)}/messages",
     )
     return deleted(request)
