@@ -13,7 +13,7 @@ interface CreateWorkflowModalProps {
   isPending?: boolean
 }
 
-const COMMAND_PATTERN = /^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$/
+const COMMAND_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*[A-Za-z0-9]$|^[A-Za-z0-9]$/
 type CreateSource = 'blank' | 'paste' | 'file'
 
 function buildInitialSpec(workflowId: string, title: string): WorkflowSpec {
@@ -69,7 +69,7 @@ export default function CreateWorkflowModal({ open, onClose, onSubmit, isPending
       return
     }
     if (!COMMAND_PATTERN.test(cmd)) {
-      setCommandError('命令必须为 kebab-case 或 snake-case（小写字母、数字、连字符、下划线）')
+      setCommandError('命令只能包含字母、数字、连字符和下划线')
     } else {
       setCommandError(null)
     }
@@ -101,7 +101,7 @@ export default function CreateWorkflowModal({ open, onClose, onSubmit, isPending
         const id = workflowId.trim()
         const displayTitle = title.trim() || id
         const cmd = command.trim()
-        const facade = cmd ? { command: cmd, remark: remark.trim() || undefined } : undefined
+        const facade = cmd ? { command: cmd.toLowerCase(), remark: remark.trim() || undefined } : undefined
         await onSubmit({ workflowId: id, spec: buildInitialSpec(id, displayTitle), facade })
       }
       onClose()

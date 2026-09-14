@@ -92,6 +92,8 @@ const workflowsCache = new ApiCache<unknown[]>({
   keyPrefix: "workflows",
 });
 
+const FACADE_COMMAND_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
 export function createWorkflowsRouter(
   workflowSpecRepo: WorkflowSpecRepository | null,
   facadeRepo: FacadeBindingRepository | null,
@@ -189,6 +191,11 @@ export function createWorkflowsRouter(
         });
         return;
       }
+      const facadeCommand = facade?.command?.trim();
+      if (facadeCommand && !FACADE_COMMAND_PATTERN.test(facadeCommand)) {
+        res.status(400).json({ error: "Bad Request", message: "facade.command may contain only letters, digits, hyphens, and underscores" });
+        return;
+      }
       const specJson = JSON.stringify(validationResult.normalizedSpec);
 
       // Execute save: handle ID change vs normal upsert
@@ -215,10 +222,11 @@ export function createWorkflowsRouter(
         row = await workflowSpecRepo.upsert(workflowId, packId ?? existingRow?.pack_id ?? null, specJson);
       }
 
-      // Persist facade binding (slash command) if provided and repo available
-      if (facadeRepo && facade?.command) {
+      // Facade command invocation is case-insensitive. Keep a lower-case key in
+      // the database so "Demo" and "demo" cannot become separate bindings.
+      if (facadeRepo && facadeCommand) {
         await facadeRepo.upsert({
-          command: facade.command,
+          command: facadeCommand.toLowerCase(),
           workflowId,
           packId: packId ?? null,
           remark: facade.remark ?? null,

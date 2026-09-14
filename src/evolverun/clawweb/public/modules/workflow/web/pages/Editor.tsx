@@ -56,7 +56,7 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
   const saveToDbMutation = useSaveWorkflowToDb()
   const { data: facadeBindings } = useFacadeBindings()
 
-  const COMMAND_PATTERN = /^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$/
+  const COMMAND_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*[A-Za-z0-9]$|^[A-Za-z0-9]$/
 
   const handleSelectWorkflow = useCallback(
     (workflowId: string) => {
@@ -169,14 +169,15 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
     const id = saveId.trim()
     const title = saveTitle.trim()
     const command = saveCommand.trim()
+    const normalizedCommand = command.toLowerCase()
     if (!id) return
     if (command && !COMMAND_PATTERN.test(command)) {
-      setCommandError('命令必须为 kebab-case 或 snake-case（小写字母、数字、连字符、下划线）')
+      setCommandError('命令只能包含字母、数字、连字符和下划线')
       return
     }
     if (commandError) return
     try {
-      const facade = command ? { command, remark: saveRemark.trim() || undefined } : undefined
+      const facade = normalizedCommand ? { command: normalizedCommand, remark: saveRemark.trim() || undefined } : undefined
       const specToSave: WorkflowSpec = { ...spec, id, title: title || id }
       const user = getClientUser()
       if (!user?.userId) {
@@ -556,10 +557,10 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
                       const cmd = saveCommand.trim()
                       if (!cmd) { setCommandError(null); return }
                       if (!COMMAND_PATTERN.test(cmd)) {
-                        setCommandError('命令必须为 kebab-case 或 snake-case（小写字母、数字、连字符、下划线）')
+                        setCommandError('命令只能包含字母、数字、连字符和下划线')
                         return
                       }
-                      const existing = facadeBindings?.find((b) => b.command === cmd)
+                      const existing = facadeBindings?.find((b) => b.command === cmd.toLowerCase())
                       if (existing && existing.workflowId !== spec?.id) {
                         setCommandError(`Command "/${cmd}" 已绑定到工作流 "${existing.workflowId}"`)
                       }
