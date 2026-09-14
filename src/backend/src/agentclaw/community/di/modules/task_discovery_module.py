@@ -45,9 +45,6 @@ from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
 from agentclaw.community.core.task.task_discovery.notify_messages_provider import (
     NotifyMessagesProvider,
 )
-from agentclaw.community.core.task.task_discovery.openapi_bot_session_initiator import (
-    OpenApiBotSessionInitiator,
-)
 from agentclaw.community.core.task.task_discovery.protocols import (
     BotServiceProtocol as _TaskDiscoveryBotServiceProtocol,
     CronRelayServiceProtocol as _TaskDiscoveryCronRelayProtocol,
@@ -63,9 +60,6 @@ from agentclaw.community.core.task.task_discovery.session_initiator import (
 from agentclaw.community.core.task.task_discovery.task_reader import (
     OrmTaskReader,
     TaskReader,
-)
-from agentclaw.community.core.task.task_runner.client.ports import (
-    OpenApiBotPort,
 )
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.log import get_logger
@@ -169,15 +163,16 @@ class TaskDiscoveryModule(Module):
         cron_relay: _ApiCronRelayServiceProtocol,
         injector: Injector,
     ) -> SessionInitiator:
-        """构建 SessionInitiator — 按 DEPLOY_PROFILE 分发。
+        """构建 SessionInitiator — 默认 local 实现 (CronRelaySessionInitiator).
 
-        - singlebox → ``CronRelaySessionInitiator`` (cron relay + 直连 engine WebSocket)
-        - corp/pre/prod → ``OpenApiBotSessionInitiator`` (BaaS Open API + Bearer 鉴权)
-          当 ``OpenApiBotPort`` 未绑定或返回 None (fail-closed) → 回退 CronRelaySessionInitiator。
+        组合根按 ``DeployProfile`` 选实现, provider 内不 if/else:
+        - base (本 provider) → ``CronRelaySessionInitiator`` (relay + WebSocket 直连)。
+        - corp 列 → 通过 corp overlay 的 ``@provider`` 绑定 ``OpenApiBotSessionInitiator``
+          (BaaS Open API + Bearer), last-binding-wins 覆盖本默认绑定。
+        - 若 corp 未装/OpenApiBotPort 缺失, corp overlay 自身 fail-closed 回落
+          (见 corp ``corp_task_integration``), 不在此 base 内判断。
 
-        对齐 ``task_module.py`` 的 ``injector.get(OpenApiBotPort)`` + try/except 降级模式。
-
-        ``FrontendUrlProvider`` 由 DI 注入(corp 列 ``CorpFrontendUrlProvider``,
+        ``FrontendUrlProvider`` 由 DI 注入 (corp 列 ``CorpFrontendUrlProvider``,
         community/singlebox 列未绑定 → fallback ``NullFrontendUrlProvider``)。
         """
         logger.debug("[task_discovery] → TaskDiscoveryModule._provide_session_initiator()")
@@ -186,34 +181,6 @@ class TaskDiscoveryModule(Module):
         except Exception:  # noqa: BLE101 未绑定 → Null(构造参数兜底)
             fe_provider = NullFrontendUrlProvider()
 
-        if os.environ.get("DEPLOY_PROFILE", "").strip().lower() != DeployProfile.SINGLEBOX.value:
-            # corp/pre/prod: 尝试从 DI 注入 OpenApiBotPort (corp overlay 绑定)
-            try:
-                openapi_bot = injector.get(OpenApiBotPort)
-                if openapi_bot is not None:
-                    logger.info(
-                        "[task_discovery] SessionInitiator → OpenApiBotSessionInitiator "
-                        "(corp path, openapi_bot=%s, frontend_url_provider=%s)",
-                        type(openapi_bot).__name__,
-                        type(fe_provider).__name__,
-                    )
-                    return OpenApiBotSessionInitiator(
-                        openapi_bot=openapi_bot,
-                        frontend_url=_resolve_frontend_url(),
-                        backend_url=_resolve_backend_url(),
-                        frontend_url_provider=fe_provider,
-                    )
-                logger.warning(
-                    "[task_discovery] OpenApiBotPort resolved to None (fail-closed) "
-                    "→ falling back to CronRelaySessionInitiator",
-                )
-            except Exception as exc:
-                logger.warning(
-                    "[task_discovery] OpenApiBotPort DI 未绑定/解析失败 "
-                    "→ falling back to CronRelaySessionInitiator: %s: %s",
-                    type(exc).__name__, exc,
-                )
-        # singlebox or fallback
         return CronRelaySessionInitiator(
             cron_relay=cron_relay,
             frontend_url=_resolve_frontend_url(),

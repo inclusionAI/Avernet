@@ -1,7 +1,7 @@
-"""Unit tests for TaskDiscoveryModule — URL resolution + SessionInitiator DI dispatch.
+"""Unit tests for TaskDiscoveryModule — URL resolution + SessionInitiator base binding.
 
 Covers _resolve_frontend_url, _resolve_backend_url env branches, and
-_provide_session_initiator corp/singlebox/fallback dispatch.
+_provide_session_initiator's base (LOCAL default) binding with Null fallback.
 """
 from __future__ import annotations
 
@@ -9,9 +9,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentclaw.community.core.task.task_discovery.openapi_bot_session_initiator import (
-    OpenApiBotSessionInitiator,
-)
 from agentclaw.community.core.task.task_discovery.session_initiator import (
     CronRelaySessionInitiator,
 )
@@ -77,12 +74,18 @@ class TestResolveBackendUrl:
 
 
 # ---------------------------------------------------------------------------
-# _provide_session_initiator — DI dispatch
+# _provide_session_initiator — base binding (local default)
 # ---------------------------------------------------------------------------
 
 class TestProvideSessionInitiator:
-    """Verify _provide_session_initiator dispatches by DEPLOY_PROFILE and
-    OpenApiBotPort availability."""
+    """Verify the base provider always binds the LOCAL impl (CronRelay) and
+    injects FrontendUrlProvider with Null fallback.
+
+    组合根选实现 (plugin-ication 改造): provider 不再按 DEPLOY_PROFILE 分发 —
+    corp 列通过 ``CorpTaskIntegrationModule.session_initiator`` 的同键 provider
+    (last-binding-wins) 覆盖为 ``OpenApiBotSessionInitiator`` (corp/plugins/prod)。
+    本 base provider 在所有 profile 下都返回 ``CronRelaySessionInitiator``。
+    """
 
     def _make_module(self):
         return TaskDiscoveryModule()
@@ -90,87 +93,46 @@ class TestProvideSessionInitiator:
     def _make_cron_relay(self):
         return MagicMock()
 
-    def test_corp_path_with_openapi_bot_bound(self, monkeypatch):
-        """Non-singlebox + OpenApiBotPort resolves → OpenApiBotSessionInitiator.
-
-        corp 分支还会二次解析 ``FrontendUrlProvider``(corp 绑
-        ``CorpFrontendUrlProvider``;此处 MagicMock 同样返回 fake,
-        传入 initiator 供 _build_session_url 使用)。"""
-        from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
-            FrontendUrlProvider,
-        )
-
-        monkeypatch.setenv("DEPLOY_PROFILE", "test")
+    @pytest.mark.parametrize("profile", ["singlebox", "test", "community"])
+    def test_base_returns_cron_relay_regardless_of_profile(self, monkeypatch, profile):
+        """Any profile → base provider returns CronRelaySessionInitiator (no
+        DEPLOY_PROFILE branching inside the provider)."""
+        monkeypatch.setenv("DEPLOY_PROFILE", profile)
         injector = MagicMock()
-        fake_bot = MagicMock()
-        injector.get.return_value = fake_bot
-        result = self._make_module()._provide_session_initiator(
-            self._make_cron_relay(), injector,
-        )
-        assert isinstance(result, OpenApiBotSessionInitiator)
-        assert result._frontend_url_provider is fake_bot
-        # 两次 DI 解析:OpenApiBotPort + FrontendUrlProvider
-        assert injector.get.call_count == 2
-        injector.get.assert_any_call(FrontendUrlProvider)
-
-    def test_corp_path_frontend_url_provider_unbound_uses_null(self, monkeypatch):
-        """Non-singlebox + FrontendUrlProvider 解析抛错 → Null 兜底(回落构造值)。
-
-        OpenApiBotPort 正常返回,但 FrontendUrlProvider 未绑定(injector.get
-        第二次调用 raise)→ NullFrontendUrlProvider;initiator 仍装配成功。"""
-        from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
-            FrontendUrlProvider,
-            NullFrontendUrlProvider,
-        )
-
-        monkeypatch.setenv("DEPLOY_PROFILE", "test")
-        injector = MagicMock()
-        fake_bot = MagicMock()
-
-        def _get(interface):
-            if interface is FrontendUrlProvider:
-                raise Exception("not bound")
-            return fake_bot
-
-        injector.get.side_effect = _get
-        result = self._make_module()._provide_session_initiator(
-            self._make_cron_relay(), injector,
-        )
-        assert isinstance(result, OpenApiBotSessionInitiator)
-        assert isinstance(result._frontend_url_provider, NullFrontendUrlProvider)
-
-    def test_corp_path_openapi_bot_none_falls_back(self, monkeypatch):
-        """Non-singlebox + OpenApiBotPort resolves to None → CronRelaySessionInitiator."""
-        monkeypatch.setenv("DEPLOY_PROFILE", "test")
-        injector = MagicMock()
-        injector.get.return_value = None
         result = self._make_module()._provide_session_initiator(
             self._make_cron_relay(), injector,
         )
         assert isinstance(result, CronRelaySessionInitiator)
 
-    def test_corp_path_openapi_port_unbound_falls_back(self, monkeypatch):
-        """Non-singlebox + injector.get raises → CronRelaySessionInitiator."""
-        monkeypatch.setenv("DEPLOY_PROFILE", "test")
+    def test_frontend_url_provider_bound_is_injected(self, monkeypatch):
+        """FrontendUrlProvider resolves → injected into the initiator."""
+        from agentclaw.community.plugin_api.frontend_url import (
+            FrontendUrlProvider,
+        )
+
+        monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
+        injector = MagicMock()
+        fake_fe = MagicMock()
+        injector.get.return_value = fake_fe
+        result = self._make_module()._provide_session_initiator(
+            self._make_cron_relay(), injector,
+        )
+        assert isinstance(result, CronRelaySessionInitiator)
+        assert result._frontend_url_provider is fake_fe
+        injector.get.assert_called_once_with(FrontendUrlProvider)
+
+    def test_frontend_url_provider_unbound_uses_null(self, monkeypatch):
+        """FrontendUrlProvider resolution raises → NullFrontendUrlProvider
+        fallback (constructor default wins)."""
+        from agentclaw.community.plugin_api.frontend_url import (
+            NullFrontendUrlProvider,
+        )
+
+        monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
         injector = MagicMock()
         injector.get.side_effect = Exception("not bound")
         result = self._make_module()._provide_session_initiator(
             self._make_cron_relay(), injector,
         )
         assert isinstance(result, CronRelaySessionInitiator)
-
-    def test_singlebox_path_returns_cron_relay(self, monkeypatch):
-        """Singlebox → always CronRelaySessionInitiator (no OpenApiBotPort lookup)."""
-        monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
-        injector = MagicMock()
-        result = self._make_module()._provide_session_initiator(
-            self._make_cron_relay(), injector,
-        )
-        assert isinstance(result, CronRelaySessionInitiator)
-        from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
-            FrontendUrlProvider,
-        )
-
-        # FrontendUrlProvider is resolved atop (before DEPLOY_PROFILE check);
-        # OpenApiBotPort should never be resolved in singlebox
-        injector.get.assert_called_once_with(FrontendUrlProvider)
+        assert isinstance(result._frontend_url_provider, NullFrontendUrlProvider)

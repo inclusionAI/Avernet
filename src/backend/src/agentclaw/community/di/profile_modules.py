@@ -49,6 +49,10 @@ def _common_test_doubles() -> list[Module]:
     from agentclaw.community.di.modules.infrastructure.test.eval_env import (
         TestEvalEnvModule,
     )
+    from agentclaw.community.di.modules.infrastructure.test.task_discovery_ports import (
+        TestFrontendUrlProviderModule,
+        TestNotifyMessagesProviderModule,
+    )
     from agentclaw.community.di.modules.testing_aicoding_module import TestingAicodingModule
     from agentclaw.community.di.modules.testing_database_module import TestingDatabaseModule
     from agentclaw.community.di.modules.testing_mcp_module import TestingMcpModule
@@ -79,6 +83,9 @@ def _common_test_doubles() -> list[Module]:
         TestSkillCenterClientModule(),
         # 评测环境 Noop 绑定（评测功能关闭）。
         TestEvalEnvModule(),
+        # task_discovery plugin ports (FrontendUrl / NotifyMessages) — Null impls.
+        TestFrontendUrlProviderModule(),
+        TestNotifyMessagesProviderModule(),
     ]
 
 
@@ -301,6 +308,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.community.eval_env import (
             CommunityEvalEnvModule,
         )
+        from agentclaw.community.di.modules.infrastructure.community.task_discovery_ports import (
+            CommunityTaskDiscoveryPortsModule,
+        )
         from agentclaw.community.di.modules.infrastructure.community.task_runner_integration import (
             TaskRunnerIntegrationModule,
         )
@@ -345,6 +355,11 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             # the openapi_bot / bcs_client user_config blocks. Registered after
             # base TaskModule so its bcs_token_provider callback override wins.
             TaskRunnerIntegrationModule(),
+            # task_discovery plugin ports (FrontendUrl / NotifyMessages) — Null
+            # impls (community ships no DingTalk channel / env-aware YAML
+            # frontend block; the corp column overrides both via
+            # CorpTaskIntegrationModule, last-binding-wins).
+            CommunityTaskDiscoveryPortsModule(),
         ]
         return column
 
