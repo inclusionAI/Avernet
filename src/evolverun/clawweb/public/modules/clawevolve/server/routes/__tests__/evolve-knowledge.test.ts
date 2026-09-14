@@ -153,6 +153,18 @@ describe("evolve knowledge endpoints", () => {
     expect(recovered).toHaveLength(1);
     expect(recovered[0].id).not.toBe(retry[0].id);
     await expect(aggregates.complete('c', retry[0].id, summary)).rejects.toThrow();
+    for (const empty of [null, {}, { summary: '', causes: [], unknowns: [] }]) {
+      await expect(aggregates.complete('c', recovered[0].id, empty)).rejects.toThrow();
+      expect((await aggregates.list('wf'))[0].summary?.summary).toBe('Network delays');
+    }
+    await aggregates.complete('c', recovered[0].id, null, true);
+    const retained = (await aggregates.list('wf'))[0];
+    expect(retained.aggregationStatus).toBe('failed');
+    expect(retained.stale).toBe(true);
+    expect(retained.summary?.summary).toBe('Network delays');
+    expect(retained.summarySources.map(s => s.flowId)).toEqual(expect.arrayContaining(['run-a', 'run-b']));
+    await expect(aggregates.complete('b', jobs[0].id, null, true)).rejects.toThrow();
+    expect((await aggregates.list('wf'))[0].summary?.summary).toBe('Network delays');
   });
   it("normalizes legacy applied suggestions to applied-unverified for clients", async () => {
     const suggestion = await repo.createSuggestion({

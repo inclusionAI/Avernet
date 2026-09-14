@@ -29,14 +29,21 @@ export default function RunEvolutionAnalysis({
   const emptyDiagnosisText = hasAnalysisContext
     ? '本次分析未生成有效诊断，请重新分析。'
     : '本次分析未生成诊断。'
-  const focusedDiagnosis = analysis.diagnoses.find((diagnosis) => (
-    (focusDiagnosisId && diagnosis.diagnosisId === focusDiagnosisId)
-    || (focusFailureSignature && diagnosis.failureSignature === focusFailureSignature)
-  )) ?? analysis.diagnoses[0]
+  const focusedDiagnosis = (focusDiagnosisId
+    ? analysis.diagnoses.find(diagnosis => diagnosis.diagnosisId === focusDiagnosisId)
+    : focusFailureSignature ? analysis.diagnoses.find(diagnosis => diagnosis.failureSignature === focusFailureSignature)
+      : analysis.diagnoses[0])
 
   if (variant === 'evidence') {
     return (
       <div data-variant="analysis-evidence" className="space-y-3">
+        {focusedDiagnosis && <section className="space-y-2 text-xs leading-5">
+          <h4 className="font-semibold text-slate-800">本次诊断结论</h4>
+          <p className="whitespace-pre-wrap text-slate-600">{focusedDiagnosis.reasoning}</p>
+          <h4 className="font-semibold text-slate-800">本次原始建议</h4>
+          <p className="whitespace-pre-wrap text-slate-600">{typeof focusedDiagnosis.proposal?.summary === 'string' && focusedDiagnosis.proposal.summary.trim() ? focusedDiagnosis.proposal.summary : '本次未生成建议'}</p>
+          {focusedDiagnosis.proposal && <p className="text-slate-400">仅供回溯，不代表当前可执行方案。</p>}
+        </section>}
         <section>
           <div className="flex items-center justify-between gap-3">
             <h4 className="text-xs font-semibold text-slate-800">问题来源</h4>

@@ -101,3 +101,15 @@ Bot binding, cached results, stale snapshots and expired-job recovery.
 Workflow `IssueSummary` and `EvolutionIssueFlow` tests: cause/source display,
 failure states and existing run navigation/actions.
 ClawMind routing/helper tests: two model phases and single-analysis preservation.
+# Progress and retained results
+
+Run analysis completion and issue aggregation are independent. The run detail polls
+the existing issue-groups endpoint after the single-run result is saved, even when
+the parent analysis task has completed. Queued, failed, oversized and missing
+aggregations must not be presented as completed. No new endpoint is required.
+
+Only validated nonempty summaries become completed snapshots. A failed, timed-out
+or rejected attempt must not replace the previous completed snapshot or its source
+references. A stale retained summary is labelled as not covering the latest input.
+Selected analysis details show that diagnosis's original proposal for inspection,
+without offering historical apply actions.
