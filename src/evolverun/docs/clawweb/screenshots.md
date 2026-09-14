@@ -3,7 +3,7 @@
 The public English and Chinese guides use the following screenshots:
 
 - `agent-evolve-overview.png`: task center and available evolution entry points;
-- `agent-evolve-cli_start.png`: interactive local startup and Bot-source selection;
+- `agent-evolve-cli-start.png`: interactive local startup and Bot-source selection;
 - `agent-evolve-create-task.png`: Bot, evolution mode, model, and objective selection;
 - `agent-evolve-run-detail.png`: planning, optimization rounds, diffs, metrics, and Pack;
 - `agent-evolve-bench-result.png`: Bench template, version, and historical runs;
