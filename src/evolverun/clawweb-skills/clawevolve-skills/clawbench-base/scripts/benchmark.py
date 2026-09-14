@@ -48,15 +48,6 @@ from lib_grading import (
 from lib_evolve_identity import task_scoped_agent_id
 from lib_tasks import Task, TaskLoader
 
-# Optional Doctor integration
-try:
-    sys.path.insert(0, str(Path(__file__).parent.parent / "doctor"))
-    from lib_integration import DoctorIntegration
-    DOCTOR_AVAILABLE = True
-except ImportError:
-    DOCTOR_AVAILABLE = False
-
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -578,23 +569,6 @@ def _parse_args() -> argparse.Namespace:
         default="default",
         help='Scene name for results organization (default: "default")',
     )
-    # Doctor integration arguments
-    parser.add_argument(
-        "--enable-diagnosis",
-        action="store_true",
-        help="Enable Doctor diagnosis after each task",
-    )
-    parser.add_argument(
-        "--enable-llm-diagnosis",
-        action="store_true",
-        help="Enable LLM deep analysis (reuses --judge-api-key and --judge-base-url by default)",
-    )
-    parser.add_argument(
-        "--diagnosis-score-threshold",
-        type=float,
-        default=1.0,
-        help="Only diagnose tasks below this score (default: 1.0)",
-    )
     parser.add_argument(
         "--copy-main-workspace-md",
         action="store_true",
@@ -1019,28 +993,6 @@ def main():
     scene_dir = Path(args.output_dir) / "benchmark" / args.scene
     scene_dir.mkdir(parents=True, exist_ok=True)
 
-    # Initialize Doctor integration (optional)
-    # --enable-llm-diagnosis implies --enable-diagnosis
-    # LLM diagnosis reuses --judge-api-key / --judge-base-url by default,
-    # so no extra API key configuration is needed.
-    if args.enable_llm_diagnosis:
-        args.enable_diagnosis = True
-    doctor = None
-    if args.enable_diagnosis:
-        if not DOCTOR_AVAILABLE:
-            logger.error("Doctor module not found. Make sure doctor/ directory exists.")
-            sys.exit(1)
-        logger.info("🔍 Doctor diagnosis enabled")
-        doctor = DoctorIntegration(
-            output_dir=scene_dir,
-            enable_llm=args.enable_llm_diagnosis,
-            llm_api_key=getattr(args, "judge_api_key", None),
-            llm_base_url=getattr(args, "judge_base_url", None),
-            llm_model=getattr(args, "judge", None),
-            score_threshold=args.diagnosis_score_threshold,
-            domain=Path(args.benchmark).name,
-        )
-
     task_ids = _select_task_ids(runner.tasks, args.suite)
     results = []
     grades_by_task_id = {}
@@ -1178,26 +1130,6 @@ def main():
                         f"stderr preview: {stderr_preview}"
                     )
                     grade.notes = " | ".join(filter(None, [grade.notes, execution_note]))
-            # Run Doctor diagnosis (optional)
-            if doctor and grade.score < args.diagnosis_score_threshold:
-                try:
-                    diagnosis = doctor.diagnose_task(
-                        task_id=task.task_id,
-                        transcript=result["transcript"],
-                        score=grade.score,
-                        status=result["status"],
-                        user_query=task.prompt,
-                    )
-                    if diagnosis:
-                        logger.info(
-                            "🔍 Doctor found %d issues, %d LLM insights for %s",
-                            len(diagnosis.issues),
-                            len(diagnosis.llm_insights),
-                            task.task_id,
-                        )
-                except Exception as exc:
-                    logger.warning("Diagnosis failed for %s: %s", task.task_id, exc)
-
             task_grades.append(grade)
             task_results.append(result)
             results.append(result)
@@ -1314,16 +1246,6 @@ def main():
     logger.info("Saved results to %s", output_path)
     _log_category_summary(task_entries, tasks_by_id)
     _log_efficiency_summary(efficiency, grades_by_task_id)
-    # Save Doctor diagnosis report (optional)
-    if doctor:
-        try:
-            report_path = doctor.save_report(run_id, args.model)
-            doctor.print_summary()
-            if report_path:
-                logger.info("🔍 Doctor report saved to %s", report_path)
-        except Exception as exc:
-            logger.warning("Failed to save diagnosis report: %s", exc)
-
     if args.no_upload:
         logger.info("Skipping upload (--no-upload)")
     else:

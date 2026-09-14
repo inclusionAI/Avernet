@@ -53,12 +53,12 @@ if [[ -z "$SCENE" ]]; then
     echo "Packing entire results/ ..."
     tar -czf "$OUTPUT_DIR/$ARCHIVE_NAME" -C "$PROJECT_ROOT" results
 else
-    # Pack specific scene across benchmark/doctor/baseline
+    # Pack specific scene across benchmark/baseline
     TEMP_DIR=$(mktemp -d)
     trap "rm -rf $TEMP_DIR" EXIT
 
     FOUND=0
-    for component in benchmark doctor baseline; do
+    for component in benchmark baseline; do
         SRC="$RESULTS_DIR/$component/$SCENE"
         if [[ -d "$SRC" ]]; then
             mkdir -p "$TEMP_DIR/results/$component/$SCENE"
@@ -70,7 +70,7 @@ else
     if [[ $FOUND -eq 0 ]]; then
         echo "Error: no results found for scene \"$SCENE\""
         echo "Looked in:"
-        for component in benchmark doctor baseline; do
+        for component in benchmark baseline; do
             echo "  results/$component/$SCENE/"
         done
         exit 1

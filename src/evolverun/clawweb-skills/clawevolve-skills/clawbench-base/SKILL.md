@@ -60,8 +60,6 @@ find ~/.openclaw/workspace -path '*benchmark*' -maxdepth 8 -type f
 This skill ships the local ClawBench runner implementation:
 
 - `scripts/`: runner, adapter, grading, upload, and utility scripts.
-- `assets/`: shared static assets used by examples and local validation.
-- `doctor/`: failure diagnosis utilities.
 - `tests/`: core library tests.
 - `report/`: report template and report-generation skill source.
 
