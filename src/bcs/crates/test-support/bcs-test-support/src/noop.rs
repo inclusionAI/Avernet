@@ -193,7 +193,7 @@ impl BotRegistryCoreService for NoopBotRegistryCoreService {
         Ok(())
     }
 
-    async fn update_status(&self, _bot_id: &str, _status: BotDynamicStatus) -> bool {
+    async fn update_status(&self, _bot_id: &str) -> bool {
         false
     }
 

@@ -2377,7 +2377,7 @@ mod tests {
         MemoryImParticipantRepo,
     };
     use bcs_domain::{
-        ActorKind, BindingStatus, BindingTarget, BotCapabilities, BotDynamicStatus, ChannelBinding,
+        ActorKind, BindingStatus, BindingTarget, BotCapabilities, ChannelBinding,
         ChannelConfig, ChannelType, Group, GroupChatScope, GroupKind, HumanInputNotificationMode,
         HumanInputRequestStatus, Participant, ParticipantMode, ParticipantRole, RegisteredBot,
         Session, SessionKind, SessionScope, SessionStatus, Skill, StateMachineNodeRun,
@@ -7050,7 +7050,7 @@ mod tests {
             Ok(())
         }
 
-        async fn update_status(&self, _bot_id: &str, _status: BotDynamicStatus) -> bool {
+        async fn update_status(&self, _bot_id: &str) -> bool {
             false
         }
 

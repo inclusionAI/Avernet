@@ -6,7 +6,7 @@ use bcs_friend::{
     Friend, FriendCore, FriendRequestCore, MemoryFriendRepo, MemoryFriendRequestRepo,
 };
 use bcs_service_api::{
-    ActorKind, ActorStatus, AgentCredentials, BotCapabilities, BotDynamicStatus,
+    ActorKind, ActorStatus, AgentCredentials, BotCapabilities,
     BotRegistryCoreService, EdgePermissionFriendSyncService, FriendCoreService,
     FriendRequestCoreService, FriendRequestDirection, FriendRepoPort, FriendRequestRepoPort,
     FriendRequestStatus, FriendService, ListFriendsCommand,
@@ -415,7 +415,7 @@ impl BotRegistryCoreService for StaticRegistry {
         Ok(())
     }
 
-    async fn update_status(&self, _bot_id: &str, _status: BotDynamicStatus) -> bool {
+    async fn update_status(&self, _bot_id: &str) -> bool {
         false
     }
 

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use bcs_domain::{
-    ActorKind, ActorStatus, BotCapabilities, BotDynamicStatus, DeliveryType, Group,
+    ActorKind, ActorStatus, BotCapabilities, DeliveryType, Group,
     GroupStrategy, LedgerSummary, Participant, ParticipantRole, RegisteredBot, SystemGroupMessage,
     SystemMessageEvent, CoordinationMode, CoordinationSurface,
 };
@@ -68,7 +68,7 @@ impl BotRegistryCoreService for NamedRegistry {
         Ok(())
     }
 
-    async fn update_status(&self, _bot_id: &str, _status: BotDynamicStatus) -> bool {
+    async fn update_status(&self, _bot_id: &str) -> bool {
         false
     }
 

@@ -445,7 +445,7 @@ mod tests {
 
     use async_trait::async_trait;
     use bcs_service_api::{
-        ActorKind, ActorStatus, BindingChannel, BindingChannels, BotDynamicStatus,
+        ActorKind, ActorStatus, BindingChannel, BindingChannels,
         BotRegistryCoreService, EnsureHumanResult, EnsureOwnerEdgesResult, OnboardActorIdentity,
         RegisteredBot, RelationCoreService, RelationEdge, ServiceResult, Skill,
     };
@@ -600,7 +600,7 @@ mod tests {
             Ok(())
         }
 
-        async fn update_status(&self, _bot_id: &str, _status: BotDynamicStatus) -> bool {
+        async fn update_status(&self, _bot_id: &str) -> bool {
             false
         }
 

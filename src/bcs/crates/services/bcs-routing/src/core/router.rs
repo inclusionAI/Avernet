@@ -1027,7 +1027,7 @@ pub fn build_sender_route_decision(
 mod tests {
     use super::*;
     use bcs_service_api::{
-        BotCapabilities, BotDynamicStatus, ChatEventRouting, GroupStrategy, Participant,
+        BotCapabilities, ChatEventRouting, GroupStrategy, Participant,
         ParticipantRole, RegisteredBot, ResponseMode, RouteSelectorWire, Workspace,
     };
     use bcs_test_support::NoopBotRegistryCoreService;
@@ -1559,7 +1559,7 @@ mod tests {
         ) -> bcs_service_api::ServiceResult<()> {
             Ok(())
         }
-        async fn update_status(&self, _: &str, _: BotDynamicStatus) -> bool {
+        async fn update_status(&self, _: &str) -> bool {
             false
         }
         async fn get(&self, bot_id: &str) -> Option<RegisteredBot> {

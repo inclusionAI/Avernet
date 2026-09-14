@@ -2,7 +2,7 @@ use async_trait::async_trait;
 
 use crate::core::registry::ConnectStreamError;
 use crate::types::{
-    ActorStatus, AgentCredentials, BotCapabilities, BotDynamicStatus, EnsureHumanResult,
+    ActorStatus, AgentCredentials, BotCapabilities, EnsureHumanResult,
     RegisteredBot, ServiceResult,
 };
 
@@ -48,8 +48,9 @@ pub trait BotRepoPort: Send + Sync {
         self.register(bot_id.to_string(), capabilities).await
     }
 
-    /// Renew a known registration heartbeat. The legacy payload is not retained.
-    async fn update_status(&self, bot_id: &str, status: BotDynamicStatus) -> bool;
+    /// Renew a known registration heartbeat. The legacy payload is not
+    /// retained and is no longer accepted on this internal port.
+    async fn update_status(&self, bot_id: &str) -> bool;
     async fn get(&self, bot_id: &str) -> Option<RegisteredBot>;
 
     /// Read a Bot without hiding persistence failures.

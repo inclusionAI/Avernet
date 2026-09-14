@@ -1348,7 +1348,7 @@ impl BotRepoPort for PersistentBotRepo {
         Ok(())
     }
 
-    async fn update_status(&self, bot_id: &str, _status: BotDynamicStatus) -> bool {
+    async fn update_status(&self, bot_id: &str) -> bool {
         // Update memory
         {
             let mut bots = self.bots.write().await;
