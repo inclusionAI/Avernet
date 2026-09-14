@@ -25,8 +25,8 @@ KEY = "application-boundary-test-key-at-least-32-bytes"
 PARAMS = {"bot_id": "bot", "owner_id": "owner", "user_id": "caller"}
 
 
-def token(kind="app", **overrides):
-    principals = [{"type": "app", "tenant": "acme", "app": {"app_id": 7, "app_name": "partner", "owners": "owner", "tenant": "acme"}}]
+def token(kind="app", *, app_id=7, **overrides):
+    principals = [{"type": "app", "tenant": "acme", "app": {"app_id": app_id, "app_name": "partner", "owners": "owner", "tenant": "acme"}}]
     if kind == "user":
         principals = []
     if kind in ("user", "mixed"):
@@ -59,16 +59,16 @@ def client_service():
     reset_principal_verifier_config_cache()
 
 
-@pytest.mark.parametrize("kind", ["app", "mixed"])
-def test_application_success_without_user_cookie(client_service, caplog, kind):
+@pytest.mark.parametrize("kind,app_id", [("app", 7), ("app", 8), ("mixed", 7)])
+def test_application_success_without_user_cookie(client_service, caplog, kind, app_id):
     client, service = client_service
     caplog.set_level(logging.INFO)
-    credential = token(kind)
+    credential = token(kind, app_id=app_id)
     response = client.post(PATH, params=PARAMS, headers={"X-Avernet-Principal": credential})
     assert response.status_code == 200
     assert response.json()["data"]["connection"]["token"] == "response-secret"
     assert response.json()["success"] is True
-    service.get_application_caller_connection.assert_awaited_once_with(app_id=7, tenant="acme", force_upgrade=False, **PARAMS)
+    service.get_application_caller_connection.assert_awaited_once_with(app_id=app_id, tenant="acme", force_upgrade=False, **PARAMS)
     assert get_current_avernet_tenant() == "teamclaw"
     assert "app_caller_connection.request" in caplog.text
     assert "app_caller_connection.success" in caplog.text

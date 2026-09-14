@@ -102,8 +102,6 @@ def _make_service(
     common_config_service.get_value.return_value = None
 
     svc = ExpertChatInstanceService(
-        app_grants=MagicMock(),
-        collaborator_service=MagicMock(),
         instance_repo=instance_repo,
         baas_service=baas,
         bot_publish_repo=publish_repo,
@@ -1987,38 +1985,37 @@ class TestGetAuthorizedCallerConnection:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["owner", "public", "member", "revoked", "missing_grant", "missing_bot", "tenant_mismatch", "lookup_error"])
-async def test_application_authorization_checks_live_access(mode):
-    """A grant must not outlive the delegating user's current bot access."""
+@pytest.mark.parametrize("app_id", [7, 8])
+async def test_any_application_can_access_private_nonmember_caller_without_grant(app_id):
     from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
     svc = _make_service()[0]
     svc._app_grants = MagicMock()
     svc._collaborator_service = MagicMock()
-    svc._bot_repo.get_by_id_and_owner.return_value = {"bot_id": BOT_ID, "owner_id": OWNER_ID, "public": "1" if mode == "public" else "0"}
-    svc._collaborator_service.check_collaborator_permission.return_value = {"has_permission": mode == "member"}
+    svc._app_grants.find.return_value = None
+    svc._collaborator_service.check_collaborator_permission.return_value = {"has_permission": False}
+    svc._bot_repo.get_by_id_and_owner.return_value = {"bot_id": BOT_ID, "owner_id": OWNER_ID, "public": "0"}
     svc._instance_repo.get_instance.return_value = {"ext": {"bot_uuid": BOT_UUID}}
     svc.get_caller_connection = AsyncMock(return_value={"need_poll": True})
-    if mode == "missing_grant":
-        svc._app_grants.find.return_value = None
-    if mode == "missing_bot":
-        svc._bot_repo.get_by_id_and_owner.return_value = None
-    if mode == "lookup_error":
-        svc._collaborator_service.check_collaborator_permission.side_effect = RuntimeError("credential-secret")
-    user_id = OWNER_ID if mode == "owner" else USER_ID
     with avernet_tenant_scope("acme"):
-        kwargs = dict(app_id=7, tenant="other" if mode == "tenant_mismatch" else "acme", user_id=user_id, bot_id=BOT_ID, owner_id=OWNER_ID, force_upgrade=True)
-        if mode in ("owner", "public", "member"):
-            assert await svc.get_application_caller_connection(**kwargs) == {"need_poll": True}
-            svc.get_caller_connection.assert_awaited_once_with(user_id=user_id, bot_id=BOT_ID, owner_id=OWNER_ID, force_upgrade=True)
-        else:
-            with pytest.raises(ChatPermissionError):
-                await svc.get_application_caller_connection(**kwargs)
-            svc.get_caller_connection.assert_not_called()
-            svc._instance_repo.get_instance.assert_not_called()
-        if mode == "tenant_mismatch":
-            svc._app_grants.find.assert_not_called()
-        else:
-            svc._app_grants.find.assert_called_once_with(app_id=7, user_id=user_id, bot_id=BOT_ID, owner_id=OWNER_ID)
+        assert await svc.get_application_caller_connection(app_id=app_id, tenant="acme", user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID, force_upgrade=True) == {"need_poll": True}
+    svc.get_caller_connection.assert_awaited_once_with(user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID, force_upgrade=True)
+    svc._app_grants.find.assert_not_called()
+    svc._collaborator_service.check_collaborator_permission.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["missing_bot", "tenant_mismatch"])
+async def test_application_rejects_missing_bot_or_tenant_mismatch(mode):
+    from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
+    svc = _make_service()[0]
+    svc._bot_repo.get_by_id_and_owner.return_value = None if mode == "missing_bot" else {"bot_id": BOT_ID}
+    svc.get_caller_connection = AsyncMock()
+    with avernet_tenant_scope("acme"), pytest.raises(ChatPermissionError):
+        await svc.get_application_caller_connection(app_id=7, tenant="other" if mode == "tenant_mismatch" else "acme", user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID)
+    svc.get_caller_connection.assert_not_called()
+    svc._instance_repo.get_instance.assert_not_called()
+    if mode == "tenant_mismatch":
+        svc._bot_repo.get_by_id_and_owner.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -2026,27 +2023,8 @@ async def test_application_authorization_checks_live_access(mode):
 async def test_application_cannot_create_first_instance(instance):
     from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
     svc = _make_service()[0]
-    svc._app_grants = MagicMock()
     svc._instance_repo.get_instance.return_value = instance
     svc.get_caller_connection = AsyncMock()
     with avernet_tenant_scope("acme"), pytest.raises(ChatPermissionError):
-        await svc.get_application_caller_connection(app_id=7, tenant="acme", user_id=OWNER_ID, bot_id=BOT_ID, owner_id=OWNER_ID)
-    svc.get_caller_connection.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("changed", ["app_id", "user_id", "bot_id", "owner_id", "tenant", "revoked"])
-async def test_application_grant_scope_is_exact(changed):
-    from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope, get_current_avernet_tenant
-    svc = _make_service()[0]
-    authorized = dict(app_id=7, user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID)
-    svc._app_grants.find.side_effect = lambda **scope: object() if scope == authorized and get_current_avernet_tenant() == "acme" and changed != "revoked" else None
-    svc.get_caller_connection = AsyncMock()
-    requested = dict(authorized, tenant="acme")
-    if changed != "revoked":
-        requested[changed] = 8 if changed == "app_id" else "other"
-    with avernet_tenant_scope(requested["tenant"]), pytest.raises(ChatPermissionError):
-        await svc.get_application_caller_connection(**requested)
-    svc._bot_repo.get_by_id_and_owner.assert_not_called()
-    svc._instance_repo.get_instance.assert_not_called()
+        await svc.get_application_caller_connection(app_id=7, tenant="acme", user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID)
     svc.get_caller_connection.assert_not_called()

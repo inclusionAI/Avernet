@@ -874,35 +874,3 @@ def test_losing_the_insert_race_returns_the_winners_row(repo, monkeypatch, sessi
     with sessions() as session:
         assert session.query(BotAppGrantModel).count() == 1
     assert _log(sessions) == [GrantAction.GRANTED], "no phantom period"
-
-
-@pytest.mark.asyncio
-async def test_application_caller_connection_observes_persisted_grant_and_revocation(service):
-    """Exercise the application entry against the real SQLite grant repository."""
-    from unittest.mock import AsyncMock
-    from agentclaw.community.core.expert_chat.errors import ChatPermissionError
-    from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
-    from tests.community.core.expert_chat.services.test_expert_chat_instance_service import _make_service
-
-    instance_service = _make_service()[0]
-    instance_service._app_grants = service
-    instance_service._bot_repo.get_by_id_and_owner.return_value = {"bot_id": "b-1", "owner_id": "u-1"}
-    instance_service._instance_repo.get_instance.return_value = {"ext": {"bot_uuid": "existing"}}
-    instance_service.get_caller_connection = AsyncMock(return_value={"need_poll": True})
-    scope = {key: value for key, value in GRANT.items() if key != "app_name"}
-    with avernet_tenant_scope("acme"):
-        service.grant(**GRANT)
-        assert await instance_service.get_application_caller_connection(tenant="acme", **scope) == {"need_poll": True}
-        for field in ("app_id", "user_id", "bot_id", "owner_id"):
-            changed = {**scope, field: 43 if field == "app_id" else "other"}
-            with pytest.raises(ChatPermissionError):
-                await instance_service.get_application_caller_connection(tenant="acme", **changed)
-        with avernet_tenant_scope("other"), pytest.raises(ChatPermissionError):
-            await instance_service.get_application_caller_connection(tenant="other", **scope)
-        service.revoke(**scope)
-        with pytest.raises(ChatPermissionError):
-            await instance_service.get_application_caller_connection(tenant="acme", **scope)
-    with avernet_tenant_scope("other"), pytest.raises(ChatPermissionError):
-        await instance_service.get_application_caller_connection(tenant="other", **scope)
-    assert instance_service.get_caller_connection.await_count == 1
-    assert instance_service._instance_repo.get_instance.call_count == 1

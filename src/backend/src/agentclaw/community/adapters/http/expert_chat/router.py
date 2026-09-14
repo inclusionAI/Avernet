@@ -622,7 +622,7 @@ async def get_caller_connection_for_application(
         ExpertChatInstanceServiceProtocol
     ),
 ):
-    """Connect an existing caller instance using a verified app delegation."""
+    """Connect an existing caller instance for any verified app in its tenant."""
     started_at = time.perf_counter()
     context = {
         "system": "backend", "direction": "inbound",

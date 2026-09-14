@@ -568,19 +568,15 @@ def _app_principal():
 
 def _seed_application_connection(world):
     from types import SimpleNamespace
-    from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
     from agentclaw.community.utils.gateway_principal_config import init_principal_verifier_config
     resolver = SimpleNamespace(get_secret=lambda _: SimpleNamespace(secret_value=_APP_KEY, secret_user="test"))
     init_principal_verifier_config(resolver, "test-key", strict=False)
     _seed_happy(world)
     world.get(ExpertChatInstanceRepository).upsert_instance(
-        user_id=_OWNER_ID, bot_id=_BOT_ID, owner_id=_OWNER_ID,
+        user_id=_USER_ID, bot_id=_BOT_ID, owner_id=_OWNER_ID,
         status="success", ext={"bot_uuid": _BOT_UUID, "version": 1},
     )
-    world.get(BotAppGrantServiceProtocol).grant(
-        app_id=73, app_name="caller-client", user_id=_OWNER_ID,
-        bot_id=_BOT_ID, owner_id=_OWNER_ID,
-    )
+
 
 
 @endpoint_test(
@@ -588,7 +584,7 @@ def _seed_application_connection(world):
     path="/api/v1/expert-chats/app-caller-connection",
     scenario="app_only_existing_caller_connection",
     input=CaseInput(
-        query_params={"bot_id": _BOT_ID, "owner_id": _OWNER_ID, "user_id": _OWNER_ID},
+        query_params={"bot_id": _BOT_ID, "owner_id": _OWNER_ID, "user_id": _USER_ID},
         headers={"X-Avernet-Principal": _app_principal()},
     ),
     seed=_seed_application_connection,
@@ -597,16 +593,16 @@ def _seed_application_connection(world):
     }),
 )
 def test_application_caller_connection_happy():
-    """Real DI, grant and instance repositories return an existing connection."""
+    """Real DI and instance repositories allow a private nonmember caller without grants."""
 
 
 @endpoint_test(
     method="POST",
     path="/api/v1/expert-chats/app-caller-connection",
     scenario="app_connection_requires_signed_identity",
-    input=CaseInput(query_params={"bot_id": _BOT_ID, "owner_id": _OWNER_ID, "user_id": _OWNER_ID}),
+    input=CaseInput(query_params={"bot_id": _BOT_ID, "owner_id": _OWNER_ID, "user_id": _USER_ID}),
     seed=_seed_application_connection,
     expect=ExpectError(status=401, json_contains={"detail": "Unauthorized"}),
 )
 def test_application_caller_connection_unauthenticated():
-    """The existing grant does not authorize a request without its Principal."""
+    """An existing instance does not authorize a request without its Principal."""

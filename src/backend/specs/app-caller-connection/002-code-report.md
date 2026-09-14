@@ -2,66 +2,33 @@
 agent: tc-code
 status: completed
 created: 2026-09-14
-iteration: 1
+iteration: 4
 ---
+# 编码报告：任意认证应用访问已有 Caller 实例
 
-# 编码报告
+## 最新需求和边界
+用户明确批准：所有通过Principal校验且带app_id的应用均能操作同tenant已有Caller实例，允许跨用户、私有Bot、非成员Caller。无需app grant或用户owner/public/collaborator权限。新增路由仍保留Principal、tenant、Bot存在、有效既有实例限制；不赋管理员、不首次创建。
 
-## Worktree
-- 路径: /Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/feat-app-caller-connection-rel20260915
-- 分支: feat/app-caller-connection-rel20260915
-- Base: GitHub inclusionAI/Avernet REL20260915 @ 5e41bc0d42720b68c1b18c2b3ae5a320c99d33f2
-- 本agent不commit/push，交父agent执行rebase及PR。
+Worktree: /Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/feat-app-caller-connection-rel20260915
+Branch: feat/app-caller-connection-rel20260915
 
-## 既有链路与边界
-- 既有ordinary Principal verifier → exact app grant → current caller chat access → existing caller instance lifecycle。
-- 允许新增点: org应用依赖、精确路径tenant middleware、原router平放endpoint、原instance service应用入口及其owning Protocol、context README和测试。
-- 禁止触碰点: Gateway、BaaS、Engine、Relay、数据库schema及原用户接口语义；均未修改。
-
-## 文件变更
-| 文件（相对src/backend） | 用途 |
-|---|---|
-| src/agentclaw/community/adapters/http/org/dependencies.py | require_app_caller及缓存ordinary tenant seam；畸形Principal错误仅记录异常类型避免Pydantic input_value泄漏 |
-| src/agentclaw/community/adapters/http/middleware.py | 仅新精确路径在DI前建立可信tenant并自动恢复 |
-| src/agentclaw/community/adapters/http/expert_chat/router.py | 平放应用endpoint、原ApiResponse映射、结构化安全诊断 |
-| src/agentclaw/community/core/expert_chat/services/expert_chat_instance_service.py | tenant一致→精确grant→当前owner/public/MEMBER→已有实例非admin生命周期 |
-| src/agentclaw/community/core/expert_chat/expert_chat_instance_service_protocol.py | owning Service API方法及前置条件、返回和错误契约 |
-| src/agentclaw/community/core/expert_chat/README.md | 声明grant/collaborator public API依赖 |
-| tests/community/api/expert_chat/test_app_caller_connection.py | 实签JWT ASGI、DI时tenant、验签仅一次、租户恢复、错误/参数与日志 |
-| tests/community/core/expert_chat/services/test_expert_chat_instance_service.py | 新构造依赖fixture，应用精确授权/撤权/首次实例拒绝 |
-| tests/community/core/bot_app_grant/test_grant_service.py | real SQLite grant与service跨tuple/tenant拒绝和撤销即时生效集成 |
+## 本轮改动
+- instance service删除本任务新增的app grant和当前caller权限gate，移除已无用途的grant/collaborator构造参数及import。
+- 保留tenant mismatch在任何仓储访问之前拒绝，Bot不存在拒绝，复用get_authorized_caller_connection(operator_id=user_id,is_super_admin=False)的既有bot_uuid实例限制及原生命周期。
+- owning Protocol、README、router docstring及001 spec/plan明确跨用户权限范围。原用户接口、其他app grant功能、Gateway/BaaS/Engine和schema未改。
+- 服务测试证明两个不同app均可访问无grant、private非成员caller实例；Bot/tenant/实例拒绝无副作用。删除已不适用的本任务grant集成测试，不修改原grant功能测试。
+- 框架真实DI/仓储成功用例改为无grant种子、private非owner Caller；ASGI实签增加第二个app身份。
+- live acceptance更新为：无grant且缺实例403；已有实例进入原未发布错误语义；admin provision私有Bot非owner Caller后，两个APP-only无grant复用同实例/UUID，断言success/need_poll/connection及请求无Cookie/x-user-id。保留manifest新路由及原覆盖率阈值。
 
 ## 验证
-- 新worktree独立 `uv sync --project src/backend --group dev`，使用本worktree `src/backend/.venv/bin/python`。
-- TDD红灯：新ASGI endpoint 404；service方法不存在；畸形JWT input_value日志泄漏；嵌套URL凭据与binary日志泄漏。对应最小实现后均通过。
-- focused+回归+架构合并运行: **353 passed**（18个存量Pydantic/Starlette deprecation warnings），日志 `/tmp/app-caller-final-focused.log`。
-- 命令: `.venv/bin/python -m pytest tests/community/api/expert_chat/test_app_caller_connection.py tests/community/core/expert_chat/services/test_expert_chat_instance_service.py tests/community/core/bot_app_grant/test_grant_service.py tests/community/api/expert_chat/test_router.py tests/community/adapters/http/org/test_org_user.py tests/community/adapters/http/test_avernet_tenant_middleware.py tests/community/architecture/test_service_api_conformance.py tests/community/architecture/test_module_boundaries.py tests/community/architecture/test_http_adapter_layer_is_http_only.py tests/community/architecture/test_no_fastapi_in_core.py --no-cov -q`（cwd src/backend）。
-- `ruff check` 修改源文件与新增API/grant测试 `--select F,E9`: PASS；`git diff --check`: PASS。
-- full backend regression及远端coverage/CI由独立regression/父agent提供，本报告不把未运行门禁写PASS。
+- TDD红灯：两个任意app无grant成功断言在旧gate上失败；删除gate后通过。
+- focused/API/framework/原grant回归及architecture compliance/conformance/module boundary/endpoint coverage gate：**318 passed**（18个存量Pydantic/Starlette warnings）。日志 /tmp/app-caller-policy-final.log。
+- 验收collection：16 tests collected，日志 /tmp/app-caller-policy-collection.log。未本地拉完整live栈，远端Singlebox尚待复跑，不能沿用上一策略的CI状态。
+- 修改源文件及API/live/framework测试Ruff F/E9 PASS；instance服务旧测试文件有16个原有F841，按HEAD与当前内容分别ruff比较，数量及code/message完全相同，无新增lint问题。
+- manifest checker PASS；git diff --check PASS。
 
-## 外部边界日志
-- 新事件: expert_chat.app_caller_connection.authentication_request/request/success/denied/failed；service事件 expert_chat.application_authorized。
-- 字段: system、direction、operation、method、route、request_id、可信tenant/app_id、bot_id/owner_id/user_id/force_upgrade、status/error_code、duration_ms、拒绝reason及异常类型，安全完整业务response。
-- 脱敏: token/Authorization/Cookie/password/secret/key/credential/session等键大小写不敏感递归处理，URL userinfo移除，敏感query值（包括嵌套URL）脱敏，binary仅类型长度。固定错误消息，不打印原异常消息或Principal。
-- 测试真实caplog断言成功、失败及畸形JWT凭据不落日志。error_logging的现有私有summarizer截断普通字段、没有URL脱敏且公开异常logger输出原exc，不能满足此接口的完整非敏感response契约；因此使用局部redactor，不修改通用helper。
+## 安全日志
+保留authentication_request/request/success/denied/failed和application_authorized事件、system/direction/operation/method/route/request_id、可信tenant/app_id及目标参数、status/error_code/duration。递归凭据/URL/binary脱敏不变；不输出Principal/原异常凭据。此次删除权限gate不引入新外部边界。
 
-## 契约与兼容性
-- 不要求Cookie/AuthenticatedUser；APP+USER仍走APP授权。可信app_id并非BaaS自报id。
-- 普通HTTP维持verify_audience=False；签名/issuer/exp/主体结构及各Principal外层tenant一致性仍按现有verifier。内嵌app.tenant与外层tenant的对照不属于现有校验，本次没有扩大规则。
-- 未授权和首次创建拒绝先于instance连接读取及生命周期；已有效实例允许原force_upgrade和need_poll语义。
-- 授权失败HTTP 200 ApiResponse error_code=403；认证失败HTTP 401；非法参数422；非权限业务失败5999。
-
-## 全量回归修复（iteration 2）
-- 首次full回归18,578 passed / 2 failed；失败为core→api导入门禁与新增endpoint未登记框架happy/error。
-- 核心服务改为导入owning core Protocol；public api只是相同对象的转导出，HTTP consumer不变。同步Spec/README，不添加waiver、不弱化门禁。
-- 在tests/community/endpoints/test_expert_chat_caller_connection.py新增真实框架APP成功与无Principal401用例：真实DI、grant/instance仓储、现有LocalHttpClient外部BaaS替身；成功断言success/error_code/need_poll=False。
-- focused验证 `.venv/bin/python -m pytest tests/community/endpoints/test_expert_chat_caller_connection.py tests/community/architecture/test_architecture_compliance.py tests/community/framework/test_coverage_gate.py tests/community/architecture/test_module_boundaries.py --no-cov -q`: **38 passed**，日志 /tmp/app-caller-gate-fixes.log。
-- full最终结果以独立003b报告为准。
-
-## PR Singlebox coverage 修复
-- 根因证据: GitHub Singlebox run 34821523568 job 103904087146日志 `expert_chat core coverage 60.80% < 61.18%`，并非BCS或cleanup失败。
-- 新增2条live acceptance故事，原文件tests/community/acceptance/expert_chat/test_caller_connection_api.py：安全拒绝与无副作用链路；admin实际provision后APP-only复用同一实例及撤权拒绝。全部实签JWT、真实HTTP、真实仓储；使用Singlebox已有BaaS配置，无新业务mock。
-- manifest登记新HTTP endpoint，原阈值不变；spec同步验证范围。
-- 预期真实命中: get_application_caller_connection的grant missing/live、owner/public/当前collaborator权限拒绝、authorized日志与非admin已有实例链路；HTTP新路由成功/拒绝/错误处理。现有生命周期真实provision+reuse由正向故事断言。
-- 本地collection: 16 tests collected（含2条新故事）；Ruff F/E9、manifest checker、git diff --check通过。未在本地启动完整Singlebox，不声明live PASS；远端复跑负责最终覆盖率/功能验证。
-- 后续本地API/framework focused: 27 passed（/tmp/app-caller-post-singlebox-focused.log）。额外Singlebox脚本单测25 passed、2个已核对base存量失败：report test期待resources模块但REL20260915 manifest无该模块；workflow test期待src/bcs paths filter而base workflow无该段。两测试/workflow与base字节一致，manifest仅新增本次router item，未修改无关基线；不把该组写PASS。
+## 后续
+创建本地commit交主agent；不push。独立review、全量Backend及远端Singlebox/PR门禁需按最新head验证。未改003/008/009报告。
