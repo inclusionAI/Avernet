@@ -199,7 +199,38 @@ headers = {k: v for k, v in request.headers.items() if k.lower() not in STRIP}
 
 ---
 
-## 三、红线
+## 三、密钥从哪来（MIST）
+
+签发和校验用的是**同一把共享 HMAC 密钥**，存在 MIST 上：
+
+```
+other_manual_teamclawgw_principal_signing_key
+```
+
+**新组件接入前，要先把自己加进这个 key 的 MIST 应用列表**，否则拉不到值。
+拉不到的后果不是报错，是解析成空字符串 —— 而空密钥被当作「谁都不信」，
+于是服务看起来是健康的，但每个请求都 401。
+
+各组件通过自己的配置项指向这个名字，值在**启动时解析一次**：
+
+| 组件 | 配置项 |
+|---|---|
+| gateway | `user_config.principal_signer.secret_name` |
+| backend | `secret_names.gateway_principal_signing_key` |
+| bcs | `gateway_principal.signing_key_secret` |
+
+> 仓库里提交的默认值是**通用名**（`principal_signing_key` 之类），
+> 真正的 `other_manual_*` 名字只写在 corp 环境 overlay 里。不要把它硬编码进源码。
+
+密钥本身要求 **≥32 字节**（RFC 7518 §3.2）。轮转要两端一起重启，没有热加载。
+
+排查「两边验不过」：先比启动日志里的 `key fp=sha256(key)[:8]`，
+两端 diff 这一行就知道密钥是不是同一把；一样的话就去看 `aud` / `iss` / `kid` 配置，
+不要上来就轮换密钥。
+
+---
+
+## 四、红线
 
 | ❌ | 为什么 |
 |---|---|
@@ -213,12 +244,11 @@ headers = {k: v for k, v in request.headers.items() if k.lower() not in STRIP}
 | token 进日志 / 进 URL query | 泄露。日志只记指纹：`sha256(token)[:16]` |
 | TTL > 300s | 重放窗口 |
 
-密钥：共享 HMAC，**≥32 字节**，从各组件的 `SecretResolver` 取，仓库里不准提交默认密钥。
-启动时打一条 `key fp=sha256(key)[:8]`，两端 diff 这一行就知道密钥一不一致。
+仓库里不准提交默认密钥。
 
 ---
 
-## 四、已知缺口
+## 五、已知缺口
 
 推广到全量内部流量之前需要先解决：
 
