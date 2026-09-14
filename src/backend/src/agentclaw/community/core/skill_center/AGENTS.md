@@ -232,6 +232,12 @@ Engine 拥有物理布局。Backend 通过 `community/core/skills_pool/` 的版�
 
 Legacy `/api/skills`、`/api/skillsets` 位于 `community/adapters/http/skill_center/`，继续复用 Query、DirectActivation、SkillSetManagement。Legacy scope/reference resolution 与 Factory 负责旧参数、Default/exclusion、设备路径适配；保留其 wire compatibility，不恢复第二条 Installation 写路径。
 
+旧版 `POST /api/skills/upload` 的失败业务响应继续使用 HTTP 200 和
+`success=false`，并额外返回 `error_code`（成功时为 `null`）。错误码定义在
+`core/skill_center/upload_error_codes.py`，Legacy HTTP adapter 负责将既有异常
+归类为该枚举。前端应按错误码而不是匹配 `message` 判断分支；完整枚举与兼容说明见
+`src/backend/specs/2026-09-14-legacy-skill-upload-error-contract.md`。
+
 ## 10. 当前边界：不得扩大成未交付能力
 
 - `SkillQueryService` 已支持 Bot-facing Center 详情、内容、参数前置解析与 Direct 操作，并支持无 Bot 的共享 README。Center 内容只读最新 PUBLISHED 数据库 Version 对应的 Canonical 精确版本；读取不调用 Engine、不下载，也不证明 Runtime 已应用该版本。

@@ -16,6 +16,7 @@ it in run_in_threadpool.
 """
 
 import json
+import zipfile
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,7 +33,15 @@ from agentclaw.community.adapters.http.dependencies import (
     get_request_context,
 )
 from agentclaw.community.adapters.http.skill_center.skills import (
+    _classify_upload_validation_error,
+    _is_runtime_upload_error,
     router as skills_router,
+)
+from agentclaw.community.core.skill_center.upload_error_codes import (
+    SkillUploadErrorCode,
+)
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterHTTPStatusError,
 )
 from agentclaw.community.api.runtime_layout_probe_service import (
     RuntimeLayoutProbeServiceProtocol,
@@ -53,6 +62,7 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
     RuntimeLayoutProbeStatus,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillInfo
+from agentclaw.community.core.skill_center.skill_metadata import SkillManifestError
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -581,6 +591,7 @@ class TestUploadSkillValidation:
             assert response.status_code == 200
             body = response.json()
             assert body["success"] is False
+            assert body["error_code"] == SkillUploadErrorCode.BOT_NOT_READY
             assert "expected ACTIVE" in body["message"]
             mock_svc.upload_skill.assert_not_called()
 
@@ -610,6 +621,7 @@ class TestUploadSkillValidation:
 
             body = response.json()
             assert body["success"] is False
+            assert body["error_code"] == SkillUploadErrorCode.BOT_NOT_FOUND
             assert body["message"] == "Bot not found."
             mock_svc.upload_skill.assert_not_called()
 
@@ -640,6 +652,7 @@ class TestUploadSkillValidation:
 
             body = response.json()
             assert body["success"] is False
+            assert body["error_code"] == SkillUploadErrorCode.BOT_OWNER_MISSING
             assert body["message"] == "Bot ownership metadata is incomplete."
             mock_svc.upload_skill.assert_not_called()
 
@@ -668,7 +681,39 @@ class TestUploadSkillValidation:
 
             body = response.json()
             assert body["success"] is False
+            assert (
+                body["error_code"]
+                == SkillUploadErrorCode.FILE_PATHS_COUNT_MISMATCH
+            )
             assert body["message"] == "file_paths length must match files length."
+            mock_svc.upload_skill.assert_not_called()
+
+    def test_upload_rejects_invalid_file_paths_json(self, mock_ctx):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
+            client,
+            mock_svc,
+            _,
+            _,
+        ):
+            response = client.post(
+                "/api/skills/upload",
+                files=[
+                    (
+                        "files",
+                        (
+                            "SKILL.md",
+                            b"---\nname: a\ndescription: a\n---",
+                            "text/markdown",
+                        ),
+                    )
+                ],
+                data={"file_paths": "not-json"},
+            )
+
+            body = response.json()
+            assert body["success"] is False
+            assert body["error_code"] == SkillUploadErrorCode.FILE_PATHS_INVALID
+            assert body["message"] == "file_paths must be a JSON array."
             mock_svc.upload_skill.assert_not_called()
 
     def test_upload_active_bot_calls_service(self, mock_ctx):
@@ -695,6 +740,7 @@ class TestUploadSkillValidation:
 
             body = response.json()
             assert body["success"] is True
+            assert body["error_code"] is None
             assert mock_svc.upload_skill.await_count == 1
 
     def test_upload_persists_bot_owner_for_collaborator_upload(self):
@@ -821,9 +867,220 @@ class TestUploadSkillValidation:
             body = response.json()
             assert response.status_code == 200
             assert body["success"] is False
+            assert body["error_code"] == SkillUploadErrorCode.RUNTIME_UNAVAILABLE
             assert (
                 body["message"]
                 == "当前 Bot 的运行环境暂不可用，请重新启动 Bot 后重试。"
+            )
+
+    def test_upload_normalizes_legacy_timeout_error_message(self, mock_ctx):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
+            client,
+            mock_svc,
+            _,
+            _,
+        ):
+            mock_svc.upload_skill.side_effect = ValueError(
+                "Upload processing error: timeout"
+            )
+
+            response = client.post(
+                "/api/skills/upload",
+                files=[
+                    (
+                        "files",
+                        (
+                            "SKILL.md",
+                            b"---\nname: a\ndescription: a\n---",
+                            "text/markdown",
+                        ),
+                    )
+                ],
+                data={"file_paths": json.dumps(["SKILL.md"])},
+            )
+
+            body = response.json()
+            assert response.status_code == 200
+            assert body["success"] is False
+            assert body["error_code"] == SkillUploadErrorCode.RUNTIME_UNAVAILABLE
+            assert (
+                body["message"]
+                == "当前 Bot 的运行环境暂不可用，请重新启动 Bot 后重试。"
+            )
+
+    def test_upload_returns_manifest_error_code(self, mock_ctx):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
+            client,
+            mock_svc,
+            _,
+            _,
+        ):
+            mock_svc.upload_skill.side_effect = ValueError("SKILL.md is required.")
+
+            response = client.post(
+                "/api/skills/upload",
+                files=[
+                    (
+                        "files",
+                        (
+                            "README.md",
+                            b"readme",
+                            "text/markdown",
+                        ),
+                    )
+                ],
+                data={"file_paths": json.dumps(["README.md"])},
+            )
+
+            body = response.json()
+            assert response.status_code == 200
+            assert body["success"] is False
+            assert body["error_code"] == SkillUploadErrorCode.MANIFEST_MISSING
+            assert body["message"] == "SKILL.md is required."
+
+    @pytest.mark.parametrize(
+        ("message", "expected_code"),
+        [
+            ("No files uploaded", SkillUploadErrorCode.NO_FILES),
+            ("SKILL.md is required.", SkillUploadErrorCode.MANIFEST_MISSING),
+            (
+                "Only one skill can be uploaded at a time. Found 2 SKILL.md files.",
+                SkillUploadErrorCode.MANIFEST_MULTIPLE,
+            ),
+            (
+                "Upload contains files outside the skill root directory.",
+                SkillUploadErrorCode.FILE_OUTSIDE_ROOT,
+            ),
+            (
+                "Invalid upload path: parent directory '..' is not allowed.",
+                SkillUploadErrorCode.PATH_INVALID,
+            ),
+            (
+                "SKILL.md must contain required field: name.",
+                SkillUploadErrorCode.NAME_MISSING,
+            ),
+            (
+                "SKILL.md field 'name' cannot be empty.",
+                SkillUploadErrorCode.NAME_EMPTY,
+            ),
+            (
+                "SKILL.md must contain required field: description.",
+                SkillUploadErrorCode.DESCRIPTION_MISSING,
+            ),
+            (
+                "Skill folder name must match SKILL.md field 'name'.",
+                SkillUploadErrorCode.ROOT_NAME_MISMATCH,
+            ),
+            (
+                "Skill name 'a_b' is invalid. Only English letters, numbers, and '-' are allowed",
+                SkillUploadErrorCode.NAME_INVALID,
+            ),
+            (
+                "Skill name cannot contain underscore '_'",
+                SkillUploadErrorCode.NAME_INVALID,
+            ),
+            (
+                "Skill name 'default' is reserved and cannot be used",
+                SkillUploadErrorCode.NAME_RESERVED,
+            ),
+            ("File is not a zip file", SkillUploadErrorCode.ZIP_INVALID),
+            ("Bad CRC-32 for file 'foo'", SkillUploadErrorCode.ZIP_INVALID),
+            (
+                "Bad offset for central directory",
+                SkillUploadErrorCode.ZIP_INVALID,
+            ),
+            ("database write failed", SkillUploadErrorCode.UPLOAD_FAILED),
+        ],
+    )
+    def test_upload_validation_messages_have_stable_codes(
+        self, message, expected_code
+    ):
+        assert (
+            _classify_upload_validation_error(message)
+            or SkillUploadErrorCode.UPLOAD_FAILED
+        ) == expected_code
+
+    @pytest.mark.parametrize(
+        ("manifest_code", "expected_code"),
+        [
+            ("INVALID_FRONTMATTER", SkillUploadErrorCode.MANIFEST_INVALID),
+            (
+                "INVALID_ENCODING",
+                SkillUploadErrorCode.MANIFEST_ENCODING_INVALID,
+            ),
+            ("MISSING_NAME", SkillUploadErrorCode.NAME_MISSING),
+            ("EMPTY_DESCRIPTION", SkillUploadErrorCode.DESCRIPTION_EMPTY),
+            ("NAME_TOO_LONG", SkillUploadErrorCode.NAME_TOO_LONG),
+            (
+                "DESCRIPTION_TOO_LONG",
+                SkillUploadErrorCode.DESCRIPTION_TOO_LONG,
+            ),
+        ],
+    )
+    def test_manifest_errors_use_their_stable_codes(
+        self, manifest_code, expected_code
+    ):
+        error = SkillManifestError(manifest_code, "manifest error")
+        assert _classify_upload_validation_error(error) == expected_code
+
+    def test_runtime_classification_uses_exception_types_and_explicit_transport_text(self):
+        assert _is_runtime_upload_error(TimeoutError("timed out"))
+        assert _is_runtime_upload_error(
+            ValueError("Upload processing error: 502 Bad Gateway")
+        )
+        assert _is_runtime_upload_error(DeviceAdapterHTTPStatusError(502, "bad gateway"))
+        assert not _is_runtime_upload_error(
+            DeviceAdapterHTTPStatusError(400, "bad request")
+        )
+        assert not _is_runtime_upload_error(
+            "Skill folder name must match; Folder name: '503'"
+        )
+        assert not _is_runtime_upload_error(
+            "SKILL.md frontmatter is invalid at line 502"
+        )
+
+    def test_wrapped_zip_exception_keeps_zip_error_code(self):
+        cause = zipfile.BadZipFile("corrupt archive")
+        error = ValueError("Upload processing error: malformed archive")
+        error.__cause__ = cause
+        assert (
+            _classify_upload_validation_error(error)
+            == SkillUploadErrorCode.ZIP_INVALID
+        )
+
+    def test_upload_preserves_manifest_error_before_timeout_classification(self, mock_ctx):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
+            client,
+            mock_svc,
+            _,
+            _,
+        ):
+            mock_svc.upload_skill.side_effect = SkillManifestError(
+                "INVALID_FRONTMATTER",
+                "SKILL.md frontmatter is invalid: timeout in quoted value",
+            )
+
+            response = client.post(
+                "/api/skills/upload",
+                files=[
+                    (
+                        "files",
+                        (
+                            "SKILL.md",
+                            b"---\nname: a\ndescription: a\n---",
+                            "text/markdown",
+                        ),
+                    )
+                ],
+                data={"file_paths": json.dumps(["SKILL.md"])},
+            )
+
+            body = response.json()
+            assert response.status_code == 200
+            assert body["success"] is False
+            assert body["error_code"] == SkillUploadErrorCode.MANIFEST_INVALID
+            assert body["message"] == (
+                "SKILL.md frontmatter is invalid: timeout in quoted value"
             )
 
 
