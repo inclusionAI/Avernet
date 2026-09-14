@@ -3,7 +3,7 @@
 - 状态：接收端与正式前端已实现；监控服务端 72 项、选定前端回归 28 项通过；Mock 经真实 POST→dev 表→GET→正式页面验证完成（OC/TE 各 30 条，已清理）。真实内部 Host、AIStudio→预发、原生 SQLite 驱动与 prod 仍待验证。宿主坏 JSON 错误 envelope 的已知差异见开发记录 §5.1。
 - 本次验证：draft.3 的类型检查通过；使用显式 node:sqlite 辅助驱动的 73 项监控测试通过，未重跑 ODC 或完整 Host/AIStudio 联调。上行 72 项为此前记录，不是本修订结果。
 - 日期：2026-09-11（取消监控上报 Token；既有页面与 dev 验收结果为历史记录）；对齐公共契约 `1.0.0-draft.3`。
-- 本阶段开发基线：Avernet `3e0d54256`，分支 `feat/clawinsight-monitoring`；下方历史核对记录仍保留。claw-validation 未在本阶段修改；不代表已验证远端部署版本。合入前需重新核对装配点与 migration 序号（当前新增 120）。
+- 本阶段开发基线：Avernet `3e0d54256`，分支 `feat/clawinsight-monitoring`；下方历史核对记录仍保留。claw-validation 未在本阶段修改；不代表已验证远端部署版本。合入前需重新核对装配点与 migration 序号（当前实现曾新增 121，实施时必须按迁移顺序修正）。
 - 协议依据：[公共接口契约](clawinsight-monitoring-api-contract.md)。公共字段和行为不在本文另设第二套版本。
 - 页面基准：[设计 HTML](../../design/clawinsight-realtime-monitoring-demo.html)；与该 HTML 或旧设计文字冲突时，以本次 Spec 的范围和字段为准。
 
@@ -96,15 +96,33 @@ AIStudio 中 claw-validation
 - 本轮监控 POST 不执行应用层 Token 校验，依赖部署侧受限内网入口。不得修改旧治理、其他 internal API 的权限行为。
 - 现有 AIStudio service 的平台 Token 仅用于出站调用，保留不变；本次不增加监控上报秘密配置。
 
+### 3.1 本次不包含 Host 外观重构
+
+本次只保留 ClawInsight 页面自身的 Monitoring 入口和必要样式。为页面构建服务的 Tailwind source 声明可以保留，例如：
+
+```css
+@source "../../../modules/clawinsight/web";
+```
+
+公共 Header、Logo、主导航及其他 Host 外观调整不属于本需求；如果确有必要，必须拆成独立 PR，避免借 Monitoring 接入扩大改动范围。
+
 ## 4. 运行时装配与配置
 
 ### 4.1 装配要求
 
-新增 `createMonitoringRuntime`，在 Avernet 自己的配置 / composition 边界中解析配置、获取 IDatabase、创建 Repository 和 Service；核心业务代码不直接读取环境或依赖 Express。
+新增 `createMonitoringRuntime`，但它只负责根据已解析的依赖创建 Monitoring Repository 和 Service；不得自行读取最终环境配置、创建数据库连接或启动另一套进程。配置和数据库必须由 composition root 显式传入。
 
-现有 `createInsightRouter(service, options)` 参数保持兼容，新增可选 monitoring 注入。生产既有调用不传新参数时，由 Avernet 内部模块装配路径提供默认配置工厂；测试可以显式注入。不能只声明“可注入”却要求 OCB 改调用才能真正启用。
+- OCB Host 负责加载最终合并配置、创建业务数据库连接，并在装配时创建 Monitoring Runtime；
+- Avernet public Host（如用于本地/公开组合启动）负责使用其自身已解析的配置和数据库连接完成同样的装配；
+- `createInsightRouter(..., { monitoring })` 接收已创建的 Runtime，Router 只负责挂载，不负责隐式初始化；
+- `createMonitoringRuntime` 的参数至少包含 `db` 和已解析的 Monitoring 配置，不能在内部直接读取 `process.env` 或全局 `getRepositories()`；
+- 测试必须显式传入 fake DB / 配置，不能依赖进程全局环境才能完成单元测试。
 
-监控子路由注册在治理兜底 / 错误处理之前；不能因为治理 `InsightService` 为 null，就提前返回导致监控所有路由不可用。监控不可用只影响自己的路径，既有治理继续运行。监控专用错误适配器仅处理自己的请求。现有 `server/index.ts` 只是导出，不是已经初始化好的 monitoring runtime；默认装配属于本次待实现工作，必须用现有工厂签名的测试证明确实可达。
+核心业务代码不直接读取环境或依赖 Express。
+
+现有 `createInsightRouter(service, options)` 参数保持兼容，新增可选 monitoring 注入。生产调用方必须在 composition root 完成 Runtime 创建并通过 `options.monitoring` 注入；不再允许 Router 在缺少 Runtime 时自行读取环境或全局 Repository 进行隐式装配。测试可以显式注入。若某个 Host 未装配 Monitoring，则只返回可识别的未就绪结果，不影响既有治理路由。
+
+监控子路由注册在治理兜底 / 错误处理之前；不能因为治理 `InsightService` 为 null，就提前返回导致监控所有路由不可用。监控不可用只影响自己的路径，既有治理继续运行。监控专用错误适配器仅处理自己的请求。现有 `server/index.ts` 只是导出，不是已经初始化好的 Monitoring Runtime；实际装配必须由 Host composition root 完成，并用 Host 装配测试证明确实可达。
 
 ### 4.2 拟新增环境配置
 
@@ -226,9 +244,23 @@ bot_id / event_id 的比较、排序采用 ASCII 二进制语义（SQLite BINARY
 
 本稿将三处 ID 列改为 `CHARACTER SET latin1 COLLATE latin1_bin`，保留单字节存储、ASCII 合法 ID 的大小写敏感匹配与排序；其余中文字段仍继承表级 utf8mb4。SQL 文件只保留两条 CREATE，方便批量上传。此改动是待用户重新校验的兼容候选，不代表已通过 ODC 或真实建表测试；建表后需核验列字符集/字符序未被平台改写。
 
-### 5.4 migration 与类型约束
+### 5.4 Schema 归属、migration 与类型约束
 
-- 在 `shared/server/schema.ts` 追加当时下一个可用版本；本轮已核对最高版本为 119，其内容属于 Workflow，不可修改 / 复用。若实施时仍为 119 则可申请 120，否则顺延；必须先重新核对，避免与并行开发冲突。
+#### 目录与 Owner 约束
+
+Monitoring 是 ClawInsight 的子能力，不新增独立 npm package。前端、Router、Repository、Service、schema helper、fixture 和测试均位于：
+
+```text
+public/modules/clawinsight/
+```
+
+不得将 Monitoring 代码复制到 OCB、Host 或 Archive；不得为此新增 ACI；不得通过跨 package 相对路径读取另一仓库源码。OCB 只负责最终配置、数据库创建和 Host composition。
+
+
+
+- Monitoring 专属 DDL 与 schema helper 归属 `modules/clawinsight/server/services/monitoring/schema.ts`；`public/shared` 只保留通用 `IDatabase`、Dialect 和 migration 执行能力，不再新增 Monitoring 专属表定义。
+- 集中 migration 注册仍可暂时位于 `shared/server/schema.ts`，但只能通过 ClawInsight 导出的 migration/DDL 引用；这是迁移机制约束下的临时桥接，不得成为后续业务表放入 Shared 的惯例。
+- 当前实现中的 Monitoring migration 必须机械放在 migration 120 之后；如果并行分支已占用 120，则顺延到下一个实际可用序号。不能让 migration 121 排在 1～120 之前，也不能修改或复用 Workflow migration。修正后重新检查完整注册顺序和升级路径。
 - 审批稿与后续实现 migration 必须做结构一致性测试；审批后的表名/列/索引变化须同步此文件和 SQL 稿，不只改一处。现有 renderer 会将所有 `VARCHAR(255)` 缩为 `VARCHAR(190)`，但本契约 session_id / trace_id 允许 255 码点且不建索引：实现 migration 时必须对监控 DDL 做窄范围适配以保留 255，禁止静默截断或全局改变旧模块规则。ID 列 `latin1_bin` 同样须验证 SQLite 转换与生产保留行为；API 仍只接受 ASCII ID，不因存储字符集可表示更多字符而放宽协议。
 - 遵循 SQLite canonical / 方言 render 机制。MySQL / ZDAS 列 COMMENT、gmt 字段、内联索引、索引列 VARCHAR 等既有规范必须通过；不要仅写 SQLite DDL 后宣称生产已完成。
 - API 入口及 Repository 共同限制 human_intervention 为 0/1、枚举合法值和 confidence 范围；本建表稿不依赖跨版本 CHECK/ENUM 行为，不允许绕过校验的业务写入。
