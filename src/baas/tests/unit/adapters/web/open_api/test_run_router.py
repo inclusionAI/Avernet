@@ -12,6 +12,7 @@ from fastapi import HTTPException, status
 
 from secbaas.community.adapters.web.routers.open_api.model import RunRequest
 from secbaas.community.adapters.web.routers.open_api.run_router import (
+    abort_run,
     get_run_result,
     run_chat,
 )
@@ -488,3 +489,154 @@ class TestGetRunResult:
         assert exc.value.status_code == status.HTTP_404_NOT_FOUND
         assert exc.value.detail["code"] == 40401
         assert "run-404" in exc.value.detail["message"]
+
+# ── abort_run ────────────────────────────────────────────────
+
+
+class TestAbortRun:
+    """Tests for abort_run endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_success_with_session_id_in_metadata(self):
+        """Happy path: abort accepted, session_id from metadata."""
+        api_key = _make_api_key_record()
+        record = _make_run_record(metadata={"session_id": "sess-1"})
+        mock_runner = AsyncMock()
+        mock_runner.get_result = MagicMock(return_value=record)
+        mock_runner.abort = AsyncMock(return_value=None)
+
+        result = await abort_run(
+            run_id="run-001",
+            api_key_record=api_key,
+            bot_runner=mock_runner,
+        )
+
+        assert result.code == 0
+        assert result.message == "success"
+        assert result.data.ok is True
+        mock_runner.abort.assert_awaited_once_with(
+            session_id="sess-1",
+            run_id="run-001",
+        )
+
+    @pytest.mark.asyncio
+    async def test_success_with_session_id_in_result_extra(self):
+        """session_id falls back to result_extra when metadata is absent."""
+        api_key = _make_api_key_record()
+        record = _make_run_record(
+            metadata=None,
+            result_extra={"session_id": "sess-extra", "usage": {}},
+        )
+        mock_runner = AsyncMock()
+        mock_runner.get_result = MagicMock(return_value=record)
+        mock_runner.abort = AsyncMock(return_value=None)
+
+        result = await abort_run(
+            run_id="run-001",
+            api_key_record=api_key,
+            bot_runner=mock_runner,
+        )
+
+        assert result.code == 0
+        assert result.data.ok is True
+        mock_runner.abort.assert_awaited_once_with(
+            session_id="sess-extra",
+            run_id="run-001",
+        )
+
+    @pytest.mark.asyncio
+    async def test_success_with_empty_session_id(self):
+        """Abort accepted even when no session_id can be extracted."""
+        api_key = _make_api_key_record()
+        record = _make_run_record(metadata=None, result_extra=None)
+        mock_runner = AsyncMock()
+        mock_runner.get_result = MagicMock(return_value=record)
+        mock_runner.abort = AsyncMock(return_value=None)
+
+        result = await abort_run(
+            run_id="run-001",
+            api_key_record=api_key,
+            bot_runner=mock_runner,
+        )
+
+        assert result.code == 0
+        assert result.data.ok is True
+        mock_runner.abort.assert_awaited_once_with(
+            session_id="",
+            run_id="run-001",
+        )
+
+    @pytest.mark.asyncio
+    async def test_auth_fail_api_key_prefix_mismatch(self):
+        """api_key_prefix mismatch → business error, abort not called."""
+        api_key = _make_api_key_record(api_key_prefix="kp-999")
+        record = _make_run_record(api_key_prefix="kp-001")
+        mock_runner = AsyncMock()
+        mock_runner.get_result = MagicMock(return_value=record)
+
+        result = await abort_run(
+            run_id="run-001",
+            api_key_record=api_key,
+            bot_runner=mock_runner,
+        )
+
+        assert result.code == OpenAPICode.BUSINESS_ERROR
+        assert "Run not found" in result.message
+        assert result.data is None
+        mock_runner.abort.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_auth_fail_bot_id_mismatch(self):
+        """bot_id mismatch → business error, abort not called."""
+        api_key = _make_api_key_record(app_id="bot-other:entity-2")
+        record = _make_run_record(bot_id="bot-1:entity-1")
+        mock_runner = AsyncMock()
+        mock_runner.get_result = MagicMock(return_value=record)
+
+        result = await abort_run(
+            run_id="run-001",
+            api_key_record=api_key,
+            bot_runner=mock_runner,
+        )
+
+        assert result.code == OpenAPICode.BUSINESS_ERROR
+        assert "Run not found" in result.message
+        assert result.data is None
+        mock_runner.abort.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_key_error_returns_404(self):
+        """KeyError from get_result → 404 HTTPException."""
+        api_key = _make_api_key_record()
+        mock_runner = AsyncMock()
+        mock_runner.get_result = MagicMock(side_effect=KeyError("run-404"))
+
+        with pytest.raises(HTTPException) as exc:
+            await abort_run(
+                run_id="run-404",
+                api_key_record=api_key,
+                bot_runner=mock_runner,
+            )
+
+        assert exc.value.status_code == status.HTTP_404_NOT_FOUND
+        assert exc.value.detail["code"] == 40401
+        assert "run-404" in exc.value.detail["message"]
+
+    @pytest.mark.asyncio
+    async def test_generic_exception_returns_500(self):
+        """Unexpected Exception → 500 HTTPException."""
+        api_key = _make_api_key_record()
+        mock_runner = AsyncMock()
+        mock_runner.get_result = MagicMock(side_effect=RuntimeError("boom"))
+
+        with pytest.raises(HTTPException) as exc:
+            await abort_run(
+                run_id="run-001",
+                api_key_record=api_key,
+                bot_runner=mock_runner,
+            )
+
+        assert exc.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert exc.value.detail["code"] == 50001
+        assert "Internal server error" in exc.value.detail["message"]
+
