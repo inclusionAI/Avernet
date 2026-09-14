@@ -134,6 +134,36 @@ describe("independent Stage development record", () => {
     }
   });
 
+  it.each(
+    ["skill_evolution", "bot_evolution"].flatMap((flow) =>
+      ["diagnose", "plan", "optimize"].flatMap((stage) =>
+        ["preprocess", "postprocess", "replace"].map((mode) => ({ flow, stage, mode })))),
+  )("documents applicable task types for $flow/$stage/$mode in the downloaded contract", async ({ flow, stage, mode }) => {
+    const test = await setup();
+    const response = await test.request(`/stage-skills/developer-package?flow=${flow}&stage=${stage}&mode=${mode}`);
+    expect(response.status).toBe(200);
+    const zip = await JSZip.loadAsync(await response.arrayBuffer());
+    const guide = await zip.file("SKILL.md")!.async("string");
+    const inputs = [...guide.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) => JSON.parse(match[1]!));
+    const planBusiness = flow === "skill_evolution" && stage === "plan" && mode === "replace";
+    if (planBusiness) {
+      expect(inputs[0]).toHaveProperty("phase", "discovery");
+      expect(inputs.every((input) => !("task" in input))).toBe(true);
+      expect(guide).not.toContain("task_type");
+      return;
+    }
+    expect(inputs[0].task.task_type).toBe("full");
+    expect(guide).toContain("完整任务的 task_type 为 full，单段集成测试为 stage_test。");
+    if (stage === "optimize") {
+      expect(guide).not.toContain("task_type 为 diagnose");
+    } else {
+      const target = flow === "skill_evolution" ? "目标 Skill" : "Bot";
+      expect(guide).toContain(`${target}单独诊断任务的 task_type 为 diagnose`);
+      expect(guide).toContain("执行诊断及按任务选择启用的规划，不进入优化环节。");
+      expect(guide).not.toContain(`${flow === "skill_evolution" ? "Bot" : "目标 Skill"}单独诊断任务`);
+    }
+  });
+
   it("delivers all four Plan business input/output pairs through the developer package route", async () => {
     const test = await setup();
     const response = await test.request("/stage-skills/developer-package?flow=skill_evolution&stage=plan&mode=replace");

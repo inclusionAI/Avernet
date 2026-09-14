@@ -176,6 +176,7 @@ export function stageDevelopmentGuide(stage: OfficialStageDefinition, mode: Stag
     "运行时，平台会向执行 Agent 提供本次输入文件和结果文件的具体位置。读取输入文件，完成处理后，将结果以 JSON 格式写入结果文件。", "",
     "### 输入", "", "以下示例说明数据格式；标识、路径和业务内容以本次实际输入为准。", "", json(input), "",
     "`task` 是平台提供的任务信息。完整任务的 task_type 为 full，单段集成测试为 stage_test。", "",
+    ...(stage.stage !== "optimize" ? [`${skillFlow ? "目标 Skill" : "Bot"}单独诊断任务的 task_type 为 diagnose，执行诊断及按任务选择启用的规划，不进入优化环节。`, ""] : []),
     inputNotes[stage.stage], "",
     ...(skillFlow ? ["`target_skill` 描述本次待进化 Skill 的独立副本。path 是可读取的 Skill 目录，workspace 是本次工作目录；其余字段标识原始 Skill 和内容基线。修改范围限于任务允许的副本内容。", ""] : []),
     ...(skillFlow && ((stage.stage === "diagnose" && mode === "preprocess") || (stage.stage === "plan" && mode === "replace"))
