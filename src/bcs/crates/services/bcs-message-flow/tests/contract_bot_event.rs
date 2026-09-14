@@ -64,6 +64,61 @@ impl RecordingChannelService {
 }
 
 #[tokio::test]
+async fn queue_reconstruction_never_rewrites_channel_or_frontend_final() {
+    use bcs_service_api::ManagedMessageDeliveryService;
+    use bcs_service_api::port::repo::MessageRepoPort;
+    for queued in [false, true] {
+        for final_text in ["工具前工具后", "工具后补充", "重写后的回答", ""] {
+            let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+            let repo = Arc::new(bcs_message_store::MemoryMessageRepo::new());
+            let service = Arc::new(bcs_message_flow::managed_delivery::ManagedMessageDelivery::new(repo.clone()));
+            let mut flow = BcsMessageFlow::new(support.group.clone(), support.routing, support.registry,
+                support.bot_delivery, support.frontend_delivery.clone())
+                .with_message_repo(repo.clone()).with_managed_deliveries(service.clone());
+            if queued {
+                flow = flow.with_group_delivery_limits(BTreeMap::from([("bot-driver".into(), 100), ("bot-observer".into(), 100)]));
+            }
+            let channel = Arc::new(RecordingChannelService::default());
+            assert!(flow.channel_slot().set(channel.clone()).is_ok());
+            let event = |state, event_type: &str, payload| BotEventCommand {
+                bot_id: "bot-driver".into(), run_id: "raw-final-run".into(), group_id: "group-1".into(),
+                bcs_session_id: Some("group-1:raw-final".into()), state, event_type: event_type.into(), event_payload: payload,
+            };
+            for (state, kind, payload) in [
+                (ChatEventState::Delta, "chat.event", json!({"message":{"content":[{"type":"text","text":"工具前"}]}})),
+                (ChatEventState::Delta, "agent", json!({"stream":"tool","data":{"phase":"result","name":"search","toolCallId":"tool","result":"done"}})),
+                (ChatEventState::Delta, "chat.event", json!({"message":{"content":[{"type":"text","text":"工具后"}]}})),
+            ] { flow.handle_bot_event(event(state, kind, payload)).await.unwrap(); }
+            let payload = json!({"state":"final","message":{"role":"assistant","content":[{"type":"text","text":final_text}]},"custom":"preserved"});
+            let before = support.frontend_delivery.events().await.len();
+            flow.handle_bot_event(event(ChatEventState::Final, "chat.event", payload.clone())).await.unwrap();
+            let outbound = channel.outbound().await;
+            let finals: Vec<_> = outbound.iter().filter(|m| m.kind == ChannelOutboundEventKind::ChatFinal).collect();
+            assert_eq!(finals.len(), 1);
+            assert_eq!(finals[0].raw_payload, payload);
+            assert_eq!(finals[0].text.as_deref().unwrap_or(""), final_text);
+            let events = support.frontend_delivery.events().await;
+            let final_frame: Value = serde_json::from_str(&events[before]).unwrap();
+            assert_eq!(final_frame["payload"]["message"], payload["message"]);
+            assert_eq!(final_frame["payload"]["custom"], "preserved");
+            let deliveries = service.snapshot(Some("group-1:raw-final")).await.unwrap();
+            if queued {
+                assert!(!deliveries.is_empty());
+                let message = repo.get_message_by_id("group-1:raw-final", &deliveries[0].source_message_id).await.unwrap().unwrap();
+                assert_eq!(message.message_type, "run_reply");
+                let expected = match final_text {
+                    "工具前工具后" | "" => "工具前工具后",
+                    "工具后补充" => "工具前工具后补充",
+                    _ => "工具前工具后重写后的回答",
+                };
+                assert_eq!(message.content["text"], expected);
+                assert_eq!(message.content["normalization"]["raw_final"], final_text);
+            } else { assert!(deliveries.is_empty()); }
+        }
+    }
+}
+
+#[tokio::test]
 async fn queued_im_hints_aggregate_targets_and_do_not_replay_on_restart() {
     use bcs_domain::{DeliveryType, NewMessage, SenderType, message_delivery::DeliveryFlowKind};
     use bcs_service_api::{ManagedMessageDeliveryService, DeliveryTransitionCommand};
