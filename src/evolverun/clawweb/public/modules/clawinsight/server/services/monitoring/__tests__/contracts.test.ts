@@ -1,12 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { createMonitoringService } from "../monitoring-service.js";
 import { parseCheck, parseDiagnosis, parseQuery, timestamp } from "../validation.js";
 import { CHECK_VERSION, type MonitoringStore } from "../contracts.js";
 import { createMonitoringRuntime } from "../monitoring-runtime.js";
 
-const alert = JSON.parse(readFileSync(fileURLToPath(new URL("../../../fixtures/monitoring/alert.json", import.meta.url)), "utf8"));
+const fixture = (name: string) =>
+  JSON.parse(
+    readFileSync(
+      join(process.cwd(), "server/fixtures/monitoring", `${name}.json`),
+      "utf8",
+    ),
+  );
+const alert = fixture("alert");
 const now = Date.parse("2026-09-10T09:00:00Z");
 const check = { schemaVersion: CHECK_VERSION, botId: "mock-bot-te", engine: "TE", checkedAt: new Date(now).toISOString(),
   lastSuccessfulCheckAt: new Date(now).toISOString(), status: "HEALTHY" };
