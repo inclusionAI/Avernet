@@ -3,8 +3,9 @@ import express from "express";
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { SqliteDatabase, runMigrations } from "@avernet/clawweb-shared/server/db";
+import { SqliteDatabase } from "@avernet/clawweb-shared/server/db";
 import { createMonitoringRouter } from "../../routes/monitoring.js";
+import { initializeMonitoringSqlite } from "./schema.js";
 import { createMonitoringRuntime } from "./monitoring-runtime.js";
 
 const path = resolve(process.env.MONITORING_LOCAL_DB_PATH ?? ".local/monitoring.sqlite3");
@@ -13,7 +14,7 @@ const sqlite = new Database(path);
 sqlite.pragma("journal_mode = WAL");
 sqlite.pragma("synchronous = FULL");
 const db = new SqliteDatabase(sqlite);
-await runMigrations(db, "sqlite");
+await initializeMonitoringSqlite(db);
 const runtime = createMonitoringRuntime(() => db, { ...process.env, CLAWWEB_MONITORING_ENABLED: "true",
   CLAWWEB_MONITORING_BOTS_JSON: JSON.stringify([{ botId: "mock-bot-te", engine: "TE" }, { botId: "mock-bot-oc", engine: "OC" }]) });
 if (!runtime.service) throw new Error("Invalid monitoring configuration");

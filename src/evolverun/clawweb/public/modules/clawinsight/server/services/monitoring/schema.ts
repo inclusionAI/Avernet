@@ -1,4 +1,7 @@
-/** Canonical monitoring DDL. Kept in sync with the reviewed schema.mysql.sql. */
+import type { IDatabase } from "@avernet/clawweb-shared/server/db";
+import type { Dialect } from "@avernet/clawweb-shared/server/db/dialect";
+
+/** Monitoring-owned DDL. Managed databases are provisioned externally, never by the router. */
 export const monitoringDdl = [
   `CREATE TABLE IF NOT EXISTS insight_monitoring_diagnoses (
   id INTEGER PRIMARY KEY AUTOINCREMENT COMMENT '内部自增主键，不作为页面记录编号',
@@ -40,3 +43,27 @@ export const monitoringDdl = [
   UNIQUE INDEX uk_monitor_check_bot (bot_id)
 ) COMMENT='Agent监控每Bot最新检查状态，不保存心跳历史'`
 ];
+
+/** Adapt only this module's fixed DDL; the shared dialect keeps its legacy policy. */
+export function renderMonitoringDdl(dialect: Dialect): string[] {
+  return monitoringDdl.map((ddl) => {
+    if (dialect.name === "sqlite") {
+      return dialect.renderDdl(ddl.replace(/CHARACTER SET latin1 COLLATE latin1_bin/g, "COLLATE BINARY"));
+    }
+    if (dialect.name !== "mysql" && dialect.name !== "zdas") throw new Error("Unsupported monitoring DDL dialect");
+    // These non-indexed locators must retain the protocol's 255-codepoint capacity.
+    const rendered = dialect.renderDdl(ddl.replace(/VARCHAR\(255\)/g, "MONITORING_LOCATOR_255"))
+      .replace(/MONITORING_LOCATOR_255/g, "VARCHAR(255)");
+    return `${rendered} DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci`;
+  });
+}
+
+/** Explicit local/test setup only. Never called by production runtime or request handlers. */
+export async function initializeMonitoringSqlite(db: IDatabase): Promise<void> {
+  if (db.dbType !== "sqlite") throw new Error("Monitoring local initialization requires SQLite");
+  for (const ddl of renderMonitoringDdl(db.dialect)) await db.exec(ddl);
+  for (const table of ["insight_monitoring_diagnoses", "insight_monitoring_bot_checks"]) {
+    await db.exec(`CREATE TRIGGER IF NOT EXISTS trg_${table}_update AFTER UPDATE ON ${table}
+      FOR EACH ROW BEGIN UPDATE ${table} SET gmt_modified = (unixepoch()) WHERE id = NEW.id; END`);
+  }
+}

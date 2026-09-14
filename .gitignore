@@ -107,5 +107,3 @@ src/bcs/target
 openspec
 
 scripts/undercover-game.sh
-# Local monitoring integration host state
-src/evolverun/clawweb/public/modules/clawinsight/.local/

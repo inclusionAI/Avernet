@@ -183,7 +183,6 @@ export const sqliteDialect: Dialect = {
     }
 
     const rendered = sql
-      .replace(/CHARACTER SET latin1 COLLATE latin1_bin/gi, "COLLATE BINARY")
       .replace(/\bBIGINT(?:\s*\(\d+\))?\s+PRIMARY\s+KEY\s+AUTO_INCREMENT\b/gi, "INTEGER PRIMARY KEY AUTOINCREMENT")
       .replace(/ALTER\s+TABLE\s+\w+\s+MODIFY\s+COLUMN\s+[\s\S]*?$/gm, "SELECT 0 -- SQLite: MODIFY COLUMN skipped (INTEGER is unbounded)")
       .replace(/\bTINYINT\b/gi, "INTEGER")
@@ -382,8 +381,7 @@ export const mysqlDialect: Dialect = {
     // because steps 1-4 match the SQLite-specific `(unixepoch())` token which
     // step 7 would otherwise destroy. Similarly, step 9 must run after step 1
     // because it matches the `BIGINT ... AUTO_INCREMENT` produced by step 1.
-    const monitoringTable = /^\s*CREATE TABLE IF NOT EXISTS insight_monitoring_(?:diagnoses|bot_checks)\s*\(/i.test(sql);
-    const rendered = sql
+    return sql
       // 1. INTEGER PK AUTOINCREMENT → BIGINT PK AUTO_INCREMENT
       .replace(/INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT/gi, "BIGINT PRIMARY KEY AUTO_INCREMENT")
       // 2. INTEGER PK AUTO_INCREMENT (canonical variant) → BIGINT PK AUTO_INCREMENT
@@ -429,7 +427,7 @@ export const mysqlDialect: Dialect = {
       // 10. VARCHAR(255) → VARCHAR(190): avoids InnoDB 767-byte key limit so
       //     unique indexes on these columns (often used as FK targets) can be
       //     full-column instead of prefix indexes, which MySQL requires for FKs.
-      .replace(/\bVARCHAR\s*\(\s*255\s*\)/gi, monitoringTable ? "VARCHAR(255)" : "VARCHAR(190)")
+      .replace(/\bVARCHAR\s*\(\s*255\s*\)/gi, "VARCHAR(190)")
       // 11. id BIGINT PK AUTO_INCREMENT → add COMMENT '主键ID' when the
       //     canonical DDL has not already supplied one (must run after step 1).
       .replace(
@@ -439,9 +437,6 @@ export const mysqlDialect: Dialect = {
       // 12. Remaining INTEGER → BIGINT (SQLite INTEGER is 64-bit; MySQL INT is 32-bit).
       //     Must run after all preceding steps so PK/FK types match.
       .replace(/\bINTEGER\b/gi, "BIGINT");
-    return monitoringTable
-      ? `${rendered} DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci`
-      : rendered;
   },
 };
 

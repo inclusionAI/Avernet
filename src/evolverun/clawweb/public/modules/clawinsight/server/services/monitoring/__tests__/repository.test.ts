@@ -2,9 +2,9 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runMigrations, type IDatabase } from "@avernet/clawweb-shared/server/db";
+import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { mysqlDialect, zdasDialect } from "@avernet/clawweb-shared/server/db/dialect";
-import { monitoringDdl } from "../../../../../../shared/server/monitoring-schema.js";
+import { initializeMonitoringSqlite, renderMonitoringDdl } from "../schema.js";
 import { MonitoringRepository } from "../../../repositories/monitoring-repository.js";
 import { parseDiagnosis, parseQuery, parseCheck } from "../validation.js";
 import { database } from "./test-database.js";
@@ -20,14 +20,25 @@ const now = Date.parse("2026-09-10T09:00:00Z");
 let db: IDatabase, repo: MonitoringRepository, dir: string;
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "monitoring-repository-")); db = database(join(dir, "db.sqlite3"));
-  const log = vi.spyOn(console, "log").mockImplementation(() => {}), warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-  try { await runMigrations(db, "sqlite"); } finally { log.mockRestore(); warn.mockRestore(); }
+  await initializeMonitoringSqlite(db);
   repo = new MonitoringRepository(db);
-});
+}, 30000);
 afterEach(async () => { await db?.close(); if (dir) rmSync(dir, { recursive: true, force: true }); vi.restoreAllMocks(); });
 const insert = (event = alert) => repo.insertDiagnosis(parseDiagnosis(event, event.eventId), now);
 const list = (query = {}, bot = "mock-bot-te") => repo.listDiagnoses(bot, parseQuery(query));
 describe("monitoring real SQL persistence (no HTTP listener)", () => {
+  it("initializes only module tables, is repeatable and preserves existing records", async () => {
+    await insert();
+    await initializeMonitoringSqlite(db);
+    expect((await list()).total).toBe(1);
+    const tables = await db.query<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
+    expect(tables.map(row => row.name)).toEqual(["insight_monitoring_bot_checks", "insight_monitoring_diagnoses"]);
+  });
+  it("refuses local initialization on a managed database without executing DDL", async () => {
+    const exec = vi.fn();
+    await expect(initializeMonitoringSqlite({ dbType: "zdas", exec } as unknown as IDatabase)).rejects.toThrow("requires SQLite");
+    expect(exec).not.toHaveBeenCalled();
+  });
   it("stores all three decisions and intervention, isolates bots and survives reopen", async () => {
     for (const event of [alert, pass, unresolved]) expect(await insert(event)).toBe(true);
     expect(await list()).toMatchObject({ total: 2, counts: { all: 2, alert: 1, pass: 1, unresolved: 0 } });
@@ -83,7 +94,7 @@ describe("monitoring real SQL persistence (no HTTP listener)", () => {
     await expect(list()).rejects.toMatchObject({ code: "NOT_READY" });
   });
   it.each([mysqlDialect, zdasDialect])("renders reviewed monitoring types without changing legacy VARCHAR policy ($name)", dialect => {
-    const sql = monitoringDdl.map(ddl => dialect.renderDdl(ddl)).join("\n");
+    const sql = renderMonitoringDdl(dialect).join("\n");
     expect(sql).toContain("VARCHAR(255)"); expect(sql).toContain("CHARACTER SET latin1 COLLATE latin1_bin");
     expect(sql).toContain("utf8mb4"); expect(sql).toContain("AUTO_INCREMENT");
     expect(sql).toContain("(bot_id, decision, occurred_at_ms, event_id)");

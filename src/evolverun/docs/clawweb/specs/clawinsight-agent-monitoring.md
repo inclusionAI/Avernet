@@ -3,13 +3,13 @@
 - 状态：接收端与正式前端已实现；监控服务端 72 项、选定前端回归 28 项通过；Mock 经真实 POST→dev 表→GET→正式页面验证完成（OC/TE 各 30 条，已清理）。真实内部 Host、AIStudio→预发、原生 SQLite 驱动与 prod 仍待验证。宿主坏 JSON 错误 envelope 的已知差异见开发记录 §5.1。
 - 本次验证：draft.3 的类型检查通过；使用显式 node:sqlite 辅助驱动的 73 项监控测试通过，未重跑 ODC 或完整 Host/AIStudio 联调。上行 72 项为此前记录，不是本修订结果。
 - 日期：2026-09-11（取消监控上报 Token；既有页面与 dev 验收结果为历史记录）；对齐公共契约 `1.0.0-draft.3`。
-- 本阶段开发基线：Avernet `3e0d54256`，分支 `feat/clawinsight-monitoring`；下方历史核对记录仍保留。claw-validation 未在本阶段修改；不代表已验证远端部署版本。合入前需重新核对装配点与 migration 序号（当前实现曾新增 121，实施时必须按迁移顺序修正）。
+- 本阶段开发基线：Avernet `3e0d54256`，分支 `feat/clawinsight-monitoring`；下方历史核对记录仍保留。claw-validation 未在本阶段修改；不代表已验证远端部署版本。2026-09-14 边界收敛：已撤回共享 migration 121；监控 DDL 和本地初始化归属 ClawInsight，受管库继续经 ODC 审批建表。
 - 协议依据：[公共接口契约](clawinsight-monitoring-api-contract.md)。公共字段和行为不在本文另设第二套版本。
 - 页面基准：[设计 HTML](../../design/clawinsight-realtime-monitoring-demo.html)；与该 HTML 或旧设计文字冲突时，以本次 Spec 的范围和字段为准。
 
 ## 0. 文档定位与本次更新
 
-- 负责模块：ClawInsight server / web；参与模块：ClawWeb shared 数据库与迁移层、外部 claw-validation 上报端。
+- 负责模块：ClawInsight server / web；依赖：ClawWeb Shared 的既有数据库接口、外部 claw-validation 上报端；本 PR 不修改 Shared、Host 或公共 CI。
 - 本主题跨模块、跨仓库，按[领域文档规范](../../agents/domain.md)归入 `docs/specs/2026-09-09-clawinsight-agent-monitoring/`，本文 `spec.md` 为实现入口；同目录公共契约为双方协议依据。不额外拆 plan/tasks 文档。
 - 遵守[架构规则](../../arch/arch.rules.md)、[CI 规则](../../arch/ci.enforce.md)、[Context Boundary](../../arch/context-boundary-format.md)和[协议测试规则](../../arch/protocol-contract-tests.md)。领域入口为[Context Map](../../../CONTEXT-MAP.md)；当前已列出的 Skill 生命周期 ADR 不直接规定本次监控上报，不修改这些 ADR。
 - 上报端的独立实现合同在 claw-validation 仓库 `docs/specs/clawweb-reporting-integration-spec.md`。本仓库不复制 Python 实现 Spec；通过同修订号公共契约对齐，部署 / PR 交付时注明两端对应版本。
@@ -22,7 +22,7 @@
 | 核心接入 | IDatabase、Insight runtime / 导出工厂、AIStudio service、InsightCenter 外层页面相对旧基线未改 | 原挂载、存储、两模块分离思路保持 |
 | 现有治理与修复 | 管理员执行接口新增 diagnosticMode；验收支持显式 allowZeroSession；修复证据投影增强 | 作为必须保留的治理行为，不吸收到监控 DTO |
 | 管理页 | InsightCenter 已有管理员专属 `tab=admin`，并非本轮新加 | 修正初稿“只有三个 tab”的不完整描述，新增监控时必须保留它 |
-| 数据库 | 统一 schema 已新增 v119（Workflow 跨实例重试选项） | 不复用 v119，实施时领取下一个可用版本 |
+| 数据库 | 统一 schema 已新增 v119（Workflow 跨实例重试选项） | 不占用统一 migration 版本；模块本地初始化与 ODC 发布分工 |
 | 进化室 | `/evolve/*` 新增 EvolveRoutes 具名路由包装 | 不覆盖该包装，不为监控重构 `/evolve` |
 | Workflow | 新增跨实例 run/log 查询和 retry-request 能力 | 它们不是 CV 诊断接收接口；不接入任务 claim/complete 链路 |
 | 测试依赖 | ClawInsight Vitest 与 coverage-v8 均为 3.2.7 | 沿用当前依赖及脚本，不从旧设计恢复旧版本 |
@@ -57,7 +57,7 @@ AIStudio 中 claw-validation
 | 目的 | 历史分析、问题证据、改进待办 | 固定 Bot 实时诊断结果 |
 | 数据产生 | 现有导出 / 分析和治理流程 | 外部 CV 主动单条 POST |
 | 页面 | 保留效果概览 / 问题证据 / 我的待办，以及管理员专属“管理” | Bot/日期/刷新、状态、诊断记录 |
-| 复用 | Host、页面外壳、模块装配、数据库抽象、migration | 不复用治理统计模型表达实时诊断 |
+| 复用 | Host、页面外壳、模块装配、数据库抽象 | 不复用治理统计模型表达实时诊断 |
 
 “ODC 落表”是通过既有数据库连接写表，再用 ODC 查看同一张表，不新增所谓 ODC HTTP 上传接口。
 
@@ -67,7 +67,7 @@ AIStudio 中 claw-validation
 
 1. 公共契约的两个 POST：诊断落库、最新 Bot 检查状态。
 2. 同契约三个 GET：固定 Bot 清单、运行状态、分页诊断。
-3. 两张业务表、索引、统一 migration、真实持久化与幂等。
+3. 两张业务表、索引、模块内 DDL、真实持久化与幂等。
 4. 设计 HTML 对应的 React 页面，接入现有 Host 外壳。
 5. 不连 AIStudio 的本地真实 Router + SQLite + 页面闭环测试。
 
@@ -87,7 +87,7 @@ AIStudio 中 claw-validation
 | `modules/clawinsight/server/services/aistudio-service.ts` | 现有 AIStudio 出站请求 / 配置 | 只参考服务端配置注入模式；不是本次入站上报实现 |
 | `modules/clawinsight/server/repositories/` | 治理数据持久化 | 参考 Repository 风格，新增独立表，不写入治理指标表 |
 | `shared/server/db.ts` | IDatabase、SQLite/MySQL/ZDAS/noop 适配与事务 | 注入同一个业务库；监控明确拒绝 noop |
-| `shared/server/schema.ts` | 统一 migration 与方言 DDL | 追加与受管库审批 DDL 一致的表和索引；允许先经 ODC 发布，不创建脱离 Spec 的孤立表 |
+| `modules/clawinsight/server/services/monitoring/schema.ts` | 模块专属 DDL、类型适配、本地 SQLite 初始化 | 受管库由 ODC 发布；线上运行时只检查和读写，不执行监控 DDL |
 | `modules/clawinsight/web/pages/InsightCenter/index.tsx` | 现有效果中心页面 | 增加模块切换，保留治理入口行为 |
 | `modules/clawinsight/web/api/insight.ts` | 治理前端 API | 新增独立 monitoring API，避免混用治理响应类型；保留新 diagnosticMode 参数 |
 
@@ -199,7 +199,7 @@ bot_id / event_id 的比较、排序采用 ASCII 二进制语义（SQLite BINARY
 **两张表与既有 ClawInsight 表共用同一个 `IDatabase`，不通过 ODC HTTP API 读写。**
 
 - 核对证据、已确认结论与验收边界：[数据库接入核对记录](database-research.md)。
-- 审批建表稿：[schema.mysql.sql](schema.mysql.sql)。表名采用 `insight_` 前缀，与既有 ClawInsight 表命名保持一致，Repository 和 migration 使用上述完整固定名称；该前缀不是驱动自动添加的。
+- 审批建表稿：[schema.mysql.sql](schema.mysql.sql)。表名采用 `insight_` 前缀，与既有 ClawInsight 表命名保持一致，Repository 和模块 DDL 使用上述完整固定名称；该前缀不是驱动自动添加的。
 - 发布后核验：[verify.mysql.sql](verify.mysql.sql)。文件只含只读查询，不执行建表或写入业务数据。
 - `schema.mysql.sql` 面向 OceanBase MySQL 兼容模式 / MySQL，尚未在目标库执行。ODC 单表结构编辑器每个结构填写一条 CREATE；本次截图所示“编写 SQL”批量入口允许不同表的多条 CREATE，可以粘贴本文件全部内容。每张表的发布目标名称须与 SQL 表名一致。确认目标库后，完成生成 SQL 任务、审批和实际执行；仅保存结构设计不表示已建表。
 - 审批时检查生成的最终 DDL，而非只看输入 CREATE。ODC 会对已有同名表做差异比较；发现同名非本模块表或结构不符时停止，不自动改造旧表。本稿不含 USE、DROP、ALTER 或共享 schema_version 写入。
@@ -226,15 +226,15 @@ bot_id / event_id 的比较、排序采用 ASCII 二进制语义（SQLite BINARY
 
 本需求不因数据库接入新增 OCB 业务代码或凭据配置。建表后按正常联调验收核验新表读写：用既有服务连接读表，再用本契约 mock 上报验证写入及查询；这属于新表验收，不是重新设计数据源。个人 ODC 权限与服务账号权限仍是不同概念，若验收出现权限错误，沿现有流程处理。不要向前端或 claw-validation 发放数据库密码。
 
-#### 受管库与本地 migration 的分工
+#### 受管库与本地初始化的分工
 
-现有 `runMigrations` 在创建 `schema_version` 被识别为 DDL 禁止时会跳过迁移并假设外部已建表，因此不能承诺“应用启动自动创建生产表”。执行分工如下：
+本模块不再往 Shared 注册监控 migration，也不让 Shared 反向依赖 ClawInsight。线上监控只消费 Host 提供的 IDatabase，不负责建表；本地测试显式调用模块的 `initializeMonitoringSqlite`，只建立两张监控表及其索引和触发器，不运行全站迁移、不写共享 `schema_version`。执行分工如下：
 
 | 场景 | 建表负责方 | 应用行为 |
 |---|---|---|
-| 本地 SQLite / 可建表的开发库 | 同仓统一 migration | 建立相同业务列和索引，运行契约测试 |
+| 本地 SQLite / 监控定向测试 | 模块显式 SQLite 初始化 | 只建立两张监控表，运行契约测试 |
 | 禁止应用 DDL 的受管库 | 经审批的 ODC 结构发布 | 只做业务读写与结构就绪校验，不要求为监控授予 CREATE 权限 |
-| 已人工建表且运行账户可迁移 | 与审批稿一致的幂等 migration | 已存在结构须核验，不因表存在就视为完全正确 |
+| 已人工建表的受管库（即使账户有 DDL 权限） | ODC 管理表结构 | 仍只做结构核验和业务读写，不执行建表或迁移 |
 
 新增 monitoring 就绪校验须确认必需列、类型/长度、可空性、ID 大小写敏感语义及唯一/查询索引；不能只看连接成功或 `CREATE IF NOT EXISTS` 没报错。缺表、结构不兼容、无访问权限或 noop 时，依赖 DB 的监控接口返回 503，不假 ACK，不返回伪造空历史；不要拖垮原有 Agent 治理。不得手动抬高共享 `schema_version` 来跳过别的模块迁移。
 
@@ -259,9 +259,9 @@ public/modules/clawinsight/
 
 
 - Monitoring 专属 DDL 与 schema helper 归属 `modules/clawinsight/server/services/monitoring/schema.ts`；`public/shared` 只保留通用 `IDatabase`、Dialect 和 migration 执行能力，不再新增 Monitoring 专属表定义。
-- 集中 migration 注册仍可暂时位于 `shared/server/schema.ts`，但只能通过 ClawInsight 导出的 migration/DDL 引用；这是迁移机制约束下的临时桥接，不得成为后续业务表放入 Shared 的惯例。
-- 当前实现中的 Monitoring migration 必须机械放在 migration 120 之后；如果并行分支已占用 120，则顺延到下一个实际可用序号。不能让 migration 121 排在 1～120 之前，也不能修改或复用 Workflow migration。修正后重新检查完整注册顺序和升级路径。
-- 审批稿与后续实现 migration 必须做结构一致性测试；审批后的表名/列/索引变化须同步此文件和 SQL 稿，不只改一处。现有 renderer 会将所有 `VARCHAR(255)` 缩为 `VARCHAR(190)`，但本契约 session_id / trace_id 允许 255 码点且不建索引：实现 migration 时必须对监控 DDL 做窄范围适配以保留 255，禁止静默截断或全局改变旧模块规则。ID 列 `latin1_bin` 同样须验证 SQLite 转换与生产保留行为；API 仍只接受 ASCII ID，不因存储字符集可表示更多字符而放宽协议。
+- 不在 `shared/server/schema.ts` 注册监控 migration；禁止 Shared 反向依赖 ClawInsight。受管库以 ODC 发布为唯一监控建表入口；模块 SQLite 初始化仅供本地 Host 和测试显式调用，并拒绝 MySQL/ZDAS。
+- 撤回本 PR 新增的共享 migration 121、共享监控触发器和方言中的监控表特判。已有数据库的监控表、数据和 schema_version 不做删除或回退；不要因为源码撤回注册而执行数据库清理。
+- 审批稿与模块 DDL 必须做结构一致性测试；审批后的表名/列/索引变化须同步此文件和 SQL 稿，不只改一处。现有 renderer 会将所有 `VARCHAR(255)` 缩为 `VARCHAR(190)`，但本契约 session_id / trace_id 允许 255 码点且不建索引：模块 renderer 必须对监控 DDL 做窄范围适配以保留 255，禁止静默截断或全局改变旧模块规则。ID 列 `latin1_bin` 同样须验证 SQLite 转换与生产保留行为；API 仍只接受 ASCII ID，不因存储字符集可表示更多字符而放宽协议。
 - 遵循 SQLite canonical / 方言 render 机制。MySQL / ZDAS 列 COMMENT、gmt 字段、内联索引、索引列 VARCHAR 等既有规范必须通过；不要仅写 SQLite DDL 后宣称生产已完成。
 - API 入口及 Repository 共同限制 human_intervention 为 0/1、枚举合法值和 confidence 范围；本建表稿不依赖跨版本 CHECK/ENUM 行为，不允许绕过校验的业务写入。
 - SQLite boolean 为 0/1，MySQL 驱动 BIGINT / 数字可能返回字符串，Repository 必须显式转换并检查安全范围。日期有效范围限制在公共 RFC3339 格式支持范围，不能溢出 JS 安全整数。
@@ -356,17 +356,17 @@ SQLite 当前单连接异步 transaction 使用须特别测试并发 BEGIN / COM
 | `modules/clawinsight/server/repositories/monitoring-repository.ts`（新增） | IDatabase、方言查询、唯一键处理、状态原子更新 |
 | `modules/clawinsight/server/routes/monitoring.ts`（新增） | POST/GET 适配、Header/body/query 校验、错误响应 |
 | `modules/clawinsight/server/routes/insight.ts`、`server/index.ts` | 在原工厂路径组合导出，不要求 OCB 新路由 |
-| `shared/server/schema.ts` | migration、索引和方言转换 |
+| `modules/clawinsight/server/services/monitoring/schema.ts`（新增） | 监控 DDL、局部方言适配、仅本地 SQLite 初始化 |
 | `modules/clawinsight/web/api/monitoring.ts`（新增） | 同源 GET、类型、错误映射，不含写 Token |
 | `modules/clawinsight/web/pages/InsightCenter/index.tsx` | 两模块切换，旧治理兼容 |
 | `modules/clawinsight/web/pages/InsightCenter/monitoring/`（新增） | 筛选、状态、条目、分页、样式与页面测试 |
 | 模块现有测试目录 / `server/fixtures/monitoring/`（新增） | 公共样例与实际 Router 测试 |
 
-不新增顶级微服务或重构其他治理任务框架；遵循仓库架构边界、环境读取位置和契约测试要求。
+不新增顶级微服务或重构其他治理任务框架；遵循仓库架构边界、环境读取位置和契约测试要求。公共 App 顶部导航、全局样式、根 `.gitignore`、Shared 和 `scripts/ci` 保持目标分支基线。测试串行策略放在 ClawInsight 的 Vitest 配置中，测试不跳过；监控 `.local/` 忽略规则放在模块 `.gitignore`。
 
 ## 9. 本地 Mock：真实接口，不是假页面闭环
 
-实现时将公共契约 §8 的 alert/pass/unresolved 样例保存为 fixtures；实现一个测试用本地 Host，复用生产 monitoring Router、真实 SQLite Repository 和 migration，监听 loopback，注入仅测试凭据。不要求 AIStudio 可达，不引入公司内网依赖来“完成本地开发”。
+实现时将公共契约 §8 的 alert/pass/unresolved 样例保存为 fixtures；实现一个测试用本地 Host，复用生产 monitoring Router、真实 SQLite Repository 和模块初始化，监听 loopback，注入仅测试凭据。不要求 AIStudio 可达，不引入公司内网依赖来“完成本地开发”。
 
 步骤：
 
@@ -384,7 +384,7 @@ SQLite 当前单连接异步 transaction 使用须特别测试并发 BEGIN / COM
 ### 10.1 开发步骤
 
 1. 评审公共契约，固定 fixtures 和配置默认值。
-2. migration + Repository + 两个写接口，先跑实际 SQLite 接收闭环。
+2. 模块 DDL / 本地初始化 + Repository + 两个写接口，先跑实际 SQLite 接收闭环。
 3. 三个 GET 和跨方言查询测试。
 4. React 页面、路由切换和竞态处理。
 5. CV 发送器对本地服务联测；最后验证真实 Host、AIStudio 出站、生产库与 ODC 一致。

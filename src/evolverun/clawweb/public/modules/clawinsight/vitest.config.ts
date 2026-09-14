@@ -7,9 +7,9 @@ export default defineConfig({
     environment: "jsdom",
     // Server-side monitoring suites opt into Node so the workspace CI runner can execute
     // both browser and server tests in one Vitest invocation.
-    environmentMatchGlobs: [["server/**", "node"]],
-    hookTimeout: 30000,
-    testTimeout: 300000,
+    environmentMatchGlobs: [["server/services/monitoring/**", "node"], ["server/routes/__tests__/monitoring.test.ts", "node"]],
+    // Keep this package serial even when the workspace runner supplies maxWorkers=2.
+    fileParallelism: false,
     setupFiles: ["./web/test/setup.ts"],
     globals: true,
     css: false,

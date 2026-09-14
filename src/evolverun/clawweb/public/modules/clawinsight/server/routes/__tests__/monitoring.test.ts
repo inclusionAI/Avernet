@@ -1,10 +1,11 @@
+import { initializeMonitoringSqlite } from "../../services/monitoring/schema.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { request } from "node:http";
-import { runMigrations, type IDatabase } from "@avernet/clawweb-shared/server/db";
+import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { database } from "../../services/monitoring/__tests__/test-database.js";
 import { createMonitoringRuntime } from "../../services/monitoring/monitoring-runtime.js";
 import { createInsightRouter } from "../insight.js";
@@ -55,11 +56,9 @@ beforeEach(async () => {
   env = { CLAWWEB_MONITORING_ENABLED: "true", CLAWWEB_MONITORING_BOTS_JSON: JSON.stringify(bots) };
   dir = mkdtempSync(join(tmpdir(), "monitoring-contract-"));
   db = database(join(dir, "runtime.sqlite3"));
-  const log = vi.spyOn(console, "log").mockImplementation(() => {});
-  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-  try { await runMigrations(db, "sqlite"); } finally { log.mockRestore(); warn.mockRestore(); }
+  await initializeMonitoringSqlite(db);
   await start();
-});
+}, 30000);
 afterEach(async () => {
   await stop();
   await db?.close();
@@ -67,7 +66,7 @@ afterEach(async () => {
   vi.unstubAllEnvs(); vi.restoreAllMocks();
 });
 
-describe("monitoring HTTP -> shared schema -> repository -> GET", () => {
+describe("monitoring HTTP -> module schema -> repository -> GET", () => {
   it("persists all decisions and both intervention values, including same Session/different Trace", async () => {
     for (const event of [alert, pass, unresolved]) expect((await post(event)).status).toBe(201);
     const { body, cache } = await get();
