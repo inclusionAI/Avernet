@@ -13,7 +13,7 @@ from agentclaw.community.plugins.local._mock_seam import MockSeam
 @plugin_impl(
     mode=Mode.LOCAL,
     flavor=Flavor.NOOP,
-    rationale="local/singlebox/test 无 env-aware YAML; 回落构造默认 localhost",
+    rationale="local/singlebox/test 无 env-aware YAML; 回落构造默认地址",
 )
 class NullFrontendUrlProvider(MockSeam, FrontendUrlProvider):
     """空实现: ``get()`` 恒返回 "" (下游回落构造默认 ``http://localhost:8000``)."""
