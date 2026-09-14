@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import base64
 from abc import abstractmethod
-from typing import Protocol, runtime_checkable
+from typing import Protocol
 
 from agentclaw.community.core.bot_management.engines.registry import (
     normalize_engine_type,
@@ -52,13 +52,17 @@ from agentclaw.community.core.bot_management.engines.registry import (
 TECLAW_ENGINE_TYPE = "teclaw"
 
 
-@runtime_checkable
 class SessionKeyCodec(Protocol):
     """Turn a public session id into the form one engine's routes accept.
 
     Implementations **inherit** this rather than satisfying it structurally, so
     a codec that never implements :meth:`encode` fails at construction instead
     of at the first forward, and the registry's contract has one declaration.
+
+    Deliberately **not** ``@runtime_checkable``: that decorator exists to allow
+    ``isinstance``/``issubclass`` against the Protocol *structurally*, which is
+    the duck typing this contract is meant to close — and nothing needs it,
+    since every codec here is a nominal subclass.
     """
 
     @abstractmethod

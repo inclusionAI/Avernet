@@ -132,9 +132,25 @@ def test_registering_an_engine_overrides_the_default_for_it_alone():
 
 
 def test_the_bundled_codecs_inherit_the_protocol():
-    """Inheritance, not duck typing: the contract has one declaration."""
-    assert issubclass(PassThroughSessionKeyCodec, SessionKeyCodec)
-    assert issubclass(Base64SessionKeyCodec, SessionKeyCodec)
+    """Inheritance, not duck typing: the contract has one declaration.
+
+    Asserted on the MRO rather than with ``issubclass``, which a Protocol
+    answers only when it is ``@runtime_checkable`` — and that decorator is the
+    structural-matching escape hatch this contract exists to close. A test that
+    needed it would be the only thing keeping it alive.
+    """
+    assert SessionKeyCodec in PassThroughSessionKeyCodec.__mro__
+    assert SessionKeyCodec in Base64SessionKeyCodec.__mro__
+
+
+def test_a_look_alike_class_is_not_a_codec():
+    """The contract admits nominal subclasses only."""
+
+    class _Duck:
+        def encode(self, session_key: str) -> str:
+            return session_key
+
+    assert SessionKeyCodec not in _Duck.__mro__
 
 
 def test_a_codec_that_never_implements_encode_cannot_be_constructed():
