@@ -514,3 +514,27 @@ def test_register_security_overrides_must_be_method_scoped() -> None:
     token_get = rs.resolve("GET", "/openapi/v1/collaboration/register/token")
     assert token_get is not None
     assert token_get[PrincipalType.USER] is Presence.REQUIRED
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/openapi/v1/harnessflow/api/workflows"),
+        ("GET", "/openapi/v1/harnessflow/api/workflows/tech-research-v1"),
+        ("POST", "/openapi/v1/harnessflow/api/workflows/save"),
+        ("DELETE", "/openapi/v1/harnessflow/api/workflows/wf-1"),
+        ("GET", "/openapi/v1/harnessflow/api/workflows/wf-1/history"),
+    ],
+)
+def test_shipped_config_requires_user_for_harnessflow(method: str, path: str) -> None:
+    """HarnessFlow exposes sensitive platform-internal workflow definitions
+    (node prompts, knowledge-base references, callback configs). Anonymous
+    access was reported as a vulnerability — the edge must require a user.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+
+    req = rs.resolve(method, path)
+
+    assert req is not None, (method, path)
+    assert req[PrincipalType.USER] is Presence.REQUIRED, (method, path)

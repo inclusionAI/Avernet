@@ -326,9 +326,17 @@ user_config:
       access_key: required
     "WEBSOCKET /openapi/v1/collaboration/messages/ws": {}
     "WEBSOCKET /openapi/v1/bots/messages/ws/**": {}
+    # HarnessFlow (workflow specs, node prompts, deploy history, callback
+    # configs) exposes sensitive platform-internal data — full workflow
+    # definitions including node prompts that reference internal knowledge
+    # bases and systems. Anonymous access must be refused at the edge.
+    # A logged-in end user is required; app-only callers are not admitted
+    # because there is no backend-side require_principal guard on this
+    # surface (unlike /openapi/v1/bots/** which has the backend admission
+    # table).  This closes the unauthorized-read vulnerability reported on
+    # /openapi/v1/harnessflow/api/workflows.
     "/openapi/v1/harnessflow/**":
-      user: optional
-      app: optional
+      user: required
 
     # bcsfuse public surface (fusion + fusable worker-config queries). These
     # are human-driven management operations, so a user is required — same
