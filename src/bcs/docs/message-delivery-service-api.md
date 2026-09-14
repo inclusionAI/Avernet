@@ -54,9 +54,11 @@ master 在运行期间每 5 秒读取一次 DB 策略记录并校验版本，仅
 保存版本 1、判断方式、原始 final 与已结束段消息 ID，仅内部排查使用，不输出到日志或消息事件。
 
 重建正文仅用于队列准入和内部 `run_reply` 持久化，不写回原始 final 事件。
-前端、channel 和非队列转发保留上游 final 语义（包括空 final、分段快照和 `delta_text`）。
+前端、channel 和非队列转发保留上游 final 语义（包括空 final 和 `message` 正文）。
 受管终态仍先提交事务，再发布原始事件；空 final 可以用重建正文完成队列路由，但不向非队列
-目标补发该正文。未受管且没有启用队列的目标时，不读取重建历史。
+目标补发该正文。未受管 final 先发布原始事件，再查询会话并按需重建队列正文。
+群路由只使用会话成员，查询失败或会话不存在时返回错误，不回退群成员。
+没有启用队列的目标时，不读取重建历史。`delta_text` 仅用于 delta，带正文的 final 必须使用 `message`。
 
 需要队列处理的成功 Group 回复持久化一条内部 `message_type=run_reply`，`content.text`
 保存归一化全文。每个目标 Bot 一条 delivery，共享这条消息；`source_message_id` 不引用

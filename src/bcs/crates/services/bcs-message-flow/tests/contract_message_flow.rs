@@ -3249,7 +3249,7 @@ async fn bot_final_event_routes_and_publishes_frontend_through_message_flow() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    )
+    ).with_session_management(Arc::new(StaticSessionManagement::new(test_session("group-1", "group-1", support.group.get("group-1").await.unwrap().participants))))
     .with_bot_run_context(run_context.clone());
 
     let outcome = flow
@@ -3265,7 +3265,7 @@ async fn bot_final_event_routes_and_publishes_frontend_through_message_flow() {
                     "content": [{"type": "text", "text": "callback done"}],
                 },
             }),
-            bcs_session_id: None,
+            bcs_session_id: Some("group-1".into()),
             state: ChatEventState::Final,
         })
         .await
@@ -3319,7 +3319,7 @@ async fn bot_final_event_relay_to_provider_uses_explicit_bcs_session_id() {
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    );
+    ).with_session_management(Arc::new(StaticSessionManagement::new(test_session("group-1:abcdef12", "group-1", support.group.get("group-1").await.unwrap().participants))));
 
     flow.handle_bot_event(BotEventCommand {
         bot_id: "bot-observer".to_string(),

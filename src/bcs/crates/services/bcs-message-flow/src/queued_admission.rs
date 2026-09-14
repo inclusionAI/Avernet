@@ -164,27 +164,10 @@ pub async fn find_managed_run(
     Ok(None)
 }
 
-/// Only queue-managed sources or eligible relay targets need reconstructed text.
-/// In particular, installing a queue service with the policy disabled must not
-/// make ordinary final delivery depend on queue history reads.
-pub(crate) async fn needs_reply(
-    flow: &BcsMessageFlow,
-    event: &bcs_service_api::BotEventCommand,
-    managed_terminal: bool,
-) -> ServiceResult<bool> {
-    if managed_terminal { return Ok(true); }
-    if flow.managed_deliveries.is_none() || (flow.delivery_policy.is_none() && flow.group_delivery_limits.is_empty()) { return Ok(false); }
-    let Some(group) = flow.group.get(&event.group_id).await else { return Ok(false); };
-    if group.group_strategy == GroupStrategy::StateMachine { return Ok(false); }
-    let participants = if let (Some(sessions), Some(id)) = (&flow.session_management, event.bcs_session_id.as_deref()) {
-        sessions.get(id).await.map_err(|_| ServiceError::InternalError("queue reply session read failed".into()))?.filter(|s| !s.participants.is_empty()).map(|s| s.participants).unwrap_or(group.participants)
-    } else { group.participants };
-    if let Some(live) = &flow.delivery_policy {
-        let snapshot = live.snapshot.read().await;
-        Ok(participants.iter().any(|p| snapshot.policy.manages_group(&p.bot_uuid)))
-    } else {
-        Ok(participants.iter().any(|p| flow.group_delivery_limits.contains_key(&p.bot_uuid)))
-    }
+/// Reuse the authoritative session participants already loaded for routing.
+pub(crate) async fn needs_reply(flow: &BcsMessageFlow, group: &Group) -> bool {
+    flow.managed_deliveries.is_some() && group.group_strategy != GroupStrategy::StateMachine
+        && manages_any(flow, group).await
 }
 
 pub(crate) struct QueuedReply {

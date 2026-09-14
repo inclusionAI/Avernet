@@ -163,16 +163,13 @@ async fn mixed_final_modes_reconstruct_one_reply_and_preserve_visible_history() 
                 .with_group_delivery_limits(std::collections::BTreeMap::from([("bot-driver".into(), 100), ("bot-observer".into(), 100)]))
                 .with_session_management(flow.session_management.clone().unwrap());
         }
-        let payload = if index == 2 { json!({"delta_text":final_text}) } else { json!({"message":{"role":"assistant","content":[{"type":"text","text":final_text}]}}) };
+        let payload = json!({"message":{"role":"assistant","content":[{"type":"text","text":final_text}]}});
         let terminal = event(ChatEventState::Final, "chat", payload);
         let before = frontend.events().await.len();
         flow.handle_bot_event(terminal.clone()).await.unwrap();
         let events = frontend.events().await;
         let wire: serde_json::Value = serde_json::from_str(&events[before]).unwrap();
-        if index == 2 {
-            assert_eq!(wire["payload"]["delta_text"], final_text);
-            assert!(wire["payload"].get("message").is_none());
-        } else { assert_eq!(wire["payload"]["message"], terminal.event_payload["message"]); }
+        assert_eq!(wire["payload"]["message"], terminal.event_payload["message"]);
         let deliveries = service.snapshot(Some("group-1:reply")).await.unwrap();
         let mut summaries = Vec::new();
         for delivery in &deliveries {

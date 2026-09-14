@@ -136,9 +136,8 @@ pub async fn handle_bot_event(
     // final or replace its frontend/channel projection with queue display text.
     let queue_reply = if cmd.state == ChatEventState::Final && task_id_for_event.is_none()
         && !cmd.group_id.is_empty() && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
-        && crate::queued_admission::needs_reply(flow, &cmd, managed_terminal).await? {
+        && managed_terminal {
         let text = extract_message_text(&cmd.event_payload);
-        let text = if text.is_empty() { extract_delta_text(&cmd.event_payload).unwrap_or("").to_owned() } else { text };
         Some(crate::run_reply::prepare(flow, &cmd, &text, managed_terminal).await?)
     } else { None };
     // Preserve the existing empty-final fallback for task/direct A2A runs;
@@ -552,6 +551,29 @@ async fn relay_final_chat_event(
         }
     };
 
+    // Group replies route exclusively through their session membership.
+    let session_id = cmd.bcs_session_id.as_deref().filter(|id| !id.is_empty())
+        .ok_or_else(|| ServiceError::InternalError("group reply session id missing".into()))?;
+    let sessions = flow.session_management.as_ref()
+        .ok_or_else(|| ServiceError::InternalError("group reply session service missing".into()))?;
+    let session = sessions.get(session_id).await
+        .map_err(|_| ServiceError::InternalError("group reply session read failed".into()))?
+        .ok_or_else(|| ServiceError::InternalError("group reply session not found".into()))?;
+    if session.group_id != cmd.group_id {
+        return Err(ServiceError::InternalError("group reply session belongs to another group".into()));
+    }
+    group.participants = session.participants;
+    backfill_bot_names(flow.registry.as_ref(), &mut group).await;
+
+    // Unmanaged events have already been published. Only their queue path
+    // depends on membership and reconstruction reads.
+    let reconstructed;
+    let normalized = if normalized.is_none()
+        && crate::queued_admission::needs_reply(flow, &group).await {
+        reconstructed = crate::run_reply::prepare(flow, cmd, &extract_message_text(&cmd.event_payload), false).await?;
+        Some(&reconstructed)
+    } else { normalized };
+
     let raw_text = extract_message_text(&cmd.event_payload);
     // An empty final can still finish a queued reply assembled from segments.
     // Non-queued deliveries below continue to use the original final only.
@@ -570,23 +592,6 @@ async fn relay_final_chat_event(
             mentions: Vec::new(),
             delivery_results: Vec::new(),
         });
-    }
-
-    backfill_bot_names(flow.registry.as_ref(), &mut group).await;
-
-    // Session-aware routing: when the bot responded in the context of a
-    // specific session (bcs_session_id present), swap the group-level
-    // participants for the session-level participants. This ensures
-    // per-session add/remove (e.g. human joins session via PATCH) takes
-    // effect on outbound routing.
-    if let Some(ref bcs_session_id) = cmd.bcs_session_id {
-        if let Some(ref session_mgmt) = flow.session_management {
-            if let Ok(Some(sess)) = session_mgmt.get(bcs_session_id).await {
-                if !sess.participants.is_empty() {
-                    group.participants = sess.participants;
-                }
-            }
-        }
     }
 
     let overlay = build_route_overlay(flow, &group).await;
