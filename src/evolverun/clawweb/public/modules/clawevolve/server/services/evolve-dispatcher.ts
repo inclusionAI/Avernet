@@ -52,6 +52,8 @@ export type EvolveDispatchSecrets = {
 
 export type EvolveDispatchInput = {
   taskId: string; stepPk: number; stepId: string; stepType: string;
+  /** Stable delivery identity; HITL resumes are new messages for the same Step. */
+  messageId?: string;
   userId: string; botId: string; command: string; mode: "message" | "run";
   callbackUrl?: string;
   runtime?: EvolveBotRuntime | null;
@@ -309,6 +311,19 @@ export async function cancelEvolveExecution(input: EvolveCancelInput): Promise<{
       "",
       stopCommand,
     ].join("\n");
+  } else if (input.stepType === "plan" || input.stepType === "optimize") {
+    if (!/^[A-Za-z0-9._:-]{1,256}$/.test(input.taskId) || !/^[A-Za-z0-9._:-]{1,256}$/.test(input.stepId)) {
+      throw new Error("Message Stage stop 参数非法");
+    }
+    const skillDirectory = input.stepType === "plan" ? "clawevolve-plan" : "clawevolve-workflow";
+    const stopCommand = `bash skills/skills-local/${skillDirectory}/scripts/run.sh --stop --task-id ${input.taskId} --step-id ${input.stepId}`;
+    message = [
+      "这是 ClawEvolve 系统停止任务。",
+      "必须使用 exec 工具原样执行下面唯一一条命令，不得添加 sudo，不得修改参数，不得执行其他命令。",
+      "执行完成后只返回脚本 stdout 的最后一行 JSON。",
+      "",
+      stopCommand,
+    ].join("\n");
   }
   const result = await sendIntervention({
     botId: routedBotId, sessionKey: input.sessionId, sessionId: input.sessionId,
@@ -416,14 +431,14 @@ async function dispatchMessage(input: EvolveDispatchInput): Promise<DispatchResu
           bot_id: routedBotId,
           message: input.command,
           ...(input.callbackUrl ? { callback_url: input.callbackUrl } : {}),
-          message_id: input.stepId,
+          message_id: input.messageId ?? input.stepId,
           metadata: {
             title: `Claw进化 ${input.stepType === "skill_init" ? "Skill 初始化" : input.stepType} · ${input.taskId} · ${input.stepId}`,
             // ClawEvolve never executes against the published service instance.
             // Make the draft target explicit instead of relying on the platform's
             // default lifecycle (online), including for legacy "message" tasks.
             bot_options: { lifecycle_stage: "draft" },
-            sender_options: { from: "owner" }, timeout: 1800, ignore_content: false,
+            sender_options: { from: "owner" }, timeout: 1800, ignore_content: true,
             biz_task_id: input.taskId,
             biz_scene: input.stepType === "skill_init" ? "claw_evolve_init" : "claw_evolve",
           },

@@ -16,10 +16,12 @@ function safeObjectKey(value: string): string {
 
 export class FilesystemObjectStore implements ObjectStore {
   private readonly root: string;
+  private readonly publicBaseUrl: string;
   private readonly signingKey = randomBytes(32);
 
-  constructor(root: string) {
+  constructor(root: string, publicBaseUrl = "") {
     this.root = resolve(root);
+    this.publicBaseUrl = publicBaseUrl.replace(/\/+$/, "");
   }
 
   private pathFor(objectKey: string): string {
@@ -66,7 +68,7 @@ export class FilesystemObjectStore implements ObjectStore {
       expiresAt: Date.now() + expiresSeconds * 1000,
     })).toString("base64url");
     const signature = createHmac("sha256", this.signingKey).update(payload).digest("base64url");
-    return `/api/singlebox/artifacts/${payload}.${signature}`;
+    return `${this.publicBaseUrl}/api/singlebox/artifacts/${payload}.${signature}`;
   }
 
   resolveSignedRequest(token: string, method: string): string {

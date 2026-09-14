@@ -10,6 +10,7 @@ export type JsonSchema = {
   enum?: string[];
   properties?: Record<string, JsonSchema>;
   items?: JsonSchema;
+  additionalProperties?: boolean;
 };
 
 export type OfficialStageDefinition = {
@@ -17,56 +18,50 @@ export type OfficialStageDefinition = {
   name: string;
   description: string;
   extensionModes: StageExtensionMode[];
+  postprocessWritablePaths: string[];
   inputSchema: JsonSchema;
   resultSchema: JsonSchema;
 };
 
-export type OfficialEvolveCatalog = {
-  schemaVersion: "clawevolve.stage-catalog/v1";
-  template: {
-    name: string;
-    description: string;
-    steps: Array<{ stage: StageKey; name: string }>;
-  };
+export type OfficialStageContracts = {
+  schemaVersion: "clawevolve.stage-contracts/v1";
   stages: OfficialStageDefinition[];
 };
 
 const STAGES = new Set<StageKey>(["diagnose", "plan", "optimize"]);
 const MODES = new Set<StageExtensionMode>(["preprocess", "postprocess", "replace"]);
 
-function loadCatalog(value: unknown): OfficialEvolveCatalog {
+function loadContracts(value: unknown): OfficialStageContracts {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Official Evolve Stage catalog must be an object");
   }
-  const catalog = value as OfficialEvolveCatalog;
-  if (catalog.schemaVersion !== "clawevolve.stage-catalog/v1"
-    || !catalog.template?.name?.trim()
-    || !Array.isArray(catalog.template.steps)
-    || !Array.isArray(catalog.stages)) {
-    throw new Error("Official Evolve Stage catalog is invalid");
+  const contracts = value as OfficialStageContracts;
+  if (contracts.schemaVersion !== "clawevolve.stage-contracts/v1"
+    || !Array.isArray(contracts.stages)) {
+    throw new Error("Official Evolve Stage contracts are invalid");
   }
-  const definitions = new Map(catalog.stages.map((item) => [item.stage, item]));
-  for (const step of catalog.template.steps) {
-    if (!STAGES.has(step.stage) || !definitions.has(step.stage)) {
-      throw new Error(`Unknown official Stage: ${String(step.stage)}`);
-    }
+  const definitions = new Map(contracts.stages.map((item) => [item.stage, item]));
+  if (definitions.size !== STAGES.size || [...STAGES].some((stage) => !definitions.has(stage))) {
+    throw new Error("Official Evolve Stage contracts are incomplete");
   }
-  for (const stage of catalog.stages) {
+  for (const stage of contracts.stages) {
     if (!STAGES.has(stage.stage) || !stage.name?.trim() || !stage.description?.trim()
       || stage.inputSchema?.type !== "object" || stage.resultSchema?.type !== "object"
       || !Array.isArray(stage.extensionModes)
+      || !Array.isArray(stage.postprocessWritablePaths)
+      || stage.postprocessWritablePaths.some((path) => !path.trim() || path.includes(".."))
       || new Set(stage.extensionModes).size !== stage.extensionModes.length
       || stage.extensionModes.some((mode) => !MODES.has(mode))) {
       throw new Error(`Invalid official Stage definition: ${String(stage.stage)}`);
     }
   }
-  return catalog;
+  return contracts;
 }
 
-export const officialEvolveCatalog = loadCatalog(catalogJson);
+export const officialStageContracts = loadContracts(catalogJson);
 
 export function findOfficialStage(stage: string): OfficialStageDefinition | null {
-  return officialEvolveCatalog.stages.find((item) => item.stage === stage) ?? null;
+  return officialStageContracts.stages.find((item) => item.stage === stage) ?? null;
 }
 
 export function isStageExtensionMode(value: unknown): value is StageExtensionMode {
@@ -80,12 +75,94 @@ export function stageRuntimeInputSchema(
   if (mode !== "postprocess") return stage.inputSchema;
   return {
     ...stage.inputSchema,
-    required: [...new Set([...(stage.inputSchema.required ?? []), "stage_result"])],
+    required: [...new Set([...(stage.inputSchema.required ?? []), "builtin_result"])],
     properties: {
       ...stage.inputSchema.properties,
-      stage_result: {
+      builtin_result: {
         ...stage.resultSchema,
-        description: `平台内置${stage.name}已经生成的结果；后处理可复核、补充或修正，并交付同结构的最终结果`,
+        description: `平台内置${stage.name}已经生成的完整结果；后处理只需返回允许字段的增量修改`,
+      },
+    },
+  };
+}
+
+function schemaAtPath(schema: JsonSchema, path: string): JsonSchema | null {
+  let current: JsonSchema | undefined = schema;
+  for (const segment of path.split(".")) {
+    if (current.type !== "object") return null;
+    current = current.properties?.[segment];
+    if (!current) return null;
+  }
+  return current;
+}
+
+function addSchemaPath(root: JsonSchema, path: string, value: JsonSchema): void {
+  const segments = path.split(".");
+  let current = root;
+  for (const [index, segment] of segments.entries()) {
+    current.properties ??= {};
+    if (index === segments.length - 1) {
+      current.properties[segment] = value;
+      return;
+    }
+    current.properties[segment] ??= { type: "object", properties: {}, additionalProperties: false };
+    current = current.properties[segment];
+  }
+}
+
+function partialSchema(schema: JsonSchema): JsonSchema {
+  if (schema.type === "object") {
+    return {
+      ...schema,
+      required: undefined,
+      additionalProperties: false,
+      properties: Object.fromEntries(
+        Object.entries(schema.properties ?? {}).map(([key, value]) => [key, partialSchema(value)]),
+      ),
+    };
+  }
+  return structuredClone(schema);
+}
+
+function postprocessPatchSchema(stage: OfficialStageDefinition): JsonSchema {
+  const patch: JsonSchema = { type: "object", properties: {}, additionalProperties: false };
+  for (const path of stage.postprocessWritablePaths) {
+    const schema = schemaAtPath(stage.resultSchema, path);
+    if (!schema) throw new Error(`${stage.name}后处理开放了不存在的结果字段: ${path}`);
+    addSchemaPath(patch, path, partialSchema(schema));
+  }
+  return patch;
+}
+
+export function stageExtensionResultSchema(
+  stage: OfficialStageDefinition,
+  mode: StageExtensionMode,
+): JsonSchema {
+  if (mode === "replace") return stage.resultSchema;
+  if (mode === "postprocess") {
+    return {
+      type: "object",
+      required: ["result_patch"],
+      additionalProperties: false,
+      properties: {
+        result_patch: {
+          ...postprocessPatchSchema(stage),
+          description: "只返回本实现要补充或修正的字段；平台会与内置结果合并并校验完整结果",
+        },
+      },
+    };
+  }
+  return {
+    type: "object",
+    required: ["summary", "changed"],
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string", description: "本次前置处理完成了什么" },
+      changed: { type: "boolean", description: "是否修改了平台提供的候选资源" },
+      changed_files: {
+        type: "array",
+        items: { type: "string" },
+        description: "实际修改的候选文件；未修改时可省略",
       },
     },
   };
@@ -98,6 +175,10 @@ export function validateJsonSchema(schema: JsonSchema, value: unknown, path = "i
     const record = value as Record<string, unknown>;
     for (const key of schema.required ?? []) {
       if (!(key in record) || record[key] == null) return `${path}.${key} 为必填项`;
+    }
+    if (schema.additionalProperties === false) {
+      const unknown = Object.keys(record).find((key) => !(key in (schema.properties ?? {})));
+      if (unknown) return `${path}.${unknown} 不是允许的字段`;
     }
     for (const [key, propertySchema] of Object.entries(schema.properties ?? {})) {
       if (record[key] == null) continue;

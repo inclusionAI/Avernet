@@ -111,11 +111,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
   });
   publicRouter.use(createStageSkillsRouter({
     repo: stageSkill,
-    evolveRepo: evolve,
     artifactStore: options.artifactStore,
-    skillAssetRepo: skillAsset,
-    ocbLocalSkills: options.ocbLocalSkills ?? null,
-    dispatch,
   }));
   publicRouter.use(createSkillAssetsRouter({
     repo: skillAsset,

@@ -18,3 +18,5 @@ export { BenchTemplateVersionRepository } from "./repositories/bench-template-ve
 export { BenchRunRepository } from "./repositories/bench-run-repository.js";
 export { BenchTaskResultRepository } from "./repositories/bench-task-result-repository.js";
 export type { ObjectStore, StoredObject } from "./services/object-storage/oss-object-store.js";
+export { FilesystemObjectStore } from "./services/object-storage/filesystem-object-store.js";
+export { createFilesystemObjectStoreRouter } from "./services/object-storage/filesystem-object-store-router.js";

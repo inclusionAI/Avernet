@@ -488,6 +488,47 @@ describe("dispatchEvolveCommand environment routing", () => {
     }));
   });
 
+  it("releases the BaaS dispatch slot without waiting for duplicate Stage content", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      code: 0,
+      data: { message_id: "message-local-1", session_id: "session-local-1" },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await dispatchEvolveCommand(input({
+      stepType: "diagnose",
+      runtime: runtime("dev", "baas"),
+    }));
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    const body = JSON.parse(String(init?.body));
+    expect(body.metadata?.ignore_content).toBe(true);
+    expect(body.callback_url).toBe("http://callback");
+  });
+
+  it("uses a stable per-interaction message ID while preserving the Stage callback identity", async () => {
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({
+        code: 0, data: { message_id: body.message_id, session_id: `session-${body.message_id}` },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const first = input({ stepType: "stage_extension", runtime: runtime("dev", "baas") });
+    const resumed = { ...first, messageId: `${first.stepId}:hitl:HITL-001` };
+    const firstResult = await dispatchEvolveCommand(first);
+    const resumedResult = await dispatchEvolveCommand(resumed);
+    const retryResult = await dispatchEvolveCommand(resumed);
+    const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(bodies.map((body) => body.message_id)).toEqual([
+      first.stepId, resumed.messageId, resumed.messageId,
+    ]);
+    expect(bodies.every((body) => body.message === first.command && body.callback_url === first.callbackUrl)).toBe(true);
+    expect(firstResult.runId).toBe(first.stepId);
+    expect(resumedResult.runId).toBe(resumed.messageId);
+    expect(retryResult.runId).toBe(resumedResult.runId);
+  });
+
   it("dispatches ARCA through a direct Runner Message and records the additive marker", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       code: 0,
@@ -621,6 +662,35 @@ describe("dispatchEvolveCommand environment routing", () => {
     expect(body.metadata?.bot_options).toEqual({ lifecycle_stage: "draft" });
     const payload = message.match(/--args-base64 '([^']*)'/)?.[1];
     expect(Buffer.from(payload!, "base64").toString("utf8")).toBe("--task-id EV-001 --step-id STEP-001");
+  });
+
+  it.each([
+    ["plan", "clawevolve-plan"],
+    ["optimize", "clawevolve-workflow"],
+  ])("stops a local Message %s worker with its typed stop entry", async (stepType, skillDirectory) => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      code: 0, data: { message_id: `stop-${stepType}`, session_id: `session-${stepType}` },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await cancelEvolveExecution({
+      taskId: "EV-001",
+      stepId: "STEP-001",
+      stepType,
+      userId: "197444",
+      botId: "bot-001",
+      sessionId: `session-${stepType}`,
+      platformResponse: { evolve_dispatch: { provider: "baas", transport: "message" } },
+      runtime: runtime("dev", "baas"),
+    });
+
+    const [, init] = fetchMock.mock.calls[0] ?? [];
+    const body = JSON.parse(String(init?.body));
+    expect(body.message).toContain(
+      `bash skills/skills-local/${skillDirectory}/scripts/run.sh --stop --task-id EV-001 --step-id STEP-001`,
+    );
+    expect(body.message).toContain("唯一一条命令");
+    expect(result.transport).toBe("message");
   });
 
   it("injects the Diagnose LLM key through env without putting it in command arguments", async () => {

@@ -2,14 +2,9 @@ import { randomUUID } from "node:crypto";
 import { Router, type Request } from "express";
 import multer from "multer";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
-import type { EvolveRepository } from "../repositories/evolve-repository.js";
-import type { StageSkillRepository } from "../repositories/stage-skill-repository.js";
-import type { SkillAssetRepository } from "../repositories/skill-asset-repository.js";
-import type { OcbLocalSkillPort } from "../internal/module-api.js";
+import type { StageDevelopmentRow, StageSkillRepository } from "../repositories/stage-skill-repository.js";
 import type { ObjectStore } from "../services/object-storage/oss-object-store.js";
 import { getArtifactBucket } from "../services/object-storage/oss-object-store.js";
-import { getClawWebPublicBaseUrl } from "../env.js";
-import type { EvolveDispatchInput } from "../services/evolve-dispatcher.js";
 import {
   createStageDevelopmentPackage,
   inspectStageSkillPackage,
@@ -17,13 +12,15 @@ import {
 import {
   findOfficialStage,
   isStageExtensionMode,
-  officialEvolveCatalog,
-  stageRuntimeInputSchema,
-  validateJsonSchema,
+  officialStageContracts,
   type StageExtensionMode,
   type StageKey,
 } from "../services/evolve/stage-catalog.js";
-import { freezeSkillTarget } from "../services/evolve/skill-candidate.js";
+import {
+  botEvolutionFlow,
+  skillEvolutionFlow,
+  type EvolutionFlowKey,
+} from "../services/evolve/evolution-flow.js";
 import { skillPackageView } from "../services/evolve/skill-package-view.js";
 
 const upload = multer({
@@ -33,11 +30,7 @@ const upload = multer({
 
 type StageSkillsRouterInput = {
   repo: StageSkillRepository;
-  evolveRepo: EvolveRepository;
   artifactStore?: ObjectStore;
-  skillAssetRepo: SkillAssetRepository;
-  ocbLocalSkills: OcbLocalSkillPort | null;
-  dispatch: (input: EvolveDispatchInput) => Promise<{ runId: string | null; sessionId: string | null; platformResponse: unknown }>;
 };
 
 function actor(req: Request): string | null {
@@ -50,6 +43,7 @@ function implementationView(row: Awaited<ReturnType<StageSkillRepository["findIm
   const stage = findOfficialStage(row.stage_key);
   return {
     stageSkillId: row.stage_skill_id,
+    ownerId: row.owner_user_id,
     implementationId: row.implementation_id,
     displayName: row.display_name,
     stage: row.stage_key,
@@ -60,13 +54,19 @@ function implementationView(row: Awaited<ReturnType<StageSkillRepository["findIm
     packageSha256: row.package_sha256,
     staticValidation: JSON.parse(row.static_validation_json),
     integrationTestTaskId: row.integration_test_task_id,
+    integrationTestStatus: row.integration_test_status,
     createdAt: row.gmt_create,
     updatedAt: row.gmt_modified,
   };
 }
 
-function stageCommand(taskId: string, stepId: string): string {
-  return `/clawevolve-stage --task-id ${taskId} --step-id ${stepId} --clawweb-url ${getClawWebPublicBaseUrl()}`;
+function developmentView(row: StageDevelopmentRow) {
+  return {
+    stageSkillId: row.stage_skill_id, ownerId: row.owner_user_id,
+    displayName: row.display_name, flow: row.flow_key, stage: row.stage_key,
+    stageName: findOfficialStage(row.stage_key)?.name ?? row.stage_key,
+    mode: row.extension_mode, createdAt: row.gmt_create, updatedAt: row.gmt_modified,
+  };
 }
 
 function packageObjectKey(ref: string): string {
@@ -83,17 +83,90 @@ function packageObjectKey(ref: string): string {
 export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
   const router = Router();
 
-  router.get("/stage-catalog", (_req, res) => {
-    res.json(officialEvolveCatalog);
+  router.get("/stage-catalog", (req, res) => {
+    const taskType: "diagnose" | "full" = req.query.taskType === "diagnose" ? "diagnose" : "full";
+    const inputMode = req.query.inputMode === "direct_goal" ? "direct_goal" : "diagnose_goal";
+    const goal = req.query.hasGoal === "true" ? "provided" : "";
+    const startInput = {
+      taskType,
+      inputMode,
+      goal,
+    };
+    res.json({
+      schemaVersion: "clawevolve.stage-development/v2",
+      flows: [
+        botEvolutionFlow.describe({ ...startInput, hasTargetSkill: false }),
+        skillEvolutionFlow.describe({ ...startInput, taskType: "full", hasTargetSkill: true }),
+      ],
+      stages: officialStageContracts.stages,
+    });
   });
 
+  router.post("/stage-developments", asyncHandler(async (req, res) => {
+    const owner = actor(req);
+    if (!owner) { res.status(401).json({ error: "无法识别当前用户" }); return; }
+    const stage = findOfficialStage(String(req.body?.stage ?? ""));
+    const mode = req.body?.mode;
+    const flow = req.body?.flow;
+    const definition = flow === "bot_evolution" ? botEvolutionFlow
+      : flow === "skill_evolution" ? skillEvolutionFlow : null;
+    if (!stage || !isStageExtensionMode(mode) || !stage.extensionModes.includes(mode) || !definition) {
+      res.status(400).json({ error: "请选择有效的流程、Stage 和开放位置" }); return;
+    }
+    const descriptor = definition.describe({ taskType: "full", inputMode: "diagnose_goal", goal: "", hasTargetSkill: flow === "skill_evolution" });
+    if (!descriptor.stages.some((item) => item.key === stage.stage)) {
+      res.status(400).json({ error: "当前流程不包含该 Stage" }); return;
+    }
+    const names = { preprocess: "前置处理", postprocess: "后置处理", replace: "整体替换" };
+    const row = await input.repo.createDevelopment({
+      stageSkillId: `STAGESKILL-${randomUUID().slice(0, 12).toUpperCase()}`,
+      ownerUserId: owner, displayName: `${stage.name}${names[mode]}自定义实现`,
+      flow, stage: stage.stage, mode,
+    });
+    res.status(201).json(developmentView(row));
+  }));
+
+  router.get("/stage-developments", asyncHandler(async (req, res) => {
+    const owner = actor(req);
+    if (!owner) { res.status(401).json({ error: "无法识别当前用户" }); return; }
+    res.json({ items: (await input.repo.listDevelopments(owner)).map(developmentView) });
+  }));
+
+  router.get("/stage-developments/:id", asyncHandler(async (req, res) => {
+    const row = await input.repo.findDevelopment(String(req.params.id));
+    if (!row || row.owner_user_id !== actor(req)) {
+      res.status(404).json({ error: "开发记录不存在" }); return;
+    }
+    res.json(developmentView(row));
+  }));
+
+  router.delete("/stage-developments/:id", asyncHandler(async (req, res) => {
+    const owner = actor(req);
+    if (!owner || !await input.repo.deleteDraft(String(req.params.id), owner)) {
+      res.status(409).json({ error: "开发记录不存在或已有上传版本，请在详情中管理版本" }); return;
+    }
+    res.json({ deleted: true });
+  }));
+
   router.get("/stage-skills/developer-package", asyncHandler(async (req, res) => {
+    const developmentId = String(req.query.developmentId ?? "");
+    if (developmentId) {
+      const row = await input.repo.findDevelopment(developmentId);
+      if (!row || row.owner_user_id !== actor(req)) {
+        res.status(404).json({ error: "开发记录不存在" }); return;
+      }
+      const archive = await createStageDevelopmentPackage({ stage: row.stage_key, mode: row.extension_mode, flow: row.flow_key });
+      res.type("application/zip").attachment(`${row.stage_key}-${row.extension_mode}.zip`).send(archive);
+      return;
+    }
     const stage = String(req.query.stage ?? "") as StageKey;
     const mode = String(req.query.mode ?? "") as StageExtensionMode;
-    if (!findOfficialStage(stage) || !isStageExtensionMode(mode)) {
-      res.status(400).json({ error: "请选择有效的 Stage 和接入方式" }); return;
+    const flow = String(req.query.flow ?? "bot_evolution") as EvolutionFlowKey;
+    if (!findOfficialStage(stage) || !isStageExtensionMode(mode)
+      || !new Set<EvolutionFlowKey>(["bot_evolution", "skill_evolution"]).has(flow)) {
+      res.status(400).json({ error: "请选择有效的流程、Stage 和接入方式" }); return;
     }
-    const archive = await createStageDevelopmentPackage({ stage, mode });
+    const archive = await createStageDevelopmentPackage({ stage, mode, flow });
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", `attachment; filename="${stage}-${mode}-stage-skill.zip"`);
     res.send(archive);
@@ -147,16 +220,18 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
         res.status(422).json({ error: "静态校验未通过", validation: inspection }); return;
       }
       const requestedStageSkillId = String(req.body?.stageSkillId ?? "").trim();
+      const development = requestedStageSkillId
+        ? await input.repo.findDevelopment(requestedStageSkillId) : null;
       const existingStageSkill = requestedStageSkillId
         ? await input.repo.findLatestStageSkill(requestedStageSkillId)
         : null;
-      if (requestedStageSkillId && (!existingStageSkill || existingStageSkill.owner_user_id !== owner
-        || existingStageSkill.stage_key !== stage || existingStageSkill.extension_mode !== mode)) {
+      const binding = development ?? existingStageSkill;
+      if (!requestedStageSkillId || !binding || binding.owner_user_id !== owner
+        || binding.stage_key !== stage || binding.extension_mode !== mode) {
         res.status(404).json({ error: "要升级的 Stage Skill 不存在，或与当前 Stage/接入方式不一致" }); return;
       }
-      const stageSkillId = existingStageSkill?.stage_skill_id
-        ?? `STAGESKILL-${randomUUID().slice(0, 12).toUpperCase()}`;
-      const displayName = existingStageSkill?.display_name ?? inspection.manifest!.display_name;
+      const stageSkillId = binding.stage_skill_id;
+      const displayName = binding.display_name;
       const implementationId = `IMPL-${randomUUID().slice(0, 12).toUpperCase()}`;
       const versionNo = await input.repo.nextVersion(stageSkillId);
       const objectKey = `evolve/stage-implementations/${implementationId}/v${versionNo}/package.zip`;
@@ -171,7 +246,14 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
         versionNo,
         packageRef: `oss://${getArtifactBucket()}/${objectKey}`,
         packageSha256: inspection.packageSha256,
-        staticValidation: inspection,
+        // Freeze execution semantics only for this new upload. Neither package
+        // fields nor later deployment changes can upgrade a historical version.
+        staticValidation: {
+          ...inspection,
+          ...(development?.flow_key === "skill_evolution" && stage === "plan" && mode === "replace"
+            ? { executionContract: "clawevolve.plan-business/v1" }
+            : {}),
+        },
       });
       res.status(201).json(implementationView(created));
     }),
@@ -196,135 +278,6 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
       res.status(404).json({ error: "Stage Skill 不存在" }); return;
     }
     res.json({ deleted: true });
-  }));
-
-  router.post("/stage-skills/:implementationId/integration-tests", asyncHandler(async (req, res) => {
-    const owner = actor(req);
-    const implementation = await input.repo.findImplementation(String(req.params.implementationId));
-    const botId = String(req.body?.botId ?? "").trim();
-    if (!owner || !implementation || implementation.owner_user_id !== owner) {
-      res.status(404).json({ error: "Stage Skill 不存在" }); return;
-    }
-    if (implementation.status === "deleted") {
-      res.status(404).json({ error: "Stage Skill 不存在" }); return;
-    }
-    if (!botId || !req.body || typeof req.body.caseInput !== "object" || Array.isArray(req.body.caseInput)) {
-      res.status(400).json({ error: "请选择测试 Bot，并按当前 Stage 输入填写测试 Case" }); return;
-    }
-    const stage = findOfficialStage(implementation.stage_key);
-    if (!stage) { res.status(409).json({ error: "Stage 定义不存在" }); return; }
-    const caseInput = req.body.caseInput as Record<string, unknown>;
-    const runtimeCaseInput = {
-      ...caseInput,
-      ...(implementation.stage_key === "diagnose" ? { session_source: { mode: "local" } } : {}),
-    };
-    const inputError = validateJsonSchema(
-      stageRuntimeInputSchema(stage, implementation.extension_mode),
-      {
-        ...runtimeCaseInput,
-        task: {
-          task_id: "stage-test-preview",
-          task_type: "stage_test",
-          target_bot_id: botId,
-        },
-      },
-    );
-    if (inputError) {
-      res.status(400).json({ error: `测试 Case 不符合当前 Stage 输入协议：${inputError}` }); return;
-    }
-    const taskId = `EVT-${randomUUID().slice(0, 12).toUpperCase()}`;
-    const extensionStepId = `STEP-${randomUUID().slice(0, 12).toUpperCase()}`;
-    const botEnv = String(req.body.botEnv ?? "");
-    const targetSkillAssetId = String(req.body.targetSkillAssetId ?? "").trim();
-    let targetSkill;
-    if (targetSkillAssetId) {
-      if (!input.ocbLocalSkills || !input.artifactStore?.putObject) {
-        res.status(503).json({ error: "真实目标 Skill 测试服务不可用" }); return;
-      }
-      try {
-        targetSkill = await freezeSkillTarget({
-          taskId,
-          ownerUserId: owner,
-          botId,
-          assetId: targetSkillAssetId,
-          skillAssetRepo: input.skillAssetRepo,
-          ocbLocalSkills: input.ocbLocalSkills,
-          artifactStore: { putObject: input.artifactStore.putObject.bind(input.artifactStore) },
-          identity: {
-            userId: owner,
-            authorization: req.header("Authorization") || undefined,
-            cookie: req.header("Cookie") || undefined,
-          },
-        });
-      } catch (error) {
-        res.status(Number((error as { status?: unknown })?.status) || 502).json({
-          error: `无法从 OCB 读取测试 Skill: ${error instanceof Error ? error.message : String(error)}`,
-        }); return;
-      }
-    }
-    const firstStepId = targetSkill ? `STEP-${randomUUID().slice(0, 12).toUpperCase()}` : extensionStepId;
-    const firstStepType = targetSkill ? "skill_prepare" : "stage_extension";
-    const firstCommand = targetSkill
-      ? `/clawevolve-stage --action prepare --task-id ${taskId} --step-id ${firstStepId} --clawweb-url ${getClawWebPublicBaseUrl()}`
-      : stageCommand(taskId, firstStepId);
-    await input.evolveRepo.createTaskWithStep({
-      task: {
-        taskId,
-        taskType: "stage_test",
-        taskName: `${implementation.display_name} 集成测试`,
-        userId: owner,
-        botId,
-        configJson: JSON.stringify({
-          stageTest: true,
-          botEnv,
-          caseInput: runtimeCaseInput,
-          stageExtension: {
-            stage: implementation.stage_key,
-            mode: implementation.extension_mode,
-            implementationId: implementation.implementation_id,
-          },
-          ...(targetSkill ? { targetSkill } : {}),
-        }),
-        createdBy: owner,
-      },
-      step: { stepId: firstStepId, stepType: firstStepType, stepNo: 1, command: firstCommand },
-    });
-    if (targetSkill) {
-      await input.evolveRepo.createStep({
-        stepId: extensionStepId,
-        taskId,
-        stepType: "stage_extension",
-        stepNo: 2,
-        command: stageCommand(taskId, extensionStepId),
-      });
-    }
-    await input.repo.createExtensionRun({
-      stepId: extensionStepId,
-      taskId,
-      stage: implementation.stage_key,
-      mode: implementation.extension_mode,
-      implementationId: implementation.implementation_id,
-      initialInput: runtimeCaseInput,
-    });
-    await input.repo.updateIntegrationTest(implementation.implementation_id, taskId, "testing");
-    const runtime = await input.evolveRepo.resolveEvolveBotRuntime(owner, botId, botEnv);
-    const firstStep = await input.evolveRepo.findStep(firstStepId);
-    if (!firstStep) throw new Error("集成测试初始 Step 创建失败");
-    try {
-      const result = await input.dispatch({
-        taskId, stepPk: firstStep.id, stepId: firstStepId,
-        stepType: firstStepType, userId: owner, botId,
-        command: firstCommand, mode: "message",
-        callbackUrl: `${getClawWebPublicBaseUrl()}/api/evolve/internal/tasks/${taskId}/steps/${firstStepId}/bot-callback`,
-        runtime,
-        runtimeMaintenance: false,
-      });
-      await input.evolveRepo.markDispatched(firstStepId, result.runId, result.sessionId, result.platformResponse);
-    } catch (error) {
-      await input.evolveRepo.markDispatchFailed(firstStepId, error instanceof Error ? error.message : String(error));
-      await input.repo.updateIntegrationTest(implementation.implementation_id, taskId, "test_failed");
-    }
-    res.status(201).json({ taskId, stepId: firstStepId, extensionStepId });
   }));
 
   return router;

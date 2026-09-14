@@ -1,20 +1,12 @@
 {
-  "schemaVersion": "clawevolve.stage-catalog/v1",
-  "template": {
-    "name": "Bot 自进化",
-    "description": "从真实运行记录中发现问题，形成优化方案，并通过多轮 Bench 验证持续改进 Bot 或其中一个 Skill。",
-    "steps": [
-      { "stage": "diagnose", "name": "诊断" },
-      { "stage": "plan", "name": "规划" },
-      { "stage": "optimize", "name": "优化" }
-    ]
-  },
+  "schemaVersion": "clawevolve.stage-contracts/v1",
   "stages": [
     {
       "stage": "diagnose",
       "name": "诊断",
       "description": "读取本次任务的诊断目标和真实 Session，找出具有代表性的成功与失败案例，为后续规划提供可追溯的问题证据。",
       "extensionModes": ["preprocess", "postprocess", "replace"],
+      "postprocessWritablePaths": ["diagnosis", "cases"],
       "inputSchema": {
         "type": "object",
         "required": ["task", "diagnose_goal", "session_source"],
@@ -35,20 +27,27 @@
             "description": "平台准备好的真实 Session 读取方式",
             "required": ["mode"],
             "properties": {
-              "mode": { "type": "string", "enum": ["local", "service_export"], "description": "读取当前 Bot 本地 Session，或读取平台导出的服务态 Session" }
+              "mode": { "type": "string", "enum": ["local", "service_export"], "description": "读取当前 Bot 本地 Session，或读取平台导出的服务态 Session" },
+              "session_ids": {
+                "type": "array",
+                "description": "可选精确来源上限：当前 Bot 索引中的 sessionId 或完整 sessionKey。非空时仅支持 local；全部映射在正文读取前验证，未知、歧义或越界明确失败。缺省或空数组保持原行为。",
+                "items": { "type": "string", "description": "原样匹配，不解析自然语言；1至512字符，字母/数字/下划线/点/冒号/连字符（含中文）；禁止路径、空白、..、以点开头及.json/.jsonl后缀" }
+              }
             }
           },
           "target_skill": {
             "type": "object",
-            "description": "仅在 Skill 进化时提供；当前任务独立的待进化 Skill 候选",
+            "description": "正式 Skill 进化提供独立候选；Skill 流程开发记录的 diagnose/preprocess 或 plan/replace 独立测试提供明确标注来源的固定 fixture，不是正式资产",
             "required": ["asset_id", "skill_id", "name", "workspace", "path", "baseline_sha256"],
             "properties": {
-              "asset_id": { "type": "string", "description": "ClawEvolve 中登记的 Skill 资产标识" },
-              "skill_id": { "type": "string", "description": "OCB 中的 Local Skill 标识" },
+              "kind": { "type": "string", "enum": ["stage_test_fixture"], "description": "仅测试 fixture 提供此字段；缺省保持正式 Skill 候选语义" },
+              "fixture_id": { "type": "string", "enum": ["skill-description-v1", "skill-description-v2"], "description": "kind=stage_test_fixture 时由平台提供的固定测试资源标识；不对应正式资产" },
+              "asset_id": { "type": "string", "description": "正式候选为登记资产标识；测试为 fixture:{taskId}:{fixtureId}，不登记资产" },
+              "skill_id": { "type": "string", "description": "正式候选为 OCB Local Skill 标识；测试为 fixture:{fixtureId}，不是 OCB 身份" },
               "name": { "type": "string", "description": "Skill 名称" },
               "workspace": { "type": "string", "description": "本次任务独立候选 Workspace" },
               "path": { "type": "string", "description": "候选 Workspace 内的 Skill 目录" },
-              "baseline_sha256": { "type": "string", "description": "任务开始时从 OCB 冻结的原始内容校验值" }
+              "baseline_sha256": { "type": "string", "description": "正式候选为从 OCB 冻结的原包校验值；测试为固定 ZIP 的 SHA256，不代表 OCB 内容" }
             }
           },
           "human_input": {
@@ -120,6 +119,7 @@
       "name": "规划",
       "description": "基于诊断案例和进化目标形成可执行的优化 Spec，并生成训练集、测试集及其 Bench 选择，作为 Optimize Loop 的冻结输入。",
       "extensionModes": ["preprocess", "postprocess", "replace"],
+      "postprocessWritablePaths": ["goal", "spec", "benchCases", "benchDomains"],
       "inputSchema": {
         "type": "object",
         "required": ["task", "goal"],
@@ -138,15 +138,17 @@
           "diagnose_result": { "type": "object", "description": "诊断 Stage 的最终结果；按目标直接进化时不提供" },
           "target_skill": {
             "type": "object",
-            "description": "仅在 Skill 进化时提供；当前任务独立的待进化 Skill 候选",
+            "description": "正式 Skill 进化提供独立候选；Skill 流程开发记录的 diagnose/preprocess 或 plan/replace 独立测试提供明确标注来源的固定 fixture，不是正式资产",
             "required": ["asset_id", "skill_id", "name", "workspace", "path", "baseline_sha256"],
             "properties": {
-              "asset_id": { "type": "string", "description": "ClawEvolve 中登记的 Skill 资产标识" },
-              "skill_id": { "type": "string", "description": "OCB 中的 Local Skill 标识" },
+              "kind": { "type": "string", "enum": ["stage_test_fixture"], "description": "仅测试 fixture 提供此字段；缺省保持正式 Skill 候选语义" },
+              "fixture_id": { "type": "string", "enum": ["skill-description-v1", "skill-description-v2", "skill-description-v3"], "description": "kind=stage_test_fixture 时由平台提供的固定测试资源标识；v3 为真实 Plan Source 调用 daily-report-zh 的原文隔离副本，不对应正式资产" },
+              "asset_id": { "type": "string", "description": "正式候选为登记资产标识；测试为 fixture:{taskId}:{fixtureId}，不登记资产" },
+              "skill_id": { "type": "string", "description": "正式候选为 OCB Local Skill 标识；测试为 fixture:{fixtureId}，不是 OCB 身份" },
               "name": { "type": "string", "description": "Skill 名称" },
               "workspace": { "type": "string", "description": "本次任务独立候选 Workspace" },
               "path": { "type": "string", "description": "候选 Workspace 内的 Skill 目录" },
-              "baseline_sha256": { "type": "string", "description": "任务开始时从 OCB 冻结的原始内容校验值" }
+              "baseline_sha256": { "type": "string", "description": "正式候选为从 OCB 冻结的原包校验值；测试为固定 ZIP 的 SHA256，不代表 OCB 内容" }
             }
           },
           "human_input": {
@@ -248,6 +250,7 @@
       "name": "优化",
       "description": "按照冻结的 Spec 修改候选内容，运行训练与测试 Bench，并根据结果决定是否继续下一轮，直到达标或达到最大轮数。",
       "extensionModes": ["preprocess", "postprocess", "replace"],
+      "postprocessWritablePaths": ["diff", "roundDecision", "spec"],
       "inputSchema": {
         "type": "object",
         "required": ["task", "round", "plan_result"],

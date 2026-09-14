@@ -111,10 +111,19 @@ export type OcbRequestIdentity = {
 export type OcbLocalSkillSummary = {
   skillId: string;
   displayName: string;
+  description?: string | null;
 };
 
-/** OCB owns live Local Skills; ClawEvolve only receives whole-package snapshots. */
+/** OCB owns live Local Skills and Bot metadata. Package snapshots are frozen;
+ * display metadata is live and never changes the registering user's permissions.
+ * Metadata fields/method remain optional for older injected providers (unknown => null).
+ */
 export type OcbLocalSkillPort = {
+  /** Live display metadata only; never substitutes for the registering user's authorization. */
+  getBotMetadata?(input: {
+    botId: string;
+    identity: OcbRequestIdentity;
+  }): Promise<{ ownerId: string | null }>;
   listLocalSkills(input: {
     botId: string;
     identity: OcbRequestIdentity;
@@ -123,7 +132,7 @@ export type OcbLocalSkillPort = {
     botId: string;
     skillId: string;
     identity: OcbRequestIdentity;
-  }): Promise<{ packageBytes: Buffer; sha256: string; displayName: string }>;
+  }): Promise<{ packageBytes: Buffer; sha256: string; displayName: string; description?: string | null }>;
   replaceLocalSkill(input: {
     botId: string;
     skillId: string;

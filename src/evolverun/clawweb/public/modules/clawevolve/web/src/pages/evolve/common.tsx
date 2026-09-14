@@ -39,12 +39,12 @@ export function TaskType({ children }: { type: string; children: ReactNode }) {
   )
 }
 
-export function PageTitle({ action }: { action?: ReactNode }) {
+export function PageTitle({ action, title = '进化任务', description = '向指定 Bot 发起进化，并查看任务执行结果。' }: { action?: ReactNode; title?: string; description?: string }) {
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-gray-950">进化任务</h1>
-        <p className="mt-1.5 text-sm text-gray-500">向指定 Bot 发起进化，并查看任务执行结果。</p>
+        <h1 className="text-2xl font-semibold tracking-tight text-gray-950">{title}</h1>
+        <p className="mt-1.5 text-sm text-gray-500">{description}</p>
       </div>
       {action}
     </div>

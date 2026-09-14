@@ -4,7 +4,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "exports": {
     ".": {
@@ -36,7 +36,7 @@
     "@avernet/clawevolve": "0.2.0",
     "@avernet/clawweb-shared": "0.1.0",
     "ali-oss": "^6.23.0",
-    "better-sqlite3": "^11.9.1",
+    "better-sqlite3": "^13.0.3",
     "echarts-for-react": "^3.0.6",
     "express": "^5.2.1",
     "hawk": "^9.0.2",

@@ -20,7 +20,7 @@ import SkillEvolutionFields, {
   type StageExtensionDraft,
   type StageSelectionDraft,
 } from '../components/SkillEvolutionFields'
-import SkillTaskRuntimePanel from '../components/SkillTaskRuntimePanel'
+import SkillTaskRuntimePanel, { StepInteractions } from '../components/SkillTaskRuntimePanel'
 import { EvolveAdminScopeProvider, useEvolveAdminScope } from '../features/evolve/admin-scope'
 import {
 
@@ -35,6 +35,7 @@ import StageSkillManagement from './StageSkillManagement'
 import StageSkillDevelopment from './StageSkillDevelopment'
 import StageSkillDetail from './StageSkillDetail'
 import SkillCenter from './SkillCenter'
+import SkillEventLog from '../components/SkillEventLog'
 import SkillDetail from './SkillDetail'
 
 type IconName = 'spark' | 'plus' | 'bot' | 'arrow' | 'check' | 'clock' | 'file' | 'chart' | 'code' | 'send' | 'target' | 'package'
@@ -864,6 +865,9 @@ function StartEvolution() {
               if (taskType === 'full') setFullInputMode(value.diagnose ? 'diagnose_goal' : 'direct_goal')
             }}
             fullTask={taskType === 'full'}
+            flowKey="skill_evolution"
+            inputMode={fullInputMode}
+            hasGoal={Boolean(evolutionGoal.trim())}
             section="target"
           />}
 
@@ -938,6 +942,9 @@ function StartEvolution() {
               if (taskType === 'full') setFullInputMode(value.diagnose ? 'diagnose_goal' : 'direct_goal')
             }}
             fullTask={taskType === 'full'}
+            flowKey={isSkillEvolution ? 'skill_evolution' : 'bot_evolution'}
+            inputMode={fullInputMode}
+            hasGoal={Boolean(evolutionGoal.trim())}
             section="extensions"
           />}
           </div>
@@ -1614,10 +1621,8 @@ function TaskDetail() {
   const [sharingBusy, setSharingBusy] = useState(false)
   const [logArchiveBusy, setLogArchiveBusy] = useState(false)
   const [logArchives, setLogArchives] = useState<EvolveTaskLogArchive[]>([])
-  const loadTask = async () => {
-    const data = await api.evolve.getTask(taskId)
-    setTask(data)
-  }
+  const refreshTaskRef = useRef<() => Promise<void>>(async () => {})
+  const loadTask = () => refreshTaskRef.current()
   const loadLogArchives = async () => {
     try {
       const data = await api.evolve.listTaskLogArchives(taskId)
@@ -1628,6 +1633,38 @@ function TaskDetail() {
   }
   useEffect(() => {
     let active = true
+    let timer: ReturnType<typeof window.setTimeout> | undefined
+    let inFlight: Promise<void> | null = null
+    let latestStatus = ''
+    const refresh = (): Promise<void> => {
+      if (!active || !taskId) return Promise.resolve()
+      if (inFlight) return inFlight
+      window.clearTimeout(timer)
+      inFlight = api.evolve.getTask(taskId)
+        .then((data) => {
+          if (!active) return
+          latestStatus = data.status
+          setTask(data)
+          setLoadError('')
+        })
+        .catch((error) => {
+          if (active) {
+            const message = error instanceof Error ? error.message : '任务加载失败'
+            setLoadError(message.includes('TASK_NOT_SHARED') ? '权限不足，请联系任务 Owner 开启分享' : message)
+          }
+          throw error
+        })
+        .finally(() => {
+          inFlight = null
+          if (!active) return
+          setLoading(false)
+          if (!['completed', 'failed', 'canceled'].includes(latestStatus)) {
+            timer = window.setTimeout(() => { void refresh().catch(() => {}) }, 3000)
+          }
+        })
+      return inFlight
+    }
+    refreshTaskRef.current = refresh
     if (!taskId) {
       queueMicrotask(() => {
         if (!active) return
@@ -1640,12 +1677,11 @@ function TaskDetail() {
     queueMicrotask(() => {
       if (!active) return
       setLoading(true)
-      api.evolve.getTask(taskId)
-        .then((data) => { if (active) setTask(data) })
-        .catch((error) => { if (active) { const message = error instanceof Error ? error.message : '任务加载失败'; setLoadError(message.includes('TASK_NOT_SHARED') ? '权限不足，请联系任务 Owner 开启分享' : message) } })
-        .finally(() => { if (active) setLoading(false) })
+      setTask(null)
+      setLoadError('')
+      void refresh().catch(() => {})
     })
-    return () => { active = false }
+    return () => { active = false; window.clearTimeout(timer) }
   }, [taskId])
   useEffect(() => {
     if (!taskId) return
@@ -1666,6 +1702,9 @@ function TaskDetail() {
   if (!task) return <div className="mx-auto max-w-5xl px-4 py-20 text-center"><p className="text-sm text-red-600">{loadError || '任务不存在'}</p><button onClick={() => navigate('/evolve')} className={`${secondaryButton} mt-4`}>返回任务列表</button></div>
   const steps = task.steps ?? []
   const view = statusView(task.status)
+  const isStageTest = task.task_type === 'stage_test'
+  const testEnvironmentSteps = isStageTest ? steps.filter((step) => ['skill_init', 'skill_prepare', 'skill_finalize'].includes(step.stepType) || step.command.startsWith('stage-test supplied ')) : []
+  const visibleSteps = steps.filter((step) => !testEnvironmentSteps.includes(step))
   const shared = task.config.shared === true
   const canShare = !adminReadMode && (user?.userId === task.created_by || user?.isClawEvolveAdmin === true)
   const canOperate = !adminReadMode && (user?.userId === task.user_id || canShare)
@@ -1791,28 +1830,29 @@ function TaskDetail() {
           <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
             <div className="border-b border-gray-100 px-5 py-4">
               <div className="flex items-center justify-between gap-3">
-                <div><h2 className="text-sm font-semibold text-gray-900">进化工作流</h2><p className="mt-1 text-xs text-gray-500">按目标设定、优化 Loop、结果应用组织 Bot 进化过程。</p></div>
+                <div><h2 className="text-sm font-semibold text-gray-900">{isStageTest ? 'Stage 集成测试流程' : '进化工作流'}</h2><p className="mt-1 text-xs text-gray-500">{isStageTest ? '仅验证当前 Stage 的自定义处理及与平台默认处理的衔接。' : '按目标设定、优化 Loop、结果应用组织 Bot 进化过程。'}</p></div>
                 <Status type={view.type}>{view.text}</Status>
               </div>
             </div>
-            <WorkflowNodes
+            {isStageTest ? <div className="flex flex-wrap items-center gap-3 p-5">{visibleSteps.map((step, index) => <div key={step.stepId} className="flex items-center gap-3">{index > 0 && <span className="text-gray-300">→</span>}<a href={'#step-' + step.stepId} className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-700">{stageTestStepLabel(step, task)}<span className="ml-2"><Status type={statusView(step.status).type}>{statusView(step.status).text}</Status></span></a></div>)}{visibleSteps.length === 0 && <p className="text-sm text-gray-400">等待创建测试步骤</p>}</div> : <WorkflowNodes
               taskType={task.task_type}
               steps={steps}
               insightImprovement={isGovernanceTask(task)}
               inputMode={task.config.inputMode === 'direct_goal' ? 'direct_goal' : 'diagnose_goal'}
-            />
+            />}
           </section>
           <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between gap-3">
               <div><h2 className="text-sm font-semibold text-gray-900">执行记录</h2><p className="mt-1 text-xs text-gray-500">命令、运行标识、输出和错误信息。</p></div>
-              <span className="text-xs text-gray-400">{steps.length} 个 Step</span>
+              <span className="text-xs text-gray-400">{visibleSteps.length} 个 Step</span>
             </div>
             <div className="mt-5 space-y-3">
               {retryError && <p className="rounded-lg bg-red-50 p-3 text-xs text-red-700">{retryError}</p>}
-              {steps.map((step, index) => <StepCard key={step.stepId} step={step} canRetry={canOperate && canRetryRecordedStep(step, index)} canCancel={canOperate && canCancelRecordedStep(step, index)} retrying={retryingStepId === step.stepId} canceling={cancelingStepId === step.stepId} onRetry={() => void retryStep(step)} onCancel={() => void cancelStep(step)} />)}
+              {visibleSteps.map((step) => <StepCard key={step.stepId} step={step} label={isStageTest ? stageTestStepLabel(step, task) : undefined} canRetry={canOperate && canRetryRecordedStep(step, steps.indexOf(step))} canCancel={canOperate && canCancelRecordedStep(step, steps.indexOf(step))} retrying={retryingStepId === step.stepId} canceling={cancelingStepId === step.stepId} onRetry={() => void retryStep(step)} onCancel={() => void cancelStep(step)}><StepInteractions task={task} stepId={step.stepId} canOperate={canOperate} onUpdated={loadTask} /></StepCard>)}
               {steps.length === 0 && <div className="rounded-xl border border-dashed border-gray-200 py-10 text-center text-sm text-gray-400">尚未创建 Step</div>}
             </div>
           </section>
+          {testEnvironmentSteps.length > 0 && <details className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><summary className="cursor-pointer text-sm font-semibold text-gray-700">测试环境准备与产物记录（{testEnvironmentSteps.length}）</summary><p className="mt-2 text-xs text-gray-500">保留当时实际执行的准备、输入和产物记录，不属于被测 Stage，不会应用 Skill 版本。</p><div className="mt-4 space-y-3">{testEnvironmentSteps.map((step) => <StepCard key={step.stepId} step={step} label={stageTestStepLabel(step, task)}><StepInteractions task={task} stepId={step.stepId} canOperate={false} onUpdated={loadTask} /></StepCard>)}</div></details>}
         </div>
 
         <aside className="min-w-0 space-y-4">
@@ -2220,7 +2260,17 @@ function TaskConfigPanel({ config }: { config: Record<string, unknown> }) {
   )
 }
 
-function StepCard({ step, canRetry = false, canCancel = false, retrying = false, canceling = false, onRetry, onCancel }: { step: EvolveStep; canRetry?: boolean; canCancel?: boolean; retrying?: boolean; canceling?: boolean; onRetry?: () => void; onCancel?: () => void }) {
+function stageTestStepLabel(step: EvolveStep, task: EvolveTask): string {
+  if (step.stepType === 'skill_init') return '测试运行环境初始化'
+  if (step.stepType === 'skill_prepare') return '历史测试环境准备'
+  if (step.stepType === 'skill_finalize') return '历史测试产物归档'
+  if (step.command.startsWith('stage-test supplied ')) return '测试上游输入'
+  const stage = task.config.stageTest as { stage?: string; mode?: string } | undefined
+  const name = ({ diagnose: '诊断', plan: '规划', optimize: '优化' } as Record<string, string>)[stage?.stage || step.stepType] || 'Stage'
+  return step.stepType === 'stage_extension' ? name + ' · ' + (({ preprocess: '前置处理', postprocess: '后置处理', replace: '整体替换' } as Record<string, string>)[stage?.mode || ''] || '自定义处理') : '平台默认' + name
+}
+
+function StepCard({ step, label, children, canRetry = false, canCancel = false, retrying = false, canceling = false, onRetry, onCancel }: { step: EvolveStep; label?: string; children?: ReactNode; canRetry?: boolean; canCancel?: boolean; retrying?: boolean; canceling?: boolean; onRetry?: () => void; onCancel?: () => void }) {
   const view = statusView(step.status)
   const dispatchLabel = stepDispatchLabel(step)
   const stepLabel: Record<string, string> = {
@@ -2229,12 +2279,13 @@ function StepCard({ step, canRetry = false, canCancel = false, retrying = false,
     skill_prepare: '准备待进化 Skill', stage_extension: '执行自定义 Stage', skill_finalize: '生成候选 Skill',
   }
   return (
-    <div className="rounded-xl border border-gray-200 p-4 transition hover:border-gray-300">
+    <div id={'step-' + step.stepId} className="scroll-mt-4 rounded-xl border border-gray-200 p-4 transition hover:border-gray-300">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div><div className="flex items-center gap-2"><p className="text-sm font-semibold text-gray-900">{stepLabel[step.stepType] ?? step.stepType}</p>{step.roundNo != null && <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">第 {step.roundNo} 轮</span>}<Status type={view.type}>{view.text}</Status>{dispatchLabel && <span className="rounded-full bg-sky-50 px-2 py-1 text-[10px] font-medium text-sky-700">{dispatchLabel}</span>}</div><p className="mt-1 font-mono text-[10px] text-gray-400">{step.stepId}</p></div>
+        <div><div className="flex items-center gap-2"><p className="text-sm font-semibold text-gray-900">{label ?? stepLabel[step.stepType] ?? step.stepType}</p>{step.roundNo != null && <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">第 {step.roundNo} 轮</span>}<Status type={view.type}>{view.text}</Status>{dispatchLabel && <span className="rounded-full bg-sky-50 px-2 py-1 text-[10px] font-medium text-sky-700">{dispatchLabel}</span>}</div><p className="mt-1 font-mono text-[10px] text-gray-400">{step.stepId}</p></div>
         <div className="flex items-center gap-3">{step.botRunId && <span className="font-mono text-[10px] text-gray-400">{step.botRunId}</span>}{canCancel && <button type="button" disabled={canceling} onClick={onCancel} className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50">{canceling ? '正在停止…' : '停止'}</button>}{canRetry && <button type="button" disabled={retrying} onClick={onRetry} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">{retrying ? '正在继续…' : '继续执行'}</button>}</div>
       </div>
       {step.summary && <p className="mt-3 text-sm text-gray-700">{step.summary}</p>}
+      {children}
       {step.error && <p className="mt-3 rounded-lg bg-red-50 p-3 text-xs text-red-700">{step.error.code ? `${step.error.code}: ` : ''}{step.error.message}</p>}
       {step.output && <StepDeliverables output={step.output} taskId={step.taskId} stepId={step.stepId} stepType={step.stepType} />}
       <details className="mt-3 border-t border-gray-100 pt-3">
@@ -2588,6 +2639,22 @@ function EvolveSidebarEvaluationGroup() {
   )
 }
 
+function EvolveSidebarSkillGroup() {
+  const { pathname } = useLocation()
+  const active = pathname.startsWith('/evolve/skills')
+  const [expanded, setExpanded] = useState(active)
+  useEffect(() => { if (active) setExpanded(true) }, [active])
+  return <div>
+    <button type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition ${active ? 'text-blue-700' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`}>
+      <Icon name="package" className="h-[18px] w-[18px]" /><span>技能中心</span><Icon name="arrow" className={`ml-auto h-4 w-4 transition-transform ${expanded ? 'rotate-90' : ''}`} />
+    </button>
+    {expanded && <div className="mt-0.5 space-y-0.5">
+      <EvolveSidebarSubLink to="/evolve/skills" label="技能管理" activeWhen={(path) => path.startsWith('/evolve/skills') && path !== '/evolve/skills/events'} />
+      <EvolveSidebarSubLink to="/evolve/skills/events" label="技能事件日志" activeWhen={(path) => path === '/evolve/skills/events'} />
+    </div>}
+  </div>
+}
+
 function EvolveSidebarComingSoon({ label }: { label: string }) {
   return (
     <div className="flex cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-400" aria-disabled="true">
@@ -2612,7 +2679,7 @@ function EvolveShell({ children }: { children: ReactNode }) {
           <EvolveSidebarLink to="/evolve" label="进化任务" icon="spark" activeWhen={(pathname) => pathname === '/evolve' || pathname.startsWith('/evolve/tasks') || pathname.startsWith('/evolve/runs') || pathname.startsWith('/evolve/new')} />
           <EvolveSidebarEvaluationGroup />
           <EvolveSidebarLink to="/evolve/packs" label="进化版本" icon="package" />
-          <EvolveSidebarLink to="/evolve/skills" label="技能中心" icon="package" activeWhen={(pathname) => pathname.startsWith('/evolve/skills')} />
+          <EvolveSidebarSkillGroup />
           <EvolveSidebarLink to="/evolve/stage-skills" label="自定义 Stage" icon="code" activeWhen={(pathname) => pathname.startsWith('/evolve/stage-skills')} />
           <div className="px-3 pb-1 pt-5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">专项进化</div>
           <p className="px-3 pb-1 text-[10px] leading-4 text-gray-400">特定模块的独立管理与定向进化</p>
@@ -2679,6 +2746,7 @@ export default function Evolve() {
   if (location.pathname === '/evolve/stage-skills/new') content = <StageSkillDevelopment />
   else if (location.pathname.startsWith('/evolve/stage-skills/')) content = <StageSkillDetail />
   else if (location.pathname === '/evolve/stage-skills') content = <StageSkillManagement />
+  else if (location.pathname === '/evolve/skills/events') content = <SkillEventLog />
   else if (location.pathname.startsWith('/evolve/skills/')) content = <SkillDetail />
   else if (location.pathname === '/evolve/skills') content = <SkillCenter />
   else if (location.pathname.startsWith('/evolve/packs/')) content = <PackDetail />

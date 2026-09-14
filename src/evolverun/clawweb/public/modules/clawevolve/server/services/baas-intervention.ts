@@ -10,8 +10,16 @@
  */
 import { resolveBaasConfig } from "@avernet/clawweb-shared/server/db";
 
-/** Whether the current platform requires iamtoken for BaaS calls */
-const PLATFORM_REQUIRES_IAMTOKEN = process.platform === "darwin";
+/** Whether the current transport target requires the macOS IAM browser cookie. */
+function requiresIamToken(baseUrl: string): boolean {
+  if (process.platform !== "darwin") return false;
+  try {
+    const hostname = new URL(baseUrl).hostname.toLowerCase();
+    return !["127.0.0.1", "localhost", "::1", "[::1]"].includes(hostname);
+  } catch {
+    return true;
+  }
+}
 
 export type InterventionParams = {
   /** BaaS-format bot_id: "real_bot_id:staff_no" (e.g. "default:151614") */
@@ -57,12 +65,12 @@ const TOKEN_EXPIRED_CODES = ["TOKEN_EXPIRED", "TOKEN_INVALID", "USER_NOT_LOGIN"]
  * On macOS (local dev): requires both apiKey + iamtoken from application.yaml.
  * On server (Linux etc.): apiKey only; iamtoken is not needed and ignored.
  */
-function buildBaasHeaders(config: { apiKey: string; iamtoken: string }): Record<string, string> {
+function buildBaasHeaders(config: { apiKey: string; iamtoken: string; baseUrl: string }): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${config.apiKey}`,
   };
-  if (PLATFORM_REQUIRES_IAMTOKEN && config.iamtoken) {
+  if (requiresIamToken(config.baseUrl) && config.iamtoken) {
     headers["Cookie"] = `iam_token=${config.iamtoken}`;
   }
   return headers;
@@ -86,7 +94,7 @@ export async function sendIntervention(params: InterventionParams): Promise<Inte
   }
 
   // iamtoken is only required on macOS (local dev)
-  if (PLATFORM_REQUIRES_IAMTOKEN && !config.iamtoken) {
+  if (requiresIamToken(config.baseUrl) && !config.iamtoken) {
     return {
       ok: false,
       error: "BaaS iamtoken 未配置。请在 application.yaml 中设置 baas.iamtoken (macOS 本地开发需要)",

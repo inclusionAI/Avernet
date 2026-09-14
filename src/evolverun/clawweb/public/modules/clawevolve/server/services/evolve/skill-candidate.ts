@@ -7,12 +7,18 @@ export type FrozenSkillTarget = {
   skillId: string;
   name: string;
   baseline: { ref: string; sha256: string };
-  workspacePath: string;
-  skillPath: string;
   candidate: {
     ref: string;
+    prepared?: PreparedSkillCandidate;
     artifact?: { ref: string; size: number; sha256: string; contentType: "application/zip" };
   };
+};
+
+export type PreparedSkillCandidate = {
+  workspacePath: string;
+  skillPath: string;
+  preparedByStepId: string;
+  baselineSha256: string;
 };
 
 function safeSkillDirectoryName(value: string): string {
@@ -21,6 +27,50 @@ function safeSkillDirectoryName(value: string): string {
     throw new Error("OCB Skill 标识不能安全映射为候选目录");
   }
   return normalized;
+}
+
+export function candidateWorkspacePath(taskId: string): string {
+  if (!/^[A-Za-z0-9._-]{1,128}$/.test(taskId)) throw new Error("Task 标识不能安全映射为候选目录");
+  return `/home/admin/.openclaw/clawevolve_workspaces/${taskId}/workspace`;
+}
+
+export function expectedCandidateSkillPath(taskId: string, displayName: string): string {
+  return `${candidateWorkspacePath(taskId)}/skills/skills-local/${safeSkillDirectoryName(displayName)}`;
+}
+
+export function recordPreparedSkillCandidate(input: {
+  taskId: string;
+  stepId: string;
+  target: FrozenSkillTarget;
+  output: Record<string, unknown>;
+}): FrozenSkillTarget {
+  const workspacePath = String(input.output.workspace ?? "");
+  const skillPath = String(input.output.targetSkillPath ?? "");
+  const expectedWorkspace = candidateWorkspacePath(input.taskId);
+  const expectedSkill = expectedCandidateSkillPath(input.taskId, input.target.name);
+  if (input.output.prepared !== true || workspacePath !== expectedWorkspace || skillPath !== expectedSkill) {
+    throw new Error("候选准备结果与本次任务的隔离目录不一致");
+  }
+  return {
+    ...input.target,
+    candidate: {
+      ...input.target.candidate,
+      prepared: {
+        workspacePath,
+        skillPath,
+        preparedByStepId: input.stepId,
+        baselineSha256: input.target.baseline.sha256,
+      },
+    },
+  };
+}
+
+export function requirePreparedSkillCandidate(target: FrozenSkillTarget): PreparedSkillCandidate {
+  const prepared = target.candidate.prepared;
+  if (!prepared || prepared.baselineSha256 !== target.baseline.sha256) {
+    throw new Error("待进化 Skill 尚未在本次任务中完成候选准备");
+  }
+  return prepared;
 }
 
 export async function freezeSkillTarget(input: {
@@ -45,7 +95,6 @@ export async function freezeSkillTarget(input: {
   const baselineKey = `evolve/skills/tasks/${input.taskId}/baseline/package.zip`;
   const candidateKey = `evolve/skills/tasks/${input.taskId}/candidate/package.zip`;
   await input.artifactStore.putObject(baselineKey, exported.packageBytes, "application/zip");
-  const workspacePath = `/home/admin/.openclaw/clawevolve_workspaces/${input.taskId}/workspace`;
   return {
     assetId: asset.asset_id,
     skillId: asset.ocb_skill_id,
@@ -54,10 +103,6 @@ export async function freezeSkillTarget(input: {
       ref: `oss://${getArtifactBucket()}/${baselineKey}`,
       sha256: exported.sha256,
     },
-    workspacePath,
-    // OCB's canonical Local Skill directory is derived from the validated
-    // package name, not from the database row id used by its API.
-    skillPath: `${workspacePath}/skills/skills-local/${safeSkillDirectoryName(exported.displayName)}`,
     candidate: { ref: `oss://${getArtifactBucket()}/${candidateKey}` },
   };
 }

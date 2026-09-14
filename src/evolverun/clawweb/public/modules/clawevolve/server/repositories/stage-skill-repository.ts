@@ -1,6 +1,17 @@
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import type { StageExtensionMode, StageKey } from "../services/evolve/stage-catalog.js";
 
+export type StageDevelopmentRow = {
+  stage_skill_id: string;
+  owner_user_id: string;
+  display_name: string;
+  flow_key: "bot_evolution" | "skill_evolution";
+  stage_key: StageKey;
+  extension_mode: StageExtensionMode;
+  gmt_create: number | string;
+  gmt_modified: number | string;
+};
+
 export type StageSkillImplementationRow = {
   id: number;
   stage_skill_id: string;
@@ -15,6 +26,7 @@ export type StageSkillImplementationRow = {
   package_sha256: string;
   static_validation_json: string;
   integration_test_task_id: string | null;
+  integration_test_status: "untested" | "testing" | "test_passed" | "test_failed";
   gmt_create: number | string;
   gmt_modified: number | string;
 };
@@ -45,6 +57,47 @@ export type StageInteractionRow = {
 
 export class StageSkillRepository {
   constructor(private readonly db: IDatabase) {}
+
+  async createDevelopment(input: {
+    stageSkillId: string; ownerUserId: string; displayName: string;
+    flow: StageDevelopmentRow["flow_key"]; stage: StageKey; mode: StageExtensionMode;
+  }): Promise<StageDevelopmentRow> {
+    const now = this.db.dialect.now();
+    await this.db.exec(
+      `INSERT INTO ce_stage_developments
+       (stage_skill_id, owner_user_id, display_name, flow_key, stage_key, extension_mode, gmt_create, gmt_modified)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [input.stageSkillId, input.ownerUserId, input.displayName, input.flow, input.stage, input.mode, now, now],
+    );
+    const row = await this.findDevelopment(input.stageSkillId);
+    if (!row) throw new Error("开发记录创建失败");
+    return row;
+  }
+
+  async findDevelopment(stageSkillId: string): Promise<StageDevelopmentRow | null> {
+    return (await this.db.query<StageDevelopmentRow>(
+      "SELECT * FROM ce_stage_developments WHERE stage_skill_id = ?", [stageSkillId],
+    ))[0] ?? null;
+  }
+
+  async listDevelopments(ownerUserId: string): Promise<StageDevelopmentRow[]> {
+    return this.db.query<StageDevelopmentRow>(
+      `SELECT d.* FROM ce_stage_developments d WHERE owner_user_id = ?
+       AND (NOT EXISTS (SELECT 1 FROM ce_stage_skill_implementations i WHERE i.stage_skill_id = d.stage_skill_id)
+         OR EXISTS (SELECT 1 FROM ce_stage_skill_implementations i WHERE i.stage_skill_id = d.stage_skill_id AND i.status <> 'deleted'))
+       ORDER BY gmt_modified DESC`,
+      [ownerUserId],
+    );
+  }
+
+  async deleteDraft(stageSkillId: string, ownerUserId: string): Promise<boolean> {
+    const result = await this.db.exec(
+      `DELETE FROM ce_stage_developments WHERE stage_skill_id = ? AND owner_user_id = ?
+       AND NOT EXISTS (SELECT 1 FROM ce_stage_skill_implementations WHERE stage_skill_id = ?)`,
+      [stageSkillId, ownerUserId, stageSkillId],
+    );
+    return result.affectedRows === 1;
+  }
 
   async nextVersion(stageSkillId: string): Promise<number> {
     const row = (await this.db.query<{ max_version: number | string | null }>(
@@ -113,9 +166,11 @@ export class StageSkillRepository {
   ): Promise<void> {
     await this.db.exec(
       `UPDATE ce_stage_skill_implementations
-       SET integration_test_task_id = ?, status = ?, gmt_modified = ?
+       SET integration_test_task_id = ?, integration_test_status = ?,
+           status = CASE WHEN status = 'registered' THEN status ELSE ? END,
+           gmt_modified = ?
        WHERE implementation_id = ?`,
-      [taskId, status, this.db.dialect.now(), implementationId],
+      [taskId, status, status, this.db.dialect.now(), implementationId],
     );
   }
 

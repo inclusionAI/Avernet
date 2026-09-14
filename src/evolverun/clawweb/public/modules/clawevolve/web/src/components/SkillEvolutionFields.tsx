@@ -31,6 +31,9 @@ export default function SkillEvolutionFields({
   stageSelection,
   onStageSelectionChange,
   fullTask,
+  flowKey,
+  inputMode,
+  hasGoal,
   section = 'all',
 }: {
   botId: string
@@ -42,6 +45,9 @@ export default function SkillEvolutionFields({
   stageSelection: StageSelectionDraft
   onStageSelectionChange: (value: StageSelectionDraft) => void
   fullTask: boolean
+  flowKey: 'bot_evolution' | 'skill_evolution'
+  inputMode: 'diagnose_goal' | 'direct_goal'
+  hasGoal: boolean
   section?: 'all' | 'target' | 'extensions'
 }) {
   const [assets, setAssets] = useState<EvolveSkillAsset[]>([])
@@ -56,7 +62,11 @@ export default function SkillEvolutionFields({
     let active = true
     Promise.all([
       includeTargetSkill && section !== 'extensions' ? api.evolve.listSkillAssets() : Promise.resolve({ items: [] }),
-      section !== 'target' ? api.evolve.stageCatalog() : Promise.resolve(null),
+      section !== 'target' ? api.evolve.stageCatalog({
+        taskType: fullTask ? 'full' : 'diagnose',
+        inputMode,
+        hasGoal,
+      }) : Promise.resolve(null),
       section !== 'target' ? api.evolve.listStageSkills() : Promise.resolve({ items: [] }),
     ]).then(([assetResult, stageCatalog, implementationResult]) => {
       if (!active) return
@@ -71,7 +81,11 @@ export default function SkillEvolutionFields({
       if (active) setError(reason instanceof Error ? reason.message : 'Skill 进化配置加载失败')
     })
     return () => { active = false }
-  }, [botId, includeTargetSkill, section])
+  }, [botId, includeTargetSkill, section, fullTask, inputMode, hasGoal])
+
+  const flowDescription = catalog?.flows.find((flow) => flow.key === flowKey)
+  const stagePolicy = (stage: 'diagnose' | 'plan' | 'optimize') =>
+    flowDescription?.stages.find((item) => item.key === stage)
 
   const stageSkills = useMemo(() => {
     const result = new Map<string, EvolveStageSkill[]>()
@@ -141,18 +155,15 @@ export default function SkillEvolutionFields({
   })
 
   const updateStage = (stage: 'diagnose' | 'plan' | 'optimize', enabled: boolean) => {
-    let nextSelection = { ...stageSelection, [stage]: enabled }
+    const policy = stagePolicy(stage)
+    if (!policy?.canDisable && enabled !== policy?.enabled) return
+    const nextSelection = { ...stageSelection, [stage]: enabled }
     let nextExtensions = extensions
     if (!enabled) {
       nextExtensions = disableExtensions(nextExtensions, stage)
       setCustomizing((value) => ({ ...value, [stage]: false }))
       if (pickerStage === stage) setPickerStage(null)
     }
-    if (stage === 'plan' && !enabled) {
-      nextSelection = { ...nextSelection, optimize: false }
-      nextExtensions = disableExtensions(nextExtensions, 'optimize')
-    }
-    if (stage === 'optimize' && enabled) nextSelection = { ...nextSelection, plan: true }
     if (!Object.values(nextSelection).some(Boolean)) return
     onStageSelectionChange(nextSelection)
     onExtensionsChange(nextExtensions)
@@ -189,6 +200,7 @@ export default function SkillEvolutionFields({
           const selected = activeBindings(stageKey)
           const options = (stageSkills.get(stage.stage) ?? [])
             .filter((item) => stage.extensionModes.includes(item.mode))
+            .filter((item) => flowKey !== 'skill_evolution' || item.integrationTestStatus === 'test_passed')
           const customEnabled = customizing[stageKey] === true || selected.length > 0
           const hasReplace = selected.some(([mode]) => mode === 'replace')
           const selectedModes = new Set(selected.map(([mode]) => mode))
@@ -199,22 +211,28 @@ export default function SkillEvolutionFields({
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-gray-900">{stage.name}</p><p className="mt-1 text-xs leading-5 text-gray-500">{stage.description}</p></div>
               <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2 text-xs text-gray-700"><input type="checkbox" checked={stageSelection[stageKey]} disabled={!fullTask && stage.stage === 'diagnose'} onChange={(event) => updateStage(stageKey, event.target.checked)} className="h-4 w-4 rounded border-gray-300 text-blue-600" />启用</label>
-                <label className="flex items-center gap-2 text-xs text-gray-700"><input type="checkbox" checked={customEnabled} disabled={!stageSelection[stageKey] || options.length === 0} onChange={(event) => toggleCustom(stageKey, event.target.checked)} className="h-4 w-4 rounded border-gray-300 text-blue-600" />自定义</label>
+                {stagePolicy(stageKey)?.canDisable
+                  ? <label className="flex items-center gap-2 text-xs text-gray-700"><input type="checkbox" checked={stageSelection[stageKey]} onChange={(event) => updateStage(stageKey, event.target.checked)} className="h-4 w-4 rounded border-gray-300 accent-blue-600" />启用</label>
+                  : <span className="rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-700">必选</span>}
+                {stageSelection[stageKey] && <label className="flex items-center gap-2 text-xs text-gray-700"><input type="checkbox" checked={customEnabled} onChange={(event) => toggleCustom(stageKey, event.target.checked)} className="h-4 w-4 rounded border-gray-300 accent-blue-600" />自定义</label>}
               </div>
             </div>
+            {!stagePolicy(stageKey)?.canDisable && stagePolicy(stageKey)?.disabledReason && <p className="mt-2 text-[11px] text-gray-400">{stagePolicy(stageKey)?.disabledReason}</p>}
             {customEnabled && stageSelection[stageKey] && <div className="mt-3 flex flex-wrap items-center gap-2">
               {selected.map(([mode, binding]) => {
                 const implementation = implementations.find((item) => item.implementationId === binding.implementationId)
                 return <span key={mode} className="inline-flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800"><span className="font-medium">{modeCopy[mode].name}</span><span>{implementation?.displayName ?? binding.implementationId} · {implementation?.version ?? ''}</span><button type="button" onClick={() => removeBinding(stageKey, mode)} className="text-blue-400 hover:text-red-600">×</button></span>
               })}
-              <button type="button" disabled={selectable.length === 0} onClick={() => setPickerStage(pickerStage === stageKey ? null : stageKey)} className="rounded-lg border border-dashed border-blue-300 px-3 py-2 text-xs font-medium text-blue-600 disabled:border-gray-200 disabled:text-gray-300">＋ 选择实现</button>
+              <button type="button" onClick={() => setPickerStage(pickerStage === stageKey ? null : stageKey)} className="rounded-lg border border-dashed border-blue-300 px-3 py-2 text-xs font-medium text-blue-600">＋ 选择实现</button>
             </div>}
             {pickerStage === stageKey && customEnabled && <div className="mt-3 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-              {selectable.length > 0 ? selectable.map((item) => <button type="button" key={item.implementationId} onClick={() => chooseImplementation(stageKey, item)} className="flex w-full items-center justify-between gap-4 border-b border-gray-100 px-4 py-3 text-left last:border-b-0 hover:bg-blue-50"><span><span className="block text-xs font-medium text-gray-900">{item.displayName} · {item.version}</span><span className="mt-0.5 block text-[10px] text-gray-400">{modeCopy[item.mode].name} · {modeCopy[item.mode].description}</span></span><span className="text-xs text-blue-600">选择</span></button>) : <p className="px-4 py-3 text-xs text-gray-400">当前组合下没有可选择的实现</p>}
+              {selectable.length > 0 ? selectable.map((item) => <button type="button" key={item.implementationId} onClick={() => chooseImplementation(stageKey, item)} className="flex w-full items-center justify-between gap-4 border-b border-gray-100 px-4 py-3 text-left last:border-b-0 hover:bg-blue-50"><span><span className="block text-xs font-medium text-gray-900">{item.displayName} · {item.version}</span><span className="mt-0.5 block text-[10px] text-gray-400">{modeCopy[item.mode].name} · {modeCopy[item.mode].description}</span></span><span className="text-xs text-blue-600">选择</span></button>) : <div className="px-4 py-4 text-xs text-gray-500"><p>{options.length === 0 ? '暂无可用的自定义实现' : '当前组合下没有可添加的实现'}</p>{hasReplace && <p className="mt-1">整体替换不能与前置、后置处理同时使用。</p>}<Link to="/evolve/stage-skills/new" className="mt-2 inline-block font-medium text-blue-600 hover:text-blue-700">去接入自定义实现 ↗</Link></div>}
             </div>}
           </div>
         })}
+        {flowKey === 'skill_evolution' && implementations.some((item) =>
+          item.status === 'registered' && item.integrationTestStatus !== 'test_passed')
+          && <p className="text-xs text-gray-500">Skill 自进化只展示已经通过真实集成测试的自定义实现。</p>}
         {error && <p className="text-xs text-red-600">{error}</p>}
       </div>}
     </section>}

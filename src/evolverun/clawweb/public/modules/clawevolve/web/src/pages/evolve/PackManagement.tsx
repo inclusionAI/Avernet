@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { api, type EvolveVersion } from '../../api/client'
 import type { TCLogBot } from '../../types'
 import EvolveBotPicker from '../../components/EvolveBotPicker'
+import TestBenchComparison from '../../components/TestBenchComparison'
 import { useEvolveAdminScope } from '../../features/evolve/admin-scope'
 import { GitDiffView, Icon } from './common'
 import { formatStepTime, primaryButton, secondaryButton } from './helpers'
@@ -229,7 +230,7 @@ export function PackManagement() {
                     </td>
                     <td className="px-4 py-4"><span className={`inline-flex rounded-md px-2 py-1 text-xs font-medium ${status.tone}`}>{status.label}</span></td>
                     <td className="px-4 py-4">
-                      {comparison ? <div className="text-xs"><div className="flex items-center gap-2 text-gray-600"><span>{comparison.baseline ?? '—'}</span><span className="text-gray-300">→</span><span className="font-semibold text-gray-900">{comparison.candidate ?? '—'}</span><span className={`font-medium ${(comparison.delta ?? 0) > 0 ? 'text-emerald-600' : (comparison.delta ?? 0) < 0 ? 'text-red-600' : 'text-gray-400'}`}>{typeof comparison.delta === 'number' ? `${comparison.delta >= 0 ? '+' : ''}${comparison.delta.toFixed(4)}` : '—'}</span></div><p className="mt-1 text-[10px] text-gray-400">{comparison.name || 'test_score'}</p></div> : <span className="text-xs text-gray-400">未评测</span>}
+                      <TestBenchComparison comparison={comparison} />
                     </td>
                     <td className="px-4 py-4"><p className="text-xs font-medium text-gray-700">{item.reviewStatus || '—'}</p>{item.specVersion && <p className="mt-1 text-[10px] text-gray-400">Spec {item.specVersion}</p>}</td>
                     <td className="px-4 py-4">{item.pack?.artifact.ref ? <span className="rounded-md bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700">可恢复</span> : item.reportedPack?.artifact?.ref ? <span className="text-xs font-medium text-amber-700">Skill 已上报 · 未登记</span> : <span className="text-xs text-gray-400">仅 Review</span>}</td>

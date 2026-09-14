@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { Router, type Request } from "express";
+import { Router, type Request, type ErrorRequestHandler } from "express";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import type { OcbLocalSkillPort, OcbRequestIdentity } from "../internal/module-api.js";
 import type { SkillAssetRepository } from "../repositories/skill-asset-repository.js";
+import { skillEventTestBench } from "../repositories/skill-audit.js";
 import { getArtifactBucket, type ObjectStore } from "../services/object-storage/oss-object-store.js";
 import { skillPackageDiff, skillPackageView } from "../services/evolve/skill-package-view.js";
 
@@ -22,13 +23,18 @@ function identity(req: Request): OcbRequestIdentity | null {
   };
 }
 
-function assetView(row: Awaited<ReturnType<SkillAssetRepository["findAsset"]>>) {
+type DisplayMetadata = { ownerId: string | null; descriptions: Map<string, string | null> };
+
+function assetView(row: Awaited<ReturnType<SkillAssetRepository["findAsset"]>>, metadata?: DisplayMetadata) {
   if (!row) return null;
   return {
     assetId: row.asset_id,
+    ownerId: metadata?.ownerId ?? null,
+    createdAt: row.gmt_create,
     botId: row.bot_id,
     skillId: row.ocb_skill_id,
     name: row.display_name,
+    description: metadata?.descriptions.get(row.ocb_skill_id) ?? null,
     currentVersion: `v${row.current_version_no}`,
     updatedAt: row.gmt_modified,
   };
@@ -44,8 +50,52 @@ function objectKey(ref: string): string {
   return value;
 }
 
+async function readSnapshot(store: ObjectStore, ref: string) {
+  try {
+    return await store.getObject(objectKey(ref));
+  } catch (error) {
+    const code = (error as { code?: unknown } | null)?.code;
+    if (code !== "ENOENT" && code !== "NoSuchKey") throw error;
+    throw Object.assign(new Error("该版本的历史快照在当前存储中不可用，无法查看内容或差异；不会以当前 Skill 内容替代。"), {
+      code: "SKILL_SNAPSHOT_UNAVAILABLE",
+    });
+  }
+}
+
 export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
   const router = Router();
+
+  async function displayMetadata(botIds: string[], requestIdentity: OcbRequestIdentity, includeSkills = true) {
+    // Request-scoped deduplication: two metadata calls per distinct Bot, never
+    // per version/asset and never ZIP reads. Old registered assets benefit too.
+    const entries = await Promise.all([...new Set(botIds)].map(async (botId) => {
+      const query = { botId, identity: requestIdentity };
+      const [bot, skills] = await Promise.all([
+        input.ocbLocalSkills?.getBotMetadata?.(query).catch(() => null),
+        includeSkills ? input.ocbLocalSkills?.listLocalSkills(query).catch(() => []) : [],
+      ]);
+      return [botId, { ownerId: bot?.ownerId ?? null,
+        descriptions: new Map((skills ?? []).map((skill) => [skill.skillId, skill.description ?? null])),
+      }] as const;
+    }));
+    return new Map(entries);
+  }
+
+  router.get("/skill-events", asyncHandler(async (req, res) => {
+    const requestIdentity = identity(req);
+    if (!requestIdentity) { res.status(401).json({ error: "无法识别当前用户" }); return; }
+    const events = await input.repo.listEvents(requestIdentity.userId);
+    const metadata = await displayMetadata(events.map((event) => event.bot_id), requestIdentity, false);
+    res.json({ items: events.map((event) => ({
+      eventId: event.event_id, assetId: event.asset_id, name: event.display_name,
+      description: event.description,
+      ownerId: metadata.get(event.bot_id)?.ownerId ?? null, botId: event.bot_id,
+      version: event.version_no == null ? null : `v${event.version_no}`, versionId: event.version_id,
+      type: event.event_type, actorId: event.actor_id, actorType: event.actor_type, result: event.result,
+      taskId: event.task_id, createdAt: event.gmt_create,
+      testBench: skillEventTestBench(event.detail_json, event.task_id),
+    })) });
+  }));
 
   router.get("/skill-assets/available", asyncHandler(async (req, res) => {
     const requestIdentity = identity(req);
@@ -60,7 +110,9 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
   router.get("/skill-assets", asyncHandler(async (req, res) => {
     const requestIdentity = identity(req);
     if (!requestIdentity) { res.status(401).json({ error: "无法识别当前用户" }); return; }
-    res.json({ items: (await input.repo.listAssets(requestIdentity.userId)).map(assetView) });
+    const assets = await input.repo.listAssets(requestIdentity.userId);
+    const metadata = await displayMetadata(assets.map((asset) => asset.bot_id), requestIdentity);
+    res.json({ items: assets.map((asset) => assetView(asset, metadata.get(asset.bot_id))) });
   }));
 
   router.post("/skill-assets", asyncHandler(async (req, res) => {
@@ -73,7 +125,10 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
       res.status(503).json({ error: "Skill 登记所需服务不可用" }); return;
     }
     const existing = await input.repo.findByOcbSkill(requestIdentity.userId, botId, skillId);
-    if (existing) { res.json({ ...assetView(existing), existing: true }); return; }
+    if (existing) {
+      const metadata = await displayMetadata([botId], requestIdentity);
+      res.json({ ...assetView(existing, metadata.get(botId)), existing: true }); return;
+    }
     const exported = await input.ocbLocalSkills.exportLocalSkill({
       botId,
       skillId,
@@ -89,10 +144,13 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
       botId,
       ocbSkillId: skillId,
       displayName: exported.displayName,
+      description: exported.description ?? null,
       packageRef: `oss://${getArtifactBucket()}/${objectKey}`,
       packageSha256: exported.sha256,
     });
-    res.status(201).json(assetView(created));
+    const metadata = await displayMetadata([botId], requestIdentity, false);
+    metadata.get(botId)?.descriptions.set(skillId, exported.description ?? null);
+    res.status(201).json(assetView(created, metadata.get(botId)));
   }));
 
   router.get("/skill-assets/:assetId", asyncHandler(async (req, res) => {
@@ -101,8 +159,9 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
     if (!requestIdentity || !asset || asset.owner_user_id !== requestIdentity.userId) {
       res.status(404).json({ error: "Skill 不存在" }); return;
     }
+    const metadata = await displayMetadata([asset.bot_id], requestIdentity);
     res.json({
-      ...assetView(asset),
+      ...assetView(asset, metadata.get(asset.bot_id)),
       versions: (await input.repo.listVersions(asset.asset_id)).map((version) => ({
         versionId: version.version_id,
         version: `v${version.version_no}`,
@@ -123,7 +182,7 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
     if (!input.artifactStore) { res.status(503).json({ error: "Skill 版本文件存储不可用" }); return; }
     const version = await input.repo.findVersion(asset.asset_id, String(req.params.versionId));
     if (!version) { res.status(404).json({ error: "Skill 版本不存在" }); return; }
-    const stored = await input.artifactStore.getObject(objectKey(version.package_ref));
+    const stored = await readSnapshot(input.artifactStore, version.package_ref);
     res.json(await skillPackageView(stored.content, String(req.query.path ?? "")));
   }));
 
@@ -140,8 +199,8 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
       res.json({ baseline: null, files: [] }); return;
     }
     const [baseline, candidate] = await Promise.all([
-      input.artifactStore.getObject(objectKey(version.baseline_package_ref)),
-      input.artifactStore.getObject(objectKey(version.package_ref)),
+      readSnapshot(input.artifactStore, version.baseline_package_ref),
+      readSnapshot(input.artifactStore, version.package_ref),
     ]);
     res.json({
       baseline: { sha256: version.baseline_package_sha256 },
@@ -149,5 +208,19 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
     });
   }));
 
+  const snapshotError: ErrorRequestHandler = (error, _req, res, next) => {
+    if (error?.code !== "SKILL_SNAPSHOT_UNAVAILABLE") { next(error); return; }
+    res.status(404).json({ code: error.code, error: error.message });
+  };
+  router.use(snapshotError);
+  const ocbSkillError: ErrorRequestHandler = (error, _req, res, next) => {
+    const status = error?.status ?? error?.statusCode;
+    const unavailable = error?.code === "OCB_LOCAL_SKILL_UNAVAILABLE" && (status === 502 || status === 503);
+    const rejected = error?.code === "OCB_LOCAL_SKILL_REQUEST_FAILED"
+      && Number.isInteger(status) && status >= 400 && status < 500;
+    if ((!unavailable && !rejected) || typeof error?.message !== "string") { next(error); return; }
+    res.status(status).json({ code: error.code, error: error.message });
+  };
+  router.use(ocbSkillError);
   return router;
 }

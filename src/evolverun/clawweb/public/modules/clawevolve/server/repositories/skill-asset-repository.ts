@@ -1,4 +1,5 @@
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
+import { appendSkillAudit, skillAuditTransaction, skillEventTestBench, type SkillAuditRow } from './skill-audit.js';
 
 export type SkillAssetRow = {
   id: number;
@@ -7,6 +8,7 @@ export type SkillAssetRow = {
   bot_id: string;
   ocb_skill_id: string;
   display_name: string;
+  description: string | null;
   current_version_no: number;
   current_package_ref: string;
   current_package_sha256: string;
@@ -30,6 +32,13 @@ export type SkillVersionRow = {
 
 export class SkillAssetRepository {
   constructor(private readonly db: IDatabase) {}
+
+  async listEvents(ownerUserId: string) {
+    return this.db.query<SkillAuditRow>(
+      `SELECT * FROM ce_skill_audit_events WHERE owner_user_id = ? ORDER BY gmt_create DESC, id DESC`,
+      [ownerUserId],
+    );
+  }
 
   async findAsset(assetId: string): Promise<SkillAssetRow | null> {
     return (await this.db.query<SkillAssetRow>(
@@ -57,9 +66,11 @@ export class SkillAssetRepository {
     assetId: string;
     versionId: string;
     ownerUserId: string;
+    actorId?: string;
     botId: string;
     ocbSkillId: string;
     displayName: string;
+    description?: string | null;
     packageRef: string;
     packageSha256: string;
   }): Promise<SkillAssetRow> {
@@ -67,10 +78,10 @@ export class SkillAssetRepository {
       const now = tx.dialect.now();
       await tx.exec(
         `INSERT INTO ce_skill_assets
-         (asset_id, owner_user_id, bot_id, ocb_skill_id, display_name, current_version_no,
+         (asset_id, owner_user_id, bot_id, ocb_skill_id, display_name, description, current_version_no,
           current_package_ref, current_package_sha256, gmt_create, gmt_modified)
-         VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
-        [input.assetId, input.ownerUserId, input.botId, input.ocbSkillId, input.displayName,
+         VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+        [input.assetId, input.ownerUserId, input.botId, input.ocbSkillId, input.displayName, input.description ?? null,
           input.packageRef, input.packageSha256, now, now],
       );
       await tx.exec(
@@ -79,6 +90,9 @@ export class SkillAssetRepository {
          VALUES (?, ?, 1, ?, ?, 'baseline', ?)`,
         [input.versionId, input.assetId, input.packageRef, input.packageSha256, now],
       );
+      await appendSkillAudit(tx, { key: `register:${input.assetId}`, assetId: input.assetId,
+        versionId: input.versionId, versionNo: 1, type: 'registered', actorType: 'user',
+        actorId: input.actorId ?? input.ownerUserId, result: 'succeeded' });
     });
     const created = await this.findAsset(input.assetId);
     if (!created) throw new Error("Skill 登记失败");
@@ -93,13 +107,17 @@ export class SkillAssetRepository {
     sourceTaskId: string;
     baselinePackageRef: string;
     baselinePackageSha256: string;
+    appliedBy?: string;
   }): Promise<SkillVersionRow> {
-    const existing = await this.findVersionBySourceTask(input.assetId, input.sourceTaskId);
-    if (existing) return existing;
-    const asset = await this.findAsset(input.assetId);
-    if (!asset) throw new Error("Skill 不存在");
-    const versionNo = Number(asset.current_version_no) + 1;
-    await this.db.transaction(async (tx) => {
+    return skillAuditTransaction(this.db, async (tx) => {
+      // Serialize version allocation and idempotency checks across workers.
+      await tx.exec('UPDATE ce_skill_assets SET asset_id = asset_id WHERE asset_id = ?', [input.assetId]);
+      const asset = (await tx.query<SkillAssetRow>('SELECT * FROM ce_skill_assets WHERE asset_id = ?', [input.assetId]))[0];
+      if (!asset) throw new Error("Skill 不存在");
+      const existing = (await tx.query<SkillVersionRow>('SELECT * FROM ce_skill_versions WHERE asset_id = ? AND source_task_id = ?',
+        [input.assetId, input.sourceTaskId]))[0];
+      if (existing) return existing;
+      const versionNo = Number(asset.current_version_no) + 1;
       const now = tx.dialect.now();
       await tx.exec(
         `INSERT INTO ce_skill_versions
@@ -114,11 +132,20 @@ export class SkillAssetRepository {
          current_package_sha256 = ?, gmt_modified = ? WHERE asset_id = ?`,
         [versionNo, input.packageRef, input.packageSha256, now, input.assetId],
       );
+      // Carry the accepted operation's immutable association, not a live/latest round.
+      const accepted = (await tx.query<{ detail_json: string | null }>(
+        `SELECT detail_json FROM ce_skill_audit_events WHERE asset_id = ? AND task_id = ?
+         AND owner_user_id = ? AND bot_id = ? AND event_type = 'candidate_accepted'`,
+        [input.assetId, input.sourceTaskId, asset.owner_user_id, asset.bot_id]))[0];
+      const testBench = skillEventTestBench(accepted?.detail_json ?? null, input.sourceTaskId);
+      if (input.appliedBy) await appendSkillAudit(tx, {
+        key: `${input.sourceTaskId}:version-applied`, assetId: input.assetId, taskId: input.sourceTaskId,
+        versionId: input.versionId, versionNo, type: 'version_applied', actorId: input.appliedBy,
+        actorType: 'user', result: 'succeeded',
+        ...(testBench ? { detail: { testBench } } : {}),
+      });
+      return (await tx.query<SkillVersionRow>('SELECT * FROM ce_skill_versions WHERE version_id = ?', [input.versionId]))[0];
     });
-    return (await this.db.query<SkillVersionRow>(
-      "SELECT * FROM ce_skill_versions WHERE version_id = ?",
-      [input.versionId],
-    ))[0];
   }
 
   async listVersions(assetId: string): Promise<SkillVersionRow[]> {
