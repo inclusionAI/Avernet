@@ -47,6 +47,7 @@ from engine.community.openclaw.client.gateway_client import (
 )
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 from engine.community.plugins.openclaw.token_pool import TokenClientPool
+from engine.community.plugins.openclaw.active_run_registry import ActiveRunRegistry
 
 if TYPE_CHECKING:
     from engine.community.core.cron.services.systemevent_monitor import (
@@ -158,6 +159,7 @@ class OpenClawEngine(BaseEngine):
         *,
         client: OpenClawGatewayClient | None = None,
         pool: TokenClientPool | None = None,
+        active_run_registry: ActiveRunRegistry | None = None,
     ) -> None:
         """Assemble the engine from the ACL over one `OpenClawPluginImpl`.
 
@@ -174,6 +176,7 @@ class OpenClawEngine(BaseEngine):
             client=client,
             pool=pool,
             center_content_adapter=build_center_content_adapter(),
+            active_run_registry=active_run_registry,
         )
 
         # ACL adapters implementing the core *Service protocols.
@@ -206,6 +209,113 @@ class OpenClawEngine(BaseEngine):
         """Expose the pool so the (still-OpenClaw-specific) WS server can call
         `register` / `release` on handshake / disconnect."""
         return self._port.pool
+
+    async def query_active_sessions(
+        self,
+        *,
+        timeout_ms: int | None = None,
+    ) -> dict[str, Any]:
+        """Read-only Active Session query.
+
+        Returns a dual-axis response derived from OpenClaw's own
+        ``chat_stream`` run lifecycle (populated by ``ActiveRunRegistry``
+        through ``_ChatPortMixin.chat_stream``):
+
+        ``{query_status, verdict, engine, checked_at,
+        active_session_count, sessions[...]}``
+
+        Behavior matrix (summarized in the active-sessions design):
+          * ok + empty        => verdict=clear
+          * ok + ≥1 session   => verdict=active, sessions[] populated
+          * stale/incomplete  => query_status=error, verdict=unknown
+          * timeout           => query_status=timeout, verdict=unknown
+          * exception         => query_status=error, verdict=unknown
+
+        Never raises — failures are encoded into the response shape so the HTTP
+        route can pass the envelope straight through. This method is the engine
+        surface for the read-only ``GET /api/engine/active-sessions`` route;
+        non-OpenClaw engines (or this engine never having been activated via
+        ``EngineManager.initialize()``) are not reached here — the route itself
+        returns ``query_status=unsupported, verdict=unknown`` for them.
+        """
+        import asyncio
+
+        from datetime import UTC, datetime
+
+        default_timeout_ms = 2000
+        timeout_value = default_timeout_ms if timeout_ms is None else timeout_ms
+        try:
+            timeout_value_int = int(timeout_value)
+        except (TypeError, ValueError):
+            timeout_value_int = default_timeout_ms
+        if timeout_value_int < 0:
+            timeout_value_int = default_timeout_ms
+
+        def _result(
+            query_status: str,
+            verdict: str,
+            *,
+            sessions: list[dict[str, Any]] | None = None,
+            count: int | None = None,
+            incomplete: bool = False,
+            error_message: str | None = None,
+        ) -> dict[str, Any]:
+            data: dict[str, Any] = {
+                "query_status": query_status,
+                "verdict": verdict,
+                "engine": self.name,
+                "checked_at": datetime.now(tz=UTC).isoformat(),
+                "active_session_count": count if count is not None else 0,
+                "sessions": sessions or [],
+            }
+            if incomplete:
+                data["incomplete"] = True
+            if error_message:
+                data["error_message"] = error_message
+            return data
+
+        registry = self._port.active_run_registry
+
+        try:
+            if timeout_value_int > 0:
+                sessions, stale = await asyncio.wait_for(
+                    registry.list_active_sessions_async(),
+                    timeout=timeout_value_int / 1000.0,
+                )
+            else:
+                sessions, stale = await registry.list_active_sessions_async()
+        except asyncio.TimeoutError:
+            return _result(
+                "timeout",
+                "unknown",
+                error_message="active-sessions query exceeded timeout",
+            )
+        except Exception as exc:
+            log.exception("OpenClawEngine.query_active_sessions failed: %s", exc)
+            return _result(
+                "error",
+                "unknown",
+                error_message=str(exc) or "active-sessions query failed",
+            )
+
+        if stale:
+            # Data incomplete — registry couldn't observe a terminal transition
+            # for at least one stale entry. The data is not query=ok;
+            # the verdict must be unknown.
+            return _result(
+                "error",
+                "unknown",
+                sessions=sessions,
+                count=len(sessions),
+                incomplete=True,
+                error_message="active-session data is incomplete (stale entries)",
+            )
+        return _result(
+            "ok",
+            "active" if sessions else "clear",
+            sessions=sessions,
+            count=len(sessions),
+        )
 
     async def initialize(self) -> None:
         """Best-effort eager connect of the shared gateway client + start the

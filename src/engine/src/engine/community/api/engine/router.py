@@ -18,7 +18,12 @@ import logging
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from engine.community.api.engine.schemas import EngineRestartRequest, EngineSwitchRequest
+from engine.community.api.engine.schemas import (
+    ActiveSessionEntry,
+    ActiveSessionsResponseData,
+    EngineRestartRequest,
+    EngineSwitchRequest,
+)
 from engine.community.manager import EngineManager
 
 log = logging.getLogger("engine-web")
@@ -98,6 +103,77 @@ async def engine_restart(request: EngineRestartRequest):
     except Exception as e:
         log.exception(f"Engine restart failed: {e}")
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@router.get("/active-sessions")
+async def engine_active_sessions(timeout_ms: int = 2000) -> dict:
+    """Read-only Active Session query.
+
+    Returns a dual-axis response envelope:
+      ``{success, data: {query_status, verdict, engine, checked_at,
+      active_session_count, sessions[]}}``
+
+    Routing logic:
+      * the active engine is OpenClaw and has been initialized via
+        ``EngineManager.initialize()`` → delegate to
+        ``OpenClawEngine.query_active_sessions``;
+      * any other active engine or an uninitialized manager →
+        ``query_status=unsupported, verdict=unknown``;
+      * timeouts / exceptions from the OpenClaw engine are encoded into the
+        response shape (the engine's query_active_sessions never raises).
+    """
+    manager = EngineManager.get_instance()
+    active_engine = manager.active_engine_instance()
+    # OpenClawEngine (and only it today) exposes query_active_sessions().
+    supports_active_sessions = (
+        active_engine is not None
+        and hasattr(active_engine, "query_active_sessions")
+    )
+    if not supports_active_sessions:
+        data = ActiveSessionsResponseData(
+            query_status="unsupported",
+            verdict="unknown",
+            engine=manager.engine,
+            checked_at=_iso_now(),
+            active_session_count=0,
+            sessions=[],
+            incomplete=True,
+            error_message="active engine does not support active-session queries",
+        )
+        return {"success": True, "data": data.model_dump()}
+
+    try:
+        raw = await active_engine.query_active_sessions(timeout_ms=timeout_ms)
+    except Exception as exc:  # pragma: no cover — defensive; engines contract to never raise
+        log.exception("active_engine.query_active_sessions raised: %s", exc)
+        raw = {
+            "query_status": "error",
+            "verdict": "unknown",
+            "engine": manager.engine,
+            "checked_at": _iso_now(),
+            "active_session_count": 0,
+            "sessions": [],
+            "incomplete": True,
+            "error_message": str(exc) or "active-sessions query raised an exception",
+        }
+    sessions = [ActiveSessionEntry(**s) for s in raw.get("sessions", [])]
+    data = ActiveSessionsResponseData(
+        query_status=raw.get("query_status", "error"),
+        verdict=raw.get("verdict", "unknown"),
+        engine=raw.get("engine", manager.engine),
+        checked_at=raw.get("checked_at", _iso_now()),
+        active_session_count=int(raw.get("active_session_count", len(sessions))),
+        sessions=sessions,
+        incomplete=raw.get("incomplete"),
+        error_message=raw.get("error_message"),
+    )
+    return {"success": True, "data": data.model_dump()}
+
+
+def _iso_now() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(tz=UTC).isoformat()
 
 
 __all__ = ["router"]

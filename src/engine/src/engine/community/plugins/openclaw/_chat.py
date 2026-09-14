@@ -111,25 +111,61 @@ class _ChatPortMixin:
             )
 
         client = await self._pooled_client(token)
-        async for event_data in client.chat_stream(
-            session_key=session_key,
-            message=message,
-            timeout_ms=timeout_ms,
-            idempotency_key=idempotency_key,
-            attachments=attachments,
-        ):
-            event_data.setdefault("sessionKey", session_key)
-            state = event_data.get("state", "")
-            event_name = _derive_event_name(event_data)
-            frame = EventFrame(event=event_name, payload=event_data)
-            yield frame
+        # ── OpenClaw's own active-run registry ──────────────────────────────
+        # Register this foreground chat_stream turn so the read-only
+        # GET /api/engine/active-sessions endpoint can authoritatively answer
+        # whether a session has a run in flight. call_id is registry-internal
+        # (uuid4); the gateway's runId is best-effort and surfaced through
+        # per-event payloads. Released via finally on any terminal path
+        # (final/error/aborted/abnormal/exception/consumer-aclose) so the
+        # registry never leaks a discontinued stream.
+        registry = self._active_run_registry
+        call_id = registry.new_call_id()
+        registry.register(
+            call_id,
+            session_key,
+            run_id=idempotency_key,
+        )
+        terminal_state = "abnormal"
+        try:
+            async for event_data in client.chat_stream(
+                session_key=session_key,
+                message=message,
+                timeout_ms=timeout_ms,
+                idempotency_key=idempotency_key,
+                attachments=attachments,
+            ):
+                event_data.setdefault("sessionKey", session_key)
+                state = event_data.get("state", "")
+                payload_run_id = event_data.get("runId")
+                # OpenClaw inject-* broadcasts are state="final" but are
+                # out-of-band injected assistant messages — the parent run is
+                # NOT terminal. Do NOT mark the registry entry terminal on
+                # those; continue streaming and let touch reflect "running".
+                is_inject = (
+                    isinstance(payload_run_id, str)
+                    and payload_run_id.startswith("inject-")
+                )
+                registry.touch(
+                    call_id,
+                    run_id=payload_run_id if isinstance(payload_run_id, str) and payload_run_id else None,
+                    last_state="running" if is_inject else (state or "running"),
+                )
+                event_name = _derive_event_name(event_data)
+                frame = EventFrame(event=event_name, payload=event_data)
+                yield frame
 
-            if state in ("final", "error", "aborted"):
-                run_id = event_data.get("runId", "")
-                if isinstance(run_id, str) and run_id.startswith("inject-"):
-                    continue
-                log.info("[chat_stream] stream ended: state=%s", state)
-                break
+                if state in ("final", "error", "aborted"):
+                    if is_inject:
+                        continue
+                    terminal_state = {"final": "final", "error": "error", "aborted": "aborted"}[state]
+                    log.info("[chat_stream] stream ended: state=%s", state)
+                    break
+        except Exception:
+            terminal_state = "error"
+            raise
+        finally:
+            registry.release(call_id, last_state=terminal_state)
 
     async def chat_abort(
         self,

@@ -192,6 +192,17 @@ class EngineManager:
         """当前活跃引擎名称"""
         return self._engine
 
+    def active_engine_instance(self) -> "Engine | None":
+        """Return the currently active engine instance (None until initialized).
+
+        Used by the read-only GET /api/engine/active-sessions route to
+        decide whether to delegate to the engine's active-session query
+        (the OpenClawEngine exposes ``query_active_sessions``) or return
+        ``unsupported``. This does not construct or initialize an engine
+        — it merely reports the slot state.
+        """
+        return self._active_engine
+
     # ── Introspection (§18.2) ──────────────────────────────────────────────
 
     def get_capabilities(self, engine: str | None = None) -> "EngineCapabilities":
