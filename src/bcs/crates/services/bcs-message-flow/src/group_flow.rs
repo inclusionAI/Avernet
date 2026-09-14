@@ -83,6 +83,7 @@ pub struct BcsMessageFlow {
     pub(crate) delivery_event_locks: tokio::sync::Mutex<BTreeMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>,
     terminal_owner: OnceLock<std::sync::Weak<BcsMessageFlow>>,
     terminal_slots: Arc<tokio::sync::Semaphore>,
+    system_queue: Arc<crate::queued_system::QueuedSystemAdmission>,
 }
 
 impl BcsMessageFlow {
@@ -125,6 +126,7 @@ impl BcsMessageFlow {
             delivery_event_locks: Default::default(),
             terminal_owner: OnceLock::new(),
             terminal_slots: Arc::new(tokio::sync::Semaphore::new(64)),
+            system_queue: Arc::new(crate::queued_system::QueuedSystemAdmission::default()),
         }
     }
 
@@ -141,6 +143,11 @@ impl BcsMessageFlow {
     /// can survive a disconnected caller without retaining the service forever.
     pub fn retain_terminal_events(self: &Arc<Self>) {
         let _ = self.terminal_owner.set(Arc::downgrade(self));
+        self.system_queue.bind(self);
+    }
+
+    pub fn system_queue_port(&self) -> Arc<dyn bcs_service_api::application::system_message::SystemMessageQueueService> {
+        self.system_queue.clone()
     }
 
     pub fn with_managed_deliveries(mut self, service: Arc<dyn bcs_service_api::application::message_delivery::ManagedMessageDeliveryService>) -> Self {

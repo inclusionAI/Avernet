@@ -8,6 +8,7 @@ pub mod managed_delivery;
 pub mod queued_payload;
 pub mod queued_group;
 pub mod queued_admission;
+pub mod queued_system;
 mod run_reply;
 mod reply_timing;
 mod storage_retry;

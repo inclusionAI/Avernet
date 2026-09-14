@@ -311,7 +311,7 @@ pub(crate) fn plan_admission(
             },
             wait_reason: None,
             available_at_ms: command.now_ms,
-            expire_at_ms: command.expire_at_ms,
+            expire_at_ms: if target.kind == DeliveryType::Inject && target.semantic_projection_json.get("required_context").and_then(|v| v.as_bool()) == Some(true) { None } else { command.expire_at_ms },
             created_at_ms: command.now_ms,
             updated_at_ms: command.now_ms,
             idempotency_key: run_id.clone(),
@@ -558,8 +558,9 @@ impl MySqlMessageStore {
     async fn delivery_transaction(
         &self,
         mut changes: Vec<DeliveryCompareAndSet>,
-        admission: Option<AdmitMessageDeliveries>,
-    ) -> Result<Option<DeliveryAdmissionResult>, MessageDeliveryRepoError> {
+        admission: Vec<AdmitMessageDeliveries>,
+    ) -> Result<Vec<DeliveryAdmissionResult>, MessageDeliveryRepoError> {
+        if admission.windows(2).any(|w| w[0].message.session_id != w[1].message.session_id) { return Err(MessageDeliveryRepoError::Invalid("batch must share a session".into())); }
         let waiting = WriterTimer::new("repository.writer_wait");
         let mut keys = BTreeSet::new();
         for change in &changes {
@@ -570,7 +571,7 @@ impl MySqlMessageStore {
                 keys.insert((0, change.delivery.target_bot_id.clone()));
             }
         }
-        if let Some(command) = &admission {
+        for command in &admission {
             keys.insert((1, command.message.session_id.clone()));
             for target in &command.targets {
                 if target.kind == DeliveryType::Send {
@@ -582,7 +583,7 @@ impl MySqlMessageStore {
         drop(waiting);
         let _held = WriterTimer::new("repository.writer_held");
         async {
-        if let Some(ref command) = admission {
+        for command in &admission {
             validate_admission(command)?;
         }
         let mut rows: Vec<PersistedMessageDelivery> = Vec::new();
@@ -603,7 +604,7 @@ impl MySqlMessageStore {
         }
         apply_changes(&mut rows, &changes)?;
         let mut queued_counts = std::collections::BTreeMap::new();
-        if let Some(command) = &admission {
+        for command in &admission {
             for target in &command.targets {
                 if target.kind != DeliveryType::Send { continue; }
                 let counts = self.db.query(DbStatement::with_params("SELECT COUNT(*) AS n FROM bcs_message_deliveries WHERE env = ? AND target_bot_id = ? AND kind = 'send' AND status = 'queued'", vec![self.env.as_str().into(), target.target_bot_id.as_str().into()])).await.map_err(storage)?;
@@ -620,19 +621,26 @@ impl MySqlMessageStore {
             }
         }
         let mut steps = Vec::new();
-        let mut admitted = None;
-        let event = admission.as_ref().and_then(|c| c.event.clone().or_else(|| c.display_message.as_ref().and_then(|d| d.event.clone())));
-        if let Some(command) = admission {
+        let mut admitted = Vec::new();
+        let mut events = Vec::new();
+        let mut staged_seq = None;
+        let mut staged_messages: Vec<PersistedMessage> = Vec::new();
+        let has_transition = !changes.is_empty();
+        for command in admission {
             // Sender-scoped idempotency lookup, including env. Re-entry returns
             // the old target outcomes, never inserts a fresh set of deliveries.
             if let Some(client_id) = command.message.client_msg_id.as_deref() {
+                if let Some(message) = staged_messages.iter().find(|m| m.sender_id == command.message.sender_id && m.client_msg_id.as_deref() == Some(client_id)) {
+                    admitted.push(DeliveryAdmissionResult { message: message.clone(), deliveries: rows.iter().filter(|d| d.source_message_id == message.message_id).cloned().collect(), duplicate: true });
+                    continue;
+                }
                 let duplicates = self.db.query(DbStatement::with_params(
                     "SELECT message_id FROM bcs_messages WHERE env = ? AND session_id = ? AND sender_id = ? AND client_msg_id = ?",
                     vec![self.env.as_str().into(), command.message.session_id.as_str().into(),
                         command.message.sender_id.as_str().into(), client_id.into()],
                 )).await.map_err(storage)?;
                 if let Some(duplicate) = duplicates.first() {
-                    if !changes.is_empty() {
+                    if has_transition {
                         return Err(MessageDeliveryRepoError::Conflict);
                     }
                     let id: String = db_get_column(duplicate, "message_id").map_err(storage)?;
@@ -641,27 +649,30 @@ impl MySqlMessageStore {
                         .await
                         .map_err(storage)?
                         .ok_or_else(|| storage("idempotent message is missing"))?;
-                    return Ok(Some(DeliveryAdmissionResult {
+                    admitted.push(DeliveryAdmissionResult {
                         deliveries: self.lookup(DeliveryLookup::Message(id)).await?,
                         message,
                         duplicate: true,
-                    }));
+                    });
+                    continue;
                 }
             }
+            let old_seq: i64 = if let Some(seq) = staged_seq { seq } else {
             let sequence = self.db.query(DbStatement::with_params(
                 "SELECT current_msg_seq FROM bcs_group_sessions WHERE env = ? AND session_id = ?",
                 vec![self.env.as_str().into(), command.message.session_id.as_str().into()],
             )).await.map_err(storage)?;
-            let old_seq: i64 = db_get_column(
+            db_get_column(
                 sequence
                     .first()
                     .ok_or_else(|| storage("canonical session is missing"))?,
                 "current_msg_seq",
             )
-            .map_err(storage)?;
+            .map_err(storage)? };
             let seq = old_seq
                 .checked_add(1 + i64::from(command.display_message.is_some()))
                 .ok_or_else(|| storage("session sequence exhausted"))?;
+            staged_seq = Some(seq);
             steps.push(DbTransactionStep::ExecuteChecked {
                 statement: DbStatement::with_params("UPDATE bcs_group_sessions SET current_msg_seq = ? WHERE env = ? AND session_id = ? AND current_msg_seq = ?",
                     vec![seq.into(), self.env.as_str().into(), command.message.session_id.as_str().into(), old_seq.into()]),
@@ -675,20 +686,30 @@ impl MySqlMessageStore {
             steps.push(insert_message(&message, &self.env, &command.message)?);
             // Changes may release context that this reply rebinds. Preserve
             // ordered CAS steps rather than collapsing versions.
+            apply_changes(&mut rows, &bound)?;
             changes.extend(bound);
             for delivery in &deliveries {
                 steps.push(insert_delivery(delivery)?);
+                if delivery.state.kind == DeliveryType::Send && delivery.state.status == Status::Queued { *queued_counts.entry(delivery.target_bot_id.clone()).or_default() += 1; }
             }
-            admitted = Some(DeliveryAdmissionResult {
+            rows.extend(deliveries.clone());
+            staged_messages.push(message.clone());
+            if let Some(event) = command.event.clone().or_else(|| command.display_message.as_ref().and_then(|d| d.event.clone())) { events.push(event); }
+            admitted.push(DeliveryAdmissionResult {
                 message,
                 deliveries,
                 duplicate: false,
             });
         }
+        for result in &mut admitted {
+            for delivery in &mut result.deliveries {
+                if let Some(current) = rows.iter().find(|d| d.delivery_id == delivery.delivery_id) { *delivery = current.clone(); }
+            }
+        }
         for change in &changes {
             steps.push(update_delivery(change)?);
         }
-        if let Some(event) = event {
+        for event in events {
             let plan = bcs_event_store::EventAppendTransactionPlan::build(
                 &event,
                 self.flavor,
@@ -720,7 +741,9 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
     async fn bounded_contexts(&self, carrier: &str, limit: usize) -> Result<BoundDeliveryContexts, MessageDeliveryRepoError> {
         let count = self.db.query(DbStatement::with_params("SELECT COUNT(*) AS total FROM bcs_message_deliveries WHERE env = ? AND bound_to_delivery_id = ? AND status = 'bound'", vec![self.env.as_str().into(), carrier.into()])).await.map_err(storage)?;
         let total: i64 = db_get_column(count.first().ok_or_else(|| storage("missing bound count"))?, "total").map_err(storage)?;
-        let rows = self.db.query(DbStatement::with_params("SELECT * FROM bcs_message_deliveries WHERE env = ? AND bound_to_delivery_id = ? AND status = 'bound' ORDER BY source_session_seq DESC, delivery_id DESC LIMIT ?", vec![self.env.as_str().into(), carrier.into(), (limit.min(1025) as i64).into()])).await.map_err(storage)?.into_iter().map(row_to_delivery).collect::<Result<_, _>>()?;
+        let mut rows = self.db.query(DbStatement::with_params("SELECT * FROM bcs_message_deliveries WHERE env = ? AND bound_to_delivery_id = ? AND status = 'bound' AND COALESCE(JSON_EXTRACT(semantic_projection_json, '$.required_context'), false) != true ORDER BY source_session_seq DESC, delivery_id DESC LIMIT ?", vec![self.env.as_str().into(), carrier.into(), (limit.min(1025) as i64).into()])).await.map_err(storage)?.into_iter().map(row_to_delivery).collect::<Result<Vec<_>, _>>()?;
+        rows.extend(self.db.query(DbStatement::with_params("SELECT * FROM bcs_message_deliveries WHERE env = ? AND bound_to_delivery_id = ? AND status = 'bound' AND JSON_EXTRACT(semantic_projection_json, '$.required_context') = true", vec![self.env.as_str().into(), carrier.into()])).await.map_err(storage)?.into_iter().map(row_to_delivery).collect::<Result<Vec<_>, _>>()?);
+        rows.sort_by(|a,b| (b.source_session_seq, &b.delivery_id).cmp(&(a.source_session_seq, &a.delivery_id)));
         Ok(BoundDeliveryContexts { rows, total: total as u64 })
     }
     async fn lookup(&self, scope: DeliveryLookup) -> Result<Vec<PersistedMessageDelivery>, MessageDeliveryRepoError> {
@@ -739,6 +762,7 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
             DeliveryLookup::LanePending { bot, session } => { params.extend([bot.into(), session.into()]); "target_bot_id = ? AND session_id = ? AND kind = 'send' AND status IN ('queued','dispatching','running','unknown','cancelling','cancel_unknown') LIMIT 1" }
             DeliveryLookup::BotPendingContexts(bot) => { params.push(bot.into()); "target_bot_id = ? AND kind = 'inject' AND status = 'pending_context' LIMIT 100" }
             DeliveryLookup::LanePendingContexts { bot, session } => { params.extend([bot.into(), session.into()]); "target_bot_id = ? AND session_id = ? AND kind = 'inject' AND status = 'pending_context' LIMIT 100" }
+            DeliveryLookup::LanePendingContextCarrier { bot, session, now_ms } => { params.extend([bot.into(), session.into(), now_ms.into()]); "target_bot_id = ? AND session_id = ? AND kind = 'inject' AND status = 'pending_context' AND (expire_at_ms IS NULL OR expire_at_ms > ?) LIMIT 1" }
             DeliveryLookup::Message(id) => { params.push(id.into()); "source_message_id = ?" }
             DeliveryLookup::Successor { bot, session, after_seq, exclude, now_ms } => {
                 params.extend([bot.into(), session.into(), after_seq.into(), exclude.into(), now_ms.into()]);
@@ -833,7 +857,12 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
             updated_by: db_get_column(row, "updated_by").map_err(storage)?,
             updated_at_ms: db_get_column(row, "updated_at_ms").map_err(storage)?,
         };
-        record.policy.validate().map_err(storage)?;
+        // Older durable policies allowed Group independently of System. Check
+        // the remaining fields without rewriting the returned record: the
+        // application loader must persist migration through versioned CAS.
+        let mut compatible = record.policy.clone();
+        compatible.flow_enabled.system = compatible.flow_enabled.group;
+        compatible.validate().map_err(storage)?;
         Ok(record)
     }
 
@@ -885,9 +914,11 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
         &self,
         command: AdmitMessageDeliveries,
     ) -> Result<DeliveryAdmissionResult, MessageDeliveryRepoError> {
-        self.delivery_transaction(Vec::new(), Some(command))
-            .await?
+        self.admit_batch(vec![command]).await?.pop()
             .ok_or_else(|| storage("missing admission result"))
+    }
+    async fn admit_batch(&self, commands: Vec<AdmitMessageDeliveries>) -> Result<Vec<DeliveryAdmissionResult>, MessageDeliveryRepoError> {
+        self.delivery_transaction(Vec::new(), commands).await
     }
     async fn list_deliveries(
         &self,
@@ -916,6 +947,6 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
         changes: Vec<DeliveryCompareAndSet>,
         reply: Option<AdmitMessageDeliveries>,
     ) -> Result<Option<DeliveryAdmissionResult>, MessageDeliveryRepoError> {
-        self.delivery_transaction(changes, reply).await
+        Ok(self.delivery_transaction(changes, reply.into_iter().collect()).await?.pop())
     }
 }

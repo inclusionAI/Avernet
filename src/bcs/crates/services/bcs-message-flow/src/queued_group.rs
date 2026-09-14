@@ -44,6 +44,11 @@ enum TextProjection {
 #[serde(deny_unknown_fields)]
 pub struct QueuedGroupProjection {
     version: u32,
+    /// Initialization context must survive ordinary history TTL/count limits.
+    #[serde(default)]
+    required_context: bool,
+    #[serde(default)]
+    drain_context: bool,
     #[serde(default)]
     policy_version: Option<u64>,
     driver_bot: String,
@@ -327,6 +332,25 @@ fn invalid(message: &str) -> ServiceError {
 }
 
 impl QueuedGroupProjection {
+    pub(crate) fn system(group: &Group, recipient: &str, required_context: bool) -> ServiceResult<Self> {
+        let participant = group.participants.iter().find(|p| p.bot_uuid == recipient)
+            .ok_or_else(|| invalid("system queue target is not a session participant"))?;
+        let snapshot = crate::protocol_context::group_context_input(group);
+        Ok(Self {
+            version: 1, required_context, drain_context: false, policy_version: None,
+            driver_bot: snapshot.driver_bot, originator: snapshot.originator,
+            participants: snapshot.participants.into_iter().map(|p| ParticipantProjection {
+                id: p.id, name: p.name, role: p.role, is_bot: p.is_bot,
+            }).collect(),
+            direct_bot: false,
+            group_type: crate::protocol_context::group_type_wire(group.group_strategy),
+            mentions: Vec::new(), target_tags: participant.tags.clone(),
+            sender_name: bcs_service_api::core::BCS_SYSTEM_MESSAGE.into(), sender_owner: None,
+            thinking: None, text_projection: TextProjection::Original,
+            reply_context: None, forward_hop: None, provider_route_headers: Vec::new(),
+            admission_rejection: None,
+        })
+    }
     pub fn with_reply_context(
         mut self,
         mut context: bcs_protocol::GroupContext,
@@ -370,6 +394,8 @@ impl QueuedGroupProjection {
             .ok_or_else(|| invalid("queue target is not a session participant"))?;
         let snapshot = crate::protocol_context::group_context_input(group);
         Ok(Self {
+            required_context: false,
+            drain_context: false,
             policy_version: None,
             provider_route_headers,
             admission_rejection,
@@ -410,7 +436,8 @@ impl QueuedGroupProjection {
     fn decode(row: &PersistedMessageDelivery) -> Result<Self, String> {
         let projection: Self = serde_json::from_value(row.semantic_projection_json.clone())
             .map_err(|_| "invalid queued group projection".to_string())?;
-        if projection.version != 1 || row.flow_kind != DeliveryFlowKind::Group {
+        if projection.version != 1 || !matches!(row.flow_kind, DeliveryFlowKind::Group | DeliveryFlowKind::System)
+            || (row.flow_kind == DeliveryFlowKind::Group && projection.required_context) {
             return Err("unsupported queued group projection version or flow".into());
         }
         Ok(projection)
@@ -496,7 +523,13 @@ async fn prepare_queued_group_bounded(
         .await
         .map_err(|_| invalid("canonical queue message read failed"))?
         .ok_or_else(|| invalid("canonical queue message missing"))?;
-    for actor in [&source.sender_id, &row.target_bot_id] {
+    if row.flow_kind == DeliveryFlowKind::System
+        && (source.sender_id != "system" || source.sender_type != bcs_domain::SenderType::System || source.message_type != "system") {
+        return Err(invalid("invalid queued system message identity"));
+    }
+    let actors = if row.flow_kind == DeliveryFlowKind::System { vec![&row.target_bot_id] }
+        else { vec![&source.sender_id, &row.target_bot_id] };
+    for actor in actors {
         if !group.participants.iter().any(|p| &p.bot_uuid == actor) {
             return Err(invalid("queue participant no longer has session access"));
         }
@@ -525,10 +558,13 @@ async fn prepare_queued_group_bounded(
         is_driver: row.target_bot_id == projection.driver_bot,
         delivery_type: DeliveryType::Send,
     };
+    let sender_id = if row.flow_kind == DeliveryFlowKind::System {
+        bcs_service_api::core::BCS_SYSTEM_MESSAGE
+    } else { source.sender_id.as_str() };
     let candidate = GroupMessage {
         id: run_id.clone(),
         timestamp: bcs_protocol::now_ms(),
-        sender: source.sender_id.clone(),
+        sender: sender_id.to_string(),
         content: payload.text,
         message_type: GroupMessageType::Bot,
         bot_name: Some(projection.sender_name.clone()),
@@ -578,7 +614,7 @@ async fn prepare_queued_group_bounded(
         let mut frame = crate::bot_event::build_send_frame(
             &row.group_id,
             Some(&row.session_id),
-            &source.sender_id,
+            sender_id,
             &projection.sender_name,
             &authorized.content,
             &context,
@@ -603,7 +639,7 @@ async fn prepare_queued_group_bounded(
             run_id,
             &row.group_id,
             &authorized.content,
-            &source.sender_id,
+            sender_id,
             &projection.sender_name,
             &row.target_bot_id,
             tags,
@@ -634,7 +670,7 @@ async fn prepare_queued_group_bounded(
             &row.group_id,
             &group_context,
             &authorized.content,
-            &source.sender_id,
+            sender_id,
             &projection.sender_name,
             &projection.mentions,
             &row.target_bot_id,

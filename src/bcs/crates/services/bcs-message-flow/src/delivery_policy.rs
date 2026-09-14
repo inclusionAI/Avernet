@@ -15,12 +15,40 @@ pub struct LiveDeliveryPolicy {
 }
 
 impl LiveDeliveryPolicy {
+    /// Upgrade pre-System durable policies using the former Group switch as
+    /// authority. CAS and reload prevent overwriting a concurrent operator edit.
+    /// Only durable loading normalizes legacy input; management PUT is strict.
+    pub async fn load_compatible(repository: &dyn MessageDeliveryRepoPort) -> ServiceResult<DeliveryPolicyRecord> {
+        loop {
+            let mut stored = repository.load_policy().await
+                .map_err(|_| ServiceError::InternalError("delivery policy read failed".into()))?;
+            if stored.policy.flow_enabled.group == stored.policy.flow_enabled.system {
+                stored.policy.validate().map_err(|_| ServiceError::InternalError("invalid durable delivery policy".into()))?;
+                return Ok(stored);
+            }
+            let expected = stored.version;
+            stored.policy.flow_enabled.system = stored.policy.flow_enabled.group;
+            stored.policy.validate().map_err(|_| ServiceError::InternalError("invalid durable delivery policy".into()))?;
+            stored.version = expected.checked_add(1).filter(|v| *v <= i64::MAX as u64)
+                .ok_or_else(|| ServiceError::InternalError("delivery policy version exhausted".into()))?;
+            stored.updated_by = "system:group-system-policy-migration".into();
+            stored.updated_at_ms = chrono::Utc::now().timestamp_millis();
+            match repository.replace_policy(expected, stored.clone()).await {
+                Ok(()) => {
+                    tracing::info!(before_version = expected, after_version = stored.version,
+                        "delivery policy Group/System switches migrated");
+                    return Ok(stored);
+                }
+                Err(MessageDeliveryRepoError::Conflict) => tokio::task::yield_now().await,
+                Err(_) => return Err(ServiceError::InternalError("delivery policy migration persistence failed".into())),
+            }
+        }
+    }
+
     /// Refresh on master acquisition, serialized with management API writes.
     pub async fn refresh_for_takeover(&self) -> ServiceResult<()> {
         let mut current = self.snapshot.write().await;
-        let stored = self.repository.load_policy().await
-            .map_err(|_| ServiceError::InternalError("delivery policy takeover read failed".into()))?;
-        stored.policy.validate().map_err(|_| ServiceError::InternalError("invalid durable delivery policy".into()))?;
+        let stored = Self::load_compatible(self.repository.as_ref()).await?;
         *current = stored;
         Ok(())
     }
@@ -29,8 +57,7 @@ impl LiveDeliveryPolicy {
     /// versions or racing this process's management commit/publication lock.
     pub async fn reconcile_durable_version(&self) -> ServiceResult<()> {
         let mut current = self.snapshot.write().await;
-        let stored = self.repository.load_policy().await
-            .map_err(|_| ServiceError::InternalError("delivery policy reconciliation read failed".into()))?;
+        let stored = Self::load_compatible(self.repository.as_ref()).await?;
         if stored.version > current.version {
             stored.policy.validate().map_err(|_| ServiceError::InternalError("invalid durable delivery policy".into()))?;
             *current = stored;

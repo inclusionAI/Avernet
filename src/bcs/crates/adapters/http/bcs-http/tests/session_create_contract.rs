@@ -617,6 +617,7 @@ impl SystemMessageService for InitialRunSystemMessage {
                 recipient_id: "driver-bot".to_string(),
                 run_id: "session-context-run".to_string(),
                 delivery_type: DeliveryType::Send,
+                delivery_id: None,
                 delivered: true,
                 error: None,
             }],

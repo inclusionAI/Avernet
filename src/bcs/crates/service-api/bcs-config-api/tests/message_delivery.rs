@@ -9,16 +9,31 @@ fn durable_defaults_cover_future_bots_and_partial_overrides_inherit() {
     let mut policy = DeliveryPolicy::default();
     assert!(!policy.manages_group("new-bot"));
     policy.flow_enabled.group = true;
+    policy.flow_enabled.system = true;
     policy.defaults.mode = BotDeliveryMode::Enforce;
     policy.bots.insert("special".into(), BotDeliveryOverride { max_running: Some(3), ..Default::default() });
     policy.bots.insert("excluded".into(), BotDeliveryOverride { mode: Some(BotDeliveryMode::Off), ..Default::default() });
     policy.validate().unwrap();
     assert!(policy.manages_group("new-bot"));
+    assert!(policy.manages_system("new-bot"));
     assert!(!policy.manages_group("excluded"));
     assert_eq!(policy.bot("special").max_running, 3);
     assert_eq!(policy.bot("special").max_queued, policy.defaults.max_queued);
     policy.flow_enabled.direct_a2a = true;
     assert!(policy.validate().is_err());
+}
+
+#[test]
+fn group_and_system_must_be_enabled_or_disabled_together() {
+    use bcs_config_api::message_delivery::DeliveryPolicy;
+    for enabled in [false, true] {
+        let mut policy = DeliveryPolicy::default();
+        policy.flow_enabled.group = enabled;
+        policy.flow_enabled.system = enabled;
+        policy.validate().unwrap();
+        policy.flow_enabled.system = !enabled;
+        assert_eq!(policy.validate(), Err(MessageDeliveryConfigError::GroupSystemSwitchMismatch));
+    }
 }
 
 #[test]

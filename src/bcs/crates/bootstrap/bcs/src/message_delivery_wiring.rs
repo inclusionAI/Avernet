@@ -64,8 +64,8 @@ pub async fn wire_with_leader(
     }
     let repository = flow.message_repo.clone().and_then(|repo| repo.delivery_repository())
         .ok_or_else(|| invalid("message store does not support delivery transactions"))?;
-    let initial = repository.load_policy().await.map_err(|_| invalid("cannot load durable delivery policy"))?;
-    initial.policy.validate().map_err(|e| invalid(&e.to_string()))?;
+    let initial = LiveDeliveryPolicy::load_compatible(repository.as_ref()).await
+        .map_err(|_| invalid("cannot load or migrate durable delivery policy"))?;
     let durable = repository.is_durable();
     config.provider_http.validate().map_err(|e| invalid(&e))?;
     flow.queue_persistable_headers = config.provider_http.queue_persistable_headers.clone();
@@ -278,6 +278,7 @@ mod tests {
         config.provider_http.queue_persistable_headers = vec!["x-routing-zone".into()];
         let mut policy = DeliveryPolicy::default();
         policy.flow_enabled.group = true;
+        policy.flow_enabled.system = true;
         policy.defaults.mode = BotDeliveryMode::Enforce;
         let election = Arc::new(TestLeader(std::sync::atomic::AtomicU8::new(0)));
         let flow = wire_with_leader(make_flow(), &config, election.clone()).await.unwrap();
@@ -343,6 +344,7 @@ mod tests {
         assert!(flow.delivery_shutdown.get().is_none());
         let mut policy = DeliveryPolicy::default();
         policy.flow_enabled.group = true;
+        policy.flow_enabled.system = true;
         policy.defaults.mode = BotDeliveryMode::Enforce;
         let caller = CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "1".into() });
         assert!(flow.replace_delivery_policy(caller, 0, policy).await.is_err());

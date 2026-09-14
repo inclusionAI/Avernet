@@ -66,12 +66,19 @@ impl DeliveryPolicy {
         self.flow_enabled.group && self.bot(id).mode == BotDeliveryMode::Enforce
     }
 
+    pub fn manages_system(&self, id: &str) -> bool {
+        self.flow_enabled.system && self.bot(id).mode == BotDeliveryMode::Enforce
+    }
+
     pub fn needs_scheduler(&self) -> bool {
-        self.flow_enabled.group && (self.defaults.mode == BotDeliveryMode::Enforce
+        (self.flow_enabled.group || self.flow_enabled.system) && (self.defaults.mode == BotDeliveryMode::Enforce
             || self.bots.keys().any(|id| self.bot(id).mode == BotDeliveryMode::Enforce))
     }
 
     pub fn validate(&self) -> Result<(), MessageDeliveryConfigError> {
+        if self.flow_enabled.group != self.flow_enabled.system {
+            return Err(MessageDeliveryConfigError::GroupSystemSwitchMismatch);
+        }
         if !(1..=1024).contains(&self.max_context_messages) || !(512..=16_777_216).contains(&self.max_context_bytes) {
             return Err(MessageDeliveryConfigError::InvalidContextPolicy);
         }
@@ -83,7 +90,7 @@ impl DeliveryPolicy {
         MessageDeliveryConfig { flow_enabled: self.flow_enabled.clone(), bots,
             queue_ttl_ms: self.queue_ttl_ms, safe_retry: self.safe_retry.clone(),
             pause_dispatch: self.pause_dispatch,
-        }.validate_ready_flows(&[DeliveryFlowKey::Group])
+        }.validate_ready_flows(&[DeliveryFlowKey::Group, DeliveryFlowKey::System])
     }
 }
 
@@ -184,6 +191,7 @@ pub struct BotDeliveryConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageDeliveryConfigError {
+    GroupSystemSwitchMismatch,
     FlowNotReady(DeliveryFlowKey),
     InvalidBotPolicy,
     InvalidContextPolicy,
@@ -192,6 +200,7 @@ pub enum MessageDeliveryConfigError {
 impl std::fmt::Display for MessageDeliveryConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::GroupSystemSwitchMismatch => write!(f, "queue_group_system_switch_mismatch: group and system must be enabled or disabled together"),
             Self::FlowNotReady(flow) => write!(f, "queue_flow_not_ready: {flow:?}"),
             Self::InvalidBotPolicy => write!(f, "invalid message_delivery Bot policy"),
             Self::InvalidContextPolicy => write!(f, "invalid context limits: messages must be 1..=1024 and bytes 512..=16777216"),

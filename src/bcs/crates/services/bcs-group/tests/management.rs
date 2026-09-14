@@ -158,7 +158,8 @@ impl ParticipantViewBindingPort for RecordingParticipantViewBindings {
     }
 }
 
-struct InitialRunSystemMessage;
+#[derive(Default)]
+struct InitialRunSystemMessage { queued: bool }
 
 #[async_trait]
 impl SystemMessageService for InitialRunSystemMessage {
@@ -188,14 +189,16 @@ impl SystemMessageService for InitialRunSystemMessage {
                     recipient_id: "manager".to_string(),
                     run_id: "manager-bootstrap-run".to_string(),
                     delivery_type: bcs_service_api::DeliveryType::Send,
-                    delivered: true,
+                    delivery_id: self.queued.then(|| "manager-delivery".into()),
+                    delivered: !self.queued,
                     error: None,
                 },
                 SystemMessageRecipientResult {
                     recipient_id: "worker".to_string(),
                     run_id: "worker-inject-run".to_string(),
                     delivery_type: bcs_service_api::DeliveryType::Inject,
-                    delivered: true,
+                    delivery_id: self.queued.then(|| "worker-delivery".into()),
+                    delivered: !self.queued,
                     error: None,
                 },
             ],
@@ -632,7 +635,7 @@ async fn create_manager_worker_group_returns_only_manager_send_as_initial_run() 
     let fixture = Fixture::new()
         .with_bot("manager", "Manager", "public", Some("alice"))
         .with_bot("worker", "Worker", "public", None);
-    let service = fixture.service_with_system_message(Arc::new(InitialRunSystemMessage));
+    let service = fixture.service_with_system_message(Arc::new(InitialRunSystemMessage::default()));
     let mut cmd = create_cmd(
         Some("manager"),
         "manager",
@@ -663,7 +666,7 @@ async fn create_chat_group_returns_driver_send_as_initial_run() {
     let fixture = Fixture::new()
         .with_bot("manager", "Driver", "public", Some("alice"))
         .with_bot("worker", "Member", "public", None);
-    let service = fixture.service_with_system_message(Arc::new(InitialRunSystemMessage));
+    let service = fixture.service_with_system_message(Arc::new(InitialRunSystemMessage::default()));
     let cmd = create_cmd(
         Some("manager"),
         "manager",
@@ -686,6 +689,28 @@ async fn create_chat_group_returns_driver_send_as_initial_run() {
         initial_run.state,
         bcs_service_api::InitialGroupRunState::Running
     );
+}
+
+#[tokio::test]
+async fn queued_group_bootstrap_returns_queued_initial_run() {
+    for manager_worker in [false, true] {
+        let fixture = Fixture::new()
+            .with_bot("manager", "Manager", "public", Some("alice"))
+            .with_bot("worker", "Worker", "public", None);
+        let service = fixture.service_with_system_message(Arc::new(InitialRunSystemMessage { queued: true }));
+        let mut cmd = create_cmd(Some("manager"), "manager", vec![
+            participant("manager", Some(if manager_worker { "manager" } else { "driver" })),
+            participant("worker", Some(if manager_worker { "worker" } else { "consultant" })),
+        ]);
+        if manager_worker { cmd.group_strategy = Some(GroupStrategy::ManagerWorker); }
+
+        let created = service.create_group(cmd).await.expect("queued bootstrap allows group creation");
+        let run = created.initial_run.expect("queued Send, not worker Inject, is initial run");
+        assert_eq!(run.run_id, "manager-bootstrap-run");
+        assert_eq!(run.bot_uuid, "manager");
+        assert_eq!(run.state, bcs_service_api::InitialGroupRunState::Queued);
+        assert_eq!(run.activity_kind, bcs_service_api::InitialGroupRunActivityKind::GroupBootstrap);
+    }
 }
 
 #[tokio::test]

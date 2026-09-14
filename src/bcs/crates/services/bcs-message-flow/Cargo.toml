@@ -30,6 +30,7 @@ bcs-protocol = { workspace = true }
 chrono = { workspace = true }
 
 [dev-dependencies]
+bcs-system-message = { workspace = true }
 bcs-bot = { workspace = true }
 bcs-event-store = { workspace = true }
 tracing-subscriber = { workspace = true }

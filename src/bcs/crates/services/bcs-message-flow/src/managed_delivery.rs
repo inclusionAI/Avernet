@@ -158,10 +158,13 @@ impl ManagedMessageDelivery {
             if let Some(value) = command.transport_context_json.as_ref().and_then(|v| v.get("context_selection")) {
                 let selection: bcs_domain::message_delivery::DeliveryContextSelection = serde_json::from_value(value.clone()).map_err(|_| ManagedDeliveryError::Conflict)?;
                 let contexts = self.repo.bounded_contexts(&primary.delivery_id, selection.max_messages as usize + 1).await?;
+                let required = |d: &PersistedMessageDelivery| d.semantic_projection_json.get("required_context").and_then(|v| v.as_bool()) == Some(true);
+                let selected_rows: Vec<_> = contexts.rows.iter().filter(|d| selection.selected.iter().any(|s| s.delivery_id == d.delivery_id)).collect();
                 if selection.version != 1 || !(1..=1024).contains(&selection.max_messages) || !(512..=16_777_216).contains(&selection.max_bytes)
-                    || selection.bound_count != contexts.total || selection.selected.len() > selection.max_messages as usize
-                    || selection.selected.len() > contexts.rows.len() || selection.history_bytes > selection.max_bytes
-                    || selection.selected.iter().zip(&contexts.rows).any(|(s,d)| d.delivery_id != s.delivery_id || d.state.state_version != s.state_version)
+                    || selection.bound_count != contexts.total || selected_rows.iter().filter(|d| !required(d)).count() > selection.max_messages as usize
+                    || selection.selected.len() != selected_rows.len() || selection.history_bytes > selection.max_bytes
+                    || selection.selected.iter().zip(&selected_rows).any(|(s,d)| d.delivery_id != s.delivery_id || d.state.state_version != s.state_version || (required(d) && s.body_start != 0))
+                    || contexts.rows.iter().filter(|d| required(d)).any(|d| !selection.selected.iter().any(|s| s.delivery_id == d.delivery_id))
                     || selection.selected.iter().skip(1).any(|s| s.body_start != 0)
                     || (selection.selected.len() > 1 && selection.selected[0].body_start != 0)
                 { return Err(ManagedDeliveryError::Conflict); }
@@ -336,6 +339,7 @@ impl ManagedMessageDelivery {
                 match outcome.context_action {
                     DeliveryContextAction::Consume => {
                         if consumed_selection.as_ref().is_some_and(|s| !s.selected.iter().any(|s| s.delivery_id == next.delivery_id)) {
+                            if next.semantic_projection_json.get("required_context").and_then(|v| v.as_bool()) == Some(true) { return Err(ManagedDeliveryError::Conflict); }
                             next.state.status = Status::DiscardedContext;
                             next.last_error_code = Some("context_limit".into());
                         } else { next.state.status = Status::Consumed; }
@@ -626,23 +630,37 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
 
     async fn admit(
         &self,
-        mut command: AdmitMessageDeliveries,
+        command: AdmitMessageDeliveries,
     ) -> Result<DeliveryAdmissionResult, ManagedDeliveryError> {
+        self.admit_batch(vec![command]).await?.pop().ok_or(ManagedDeliveryError::Conflict)
+    }
+    async fn admit_batch(&self, mut commands: Vec<AdmitMessageDeliveries>) -> Result<Vec<DeliveryAdmissionResult>, ManagedDeliveryError> {
         let _slot = self
             .admission_slots
             .try_acquire()
             .map_err(|_| ManagedDeliveryError::Conflict)?;
-        let _guards = self.mutations.acquire(command.targets.iter().map(|t| t.target_bot_id.clone())).await;
+        let bots: Vec<String> = commands.iter().flat_map(|c| c.targets.iter().map(|t| t.target_bot_id.clone())).collect();
+        let _guards = self.mutations.acquire(bots).await;
         let policy = match &self.policy { Some(live) => Some(live.snapshot.read().await), None => None };
         if let Some(policy) = &policy {
+          for command in &mut commands {
+            if !matches!(command.flow_kind, bcs_domain::message_delivery::DeliveryFlowKind::Group | bcs_domain::message_delivery::DeliveryFlowKind::System) { return Err(ManagedDeliveryError::Conflict); }
             for target in &mut command.targets {
-                if !policy.policy.manages_group(&target.target_bot_id)
+                let drain = target.kind == DeliveryType::Send && target.semantic_projection_json.get("drain_context").and_then(|v| v.as_bool()) == Some(true)
+                    && !self.repo.lookup(DeliveryLookup::LanePendingContextCarrier { bot: target.target_bot_id.clone(), session: command.message.session_id.clone(), now_ms: command.now_ms }).await?.is_empty();
+                let enabled = match command.flow_kind {
+                    bcs_domain::message_delivery::DeliveryFlowKind::System => policy.policy.manages_system(&target.target_bot_id),
+                    _ => policy.policy.manages_group(&target.target_bot_id),
+                };
+                if (!enabled && !drain)
+                    || (drain && target.semantic_projection_json.get("policy_version").and_then(|v| v.as_u64()) != Some(policy.version))
                     || target.semantic_projection_json.get("policy_version").and_then(|v| v.as_u64()).is_some_and(|version| version != policy.version) {
                     return Err(ManagedDeliveryError::Conflict);
                 }
                 target.max_queued = policy.policy.bot(&target.target_bot_id).max_queued;
             }
             command.expire_at_ms = policy.policy.queue_ttl_ms.map(|ttl| command.now_ms.saturating_add(ttl as i64));
+          }
         }
         if !self
             .admission_available
@@ -651,7 +669,8 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
             return Err(ManagedDeliveryError::Conflict);
         }
         let repo = self.repo.clone();
-        let (result, _guards) = persist_with_guards(_guards, async move { repo.admit(command).await }).await?;
+        let (results, _guards) = persist_with_guards(_guards, async move { repo.admit_batch(commands).await }).await?;
+        for result in &results {
         tracing::debug!(message_id = %result.message.message_id, session_id = %result.message.session_id,
             duplicate = result.duplicate, target_count = result.deliveries.len(),
             rejected_count = result.deliveries.iter().filter(|row| row.state.status == Status::RejectedCapacity).count(),
@@ -660,7 +679,8 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
             if let Some(hook) = &self.instrumentation { for row in &result.deliveries { hook.event("admitted", row); } }
             let _ = self.changes.send(result.deliveries.clone());
         }
-        Ok(result)
+        }
+        Ok(results)
     }
     async fn snapshot(
         &self,

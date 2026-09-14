@@ -410,6 +410,7 @@ async fn live_policy_enables_empty_scheduler_recalculates_interval_and_drains_of
     assert!(service.admit(command("disabled", "a")).await.is_err());
     let mut policy = DeliveryPolicy::default();
     policy.flow_enabled.group = true;
+    policy.flow_enabled.system = true;
     policy.defaults.mode = BotDeliveryMode::Enforce;
     policy.defaults.min_send_interval_ms = 0;
     policy.defaults.max_running = 1;
@@ -436,6 +437,7 @@ async fn live_policy_enables_empty_scheduler_recalculates_interval_and_drains_of
     // the previous 1000 ms future deadline or reset rate state.
     policy.defaults.min_send_interval_ms = 0;
     policy.flow_enabled.group = false;
+    policy.flow_enabled.system = false;
     live.replace(admin(), 2, policy).await?;
     assert!(service.admit(command("new-off", "c")).await.is_err());
     wait_status(&service, "live-second", Status::Dispatching).await?;
@@ -524,6 +526,7 @@ async fn lowering_live_limits_preserves_existing_work_and_only_blocks_new_capaci
     live.scheduler_available.store(true, std::sync::atomic::Ordering::SeqCst);
     let mut policy = DeliveryPolicy::default();
     policy.flow_enabled.group = true;
+    policy.flow_enabled.system = true;
     policy.defaults.mode = BotDeliveryMode::Enforce;
     policy.defaults.max_running = 2;
     policy.defaults.min_send_interval_ms = 0;
