@@ -33,6 +33,8 @@ from typing import Any, Dict, Optional
 
 from injector import inject
 
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.caller_identity.contracts import CallerIdentityStage
@@ -129,6 +131,34 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
     # ------------------------------------------------------------------
     # Public entry
     # ------------------------------------------------------------------
+    async def get_application_caller_connection(
+        self,
+        *,
+        app_id: int,
+        tenant: str,
+        user_id: str,
+        bot_id: str,
+        owner_id: str,
+        force_upgrade: bool = False,
+    ) -> Dict[str, Any]:
+        """Allow a verified app to access any existing caller instance in its tenant."""
+        # COSEC: reject tenant confusion before any repository lookup.
+        if tenant != get_current_avernet_tenant():
+            raise self._caller_permission_error("tenant_mismatch")
+        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        if bot is None:
+            raise self._caller_permission_error("bot_not_found")
+        logger.info(
+            "event=expert_chat.application_authorized system=backend "
+            "operation=app_caller_connection tenant=%s app_id=%s "
+            "bot_id=%s owner_id=%s user_id=%s",
+            tenant, app_id, bot_id, owner_id, user_id,
+        )
+        return await self.get_authorized_caller_connection(
+            operator_id=user_id, user_id=user_id, bot_id=bot_id,
+            owner_id=owner_id, is_super_admin=False, force_upgrade=force_upgrade,
+        )
+
     async def get_authorized_caller_connection(
         self,
         *,
