@@ -50,7 +50,14 @@ frontend_teamclaw_sync_latest() {
         log_warn "TEAMCLAW_DIR is not a git checkout; skipping frontend auto-update"
         return 0
     }
-    if ! git -C "$dir" fetch --quiet origin 2>/dev/null; then
+    # Bounded fetch: git/curl has no default low-speed abort, so a remote that
+    # silently drops packets would otherwise park the start path in the TCP
+    # connect timeout on every invocation. --no-tags trims the default refspec
+    # to what the upstream/behind checks below need. Any failure stays
+    # warn-and-continue: auto-update must never block startup.
+    if ! GIT_SSH_COMMAND="ssh -o ConnectTimeout=10" git -C "$dir" \
+        -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=10 \
+        fetch --quiet --no-tags origin 2>/dev/null; then
         log_warn "teamclaw frontend: git fetch failed; continuing with current tree"
         return 0
     fi
@@ -60,8 +67,13 @@ frontend_teamclaw_sync_latest() {
         log_warn "teamclaw frontend: branch '${branch:-unknown}' has no upstream; skipping auto-update"
         return 0
     fi
-    behind="$(git -C "$dir" rev-list --count "HEAD..@{upstream}" 2>/dev/null || echo 0)"
-    if [ "${behind:-0}" -eq 0 ]; then
+    if ! behind="$(git -C "$dir" rev-list --count "HEAD..@{upstream}" 2>/dev/null)"; then
+        # A failed behind-count must not masquerade as "up to date": the tree
+        # is untouched, but this branch's relation to its upstream is unknown.
+        log_warn "teamclaw frontend: could not determine how far behind ${upstream} the checkout is; continuing with ${branch}@$(git -C "$dir" rev-parse --short HEAD)"
+        return 0
+    fi
+    if [ "$behind" -eq 0 ]; then
         log_info "teamclaw frontend up to date: ${branch}@$(git -C "$dir" rev-parse --short HEAD)"
         return 0
     fi
@@ -375,5 +387,5 @@ frontend_prereqs() {
 }
 
 frontend_help() {
-    echo "frontend - Web UI workbench (port ${FRONTEND_PORT}; FRONTEND_VARIANT=legacy|nextgen)"
+    echo "frontend - Web UI workbench (port ${FRONTEND_PORT}; FRONTEND_VARIANT=legacy|nextgen|teamclaw)"
 }
