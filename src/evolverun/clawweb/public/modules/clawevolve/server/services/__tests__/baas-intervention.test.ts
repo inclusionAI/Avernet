@@ -20,7 +20,7 @@ describe("sendIntervention", () => {
       sessionId: "session-1",
       message: "/clawevolve cancel",
       transportConfig: {
-        apiKey: "local-api-key",
+        apiKey: "baas-key",
         iamtoken: "",
         baseUrl: "http://127.0.0.1:8910",
       },
@@ -28,7 +28,7 @@ describe("sendIntervention", () => {
 
     expect(result).toEqual({ ok: true, messageId: "message-1", sessionId: "session-1" });
     const [, init] = fetchMock.mock.calls[0] ?? [];
-    expect(init?.headers).toMatchObject({ Authorization: "Bearer local-api-key" });
+    expect(init?.headers).toMatchObject({ Authorization: "Bearer baas-key" });
     expect(init?.headers).not.toHaveProperty("Cookie");
   });
 });

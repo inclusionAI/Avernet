@@ -99,7 +99,7 @@ async function createDiagnosis(model = "GLM-5.1") {
     body: JSON.stringify({
       taskName: "诊断任务示例",
       remark: "验证任务名称和备注",
-      userId: "user-1", botId: "bot-1", apiKey: "temporary-secret",
+      userId: "user-1", botId: "bot-1", apiKey: "test-token",
       model, diagnoseIntent: "扫描最近3天的历史 session；抽取4个 bad case 和1个 good case；重点关注影响任务完成率的主要问题。",
     }),
   });
@@ -442,7 +442,7 @@ async function createDiagnosisFromImprovement(input: Partial<Record<string, unkn
       remark: "来自效果中心",
       userId: owner,
       botId: "bot-1",
-      apiKey: "temporary-secret",
+      apiKey: "test-token",
       model: "GLM-5.1",
       diagnoseIntent: "扫描最近3天的历史 session；抽取4个 bad case 和1个 good case；重点关注影响任务完成率的主要问题。",
       improvementId: seededImprovementId,
@@ -2955,7 +2955,7 @@ describe("ClawEvolve step protocol", () => {
       command: expect.stringContaining(`--task-id ${String(body.task_id)} --step-id ${steps[0].stepId}`),
     }));
     expect(dispatch.mock.calls[0]?.[0].command).toContain("--model GLM-5.1");
-    expect(JSON.stringify(body)).not.toContain("temporary-secret");
+    expect(JSON.stringify(body)).not.toContain("test-token");
   });
 
   it("includes structured diagnosis dates in the default command intent", async () => {
@@ -3724,8 +3724,8 @@ describe("ClawEvolve step protocol", () => {
     expect(response.status).toBe(201);
     const dispatched = dispatch.mock.calls.at(-1)?.[0];
     expect(dispatched.command).not.toContain("--api-key");
-    expect(dispatched.command).not.toContain("temporary-secret");
-    expect(dispatched.secrets).toEqual({ diagnoseApiKey: "temporary-secret" });
+    expect(dispatched.command).not.toContain("test-token");
+    expect(dispatched.secrets).toEqual({ diagnoseApiKey: "test-token" });
   });
 
   it("returns prior successful steps and exposes their output", async () => {

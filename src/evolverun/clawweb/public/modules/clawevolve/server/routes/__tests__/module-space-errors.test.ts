@@ -7,7 +7,7 @@ import type { OcbLocalSkillPort, OcbSpacePort } from "../../internal/module-api.
 import { SkillAssetRepository } from "../../repositories/skill-asset-repository.js";
 
 const actor = "module-error-user";
-const secret = "PRIVATE-UPSTREAM-DETAIL-DO-NOT-EXPOSE";
+const privateDetail = "PRIVATE-UPSTREAM-DETAIL-DO-NOT-EXPOSE";
 const genericBody = { error: "Internal Server Error" };
 let db: SqliteDatabase;
 let module: ClawevolveModule | undefined;
@@ -129,7 +129,7 @@ describe("ClawEvolve module space errors under a generic-500 host", () => {
     { code: "OCB_PERSONAL_SPACE_NOT_INITIALIZED", status: 409, field: "statusCode" },
   ])("preserves safe $code/$status across all mounted public space routes", async ({ code, status, field }) => {
     listAccessibleSpaces.mockRejectedValue(Object.assign(new Error("可安全展示的 OCB 空间错误"), {
-      code, [field]: status, internalDetails: secret, upstreamBody: { debug: secret },
+      code, [field]: status, internalDetails: privateDetail, upstreamBody: { debug: privateDetail },
     }));
     await startHost();
     const before = await snapshot();
@@ -149,9 +149,9 @@ describe("ClawEvolve module space errors under a generic-500 host", () => {
     { name: "safe code but non-error status", fields: { code: "OCB_SPACE_UNAVAILABLE", status: 200 } },
     { name: "safe code but out-of-range status", fields: { code: "OCB_SPACE_UNAVAILABLE", status: 600 } },
     { name: "safe code but fractional status", fields: { code: "OCB_SPACE_UNAVAILABLE", status: 503.5 } },
-    { name: "safe code but non-string message", fields: { code: "OCB_SPACE_UNAVAILABLE", status: 503, message: { secret } } },
+    { name: "safe code but non-string message", fields: { code: "OCB_SPACE_UNAVAILABLE", status: 503, message: { privateDetail } } },
   ])("passes $name to the host's generic 500 without leaking upstream details", async ({ fields }) => {
-    listAccessibleSpaces.mockRejectedValue(Object.assign(new Error(secret), fields));
+    listAccessibleSpaces.mockRejectedValue(Object.assign(new Error(privateDetail), fields));
     await startHost();
     const before = await snapshot();
     for (const endpoint of endpoints) {
@@ -159,7 +159,7 @@ describe("ClawEvolve module space errors under a generic-500 host", () => {
       expect(response.status, endpoint).toBe(500);
       const body = await response.json();
       expect(body).toEqual(genericBody);
-      expect(JSON.stringify(body)).not.toContain(secret);
+      expect(JSON.stringify(body)).not.toContain(privateDetail);
     }
     expect(hostErrors).toHaveBeenCalledTimes(endpoints.length);
     await expectUnchanged(before);

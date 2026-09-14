@@ -32,11 +32,11 @@ baas:
 
 afterEach(() => {
   if (originalPreApiKey === undefined) delete process.env.CLAWEVOLVE_BAAS_PRE_API_KEY;
-  else process.env.CLAWEVOLVE_BAAS_PRE_API_KEY = originalPreApiKey;
+  else Reflect.set(process.env, "CLAWEVOLVE_BAAS_PRE_API_KEY", originalPreApiKey);
   if (originalProdApiKey === undefined) delete process.env.CLAWEVOLVE_BAAS_PROD_API_KEY;
-  else process.env.CLAWEVOLVE_BAAS_PROD_API_KEY = originalProdApiKey;
+  else Reflect.set(process.env, "CLAWEVOLVE_BAAS_PROD_API_KEY", originalProdApiKey);
   if (originalDevApiKey === undefined) delete process.env.CLAWEVOLVE_BAAS_DEV_API_KEY;
-  else process.env.CLAWEVOLVE_BAAS_DEV_API_KEY = originalDevApiKey;
+  else Reflect.set(process.env, "CLAWEVOLVE_BAAS_DEV_API_KEY", originalDevApiKey);
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -44,14 +44,14 @@ afterEach(() => {
 
 describe("BaaS runtime credentials", () => {
   it("uses process-local credentials loaded by the OCB MIST adapter", () => {
-    process.env.CLAWEVOLVE_BAAS_PRE_API_KEY = "pre-runtime-key";
-    process.env.CLAWEVOLVE_BAAS_PROD_API_KEY = "prod-runtime-key";
-    process.env.CLAWEVOLVE_BAAS_DEV_API_KEY = "dev-runtime-key";
+    process.env.CLAWEVOLVE_BAAS_PRE_API_KEY = "pre-key";
+    process.env.CLAWEVOLVE_BAAS_PROD_API_KEY = "prod-key";
+    process.env.CLAWEVOLVE_BAAS_DEV_API_KEY = "dev-key";
 
     expect(resolveBaasConfig(configFile()).environments).toEqual({
-      dev: { apiKey: "dev-runtime-key", baseUrl: "http://127.0.0.1:8890" },
-      pre: { apiKey: "pre-runtime-key", baseUrl: "https://baas-pre.example.com" },
-      prod: { apiKey: "prod-runtime-key", baseUrl: "https://baas-prod.example.com" },
+      dev: { apiKey: "dev-key", baseUrl: "http://127.0.0.1:8890" },
+      pre: { apiKey: "pre-key", baseUrl: "https://baas-pre.example.com" },
+      prod: { apiKey: "prod-key", baseUrl: "https://baas-prod.example.com" },
     });
   });
 });

@@ -51,17 +51,17 @@ export function withFrozenSessionIds(command: string, source?: DiagnoseSessionSo
   const tokens = commandTokens(command);
   const removed: Array<{ start: number; end: number }> = [];
   for (let index = 0; index < tokens.length; index++) {
-    const token = tokens[index]!;
-    const option = token.value.split("=", 1)[0]!;
+    const part = tokens[index]!;
+    const option = part.value.split("=", 1)[0]!;
     // argparse accepts unique option prefixes; they must not broaden the frozen set.
     if (!option.startsWith("--") || option.length <= 2 || !"--session-id".startsWith(option)) continue;
-    let end = token.end;
-    if (!token.value.includes("=")) {
+    let end = part.end;
+    if (!part.value.includes("=")) {
       const argument = tokens[++index];
       if (!argument || argument.value.startsWith("--")) throw new Error("Session 范围命令缺少 --session-id 的值");
       end = argument.end;
     }
-    removed.push({ start: token.start, end });
+    removed.push({ start: part.start, end });
   }
   let scoped = command;
   for (const span of removed.reverse()) scoped = scoped.slice(0, span.start) + scoped.slice(span.end);
