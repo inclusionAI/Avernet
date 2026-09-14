@@ -5,6 +5,7 @@
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { parse as parseYaml } from "yaml";
 import { normalizeWorkflowSpec } from "../workflow.js";
+import type { WorkflowDeployHistoryRepository } from "./workflow-deploy-history-repository.js";
 
 export type WorkflowSpecRow = {
   id: number;
@@ -26,6 +27,8 @@ export type WorkflowSpecSummary = {
   title: string | null;
   gmt_modified: number | string;
   owner_id: string | null;
+  /** Owner resolved from active deploy history (preferred) or workflow_specs (fallback). */
+  resolved_owner_id: string | null;
 };
 
 /** Row returned by accessible-workflow queries (joined with bot_workflow_permissions). */
@@ -59,7 +62,10 @@ export function extractTitleFromSpecJson(specJson: string, fallbackId: string): 
 }
 
 export class WorkflowSpecRepository {
-  constructor(private db: IDatabase) {}
+  constructor(
+    private db: IDatabase,
+    private deployHistoryRepo?: WorkflowDeployHistoryRepository,
+  ) {}
 
   /** List all workflow specs with full spec_json (use only when spec_json is needed). */
   async listAll(): Promise<WorkflowSpecRow[]> {
@@ -68,11 +74,16 @@ export class WorkflowSpecRepository {
     );
   }
 
-  /** List workflow summaries without loading spec_json — used for list/table views. */
+  /** List workflow summaries without loading spec_json — used for list/table views.
+   *  Resolves owner_id preferring the active deploy_history record, falling back to workflow_specs. */
   async listSummaries(): Promise<WorkflowSpecSummary[]> {
-    return this.db.query<WorkflowSpecSummary>(
+    const rows = await this.db.query<WorkflowSpecSummary>(
       "SELECT workflow_id, pack_id, title, gmt_modified, owner_id FROM workflow_specs ORDER BY gmt_modified DESC",
     );
+    if (!this.deployHistoryRepo) {
+      return rows.map((r) => ({ ...r, resolved_owner_id: r.owner_id }));
+    }
+    return await resolveOwners(this.deployHistoryRepo, rows);
   }
 
   async findByWorkflowId(workflowId: string): Promise<WorkflowSpecRow | null> {
@@ -81,6 +92,21 @@ export class WorkflowSpecRepository {
       [workflowId],
     );
     return rows[0] ?? null;
+  }
+
+  /** Find a single workflow summary with resolved owner_id. */
+  async findSummaryByWorkflowId(workflowId: string): Promise<WorkflowSpecSummary | null> {
+    const rows = await this.db.query<WorkflowSpecSummary>(
+      "SELECT workflow_id, pack_id, title, gmt_modified, owner_id FROM workflow_specs WHERE workflow_id = ?",
+      [workflowId],
+    );
+    const row = rows[0];
+    if (!row) return null;
+    if (!this.deployHistoryRepo) {
+      return { ...row, resolved_owner_id: row.owner_id };
+    }
+    const resolved = await resolveOwners(this.deployHistoryRepo, [row]);
+    return resolved[0] ?? null;
   }
 
   async upsert(
@@ -177,7 +203,11 @@ export class WorkflowSpecRepository {
       [...params, limit, offset],
     );
 
-    return { rows, total };
+    const resolvedRows = this.deployHistoryRepo
+      ? await resolveOwners(this.deployHistoryRepo, rows)
+      : rows.map((r) => ({ ...r, resolved_owner_id: r.owner_id }));
+
+    return { rows: resolvedRows, total };
   }
 
   /**
@@ -292,4 +322,34 @@ export class WorkflowSpecRepository {
     }
     throw new Error("buildModeFilter: at least one of [userId, botId] is required");
   }
+}
+
+/**
+ * Resolve owner_id for each summary row.
+ * Prefer the active (is_active=1) workflow_deploy_history.owner_id;
+ * fall back to workflow_specs.owner_id when no active deploy history exists.
+ * Performs one batched query per batch of rows to avoid N+1.
+ */
+async function resolveOwners(
+  deployHistoryRepo: WorkflowDeployHistoryRepository,
+  rows: Array<{ workflow_id: string; owner_id: string | null }>,
+): Promise<WorkflowSpecSummary[]> {
+  const BATCH_SIZE = 50;
+  const results: WorkflowSpecSummary[] = [];
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    const batch = rows.slice(i, i + BATCH_SIZE);
+    const ownerMap = new Map<string, string | null>();
+    await Promise.all(
+      batch.map(async (row) => {
+        const active = await deployHistoryRepo.findActiveByWorkflowId(row.workflow_id);
+        ownerMap.set(row.workflow_id, active?.owner_id ?? row.owner_id);
+      }),
+    );
+    for (const row of batch) {
+      const summary = row as unknown as WorkflowSpecSummary;
+      summary.resolved_owner_id = ownerMap.get(row.workflow_id) ?? row.owner_id;
+      results.push(summary);
+    }
+  }
+  return results;
 }

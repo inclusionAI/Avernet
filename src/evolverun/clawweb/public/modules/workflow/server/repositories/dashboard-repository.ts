@@ -1028,6 +1028,7 @@ export class DashboardRepository {
         run_count: number;
         succeeded_count: number;
         terminal_count: number;
+        failed_count: number;
         avg_ms: number | null;
       }>(
         `SELECT
@@ -1036,6 +1037,7 @@ export class DashboardRepository {
           COUNT(*) AS run_count,
           SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded_count,
           SUM(CASE WHEN status IN (${terminalSql}) THEN 1 ELSE 0 END) AS terminal_count,
+          SUM(CASE WHEN status IN (${unsuccessfulTerminalSql}) THEN 1 ELSE 0 END) AS failed_count,
           AVG(CASE WHEN status = 'succeeded' THEN ${normalizedDurationSql} END) AS avg_ms
          FROM flow_runs
          WHERE started_at BETWEEN ? AND ? AND started_at IS NOT NULL
@@ -1083,6 +1085,7 @@ export class DashboardRepository {
           released: releasedSet ? releasedSet.has(r.workflow_id) : false,
           runCount: asNumber(r.run_count),
           completionSuccessRate: completion,
+          failedCount: asNumber(r.failed_count),
           selfHealTriggeredRuns: 0,
           selfHealSuccessRate: null,
           machineDurationP50: percentile(durs, 0.5),

@@ -402,6 +402,7 @@ export function mockWorkflowHealth(from: number, to: number): IWorkflowHealthRes
       released: r.released ?? false,
       runCount: r.runCount ?? 0,
       completionSuccessRate: completion,
+      failedCount: 0,
       selfHealTriggeredRuns: healRuns,
       selfHealSuccessRate: healRate,
       machineDurationP50: machine,

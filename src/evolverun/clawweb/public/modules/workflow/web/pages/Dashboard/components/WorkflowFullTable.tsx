@@ -12,6 +12,7 @@ interface MergedRow {
   status: 'released' | 'testing' | 'unpublished'   // 已发布 / 测试(跑过未部署) / 未发布(没跑过也没部署)
   runCount: number
   completionSuccessRate: number | null
+  failedCount: number
   selfHealSuccessRate: number | null
   selfHealTriggeredRuns: number
   machineDurationP50: number | null
@@ -75,6 +76,7 @@ export function WorkflowFullTable({ healthRows, releaseRows, isLoading, isError 
         status: h.released ? 'released' : 'testing',
         runCount: h.runCount,
         completionSuccessRate: h.completionSuccessRate,
+        failedCount: h.failedCount,
         selfHealSuccessRate: h.selfHealSuccessRate,
         selfHealTriggeredRuns: h.selfHealTriggeredRuns,
         machineDurationP50: h.machineDurationP50,
@@ -102,6 +104,7 @@ export function WorkflowFullTable({ healthRows, releaseRows, isLoading, isError 
           status: r.released ? 'released' : 'unpublished',
           runCount: 0,
           completionSuccessRate: null,
+          failedCount: 0,
           selfHealSuccessRate: null,
           selfHealTriggeredRuns: 0,
           machineDurationP50: null,
@@ -134,6 +137,7 @@ export function WorkflowFullTable({ healthRows, releaseRows, isLoading, isError 
       case 'healDesc': sorted.sort((a, b) => b.selfHealTriggeredRuns - a.selfHealTriggeredRuns); break
       case 'deployDesc': sorted.sort((a, b) => b.deployCount - a.deployCount); break
       case 'recentDeployDesc': sorted.sort((a, b) => (b.lastDeployAt ?? 0) - (a.lastDeployAt ?? 0)); break
+      case 'failedDesc': sorted.sort((a, b) => b.failedCount - a.failedCount); break
     }
     return sorted
   }, [merged, status, kw, sort])
@@ -190,6 +194,7 @@ export function WorkflowFullTable({ healthRows, releaseRows, isLoading, isError 
                 <th className="w-[28%] px-3 py-2 text-left font-medium">工作流</th>
                 <th className="w-20 whitespace-nowrap px-3 py-2 text-center font-medium">状态</th>
                 <th className="w-20 whitespace-nowrap px-3 py-2 text-right font-medium">运行数</th>
+                <th className="w-24 whitespace-nowrap px-3 py-2 text-right font-medium">失败流程数</th>
                 <th className="w-24 whitespace-nowrap px-3 py-2 text-right font-medium">运行成功率</th>
                 <th className="w-24 whitespace-nowrap px-3 py-2 text-right font-medium">自愈成功率</th>
                 <th className="w-24 whitespace-nowrap px-3 py-2 text-right font-medium">耗时 P50</th>
@@ -215,6 +220,7 @@ export function WorkflowFullTable({ healthRows, releaseRows, isLoading, isError 
                       <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ${badge.cls}`}>{badge.text}</span>
                     </td>
                     <td className="whitespace-nowrap px-3 py-2.5 text-right text-sm tabular-nums text-gray-600">{w.runCount > 0 ? w.runCount.toLocaleString() : '—'}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-right text-sm tabular-nums text-gray-600">{w.failedCount > 0 ? w.failedCount.toLocaleString() : '—'}</td>
                     <td className="px-3 py-2.5 text-right text-sm"><Rate r={w.completionSuccessRate} /></td>
                     <td className="px-3 py-2.5 text-right text-sm"><Rate r={w.selfHealSuccessRate} /></td>
                     <td className="px-3 py-2.5 text-right text-sm tabular-nums text-gray-600">{w.machineDurationP50 != null ? formatDuration(w.machineDurationP50) : '—'}</td>

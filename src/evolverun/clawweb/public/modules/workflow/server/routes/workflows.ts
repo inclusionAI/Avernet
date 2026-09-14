@@ -367,6 +367,7 @@ export function createWorkflowsRouter(
         title: r.title ?? r.workflow_id,
         packId: r.pack_id,
         updatedAt: toEpochMs(r.gmt_modified),
+        ownerId: r.resolved_owner_id ?? r.owner_id ?? null,
       }));
       res.json({
         data,
@@ -427,6 +428,7 @@ export function createWorkflowsRouter(
           title: r.title ?? r.workflow_id,
           packId: r.pack_id,
           updatedAt: toEpochMs(r.gmt_modified),
+          ownerId: r.resolved_owner_id ?? r.owner_id ?? null,
         }));
       workflowsCache.set(cacheKey, result);
       res.json(result);

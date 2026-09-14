@@ -269,6 +269,7 @@ export interface IWorkflowHealthRow {
   released: boolean
   runCount: number
   completionSuccessRate: number | null
+  failedCount: number
   selfHealTriggeredRuns: number
   selfHealSuccessRate: number | null
   machineDurationP50: number | null

@@ -213,11 +213,12 @@ export function createRunsRouter(
       ]);
 
       // 2. Build spec entries from lightweight summaries (title from DB column, no JSON parse)
-      type SpecEntry = { workflowId: string; title: string; updatedAt: number | null };
+      type SpecEntry = { workflowId: string; title: string; updatedAt: number | null; ownerId: string | null };
       const specEntries: SpecEntry[] = specRows.map((r) => ({
         workflowId: r.workflow_id,
         title: r.title ?? r.workflow_id,
         updatedAt: typeof r.gmt_modified === "string" ? Math.floor(new Date(r.gmt_modified).getTime() / 1000) : (r.gmt_modified ?? null),
+        ownerId: r.resolved_owner_id ?? r.owner_id ?? null,
       }));
 
       // 3. Build run stats map
@@ -228,7 +229,7 @@ export function createRunsRouter(
       }
 
       // 4. Merge workflow_specs entries + run-only workflows (flows without a spec still show up)
-      type WorkflowEntry = { workflow_id: string; workflow_title: string | null; run_count: number; last_status: string | null; last_run_at: number | null; updated_at: number | null };
+      type WorkflowEntry = { workflow_id: string; workflow_title: string | null; run_count: number; last_status: string | null; last_run_at: number | null; updated_at: number | null; owner_id: string | null };
       const merged: WorkflowEntry[] = [];
       const seenIds = new Set<string>();
 
@@ -243,6 +244,7 @@ export function createRunsRouter(
           last_status: stats?.last_status ?? null,
           last_run_at: stats?.last_run_at ?? null,
           updated_at: spec.updatedAt,
+          owner_id: spec.ownerId,
         });
       }
 
@@ -256,6 +258,7 @@ export function createRunsRouter(
           last_status: stats.last_status ?? null,
           last_run_at: stats.last_run_at ?? null,
           updated_at: null,
+          owner_id: null,
         });
       }
 

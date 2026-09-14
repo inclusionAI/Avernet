@@ -1,4 +1,4 @@
-export type FullSortKey = 'completionAsc' | 'runDesc' | 'machineAsc' | 'healDesc' | 'deployDesc' | 'recentDeployDesc'
+export type FullSortKey = 'completionAsc' | 'runDesc' | 'machineAsc' | 'healDesc' | 'deployDesc' | 'recentDeployDesc' | 'failedDesc'
 
 export const FULL_SORT_LABELS: Record<FullSortKey, string> = {
   completionAsc: '运行成功率 升序(短板优先)',
@@ -7,4 +7,5 @@ export const FULL_SORT_LABELS: Record<FullSortKey, string> = {
   healDesc: '自愈次数 降序',
   deployDesc: '部署次数 降序',
   recentDeployDesc: '最近部署 降序',
+  failedDesc: '失败流程数 降序',
 }
