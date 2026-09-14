@@ -9,11 +9,10 @@ import logging
 import socket
 from collections.abc import Mapping
 from pathlib import Path
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 import aiofiles
 import httpx
-
 from engine.community.core.resource_materialization.models import (
     ChatAttachmentMaterializationRequest,
     MaterializationRequest,
@@ -181,10 +180,25 @@ class HttpTemporaryUrlPullClient:
             self._max_bytes,
             request.download_max_bytes or self._max_bytes,
         )
-        host, port = self._validate_url(request.temporary_url)
+        url = request.temporary_url
+        # One deadline covers DNS, all redirects, and the final response body.
+        async with asyncio.timeout(self._timeout_seconds):
+            for redirect_count in range(6):
+                next_url = await self._pull_hop(url, destination, max_bytes)
+                if next_url is None:
+                    return
+                if redirect_count == 5:
+                    raise ValueError("temporary URL redirect limit exceeded")
+                url = next_url
+
+    async def _pull_hop(
+        self, url: str, destination: Path, max_bytes: int
+    ) -> str | None:
+        # A fresh client per hop prevents cookies/auth from crossing origins.
+        host, port = self._validate_url(url)
         resolved_ips = await self._resolve_public_ips(host, port)
         pinned_ip = min(resolved_ips)
-        parsed_url = urlsplit(request.temporary_url)
+        parsed_url = urlsplit(url)
         pinned_host = f"[{pinned_ip}]" if ":" in pinned_ip else pinned_ip
         host_header = parsed_url.netloc
         pinned_url = urlunsplit(
@@ -210,6 +224,9 @@ class HttpTemporaryUrlPullClient:
                 timeout=timeout,
                 follow_redirects=False,
                 transport=self._transport,
+                # Preserve configured CAs while disabling environment proxies.
+                verify=httpx.create_ssl_context(trust_env=True),
+                trust_env=False,
             ) as client,
             client.stream(
                 "GET",
@@ -218,6 +235,18 @@ class HttpTemporaryUrlPullClient:
                 extensions={"sni_hostname": host},
             ) as response,
         ):
+            if response.status_code in {301, 302, 303, 307, 308}:
+                location = response.headers.get("location", "").strip()
+                if not location:
+                    raise ValueError("temporary URL redirect is missing Location")
+                next_url = urljoin(url, location)
+                self._validate_url(next_url)
+                if (
+                    parsed_url.scheme == "https"
+                    and urlsplit(next_url).scheme != "https"
+                ):
+                    raise ValueError("temporary URL redirect cannot downgrade HTTPS")
+                return next_url
             response.raise_for_status()
             content_length = response.headers.get("content-length")
             if content_length is not None:
@@ -234,6 +263,7 @@ class HttpTemporaryUrlPullClient:
                     if observed > max_bytes:
                         raise ValueError("temporary URL response exceeds size limit")
                     await stream.write(chunk)
+        return None
 
     def _validate_url(self, value: str) -> tuple[str, int]:
         parsed = urlsplit(value)

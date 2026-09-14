@@ -38,7 +38,15 @@ class BackendMaterializationCallbackClient(Protocol):
 
 @runtime_checkable
 class TemporaryUrlPullClient(Protocol):
-    """Download one validated short-lived capability into a caller-owned file."""
+    """Download one validated short-lived capability into a caller-owned file.
+
+    HTTP downloads support at most five 301/302/303/307/308 redirects,
+    including relative Locations. Every hop must use HTTP(S) without userinfo,
+    resolve exclusively to public IPs, and connect to a validated IP with the
+    original Host/SNI. HTTPS must not downgrade to HTTP. Cookies and credentials
+    must not propagate between hops. DNS, redirects and body streaming share
+    one timeout; the final body remains subject to the request's byte limit.
+    """
 
     async def pull(
         self,
