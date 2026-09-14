@@ -30,7 +30,7 @@ refused, a validation failure raised) exactly as W4 shipped it.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Optional
 
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
@@ -54,12 +54,6 @@ APPLY_TASK_DEADLINE_SECONDS = 20 * 60
 
 #: The key every payload this version enqueues carries, ``null`` included.
 PHASE_KEY = "phase"
-
-#: The key a payload carried before :data:`PHASE_KEY` existed: a list of one or
-#: both phase names. Still **written** as well as read, because a rolling
-#: deployment runs both versions at once against one queue — see the builder
-#: and :func:`phase_of_payload`. Both go when no such deployment remains.
-LEGACY_PHASES_KEY = "phases"
 
 
 def build_apply_task_payload(
@@ -95,7 +89,6 @@ def build_apply_task_payload(
             "lock_token": "lk_3f9c...",
             "started_at": "2026-03-01T09:00:00+00:00",
             "phase": "pre_container",        # or "on_container", or None
-            "phases": ["pre_container"],     # the same fact, older spelling
             "carry_from_apply_id": None,     # or an earlier phase's apply_id
             "engine_type": "claude_code",    # only read when there is no
             "bot_type": "arca",              # bot record yet
@@ -105,23 +98,6 @@ def build_apply_task_payload(
     reconstructed from a default at the far end: one of the two phase names for
     a creation half, and ``null`` — a stated value, not an absence — for the
     whole apply.
-
-    **Both spellings are written, and that is deliberate.** A rolling
-    deployment runs two versions against one app-scoped queue, so a payload
-    this version enqueues can be claimed by a worker still running the previous
-    one — and that worker reads ``payload["phases"]`` unconditionally. Sending
-    only :data:`PHASE_KEY` would raise ``KeyError`` there, and the worker would
-    retry the task until :data:`APPLY_TASK_DEADLINE_SECONDS` retires it: long
-    enough for a creation's pre-container phase to miss the window before the
-    start command is composed, which boots the bot with no script. So
-    :data:`LEGACY_PHASES_KEY` is written alongside as the same fact in the
-    older shape. It is never read by this version —
-    :func:`phase_of_payload` prefers :data:`PHASE_KEY` — and exists only so the
-    previous one can still decode what this one enqueues.
-
-    This is the emit half of an expand/contract migration whose read half is
-    :func:`phase_of_payload`. **Both halves come out together**, one deploy on,
-    once no worker and no queued row can predate :data:`PHASE_KEY`.
 
     Consumed by: :meth:`ApplyTaskHandler.handle`, which passes it straight to
     ``BotConfigManifestApplyService.run_apply_task``.
@@ -166,13 +142,6 @@ def build_apply_task_payload(
         # half, ``null`` for the whole apply. Never reconstructed from a
         # default at the far end.
         PHASE_KEY: phase.value if phase is not None else None,
-        # The same fact in the shape the previous version reads, so a worker
-        # that has not been restarted yet can still decode this row. Sorted,
-        # as that version wrote it. Unread here; delete with the decoder's
-        # legacy branch.
-        LEGACY_PHASES_KEY: sorted(
-            p.value for p in (tuple(ApplyPhase) if phase is None else (phase,))
-        ),
         "carry_from_apply_id": carry_from_apply_id,
         "engine_type": engine_type,
         "bot_type": bot_type,
@@ -182,7 +151,7 @@ def build_apply_task_payload(
 def phase_from_payload(value: str | None) -> ApplyPhase | None:
     """The phase the payload names, back as an enum member::
 
-        phase_from_payload("pre_container")
+        phase_from_payload(ApplyPhase.PRE_CONTAINER.value)
         # -> ApplyPhase.PRE_CONTAINER
         phase_from_payload(None)
         # -> None, i.e. the whole apply
@@ -191,61 +160,6 @@ def phase_from_payload(value: str | None) -> ApplyPhase | None:
     Always present in a payload — see the builder.
     """
     return ApplyPhase(value) if value is not None else None
-
-
-def phase_of_payload(payload: Mapping[str, Any]) -> ApplyPhase | None:
-    """What an apply covers, read from either generation of payload.
-
-    **Why this is not just ``payload.get("phase")``.** The queue is durable and
-    a rollout is not atomic, so for one deploy a worker running this code can
-    claim a task enqueued by the previous one. Those payloads have no
-    ``"phase"`` key at all — they state the same fact as a list under
-    :data:`LEGACY_PHASES_KEY` — and reading an absent key as ``None`` would
-    turn a creation's *half* into a *whole* apply. That is the one widening
-    that matters: the pre-container phase would walk the container-bound
-    constructs before any container exists, which is precisely the ordering
-    failure :class:`~...order.ApplyPhase` exists to prevent.
-
-    So presence of :data:`PHASE_KEY`, not its value, is what says a payload
-    speaks the current contract — the builder always writes it, and ``null``
-    there is the stated "not a creation half". Otherwise the legacy list is
-    translated, because it carries the same information in the older shape::
-
-        {"phase": "pre_container"}                    -> PRE_CONTAINER
-        {"phase": None}                               -> None, a whole apply
-        {"phases": ["pre_container"]}                 -> PRE_CONTAINER
-        {"phases": ["on_container"]}                  -> ON_CONTAINER
-        {"phases": ["on_container", "pre_container"]} -> None, a whole apply
-        {}                                            -> None, a whole apply
-
-    Translating rather than refusing is deliberate. Failing a legacy
-    pre-container task would leave the startup-script row unwritten before the
-    start command is composed, so the bot boots with no script — a worse
-    outcome than the widening, and a silent one.
-
-    **Delete this with the legacy branch** once no queue can hold a payload
-    without :data:`PHASE_KEY`: one deploy past the one that introduced it,
-    bounded by :data:`APPLY_TASK_DEADLINE_SECONDS` plus the lock TTL.
-
-    Raises ``ValueError`` on an unknown phase name, and on an empty legacy
-    list — it named an apply covering nothing, which no caller could have
-    meant and the scalar has no way to say.
-    """
-    if PHASE_KEY in payload:
-        return phase_from_payload(payload[PHASE_KEY])
-    legacy = payload.get(LEGACY_PHASES_KEY)
-    if legacy is None:
-        return None
-    named = frozenset(ApplyPhase(item) for item in legacy)
-    if not named:
-        raise ValueError(
-            f"a payload's {LEGACY_PHASES_KEY!r} named no phase at all; an "
-            "apply that covers nothing was never a thing a caller could mean"
-        )
-    if named == frozenset(ApplyPhase):
-        return None
-    (only,) = named
-    return only
 
 
 class ApplyTaskHandler:
@@ -316,9 +230,7 @@ __all__ = [
     "APPLY_TASK_TYPE",
     "ApplyTaskHandler",
     "ApplyTaskLifecycle",
-    "LEGACY_PHASES_KEY",
     "PHASE_KEY",
     "build_apply_task_payload",
     "phase_from_payload",
-    "phase_of_payload",
 ]

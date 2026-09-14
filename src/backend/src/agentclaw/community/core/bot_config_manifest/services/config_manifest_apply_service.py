@@ -60,8 +60,9 @@ from agentclaw.community.core.bot_config_manifest.apply.delivery import (
 from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     APPLY_TASK_DEADLINE_SECONDS,
     APPLY_TASK_TYPE,
+    PHASE_KEY,
     build_apply_task_payload,
-    phase_of_payload,
+    phase_from_payload,
 )
 from agentclaw.community.core.bot_config_manifest.apply.triggers import require_phase_matches_trigger
 from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
@@ -81,9 +82,7 @@ from agentclaw.community.core.bot_config_manifest.fetch.limits import (
     APPLY_FETCH_TOTAL_LIMIT,
 )
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
-from agentclaw.community.core.bot_config_manifest.apply.orchestrator import (
-    ApplyOrchestrator,
-)
+from agentclaw.community.core.bot_config_manifest.apply.orchestrator import ApplyOrchestrator
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyConstruct,
     ApplyReport,
@@ -597,7 +596,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 apply_id=str(payload["apply_id"]),
                 trigger=str(payload["trigger"]),
                 started_at=parse_started_at(payload.get("started_at")),
-                phase=phase_of_payload(payload),
+                phase=phase_from_payload(payload.get(PHASE_KEY)),
                 lock_token=str(payload["lock_token"]),
                 carry_from_apply_id=payload.get("carry_from_apply_id"),
             )

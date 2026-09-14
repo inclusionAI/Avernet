@@ -97,6 +97,19 @@ def require_phase_matches_trigger(trigger: str, phase: ApplyPhase | None) -> Non
     phase. So each creation trigger is compared against the one phase it
     delivers, and ``None`` is what every other trigger must carry.
 
+    **Every other trigger.** ``explicit``, ``put``, and any string not in the
+    table are simply absent from it, so the lookup answers ``None`` and the
+    same comparison then requires ``phase`` to be ``None`` as well: such a call
+    passes when it names no half, and raises ``ValueError`` when it names one.
+    A *misspelled* creation trigger is absent from the table too, so it reads
+    as a non-creation one. In practice that still catches it: a creation caller
+    passes the half it is delivering, and a trigger the table does not know
+    expects ``None``, so the pair raises. What slips through is only a
+    misspelling that also names no phase — which asks for the whole apply and
+    gets it. Checking a trigger against :data:`ALL_TRIGGERS` is a separate
+    concern from pairing it with a phase, and deliberately not done here: that
+    list is "not enforced anywhere" and ``start_apply`` takes a plain ``str``.
+
     Lives here rather than in the apply service because the pairing is a fact
     about the trigger vocabulary, and this module exists so a trigger is
     spelled once. ``start_apply`` calls it before the lock is taken and before
