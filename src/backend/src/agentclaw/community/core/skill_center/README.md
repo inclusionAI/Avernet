@@ -72,6 +72,7 @@ provides:
   - "SkillManifestErrorCode"
   - "SkillManifestValidationIssue"
   - "SkillManifestValidationResult"
+  - "SkillUploadErrorCode"
   - "SkillCenterGatewayService"
   - "SkillCenterReferenceService"
   - "SkillCenterReferenceProcessor"
