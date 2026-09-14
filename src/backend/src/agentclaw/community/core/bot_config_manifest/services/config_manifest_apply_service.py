@@ -764,13 +764,14 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         (``ApplyReport.sources``), so strict mode reads them back rather than
         keeping a second table the two could drift apart on. The read walks a
         bounded history, **not just the newest report**: the newest apply may
-        have failed to fetch a source (its report carries no resolution for
-        it — a failed fetch or a strict refusal adopts nothing), and reading
-        only that row would wipe the baseline, silently disarming strict mode
-        and the ``keep_last`` receipt after one outage. Per key, the newest
-        report that carries it wins; rows sharing a key (the report holds one
-        per declaration) carry the same sha, so any serves. A row missing
-        ``url`` or ``mode`` yields no opinion, nor do empty or absent reports.
+        have failed to fetch a source (a failed fetch or a strict refusal
+        adopts nothing), and reading only that row would wipe the baseline,
+        disarming strict mode and ``keep_last`` after one outage. Per key the
+        newest report wins, and within one report its last row — a creation
+        folds two applies (``apply/carry_forward``), carried phase first, so
+        the later row is the one its delivery stood behind; the walk reads
+        each report backwards. A row with no ``ref`` reads ``"HEAD"``; one
+        missing ``url`` or ``mode`` yields no opinion, nor do empty reports.
         """
         records = self._applies.recent(
             env=get_current_env(),
@@ -783,11 +784,10 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             report = self._to_report(record, entity_id=entity_id, bot_id=bot_id)
             if report is None:
                 continue
-            for source in report.sources:
+            for source in reversed(report.sources):
                 if (source.url is None or source.mode is None
                         or source.resolved_sha is None):
                     continue
-                # Newest wins; "HEAD" normalised the way the spec does it.
                 key = (source.url, source.ref or "HEAD", source.mode)
                 baselines.setdefault(key, source.resolved_sha)
         return baselines
