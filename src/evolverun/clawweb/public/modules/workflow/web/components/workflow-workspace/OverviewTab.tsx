@@ -108,7 +108,7 @@ interface OverviewTabProps {
 
 export default function OverviewTab({ workflow }: OverviewTabProps) {
   const workflowId = workflow.workflow_id
-  const [days, setDays] = useState<7 | 30>(7)
+  const [days, setDays] = useState<1 | 7 | 30>(7)
   const [page, setPage] = useState(0)
   const [statusFilter, setStatusFilter] = useState('')
   const [searchInput, setSearchInput] = useState('')
@@ -122,7 +122,9 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
     isError: isHealthError,
   } = useWorkflowHealth(workflowId, days)
   const pageSize = 20
-  const windowStart = windowEnd - days * 86400
+  const windowStart = days === 1
+    ? Math.floor(new Date(new Date().setHours(0, 0, 0, 0)).getTime() / 1000)
+    : windowEnd - days * 86400
   const {
     data: metricsData,
     isPending: isMetricsPending,
@@ -180,20 +182,20 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
   const currentPage = Math.min(page + 1, totalPages)
   const isRefreshing = isFetching || isMetricsFetching
 
-  const changeDays = (nextDays: 7 | 30) => {
+  const changeDays = (nextDays: 1 | 7 | 30) => {
     setDays(nextDays)
   }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-end gap-1" aria-label="概览时间范围">
-        {[7, 30].map((value) => (
+        {([1, 7, 30] as const).map((value) => (
           <button
             key={value}
             type="button"
-            onClick={() => changeDays(value as 7 | 30)}
+            onClick={() => changeDays(value)}
             className={`rounded-md px-3 py-1 text-xs font-medium transition ${days === value ? 'bg-blue-600 text-white' : 'bg-white text-slate-500 ring-1 ring-slate-200 hover:bg-slate-50'}`}
-          >{value}天</button>
+          >{value === 1 ? '今天' : `${value}天`}</button>
         ))}
       </div>
       <section aria-label="工作流关键指标" className="grid grid-cols-2 divide-x divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white lg:grid-cols-4 lg:divide-y-0">

@@ -187,4 +187,17 @@ describe('task escort overview layout', () => {
     const metricParams = mocks.useFlowRuns.mock.calls.at(-2)?.[0]
     expect(Number(metricParams.to) - Number(metricParams.from)).toBe(30 * 86400)
   })
+
+  it('switches to "今天" starting the metric window from local midnight', async () => {
+    mockQueries()
+    render(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
+
+    await userEvent.click(screen.getByRole('button', { name: '今天' }))
+    expect(mocks.useWorkflowHealth).toHaveBeenLastCalledWith('tech-research', 1)
+
+    const metricParams = mocks.useFlowRuns.mock.calls.filter(([params]) => params?.from).at(-1)?.[0]
+    const localMidnight = Math.floor(new Date(new Date().setHours(0, 0, 0, 0)).getTime() / 1000)
+    expect(Number(metricParams?.from)).toBe(localMidnight)
+    expect(Number(metricParams?.to)).toBeGreaterThanOrEqual(localMidnight)
+  })
 })
