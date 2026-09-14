@@ -128,6 +128,21 @@ class FakeRelay:
             bot_id=BOT, bot_type=bot_type, active_engine="openclaw", owner_id=OWNER
         )
 
+    def set_active_engine(self, active_engine: str) -> None:
+        """Re-seed the bot with another engine, keeping everything else.
+
+        The engine is a fact handlers read *before* forwarding — a session id's
+        wire form is one engine's business (``core/engine_runtime/session_key``)
+        — so it has to be settable here rather than only in core's own tests.
+        """
+        current = self.bots[(BOT, OWNER)]
+        self.bots[(BOT, OWNER)] = BotFacts(
+            bot_id=current.bot_id,
+            bot_type=current.bot_type,
+            active_engine=active_engine,
+            owner_id=current.owner_id,
+        )
+
     def add_operator(
         self, caller_id: str, *, bot_id: str = BOT, owner_id: str = OWNER
     ) -> None:

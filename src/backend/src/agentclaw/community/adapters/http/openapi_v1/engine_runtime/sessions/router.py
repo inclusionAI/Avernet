@@ -75,6 +75,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineResourceNotFoundError,
     EngineUpstreamError,
 )
+from agentclaw.community.core.engine_runtime.session_key import encode_session_key
 from agentclaw.community.core.resources.service import FileTooLargeError
 from agentclaw.community.core.expert_chat.errors import (
     BotNotFoundError as ExpertBotNotFoundError,
@@ -363,7 +364,10 @@ async def get_session(
     Pass the `session_id` exactly as the list endpoint returned it. The value
     may contain colons; no encoding is required.
     """
-    # A colon is legal in a path segment (RFC 3986), so ids route as-is. An id
+    # A colon is legal in a path segment (RFC 3986), so ids route as-is to
+    # every engine that takes them that way. An engine whose runtime does not —
+    # teclaw, whose proxy answers 400 — registers a codec in
+    # ``core/engine_runtime/session_key.py`` and its ids travel encoded. An id
     # containing "/" would not be addressable, but no engine id format has one.
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
@@ -385,7 +389,7 @@ async def get_session(
         facts=facts,
         stage=stage.value,
         method="GET",
-        path=f"/api/sessions/{session_id}",
+        path=f"/api/sessions/{encode_session_key(facts.active_engine, session_id)}",
     )
     if not isinstance(result.data, dict):
         raise EngineResourceNotFoundError(f"no session {session_id}")
@@ -420,7 +424,9 @@ async def _set_session_favorite(
         except Exception as error:
             _raise_expert_error(error)
         return SessionFavorite(session_id=session_id, favorited=favorited)
-    encoded_session_id = quote(session_id, safe="")
+    encoded_session_id = quote(
+        encode_session_key(facts.active_engine, session_id), safe=""
+    )
     await relay.call(
         bot_id=bot_id,
         owner_id=owner_id,
@@ -539,7 +545,7 @@ async def update_session(
         # there is no Body(...) on it. Sending a body is silently discarded and
         # the endpoint answers 200 with the unchanged session: a no-op that
         # looks like success.
-        path=f"/api/sessions/{session_id}/update",
+        path=f"/api/sessions/{encode_session_key(facts.active_engine, session_id)}/update",
         params=payload,
     )
     if not isinstance(result.data, dict):
@@ -581,7 +587,7 @@ async def delete_session(
         facts=facts,
         stage=stage.value,
         method="DELETE",
-        path=f"/api/sessions/{session_id}",
+        path=f"/api/sessions/{encode_session_key(facts.active_engine, session_id)}",
     )
     return deleted(request)
 
@@ -941,7 +947,7 @@ async def list_session_messages(
         facts=facts,
         stage=stage.value,
         method="GET",
-        path=f"/api/sessions/{session_id}/messages",
+        path=f"/api/sessions/{encode_session_key(facts.active_engine, session_id)}/messages",
         # The history route tail-limits rather than paginating, so the offset is
         # applied here instead of being sent. See ``_history_window``.
         params=_history_window(page),
@@ -989,6 +995,6 @@ async def clear_session_messages(
         facts=facts,
         stage=stage.value,
         method="DELETE",
-        path=f"/api/sessions/{session_id}/messages",
+        path=f"/api/sessions/{encode_session_key(facts.active_engine, session_id)}/messages",
     )
     return deleted(request)
