@@ -30,7 +30,7 @@ refused, a validation failure raised) exactly as W4 shipped it.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Optional, Sequence
+from typing import Any, Callable, Optional
 
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
@@ -52,6 +52,9 @@ APPLY_TASK_TYPE = "config_manifest.apply"
 #: outlive the lock that a later apply would reap.
 APPLY_TASK_DEADLINE_SECONDS = 20 * 60
 
+#: The key every payload this version enqueues carries, ``null`` included.
+PHASE_KEY = "phase"
+
 
 def build_apply_task_payload(
     *,
@@ -65,7 +68,7 @@ def build_apply_task_payload(
     trigger: str,
     lock_token: str,
     started_at: str,
-    phases: frozenset[ApplyPhase],
+    phase: ApplyPhase | None,
     carry_from_apply_id: Optional[str] = None,
     engine_type: Optional[str] = None,
     bot_type: Optional[str] = None,
@@ -85,15 +88,16 @@ def build_apply_task_payload(
             "trigger": "create:pre_container",
             "lock_token": "lk_3f9c...",
             "started_at": "2026-03-01T09:00:00+00:00",
-            "phases": ["pre_container"],     # sorted .value strings
+            "phase": "pre_container",        # or "on_container", or None
             "carry_from_apply_id": None,     # or an earlier phase's apply_id
             "engine_type": "claude_code",    # only read when there is no
             "bot_type": "arca",              # bot record yet
         }
 
-    ``phases`` is sorted so two enqueues of one apply cannot differ by set
-    iteration order, and is never ``None``: what an apply covers is always
-    stated rather than reconstructed from a default at the far end.
+    ``phase`` states what the apply covers rather than leaving it to be
+    reconstructed from a default at the far end: one of the two phase names for
+    a creation half, and ``null`` — a stated value, not an absence — for the
+    whole apply.
 
     Consumed by: :meth:`ApplyTaskHandler.handle`, which passes it straight to
     ``BotConfigManifestApplyService.run_apply_task``.
@@ -134,29 +138,28 @@ def build_apply_task_payload(
         # row already holds this; carrying it keeps the finished report's own
         # copy from disagreeing with the row it belongs to.
         "started_at": started_at,
-        # Sorted for a stable payload: two enqueues of the same apply must not
-        # differ only by set iteration order. Never ``None``: ``phases`` is
-        # required, so what an apply covers is always stated in its payload
-        # rather than reconstructed from a default at the far end.
-        "phases": sorted(p.value for p in phases),
+        # What this apply covers, always stated: a phase name for a creation
+        # half, ``null`` for the whole apply. Never reconstructed from a
+        # default at the far end.
+        PHASE_KEY: phase.value if phase is not None else None,
         "carry_from_apply_id": carry_from_apply_id,
         "engine_type": engine_type,
         "bot_type": bot_type,
     }
 
 
-def phases_from_payload(value: Sequence[str]) -> frozenset[ApplyPhase]:
-    """The phases the payload names, back as enum members::
+def phase_from_payload(value: str | None) -> ApplyPhase | None:
+    """The phase the payload names, back as an enum member::
 
-        phases_from_payload(["pre_container"])
-        # -> frozenset({ApplyPhase.PRE_CONTAINER})
-        phases_from_payload(["on_container", "pre_container"])
-        # -> ALL_PHASES
+        phase_from_payload(ApplyPhase.PRE_CONTAINER.value)
+        # -> ApplyPhase.PRE_CONTAINER
+        phase_from_payload(None)
+        # -> None, i.e. the whole apply
 
     Raises ``ValueError`` on an unknown phase name rather than dropping it.
     Always present in a payload — see the builder.
     """
-    return frozenset(ApplyPhase(item) for item in value)
+    return ApplyPhase(value) if value is not None else None
 
 
 class ApplyTaskHandler:
@@ -227,6 +230,7 @@ __all__ = [
     "APPLY_TASK_TYPE",
     "ApplyTaskHandler",
     "ApplyTaskLifecycle",
+    "PHASE_KEY",
     "build_apply_task_payload",
-    "phases_from_payload",
+    "phase_from_payload",
 ]

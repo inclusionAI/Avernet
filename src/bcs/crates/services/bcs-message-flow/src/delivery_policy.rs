@@ -15,6 +15,29 @@ pub struct LiveDeliveryPolicy {
 }
 
 impl LiveDeliveryPolicy {
+    /// Refresh on master acquisition, serialized with management API writes.
+    pub async fn refresh_for_takeover(&self) -> ServiceResult<()> {
+        let mut current = self.snapshot.write().await;
+        let stored = self.repository.load_policy().await
+            .map_err(|_| ServiceError::InternalError("delivery policy takeover read failed".into()))?;
+        stored.policy.validate().map_err(|_| ServiceError::InternalError("invalid durable delivery policy".into()))?;
+        *current = stored;
+        Ok(())
+    }
+
+    /// Reconcile late commits from a previous master without replacing equal
+    /// versions or racing this process's management commit/publication lock.
+    pub async fn reconcile_durable_version(&self) -> ServiceResult<()> {
+        let mut current = self.snapshot.write().await;
+        let stored = self.repository.load_policy().await
+            .map_err(|_| ServiceError::InternalError("delivery policy reconciliation read failed".into()))?;
+        if stored.version > current.version {
+            stored.policy.validate().map_err(|_| ServiceError::InternalError("invalid durable delivery policy".into()))?;
+            *current = stored;
+        }
+        Ok(())
+    }
+
     pub fn new(repository: Arc<dyn MessageDeliveryRepoPort>, initial: DeliveryPolicyRecord) -> Self {
         Self { snapshot: Arc::new(tokio::sync::RwLock::new(initial)), repository, updates: Arc::new(tokio::sync::Semaphore::new(8)),
             scheduler_available: Arc::new(AtomicBool::new(false)) }

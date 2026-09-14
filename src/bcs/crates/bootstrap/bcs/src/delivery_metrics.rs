@@ -85,9 +85,14 @@ impl Sample {
         }
     }
 }
-#[derive(Default)]
 pub struct DeliveryMetrics {
+    boot_id: String,
     counters: Mutex<BTreeMap<Key, Sample>>,
+}
+impl Default for DeliveryMetrics {
+    fn default() -> Self {
+        Self { boot_id: uuid::Uuid::new_v4().simple().to_string(), counters: Mutex::default() }
+    }
 }
 impl DeliveryInstrumentation for DeliveryMetrics {
     fn operation(&self, operation: &'static str, seconds: f64, rows: usize, success: bool) {
@@ -296,7 +301,7 @@ pub async fn run(
     metrics: Arc<DeliveryMetrics>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
-    let boot = uuid::Uuid::new_v4().simple().to_string();
+    let boot = &metrics.boot_id;
     let mut ticker = tokio::time::interval(Duration::from_secs(10));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut snapshot = Snapshot::default();
@@ -326,7 +331,7 @@ pub async fn run(
         let (dropped, errors) = crate::logging::delivery_monitor_statistics();
         let record = snapshot.render(
                 now,
-                &boot,
+                boot,
                 &metrics,
                 policy
                     .scheduler_available
@@ -344,6 +349,20 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sampler_restarts_preserve_counter_identity() {
+        let metrics = Arc::new(DeliveryMetrics::default());
+        let first_epoch = metrics.clone();
+        first_epoch.operation("tick", 0.1, 3, true);
+        let first = Snapshot::default().render(1000, &first_epoch.boot_id, &first_epoch, true, false, 0, [0; 6], 0, 0);
+        drop(first_epoch);
+        let next_epoch = metrics.clone();
+        next_epoch.operation("tick", 0.2, 2, true);
+        let next = Snapshot::default().render(2000, &next_epoch.boot_id, &next_epoch, true, false, 0, [0; 6], 0, 0);
+        assert_eq!(first.lines().next().unwrap().split(',').nth(2), next.lines().next().unwrap().split(',').nth(2));
+        assert!(next.contains(",3,0,0,1,0,11,5,2,"), "operation counter remains cumulative");
+        assert_ne!(metrics.boot_id, DeliveryMetrics::default().boot_id);
+    }
     #[test]
     fn snapshot_failure_retains_data_and_successful_empty_clears_it() {
         let mut snapshot = Snapshot::default();

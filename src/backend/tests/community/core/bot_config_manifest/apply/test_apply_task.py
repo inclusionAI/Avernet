@@ -37,12 +37,15 @@ from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     APPLY_TASK_TYPE,
     ApplyTaskHandler,
     build_apply_task_payload,
-    phases_from_payload,
+    phase_from_payload,
 )
-from agentclaw.community.core.bot_config_manifest.apply.order import (
-    ALL_PHASES,
-    ApplyPhase,
+from agentclaw.community.core.bot_config_manifest.apply.triggers import (
+    CREATE_ON_CONTAINER,
+    CREATE_PRE_CONTAINER,
+    EXPLICIT,
+    require_phase_matches_trigger,
 )
+from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 
 # Imported for side effect: registers the models on ``Base.metadata``.
@@ -226,7 +229,6 @@ def _start(service):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        phases=ALL_PHASES,
     )
 
 
@@ -252,7 +254,7 @@ def test_the_payload_carries_identifiers_and_not_the_document():
         trigger="explicit",
         lock_token="tok",
         started_at="2026-09-01T00:00:00",
-        phases=ALL_PHASES,
+        phase=None,
     )
     assert "document" not in payload and "parsed" not in payload
     assert "bot" not in payload
@@ -261,30 +263,37 @@ def test_the_payload_carries_identifiers_and_not_the_document():
     assert payload["tenant"] == "t1"
 
 
-def test_the_payloads_phases_are_stable_across_two_enqueues():
-    """A set's iteration order must not leak into a persisted payload.
+def test_the_payload_states_the_phase_and_round_trips_it():
+    """What an apply covers is written down, never inferred at the far end.
 
-    Two enqueues of the same apply that differ only by that would look like
-    different work to anyone comparing rows.
+    ``null`` is one of the stated values, not an absence: it says this apply is
+    not a creation half, which is the whole document.
     """
-    both = frozenset({ApplyPhase.ON_CONTAINER, ApplyPhase.PRE_CONTAINER})
-    first = build_apply_task_payload(
-        apply_id="a1", entity_id=_ENTITY, bot_id=_BOT, owner_id=_ENTITY,
-        actor_id=_ENTITY, env="dev", tenant="t1", trigger="explicit",
-        lock_token="tok", started_at="2026-09-01T00:00:00", phases=both,
+    def payload_for(phase):
+        return build_apply_task_payload(
+            apply_id="a1", entity_id=_ENTITY, bot_id=_BOT, owner_id=_ENTITY,
+            actor_id=_ENTITY, env="dev", tenant="t1", trigger="explicit",
+            lock_token="tok", started_at="2026-09-01T00:00:00", phase=phase,
+        )
+
+    whole = payload_for(None)
+    assert "phase" in whole, (
+        "the payload left out what the apply covers; the far end would have to "
+        "reconstruct it from a default"
     )
-    second = build_apply_task_payload(
-        apply_id="a1", entity_id=_ENTITY, bot_id=_BOT, owner_id=_ENTITY,
-        actor_id=_ENTITY, env="dev", tenant="t1", trigger="explicit",
-        lock_token="tok", started_at="2026-09-01T00:00:00", phases=both,
-    )
-    assert first["phases"] == second["phases"]
-    assert phases_from_payload(first["phases"]) == both
-    # Always written, never inferred. ``phases`` is a required argument, so a
-    # payload cannot leave what an apply covers to a default at the far end —
-    # which is what an absent value used to mean.
-    assert first["phases"] is not None
-    assert phases_from_payload(first["phases"]) == ALL_PHASES
+    assert whole["phase"] is None
+    assert phase_from_payload(whole["phase"]) is None
+
+    for phase in ApplyPhase:
+        written = payload_for(phase)["phase"]
+        assert written == phase.value
+        assert phase_from_payload(written) is phase
+
+
+def test_an_unknown_phase_name_in_a_payload_raises():
+    """Dropping it would silently narrow or widen what an apply covers."""
+    with pytest.raises(ValueError):
+        phase_from_payload("mid_container")
 
 
 # ── re-running ─────────────────────────────────────────────────────────────
@@ -401,3 +410,40 @@ def test_an_apply_that_cannot_be_rebuilt_releases_its_lock(world):
     report = service.last_apply(entity_id=_ENTITY, bot_id=_BOT)
     assert report is not None and report.status is ApplyStatus.FAILED
     assert scripts.writes == 0, "nothing should have been applied"
+
+
+# ── the trigger and the phase must agree exactly ───────────────────────────
+
+
+@pytest.mark.parametrize(
+    "trigger, phase",
+    [
+        (CREATE_PRE_CONTAINER, ApplyPhase.PRE_CONTAINER),
+        (CREATE_ON_CONTAINER, ApplyPhase.ON_CONTAINER),
+        (EXPLICIT, None),
+        ("put", None),
+    ],
+)
+def test_a_trigger_carrying_the_half_it_delivers_is_accepted(trigger, phase):
+    require_phase_matches_trigger(trigger, phase)
+
+
+@pytest.mark.parametrize(
+    "trigger, phase",
+    [
+        # The crossed pairs: a phase *is* present, so a check that asked only
+        # "was one supplied?" would wave these through and run the opposite
+        # half under a trigger saying otherwise.
+        (CREATE_PRE_CONTAINER, ApplyPhase.ON_CONTAINER),
+        (CREATE_ON_CONTAINER, ApplyPhase.PRE_CONTAINER),
+        # A creation trigger naming no half at all.
+        (CREATE_PRE_CONTAINER, None),
+        (CREATE_ON_CONTAINER, None),
+        # A non-creation trigger naming one.
+        (EXPLICIT, ApplyPhase.PRE_CONTAINER),
+        ("put", ApplyPhase.ON_CONTAINER),
+    ],
+)
+def test_a_trigger_and_a_phase_that_disagree_are_refused(trigger, phase):
+    with pytest.raises(ValueError):
+        require_phase_matches_trigger(trigger, phase)

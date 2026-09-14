@@ -18,6 +18,11 @@ exclusivity is implemented; it must never be emulated by a scope-wide abort.
 
 ## Provides
 
+LiveDeliveryPolicy reconciles newer durable versions under the management snapshot
+write lock. Bootstrap invokes this every five seconds on the master to observe
+late old-master commits; failed reads retain the existing snapshot and return an
+error. Equal/older versions do not replace current state.
+
 - Inline v1 and reference v2 coordination consumption through an injected resolver port.
 
 Queued messages and run-reply display companions share the existing persisted
@@ -56,7 +61,7 @@ No SQL/cache/Prometheus implementation dependency is introduced into this servic
 
 LiveDeliveryPolicy serializes durable policy CAS and publication; Group admission and runtime read defaults plus partial Bot overrides, preserving drain and send-start version fencing.
 Policy management validates trusted Human callers again at the application boundary, grants environment-wide access, and audits actor, versions, field names, timestamps and outcomes without recording credentials or full payloads.
-Dynamic enforce requires durable storage and a healthy scheduler, not a host file lock. Deployment guarantees a single instance per DB; scheduler shutdown/failure still closes admission and policy activation.
+Dynamic enforce requires durable storage and healthy scheduler supervision, not a host file lock. Bootstrap supplies a single elected-master runtime epoch per DB. Policy refresh on takeover uses the same snapshot write lock as management updates; configuration requests route to the master, without periodic policy broadcasts. Demotion cancels local scheduler futures, preserving uncertain send-start records for takeover recovery. Scheduler supervision failure still closes admission and policy activation.
 
 - `MessageFlowService` implementation for Workbench/Web group send, bot event relay, chat abort, and master-slave task flow.
 - `A2aChatService` implementation for direct bot chat and async chat run APIs.

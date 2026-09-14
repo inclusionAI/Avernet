@@ -87,7 +87,7 @@ def _dummy_entry_fetcher():
     return DeclaredSourceResolver(FakeManifestContent(), FakeCredentials(), FakeObjectStore())
 
 
-async def _apply(engine, document, *, ctx=None, dry_run=False, phases=None):
+async def _apply(engine, document, *, ctx=None, dry_run=False, phase=None):
     return await engine.apply(
         ctx or make_context(),
         yaml.safe_load(document),
@@ -95,7 +95,7 @@ async def _apply(engine, document, *, ctx=None, dry_run=False, phases=None):
         trigger="explicit",
         started_at=datetime.now(),
         dry_run=dry_run,
-        phases=phases,
+        phase=phase,
     )
 
 
@@ -433,7 +433,7 @@ async def test_phase_a_applies_only_the_script():
     report = await _apply(
         _engine(scripts, activations),
         _MCP_AND_SCRIPT,
-        phases=frozenset({ApplyPhase.PRE_CONTAINER}),
+        phase=ApplyPhase.PRE_CONTAINER,
     )
 
     assert _outcomes(report) == {"script": EntryOutcome.CREATED}
@@ -448,7 +448,7 @@ async def test_phase_b_applies_everything_but_the_script():
     report = await _apply(
         _engine(scripts, activations),
         _MCP_AND_SCRIPT,
-        phases=frozenset({ApplyPhase.ON_CONTAINER}),
+        phase=ApplyPhase.ON_CONTAINER,
     )
 
     assert _outcomes(report) == {"gh": EntryOutcome.CREATED}
@@ -480,7 +480,7 @@ async def test_phase_a_reaches_no_device_and_needs_no_container():
     report = await _apply(
         _engine(scripts, ExplodingActivation()),
         _MCP_AND_SCRIPT,
-        phases=frozenset({ApplyPhase.PRE_CONTAINER}),
+        phase=ApplyPhase.PRE_CONTAINER,
     )
     assert _outcomes(report) == {"script": EntryOutcome.CREATED}
 

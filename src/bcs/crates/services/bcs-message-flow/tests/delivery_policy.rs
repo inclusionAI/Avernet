@@ -9,9 +9,23 @@ fn admin() -> CallerContext {
     CallerContext::Human(HumanActor { actor_id: "human_operator".into(), staff_no: "operator".into() })
 }
 
+#[tokio::test]
+async fn takeover_reloads_policy_changed_by_previous_master() {
+    let repo = Arc::new(MemoryMessageRepo::new());
+    let live = LiveDeliveryPolicy::new(repo.clone(), Default::default());
+    let mut stored = DeliveryPolicyRecord::default();
+    stored.version = 1;
+    stored.policy.pause_dispatch = true;
+    repo.replace_policy(0, stored.clone()).await.unwrap();
+    assert_eq!(live.snapshot.read().await.version, 0);
+    live.refresh_for_takeover().await.unwrap();
+    assert_eq!(*live.snapshot.read().await, stored);
+}
+
 
 struct SlowPolicyRepo {
     inner: MemoryMessageRepo,
+    fail_read: std::sync::atomic::AtomicBool,
     started: tokio::sync::Notify,
     release: tokio::sync::Notify,
 }
@@ -27,6 +41,9 @@ impl MessageDeliveryRepoPort for SlowPolicyRepo {
     async fn work_batch(&self, kind: bcs_service_api::port::repo::message_delivery::DeliveryWorkBatch, now: i64, after: &str, limit: usize) -> Result<Vec<bcs_domain::message_delivery::PersistedMessageDelivery>, bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> { self.inner.work_batch(kind, now, after, limit).await }
     async fn queue_statistics(&self) -> Result<Vec<bcs_service_api::port::repo::message_delivery::DeliveryQueueStatistic>, bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> { self.inner.queue_statistics().await }
     async fn load_policy(&self) -> Result<DeliveryPolicyRecord, bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
+        if self.fail_read.load(Ordering::SeqCst) {
+            return Err(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Storage("unavailable".into()));
+        }
         self.inner.load_policy().await
     }
     async fn replace_policy(&self, expected: u64, record: DeliveryPolicyRecord) -> Result<(), bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
@@ -41,7 +58,7 @@ impl MessageDeliveryRepoPort for SlowPolicyRepo {
 
 #[tokio::test]
 async fn disconnected_management_request_still_finishes_commit_and_publication() {
-    let repo = Arc::new(SlowPolicyRepo { inner: MemoryMessageRepo::new(), started: Default::default(), release: Default::default() });
+    let repo = Arc::new(SlowPolicyRepo { inner: MemoryMessageRepo::new(), fail_read: Default::default(), started: Default::default(), release: Default::default() });
     let live = Arc::new(LiveDeliveryPolicy::new(repo.clone(), Default::default()));
     let request_live = live.clone();
     let request = tokio::spawn(async move { request_live.replace(admin(), 0, DeliveryPolicy::default()).await });
@@ -52,6 +69,47 @@ async fn disconnected_management_request_still_finishes_commit_and_publication()
         loop { if live.snapshot.read().await.version == 1 { break; } tokio::task::yield_now().await; }
     }).await.unwrap();
     assert_eq!(live.get(admin()).await.unwrap().version, 1);
+}
+
+#[tokio::test]
+async fn failed_takeover_read_does_not_publish_a_default_policy() {
+    let repo = Arc::new(SlowPolicyRepo { inner: MemoryMessageRepo::new(), fail_read: true.into(), started: Default::default(), release: Default::default() });
+    let mut initial = DeliveryPolicyRecord::default();
+    initial.version = 7;
+    initial.policy.pause_dispatch = true;
+    let live = LiveDeliveryPolicy::new(repo.clone(), initial.clone());
+    assert!(live.refresh_for_takeover().await.is_err());
+    assert_eq!(*live.snapshot.read().await, initial);
+    repo.fail_read.store(false, Ordering::SeqCst);
+    live.refresh_for_takeover().await.unwrap();
+    assert_eq!(live.snapshot.read().await.version, 0);
+}
+
+#[tokio::test]
+async fn reconciliation_observes_previous_masters_late_commit() {
+    let repo = Arc::new(SlowPolicyRepo { inner: MemoryMessageRepo::new(), fail_read: Default::default(), started: Default::default(), release: Default::default() });
+    let old = Arc::new(LiveDeliveryPolicy::new(repo.clone(), Default::default()));
+    let next = LiveDeliveryPolicy::new(repo.clone(), Default::default());
+    let writing = old.clone();
+    let update = tokio::spawn(async move {
+        let mut policy = DeliveryPolicy::default();
+        policy.pause_dispatch = true;
+        writing.replace(admin(), 0, policy).await
+    });
+    repo.started.notified().await;
+    next.refresh_for_takeover().await.unwrap();
+    assert_eq!(next.snapshot.read().await.version, 0);
+    repo.release.notify_one();
+    let committed = update.await.unwrap().unwrap();
+    assert!(!next.snapshot.read().await.policy.pause_dispatch);
+    repo.fail_read.store(true, Ordering::SeqCst);
+    assert!(next.reconcile_durable_version().await.is_err());
+    assert_eq!(next.snapshot.read().await.version, 0);
+    repo.fail_read.store(false, Ordering::SeqCst);
+    next.reconcile_durable_version().await.unwrap();
+    assert_eq!(*next.snapshot.read().await, committed);
+    next.reconcile_durable_version().await.unwrap();
+    assert_eq!(*next.snapshot.read().await, committed);
 }
 
 #[tokio::test]

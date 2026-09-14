@@ -4716,7 +4716,7 @@ impl BcsServer {
         );
         let message_flow_builder = message_flow_builder.with_system_message(use_cases.system_message.clone());
         let channel_slot = message_flow_builder.channel_slot();
-        let message_flow: Arc<dyn MessageFlowService> = crate::message_delivery_wiring::wire(message_flow_builder, &config).await?;
+        let message_flow: Arc<dyn MessageFlowService> = crate::message_delivery_wiring::wire_with_leader(message_flow_builder, &config, leader_election.clone()).await?;
         let mut delivery_startup_guard = crate::message_delivery_wiring::StartupGuard(Some(message_flow.clone()));
         frontend_connections
             .set_bot_query(use_cases.bot_query.clone())

@@ -20,6 +20,7 @@ from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     TeclawDelivery,
 )
 from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
+from agentclaw.community.core.bot_config_manifest.apply import triggers
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.repository.apply_models import (  # noqa: F401
@@ -182,14 +183,21 @@ def _world(*, bot, platform_managed, platform_activation=None, redeliver=None):
     return service, device_activation, platform_activation
 
 
-def _apply(service, bot, phases):
+def _apply(service, bot, phase):
+    # A phase is a creation half, so it rides the creation trigger that names
+    # it: ``start_apply`` refuses the two stated apart.
     service.start_apply(
         entity_id=_ENTITY,
         bot_id=bot["bot_id"],
         bot=bot,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
-        phases=phases,
+        trigger=(
+            triggers.CREATE_PRE_CONTAINER
+            if phase is ApplyPhase.PRE_CONTAINER
+            else triggers.CREATE_ON_CONTAINER
+        ),
+        phase=phase,
     )
     return service.last_apply(entity_id=_ENTITY, bot_id=bot["bot_id"])
 
@@ -213,7 +221,7 @@ def test_teclaw_on_applies_container_bound_categories_in_the_pre_container_phase
     service, device_activation, platform_activation = _world(
         bot=_TECLAW_BOT, platform_managed=True, redeliver=redeliver
     )
-    report = _apply(service, _TECLAW_BOT, frozenset({ApplyPhase.PRE_CONTAINER}))
+    report = _apply(service, _TECLAW_BOT, ApplyPhase.PRE_CONTAINER)
     assert report.status is ApplyStatus.SUCCEEDED
     assert [c.construct.value for c in report.categories] == ["mcp"]
     # The platform ports were used, the device ports were not.
@@ -229,7 +237,7 @@ def test_teclaw_on_records_a_failed_closing_step_as_a_note() -> None:
         return "redeliver failed: container unreachable"
 
     service, _, _ = _world(bot=_TECLAW_BOT, platform_managed=True, redeliver=redeliver)
-    report = _apply(service, _TECLAW_BOT, frozenset({ApplyPhase.PRE_CONTAINER}))
+    report = _apply(service, _TECLAW_BOT, ApplyPhase.PRE_CONTAINER)
     assert report.status is ApplyStatus.SUCCEEDED
     assert report.notes == ("redeliver failed: container unreachable",)
     # And it survives the round trip through the stored record.
@@ -247,9 +255,9 @@ def test_teclaw_off_is_the_pre_w8_shape() -> None:
     service, device_activation, platform_activation = _world(
         bot=_TECLAW_BOT, platform_managed=False, redeliver=redeliver
     )
-    pre = _apply(service, _TECLAW_BOT, frozenset({ApplyPhase.PRE_CONTAINER}))
+    pre = _apply(service, _TECLAW_BOT, ApplyPhase.PRE_CONTAINER)
     assert pre.categories == ()  # mcp is not pre-container with the switch off
-    on = _apply(service, _TECLAW_BOT, frozenset({ApplyPhase.ON_CONTAINER}))
+    on = _apply(service, _TECLAW_BOT, ApplyPhase.ON_CONTAINER)
     assert [c.construct.value for c in on.categories] == ["mcp"]
     assert device_activation.activated == ["github"]
     assert platform_activation.activated == []
@@ -267,9 +275,9 @@ def test_arca_never_sees_the_switch() -> None:
     service, device_activation, platform_activation = _world(
         bot=_ARCA_BOT, platform_managed=True, redeliver=redeliver
     )
-    pre = _apply(service, _ARCA_BOT, frozenset({ApplyPhase.PRE_CONTAINER}))
+    pre = _apply(service, _ARCA_BOT, ApplyPhase.PRE_CONTAINER)
     assert pre.categories == ()
-    on = _apply(service, _ARCA_BOT, frozenset({ApplyPhase.ON_CONTAINER}))
+    on = _apply(service, _ARCA_BOT, ApplyPhase.ON_CONTAINER)
     assert [c.construct.value for c in on.categories] == ["mcp"]
     assert device_activation.activated == ["github"]
     assert platform_activation.activated == []
@@ -307,7 +315,7 @@ def test_a_raising_closing_step_is_a_note_not_a_failure() -> None:
     service, _, platform_activation = _world(
         bot=_TECLAW_BOT, platform_managed=True, redeliver=redeliver
     )
-    report = _apply(service, _TECLAW_BOT, frozenset({ApplyPhase.PRE_CONTAINER}))
+    report = _apply(service, _TECLAW_BOT, ApplyPhase.PRE_CONTAINER)
     assert report.status is ApplyStatus.SUCCEEDED
     assert platform_activation.activated == ["github"]
     assert report.notes == ("delivery could not be closed: ConnectionError",)

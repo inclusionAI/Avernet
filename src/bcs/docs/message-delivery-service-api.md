@@ -3,6 +3,29 @@
 本文描述单实例消息拥塞控制的后端契约，不包含 Workbench 前端实现。
 详细设计见 [设计方案](plans/2026-09-04-bcs-message-congestion-control-design.md)。
 
+## Master 调度与接管
+
+多实例部署复用已有 `LeaderElectionPort`，只允许当前 master 执行队列恢复、
+调度、过期处理、主动 abort 及队列总量采样。follower 不消费；管理接口由部署层
+路由到 master。每次成为 master 先从 DB 刷新策略，和管理接口更新共用快照写锁，
+刷新失败或超时不开始调度，不增加周期性策略广播。
+
+master 在运行期间每 5 秒读取一次 DB 策略记录并校验版本，仅在 DB 版本更高时更新
+内存快照，用于收敛旧 master 在切主后才完成的策略提交。校验与本机管理接口更新
+共用快照写锁；校验失败或超时保留现有策略并继续重试，日志限频。DB 正常时策略在
+下一次校验完成后收敛，并非跨节点即时生效；持续 DB 故障期间不承诺 5 秒生效。
+校验 future 随 master 调度周期停止，不在 follower 执行，也不重启正在处理的运行。
+
+监督任务每 100 ms 检查 master 身份；检查失败或超时按非 master 处理，停止当前
+调度周期及本地 I/O future，不在 follower 执行恢复。已提交 send-start 的记录保留，
+由新 master 按 Unknown 等既有保守语义恢复，不自动重发。取消本地 future 不代表
+下游 Bot 已停止。该机制依赖已有选主的独占保证，不新增分布式 fencing，也不能撤回
+已经发出的网络请求。单机环境使用现有 standalone leader 实现。
+
+队列记录解码失败会限频记录固定操作名、错误类别及列名/类型，不输出字段值或
+可能含正文的 serde 错误。内部 ZDAS 插件按列类型将 JSON 映射为文本，真实 BLOB
+保持二进制；运行时是否遇到此兼容问题仍需通过部署日志验证。
+
 ## Run 级回复归一化与内部汇总
 
 队列 Group 回复不再假设引擎 final 包含全文。按 env/session/发送 Bot/run 隔离，
@@ -511,6 +534,8 @@ wait_reason 编码：0 无/未知、1 prior_message_running、2 bot_capacity、3
 时长平均值为 sum 差值 / count 差值（分母 0 时无样本）。
 这些是累计 sum/count/max，**不是直方图，不能计算 P95/P99**；max 是启动以来峰值，
 不能用相邻 max 差值当区间最大值。新 boot ID 重置 counter，第一条只建立基线。
+boot ID 与进程内累计计数对象共同初始化；同一进程退为 follower 后重新成为 master，
+采样器复用原 boot ID 和计数，不把一次主从切换误报为计数重置。
 type=2/3 某个组合第一次事件前不输出，首次出现的累计值从本 boot 的 0 起算。
 第 14～15 列只描述 SQL 快照；策略/worker/cache 数据仍为本轮读取的数据。
 

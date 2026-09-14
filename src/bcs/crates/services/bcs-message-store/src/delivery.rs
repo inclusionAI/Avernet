@@ -401,6 +401,28 @@ pub(crate) fn apply_changes(
 }
 
 fn row_to_delivery(row: DbRow) -> Result<PersistedMessageDelivery, MessageDeliveryRepoError> {
+    let result = decode_delivery(&row);
+    if result.is_err() {
+        // Bounded, metadata-only diagnostics. Serde errors may contain input
+        // values, so never log the error string or row contents here.
+        static LAST_WARNING: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64;
+        let previous = LAST_WARNING.load(std::sync::atomic::Ordering::Relaxed);
+        if now.saturating_sub(previous) >= 30_000 && LAST_WARNING.compare_exchange(previous, now,
+            std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed).is_ok() {
+            let types: Vec<_> = COLS.iter().map(|name| (*name, match row.get(name) {
+                None => "missing", Some(DbValue::Null) => "null", Some(DbValue::String(_)) => "string",
+                Some(DbValue::Bytes(_)) => "bytes", Some(DbValue::I64(_)) => "i64", Some(DbValue::U64(_)) => "u64",
+                Some(DbValue::Bool(_)) => "bool", Some(DbValue::F64(_)) => "f64",
+            })).collect();
+            tracing::warn!(operation = "decode_delivery", error_category = "column_conversion", column_types = ?types,
+                "delivery row decoding failed; payload omitted; scheduler may be backing off");
+        }
+    }
+    result
+}
+
+fn decode_delivery(row: &DbRow) -> Result<PersistedMessageDelivery, MessageDeliveryRepoError> {
     let mut map = serde_json::Map::new();
     for name in COLS {
         let value = row

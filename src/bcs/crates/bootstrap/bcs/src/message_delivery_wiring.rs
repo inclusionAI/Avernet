@@ -1,4 +1,4 @@
-//! Durable single-instance scheduler composition. Deployment guarantees exclusivity.
+//! Durable scheduler composition gated by the existing master election port.
 use bcs_message_flow::{
     BcsMessageFlow,
     delivery_runtime::{DeliveryRuntime, DeliveryRuntimeConfig},
@@ -7,6 +7,7 @@ use bcs_message_flow::{
 };
 use bcs_service_api::application::message_delivery::ManagedMessageDeliveryService;
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use tracing::instrument::WithSubscriber;
 
 #[cfg(test)]
 #[path = "../../../test-support/message_flow_contract_support.rs"]
@@ -45,9 +46,15 @@ impl Drop for SchedulerGuard {
     }
 }
 
-pub async fn wire(
+#[cfg(test)]
+pub async fn wire(flow: BcsMessageFlow, config: &crate::BcsConfig) -> crate::Result<Arc<BcsMessageFlow>> {
+    wire_with_leader(flow, config, Arc::new(bcs_leader_election::StandaloneLeaderElection::local())).await
+}
+
+pub async fn wire_with_leader(
     mut flow: BcsMessageFlow,
     config: &crate::BcsConfig,
+    leader: Arc<dyn bcs_service_api::LeaderElectionPort>,
 ) -> crate::Result<Arc<BcsMessageFlow>> {
     use bcs_message_flow::delivery_policy::LiveDeliveryPolicy;
     use std::sync::atomic::Ordering;
@@ -75,7 +82,7 @@ pub async fn wire(
     let flow = Arc::new(flow);
     flow.retain_terminal_events();
     // Durable storage always installs an idle scheduler, even when all policy
-    // switches are off. Deployment owns single-instance, non-overlapping runs.
+    // switches are off. Only the current master's epoch may consume work.
     if !durable {
         if initial.policy.needs_scheduler() || pending {
             return Err(invalid("message delivery scheduler requires SQLite or MySQL/OceanBase"));
@@ -84,7 +91,6 @@ pub async fn wire(
     }
     let (completion_sender, completion_receiver) = tokio::sync::watch::channel(false);
     let guard = SchedulerGuard { service: service.clone(), policy: live.clone(), completion: completion_sender };
-    service.recover(chrono::Utc::now().timestamp_millis()).await.map_err(|_| invalid("message delivery startup recovery failed"))?;
     let runtime = DeliveryRuntime {
         policy: Some(live.clone()),
         service: service.clone(),
@@ -103,25 +109,146 @@ pub async fn wire(
     flow.delivery_shutdown.set((sender, completion_receiver)).map_err(|_| invalid("queue shutdown hook already installed"))?;
     service.set_admission_available(true);
     live.scheduler_available.store(true, Ordering::SeqCst);
-    let (metrics_stop, metrics_receiver) = tokio::sync::watch::channel(false);
-    let sampler = tokio::spawn(crate::delivery_metrics::run(service.clone(), live.clone(), metrics, metrics_receiver));
     let notifications = service.subscribe();
     tokio::spawn(bcs_message_flow::delivery_notifications::run(Arc::downgrade(&flow), notifications, receiver.clone()));
     tokio::spawn(async move {
         let _guard = guard;
-        if let Err(error) = runtime.run(receiver).await {
+        if let Err(error) = run_on_master(runtime, leader, service, live, metrics, receiver).await {
             tracing::error!(%error, "message delivery scheduler stopped; new admissions are disabled");
         }
         _guard.service.set_admission_available(false);
         _guard.policy.scheduler_available.store(false, Ordering::SeqCst);
-        let _ = metrics_stop.send(true);
-        if let Err(error) = sampler.await { tracing::error!(%error, "delivery monitor sampler stopped unexpectedly"); }
-    });
+    }.with_current_subscriber());
     Ok(flow)
+}
+
+/// Drop the epoch futures on demotion: no follower recovery and no new I/O.
+/// JoinSet drop aborts local I/O tasks; persisted send-start records remain
+/// uncertain until the next master's recovery (never blindly re-enqueued).
+async fn run_on_master(
+    runtime: DeliveryRuntime,
+    leader: Arc<dyn bcs_service_api::LeaderElectionPort>,
+    service: Arc<ManagedMessageDelivery>,
+    policy: Arc<bcs_message_flow::delivery_policy::LiveDeliveryPolicy>,
+    metrics: Arc<crate::delivery_metrics::DeliveryMetrics>,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) -> Result<(), bcs_service_api::ManagedDeliveryError> {
+    let mut poll = tokio::time::interval(Duration::from_millis(100));
+    poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! { biased;
+            _ = shutdown.changed() => return Ok(()),
+            _ = poll.tick() => {}
+        }
+        if *shutdown.borrow() { return Ok(()); }
+        if !master(&leader).await { continue; }
+        let refreshed = tokio::select! { biased;
+            _ = shutdown.changed() => return Ok(()),
+            result = tokio::time::timeout(Duration::from_secs(5), policy.refresh_for_takeover()) => matches!(result, Ok(Ok(()))),
+        };
+        if !refreshed {
+            tracing::warn!("delivery master takeover policy refresh failed; dispatch remains paused");
+            tokio::select! { _ = shutdown.changed() => return Ok(()), _ = tokio::time::sleep(Duration::from_secs(5)) => {} }
+            continue;
+        }
+        if !master(&leader).await { continue; }
+        tracing::info!("delivery master epoch started");
+        let epoch = runtime.clone().run(shutdown.clone());
+        let sampler = crate::delivery_metrics::run(service.clone(), policy.clone(), metrics.clone(), shutdown.clone());
+        let reconciliation = reconcile_policy(policy.clone());
+        tokio::pin!(epoch, sampler, reconciliation);
+        loop {
+            tokio::select! { biased;
+                _ = shutdown.changed() => return Ok(()),
+                _ = poll.tick() => {
+                    if !master(&leader).await {
+                        tracing::info!("delivery master epoch stopped; unresolved sends retained for takeover");
+                        break;
+                    }
+                }
+                result = &mut epoch => return result,
+                _ = &mut sampler => return Err(bcs_service_api::ManagedDeliveryError::Conflict),
+                _ = &mut reconciliation => return Err(bcs_service_api::ManagedDeliveryError::Conflict),
+            }
+        }
+    }
+}
+
+/// This future belongs to the master epoch, so demotion/shutdown also cancels
+/// slow reconciliation without blocking leadership checks or restarting runs.
+async fn reconcile_policy(policy: Arc<bcs_message_flow::delivery_policy::LiveDeliveryPolicy>) {
+    let period = Duration::from_secs(5);
+    let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut last_warning = None;
+    loop {
+        ticker.tick().await;
+        if !matches!(tokio::time::timeout(period, policy.reconcile_durable_version()).await, Ok(Ok(()))) {
+            let now = tokio::time::Instant::now();
+            if last_warning.is_none_or(|at| now.duration_since(at) >= Duration::from_secs(30)) {
+                tracing::warn!(operation = "policy_reconciliation", "delivery policy DB check failed; retaining snapshot and retrying in 5 seconds");
+                last_warning = Some(now);
+            }
+        }
+    }
+}
+
+async fn master(leader: &Arc<dyn bcs_service_api::LeaderElectionPort>) -> bool {
+    matches!(tokio::time::timeout(Duration::from_millis(100), leader.is_leader()).await, Ok(Ok(true)))
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn master_reconciles_policy_after_five_seconds() {
+        use bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort;
+        let repo = Arc::new(bcs_message_store::MemoryMessageRepo::new());
+        let policy = Arc::new(bcs_message_flow::delivery_policy::LiveDeliveryPolicy::new(repo.clone(), Default::default()));
+        let reconciliation = reconcile_policy(policy.clone());
+        tokio::pin!(reconciliation);
+        let mut stored = bcs_config_api::message_delivery::DeliveryPolicyRecord::default();
+        stored.version = 1;
+        stored.policy.pause_dispatch = true;
+        repo.replace_policy(0, stored).await.unwrap();
+        tokio::select! { _ = &mut reconciliation => panic!("reconciliation exited"), _ = tokio::time::sleep(Duration::from_millis(100)) => {} }
+        assert_eq!(policy.snapshot.read().await.version, 0, "no eager reload before 5-second interval");
+        let observed = async {
+            loop {
+                if policy.snapshot.read().await.version == 1 { break; }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+        tokio::select! {
+            _ = &mut reconciliation => panic!("reconciliation exited"),
+            result = tokio::time::timeout(Duration::from_secs(6), observed) => result.unwrap(),
+        }
+        assert!(policy.snapshot.read().await.policy.pause_dispatch);
+    }
+
+    struct TestLeader(std::sync::atomic::AtomicU8);
+    #[async_trait::async_trait]
+    impl bcs_service_api::LeaderElectionPort for TestLeader {
+        async fn campaign(&self) -> bcs_service_api::ServiceResult<bcs_service_api::LeaderStatus> { unreachable!() }
+        async fn current_leader(&self) -> bcs_service_api::ServiceResult<Option<bcs_service_api::LeaderInfo>> { unreachable!() }
+        async fn is_leader(&self) -> bcs_service_api::ServiceResult<bool> {
+            match self.0.load(std::sync::atomic::Ordering::SeqCst) {
+                0 => Ok(false), 1 => Ok(true),
+                _ => Err(bcs_service_api::ServiceError::InternalError("unavailable".into())),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn leadership_errors_fail_closed() {
+        let election = Arc::new(TestLeader(std::sync::atomic::AtomicU8::new(2)));
+        let port: Arc<dyn bcs_service_api::LeaderElectionPort> = election.clone();
+        assert!(!master(&port).await);
+        election.0.store(0, std::sync::atomic::Ordering::SeqCst);
+        assert!(!master(&port).await);
+        election.0.store(1, std::sync::atomic::Ordering::SeqCst);
+        assert!(master(&port).await);
+    }
 
     #[test]
     fn removed_lock_path_is_rejected_by_full_config_schema() {
@@ -152,7 +279,8 @@ mod tests {
         let mut policy = DeliveryPolicy::default();
         policy.flow_enabled.group = true;
         policy.defaults.mode = BotDeliveryMode::Enforce;
-        let flow = wire(make_flow(), &config).await.unwrap();
+        let election = Arc::new(TestLeader(std::sync::atomic::AtomicU8::new(0)));
+        let flow = wire_with_leader(make_flow(), &config, election.clone()).await.unwrap();
         assert!(flow.delivery_shutdown.get().is_some(), "off startup must install the idle scheduler");
         let enabled = flow.replace_delivery_policy(admin(), 0, policy).await.unwrap();
         assert_eq!(enabled.version, 1);
@@ -164,13 +292,39 @@ mod tests {
             channel_sender_identity: None, sender_conn_id: None, provider_bypass_headers: Vec::new(),
         }).await.unwrap();
         assert!(admission.queue_admission.is_some());
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert!(fixture.bot_delivery.frames().await.is_empty(), "follower must not send queued work");
+        election.0.store(1, std::sync::atomic::Ordering::SeqCst);
         let dispatched = tokio::time::timeout(Duration::from_secs(3), async {
             while fixture.bot_delivery.frames().await.is_empty() { tokio::time::sleep(Duration::from_millis(10)).await; }
         }).await;
         assert!(dispatched.is_ok(), "idle scheduler did not dispatch: {:?}", flow.managed_deliveries.as_ref().unwrap().snapshot(None).await.unwrap());
+        election.0.store(0, std::sync::atomic::Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let mut expiring_policy = enabled.policy.clone();
+        expiring_policy.queue_ttl_ms = Some(100);
+        let enabled = flow.replace_delivery_policy(admin(), 1, expiring_policy).await.unwrap();
+        flow.handle_web_send(WebSendCommand {
+            caller: CallerContext::Human(HumanActor { actor_id: "human_1".into(), staff_no: "1".into() }),
+            group_id: "group-1".into(), session_id: Some("group-1:live".into()), from_actor_id: "human_1".into(),
+            from_name: None, message: "@Driver expire after takeover".into(), mentions: vec!["bot-driver".into()],
+            attachments: None, thinking: None, idempotency_key: Some("dynamic-2".into()), source_im_message_id: None,
+            channel_sender_identity: None, sender_conn_id: None, provider_bypass_headers: Vec::new(),
+        }).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let rows = flow.managed_deliveries.as_ref().unwrap().snapshot(None).await.unwrap();
+        assert!(rows.iter().any(|r| r.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Queued), "follower must not expire work");
+        election.0.store(1, std::sync::atomic::Ordering::SeqCst);
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let rows = flow.managed_deliveries.as_ref().unwrap().snapshot(None).await.unwrap();
+                if rows.iter().any(|r| r.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Expired) { break; }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.expect("new master must process expiry");
         flow.shutdown_managed_delivery().await.unwrap();
         assert!(!flow.delivery_policy.as_ref().unwrap().scheduler_available.load(std::sync::atomic::Ordering::SeqCst));
-        assert!(flow.replace_delivery_policy(admin(), 1, enabled.policy.clone()).await.is_err(), "stopped scheduler must remain fail closed");
+        assert!(flow.replace_delivery_policy(admin(), 2, enabled.policy.clone()).await.is_err(), "stopped scheduler must remain fail closed");
         let restarted = wire(make_flow(), &config).await.unwrap();
         assert_eq!(restarted.get_delivery_policy(admin()).await.unwrap(), enabled);
         restarted.shutdown_managed_delivery().await.unwrap();
@@ -264,14 +418,18 @@ mod tests {
             )
             .with_message_repo(repo.clone())
         };
-        let flow = wire(make_flow(), &config).await.unwrap();
-        let recovered = flow
-            .managed_deliveries
-            .as_ref()
-            .unwrap()
-            .snapshot(None)
-            .await
-            .unwrap();
+        let election = Arc::new(TestLeader(std::sync::atomic::AtomicU8::new(0)));
+        let flow = wire_with_leader(make_flow(), &config, election.clone()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert_eq!(seed.snapshot(None).await.unwrap()[0].state.status, MessageDeliveryStatus::Dispatching, "follower must not recover another master's work");
+        election.0.store(1, std::sync::atomic::Ordering::SeqCst);
+        let recovered = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let rows = flow.managed_deliveries.as_ref().unwrap().snapshot(None).await.unwrap();
+                if rows[0].state.status == MessageDeliveryStatus::Unknown { break rows; }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.expect("master acquisition must recover outstanding work");
         assert_eq!(recovered[0].state.status, MessageDeliveryStatus::Unknown);
         assert_eq!(
             recovered[0].run_id,

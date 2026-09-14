@@ -120,7 +120,7 @@ class ApplyOrchestrator:
         self,
         materialisers: Mapping[ApplyConstruct, Materialiser],
         *,
-        steps: Callable[[frozenset[ApplyPhase] | None], tuple[ApplyStep, ...]],
+        steps: Callable[[ApplyPhase | None], tuple[ApplyStep, ...]],
     ) -> None:
         self._materialisers = dict(materialisers)
         # Which construct belongs to which phase is the engine family's to say
@@ -138,7 +138,7 @@ class ApplyOrchestrator:
         apply_id: str,
         trigger: str,
         started_at: datetime,
-        phases: frozenset[ApplyPhase] | None = None,
+        phase: ApplyPhase | None = None,
         dry_run: bool = False,
     ) -> ApplyReport:
         """Walk the order, apply what is declared, and report what happened.
@@ -148,18 +148,19 @@ class ApplyOrchestrator:
         construct the document does not mention contributes no row at all, so
         a report's ``categories`` is usually shorter than the order table.
 
-        ``phases`` selects which half runs; ``None`` is both, which is what an
-        apply on an existing bot wants. ``dry_run`` stops each construct after
-        its plan, so no write to the BOT or any bot-owned entity occurs —
-        "no write of any kind" stopped being true when fetch moved into
-        ``resolve`` (W5): a declared source may be fetched, and the bytes the
-        platform acquires are filed as its own copy (§2.8's audit trail is
-        about acquisition, not delivery); the fetch is bounded by the same
-        per-apply ledger a real apply uses. No materialisation, activation
+        ``phase`` selects which half runs; ``None`` is the whole apply, which
+        is what an apply on an existing bot wants — only the creation job,
+        which delivers one half per call, names one. ``dry_run`` stops each
+        construct after its plan, so no write to the BOT or any bot-owned
+        entity occurs — "no write of any kind" stopped being true when fetch
+        moved into ``resolve`` (W5): a declared source may be fetched, and the
+        bytes the platform acquires are filed as its own copy (§2.8's audit
+        trail is about acquisition, not delivery); the fetch is bounded by the
+        same per-apply ledger a real apply uses. No materialisation, activation
         or removal happens — the write paths are simply never entered.
         """
         results: list[CategoryResult] = []
-        for step in self._steps(phases):
+        for step in self._steps(phase):
             entries = declared_entries(parsed, step.construct)
             if entries is None:
                 # Not declared: no opinion, no touch, nothing reported.

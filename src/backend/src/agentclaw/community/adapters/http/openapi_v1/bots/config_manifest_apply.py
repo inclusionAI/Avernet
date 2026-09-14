@@ -35,7 +35,6 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
 )
 from agentclaw.community.api.bot_config_manifest_apply_service import (
-    ALL_PHASES,
     BotConfigManifestApplyServiceProtocol,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
@@ -181,6 +180,12 @@ async def apply_bot_config_manifest(
         )
         return envelope(apply_payload(report), request)
 
+    # No phase: this route applies a whole document to a bot that already
+    # exists, so every step is deliverable and there is no half to name. Only
+    # the creation path splits an apply in two, and ``start_apply`` refuses a
+    # phase from any trigger but a creation one — so the omission here is the
+    # checked statement "not a creation half", not a default inherited by
+    # accident.
     accepted = apply_service.start_apply(
         entity_id=entity_id,
         bot_id=bot_id,
@@ -188,12 +193,6 @@ async def apply_bot_config_manifest(
         owner_id=owner_id,
         actor_id=actor_id,
         audit_actor=audit,
-        # Every phase: this route applies a whole document to a bot that already
-        # exists, so both halves are deliverable. Stated rather than defaulted —
-        # the creation path deliberately applies one phase at a time, and which
-        # of the two a call means must never be something a reader infers from
-        # an omission.
-        phases=ALL_PHASES,
     )
     return envelope(
         ConfigManifestApplyAccepted(

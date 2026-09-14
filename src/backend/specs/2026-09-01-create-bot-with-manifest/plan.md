@@ -2,6 +2,21 @@
 
 Spec: `spec.md` in this directory. Work item W13, issue #1696.
 
+> **Superseded in part by PR #2167 — the `phases` set is now a `phase` scalar.**
+> Everything below describing `start_apply(..., phases=...)`,
+> `steps_for(phases)`, `ApplyOrchestrator.apply(..., phases=...)`, a
+> `frozenset[ApplyPhase]`, or `ALL_PHASES` records the contract as it stood when
+> this document was written. That contract is gone: the parameter is now one
+> optional `phase: ApplyPhase | None = None`, `None` means the whole apply, and
+> `ALL_PHASES` is deleted. A creation trigger must carry exactly the phase it
+> delivers, and any other trigger must carry none — `start_apply` raises
+> `ValueError` otherwise. The task payload's `"phases"` list became a `"phase"`
+> scalar, with both written and read during the rollout.
+>
+> The rest of this document stands. Nothing here is rewritten, because it is the
+> record of what was decided at the time; for the current signatures read
+> `bot_config_manifest_apply_service_protocol.py` and `apply/delivery.py`.
+
 > **Revision 5.** All open questions closed: the terminal states name *what*
 > failed, the submit response carries no state, and the endpoint is **ARCA-only**.
 > Rev 4 moved applying onto the task queue for all three cases. Revision history
