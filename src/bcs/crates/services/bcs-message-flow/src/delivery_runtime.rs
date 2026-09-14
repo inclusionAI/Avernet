@@ -27,6 +27,7 @@ pub struct DeliveryRuntimePolicy {
     pub min_send_interval_ms: u64,
 }
 
+#[derive(Clone)]
 pub struct DeliveryRuntimeConfig {
     pub max_safe_retries: u32,
     pub pause_dispatch: bool,
@@ -39,6 +40,7 @@ pub struct DeliveryRuntimeConfig {
     pub max_abort_tasks: usize,
 }
 
+#[derive(Clone)]
 pub struct DeliveryRuntime {
     pub policy: Option<Arc<crate::delivery_policy::LiveDeliveryPolicy>>,
     pub service: Arc<dyn ManagedMessageDeliveryService>,

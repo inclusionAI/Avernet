@@ -16,7 +16,7 @@ Bot/session/message IDs, message text, Provider keys or credentials enter monito
 The scheduler shutdown waits for sampling to stop; the process LoggingGuard
 subsequently flushes the shared logging workers when runtime shutdown completes.
 
-Delivery wiring loads DB policy, rejects non-default legacy file policy, and starts an idle scheduler on durable storage even while all business flows are disabled. Deployment guarantees exactly one non-overlapping instance per DB; no file lock or same-host/cross-host duplicate detection is provided. Lifecycle guards still disable admissions and dynamic enforce when the scheduler stops.
+Delivery wiring loads DB policy, rejects non-default legacy file policy, and supervises a scheduler on durable storage even while flows are disabled. The existing LeaderElectionPort gates each master epoch; followers do not run recovery, expiry, dispatch, abort control or the queue aggregate sampler. Master acquisition reloads durable policy under the management write lock before recovery/dispatch. Failed reads or uncertain leadership fail closed. Demotion drops epoch futures without follower-side recovery; send-start records survive for conservative recovery by the next master. Management traffic must route to the master. This reuses deployment election, not a new distributed fencing/consensus protocol; already-issued network operations cannot be recalled on demotion. Lifecycle guards disable admissions and dynamic enforce when supervision stops.
 
 - BCS process entrypoint and composition root.
 - Config loading, logging bootstrap, runtime assembly, and adapter registration.
