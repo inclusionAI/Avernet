@@ -57,27 +57,12 @@ from agentclaw.community.core.repository.implementations.bot.config_manifest_app
     BotConfigManifestApplyLockRepository,
     BotConfigManifestApplyRepository,
 )
-
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
-    DeclaredSourceResolver,
-)
 from ..apply._fakes import (
-    FakeActivationService,
-    FakeCapabilityReader,
-    FakeCredentials,
     FakeGitClient,
-    FakeIdentityService,
-    FakeManifestContent,
-    FakeMcpAuth,
-    FakeResourceFileService,
-    FakeSkillUploadService,
     FakeStartupScriptService,
-    real_validator,
-    arca_only_engine_test,
-    unreachable_platform_ports,
-    unreachable_redeliver,
+    arca_only_delivery,
+    device_port_bundle,
 )
-from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 
 _ENTITY = "u_owner"
 _BOT = "b_ordering"
@@ -214,30 +199,15 @@ def _build(db, *, scripts=None):
         manifest_service=_Manifests(),
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
-        script_service_provider=lambda: scripts,
-        activation_service_provider=lambda: FakeActivationService(),
-        mcp_auth_service_provider=lambda: FakeMcpAuth(),
-        # W5's materialisers. These suites' documents declare only script, so
-        # the fetch-consuming categories are never reached — but they must exist
-        # for the registry to register.
-        identity_service_provider=lambda: FakeIdentityService(),
-        upload_service_provider=lambda: FakeSkillUploadService(),
-        capability_reader_provider=lambda: FakeCapabilityReader(),
-        package_validator_provider=lambda: real_validator(),
-        entry_fetcher_provider=lambda: DeclaredSourceResolver(
-            FakeManifestContent(), FakeCredentials(), FakeObjectStore()
-        ),
-        # W6's resources materialiser and W7's git transport: unreached by
-        # this suite's document, but the registry registers them and the
-        # session is built per apply regardless.
-        resource_service_provider=lambda: FakeResourceFileService(),
-        cli_tool_service_factory=lambda family: None,
         git_client_provider=lambda: FakeGitClient(),
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(),
-        is_teclaw=arca_only_engine_test,
-        teclaw_platform_ports_provider=unreachable_platform_ports,
-        redeliver=unreachable_redeliver,
+        # The delivery seam, assembled the way the composition root
+        # assembles it: a bundle of device-backed ports, one strategy
+        # over it, and a lookup. The categories this suite's document
+        # does not declare are never reached, but their ports must
+        # exist for the registry to register them.
+        delivery_strategies=arca_only_delivery(device_port_bundle(script_service=scripts)),
     )
     queue.service = applies
 

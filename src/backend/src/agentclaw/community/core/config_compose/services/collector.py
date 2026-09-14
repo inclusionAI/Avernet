@@ -196,8 +196,9 @@ class ConfigComposerInputCollector(ComposeInputCollector):
 
         Read once per compose from the managed-files reader, which decides
         for its own engine family and from the compose's occasion; ``False``
-        for an engine the reader does not serve, for a runtime edit, and while
-        the platform-managed switch is off. The composer turns it into the
+        for an engine the reader does not serve, for a runtime edit, and for
+        every compose in a deployment that runs the device-backed teclaw
+        delivery — which binds a reader that owns nothing. The composer turns it into the
         artifact's ``ownership`` map; the three file-category branches below
         read the store when it holds and answer as before W8 when it does
         not. The collector itself never names an engine.

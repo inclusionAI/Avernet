@@ -2,11 +2,21 @@
 
 Two questions, one object. *Does the platform own this compose?* — yes for
 the closing redeliver of a manifest apply and for the first artifact of a
-bot that carries a manifest, when the platform-managed switch is on; no for
-a runtime edit, for another engine family, and while the switch is off.
-*What files does the platform hold for the bot?* — store-relative refs from
-the store's listing, in the shapes the collector already yields, so the
-composer embeds them the way it embeds everything else.
+bot that carries a manifest; no for a runtime edit and for another engine
+family. *What files does the platform hold for the bot?* — store-relative
+refs from the store's listing, in the shapes the collector already yields, so
+the composer embeds them the way it embeds everything else.
+
+**Two implementations, because a deployment runs one delivery or the other.**
+:class:`ManagedFilesComposeReader` is the platform-managed answer.
+:class:`EngineOwnedComposeReader` is the other: no compose is ever the
+platform's, which is exactly what the composer did before W8 and what a
+deployment whose engine has not shipped the artifact's ``ownership`` map still
+needs. Which one is bound is decided once, in the composition root, from
+``TeclawDeliveryMode`` — neither class holds that mode, or any flag, because
+the answer cannot change while the process runs. The collector's contract
+already anticipated this: it takes a reader and asks, and "a caller that wants
+every compose engine-owned passes a reader that says so".
 """
 from __future__ import annotations
 
@@ -56,11 +66,9 @@ class ManagedFilesComposeReader(PlatformOwnershipReader, ManagedFilesReader):
         *,
         store: ManagedFilesStore,
         manifest_service_provider: Callable[[], BotConfigManifestServiceProtocol],
-        platform_managed: Callable[[], bool],
     ) -> None:
         self._store = store
         self._manifests = manifest_service_provider
-        self._platform_managed = platform_managed
 
     # ── PlatformOwnershipReader ──────────────────────────────────────────
 
@@ -73,8 +81,13 @@ class ManagedFilesComposeReader(PlatformOwnershipReader, ManagedFilesReader):
         the creation job applied it before provisioning — and the engine's
         for a bot created without one, so a template's own files are not
         told to go. A runtime edit is always the engine's.
+
+        The occasion and the engine family are the whole of the answer. This
+        class *is* the platform-managed reading; a deployment that does not run
+        it is bound :class:`EngineOwnedComposeReader` instead, so there is no
+        mode left to consult here.
         """
-        if req.engine_type != SERVED_ENGINE or not self._platform_managed():
+        if req.engine_type != SERVED_ENGINE:
             return False
         if req.occasion is ComposeOccasion.MANIFEST_APPLY:
             return True
@@ -136,6 +149,43 @@ class ManagedFilesComposeReader(PlatformOwnershipReader, ManagedFilesReader):
         )
 
 
+class EngineOwnedComposeReader(PlatformOwnershipReader, ManagedFilesReader):
+    """Every compose is the engine's — the reading before W8, kept whole.
+
+    Bound in place of :class:`ManagedFilesComposeReader` while the deployment
+    runs ``TeclawDeliveryMode.DEVICE``: the manifest's file categories are
+    delivered into the container by the device-backed ports, so the platform
+    asserts ownership of nothing and holds nothing the composer should read.
+
+    The empty lists are unreachable in practice — the collector consults a
+    reader's categories only when it owns the compose, and this one never does
+    — and they are answered rather than raised because that is what the
+    Protocol promises. A reader that raised would turn a caller's mistake into
+    a failed provision instead of an artifact composed the pre-W8 way.
+
+    It holds nothing, which is the point: a deployment's delivery shape is
+    settled at boot, so the object that embodies it needs no state to
+    re-examine.
+    """
+
+    def platform_owns(self, req: ComposeRequest) -> bool:
+        return False
+
+    def identity_files(self, req: ComposeRequest) -> list[CollectedFile]:
+        return []
+
+    def resources(self, req: ComposeRequest) -> list[CollectedFile]:
+        return []
+
+    def skills(self, req: ComposeRequest) -> list[CollectedSkill]:
+        return []
+
+    def skill_files(
+        self, req: ComposeRequest, names: Collection[str]
+    ) -> list[CollectedFile]:
+        return []
+
+
 def _scope(req: ComposeRequest) -> ManagedFileScope:
     """The store scope for a compose request — the *owner-based* address.
 
@@ -154,4 +204,8 @@ def _scope(req: ComposeRequest) -> ManagedFileScope:
     )
 
 
-__all__ = ["SERVED_ENGINE", "ManagedFilesComposeReader"]
+__all__ = [
+    "SERVED_ENGINE",
+    "EngineOwnedComposeReader",
+    "ManagedFilesComposeReader",
+]

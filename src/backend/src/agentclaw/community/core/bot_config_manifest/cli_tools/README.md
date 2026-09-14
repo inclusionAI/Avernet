@@ -76,7 +76,7 @@ converged calls the port **not at all**.
 
 On teclaw the push is the artifact, and two callers own two different ends:
 the management API has no closing step, so its binding carries the redeliver
-and the port pushes; a manifest apply ends at `TeclawDelivery.finish`, which
+and the port pushes; a manifest apply ends at `TeclawPlatformDelivery.finish`, which
 pushes one artifact covering every category it wrote, so its binding leaves the
 redeliver unset. That is why the service factory has three keys — `arca`,
 `teclaw`, `teclaw-live` — and not two.

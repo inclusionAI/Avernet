@@ -38,24 +38,10 @@ from agentclaw.community.core.bot_config_manifest.apply.budget import (
 from agentclaw.community.core.bot_config_manifest.apply.carry_forward import (
     carry_forward,
 )
-from agentclaw.community.core.bot_config_manifest.apply.activation_delegates import (
-    DeviceActivation,
-)
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
-from agentclaw.community.core.bot_config_manifest.apply.identity_files import (
-    DeviceIdentity,
-)
-from agentclaw.community.core.bot_config_manifest.apply.resource_files import (
-    DeviceResource,
-)
-from agentclaw.community.core.bot_config_manifest.apply.skill_package_upload import (
-    DeviceSkillPackageUpload,
-)
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     DeliveryStrategy,
     DeliveryStrategyFactory,
-    MaterialiserPorts,
-    Redeliver,
 )
 from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     APPLY_TASK_DEADLINE_SECONDS,
@@ -65,15 +51,6 @@ from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     phase_from_payload,
 )
 from agentclaw.community.core.bot_config_manifest.apply.triggers import require_phase_matches_trigger
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
-    DeclaredSourceResolver,
-)
-from agentclaw.community.core.ports.identity_file_port import (
-    IdentityFilePort,
-)
-from agentclaw.community.core.ports.resource_file_port import (
-    ResourceFilePort,
-)
 from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
     GitSourceClient,
 )
@@ -116,28 +93,10 @@ from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_serv
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import (
     BotConfigManifestServiceProtocol,
 )
-from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
-    BotStartupScriptServiceProtocol,
-)
-from agentclaw.community.core.mcp.mcp_auth_service_protocol import (
-    MCPAuthServiceProtocol,
-)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.bot.config_manifest_apply import (
     BotConfigManifestApplyLockRepositoryProtocol,
     BotConfigManifestApplyRepositoryProtocol,
-)
-from agentclaw.community.core.skill_center.direct_activation_service_protocol import (
-    DirectActivationServiceProtocol,
-)
-from agentclaw.community.core.skill_center.local_skill_upload_service_protocol import (
-    LocalSkillUploadServiceProtocol,
-)
-from agentclaw.community.core.skill_center.capability_state_contract import (
-    BotCapabilityStateReaderProtocol,
-)
-from agentclaw.community.core.skill_center.skill_package import (
-    SkillPackageValidator,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.avernet_tenant import (
@@ -147,9 +106,6 @@ from agentclaw.community.utils.avernet_tenant import (
 from agentclaw.community.utils.env_utils import get_current_env
 
 if TYPE_CHECKING:  # pragma: no cover - import-time cycle, see below
-    from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
-        CliToolService,
-    )
     from agentclaw.community.core.task_queue.services.task_queue_service import (
         TaskQueueService,
     )
@@ -203,57 +159,16 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         manifest_service: BotConfigManifestServiceProtocol,
         apply_repository: BotConfigManifestApplyRepositoryProtocol,
         lock_repository: BotConfigManifestApplyLockRepositoryProtocol,
-        script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
-        activation_service_provider: Callable[[], DirectActivationServiceProtocol],
-        mcp_auth_service_provider: Callable[[], MCPAuthServiceProtocol],
-        identity_service_provider: Callable[[], IdentityFilePort],
-        upload_service_provider: Callable[[], LocalSkillUploadServiceProtocol],
-        capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
-        package_validator_provider: Callable[[], SkillPackageValidator],
-        entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
-        resource_service_provider: Callable[[], ResourceFilePort],
-        cli_tool_service_factory: Callable[[str], "CliToolService"],
         git_client_provider: Callable[[], GitSourceClient],
         task_queue_provider: Callable[[], "TaskQueueService"],
         bot_repository: BotRepository,
         *,
-        is_teclaw: Callable[[Optional[str]], bool],
-        teclaw_platform_ports_provider: Callable[[], MaterialiserPorts],
-        redeliver: Redeliver,
-        teclaw_platform_managed: bool = False,
+        delivery_strategies: DeliveryStrategyFactory,
     ) -> None:
         self._manifests = manifest_service
         self._applies = apply_repository
         self._locks = lock_repository
-        # Lazy providers rather than the services themselves, the way the
-        # sibling manifest service holds its teclaw test: the bot-configuration
-        # graph reaches back into this module's package, and holding concrete
-        # instances would close an import cycle at construction.
-        self._script_service_provider = script_service_provider
-        self._activation_service_provider = activation_service_provider
-        self._mcp_auth_service_provider = mcp_auth_service_provider
-        # W5's two fetch-consuming materialisers take their services the same
-        # way — each sits deeper in the bot-configuration graph, and holding
-        # one directly would close the same cycles. The identity service is
-        # named by its narrow port (``core/ports/identity_file_port.py``): the
-        # real service has no Protocol (one implementation, the waiver the
-        # identity router records), and the port exists to key a lazy
-        # provider without importing the device graph.
-        self._identity_service_provider = identity_service_provider
-        self._upload_service_provider = upload_service_provider
-        self._capability_reader_provider = capability_reader_provider
-        self._package_validator_provider = package_validator_provider
-        self._entry_fetcher_provider = entry_fetcher_provider
-        # The same laziness for W6's resources materialiser: the resource
-        # file service dispatches to devices, another arm of the same
-        # bot-configuration graph that made every provider above lazy.
-        self._resource_service_provider = resource_service_provider
-        # W9: the same component the management API installs through, built
-        # per engine family because the family decides which delivery port sits
-        # inside it. Held as a factory rather than an instance for the reason
-        # every provider above is lazy — it reaches the device graph.
-        self._cli_tool_service_factory = cli_tool_service_factory
-        # W7's git transport, held the same lazy way: the sessions built
+        # W7's git transport, held lazily: the sessions built
         # above reach it by lookup rather than by a held instance, so no
         # client state can outlive the apply that asked for it. The type is
         # the fetch-side Protocol — already in this file's import tree via
@@ -271,24 +186,17 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         # The repository has no such problem and is injected directly.
         self._task_queue_provider = task_queue_provider
         self._bots = bot_repository
-        # W8: the delivery seam. The factory is the one reader of the
-        # platform-managed switch; ARCA's ports are the providers above, held
-        # as a thunk so they are resolved per apply like everything else here.
-        # ``is_teclaw`` is the engine authority (``TeclawProvisionService``).
-        # It, the platform ports and the redeliver are **required**: the
-        # composition root binds all three, and defaulting ``is_teclaw`` was
-        # not inert — "every bot is ARCA" routed a teclaw apply through the
-        # container ports silently. The switch stays defaulted; off is real.
-        self._strategies = DeliveryStrategyFactory(
-            is_teclaw=is_teclaw,
-            teclaw_platform_managed=teclaw_platform_managed,
-            arca_ports=self._arca_ports,
-            teclaw_platform_ports=teclaw_platform_ports_provider,
-            redeliver=redeliver,
-            # W9: the teclaw-bound CLI service, so a teclaw bot never gets the
-            # ARCA delivery port for this category whatever the switch says.
-            teclaw_cli_tool_service=lambda: cli_tool_service_factory("teclaw"),
-        )
+        # W8: the delivery seam, injected already assembled. This service
+        # composes no strategy and knows no engine family: which port bundle,
+        # phase table and closing step a bot applies through was decided in the
+        # composition root, and what arrives here is a lookup keyed by the
+        # bot's engine.
+        #
+        # Required, and the reason it is not defaulted has history: an earlier
+        # default of "every bot is ARCA" routed a teclaw apply through the
+        # container ports silently. A service that cannot be built without the
+        # seam cannot be built wrong.
+        self._strategies = delivery_strategies
 
     # ── starting ────────────────────────────────────────────────────────────
 
@@ -803,35 +711,25 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         remembering to update a list. A hand-written set would drift, and the
         drift is only observable as a failed apply on a bot that already exists.
         """
-        return frozenset(self._build_materialisers().keys())
-
-    def _arca_ports(self) -> MaterialiserPorts:
-        """The device-backed write targets: ARCA's, and teclaw's with the switch off."""
-        return MaterialiserPorts(
-            script_service=self._script_service_provider(),
-            activation_service=DeviceActivation(self._activation_service_provider()),
-            mcp_auth_service=self._mcp_auth_service_provider(),
-            identity_service=DeviceIdentity(self._identity_service_provider()),
-            upload_service=DeviceSkillPackageUpload(self._upload_service_provider()),
-            capability_reader=self._capability_reader_provider(),
-            package_validator=self._package_validator_provider(),
-            entry_fetcher=self._entry_fetcher_provider(),
-            resource_service=DeviceResource(self._resource_service_provider()),
-            cli_tool_service=self._cli_tool_service_factory("arca"),
+        # Any strategy answers, because the keys are the registry's and the
+        # strategy only decides what sits behind each port. ``None`` is the
+        # engine authority's ARCA answer, which is what this used to build by
+        # hand.
+        return frozenset(
+            self._build_materialisers(self.delivery_for_engine(None)).keys()
         )
 
-    def _build_materialisers(self, strategy: Optional[DeliveryStrategy] = None):
+    def _build_materialisers(self, strategy: DeliveryStrategy):
         """The one construction site for the registry.
 
         Named rather than inlined into ``_orchestrator`` so
         ``materialised_constructs`` reads the *same* registry the engine runs,
         instead of a second list that would drift from it. The ports come from
         the strategy (W8): the registry's *keys* are the same for every family
-        — which is why ``materialised_constructs`` may build it without one —
-        while what sits behind each port is the family's.
+        — which is why ``materialised_constructs`` may ask any strategy for
+        them — while what sits behind each port is the family's.
         """
-        ports = strategy.ports() if strategy is not None else self._arca_ports()
-        return build_materialisers(**ports.as_kwargs())
+        return build_materialisers(**strategy.ports().as_kwargs())
 
     def _orchestrator(self, strategy: DeliveryStrategy) -> ApplyOrchestrator:
         """A fresh orchestrator over the strategy's registry and phase table."""

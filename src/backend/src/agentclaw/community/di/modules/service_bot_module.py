@@ -62,8 +62,8 @@ from agentclaw.community.core.channel.services.engine_overrides_reader import (
     ChannelEngineOverridesReader,
 )
 from agentclaw.community.core.common_config import CommonConfigService, CommonWhiteListService
-from agentclaw.community.core.bot_config_manifest.managed_files import (
-    ManagedFilesComposeReader,
+from agentclaw.community.core.config_compose.protocols import (
+    ComposeManagedFilesReader,
 )
 from agentclaw.community.core.config_compose.services.collector import (
     ConfigComposerInputCollector,
@@ -470,8 +470,10 @@ class ServiceBotModule(Module):
             overrides_reader=injector.get(ChannelEngineOverridesReader),
             center_store=injector.get(CanonicalCenterVersionStore),
             # W8: the platform's copy of a teclaw bot's manifest-delivered
-            # files, and which categories it asserts (manifest_fetch_module).
-            managed_files_reader=injector.get(ManagedFilesComposeReader),
+            # files, and which categories it asserts. Asked for by the Protocol
+            # pair, because which reader answers is the deployment's delivery
+            # mode (manifest_fetch_module selects it).
+            managed_files_reader=injector.get(ComposeManagedFilesReader),
             # W9: ``ac_bot_cli_tool``. Without it every production compose
             # yields no tool refs at all — the row and the bytes exist and the
             # artifact never mentions them.
