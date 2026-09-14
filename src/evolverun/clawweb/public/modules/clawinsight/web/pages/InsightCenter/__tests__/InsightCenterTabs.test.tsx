@@ -28,6 +28,8 @@ vi.mock('../AdminReviewQueue', () => ({
   </div>,
 }))
 
+vi.mock('../monitoring/MonitoringPanel', () => ({ default: () => <div>MONITORING_CONTENT</div> }))
+
 import InsightCenter from '../index'
 
 describe('Insight Center tabs', () => {
@@ -63,5 +65,22 @@ describe('Insight Center tabs', () => {
     expect(screen.getByText('ADMIN_CONTENT:none')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'OPEN_ADMIN_IMPROVEMENT' }))
     expect(screen.getByText('ADMIN_CONTENT:88')).toBeInTheDocument()
+  })
+})
+
+
+describe('Insight monitoring module navigation', () => {
+  it('isolates monitoring from governance loading and preserves the governance deep link', async () => {
+    mocks.overview.mockClear()
+    mocks.user.isAdmin = true
+    const user = userEvent.setup()
+    render(<MemoryRouter initialEntries={['/insight?module=monitoring&tab=admin&improvementId=88&ownerUserId=*']}><InsightCenter /></MemoryRouter>)
+    expect(screen.getByText('MONITORING_CONTENT')).toBeInTheDocument()
+    expect(mocks.overview).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Agent 治理' }))
+    expect(screen.getByText('ADMIN_CONTENT:88')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Agent 监控自愈' }))
+    expect(screen.getByText('MONITORING_CONTENT')).toBeInTheDocument()
+    expect(screen.queryByText('ADMIN_CONTENT:88')).not.toBeInTheDocument()
   })
 })

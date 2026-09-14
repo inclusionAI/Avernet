@@ -29,8 +29,11 @@
   ],
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
-    "build": "tsc -p tsconfig.json && mkdir -p dist/server/fixtures && cp -R server/fixtures/. dist/server/fixtures/",
-    "test": "vitest run"
+    "build": "tsc -p tsconfig.json && mkdir -p dist/server/fixtures && cp -R server/fixtures/. dist/server/fixtures/ && cp web/pages/InsightCenter/monitoring/monitoring.css dist/web/pages/InsightCenter/monitoring/",
+    "test": "vitest run",
+    "test:monitoring": "vitest run --config vitest.monitoring.config.ts",
+    "monitoring:local": "node dist/server/services/monitoring/local-host.js",
+    "monitoring:mock": "node dist/server/services/monitoring/local-mock.js"
   },
   "dependencies": {
     "@avernet/clawevolve": "0.2.0",

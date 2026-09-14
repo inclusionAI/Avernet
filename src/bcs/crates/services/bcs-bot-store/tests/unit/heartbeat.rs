@@ -33,13 +33,6 @@ async fn register(repo: &PersistentBotRepo) {
     ).await.unwrap();
 }
 
-fn payload() -> BotDynamicStatus {
-    BotDynamicStatus {
-        status: "busy".into(), dynamic_summary: Some("ephemeral-only-marker".into()),
-        load: Some(0.9), updated_at: Some(1),
-    }
-}
-
 #[tokio::test]
 async fn heartbeat_renews_registration_without_cache_or_retained_payload() {
     let repo = repository(database().await);
@@ -49,13 +42,13 @@ async fn heartbeat_renews_registration_without_cache_or_retained_payload() {
         repo.bots.write().await.get_mut("heartbeat-bot").unwrap().last_heartbeat =
             Instant::now() - BOT_EXPIRY - Duration::from_secs(1);
         assert!(repo.list_active().await.is_empty());
-        assert!(repo.update_status("heartbeat-bot", payload()).await);
+        assert!(repo.update_status("heartbeat-bot").await);
         assert_eq!(repo.list_active().await.len(), 1);
         assert!(!repo.bots.read().await["heartbeat-bot"].is_expired());
     }
     let bot = repo.get("heartbeat-bot").await.unwrap();
     assert!(serde_json::to_value(bot).unwrap().get("dynamic_status").is_none());
-    assert!(!repo.update_status("unknown", payload()).await);
+    assert!(!repo.update_status("unknown").await);
     assert!(!repo.bots.read().await.contains_key("unknown"));
     assert!(repo.discover("ephemeral-only-marker").await.is_empty());
     assert_eq!(repo.discover("Static SQL").await.len(), 1);

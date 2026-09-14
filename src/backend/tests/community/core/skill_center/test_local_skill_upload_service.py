@@ -1501,6 +1501,7 @@ async def test_active_replacement_preserves_enqueue_failure_and_new_content(capl
                 "bot_id": bot_id,
                 "owner_id": owner_id,
                 "bot_type": "desktop",
+                "status": "ACTIVE",
             }
 
     class _FailingTasks:

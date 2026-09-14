@@ -718,7 +718,7 @@ impl BotRepoPort for MemoryBotRepo {
         Ok(())
     }
 
-    async fn update_status(&self, bot_id: &str, _status: BotDynamicStatus) -> bool {
+    async fn update_status(&self, bot_id: &str) -> bool {
         let mut bots = self.bots.write().await;
 
         if let Some(bot) = bots.get_mut(bot_id) {
@@ -2483,7 +2483,7 @@ mod tests {
         };
         registry.register("dba".to_string(), caps).await.unwrap();
 
-        let status = BotDynamicStatus {
+        let _status = BotDynamicStatus {
             status: "busy".to_string(),
             dynamic_summary: Some("Processing deadlock request".to_string()),
             load: Some(0.7),
@@ -2491,16 +2491,14 @@ mod tests {
         };
         registry.bots.write().await.get_mut("dba").unwrap().last_heartbeat =
             Instant::now() - BOT_EXPIRY - Duration::from_secs(1);
-        let updated = registry.update_status("dba", status.clone()).await;
+        let updated = registry.update_status("dba").await;
         assert!(updated);
 
         let bot = registry.get("dba").await.unwrap();
         assert!(serde_json::to_value(bot).unwrap().get("dynamic_status").is_none());
         assert!(!registry.bots.read().await["dba"].is_expired());
 
-        let not_found = registry
-            .update_status("unknown", BotDynamicStatus::default())
-            .await;
+        let not_found = registry.update_status("unknown").await;
         assert!(!not_found);
     }
 
@@ -2772,13 +2770,13 @@ mod tests {
         registry.register("dba".to_string(), caps).await.unwrap();
 
         // Update with dynamic summary
-        let status = BotDynamicStatus {
+        let _status = BotDynamicStatus {
             status: "busy".to_string(),
             dynamic_summary: Some("Currently handling deadlock analysis".to_string()),
             load: None,
             updated_at: None,
         };
-        registry.update_status("dba", status).await;
+        registry.update_status("dba").await;
 
         // Heartbeat descriptions are not part of the discovery contract.
         assert!(registry.discover("deadlock analysis").await.is_empty());

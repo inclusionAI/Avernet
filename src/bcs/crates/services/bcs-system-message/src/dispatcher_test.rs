@@ -12,7 +12,7 @@ use bcs_domain::{
 };
 use bcs_service_api::{
     ActiveBotRunContext, ActorStatus, AgentCredentials, BotCapabilities, BotDeliveryCommand,
-    BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, BotDynamicStatus,
+    BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget,
     BotRegistryCoreService, BotRunContext, BotRunContextPort, BotRunScope,
     EnsureHumanResult, ProviderRunTransport, ProviderStreamGrayList, RegisteredBot,
     ServiceError, ServiceResult, SystemMessageDispatcherService, SystemMessageProducerService,
@@ -276,6 +276,12 @@ impl bcs_service_api::port::repo::MessageRepoPort for RecordingMessageRepo {
     ) -> Result<i64, bcs_service_api::port::repo::MessageRepoError> {
         Ok(self.appended.read().await.len() as i64)
     }
+}
+
+#[tokio::test]
+async fn provider_target_registry_update_status_rejects_heartbeat_renewal() {
+    let registry = Arc::new(ProviderTargetRegistry::default());
+    assert!(!registry.update_status("heartbeat-renewal-unsupported").await);
 }
 
 #[tokio::test]
@@ -1687,7 +1693,7 @@ impl BotRegistryCoreService for ProviderTargetRegistry {
         Ok(())
     }
 
-    async fn update_status(&self, _bot_id: &str, _status: BotDynamicStatus) -> bool {
+    async fn update_status(&self, _bot_id: &str) -> bool {
         false
     }
 

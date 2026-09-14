@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "claw-monitoring/diagnosis-event/v1",
+  "eventId": "mock-diag-te-alert-001",
+  "diagnosisId": "mock-diag-te-alert-001",
+  "botId": "mock-bot-te",
+  "engine": "TE",
+  "sessionKey": null,
+  "sessionId": "mock-session-001",
+  "traceId": "mock-trace-001",
+  "occurredAt": "2026-09-09T09:00:00Z",
+  "diagnosedAt": "2026-09-09T09:00:18Z",
+  "decision": "ALERT",
+  "tcFaultLabel": "TC.MCP.DATA",
+  "confidence": 0.86,
+  "businessProblemCategory": "外部服务异常",
+  "businessProblemSubtype": "数据获取失败",
+  "systemDiagnosis": "数据查询工具返回空响应，本轮数据获取失败。",
+  "businessDiagnosis": "用户要求重试此前未完成的数据查询，本次重试仍未取得结果。",
+  "handlerName": null,
+  "humanIntervention": true
+}

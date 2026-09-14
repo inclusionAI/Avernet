@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceConnectionUnavailableError,
+    DeviceOfflineError,
+)
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     EngineRuntimeProjection,
     ProjectionScope,
@@ -88,6 +92,54 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
                         plan=plan,
                         retired_mappings=retired_mappings,
                         service_factory=service_factory,
+                    )
+                )
+            except DeviceOfflineError:
+                if str(plan.bot.get("bot_type") or "").lower() != "desktop":
+                    logger.warning(
+                        "[PerDomainRuntimeProjection] runtime device has no "
+                        "active instance bot_id=%s engine=%s bot_type=%s",
+                        plan.bot_id,
+                        plan.engine,
+                        plan.bot.get("bot_type"),
+                    )
+                    results.append(
+                        RuntimeProjectionResult.pending(
+                            code="SKILL_RUNTIME_UNAVAILABLE",
+                            reason="Skill 运行环境当前不可连接，能力状态已保存但尚未同步",
+                        )
+                    )
+                else:
+                    log = (
+                        logger.info
+                        if str(plan.bot.get("status") or "").upper() == "OFFLINE"
+                        else logger.warning
+                    )
+                    log(
+                        "[PerDomainRuntimeProjection] Desktop device offline "
+                        "bot_id=%s engine=%s db_status=%s",
+                        plan.bot_id,
+                        plan.engine,
+                        plan.bot.get("status"),
+                    )
+                    results.append(
+                        RuntimeProjectionResult.pending(
+                            code="DESKTOP_DEVICE_OFFLINE",
+                            reason="Desktop 设备当前离线，能力状态已保存，将在设备上线后自动同步",
+                            suggested_action="请启动或重新连接 Desktop 客户端。",
+                        )
+                    )
+            except DeviceConnectionUnavailableError:
+                logger.warning(
+                    "[PerDomainRuntimeProjection] transient device connection "
+                    "failure bot_id=%s engine=%s",
+                    plan.bot_id,
+                    plan.engine,
+                )
+                results.append(
+                    RuntimeProjectionResult.pending(
+                        code="SKILL_RUNTIME_UNAVAILABLE",
+                        reason="Skill 运行环境当前不可连接，能力状态已保存但尚未同步",
                     )
                 )
             except Exception:

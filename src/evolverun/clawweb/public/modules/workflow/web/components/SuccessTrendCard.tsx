@@ -21,7 +21,7 @@ export function SuccessTrendCard({
   currentSuccessRate: string
   currentDetail: string
   compact?: boolean
-  days?: 7 | 30
+  days?: 1 | 7 | 30
   onDaysChange?: (days: 7 | 30) => void
   showRangeSelector?: boolean
 }) {

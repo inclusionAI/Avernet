@@ -114,3 +114,6 @@ describe('run detail suggestion navigation', () => {
     expect(screen.getByText('问题来源')).toBeInTheDocument()
   })
 })
+vi.mock('../../components/workflow-workspace/issue-groups', () => ({
+  useIssueGroups: () => ({ data: { groups: [] }, isLoading: false, isError: false }),
+}))

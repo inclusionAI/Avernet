@@ -364,12 +364,18 @@ export function createWorkflowsRouter(
         return;
       }
 
-      res.set("Cache-Control", "private, max-age=60, must-revalidate");
-
+      // Require an authenticated identity; reject anonymous callers.
       const queryBotOwnerId = req.query.botOwnerId as string | undefined;
       const headerUserId = req.headers["x-user-id"] as string | undefined;
       const queryBotId = req.query.botId as string | undefined;
-      const botOwnerId = queryBotOwnerId?.trim() || headerUserId?.trim() || req.cookies?.staff_id?.trim() || "";
+      const botOwnerId = queryBotOwnerId?.trim() || headerUserId?.trim() || req.cookies?.staff_id?.trim() || req.userId?.trim() || "";
+      if (!botOwnerId && !req.isAdmin) {
+        res.status(401).json({ error: "Unauthorized", message: "User identity required" });
+        return;
+      }
+
+      res.set("Cache-Control", "private, max-age=60, must-revalidate");
+
       const botId = queryBotId?.trim() || undefined;
       const cacheKey = `list:${botOwnerId}:${botId ?? ""}:${req.isAdmin ? "admin" : "user"}`;
 
@@ -387,6 +393,12 @@ export function createWorkflowsRouter(
         viewPerm = null;
       } else if (botPermRepo && botOwnerId) {
         viewPerm = await botPermRepo.getViewByIdsForOwner(botOwnerId, botId);
+      } else if (!botPermRepo) {
+        // No permission table configured: allow all (isolated/read-only deployments).
+        viewPerm = null;
+      } else {
+        // Has permission table but no owner id: show nothing.
+        viewPerm = { restrictedIds: new Set(), viewableIds: new Set() };
       }
 
       const result = rows
@@ -503,7 +515,29 @@ export function createWorkflowsRouter(
   /** GET /:workflowId — get saved workflow spec from DB, fallback to filesystem */
   router.get("/:workflowId", asyncHandler(async (req: Request, res: Response) => {
     try {
+      // Require an authenticated identity; reject anonymous callers.
+      const actorId = (req.headers["x-user-id"] as string | undefined)?.trim()
+        || req.cookies?.staff_id?.trim()
+        || req.userId?.trim()
+        || "";
+      if (!actorId && !req.isAdmin) {
+        res.status(401).json({ error: "Unauthorized", message: "User identity required" });
+        return;
+      }
+
       const workflowId = String(req.params.workflowId);
+
+      // View permission check: non-admin callers must have view access.
+      if (!req.isAdmin && botPermRepo && actorId) {
+        const view = await botPermRepo.getViewByIdsForOwner(actorId);
+        if (view && !view.viewableIds.has(workflowId)) {
+          res.status(403).json({ error: "Forbidden", message: "No view permission for this workflow" });
+          return;
+        }
+      } else if (!req.isAdmin && botPermRepo && !actorId) {
+        res.status(401).json({ error: "Unauthorized", message: "User identity required" });
+        return;
+      }
 
       // Try database first
       if (workflowSpecRepo) {

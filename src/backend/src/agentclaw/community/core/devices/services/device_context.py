@@ -58,3 +58,11 @@ class UnknownProviderError(RuntimeError):
 
 class ConnInfoBuildError(RuntimeError):
     """ConnInfoBuilder 调底层(baas /http-info、arca proxy 等)失败。"""
+
+
+class DeviceOfflineError(ConnInfoBuildError):
+    """The provider confirms that the current device is offline."""
+
+
+class DeviceConnectionUnavailableError(ConnInfoBuildError):
+    """A transient provider connection failure with unknown device state."""

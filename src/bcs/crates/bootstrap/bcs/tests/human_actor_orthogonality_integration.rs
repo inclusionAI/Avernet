@@ -30,7 +30,7 @@ use bcs_friend::{FriendCore, FriendRequestCore};
 use bcs_friend_store::{MemoryFriendRepo, MemoryFriendRequestRepo};
 use bcs_relation::MemoryRelationStore;
 use bcs_service_api::{
-    ActorKind, ActorStatus, AgentCredentials, BotCapabilities, BotDynamicStatus,
+    ActorKind, ActorStatus, AgentCredentials, BotCapabilities,
     BotRegistryCoreService, FriendCoreService, FriendRequestCoreService, RegisteredBot,
     RelationCoreService, ServiceError, ServiceResult,
 };
@@ -90,7 +90,7 @@ impl BotRegistryCoreService for MutableRegistry {
     async fn register(&self, _bot_id: String, _capabilities: BotCapabilities) -> ServiceResult<()> {
         Ok(())
     }
-    async fn update_status(&self, _bot_id: &str, _status: BotDynamicStatus) -> bool {
+    async fn update_status(&self, _bot_id: &str) -> bool {
         false
     }
     async fn get(&self, bot_id: &str) -> Option<RegisteredBot> {

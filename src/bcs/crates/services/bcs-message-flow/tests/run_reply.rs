@@ -117,6 +117,7 @@ async fn terminal_storage_faults_preserve_reply_and_publish_after_commit_even_if
 #[tokio::test]
 async fn mixed_final_modes_reconstruct_one_reply_and_preserve_visible_history() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let frontend = support.frontend_delivery.clone();
     let event_store = Arc::new(bcs_event_store::MemoryEventStore::new());
     let factory = Arc::new(RecordingEventFactory::default());
     let repo = Arc::new(bcs_message_store::MemoryMessageRepo::new().with_environment("local".into()).with_event_store(event_store.clone()));
@@ -128,10 +129,10 @@ async fn mixed_final_modes_reconstruct_one_reply_and_preserve_visible_history() 
         .with_group_delivery_limits(std::collections::BTreeMap::from([("bot-driver".into(), 100), ("bot-observer".into(), 100)]))
         .with_session_management(Arc::new(session_support::StaticSessionManagement::new(session_support::test_session("group-1:reply", "group-1", group.participants))));
     for (index, final_text, expected, current) in [
-        (0, "工具前\n工具后补充", "工具前\n工具后补充", "工具后"),
-        (1, "工具后补充", "工具前\n工具后补充", "工具后"),
-        (2, "补充", "工具前\n工具后补充", "工具后"),
-        (3, "", "工具前\n工具后", "工具后"),
+        (0, "工具前工具后补充", "工具前工具后补充", "工具后"),
+        (1, "工具后补充", "工具前工具后补充", "工具后"),
+        (2, "补充", "工具前工具后补充", "工具后"),
+        (3, "", "工具前工具后", "工具后"),
         (4, "", "工具前", ""),
     ] {
         let source = service.admit(AdmitMessageDeliveries { display_message: None,
@@ -162,9 +163,13 @@ async fn mixed_final_modes_reconstruct_one_reply_and_preserve_visible_history() 
                 .with_group_delivery_limits(std::collections::BTreeMap::from([("bot-driver".into(), 100), ("bot-observer".into(), 100)]))
                 .with_session_management(flow.session_management.clone().unwrap());
         }
-        let payload = if index == 2 { json!({"delta_text":final_text}) } else { json!({"message":{"role":"assistant","content":[{"type":"text","text":final_text}]}}) };
+        let payload = json!({"message":{"role":"assistant","content":[{"type":"text","text":final_text}]}});
         let terminal = event(ChatEventState::Final, "chat", payload);
+        let before = frontend.events().await.len();
         flow.handle_bot_event(terminal.clone()).await.unwrap();
+        let events = frontend.events().await;
+        let wire: serde_json::Value = serde_json::from_str(&events[before]).unwrap();
+        assert_eq!(wire["payload"]["message"], terminal.event_payload["message"]);
         let deliveries = service.snapshot(Some("group-1:reply")).await.unwrap();
         let mut summaries = Vec::new();
         for delivery in &deliveries {
@@ -182,7 +187,7 @@ async fn mixed_final_modes_reconstruct_one_reply_and_preserve_visible_history() 
         let history = repo.list_session_history("group-1:reply", MessageOwnerFilter::Any, None, None, None, 100).await.unwrap();
         assert!(history.messages.iter().all(|m| m.message_type != "run_reply"));
         let visible = repo.run_chat_segments("group-1:reply", "bot-driver", run).await.unwrap();
-        assert_eq!(visible.iter().filter_map(|m| m.content.as_str()).collect::<Vec<_>>().join("\n"), expected);
+        assert_eq!(visible.iter().filter_map(|m| m.content.as_str()).collect::<Vec<_>>().concat(), expected);
         flow.handle_bot_event(terminal).await.unwrap();
         assert_eq!(service.snapshot(Some("group-1:reply")).await.unwrap().len(), deliveries.len());
         let events = factory.0.lock().unwrap().clone();

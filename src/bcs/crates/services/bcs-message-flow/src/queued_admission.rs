@@ -164,6 +164,12 @@ pub async fn find_managed_run(
     Ok(None)
 }
 
+/// Reuse the session or legacy group participants already resolved for routing.
+pub(crate) async fn needs_reply(flow: &BcsMessageFlow, group: &Group) -> bool {
+    flow.managed_deliveries.is_some() && group.group_strategy != GroupStrategy::StateMachine
+        && manages_any(flow, group).await
+}
+
 pub(crate) struct QueuedReply {
     pub target_ids: Vec<String>,
     /// A newly admitted logical relay, not a count of recipients or attempts.
@@ -247,6 +253,9 @@ pub(crate) async fn commit_routed_reply(
                 && context.scope.session_id == session_id)
             .map(|context| context.provider_bypass_headers).unwrap_or_default()
     } else { Vec::new() };
+    // The original event is immutable; only the admitted queue payload uses
+    // the reconstructed full reply.
+    let text = normalized.map(|reply| reply.text.as_str()).unwrap_or(text);
     let command = WebSendCommand {
         caller: bcs_service_api::CallerContext::Public,
         group_id: group.id.clone(),

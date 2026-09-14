@@ -10,6 +10,7 @@ import AnalysisModal from '../components/AnalysisModal'
 import InterventionPanel from '../components/InterventionPanel'
 import AnalyzeRunBotModal from '../components/AnalyzeRunBotModal'
 import RunEvolutionAnalysis from '../components/evolution/RunEvolutionAnalysis'
+import AggregationProgress from '../components/workflow-workspace/AggregationProgress'
 import type { RunEvolutionAnalysisResponse, WorkflowAnalysisProgressResponse } from '@avernet/clawweb-shared/web/api/client'
 import type { FlowRun, NodeExecution } from '@avernet/clawweb-shared/web/types'
 
@@ -429,6 +430,7 @@ function EvolutionAnalysisPanel({
 
       {!analyzing && analysis?.status === 'completed' && (
         <div className="mt-3">
+          <AggregationProgress workflowId={workflowId} flowId={flowId} />
           <RunEvolutionAnalysis
             analysis={analysis}
             renderOptimizeLink={(diagnosis) => diagnosis.proposal ? (

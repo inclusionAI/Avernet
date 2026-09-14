@@ -8,6 +8,7 @@
  * 所有 LLM 分析都发生在 ClawMind plugin 内。
  */
 import { Router, type Request, type Response } from "express";
+import { IssueAggregationRepository } from '../../repositories/issue-aggregation-repository.js';
 import type { IDatabase, Row } from "@avernet/clawweb-shared/server/db";
 import type { EvolveRepository } from "../../repositories/evolve-repository.js";
 import crypto from "node:crypto";
@@ -273,7 +274,7 @@ export function createInternalEvolveRouter(repos: InternalEvolveRepos): Router {
         }
       }
     }
-    res.json({ ...input, workflowSpecDigest, workflowSpec });
+    res.json({ ...input, workflowSpecDigest, workflowSpec, issueAggregationSupported: true });
   });
 
   router.post("/analysis-runs/:analysisId/claim", async (req: Request, res: Response) => {
@@ -336,6 +337,31 @@ export function createInternalEvolveRouter(repos: InternalEvolveRepos): Router {
     } catch (error) {
       const status = error instanceof AnalysisBotMismatchError ? 403 : 400;
       res.status(status).json({ error: status === 403 ? "analysis_bot_mismatch" : "invalid_analysis_progress", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  router.post('/analysis-runs/:analysisId/aggregations', async (req: Request, res: Response) => {
+    try {
+      const parentId = String(req.params.analysisId);
+      const parent = await workflowEvolutionRepo.findAnalysisRun(parentId);
+      if (!parent) { res.status(404).json({ error: 'analysis_not_found' }); return; }
+      await assertLinkedAnalysisBot(parent, textOrNull(req.body?.botId));
+      res.json({ jobs: await new IssueAggregationRepository(db).prepare(parentId) });
+    } catch (error) {
+      res.status(error instanceof AnalysisBotMismatchError ? 403 : 400).json({ error: 'aggregation_request_failed' });
+    }
+  });
+
+  router.post('/analysis-runs/:analysisId/aggregations/:aggregationId', async (req: Request, res: Response) => {
+    try {
+      const parentId = String(req.params.analysisId);
+      const parent = await workflowEvolutionRepo.findAnalysisRun(parentId);
+      if (!parent) { res.status(404).json({ error: 'analysis_not_found' }); return; }
+      await assertLinkedAnalysisBot(parent, textOrNull(req.body?.botId));
+      await new IssueAggregationRepository(db).complete(parentId, String(req.params.aggregationId), req.body?.result, req.body?.failed === true);
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(error instanceof AnalysisBotMismatchError ? 403 : 400).json({ error: 'aggregation_result_rejected' });
     }
   });
 

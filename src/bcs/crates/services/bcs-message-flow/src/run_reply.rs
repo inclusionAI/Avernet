@@ -1,5 +1,5 @@
-//! Heuristic terminal normalization. Explicit deltas concatenate verbatim;
-//! completed visible segments are separated by one newline. No substring dedup.
+//! Queue-only reply reconstruction. Segments and deltas concatenate verbatim;
+//! original whitespace is preserved. No display separators or substring dedup.
 use crate::BcsMessageFlow;
 use bcs_service_api::{BotEventCommand, ServiceError, ServiceResult};
 
@@ -19,7 +19,7 @@ pub(crate) fn chat_key(cmd: &BotEventCommand) -> String {
 fn join(history: &str, current: &str) -> String {
     match (history.is_empty(), current.is_empty()) {
         (true, _) => current.into(), (_, true) => history.into(),
-        _ => format!("{history}\n{current}"),
+        _ => format!("{history}{current}"),
     }
 }
 
@@ -29,7 +29,7 @@ fn normalize(history: &str, current: &str, final_text: &str) -> RunReply {
         (accumulated, current.to_owned(), "empty")
     } else if !accumulated.is_empty() && final_text.starts_with(&accumulated) {
         let remainder = final_text.strip_prefix(history).unwrap_or(final_text);
-        let display = if history.is_empty() { final_text } else { remainder.strip_prefix('\n').unwrap_or(remainder) };
+        let display = remainder;
         (final_text.to_owned(), display.to_owned(), "full_snapshot")
     } else if !current.is_empty() && final_text.starts_with(current) {
         (join(history, final_text), final_text.to_owned(), "segment_snapshot")
@@ -69,7 +69,7 @@ pub(crate) async fn prepare(flow: &BcsMessageFlow, cmd: &BotEventCommand, final_
         flow.message_tracker.peek_chat_buf(&chat_key(cmd)).await.unwrap_or_default()
     };
     let _timing = crate::reply_timing::Timer::new("reply.normalize");
-    let mut reply = normalize(&segments.join("\n"), &current, final_text);
+    let mut reply = normalize(&segments.concat(), &current, final_text);
     reply.source_ids = source_ids;
     Ok(reply)
 }
@@ -78,12 +78,21 @@ pub(crate) async fn prepare(flow: &BcsMessageFlow, cmd: &BotEventCommand, final_
 mod tests {
     use super::*;
     #[test]
+    fn original_whitespace_and_intentional_repetition_are_preserved() {
+        let reply = normalize("工具前\n", "\n工具后", "工具前\n\n工具后补充");
+        assert_eq!(reply.text, "工具前\n\n工具后补充");
+        assert_eq!(reply.display, "\n工具后补充");
+        assert_eq!(normalize("好的", "好的", "好的好的").text, "好的好的");
+        assert_eq!(normalize("你好", "世界", "你好世界").text, "你好世界");
+    }
+
+    #[test]
     fn three_modes_empty_and_short_repeats() {
         for (final_text, expected, mode) in [
-            ("A\nBC", "A\nBC", "full_snapshot"),
-            ("BC", "A\nBC", "segment_snapshot"),
-            ("C", "A\nBC", "delta"),
-            ("", "A\nB", "empty"),
+            ("ABC", "ABC", "full_snapshot"),
+            ("BC", "ABC", "segment_snapshot"),
+            ("C", "ABC", "delta"),
+            ("", "AB", "empty"),
         ] {
             let r = normalize("A", "B", final_text);
             assert_eq!(r.text, expected); assert_eq!(r.method, mode);
@@ -91,8 +100,8 @@ mod tests {
         assert_eq!(normalize("", "好的", "好的").text, "好的");
         assert_eq!(normalize("工具前", "", "").text, "工具前");
         assert_eq!(normalize("工具前", "", "工具前").display, "");
-        assert_eq!(normalize("A\nB", "C", "D").text, "A\nB\nCD");
+        assert_eq!(normalize("A\nB", "C", "D").text, "A\nBCD");
         // Rewritten snapshots are deliberately retained, not guessed away.
-        assert_eq!(normalize("A", "B", "rewrite").text, "A\nBrewrite");
+        assert_eq!(normalize("A", "B", "rewrite").text, "ABrewrite");
     }
 }

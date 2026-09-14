@@ -5,11 +5,17 @@ use bcs_service_api::{
 
 pub struct StaticSessionManagement {
     session: Session,
+    fail_get: bool,
 }
 
 impl StaticSessionManagement {
+    pub fn with_get_failure(mut self) -> Self {
+        self.fail_get = true;
+        self
+    }
+
     pub fn new(session: Session) -> Self {
-        Self { session }
+        Self { session, fail_get: false }
     }
 }
 
@@ -23,6 +29,9 @@ impl SessionManagementService for StaticSessionManagement {
     }
 
     async fn get(&self, session_id: &str) -> Result<Option<Session>, SessionUseCaseError> {
+        if self.fail_get {
+            return Err(SessionUseCaseError::Internal(bcs_service_api::ServiceError::InternalError("injected session read failure".into())));
+        }
         Ok((self.session.id == session_id).then(|| self.session.clone()))
     }
 

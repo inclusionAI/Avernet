@@ -5,7 +5,7 @@ use std::{
 
 use async_trait::async_trait;
 use bcs_service_api::{
-    ActorKind, AgentCredentials, BotCapabilities, BotDynamicStatus, BotRegistryCoreService,
+    ActorKind, AgentCredentials, BotCapabilities, BotRegistryCoreService,
     ChannelBindingCleanupPort,
     BotDeliveryTarget, BotRuntimeConnectCommand, BotRuntimeConnectOutcome,
     BotRuntimeConnectionService, BotRuntimeDisconnectCommand, BotRuntimeStatusCommand,
@@ -2859,7 +2859,7 @@ impl BotRegistryCoreService for FakeRegistry {
         Ok(())
     }
 
-    async fn update_status(&self, _bot_id: &str, _status: BotDynamicStatus) -> bool {
+    async fn update_status(&self, _bot_id: &str) -> bool {
         true
     }
 

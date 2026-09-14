@@ -316,7 +316,7 @@ export class WorkflowEvolutionRepository {
     if (analysis.workflow_id) {
       const prior = await this.db.query<WorkflowEvolutionAnalysisRow>(
         `SELECT * FROM workflow_evolution_analysis_runs
-         WHERE workflow_id = ? AND analysis_id <> ? AND status = 'completed' AND result_json IS NOT NULL
+         WHERE workflow_id = ? AND analysis_id <> ? AND scope_type <> 'issue_aggregate' AND status = 'completed' AND result_json IS NOT NULL
          ORDER BY id DESC LIMIT 20`,
         [analysis.workflow_id, analysis.analysis_id],
       );
@@ -418,6 +418,10 @@ export class WorkflowEvolutionRepository {
       ))[0]!;
       for (const diagnosis of result.diagnoses) {
         if (!diagnosis.proposal) continue;
+        // One executable suggestion per signature: retain competing proposals in
+        // result_json instead of silently overwriting one cause's fix with another.
+        const competing = result.diagnoses.filter(item => item.failureSignature === diagnosis.failureSignature && item.proposal);
+        if (new Set(competing.map(item => digestCanonicalJson(item.proposal))).size > 1) continue;
         const existing = (await tx.query<{
           id: number;
           source_diagnosis_ids: string | null;
@@ -498,7 +502,7 @@ export class WorkflowEvolutionRepository {
   }
 
   async listProjectedDiagnoses(options: { workflowId?: string; flowId?: string; analysisId?: string; query?: string; limit?: number; offset?: number } = {}): Promise<{ rows: Array<Record<string, unknown>>; total: number }> {
-    const clauses = ["status = 'completed'", "result_json IS NOT NULL"];
+    const clauses = ["status = 'completed'", "result_json IS NOT NULL", "scope_type <> 'issue_aggregate'"];
     const params: unknown[] = [];
     if (options.workflowId) { clauses.push("workflow_id = ?"); params.push(options.workflowId); }
     if (options.flowId) { clauses.push("flow_id = ?"); params.push(options.flowId); }

@@ -1994,10 +1994,7 @@ async fn discovery_ignores_heartbeat_summary_and_keeps_static_metadata() {
     let fixture = RegistryFixture::new();
     register_bot(&fixture.registry, "summary-bot",
         caps(Some("Database Helper"), Some("Static SQL expertise"), "public"), None).await;
-    fixture.registry.update_status("summary-bot", bcs_service_api::BotDynamicStatus {
-        status: "busy".into(), dynamic_summary: Some("ephemeral-only-marker".into()),
-        load: Some(1.0), updated_at: Some(123),
-    }).await;
+    fixture.registry.update_status("summary-bot").await;
     let service = fixture.service();
     let ignored = service.discover_bots(BotDiscoveryCommand {
         q: Some("ephemeral-only-marker".into()), ..Default::default()

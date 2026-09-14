@@ -15,6 +15,7 @@ import { buildInterventionMessage, type InterventionAction } from "../services/i
 import type { WorkflowSpecRepository } from "../repositories/workflow-spec-repository.js";
 import { ExecutionStepLogRepository } from "../repositories/execution-step-log-repository.js";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
+import { resolveWorkflowActorId } from "@avernet/clawweb-shared/server/services/workflow-access";
 
 /**
  * Fix total_duration_ms values that were inflated 1000x by a bug in
@@ -213,11 +214,12 @@ export function createRunsRouter(
       ]);
 
       // 2. Build spec entries from lightweight summaries (title from DB column, no JSON parse)
-      type SpecEntry = { workflowId: string; title: string; updatedAt: number | null };
+      type SpecEntry = { workflowId: string; title: string; updatedAt: number | null; ownerId: string | null };
       const specEntries: SpecEntry[] = specRows.map((r) => ({
         workflowId: r.workflow_id,
         title: r.title ?? r.workflow_id,
         updatedAt: typeof r.gmt_modified === "string" ? Math.floor(new Date(r.gmt_modified).getTime() / 1000) : (r.gmt_modified ?? null),
+        ownerId: r.resolved_owner_id ?? r.owner_id ?? null,
       }));
 
       // 3. Build run stats map
@@ -228,7 +230,7 @@ export function createRunsRouter(
       }
 
       // 4. Merge workflow_specs entries + run-only workflows (flows without a spec still show up)
-      type WorkflowEntry = { workflow_id: string; workflow_title: string | null; run_count: number; last_status: string | null; last_run_at: number | null; updated_at: number | null };
+      type WorkflowEntry = { workflow_id: string; workflow_title: string | null; run_count: number; last_status: string | null; last_run_at: number | null; updated_at: number | null; owner_id: string | null };
       const merged: WorkflowEntry[] = [];
       const seenIds = new Set<string>();
 
@@ -243,6 +245,7 @@ export function createRunsRouter(
           last_status: stats?.last_status ?? null,
           last_run_at: stats?.last_run_at ?? null,
           updated_at: spec.updatedAt,
+          owner_id: spec.ownerId,
         });
       }
 
@@ -256,6 +259,7 @@ export function createRunsRouter(
           last_status: stats.last_status ?? null,
           last_run_at: stats.last_run_at ?? null,
           updated_at: null,
+          owner_id: null,
         });
       }
 
@@ -913,10 +917,19 @@ export function createRunsRouter(
     }
   }));
 
-  /** DELETE /:flowId — delete a flow run and all related data */
+  /** DELETE /:flowId — delete a flow run and all related data (admin only) */
   router.delete("/:flowId", asyncHandler(async (req: Request, res: Response) => {
     if (!flowRunRepo || !nodeExecRepo || !eventRepo) {
       res.status(503).json({ error: "Service Unavailable", message: "Database not configured" });
+      return;
+    }
+    // Require an authenticated identity; only admins can delete flow runs.
+    if (!resolveWorkflowActorId(req) && !req.isAdmin) {
+      res.status(401).json({ error: "Unauthorized", message: "User identity required" });
+      return;
+    }
+    if (!req.isAdmin) {
+      res.status(403).json({ error: "Forbidden", message: "Only admins can delete flow runs" });
       return;
     }
     try {
