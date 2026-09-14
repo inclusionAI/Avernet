@@ -57,6 +57,11 @@ class CliCapabilityManifestResolver:
         template_type: str | None,
     ) -> list[CliItem]:
         """Return the default items for one exact logical-engine profile."""
+        # Match is first-match-wins by declaration order: an exact
+        # ``template_type`` profile (e.g. claude_code/generalCC) MUST
+        # precede any ``exclude_template_types`` fallback for the same
+        # engine. See specs/cli-default-install-identity/
+        # 010-exclude-template-types.md.
         for profile in self._manifest.profiles:
             match = profile["match"]
             if match["engine_type"] != engine_type:

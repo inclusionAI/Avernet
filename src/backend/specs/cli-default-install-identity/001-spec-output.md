@@ -130,6 +130,7 @@ Backend 扩展已有 `/api/v1/devices/callback/bootstrap-auth`，保持旧的 `a
 - `claude_code/generalCC` 创建路径保持既有 `get_default_cli_items()` 行为：首次 Passport scope 包含 aicoding 九项；首次/每次 Bootstrap 在保留这些历史项的基础上补齐 YAML 管理的 `dataphin`、`deepinsight-cli`，不得清除或替换创建期项。
 - [sync_service.py](/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/cli-default-install-identity/src/backend/src/agentclaw/community/core/mcp/services/sync_service.py:925)、[bot_runtime_projector.py](/Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/cli-default-install-identity/src/backend/src/agentclaw/community/core/skill_center/services/bot_runtime_projector.py:295)、删除 Default CLI endpoint 与 default passport repair 均不可另行调用硬编码默认列表或丢掉 CLI identity。
 - 不在一期 profile 的引擎维持既有行为；本变更不得把 YAML 默认项扩展到 `aicoding`、`moltis`、`hermes` 或其他 Claude template。
+- （由 `010-exclude-template-types.md` 修订）`claude_code` 允许新增一条**配置驱动**的 `exclude_template_types` 兜底 profile，覆盖非 `generalCC`/非空/非 `normalCC` 模板；该修订不沿用 runtime-identity 分桶，维持本条分离不变量。
 
 `RuntimeProjection.cli_commands` 仍仅携带授权的 `cli_code`，不承担 caller token 注入或 CLI 安装状态；它继续从收敛后的 Passport snapshot 得到 CLI code。
 
@@ -212,7 +213,8 @@ OpenAPI 与兼容的 `/api/bots/{bot_id}/caller-context` 均在原有 `mcp_call_
 |---|---|---|---|---|---|
 | `manifest_version` | 非空字符串 | 是 | 同一 Backend/DaaS artifact 一致 | 发布配置 | Bootstrap 与 DaaS 版本一致性检查 |
 | `profiles[].match.engine_type` | 枚举 | 是 | 一期仅 `openclaw`/`claude_code` | 发布配置 | 逻辑 engine key，不是 runtime bucket |
-| `profiles[].match.template_type` | 字符串/null | 条件必填 | `claude_code` 必须为 `generalCC` | 发布配置 | exact match，不能继承其他 template |
+| `profiles[].match.template_type` | 字符串/null | 条件必填 | `claude_code` 精确路径必须为 `generalCC` | 发布配置 | exact match，不能继承其他 template |
+| `profiles[].match.exclude_template_types` | 非空 string 数组 | 否 | 与 `template_type` 互斥 | 发布配置 | 可选 deny-list：命中当 `engine_type` 相等且 `template_type` 非空且不在列表内；详见 `010-exclude-template-types.md` |
 | `default_cli_codes[]` | `cli_code` | 是 | 在 catalog 唯一存在 | 发布配置 | Default 必选授权项 |
 | `catalog.<code>.default_identity_mode` | `owner/caller` | 是 | 本期默认 `owner` | 发布配置 | 历史 identity 与 sparse override 均可覆盖它 |
 | `install.argv/probe_argv` | 非空 string 数组 | 是 | 禁止 shell/空项/用户占位符 | 发布配置 | 供固定 argv 执行，不是 shell command |
@@ -296,6 +298,7 @@ OpenAPI 与兼容的 `/api/bots/{bot_id}/caller-context` 均在原有 `mcp_call_
 ### 关注点
 
 - YAML profile 必须按逻辑 engine/template 精确匹配，不能沿用 Claude Code 到 aicoding 的默认能力分桶。
+- （`010-exclude-template-types.md` 修订）`claude_code` 允许一条配置驱动 `exclude_template_types` 兜底；命中仍由 manifest 驱动、不调用 runtime-identity 谓词，故本条分离不变量保持。R-01 精确匹配对 `openclaw`/`claude_code/generalCC` 仍成立；唯一例外为该兜底 profile。
 - 所有 AgentPass resourceManifest writer 必须带完整 MCP + CLI identity scope，且只经共享构建逻辑。
 - CLI caller/owner 的持久化、AgentPass identity 和实际 engine 消费三者必须有明确闭环；不得半实现为 UI 字段。
 - 安装器必须以受控 argv 执行并在现有 `eval` 并行框架之外运行。
