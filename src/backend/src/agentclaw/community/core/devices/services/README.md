@@ -45,6 +45,8 @@ ctx = resolver.resolve_for_bot(bot_id: str, user_id: str) -> DeviceContext
 - `DeviceNotBoundError` — bot 无 active binding（未 apply / 已 release）。
 - `UnknownProviderError` — `binding.device_provider` 是未知值（DB 异常）。
 - `ConnInfoBuildError` — 底层 conn_info 计算失败。
+- `DeviceOfflineError` — provider 明确确认当前没有 active device；属于等待设备上线的正常状态。
+- `DeviceConnectionUnavailableError` — timeout、5xx 等无法确认设备状态的暂时连接故障。
 
 ## `DeviceContext` 字段
 
@@ -67,7 +69,9 @@ frozen dataclass，不可变。
 | `TeclawConnInfoBuilder`| 复用现 teclaw plugin 内 OSS 装配逻辑                                |
 | `LocalConnInfoBuilder` | 兼容期 fallback（无 binding 场景；含 desktop pathlib path）         |
 
-builder 仅算 conn_info，不做权限 / 不做存活检查。
+builder 仅算 conn_info，不做权限判断。BaaS builder 会把边界层结构化
+`NO_ACTIVE_DEVICES` 转为 provider-neutral `DeviceOfflineError`，并把网络/5xx
+转为 `DeviceConnectionUnavailableError`；不得靠异常字符串识别。
 
 ## 2 个 Dispatcher
 

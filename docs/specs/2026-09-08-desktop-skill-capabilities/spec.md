@@ -1,6 +1,6 @@
 # Desktop Skill 能力适配 Spec
 
-版本：1.0，2026-09-09。状态：总体设计已定稿；本文为Q1–Q29最终决定的规范化整理，功能尚未实现、测试或部署。
+版本：1.1，2026-09-11。状态：G1–G4 已实现并合入 Avernet dev；统一集成和实机验收由 #2105 跟踪。本文补充预发发现的明确离线恢复语义，修复和部署状态仍须独立记录。
 
 Owning Module：Skill Center。参与方：Avernet Backend/Engine/BaaS契约与OCB企业装配、Desktop客户端及Engine Adapter。目标分支：两仓`dev`。
 
@@ -171,7 +171,9 @@ Mounted保持原挂载及检查行为，不下载、不修mount、不写只读�
 
 **调度身份**：Queue既有`env/app/task_type`作用域加`owner_id + bot_id`；同Bot至多一条live工作项，不按入口、Skill、Reference或版本拆长期任务。payload只承载逻辑目标及必要控制信息，不存签名URL、冻结版本清单或待重放的激活动作。
 
-**入口**：正式Set/Direct变更收尾（含Reference最终add）、共同投影、启动/重连及Track Latest都请求同一恢复Interface。Bot未就绪或snapshot失败导致未进入Engine的提前PENDING，也要进入这一共同机制。inactive SKIPPED不是下载理由，业务权限/DB失败不是重试历史命令的授权。
+**入口**：正式Set/Direct变更收尾（含Reference最终add）、共同投影、启动/重连及Track Latest都请求同一恢复Interface。Bot未就绪或snapshot失败导致未进入Engine的提前PENDING，也要进入这一共同机制。inactive SKIPPED不是下载理由，业务权限/DB失败不是重试历史命令的授权。Desktop健康扫描确认`OFFLINE → ACTIVE`并提交状态后发布既有`RuntimeProjectionRequestedEvent`；不重放只表示首次激活的`DeviceActivatedEvent`，也不让健康扫描直接调用Skill服务。
+
+**恢复资格**：Recovery内部使用独立三态分类，不复用回答产品可用性的`is_bot_ready()`。ACTIVE/PENDING为RUN，OFFLINE为WAIT_FOR_DEVICE，FAILED/RELEASING/RELEASED及未知状态为STOP（未知需告警）。`ensure()`、Sweeper和Handler执行前/正式apply前共用同一规则；WAIT/STOP不创建或继续高频任务。自然重连事件创建due-now任务，事件丢失时由后续RUN状态低频扫描兜底。
 
 **一次执行**：核对目标仍适用及当前绑定；Reader读取当前有效身份并解析精确版本；后台逐项准备尚缺派生包，单项准备失败不能阻断其它可执行项；重工作结束后重新读取最新期望，再调用共同Projector的Skill scope及Engine apply；按逐项结果决定本行Queue outcome。已退出的目标不继续安排下载，迟到内容不能重新激活；任务自身不再enqueue另一条任务来代替Reschedule。
 
@@ -179,18 +181,23 @@ Mounted保持原挂载及检查行为，不下载、不修mount、不写只读�
 | --- | --- |
 | 新建due-now工作 | 使用现有wake_on_enqueue及worker领取，首轮不等待扫漏。 |
 | 内容正常准备/下载中 | `Reschedule(5s)`，不因正常等待指数退避。 |
-| 网络/设备暂不可用 | 使用既有`Retry`退避；超时不能当已确认在下载。 |
+| 明确OFFLINE或BaaS结构化`NO_ACTIVE_DEVICES` | 当前Task `Complete`并释放live key，等待首次激活/重连事件；不访问或继续轮询Engine。 |
+| timeout、5xx、非法响应等状态未知故障 | 使用既有`Retry`退避；超时不能当已确认离线或正在下载。 |
 | 混合DEGRADED/PENDING | 看逐项可恢复工作，永久问题不能遮住其它等待项。 |
 | Skill域全部完成 | 结束快速跟进；不表示MCP/Passport全部完成。 |
 | 只剩不可自动解决的问题 | 停止该问题高频重试，保留具体DEGRADED，不能伪报成功。 |
 | 单轮达到30分钟deadline | 按现有Queue终态/释放live key机制处理；不回滚DB、不删除完整缓存。 |
-| 漏唤醒、过期或较长离线 | 约10分钟分页扫漏，幂等ensure同一类任务；不在扫描线程下载/投影。 |
+| 漏唤醒、过期或RUN状态恢复 | 约10分钟分页扫漏，幂等ensure同一类任务；明确OFFLINE/终态跳过，不在扫描线程下载/投影。 |
 
-兜底不能只查现存任务或DB ACTIVE/状态跳变；必要时对目标范围内存活且有绑定的Desktop幂等再核对。允许已有完成Bot低频核对，不新增同步进度表。现有健康扫描只更新状态，不能偷换其dry-run/白名单保护或视为已经触发投影。Pool过渡期继续尊重既有迁移对映射的所有权，不让新任务抢写。
+兜底不能只查现存任务；按统一Recovery资格对RUN状态且有当前绑定的Desktop幂等再核对。明确OFFLINE、终态和未知状态不进入高频恢复，PENDING仍保留启动期资格。允许已有完成Bot低频核对，不新增同步进度表。健康扫描保持原dry-run/白名单保护，只在实际提交`OFFLINE → ACTIVE`后发布best-effort Runtime重投影事件。Pool过渡期继续尊重既有迁移对映射的所有权，不让新任务抢写。
 
 5秒是下一次可领取时间；10分钟是扫描周期，均不是端到端SLA。deadline不是取消正在运行Handler的硬超时，租约续期不延长它。重复enqueue不更新payload、不提前run_at、不延deadline，亦不是所有前台命令的分布式锁。
 
 保留现有入队非事务窗口，以及最后一次读取至Complete之间出现新期望的窗口，由已定扫漏兜底。不得因此新增outbox、generation表、任务进度表或修改通用Queue基础设施。入队失败必须保留真实错误/日志，不能声称持久恢复已保证。
+
+**明确离线错误合同**：BaaS层只根据可信非2xx JSON的精确`detail.error=NO_ACTIVE_DEVICES`产生窄结构化错误，不匹配异常字符串；HTTP状态可以是当前观察到的404或历史合同中的503。Builder将其转换为provider-neutral `DeviceOfflineError`，Runtime再返回`DESKTOP_DEVICE_OFFLINE / PENDING / retryable=true`。这里`retryable`仅表示未来投影可能恢复，不决定当前Task；Recovery内部将其分类为等待事件并`Complete`。401/403、其它code、坏JSON、timeout、5xx和普通`ConnInfoBuildError`不得误归为离线。
+
+**日志与多Pod**：正常OFFLINE不逐Bot记录，Sweeper每轮输出扫描/资格/跳过/创建/加入既有任务/失败/耗时聚合；DB仍为ACTIVE但BaaS明确无设备时记录单行WARN，无traceback，DB已OFFLINE则INFO。普通网络故障WARN并退避，非法合同/不变量/Engine apply异常保持ERROR和traceback。多个Pod可重复低频扫描，继续依赖Queue live-key去重，不新增Sweeper分布式锁。
 
 ### D9. 版本切换、退出和MCP
 
@@ -219,11 +226,15 @@ Desktop既有产品升级门禁继续使用，不新增Backend最低版本表。
 
 公开Router/DTO如实际变更，必须从Backend正式实现生成Gateway产物并执行合同检查；不能只修改生成JSON或只更新前端说明。签名扩展为内部Engine合同，不直接成为前端字段。
 
+`DESKTOP_DEVICE_OFFLINE`只是现有`RuntimeProjectionIssue.code: string`的新稳定取值；状态、字段和HTTP结构不变，不要求Gateway schema或现有调用方升级。前端可选识别该code显示“设备离线、上线后自动同步”，但不能仅因`retryable=true`秒级重放业务命令。
+
 ## Testing Decisions
 
 以用户可观察行为、正式Service/Plugin Interface及真实Router→DI为测试面。Mock应模拟外部依赖而非跳过需要验证的Module；必须证明真实Adapter被调用。共享Mounted/Downloaded运行同一契约套件，具体实现可补充测试。
 
 测试分层：各组窄单测与协议/DI/架构门禁 → Standards/Spec双轴review并修高优问题 → 必要全量/CI收尾 → 匹配OCB gitlink与真实Desktop验证。已有CI要求不削弱；Fake/隔离测试不能代替真实设备。此文没有运行这些测试。
+
+明确离线修复至少覆盖：BaaS exact code与其它4xx/5xx/坏JSON分流；Builder provider-neutral转换；PerDomain结果和INFO/WARN/ERROR分级；Recovery三态资格；Sweeper排除OFFLINE/终态；Handler开始及apply前竞态；既有离线live task升级后完成；`OFFLINE → ACTIVE`仅发布一次Runtime重投影事件；事件失败由RUN状态Sweep补漏；timeout/5xx继续退避、Center下载继续五秒跟进。OpenClaw/Hermes均需真实验证。
 
 ### 验收索引
 

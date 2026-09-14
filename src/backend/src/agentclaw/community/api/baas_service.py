@@ -16,6 +16,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, Optional, Protocol, runtime_checkable
 
+from agentclaw.community.core.service_bot.baas_service_errors import (
+    BaasNoActiveDevicesError,
+    BaasServiceError,
+    BaasTransientServiceError,
+)
 from agentclaw.community.core.service_bot.services.baas_service import (
     BotWsConnectionInfoResponse,
     HttpConnectionInfo,
@@ -149,6 +154,10 @@ class BaasServiceProtocol(Protocol):
 
         ``device_uuid`` (optional) locks a specific instance in a multi-instance
         service bot; omitted → BaaS auto-selects an active instance.
+
+        Raises ``BaasNoActiveDevicesError`` for trusted structured device-offline
+        responses, ``BaasTransientServiceError`` for transport/5xx failures, and
+        ``BaasServiceError`` for other service failures.
         """
         ...
 
@@ -279,4 +288,9 @@ class BaasServiceProtocol(Protocol):
         ...
 
 
-__all__ = ["BaasServiceProtocol"]
+__all__ = [
+    "BaasNoActiveDevicesError",
+    "BaasServiceError",
+    "BaasServiceProtocol",
+    "BaasTransientServiceError",
+]
