@@ -179,7 +179,7 @@ user_config:
   # Level-triggered Desktop Skill recovery. The sweep only enqueues one
   # owner+bot task; downloads and Runtime projection stay in the queue worker.
   desktop_skill_recovery:
-    enabled: true
+    enabled: false
     sweep_interval_seconds: 600
     sweep_page_size: 100
 
