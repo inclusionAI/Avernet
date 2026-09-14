@@ -108,7 +108,7 @@ interface OverviewTabProps {
 
 export default function OverviewTab({ workflow }: OverviewTabProps) {
   const workflowId = workflow.workflow_id
-  const [days, setDays] = useState<7 | 30>(7)
+  const [days, setDays] = useState<1 | 7 | 30>(7)
   const [page, setPage] = useState(0)
   const [statusFilter, setStatusFilter] = useState('')
   const [searchInput, setSearchInput] = useState('')
@@ -180,25 +180,31 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
   const currentPage = Math.min(page + 1, totalPages)
   const isRefreshing = isFetching || isMetricsFetching
 
-  const changeDays = (nextDays: 7 | 30) => {
+  const changeDays = (nextDays: 1 | 7 | 30) => {
     setDays(nextDays)
   }
+
+  const rangeOptions: { value: 1 | 7 | 30; label: string }[] = [
+    { value: 1, label: '今天' },
+    { value: 7, label: '7天' },
+    { value: 30, label: '30天' },
+  ]
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-end gap-1" aria-label="概览时间范围">
-        {[7, 30].map((value) => (
+        {rangeOptions.map((option) => (
           <button
-            key={value}
+            key={option.value}
             type="button"
-            onClick={() => changeDays(value as 7 | 30)}
-            className={`rounded-md px-3 py-1 text-xs font-medium transition ${days === value ? 'bg-blue-600 text-white' : 'bg-white text-slate-500 ring-1 ring-slate-200 hover:bg-slate-50'}`}
-          >{value}天</button>
+            onClick={() => changeDays(option.value)}
+            className={`rounded-md px-3 py-1 text-xs font-medium transition ${days === option.value ? 'bg-blue-600 text-white' : 'bg-white text-slate-500 ring-1 ring-slate-200 hover:bg-slate-50'}`}
+          >{option.label}</button>
         ))}
       </div>
       <section aria-label="工作流关键指标" className="grid grid-cols-2 divide-x divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white lg:grid-cols-4 lg:divide-y-0">
         <MetricCell label="健康度" value={health ? String(health.overallScore) : '—'} detail={health ? (health.overallScore >= 80 ? '运行稳定' : health.overallScore >= 60 ? '需要关注' : '建议优先处理') : '等待健康数据'} emphasis={health && health.overallScore < 60 ? 'danger' : 'default'} />
-        <MetricCell label="运行成功率" value={currentSuccessRate} detail={`近 ${days} 天 · 成功 / 终态`} />
+        <MetricCell label="运行成功率" value={currentSuccessRate} detail={`${days === 1 ? '今日' : `近 ${days} 天`} · 成功 / 终态`} />
         <MetricCell label="异常结束" value={hasMetrics ? String(stats.abnormalRuns) : '—'} detail="失败、终止或取消" emphasis={hasMetrics && stats.abnormalRuns > 0 ? 'danger' : 'default'} />
         <MetricCell label="节点耗时 P95" value={health ? formatDuration(health.p95DurationMs) : '—'} detail="最慢节点 P95 口径" />
       </section>

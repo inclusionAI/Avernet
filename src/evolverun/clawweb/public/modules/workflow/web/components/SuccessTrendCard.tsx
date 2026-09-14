@@ -21,11 +21,11 @@ export function SuccessTrendCard({
   currentSuccessRate: string
   currentDetail: string
   compact?: boolean
-  days?: 7 | 30
-  onDaysChange?: (days: 7 | 30) => void
+  days?: 1 | 7 | 30
+  onDaysChange?: (days: 1 | 7 | 30) => void
   showRangeSelector?: boolean
 }) {
-  const [localDays, setLocalDays] = useState<7 | 30>(7)
+  const [localDays, setLocalDays] = useState<1 | 7 | 30>(7)
   const days = controlledDays ?? localDays
   const [data, setData] = useState<TrendPoint[]>([])
   const [loading, setLoading] = useState(false)
@@ -54,7 +54,7 @@ export function SuccessTrendCard({
     return () => { cancelled = true }
   }, [workflowId, days, requestSeq])
 
-  const changeDays = (next: 7 | 30) => {
+  const changeDays = (next: 1 | 7 | 30) => {
     if (onDaysChange) onDaysChange(next)
     else setLocalDays(next)
   }
@@ -75,13 +75,17 @@ export function SuccessTrendCard({
           {!compact && <span className={`text-2xl font-bold ${currentSuccessRate === '—' ? 'text-gray-300' : Number(currentSuccessRate.replace('%', '')) >= 80 ? 'text-emerald-600' : Number(currentSuccessRate.replace('%', '')) >= 50 ? 'text-amber-600' : 'text-rose-600'}`}>{currentSuccessRate}</span>}
         </div>
         {showRangeSelector && <div className="flex items-center gap-1">
-          {[7, 30].map((d) => (
+          {[
+            { value: 1, label: '今天' },
+            { value: 7, label: '7天' },
+            { value: 30, label: '30天' },
+          ].map((option) => (
             <button
-              key={d}
-              onClick={() => changeDays(d as 7 | 30)}
-              className={`px-2 py-0.5 text-[10px] rounded-md transition-all ${days === d ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}
+              key={option.value}
+              onClick={() => changeDays(option.value as 1 | 7 | 30)}
+              className={`px-2 py-0.5 text-[10px] rounded-md transition-all ${days === option.value ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}
             >
-              {d}天
+              {option.label}
             </button>
           ))}
         </div>}
