@@ -1659,7 +1659,12 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     expect(dispatch.mock.calls.length).toBe(callsBefore);
   });
 
-  it.each([false, true])("binds a real Skill to a diagnosis-only task without Plan, Optimize or finalize (preprocess=%s)", async (preprocess) => {
+  it.each([
+    { preprocess: false, plan: undefined }, { preprocess: true, plan: undefined },
+    { preprocess: false, plan: true }, { preprocess: true, plan: true },
+    { preprocess: false, plan: false }, { preprocess: true, plan: false },
+  ])("binds a real Skill to the existing Diagnose flow without Optimize or finalize (preprocess=$preprocess, plan=$plan)", async ({ preprocess, plan }) => {
+    const runsPlan = plan !== false;
     await seedArcaBot();
     await skillAssetRepo.createAsset({
       assetId: "SKILL-DIAGNOSE", versionId: "SKVER-DIAGNOSE", ownerUserId: "user-1",
@@ -1671,14 +1676,15 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     if (implementationId) await stageSkillRepo.updateIntegrationTest(implementationId, "TEST-DIAGNOSE", "test_passed");
     const response = await fetch(`${baseUrl}/api/evolve/tasks`, {
       method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
-      body: JSON.stringify({ taskType: "diagnose", taskName: "Skill 仅诊断", userId: "user-1", botId: "bot-arca", botEnv: "pre",
+      body: JSON.stringify({ taskType: "diagnose", taskName: "Skill 诊断任务", userId: "user-1", botId: "bot-arca", botEnv: "pre",
         judgeBackend: "subagent", model: "GLM-5.2", diagnoseIntent: "检查日报真实执行", targetSkillAssetId: "SKILL-DIAGNOSE",
+        ...(plan === undefined ? {} : { stageSelection: { plan } }),
         ...(implementationId ? { stageExtensions: { diagnose: { preprocess: { enabled: true, implementationId } } } } : {}) }),
     });
     expect(response.status, await response.clone().text()).toBe(201);
     const task = await response.json();
     expect(task.task_type).toBe("diagnose");
-    expect(task.config.flow).toEqual({ key: "skill_evolution", version: "v1", stages: { diagnose: true, plan: false, optimize: false } });
+    expect(task.config.flow).toEqual({ key: "skill_evolution", version: "v1", stages: { diagnose: true, plan: runsPlan, optimize: false } });
     expect(task.config.targetSkill).toMatchObject({ assetId: "SKILL-DIAGNOSE", skillId: "daily-report-zh", ownerUserId: "user-1",
       baseline: { sha256: `sha256:${"a".repeat(64)}` } });
     expect(ocbLocalSkills.exportLocalSkill).toHaveBeenCalledWith(expect.objectContaining({ botId: "bot-arca", skillId: "daily-report-zh" }));
@@ -1708,15 +1714,29 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     });
     const diagnosed = await callback(task.task_id, next.stepId, { status: "succeeded", output: diagnoseOutput("存在待诊断问题", 1) });
     expect(diagnosed.response.status).toBe(200);
-    expect(diagnosed.body.nextStep).toBeNull();
+    if (runsPlan) {
+      expect(diagnosed.body.nextStep).toMatchObject({ stepType: "plan" });
+      const planStep = diagnosed.body.nextStep as { stepId: string };
+      const planInput = await fetch(`${baseUrl}/api/evolve/internal/tasks/${task.task_id}/steps/${planStep.stepId}/input`);
+      expect(planInput.status).toBe(200);
+      expect((await planInput.json()).task.config.targetSkill.candidate.prepared).toMatchObject({
+        workspacePath: workspace, skillPath: `${workspace}/skills/skills-local/local-skill`,
+      });
+      const planned = await callback(task.task_id, planStep.stepId, { status: "succeeded", output: planOutput() });
+      expect(planned.response.status, JSON.stringify(planned.body)).toBe(200);
+      expect(planned.body.nextStep).toBeNull();
+    } else {
+      expect(diagnosed.body.nextStep).toBeNull();
+    }
     expect((await repo.findTask(task.task_id))?.status).toBe("completed");
-    expect((await repo.listSteps(task.task_id)).map((step) => step.step_type)).toEqual(preprocess
-      ? ["skill_prepare", "stage_extension", "diagnose"] : ["skill_prepare", "diagnose"]);
+    expect((await repo.listSteps(task.task_id)).map((step) => step.step_type)).toEqual([
+      "skill_prepare", ...(preprocess ? ["stage_extension"] : []), "diagnose", ...(runsPlan ? ["plan"] : []),
+    ]);
     expect(await skillAssetRepo.listVersions("SKILL-DIAGNOSE")).toHaveLength(1);
     expect(ocbLocalSkills.replaceLocalSkill).not.toHaveBeenCalled();
   });
 
-  it.each(["foreign-owner", "wrong-bot", "missing-asset", "enable-plan", "enable-optimize", "disable-diagnose"])(
+  it.each(["foreign-owner", "wrong-bot", "missing-asset", "invalid-plan", "enable-optimize", "disable-diagnose"])(
     "rejects invalid Skill diagnosis binding or scope before export/task/dispatch: %s", async (reason) => {
       if (reason !== "missing-asset") await skillAssetRepo.createAsset({
         assetId: "SKILL-DIAG-DENIED", versionId: "SKVER-DIAG-DENIED", ownerUserId: reason === "foreign-owner" ? "other" : "user-1",
@@ -1724,7 +1744,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
         packageRef: "oss://clawevolve-artifacts/evolve/skills/SKILL-DIAG-DENIED/versions/v1/package.zip",
         packageSha256: `sha256:${"0".repeat(64)}`,
       });
-      const selection = reason === "enable-plan" ? { plan: true }
+      const selection = reason === "invalid-plan" ? { plan: "true" }
         : reason === "enable-optimize" ? { optimize: true }
           : reason === "disable-diagnose" ? { diagnose: false } : undefined;
       const response = await fetch(`${baseUrl}/api/evolve/tasks`, {

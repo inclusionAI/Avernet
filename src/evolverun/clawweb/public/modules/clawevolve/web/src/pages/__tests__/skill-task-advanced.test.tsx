@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, useNavigate } from 'react-router-dom'
 import Evolve from '../Evolve'
 
@@ -43,6 +43,22 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('fixed Skill advanced task form', () => {
+  it('labels fixed Skill diagnosis and previews its registered name while preserving Plan', async () => {
+    api.evolve.getSkillAsset.mockResolvedValue({ ...asset, name: 'daily-report-zh' })
+    open()
+    await ready()
+    expect(screen.getByRole('heading', { name: '发起 Skill 诊断' })).toBeTruthy()
+    expect(screen.getByText('Skill 诊断', { exact: true })).toBeTruthy()
+    const preview = within(screen.getByText('流程预览').closest('aside')!)
+    expect(preview.getByText('Skill 诊断 · daily-report-zh')).toBeTruthy()
+    expect(preview.queryByText('Bot 诊断')).toBeNull()
+    expect(preview.getByText('目标规划')).toBeTruthy()
+    fireEvent.click(submit())
+    await waitFor(() => expect(api.evolve.createDiagnosis).toHaveBeenCalledOnce())
+    expect(api.evolve.createDiagnosis.mock.calls[0][0]).toMatchObject({ targetSkillAssetId: 'asset-1',
+      stageSelection: { diagnose: true, plan: true, optimize: false } })
+  })
+
   it.each(['diagnose', 'full'])('submits %s with defaults Owner, ignores forged URL identity and keeps model editable', async (type) => {
     open(type, '&botId=forged-bot&userId=forged-owner&botEnv=prod')
     await ready(type)
@@ -135,6 +151,9 @@ describe('fixed Skill advanced task form', () => {
 
   it('keeps ordinary non-Skill task creation on the logged-in user', async () => {
     render(<MemoryRouter initialEntries={['/evolve/new?type=diagnose']}><Evolve /></MemoryRouter>)
+    expect(screen.getByRole('heading', { name: '发起 Bot 诊断' })).toBeTruthy()
+    expect(screen.getByText('Bot诊断', { exact: true })).toBeTruthy()
+    expect(within(screen.getByText('流程预览').closest('aside')!).getByText('Bot 诊断')).toBeTruthy()
     await waitFor(() => expect(api.tclog.bots).toHaveBeenCalledWith({ ownerId: 'viewer', status: 'all' }))
     expect((screen.getByRole('textbox', { name: '用户空间 user_id' }) as HTMLInputElement).value).toBe('viewer')
     expect(api.evolve.getSkillTaskDefaults).not.toHaveBeenCalled()

@@ -1974,7 +1974,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       res.status(400).json({ error: "inputMode 必须是 diagnose_goal 或 direct_goal" }); return;
     }
     const targetSkillAssetId = String(rawTargetSkillAssetId ?? "").trim();
-    const skillDiagnosisOnly = Boolean(targetSkillAssetId) && taskType === "diagnose";
+    const skillDiagnosis = Boolean(targetSkillAssetId) && taskType === "diagnose";
     let goal: string;
     try {
       goal = taskType === "full" ? normalizeEvolutionGoal(rawGoal) : "";
@@ -1990,14 +1990,10 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     } as const;
     let stageSelection: FrozenStageSelection;
     try {
-      // Reuse Diagnose switch validation while keeping the frozen Skill identity.
-      // Skill diagnosis does not inherit the legacy Bot diagnosis's optional Plan.
-      stageSelection = (skillDiagnosisOnly ? resolveEvolutionFlow(false) : flow)
+      // Preserve the existing Diagnose flow (optional Plan, no Optimize),
+      // independently of whether its target is a frozen Skill or the Bot.
+      stageSelection = (skillDiagnosis ? resolveEvolutionFlow(false) : flow)
         .resolveSelection(flowStartInput, rawStageSelection);
-      if (skillDiagnosisOnly) {
-        if (rawStageSelection?.plan === true) throw new Error("Skill 诊断任务不能执行 Plan，请创建完整自进化任务");
-        stageSelection.plan = false;
-      }
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); return;
     }

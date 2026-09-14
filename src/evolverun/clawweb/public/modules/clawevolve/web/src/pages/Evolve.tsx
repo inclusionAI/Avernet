@@ -720,8 +720,8 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
     submit: '创建治理优化任务',
   }) : ({
     diagnose: {
-      eyebrow: 'Bot诊断',
-      title: '发起 Bot 诊断',
+      eyebrow: fixedSkillAssetId ? 'Skill 诊断' : 'Bot诊断',
+      title: fixedSkillAssetId ? '发起 Skill 诊断' : '发起 Bot 诊断',
       description: '诊断近期使用情况，产出 Goal、Spec v0 和 Bench Case。',
       submit: '创建诊断任务',
     },
@@ -1030,7 +1030,8 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
             section="extensions"
           />}
           </div>
-          <TaskFormOverview taskType={taskType} fullInputMode={fullInputMode} improvementSource={improvementSource} stageSelection={effectiveStageSelection} />
+          <TaskFormOverview taskType={taskType} fullInputMode={fullInputMode} improvementSource={improvementSource} stageSelection={effectiveStageSelection}
+            fixedSkillDiagnosisName={taskType === 'diagnose' && fixedSkillAssetId ? (fixedSkillReady ? fixedSkill!.name : '') : undefined} />
           </div>
         </div>
 
@@ -1487,11 +1488,12 @@ function FullFlowFields({ diagnoseEnabled, goal, onGoalChange, model, onModelCha
   )
 }
 
-function TaskFormOverview({ taskType, fullInputMode, improvementSource, stageSelection }: {
+function TaskFormOverview({ taskType, fullInputMode, improvementSource, stageSelection, fixedSkillDiagnosisName }: {
   taskType: EvolveTask['task_type']
   fullInputMode: FullInputMode
   improvementSource: boolean
   stageSelection: StageSelectionDraft
+  fixedSkillDiagnosisName?: string
 }) {
   const overview = (() => {
     if (taskType === 'full' && improvementSource) return {
@@ -1634,6 +1636,12 @@ function TaskFormOverview({ taskType, fullInputMode, improvementSource, stageSel
       ...(stageSelection.optimize ? ['优化 Loop'] : []),
     ])
     overview.stages = overview.stages.filter(([name]) => enabledNames.has(name))
+  }
+  if (taskType === 'diagnose' && fixedSkillDiagnosisName !== undefined) {
+    overview.stages = overview.stages.map(([name, description]) => [
+      name === 'Bot 诊断' ? `Skill 诊断${fixedSkillDiagnosisName ? ` · ${fixedSkillDiagnosisName}` : ''}` : name,
+      description,
+    ])
   }
   return (
     <EvolveTaskOverview {...overview} />
