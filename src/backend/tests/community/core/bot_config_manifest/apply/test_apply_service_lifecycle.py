@@ -798,6 +798,50 @@ def test_a_failed_apply_does_not_wipe_a_strict_baseline(world, monkeypatch):
     ) == {("https://git.corp/charts.git", "main", "strict"): "b" * 40}
 
 
+def test_within_one_report_the_later_resolution_is_the_baseline(world, monkeypatch):
+    """A folded creation report can hold two resolutions of one moving ref.
+
+    Its two phases resolve minutes apart, with the carried (pre-container)
+    rows first, so a ``ref: main`` that moved between them leaves both commits
+    in one report. The later row is what the apply's own delivery stood
+    behind, so it is what the next apply compares against — taking the first
+    would hand ``keep_last`` the stored tree of a commit one older than what
+    was actually delivered.
+    """
+    service, _applies, _locks, _scripts, _manifests = world
+    url = "https://git.corp/manifest-testing.git"
+    phase_a = SourceResolution(name="content", url=url, ref="main",
+                               mode="non_strict", resolved_sha="7" * 40)
+    phase_b = SourceResolution(name="content", url=url, ref="main",
+                               mode="non_strict", resolved_sha="9" * 40)
+    monkeypatch.setattr(
+        service._applies,
+        "recent",
+        lambda *, env, entity_id, bot_id, limit: [
+            _row(_report_with_sources([phase_a, phase_b], apply_id="created"))
+        ],
+    )
+    assert service._last_resolutions(entity_id=_ENTITY, bot_id=_BOT) == {
+        (url, "main", "non_strict"): "9" * 40
+    }
+
+    # Across records the newest still wins outright: an older report's later
+    # row must not reach past a newer report that answered the same key.
+    older = SourceResolution(name="content", url=url, ref="main",
+                             mode="non_strict", resolved_sha="1" * 40)
+    monkeypatch.setattr(
+        service._applies,
+        "recent",
+        lambda *, env, entity_id, bot_id, limit: [
+            _row(_report_with_sources([phase_b], apply_id="newest")),
+            _row(_report_with_sources([phase_a, older], apply_id="older")),
+        ],
+    )
+    assert service._last_resolutions(entity_id=_ENTITY, bot_id=_BOT) == {
+        (url, "main", "non_strict"): "9" * 40
+    }
+
+
 
 
 def test_a_failed_handoff_has_no_session_to_leak(world, monkeypatch):

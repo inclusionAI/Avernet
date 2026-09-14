@@ -8,16 +8,51 @@ size the architecture cap allows.
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable, Iterable, Optional
 
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyReport,
+    SourceResolution,
     derive_status,
 )
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
+
+
+def _dedup_sources(
+    sources: Iterable[SourceResolution],
+) -> tuple[SourceResolution, ...]:
+    """Fold repeated source rows, keeping the first occurrence of each.
+
+    ``SourceSession.adopt`` already makes this true *within* one apply, but the
+    two phases of a creation carry two sessions, so a source both of them used
+    arrives here twice — and ``sources`` is documented, in the schema and on
+    :class:`~...outcomes.SourceResolution`, as one row per declaration.
+
+    The identity is the **whole row** and not ``(url, ref, mode)``: two
+    resolutions of one moving ref minutes apart are two true facts about what
+    this apply resolved, and dropping either would report a delivery that did
+    not happen. ``auth`` is left out of it because a credential's name is how
+    the fetch was made, not part of what was resolved; a source re-declared
+    under a second credential to the same commit is still one resolution.
+    """
+    seen: set[tuple[str, str | None, str | None, str | None, str | None]] = set()
+    kept: list[SourceResolution] = []
+    for source in sources:
+        key = (
+            source.name,
+            source.url,
+            source.ref,
+            source.mode,
+            source.resolved_sha,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(source)
+    return tuple(kept)
 
 
 def carry_forward(
@@ -33,7 +68,9 @@ def carry_forward(
     Answers a **new** :class:`~...outcomes.ApplyReport` that keeps this
     apply's own identity (``apply_id``, ``trigger``, both timestamps) and
     concatenates the earlier apply's ``categories``, ``sources`` and ``notes``
-    in front of this one's, re-deriving ``status`` over the union::
+    in front of this one's — ``sources`` deduped, the other two not, for the
+    reason :func:`_dedup_sources` gives — re-deriving ``status`` over the
+    union::
 
         # phase A wrote script and failed it; phase B wrote mcp cleanly
         carry_forward(phase_b_report, ctx=ctx,
@@ -103,7 +140,10 @@ def carry_forward(
         started_at=report.started_at,
         finished_at=report.finished_at,
         categories=categories,
-        sources=tuple(carried.sources) + tuple(report.sources),
+        # Deduped, unlike the two lists around it: a category is one phase's
+        # work and belongs to whichever phase did it, but a source both phases
+        # fetched is one declaration that was resolved, not two.
+        sources=_dedup_sources(tuple(carried.sources) + tuple(report.sources)),
         # Apply-level notes ride along too: a redeliver that failed after phase
         # A must not vanish because phase B carried it forward.
         notes=tuple(carried.notes) + tuple(report.notes),
