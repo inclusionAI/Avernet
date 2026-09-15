@@ -137,6 +137,7 @@ provides:
   - HarnessTemplateRepository
   # identity
   - CallerIdentityRepositoryProtocol
+  - ExecutionIdentityRepositoryProtocol
   - PolicyRepository
   - UserListRepositoryProtocol
   # platform
@@ -212,6 +213,7 @@ provides:
   - TaskRecordRepository
   # identity
   - CallerIdentityRepository
+  - ExecutionIdentityRepository
   - UserListRepository
   # platform
   - ResourceRepository
@@ -261,6 +263,7 @@ internal_dependencies:
   - agentclaw.community.core.common_config
   - agentclaw.community.core.devices
   - agentclaw.community.core.economy
+  - agentclaw.community.core.execution_identity
   - agentclaw.community.core.expert_chat
   - agentclaw.community.core.harness
   - agentclaw.community.core.quality

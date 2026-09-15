@@ -246,6 +246,27 @@ class PassportPlugin(Plugin, Protocol):
         """Apply for an agent passport (non-first time)."""
         ...
 
+    def reissue_agent_credentials(
+        self,
+        *,
+        bot_id: str,
+        owner_workno: str,
+        entity_id: str,
+        execution_workno: str,
+        bot_name: str | None = None,
+        bot_desc: str | None = None,
+        engine_type: str | None = None,
+        target_env: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Mint a parallel ALC/AAC/AEC set for a different executor.
+
+        ``owner_workno`` remains the legacy TeamClaw owner/addressing value;
+        ``entity_id`` keeps the existing AgentPass record address stable; only
+        ``execution_workno`` changes the principal that executes the Bot.
+        Implementations must preserve the current Passport resource manifest.
+        """
+        ...
+
     def destroy_passport(self, bot_id: str, owner_workno: str) -> None:
         """Destroy the passport for a bot."""
         ...
@@ -256,6 +277,7 @@ class PassportPlugin(Plugin, Protocol):
         owner_workno: str,
         *,
         target_env: str | None = None,
+        entity_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Query the current passport auth status."""
         ...
@@ -266,6 +288,7 @@ class PassportPlugin(Plugin, Protocol):
         owner_workno: str,
         *,
         target_env: str | None = None,
+        entity_id: str | None = None,
     ) -> str | None:
         """Query the current passport token."""
         ...
@@ -276,6 +299,7 @@ class PassportPlugin(Plugin, Protocol):
         owner_workno: str,
         *,
         target_env: str | None = None,
+        entity_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Query the full agent passport details."""
         ...
