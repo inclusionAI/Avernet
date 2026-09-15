@@ -63,3 +63,11 @@ HTTP endpoint policy, or business resource state transitions.
 - `cargo test -p bcs-eventing --test lifecycle`
 - `cargo test -p bcs-eventing --test conformance_eventing_lifecycle`
 - `uv run --with pytest --with pyyaml --with jsonschema pytest src/bcs/tests/event_contract -q`
+
+## Idle polling
+
+Fanout and delivery can independently opt into bounded exponential idle backoff
+with upper-quarter jitter. Missing ceilings preserve base polling. A nonempty
+iteration or error resets to the base; errors remain visible. Retention uses a
+fixed interval. Cancellation interrupts idle waits without cancelling a claimed
+batch. Bootstrap injects validated limits; Eventing does not read configuration.

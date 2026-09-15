@@ -192,6 +192,12 @@ pub(crate) async fn build_eventing_runtime(
             EVENTING_RETENTION_POLL_INTERVAL,
             Duration::from_millis(config.eventing.drain_timeout_ms),
         )
+        .and_then(|lifecycle| lifecycle.with_idle_poll_limits(
+            Duration::from_millis(config.eventing.fanout_idle_poll_max_interval_ms
+                .unwrap_or(config.eventing.fanout_poll_interval_ms)),
+            Duration::from_millis(config.eventing.delivery_idle_poll_max_interval_ms
+                .unwrap_or(config.eventing.delivery_poll_interval_ms)),
+        ))
         .map_err(|error| BcsError::InvalidConfig(error.to_string()))?,
     );
 

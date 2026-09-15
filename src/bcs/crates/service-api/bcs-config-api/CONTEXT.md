@@ -67,3 +67,12 @@ The crate owns configuration contract types and their semantics. It does not own
 
 - `cargo test --package bcs-config-api --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-config-api --all-targets --manifest-path src/bcs/Cargo.toml`
+
+## Eventing polling configuration
+
+Optional `fanout_idle_poll_max_interval_ms` and
+`delivery_idle_poll_max_interval_ms` ceilings default to their respective base
+intervals when absent. Explicit values must be at least the base and at most
+60,000 ms. Equal ceilings disable backoff; larger values trade cold-event latency
+for fewer idle database calls. Eventing and logging definitions have private
+modules with existing root type re-exports preserved.

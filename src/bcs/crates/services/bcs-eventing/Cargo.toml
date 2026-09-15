@@ -33,3 +33,4 @@ uuid = { workspace = true }
 bcs-event-store = { workspace = true }
 bcs-group = { workspace = true }
 bcs-test-support = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
