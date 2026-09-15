@@ -139,11 +139,6 @@ class OpenApiBotAdapter(
         本地 singlebox 与 service-to-service(``CorpApiKeyProvider`` cookie/referer 空)不加 → 行为不变。
         """
         h: dict[str, str] = {"Authorization": f"Bearer {self._k.api_key}"}
-        logger.info(
-            "[task][headers] Authorization=%s, h=%s",
-            self._k.api_key,
-            h,
-        )
         if self._k.cookie:
             h["Cookie"] = self._k.cookie
         if self._k.referer:
@@ -283,8 +278,7 @@ class OpenApiBotAdapter(
                 headers=self._headers(),
             )
         logger.info(
-            "[task][openapi_bot] <<< send_message headers=%s status=%s body=%s",
-            r.request.headers,
+            "[task][openapi_bot] <<< send_message status=%s body=%s",
             r.status_code,
             _resp_summary(r),
         )
