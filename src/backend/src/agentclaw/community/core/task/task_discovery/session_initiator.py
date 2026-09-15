@@ -1,4 +1,4 @@
-"""SessionInitiator — 创建 engine session + WebSocket 注入发现提示消息。
+"""CronRelaySessionInitiator — SessionInitiator 的 local 实现（relay + WebSocket）。
 
 两步流程：
   Step 1 — CronRelayService.forward_request(POST /api/sessions) 创建 session
@@ -9,24 +9,38 @@ WebSocket 协议参考 ``test_create_session_e2e.py`` 的已验证实现：
 
 消息注入失败仅 log warning — session 已创建 = 主流程成功。
 用户通过通知 deep_link 打开 session 后仍可手动交互。
+
+``SessionInitiator`` Protocol 已迁移至 ``plugin_api.session_initiator``（继承
+``Plugin``）；本文件保留其 **local 实现** ``CronRelaySessionInitiator``（经
+``@plugin_impl(mode=LOCAL)`` 注册），因为它依赖 core 领域模型
+（``DiscoveredTask`` / ``DiscoverySession``），本质是领域服务而非可替换基础设施
+插件，留在 core 避免 core→plugins 循环依赖。
+
+``FrontendUrlHolder`` 保留在此作 legacy runtime 热注入兼容（被 router 与 corp
+兼容路径引用），不属于 Plugin 契约。
 """
 from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import websockets
 
-from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
-    FrontendUrlProvider,
-)
 from agentclaw.community.core.task.task_discovery.models import (
     DiscoveredTask,
     DiscoverySession,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
+from agentclaw.community.plugin_api.session_initiator import SessionInitiator
+
+if TYPE_CHECKING:  # 仅注解使用（duck-typed ``get()``），运行时 import 会与
+    # frontend_url.py → session_initiator.FrontendUrlHolder 构成循环。
+    from agentclaw.community.core.task.task_discovery.frontend_url import (
+        ConfigFrontendUrlProvider,
+    )
 
 logger = get_logger()
 
@@ -53,23 +67,12 @@ _WS_SEND_TIMEOUT = 10.0
 _WS_REPLY_TIMEOUT = 60.0  # 仅 wait_for_reply=True 时使用
 
 
-class SessionInitiator(Protocol):
-    """Engine session 创建+消息注入接口。"""
-
-    async def initiate_session(
-        self,
-        tasks: list[DiscoveredTask],
-        *,
-        bot_id: str,
-        owner_id: str,
-        agent_id: str,
-        model: str | None = None,
-    ) -> DiscoverySession:
-        """为发现任务创建 engine session 并注入发现提示消息。"""
-        ...
-
-
-class CronRelaySessionInitiator:
+@plugin_impl(
+    mode=Mode.LOCAL,
+    flavor=Flavor.SIMULATOR,
+    rationale="relay 通道 + WebSocket 直连本地 engine (singlebox/local 真实链路)",
+)
+class CronRelaySessionInitiator(SessionInitiator):
     """通过 relay 通道创建 session + WebSocket 注入发现消息。
 
     流程：
@@ -90,7 +93,7 @@ class CronRelaySessionInitiator:
         frontend_url: str = "http://localhost:8000",
         backend_url: str = "http://localhost:8888",
         wait_for_reply: bool = False,
-        frontend_url_provider: FrontendUrlProvider | None = None,
+        frontend_url_provider: ConfigFrontendUrlProvider | None = None,
     ):
         self._cron_relay = cron_relay
         self._frontend_url = frontend_url
@@ -415,4 +418,4 @@ class CronRelaySessionInitiator:
         return f"{base}/assistant?botId={agent_id}&sessionId={encoded_sid}"
 
 
-__all__ = ["SessionInitiator", "CronRelaySessionInitiator"]
+__all__ = ["SessionInitiator", "CronRelaySessionInitiator", "FrontendUrlHolder"]
