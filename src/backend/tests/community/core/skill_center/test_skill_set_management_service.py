@@ -25,6 +25,7 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
 )
 from agentclaw.community.core.skill_center.errors import (
+    McpEndpointUnavailableError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
     SkillSetRuntimeReconcileError,
@@ -491,6 +492,21 @@ class _McpAuth:
         return {"success": True, "process_url": None, "error": None}
 
 
+class _McpConfig:
+    def build_mcp_sync_payload(self, **_kwargs) -> tuple[None, dict[str, str], str, None]:
+        return None, {}, "PROD", None
+
+
+class _OwnerSensitiveMcpConfig:
+    def __init__(self) -> None:
+        self.user_ids: list[str] = []
+
+    def build_mcp_sync_payload(self, **kwargs) -> tuple[None, dict[str, str], str, None]:
+        user_id = kwargs["user_id"]
+        self.user_ids.append(user_id)
+        return None, {}, "PROD" if user_id == "collaborator" else "PRE", None
+
+
 class _McpCenter:
     def __init__(self, allowed: bool) -> None:
         self.allowed = allowed
@@ -504,7 +520,117 @@ class _McpCenter:
         }
 
     def get_mcp_detail(self, _server_code: str) -> dict:
-        return {"accessLevel": "PUBLIC"}
+        return {
+            "accessLevel": "PUBLIC",
+            "runMode": "REMOTE",
+            "endpoints": [
+                {
+                    "networkType": "OFFICE",
+                    "env": "PROD",
+                    "transportProtocol": "STREAMABLE_HTTP",
+                    "url": "https://mcp.example.test/streamable/mcp",
+                }
+            ],
+        }
+
+
+@pytest.mark.asyncio
+async def test_add_mcp_rejects_an_intranet_only_remote_server_before_write() -> None:
+    class _IntranetOnlyCenter(_McpCenter):
+        def get_mcp_detail(self, _server_code: str) -> dict:
+            return {
+                "accessLevel": "PUBLIC",
+                "runMode": "REMOTE",
+                "endpoints": [
+                    {
+                        "networkType": "INTRANET",
+                        "env": "PROD",
+                        "transportProtocol": "STREAMABLE_HTTP",
+                        "url": "mcp.internal.only",
+                    }
+                ],
+            }
+
+    repository = _Repository()
+    service = SkillSetManagementService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Authorization(),
+        audit_log_repo=_Audit(),
+        mcp_center=_IntranetOnlyCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
+        ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
+    )
+
+    with pytest.raises(McpEndpointUnavailableError):
+        await service.add_mcp(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            user_id="true-owner",
+            set_id="set-1",
+            server_code="mcp.intranet.only",
+        )
+
+    assert repository.add_mcp_calls == []
+
+
+@pytest.mark.asyncio
+async def test_add_mcp_validates_with_bot_owner_config_not_collaborator_config() -> None:
+    class _PreIntranetCenter(_McpCenter):
+        def get_mcp_detail(self, _server_code: str) -> dict:
+            return {
+                "accessLevel": "PUBLIC",
+                "runMode": "REMOTE",
+                "endpoints": [
+                    {
+                        "networkType": "OFFICE",
+                        "env": "PROD",
+                        "transportProtocol": "STREAMABLE_HTTP",
+                        "url": "https://mcp.example.test/prod",
+                    },
+                    {
+                        "networkType": "INTRANET",
+                        "env": "PRE",
+                        "transportProtocol": "STREAMABLE_HTTP",
+                        "url": "https://mcp.example.test/pre",
+                    },
+                ],
+            }
+
+    repository = _Repository()
+    config = _OwnerSensitiveMcpConfig()
+    service = SkillSetManagementService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=object(),
+        passport=object(),
+        authorization=_Authorization(),
+        audit_log_repo=_Audit(),
+        mcp_center=_PreIntranetCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+        mcp_config=config,
+        ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
+    )
+
+    with pytest.raises(McpEndpointUnavailableError) as exc_info:
+        await service.add_mcp(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            user_id="collaborator",
+            set_id="set-1",
+            server_code="mcp.owner.pre.intranet",
+        )
+
+    assert "PROD" not in str(exc_info.value)
+    assert config.user_ids == ["true-owner"]
+    assert repository.add_mcp_calls == []
 
 
 def _registry(*, pool_runtime, pool_layouts):
@@ -947,6 +1073,7 @@ async def test_collaborator_command_keeps_desired_state_and_uses_true_owner():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1002,6 +1129,7 @@ async def test_deactivate_retires_mappings_removed_from_the_runtime_projection()
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1037,6 +1165,7 @@ def test_create_rejects_missing_bot_instead_of_creating_orphan_set():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1066,6 +1195,7 @@ def test_default_create_rejects_missing_bot_instead_of_creating_orphan_set():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1096,6 +1226,7 @@ def test_default_create_uses_owner_qualified_bot_lookup():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1129,6 +1260,7 @@ def test_legacy_set_scope_recovers_persisted_bot_then_applies_actor_acl() -> Non
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1164,6 +1296,7 @@ def test_legacy_set_scope_rejects_conflicting_owner_hint() -> None:
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1188,6 +1321,7 @@ def test_addressed_create_persists_metadata_without_runtime_reconcile() -> None:
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1224,6 +1358,7 @@ def test_create_active_empty_set_does_not_require_runtime_readiness() -> None:
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1252,6 +1387,7 @@ def test_inactive_set_metadata_updates_do_not_require_runtime_readiness() -> Non
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1300,6 +1436,7 @@ async def test_inactive_set_membership_does_not_require_runtime_readiness(
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1342,6 +1479,7 @@ async def test_active_set_membership_commits_when_runtime_is_not_ready() -> None
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1369,6 +1507,7 @@ def test_default_read_rejects_missing_bot():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1392,6 +1531,7 @@ async def test_legacy_sync_activates_additively_without_replacing_other_sets():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1430,6 +1570,7 @@ async def test_legacy_default_sync_uses_owner_qualified_bot_lookup():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1599,6 +1740,7 @@ def test_the_service_keeps_writing_its_own_audit_row_after_the_seam_took_over():
         audit_log_repo=_RecordingAudit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1634,6 +1776,7 @@ def test_resources_forwards_resolved_bot_owner_to_owner_scoped_set_listing():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1666,6 +1809,7 @@ def test_list_sets_uses_aicoding_default_then_claude_code_fallback_for_coding_im
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1696,6 +1840,7 @@ def test_update_set_uses_runtime_default_candidates_for_coding_image():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1735,6 +1880,7 @@ def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_sc
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1794,6 +1940,7 @@ def test_resources_enriches_only_default_mcp_display_from_agentpass():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1828,6 +1975,7 @@ def test_list_mcps_reads_global_default_projection_for_collaborator_owner_scope(
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1864,6 +2012,7 @@ def test_list_mcps_keeps_ordinary_membership_on_canonical_repository_path():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1902,6 +2051,7 @@ def test_default_mcp_permissions_remain_scoped_to_persisted_membership():
         audit_log_repo=_Audit(),
         mcp_center=mcp_center,
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1938,6 +2088,7 @@ def test_default_mcp_permission_request_does_not_expand_platform_defaults():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=mcp_auth,
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -1983,6 +2134,7 @@ def test_resources_keeps_ordinary_mcp_membership_on_canonical_repository_path():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -2019,6 +2171,7 @@ async def test_existing_coding_bot_can_activate_skill_set(bots) -> None:
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -2051,6 +2204,7 @@ async def test_existing_claude_code_skill_set_deactivate_uses_full_projection():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -2100,6 +2254,7 @@ def test_existing_coding_bot_metadata_mutations_ignore_product_creation_matrix(
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -2135,6 +2290,7 @@ def test_historical_bot_may_delete_an_inactive_skill_set_without_new_runtime_wri
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -2161,6 +2317,7 @@ def test_legacy_name_or_git_path_materializes_market_repo_skill_before_membershi
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -2747,6 +2904,7 @@ async def test_failed_mcp_projection_keeps_the_declared_mcp_delta():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -3965,6 +4123,7 @@ def _skill_service(repository, runtime):
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
@@ -4490,7 +4649,7 @@ class _ProjectionCountingRuntime(_SuccessfulRuntime):
 
 
 def _default_wire_service(
-    repository, runtime=None, ext_info_provider=None
+    repository, runtime=None, ext_info_provider=None, mcp_center=None
 ) -> SkillSetManagementService:
     return SkillSetManagementService(
         repository=repository,
@@ -4500,8 +4659,9 @@ def _default_wire_service(
         passport=object(),
         authorization=_Authorization(),
         audit_log_repo=_Audit(),
-        mcp_center=_McpCenter(allowed=True),
+        mcp_center=mcp_center if mcp_center is not None else _McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=(
             ext_info_provider if ext_info_provider is not None else lambda _bot_id: None
         ),
@@ -4713,6 +4873,40 @@ async def test_default_mcp_exclusion_wire_mirrors_the_skill_wire():
 
 
 @pytest.mark.asyncio
+async def test_unexcluding_default_mcp_rejects_an_incompatible_endpoint_before_write():
+    class _IntranetOnlyCenter(_McpCenter):
+        def get_mcp_detail(self, _server_code: str) -> dict:
+            return {
+                "accessLevel": "PUBLIC",
+                "runMode": "REMOTE",
+                "endpoints": [
+                    {
+                        "networkType": "INTRANET",
+                        "env": "PROD",
+                        "transportProtocol": "STREAMABLE_HTTP",
+                        "url": "mcp.internal.only",
+                    }
+                ],
+            }
+
+    repository = _DefaultTargetRepository(excluded_codes={"mcp.back"})
+    service = _default_wire_service(
+        repository, mcp_center=_IntranetOnlyCenter(allowed=True)
+    )
+
+    with pytest.raises(McpEndpointUnavailableError):
+        await service.add_mcp(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            user_id="true-owner",
+            set_id="9",
+            server_code="mcp.back",
+        )
+
+    assert repository.exclusion_calls == []
+
+
+@pytest.mark.asyncio
 async def test_unexcluding_a_default_mcp_still_requires_marketplace_permission():
     repository = _DefaultTargetRepository(excluded_codes={"mcp.back"})
     service = SkillSetManagementService(
@@ -4725,6 +4919,7 @@ async def test_unexcluding_a_default_mcp_still_requires_marketplace_permission()
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=False),
         mcp_auth=_McpAuth(allowed=False),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )
