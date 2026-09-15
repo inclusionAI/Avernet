@@ -75,6 +75,8 @@ class RollbackOpsMixin:
         if not current_record:
             raise PublishNotFoundError(f"Current publish record not found: {current_publish_id}")
 
+        self.require_employee_approval(target_publish_id)
+
         # 2. Get the target version's build artifact
         target_ext = self._get_latest_ext(target_publish_id)
         expected_target_ext = copy.deepcopy(target_ext)

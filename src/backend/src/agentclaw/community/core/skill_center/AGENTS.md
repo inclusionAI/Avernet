@@ -261,3 +261,7 @@ Legacy `/api/skills`、`/api/skillsets` 位于 `community/adapters/http/skill_ce
 以上测试路径除第一项外均相对 `src/backend/`。检查接口时从 Router 回溯到注入 Protocol、服务、Repository/Plugin 和错误映射；检查后台链路时再追到生命周期注册和 TaskQueue handler。列出尚未验证的外部消费者，避免以返回 200 或 Task enqueue 成功作为最终验收。
 
 历史 Spec 和前端联调文档位于 `src/backend/specs/2026-08-20-skill-capability-upgrade/`，Installation 设计位于 `src/backend/specs/2026-08-24-installation-single-source-of-truth/`。它们用于追溯决定；旧术语、废弃状态和未实现接口须与本文件及当前代码逐项核对后再使用。
+
+## 数字员工共享凭证保护
+
+已绑定数字员工的服务 Bot 在完整能力投影更新 AgentPass 前，通过数字员工服务申请非公开 MCP 权限，并保留历史 MCP 授权与草稿期望范围的并集。删除仅影响草稿 Runtime 配置；审批通过的发布流程在最终上线时收敛凭证范围。未绑定 Bot 的投影语义保持不变。

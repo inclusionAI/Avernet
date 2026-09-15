@@ -3899,6 +3899,9 @@ class BotService(BotServiceProtocol):
             if not bot:
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
 
+            if (bot.get("ext") or {}).get("digital_employee"):
+                raise BotOperationNotAllowedError("已绑定数字员工的 Bot 不支持删除")
+
             # 保护 owner 名下最早创建的 bot 不能删除（等价于旧 "default" bot 不可删语义）。
             # 含 owner 仅一只的情形（earliest 即该只 → 拒），自然保留 ≥1。
             # 必须在 release_device / destroy_passport 之前拦截，否则会误销毁

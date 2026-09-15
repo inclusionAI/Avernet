@@ -149,6 +149,7 @@ from agentclaw.community.adapters.http.cron.cron_noauth_router import router as 
 from agentclaw.community.adapters.http.aicoding import notify_router  # noqa: E402
 from agentclaw.community.adapters.http.aicoding.architect_rebind_router import router as architect_rebind_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_management import router as bot_management_router  # noqa: E402
+from agentclaw.community.adapters.http.digital_employee import router as digital_employee_router  # noqa: E402
 from agentclaw.community.adapters.http.caller_identity.router import router as caller_identity_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant import router as bot_dormant_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant.router import internal_router as bot_dormant_internal_router  # noqa: E402
@@ -940,6 +941,7 @@ app.include_router(aicoding_router)
 app.include_router(aicoding_data_proxy_router)
 app.include_router(architect_rebind_router)
 app.include_router(bot_management_router.router)
+app.include_router(digital_employee_router)
 app.include_router(caller_identity_router)
 app.include_router(bot_dormant_router.router)
 app.include_router(bot_dormant_internal_router)
@@ -972,9 +974,7 @@ app.include_router(task_callback_router)
 # they are the one route registration that needs a resolved binding, so
 # ``finalize_worker_runtime`` mounts them once it has the worker's injector.
 
-# 3. Public /openapi/v1/bots surface — new, definition-only routers for the
-# redesigned external contract (not a re-mount of the handlers above; see
-# adapters/http/openapi_v1). Handlers are stubs until the implementation lands.
+# Public OpenAPI surface, with its own authentication and contract.
 from agentclaw.community.adapters.http.openapi_v1 import build_public_router  # noqa: E402
 app.include_router(build_public_router())
 

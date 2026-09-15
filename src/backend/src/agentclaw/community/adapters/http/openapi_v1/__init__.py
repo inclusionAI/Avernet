@@ -247,6 +247,7 @@ from agentclaw.community.adapters.http.openapi_v1.authorization import (
     assert_every_route_authorized,
 )
 from .token import token_router
+from .digital_employee import router as digital_employee_router
 
 # Every public route lives under this prefix. Exported so app-level handlers can
 # tell a public request from an internal one (e.g. to envelope validation errors
@@ -273,6 +274,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (  # noqa: E4
 # Bringing it under this rule would remove a capability that route exists to
 # provide. See the note in the spec's Out of Scope.
 _GROUPS_WITHOUT_CALLER_SCOPE = [
+    digital_employee_router,
     logs_router,
     loadtest_router,
 ]

@@ -1,4 +1,4 @@
-"""Application service for persistent AgentPass execution identity changes."""
+"""Application service for persistent passport execution identity changes."""
 
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ class ExecutionIdentityService(ExecutionIdentityServiceProtocol):
         entity_id = str(bot.get("entity_id") or "").strip()
         if not entity_id:
             raise ExecutionIdentityOperationNotAllowedError(
-                "Bot entity_id is required for AgentPass addressing"
+                "Bot entity_id is required for passport addressing"
             )
         bot_pk = int(bot["id"])
 
@@ -145,7 +145,7 @@ class ExecutionIdentityService(ExecutionIdentityServiceProtocol):
             # A transport timeout can be an unknown remote outcome. Keep the
             # durable transition PENDING so activate can reconcile it later.
             raise ExecutionIdentityOperationNotAllowedError(
-                "AgentPass reissue returned no result; transition remains PENDING"
+                "passport reissue returned no result; transition remains PENDING"
             )
         pending = self._bindings.record_credential_result(
             binding_id=pending.id,
@@ -202,7 +202,7 @@ class ExecutionIdentityService(ExecutionIdentityServiceProtocol):
         ) or {}
         if passport.get("execution_workno") != pending.execution_workno:
             raise ExecutionIdentityOperationNotAllowedError(
-                "Latest AgentPass execution_workno does not match pending binding"
+                "Latest passport execution_workno does not match pending binding"
             )
         runtime_result = self._runtime.hot_update_passport_token_to_device(
             bot_id=bot_id, user_id=owner_id, token=str(token)

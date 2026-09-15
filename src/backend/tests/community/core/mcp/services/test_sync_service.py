@@ -88,6 +88,7 @@ def _make_sync_service(
     """
     provider = mcp_provider or _make_mcp_provider()
     service = MCPSyncService.__new__(MCPSyncService)
+    service._employee_service_provider = None
     service._mcp_provider_factory = lambda: provider
     service._mcp_provider_cached = provider
     service.mcp_center = mcp_center or MagicMock()
@@ -106,6 +107,8 @@ def _make_sync_service(
         None, {}, "PROD", None
     )
     service.bot_repository = bot_repository or MagicMock()
+    if bot_repository is None:
+        service.bot_repository.get_by_id_and_owner.return_value = {"id": 42, "ext": {}}
     if caller_identity_repository is None:
         caller_identity_repository = MagicMock()
         caller_identity_repository.list_draft_call_types.return_value = {}

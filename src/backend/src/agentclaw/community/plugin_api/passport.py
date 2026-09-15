@@ -61,6 +61,14 @@ class McpScopeItem(TypedDict, total=False):
     identity_mode: str
 
 
+class SkillScopeItem(TypedDict):
+    """Skill fields supported by the AgentPass resource manifest."""
+
+    skill_code: str
+    skill_name: str
+    skill_desc: str
+
+
 class PassportResourceScope(TypedDict, total=False):
     """Complete resourceManifest scope for overwrite-style updatePassport calls.
 
@@ -72,6 +80,30 @@ class PassportResourceScope(TypedDict, total=False):
     mcp_codes: list[str]
     mcp_items: list[McpScopeItem]
     cli_items: list[CliItem]
+    # Omitted preserves existing skills; an explicit empty list clears them.
+    skill_items: list[SkillScopeItem]
+
+
+def unpack_skill_scope(resource_scope: PassportResourceScope | None) -> list[SkillScopeItem] | None:
+    """Validate an explicitly supplied complete Skill replacement."""
+    if resource_scope is None or "skill_items" not in resource_scope:
+        return None
+    items = resource_scope["skill_items"]
+    if not isinstance(items, list):
+        raise ValueError("Skill scope items must be a list")
+    seen: set[str] = set()
+    result: list[SkillScopeItem] = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            raise ValueError("Skill scope item must be a mapping")
+        code = item.get("skill_code")
+        if not isinstance(code, str) or not code.strip() or code in seen:
+            raise ValueError("Skill scope item code is invalid or duplicated")
+        if any(not isinstance(item.get(field), str) for field in ("skill_name", "skill_desc")):
+            raise ValueError("Skill scope item name and description must be strings")
+        seen.add(code)
+        result.append({"skill_code": code, "skill_name": item["skill_name"], "skill_desc": item["skill_desc"]})
+    return result
 
 
 def extract_cli_items(passport: Mapping[str, Any] | None) -> list[CliItem]:

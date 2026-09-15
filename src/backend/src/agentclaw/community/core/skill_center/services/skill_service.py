@@ -1266,6 +1266,25 @@ class SkillService:
             logger.error(f"[get_skill_readme] Unexpected error: skill_id={skill_id}, error={type(e).__name__}: {e}")
             raise
 
+    def get_repository_skill_package_files(self, skill_id: str) -> list[tuple[str, bytes]]:
+        """Read the complete governed Repo asset, without traversing outside it."""
+        skill = self._skill_repo.get_by_id(skill_id)
+        locator = str((skill or {}).get("git_path") or "")
+        if not locator.startswith("git://"):
+            raise ValueError("Skill is not a repository asset")
+        root = self._get_market_repo_dir().resolve(strict=True)
+        directory = (root / locator[len("git://"):]).resolve(strict=True)
+        if not directory.is_relative_to(root) or directory == root:
+            raise ValueError("Repository Skill is outside its content store")
+        files = []
+        for path in sorted(directory.rglob("*")):
+            resolved = path.resolve(strict=True)
+            if not resolved.is_relative_to(directory):
+                raise ValueError("Skill file escapes its package")
+            if resolved.is_file():
+                files.append((path.relative_to(directory).as_posix(), resolved.read_bytes()))
+        return files
+
     def get_repository_skill_content(self, skill_id: str) -> str | None:
         """Read exactly the governed Repo asset's ``SKILL.md`` from global storage.
 

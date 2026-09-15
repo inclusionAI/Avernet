@@ -1144,6 +1144,9 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         if not publish_record:
             raise PublishNotFoundError(f"Publish order not found: {publish_id}")
 
+        if ((publish_record.ext or {}).get("digital_employee_approval") or {}).get("status") in {"SUBMITTING", "APPROVING"}:
+            raise BotPublishServiceError("数字员工审批中，暂不能下线或退回草稿")
+
         # Step 2: 根据状态判断 stage
         current_status = publish_record.status
 

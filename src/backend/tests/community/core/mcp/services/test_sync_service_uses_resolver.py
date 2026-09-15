@@ -69,6 +69,7 @@ def _make_service(
     from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 
     service = MCPSyncService.__new__(MCPSyncService)
+    service._employee_service_provider = None
     provider = mcp_provider or _make_mcp_provider()
     service._mcp_provider_factory = lambda: provider
     service._mcp_provider_cached = provider

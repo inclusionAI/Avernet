@@ -26,6 +26,8 @@ bindings exist so production routes can use ``Injected(...)``.
 """
 from __future__ import annotations
 
+from agentclaw.community.core.digital_employee.contracts import DigitalEmployeePublicationProtocol
+
 from typing import Annotated, Callable
 from agentclaw.community.api.publish_ignore_service import PublishIgnoreServiceProtocol
 from agentclaw.community.plugin_api.publish_ignore_runtime import PublishIgnoreRuntime
@@ -631,6 +633,7 @@ class ServiceBotModule(Module):
         OSS client) power the teclaw build-time file snapshot.
         """
         return PublishFlowService(
+            employee_publication_provider=lambda: injector.get(DigitalEmployeePublicationProtocol),
             bot_publish_service=bot_publish_service,
             bot_build_service=bot_build_service,
             baas_service=baas_service,

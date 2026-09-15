@@ -184,6 +184,8 @@ Authorization = Check | NoCheck | ServiceChecked | _Scaffold
 #: No row is :class:`Check` yet: this change builds the seam, and moving each
 #: group onto it is its own session (``spec.md`` *Decisions* 4).
 AUTHORIZATION: dict[tuple[str, str], Authorization] = {
+    ("GET", "/openapi/v1/bots/metadata/digital-employees"): NoCheck("authenticated tenant catalog for digital employee registration; creator filter is supplied by the platform"),
+    ("GET", "/openapi/v1/bots/metadata/digital-employees/{agent_id}"): NoCheck("authenticated tenant catalog for digital employee registration; public visibility approved for this integration"),
     ("POST", "/openapi/v1/bots/metadata/queries"):
         NoCheck("tenant-wide display metadata for caller-supplied known bot ids"),
     # ── Bot-scoped operations ─────────────────────────────────────────────

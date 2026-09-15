@@ -154,6 +154,22 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             return None
         return "sha256:" + hashlib.sha256(canonical).hexdigest()
 
+    async def export_installed_package(
+        self, *, bot: Mapping[str, Any], bot_id: str, owner_id: str, name: str
+    ) -> bytes:
+        _, storage = self._skill_service_factory.local_skill_package_storage(
+            entity_id=str(bot["entity_id"]), owner_id=owner_id, bot_id=bot_id,
+            engine_type=bot["active_engine"], entity_type=str(bot["entity_type"]),
+            is_desktop=bot.get("bot_type") == "desktop",
+            is_teclaw=self._is_teclaw(bot_id=bot_id, owner_id=owner_id), name=name,
+        )
+        if not await storage.exists():
+            raise LocalSkillStorageError("Installed Skill package is missing")
+        files = await storage.read_package_files()
+        package = self._package_validator.pack_directory(list(files))
+        self._package_validator.validate_legacy_local_zip(package)
+        return package
+
     async def upload_local_skill(
         self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
     ) -> dict[str, Any]:

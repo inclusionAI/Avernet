@@ -83,6 +83,7 @@ purpose: "Every repository contract (protocols/) and implementation (implementat
 provides:
   - BotCommonConfigRepository
   - BotCommonConfigRepositoryProtocol
+  - DigitalEmployeeRepository
   # Contracts — protocols/<domain>.py. This is the surface domain services
   # import at runtime for DI; a change here is a change to their constructors.
   # bot
@@ -248,6 +249,7 @@ consumes:
   - get_server_host               # ditto
   - get_current_avernet_tenant    # tenant scoping (utils.avernet_tenant)
 internal_dependencies:
+  - agentclaw.community.core.digital_employee.contracts
   - agentclaw.community.plugin_api.database    # DatabasePlugin — the injected session seam
   - agentclaw.community.plugin_api.models
   - agentclaw.community.core.models

@@ -167,7 +167,7 @@ class CliPassportScopeReconciler:
             raise ValueError("Bot template_type is invalid")
         passport = self._passport_plugin.query_agent_passport(bot_id, owner_id)
         historical_cli_items = extract_cli_items(passport)
-        historical_mcp_items = _extract_mcp_items(passport)
+        historical_mcp_items = extract_passport_mcp_items(passport)
         mcp_identity_modes = self._identity_repository.list_draft_call_types(
             int(bot["id"]), engine_type
         )
@@ -192,7 +192,7 @@ class CliPassportScopeReconciler:
         )
 
 
-def _extract_mcp_items(passport: Mapping[str, Any] | None) -> list[McpScopeItem]:
+def extract_passport_mcp_items(passport: Mapping[str, Any] | None) -> list[McpScopeItem]:
     if not isinstance(passport, Mapping):
         raise ValueError("Passport scope is unavailable")
     result: list[McpScopeItem] = []
@@ -234,7 +234,7 @@ def build_passport_resource_scope(
     local sparse row take precedence. CLI history is retained and merged with
     caller-provided defaults or desired additions in the same snapshot.
     """
-    historical_mcp_items = _extract_mcp_items(passport)
+    historical_mcp_items = extract_passport_mcp_items(passport)
     historical_cli_items = extract_cli_items(passport)
     mcp_items = _merge_desired_mcp_identity_modes(
         desired_mcp_items,
@@ -314,4 +314,5 @@ __all__ = [
     "CliPassportScopeReconciler",
     "CliScopeReconcileResult",
     "build_passport_resource_scope",
+    "extract_passport_mcp_items",
 ]
