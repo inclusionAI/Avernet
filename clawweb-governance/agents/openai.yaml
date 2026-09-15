@@ -1,4 +1,0 @@
-interface:
-  display_name: "ClawWeb Governance Agent"
-  short_description: "在 AIStudio 中召回、核验并创建 Agent 治理候选"
-  default_prompt: "Use $clawweb-governance to analyze OpenClaw failures in AIStudio, verify root causes with NAS evidence, and submit only high-confidence Admin-gated candidates."
