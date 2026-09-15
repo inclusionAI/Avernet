@@ -254,7 +254,9 @@ async def _list_claim_bots(bcn, task_id: str) -> list[dict]:
                 asyncio.to_thread(
                     bcn.list_bots_by_task_modes,
                     claim=True,
+                    dream=None,
                     match="all",
+                    visibility="public",
                 ),
                 timeout=_ROSTER_TIMEOUT,
             )
