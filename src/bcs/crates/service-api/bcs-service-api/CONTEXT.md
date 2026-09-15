@@ -134,3 +134,11 @@ pages, bounds and errors. Facade tests prohibit full-list calls and verify paged
 results/errors/count conversion. HTTP contract and legacy route/search tests
 cover compatibility. MySQL SQL construction tests do not substitute for a live
 MySQL conformance run.
+
+## Streaming identity operation
+
+`BotRepoPort::connect_streaming(BotConnectParams)` is a required internal repository
+operation returning `BotConnectResult` or `ConnectError`. Both production stores
+and the test wrapper implement it together; Core is its consumer. The operation
+owns serialized identity admission and distinguishes storage failure from absence.
+Existing Bot wire request/response fields and error classes remain unchanged.
