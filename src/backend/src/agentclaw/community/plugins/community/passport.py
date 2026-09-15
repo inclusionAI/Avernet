@@ -101,6 +101,27 @@ class SelfIssuedPassportPlugin(PassportPlugin):
     ) -> Optional[dict[str, Any]]:
         return self._issue(bot_id)
 
+    def reissue_agent_credentials(
+        self,
+        *,
+        bot_id: str,
+        owner_workno: str,
+        entity_id: str,
+        execution_workno: str,
+        bot_name: Optional[str] = None,
+        bot_desc: Optional[str] = None,
+        engine_type: Optional[str] = None,
+        target_env: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        validate_passport_target_env(target_env)
+        result = self._issue(bot_id)
+        result.update(
+            status="ISSUED",
+            entity_id=entity_id,
+            execution_workno=execution_workno,
+        )
+        return result
+
     def destroy_passport(self, bot_id: str, owner_workno: str) -> None:
         # Nothing to revoke — credentials are derived, not stored externally.
         return None
@@ -111,6 +132,7 @@ class SelfIssuedPassportPlugin(PassportPlugin):
         owner_workno: str,
         *,
         target_env: Optional[str] = None,
+        entity_id: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         validate_passport_target_env(target_env)
         return {"status": "ISSUED", "token": _token_for(bot_id)}
@@ -121,6 +143,7 @@ class SelfIssuedPassportPlugin(PassportPlugin):
         owner_workno: str,
         *,
         target_env: Optional[str] = None,
+        entity_id: Optional[str] = None,
     ) -> Optional[str]:
         validate_passport_target_env(target_env)
         return _token_for(bot_id)
@@ -131,6 +154,7 @@ class SelfIssuedPassportPlugin(PassportPlugin):
         owner_workno: str,
         *,
         target_env: Optional[str] = None,
+        entity_id: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         validate_passport_target_env(target_env)
         return {
