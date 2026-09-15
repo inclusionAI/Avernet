@@ -120,6 +120,9 @@ describe('Stage interactions belong to their execution step', () => {
     const frame = view.container.querySelector('iframe')!
     expect(frame.getAttribute('sandbox')).toBe('allow-forms allow-scripts')
     expect(frame.srcdoc).toContain('data-evolve-form-theme="platform"')
+    expect(frame.style.height).toBe('720px')
+    fireEvent(window, new MessageEvent('message', { source: frame.contentWindow, data: { channel: 'evolve-hitl:HITL-1', type: 'resize', height: 900 } }))
+    expect(frame.style.height).toBe('924px')
     fireEvent(window, new MessageEvent('message', { source: window, data: { channel: 'evolve-hitl:HITL-1', type: 'submit', value: { session: 'wrong' } } }))
     expect(api.evolve.answerStageInteraction).not.toHaveBeenCalled()
     fireEvent(window, new MessageEvent('message', { source: frame.contentWindow, data: { channel: 'evolve-hitl:HITL-1', type: 'submit', value: { session: 'right' } } }))

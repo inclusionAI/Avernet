@@ -34,6 +34,10 @@ function taskDetailPath(taskId: string, returnTo: string): string {
   return `/evolve/runs/${encodeURIComponent(taskId)}?${new URLSearchParams({ returnTo })}`
 }
 
+function eventDetailPath(event: EvolveSkillEvent, returnTo: string): string {
+  return event.taskId ? taskDetailPath(event.taskId, returnTo) : skillDetailPath(event, returnTo)
+}
+
 function eventVersion(event: EvolveSkillEvent): string {
   if (event.versionTo && event.versionFrom) return `${event.versionFrom.version} → ${event.versionTo.version}`
   if (event.versionTo) return event.versionTo.version
@@ -79,7 +83,7 @@ export default function SkillEventLog() {
             <td className="px-4 py-4"><span className="inline-flex rounded-md border border-blue-100 bg-blue-50 px-2 py-1 font-mono text-[10px] font-medium text-blue-700">{eventVersion(item)}</span></td>
             <td className="px-4 py-4"><TestBenchComparison comparison={item.testBench?.scoreComparison} emptyLabel={item.testBench ? '未评测' : '未记录评测关联'} /></td>
             <td className="whitespace-nowrap px-4 py-4 text-xs text-gray-500"><p>{formatStepTime(item.updatedAt)}</p>{item.completedAt && <p className="mt-1 text-[10px] text-gray-400">完成 {formatStepTime(item.completedAt)}</p>}</td>
-            <td className={`sticky right-0 border-l border-gray-100 px-3 py-4 text-center shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.35)] ${waiting ? 'bg-amber-50 group-hover:bg-amber-50' : 'bg-white group-hover:bg-gray-50'}`}><div className="flex items-center justify-center gap-2">{waiting && item.taskId && <Link className="inline-flex items-center justify-center whitespace-nowrap rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700" to={taskDetailPath(item.taskId, returnTo)}>去处理</Link>}<Link className="inline-flex items-center justify-center whitespace-nowrap rounded-md border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100" to={skillDetailPath(item, returnTo)}>查看</Link></div></td>
+            <td className={`sticky right-0 border-l border-gray-100 px-3 py-4 text-center shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.35)] ${waiting ? 'bg-amber-50 group-hover:bg-amber-50' : 'bg-white group-hover:bg-gray-50'}`}><div className="flex items-center justify-center gap-2">{waiting && item.taskId && <Link className="inline-flex items-center justify-center whitespace-nowrap rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700" to={taskDetailPath(item.taskId, returnTo)}>去处理</Link>}<Link className="inline-flex items-center justify-center whitespace-nowrap rounded-md border border-blue-100 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100" to={eventDetailPath(item, returnTo)}>查看</Link></div></td>
           </tr>
         })}</tbody>
       </table></div>

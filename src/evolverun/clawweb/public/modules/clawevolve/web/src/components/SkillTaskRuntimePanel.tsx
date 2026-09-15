@@ -47,6 +47,7 @@ function InteractionCard({ taskId, interaction, canOperate, onUpdated }: {
   const [answer, setAnswer] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [frameHeight, setFrameHeight] = useState(720)
   const frameRef = useRef<HTMLIFrameElement>(null)
   const channel = useMemo(() => 'evolve-hitl:' + interaction.interactionId, [interaction.interactionId])
   const question = useMemo(() => {
@@ -85,9 +86,12 @@ function InteractionCard({ taskId, interaction, canOperate, onUpdated }: {
   useEffect(() => {
     if (interaction.question.format !== 'html' || interaction.status !== 'waiting' || !canOperate) return
     const receive = (event: MessageEvent) => {
-      if (event.source !== frameRef.current?.contentWindow
-        || !event.data || event.data.channel !== channel || event.data.type !== 'submit') return
-      void submit(event.data.value)
+      if (event.source !== frameRef.current?.contentWindow || !event.data || event.data.channel !== channel) return
+      if (event.data.type === 'resize' && Number.isFinite(event.data.height)) {
+        setFrameHeight(Math.min(1600, Math.max(640, Math.ceil(event.data.height) + 24)))
+      } else if (event.data.type === 'submit') {
+        void submit(event.data.value)
+      }
     }
     window.addEventListener('message', receive)
     return () => window.removeEventListener('message', receive)
@@ -100,7 +104,9 @@ function InteractionCard({ taskId, interaction, canOperate, onUpdated }: {
       + interaction.question.content + '</div>' + platformInteractionFormStyle
       + "<script>document.addEventListener('submit',function(e){e.preventDefault();var f=new FormData(e.target);var v={};f.forEach(function(x,k){if(v[k]===undefined)v[k]=x;else if(Array.isArray(v[k]))v[k].push(x);else v[k]=[v[k],x]});parent.postMessage({channel:"
       + JSON.stringify(channel)
-      + ",type:'submit',value:v},'*')});</script></body></html>"
+      + ",type:'submit',value:v},'*')});function reportHeight(){parent.postMessage({channel:"
+      + JSON.stringify(channel)
+      + ",type:'resize',height:Math.max(document.documentElement.scrollHeight,document.body.scrollHeight)},'*')}addEventListener('load',reportHeight);new ResizeObserver(reportHeight).observe(document.documentElement);reportHeight();</script></body></html>"
     : ''
 
   return <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
@@ -111,7 +117,7 @@ function InteractionCard({ taskId, interaction, canOperate, onUpdated }: {
     {answeredForm
       ? <ReadOnlyInteractionForm html={answeredForm.html} />
       : !answered && canOperate && interaction.question.format === 'html'
-      ? <iframe ref={frameRef} title="Stage 提交的交互表单" sandbox="allow-forms allow-scripts" srcDoc={html} className="mt-3 min-h-48 w-full rounded-lg border border-amber-100 bg-white" />
+      ? <iframe ref={frameRef} title="Stage 提交的交互表单" sandbox="allow-forms allow-scripts" srcDoc={html} style={{ height: frameHeight }} className="mt-3 w-full rounded-lg border border-amber-100 bg-white" />
       : <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-gray-800">{question.text}</p>}
     {interaction.status === 'waiting' && interaction.question.format === 'text' && <div className="mt-3 flex gap-2">
       <textarea value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="填写回答" className="min-h-20 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500" />
