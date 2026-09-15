@@ -128,7 +128,7 @@ class _BotEditorWorkOrderRepository:
                     self._WorkOrder.biz_type == WorkOrderBizType.BOT_COLLABORATOR.value,
                     self._WorkOrder.biz_id == bot_id,
                     self._WorkOrder.applicant_user_id == applicant_user_id,
-                    self._WorkOrder.status == WorkOrderStatus.PENDING.value
+                    self._WorkOrder.status == WorkOrderStatus.PENDING.value,
                     self._WorkOrder.env == env,
                 )
                 .all()
