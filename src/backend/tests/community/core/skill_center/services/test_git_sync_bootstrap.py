@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import subprocess
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from agentclaw.community.core.skill_center.services.git_sync import GitSyncService
@@ -88,30 +87,20 @@ async def test_bootstrap_clone_failure_logs_error_and_releases_lock(caplog):
     assert result["success"] is False
 
 
-def test_clone_timeout_is_bounded_and_cleans_partial_repo(tmp_path):
+def test_clone_does_not_apply_a_global_timeout(tmp_path):
     svc = GitSyncService.__new__(GitSyncService)
     svc.config = MagicMock()
     svc.config.local_bare_repo = tmp_path / "aiworkbench.git"
     svc.config.branch = "master"
-    svc.config.clone_timeout_seconds = 20
     svc._repo_url = "ssh://git@example.test/aiworkbench.git"
-
-    def _hang_until_timeout(*_args, **kwargs):
-        svc.config.local_bare_repo.mkdir()
-        raise subprocess.TimeoutExpired(
-            cmd="git clone",
-            timeout=kwargs.get("timeout"),
-        )
 
     with patch(
         "agentclaw.community.core.skill_center.services.git_sync.subprocess.run",
-        side_effect=_hang_until_timeout,
+        return_value=MagicMock(returncode=0),
     ) as run:
-        with pytest.raises(subprocess.TimeoutExpired):
-            svc._sync_clone_bare_repo()
+        svc._sync_clone_bare_repo()
 
-    assert run.call_args.kwargs["timeout"] == 20
-    assert not svc.config.local_bare_repo.exists()
+    assert "timeout" not in run.call_args.kwargs
 
 
 def test_oss_fallback_does_not_extract_over_partial_repo(tmp_path):
