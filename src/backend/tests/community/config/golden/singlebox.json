@@ -182,7 +182,7 @@
     "mock_tcauth": true,
     "nas_mount_root": "/home/admin/.bot_shared_nas/arca/arcaagentclaw",
     "openclaw": {
-      "skills_repo_url": "git@code.teamclaw.com:security_release/aiworkbench.git"
+      "skills_repo_url": ""
     },
     "oss_mount_root": "/aidesktop",
     "secret_names": {
