@@ -1,6 +1,6 @@
 import type { EvolveScoreComparison } from '../api/client'
 
-/** The same reported score view for versions and immutable operation events. */
+/** The same reported score view for versions and business task events. */
 export default function TestBenchComparison({ comparison, emptyLabel = '未评测' }: {
   comparison?: EvolveScoreComparison | null
   emptyLabel?: string

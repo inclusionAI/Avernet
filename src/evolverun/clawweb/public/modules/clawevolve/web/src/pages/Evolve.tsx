@@ -767,6 +767,14 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
     },
   }[taskType])
 
+  const requestedCreateReturnTo = searchParams.get('returnTo')
+  const createdTaskQuery = new URLSearchParams({ type: taskType ?? '' })
+  const createReturnTo = requestedCreateReturnTo?.startsWith('/evolve/') && !requestedCreateReturnTo.startsWith('//')
+    ? requestedCreateReturnTo : '/evolve'
+  if (createReturnTo !== '/evolve') {
+    createdTaskQuery.set('returnTo', createReturnTo)
+  }
+
   if (submitted) {
     return (
       <div className="mx-auto max-w-2xl px-4 py-16">
@@ -782,7 +790,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
             {taskType === 'full' && !improvementSource && <SummaryRow label="进化方式" value={fullInputMode === 'direct_goal' ? '按目标进化' : '先诊断再进化'} />}
             {taskType === 'full' && evolutionGoal && <SummaryRow label="优化目标" value={evolutionGoal} />}
           </div>
-          <button className={`${primaryButton} mt-6`} onClick={() => navigate(`/evolve/runs/${createdTaskId}?type=${taskType}`)}>查看进化任务 <Icon name="arrow" /></button>
+          <button className={`${primaryButton} mt-6`} onClick={() => navigate(`/evolve/runs/${createdTaskId}?${createdTaskQuery}`)}>查看进化任务 <Icon name="arrow" /></button>
         </div>
       </div>
     )
@@ -790,7 +798,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-7 sm:px-6 lg:px-8">
-      <button onClick={() => navigate('/evolve')} className="mb-5 inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800"><span className="rotate-180"><Icon name="arrow" /></span>返回任务列表</button>
+      <button onClick={() => navigate(createReturnTo)} className="mb-5 inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800"><span className="rotate-180"><Icon name="arrow" /></span>{createReturnTo.startsWith('/evolve/skills/') ? '返回 Skill 详情' : createReturnTo.startsWith('/evolve/skills') ? '返回技能中心' : '返回任务列表'}</button>
       <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
         <div className="border-b border-gray-100 px-6 py-5">
           <div className="flex items-center gap-2 text-sm font-medium text-blue-600"><Icon name="spark" />{taskCopy.eyebrow}</div>
@@ -1037,7 +1045,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
 
         <div className="flex items-center justify-end gap-2 border-t border-gray-100 bg-gray-50/60 px-6 py-4">
           {submitError && <p className="mr-auto text-xs text-red-600">{submitError}</p>}
-          <button className={secondaryButton} onClick={() => navigate('/evolve')}>取消</button>
+          <button className={secondaryButton} onClick={() => navigate(createReturnTo)}>取消</button>
           <button disabled={submitting || !fixedTargetReady || botsLoading || restorePacksLoading || !currentUserId || !evolveUserId || !botId || !isOpenClawBot(selectedBot) || (taskType === 'pack_restore' && !selectedRestorePack) || (improvementSource && !activeHandoff) || (crossBotTarget && !crossBotConfirmed)} className={`${primaryButton} disabled:opacity-50`} onClick={async () => {
             if (!taskName.trim()) { setSubmitError('请输入任务名称'); return }
             if (!currentUserId) { setSubmitError('无法识别当前用户，请重新登录'); return }
@@ -1771,6 +1779,11 @@ function TaskDetail({ version = 'internalversion', taskPresentationExtensions = 
   const { enabled: adminReadMode } = useEvolveAdminScope()
   const navigate = useNavigate()
   const location = useLocation()
+  const requestedReturnTo = new URLSearchParams(location.search).get('returnTo')
+  const returnTo = requestedReturnTo?.startsWith('/evolve/') && !requestedReturnTo.startsWith('//') ? requestedReturnTo : '/evolve'
+  const returnLabel = returnTo.startsWith('/evolve/skills/')
+    ? '返回 Skill 详情'
+    : returnTo === '/evolve/skills/events' ? '返回技能事件日志' : returnTo.startsWith('/evolve/skills') ? '返回技能中心' : '返回任务列表'
   const pathTaskId = decodeURIComponent(location.pathname.split('/').filter(Boolean).at(-1) ?? '')
   const taskId = pathTaskId === 'runs' ? '' : pathTaskId
   const [task, setTask] = useState<EvolveTask | null>(null)
@@ -1860,7 +1873,7 @@ function TaskDetail({ version = 'internalversion', taskPresentationExtensions = 
   }, [taskId, activeLogArchiveKey])
 
   if (loading) return <div className="mx-auto max-w-5xl px-4 py-20 text-center text-sm text-gray-500">正在加载任务详情…</div>
-  if (!task) return <div className="mx-auto max-w-5xl px-4 py-20 text-center"><p className="text-sm text-red-600">{loadError || '任务不存在'}</p><button onClick={() => navigate('/evolve')} className={`${secondaryButton} mt-4`}>返回任务列表</button></div>
+  if (!task) return <div className="mx-auto max-w-5xl px-4 py-20 text-center"><p className="text-sm text-red-600">{loadError || '任务不存在'}</p><button onClick={() => navigate(returnTo)} className={`${secondaryButton} mt-4`}>{returnLabel}</button></div>
   const steps = task.steps ?? []
   const view = statusView(task.status)
   const isStageTest = task.task_type === 'stage_test'
@@ -1994,7 +2007,7 @@ function TaskDetail({ version = 'internalversion', taskPresentationExtensions = 
 
   return (
     <div className="mx-auto w-full max-w-[1440px] px-4 py-7 sm:px-6 lg:px-8">
-      <button onClick={() => navigate('/evolve')} className="mb-5 inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800"><span className="rotate-180"><Icon name="arrow" /></span>返回任务列表</button>
+      <button onClick={() => navigate(returnTo)} className="mb-5 inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800"><span className="rotate-180"><Icon name="arrow" /></span>{returnLabel}</button>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="flex items-center gap-2"><Status type={view.type}>{view.text}</Status><TaskType type={displayType.key}>{displayType.label}</TaskType><span className="font-mono text-xs text-gray-400">{task.task_id}</span></div>

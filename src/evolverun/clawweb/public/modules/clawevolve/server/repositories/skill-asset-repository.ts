@@ -1,5 +1,5 @@
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
-import { appendSkillAudit, skillAuditTransaction, skillEventTestBench, type SkillAuditRow } from './skill-audit.js';
+import { recordSkillRegistration, recordSkillTaskEvent, skillAuditTransaction, type SkillEventRow } from './skill-audit.js';
 
 export type SkillAssetRow = {
   id: number;
@@ -36,28 +36,15 @@ export type SkillVersionRow = {
 export class SkillAssetRepository {
   constructor(private readonly db: IDatabase) {}
 
-  async listEvents(ownerUserId: string) {
-    return this.db.query<SkillAuditRow>(
-      `SELECT * FROM ce_skill_audit_events WHERE owner_user_id = ? ORDER BY gmt_create DESC, id DESC`,
-      [ownerUserId],
-    );
-  }
-
-  async listEventTaskContexts(ownerUserId: string): Promise<Array<{ task_id: string; task_type: string; config_json: string }>> {
-    return this.db.query(
-      `SELECT DISTINCT t.task_id, t.task_type, t.config_json
-       FROM ce_tasks t JOIN ce_skill_audit_events e ON e.task_id = t.task_id
-       WHERE e.owner_user_id = ?`,
-      [ownerUserId],
-    );
-  }
-
-  async listEventVersions(ownerUserId: string): Promise<SkillVersionRow[]> {
-    return this.db.query(
-      `SELECT DISTINCT v.* FROM ce_skill_versions v
-       JOIN ce_skill_audit_events e ON e.asset_id = v.asset_id
-       WHERE e.owner_user_id = ?`,
-      [ownerUserId],
+  async listEvents(ownerUserId: string, teamSpaceIds: readonly string[] = [], assetId?: string) {
+    return this.db.query<SkillEventRow>(
+      `SELECT e.* FROM ce_skill_events e
+       JOIN ce_skill_assets a ON a.asset_id = e.asset_id
+       WHERE (e.owner_user_id = ?${teamSpaceIds.length
+    ? ` OR (a.space_type = 'TEAM' AND a.space_id IN (${teamSpaceIds.map(() => '?').join(',')}))` : ''})
+       ${assetId ? 'AND e.asset_id = ?' : ''}
+       ORDER BY e.started_at DESC, e.id DESC`,
+      [ownerUserId, ...teamSpaceIds, ...(assetId ? [assetId] : [])],
     );
   }
 
@@ -115,9 +102,8 @@ export class SkillAssetRepository {
          VALUES (?, ?, 1, ?, ?, 'baseline', ?)`,
         [input.versionId, input.assetId, input.packageRef, input.packageSha256, now],
       );
-      await appendSkillAudit(tx, { key: `register:${input.assetId}`, assetId: input.assetId,
-        versionId: input.versionId, versionNo: 1, type: 'registered', actorType: 'user',
-        actorId: input.actorId ?? input.ownerUserId, result: 'succeeded' });
+      await recordSkillRegistration(tx, { assetId: input.assetId, versionId: input.versionId,
+        versionNo: 1, actorId: input.actorId ?? input.ownerUserId });
     });
     const created = await this.findAsset(input.assetId);
     if (!created) throw new Error("Skill 登记失败");
@@ -157,17 +143,9 @@ export class SkillAssetRepository {
          current_package_sha256 = ?, gmt_modified = ? WHERE asset_id = ?`,
         [versionNo, input.packageRef, input.packageSha256, now, input.assetId],
       );
-      // Carry the accepted operation's immutable association, not a live/latest round.
-      const accepted = (await tx.query<{ detail_json: string | null }>(
-        `SELECT detail_json FROM ce_skill_audit_events WHERE asset_id = ? AND task_id = ?
-         AND owner_user_id = ? AND bot_id = ? AND event_type = 'candidate_accepted'`,
-        [input.assetId, input.sourceTaskId, asset.owner_user_id, asset.bot_id]))[0];
-      const testBench = skillEventTestBench(accepted?.detail_json ?? null, input.sourceTaskId);
-      if (input.appliedBy) await appendSkillAudit(tx, {
-        key: `${input.sourceTaskId}:version-applied`, assetId: input.assetId, taskId: input.sourceTaskId,
-        versionId: input.versionId, versionNo, type: 'version_applied', actorId: input.appliedBy,
-        actorType: 'user', result: 'succeeded',
-        ...(testBench ? { detail: { testBench } } : {}),
+      if (input.appliedBy) await recordSkillTaskEvent(tx, input.sourceTaskId, {
+        status: 'waiting_acceptance', outcome: 'applied', actorType: 'user', actorId: input.appliedBy,
+        versionToId: input.versionId, versionToNo: versionNo,
       });
       return (await tx.query<SkillVersionRow>('SELECT * FROM ce_skill_versions WHERE version_id = ?', [input.versionId]))[0];
     });

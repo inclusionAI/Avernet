@@ -725,7 +725,7 @@ describe("ClawEvolve frozen Diagnose Plan Source", () => {
       ref: auditConfig.targetSkill.candidate.ref, size: 1, sha256: '7'.repeat(64), contentType: 'application/zip',
     } } });
     expect(finalized.response.status).toBe(200);
-    const event = (await skillAssetRepo.listEvents('user-1')).find(item => item.task_id === taskId && item.event_type === 'evolution_finished')!;
+    const event = (await skillAssetRepo.listEvents('user-1')).find(item => item.task_id === taskId && item.event_type === 'optimization')!;
     expect(JSON.parse(event.detail_json!).testBench).toEqual(auditConfig.skillAuditTestBench);
   });
 
@@ -1073,7 +1073,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
       expect(response.status).toBe(409);
     }
     expect(await skillAssetRepo.listAssets("user-1")).toEqual([]);
-    expect(await db.query("SELECT event_id FROM ce_skill_audit_events")).toEqual([]);
+    expect(await db.query("SELECT event_id FROM ce_skill_events")).toEqual([]);
     expect(await db.query("SELECT version_id FROM ce_skill_versions")).toEqual([]);
     expect(ocbLocalSkills.replaceLocalSkill).not.toHaveBeenCalled();
   });
@@ -1503,6 +1503,36 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     expect((await repo.listSteps(String(task.task_id))).some((item) => item.step_type === "diagnose")).toBe(false);
   });
 
+  it('updates one Skill optimization event when a Stage waits for and receives user input', async () => {
+    await skillAssetRepo.createAsset({ assetId: 'SKILL-HITL-EVENT', versionId: 'SKVER-HITL-EVENT',
+      ownerUserId: 'user-1', botId: 'bot-1', ocbSkillId: 'hitl-event', displayName: 'HITL Skill',
+      packageRef: 'baseline', packageSha256: 'baseline-sha' });
+    const implementationId = await seedStageImplementation('preprocess');
+    const taskId = 'EV-SKILL-HITL-EVENT';
+    const stepId = 'STEP-SKILL-HITL-EVENT';
+    await repo.createTask({ taskId, taskType: 'full', userId: 'user-1', botId: 'bot-1',
+      taskName: '等待加固表单', createdBy: 'user-1', configJson: JSON.stringify({ targetSkill: {
+        assetId: 'SKILL-HITL-EVENT', baseline: { versionId: 'SKVER-HITL-EVENT', versionNo: 1 },
+      } }) });
+    await repo.createStep({ taskId, stepId, stepType: 'stage_extension', stepNo: 1, command: 'fixture' });
+    await stageSkillRepo.createExtensionRun({ taskId, stepId, stage: 'diagnose', mode: 'preprocess', implementationId });
+    const waiting = await callback(taskId, stepId, { status: 'succeeded', output: { hitl: true,
+      question: { tag: 'hardening', format: 'text', content: '请选择加固等级' } } });
+    expect(waiting.response.status).toBe(200);
+    const interactionId = String((waiting.body.interaction as Record<string, unknown>).interactionId);
+    const waitingEvent = (await skillAssetRepo.listEvents('user-1')).find(event => event.task_id === taskId)!;
+    expect(waitingEvent).toMatchObject({ event_type: 'optimization', status: 'waiting_user_input',
+      waiting_interaction_id: interactionId });
+    const answered = await fetch(`${baseUrl}/api/evolve/tasks/${taskId}/steps/${stepId}/interactions/${interactionId}/answer`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': 'user-1' },
+      body: JSON.stringify({ answer: '基础加固' }),
+    });
+    expect(answered.status).toBe(200);
+    const resumedEvent = (await skillAssetRepo.listEvents('user-1')).find(event => event.task_id === taskId)!;
+    expect(resumedEvent).toMatchObject({ event_id: waitingEvent.event_id, status: 'running', waiting_interaction_id: null });
+    expect((await skillAssetRepo.listEvents('user-1')).filter(event => event.task_id === taskId)).toHaveLength(1);
+  });
+
   it.each(["failed", "canceled", "succeeded"])("does not reopen a %s Stage after a late HITL report", async (terminalStatus) => {
     const implementationId = await seedStageImplementation("replace");
     const started = await fetch(`${baseUrl}/api/evolve/stage-skills/${implementationId}/integration-tests`, {
@@ -1826,7 +1856,9 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     expect((await repo.findTask(String(task.task_id)))?.status).toBe("completed");
     expect((await repo.listSteps(String(task.task_id))).some((item) => item.step_type === "skill_finalize"))
       .toBe(false);
-    expect((await skillAssetRepo.listEvents('user-1'))[0]).toMatchObject({ event_type: 'evolution_finished', task_id: task.task_id, result: 'no_cases', version_id: null });
+    expect((await skillAssetRepo.listEvents('user-1'))[0]).toMatchObject({
+      event_type: 'optimization', task_id: task.task_id, status: 'completed', outcome: 'no_cases', version_to_id: null,
+    });
   });
 
   it("skips Diagnose for a Skill evolution task only when a direct goal is frozen", async () => {
@@ -1932,7 +1964,9 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     expect(optimized.response.status).toBe(200);
     expect(optimized.body.nextStep).toBeNull();
     expect((await repo.findTask(String(task.task_id)))?.status).toBe("completed");
-    expect((await skillAssetRepo.listEvents('user-1'))[0]).toMatchObject({ event_type: 'evolution_finished', task_id: task.task_id, result: 'not_improved', version_id: null });
+    expect((await skillAssetRepo.listEvents('user-1'))[0]).toMatchObject({
+      event_type: 'optimization', task_id: task.task_id, status: 'completed', outcome: 'not_improved', version_to_id: null,
+    });
     expect((await repo.listSteps(String(task.task_id))).some((item) => item.step_type === "skill_finalize"))
       .toBe(false);
   });
@@ -1941,7 +1975,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     const result = await runSkillEvolutionToWaitingAcceptance({ assetId: 'SKILL-BENCH-AUDIT', ocbSkillId: 'ocb-bench-audit',
       scoreComparison: { name: 'test_score', baseline: .5, candidate: .75, delta: .25 } });
     const step = (await repo.listSteps(result.taskId)).find(item => item.step_type === 'optimize')!;
-    const event = (await skillAssetRepo.listEvents('user-1')).find(item => item.event_type === 'evolution_finished')!;
+    const event = (await skillAssetRepo.listEvents('user-1')).find(item => item.event_type === 'optimization')!;
     expect(JSON.parse(event.detail_json!).testBench).toEqual({ taskId: result.taskId, stepId: step.step_id, round: 1,
       scoreComparison: { name: 'test_score', baseline: .5, candidate: .75, delta: .25 } });
   });
@@ -1952,8 +1986,8 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
       ocbSkillId: "ocb-skill-full-accept",
     });
     const before = await skillAssetRepo.listEvents('user-1');
-    expect(before.map(e => [e.event_type, e.result])).toEqual([
-      ['evolution_finished', 'waiting_acceptance'], ['evolution_started', 'pending'], ['registered', 'succeeded'],
+    expect(before.map(e => [e.event_type, e.status, e.outcome])).toEqual([
+      ['optimization', 'waiting_acceptance', null], ['registered', 'completed', 'registered'],
     ]);
     const finalStep = (await repo.listSteps(result.taskId)).find(step => step.step_type === 'skill_finalize')!;
     await callback(result.taskId, finalStep.step_id, { status: 'succeeded', output: JSON.parse(finalStep.output_json!) });
@@ -1982,8 +2016,9 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
       package_sha256: `sha256:${result.candidateSha}`,
     });
     const recorded = await skillAssetRepo.listEvents('user-1');
-    expect(recorded.map(e => e.event_type)).toEqual(['version_applied', 'candidate_accepted', 'evolution_finished', 'evolution_started', 'registered']);
-    expect(recorded[0]).toMatchObject({ task_id: result.taskId, asset_id: 'SKILL-FULL-ACCEPT', actor_id: 'user-1', version_no: 2, result: 'succeeded' });
+    expect(recorded.map(e => e.event_type)).toEqual(['optimization', 'registered']);
+    expect(recorded[0]).toMatchObject({ task_id: result.taskId, asset_id: 'SKILL-FULL-ACCEPT', actor_id: 'user-1',
+      status: 'completed', outcome: 'applied', version_to_no: 2 });
     const duplicate = await fetch(`${baseUrl}/api/evolve/tasks/${result.taskId}/skill-decision`, { method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-User-Id': 'user-1' }, body: JSON.stringify({ decision: 'accept' }) });
     expect(await duplicate.json()).toMatchObject({ duplicate: true });
@@ -2012,8 +2047,8 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     expect(ocbLocalSkills.replaceLocalSkill).not.toHaveBeenCalled();
     expect(await skillAssetRepo.listVersions("SKILL-FULL-REJECT")).toHaveLength(1);
     const events = await skillAssetRepo.listEvents('user-1');
-    expect(events[0]).toMatchObject({ event_type: 'candidate_rejected', result: 'rejected', actor_id: 'user-1', task_id: result.taskId, version_id: null });
-    expect(events.some(e => e.event_type === 'version_applied')).toBe(false);
+    expect(events[0]).toMatchObject({ event_type: 'optimization', status: 'completed', outcome: 'rejected',
+      actor_id: 'user-1', task_id: result.taskId, version_to_id: null });
     const repeat = await fetch(`${baseUrl}/api/evolve/tasks/${result.taskId}/skill-decision`, { method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-User-Id': 'user-1' }, body: JSON.stringify({ decision: 'reject' }) });
     expect(await repeat.json()).toMatchObject({ duplicate: true });
@@ -2031,17 +2066,17 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     expect(await skillAssetRepo.listVersions('SKILL-FAIL-AUDIT')).toHaveLength(1);
     expect((await repo.findTask(result.taskId))?.status).toBe('waiting_acceptance');
     const events = await skillAssetRepo.listEvents('user-1');
-    expect(events.map(e => e.event_type)).toEqual(['version_apply_failed', 'candidate_accepted', 'evolution_finished', 'evolution_started', 'registered']);
-    expect(events[0]).toMatchObject({ result: status === 409 ? 'conflict' : 'failed', task_id: result.taskId, version_id: null });
+    expect(events.map(e => e.event_type)).toEqual(['optimization', 'registered']);
+    expect(events[0]).toMatchObject({ status: 'waiting_acceptance',
+      outcome: status === 409 ? 'conflict' : 'version_apply_failed', task_id: result.taskId, version_to_id: null });
     expect(await skillAssetRepo.listEvents('other-user')).toEqual([]);
     expect((await decide('user-1', 'new-user-submission')).status).toBe(status);
-    expect((await skillAssetRepo.listEvents('user-1')).filter(e => e.event_type === 'version_apply_failed')).toHaveLength(2);
-    expect((await skillAssetRepo.listEvents('user-1')).filter(e => e.event_type === 'candidate_accepted')).toHaveLength(1);
+    expect((await skillAssetRepo.listEvents('user-1')).filter(e => e.event_type === 'optimization')).toHaveLength(1);
   });
 
   it('does not call OCB if accepting the decision cannot be durably audited', async () => {
     const result = await runSkillEvolutionToWaitingAcceptance({ assetId: 'SKILL-AUDIT-DOWN', ocbSkillId: 'audit-down' });
-    await db.exec("CREATE TRIGGER audit_down BEFORE INSERT ON ce_skill_audit_events WHEN NEW.event_type = 'candidate_accepted' BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END");
+    await db.exec("CREATE TRIGGER audit_down BEFORE UPDATE ON ce_skill_events WHEN NEW.outcome = 'accepted' BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END");
     const response = await fetch(`${baseUrl}/api/evolve/tasks/${result.taskId}/skill-decision`, { method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-User-Id': 'user-1' }, body: JSON.stringify({ decision: 'accept' }) });
     expect(response.status).toBe(500);
@@ -2059,14 +2094,17 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     expect((await repo.findTask(result.taskId))?.status).toBe('waiting_acceptance');
     expect(await skillAssetRepo.listVersions('SKILL-COMMIT-RETRY')).toHaveLength(2);
     const events = await skillAssetRepo.listEvents('user-1');
-    expect(events[0]).toMatchObject({ event_type: 'version_applied', version_no: 2, task_id: result.taskId });
+    expect(events[0]).toMatchObject({ event_type: 'optimization', version_to_no: 2, task_id: result.taskId });
     await db.exec('DROP TRIGGER task_commit_down');
     ocbLocalSkills.exportLocalSkill.mockResolvedValueOnce({ packageBytes: candidate, sha256: result.candidateSha, displayName: 'commit-retry' });
     const retried = await decide();
     expect(retried.status).toBe(200);
     expect(await retried.json()).toMatchObject({ duplicate: true, status: 'completed' });
     expect(ocbLocalSkills.replaceLocalSkill).toHaveBeenCalledTimes(1);
-    expect(await skillAssetRepo.listEvents('user-1')).toEqual(events);
+    const completedEvents = await skillAssetRepo.listEvents('user-1');
+    expect(completedEvents).toHaveLength(events.length);
+    expect(completedEvents[0]).toMatchObject({ event_id: events[0].event_id, status: 'completed',
+      outcome: 'applied', version_to_no: 2 });
     expect(await skillAssetRepo.listVersions('SKILL-COMMIT-RETRY')).toHaveLength(2);
   });
 
@@ -2089,13 +2127,16 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     expect(ocbLocalSkills.replaceLocalSkill).toHaveBeenCalledTimes(1);
     expect(await skillAssetRepo.listVersions('SKILL-PARTIAL-DECISION')).toHaveLength(2);
     const events = await skillAssetRepo.listEvents('user-1');
-    expect(events.filter(event => event.event_type === 'candidate_rejected')).toEqual([]);
-    expect(events.filter(event => event.event_type === 'candidate_accepted')).toHaveLength(1);
-    expect(events.filter(event => event.event_type === 'version_applied')).toHaveLength(1);
-    expect(events.filter(event => event.event_type === 'version_apply_failed')).toHaveLength(1);
+    expect(events.filter(event => event.event_type === 'optimization')).toHaveLength(1);
+    expect(events.find(event => event.event_type === 'optimization')).toMatchObject({
+      status: 'waiting_acceptance', outcome: 'conflict', version_to_no: 2,
+    });
     ocbLocalSkills.exportLocalSkill.mockResolvedValue({ packageBytes: candidate, sha256: result.candidateSha, displayName: 'partial' });
     expect((await decide('accept')).status).toBe(200);
-    expect(await skillAssetRepo.listEvents('user-1')).toEqual(events);
+    const completedEvents = await skillAssetRepo.listEvents('user-1');
+    expect(completedEvents).toHaveLength(events.length);
+    expect(completedEvents[0]).toMatchObject({ event_id: events[0].event_id, status: 'completed',
+      outcome: 'applied', version_to_no: 2 });
   });
 
   it.each(['accept', 'reject'] as const)('keeps concurrent accept/reject exclusive when %s commits first', async (winner) => {
@@ -2121,8 +2162,9 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     expect(ocbLocalSkills.replaceLocalSkill).toHaveBeenCalledTimes(winner === 'accept' ? 1 : 0);
     expect(JSON.parse((await repo.findTask(result.taskId))!.config_json).skillDecision.decision).toBe(winner);
     const events = await skillAssetRepo.listEvents('user-1');
-    expect(events.filter(event => event.event_type.startsWith('candidate_')).map(event => event.event_type))
-      .toEqual([winner === 'accept' ? 'candidate_accepted' : 'candidate_rejected']);
+    const businessEvent = events.find(event => event.event_type === 'optimization')!;
+    expect(JSON.parse(businessEvent.detail_json!).decision).toBe(winner);
+    expect(businessEvent.outcome).toBe(winner === 'accept' ? 'applied' : 'rejected');
     const repeated = await decide(winner);
     expect(await repeated.json()).toMatchObject({ duplicate: true });
     expect(await skillAssetRepo.listEvents('user-1')).toEqual(events);
@@ -2151,13 +2193,15 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     expect((await repo.findTask(result.taskId))?.status).toBe('completed');
     expect(await skillAssetRepo.listVersions('SKILL-DOUBLE-ACCEPT')).toHaveLength(2);
     const events = await skillAssetRepo.listEvents('user-1');
-    expect(events.filter(event => event.event_type === 'candidate_accepted')).toHaveLength(1);
-    expect(events.filter(event => event.event_type === 'version_applied')).toHaveLength(1);
+    expect(events.filter(event => event.event_type === 'optimization')).toHaveLength(1);
+    expect(events.find(event => event.event_type === 'optimization')).toMatchObject({
+      status: 'completed', outcome: 'applied', version_to_no: 2,
+    });
   });
 
   it('keeps accepted intent exclusive if version audit persistence fails after OCB writes', async () => {
     const result = await runSkillEvolutionToWaitingAcceptance({ assetId: 'SKILL-PARTIAL-AUDIT', ocbSkillId: 'partial-audit' });
-    await db.exec("CREATE TRIGGER fail_version_audit BEFORE INSERT ON ce_skill_audit_events WHEN NEW.event_type = 'version_applied' BEGIN SELECT RAISE(ABORT, 'version audit unavailable'); END");
+    await db.exec("CREATE TRIGGER fail_version_audit BEFORE UPDATE ON ce_skill_events WHEN NEW.version_to_no = 2 AND OLD.version_to_no IS NULL BEGIN SELECT RAISE(ABORT, 'version audit unavailable'); END");
     const decide = (decision: string) => fetch(`${baseUrl}/api/evolve/tasks/${result.taskId}/skill-decision`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-User-Id': 'user-1' }, body: JSON.stringify({ decision }),
     });
@@ -2167,8 +2211,10 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     expect(await skillAssetRepo.listVersions('SKILL-PARTIAL-AUDIT')).toHaveLength(1);
     expect((await repo.findTask(result.taskId))?.status).toBe('waiting_acceptance');
     const events = await skillAssetRepo.listEvents('user-1');
-    expect(events.filter(event => event.event_type === 'candidate_rejected' || event.event_type === 'version_applied')).toEqual([]);
-    expect(events.filter(event => event.event_type === 'candidate_accepted')).toHaveLength(1);
+    expect(events.filter(event => event.event_type === 'optimization')).toHaveLength(1);
+    expect(events.find(event => event.event_type === 'optimization')).toMatchObject({
+      status: 'waiting_acceptance', outcome: 'accepted', version_to_no: null,
+    });
   });
 
   it.each(['builtin', 'replace', 'postprocess'] as const)('atomically terminates a no-cases %s report and safely replays after audit failure', async (mode) => {
@@ -2192,7 +2238,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     const output = mode === 'builtin' ? diagnoseOutput('empty', 0)
       : { hitl: false, result: mode === 'replace' ? diagnoseOutput('empty', 0) : { result_patch: {} } };
     const report = { status: 'succeeded', output };
-    await db.exec("CREATE TRIGGER fail_finish_audit BEFORE INSERT ON ce_skill_audit_events WHEN NEW.event_type = 'evolution_finished' BEGIN SELECT RAISE(ABORT, 'finish audit unavailable'); END");
+    await db.exec("CREATE TRIGGER fail_finish_audit BEFORE UPDATE ON ce_skill_events WHEN NEW.outcome = 'no_cases' BEGIN SELECT RAISE(ABORT, 'finish audit unavailable'); END");
     const failed = await fetch(`${baseUrl}/api/evolve/internal/tasks/${taskId}/steps/${stepId}/report`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(report),
     });
@@ -2203,7 +2249,9 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     expect((await callback(taskId, stepId, report)).response.status).toBe(200);
     expect((await repo.findTask(taskId))?.status).toBe('completed');
     const events = await skillAssetRepo.listEvents('user-1');
-    expect(events.filter(event => event.event_type === 'evolution_finished')).toMatchObject([{ result: 'no_cases' }]);
+    expect(events.filter(event => event.event_type === 'optimization')).toMatchObject([{
+      status: 'completed', outcome: 'no_cases',
+    }]);
     expect((await callback(taskId, stepId, report)).response.status).toBe(200);
     expect(await skillAssetRepo.listEvents('user-1')).toEqual(events);
     expect(dispatch).not.toHaveBeenCalled();
@@ -2295,14 +2343,16 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     });
     await repo.updateTaskState({ taskId: "EV-SKILL-RETRY", status: "waiting_acceptance" });
     getObject.mockResolvedValue({ content: candidate, etag: null, contentType: "application/zip" });
-    await db.exec("CREATE TRIGGER audit_down BEFORE INSERT ON ce_skill_audit_events WHEN NEW.event_type = 'version_applied' BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END");
+    await db.exec("CREATE TRIGGER audit_down BEFORE UPDATE ON ce_skill_events WHEN NEW.version_to_no = 2 AND OLD.version_to_no IS NULL BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END");
     const interrupted = await fetch(`${baseUrl}/api/evolve/tasks/EV-SKILL-RETRY/skill-decision`, { method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-User-Id': 'user-1' }, body: JSON.stringify({ decision: 'accept' }) });
     expect(interrupted.status).toBe(500);
     expect(ocbLocalSkills.replaceLocalSkill).toHaveBeenCalledTimes(1);
     expect(await skillAssetRepo.listVersions('SKILL-RETRY')).toHaveLength(1);
     expect((await skillAssetRepo.findAsset('SKILL-RETRY'))?.current_version_no).toBe(1);
-    expect((await skillAssetRepo.listEvents('user-1'))[0].event_type).toBe('candidate_accepted');
+    expect((await skillAssetRepo.listEvents('user-1'))[0]).toMatchObject({
+      event_type: 'optimization', status: 'waiting_acceptance', outcome: 'accepted', version_to_no: null,
+    });
     await db.exec('DROP TRIGGER audit_down');
     ocbLocalSkills.replaceLocalSkill.mockRejectedValueOnce(Object.assign(new Error("conflict"), { status: 409 }));
     ocbLocalSkills.exportLocalSkill.mockResolvedValueOnce({
@@ -2324,8 +2374,10 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     });
     const savedConfig = JSON.parse((await repo.findTask("EV-SKILL-RETRY"))!.config_json);
     expect(savedConfig.skillDecision.ocbPackageSha256).toBe(`sha256:${"c".repeat(64)}`);
-    expect((await skillAssetRepo.listEvents('user-1')).filter(e => e.event_type === 'version_applied')).toHaveLength(1);
-    expect((await skillAssetRepo.listEvents('user-1')).filter(e => e.event_type === 'candidate_accepted')).toHaveLength(1);
+    expect((await skillAssetRepo.listEvents('user-1')).filter(e => e.event_type === 'optimization')).toHaveLength(1);
+    expect((await skillAssetRepo.listEvents('user-1')).find(e => e.event_type === 'optimization')).toMatchObject({
+      status: 'completed', outcome: 'applied', version_to_no: 2,
+    });
   });
 
   it("does not complete a retried acceptance after the recorded version has drifted in OCB", async () => {

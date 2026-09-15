@@ -55,17 +55,6 @@ function objectKey(ref: string): string {
   return value;
 }
 
-function skillEventTaskConfig(value: string): {
-  targetSkill?: { assetId?: string; baseline?: { sha256?: string; versionId?: string; versionNo?: number } };
-} {
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
 async function readSnapshot(store: ObjectStore, ref: string) {
   try {
     return await store.getObject(objectKey(ref));
@@ -76,6 +65,36 @@ async function readSnapshot(store: ObjectStore, ref: string) {
       code: "SKILL_SNAPSHOT_UNAVAILABLE",
     });
   }
+}
+
+function eventView(
+  event: Awaited<ReturnType<SkillAssetRepository["listEvents"]>>[number],
+  ownerId: string | null,
+) {
+  const version = (id: string | null, no: number | null) => id && no != null
+    ? { versionId: id, version: `v${no}` } : null;
+  return {
+    eventId: event.event_id,
+    assetId: event.asset_id,
+    name: event.display_name,
+    description: event.description,
+    ownerId,
+    botId: event.bot_id,
+    actorId: event.actor_id,
+    actorType: event.actor_type,
+    type: event.event_type,
+    status: event.status,
+    outcome: event.outcome,
+    taskId: event.task_id,
+    versionFrom: version(event.version_from_id, event.version_from_no),
+    versionTo: version(event.version_to_id, event.version_to_no),
+    waitingInteractionId: event.waiting_interaction_id,
+    summary: event.summary,
+    testBench: skillEventTestBench(event.detail_json, event.task_id),
+    startedAt: event.started_at,
+    completedAt: event.completed_at,
+    updatedAt: event.gmt_modified,
+  };
 }
 
 export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
@@ -105,50 +124,11 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
   router.get("/skill-events", asyncHandler(async (req, res) => {
     const requestIdentity = identity(req);
     if (!requestIdentity) { res.status(401).json({ error: "无法识别当前用户" }); return; }
-    const [events, taskContexts, versions] = await Promise.all([
-      input.repo.listEvents(requestIdentity.userId),
-      input.repo.listEventTaskContexts(requestIdentity.userId),
-      input.repo.listEventVersions(requestIdentity.userId),
-    ]);
+    const spaces = await input.ocbSpaces?.listAccessibleSpaces({ identity: requestIdentity }) ?? [];
+    const events = await input.repo.listEvents(requestIdentity.userId,
+      spaces.filter((space) => space.type === 'TEAM').map((space) => space.id));
     const metadata = await displayMetadata(events.map((event) => event.bot_id), requestIdentity, false);
-    const tasksById = new Map(taskContexts.map((task) => [task.task_id, task]));
-    const versionsByDigest = new Map<string, typeof versions>();
-    for (const version of versions) {
-      const key = `${version.asset_id}\0${version.package_sha256}`;
-      versionsByDigest.set(key, [...(versionsByDigest.get(key) ?? []), version]);
-    }
-    res.json({ items: events.map((event) => {
-      const task = event.task_id ? tasksById.get(event.task_id) : null;
-      const type = task?.task_type === "diagnose"
-        ? event.event_type === "evolution_started" ? "diagnosis_started"
-          : event.event_type === "evolution_finished" ? "diagnosis_finished" : event.event_type
-        : event.event_type;
-      let versionId = event.version_id;
-      let versionNo = event.version_no;
-      if (versionNo == null && task && ["diagnosis_started", "diagnosis_finished", "evolution_started", "evolution_finished"].includes(type)) {
-        const target = skillEventTaskConfig(task.config_json).targetSkill;
-        if (target?.assetId === event.asset_id) {
-          if (typeof target.baseline?.versionId === "string" && Number.isSafeInteger(target.baseline.versionNo)) {
-            versionId = target.baseline.versionId;
-            versionNo = target.baseline.versionNo!;
-          } else if (typeof target.baseline?.sha256 === "string") {
-            const exact = versionsByDigest.get(`${event.asset_id}\0${target.baseline.sha256}`) ?? [];
-            if (exact.length === 1) {
-              versionId = exact[0].version_id;
-              versionNo = exact[0].version_no;
-            }
-          }
-        }
-      }
-      return {
-      eventId: event.event_id, assetId: event.asset_id, name: event.display_name,
-      description: event.description,
-      ownerId: metadata.get(event.bot_id)?.ownerId ?? null, botId: event.bot_id,
-      version: versionNo == null ? null : `v${versionNo}`, versionId,
-      type, actorId: event.actor_id, actorType: event.actor_type, result: event.result,
-      taskId: event.task_id, createdAt: event.gmt_create,
-      testBench: skillEventTestBench(event.detail_json, event.task_id),
-    }; }) });
+    res.json({ items: events.map((event) => eventView(event, metadata.get(event.bot_id)?.ownerId ?? null)) });
   }));
 
   router.get("/skill-assets/available", asyncHandler(async (req, res) => {
@@ -232,6 +212,19 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
         createdAt: version.gmt_create,
       })),
     });
+  }));
+
+  router.get("/skill-assets/:assetId/history", asyncHandler(async (req, res) => {
+    const requestIdentity = identity(req);
+    const asset = await input.repo.findAsset(String(req.params.assetId));
+    if (!requestIdentity || !asset || !await readable(asset, requestIdentity)) {
+      res.status(404).json({ error: "Skill 不存在" }); return;
+    }
+    const spaces = await input.ocbSpaces?.listAccessibleSpaces({ identity: requestIdentity }) ?? [];
+    const events = await input.repo.listEvents(requestIdentity.userId,
+      spaces.filter((space) => space.type === 'TEAM').map((space) => space.id), asset.asset_id);
+    const metadata = await displayMetadata([asset.bot_id], requestIdentity, false);
+    res.json({ events: events.map((event) => eventView(event, metadata.get(event.bot_id)?.ownerId ?? null)) });
   }));
 
   router.get("/skill-assets/:assetId/versions/:versionId/content", asyncHandler(async (req, res) => {

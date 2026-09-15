@@ -70,23 +70,26 @@ async function zip(content: string) {
 }
 
 describe("Skill historical snapshot availability", () => {
-  it('presents legacy Skill diagnosis events with their exact frozen baseline version', async () => {
+  it('presents a diagnosis business event with its exact frozen baseline version', async () => {
     const test = await startRouter(true);
     await test.repo.createAsset({ assetId: 'ASSET', versionId: 'BASE', ownerUserId: 'owner-1', botId: 'bot-1',
       ocbSkillId: '47', displayName: 'Skill', packageRef: 'base', packageSha256: 'base-sha' });
     const tasks = new EvolveRepository(database!);
     await tasks.createTask({ taskId: 'TASK-DIAGNOSE', taskType: 'diagnose', taskName: 'Diagnose Skill',
       userId: 'owner-1', botId: 'bot-1', createdBy: 'owner-1', configJson: JSON.stringify({
-        targetSkill: { assetId: 'ASSET', baseline: { sha256: 'base-sha' } },
+        targetSkill: { assetId: 'ASSET', baseline: { sha256: 'base-sha', versionId: 'BASE', versionNo: 1 } },
       }) });
-    await database!.exec(
-      "UPDATE ce_skill_audit_events SET event_type = 'evolution_started', version_id = NULL, version_no = NULL WHERE task_id = ?",
-      ['TASK-DIAGNOSE'],
-    );
     const response = await fetch(`${test.baseUrl}/skill-events`, { headers: { 'X-User-Id': 'owner-1' } });
     expect(response.status).toBe(200);
     const { items } = await response.json();
-    expect(items[0]).toMatchObject({ type: 'diagnosis_started', version: 'v1', versionId: 'BASE' });
+    expect(items[0]).toMatchObject({ type: 'diagnosis', status: 'running',
+      versionFrom: { version: 'v1', versionId: 'BASE' } });
+    const history = await fetch(`${test.baseUrl}/skill-assets/ASSET/history`, { headers: { 'X-User-Id': 'owner-1' } });
+    expect(history.status).toBe(200);
+    expect((await history.json()).events).toMatchObject([
+      { eventId: items[0].eventId, type: 'diagnosis', taskId: 'TASK-DIAGNOSE' },
+      { type: 'registered', taskId: null },
+    ]);
   });
 
   it('projects only the frozen Test Bench association, never private event detail or live reports', async () => {
@@ -240,7 +243,9 @@ describe("Skill historical snapshot availability", () => {
     expect(response.status).toBe(200);
     const { items } = await response.json();
     expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ assetId: "SKILL-1", ownerId: "bot-owner", botId: "bot-1", version: "v1", versionId: 'BASE-SKILL-1', type: "registered", taskId: null, actorId: 'owner-1', actorType: 'user', result: 'succeeded' });
+    expect(items[0]).toMatchObject({ assetId: "SKILL-1", ownerId: "bot-owner", botId: "bot-1",
+      versionFrom: { version: "v1", versionId: 'BASE-SKILL-1' }, type: "registered", status: 'completed',
+      outcome: 'registered', taskId: null, actorId: 'owner-1', actorType: 'user' });
     expect(items[0].description).toBe('Description at registration');
     expect(test.listLocalSkills).not.toHaveBeenCalled();
     expect(items.every((item: Record<string, unknown>) => !('score' in item) && !('improved' in item))).toBe(true);

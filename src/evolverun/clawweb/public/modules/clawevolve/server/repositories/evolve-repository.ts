@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { auditTaskOperation, skillAuditTransaction, skillTestBenchSnapshot, type SkillAuditInput } from './skill-audit.js';
+import { recordSkillTaskEvent, skillAuditTransaction, skillTestBenchSnapshot, type SkillTaskEventUpdate } from './skill-audit.js';
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { nowForDb } from "@avernet/clawweb-shared/server/db";
 
@@ -342,8 +342,8 @@ export class EvolveRepository {
         [input.taskId, input.taskType, input.taskName, input.remark ?? null, input.userId, input.botId,
           input.configJson, input.createdBy, now, now],
       );
-      await auditTaskOperation(tx, input.taskId, { key: `${input.taskId}:started`, type: 'evolution_started',
-        actorType: 'user', actorId: input.auditActorId ?? input.createdBy, result: 'pending' });
+      await recordSkillTaskEvent(tx, input.taskId, { status: 'running', actorType: 'user',
+        actorId: input.auditActorId ?? input.createdBy });
     });
   }
 
@@ -382,7 +382,7 @@ export class EvolveRepository {
         [input.step.stepId, input.task.taskId, input.step.stepType, input.step.stepNo,
           input.step.roundNo ?? null, input.step.command, now, now],
       );
-      await auditTaskOperation(tx, input.task.taskId, { key: `${input.task.taskId}:started`, type: 'evolution_started', actorType: 'user', actorId: input.task.createdBy, result: 'pending' });
+      await recordSkillTaskEvent(tx, input.task.taskId, { status: 'running', actorType: 'user', actorId: input.task.createdBy });
     });
   }
 
@@ -1533,6 +1533,9 @@ export class EvolveRepository {
 
   async deleteTask(taskId: string): Promise<void> {
     await this.db.transaction(async (tx) => {
+      // This method is used only to roll back a task that was not successfully
+      // created for the caller, so its not-yet-visible business event goes too.
+      await tx.exec("DELETE FROM ce_skill_events WHERE task_id = ?", [taskId]);
       await tx.exec("DELETE FROM ce_steps WHERE task_id = ?", [taskId]);
       await tx.exec("DELETE FROM ce_task_sources WHERE task_id = ?", [taskId]);
       await tx.exec("DELETE FROM ce_tasks WHERE task_id = ?", [taskId]);
@@ -1639,7 +1642,6 @@ export class EvolveRepository {
     status: string;
     config?: Record<string, unknown>;
     errorMessage?: string | null;
-    audit?: Omit<SkillAuditInput, 'assetId' | 'taskId'>;
     result?: string;
   }): Promise<void> {
     const now = nowForDb(this.db.dbType);
@@ -1655,10 +1657,14 @@ export class EvolveRepository {
           [input.status, input.errorMessage ?? null, now, input.taskId],
         );
       }
-      if (input.audit) await auditTaskOperation(tx, input.taskId, input.audit);
-      if (!input.config?.skillDecision && ['waiting_acceptance', 'completed', 'failed', 'canceled'].includes(input.status)) {
-        await auditTaskOperation(tx, input.taskId, { type: 'evolution_finished', actorType: 'system', result: input.result ?? input.status });
-      }
+      const skillDecision = input.config?.skillDecision as { decision?: string } | undefined;
+      await recordSkillTaskEvent(tx, input.taskId, {
+        outcome: input.result ?? (input.status === 'completed'
+          ? skillDecision?.decision === 'accept' ? 'applied'
+            : skillDecision?.decision === 'reject' ? 'rejected' : 'completed'
+          : null),
+        summary: input.errorMessage ?? undefined,
+      });
     });
   }
   async prepareTaskRetry(taskId: string, config: Record<string, unknown>, actorId?: string): Promise<void> {
@@ -1667,13 +1673,13 @@ export class EvolveRepository {
         "UPDATE ce_tasks SET status = 'pending', config_json = ?, error_message = NULL, gmt_modified = ? WHERE task_id = ?",
         [JSON.stringify(config), tx.dialect.now(), taskId],
       );
-      await auditTaskOperation(tx, taskId, { key: `${taskId}:retry:${randomUUID()}`, type: 'evolution_started',
-        actorType: actorId ? 'user' : 'system', actorId, result: 'retry_pending' });
+      await recordSkillTaskEvent(tx, taskId, { status: 'running', outcome: null,
+        waitingInteractionId: null, actorType: actorId ? 'user' : 'system', actorId });
     });
   }
 
-  async recordSkillOperation(taskId: string, audit: Omit<SkillAuditInput, 'assetId' | 'taskId'>): Promise<void> {
-    await skillAuditTransaction(this.db, tx => auditTaskOperation(tx, taskId, audit));
+  async recordSkillOperation(taskId: string, update: SkillTaskEventUpdate): Promise<void> {
+    await skillAuditTransaction(this.db, tx => recordSkillTaskEvent(tx, taskId, update));
   }
 
   /** Called only when orchestration actually selects its terminal Optimize
@@ -1728,29 +1734,29 @@ export class EvolveRepository {
         || task.config_json !== input.expectedConfigJson) return false;
       const config = JSON.parse(task.config_json);
       if (!config.targetSkill?.assetId || !config.targetSkill?.candidate?.artifact) return false;
-      const decisions = await tx.query<{ event_type: string; detail_json: string | null }>(
-        "SELECT event_type, detail_json FROM ce_skill_audit_events WHERE task_id = ? AND event_type IN ('candidate_accepted', 'candidate_rejected', 'version_applied')",
-        [input.taskId],
-      );
-      if (decisions.some(event => event.event_type === 'candidate_rejected')) return false;
+      const event = (await tx.query<{ detail_json: string | null }>(
+        'SELECT detail_json FROM ce_skill_events WHERE task_id = ?', [input.taskId]))[0];
+      let eventDetail: Record<string, unknown> = {};
+      try { eventDetail = JSON.parse(event?.detail_json ?? '{}'); } catch { eventDetail = {}; }
+      const priorDecision = eventDetail.decision;
+      if (priorDecision === 'reject') return false;
       if (input.decision === 'reject') {
-        // Includes interrupted pre-upgrade applications without an accepted event.
+        // Includes interrupted applications whose version row was already committed.
         const versions = await tx.query('SELECT version_id FROM ce_skill_versions WHERE asset_id = ? AND source_task_id = ?',
           [config.targetSkill.assetId, input.taskId]);
-        if (decisions.length || versions.length) return false;
+        if (priorDecision === 'accept' || versions.length) return false;
         await tx.exec("UPDATE ce_tasks SET status = 'completed', config_json = ?, error_message = NULL, gmt_modified = ? WHERE task_id = ? AND status = 'waiting_acceptance'",
           [JSON.stringify({ ...config, skillDecision: { decision: 'reject', decidedAt: new Date().toISOString() } }), tx.dialect.now(), input.taskId]);
       } else {
         if (!input.candidateSha256 || input.candidateSha256 !== config.targetSkill.candidate.artifact.sha256) return false;
-        const accepted = decisions.find(event => event.event_type === 'candidate_accepted');
-        if (accepted) return JSON.parse(accepted.detail_json ?? '{}').candidateSha256 === input.candidateSha256;
+        if (priorDecision === 'accept') return eventDetail.candidateSha256 === input.candidateSha256;
       }
-      await auditTaskOperation(tx, input.taskId, {
-        key: `${input.taskId}:candidate-${input.decision === 'accept' ? 'accepted' : 'rejected'}`,
-        type: input.decision === 'accept' ? 'candidate_accepted' : 'candidate_rejected',
+      await recordSkillTaskEvent(tx, input.taskId, {
+        status: input.decision === 'reject' ? 'completed' : 'waiting_acceptance',
+        outcome: input.decision === 'accept' ? 'accepted' : 'rejected',
         actorType: 'user', actorId: input.actorId,
-        result: input.decision === 'accept' ? 'accepted' : 'rejected',
-        ...(input.decision === 'accept' ? { detail: { candidateSha256: input.candidateSha256 } } : {}),
+        detail: { decision: input.decision,
+          ...(input.decision === 'accept' ? { candidateSha256: input.candidateSha256 } : {}) },
       });
       return true;
     });
@@ -1954,6 +1960,7 @@ export class EvolveRepository {
           WHERE task_id = ?`,
         [now, step.task_id],
       );
+      await recordSkillTaskEvent(tx, step.task_id, { status: 'running', waitingInteractionId: null });
     });
   }
 
@@ -1974,22 +1981,30 @@ export class EvolveRepository {
         [error, completedAt, now, stepId],
       );
       await tx.exec("UPDATE ce_tasks SET status = 'failed', error_message = ?, gmt_modified = ? WHERE task_id = ?", [error, now, step.task_id]);
-      await auditTaskOperation(tx, step.task_id, { type: 'evolution_finished', actorType: 'system', result: 'dispatch_failed', detail: { stepId } });
+      await recordSkillTaskEvent(tx, step.task_id, { status: 'failed', outcome: 'dispatch_failed',
+        actorType: 'system', summary: error, detail: { stepId } });
     });
   }
 
   async resumeWaitingStep(stepId: string): Promise<boolean> {
-    const result = await this.db.exec(
-      `UPDATE ce_steps SET status = 'created', bot_run_id = NULL, bot_session_id = NULL,
-       bot_response_json = NULL, error_code = NULL, error_message = NULL, retryable = 0,
-       completed_at = NULL, gmt_modified = ?
-       WHERE step_id = ? AND status = 'waiting_context'
-       AND EXISTS (SELECT 1 FROM ce_tasks
-         WHERE ce_tasks.task_id = ce_steps.task_id
-         AND ce_tasks.status NOT IN ('completed', 'failed', 'canceled'))`,
-      [this.db.dialect.now(), stepId],
-    );
-    return result.affectedRows === 1;
+    return skillAuditTransaction(this.db, async (tx) => {
+      const step = (await tx.query<EvolveStepRow>('SELECT * FROM ce_steps WHERE step_id = ?', [stepId]))[0];
+      if (!step) return false;
+      const result = await tx.exec(
+        `UPDATE ce_steps SET status = 'created', bot_run_id = NULL, bot_session_id = NULL,
+         bot_response_json = NULL, error_code = NULL, error_message = NULL, retryable = 0,
+         completed_at = NULL, gmt_modified = ?
+         WHERE step_id = ? AND status = 'waiting_context'
+         AND EXISTS (SELECT 1 FROM ce_tasks
+           WHERE ce_tasks.task_id = ce_steps.task_id
+           AND ce_tasks.status NOT IN ('completed', 'failed', 'canceled'))`,
+        [tx.dialect.now(), stepId],
+      );
+      if (result.affectedRows === 1) {
+        await recordSkillTaskEvent(tx, step.task_id, { status: 'running', waitingInteractionId: null });
+      }
+      return result.affectedRows === 1;
+    });
   }
 
   async claimCreatedBusinessStep(taskId: string): Promise<EvolveStepRow | null> {
@@ -2216,13 +2231,17 @@ export class EvolveRepository {
           "UPDATE ce_tasks SET status = ?, error_message = ?, gmt_modified = ? WHERE task_id = ?",
           [input.status === "canceled" ? "canceled" : "failed", input.errorMessage ?? input.status, now, step.task_id],
         );
-        await auditTaskOperation(tx, step.task_id, { type: 'evolution_finished', actorType: input.auditActorId ? 'user' : 'system', actorId: input.auditActorId, result: input.status,
-          detail: { stepId, errorCode: input.errorCode ?? null } });
+        await recordSkillTaskEvent(tx, step.task_id, { status: input.status === 'canceled' ? 'canceled' : 'failed',
+          outcome: input.status, actorType: input.auditActorId ? 'user' : 'system', actorId: input.auditActorId,
+          summary: input.errorMessage ?? input.status, detail: { stepId, errorCode: input.errorCode ?? null } });
       }
       if (input.taskState) {
         await tx.exec('UPDATE ce_tasks SET status = ?, config_json = ?, gmt_modified = ? WHERE task_id = ?',
           [input.taskState.status, JSON.stringify(input.taskState.config), now, step.task_id]);
-        await auditTaskOperation(tx, step.task_id, { type: 'evolution_finished', actorType: 'system', result: input.taskState.result ?? input.taskState.status });
+        await recordSkillTaskEvent(tx, step.task_id, {
+          outcome: input.taskState.status === 'waiting_acceptance'
+            ? null : input.taskState.result ?? input.taskState.status,
+        });
       }
       return true;
     });

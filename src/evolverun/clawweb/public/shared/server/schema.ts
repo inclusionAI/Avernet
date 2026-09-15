@@ -3063,4 +3063,99 @@ END`,
       ]),
     ],
   },
+  {
+    version: 127,
+    description: "Normalize Skill history into one business event per task",
+    sql: [
+      `CREATE TABLE IF NOT EXISTS ce_skill_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id VARCHAR(64) NOT NULL,
+  business_key VARCHAR(255) NOT NULL,
+  asset_id VARCHAR(64) NOT NULL,
+  owner_user_id VARCHAR(128) NOT NULL,
+  bot_id VARCHAR(128) NOT NULL,
+  ocb_skill_id VARCHAR(255) NOT NULL,
+  display_name VARCHAR(255) NOT NULL,
+  description TEXT,
+  task_id VARCHAR(64),
+  event_type VARCHAR(32) NOT NULL,
+  status VARCHAR(32) NOT NULL,
+  outcome VARCHAR(64),
+  actor_id VARCHAR(128),
+  actor_type VARCHAR(16) NOT NULL,
+  version_from_id VARCHAR(64),
+  version_from_no INTEGER,
+  version_to_id VARCHAR(64),
+  version_to_no INTEGER,
+  waiting_interaction_id VARCHAR(64),
+  summary TEXT,
+  detail_json TEXT,
+  started_at INTEGER NOT NULL,
+  completed_at INTEGER,
+  gmt_create INTEGER NOT NULL DEFAULT (unixepoch()),
+  gmt_modified INTEGER NOT NULL DEFAULT (unixepoch()),
+  UNIQUE (event_id),
+  UNIQUE (business_key),
+  UNIQUE (task_id),
+  INDEX idx_ce_skill_event_owner (owner_user_id, gmt_create),
+  INDEX idx_ce_skill_event_asset (asset_id, gmt_create),
+  INDEX idx_ce_skill_event_task (task_id)
+)`,
+      `INSERT INTO ce_skill_events
+       (event_id, business_key, asset_id, owner_user_id, bot_id, ocb_skill_id, display_name, description,
+        task_id, event_type, status, outcome, actor_id, actor_type, version_from_id, version_from_no,
+        started_at, completed_at, gmt_create, gmt_modified)
+       SELECT event_id, idempotency_key, asset_id, owner_user_id, bot_id, ocb_skill_id, display_name, description,
+        NULL, 'registered', 'completed', result, actor_id, actor_type, version_id, version_no,
+        gmt_create, gmt_create, gmt_create, gmt_create
+       FROM ce_skill_audit_events source WHERE event_type = 'registered'
+         AND NOT EXISTS (SELECT 1 FROM ce_skill_events target WHERE target.event_id = source.event_id)`,
+      `INSERT INTO ce_skill_events
+       (event_id, business_key, asset_id, owner_user_id, bot_id, ocb_skill_id, display_name, description,
+        task_id, event_type, status, outcome, actor_id, actor_type, version_from_id, version_from_no,
+        version_to_id, version_to_no, waiting_interaction_id, summary, detail_json,
+        started_at, completed_at, gmt_create, gmt_modified)
+       SELECT first_event.event_id, first_event.task_id, first_event.asset_id, first_event.owner_user_id,
+        first_event.bot_id, first_event.ocb_skill_id, first_event.display_name, first_event.description,
+        first_event.task_id,
+        CASE WHEN task.task_type = 'diagnose' THEN 'diagnosis' ELSE 'optimization' END,
+        CASE
+          WHEN task.status IN ('completed', 'failed', 'canceled') THEN task.status
+          WHEN task.status = 'waiting_acceptance' THEN 'waiting_acceptance'
+          WHEN EXISTS (SELECT 1 FROM ce_stage_interactions interaction
+            JOIN ce_steps interaction_step ON interaction_step.step_id = interaction.step_id
+            WHERE interaction.task_id = first_event.task_id AND interaction.status = 'waiting'
+              AND interaction_step.status = 'waiting_context') THEN 'waiting_user_input'
+          ELSE 'running'
+        END,
+        (SELECT terminal.result FROM ce_skill_audit_events terminal
+          WHERE terminal.task_id = first_event.task_id
+            AND terminal.event_type IN ('diagnosis_finished', 'evolution_finished', 'candidate_rejected',
+              'version_applied', 'version_apply_failed')
+          ORDER BY terminal.id DESC LIMIT 1),
+        first_event.actor_id, first_event.actor_type, first_event.version_id, first_event.version_no,
+        target_version.version_id, target_version.version_no,
+        (SELECT interaction.interaction_id FROM ce_stage_interactions interaction
+          WHERE interaction.task_id = first_event.task_id AND interaction.status = 'waiting'
+          ORDER BY interaction.id DESC LIMIT 1),
+        task.task_name,
+        (SELECT terminal.detail_json FROM ce_skill_audit_events terminal
+          WHERE terminal.task_id = first_event.task_id AND terminal.detail_json IS NOT NULL
+          ORDER BY terminal.id DESC LIMIT 1),
+        first_event.gmt_create,
+        CASE WHEN task.status IN ('completed', 'failed', 'canceled') THEN task.gmt_modified ELSE NULL END,
+        first_event.gmt_create, task.gmt_modified
+       FROM ce_skill_audit_events first_event
+       JOIN (
+         SELECT task_id, MIN(id) AS first_id FROM ce_skill_audit_events
+         WHERE task_id IS NOT NULL AND event_type IN ('diagnosis_started', 'evolution_started')
+         GROUP BY task_id
+       ) first_by_task ON first_by_task.first_id = first_event.id
+       JOIN ce_tasks task ON task.task_id = first_event.task_id
+       LEFT JOIN ce_skill_versions target_version
+         ON target_version.asset_id = first_event.asset_id AND target_version.source_task_id = first_event.task_id
+       WHERE task.task_type IN ('diagnose', 'full')
+         AND NOT EXISTS (SELECT 1 FROM ce_skill_events target WHERE target.task_id = first_event.task_id)`,
+    ],
+  },
 ];

@@ -2,11 +2,11 @@
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { MemoryRouter, useNavigate } from 'react-router-dom'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import Evolve from '../Evolve'
 import type { EvolveTaskPresentationExtension } from '../../features/evolve/host-extensions'
 
-const api = vi.hoisted(() => ({ evolve: { getTask: vi.fn(), listTaskLogArchives: vi.fn(), getTaskSkillDiff: vi.fn() } }))
+const api = vi.hoisted(() => ({ evolve: { getTask: vi.fn(), listTaskLogArchives: vi.fn(), getTaskSkillDiff: vi.fn(), getSkillAsset: vi.fn(), getSkillAssetHistory: vi.fn(), getSkillVersionContent: vi.fn(), getSkillVersionDiff: vi.fn() } }))
 vi.mock('../../api/client', () => ({ api }))
 vi.mock('../../hooks/useClientUser', () => ({ useClientUser: () => ({ authState: 'authenticated', user: { userId: 'viewer' } }) }))
 
@@ -19,13 +19,18 @@ function Navigation() {
   const navigate = useNavigate()
   return <button onClick={() => navigate('/evolve/runs/TASK-2')}>Open second task</button>
 }
-function open(taskPresentationExtensions: readonly EvolveTaskPresentationExtension[] = []) {
-  return render(<MemoryRouter initialEntries={['/evolve/runs/TASK-1']}><Navigation /><Evolve taskPresentationExtensions={taskPresentationExtensions} /></MemoryRouter>)
+function Location() { const location = useLocation(); return <output aria-label="location">{location.pathname}{location.search}</output> }
+function open(taskPresentationExtensions: readonly EvolveTaskPresentationExtension[] = [], initialEntry = '/evolve/runs/TASK-1') {
+  return render(<MemoryRouter initialEntries={[initialEntry]}><Navigation /><Evolve taskPresentationExtensions={taskPresentationExtensions} /><Location /></MemoryRouter>)
 }
 beforeEach(() => {
   vi.stubGlobal('React', React); vi.useFakeTimers(); vi.resetAllMocks()
   api.evolve.listTaskLogArchives.mockResolvedValue({ items: [] })
   api.evolve.getTaskSkillDiff.mockRejectedValue(new Error('候选尚未生成'))
+  api.evolve.getSkillAsset.mockResolvedValue({ assetId: 'SKILL-1', botId: 'bot', skillId: 'skill', name: 'Fixture Skill', currentVersion: 'v1', updatedAt: 1, versions: [{ versionId: 'V1', version: 'v1', createdAt: 1 }] })
+  api.evolve.getSkillAssetHistory.mockResolvedValue({ events: [] })
+  api.evolve.getSkillVersionContent.mockResolvedValue({ files: [], selected: null })
+  api.evolve.getSkillVersionDiff.mockResolvedValue({ baseline: null, files: [] })
 })
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals() })
 
@@ -129,6 +134,15 @@ describe('Task detail live updates', () => {
     expect(screen.getByRole('heading', { name: 'Polling completed' })).toBeTruthy()
     expect(screen.getByText('Final candidate')).toBeTruthy()
     expect(screen.queryByText('候选尚未生成')).toBeNull()
+  })
+
+  it('returns a task opened from Skill detail to the exact Skill workbench state', async () => {
+    api.evolve.getTask.mockResolvedValue(task('completed'))
+    const returnTo = '/evolve/skills/SKILL-1?selected=task%3ATASK-1&view=task'
+    open([], `/evolve/runs/TASK-1?${new URLSearchParams({ returnTo })}`)
+    await tick()
+    fireEvent.click(screen.getByRole('button', { name: '返回 Skill 详情' }))
+    expect(screen.getByLabelText('location').textContent).toBe(returnTo)
   })
 
   it('discovers a new HITL question and keeps polling while waiting for input', async () => {

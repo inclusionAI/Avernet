@@ -3371,8 +3371,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         },
       });
       if (!await skillPackagesEquivalent(live.packageBytes, stored.content)) {
-        await repo.recordSkillOperation(task.task_id, { key: `${task.task_id}:apply-failed:${requestKey}:409`,
-          type: 'version_apply_failed', actorType: 'user', actorId, result: 'conflict', detail: { statusCode: 409 } });
+        await repo.recordSkillOperation(task.task_id, { status: 'waiting_acceptance', outcome: 'conflict',
+          actorType: 'user', actorId, detail: { statusCode: 409 } });
         res.status(409).json({
           code: "SKILL_VERSION_CONFLICT",
           error: "待进化 Skill 在本次版本写入后又被其他操作修改，请重新发起任务",
@@ -3434,9 +3434,9 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         }
       }
       if (!replaced) {
-        await repo.recordSkillOperation(task.task_id, { key: `${task.task_id}:apply-failed:${requestKey}:${statusCode}`,
-          type: 'version_apply_failed', actorType: 'user', actorId,
-          result: statusCode === 409 ? 'conflict' : 'failed', detail: { statusCode } });
+        await repo.recordSkillOperation(task.task_id, { status: 'waiting_acceptance',
+          outcome: statusCode === 409 ? 'conflict' : 'version_apply_failed', actorType: 'user', actorId,
+          detail: { statusCode } });
         res.status(statusCode).json({
           code: statusCode === 409 ? "SKILL_VERSION_CONFLICT" : "OCB_SKILL_UPDATE_FAILED",
           error: statusCode === 409
@@ -3852,7 +3852,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!task || !step || step.task_id !== taskId) {
       res.status(404).json({ error: "任务或 Step 不存在" }); return;
     }
-    if (!new Set(["created", "dispatched", "running"]).has(step.status)) {
+    if (!new Set(["created", "dispatched", "running", "waiting_context"]).has(step.status)) {
       res.status(409).json({ error: `当前 Step 状态不允许停止: ${step.status}` }); return;
     }
     const steps = await repo.listSteps(taskId);
@@ -3881,7 +3881,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       error?: string;
       auditError?: string;
     } = { status: "not_required" };
-    if (step.status !== "created") {
+    if (step.status === "dispatched" || step.status === "running") {
       const runtime = await repo.resolveEvolveBotRuntime(task.user_id, task.bot_id, taskBotEnv(task));
       let remoteCancellation: {
         status: "remote_stopped" | "remote_stop_failed";
@@ -4606,6 +4606,11 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
           status: "waiting_context",
           summary: summary == null ? "等待用户补充信息" : String(summary),
           output: { hitl: true, question: parsedResult.question },
+        });
+        await repo.recordSkillOperation(step.task_id, {
+          status: 'waiting_user_input', outcome: null,
+          waitingInteractionId: interaction.interaction_id,
+          summary: summary == null ? '等待用户补充信息' : String(summary),
         });
         res.json({
           ok: true,

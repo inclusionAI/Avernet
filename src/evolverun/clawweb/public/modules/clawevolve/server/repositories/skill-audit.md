@@ -1,29 +1,32 @@
-# Skill operation audit contract
+# Skill business-event contract
 
-`ce_skill_audit_events` records operations when they happen. It is not a view of
-`ce_tasks` or `ce_skill_versions`. Migration 123 creates an empty table; there is
-no backfill, read-time repair, inferred score, or invented historical outcome.
+`ce_skill_events` is the canonical Skill history store. It records one row for
+registration and one row for each top-level Skill diagnosis or optimization task.
+Internal Stage, round, candidate-decision and version-application transitions update
+that task row; they never become additional user-facing events.
+
+Migration 127 folds historical operation rows into this model. Runtime code reads
+and writes only `ce_skill_events`; the former append-only table remains an inert
+rollback snapshot and is not a compatibility source.
 
 ## Write boundary
 
-- Registration and its baseline version commit with `registered`.
-- Skill diagnosis creation commits with `diagnosis_started`; full Skill evolution
-  creation commits with `evolution_started`. Both use the actual frozen
-  `targetSkill.assetId` and persist the exact registered baseline version when
-  its immutable version snapshot matches the frozen package. Stage integration
-  tests are excluded. An explicit task retry starts another run; replayed
-  terminal reports deduplicate within that run.
-- Skill diagnosis termination commits with `diagnosis_finished`; full Skill
-  evolution termination commits with `evolution_finished`. Results distinguish failure,
-  cancellation, no cases, no improvement, and waiting for version confirmation.
+- Registration and its baseline version commit with one completed `registered` row.
+- Skill diagnosis creation commits one `diagnosis` row; full Skill evolution
+  creation commits one `optimization` row. Both link the exact frozen
+  `targetSkill` baseline. Stage integration tests are excluded. Retries update the
+  same event ID and return it to `running`.
+- Task lifecycle maps to `running`, `waiting_user_input`, `waiting_acceptance`,
+  `completed`, `failed` or `canceled`. Outcomes distinguish no cases, no
+  improvement, rejection, successful application and application failures.
   A finalize report, candidate reference, waiting state and event commit together.
   A no-cases Diagnose completion (builtin, replacement, or postprocessor) also
   commits its Step report, Task completion and `no_cases` event together. Audit
   failure rolls back the Step, so the same report can be retried without invoking
   a model or adding a new Step. Successful duplicates do not add events.
-- `candidate_accepted` is a durable user decision/intent, **not** proof of an OCB
-  write. It precedes the external CAS. `candidate_rejected` commits with the user
-  decision and completed task state, without creating a version or writing OCB.
+- An accepted decision is durable intent, **not** proof of an OCB write. It is
+  stored on the optimization event before the external CAS. Rejection updates the
+  same event and completed task state without creating a version or writing OCB.
   Both decisions lock the same Task row and recheck its frozen configuration and
   persisted decisions inside the transaction. Once acceptance is committed,
   rejection is forbidden even if OCB or the final Task update subsequently fails.
@@ -32,7 +35,7 @@ no backfill, read-time repair, inferred score, or invented historical outcome.
   candidate. A rejection that wins first prevents a concurrent stale acceptance
   from calling OCB. No database lock is held over external I/O.
 - Successful OCB application is followed by one transaction for the immutable
-  version, current asset pointer and `version_applied`, linked by `sourceTaskId`.
+  version, current asset pointer and the optimization event's `version_to`, linked by `sourceTaskId`.
   If this transaction fails, its writes roll back but the accepted intent remains.
   Retrying the same decision uses the frozen candidate: an OCB conflict can be
   recovered only after the live package is proven equivalent to that exact
@@ -41,7 +44,8 @@ no backfill, read-time repair, inferred score, or invented historical outcome.
   or automatic model/task replay.
   Version allocation and the source-Task idempotency check are protected by the
   same asset-row transaction, including concurrent acceptance retries.
-- An OCB failure/conflict produces `version_apply_failed`, never an applied version.
+- An OCB failure/conflict keeps the event at `waiting_acceptance`, records the
+  failure in `outcome`, and never claims an applied version.
   The application request's `Idempotency-Key` identifies the attempt; callers
   retrying a request should reuse it. A new user submission gets a fresh key.
   Legacy clients without a key share a task-scoped logical attempt. A repeated
@@ -49,7 +53,8 @@ no backfill, read-time repair, inferred score, or invented historical outcome.
   accepted/rejected decisions remain task-scoped and cannot duplicate on retry.
 
 The common writer requires the caller's database transaction and propagates
-persistence errors. The event key is a SHA-256 digest with a unique constraint.
+persistence errors. Registration and task business keys are unique; `task_id` is
+also unique, enforcing one event per top-level Skill task.
 Decision/version/final-report audit transactions sharing one SQLite connection
 are queued locally; MySQL/ZDAS use database row locks for cross-worker exclusion.
 Snapshots retain Skill name/description, tenant authorization identity, Bot and
@@ -69,9 +74,8 @@ The snapshot contains only `taskId`, `stepId`, `round`, and the producer's repor
 null; no score or delta is calculated. A producer with no score is distinguishable
 from an event with no recorded association.
 
-New termination/accept/reject/application-failure events copy that frozen snapshot
-into `detail_json.testBench` in their existing business transaction. Application
-copies the exact accepted event's association in the version transaction. Repeated
+Lifecycle, decision and application updates retain that frozen snapshot in
+`detail_json.testBench` on the same business event. Repeated
 selection of the same Step does not refresh scores; a different selection cannot
 overwrite it. Finalize retries preserve the selected evidence. Terminal historical
 tasks without a frozen association are not backfilled by repeated callbacks,
@@ -82,20 +86,17 @@ never returns arbitrary `detail_json`, report output, package URLs, or errors.
 It never joins a live Step to construct an old event. Skill events and the version
 list use the same `TestBenchComparison` UI component. Missing historical links
 show **未记录评测关联**; a linked producer without scores shows **未评测**;
-individual missing numbers show **—**, not 0. The existing version-list scores,
-event types, operation results and selection semantics remain unchanged.
+individual missing numbers show **—**, not 0. Existing version-list scores and
+Test Bench selection semantics remain unchanged.
 
-## Read and compatibility boundary
+## Read boundary
 
-`GET /api/evolve/skill-events` only selects persisted audit rows for the authenticated
-registrar/asset tenant. Bot Owner is optional **current display metadata**, resolved
+`GET /api/evolve/skill-events` and `GET /api/evolve/skill-assets/:assetId/history`
+select persisted business-event rows visible to the authenticated owner or an
+accessible team space. Bot Owner is optional **current display metadata**, resolved
 independently from OCB; it is never substituted for authorization or actor identity.
-Event descriptions/results/version references are read from the event snapshot.
-For records created before diagnosis-specific event names and baseline version
-references existed, presentation may relabel lifecycle events from the persisted
-Task type and expose a version only when the frozen baseline digest resolves to
-exactly one immutable version; ambiguous or unmatched history stays unknown.
-The internal client supports nullable versions and the event type/result fields.
+Event descriptions, outcomes and version references are read directly from the
+canonical row. There is no read-time legacy relabeling or version inference.
 Task links use the recorded task ID; version application records carry the exact
 version ID. Existing version content and frozen-baseline diff APIs are unchanged.
 

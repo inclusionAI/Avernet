@@ -13,9 +13,10 @@ function dateValue(offsetDays = 0): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
-export default function SkillTaskLaunchDialog({ asset, action, onClose }: {
+export default function SkillTaskLaunchDialog({ asset, action, returnTo, onClose }: {
   asset: EvolveSkillAsset
   action: SkillTaskAction
+  returnTo?: string
   onClose: () => void
 }) {
   const navigate = useNavigate()
@@ -84,7 +85,8 @@ export default function SkillTaskLaunchDialog({ asset, action, onClose }: {
             stageSelection: { diagnose: true, plan: true, optimize: true },
             ...(preset.stageExtensions ? { stageExtensions: preset.stageExtensions } : {}) }, requestId)
       onClose()
-      navigate(`/evolve/runs/${encodeURIComponent(result.task_id)}`)
+      const query = returnTo ? `?${new URLSearchParams({ returnTo })}` : ''
+      navigate(`/evolve/runs/${encodeURIComponent(result.task_id)}${query}`)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '任务启动失败')
     } finally {
@@ -98,6 +100,7 @@ export default function SkillTaskLaunchDialog({ asset, action, onClose }: {
     const query = new URLSearchParams({ target: 'skill',
       type: action === 'diagnose' ? 'diagnose' : 'full', assetId: asset.assetId,
       skillAction: action })
+    if (returnTo) query.set('returnTo', returnTo)
     onClose()
     navigate(`/evolve/new?${query}`)
   }

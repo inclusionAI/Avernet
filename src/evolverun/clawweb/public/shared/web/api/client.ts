@@ -481,18 +481,23 @@ export type EvolveSkillEvent = {
   eventId: string
   assetId: string
   name: string
-  description?: string | null
+  description: string | null
   ownerId: string | null
   botId: string
-  version: string | null
-  versionId: string | null
   actorId: string | null
   actorType: 'user' | 'system'
-  result: string
-  type: string
+  type: 'registered' | 'diagnosis' | 'optimization'
+  status: 'running' | 'waiting_user_input' | 'waiting_acceptance' | 'completed' | 'failed' | 'canceled'
+  outcome: string | null
   taskId: string | null
-  testBench?: { taskId: string; stepId: string; round: number; scoreComparison: EvolveScoreComparison | null } | null
-  createdAt: number | string
+  versionFrom: { versionId: string; version: string } | null
+  versionTo: { versionId: string; version: string } | null
+  waitingInteractionId: string | null
+  summary: string | null
+  testBench: { taskId: string; stepId: string; round: number; scoreComparison: EvolveScoreComparison | null } | null
+  startedAt: number | string
+  completedAt: number | string | null
+  updatedAt: number | string
 }
 
 export type EvolveTaskLogArchive = {
@@ -1111,6 +1116,9 @@ export const api = {
     },
     getSkillAsset(assetId: string): Promise<EvolveSkillAsset> {
       return fetchJson(`${BASE}/evolve/skill-assets/${encodeURIComponent(assetId)}`)
+    },
+    getSkillAssetHistory(assetId: string): Promise<{ events: EvolveSkillEvent[] }> {
+      return fetchJson(`${BASE}/evolve/skill-assets/${encodeURIComponent(assetId)}/history`)
     },
     getSkillVersionContent(assetId: string, versionId: string, path?: string): Promise<{
       files: Array<{ path: string; size: number; text: boolean }>

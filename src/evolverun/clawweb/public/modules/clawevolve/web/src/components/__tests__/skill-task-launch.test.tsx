@@ -9,7 +9,7 @@ import SkillDetail from '../../pages/SkillDetail'
 
 const api = vi.hoisted(() => ({ evolve: {
   getSkillTaskDefaults: vi.fn(), createTask: vi.fn(), listSkillAssets: vi.fn(), getSkillAsset: vi.fn(),
-  getSkillVersionContent: vi.fn(), getSkillVersionDiff: vi.fn(),
+  getSkillAssetHistory: vi.fn(), getSkillVersionContent: vi.fn(), getSkillVersionDiff: vi.fn(),
 }, tclog: { bots: vi.fn() } }))
 vi.mock('../../api/client', () => ({ api }))
 vi.mock('../../hooks/useClientUser', () => ({ useClientUser: () => ({ user: { userId: 'viewer-not-owner' } }) }))
@@ -34,6 +34,7 @@ beforeEach(() => {
   api.evolve.createTask.mockResolvedValue({ task_id: 'task-1', status: 'pending' })
   api.evolve.listSkillAssets.mockResolvedValue({ items: [asset] })
   api.evolve.getSkillAsset.mockResolvedValue(asset)
+  api.evolve.getSkillAssetHistory.mockResolvedValue({ events: [] })
   api.tclog.bots.mockResolvedValue({ bots: [] })
 })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })

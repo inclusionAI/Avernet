@@ -10,7 +10,9 @@ const api = vi.hoisted(() => ({ evolve: { listSkillEvents: vi.fn(), listVersions
 vi.mock('../../api/client', () => ({ api }))
 vi.mock('../../hooks/useClientUser', () => ({ useClientUser: () => ({ user: { userId: 'owner' } }) }))
 const event = { eventId: 'EVENT', assetId: 'ASSET', name: 'Evidence Skill', ownerId: 'owner', botId: 'BOT',
-  version: null, type: 'evolution_finished', actorType: 'system', result: 'waiting_acceptance', taskId: 'TASK', createdAt: 1789060001 }
+  type: 'optimization', status: 'waiting_acceptance', outcome: null, actorId: null, actorType: 'system', taskId: 'TASK',
+  versionFrom: { versionId: 'V1', version: 'v1' }, versionTo: null, waitingInteractionId: null, summary: '等待确认候选版本',
+  startedAt: 1789060001, completedAt: null, updatedAt: 1789060001 }
 beforeEach(() => { vi.stubGlobal('React', React); vi.resetAllMocks(); api.tclog.bots.mockResolvedValue({ bots: [] }) })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 

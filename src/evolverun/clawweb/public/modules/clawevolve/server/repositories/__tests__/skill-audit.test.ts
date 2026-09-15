@@ -21,7 +21,7 @@ describe('persisted Skill operation audit', () => {
   });
   afterEach(async () => { await db.close(); });
 
-  it('freezes the explicitly selected Optimize score for new end/decision/applied events, never the latest round', async () => {
+  it('freezes the explicitly selected Optimize score on the single optimization event', async () => {
     await assets.createAsset(registration);
     const config = { targetSkill: { assetId: 'asset', candidate: { artifact: { sha256: 'candidate' } } } };
     await tasks.createTask({ ...task, configJson: JSON.stringify(config) });
@@ -35,7 +35,7 @@ describe('persisted Skill operation audit', () => {
     await tasks.updateTaskState({ taskId: 'task', status: 'waiting_acceptance' });
     const expected = { taskId: 'task', stepId: 'selected', round: 1,
       scoreComparison: { name: 'test_score', baseline: .5, candidate: .7, delta: .7 - .5 } };
-    const original = (await assets.listEvents('owner')).find(event => event.event_type === 'evolution_finished')!;
+    const original = (await assets.listEvents('owner')).find(event => event.event_type === 'optimization')!;
     expect(JSON.parse(original.detail_json!).testBench).toEqual(expected);
     // Later summaries/reports and repeated selection cannot rewrite this operation's evidence.
     await tasks.updateStepStatus('selected', { status: 'succeeded', output: { scoreComparison: { name: 'test_score', baseline: 0, candidate: 1, delta: 1 } } });
@@ -45,11 +45,11 @@ describe('persisted Skill operation audit', () => {
     await assets.createAcceptedVersion({ assetId: 'asset', versionId: 'v2', sourceTaskId: 'task', packageRef: 'candidate',
       packageSha256: 'candidate-sha', baselinePackageRef: 'base', baselinePackageSha256: 'base-sha', appliedBy: 'operator' });
     const events = await assets.listEvents('owner');
-    for (const type of ['evolution_finished', 'candidate_accepted', 'version_applied']) {
-      expect(JSON.parse(events.find(event => event.event_type === type)!.detail_json!).testBench).toEqual(expected);
-    }
-    expect(events.filter(event => ['registered', 'evolution_started'].includes(event.event_type))
-      .every(event => !event.detail_json || !JSON.parse(event.detail_json).testBench)).toBe(true);
+    expect(events).toHaveLength(2);
+    const optimization = events.find(event => event.event_type === 'optimization')!;
+    expect(JSON.parse(optimization.detail_json!).testBench).toEqual(expected);
+    expect(optimization).toMatchObject({ status: 'waiting_acceptance', outcome: 'applied', version_to_no: 2 });
+    expect(events.find(event => event.event_type === 'registered')?.detail_json).toBeNull();
   });
 
   it('preserves the selected evidence through a failed finalize retry without rereading the producer', async () => {
@@ -63,15 +63,15 @@ describe('persisted Skill operation audit', () => {
     await tasks.prepareTaskRetry('task', config, 'operator');
     await tasks.updateStepStatus('selected', { status: 'succeeded', output: { scoreComparison: { candidate: 999 } } });
     await tasks.updateTaskState({ taskId: 'task', status: 'waiting_acceptance' });
-    const finished = (await assets.listEvents('owner')).filter(event => event.event_type === 'evolution_finished');
-    expect(finished).toHaveLength(2);
-    for (const event of finished) expect(JSON.parse(event.detail_json!).testBench).toMatchObject({ stepId: 'selected', scoreComparison: { candidate: .75, delta: null } });
+    const event = (await assets.listEvents('owner')).find(item => item.event_type === 'optimization')!;
+    expect(event.status).toBe('waiting_acceptance');
+    expect(JSON.parse(event.detail_json!).testBench).toMatchObject({ stepId: 'selected', scoreComparison: { candidate: .75, delta: null } });
   });
 
   it('does not accept an arbitrary event-detail score as a selected producer', async () => {
     await assets.createAsset(registration);
     await tasks.createTask(task);
-    await tasks.recordSkillOperation('task', { key: 'failure', type: 'version_apply_failed', actorType: 'system', result: 'failed',
+    await tasks.recordSkillOperation('task', { status: 'waiting_acceptance', outcome: 'version_apply_failed', actorType: 'system',
       detail: { errorCode: 'TEST', testBench: { taskId: 'task', stepId: 'invented', round: 1, scoreComparison: { candidate: 1 } } } });
     expect(JSON.parse((await assets.listEvents('owner'))[0].detail_json!)).toEqual({ errorCode: 'TEST' });
   });
@@ -138,8 +138,9 @@ describe('persisted Skill operation audit', () => {
       tasks.recordSkillDecision({ ...input, decision: first }),
       other.recordSkillDecision({ ...input, decision: first === 'accept' ? 'reject' : 'accept' }),
     ])).toEqual([true, false]);
-    const decisions = (await assets.listEvents('owner')).filter(event => event.event_type.startsWith('candidate_'));
-    expect(decisions.map(event => event.event_type)).toEqual([first === 'accept' ? 'candidate_accepted' : 'candidate_rejected']);
+    const event = (await assets.listEvents('owner')).find(item => item.event_type === 'optimization')!;
+    expect(JSON.parse(event.detail_json!).decision).toBe(first);
+    expect(event.outcome).toBe(first === 'accept' ? 'accepted' : 'rejected');
   });
 
   it('rolls back rejection and releases the decision lock when its audit fails', async () => {
@@ -147,17 +148,18 @@ describe('persisted Skill operation audit', () => {
     const configJson = JSON.stringify({ targetSkill: { assetId: 'asset', candidate: { artifact: { sha256: 'candidate' } } } });
     await tasks.createTask({ ...task, configJson });
     await tasks.updateTaskState({ taskId: 'task', status: 'waiting_acceptance' });
-    await db.exec("CREATE TRIGGER fail_reject BEFORE INSERT ON ce_skill_audit_events WHEN NEW.event_type = 'candidate_rejected' BEGIN SELECT RAISE(ABORT, 'reject unavailable'); END");
+    await db.exec("CREATE TRIGGER fail_reject BEFORE UPDATE ON ce_skill_events WHEN NEW.outcome = 'rejected' BEGIN SELECT RAISE(ABORT, 'reject unavailable'); END");
     const input = { taskId: 'task', actorId: 'operator', expectedConfigJson: configJson };
     await expect(tasks.recordSkillDecision({ ...input, decision: 'reject' })).rejects.toThrow('reject unavailable');
     expect((await tasks.findTask('task'))?.status).toBe('waiting_acceptance');
     await db.exec('DROP TRIGGER fail_reject');
     expect(await tasks.recordSkillDecision({ ...input, decision: 'accept', candidateSha256: 'candidate' })).toBe(true);
-    expect((await assets.listEvents('owner')).filter(event => event.event_type === 'candidate_rejected')).toEqual([]);
+    expect((await assets.listEvents('owner')).find(event => event.event_type === 'optimization')?.outcome).toBe('accepted');
   });
 
   it('allocates one version and applied event for concurrent acceptance retries', async () => {
     await assets.createAsset(registration);
+    await tasks.createTask(task);
     const input = { assetId: 'asset', sourceTaskId: 'task', packageRef: 'candidate', packageSha256: 'candidate-sha',
       baselinePackageRef: 'base', baselinePackageSha256: 'base-sha', appliedBy: 'operator' };
     const versions = await Promise.all([
@@ -166,11 +168,14 @@ describe('persisted Skill operation audit', () => {
     ]);
     expect(versions[0]).toEqual(versions[1]);
     expect(await assets.listVersions('asset')).toHaveLength(2);
-    expect((await assets.listEvents('owner')).filter(event => event.event_type === 'version_applied')).toHaveLength(1);
+    expect((await assets.listEvents('owner')).filter(event => event.event_type === 'optimization')).toHaveLength(1);
+    expect((await assets.listEvents('owner')).find(event => event.event_type === 'optimization')).toMatchObject({
+      outcome: 'applied', version_to_no: 2,
+    });
   });
   it('does not manufacture past events from existing version rows', async () => {
     await assets.createAsset(registration);
-    await db.exec('DELETE FROM ce_skill_audit_events');
+    await db.exec('DELETE FROM ce_skill_events');
     expect(await assets.listEvents('owner')).toEqual([]);
   });
   it('records registration/start/end once, with actor and actual result, scoped to the asset owner', async () => {
@@ -179,11 +184,10 @@ describe('persisted Skill operation audit', () => {
     await tasks.completeTask('task', 'not_improved');
     await tasks.completeTask('task', 'not_improved');
     const events = await assets.listEvents('owner');
-    expect(events.map(e => [e.event_type, e.result])).toEqual([
-      ['evolution_finished', 'not_improved'], ['evolution_started', 'pending'], ['registered', 'succeeded'],
+    expect(events.map(e => [e.event_type, e.status, e.outcome])).toEqual([
+      ['optimization', 'completed', 'not_improved'], ['registered', 'completed', 'registered'],
     ]);
-    expect(events[1]).toMatchObject({ asset_id: 'asset', task_id: 'task', actor_id: 'operator', actor_type: 'user' });
-    expect(events[0]).toMatchObject({ actor_type: 'system', version_id: null });
+    expect(events[0]).toMatchObject({ asset_id: 'asset', task_id: 'task', actor_id: 'operator', actor_type: 'user' });
     expect(await assets.listEvents('bot-owner')).toEqual([]);
   });
   it('records Skill diagnosis separately and links the exact frozen baseline version', async () => {
@@ -193,15 +197,14 @@ describe('persisted Skill operation audit', () => {
     }) });
     await tasks.completeTask('task', 'no_cases');
     expect((await assets.listEvents('owner')).map(event => [
-      event.event_type, event.result, event.version_id, event.version_no,
+      event.event_type, event.status, event.outcome, event.version_from_id, event.version_from_no,
     ])).toEqual([
-      ['diagnosis_finished', 'no_cases', 'v1', 1],
-      ['diagnosis_started', 'pending', 'v1', 1],
-      ['registered', 'succeeded', 'v1', 1],
+      ['diagnosis', 'completed', 'no_cases', 'v1', 1],
+      ['registered', 'completed', 'registered', 'v1', 1],
     ]);
   });
   it('rolls back the business operation if audit persistence fails', async () => {
-    await db.exec("CREATE TRIGGER reject_audit BEFORE INSERT ON ce_skill_audit_events BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END");
+    await db.exec("CREATE TRIGGER reject_audit BEFORE INSERT ON ce_skill_events BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END");
     await expect(assets.createAsset(registration)).rejects.toThrow('audit unavailable');
     expect(await assets.findAsset('asset')).toBeNull();
   });
@@ -221,33 +224,35 @@ describe('persisted Skill operation audit', () => {
     expect((await assets.listEvents('owner')).map(e => e.event_type)).toEqual(['registered']);
   });
 
-  it('rolls back task creation and finalization when their audit insert fails', async () => {
+  it('rolls back task creation and finalization when business-event persistence fails', async () => {
     await assets.createAsset(registration);
-    await db.exec("CREATE TRIGGER reject_audit BEFORE INSERT ON ce_skill_audit_events BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END");
+    await db.exec("CREATE TRIGGER reject_audit BEFORE INSERT ON ce_skill_events BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END");
     await expect(tasks.createTask(task)).rejects.toThrow('audit unavailable');
     expect(await tasks.findTask('task')).toBeNull();
     await db.exec('DROP TRIGGER reject_audit');
     await tasks.createTask(task);
     await tasks.createStep({ stepId: 'finalize', taskId: 'task', stepType: 'skill_finalize', stepNo: 1, command: 'fixture' });
-    await db.exec("CREATE TRIGGER reject_audit BEFORE INSERT ON ce_skill_audit_events BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END");
+    await db.exec("CREATE TRIGGER reject_audit BEFORE UPDATE ON ce_skill_events BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END");
     const config = JSON.parse(task.configJson);
     await expect(tasks.updateStepStatus('finalize', { status: 'succeeded', taskState: { status: 'waiting_acceptance', config } })).rejects.toThrow('audit unavailable');
     expect((await tasks.findStep('finalize'))?.status).toBe('created');
     expect((await tasks.findTask('task'))?.status).toBe('pending');
     await db.exec('DROP TRIGGER reject_audit');
     await tasks.updateStepStatus('finalize', { status: 'succeeded', taskState: { status: 'waiting_acceptance', config } });
-    expect((await assets.listEvents('owner'))[0].result).toBe('waiting_acceptance');
+    expect((await assets.listEvents('owner'))[0].status).toBe('waiting_acceptance');
   });
 
-  it.each(['failed', 'canceled'])('records actual %s step termination once and separates a later retry', async (status) => {
+  it.each(['failed', 'canceled'])('updates the same event through %s and a later retry', async (status) => {
     await assets.createAsset(registration);
     await tasks.createTask(task);
     await tasks.createStep({ stepId: 'step', taskId: 'task', stepType: 'diagnose', stepNo: 1, command: 'fixture' });
     await tasks.updateStepStatus('step', { status, errorCode: 'TEST_FAILURE' });
     await tasks.updateStepStatus('step', { status, errorCode: 'TEST_FAILURE' });
-    expect((await assets.listEvents('owner')).filter(e => e.event_type === 'evolution_finished')).toHaveLength(1);
+    expect((await assets.listEvents('owner')).find(e => e.event_type === 'optimization')).toMatchObject({ status, outcome: status });
     await tasks.prepareTaskRetry('task', JSON.parse(task.configJson));
     await tasks.completeTask('task', 'no_cases');
-    expect((await assets.listEvents('owner')).filter(e => e.event_type === 'evolution_finished').map(e => e.result)).toEqual(['no_cases', status]);
+    const events = await assets.listEvents('owner');
+    expect(events.filter(e => e.event_type === 'optimization')).toHaveLength(1);
+    expect(events.find(e => e.event_type === 'optimization')).toMatchObject({ status: 'completed', outcome: 'no_cases' });
   });
 });
