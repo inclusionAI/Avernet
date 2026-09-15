@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use bcs_domain::{
     DeliveryType, Group, GroupStrategy, MessageAudience, MessageVisibilityDomain, NewMessage,
     Participant, PersistMode, SenderType, SystemGroupMessage, SystemMessageEvent,
-    SystemMessageEventKind,
+    SystemMessageEventKind, system_message_visibility,
 };
 use bcs_protocol::{
     build_chat_inject_frame, build_chat_send_frame, now_ms, BcsFrame, BotDeliveryKind,
@@ -219,30 +219,11 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
         if let Some(ref repo) = self.message_repo.as_ref().filter(|_| queued.is_none()) {
             let mut persisted_count = 0usize;
             let new_record = |msg: &SystemGroupMessage, owner_bot_id: Option<String>| {
-                let visibility_domain = match group.group_strategy {
-                    GroupStrategy::Chat => MessageVisibilityDomain::Chat,
-                    GroupStrategy::ManagerWorker => MessageVisibilityDomain::ManagerWorker,
-                    GroupStrategy::StateMachine => MessageVisibilityDomain::StateMachine,
-                };
-                let audience = match visibility_domain {
-                    MessageVisibilityDomain::Chat => None,
-                    MessageVisibilityDomain::ManagerWorker
-                    | MessageVisibilityDomain::StateMachine => {
-                        Some(if kind == SystemMessageEventKind::SessionContext {
-                            // GroupContext is bot execution context, not a
-                            // manager announcement. Full keeps the legacy
-                            // owner-filtered row; participant hides it.
-                            MessageAudience::FullOnly
-                        } else {
-                            match owner_bot_id.as_ref() {
-                                Some(owner_actor_id) => MessageAudience::Directed {
-                                    actor_ids: vec![owner_actor_id.clone()],
-                                },
-                                None => MessageAudience::Public,
-                            }
-                        })
-                    }
-                };
+                let (visibility_domain, audience) = system_message_visibility(
+                    group.group_strategy,
+                    kind,
+                    owner_bot_id.as_deref(),
+                );
                 NewMessage {
                     group_id: group.id.clone(),
                     session_id: session_id.to_string(),

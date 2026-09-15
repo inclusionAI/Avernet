@@ -1,8 +1,8 @@
 //! System messages use the same canonical admission and Bot/session lanes as
 //! group messages. The weak owner is bound by composition after runtime wiring.
 use std::sync::{Arc, OnceLock, Weak};
-use bcs_domain::{DeliveryType, Group, GroupStrategy, MessageAudience, MessageVisibilityDomain,
-    NewMessage, Participant, PersistMode, SenderType, SystemGroupMessage, SystemMessageEventKind};
+use bcs_domain::{DeliveryType, Group, GroupStrategy, NewMessage, Participant, PersistMode,
+    SenderType, SystemGroupMessage, SystemMessageEventKind, system_message_visibility};
 use bcs_domain::message_delivery::{DeliveryFlowKind, MessageDeliveryStatus};
 use bcs_service_api::{SystemMessageQueueService, SystemQueueAdmissionOutcome};
 use bcs_service_api::port::repo::message_delivery::{AdmitMessageDeliveries, DeliveryAdmissionTarget};
@@ -126,17 +126,8 @@ impl SystemMessageQueueService for QueuedSystemAdmission {
 fn new_message(group: &Group, session: &str, kind: SystemMessageEventKind, text: &str,
     owner_bot_id: Option<String>, now_ms: i64,
 ) -> NewMessage {
-    let visibility_domain = match group.group_strategy {
-        GroupStrategy::Chat => MessageVisibilityDomain::Chat,
-        GroupStrategy::ManagerWorker => MessageVisibilityDomain::ManagerWorker,
-        GroupStrategy::StateMachine => MessageVisibilityDomain::StateMachine,
-    };
-    let audience = if visibility_domain == MessageVisibilityDomain::Chat { None }
-        else if kind == SystemMessageEventKind::SessionContext { Some(MessageAudience::FullOnly) }
-        else { Some(match &owner_bot_id {
-            Some(id) => MessageAudience::Directed { actor_ids: vec![id.clone()] },
-            None => MessageAudience::Public,
-        }) };
+    let (visibility_domain, audience) = system_message_visibility(
+        group.group_strategy, kind, owner_bot_id.as_deref());
     NewMessage { group_id: group.id.clone(), session_id: session.into(), sender_id: "system".into(),
         sender_type: SenderType::System, message_type: "system".into(), content: serde_json::json!({"text":text}),
         client_msg_id: None, owner_bot_id, created_at: now_ms as u64, run_id: String::new(),

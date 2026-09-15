@@ -110,6 +110,10 @@ enabled = false
 dispatcher_enabled = false
 fanout_poll_interval_ms = 200
 delivery_poll_interval_ms = 200
+# Optional idle backoff; omitted ceilings preserve the base polling intervals.
+# Enabling both 1000 ms ceilings can add up to 2 seconds of polling wait.
+# fanout_idle_poll_max_interval_ms = 1000
+# delivery_idle_poll_max_interval_ms = 1000
 worker_concurrency = 64
 per_host_concurrency = 8
 lease_ms = 30000

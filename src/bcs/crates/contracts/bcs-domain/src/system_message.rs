@@ -2,7 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ActorKind, DeliveryType, Participant, ParticipantMode};
+use crate::{
+    ActorKind, DeliveryType, GroupStrategy, MessageAudience, MessageVisibilityDomain, Participant,
+    ParticipantMode,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SystemMessageEvent {
@@ -86,6 +89,41 @@ impl SystemMessageEvent {
             Self::BotHiddenNotice { .. } => SystemMessageEventKind::BotHiddenNotice,
         }
     }
+}
+
+/// Resolve the persisted visibility metadata shared by direct and queued
+/// system-message delivery paths.
+pub fn system_message_visibility(
+    group_strategy: GroupStrategy,
+    kind: SystemMessageEventKind,
+    owner_bot_id: Option<&str>,
+) -> (MessageVisibilityDomain, Option<MessageAudience>) {
+    let visibility_domain = match group_strategy {
+        GroupStrategy::Chat => MessageVisibilityDomain::Chat,
+        GroupStrategy::ManagerWorker => MessageVisibilityDomain::ManagerWorker,
+        GroupStrategy::StateMachine => MessageVisibilityDomain::StateMachine,
+    };
+    let audience = match visibility_domain {
+        MessageVisibilityDomain::Chat => None,
+        MessageVisibilityDomain::ManagerWorker | MessageVisibilityDomain::StateMachine => {
+            Some(if kind == SystemMessageEventKind::SessionContext {
+                match owner_bot_id {
+                    Some(owner_actor_id) => MessageAudience::Directed {
+                        actor_ids: vec![owner_actor_id.to_string()],
+                    },
+                    None => MessageAudience::FullOnly,
+                }
+            } else {
+                match owner_bot_id {
+                    Some(owner_actor_id) => MessageAudience::Directed {
+                        actor_ids: vec![owner_actor_id.to_string()],
+                    },
+                    None => MessageAudience::Public,
+                }
+            })
+        }
+    };
+    (visibility_domain, audience)
 }
 
 /// Persistence policy for a system group message.
