@@ -5,6 +5,8 @@ import time
 from collections.abc import Mapping
 from typing import Any, Callable, Optional
 
+from agentclaw.community.core.digital_employee.contracts import DigitalEmployeeServiceProtocol
+from agentclaw.community.core.mcp.services.cli_passport_scope import extract_passport_mcp_items
 from agentclaw.community.core.mcp.services._defaults import get_default_cli_items
 from agentclaw.community.core.mcp.services.passport_scope import (
     passport_mcp_items_from_entries,
@@ -31,6 +33,7 @@ def update_mcp_passport_scope(
     synced_mcps: list[dict[str, Any]],
     engine_type: Optional[str],
     scope_builder: Callable[..., dict[str, Any]],
+    employee_service_provider: Callable[[], DigitalEmployeeServiceProtocol] | None = None,
 ) -> dict[str, Any]:
     """Update complete MCP scope; abort if identity or metadata cannot be read."""
     scope_started = time.monotonic()
@@ -147,6 +150,12 @@ def update_mcp_passport_scope(
         ext_info={"template_config": template_config} if template_config else None,
     )
     try:
+        if bot and (bot.get("ext") or {}).get("digital_employee"):
+            if employee_service_provider is None:
+                raise ValueError("Digital employee governance is not wired")
+            mcp_items = employee_service_provider().prepare_mcp_change(
+                bot, mcp_items, extract_passport_mcp_items(passport), user_id
+            )
         resource_scope = scope_builder(
             passport,
             desired_mcp_items=mcp_items,

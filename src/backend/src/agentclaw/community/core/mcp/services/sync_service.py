@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from injector import inject
+from agentclaw.community.core.digital_employee.contracts import DigitalEmployeeServiceProtocol
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.identity import CallerIdentityRepositoryProtocol
@@ -100,6 +101,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
         caller_identity_repository: CallerIdentityRepositoryProtocol,
         resolver_provider: 'Callable[[], "DeviceContextResolver"]',
         device_sync_dispatcher_provider: 'Callable[[], "DeviceSyncDispatcher"]',
+        employee_service_provider: Callable[[], DigitalEmployeeServiceProtocol] | None = None,
     ) -> None:
         """初始化 MCP 同步编排服务。
 
@@ -132,6 +134,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
         self.mcp_config_service = mcp_config_service
         self.bot_repository = bot_repository
         self.caller_identity_repository = caller_identity_repository
+        self._employee_service_provider = employee_service_provider
         self._resolver_provider = resolver_provider
         self._device_sync_dispatcher_provider = device_sync_dispatcher_provider
 
@@ -909,4 +912,5 @@ class MCPSyncService(MCPSyncServiceProtocol):
             synced_mcps=synced_mcps,
             engine_type=engine_type,
             scope_builder=build_passport_resource_scope,
+            employee_service_provider=self._employee_service_provider,
         )

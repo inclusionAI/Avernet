@@ -17,6 +17,9 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+from collections.abc import Callable
+from agentclaw.community.core.digital_employee.contracts import DigitalEmployeePublicationProtocol
+from agentclaw.community.core.digital_employee.snapshot import capability_digest, runtime_capability_digest
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
     PublishStatus,
@@ -79,7 +82,9 @@ class BuildStageRunner:
         provider_behaviors: ProviderBehaviorRouter,
         runtime_projector: BotRuntimeProjectorProtocol,
         runtime_layout_probe: RuntimeLayoutProbeServiceProtocol,
+        employee_publication_provider: Callable[[], DigitalEmployeePublicationProtocol] | None = None,
     ) -> None:
+        self._employee_publication_provider = employee_publication_provider
         self._ext_state = ext_state
         self._bot_service = bot_service
         self._baas_service = baas_service
@@ -186,8 +191,10 @@ class BuildStageRunner:
                 version=version,
                 layout_observation=layout_observation,
             )
+            employee_snapshot = None
+            if self._employee_publication_provider is not None:
+                employee_snapshot = await asyncio.to_thread(self._employee_publication_provider().capture, bot)
             artifact = await asyncio.to_thread(producer.produce_artifact, request)
-
             if not artifact.success:
                 raise ServiceArtifactBuildError(
                     ServiceArtifactBuildErrorCode.SNAPSHOT_INVALID,
@@ -204,6 +211,16 @@ class BuildStageRunner:
                 owner_id=owner_id,
                 publish_id=publish_id,
             )
+
+            if employee_snapshot is not None:
+                employee_service = self._employee_publication_provider()
+                current = await asyncio.to_thread(employee_service.capture, bot)
+                if current is None or capability_digest(current) != capability_digest(employee_snapshot):
+                    raise ValueError("数字员工能力在构建期间发生变化，请重新构建")
+                frozen = await asyncio.to_thread(employee_service.capture_artifact, bot, artifact.ext)
+                if runtime_capability_digest(frozen) != runtime_capability_digest(current):
+                    raise ValueError("发布产物与当前数字员工能力不一致，请同步配置后重新构建")
+                artifact.ext["digital_employee_snapshot"] = frozen
 
             # Build succeeded: merge the artifact pointers into ext (ARCA =
             # migration_path/build_target_path; external = config_artifact/

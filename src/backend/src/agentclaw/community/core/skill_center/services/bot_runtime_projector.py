@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+
+from agentclaw.community.core.digital_employee.contracts import DigitalEmployeeServiceProtocol
 
 from injector import inject
 
@@ -14,6 +16,7 @@ from agentclaw.community.core.mcp.services.passport_scope import (
 )
 from agentclaw.community.core.mcp.services.cli_passport_scope import (
     build_passport_resource_scope,
+    extract_passport_mcp_items,
 )
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilitySnapshot,
@@ -82,7 +85,9 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         registry: EngineRuntimeProjectionRegistry,
         passport: PassportPlugin,
         caller_identity_repo: CallerIdentityRepositoryProtocol,
+        employee_service_provider: Callable[[], DigitalEmployeeServiceProtocol] | None = None,
     ) -> None:
+        self._employee_service_provider = employee_service_provider
         self._factory = factory
         self._bot_repo = bot_repo
         self._repository = repository
@@ -619,8 +624,15 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
                 len(plan.effective_cli_items),
                 0,
             )
+            passport = self._passport.query_agent_passport(plan.bot_id, plan.owner_id)
+            if (plan.bot.get("ext") or {}).get("digital_employee"):
+                if self._employee_service_provider is None:
+                    raise ValueError("Digital employee governance is not wired")
+                mcp_items = self._employee_service_provider().prepare_mcp_change(
+                    plan.bot, mcp_items, extract_passport_mcp_items(passport), plan.owner_id
+                )
             resource_scope = build_passport_resource_scope(
-                self._passport.query_agent_passport(plan.bot_id, plan.owner_id),
+                passport,
                 desired_mcp_items=mcp_items,
                 mcp_identity_modes=plan.identity_modes,
                 additional_cli_items=plan.effective_cli_items,

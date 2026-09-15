@@ -172,6 +172,9 @@ class RestartMixin:
                 "message": f"Publish record not found: publish_id={publish_id}",
             }, None, None
 
+        if ((publish_record.ext or {}).get("digital_employee_approval") or {}).get("status") in {"SUBMITTING", "APPROVING"}:
+            return {"success": False, "message": "数字员工审批中，暂不能重启发布"}, None, None
+
         current_status = PublishStatus(publish_record.status)
         stage = self._determine_restart_stage(current_status)
         if not stage:
@@ -268,6 +271,9 @@ class RestartMixin:
         publish_record = self._publish_service.get_publish_by_id(publish_id)
         if not publish_record:
             return {"success": False, "message": f"Publish record not found: {publish_id}"}
+
+        if ((publish_record.ext or {}).get("digital_employee_approval") or {}).get("status") in {"SUBMITTING", "APPROVING"}:
+            return {"success": False, "message": "数字员工审批中，暂不能重启发布"}
 
         ext = self._get_latest_ext(publish_id)
         binding_id = (ext.get("binding") or {}).get(stage_enum.value)

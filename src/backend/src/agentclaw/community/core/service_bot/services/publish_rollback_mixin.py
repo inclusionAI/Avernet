@@ -2,6 +2,7 @@
 
 从 BotPublishService 提取的回滚功能，用于满足 Rule 9 (Single Responsibility) 的文件行数限制。
 """
+import asyncio
 from datetime import datetime
 from typing import TYPE_CHECKING, Callable
 
@@ -150,6 +151,11 @@ class PublishRollbackMixin:
                 f"Target publish record not found: last_pub_id={current_record.last_pub_id}"
             )
 
+        # A version approved for the currently bound employee may be restored;
+        # a pre-binding or modified version must enter the normal approval flow.
+        flow_service = self._publish_flow_service_provider()
+        await asyncio.to_thread(flow_service.require_employee_approval, target_record.id)
+
         # 3+4. (#197) Atomically flip both records (one transaction) to avoid a
         # "half-flip" that would leave can_rollback permanently refusing. The
         # demoted (currently-live) record goes SUCCESS→DRAFT (recording
@@ -193,7 +199,6 @@ class PublishRollbackMixin:
         )
 
         # 5. 执行回滚部署（通过 PublishFlowService）
-        flow_service = self._publish_flow_service_provider()
         deploy_result = await flow_service.execute_rollback(
             current_publish_id=publish_id,
             target_publish_id=current_record.last_pub_id,

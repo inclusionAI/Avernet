@@ -49,3 +49,9 @@ class LocalSkillUploadServiceProtocol(Protocol):
         entry for a full write rather than guess.
         """
         ...
+
+    async def export_installed_package(
+        self, *, bot: Mapping[str, Any], bot_id: str, owner_id: str, name: str
+    ) -> bytes:
+        """Read and validate the complete installed package; failures propagate."""
+        ...
