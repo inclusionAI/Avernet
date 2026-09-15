@@ -707,6 +707,11 @@ setup_claude_code() {
 
 # ============ OpenClaw 安装 ============
 
+openclaw_version_supported() {
+    version_at_least "$1" "${MIN_OPENCLAW_VERSION}" &&
+        version_at_least "${MAX_OPENCLAW_VERSION}" "$1"
+}
+
 # 安装 openclaw
 install_openclaw() {
     log_info "Installing openclaw ${OPENCLAW_VERSION}..."
@@ -740,16 +745,15 @@ setup_openclaw() {
     log_info "Checking openclaw installation..."
 
     local current_version=$(get_openclaw_version)
-    local required_min_version=$(extract_version_from_text "${OPENCLAW_VERSION}")
 
     if [ -n "$current_version" ]; then
-        if [ -n "$required_min_version" ] && version_at_least "$current_version" "$required_min_version"; then
-            log_info "openclaw ${current_version} satisfies required >= ${required_min_version}"
+        if openclaw_version_supported "$current_version"; then
+            log_info "openclaw ${current_version} is within supported range ${MIN_OPENCLAW_VERSION} - ${MAX_OPENCLAW_VERSION}"
             # Report the config source without overwriting local model settings.
             copy_openclaw_config
             return 0
         else
-            log_warn "openclaw version below minimum: installed ${current_version}, required >= ${required_min_version:-$OPENCLAW_VERSION}"
+            log_warn "openclaw version unsupported: installed ${current_version}, required ${MIN_OPENCLAW_VERSION} - ${MAX_OPENCLAW_VERSION}"
             if confirm_tool_install "是否安装 openclaw ${OPENCLAW_VERSION}?"; then
                 install_openclaw
                 return $?
