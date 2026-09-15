@@ -132,7 +132,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--model",
         default=DEFAULT_MODEL,
-        help="local 链路可选。未指定时使用 OpenClaw 配置的默认模型",
+        help=(
+            "模型名称。subagent 未指定时继承 OpenClaw 默认模型；"
+            "API judge 必须显式指定，因为直接 API 调用无法继承 OpenClaw 配置。"
+        ),
     )
     p.add_argument(
         "--max-sessions",
