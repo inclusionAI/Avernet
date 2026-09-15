@@ -167,11 +167,6 @@ class GitSyncConfig:
         # Sync schedule
         self.sync_interval_minutes = int(os.getenv("SYNC_INTERVAL_MINUTES", "30"))
         self.sync_jitter_seconds = int(os.getenv("SYNC_JITTER_SECONDS", "60"))
-        # Keep bootstrap bounded so a stalled SSH connection can reach the
-        # existing OSS fallback before the service readiness deadline.
-        self.clone_timeout_seconds = int(
-            os.getenv("GIT_CLONE_TIMEOUT_SECONDS", "20")
-        )
         # 抢不到 bootstrap 锁的 worker 轮询等待 bare repo 就绪的超时（秒）
         self.bootstrap_wait_timeout = int(os.getenv("BOOTSTRAP_WAIT_TIMEOUT", "60"))
         self.archive_cron = "0 0 * * *"  # Daily at 00:00
@@ -557,20 +552,12 @@ class GitSyncService(LifecycleBase, GitSyncServiceProtocol):
         target.parent.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"[GitSyncService] Cloning {self._repo_url} to {target}")
-        try:
-            result = subprocess.run(
-                ["git", "clone", "--bare", "--branch", self.config.branch,
-                 self._repo_url, str(target)],
-                capture_output=True,
-                text=True,
-                timeout=self.config.clone_timeout_seconds,
-            )
-        except subprocess.TimeoutExpired:
-            # git may leave a partial bare repo behind when it is killed. The
-            # OSS fallback must extract into a clean target directory.
-            if target.exists():
-                shutil.rmtree(target)
-            raise
+        result = subprocess.run(
+            ["git", "clone", "--bare", "--branch", self.config.branch,
+             self._repo_url, str(target)],
+            capture_output=True,
+            text=True
+        )
         if result.returncode != 0:
             raise RuntimeError(f"Git clone failed: {result.stderr}")
 
