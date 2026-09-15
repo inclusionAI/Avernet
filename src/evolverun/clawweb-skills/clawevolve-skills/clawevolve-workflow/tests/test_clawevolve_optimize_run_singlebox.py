@@ -12,6 +12,43 @@ handler = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(handler)
 
 
+def test_task_model_is_used_for_tune_and_review_when_no_stage_override(monkeypatch):
+    monkeypatch.setattr(handler, "TUNE_AGENT_MODEL", "")
+    monkeypatch.setattr(handler, "REVIEW_AGENT_MODEL", "")
+    monkeypatch.setattr(handler, "DEFAULT_OPTIMIZER_MODEL", "")
+    args = SimpleNamespace(
+        model="provider/task-model",
+        optimizer_model="",
+        tune_model="",
+        review_model="",
+    )
+    assert handler._optimizer_model(args, "tune") == "provider/task-model"
+    assert handler._optimizer_model(args, "review") == "provider/task-model"
+
+
+def test_tune_and_review_use_openclaw_default_when_no_model_is_selected(monkeypatch):
+    monkeypatch.setattr(handler, "TUNE_AGENT_MODEL", "")
+    monkeypatch.setattr(handler, "REVIEW_AGENT_MODEL", "")
+    monkeypatch.setattr(handler, "DEFAULT_OPTIMIZER_MODEL", "")
+    args = SimpleNamespace(model="", optimizer_model="", tune_model="", review_model="")
+    assert handler._optimizer_model(args, "tune") == ""
+    assert handler._optimizer_model(args, "review") == ""
+
+
+def test_tune_and_review_keep_explicit_override_precedence(monkeypatch):
+    monkeypatch.setattr(handler, "TUNE_AGENT_MODEL", "provider/tune-env")
+    monkeypatch.setattr(handler, "REVIEW_AGENT_MODEL", "provider/review-env")
+    monkeypatch.setattr(handler, "DEFAULT_OPTIMIZER_MODEL", "provider/optimizer-env")
+    args = SimpleNamespace(
+        model="provider/task",
+        optimizer_model="provider/optimizer-cli",
+        tune_model="provider/tune-cli",
+        review_model="",
+    )
+    assert handler._optimizer_model(args, "tune") == "provider/tune-cli"
+    assert handler._optimizer_model(args, "review") == "provider/review-env"
+
+
 def test_openversion_does_not_scan_or_kill_host_processes(monkeypatch):
     monkeypatch.setenv("CLAWWEB_VERSION", "openversion")
     with patch.object(handler.subprocess, "run") as run, patch.object(handler.os, "kill") as kill:

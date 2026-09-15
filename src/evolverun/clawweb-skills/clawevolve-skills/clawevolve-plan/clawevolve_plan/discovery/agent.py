@@ -62,7 +62,6 @@ _AGENT_ADD_TIMEOUT_SECONDS = int(os.environ.get("CLAWEVOLVE_PLAN_AGENT_ADD_TIMEO
 _AGENT_DELETE_TIMEOUT_SECONDS = int(os.environ.get("CLAWEVOLVE_PLAN_AGENT_DELETE_TIMEOUT", "60"))
 _REGISTRATION_LOCK_TIMEOUT_SECONDS = int(os.environ.get("CLAWEVOLVE_PLAN_AGENT_LOCK_TIMEOUT", "60"))
 _GATEWAY_VISIBILITY_DELAYS_SECONDS = (0.5, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0)
-_DEFAULT_MODEL = os.environ.get("CLAWEVOLVE_PLAN_DISCOVERY_MODEL", "openai/gpt-4.1-mini")
 _DEFAULT_AGENT_NAME = "clawevolve-plan-discovery"
 
 
@@ -115,7 +114,9 @@ def _run_cli_agent_message(
     workspace = workspace.resolve()
     workspace.mkdir(parents=True, exist_ok=True)
     openclaw_path = os.environ.get("OPENCLAW_PATH", "openclaw")
-    model = os.environ.get("CLAWEVOLVE_PLAN_DISCOVERY_MODEL", _DEFAULT_MODEL)
+    # When the caller does not select a model, inherit OpenClaw's configured
+    # default. Do not introduce a provider-specific model from the Skill.
+    model = os.environ.get("CLAWEVOLVE_PLAN_DISCOVERY_MODEL", "").strip()
     env = _openclaw_env()
     diagnostics: dict[str, Any] = {
         "transport": "openclaw-cli",
@@ -155,13 +156,13 @@ def _run_cli_agent_message(
                         "agents",
                         "add",
                         agent_id,
-                        "--model",
-                        model,
                         "--workspace",
                         str(workspace),
                         "--non-interactive",
                         "--json",
                     ]
+                    if model:
+                        add_cmd[4:4] = ["--model", model]
                     diagnostics["addCmd"] = _redacted_cmd(add_cmd)
                     add_proc = _run_command(
                         add_cmd,

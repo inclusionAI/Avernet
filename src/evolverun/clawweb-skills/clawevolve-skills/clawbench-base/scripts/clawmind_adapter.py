@@ -533,7 +533,7 @@ def action_create_run() -> None:
     payload: dict[str, Any] = {
         "domainId": domain_id,
         "status": "running",
-        "model": env("MODEL", "antchat/GLM-5.1"),
+        "model": env("MODEL", ""),
         "suite": env("SUITE", "all"),
         "scene": env("SCENE", "openclaw-clawbench"),
     }
@@ -578,7 +578,7 @@ def action_run_agentbench() -> None:
     benchmark_dir = env("BENCHMARK_DIR")
     bench_run_id = env("BENCH_RUN_ID")
     suite = env("SUITE", "all")
-    model = env("MODEL", "antchat/GLM-5.1")
+    model = env("MODEL", "")
     scene = env("SCENE", "openclaw-clawbench")
     judge = env("JUDGE", "")
     judge_base_url = env("JUDGE_BASE_URL", "")
@@ -646,8 +646,6 @@ def action_run_agentbench() -> None:
     cmd = [
         sys.executable,
         "scripts/benchmark.py",
-        "--model",
-        model,
         "--benchmark",
         benchmark_arg,
         "--suite",
@@ -658,6 +656,8 @@ def action_run_agentbench() -> None:
         resolved_output_dir,
         "--no-fail-fast",
     ]
+    if model:
+        cmd.extend(["--model", model])
     if judge:
         cmd.extend(["--judge", judge])
     if judge_base_url:

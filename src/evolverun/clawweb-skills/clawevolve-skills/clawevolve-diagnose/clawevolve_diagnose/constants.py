@@ -2,7 +2,7 @@ from __future__ import annotations
 
 EVOLVE_RESULTS_BASE_DIR = "/home/admin/.openclaw/workspace/clawevolve_results"
 DIAGNOSE_RUN_SUBDIR = "diagnose"
-DEFAULT_MODEL = "gpt-4.1-mini"
+DEFAULT_MODEL = ""
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_CASE_LIMIT = 5
 DEFAULT_DIAGNOSIS_LIMIT = 20

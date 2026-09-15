@@ -85,11 +85,13 @@ def run_clawevolve_bench(
     cmd = [
         sys.executable, "-u", "-B", str(workflow), "run",
         "--owner-id", owner_id, "--domain-id", domain_id,
-        "--work-dir", str(work_dir), "--model", str(model),
+        "--work-dir", str(work_dir),
         "--suite", str(suite), "--scene", str(scene),
         "--timeout-seconds", str(timeout_seconds),
         "--openclaw-execution-mode", str(openclaw_execution_mode or "local"),
     ]
+    if model:
+        cmd += ["--model", str(model)]
     if context_dir:
         cmd += ["--context-dir", str(Path(context_dir).expanduser().resolve())]
     if judge:

@@ -131,7 +131,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--domain-id")
     parser.add_argument("--template", action="append", type=parse_template_ref, default=[], help="Advanced: pin name@version; repeat for multiple templates")
     parser.add_argument("--run-scope", choices=["domain", "template"], default="domain")
-    parser.add_argument("--model", default=os.environ.get("CLAWEVOLVE_BENCH_MODEL", "openai/gpt-4.1-mini"))
+    parser.add_argument(
+        "--model",
+        default=os.environ.get("CLAWEVOLVE_BENCH_MODEL", ""),
+        help="Model ID; when omitted, use the OpenClaw configured default",
+    )
     parser.add_argument("--suite", default="all")
     parser.add_argument("--scene", default="claw-evolve-bench")
     parser.add_argument("--judge", default="")
@@ -661,8 +665,9 @@ class Workflow:
         if exists:
             return
         args = [command, "agents", "add", agent_id, "--workspace", str(workspace), "--non-interactive"]
-        model = str(report_config.get("model") or (self.config.get("bench") or {}).get("model") or os.environ.get("CLAWEVOLVE_BENCH_MODEL", "openai/gpt-4.1-mini")).strip()
-        args.extend(["--model", model])
+        model = str(report_config.get("model") or (self.config.get("bench") or {}).get("model") or os.environ.get("CLAWEVOLVE_BENCH_MODEL", "")).strip()
+        if model:
+            args.extend(["--model", model])
         added = self.command_runner(args, text=True, capture_output=True, timeout=120, env=child_env)
         if added.returncode == 0:
             return

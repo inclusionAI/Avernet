@@ -16,11 +16,11 @@ SPEC.loader.exec_module(workflow_module)
 
 
 class WorkflowTests(unittest.TestCase):
-    def test_default_bench_model_is_public_default(self):
+    def test_default_bench_model_inherits_openclaw(self):
         args = workflow_module.build_parser().parse_args([
             "run", "--owner-id", "197444", "--domain-id", "test_shanzong",
         ])
-        self.assertEqual(args.model, "openai/gpt-4.1-mini")
+        self.assertEqual(args.model, "")
 
     def test_direct_cli_builds_bench_config_and_internal_files(self):
         with tempfile.TemporaryDirectory() as temp:

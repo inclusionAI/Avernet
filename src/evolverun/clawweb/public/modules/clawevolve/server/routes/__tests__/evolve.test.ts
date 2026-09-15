@@ -791,6 +791,28 @@ describe("ClawEvolve step protocol", () => {
     expect(dispatch.mock.calls.at(-1)?.[0]).not.toHaveProperty("secrets");
   });
 
+  it("lets OpenClaw select its configured model when a Subagent task omits model", async () => {
+    const response = await fetch(`${baseUrl}/api/evolve/diagnoses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
+      body: JSON.stringify({
+        taskName: "OpenClaw 默认模型诊断",
+        userId: "user-1",
+        botId: "bot-1",
+        judgeBackend: "subagent",
+        maxSessions: 12,
+        diagnoseIntent: "扫描最近3天的历史 session；抽取1个 bad case；重点关注任务未完成。",
+      }),
+    });
+    expect(response.status).toBe(201);
+    const body = await response.json() as { config: Record<string, unknown>; steps: Array<{ command: string }> };
+    expect(body.config).not.toHaveProperty("model");
+    expect(body.steps[0].command).not.toMatch(/(?:^|\s)--model(?:\s|=|$)/);
+    expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      command: expect.not.stringMatching(/(?:^|\s)--model(?:\s|=|$)/),
+    }));
+  });
+
   it("runs service Session diagnosis on the draft Bot and only passes export source arguments", async () => {
     await seedBaasDraftBotWithService();
     const response = await fetch(`${baseUrl}/api/evolve/diagnoses`, {
@@ -1047,16 +1069,18 @@ describe("ClawEvolve step protocol", () => {
     expect((await improvementRepo.getDetail("owner-1", improvementId))?.version).toBe(detail?.version);
   });
 
-  it("accepts GLM-5.2 and rejects unsupported diagnose models", async () => {
+  it("accepts configured and custom diagnose models without a server-side model allowlist", async () => {
     const accepted = await createDiagnosis("GLM-5.2");
     expect(accepted.response.status).toBe(201);
     expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       command: expect.stringContaining("--model GLM-5.2"),
     }));
 
-    const rejected = await createDiagnosis("GLM-5");
-    expect(rejected.response.status).toBe(400);
-    expect(rejected.body.error).toBe("API Judge 的 model 必须是 GLM-5.1 或 GLM-5.2");
+    const custom = await createDiagnosis("provider/custom-model");
+    expect(custom.response.status).toBe(201);
+    expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      command: expect.stringContaining("--model provider/custom-model"),
+    }));
   });
 
   it("links a diagnosis task to the owned improvement item", async () => {
@@ -1431,7 +1455,7 @@ describe("ClawEvolve step protocol", () => {
     const planStep = diagnoseResult.body.nextStep as { stepId: string };
     expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       stepType: "plan",
-      command: `/clawevolve-plan --strategy conservative --task-id ${task.task_id} --step-id ${planStep.stepId} --owner-id user-1 --bot-id bot-1 --clawweb-url http://localhost:3001 --goal '优先修复工具调用失败的 '"'"'高频'"'"' 根因，完成率达到 90%，不要执行 $(whoami)'`,
+      command: `/clawevolve-plan --strategy conservative --task-id ${task.task_id} --step-id ${planStep.stepId} --owner-id user-1 --bot-id bot-1 --clawweb-url http://localhost:3001 --goal '优先修复工具调用失败的 '"'"'高频'"'"' 根因，完成率达到 90%，不要执行 $(whoami)' --model GLM-5.1`,
     }));
   });
 
@@ -1469,7 +1493,7 @@ describe("ClawEvolve step protocol", () => {
     expect(next.stepType).toBe("plan");
     expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       stepId: next.stepId,
-      command: `/clawevolve-plan --task-id ${String(body.task_id)} --step-id ${next.stepId} --owner-id user-1 --bot-id bot-1 --clawweb-url http://localhost:3001`,
+      command: `/clawevolve-plan --task-id ${String(body.task_id)} --step-id ${next.stepId} --owner-id user-1 --bot-id bot-1 --clawweb-url http://localhost:3001 --model GLM-5.1`,
     }));
 
     const inputResponse = await fetch(`${baseUrl}/api/evolve/internal/tasks/${String(body.task_id)}/steps/${next.stepId}/input`);
@@ -1663,7 +1687,7 @@ describe("ClawEvolve step protocol", () => {
     expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       stepType: "optimize",
       command: expect.stringMatching(
-        /\/clawevolve-workflow --stage optimize .+--task-id EV-.+ --step-id STEP-.+ --round 1 --train-bench-domain-id TRAIN-001 --test-bench-domain-id TEST-001 --clawweb-url http:\/\/localhost:3001 --openclaw-execution-mode local --owner-id user-1/,
+        /\/clawevolve-workflow --stage optimize .+--task-id EV-.+ --step-id STEP-.+ --round 1 --train-bench-domain-id TRAIN-001 --test-bench-domain-id TEST-001 --clawweb-url http:\/\/localhost:3001 --openclaw-execution-mode local --model GLM-5.1 --owner-id user-1/,
       ),
     }));
     expect(String(dispatch.mock.calls.at(-1)?.[0]?.command)).toContain("--owner-id user-1");

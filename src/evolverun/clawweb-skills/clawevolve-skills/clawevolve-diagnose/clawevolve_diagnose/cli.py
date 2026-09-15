@@ -129,7 +129,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="local 链路可选。OpenAI-compatible base URL；未显式传入时固定使用代码默认值",
     )
-    p.add_argument("--model", default=DEFAULT_MODEL, help="local 链路可选。LLM model name")
+    p.add_argument(
+        "--model",
+        default=DEFAULT_MODEL,
+        help="local 链路可选。未指定时使用 OpenClaw 配置的默认模型",
+    )
     p.add_argument(
         "--max-sessions",
         type=int,

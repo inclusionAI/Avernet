@@ -16,7 +16,7 @@ import {
 } from '../api/client'
 import EvolveBotPicker from '../components/EvolveBotPicker'
 import EvolveModelFields, {
-  DEFAULT_EVOLVE_MODEL,
+  INITIAL_EVOLVE_MODEL,
   EVOLVE_CUSTOM_MODEL,
   EVOLVE_MODEL_OPTIONS,
 } from '../components/EvolveModelFields'
@@ -561,10 +561,10 @@ function CreateRepair({
   const [agentMode, setAgentMode] = useState<RepairAgentMode>('openclaw')
   const [deepDiagnostics, setDeepDiagnostics] = useState(false)
   const [llmUseDefault, setLlmUseDefault] = useState(true)
-  const [llmModelChoice, setLlmModelChoice] = useState<string>(DEFAULT_EVOLVE_MODEL)
+  const [llmModelChoice, setLlmModelChoice] = useState<string>(INITIAL_EVOLVE_MODEL)
   const [customLlmModel, setCustomLlmModel] = useState('')
   const [cfuseEngine, setCfuseEngine] = useState<RepairCfuseEngine>('cfuse')
-  const [cfuseModelChoice, setCfuseModelChoice] = useState<string>(DEFAULT_EVOLVE_MODEL)
+  const [cfuseModelChoice, setCfuseModelChoice] = useState<string>(INITIAL_EVOLVE_MODEL)
   const [customCfuseModel, setCustomCfuseModel] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)

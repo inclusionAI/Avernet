@@ -1861,11 +1861,10 @@ def resolve_paths(args):
 # 状态、断点续跑
 # ═══════════════════════════════════════════════════════════════════════════════
 
-DEFAULT_BENCH_MODEL = os.environ.get("CLAWEVOLVE_BENCH_MODEL", "openai/gpt-4.1-mini")
-# tune/review are the actual self-evolution optimization agents. Use a stronger
-# default than the benchmarked bot model, while keeping explicit CLI/env override
-# paths for controlled A/B experiments.
-DEFAULT_OPTIMIZER_MODEL = os.environ.get("CLAWEVOLVE_OPTIMIZER_MODEL", "openai/gpt-4.1-mini")
+DEFAULT_BENCH_MODEL = os.environ.get("CLAWEVOLVE_BENCH_MODEL", "")
+# Tune/review inherit OpenClaw's configured model unless the caller or an
+# explicit stage environment variable selects another model.
+DEFAULT_OPTIMIZER_MODEL = os.environ.get("CLAWEVOLVE_OPTIMIZER_MODEL", "")
 TUNE_AGENT_TIMEOUT = int(os.environ.get("CLAWEVOLVE_TUNE_TIMEOUT", "7200"))
 REVIEW_AGENT_TIMEOUT = int(os.environ.get("CLAWEVOLVE_REVIEW_TIMEOUT", "3600"))
 # OpenClaw's CLI defaults to a 600-second command timeout.  Tune agents routinely
@@ -1929,7 +1928,12 @@ def _bench_model(args) -> str:
 
 def _optimizer_model(args, kind: str) -> str:
     specific = getattr(args, f"{kind}_model", "") or (TUNE_AGENT_MODEL if kind == "tune" else REVIEW_AGENT_MODEL)
-    return specific or getattr(args, "optimizer_model", "") or DEFAULT_OPTIMIZER_MODEL
+    return (
+        specific
+        or getattr(args, "optimizer_model", "")
+        or getattr(args, "model", "")
+        or DEFAULT_OPTIMIZER_MODEL
+    )
 
 STEP_OUTPUTS = {
     "prepare":      lambda paths, args: [paths["round_dir"] / "round_state.json", paths["input_dir"] / f"spec-v{args.round - 1}.md", paths["input_dir"] / f"spec-v{args.round - 1}.json"],
@@ -7980,7 +7984,7 @@ def _archive_openclaw_agent_session(result: dict, archive_dir: Path) -> dict:
 
 def _openclaw_agent_message(
     agent_id: str, message: str, workspace: Path, timeout_seconds: int,
-    *, model: str = "openai/gpt-4.1-mini", base_url: str = "", api_key: str = "",
+    *, model: str = "", base_url: str = "", api_key: str = "",
     completion_marker: str | None = None, poll_interval: int = 10,
     expected_outputs: list[Path] | None = None,
     idle_timeout_seconds: int = DEFAULT_AGENT_IDLE_TIMEOUT_SECONDS,
@@ -8034,7 +8038,10 @@ def _openclaw_agent_message(
     if already_exists:
         diag["agentRegistration"] = "already-exists"
     else:
-        add_cmd = [openclaw_path, "agents", "add", agent_id, "--model", model, "--workspace", str(agent_workspace), "--non-interactive"]
+        add_cmd = [openclaw_path, "agents", "add", agent_id]
+        if model:
+            add_cmd.extend(["--model", model])
+        add_cmd.extend(["--workspace", str(agent_workspace), "--non-interactive"])
         if base_url:
             add_cmd.extend(["--base-url", base_url])
         if api_key:
