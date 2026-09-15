@@ -123,6 +123,8 @@ const field = (value: unknown, fallback = "—") =>
 function artifactLabel(name: string, mode: SessionAnalysisTask["mode"]) {
   if (name === "raw")
     return mode === "EXPORT_ALL" ? "下载 Session 压缩包" : "下载 Session 文件";
+  if (name === "trajectory") return "下载 trajectory 文件";
+  if (name === "trajectoryPath") return "下载 trajectory pointer";
   if (name === "report") return "下载诊断报告";
   if (name === "analysis") return "下载分析 JSON";
   return `下载 ${name}`;
@@ -1209,7 +1211,7 @@ function SessionAnalysisDetail() {
               </div>
             </section>
           )}
-          {task.status === "completed" && task.artifacts && (
+          {task.artifacts && task.artifacts.length > 0 && (
             <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
               <h2 className="mb-3 text-base font-semibold">任务产物</h2>
               <div className="flex flex-wrap gap-2">
@@ -1217,7 +1219,7 @@ function SessionAnalysisDetail() {
                   .filter(
                     (name) =>
                       !["result", "manifest"].includes(name) &&
-                      !(task.mode === "ANALYZE_SINGLE" && name === "raw"),
+                      !(task.mode === "ANALYZE_SINGLE" && name === "raw" && task.sessionPreview),
                   )
                   .map((name) => (
                     <button

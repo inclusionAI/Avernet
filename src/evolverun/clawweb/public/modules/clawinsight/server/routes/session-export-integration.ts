@@ -7,16 +7,16 @@ import type {
   EvolveStepRow,
   EvolveTaskRow,
 } from "@avernet/clawevolve/server/repositories/evolve-repository";
-import {
-  AistudioService,
-  SESSION_ANALYSIS_SNAPSHOT_ID,
-} from "../services/aistudio-service.js";
+import type { AisExecutor, SessionAisOptions } from "@avernet/clawevolve/server/contracts/ais-executor";
 import type { MistOssObjectStore } from "../services/object-storage/oss-object-store.js";
+
+import { sessionAisBaseConfig, sessionAisParams, type SessionAisBaseConfig } from "@avernet/clawevolve/server/services/session-ais-config";
 
 type ExportScope = "single" | "bot";
 type ExportStage = "all" | "draft" | "service";
 
 type SessionExportConfig = {
+  aisBase?: SessionAisBaseConfig;
   source: "integration_api";
   apiVersion: "session-export/v1";
   mode: "EXPORT_SINGLE" | "EXPORT_ALL";
@@ -45,7 +45,8 @@ type SignedUrlStore = Pick<MistOssObjectStore, "createSignedUrl">;
 
 export type SessionExportIntegrationRouterDeps = {
   repo: EvolveRepository | null;
-  ais: Pick<AistudioService, "execute">;
+  ais: Pick<AisExecutor, "execute">;
+  aisOptions: SessionAisOptions;
   officeDownloadStore: SignedUrlStore;
   productionDownloadStore: SignedUrlStore;
   now?: () => number;
@@ -216,6 +217,7 @@ function buildTaskParams(config: SessionExportConfig): Record<string, string> {
       artifacts: config.artifacts,
     },
   };
+  if (config.aisBase) return sessionAisParams({ ...config, aisBase: config.aisBase }, "session_export", envelope.input);
   return { "${clawevolve_params}": JSON.stringify(envelope) };
 }
 
@@ -260,12 +262,19 @@ export function createSessionExportIntegrationRouter(
     const prefix = `evolution/${taskId}/session-export/attempt-${attempt}`;
     const archiveName = `${safeFilenamePart(accessible.ownerId)}-${safeFilenamePart(request.target.botId)}-${request.target.stage}-sessions.tar.gz`;
     const rawName = request.exportScope === "single" ? "session.jsonl" : archiveName;
-    const artifacts = {
+    if (deps.aisOptions.configurationError) return error(res, 503, deps.aisOptions.configurationError, "会话 AIS 配置无效，请联系管理员");
+    const aisBase = sessionAisBaseConfig(deps.aisOptions, now());
+    const artifacts: Record<string, { objectKey: string }> = {
       raw: { objectKey: `${prefix}/${rawName}` },
       manifest: { objectKey: `${prefix}/manifest.json` },
       result: { objectKey: `${prefix}/result.json` },
     };
+    if (aisBase && request.exportScope === "single") {
+      artifacts.trajectory = { objectKey: `${prefix}/session.trajectory.jsonl` };
+      artifacts.trajectoryPath = { objectKey: `${prefix}/session.trajectory-path.json` };
+    }
     const config: SessionExportConfig = {
+      aisBase,
       source: "integration_api",
       apiVersion: API_VERSION,
       mode: request.exportScope === "single" ? "EXPORT_SINGLE" : "EXPORT_ALL",
@@ -315,12 +324,12 @@ export function createSessionExportIntegrationRouter(
       const jobId = await deps.ais.execute(
         request.target.userId,
         buildTaskParams(config),
-        SESSION_ANALYSIS_SNAPSHOT_ID,
+        config.aisBase?.snapshotId ?? deps.aisOptions.legacySnapshotId,
       );
       await deps.repo.markExternalDispatched(stepId, jobId, {
         jobId,
         jobUrl: `https://aistudio.alipay.com/project/job/detail/${jobId}`,
-        snapshotId: SESSION_ANALYSIS_SNAPSHOT_ID,
+        snapshotId: config.aisBase?.snapshotId ?? deps.aisOptions.legacySnapshotId,
         submittedBy: request.target.userId,
         taskId,
         stepId,
@@ -403,6 +412,30 @@ export function createSessionExportIntegrationRouter(
         downloadUrlExpiresAt: new Date(now() + DOWNLOAD_URL_TTL_SECONDS * 1_000).toISOString(),
       };
     }
+    const attachments: Record<string, Record<string, unknown>> = {};
+    if (status === "succeeded" && config.exportScope === "single") {
+      const uploaded = objectValue(output?.artifacts);
+      for (const name of ["trajectory", "trajectoryPath"]) {
+        const item = objectValue(uploaded?.[name]);
+        if (!item) continue;
+        const expected = config.artifacts[name];
+        const contentType = name === "trajectory" ? "application/x-ndjson" : "application/json";
+        if (!expected || item.objectKey !== expected.objectKey || !Number.isSafeInteger(item.size)
+          || Number(item.size) < 0 || typeof item.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(item.sha256)
+          || item.contentType !== contentType) return error(res, 503, "ARTIFACT_METADATA_INVALID", "附件元数据无效");
+        const store = req.query.downloadNetwork === "production" ? deps.productionDownloadStore : deps.officeDownloadStore;
+        try {
+          attachments[name] = {
+            filename: `${safeFilenamePart(sessionIds[0] ?? config.sessionIdentifier ?? "session")}.${name === "trajectory" ? "trajectory.jsonl" : "trajectory-path.json"}`,
+            contentType, size: item.size, sha256: item.sha256,
+            downloadUrl: await store.createSignedUrl(expected.objectKey, "GET", DOWNLOAD_URL_TTL_SECONDS),
+            downloadUrlExpiresAt: new Date(now() + DOWNLOAD_URL_TTL_SECONDS * 1000).toISOString(),
+          };
+        } catch {
+          return error(res, 503, "DOWNLOAD_URL_UNAVAILABLE", "暂时无法生成附件下载地址");
+        }
+      }
+    }
     const taskError = status === "failed" ? {
       code: step?.error_code ?? "SESSION_EXPORT_FAILED",
       message: step?.error_code === "DISPATCH_FAILED"
@@ -432,6 +465,7 @@ export function createSessionExportIntegrationRouter(
         warnings: Array.isArray(output?.warnings) ? output.warnings : [],
       } : null,
       artifact,
+      ...(Object.keys(attachments).length ? { artifacts: attachments } : {}),
       error: taskError,
       createdAt: isoTime(task.gmt_create),
       startedAt: isoTime(step?.started_at),

@@ -1,6 +1,6 @@
 import type { EvolveRepository, EvolveTaskRow } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import type { MistOssObjectStore } from "./object-storage/oss-object-store.js";
-import { AistudioService } from "./aistudio-service.js";
+import type { AistudioService } from "./aistudio-service.js";
 
 export type AisArtifactSpec = { objectKey: string; contentType?: string };
 export type AisTaskDefinition<TConfig> = {

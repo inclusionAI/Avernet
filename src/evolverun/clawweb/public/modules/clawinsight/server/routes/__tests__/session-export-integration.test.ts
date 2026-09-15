@@ -1,3 +1,4 @@
+import type { SessionAisOptions } from "@avernet/clawevolve/server/contracts/ais-executor";
 import Database from "better-sqlite3";
 import express from "express";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -27,7 +28,9 @@ async function request(
   });
 }
 
+let aisOptions: SessionAisOptions;
 beforeEach(async () => {
+  aisOptions = { legacySnapshotId: 62310015, deadlineSeconds: 7200 };
   db = new SqliteDatabase(new Database(":memory:"));
   await runMigrations(db, "sqlite");
   await db.exec(
@@ -72,6 +75,7 @@ beforeEach(async () => {
   app.use("/api/integrations/v1/session-exports", createSessionExportIntegrationRouter({
     repo,
     ais: { execute },
+    aisOptions,
     officeDownloadStore: { createSignedUrl: officeSignedUrl },
     productionDownloadStore: { createSignedUrl: productionSignedUrl },
     now: () => Date.parse("2026-08-20T02:10:00Z"),
@@ -84,6 +88,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   const active = server;
   server = null;
   if (active) await new Promise<void>((resolve) => active.close(() => resolve()));
@@ -91,6 +96,55 @@ afterEach(async () => {
 });
 
 describe("Session Export Integration API", () => {
+  it("returns a scoped configuration error without dispatching or blocking reads", async () => {
+    aisOptions.configurationError = "SESSION_AIS_CONFIG_INVALID";
+    const response = await request("/api/integrations/v1/session-exports", {
+      method: "POST", headers: { "Idempotency-Key": "invalid-ais-config-001" },
+      body: JSON.stringify({ exportScope: "single", target: { userId: "197444", botId: "bot-1" }, sessionIdentifier: "s" }),
+    });
+    expect(response.status).toBe(503);
+    expect((await response.json()).code).toBe("SESSION_AIS_CONFIG_INVALID");
+    expect(execute).not.toHaveBeenCalled();
+    expect((await request("/api/integrations/v1/session-exports/missing")).status).toBe(404);
+  });
+
+  it("new AIS tasks explicitly select a Skill and expose optional trajectory downloads on both networks", async () => {
+    aisOptions.deployment = { snapshotId: 912345, packageId: "clawevolve-ais-diagnose" };
+    const created = await request("/api/integrations/v1/session-exports", {
+      method: "POST", headers: { "Idempotency-Key": "new-ais-trajectory-001" },
+      body: JSON.stringify({ exportScope: "single", target: { userId: "197444", botId: "bot-1" },
+        sessionIdentifier: "s" }),
+    });
+    expect(created.status).toBe(202);
+    const { exportId } = await created.json();
+    expect(execute.mock.calls[0][2]).toBe(912345);
+    const envelope = JSON.parse(execute.mock.calls[0][1]["${clawevolve_params}"]);
+    expect(envelope.runtime.package).toEqual({ packageId: "clawevolve-ais-diagnose" });
+    expect(envelope.runtime).not.toHaveProperty("artifacts");
+    expect(envelope).not.toHaveProperty("execution");
+    const config = JSON.parse((await repo.findTask(exportId))!.config_json);
+    const metadata = (name: string, size: number, contentType: string) => ({
+      objectKey: config.artifacts[name].objectKey, size, contentType, sha256: "b".repeat(64),
+    });
+    await repo.applySessionAisStatus(exportId, config.stepId, { status: "succeeded", output: {
+      success: true, sessionIds: ["s"], artifacts: {
+        raw: metadata("raw", 100, "application/x-ndjson"),
+        trajectory: metadata("trajectory", 200, "application/x-ndjson"),
+        trajectoryPath: metadata("trajectoryPath", 0, "application/json"),
+      },
+    } });
+    for (const network of ["office", "production"]) {
+      const response = await request(`/api/integrations/v1/session-exports/${exportId}?downloadNetwork=${network}`);
+      expect(response.status).toBe(200);
+      const result = await response.json();
+      expect(result.artifact.filename).toBe("s.jsonl");
+      expect(result.resolution).toMatchObject({ fileCount: 1, totalBytes: 100 });
+      expect(result.artifacts.trajectory).toMatchObject({ filename: "s.trajectory.jsonl", size: 200,
+        downloadUrl: `https://${network}-oss.example/session` });
+      expect(result.artifacts.trajectoryPath).toMatchObject({ filename: "s.trajectory-path.json", size: 0 });
+    }
+  });
+
   it("is public and returns not found for an unknown export", async () => {
     const response = await fetch(`${baseUrl}/api/integrations/v1/session-exports/missing`);
     expect(response.status).toBe(404);
