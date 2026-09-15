@@ -100,7 +100,7 @@ impl StreamingStore for MemoryBotRepo {
     }
     async fn promote(&self, identity: &Identity, token: &str) -> Result<(), ConnectError> {
         // Called with the same identity lock used by persistence writers.
-        self.repo_save_token(&identity.id, token)
+        self.save_token_under_identity_lock(&identity.id, token)
             .await
             .map_err(connection_error)
     }

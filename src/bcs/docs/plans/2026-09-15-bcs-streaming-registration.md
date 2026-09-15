@@ -9,7 +9,7 @@
 ## Completed implementation
 
 1. Reproduce expired temporary identity refusal with the SQLite store; run the regression and observe its failure.
-2. Mechanically split oversized store source files by responsibility; retain all existing public traits and tests, keeping each changed source below 1,000 lines.
+2. Keep the existing store organization and inline legacy tests. Defer file-size refactoring to a separate task; add only the admission logic and regression tests required for this fix.
 3. Add a streaming admission repo operation accepting optional Bot ID/token. Preserve token-first identity resolution, real-token protection and MOCK promotion. Require all repository implementations, including the conformance wrapper, to provide the operation; keep workflow implementation out of the contract crate.
 4. Implement per-request identity lookup reuse and conditional cleanup in SQL and local-file stores. Serialize admission with identity mutations without holding the global Bot map across DB I/O. Propagate read/write errors and reject deleted identities.
 5. Delegate the Core streaming path to the operation; reuse loaded capabilities and avoid the existing repeated get/load calls.
@@ -69,16 +69,25 @@ be overwritten by an admission snapshot. Tests first reproduced each failure.
 Token-index hints are validated against storage, and MOCK promotion preserves
 runtime credentials while expired temporary recovery discards them.
 
-The original store roots exceeded the repository's 1,000-line source limit. Their
-unchanged methods/tests were split by responsibility; every touched source file
-now satisfies the limit. No unrelated behavior or formatting was changed.
+The existing `lib.rs` and `memory.rs` organization and inline tests are retained.
+The three added production files contain the new admission logic; the three
+added test files cover its regressions. Existing oversized roots remain intact
+per the requested scope: file-size refactoring belongs to a separate task.
 
-## Final validation
+## Final source layout validation
+
+- `cargo test --offline --manifest-path src/bcs/Cargo.toml -p bcs-bot-store -p bcs-bot`: 267 passed, 0 failed, 4 existing external-DB tests ignored, across 23 test binaries/doc-test runs.
+- `git diff --check`: passed.
+- Existing methods and inline legacy tests are restored to their original files. The original roots remain oversized (`lib.rs`: 3,773 lines; `memory.rs`: 2,747 lines); the source-size requirement is deferred with the explicitly requested separate refactor. No CI rule or allowlist was changed.
+
+## Earlier broader validation
+
+The following results were obtained before restoring the original source layout;
+only the focused Store and Core suites above were rerun after that adjustment.
 
 - Host `cargo test --offline --manifest-path src/bcs/Cargo.toml -p bcs-bot-store -p bcs-bot -p bcs-service-api -p bcs-ws`: 636 passed, 0 failed, 18 existing ignored tests, across 65 test binaries/doc-test runs.
 - Host `cargo test --offline --manifest-path src/bcs/Cargo.toml -p bcs --lib config --quiet`: 126 passed. Sandbox runs of socket/OTLP tests failed with `Operation not permitted`; the same tests passed on the host.
 - `cargo check --offline --manifest-path src/bcs/Cargo.toml -p bcs-bot-store -p bcs-bot -p bcs-service-api -p bcs-ws --all-targets`: passed. Existing warnings remain in unchanged provider code/tests.
-- `git diff --check`: passed. All 33 changed Rust source files are below 1,000 lines (largest: 769).
 - Architecture runner is not green on DEV: dependency script fails at line 36 (`unbound variable`), reproduced from the unchanged base archive. Static import, trait-naming and R25 failures match the base exactly (4, 6 and 151 distinct failures; zero added findings). Port purity, forbidden-symbol, store-boundary and interceptor checks passed. Full-workspace conformance discovery was interrupted; no claim is made that the complete architecture runner or full-workspace/Singlebox suite passed.
 - Independent code review completed; reported token-rotation and runtime-credential races were fixed and covered by regression tests.
 
