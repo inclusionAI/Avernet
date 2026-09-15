@@ -15,8 +15,7 @@ sqlite.pragma("journal_mode = WAL");
 sqlite.pragma("synchronous = FULL");
 const db = new SqliteDatabase(sqlite);
 await initializeMonitoringSqlite(db);
-const runtime = createMonitoringRuntime(() => db, { ...process.env, CLAWWEB_MONITORING_ENABLED: "true",
-  CLAWWEB_MONITORING_BOTS_JSON: JSON.stringify([{ botId: "mock-bot-te", engine: "TE" }, { botId: "mock-bot-oc", engine: "OC" }]) });
+const runtime = createMonitoringRuntime(() => db);
 if (!runtime.service) throw new Error("Invalid monitoring configuration");
 const port = Number(process.env.MONITORING_LOCAL_PORT ?? "3101");
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid local port");

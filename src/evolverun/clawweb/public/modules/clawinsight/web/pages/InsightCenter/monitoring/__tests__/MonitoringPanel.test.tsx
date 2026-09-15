@@ -25,7 +25,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 describe('MonitoringPanel', () => {
-  it('loads fixed IDs, expands diagnosis safely, and omits unsupported actions', async () => {
+  it('loads discovered IDs, expands diagnosis safely, and omits unsupported actions', async () => {
     const { container } = render(<MonitoringPanel />);
     fireEvent.click(await screen.findByRole('button', { name: /外部服务异常/ }));
     expect(screen.getByText('是否人工干预').nextElementSibling).toHaveTextContent('是');
@@ -97,11 +97,41 @@ describe('MonitoringPanel', () => {
     api.bots.mockRejectedValueOnce({ status: 503 });
     render(<MonitoringPanel />);
     await screen.findByText('监控服务暂不可用，请稍后重试。');
-    expect(screen.queryByText('暂无已配置的监控 Bot。')).not.toBeInTheDocument();
+    expect(screen.queryByText('暂无已上报的监控 Bot。')).not.toBeInTheDocument();
     api.bots.mockResolvedValue({ items: [] });
     fireEvent.click(screen.getByRole('button', { name: '刷新' }));
-    await screen.findByText('暂无已配置的监控 Bot。');
+    await screen.findByText('暂无已上报的监控 Bot。');
     expect(api.diagnoses).not.toHaveBeenCalled();
+  });
+  it('discovers new bots by polling and manual refresh without losing selection', async () => {
+    vi.useFakeTimers();
+    render(<MonitoringPanel />);
+    await act(async () => {});
+    api.bots.mockResolvedValue({ items: [{ botId: 'bot-new' }, { botId: 'bot-te' }, { botId: 'bot-oc' }] });
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    expect(api.bots).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole('button', { name: '监控 Bot bot-te' }));
+    expect(screen.getByRole('button', { name: 'bot-new', exact: true })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'bot-new', exact: true }));
+    await act(async () => {});
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }));
+    await act(async () => {});
+    expect(api.bots).toHaveBeenCalledTimes(3);
+    expect(screen.getByRole('button', { name: '监控 Bot bot-new' })).toBeInTheDocument();
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    fireEvent(document, new Event('visibilitychange'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(60000); });
+    expect(api.bots).toHaveBeenCalledTimes(3);
+  });
+  it('discovers the first bot when an initially empty list is polled', async () => {
+    vi.useFakeTimers();
+    api.bots.mockResolvedValueOnce({ items: [] });
+    render(<MonitoringPanel />);
+    await act(async () => {});
+    expect(screen.getByText('暂无已上报的监控 Bot。')).toBeInTheDocument();
+    expect(api.status).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
+    expect(api.status.mock.lastCall?.[0]).toBe('bot-te');
   });
   it('polls only while visible and stops after unmount; keyword is debounced', async () => {
     vi.useFakeTimers();

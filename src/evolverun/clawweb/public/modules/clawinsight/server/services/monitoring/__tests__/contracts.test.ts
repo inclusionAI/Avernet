@@ -17,9 +17,9 @@ const alert = fixture("alert");
 const now = Date.parse("2026-09-10T09:00:00Z");
 const check = { schemaVersion: CHECK_VERSION, botId: "mock-bot-te", engine: "TE", checkedAt: new Date(now).toISOString(),
   lastSuccessfulCheckAt: new Date(now).toISOString(), status: "HEALTHY" };
-const env = { CLAWWEB_MONITORING_ENABLED: "true", CLAWWEB_MONITORING_BOTS_JSON: '[{"botId":"mock-bot-te","engine":"TE"}]' };
+const env = {};
 function store(): MonitoringStore {
-  return { insertDiagnosis: vi.fn().mockResolvedValue(true), applyCheck: vi.fn().mockResolvedValue(true),
+  return { listBots: vi.fn().mockResolvedValue([]), insertDiagnosis: vi.fn().mockResolvedValue(true), applyCheck: vi.fn().mockResolvedValue(true),
     readStatus: vi.fn().mockResolvedValue({ check: null, count: 0 }), listDiagnoses: vi.fn() };
 }
 describe("monitoring contract validation", () => {
@@ -71,45 +71,68 @@ describe("monitoring contract validation", () => {
 describe("monitoring service and configuration", () => {
   it("invokes storage with normalized event and stable receive time", async () => {
     const repo = store();
-    const api = createMonitoringService(repo, [{ botId: alert.botId, engine: "TE" }], 300, () => now);
+    const api = createMonitoringService(repo, 300, () => now);
     expect(await api.reportDiagnosis(alert, alert.eventId)).toMatchObject({ duplicate: false, stored: true });
     expect(repo.insertDiagnosis).toHaveBeenCalledWith(parseDiagnosis(alert, alert.eventId), now);
     expect(await api.reportCheck(check)).toMatchObject({ applied: true });
     expect(repo.applyCheck).toHaveBeenCalledWith(parseCheck(check, now), now);
   });
-  it("rejects unknown bots and engine mismatches before storage", async () => {
+  it("accepts new bots but still rejects invalid engines and IDs before storage", async () => {
     const repo = store();
-    const api = createMonitoringService(repo, [{ botId: alert.botId, engine: "OC" }], 300);
-    await expect(api.reportDiagnosis(alert, alert.eventId)).rejects.toMatchObject({ code: "BOT_NOT_ALLOWED" });
+    const api = createMonitoringService(repo, 300, () => now);
+    await expect(api.reportDiagnosis({ ...alert, botId: "new-bot" }, alert.eventId)).resolves.toMatchObject({ accepted: true });
+    vi.mocked(repo.insertDiagnosis).mockClear();
+    await expect(api.reportDiagnosis({ ...alert, engine: "OTHER" }, alert.eventId)).rejects.toMatchObject({ code: "INVALID_EVENT" });
+    await expect(api.reportCheck({ ...check, botId: "bad/id" })).rejects.toMatchObject({ code: "INVALID_EVENT" });
     await expect(api.status("unknown")).rejects.toMatchObject({ code: "BOT_NOT_FOUND" });
+    await expect(api.diagnoses("unknown", {})).rejects.toMatchObject({ code: "BOT_NOT_FOUND" });
     expect(repo.insertDiagnosis).not.toHaveBeenCalled();
+    expect(repo.applyCheck).not.toHaveBeenCalled();
   });
-  it("expires old checks, keeps last successful time and honors explicit pause", async () => {
+  it("expires old checks, keeps last successful time and honors reported pause", async () => {
     const repo = store();
     vi.mocked(repo.readStatus).mockResolvedValue({ check: parseCheck(check, now), count: 3 });
     let clock = now;
-    const api = createMonitoringService(repo, [{ botId: alert.botId, engine: "TE" }, { botId: "paused", engine: "TE", paused: true }], 300, () => clock);
+    const api = createMonitoringService(repo, 300, () => clock);
     expect((await api.status(alert.botId)).status).toBe("HEALTHY");
     clock += 300001;
     expect(await api.status(alert.botId)).toMatchObject({ status: "UNKNOWN", diagnosisCount: 3, lastSuccessfulCheckAt: check.lastSuccessfulCheckAt });
-    expect((await api.status("paused")).status).toBe("PAUSED");
+    vi.mocked(repo.readStatus).mockResolvedValue({ check: parseCheck({ ...check, status: "PAUSED" }, now), count: 3 });
+    expect((await api.status(alert.botId)).status).toBe("PAUSED");
+    vi.mocked(repo.readStatus).mockResolvedValue({ check: null, count: 3 });
+    expect(await api.status(alert.botId)).toMatchObject({ status: "UNKNOWN", diagnosisCount: 3, lastSuccessfulCheckAt: null });
+  });
+  it("reads discovered bots from storage on every call", async () => {
+    const repo = store(); const api = createMonitoringService(repo, 300);
+    expect(await api.bots()).toEqual({ items: [] });
+    vi.mocked(repo.listBots).mockResolvedValue([{ botId: "new-bot" }]);
+    expect(await api.bots()).toEqual({ items: [{ botId: "new-bot" }] });
+    expect(repo.listBots).toHaveBeenCalledTimes(2);
   });
   it("never turns a failed storage operation into success", async () => {
     const repo = store();
     vi.mocked(repo.insertDiagnosis).mockRejectedValue(new Error("offline"));
-    const api = createMonitoringService(repo, [{ botId: alert.botId, engine: "TE" }], 300);
+    const api = createMonitoringService(repo, 300);
     await expect(api.reportDiagnosis(alert, alert.eventId)).rejects.toThrow("offline");
   });
-  it("lists bots without a DB; unavailable DB fails only dependent calls", async () => {
+  it("assembles without a DB; unavailable storage fails requests, not Host startup", async () => {
     const getDb = vi.fn(() => { throw new Error("not initialized"); });
     const runtime = createMonitoringRuntime(getDb, env);
-    expect(runtime.service!.bots()).toEqual({ items: [{ botId: "mock-bot-te" }] });
+    expect(runtime.service).not.toBeNull();
     expect(getDb).not.toHaveBeenCalled();
+    await expect(runtime.service!.bots()).rejects.toMatchObject({ code: "NOT_READY" });
     await expect(runtime.service!.status("mock-bot-te")).rejects.toMatchObject({ code: "NOT_READY" });
   });
-  it.each([{ CLAWWEB_MONITORING_ENABLED: "false" }, { CLAWWEB_MONITORING_STALE_SECONDS: "0" },
-    { CLAWWEB_MONITORING_BOTS_JSON: "[]" }, { CLAWWEB_MONITORING_BOTS_JSON: '[{"botId":"a","engine":"TE","name":"ignored?"}]' },
-    { CLAWWEB_MONITORING_BOTS_JSON: '[{"botId":"a","engine":"TE"},{"botId":"a","engine":"OC"}]' }])("fails closed for configuration %j", (patch) => {
-    expect(createMonitoringRuntime(() => { throw new Error(); }, { ...env, ...patch }).service).toBeNull();
+  it.each([{}, { CLAWWEB_MONITORING_ENABLED: "false" },
+    { CLAWWEB_MONITORING_ENABLED: "invalid", CLAWWEB_MONITORING_BOTS_JSON: "not-json" },
+    { CLAWWEB_MONITORING_BOTS_JSON: "[]" },
+    { CLAWWEB_MONITORING_BOTS_JSON: '[{"botId":"default","engine":"TE"},{"botId":"default","engine":"OC"}]' },
+  ])("ignores removed configuration %j", (legacy) => {
+    const getDb = vi.fn(() => { throw new Error("not initialized"); });
+    expect(createMonitoringRuntime(getDb, legacy).service).not.toBeNull();
+    expect(getDb).not.toHaveBeenCalled();
+  });
+  it.each(["0", "-1", "invalid", "1.5"])("still validates stale seconds: %s", (seconds) => {
+    expect(createMonitoringRuntime(() => { throw new Error(); }, { CLAWWEB_MONITORING_STALE_SECONDS: seconds }).service).toBeNull();
   });
 });

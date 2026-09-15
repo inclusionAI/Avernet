@@ -40,7 +40,7 @@ AIStudio 中 claw-validation
        │ POST：一条诊断 / 一个 Bot 检查快照
        ▼
 现有 ClawWeb Host → /api/insight/v1 → monitoring Router
-                                          │ 字段 + 固定 Bot 校验
+                                          │ 字段 + 引擎枚举校验
                                           ▼
                                      Service → Repository
                                                     │ IDatabase
@@ -54,7 +54,7 @@ AIStudio 中 claw-validation
 
 | 项目 | Agent 治理（现有） | Agent 监控自愈（本次） |
 |---|---|---|
-| 目的 | 历史分析、问题证据、改进待办 | 固定 Bot 实时诊断结果 |
+| 目的 | 历史分析、问题证据、改进待办 | 已上报 Bot 实时诊断结果 |
 | 数据产生 | 现有导出 / 分析和治理流程 | 外部 CV 主动单条 POST |
 | 页面 | 保留效果概览 / 问题证据 / 我的待办，以及管理员专属“管理” | Bot/日期/刷新、状态、诊断记录 |
 | 复用 | Host、页面外壳、模块装配、数据库抽象 | 不复用治理统计模型表达实时诊断 |
@@ -66,14 +66,14 @@ AIStudio 中 claw-validation
 必须实现：
 
 1. 公共契约的两个 POST：诊断落库、最新 Bot 检查状态。
-2. 同契约三个 GET：固定 Bot 清单、运行状态、分页诊断。
+2. 同契约三个 GET：已上报 Bot 清单、运行状态、分页诊断。
 3. 两张业务表、索引、模块内 DDL、真实持久化与幂等。
 4. 设计 HTML 对应的 React 页面，接入现有 Host 外壳。
 5. 不连 AIStudio 的本地真实 Router + SQLite + 页面闭环测试。
 
 不实现：Python 迁仓、直接访问 AI Vision、Bot 名称 / 添加 Bot、全量扫描、用户专属监控范围、任务下发、原文存储、钉钉通知字段、认领处理按钮、自愈动作、MQ、SSE/WebSocket、历史回灌工具。
 
-**OCB 无计划业务代码改动。** 沿用当前 Host 装配和 `/api/insight/v1` 挂载。不能把“不改 OCB 业务代码”解释为“不需要部署配置”：内网访问限制、固定 Bot 清单、业务库和网关可达性仍须配置及验证。如果既有入口拦截服务请求，应报告具体阻塞点并单独确认最小配置 / 装配调整，不擅自新增另一套 Host。
+**OCB 无计划业务代码改动。** 沿用当前 Host 装配和 `/api/insight/v1` 挂载。不能把“不改 OCB 业务代码”解释为“不需要部署配置”：内网访问限制、业务库和网关可达性仍须配置及验证；Bot 接入名单不再需要配置。如果既有入口拦截服务请求，应报告具体阻塞点并单独确认最小配置 / 装配调整，不擅自新增另一套 Host。
 
 ## 3. 代码导航：已有能力在哪里
 
@@ -124,29 +124,30 @@ AIStudio 中 claw-validation
 
 监控子路由注册在治理兜底 / 错误处理之前；不能因为治理 `InsightService` 为 null，就提前返回导致监控所有路由不可用。监控不可用只影响自己的路径，既有治理继续运行。监控专用错误适配器仅处理自己的请求。现有 `server/index.ts` 只是导出，不是已经初始化好的 Monitoring Runtime；实际装配必须由 Host composition root 完成，并用 Host 装配测试证明确实可达。
 
-### 4.2 拟新增环境配置
+### 4.2 监控默认装配与动态 Bot 发现（2026-09-15 修订）
 
-| 配置 | 默认 / 定义 |
-|---|---|
-| `CLAWWEB_MONITORING_ENABLED` | false；部署启用新能力；禁用时监控路径返回可识别未就绪，不影响旧治理 |
-| `CLAWWEB_MONITORING_BOTS_JSON` | 固定有序清单，至少 botId、engine，可选 paused，botId 不重复 |
-| `CLAWWEB_MONITORING_STALE_SECONDS` | 300；必须大于正常最大检查间隔，允许配置但不得为零 / 负数 |
+移除 `CLAWWEB_MONITORING_ENABLED` 和 `CLAWWEB_MONITORING_BOTS_JSON`。
+这两个旧变量无论缺失、为空、为 false 或包含非法 JSON，均不得影响 Host 启动、监控装配或合法上报。
+保留 `CLAWWEB_MONITORING_STALE_SECONDS`（默认 300，正整数）；该项非法时只影响监控 readiness。
 
-本地清单示意：
+- CV 决定采集哪些 Bot；ClawWeb 不再维护第二份接入名单。
+- 合法检查或诊断成功持久化后，Bot 自动可见。列表查询两张既有表中 `bot_id` 的去重并集，按 ASCII 二进制顺序排序。
+- 不新增注册表、内存名单或外部发现依赖；原有诊断和检查数据直接参与发现，多实例与重启后结果一致。
+- 首次上报之前不预展示 Bot；空库返回 `{ "items": [] }`。已有诊断但没有检查的 Bot 状态为 UNKNOWN。
+- 所有 GET 均依赖监控存储；存储不可用返回 503，不伪装空列表。数据库延迟解析，不因监控数据库尚未可用而阻止 Host 启动。
+- 未知 Bot 的 status/diagnoses 返回 404；合法新 Bot 的 POST 不再返回名单相关 403。
+- `engine` 仍校验为 OC/TE，但不再与环境名单比对；身份仍由全局 `botId` 标识，不引入 `(botId, engine)` 复合身份。两个不同 Bot 必须使用不同的真实 ID，不能都上报为 `default`。
+- 暂停来自最新有效 BotCheck 的 PAUSED 状态，直到新检查替换；不再有配置级暂停。
 
-```json
-[{"botId":"mock-bot-te","engine":"TE"},{"botId":"mock-bot-oc","engine":"OC","paused":false}]
-```
-
-CV 配置负责采集，ClawWeb 这份配置负责列表及写入校验；双方部署时核对一致。不是从首次事件自动注册 Bot。数据库连接仍用既有 `DATABASE_MODE` 及其配套配置，不另建一套生产连接项，不硬编码内部地址。
-
-不要求 MONITORING_REPORT_TOKEN；未配置上报 Token 不得阻止启动、写入或查询。模块关闭 / 配置非法则整块 monitoring 未就绪；列表 GET 只依赖有效配置，状态和诊断 GET 依赖数据库。
+数据库连接沿用既有 `DATABASE_MODE` 配置。不要求 MONITORING_REPORT_TOKEN。
+OCB 删除启动脚本中两个旧变量的导出和兜底名单，不提供新名单变量。
+完整兼容性与验收说明见 [无配置监控发现](clawinsight-monitoring-auto-discovery.md)。
 
 ### 4.3 服务请求安全
 
-- 两个监控 POST 不要求或校验 Authorization。保留请求大小、JSON、字段、Bot 清单和幂等校验。
+- 两个监控 POST 不要求或校验 Authorization。保留请求大小、JSON、字段、引擎枚举和幂等校验。
 - 不产生 Token 相关 401/503；模块或存储未就绪仍拒绝。网关登录 HTML 不得被发送端当作成功 ACK。
-- GET 沿用 Host 登录态；不套用 Agent 治理 owner / Bot ownership 范围；进入页面的用户共享固定 Bot 结果。本原则只适用于新增监控路径，不得删除旧治理或修复接口的管理员 / owner 校验。
+- GET 沿用 Host 登录态；不套用 Agent 治理 owner / Bot ownership 范围；进入页面的用户共享已上报 Bot 结果。本原则只适用于新增监控路径，不得删除旧治理或修复接口的管理员 / owner 校验。
 - 不把浏览器可随意提交的身份 Header 当新权限系统；沿用可信 Host 边界。
 - 在 JSON parser 层实施 128 KiB 限额；若父级 parser 已先执行，须在 Avernet 装配点协调限额与错误适配，不能宣称子路由 parser 可以重新限制已消费的 body。
 - 错误体、Header 校验、未知字段拒绝与 HTTPS 边界以公共契约为准。
@@ -162,7 +163,7 @@ CV 配置负责采集，ClawWeb 这份配置负责列表及写入校验；双方
 | id | 各方言现有自增主键惯例 | 内部行标识，不暴露页面 |
 | event_id | VARCHAR(128)，NOT NULL，唯一 | 公共 eventId；diagnosisId 等于该值，不重复存两列 |
 | schema_version | VARCHAR(64)，NOT NULL | 上报格式版本 |
-| bot_id | VARCHAR(128)，NOT NULL | 固定业务 Bot |
+| bot_id | VARCHAR(128)，NOT NULL | 上报的业务 Bot |
 | engine | VARCHAR(2)，NOT NULL | OC / TE |
 | session_key | VARCHAR(1024)，可空 | 上游键 |
 | session_id / trace_id | VARCHAR(255)，可空 | 真实定位 |
@@ -186,13 +187,13 @@ CV 配置负责采集，ClawWeb 这份配置负责列表及写入校验；双方
 - `(bot_id, occurred_at_ms, event_id)` 支撑分页。
 - `(bot_id, decision, occurred_at_ms, event_id)` 支撑 decision 过滤。
 
-bot_id / event_id 的比较、排序采用 ASCII 二进制语义（SQLite BINARY；生产 ID 列使用 `CHARACTER SET latin1 COLLATE latin1_bin`，入口仍严格限制 `[A-Za-z0-9_.:-]+`），跨方言测试。不为长文本建立前缀索引冒充全文搜索；首版固定少量 Bot 的关键词使用参数化字面子串查询，数据增长后基于查询计划再优化。
+bot_id / event_id 的比较、排序采用 ASCII 二进制语义（SQLite BINARY；生产 ID 列使用 `CHARACTER SET latin1 COLLATE latin1_bin`，入口仍严格限制 `[A-Za-z0-9_.:-]+`），跨方言测试。不为长文本建立前缀索引冒充全文搜索；首版监控 Bot 的关键词使用参数化字面子串查询，数据增长后基于查询计划再优化。
 
 ### 5.2 最新 Bot 检查表
 
 表名固定为 `insight_monitoring_bot_checks`：id 自增主键、bot_id 唯一 VARCHAR(128)、engine VARCHAR(2)、checked_at_ms BIGINT、last_successful_check_at_ms 可空 BIGINT、status VARCHAR(16)、received_at_ms BIGINT，以及 gmt_create/gmt_modified。
 
-只存每 Bot 最新一行，不建每日心跳历史表，不把诊断总数反复回写到此表。PAUSED 可来自有效上报或显式暂停配置，历史成功时间保留。
+只存每 Bot 最新一行，不建每日心跳历史表，不把诊断总数反复回写到此表。PAUSED 来自最新有效检查上报，历史成功时间保留。
 
 ### 5.3 建表交付与数据库接入
 
@@ -203,7 +204,7 @@ bot_id / event_id 的比较、排序采用 ASCII 二进制语义（SQLite BINARY
 - 发布后核验：[verify.mysql.sql](verify.mysql.sql)。文件只含只读查询，不执行建表或写入业务数据。
 - `schema.mysql.sql` 面向 OceanBase MySQL 兼容模式 / MySQL，尚未在目标库执行。ODC 单表结构编辑器每个结构填写一条 CREATE；本次截图所示“编写 SQL”批量入口允许不同表的多条 CREATE，可以粘贴本文件全部内容。每张表的发布目标名称须与 SQL 表名一致。确认目标库后，完成生成 SQL 任务、审批和实际执行；仅保存结构设计不表示已建表。
 - 审批时检查生成的最终 DDL，而非只看输入 CREATE。ODC 会对已有同名表做差异比较；发现同名非本模块表或结构不符时停止，不自动改造旧表。本稿不含 USE、DROP、ALTER 或共享 schema_version 写入。
-- 默认不分库分表、不加分区、不关联 `ac_bots` 外键；固定 Bot 清单仍由配置维护。若部署目标实际为逻辑分片库，必须先确认单表路由/发布拓扑，不能直接把物理建表稿当成逻辑路由配置。
+- 默认不分库分表、不加分区、不关联 `ac_bots` 外键；Bot 清单由两张监控表中的持久化数据发现。若部署目标实际为逻辑分片库，必须先确认单表路由/发布拓扑，不能直接把物理建表稿当成逻辑路由配置。
 
 #### 连接与表名如何对应
 
@@ -304,8 +305,8 @@ SQLite 当前单连接异步 transaction 使用须特别测试并发 BEGIN / COM
 
 ### 7.1 后端
 
-- bots 从配置读取，顺序稳定，无记录也可选择。
-- status 的 diagnosisCount 为该 Bot 全部已存诊断数，不受页面日期影响。检查过期默认 UNKNOWN；显式暂停配置优先 PAUSED；保留最后真实成功时间。
+- bots 从检查和诊断表读取去重并集，按 botId 排序；首次成功上报后可选择。
+- status 的 diagnosisCount 为该 Bot 全部已存诊断数，不受页面日期影响。检查过期默认 UNKNOWN；最新检查为 PAUSED 时优先显示 PAUSED；保留最后真实成功时间。
 - 日期为北京时间自然日，结束日转换为下一天零点的半开区间；任一日期过滤排除 occurredAt=null，全部时间 null 排最后。
 - page、pageSize、keyword、decision、counts / total 规则严格遵守公共契约；数据库分页，不调用已有全量 diagnoses() 之类方法加载全部记录。
 - 同时间按 event_id ASCII 倒序；显式 CASE/null 排序保证各方言一致。
@@ -322,7 +323,7 @@ SQLite 当前单连接异步 transaction 使用须特别测试并发 BEGIN / COM
 
 右侧只组织三块主内容：
 
-- **筛选组件**：固定 Bot ID 切换、时间范围、刷新放在同一组件；默认第一个 Bot、全部时间。无 Bot 名称、手动添加、任务来源或数据源标签。
+- **筛选组件**：已上报 Bot ID 切换、时间范围、刷新放在同一组件；默认第一个 Bot、全部时间。无 Bot 名称、手动添加、任务来源或数据源标签。
 - **状态区**：HEALTHY 显示“监控正常”、ERROR“检查异常”、UNKNOWN“状态未知”、PAUSED“已暂停”；最后成功检查时间、累计诊断数。状态描述的是采集检查，不暗示任务全部成功。
 - **诊断记录**：结果筛选、关键词搜索、清晰可展开条目和分页；不要拆成“实时任务”和“诊断历史”。
 
@@ -338,10 +339,10 @@ SQLite 当前单连接异步 transaction 使用须特别测试并发 BEGIN / COM
 - 默认页大小 10，允许 10/20/50；零条隐藏无效翻页或禁用按钮，越界页提示可返回首页，后端不悄悄调整页码。
 - Bot、时间、decision、keyword、pageSize 改变回到第 1 页，清理展开状态；手动刷新保留筛选和当前页。切换 Bot 立即清除旧 Bot 数据，不让旧记录暂挂在新标题下。
 - 搜索可去抖 300ms；每次查询绑定完整筛选 key 和请求序号 / AbortController，旧响应不可覆盖新筛选结果。
-- 首版页面可见且停留监控模块时每 30 秒轮询 status 与当前列表；隐藏 / 切到治理时暂停，返回时立即刷新。不请求后台原文，不新增推送通道。
+- 首版页面可见且停留监控模块时每 30 秒轮询 Bot 清单、status 与当前诊断列表；隐藏 / 切到治理时暂停，返回时立即刷新。不请求后台原文，不新增推送通道。
 - 同筛选刷新保留已有列表，显示轻量刷新态；失败保留旧数据显示错误，不能伪装最新结果。初始加载、空记录、未就绪、鉴权、错误分别展示。
 - 旧状态需要随时间失效；请求失败不能让很久以前的“监控正常”无限保持，前端应标注状态未更新 / 暂不可用，不自行推断 PAUSED。
-- 页面同时展示全部用户共享固定 Bot 的结果，不给监控新增管理员控制面板；既有治理的管理员控制面板保留。治理 overview 的初始数据请求应收敛到治理模块生命周期，不能在监控页面挂载时继续隐式依赖该请求。
+- 页面同时展示全部用户共享已上报 Bot 的结果，不给监控新增管理员控制面板；既有治理的管理员控制面板保留。治理 overview 的初始数据请求应收敛到治理模块生命周期，不能在监控页面挂载时继续隐式依赖该请求。
 
 ## 8. 拟新增 / 修改文件
 
@@ -350,7 +351,7 @@ SQLite 当前单连接异步 transaction 使用须特别测试并发 BEGIN / COM
 | 路径 | 责任 |
 |---|---|
 | `modules/clawinsight/server/services/monitoring/contracts.ts`（新增） | 领域 DTO 与枚举，不依赖 Express |
-| `modules/clawinsight/server/services/monitoring/monitoring-ingest-service.ts`（新增） | 验证后事件归一化、固定 Bot 策略、幂等 |
+| `modules/clawinsight/server/services/monitoring/monitoring-ingest-service.ts`（新增） | 验证后事件归一化、动态 Bot 发现策略、幂等 |
 | `modules/clawinsight/server/services/monitoring/monitoring-read-service.ts`（新增） | 状态过期、分页查询语义 |
 | `modules/clawinsight/server/services/monitoring/monitoring-runtime.ts`（新增） | 配置、依赖装配、read/write readiness |
 | `modules/clawinsight/server/repositories/monitoring-repository.ts`（新增） | IDatabase、方言查询、唯一键处理、状态原子更新 |
@@ -370,7 +371,7 @@ SQLite 当前单连接异步 transaction 使用须特别测试并发 BEGIN / COM
 
 步骤：
 
-1. 准备独立 SQLite 文件，启用固定 mock Bot 清单，不配置上报 Token。
+1. 准备独立 SQLite 文件，不配置监控开关、Bot 清单和上报 Token；发送 mock 数据后验证 Bot 自动发现。
 2. 用公共契约 curl POST 三个样例；写当前时间的 BotCheck。
 3. GET 确认 TE 两条、OC 一条；打开 React 页面验证筛选 / 展开 / 翻页。
 4. 重复 POST、冲突 POST、无 Token 上报、数据库失败分别验证。
@@ -394,7 +395,7 @@ SQLite 当前单连接异步 transaction 使用须特别测试并发 BEGIN / COM
 | 范围 | 验收 |
 |---|---|
 | 挂载 | 原有工厂调用能提供新接口；治理 service 不可用不误伤独立监控；旧治理路由、管理员专属管理页不回归 |
-| 内网接入 | 无 Token 配置、无 Authorization 时两个 POST 均成功；旧 Token 配置/头不重新启用校验；非法字段/未知 Bot/模块关闭/存储失败仍拒绝；上游登录 HTML 不得假成功 |
+| 内网接入 | 无 Token 配置、无 Authorization 时两个 POST 均成功；旧 Token 配置/头不重新启用校验；非法字段/非法引擎/存储失败仍拒绝；合法新 Bot 自动接入；上游登录 HTML 不得假成功 |
 | 入库 | 首次201、重复200、冲突409；20个并发相同POST只落一行 |
 | 故障 | noop / DB断开 / migration失败 / 缺表或结构不符无假ACK；ACK丢失重复不新增 |
 | 字段 | humanIntervention true/false保存一致；不含通知状态；置信度仍为number/null |
@@ -410,8 +411,8 @@ SQLite 当前单连接异步 transaction 使用须特别测试并发 BEGIN / COM
 
 本地通过后仍须确认：既有 Host 的上报路径能够接收服务请求；部署侧内网访问范围已确认；AIStudio 可访问实际入口；实际 `IDatabase` 方言迁移 / 唯一索引 / 时间 / 排序均通过；ODC 查询的库表确实与服务连接一致。记录所验证的版本和环境，不能以 SQLite 成功代替生产 SQL 成功。
 
-这些是启用配置的前提，不是新增一套 OCB 业务实现。首次启用可选一个固定 Bot 验证后再扩到既定清单；不删除历史，不自动从旧 SQLite 回灌。
+这些是接入验收的前提，不是新增一套 OCB 业务实现。首次接入可选一个 Bot 上报验证后再扩到采集端目标清单；不删除历史，不自动从旧 SQLite 回灌。
 
-出现问题时关闭 `CLAWWEB_MONITORING_ENABLED` 并保留表，旧 Agent 治理仍可用；CV 暂停发送 / 保留 outbox，不能为了回滚删除未确认事件。恢复后相同事件重试依赖幂等完成交付。
+出现问题时暂停 CV 发送或在既有网关关闭内部上报入口，并保留表；旧 Agent 治理仍可用；CV 保留 outbox，不能为了回滚删除未确认事件。恢复后相同事件重试依赖幂等完成交付。
 
 > 真实库证据（2026-09-11）：经 meshboot 本地代理对 ODC dev 库跑通真实 HTTP 路由写读到 `insight_monitoring_diagnoses` / `insight_monitoring_bot_checks`，17/17 通过；表结构（`latin1_bin`、`gmt_*` 默认值、唯一索引）与 `monitoring-schema-check` 兼容。详见 [本地验证](local-development.md) 第 5.1 节与同目录 `verify-odc-dev-e2e.cjs`。此项不替代真实内部 Host 挂载、AIStudio 出站与 prod 库的预发验证。

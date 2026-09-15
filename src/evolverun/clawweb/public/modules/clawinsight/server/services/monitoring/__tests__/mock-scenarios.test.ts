@@ -15,6 +15,6 @@ describe('browser acceptance fixtures', () => {
     expect(new Set(scenario.events.map(e => e.eventId)).size).toBe(60);
     expect(scenario.checks[1].status).toBe('ERROR');
     expect(Date.parse(scenario.checks[0].checkedAt) - Date.parse(scenario.checks[2].checkedAt)).toBe(3600000);
-    expect(scenario.bots[3].paused).toBe(true);
+    expect(scenario.checks[3].status).toBe('PAUSED');
   });
 });

@@ -7,7 +7,7 @@ export function createMonitoringMockScenario(batch: string, now: number) {
     { botId: `mock-ui-${batch}-te`, engine: 'TE' },
     { botId: `mock-ui-${batch}-oc`, engine: 'OC' },
     { botId: `mock-ui-${batch}-stale`, engine: 'TE' },
-    { botId: `mock-ui-${batch}-paused`, engine: 'OC', paused: true },
+    { botId: `mock-ui-${batch}-paused`, engine: 'OC' },
   ];
   const events: DiagnosisEvent[] = [];
   for (const bot of bots.slice(0, 2)) {
@@ -32,11 +32,11 @@ export function createMonitoringMockScenario(batch: string, now: number) {
       });
     }
   }
-  const checks: BotCheck[] = bots.slice(0, 3).map((bot, i) => ({ schemaVersion: CHECK_VERSION,
+  const checks: BotCheck[] = bots.map((bot, i) => ({ schemaVersion: CHECK_VERSION,
     botId: bot.botId, engine: bot.engine,
     checkedAt: iso(now - (i === 2 ? 3600000 : 0)),
     lastSuccessfulCheckAt: iso(now - (i === 0 ? 0 : 3600000)),
-    status: i === 1 ? 'ERROR' : 'HEALTHY',
+    status: i === 3 ? 'PAUSED' : i === 1 ? 'ERROR' : 'HEALTHY',
   }));
   return { bots, events, checks };
 }

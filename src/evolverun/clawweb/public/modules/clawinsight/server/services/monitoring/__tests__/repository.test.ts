@@ -47,6 +47,24 @@ describe("monitoring real SQL persistence (no HTTP listener)", () => {
     await db.close(); db = database(join(dir, "db.sqlite3")); repo = new MonitoringRepository(db);
     expect((await list()).total).toBe(2);
   });
+  it("discovers persisted checks and diagnoses across connections without caching the roster", async () => {
+    expect(await repo.listBots()).toEqual([]);
+    await insert({ ...alert, botId: "diagnosis-only" });
+    const check = parseCheck({ schemaVersion: "claw-monitoring/bot-check/v1", botId: "check-only", engine: "OC",
+      checkedAt: new Date(now).toISOString(), lastSuccessfulCheckAt: null, status: "HEALTHY" }, now);
+    await repo.applyCheck(check, now);
+    const otherDb = database(join(dir, "db.sqlite3"));
+    try {
+      const other = new MonitoringRepository(otherDb);
+      expect(await other.listBots()).toEqual([{ botId: "check-only" }, { botId: "diagnosis-only" }]);
+      // The second connection writes both a duplicate identity and new case-sensitive identities.
+      await other.applyCheck({ ...check, botId: "diagnosis-only" }, now);
+      for (const botId of ["Case", "case"]) await other.applyCheck({ ...check, botId }, now);
+      const expected = ["Case", "case", "check-only", "diagnosis-only"].map(botId => ({ botId }));
+      expect(await repo.listBots()).toEqual(expected);
+      expect(await other.listBots()).toEqual(expected);
+    } finally { await otherDb.close(); }
+  });
   it("deduplicates concurrent writes, normalizes timezones and rejects conflicts", async () => {
     const results = await Promise.all(Array.from({ length: 20 }, () => insert()));
     expect(results.filter(Boolean)).toHaveLength(1);

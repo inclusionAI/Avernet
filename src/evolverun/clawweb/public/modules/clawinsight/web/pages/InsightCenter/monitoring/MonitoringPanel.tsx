@@ -30,17 +30,32 @@ export default function MonitoringPanel() {
   const invalidDates = Boolean(query.startDate && query.endDate && query.startDate > query.endDate);
 
   useEffect(() => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(new DOMException('Timeout', 'TimeoutError')), 15000);
     let active = true;
-    setBotsLoading(true); setBotsError('');
-    monitoringApi.bots(controller.signal).then(result => {
-      if (!active) return;
-      setBots(result.items);
-      setBotId(current => result.items.some(bot => bot.botId === current) ? current : result.items[0]?.botId ?? '');
-    }).catch(failure => { if (active) setBotsError(monitoringErrorText(controller.signal.reason ?? failure)); })
-      .finally(() => { clearTimeout(timeout); if (active) setBotsLoading(false); });
-    return () => { active = false; clearTimeout(timeout); controller.abort(); };
+    let controller: AbortController | null = null;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const load = () => {
+      if (document.visibilityState === 'hidden') return;
+      controller?.abort(); clearTimeout(timeout);
+      const current = new AbortController(); controller = current;
+      const live = () => active && controller === current;
+      timeout = setTimeout(() => current.abort(new DOMException('Timeout', 'TimeoutError')), 15000);
+      setBotsLoading(true); setBotsError('');
+      monitoringApi.bots(current.signal).then(result => {
+        if (!live()) return;
+        setBots(result.items);
+        setBotId(selected => result.items.some(bot => bot.botId === selected) ? selected : result.items[0]?.botId ?? '');
+      }).catch(failure => { if (live()) setBotsError(monitoringErrorText(current.signal.reason ?? failure)); })
+        .finally(() => { if (live()) { clearTimeout(timeout); setBotsLoading(false); } });
+    };
+    const visibility = () => {
+      if (document.visibilityState === 'hidden') {
+        controller?.abort(); controller = null; clearTimeout(timeout); setBotsLoading(false);
+      } else load();
+    };
+    load();
+    const interval = setInterval(load, 30000);
+    document.addEventListener('visibilitychange', visibility);
+    return () => { active = false; controller?.abort(); clearTimeout(timeout); clearInterval(interval); document.removeEventListener('visibilitychange', visibility); };
   }, [botsRevision]);
 
   useEffect(() => {
@@ -97,7 +112,7 @@ export default function MonitoringPanel() {
     <div className="page-heading"><div><h1>Agent 监控自愈</h1><p>关注运行异常，查看每一次会话诊断。</p></div></div>
     <MonitoringControls bots={bots} botId={botId} botsLoading={botsLoading} loading={loading} startDate={query.startDate} endDate={query.endDate}
       onBotChange={id => { setBotId(id); change({}); }} onDatesChange={change}
-      onRefresh={() => { if (botsError || !bots.length) setBotsRevision(x => x + 1); else setRevision(x => x + 1); }}>
+      onRefresh={() => { setBotsRevision(x => x + 1); setRevision(x => x + 1); }}>
       {botId && <>
         <div className="status-bar" role="region" aria-label="Bot 监控状态">
           <div className="status-left"><span className={`health ${healthClass}`}><span className="dot" />{statusError ? '状态未更新' : status ? states[status.status] : '状态加载中…'}</span><span className="separator" /><span className="status-time" title={displayTime(status?.lastSuccessfulCheckAt ?? null)}>最近成功检查 {lastCheck ? `${lastCheck.day} ${lastCheck.time}` : '—'}</span></div>
@@ -107,7 +122,7 @@ export default function MonitoringPanel() {
       </>}
     </MonitoringControls>
     {botsError && <p role="alert" className="error-banner">{botsError}</p>}
-    {!botsLoading && !botsError && !bots.length && <p className="monitoring-empty">暂无已配置的监控 Bot。</p>}
+    {!botsLoading && !botsError && !bots.length && <p className="monitoring-empty">暂无已上报的监控 Bot。</p>}
     {botId && <>
       <div className="records-title"><h2>诊断记录</h2><span className="sort-note" title="按会话时间倒序排列，时间未知的记录在最后"><Icon name="sort" />最新会话优先</span></div>
       <section aria-label="诊断记录" className="records-panel" aria-busy={loading}>
