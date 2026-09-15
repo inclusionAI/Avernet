@@ -23,7 +23,7 @@ import SkillEvolutionFields, {
   type StageSelectionDraft,
 } from '../components/SkillEvolutionFields'
 import SkillTaskRuntimePanel, { StepInteractions } from '../components/SkillTaskRuntimePanel'
-import SkillHardeningDetail, { skillHardeningImplementation } from '../components/SkillHardeningDetail'
+import SkillHardeningDetail, { isSkillHardeningResultStep, skillHardeningImplementation } from '../components/SkillHardeningDetail'
 import { EvolveAdminScopeProvider, useEvolveAdminScope } from '../features/evolve/admin-scope'
 import {
 
@@ -2031,15 +2031,16 @@ function TaskDetail({ version = 'internalversion' }: Pick<EvolveProps, 'version'
             </div>
             <div className="mt-5 space-y-3">
               {retryError && <p className="rounded-lg bg-red-50 p-3 text-xs text-red-700">{retryError}</p>}
-              {visibleSteps.map((step) => <StepCard key={step.stepId} step={step} label={isStageTest ? stageTestStepLabel(step, task) : undefined} canRetry={canOperate && canRetryRecordedStep(step, steps.indexOf(step))} canCancel={canOperate && canCancelRecordedStep(step, steps.indexOf(step))} retrying={retryingStepId === step.stepId} canceling={cancelingStepId === step.stepId} onRetry={() => void retryStep(step)} onCancel={() => void cancelStep(step)}>{renderStepInteractions(step.stepId)}</StepCard>)}
+              {visibleSteps.map((step) => {
+                const isHardeningResult = Boolean(hardeningImplementationId && isSkillHardeningResultStep(step, hardeningImplementationId))
+                return <StepCard key={step.stepId} step={step} label={isStageTest ? stageTestStepLabel(step, task) : undefined} suppressDeliverables={isHardeningResult} canRetry={canOperate && canRetryRecordedStep(step, steps.indexOf(step))} canCancel={canOperate && canCancelRecordedStep(step, steps.indexOf(step))} retrying={retryingStepId === step.stepId} canceling={cancelingStepId === step.stepId} onRetry={() => void retryStep(step)} onCancel={() => void cancelStep(step)}>
+                  {renderStepInteractions(step.stepId)}
+                  {isHardeningResult && <SkillHardeningDetail task={task} implementationId={hardeningImplementationId!} stepId={step.stepId} renderStatus={(status) => <Status type={statusView(status).type}>{statusView(status).text}</Status>} />}
+                </StepCard>
+              })}
               {visibleSteps.length === 0 && <div className="rounded-xl border border-dashed border-gray-200 py-10 text-center text-sm text-gray-400">尚未创建 Step</div>}
             </div>
           </section>
-          {hardeningImplementationId && <SkillHardeningDetail
-            task={task}
-            implementationId={hardeningImplementationId}
-            renderStatus={(status) => <Status type={statusView(status).type}>{statusView(status).text}</Status>}
-          />}
         </div>
 
         <aside className="min-w-0 space-y-4">
@@ -2552,7 +2553,7 @@ function stageTestStepLabel(step: EvolveStep, task: EvolveTask): string {
     : '平台默认' + name
 }
 
-function StepCard({ step, label, children, canRetry = false, canCancel = false, retrying = false, canceling = false, onRetry, onCancel }: { step: EvolveStep; label?: string; children?: ReactNode; canRetry?: boolean; canCancel?: boolean; retrying?: boolean; canceling?: boolean; onRetry?: () => void; onCancel?: () => void }) {
+function StepCard({ step, label, children, suppressDeliverables = false, canRetry = false, canCancel = false, retrying = false, canceling = false, onRetry, onCancel }: { step: EvolveStep; label?: string; children?: ReactNode; suppressDeliverables?: boolean; canRetry?: boolean; canCancel?: boolean; retrying?: boolean; canceling?: boolean; onRetry?: () => void; onCancel?: () => void }) {
   const view = statusView(step.status)
   const dispatchLabel = stepDispatchLabel(step)
   const stepLabel: Record<string, string> = {
@@ -2569,7 +2570,7 @@ function StepCard({ step, label, children, canRetry = false, canCancel = false, 
       {step.summary && <p className="mt-3 text-sm text-gray-700">{step.summary}</p>}
       {children}
       {step.error && <p className="mt-3 rounded-lg bg-red-50 p-3 text-xs text-red-700">{step.error.code ? `${step.error.code}: ` : ''}{step.error.message}</p>}
-      {step.output && !(step.stepType === 'stage_extension' && step.status === 'waiting_context') && <StepDeliverables output={step.output} taskId={step.taskId} stepId={step.stepId} stepType={step.stepType} />}
+      {!suppressDeliverables && step.output && !(step.stepType === 'stage_extension' && step.status === 'waiting_context') && <StepDeliverables output={step.output} taskId={step.taskId} stepId={step.stepId} stepType={step.stepType} />}
       <details className="mt-3 border-t border-gray-100 pt-3">
         <summary className="cursor-pointer text-xs text-gray-400 hover:text-gray-600">技术信息</summary>
         <div className="mt-2 rounded-lg bg-gray-50 px-3 py-2 font-mono text-[10px] leading-5 text-gray-600">{step.command}</div>

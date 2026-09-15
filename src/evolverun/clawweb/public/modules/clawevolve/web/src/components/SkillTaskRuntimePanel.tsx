@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type EvolveTask } from '../api/client'
-import { answeredInteractionHtml } from './answered-interaction-html'
+import { answeredInteractionHtml, platformInteractionFormStyle } from './answered-interaction-html'
 
 type Interaction = NonNullable<EvolveTask['interactions']>[number]
 type TaskDiff = Awaited<ReturnType<typeof api.evolve.getTaskSkillDiff>>
@@ -34,7 +34,7 @@ function ReadOnlyInteractionForm({ html }: { html: string }) {
     return () => { element.removeEventListener('load', measure); observer?.disconnect() }
   }, [html])
   // Same-origin only lets this trusted parent measure the static document; scripts and forms stay forbidden.
-  return <iframe ref={frame} title="Stage 已回答的交互表单" sandbox="allow-same-origin" srcDoc={html} style={{ height }} className="mt-3 w-full rounded-lg border border-amber-100 bg-white" />
+  return <iframe ref={frame} title="Stage 已回答的交互表单" sandbox="allow-same-origin" srcDoc={html} style={{ height }} className="mt-3 w-full rounded-xl border border-gray-200 bg-white shadow-sm" />
 }
 
 function InteractionCard({ taskId, interaction, canOperate, onUpdated }: {
@@ -95,8 +95,8 @@ function InteractionCard({ taskId, interaction, canOperate, onUpdated }: {
   const html = interaction.question.format === 'html'
     ? '<!doctype html><html><head><meta charset="utf-8">'
       + '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; script-src \'unsafe-inline\'; img-src data:; font-src data:; connect-src \'none\'; form-action \'none\'; base-uri \'none\'">'
-      + '</head><body>'
-      + interaction.question.content
+      + '</head><body data-evolve-form-theme="platform"><div class="evolve-form-shell">'
+      + interaction.question.content + '</div>' + platformInteractionFormStyle
       + "<script>document.addEventListener('submit',function(e){e.preventDefault();var f=new FormData(e.target);var v={};f.forEach(function(x,k){if(v[k]===undefined)v[k]=x;else if(Array.isArray(v[k]))v[k].push(x);else v[k]=[v[k],x]});parent.postMessage({channel:"
       + JSON.stringify(channel)
       + ",type:'submit',value:v},'*')});</script></body></html>"
@@ -116,7 +116,7 @@ function InteractionCard({ taskId, interaction, canOperate, onUpdated }: {
       <textarea value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="填写回答" className="min-h-20 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500" />
       <button disabled={busy || !answer.trim() || !canOperate} onClick={() => void submit({ tag: interaction.question.tag, content: answer.trim() })} className="self-end rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-40">{busy ? '提交中…' : '提交并继续'}</button>
     </div>}
-    {answered && (!answeredForm || answeredForm.remainingAnswer != null) && <div className="mt-3 rounded-lg bg-white p-3"><p className="mb-2 text-xs font-medium text-gray-500">已提交答案</p><AnswerValue value={answeredForm ? answeredForm.remainingAnswer : answerValue} labels={question.labels} /></div>}
+    {answered && !answeredForm && <div className="mt-3 rounded-lg bg-white p-3"><p className="mb-2 text-xs font-medium text-gray-500">已提交答案</p><AnswerValue value={answerValue} labels={question.labels} /></div>}
     {answered && <details className="mt-3"><summary className="cursor-pointer text-xs text-gray-500">交互技术详情</summary><pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-gray-950 p-3 text-xs text-gray-200">{JSON.stringify({ question: interaction.question, answer: interaction.answer }, null, 2)}</pre></details>}
     {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
   </div>

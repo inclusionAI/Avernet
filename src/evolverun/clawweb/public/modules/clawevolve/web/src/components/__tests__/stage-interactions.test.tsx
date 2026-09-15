@@ -28,6 +28,7 @@ describe('Stage interactions belong to their execution step', () => {
     const frame = screen.getByTitle('Stage 已回答的交互表单') as HTMLIFrameElement
     expect(frame.closest('[data-testid="step"]')).toBeTruthy()
     expect(frame.getAttribute('sandbox')).toBe('allow-same-origin')
+    expect(frame.srcdoc).toContain('data-evolve-form-theme="platform"')
     const doc = new DOMParser().parseFromString(frame.srcdoc, 'text/html')
     expect(doc.querySelector('form h3')?.textContent).toBe('检查范围')
     expect(doc.querySelector('label')?.textContent).toBe('会话')
@@ -55,6 +56,20 @@ describe('Stage interactions belong to their execution step', () => {
     const doc = new DOMParser().parseFromString(frame.srcdoc, 'text/html')
     expect(doc.querySelector('input')?.value).toBe('saved-envelope-answer')
     expect(doc.querySelector('input')?.readOnly).toBe(true)
+  })
+
+  it('keeps opaque submitted context out of the visible answer when the complete HTML form is available', () => {
+    const value = task()
+    value.interactions![0].question.content = '<form><h3>加固确认</h3><label>操作<select name="action"><option value="">请选择</option><option value="apply">批准并修改</option></select></label><input type="hidden" name="review_payload"><button>提交</button></form>'
+    value.interactions![0].answer = { action: 'apply', review_payload: { version: 1, review: { inventory: 'large internal payload' } } }
+    render(<StepInteractions task={value} stepId="STEP-1" canOperate={false} onUpdated={onUpdated} />)
+    const frame = screen.getByTitle('Stage 已回答的交互表单') as HTMLIFrameElement
+    const doc = new DOMParser().parseFromString(frame.srcdoc, 'text/html')
+    expect(doc.querySelector<HTMLSelectElement>('select[name=action]')?.value).toBe('apply')
+    expect(doc.body.getAttribute('data-evolve-form-theme')).toBe('platform')
+    expect(screen.queryByText('已提交答案')).toBeNull()
+    const details = screen.getByText('交互技术详情').closest('details')!
+    expect(details.open).toBe(false)
   })
 
   it('restores textarea, repeated fields, radio, checkbox and select answers without executing HTML', () => {
@@ -104,6 +119,7 @@ describe('Stage interactions belong to their execution step', () => {
     const view = render(<StepInteractions task={task('waiting')} stepId="STEP-1" canOperate onUpdated={onUpdated} />)
     const frame = view.container.querySelector('iframe')!
     expect(frame.getAttribute('sandbox')).toBe('allow-forms allow-scripts')
+    expect(frame.srcdoc).toContain('data-evolve-form-theme="platform"')
     fireEvent(window, new MessageEvent('message', { source: window, data: { channel: 'evolve-hitl:HITL-1', type: 'submit', value: { session: 'wrong' } } }))
     expect(api.evolve.answerStageInteraction).not.toHaveBeenCalled()
     fireEvent(window, new MessageEvent('message', { source: frame.contentWindow, data: { channel: 'evolve-hitl:HITL-1', type: 'submit', value: { session: 'right' } } }))

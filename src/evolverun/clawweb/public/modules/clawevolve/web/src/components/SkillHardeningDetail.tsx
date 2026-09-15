@@ -10,21 +10,24 @@ export function skillHardeningImplementation(task: EvolveTask): string | null {
     ? value.hardeningImplementationId : null
 }
 
-export default function SkillHardeningDetail({ task, implementationId, renderStatus }: {
+export function isSkillHardeningResultStep(step: EvolveStep, implementationId: string): boolean {
+  const binding = (step as EvolveStep & { stageExtension?: {
+    stage: string; mode: string; implementationId: string
+  } | null }).stageExtension
+  return step.status === 'succeeded' && step.stepType === 'stage_extension' && binding?.stage === 'diagnose'
+    && binding.mode === 'preprocess' && binding.implementationId === implementationId
+}
+
+export default function SkillHardeningDetail({ task, implementationId, stepId, renderStatus }: {
   task: EvolveTask
   implementationId: string
+  stepId?: string
   renderStatus: (status: string) => ReactNode
 }) {
   const steps = (task.steps ?? []).filter((step) => step.taskId === task.task_id)
-  const matching = steps.filter((step) => {
-    const binding = (step as EvolveStep & { stageExtension?: {
-      stage: string; mode: string; implementationId: string
-    } | null }).stageExtension
-    return step.status === 'succeeded' && step.stepType === 'stage_extension' && binding?.stage === 'diagnose'
-      && binding.mode === 'preprocess' && binding.implementationId === implementationId
-  })
-  return <section aria-label="诊断前置结果" className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-      <h2 className="text-sm font-semibold">诊断前置结果</h2>
+  const matching = steps.filter((step) => (!stepId || step.stepId === stepId) && isSkillHardeningResultStep(step, implementationId))
+  return <section aria-label="诊断前置结果" className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50/40 p-4">
+      <h2 className="text-sm font-semibold text-emerald-950">诊断前置结果</h2>
       {!matching.length && <p className="mt-3 text-sm text-gray-500">尚无可关联的诊断前置输出</p>}
       {matching.map((step) => <article key={step.stepId} className="mt-4 border-t border-gray-100 pt-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs"><span className="break-all font-mono text-gray-400">{step.stepId}</span>{renderStatus(step.status)}</div>

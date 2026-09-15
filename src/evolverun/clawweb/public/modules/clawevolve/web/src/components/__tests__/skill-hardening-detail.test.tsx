@@ -78,6 +78,12 @@ it('keeps the original task detail shell for the frozen presentation policy and 
   expect(screen.getAllByText('其他步骤仍需回答')).toHaveLength(1)
   expect(screen.getByRole('heading', { name: '执行记录' })).toBeTruthy()
   expect(screen.getByRole('heading', { name: '任务配置' })).toBeTruthy()
+  const hardeningStep = document.getElementById('step-PRE')!
+  const hardeningResult = screen.getByRole('region', { name: '诊断前置结果' })
+  const diagnoseStep = document.getElementById('step-MAIN')!
+  expect(hardeningStep.contains(hardeningResult)).toBe(true)
+  expect(Boolean(hardeningResult.compareDocumentPosition(diagnoseStep) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+  expect(screen.queryByText('自定义 STAGE 交付结果')).toBeNull()
   expect(screen.queryByRole('region', { name: '诊断工作流' })).toBeNull()
   expect(screen.queryByRole('heading', { name: '诊断 Stage' })).toBeNull()
 })
