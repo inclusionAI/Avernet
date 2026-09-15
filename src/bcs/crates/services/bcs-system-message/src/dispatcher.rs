@@ -230,9 +230,16 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                     | MessageVisibilityDomain::StateMachine => {
                         Some(if kind == SystemMessageEventKind::SessionContext {
                             // GroupContext is bot execution context, not a
-                            // manager announcement. Full keeps the legacy
-                            // owner-filtered row; participant hides it.
-                            MessageAudience::FullOnly
+                            // manager announcement. Recipient-owned rows must
+                            // declare that recipient as their directed
+                            // audience; the ownerless manager copy remains
+                            // hidden from participant views.
+                            match owner_bot_id.as_ref() {
+                                Some(owner_actor_id) => MessageAudience::Directed {
+                                    actor_ids: vec![owner_actor_id.clone()],
+                                },
+                                None => MessageAudience::FullOnly,
+                            }
                         } else {
                             match owner_bot_id.as_ref() {
                                 Some(owner_actor_id) => MessageAudience::Directed {
