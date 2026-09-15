@@ -255,6 +255,30 @@ class TaskQueueRepositoryProtocol(Protocol):
         returned — that is the generation a caller asking "what became of it?"
         means.
         """
+
+    @abstractmethod
+    def postpone_by_idempotency_key(
+        self,
+        *,
+        task_type: str,
+        idempotency_key: str,
+        delay_seconds: int,
+        env: str,
+        app: str,
+    ) -> bool:
+        """Postpone a live PENDING task found by its idempotency key.
+
+        Sets ``run_at = now() + delay_seconds`` on the task that holds
+        ``active_idempotency_key = idempotency_key`` and whose status is
+        PENDING.  Returns ``True`` if a row was updated, ``False`` if no
+        live PENDING task holds the key (the caller should enqueue a new
+        one instead).
+
+        **No-op on non-PENDING rows.**  A RUNNING task is mid-execution
+        and must not be disturbed; a terminal task has already released
+        the active key.  Either case returns ``False`` so the caller
+        falls through to a fresh ``enqueue``.
+        """
         ...
 
 

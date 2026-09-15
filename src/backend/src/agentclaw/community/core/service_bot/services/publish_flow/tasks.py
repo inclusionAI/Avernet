@@ -240,6 +240,10 @@ def build_eval_teardown_payload(*, publish_id: int, bot_uuid: str, operator: str
     return {"publish_id": publish_id, "bot_uuid": bot_uuid, "operator": operator}
 
 
+def _eval_teardown_idempotency_key(publish_id: int, bot_uuid: str) -> str:
+    return f"eval_teardown:{publish_id}:{bot_uuid}"
+
+
 def enqueue_eval_teardown(
     task_queue_service: TaskQueueService,
     *,
@@ -249,13 +253,56 @@ def enqueue_eval_teardown(
     delay_seconds: int = 0,
 ) -> None:
     """Enqueue the durable eval teardown. ``delay_seconds`` = the TTL safety net
-    at publish time; ``0`` for an explicit (post-eval) early teardown."""
+    at publish time; ``0`` for an explicit (post-eval) early teardown.
+
+    An ``idempotency_key`` derived from ``(publish_id, bot_uuid)`` ensures
+    at most one **live** teardown task per environment+app — duplicate
+    enqueues (e.g. from a renewal loop) join the existing live task
+    instead of inserting new rows.
+    """
     task_queue_service.enqueue(
         EVAL_TEARDOWN_TASK,
         build_eval_teardown_payload(
             publish_id=publish_id, bot_uuid=bot_uuid, operator=operator
         ),
         deadline_seconds=_EVAL_TEARDOWN_DEADLINE_SECONDS,
+        delay_seconds=delay_seconds,
+        idempotency_key=_eval_teardown_idempotency_key(publish_id, bot_uuid),
+    )
+
+
+def enqueue_or_postpone_eval_teardown(
+    task_queue_service: TaskQueueService,
+    *,
+    publish_id: int,
+    bot_uuid: str,
+    operator: str,
+    delay_seconds: int = 0,
+) -> None:
+    """Renewal-safe variant of :func:`enqueue_eval_teardown`.
+
+    If a PENDING task with the same ``(publish_id, bot_uuid)`` key already
+    exists, **postpone** it by setting ``run_at = now() + delay_seconds``
+    instead of inserting a new row.  If no PENDING task holds the key (the
+    task is terminal, absent, or already RUNNING), falls back to a fresh
+    ``enqueue``.
+
+    Use this in renewal loops (e.g. ``renew_default_env_ttl``) to avoid
+    inflating the queue with duplicate delayed rows.
+    """
+    postponed = task_queue_service.postpone(
+        EVAL_TEARDOWN_TASK,
+        _eval_teardown_idempotency_key(publish_id, bot_uuid),
+        delay_seconds=delay_seconds,
+    )
+    if postponed:
+        return
+    # No PENDING task to postpone — enqueue a new one.
+    enqueue_eval_teardown(
+        task_queue_service,
+        publish_id=publish_id,
+        bot_uuid=bot_uuid,
+        operator=operator,
         delay_seconds=delay_seconds,
     )
 
@@ -481,6 +528,19 @@ class PublishEvalTeardownHandler(_PublishTaskBase):
         return asyncio.run(self._run(publish_id, bot_uuid, operator))
 
     async def _run(self, publish_id: int, bot_uuid: str, operator: str) -> TaskOutcome:
+        # Short-circuit: if the bot no longer exists on BaaS, the teardown
+        # goal is already met — no need to call destroy_bot (which would
+        # fail with BOT_NOT_FOUND and trigger infinite Retry).
+        try:
+            bot_info = self._flow._baas_service.get_bot(bot_uuid=bot_uuid)
+            if not bot_info:
+                return Complete()
+        except Exception:
+            # Non-fatal: if the existence check itself fails, proceed
+            # with the normal teardown path — the operation runner's
+            # adopt-by-query will handle it.
+            pass
+
         result = await self._flow.execute_eval_teardown(
             publish_id=publish_id, bot_uuid=bot_uuid, operator=operator
         )

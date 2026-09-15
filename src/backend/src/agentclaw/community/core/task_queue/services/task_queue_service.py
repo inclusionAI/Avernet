@@ -131,6 +131,33 @@ class TaskQueueService:
             app=self._config.app,
         )
 
+    def postpone(
+        self,
+        task_type: str,
+        idempotency_key: str,
+        delay_seconds: int,
+    ) -> bool:
+        """Postpone a live PENDING task found by idempotency key.
+
+        Updates ``run_at = now() + delay_seconds`` on an existing PENDING
+        task that holds the given key.  Returns ``True`` if a row was
+        updated, ``False`` if no live PENDING task holds the key (the
+        caller should ``enqueue`` a new one instead).
+
+        This is the renewal primitive for delayed one-shot tasks (like
+        ``eval_teardown``): "I want to push the deadline back by
+        ``delay_seconds``."  It avoids inflating the queue by inserting
+        duplicate rows — each renewal simply moves the existing row's
+        ``run_at`` forward.
+        """
+        return self._repo.postpone_by_idempotency_key(
+            task_type=task_type,
+            idempotency_key=idempotency_key,
+            delay_seconds=delay_seconds,
+            env=get_current_env(),
+            app=self._config.app,
+        )
+
     def _should_wake(
         self, result: EnqueueResult, *, task_type: str, delay_seconds: int
     ) -> bool:
