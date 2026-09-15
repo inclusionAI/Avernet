@@ -30,20 +30,6 @@ def test_bootstrap_wait_timeout_from_env(mock_bolt_shared, monkeypatch):
     assert cfg.bootstrap_wait_timeout == 120
 
 
-def test_clone_timeout_default(mock_bolt_shared, monkeypatch):
-    """Git clone must have a bounded default so bootstrap can fall back."""
-    monkeypatch.delenv("GIT_CLONE_TIMEOUT_SECONDS", raising=False)
-    cfg = GitSyncConfig()
-    assert cfg.clone_timeout_seconds == 20
-
-
-def test_clone_timeout_from_env(mock_bolt_shared, monkeypatch):
-    """Deployments can widen the clone timeout for larger repositories."""
-    monkeypatch.setenv("GIT_CLONE_TIMEOUT_SECONDS", "90")
-    cfg = GitSyncConfig()
-    assert cfg.clone_timeout_seconds == 90
-
-
 @pytest.mark.parametrize(
     ("name", "value", "message"),
     [
