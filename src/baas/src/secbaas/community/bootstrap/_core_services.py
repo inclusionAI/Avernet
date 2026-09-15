@@ -31,8 +31,8 @@ from secbaas.community.core.service.bot_run import (
     BotRunRequestExecutor,
     BotServiceConfig,
     BotServiceSelector,
+    CallerBotService,
     ClawBotService,
-    FixedMachineCountProvider,
     QueueTaskMessageDispatcher,
     ResultGuardExecutor,
     SerializingExecutor,
@@ -426,6 +426,13 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         engine_adapter_registry=engine_adapter_registry,
     )
 
+    # caller 模式：容器由 caller-connection 显式指定（binding.device_provider=="caller"），
+    # 传输层复用 claw，caller 专属校验在 CallerBotService 内（见 _caller_service.py）。
+    caller_bot_service = providers.Singleton(
+        CallerBotService,
+        inner=claw_bot_service,
+    )
+
     # ── Service providers ─────────────────────────────────────────────────────
 
     device_template_service = providers.Singleton(
@@ -555,6 +562,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         BotServiceSelector,
         claw_service=claw_bot_service,
         baas_service=baas_bot_service,
+        caller_service=caller_bot_service,
     )
 
     task_concurrency_pool = providers.Singleton(
@@ -694,13 +702,6 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         candidates_per_bot=config.bot_run_queue.candidates_per_bot,
         max_concurrent=config.bot_run_queue.max_concurrent,
         heartbeat_interval_seconds=config.bot_run_queue.heartbeat_interval_seconds,
-        bucket_sweep_interval_seconds=config.bot_run_queue.bucket_sweep_interval_seconds,
-        bucket_idle_ttl_seconds=config.bot_run_queue.bucket_idle_ttl_seconds,
-    )
-
-    machine_count_provider = providers.Singleton(
-        FixedMachineCountProvider,
-        count=config.bot_run_queue.machine_count,
     )
 
     engine_abort_notifier = providers.Callable(
@@ -720,7 +721,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
                 "http_callback": http_callback,
             }
         ),
-        machine_count_provider=machine_count_provider,
+        lock_service=distributed_lock_service,
         config=bot_request_worker_config,
         engine_abort_notifier=engine_abort_notifier,
     )

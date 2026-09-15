@@ -1,4 +1,4 @@
-"""ConcurrencyLimiter / BotQpmManager / MachineCountProvider 单元测试（阶段一）。"""
+"""BotConcurrencyManager（QPM 配置管理器）单元测试。"""
 
 from __future__ import annotations
 
@@ -8,90 +8,9 @@ import pytest
 
 from secbaas.community.core.service.bot_run._bot_concurrency import (
     BotConcurrencyManager,
-    ConcurrencyLimiter,
-    FixedMachineCountProvider,
 )
 
-# ----------------------------- ConcurrencyLimiter -----------------------------
-
-
-def test_limiter_acquire_and_release():
-    limiter = ConcurrencyLimiter(capacity=2)
-    assert limiter.try_acquire() is True
-    assert limiter.try_acquire() is True
-    assert limiter.try_acquire() is False  # 槽位已满
-    limiter.release()
-    assert limiter.try_acquire() is True  # 归还后可再次获取
-
-
-def test_limiter_has_slot():
-    limiter = ConcurrencyLimiter(capacity=1)
-    assert limiter.has_slot() is True
-    assert limiter.try_acquire() is True
-    assert limiter.has_slot() is False
-
-
-def test_limiter_ref_count():
-    limiter = ConcurrencyLimiter(capacity=3)
-    assert limiter.ref_count == 0
-    limiter.try_acquire()
-    assert limiter.ref_count == 1
-    limiter.try_acquire()
-    assert limiter.ref_count == 2
-    limiter.release()
-    assert limiter.ref_count == 1
-
-
-# ----------------------- min_interval (亚单位并发) ----------------------
-
-
-def test_limiter_min_interval_blocks_immediate_reacquire():
-    """capacity=1 + min_interval: acquire 后立即再 acquire 应被拒绝。"""
-    limiter = ConcurrencyLimiter(capacity=1, min_interval_seconds=10.0)
-    assert limiter.try_acquire() is True
-    limiter.release()  # 槽位归还，但间隔未过
-    assert limiter.has_slot() is False
-    assert limiter.try_acquire() is False
-
-
-def test_limiter_min_interval_allows_after_interval():
-    """间隔过后可以再次 acquire。"""
-    limiter = ConcurrencyLimiter(capacity=1, min_interval_seconds=0.05)
-    assert limiter.try_acquire() is True
-    limiter.release()
-    assert limiter.has_slot() is False
-    time.sleep(0.06)
-    assert limiter.has_slot() is True
-    assert limiter.try_acquire() is True
-
-
-def test_limiter_min_interval_zero_behaves_like_normal():
-    """min_interval=0 时行为与原来一致，不受间隔限制。"""
-    limiter = ConcurrencyLimiter(capacity=1, min_interval_seconds=0.0)
-    assert limiter.try_acquire() is True
-    limiter.release()
-    # 间隔为 0，立即可以再次获取
-    assert limiter.has_slot() is True
-    assert limiter.try_acquire() is True
-
-
-def test_limiter_min_interval_capacity_exhausted_first():
-    """capacity 用尽时 has_slot 先返回 False（槽位检查优先于间隔检查）。"""
-    limiter = ConcurrencyLimiter(capacity=1, min_interval_seconds=10.0)
-    assert limiter.try_acquire() is True
-    # capacity 用尽，has_slot 返回 False（不会走到间隔检查）
-    assert limiter.has_slot() is False
-
-
-# ----------------------- FixedMachineCountProvider ----------------------
-
-
-def test_machine_count_floor_one():
-    assert FixedMachineCountProvider(0).get_machine_count() == 1
-    assert FixedMachineCountProvider(3).get_machine_count() == 3
-
-
-# ----------------------------- BotQpmManager ----------------------------
+# ----------------------------- BotConcurrencyManager ----------------------------
 
 
 class _FakeRepo:

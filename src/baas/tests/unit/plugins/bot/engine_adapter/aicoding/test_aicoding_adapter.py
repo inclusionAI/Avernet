@@ -41,17 +41,10 @@ def test_ws_path_is_api_ws(factory: type) -> None:
 
 
 @pytest.mark.parametrize("factory", ADAPTERS)
-def test_session_consistency_key_none_without_session_id(factory: type) -> None:
+def test_session_consistency_key_returns_structured_key(factory: type) -> None:
+    """real aicoding 覆写返回结构化亲和键（与 claude_code/hermes 同形）。"""
     key = factory().session_consistency_key(tc_bot_id="b1", user_id="u1", run_id="r1")
-    assert key is None
-
-
-@pytest.mark.parametrize("factory", ADAPTERS)
-def test_session_consistency_key_prefers_session_id(factory: type) -> None:
-    key = factory().session_consistency_key(
-        tc_bot_id="b1", user_id="u1", run_id="r1", session_id="s1"
-    )
-    assert key == "s1"
+    assert key == "agent:b1:session:r1:user:u1"
 
 
 @pytest.mark.asyncio
@@ -97,12 +90,7 @@ def test_noop_returns_safe_zero_values(noop_cls: type) -> None:
     """Noop 不抛异常、返回安全零值。"""
     a = noop_cls()
     assert isinstance(a.ws_path(), str)
-    assert (
-        a.session_consistency_key(
-            tc_bot_id="b1", user_id="u1", run_id="r1", session_id="s1"
-        )
-        is None
-    )
+    assert a.session_consistency_key(tc_bot_id="b1", user_id="u1", run_id="r1") is None
 
 
 class TestNoopAICodingAdapterCreateSession:

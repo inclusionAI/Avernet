@@ -570,12 +570,8 @@ class TestTryAcquireLock:
         repo, mock_session = _make_repo("mysql")
         mock_session.execute.side_effect = [
             _make_exec_result(None),
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
         ]
 
         result = repo.try_acquire_lock(
@@ -597,12 +593,8 @@ class TestTryAcquireLock:
         repo, mock_session = _make_repo("mysql")
         mock_session.execute.side_effect = [
             _make_exec_result(_make_model(lock_holder="holder-B", expire_time=PAST)),
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
         ]
 
         result = repo.try_acquire_lock(
@@ -617,15 +609,9 @@ class TestTryAcquireLock:
         # → upsert renews → confirm shows self.
         repo, mock_session = _make_repo("mysql")
         mock_session.execute.side_effect = [
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
         ]
 
         result = repo.try_acquire_lock(
@@ -645,12 +631,8 @@ class TestTryAcquireLock:
         repo, mock_session = _make_repo("mysql")
         mock_session.execute.side_effect = [
             _make_exec_result(None),
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
-            _make_exec_result(
-                _make_model(lock_holder="holder-B", expire_time=FUTURE)
-            ),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
+            _make_exec_result(_make_model(lock_holder="holder-B", expire_time=FUTURE)),
         ]
 
         result = repo.try_acquire_lock(
@@ -668,12 +650,8 @@ class TestTryAcquireLock:
         repo, mock_session = _make_repo("mysql")
         mock_session.execute.side_effect = [
             _make_exec_result(_make_model(lock_holder="holder-B", expire_time=None)),
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
-            _make_exec_result(
-                _make_model(lock_holder="holder-A", expire_time=FUTURE)
-            ),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
+            _make_exec_result(_make_model(lock_holder="holder-A", expire_time=FUTURE)),
         ]
 
         result = repo.try_acquire_lock(

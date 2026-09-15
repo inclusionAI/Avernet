@@ -400,6 +400,18 @@ class AiohttpBotServicePlugin(BotServicePlugin):
             f"stage={stage}",
         )
 
+    # ─────────────────── get_caller_connection (error-propagating) ───────────────────
+
+    async def get_caller_connection(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+        token: str,
+    ) -> str:
+        raise NotImplementedError()
+
     # ───────────────────────── 生命周期 ─────────────────────────
 
     async def close(self) -> None:

@@ -25,8 +25,7 @@ class NoopAICodingAdapter:
         *,
         tc_bot_id: str,
         user_id: str,
-        run_id: str | None,
-        session_id: str | None = None,
+        run_id: str,
     ) -> str | None:
         return None
 
@@ -67,14 +66,9 @@ class MockAICodingAdapter:
         *,
         tc_bot_id: str,
         user_id: str,
-        run_id: str | None,
-        session_id: str | None = None,
+        run_id: str,
     ) -> str | None:
-        self.calls.append(
-            ("session_consistency_key", tc_bot_id, user_id, run_id, session_id)
-        )
-        if session_id is not None:
-            return session_id
+        self.calls.append(("session_consistency_key", tc_bot_id, user_id, run_id))
         return None
 
     async def create_adapter_session(

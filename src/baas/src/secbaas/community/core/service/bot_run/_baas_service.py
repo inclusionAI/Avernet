@@ -16,6 +16,7 @@ baas_session_id 通过 binding_info.baas_session_id 传递。
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import datetime
@@ -50,11 +51,17 @@ from ._async_chat_client import ConcurrentSessionError
 from ._async_chat_client_pool import AsyncChatClientPool
 from ._async_session_client import AsyncSessionClient
 from ._async_session_client import SessionInfo as AdapterSessionInfo
-from ._bot_run_utils import resolve_user_id
+from ._bot_run_utils import (
+    extract_session_key_from_planned_id,
+    plan_session_id,
+    resolve_user_id,
+    strip_agent_main_prefix,
+)
 from ._internal_protocols import BotService
 
 if TYPE_CHECKING:
     from secbaas.community.spi.bot.engine_adapter import BotEngineAdapter
+    from secbaas.community.spi.eval_env import EvalConsistencyCheckProtocol
 
     from ._engine_adapter_registry import BotEngineAdapterRegistry
 
@@ -64,23 +71,6 @@ DEFAULT_WS_PATH = "/api/openclaw/ws"
 DEFAULT_ADAPTER_PORT = 20003
 DEFAULT_REQUEST_TIMEOUT = 30
 DEFAULT_CONNECT_TIMEOUT = 10
-
-# openclaw 给持久化 session id 加的固定前缀; 路由亲和键必须对有无该前缀不敏感,
-# 否则同一会话经 DingTalk(裸 id)与 Open API(带前缀 id)两次投递会哈希到不同实例。
-_AGENT_MAIN_PREFIX = "agent:main:"
-
-
-def _strip_agent_main_prefix(session_id: str) -> str:
-    """剥离前导 ``agent:main:`` 前缀,使设备路由亲和键对前缀有无不敏感。
-
-    openclaw 会在持久化/返回 session id 时加上 ``agent:main:`` 前缀,而 DingTalk 入站
-    携带的是裸 id;若直接把调用方原样传入的 session_id 作为 ``device_affinity`` 哈希,
-    同一会话两次调用(裸 id vs 带前缀 id)会命中不同实例。在构造亲和键处统一剥离前缀,
-    使两种形式哈希到同一设备。循环剥离以对重复前缀幂等。
-    """
-    while session_id.startswith(_AGENT_MAIN_PREFIX):
-        session_id = session_id[len(_AGENT_MAIN_PREFIX) :]
-    return session_id
 
 
 def _safe_client_msg(exc: Exception) -> str:
@@ -135,8 +125,8 @@ class BaasBotService(BotService):
         client_pool: AsyncChatClientPool,
         wss_resolver: DefaultBotWssDispatcher,
         session_service: DefaultSessionService,
-        engine_adapter_registry: BotEngineAdapterRegistry | None = None,
-        eval_consistency_check: Any | None = None,
+        engine_adapter_registry: BotEngineAdapterRegistry,
+        eval_consistency_check: EvalConsistencyCheckProtocol,
     ) -> None:
         self._config = config
         self._client_pool = client_pool
@@ -155,9 +145,9 @@ class BaasBotService(BotService):
         *,
         bot_id: str,
         session_id: str | None = None,
-        metadata: dict[str, Any] | None = None,
-        binding_info: BotBindingInfo | None = None,
-        context: BotChatContext | None = None,
+        metadata: dict[str, Any],
+        binding_info: BotBindingInfo,
+        context: BotChatContext,
         run_id: str | None = None,
     ) -> SessionInfo:
         """Create a new conversation session.
@@ -191,43 +181,36 @@ class BaasBotService(BotService):
             BotNotAvailableError: If no active devices or connection fails.
         """
         # Extract tenant from context.extra, fallback to metadata for backward compat
-        tenant = None
-        invoker = None
-        if context is not None:
-            invoker = context.api_key_prefix
-            if context.tenant:
-                tenant = context.tenant
+        tenant = context.tenant or None
+        invoker = context.api_key_prefix
 
-        metadata = metadata or {}
         if not tenant:
             tenant = metadata.get("tenant")
 
         logger.info(
             "[BaasBotService.create_session] bot_id=%s, session_id=%s, "
-            "has_binding_info=%s, tenant=%s, invoker=%s, service_type=%s",
+            "tenant=%s, invoker=%s, service_type=%s",
             bot_id,
             session_id,
-            binding_info is not None,
             tenant,
             invoker,
             "BaasBotService",
         )
-        if binding_info:
-            logger.info(
-                "[BaasBotService.create_session] binding_info: "
-                "device_provider=%s, device_id=%s, binding_id=%s, bot_type=%s",
-                binding_info.device_provider,
-                binding_info.device_id,
-                binding_info.binding_id,
-                binding_info.bot_type,
-            )
+        logger.info(
+            "[BaasBotService.create_session] binding_info: "
+            "device_provider=%s, device_id=%s, binding_id=%s, bot_type=%s",
+            binding_info.device_provider,
+            binding_info.device_id,
+            binding_info.binding_id,
+            binding_info.bot_type,
+        )
 
         logger.info(
             "[BaasBotService.create_session] Extracted tenant: "
             "tenant=%r, invoker=%r, metadata_keys=%s",
             tenant,
             invoker,
-            list(metadata.keys()) if metadata else [],
+            list(metadata.keys()),
         )
         if not tenant:
             raise BotServiceError(
@@ -244,7 +227,7 @@ class BaasBotService(BotService):
         user_id = resolve_user_id(metadata, binding_info, context, bot_id)
 
         # 评测流量：提取 eval_id 供 consistency_key 构造使用
-        eval_id = metadata.get("eval_id") if metadata else None
+        eval_id = metadata.get("eval_id")
 
         # Step 1: Resolve bot_uuid → WsConnectionInfo (also verifies bot is ACTIVE)
         env = get_current_env()
@@ -256,30 +239,20 @@ class BaasBotService(BotService):
             env,
         )
         try:
-            engine_type = binding_info.engine_type if binding_info else None
-            # consistency key:命中 adapter 走 adapter,否则走原始分支。
-            _adapter = self._adapter_for(engine_type)
-            if _adapter is not None:
-                session_consistency_key = _adapter.session_consistency_key(
-                    tc_bot_id=binding_info.bot_id,
-                    user_id=user_id,
-                    run_id=eval_id or run_id,
-                    session_id=session_id,
-                )
+            engine_type = binding_info.engine_type
+            if session_id:
+                session_consistency_key = session_id
             else:
-                session_consistency_key = self._create_session_consistency_key(
+                run_id = str(uuid.uuid4())
+                session_consistency_key = plan_session_id(
                     engine_type=engine_type,
                     tc_bot_id=binding_info.bot_id,
                     user_id=user_id,
                     run_id=run_id,
-                    session_id=session_id,
                     eval_id=eval_id,
+                    adapter=self._adapter_for(engine_type),
                 )
-            consistency_key = (
-                _strip_agent_main_prefix(session_consistency_key)
-                if session_consistency_key
-                else None
-            )
+            consistency_key = strip_agent_main_prefix(session_consistency_key)
             conn_info = await self._resolve_ws_connection(
                 bot_id, tenant, engine_type, consistency_key
             )
@@ -388,8 +361,7 @@ class BaasBotService(BotService):
             session_info=session_info,
             conn_info=conn_info,
         )
-        if binding_info is not None:
-            binding_info.baas_session_id = baas_session_id
+        binding_info.baas_session_id = baas_session_id
 
         return session_info
 
@@ -404,6 +376,7 @@ class BaasBotService(BotService):
         timeout: float,
         chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> BotResponse:
         """Send a message and get response via ChatClient.
 
@@ -419,6 +392,9 @@ class BaasBotService(BotService):
             wait_result: Whether to wait for result.
             context: Optional request context.
             timeout: Optional timeout in seconds. None means no limit.
+            chat_metadata: Optional chat metadata.
+            attachments: Optional attachments.
+            session_pending: session_id 为提前构造的计划值，发送前需先物化。
 
         Returns:
             BotResponse: The bot's response.
@@ -426,6 +402,14 @@ class BaasBotService(BotService):
         Raises:
             BotServiceError: If request fails.
         """
+        if session_pending:
+            await self._materialize_session(
+                session_id=session_id,
+                binding_info=binding_info,
+                context=context,
+                metadata=dict(chat_metadata) if chat_metadata else {},
+            )
+
         baas_session_id = binding_info.baas_session_id
 
         # eval 消息一致性检查与日志 — 委托 Plugin
@@ -435,17 +419,10 @@ class BaasBotService(BotService):
                 chat_metadata.get("eval_id"),
                 session_id,
             )
-            if self._eval_consistency_check is not None:
-                self._eval_consistency_check.check_default_tag_consistency(
-                    binding_info=binding_info,
-                    chat_metadata=chat_metadata,
-                )
-            else:
-                logger.warning(
-                    "[BaasBotService.send_message] eval_consistency_check not injected, "
-                    "skipping consistency check for session_id=%s",
-                    session_id,
-                )
+            self._eval_consistency_check.check_default_tag_consistency(
+                binding_info=binding_info,
+                chat_metadata=chat_metadata,
+            )
 
         try:
             conn_info = await self._resolve_ws_connection_for_binding(
@@ -510,6 +487,7 @@ class BaasBotService(BotService):
         timeout: float,
         chat_metadata: dict[str, str] | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         """流式发送消息，逐 chunk 产出 StreamChunk。
 
@@ -518,6 +496,14 @@ class BaasBotService(BotService):
 
         会话状态在流结束后标记完成/失败。
         """
+        if session_pending:
+            await self._materialize_session(
+                session_id=session_id,
+                binding_info=binding_info,
+                context=context,
+                metadata=dict(chat_metadata) if chat_metadata else {},
+            )
+
         baas_session_id = binding_info.baas_session_id
         engine_type = binding_info.engine_type
 
@@ -529,17 +515,10 @@ class BaasBotService(BotService):
                 chat_metadata.get("eval_id"),
                 session_id,
             )
-            if self._eval_consistency_check is not None:
-                self._eval_consistency_check.check_default_tag_consistency(
-                    binding_info=binding_info,
-                    chat_metadata=chat_metadata,
-                )
-            else:
-                logger.warning(
-                    "[BaasBotService.send_message_stream] eval_consistency_check not injected, "
-                    "skipping consistency check for session_id=%s",
-                    session_id,
-                )
+            self._eval_consistency_check.check_default_tag_consistency(
+                binding_info=binding_info,
+                chat_metadata=chat_metadata,
+            )
 
         try:
             conn_info = await self._resolve_ws_connection_for_binding(
@@ -607,6 +586,7 @@ class BaasBotService(BotService):
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         attachments: list[Any] | None = None,
+        session_pending: bool = False,
     ) -> None:
         """注入消息到已有会话
 
@@ -618,7 +598,17 @@ class BaasBotService(BotService):
             message: 注入的消息内容
             binding_info: Binding info for WS connection (contains baas_session_id).
             context: 可选的请求上下文（身份认证、调用者信息等）
+            attachments: 附件
+            session_pending: session_id 为提前构造的计划值，注入前需先物化。
         """
+        if session_pending:
+            await self._materialize_session(
+                session_id=session_id,
+                binding_info=binding_info,
+                context=context,
+                metadata={},
+            )
+
         baas_session_id = binding_info.baas_session_id
 
         try:
@@ -889,9 +879,8 @@ class BaasBotService(BotService):
         只有 aicoding / hermes / claude_code 会命中；openclaw / teclaw 恒返回 None
         → 三处接缝走 else 原始分支（字节级不变）。
         """
-        reg = self._engine_adapter_registry
-        if reg is not None and engine_type and reg.has(engine_type):
-            return reg.get(engine_type)
+        if engine_type and self._engine_adapter_registry.has(engine_type):
+            return self._engine_adapter_registry.get(engine_type)
         return None
 
     async def _resolve_ws_connection(
@@ -974,7 +963,7 @@ class BaasBotService(BotService):
         # 与 create_session 路径一致:剥离前导 agent:main: 前缀,使 send/inject 等
         # API 路径的 device 路由对前缀有无不敏感(同一会话跨通道落到同一实例)。
         affinity = (
-            _strip_agent_main_prefix(session_id) if session_id is not None else None
+            strip_agent_main_prefix(session_id) if session_id is not None else None
         )
         return await self._resolve_ws_connection(
             bot_uuid,
@@ -1109,6 +1098,101 @@ class BaasBotService(BotService):
                     adapter_session_id = f"agent:main:{adapter_session_id}"
             logger.info("Adapter session created: session_id=%s", adapter_session_id)
             return adapter_session_id, False
+
+    async def _materialize_session(
+        self,
+        *,
+        session_id: str,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None,
+        metadata: dict[str, Any],
+    ) -> None:
+        """延迟物化：resolve WS → adapter 创建 → persist → 回填 baas_session_id。
+
+        用预先构造的 session_id 在 adapter 侧创建会话：
+        teclaw 复用 _get_or_create_teclaw_session 的"探测-不存在再创建"语义，
+        其余 engine 用裸 session key 直接创建（引擎侧幂等）。
+        """
+        tenant = metadata.get("tenant", "")
+        if not tenant and context and context.tenant:
+            tenant = context.tenant
+        if not tenant:
+            raise BotServiceError(
+                f"tenant is required for materialize session, session_id={session_id}"
+            )
+
+        # 注入 invoker/tenant 供 _persist_session_create 使用
+        if context and context.api_key_prefix:
+            metadata["invoker"] = context.api_key_prefix
+        metadata["tenant"] = tenant
+
+        user_id = resolve_user_id(metadata, binding_info, context, binding_info.bot_id)
+        engine_type = binding_info.engine_type
+
+        # WS 连接解析（用 planned session_id 作为 consistency_key，保证设备亲和）
+        consistency_key = strip_agent_main_prefix(session_id)
+        try:
+            conn_info = await self._resolve_ws_connection(
+                binding_info.bot_id, tenant, engine_type, consistency_key
+            )
+        except Exception as e:
+            raise BotServiceError(
+                f"Failed to resolve WS connection for materialize: {_safe_client_msg(e)}"
+            ) from e
+
+        # adapter 侧创建：teclaw 需先探测 session 是否存在，其余 engine 直接创建
+        # adapter 的 create_session(uuid=...) 期望接收裸 session key，
+        # 而非完整 planned id（agent:main:session:{key}:user:{user_id}）
+        adapter_uuid = extract_session_key_from_planned_id(session_id)
+        session_client = self._create_session_client(
+            conn_info, engine_type, metadata=metadata
+        )
+        try:
+            async with session_client:
+                reused = False
+                if engine_type == "teclaw":
+                    _, reused = await self._get_or_create_teclaw_session(
+                        session_client,
+                        session_id,
+                        user_id,
+                        metadata,
+                        binding_info.bot_id,
+                    )
+                else:
+                    await session_client.create_session(
+                        title=metadata.get("title"),
+                        user_id=user_id,
+                        agent_id=binding_info.bot_id,
+                        model=metadata.get("model"),
+                        engine=engine_type,
+                        uuid=adapter_uuid,
+                    )
+                logger.info(
+                    "[materialize_session] %s: session_id=%s, bot_id=%s",
+                    "reused" if reused else "created",
+                    session_id,
+                    binding_info.bot_id,
+                )
+        except BotServiceError:
+            raise
+        except Exception as e:
+            raise BotServiceError(
+                f"Failed to materialize session {session_id}: {_safe_client_msg(e)}"
+            ) from e
+
+        # 持久化并回填 baas_session_id
+        session_info = SessionInfo(
+            session_id=session_id,
+            bot_id=binding_info.bot_id,
+            status="active",
+            created_at=datetime.now(),
+            metadata=metadata,
+        )
+        baas_session_id = self._persist_session_create(
+            session_info=session_info,
+            conn_info=conn_info,
+        )
+        binding_info.baas_session_id = baas_session_id
 
     def _persist_session_create(
         self,
@@ -1261,53 +1345,6 @@ class BaasBotService(BotService):
             adapter_session_id = adapter_session.id
             logger.info("Adapter session created: session_id=%s", adapter_session_id)
             return adapter_session_id, False
-
-    def _create_session_consistency_key(
-        self,
-        engine_type: str,
-        tc_bot_id: str,
-        user_id: str,
-        run_id: str,
-        session_id: str | None = None,
-        eval_id: str | None = None,
-    ) -> str | None:
-        """Create consistency key for session routing.
-
-        The affinity key drives consistent-hash device routing, so it must be
-        stable for a conversation regardless of whether the caller supplied the
-        ``agent:main:`` prefix. A caller-supplied ``session_id`` is therefore
-        canonicalized by stripping a leading ``agent:main:`` so the DingTalk
-        path (raw id) and the Open API path (prefixed id) hash to the same
-        device. The persisted/returned session id contract is unchanged.
-
-        When ``eval_id`` is present (eval traffic) and ``session_id`` is None
-        (first round), the eval_id replaces run_id in the session field,
-        producing a structured key like ``agent:{id}:session:{evalId}:user:{uid}``
-        that is consistent with the production format.
-        """
-        if session_id is not None:
-            return session_id
-
-        session_key = eval_id if eval_id else run_id
-
-        if engine_type == "openclaw":
-            # Fixed prefix 'agent:main:'
-            return f"agent:main:session:{session_key}:user:{user_id}"
-        elif engine_type in {"claude_code", "deepseek_harness"}:
-            return f"agent:{tc_bot_id}:session:{session_key}:user:{user_id}"
-        elif engine_type == "teclaw":
-            # 仅评测流量（eval_id 存在）时构造结构化 key，
-            # 生产流量返回 None，保持 TeClaw adapter 原有 sessionKey 生成逻辑
-            if eval_id:
-                return f"agent:{tc_bot_id}:session:{session_key}:user:{user_id}"
-            return None
-        else:
-            logger.warning(
-                "[_create_session_consistency_key] unsupported engine_type=%s, "
-                "returning None",
-                engine_type,
-            )
-            return None
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
