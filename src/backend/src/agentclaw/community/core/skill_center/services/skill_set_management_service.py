@@ -24,6 +24,9 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneNotFoundError,
     SkillSetAccessDeniedError,
 )
+from agentclaw.community.core.mcp.mcp_config_service_protocol import (
+    MCPConfigServiceProtocol,
+)
 from agentclaw.community.core.skill_center.policies.capability_ownership import (
     require_non_platform_mcp,
 )
@@ -52,6 +55,11 @@ from agentclaw.community.core.skill_center.services._mutation_flow import (
     skill_claim_scope,
     skill_release_scope,
 )
+from agentclaw.community.core.skill_center.services.mcp_admission import (
+    mcp_catalog_entry,
+    require_mcp_delivery_eligibility,
+    resolve_mcp_catalog_detail,
+)
 from agentclaw.community.core.skill_center.skill_set_batch import (
     SkillSetSkillOutcome,
 )
@@ -78,6 +86,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         audit_log_repo: BotCollabLogRepositoryProtocol,
         mcp_center: MCPCenterPlugin,
         mcp_auth: MCPAuthPlugin,
+        mcp_config: MCPConfigServiceProtocol,
         ext_info_provider: Callable[[str], Mapping[str, Any] | None],
         recovery: DesktopSkillRecoveryServiceProtocol,
     ) -> None:
@@ -91,6 +100,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         self._audit_log_repo = audit_log_repo
         self._mcp_center = mcp_center
         self._mcp_auth = mcp_auth
+        self._mcp_config = mcp_config
         self._platform_default_mcp_policy = PlatformDefaultMcpPolicy(
             ext_info_provider
         )
@@ -646,6 +656,14 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
             )
             if server_code not in codes:
                 raise SkillSetControlPlaneConflictError("SYSTEM_DEFAULT_IMMUTABLE")
+            detail = resolve_mcp_catalog_detail(self._mcp_center, server_code)
+            require_mcp_delivery_eligibility(
+                mcp_config=self._mcp_config,
+                engine_type=self._engine(bot),
+                owner_id=str(bot["owner_id"]),
+                server_code=server_code,
+                detail=detail,
+            )
             return await self._mutate(
                 bot=bot,
                 bot_id=bot_id,
@@ -665,7 +683,15 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
         require_non_platform_mcp(
             server_code=server_code, platform_default_codes=platform_default_codes
         )
-        catalog = self._mcp_catalog_entry(server_code)
+        detail = resolve_mcp_catalog_detail(self._mcp_center, server_code)
+        require_mcp_delivery_eligibility(
+            mcp_config=self._mcp_config,
+            engine_type=self._engine(bot),
+            owner_id=str(bot["owner_id"]),
+            server_code=server_code,
+            detail=detail,
+        )
+        catalog = mcp_catalog_entry(server_code, detail)
         return await self._mutate(
             bot=bot,
             bot_id=bot_id,
@@ -893,28 +919,6 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
     def _is_public_mcp(self, server_code: str) -> bool:
         detail = self._mcp_center.get_mcp_detail(server_code)
         return bool(detail and detail.get("accessLevel") == "PUBLIC")
-
-    def _mcp_catalog_entry(self, server_code: str) -> dict[str, Any]:
-        """The catalogue metadata a new membership row carries.
-
-        The row is what every read-side answer renders, so it holds the
-        catalogue's own name/description/icon rather than the server code
-        standing in for all three. Resolved before the mutation opens: a code
-        the catalogue does not know is a 404 at the boundary, not a membership
-        row persisted under a placeholder name.
-
-        A known entry that simply carries no display name still installs — the
-        server code is a usable label, and refusing there would reject an
-        install over a cosmetic gap in someone else's catalogue.
-        """
-        detail = self._mcp_center.get_mcp_detail(server_code)
-        if not detail:
-            raise SkillSetControlPlaneNotFoundError("MCP server not found")
-        return {
-            "name": str(detail.get("name") or server_code),
-            "description": detail.get("description"),
-            "icon": detail.get("icon"),
-        }
 
     def _require_set_mcp_permissions(
         self, *, bot_id: str, actor_id: str, set_id: str, bot: dict

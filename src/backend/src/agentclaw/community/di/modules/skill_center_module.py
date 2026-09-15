@@ -491,6 +491,7 @@ class SkillCenterModule(
         audit_log_repo: BotCollabLogRepositoryProtocol,
         mcp_center: MCPCenterPlugin,
         mcp_auth: MCPAuthPlugin,
+        mcp_config: MCPConfigService,
         recovery: DesktopSkillRecoveryServiceProtocol,
         injector: Injector,
     ) -> SkillSetManagementServiceProtocol:
@@ -510,6 +511,7 @@ class SkillCenterModule(
             audit_log_repo,
             mcp_center,
             mcp_auth,
+            mcp_config,
             ext_info_provider=_build__ext_info_provider(injector),
             recovery=recovery,
         )
