@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { EvolveTask } from '../../api/client'
 import SkillTaskRuntimePanel from '../SkillTaskRuntimePanel'
 
@@ -19,7 +19,7 @@ function panel(value: EvolveTask) {
   return <SkillTaskRuntimePanel task={value} canOperate={false} onUpdated={async () => {}} />
 }
 
-const readyDiff = { files: [{ path: 'SKILL.md', change: 'modified', before: 'Frozen baseline', after: 'Ready candidate' }] }
+const readyDiff = { files: [{ path: 'SKILL.md', change: 'modified', before: 'shared\nFrozen baseline', after: 'shared\nReady candidate' }] }
 
 beforeEach(() => { vi.stubGlobal('React', React); vi.resetAllMocks() })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
@@ -33,8 +33,15 @@ describe('Skill candidate diff polling', () => {
 
     view.rerender(panel(task({ ref: 'candidate/package.zip', sha256: 'ready-hash' })))
 
-    await screen.findByText('Ready candidate')
-    expect(screen.getByText('Frozen baseline')).toBeTruthy()
+    const summary = await screen.findByText('Skill 候选版本')
+    const candidate = summary.closest('details')!
+    expect(candidate.open).toBe(false)
+    expect(screen.queryByText('完整对比')).toBeNull()
+    fireEvent.click(summary)
+    expect(candidate.open).toBe(true)
+    expect(candidate.textContent).toContain('-Frozen baseline')
+    expect(candidate.textContent).toContain('+Ready candidate')
+    expect(screen.queryByText('任务开始时')).toBeNull()
     expect(screen.queryByText('候选尚未生成')).toBeNull()
     expect(api.evolve.getTaskSkillDiff).toHaveBeenCalledTimes(1)
   })

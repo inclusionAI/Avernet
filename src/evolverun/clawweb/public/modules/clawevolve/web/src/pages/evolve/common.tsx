@@ -59,6 +59,79 @@ export function GitDiffView({ content }: { content: string }) {
   return <div className="mt-2 space-y-3">{fileNodes}</div>
 }
 
+export type BeforeAfterDiffFile = {
+  path: string
+  change: string
+  before?: string | null
+  after?: string | null
+}
+
+export function createUnifiedDiff(files: BeforeAfterDiffFile[]): string {
+  return files.map((file) => {
+    const before = splitDiffLines(file.before)
+    const after = splitDiffLines(file.after)
+    const oldPath = file.change === 'added' ? '/dev/null' : `a/${file.path}`
+    const newPath = file.change === 'deleted' ? '/dev/null' : `b/${file.path}`
+    const body = lineChanges(before, after).map((line) => line.kind + line.value)
+    return [
+      `diff --git a/${file.path} b/${file.path}`,
+      `--- ${oldPath}`,
+      `+++ ${newPath}`,
+      `@@ -${before.length ? 1 : 0},${before.length} +${after.length ? 1 : 0},${after.length} @@`,
+      ...body,
+    ].join('\n')
+  }).join('\n')
+}
+
+function splitDiffLines(value?: string | null): string[] {
+  if (!value) return []
+  const lines = value.replace(/\r\n/g, '\n').split('\n')
+  if (lines.at(-1) === '') lines.pop()
+  return lines
+}
+
+function lineChanges(before: string[], after: string[]): Array<{ kind: ' ' | '+' | '-'; value: string }> {
+  const cells = (before.length + 1) * (after.length + 1)
+  if (cells > 2_000_000) return largeFileLineChanges(before, after)
+  const width = after.length + 1
+  const lengths = new Uint32Array(cells)
+  for (let oldIndex = before.length - 1; oldIndex >= 0; oldIndex -= 1) {
+    for (let newIndex = after.length - 1; newIndex >= 0; newIndex -= 1) {
+      const index = oldIndex * width + newIndex
+      lengths[index] = before[oldIndex] === after[newIndex]
+        ? lengths[(oldIndex + 1) * width + newIndex + 1] + 1
+        : Math.max(lengths[(oldIndex + 1) * width + newIndex], lengths[index + 1])
+    }
+  }
+  const result: Array<{ kind: ' ' | '+' | '-'; value: string }> = []
+  let oldIndex = 0
+  let newIndex = 0
+  while (oldIndex < before.length || newIndex < after.length) {
+    if (oldIndex < before.length && newIndex < after.length && before[oldIndex] === after[newIndex]) {
+      result.push({ kind: ' ', value: before[oldIndex] }); oldIndex += 1; newIndex += 1
+    } else if (oldIndex < before.length && (newIndex === after.length || lengths[(oldIndex + 1) * width + newIndex] >= lengths[oldIndex * width + newIndex + 1])) {
+      result.push({ kind: '-', value: before[oldIndex] }); oldIndex += 1
+    } else {
+      result.push({ kind: '+', value: after[newIndex] }); newIndex += 1
+    }
+  }
+  return result
+}
+
+function largeFileLineChanges(before: string[], after: string[]): Array<{ kind: ' ' | '+' | '-'; value: string }> {
+  let prefix = 0
+  while (prefix < before.length && prefix < after.length && before[prefix] === after[prefix]) prefix += 1
+  let suffix = 0
+  while (suffix < before.length - prefix && suffix < after.length - prefix
+    && before[before.length - 1 - suffix] === after[after.length - 1 - suffix]) suffix += 1
+  return [
+    ...before.slice(0, prefix).map((value) => ({ kind: ' ' as const, value })),
+    ...before.slice(prefix, before.length - suffix).map((value) => ({ kind: '-' as const, value })),
+    ...after.slice(prefix, after.length - suffix).map((value) => ({ kind: '+' as const, value })),
+    ...before.slice(before.length - suffix).map((value) => ({ kind: ' ' as const, value })),
+  ]
+}
+
 function buildDiffFileNodes(content: string) {
   const normalized = content.replace(/\r\n/g, '\n')
   const starts = [...normalized.matchAll(/^diff --git /gm)].map((match) => match.index ?? 0)
@@ -93,6 +166,8 @@ function renderGitDiffRows(content: string) {
     let oldNumber: number | null = null
     let newNumber: number | null = null
     let tone = 'bg-white text-gray-700'
+    const addition = line.startsWith('+') && !line.startsWith('+++ ')
+    const deletion = line.startsWith('-') && !line.startsWith('--- ')
     if (hunk) {
       oldLine = Number(hunk[1])
       newLine = Number(hunk[2])
@@ -101,11 +176,11 @@ function renderGitDiffRows(content: string) {
       tone = 'bg-gray-100 text-gray-700 font-semibold'
     } else if (line.startsWith('--- ') || line.startsWith('+++ ')) {
       tone = 'bg-gray-50 text-gray-600 font-semibold'
-    } else if (line.startsWith('+')) {
+    } else if (addition) {
       newNumber = newLine
       if (newLine != null) newLine += 1
       tone = 'bg-emerald-50 text-emerald-900'
-    } else if (line.startsWith('-')) {
+    } else if (deletion) {
       oldNumber = oldLine
       if (oldLine != null) oldLine += 1
       tone = 'bg-red-50 text-red-900'
@@ -115,13 +190,13 @@ function renderGitDiffRows(content: string) {
       if (oldLine != null) oldLine += 1
       if (newLine != null) newLine += 1
     }
-    const marker = line.startsWith('+') ? '+' : line.startsWith('-') ? '−' : hunk ? '•' : ' '
+    const marker = addition ? '+' : deletion ? '-' : hunk ? '•' : ' '
     return (
       <div key={index} className={`flex min-w-max border-b border-gray-100 last:border-b-0 ${tone}`}>
         <span className="sticky left-0 w-11 shrink-0 select-none border-r border-gray-200 bg-inherit px-2 text-right text-gray-400">{oldNumber ?? ''}</span>
         <span className="sticky left-11 w-11 shrink-0 select-none border-r border-gray-200 bg-inherit px-2 text-right text-gray-400">{newNumber ?? ''}</span>
         <span className="w-7 shrink-0 select-none text-center font-semibold opacity-70">{marker}</span>
-        <span className="whitespace-pre pr-4">{line.startsWith('+') || line.startsWith('-') ? line.slice(1) : line || ' '}</span>
+        <span className="whitespace-pre pr-4">{addition || deletion ? line.slice(1) : line || ' '}</span>
       </div>
     )
   })

@@ -43,6 +43,24 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('fixed Skill advanced task form', () => {
+  it('submits the explicit date range represented by the current diagnosis lookback', async () => {
+    const expectedDate = (offsetDays: number) => {
+      const date = new Date()
+      date.setDate(date.getDate() + offsetDays)
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    }
+    open()
+    await ready()
+    fireEvent.change(screen.getByRole('combobox', { name: '会话时间范围' }), { target: { value: '14' } })
+    fireEvent.click(submit())
+
+    await waitFor(() => expect(api.evolve.createDiagnosis).toHaveBeenCalledOnce())
+    const payload = api.evolve.createDiagnosis.mock.calls[0][0]
+    expect(payload.diagnoseIntent).toContain('最近14天')
+    expect(payload.startDate).toBe(expectedDate(-14))
+    expect(payload.endDate).toBe(expectedDate(0))
+  })
+
   it('labels fixed Skill diagnosis and previews its registered name while preserving Plan', async () => {
     api.evolve.getSkillAsset.mockResolvedValue({ ...asset, name: 'daily-report-zh' })
     open()

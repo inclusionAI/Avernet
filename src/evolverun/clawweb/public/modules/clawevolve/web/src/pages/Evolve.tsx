@@ -1087,6 +1087,8 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
             setSubmitting(true); setSubmitError('')
             try {
               const taskInfo = { taskName: taskName.trim(), remark: remark.trim() || undefined }
+              const payloadStartDate = taskType === 'diagnose' ? dateValue(-parsedLookbackDays) : startDate
+              const payloadEndDate = taskType === 'diagnose' ? dateValue() : endDate
               const fullNodeCommandYamls = customCommands
                 ? Object.fromEntries(Object.entries(nodeCommandYamls).filter(([node]) =>
                     effectiveStageSelection[node as keyof StageSelectionDraft] !== false))
@@ -1098,7 +1100,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
                 apiKey: effectiveJudgeBackend === 'api' ? apiKey.trim() : undefined, model: diagnoseModel,
                 diagnoseIntent, maxSessions: parsedMaxDiagnoseSessions,
                 goal: taskType === 'full' ? evolutionGoal.trim() : undefined,
-                startDate, endDate, nodeCommandYamls: customCommands ? (improvementSource
+                startDate: payloadStartDate, endDate: payloadEndDate, nodeCommandYamls: customCommands ? (improvementSource
                   ? Object.fromEntries(Object.entries(nodeCommandYamls).filter(([node]) => node === 'plan' || node === 'optimize'))
                   : nodeCommandYamls) : undefined, forceMessage, runtimeMaintenance: taskType === 'pack' || taskType === 'pack_restore' ? false : runtimeMaintenance,
                 ...(!improvementSource && (taskType === 'diagnose' || taskType === 'full')
@@ -2707,6 +2709,7 @@ function StepDeliverables({ output, taskId, stepId, stepType }: { output: Record
   const hasKnownPresentation = items.length > 0 || Boolean(spec || benchCases || baseline || benchResult || diff || runMetrics || roundDecision || benchDecision || reviewStatus || scoreComparison)
   const showStageSkillResult = stepType === 'stage_extension' && !hasKnownPresentation
   const showLifecycleResult = (stepType === 'skill_prepare' || stepType === 'skill_finalize') && !hasKnownPresentation
+  const lifecycleRows = showLifecycleResult ? skillLifecycleRows(output) : []
   if (!hasKnownPresentation && !showStageSkillResult && !showLifecycleResult) return null
   const toneClass: Record<string, string> = {
     violet: 'border-violet-100 bg-violet-50 text-violet-700',
@@ -2716,13 +2719,23 @@ function StepDeliverables({ output, taskId, stepId, stepType }: { output: Record
   }
   return (
     <div className="mt-3 space-y-2">
-      {(showStageSkillResult || showLifecycleResult) && <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 text-gray-900">
+      {showStageSkillResult && <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 text-gray-900">
         <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
-          {showStageSkillResult ? '自定义 Stage 交付结果' : 'Skill 候选处理结果'}
+          自定义 Stage 交付结果
         </p>
         {typeof output.summary === 'string' && output.summary.trim() && <p className="mt-2 text-xs leading-5 text-gray-700">{output.summary}</p>}
         <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border border-gray-200 bg-white p-3 font-mono text-[10px] leading-5 text-gray-700">{JSON.stringify(output, null, 2)}</pre>
       </div>}
+      {showLifecycleResult && <details className="group rounded-lg border border-gray-200 bg-gray-50 text-gray-900">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 marker:content-none">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-gray-500">Skill 候选处理结果</span>
+          <span className="text-[10px] font-medium text-blue-600 group-open:hidden">展开</span><span className="hidden text-[10px] font-medium text-blue-600 group-open:inline">收起</span>
+        </summary>
+        <div className="border-t border-gray-200 bg-white px-3 py-3">
+          {typeof output.summary === 'string' && output.summary.trim() && <p className="mb-3 text-xs leading-5 text-gray-700">{output.summary}</p>}
+          <dl className="grid gap-2 sm:grid-cols-2">{lifecycleRows.map((row) => <div key={row.label} className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2"><dt className="text-[10px] text-gray-400">{row.label}</dt><dd className="mt-1 break-all text-xs font-medium text-gray-700">{row.value}</dd></div>)}</dl>
+        </div>
+      </details>}
       {items.length > 0 && <div className="grid gap-2 sm:grid-cols-2">
         {items.map((item) => <div key={item.label} className={`rounded-lg border px-3 py-2.5 ${toneClass[item.tone]}`}><p className="text-[10px] font-medium uppercase tracking-wide opacity-70">{item.label}</p><p className="mt-1 line-clamp-2 text-xs font-medium">{item.value}</p></div>)}
       </div>}
@@ -2850,6 +2863,24 @@ function StepDeliverables({ output, taskId, stepId, stepType }: { output: Record
       </div>}
     </div>
   )
+}
+
+function skillLifecycleRows(output: Record<string, unknown>): Array<{ label: string; value: string }> {
+  const artifact = output.artifact && typeof output.artifact === 'object' && !Array.isArray(output.artifact)
+    ? output.artifact as Record<string, unknown> : undefined
+  const rows: Array<{ label: string; value: unknown }> = [
+    { label: '准备状态', value: output.prepared === true ? '已完成' : output.prepared === false ? '未完成' : undefined },
+    { label: '候选工作区', value: output.workspace },
+    { label: '目标 Skill 路径', value: output.targetSkillPath },
+    { label: '候选产物', value: artifact?.ref },
+    { label: '内容校验', value: artifact?.sha256 },
+  ]
+  const known = new Set(['summary', 'prepared', 'workspace', 'targetSkillPath', 'artifact'])
+  Object.entries(output).forEach(([key, value]) => {
+    if (known.has(key) || value == null) return
+    rows.push({ label: `其他信息 · ${key}`, value: Array.isArray(value) ? `${value.length} 项` : typeof value === 'object' ? '已生成' : value })
+  })
+  return rows.filter((row) => row.value !== undefined).map((row) => ({ label: row.label, value: String(row.value) }))
 }
 
 

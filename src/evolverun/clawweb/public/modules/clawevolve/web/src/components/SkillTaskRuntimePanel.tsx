@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, type EvolveTask } from '../api/client'
 import { answeredInteractionHtml, platformInteractionFormStyle } from './answered-interaction-html'
+import { createUnifiedDiff, GitDiffView } from '../pages/evolve/common'
 
 type Interaction = NonNullable<EvolveTask['interactions']>[number]
 type TaskDiff = Awaited<ReturnType<typeof api.evolve.getTaskSkillDiff>>
@@ -133,18 +134,17 @@ function CandidateDecision({ task, canOperate, onUpdated }: {
     candidate?: { artifact?: { ref?: string; sha256?: string } }
   } | undefined
   const [diff, setDiff] = useState<TaskDiff | null>(null)
-  const [selected, setSelected] = useState('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
 
   useEffect(() => {
-    setDiff(null); setSelected(''); setError('')
+    setDiff(null); setError('')
     if (!target?.candidate?.artifact) return
     let active = true
     void api.evolve.getTaskSkillDiff(task.task_id)
       .then((value) => {
         if (!active) return
-        setDiff(value); setSelected(value.files[0]?.path ?? ''); setError('')
+        setDiff(value); setError('')
       })
       .catch((reason) => {
         if (active) setError(reason instanceof Error ? reason.message : '候选差异加载失败')
@@ -152,8 +152,8 @@ function CandidateDecision({ task, canOperate, onUpdated }: {
     return () => { active = false }
   }, [task.task_id, target?.assetId, target?.candidate?.artifact?.ref, target?.candidate?.artifact?.sha256])
 
+  const unifiedDiff = useMemo(() => createUnifiedDiff(diff?.files ?? []), [diff])
   if (!target) return null
-  const file = diff?.files.find((item) => item.path === selected)
   const decide = async (decision: 'accept' | 'reject') => {
     const message = decision === 'accept'
       ? '确认将本次候选版本应用回 OCB 中的原 Skill？'
@@ -168,26 +168,23 @@ function CandidateDecision({ task, canOperate, onUpdated }: {
     } finally { setBusy('') }
   }
 
-  return <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><h2 className="text-sm font-semibold text-gray-900">Skill 候选版本</h2><p className="mt-1 text-xs text-gray-500">{target.name || '待进化 Skill'} · 与本次任务开始时冻结的内容对比</p></div>
+  return <details className="group rounded-2xl border border-gray-200 bg-white shadow-sm">
+    <summary className="flex cursor-pointer list-none items-start justify-between gap-3 p-5 marker:content-none">
+      <div><h2 className="text-sm font-semibold text-gray-900">Skill 候选版本</h2><p className="mt-1 text-xs text-gray-500">{!target.candidate?.artifact && ['completed', 'failed', 'canceled'].includes(task.status)
+        ? '任务已结束，未产生可应用的候选版本。'
+        : !target.candidate?.artifact ? '候选版本尚未生成。' : `${target.name || '待进化 Skill'} · Git Diff`}</p></div>
+      <span className="mt-0.5 shrink-0 text-xs font-medium text-blue-600 group-open:hidden">展开</span><span className="mt-0.5 hidden shrink-0 text-xs font-medium text-blue-600 group-open:inline">收起</span>
+    </summary>
+    <div className="border-t border-gray-100 px-5 pb-5 pt-4">
       {target.candidate?.artifact && task.status === 'waiting_acceptance' && canOperate && <div className="flex gap-2">
         <button disabled={Boolean(busy)} onClick={() => void decide('reject')} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700 disabled:opacity-40">拒绝</button>
         <button disabled={Boolean(busy)} onClick={() => void decide('accept')} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-medium text-white disabled:opacity-40">接受并应用</button>
       </div>}
-    </div>
-    {!target.candidate?.artifact && <p className="mt-4 text-sm text-gray-400">{['completed', 'failed', 'canceled'].includes(task.status)
-      ? '任务已结束，未产生可应用的候选版本。' : '候选版本尚未生成。'}</p>}
-    {diff && <><div className="mt-4 flex flex-wrap gap-2">
-      {diff.files.map((item) => <button key={item.path} onClick={() => setSelected(item.path)} className={'rounded-md border px-2.5 py-1.5 text-xs ' + (selected === item.path ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600')}>{item.path} · {item.change === 'added' ? '新增' : item.change === 'deleted' ? '删除' : '修改'}</button>)}
-    </div>
-    {file && <div className="mt-3 grid gap-3 lg:grid-cols-2">
-      <div><p className="mb-1 text-[10px] font-medium text-gray-400">任务开始时</p><pre className="max-h-80 overflow-auto rounded-lg bg-gray-950 p-3 text-[11px] leading-5 text-gray-200">{file.before ?? '（无）'}</pre></div>
-      <div><p className="mb-1 text-[10px] font-medium text-gray-400">候选版本</p><pre className="max-h-80 overflow-auto rounded-lg bg-gray-950 p-3 text-[11px] leading-5 text-gray-200">{file.after ?? '（已删除）'}</pre></div>
-    </div>}</>}
+    {diff && diff.files.length > 0 && <GitDiffView content={unifiedDiff} />}
     {diff && diff.files.length === 0 && <p className="mt-4 text-sm text-gray-400">候选内容与任务开始时一致。</p>}
     {error && <p className="mt-3 text-xs text-red-600">{error}</p>}
-  </section>
+    </div>
+  </details>
 }
 
 export default function SkillTaskRuntimePanel({ task, canOperate, onUpdated }: {

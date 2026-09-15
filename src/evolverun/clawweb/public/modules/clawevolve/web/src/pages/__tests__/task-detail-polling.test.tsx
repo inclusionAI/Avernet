@@ -77,6 +77,29 @@ describe('Task detail live updates', () => {
     expect(api.evolve.getTaskSkillDiff).not.toHaveBeenCalled()
   })
 
+  it('folds prepared Skill results and presents their fields in readable Chinese instead of raw JSON', async () => {
+    const prepared = { ...task('completed'), steps: [{
+      stepId: 'PREPARE', taskId: 'TASK-1', stepType: 'skill_prepare', status: 'succeeded', command: 'prepare candidate',
+      output: { prepared: true, workspace: '/workspace/candidate', targetSkillPath: '/workspace/candidate/skills/example' },
+    }] }
+    api.evolve.getTask.mockResolvedValue(prepared)
+    const view = open(); await tick()
+    const results = screen.getAllByText('Skill 候选处理结果')
+    expect(results.length).toBeGreaterThan(0)
+    expect(results.every((title) => title.closest('details')?.open === false)).toBe(true)
+    const details = results.at(-1)!.closest('details')!
+    expect(details.querySelector('pre')).toBeNull()
+
+    fireEvent.click(details.querySelector('summary')!)
+    expect(details.open).toBe(true)
+    expect(details.textContent).toContain('准备状态')
+    expect(details.textContent).toContain('已完成')
+    expect(details.textContent).toContain('候选工作区')
+    expect(details.textContent).toContain('/workspace/candidate')
+    expect(details.textContent).toContain('目标 Skill 路径')
+    expect(view.container.querySelector('#step-PREPARE')).toBeTruthy()
+  })
+
   it('polls running to completed and supplies the new candidate without page navigation', async () => {
     api.evolve.getTask.mockResolvedValueOnce(task()).mockResolvedValueOnce(task('completed', true))
     api.evolve.getTaskSkillDiff.mockResolvedValueOnce({ files: [{ path: 'SKILL.md', change: 'modified', before: 'Task baseline', after: 'Final candidate' }] })
