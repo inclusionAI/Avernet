@@ -90,11 +90,6 @@ class _StorageFactory:
     def local_skill_package_storage_for_locator(self, *, locator: str, **_kwargs):
         return LocalSkillPackageStorage(self.files, locator)
 
-    def local_skill_package_storage(self, *, directory_name: str, **_kwargs):
-        locator = f"/skills/{directory_name}"
-        return locator, LocalSkillPackageStorage(self.files, locator)
-
-
 class _Guard:
     async def acquire_for_edit_wait(self, **_kwargs):
         return object()
