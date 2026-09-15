@@ -1,160 +1,97 @@
 // @vitest-environment jsdom
-import React, { useState } from 'react'
+import React from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import type { EvolveTask, EvolveStep } from '../../api/client'
+import type { EvolveStep, EvolveTask } from '../../api/client'
 import Evolve from '../../pages/Evolve'
-import StageWorkflow from '../StageWorkflow'
-import { StepInteractions } from '../SkillTaskRuntimePanel'
 
-const api = vi.hoisted(() => ({ evolve: { getStageSkill: vi.fn(), answerStageInteraction: vi.fn(), getTask: vi.fn(), listTaskLogArchives: vi.fn(), listVersions: vi.fn() } }))
+const api = vi.hoisted(() => ({ evolve: {
+  getTask: vi.fn(), listTaskLogArchives: vi.fn(), listVersions: vi.fn(), answerStageInteraction: vi.fn(),
+} }))
 vi.mock('../../api/client', () => ({ api }))
 vi.mock('../../hooks/useClientUser', () => ({ useClientUser: () => ({ authState: 'authenticated', user: { userId: 'owner' } }) }))
-beforeEach(() => { vi.stubGlobal('React', React); vi.resetAllMocks() })
-afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
-function step(stepId: string, status: string, stage?: string, mode = 'preprocess', roundNo: number | null = null): EvolveStep {
-  return { stepId, taskId: 'TASK', stepType: stage ? 'stage_extension' : 'diagnose', stepNo: 1, roundNo, status,
-    command: 'frozen command', output: { summary: 'receipt is not a status' },
-    ...(stage ? { stageExtension: { stage, mode, implementationId: `${stage}-${mode}`, displayName: stage === 'diagnose' ? '诊断范围确认' : '轮内质量检查' } } : {}),
-  } as EvolveStep
-}
-function task(steps: EvolveStep[]): EvolveTask {
-  return { task_id: 'TASK', task_type: 'full', config: { stageSelection: { diagnose: true, plan: false, optimize: false } }, steps,
-    interactions: [{ interactionId: 'HITL', stepId: 'PRE', status: 'waiting', question: { tag: 'scope', format: 'text', content: '请选择诊断范围' } }],
-  } as EvolveTask
-}
-function Workflow({ value }: { value: EvolveTask }) {
-  const [selectedStepId, onSelect] = useState<string | null>(null)
-  return <StageWorkflow task={value} selectedStepId={selectedStepId} onSelect={onSelect}
-    renderDetails={(selected) => <StepInteractions task={value} stepId={selected.stepId} canOperate onUpdated={async () => {}} />} />
-}
-
-it('shows the registered preprocess as an independent waiting node and opens its existing form', () => {
-  render(<Workflow value={task([step('PRE', 'waiting_context', 'diagnose'), step('BUILTIN', 'queued')])} />)
-  const node = screen.getByRole('button', { name: /诊断范围确认/ })
-  expect(within(node).getByText('前置')).toBeTruthy()
-  expect(within(node).getByText('等待补充信息')).toBeTruthy()
-  expect(screen.queryByText('请选择诊断范围')).toBeNull()
-  fireEvent.click(node)
-  expect(screen.getByText('请选择诊断范围')).toBeTruthy()
-  expect(screen.getByRole('button', { name: '提交并继续' })).toBeTruthy()
-  expect(within(node).queryByText('已完成')).toBeNull()
-})
-
-it('keeps preprocess and postprocess inside their real optimize rounds, including a round with only preprocess started', () => {
-  const value = task([
-    { ...step('OPT-1', 'succeeded'), stepType: 'optimize', roundNo: 1, stepNo: 2 },
-    { ...step('POST-1', 'failed', 'optimize', 'postprocess', 1), stepNo: 3 },
-    { ...step('PRE-2', 'running', 'optimize', 'preprocess', 2), stepNo: 4 },
-    { ...step('PRE-1', 'succeeded', 'optimize', 'preprocess', 1), stepNo: 1 },
-  ])
-  value.config = { stageSelection: { diagnose: false, plan: false, optimize: true } }
-  render(<Workflow value={value} />)
-  const first = within(screen.getByRole('group', { name: '第 1 轮优化' }))
-  expect(first.getAllByRole('button').map((node) => node.textContent)).toEqual([
-    expect.stringContaining('PRE-1'), expect.stringContaining('OPT-1'), expect.stringContaining('POST-1'),
-  ])
-  expect(within(first.getByRole('button', { name: /POST-1/ })).getByText('失败')).toBeTruthy()
-  const second = within(screen.getByRole('group', { name: '第 2 轮优化' }))
-  expect(second.getByRole('button', { name: /PRE-2/ })).toBeTruthy()
-  expect(second.queryByText('已完成')).toBeNull()
-  expect(second.getByText('尚未创建')).toBeTruthy()
-})
-
-it('shows configured but uncreated extensions without borrowing an unbound receipt or claiming completion', async () => {
-  api.evolve.getStageSkill.mockResolvedValue({ implementationId: 'POST', stage: 'diagnose', mode: 'postprocess', displayName: '通用诊断复核' })
-  const value = task([{ ...step('UNBOUND', 'failed'), stepType: 'stage_extension', output: { summary: 'postprocess succeeded' } }])
-  value.config.stageExtensions = { diagnose: { postprocess: { enabled: true, implementationId: 'POST' } } }
-  render(<Workflow value={value} />)
-  const pending = await screen.findByRole('button', { name: /通用诊断复核/ })
-  expect((pending as HTMLButtonElement).disabled).toBe(true)
-  expect(within(pending).getByText('状态未知（未关联）')).toBeTruthy()
-  expect(within(pending).queryByText('已完成')).toBeNull()
-  const unknown = within(screen.getByRole('region', { name: '未关联的执行步骤' }))
-  expect(unknown.getByRole('button', { name: /UNBOUND/ })).toBeTruthy()
-  expect(unknown.getByText('绑定信息缺失')).toBeTruthy()
-})
-
-it('prefers the exact frozen registered name and shows a genuinely uncreated postprocess as pending', () => {
-  const value = task([step('PRE', 'running', 'diagnose')])
-  value.config.stageExtensions = { diagnose: {
-    preprocess: { enabled: true, implementationId: 'diagnose-preprocess', displayName: '已冻结的注册名称' },
-    postprocess: { enabled: true, implementationId: 'POST', displayName: '未来复核' },
-  } }
-  render(<Workflow value={value} />)
-  expect(screen.getByRole('button', { name: /已冻结的注册名称/ })).toBeTruthy()
-  const pending = screen.getByRole('button', { name: /未来复核/ })
-  expect(within(pending).getByText('尚未创建')).toBeTruthy()
-  expect((pending as HTMLButtonElement).disabled).toBe(true)
-  expect(api.evolve.getStageSkill).not.toHaveBeenCalled()
-})
-
-it('keeps replacement independent, respects frozen flow selection, and follows actual status changes', () => {
-  const replacement = step('REPLACE', 'waiting_context', 'plan', 'replace')
-  const value = task([replacement])
-  value.config = { flow: { stages: { diagnose: false, plan: true, optimize: false } }, stageSelection: { diagnose: true, plan: true, optimize: true } }
-  const view = render(<Workflow value={value} />)
-  expect(screen.queryByRole('region', { name: '诊断工作流' })).toBeNull()
-  expect(screen.queryByRole('region', { name: '优化工作流' })).toBeNull()
-  expect(screen.getAllByRole('button')).toHaveLength(1)
-  expect(screen.getByText('替换')).toBeTruthy()
-  view.rerender(<Workflow value={{ ...value, steps: [{ ...replacement, status: 'canceled' }] }} />)
-  expect(screen.getByText('已取消')).toBeTruthy()
-  expect(screen.queryByText('已完成')).toBeNull()
-})
-
-it('does not move an extension with no round to an invented optimize round or accept another task’s step', () => {
-  const value = task([step('NO-ROUND', 'failed', 'optimize'), { ...step('FOREIGN', 'succeeded', 'diagnose'), taskId: 'OTHER' }])
-  render(<Workflow value={value} />)
-  expect(screen.queryByRole('group', { name: '第 1 轮优化' })).toBeNull()
-  const unbound = within(screen.getByRole('region', { name: '未关联的执行步骤' }))
-  expect(unbound.getByRole('button', { name: /NO-ROUND/ })).toBeTruthy()
-  expect(screen.queryByText('FOREIGN')).toBeNull()
-  expect(screen.getByText('尚无可关联的优化轮次')).toBeTruthy()
-})
-
-it.each(['denied', 'mismatched'])('keeps the frozen implementation ID visible when the name lookup is %s', async (lookup) => {
-  if (lookup === 'denied') api.evolve.getStageSkill.mockRejectedValue(new Error('403'))
-  else api.evolve.getStageSkill.mockResolvedValue({ implementationId: 'OTHER', stage: 'diagnose', mode: 'preprocess', displayName: '不属于这个节点' })
-  const value = task([])
-  value.config.stageExtensions = { diagnose: { preprocess: { enabled: true, implementationId: 'REGISTERED-ID' } } }
-  await act(async () => { render(<Workflow value={value} />) })
-  const node = screen.getByRole('button', { name: /名称不可用 · REGISTERED-ID/ })
-  expect(within(node).getByText('尚未创建')).toBeTruthy()
-  expect(screen.queryByText('不属于这个节点')).toBeNull()
-  expect(screen.queryByText('自定义')).toBeNull()
-})
-
-it('uses an identity-matched historical receipt name only as a label, never as the execution status', () => {
-  const original = step('OLD', 'failed', 'diagnose')
-  const value = task([{ ...original,
-    stageExtension: { stage: 'diagnose', mode: 'preprocess', implementationId: 'diagnose-preprocess', displayName: null },
-    output: { implementation: { implementationId: 'diagnose-preprocess', displayName: '历史注册名称' }, status: 'succeeded' },
-  } as EvolveStep])
-  render(<Workflow value={value} />)
-  const node = screen.getByRole('button', { name: /历史注册名称/ })
-  expect(within(node).getByText('失败')).toBeTruthy()
-  expect(within(node).queryByText('已完成')).toBeNull()
-})
-
-it('opens the existing form and result in the task detail workflow without duplicating the form', async () => {
-  const value = { ...task([step('PRE', 'waiting_context', 'diagnose'),
-    { ...step('POST', 'succeeded', 'diagnose', 'postprocess'), output: { summary: '实际后置产物', changed: false } }]),
-    task_name: 'Generic workflow', user_id: 'owner', status: 'completed' }
-  api.evolve.getTask.mockResolvedValue(value)
+beforeEach(() => {
+  vi.stubGlobal('React', React)
+  vi.resetAllMocks()
   api.evolve.listTaskLogArchives.mockResolvedValue({ items: [] })
   api.evolve.listVersions.mockResolvedValue({ versions: [] })
+})
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+
+function step(stepId: string, stepType: string, status: string, stepNo: number, roundNo: number | null = null): EvolveStep {
+  return { stepId, taskId: 'TASK', stepType, status, stepNo, roundNo, command: `${stepType} command` } as EvolveStep
+}
+
+function extension(stepId: string, stage: 'diagnose' | 'plan' | 'optimize', mode: 'preprocess' | 'replace' | 'postprocess',
+  status: string, stepNo: number, roundNo: number | null = null): EvolveStep {
+  return { ...step(stepId, 'stage_extension', status, stepNo, roundNo),
+    stageExtension: { stage, mode, implementationId: `${stage}-${mode}`, displayName: stage === 'diagnose' ? '诊断范围确认' : '轮内质量检查' },
+  } as EvolveStep
+}
+
+function task(steps: EvolveStep[], config: Record<string, unknown> = {}): EvolveTask {
+  return { task_id: 'TASK', task_type: 'full', task_name: '原样式工作流', user_id: 'owner', bot_id: 'BOT', created_by: 'owner',
+    status: 'running', config, steps, interactions: [], error_message: null } as EvolveTask
+}
+
+async function renderTask(value: EvolveTask) {
+  api.evolve.getTask.mockResolvedValue(value)
   render(<MemoryRouter initialEntries={['/evolve/runs/TASK']}><Evolve /></MemoryRouter>)
-  const heading = await screen.findByRole('heading', { name: '进化工作流' })
-  const graph = within(heading.closest('section')!)
-  fireEvent.click(graph.getByRole('button', { name: /前置.*PRE/ }))
-  expect(graph.getByText('请选择诊断范围')).toBeTruthy()
-  expect(graph.queryByText('自定义 Stage 交付结果')).toBeNull()
-  expect(graph.queryByText('receipt is not a status')).toBeNull()
+  await screen.findByRole('heading', { name: value.task_name! })
+}
+
+it('inserts a named custom Stage into the original horizontal workflow without replacing the task detail shell', async () => {
+  const value = task([
+    extension('PRE', 'diagnose', 'preprocess', 'waiting_context', 1),
+    step('DIAGNOSE', 'diagnose', 'created', 2),
+    step('PLAN', 'plan', 'created', 3),
+    step('OPTIMIZE', 'optimize', 'created', 4, 1),
+  ], { stageExtensions: { diagnose: { preprocess: { enabled: true, implementationId: 'diagnose-preprocess', displayName: '诊断范围确认' } } } })
+  value.interactions = [{ interactionId: 'HITL', stepId: 'PRE', status: 'waiting', question: { tag: 'scope', format: 'text', content: '请选择诊断范围' } }] as EvolveTask['interactions']
+  await renderTask(value)
+  const workflow = screen.getByRole('heading', { name: '进化工作流' }).closest('section')!
+  const custom = within(workflow).getByRole('button', { name: /诊断范围确认.*自定义/ })
+  const builtin = within(workflow).getByRole('button', { name: /Bot 诊断/ })
+  expect(custom.className).toContain('w-52 rounded-xl border p-4 text-left transition')
+  expect(builtin.className).toContain('w-52 rounded-xl border p-4 text-left transition')
+  expect(workflow.textContent!.indexOf('诊断范围确认')).toBeLessThan(workflow.textContent!.indexOf('Bot 诊断'))
+  expect(within(workflow).getByRole('button', { name: /目标规划/ })).toBeTruthy()
+  expect(within(workflow).getByRole('button', { name: /优化 Loop/ })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: '执行记录' })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: '任务配置' })).toBeTruthy()
+  expect(screen.queryByRole('heading', { name: '诊断 Stage' })).toBeNull()
+  expect(screen.queryByRole('region', { name: '诊断工作流' })).toBeNull()
   expect(screen.getAllByText('请选择诊断范围')).toHaveLength(1)
-  fireEvent.click(graph.getByRole('button', { name: /后置.*POST/ }))
-  expect(graph.getByText('实际后置产物')).toBeTruthy()
+  fireEvent.click(custom)
   expect(screen.getAllByText('请选择诊断范围')).toHaveLength(1)
+})
+
+it('uses the same card for a replacement and omits only the replaced default business node', async () => {
+  const value = task([extension('REPLACE', 'diagnose', 'replace', 'succeeded', 1)])
+  value.task_type = 'diagnose'
+  await renderTask(value)
+  const workflow = screen.getByRole('heading', { name: '进化工作流' }).closest('section')!
+  expect(within(workflow).getByRole('button', { name: /诊断范围确认.*自定义/ })).toBeTruthy()
+  expect(within(workflow).queryByRole('button', { name: /Bot 诊断/ })).toBeNull()
+  expect(within(workflow).getByRole('button', { name: /目标规划/ })).toBeTruthy()
+})
+
+it('keeps one original Optimize Loop and its compact round strip while aggregating custom round executions', async () => {
+  const value = task([
+    extension('PRE-1', 'optimize', 'preprocess', 'succeeded', 1, 1),
+    step('OPT-1', 'optimize', 'succeeded', 2, 1),
+    extension('PRE-2', 'optimize', 'preprocess', 'running', 3, 2),
+    step('OPT-2', 'optimize', 'created', 4, 2),
+  ])
+  await renderTask(value)
+  const workflow = screen.getByRole('heading', { name: '进化工作流' }).closest('section')!
+  const custom = within(workflow).getByRole('button', { name: /轮内质量检查.*自定义/ })
+  expect(within(custom).getByText('2 次执行')).toBeTruthy()
+  expect(within(workflow).getAllByRole('button', { name: /优化 Loop/ })).toHaveLength(1)
+  expect(within(workflow).getByText('优化轮次')).toBeTruthy()
+  expect(within(workflow).getByRole('button', { name: /第 1 轮优化/ })).toBeTruthy()
+  expect(within(workflow).getByRole('button', { name: /第 2 轮优化/ })).toBeTruthy()
+  expect(within(workflow).queryByRole('group', { name: /第 .* 轮优化/ })).toBeNull()
 })

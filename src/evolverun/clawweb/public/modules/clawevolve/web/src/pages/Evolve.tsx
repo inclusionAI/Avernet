@@ -23,7 +23,6 @@ import SkillEvolutionFields, {
   type StageSelectionDraft,
 } from '../components/SkillEvolutionFields'
 import SkillTaskRuntimePanel, { StepInteractions } from '../components/SkillTaskRuntimePanel'
-import StageWorkflow from '../components/StageWorkflow'
 import SkillHardeningDetail, { skillHardeningImplementation } from '../components/SkillHardeningDetail'
 import { EvolveAdminScopeProvider, useEvolveAdminScope } from '../features/evolve/admin-scope'
 import {
@@ -1776,7 +1775,6 @@ function TaskDetail({ version = 'internalversion' }: Pick<EvolveProps, 'version'
   const [loadError, setLoadError] = useState('')
   const [retryingStepId, setRetryingStepId] = useState('')
   const [cancelingStepId, setCancelingStepId] = useState('')
-  const [workflowSelection, setWorkflowSelection] = useState<{ taskId: string; stepId: string | null } | null>(null)
   const [retryError, setRetryError] = useState('')
   const [sharingBusy, setSharingBusy] = useState(false)
   const [logArchiveBusy, setLogArchiveBusy] = useState(false)
@@ -1864,11 +1862,6 @@ function TaskDetail({ version = 'internalversion' }: Pick<EvolveProps, 'version'
   const view = statusView(task.status)
   const isStageTest = task.task_type === 'stage_test'
   const hardeningImplementationId = skillHardeningImplementation(task)
-  const useStageWorkflow = !isStageTest && ['full', 'diagnose', 'optimize', 'bench_optimize'].includes(task.task_type)
-    && Boolean(task.config.stageSelection || task.config.stageExtensions || (task.config.flow as { stages?: unknown } | undefined)?.stages
-      || steps.some((step) => step.stepType === 'stage_extension'))
-  const selectedWorkflowStepId = useStageWorkflow && workflowSelection?.taskId === task.task_id
-    ? workflowSelection.stepId : null
   const testEnvironmentSteps = isStageTest ? steps.filter((step) => ['skill_init', 'skill_prepare', 'skill_finalize'].includes(step.stepType) || step.command.startsWith('stage-test supplied ')) : []
   const visibleSteps = steps.filter((step) => !testEnvironmentSteps.includes(step))
   const shared = task.config.shared === true
@@ -2009,15 +2002,6 @@ function TaskDetail({ version = 'internalversion' }: Pick<EvolveProps, 'version'
       <div className="flex items-center gap-2">{shared && <span className="rounded-full bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700">已公开分享</span>}{canShare && <button type="button" className={secondaryButton} disabled={sharingBusy} onClick={() => void toggleSharing()}>{sharingBusy ? '更新中…' : shared ? '关闭分享' : '分享'}</button>}{latestSuccessfulLogArchive && <button type="button" className={secondaryButton} onClick={() => void downloadLogArchive(latestSuccessfulLogArchive.archiveId)}>下载最新日志</button>}{canOperate && <button type="button" className={secondaryButton} disabled={logArchiveBusy || logArchives.some((item) => ['dispatching', 'running'].includes(item.status))} onClick={() => void createLogArchive()}>{logArchiveBusy ? '正在发起…' : logArchives.some((item) => ['dispatching', 'running'].includes(item.status)) ? '日志获取中…' : latestSuccessfulLogArchive ? '重新获取日志' : '获取日志'}</button>}{baselinePack && <button type="button" className={secondaryButton} onClick={() => void downloadBaselinePack()}>下载初始 Pack</button>}{baselinePack && canOperate && <button type="button" className={secondaryButton} onClick={() => navigate(`/evolve/new?type=pack_restore&packId=${encodeURIComponent(baselinePack.packId)}&sourceTaskId=${encodeURIComponent(task.task_id)}&sourceKind=baseline&botEnv=${encodeURIComponent(String(task.config.botEnv ?? ''))}`)}>恢复到任务初始版本</button>}</div>
       </div>
 
-      {hardeningImplementationId ? <>
-        {retryError && <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{retryError}</p>}
-        <SkillHardeningDetail
-          task={task}
-          implementationId={hardeningImplementationId}
-          renderStatus={(status) => <Status type={statusView(status).type}>{statusView(status).text}</Status>}
-          renderInteractions={renderStepInteractions}
-        />
-      </> : <>
       <GovernanceSourceCard task={task} />
       {['full', 'optimize', 'bench_optimize'].includes(task.task_type) && <TaskVersionStatus task={task} adminReadMode={adminReadMode} canLoadVersions={adminReadMode || user?.userId === task.user_id} />}
 
@@ -2032,20 +2016,13 @@ function TaskDetail({ version = 'internalversion' }: Pick<EvolveProps, 'version'
                 <Status type={view.type}>{view.text}</Status>
               </div>
             </div>
-            {isStageTest ? <div className="flex flex-wrap items-center gap-3 p-5">{visibleSteps.map((step, index) => <div key={step.stepId} className="flex items-center gap-3">{index > 0 && <span className="text-gray-300">→</span>}<a href={'#step-' + step.stepId} className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-700">{stageTestStepLabel(step, task)}<span className="ml-2"><Status type={statusView(step.status).type}>{statusView(step.status).text}</Status></span></a></div>)}{visibleSteps.length === 0 && <p className="text-sm text-gray-400">等待创建测试步骤</p>}</div> : useStageWorkflow ? <StageWorkflow
-              task={task}
-              selectedStepId={selectedWorkflowStepId}
-              onSelect={(stepId) => setWorkflowSelection({ taskId: task.task_id, stepId })}
-              renderDetails={(step) => <>
-                <WorkflowNodeInspector step={step} />
-                <div className="px-5 pb-5">{renderStepInteractions(step.stepId)}</div>
-              </>}
-            /> : <WorkflowNodes
+            <WorkflowNodes
               taskType={task.task_type}
-              steps={steps}
+              steps={visibleSteps}
+              config={task.config}
               insightImprovement={isGovernanceTask(task)}
               inputMode={task.config.inputMode === 'direct_goal' ? 'direct_goal' : 'diagnose_goal'}
-            />}
+            />
           </section>
           <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between gap-3">
@@ -2054,11 +2031,15 @@ function TaskDetail({ version = 'internalversion' }: Pick<EvolveProps, 'version'
             </div>
             <div className="mt-5 space-y-3">
               {retryError && <p className="rounded-lg bg-red-50 p-3 text-xs text-red-700">{retryError}</p>}
-              {visibleSteps.map((step) => <StepCard key={step.stepId} step={step} label={isStageTest ? stageTestStepLabel(step, task) : undefined} canRetry={canOperate && canRetryRecordedStep(step, steps.indexOf(step))} canCancel={canOperate && canCancelRecordedStep(step, steps.indexOf(step))} retrying={retryingStepId === step.stepId} canceling={cancelingStepId === step.stepId} onRetry={() => void retryStep(step)} onCancel={() => void cancelStep(step)}>{selectedWorkflowStepId !== step.stepId && renderStepInteractions(step.stepId)}</StepCard>)}
-              {steps.length === 0 && <div className="rounded-xl border border-dashed border-gray-200 py-10 text-center text-sm text-gray-400">尚未创建 Step</div>}
+              {visibleSteps.map((step) => <StepCard key={step.stepId} step={step} label={isStageTest ? stageTestStepLabel(step, task) : undefined} canRetry={canOperate && canRetryRecordedStep(step, steps.indexOf(step))} canCancel={canOperate && canCancelRecordedStep(step, steps.indexOf(step))} retrying={retryingStepId === step.stepId} canceling={cancelingStepId === step.stepId} onRetry={() => void retryStep(step)} onCancel={() => void cancelStep(step)}>{renderStepInteractions(step.stepId)}</StepCard>)}
+              {visibleSteps.length === 0 && <div className="rounded-xl border border-dashed border-gray-200 py-10 text-center text-sm text-gray-400">尚未创建 Step</div>}
             </div>
           </section>
-          {testEnvironmentSteps.length > 0 && <details className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm"><summary className="cursor-pointer text-sm font-semibold text-gray-700">测试环境准备与产物记录（{testEnvironmentSteps.length}）</summary><p className="mt-2 text-xs text-gray-500">保留当时实际执行的准备、输入和产物记录，不属于被测 Stage，不会应用 Skill 版本。</p><div className="mt-4 space-y-3">{testEnvironmentSteps.map((step) => <StepCard key={step.stepId} step={step} label={stageTestStepLabel(step, task)}><StepInteractions task={task} stepId={step.stepId} canOperate={false} onUpdated={loadTask} /></StepCard>)}</div></details>}
+          {hardeningImplementationId && <SkillHardeningDetail
+            task={task}
+            implementationId={hardeningImplementationId}
+            renderStatus={(status) => <Status type={statusView(status).type}>{statusView(status).text}</Status>}
+          />}
         </div>
 
         <aside className="min-w-0 space-y-4">
@@ -2090,7 +2071,6 @@ function TaskDetail({ version = 'internalversion' }: Pick<EvolveProps, 'version'
           <TaskConfigPanel config={task.config} />
         </aside>
       </div>
-      </>}
     </div>
   )
 }
@@ -2101,6 +2081,35 @@ type WorkflowPhase = {
   subtitle: string
   tone: 'blue' | 'green' | 'amber'
   nodes: Array<{ type: string; title: string; command: string; deliverable: string; matchTypes?: string[] }>
+}
+
+type WorkflowStage = 'diagnose' | 'plan' | 'optimize'
+type WorkflowStageMode = 'preprocess' | 'replace' | 'postprocess'
+type WorkflowStageStep = EvolveStep & { stageExtension?: {
+  stage: WorkflowStage
+  mode: WorkflowStageMode
+  implementationId: string
+  displayName?: string | null
+} | null }
+type WorkflowNodeDefinition = WorkflowPhase['nodes'][number] & {
+  tone: WorkflowPhase['tone']
+  key?: string
+  stage?: WorkflowStage
+  mode?: WorkflowStageMode
+  implementationId?: string
+  custom?: boolean
+}
+
+const workflowStageNames: Record<WorkflowStage, string> = { diagnose: '诊断', plan: '规划', optimize: '优化' }
+const workflowModeNames: Record<WorkflowStageMode, string> = { preprocess: '前置', replace: '替换', postprocess: '后置' }
+
+function workflowStageBinding(step: EvolveStep) {
+  const value = (step as WorkflowStageStep).stageExtension
+  return step.stepType === 'stage_extension' && value
+    && Object.hasOwn(workflowStageNames, value.stage)
+    && Object.hasOwn(workflowModeNames, value.mode)
+    && typeof value.implementationId === 'string' && value.implementationId.trim()
+    ? value : null
 }
 
 const targetPhase: WorkflowPhase = {
@@ -2173,6 +2182,14 @@ const insightPlanPhase: WorkflowPhase = {
   nodes: [{ type: 'plan', title: '进化规划', command: 'clawevolve-plan', deliverable: 'Goal · Spec v0 · Bench Case' }],
 }
 
+function stageTestWorkflowPhase(config: Record<string, unknown>): WorkflowPhase[] {
+  const stage = (config.stageTest as { stage?: unknown } | undefined)?.stage
+  if (stage === 'diagnose') return [{ ...targetPhase, nodes: [targetPhase.nodes[0]] }]
+  if (stage === 'plan') return [{ ...targetPhase, nodes: [targetPhase.nodes[1]] }]
+  if (stage === 'optimize') return [optimizePhase]
+  return []
+}
+
 const workflowDefinitions: Partial<Record<EvolveTask['task_type'], WorkflowPhase[]>> = {
   diagnose: [targetPhase],
   optimize: [optimizePhase],
@@ -2185,18 +2202,64 @@ const workflowDefinitions: Partial<Record<EvolveTask['task_type'], WorkflowPhase
   runtime_cleanup: [{ key: 'runtime-cleanup', title: '任务清理', subtitle: '清理目标 Bot 草稿运行环境中的历史进化记录', tone: 'amber', nodes: [{ type: 'runtime_cleanup', title: '任务清理', command: 'clawevolve-runtime-cleanup', deliverable: '清理结果与计数' }] }],
 }
 
-function WorkflowNodes({ taskType, steps, insightImprovement = false, inputMode = 'diagnose_goal' }: {
+function WorkflowNodes({ taskType, steps, config, insightImprovement = false, inputMode = 'diagnose_goal' }: {
   taskType: EvolveTask['task_type'];
   steps: EvolveStep[];
+  config: Record<string, unknown>;
   insightImprovement?: boolean;
   inputMode?: FullInputMode;
 }) {
   const phases = insightImprovement
     ? [insightPlanPhase, optimizePhase]
+    : taskType === 'stage_test'
+      ? stageTestWorkflowPhase(config)
     : taskType === 'full' && inputMode === 'direct_goal'
       ? [directGoalPhase, compactOptimizePhase]
       : (workflowDefinitions[taskType] ?? [])
-  const definitions = phases.flatMap((phase) => phase.nodes.map((node) => ({ ...node, tone: phase.tone })))
+  const baseDefinitions: WorkflowNodeDefinition[] = phases.flatMap((phase) => phase.nodes.map((node) => ({ ...node, tone: phase.tone })))
+  const configuredExtensions = config.stageExtensions as Partial<Record<WorkflowStage, Partial<Record<WorkflowStageMode, {
+    enabled?: boolean
+    implementationId?: string
+    displayName?: string
+  }>>>> | undefined
+  const extensionDefinitions = new Map<string, WorkflowNodeDefinition>()
+  for (const stage of ['diagnose', 'plan', 'optimize'] as const) {
+    for (const mode of ['preprocess', 'replace', 'postprocess'] as const) {
+      const binding = configuredExtensions?.[stage]?.[mode]
+      if (!binding?.enabled || !binding.implementationId?.trim()) continue
+      const key = `${stage}:${mode}:${binding.implementationId}`
+      extensionDefinitions.set(key, {
+        key, type: 'stage_extension', stage, mode, implementationId: binding.implementationId,
+        title: binding.displayName?.trim() || binding.implementationId,
+        command: `${workflowStageNames[stage]} Stage · ${workflowModeNames[mode]}`,
+        deliverable: '自定义 Stage 处理结果', tone: stage === 'optimize' ? 'green' : 'blue', custom: true,
+      })
+    }
+  }
+  for (const step of steps) {
+    const binding = workflowStageBinding(step)
+    if (!binding) continue
+    const key = `${binding.stage}:${binding.mode}:${binding.implementationId}`
+    const receipt = step.output?.implementation as { implementationId?: string; displayName?: string } | undefined
+    const displayName = binding.displayName?.trim()
+      || (receipt?.implementationId === binding.implementationId ? receipt.displayName?.trim() : '')
+      || extensionDefinitions.get(key)?.title
+      || binding.implementationId
+    extensionDefinitions.set(key, {
+      key, type: 'stage_extension', stage: binding.stage, mode: binding.mode, implementationId: binding.implementationId,
+      title: displayName,
+      command: `${workflowStageNames[binding.stage]} Stage · ${workflowModeNames[binding.mode]}`,
+      deliverable: '自定义 Stage 处理结果', tone: binding.stage === 'optimize' ? 'green' : 'blue', custom: true,
+    })
+  }
+  const definitions = baseDefinitions.flatMap((definition) => {
+    const stage = definition.type === 'optimize-loop' ? 'optimize' : definition.type as WorkflowStage
+    const extensions = [...extensionDefinitions.values()].filter((item) => item.stage === stage)
+    const before = extensions.filter((item) => item.mode === 'preprocess')
+    const replacements = extensions.filter((item) => item.mode === 'replace')
+    const after = extensions.filter((item) => item.mode === 'postprocess')
+    return [...before, ...(replacements.length ? replacements : [definition]), ...after]
+  })
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
   const [optimizeLoopExpanded, setOptimizeLoopExpanded] = useState(
     () => steps.some((step) => step.stepType === 'optimize'),
@@ -2220,7 +2283,13 @@ function WorkflowNodes({ taskType, steps, insightImprovement = false, inputMode 
         <div className="flex min-w-max items-center">
           {definitions.map((definition, index) => {
             const matchingTypes = definition.matchTypes ?? [definition.type]
-            const matching = steps.filter((step) => matchingTypes.includes(step.stepType))
+            const matching = definition.custom
+              ? steps.filter((step) => {
+                const binding = workflowStageBinding(step)
+                return binding?.stage === definition.stage && binding.mode === definition.mode
+                  && binding.implementationId === definition.implementationId
+              })
+              : steps.filter((step) => matchingTypes.includes(step.stepType))
             const latest = matching.at(-1)
             const completed = latest?.status === 'succeeded' || latest?.status === 'completed'
             const active = Boolean(latest && !completed && !['failed', 'canceled'].includes(latest.status))
@@ -2233,12 +2302,12 @@ function WorkflowNodes({ taskType, steps, insightImprovement = false, inputMode 
               amber: { rail: 'bg-amber-50', border: 'border-amber-100', text: 'text-amber-700' },
             }[definition.tone]
             return (
-              <div key={definition.type} className="flex items-center">
+              <div key={definition.key ?? definition.type} className="flex items-center">
                 <button
                   type="button"
                   disabled={!latest}
                   onClick={() => {
-                    if (definition.matchTypes) {
+                    if (definition.matchTypes && !definition.custom) {
                       setOptimizeLoopExpanded((expanded) => !expanded)
                       if (latest) setSelectedStepId(latest.stepId)
                       return
@@ -2258,8 +2327,10 @@ function WorkflowNodes({ taskType, steps, insightImprovement = false, inputMode 
                     </span>
                     <Status type={view.type}>{view.text}</Status>
                   </div>
-                  <p className="mt-3 text-sm font-semibold text-gray-900">{definition.title}</p>
-                  <p className={`mt-1 text-[9px] text-gray-400 ${definition.matchTypes ? '' : 'font-mono'}`}>{definition.matchTypes ? definition.command : `/${definition.command}`}</p>
+                  {definition.custom
+                    ? <div className="mt-3 flex items-start gap-2"><p className="min-w-0 text-sm font-semibold text-gray-900">{definition.title}</p><span className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[9px] font-medium text-blue-600">自定义</span></div>
+                    : <p className="mt-3 text-sm font-semibold text-gray-900">{definition.title}</p>}
+                  <p className={`mt-1 text-[9px] text-gray-400 ${definition.matchTypes || definition.custom ? '' : 'font-mono'}`}>{definition.matchTypes || definition.custom ? definition.command : `/${definition.command}`}</p>
                   <div className="mt-3 border-t border-gray-100 pt-2">
                     <p className="text-[9px] font-medium uppercase tracking-wide text-gray-400">交付物</p>
                     <p className="mt-1 text-[10px] leading-4 text-gray-600">{definition.deliverable}</p>
@@ -2268,8 +2339,8 @@ function WorkflowNodes({ taskType, steps, insightImprovement = false, inputMode 
                     <span>{latest ? `创建 ${formatStepTime(latest.gmtCreate)}` : '等待上一步'}</span>
                     {latest && <span>{stepDuration(latest)}</span>}
                   </div>
-                  {matching.length > 1 && <p className="mt-2 text-[10px] font-medium text-blue-600">{definition.matchTypes ? `${matching.length} 个子步骤 / 轮次` : `${matching.length} 轮 Step`}</p>}
-                  {definition.matchTypes && latest && (
+                  {matching.length > 1 && <p className="mt-2 text-[10px] font-medium text-blue-600">{definition.custom ? `${matching.length} 次执行` : definition.matchTypes ? `${matching.length} 个子步骤 / 轮次` : `${matching.length} 轮 Step`}</p>}
+                  {definition.matchTypes && !definition.custom && latest && (
                     <p className="mt-2 flex items-center gap-1 text-[10px] font-medium text-blue-600">
                       <span className={`transition-transform ${optimizeLoopExpanded ? 'rotate-90' : ''}`}><Icon name="arrow" /></span>
                       {optimizeLoopExpanded ? '收起内部节点' : '展开内部节点'}
@@ -2474,7 +2545,11 @@ function stageTestStepLabel(step: EvolveStep, task: EvolveTask): string {
   if (step.command.startsWith('stage-test supplied ')) return '测试上游输入'
   const stage = task.config.stageTest as { stage?: string; mode?: string } | undefined
   const name = ({ diagnose: '诊断', plan: '规划', optimize: '优化' } as Record<string, string>)[stage?.stage || step.stepType] || 'Stage'
-  return step.stepType === 'stage_extension' ? name + ' · ' + (({ preprocess: '前置处理', postprocess: '后置处理', replace: '整体替换' } as Record<string, string>)[stage?.mode || ''] || '自定义处理') : '平台默认' + name
+  const extension = workflowStageBinding(step)
+  const extensionName = extension?.displayName?.trim()
+  return step.stepType === 'stage_extension'
+    ? `${extensionName ? `${extensionName} · ` : ''}${name} · ${(({ preprocess: '前置处理', postprocess: '后置处理', replace: '整体替换' } as Record<string, string>)[extension?.mode || stage?.mode || ''] || '自定义处理')}`
+    : '平台默认' + name
 }
 
 function StepCard({ step, label, children, canRetry = false, canCancel = false, retrying = false, canceling = false, onRetry, onCancel }: { step: EvolveStep; label?: string; children?: ReactNode; canRetry?: boolean; canCancel?: boolean; retrying?: boolean; canceling?: boolean; onRetry?: () => void; onCancel?: () => void }) {

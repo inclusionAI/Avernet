@@ -46,39 +46,35 @@ describe('Task detail live updates', () => {
     expect(frame.srcdoc).toContain('HIDDEN_PAYLOAD_SENTINEL')
     expect(screen.getByText('等待回答')).toBeTruthy()
     expect(screen.getAllByText('等待补充上下文').length).toBeGreaterThan(0)
-    expect(screen.getByText('CONTEXT: 保留步骤错误')).toBeTruthy()
+    expect(screen.getAllByText('CONTEXT: 保留步骤错误').length).toBeGreaterThan(0)
     expect(screen.queryByText('自定义 Stage 交付结果')).toBeNull()
     const rawOutputs = Array.from(view.container.querySelectorAll('pre')).filter((el) => el.textContent?.includes('HIDDEN_PAYLOAD_SENTINEL'))
     expect(rawOutputs.length).toBeGreaterThan(0)
     expect(rawOutputs.every((el) => el.closest('details')?.open === false)).toBe(true)
     await tick(3000)
-    expect(screen.getByText('自定义 Stage 交付结果')).toBeTruthy()
-    expect(screen.getByText('最终交付结果')).toBeTruthy()
+    expect(screen.getAllByText('自定义 Stage 交付结果').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('最终交付结果').length).toBeGreaterThan(0)
     expect(screen.getByTitle('Stage 已回答的交互表单')).toBeTruthy()
   })
 
-  it('folds legacy Stage test preparation and artifacts while preserving its original step and answered interaction', async () => {
+  it('filters Stage test preparation and artifacts without introducing a second visual section', async () => {
     const step = (stepId: string, stepType: string) => ({ stepId, taskId: 'TASK-1', stepType, status: 'succeeded', command: 'original command', summary: 'original ' + stepType })
     const history = { ...task('completed', true), task_type: 'stage_test', config: { ...task('completed', true).config, stageTest: { stage: 'diagnose', mode: 'replace' } },
-      steps: [step('PREP', 'skill_prepare'), step('MAIN', 'stage_extension'), step('FINAL', 'skill_finalize')],
+      steps: [step('PREP', 'skill_prepare'), { ...step('MAIN', 'stage_extension'), stageExtension: { stage: 'diagnose', mode: 'replace', implementationId: 'IMPL-97', displayName: '97 技能加固诊断前置' } }, step('FINAL', 'skill_finalize')],
       interactions: [{ interactionId: 'HITL-1', stepId: 'MAIN', status: 'answered', question: { format: 'text', content: '历史问题' }, answer: { content: '历史回答', tag: 'scope' } }],
     }
     api.evolve.getTask.mockResolvedValue(history)
     const view = open(); await tick()
     expect(screen.getByRole('heading', { name: 'Stage 集成测试流程' })).toBeTruthy()
     expect(screen.queryByRole('heading', { name: '进化工作流' })).toBeNull()
-    const archive = screen.getByText('测试环境准备与产物记录（2）').closest('details')!
-    expect(archive.open).toBe(false)
-    expect(archive.querySelector('#step-PREP')).toBeTruthy()
-    expect(archive.querySelector('#step-FINAL')).toBeTruthy()
-    expect(archive.querySelector('#step-MAIN')).toBeNull()
+    expect(screen.getByRole('button', { name: /97 技能加固诊断前置.*自定义/ })).toBeTruthy()
+    expect(screen.queryByText('测试环境准备与产物记录（2）')).toBeNull()
+    expect(view.container.querySelector('#step-PREP')).toBeNull()
+    expect(view.container.querySelector('#step-FINAL')).toBeNull()
     expect(screen.getByText('历史回答').closest('#step-MAIN')).toBeTruthy()
     expect(view.container.querySelectorAll('#step-MAIN')).toHaveLength(1)
     expect(screen.queryByText('Skill 候选版本')).toBeNull()
     expect(api.evolve.getTaskSkillDiff).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByText('测试环境准备与产物记录（2）'))
-    expect(archive.open).toBe(true)
-    expect(archive.textContent).toContain('original skill_finalize')
   })
 
   it('polls running to completed and supplies the new candidate without page navigation', async () => {
