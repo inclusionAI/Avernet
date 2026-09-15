@@ -6,8 +6,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseVersionAlignmentTest(unittest.TestCase):
+    def test_individual_skill_version_files_are_removed(self):
+        self.assertEqual(list(ROOT.glob("*/version")), [])
+        self.assertFalse((ROOT / "scripts/package-clawbench.sh").exists())
+
     def test_packaging_uses_the_bundle_release_for_every_skill(self):
         source = (ROOT / "scripts/package_clawevolve_skills.sh").read_text(encoding="utf-8")
+        self.assertIn("legacy per-Skill version file is not allowed", source)
         self.assertIn('printf \'%s\\n\' "$RELEASE_VERSION" > "$STAGING_DIR/skills/$name/.clawevolve-version"', source)
         self.assertIn('printf \'%s\\t%s\\t%s\\n\' "$name" "$RELEASE_VERSION" "$digest"', source)
         self.assertNotIn("version_for_release", source)

@@ -44,7 +44,7 @@ skill_digest() {
   (
     cd "$source_dir"
     find . -type d \( -name '__pycache__' -o -name '.pytest_cache' -o -name '.git' -o -path './tasks' \) -prune -o \
-      -type f ! -name 'version' ! -name '.clawevolve-version' \
+      -type f ! -name '.clawevolve-version' \
       ! -name '.DS_Store' ! -name '.nfs*' ! -name '*.pyc' ! -name '*.log' -print \
       | LC_ALL=C sort \
       | while IFS= read -r file; do
@@ -65,6 +65,10 @@ mkdir -p "$STAGING_DIR/skills"
 for name in "${SKILLS[@]}"; do
   source_dir="${PROJECT_DIR}/${name}"
   [[ -f "${source_dir}/SKILL.md" ]] || { echo "missing skill: ${source_dir}" >&2; exit 1; }
+  [[ ! -e "${source_dir}/version" ]] || {
+    echo "legacy per-Skill version file is not allowed: ${source_dir}/version" >&2
+    exit 1
+  }
   digest="$(skill_digest "$source_dir")"
 
   cp -R "$source_dir" "$STAGING_DIR/skills/$name"
