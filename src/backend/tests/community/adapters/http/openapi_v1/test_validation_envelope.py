@@ -200,7 +200,7 @@ def test_error_envelope_carries_the_trace_header():
     from unittest.mock import patch
 
     with patch(
-        "agentclaw.community.adapters.http.openapi_v1.responses._trace_id",
+        "agentclaw.community.adapters.http.openapi_v1.response_envelope.trace_id",
         return_value="trace-123",
     ):
         resp = _routing_app().get(f"{PUBLIC_API_PREFIX}/bots/nope")

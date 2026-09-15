@@ -1940,6 +1940,7 @@ def test_resources_enriches_only_default_mcp_display_from_agentpass():
         audit_log_repo=_Audit(),
         mcp_center=_McpCenter(allowed=True),
         mcp_auth=_McpAuth(allowed=True),
+        mcp_config=_McpConfig(),
         ext_info_provider=lambda _bot_id: None,
         recovery=MagicMock(),
     )

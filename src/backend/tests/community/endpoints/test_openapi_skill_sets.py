@@ -724,6 +724,13 @@ def _seed_mcp_catalog(world) -> None:
             "name": "Dima MCP",
             "description": "Dima workflow tools",
             "icon": "https://example.test/dima.png",
+            "runMode": "REMOTE",
+            "endpoints": [{
+                "networkType": "OFFICE",
+                "env": "PROD",
+                "transportProtocol": "STREAMABLE_HTTP",
+                "url": "https://mcp.example.test/streamable/mcp",
+            }],
         },
     )
     _seed(world)
@@ -961,6 +968,19 @@ def _seed_excluded_default_mcp(world) -> None:
             server_code="mcp.default",
             engine_type="openclaw", default_engine_types=("openclaw",),
         )
+    world.get(MCPCenterPlugin).set_override(
+        "get_mcp_detail",
+        lambda server_code: {
+            "serverCode": server_code,
+            "runMode": "REMOTE",
+            "endpoints": [{
+                "networkType": "OFFICE",
+                "env": "PROD",
+                "transportProtocol": "STREAMABLE_HTTP",
+                "url": "https://mcp.example.test/streamable/mcp",
+            }],
+        },
+    )
 
 
 def _seed_excluded_platform_default_mcp(world) -> None:
