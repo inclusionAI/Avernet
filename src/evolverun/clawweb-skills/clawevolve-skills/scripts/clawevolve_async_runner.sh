@@ -415,7 +415,7 @@ sync_skills() {
   local runtime_root="$CLAWEVOLVE_SKILLS_ROOT"
   local installed_release_file="${runtime_root}/.clawevolve-release-version"
   local format_version release_version archive_file archive_sha256 installed_release release_marker_tmp release_healthy
-  local record name packaged_release packaged_digest source_dir installed_path incoming backup
+  local record name manifest_skill_version packaged_digest source_dir installed_path incoming backup
   [[ -f "$release_file" ]] || { printf 'release manifest not found: %s\n' "$release_file" >&2; return 1; }
   format_version="$(awk -F '\t' '$1 == "format_version" { print $2; exit }' "$release_file")"
   release_version="$(awk -F '\t' '$1 == "release_version" { print $2; exit }' "$release_file")"
@@ -437,7 +437,7 @@ sync_skills() {
   fi
   if [[ "$installed_release" == "$release_version" ]]; then
     release_healthy=1
-    while IFS=$'\t' read -r record name packaged_release packaged_digest; do
+    while IFS=$'\t' read -r record name manifest_skill_version packaged_digest; do
       [[ "$record" == "skill" ]] || continue
       if [[ ! -f "$runtime_root/$name/SKILL.md" ]]; then
         release_healthy=0
@@ -468,10 +468,10 @@ sync_skills() {
   SKILL_EXTRACT_DIR="$(mktemp -d /tmp/clawevolve-skills.XXXXXX)"
   tar -C "$SKILL_EXTRACT_DIR" -xf "$archive"
   chmod -R u+rwX "$SKILL_EXTRACT_DIR/skills"
-  while IFS=$'\t' read -r record name packaged_release packaged_digest; do
+  while IFS=$'\t' read -r record name manifest_skill_version packaged_digest; do
     [[ "$record" == "skill" ]] || continue
     [[ "$name" =~ ^[A-Za-z0-9._-]+$ \
-      && "$packaged_release" == "$release_version" \
+      && "$manifest_skill_version" =~ ^[A-Za-z0-9._-]{1,128}$ \
       && ( -z "$packaged_digest" || "$packaged_digest" =~ ^[a-f0-9]{64}$ ) ]] || {
       printf 'invalid skill manifest entry\n' >&2; return 1;
     }

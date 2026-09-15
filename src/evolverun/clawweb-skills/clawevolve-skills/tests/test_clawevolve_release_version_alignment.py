@@ -17,6 +17,7 @@ class ReleaseVersionAlignmentTest(unittest.TestCase):
         source = (ROOT / "scripts/clawevolve_async_runner.sh").read_text(encoding="utf-8")
         self.assertIn('if [[ "$installed_release" == "$release_version" ]]', source)
         self.assertIn('version_is_newer "$installed_release" "$release_version" "clawevolve"', source)
-        self.assertIn('"$packaged_release" == "$release_version"', source)
+        self.assertIn('"$manifest_skill_version" =~ ^[A-Za-z0-9._-]{1,128}$', source)
+        self.assertNotIn('"$manifest_skill_version" == "$release_version"', source)
         self.assertNotIn('installed_version=""', source)
         self.assertNotIn('version_is_newer "$installed_version" "$packaged_version"', source)
