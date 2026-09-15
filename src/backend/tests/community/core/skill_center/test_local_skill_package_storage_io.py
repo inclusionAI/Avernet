@@ -33,6 +33,7 @@ class _RecordingFilesystem:
     def __init__(self, *, fail_paths=(), delay=0.01):
         self.files: dict[str, bytes] = {}
         self.completed: list[str] = []
+        self.deleted_trees: list[str] = []
         self.in_flight = 0
         self.peak_in_flight = 0
         self._fail_paths = set(fail_paths)
@@ -65,6 +66,10 @@ class _RecordingFilesystem:
             for stored in self.files
             if stored.startswith(prefix)
         ] or None
+
+    async def delete_tree(self, path):
+        self.deleted_trees.append(path)
+        return True
 
 
 def _package(count):
@@ -119,6 +124,15 @@ async def test_a_failed_write_reports_the_first_failure_in_file_order():
 
     with pytest.raises(OSError, match="f1.md"):
         await storage.write(files)
+
+
+@pytest.mark.asyncio
+async def test_delete_delegates_the_complete_package_to_one_runtime_operation():
+    filesystem = _RecordingFilesystem()
+    storage = LocalSkillPackageStorage(filesystem, DIRECTORY)
+
+    assert await storage.delete() is True
+    assert filesystem.deleted_trees == [DIRECTORY]
 
 
 @pytest.mark.asyncio

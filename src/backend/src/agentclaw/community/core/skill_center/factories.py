@@ -80,10 +80,6 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 
-class LocalSkillQuarantineRepairError(OSError):
-    """A partial authoritative-package delete could not be verified repaired."""
-
-
 # Every package file is one device round trip. Issuing them sequentially made a
 # package cost ``file_count × round_trip``, which dominates upload time for the many
 # small files a skill package is made of. Fan them out instead — but bounded: device
@@ -189,6 +185,10 @@ class LocalSkillPackageStorage:
     async def cleanup(self) -> bool:
         return await self._filesystem.delete_tree(self._device_directory)
 
+    async def delete(self) -> bool:
+        """Delete the complete package through one runtime operation."""
+        return await self._filesystem.delete_tree(self._device_directory)
+
     async def exists(self) -> bool:
         """Whether this storage currently has an authoritative package."""
         return await self._filesystem.exists(self._device_directory)
@@ -240,75 +240,6 @@ class LocalSkillPackageStorage:
                 raise OSError("unable to clear Local Skill copy target")
         if not await target._restore_contents(files):
             raise OSError("Local Skill copy verification failed")
-
-    async def quarantine_to(self, quarantine: "LocalSkillPackageStorage") -> None:
-        """Copy, verify, then remove this authoritative package.
-
-        Device backends have no shared directory-rename operation.  This
-        portable sequence deliberately retains the authoritative source until
-        every copied file has been read back byte-for-byte from quarantine.
-        """
-        files = await self._read_package_files()
-        if await quarantine._filesystem.exists(quarantine.directory):
-            raise OSError("Local Skill quarantine already exists")
-        await _gather_package_io(
-            [
-                quarantine._filesystem.write_file(
-                    f"{quarantine.directory}/{relative_path}", content
-                )
-                for relative_path, content in files
-            ]
-        )
-        copied = await _gather_package_io(
-            [
-                quarantine._filesystem.read_file(
-                    f"{quarantine.directory}/{relative_path}"
-                )
-                for relative_path, _ in files
-            ]
-        )
-        if any(
-            actual != expected
-            for actual, (_, expected) in zip(copied, files)
-        ):
-            raise OSError("Local Skill quarantine verification failed")
-        try:
-            source_cleaned = await self.cleanup()
-        except Exception:
-            # A device backend can raise after partially deleting source
-            # bytes. Treat that exactly like a failed cleanup so the verified
-            # quarantine copy is used to restore the authoritative package.
-            source_cleaned = False
-        if not source_cleaned:
-            try:
-                restored = await self._restore_contents(files)
-            except Exception as exc:
-                raise LocalSkillQuarantineRepairError(
-                    "Local Skill package repair failed"
-                ) from exc
-            if not restored:
-                raise LocalSkillQuarantineRepairError(
-                    "Local Skill package repair verification failed"
-                )
-            raise OSError("Local Skill package quarantine failed")
-
-    async def restore_from(
-        self, quarantine: "LocalSkillPackageStorage"
-    ) -> tuple[bool, bool]:
-        """Verify or restore the package before purging its quarantine copy."""
-        files = await quarantine._read_package_files()
-        if await self._filesystem.exists(self.directory):
-            try:
-                source_files = await self._read_package_files()
-            except OSError:
-                source_files = []
-            if source_files == files:
-                return True, await quarantine.cleanup()
-            if not await self.cleanup():
-                return False, False
-        if not await self._restore_contents(files):
-            return False, False
-        return True, await quarantine.cleanup()
 
     async def _restore_contents(self, files: list[tuple[str, bytes]]) -> bool:
         await _gather_package_io(

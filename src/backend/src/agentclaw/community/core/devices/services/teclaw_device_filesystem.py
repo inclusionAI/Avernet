@@ -3,9 +3,9 @@
 Like Baas/Arca, every read **and write** is a per-file call to the engine's HTTP
 file API; the **engine** owns its NAS/ossfs mount and does the landing. So
 ``write_file`` → ``/api/v1/file/upload`` (multipart), ``delete_file`` →
-``/api/v1/file/remove``, ``delete_tree`` → ``/api/v1/file/rmtree``, ``read_file``
-→ ``/api/v1/file/read``, ``list_dir`` → ``/api/v1/file/list``. There is **no**
-OSS materialize and **no** whole-artifact
+``/api/v1/file/remove`` and ``delete_tree`` → the same recursive-capable
+``/api/v1/file/remove``, ``read_file`` → ``/api/v1/file/read``, ``list_dir`` →
+``/api/v1/file/list``. There is **no** OSS materialize and **no** whole-artifact
 redeliver on an edit — the running container is the source of truth for a bot's
 files. (Files are carried to a new version only at draft→verify / verify→publish,
 by a separate promotion step that gathers from the engine into OSS + composes
@@ -115,13 +115,15 @@ class TeclawDeviceFileSystem(DeviceFileSystem):
             return False
 
     async def delete_tree(self, dir_path: str) -> bool:
-        """Forward a recursive directory delete to the engine
-        (``/api/v1/file/rmtree``). The engine always provides ``rmtree`` (per the
-        contract), so there is no list+remove-each fallback."""
+        """Ask teclaw to remove the complete directory tree in one operation.
+
+        Teclaw's 404 cannot distinguish an absent target from an unavailable
+        route, so only a 2xx response is accepted and no fallback is attempted.
+        """
         engine_dir = self._path_mapper(dir_path)
         try:
             response = await asyncio.to_thread(
-                self._invoke, "/api/v1/file/rmtree", json={"target_path": engine_dir}
+                self._invoke, "/api/v1/file/remove", json={"target_path": engine_dir}
             )
             response.raise_for_status()
             logger.info("[TeclawDeviceFileSystem.delete_tree] removed tree %s", engine_dir)
