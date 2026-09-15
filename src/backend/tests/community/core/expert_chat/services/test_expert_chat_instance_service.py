@@ -19,6 +19,9 @@ from agentclaw.community.core.expert_chat.errors import (
 from agentclaw.community.core.expert_chat.services.expert_chat_instance_service import (
     ExpertChatInstanceService,
 )
+from agentclaw.community.core.bot_management.services.bot_service import (
+    BotNotFoundError as BotLookupNotFoundError,
+)
 from agentclaw.community.core.service_bot.services.baas_service import (
     BaasServiceError,
     BotWsConnectionInfoResponse,
@@ -101,6 +104,23 @@ def _make_service(
     common_config_service = common_config_service or MagicMock()
     common_config_service.get_value.return_value = None
 
+    # ExpertChatInstanceService now loads the service bot through
+    # BotService.get_bot (which attaches template_config) so the caller
+    # container gets the same envs as the publish path. Mirror get_bot onto
+    # bot_repo.get_by_id_and_owner so tests that already wire bot_repo still
+    # drive the service-bot fetch; raise the same BotNotFoundError get_bot
+    # raises when the underlying lookup is None, so the not-found tests stay
+    # valid without touching their wiring.
+    bot_service = MagicMock()
+
+    def _mirror_get_bot(*, bot_id, user_id, **_kw):
+        info = bot_repo.get_by_id_and_owner(bot_id, user_id)
+        if info is None:
+            raise BotLookupNotFoundError(f"Bot not found: bot_id={bot_id}")
+        return info
+
+    bot_service.get_bot = MagicMock(side_effect=_mirror_get_bot)
+
     svc = ExpertChatInstanceService(
         instance_repo=instance_repo,
         baas_service=baas,
@@ -108,6 +128,7 @@ def _make_service(
         bot_repo=bot_repo,
         binding_repo=binding_repo,
         bot_build_service=bot_build_service,
+        bot_service=bot_service,
         caller_identity=caller_identity,
         token_provider=token_provider,
         runtime_updater=runtime_updater,
@@ -399,6 +420,87 @@ class TestCreateContainer:
         assert call_kwargs["version"] == "2"
         assert call_kwargs["docker_image"] == "registry/arca:v2"
 
+    @pytest.mark.asyncio
+    async def test_create_forwards_aligned_envs_from_template_config(self):
+        """_create_container forwards publish-aligned extra_envs/template_config/ext_info.
+
+        Mirrors the service-bot publish/restart/rollback contract: engine-owned
+        envs (GIT_ADDRESSES here), the sandbox template_config and the
+        skills-manifest ext_info must be derived from the bot's template_config +
+        publish ext and forwarded to release_async.
+        """
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, *_ = _make_service()
+        repo_url = "https://code.example.com/o/r.git"
+        template_config = {
+            "template_key": "normalcc",
+            "template_uid": "tuid-1",
+            "repos": [repo_url],
+        }
+        bot_info = {
+            "bot_id": BOT_ID,
+            "owner_id": OWNER_ID,
+            "bot_name": "Test Bot",
+            "entity_id": OWNER_ID,
+            "active_engine": "aicoding",
+            "bot_type": "service",
+            "template_config": template_config,
+        }
+        _wire_bot_repo(bot_repo, bot_info)
+        _wire_binding_repo(binding_repo)
+        bot_build_service.release_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 888})
+        skills_manifest = {
+            "schema_version": 1,
+            "engine": "aicoding",
+            "active_layout": "legacy",
+        }
+        publish_ext = {"skills_manifest": skills_manifest, "migration_path": "/nas/path"}
+
+        await svc._create_container(
+            BOT_ID,
+            OWNER_ID,
+            USER_ID,
+            migration_path="/nas/path",
+            version=2,
+            docker_image="registry/arca:v2",
+            publish_ext=publish_ext,
+        )
+
+        bot_build_service.release_async.assert_called_once()
+        kwargs = bot_build_service.release_async.call_args[1]
+        assert kwargs["bot"] == bot_info
+        assert kwargs["extra_envs"]["GIT_ADDRESSES"] == f'["{repo_url}"]'
+        assert kwargs["extra_envs"]["AGENTCLAW_SKILLS_LAYOUT"] == "legacy"
+        assert kwargs["template_config"] == template_config
+        assert kwargs["ext_info"] == {"skills_manifest": skills_manifest}
+
+    @pytest.mark.asyncio
+    async def test_create_no_skills_manifest_yields_none_ext_info(self):
+        """ext_info/template_config are None when publish_ext has no skills_manifest and the bot has no template_config."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, *_ = _make_service()
+        _wire_bot_repo(bot_repo, {
+            "bot_id": BOT_ID,
+            "owner_id": OWNER_ID,
+            "entity_id": OWNER_ID,
+            "active_engine": "aicoding",
+            "bot_type": "service",
+            "template_config": {},
+        })
+        _wire_binding_repo(binding_repo)
+        bot_build_service.release_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 888})
+
+        await svc._create_container(
+            BOT_ID,
+            OWNER_ID,
+            USER_ID,
+            migration_path="/nas/path",
+            publish_ext={"migration_path": "/nas/path"},
+        )
+
+        kwargs = bot_build_service.release_async.call_args[1]
+        assert kwargs["ext_info"] is None
+        assert kwargs["template_config"] is None
+        assert kwargs["extra_envs"]["AGENTCLAW_SKILLS_LAYOUT"] == "legacy"
+
 
 class TestUpgradeContainer:
     """Tests for _upgrade_container method (async, uses upgrade_async)."""
@@ -472,6 +574,53 @@ class TestUpgradeContainer:
         assert call_kwargs["publish_stage"] == PublishStage.ONLINE
         assert call_kwargs["version"] == "3"
         assert call_kwargs["docker_image"] == "registry/arca:v2"
+
+    @pytest.mark.asyncio
+    async def test_upgrade_forwards_aligned_envs_from_template_config(self):
+        """_upgrade_container forwards publish-aligned extra_envs/template_config/ext_info (recycled container)."""
+        svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, *_ = _make_service()
+        repo_url = "https://code.example.com/o/r.git"
+        template_config = {
+            "template_key": "normalcc",
+            "template_uid": "tuid-1",
+            "repos": [repo_url],
+        }
+        bot_info = {
+            "bot_id": BOT_ID,
+            "owner_id": OWNER_ID,
+            "bot_name": "Test Bot",
+            "entity_id": OWNER_ID,
+            "active_engine": "aicoding",
+            "bot_type": "service",
+            "template_config": template_config,
+        }
+        _wire_bot_repo(bot_repo, bot_info)
+        bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
+        skills_manifest = {
+            "schema_version": 1,
+            "engine": "aicoding",
+            "active_layout": "legacy",
+        }
+        publish_ext = {"skills_manifest": skills_manifest, "migration_path": "/nas/path"}
+
+        await svc._upgrade_container(
+            BOT_UUID,
+            BOT_ID,
+            OWNER_ID,
+            migration_path="/nas/path",
+            version=3,
+            docker_image="registry/arca:v2",
+            publish_ext=publish_ext,
+        )
+
+        bot_build_service.upgrade_async.assert_called_once()
+        kwargs = bot_build_service.upgrade_async.call_args[1]
+        assert kwargs["bot_uuid"] == BOT_UUID
+        assert kwargs["bot"] == bot_info
+        assert kwargs["extra_envs"]["GIT_ADDRESSES"] == f'["{repo_url}"]'
+        assert kwargs["extra_envs"]["AGENTCLAW_SKILLS_LAYOUT"] == "legacy"
+        assert kwargs["template_config"] == template_config
+        assert kwargs["ext_info"] == {"skills_manifest": skills_manifest}
 
 
 class TestBuildConnection:
