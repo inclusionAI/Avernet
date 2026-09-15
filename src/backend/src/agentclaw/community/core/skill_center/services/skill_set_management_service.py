@@ -60,6 +60,9 @@ from agentclaw.community.core.workspace.skill_layout import (
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.core.skill_center.skill_set_management_service_protocol import SkillSetManagementServiceProtocol
+from agentclaw.community.core.skill_center.services.skill_set_resource_projection import (
+    list_skill_set_resources,
+)
 
 
 class SkillSetManagementService(SkillSetManagementServiceProtocol):
@@ -813,40 +816,16 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
     def list_resources(self, *, bot_id: str, owner_id: str, user_id: str) -> list[dict]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         owner_id = str(bot["owner_id"])
-        # Resource reads preserve the legacy graceful degradation: a passport-provider
-        # outage hides Default CLI entries but must not hide SkillSet/MCP data.
-        try:
-            default_clis = self._passport.query_passport_clis(
-                bot_id, str(bot.get("entity_id") or owner_id)
-            )
-        except Exception:
-            default_clis = []
-        items = self._repository.list_sets(
+        return list_skill_set_resources(
+            repository=self._repository,
+            legacy_factory=self._legacy_factory,
+            passport=self._passport,
+            bot=bot,
             bot_id=bot_id,
             owner_id=owner_id,
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
         )
-        resources: list[dict] = []
-        for item in items:
-            mcps = list_skill_set_mcp_projection(
-                repository=self._repository,
-                legacy_factory=self._legacy_factory,
-                bot=bot,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                target=item,
-                engine_type=self._engine(bot),
-                default_engine_types=self._default_engine_types(bot),
-            )
-            resources.append(
-                {
-                    **item,
-                    "mcps": mcps,
-                    "clis": default_clis if item["is_default"] else [],
-                }
-            )
-        return resources
 
     async def _mutate(
         self,
