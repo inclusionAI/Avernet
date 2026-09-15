@@ -61,7 +61,6 @@ provides:
   - "RecoveringBotRuntimeProjector"
   - "SkillRuntimeDelivery"
   - "RuntimeServiceFactoryBoundary"
-  - "LocalSkillCleanupWorkModel"
   - "DesktopSkillRecoveryServiceProtocol"
   - "DesktopSkillRecoveryService"
   - "DesktopSkillRecoveryTaskHandler"
@@ -109,7 +108,6 @@ consumes:
   - "SpaceSkillSourcePlugin"
   - "SkillRepoSyncPlugin"
   - "WorkspacePathFactory"
-  - "LocalSkillCleanupRepository"
   - "BotRuntimeProjectorProtocol"
   - "SpaceAccessServiceProtocol"
   - "SpaceSkillRepository"
@@ -172,7 +170,6 @@ internal_dependencies:
   - agentclaw.community.log
   - agentclaw.community.plugin_api.cache
   - agentclaw.community.plugin_api.http_client
-  - agentclaw.community.plugin_api.local_skill_cleanup
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.device_adapter_transport
   - agentclaw.community.plugin_api.devices
@@ -463,22 +460,12 @@ request fails. A Runtime projection failure is instead returned as `PENDING` /
 whose authoritative package is missing fails closed and is repaired outside the
 upload path.
 
-Public Local Skill deletion first persists a non-purgeable `preparing` record,
-then promotes it to `repair_required` before copying and verifying package
-bytes in a unique Bot-scoped quarantine. Its one transaction rechecks active
-custom SkillSet references, removes the default-set exclusion, all SkillSet
-associations, and the Skill row, and makes the retained cleanup work
-purgeable. Bot-scoped SkillSet activation takes the same edit lease, so it
-cannot publish a stale association while deletion is in flight. If the
-transaction fails, the package is restored from quarantine before the request
-fails. A post-commit purge failure retains the same durable cleanup work; it
-never recreates the deleted Skill.
-
-If a device reports source deletion failure after a partial delete and the
-authoritative package cannot be verified repaired, the complete quarantine is
-retained as `repair_required` cleanup work. It is deliberately excluded from
-ordinary obsolete-byte purge retries until package repair is resolved.
-Before a later deletion of that same Local Skill starts, it reacquires the
-serialized edit lease and restores any such quarantine to the authoritative
-locator; only after that succeeds can the deletion retry. If restoration leaves
-a redundant quarantine, ordinary pending cleanup may purge that duplicate.
+Public Local Skill deletion keeps authorization, readiness checks, the edit
+lease, reference prechecks, and metadata deletion in Backend. It delegates the
+complete package root to one runtime deletion operation before deleting the
+metadata; Backend does not list, copy, quarantine, restore, or individually
+remove package files. Only a positively reported runtime success permits the
+metadata transaction. A later metadata failure is returned as a storage error
+without restoring runtime files, so this flow is not a cross-storage atomic
+transaction. The exact trade-off and Teclaw adapter semantics are recorded in
+`docs/adr/0014-engine-owned-package-deletion.md`.
