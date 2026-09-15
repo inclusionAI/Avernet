@@ -21,16 +21,23 @@ already ``RUNNING`` with a live lease → ``affected == 0``). No ``SELECT ... FO
 UPDATE``. The same CAS shape guards ``complete`` / ``reschedule`` / ``fail`` on
 ``claimed_by == worker_id AND status == RUNNING``.
 
-**The claim scan is two queries, not one.** Eligibility is a union -- due
-``PENDING`` rows, plus ``RUNNING`` rows whose lease lapsed -- and as a single
-``OR`` it is a scan predicate no one index serves: the halves sit in different
-indexes and ``ORDER BY run_at`` is satisfiable by neither, so the engine
-materialises the whole eligible set and sorts it before ``LIMIT`` can bite. On a
-queue whose healthy steady state is a large backlog parked in the future -- one
-row per poller waiting out its interval, one per backoff retry -- that is the
-cost that matters. :meth:`_read_candidates` reads each half through the index
-built for it instead, reclaimable rows first. The ``OR`` survives where it is
-free: the CAS, which has already pinned its row by primary key.
+**The claim scan reads its two eligibility branches separately.** Eligibility
+is a union -- due ``PENDING`` rows, plus ``RUNNING`` rows whose lease lapsed --
+and as a single ``OR`` neither half gets the index it wants. The lapsed-lease
+half degrades to ``status = 'RUNNING' AND run_at <= now()``, which every
+in-flight row satisfies, so the engine reads *all* of them and only then checks
+``lease_expires_at`` off the row; and with two status ranges in play
+``ORDER BY run_at`` is satisfiable by neither, so ``LIMIT`` cannot end the scan
+and the sort input is "every due row plus every RUNNING row" rather than
+``limit``. :meth:`_read_candidates` gives each half its own index instead, in
+one statement. The ``OR`` survives where it is free: the CAS, which has already
+pinned its row by primary key.
+
+Note what was **not** wrong with the ``OR``: ``run_at <= now()`` sat outside it
+and bounded both index ranges, so ``PENDING`` rows parked in the future were
+already excluded from the scan. A large future backlog -- one row per poller
+waiting out its interval, one per backoff retry -- was never the cost here. The
+cost scales with the RUNNING population and the due backlog.
 
 **App scoping.** The table is shared with a second, independently deployed
 backend, so every row names its owning ``app`` and every statement that *selects
@@ -80,7 +87,7 @@ import json
 from typing import List, Optional
 
 from injector import inject
-from sqlalchemy import and_, func, or_, text
+from sqlalchemy import and_, func, literal, or_, select, text, union_all
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -329,11 +336,12 @@ class TaskQueueRepository(
 
         ``idx_env_app_status_run_at`` matches this end to end -- three equality
         terms and then a range on the index's last column -- so the scan stops
-        at ``now()`` and never reads what lies past it. What lies past it is the
-        bulk of a healthy queue: every task a poller rescheduled and every
-        backoff retry sits there as ``PENDING`` with a future ``run_at``.
-        ``ORDER BY run_at`` is that index's own order, so ``LIMIT n`` stops the
-        scan after n entries rather than sorting first."""
+        at ``now()``, and ``ORDER BY run_at`` is that index's own order, so
+        ``LIMIT n`` ends the scan after n entries.
+
+        The combined ``OR`` also bounded this half by ``run_at`` and also
+        excluded the rows parked past ``now()``; what it could not do was stop
+        at n, because the sort came first."""
         return and_(
             *self._scoped_and_due(env, app),
             self.Model.status == TaskStatus.PENDING.value,
@@ -348,7 +356,11 @@ class TaskQueueRepository(
         ``lease_expires_at`` -- the insert leaves it NULL, all four terminal
         transitions and ``reschedule``'s re-pend set it back to NULL -- and no
         engine matches NULL against ``<= now()``. The range therefore selects
-        RUNNING rows and nothing else.
+        RUNNING rows and nothing else. This is the half the combined ``OR``
+        served worst: without ``lease_expires_at`` in the index it could only
+        narrow to ``status = 'RUNNING' AND run_at <= now()``, which every
+        in-flight row passes, so every one of them was read and tested off the
+        row.
 
         ``run_at <= now()`` comes along from :meth:`_scoped_and_due` to keep
         this branch exactly the CAS's second disjunct. It excludes nothing: a
@@ -632,57 +644,69 @@ class TaskQueueRepository(
     # ── claim (the single-winner CAS) ───────────────────────────────────
 
     def _read_candidates(self, db, env: str, app: str, limit: int) -> List[int]:
-        """The claim scan: one index-aligned query per eligibility branch.
+        """The claim scan: both eligibility branches, each riding its own index,
+        in **one** statement.
 
-        Split rather than issued as a single ``OR`` (see :meth:`_eligible`).
-        Each half is a plain range scan on its own index, ordered by that
-        index's own order, so ``LIMIT`` ends the scan instead of trimming a
-        result set the engine had to sort first.
+        Split rather than issued as a single ``OR`` (see :meth:`_eligible`) --
+        but issued as one round trip, because the branches are arms of a
+        ``UNION ALL`` rather than two calls. That matters more than it looks:
+        ``TaskWorker`` polls on a sub-second interval and re-polls with no delay
+        whenever a tick fills its batch, so a second statement per tick would be
+        a second remote round trip on every idle poll, on the exact path this
+        method exists to make cheaper.
 
-        **Reclaim is read first, and draws from the same budget.** The order is
-        load-bearing, not a fairness preference. The worker loop re-polls with
-        no delay whenever a tick fills its batch (``TaskWorker._loop``), so
-        spending the budget on branch A first would leave branch B unread for
-        as long as due work keeps arriving -- and branch B holds precisely the
-        rows a crashed worker abandoned, which no other path recovers. The
-        reverse cannot happen: claiming an expired-lease row renews its lease,
-        so branch B's pool drains as it is read and refills only when a worker
-        actually dies. Sharing one budget is what keeps the split invisible to
-        the caller -- ``limit`` still bounds the batch, as the protocol says.
+        Each arm is bounded and ordered inside its own derived table. SQLite
+        forbids ``ORDER BY`` / ``LIMIT`` on the arms of a compound SELECT, so
+        they have to be subqueries rather than parenthesised selects;
+        MySQL/OceanBase read the same shape as a derived table. The one sort
+        left is the outer ``ORDER BY``, over at most ``2 * limit`` rows -- a
+        fixed twenty at the default batch size, and independent of how large
+        the table or the backlog is. That is the whole point: what the combined
+        ``OR`` sorted was every due row plus every RUNNING row.
+
+        **Reclaim comes first, and both arms draw on the same budget.** The
+        order is load-bearing, not a fairness preference. Spending the budget on
+        branch A first would leave branch B unread for as long as due work keeps
+        arriving -- and branch B holds precisely the rows a crashed worker
+        abandoned, which no other path recovers. The reverse cannot happen:
+        claiming an expired-lease row renews its lease, so branch B's pool
+        drains as it is read and refills only when a worker actually dies.
+        Sharing one budget is what keeps the split invisible to the caller --
+        ``limit`` still bounds the batch, as the protocol says.
+
+        One statement also closes a window the two-query form had: a row cannot
+        be seen by both arms, because both are evaluated against one snapshot
+        and no row is ``PENDING`` and ``RUNNING`` at once. No de-duplication is
+        needed here.
         """
-        def _ids(where, order_by, count: int) -> List[int]:
-            if count <= 0:
-                return []
-            return [
-                row_id
-                for (row_id,) in db.query(self.Model.id)
-                .filter(where)
-                .order_by(order_by)
-                .limit(count)
-                .all()
-            ]
+        def _arm(where, order_col, priority: int):
+            bounded = (
+                select(self.Model.id.label("id"), order_col.label("k"))
+                .where(where)
+                .order_by(order_col.asc())
+                .limit(limit)
+                .subquery()
+            )
+            return select(bounded.c.id, literal(priority).label("pri"), bounded.c.k)
 
-        reclaimable = _ids(
-            self._expired_lease(env, app),
-            # The index's own order, and the right one on its own terms:
-            # longest-lapsed lease first is longest-abandoned first.
-            self.Model.lease_expires_at.asc(),
-            limit,
-        )
-        due = _ids(
-            self._due_pending(env, app),
-            # Oldest run_at first, so the queue drains roughly FIFO and
-            # starvation within the branch stays bounded.
-            self.Model.run_at.asc(),
-            limit - len(reclaimable),
-        )
-        # A row can cross from branch B to branch A between the two reads: a
-        # racing worker reclaims it and reschedules it with no delay.
-        # Claiming it twice would be harmless -- the second CAS sees the live
-        # lease this call just wrote and matches nothing -- but the round trip
-        # is free to skip.
-        seen = set(reclaimable)
-        return reclaimable + [task_id for task_id in due if task_id not in seen]
+        candidates = union_all(
+            # Priority 0. Ordered by the index's own column, which is also the
+            # right order on its merits: longest-lapsed lease is
+            # longest-abandoned.
+            _arm(self._expired_lease(env, app), self.Model.lease_expires_at, 0),
+            # Priority 1, oldest run_at first, so the queue drains roughly FIFO
+            # and starvation within the branch stays bounded.
+            _arm(self._due_pending(env, app), self.Model.run_at, 1),
+        ).subquery()
+
+        return [
+            row_id
+            for (row_id,) in db.execute(
+                select(candidates.c.id)
+                .order_by(candidates.c.pri, candidates.c.k)
+                .limit(limit)
+            ).all()
+        ]
 
     def claim_batch(
         self,

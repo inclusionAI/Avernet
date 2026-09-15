@@ -76,16 +76,27 @@ unclaimed (or lease-expired) row. Across N racing workers each task is won by
 exactly one. A crashed worker's task is reclaimed after its lease expires. No
 `SELECT … FOR UPDATE`. See `plugins/task_queue_repository.py`.
 
-The scan that feeds that CAS runs as **two queries, one per eligibility branch**
-— due `PENDING`, and `RUNNING` with a lapsed lease — each riding the app-scoped
-index built for it. As a single `OR` it rode neither: the halves sit in
-different indexes and `ORDER BY run_at` is satisfiable by neither, so the engine
-sorted the whole eligible set before `LIMIT` applied. On a queue whose healthy
-steady state is a large backlog of not-yet-due rows, that is the cost that
-matters. Reclaimable rows are read first and both branches share the one
-`limit`: the worker re-polls immediately whenever a tick fills its batch, so
-spending the budget on `PENDING` first would leave a crashed worker's rows
-unreclaimed for as long as due work keeps arriving.
+The scan that feeds that CAS reads its **two eligibility branches separately —
+due `PENDING`, and `RUNNING` with a lapsed lease — in one statement**, as arms
+of a `UNION ALL`, each riding the app-scoped index built for it. As a single
+`OR` neither half got its index: the lapsed-lease half degraded to `status =
+'RUNNING' AND run_at <= now()`, which every in-flight row passes, so all of them
+were read and `lease_expires_at` tested off the row; and with two status ranges
+in play `ORDER BY run_at` was satisfiable by neither index, so `LIMIT` could not
+end the scan. The sort input was every due row plus every RUNNING row. It is now
+the union's own output, at most `2 × limit` rows.
+
+Note what the `OR` did *not* cost: `run_at <= now()` sat outside it and bounded
+both index ranges, so `PENDING` rows parked in the future were already excluded.
+A large future-dated backlog is not what this shape is about — the cost scales
+with the RUNNING population and the due backlog.
+
+One statement rather than two because `TaskWorker` polls on a sub-second
+interval and re-polls with no delay on a full batch: a per-branch query would be
+a second remote round trip on every idle tick. Reclaimable rows come first and
+both arms share the one `limit`, because spending the budget on `PENDING` first
+would leave a crashed worker's rows unreclaimed for as long as due work keeps
+arriving.
 
 ### Enqueue time — "should this row exist at all?"
 
