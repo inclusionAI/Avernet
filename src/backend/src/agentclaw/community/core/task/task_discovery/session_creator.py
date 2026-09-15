@@ -16,8 +16,8 @@ from typing import Any, Protocol
 
 import httpx
 
-from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
-    FrontendUrlProvider,
+from agentclaw.community.core.task.task_discovery.frontend_url import (
+    ConfigFrontendUrlProvider,
 )
 from agentclaw.community.core.task.task_discovery.models import (
     DiscoveredTask,
@@ -63,7 +63,7 @@ class HttpSessionCreator:
         *,
         backend_url: str = "http://localhost:8888",
         frontend_url: str = "http://localhost:8000",
-        frontend_url_provider: FrontendUrlProvider | None = None,
+        frontend_url_provider: ConfigFrontendUrlProvider | None = None,
     ):
         """初始化。
 

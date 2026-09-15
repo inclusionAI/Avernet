@@ -105,9 +105,9 @@ class TestProvideSessionInitiator:
         assert isinstance(result, CronRelaySessionInitiator)
 
     def test_frontend_url_provider_bound_is_injected(self, monkeypatch):
-        """FrontendUrlProvider resolves → injected into the initiator."""
-        from agentclaw.community.plugin_api.frontend_url import (
-            FrontendUrlProvider,
+        """ConfigFrontendUrlProvider resolves → injected into the initiator."""
+        from agentclaw.community.core.task.task_discovery.frontend_url import (
+            ConfigFrontendUrlProvider,
         )
 
         monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
@@ -119,20 +119,25 @@ class TestProvideSessionInitiator:
         )
         assert isinstance(result, CronRelaySessionInitiator)
         assert result._frontend_url_provider is fake_fe
-        injector.get.assert_called_once_with(FrontendUrlProvider)
+        injector.get.assert_called_once_with(ConfigFrontendUrlProvider)
 
-    def test_frontend_url_provider_unbound_uses_null(self, monkeypatch):
-        """FrontendUrlProvider resolution raises → NullFrontendUrlProvider
-        fallback (constructor default wins)."""
-        from agentclaw.community.plugin_api.frontend_url import (
-            NullFrontendUrlProvider,
+    def test_frontend_url_provider_unbound_uses_empty_default(self, monkeypatch):
+        """ConfigFrontendUrlProvider resolution raises → empty static fallback
+        (constructor default wins downstream)."""
+        from agentclaw.community.core.task.task_discovery.frontend_url import (
+            ConfigFrontendUrlProvider,
+        )
+        from agentclaw.community.core.task.task_discovery.session_initiator import (
+            FrontendUrlHolder,
         )
 
         monkeypatch.setenv("DEPLOY_PROFILE", "singlebox")
+        FrontendUrlHolder._url = ""  # isolate from other holders
         injector = MagicMock()
         injector.get.side_effect = Exception("not bound")
         result = self._make_module()._provide_session_initiator(
             self._make_cron_relay(), injector,
         )
         assert isinstance(result, CronRelaySessionInitiator)
-        assert isinstance(result._frontend_url_provider, NullFrontendUrlProvider)
+        assert isinstance(result._frontend_url_provider, ConfigFrontendUrlProvider)
+        assert result._frontend_url_provider.get() == ""
