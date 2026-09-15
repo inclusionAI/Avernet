@@ -819,12 +819,13 @@ export function resolveBaasConfig(configPath?: string): ResolvedBaasConfig {
   if (!evolveScriptPaths.dev || !evolveScriptPaths.pre || !evolveScriptPaths.prod) {
     throw new Error("BaaS evolveScriptPaths.dev/pre/prod 必须在 YAML 中显式配置");
   }
+  const devBaasAuth = firstNonBlank(
+    getEnv("CLAWEVOLVE_BAAS_DEV_API_KEY"),
+    yaml.baas?.environments?.dev?.apiKey,
+  );
   const environments: Record<"dev" | "pre" | "prod", ResolvedBaasEnvironmentConfig> = {
     dev: {
-      apiKey: firstNonBlank(
-        getEnv("CLAWEVOLVE_BAAS_DEV_API_KEY"),
-        yaml.baas?.environments?.dev?.apiKey,
-      ),
+      apiKey: devBaasAuth,
       baseUrl: firstNonBlank(yaml.baas?.environments?.dev?.baseUrl).replace(/\/$/, ""),
     },
     pre: {

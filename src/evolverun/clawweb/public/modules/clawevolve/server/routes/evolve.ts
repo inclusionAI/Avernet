@@ -1018,10 +1018,11 @@ async function createBuiltinDiagnoseStep(
     },
     systemArgs,
   );
+  const diagAuth = judgeBackend === "api" ? diagnoseApiKey : "******";
   let dispatchCommand = renderCommand(
     config.nodeCommands?.diagnose ?? defaultNodeCommand("diagnose"),
     {
-      api_key: judgeBackend === "api" ? diagnoseApiKey : "******",
+      api_key: diagAuth,
       model: config.model ?? "GLM-5.2",
       diagnose_intent: quoteCommandArgument(effectiveDiagnoseIntent),
       start_date: config.startDate ?? "",
