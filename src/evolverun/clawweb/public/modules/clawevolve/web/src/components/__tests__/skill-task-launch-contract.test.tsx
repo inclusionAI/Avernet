@@ -10,10 +10,11 @@ import { SkillAssetRepository } from '../../../../server/repositories/skill-asse
 import { StageSkillRepository } from '../../../../server/repositories/stage-skill-repository'
 import { createSkillTaskDefaultsRouter } from '../../../../server/routes/skill-task-defaults'
 import type { OcbSpace } from '../../../../server/internal/module-api'
+import type { EvolveHostExtension } from '../../../../server/services/evolve/host-extensions'
 import SkillTaskLaunchDialog, { type SkillTaskAction } from '../SkillTaskLaunchDialog'
 
 const transportFetch = globalThis.fetch
-const team: OcbSpace = { id: 'real-team-208', name: 'Renamed team', type: 'TEAM', role: 'MEMBER' }
+const team: OcbSpace = { id: 'team-alpha', name: 'Renamed team', type: 'TEAM', role: 'MEMBER' }
 const asset = { assetId: 'asset-1', botId: 'original-bot', name: 'Contract Skill', skillId: 'skill-1', currentVersion: 'v1', updatedAt: 1789060000 }
 let db: SqliteDatabase
 let stages: StageSkillRepository
@@ -35,9 +36,17 @@ beforeEach(async () => {
     displayName: asset.name, packageRef: 'fixture:skill', packageSha256: 'fixture-checksum' })
   const app = express()
   app.use(express.json())
+  const hostExtension: EvolveHostExtension = { id: 'host.contract', resolveSkillTaskPreset: (context) => {
+    if (context.targetSkill.spaceId !== team.id) return null
+    const implementation = context.availableStageImplementations.find((item) => item.stageSkillId === 'host-stage'
+      && item.status === 'registered' && item.integrationTestStatus === 'test_passed')
+    return implementation ? { stageExtensions: { diagnose: { preprocess: {
+      enabled: true, implementationId: implementation.implementationId,
+    } } } } : { unavailableReason: 'Host requirement is unavailable' }
+  } }
   app.use('/api/evolve', createSkillTaskDefaultsRouter({ skills, stages,
     spaces: { listAccessibleSpaces: async ({ identity }) => identity.userId === 'team-reader' ? [team] : [] },
-    policies: [{ spaceId: team.id, kind: 'skill_hardening', diagnosePreprocessStageSkillId: 'hardening-stage' }],
+    hostExtensions: [hostExtension],
   }))
   submissions = []
   // Capture the real client's POST locally; never dispatch a live Bot task.
@@ -64,12 +73,12 @@ afterEach(async () => {
 })
 
 async function seedStage() {
-  await stages.createImplementation({ implementationId: 'verified-97-v1', stageSkillId: 'hardening-stage',
+  await stages.createImplementation({ implementationId: 'verified-host-v1', stageSkillId: 'host-stage',
     ownerUserId: 'publisher', spaceId: team.id, spaceType: 'TEAM', spaceName: team.name,
     displayName: 'Verified hardening', stage: 'diagnose', mode: 'preprocess', versionNo: 1,
     packageRef: 'fixture:stage', packageSha256: 'fixture-checksum', staticValidation: { status: 'passed' } })
-  await stages.registerImplementation('verified-97-v1')
-  await stages.updateIntegrationTest('verified-97-v1', 'test-1', 'test_passed')
+  await stages.registerImplementation('verified-host-v1')
+  await stages.updateIntegrationTest('verified-host-v1', 'test-1', 'test_passed')
 }
 
 describe('defaults HTTP router → launch dialog → task client contract', () => {
@@ -82,15 +91,14 @@ describe('defaults HTTP router → launch dialog → task client contract', () =
     await waitFor(() => expect(submissions).toHaveLength(1))
     expect(submissions[0]).toMatchObject({ targetSkillAssetId: asset.assetId, userId: 'original-owner', botId: asset.botId,
       taskType: action === 'diagnose' ? 'diagnose' : 'full', model: 'GLM-5.2' })
-    if (action === 'optimize') expect(submissions[0]).toMatchObject({ stageSelection: { diagnose: true, plan: true, optimize: true },
-      stageExtensions: { diagnose: { preprocess: { enabled: true, implementationId: 'verified-97-v1' } } } })
-    else expect(submissions[0]).not.toHaveProperty('stageExtensions')
+    expect(submissions[0]).toMatchObject({ stageSelection: { diagnose: true, plan: true, optimize: action === 'optimize' },
+      stageExtensions: { diagnose: { preprocess: { enabled: true, implementationId: 'verified-host-v1' } } } })
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/evolve/runs/local-contract-task'))
   })
 
   it('uses the real server unavailable reason and sends no POST without an eligible Stage', async () => {
     open('optimize')
-    await screen.findByText('不可启动优化：尚无可用的已通过集成测试的加固 Stage，请检查空间权限和 Stage 登记状态。')
+    await screen.findByText('不可启动优化：Host requirement is unavailable')
     const confirm = screen.getByRole('button', { name: '确认优化' }) as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
     fireEvent.click(confirm)

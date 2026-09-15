@@ -23,8 +23,8 @@ import SkillEvolutionFields, {
   type StageSelectionDraft,
 } from '../components/SkillEvolutionFields'
 import SkillTaskRuntimePanel, { StepInteractions } from '../components/SkillTaskRuntimePanel'
-import SkillHardeningDetail, { isSkillHardeningResultStep, skillHardeningImplementation } from '../components/SkillHardeningDetail'
 import { EvolveAdminScopeProvider, useEvolveAdminScope } from '../features/evolve/admin-scope'
+import { taskPresentationExtension, type EvolveTaskPresentationExtension } from '../features/evolve/host-extensions'
 import {
 
   governanceImprovementId,
@@ -301,6 +301,7 @@ export type EvolvePresentationVersion = 'openversion' | 'internalversion'
 export interface EvolveProps {
   version?: EvolvePresentationVersion
   singleboxModel?: string
+  taskPresentationExtensions?: readonly EvolveTaskPresentationExtension[]
 }
 
 function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveProps) {
@@ -432,10 +433,10 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
         userId: defaults.userId, actorId: currentUserId, taskType })
       setTaskName(`${asset.name} · ${taskType === 'diagnose' ? '诊断' : '优化'}`)
       setFocusIssue(defaults.diagnose.goal)
-      if (taskType === 'full') {
-        setEvolutionGoal(defaults.optimize.goal)
-        setStageExtensions(defaults.optimize.stageExtensions ?? {})
-      }
+      const preset = taskType === 'diagnose' ? defaults.diagnose : defaults.optimize
+      if (preset.unavailableReason) throw new Error(preset.unavailableReason)
+      setStageExtensions(preset.stageExtensions ?? {})
+      if (taskType === 'full') setEvolutionGoal(defaults.optimize.goal)
     }).catch((error) => { if (active) setFixedSkillError(error instanceof Error ? error.message : '固定 Skill 加载失败') })
     return () => { active = false }
   }, [fixedSkillAssetId, currentUserId, taskType, improvementSource])
@@ -1765,7 +1766,7 @@ function TaskVersionStatus({ task, adminReadMode, canLoadVersions }: { task: Evo
   </section>
 }
 
-function TaskDetail({ version = 'internalversion' }: Pick<EvolveProps, 'version'>) {
+function TaskDetail({ version = 'internalversion', taskPresentationExtensions = [] }: Pick<EvolveProps, 'version' | 'taskPresentationExtensions'>) {
   const { user } = useClientUser()
   const { enabled: adminReadMode } = useEvolveAdminScope()
   const navigate = useNavigate()
@@ -1863,7 +1864,7 @@ function TaskDetail({ version = 'internalversion' }: Pick<EvolveProps, 'version'
   const steps = task.steps ?? []
   const view = statusView(task.status)
   const isStageTest = task.task_type === 'stage_test'
-  const hardeningImplementationId = skillHardeningImplementation(task)
+  const hostPresentation = taskPresentationExtension(task, taskPresentationExtensions)
   const testEnvironmentSteps = isStageTest ? steps.filter((step) => ['skill_init', 'skill_prepare', 'skill_finalize'].includes(step.stepType) || step.command.startsWith('stage-test supplied ')) : []
   const visibleSteps = steps.filter((step) => !testEnvironmentSteps.includes(step))
   const shared = task.config.shared === true
@@ -2034,10 +2035,12 @@ function TaskDetail({ version = 'internalversion' }: Pick<EvolveProps, 'version'
             <div className="mt-5 space-y-3">
               {retryError && <p className="rounded-lg bg-red-50 p-3 text-xs text-red-700">{retryError}</p>}
               {visibleSteps.map((step) => {
-                const isHardeningResult = Boolean(hardeningImplementationId && isSkillHardeningResultStep(step, hardeningImplementationId))
-                return <StepCard key={step.stepId} step={step} label={isStageTest ? stageTestStepLabel(step, task) : undefined} suppressDeliverables={isHardeningResult} canRetry={canOperate && canRetryRecordedStep(step, steps.indexOf(step))} canCancel={canOperate && canCancelRecordedStep(step, steps.indexOf(step))} retrying={retryingStepId === step.stepId} canceling={cancelingStepId === step.stepId} onRetry={() => void retryStep(step)} onCancel={() => void cancelStep(step)}>
+                const extensionContext = { task, step }
+                const customResult = hostPresentation?.renderStepResult?.(extensionContext)
+                const suppressDeliverables = Boolean(customResult && hostPresentation?.suppressDefaultStepDeliverables?.(extensionContext))
+                return <StepCard key={step.stepId} step={step} label={isStageTest ? stageTestStepLabel(step, task) : undefined} suppressDeliverables={suppressDeliverables} canRetry={canOperate && canRetryRecordedStep(step, steps.indexOf(step))} canCancel={canOperate && canCancelRecordedStep(step, steps.indexOf(step))} retrying={retryingStepId === step.stepId} canceling={cancelingStepId === step.stepId} onRetry={() => void retryStep(step)} onCancel={() => void cancelStep(step)}>
                   {renderStepInteractions(step.stepId)}
-                  {isHardeningResult && <SkillHardeningDetail task={task} implementationId={hardeningImplementationId!} stepId={step.stepId} renderStatus={(status) => <Status type={statusView(status).type}>{statusView(status).text}</Status>} />}
+                  {customResult}
                 </StepCard>
               })}
               {visibleSteps.length === 0 && <div className="rounded-xl border border-dashed border-gray-200 py-10 text-center text-sm text-gray-400">尚未创建 Step</div>}
@@ -3051,7 +3054,7 @@ export default function Evolve(props: EvolveProps = {}) {
   return <EvolveRoutes><EvolvePage {...props} /></EvolveRoutes>
 }
 
-function EvolvePage({ version = 'internalversion', singleboxModel }: EvolveProps) {
+function EvolvePage({ version = 'internalversion', singleboxModel, taskPresentationExtensions = [] }: EvolveProps) {
   const location = useLocation()
   const { authState } = useClientUser()
   // COSEC: The embedded package owns a separate auth cache from its ClawWeb host;
@@ -3080,7 +3083,7 @@ function EvolvePage({ version = 'internalversion', singleboxModel }: EvolveProps
   else if (location.pathname === '/evolve/new' && new URLSearchParams(location.search).get('type') === 'repair') content = <Repair view="create" />
   else if (location.pathname === '/evolve/new' && new URLSearchParams(location.search).get('type') === 'session_analysis') content = <SessionAnalysis view="create" />
   else if (location.pathname === '/evolve/new') content = <StartEvolution version={version} singleboxModel={singleboxModel} />
-  else if (location.pathname.startsWith('/evolve/runs/')) content = <TaskDetail version={version} />
+  else if (location.pathname.startsWith('/evolve/runs/')) content = <TaskDetail version={version} taskPresentationExtensions={taskPresentationExtensions} />
   else content = <TaskList version={version} />
   if (location.pathname === '/evolve/new') {
     content = <SingleboxTaskEntry version={version} governance={new URLSearchParams(location.search).get('source') === 'improvement'} taskType={new URLSearchParams(location.search).get('type')}>{content}</SingleboxTaskEntry>

@@ -47,15 +47,15 @@ export type EvolveSkillTaskDefaults = {
   assetId: string
   botId: string
   userId: string
-  diagnose: { taskType: 'diagnose'; goal: string }
-  optimize: {
-    taskType: 'full'
+  diagnose: EvolveSkillTaskPreset & { taskType: 'diagnose' }
+  optimize: EvolveSkillTaskPreset & { taskType: 'full' }
+}
+
+export type EvolveSkillTaskPreset = {
     goal: string
-    stageExtensions: {
-      diagnose: { preprocess: { enabled: true; implementationId: string } }
-    } | null
+    stageExtensions: EvolveTaskStageExtensions | null
     unavailableReason: string | null
-  }
+    launchDescription: string | null
 }
 
 export type EvolveCreateTaskInput = Parameters<typeof sharedApi.evolve.createTask>[0] | (

@@ -4,14 +4,18 @@ import type { OcbSpacePort } from "../internal/module-api.js";
 import type { SkillAssetRepository } from "../repositories/skill-asset-repository.js";
 import type { StageSkillRepository } from "../repositories/stage-skill-repository.js";
 import { canReadSpaceRecord } from "../services/evolve/space-access.js";
-import type { SpacePresentationPolicy } from "../services/evolve/space-presentation.js";
+import {
+  resolveSkillTaskHostPreset,
+  type EvolveHostExtension,
+  type SkillTaskHostAction,
+} from "../services/evolve/host-extensions.js";
 import { spaceRequestIdentity } from "./evolve-spaces.js";
 
 export function createSkillTaskDefaultsRouter(input: {
   skills: SkillAssetRepository;
   stages: StageSkillRepository;
   spaces?: OcbSpacePort;
-  policies: readonly SpacePresentationPolicy[];
+  hostExtensions?: readonly EvolveHostExtension[];
 }): Router {
   const router = Router();
   router.get("/skill-assets/:assetId/task-defaults", asyncHandler(async (req, res) => {
@@ -23,20 +27,44 @@ export function createSkillTaskDefaultsRouter(input: {
       res.status(404).json({ error: "Skill 不存在" }); return;
     }
     const available = await input.stages.listImplementations(identity.userId, spaces.filter((space) => space.type === "TEAM").map((space) => space.id));
-    const policies = [...input.policies].sort((left, right) => Number(right.spaceId === asset.space_id) - Number(left.spaceId === asset.space_id));
-    const implementation = policies.flatMap((policy) => available.filter((row) =>
-      row.stage_skill_id === policy.diagnosePreprocessStageSkillId && row.space_id === policy.spaceId
-      && row.space_type === "TEAM" && row.stage_key === "diagnose" && row.extension_mode === "preprocess"
-      && row.status === "registered" && row.integration_test_status === "test_passed"
-      && canReadSpaceRecord(row, identity.userId, spaces)).sort((a, b) => b.version_no - a.version_no))[0];
+    const context = {
+      actorUserId: identity.userId,
+      targetSkill: {
+        assetId: asset.asset_id,
+        botId: asset.bot_id,
+        ownerUserId: asset.owner_user_id,
+        displayName: asset.display_name,
+        spaceId: asset.space_id ?? null,
+        spaceType: asset.space_type ?? null,
+      },
+      availableStageImplementations: available.map((row) => ({
+        stageSkillId: row.stage_skill_id,
+        implementationId: row.implementation_id,
+        ownerUserId: row.owner_user_id,
+        displayName: row.display_name,
+        spaceId: row.space_id ?? null,
+        spaceType: row.space_type ?? null,
+        stage: row.stage_key,
+        mode: row.extension_mode,
+        versionNo: row.version_no,
+        status: row.status,
+        integrationTestStatus: row.integration_test_status,
+      })),
+    };
+    const preset = (action: SkillTaskHostAction, taskType: "diagnose" | "full", goal: string) => {
+      const contribution = resolveSkillTaskHostPreset(input.hostExtensions ?? [], { ...context, action });
+      return {
+        taskType,
+        goal,
+        stageExtensions: contribution?.stageExtensions ?? null,
+        unavailableReason: contribution?.unavailableReason ?? null,
+        launchDescription: contribution?.launchDescription ?? null,
+      };
+    };
     res.json({
       assetId: asset.asset_id, botId: asset.bot_id, userId: asset.owner_user_id,
-      diagnose: { taskType: "diagnose", goal: `诊断 ${asset.display_name} 在真实会话中的准确性、可靠性与任务完成情况。` },
-      optimize: {
-        taskType: "full", goal: `改进 ${asset.display_name} 的准确性与可靠性，保留已经确认的业务语义。`,
-        stageExtensions: implementation ? { diagnose: { preprocess: { enabled: true, implementationId: implementation.implementation_id } } } : null,
-        unavailableReason: implementation ? null : "尚无可用的已通过集成测试的加固 Stage，请检查空间权限和 Stage 登记状态。",
-      },
+      diagnose: preset("diagnose", "diagnose", `诊断 ${asset.display_name} 在真实会话中的准确性、可靠性与任务完成情况。`),
+      optimize: preset("optimize", "full", `改进 ${asset.display_name} 的准确性与可靠性，保留已经确认的业务语义。`),
     });
   }));
   return router;

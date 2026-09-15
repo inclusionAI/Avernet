@@ -1,9 +1,11 @@
-import type { ComponentType } from "react";
+import type { ComponentType, ReactNode } from "react";
+import type { EvolveStep, EvolveTask } from "@avernet/clawweb-shared/web/api/client";
 
 export type EvolvePresentationVersion = "openversion" | "internalversion";
 export interface EvolveProps {
   version?: EvolvePresentationVersion;
   singleboxModel?: string;
+  taskPresentationExtensions?: readonly EvolveTaskPresentationExtension[];
 }
 export declare const Evolve: ComponentType<EvolveProps>;
 export declare const ClawevolveApp: ComponentType<EvolveProps>;
@@ -11,6 +13,13 @@ export declare const BenchAdmin: ComponentType;
 export declare const BenchDomains: ComponentType;
 export declare const BenchRunDetail: ComponentType;
 export declare const BenchTemplateDetail: ComponentType;
+export declare const StageExtensionResultDetail: ComponentType<{ step: EvolveStep; title?: string }>;
+
+export type EvolveTaskPresentationExtension = {
+  id: string;
+  renderStepResult?: (context: { task: EvolveTask; step: EvolveStep }) => ReactNode;
+  suppressDefaultStepDeliverables?: (context: { task: EvolveTask; step: EvolveStep }) => boolean;
+};
 
 export type BenchSessionEvent = {
   type?: string;

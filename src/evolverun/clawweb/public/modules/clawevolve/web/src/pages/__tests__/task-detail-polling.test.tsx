@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, useNavigate } from 'react-router-dom'
 import Evolve from '../Evolve'
+import type { EvolveTaskPresentationExtension } from '../../features/evolve/host-extensions'
 
 const api = vi.hoisted(() => ({ evolve: { getTask: vi.fn(), listTaskLogArchives: vi.fn(), getTaskSkillDiff: vi.fn() } }))
 vi.mock('../../api/client', () => ({ api }))
@@ -18,7 +19,9 @@ function Navigation() {
   const navigate = useNavigate()
   return <button onClick={() => navigate('/evolve/runs/TASK-2')}>Open second task</button>
 }
-function open() { return render(<MemoryRouter initialEntries={['/evolve/runs/TASK-1']}><Navigation /><Evolve /></MemoryRouter>) }
+function open(taskPresentationExtensions: readonly EvolveTaskPresentationExtension[] = []) {
+  return render(<MemoryRouter initialEntries={['/evolve/runs/TASK-1']}><Navigation /><Evolve taskPresentationExtensions={taskPresentationExtensions} /></MemoryRouter>)
+}
 beforeEach(() => {
   vi.stubGlobal('React', React); vi.useFakeTimers(); vi.resetAllMocks()
   api.evolve.listTaskLogArchives.mockResolvedValue({ items: [] })
@@ -60,14 +63,14 @@ describe('Task detail live updates', () => {
   it('filters Stage test preparation and artifacts without introducing a second visual section', async () => {
     const step = (stepId: string, stepType: string) => ({ stepId, taskId: 'TASK-1', stepType, status: 'succeeded', command: 'original command', summary: 'original ' + stepType })
     const history = { ...task('completed', true), task_type: 'stage_test', config: { ...task('completed', true).config, stageTest: { stage: 'diagnose', mode: 'replace' } },
-      steps: [step('PREP', 'skill_prepare'), { ...step('MAIN', 'stage_extension'), stageExtension: { stage: 'diagnose', mode: 'replace', implementationId: 'IMPL-97', displayName: '97 技能加固诊断前置' } }, step('FINAL', 'skill_finalize')],
+      steps: [step('PREP', 'skill_prepare'), { ...step('MAIN', 'stage_extension'), stageExtension: { stage: 'diagnose', mode: 'replace', implementationId: 'IMPL-HOST', displayName: '自定义诊断实现' } }, step('FINAL', 'skill_finalize')],
       interactions: [{ interactionId: 'HITL-1', stepId: 'MAIN', status: 'answered', question: { format: 'text', content: '历史问题' }, answer: { content: '历史回答', tag: 'scope' } }],
     }
     api.evolve.getTask.mockResolvedValue(history)
     const view = open(); await tick()
     expect(screen.getByRole('heading', { name: 'Stage 集成测试流程' })).toBeTruthy()
     expect(screen.queryByRole('heading', { name: '进化工作流' })).toBeNull()
-    expect(screen.getByRole('button', { name: /97 技能加固诊断前置.*自定义/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /自定义诊断实现.*自定义/ })).toBeTruthy()
     expect(screen.queryByText('测试环境准备与产物记录（2）')).toBeNull()
     expect(view.container.querySelector('#step-PREP')).toBeNull()
     expect(view.container.querySelector('#step-FINAL')).toBeNull()
@@ -75,6 +78,23 @@ describe('Task detail live updates', () => {
     expect(view.container.querySelectorAll('#step-MAIN')).toHaveLength(1)
     expect(screen.queryByText('Skill 候选版本')).toBeNull()
     expect(api.evolve.getTaskSkillDiff).not.toHaveBeenCalled()
+  })
+
+  it('lets the embedding host render and replace one Step result through an opaque presentation extension', async () => {
+    const custom = { ...task('completed'), config: { ...task('completed').config,
+      presentation: { extensionId: 'host.result', data: { anything: true } } },
+      steps: [{ stepId: 'HOST', taskId: 'TASK-1', stepType: 'stage_extension', status: 'succeeded',
+        command: 'host stage', output: { summary: 'default deliverable sentinel' } }],
+    }
+    api.evolve.getTask.mockResolvedValue(custom)
+    const extension: EvolveTaskPresentationExtension = {
+      id: 'host.result',
+      renderStepResult: ({ step }) => step.stepId === 'HOST' ? <div>Host-rendered result</div> : null,
+      suppressDefaultStepDeliverables: ({ step }) => step.stepId === 'HOST',
+    }
+    const view = open([extension]); await tick()
+    expect(screen.getByText('Host-rendered result')).toBeTruthy()
+    expect(view.container.querySelector('#step-HOST')?.textContent).not.toContain('自定义 Stage 交付结果')
   })
 
   it('folds prepared Skill results and presents their fields in readable Chinese instead of raw JSON', async () => {

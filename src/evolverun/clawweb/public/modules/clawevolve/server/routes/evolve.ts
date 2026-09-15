@@ -133,7 +133,7 @@ import {
 type Dispatch = typeof dispatchEvolveCommand;
 import type { OcbSpace, OcbSpacePort } from "../internal/module-api.js";
 import { canReadSpaceRecord } from "../services/evolve/space-access.js";
-import { taskSpacePresentation, type SpacePresentationPolicy } from "../services/evolve/space-presentation.js";
+import { resolveTaskHostPresentation, type EvolveHostExtension } from "../services/evolve/host-extensions.js";
 type DispatchTaskLogArchive = typeof dispatchEvolveTaskLogArchive;
 type CancelExecution = typeof cancelEvolveExecution;
 export type EvolveRouterDeps = {
@@ -160,7 +160,7 @@ export type EvolveRouterDeps = {
   runAnalysisStarter?: RunAnalysisStarter | null;
   ocbLocalSkills?: OcbLocalSkillPort | null;
   ocbSpaces?: OcbSpacePort;
-  spacePresentationPolicies?: readonly SpacePresentationPolicy[];
+  hostExtensions?: readonly EvolveHostExtension[];
   stageSkillRepo?: StageSkillRepository | null;
   skillAssetRepo?: SkillAssetRepository | null;
 };
@@ -2228,7 +2228,12 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         }); return;
       }
     }
-    const presentation = taskSpacePresentation(targetSkill, stageExtensions, deps.spacePresentationPolicies ?? []);
+    let presentation;
+    try {
+      presentation = resolveTaskHostPresentation(deps.hostExtensions ?? [], { targetSkill, stageExtensions });
+    } catch (error) {
+      res.status(409).json({ error: error instanceof Error ? error.message : String(error) }); return;
+    }
     const config = {
       flow: freezeEvolutionFlow(flow, stageSelection),
       ...(presentation ? { presentation } : {}),

@@ -28,7 +28,7 @@ import { configureClawWebPublicBaseUrl } from "./env.js";
 import type { ClawEvolveInternalApi, ClawInsightInternalApi } from "./internal/module-api.js";
 import type { OcbLocalSkillPort, OcbSpacePort } from "./internal/module-api.js";
 import { createEvolveSpacesRouter } from "./routes/evolve-spaces.js";
-import type { SpacePresentationPolicy } from "./services/evolve/space-presentation.js";
+import type { EvolveHostExtension } from "./services/evolve/host-extensions.js";
 import { createSkillTaskDefaultsRouter } from "./routes/skill-task-defaults.js";
 import { spaceAccessErrorHandler } from "./services/evolve/space-access.js";
 
@@ -52,7 +52,7 @@ export type ClawevolveModuleOptions = {
   workflowRuntime?: InternalEvolveWorkflowRuntime;
   ocbLocalSkills?: OcbLocalSkillPort;
   ocbSpaces?: OcbSpacePort;
-  spacePresentationPolicies?: readonly SpacePresentationPolicy[];
+  hostExtensions?: readonly EvolveHostExtension[];
 };
 
 export type ClawevolveModule = {
@@ -118,7 +118,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     botWorkflowPermissionRepo: botWorkflowPermission,
     ocbLocalSkills: options.ocbLocalSkills ?? null,
     ocbSpaces: options.ocbSpaces,
-    spacePresentationPolicies: options.spacePresentationPolicies,
+    hostExtensions: options.hostExtensions,
     stageSkillRepo: stageSkill,
     skillAssetRepo: skillAsset,
   });
@@ -135,7 +135,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
   }));
   publicRouter.use(createEvolveSpacesRouter(options.ocbSpaces));
   publicRouter.use(createSkillTaskDefaultsRouter({ skills: skillAsset, stages: stageSkill,
-    spaces: options.ocbSpaces, policies: options.spacePresentationPolicies ?? [] }));
+    spaces: options.ocbSpaces, hostExtensions: options.hostExtensions }));
   publicRouter.use(spaceAccessErrorHandler);
 
   const internalRouter = createInternalEvolveRouter({

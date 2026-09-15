@@ -15,10 +15,12 @@ vi.mock('../../api/client', () => ({ api }))
 vi.mock('../../hooks/useClientUser', () => ({ useClientUser: () => ({ user: { userId: 'viewer-not-owner' } }) }))
 
 const asset = { assetId: 'asset / 1', botId: 'bot-1', name: '我的技能', skillId: 'skill-1', currentVersion: 'v1', updatedAt: 1789060000 }
+const stageBinding = { diagnose: { preprocess: { enabled: true, implementationId: 'host-stage-v3' } } }
 const defaults = { assetId: asset.assetId, botId: asset.botId, userId: 'original-owner',
-  diagnose: { taskType: 'diagnose', goal: '检查该技能的表现' },
+  diagnose: { taskType: 'diagnose', goal: '检查该技能的表现', unavailableReason: null,
+    stageExtensions: stageBinding, launchDescription: 'Host diagnostic flow。' },
   optimize: { taskType: 'full', goal: '优化该技能的表现', unavailableReason: null,
-    stageExtensions: { diagnose: { preprocess: { enabled: true, implementationId: 'hardened-97-v3' } } } } }
+    stageExtensions: stageBinding, launchDescription: 'Host optimization flow。' } }
 
 function Location() { const location = useLocation(); return <output data-testid="location">{location.pathname + location.search}</output> }
 function open(action: SkillTaskAction = 'diagnose', onClose = vi.fn()) {
@@ -66,30 +68,35 @@ describe('Skill task launch confirmation', () => {
     expect(input).not.toHaveProperty('disableStages')
     expect(input).not.toHaveProperty('skipPlan')
     expect(key).toEqual(expect.any(String))
+    expect(input).toMatchObject({ stageExtensions: defaults[action].stageExtensions })
     if (action === 'optimize') {
-      expect(input).toMatchObject({ inputMode: 'diagnose_goal', maxRounds: 3, stageExtensions: defaults.optimize.stageExtensions })
+      expect(input).toMatchObject({ inputMode: 'diagnose_goal', maxRounds: 3 })
       expect(input.startDate).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-    } else expect(input).not.toHaveProperty('stageExtensions')
+    }
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/evolve/runs/task-1'))
   })
 
-  it.each([null, '当前用户没有可用的 97 加固 Stage'])('blocks missing optimization bindings with a visible reason (%s)', async (unavailableReason) => {
-    api.evolve.getSkillTaskDefaults.mockResolvedValue({ ...defaults, optimize: { ...defaults.optimize, stageExtensions: null, unavailableReason } })
-    open('optimize')
-    const alert = await screen.findByRole('alert')
-    expect(alert.textContent).toContain(unavailableReason ?? '当前没有有权使用且已通过集成测试的 97 加固 Stage')
-    const confirm = screen.getByRole('button', { name: '确认优化' }) as HTMLButtonElement
+  it.each(['diagnose', 'optimize'] as const)('honors a host denial for %s', async (action) => {
+    api.evolve.getSkillTaskDefaults.mockResolvedValue({ ...defaults,
+      [action]: { ...defaults[action], stageExtensions: null, unavailableReason: 'Host requirement is unavailable' } })
+    open(action)
+    await screen.findByText(`不可启动${action === 'diagnose' ? '诊断' : '优化'}：Host requirement is unavailable`)
+    const confirm = screen.getByRole('button', { name: action === 'diagnose' ? '确认诊断' : '确认优化' }) as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
-    expect(confirm.title).toContain('97 加固 Stage')
     fireEvent.click(confirm)
     expect(api.evolve.createTask).not.toHaveBeenCalled()
   })
 
-  it('honors a server denial even if a binding is present', async () => {
-    api.evolve.getSkillTaskDefaults.mockResolvedValue({ ...defaults, optimize: { ...defaults.optimize, unavailableReason: '权限已失效' } })
+  it('launches the complete Avernet default flow when no host contributes a Stage', async () => {
+    api.evolve.getSkillTaskDefaults.mockResolvedValue({ ...defaults,
+      optimize: { ...defaults.optimize, stageExtensions: null, unavailableReason: null, launchDescription: null } })
     open('optimize')
-    await screen.findByText('不可启动优化：权限已失效')
-    expect((screen.getByRole('button', { name: '确认优化' }) as HTMLButtonElement).disabled).toBe(true)
+    await screen.findByText(/运行完整诊断、规划和优化流程/)
+    const confirm = screen.getByRole('button', { name: '确认优化' }) as HTMLButtonElement
+    expect(confirm.disabled).toBe(false)
+    fireEvent.click(confirm)
+    await waitFor(() => expect(api.evolve.createTask).toHaveBeenCalledOnce())
+    expect(api.evolve.createTask.mock.calls[0][0]).not.toHaveProperty('stageExtensions')
   })
 
   it('shows load failures and permits explicit retry without launching', async () => {

@@ -14,9 +14,10 @@ vi.mock('../../hooks/useClientUser', () => ({ useClientUser: () => ({ authState:
 
 const asset = { assetId: 'asset-1', botId: 'owner-bot', name: 'Fixed Skill', currentVersion: 'v1' }
 const bot = { botId: 'owner-bot', botName: 'Owner Bot', ownerId: 'original-owner', env: 'dev', activeEngine: 'openclaw', deviceProvider: 'baas' }
+const stageExtensions = { diagnose: { preprocess: { enabled: true, implementationId: 'verified-host' } } }
 const defaults = { assetId: asset.assetId, botId: asset.botId, userId: 'original-owner',
-  diagnose: { taskType: 'diagnose', goal: '原技能诊断目标' }, optimize: { taskType: 'full', goal: '原技能优化目标', unavailableReason: null,
-    stageExtensions: { diagnose: { preprocess: { enabled: true, implementationId: 'verified-97' } } } } }
+  diagnose: { taskType: 'diagnose', goal: '原技能诊断目标', unavailableReason: null, launchDescription: null, stageExtensions },
+  optimize: { taskType: 'full', goal: '原技能优化目标', unavailableReason: null, launchDescription: null, stageExtensions } }
 
 function Navigate() { const navigate = useNavigate(); return <button onClick={() => navigate('/evolve/new?type=full&target=skill&assetId=asset-2&skillAction=optimize')}>另一个登记目标</button> }
 function open(type = 'diagnose', extra = '') {
@@ -74,7 +75,7 @@ describe('fixed Skill advanced task form', () => {
     fireEvent.click(submit())
     await waitFor(() => expect(api.evolve.createDiagnosis).toHaveBeenCalledOnce())
     expect(api.evolve.createDiagnosis.mock.calls[0][0]).toMatchObject({ targetSkillAssetId: 'asset-1',
-      stageSelection: { diagnose: true, plan: true, optimize: false } })
+      stageSelection: { diagnose: true, plan: true, optimize: false }, stageExtensions })
   })
 
   it.each(['diagnose', 'full'])('submits %s with defaults Owner, ignores forged URL identity and keeps model editable', async (type) => {
@@ -105,7 +106,8 @@ describe('fixed Skill advanced task form', () => {
     expect(create.mock.calls[0][0]).toMatchObject({ userId: 'original-owner', botId: 'owner-bot', botEnv: 'dev',
       targetSkillAssetId: 'asset-1', model: 'custom-model' })
     if (type === 'full') expect(create.mock.calls[0][0]).toMatchObject({ taskType: 'full', goal: defaults.optimize.goal,
-      stageSelection: { diagnose: true, plan: true, optimize: true }, stageExtensions: defaults.optimize.stageExtensions })
+      stageSelection: { diagnose: true, plan: true, optimize: true }, stageExtensions })
+    else expect(create.mock.calls[0][0]).toMatchObject({ stageExtensions })
   })
 
   it('blocks submission and does not query viewer bots before defaults resolve', async () => {

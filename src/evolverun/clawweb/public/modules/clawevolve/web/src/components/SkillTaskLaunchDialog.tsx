@@ -54,12 +54,7 @@ export default function SkillTaskLaunchDialog({ asset, action, onClose }: {
   }, [])
 
   const preset = defaults?.[action]
-  const unavailableReason = action === 'optimize' && defaults
-    ? defaults.optimize.unavailableReason || (
-      defaults.optimize.stageExtensions?.diagnose?.preprocess?.enabled === true
-        && defaults.optimize.stageExtensions.diagnose.preprocess.implementationId?.trim()
-        ? '' : '当前没有有权使用且已通过集成测试的 97 加固 Stage，暂不可启动优化。'
-    ) : ''
+  const unavailableReason = preset?.unavailableReason ?? ''
   const canLaunch = Boolean(defaults && preset?.goal.trim() && !unavailableReason && !loading && !busy)
 
   const confirm = async () => {
@@ -83,10 +78,11 @@ export default function SkillTaskLaunchDialog({ asset, action, onClose }: {
         runtimeMaintenance: false,
       }
       const result = await api.evolve.createTask(action === 'diagnose'
-        ? { ...common, taskType: 'diagnose', stageSelection: { diagnose: true, plan: true, optimize: false } }
+        ? { ...common, taskType: 'diagnose', stageSelection: { diagnose: true, plan: true, optimize: false },
+            ...(preset.stageExtensions ? { stageExtensions: preset.stageExtensions } : {}) }
         : { ...common, taskType: 'full', inputMode: 'diagnose_goal', maxRounds: 3,
             stageSelection: { diagnose: true, plan: true, optimize: true },
-            stageExtensions: defaults.optimize.stageExtensions! }, requestId)
+            ...(preset.stageExtensions ? { stageExtensions: preset.stageExtensions } : {}) }, requestId)
       onClose()
       navigate(`/evolve/runs/${encodeURIComponent(result.task_id)}`)
     } catch (reason) {
@@ -129,10 +125,10 @@ export default function SkillTaskLaunchDialog({ asset, action, onClose }: {
           <div><dt className="inline">模型：</dt><dd className="inline">{defaultModel}（平台默认，可在高级表单修改）</dd></div>
         </dl>
         <p className="mt-4 whitespace-pre-wrap rounded-lg bg-gray-50 p-3 text-sm leading-6 text-gray-700">{preset?.goal}</p>
-        <p className="mt-3 text-xs leading-5 text-gray-500">{action === 'optimize'
-          ? '运行完整诊断、规划和优化流程；启动前须绑定有权使用且通过集成测试的 97 加固诊断前置 Stage，最多优化 3 轮。'
-          : '诊断当前登记的 Skill，并生成后续规划，不启动优化轮次。'}本次不会清理历史会话或重启 Gateway。</p>
-        {unavailableReason && <p role="alert" className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">不可启动优化：{unavailableReason}</p>}
+        <p className="mt-3 text-xs leading-5 text-gray-500">{preset?.launchDescription || (action === 'optimize'
+          ? '运行完整诊断、规划和优化流程，最多优化 3 轮。'
+          : '诊断当前登记的 Skill，并生成后续规划，不启动优化轮次。')}本次不会清理历史会话或重启 Gateway。</p>
+        {unavailableReason && <p role="alert" className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">不可启动{actionName[action]}：{unavailableReason}</p>}
         {!preset?.goal.trim() && <p role="alert" className="mt-3 text-sm text-red-700">任务默认目标为空，暂不可启动。</p>}
       </>}
       {error && <div role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}
