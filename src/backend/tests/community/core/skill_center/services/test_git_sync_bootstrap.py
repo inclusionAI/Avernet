@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import subprocess
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from agentclaw.community.core.skill_center.services.git_sync import GitSyncService
@@ -81,6 +82,89 @@ async def test_bootstrap_clone_failure_logs_error_and_releases_lock(caplog):
     finally:
         git_sync_module.logger.removeHandler(caplog.handler)
 
+    svc._download_from_oss_and_extract.assert_awaited_once()
     svc._cache_plugin.release_lock.assert_called_once()
     assert any(r.levelno >= logging.ERROR for r in caplog.records)
     assert result["success"] is False
+
+
+def test_clone_timeout_is_bounded_and_cleans_partial_repo(tmp_path):
+    svc = GitSyncService.__new__(GitSyncService)
+    svc.config = MagicMock()
+    svc.config.local_bare_repo = tmp_path / "aiworkbench.git"
+    svc.config.branch = "master"
+    svc.config.clone_timeout_seconds = 20
+    svc._repo_url = "ssh://git@example.test/aiworkbench.git"
+
+    def _hang_until_timeout(*_args, **kwargs):
+        svc.config.local_bare_repo.mkdir()
+        raise subprocess.TimeoutExpired(
+            cmd="git clone",
+            timeout=kwargs.get("timeout"),
+        )
+
+    with patch(
+        "agentclaw.community.core.skill_center.services.git_sync.subprocess.run",
+        side_effect=_hang_until_timeout,
+    ) as run:
+        with pytest.raises(subprocess.TimeoutExpired):
+            svc._sync_clone_bare_repo()
+
+    assert run.call_args.kwargs["timeout"] == 20
+    assert not svc.config.local_bare_repo.exists()
+
+
+def test_oss_fallback_does_not_extract_over_partial_repo(tmp_path):
+    svc = GitSyncService.__new__(GitSyncService)
+    svc.config = MagicMock()
+    svc.config.local_bare_repo = tmp_path / "aiworkbench.git"
+    svc.config.local_bare_repo.mkdir()
+    svc.config.oss_archive_path = "archives/aiworkbench.tar.gz"
+    svc._oss_storage = MagicMock()
+
+    with (
+        patch(
+            "agentclaw.community.core.skill_center.services.git_sync.requests.get",
+        ) as download,
+        patch(
+            "agentclaw.community.core.skill_center.services.git_sync.subprocess.run"
+        ) as tar,
+    ):
+        with pytest.raises(RuntimeError, match="refusing to overwrite"):
+            svc._sync_download_from_oss_and_extract()
+
+    svc._oss_storage.sign_url.assert_not_called()
+    download.assert_not_called()
+    tar.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_post_clone_failure_preserves_valid_bare_repo(tmp_path):
+    svc = GitSyncService.__new__(GitSyncService)
+    svc.config = MagicMock()
+    svc.config.local_bare_repo = tmp_path / "aiworkbench.git"
+    svc.config.enable_oss_sync = True
+    svc.config.subtrees = [{"name": "skills"}]
+    svc._oss_storage = MagicMock()
+
+    async def _clone():
+        svc.config.local_bare_repo.mkdir()
+
+    async def _run_sync(_func, *_args, **_kwargs):
+        raise RuntimeError("OSS upload failed")
+
+    async def _fallback():
+        svc._sync_download_from_oss_and_extract()
+
+    svc._clone_bare_repo = AsyncMock(side_effect=_clone)
+    svc._git_fetch = AsyncMock(return_value={"success": True})
+    svc._sync_subtree = AsyncMock(return_value={"success": True})
+    svc._run_sync = _run_sync
+    svc._download_from_oss_and_extract = AsyncMock(side_effect=_fallback)
+
+    result = await svc._bootstrap_clone_or_fallback()
+
+    assert result["success"] is False
+    assert svc.config.local_bare_repo.exists()
+    svc._download_from_oss_and_extract.assert_awaited_once()
+    svc._oss_storage.sign_url.assert_not_called()
