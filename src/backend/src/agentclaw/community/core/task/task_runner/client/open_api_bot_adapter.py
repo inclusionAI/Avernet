@@ -140,8 +140,9 @@ class OpenApiBotAdapter(
         """
         h: dict[str, str] = {"Authorization": f"Bearer {self._k.api_key}"}
         logger.info(
-            "[task][headers] Authorization=%s",
+            "[task][headers] Authorization=%s, h=%s",
             self._k.api_key,
+            h,
         )
         if self._k.cookie:
             h["Cookie"] = self._k.cookie
