@@ -388,6 +388,24 @@ class QualityTaskModel(Base):
     )
 
 
+class BotCommonConfig(Base):
+    """Generic, tenant/environment-scoped Bot configuration."""
+
+    __tablename__ = "ac_bot_common_config"
+    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
+    bot_id = Column(String(128), nullable=False)
+    entity_id = Column(String(128), nullable=False)
+    env = Column(String(32), nullable=False)
+    config_key = Column(String(64), nullable=False)
+    config_value = Column(Text, nullable=False)
+    is_delete = Column(SmallInteger, nullable=False, default=0, server_default="0")
+    gmt_create = Column(DateTime, server_default=func.now(), nullable=False)
+    gmt_modified = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+    __table_args__ = (
+        UniqueConstraint("bot_id", "entity_id", "env", "config_key", name="uk_bot_config"),
+    )
+
+
 class CommonConfig(Base):
     """SQLAlchemy ORM model for ac_common_config table."""
 

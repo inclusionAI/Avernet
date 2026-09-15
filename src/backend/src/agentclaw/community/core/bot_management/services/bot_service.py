@@ -1885,7 +1885,7 @@ class BotService(BotServiceProtocol):
                     log_context="bot_service.create_bot",
                 )
 
-                device_result = service.apply_device(
+                create_kwargs = dict(
                     apply_reason=f"Create bot: {resolved_bot_name or bot_id}",
                     entity_id=resolved_entity_id,
                     entity_type=resolved_entity_type,
@@ -1901,6 +1901,12 @@ class BotService(BotServiceProtocol):
                     template_type=template_type,
                     template_config=device_template_config,
                 )
+
+                # 本期仅 personal 接入；准备只返回原申请参数的覆写，不创建设备。
+                # 服务草稿后续接入时放开类型判断；重启/补建不调用初始化。
+                if resolved_bot_type == "personal":
+                    create_kwargs.update(service.prepare_bot_storage_policy(**create_kwargs))
+                device_result = service.apply_device(**create_kwargs)
 
                 if not device_result:
                     raise DeviceAllocationError("设备申请返回空结果")

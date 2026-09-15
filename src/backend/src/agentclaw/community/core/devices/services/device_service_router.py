@@ -289,6 +289,19 @@ class DeviceServiceRouter(DeviceService):
     # ============== DeviceService 接口代理实现 ==============
 
     @override
+    def prepare_bot_storage_policy(self, **kwargs: Any) -> dict[str, Any]:
+        """Prepare storage without allocating; pin the existing provider decision."""
+        service = self._get_provider_for_new_device(
+            kwargs["operator"].staff_id,
+            engine_type=kwargs.get("engine"),
+            template_type=kwargs.get("template_type"),
+            bot_type=kwargs.get("bot_type", ""),
+        )
+        overrides = service.prepare_bot_storage_policy(**kwargs)
+        provider = next(key for key, value in self._providers.items() if value is service)
+        return {**overrides, "device_provider": provider}
+
+    @override
     def apply_device(
         self,
         *,

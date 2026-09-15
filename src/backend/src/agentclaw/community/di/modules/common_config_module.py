@@ -14,10 +14,20 @@ from agentclaw.community.core.common_config import (
 from agentclaw.community.core.repository.implementations.config.common_config import CommonConfigRepository
 
 
+from agentclaw.community.core.repository.protocols.config import BotCommonConfigRepositoryProtocol
+from agentclaw.community.core.common_config.bot_config_protocol import (
+    BotCommonConfigServiceProtocol,
+)
+from agentclaw.community.core.common_config.bot_config_service import BotCommonConfigService
+from agentclaw.community.core.repository.implementations.config.bot_common_config import BotCommonConfigRepository
+
+
 class CommonConfigModule(Module):
     """Production bindings for common_config."""
 
     def configure(self, binder: Binder) -> None:
+        binder.bind(BotCommonConfigRepositoryProtocol, to=BotCommonConfigRepository, scope=singleton)
+        binder.bind(BotCommonConfigServiceProtocol, to=BotCommonConfigService, scope=singleton)
         binder.bind(CommonConfigService, to=CommonConfigService, scope=singleton)
         binder.bind(CommonWhiteListService, to=CommonWhiteListService, scope=singleton)
         binder.bind(BetaQuotaService, to=BetaQuotaService, scope=singleton)

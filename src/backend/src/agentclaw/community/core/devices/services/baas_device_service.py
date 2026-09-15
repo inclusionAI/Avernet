@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Protocol, override
 
 from agentclaw.community.core.bot_management.engines import resolve_provisioning
@@ -41,6 +41,7 @@ from agentclaw.community.core.devices.services.device_service import (
     DEFAULT_ENGINE_TYPE,
     DeviceService,
 )
+from agentclaw.community.core.service_bot.services.deploy.deploy_models import StorageType
 from agentclaw.community.log import get_logger
 
 
@@ -81,6 +82,15 @@ class TemplateConfigReader(Protocol):
     """Minimal template service surface needed by BaaS create-init tasks."""
 
     def get_template_config(self, bot_id: str) -> dict[str, Any] | None: ...
+
+
+@dataclass(frozen=True)
+class _PreparedBotCreation:
+    """Request-local result: the checked template and committed storage choice."""
+
+    template_uid: str
+    template_uuid: str
+    storage_type: StorageType
 
 
 class BaasDeviceService(DeviceService):
@@ -141,6 +151,56 @@ class BaasDeviceService(DeviceService):
     # ------------------------------------------------------------------
     # provider=baas lifecycle hooks (apply_device template method)
     # ------------------------------------------------------------------
+
+    @override
+    def prepare_bot_storage_policy(self, **kwargs: Any) -> dict[str, Any]:
+        """Prepare storage only; the caller still uses the original apply_device."""
+        from agentclaw.community.core.bot_management.engines.registry import (
+            resolve_baas_engine_bucket,
+        )
+        from agentclaw.community.utils.env_utils import get_current_env
+
+        bot_id = kwargs.get("bot_id") or "default"
+        entity_id = kwargs.get("entity_id") or kwargs["operator"].staff_id
+        owner_id = kwargs.get("owner_id") or entity_id
+        bot_type = (kwargs.get("bot_type") or "").strip()
+        if bot_type not in {"personal", "service"}:
+            raise BaasDeviceServiceError(f"unsupported bot_type: {bot_type}")
+        engine = kwargs.get("engine") or DEFAULT_ENGINE_TYPE
+        env = get_current_env()
+        template_config = dict(kwargs.get("template_config") or {})
+        # Never accept a caller-supplied snapshot at the creation boundary.
+        template_config.pop("_prepared_bot_creation", None)
+        template_uid, template_uuid = self._resolve_required_baas_template(
+            bot_id=bot_id,
+            user_id=owner_id,
+            env=env,
+            bot_type=bot_type,
+            engine_type=engine,
+            template_type=kwargs.get("template_type"),
+            template_config=template_config,
+        )
+        storage_type = self._baas_service.initialize_bot_storage(
+            bot_id=bot_id,
+            entity_id=entity_id,
+            env=env,
+            engine=resolve_baas_engine_bucket(
+                engine_type=engine,
+                template_type=kwargs.get("template_type"),
+                template_config=template_config,
+            ),
+            user_id=owner_id,
+            template_uuid=template_uuid,
+        )
+        # Reuse the existing template_config path, not another allocation argument.
+        # A typed, request-local snapshot pins the checked template; it is consumed
+        # before constructing the BaaS payload and is never persisted/serialized.
+        template_config["_prepared_bot_creation"] = _PreparedBotCreation(
+            template_uid=template_uid,
+            template_uuid=template_uuid,
+            storage_type=storage_type,
+        )
+        return {"template_config": template_config}
 
     def _setup_directory(
         self,
@@ -322,17 +382,22 @@ class BaasDeviceService(DeviceService):
 
             # template_uid 是上层业务选择 template 的稳定标识；BaaS 创建接口仍使用底层 template_uuid。
             # 这里按 system_config 映射到实际创建用的 template_uuid。
-            template_uid, template_uuid = self._resolve_required_baas_template(
-                bot_id=bolt_id,
-                user_id=effective_owner_id,
-                env=env,
-                bot_type=effective_bot_type,
-                engine_type=engine,
-                template_type=template_type,
-                template_config=template_config,
-            )
+            prepared = (template_config or {}).pop("_prepared_bot_creation", None)
+            if isinstance(prepared, _PreparedBotCreation):
+                template_uid, template_uuid = prepared.template_uid, prepared.template_uuid
+            else:
+                template_uid, template_uuid = self._resolve_required_baas_template(
+                    bot_id=bolt_id,
+                    user_id=effective_owner_id,
+                    env=env,
+                    bot_type=effective_bot_type,
+                    engine_type=engine,
+                    template_type=template_type,
+                    template_config=template_config,
+                )
 
             bot = {
+                "env": env,
                 "bot_id": bolt_id,
                 "bot_name": bot_name,
                 "bot_desc": bot_desc,
@@ -352,7 +417,7 @@ class BaasDeviceService(DeviceService):
                 "auto_approve_publish": True,
                 "extra_envs": extra_envs,
                 "template_config": template_config,
-                # 个人 Bot / 服务 Bot 草稿没有 migration_path，但启动仍按 NAS home 目录运行。
+                # 个人 Bot / 服务 Bot 草稿共用 home 挂载路径，类型由存储策略选择。
                 "mount_home_dir_storage": True,
                 # The per-bot startup script (issue #926) is NOT passed here.
                 # BaasService resolves it centrally in
@@ -360,6 +425,10 @@ class BaasDeviceService(DeviceService):
                 # deliver it; passing "" from a failed lookup here would read
                 # as a deliberate override and silently suppress it.
             }
+            if isinstance(prepared, _PreparedBotCreation):
+                # Initialization already performed strict DB reads. Do not re-read
+                # via restart's compatibility fallback and silently change storage.
+                payload_kwargs["storage_type"] = prepared.storage_type
             if effective_bot_type == "service":
                 payload_kwargs["stage"] = PublishStage.DRAFT.value
             payload = self._baas_service._build_create_bot_payload(**payload_kwargs)
