@@ -8,7 +8,9 @@
 import { useExt } from '@/capabilities';
 import * as BcnController from '@/services/backend-api/BcnController';
 import * as BotController from '@/services/backend-api/BotController';
+import { ENGINE_TYPE } from '@/services/backend-api/BotController';
 import { AppExt } from '@/shell';
+import { useBotStore } from '@/stores/botStore';
 import type { BotNetworkInfo } from '@/stores/botNetworkStore';
 import { useUserStore } from '@/stores/userStore';
 import { resolveBotOwnerId } from '@/utils/activeBotContext';
@@ -109,33 +111,39 @@ const TopNavBar: React.FC<TopNavBarProps> = ({
       // 检查是否入网失败
       if (response.data?.onboarded === false) {
         const errorMsg = response.message || 'Bot 入网失败';
-        // 显示错误提示，带重启按钮
-        toast.error(errorMsg, {
-          action: {
-            label: '立即重启',
-            onClick: async () => {
-              try {
-                // 解析 bot_id（格式：bot_id:entity_id）
-                const [botId] = bot.bot_uuid.split(':');
-                await BotController.restartBot({
-                  bot_id: botId,
-                  user_id: '', // user_id 可选，后端会从 token 获取
-                  // BCN 闭包：botStore 已由 initUnifiedBotTabs 反写，
-                  // resolveBotOwnerId 能查到 owner_id；极端情况用 userId 兜底
-                  owner_id:
-                    resolveBotOwnerId(botId) || useUserStore.getState().userId,
-                });
-                toast.success('Bot 重启中，请稍后重试入网');
-              } catch (restartError) {
-                console.error(
-                  '[TopNavBar] Failed to restart bot:',
-                  restartError,
-                );
-                toast.error('Bot 重启失败');
-              }
+        const [botId] = bot.bot_uuid.split(':');
+        // 查询完整 Bot 记录判断是否 teclaw 引擎
+        const fullBot = useBotStore.getState().getBotById(botId);
+        const isTeclaw = fullBot?.active_engine === ENGINE_TYPE.TECLAW;
+
+        if (isTeclaw) {
+          // teclaw 不支持重启（会销毁容器且无法重建），引导用户更新配置或联系运维
+          toast.error('入网失败，可尝试更新配置后重试。如问题持续请联系运维。');
+        } else {
+          // 非 teclaw：保留原有重启入口
+          toast.error(errorMsg, {
+            action: {
+              label: '立即重启',
+              onClick: async () => {
+                try {
+                  await BotController.restartBot({
+                    bot_id: botId,
+                    user_id: '',
+                    owner_id:
+                      resolveBotOwnerId(botId) || useUserStore.getState().userId,
+                  });
+                  toast.success('Bot 重启中，请稍后重试入网');
+                } catch (restartError) {
+                  console.error(
+                    '[TopNavBar] Failed to restart bot:',
+                    restartError,
+                  );
+                  toast.error('Bot 重启失败');
+                }
+              },
             },
-          },
-        });
+          });
+        }
         return;
       }
 
