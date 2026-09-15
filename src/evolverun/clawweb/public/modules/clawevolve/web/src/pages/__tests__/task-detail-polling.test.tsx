@@ -102,6 +102,22 @@ describe('Task detail live updates', () => {
     expect(view.container.querySelector('#step-HOST')?.textContent).not.toContain('自定义 Stage 交付结果')
   })
 
+  it('lets the embedding host suppress a transient Step payload before a custom result is ready', async () => {
+    const waiting = { ...task('running'), config: { ...task('running').config,
+      presentation: { extensionId: 'host.result', data: { anything: true } } },
+      steps: [{ stepId: 'HOST', taskId: 'TASK-1', stepType: 'stage_extension', status: 'running',
+        command: 'host stage', output: { hitl: true, question: { format: 'html', content: '<form />' } } }],
+    }
+    api.evolve.getTask.mockResolvedValue(waiting)
+    const extension: EvolveTaskPresentationExtension = {
+      id: 'host.result',
+      renderStepResult: () => null,
+      suppressDefaultStepDeliverables: ({ step }) => step.stepId === 'HOST',
+    }
+    const view = open([extension]); await tick()
+    expect(view.container.querySelector('#step-HOST')?.textContent).not.toContain('自定义 Stage 交付结果')
+  })
+
   it('folds prepared Skill results and presents their fields in readable Chinese instead of raw JSON', async () => {
     const prepared = { ...task('completed'), steps: [{
       stepId: 'PREPARE', taskId: 'TASK-1', stepType: 'skill_prepare', status: 'succeeded', command: 'prepare candidate',

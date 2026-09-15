@@ -2050,7 +2050,7 @@ function TaskDetail({ version = 'internalversion', taskPresentationExtensions = 
               {visibleSteps.map((step) => {
                 const extensionContext = { task, step }
                 const customResult = hostPresentation?.renderStepResult?.(extensionContext)
-                const suppressDeliverables = Boolean(customResult && hostPresentation?.suppressDefaultStepDeliverables?.(extensionContext))
+                const suppressDeliverables = Boolean(hostPresentation?.suppressDefaultStepDeliverables?.(extensionContext))
                 return <StepCard key={step.stepId} step={step} label={isStageTest ? stageTestStepLabel(step, task) : undefined} suppressDeliverables={suppressDeliverables} canRetry={canOperate && canRetryRecordedStep(step, steps.indexOf(step))} canCancel={canOperate && canCancelRecordedStep(step, steps.indexOf(step))} retrying={retryingStepId === step.stepId} canceling={cancelingStepId === step.stepId} onRetry={() => void retryStep(step)} onCancel={() => void cancelStep(step)}>
                   {renderStepInteractions(step.stepId)}
                   {customResult}
