@@ -37,9 +37,7 @@ user_config:
   #     allow_origins:
   #       - "https://your-frontend.example.com"
 
-  # Skill scan — community build has no scanner SDK, so disable it to avoid
-  # SkillScanService.start() returning False and start_center_daily_task()
-  # raising RuntimeError("not started").
+  # Skill scan — community build has no scanner SDK, so disable it.
   skill_scan:
     enabled: false
 

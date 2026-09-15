@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
@@ -22,6 +23,9 @@ from agentclaw.community.core.skill_center.services.skill_center_sync_service im
     SkillCenterSyncInProgressError,
     SkillCenterSyncService,
     SkillCenterSyncUnavailableError,
+)
+from agentclaw.community.core.skill_center.skill_center_sync_contract import (
+    SkillCenterSyncSummary,
 )
 from agentclaw.community.plugin_api.cache import CacheLockInfrastructureError
 from agentclaw.community.plugin_api.skill_center_gateway import (
@@ -113,10 +117,12 @@ class _TrackLatest:
 class _Cache:
     def __init__(self, *, lock_value="lock-token") -> None:
         self.lock_value = lock_value
+        self.acquired = []
         self.released = []
         self.renewed = []
 
     def acquire_lock_strict(self, key, ttl):
+        self.acquired.append((key, ttl))
         return self.lock_value
 
     def release_lock(self, key, value):
@@ -286,7 +292,7 @@ def test_published_exact_version_reensures_track_latest_before_unchanged() -> No
     assert len(track_latest.calls) == 1
 
 
-def test_lifecycle_bootstrap_reconciles_once_then_starts_and_stops_periodic_task() -> None:
+def test_lifecycle_defers_first_reconciliation_until_periodic_task() -> None:
     cache = _Cache()
     service = SkillCenterSyncService(
         assets=_Assets(),
@@ -300,6 +306,7 @@ def test_lifecycle_bootstrap_reconciles_once_then_starts_and_stops_periodic_task
 
     async def run_lifecycle() -> None:
         await service.startup()
+        assert cache.acquired == []
         assert service._periodic_task is not None
         assert not service._periodic_task.done()
         await service.shutdown()
@@ -307,6 +314,57 @@ def test_lifecycle_bootstrap_reconciles_once_then_starts_and_stops_periodic_task
 
     asyncio.run(run_lifecycle())
     assert cache.released == []
+
+
+def test_periodic_reconciliation_logs_summary_counts() -> None:
+    service = SkillCenterSyncService(
+        assets=_Assets(),
+        gateway=_Gateway(),
+        materializer=_Materializer(),
+        track_latest=_TrackLatest(),
+        cache=_Cache(),
+        env_provider=lambda: "pre",
+        interval_seconds=1800,
+    )
+    summary = SkillCenterSyncSummary(4, 1, 2, 1, ())
+    sleep_delays: list[int] = []
+
+    async def fake_sleep(delay: int) -> None:
+        sleep_delays.append(delay)
+        if len(sleep_delays) > 1:
+            raise asyncio.CancelledError
+
+    async def run_loop() -> None:
+        with (
+            patch(
+                "agentclaw.community.core.skill_center.services."
+                "skill_center_sync_service.asyncio.sleep",
+                side_effect=fake_sleep,
+            ),
+            patch(
+                "agentclaw.community.core.skill_center.services."
+                "skill_center_sync_service.asyncio.to_thread",
+                new=AsyncMock(return_value=summary),
+            ),
+            patch(
+                "agentclaw.community.core.skill_center.services."
+                "skill_center_sync_service.logger.info"
+            ) as info,
+        ):
+            with pytest.raises(asyncio.CancelledError):
+                await service._periodic_loop()
+
+        info.assert_called_once_with(
+            "[SkillCenterSync] periodic reconciliation completed: "
+            "scanned=%d updated=%d unchanged=%d failed=%d",
+            4,
+            1,
+            2,
+            1,
+        )
+
+    asyncio.run(run_loop())
+    assert sleep_delays[0] == 1800
 
 
 @pytest.mark.parametrize(

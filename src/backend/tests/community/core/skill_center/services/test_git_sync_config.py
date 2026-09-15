@@ -1,6 +1,6 @@
 """Tests for GitSyncConfig."""
 import asyncio
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -42,6 +42,22 @@ def test_clone_timeout_from_env(mock_bolt_shared, monkeypatch):
     monkeypatch.setenv("GIT_CLONE_TIMEOUT_SECONDS", "90")
     cfg = GitSyncConfig()
     assert cfg.clone_timeout_seconds == 90
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "message"),
+    [
+        ("SYNC_INTERVAL_MINUTES", "0", "SYNC_INTERVAL_MINUTES must be positive"),
+        ("SYNC_JITTER_SECONDS", "-1", "SYNC_JITTER_SECONDS must be non-negative"),
+    ],
+)
+def test_invalid_sync_schedule_fails_during_config_load(
+    mock_bolt_shared, monkeypatch, name, value, message
+):
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValueError, match=message):
+        GitSyncConfig()
 
 
 def test_enable_oss_sync_yaml_load_swallows_exception(
@@ -369,3 +385,78 @@ def test_startup_skips_all_sync_when_disabled(mock_bolt_shared, monkeypatch):
     seed.assert_not_called()
     periodic.assert_not_called()
     assert svc._started is False
+
+
+def test_remote_startup_defers_bootstrap_and_starts_periodic_sync(
+    mock_bolt_shared,
+):
+    """A configured remote is reconciliation input, not startup readiness."""
+    from unittest.mock import MagicMock
+
+    config = GitSyncConfig()
+    resolver = MagicMock()
+    resolver.get_secret.return_value = MagicMock(
+        secret_value="https://host/repo.git"
+    )
+    svc = _svc(config, resolver)
+
+    async def run_startup() -> None:
+        with (
+            patch.object(svc, "sync_bootstrap", new_callable=AsyncMock) as bootstrap,
+            patch.object(
+                svc, "start_periodic_sync", new_callable=AsyncMock
+            ) as periodic,
+        ):
+            await svc.startup()
+        bootstrap.assert_not_awaited()
+        periodic.assert_awaited_once_with()
+
+    try:
+        asyncio.run(run_startup())
+    finally:
+        svc._executor.shutdown(wait=True)
+
+
+def test_periodic_sync_waits_full_interval_plus_jitter_before_first_run(
+    mock_bolt_shared,
+):
+    from unittest.mock import MagicMock
+
+    config = GitSyncConfig()
+    config.sync_interval_minutes = 30
+    config.sync_jitter_seconds = 60
+    resolver = MagicMock()
+    resolver.get_secret.return_value = MagicMock(
+        secret_value="https://host/repo.git"
+    )
+    svc = _svc(config, resolver)
+    svc._started = True
+    svc.sync = AsyncMock(return_value={"success": True})
+    sleep_delays: list[int] = []
+
+    async def fake_sleep(delay: int) -> None:
+        sleep_delays.append(delay)
+        if len(sleep_delays) > 1:
+            raise asyncio.CancelledError
+
+    async def run_loop() -> None:
+        with (
+            patch(
+                "agentclaw.community.core.skill_center.services.git_sync.random.randint",
+                return_value=7,
+            ),
+            patch(
+                "agentclaw.community.core.skill_center.services.git_sync.asyncio.sleep",
+                side_effect=fake_sleep,
+            ),
+        ):
+            with pytest.raises(asyncio.CancelledError):
+                await svc._sync_loop()
+
+    try:
+        asyncio.run(run_loop())
+    finally:
+        svc._executor.shutdown(wait=True)
+
+    assert sleep_delays[0] == 30 * 60 + 7
+    svc.sync.assert_awaited_once_with()
