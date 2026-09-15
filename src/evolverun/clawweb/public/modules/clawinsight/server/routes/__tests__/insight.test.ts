@@ -4420,3 +4420,38 @@ describe("Insight Center local contract", () => {
   });
 
 });
+
+describe("owner markHandled for non-governance improvement", () => {
+  it("writes the verification handoff (handledAt + PENDING) instead of silently staying NOT_STARTED", async () => {
+    await withDbInsightServer(async ({ baseUrl: isolatedBaseUrl, db }) => {
+      await db.exec(
+        `INSERT INTO insight_improvement_item
+         (owner_user_id, bot_owner_user_id, bot_id, title, source_type,
+          source_rule_id, data_as_of, batch_id, content_fingerprint, idempotency_key,
+          status, version, created_by)
+         VALUES ('dev_local', 'dev_local', 'repair-bot', '非治理手动改进项', 'USER_SELECTED',
+          NULL, '2026-09-14T00:00:00Z', 'diag-manual-1', 'fp-manual-1', 'key-manual-1',
+          'ACTIVE', 1, 'dev_local')`,
+      );
+      const [{ id }] = await db.query<{ id: number }>(
+        `SELECT id FROM insight_improvement_item WHERE owner_user_id = 'dev_local' AND title = '非治理手动改进项'`,
+      );
+
+      const handled = await jsonRequestAt(
+        isolatedBaseUrl,
+        `/api/insight/v1/improvements/${id}/handled`,
+        {
+          method: "POST",
+          headers: ownerHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ version: 1 }),
+        },
+      );
+
+      expect(handled.response.status).toBe(200);
+      expect(handled.body).toEqual(
+        expect.objectContaining({ status: "IN_PROGRESS", verificationStatus: "PENDING" }),
+      );
+      expect(handled.body.handledAt).toBeTruthy();
+    });
+  });
+});

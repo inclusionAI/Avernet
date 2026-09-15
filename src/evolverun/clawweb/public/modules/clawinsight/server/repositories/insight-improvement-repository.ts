@@ -809,12 +809,12 @@ export class InsightImprovementRepository {
     if (existing.version !== expectedVersion) return "VERSION_CONFLICT";
     if (!["ACTIVE", "IN_PROGRESS"].includes(existing.status.toUpperCase())) return "STATE_CONFLICT";
     const now = this.db.dialect.now();
-    const guidance = isGovernanceSourceType(existing.source_type)
-      ? appendPendingVerification(appendGovernanceEvent(existing.user_guidance, {
-          title: "用户已处理",
-          values: [["时间", now]],
-        }))
-      : existing.user_guidance;
+    // 无论治理/非治理源：Owner 标记已修复即写入「用户已处理」+「自动验证/PENDING」，
+    // 使 handledAt 有值、可进标准验收队列(listVerificationCandidates 按 handledAt 过滤)。
+    const guidance = appendPendingVerification(appendGovernanceEvent(existing.user_guidance, {
+      title: "用户已处理",
+      values: [["时间", now]],
+    }));
     const result = await this.db.exec(
       `UPDATE insight_improvement_item
           SET status = 'IN_PROGRESS', user_guidance = ?, version = version + 1, gmt_modified = ?
