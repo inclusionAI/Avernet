@@ -1,7 +1,7 @@
 use super::*;
 use bcs_db_local::LocalSqliteDbPlugin;
 
-async fn database() -> Arc<dyn DbPlugin> {
+pub(super) async fn database() -> Arc<dyn DbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
     db.execute(DbStatement::new(
         "CREATE TABLE bcs_bots (
@@ -81,4 +81,22 @@ async fn deleted_bot_name_backfill_does_not_read_status_cache() {
     assert!(cold.get("heartbeat-bot").await.is_none());
     let bot = cold.get_including_deleted("heartbeat-bot").await.unwrap();
     assert_eq!(bot.capabilities.name.as_deref(), Some("Database Helper"));
+}
+
+#[tokio::test]
+async fn expired_unpersisted_identity_can_be_claimed_again() {
+    let repo = repository(database().await);
+    let id = "expired-temporary-bot";
+    let old_token = repo.connect_or_promote_streaming(id.into()).await.unwrap();
+    repo.disconnect_streaming(id).await;
+    repo.bots.write().await.get_mut(id).unwrap().last_heartbeat =
+        Instant::now() - BOT_EXPIRY - Duration::from_secs(1);
+    assert!(repo.get(id).await.is_none());
+    assert!(repo.find_bot_by_token(&old_token).await.is_none());
+    let new_token = repo.connect_or_promote_streaming(id.into()).await
+        .expect("expired memory-only identity must not permanently reserve the id");
+    assert_ne!(new_token, old_token);
+    assert!(repo.is_connected(id).await);
+    assert!(!repo.token_to_bot.read().await.contains_key(&old_token));
+    assert_eq!(repo.find_bot_by_token(&new_token).await.as_deref(), Some(id));
 }

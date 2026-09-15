@@ -123,6 +123,12 @@ impl NoConnectBotRepo {
 
 #[async_trait]
 impl BotRepoPort for NoConnectBotRepo {
+    async fn connect_streaming(&self, params: BotConnectParams)
+        -> Result<bcs_service_api::BotConnectResult, bcs_service_api::ConnectError>
+    {
+        self.inner.connect_streaming(params).await
+    }
+
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
         self.inner.register(bot_id, capabilities).await
     }

@@ -49,3 +49,8 @@ delivery state machine or resume nonterminal streams from durable metadata.
 
 - `cargo test --package bcs-bot --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-bot --all-targets --manifest-path src/bcs/Cargo.toml`
+
+Streaming `connect_bot` delegates complete admission to the Bot repository. Core
+no longer chains credential/get/claim/capability reads for that path. The HTTP
+path retains its behavior. The complete Core-to-SQL contract test verifies one
+read for a new identity, hot reconnect and uncontended cold token reconnect.
