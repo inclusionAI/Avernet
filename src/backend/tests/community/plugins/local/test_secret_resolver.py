@@ -42,6 +42,15 @@ def test_aiworkbench_repo_url_missing_in_singlebox_yaml_returns_none(
     assert LocalSecretResolver().get_secret(_AIWORKBENCH_REPO_URL_SECRET_NAME) is None
 
 
+def test_shipped_singlebox_config_has_no_remote_aiworkbench_repo_url(
+    tmp_path, monkeypatch
+):
+    """The shipped Singlebox profile must bootstrap only from local disk."""
+    monkeypatch.chdir(tmp_path)
+
+    assert LocalSecretResolver().get_secret(_AIWORKBENCH_REPO_URL_SECRET_NAME) is None
+
+
 def test_aiworkbench_repo_url_unreadable_singlebox_yaml_returns_none(
     tmp_path, monkeypatch
 ):
