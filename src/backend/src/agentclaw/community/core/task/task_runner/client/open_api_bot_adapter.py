@@ -278,7 +278,8 @@ class OpenApiBotAdapter(
                 headers=self._headers(),
             )
         logger.info(
-            "[task][openapi_bot] <<< send_message status=%s body=%s",
+            "[task][openapi_bot] <<< send_message headers=%s status=%s body=%s",
+            r.request.headers,
             r.status_code,
             _resp_summary(r),
         )
