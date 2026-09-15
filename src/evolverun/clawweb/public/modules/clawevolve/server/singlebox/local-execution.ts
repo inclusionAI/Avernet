@@ -87,7 +87,7 @@ export function localInvocation(config: SingleboxConfig & LocalBotPaths, input: 
       || !Number.isSafeInteger(Number(round)) || (kind === "round" && Number(round) < 1)) throw new Error("Invalid frozen Pack source");
     // COSEC: fixed argv; Skill rechecks this selection against the frozen server input.
     return { executable: "python3", args: ["-u", "-B", script, "--mode", "restore",
-      "--version", "openversion", "--artifact-bucket", "clawevolve-artifacts",
+      "--version", "openversion",
       "--task-id", taskId, "--step-id", stepId, "--source-task-id", checkedId(source),
       "--source-kind", kind!, "--source-round", round, "--clawweb-url", `http://127.0.0.1:${config.port}`],
       logDirectory: join(config.dataDirectory, "logs", taskId), stepId };
