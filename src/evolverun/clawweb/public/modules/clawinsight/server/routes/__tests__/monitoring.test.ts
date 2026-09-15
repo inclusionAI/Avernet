@@ -25,10 +25,11 @@ let db: IDatabase, dir: string, url: string;
 let server: ReturnType<express.Application["listen"]> | undefined;
 let clock: number;
 let env: Record<string, string | undefined>;
-async function start(parent = true, defaultFactory = false, getDb = () => db) {
+async function start(parent = true, defaultFactory = false, getDb = () => db, unassembled = false) {
   const app = express();
   if (parent) app.use(express.json({ limit: "10mb" }));
-  const runtime = createMonitoringRuntime(getDb, env, () => clock);
+  for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
+  const runtime = unassembled ? { service: null } : createMonitoringRuntime(getDb, () => clock);
   app.use("/api/insight/v1", defaultFactory ? createInsightRouter(null) : createInsightRouter(null, { monitoring: runtime }));
   server = await new Promise<ReturnType<express.Application["listen"]>>((resolve, reject) => {
     const s = app.listen(0, "127.0.0.1", (error?: Error) => error ? reject(error) : resolve(s));
@@ -84,6 +85,27 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
     await stop(); await db.close(); db = database(join(dir, "runtime.sqlite3")); await start();
     expect((await call("/monitoring/bots")).body).toEqual({ items: expected });
   });
+  it.each([undefined, "", "0", "-1", "invalid", "1.5", " 300 ", "1", "600", "9007199254740992"])(
+    "keeps GET/POST available and uses fixed freshness despite stale env %s", async (seconds) => {
+      await stop(); env.CLAWWEB_MONITORING_STALE_SECONDS = seconds; await start();
+      expect(await call("/monitoring/bots")).toMatchObject({ status: 200, body: { items: [] } });
+      expect((await post(check, "bot-checks")).status).toBe(200);
+      expect((await post(alert)).status).toBe(201);
+      clock = now + 300000;
+      expect((await call("/monitoring/bots/mock-bot-te/status")).body.status).toBe("HEALTHY");
+      clock++;
+      expect(await call("/monitoring/bots/mock-bot-te/status")).toMatchObject({ status: 200,
+        body: { status: "UNKNOWN", lastSuccessfulCheckAt: check.lastSuccessfulCheckAt } });
+      // Freshness uses checkedAt, not the last successful check. A fresh ERROR stays visible.
+      expect((await post({ ...check, checkedAt: new Date(clock).toISOString(), status: "ERROR" }, "bot-checks")).status).toBe(200);
+      expect((await call("/monitoring/bots/mock-bot-te/status")).body.status).toBe("ERROR");
+      clock++;
+      expect((await post({ ...check, checkedAt: new Date(clock).toISOString(), status: "PAUSED" }, "bot-checks")).status).toBe(200);
+      clock += 300001;
+      expect((await call("/monitoring/bots/mock-bot-te/status")).body.status).toBe("PAUSED");
+      expect((await call("/monitoring/bots")).body.items).toEqual([{ botId: check.botId }]);
+    },
+  );
   it("discovers historical diagnosis-only bots and keeps case-sensitive identities", async () => {
     await post({ ...alert, botId: "Case" });
     expect((await post({ ...check, botId: "case" }, "bot-checks")).status).toBe(200);
@@ -221,6 +243,13 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
     expect((await post(pass)).status).toBe(503); exec.mockRestore();
     await db.exec("DROP TABLE insight_monitoring_diagnoses");
     expect((await get()).status).toBe(503);
+  });
+  it("still rejects explicitly unassembled monitoring without blaming removed configuration", async () => {
+    await stop(); await start(true, false, () => db, true);
+    expect(await call("/monitoring/bots")).toMatchObject({ status: 503,
+      body: { error: { code: "MONITORING_NOT_READY", message: "监控模块未装配。" } } });
+    expect((await post(check, "bot-checks")).status).toBe(503);
+    expect((await post(alert)).status).toBe(503);
   });
   it("does not ACK a noop database", async () => {
     await stop();

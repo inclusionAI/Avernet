@@ -16,7 +16,6 @@ sqlite.pragma("synchronous = FULL");
 const db = new SqliteDatabase(sqlite);
 await initializeMonitoringSqlite(db);
 const runtime = createMonitoringRuntime(() => db);
-if (!runtime.service) throw new Error("Invalid monitoring configuration");
 const port = Number(process.env.MONITORING_LOCAL_PORT ?? "3101");
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid local port");
 const app = express();

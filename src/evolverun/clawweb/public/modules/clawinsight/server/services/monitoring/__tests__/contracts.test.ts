@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createMonitoringService } from "../monitoring-service.js";
@@ -17,7 +17,7 @@ const alert = fixture("alert");
 const now = Date.parse("2026-09-10T09:00:00Z");
 const check = { schemaVersion: CHECK_VERSION, botId: "mock-bot-te", engine: "TE", checkedAt: new Date(now).toISOString(),
   lastSuccessfulCheckAt: new Date(now).toISOString(), status: "HEALTHY" };
-const env = {};
+afterEach(() => { vi.unstubAllEnvs(); });
 function store(): MonitoringStore {
   return { listBots: vi.fn().mockResolvedValue([]), insertDiagnosis: vi.fn().mockResolvedValue(true), applyCheck: vi.fn().mockResolvedValue(true),
     readStatus: vi.fn().mockResolvedValue({ check: null, count: 0 }), listDiagnoses: vi.fn() };
@@ -117,7 +117,7 @@ describe("monitoring service and configuration", () => {
   });
   it("assembles without a DB; unavailable storage fails requests, not Host startup", async () => {
     const getDb = vi.fn(() => { throw new Error("not initialized"); });
-    const runtime = createMonitoringRuntime(getDb, env);
+    const runtime = createMonitoringRuntime(getDb);
     expect(runtime.service).not.toBeNull();
     expect(getDb).not.toHaveBeenCalled();
     await expect(runtime.service!.bots()).rejects.toMatchObject({ code: "NOT_READY" });
@@ -129,10 +129,14 @@ describe("monitoring service and configuration", () => {
     { CLAWWEB_MONITORING_BOTS_JSON: '[{"botId":"default","engine":"TE"},{"botId":"default","engine":"OC"}]' },
   ])("ignores removed configuration %j", (legacy) => {
     const getDb = vi.fn(() => { throw new Error("not initialized"); });
-    expect(createMonitoringRuntime(getDb, legacy).service).not.toBeNull();
+    for (const [key, value] of Object.entries(legacy)) vi.stubEnv(key, value);
+    expect(createMonitoringRuntime(getDb).service).not.toBeNull();
     expect(getDb).not.toHaveBeenCalled();
   });
-  it.each(["0", "-1", "invalid", "1.5"])("still validates stale seconds: %s", (seconds) => {
-    expect(createMonitoringRuntime(() => { throw new Error(); }, { CLAWWEB_MONITORING_STALE_SECONDS: seconds }).service).toBeNull();
+  it.each([undefined, "", "0", "-1", "invalid", "1.5", " 300 ", "1", "600", "9007199254740992"])("ignores removed stale configuration: %s", (seconds) => {
+    vi.stubEnv("CLAWWEB_MONITORING_STALE_SECONDS", seconds);
+    const getDb = vi.fn(() => { throw new Error("not initialized"); });
+    expect(createMonitoringRuntime(getDb).service).not.toBeNull();
+    expect(getDb).not.toHaveBeenCalled();
   });
 });

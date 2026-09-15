@@ -128,7 +128,10 @@ AIStudio 中 claw-validation
 
 移除 `CLAWWEB_MONITORING_ENABLED` 和 `CLAWWEB_MONITORING_BOTS_JSON`。
 这两个旧变量无论缺失、为空、为 false 或包含非法 JSON，均不得影响 Host 启动、监控装配或合法上报。
-保留 `CLAWWEB_MONITORING_STALE_SECONDS`（默认 300，正整数）；该项非法时只影响监控 readiness。
+2026-09-16 修订：同时移除 `CLAWWEB_MONITORING_STALE_SECONDS`，不读取或校验其残留值。
+状态新鲜度固定为 300 秒：当前时间距离最新 `checkedAt` 超过 300 秒时显示 UNKNOWN；
+最新检查为 PAUSED 时仍保持 PAUSED，`lastSuccessfulCheckAt` 仅保留真实成功时间。
+配置为空或非法不再导致监控 503；显式未装配或数据库/表结构/读写故障仍返回 503。
 
 - CV 决定采集哪些 Bot；ClawWeb 不再维护第二份接入名单。
 - 合法检查或诊断成功持久化后，Bot 自动可见。列表查询两张既有表中 `bot_id` 的去重并集，按 ASCII 二进制顺序排序。

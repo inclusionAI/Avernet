@@ -27,7 +27,7 @@ export function createMonitoringRouter(runtime: MonitoringRuntime = createMonito
   router.use((req, res, next) => {
     if (!scoped(req)) { next("router"); return; }
     res.set("Cache-Control", "no-store");
-    if (!runtime.service) { next(new MonitoringError("NOT_READY", "监控模块未装配或配置无效。")); return; }
+    if (!runtime.service) { next(new MonitoringError("NOT_READY", "监控模块未装配。")); return; }
     next();
   });
   const parseJson = json({ limit: MAX_BYTES, inflate: false });
