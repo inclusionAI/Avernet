@@ -15,16 +15,19 @@ An active keyword performs a literal substring match against any of:
 
 - `flow_id` (Run ID);
 - `triggered_by` (initiator);
-- `origin_bot_id` (stored Bot identity, including the owner suffix when present).
+- `origin_bot_id` (stored Bot identity, including the owner suffix when present);
+- `input_json` (stored run input, including business keywords in nested JSON).
 
-It does not search input JSON or node logs. `%`, `_`, and `!` are escaped as
+It does not search node logs or outputs. Input matching is against the stored JSON
+text, not decoded JSON values (for example, escaped Unicode remains escaped).
+`%`, `_`, and `!` are escaped as
 literal characters rather than LIKE patterns. Values are SQL-bound parameters.
 Case sensitivity follows the database column collation; portable clients must
 not rely on a particular case-folding behavior.
 
 ## Composition with existing filters
 
-The keyword's three field matches are grouped with OR. That group is combined
+The keyword's four field matches are grouped with OR. That group is combined
 with AND against `workflowId`, `status`/`statuses`, `inputQuery`, `from`/`to`,
 the existing origin-Bot scope, and workflow view permissions.
 
@@ -70,7 +73,8 @@ GET /api/runs?workflowId=example&query=%20run-123%20
 SQLite repository and the Express HTTP route. Coverage includes normalization,
 non-scalar/omitted parameters, unchanged response shape, filter intersections,
 status-list precedence, literal wildcards, permission-scoped counts and rows,
-pagination, empty permissions, and the admin view. Run it with:
+pagination, nested input keywords (including Chinese), literal input wildcards,
+empty permissions, and the admin view. Run it with:
 
 ```sh
 npm test --workspace @avernet/workflow -- server/repositories/__tests__/run-list-search.test.ts

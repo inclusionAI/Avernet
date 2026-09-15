@@ -299,7 +299,7 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
               <option value="cancelled">取消</option>
               <option value="aborted">终止</option>
             </select>
-            <input type="search" aria-label="搜索运行记录" placeholder="搜索 Run ID / 发起方 / Bot ID" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} className="min-w-0 flex-1 basis-64 rounded-md border border-slate-200 px-3 py-2 text-xs text-slate-700 sm:max-w-sm" />
+            <input type="search" aria-label="搜索运行记录" placeholder="搜索输入内容 / Run ID / 发起方 / Bot ID" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} className="min-w-0 flex-1 basis-64 rounded-md border border-slate-200 px-3 py-2 text-xs text-slate-700 sm:max-w-sm" />
             <button type="submit" className="rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700">搜索</button>
             <button type="button" disabled={!hasFilters && !searchInput} onClick={() => { setStatusFilter(''); setSearchInput(''); setQuery(''); setPage(0) }} className="rounded-md px-3 py-2 text-xs text-slate-500 hover:bg-slate-50 disabled:opacity-40">重置筛选</button>
             {!isLoading && !isError && <span className="ml-auto text-xs text-slate-400" aria-live="polite">{hasFilters ? '匹配' : '共'} {totalCount} 条</span>}
