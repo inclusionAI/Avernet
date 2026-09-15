@@ -3,7 +3,8 @@
 //! guards against concurrent legacy sequence allocation and stale callbacks.
 use super::mysql::MySqlMessageStore;
 use async_trait::async_trait;
-use bcs_db_api::{DbError, DbRow, DbStatement, DbTransactionStep, DbValue, db_get_column};
+use bcs_db_api::{DbError, DbRow, DbSqlFlavor, DbStatement, DbTransactionStep,
+    DbTransactionStepResult, DbValue, db_get_column};
 use bcs_domain::message_delivery::{
     MessageDeliveryState, MessageDeliveryStatus as Status, PersistedMessageDelivery,
 };
@@ -658,17 +659,25 @@ impl MySqlMessageStore {
                 }
             }
             let old_seq: i64 = if let Some(seq) = staged_seq { seq } else {
-            let sequence = self.db.query(DbStatement::with_params(
-                "SELECT current_msg_seq FROM bcs_group_sessions WHERE env = ? AND session_id = ?",
-                vec![self.env.as_str().into(), command.message.session_id.as_str().into()],
-            )).await.map_err(storage)?;
+            // A standalone SELECT may be routed to a lagging replica immediately
+            // after Session creation. Use a locking transaction read on MySQL so
+            // admission observes the primary; the later CAS still detects any
+            // sequence change before the atomic message/delivery commit.
+            let suffix = if self.flavor == DbSqlFlavor::Mysql { " FOR UPDATE" } else { "" };
+            let sequence = self.db.transaction(vec![DbTransactionStep::Query(
+                DbStatement::with_params(
+                    format!("SELECT current_msg_seq FROM bcs_group_sessions WHERE env = ? AND session_id = ?{suffix}"),
+                    vec![self.env.as_str().into(), command.message.session_id.as_str().into()],
+                ),
+            )]).await.map_err(storage)?;
+            let rows = match sequence.first() {
+                Some(DbTransactionStepResult::Rows(rows)) => rows,
+                _ => return Err(storage("canonical session sequence query is missing")),
+            };
             db_get_column(
-                sequence
-                    .first()
-                    .ok_or_else(|| storage("canonical session is missing"))?,
+                rows.first().ok_or_else(|| storage("canonical session is missing"))?,
                 "current_msg_seq",
-            )
-            .map_err(storage)? };
+            ).map_err(storage)? };
             let seq = old_seq
                 .checked_add(1 + i64::from(command.display_message.is_some()))
                 .ok_or_else(|| storage("session sequence exhausted"))?;

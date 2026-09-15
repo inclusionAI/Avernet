@@ -221,9 +221,12 @@ async fn failed_system_admission_never_falls_back_to_transport_or_partial_histor
         .with_delivery(support.bot_delivery.clone()).with_frontend_delivery(support.frontend_delivery.clone())
         .with_message_repo(repo.clone()).with_bot_run_context(contexts).with_queue(flow.system_queue_port())
         .register(SessionContextMessageProducer).build().unwrap();
-    assert!(dispatcher.dispatch(SystemMessageEvent::SessionContext { group_id:group.id.clone(),
+    let error = dispatcher.dispatch(SystemMessageEvent::SessionContext { group_id:group.id.clone(),
         session_id:"group-1:system".into(), reason:"failure test".into(), session_input:None,
-        task_ledger:None, driver_delivery:None }, &group, "group-1:system", &group.participants).await.is_err());
+        task_ledger:None, driver_delivery:None }, &group, "group-1:system", &group.participants).await.unwrap_err();
+    assert!(error.to_string().contains(
+        "system queue admission persistence failed: delivery attempt or context carrier has changed"
+    ));
     assert!(service.snapshot(None).await.unwrap().is_empty());
     assert_eq!(repo.get_current_seq("group-1:system").await.unwrap(), 0);
     assert!(support.bot_delivery.frames().await.is_empty());

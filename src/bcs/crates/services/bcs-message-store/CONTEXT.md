@@ -8,6 +8,9 @@ versions. Required-context metadata is included alongside the bounded ordinary
 page; LanePendingContextCarrier filters expiry before LIMIT 1 so expired backlog
 cannot hide initialization during disabled-policy drain. No new database column
 is needed; required_context is an explicit semantic projection flag.
+The sequence baseline uses a transactional primary read (locking on MySQL) before
+the existing compare-and-set commit, so a newly committed Session is not mistaken
+for a missing canonical Session because of replica lag.
 
 Delivery decoding failures emit rate-limited column names/types and a fixed error
 category, never row values or serde errors that could include message/header data.

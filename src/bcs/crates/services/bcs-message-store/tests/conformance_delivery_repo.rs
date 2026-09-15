@@ -6,6 +6,8 @@ use std::sync::Arc;
 
 struct RecordingQueries { inner: Arc<dyn DbPlugin>, queries: std::sync::Mutex<Vec<(DbStatement, usize)>> }
 
+struct StaleStandaloneSessionRead { inner: Arc<dyn DbPlugin> }
+
 #[tokio::test]
 async fn sqlite_legacy_policy_read_and_application_migration_preserve_cas() -> Result<(), Box<dyn std::error::Error>> {
     use bcs_config_api::message_delivery::{DeliveryPolicy, DeliveryPolicyRecord};
@@ -160,6 +162,45 @@ impl DbPlugin for RecordingQueries {
     async fn execute(&self, statement: DbStatement) -> bcs_db_api::DbResult<bcs_db_api::DbExecuteResult> { self.inner.execute(statement).await }
     async fn transaction(&self, steps: Vec<bcs_db_api::DbTransactionStep>) -> bcs_db_api::DbResult<Vec<bcs_db_api::DbTransactionStepResult>> { self.inner.transaction(steps).await }
     async fn health_check(&self) -> bcs_db_api::DbResult<bcs_db_api::DbHealth> { self.inner.health_check().await }
+}
+
+#[async_trait::async_trait]
+impl DbPlugin for StaleStandaloneSessionRead {
+    async fn query(&self, statement: DbStatement) -> bcs_db_api::DbResult<Vec<bcs_db_api::DbRow>> {
+        if statement.sql().starts_with("SELECT current_msg_seq FROM bcs_group_sessions") {
+            return Ok(Vec::new());
+        }
+        self.inner.query(statement).await
+    }
+    async fn execute(&self, statement: DbStatement) -> bcs_db_api::DbResult<bcs_db_api::DbExecuteResult> { self.inner.execute(statement).await }
+    async fn transaction(&self, steps: Vec<bcs_db_api::DbTransactionStep>) -> bcs_db_api::DbResult<Vec<bcs_db_api::DbTransactionStepResult>> { self.inner.transaction(steps).await }
+    async fn health_check(&self) -> bcs_db_api::DbResult<bcs_db_api::DbHealth> { self.inner.health_check().await }
+}
+
+#[tokio::test]
+async fn newly_created_session_sequence_uses_transactional_read() -> Result<(), Box<dyn std::error::Error>> {
+    use bcs_domain::{DeliveryType, NewMessage, SenderType};
+    use bcs_domain::message_delivery::DeliveryFlowKind;
+    use bcs_service_api::port::repo::message_delivery::*;
+    let db = Arc::new(LocalSqliteDbPlugin::new()?);
+    migrations::run_sqlite_migrations(db.as_ref()).await?;
+    db.execute(DbStatement::new("INSERT INTO bcs_group_sessions (session_id, group_id, env, participants) VALUES ('new-session', 'g', 'dev', '[]')")).await?;
+    let routed = Arc::new(StaleStandaloneSessionRead { inner: db });
+    let repo = MySqlMessageStore::sqlite(routed, "dev".into());
+    let result = repo.admit(AdmitMessageDeliveries {
+        display_message: None, message_id: "initial-context".into(), flow_kind: DeliveryFlowKind::System,
+        now_ms: 1, expire_at_ms: None, event: None,
+        message: NewMessage { visibility_domain: bcs_domain::MessageVisibilityDomain::ManagerWorker,
+            audience: Some(bcs_domain::MessageAudience::FullOnly), group_id: "g".into(),
+            session_id: "new-session".into(), sender_id: "system".into(), sender_type: SenderType::System,
+            message_type: "system".into(), content: serde_json::json!({"text":"initial context"}),
+            client_msg_id: None, owner_bot_id: None, created_at: 1, run_id: String::new() },
+        targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "manager".into(),
+            kind: DeliveryType::Send, max_queued: 1, semantic_projection_json: serde_json::json!({}) }],
+    }).await?;
+    assert_eq!(result.message.session_seq, 1);
+    assert_eq!(result.deliveries[0].source_session_seq, 1);
+    Ok(())
 }
 
 #[path = "../../../bootstrap/bcs/src/migrations.rs"]
