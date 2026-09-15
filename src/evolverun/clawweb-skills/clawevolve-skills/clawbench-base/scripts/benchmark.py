@@ -504,8 +504,8 @@ def _parse_args() -> argparse.Namespace:
         "--judge",
         default=None,
         help=(
-            "Judge model or backend. Default (unset): OpenClaw agent session with "
-            f"{DEFAULT_JUDGE_MODEL}. Set to a model ID to call its API directly "
+            "Judge model or backend. Default (unset): OpenClaw agent session using "
+            "the model configured by OpenClaw. Set to a model ID to call its API directly "
             "(e.g. openai/gpt-4o, anthropic/claude-sonnet-4-5-20250514, claude)"
         ),
     )
@@ -921,10 +921,6 @@ def main():
         logger.error(f"   Available benchmarks: {[d.name for d in (skill_root / 'tasks').iterdir() if d.is_dir()]}")
         sys.exit(1)
 
-    if not args.model and not args.register and not args.upload:
-        logger.error("Missing required argument: --model (unless using --register or --upload)")
-        sys.exit(2)
-
     if args.register:
         try:
             from lib_upload import UploadError, register_token, save_token_config
@@ -975,8 +971,11 @@ def main():
 
     # Validate model exists before wasting time on tasks
     if args.base_url:
+        if not args.model:
+            logger.error("A custom --base-url requires an explicit --model")
+            sys.exit(2)
         logger.info("Using custom endpoint: %s (skipping OpenRouter validation)", args.base_url)
-    else:
+    elif args.model:
         try:
             validate_openrouter_model(args.model)
         except ModelValidationError as exc:

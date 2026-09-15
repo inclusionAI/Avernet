@@ -7,6 +7,42 @@ use std::sync::Arc;
 struct RecordingQueries { inner: Arc<dyn DbPlugin>, queries: std::sync::Mutex<Vec<(DbStatement, usize)>> }
 
 #[tokio::test]
+async fn sqlite_legacy_policy_read_and_application_migration_preserve_cas() -> Result<(), Box<dyn std::error::Error>> {
+    use bcs_config_api::message_delivery::{DeliveryPolicy, DeliveryPolicyRecord};
+    use bcs_message_flow::delivery_policy::LiveDeliveryPolicy;
+    use bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort;
+    let db = Arc::new(LocalSqliteDbPlugin::new()?);
+    migrations::run_sqlite_migrations(db.as_ref()).await?;
+    let repo = MySqlMessageStore::sqlite(db.clone(), "dev".into());
+    let mut legacy = DeliveryPolicy::default();
+    legacy.flow_enabled.group = true;
+    db.execute(DbStatement::with_params(
+        "INSERT INTO bcs_message_delivery_policy (env, version, policy_json, updated_by, updated_at_ms) VALUES (?, ?, ?, ?, ?)",
+        vec!["dev".into(), 7_i64.into(), serde_json::to_string(&legacy)?.into(), "human_original".into(), 1_i64.into()],
+    )).await?;
+    let original = repo.load_policy().await?;
+    assert_eq!(original.version, 7);
+    assert_eq!(original.policy, legacy, "reading must not silently migrate the snapshot");
+    assert!(repo.replace_policy(7, DeliveryPolicyRecord { version: 8, ..original.clone() }).await.is_err(), "new writes remain strict");
+    let upgraded = LiveDeliveryPolicy::load_compatible(&repo).await?;
+    assert_eq!(upgraded.version, 8);
+    assert!(upgraded.policy.flow_enabled.group && upgraded.policy.flow_enabled.system);
+    assert_eq!(upgraded.updated_by, "system:group-system-policy-migration");
+    assert_eq!(repo.load_policy().await?, upgraded);
+    assert_eq!(LiveDeliveryPolicy::load_compatible(&repo).await?, upgraded);
+    assert!(repo.replace_policy(7, upgraded.clone()).await.is_err(), "old versions cannot overwrite migration");
+
+    // An old switch mismatch must not mask unrelated corruption.
+    legacy.defaults.max_running = 0;
+    db.execute(DbStatement::with_params(
+        "UPDATE bcs_message_delivery_policy SET policy_json = ? WHERE env = ?",
+        vec![serde_json::to_string(&legacy)?.into(), "dev".into()],
+    )).await?;
+    assert!(repo.load_policy().await.is_err());
+    Ok(())
+}
+
+#[tokio::test]
 async fn sqlite_control_batches_are_indexed_fair_and_bounded() -> Result<(), Box<dyn std::error::Error>> {
     use bcs_service_api::port::repo::message_delivery::*;
     let db = Arc::new(LocalSqliteDbPlugin::new()?);
@@ -56,13 +92,63 @@ async fn sqlite_bound_context_page_does_not_read_unbounded_bodies() -> Result<()
     assert_eq!(page.rows[0].source_session_seq, 10000);
     assert_eq!(page.rows[24].source_session_seq, 9976);
     let queries = recording.queries.lock().unwrap().clone();
-    assert_eq!(queries.len(), 2);
+    assert_eq!(queries.len(), 3);
     assert!(queries.iter().all(|(q,n)| *n <= 25 && !q.sql().contains("FROM bcs_messages ")));
     let query = &queries[1].0;
     let plan = db.query(DbStatement::with_params(format!("EXPLAIN QUERY PLAN {}", query.sql()), query.params().to_vec())).await?;
     let plan = plan.iter().map(|r| bcs_db_api::db_get_column::<String>(r, "detail").unwrap()).collect::<Vec<_>>().join("; ");
     assert!(plan.contains("idx_delivery_bound_seq"), "{plan}");
     assert!(!plan.contains("USE TEMP B-TREE"), "{plan}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn batch_initialization_is_atomic_and_preserves_required_contexts() -> Result<(), Box<dyn std::error::Error>> {
+    use bcs_domain::{DeliveryType, NewMessage, SenderType};
+    use bcs_domain::message_delivery::{DeliveryFlowKind, MessageDeliveryStatus as Status};
+    use bcs_service_api::port::repo::message_delivery::*;
+    let db = Arc::new(LocalSqliteDbPlugin::new()?);
+    migrations::run_sqlite_migrations(db.as_ref()).await?;
+    db.execute(DbStatement::new("INSERT INTO bcs_group_sessions (session_id, group_id, env, participants) VALUES ('batch', 'g', 'dev', '[]')")).await?;
+    let repos: Vec<Box<dyn MessageDeliveryRepoPort>> = vec![Box::new(MemoryMessageRepo::new().with_environment("dev".into())), Box::new(MySqlMessageStore::sqlite(db, "dev".into()))];
+    let make = |id: &str, kind, required| AdmitMessageDeliveries {
+        display_message: None, message_id: id.into(), flow_kind: DeliveryFlowKind::System, now_ms: 1, expire_at_ms: Some(10), event: None,
+        message: NewMessage { visibility_domain: bcs_domain::MessageVisibilityDomain::Chat, audience: None, group_id: "g".into(), session_id: "batch".into(), sender_id: "system".into(), sender_type: SenderType::System, message_type: "system".into(), content: serde_json::json!({"text":id}), client_msg_id: Some(id.into()), owner_bot_id: None, created_at: 1, run_id: String::new() },
+        targets: vec![DeliveryAdmissionTarget { rejection: None, target_bot_id: "bot".into(), kind, max_queued: 2, semantic_projection_json: serde_json::json!({"required_context":required}) }],
+    };
+    for repo in repos {
+        let mut invalid = make("invalid", DeliveryType::Send, false); invalid.message.content = serde_json::json!({});
+        assert!(repo.admit_batch(vec![make("rollback", DeliveryType::Inject, true), invalid]).await.is_err());
+        assert!(repo.list_deliveries(None).await?.is_empty());
+        let mut duplicate_identity = make("rollback", DeliveryType::Inject, false);
+        duplicate_identity.message.client_msg_id = Some("different-request".into());
+        assert!(repo.admit_batch(vec![make("rollback", DeliveryType::Inject, true), duplicate_identity]).await.is_err());
+        assert!(repo.list_deliveries(None).await?.is_empty(), "a later insert failure must roll back earlier inserts and sequence allocation");
+        let batch = vec![make("required", DeliveryType::Inject, true), make("ordinary-old", DeliveryType::Inject, false), make("ordinary-new", DeliveryType::Inject, false), make("driver", DeliveryType::Send, false)];
+        let results = repo.admit_batch(batch.clone()).await?;
+        assert_eq!(results.iter().map(|r| r.message.session_seq).collect::<Vec<_>>(), vec![1,2,3,4]);
+        let carrier = &results[3].deliveries[0].delivery_id;
+        let contexts = repo.bounded_contexts(carrier, 1).await?;
+        assert_eq!(contexts.total, 3);
+        assert_eq!(contexts.rows.len(), 2);
+        assert_eq!(contexts.rows[0].source_message_id, "ordinary-new");
+        assert_eq!(contexts.rows[1].source_message_id, "required");
+        assert_eq!(contexts.rows[1].expire_at_ms, None);
+        assert_eq!(contexts.rows[1].state.status, Status::Bound);
+        assert!(repo.admit_batch(batch).await?.iter().all(|r| r.duplicate));
+        assert_eq!(repo.list_deliveries(None).await?.len(), 4);
+        let results = repo.admit_batch(vec![make("second", DeliveryType::Send, false), make("third", DeliveryType::Send, false)]).await?;
+        assert_eq!(results[0].deliveries[0].state.status, Status::Queued);
+        assert_eq!(results[1].deliveries[0].state.status, Status::RejectedCapacity);
+        let expired: Vec<_> = (0..120).map(|n| make(&format!("expired-{n}"), DeliveryType::Inject, false)).collect();
+        repo.admit_batch(expired).await?;
+        let lookup = || DeliveryLookup::LanePendingContextCarrier { bot:"bot".into(), session:"batch".into(), now_ms:20 };
+        assert!(repo.lookup(lookup()).await?.is_empty());
+        repo.admit(make("late-required", DeliveryType::Inject, true)).await?;
+        let pending = repo.lookup(lookup()).await?;
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].source_message_id, "late-required", "expired metadata before required initialization must not hide a drain carrier");
+    }
     Ok(())
 }
 #[async_trait::async_trait]

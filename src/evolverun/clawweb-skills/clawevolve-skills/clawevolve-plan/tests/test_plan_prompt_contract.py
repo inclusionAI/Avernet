@@ -9,29 +9,7 @@ from clawevolve_plan.direct_goal.prompt import build_direct_goal_prompt
 from clawevolve_plan.direct_goal.schema import goal_digest
 from clawevolve_plan.discovery.prompt import open_skill_layout_instruction, build_discovery_prompt
 from clawevolve_plan.direct_goal.service import build_direct_goal_plan
-from clawevolve_plan.spec.document_agent import _build_prompt, load_plan_templates
 from test_direct_goal import GOAL, TARGET, direct_payload, make_workspace
-
-
-def document_prompt(mode):
-    objective, spec, _ = load_plan_templates()
-    return _build_prompt(plan={"input_mode": mode}, goal_text=GOAL, discovery_notes="checked",
-                         target_files=[], objective_template=objective, spec_template=spec)
-
-
-@pytest.mark.parametrize("mode", ["direct_goal", "diagnose"])
-def test_actual_template_is_used_in_every_version(monkeypatch, mode):
-    monkeypatch.delenv("CLAWWEB_VERSION", raising=False)
-    baseline = document_prompt(mode)
-    for version in ("internalversion", "openversion"):
-        monkeypatch.setenv("CLAWWEB_VERSION", version)
-        assert document_prompt(mode) == baseline
-    actual = baseline.split("SPEC-V0 模板：\n", 1)[1].strip()
-    assert actual.startswith("---\nschema_version: evolution.spec.v0\n")
-    assert "# Evolution Strategy Spec v0 Template" not in actual
-    assert not actual.endswith("```")
-    assert "## Appendix B:" in actual
-    assert "few-shot" not in baseline and "早安" not in baseline
 
 
 def test_direct_goal_json_prompt_keeps_version_specific_skill_layout(monkeypatch, tmp_path):

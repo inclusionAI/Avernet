@@ -71,7 +71,9 @@ def discovery_payload(workspace: Path, *, target: str = TARGET) -> dict:
     }
 
 
-def agent_result(*, response_text: str = "", status: str = "success"):
+def agent_result(
+    *, response_text: str = "", status: str = "success", diagnostics=None
+):
     return SimpleNamespace(
         status=status,
         agent_id="test-discovery-agent",
@@ -80,7 +82,8 @@ def agent_result(*, response_text: str = "", status: str = "success"):
         response_text=response_text,
         stdout_text="",
         stderr_text="",
-        diagnostics={},
+        diagnostics=diagnostics or {},
+        transport="gateway",
     )
 
 
@@ -169,11 +172,25 @@ class AutomaticDiscoveryArtifactTests(unittest.TestCase):
 
             with patch(
                 "clawevolve_plan.discovery.service.run_openclaw_agent_message",
-                return_value=agent_result(),
+                return_value=agent_result(
+                    status="failed",
+                    diagnostics={
+                        "selectedTransport": "gateway",
+                        "failureCode": "gateway_agent_registry_not_synced",
+                        "localAgentExitCode": 1,
+                        "localFallbackReason": "provider authentication unavailable",
+                        "gatewayAgentVisible": False,
+                        "gatewayVisibilityAttempts": [
+                            {
+                                "exitCode": 0,
+                                "timedOut": False,
+                                "stderr": "",
+                            }
+                        ],
+                    },
+                ),
             ) as agent:
-                with self.assertRaisesRegex(
-                    ValueError, "no repairable structured artifact"
-                ):
+                with self.assertRaisesRegex(ValueError, "gateway_agent_registry_not_synced"):
                     self._run(workspace, input_dir)
 
             self.assertEqual(agent.call_count, 1)

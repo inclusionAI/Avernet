@@ -10,6 +10,81 @@ fn admin() -> CallerContext {
 }
 
 #[tokio::test]
+async fn legacy_group_policy_is_migrated_durably_and_only_once() {
+    let repo = SlowPolicyRepo::default();
+    let mut legacy = DeliveryPolicyRecord::default();
+    legacy.version = 1;
+    legacy.policy.flow_enabled.group = true;
+    legacy.policy.defaults.mode = BotDeliveryMode::Enforce;
+    repo.seed_legacy(0, legacy.clone()).await;
+    repo.release.notify_one();
+    let upgraded = LiveDeliveryPolicy::load_compatible(&repo).await.unwrap();
+    assert_eq!(upgraded.version, 2);
+    assert!(upgraded.policy.manages_system("bot"));
+    assert_eq!(upgraded.updated_by, "system:group-system-policy-migration");
+    assert_eq!(repo.load_policy().await.unwrap(), upgraded);
+    assert_eq!(LiveDeliveryPolicy::load_compatible(&repo).await.unwrap(), upgraded);
+}
+
+#[tokio::test]
+async fn takeover_and_reconciliation_migrate_legacy_commits() {
+    let repo = Arc::new(SlowPolicyRepo::default());
+    let live = LiveDeliveryPolicy::new(repo.clone(), Default::default());
+    let mut legacy = DeliveryPolicyRecord::default();
+    legacy.version = 1;
+    legacy.policy.flow_enabled.group = true;
+    repo.seed_legacy(0, legacy.clone()).await;
+    repo.release.notify_one();
+    live.refresh_for_takeover().await.unwrap();
+    assert_eq!(live.snapshot.read().await.version, 2);
+    assert!(live.snapshot.read().await.policy.flow_enabled.system);
+    legacy.version = 3;
+    legacy.policy.flow_enabled.group = false;
+    legacy.policy.flow_enabled.system = true;
+    repo.seed_legacy(2, legacy).await;
+    repo.release.notify_one();
+    live.reconcile_durable_version().await.unwrap();
+    assert_eq!(live.snapshot.read().await.version, 4);
+    assert!(!live.snapshot.read().await.policy.flow_enabled.system);
+    assert_eq!(*live.snapshot.read().await, repo.load_policy().await.unwrap());
+}
+
+#[tokio::test]
+async fn management_rejects_mismatched_switches_without_persisting() {
+    let repo = Arc::new(MemoryMessageRepo::new());
+    let live = LiveDeliveryPolicy::new(repo.clone(), Default::default());
+    live.scheduler_available.store(true, Ordering::SeqCst);
+    for group in [false, true] {
+        let mut policy = DeliveryPolicy::default();
+        policy.flow_enabled.group = group;
+        policy.flow_enabled.system = !group;
+        let error = live.replace(admin(), 0, policy).await.unwrap_err();
+        assert!(error.to_string().contains("queue_group_system_switch_mismatch"));
+        assert_eq!(repo.load_policy().await.unwrap().version, 0);
+    }
+}
+
+#[tokio::test]
+async fn migration_conflict_reloads_latest_operator_policy_without_overwriting_it() {
+    let repo = Arc::new(SlowPolicyRepo::default());
+    let mut legacy = DeliveryPolicyRecord::default();
+    legacy.version = 1;
+    legacy.policy.flow_enabled.group = true;
+    repo.seed_legacy(0, legacy).await;
+    let migrating_repo = repo.clone();
+    let migration = tokio::spawn(async move { LiveDeliveryPolicy::load_compatible(migrating_repo.as_ref()).await });
+    repo.started.notified().await;
+    let mut operator = DeliveryPolicyRecord::default();
+    operator.version = 2;
+    operator.policy.pause_dispatch = true;
+    operator.updated_by = "human_operator".into();
+    repo.inner.replace_policy(1, operator.clone()).await.unwrap();
+    repo.release.notify_one();
+    assert_eq!(migration.await.unwrap().unwrap(), operator);
+    assert_eq!(repo.inner.load_policy().await.unwrap(), operator);
+}
+
+#[tokio::test]
 async fn takeover_reloads_policy_changed_by_previous_master() {
     let repo = Arc::new(MemoryMessageRepo::new());
     let live = LiveDeliveryPolicy::new(repo.clone(), Default::default());
@@ -23,11 +98,24 @@ async fn takeover_reloads_policy_changed_by_previous_master() {
 }
 
 
+#[derive(Default)]
 struct SlowPolicyRepo {
     inner: MemoryMessageRepo,
+    legacy: tokio::sync::RwLock<Option<DeliveryPolicyRecord>>,
     fail_read: std::sync::atomic::AtomicBool,
     started: tokio::sync::Notify,
     release: tokio::sync::Notify,
+}
+
+impl SlowPolicyRepo {
+    // Model old durable bytes at the read boundary without weakening current
+    // repository validation. The real inner version still participates in CAS.
+    async fn seed_legacy(&self, expected: u64, legacy: DeliveryPolicyRecord) {
+        let mut valid = legacy.clone();
+        valid.policy.flow_enabled.system = valid.policy.flow_enabled.group;
+        self.inner.replace_policy(expected, valid).await.unwrap();
+        *self.legacy.write().await = Some(legacy);
+    }
 }
 
 #[async_trait::async_trait]
@@ -44,7 +132,11 @@ impl MessageDeliveryRepoPort for SlowPolicyRepo {
         if self.fail_read.load(Ordering::SeqCst) {
             return Err(bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Storage("unavailable".into()));
         }
-        self.inner.load_policy().await
+        let stored = self.inner.load_policy().await?;
+        if let Some(legacy) = self.legacy.read().await.as_ref() {
+            if legacy.version == stored.version { return Ok(legacy.clone()); }
+        }
+        Ok(stored)
     }
     async fn replace_policy(&self, expected: u64, record: DeliveryPolicyRecord) -> Result<(), bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
         self.started.notify_one();
@@ -58,7 +150,7 @@ impl MessageDeliveryRepoPort for SlowPolicyRepo {
 
 #[tokio::test]
 async fn disconnected_management_request_still_finishes_commit_and_publication() {
-    let repo = Arc::new(SlowPolicyRepo { inner: MemoryMessageRepo::new(), fail_read: Default::default(), started: Default::default(), release: Default::default() });
+    let repo = Arc::new(SlowPolicyRepo::default());
     let live = Arc::new(LiveDeliveryPolicy::new(repo.clone(), Default::default()));
     let request_live = live.clone();
     let request = tokio::spawn(async move { request_live.replace(admin(), 0, DeliveryPolicy::default()).await });
@@ -73,7 +165,7 @@ async fn disconnected_management_request_still_finishes_commit_and_publication()
 
 #[tokio::test]
 async fn failed_takeover_read_does_not_publish_a_default_policy() {
-    let repo = Arc::new(SlowPolicyRepo { inner: MemoryMessageRepo::new(), fail_read: true.into(), started: Default::default(), release: Default::default() });
+    let repo = Arc::new(SlowPolicyRepo { fail_read: true.into(), ..Default::default() });
     let mut initial = DeliveryPolicyRecord::default();
     initial.version = 7;
     initial.policy.pause_dispatch = true;
@@ -87,7 +179,7 @@ async fn failed_takeover_read_does_not_publish_a_default_policy() {
 
 #[tokio::test]
 async fn reconciliation_observes_previous_masters_late_commit() {
-    let repo = Arc::new(SlowPolicyRepo { inner: MemoryMessageRepo::new(), fail_read: Default::default(), started: Default::default(), release: Default::default() });
+    let repo = Arc::new(SlowPolicyRepo::default());
     let old = Arc::new(LiveDeliveryPolicy::new(repo.clone(), Default::default()));
     let next = LiveDeliveryPolicy::new(repo.clone(), Default::default());
     let writing = old.clone();
@@ -128,6 +220,7 @@ async fn policy_management_auth_cas_and_live_publication() {
     }
     let mut policy = DeliveryPolicy::default();
     policy.flow_enabled.group = true;
+    policy.flow_enabled.system = true;
     policy.defaults.mode = BotDeliveryMode::Enforce;
     assert!(live.replace(admin(), 0, policy.clone()).await.is_err(), "missing scheduler must not falsely enable");
     assert_eq!(repo.load_policy().await.unwrap().version, 0);
@@ -157,6 +250,7 @@ async fn unready_flows_are_rejected_but_group_activation_is_allowed() {
     assert!(live.replace(admin(), 0, policy).await.is_err());
     let mut policy = DeliveryPolicy::default();
     policy.flow_enabled.group = true;
+    policy.flow_enabled.system = true;
     policy.defaults.mode = BotDeliveryMode::Enforce;
     assert!(live.replace(admin(), 0, policy).await.is_ok());
 }

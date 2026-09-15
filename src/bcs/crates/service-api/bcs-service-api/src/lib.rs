@@ -36,7 +36,7 @@ pub use core::{
     WorkerProfile, WorkerProfileCoreService as WorkerProfileService, WorkerRecommendCommand,
     WorkerRecommendResult, WorkerRecommendation,
 };
-pub use application::SystemMessageService;
+pub use application::{SystemMessageService, SystemMessageQueueService, SystemQueueAdmissionOutcome};
 pub use application::message_delivery::{
     CancelMessageDeliveryCommand, CancelMessageDeliveryResult, DeliveryAdmissionView,
     DeliveryResolution, ResolveMessageDeliveryCommand,

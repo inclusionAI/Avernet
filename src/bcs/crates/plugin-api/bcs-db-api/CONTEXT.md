@@ -41,3 +41,17 @@ The crate owns DB capability semantics. It does not own service persistence poli
 
 - `cargo test --package bcs-db-api --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-db-api --all-targets --manifest-path src/bcs/Cargo.toml`
+
+## Transaction early success (API v1 extension)
+
+A plain Execute may opt into `DbStatement::with_transaction_stop_on_no_rows`.
+Zero affected rows commits the executed prefix and returns only its results;
+remaining SQL and bindings are skipped. Nonzero results continue atomically.
+Execution/binding failures roll back, and commit failures propagate. Query,
+ExecuteChecked and standalone operations reject the option. Both local SQLite
+and MySQL implement and run the shared `db_plugin_contract_tests` semantics.
+Existing enum variants, method signatures and unflagged semantics are unchanged.
+Consumers and third-party implementations must coordinate support for the option.
+
+Statement and transaction types live in `src/transaction.rs` and retain root
+re-exports. See [idle polling spec](../../../specs/2026-09-15-eventing-idle-polling/spec.md).

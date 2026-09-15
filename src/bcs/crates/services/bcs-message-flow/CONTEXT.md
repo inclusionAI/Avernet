@@ -1,5 +1,13 @@
 # bcs-message-flow Context
 
+System admission shares Group runtime preparation and Bot/session lanes. A weak
+composition-bound SystemMessageQueueService lets the dispatcher persist its whole
+event before Driver dispatch. Public/Skip copies share a source; personalized
+initialization remains private. Explicit required_context survives TTL/count
+limits and must fit fully in the shared history byte budget. Joint Group/System
+disable retains context for the next Send, using exact scoped drain admission;
+it does not turn queued initialization into a native inject call.
+
 Queued Provider routing snapshots are opt-in non-sensitive headers, bounded and
 normalized by the shared config contract. Admission rejects only unsupported
 Provider recipients, without retaining rejected values or bypassing the queue.

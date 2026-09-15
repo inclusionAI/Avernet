@@ -284,7 +284,7 @@ export function GuardianMetricDrawer({
               <div className="border-b border-slate-100 px-4 py-3"><h3 className="text-sm font-semibold text-slate-900">{kind === 'duration' ? '耗时最高的工作流' : '成功率较低的工作流'}</h3><p className="mt-0.5 text-[11px] text-slate-400">用于定位主要贡献者，不改变主指标口径</p></div>
               <div className="divide-y divide-slate-100">
                 {workflowRows.map((row) => (
-                  <button key={row.workflowId} onClick={() => navigate(`/workflow/${encodeURIComponent(row.workflowId)}/metrics`)} className="grid w-full grid-cols-[minmax(0,1fr)_90px_90px] items-center gap-3 px-4 py-3 text-left hover:bg-slate-50">
+                  <button key={row.workflowId} onClick={() => navigate(`/workflows/workspace?workflowId=${encodeURIComponent(row.workflowId)}`)} className="grid w-full grid-cols-[minmax(0,1fr)_90px_90px] items-center gap-3 px-4 py-3 text-left hover:bg-slate-50">
                     <span className="truncate text-xs font-medium text-slate-800">{row.workflowTitle}</span>
                     <span className="text-right text-xs tabular-nums text-slate-600">{formatRate(row.completionSuccessRate)}</span>
                     <span className="text-right text-xs tabular-nums text-slate-600">{row.machineDurationP50 == null ? '—' : formatDuration(row.machineDurationP50)}</span>

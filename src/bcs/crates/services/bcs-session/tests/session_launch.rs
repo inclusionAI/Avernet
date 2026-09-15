@@ -133,6 +133,7 @@ impl CollaborationRuntimeService for RecordingRuntime {
 #[derive(Default)]
 struct RecordingSystemMessage {
     events: Mutex<Vec<(String, SystemMessageEvent, String, Vec<Participant>)>>,
+    queued: std::sync::atomic::AtomicBool,
 }
 
 #[async_trait]
@@ -167,6 +168,7 @@ impl SystemMessageService for RecordingSystemMessage {
             _ => None,
         };
         self.notify(group_id, event, session_id, participants).await?;
+        let queued = self.queued.load(std::sync::atomic::Ordering::SeqCst);
         let recipient_results = participants
             .iter()
             .filter(|participant| participant.is_bot())
@@ -180,7 +182,8 @@ impl SystemMessageService for RecordingSystemMessage {
                     recipient_id: participant.bot_uuid.clone(),
                     run_id: format!("context-run-{}", participant.bot_uuid),
                     delivery_type,
-                    delivered: true,
+                    delivery_id: queued.then(|| format!("delivery-{}", participant.bot_uuid)),
+                    delivered: !queued,
                     error: None,
                 }
             })
@@ -324,6 +327,28 @@ async fn human_creates_as_owned_bot() {
         initial_run.state,
         bcs_service_api::InitialSessionRunState::Running
     );
+}
+
+#[tokio::test]
+async fn queued_session_context_returns_queued_initial_run() {
+    let fixture = Fixture::new();
+    fixture.system_message.queued.store(true, std::sync::atomic::Ordering::SeqCst);
+    fixture.add_bot("driver", "alice").await;
+    fixture.add_bot("worker", "alice").await;
+    fixture.add_group(Group::new("queued-group", "driver", vec![
+        Participant::bot("driver", ParticipantRole::Driver),
+        Participant::bot("worker", ParticipantRole::Consultant),
+    ])).await;
+
+    let outcome = fixture.service.create(CreateSessionLaunch {
+        request: request(human("alice"), "queued-group", Some("worker")),
+    }).await.expect("durable admission allows session creation before Bot delivery");
+
+    let run = outcome.initial_run.expect("queued driver send remains visible");
+    assert_eq!(run.run_id, "context-run-driver");
+    assert_eq!(run.bot_uuid, "driver");
+    assert_eq!(run.state, bcs_service_api::InitialSessionRunState::Queued);
+    assert_eq!(run.activity_kind, bcs_service_api::InitialSessionRunActivityKind::SessionContext);
 }
 
 #[tokio::test]

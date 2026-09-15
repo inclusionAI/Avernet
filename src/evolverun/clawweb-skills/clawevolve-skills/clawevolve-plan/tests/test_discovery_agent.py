@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -83,10 +84,45 @@ class DiscoveryAgentTransportTests(unittest.TestCase):
         self.assertEqual(result.diagnostics["agentCleanup"], "deleted")
         add_cmd = next(cmd for cmd in commands if cmd[1:3] == ["agents", "add"])
         self.assertIn("--json", add_cmd)
+        self.assertNotIn("--model", add_cmd)
         self.assertNotIn("--api-key", add_cmd)
         self.assertNotIn("--base-url", add_cmd)
         local_cmd = next(cmd for cmd in commands if cmd[1:3] == ["agent", "--local"])
         self.assertIn("--timeout", local_cmd)
+
+    def test_registration_uses_explicit_discovery_model_override(self):
+        agent_id = "clawevolve-plan-model-override"
+        commands: list[list[str]] = []
+
+        def fake_run(cmd, **_kwargs):
+            commands.append(cmd)
+            if cmd[1:3] == ["config", "validate"]:
+                return command_result(0)
+            if cmd[1:4] == ["agents", "list", "--json"]:
+                listed = agent_id if len([c for c in commands if c[1:4] == ["agents", "list", "--json"]]) > 1 else None
+                return command_result(0, stdout=registry_json(*([listed] if listed else [])))
+            if cmd[1:3] == ["agents", "add"]:
+                return command_result(0, stdout=json.dumps({"id": agent_id}))
+            if cmd[1:3] == ["agent", "--local"]:
+                return command_result(0, stdout=json.dumps({"response": "done"}))
+            if cmd[1:3] == ["agents", "delete"]:
+                return command_result(0, stdout=json.dumps({"deleted": True}))
+            raise AssertionError(cmd)
+
+        with tempfile.TemporaryDirectory(prefix="plan-agent-model-") as td, patch(
+            "clawevolve_plan.discovery.agent._openclaw_env", return_value={}
+        ), patch(
+            "clawevolve_plan.discovery.agent._run_command", side_effect=fake_run
+        ), patch.dict(
+            os.environ,
+            {"CLAWEVOLVE_PLAN_DISCOVERY_MODEL": "antchat/GLM-5.1"},
+        ):
+            result = self._run(Path(td), agent_id=agent_id)
+
+        self.assertEqual(result.status, "success")
+        add_cmd = next(cmd for cmd in commands if cmd[1:3] == ["agents", "add"])
+        model_index = add_cmd.index("--model")
+        self.assertEqual(add_cmd[model_index + 1], "antchat/GLM-5.1")
 
     def test_extracts_text_from_openclaw_payloads_stdout(self):
         agent_id = "clawevolve-plan-payloads"

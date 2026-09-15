@@ -10,6 +10,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{EventDispatcher, EventFanoutWorker, EventRetentionWorker};
 
+mod polling;
+use polling::IdleBackoff;
+
 struct RunningWorkers {
     cancellation: CancellationToken,
     handles: Vec<JoinHandle<()>>,
@@ -21,6 +24,8 @@ pub struct EventingLifecycle {
     retention: Arc<EventRetentionWorker>,
     fanout_poll_interval: Duration,
     delivery_poll_interval: Duration,
+    fanout_idle_poll_max_interval: Duration,
+    delivery_idle_poll_max_interval: Duration,
     retention_poll_interval: Duration,
     shutdown_timeout: Duration,
     running: Mutex<Option<RunningWorkers>>,
@@ -52,10 +57,29 @@ impl EventingLifecycle {
             retention,
             fanout_poll_interval,
             delivery_poll_interval,
+            fanout_idle_poll_max_interval: fanout_poll_interval,
+            delivery_idle_poll_max_interval: delivery_poll_interval,
             retention_poll_interval,
             shutdown_timeout,
             running: Mutex::new(None),
         })
+    }
+
+    /// Opt into bounded idle backoff. Ceilings equal to the base intervals
+    /// preserve fixed polling; no change to lease or delivery retry policy.
+    pub fn with_idle_poll_limits(
+        mut self,
+        fanout_max: Duration,
+        delivery_max: Duration,
+    ) -> Result<Self, LifecycleError> {
+        if fanout_max < self.fanout_poll_interval || delivery_max < self.delivery_poll_interval {
+            return Err(LifecycleError::Precondition(
+                "Eventing idle polling ceilings must not be below base intervals".to_string(),
+            ));
+        }
+        self.fanout_idle_poll_max_interval = fanout_max;
+        self.delivery_idle_poll_max_interval = delivery_max;
+        Ok(self)
     }
 }
 
@@ -75,11 +99,12 @@ impl ServiceLifecycle for EventingLifecycle {
         let fanout = self.fanout.clone();
         let fanout_cancel = cancellation.clone();
         let fanout_interval = self.fanout_poll_interval;
+        let fanout_max = self.fanout_idle_poll_max_interval;
         handles.push(tokio::spawn(async move {
-            worker_loop(fanout_cancel, fanout_interval, move || {
+            worker_loop(fanout_cancel, fanout_interval, fanout_max, "fanout", move || {
                 let fanout = fanout.clone();
                 async move {
-                    let _ = fanout.run_once("eventing-fanout").await;
+                    fanout.run_once("eventing-fanout").await
                 }
             })
             .await;
@@ -88,11 +113,12 @@ impl ServiceLifecycle for EventingLifecycle {
         if let Some(dispatcher) = self.dispatcher.clone() {
             let delivery_cancel = cancellation.clone();
             let delivery_interval = self.delivery_poll_interval;
+            let delivery_max = self.delivery_idle_poll_max_interval;
             handles.push(tokio::spawn(async move {
-                worker_loop(delivery_cancel, delivery_interval, move || {
+                worker_loop(delivery_cancel, delivery_interval, delivery_max, "delivery", move || {
                     let dispatcher = dispatcher.clone();
                     async move {
-                        let _ = dispatcher.run_once("eventing-dispatcher").await;
+                        dispatcher.run_once("eventing-dispatcher").await
                     }
                 })
                 .await;
@@ -103,10 +129,10 @@ impl ServiceLifecycle for EventingLifecycle {
         let retention_cancel = cancellation.clone();
         let retention_interval = self.retention_poll_interval;
         handles.push(tokio::spawn(async move {
-            worker_loop(retention_cancel, retention_interval, move || {
+            worker_loop(retention_cancel, retention_interval, retention_interval, "retention", move || {
                 let retention = retention.clone();
                 async move {
-                    let _ = retention.run_once().await;
+                    retention.run_once().await.map(|_| 1)
                 }
             })
             .await;
@@ -149,11 +175,19 @@ impl ServiceLifecycle for EventingLifecycle {
     }
 }
 
-async fn worker_loop<F, Fut>(cancellation: CancellationToken, interval: Duration, mut work: F)
+async fn worker_loop<F, Fut, E>(
+    cancellation: CancellationToken,
+    interval: Duration,
+    idle_max: Duration,
+    worker: &'static str,
+    mut work: F,
+)
 where
     F: FnMut() -> Fut,
-    Fut: Future<Output = ()>,
+    Fut: Future<Output = Result<usize, E>>,
+    E: std::fmt::Display,
 {
+    let mut backoff = IdleBackoff::new(interval, idle_max);
     loop {
         if cancellation.is_cancelled() {
             return;
@@ -161,10 +195,20 @@ where
         // Finish a claimed batch before stopping so completed Attempts and
         // lease releases remain durable. The lifecycle timeout aborts a truly
         // stuck batch; its leases are then recovered by another worker.
-        work().await;
+        let empty = match work().await {
+            Ok(count) => count == 0,
+            Err(error) => {
+                tracing::warn!(worker, error = %error, "Eventing worker iteration failed");
+                false
+            }
+        };
+        let delay = backoff.next_delay(empty, rand::random());
         tokio::select! {
             () = cancellation.cancelled() => return,
-            () = tokio::time::sleep(interval) => {}
+            () = tokio::time::sleep(delay) => {}
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

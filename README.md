@@ -69,18 +69,18 @@ It is built for teams that need to:
 - **Shared intelligence and evolution**  
   ![Context](https://img.shields.io/badge/Context-Planned-lightgrey)
   ![Memory](https://img.shields.io/badge/Memory-Planned-lightgrey)
-  ![Orchestration](https://img.shields.io/badge/Orchestration-Planned-lightgrey)
+  ![Orchestration](https://img.shields.io/badge/Orchestration-Available-brightgreen)
   ![Evaluation](https://img.shields.io/badge/Evaluation-Available-brightgreen)
   ![Evolution](https://img.shields.io/badge/Evolution-Available-brightgreen)
 
-  Bot diagnosis, repeatable Bench evaluation, goal- or diagnosis-driven optimization, and recoverable Pack versions are available through [AgentEvolve](docs/agent-evolve.md). Context, memory, and general-purpose orchestration remain planned.
+  Bot diagnosis, repeatable Bench evaluation, goal- or diagnosis-driven optimization, and recoverable Pack versions are available through [AgentEvolve](docs/agent-evolve.md). Orchestration is available via the Avernet coordination layer. Context and memory remain planned.
 
 - **Application building blocks**  
   ![Apps](https://img.shields.io/badge/Apps-Planned-lightgrey)
   ![Canvas](https://img.shields.io/badge/Canvas-Available-brightgreen)
   ![Workflow](https://img.shields.io/badge/Workflow-Available-brightgreen)
   ![Extensions](https://img.shields.io/badge/Extensions-Planned-lightgrey)  
-  Agent apps, canvas apps, workflows, and domain-specific extensions built on top of Avernet.
+  Agent apps, canvas apps, workflows, and domain-specific extensions built on top of Avernet. Workflow orchestration is available through [TaskGuard](docs/taskguard.md).
 
 ## Quick Start
 
@@ -200,7 +200,6 @@ ocb/
 
 ## Documentation
 
-- [AgentEvolve](docs/agent-evolve.md)
 - [Quick Start](docs/quick-start.md)
 - [Dependencies](docs/dependencies.md)
 - [Docker Guide](docs/docker.md)
@@ -209,6 +208,8 @@ ocb/
 - [Local OpenClaw from source](docs/openclaw-bcn-local.md)
 - [Architecture docs](docs/arch/)
 - [BCS Development Guide](src/bcs/README.md)
+- [AgentEvolve](docs/agent-evolve.md)
+- [TaskGuard](docs/taskguard.md)
 
 ## Security
 

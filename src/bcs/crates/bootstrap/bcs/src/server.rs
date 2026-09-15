@@ -2225,6 +2225,7 @@ impl Default for BcsServerState {
         );
         let system_message: Arc<dyn bcs_service_api::SystemMessageService> = {
             let dispatcher = SystemMessageDispatcherImpl::builder()
+                .with_queue(message_flow_builder.system_queue_port())
                 .with_registry(bot_registry.clone())
                 .with_delivery(bot_delivery.clone())
                 .with_frontend_delivery(frontend_delivery.clone())
@@ -2785,6 +2786,7 @@ struct UseCaseBundle {
 
 fn build_use_case_bundle(
     config: &BcsConfig,
+    system_queue: Arc<dyn bcs_service_api::application::system_message::SystemMessageQueueService>,
     bot_registry: Arc<dyn BotRegistryCoreService>,
     bot_core: Arc<BotCore>,
     organization_core: Arc<dyn OrganizationCoreService>,
@@ -2836,6 +2838,7 @@ fn build_use_case_bundle(
     let bot_use_cases = Arc::new(bot_use_cases);
     let system_message: Arc<dyn bcs_service_api::SystemMessageService> = {
         let mut disp_builder = SystemMessageDispatcherImpl::builder()
+            .with_queue(system_queue)
             .with_registry(bot_registry.clone())
             .with_delivery(bot_delivery.clone())
             .with_frontend_delivery(frontend_delivery.clone())
@@ -3082,7 +3085,9 @@ fn finalize_message_flow(
 ) -> (Arc<dyn MessageFlowService>, ChannelSlot) {
     let message_flow = message_flow.with_system_message(system_message);
     let channel_slot = message_flow.channel_slot();
-    (Arc::new(message_flow), channel_slot)
+    let message_flow = Arc::new(message_flow);
+    message_flow.retain_terminal_events();
+    (message_flow, channel_slot)
 }
 
 fn create_interceptor_chain(config: &BcsConfig) -> crate::Result<Arc<InterceptorChain>> {
@@ -3839,6 +3844,7 @@ impl BcsServer {
         let direct_chat_run_snapshot: Arc<dyn DirectChatRunSnapshotPort> = a2a_chat_impl;
         let use_cases = build_use_case_bundle(
             &config,
+            message_flow_builder.system_queue_port(),
             bot_registry.clone(),
             bot_core_arc.clone(),
             organization_core.clone(),
@@ -4688,6 +4694,7 @@ impl BcsServer {
         let direct_chat_run_snapshot: Arc<dyn DirectChatRunSnapshotPort> = a2a_chat_impl;
         let use_cases = build_use_case_bundle(
             &config,
+            message_flow_builder.system_queue_port(),
             bot_registry.clone(),
             bot_core_arc.clone(),
             organization_core.clone(),

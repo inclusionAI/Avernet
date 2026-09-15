@@ -322,8 +322,9 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
   const [apiKey, setApiKey] = useState('')
   const [judgeBackend, setJudgeBackend] = useState<'subagent' | 'api'>('subagent')
   const [diagnoseSessionSource, setDiagnoseSessionSource] = useState<'local' | 'service_export'>('local')
-  const [diagnoseModel, setDiagnoseModel] = useState(localModel ?? 'GLM-5.1')
-  const [workflowModel, setWorkflowModel] = useState(localModel ?? 'GLM-5.1')
+  const configuredInitialModel = ''
+  const [diagnoseModel, setDiagnoseModel] = useState(configuredInitialModel)
+  const [workflowModel, setWorkflowModel] = useState(configuredInitialModel)
   const [lookbackDays, setLookbackDays] = useState('3')
   const [maxDiagnoseSessions, setMaxDiagnoseSessions] = useState('10')
   const [badCaseCount, setBadCaseCount] = useState('4')
@@ -344,7 +345,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
   const [benchObjective, setBenchObjective] = useState('')
   const [evolutionGoal, setEvolutionGoal] = useState('')
   const [fullInputMode, setFullInputMode] = useState<FullInputMode>('diagnose_goal')
-  const [directGoalModel, setDirectGoalModel] = useState(localModel ?? 'GLM-5.1')
+  const [directGoalModel, setDirectGoalModel] = useState(configuredInitialModel)
   const [startDate, setStartDate] = useState(() => dateValue(-3))
   const [endDate, setEndDate] = useState(() => dateValue())
   const [customCommands, setCustomCommands] = useState(false)
@@ -855,7 +856,6 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
             onJudgeBackendChange={(value) => {
               setJudgeBackend(value)
               if (value === 'subagent') setApiKey('')
-              if (value === 'api' && !diagnoseModel.trim()) setDiagnoseModel('GLM-5.1')
             }}
             apiKey={apiKey}
             onApiKeyChange={setApiKey}
@@ -920,8 +920,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
             if (openVersion && taskType === 'pack_restore' && !window.confirm('将应用所选 Pack，覆盖该 Bot 的工作区配置物料与 Skill；原部署脚本会先备份并在失败时尝试回滚。不会恢复业务会话或运行身份。确认继续？')) return
             if (taskType === 'pack_restore' && !selectedRestorePack) { setSubmitError('请选择要应用的 Pack 版本'); return }
             if (taskType === 'full' && !improvementSource && !evolutionGoal.trim()) { setSubmitError('请输入一句话优化目标'); return }
-            if (taskType === 'full' && !improvementSource && fullInputMode === 'direct_goal' && !directGoalModel.trim()) { setSubmitError('请选择或输入模型'); return }
-            if ((taskType === 'optimize' || taskType === 'bench' || taskType === 'bench_optimize') && !workflowModel.trim()) { setSubmitError('请选择或输入模型'); return }
+            if (diagnoseEnabled && effectiveJudgeBackend === 'api' && !diagnoseModel.trim()) { setSubmitError('API Judge 需要显式选择或输入模型'); return }
             if (taskType === 'optimize' && sourceDiagnosisTaskIds.length === 0) { setSubmitError('请选择一个已完成 Plan 的诊断任务'); return }
             if (improvementSource && !activeHandoff) { setSubmitError('请先成功加载 Insight Center 改进项'); return }
             if (crossBotTarget && !crossBotConfirmed) { setSubmitError('请确认 Evidence 来源与实际执行目标不同'); return }
@@ -987,16 +986,16 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
                     runtimeMaintenance,
                   }, improvementRequestId)
                 : taskType === 'optimize'
-                ? await api.evolve.createOptimization({ ...taskInfo, userId: evolveUserId, botId, botEnv, sourceDiagnosisTaskIds, model: workflowModel.trim(), maxRounds: parsedMaxRounds, nodeCommandYamls: customCommands ? nodeCommandYamls : undefined, forceMessage, runtimeMaintenance })
+                ? await api.evolve.createOptimization({ ...taskInfo, userId: evolveUserId, botId, botEnv, sourceDiagnosisTaskIds, ...(workflowModel.trim() ? { model: workflowModel.trim() } : {}), maxRounds: parsedMaxRounds, nodeCommandYamls: customCommands ? nodeCommandYamls : undefined, forceMessage, runtimeMaintenance })
                 : taskType === 'bench'
-                ? await api.evolve.createBench({ ...taskInfo, userId: evolveUserId, botId, botEnv, benchDomainId, model: workflowModel.trim(), suite: 'all', scene: 'claw-evolve-bench', nodeCommandYamls: customCommands ? nodeCommandYamls : undefined, forceMessage, runtimeMaintenance })
+                ? await api.evolve.createBench({ ...taskInfo, userId: evolveUserId, botId, botEnv, benchDomainId, ...(workflowModel.trim() ? { model: workflowModel.trim() } : {}), suite: 'all', scene: 'claw-evolve-bench', nodeCommandYamls: customCommands ? nodeCommandYamls : undefined, forceMessage, runtimeMaintenance })
                 : taskType === 'bench_optimize'
-                ? await api.evolve.createBenchOptimization({ ...taskInfo, userId: evolveUserId, botId, botEnv, objective: benchObjective.trim(), trainBenchDomainId, testBenchDomainId, model: workflowModel.trim(), maxRounds: parsedMaxRounds, nodeCommandYamls: customCommands ? nodeCommandYamls : undefined, forceMessage, runtimeMaintenance })
+                ? await api.evolve.createBenchOptimization({ ...taskInfo, userId: evolveUserId, botId, botEnv, objective: benchObjective.trim(), trainBenchDomainId, testBenchDomainId, ...(workflowModel.trim() ? { model: workflowModel.trim() } : {}), maxRounds: parsedMaxRounds, nodeCommandYamls: customCommands ? nodeCommandYamls : undefined, forceMessage, runtimeMaintenance })
                 : taskType === 'full'
                 ? fullInputMode === 'direct_goal'
                   ? await api.evolve.createTask({
                       ...taskInfo, taskType: 'full', inputMode: 'direct_goal', userId: evolveUserId, botId, botEnv,
-                      goal: evolutionGoal.trim(), model: directGoalModel.trim(), maxRounds: parsedMaxRounds, nodeCommandYamls: fullNodeCommandYamls,
+                      goal: evolutionGoal.trim(), ...(directGoalModel.trim() ? { model: directGoalModel.trim() } : {}), maxRounds: parsedMaxRounds, nodeCommandYamls: fullNodeCommandYamls,
                       forceMessage, runtimeMaintenance,
                     })
                   : await api.evolve.createTask({
@@ -1098,8 +1097,8 @@ function DiagnoseFields({
           </> : <label><span className="mb-1.5 block text-xs font-medium text-gray-600">会话时间范围</span><select className={inputClass} value={lookbackDays} onChange={(event) => onLookbackDaysChange(event.target.value)}><option value="3">最近 3 天</option><option value="7">最近 7 天</option><option value="14">最近 14 天</option><option value="30">最近 30 天</option></select></label>}
           <EvolveModelFields
             modelOptions={configuredModel ? [configuredModel, ...EVOLVE_MODEL_OPTIONS.filter((item) => item !== configuredModel)] : EVOLVE_MODEL_OPTIONS}
-            choice={(configuredModel ? [configuredModel, ...EVOLVE_MODEL_OPTIONS] : EVOLVE_MODEL_OPTIONS).includes(model) ? model : EVOLVE_CUSTOM_MODEL}
-            customValue={(configuredModel ? [configuredModel, ...EVOLVE_MODEL_OPTIONS] : EVOLVE_MODEL_OPTIONS).includes(model) ? '' : model}
+            choice={!model || (configuredModel ? [configuredModel, ...EVOLVE_MODEL_OPTIONS] : EVOLVE_MODEL_OPTIONS).includes(model) ? model : EVOLVE_CUSTOM_MODEL}
+            customValue={!model || (configuredModel ? [configuredModel, ...EVOLVE_MODEL_OPTIONS] : EVOLVE_MODEL_OPTIONS).includes(model) ? '' : model}
             onChoiceChange={(value) => onModelChange(value === EVOLVE_CUSTOM_MODEL ? '' : value)}
             onCustomValueChange={onModelChange}
             selectAriaLabel="诊断模型"
@@ -1133,7 +1132,7 @@ function TaskModelFields({ title, model, configuredModel, onModelChange }: {
   const modelOptions = configuredModel
     ? [configuredModel, ...EVOLVE_MODEL_OPTIONS.filter((item) => item !== configuredModel)]
     : EVOLVE_MODEL_OPTIONS
-  const knownModel = modelOptions.includes(model)
+  const knownModel = !model || modelOptions.includes(model)
   return <section className="border-t border-gray-100 pt-6">
     <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
     <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -1302,7 +1301,7 @@ function FullFlowFields({ mode, onModeChange, goal, onGoalChange, model, onModel
   const modelOptions = configuredModel
     ? [configuredModel, ...EVOLVE_MODEL_OPTIONS.filter((item) => item !== configuredModel)]
     : EVOLVE_MODEL_OPTIONS
-  const knownModel = modelOptions.includes(model as (typeof modelOptions)[number])
+  const knownModel = !model || modelOptions.includes(model as (typeof modelOptions)[number])
   return (
     <>
       <section className="border-t border-gray-100 pt-6">

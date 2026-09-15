@@ -2,6 +2,16 @@
 
 ## Provides
 
+SystemMessageQueueService atomically admits one producer event before any direct
+delivery; admitted recipients expose delivery_id separately from delivered.
+Group/Session initialization can return queued instead of running. The managed
+and repository admit_batch contracts commit one Session's canonical sources and
+targets together. Required initialization survives ordinary count/TTL limits,
+and a scoped non-expired context lookup authorizes a carrier after policy disable.
+Consumers are the System dispatcher, session/group launch and shared queue runtime;
+Memory/SQLite conformance covers persistence, and queued System tests cover the
+dispatcher-to-Send boundary without native inject.
+
 DeliveryAdmissionTarget carries a typed per-recipient rejection, committed as an
 unsent Failed delivery without aborting other recipients. DeliveryStatusView
 adds optional fixed admission_error codes, never arbitrary transport error text.

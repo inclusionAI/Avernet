@@ -25,7 +25,7 @@
 | `--step-id` | 是 | 无 | ClawWeb step id；用于步骤状态回传。必须原样传入。 |
 | `--api-key` | 是 | 空 | OpenAI-compatible LLM API key；传入时走 direct API judge，未传或为空时直接失败；当前仅支持 API-key judge，OpenClaw subagent 暂时废弃；只用于请求头，不写入输出文件。 |
 | `--llm-base-url` | 否 | 代码常量 `DEFAULT_BASE_URL` | OpenAI-compatible base URL；不读取环境变量。 |
-| `--model` | 否 | `DEFAULT_MODEL` | LLM model name。 |
+| `--model` | API Judge 必填；Subagent 可选 | Subagent 使用 OpenClaw 当前默认模型；API Judge 无默认值 | LLM model name；ClawWeb 发起的 API Judge 任务会显式传递页面选择值。 |
 | `--max-sessions` | 否 | 0，实际使用 `DEFAULT_MAX_SESSIONS` | 最多实际送 judge 分析的 session 数；发现阶段可扫描更宽窗口。 |
 | `--debug-session-path` | 否 | 空 | 调试入口：只读取并分析指定 session JSONL 文件。 |
 | `--output-dir` | 否，隐藏 | 空 | 调试用输出目录；线上默认不需要传。 |

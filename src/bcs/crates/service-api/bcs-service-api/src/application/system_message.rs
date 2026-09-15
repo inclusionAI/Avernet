@@ -5,6 +5,27 @@ use bcs_domain::{Participant, SystemMessageEvent};
 
 use crate::{ServiceResult, SystemMessageDispatchOutcome};
 
+/// System dispatcher admission hook. `Some` means all canonical history for
+/// this event has been committed atomically; queued recipients must not also
+/// be delivered through the legacy port. `None` leaves persistence/delivery
+/// with the dispatcher. An error never permits a legacy fallback.
+#[async_trait]
+pub trait SystemMessageQueueService: Send + Sync {
+    async fn admit(
+        &self,
+        group: &bcs_domain::Group,
+        session_id: &str,
+        participants: &[Participant],
+        kind: bcs_domain::SystemMessageEventKind,
+        messages: &[bcs_domain::SystemGroupMessage],
+    ) -> ServiceResult<Option<SystemQueueAdmissionOutcome>>;
+}
+
+pub struct SystemQueueAdmissionOutcome {
+    /// Producer message index disambiguates several messages for one Bot.
+    pub recipients: Vec<(usize, crate::SystemMessageRecipientResult)>,
+}
+
 #[async_trait]
 pub trait SystemMessageService: Send + Sync {
     async fn notify(

@@ -74,6 +74,7 @@ impl DbPlugin for MysqlDbPlugin {
         &self,
         steps: Vec<DbTransactionStep>,
     ) -> DbResult<Vec<DbTransactionStepResult>> {
+        steps.iter().try_for_each(DbTransactionStep::validate)?;
         let steps = steps
             .into_iter()
             .map(PreparedTransactionStep::from)
@@ -102,10 +103,15 @@ impl DbPlugin for MysqlDbPlugin {
                                 let result = tx
                                     .execute_result(statement.sql(), mysql_params(&params)?)
                                     .await?;
+                                let stop = statement.stops_transaction_on_no_rows()
+                                    && result.affected_rows == 0;
                                 results.push(DbTransactionStepResult::Executed(DbExecuteResult {
                                     affected_rows: result.affected_rows,
                                     last_insert_id: result.last_insert_id,
                                 }));
+                                if stop {
+                                    break;
+                                }
                             }
                             PreparedTransactionStep::ExecuteChecked(statement, expected) => {
                                 let params = statement.resolve_transaction_params(&results, step_index)?;

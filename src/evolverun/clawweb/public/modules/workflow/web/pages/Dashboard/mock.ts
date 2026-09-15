@@ -401,6 +401,7 @@ export function mockWorkflowHealth(from: number, to: number): IWorkflowHealthRes
       sceneName: SCENE_OF[r.workflowId!] ?? r.sceneName ?? '其他',
       released: r.released ?? false,
       runCount: r.runCount ?? 0,
+      failedCount: r.failedCount ?? 0,
       completionSuccessRate: completion,
       selfHealTriggeredRuns: healRuns,
       selfHealSuccessRate: healRate,

@@ -105,6 +105,7 @@ async fn conformance_live_group_admission_uses_defaults_and_blocks_drain_bypass(
     let admin = || CallerContext::Human(HumanActor { actor_id: "human_operator".into(), staff_no: "operator".into() });
     let mut policy = DeliveryPolicy::default();
     policy.flow_enabled.group = true;
+    policy.flow_enabled.system = true;
     policy.defaults.mode = BotDeliveryMode::Enforce;
     policy.defaults.max_queued = 1;
     flow.replace_delivery_policy(admin(), 0, policy.clone()).await.unwrap();
@@ -119,6 +120,7 @@ async fn conformance_live_group_admission_uses_defaults_and_blocks_drain_bypass(
     assert_eq!(first.deliveries.len(), 2, "defaults cover both unlisted Bots");
     assert!(support.bot_delivery.frames().await.is_empty(), "managed ingress must not send directly");
     policy.flow_enabled.group = false;
+    policy.flow_enabled.system = false;
     flow.replace_delivery_policy(admin(), 1, policy).await.unwrap();
     let mut next = command;
     next.idempotency_key = Some("live-2".into());
@@ -146,8 +148,8 @@ async fn conformance_live_group_admission_uses_defaults_and_blocks_drain_bypass(
     }).await.unwrap();
     assert!(flow.handle_web_send(next).await.unwrap().queue_admission.is_none());
     assert!(!support.bot_delivery.frames().await.is_empty());
-    assert!(service.snapshot(None).await.unwrap().iter().all(|row|
-        row.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Cancelled));
+    assert!(service.snapshot(None).await.unwrap().iter().any(|row|
+        row.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::PendingContext), "unbound history survives for the observer's next Send");
 }
 
 #[tokio::test]

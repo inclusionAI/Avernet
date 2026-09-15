@@ -59,6 +59,33 @@ fn transition(
 }
 
 #[tokio::test]
+async fn system_batch_retains_initialization_and_only_real_pending_context_allows_drain() -> Result<(), Box<dyn std::error::Error>> {
+    use bcs_config_api::message_delivery::{DeliveryPolicyRecord, BotDeliveryMode};
+    let repo = Arc::new(MemoryMessageRepo::new());
+    let mut initial = DeliveryPolicyRecord::default();
+    initial.policy.flow_enabled.group = true; initial.policy.flow_enabled.system = true;
+    initial.policy.defaults.mode = BotDeliveryMode::Enforce; initial.policy.queue_ttl_ms = Some(1);
+    let policy = Arc::new(bcs_message_flow::delivery_policy::LiveDeliveryPolicy::new(repo.clone(), initial));
+    let service = ManagedMessageDelivery::new(repo.clone()).with_policy(policy.clone());
+    let mut context = admit("system-context", DeliveryType::Inject);
+    context.flow_kind = DeliveryFlowKind::System;
+    context.targets[0].semantic_projection_json["required_context"] = true.into();
+    let required = service.admit_batch(vec![context]).await?.remove(0).deliveries.remove(0);
+    assert_eq!(required.expire_at_ms, None);
+    let version = { let mut p = policy.snapshot.write().await; p.policy.flow_enabled.group = false; p.policy.flow_enabled.system = false; p.version += 1; p.version };
+    assert!(service.admit(admit("disabled", DeliveryType::Send)).await.is_err());
+    let mut carrier = admit("drain", DeliveryType::Send);
+    carrier.targets[0].semantic_projection_json = serde_json::json!({"version":1,"drain_context":true,"policy_version":version-1});
+    assert!(service.admit(carrier.clone()).await.is_err());
+    carrier.targets[0].semantic_projection_json["policy_version"] = version.into();
+    let admitted = service.admit(carrier.clone()).await?.deliveries.remove(0);
+    assert_eq!(repo.lookup(DeliveryLookup::Bound(admitted.delivery_id)).await?.len(), 1);
+    carrier.message_id = "fake-drain".into(); carrier.message.client_msg_id = Some("fake-drain".into());
+    assert!(service.admit(carrier).await.is_err(), "bound contexts cannot authorize additional drain carriers");
+    Ok(())
+}
+
+#[tokio::test]
 async fn send_start_rechecks_cross_session_capacity_under_mutation_lock() -> Result<(), Box<dyn std::error::Error>> {
     use bcs_config_api::message_delivery::{DeliveryPolicyRecord, BotDeliveryMode};
     let repo = Arc::new(MemoryMessageRepo::new());

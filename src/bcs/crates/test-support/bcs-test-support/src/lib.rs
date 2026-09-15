@@ -2,6 +2,7 @@
 
 pub mod contract;
 
+mod db_transactions;
 mod auth_noop;
 mod auth_oauth_mock;
 mod edge_permission_noop;
@@ -530,6 +531,7 @@ pub async fn db_plugin_contract_tests<P: DbPlugin>(plugin: &P) {
         statement: DbStatement::new("UPDATE contract_items SET active = active + 1 WHERE id = 'item-1'"),
         expected_affected_rows: 1,
     }]).await.expect("matched CAS commits");
+    db_transactions::stop_on_no_rows_contract(plugin).await;
 }
 
 /// Contract suite every `SecretAccessPort` implementation must satisfy.

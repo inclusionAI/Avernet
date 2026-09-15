@@ -415,7 +415,7 @@ sync_skills() {
   local runtime_root="$CLAWEVOLVE_SKILLS_ROOT"
   local installed_release_file="${runtime_root}/.clawevolve-release-version"
   local format_version release_version archive_file archive_sha256 installed_release release_marker_tmp release_healthy
-  local record name packaged_version packaged_digest installed_version source_dir installed_path incoming backup
+  local record name manifest_skill_version packaged_digest source_dir installed_path incoming backup
   [[ -f "$release_file" ]] || { printf 'release manifest not found: %s\n' "$release_file" >&2; return 1; }
   format_version="$(awk -F '\t' '$1 == "format_version" { print $2; exit }' "$release_file")"
   release_version="$(awk -F '\t' '$1 == "release_version" { print $2; exit }' "$release_file")"
@@ -437,7 +437,7 @@ sync_skills() {
   fi
   if [[ "$installed_release" == "$release_version" ]]; then
     release_healthy=1
-    while IFS=$'\t' read -r record name packaged_version packaged_digest; do
+    while IFS=$'\t' read -r record name manifest_skill_version packaged_digest; do
       [[ "$record" == "skill" ]] || continue
       if [[ ! -f "$runtime_root/$name/SKILL.md" ]]; then
         release_healthy=0
@@ -468,30 +468,16 @@ sync_skills() {
   SKILL_EXTRACT_DIR="$(mktemp -d /tmp/clawevolve-skills.XXXXXX)"
   tar -C "$SKILL_EXTRACT_DIR" -xf "$archive"
   chmod -R u+rwX "$SKILL_EXTRACT_DIR/skills"
-  while IFS=$'\t' read -r record name packaged_version packaged_digest; do
+  while IFS=$'\t' read -r record name manifest_skill_version packaged_digest; do
     [[ "$record" == "skill" ]] || continue
     [[ "$name" =~ ^[A-Za-z0-9._-]+$ \
-      && "$packaged_version" =~ ^[A-Za-z0-9._-]{1,128}$ \
+      && "$manifest_skill_version" =~ ^[A-Za-z0-9._-]{1,128}$ \
       && ( -z "$packaged_digest" || "$packaged_digest" =~ ^[a-f0-9]{64}$ ) ]] || {
       printf 'invalid skill manifest entry\n' >&2; return 1;
     }
     source_dir="$SKILL_EXTRACT_DIR/skills/$name"
     installed_path="$runtime_root/$name"
     [[ -f "$source_dir/SKILL.md" ]] || { printf 'skill missing from package: %s\n' "$name" >&2; return 1; }
-    installed_version=""
-    if [[ -f "$installed_path/.clawevolve-version" ]]; then
-      installed_version="$(tr -d '[:space:]' < "$installed_path/.clawevolve-version")"
-    elif [[ -f "$installed_path/SKILL.md" ]]; then
-      installed_version="$(awk -F: '/^[[:space:]]*version:/ { gsub(/[ "[:space:]]/, "", $2); print $2; exit }' "$installed_path/SKILL.md")"
-    fi
-    if [[ "$installed_version" == "$packaged_version" && -w "$installed_path" ]]; then
-      log_line "skill unchanged: ${name} installed=${installed_version} package=${packaged_version}"
-      continue
-    fi
-    if version_is_newer "$installed_version" "$packaged_version" "$name"; then
-      log_line "skill downgrade skipped: ${name} installed=${installed_version} package=${packaged_version}"
-      continue
-    fi
     incoming="$runtime_root/.${name}.incoming.$$"
     backup="$runtime_root/.${name}.backup.$$"
     # These names include this process PID and normally cannot exist. A stale
@@ -511,7 +497,7 @@ sync_skills() {
     if ! rm -rf "$backup" 2>> "$LOG_FILE"; then
       log_line "skill backup cleanup deferred (file still busy): ${backup}"
     fi
-    log_line "skill updated: ${name} ${installed_version:-none} -> ${packaged_version}"
+    log_line "skill updated: ${name} release=${release_version}"
   done < "$release_file"
   release_marker_tmp="${installed_release_file}.tmp.$$"
   printf '%s\n' "$release_version" > "$release_marker_tmp"

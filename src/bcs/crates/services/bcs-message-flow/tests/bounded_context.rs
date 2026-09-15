@@ -156,3 +156,47 @@ async fn cancel_before_send_rebinds_all_history_and_stale_preparation_cannot_sen
     let fresh = read_bounded_queued_payload(repo.as_ref(), &next, &rebound.rows, rebound.total, 24, 131072, |_,s| Ok(s.into())).await.unwrap();
     assert_eq!(fresh.selection.selected.len(), 24);
 }
+
+#[tokio::test]
+async fn required_system_context_survives_count_limit_recovery_and_is_consumed_once() {
+    let repo = Arc::new(MemoryMessageRepo::new());
+    let service = ManagedMessageDelivery::new(repo.clone());
+    let mut initialization = admission("initial", "REQUIRED_INIT".into(), DeliveryType::Inject);
+    initialization.flow_kind = DeliveryFlowKind::System;
+    initialization.targets[0].semantic_projection_json["required_context"] = true.into();
+    let initial = service.admit(initialization).await.unwrap().deliveries.remove(0);
+    for i in 0..30 { service.admit(admission(&format!("history-{i}"), format!("HISTORY-{i:02}").into(), DeliveryType::Inject)).await.unwrap(); }
+    let carrier = service.admit(admission("carrier", "CURRENT".into(), DeliveryType::Send)).await.unwrap().deliveries.remove(0);
+    let page = service.bounded_contexts(&carrier.delivery_id, 25).await.unwrap();
+    assert_eq!(page.rows.len(), 26);
+    let payload = read_bounded_queued_payload(repo.as_ref(), &carrier, &page.rows, page.total, 24, 131072, |_,s| Ok(s.into())).await.unwrap();
+    assert_eq!(payload.selection.selected.len(), 25);
+    assert!(payload.text.contains("REQUIRED_INIT"));
+    assert!(!payload.text.contains("HISTORY-00"));
+    assert!(payload.text.find("REQUIRED_INIT").unwrap() < payload.text.find("HISTORY-29").unwrap());
+    let mut command = transition(&carrier, Event::StartSend);
+    command.transport_context_json = Some(serde_json::json!({"context_selection":payload.selection}));
+    let sent = service.transition(command).await.unwrap();
+    let recovered = service.transition(transition(&sent, Event::Recover)).await.unwrap();
+    assert_eq!(recovered.state.status, Status::Unknown);
+    service.transition(transition(&recovered, Event::Completed)).await.unwrap();
+    let rows = service.snapshot(None).await.unwrap();
+    assert_eq!(rows.iter().find(|r| r.delivery_id == initial.delivery_id).unwrap().state.status, Status::Consumed);
+    assert_eq!(rows.iter().filter(|r| r.state.status == Status::DiscardedContext).count(), 6);
+}
+
+#[tokio::test]
+async fn oversized_required_context_fails_without_silent_truncation_or_consumption() {
+    let repo = Arc::new(MemoryMessageRepo::new());
+    let service = ManagedMessageDelivery::new(repo.clone());
+    let mut initialization = admission("initial", "中文".repeat(1000).into(), DeliveryType::Inject);
+    initialization.flow_kind = DeliveryFlowKind::System;
+    initialization.targets[0].semantic_projection_json["required_context"] = true.into();
+    service.admit(initialization).await.unwrap();
+    let carrier = service.admit(admission("carrier", "CURRENT".into(), DeliveryType::Send)).await.unwrap().deliveries.remove(0);
+    let page = service.bounded_contexts(&carrier.delivery_id, 25).await.unwrap();
+    let result = read_bounded_queued_payload(repo.as_ref(), &carrier, &page.rows, page.total, 24, 512, |_,s| Ok(s.into())).await;
+    assert!(result.err().unwrap().contains("required initialization context exceeds byte budget"));
+    service.transition(transition(&carrier, Event::PreparationFailed)).await.unwrap();
+    assert!(service.snapshot(None).await.unwrap().iter().any(|r| r.state.status == Status::PendingContext));
+}

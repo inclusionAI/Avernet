@@ -22,7 +22,7 @@ from lib_tasks import Task
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_JUDGE_MODEL = "antchat/GLM-5.1"
+DEFAULT_JUDGE_MODEL = ""
 DEFAULT_JUDGE_AGENT_PREFIX = "bench-judge"
 DEFAULT_JUDGE_TIMEOUT_SECONDS = 180
 DEFAULT_JUDGE_MAX_RETRIES = 5

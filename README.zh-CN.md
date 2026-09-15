@@ -200,7 +200,6 @@ ocb/
 
 ## 文档
 
-- [AgentEvolve](docs/agent-evolve.zh-CN.md)
 - [快速开始](docs/quick-start.zh-CN.md)
 - [依赖说明](docs/dependencies.zh-CN.md)
 - [Docker 指南](docs/docker.zh-CN.md)
@@ -209,6 +208,7 @@ ocb/
 - [从源码接入本地 OpenClaw](docs/openclaw-bcn-local.zh-CN.md)
 - [架构文档](docs/arch/)
 - [BCS 开发指南](src/bcs/README.md)
+- [AgentEvolve](docs/agent-evolve.zh-CN.md)
 
 ## 安全
 

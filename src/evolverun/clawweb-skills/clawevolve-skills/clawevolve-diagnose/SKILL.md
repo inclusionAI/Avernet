@@ -78,7 +78,7 @@ cd clawevolve-diagnose && bash scripts/run.sh '/clawevolve-diagnose --api-key **
 | `--judge-backend` | 否 | 有 Key 时 `api`，否则 `subagent` | `subagent` 使用当前 Bot OpenClaw Agent；`api` 使用 OpenAI-compatible API。 |
 | `--api-key` | API Judge 必填 | `OPENAI_API_KEY` | OpenAI-compatible LLM API key；命令行主要用于本地调试，BaaS 使用环境变量注入；subagent 不消费 Key。 |
 | `--llm-base-url` | 否 | 代码默认 `DEFAULT_BASE_URL` | OpenAI-compatible base URL；未传时只用代码默认。LLM 请求最终走 `<base-url>/chat/completions`。 |
-| `--model` | 否 | 代码默认 `DEFAULT_MODEL` | LLM model name。 |
+| `--model` | API Judge 必填；Subagent 可选 | Subagent 使用 OpenClaw 当前默认模型；API Judge 无默认值 | LLM model name；ClawWeb 发起的 API Judge 任务会显式传递页面选择值。 |
 | `--intent` | 否 | 空 | 本次诊断的自然语言意图；可描述问题类型、case 数量、时间范围和筛选偏好。自然语言只能通过该参数传入。 |
 | `--max-sessions` | 否 | 10 | 快速过滤后最多保留并送 Judge 分析的最新 session 数；个人/服务 Bot 共用。 |
 | `--debug-session-path` | 否 | 空 | 调试入口：只从指定 session JSONL 文件读取并分析该 session。 |

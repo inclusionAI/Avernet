@@ -118,6 +118,8 @@ pub enum InitialSessionRunActivityKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InitialSessionRunState {
+    /// Canonical run allocated and accepted by the delivery queue; not started.
+    Queued,
     Running,
     Failed,
 }

@@ -105,14 +105,14 @@ it("uses the existing Pack handler with fixed mode and local callback", () => {
   expect(result.args.slice(3)).toEqual(["--mode", "pack", "--task-id", "EV-test", "--step-id", "STEP-test", "--clawweb-url", "http://127.0.0.1:5173"]);
 });
 
-it("pins restore namespace and verifies frozen source options", () => {
+it("uses the frozen restore reference namespace and verifies source options", () => {
   const { config, input, root } = fixture();
   mkdirSync(join(root, "clawevolve-workflow/scripts/handlers"), { recursive: true });
   writeFileSync(join(root, "clawevolve-workflow/scripts/handlers/clawevolve_pack_run.py"), "pass\n");
   for (const kind of ["snapshot", "baseline", "round"]) {
     const result = localInvocation(config, { ...input, stepType: "restore", command: `/clawevolve-pack --mode restore --source-task-id EV-source --source-kind ${kind} --source-round 1` });
     expect(result.args).toContain("openversion");
-    expect(result.args).toContain("clawevolve-artifacts");
+    expect(result.args).not.toContain("--artifact-bucket");
     expect(result.args).toContain(kind);
   }
   expect(() => localInvocation(config, { ...input, stepType: "restore", command: "/clawevolve-pack --source-task-id ../x --source-kind snapshot" })).toThrow();

@@ -195,6 +195,7 @@ export interface WorkflowHealthRow {
   sceneName: string;
   released: boolean;
   runCount: number;
+  failedCount: number;
   completionSuccessRate: number | null;
   selfHealTriggeredRuns: number;
   selfHealSuccessRate: number | null;
@@ -1027,6 +1028,7 @@ export class DashboardRepository {
         workflow_title: string | null;
         run_count: number;
         succeeded_count: number;
+        failed_count: number;
         terminal_count: number;
         avg_ms: number | null;
       }>(
@@ -1035,6 +1037,7 @@ export class DashboardRepository {
           MAX(workflow_title) AS workflow_title,
           COUNT(*) AS run_count,
           SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded_count,
+          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_count,
           SUM(CASE WHEN status IN (${terminalSql}) THEN 1 ELSE 0 END) AS terminal_count,
           AVG(CASE WHEN status = 'succeeded' THEN ${normalizedDurationSql} END) AS avg_ms
          FROM flow_runs
@@ -1082,6 +1085,7 @@ export class DashboardRepository {
           sceneName: "",
           released: releasedSet ? releasedSet.has(r.workflow_id) : false,
           runCount: asNumber(r.run_count),
+          failedCount: asNumber(r.failed_count),
           completionSuccessRate: completion,
           selfHealTriggeredRuns: 0,
           selfHealSuccessRate: null,

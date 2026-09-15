@@ -47,3 +47,11 @@ HTTP execution, or business resource transitions.
 
 - `cargo test -p bcs-event-store`
 - The ignored MySQL conformance test runs when `BCS_TEST_MYSQL_URL` is set.
+
+## Idle claims
+
+The initial fanout/delivery claim UPDATE requests DB transaction early success
+when it affects zero rows. Empty claims execute one SQL statement; nonempty
+claims retain their full atomic transaction, fencing and recovery semantics.
+`src/db.rs` implements the repository contract, with private SQL operations,
+validation and row mapping split under `src/db/`. No schema changes are required.

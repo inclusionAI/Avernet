@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -105,6 +106,11 @@ def run_auto_discovery(
         session_id=result.session_id,
         response_chars=len(result.response_text or ""),
         elapsed_seconds=f"{result.elapsed_seconds:.2f}",
+        failure_diagnostics=(
+            _agent_failure_summary(result)
+            if result.status not in {"success", "succeeded", "completed", "done", "ok"}
+            else {}
+        ),
     )
     try:
         artifact = _materialize_discovery_candidate(
@@ -116,9 +122,18 @@ def run_auto_discovery(
         )
     except StructuredArtifactError as first_error:
         if first_error.repair_source_path is None:
+            failure_summary = _agent_failure_summary(result)
+            logger.error(
+                "automatic discovery agent produced no candidate or response",
+                task_id=task_id,
+                agent_id=result.agent_id,
+                session_id=result.session_id,
+                failure_diagnostics=failure_summary,
+            )
             raise ValueError(
                 "automatic discovery agent produced no repairable structured artifact; "
-                f"{first_error}"
+                f"{first_error}; agent_diagnostics="
+                f"{json.dumps(failure_summary, ensure_ascii=False, default=str)}"
             ) from first_error
         logger.warning(
             "automatic discovery artifact rejected; requesting one correction",
@@ -302,6 +317,66 @@ def _agent_failure_detail(result: Any) -> str:
         except Exception:
             parts.append("diagnostics=" + str(diagnostics)[-2000:])
     return "\n".join(parts)
+
+
+def _agent_failure_summary(result: Any) -> dict[str, Any]:
+    diagnostics = getattr(result, "diagnostics", None)
+    diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+    visibility_attempts = diagnostics.get("gatewayVisibilityAttempts")
+    visibility_attempts = (
+        visibility_attempts if isinstance(visibility_attempts, list) else []
+    )
+    last_visibility = (
+        visibility_attempts[-1]
+        if visibility_attempts and isinstance(visibility_attempts[-1], dict)
+        else {}
+    )
+    return {
+        "status": str(getattr(result, "status", "") or ""),
+        "transport": str(
+            diagnostics.get("selectedTransport")
+            or getattr(result, "transport", "")
+            or ""
+        ),
+        "failureCode": str(diagnostics.get("failureCode") or ""),
+        "agentExecution": str(diagnostics.get("agentExecution") or ""),
+        "localExitCode": diagnostics.get("localAgentExitCode"),
+        "localTimedOut": bool(diagnostics.get("localAgentTimedOut")),
+        "localFallbackReason": _redact_diagnostic_text(
+            diagnostics.get("localFallbackReason") or ""
+        ),
+        "gatewayAgentVisible": diagnostics.get("gatewayAgentVisible"),
+        "gatewayVisibilityAttemptCount": len(visibility_attempts),
+        "gatewayVisibilityLastAttempt": {
+            "exitCode": last_visibility.get("exitCode"),
+            "timedOut": bool(last_visibility.get("timedOut")),
+            "parseError": _redact_diagnostic_text(
+                last_visibility.get("parseError") or "", limit=400
+            ),
+            "stderr": _redact_diagnostic_text(
+                last_visibility.get("stderr") or "", limit=800
+            ),
+        },
+        "gatewayExitCode": diagnostics.get("gatewayAgentExitCode"),
+        "gatewayTimedOut": bool(diagnostics.get("gatewayAgentTimedOut")),
+        "stderr": _redact_diagnostic_text(
+            getattr(result, "stderr_text", "")
+            or getattr(result, "stderr", "")
+            or ""
+        ),
+    }
+
+
+def _redact_diagnostic_text(value: Any, *, limit: int = 1200) -> str:
+    text = str(value or "")
+    text = re.sub(r"(?i)bearer\s+[A-Za-z0-9._~+/=-]+", "Bearer <redacted>", text)
+    text = re.sub(
+        r"(?i)((?:api[_ -]?key|token|authorization|secret|cookie)\s*[:=]\s*)"
+        r"[^\s,;]+",
+        r"\1<redacted>",
+        text,
+    )
+    return text[-limit:]
 
 
 def resolve_workspace_root(
