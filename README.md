@@ -200,7 +200,6 @@ ocb/
 
 ## Documentation
 
-- [AgentEvolve](docs/agent-evolve.md)
 - [Quick Start](docs/quick-start.md)
 - [Dependencies](docs/dependencies.md)
 - [Docker Guide](docs/docker.md)
@@ -209,6 +208,7 @@ ocb/
 - [Local OpenClaw from source](docs/openclaw-bcn-local.md)
 - [Architecture docs](docs/arch/)
 - [BCS Development Guide](src/bcs/README.md)
+- [AgentEvolve](docs/agent-evolve.md)
 
 ## Security
 
