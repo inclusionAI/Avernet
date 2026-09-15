@@ -171,3 +171,20 @@ def test_contract_excludes_unapproved_runtime_and_routing_surfaces() -> None:
     assert not any(path.startswith("/openapi/v1/bcn/") for _, path in actual)
     assert not any(path.startswith("/openapi/v1/actors/") for _, path in actual)
     assert not any(path.startswith("/openapi/v1/internal/") for _, path in actual)
+
+
+def test_friend_connections_filter_and_pagination_contract() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"]["/openapi/v1/collaboration/friend-connections"]["get"]
+    parameters = {item["name"]: item for item in operation["parameters"]}
+    assert set(parameters) == {"actor_type", "actor_id", "target_type", "page", "page_size"}
+    assert set(parameters["target_type"]["schema"]["enum"]) == {"human", "bot"}
+    assert parameters["target_type"]["required"] is False
+    assert parameters["page"]["schema"]["default"] == 1
+    assert parameters["page"]["schema"]["minimum"] == 1
+    assert parameters["page_size"]["schema"]["default"] == 20
+    assert parameters["page_size"]["schema"]["minimum"] == 1
+    assert parameters["page_size"]["schema"]["maximum"] == 100
+    envelope = operation["responses"]["200"]["content"]["application/json"]["schema"]
+    page = envelope["properties"]["data"]
+    assert set(page["required"]) == {"items", "total", "page", "page_size"}

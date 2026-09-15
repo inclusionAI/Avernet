@@ -216,6 +216,14 @@ impl ConnectService for RecordingConnectService {
         unreachable!("not used")
     }
 
+    async fn list_friends_paginated(
+        &self,
+        _: &str,
+        _: bcs_service_api::application::connect::FriendListQuery,
+    ) -> ServiceResult<bcs_service_api::application::connect::FriendEntriesPage> {
+        unreachable!("legacy caller must retain the unpaginated query")
+    }
+
     async fn list_friends(
         &self,
         _: &str,

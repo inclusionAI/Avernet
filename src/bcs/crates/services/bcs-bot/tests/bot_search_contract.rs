@@ -126,6 +126,15 @@ impl EdgeGrantRepoPort for RecordingEdgeGrantRepo {
         false
     }
 
+    async fn list_friends_paginated(
+        &self,
+        _: &str,
+        _: &str,
+        _: bcs_service_api::port::repo::edge_grant::FriendListQuery,
+    ) -> ServiceResult<bcs_service_api::port::repo::edge_grant::FriendIdsPage> {
+        unreachable!("legacy search must retain the unpaginated query")
+    }
+
     async fn list_friends(&self, actor: &str, env: &str) -> Vec<String> {
         self.calls
             .lock()

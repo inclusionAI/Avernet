@@ -36,7 +36,7 @@ use bcs_domain::edge_permission::{
 };
 use bcs_service_api::application::admission::AdmissionService;
 use bcs_service_api::application::connect::{
-    ConnectResult, ConnectService, ConnectStatus, RequestDirection, RequestsPage,
+    ConnectResult, ConnectService, ConnectStatus, FriendEntriesPage, FriendListQuery, RequestDirection, RequestsPage,
 };
 use bcs_service_api::port::{
     FriendConnectNotificationCommand, FriendConnectNotificationKind,
@@ -674,6 +674,22 @@ impl ConnectService for DbConnectService {
             })
             .collect();
         Ok(entries)
+    }
+
+    async fn list_friends_paginated(
+        &self,
+        actor: &str,
+        query: FriendListQuery,
+    ) -> ServiceResult<FriendEntriesPage> {
+        let page = self.edge_grants.list_friends_paginated(actor, &self.env, query).await?;
+        let items = page.items.into_iter().map(|id| FriendListEntry {
+            kind: actor_kind_of(&id),
+            actor_id: id,
+            name: None,
+            summary: None,
+            is_online: false,
+        }).collect();
+        Ok(FriendEntriesPage { items, total: page.total })
     }
 
     async fn list_requests(
@@ -2945,6 +2961,46 @@ mod tests {
         assert_eq!(r.status, RequestStatus::Approved);
         assert_eq!(r.edge_id, Some(edge_ids[0]));
         assert!(eg.has_friend_edge("human_1", "x:appr", "dev").await);
+        assert!(eg.list_active_grants("x:appr", "human_1", "dev").await.is_empty());
+        let bot_friends = svc.list_friends("x:appr").await.expect("bot friends");
+        assert_eq!(bot_friends.len(), 1);
+        assert_eq!(bot_friends[0].actor_id, "human_1");
+        assert_eq!(bot_friends[0].kind, ActorKind::Human);
+        let human_friends = svc.list_friends("human_1").await.expect("human friends");
+        assert_eq!(human_friends.len(), 1);
+        assert_eq!(human_friends[0].actor_id, "x:appr");
+        svc.revoke_friend("x:appr", "human_1").await.expect("bot removes friend");
+        assert!(svc.list_friends("x:appr").await.expect("bot friends").is_empty());
+        assert!(svc.list_friends("human_1").await.expect("human friends").is_empty());
+    }
+
+    #[tokio::test]
+    async fn friend_page_service_preserves_single_edge_and_propagates_store_errors() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:paged", "protected", "protected", "OPEN", "online", Some("85020")).await;
+        let svc = service(&eg, &pp, &rq, &bc);
+        for human in ["human_2", "human_1"] {
+            svc.create_connect(human, "x:paged", None, None).await.unwrap();
+        }
+        let query = FriendListQuery { target_type: Some(ActorKind::Human), offset: 1, limit: 1 };
+        let page = svc.list_friends_paginated("x:paged", query).await.unwrap();
+        assert_eq!(page.total, 2);
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].actor_id, "human_2");
+        assert_eq!(page.items[0].kind, ActorKind::Human);
+        assert!(eg.list_active_grants("x:paged", "human_2", "dev").await.is_empty());
+        let bots = svc.list_friends_paginated("x:paged", FriendListQuery {
+            target_type: Some(ActorKind::Bot), offset: 0, limit: 20,
+        }).await.unwrap();
+        assert_eq!(bots.total, 0);
+        assert!(bots.items.is_empty());
+        svc.revoke_friend("x:paged", "human_1").await.unwrap();
+        let empty = svc.list_friends_paginated("x:paged", query).await.unwrap();
+        assert_eq!(empty.total, 1);
+        assert!(empty.items.is_empty());
+        db.execute(DbStatement::new("DROP TABLE edge_grants")).await.unwrap();
+        assert!(matches!(svc.list_friends_paginated("x:paged", query).await,
+            Err(ServiceError::InternalError(_))));
     }
 
     #[tokio::test]

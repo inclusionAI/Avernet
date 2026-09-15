@@ -97,7 +97,10 @@ pub struct FriendConnectionView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FriendConnectionPage {
     pub items: Vec<FriendConnectionView>,
+    /// Number of friends matching target_type before pagination.
     pub total: u32,
+    pub page: u32,
+    pub page_size: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -144,6 +147,11 @@ pub struct CancelFriendConnectionRequest {
 pub struct ListFriendConnections {
     pub caller: AuthenticatedCaller,
     pub actor: FriendConnectionActor,
+    /// Omit to include both Human and Bot peers. Does not change edge permissions.
+    pub target_type: Option<FriendConnectionActorType>,
+    /// One-based page; page_size must be between 1 and 100.
+    pub page: u32,
+    pub page_size: u32,
 }
 
 #[derive(Debug, Clone)]

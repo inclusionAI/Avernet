@@ -13,6 +13,8 @@ use bcs_service_api::port::repo::{
     EdgeGrantRepoPort, PermissionProfileRepoPort, PermissionRequestRepoPort,
 };
 use serde_json::json;
+use bcs_service_api::application::connect::{FriendEntriesPage, FriendListQuery};
+use bcs_service_api::port::repo::edge_grant::FriendIdsPage;
 
 pub struct NoopEdgeGrantRepo;
 #[async_trait]
@@ -21,6 +23,9 @@ impl EdgeGrantRepoPort for NoopEdgeGrantRepo {
     async fn is_authorized(&self, _: &str, _: &str, _: &str) -> bool { false }
     async fn has_friend_edge(&self, _: &str, _: &str, _: &str) -> bool { false }
     async fn list_friends(&self, _: &str, _: &str) -> Vec<String> { vec![] }
+    async fn list_friends_paginated(&self, _: &str, _: &str, _: FriendListQuery) -> ServiceResult<FriendIdsPage> {
+        Ok(FriendIdsPage { items: vec![], total: 0 })
+    }
     async fn insert_grant(&self, _: EdgeGrant) -> ServiceResult<u64> { Ok(1) }
     async fn revoke_grant(&self, _: u64, _: &str) -> ServiceResult<()> { Ok(()) }
     async fn get_default_profile_id(&self, _: &str, _: &str) -> Option<u64> { None }
@@ -59,6 +64,9 @@ impl ConnectService for NoopConnectService {
     }
     async fn revoke_friend(&self, _: &str, _: &str) -> ServiceResult<Vec<u64>> { Ok(vec![]) }
     async fn list_friends(&self, _: &str) -> ServiceResult<Vec<FriendListEntry>> { Ok(vec![]) }
+    async fn list_friends_paginated(&self, _: &str, _: FriendListQuery) -> ServiceResult<FriendEntriesPage> {
+        Ok(FriendEntriesPage { items: vec![], total: 0 })
+    }
     async fn list_requests(
         &self,
         _actor: &str,
