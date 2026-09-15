@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1260 840" width="1260" height="840" role="img" aria-label="engine capability matrix">
+  <style>
+    .t{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif}
+    .title{font-size:25px;font-weight:600;fill:#1F1E1C}
+    .sub{font-size:13.5px;fill:#75736E}
+    .th{font-size:12px;font-weight:600;fill:#8A8781;letter-spacing:.05em}
+    .dom{font-size:13px;fill:#1F1E1C}
+    .cell{font-size:12.5px;fill:#33322E}
+    .note{font-size:11px;fill:#75736E}
+    .mark{font-size:14px}
+    .lg{font-size:12px;fill:#5E5C57}
+    .ft{font-size:12.5px;fill:#33322E}
+  </style>
+  <rect width="1260" height="840" fill="#FAF9F7"/>
+  <g class="t">
+    <text x="44" y="50" class="title">能力矩阵：不是完整度排名，是各自的形状</text>
+    <text x="44" y="78" class="sub">每个引擎在组装根声明自己支持什么。上层据此决定是否派发、是否降级提示、还是直接隐藏功能 —— 而不是调用后再捕获异常。</text>
+    <text x="44" y="146" class="th">能力域</text>
+    <text x="344" y="146" class="th">CLAUDE_CODE （cc）</text>
+    <text x="594" y="146" class="th">OPENCLAW （oc）</text>
+    <text x="844" y="146" class="th">说明</text>
+    <line x1="44" y1="158" x2="1216" y2="158" stroke="#B9B5AD" stroke-width="1.2"/>
+    <text x="58" y="192" class="dom">Session 会话</text>
+    <text x="346" y="192" class="mark" fill="#3F7350">●</text>
+    <text x="368" y="192" class="cell">4 项 + 1 受限</text>
+    <text x="596" y="192" class="mark" fill="#3F7350">●</text>
+    <text x="618" y="192" class="cell">5 项</text>
+    <text x="844" y="192" class="note">受限项：cc 无显式建会话，会话由首条消息落地</text>
+    <line x1="44" y1="204" x2="1216" y2="204" stroke="#E2DFD9" stroke-width="1"/>
+    <rect x="44" y="204" width="1172" height="36" fill="#F2F0EB"/>
+    <text x="58" y="228" class="dom">Chat 对话</text>
+    <text x="346" y="228" class="mark" fill="#3F7350">●</text>
+    <text x="368" y="228" class="cell">6 项</text>
+    <text x="596" y="228" class="mark" fill="#3F7350">●</text>
+    <text x="618" y="228" class="cell">5 项</text>
+    <text x="844" y="228" class="note">cc 独占交互问答与模式切换；oc 独占 complete</text>
+    <line x1="44" y1="240" x2="1216" y2="240" stroke="#E2DFD9" stroke-width="1"/>
+    <text x="58" y="264" class="dom">MCP</text>
+    <text x="346" y="264" class="mark" fill="#3F7350">●</text>
+    <text x="368" y="264" class="cell">6 项 + 1 受限</text>
+    <text x="596" y="264" class="mark" fill="#3F7350">●</text>
+    <text x="618" y="264" class="cell">11 项 + 2 受限</text>
+    <text x="844" y="264" class="note">oc 覆盖 resources / prompts；cc 仅 SDK 桥可直调工具</text>
+    <line x1="44" y1="276" x2="1216" y2="276" stroke="#E2DFD9" stroke-width="1"/>
+    <rect x="44" y="276" width="1172" height="36" fill="#F2F0EB"/>
+    <text x="58" y="300" class="dom">Skills 技能</text>
+    <text x="346" y="300" class="mark" fill="#3F7350">●</text>
+    <text x="368" y="300" class="cell">8 项 + 1 受限</text>
+    <text x="596" y="300" class="mark" fill="#3F7350">●</text>
+    <text x="618" y="300" class="cell">4 项</text>
+    <text x="844" y="300" class="note">cc 支持单技能增删改；oc 只暴露批量软链操作</text>
+    <line x1="44" y1="312" x2="1216" y2="312" stroke="#E2DFD9" stroke-width="1"/>
+    <text x="58" y="336" class="dom">CLI Tools</text>
+    <text x="346" y="336" class="mark" fill="#3F7350">●</text>
+    <text x="368" y="336" class="cell">5 项</text>
+    <text x="596" y="336" class="mark" fill="#3F7350">●</text>
+    <text x="618" y="336" class="cell">5 项</text>
+    <text x="844" y="336" class="note">完全对齐</text>
+    <line x1="44" y1="348" x2="1216" y2="348" stroke="#E2DFD9" stroke-width="1"/>
+    <rect x="44" y="348" width="1172" height="36" fill="#F2F0EB"/>
+    <text x="58" y="372" class="dom">Cron 定时</text>
+    <text x="346" y="372" class="mark" fill="#3F7350">●</text>
+    <text x="368" y="372" class="cell">6 项</text>
+    <text x="596" y="372" class="mark" fill="#3F7350">●</text>
+    <text x="618" y="372" class="cell">6 项</text>
+    <text x="844" y="372" class="note">完全对齐</text>
+    <line x1="44" y1="384" x2="1216" y2="384" stroke="#E2DFD9" stroke-width="1"/>
+    <text x="58" y="408" class="dom">Model 模型</text>
+    <text x="346" y="408" class="mark" fill="#3F7350">●</text>
+    <text x="368" y="408" class="cell">2 项</text>
+    <text x="596" y="408" class="mark" fill="#3F7350">●</text>
+    <text x="618" y="408" class="cell">2 项</text>
+    <text x="844" y="408" class="note">完全对齐</text>
+    <line x1="44" y1="420" x2="1216" y2="420" stroke="#E2DFD9" stroke-width="1"/>
+    <rect x="44" y="420" width="1172" height="36" fill="#F2F0EB"/>
+    <text x="58" y="444" class="dom">File 文件</text>
+    <text x="346" y="444" class="mark" fill="#3F7350">●</text>
+    <text x="368" y="444" class="cell">5 项</text>
+    <text x="596" y="444" class="mark" fill="#3F7350">●</text>
+    <text x="618" y="444" class="cell">5 项</text>
+    <text x="844" y="444" class="note">完全对齐</text>
+    <line x1="44" y1="456" x2="1216" y2="456" stroke="#E2DFD9" stroke-width="1"/>
+    <text x="58" y="480" class="dom">Bash</text>
+    <text x="346" y="480" class="mark" fill="#3F7350">●</text>
+    <text x="368" y="480" class="cell">1 项</text>
+    <text x="596" y="480" class="mark" fill="#3F7350">●</text>
+    <text x="618" y="480" class="cell">1 项</text>
+    <text x="844" y="480" class="note">cc 复用 core 默认实现，无需原生端口</text>
+    <line x1="44" y1="492" x2="1216" y2="492" stroke="#E2DFD9" stroke-width="1"/>
+    <rect x="44" y="492" width="1172" height="36" fill="#F2F0EB"/>
+    <text x="58" y="516" class="dom">Approval 审批</text>
+    <text x="346" y="516" class="mark" fill="#B9B5AD">○</text>
+    <text x="368" y="516" class="cell">未接入</text>
+    <text x="596" y="516" class="mark" fill="#3F7350">●</text>
+    <text x="618" y="516" class="cell">2 项</text>
+    <text x="844" y="516" class="note">cc 的审批在 chat 流内（chat.approval）</text>
+    <line x1="44" y1="528" x2="1216" y2="528" stroke="#E2DFD9" stroke-width="1"/>
+    <text x="58" y="552" class="dom">Node 节点</text>
+    <text x="346" y="552" class="mark" fill="#B9B5AD">○</text>
+    <text x="368" y="552" class="cell">未接入</text>
+    <text x="596" y="552" class="mark" fill="#3F7350">●</text>
+    <text x="618" y="552" class="cell">3 项</text>
+    <line x1="44" y1="564" x2="1216" y2="564" stroke="#E2DFD9" stroke-width="1"/>
+    <rect x="44" y="564" width="1172" height="36" fill="#F2F0EB"/>
+    <text x="58" y="588" class="dom">Channel 渠道</text>
+    <text x="346" y="588" class="mark" fill="#B9B5AD">○</text>
+    <text x="368" y="588" class="cell">未接入</text>
+    <text x="596" y="588" class="mark" fill="#3F7350">●</text>
+    <text x="618" y="588" class="cell">3 项</text>
+    <line x1="44" y1="600" x2="1216" y2="600" stroke="#E2DFD9" stroke-width="1"/>
+    <text x="58" y="624" class="dom">DefaultConfig</text>
+    <text x="346" y="624" class="mark" fill="#B9B5AD">○</text>
+    <text x="368" y="624" class="cell">未接入</text>
+    <text x="596" y="624" class="mark" fill="#3F7350">●</text>
+    <text x="618" y="624" class="cell">1 项</text>
+    <line x1="44" y1="636" x2="1216" y2="636" stroke="#E2DFD9" stroke-width="1"/>
+    <rect x="44" y="636" width="1172" height="36" fill="#F2F0EB"/>
+    <text x="58" y="660" class="dom">WebShell</text>
+    <text x="346" y="660" class="mark" fill="#B9B5AD">○</text>
+    <text x="368" y="660" class="cell">未接入</text>
+    <text x="596" y="660" class="mark" fill="#3F7350">●</text>
+    <text x="618" y="660" class="cell">1 项</text>
+    <line x1="44" y1="672" x2="1216" y2="672" stroke="#E2DFD9" stroke-width="1"/>
+    <text x="44" y="700" class="lg"><tspan fill="#3F7350">●</tspan>  原生支持      <tspan fill="#A1762E">◐</tspan>  受限 / 降级 —— 声明时必须写明原因      <tspan fill="#B9B5AD">○</tspan>  未接入 —— 上层不派发</text>
+    <rect x="44" y="720" width="1172" height="96" rx="6" fill="#F1EFEA" stroke="#D8D5CF"/>
+    <text x="64" y="750" class="ft">两条链路互不包含：claude_code 在技能与对话交互上更强，openclaw 在 MCP、节点、渠道上更全。交集才是 core 可以无条件依赖的部分。</text>
+    <text x="64" y="774" class="ft">声明与实现的一致性在构造期交叉校验 —— 声明了能力却没接端口，启动即失败，而不是等到线上第一次调用。</text>
+    <text x="64" y="798" class="note">能力名是 engine、backend、前端之间的稳定契约：新增是安全的，改名或删除是破坏性变更。</text>
+  </g>
+</svg>
