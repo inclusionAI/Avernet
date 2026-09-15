@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import websockets
@@ -33,9 +33,14 @@ from agentclaw.community.core.task.task_discovery.models import (
     DiscoverySession,
 )
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.frontend_url import FrontendUrlProvider
 from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
 from agentclaw.community.plugin_api.session_initiator import SessionInitiator
+
+if TYPE_CHECKING:  # 仅注解使用（duck-typed ``get()``），运行时 import 会与
+    # frontend_url.py → session_initiator.FrontendUrlHolder 构成循环。
+    from agentclaw.community.core.task.task_discovery.frontend_url import (
+        ConfigFrontendUrlProvider,
+    )
 
 logger = get_logger()
 
@@ -88,7 +93,7 @@ class CronRelaySessionInitiator(SessionInitiator):
         frontend_url: str = "http://localhost:8000",
         backend_url: str = "http://localhost:8888",
         wait_for_reply: bool = False,
-        frontend_url_provider: FrontendUrlProvider | None = None,
+        frontend_url_provider: ConfigFrontendUrlProvider | None = None,
     ):
         self._cron_relay = cron_relay
         self._frontend_url = frontend_url

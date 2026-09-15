@@ -1,21 +1,21 @@
-"""Task-discovery ports — test / singlebox binding (Null impls).
+"""Task-discovery ports — test / singlebox binding.
 
-Binds ``FrontendUrlProvider`` / ``NotifyMessagesProvider`` (the task_discovery
-plugin ports declared in ``plugin_api.frontend_url`` /
-``plugin_api.task_discovery_notify``) to the local Null impls, so contract
-suites can resolve them via ``world.get(...)`` and the fail-closed consumer
-fallback is exercised with a bound (rather than missing) binding.
+- ``ConfigFrontendUrlProvider``: 前端 URL 配置端口（非 plugin），test/singlebox
+  默认空值（下游回落构造默认 localhost），保证契约/DI 消费路径可解析。
+- ``NotifyMessagesProvider``: task_discovery 通知窄端口（plugin 契约），test
+  绑 Null 实现。
 """
 from __future__ import annotations
 
 from injector import Module, provider, singleton
 
+from agentclaw.community.core.task.task_discovery.frontend_url import (
+    ConfigFrontendUrlProvider,
+)
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.frontend_url import FrontendUrlProvider
 from agentclaw.community.plugin_api.task_discovery_notify import (
     NotifyMessagesProvider,
 )
-from agentclaw.community.plugins.local.frontend_url import NullFrontendUrlProvider
 from agentclaw.community.plugins.local.task_discovery_notify import (
     NullNotifyMessagesProvider,
 )
@@ -25,13 +25,13 @@ logger = get_logger()
 
 
 class TestFrontendUrlProviderModule(Module):
-    """test / singlebox: Null frontend URL provider (empty string)."""
+    """test / singlebox: empty static frontend URL provider."""
 
     @singleton
     @provider
-    def frontend_url_provider(self) -> FrontendUrlProvider:
-        logger.info("FrontendUrlProvider: NullFrontendUrlProvider (test)")
-        return NullFrontendUrlProvider()
+    def frontend_url_provider(self) -> ConfigFrontendUrlProvider:
+        logger.info("ConfigFrontendUrlProvider: empty static (test)")
+        return ConfigFrontendUrlProvider()
 
 
 class TestNotifyMessagesProviderModule(Module):

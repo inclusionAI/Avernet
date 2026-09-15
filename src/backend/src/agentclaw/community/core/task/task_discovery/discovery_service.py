@@ -40,8 +40,8 @@ from agentclaw.community.core.task.task_discovery.models import (
     DiscoveredTask,
     DiscoverySession,
 )
-from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
-    FrontendUrlProvider,
+from agentclaw.community.core.task.task_discovery.frontend_url import (
+    ConfigFrontendUrlProvider,
 )
 from agentclaw.community.core.task.task_discovery.notify_messages_provider import (
     NotifyMessagesProvider,
@@ -102,7 +102,7 @@ class DiscoveryService:
         bot_service: BotServiceProtocol | None = None,
         discovery_lock_repo: TaskDiscoveryLockRepositoryProtocol | None = None,
         work_order_service: WorkOrderServiceProtocol | None = None,
-        frontend_url_provider: FrontendUrlProvider | None = None,
+        frontend_url_provider: ConfigFrontendUrlProvider | None = None,
     ):
         self._reader = reader
         self._session_initiator = session_initiator

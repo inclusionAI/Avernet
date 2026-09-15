@@ -38,9 +38,8 @@ from agentclaw.community.core.repository.protocols.task import (
 from agentclaw.community.core.task.task_discovery.discovery_service import (
     DiscoveryService,
 )
-from agentclaw.community.core.task.task_discovery.frontend_url_provider import (
-    FrontendUrlProvider,
-    NullFrontendUrlProvider,
+from agentclaw.community.core.task.task_discovery.frontend_url import (
+    ConfigFrontendUrlProvider,
 )
 from agentclaw.community.core.task.task_discovery.notify_messages_provider import (
     NotifyMessagesProvider,
@@ -142,9 +141,11 @@ class TaskDiscoveryModule(Module):
         """构建 DiscoveryService（注入 reader + initiator + notify + bot_service + lock + work_order + frontend_url_provider）。"""
         logger.debug("[task_discovery] → TaskDiscoveryModule._provide_discovery_service()")
         try:
-            fe_provider: FrontendUrlProvider = injector.get(FrontendUrlProvider)
-        except Exception:  # noqa: BLE101 未绑定 → Null(构造参数兜底)
-            fe_provider = NullFrontendUrlProvider()
+            fe_provider: ConfigFrontendUrlProvider = injector.get(
+                ConfigFrontendUrlProvider
+            )
+        except Exception:  # noqa: BLE101 未绑定 → 默认空值(构造参数兜底)
+            fe_provider = ConfigFrontendUrlProvider()
         return DiscoveryService(
             reader=reader,
             session_initiator=session_initiator,
@@ -172,14 +173,17 @@ class TaskDiscoveryModule(Module):
         - 若 corp 未装/OpenApiBotPort 缺失, corp overlay 自身 fail-closed 回落
           (见 corp ``corp_task_integration``), 不在此 base 内判断。
 
-        ``FrontendUrlProvider`` 由 DI 注入 (corp 列 ``CorpFrontendUrlProvider``,
-        community/singlebox 列未绑定 → fallback ``NullFrontendUrlProvider``)。
+        ``ConfigFrontendUrlProvider`` 由 DI 注入 (corp 列经钉钉块 env-aware 固化,
+        community 列经 user_config.task_discovery 中性块, 未配置→空值)。「取 URL」
+        是数据差异而非行为差异, 故不再走 plugin 契约/分列实现。
         """
         logger.debug("[task_discovery] → TaskDiscoveryModule._provide_session_initiator()")
         try:
-            fe_provider: FrontendUrlProvider = injector.get(FrontendUrlProvider)
-        except Exception:  # noqa: BLE101 未绑定 → Null(构造参数兜底)
-            fe_provider = NullFrontendUrlProvider()
+            fe_provider: ConfigFrontendUrlProvider = injector.get(
+                ConfigFrontendUrlProvider
+            )
+        except Exception:  # noqa: BLE101 未绑定 → 默认空值(构造参数兜底)
+            fe_provider = ConfigFrontendUrlProvider()
 
         return CronRelaySessionInitiator(
             cron_relay=cron_relay,
