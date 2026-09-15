@@ -58,63 +58,11 @@ from agentclaw.community.core.skill_center.skill_set_batch import (
 from agentclaw.community.core.workspace.skill_layout import (
     runtime_layout_engine_for_bot,
 )
-from agentclaw.community.plugin_api.passport import (
-    PassportPlugin,
-    extract_cli_items,
-)
+from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.core.skill_center.skill_set_management_service_protocol import SkillSetManagementServiceProtocol
-
-
-def _passport_mcp_display_metadata(
-    passport: Mapping[str, Any] | None,
-) -> dict[str, dict[str, str]]:
-    """Index the usable display metadata in one AgentPassport snapshot."""
-    if not isinstance(passport, Mapping):
-        return {}
-
-    metadata: dict[str, dict[str, str]] = {}
-    for item in passport.get("mcps") or []:
-        if not isinstance(item, Mapping):
-            continue
-        server_code = item.get("mcp_code")
-        if not isinstance(server_code, str) or not server_code:
-            continue
-        display = {
-            key: value
-            for key, value in (
-                ("name", item.get("mcp_name")),
-                ("description", item.get("mcp_desc")),
-            )
-            if isinstance(value, str) and value
-        }
-        if display:
-            metadata[server_code] = display
-    return metadata
-
-
-def _enrich_default_mcp_display(
-    mcps: Sequence[Mapping[str, Any]],
-    metadata_by_code: Mapping[str, Mapping[str, str]],
-) -> list[dict[str, Any]]:
-    """Overlay current AgentPassport labels on an existing Default MCP projection.
-
-    Membership remains owned by the default policy and exclusions. This is a
-    display-only overlay, so a missing Passport item retains the projection's
-    existing fallback name and description.
-    """
-    enriched: list[dict[str, Any]] = []
-    for mcp in mcps:
-        item = dict(mcp)
-        server_code = item.get("server_code")
-        metadata = (
-            metadata_by_code.get(server_code)
-            if isinstance(server_code, str)
-            else None
-        )
-        if metadata:
-            item.update(metadata)
-        enriched.append(item)
-    return enriched
+from agentclaw.community.core.skill_center.services.skill_set_resource_projection import (
+    list_skill_set_resources,
+)
 
 
 class SkillSetManagementService(SkillSetManagementServiceProtocol):
@@ -868,47 +816,16 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
     def list_resources(self, *, bot_id: str, owner_id: str, user_id: str) -> list[dict]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, user_id=user_id)
         owner_id = str(bot["owner_id"])
-        # Resource reads preserve the legacy graceful degradation: a passport-provider
-        # outage hides Default CLI entries and display metadata, but must not hide
-        # SkillSet/MCP data. AgentPassport is queried once because its snapshot
-        # owns both resource types.
-        try:
-            passport = self._passport.query_agent_passport(
-                bot_id, str(bot.get("entity_id") or owner_id)
-            )
-            default_clis = extract_cli_items(passport)
-            default_mcp_metadata = _passport_mcp_display_metadata(passport)
-        except Exception:
-            default_clis = []
-            default_mcp_metadata = {}
-        items = self._repository.list_sets(
+        return list_skill_set_resources(
+            repository=self._repository,
+            legacy_factory=self._legacy_factory,
+            passport=self._passport,
+            bot=bot,
             bot_id=bot_id,
             owner_id=owner_id,
             engine_type=self._engine(bot),
             default_engine_types=self._default_engine_types(bot),
         )
-        resources: list[dict] = []
-        for item in items:
-            mcps = list_skill_set_mcp_projection(
-                repository=self._repository,
-                legacy_factory=self._legacy_factory,
-                bot=bot,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                target=item,
-                engine_type=self._engine(bot),
-                default_engine_types=self._default_engine_types(bot),
-            )
-            if item["is_default"]:
-                mcps = _enrich_default_mcp_display(mcps, default_mcp_metadata)
-            resources.append(
-                {
-                    **item,
-                    "mcps": mcps,
-                    "clis": default_clis if item["is_default"] else [],
-                }
-            )
-        return resources
 
     async def _mutate(
         self,
