@@ -38,7 +38,17 @@ print_frontend_ready_banner() {
     echo -e "${GREEN}============================================================${NC}"
     echo -e "${GREEN}  FRONTEND READY${NC}"
     echo -e "${CYAN}  Open the workbench:${NC}"
-    echo -e "${CYAN}  http://localhost:${FRONTEND_PORT:-8000}/${NC}"
+    echo -e "${CYAN}  http://127.0.0.1:${FRONTEND_PORT:-8000}/${NC}"
+    if [ "${FRONTEND_VARIANT:-legacy}" != legacy ]; then
+        # 非 legacy 前端的登录态来自 gateway dev_cookie 策略的 staff_id cookie；
+        # /_dev/login 是设置它的浏览器入口（仅 local/dev/test 环境存在）。
+        # 不 gate 在 GATEWAY_AUTH_MOCK 上：那是 dev principal header 策略的
+        # 开关，cookie 策略不受它控制，而且 gateway 常由另一次调用启动，
+        # 本进程读不到那次 export。host 固定 127.0.0.1，与文档一致——cookie jar
+        # 按主机名隔离，大小写不同的 host之间不共享身份。
+        echo -e "${CYAN}  Dev login (set local identity):${NC}"
+        echo -e "${CYAN}  http://127.0.0.1:${GATEWAY_PORT:-8889}/_dev/login?next=${FRONTEND_PORT:-8000}${NC}"
+    fi
     echo -e "${GREEN}============================================================${NC}"
     echo ""
 }
@@ -182,7 +192,24 @@ process_command() {
 # session, rather than relying on nohup alone. This helper is called from a
 # background job or an explicit subshell; `exec` replaces that wrapper so the
 # recorded PID is the actual service process and no shell is left waiting.
+# Functional check, deliberately stronger than `command -v python3`: on a
+# stock macOS without Xcode CLT, /usr/bin/python3 resolves like a real
+# binary but is an xcode-select stub that cannot execute — and no
+# prerequisite gate verifies python3, so the launch path has to be the one
+# that does.
+detached_python3_usable() {
+    python3 -c 'import os, sys' >/dev/null 2>&1
+}
+
 start_in_detached_session() {
+    # macOS hosts may disable the bundled Perl executable — prefer the
+    # installed Python 3 runtime there, but only when it actually runs;
+    # fall back to the bundled Perl otherwise. Linux retains its existing
+    # Perl prerequisite. Both branches exec argv directly and preserve the
+    # owned service PID.
+    if [ "$(uname -s)" = Darwin ] && detached_python3_usable; then
+        exec python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' "$@"
+    fi
     exec perl -MPOSIX=setsid -e 'setsid() or die "setsid failed: $!\\n"; exec @ARGV' "$@"
 }
 

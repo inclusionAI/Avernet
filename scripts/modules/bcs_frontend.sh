@@ -3,12 +3,28 @@
 [[ -n "${_BCS_FRONTEND_SH_LOADED:-}" ]] && return 0
 _BCS_FRONTEND_SH_LOADED=1
 
+# The composite forces the LEGACY panel scripts (devs:local:oss / devs:dev,
+# neither of which exists in src/frontend-nextgen or the internal teamclaw
+# checkout) and its 'bcs frontend' expansion never starts the Gateway the
+# non-legacy UIs' OpenAPI/auth routes target. Refuse loudly up front instead
+# of leaving a half-started stack: BCS up, frontend dead on "Missing script"
+# or a UI whose every proxied call 5xxs.
+bcs_frontend_guard_variant() {
+    if [ "${FRONTEND_VARIANT:-legacy}" != legacy ]; then
+        log_error "The bcs_frontend composite serves the legacy BCS panel: its frontend scripts (devs:local:oss / devs:dev) do not exist in the ${FRONTEND_VARIANT} frontend, and the group does not compose the Gateway that a ${FRONTEND_VARIANT} workbench needs."
+        log_error "For the ${FRONTEND_VARIANT} workbench use: ./scripts/singlebox.sh $(singlebox_mode_option) start all"
+        return 1
+    fi
+}
+
 bcs_frontend_setup() {
+    bcs_frontend_guard_variant || return 1
     bcs_setup || return 1
     frontend_setup || return 1
 }
 
 bcs_frontend_start() {
+    bcs_frontend_guard_variant || return 1
     if [ "$LOCAL_MODE" != true ]; then
         log_info "Non-local BCS mode expects required external proxies to be started by the caller"
     else
