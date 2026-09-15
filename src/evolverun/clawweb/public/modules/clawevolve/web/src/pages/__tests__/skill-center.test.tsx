@@ -30,6 +30,8 @@ describe('Skill center asset list and recorded events', () => {
     expect(screen.getAllByRole('combobox')).toHaveLength(3)
     expect(screen.getByRole('button', { name: '登记' })).toBeTruthy()
     expect(screen.queryByText('平台从 OCB 读取完整 Skill，并保存登记时的 v1 冻结版本。')).toBeNull()
+    expect(screen.getByRole('combobox', { name: '所属 Bot' }).closest('label')?.className).toContain('block')
+    expect(screen.getByRole('combobox', { name: 'Bot 中自己上传的 Skill' }).closest('label')?.className).toContain('block')
   })
 
   it('shows one row per Skill with real metadata and no list version selector', async () => {
@@ -74,22 +76,26 @@ describe('Skill center asset list and recorded events', () => {
 
   it('shows persisted audit results and actors with exact asset or task links', async () => {
     api.evolve.listSkillEvents.mockResolvedValue({ items: [
+      { eventId: 'AUDIT-DIAGNOSE', assetId: 'ASSET-1', name: 'Evidence Skill', ownerId: 'owner', botId: 'BOT-1', version: 'v2', type: 'diagnosis_started', actorId: 'diagnoser', actorType: 'user', result: 'pending', taskId: 'TASK-DIAGNOSE', createdAt: 1789060002 },
       { eventId: 'AUDIT-END', assetId: 'ASSET-1', name: 'Evidence Skill', description: 'OCB event skill description', ownerId: 'owner', botId: 'BOT-1', version: null, type: 'evolution_finished', actorId: null, actorType: 'system', result: 'not_improved', taskId: 'TASK-1', createdAt: 1789060001 },
       { eventId: 'AUDIT-REGISTER', assetId: 'ASSET-1', name: 'Evidence Skill', ownerId: 'owner', botId: 'BOT-1', version: 'v1', type: 'registered', actorId: 'registrar', actorType: 'user', result: 'succeeded', taskId: null, createdAt: 1789060000 },
     ] })
     render(<MemoryRouter><SkillEventLog /></MemoryRouter>)
-    await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(3))
+    await waitFor(() => expect(screen.getAllByRole('row')).toHaveLength(4))
     const rows = screen.getAllByRole('row')
-    expect(rows).toHaveLength(3)
+    expect(rows).toHaveLength(4)
     expect(screen.getAllByRole('columnheader')[0].textContent).toBe('技能名称')
     expect(screen.getByText('OCB event skill description')).toBeTruthy()
     expect(screen.getByRole('columnheader', { name: '操作' }).className).toContain('sticky')
-    expect(within(rows[1]).getByRole('link', { name: '查看' }).getAttribute('href')).toBe('/evolve/runs/TASK-1')
-    expect(within(rows[2]).getByRole('link', { name: '查看' }).getAttribute('href')).toBe('/evolve/skills/ASSET-1')
-    expect(within(rows[2]).getByText('登记 Skill')).toBeTruthy()
-    expect(within(rows[1]).getByText('未提升')).toBeTruthy()
-    expect(within(rows[1]).getByText('系统')).toBeTruthy()
-    expect(within(rows[2]).getByText('registrar')).toBeTruthy()
+    expect(within(rows[1]).getByRole('link', { name: '查看' }).getAttribute('href')).toBe('/evolve/runs/TASK-DIAGNOSE')
+    expect(within(rows[1]).getByText('发起技能诊断')).toBeTruthy()
+    expect(within(rows[1]).getByText('v2')).toBeTruthy()
+    expect(within(rows[2]).getByRole('link', { name: '查看' }).getAttribute('href')).toBe('/evolve/runs/TASK-1')
+    expect(within(rows[3]).getByRole('link', { name: '查看' }).getAttribute('href')).toBe('/evolve/skills/ASSET-1')
+    expect(within(rows[3]).getByText('登记 Skill')).toBeTruthy()
+    expect(within(rows[2]).getByText('未提升')).toBeTruthy()
+    expect(within(rows[2]).getByText('系统')).toBeTruthy()
+    expect(within(rows[3]).getByText('registrar')).toBeTruthy()
     expect(screen.queryByText('拒绝候选版本')).toBeNull()
     expect(screen.queryByText(/提分|优化成功/)).toBeNull()
   })

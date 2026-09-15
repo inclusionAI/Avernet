@@ -70,6 +70,25 @@ async function zip(content: string) {
 }
 
 describe("Skill historical snapshot availability", () => {
+  it('presents legacy Skill diagnosis events with their exact frozen baseline version', async () => {
+    const test = await startRouter(true);
+    await test.repo.createAsset({ assetId: 'ASSET', versionId: 'BASE', ownerUserId: 'owner-1', botId: 'bot-1',
+      ocbSkillId: '47', displayName: 'Skill', packageRef: 'base', packageSha256: 'base-sha' });
+    const tasks = new EvolveRepository(database!);
+    await tasks.createTask({ taskId: 'TASK-DIAGNOSE', taskType: 'diagnose', taskName: 'Diagnose Skill',
+      userId: 'owner-1', botId: 'bot-1', createdBy: 'owner-1', configJson: JSON.stringify({
+        targetSkill: { assetId: 'ASSET', baseline: { sha256: 'base-sha' } },
+      }) });
+    await database!.exec(
+      "UPDATE ce_skill_audit_events SET event_type = 'evolution_started', version_id = NULL, version_no = NULL WHERE task_id = ?",
+      ['TASK-DIAGNOSE'],
+    );
+    const response = await fetch(`${test.baseUrl}/skill-events`, { headers: { 'X-User-Id': 'owner-1' } });
+    expect(response.status).toBe(200);
+    const { items } = await response.json();
+    expect(items[0]).toMatchObject({ type: 'diagnosis_started', version: 'v1', versionId: 'BASE' });
+  });
+
   it('projects only the frozen Test Bench association, never private event detail or live reports', async () => {
     const test = await startRouter(true);
     await test.repo.createAsset({ assetId: 'ASSET', versionId: 'BASE', ownerUserId: 'owner-1', botId: 'bot-1',

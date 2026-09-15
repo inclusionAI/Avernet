@@ -186,6 +186,20 @@ describe('persisted Skill operation audit', () => {
     expect(events[0]).toMatchObject({ actor_type: 'system', version_id: null });
     expect(await assets.listEvents('bot-owner')).toEqual([]);
   });
+  it('records Skill diagnosis separately and links the exact frozen baseline version', async () => {
+    await assets.createAsset(registration);
+    await tasks.createTask({ ...task, taskType: 'diagnose', configJson: JSON.stringify({
+      targetSkill: { assetId: 'asset', baseline: { sha256: 'base-sha', versionId: 'v1', versionNo: 1 } },
+    }) });
+    await tasks.completeTask('task', 'no_cases');
+    expect((await assets.listEvents('owner')).map(event => [
+      event.event_type, event.result, event.version_id, event.version_no,
+    ])).toEqual([
+      ['diagnosis_finished', 'no_cases', 'v1', 1],
+      ['diagnosis_started', 'pending', 'v1', 1],
+      ['registered', 'succeeded', 'v1', 1],
+    ]);
+  });
   it('rolls back the business operation if audit persistence fails', async () => {
     await db.exec("CREATE TRIGGER reject_audit BEFORE INSERT ON ce_skill_audit_events BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END");
     await expect(assets.createAsset(registration)).rejects.toThrow('audit unavailable');

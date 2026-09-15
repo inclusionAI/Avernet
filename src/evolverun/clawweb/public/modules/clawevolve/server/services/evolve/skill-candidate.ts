@@ -10,7 +10,7 @@ export type FrozenSkillTarget = {
   ownerUserId?: string;
   spaceId?: string | null;
   spaceType?: "PERSONAL" | "TEAM" | null;
-  baseline: { ref: string; sha256: string };
+  baseline: { ref: string; sha256: string; versionId?: string; versionNo?: number };
   candidate: {
     ref: string;
     prepared?: PreparedSkillCandidate;
@@ -100,6 +100,8 @@ export async function freezeSkillTarget(input: {
   });
   const baselineKey = `evolve/skills/tasks/${input.taskId}/baseline/package.zip`;
   const candidateKey = `evolve/skills/tasks/${input.taskId}/candidate/package.zip`;
+  const registeredVersion = exported.sha256 === asset.current_package_sha256
+    ? await input.skillAssetRepo.findVersionByNumber(asset.asset_id, asset.current_version_no) : null;
   await input.artifactStore.putObject(baselineKey, exported.packageBytes, "application/zip");
   return {
     assetId: asset.asset_id,
@@ -111,6 +113,10 @@ export async function freezeSkillTarget(input: {
     baseline: {
       ref: `oss://${getArtifactBucket()}/${baselineKey}`,
       sha256: exported.sha256,
+      ...(registeredVersion?.package_sha256 === exported.sha256 ? {
+        versionId: registeredVersion.version_id,
+        versionNo: registeredVersion.version_no,
+      } : {}),
     },
     candidate: { ref: `oss://${getArtifactBucket()}/${candidateKey}` },
   };

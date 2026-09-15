@@ -55,6 +55,17 @@ function objectKey(ref: string): string {
   return value;
 }
 
+function skillEventTaskConfig(value: string): {
+  targetSkill?: { assetId?: string; baseline?: { sha256?: string; versionId?: string; versionNo?: number } };
+} {
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 async function readSnapshot(store: ObjectStore, ref: string) {
   try {
     return await store.getObject(objectKey(ref));
@@ -94,17 +105,50 @@ export function createSkillAssetsRouter(input: SkillAssetsRouterInput): Router {
   router.get("/skill-events", asyncHandler(async (req, res) => {
     const requestIdentity = identity(req);
     if (!requestIdentity) { res.status(401).json({ error: "无法识别当前用户" }); return; }
-    const events = await input.repo.listEvents(requestIdentity.userId);
+    const [events, taskContexts, versions] = await Promise.all([
+      input.repo.listEvents(requestIdentity.userId),
+      input.repo.listEventTaskContexts(requestIdentity.userId),
+      input.repo.listEventVersions(requestIdentity.userId),
+    ]);
     const metadata = await displayMetadata(events.map((event) => event.bot_id), requestIdentity, false);
-    res.json({ items: events.map((event) => ({
+    const tasksById = new Map(taskContexts.map((task) => [task.task_id, task]));
+    const versionsByDigest = new Map<string, typeof versions>();
+    for (const version of versions) {
+      const key = `${version.asset_id}\0${version.package_sha256}`;
+      versionsByDigest.set(key, [...(versionsByDigest.get(key) ?? []), version]);
+    }
+    res.json({ items: events.map((event) => {
+      const task = event.task_id ? tasksById.get(event.task_id) : null;
+      const type = task?.task_type === "diagnose"
+        ? event.event_type === "evolution_started" ? "diagnosis_started"
+          : event.event_type === "evolution_finished" ? "diagnosis_finished" : event.event_type
+        : event.event_type;
+      let versionId = event.version_id;
+      let versionNo = event.version_no;
+      if (versionNo == null && task && ["diagnosis_started", "diagnosis_finished", "evolution_started", "evolution_finished"].includes(type)) {
+        const target = skillEventTaskConfig(task.config_json).targetSkill;
+        if (target?.assetId === event.asset_id) {
+          if (typeof target.baseline?.versionId === "string" && Number.isSafeInteger(target.baseline.versionNo)) {
+            versionId = target.baseline.versionId;
+            versionNo = target.baseline.versionNo!;
+          } else if (typeof target.baseline?.sha256 === "string") {
+            const exact = versionsByDigest.get(`${event.asset_id}\0${target.baseline.sha256}`) ?? [];
+            if (exact.length === 1) {
+              versionId = exact[0].version_id;
+              versionNo = exact[0].version_no;
+            }
+          }
+        }
+      }
+      return {
       eventId: event.event_id, assetId: event.asset_id, name: event.display_name,
       description: event.description,
       ownerId: metadata.get(event.bot_id)?.ownerId ?? null, botId: event.bot_id,
-      version: event.version_no == null ? null : `v${event.version_no}`, versionId: event.version_id,
-      type: event.event_type, actorId: event.actor_id, actorType: event.actor_type, result: event.result,
+      version: versionNo == null ? null : `v${versionNo}`, versionId,
+      type, actorId: event.actor_id, actorType: event.actor_type, result: event.result,
       taskId: event.task_id, createdAt: event.gmt_create,
       testBench: skillEventTestBench(event.detail_json, event.task_id),
-    })) });
+    }; }) });
   }));
 
   router.get("/skill-assets/available", asyncHandler(async (req, res) => {

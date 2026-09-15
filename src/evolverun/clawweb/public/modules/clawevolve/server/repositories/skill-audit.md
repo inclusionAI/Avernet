@@ -7,10 +7,14 @@ no backfill, read-time repair, inferred score, or invented historical outcome.
 ## Write boundary
 
 - Registration and its baseline version commit with `registered`.
-- Task creation commits with `evolution_started`, using the actual frozen
-  `targetSkill.assetId`. Stage integration tests are excluded. An explicit task
-  retry starts another run; replayed terminal reports deduplicate within that run.
-- Task termination commits with `evolution_finished`. Results distinguish failure,
+- Skill diagnosis creation commits with `diagnosis_started`; full Skill evolution
+  creation commits with `evolution_started`. Both use the actual frozen
+  `targetSkill.assetId` and persist the exact registered baseline version when
+  its immutable version snapshot matches the frozen package. Stage integration
+  tests are excluded. An explicit task retry starts another run; replayed
+  terminal reports deduplicate within that run.
+- Skill diagnosis termination commits with `diagnosis_finished`; full Skill
+  evolution termination commits with `evolution_finished`. Results distinguish failure,
   cancellation, no cases, no improvement, and waiting for version confirmation.
   A finalize report, candidate reference, waiting state and event commit together.
   A no-cases Diagnose completion (builtin, replacement, or postprocessor) also
@@ -87,6 +91,10 @@ event types, operation results and selection semantics remain unchanged.
 registrar/asset tenant. Bot Owner is optional **current display metadata**, resolved
 independently from OCB; it is never substituted for authorization or actor identity.
 Event descriptions/results/version references are read from the event snapshot.
+For records created before diagnosis-specific event names and baseline version
+references existed, presentation may relabel lifecycle events from the persisted
+Task type and expose a version only when the frozen baseline digest resolves to
+exactly one immutable version; ambiguous or unmatched history stays unknown.
 The internal client supports nullable versions and the event type/result fields.
 Task links use the recorded task ID; version application records carry the exact
 version ID. Existing version content and frozen-baseline diff APIs are unchanged.

@@ -6,7 +6,7 @@ import { formatStepTime } from '../pages/evolve/helpers'
 import SkillListPagination, { skillListPageSize } from './SkillListPagination'
 import TestBenchComparison from './TestBenchComparison'
 
-const eventNames: Record<string, string> = { registered: '登记 Skill', evolution_started: '发起技能进化', evolution_finished: '技能进化结束', candidate_accepted: '接受候选版本', candidate_rejected: '拒绝候选版本', version_applied: '应用技能版本', version_apply_failed: '版本应用失败' }
+const eventNames: Record<string, string> = { registered: '登记 Skill', diagnosis_started: '发起技能诊断', diagnosis_finished: '技能诊断结束', evolution_started: '发起技能进化', evolution_finished: '技能进化结束', candidate_accepted: '接受候选版本', candidate_rejected: '拒绝候选版本', version_applied: '应用技能版本', version_apply_failed: '版本应用失败' }
 const resultNames: Record<string, string> = { succeeded: '成功', pending: '已发起', retry_pending: '已重试', waiting_acceptance: '等待版本确认', completed: '已完成', not_improved: '未提升', candidate_not_accepted: '候选未获采纳', no_cases: '无诊断案例', failed: '失败', canceled: '已停止', dispatch_failed: '投递失败', accepted: '已接受', rejected: '已拒绝', conflict: '版本冲突' }
 
 export default function SkillEventLog() {

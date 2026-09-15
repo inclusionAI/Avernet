@@ -49,7 +49,7 @@ export type SkillAuditInput = {
   taskId?: string;
   versionId?: string;
   versionNo?: number;
-  type: 'registered' | 'evolution_started' | 'evolution_finished' | 'candidate_accepted' | 'candidate_rejected' | 'version_applied' | 'version_apply_failed';
+  type: 'registered' | 'diagnosis_started' | 'diagnosis_finished' | 'evolution_started' | 'evolution_finished' | 'candidate_accepted' | 'candidate_rejected' | 'version_applied' | 'version_apply_failed';
   actorId?: string;
   actorType: 'user' | 'system';
   result: string;
@@ -86,16 +86,29 @@ export async function auditTaskOperation(tx: IDatabase, taskId: string, input: O
   const task = (await tx.query<{ task_type: string; config_json: string; created_by: string; user_id: string; bot_id: string }>(
     'SELECT task_type, config_json, created_by, user_id, bot_id FROM ce_tasks WHERE task_id = ?', [taskId]))[0];
   if (!task || task.task_type === 'stage_test') return;
-  const config = JSON.parse(task.config_json) as { targetSkill?: { assetId?: string }; skillAuditTestBench?: unknown };
+  const config = JSON.parse(task.config_json) as { targetSkill?: {
+    assetId?: string;
+    baseline?: { versionId?: string; versionNo?: number };
+  }; skillAuditTestBench?: unknown };
   if (!config.targetSkill?.assetId) return;
   const asset = (await tx.query<SkillAssetRow>('SELECT * FROM ce_skill_assets WHERE asset_id = ?', [config.targetSkill.assetId]))[0];
   if (!asset || asset.owner_user_id !== task.user_id || asset.bot_id !== task.bot_id) throw new Error('Skill audit target does not belong to this task');
+  const eventType = task.task_type === 'diagnose'
+    ? input.type === 'evolution_started' ? 'diagnosis_started'
+      : input.type === 'evolution_finished' ? 'diagnosis_finished' : input.type
+    : input.type;
   const run = (await tx.query<{ event_id: string }>(
-    "SELECT event_id FROM ce_skill_audit_events WHERE task_id = ? AND event_type = 'evolution_started' ORDER BY id DESC LIMIT 1", [taskId]))[0];
-  const testBench = input.type === 'evolution_started' || input.type === 'registered'
+    "SELECT event_id FROM ce_skill_audit_events WHERE task_id = ? AND event_type IN ('evolution_started', 'diagnosis_started') ORDER BY id DESC LIMIT 1", [taskId]))[0];
+  const testBench = eventType === 'evolution_started' || eventType === 'diagnosis_started' || eventType === 'registered'
     ? null : skillTestBenchSnapshot(config.skillAuditTestBench, taskId);
   const { testBench: _untrustedAssociation, ...detail } = input.detail ?? {};
+  const lifecycle = ['diagnosis_started', 'diagnosis_finished', 'evolution_started', 'evolution_finished'].includes(eventType);
+  const versionId = lifecycle && typeof config.targetSkill.baseline?.versionId === 'string'
+    ? config.targetSkill.baseline.versionId : input.versionId;
+  const versionNo = lifecycle && Number.isSafeInteger(config.targetSkill.baseline?.versionNo)
+    ? config.targetSkill.baseline!.versionNo : input.versionNo;
   await appendSkillAudit(tx, { ...input, assetId: config.targetSkill.assetId, taskId,
+    type: eventType, versionId, versionNo,
     detail: Object.keys(detail).length || testBench ? { ...detail, ...(testBench ? { testBench } : {}) } : undefined,
     key: input.key ?? `${taskId}:${run?.event_id ?? 'current-operation'}:${input.type}`,
     actorId: input.actorType === 'user' ? input.actorId ?? task.created_by : undefined });

@@ -43,6 +43,24 @@ export class SkillAssetRepository {
     );
   }
 
+  async listEventTaskContexts(ownerUserId: string): Promise<Array<{ task_id: string; task_type: string; config_json: string }>> {
+    return this.db.query(
+      `SELECT DISTINCT t.task_id, t.task_type, t.config_json
+       FROM ce_tasks t JOIN ce_skill_audit_events e ON e.task_id = t.task_id
+       WHERE e.owner_user_id = ?`,
+      [ownerUserId],
+    );
+  }
+
+  async listEventVersions(ownerUserId: string): Promise<SkillVersionRow[]> {
+    return this.db.query(
+      `SELECT DISTINCT v.* FROM ce_skill_versions v
+       JOIN ce_skill_audit_events e ON e.asset_id = v.asset_id
+       WHERE e.owner_user_id = ?`,
+      [ownerUserId],
+    );
+  }
+
   async findAsset(assetId: string): Promise<SkillAssetRow | null> {
     return (await this.db.query<SkillAssetRow>(
       "SELECT * FROM ce_skill_assets WHERE asset_id = ?",
@@ -166,6 +184,13 @@ export class SkillAssetRepository {
     return (await this.db.query<SkillVersionRow>(
       "SELECT * FROM ce_skill_versions WHERE asset_id = ? AND version_id = ?",
       [assetId, versionId],
+    ))[0] ?? null;
+  }
+
+  async findVersionByNumber(assetId: string, versionNo: number): Promise<SkillVersionRow | null> {
+    return (await this.db.query<SkillVersionRow>(
+      "SELECT * FROM ce_skill_versions WHERE asset_id = ? AND version_no = ?",
+      [assetId, versionNo],
     ))[0] ?? null;
   }
 
