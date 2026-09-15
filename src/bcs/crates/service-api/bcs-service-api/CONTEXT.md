@@ -97,3 +97,9 @@ Actor-selection semantics, and the crate does not own concrete runtime behavior.
 
 - `cargo test --package bcs-service-api --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-service-api --all-targets --manifest-path src/bcs/Cargo.toml`
+
+`BotRepoPort::connect_streaming(BotConnectParams)` is a required internal repository
+operation returning `BotConnectResult` or `ConnectError`. Both production stores
+and the test wrapper implement it together; Core is its consumer. The operation
+owns serialized identity admission and distinguishes storage failure from absence.
+Existing Bot wire request/response fields and error classes remain unchanged.

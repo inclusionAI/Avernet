@@ -263,6 +263,17 @@ pub trait BotRepoPort: Send + Sync {
         None
     }
 
+    /// Resolve credentials and claim a streaming connection in one operation.
+    /// Production stores must serialize identity changes, reuse reads within
+    /// this admission, and distinguish storage errors from missing identities.
+    /// Expired, disconnected temporary identities may be reclaimed only after
+    /// confirming no persistent identity exists. Active/deleted/real-token
+    /// persistent identities must not be overwritten by a new claim.
+    async fn connect_streaming(
+        &self,
+        params: crate::BotConnectParams,
+    ) -> Result<crate::BotConnectResult, crate::ConnectError>;
+
     async fn register_streaming_connection(&self, bot_id: String) -> Result<String, ()>;
     /// Connect or promote a streaming connection by `bot_id`, deciding
     /// atomically inside the store:
