@@ -9,7 +9,7 @@ import time
 from contextlib import contextmanager
 
 import pytest
-from sqlalchemy import create_engine, func
+from sqlalchemy import create_engine, func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -261,6 +261,153 @@ def test_lease_reclaim_before_and_after_expiry(repo):
     stored = repo.get_by_id(rec.id)
     assert stored.claimed_by == "B"
     assert stored.attempts == 2  # claimed twice
+
+
+# ── the claim scan: two index-aligned queries, reclaim first ────────────────
+
+def _expire_lease(repo, task_id):
+    """Backdate a live lease so the reclaim branch sees it. Mirrors
+    ``test_lease_reclaim_before_and_after_expiry``: do not sleep across
+    SQLite's second-granular DB clock, make the stored lease stale instead."""
+    with repo._db.orm_session() as db:
+        db.query(TaskQueueModel).filter(TaskQueueModel.id == task_id).update(
+            {TaskQueueModel.lease_expires_at: func.datetime("now", "-1 minute")},
+            synchronize_session=False,
+        )
+
+
+def _abandoned(repo, worker="DEAD"):
+    """A task held by a worker that died: RUNNING with a lapsed lease."""
+    rec = _enqueue(repo)
+    _claim(repo, worker, lease=60)
+    _expire_lease(repo, rec.id)
+    return rec
+
+
+def _scan_plans(repo):
+    """SQLite's plan for each branch of the claim scan, issued exactly as
+    ``_read_candidates`` issues it, plus the combined ``OR`` it replaced."""
+    M = TaskQueueModel
+    with repo._db.orm_session() as db:
+        def plan(query):
+            sql = query.statement.compile(
+                db.bind, compile_kwargs={"literal_binds": True}
+            )
+            rows = db.execute(text(f"EXPLAIN QUERY PLAN {sql}")).fetchall()
+            return " / ".join(tuple(row)[-1] for row in rows)
+
+        return (
+            plan(
+                db.query(M.id)
+                .filter(repo._due_pending(ENV, APP))
+                .order_by(M.run_at.asc())
+                .limit(10)
+            ),
+            plan(
+                db.query(M.id)
+                .filter(repo._expired_lease(ENV, APP))
+                .order_by(M.lease_expires_at.asc())
+                .limit(10)
+            ),
+            plan(
+                db.query(M.id)
+                .filter(repo._eligible(ENV, APP))
+                .order_by(M.run_at.asc())
+                .limit(10)
+            ),
+        )
+
+
+def test_each_claim_scan_branch_rides_its_own_index_with_no_sort(repo):
+    """The point of splitting the scan, asserted on the plan rather than on
+    timings. Each branch must be a single range scan on the app-scoped index
+    built for it, with ORDER BY satisfied by that index's own order -- which is
+    what lets LIMIT end the scan instead of trimming a sorted result set.
+
+    That is also what keeps a backlog of not-yet-due PENDING rows free: the
+    range stops at now(), and rows parked past it are never read."""
+    due, reclaim, _ = _scan_plans(repo)
+    assert "idx_env_app_status_run_at" in due
+    assert "idx_env_app_lease_expires_at" in reclaim
+    # SQLite's name for a sort it had to materialise -- a filesort by any other
+    # name. Neither branch may need one.
+    assert "TEMP B-TREE" not in due
+    assert "TEMP B-TREE" not in reclaim
+
+
+def test_the_combined_or_is_why_the_claim_scan_is_split(repo):
+    """The contrast that gives the test above its meaning, and the regression
+    this change exists to prevent: issued as one ``OR``, eligibility spans two
+    index ranges and ``ORDER BY run_at`` is satisfiable by neither, so the
+    engine materialises and sorts the whole eligible set before ``LIMIT`` can
+    bite. On a queue whose steady state is a large backlog, that is the
+    difference between reading ``limit`` index entries and sorting all of it.
+
+    ``_eligible`` itself is still correct and still used -- by the CAS, where
+    the row is pinned by primary key and the ``OR`` costs nothing. This asserts
+    only that it is the wrong shape for a *scan*. Should a future engine learn
+    to merge the two ordered ranges, this test fails loudly and the split can
+    be revisited on its own merits."""
+    _, _, combined = _scan_plans(repo)
+    assert "TEMP B-TREE" in combined
+
+
+def test_expired_leases_are_not_starved_by_a_saturated_pending_backlog(repo):
+    """Reclaim is read first, and this is why. The worker loop re-polls with no
+    delay whenever a tick fills its batch, so a scan that spent the whole budget
+    on due PENDING rows would never reach the reclaim branch for as long as work
+    keeps arriving -- and the rows starved that way are the ones a crashed
+    worker abandoned, which no other path recovers."""
+    dead = _abandoned(repo)
+    for _ in range(5):  # more due work than the batch can hold
+        _enqueue(repo)
+
+    won = {task.id for task in _claim(repo, "W", limit=3)}
+
+    assert dead.id in won
+    assert repo.get_by_id(dead.id).claimed_by == "W"
+
+
+def test_reclaim_and_pending_draw_on_one_shared_budget(repo):
+    """Splitting the scan must not quietly double the batch: ``limit`` still
+    bounds what one call claims, as the protocol says it does."""
+    _abandoned(repo)
+    for _ in range(5):
+        _enqueue(repo)
+
+    assert len(_claim(repo, "W", limit=3)) == 3
+
+
+def test_reclaim_takes_the_longest_lapsed_lease_first(repo):
+    """Branch B orders by ``lease_expires_at`` -- the index's own order, and
+    oldest-abandoned-first on its own merits."""
+    older = _enqueue(repo)
+    newer = _enqueue(repo)
+    _claim(repo, "DEAD", lease=60)
+    with repo._db.orm_session() as db:
+        for rec, offset in ((older, "-9 minutes"), (newer, "-1 minute")):
+            db.query(TaskQueueModel).filter(TaskQueueModel.id == rec.id).update(
+                {TaskQueueModel.lease_expires_at: func.datetime("now", offset)},
+                synchronize_session=False,
+            )
+
+    won = _claim(repo, "W", limit=1)
+
+    assert [task.id for task in won] == [older.id]
+
+
+def test_a_pending_row_not_yet_due_is_still_never_claimed(repo):
+    """The split rewrote the predicate; the range bound it rests on has to
+    survive. ``test_claim_skips_tasks_not_yet_due`` covers the single-row case
+    -- this one pins it with reclaimable work in the same batch, where the two
+    branches share a budget."""
+    dead = _abandoned(repo)
+    future = _enqueue(repo, delay_seconds=3600)
+
+    won = {task.id for task in _claim(repo, "W", limit=10)}
+
+    assert won == {dead.id}
+    assert repo.get_by_id(future.id).status == TaskStatus.PENDING
 
 
 # ── holder-guarded transitions (CAS) ────────────────────────────────────────

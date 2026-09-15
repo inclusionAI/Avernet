@@ -76,6 +76,17 @@ unclaimed (or lease-expired) row. Across N racing workers each task is won by
 exactly one. A crashed worker's task is reclaimed after its lease expires. No
 `SELECT … FOR UPDATE`. See `plugins/task_queue_repository.py`.
 
+The scan that feeds that CAS runs as **two queries, one per eligibility branch**
+— due `PENDING`, and `RUNNING` with a lapsed lease — each riding the app-scoped
+index built for it. As a single `OR` it rode neither: the halves sit in
+different indexes and `ORDER BY run_at` is satisfiable by neither, so the engine
+sorted the whole eligible set before `LIMIT` applied. On a queue whose healthy
+steady state is a large backlog of not-yet-due rows, that is the cost that
+matters. Reclaimable rows are read first and both branches share the one
+`limit`: the worker re-polls immediately whenever a tick fills its batch, so
+spending the budget on `PENDING` first would leave a crashed worker's rows
+unreclaimed for as long as due work keeps arriving.
+
 ### Enqueue time — "should this row exist at all?"
 
 **Opt-in.** Pass an `idempotency_key` to `enqueue(...)` and at most one **live**

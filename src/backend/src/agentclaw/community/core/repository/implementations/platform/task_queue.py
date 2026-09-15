@@ -21,6 +21,17 @@ already ``RUNNING`` with a live lease → ``affected == 0``). No ``SELECT ... FO
 UPDATE``. The same CAS shape guards ``complete`` / ``reschedule`` / ``fail`` on
 ``claimed_by == worker_id AND status == RUNNING``.
 
+**The claim scan is two queries, not one.** Eligibility is a union -- due
+``PENDING`` rows, plus ``RUNNING`` rows whose lease lapsed -- and as a single
+``OR`` it is a scan predicate no one index serves: the halves sit in different
+indexes and ``ORDER BY run_at`` is satisfiable by neither, so the engine
+materialises the whole eligible set and sorts it before ``LIMIT`` can bite. On a
+queue whose healthy steady state is a large backlog parked in the future -- one
+row per poller waiting out its interval, one per backoff retry -- that is the
+cost that matters. :meth:`_read_candidates` reads each half through the index
+built for it instead, reclaimable rows first. The ``OR`` survives where it is
+free: the CAS, which has already pinned its row by primary key.
+
 **App scoping.** The table is shared with a second, independently deployed
 backend, so every row names its owning ``app`` and every statement that *selects
 work* matches it: the claim scan and its CAS, the deadline retirement inside that
@@ -304,6 +315,52 @@ class TaskQueueRepository(
         # mysql / oceanbase
         return func.date_add(func.now(), text(f"INTERVAL {n} SECOND"))
 
+    def _scoped_and_due(self, env: str, app: str) -> List[ColumnElement]:
+        """The terms both eligibility branches share: this deployment's rows,
+        and only those whose next-eligible time has arrived."""
+        return [
+            self.Model.env == env,
+            self.Model.app == app,
+            self.Model.run_at <= func.now(),
+        ]
+
+    def _due_pending(self, env: str, app: str):
+        """Eligibility branch A: a task waiting for its turn to run.
+
+        ``idx_env_app_status_run_at`` matches this end to end -- three equality
+        terms and then a range on the index's last column -- so the scan stops
+        at ``now()`` and never reads what lies past it. What lies past it is the
+        bulk of a healthy queue: every task a poller rescheduled and every
+        backoff retry sits there as ``PENDING`` with a future ``run_at``.
+        ``ORDER BY run_at`` is that index's own order, so ``LIMIT n`` stops the
+        scan after n entries rather than sorting first."""
+        return and_(
+            *self._scoped_and_due(env, app),
+            self.Model.status == TaskStatus.PENDING.value,
+        )
+
+    def _expired_lease(self, env: str, app: str):
+        """Eligibility branch B: a task abandoned by a worker that died holding
+        it, reclaimable now that its lease has lapsed.
+
+        ``idx_env_app_lease_expires_at`` matches this one. That index carries no
+        ``status`` column and needs none: every non-RUNNING row has a NULL
+        ``lease_expires_at`` -- the insert leaves it NULL, all four terminal
+        transitions and ``reschedule``'s re-pend set it back to NULL -- and no
+        engine matches NULL against ``<= now()``. The range therefore selects
+        RUNNING rows and nothing else.
+
+        ``run_at <= now()`` comes along from :meth:`_scoped_and_due` to keep
+        this branch exactly the CAS's second disjunct. It excludes nothing: a
+        RUNNING row passed that same test to be claimed, and the only
+        transition that moves ``run_at`` forward also moves the row back to
+        PENDING."""
+        return and_(
+            *self._scoped_and_due(env, app),
+            self.Model.status == TaskStatus.RUNNING.value,
+            self.Model.lease_expires_at <= func.now(),
+        )
+
     def _eligible(self, env: str, app: str):
         """Eligibility predicate: due, scoped to this ``(env, app)``, and either
         PENDING or a RUNNING row whose lease has expired (abandoned by a crashed
@@ -313,20 +370,14 @@ class TaskQueueRepository(
         other's rows. It is part of the predicate rather than a pre-filter
         because the predicate is reused verbatim as the claim CAS's WHERE: a row
         that stopped being ours between the candidate read and the UPDATE must
-        fail the CAS, not be taken anyway."""
-        now = func.now()
-        return and_(
-            self.Model.env == env,
-            self.Model.app == app,
-            self.Model.run_at <= now,
-            or_(
-                self.Model.status == TaskStatus.PENDING.value,
-                and_(
-                    self.Model.status == TaskStatus.RUNNING.value,
-                    self.Model.lease_expires_at <= now,
-                ),
-            ),
-        )
+        fail the CAS, not be taken anyway.
+
+        The union of the two branches above, and still exactly the predicate it
+        always was -- ``AND`` distributed over the ``OR``, term for term. This
+        is the shape the **CAS** wants, where the row is already pinned by
+        primary key and the ``OR`` costs nothing. The *candidate read* wants the
+        branches apart: see :meth:`_read_candidates`."""
+        return or_(self._due_pending(env, app), self._expired_lease(env, app))
 
     def _holder_filter(self, task_id: int, worker_id: str):
         return and_(
@@ -580,6 +631,59 @@ class TaskQueueRepository(
 
     # ── claim (the single-winner CAS) ───────────────────────────────────
 
+    def _read_candidates(self, db, env: str, app: str, limit: int) -> List[int]:
+        """The claim scan: one index-aligned query per eligibility branch.
+
+        Split rather than issued as a single ``OR`` (see :meth:`_eligible`).
+        Each half is a plain range scan on its own index, ordered by that
+        index's own order, so ``LIMIT`` ends the scan instead of trimming a
+        result set the engine had to sort first.
+
+        **Reclaim is read first, and draws from the same budget.** The order is
+        load-bearing, not a fairness preference. The worker loop re-polls with
+        no delay whenever a tick fills its batch (``TaskWorker._loop``), so
+        spending the budget on branch A first would leave branch B unread for
+        as long as due work keeps arriving -- and branch B holds precisely the
+        rows a crashed worker abandoned, which no other path recovers. The
+        reverse cannot happen: claiming an expired-lease row renews its lease,
+        so branch B's pool drains as it is read and refills only when a worker
+        actually dies. Sharing one budget is what keeps the split invisible to
+        the caller -- ``limit`` still bounds the batch, as the protocol says.
+        """
+        def _ids(where, order_by, count: int) -> List[int]:
+            if count <= 0:
+                return []
+            return [
+                row_id
+                for (row_id,) in db.query(self.Model.id)
+                .filter(where)
+                .order_by(order_by)
+                .limit(count)
+                .all()
+            ]
+
+        reclaimable = _ids(
+            self._expired_lease(env, app),
+            # The index's own order, and the right one on its own terms:
+            # longest-lapsed lease first is longest-abandoned first.
+            self.Model.lease_expires_at.asc(),
+            limit,
+        )
+        due = _ids(
+            self._due_pending(env, app),
+            # Oldest run_at first, so the queue drains roughly FIFO and
+            # starvation within the branch stays bounded.
+            self.Model.run_at.asc(),
+            limit - len(reclaimable),
+        )
+        # A row can cross from branch B to branch A between the two reads: a
+        # racing worker reclaims it and reschedules it with no delay.
+        # Claiming it twice would be harmless -- the second CAS sees the live
+        # lease this call just wrote and matches nothing -- but the round trip
+        # is free to skip.
+        seen = set(reclaimable)
+        return reclaimable + [task_id for task_id in due if task_id not in seen]
+
     def claim_batch(
         self,
         *,
@@ -593,16 +697,9 @@ class TaskQueueRepository(
             return []
         won: List[TaskRecord] = []
         with self._db.orm_session() as db:
-            # 1) Read candidates (cheap, no lock). Oldest run_at first so the
-            #    queue drains roughly FIFO and starvation is bounded.
-            candidate_ids = [
-                row_id
-                for (row_id,) in db.query(self.Model.id)
-                .filter(self._eligible(env, app))
-                .order_by(self.Model.run_at.asc())
-                .limit(limit)
-                .all()
-            ]
+            # 1) Read candidates (cheap, no lock) -- one query per eligibility
+            #    branch, reclaimable rows first. See _read_candidates.
+            candidate_ids = self._read_candidates(db, env, app, limit)
 
             for task_id in candidate_ids:
                 # 2a) Claim it — but only while still eligible AND within
