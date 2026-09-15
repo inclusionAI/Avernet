@@ -24,12 +24,30 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agentclaw.community.core.task.task_discovery.session_initiator import (
-    FrontendUrlHolder,
-)
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
+
+
+class FrontendUrlHolder:
+    """Runtime frontend URL override shared by task discovery integrations.
+
+    2026-09-15 统一化重构时自 ``session_initiator.py`` 迁入（原文件因删除
+    ``CronRelaySessionInitiator`` 而重写）。legacy runtime 热注入兼容:
+    ``adapters/http/task/router.py`` 的 ``POST /discovery/dingtalk-config``
+    与 corp 兼容路径写入本 holder,不属于 Plugin 契约。
+    """
+
+    _url: str = ""
+
+    @classmethod
+    def set(cls, url: str) -> None:
+        cls._url = url.rstrip("/")
+        logger.info("[FrontendUrlHolder] frontend url injected at runtime: %s", cls._url)
+
+    @classmethod
+    def get(cls) -> str:
+        return cls._url
 
 
 @dataclass(frozen=True)

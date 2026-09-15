@@ -1,104 +1,136 @@
-"""CronRelaySessionInitiator — SessionInitiator 的 local 实现（relay + WebSocket）。
+"""SessionInitiator 唯一实现 — OpenApiBotSessionInitiator（BaaS Open API）。
 
-两步流程：
-  Step 1 — CronRelayService.forward_request(POST /api/sessions) 创建 session
-  Step 2 — WebSocket 连 engine → connect 握手 → chat.send 发现提示消息
+历史（2026-09-15 统一化重构）:
+- 原社区/local 列走 ``CronRelaySessionInitiator``（CronRelayService.forward_request
+  创建 session + WebSocket 直连 engine 注入发现消息），corp 列走
+  ``OpenApiBotSessionInitiator``（BaaS Open API ``/openapi/v1/messages``）。
+- 2026-09-15 起 session 创建链路归一: 删除 ``CronRelaySessionInitiator`` 及其
+  Relay/WS 注入链, ``OpenApiBotSessionInitiator`` 自 corp 列下沉为唯一实现,
+  由 community ``TaskDiscoveryModule._provide_session_initiator`` 基绑定直接装配;
+  corp 列不再覆盖绑定（仅提供 ``OpenApiBotPort`` / 钉钉通知 / FrontendUrlProvider
+  配置数据）。钉钉通知仍保持 community/corp 两套实现。
 
-WebSocket 协议参考 ``test_create_session_e2e.py`` 的已验证实现：
-  connect(proto3 握手) → chat.send(sessionKey, message) → 可选等 final
+流程 (BaaS 自动创建 session):
+    ensure_grant(bot_id)           — 可选鉴权:校验 bot 是否在 allowed-bots,缺则 grant
+    send_message(bot_id, message)  — Bearer auth POST /openapi/v1/messages
+                                     BaaS 内部创建 session,返回 session_id
+    _update_session_title(...)     — 直连 engine 更新 title (non-fatal)
+    _build_session_url(...)        — 生产前端路由格式
+    → DiscoverySession
 
-消息注入失败仅 log warning — session 已创建 = 主流程成功。
-用户通过通知 deep_link 打开 session 后仍可手动交互。
+``OpenApiBotPort`` 未绑定时（无 BaaS Open API 凭证的社区/单机列）,组合根注入
+``UnavailableSessionInitiator`` fail-closed 占位——调用即抛可读错误,由
+``DiscoveryService`` 的 per-bot 容错记录,不再默默走降级通道。
 
-``SessionInitiator`` Protocol 已迁移至 ``plugin_api.session_initiator``（继承
-``Plugin``）；本文件保留其 **local 实现** ``CronRelaySessionInitiator``（经
-``@plugin_impl(mode=LOCAL)`` 注册），因为它依赖 core 领域模型
-（``DiscoveredTask`` / ``DiscoverySession``），本质是领域服务而非可替换基础设施
-插件，留在 core 避免 core→plugins 循环依赖。
-
-``FrontendUrlHolder`` 保留在此作 legacy runtime 热注入兼容（被 router 与 corp
-兼容路径引用），不属于 Plugin 契约。
+``FrontendUrlHolder`` 已随本次重构迁至同目录 ``frontend_url.py``（解除
+frontend_url → session_initiator 的历史循环依赖）。
 """
 from __future__ import annotations
 
-import asyncio
-import json
-from typing import TYPE_CHECKING, Any
+from typing import Any
+from urllib.parse import quote
 
 import httpx
-import websockets
 
+from agentclaw.community.core.task.task_discovery.frontend_url import (
+    ConfigFrontendUrlProvider,
+)
 from agentclaw.community.core.task.task_discovery.models import (
     DiscoveredTask,
     DiscoverySession,
 )
+from agentclaw.community.core.task.task_runner.client.ports import (
+    OpenApiBotPort,
+)
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
+from agentclaw.community.plugin_api.impl_registry import (
+    Flavor,
+    Mode,
+    plugin_impl,
+)
 from agentclaw.community.plugin_api.session_initiator import SessionInitiator
 
-if TYPE_CHECKING:  # 仅注解使用（duck-typed ``get()``），运行时 import 会与
-    # frontend_url.py → session_initiator.FrontendUrlHolder 构成循环。
-    from agentclaw.community.core.task.task_discovery.frontend_url import (
-        ConfigFrontendUrlProvider,
-    )
-
 logger = get_logger()
-
-
-class FrontendUrlHolder:
-    """Runtime frontend URL override shared by task discovery integrations."""
-
-    _url: str = ""
-
-    @classmethod
-    def set(cls, url: str) -> None:
-        cls._url = url.rstrip("/")
-        logger.info("[FrontendUrlHolder] frontend url injected at runtime: %s", cls._url)
-
-    @classmethod
-    def get(cls) -> str:
-        return cls._url
-
-
-#: WebSocket 协议常量
-_WS_PROTOCOL = 3
-_WS_HANDSHAKE_TIMEOUT = 10.0
-_WS_SEND_TIMEOUT = 10.0
-_WS_REPLY_TIMEOUT = 60.0  # 仅 wait_for_reply=True 时使用
 
 
 @plugin_impl(
     mode=Mode.LOCAL,
     flavor=Flavor.SIMULATOR,
-    rationale="relay 通道 + WebSocket 直连本地 engine (singlebox/local 真实链路)",
+    rationale="社区/单机列无 BaaS Open API 凭证时的 fail-closed 占位(2026-09-15 统一化)",
 )
-class CronRelaySessionInitiator(SessionInitiator):
-    """通过 relay 通道创建 session + WebSocket 注入发现消息。
+class UnavailableSessionInitiator(SessionInitiator):
+    """fail-closed 占位 — ``OpenApiBotPort`` 未绑定时的 session 创建禁用态。
 
-    流程：
-      Step 1 — CronRelayService.forward_request(POST /api/sessions) 创建 session
-      Step 2 — 解析 engine target 地址
-      Step 3 — WebSocket 连 engine → connect 握手 → chat.send 发现提示消息
-      Step 4 — 返回 session_id + session_url
+    由 community ``TaskDiscoveryModule._provide_session_initiator`` 在
+    ``OpenApiBotPort`` 解析失败/未绑定时注入（社区/单机列无 BaaS Open API
+    凭证）。``initiate_session`` 调用即抛错（带配置引导），由
+    ``DiscoveryService`` 的 per-bot 容错记录到 ``tasks[].error``，
+    不掩盖也不降级。
+    """
 
-    agent 回复策略：
-      - 默认发完即走（fire message）— 不等 state=final
-      - 用户打开 session 时 bot 回复可能已生成或正在生成
-      - 可选 wait_for_reply=True 等待 final（阻塞，用于测试）
+    def __init__(self, reason: str = "") -> None:
+        self._reason = reason or "OpenApiBotPort 未绑定（无 BaaS Open API 凭证配置）"
+
+    async def initiate_session(
+        self,
+        tasks: list[DiscoveredTask],
+        *,
+        bot_id: str,
+        owner_id: str,
+        agent_id: str,
+        model: str | None = None,
+    ) -> DiscoverySession:
+        raise RuntimeError(
+            f"SessionInitiator unavailable: {self._reason}。"
+            "配置引导: corp/pre/prod 列经 openapi_bot 块"
+            "(api_key_secret → 凭证平台解析)由 CorpTaskIntegrationModule 提供 OpenApiBotPort;"
+            "社区/单机列无凭证, task discovery 的 session 创建 fail-closed。"
+        )
+
+
+@plugin_impl(
+    mode=Mode.PROD,
+    rationale="BaaS Open API + Bearer 鉴权 (2026-09-15 统一化: 唯一实现, 原 Relay/WS 链废除)",
+)
+class OpenApiBotSessionInitiator(SessionInitiator):
+    """SessionInitiator 唯一实现 — 通过 BaaS Open API 发送发现提示消息。
+
+    依赖 ``OpenApiBotPort``（corp/pre/prod 由 ``CorpTaskIntegrationModule``
+    经 Bearer api_key 装配;单机 e2e/联调可注入本地 stub）,BaaS 在处理
+    ``send_message`` 时内部创建 session 并在响应中返回 ``session_id``。
+
+    鉴权流程:
+        1. ``ensure_grant(bot_id)`` — 可选:校验 bot 是否已授权 (Bearer api_key)
+        2. ``send_message(bot_id, message, metadata)`` — BaaS Open API 派发
+
+    session_url:
+        生产前端路由为 ``/workspace?tab=chat&bot={bot_id}:{owner_id}&session=...``。
     """
 
     def __init__(
         self,
-        cron_relay: Any,
+        openapi_bot: OpenApiBotPort,
+        *,
         frontend_url: str = "http://localhost:8000",
         backend_url: str = "http://localhost:8888",
-        wait_for_reply: bool = False,
+        ensure_grant: bool = False,
         frontend_url_provider: ConfigFrontendUrlProvider | None = None,
     ):
-        self._cron_relay = cron_relay
+        """
+        Args:
+            openapi_bot: BaaS Open API 适配器 (已内含 Bearer api_key 鉴权)。
+            frontend_url: 前端 workbench 地址 (兜底,provider 未注入/返回空时使用)。
+            backend_url: 当前 backend 服务地址 (用于创建 session 后更新 title)。
+            ensure_grant: 是否对 bot 执行 allowed-bots 校验 + grant 流程。
+                corp 预授权模式默认 False (OOB 预授权); 测试/联调可设 True。
+            frontend_url_provider: 前端 URL 取数(配置数据实现,corp 列 DI 绑
+                ``ConfigFrontendUrlProvider`` — env-aware 静态值 + 运行时 holder
+                优先;未注入时仅用 ``frontend_url`` 兜底)。
+        """
+        self._openapi_bot = openapi_bot
         self._frontend_url = frontend_url
         self._backend_url = backend_url
-        self._wait_for_reply = wait_for_reply
+        self._ensure_grant = ensure_grant
         self._frontend_url_provider = frontend_url_provider
 
     async def initiate_session(
@@ -110,15 +142,12 @@ class CronRelaySessionInitiator(SessionInitiator):
         agent_id: str,
         model: str | None = None,
     ) -> DiscoverySession:
-        """创建 session + 注入发现消息。
+        """创建 session + 注入发现消息 — 通过 BaaS Open API 一步完成。
 
-        Steps:
-            1. 构造 session body（title + extInfo）→ relay 创建 session
-            2. 从 relay 响应中提取 session_id + engine target
-            3. WebSocket 连 engine → chat.send 发现提示消息
-            4. 返回 DiscoverySession
+        BaaS 在处理 ``POST /openapi/v1/messages`` 时内部创建 session,
+        响应中返回 ``message_id`` (run_id) 和 ``session_id``。
         """
-        logger.debug("[task_discovery] → CronRelaySessionInitiator.initiate_session(bot_id=%s, owner_id=%s, task_count=%d)", bot_id, owner_id, len(tasks))
+        logger.debug("[task_discovery] → OpenApiBotSessionInitiator.initiate_session(bot_id=%s, owner_id=%s, task_count=%d)", bot_id, owner_id, len(tasks))
         first_task = tasks[0]
         task_count = len(tasks)
         title = (
@@ -127,91 +156,61 @@ class CronRelaySessionInitiator(SessionInitiator):
             else f"[DreamMode-任务发现] {first_task.title}"
         )
 
-        # ── Step 1: 创建 session ──────────────────────────────
-        body: dict[str, Any] = {
+        # ── Step 1: 鉴权 — 校验 bot 是否已授权 ──────────────────
+        try:
+            await self._openapi_bot.ensure_grant(bot_id)
+        except Exception as exc:
+            logger.warning(
+                "[task_discovery] ensure_grant failed (non-fatal, OOB 预授权模式可能跳过): "
+                "bot=%s err=%s: %s",
+                bot_id, type(exc).__name__, exc,
+            )
+
+        # ── Step 2: 构造发现提示消息 ───────────────────────────
+        prompt = self._build_discovery_prompt(tasks)
+
+        metadata: dict[str, Any] = {
             "title": title,
-            "user_id": owner_id,
-            "agent_id": agent_id,
-            "extInfo": {
-                "source": "task_discovery",
-                "task_count": task_count,
-                "discovery_date": first_task.dt,
+            "source": "task_discovery",
+            "task_count": task_count,
+            "discovery_date": first_task.dt,
+            "ext_info": {
                 "tasks": [t.to_session_ext_info() for t in tasks],
             },
         }
-        if model:
-            body["model"] = model
 
-        result = await self._cron_relay.forward_request(
+        # ── Step 3: 发送消息 (BaaS 内部创建 session) ───────────
+        logger.info(
+            "[task_discovery] send_message via BaaS Open API: bot=%s msg_len=%d",
+            bot_id, len(prompt),
+        )
+        result = await self._openapi_bot.send_message(
             bot_id=bot_id,
-            user_id=owner_id,
-            nick_name=owner_id,
-            method="POST",
-            path="/api/sessions",
-            body=body,
+            message=prompt,
+            metadata=metadata,
         )
 
-        if not result.get("success"):
-            raise RuntimeError(
-                f"engine session creation failed: {result.get('message', result)}"
-            )
-
-        session_data = result.get("data", {})
-        session_id = (
-            session_data.get("id")
-            or session_data.get("session_id", "")
-        )
+        session_id = result.session_id
         if not session_id:
-            raise RuntimeError(f"engine response missing session id: {result}")
+            # BaaS 当前版本可能不返回 session_id; 用 run_id 作前向兼容 fallback
+            logger.warning(
+                "[task_discovery] BaaS send_message returned no session_id "
+                "(run_id=%s), using run_id as session fallback",
+                result.run_id,
+            )
+            session_id = result.run_id
 
         logger.info(
-            "[task_discovery] session created: id=%s (bot=%s)",
-            session_id, bot_id,
+            "[task_discovery] session created via BaaS Open API: "
+            "id=%s run_id=%s bot=%s",
+            session_id, result.run_id, bot_id,
         )
 
-        # ── Step 2: 解析 engine target ───────────────────────
-        engine_target = await self._extract_engine_target(bot_id, owner_id)
-        if not engine_target:
-            logger.warning(
-                "[task_discovery] no engine target for bot=%s, "
-                "session created but message injection skipped",
-                bot_id,
-            )
-        else:
-            # ── Step 2.5: 更新 session title（engine 创建时 title 不生效，需单独 HTTP 调 update）
-            try:
-                base = engine_target
-                if not base.startswith("http"):
-                    base = f"http://{base}"
-                async with httpx.AsyncClient(timeout=10.0) as cli:
-                    upd_resp = await cli.post(
-                        f"{base}/api/sessions/{session_id}/update",
-                        params={"title": title},
-                        headers={"x-user-id": owner_id},
-                    )
-                    if upd_resp.status_code == 200:
-                        logger.info(
-                            "[task_discovery] session title updated: id=%s title=%s",
-                            session_id, title,
-                        )
-                    else:
-                        logger.warning(
-                            "[task_discovery] session title update failed (non-fatal): "
-                            "HTTP %s — %s",
-                            upd_resp.status_code, upd_resp.text[:200],
-                        )
-            except Exception as exc:
-                logger.warning(
-                    "[task_discovery] session title update error (non-fatal): %s", exc,
-                )
+        # ── Step 4: 更新 session title (send_message 不传 title，需单独调) ──
+        await self._update_session_title(session_id, title, bot_id, owner_id)
 
-            # ── Step 3: WebSocket 注入发现消息 ────────────────
-            discovery_prompt = self._build_discovery_prompt(tasks)
-            await self._ws_send_message(
-                engine_target, session_id, discovery_prompt,
-            )
-
-        session_url = self._build_session_url(session_id, agent_id)
+        # ── Step 5: 构建 session_url ───────────────────────────
+        session_url = self._build_session_url(session_id, bot_id, owner_id)
 
         return DiscoverySession(
             task_id=first_task.task_id,
@@ -219,157 +218,15 @@ class CronRelaySessionInitiator(SessionInitiator):
             session_url=session_url,
         )
 
-    # ── Engine target 解析 ────────────────────────────────────
-
-    async def _extract_engine_target(
-        self, bot_id: str, owner_id: str,
-    ) -> str | None:
-        """通过 backend API 查 per-bot engine 的 target 地址。
-
-        复用 HttpSessionCreator._resolve_engine_target 的逻辑：
-        1. GET /api/bots/{bot_id} → 拿 binding_id
-        2. GET /api/v1/devices/{binding_id}/connection → 拿 target
-
-        Returns:
-            如 ``localhost:20010``，失败返回 None。
-        """
-        logger.debug("[task_discovery] → CronRelaySessionInitiator._extract_engine_target(bot_id=%s, owner_id=%s)", bot_id, owner_id)
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as cli:
-                bot_resp = await cli.get(
-                    f"{self._backend_url}/api/bots/{bot_id}",
-                    params={"owner_id": owner_id},
-                    headers={"x-user-id": owner_id},
-                )
-                bot_resp.raise_for_status()
-                binding_id = (
-                    bot_resp.json().get("data") or {}
-                ).get("binding_id")
-                if not binding_id:
-                    return None
-                conn_resp = await cli.get(
-                    f"{self._backend_url}/api/v1/devices/{binding_id}/connection",
-                    headers={"x-user-id": owner_id},
-                )
-                conn_resp.raise_for_status()
-                return (
-                    conn_resp.json().get("data") or {}
-                ).get("target") or None
-        except Exception:
-            return None
-
-    # ── WebSocket 消息注入 ────────────────────────────────────
-
-    async def _ws_send_message(
-        self, target: str, session_key: str, message: str,
-    ) -> None:
-        """WebSocket 连接 engine → 握手 → chat.send → 关闭。
-
-        协议同 test_create_session_e2e.py:128-179：connect(proto3) → chat.send。
-        默认发完即走（不等 final）；wait_for_reply=True 时等待 agent 回复。
-
-        仅 log warning，不抛异常 — 消息注入失败不影响 session 创建结果。
-        """
-        logger.debug("[task_discovery] → CronRelaySessionInitiator._ws_send_message(target=%s, session_key=%s)", target, session_key)
-        uri = f"ws://{target}/api/openclaw/ws"
-        connect_params = {
-            "minProtocol": _WS_PROTOCOL,
-            "maxProtocol": _WS_PROTOCOL,
-            "client": {
-                "id": "task-discovery-initiator",
-                "version": "1.0.0",
-                "platform": "linux",
-                "mode": "operator",
-            },
-            "role": "operator",
-        }
-
-        try:
-            async with websockets.connect(
-                uri, open_timeout=_WS_HANDSHAKE_TIMEOUT,
-            ) as ws:
-                # 1) 握手
-                await ws.send(json.dumps({
-                    "type": "req", "id": "1",
-                    "method": "connect",
-                    "params": connect_params,
-                }))
-                hello = json.loads(await asyncio.wait_for(
-                    ws.recv(), timeout=_WS_HANDSHAKE_TIMEOUT,
-                ))
-                if not hello.get("ok"):
-                    logger.warning(
-                        "[task_discovery] WS handshake failed: %s",
-                        json.dumps(hello)[:200],
-                    )
-                    return
-
-                # 2) chat.send 发送发现提示消息
-                await ws.send(json.dumps({
-                    "type": "req", "id": "2",
-                    "method": "chat.send",
-                    "params": {
-                        "sessionKey": session_key,
-                        "message": message,
-                    },
-                }))
-                ack = json.loads(await asyncio.wait_for(
-                    ws.recv(), timeout=_WS_SEND_TIMEOUT,
-                ))
-                if not ack.get("ok"):
-                    logger.warning(
-                        "[task_discovery] WS chat.send rejected: %s",
-                        json.dumps(ack)[:200],
-                    )
-                    return
-
-                logger.info(
-                    "[task_discovery] WS message injected: session=%s",
-                    session_key,
-                )
-
-                # 3) 可选：等待 agent 回复
-                if self._wait_for_reply:
-                    await self._wait_for_final(ws, session_key)
-
-        except Exception as exc:
-            logger.warning(
-                "[task_discovery] WS message injection failed for "
-                "session %s: %s (session already created, user can "
-                "interact manually)",
-                session_key, exc,
-            )
-
-    async def _wait_for_final(self, ws: Any, session_key: str) -> None:
-        """等待 chat agent 输出 state=final 事件。"""
-        logger.debug("[task_discovery] → CronRelaySessionInitiator._wait_for_final(session_key=%s)", session_key)
-        try:
-            while True:
-                raw = await asyncio.wait_for(
-                    ws.recv(), timeout=_WS_REPLY_TIMEOUT,
-                )
-                data = json.loads(raw)
-                if data.get("type") != "event":
-                    continue
-                if data.get("event") == "chat":
-                    state = (data.get("payload") or {}).get("state")
-                    if state in ("final", "error"):
-                        break
-        except asyncio.TimeoutError:
-            logger.warning(
-                "[task_discovery] WS reply timeout for session %s",
-                session_key,
-            )
-
     # ── 辅助方法 ──────────────────────────────────────────────
 
     def _build_discovery_prompt(self, tasks: list[DiscoveredTask]) -> str:
-        """构造发现提示消息 — 作为 chat.send 的 message 发送给 bot。
+        """构造发现提示消息。
 
-        直接按 4 个维度组织（对齐执行层 TaskSpec 语义）：
-          目标       ← task.objective（缺省回退 title）
+        按 4 个维度组织 (对齐执行层 TaskSpec 语义):
+          目标       ← task.objective (缺省回退 title)
           预期交付物 ← task.instruction
-          验收标准   ← task.acceptances（为空则提示确认时补充）
+          验收标准   ← task.acceptances (为空则提示确认时补充)
           约束       ← task.background
         """
         lines = ["/task 用taskloop 这个skill。\n"]
@@ -390,21 +247,109 @@ class CronRelaySessionInitiator(SessionInitiator):
         lines.append("请向用户展示以上任务，并询问是否确认执行。")
         return "\n".join(lines)
 
-    def _build_session_url(self, session_id: str, agent_id: str) -> str:
-        """构建前端 workbench session URL。
+    async def _update_session_title(
+        self, session_id: str, title: str, bot_id: str, owner_id: str,
+    ) -> None:
+        """创建 session 后单独更新 title（BaaS send_message 不传 title，需额外调一次）。
 
-        前端路由格式: ``/assistant?botId={bot_id}&sessionId={session_id}``
-        sessionId 需 URL encode（如 ``agent:main:xxx`` 含冒号）。
+        解析 engine target 后直连 engine 的
+        ``POST /api/sessions/{session_id}/update?title=...``。
 
-        engine 返回的 raw session_id 需要加 ``agent:main:`` 前缀构成
-        前端所需的完整 session key，这样 session_url 可直接被钉钉卡片 /
-        通知 / 测试脚本消费，无需外部拼装。
+        原实现走 backend 公开的 ``PATCH /openapi/v1/bots/{bot_id}/sessions/{session_id}``，
+        但该接口需要 Bearer/Cookie 鉴权（PublicAPIRoute admission），内部服务调用
+        只有 ``x-user-id`` header → 401。改为直连 engine 绕过 admission 层。
 
-        动态解析 frontend URL — 优先 ``FrontendUrlProvider`` (DI 注入),
-        未注入/返回空时回落构造参数 ``self._frontend_url``。
+        失败不阻断主流程（non-fatal），仅记录 warning。
         """
-        from urllib.parse import quote
+        logger.debug("[task_discovery] → OpenApiBotSessionInitiator._update_session_title(session_id=%s, bot_id=%s)", session_id, bot_id)
+        full_session_key = (
+            session_id
+            if session_id.startswith("agent:main:")
+            else f"agent:main:{session_id}"
+        )
+        engine_target = await self._resolve_engine_target(bot_id, owner_id)
+        if not engine_target:
+            logger.warning(
+                "[task_discovery] cannot update title: no engine target "
+                "for bot=%s (non-fatal)",
+                bot_id,
+            )
+            return
 
+        base = engine_target
+        if not base.startswith("http"):
+            base = f"http://{base}"
+        url = f"{base}/api/sessions/{full_session_key}/update"
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as cli:
+                resp = await cli.post(
+                    url,
+                    params={"title": title},
+                    headers={"x-user-id": owner_id},
+                )
+                if resp.status_code == 200:
+                    logger.info(
+                        "[task_discovery] session title updated: id=%s title=%s",
+                        session_id, title,
+                    )
+                else:
+                    logger.warning(
+                        "[task_discovery] session title update failed (non-fatal): "
+                        "HTTP %s — %s",
+                        resp.status_code, resp.text[:200],
+                    )
+        except Exception as exc:
+            logger.warning(
+                "[task_discovery] session title update error (non-fatal): %s", exc,
+            )
+
+    async def _resolve_engine_target(
+        self, bot_id: str, owner_id: str,
+    ) -> str | None:
+        """通过 backend API 查 per-bot engine 的 target 地址。
+
+        1. GET /api/bots/{bot_id} → 拿 binding_id
+        2. GET /api/v1/devices/{binding_id}/connection → 拿 target
+        """
+        logger.debug("[task_discovery] → OpenApiBotSessionInitiator._resolve_engine_target(bot_id=%s, owner_id=%s)", bot_id, owner_id)
+        try:
+            backend = self._backend_url.rstrip("/")
+            async with httpx.AsyncClient(timeout=10.0) as cli:
+                bot_resp = await cli.get(
+                    f"{backend}/api/bots/{bot_id}",
+                    params={"owner_id": owner_id},
+                    headers={"x-user-id": owner_id},
+                )
+                bot_resp.raise_for_status()
+                binding_id = (
+                    bot_resp.json().get("data") or {}
+                ).get("binding_id")
+                if not binding_id:
+                    return None
+                conn_resp = await cli.get(
+                    f"{backend}/api/v1/devices/{binding_id}/connection",
+                    headers={"x-user-id": owner_id},
+                )
+                conn_resp.raise_for_status()
+                return (
+                    conn_resp.json().get("data") or {}
+                ).get("target") or None
+        except Exception as exc:
+            logger.warning(
+                "[task_discovery] _resolve_engine_target failed: %s", exc,
+            )
+            return None
+
+    def _build_session_url(self, session_id: str, bot_id: str, owner_id: str) -> str:
+        """构建前端 workbench session URL — 生产前端路由格式。
+
+        格式: ``{frontend_url}/workspace?tab=chat&bot={bot_id}:{owner_id}&session={encoded_session_key}``
+        session_key = ``agent:main:{raw_session_id}`` URL-encoded。
+
+        动态解析 frontend URL — 优先配置 provider (corp DI 绑
+        ``ConfigFrontendUrlProvider``: 运行时 holder 热注入 > env-aware 静态值),
+        provider 未注入/返回空时回落构造参数 ``frontend_url``。
+        """
         provided = (
             self._frontend_url_provider.get() if self._frontend_url_provider else ""
         )
@@ -414,8 +359,17 @@ class CronRelaySessionInitiator(SessionInitiator):
             if session_id.startswith("agent:main:")
             else f"agent:main:{session_id}"
         )
-        encoded_sid = quote(full_session_key, safe="")
-        return f"{base}/assistant?botId={agent_id}&sessionId={encoded_sid}"
+        bot_value = f"{bot_id}:{owner_id}"
+        return (
+            f"{base}/workspace"
+            f"?tab=chat"
+            f"&bot={quote(bot_value, safe='')}"
+            f"&session={quote(full_session_key, safe='')}"
+        )
 
 
-__all__ = ["SessionInitiator", "CronRelaySessionInitiator", "FrontendUrlHolder"]
+__all__ = [
+    "OpenApiBotSessionInitiator",
+    "UnavailableSessionInitiator",
+    "SessionInitiator",
+]

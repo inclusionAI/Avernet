@@ -3,7 +3,8 @@
 编排完整流程：
 1. ``TaskReader`` 读取已发现的待确认任务 (按 bot_id/owner_id/dt 过滤)
 2. 为每个 bot 的所有任务通过 ``SessionInitiator`` 创建 engine session（获得 session_id）
-   — 同时通过 WebSocket ``chat.send`` 注入发现提示消息
+   — 唯一实现 ``OpenApiBotSessionInitiator`` 经 BaaS Open API ``/openapi/v1/messages``
+     一步完成 session 创建与发现提示消息注入（原 Relay/WS 注入链已废除）
 3. session 创建成功后通过 ``NotifyMessagesProvider`` 投递通知（发现摘要 + session 链接）
 4. 用户在前端确认后，由执行框架处理（不在本模块）
 
@@ -11,7 +12,7 @@
 
     service = DiscoveryService(
         reader=SqliteTaskReader("scripts/.dependencies/data/discovered_tasks.db"),
-        session_initiator=CronRelaySessionInitiator(cron_relay),
+        session_initiator=OpenApiBotSessionInitiator(openapi_bot),
         notify_sender=CommunityNotifySender(),
     )
 
@@ -28,7 +29,7 @@ import os
 import socket
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 from agentclaw.community.core.repository.protocols.task import (
     TaskDiscoveryLockRepositoryProtocol,
@@ -500,10 +501,12 @@ def create_default_service(
     logger.debug("[task_discovery] → create_default_service(data_file=%s)", data_file)
     reader = SqliteTaskReader(data_file)
     from agentclaw.community.core.task.task_discovery.session_initiator import (
-        CronRelaySessionInitiator,
+        UnavailableSessionInitiator,
     )
 
-    session_initiator = CronRelaySessionInitiator(cron_relay=None)
+    session_initiator = UnavailableSessionInitiator(
+        reason="create_default_service 手动装配路径无 OpenApiBotPort"
+    )
     return DiscoveryService(
         reader=reader,
         session_initiator=session_initiator,

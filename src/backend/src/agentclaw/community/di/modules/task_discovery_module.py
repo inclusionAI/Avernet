@@ -4,9 +4,12 @@
 - 绑定 ``TaskDiscoveryScheduler`` 为 singleton（Lifecycle 参与者自动发现）
 - 绑定 ``DiscoveryService`` 为 singleton
 - 绑定 ``TaskDiscoveryLockRepository`` 为 singleton（per-bot 分布式锁）
-- 提供 ``SessionInitiator``（注入 CronRelayServiceProtocol）
+- 提供 ``SessionInitiator``（唯一实现 ``OpenApiBotSessionInitiator``，注入
+  ``OpenApiBotPort``；port 未绑定 → ``UnavailableSessionInitiator`` fail-closed
+  占位。2026-09-15 统一化: 原 ``CronRelaySessionInitiator`` Relay/WS 链已废除，
+  corp 列不再覆盖绑定）
 - 提供 ``TaskReader``（注入 SQLite path）
-- 桥接 API 层的 BotServiceProtocol 和 CronRelayServiceProtocol
+- 桥接 API 层的 BotServiceProtocol 和 WorkOrderServiceProtocol
 
 配置项 (通过环境变量):
   TASK_DISCOVERY_AUTO_START        是否启用自动调度 (true/false, 默认 true)
@@ -22,9 +25,6 @@ from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.bot_service import (
     BotServiceProtocol as _ApiBotServiceProtocol,
-)
-from agentclaw.community.api.cron_relay_service import (
-    CronRelayServiceProtocol as _ApiCronRelayServiceProtocol,
 )
 from agentclaw.community.api.work_order_service import (
     WorkOrderServiceProtocol as _ApiWorkOrderServiceProtocol,
@@ -46,19 +46,22 @@ from agentclaw.community.core.task.task_discovery.notify_messages_provider impor
 )
 from agentclaw.community.core.task.task_discovery.protocols import (
     BotServiceProtocol as _TaskDiscoveryBotServiceProtocol,
-    CronRelayServiceProtocol as _TaskDiscoveryCronRelayProtocol,
     WorkOrderServiceProtocol as _TaskDiscoveryWorkOrderServiceProtocol,
 )
 from agentclaw.community.core.task.task_discovery.scheduler import (
     TaskDiscoveryScheduler,
 )
 from agentclaw.community.core.task.task_discovery.session_initiator import (
-    CronRelaySessionInitiator,
+    OpenApiBotSessionInitiator,
     SessionInitiator,
+    UnavailableSessionInitiator,
 )
 from agentclaw.community.core.task.task_discovery.task_reader import (
     OrmTaskReader,
     TaskReader,
+)
+from agentclaw.community.core.task.task_runner.client.ports import (
+    OpenApiBotPort,
 )
 from agentclaw.community.di.profile import DeployProfile
 from agentclaw.community.log import get_logger
@@ -161,17 +164,18 @@ class TaskDiscoveryModule(Module):
     @inject
     def _provide_session_initiator(
         self,
-        cron_relay: _ApiCronRelayServiceProtocol,
         injector: Injector,
     ) -> SessionInitiator:
-        """构建 SessionInitiator — 默认 local 实现 (CronRelaySessionInitiator).
+        """构建 SessionInitiator — 唯一实现 ``OpenApiBotSessionInitiator`` (BaaS Open API)。
 
-        组合根按 ``DeployProfile`` 选实现, provider 内不 if/else:
-        - base (本 provider) → ``CronRelaySessionInitiator`` (relay + WebSocket 直连)。
-        - corp 列 → 通过 corp overlay 的 ``@provider`` 绑定 ``OpenApiBotSessionInitiator``
-          (BaaS Open API + Bearer), last-binding-wins 覆盖本默认绑定。
-        - 若 corp 未装/OpenApiBotPort 缺失, corp overlay 自身 fail-closed 回落
-          (见 corp ``corp_task_integration``), 不在此 base 内判断。
+        2026-09-15 统一化: 原 base 绑定 ``CronRelaySessionInitiator``（relay +
+        WebSocket 直连 engine 链）已废除;实现自 corp 列下沉为社区唯一基绑定,
+        依赖组合根经 DI 提供的 ``OpenApiBotPort``:
+        - corp/pre/prod 列 → ``CorpTaskIntegrationModule.openapi_bot_port``
+          (openapi_bot 块 api_key_secret → Mist, Bearer)。
+        - 社区/单机列 → 无凭证,``OpenApiBotPort`` 未绑定时注入
+          ``UnavailableSessionInitiator`` fail-closed 占位（调用即抛可读错误,
+          由 DiscoveryService per-bot 容错记录）;e2e/联调可显式注入本地 port stub。
 
         ``ConfigFrontendUrlProvider`` 由 DI 注入 (corp 列经钉钉块 env-aware 固化,
         community 列经 user_config.task_discovery 中性块, 未配置→空值)。「取 URL」
@@ -185,8 +189,30 @@ class TaskDiscoveryModule(Module):
         except Exception:  # noqa: BLE101 未绑定 → 默认空值(构造参数兜底)
             fe_provider = ConfigFrontendUrlProvider()
 
-        return CronRelaySessionInitiator(
-            cron_relay=cron_relay,
+        try:
+            openapi_bot = injector.get(OpenApiBotPort)
+        except Exception as exc:  # noqa: BLE101 未绑定 → fail-closed 占位
+            logger.warning(
+                "[task_discovery] OpenApiBotPort 未绑定/解析失败(%s: %s) — "
+                "SessionInitiator 退化为 UnavailableSessionInitiator"
+                "(session 创建 fail-closed, per-bot 容错记录)",
+                type(exc).__name__, exc,
+            )
+            return UnavailableSessionInitiator(
+                reason=f"OpenApiBotPort DI 解析失败: {type(exc).__name__}: {exc}"
+            )
+        if openapi_bot is None:
+            logger.warning(
+                "[task_discovery] OpenApiBotPort resolved to None (fail-closed, "
+                "openapi_bot 块未配置或 api_key 缺失) — SessionInitiator 退化为 "
+                "UnavailableSessionInitiator"
+            )
+            return UnavailableSessionInitiator(
+                reason="OpenApiBotPort resolved to None（openapi_bot 块未配置/凭证缺失）"
+            )
+
+        return OpenApiBotSessionInitiator(
+            openapi_bot=openapi_bot,
             frontend_url=_resolve_frontend_url(),
             backend_url=_resolve_backend_url(),
             frontend_url_provider=fe_provider,
@@ -217,15 +243,7 @@ class TaskDiscoveryModule(Module):
         """
         return bot_service  # type: ignore[return-value]
 
-    @singleton
-    @provider
-    @inject
-    def _bridge_cron_relay_protocol(
-        self,
-        cron_relay: _ApiCronRelayServiceProtocol,
-    ) -> _TaskDiscoveryCronRelayProtocol:
-        """Adapt the API cron relay to the task_discovery module's local contract."""
-        return cron_relay  # type: ignore[return-value]
+    
 
     @singleton
     @provider

@@ -10,8 +10,9 @@ annotations (``from __future__ import annotations``), so ``plugin_api/`` does
 not import ``core/`` (layer rule test_architecture_compliance).
 
 Rule 20 — every Plugin Protocol has ≥1 local + ≥1 prod impl:
-- local   : ``CronRelaySessionInitiator`` (plugins/local) — relay + WebSocket.
-- prod    : ``OpenApiBotSessionInitiator`` (corp/plugins/prod) — BaaS Open API.
+- only    : ``OpenApiBotSessionInitiator`` (core, 2026-09-15 统一化下沉) —
+            BaaS Open API. 原 local ``CronRelaySessionInitiator``（relay +
+            WebSocket 链）已删除;社区基绑定即唯一实现,corp 列不再覆盖。
 
 Concrete implementations nominally inherit this Protocol and are decorated
 ``@plugin_impl`` so the Rule 20/21 registry recognizes the Protocol from the
@@ -31,9 +32,10 @@ from agentclaw.community.plugin_api.base import Plugin
 class SessionInitiator(Plugin, Protocol):
     """Engine session 创建 + 消息注入接口。
 
-    Implementations:
-    - ``CronRelaySessionInitiator``  (local) — relay 通道创建 session + WebSocket 注入。
-    - ``OpenApiBotSessionInitiator`` (prod)  — BaaS Open API 创建 session + 注入。
+    Implementation(s):
+    - ``OpenApiBotSessionInitiator`` (core 唯一实现) — BaaS Open API 创建 session + 注入;
+      ``OpenApiBotPort`` 未绑定时组合根注入 ``UnavailableSessionInitiator``
+      fail-closed 占位。
     """
 
     async def initiate_session(

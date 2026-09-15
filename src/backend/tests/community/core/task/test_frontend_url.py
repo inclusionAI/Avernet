@@ -12,7 +12,7 @@ from agentclaw.community.core.task.task_discovery.frontend_url import (
     FrontendUrlConfig,
     resolve_static_frontend_url,
 )
-from agentclaw.community.core.task.task_discovery.session_initiator import (
+from agentclaw.community.core.task.task_discovery.frontend_url import (
     FrontendUrlHolder,
 )
 

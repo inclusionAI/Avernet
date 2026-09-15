@@ -694,7 +694,7 @@ async def set_dingtalk_config(
     injected = ["dingtalk credentials"]
 
     if frontend_url:
-        from agentclaw.community.core.task.task_discovery.session_initiator import (
+        from agentclaw.community.core.task.task_discovery.frontend_url import (
             FrontendUrlHolder,
         )
 

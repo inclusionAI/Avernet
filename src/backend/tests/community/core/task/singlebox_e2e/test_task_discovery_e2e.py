@@ -1,4 +1,4 @@
-"""任务主动发现 — singlebox 真实端到端集成用例(发现 → session 创建 + WS 注入 → 通知投递)。
+"""任务主动发现 — singlebox 真实端到端集成用例(发现 → session 创建 → 通知投递)。
 
 gated by ``SINGLEBOX_TASK_E2E=1``。本地起后端 singlebox 时设置:
 
@@ -7,17 +7,21 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地起后端 singlebox 时设置:
 
 完整流程覆盖:
   1) 准备 mock 数据: 将内联测试数据(含 bot_id/owner_id/dt)写入 discovered_tasks.db
-  2) 直接调用 DiscoveryService.discover() → 创建 session + WS chat.send 注入 + 通知
+  2) 直接调用 DiscoveryService.discover() → 创建 session + 通知
   3) 验证返回: success / discovered count / task_id / session_id / session_url / notification_sent
   4) 通过 SqliteTaskReader 验证任务状态可查询（含 bot_id/owner_id/dt）
   5) 验证 engine session 实际存在(GET /api/sessions/{id} 可达)
   6) 验证 session_url 可在 engine session 列表中找到
 
-关键架构前提:
+关键架构前提 (2026-09-15 统一化后):
   - 直接构造 DiscoveryService，绕过 HTTP /discover 端点（避免 DI 注入 / device 状态等问题）
-  - CronRelaySessionInitiator 需要 cron_relay.forward_request() — 用 _HttpCronRelay 直接转发到 engine
+  - session 创建唯一实现 ``OpenApiBotSessionInitiator``（BaaS Open API）;singlebox
+    无凭证,本 e2e 注入 ``_HttpOpenApiBotPort`` 本地 stub——按真实链路的三步
+    (binding_id → engine target → POST /api/sessions)真实创建 engine session,
+    以消息端口身份返回 ``BotSendResult``,保持「session 真实存在」可验证。
+  - 原 CronRelay/WS chat.send 注入链已废除;发现提示消息由生产环境的 BaaS
+    messages 端点注入,stub 下消息历史检查仅为可选观察(不 fail)。
   - backend → engine 方向不反转
-  - engine 侧零改动 — 复用现有 WebSocket 端点 + chat.send
   - mock 数据用新格式（bot_id/owner_id/dt 匹配 discover 查询条件）
 """
 from __future__ import annotations
@@ -35,7 +39,10 @@ from agentclaw.community.core.task.task_discovery.discovery_service import (
 )
 from agentclaw.community.core.task.task_discovery.models import DiscoveredTask
 from agentclaw.community.core.task.task_discovery.session_initiator import (
-    CronRelaySessionInitiator,
+    OpenApiBotSessionInitiator,
+)
+from agentclaw.community.core.task.task_runner.client.ports import (
+    BotSendResult,
 )
 from agentclaw.community.plugin_api.notify_sender import NotifyMessage
 
@@ -144,30 +151,33 @@ def _seed_backend(bot_id: str, owner_id: str) -> list[dict]:
     return tasks
 
 
-class _HttpCronRelay:
-    """轻量 HTTP cron relay — 直接解析 engine target 并转发请求。
+class _HttpOpenApiBotPort:
+    """OpenApiBotPort 本地 stub — 模拟 BaaS 的 session 创建，engine 侧真实。
 
-    绕过完整 CronRelayService（需要 device 状态检查 / transport / resolver 等），
-    仅做 e2e 测试需要的 forward_request(): backend API → engine。
+    生产实现的 ``send_message`` 走 BaaS ``POST /openapi/v1/messages``（BaaS
+    内部建 session + 注入消息）。singlebox 无 BaaS 凭证，本 stub 复用同一
+    三步解析（binding_id → engine target → ``POST /api/sessions``）在 engine
+    上真实创建 session，以 ``BotSendResult`` 形状返回 — 保持 e2e 的
+    「session 真实存在/可查询」验证有效。消息注入不在 stub 职责内（生产由
+    BaaS messages 端点完成；原 WS chat.send 注入链已废除）。
     """
 
     def __init__(self, backend_url: str, user_id: str):
         self._backend_url = backend_url
         self._user_id = user_id
+        self._send_count = 0
 
-    async def forward_request(
-        self,
-        *,
-        bot_id: str,
-        user_id: str,
-        nick_name: str,
-        method: str,
-        path: str,
-        body: dict | None = None,
-        params: dict | None = None,
-    ) -> dict:
-        """解析 engine target → 转发 HTTP 请求 → 返回 engine 响应。"""
-        headers = {"x-user-id": user_id}
+    async def ensure_grant(self, bot_id: str) -> None:
+        """noop — stub 无 allowed-bots 授权面。"""
+        return None
+
+    async def send_message(
+        self, *, bot_id: str, message: str, metadata: dict | None = None,
+    ) -> BotSendResult:
+        """真实创建 engine session（POST /api/sessions），返回 BotSendResult。"""
+        headers = {"x-user-id": self._user_id}
+        self._send_count += 1
+        run_id = f"e2e-run-{self._send_count}"
         async with httpx.AsyncClient(timeout=30.0) as cli:
             # 1. GET /api/bots/{bot_id} → binding_id
             bot_resp = await cli.get(
@@ -177,7 +187,7 @@ class _HttpCronRelay:
             bot_resp.raise_for_status()
             binding_id = (bot_resp.json().get("data") or {}).get("binding_id")
             if not binding_id:
-                return {"success": False, "message": f"Bot {bot_id} has no binding_id"}
+                raise RuntimeError(f"Bot {bot_id} has no binding_id")
 
             # 2. GET /api/v1/devices/{binding_id}/connection → engine target
             conn_resp = await cli.get(
@@ -187,26 +197,29 @@ class _HttpCronRelay:
             conn_resp.raise_for_status()
             target = (conn_resp.json().get("data") or {}).get("target") or ""
             if not target:
-                return {"success": False, "message": "No engine target resolved"}
+                raise RuntimeError("No engine target resolved")
 
-            # 3. 转发请求到 engine
-            engine_resp = await cli.request(
-                method,
-                f"http://{target}{path}",
+            # 3. 在 engine 上真实创建 session（标题带 task_discovery 语义）
+            body: dict = {
+                "title": (metadata or {}).get("title") or "[DreamMode-任务发现] e2e",
+                "user_id": self._user_id,
+                "agent_id": bot_id,
+                "extInfo": (metadata or {}).get("ext_info") or {},
+            }
+            eng_resp = await cli.post(
+                f"http://{target}/api/sessions",
                 json=body,
-                params=params,
-                headers={"x-user-id": user_id},
+                headers={"x-user-id": self._user_id},
             )
-
-            # engine 响应本身就是 {"success": True, "data": {"id": "session:..."}}
-            # 直接透传，不要再包一层
-            if engine_resp.is_success:
-                return engine_resp.json() if engine_resp.content else {"success": True, "data": {}}
-            else:
-                return {
-                    "success": False,
-                    "message": f"Engine returned {engine_resp.status_code}: {engine_resp.text[:200]}",
-                }
+            eng_resp.raise_for_status()
+            payload = eng_resp.json() or {}
+            session_data = payload.get("data") or {}
+            session_id = (
+                session_data.get("id") or session_data.get("session_id") or ""
+            )
+            if not session_id:
+                raise RuntimeError(f"engine response missing session id: {payload}")
+            return BotSendResult(run_id=run_id, session_id=session_id)
 
 
 class _MockNotifySender:
@@ -267,8 +280,11 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
         # ===== 直接构造 DiscoveryService（绕过 HTTP /discover 端点）=====
 
         reader = _InMemoryTaskReader(self._mock_tasks)
-        relay = _HttpCronRelay(_BACKEND, _USER_ID)
-        initiator = CronRelaySessionInitiator(cron_relay=relay)
+        port = _HttpOpenApiBotPort(_BACKEND, _USER_ID)
+        initiator = OpenApiBotSessionInitiator(
+            openapi_bot=port,
+            backend_url=_BACKEND,
+        )
         notifier = _MockNotifySender()
 
         service = DiscoveryService(
@@ -362,13 +378,12 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
                 f"session {first_sid} 未在 per-bot engine({target})中找到",
             )
 
-            # 5) 验证消息历史 — backend 应已通过 WS chat.send 注入发现消息
-            #    WS 注入是 best-effort（CronRelaySessionInitiator 内部失败只 log warning），
-            #    给 engine 一点时间处理 WS 消息后重试几次。
+            # 5) 消息历史观察 — 统一化后消息注入由生产 BaaS messages 端点完成,
+            #    本地 stub 不注入消息;保留为可选观察(不 fail),仅打印现状。
             encoded_id = base64.urlsafe_b64encode(first_sid.encode()).decode()
             messages: list[dict] = []
-            for _attempt in range(3):
-                await asyncio.sleep(2)
+            for _attempt in range(2):
+                await asyncio.sleep(1)
                 msg_resp = await cli.get(
                     f"http://{target}/api/sessions/{encoded_id}/messages",
                     params={"limit": 10, "offset": 0},
@@ -379,13 +394,8 @@ class TestTaskDiscoveryE2E(unittest.TestCase):
                     if messages:
                         break
             roles = [m.get("role") for m in messages]
-            print(f"[messages] 共 {len(messages)} 条, roles={roles}")
-            if "user" not in roles:
-                import warnings
-                warnings.warn(
-                    "消息历史中缺少 user 消息 — WS chat.send 注入可能失败"
-                    "（session 已创建成功，WS 注入是 best-effort）",
-                )
+            print(f"[messages] 共 {len(messages)} 条, roles={roles} "
+                  f"(stub 不注入消息, 空为正常)")
 
         print("[done] task_discovery e2e 全链路验证通过")
 
@@ -464,6 +474,19 @@ class TestDiscoveryStatusE2E(unittest.TestCase):
             discover_body = r2.json().get("data") or {}
             print(f"[discover] discovered={discover_body.get('discovered')} "
                   f"tasks={len(discover_body.get('tasks') or [])}")
+
+            # 2026-09-15 统一化: singlebox 列无 OpenApiBotPort(社区 fail-closed 占位)
+            # → HTTP discover 的 session 创建不可用。明确按原因 skip(环境需提供本地
+            # BaaS/port 装配后此 HTTP e2e 才有意义), 不作为回归失败。
+            _err = (discover_body.get("tasks") or [{}])
+            if _err and all(
+                "SessionInitiator unavailable" in (t.get("error") or "")
+                for t in _err
+            ):
+                self.skipTest(
+                    "singlebox 无 OpenApiBotPort — session 创建 fail-closed"
+                    "(统一化后社区列无凭证;需本地 BaaS/OpenApiBotPort 装配后回归)"
+                )
 
             # 3) 再查 status（discover 后）— 应该 discovered=True + session_id 非空
             r3 = await cli.get(

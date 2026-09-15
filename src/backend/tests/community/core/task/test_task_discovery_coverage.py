@@ -6,7 +6,7 @@ Covers lines not exercised by test_task_discovery_unit.py:
   - DiscoveryService._send_work_order_event (success/None/exception)
   - DiscoveryService.discover_all_bots lock integration
   - DiscoveredTask.to_discovery_prompt with empty acceptances
-  - CronRelaySessionInitiator._build_discovery_prompt empty acceptances
+  - OpenApiBotSessionInitiator._build_discovery_prompt empty acceptances
   - _row_to_task with invalid JSON acceptances
   - CommunityNotifyModule DI binding (both branches)
 """
@@ -34,7 +34,7 @@ from agentclaw.community.core.task.task_discovery.models import (
     DiscoverySession,
 )
 from agentclaw.community.core.task.task_discovery.session_initiator import (
-    CronRelaySessionInitiator,
+    OpenApiBotSessionInitiator,
 )
 from agentclaw.community.core.task.task_discovery.task_reader import (
     OrmTaskReader,
@@ -430,13 +430,13 @@ def test_to_discovery_prompt_empty_acceptances():
 
 
 # ===========================================================================
-# CronRelaySessionInitiator._build_discovery_prompt empty acceptances
+# OpenApiBotSessionInitiator._build_discovery_prompt empty acceptances
 # ===========================================================================
 
 def test_build_discovery_prompt_empty_acceptances():
     """_build_discovery_prompt covers the empty-acceptances branch (multi-task)."""
-    initiator = CronRelaySessionInitiator(
-        cron_relay=MagicMock(),
+    initiator = OpenApiBotSessionInitiator(
+        openapi_bot=MagicMock(),
         frontend_url="http://localhost:8000",
         backend_url="http://localhost:8888",
     )
