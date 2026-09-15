@@ -33,8 +33,6 @@ RELEASE_VERSION="${1:-$(next_release_version)}"
   echo "release version must match clawevolve-YYYYMMDD-vN: ${RELEASE_VERSION}" >&2
   exit 2
 }
-RELEASE_DATE="${BASH_REMATCH[1]}"
-RELEASE_SEQUENCE="${BASH_REMATCH[2]}"
 RELEASE_DIR="${DIST_DIR}/${RELEASE_VERSION}"
 RELEASE_BUILD_DIR="${DIST_DIR}/.${RELEASE_VERSION}.incoming.$$"
 ARCHIVE_VERSION="${RELEASE_VERSION#clawevolve-}"
@@ -56,17 +54,6 @@ skill_digest() {
   ) | shasum -a 256 | awk '{print $1}'
 }
 
-version_for_release() {
-  local version="$1" prefix
-  if [[ "$version" =~ ^(.+)-([0-9]{8})-v([0-9]+)$ ]]; then
-    prefix="${BASH_REMATCH[1]}"
-    printf '%s-%s-v%s\n' "$prefix" "$RELEASE_DATE" "$RELEASE_SEQUENCE"
-    return
-  fi
-  echo "skill version must match <prefix>-YYYYMMDD-vN: ${version}" >&2
-  return 1
-}
-
 mkdir -p "$DIST_DIR"
 [[ ! -e "$RELEASE_DIR" ]] || { echo "release already exists: ${RELEASE_DIR}" >&2; exit 2; }
 mkdir -p "$RELEASE_BUILD_DIR"
@@ -77,16 +64,8 @@ mkdir -p "$STAGING_DIR/skills"
 
 for name in "${SKILLS[@]}"; do
   source_dir="${PROJECT_DIR}/${name}"
-  version_file="${source_dir}/version"
   [[ -f "${source_dir}/SKILL.md" ]] || { echo "missing skill: ${source_dir}" >&2; exit 1; }
-  [[ -f "$version_file" ]] || { echo "missing skill version: ${version_file}" >&2; exit 1; }
-  version="$(tr -d '[:space:]' < "$version_file")"
-  [[ "$version" =~ ^[A-Za-z0-9._-]{1,128}$ ]] || { echo "invalid skill version: ${name}=${version}" >&2; exit 1; }
   digest="$(skill_digest "$source_dir")"
-  previous_version="$version"
-  version="$(version_for_release "$version")"
-  printf '%s\n' "$version" > "$version_file"
-  echo "version bumped: ${name} ${previous_version} -> ${version}"
 
   cp -R "$source_dir" "$STAGING_DIR/skills/$name"
   find "$STAGING_DIR/skills/$name" -name '.DS_Store' -delete
@@ -94,9 +73,8 @@ for name in "${SKILLS[@]}"; do
   rm -rf "$STAGING_DIR/skills/$name/tasks"
   find "$STAGING_DIR/skills/$name" -type f \( -name '*.pyc' -o -name '*.log' -o -name '.nfs*' \) -delete
   find "$STAGING_DIR/skills/$name/scripts/handlers" -type f -empty -delete 2>/dev/null || true
-  printf '%s\n' "$version" > "$STAGING_DIR/skills/$name/version"
-  printf '%s\n' "$version" > "$STAGING_DIR/skills/$name/.clawevolve-version"
-  printf '%s\t%s\t%s\n' "$name" "$version" "$digest" >> "$STAGING_DIR/manifest.tsv"
+  printf '%s\n' "$RELEASE_VERSION" > "$STAGING_DIR/skills/$name/.clawevolve-version"
+  printf '%s\t%s\t%s\n' "$name" "$RELEASE_VERSION" "$digest" >> "$STAGING_DIR/manifest.tsv"
 done
 
 TMP_OUTPUT="${OUTPUT}.tmp.$$"
