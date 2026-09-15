@@ -1,8 +1,9 @@
 """Local SecretResolver.
 
 The remote secret backend is unreachable in local/singlebox mode. Most secrets
-are unavailable, but the aiworkbench repo URL is configured locally so
-GitSyncService can reuse the same SecretResolver contract as corp.
+are unavailable. The shipped Singlebox config leaves the aiworkbench repo URL
+empty, so GitSyncService uses its local-disk seed path without contacting corp
+Git. An explicit runtime overlay may still provide a URL for local integration.
 
 The gateway principal signing key may be injected by the singlebox composition
 root for live OpenAPI acceptance. No key is stored in repository configuration;
