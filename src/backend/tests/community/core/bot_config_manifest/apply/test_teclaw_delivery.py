@@ -26,6 +26,11 @@ from agentclaw.community.core.bot_config_manifest.apply.activation_delegates imp
 from agentclaw.community.core.bot_config_manifest.apply.redeliver import TeclawRedeliver
 
 from tests.community.core.bot_config_manifest.apply._fakes import make_context
+async def _no_redeliver(ctx) -> None:
+    """The closing step, doing nothing. Required on every teclaw strategy —
+    the composition root always binds one — so a test that is not about the
+    redeliver still has to say which one it means."""
+    return None
 
 
 def _run(coro):
@@ -86,10 +91,12 @@ def _redeliver(*, bound: bool, result: Any = {"success": True}):
 
 def test_switch_on_hands_the_platform_ports_and_off_the_device_ports() -> None:
     on = TeclawDelivery(
-        platform_managed=True, platform_ports=lambda: _ports("store"), device_ports=lambda: _ports("device")
+        platform_managed=True, platform_ports=lambda: _ports("store"), device_ports=lambda: _ports("device"),
+        redeliver=_no_redeliver,
     )
     off = TeclawDelivery(
-        platform_managed=False, platform_ports=lambda: _ports("store"), device_ports=lambda: _ports("device")
+        platform_managed=False, platform_ports=lambda: _ports("store"), device_ports=lambda: _ports("device"),
+        redeliver=_no_redeliver,
     )
     assert on.ports().identity_service == "store"
     assert off.ports().identity_service == "device"

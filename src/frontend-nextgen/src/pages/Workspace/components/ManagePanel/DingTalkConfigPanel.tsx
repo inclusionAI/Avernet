@@ -100,7 +100,7 @@ export function DingTalkConfigPanel({
   const renderForm = () => (
     <div className="space-y-3">
       <label className="block">
-        <span className="mb-1.5 block text-xs text-muted-foreground">Robot Code</span>
+        <span className="mb-1.5 block text-xs font-medium text-muted-foreground">Robot Code</span>
         <Input
           value={form.robotCode}
           onChange={(e) => update('robotCode', e.target.value)}
@@ -108,7 +108,7 @@ export function DingTalkConfigPanel({
         />
       </label>
       <label className="block">
-        <span className="mb-1.5 block text-xs text-muted-foreground">app_key</span>
+        <span className="mb-1.5 block text-xs font-medium text-muted-foreground">app_key</span>
         <Input
           value={form.appKey}
           onChange={(e) => update('appKey', e.target.value)}
@@ -116,7 +116,7 @@ export function DingTalkConfigPanel({
         />
       </label>
       <label className="block">
-        <span className="mb-1.5 block text-xs text-muted-foreground">
+        <span className="mb-1.5 block text-xs font-medium text-muted-foreground">
           app_secret{isBound ? '（更新需重新输入）' : ''}
         </span>
         <Input
@@ -128,8 +128,8 @@ export function DingTalkConfigPanel({
       </label>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="m-0 text-sm text-foreground">启用流式卡片</p>
-          <p className="m-0 mt-0.5 text-xs text-muted-foreground">开启后使用流式卡片模板输出。</p>
+          <p className="m-0 text-xs font-medium text-foreground">启用流式卡片</p>
+          <p className="m-0 mt-0.5 text-[11px] text-muted-foreground">开启后使用流式卡片模板输出。</p>
         </div>
         <Switch
           checked={form.enableStreamOutput}
@@ -139,7 +139,7 @@ export function DingTalkConfigPanel({
       </div>
       {form.enableStreamOutput && (
         <label className="block">
-          <span className="mb-1.5 block text-xs text-muted-foreground">卡片模板 ID</span>
+          <span className="mb-1.5 block text-xs font-medium text-muted-foreground">卡片模板 ID</span>
           <Input
             value={form.cardTemplateId}
             onChange={(e) => update('cardTemplateId', e.target.value)}
@@ -167,7 +167,7 @@ export function DingTalkConfigPanel({
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Bot className="h-4 w-4 text-primary" />
-          <p className="m-0 text-sm font-medium text-foreground">钉钉机器人配置</p>
+          <p className="m-0 text-sm font-semibold text-foreground">钉钉机器人配置</p>
         </div>
         {loading ? (
           <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
@@ -216,8 +216,8 @@ export function DingTalkConfigPanel({
             </dl>
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="m-0 text-sm text-foreground">启用状态</p>
-                <p className="m-0 mt-0.5 text-xs text-muted-foreground">停用后钉钉机器人不再接收本群消息。</p>
+                <p className="m-0 text-xs font-medium text-foreground">启用状态</p>
+                <p className="m-0 mt-0.5 text-[11px] text-muted-foreground">停用后钉钉机器人不再接收本群消息。</p>
               </div>
               <Switch
                 checked={boundView.status === 'active'}
@@ -255,7 +255,7 @@ export function DingTalkConfigPanel({
               </p>
             ) : (
               <div className="mt-3 flex gap-2">
-                <Button loading={saving} onClick={() => void handleSave()}>
+                <Button size="sm" loading={saving} onClick={() => void handleSave()}>
                   {isBound ? '保存修改' : '保存绑定'}
                 </Button>
                 {isBound && (

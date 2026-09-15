@@ -44,6 +44,7 @@ pub struct SystemMessageDispatcherImpl {
     /// Deprecated compatibility setting. Provider 2.0 `chat.send` is always
     /// SSE-first and no longer consults this gray list.
     _provider_stream_gray_list: Option<Arc<ProviderStreamGrayList>>,
+    queue: Option<Arc<dyn bcs_service_api::application::system_message::SystemMessageQueueService>>,
 }
 
 impl SystemMessageDispatcherImpl {
@@ -64,9 +65,14 @@ pub struct SystemMessageDispatcherBuilder {
     provider_chat_run_timeout_ms: Option<u64>,
     message_repo: Option<Arc<dyn MessageRepoPort>>,
     provider_stream_gray_list: Option<Arc<ProviderStreamGrayList>>,
+    queue: Option<Arc<dyn bcs_service_api::application::system_message::SystemMessageQueueService>>,
 }
 
 impl SystemMessageDispatcherBuilder {
+    pub fn with_queue(mut self, queue: Arc<dyn bcs_service_api::application::system_message::SystemMessageQueueService>) -> Self {
+        self.queue = Some(queue);
+        self
+    }
     /// Set the bot-registry core service.
     pub fn with_registry(mut self, registry: Arc<dyn BotRegistryCoreService>) -> Self {
         self.registry = Some(registry);
@@ -136,6 +142,7 @@ impl SystemMessageDispatcherBuilder {
                 .unwrap_or(DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS),
             message_repo: self.message_repo,
             _provider_stream_gray_list: self.provider_stream_gray_list,
+            queue: self.queue,
         })
     }
 }
@@ -194,6 +201,11 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
             .produce(&event, group, self.registry.as_ref(), participants)
             .await;
 
+        let queued = match &self.queue {
+            Some(queue) => queue.admit(group, session_id, participants, kind, &bot_messages).await?,
+            None => None,
+        };
+
         // Persist system messages according to each message's PersistMode:
         // - PerRecipient: one record per recipient with owner_bot_id = recipient
         //   (personalized per-bot context, readable only in that bot's view).
@@ -204,7 +216,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
         //   to human viewers via user_message.
         // - Skip: no record.
         // user_message is NOT persisted (frontend-only).
-        if let Some(ref repo) = self.message_repo {
+        if let Some(ref repo) = self.message_repo.as_ref().filter(|_| queued.is_none()) {
             let mut persisted_count = 0usize;
             let new_record = |msg: &SystemGroupMessage, owner_bot_id: Option<String>| {
                 let visibility_domain = match group.group_strategy {
@@ -257,14 +269,8 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                         .collect(),
                 };
                 for new_msg in records {
-                    if let Err(e) = repo.append_message(new_msg).await {
-                        tracing::warn!(
-                            group_id = %group.id, error = %e,
-                            "failed to persist system message to message store"
-                        );
-                    } else {
-                        persisted_count += 1;
-                    }
+                    repo.append_message(new_msg).await.map_err(|error| ServiceError::InternalError(format!("system message persistence failed: {error}")))?;
+                    persisted_count += 1;
                 }
             }
             tracing::info!(group_id = %group.id, count = persisted_count, "system message persisted");
@@ -275,11 +281,14 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
         let mut total = 0usize;
         let mut success = 0usize;
         let mut failed = 0usize;
-        let mut results = Vec::new();
+        let queued = queued.map(|outcome| outcome.recipients).unwrap_or_default();
+        let queued_keys: Vec<_> = queued.iter().map(|(index, result)| (*index, result.recipient_id.clone())).collect();
+        let mut results: Vec<_> = queued.into_iter().map(|(_, result)| result).collect();
         let mut commands = Vec::new();
-        for msg in &bot_messages {
+        for (index, msg) in bot_messages.iter().enumerate() {
             for recipient in &msg.recipients {
                 total += 1;
+                if queued_keys.iter().any(|(i, id)| *i == index && id == recipient) { continue; }
                 let run_id = uuid::Uuid::new_v4().to_string();
                 let target = match self.registry.resolve_delivery_target(recipient).await {
                     Ok(target) => target,
@@ -293,6 +302,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                             recipient_id: recipient.clone(),
                             run_id,
                             delivery_type: msg.delivery_type,
+                            delivery_id: None,
                             delivered: false,
                             error: Some(error),
                         });
@@ -436,6 +446,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                                     recipient_id: recipient,
                                     run_id: cmd.run_id,
                                     delivery_type: cmd.delivery_type,
+                                    delivery_id: None,
                                     delivered: false,
                                     error: Some(error),
                                 },
@@ -483,6 +494,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                         recipient_id: recipient,
                         run_id: cmd.run_id,
                         delivery_type: cmd.delivery_type,
+                        delivery_id: None,
                         delivered,
                         error,
                     },
@@ -497,7 +509,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
         results.extend(delivery_outcomes.into_iter().map(|(result, _)| result));
 
         for r in &results {
-            if r.delivered {
+            if r.accepted() {
                 success += 1;
             } else {
                 failed += 1;

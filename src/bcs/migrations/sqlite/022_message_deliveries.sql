@@ -1,0 +1,48 @@
+-- Managed message deliveries. Deploy before enabling any queue flow.
+CREATE TABLE IF NOT EXISTS bcs_message_deliveries (
+    delivery_id TEXT NOT NULL,
+    env TEXT NOT NULL,
+    source_message_id TEXT NOT NULL,
+    target_bot_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    group_id TEXT NOT NULL,
+    source_session_seq INTEGER NOT NULL,
+    flow_kind TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    state_version INTEGER NOT NULL,
+    may_have_been_sent BOOLEAN NOT NULL,
+    wait_reason TEXT,
+    available_at_ms INTEGER NOT NULL,
+    expire_at_ms INTEGER,
+    created_at_ms INTEGER NOT NULL,
+    updated_at_ms INTEGER NOT NULL,
+    run_id TEXT,
+    idempotency_key TEXT,
+    attempt_no INTEGER NOT NULL,
+    request_id TEXT,
+    send_started_at_ms INTEGER,
+    submitted_at_ms INTEGER,
+    accepted_at_ms INTEGER,
+    run_deadline_at_ms INTEGER,
+    terminal_at_ms INTEGER,
+    bound_to_delivery_id TEXT,
+    cancel_requested_at_ms INTEGER,
+    cancel_requested_by TEXT,
+    cancel_reason TEXT,
+    abort_request_id TEXT,
+    abort_started_at_ms INTEGER,
+    cancel_deadline_at_ms INTEGER,
+    last_error_code TEXT,
+    semantic_projection_json TEXT NOT NULL,
+    transport_context_json TEXT,
+    PRIMARY KEY (env, delivery_id),
+    UNIQUE (env, source_message_id, target_bot_id),
+    UNIQUE (env, run_id),
+    UNIQUE (env, idempotency_key),
+    UNIQUE (env, request_id)
+);
+CREATE INDEX IF NOT EXISTS idx_delivery_schedule ON bcs_message_deliveries (env, status, available_at_ms);
+CREATE INDEX IF NOT EXISTS idx_delivery_lane ON bcs_message_deliveries (env, target_bot_id, session_id, source_session_seq);
+CREATE INDEX IF NOT EXISTS idx_delivery_context ON bcs_message_deliveries (env, bound_to_delivery_id);
+CREATE INDEX IF NOT EXISTS idx_delivery_source ON bcs_message_deliveries (env, source_message_id);

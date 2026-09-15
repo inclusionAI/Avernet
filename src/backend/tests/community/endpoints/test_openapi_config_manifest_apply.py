@@ -203,6 +203,18 @@ def _await_the_background_apply(_response, world) -> None:
         if task.task_type == APPLY_TASK_TYPE
     ]
     assert enqueued, "the accepted apply enqueued no task"
+    for task in enqueued:
+        # The route applies a whole document to a bot that already exists, so it
+        # names no phase and the payload says so. A phase here would mean the
+        # route had quietly become a creation half and delivered a fraction of
+        # what the caller asked for.
+        assert "phase" in task.payload, (
+            "the payload left out what the apply covers"
+        )
+        assert task.payload["phase"] is None, (
+            "the explicit-apply route reached the service with a phase; it must "
+            f"pass none, got {task.payload['phase']!r}"
+        )
     apply_service = world.get(BotConfigManifestApplyServiceProtocol)
     for task in enqueued:
         apply_service.run_apply_task(task.payload)
@@ -536,10 +548,6 @@ def _seed_bot_with_resource_manifest(world) -> None:
         modifier=_OWNER,
     )
 
-    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-        EntryFetcher,
-        FetchedEntry,
-    )
     from agentclaw.community.core.bot_config_manifest.credentials.service_protocol import (  # noqa: E501
         SourceCredentialServiceProtocol,
     )
@@ -556,9 +564,6 @@ def _seed_bot_with_resource_manifest(world) -> None:
     archive = _TOOL_ARCHIVE
     uploads: list[dict] = []
     deletes: list[str] = []
-
-    def fetch(_self, ctx, **kwargs):
-        return FetchedEntry(content=archive, digest="sha256:stub", from_store=False)
 
     async def upload_file(_self, **kwargs):
         uploads.append(
@@ -584,11 +589,6 @@ def _seed_bot_with_resource_manifest(world) -> None:
     world.injector.binder.bind(AliyunObjectStore, to=objects, scope=singleton)
     bind_overrides(
         world,
-        EntryFetcher,
-        {"fetch": fetch},
-    )
-    bind_overrides(
-        world,
         ResourceFileService,
         {"upload_file": upload_file, "delete": delete, "exists": exists},
     )
@@ -609,9 +609,8 @@ def _seed_bot_with_resource_manifest(world) -> None:
     # The oss road is left REAL up to the wire here — credential resolution,
     # the composed key, the read through the funnel — with only the store
     # itself doubled and the bucket's contents seeded. That is the point of an
-    # endpoint test: the URL transport's double (``fetch``) does not stand in
-    # for it, because the object road does not go through the URL transport
-    # at all.
+    # endpoint test: there is nothing left to stand in for the road, and
+    # nothing to stand in with — the funnel's URL transport is gone.
     objects.put("mirror", "tools.tgz", archive)
     world.get(SourceCredentialServiceProtocol).put(
         name="oss-cred",

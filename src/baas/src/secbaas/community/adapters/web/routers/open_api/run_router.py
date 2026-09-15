@@ -14,6 +14,8 @@ from secbaas.community.adapters.web.routers.open_api.dependencies import (
 )
 from secbaas.community.adapters.web.routers.open_api.model import (
     ExtraInfo,
+    RunAbortResponse,
+    RunAbortResponseData,
     RunRequest,
     RunResponse,
     RunResponseData,
@@ -243,3 +245,93 @@ async def get_run_result(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": 40401, "message": f"Run not found: {run_id}"},
         )
+
+
+@router.post(
+    "/runs/{run_id}/abort",
+    response_model=RunAbortResponse,
+    summary="Abort conversation run",
+    description="Best-effort abort a running conversation by run_id",
+    responses={
+        200: {"description": "Abort request accepted"},
+        401: {"description": "Authentication failed"},
+        404: {"description": "Run not found"},
+        500: {"description": "Internal server error"},
+    },
+)
+@inject
+async def abort_run(
+    run_id: str,
+    api_key_record: APIKeyRecord = Depends(validate_api_key),
+    bot_runner: BotRunner = Depends(Provide[ApplicationContainer.services.bot_runner]),
+) -> RunAbortResponse:
+    """Abort run endpoint
+
+    Args:
+        run_id: Run ID
+        api_key_record: Record from API Key validation
+        bot_runner: BotRunner instance
+
+    Returns:
+        RunAbortResponse: Abort response
+    """
+    try:
+        logger.info(
+            f"abort_run: run_id={run_id}, "
+            f"api_key_prefix={api_key_record.api_key_prefix}"
+        )
+
+        run_info = bot_runner.get_result(run_id)
+
+        # Verify run ownership to prevent horizontal privilege escalation
+        if (
+            run_info.api_key_prefix != api_key_record.api_key_prefix
+            or run_info.bot_id != api_key_record.app_id
+        ):
+            logger.warning(
+                f"abort_run ownership mismatch: run_id={run_id}, "
+                f"expected api_key_prefix={api_key_record.api_key_prefix}/"
+                f"bot_id={api_key_record.app_id}, "
+                f"actual api_key_prefix={run_info.api_key_prefix}/"
+                f"bot_id={run_info.bot_id}"
+            )
+            return RunAbortResponse(
+                code=OpenAPICode.BUSINESS_ERROR,
+                message=f"Run not found: {run_id}",
+                data=None,
+            )
+
+        # Extract session_id from the run record
+        if run_info.metadata and "session_id" in run_info.metadata:
+            session_id = run_info.metadata.get("session_id", "")
+        elif run_info.result_extra and "session_id" in run_info.result_extra:
+            session_id = run_info.result_extra.get("session_id", "")
+        else:
+            session_id = ""
+
+        await bot_runner.abort(session_id=session_id, run_id=run_id)
+
+        logger.info(f"abort_run accepted: run_id={run_id}, session_id={session_id}")
+
+        return RunAbortResponse(
+            code=0,
+            message="success",
+            data=RunAbortResponseData(ok=True),
+        )
+
+    except KeyError:
+        logger.warning(f"abort_run not found: run_id={run_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": 40401, "message": f"Run not found: {run_id}"},
+        )
+    except Exception as e:
+        logger.error(
+            f"abort_run unexpected error: run_id={run_id}, error={e}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": 50001, "message": f"Internal server error: {str(e)}"},
+        )
+

@@ -2,6 +2,21 @@
 
 Spec: `spec.md` in this directory. Work item W8, issue #1476.
 
+> **Superseded in part by PR #2167 — the `phases` set is now a `phase` scalar.**
+> Everything below describing `start_apply(..., phases=...)`,
+> `steps_for(phases)`, `ApplyOrchestrator.apply(..., phases=...)`, a
+> `frozenset[ApplyPhase]`, or `ALL_PHASES` records the contract as it stood when
+> this document was written. That contract is gone: the parameter is now one
+> optional `phase: ApplyPhase | None = None`, `None` means the whole apply, and
+> `ALL_PHASES` is deleted. A creation trigger must carry exactly the phase it
+> delivers, and any other trigger must carry none — `start_apply` raises
+> `ValueError` otherwise. The task payload's `"phases"` list became a `"phase"`
+> scalar, with both written and read during the rollout.
+>
+> The rest of this document stands. Nothing here is rewritten, because it is the
+> record of what was decided at the time; for the current signatures read
+> `bot_config_manifest_apply_service_protocol.py` and `apply/delivery.py`.
+
 > **Revision 4 (2026-09-03).** The managed-files index table is dropped in review: the object key layout is the record. Otherwise revision 3 — The delivery-strategy seam, the ownership map,
 > the teclaw platform-managed path behind a switch, and the deferred-provision
 > creation sequence. Revision history at the end.

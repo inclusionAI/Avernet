@@ -56,6 +56,31 @@ def _ready_center_store():
     return store
 
 
+class EngineOwnedFiles:
+    """A ``ManagedFilesReader`` + ``PlatformOwnershipReader`` that owns nothing.
+
+    The collector requires a reader — the composition root always binds one —
+    so "the platform owns no compose" is said with this rather than by leaving
+    the collaborator out. Every category answers empty, which is what a reader
+    that owns nothing is never asked for anyway.
+    """
+
+    def platform_owns(self, req) -> bool:
+        return False
+
+    def identity_files(self, req):
+        return []
+
+    def resources(self, req):
+        return []
+
+    def skills(self, req):
+        return []
+
+    def skill_files(self, req, names):
+        return []
+
+
 def _collector(*, skill_set_service=None, mcp_config_service=None,
                resource_repository=None,
                identity_service=None, channel_repo=None,
@@ -76,7 +101,7 @@ def _collector(*, skill_set_service=None, mcp_config_service=None,
         # would read the repo's bundled local-mcp-servers.yaml off disk and make
         # every test here depend on that file's contents.
         local_mcp_registry=local_mcp_registry or _registry_over({}),
-        managed_files_reader=managed_files_reader,
+        managed_files_reader=managed_files_reader or EngineOwnedFiles(),
     )
 
 
@@ -227,6 +252,7 @@ def test_local_skill_not_emitted_engine_owned():
         overrides_reader=_reader_over(None),
         center_store=_ready_center_store(),
         cli_tool_repository=FakeCliToolRepo(),
+        managed_files_reader=EngineOwnedFiles(),
     )
     skills = collector.skills(
         ComposeRequest(entity_id="staff_u1", bot_id="bot7", user_id="u1", engine_type="openclaw")
@@ -298,6 +324,7 @@ def test_one_compose_builds_one_skill_set_service():
         overrides_reader=_reader_over(None),
         center_store=_ready_center_store(),
         cli_tool_repository=FakeCliToolRepo(),
+        managed_files_reader=EngineOwnedFiles(),
         local_mcp_registry=_registry_over({}),
     )
 
@@ -333,6 +360,7 @@ def test_a_memoized_service_never_crosses_from_one_bot_to_another():
         overrides_reader=_reader_over(None),
         center_store=_ready_center_store(),
         cli_tool_repository=FakeCliToolRepo(),
+        managed_files_reader=EngineOwnedFiles(),
         local_mcp_registry=_registry_over({}),
     )
 

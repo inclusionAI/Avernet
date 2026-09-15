@@ -4,6 +4,10 @@ use strum::AsRefStr;
 #[derive(Debug, thiserror::Error, AsRefStr)]
 #[strum(serialize_all = "snake_case")]
 pub enum ServiceError {
+    /// Transport proves the request was never submitted and no sender remains.
+    /// Only the transport may classify this; timeouts are not such proof.
+    #[error("delivery not sent: {code}")]
+    DeliveryNotSent { code: &'static str, retryable: bool },
     /// Bot not found.
     #[error("Bot '{0}' not found")]
     BotNotFound(String),
@@ -162,6 +166,7 @@ impl ServiceError {
     /// internal details must not be exposed (IoError, JsonError).
     pub fn error_params(&self) -> serde_json::Value {
         match self {
+            Self::DeliveryNotSent { code, retryable } => serde_json::json!({"code": code, "retryable": retryable}),
             Self::BotNotFound(id)
             | Self::BotNotRegistered(id)
             | Self::BotNotConnected(id)

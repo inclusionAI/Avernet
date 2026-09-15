@@ -565,13 +565,16 @@ describe('GroupSidebar', () => {
     const filterButton = screen.getByRole('button', { name: '筛选' });
     await user.click(filterButton);
     expect(screen.getByRole('radio', { name: '全部' })).toBeInTheDocument();
-    await user.click(document.body);
+    // Radix Popover 的 outside click 检测依赖 pointerdown 事件；
+    // userEvent.click(document.body) 在 jsdom 下会挂起不返回，改用 fireEvent。
+    fireEvent.pointerDown(document.body);
+    fireEvent.pointerUp(document.body);
     expect(screen.queryByRole('radio', { name: '全部' })).not.toBeInTheDocument();
 
     await user.click(filterButton);
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('radio', { name: '全部' })).not.toBeInTheDocument();
-  });
+  }, 60000);
 
   it('marks the filter button when a filter is applied', () => {
     render(<GroupSidebar {...makeProps({ membership: 'session_only' })} />);

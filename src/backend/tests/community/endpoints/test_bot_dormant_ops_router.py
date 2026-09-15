@@ -9,8 +9,6 @@ the boundary the ops service calls.
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
-from agentclaw.community.core.bot_dormant.ops_service import DormantOpsService
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot
@@ -66,8 +64,8 @@ def _seed_activate_ok(world) -> None:
 
 
 def _seed_activate_error(world) -> None:
-    """An ACTIVE bot — activation only applies to a recycled one."""
-    _seed_bot(world, status="ACTIVE")
+    """A PENDING bot — neither active nor eligible for reactivation."""
+    _seed_bot(world, status="PENDING")
 
 
 @endpoint_test(
@@ -187,7 +185,12 @@ def activate_one_ok():
         json_body={"bot_id": _BOT_ID, "owner_id": _OWNER_ID},
     ),
     seed=_seed_activate_error,
-    expect=ExpectError(status=400, json_contains={"detail": "only RECYCLED bot can be activated, current: ACTIVE"}),
+    expect=ExpectError(
+        status=400,
+        json_contains={
+            "detail": "Bot 必须处于回收状态才能激活，当前状态: PENDING"
+        },
+    ),
 )
 def activate_one_err():
     """Error path: invalid activation state is surfaced as HTTP 400."""

@@ -26,6 +26,9 @@ import pytest
 from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     ApplyTaskHandler,
 )
+from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    CreationSequence,
+)
 from agentclaw.community.core.bot_config_manifest.create_job import (
     BotCreateWithManifestHandler,
 )
@@ -126,15 +129,14 @@ def _real_apply_service(manifests):
         BotConfigManifestApplyRepository,
     )
 
-    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-        EntryFetcher,
+    from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+        DeclaredSourceResolver,
     )
     from ..apply._fakes import (
         FakeActivationService,
         FakeCapabilityReader,
         FakeCredentials,
         FakeGitClient,
-        FakeGuardedFetcher,
         FakeIdentityService,
         FakeManifestContent,
         FakeMcpAuth,
@@ -142,6 +144,9 @@ def _real_apply_service(manifests):
         FakeSkillUploadService,
         FakeStartupScriptService,
         real_validator,
+        arca_only_engine_test,
+        unreachable_platform_ports,
+        unreachable_redeliver,
     )
 
     engine = create_engine(
@@ -182,9 +187,9 @@ def _real_apply_service(manifests):
         upload_service_provider=lambda: FakeSkillUploadService(),
         capability_reader_provider=lambda: FakeCapabilityReader(),
         package_validator_provider=lambda: real_validator(),
-        entry_fetcher_provider=lambda: EntryFetcher(
-            FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
-        , FakeObjectStore()),
+        entry_fetcher_provider=lambda: DeclaredSourceResolver(
+            FakeManifestContent(), FakeCredentials(), FakeObjectStore()
+        ),
         # W6's resources materialiser and W7's git transport: unreached by
         # this suite's document, but the registry registers them and the
         # session is built per apply regardless.
@@ -193,6 +198,9 @@ def _real_apply_service(manifests):
         git_client_provider=lambda: FakeGitClient(),
         task_queue_provider=lambda: None,
         bot_repository=_NoBot(),
+        is_teclaw=arca_only_engine_test,
+        teclaw_platform_ports_provider=unreachable_platform_ports,
+        redeliver=unreachable_redeliver,
     )
 
 
@@ -212,8 +220,9 @@ _APPLY_PAYLOAD = {
     "trigger": "explicit",
     "lock_token": "tok",
     "started_at": "2026-09-01T00:00:00",
-    # Explicit, as every payload now is — the builder has no default.
-    "phases": ["on_container", "pre_container"],
+    # Stated, as every payload is: ``None`` is the whole apply, not an
+    # absence the far end fills in from a default.
+    "phase": None,
     "carry_from_apply_id": None,
     "engine_type": "claude_code",
     "bot_type": "personal",
@@ -262,6 +271,9 @@ def _job(passport):
         passport_plugin_provider=lambda: passport,
         bot_service_provider=lambda: None,
         auth_relationship_provider=lambda: _RecordedRelationship(),
+        # The ARCA order, said rather than defaulted: the composition root,
+        # always passes the delivery strategy's own answer.,
+        creation_sequence=lambda _engine: CreationSequence.CREATE_BETWEEN_PHASES,
     )
 
 

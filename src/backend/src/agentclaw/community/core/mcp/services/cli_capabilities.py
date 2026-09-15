@@ -57,11 +57,21 @@ class CliCapabilityManifestResolver:
         template_type: str | None,
     ) -> list[CliItem]:
         """Return the default items for one exact logical-engine profile."""
+        # Match is first-match-wins by declaration order: an exact
+        # ``template_type`` profile (e.g. claude_code/generalCC) MUST
+        # precede any ``exclude_template_types`` fallback for the same
+        # engine. See specs/cli-default-install-identity/
+        # 010-exclude-template-types.md.
         for profile in self._manifest.profiles:
             match = profile["match"]
             if match["engine_type"] != engine_type:
                 continue
             if "template_type" in match and match["template_type"] != template_type:
+                continue
+            exclude_template_types = match.get("exclude_template_types")
+            if exclude_template_types is not None and (
+                not template_type or template_type in exclude_template_types
+            ):
                 continue
             return [dict(self._manifest.catalog[code]) for code in profile["default_cli_codes"]]
         return []
@@ -160,6 +170,19 @@ def _parse_profiles(raw: object, catalog: Mapping[str, CliItem]) -> list[dict[st
             raise ValueError(f"CLI capability profile {profile_id} has invalid match")
         if "template_type" in match and not isinstance(match["template_type"], str):
             raise ValueError(f"CLI capability profile {profile_id} has invalid template")
+        exclude = match.get("exclude_template_types")
+        if exclude is not None:
+            if not isinstance(exclude, list) or not exclude or any(
+                not isinstance(t, str) or not t for t in exclude
+            ):
+                raise ValueError(
+                    f"CLI capability profile {profile_id} has invalid exclude_template_types"
+                )
+            if "template_type" in match:
+                raise ValueError(
+                    f"CLI capability profile {profile_id} cannot combine "
+                    "template_type and exclude_template_types"
+                )
         if not isinstance(codes, list) or not codes or len(codes) != len(set(codes)):
             raise ValueError(f"CLI capability profile {profile_id} has invalid codes")
         if any(not isinstance(code, str) or code not in catalog for code in codes):

@@ -959,15 +959,17 @@ class BotConfigManifestConfig:
     block).
 
     Both fields are consumed by apply's machine parts, each through its own
-    pure parser: the guarded fetcher (W2) takes the transport allowlist, the
-    content store (W11) takes the blob tree root. Neutral defaults ship with
-    the neutral base — a deployment's env overlay decides a mirror or a NAS
-    volume.
+    pure parser: the credential service (W3) takes the transport allowlist,
+    the content store (W11) takes the blob tree root. Neutral defaults ship
+    with the neutral base — a deployment's env overlay decides an internal
+    endpoint or a NAS volume.
 
     Attributes:
-        fetch_transport_allowlist: Hosts exempt from the https-only and
-            public-only transport rules (exact-host matches, sorted for a
-            stable resolution order).
+        fetch_transport_allowlist: Hosts the credential endpoint guard exempts
+            from its https-only and public-only rules, so an object-store
+            endpoint resolving to an internal address stays registrable
+            (exact-host matches, sorted for a stable order). The name is the
+            fetch road's; the value now serves the endpoint guard alone.
         content_store_dir: The content store's blob root — relative paths
             resolve against the process working directory, ``~`` expands.
         teclaw_platform_managed: The W8 switch (see the field comment).

@@ -11,6 +11,7 @@ interface MergedRow {
   workflowTitle: string
   status: 'released' | 'testing' | 'unpublished'   // 已发布 / 测试(跑过未部署) / 未发布(没跑过也没部署)
   runCount: number
+  failedCount: number
   completionSuccessRate: number | null
   selfHealSuccessRate: number | null
   selfHealTriggeredRuns: number
@@ -74,6 +75,7 @@ export function WorkflowFullTable({ healthRows, releaseRows, isLoading, isError 
         workflowTitle: h.workflowTitle,
         status: h.released ? 'released' : 'testing',
         runCount: h.runCount,
+        failedCount: h.failedCount,
         completionSuccessRate: h.completionSuccessRate,
         selfHealSuccessRate: h.selfHealSuccessRate,
         selfHealTriggeredRuns: h.selfHealTriggeredRuns,
@@ -101,6 +103,7 @@ export function WorkflowFullTable({ healthRows, releaseRows, isLoading, isError 
           workflowTitle: r.workflowTitle,
           status: r.released ? 'released' : 'unpublished',
           runCount: 0,
+          failedCount: 0,
           completionSuccessRate: null,
           selfHealSuccessRate: null,
           selfHealTriggeredRuns: 0,
@@ -130,6 +133,7 @@ export function WorkflowFullTable({ healthRows, releaseRows, isLoading, isError 
         return a.completionSuccessRate - b.completionSuccessRate
       }); break
       case 'runDesc': sorted.sort((a, b) => b.runCount - a.runCount); break
+      case 'failedDesc': sorted.sort((a, b) => b.failedCount - a.failedCount); break
       case 'machineAsc': sorted.sort((a, b) => (a.machineDurationP50 ?? Infinity) - (b.machineDurationP50 ?? Infinity)); break
       case 'healDesc': sorted.sort((a, b) => b.selfHealTriggeredRuns - a.selfHealTriggeredRuns); break
       case 'deployDesc': sorted.sort((a, b) => b.deployCount - a.deployCount); break
@@ -142,7 +146,7 @@ export function WorkflowFullTable({ healthRows, releaseRows, isLoading, isError 
   const curPage = Math.min(page, totalPages)
   const pageRows = filtered.slice((curPage - 1) * pageSize, curPage * pageSize)
 
-  const goL3 = (id: string) => navigate(`/workflow/${encodeURIComponent(id)}/metrics`)
+  const goL3 = (id: string) => navigate(`/workflows/workspace?workflowId=${encodeURIComponent(id)}`)
 
   return (
     <div>
@@ -190,6 +194,7 @@ export function WorkflowFullTable({ healthRows, releaseRows, isLoading, isError 
                 <th className="w-[28%] px-3 py-2 text-left font-medium">工作流</th>
                 <th className="w-20 whitespace-nowrap px-3 py-2 text-center font-medium">状态</th>
                 <th className="w-20 whitespace-nowrap px-3 py-2 text-right font-medium">运行数</th>
+                <th className="w-20 whitespace-nowrap px-3 py-2 text-right font-medium">失败数</th>
                 <th className="w-24 whitespace-nowrap px-3 py-2 text-right font-medium">运行成功率</th>
                 <th className="w-24 whitespace-nowrap px-3 py-2 text-right font-medium">自愈成功率</th>
                 <th className="w-24 whitespace-nowrap px-3 py-2 text-right font-medium">耗时 P50</th>
@@ -215,6 +220,7 @@ export function WorkflowFullTable({ healthRows, releaseRows, isLoading, isError 
                       <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ${badge.cls}`}>{badge.text}</span>
                     </td>
                     <td className="whitespace-nowrap px-3 py-2.5 text-right text-sm tabular-nums text-gray-600">{w.runCount > 0 ? w.runCount.toLocaleString() : '—'}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-right text-sm tabular-nums text-gray-600">{w.failedCount > 0 ? w.failedCount.toLocaleString() : '—'}</td>
                     <td className="px-3 py-2.5 text-right text-sm"><Rate r={w.completionSuccessRate} /></td>
                     <td className="px-3 py-2.5 text-right text-sm"><Rate r={w.selfHealSuccessRate} /></td>
                     <td className="px-3 py-2.5 text-right text-sm tabular-nums text-gray-600">{w.machineDurationP50 != null ? formatDuration(w.machineDurationP50) : '—'}</td>

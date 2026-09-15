@@ -100,6 +100,7 @@ impl SystemMessageProducerService for BotJoinedMessageProducer {
         let others: Vec<String> = participants
             .iter()
             .filter(|p| p.bot_uuid != new_bot_uuid)
+            .filter(|p| p.is_bot())
             .map(|p| p.bot_uuid.clone())
             .collect();
         messages.push(SystemGroupMessage {

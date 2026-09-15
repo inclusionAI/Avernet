@@ -1329,6 +1329,8 @@ the other six: this is what "done" looks like per category.
 | PUT | `/openapi/v1/bots/{bot_id}/space` | Change the Bot's owning Business Space | `Envelope[BotSpaceAssignment]` |
 | DELETE | `/openapi/v1/bots/{bot_id}` | Delete bot | `Envelope[Deleted]` |
 | POST | `/openapi/v1/bots/{bot_id}/restart` | Restart (re-provision device) | `Envelope[Bot]` |
+| POST | `/openapi/v1/bots/{bot_id}/recycle` | Release an ACTIVE personal managed-cloud Bot and enter RECYCLED | `200 Envelope[BotRecycleResult]` |
+| POST | `/openapi/v1/bots/{bot_id}/activate` | Start reactivation of a RECYCLED personal managed-cloud Bot | `202 Envelope[BotActivateResult]`, or `200` when already ACTIVE |
 | POST | `/openapi/v1/bots/{bot_id}/auth-status` | Poll Passport auth (attributes echoed in the body); completes creation when ISSUED — a write, hence a POST | `Envelope[BotAuthStatus]` |
 | GET | `/openapi/v1/bots/{bot_id}/auth-status` | Retiring spelling of the poll (attributes in the query string); deprecated — use the POST | `Envelope[BotAuthStatus]` |
 | GET | `/openapi/v1/bots/{bot_id}/status` | Runtime / device readiness | `Envelope[BotStatus]` |
@@ -1342,6 +1344,12 @@ the other six: this is what "done" looks like per category.
 | PUT | `/openapi/v1/bots/{bot_id}/config-manifest` | Set/replace it; all-or-nothing, `422` lists every violation | `Envelope[ConfigManifest]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/config-manifest` | Clear it | `Envelope[Deleted]` |
 | GET | `/openapi/v1/bots/{bot_id}/config-manifest/capabilities` | Which manifest constructs this bot accepts | `Envelope[ConfigManifestCapabilities]` |
+
+Dormant lifecycle operations and the status poll take optional `owner_id`
+(defaulting to the caller) because `bot_id` is not globally unique. They use
+the shared addressed-Bot authorization mechanism, but require OWNER permission;
+ADMIN and MEMBER collaborators cannot recycle or activate the Bot. Teclaw,
+desktop and service Bots are outside this lifecycle.
 
 #### Space-scoped Bot quota
 

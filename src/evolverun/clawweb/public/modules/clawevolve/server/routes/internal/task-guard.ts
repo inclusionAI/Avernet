@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import type { EvolveRepository } from "../../repositories/evolve-repository.js";
+import { validateRepairOutcomes, type RepairSelection } from '../../services/evolution/group-repair.js';
 
 const PHASES = [
   "task_received",
@@ -119,6 +120,9 @@ export function createInternalTaskGuardRouter(repo: EvolveRepository | null): Ro
     if (!input || typeof input.workflowId !== "string" || typeof input.spec !== "string" || typeof input.deploy !== "boolean") {
       res.status(409).json({ error: "suggestion_application_input_invalid" }); return;
     }
+    if (input.repairSelection && !(Array.isArray(req.body?.capabilities) && req.body.capabilities.includes('issue-group-repair/v1'))) {
+      res.status(409).json({ error: 'group_repair_plugin_update_required' }); return;
+    }
     if (!await repo.claimSuggestionApplyStep(taskId, stepId)) {
       res.status(409).json({ error: "suggestion_application_already_claimed" }); return;
     }
@@ -131,7 +135,7 @@ export function createInternalTaskGuardRouter(repo: EvolveRepository | null): Ro
     const stepId = String(req.params.stepId ?? "").trim();
     const botId = String(req.body?.botId ?? "").trim();
     const claimToken = String(req.body?.claimToken ?? "").trim();
-    const status = String(req.body?.status ?? "").trim();
+    let status = String(req.body?.status ?? "").trim();
     if (status !== "succeeded" && status !== "failed") {
       res.status(400).json({ error: "invalid_suggestion_application_status" }); return;
     }
@@ -170,6 +174,21 @@ export function createInternalTaskGuardRouter(repo: EvolveRepository | null): Ro
     const output = req.body?.output && typeof req.body.output === "object"
       ? req.body.output as Record<string, unknown>
       : undefined;
+    if (config.applicationMode === 'issue_group_repair' && (succeeded || output?.repairOutcomes)) {
+      try {
+        const selection = (config.applicationInput as { repairSelection: RepairSelection }).repairSelection;
+        const outcomes = validateRepairOutcomes(output?.repairOutcomes, selection);
+        if (!output) throw new Error('missing_group_result');
+        if (Buffer.byteLength(JSON.stringify(output), 'utf8') > 50_000) throw new Error('group_result_too_large');
+        output.repairOutcomes = outcomes;
+        const deployment = output.deployResult as { workflowId?: string; deployed?: boolean } | undefined;
+        if (!deployment || deployment.workflowId !== selection.workflowId || typeof deployment.deployed !== 'boolean') throw new Error('invalid_group_deployment');
+        if (outcomes.some(item => item.status === 'unresolved')) {
+          if (deployment.deployed) throw new Error('unresolved_group_deployed');
+          status = 'failed';
+        } else if (outcomes.some(item => item.status === 'applied') && !deployment.deployed) throw new Error('group_not_deployed');
+      } catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : 'invalid_group_result' }); return; }
+    }
     const error = req.body?.error && typeof req.body.error === "object"
       ? req.body.error as Record<string, unknown>
       : undefined;
@@ -195,10 +214,10 @@ export function createInternalTaskGuardRouter(repo: EvolveRepository | null): Ro
       : [];
     const settlement = await repo.tryFinalizeSuggestionApplication(stepId, {
       source: "callback",
-      status,
+      status: status === 'succeeded' ? 'succeeded' : 'failed',
       summary,
       ...(settledOutput ? { output: settledOutput } : {}),
-      ...(succeeded ? {} : {
+      ...(status === 'succeeded' ? {} : {
         errorCode: String(error?.code ?? "SUGGESTION_APPLY_FAILED"),
         errorMessage: String(error?.message ?? summary),
         retryable: error?.retryable === true,

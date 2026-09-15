@@ -1,4 +1,4 @@
-import { Button, Checkbox, Input, Segmented } from '@/components/ui';
+import { Button, Checkbox, Input, Switch } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import type { ReactNode } from 'react';
 import { GroupLeaderSelect, type GroupLeaderOption } from './GroupLeaderSelect';
@@ -17,11 +17,6 @@ const STRATEGY_OPTIONS: Array<{ value: GroupStrategyKind; label: string; descrip
   { value: 'task_dag', label: '自定义协作', description: '状态机编排，支持以 YAML 定义协同流程' },
 ];
 
-const DELIVERY_OPTIONS: Array<{ value: DeliveryPolicy; label: string }> = [
-  { value: 'send_to_driver', label: '自动回复' },
-  { value: 'inject_observers', label: '关闭自动回复' },
-];
-
 export interface GroupConfigFieldsProps {
   kind: GroupStrategyKind;
   name: string;
@@ -30,7 +25,6 @@ export interface GroupConfigFieldsProps {
   managerBotId: string;
   deliveryPolicy: DeliveryPolicy;
   definitionYaml: string;
-  yamlSummary: string[];
   /** YAML 是否已通过校验——通过后隐藏 YAML 编辑器、展示绑定面板。 */
   yamlValidated: boolean;
   templateSlot?: ReactNode;
@@ -59,7 +53,6 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
     managerBotId,
     deliveryPolicy,
     definitionYaml,
-    yamlSummary,
     yamlValidated,
     templateSlot,
     bindingSlot,
@@ -78,9 +71,9 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
 
   return (
     <>
-      <div className="grid min-w-0 grid-cols-2 gap-4">
+      <div className="grid min-w-0 grid-cols-2 gap-3">
         <div className="min-w-0">
-          <label className="mb-2 block text-xs font-semibold text-muted-foreground" htmlFor="create-group-name">
+          <label className="mb-1.5 block text-xs font-semibold text-foreground" htmlFor="create-group-name">
             协作群名称
           </label>
           <Input
@@ -92,7 +85,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
           />
         </div>
         <div className="min-w-0">
-          <label className="mb-2 block text-xs font-semibold text-muted-foreground" htmlFor="create-group-context">
+          <label className="mb-1.5 block text-xs font-semibold text-foreground" htmlFor="create-group-context">
             协作目标
           </label>
           <Input
@@ -106,7 +99,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
       </div>
 
       <div>
-        <span className="mb-2 block text-xs font-semibold text-muted-foreground" id="strategy-group-label">
+        <span className="mb-1.5 block text-xs font-semibold text-foreground" id="strategy-group-label">
           协作群类型
         </span>
         <div role="radiogroup" aria-labelledby="strategy-group-label" className="grid min-w-0 grid-cols-3 gap-3">
@@ -171,7 +164,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
           />
           <label
             htmlFor="create-group-via-execute"
-            className="cursor-pointer select-none text-[13px] text-[var(--color-muted)]"
+            className="cursor-pointer select-none text-xs font-semibold text-foreground"
           >
             是否以任务执行
           </label>
@@ -179,7 +172,10 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
       )}
 
       {kind === 'free_chat' && (
-        <div className="grid min-w-0 grid-cols-2 gap-4">
+        <div
+          data-testid="free-chat-settings-grid"
+          className="grid min-w-0 grid-cols-[minmax(180px,0.75fr)_minmax(0,1.25fr)] gap-3"
+        >
           <div className="min-w-0">
             <GroupLeaderSelect
               id="create-group-driver"
@@ -191,13 +187,20 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
             />
           </div>
           <div className="min-w-0">
-            <span className="mb-2 block text-xs font-semibold text-muted-foreground">自动回复</span>
-            <Segmented<DeliveryPolicy> value={deliveryPolicy} onChange={onDeliveryChange} options={DELIVERY_OPTIONS} />
-            <p className="mt-2 text-[11px] leading-4 text-muted-foreground">
-              {deliveryPolicy === 'send_to_driver'
-                ? '群主 Bot 将默认回复每一条消息'
-                : '群主 Bot 仅在被 @ 时或上下文高度关联时答复'}
-            </p>
+            <span className="mb-1.5 block text-xs font-semibold text-foreground">自动回复</span>
+            <div className="flex min-h-9 items-center gap-3">
+              <Switch
+                size="md"
+                checked={deliveryPolicy === 'send_to_driver'}
+                aria-label="自动回复"
+                onCheckedChange={(checked) => onDeliveryChange(checked ? 'send_to_driver' : 'inject_observers')}
+              />
+              <p className="m-0 min-w-0 text-xs leading-5 text-muted-foreground lg:whitespace-nowrap">
+                {deliveryPolicy === 'send_to_driver'
+                  ? '群主 Bot 将默认回复每一条消息'
+                  : '群主 Bot 仅在被 @ 时或上下文语境高度关联时答复'}
+              </p>
+            </div>
           </div>
         </div>
       )}
@@ -212,25 +215,16 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
             placeholder="选择 Manager Bot"
             onChange={onManagerChange}
           />
-          <p className="mt-2 text-[11px] leading-4 text-muted-foreground">
-            主节点统一推进任务，其余成员作为 Worker 配合执行。
-          </p>
         </div>
       )}
 
       {kind === 'task_dag' && !yamlValidated && (
-        <div>
+        <div data-testid="custom-yaml-section" className="flex min-h-0 flex-1 flex-col">
           {templateSlot}
-          <label className="mb-2 block text-xs font-semibold text-muted-foreground" htmlFor="create-group-yaml">
+          <label className="mb-1.5 block text-xs font-semibold text-foreground" htmlFor="create-group-yaml">
             协作定义 YAML
           </label>
-          <YamlCodeEditor value={definitionYaml} onChange={onYamlChange} className="text-sm" />
-          {yamlSummary.length === 0 && (
-            <div className="mt-2 min-h-5 text-xs text-muted-foreground">
-              <span>等待输入有效 YAML</span>
-            </div>
-          )}
-          {bindingSlot}
+          <YamlCodeEditor value={definitionYaml} onChange={onYamlChange} fillAvailableHeight className="text-sm" />
         </div>
       )}
       {kind === 'task_dag' && yamlValidated && <div>{bindingSlot}</div>}

@@ -1,0 +1,6 @@
+interface:
+  display_name: "clawEvolve-plan"
+  short_description: "从诊断结果或自然语言目标生成评测集、目标规格与进化计划"
+  default_prompt: "Use $clawevolve-plan to turn a frozen source, diagnose handoff, or direct natural-language goal into prospective cases, ClawBench templates, objective, and spec-v0."
+policy:
+  allow_implicit_invocation: true

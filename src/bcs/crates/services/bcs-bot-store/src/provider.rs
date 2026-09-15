@@ -353,11 +353,18 @@ impl ProviderBotBindingRepoPort for MemoryProviderStore {
 pub struct DbProviderStore {
     db: Arc<dyn DbPlugin>,
     flavor: ProviderSqlFlavor,
+    providers: crate::provider_cache::ProviderCache<ProviderRecord>,
+    bindings: crate::provider_cache::ProviderCache<ProviderBotBinding>,
+    credentials: crate::provider_cache::ProviderCache<ProviderCredential>,
 }
 
 impl DbProviderStore {
     pub fn new(db: Arc<dyn DbPlugin>, flavor: ProviderSqlFlavor) -> Self {
-        Self { db, flavor }
+        Self { db, flavor,
+            providers: crate::provider_cache::ProviderCache::new(1024, std::time::Duration::from_secs(30)),
+            bindings: crate::provider_cache::ProviderCache::new(4096, std::time::Duration::from_secs(30)),
+            credentials: crate::provider_cache::ProviderCache::new(1024, std::time::Duration::from_secs(30)),
+        }
     }
 
     pub fn mysql(db: Arc<dyn DbPlugin>) -> Self {
@@ -475,11 +482,13 @@ impl ProviderRepoPort for DbProviderStore {
             ),
         )
         .await?;
+        self.providers.invalidate(&format!("{}:{}", env, provider.provider_id));
         Ok(())
     }
 
     async fn get_provider(&self, provider_id: &str) -> ServiceResult<Option<ProviderRecord>> {
         let env = resolve_env();
+        self.providers.get(&format!("{env}:{provider_id}"), || async {
         let sql = format!(
             "SELECT provider_id, name, config, disabled, created_by, owners, {ts} \
              FROM bcs_providers WHERE provider_id = ? AND env = ? LIMIT 1",
@@ -494,7 +503,8 @@ impl ProviderRepoPort for DbProviderStore {
                 ),
             )
             .await?;
-        Ok(rows.first().and_then(parse_provider))
+        rows.first().map(|row| parse_provider(row).ok_or_else(|| ServiceError::InternalError("invalid provider record".into()))).transpose()
+        }).await
     }
 
     async fn list_providers_by_ids(
@@ -609,6 +619,7 @@ impl ProviderRepoPort for DbProviderStore {
                 .await?;
             }
         }
+        self.providers.invalidate(&format!("{env}:{provider_id}"));
         self.get_provider(provider_id).await
     }
 
@@ -636,6 +647,7 @@ impl ProviderRepoPort for DbProviderStore {
             ),
         )
         .await?;
+        self.providers.invalidate(&format!("{env}:{provider_id}"));
         self.get_provider(provider_id).await
     }
 }
@@ -658,6 +670,7 @@ impl ProviderCredentialRepoPort for DbProviderStore {
             ),
         )
         .await?;
+        self.credentials.invalidate(&format!("{}:{}:{}", env, credential.provider_id, credential.credential_kind));
         Ok(())
     }
 
@@ -667,6 +680,7 @@ impl ProviderCredentialRepoPort for DbProviderStore {
         credential_kind: &str,
     ) -> ServiceResult<Option<ProviderCredential>> {
         let env = resolve_env();
+        self.credentials.get(&format!("{env}:{provider_id}:{credential_kind}"), || async {
         let sql = format!(
             "SELECT provider_id, credential_kind, secret_value, disabled, {ts} \
              FROM bcs_provider_credentials \
@@ -686,7 +700,8 @@ impl ProviderCredentialRepoPort for DbProviderStore {
                 ),
             )
             .await?;
-        Ok(rows.first().and_then(parse_credential))
+        rows.first().map(|row| parse_credential(row).ok_or_else(|| ServiceError::InternalError("invalid provider credential".into()))).transpose()
+        }).await
     }
 
     async fn list_credentials_by_kind_for_providers(
@@ -798,6 +813,7 @@ impl ProviderCredentialRepoPort for DbProviderStore {
             ),
         )
         .await?;
+        self.credentials.invalidate(&format!("{env}:{provider_id}:{credential_kind}"));
         self.get_credential_by_kind(provider_id, credential_kind).await
     }
 }
@@ -820,6 +836,7 @@ impl ProviderBotBindingRepoPort for DbProviderStore {
             ),
         )
         .await?;
+        self.bindings.invalidate(&format!("{}:{}", env, binding.bot_uuid));
         Ok(())
     }
 
@@ -828,6 +845,7 @@ impl ProviderBotBindingRepoPort for DbProviderStore {
         bot_uuid: &str,
     ) -> ServiceResult<Option<ProviderBotBinding>> {
         let env = resolve_env();
+        self.bindings.get(&format!("{env}:{bot_uuid}"), || async {
         let sql = format!(
             "SELECT bot_uuid, provider_id, provider_bot_ref, disabled, {ts} \
              FROM bcs_provider_bot_bindings \
@@ -843,7 +861,8 @@ impl ProviderBotBindingRepoPort for DbProviderStore {
                 ),
             )
             .await?;
-        Ok(rows.first().and_then(parse_binding))
+        rows.first().map(|row| parse_binding(row).ok_or_else(|| ServiceError::InternalError("invalid provider binding".into()))).transpose()
+        }).await
     }
 
     async fn list_bindings_by_bot_uuids(
@@ -983,6 +1002,7 @@ impl ProviderBotBindingRepoPort for DbProviderStore {
             ),
         )
         .await?;
+        self.bindings.invalidate(&format!("{env}:{bot_uuid}"));
         self.get_binding_by_bot_uuid(bot_uuid).await
     }
 }

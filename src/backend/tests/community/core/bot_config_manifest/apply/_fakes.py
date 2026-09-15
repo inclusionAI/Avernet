@@ -20,8 +20,7 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
 from agentclaw.community.core.bot_config_manifest.credentials.errors import (
     CredentialNotFoundError,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
-    FetchFailedError,
+from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchedObject,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.object_store import (
@@ -35,7 +34,7 @@ def fetched_object(
     body: bytes, *, url: str = "https://content.example/a.bin",
     content_type: str | None = "application/octet-stream",
 ) -> FetchedObject:
-    """A receipt-bearing fetch result, the shape ``GuardedFetcher`` returns."""
+    """A receipt-bearing fetch result, the shape a source fetcher returns."""
     return FetchedObject(
         bytes=body,
         sha256="sha256:" + hashlib.sha256(body).hexdigest(),
@@ -132,42 +131,6 @@ class FakeManifestContent:
             if record.source_url == source_url:
                 return record
         return None
-
-
-class FakeGuardedFetcher:
-    """Stands in for the W2 transport: scripted successes or real error types.
-
-    Records every request so tests can assert what the wire actually saw —
-    the substituted URL, the declared digest, the credential binding.
-
-    Implements the one rule of W2's contract a caller can lean on: a declared
-    ``expected_digest`` is verified against the served bytes, and a mismatch
-    is a fetch failure — never a "success with corrupted bytes". Without that
-    in the fake, a materialiser relying on the pin would pass here while the
-    real transport refused.
-    """
-
-    def __init__(
-        self,
-        responses: dict[str, FetchedObject] | None = None,
-        failures: dict[str, Exception] | None = None,
-    ) -> None:
-        self.responses = dict(responses or {})
-        self.failures = dict(failures or {})
-        self.requests: list[Any] = []
-
-    def fetch(self, request):
-        self.requests.append(request)
-        failure = self.failures.get(request.url)
-        if failure is not None:
-            raise failure
-        response = self.responses[request.url]
-        if (
-            request.expected_digest is not None
-            and response.sha256 != request.expected_digest
-        ):
-            raise FetchFailedError("digest mismatch")
-        return response
 
 
 @dataclass
@@ -299,6 +262,85 @@ class FakeCredentials:
         )
 
 
+# ── the declared object-source rig ──────────────────────────────────────────
+# A ``source`` is a declaration: ``{protocol: oss, bucket, key, auth}`` or
+# ``{protocol: git, ...}``. The object road is the one a consumer test reaches
+# for when what it is really pinning is the *fetch* — pinning, keep_last,
+# budget, receipts — so these constants and helpers give every such test one
+# bucket, one credential and one spelling of the declaration.
+
+#: The bucket the rigs seed. A document names it; the endpoint never appears
+#: in a document, which is the whole security property of this road.
+OSS_BUCKET = "manifest-fixtures"
+#: The credential name a declared source carries — ``auth`` is mandatory on
+#: this road, since the endpoint is a property of the credential row.
+OSS_AUTH = "oss-cred"
+OSS_ENDPOINT = "https://oss-cn-shanghai.aliyuncs.com"
+#: Deliberately short and with no provider prefix. Nothing on this road
+#: validates a key id's shape — the store fake compares it as an opaque
+#: string — while anything token-shaped, or merely 12+ characters with a
+#: little entropy, trips ``scripts/ci/check_secrets.py`` on the field name
+#: alone and blocks every push that touches this line.
+OSS_ACCESS_KEY_ID = "fake-ak"
+
+
+class FakeObjectCredentials(FakeCredentials):
+    """:class:`FakeCredentials` plus the half only the object road reads.
+
+    The base fake's binding answers the two header seams; an ``oss`` source
+    also asks it for an :class:`ObjectStoreTarget`, and *that* is where the
+    endpoint and the key pair come from — never from the document.
+    """
+
+    def binding(self, *, name: str):
+        binding = super().binding(name=name)
+        binding.object_store_target = lambda bucket: ObjectStoreTarget(
+            endpoint=OSS_ENDPOINT,
+            bucket=bucket,
+            access_key_id=OSS_ACCESS_KEY_ID,
+            secret_access_key="fake-sk",  # short, for the reason above
+            region="cn-shanghai",
+        )
+        return binding
+
+
+def oss_source(
+    key: str, *, bucket: str = OSS_BUCKET, auth: str | None = OSS_AUTH
+) -> dict[str, Any]:
+    """The declared ``source`` an entry carries to read one object."""
+    decl: dict[str, Any] = {"protocol": "oss", "bucket": bucket, "key": key}
+    if auth is not None:
+        decl["auth"] = auth
+    return decl
+
+
+def seeded_object_store(objects: dict[str, bytes] | None = None) -> FakeObjectStore:
+    """A store holding ``key → bytes`` under :data:`OSS_BUCKET`, readable by
+    the key pair :class:`FakeObjectCredentials` presents."""
+    store = FakeObjectStore()
+    for key, body in (objects or {}).items():
+        store.put(OSS_BUCKET, key, body, access_key_id=OSS_ACCESS_KEY_ID)
+    return store
+
+
+def declared_session(**kwargs):
+    """The per-apply source session a declared source needs.
+
+    Every entry that reaches a fetcher carries one — the ``from`` road reads
+    ``sources`` out of it and the git road checks out through it — so a rig
+    driving a declared source hands the context one even when the object road
+    it takes never looks inside.
+    """
+    from agentclaw.community.core.bot_config_manifest.apply.source_session import (
+        SourceSession,
+    )
+
+    kwargs.setdefault("sources", {})
+    kwargs.setdefault("baselines", {})
+    kwargs.setdefault("git", None)
+    return SourceSession(**kwargs)
+
+
 class FakeIdentityService:
     """Stands in for ``IdentityService``: files held, writes counted.
 
@@ -386,25 +428,28 @@ class FakeIdentityService:
 
 
 def identity_rig(files: dict[str, str] | None = None):
-    """A materialiser over fakes: (materialiser, identity fake, fetcher fake).
+    """A materialiser over fakes: (materialiser, identity fake, object store,
+    content store).
 
-    The fetched URL ``SOUL_URL`` serves ``SOUL_BODY`` for identity tests.
+    The declared source :data:`SOUL_SOURCE` reads :data:`SOUL_KEY` out of the
+    seeded bucket and serves :data:`SOUL_BODY`.
     """
-    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-        EntryFetcher,
+    from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+        DeclaredSourceResolver,
     )
     from agentclaw.community.core.bot_config_manifest.apply.materialisers.identity import (
         IdentityMaterialiser,
     )
 
     identity = FakeIdentityService(files)
-    fetcher = FakeGuardedFetcher(responses={SOUL_URL: fetched_object(SOUL_BODY)})
+    objects = seeded_object_store({SOUL_KEY: SOUL_BODY})
     content = FakeManifestContent()
-    pipeline = EntryFetcher(fetcher, content, FakeCredentials(), FakeObjectStore())
-    return IdentityMaterialiser(identity, pipeline), identity, fetcher, content
+    pipeline = DeclaredSourceResolver(content, FakeObjectCredentials(), objects)
+    return IdentityMaterialiser(identity, pipeline), identity, objects, content
 
 
-SOUL_URL = "https://content.example/identity/soul.md"
+SOUL_KEY = "identity/soul.md"
+SOUL_SOURCE = oss_source(SOUL_KEY)
 SOUL_BODY = b"# team charter\nServe the customer honestly.\n"
 
 
@@ -942,3 +987,35 @@ class FakeResourceFileService:
             }
         )
         return path in self._exists
+
+
+# ── the delivery seam's required collaborators (W8) ──────────────────────
+#
+# ``BotConfigManifestApplyService`` takes ``is_teclaw``, the platform ports and
+# the closing redeliver as **required** arguments: the composition root binds
+# every one of them, so an optional default would describe a value that is
+# never absent. A rig that only exercises the ARCA family still has to say so,
+# and these three say it — the two that belong to the teclaw path raise if the
+# suite ever reaches them, which is the thing worth catching.
+
+
+def arca_only_engine_test(_engine: str | None) -> bool:
+    """Every bot is ARCA. What ``is_teclaw=None`` used to fall back to."""
+    return False
+
+
+def unreachable_platform_ports():
+    raise AssertionError(
+        "this rig is ARCA-only: the teclaw platform ports are never built"
+    )
+
+
+async def unreachable_redeliver(ctx) -> None:
+    raise AssertionError(
+        "this rig is ARCA-only: the closing redeliver is never reached"
+    )
+
+
+async def no_redeliver(ctx) -> None:
+    """The closing step, doing nothing — for a teclaw rig that is not about it."""
+    return None

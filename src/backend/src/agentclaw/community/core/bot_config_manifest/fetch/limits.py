@@ -1,4 +1,4 @@
-"""Limits and deployment allowlists for the guarded fetcher (W2, #1470).
+"""Limits and the deployment allowlist for the manifest fetch road (W2, #1470).
 
 Single source for every number the transport enforces — schema §5 of
 ``docs/bot-config-manifest/manifest-schema.zh-CN.md``. Fetch-time limits
@@ -7,14 +7,16 @@ at PUT only what it can see at write time, and duplicating fetch numbers
 there is how the two drift.
 
 The deployment transport allowlist is *config-driven, not env-driven* — it
-turns a deployment decision (corporate HTTP mirror, an internal content
-proxy) into an exception through ``application.yaml``'s
-``user_config.bot_config_manifest`` block, per the repo rule that raw
-environment access belongs to config loading and composition roots, never
-to core. Core here stays pure: ``transport_allowlist_from_config`` parses
-the merged YAML tree, and the composition root hands the result to
-``GuardedFetcher`` as a constructor value. It widens nothing else — a host
-on the allowlist still goes through address validation.
+turns a deployment decision (an object store on an internal endpoint) into an
+exception through ``application.yaml``'s ``user_config.bot_config_manifest``
+block, per the repo rule that raw environment access belongs to config
+loading and composition roots, never to core. Core here stays pure:
+``transport_allowlist_from_config`` parses the merged YAML tree, and the
+composition root hands the result to ``SourceCredentialService`` as
+``endpoint_allow_hosts``. Its one consumer is the credential endpoint guard
+(:mod:`.endpoint_guard`), which otherwise refuses to store an endpoint whose
+host resolves to a private address. It widens nothing else — every other
+rule on that endpoint still applies.
 """
 from __future__ import annotations
 
@@ -126,16 +128,17 @@ def transport_allowlist_from_config(
 
     Matching is exact-host — the DNS-rebinding lesson: a hostname on the
     list is the hostname exempted. Allowlisted hosts keep every other rule:
-    redirect budget, byte caps, hop-by-hop re-validation. The list admits
+    URL shape, no userinfo, no control characters. The list admits
     *destinations*, not behaviors.
 
     The block is optional and empty by default (no deployment exception);
     a present-but-malformed block is a configuration error and raises
     ``ValueError`` — a typo in yaml must fail its reader loudly, not
-    silently fetch strictly. Consumers: the composition root that
-    constructs ``GuardedFetcher`` reads ``user_config`` through this seam
-    (kept in core as a pure parser over the already-loaded tree, so core
-    never touches raw environment itself).
+    silently refuse strictly. Consumers: the composition root that
+    constructs ``SourceCredentialService`` reads ``user_config`` through this
+    seam and passes the result as ``endpoint_allow_hosts`` (kept in core as a
+    pure parser over the already-loaded tree, so core never touches raw
+    environment itself).
     """
     block = settings.get(_MANIFEST_BLOCK)
     if block is None:
@@ -164,11 +167,12 @@ def transport_allowlist_from_config(
 
 @dataclass(frozen=True)
 class FetchBudget:
-    """Transport budget for ONE request, as the guarded fetcher issues it.
+    """Transport budget for ONE request, as a source fetcher issues it.
 
-    Per-entry caps and the per-hop timeout — the vocabulary a
-    ``FetchRequest`` names. The *apply-scope* ledger (shared wall clock and
-    byte total) is a different object at a different layer:
+    Per-entry caps and the per-operation timeout — the vocabulary a fetch
+    names when it asks how many bytes and how long it may take. The
+    *apply-scope* ledger (shared wall clock and byte total) is a different
+    object at a different layer:
     ``apply/budget.ApplyFetchBudget``, consulted per entry by the entry
     fetch pipeline (W5). The two share this module's numbers and nothing
     else.

@@ -6,3 +6,5 @@ export { default as BenchTemplateDetail } from "./pages/BenchTemplateDetail.js";
 export * from "./bench/session.js";
 export { parseBaselineMarkdown, parsedMarkdownToFormFields } from "./utils/markdown-template-parser.js";
 export * from "./features/evolve/task-registry.js";
+
+export type { EvolveProps, EvolvePresentationVersion } from "./pages/Evolve.js";

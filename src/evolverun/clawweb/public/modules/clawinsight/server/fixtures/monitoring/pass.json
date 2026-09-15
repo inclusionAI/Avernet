@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "claw-monitoring/diagnosis-event/v1",
+  "eventId": "mock-diag-te-pass-002",
+  "diagnosisId": "mock-diag-te-pass-002",
+  "botId": "mock-bot-te",
+  "engine": "TE",
+  "sessionKey": null,
+  "sessionId": "mock-session-001",
+  "traceId": "mock-trace-002",
+  "occurredAt": "2026-09-09T09:05:00Z",
+  "diagnosedAt": "2026-09-09T09:05:18Z",
+  "decision": "PASS",
+  "tcFaultLabel": null,
+  "confidence": null,
+  "businessProblemCategory": "正常",
+  "businessProblemSubtype": "目标已完成",
+  "systemDiagnosis": "本轮工具调用正常完成。",
+  "businessDiagnosis": "用户发布的新查询任务已完成。",
+  "handlerName": null,
+  "humanIntervention": false
+}

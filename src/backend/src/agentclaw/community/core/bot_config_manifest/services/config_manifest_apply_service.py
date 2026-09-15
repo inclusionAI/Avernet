@@ -60,11 +60,13 @@ from agentclaw.community.core.bot_config_manifest.apply.delivery import (
 from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     APPLY_TASK_DEADLINE_SECONDS,
     APPLY_TASK_TYPE,
+    PHASE_KEY,
     build_apply_task_payload,
-    phases_from_payload,
+    phase_from_payload,
 )
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-    EntryFetcher,
+from agentclaw.community.core.bot_config_manifest.apply.triggers import require_phase_matches_trigger
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
+    DeclaredSourceResolver,
 )
 from agentclaw.community.core.ports.identity_file_port import (
     IdentityFilePort,
@@ -79,12 +81,8 @@ from agentclaw.community.core.bot_config_manifest.fetch.limits import (
     APPLY_BUDGET_S,
     APPLY_FETCH_TOTAL_LIMIT,
 )
-from agentclaw.community.core.bot_config_manifest.apply.order import (
-    ApplyPhase,
-)
-from agentclaw.community.core.bot_config_manifest.apply.orchestrator import (
-    ApplyOrchestrator,
-)
+from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
+from agentclaw.community.core.bot_config_manifest.apply.orchestrator import ApplyOrchestrator
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyConstruct,
     ApplyReport,
@@ -212,17 +210,17 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         upload_service_provider: Callable[[], LocalSkillUploadServiceProtocol],
         capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
-        entry_fetcher_provider: Callable[[], EntryFetcher],
+        entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
         resource_service_provider: Callable[[], ResourceFilePort],
         cli_tool_service_factory: Callable[[str], "CliToolService"],
         git_client_provider: Callable[[], GitSourceClient],
         task_queue_provider: Callable[[], "TaskQueueService"],
         bot_repository: BotRepository,
         *,
-        is_teclaw: Optional[Callable[[Optional[str]], bool]] = None,
+        is_teclaw: Callable[[Optional[str]], bool],
+        teclaw_platform_ports_provider: Callable[[], MaterialiserPorts],
+        redeliver: Redeliver,
         teclaw_platform_managed: bool = False,
-        teclaw_platform_ports_provider: Optional[Callable[[], MaterialiserPorts]] = None,
-        redeliver: Optional[Redeliver] = None,
     ) -> None:
         self._manifests = manifest_service
         self._applies = apply_repository
@@ -276,13 +274,13 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         # W8: the delivery seam. The factory is the one reader of the
         # platform-managed switch; ARCA's ports are the providers above, held
         # as a thunk so they are resolved per apply like everything else here.
-        # ``is_teclaw`` is the engine authority (``TeclawProvisionService``),
-        # passed in by the DI module; ``None`` — a test constructing the
-        # service without one — makes every bot ARCA, which is the pre-W8
-        # behaviour and never a silent teclaw misroute in production, where
-        # the module always binds it.
+        # ``is_teclaw`` is the engine authority (``TeclawProvisionService``).
+        # It, the platform ports and the redeliver are **required**: the
+        # composition root binds all three, and defaulting ``is_teclaw`` was
+        # not inert — "every bot is ARCA" routed a teclaw apply through the
+        # container ports silently. The switch stays defaulted; off is real.
         self._strategies = DeliveryStrategyFactory(
-            is_teclaw=is_teclaw or (lambda _engine: False),
+            is_teclaw=is_teclaw,
             teclaw_platform_managed=teclaw_platform_managed,
             arca_ports=self._arca_ports,
             teclaw_platform_ports=teclaw_platform_ports_provider,
@@ -304,7 +302,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         actor_id: str,
         audit_actor: Optional[str] = None,
         trigger: str = "explicit",
-        phases: frozenset[ApplyPhase],
+        phase: ApplyPhase | None = None,
         engine_type: Optional[str] = None,
         bot_type: Optional[str] = None,
         carry_from_apply_id: Optional[str] = None,
@@ -343,6 +341,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         collaborator rows and found nobody. It defaults to ``actor_id`` so a
         caller with nothing to distinguish keeps the obvious behaviour.
         """
+        require_phase_matches_trigger(trigger, phase)
         env = get_current_env()
         lock = self._locks.acquire(
             env=env, entity_id=entity_id, bot_id=bot_id, holder_user_id=actor_id
@@ -438,7 +437,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                     trigger=trigger,
                     lock_token=lock.lock_token,
                     started_at=started_at.isoformat(),
-                    phases=phases,
+                    phase=phase,
                     engine_type=engine_type,
                     bot_type=bot_type,
                     carry_from_apply_id=carry_from_apply_id,
@@ -478,7 +477,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         apply_id: str,
         trigger: str,
         started_at: datetime,
-        phases: frozenset[ApplyPhase],
+        phase: ApplyPhase | None = None,
         lock_token: str,
         carry_from_apply_id: Optional[str] = None,
     ) -> None:
@@ -499,7 +498,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                     apply_id=apply_id,
                     trigger=trigger,
                     started_at=started_at,
-                    phases=phases,
+                    phase=phase,
                 )
             )
         except Exception as exc:  # noqa: BLE001 - a daemon thread has no caller
@@ -597,7 +596,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 apply_id=str(payload["apply_id"]),
                 trigger=str(payload["trigger"]),
                 started_at=parse_started_at(payload.get("started_at")),
-                phases=phases_from_payload(payload["phases"]),
+                phase=phase_from_payload(payload.get(PHASE_KEY)),
                 lock_token=str(payload["lock_token"]),
                 carry_from_apply_id=payload.get("carry_from_apply_id"),
             )
@@ -757,8 +756,9 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
 
     def _last_resolutions(
         self, *, entity_id: str, bot_id: str
-    ) -> dict[str, str]:
-        """Each source's SHA as the last apply that RESOLVED it (W7 strict).
+    ) -> dict[tuple[str, str, str], str]:
+        """Each ``(url, ref, mode)``'s SHA as the last apply that RESOLVED it,
+        never the row's ``name`` (W7; ``apply/source_session`` says why).
 
         The reports are where "what did we resolve" already lives
         (``ApplyReport.sources``), so strict mode reads them back rather than
@@ -767,9 +767,10 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         have failed to fetch a source (its report carries no resolution for
         it — a failed fetch or a strict refusal adopts nothing), and reading
         only that row would wipe the baseline, silently disarming strict mode
-        and the ``keep_last`` receipt after one outage. Per source, the
-        newest report that carries it wins; a report with no resolutions —
-        or no reports — yields no opinions.
+        and the ``keep_last`` receipt after one outage. Per key, the newest
+        report that carries it wins; rows sharing a key (the report holds one
+        per declaration) carry the same sha, so any serves. A row missing
+        ``url`` or ``mode`` yields no opinion, nor do empty or absent reports.
         """
         records = self._applies.recent(
             env=get_current_env(),
@@ -777,16 +778,18 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             bot_id=bot_id,
             limit=_BASELINE_HISTORY_APPLIES,
         )
-        baselines: dict[str, str] = {}
+        baselines: dict[tuple[str, str, str], str] = {}
         for record in records:
             report = self._to_report(record, entity_id=entity_id, bot_id=bot_id)
             if report is None:
                 continue
             for source in report.sources:
-                if source.resolved_sha is None:
+                if (source.url is None or source.mode is None
+                        or source.resolved_sha is None):
                     continue
-                # Newest wins: an earlier walk-back entry is not overwritten.
-                baselines.setdefault(source.name, source.resolved_sha)
+                # Newest wins; "HEAD" normalised the way the spec does it.
+                key = (source.url, source.ref or "HEAD", source.mode)
+                baselines.setdefault(key, source.resolved_sha)
         return baselines
 
     # ── internals ───────────────────────────────────────────────────────────
@@ -854,7 +857,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         apply_id: str,
         trigger: str,
         started_at: datetime,
-        phases: frozenset[ApplyPhase],
+        phase: ApplyPhase | None = None,
     ) -> ApplyReport:
         """Walk the categories, then let the strategy close the apply.
 
@@ -868,7 +871,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             apply_id=apply_id,
             trigger=trigger,
             started_at=started_at,
-            phases=phases,
+            phase=phase,
         )
         try:
             note = await strategy.finish(ctx, report)

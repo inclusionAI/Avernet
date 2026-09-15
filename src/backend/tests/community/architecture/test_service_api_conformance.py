@@ -49,6 +49,8 @@ import pytest
 
 from agentclaw.community.api.bot_dormant_service import (
     BotDormantActivateServiceProtocol,
+    BotDormantAuditServiceProtocol,
+    BotDormantRecycleServiceProtocol,
 )
 from agentclaw.community.api.bot_runtime_projector import (
     BotRuntimeProjectorProtocol,
@@ -170,6 +172,8 @@ from agentclaw.community.api.draft_edit_lease_service import (
     DraftEditLeaseServiceProtocol,
 )
 from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
+from agentclaw.community.core.bot_dormant.audit_service import DormantAuditService
+from agentclaw.community.core.bot_dormant.recycle_service import RecycleBotService
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
     CollaboratorService,
 )
@@ -296,6 +300,8 @@ _PAIRS = [
     (BotSpaceServiceProtocol, BotSpaceService),
     (LocalBotWorkflowServiceProtocol, LocalBotWorkflowService),
     (BotDormantActivateServiceProtocol, ActivateBotService),
+    (BotDormantRecycleServiceProtocol, RecycleBotService),
+    (BotDormantAuditServiceProtocol, DormantAuditService),
     (BotInventoryBotPort, BotService),
     (DesktopBotInventoryPort, DesktopBotService),
     (EngineConfigServiceProtocol, EngineConfigService),

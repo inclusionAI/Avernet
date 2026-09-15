@@ -123,7 +123,7 @@ export function MemberList({
             ))}
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-sm text-muted-foreground">
+          <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
             {emptyText}
           </div>
         )
@@ -143,17 +143,23 @@ export function MemberList({
                 <Avatar participant={{ ...participant, name: displayName }} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center">
-                    <span className="max-w-full truncate text-sm font-semibold text-foreground">{displayName}</span>
+                    <span className="max-w-full truncate text-xs font-medium text-foreground">{displayName}</span>
                   </div>
-                  {/* 标签分类型着色（Badge 默认字号）：成员类型默认蓝；群主/主节点紫；自动/参与绿；禁言/旁观灰。 */}
+                  {/* 标签分类型着色（管理面板内统一为 10px）：成员类型默认蓝；群主/主节点紫；自动/参与绿；禁言/旁观灰。 */}
                   <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                    <Badge tone="primary">{participant.kind === 'bot' ? 'Bot' : '用户'}</Badge>
-                    <Badge tone={getRoleTone(participant, groupKind)}>{getRoleLabel(participant, groupKind)}</Badge>
+                    <Badge className="text-[10px]" tone="primary">
+                      {participant.kind === 'bot' ? 'Bot' : '用户'}
+                    </Badge>
+                    <Badge className="text-[10px]" tone={getRoleTone(participant, groupKind)}>
+                      {getRoleLabel(participant, groupKind)}
+                    </Badge>
                     {showMode && getModeLabel(participant) ? (
-                      <Badge tone={getModeTone(participant)}>{getModeLabel(participant)}</Badge>
+                      <Badge className="text-[10px]" tone={getModeTone(participant)}>
+                        {getModeLabel(participant)}
+                      </Badge>
                     ) : null}
                     {participant.kind === 'human' && participant.messageViewScope ? (
-                      <MessageViewScopeBadge scope={participant.messageViewScope} />
+                      <MessageViewScopeBadge className="text-[10px]" scope={participant.messageViewScope} />
                     ) : null}
                   </div>
                 </div>

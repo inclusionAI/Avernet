@@ -54,7 +54,7 @@ from agentclaw.community.core.bot_config_manifest.content.models import (
     ContentScope,
     StoredContentRecord,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+from agentclaw.community.core.bot_config_manifest.fetch.errors import (
     FetchedObject,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.limits import DIGEST_RE

@@ -445,7 +445,7 @@ mod tests {
 
     use async_trait::async_trait;
     use bcs_service_api::{
-        ActorKind, ActorStatus, BindingChannel, BindingChannels, BotDynamicStatus,
+        ActorKind, ActorStatus, BindingChannel, BindingChannels,
         BotRegistryCoreService, EnsureHumanResult, EnsureOwnerEdgesResult, OnboardActorIdentity,
         RegisteredBot, RelationCoreService, RelationEdge, ServiceResult, Skill,
     };
@@ -600,7 +600,7 @@ mod tests {
             Ok(())
         }
 
-        async fn update_status(&self, _bot_id: &str, _status: BotDynamicStatus) -> bool {
+        async fn update_status(&self, _bot_id: &str) -> bool {
             false
         }
 
@@ -692,7 +692,6 @@ mod tests {
                         visibility: "protected".to_string(),
                         ..Default::default()
                     },
-                    dynamic_status: BotDynamicStatus::default(),
                     env: None,
                     created_by: Some(staff_no.to_string()),
                     actor_kind: ActorKind::Human,
@@ -784,7 +783,6 @@ mod tests {
         RegisteredBot {
             bot_uuid: bot_uuid.into(),
             capabilities,
-            dynamic_status: BotDynamicStatus::default(),
             env: None,
             created_by: None,
             actor_kind: ActorKind::Bot,
@@ -816,6 +814,12 @@ mod tests {
             agent_token: None,
             actor_identity: None,
         }
+    }
+
+    #[tokio::test]
+    async fn static_registry_update_status_rejects_heartbeat_renewal() {
+        let registry = Arc::new(StaticRegistry::new(vec![]));
+        assert!(!registry.update_status("heartbeat-renewal-unsupported").await);
     }
 
     #[tokio::test]

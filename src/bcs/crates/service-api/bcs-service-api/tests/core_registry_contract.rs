@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use bcs_service_api::{
-    ActorStatus, BotCapabilities, BotConnectParams, BotDynamicStatus, BotRegistryCoreService,
+    ActorStatus, BotCapabilities, BotConnectParams, BotRegistryCoreService,
     ConnectError, ConnectionKind,
 };
 use bcs_test_support::NoopBotRegistryCoreService;
@@ -72,7 +72,7 @@ async fn noop_registry_writes_and_transports_are_fail_closed() {
         .unwrap();
     assert!(
         !service
-            .update_status("bot-1", BotDynamicStatus::default())
+            .update_status("bot-1")
             .await
     );
     assert!(!service.unregister("bot-1").await);

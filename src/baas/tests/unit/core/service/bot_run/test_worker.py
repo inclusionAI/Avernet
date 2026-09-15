@@ -8,6 +8,8 @@ asyncio_mode=auto，异步用例直接 async def。
 from __future__ import annotations
 
 import asyncio
+from typing import Any
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -18,6 +20,7 @@ from secbaas.community.core.repository.bot_run_queue import (
     BotRunQueueRecord,
     OrmBotRunQueueRepository,
 )
+from secbaas.community.core.service.bot_run import BotRunner
 from secbaas.community.core.service.bot_run._bot_concurrency import (
     BotConcurrencyManager,
     FixedMachineCountProvider,
@@ -134,6 +137,40 @@ class _RequeuedExecutor:
         )
 
         raise RequeuedToPendingError(record.run_id, self._session_id)
+
+
+class _CancellableBlockingExecutor:
+    """阻塞在事件上，执行/取消时分别设置事件。"""
+
+    def __init__(self):
+        self.gate = asyncio.Event()
+        self.started = asyncio.Event()
+        self.cancelled = asyncio.Event()
+
+    async def execute(self, record: BotRunQueueRecord) -> None:
+        self.started.set()
+        try:
+            await self.gate.wait()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
+
+
+class _CancellableBlockingExecutor:
+    """阻塞在事件上，被取消时设置事件。"""
+
+    def __init__(self):
+        self.gate = asyncio.Event()
+        self.started = 0
+        self.cancelled = asyncio.Event()
+
+    async def execute(self, record: BotRunQueueRecord) -> None:
+        self.started += 1
+        try:
+            await self.gate.wait()
+        except asyncio.CancelledError:
+            self.cancelled.set()
+            raise
 
 
 def _insert(
@@ -311,7 +348,7 @@ async def test_disabled_worker_does_not_start(repo, queue):
 # ── trace context propagation tests ───────────────────────────────
 
 
-from unittest.mock import MagicMock, patch  # noqa: E402
+from unittest.mock import patch  # noqa: E402
 
 from secbaas.community.core.service.bot_run._worker import (  # noqa: E402
     _trace_context_from_meta,
@@ -1203,7 +1240,60 @@ async def test_abort_runs_by_session_without_run_repo_skips_update_error(repo, q
     assert queue.get_by_run_id(run_id).status == "DONE"
 
 
-# ── bot 维度收窄：群聊多 bot 共 session 不误杀 ──────────────────────
+async def test_abort_runs_by_session_remote_worker_marks_abort_meta(repo, queue):
+    """非本机 RUNNING run 被 abort 时，应写 abort_requested 到 meta 并 force_done。"""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
+    claimed = queue.claim_pending_by_bot("bot-1", "worker-a", candidates=5)
+    assert claimed is not None and claimed.run_id == run_id
+
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    # worker-b 没有本地 task，模拟多机场景
+    worker_b = _worker(queue, repo, ex, worker_id="worker-b", run_repository=repo)
+
+    outcome = await worker_b.abort_runs_by_session("sess-abort", "bot-1")
+
+    assert outcome.aborted_run_ids == [run_id]
+    assert outcome.had_terminal is False
+    assert queue.get_by_run_id(run_id).status == "DONE"
+    assert repo.get_by_run_id(run_id).status == "FAILED"
+    assert queue.is_abort_requested(run_id) is True
+
+
+async def test_abort_poll_loop_cancels_run_task_and_force_done(repo, queue):
+    """_abort_poll_loop 感知到 abort 信号后取消 task 并 force_done。"""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
+    record = queue.get_by_run_id(run_id)
+
+    worker = _worker(
+        queue,
+        repo,
+        _CompletingExecutor(repo),
+        worker_id="worker-1",
+        config=BotRequestWorkerConfig(abort_poll_interval_seconds=0.05),
+    )
+
+    run_cancelled = asyncio.Event()
+
+    async def _fake_run():
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            run_cancelled.set()
+            raise
+
+    run_task = asyncio.create_task(_fake_run())
+    poll_task = asyncio.create_task(worker._abort_poll_loop(record, run_task))
+
+    # 给轮询一点时间进入等待
+    await asyncio.sleep(0.1)
+    queue.update_meta(run_id, {"abort_requested": True})
+
+    # 轮询任务应在感知到信号后退出
+    await asyncio.wait_for(poll_task, timeout=2)
+    # run_task 应被取消
+    await asyncio.wait_for(run_cancelled.wait(), timeout=2)
+
+    assert queue.get_by_run_id(run_id).status == "DONE"
 
 
 async def test_abort_runs_by_session_group_chat_other_bot_running_not_killed(
@@ -1305,3 +1395,369 @@ async def test_abort_runs_by_session_calls_repo_with_bot_session_args(repo, queu
     assert find_running_calls == [("sess-abort", "bot-1")]
     # 有可取消 run 时不调用 find_terminal_by_bot_session
     assert find_terminal_calls == []
+
+
+async def test_abort_poll_loop_awaits_engine_notifier(repo, queue):
+    """_abort_poll_loop 感知 abort 信号后会 await engine_abort_notifier。"""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
+    record = queue.get_by_run_id(run_id)
+
+    notified = asyncio.Event()
+    captured: dict[str, str | None] = {}
+
+    async def engine_notifier(session_id: str, rid: str | None) -> None:
+        captured["session_id"] = session_id
+        captured["run_id"] = rid
+        notified.set()
+
+    worker = _worker(
+        queue,
+        repo,
+        _CompletingExecutor(repo),
+        worker_id="worker-1",
+        config=BotRequestWorkerConfig(abort_poll_interval_seconds=0.05),
+        engine_abort_notifier=engine_notifier,
+    )
+
+    run_cancelled = asyncio.Event()
+
+    async def _fake_run():
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            run_cancelled.set()
+            raise
+
+    run_task = asyncio.create_task(_fake_run())
+    poll_task = asyncio.create_task(worker._abort_poll_loop(record, run_task))
+
+    await asyncio.sleep(0.1)
+    queue.update_meta(run_id, {"abort_requested": True})
+
+    await asyncio.wait_for(poll_task, timeout=2)
+    await asyncio.wait_for(run_cancelled.wait(), timeout=2)
+
+    assert notified.is_set(), "engine notifier must be awaited"
+    assert captured["session_id"] == "sess-abort"
+    assert captured["run_id"] == run_id
+
+
+async def test_bot_runner_abort_propagates_to_bot_service(repo, queue):
+    """BotRunner.abort 解析 binding、选择 service 并调用 service.abort。"""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
+    repo.update_session_id(run_id, "agent:main:sess-real")
+
+    class _FakeBotService:
+        def __init__(self):
+            self.calls: list[dict[str, Any]] = []
+
+        async def abort(
+            self,
+            *,
+            session_id: str,
+            binding_info: Any,
+        ) -> None:
+            self.calls.append(
+                {
+                    "session_id": session_id,
+                    "binding_info": binding_info,
+                }
+            )
+
+    fake_service = _FakeBotService()
+
+    class _FakeSelector:
+        def select(self, binding_info: Any) -> Any:
+            return fake_service
+
+    class _FakePlugin:
+        async def get_binding(self, bot_id: str, owner_id: str, stage: str):
+            from secbaas.community.spi.bot_service import BotBindingData
+
+            return BotBindingData(
+                bot_id="bot-1",
+                owner_id="entity-1",
+                bot_type="personal",
+                engine_type="openclaw",
+                binding_id=1,
+                device_provider="baas",
+                device_id="device-1",
+            )
+
+        async def report(self, payload: Any) -> None:
+            pass
+
+    from secbaas.community.core.service.bot_run._noop_message_dispatcher import (
+        NoopMessageDispatcher,
+    )
+    from secbaas.community.plugins.eval_env.stub import NoopEvalSessionLog
+
+    runner = BotRunner(
+        bot_service_selector=_FakeSelector(),
+        run_repository=repo,
+        bot_service_plugin=_FakePlugin(),
+        dispatchers=[NoopMessageDispatcher()],
+        system_config_service=MagicMock(),  # type: ignore[arg-type]
+        eval_session_log=NoopEvalSessionLog(),
+    )
+
+    await runner.abort(session_id="sess-abort", run_id=run_id)
+
+    assert len(fake_service.calls) == 1
+    call = fake_service.calls[0]
+    assert call["session_id"] == "agent:main:sess-real"
+    assert call["binding_info"].device_id == "device-1"
+
+
+def _make_bot_runner_for_abort(
+    repo: OrmBotRunRepository,
+    *,
+    binding_return: Any = None,
+    service_abort_side_effect: Exception | None = None,
+):
+    """构造用于测试 ``BotRunner.abort`` 的 Runner。"""
+    from secbaas.community.api.device_manage import ErrorCode, PaasError
+    from secbaas.community.core.service.bot_run._noop_message_dispatcher import (
+        NoopMessageDispatcher,
+    )
+    from secbaas.community.plugins.eval_env.stub import NoopEvalSessionLog
+    from secbaas.community.spi.bot_service import BotBindingData
+
+    class _FakeBotService:
+        def __init__(self):
+            self.calls: list[dict[str, Any]] = []
+
+        async def abort(
+            self,
+            *,
+            session_id: str,
+            binding_info: Any,
+        ) -> None:
+            self.calls.append(
+                {
+                    "session_id": session_id,
+                    "binding_info": binding_info,
+                }
+            )
+            if service_abort_side_effect is not None:
+                raise service_abort_side_effect
+
+    fake_service = _FakeBotService()
+
+    class _FakeSelector:
+        def select(self, binding_info: Any) -> Any:
+            return fake_service
+
+    class _FakePlugin:
+        async def get_binding(
+            self,
+            bot_id: str,
+            owner_id: str,
+            stage: str,
+        ) -> Any:
+            if isinstance(binding_return, Exception):
+                raise binding_return
+            return binding_return
+
+        async def report(self, payload: Any) -> None:
+            pass
+
+    if binding_return is None:
+        binding_return = BotBindingData(
+            bot_id="bot-1",
+            owner_id="entity-1",
+            bot_type="personal",
+            engine_type="openclaw",
+            binding_id=1,
+            device_provider="baas",
+            device_id="device-1",
+        )
+
+    runner = BotRunner(
+        bot_service_selector=_FakeSelector(),
+        run_repository=repo,
+        bot_service_plugin=_FakePlugin(),
+        dispatchers=[NoopMessageDispatcher()],
+        system_config_service=MagicMock(),  # type: ignore[arg-type]
+        eval_session_log=NoopEvalSessionLog(),
+    )
+    return runner, fake_service
+
+
+async def test_bot_runner_abort_skips_when_run_id_missing(repo, queue):
+    """run_id 为空时直接跳过，不查询 DB。"""
+    # 预插记录以确保不会误命中
+    _insert_with_session(repo, queue, "bot-1", "sess-skip")
+    runner, _ = _make_bot_runner_for_abort(repo)
+
+    await runner.abort(session_id="sess-skip", run_id="")
+
+
+async def test_bot_runner_abort_skips_when_run_not_found(repo, queue):
+    """run_id 不存在时记录日志并返回。"""
+    runner, _ = _make_bot_runner_for_abort(repo)
+    missing_run_id = uuid4().hex
+
+    await runner.abort(session_id="sess-missing", run_id=missing_run_id)
+
+
+async def test_bot_runner_abort_skips_when_binding_resolution_fails(repo, queue):
+    """binding 解析抛非 NOT_FOUND 异常时，记录日志并返回。"""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-binding-fail")
+    runner, fake_service = _make_bot_runner_for_abort(
+        repo,
+        binding_return=RuntimeError("binding boom"),
+    )
+
+    await runner.abort(session_id="sess-binding-fail", run_id=run_id)
+
+    assert fake_service.calls == []
+
+
+async def test_bot_runner_abort_skips_when_binding_not_found(repo, queue):
+    """binding 返回 NOT_FOUND 时，记录日志并返回。"""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-binding-none")
+    from secbaas.community.api.device_manage import ErrorCode, PaasError
+
+    runner, fake_service = _make_bot_runner_for_abort(
+        repo,
+        binding_return=PaasError(
+            code=ErrorCode.NOT_FOUND,
+            message="not found",
+        ),
+    )
+
+    await runner.abort(session_id="sess-binding-none", run_id=run_id)
+
+    assert fake_service.calls == []
+
+
+async def test_bot_runner_abort_logs_when_service_abort_fails(repo, queue):
+    """service.abort 抛异常时，Runner 记录日志不抛出。"""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-service-fail")
+    runner, fake_service = _make_bot_runner_for_abort(
+        repo,
+        service_abort_side_effect=RuntimeError("service boom"),
+    )
+
+    await runner.abort(session_id="sess-service-fail", run_id=run_id)
+
+    assert len(fake_service.calls) == 1
+
+
+async def test_abort_poll_loop_returns_when_run_task_is_done(repo, queue):
+    """run_task 已结束时，poll loop 直接返回。"""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-poll-done")
+    record = queue.get_by_run_id(run_id)
+    worker = _worker(
+        queue,
+        repo,
+        _CompletingExecutor(repo),
+        worker_id="worker-poll-done",
+        config=BotRequestWorkerConfig(abort_poll_interval_seconds=0.05),
+    )
+
+    async def short_run() -> None:
+        await asyncio.sleep(0.01)
+
+    run_task = asyncio.create_task(short_run())
+    poll_task = asyncio.create_task(worker._abort_poll_loop(record, run_task))
+
+    await asyncio.wait_for(poll_task, timeout=2)
+
+
+async def test_abort_poll_loop_continues_when_queue_record_missing(repo, queue):
+    """get_by_run_id 返回 None 时，poll loop 继续下一轮。"""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-poll-missing")
+    record = queue.get_by_run_id(run_id)
+    worker = _worker(
+        queue,
+        repo,
+        _CompletingExecutor(repo),
+        worker_id="worker-poll-missing",
+        config=BotRequestWorkerConfig(abort_poll_interval_seconds=0.05),
+    )
+    worker._queue.get_by_run_id = MagicMock(return_value=None)
+
+    async def short_run() -> None:
+        await asyncio.sleep(0.15)
+
+    run_task = asyncio.create_task(short_run())
+    poll_task = asyncio.create_task(worker._abort_poll_loop(record, run_task))
+
+    await asyncio.wait_for(poll_task, timeout=2)
+
+
+async def test_abort_poll_loop_swallows_engine_notifier_error(repo, queue):
+    """engine abort notifier 抛异常时，poll loop 记录日志仍继续取消 task。"""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-notifier-fail")
+    record = queue.get_by_run_id(run_id)
+
+    async def failing_notifier(session_id: str, rid: str | None) -> None:
+        raise RuntimeError("notifier boom")
+
+    worker = _worker(
+        queue,
+        repo,
+        _CompletingExecutor(repo),
+        worker_id="worker-notifier-fail",
+        config=BotRequestWorkerConfig(abort_poll_interval_seconds=0.05),
+        engine_abort_notifier=failing_notifier,
+    )
+
+    run_cancelled = asyncio.Event()
+
+    async def fake_run() -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            run_cancelled.set()
+            raise
+
+    run_task = asyncio.create_task(fake_run())
+    poll_task = asyncio.create_task(worker._abort_poll_loop(record, run_task))
+
+    await asyncio.sleep(0.1)
+    queue.update_meta(run_id, {"abort_requested": True})
+
+    await asyncio.wait_for(poll_task, timeout=2)
+    await asyncio.wait_for(run_cancelled.wait(), timeout=2)
+
+    assert queue.get_by_run_id(run_id).status == "DONE"
+
+
+async def test_abort_poll_loop_logs_when_queue_lookup_fails(repo, queue):
+    """get_by_run_id 抛异常时，poll loop 捕获并记录日志后继续。"""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-poll-exception")
+    record = queue.get_by_run_id(run_id)
+    queue.update_meta(run_id, {"abort_requested": True})
+
+    worker = _worker(
+        queue,
+        repo,
+        _CompletingExecutor(repo),
+        worker_id="worker-poll-exception",
+        config=BotRequestWorkerConfig(abort_poll_interval_seconds=0.05),
+    )
+    original_get_by_run_id = worker._queue.get_by_run_id
+    worker._queue.get_by_run_id = MagicMock(
+        side_effect=[RuntimeError("db boom"), record]
+    )
+
+    run_cancelled = asyncio.Event()
+
+    async def fake_run() -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            run_cancelled.set()
+            raise
+
+    run_task = asyncio.create_task(fake_run())
+    poll_task = asyncio.create_task(worker._abort_poll_loop(record, run_task))
+
+    await asyncio.wait_for(poll_task, timeout=2)
+    await asyncio.wait_for(run_cancelled.wait(), timeout=2)
+
+    worker._queue.get_by_run_id = original_get_by_run_id
+    assert queue.get_by_run_id(run_id).status == "DONE"

@@ -609,6 +609,7 @@ reference_id DESC`。目标 Set 已被删除时，历史 Operation 仍可按 Bot
 | `IDEMPOTENCY_KEY_REUSED` | `409305` | 409 | 创建、升级、发布、Reference | 同一 Key 被用于不同请求 |
 | `SKILL_NAME_CHANGED` | `422203` | 422 | Draft save/refresh/publish | SKILL.md name 与 Identity 不一致 |
 | `SKILL_PACKAGE_INVALID` | `422202` | 422 | 创建、refresh、materialize | 包结构或 SKILL.md 非法 |
+| `SKILL_PACKAGE_TOO_LARGE` | `422209` | 422 | 创建、refresh、materialize | 文件数、单文件、展开总量或 canonical ZIP 超出上限 |
 | `SKILL_MANIFEST_MISSING` | `422205` | 422 | folder/Git 创建 | 缺少目标 SKILL.md |
 | `SKILL_MANIFEST_MULTIPLE` | `422206` | 422 | folder 创建 | 上传包包含多个候选 SKILL.md |
 | `SKILL_PATH_INVALID` | `422207` | 422 | folder/Draft file | 相对路径非法或越界 |

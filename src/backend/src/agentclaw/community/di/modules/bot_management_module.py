@@ -103,7 +103,7 @@ from agentclaw.community.core.bot_config_manifest.creation import (
 from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
     BotConfigManifestApplyService,
 )
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
+from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.bot_config_manifest.cli_tools.service import CliToolPurger, CliToolServiceFactory
 from agentclaw.community.core.ports.identity_file_port import (
     IdentityFilePort,
@@ -728,7 +728,7 @@ class BotManagementModule(Module):
         upload_service_provider: Callable[[], LocalSkillUploadServiceProtocol],
         capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
-        entry_fetcher_provider: Callable[[], EntryFetcher],
+        entry_fetcher_provider: Callable[[], DeclaredSourceResolver],
         # W6's resources materialiser and W7's git transport, from the same
         # module and lazy for the same reason.
         resource_service_provider: Callable[[], ResourceFilePort],

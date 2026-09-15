@@ -113,7 +113,7 @@ def test_dormant_service_provider_passes_common_whitelist_service():
         db=MagicMock(),
         baas_client=MagicMock(),
         bot_service=MagicMock(),
-        passport_plugin=MagicMock(),
+        recycle_service=MagicMock(),
         scan_policy=MagicMock(),
         common_whitelist_service=common_whitelist_service,
         config=DormantConfig(),

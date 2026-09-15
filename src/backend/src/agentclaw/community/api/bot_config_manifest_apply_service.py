@@ -10,7 +10,6 @@ uses.
 from __future__ import annotations
 
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
-    ALL_PHASES,
     ApplyAccepted,
     ApplyPhase,
     ApplyReport,
@@ -19,7 +18,6 @@ from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_serv
 )
 
 __all__ = [
-    "ALL_PHASES",
     "ApplyAccepted",
     "ApplyPhase",
     "ApplyReport",

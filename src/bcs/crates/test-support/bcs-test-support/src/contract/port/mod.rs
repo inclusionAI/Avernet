@@ -67,6 +67,13 @@ pub async fn bot_run_context_port_contract_tests<T: BotRunContextPort + ?Sized>(
     .await
     .expect("register active run");
 
+    let request_id = format!("{namespace}-attempt-request");
+    assert!(port.bind_request_alias(&canonical_run_id, &request_id).await.expect("bind request alias"));
+    let request_context = port.find_active_run(&request_id).await.unwrap().unwrap();
+    assert_eq!(request_context.downstream_run_id, initial_downstream_run_id,
+        "request correlation must not replace the engine run used for abort");
+    assert_eq!(port.get_context(&request_id).await.unwrap().run_id, canonical_run_id);
+
     let active = port
         .list_active_runs(&scope)
         .await

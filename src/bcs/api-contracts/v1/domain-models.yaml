@@ -923,11 +923,13 @@ InitialGroupRun:
     state:
       type: string
       enum:
+        - queued
         - running
         - failed
     started_at:
       type: string
       format: date-time
+      description: Response timestamp; queued runs have not started execution yet.
 
 GroupDetail:
   oneOf:

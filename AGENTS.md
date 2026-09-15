@@ -268,6 +268,11 @@ adding test-only calls to domain logic.
 Start from the requirement and the existing contract. Keep changes small and
 traceable.
 
+### File Size
+
+- Before completing a change, check the line count of every added or modified source file. A source file must not exceed 1,000 lines because CI enforces this limit.
+- When a file exceeds or is approaching 1,000 lines, split it by responsibility and update its callers and tests before CI. Add a file to the CI allowlist only when it cannot reasonably be split; document the reason and follow-up cleanup plan in the change description.
+
 - Do not add features that were not requested.
 - Do not add speculative abstraction or configurability.
 - Do not refactor unrelated code.

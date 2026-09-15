@@ -958,8 +958,11 @@ async fn handle_chat_send(
         run_id: outcome.primary_run_id,
         status: outcome.status,
     };
-
-    send_ok(tx, &req.id, serde_json::to_value(response)?).await?;
+    let mut response = serde_json::to_value(response)?;
+    if let Some(admission) = outcome.queue_admission {
+        response["queue_admission"] = serde_json::to_value(admission)?;
+    }
+    send_ok(tx, &req.id, response).await?;
     Ok(())
 }
 

@@ -1,3 +1,5 @@
+import { createMonitoringRouter } from "./monitoring.js";
+import type { MonitoringRuntime } from "../services/monitoring/monitoring-runtime.js";
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import {
@@ -46,6 +48,7 @@ function isInsightTaskCreationError(error: unknown): error is InsightTaskCreatio
 }
 
 type InsightRouterOptions = {
+  monitoring?: MonitoringRuntime;
   metricWriter?: InsightMetricDailyRepository | null;
   taskWriter?: InsightTaskIndexRepository | null;
   internalWriteToken?: string | null;
@@ -654,6 +657,7 @@ function errorResponse(error: unknown, _req: Request, res: Response, next: NextF
 
 export function createInsightRouter(service: InsightService | null, options: InsightRouterOptions = {}): Router {
   const router = Router();
+  router.use(createMonitoringRouter(options.monitoring));
 
   router.get("/evidence-access/:ownerUserId/:improvementId/:sessionId/:taskIndex", asyncHandler(async (req, res) => {
     const ownerUserId = stringValue(req.params.ownerUserId);

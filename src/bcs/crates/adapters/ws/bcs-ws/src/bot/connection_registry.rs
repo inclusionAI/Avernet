@@ -24,6 +24,7 @@ fn is_unknown_method_code(code: &str) -> bool {
 #[derive(Debug)]
 struct BotConnection {
     tx: mpsc::Sender<String>,
+    identity: String,
     token_expires_at: Option<u64>,
 }
 
@@ -44,6 +45,7 @@ impl BotConnectionRegistry {
             bot_id,
             BotConnection {
                 tx,
+                identity: uuid::Uuid::new_v4().to_string(),
                 token_expires_at: None,
             },
         );
@@ -82,11 +84,21 @@ impl BotConnectionRegistry {
     }
 
     pub async fn send_frame_json(&self, bot_id: &str, frame_json: String) -> Result<(), ()> {
+        self.send_frame_on_connection(bot_id, frame_json, None).await
+    }
+
+    async fn send_frame_on_connection(
+        &self,
+        bot_id: &str,
+        frame_json: String,
+        expected_connection: Option<&str>,
+    ) -> Result<(), ()> {
         let maybe_tx = self
             .connections
             .read()
             .await
             .get(bot_id)
+            .filter(|c| expected_connection.is_none_or(|expected| c.identity == expected))
             .map(|c| c.tx.clone());
         let Some(tx) = maybe_tx else {
             debug!(bot_id = %bot_id, "bot delivery skipped: not connected");
@@ -162,6 +174,27 @@ impl BotConnectionRegistry {
 
 #[async_trait]
 impl BotDeliveryPort for BotConnectionRegistry {
+    async fn connection_identity(&self, target: &BotDeliveryTarget) -> Option<String> {
+        let BotDeliveryTarget::WebSocket { bot_id } = target else { return None; };
+        self.connections.read().await.get(bot_id).map(|c| c.identity.clone())
+    }
+
+    async fn deliver_on_connection(
+        &self,
+        cmd: BotDeliveryCommand,
+        connection_id: &str,
+    ) -> ServiceResult<BotDeliveryResult> {
+        self.deliver_inner(cmd, Some(connection_id)).await
+    }
+
+    async fn abort_on_connection(
+        &self,
+        cmd: BotAbortDeliveryCommand,
+        connection_id: &str,
+    ) -> ServiceResult<BotAbortDeliveryResult> {
+        self.abort_inner(cmd, Some(connection_id)).await
+    }
+
     async fn is_available(&self, target: &BotDeliveryTarget) -> bool {
         match target {
             BotDeliveryTarget::WebSocket { bot_id } => {
@@ -172,6 +205,20 @@ impl BotDeliveryPort for BotConnectionRegistry {
     }
 
     async fn deliver(&self, cmd: BotDeliveryCommand) -> ServiceResult<BotDeliveryResult> {
+        self.deliver_inner(cmd, None).await
+    }
+
+    async fn abort(&self, cmd: BotAbortDeliveryCommand) -> ServiceResult<BotAbortDeliveryResult> {
+        self.abort_inner(cmd, None).await
+    }
+}
+
+impl BotConnectionRegistry {
+    async fn deliver_inner(
+        &self,
+        cmd: BotDeliveryCommand,
+        expected_connection: Option<&str>,
+    ) -> ServiceResult<BotDeliveryResult> {
         let BotDeliveryTarget::WebSocket { bot_id } = &cmd.target else {
             return Ok(BotDeliveryResult {
                 target_bot_id: cmd.target_bot_id().to_string(),
@@ -185,7 +232,7 @@ impl BotDeliveryPort for BotConnectionRegistry {
         let frame_json = serde_json::to_string(&cmd.frame)
             .map_err(|err| ServiceError::InternalError(format!("serialize bot frame: {err}")))?;
 
-        match self.send_frame_json(bot_id, frame_json).await {
+        match self.send_frame_on_connection(bot_id, frame_json, expected_connection).await {
             Ok(()) => Ok(BotDeliveryResult {
                 target_bot_id: bot_id.clone(),
                 delivered: true,
@@ -199,7 +246,11 @@ impl BotDeliveryPort for BotConnectionRegistry {
         }
     }
 
-    async fn abort(&self, cmd: BotAbortDeliveryCommand) -> ServiceResult<BotAbortDeliveryResult> {
+    async fn abort_inner(
+        &self,
+        cmd: BotAbortDeliveryCommand,
+        expected_connection: Option<&str>,
+    ) -> ServiceResult<BotAbortDeliveryResult> {
         let BotDeliveryTarget::WebSocket { bot_id } = &cmd.target else {
             return Err(ServiceError::InvalidOperation {
                 message: "websocket registry cannot abort an HTTP Provider target".to_string(),
@@ -231,7 +282,7 @@ impl BotDeliveryPort for BotConnectionRegistry {
             .write()
             .await
             .insert(cmd.command_id.clone(), tx);
-        if self.send_frame_json(bot_id, frame_json).await.is_err() {
+        if self.send_frame_on_connection(bot_id, frame_json, expected_connection).await.is_err() {
             self.pending_abort_requests
                 .write()
                 .await

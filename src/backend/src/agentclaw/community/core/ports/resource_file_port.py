@@ -18,10 +18,14 @@ delivery families split on everywhere else:
   store's ``workspace`` namespace and never touches a container; the composed
   artifact is the delivery.
 
-Members are ``@abstractmethod`` on purpose. The backend runs no static type
-checker, so a structurally-satisfied Protocol is verified by nothing at all;
-abstract members make a dropped or renamed method fail at construction instead
-of resolving to an inherited ``...`` stub that silently returns ``None``.
+Members are ``@abstractmethod`` on purpose, and every implementation —
+``ResourceFileService`` included — **inherits** this port rather than merely
+satisfying it structurally. The backend runs no static type checker, so a
+structurally-satisfied Protocol is verified by nothing at all; abstract members
+make a dropped or renamed method fail at construction instead of resolving to
+an inherited ``...`` stub that silently returns ``None``. The DI provider used
+to carry a hand-rolled ``isinstance`` check for exactly that drift; the base
+class is the check now.
 """
 from __future__ import annotations
 

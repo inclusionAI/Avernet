@@ -6,7 +6,7 @@ use bcs_domain::{Organization, OrganizationMember};
 use bcs_service_api::{
     A2aChatCommand, A2aChatRunService, A2aChatService, ActorKind, ActorStatus, AgentCredentials,
     AsyncA2aChatCommand, BotActor, BotCapabilities, BotDeliveryCommand,
-    BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, BotDynamicStatus,
+    BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget,
     BotRegistryCoreService, CallerContext, ChatResponseMode, ChatRunCancelCommand, ChatRunCleanupPort, ChatRunEventPort, ChatRunQueryCommand,
     AuthorizedOrganizationPair, DirectChatClientKind, DirectChatRunSnapshotPort, FriendCoreService, OrganizationCoreService, RegisteredBot,
     OrganizationCandidateBot, OrganizationCandidateQuery, ProviderTransportPreference,
@@ -1645,7 +1645,6 @@ impl MemoryRegistry {
                     visibility: visibility.to_string(),
                     ..BotCapabilities::default()
                 },
-                dynamic_status: BotDynamicStatus::default(),
                 env: None,
                 created_by: created_by.map(str::to_string),
                 actor_kind: ActorKind::Bot,
@@ -1663,7 +1662,6 @@ impl BotRegistryCoreService for MemoryRegistry {
             RegisteredBot {
                 bot_uuid: bot_id,
                 capabilities,
-                dynamic_status: BotDynamicStatus::default(),
                 env: None,
                 created_by: None,
                 actor_kind: ActorKind::Bot,
@@ -1673,7 +1671,7 @@ impl BotRegistryCoreService for MemoryRegistry {
         Ok(())
     }
 
-    async fn update_status(&self, _bot_id: &str, _status: BotDynamicStatus) -> bool {
+    async fn update_status(&self, _bot_id: &str) -> bool {
         false
     }
 

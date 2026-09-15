@@ -1,0 +1,16 @@
+{
+  "schema_version": "evolution.mutation_operator_library.v1",
+  "required_operator_diversity": 3,
+  "operators": [
+    {"name": "SHORTEN_CRITICAL_PATH", "family": "workflow", "applicable_signatures": [], "risk": "medium"},
+    {"name": "ADD_EXECUTION_CHECKPOINT", "family": "workflow", "applicable_signatures": [], "risk": "medium"},
+    {"name": "SEPARATE_ANALYSIS_FROM_RENDERING", "family": "representation", "applicable_signatures": [], "risk": "medium"},
+    {"name": "ADD_RESULT_VERIFIER", "family": "verifier", "applicable_signatures": [], "risk": "medium"},
+    {"name": "CHANGE_ROUTING_BOUNDARY", "family": "routing", "applicable_signatures": [], "risk": "high"},
+    {"name": "REDUCE_INSTRUCTION_ENTROPY", "family": "instruction", "applicable_signatures": [], "risk": "low"},
+    {"name": "ADD_FALLBACK_BUDGET", "family": "workflow", "applicable_signatures": [], "risk": "medium"},
+    {"name": "CONTEXT_RETRIEVAL_SPLIT", "family": "representation", "applicable_signatures": [], "risk": "medium"},
+    {"name": "CLARIFY_PARAMETER_CONTRACT", "family": "instruction", "applicable_signatures": [], "risk": "low"},
+    {"name": "CHANGE_OUTPUT_CONTRACT", "family": "representation", "applicable_signatures": [], "risk": "high"}
+  ]
+}

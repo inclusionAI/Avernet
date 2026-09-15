@@ -193,7 +193,7 @@ impl BotRegistryCoreService for NoopBotRegistryCoreService {
         Ok(())
     }
 
-    async fn update_status(&self, _bot_id: &str, _status: BotDynamicStatus) -> bool {
+    async fn update_status(&self, _bot_id: &str) -> bool {
         false
     }
 
@@ -532,15 +532,6 @@ impl ProviderBotEventService for NoopProviderBotEventService {
         &self,
         _command: ProviderBotEventCommand,
     ) -> Result<ProviderBotEventOutcome, ProviderBotEventError> {
-        Err(ProviderBotEventError::Internal(
-            service_not_configured("provider bot event service").to_string(),
-        ))
-    }
-
-    async fn submit_coordination(
-        &self,
-        _command: ProviderBotCoordinationCommand,
-    ) -> Result<ProviderBotCoordinationOutcome, ProviderBotEventError> {
         Err(ProviderBotEventError::Internal(
             service_not_configured("provider bot event service").to_string(),
         ))

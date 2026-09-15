@@ -1251,7 +1251,9 @@ class TestTraceIdInjection:
         assert sent_request["params"]["interactionId"] == "int-2"
 
     @pytest.mark.asyncio
-    async def test_interaction_resolve_injects_trace_id_without_active_span(self, client):
+    async def test_interaction_resolve_injects_trace_id_without_active_span(
+        self, client
+    ):
         client._send_request_frame = AsyncMock(
             return_value={"type": "res", "id": "1", "ok": True}
         )

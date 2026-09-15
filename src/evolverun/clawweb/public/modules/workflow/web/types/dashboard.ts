@@ -268,6 +268,7 @@ export interface IWorkflowHealthRow {
   sceneName: string
   released: boolean
   runCount: number
+  failedCount: number
   completionSuccessRate: number | null
   selfHealTriggeredRuns: number
   selfHealSuccessRate: number | null

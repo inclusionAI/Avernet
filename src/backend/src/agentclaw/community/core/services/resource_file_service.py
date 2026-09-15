@@ -35,6 +35,7 @@ from injector import inject
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_config_surface.coords import BotConfigCoords
+from agentclaw.community.core.ports.resource_file_port import ResourceFilePort
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_runtime_engine_for_bot,
 )
@@ -238,8 +239,18 @@ def resource_coords_from_spec(
     )
 
 
-class ResourceFileService:
-    """Provider-agnostic resource-file operations over the ``workspace`` namespace."""
+class ResourceFileService(ResourceFilePort):
+    """Provider-agnostic resource-file operations over the ``workspace`` namespace.
+
+    Inherits :class:`~agentclaw.community.core.ports.resource_file_port.ResourceFilePort`
+    — the narrow outbound port the ``resources`` materialiser reaches it
+    through. The port declares apply's own call surface and this class is a
+    deliberate keyword superset of it; inheriting makes the three method names
+    and their declared parameters fail at construction rather than mid-apply.
+    It used to be satisfied structurally, and the composition root carried a
+    hand-rolled ``isinstance`` check to catch that; the base class is the
+    check now.
+    """
 
     @inject
     def __init__(

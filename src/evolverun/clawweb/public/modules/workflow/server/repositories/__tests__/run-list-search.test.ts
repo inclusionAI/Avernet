@@ -86,6 +86,20 @@ describe("run history keyword filtering", () => {
         const second = await read("?query=gateway-client&status=failed&limit=1&offset=1");
         expect(second.runs.map((r: { flow_id: string }) => r.flow_id)).toEqual(["old-match"]);
         expect((await read("")).statusCounts).toEqual({ failed: 2, succeeded: 1 });
+        // Business keywords occur only inside input JSON, not identifiers/callers.
+        raw.prepare("UPDATE flow_runs SET input_json = ?").run(JSON.stringify({ ticket: { title: '客户投诉', tag: 'case_100%!' } }));
+        const businessQuery = `?query=${encodeURIComponent('  客户投诉  ')}&status=failed&limit=1`;
+        const inputFirst = await read(businessQuery);
+        expect(inputFirst).toMatchObject({ total: 2, offset: 0 });
+        expect(inputFirst.runs.map((r: { flow_id: string }) => r.flow_id)).toEqual(['new-match']);
+        const inputSecond = await read(businessQuery + '&offset=1');
+        expect(inputSecond.total).toBe(2);
+        expect(inputSecond.runs.map((r: { flow_id: string }) => r.flow_id)).toEqual(['old-match']);
+        expect(await read(`?query=${encodeURIComponent('客户投诉')}&workflowId=other`)).toMatchObject({ total: 0, runs: [] });
+        expect(await read(`?query=${encodeURIComponent('客户投诉')}&workflowId=wf&status=waiting`)).toMatchObject({ total: 0, runs: [] });
+        expect(await read(`?query=${encodeURIComponent('case_100%!')}&workflowId=wf`)).toMatchObject({ total: 3 });
+        raw.prepare("UPDATE flow_runs SET input_json = ? WHERE flow_id = 'success'").run(JSON.stringify({ tag: 'caseX100anything!' }));
+        expect(await read(`?query=${encodeURIComponent('case_100%!')}&workflowId=wf`)).toMatchObject({ total: 2 });
         viewableIds = new Set();
         expect(await read("?query=gateway-client")).toMatchObject({ total: 0, runs: [] });
         expect(await read("")).toMatchObject({ total: 0, runs: [], statusCounts: {} });

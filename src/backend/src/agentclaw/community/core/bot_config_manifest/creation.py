@@ -353,7 +353,7 @@ class BotCreationManifestSeam(ManifestCreationSeam):
                 owner_id=owner_id,
                 actor_id=actor_id,
                 trigger=CREATE_PRE_CONTAINER_TRIGGER,
-                phases=frozenset({ApplyPhase.PRE_CONTAINER}),
+                phase=ApplyPhase.PRE_CONTAINER,
                 engine_type=engine_type,
                 bot_type=bot_type,
             )

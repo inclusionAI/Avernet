@@ -16,7 +16,12 @@ pub enum ProviderTransportPreference {
 #[derive(Debug, Clone)]
 pub struct BotDeliveryCommand {
     pub target: BotDeliveryTarget,
+    /// Canonical logical run identity. HTTP Provider chat.send uses this as
+    /// its wire id and callback/SSE correlation key, not the attempt frame id.
     pub run_id: String,
+    /// The frame id may identify a queue attempt and differ from run_id.
+    /// WebSocket delivery preserves it; HTTP Provider normalizes chat.send
+    /// to run_id while preserving ids for non-running requests.
     pub frame: BcsFrame,
     pub delivery_kind: BotDeliveryKind,
     /// Request-scoped transport preference for HTTP Provider `chat.send`.
@@ -71,6 +76,36 @@ pub struct BotAbortDeliveryResult {
 pub trait BotDeliveryPort: Send + Sync {
     async fn is_available(&self, target: &BotDeliveryTarget) -> bool;
     async fn deliver(&self, cmd: BotDeliveryCommand) -> ServiceResult<BotDeliveryResult>;
+
+    /// Opaque identity of the current connection, not an authentication token.
+    /// Reconnection must create a new identity. None means pinning unavailable.
+    async fn connection_identity(&self, _target: &BotDeliveryTarget) -> Option<String> {
+        None
+    }
+
+    /// Select the connection and check its identity atomically. Never fall back
+    /// to a replacement connection if the original connection has disappeared.
+    async fn deliver_on_connection(
+        &self,
+        cmd: BotDeliveryCommand,
+        _connection_id: &str,
+    ) -> ServiceResult<BotDeliveryResult> {
+        Err(ServiceError::InvalidOperation {
+            message: "connection-pinned delivery is not supported".to_string(),
+            request_id: Some(cmd.run_id),
+        })
+    }
+
+    async fn abort_on_connection(
+        &self,
+        cmd: BotAbortDeliveryCommand,
+        _connection_id: &str,
+    ) -> ServiceResult<BotAbortDeliveryResult> {
+        Err(ServiceError::InvalidOperation {
+            message: "connection-pinned abort is not supported".to_string(),
+            request_id: Some(cmd.command_id),
+        })
+    }
 
     async fn abort(&self, cmd: BotAbortDeliveryCommand) -> ServiceResult<BotAbortDeliveryResult> {
         Err(ServiceError::InvalidOperation {

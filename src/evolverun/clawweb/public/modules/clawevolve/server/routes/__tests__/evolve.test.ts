@@ -396,7 +396,7 @@ describe("ClawEvolve step protocol", () => {
       body: JSON.stringify({
         taskName: "Blog Bench Evolution", userId: "user-1", botId: "bot-1",
         objective: "提升博客质量并保证测试集不回退",
-        trainBenchDomainId: "blog-train", testBenchDomainId: "blog-test", maxRounds: 3,
+        trainBenchDomainId: "blog-train", testBenchDomainId: "blog-test", model: "antchat/GLM-5.2", maxRounds: 3,
       }),
     });
     const body = await response.json() as Record<string, unknown>;
@@ -408,12 +408,14 @@ describe("ClawEvolve step protocol", () => {
     expect(steps[0].command).toContain("--train-domain-id blog-train");
     expect(steps[0].command).toContain("--test-domain-id blog-test");
     expect(steps[0].command).toContain("--owner-id user-1");
+    expect(steps[0].command).toContain("--model antchat/GLM-5.2");
     expect(steps[0].command).not.toContain("--final-action loop");
     expect(steps[0].command).not.toContain("提升博客质量");
     const saved = await repo.findTask(String(body.task_id));
     const config = JSON.parse(saved!.config_json) as Record<string, unknown>;
     expect(config).toEqual(expect.objectContaining({
       trainBenchDomainId: "blog-train", testBenchDomainId: "blog-test",
+      model: "antchat/GLM-5.2",
       objective: "提升博客质量并保证测试集不回退",
       pinnedBenchDomains: expect.objectContaining({
         "blog-train": [{ templateName: "blog-train-case", templateVersion: 1 }],
@@ -455,6 +457,7 @@ describe("ClawEvolve step protocol", () => {
     expect(updatedSteps[1].command).toContain("/clawevolve-workflow --stage optimize");
     expect(updatedSteps[1].command).toContain("--train-bench-domain-id blog-train");
     expect(updatedSteps[1].command).toContain("--test-bench-domain-id blog-test");
+    expect(updatedSteps[1].command).toContain("--model antchat/GLM-5.2");
   });
 
   it("creates a Bench task from a published domain using existing tables", async () => {
@@ -788,6 +791,28 @@ describe("ClawEvolve step protocol", () => {
     expect(dispatch.mock.calls.at(-1)?.[0]).not.toHaveProperty("secrets");
   });
 
+  it("lets OpenClaw select its configured model when a Subagent task omits model", async () => {
+    const response = await fetch(`${baseUrl}/api/evolve/diagnoses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
+      body: JSON.stringify({
+        taskName: "OpenClaw 默认模型诊断",
+        userId: "user-1",
+        botId: "bot-1",
+        judgeBackend: "subagent",
+        maxSessions: 12,
+        diagnoseIntent: "扫描最近3天的历史 session；抽取1个 bad case；重点关注任务未完成。",
+      }),
+    });
+    expect(response.status).toBe(201);
+    const body = await response.json() as { config: Record<string, unknown>; steps: Array<{ command: string }> };
+    expect(body.config).not.toHaveProperty("model");
+    expect(body.steps[0].command).not.toMatch(/(?:^|\s)--model(?:\s|=|$)/);
+    expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      command: expect.not.stringMatching(/(?:^|\s)--model(?:\s|=|$)/),
+    }));
+  });
+
   it("runs service Session diagnosis on the draft Bot and only passes export source arguments", async () => {
     await seedBaasDraftBotWithService();
     const response = await fetch(`${baseUrl}/api/evolve/diagnoses`, {
@@ -1044,16 +1069,18 @@ describe("ClawEvolve step protocol", () => {
     expect((await improvementRepo.getDetail("owner-1", improvementId))?.version).toBe(detail?.version);
   });
 
-  it("accepts GLM-5.2 and rejects unsupported diagnose models", async () => {
+  it("accepts configured and custom diagnose models without a server-side model allowlist", async () => {
     const accepted = await createDiagnosis("GLM-5.2");
     expect(accepted.response.status).toBe(201);
     expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       command: expect.stringContaining("--model GLM-5.2"),
     }));
 
-    const rejected = await createDiagnosis("GLM-5");
-    expect(rejected.response.status).toBe(400);
-    expect(rejected.body.error).toBe("API Judge 的 model 必须是 GLM-5.1 或 GLM-5.2");
+    const custom = await createDiagnosis("provider/custom-model");
+    expect(custom.response.status).toBe(201);
+    expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      command: expect.stringContaining("--model provider/custom-model"),
+    }));
   });
 
   it("links a diagnosis task to the owned improvement item", async () => {
@@ -1332,6 +1359,7 @@ describe("ClawEvolve step protocol", () => {
         taskName: "一句话目标进化",
         userId: "user-1",
         botId: "bot-1",
+        model: "antchat/GLM-5.1",
         goal: "将工具调用任务完成率提升到 90% 以上",
         maxRounds: 3,
       }),
@@ -1339,12 +1367,13 @@ describe("ClawEvolve step protocol", () => {
     expect(response.status).toBe(201);
     const body = await response.json() as {
       task_id: string;
-      config: { inputMode: string; goal: string; diagnoseIntent?: string; nodeCommands: Record<string, string> };
+      config: { inputMode: string; goal: string; model: string; diagnoseIntent?: string; nodeCommands: Record<string, string> };
       steps: Array<{ stepType: string; command: string }>;
     };
     expect(body.config).toEqual(expect.objectContaining({
       inputMode: "direct_goal",
       goal: "将工具调用任务完成率提升到 90% 以上",
+      model: "antchat/GLM-5.1",
     }));
     expect(body.config.diagnoseIntent).toBeUndefined();
     expect(body.config.nodeCommands.diagnose).toBeUndefined();
@@ -1352,6 +1381,7 @@ describe("ClawEvolve step protocol", () => {
     expect(body.steps[0].stepType).toBe("plan");
     expect(body.steps[0].command).toContain("/clawevolve-plan");
     expect(body.steps[0].command).toContain("--goal '将工具调用任务完成率提升到 90% 以上'");
+    expect(body.steps[0].command).toContain("--model antchat/GLM-5.1");
     expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       stepType: "plan",
       command: body.steps[0].command,
@@ -1425,7 +1455,7 @@ describe("ClawEvolve step protocol", () => {
     const planStep = diagnoseResult.body.nextStep as { stepId: string };
     expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       stepType: "plan",
-      command: `/clawevolve-plan --strategy conservative --task-id ${task.task_id} --step-id ${planStep.stepId} --owner-id user-1 --bot-id bot-1 --clawweb-url http://localhost:3001 --goal '优先修复工具调用失败的 '"'"'高频'"'"' 根因，完成率达到 90%，不要执行 $(whoami)'`,
+      command: `/clawevolve-plan --strategy conservative --task-id ${task.task_id} --step-id ${planStep.stepId} --owner-id user-1 --bot-id bot-1 --clawweb-url http://localhost:3001 --goal '优先修复工具调用失败的 '"'"'高频'"'"' 根因，完成率达到 90%，不要执行 $(whoami)' --model GLM-5.1`,
     }));
   });
 
@@ -1463,7 +1493,7 @@ describe("ClawEvolve step protocol", () => {
     expect(next.stepType).toBe("plan");
     expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       stepId: next.stepId,
-      command: `/clawevolve-plan --task-id ${String(body.task_id)} --step-id ${next.stepId} --owner-id user-1 --bot-id bot-1 --clawweb-url http://localhost:3001`,
+      command: `/clawevolve-plan --task-id ${String(body.task_id)} --step-id ${next.stepId} --owner-id user-1 --bot-id bot-1 --clawweb-url http://localhost:3001 --model GLM-5.1`,
     }));
 
     const inputResponse = await fetch(`${baseUrl}/api/evolve/internal/tasks/${String(body.task_id)}/steps/${next.stepId}/input`);
@@ -1657,7 +1687,7 @@ describe("ClawEvolve step protocol", () => {
     expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       stepType: "optimize",
       command: expect.stringMatching(
-        /\/clawevolve-workflow --stage optimize .+--task-id EV-.+ --step-id STEP-.+ --round 1 --train-bench-domain-id TRAIN-001 --test-bench-domain-id TEST-001 --clawweb-url http:\/\/localhost:3001 --openclaw-execution-mode local --owner-id user-1/,
+        /\/clawevolve-workflow --stage optimize .+--task-id EV-.+ --step-id STEP-.+ --round 1 --train-bench-domain-id TRAIN-001 --test-bench-domain-id TEST-001 --clawweb-url http:\/\/localhost:3001 --openclaw-execution-mode local --model GLM-5.1 --owner-id user-1/,
       ),
     }));
     expect(String(dispatch.mock.calls.at(-1)?.[0]?.command)).toContain("--owner-id user-1");
@@ -1739,12 +1769,14 @@ describe("ClawEvolve step protocol", () => {
       headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
       body: JSON.stringify({
         taskName: "百轮优化测试", userId: "user-1", botId: "bot-1",
-        sourceDiagnosisTaskIds: [sourceTaskId], maxRounds: 100,
+        sourceDiagnosisTaskIds: [sourceTaskId], model: "antchat/GLM-5.2", maxRounds: 100,
       }),
     });
     expect(accepted.status).toBe(201);
-    const acceptedBody = await accepted.json() as { config: { maxRounds: number } };
+    const acceptedBody = await accepted.json() as { config: { maxRounds: number; model: string }; steps: Array<{ command: string }> };
     expect(acceptedBody.config.maxRounds).toBe(100);
+    expect(acceptedBody.config.model).toBe("antchat/GLM-5.2");
+    expect(acceptedBody.steps[0].command).toContain("--model antchat/GLM-5.2");
 
     for (const maxRounds of [0, 101, 1.5]) {
       const rejected = await fetch(`${baseUrl}/api/evolve/optimizations`, {
@@ -2285,6 +2317,8 @@ describe("ClawEvolve step protocol", () => {
       headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
       body: JSON.stringify({
         taskName: "清理历史进化记录", userId: "owner-1", botId: "bot-1", botEnv: "pre", forceCleanup,
+        // A client cannot select openversion on an internal router.
+        version: "openversion",
       }),
     });
     const blocked = await create(false);

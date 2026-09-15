@@ -1,4 +1,4 @@
-"""Service API Protocol for dormant Bot activation.
+"""Service API Protocols for personal Bot dormant lifecycle operations.
 
 Re-export only. The Protocol is defined in its owning core module
 (``core/bot_dormant/bot_dormant_service_protocol.py``) so the concrete service can
@@ -10,8 +10,12 @@ from __future__ import annotations
 
 from agentclaw.community.core.bot_dormant.bot_dormant_service_protocol import (
     BotDormantActivateServiceProtocol,
+    BotDormantAuditServiceProtocol,
+    BotDormantRecycleServiceProtocol,
 )
 
 __all__ = [
     "BotDormantActivateServiceProtocol",
+    "BotDormantAuditServiceProtocol",
+    "BotDormantRecycleServiceProtocol",
 ]

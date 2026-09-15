@@ -321,7 +321,9 @@ def test_current_scope_read_validates_template_and_bot_fields() -> None:
     [
         ("openclaw", None, True),
         ("claude_code", "generalCC", True),
+        ("claude_code", "mcptestpq", True),
         ("claude_code", "normalCC", False),
+        ("claude_code", None, False),
         ("aicoding", None, False),
     ],
 )

@@ -540,6 +540,82 @@ class BotRunner:
             raise KeyError(f"Run not found: {run_id}")
         return record
 
+    async def abort(
+        self,
+        *,
+        session_id: str,
+        run_id: str | None,
+    ) -> None:
+        """Best-effort 通知 engine 中止指定 run。
+
+        从 ``baas_bot_run`` 读取 run 记录，解析 bot_id 与 lifecycle_stage，
+        重新解析 binding 并选择 BotService，最终调用 ``service.abort`` 发送
+        ``chat.abort``。
+
+        Args:
+            session_id: 会话 ID（优先使用 run 记录中持久化的实际 session_id）
+            run_id: 本次取消的 run ID
+        """
+        if not run_id:
+            logger.warning("[runner.abort] missing run_id, skip engine notify")
+            return
+
+        record = self._run_repository.get_by_run_id(run_id)
+        if record is None:
+            logger.warning(
+                "[runner.abort] run not found: run_id=%s session_id=%s",
+                run_id,
+                session_id,
+            )
+            return
+
+        actual_session_id = extract_session_id_from_record(record)
+        if actual_session_id:
+            session_id = actual_session_id
+
+        bot_id = record.bot_id
+        metadata = record.metadata or {}
+        lifecycle_stage = extract_lifecycle_stage(metadata)
+
+        try:
+            binding_info = await self._resolve_binding(bot_id, lifecycle_stage)
+        except Exception as e:
+            logger.warning(
+                "[runner.abort] binding resolution failed: run_id=%s bot_id=%s %s",
+                run_id,
+                bot_id,
+                e,
+            )
+            return
+        if binding_info is None:
+            logger.warning(
+                "[runner.abort] binding not found: run_id=%s bot_id=%s "
+                "lifecycle_stage=%s",
+                run_id,
+                bot_id,
+                lifecycle_stage,
+            )
+            return
+
+        bot_service = self._bot_service_selector.select(binding_info)
+        try:
+            await bot_service.abort(
+                session_id=session_id,
+                binding_info=binding_info,
+            )
+            logger.info(
+                "[runner.abort] engine abort sent: run_id=%s session_id=%s",
+                run_id,
+                session_id,
+            )
+        except Exception:
+            logger.warning(
+                "[runner.abort] engine abort failed: run_id=%s session_id=%s",
+                run_id,
+                session_id,
+                exc_info=True,
+            )
+
     # ── 私有方法：步骤提取 ──────────────────────────────────────────────
 
     async def _report_log_relation(

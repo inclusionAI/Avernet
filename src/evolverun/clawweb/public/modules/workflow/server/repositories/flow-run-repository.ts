@@ -91,7 +91,7 @@ export type FindFlowRunsOptions = {
   offset?: number;
   /** Fuzzy-match against input_json (LIKE %value%) */
   inputQuery?: string;
-  /** Literal substring search across run ID, initiator and origin Bot ID. */
+  /** Literal substring search across run ID, initiator, origin Bot ID and input JSON. */
   query?: string;
   /** Filter by origin_bot_id owner part (format: botId:botOwnerId) */
   originBotOwnerId?: string;
@@ -200,8 +200,8 @@ export class FlowRunRepository {
     if (options.inputQuery) { conds.push("input_json LIKE ?"); params.push(`%${options.inputQuery}%`); }
     if (options.query?.trim()) {
       const pattern = `%${options.query.trim().replace(/[!%_]/g, "!$&")}%`;
-      conds.push("(flow_id LIKE ? ESCAPE '!' OR triggered_by LIKE ? ESCAPE '!' OR origin_bot_id LIKE ? ESCAPE '!')");
-      params.push(pattern, pattern, pattern);
+      conds.push("(flow_id LIKE ? ESCAPE '!' OR triggered_by LIKE ? ESCAPE '!' OR origin_bot_id LIKE ? ESCAPE '!' OR input_json LIKE ? ESCAPE '!')");
+      params.push(pattern, pattern, pattern, pattern);
     }
     // origin_bot_id filtering: format is "botId:botOwnerId" (e.g. "default:461514")
     // NULL/empty origin_bot_id rows are always included (no filtering on them)

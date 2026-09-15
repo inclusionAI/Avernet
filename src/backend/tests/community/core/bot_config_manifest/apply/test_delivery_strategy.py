@@ -1,7 +1,9 @@
 """The delivery seam (W8): what differs between engine families, and only that.
 
-Three configurations, three phase tables. ARCA is ``APPLY_ORDER`` verbatim.
-teclaw with the switch on puts every non-script construct before the container,
+Three configurations, three phase tables — and the tables live on the
+strategies, not on ``APPLY_ORDER``, which carries only construct and position.
+ARCA is ``_ARCA_PHASES``: ``script`` before the container, everything else
+after. teclaw with the switch on puts every non-script construct before it,
 because the artifact is the delivery; with it off, after, because that is the
 shape it ran before W8.
 """
@@ -10,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    _ARCA_PHASES,
     ArcaDelivery,
     CreationSequence,
     DeliveryStrategyFactory,
@@ -18,15 +21,20 @@ from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     teclaw_platform_managed_from_config,
 )
 from agentclaw.community.core.bot_config_manifest.apply.order import (
-    ALL_PHASES,
     APPLY_ORDER,
     ApplyPhase,
-    steps_for,
 )
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCategory,
     ManifestSection,
 )
+
+
+async def _no_redeliver(ctx) -> None:
+    """The closing step, doing nothing. Required on every teclaw strategy —
+    the composition root always binds one — so a test that is not about the
+    redeliver still has to say which one it means."""
+    return None
 
 
 def _ports(tag: str) -> MaterialiserPorts:
@@ -39,16 +47,34 @@ _IS_TECLAW = lambda engine: (engine or "").lower() == "teclaw"  # noqa: E731
 # ── phase tables ──────────────────────────────────────────────────────────
 
 
-def test_arca_phases_are_the_order_tables_own() -> None:
+def test_arca_phases_are_the_strategys_own_table() -> None:
     arca = ArcaDelivery(lambda: _ports("arca"))
+    assert [(s.construct, arca.phase_of(s)) for s in APPLY_ORDER] == [
+        (ManifestSection.SCRIPT, ApplyPhase.PRE_CONTAINER),
+        (ManifestCategory.IDENTITY, ApplyPhase.ON_CONTAINER),
+        (ManifestCategory.RESOURCES, ApplyPhase.ON_CONTAINER),
+        (ManifestCategory.SKILLS, ApplyPhase.ON_CONTAINER),
+        (ManifestCategory.MCP, ApplyPhase.ON_CONTAINER),
+        (ManifestCategory.ENGINE_CONFIG, ApplyPhase.ON_CONTAINER),
+        (ManifestCategory.CLI_TOOLS, ApplyPhase.ON_CONTAINER),
+    ]
     for step in APPLY_ORDER:
-        assert arca.phase_of(step) is step.phase
-    assert arca.steps_for(None) == steps_for(None)
-    assert arca.steps_for(frozenset({ApplyPhase.PRE_CONTAINER})) == steps_for(
-        frozenset({ApplyPhase.PRE_CONTAINER})
+        assert arca.phase_of(step) is _ARCA_PHASES[step.construct]
+    assert arca.steps_for(None) == tuple(
+        sorted(APPLY_ORDER, key=lambda s: s.position)
     )
+    assert [s.construct for s in arca.steps_for(ApplyPhase.PRE_CONTAINER)] == [
+        ManifestSection.SCRIPT
+    ]
     assert arca.creation_sequence is CreationSequence.CREATE_BETWEEN_PHASES
     assert arca.needs_container()
+
+
+def test_the_arca_phase_table_names_every_construct_in_the_order() -> None:
+    """The import-time assertion in ``delivery.py``, named here too: adding a
+    construct to ``APPLY_ORDER`` without giving ARCA a phase for it is a
+    ``KeyError`` at the first apply that walks it."""
+    assert set(_ARCA_PHASES) == {step.construct for step in APPLY_ORDER}
 
 
 def test_teclaw_on_puts_every_non_script_construct_before_the_container() -> None:
@@ -56,8 +82,9 @@ def test_teclaw_on_puts_every_non_script_construct_before_the_container() -> Non
         platform_managed=True,
         platform_ports=lambda: _ports("store"),
         device_ports=lambda: _ports("device"),
+        redeliver=_no_redeliver,
     )
-    pre = teclaw.steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))
+    pre = teclaw.steps_for(ApplyPhase.PRE_CONTAINER)
     assert {s.construct for s in pre} == {
         ManifestSection.SCRIPT,
         ManifestCategory.IDENTITY,
@@ -67,7 +94,7 @@ def test_teclaw_on_puts_every_non_script_construct_before_the_container() -> Non
         ManifestCategory.ENGINE_CONFIG,
         ManifestCategory.CLI_TOOLS,
     }
-    assert teclaw.steps_for(frozenset({ApplyPhase.ON_CONTAINER})) == ()
+    assert teclaw.steps_for(ApplyPhase.ON_CONTAINER) == ()
     # Position order survives the re-phasing.
     assert [s.position for s in pre] == sorted(s.position for s in pre)
     assert teclaw.creation_sequence is CreationSequence.RECORD_APPLY_PROVISION
@@ -84,14 +111,15 @@ def test_teclaw_off_is_the_pre_w8_shape() -> None:
         platform_managed=False,
         platform_ports=lambda: _ports("store"),
         device_ports=lambda: _ports("device"),
+        redeliver=_no_redeliver,
     )
-    on = teclaw.steps_for(frozenset({ApplyPhase.ON_CONTAINER}))
+    on = teclaw.steps_for(ApplyPhase.ON_CONTAINER)
     assert {s.construct for s in on} == {
         s.construct
         for s in APPLY_ORDER
         if s.construct not in (ManifestSection.SCRIPT, ManifestCategory.CLI_TOOLS)
     }
-    assert [s.construct for s in teclaw.steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))] == [
+    assert [s.construct for s in teclaw.steps_for(ApplyPhase.PRE_CONTAINER)] == [
         ManifestSection.SCRIPT,
         ManifestCategory.CLI_TOOLS,
     ]
@@ -101,8 +129,8 @@ def test_teclaw_off_is_the_pre_w8_shape() -> None:
 
 
 def test_cli_tools_is_on_container_on_arca() -> None:
-    """The order table's phase is the ARCA reading, and W9 did not change it:
-    an ARCA tool is a write into a live container."""
+    """W9 did not change the ARCA reading: an ARCA tool is a write into a live
+    container."""
     arca = ArcaDelivery(lambda: _ports("arca"))
     step = next(s for s in APPLY_ORDER if s.construct is ManifestCategory.CLI_TOOLS)
     assert arca.phase_of(step) is ApplyPhase.ON_CONTAINER
@@ -123,6 +151,7 @@ def test_cli_tools_is_pre_container_on_teclaw_under_either_switch(switch) -> Non
         platform_managed=switch,
         platform_ports=lambda: _ports("store"),
         device_ports=lambda: _ports("device"),
+        redeliver=_no_redeliver,
     )
     step = next(s for s in APPLY_ORDER if s.construct is ManifestCategory.CLI_TOOLS)
     assert teclaw.phase_of(step) is ApplyPhase.PRE_CONTAINER
@@ -143,8 +172,9 @@ def test_a_teclaw_creation_installs_tools_before_it_composes(switch) -> None:
         platform_managed=switch,
         platform_ports=lambda: _ports("store"),
         device_ports=lambda: _ports("device"),
+        redeliver=_no_redeliver,
     )
-    pre = teclaw.steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))
+    pre = teclaw.steps_for(ApplyPhase.PRE_CONTAINER)
     assert ManifestCategory.CLI_TOOLS in {s.construct for s in pre}
 
 
@@ -165,6 +195,7 @@ def test_teclaw_always_gets_the_teclaw_cli_port_whatever_the_switch(switch) -> N
         platform_ports=lambda: _ports("store"),
         device_ports=lambda: _ports("device"),
         cli_tool_service=teclaw_cli,
+        redeliver=_no_redeliver,
     )
     ports = teclaw.ports()
     assert ports.cli_tool_service is teclaw_cli
@@ -185,26 +216,77 @@ def test_a_teclaw_strategy_with_no_cli_service_bound_leaves_the_bundle_alone() -
         platform_managed=False,
         platform_ports=lambda: _ports("store"),
         device_ports=lambda: _ports("device"),
+        redeliver=_no_redeliver,
     )
     assert teclaw.ports() == _ports("device")
 
 
-def test_the_order_table_itself_is_untouched_by_w9() -> None:
-    """``order.py`` carries the ARCA reading; the per-family rule lives in the
-    strategy. A change here would silently re-phase ARCA too."""
+def test_the_arca_table_itself_is_untouched_by_w9() -> None:
+    """The per-family rule lives in ``TeclawDelivery``; ARCA's own table still
+    says ``ON_CONTAINER``, and the position is the shared one. A change here
+    would silently re-phase ARCA too."""
     step = next(s for s in APPLY_ORDER if s.construct is ManifestCategory.CLI_TOOLS)
-    assert (step.phase, step.position) == (ApplyPhase.ON_CONTAINER, 6)
+    assert (_ARCA_PHASES[step.construct], step.position) == (
+        ApplyPhase.ON_CONTAINER,
+        6,
+    )
 
 
-def test_both_phases_walk_every_construct_on_every_strategy() -> None:
-    for strategy in (
+@pytest.mark.parametrize("switch", [True, False])
+def test_script_is_pre_container_on_teclaw_under_either_switch(switch) -> None:
+    """``script`` is unsupported on teclaw, but the phase is still answered —
+    and answered without consulting any shared table, since ``ApplyStep``
+    carries none. A step that fell out of both phases would be skipped
+    silently instead of walking the orchestrator's no-support path and being
+    reported."""
+    teclaw = TeclawDelivery(
+        platform_managed=switch,
+        platform_ports=lambda: _ports("store"),
+        device_ports=lambda: _ports("device"),
+        redeliver=_no_redeliver,
+    )
+    step = next(s for s in APPLY_ORDER if s.construct is ManifestSection.SCRIPT)
+    assert teclaw.phase_of(step) is ApplyPhase.PRE_CONTAINER
+    assert ManifestSection.SCRIPT in {
+        s.construct for s in teclaw.steps_for(ApplyPhase.PRE_CONTAINER)
+    }
+
+
+def _every_strategy():
+    return (
         ArcaDelivery(lambda: _ports("a")),
-        TeclawDelivery(platform_managed=True, platform_ports=lambda: _ports("s"), device_ports=lambda: _ports("d")),
-        TeclawDelivery(platform_managed=False, platform_ports=lambda: _ports("s"), device_ports=lambda: _ports("d")),
-    ):
-        assert strategy.steps_for(ALL_PHASES) == tuple(
-            sorted(APPLY_ORDER, key=lambda s: s.position)
-        )
+        TeclawDelivery(platform_managed=True, platform_ports=lambda: _ports("s"), device_ports=lambda: _ports("d"), redeliver=_no_redeliver),
+        TeclawDelivery(platform_managed=False, platform_ports=lambda: _ports("s"), device_ports=lambda: _ports("d"), redeliver=_no_redeliver),
+    )
+
+
+def test_no_phase_walks_every_construct_on_every_strategy() -> None:
+    """``None`` — stated or defaulted — is the whole apply, on every family.
+
+    The two spellings must not drift: an omitted phase and an explicit ``None``
+    are the same statement, and a family that answered them differently would
+    make the HTTP routes and the orchestrator's default disagree.
+    """
+    whole = tuple(sorted(APPLY_ORDER, key=lambda s: s.position))
+    for strategy in _every_strategy():
+        assert strategy.steps_for() == whole
+        assert strategy.steps_for(None) == whole
+        assert len(whole) == len(APPLY_ORDER) == 7
+
+
+def test_the_two_phases_partition_the_whole_apply_on_every_strategy() -> None:
+    """Each half, re-sorted together, is exactly the whole apply.
+
+    This is what lets the creation job deliver in two calls and the HTTP routes
+    in one without either losing or repeating a construct. A step that fell out
+    of both phases, or into both, would break one of the two.
+    """
+    whole = tuple(sorted(APPLY_ORDER, key=lambda s: s.position))
+    for strategy in _every_strategy():
+        pre = strategy.steps_for(ApplyPhase.PRE_CONTAINER)
+        on = strategy.steps_for(ApplyPhase.ON_CONTAINER)
+        assert tuple(sorted(pre + on, key=lambda s: s.position)) == whole
+        assert set(pre).isdisjoint(on)
 
 
 # ── the closing step ──────────────────────────────────────────────────────
@@ -244,6 +326,7 @@ def test_factory_picks_by_the_engine_authority() -> None:
         is_teclaw=_IS_TECLAW,
         teclaw_platform_managed=False,
         arca_ports=lambda: _ports("a"),
+        redeliver=_no_redeliver,
     )
     assert isinstance(factory.for_engine("openclaw"), ArcaDelivery)
     assert isinstance(factory.for_engine("claude_code"), ArcaDelivery)
@@ -253,13 +336,15 @@ def test_factory_picks_by_the_engine_authority() -> None:
 
 def test_factory_reads_the_switch_once_and_refuses_an_unbound_platform_path() -> None:
     off = DeliveryStrategyFactory(
-        is_teclaw=_IS_TECLAW, teclaw_platform_managed=False, arca_ports=lambda: _ports("a")
+        is_teclaw=_IS_TECLAW, teclaw_platform_managed=False, arca_ports=lambda: _ports("a"),
+        redeliver=_no_redeliver,
     )
     assert not off.for_engine("teclaw").platform_managed
     # On without platform ports is a misconfiguration, not a silent fallback
     # into the container.
     on_unbound = DeliveryStrategyFactory(
-        is_teclaw=_IS_TECLAW, teclaw_platform_managed=True, arca_ports=lambda: _ports("a")
+        is_teclaw=_IS_TECLAW, teclaw_platform_managed=True, arca_ports=lambda: _ports("a"),
+        redeliver=_no_redeliver,
     )
     with pytest.raises(RuntimeError):
         on_unbound.for_engine("teclaw")
@@ -268,6 +353,7 @@ def test_factory_reads_the_switch_once_and_refuses_an_unbound_platform_path() ->
         teclaw_platform_managed=True,
         arca_ports=lambda: _ports("a"),
         teclaw_platform_ports=lambda: _ports("s"),
+        redeliver=_no_redeliver,
     )
     strategy = on.for_engine("teclaw")
     assert strategy.platform_managed

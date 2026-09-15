@@ -9,6 +9,7 @@ import inspect
 import re
 
 from agentclaw.community.core.bot_config_manifest.apply import (
+    delivery,
     order,
     orchestrator,
     registry,
@@ -126,11 +127,15 @@ def test_every_registered_materialiser_has_a_place_in_the_order():
 
 
 def test_script_is_alone_in_the_phase_that_needs_no_container():
-    """The property W13 depends on, pinned against a careless reordering."""
+    """The property W13 depends on, pinned against a careless reordering.
+
+    The phase is the delivery strategy's, not the order table's; this is the
+    ARCA family's table.
+    """
     pre = [
         step.construct
         for step in order.APPLY_ORDER
-        if step.phase is order.ApplyPhase.PRE_CONTAINER
+        if delivery._ARCA_PHASES[step.construct] is order.ApplyPhase.PRE_CONTAINER
     ]
     assert pre == [ManifestSection.SCRIPT]
 
@@ -140,7 +145,7 @@ def test_phase_b_keeps_the_declared_category_order():
     on_container = [
         step.construct
         for step in sorted(order.APPLY_ORDER, key=lambda s: s.position)
-        if step.phase is order.ApplyPhase.ON_CONTAINER
+        if delivery._ARCA_PHASES[step.construct] is order.ApplyPhase.ON_CONTAINER
     ]
     assert on_container[:4] == [
         ManifestCategory.IDENTITY,

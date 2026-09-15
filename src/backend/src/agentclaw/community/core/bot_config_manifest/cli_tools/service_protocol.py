@@ -42,21 +42,47 @@ class CliToolUnsupportedError(ValueError):
     """This bot's engine cannot take CLI tools at all."""
 
 
+class CliToolTooLargeError(ValueError):
+    """The uploaded tool is past the category's per-entry width.
+
+    Raised by the HTTP route while the body is still arriving, never by the
+    service: by the time bytes reach a service call they are already in memory,
+    which is the cost this refusal exists to avoid. It is here so the surface's
+    error table names it beside the other three, rather than in the router that
+    raises it.
+    """
+
+
 @runtime_checkable
 class BotCliToolServiceProtocol(Protocol):
     """Install, list and remove a bot's CLI tools, addressed by ``bot_id``."""
 
     @abstractmethod
     async def install(
-        self, *, bot_id: str, owner_id: str, actor_id: str, decl: CliToolDecl
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        decl: CliToolDecl,
+        data: bytes,
     ) -> BotCliToolRecord:
-        """Install one tool and return its record.
+        """Install one **uploaded** tool and return its record.
+
+        ``data`` is the file the caller sent — the executable itself, or the
+        archive ``decl.subpath`` selects from. This surface never fetches: the
+        bytes arrive with the request, which is why ``decl`` carries no source
+        and why there is no credential to name. A tool that comes from a
+        declared source is a manifest's business, and reaches the same service
+        through the ``cli_tools`` materialiser.
 
         Raises:
             CliToolUnsupportedError: the bot's engine takes no CLI tools.
             CliToolConflictError: the bot already has a tool by that name.
-            CliToolRefusedError: the declaration, the bytes or the engine
-                refused — the reason is the service's own outcome detail.
+            CliToolRefusedError: the bytes or the engine refused — a digest the
+                upload does not match, an archive member that is not there, a
+                binary for another architecture — and the reason is the
+                service's own outcome detail.
         """
         ...
 
@@ -92,5 +118,6 @@ __all__ = [
     "CliToolNotFoundError",
     "CliToolOutcome",
     "CliToolRefusedError",
+    "CliToolTooLargeError",
     "CliToolUnsupportedError",
 ]

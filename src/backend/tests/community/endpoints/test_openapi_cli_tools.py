@@ -4,22 +4,30 @@ Three routes, exercised through the assembled public app rather than a mocked
 router: the real gateway-principal verification, the collaborator bars, the DI
 graph and the repository round trip.
 
-The delivery port and the fetch pipeline are the parts these cases deliberately
-do *not* reach — a bot with no binding has no engine to install into, and a
-source URL is not fetched in a test. What is on the wire here is the surface:
-who may call it, what a refused declaration answers, and that a listing reads
-the platform's own table. The pipeline itself is pinned in the service's suite.
+The install is an **upload**: the tool's bytes ride the request as a multipart
+file part, so these cases send real bytes — a real ELF header, a real tar.gz —
+and the platform really verifies them. Nothing is stubbed on that road, because
+there is nothing left to stub: no source is fetched.
+
+The delivery port is the one part these cases deliberately do *not* reach — a
+bot with no binding has no engine to install into — so the install cases run
+against a teclaw bot, where the composed artifact *is* the delivery and the
+service genuinely makes no engine call.
 """
 
 from __future__ import annotations
 
 import hashlib
+import io
+import tarfile
 import time
 
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
+from agentclaw.community.core.bot_config_manifest.fetch.limits import (
+    FETCH_ENTRY_LIMITS,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.bot.cli_tool import (
     BotCliToolRepositoryProtocol,
@@ -35,7 +43,6 @@ from tests.community.framework import (
     CaseInput,
     ExpectError,
     ExpectSuccess,
-    bind_overrides,
     endpoint_test,
 )
 
@@ -51,6 +58,24 @@ _KEY = "cli-tools-framework-signing-key-at-least-32-bytes"
 #: verifies before it will distribute anything.
 _ELF = _elf_header()
 _DIGEST = "sha256:" + hashlib.sha256(_ELF).hexdigest()
+
+
+def _targz(members: dict[str, bytes]) -> bytes:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        for member, data in members.items():
+            info = tarfile.TarInfo(member)
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
+
+_ARCHIVE = _targz({"mycli-1.4.2/bin/mycli": _ELF})
+_ARCHIVE_DIGEST = "sha256:" + hashlib.sha256(_ARCHIVE).hexdigest()
+
+#: One megabyte past the category's own per-entry width (schema §5: 200 MiB),
+#: read from the table that states it rather than restated as a number here.
+_OVER_THE_CAP = FETCH_ENTRY_LIMITS["cli_tools"] + 1024 * 1024
 
 
 class _Secret:
@@ -90,10 +115,28 @@ _MEMBER_HEADERS = {PRINCIPAL_HEADER: _principal(_MEMBER)}
 _MEMBER_QUERY = {"user_id": _MEMBER, "owner_id": _OWNER}
 
 
-def _install_body(name: str = "mycli", **overrides) -> dict:
-    body = {"name": name, "source": "https://cdn.example.test/mycli", "digest": _DIGEST}
-    body.update(overrides)
-    return body
+def _install_form(name: str = "mycli", **overrides) -> dict:
+    """The form half of the upload: everything except the file part."""
+    form = {"name": name, "digest": _DIGEST}
+    form.update(overrides)
+    return form
+
+
+def _file_part(content: bytes = _ELF, filename: str = "mycli") -> list:
+    """The file half, in httpx's ``files=`` shape."""
+    return [("file", (filename, content))]
+
+
+def _upload(
+    name: str = "mycli", *, content: bytes = _ELF, bot_id: str = None, **overrides
+) -> CaseInput:
+    return CaseInput(
+        path_params={"bot_id": bot_id or _BOT_ID},
+        query_params=_QUERY,
+        headers=_HEADERS,
+        form_data=_install_form(name, **overrides),
+        files=_file_part(content),
+    )
 
 
 def _insert_bot(
@@ -128,7 +171,7 @@ def _install_row(world, *, bot_id: str, name: str, installed_by: str = _OWNER) -
         entity_id=_OWNER,
         bot_id=bot_id,
         name=name,
-        source="https://cdn.example.test/mycli",
+        source="",
         digest=_DIGEST,
         subpath=None,
         md5="9f2c4a1b6d8e0f3a5c7b9d1e3a5c7b9d",
@@ -181,34 +224,17 @@ def _seed_no_bot(world) -> None:
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
 
 
-class _Fetched:
-    """What ``EntryFetcher.fetch`` hands back, for a source no test can reach."""
+def _seed_teclaw_bot(world) -> None:
+    """A teclaw bot, and nothing stood in for.
 
-    def __init__(self, content: bytes, digest: str) -> None:
-        self.content = content
-        self.digest = digest
-        self.from_store = False
-        self.fallback_reason = None
-        self.source_url = None
-
-
-def _seed_teclaw_bot_with_a_reachable_source(world) -> None:
-    """A teclaw bot, and a fetch that answers with a real ELF header.
-
-    Two things are stood in for, and only two. The **fetch** is stubbed because
-    no test can reach a source URL — the guarded transport is exercised by its
-    own suite. The **engine** is not stubbed at all: on teclaw the composed
-    artifact is the delivery, so ``install`` genuinely makes no engine call, and
-    this case runs the real service, the real ELF verification, the real object
-    write and the real row.
+    Nothing needs to be: the bytes come in the request, so there is no fetch to
+    stub, and on teclaw the composed artifact *is* the delivery, so ``install``
+    genuinely makes no engine call. This case runs the real service, the real
+    digest check, the real ELF verification, the real object write and the real
+    row.
     """
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
     _insert_bot(world, bot_id=_TECLAW_BOT_ID, engine="teclaw")
-
-    def _fetch(self, ctx, **kwargs):
-        return _Fetched(_ELF, kwargs.get("digest") or _DIGEST)
-
-    bind_overrides(world, EntryFetcher, {"fetch": _fetch})
 
 
 def _seed_teclaw_bot_with_a_tool(world) -> None:
@@ -306,14 +332,9 @@ def an_unknown_bot_is_refused():
 @endpoint_test(
     method="POST",
     path="/openapi/v1/bots/{bot_id}/cli-tools",
-    scenario="installs_a_tool_and_records_what_it_verified",
-    input=CaseInput(
-        path_params={"bot_id": _TECLAW_BOT_ID},
-        query_params=_QUERY,
-        headers=_HEADERS,
-        json_body=_install_body(version="1.4.2"),
-    ),
-    seed=_seed_teclaw_bot_with_a_reachable_source,
+    scenario="installs_an_uploaded_binary_and_records_what_it_verified",
+    input=_upload(bot_id=_TECLAW_BOT_ID, version="1.4.2"),
+    seed=_seed_teclaw_bot,
     expect=ExpectSuccess(
         status=200,
         json_contains={
@@ -333,7 +354,7 @@ def install_records_the_platforms_own_md5_and_size():
     """The response is the row, and the row is what the platform verified.
 
     ``size_bytes`` is the delivered executable's, not the request's — there is
-    no byte count in the body to echo. ``installed_by`` is the acting caller,
+    no byte count in the form to echo. ``installed_by`` is the acting caller,
     which is what lets a later manifest apply's report say it replaced a tool a
     person installed."""
 
@@ -341,13 +362,104 @@ def install_records_the_platforms_own_md5_and_size():
 @endpoint_test(
     method="POST",
     path="/openapi/v1/bots/{bot_id}/cli-tools",
-    scenario="a_duplicate_name_is_409",
-    input=CaseInput(
-        path_params={"bot_id": _BOT_ID},
-        query_params=_QUERY,
-        headers=_HEADERS,
-        json_body=_install_body(),
+    scenario="installs_the_subpath_out_of_an_uploaded_archive",
+    input=_upload(
+        bot_id=_TECLAW_BOT_ID,
+        content=_ARCHIVE,
+        digest=_ARCHIVE_DIGEST,
+        unpack="tar.gz",
+        subpath="mycli-1.4.2/bin/mycli",
     ),
+    seed=_seed_teclaw_bot,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "data": {
+                "name": "mycli",
+                "subpath": "mycli-1.4.2/bin/mycli",
+                # The archive's, because that is what was uploaded and what
+                # ``digest`` pins; ``subpath`` selects the file inside it.
+                "digest": _ARCHIVE_DIGEST,
+                # The selected member's, not the archive's: the platform
+                # computes these after unpacking.
+                "size_bytes": len(_ELF),
+                "md5": hashlib.md5(_ELF).hexdigest(),
+            }
+        },
+    ),
+)
+def an_archive_upload_installs_the_member_subpath_names():
+    """``digest`` covers what was uploaded; ``md5`` and ``size_bytes`` cover
+    what was installed. Reading both off one response is how a caller can tell
+    that the platform unpacked rather than distributed the archive."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/cli-tools",
+    scenario="bytes_that_do_not_match_the_digest_are_refused",
+    input=_upload(
+        bot_id=_TECLAW_BOT_ID, digest="sha256:" + "0" * 64
+    ),
+    seed=_seed_teclaw_bot,
+    expect=ExpectError(status=422, json_contains={"code": 422110}),
+)
+def an_upload_that_does_not_match_its_digest_is_refused():
+    """The digest is the client's statement of what it meant to send, so a
+    truncated upload or the wrong file is a refusal rather than an executable
+    nobody named. Nothing is stored and no row is written."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/cli-tools",
+    scenario="unpack_without_a_subpath_is_refused",
+    input=_upload(
+        bot_id=_TECLAW_BOT_ID,
+        content=_ARCHIVE,
+        digest=_ARCHIVE_DIGEST,
+        unpack="tar.gz",
+    ),
+    seed=_seed_teclaw_bot,
+    expect=ExpectError(status=422, json_contains={"code": 422110}),
+)
+def an_archive_with_no_subpath_is_refused_rather_than_guessed_at():
+    """One entry is one command is one file: with an archive and no ``subpath``
+    there is nothing that says which member is the command, and picking one
+    would be the platform guessing which executable to install."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/cli-tools",
+    scenario="an_upload_over_the_cap_is_refused",
+    input=CaseInput(
+        path_params={"bot_id": _TECLAW_BOT_ID},
+        query_params=_QUERY,
+        # A body that announces more than the cap. The bytes behind it are
+        # small on purpose: what this case pins is that the *announcement* is
+        # enough to be refused, so the platform never reads 200 MiB to find out
+        # it did not want them. The other half of the rule — a caller that
+        # announces nothing gets cut off mid-stream — is pinned as a unit on
+        # the route class, where the stream can be watched.
+        headers={**_HEADERS, "content-length": str(_OVER_THE_CAP)},
+        form_data=_install_form(),
+        files=_file_part(),
+    ),
+    seed=_seed_teclaw_bot,
+    expect=ExpectError(status=413, json_contains={"code": 413110}),
+)
+def an_upload_past_the_cap_is_refused_while_it_arrives():
+    """200 MiB is the width schema §5 gives this category, and the same number
+    caps a manifest-declared fetch: a binary the platform would refuse to fetch
+    is not one it accepts by upload either."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/cli-tools",
+    scenario="a_duplicate_name_is_409",
+    input=_upload(),
     seed=_seed_bot_with_a_tool,
     expect=ExpectError(status=409),
 )
@@ -360,35 +472,31 @@ def a_duplicate_name_is_409_not_a_silent_replacement():
 @endpoint_test(
     method="POST",
     path="/openapi/v1/bots/{bot_id}/cli-tools",
-    scenario="a_declaration_without_a_digest_is_refused",
+    scenario="an_upload_without_a_digest_is_refused",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID},
         query_params=_QUERY,
         headers=_HEADERS,
-        json_body={"name": "mycli", "source": "https://cdn.example.test/mycli"},
+        form_data={"name": "mycli"},
+        files=_file_part(),
     ),
     seed=_seed_bot,
     expect=ExpectError(status=422),
 )
 def an_unpinned_executable_is_refused_at_the_edge():
-    """``digest`` is required by the request model itself, so the platform never
-    reaches the fetch for an unpinned executable."""
+    """``digest`` is required by the form model itself, so the platform never
+    reaches the ELF gate for an unpinned executable."""
 
 
 @endpoint_test(
     method="POST",
     path="/openapi/v1/bots/{bot_id}/cli-tools",
     scenario="a_desktop_bot_cannot_take_cli_tools",
-    input=CaseInput(
-        path_params={"bot_id": _DESKTOP_BOT_ID},
-        query_params=_QUERY,
-        headers=_HEADERS,
-        json_body=_install_body(),
-    ),
+    input=_upload(bot_id=_DESKTOP_BOT_ID),
     seed=_seed_desktop_bot,
     expect=ExpectError(status=409),
 )
-def an_engine_that_cannot_take_tools_is_refused_before_the_fetch():
+def an_engine_that_cannot_take_tools_is_refused_before_anything_is_stored():
     """The capability answer is re-asked here rather than trusted from a
     manifest ``PUT``: this surface has no stored document to have been
     validated against, and a bot's engine can change."""
@@ -402,7 +510,8 @@ def an_engine_that_cannot_take_tools_is_refused_before_the_fetch():
         path_params={"bot_id": _SHARED_BOT_ID},
         query_params=_MEMBER_QUERY,
         headers=_MEMBER_HEADERS,
-        json_body=_install_body("other"),
+        form_data=_install_form("other"),
+        files=_file_part(),
     ),
     seed=_seed_member,
     expect=ExpectError(status=404, json_contains={"data": None}),

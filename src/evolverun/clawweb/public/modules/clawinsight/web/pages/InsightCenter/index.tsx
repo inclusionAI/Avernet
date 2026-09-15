@@ -8,6 +8,9 @@ import FailureTasks from "./FailureTasks";
 import ImprovementItems from "./ImprovementItems";
 import InsightOverview from "./InsightOverview";
 import { InsightIcon } from "./InsightUi";
+import MonitoringPanel from "./monitoring/MonitoringPanel";
+import { MonitoringIcon } from "./monitoring/MonitoringIcon";
+import "./monitoring/monitoring.css";
 
 type InsightTab = "todo" | "evidence" | "overview" | "admin";
 type BotOption = { botId: string; botName: string; ownerUserId?: string };
@@ -41,6 +44,29 @@ function parseImprovementId(value: string | null): number | undefined {
 }
 
 export default function InsightCenter() {
+  const [params, setParams] = useSearchParams();
+  const monitoring = params.get("module") === "monitoring";
+  const select = (value: boolean) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set("module", "monitoring");
+    else next.delete("module");
+    setParams(next);
+  };
+  return <div className="insight-shell">
+    <aside className="insight-sidebar">
+      <div className="insight-sidebar-inner">
+        <div className="insight-workspace-title"><span className="insight-workspace-icon"><MonitoringIcon name="grid" /></span>效果中心</div>
+        <nav aria-label="效果中心功能" className="insight-side-nav">
+          {[{ active: !monitoring, label: "Agent 治理", value: false, icon: "chart" as const }, { active: monitoring, label: "Agent 监控自愈", value: true, icon: "pulse" as const }].map(item =>
+            <button key={item.label} type="button" aria-current={item.active ? "page" : undefined} onClick={() => select(item.value)} className={item.active ? "active" : ""}><MonitoringIcon name={item.icon} />{item.label}</button>)}
+        </nav>
+      </div>
+    </aside>
+    <div className="insight-content">{monitoring ? <MonitoringPanel /> : <GovernanceCenter />}</div>
+  </div>;
+}
+
+function GovernanceCenter() {
   const navigate = useNavigate();
   const { user } = useClientUser();
   const isAdmin = user?.isAdmin === true;

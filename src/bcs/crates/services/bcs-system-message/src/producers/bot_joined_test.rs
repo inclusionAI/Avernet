@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_domain::{
-    ActorKind, ActorStatus, BotCapabilities, BotDynamicStatus, Group, Participant, ParticipantRole,
+    ActorKind, ActorStatus, BotCapabilities, Group, Participant, ParticipantRole,
     RegisteredBot, Skill, SystemMessageEvent,
 };
 use bcs_service_api::{AgentCredentials, BotRegistryCoreService, ServiceResult, SystemMessageProducerService};
@@ -23,7 +23,7 @@ impl BotRegistryCoreService for MockRegistry {
         Ok(())
     }
 
-    async fn update_status(&self, _bot_id: &str, _status: BotDynamicStatus) -> bool {
+    async fn update_status(&self, _bot_id: &str) -> bool {
         false
     }
 
@@ -148,6 +148,12 @@ impl BotRegistryCoreService for MockRegistry {
 }
 
 #[tokio::test]
+async fn mock_registry_update_status_rejects_heartbeat_renewal() {
+    let registry = MockRegistry::default();
+    assert!(!registry.update_status("heartbeat-renewal-unsupported").await);
+}
+
+#[tokio::test]
 async fn bot_joined_produces_context_injection_and_notification() {
     let driver = Participant::bot("driver-id", ParticipantRole::Driver);
     let consultant = Participant::bot("consultant-id", ParticipantRole::Consultant);
@@ -165,7 +171,6 @@ async fn bot_joined_produces_context_injection_and_notification() {
                 skills: vec![Skill::new("coding")],
                 ..Default::default()
             },
-            dynamic_status: BotDynamicStatus::default(),
             env: None,
             created_by: None,
             actor_kind: ActorKind::Bot,
@@ -266,7 +271,6 @@ async fn bot_joined_emits_user_message_even_when_only_new_bot_present() {
                 skills: vec![Skill::new("coding")],
                 ..Default::default()
             },
-            dynamic_status: BotDynamicStatus::default(),
             env: None,
             created_by: None,
             actor_kind: ActorKind::Bot,

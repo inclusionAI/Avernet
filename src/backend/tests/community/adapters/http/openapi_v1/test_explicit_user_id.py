@@ -459,7 +459,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: W9 (#1477) adds the three ``cli-tools`` operations — install, list and
 #: delete. All three are bot-path-addressed like the config-manifest group they
 #: sit beside, so ``path`` 156 → 159 and nothing else moves.
-_BOT_ID_PLACEMENT = {"path": 159, "query": 1, "none": 104}
+#: Dormant lifecycle adds one new bot-path operation (recycle); activate and
+#: status keep their existing paths while gaining addressed-owner scope.
+_BOT_ID_PLACEMENT = {"path": 160, "query": 1, "none": 104}
 
 
 def _schema() -> dict:
@@ -610,8 +612,9 @@ def test_the_pinned_number_of_operations_take_it():
     # W9's three cli-tools operations (#1477) are user-scoped for the reason the
     # config-manifest group beside them is: they may address a *shared* bot, so
     # the owner arrives on the wire while the caller stays the acting user —
-    # which is what ``installed_by`` records: 230 → 233.
-    assert len(taking) == 233
+    # which is what ``installed_by`` records: 230 → 233. Dormant recycle adds
+    # one more user-scoped operation: 233 → 234.
+    assert len(taking) == 234
 
 
 def test_the_exempt_operations_take_none():

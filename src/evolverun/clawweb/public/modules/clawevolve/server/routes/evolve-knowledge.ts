@@ -5,6 +5,7 @@ import type { EvolveRepository } from "../repositories/evolve-repository.js"
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository"
 import { requireWorkflowAccess } from "@avernet/clawweb-shared/server/services/workflow-access"
 import { WorkflowEvolutionRepository } from "../repositories/workflow-evolution-repository.js"
+import { IssueAggregationRepository } from '../repositories/issue-aggregation-repository.js';
 
 function lessonSuccessRate(hitCount: number, rescuedCount: number): number {
   if (!hitCount) return 0;
@@ -64,6 +65,17 @@ export function createEvolveKnowledgeRouter(
 ): Router {
   const router = Router();
   const workflowEvolutionRepo = new WorkflowEvolutionRepository(_db);
+
+  router.get('/issue-groups', async (req: Request, res: Response) => {
+    const workflowId = textOrNull(req.query.workflowId);
+    if (!workflowId) { res.status(400).json({ error: 'workflowId is required' }); return; }
+    if (!await requireWorkflowAccess(req, res, botPermRepo, workflowId, 'view')) return;
+    try {
+      res.json({ groups: await new IssueAggregationRepository(_db).list(workflowId) });
+    } catch {
+      res.status(500).json({ error: 'issue_groups_unavailable' });
+    }
+  });
 
   router.get("/lessons", async (req: Request, res: Response) => {
     if (!repo) {

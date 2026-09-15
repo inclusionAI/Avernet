@@ -21,7 +21,8 @@ worker 或状态机节点的内部回复。
    `message_view_scope`，继续沿用各自已有的成员、受理人和运行权限规则。
 4. 本能力是产品视图降噪，不承诺机密性。Human 可通过有权限的状态机副屏查看流程
    信息；真正的秘密信息不能仅依赖本 scope 保护。
-5. bot owner 以 bot 视角查看不在本次范围内。
+5. Bot tab 按所选 Bot 的归属与 Session 成员关系授权，不受登录 Human 的
+   `message_view_scope` 影响；Human 投影仅用于 Human tab。
 
 ## 3. Scope 数据模型
 
@@ -102,6 +103,11 @@ scope。Leader Election 开启的多副本部署暂时只提供实例内的 best
 
 历史接口解析同一个 actor id 与有效 scope，并在分页语义确定后返回该 viewer 的投影。
 实时与历史必须复用同一判定函数及消息元数据。
+
+HTTP 登录身份与所选 View Actor 分开处理。Human 显式通过 `view_bot_id` 选择 Bot
+时，必须拥有该 Bot，且 Bot 必须是当前 Session 的参与者；通过校验后读取 Bot
+视角，不应用 Human 的 scope，也不合并 Human 专属的运行时快照。该规则适用于
+Chat、ManagerWorker 和 StateMachine Session，旧历史接口与 V1 接口保持一致。
 
 对于运行时快照补齐的 HumanInput 展示，只能用于 `participant` 投影，不能改变 `full`
 原有消息集合。补齐消息需要稳定 identity，防止与持久化消息重复。
@@ -190,6 +196,8 @@ API 默认值为 `full`。不应引入 `participant_view_unsupported` 之类由 
 - 未传 `view_actor_id` 的旧 Workbench 连接保持原授权与未投影消息行为。
 - `full` 的 WS 帧、历史消息集合、排序和副屏行为与基线一致。
 - 旧群、旧 session 可以继续创建运行、加入和查询状态机。
+- Human 为 `full` 或 `participant` 时，切到自有且已加入 Session 的 Bot tab
+  得到相同的 Bot 历史；他人的 Bot、未加入 Session 的 Bot 和其他 Human 视角均拒绝。
 
 ### participant 主消息流
 

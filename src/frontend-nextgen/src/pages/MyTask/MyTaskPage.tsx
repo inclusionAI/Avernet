@@ -1,5 +1,4 @@
 import { PageHeader } from '@/components/Common/PageHeader';
-import { Card, CardContent } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import type { IdentityView } from '@/domain/collaboration';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
@@ -121,69 +120,72 @@ export default function MyTaskPage() {
   return (
     <main className="app-scrollbar h-full min-h-0 overflow-y-auto">
       <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-6 px-4 py-4 sm:px-6 sm:py-6 2xl:px-8">
-        <PageHeader title="我的任务" />
+        <PageHeader
+          title="我的任务"
+          description={
+            isUserIdentity ? '当前以用户身份查看任务列表' : isBotIdentity ? '当前以 Bot 身份查看定时任务' : undefined
+          }
+        />
 
-        <Card>
-          <CardContent className="space-y-4 pt-5">
-            {isUserIdentity ? (
-              <UserTaskTab
-                taskRecords={taskRecords}
-                total={userTaskTotal}
-                page={userTaskPage}
-                pageSize={userTaskPageSize}
-                loading={humanIdentityStatus === 'loading' || ownedBotsLoading || userLoading}
-                error={userError}
-                statusFilter={userTaskStatusFilter}
-                onStatusFilterChange={(status) => {
-                  setUserTaskStatusFilter(status);
-                  setUserTaskPage(DEFAULT_PAGE);
-                }}
-                onRetry={() => void refreshUserTasks()}
-                onSelectTask={setSelectedTaskId}
-                selectedTaskId={selectedTaskId}
-                onPageChange={setUserTaskPage}
-                onPageSizeChange={(nextPageSize) => {
-                  setUserTaskPageSize(nextPageSize);
-                  setUserTaskPage(DEFAULT_PAGE);
-                }}
-                botNameMap={botNameMap}
-              />
-            ) : isBotIdentity ? (
-              <RoutineTaskTab
-                routines={routines}
-                total={routineTotal}
-                page={routinePage}
-                pageSize={routinePageSize}
-                loading={humanIdentityStatus === 'loading' || routineLoading}
-                error={routineError}
-                botOptions={routineBotOptions}
-                selectedBotId={selectedRoutineBotId}
-                showBotSelector={false}
-                onChangeBotId={() => {}}
-                onRetry={() => void refreshRoutines()}
-                onSelectRoutine={(routine) =>
-                  setSelectedRoutineKey(makeRoutineKey(routine.botId, routine.id, routine.runtimeStage))
-                }
-                onRunRoutine={async (routine) => {
-                  await runRoutine(routine);
-                  await refreshRoutines();
-                }}
-                onPageChange={setRoutinePage}
-                onPageSizeChange={(nextPageSize) => {
-                  setRoutinePageSize(nextPageSize);
-                  setRoutinePage(DEFAULT_PAGE);
-                }}
-                botNameMap={botNameMap}
-              />
-            ) : (
-              <div role="status" className="space-y-3 py-2">
-                <span className="sr-only">工作身份加载中</span>
-                <Skeleton.Block className="h-12 w-full rounded-lg" />
-                <Skeleton.Block className="h-64 w-full rounded-lg" />
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <div className="space-y-4">
+          {isUserIdentity ? (
+            <UserTaskTab
+              taskRecords={taskRecords}
+              total={userTaskTotal}
+              page={userTaskPage}
+              pageSize={userTaskPageSize}
+              loading={humanIdentityStatus === 'loading' || ownedBotsLoading || userLoading}
+              error={userError}
+              statusFilter={userTaskStatusFilter}
+              onStatusFilterChange={(status) => {
+                setUserTaskStatusFilter(status);
+                setUserTaskPage(DEFAULT_PAGE);
+              }}
+              onRetry={() => void refreshUserTasks()}
+              onSelectTask={setSelectedTaskId}
+              selectedTaskId={selectedTaskId}
+              onPageChange={setUserTaskPage}
+              onPageSizeChange={(nextPageSize) => {
+                setUserTaskPageSize(nextPageSize);
+                setUserTaskPage(DEFAULT_PAGE);
+              }}
+              botNameMap={botNameMap}
+            />
+          ) : isBotIdentity ? (
+            <RoutineTaskTab
+              routines={routines}
+              total={routineTotal}
+              page={routinePage}
+              pageSize={routinePageSize}
+              loading={humanIdentityStatus === 'loading' || routineLoading}
+              error={routineError}
+              botOptions={routineBotOptions}
+              selectedBotId={selectedRoutineBotId}
+              showBotSelector={false}
+              onChangeBotId={() => {}}
+              onRetry={() => void refreshRoutines()}
+              onSelectRoutine={(routine) =>
+                setSelectedRoutineKey(makeRoutineKey(routine.botId, routine.id, routine.runtimeStage))
+              }
+              onRunRoutine={async (routine) => {
+                await runRoutine(routine);
+                await refreshRoutines();
+              }}
+              onPageChange={setRoutinePage}
+              onPageSizeChange={(nextPageSize) => {
+                setRoutinePageSize(nextPageSize);
+                setRoutinePage(DEFAULT_PAGE);
+              }}
+              botNameMap={botNameMap}
+            />
+          ) : (
+            <div role="status" className="space-y-3 py-2">
+              <span className="sr-only">工作身份加载中</span>
+              <Skeleton.Block className="h-12 w-full rounded-lg" />
+              <Skeleton.Block className="h-64 w-full rounded-lg" />
+            </div>
+          )}
+        </div>
       </div>
 
       <MyTaskDrawers

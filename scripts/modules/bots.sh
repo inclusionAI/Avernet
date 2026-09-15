@@ -699,7 +699,65 @@ bots_dynamic_copy_profile_files() {
             rm -f "${workspace_dir}/${file}"
         fi
     done
+
+    bots_dynamic_sync_profile_skills "$source" "$workspace_dir" || return 1
 }
+
+bots_dynamic_sync_profile_skills() (
+    local source="$1"
+    local workspace_dir="$2"
+    local source_dir skills_dir managed_dir staging entry name symlink_path
+    source_dir="$(bots_dynamic_profile_dir)/${source}/skills"
+    skills_dir="${workspace_dir}/skills"
+    managed_dir="${workspace_dir}/.singlebox-profile-skills"
+
+    # A trailing '/.' would dereference a symlink used as the source root.
+    if [ -L "$source_dir" ]; then
+        log_error "Profile skills must not contain symlinks: ${source_dir}"
+        return 1
+    fi
+
+    # Stage the complete source before replacing any runtime skills. The marker
+    # directory records only profile-owned names, so other installed skills stay.
+    staging="$(mktemp -d "${workspace_dir}/.singlebox-skills.XXXXXX")" || return 1
+    trap 'rm -rf "$staging"' EXIT
+    mkdir -p "${staging}/skills" "${staging}/managed" || return 1
+    if [ -e "$source_dir" ]; then
+        cp -R -P "${source_dir}/." "${staging}/skills/" || return 1
+    fi
+    # Inspect the copied tree before changing active skills. Never install a
+    # live link to external content, including hidden or dangling links.
+    symlink_path="$(find -P "${staging}/skills" -type l -print -quit)" || return 1
+    if [ -n "$symlink_path" ]; then
+        log_error "Profile skills must not contain symlinks: ${source_dir}/${symlink_path#"${staging}/skills/"}"
+        return 1
+    fi
+    if [ -L "$skills_dir" ] || [ -L "$managed_dir" ]; then
+        log_error "Profile skills destination must not be a symlink: ${workspace_dir}"
+        return 1
+    fi
+    mkdir -p "$skills_dir" "$managed_dir" || return 1
+
+    for entry in "${staging}/skills/"* "${staging}/skills/".[!.]* "${staging}/skills/"..?*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        name="${entry##*/}"
+        # The shared coordination skill is always installed from BCS below.
+        [ "$name" != "bcs-coordination" ] || continue
+        touch "${staging}/managed/${name}" || return 1
+        rm -rf "${skills_dir:?}/${name}" || return 1
+        mv "$entry" "${skills_dir}/${name}" || return 1
+    done
+    for entry in "${managed_dir}/"* "${managed_dir}/".[!.]* "${managed_dir}/"..?*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        name="${entry##*/}"
+        [ "$name" != "bcs-coordination" ] || continue
+        if [ ! -e "${staging}/managed/${name}" ]; then
+            rm -rf "${skills_dir:?}/${name}" || return 1
+        fi
+    done
+    rm -rf "$managed_dir" || return 1
+    mv "${staging}/managed" "$managed_dir" || return 1
+)
 
 bots_dynamic_setup_bcs_skill() {
     local workspace_dir="$1"

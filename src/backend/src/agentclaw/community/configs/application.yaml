@@ -216,14 +216,16 @@ user_config:
       - "http://localhost:8888"
     allow_origin_regex: []
 
-  # bot-config-manifest 抓取（W2 guarded fetcher）的部署传输白名单。
-  # 精确 host 匹配：把"部署级目的地例外"（企业 HTTP 镜像、内部内容代理）
-  # 写进配置而不是改代码/环境变量。列入的 host 仅豁免两条规则——"仅
-  # 公网地址"与"仅 https"（仍可写 https://… 到内网 mirror，或对该 host
-  # 走 http）；逐跳重定向重校验、字节上限、跳数预算、digest 校验照常。
-  # 中性默认为空（无任何例外）；corp env overlay 在此处提供镜像 host。
-  # 读取方：core/bot_config_manifest/fetch/limits.py 的
-  # transport_allowlist_from_config（组合根在装配 GuardedFetcher 时调用）。
+  # bot-config-manifest 凭据端点守卫（credential endpoint guard）的部署白名单。
+  # 租户注册 object-store 凭据时，端点要过 SSRF 校验：解析到内网地址的 host
+  # 一律拒绝落库。列入此表的 host 精确匹配豁免两条规则——"仅公网地址"与
+  # "仅 https"——于是"内网 object store 端点"这种部署级目的地例外写进配置，
+  # 而不是改代码/环境变量。豁免仅此两条，其余规则（URL 形状、userinfo、
+  # 控制字符）照常。中性默认为空（无任何例外）；corp env overlay 在此处提供
+  # 内部端点 host。读取方：core/bot_config_manifest/fetch/limits.py 的
+  # transport_allowlist_from_config —— 组合根把结果作为
+  # SourceCredentialService(endpoint_allow_hosts=...) 传入。
+  # 键名沿用抓取时代的拼法（部署面设置，改名会打断所有环境 overlay）。
   #
   # content_store_dir（W11 #1510）：平台留存副本（内容寻址 blob 目录）的根。
   # 溯源行在数据库（ac_manifest_content）；字节在这里——schema §5 单条上限

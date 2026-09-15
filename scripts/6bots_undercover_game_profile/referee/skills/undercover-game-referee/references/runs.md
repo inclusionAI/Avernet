@@ -4,7 +4,7 @@
 
 每个游戏 session 只有一个 `undercover-game-<session>` 标签，提交时固定 `--panel-tab-closable false`。每次发言、投票、后续轮次或 `--retry` 仍生成独立 YAML/input/panel-params 文件，但用同一标签更新到新的 run；标题继续显示轮次与阶段。
 
-`public_panel_projection` 是公开参数的唯一入口：发布完整原始座位 `seatOrder`、存活行动顺序 `turnOrder`、显式座位号、主持节点映射、脱敏 `publicHistory`、公开规则和人类可投候选人。它不发布词、身份、原始发言、原始票面、未公开票向或私有推理。
+`public_panel_projection` 是公开参数的唯一入口：发布完整原始座位 `seatOrder`、阶段行动顺序 `turnOrder`、显式座位号、主持节点映射、脱敏 `publicHistory`、公开规则和人类可投候选人。它不发布词、身份、原始发言、原始票面、未公开票向或私有推理。
 
 人类发言/投票节点在自然语言 instruction 末尾追加 `UNDERCOVER_UI_CONTEXT_V1` JSON 块。这个块只属于该 HumanInput 的认证读取边界，用于副屏显示本人词、轮次、座位和输入约束；Bot 节点 instruction、运行 input、公开参数与普通历史不复制该块。人类投票提交 `{"kind":"vote","target_actor_id":"<actor-id>"}` 或 `{"kind":"vote","abstain":true}`，事实层先严格解析并校验存活/非自己目标，再对非结构化 Bot 文本使用原有票号/名字解析。
 
@@ -32,7 +32,7 @@ BCS 要求恰好一个零入度入口和一个 final_output 末节点，不能�
 发言公告写入 Input.opening，提交成功后返回主持人播报。
 投票公告由脚本写入 Input.opening 与公开副屏参数 openingAnnouncement；副屏只有在
 本次运行 running 且 vote_start completed 时才展示，准备期间显示等待提示，失败时
-显示失败状态。重开公告包含旧票作废说明。投票公告不含名字、词、身份、票向或倾向。
+显示失败状态。重开公告包含旧票作废说明。常规投票公告不含名字、词、身份、票向或倾向；PK 公告包含已公开的 PK 名单。
 完整公开发言历史仍通过 Input.history 传入；预备确认不是投票判断依据。
 Bot 的词只放本人 instruction；Human 的词仍只在本人认证节点上下文中。
 
@@ -60,3 +60,9 @@ IN_COLLECT_NODE / IN_TALLY_NODE 立即结束；RUN_SLOT_BUSY 只说明服务端�
 同一轮最多重开两次；仍失败则请人类新建会话，不猜测推进。
 
 副屏组件统一使用 `--panel-component bcsPanel.UndercoverGamePanel`，由 BCS manifest 中的 `bcsPanel` 包提供；提交必须使用本局 session ID。
+
+## 平票 PK
+
+常规 tally 返回 verdict=pk 后结束，由回灌启动同轮 PK 发言。PK 发言复用串行图，仅纳入 PK 玩家，首位可为 Human；非 PK Human 观看。PK collect 只收该名单的发言，结束后回灌开启 PK 投票。
+PK 投票复用全体存活玩家并行图，候选只限 PK 玩家且不能自投，Human 私有块 allowAbstain=false。本次所有写入使用节点固定的 --round R --stage pk --attempt N；重试只重开当前 PK 阶段，不覆盖常规票面。
+公开参数 phase 为 pk_speaking / pk_voting，pkCandidates 为 actor ID 名单；publicHistory 区分普通/PK 发言，voteHistory 仅含已经计票的规范化票面及票数。PK 仍平票或零有效票不追加 PK；最终按原胜负、遗言与下一轮流程处理。

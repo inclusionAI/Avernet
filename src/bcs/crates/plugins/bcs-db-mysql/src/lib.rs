@@ -107,6 +107,17 @@ impl DbPlugin for MysqlDbPlugin {
                                     last_insert_id: result.last_insert_id,
                                 }));
                             }
+                            PreparedTransactionStep::ExecuteChecked(statement, expected) => {
+                                let params = statement.resolve_transaction_params(&results, step_index)?;
+                                let result = tx.execute_result(statement.sql(), mysql_params(&params)?).await?;
+                                if result.affected_rows != expected {
+                                    return Err(DbError::ConditionFailed { expected, actual: result.affected_rows });
+                                }
+                                results.push(DbTransactionStepResult::Executed(DbExecuteResult {
+                                    affected_rows: result.affected_rows,
+                                    last_insert_id: result.last_insert_id,
+                                }));
+                            }
                         }
                     }
                     Ok(results)
@@ -128,6 +139,7 @@ impl DbPlugin for MysqlDbPlugin {
 enum PreparedTransactionStep {
     Query(DbStatement),
     Execute(DbStatement),
+    ExecuteChecked(DbStatement, u64),
 }
 
 impl From<DbTransactionStep> for PreparedTransactionStep {
@@ -135,6 +147,9 @@ impl From<DbTransactionStep> for PreparedTransactionStep {
         match step {
             DbTransactionStep::Query(statement) => Self::Query(statement),
             DbTransactionStep::Execute(statement) => Self::Execute(statement),
+            DbTransactionStep::ExecuteChecked { statement, expected_affected_rows } => {
+                Self::ExecuteChecked(statement, expected_affected_rows)
+            }
         }
     }
 }

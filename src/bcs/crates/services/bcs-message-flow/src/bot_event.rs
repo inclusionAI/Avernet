@@ -37,6 +37,45 @@ pub async fn handle_bot_event(
     cmd: BotEventCommand,
 ) -> ServiceResult<BotEventOutcome> {
     let mut cmd = cmd;
+    let admission_timing = crate::reply_timing::Timer::new("event.lookup_and_lock");
+    let managed = crate::queued_admission::find_managed_run(flow, &cmd).await?;
+    // Serialize all events for a managed run, including two simultaneous
+    // finals. Holding this guard spans the committed terminal and its
+    // best-effort effects, not merely the first state lookup.
+    let _event_guard = {
+        let lock_id = managed.as_ref().map(|row| row.delivery_id.clone())
+            .unwrap_or_else(|| format!("run:{}", crate::run_reply::chat_key(&cmd)));
+        let lock = {
+            let mut locks = flow.delivery_event_locks.lock().await;
+            locks.retain(|_, lock| lock.strong_count() > 0);
+            let lock = locks.get(&lock_id).and_then(std::sync::Weak::upgrade)
+                .unwrap_or_else(|| std::sync::Arc::new(tokio::sync::Mutex::new(())));
+            locks.insert(lock_id, std::sync::Arc::downgrade(&lock));
+            lock
+        };
+        lock.lock_owned().await
+    };
+    let managed = if managed.is_some() { crate::queued_admission::find_managed_run(flow, &cmd).await? } else { None };
+    if let Some(row) = &managed {
+        use bcs_domain::message_delivery::MessageDeliveryStatus as Status;
+        if matches!(row.state.status, Status::Completed | Status::Failed | Status::Cancelled | Status::Expired | Status::RejectedCapacity) {
+            return Ok(BotEventOutcome { bot_deliveries: Vec::new(), frontend_deliveries: Vec::new(),
+                unregistered_run_ids: Vec::new(), mentions: Vec::new(), delivered_count: 0, failed_count: 0, delivery_results: Vec::new() });
+        }
+        if !row.state.may_have_been_sent {
+            return Err(ServiceError::InvalidOperation { message: "Bot event arrived for an unsent delivery".into(), request_id: None });
+        }
+        if cmd.state == ChatEventState::Delta {
+            if let (Some(service), Some(request_id)) = (&flow.managed_deliveries, &row.request_id) {
+                service.accept_run(request_id, &cmd.bot_id, None, chrono::Utc::now().timestamp_millis()).await
+                    .map_err(|_| ServiceError::InternalError("managed receipt persistence failed".into()))?;
+            }
+        }
+        cmd.bcs_session_id = Some(row.session_id.clone());
+        if let Some(run_id) = &row.run_id { cmd.run_id = run_id.clone(); }
+    }
+    let managed_terminal = managed.is_some() && is_terminal_state(&cmd.state) && matches!(cmd.event_type.as_str(), "chat" | "chat.event");
+    drop(admission_timing);
     let task_id_for_event = flow.task_store.resolve_task_id(&cmd.run_id).await;
     log_incoming_bot_event(&cmd, task_id_for_event.as_deref());
 
@@ -75,11 +114,11 @@ pub async fn handle_bot_event(
         match extract_delta_text(&cmd.event_payload) {
             Some(delta) if !delta.is_empty() => {
                 flow.message_tracker
-                    .append_chat_delta(&cmd.run_id, delta)
+                    .append_chat_delta(&crate::run_reply::chat_key(&cmd), delta)
                     .await;
                 // Inject the segment-accumulated text as `message` so every
                 // consumer, including direct A2A runs, sees the same shape.
-                if let Some(acc) = flow.message_tracker.peek_chat_buf(&cmd.run_id).await {
+                if let Some(acc) = flow.message_tracker.peek_chat_buf(&crate::run_reply::chat_key(&cmd)).await {
                     inject_synthesized_message(&mut cmd.event_payload, &acc);
                 }
             }
@@ -93,20 +132,29 @@ pub async fn handle_bot_event(
         }
     }
 
-    if cmd.state == ChatEventState::Final
+    // Queue reconstruction is a separate payload. Never rewrite the provider's
+    // final or replace its frontend/channel projection with queue display text.
+    let queue_reply = if cmd.state == ChatEventState::Final && task_id_for_event.is_none()
+        && !cmd.group_id.is_empty() && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
+        && managed_terminal {
+        let text = extract_message_text(&cmd.event_payload);
+        Some(crate::run_reply::prepare(flow, &cmd, &text, managed_terminal).await?)
+    } else { None };
+    // Preserve the existing empty-final fallback for task/direct A2A runs;
+    // group finals use the independent queue reconstruction above.
+    if (task_id_for_event.is_some() || cmd.group_id.is_empty())
+        && cmd.state == ChatEventState::Final
         && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
         && extract_message_text(&cmd.event_payload).is_empty()
     {
-        if let Some(accumulated) = flow.message_tracker.peek_chat_buf(&cmd.run_id).await {
+        if let Some(accumulated) = flow.message_tracker.peek_chat_buf(&crate::run_reply::chat_key(&cmd)).await {
             if !accumulated.is_empty() {
                 inject_synthesized_message(&mut cmd.event_payload, &accumulated);
             }
         }
     }
-
-    let mut frontend_deliveries =
-        publish_incoming_event(flow, &cmd, task_id_for_event.as_deref()).await?;
-    try_channel_outbound(flow, &cmd).await;
+    let mut frontend_deliveries = if managed_terminal { Vec::new() } else { publish_incoming_event(flow, &cmd, task_id_for_event.as_deref()).await? };
+    if !managed_terminal { try_channel_outbound(flow, &cmd).await; }
     let mut bot_deliveries = Vec::new();
 
     // Persist tool call events (identified by payload.stream == "tool", distinguished by payload.data.phase)
@@ -153,10 +201,10 @@ pub async fn handle_bot_event(
         flush_chat_segment(flow, &cmd, None).await?;
     }
     if is_terminal_state(&cmd.state) {
-        if matches!(cmd.event_type.as_str(), "chat" | "chat.event") {
+        if !managed_terminal && matches!(cmd.event_type.as_str(), "chat" | "chat.event") {
             flow.complete_send_context(&cmd.run_id).await?;
         }
-        flow.frontend_delivery.unregister_run(&cmd.run_id).await?;
+        if !managed_terminal { flow.frontend_delivery.unregister_run(&cmd.run_id).await?; }
     }
 
     // A terminal error/abort ends the run's open chat segment but never reaches
@@ -169,8 +217,18 @@ pub async fn handle_bot_event(
         && matches!(cmd.state, ChatEventState::Error | ChatEventState::Aborted)
         && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
     {
-        flush_chat_segment(flow, &cmd, None).await?;
+        if managed_terminal {
+            let text = flow.message_tracker.peek_chat_buf(&crate::run_reply::chat_key(&cmd)).await.unwrap_or_default();
+            crate::queued_admission::settle_without_relay(flow, &cmd, &text, None).await?;
+            frontend_deliveries.extend(publish_incoming_event(flow, &cmd, task_id_for_event.as_deref()).await?);
+            try_channel_outbound(flow, &cmd).await;
+            flow.frontend_delivery.unregister_run(&cmd.run_id).await?;
+            flow.complete_send_context(&cmd.run_id).await?;
+        } else {
+            flush_chat_segment(flow, &cmd, None).await?;
+        }
         flow.message_tracker.cleanup_run(&cmd.run_id).await;
+        flow.message_tracker.cleanup_run(&crate::run_reply::chat_key(&cmd)).await;
     }
 
     if let Some(task_id) = task_id_for_event {
@@ -190,12 +248,24 @@ pub async fn handle_bot_event(
     if matches!(cmd.state, ChatEventState::Final)
         && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
     {
-        let relay = relay_final_chat_event(flow, &cmd).await?;
+        let relay = {
+            let _timing = crate::reply_timing::Timer::new("final.relay_including_terminal");
+            relay_final_chat_event(flow, &cmd, queue_reply.as_ref()).await?
+        };
+        let _timing = crate::reply_timing::Timer::new("final.after_relay");
+        if managed_terminal {
+            crate::queued_admission::settle_without_relay(flow, &cmd, &extract_message_text(&cmd.event_payload), queue_reply.as_ref()).await?;
+            frontend_deliveries.extend(publish_incoming_event(flow, &cmd, task_id_for_event.as_deref()).await?);
+            try_channel_outbound(flow, &cmd).await;
+            flow.frontend_delivery.unregister_run(&cmd.run_id).await?;
+            flow.complete_send_context(&cmd.run_id).await?;
+        }
         let relay_mentions = relay.mentions;
         let relay_delivery_results = relay.delivery_results;
         bot_deliveries.extend(relay.bot_deliveries);
         frontend_deliveries.extend(relay.frontend_deliveries);
         flow.message_tracker.cleanup_run(&cmd.run_id).await;
+        flow.message_tracker.cleanup_run(&crate::run_reply::chat_key(&cmd)).await;
         notify_terminal_observer(flow, &cmd).await;
         return Ok(BotEventOutcome {
             bot_deliveries,
@@ -419,6 +489,7 @@ struct RelayOutcome {
 async fn relay_final_chat_event(
     flow: &BcsMessageFlow,
     cmd: &BotEventCommand,
+    normalized: Option<&crate::run_reply::RunReply>,
 ) -> ServiceResult<RelayOutcome> {
     // A2A direct chat has no group context; skip the broadcast-to-group leg
     // silently. Without this, every A2A→provider final would log a
@@ -480,7 +551,31 @@ async fn relay_final_chat_event(
         }
     };
 
-    let message_text = extract_message_text(&cmd.event_payload);
+    // Preserve legacy group routing when no usable session membership exists.
+    if let (Some(sessions), Some(session_id)) = (&flow.session_management, cmd.bcs_session_id.as_deref()) {
+        if let Ok(Some(session)) = sessions.get(session_id).await {
+            if !session.participants.is_empty() {
+                group.participants = session.participants;
+            }
+        }
+    }
+    backfill_bot_names(flow.registry.as_ref(), &mut group).await;
+
+    // Unmanaged events have already been published. Only their queue path
+    // depends on membership and reconstruction reads.
+    let reconstructed;
+    let normalized = if normalized.is_none()
+        && crate::queued_admission::needs_reply(flow, &group).await {
+        reconstructed = crate::run_reply::prepare(flow, cmd, &extract_message_text(&cmd.event_payload), false).await?;
+        Some(&reconstructed)
+    } else { normalized };
+
+    let raw_text = extract_message_text(&cmd.event_payload);
+    // An empty final can still finish a queued reply assembled from segments.
+    // Non-queued deliveries below continue to use the original final only.
+    let message_text = if raw_text.is_empty() {
+        normalized.map(|reply| reply.text.clone()).unwrap_or_default()
+    } else { raw_text.clone() };
     if message_text.is_empty() {
         info!(
             group_id = %cmd.group_id,
@@ -493,23 +588,6 @@ async fn relay_final_chat_event(
             mentions: Vec::new(),
             delivery_results: Vec::new(),
         });
-    }
-
-    backfill_bot_names(flow.registry.as_ref(), &mut group).await;
-
-    // Session-aware routing: when the bot responded in the context of a
-    // specific session (bcs_session_id present), swap the group-level
-    // participants for the session-level participants. This ensures
-    // per-session add/remove (e.g. human joins session via PATCH) takes
-    // effect on outbound routing.
-    if let Some(ref bcs_session_id) = cmd.bcs_session_id {
-        if let Some(ref session_mgmt) = flow.session_management {
-            if let Ok(Some(sess)) = session_mgmt.get(bcs_session_id).await {
-                if !sess.participants.is_empty() {
-                    group.participants = sess.participants;
-                }
-            }
-        }
     }
 
     let overlay = build_route_overlay(flow, &group).await;
@@ -623,12 +701,27 @@ async fn relay_final_chat_event(
     // Finalize the run's open chat segment: flush the buffered streaming text
     // as ONE row, using the final frame's complete text. (Final-only runs with
     // no buffered deltas just insert the final text.)
-    persist_final_chat(flow, &cmd, cleaned.clone()).await?;
+    let mut queued_contexts = Vec::new();
+    for target in &decision.targets {
+        let directive = build_response_directive(target, &routing_source, &routing_mode, routing_reason.as_deref());
+        let context = build_recipient_group_context(&protocol_group, &target.bot_uuid, &cmd.bot_id, "", &decision.mentions,
+            group_context_delivery_type(target.delivery_type), Some(directive), Some(policy_mode.clone()),
+            group_type_wire(group.group_strategy), from_bot_owner.clone());
+        queued_contexts.push((target.clone(), context));
+    }
+    let queued_reply_targets = crate::queued_admission::commit_routed_reply(flow, &group, cmd,
+        &raw_text, &decision, queued_contexts, &sender_display_name, from_bot_owner.clone(),
+        (path == RoutingPath::SenderRoutes).then_some(hop_count + 1), routing_source == RequestSource::LegacyMention, normalized).await?;
+    if queued_reply_targets.is_none() {
+        persist_final_chat(flow, &cmd, cleaned.clone()).await?;
+    } else {
+        flow.message_tracker.take_chat_buf(&crate::run_reply::chat_key(&cmd)).await;
+    }
 
     // Notify @-mentioned humans only after the message is persisted, and only
     // if the content passes the outbound policy that governs bot deliveries
     // of the same message.
-    if routing_source == RequestSource::LegacyMention && group.group_kind != GroupKind::Dm {
+    if !raw_text.is_empty() && routing_source == RequestSource::LegacyMention && group.group_kind != GroupKind::Dm {
         if let Some(notify_text) = crate::group_flow::apply_notify_outbound_policy(
             flow,
             &cmd.group_id,
@@ -655,6 +748,8 @@ async fn relay_final_chat_event(
     }
 
     for target in &decision.targets {
+        if raw_text.is_empty() { continue; }
+        if queued_reply_targets.as_ref().is_some_and(|reply| reply.target_ids.contains(&target.bot_uuid)) { continue; }
         let directive = build_response_directive(
             target,
             &routing_source,
@@ -887,7 +982,10 @@ async fn relay_final_chat_event(
         }
     }
 
-    if bot_deliveries.iter().any(|delivery| delivery.delivered) {
+    // Queue acceptance is the relay boundary for managed targets. Count one
+    // logical reply even for fan-out or mixed managed/legacy recipients.
+    if queued_reply_targets.as_ref().is_some_and(|reply| reply.relayed)
+        || bot_deliveries.iter().any(|delivery| delivery.delivered) {
         flow.group.increment_message_count(&cmd.group_id).await?;
     }
 
@@ -1040,6 +1138,7 @@ async fn handle_task_bot_event(
             flush_chat_segment(flow, cmd, None).await?;
         }
         flow.message_tracker.cleanup_run(&cmd.run_id).await;
+        flow.message_tracker.cleanup_run(&crate::run_reply::chat_key(cmd)).await;
     }
 
     if let Some(group) = group.as_ref() {
@@ -1083,7 +1182,7 @@ async fn preview_task_response_text(
 ) -> String {
     let scratch = TaskStore::new();
     scratch.register(entry.clone()).await;
-    let is_delta_mode = flow.message_tracker.is_chat_delta_mode(&cmd.run_id).await;
+    let is_delta_mode = flow.message_tracker.is_chat_delta_mode(&crate::run_reply::chat_key(&cmd)).await;
     record_task_response_event_in_store(&scratch, &entry.task_id, cmd, is_delta_mode).await;
     let attempted_entry = scratch
         .get(&entry.task_id)
@@ -1108,7 +1207,7 @@ fn task_response_text(entry: &TaskEntry, cmd: &BotEventCommand) -> String {
 }
 
 async fn record_task_response_event(flow: &BcsMessageFlow, task_id: &str, cmd: &BotEventCommand) {
-    let is_delta_mode = flow.message_tracker.is_chat_delta_mode(&cmd.run_id).await;
+    let is_delta_mode = flow.message_tracker.is_chat_delta_mode(&crate::run_reply::chat_key(&cmd)).await;
     record_task_response_event_in_store(flow.task_store.as_ref(), task_id, cmd, is_delta_mode)
         .await;
 }
@@ -2050,7 +2149,7 @@ fn coordination_argument_str<'a>(call: &'a CoordinationCall, key: &str) -> Optio
 /// delta stream costs one row, not one write per token.
 async fn persist_streaming_chat(flow: &BcsMessageFlow, cmd: &BotEventCommand, msg_text: String) {
     flow.message_tracker
-        .buffer_chat_text(&cmd.run_id, msg_text)
+        .buffer_chat_text(&crate::run_reply::chat_key(&cmd), msg_text)
         .await;
 }
 
@@ -2063,7 +2162,8 @@ async fn flush_chat_segment(
     cmd: &BotEventCommand,
     final_text: Option<String>,
 ) -> ServiceResult<()> {
-    let buffered = flow.message_tracker.take_chat_buf(&cmd.run_id).await;
+    // Do not consume the buffer before durable persistence succeeds.
+    let buffered = flow.message_tracker.peek_chat_buf(&crate::run_reply::chat_key(&cmd)).await;
     let text = match (final_text, buffered) {
         (Some(t), _) => t,             // final frame wins
         (None, Some(t)) => t,          // flush buffered delta text
@@ -2091,6 +2191,7 @@ async fn flush_chat_segment(
         &cmd.run_id,
     )
     .await?;
+    flow.message_tracker.take_chat_buf(&crate::run_reply::chat_key(&cmd)).await;
     Ok(())
 }
 
@@ -2109,7 +2210,7 @@ async fn persist_final_chat(
     cmd: &BotEventCommand,
     text: String,
 ) -> ServiceResult<()> {
-    if flow.message_tracker.is_chat_delta_mode(&cmd.run_id).await {
+    if flow.message_tracker.is_chat_delta_mode(&crate::run_reply::chat_key(&cmd)).await {
         flush_chat_segment(flow, cmd, None).await?;
     } else {
         flush_chat_segment(flow, cmd, Some(text)).await?;
@@ -2283,7 +2384,7 @@ fn determine_routing_path(
     }
 }
 
-fn build_send_frame(
+pub(crate) fn build_send_frame(
     group_id: &str,
     bcs_session_id: Option<&str>,
     from_bot: &str,
@@ -2479,7 +2580,7 @@ fn task_result_group_type(group: Option<&Group>) -> String {
         .unwrap_or_else(|| "task".to_string())
 }
 
-fn stamp_forward_hop(frame: &mut BcsFrame, hop_count: u32) {
+pub(crate) fn stamp_forward_hop(frame: &mut BcsFrame, hop_count: u32) {
     if let BcsFrame::Request(request) = frame {
         if let Some(params) = &mut request.params {
             params["_forward_hop"] = serde_json::json!(hop_count);

@@ -12,6 +12,7 @@ interface AnalyzeRunBotModalProps {
     mutate: (input: { flowId: string; botId: string; botEnv?: string }, options?: { onSuccess?: () => void }) => void
   }
   isOpen: boolean
+  dispatchError?: string | null
   onClose: () => void
 }
 
@@ -21,6 +22,7 @@ export default function AnalyzeRunBotModal({
   originBotId,
   analyzeMutation,
   isOpen,
+  dispatchError,
   onClose,
 }: AnalyzeRunBotModalProps) {
   const { data, isLoading, error } = useEligibleBotsForAnalyze(workflowId)
@@ -117,6 +119,7 @@ export default function AnalyzeRunBotModal({
           </div>
         )}
 
+        {dispatchError && <p role="alert" className="mb-3 text-xs text-red-600">分析任务派发失败：{dispatchError}</p>}
         <div className="flex justify-end gap-2">
           <button
             type="button"

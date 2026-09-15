@@ -1,0 +1,4 @@
+interface:
+  display_name: "Evolve Spec"
+  short_description: "根据验证集结果和本轮调优信息产出下一轮自进化策略 spec。"
+  default_prompt: "使用 clawevolve-review，根据 round_dir 中的 objective、spec-vN、validation_result、metrics 和 tune_report 产出 spec-vN+1 和 spec_update_report。"

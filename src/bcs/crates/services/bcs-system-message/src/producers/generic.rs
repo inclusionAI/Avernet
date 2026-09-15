@@ -43,7 +43,7 @@ impl SystemMessageProducerService for GenericNotificationMessageProducer {
                 .map(|p| p.bot_uuid.clone())
                 .collect()
         } else {
-            receivers.iter().map(|p| p.bot_uuid.clone()).collect()
+            receivers.iter().filter(|p| p.is_bot()).map(|p| p.bot_uuid.clone()).collect()
         };
         // Identical text for every recipient: persist a single public record
         // (owner = None) that human viewers also read in history. Empty
@@ -53,7 +53,7 @@ impl SystemMessageProducerService for GenericNotificationMessageProducer {
         } else {
             PersistMode::Public
         };
-        let bot_messages = if recipients.is_empty() && persist == PersistMode::Skip {
+        let bot_messages = if persist == PersistMode::Skip {
             vec![]
         } else {
             vec![SystemGroupMessage {
@@ -103,7 +103,7 @@ mod tests {
         let (messages, user_message) = GenericNotificationMessageProducer
             .produce(&event, &group, &NoopBotRegistryCoreService, &group.participants)
             .await;
-        assert_eq!(messages.len(), 1);
+        assert!(messages.is_empty(), "empty notifications have no Bot delivery or canonical source");
         assert_eq!(user_message, None, "empty message → None, never Some(\"\")");
     }
 

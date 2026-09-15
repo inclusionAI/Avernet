@@ -189,6 +189,7 @@ from .channels import router as channels_router
 from .caller_identity import router as caller_identity_router
 from .containers import router as containers_router
 from .diagnostics import router as diagnostics_router
+from .dormant import router as dormant_router
 from .editors import router as editors_router
 from .deprecated import (
     ENGINE_RUNTIME_GROUPS as _LEGACY_ENGINE_RUNTIME,
@@ -375,6 +376,7 @@ _ADDRESSED_BOT_SUBGROUPS = [
     skill_sets_router,
     skill_center_references_router,
     bot_mcp_router,
+    dormant_router,
 ]
 
 # The groups where **every** route is GRANT_CHECKED_OWN_BOT — it names a bot and resolves it

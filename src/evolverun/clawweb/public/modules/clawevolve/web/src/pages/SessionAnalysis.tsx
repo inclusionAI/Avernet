@@ -14,7 +14,7 @@ import {
 import { useClientUser } from "../hooks/useClientUser";
 import EvolveBotPicker from "../components/EvolveBotPicker";
 import EvolveModelFields, {
-  DEFAULT_EVOLVE_MODEL,
+  INITIAL_EVOLVE_MODEL,
   EVOLVE_CUSTOM_MODEL,
 } from "../components/EvolveModelFields";
 import EvolveTaskOverview from "../components/EvolveTaskOverview";
@@ -208,7 +208,7 @@ function CreateSessionAnalysis() {
   );
   const [llmAnalysis, setLlmAnalysis] = useState(true);
   const [llmUseDefault, setLlmUseDefault] = useState(true);
-  const [llmModelChoice, setLlmModelChoice] = useState<string>(DEFAULT_EVOLVE_MODEL);
+  const [llmModelChoice, setLlmModelChoice] = useState<string>(INITIAL_EVOLVE_MODEL);
   const [customLlmModel, setCustomLlmModel] = useState("");
   const [llmApiKey, setLlmApiKey] = useState("");
   const [error, setError] = useState("");

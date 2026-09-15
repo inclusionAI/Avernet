@@ -31,6 +31,9 @@ pub struct InviteConfig {
     #[serde(default)]
     pub token_secret: Option<String>,
 
+    #[serde(default)]
+    pub token_secret_secret: Option<String>,
+
     /// Whether the invite-code access gate is enabled.
     /// When false or unset, protected routes do not enforce invite-code binding.
     #[serde(default)]
@@ -61,6 +64,7 @@ impl Default for InviteConfig {
     fn default() -> Self {
         Self {
             token_secret: None,
+            token_secret_secret: None,
             invite_code_gate_enabled: false,
             public_claim_enabled: false,
             public_claim_max_count: default_public_claim_max_count(),
@@ -148,6 +152,9 @@ pub struct SessionFilesShareConfig {
     #[serde(default)]
     pub token_secret: Option<String>,
 
+    #[serde(default)]
+    pub token_secret_secret: Option<String>,
+
     /// Default share-token TTL in seconds. Clamped to `[60, 604800]` at mint.
     #[serde(default = "default_session_files_share_ttl")]
     pub default_ttl_seconds: u64,
@@ -168,6 +175,7 @@ impl Default for SessionFilesShareConfig {
     fn default() -> Self {
         Self {
             token_secret: None,
+            token_secret_secret: None,
             default_ttl_seconds: default_session_files_share_ttl(),
             share_base_url: None,
             history_attachment_ttl_seconds: default_history_attachment_ttl(),
@@ -190,10 +198,14 @@ pub struct ProviderHttpConfig {
     /// Empty by default; matching is case-insensitive.
     #[serde(default)]
     pub bypass_headers: Vec<String>,
+    /// Non-sensitive routing headers explicitly approved for durable queues.
+    #[serde(default)]
+    pub queue_persistable_headers: Vec<String>,
 }
 
 impl ProviderHttpConfig {
     pub fn validate(&self) -> Result<(), String> {
+        bcs_config_api::queued_provider_headers::validate_config(&self.bypass_headers, &self.queue_persistable_headers)?;
         for raw_name in &self.bypass_headers {
             let name = raw_name.trim();
             if name.is_empty() {
@@ -656,6 +668,10 @@ pub struct BcsConfig {
     /// Human mention notification configuration.
     #[serde(default)]
     pub human_notify: HumanNotifyConfig,
+
+    /// Managed message admission; all business flows default to disabled.
+    #[serde(default)]
+    pub message_delivery: bcs_config_api::message_delivery::MessageDeliveryConfig,
 
     /// HTTP provider webhook adapter configuration.
     #[serde(default)]
@@ -1152,6 +1168,7 @@ impl Default for BcsConfig {
             secret: SecretConfig::default(),
             channels: ChannelConfigSection::default(),
             human_notify: HumanNotifyConfig::default(),
+            message_delivery: bcs_config_api::message_delivery::MessageDeliveryConfig::default(),
             provider_http: ProviderHttpConfig::default(),
             collaboration: CollaborationConfig::default(),
             openapi_v1: OpenApiV1Config::default(),
@@ -1610,6 +1627,8 @@ impl BcsConfig {
 }
 
 fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::Error>> {
+    // Readiness is code-owned; other business flows retain legacy delivery.
+    config.message_delivery.validate_ready_flows(&[bcs_config_api::message_delivery::DeliveryFlowKey::Group])?;
     if config.provider_chat_run_timeout_ms == 0 {
         return Err(Box::new(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -1704,6 +1723,28 @@ fn validate_eventing_environment_policy(
 mod tests {
     use super::*;
     use secrecy::ExposeSecret;
+
+    #[test]
+    fn only_group_message_delivery_is_ready_and_all_flows_default_off() {
+        let mut config = BcsConfig::default();
+        assert!(validate_loaded_config(&config).is_ok());
+        config.message_delivery.flow_enabled.group = true;
+        assert!(validate_loaded_config(&config).is_ok());
+        config.message_delivery.flow_enabled.direct_a2a = true;
+        let result = validate_loaded_config(&config);
+        assert!(matches!(result, Err(error) if error.to_string().contains("queue_flow_not_ready")));
+    }
+
+    #[test]
+    fn message_delivery_invalid_enum_is_rejected() -> Result<(), serde_json::Error> {
+        let mut config = serde_json::to_value(BcsConfig::default())?;
+        config["message_delivery"] = serde_json::json!({"bots": {"bot": {
+            "mode": "enabled", "max_running": 1, "max_queued": 10,
+            "min_send_interval_ms": 100
+        }}});
+        assert!(serde_json::from_value::<BcsConfig>(config).is_err());
+        Ok(())
+    }
 
     #[test]
     fn validate_run_store_selectors_accepts_known_and_rejects_unknown() {
@@ -1893,12 +1934,14 @@ botchat_url = "${BCS_TEST_FROM_FILE_MISSING}"
     fn provider_http_bypass_headers_parse_and_default() {
         let default_config = BcsConfig::default();
         assert!(default_config.provider_http.bypass_headers.is_empty());
+        assert!(default_config.provider_http.queue_persistable_headers.is_empty());
 
         let toml = r#"
             bots_base_dir = "/bots"
 
             [provider_http]
             bypass_headers = ["X-Sandbox-Bypass"]
+            queue_persistable_headers = ["x-sandbox-bypass"]
         "#;
         let config: BcsConfig = toml::from_str(toml).expect("parse [provider_http]");
         assert_eq!(
@@ -1927,6 +1970,7 @@ botchat_url = "${BCS_TEST_FROM_FILE_MISSING}"
             "x-bcn-protocol-version",
         ] {
             let config = ProviderHttpConfig {
+                queue_persistable_headers: Vec::new(),
                 bypass_headers: vec![name.to_string()],
             };
             assert!(
@@ -2163,6 +2207,7 @@ x-collector-route = "collector-local"
             kind: None, // defaults to the instance name "google"
             client_id: "gid".to_string(),
             client_secret: None,
+            client_secret_secret: None,
             private_key: None,
             alipay_public_key: None,
         };
@@ -2177,6 +2222,7 @@ x-collector-route = "collector-local"
             kind: Some("github".to_string()),
             client_id: "ghid".to_string(),
             client_secret: None,
+            client_secret_secret: None,
             private_key: None,
             alipay_public_key: None,
         };
@@ -2194,6 +2240,7 @@ x-collector-route = "collector-local"
             kind: Some("facebook".to_string()),
             client_id: "id".to_string(),
             client_secret: None,
+            client_secret_secret: None,
             private_key: None,
             alipay_public_key: None,
         };
@@ -2213,6 +2260,7 @@ x-collector-route = "collector-local"
             kind: None,
             client_id: "  ".to_string(),
             client_secret: None,
+            client_secret_secret: None,
             private_key: None,
             alipay_public_key: None,
         };

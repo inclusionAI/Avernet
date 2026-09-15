@@ -119,6 +119,33 @@ it('group panel advanced tab renders dingtalk binding form', () => {
   expect(screen.getByText('高级配置')).toBeInTheDocument();
 });
 
+it('group panel root fills the manage panel width so advanced cards do not leave trailing space', () => {
+  const { container } = render(<GroupManagePanel {...groupProps()} />);
+  expect(container.querySelector('aside')).toHaveClass('w-full');
+});
+
+it('group panel uses a clear 16/14/12/11px typography hierarchy', () => {
+  render(<GroupManagePanel {...groupProps()} />);
+
+  expect(screen.getByText('群管理')).toHaveClass('text-base', 'font-semibold');
+  expect(screen.getByRole('tab', { name: '基础信息' })).toHaveClass('text-xs', 'font-medium');
+  expect(screen.getByText('群成员管理')).toHaveClass('text-sm', 'font-semibold');
+  expect(screen.getByText('公开群', { selector: 'p' })).toHaveClass('text-sm', 'font-semibold');
+  expect(screen.getByText('公开群允许通过邀请链接加入。')).toHaveClass('text-[11px]');
+  expect(screen.getByText('g1')).toHaveClass('text-xs', 'font-mono');
+  expect(screen.getByRole('button', { name: /分享协作群/ })).toHaveClass('text-xs');
+  expect(screen.getByText('用户可以通过链接加入群组')).toHaveClass('text-[11px]');
+});
+
+it('group advanced config keeps card headings above control content', () => {
+  render(<GroupManagePanel {...groupProps()} />);
+  fireEvent.click(screen.getByRole('tab', { name: '高级配置' }));
+
+  expect(screen.getByText('钉钉机器人配置')).toHaveClass('text-sm', 'font-semibold');
+  expect(screen.getByText('启用流式卡片')).toHaveClass('text-xs', 'font-medium');
+  expect(screen.getByText('开启后使用流式卡片模板输出。')).toHaveClass('text-[11px]');
+});
+
 it('group panel hides advanced tab when advanced config is disabled', () => {
   render(<GroupManagePanel {...groupProps()} advancedConfigEnabled={false} />);
   expect(screen.queryByRole('tab', { name: '高级配置' })).not.toBeInTheDocument();
@@ -167,6 +194,16 @@ const sessionProps = (): SessionManagePanelProps => ({
   onAddMember: jest.fn(async () => true),
   onRemoveMember: jest.fn(async () => true),
   onShare: jest.fn(async () => ({ ok: true as const, data: { invitationUrl: 'http://example.com/s1' } })),
+});
+
+it('session panel uses the same typography hierarchy as group management', () => {
+  render(<SessionManagePanel {...sessionProps()} />);
+
+  expect(screen.getByText('会话管理')).toHaveClass('text-base', 'font-semibold');
+  expect(screen.getByText('会话成员管理')).toHaveClass('text-sm', 'font-semibold');
+  expect(screen.getByText('s1')).toHaveClass('text-xs', 'font-mono');
+  expect(screen.getByRole('button', { name: /分享会话/ })).toHaveClass('text-xs');
+  expect(screen.getByText('生成会话邀请链接，供成员通过链接加入')).toHaveClass('text-[11px]');
 });
 
 it('session panel renders basic info, members, share and delete', () => {

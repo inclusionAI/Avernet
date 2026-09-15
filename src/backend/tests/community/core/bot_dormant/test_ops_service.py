@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentclaw.community.core.bot_dormant.ops_service import DormantOpsService
+from agentclaw.community.core.bot_dormant.recycle_service import RecycleBotService
 from agentclaw.community.core.bot_dormant.service import DormantBotService
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
@@ -10,7 +11,9 @@ from agentclaw.community.plugin_api.passport import PassportPlugin
 def test_unfreeze_passport_one_only_calls_passport() -> None:
     dormant_service = MagicMock(spec=DormantBotService)
     passport = MagicMock(spec=PassportPlugin)
-    service = DormantOpsService(dormant_service, passport)
+    service = DormantOpsService(
+        dormant_service, passport, MagicMock(spec=RecycleBotService)
+    )
 
     result = service.unfreeze_passport_one(
         bot_id="default",
@@ -36,7 +39,11 @@ def test_unfreeze_passport_one_propagates_passport_error() -> None:
     passport.unfreeze_agent_passport.side_effect = RuntimeError(
         "passport unavailable"
     )
-    service = DormantOpsService(MagicMock(spec=DormantBotService), passport)
+    service = DormantOpsService(
+        MagicMock(spec=DormantBotService),
+        passport,
+        MagicMock(spec=RecycleBotService),
+    )
 
     with pytest.raises(RuntimeError, match="passport unavailable"):
         service.unfreeze_passport_one(

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use bcs_domain::{
-    ActorKind, ActorStatus, BotCapabilities, BotDynamicStatus, DeliveryType, Group,
+    ActorKind, ActorStatus, BotCapabilities, DeliveryType, Group,
     GroupStrategy, LedgerSummary, Participant, ParticipantRole, RegisteredBot, SystemGroupMessage,
     SystemMessageEvent, CoordinationMode, CoordinationSurface,
 };
@@ -37,7 +37,6 @@ impl NamedRegistry {
                             visibility: "protected".to_string(),
                             ..Default::default()
                         },
-                        dynamic_status: BotDynamicStatus::default(),
                         env: None,
                         created_by: None,
                         actor_kind: ActorKind::Bot,
@@ -69,7 +68,7 @@ impl BotRegistryCoreService for NamedRegistry {
         Ok(())
     }
 
-    async fn update_status(&self, _bot_id: &str, _status: BotDynamicStatus) -> bool {
+    async fn update_status(&self, _bot_id: &str) -> bool {
         false
     }
 
@@ -264,6 +263,12 @@ async fn manager_worker_session_context_messages_with_ledger(
         .await;
 
     (manager_id.to_string(), worker_id.to_string(), messages)
+}
+
+#[tokio::test]
+async fn named_registry_update_status_rejects_heartbeat_renewal() {
+    let registry = NamedRegistry::new(&[]);
+    assert!(!registry.update_status("heartbeat-renewal-unsupported").await);
 }
 
 #[tokio::test]

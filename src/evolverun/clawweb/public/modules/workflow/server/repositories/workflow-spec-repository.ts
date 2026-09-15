@@ -5,6 +5,7 @@
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { parse as parseYaml } from "yaml";
 import { normalizeWorkflowSpec } from "../workflow.js";
+import type { WorkflowDeployHistoryRepository } from "./workflow-deploy-history-repository.js";
 
 export type WorkflowSpecRow = {
   id: number;
@@ -26,6 +27,8 @@ export type WorkflowSpecSummary = {
   title: string | null;
   gmt_modified: number | string;
   owner_id: string | null;
+  /** 最终解析出的负责人：优先取活跃部署历史的 owner_id，没有则回退 workflow_specs.owner_id。 */
+  resolved_owner_id: string | null;
 };
 
 /** Row returned by accessible-workflow queries (joined with bot_workflow_permissions). */
@@ -59,7 +62,10 @@ export function extractTitleFromSpecJson(specJson: string, fallbackId: string): 
 }
 
 export class WorkflowSpecRepository {
-  constructor(private db: IDatabase) {}
+  constructor(
+    private db: IDatabase,
+    private deployHistoryRepo?: WorkflowDeployHistoryRepository,
+  ) {}
 
   /** List all workflow specs with full spec_json (use only when spec_json is needed). */
   async listAll(): Promise<WorkflowSpecRow[]> {
@@ -70,9 +76,10 @@ export class WorkflowSpecRepository {
 
   /** List workflow summaries without loading spec_json — used for list/table views. */
   async listSummaries(): Promise<WorkflowSpecSummary[]> {
-    return this.db.query<WorkflowSpecSummary>(
+    const rows = await this.db.query<WorkflowSpecSummary>(
       "SELECT workflow_id, pack_id, title, gmt_modified, owner_id FROM workflow_specs ORDER BY gmt_modified DESC",
     );
+    return this.resolveOwners(rows);
   }
 
   async findByWorkflowId(workflowId: string): Promise<WorkflowSpecRow | null> {
@@ -81,6 +88,15 @@ export class WorkflowSpecRepository {
       [workflowId],
     );
     return rows[0] ?? null;
+  }
+
+  async findSummaryByWorkflowId(workflowId: string): Promise<WorkflowSpecSummary | null> {
+    const rows = await this.db.query<WorkflowSpecSummary>(
+      "SELECT workflow_id, pack_id, title, gmt_modified, owner_id FROM workflow_specs WHERE workflow_id = ?",
+      [workflowId],
+    );
+    const resolved = await this.resolveOwners(rows);
+    return resolved[0] ?? null;
   }
 
   async upsert(
@@ -177,7 +193,7 @@ export class WorkflowSpecRepository {
       [...params, limit, offset],
     );
 
-    return { rows, total };
+    return { rows: await this.resolveOwners(rows), total };
   }
 
   /**
@@ -252,6 +268,27 @@ export class WorkflowSpecRepository {
     `;
     const rows = await this.db.query<{ total: number }>(sql, params);
     return rows[0]?.total ?? 0;
+  }
+
+  /**
+   * 批量解析 workflow 的负责人：优先取 workflow_deploy_history.is_active=1 的 owner_id，
+   * 没有则回退到 workflow_specs.owner_id。resolved_owner_id 会写回每个 summary 行。
+   */
+  private async resolveOwners(rows: WorkflowSpecSummary[]): Promise<WorkflowSpecSummary[]> {
+    if (!this.deployHistoryRepo || rows.length === 0) {
+      return rows.map((r) => ({ ...r, resolved_owner_id: r.owner_id }));
+    }
+    const activeById = new Map<string, string | null>();
+    await Promise.all(
+      rows.map(async (r) => {
+        const active = await this.deployHistoryRepo!.findActiveByWorkflowId(r.workflow_id);
+        activeById.set(r.workflow_id, active?.owner_id ?? null);
+      }),
+    );
+    return rows.map((r) => ({
+      ...r,
+      resolved_owner_id: activeById.get(r.workflow_id) ?? r.owner_id,
+    }));
   }
 
   private buildModeFilter(

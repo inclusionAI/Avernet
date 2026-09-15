@@ -24,7 +24,11 @@ import { configureClawWebPublicBaseUrl } from "./env.js";
 import type { ClawEvolveInternalApi, ClawInsightInternalApi } from "./internal/module-api.js";
 
 export type ClawevolveModuleOptions = {
+  /** Trusted composition-root selection; defaults to internalversion. */
+  version?: "openversion" | "internalversion";
   db: IDatabase;
+  /** Optional read-only Bot metadata connection for local Singlebox. */
+  botDb?: Pick<IDatabase, "query">;
   dispatch?: EvolveRouterDeps["dispatch"];
   dispatchTaskLogArchive?: EvolveRouterDeps["dispatchTaskLogArchive"];
   cancelExecution?: EvolveRouterDeps["cancelExecution"];
@@ -68,7 +72,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
   configureClawWebPublicBaseUrl(options.publicBaseUrl, options.trustedPublicOrigins);
   configureArtifactBucket(options.artifactBucket);
 
-  const evolve = new EvolveRepository(db);
+  const evolve = new EvolveRepository(db, options.botDb);
   const clawInsight = options.clawInsight ?? null;
   const improvement = clawInsight?.improvementRepository ?? null;
   const benchDomain = new BenchDomainRepository(db);
@@ -84,6 +88,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
   const insightTaskService = options.insightTaskService ?? null;
 
   const publicRouter = createEvolveRouter(evolve, {
+    version: options.version,
     db,
     dispatch,
     dispatchTaskLogArchive: options.dispatchTaskLogArchive,

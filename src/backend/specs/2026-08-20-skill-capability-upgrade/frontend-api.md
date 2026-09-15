@@ -209,9 +209,12 @@ file_paths=["SKILL.md","references/example.md"]
 
 校验失败：
 
+浏览器文件夹上传必须在读取、大小计算和 multipart 组装前排除 `.git/**`，并向用户说明已忽略的文件数量；后端仍执行相同的 package metadata 过滤与独立资源上限保护。
+
 | 合同符号名（映射到 Envelope code） | UI |
 | --- | --- |
 | `SKILL_PACKAGE_INVALID` | 展示包级错误 |
+| `SKILL_PACKAGE_TOO_LARGE` | 明确提示文件包超限，并引导移除非运行时文件后重试 |
 | `SKILL_MANIFEST_MISSING` | 提示缺少 SKILL.md |
 | `SKILL_MANIFEST_MULTIPLE` | 提示只能存在一个目标 SKILL.md |
 | `SKILL_PATH_INVALID` | 展示非法相对路径 |

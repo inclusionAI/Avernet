@@ -1,5 +1,7 @@
 //! Core service contract harnesses.
 
+pub mod message_delivery;
+
 use std::collections::BTreeMap;
 
 use bcs_service_api::core::{

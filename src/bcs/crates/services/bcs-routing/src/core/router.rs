@@ -1027,7 +1027,7 @@ pub fn build_sender_route_decision(
 mod tests {
     use super::*;
     use bcs_service_api::{
-        BotCapabilities, BotDynamicStatus, ChatEventRouting, GroupStrategy, Participant,
+        BotCapabilities, ChatEventRouting, GroupStrategy, Participant,
         ParticipantRole, RegisteredBot, ResponseMode, RouteSelectorWire, Workspace,
     };
     use bcs_test_support::NoopBotRegistryCoreService;
@@ -1541,7 +1541,6 @@ mod tests {
                         agent_code: None,
                         agent_token: None,
                     },
-                    dynamic_status: BotDynamicStatus::default(),
                     env: None,
                     created_by: None,
                     actor_kind: bcs_service_api::ActorKind::default(),
@@ -1560,7 +1559,7 @@ mod tests {
         ) -> bcs_service_api::ServiceResult<()> {
             Ok(())
         }
-        async fn update_status(&self, _: &str, _: BotDynamicStatus) -> bool {
+        async fn update_status(&self, _: &str) -> bool {
             false
         }
         async fn get(&self, bot_id: &str) -> Option<RegisteredBot> {
@@ -1770,6 +1769,13 @@ mod tests {
         };
         let err = RouteSelector::try_from(&wire).unwrap_err();
         assert!(matches!(err, RouteSelectorError::MissingValue(_)));
+    }
+
+    #[tokio::test]
+    async fn test_bot_registry_update_status_rejects_heartbeat_renewal() {
+        use bcs_service_api::BotRegistryCoreService as _;
+        let registry = TestBotRegistry::new();
+        assert!(!registry.update_status("heartbeat-renewal-unsupported").await);
     }
 
     // 11.2: Capability exact tag matching
