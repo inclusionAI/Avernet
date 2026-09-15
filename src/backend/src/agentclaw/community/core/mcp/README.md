@@ -26,6 +26,7 @@ provides:
   - "normalize_network_types"
   - "primary_transport_protocol"
   - "ALLOWED_NETWORK_TYPES"
+  - "select_mcp_endpoint"
   # Dependency-free domain errors each surface maps.
   - "McpError"
   - "McpServerNotFoundError"
