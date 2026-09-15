@@ -1,5 +1,6 @@
 use std::sync::Arc;
-use bcs_domain::{DeliveryType, SystemMessageEvent, SystemMessageEventKind, PersistMode, SystemGroupMessage};
+use bcs_domain::{DeliveryType, GroupStrategy, MessageAudience, MessageVisibilityDomain,
+    ParticipantRole, SystemMessageEvent, SystemMessageEventKind, PersistMode, SystemGroupMessage};
 use bcs_domain::message_delivery::{DeliveryFlowKind, MessageDeliveryStatus as Status};
 use bcs_message_flow::{BcsMessageFlow, MemoryBotRunContextStore, managed_delivery::ManagedMessageDelivery,
     queued_group::QueuedGroupPreparation, queued_system::QueuedSystemAdmission};
@@ -51,6 +52,42 @@ async fn shared_initialization_source_preserves_send_ttl_and_only_protects_injec
     assert_eq!(rows[0].source_message_id, rows[1].source_message_id);
     assert!(rows.iter().find(|r| r.state.kind == DeliveryType::Send).unwrap().expire_at_ms.is_some());
     assert!(rows.iter().find(|r| r.state.kind == DeliveryType::Inject).unwrap().expire_at_ms.is_none());
+}
+
+#[tokio::test]
+async fn manager_worker_initialization_queues_owned_context_with_directed_audience() {
+    let (support, flow, service, repo, _) = fixture().await;
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.group_strategy = GroupStrategy::ManagerWorker;
+    for participant in &mut group.participants {
+        if participant.bot_uuid == "bot-driver" { participant.role = ParticipantRole::Manager; }
+        if participant.bot_uuid == "bot-observer" { participant.role = ParticipantRole::Worker; }
+    }
+    support.group.upsert(group.clone()).await.unwrap();
+    let messages = [
+        SystemGroupMessage { recipients:vec!["bot-driver".into()], message:"manager context".into(),
+            delivery_type:DeliveryType::Send, persist:PersistMode::Public },
+        SystemGroupMessage { recipients:vec!["bot-observer".into()], message:"worker context".into(),
+            delivery_type:DeliveryType::Inject, persist:PersistMode::PerRecipient },
+    ];
+    flow.system_queue_port().admit(&group, "group-1:system", &group.participants,
+        SystemMessageEventKind::SessionContext, &messages).await.unwrap().unwrap();
+    let rows = service.snapshot(None).await.unwrap();
+    let manager = rows.iter().find(|row| row.target_bot_id == "bot-driver").unwrap();
+    let manager_message = repo.get_message_by_id(&manager.session_id, &manager.source_message_id)
+        .await.unwrap().unwrap();
+    assert_eq!(manager_message.visibility_domain, Some(MessageVisibilityDomain::ManagerWorker));
+    assert_eq!(manager_message.owner_bot_id, None);
+    assert_eq!(manager_message.audience, Some(MessageAudience::FullOnly));
+    let worker = rows.iter().find(|row| row.target_bot_id == "bot-observer").unwrap();
+    assert_eq!(worker.state.status, Status::PendingContext);
+    let worker_message = repo.get_message_by_id(&worker.session_id, &worker.source_message_id)
+        .await.unwrap().unwrap();
+    assert_eq!(worker_message.visibility_domain, Some(MessageVisibilityDomain::ManagerWorker));
+    assert_eq!(worker_message.owner_bot_id.as_deref(), Some("bot-observer"));
+    assert_eq!(worker_message.audience, Some(MessageAudience::Directed {
+        actor_ids: vec!["bot-observer".into()],
+    }));
 }
 
 fn user_send() -> WebSendCommand {
