@@ -6,7 +6,7 @@ import { formatStepTime } from '../pages/evolve/helpers'
 import SkillListPagination, { skillListPageSize } from './SkillListPagination'
 import TestBenchComparison from './TestBenchComparison'
 
-const eventNames = { registered: '登记', diagnosis: '诊断', optimization: '优化' } as const
+const eventNames = { registered: '登记', diagnosis: '诊断', hardening: '加固', optimization: '优化' } as const
 const statusNames = {
   running: '运行中', waiting_user_input: '等待用户输入', waiting_acceptance: '等待版本确认',
   completed: '已完成', failed: '失败', canceled: '已取消',
@@ -14,6 +14,7 @@ const statusNames = {
 const eventTones = {
   registered: 'border-blue-100 bg-blue-50 text-blue-700',
   diagnosis: 'border-amber-200 bg-amber-50 text-amber-700',
+  hardening: 'border-violet-200 bg-violet-50 text-violet-700',
   optimization: 'border-emerald-200 bg-emerald-50 text-emerald-700',
 } as const
 const statusTones = {
@@ -41,7 +42,7 @@ function eventDetailPath(event: EvolveSkillEvent, returnTo: string): string {
 function eventVersion(event: EvolveSkillEvent): string {
   if (event.versionTo && event.versionFrom) return `${event.versionFrom.version} → ${event.versionTo.version}`
   if (event.versionTo) return event.versionTo.version
-  if (event.versionFrom) return event.type === 'optimization' ? `基于 ${event.versionFrom.version}` : event.versionFrom.version
+  if (event.versionFrom) return event.type === 'optimization' || event.type === 'hardening' ? `基于 ${event.versionFrom.version}` : event.versionFrom.version
   return '—'
 }
 
@@ -65,10 +66,10 @@ export default function SkillEventLog() {
   const visiblePage = Math.min(page, Math.max(1, Math.ceil(filtered.length / skillListPageSize)))
   const returnTo = `${location.pathname}${location.search}`
   return <div className="w-full px-3 py-6 sm:px-4 lg:px-5">
-    <PageTitle title="技能事件日志" description="按任务查看技能登记、诊断和优化结果。一次业务任务只记录一条。" />
+    <PageTitle title="技能事件日志" description="按任务查看技能登记、诊断、加固和优化结果。一次业务任务只记录一条。" />
     <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
-        <select aria-label="事件类型" value={type} onChange={(event) => { setType(event.target.value); setPage(1) }} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600"><option value="">全部事件类型</option><option value="registered">登记</option><option value="diagnosis">诊断</option><option value="optimization">优化</option></select>
+        <select aria-label="事件类型" value={type} onChange={(event) => { setType(event.target.value); setPage(1) }} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600"><option value="">全部事件类型</option><option value="registered">登记</option><option value="diagnosis">诊断</option><option value="hardening">加固</option><option value="optimization">优化</option></select>
         <input aria-label="搜索技能事件" value={query} onChange={(event) => { setQuery(event.target.value); setPage(1) }} placeholder="搜索技能、任务、Owner 或 Bot" className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-blue-500 sm:w-80" />
       </div>
       <div className="overflow-x-auto"><table className="w-full min-w-[1280px] table-fixed text-left text-sm">

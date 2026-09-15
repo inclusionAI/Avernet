@@ -10,7 +10,7 @@ describe("official Evolve Stage contracts", () => {
   it("keeps Stage contracts separate from fixed flow orchestration", () => {
     expect(officialStageContracts).not.toHaveProperty("template");
     expect(officialStageContracts.stages.map((stage) => stage.stage)).toEqual([
-      "diagnose", "plan", "optimize",
+      "diagnose", "plan", "hardening", "optimize",
     ]);
     for (const stage of officialStageContracts.stages) {
       expect(stage.extensionModes).toEqual(["preprocess", "postprocess", "replace"]);
@@ -57,8 +57,9 @@ describe("Stage Skill developer package", () => {
     expect(guide).not.toContain('"target_skill"');
   });
 
-  for (const flow of ["bot_evolution", "skill_evolution"] as const) {
-    for (const stage of officialStageContracts.stages) {
+  for (const flow of ["bot_evolution", "skill_evolution", "skill_hardening"] as const) {
+    for (const stage of officialStageContracts.stages.filter((item) =>
+      flow === "skill_hardening" ? item.stage === "hardening" : item.stage !== "hardening")) {
       for (const mode of stage.extensionModes) {
         it(`documents actual ${flow}/${stage.stage}/${mode} inputs and business output`, async () => {
           const zip = await JSZip.loadAsync(await createStageDevelopmentPackage({ flow, stage: stage.stage, mode }));
@@ -74,8 +75,8 @@ describe("Stage Skill developer package", () => {
           if (!planBusiness) {
           expect(validateJsonSchema(stageRuntimeInputSchema(stage, mode), input)).toBeNull();
           expect(validateJsonSchema(stageExtensionResultSchema(stage, mode), output)).toBeNull();
-          expect(input.task.task_type).toBe("full");
-          expect(Boolean(input.target_skill)).toBe(flow === "skill_evolution");
+          expect(input.task.task_type).toBe(flow === "skill_hardening" ? "hardening" : "full");
+          expect(Boolean(input.target_skill)).toBe(flow !== "bot_evolution");
           expect(Boolean(input.builtin_result)).toBe(mode === "postprocess");
           if (stage.stage === "diagnose") {
             expect(input).toHaveProperty("diagnose_goal");
@@ -85,10 +86,13 @@ describe("Stage Skill developer package", () => {
             expect(input).toHaveProperty("goal");
             expect(input).toHaveProperty("diagnose_result");
             expect(input).not.toHaveProperty("plan_result");
-          } else {
+          } else if (stage.stage === "optimize") {
             expect(input).toHaveProperty("round", 1);
             expect(input).toHaveProperty("plan_result");
             expect(guide).toContain("previous_round_result");
+          } else {
+            expect(input).toHaveProperty("goal");
+            expect(input).toHaveProperty("target_skill");
           }
           expect(output).not.toHaveProperty("hitl");
           expect(output).not.toHaveProperty("result");
@@ -99,9 +103,14 @@ describe("Stage Skill developer package", () => {
           if (flow === "bot_evolution") expect(guide).not.toContain("待进化 Skill 的独立副本");
           const hasTestSkill = flow === "skill_evolution"
             && ((stage.stage === "diagnose" && mode === "preprocess") || (stage.stage === "plan" && mode === "replace"));
-          expect(guide.includes("独立测试副本")).toBe(hasTestSkill);
+          expect(guide.includes("独立测试副本")).toBe(hasTestSkill || flow === "skill_hardening");
           const background = guide.split("## 背景与本次开发目标\n\n")[1]!.split("\n## 输入与输出")[0]!;
           const skillName = `${stage.name}${mode === "replace" ? "" : mode === "preprocess" ? "前置" : "后置"} Skill`;
+          if (flow === "skill_hardening") {
+            expect(background).toContain("Skill 加固任务");
+            expect(background).toContain(`本次需要你开发一个“${skillName}”`);
+            return;
+          }
           expect(background.startsWith(`${flow === "skill_evolution" ? "Skill" : "Bot"} 自进化任务用于`)).toBe(true);
           expect(background.indexOf("任务主要包含三个环节：")).toBeLessThan(background.indexOf("本次需要你开发"));
           expect(background).toContain(`本次需要你开发一个“${skillName}”`);

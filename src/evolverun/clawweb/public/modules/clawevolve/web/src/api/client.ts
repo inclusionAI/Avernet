@@ -27,7 +27,7 @@ export type EvolveStageDevelopment = SharedStageDevelopment & EvolveSpaceOwnersh
 export type EvolveStageSkill = SharedStageSkill & EvolveSpaceOwnership
 
 export type EvolveStageExtensionSelection = {
-  stage: 'diagnose' | 'plan' | 'optimize'
+  stage: 'diagnose' | 'hardening' | 'plan' | 'optimize'
   mode: EvolveStageMode
   binding: {
     enabled: boolean
@@ -48,6 +48,7 @@ export type EvolveSkillTaskDefaults = {
   botId: string
   userId: string
   diagnose: EvolveSkillTaskPreset & { taskType: 'diagnose' }
+  hardening: EvolveSkillTaskPreset & { taskType: 'hardening' }
   optimize: EvolveSkillTaskPreset & { taskType: 'full' }
 }
 
@@ -64,7 +65,17 @@ export type EvolveCreateTaskInput = Parameters<typeof sharedApi.evolve.createTas
     targetSkillAssetId?: string
     goal?: string
   }
-)
+) | {
+  taskType: 'hardening'
+  taskName: string
+  userId: string
+  botId: string
+  targetSkillAssetId: string
+  goal: string
+  runtimeMaintenance?: boolean
+  stageExtensions?: EvolveTaskStageExtensions
+  stageSelection?: { diagnose: boolean; hardening: boolean; plan: boolean; optimize: boolean }
+}
 
 export const api = {
   ...sharedApi,

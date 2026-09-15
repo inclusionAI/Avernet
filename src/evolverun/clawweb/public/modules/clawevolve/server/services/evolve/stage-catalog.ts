@@ -1,6 +1,6 @@
 import catalogJson from "../../resources/evolve/official-stage-catalog.json" with { type: "json" };
 
-export type StageKey = "diagnose" | "plan" | "optimize";
+export type StageKey = "diagnose" | "hardening" | "plan" | "optimize";
 export type StageExtensionMode = "preprocess" | "postprocess" | "replace";
 
 export type JsonSchema = {
@@ -28,7 +28,7 @@ export type OfficialStageContracts = {
   stages: OfficialStageDefinition[];
 };
 
-const STAGES = new Set<StageKey>(["diagnose", "plan", "optimize"]);
+const STAGES = new Set<StageKey>(["diagnose", "hardening", "plan", "optimize"]);
 const MODES = new Set<StageExtensionMode>(["preprocess", "postprocess", "replace"]);
 
 function loadContracts(value: unknown): OfficialStageContracts {

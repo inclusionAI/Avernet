@@ -318,7 +318,8 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
   const [botsOwnerId, setBotsOwnerId] = useState('')
   // Preserve the requested type; unavailable local stages are handled by the entry notice.
   const initialType = searchParams.get('type')
-  const taskType = isEvolveTaskType(initialType) && initialType !== 'repair' ? initialType : null
+  // Skill 加固只从 Skill Center 固定目标后发起，不进入通用任务创建表单。
+  const taskType = isEvolveTaskType(initialType) && initialType !== 'repair' && initialType !== 'hardening' ? initialType : null
   const improvementSource = searchParams.get('source') === 'improvement'
   const adminConsentToken = searchParams.get('adminConsent')?.trim() ?? ''
   const adminAutoExecute = Boolean(adminConsentToken)
@@ -2019,7 +2020,7 @@ function TaskDetail({ version = 'internalversion', taskPresentationExtensions = 
       </div>
 
       <GovernanceSourceCard task={task} />
-      {['full', 'optimize', 'bench_optimize'].includes(task.task_type) && <TaskVersionStatus task={task} adminReadMode={adminReadMode} canLoadVersions={adminReadMode || user?.userId === task.user_id} />}
+      {['hardening', 'full', 'optimize', 'bench_optimize'].includes(task.task_type) && <TaskVersionStatus task={task} adminReadMode={adminReadMode} canLoadVersions={adminReadMode || user?.userId === task.user_id} />}
 
       <div className="mt-6"><SkillTaskRuntimePanel task={task} canOperate={canOperate} onUpdated={loadTask} /></div>
 
@@ -2102,7 +2103,7 @@ type WorkflowPhase = {
   nodes: Array<{ type: string; title: string; command: string; deliverable: string; matchTypes?: string[] }>
 }
 
-type WorkflowStage = 'diagnose' | 'plan' | 'optimize'
+type WorkflowStage = 'diagnose' | 'hardening' | 'plan' | 'optimize'
 type WorkflowStageMode = 'preprocess' | 'replace' | 'postprocess'
 type WorkflowStageStep = EvolveStep & { stageExtension?: {
   stage: WorkflowStage
@@ -2119,7 +2120,7 @@ type WorkflowNodeDefinition = WorkflowPhase['nodes'][number] & {
   custom?: boolean
 }
 
-const workflowStageNames: Record<WorkflowStage, string> = { diagnose: '诊断', plan: '规划', optimize: '优化' }
+const workflowStageNames: Record<WorkflowStage, string> = { diagnose: '诊断', hardening: 'Skill 加固', plan: '规划', optimize: '优化' }
 const workflowModeNames: Record<WorkflowStageMode, string> = { preprocess: '前置', replace: '替换', postprocess: '后置' }
 
 function workflowStageBinding(step: EvolveStep) {
@@ -2157,6 +2158,15 @@ const optimizePhase: WorkflowPhase = {
   tone: 'green',
   nodes: [
     { type: 'optimize', matchTypes: ['optimize'], title: '优化 Loop', command: 'clawevolve-workflow --stage optimize', deliverable: '每轮 Diff · 指标 · Spec vN' },
+  ],
+}
+const hardeningPhase: WorkflowPhase = {
+  key: 'hardening',
+  title: 'Skill 加固',
+  subtitle: '在独立候选中加固目标 Skill，并形成可审阅的新版本',
+  tone: 'blue',
+  nodes: [
+    { type: 'hardening', title: 'Skill 加固', command: 'clawevolve-hardening', deliverable: '加固总结 · Skill Diff · 新版本' },
   ],
 }
 const compactOptimizePhase: WorkflowPhase = {
@@ -2204,6 +2214,7 @@ const insightPlanPhase: WorkflowPhase = {
 function stageTestWorkflowPhase(config: Record<string, unknown>): WorkflowPhase[] {
   const stage = (config.stageTest as { stage?: unknown } | undefined)?.stage
   if (stage === 'diagnose') return [{ ...targetPhase, nodes: [targetPhase.nodes[0]] }]
+  if (stage === 'hardening') return [hardeningPhase]
   if (stage === 'plan') return [{ ...targetPhase, nodes: [targetPhase.nodes[1]] }]
   if (stage === 'optimize') return [optimizePhase]
   return []
@@ -2211,6 +2222,7 @@ function stageTestWorkflowPhase(config: Record<string, unknown>): WorkflowPhase[
 
 const workflowDefinitions: Partial<Record<EvolveTask['task_type'], WorkflowPhase[]>> = {
   diagnose: [targetPhase],
+  hardening: [hardeningPhase],
   optimize: [optimizePhase],
   apply: [applyPhase],
   full: [targetPhase, compactOptimizePhase],
@@ -2242,7 +2254,7 @@ function WorkflowNodes({ taskType, steps, config, insightImprovement = false, in
     displayName?: string
   }>>>> | undefined
   const extensionDefinitions = new Map<string, WorkflowNodeDefinition>()
-  for (const stage of ['diagnose', 'plan', 'optimize'] as const) {
+  for (const stage of ['diagnose', 'hardening', 'plan', 'optimize'] as const) {
     for (const mode of ['preprocess', 'replace', 'postprocess'] as const) {
       const binding = configuredExtensions?.[stage]?.[mode]
       if (!binding?.enabled || !binding.implementationId?.trim()) continue

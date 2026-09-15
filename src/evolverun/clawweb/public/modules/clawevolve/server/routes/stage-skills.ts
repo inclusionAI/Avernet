@@ -18,6 +18,7 @@ import {
 } from "../services/evolve/stage-catalog.js";
 import {
   botEvolutionFlow,
+  skillHardeningFlow,
   skillEvolutionFlow,
   type EvolutionFlowKey,
 } from "../services/evolve/evolution-flow.js";
@@ -109,6 +110,7 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
       flows: [
         botEvolutionFlow.describe({ ...startInput, hasTargetSkill: false }),
         skillEvolutionFlow.describe({ ...startInput, taskType: "full", hasTargetSkill: true }),
+        skillHardeningFlow.describe({ ...startInput, taskType: "hardening", hasTargetSkill: true }),
       ],
       stages: officialStageContracts.stages,
     });
@@ -121,11 +123,12 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
     const mode = req.body?.mode;
     const flow = req.body?.flow;
     const definition = flow === "bot_evolution" ? botEvolutionFlow
-      : flow === "skill_evolution" ? skillEvolutionFlow : null;
+      : flow === "skill_evolution" ? skillEvolutionFlow
+        : flow === "skill_hardening" ? skillHardeningFlow : null;
     if (!stage || !isStageExtensionMode(mode) || !stage.extensionModes.includes(mode) || !definition) {
       res.status(400).json({ error: "请选择有效的流程、Stage 和开放位置" }); return;
     }
-    const descriptor = definition.describe({ taskType: "full", inputMode: "diagnose_goal", goal: "", hasTargetSkill: flow === "skill_evolution" });
+    const descriptor = definition.describe({ taskType: flow === "skill_hardening" ? "hardening" : "full", inputMode: "diagnose_goal", goal: "", hasTargetSkill: flow !== "bot_evolution" });
     if (!descriptor.stages.some((item) => item.key === stage.stage)) {
       res.status(400).json({ error: "当前流程不包含该 Stage" }); return;
     }
@@ -184,7 +187,7 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
     const mode = String(req.query.mode ?? "") as StageExtensionMode;
     const flow = String(req.query.flow ?? "bot_evolution") as EvolutionFlowKey;
     if (!findOfficialStage(stage) || !isStageExtensionMode(mode)
-      || !new Set<EvolutionFlowKey>(["bot_evolution", "skill_evolution"]).has(flow)) {
+      || !new Set<EvolutionFlowKey>(["bot_evolution", "skill_evolution", "skill_hardening"]).has(flow)) {
       res.status(400).json({ error: "请选择有效的流程、Stage 和接入方式" }); return;
     }
     const archive = await createStageDevelopmentPackage({ stage, mode, flow });

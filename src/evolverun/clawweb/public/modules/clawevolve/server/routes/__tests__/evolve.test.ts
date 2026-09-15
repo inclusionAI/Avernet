@@ -877,7 +877,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
       flow: {
         key: "bot_evolution",
         version: "v1",
-        stages: { diagnose: false, plan: true, optimize: true },
+        stages: { diagnose: false, hardening: false, plan: true, optimize: true },
       },
     }));
     const plan = (task.steps as Array<{ stepId: string; stepType: string }>)[0];
@@ -901,7 +901,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
       flow: {
         key: "bot_evolution",
         version: "v1",
-        stages: { diagnose: true, plan: false, optimize: false },
+        stages: { diagnose: true, hardening: false, plan: false, optimize: false },
       },
     }));
     const diagnose = (task.steps as Array<{ stepId: string; stepType: string }>)[0];
@@ -1715,7 +1715,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     expect(response.status, await response.clone().text()).toBe(201);
     const task = await response.json();
     expect(task.task_type).toBe("diagnose");
-    expect(task.config.flow).toEqual({ key: "skill_evolution", version: "v1", stages: { diagnose: true, plan: runsPlan, optimize: false } });
+    expect(task.config.flow).toEqual({ key: "skill_evolution", version: "v1", stages: { diagnose: true, hardening: false, plan: runsPlan, optimize: false } });
     expect(task.config.targetSkill).toMatchObject({ assetId: "SKILL-DIAGNOSE", skillId: "daily-report-zh", ownerUserId: "user-1",
       baseline: { sha256: `sha256:${"a".repeat(64)}` } });
     expect(ocbLocalSkills.exportLocalSkill).toHaveBeenCalledWith(expect.objectContaining({ botId: "bot-arca", skillId: "daily-report-zh" }));
@@ -1895,7 +1895,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
       flow: {
         key: "skill_evolution",
         version: "v1",
-        stages: { diagnose: false, plan: true, optimize: true },
+        stages: { diagnose: false, hardening: false, plan: true, optimize: true },
       },
     }));
 
@@ -1912,6 +1912,79 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     expect(prepared.body.nextStep).toEqual(expect.objectContaining({ stepType: "plan" }));
     expect((await repo.listSteps(String(task.task_id))).some((step) => step.step_type === "diagnose"))
       .toBe(false);
+  });
+
+  it("runs the independent Skill hardening flow through candidate acceptance and a new version", async () => {
+    await seedArcaBot();
+    await skillAssetRepo.createAsset({
+      assetId: "SKILL-HARDENING", versionId: "SKILL-HARDENING-V1", ownerUserId: "user-1",
+      botId: "bot-arca", ocbSkillId: "hardening-target", displayName: "待加固 Skill",
+      packageRef: "oss://clawevolve-artifacts/evolve/skills/SKILL-HARDENING/versions/v1/package.zip",
+      packageSha256: `sha256:${"a".repeat(64)}`,
+    });
+    const createdResponse = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        taskType: "hardening", taskName: "Skill 加固", userId: "user-1", botId: "bot-arca", botEnv: "pre",
+        targetSkillAssetId: "SKILL-HARDENING", goal: "补齐输入输出与失败处理。",
+        stageSelection: { diagnose: false, hardening: true, plan: false, optimize: false },
+        runtimeMaintenance: false,
+      }),
+    });
+    expect(createdResponse.status, await createdResponse.clone().text()).toBe(201);
+    const task = await createdResponse.json();
+    expect(task.config.flow).toEqual({ key: "skill_hardening", version: "v1", stages: {
+      diagnose: false, hardening: true, plan: false, optimize: false,
+    } });
+    expect(task.steps.map((step: { stepType: string }) => step.stepType)).toEqual(["skill_prepare"]);
+
+    const workspace = `/home/admin/.openclaw/clawevolve_workspaces/${task.task_id}/workspace`;
+    const prepared = await callback(task.task_id, task.steps[0].stepId, { status: "succeeded", output: {
+      prepared: true,
+      workspace,
+      targetSkillPath: `${workspace}/skills/skills-local/local-skill`,
+    } });
+    expect(prepared.response.status, JSON.stringify(prepared.body)).toBe(200);
+    expect(prepared.body.nextStep).toMatchObject({ stepType: "hardening" });
+    const hardeningStepId = String(prepared.body.nextStep.stepId);
+    const hardeningStep = await repo.findStep(hardeningStepId);
+    expect(hardeningStep?.command).toContain("/clawevolve-hardening");
+    expect(hardeningStep?.command).toContain(`--target '${workspace}/skills/skills-local/local-skill'`);
+
+    const hardened = await callback(task.task_id, hardeningStepId, { status: "succeeded", output: {
+      summary: "补齐输入契约和失败处理。", changed: true, changed_files: ["SKILL.md"],
+    } });
+    expect(hardened.response.status).toBe(200);
+    expect(hardened.body.nextStep).toMatchObject({ stepType: "skill_finalize" });
+
+    const saved = JSON.parse((await repo.findTask(task.task_id))!.config_json);
+    const candidate = Buffer.from("hardened-candidate");
+    const candidateSha = createHash("sha256").update(candidate).digest("hex");
+    const finalized = await callback(task.task_id, hardened.body.nextStep.stepId, { status: "succeeded", output: {
+      artifact: {
+        ref: saved.targetSkill.candidate.ref,
+        size: candidate.byteLength,
+        sha256: candidateSha,
+        contentType: "application/zip",
+      },
+    } });
+    expect(finalized.body).toMatchObject({ taskStatus: "waiting_acceptance", nextStep: null });
+    expect((await skillAssetRepo.listEvents("user-1"))[0]).toMatchObject({
+      event_type: "hardening", task_id: task.task_id, status: "waiting_acceptance", version_from_no: 1,
+    });
+
+    getObject.mockResolvedValue({ content: candidate, etag: null, contentType: "application/zip" });
+    const accepted = await fetch(`${baseUrl}/api/evolve/tasks/${task.task_id}/skill-decision`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1", "Idempotency-Key": "hardening-accept" },
+      body: JSON.stringify({ decision: "accept" }),
+    });
+    expect(accepted.status, await accepted.clone().text()).toBe(200);
+    expect(await accepted.json()).toMatchObject({ status: "completed", decision: "accept", version: { version: "v2" } });
+    expect((await skillAssetRepo.listEvents("user-1"))[0]).toMatchObject({
+      event_type: "hardening", status: "completed", outcome: "applied", version_to_no: 2,
+    });
   });
 
   it("does not freeze or offer a rejected Skill candidate after the final Optimize round", async () => {

@@ -391,15 +391,16 @@ export type EvolveTask = {
 
 export type EvolveStageMode = 'preprocess' | 'postprocess' | 'replace'
 export type EvolveStageSelection = Record<'diagnose' | 'plan' | 'optimize', boolean>
+  & Partial<Record<'hardening', boolean>>
 export type EvolveTaskStageExtensions = Partial<Record<
-  'diagnose' | 'plan' | 'optimize',
+  'diagnose' | 'hardening' | 'plan' | 'optimize',
   Partial<Record<EvolveStageMode, { enabled: boolean; implementationId: string }>>
 >>
 
 export type EvolveStageCatalog = {
   schemaVersion: string
   flows: Array<{
-    key: 'bot_evolution' | 'skill_evolution'
+    key: 'bot_evolution' | 'skill_evolution' | 'skill_hardening'
     name: string
     purpose: string
     stages: Array<{
@@ -426,7 +427,7 @@ export type EvolveStageDevelopment = {
   stageSkillId: string
   ownerId: string
   displayName: string
-  flow: 'bot_evolution' | 'skill_evolution'
+  flow: 'bot_evolution' | 'skill_evolution' | 'skill_hardening'
   stage: string
   stageName: string
   mode: EvolveStageMode
@@ -486,7 +487,7 @@ export type EvolveSkillEvent = {
   botId: string
   actorId: string | null
   actorType: 'user' | 'system'
-  type: 'registered' | 'diagnosis' | 'optimization'
+  type: 'registered' | 'diagnosis' | 'hardening' | 'optimization'
   status: 'running' | 'waiting_user_input' | 'waiting_acceptance' | 'completed' | 'failed' | 'canceled'
   outcome: string | null
   taskId: string | null
@@ -1238,6 +1239,17 @@ export const api = {
       runtimeMaintenance?: boolean;
       openclawExecutionMode?: 'local' | 'gateway';
       targetSkillAssetId?: string;
+      stageExtensions?: EvolveTaskStageExtensions;
+      stageSelection?: EvolveStageSelection;
+    } | {
+      taskType: 'hardening';
+      taskName: string; remark?: string;
+      userId: string; botId: string; botEnv?: string;
+      goal: string; targetSkillAssetId: string;
+      nodeCommandYamls?: Record<string, string>;
+      forceMessage?: boolean;
+      runtimeMaintenance?: boolean;
+      openclawExecutionMode?: 'local' | 'gateway';
       stageExtensions?: EvolveTaskStageExtensions;
       stageSelection?: EvolveStageSelection;
     } | {

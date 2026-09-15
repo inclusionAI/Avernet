@@ -85,6 +85,8 @@ import {
   freezeEvolutionFlow,
   resolveFrozenEvolutionFlow,
   resolveEvolutionFlow,
+  skillHardeningFlow,
+  type EvolutionFlowKey,
   type FrozenEvolutionFlow,
   type FrozenStageSelection,
 } from "../services/evolve/evolution-flow.js";
@@ -99,7 +101,8 @@ import {
 } from "../services/evolve/skill-candidate.js";
 import { skillPackageDiff, skillPackagesEquivalent } from "../services/evolve/skill-package-view.js";
 import {
-  freezeStageTestFixture, stageTestFixtureInput, selectStageTestFixtureVersion, usesStageTestFixture,
+  freezeStageTestFixture, stageTestFixtureInput, stageTestFixturePreviewInput,
+  selectStageTestFixtureVersion, usesStageTestFixture,
   type FrozenStageTestFixture,
 } from "../services/evolve/stage-test-fixture.js";
 
@@ -178,6 +181,7 @@ type ExtendedTaskConfig = Record<string, unknown> & {
     implementationId: string;
     stage: StageKey;
     mode: StageExtensionMode;
+    flow?: EvolutionFlowKey;
     fixture?: FrozenStageTestFixture;
     planSource?: FrozenDiagnosePlanSource;
     planResultSource?: FrozenStageTestPlanResult;
@@ -195,6 +199,7 @@ function stageEnabled(task: { config_json: string }, stage: StageKey): boolean {
 function taskStageSelection(config: ExtendedTaskConfig | null | undefined): FrozenStageSelection {
   return config?.flow?.stages ?? config?.stageSelection ?? {
     diagnose: true,
+    hardening: false,
     plan: true,
     optimize: true,
   };
@@ -492,6 +497,15 @@ function validateStepOutput(stepType: string, output: unknown): string | null {
     if (!value.diagnosis || !value.cases) return "Diagnose Output 必须包含 diagnosis 和 cases";
     const casesError = validateDiagnoseCases(value.cases);
     if (casesError) return casesError;
+  }
+  if (stepType === "hardening") {
+    if (!nonEmptyString(value.summary) || typeof value.changed !== "boolean") {
+      return "Skill 加固 Output 必须包含 summary 和 changed";
+    }
+    if (value.changed_files != null
+      && (!Array.isArray(value.changed_files) || value.changed_files.some((item) => !nonEmptyString(item)))) {
+      return "Skill 加固 Output changed_files 必须是非空字符串数组";
+    }
   }
   if (stepType === "plan") {
     const domains = value.benchDomains as Record<string, unknown> | undefined;
@@ -1058,6 +1072,43 @@ async function createBuiltinDiagnoseStep(
   return step;
 }
 
+async function createBuiltinHardeningStep(
+  req: Request,
+  repo: EvolveRepository,
+  dispatch: Dispatch,
+  task: EvolveTaskRow,
+  options: { initial?: boolean; runtime?: EvolveBotRuntime | null } = {},
+) {
+  const config = (parseJson(task.config_json) as {
+    nodeCommands?: NodeCommandYamls;
+    goal?: string;
+    clawwebUrl?: string;
+  } | null) ?? {};
+  const target = requirePreparedSkillCandidate(
+    ((parseJson(task.config_json) as ExtendedTaskConfig | null)?.targetSkill)!,
+  );
+  const stepId = id("STEP");
+  const command = renderCommand(
+    config.nodeCommands?.hardening ?? defaultNodeCommand("hardening"),
+    {},
+    [
+      ["task-id", task.task_id], ["step-id", stepId],
+      ["workspace", quoteCommandArgument(target.workspacePath)],
+      ["target", quoteCommandArgument(target.skillPath)],
+      ["goal", quoteCommandArgument(config.goal ?? "")],
+      ["clawweb-url", config.clawwebUrl ?? getClawWebPublicBaseUrl()],
+    ],
+  );
+  const steps = await repo.listSteps(task.task_id);
+  const step = await repo.createStep({
+    stepId, taskId: task.task_id, stepType: "hardening",
+    stepNo: Math.max(0, ...steps.map((item) => item.step_no)) + 1,
+    command,
+  });
+  await dispatchCreatedStep(req, repo, dispatch, task, step, options);
+  return step;
+}
+
 async function createPlanStep(
   req: Request,
   repo: EvolveRepository,
@@ -1231,6 +1282,10 @@ async function scheduleStageCut(
     const step = await createBuiltinDiagnoseStep(req, repo, dispatch, task, options);
     return { stepId: step.step_id, stepType: step.step_type, roundNo: step.round_no };
   }
+  if (stage === "hardening") {
+    const step = await createBuiltinHardeningStep(req, repo, dispatch, task, options);
+    return { stepId: step.step_id, stepType: step.step_type, roundNo: step.round_no };
+  }
   if (stage === "plan") {
     return createPlanStep(req, repo, dispatch, task, options.initial === true, options.runtime);
   }
@@ -1382,6 +1437,13 @@ async function stageRuntimeInput(
       ...(mode === "postprocess" && currentResult ? { builtin_result: currentResult } : {}),
     };
   }
+  if (stage === "hardening") {
+    return {
+      ...common,
+      goal: testInput?.goal ?? config.goal ?? "",
+      ...(mode === "postprocess" && currentResult ? { builtin_result: currentResult } : {}),
+    };
+  }
   if (stage === "plan") {
     const diagnoseResult = testInput?.diagnose_result
       ?? await logicalStageOutput(repo, stageSkillRepo, task.task_id, "diagnose", step.step_no);
@@ -1435,7 +1497,7 @@ async function finishLogicalStage(
     return null;
   }
   const finishTask = async () => {
-    if (config?.targetSkill && task.task_type === "full") {
+    if (config?.targetSkill && (task.task_type === "full" || task.task_type === "hardening")) {
       const finalStep = await createSkillLifecycleStep(req, repo, dispatch, task, "finalize");
       return { stepId: finalStep.step_id, stepType: finalStep.step_type };
     }
@@ -1453,6 +1515,7 @@ async function finishLogicalStage(
       ? scheduleStageCut(req, repo, dispatch, stageSkillRepo, task, nextStage, "start")
       : finishTask();
   }
+  if (stage === "hardening") return finishTask();
   if (stage === "plan") {
     const nextStage = flow.nextStage(selection, stage);
     if (task.task_type !== "full" || !nextStage) return finishTask();
@@ -1973,7 +2036,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       stageExtensions: rawStageExtensions,
       stageSelection: rawStageSelection,
     } = req.body ?? {};
-    const taskType = requestedTaskType === "full" ? "full" : "diagnose";
+    const taskType = requestedTaskType === "hardening" ? "hardening"
+      : requestedTaskType === "full" ? "full" : "diagnose";
     let inputMode = taskType === "full" ? String(rawInputMode ?? "diagnose_goal") : "diagnose_goal";
     if (!new Set(["diagnose_goal", "direct_goal"]).has(inputMode)) {
       res.status(400).json({ error: "inputMode 必须是 diagnose_goal 或 direct_goal" }); return;
@@ -1982,11 +2046,11 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const skillDiagnosis = Boolean(targetSkillAssetId) && taskType === "diagnose";
     let goal: string;
     try {
-      goal = taskType === "full" ? normalizeEvolutionGoal(rawGoal) : "";
+      goal = taskType === "full" || taskType === "hardening" ? normalizeEvolutionGoal(rawGoal) : "";
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); return;
     }
-    const flow = resolveEvolutionFlow(Boolean(targetSkillAssetId));
+    const flow = taskType === "hardening" ? skillHardeningFlow : resolveEvolutionFlow(Boolean(targetSkillAssetId));
     const flowStartInput = {
       taskType,
       inputMode,
@@ -2004,6 +2068,9 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
     inputMode = stageSelection.diagnose ? "diagnose_goal" : "direct_goal";
     const requiresDiagnose = stageSelection.diagnose;
+    if (taskType === "hardening" && !targetSkillAssetId) {
+      res.status(400).json({ error: "Skill 加固任务必须选择待加固 Skill" }); return;
+    }
     let sessionSourceMode = rawSessionSource == null || rawSessionSource === "local"
       ? "local"
       : rawSessionSource === "service_export" ? "service_export" : null;
@@ -2088,7 +2155,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       res.status((error as { status?: number })?.status === 403 ? 403 : 422)
         .json({ error: error instanceof Error ? error.message : String(error) }); return;
     }
-    for (const stage of ["diagnose", "plan", "optimize"] as const) {
+    for (const stage of ["diagnose", "hardening", "plan", "optimize"] as const) {
       if (!stageSelection[stage] && Object.values(stageExtensions[stage] ?? {})
         .some((binding) => binding?.enabled === true)) {
         res.status(422).json({ error: `${findOfficialStage(stage)?.name ?? stage}已关闭，不能启用该 Stage 的自定义实现` }); return;
@@ -2182,7 +2249,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const taskId = evolveTaskId();
     const stepId = id("STEP");
     const clawwebUrl = getClawWebPublicBaseUrl();
-    const enabledNodeKeys = (["diagnose", "plan", "optimize"] as const)
+    const enabledNodeKeys = (["diagnose", "hardening", "plan", "optimize"] as const)
       .filter((stage) => stageSelection[stage]);
     let nodeCommands: NodeCommandYamls;
     try {
@@ -2245,11 +2312,12 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         ...(rawSessionIds === undefined ? {} : { session_ids: sessionIds }),
       } } : {}),
       maxRounds: rounds,
-      ...(taskType === "full" && goal ? { goal } : {}),
+      ...((taskType === "full" || taskType === "hardening") && goal ? { goal } : {}),
       ...(requiresDiagnose && startDate ? { startDate: String(startDate) } : {}),
       ...(requiresDiagnose && endDate ? { endDate: String(endDate) } : {}),
       nodeCommands: {
         ...(requiresDiagnose ? { diagnose: diagnoseTemplate } : {}),
+        ...(stageSelection.hardening ? { hardening: nodeCommands.hardening ?? defaultNodeCommand("hardening") } : {}),
         ...(stageSelection.plan ? { plan: nodeCommands.plan ?? defaultNodeCommand("plan") } : {}),
         ...(stageSelection.optimize ? { optimize: nodeCommands.optimize ?? defaultNodeCommand("optimize") } : {}),
       },
@@ -2408,8 +2476,17 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     } catch (sourceError) {
       res.status(400).json({ error: sourceError instanceof Error ? sourceError.message : String(sourceError) }); return;
     }
+    let fixtureVersion: FrozenStageTestFixture["version"] | undefined;
+    try {
+      fixtureVersion = selectStageTestFixtureVersion(
+        development?.flow_key, implementation.stage_key, implementation.extension_mode, frozenPlanSource,
+      );
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); return;
+    }
     const inputError = validateJsonSchema(stage.inputSchema, {
       ...caseInput,
+      ...(fixtureVersion !== undefined ? { target_skill: stageTestFixturePreviewInput(fixtureVersion) } : {}),
       task: {
         task_id: "stage-test-preview",
         task_type: "stage_test",
@@ -2431,14 +2508,6 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const taskId = evolveTaskId();
     const botEnv = String(req.body?.botEnv ?? "");
     let fixture: FrozenStageTestFixture | undefined;
-    let fixtureVersion: FrozenStageTestFixture["version"] | undefined;
-    try {
-      fixtureVersion = selectStageTestFixtureVersion(
-        development?.flow_key, implementation.stage_key, implementation.extension_mode, frozenPlanSource,
-      );
-    } catch (error) {
-      res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); return;
-    }
     if (fixtureVersion !== undefined) {
       if (!deps.artifactStore?.putObject) {
         res.status(503).json({ error: "Stage 测试 fixture 存储不可用" }); return;
@@ -2447,6 +2516,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
     const stageSelection: FrozenStageSelection = {
       diagnose: implementation.stage_key === "diagnose",
+      hardening: implementation.stage_key === "hardening",
       plan: implementation.stage_key === "plan",
       optimize: implementation.stage_key === "optimize",
     };
@@ -2465,6 +2535,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         implementationId: implementation.implementation_id,
         stage: implementation.stage_key,
         mode: implementation.extension_mode,
+        ...(development?.flow_key ? { flow: development.flow_key as EvolutionFlowKey } : {}),
         ...(fixture ? { fixture } : {}),
         ...(frozenPlanSource ? { planSource: frozenPlanSource } : {}),
         ...(frozenPlanResult ? { planResultSource: frozenPlanResult } : {}),
@@ -3131,7 +3202,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const pageSize = Math.min(50, Math.max(1, Number.parseInt(String(req.query.pageSize ?? "20"), 10) || 20));
     const categories: Record<string, string[]> = {
       diagnosis: ["diagnose", "bench", "session_analysis", "session_export"],
-      optimization: ["optimize", "bench_optimize"],
+      optimization: ["hardening", "optimize", "bench_optimize"],
       repair: ["repair"],
       deployment: ["apply", "pack", "pack_restore", "runtime_cleanup"],
       full: ["full"],
@@ -4135,7 +4206,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       if (fixture) {
         if (task.task_type !== "stage_test" || config.stageTest?.implementationId !== run.implementation_id
           || config.stageTest.stage !== run.stage_key || config.stageTest.mode !== run.extension_mode
-          || !usesStageTestFixture("skill_evolution", run.stage_key, run.extension_mode)) {
+          || !usesStageTestFixture(config.stageTest.flow, run.stage_key, run.extension_mode)) {
           res.status(409).json({ error: "Stage 测试 fixture 绑定不一致" }); return;
         }
         try { stageTestFixtureInput(task.task_id, fixture); }
@@ -5257,7 +5328,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
 
     if (status === "succeeded" && stageSkillRepo
-      && (step.step_type === "diagnose" || step.step_type === "plan" || step.step_type === "optimize")) {
+      && (step.step_type === "diagnose" || step.step_type === "hardening"
+        || step.step_type === "plan" || step.step_type === "optimize")) {
       const task = await repo.findTask(step.task_id);
       const config = task ? parseJson(task.config_json) as ExtendedTaskConfig | null : null;
       if (task && (config?.flow || config?.stageSelection || config?.targetSkill

@@ -43,7 +43,7 @@ export async function skillAuditTransaction<T>(db: IDatabase, work: (tx: IDataba
   finally { if (sqliteTransactions.get(db) === pending) sqliteTransactions.delete(db); }
 }
 
-export type SkillEventType = 'registered' | 'diagnosis' | 'optimization';
+export type SkillEventType = 'registered' | 'diagnosis' | 'hardening' | 'optimization';
 export type SkillEventStatus = 'running' | 'waiting_user_input' | 'waiting_acceptance' | 'completed' | 'failed' | 'canceled';
 
 export type SkillEventRow = {
@@ -147,7 +147,7 @@ export async function recordSkillTaskEvent(tx: IDatabase, taskId: string, update
   const task = (await tx.query<{ task_type: string; task_name: string | null; status: string; config_json: string;
     created_by: string; user_id: string; bot_id: string; error_message: string | null }>(
     'SELECT task_type, task_name, status, config_json, created_by, user_id, bot_id, error_message FROM ce_tasks WHERE task_id = ?', [taskId]))[0];
-  if (!task || !['diagnose', 'full'].includes(task.task_type)) return;
+  if (!task || !['diagnose', 'hardening', 'full'].includes(task.task_type)) return;
   const config = jsonObject(task.config_json) as { targetSkill?: {
     assetId?: string; baseline?: { versionId?: string; versionNo?: number };
   }; skillAuditTestBench?: unknown };
@@ -161,7 +161,8 @@ export async function recordSkillTaskEvent(tx: IDatabase, taskId: string, update
   const testBench = skillTestBenchSnapshot(config.skillAuditTestBench, taskId);
   await writeEvent(tx, {
     businessKey: taskId, asset, taskId,
-    type: task.task_type === 'diagnose' ? 'diagnosis' : 'optimization',
+    type: task.task_type === 'diagnose' ? 'diagnosis'
+      : task.task_type === 'hardening' ? 'hardening' : 'optimization',
     status: update.status ?? taskEventStatus(task.status),
     outcome: Object.prototype.hasOwnProperty.call(update, 'outcome') ? update.outcome : existing?.outcome,
     actorId: update.actorId ?? (existing ? null : task.created_by),

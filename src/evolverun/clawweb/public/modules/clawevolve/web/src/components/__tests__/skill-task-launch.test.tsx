@@ -19,6 +19,8 @@ const stageBinding = { diagnose: { preprocess: { enabled: true, implementationId
 const defaults = { assetId: asset.assetId, botId: asset.botId, userId: 'original-owner',
   diagnose: { taskType: 'diagnose', goal: '检查该技能的表现', unavailableReason: null,
     stageExtensions: stageBinding, launchDescription: 'Host diagnostic flow。' },
+  hardening: { taskType: 'hardening', goal: '加固该技能的内容', unavailableReason: null,
+    stageExtensions: { hardening: { replace: { enabled: true, implementationId: 'hardening-v1' } } }, launchDescription: 'Host hardening flow。' },
   optimize: { taskType: 'full', goal: '优化该技能的表现', unavailableReason: null,
     stageExtensions: stageBinding, launchDescription: 'Host optimization flow。' } }
 
@@ -49,23 +51,26 @@ describe('Skill task launch confirmation', () => {
     expect(api.evolve.createTask.mock.calls[0][1]).toMatch(/^skill-task-/)
   })
 
-  it.each(['diagnose', 'optimize'] as const)('requires confirmation and submits %s with the real owner and fixed target', async (action) => {
+  it.each(['diagnose', 'hardening', 'optimize'] as const)('requires confirmation and submits %s with the real owner and fixed target', async (action) => {
     open(action)
     const dialog = screen.getByRole('dialog')
     expect(api.evolve.createTask).not.toHaveBeenCalled()
-    expect((within(dialog).getByRole('button', { name: /确认诊断|确认优化/ }) as HTMLButtonElement).disabled).toBe(true)
+    expect((within(dialog).getByRole('button', { name: /确认诊断|确认加固|确认优化/ }) as HTMLButtonElement).disabled).toBe(true)
     await within(dialog).findByText(defaults[action].goal)
     expect(within(dialog).getByText('original-owner')).toBeTruthy()
     expect(within(dialog).queryByText('viewer-not-owner')).toBeNull()
-    expect(within(dialog).getByText(/GLM-5.2/)).toBeTruthy()
+    if (action !== 'hardening') expect(within(dialog).getByText(/GLM-5.2/)).toBeTruthy()
     expect(within(dialog).queryByRole('combobox')).toBeNull()
-    fireEvent.click(within(dialog).getByRole('button', { name: action === 'diagnose' ? '确认诊断' : '确认优化' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: `确认${action === 'diagnose' ? '诊断' : action === 'hardening' ? '加固' : '优化'}` }))
     await waitFor(() => expect(api.evolve.createTask).toHaveBeenCalledTimes(1))
     const [input, key] = api.evolve.createTask.mock.calls[0]
-    expect(input).toMatchObject({ taskType: action === 'diagnose' ? 'diagnose' : 'full',
+    expect(input).toMatchObject({ taskType: action === 'diagnose' ? 'diagnose' : action === 'hardening' ? 'hardening' : 'full',
       targetSkillAssetId: asset.assetId, botId: 'bot-1', userId: 'original-owner', goal: defaults[action].goal,
-      diagnoseIntent: defaults[action].goal, model: 'GLM-5.2', judgeBackend: 'subagent', maxSessions: 10,
-      runtimeMaintenance: false, stageSelection: { diagnose: true, plan: true, optimize: action === 'optimize' } })
+      runtimeMaintenance: false, stageSelection: action === 'hardening'
+        ? { diagnose: false, hardening: true, plan: false, optimize: false }
+        : { diagnose: true, plan: true, optimize: action === 'optimize' } })
+    if (action !== 'hardening') expect(input).toMatchObject({ diagnoseIntent: defaults[action].goal,
+      model: 'GLM-5.2', judgeBackend: 'subagent', maxSessions: 10 })
     expect(input).not.toHaveProperty('disableStages')
     expect(input).not.toHaveProperty('skipPlan')
     expect(key).toEqual(expect.any(String))
@@ -77,12 +82,13 @@ describe('Skill task launch confirmation', () => {
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/evolve/runs/task-1'))
   })
 
-  it.each(['diagnose', 'optimize'] as const)('honors a host denial for %s', async (action) => {
+  it.each(['diagnose', 'hardening', 'optimize'] as const)('honors a host denial for %s', async (action) => {
     api.evolve.getSkillTaskDefaults.mockResolvedValue({ ...defaults,
       [action]: { ...defaults[action], stageExtensions: null, unavailableReason: 'Host requirement is unavailable' } })
     open(action)
-    await screen.findByText(`不可启动${action === 'diagnose' ? '诊断' : '优化'}：Host requirement is unavailable`)
-    const confirm = screen.getByRole('button', { name: action === 'diagnose' ? '确认诊断' : '确认优化' }) as HTMLButtonElement
+    const label = action === 'diagnose' ? '诊断' : action === 'hardening' ? '加固' : '优化'
+    await screen.findByText(`不可启动${label}：Host requirement is unavailable`)
+    const confirm = screen.getByRole('button', { name: `确认${label}` }) as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
     fireEvent.click(confirm)
     expect(api.evolve.createTask).not.toHaveBeenCalled()
@@ -158,22 +164,27 @@ describe('Skill task launch confirmation', () => {
     expect(api.evolve.createTask).not.toHaveBeenCalled()
   })
 
-  it('exposes diagnose, optimize and view on the list; both task actions open confirmation', async () => {
+  it('exposes diagnose, hardening, optimize and view on the list; task actions open confirmation', async () => {
     render(<MemoryRouter><SkillCenter /></MemoryRouter>)
     await screen.findByText(asset.name)
     const diagnose = screen.getByRole('button', { name: '诊断', exact: true })
+    const hardening = screen.getByRole('button', { name: '加固', exact: true })
     const optimize = screen.getByRole('button', { name: '优化', exact: true })
     const view = screen.getByRole('button', { name: '查看' })
-    for (const button of [diagnose, optimize, view]) {
+    for (const button of [diagnose, hardening, optimize, view]) {
       expect(button.className).toContain('rounded-md')
       expect(button.className).toContain('border')
       expect(button.className).toContain('px-3 py-1.5')
     }
     for (const token of ['border-amber-200', 'bg-amber-50', 'text-amber-700']) expect(diagnose.className).toContain(token)
+    for (const token of ['border-violet-200', 'bg-violet-50', 'text-violet-700']) expect(hardening.className).toContain(token)
     for (const token of ['border-emerald-200', 'bg-emerald-50', 'text-emerald-700']) expect(optimize.className).toContain(token)
     for (const token of ['border-gray-200', 'bg-white', 'text-gray-600']) expect(view.className).toContain(token)
     fireEvent.click(diagnose)
     await screen.findByRole('heading', { name: '确认诊断 Skill' })
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    fireEvent.click(hardening)
+    await screen.findByRole('heading', { name: '确认加固 Skill' })
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     fireEvent.click(optimize)
     await screen.findByRole('heading', { name: '确认优化 Skill' })

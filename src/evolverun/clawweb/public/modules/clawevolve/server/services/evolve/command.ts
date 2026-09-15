@@ -1,6 +1,6 @@
 import { parse as parseYaml } from "yaml";
 
-export type NodeCommandKey = "diagnose" | "plan" | "bench" | "bench_plan" | "optimize";
+export type NodeCommandKey = "diagnose" | "hardening" | "plan" | "bench" | "bench_plan" | "optimize";
 export type NodeCommandYamls = Partial<Record<NodeCommandKey, string>>;
 
 const MAX_RENDERED_COMMAND_BYTES = 64 * 1024;
@@ -95,6 +95,7 @@ export function parseNodeCommandYaml(value: unknown, node: NodeCommandKey): stri
   const command = record.command.trim();
   const expected: Partial<Record<NodeCommandKey, RegExp>> = {
     diagnose: /^\/clawevolve-diagnose(?:\s|$)/,
+    hardening: /^\/clawevolve-hardening(?:\s|$)/,
     plan: /^\/clawevolve-plan(?:\s|$)/,
     bench: /^\/clawevolve-bench(?:\s|$)/,
     bench_plan: /^\/clawevolve-workflow\s+--stage\s+bench-plan(?:\s|$)/,

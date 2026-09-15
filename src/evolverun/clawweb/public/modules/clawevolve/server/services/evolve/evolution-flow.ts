@@ -1,6 +1,6 @@
 import type { StageKey } from "./stage-catalog.js";
 
-export type EvolutionFlowKey = "bot_evolution" | "skill_evolution";
+export type EvolutionFlowKey = "bot_evolution" | "skill_evolution" | "skill_hardening";
 export type FrozenStageSelection = Record<StageKey, boolean>;
 export type RequestedStageSelection = Partial<Record<StageKey, boolean>>;
 export type FrozenEvolutionFlow = {
@@ -10,7 +10,7 @@ export type FrozenEvolutionFlow = {
 };
 
 export type FlowStartInput = {
-  taskType: "diagnose" | "full";
+  taskType: "diagnose" | "full" | "hardening";
   inputMode: string;
   goal: string;
   hasTargetSkill: boolean;
@@ -40,11 +40,16 @@ export type EvolutionFlow = {
   nextStage(selection: FrozenStageSelection, completed: StageKey): StageKey | null;
 };
 
-const ORDER: StageKey[] = ["diagnose", "plan", "optimize"];
+const EVOLUTION_ORDER: StageKey[] = ["diagnose", "plan", "optimize"];
+const HARDENING_ORDER: StageKey[] = ["hardening"];
 const STAGES: Record<StageKey, Pick<FlowStageDescription, "name" | "purpose">> = {
   diagnose: {
     name: "诊断",
     purpose: "从真实 Session 中提取问题、成功案例和失败案例，为规划提供证据。",
+  },
+  hardening: {
+    name: "Skill 加固",
+    purpose: "在独立候选中检查并改进目标 Skill，保留业务意图并形成可审阅的新版本。",
   },
   plan: {
     name: "规划",
@@ -56,14 +61,14 @@ const STAGES: Record<StageKey, Pick<FlowStageDescription, "name" | "purpose">> =
   },
 };
 
-function firstStage(selection: FrozenStageSelection): StageKey {
-  const stage = ORDER.find((key) => selection[key]);
+function firstStage(order: readonly StageKey[], selection: FrozenStageSelection): StageKey {
+  const stage = order.find((key) => selection[key]);
   if (!stage) throw new Error("至少需要启用一个 Stage");
   return stage;
 }
 
-function nextStage(selection: FrozenStageSelection, completed: StageKey): StageKey | null {
-  return ORDER.slice(ORDER.indexOf(completed) + 1).find((key) => selection[key]) ?? null;
+function nextStage(order: readonly StageKey[], selection: FrozenStageSelection, completed: StageKey): StageKey | null {
+  return order.slice(order.indexOf(completed) + 1).find((key) => selection[key]) ?? null;
 }
 
 function requestedBoolean(
@@ -77,13 +82,13 @@ function requestedBoolean(
   return value;
 }
 
-function assertKnownStageKeys(requested: RequestedStageSelection | null | undefined): void {
+function assertKnownStageKeys(requested: RequestedStageSelection | null | undefined, order: readonly StageKey[]): void {
   if (requested == null) return;
   if (typeof requested !== "object" || Array.isArray(requested)) {
     throw new Error("stageSelection 必须是 JSON 对象");
   }
   for (const key of Object.keys(requested)) {
-    if (!ORDER.includes(key as StageKey)) throw new Error(`Stage 开关不合法: ${key}`);
+    if (!order.includes(key as StageKey)) throw new Error(`Stage 开关不合法: ${key}`);
   }
 }
 
@@ -96,16 +101,17 @@ function canSkipDiagnose(input: FlowStartInput): boolean {
 }
 
 function describeStages(
+  order: readonly StageKey[],
   selection: FrozenStageSelection,
-  canDisable: Record<StageKey, boolean>,
+  canDisable: Partial<Record<StageKey, boolean>>,
   reasons: Partial<Record<StageKey, string>> = {},
 ): FlowStageDescription[] {
-  return ORDER.map((key) => ({
+  return order.map((key) => ({
     key,
     ...STAGES[key],
     enabled: selection[key],
-    canDisable: canDisable[key],
-    ...(!canDisable[key] && reasons[key] ? { disabledReason: reasons[key] } : {}),
+    canDisable: canDisable[key] === true,
+    ...(canDisable[key] !== true && reasons[key] ? { disabledReason: reasons[key] } : {}),
   }));
 }
 
@@ -120,6 +126,7 @@ export const botEvolutionFlow: EvolutionFlow = {
         ? "从 Bot 的真实运行记录中发现问题并形成可追溯的诊断结果。"
         : "从真实运行记录中发现问题、形成方案，并通过多轮 Bench 持续优化 Bot。",
       stages: describeStages(
+        EVOLUTION_ORDER,
         selection,
         input.taskType === "diagnose"
           ? { diagnose: false, plan: true, optimize: false }
@@ -133,10 +140,11 @@ export const botEvolutionFlow: EvolutionFlow = {
     };
   },
   resolveSelection(input, requested) {
-    assertKnownStageKeys(requested);
+    assertKnownStageKeys(requested, EVOLUTION_ORDER);
     if (input.taskType === "diagnose") {
       const selection: FrozenStageSelection = {
         diagnose: requestedBoolean(requested, "diagnose", true),
+        hardening: false,
         plan: requestedBoolean(requested, "plan", true),
         optimize: requestedBoolean(requested, "optimize", false),
       };
@@ -147,6 +155,7 @@ export const botEvolutionFlow: EvolutionFlow = {
     }
     const selection: FrozenStageSelection = {
       diagnose: requestedBoolean(requested, "diagnose", !canSkipDiagnose(input)),
+      hardening: false,
       plan: requestedBoolean(requested, "plan", true),
       optimize: requestedBoolean(requested, "optimize", true),
     };
@@ -158,8 +167,8 @@ export const botEvolutionFlow: EvolutionFlow = {
     }
     return selection;
   },
-  firstStage,
-  nextStage,
+  firstStage: (selection) => firstStage(EVOLUTION_ORDER, selection),
+  nextStage: (selection, completed) => nextStage(EVOLUTION_ORDER, selection, completed),
 };
 
 export const skillEvolutionFlow: EvolutionFlow = {
@@ -167,12 +176,13 @@ export const skillEvolutionFlow: EvolutionFlow = {
   describe(input) {
     const selection = input.hasTargetSkill
       ? this.resolveSelection(input, undefined)
-      : { diagnose: true, plan: true, optimize: true };
+      : { diagnose: true, hardening: false, plan: true, optimize: true };
     return {
       key: this.key,
       name: "Skill 自进化",
       purpose: "冻结待进化 Skill 的当前内容，在独立候选中完成诊断、规划和优化，确认后发布为下一版本。",
       stages: describeStages(
+        EVOLUTION_ORDER,
         selection,
         { diagnose: canDisableDiagnose(input), plan: false, optimize: false },
         {
@@ -184,11 +194,12 @@ export const skillEvolutionFlow: EvolutionFlow = {
     };
   },
   resolveSelection(input, requested) {
-    assertKnownStageKeys(requested);
+    assertKnownStageKeys(requested, EVOLUTION_ORDER);
     if (input.taskType !== "full") throw new Error("Skill 自进化只支持完整进化任务");
     if (!input.hasTargetSkill) throw new Error("请选择待进化 Skill");
     const selection: FrozenStageSelection = {
       diagnose: requestedBoolean(requested, "diagnose", !canSkipDiagnose(input)),
+      hardening: false,
       plan: requestedBoolean(requested, "plan", true),
       optimize: requestedBoolean(requested, "optimize", true),
     };
@@ -200,8 +211,35 @@ export const skillEvolutionFlow: EvolutionFlow = {
     }
     return selection;
   },
-  firstStage,
-  nextStage,
+  firstStage: (selection) => firstStage(EVOLUTION_ORDER, selection),
+  nextStage: (selection, completed) => nextStage(EVOLUTION_ORDER, selection, completed),
+};
+
+export const skillHardeningFlow: EvolutionFlow = {
+  key: "skill_hardening",
+  describe(input) {
+    const selection = this.resolveSelection(input, undefined);
+    return {
+      key: this.key,
+      name: "Skill 加固",
+      purpose: "在独立候选中运行一次 Skill 加固，确认后发布为下一版本。",
+      stages: describeStages(HARDENING_ORDER, selection, { diagnose: false, hardening: false, plan: false, optimize: false }, {
+        hardening: "Skill 加固任务必须执行加固 Stage",
+      }),
+    };
+  },
+  resolveSelection(input, requested) {
+    assertKnownStageKeys(requested, [...EVOLUTION_ORDER, ...HARDENING_ORDER]);
+    if (input.taskType !== "hardening") throw new Error("Skill 加固流程只支持加固任务");
+    if (!input.hasTargetSkill) throw new Error("请选择待加固 Skill");
+    if (["diagnose", "plan", "optimize"].some((stage) => requested?.[stage as StageKey] === true)) {
+      throw new Error("Skill 加固任务只执行加固 Stage");
+    }
+    if (requested?.hardening === false) throw new Error("Skill 加固任务必须执行加固 Stage");
+    return { diagnose: false, hardening: true, plan: false, optimize: false };
+  },
+  firstStage: (selection) => firstStage(HARDENING_ORDER, selection),
+  nextStage: (selection, completed) => nextStage(HARDENING_ORDER, selection, completed),
 };
 
 export function resolveEvolutionFlow(hasTargetSkill: boolean): EvolutionFlow {
@@ -217,5 +255,6 @@ export function freezeEvolutionFlow(
 
 export function resolveFrozenEvolutionFlow(config: FrozenEvolutionFlow): EvolutionFlow {
   if (config.version !== "v1") throw new Error(`不支持的进化流程版本: ${config.version}`);
+  if (config.key === "skill_hardening") return skillHardeningFlow;
   return config.key === "skill_evolution" ? skillEvolutionFlow : botEvolutionFlow;
 }

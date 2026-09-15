@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { api, type EvolveSkillAsset, type EvolveSkillTaskDefaults } from '../api/client'
 import { createRequestId } from '../utils/request-id'
 
-export type SkillTaskAction = 'diagnose' | 'optimize'
-const actionName = { diagnose: '诊断', optimize: '优化' } as const
+export type SkillTaskAction = 'diagnose' | 'hardening' | 'optimize'
+const actionName = { diagnose: '诊断', hardening: '加固', optimize: '优化' } as const
 const defaultModel = 'GLM-5.2'
 
 function dateValue(offsetDays = 0): string {
@@ -81,6 +81,11 @@ export default function SkillTaskLaunchDialog({ asset, action, returnTo, onClose
       const result = await api.evolve.createTask(action === 'diagnose'
         ? { ...common, taskType: 'diagnose', stageSelection: { diagnose: true, plan: true, optimize: false },
             ...(preset.stageExtensions ? { stageExtensions: preset.stageExtensions } : {}) }
+        : action === 'hardening'
+          ? { taskName: common.taskName, userId: defaults.userId, botId: defaults.botId,
+              targetSkillAssetId: asset.assetId, goal: preset.goal, runtimeMaintenance: false,
+              stageSelection: { diagnose: false, hardening: true, plan: false, optimize: false },
+              ...(preset.stageExtensions ? { stageExtensions: preset.stageExtensions } : {}), taskType: 'hardening' }
         : { ...common, taskType: 'full', inputMode: 'diagnose_goal', maxRounds: 3,
             stageSelection: { diagnose: true, plan: true, optimize: true },
             ...(preset.stageExtensions ? { stageExtensions: preset.stageExtensions } : {}) }, requestId)
@@ -97,6 +102,7 @@ export default function SkillTaskLaunchDialog({ asset, action, returnTo, onClose
 
   const advanced = () => {
     if (!defaults || busy) return
+    if (action === 'hardening') return
     const query = new URLSearchParams({ target: 'skill',
       type: action === 'diagnose' ? 'diagnose' : 'full', assetId: asset.assetId,
       skillAction: action })
@@ -125,12 +131,13 @@ export default function SkillTaskLaunchDialog({ asset, action, returnTo, onClose
         <dl className="mt-4 space-y-2 text-sm text-gray-600">
           <div><dt className="inline">所属 Bot：</dt><dd className="inline font-mono">{defaults.botId}</dd></div>
           <div><dt className="inline">Owner ID：</dt><dd className="inline font-mono">{defaults.userId}</dd></div>
-          <div><dt className="inline">模型：</dt><dd className="inline">{defaultModel}（平台默认，可在高级表单修改）</dd></div>
+          {action !== 'hardening' && <div><dt className="inline">模型：</dt><dd className="inline">{defaultModel}（平台默认，可在高级表单修改）</dd></div>}
         </dl>
         <p className="mt-4 whitespace-pre-wrap rounded-lg bg-gray-50 p-3 text-sm leading-6 text-gray-700">{preset?.goal}</p>
         <p className="mt-3 text-xs leading-5 text-gray-500">{preset?.launchDescription || (action === 'optimize'
           ? '运行完整诊断、规划和优化流程，最多优化 3 轮。'
-          : '诊断当前登记的 Skill，并生成后续规划，不启动优化轮次。')}本次不会清理历史会话或重启 Gateway。</p>
+          : action === 'hardening' ? '只运行 Skill 加固 Stage，完成后形成可审阅的新版本。'
+            : '诊断当前登记的 Skill，并生成后续规划，不启动优化轮次。')}本次不会清理历史会话或重启 Gateway。</p>
         {unavailableReason && <p role="alert" className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">不可启动{actionName[action]}：{unavailableReason}</p>}
         {!preset?.goal.trim() && <p role="alert" className="mt-3 text-sm text-red-700">任务默认目标为空，暂不可启动。</p>}
       </>}
@@ -138,7 +145,7 @@ export default function SkillTaskLaunchDialog({ asset, action, returnTo, onClose
         {!defaults && <button type="button" className="ml-2 underline" onClick={() => setAttempt((value) => value + 1)}>重试</button>}
       </div>}
       <div className="mt-6 flex flex-wrap justify-end gap-2">
-        <button type="button" disabled={!defaults || busy} onClick={advanced} className="mr-auto text-sm text-blue-600 disabled:opacity-40">自定义 / 高级</button>
+        {action !== 'hardening' && <button type="button" disabled={!defaults || busy} onClick={advanced} className="mr-auto text-sm text-blue-600 disabled:opacity-40">自定义 / 高级</button>}
         <button type="button" disabled={busy} onClick={onClose} className="rounded-lg border border-gray-200 px-4 py-2 text-sm disabled:opacity-40">取消</button>
         <button type="button" disabled={!canLaunch} title={unavailableReason || undefined} onClick={() => void confirm()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-40">{busy ? '正在启动…' : `确认${actionName[action]}`}</button>
       </div>

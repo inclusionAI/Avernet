@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   botEvolutionFlow,
+  skillHardeningFlow,
   skillEvolutionFlow,
   type FlowStartInput,
 } from "../evolution-flow.js";
@@ -47,6 +48,7 @@ describe("fixed Evolve flows", () => {
     ]);
     expect(botEvolutionFlow.resolveSelection(input, { diagnose: false })).toEqual({
       diagnose: false,
+      hardening: false,
       plan: true,
       optimize: true,
     });
@@ -66,6 +68,7 @@ describe("fixed Evolve flows", () => {
     const input = fullInput({ hasTargetSkill: true, inputMode: "direct_goal" });
     expect(skillEvolutionFlow.resolveSelection(input, { diagnose: false })).toEqual({
       diagnose: false,
+      hardening: false,
       plan: true,
       optimize: true,
     });
@@ -78,8 +81,26 @@ describe("fixed Evolve flows", () => {
 
     expect(botEvolutionFlow.resolveSelection(input, { plan: false })).toEqual({
       diagnose: true,
+      hardening: false,
       plan: false,
       optimize: false,
     });
+  });
+
+  it("runs Skill hardening as one independent required Stage", () => {
+    const input = fullInput({ taskType: "hardening", hasTargetSkill: true });
+    expect(skillHardeningFlow.describe(input)).toMatchObject({
+      key: "skill_hardening",
+      stages: [{ key: "hardening", enabled: true, canDisable: false }],
+    });
+    expect(skillHardeningFlow.resolveSelection(input, undefined)).toEqual({
+      diagnose: false,
+      hardening: true,
+      plan: false,
+      optimize: false,
+    });
+    expect(skillHardeningFlow.firstStage(skillHardeningFlow.resolveSelection(input, undefined))).toBe("hardening");
+    expect(() => skillHardeningFlow.resolveSelection({ ...input, hasTargetSkill: false }, undefined))
+      .toThrow("请选择待加固 Skill");
   });
 });

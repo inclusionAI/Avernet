@@ -219,6 +219,11 @@ describe("resolveEvolveTransport", () => {
     expect(resolveEvolveTransport({ stepType, runtime: baasRuntime })).toBe("baas_execute_command");
   });
 
+  it("uses the Agent Message path for Skill hardening", () => {
+    expect(resolveEvolveTransport({ stepType: "hardening", runtime: baasRuntime })).toBe("message");
+    expect(usesArcaDirectRunner({ stepType: "hardening", runtime: arcaRuntime })).toBe(false);
+  });
+
   it("routes service Bot Diagnose by its BaaS provider instead of bot type", () => {
     expect(resolveEvolveTransport({
       stepType: "diagnose",

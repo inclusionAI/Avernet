@@ -32,6 +32,11 @@ function resultExample(stage: StageKey): Record<string, unknown> {
     },
     benchDomains: { trainBenchDomainId: "train真实评测域标识", testBenchDomainId: "test真实评测域标识", validationIndependent: true, validationMode: "independent" },
   };
+  if (stage === "hardening") return {
+    summary: "补充输入不足时的处理约束，并修正失效的相对引用",
+    changed: true,
+    changed_files: ["SKILL.md"],
+  };
   return {
     diff: { summary: "补充执行范围检查", files: ["实际修改的文件路径"] },
     metrics: ["train", "test"].map((role) => ({
@@ -135,20 +140,23 @@ function planBusinessGuide(stage: OfficialStageDefinition): string {
 
 export function stageDevelopmentGuide(stage: OfficialStageDefinition, mode: StageExtensionMode, flow?: EvolutionFlowKey): string {
   if (flow === "skill_evolution" && stage.stage === "plan" && mode === "replace") return planBusinessGuide(stage);
-  const skillFlow = flow === "skill_evolution";
+  const hardeningFlow = flow === "skill_hardening";
+  const skillFlow = flow === "skill_evolution" || hardeningFlow;
   const input: Record<string, unknown> = {
-    task: { task_id: "本次任务标识", task_type: "full", target_bot_id: "执行 Bot 标识" },
+    task: { task_id: "本次任务标识", task_type: hardeningFlow ? "hardening" : "full", target_bot_id: "执行 Bot 标识" },
     ...(skillFlow ? { target_skill: {
       asset_id: "Skill 资产标识", skill_id: "原始 Skill 标识", name: "待进化 Skill 名称",
       workspace: "本次独立工作目录的实际路径", path: "待进化 Skill 副本的实际目录路径", baseline_sha256: "原始内容的校验值",
     } } : {}),
-    ...(stage.stage === "diagnose" ? { diagnose_goal: "检查缺少处理范围时的执行表现", session_source: { mode: "local" } }
+    ...(stage.stage === "hardening" ? { goal: "在不改变业务意图的前提下提升 Skill 稳定性" }
+      : stage.stage === "diagnose" ? { diagnose_goal: "检查缺少处理范围时的执行表现", session_source: { mode: "local" } }
       : stage.stage === "plan" ? { goal: "缺少处理范围时先确认", diagnose_result: resultExample("diagnose") }
         : { round: 1, plan_result: resultExample("plan") }),
     ...(mode === "postprocess" ? { builtin_result: resultExample(stage.stage) } : {}),
   };
   const patches: Record<StageKey, unknown> = {
     diagnose: { diagnosis: { summary: "补充说明问题的适用范围和证据" } },
+    hardening: { summary: "补充说明实际完成的加固和保留的业务边界" },
     plan: { spec: { content: "在原方案基础上补充处理范围检查和验证要求。" } },
     optimize: { roundDecision: { stop: false, reason: "根据实际结果仍需继续优化" } },
   };
@@ -156,30 +164,33 @@ export function stageDevelopmentGuide(stage: OfficialStageDefinition, mode: Stag
     : mode === "postprocess" ? { result_patch: patches[stage.stage] } : resultExample(stage.stage);
   const inputNotes: Record<StageKey, string> = {
     diagnose: "`diagnose_goal` 是本次诊断重点；`session_source` 指定真实会话来源，mode 为 local 或 service_export。诊断目标不是会话内容，需要按所提供的来源读取会话。",
+    hardening: "`target_skill` 是必须处理的独立候选；`goal` 是可选的额外加固目标。不得修改候选目录之外的内容。",
     plan: "`goal` 是改进目标与限制；`diagnose_result` 是上游诊断的最终结果，包含 diagnosis 和 cases。直接按目标进化时不提供诊断结果。",
     optimize: "`round` 是当前轮次；`plan_result` 是上游规划冻结的目标、方案和评测选择。第二轮及以后还会提供 `previous_round_result`，结构与优化结果相同。",
   };
   const resultNotes: Record<StageKey, string> = {
     diagnose: "必须包含 diagnosis 和 cases。diagnosis 的 summary、issues 必填；每个 issue 的 code、title、severity、caseCount、suggestion 必填。cases 的 total、goodCount、badCount、items 必填；每个案例的 caseId、type 必填，type 为 good 或 bad，summary 可选。数量应与真实案例一致。",
+    hardening: "必须包含 summary 和 changed。summary 如实说明本次完成的加固；changed 表示是否修改候选 Skill；changed_files 仅列实际修改的候选 Skill 相对路径，未修改时可省略或为空。",
     plan: "必须包含 goal、spec、benchCases、benchDomains。goal 的 summary、metrics 必填，指标包含示例中的全部字段，operator 为 >=。spec 的 version、content_type、content 必填，content_type 为 text。benchCases 的 trainCount、testCount、items 必填；每项的 sourceCaseId、taskId、split、template 必填，split 为 train 或 test；template 的 ownerUserId、domainId、templateName 必填，version 可选。benchDomains 的 trainBenchDomainId、testBenchDomainId 必填，其余字段可选。评测域与模板必须真实存在且可执行，不能使用示例占位标识。",
     optimize: "必须包含 diff、metrics、baseline、roundDecision。diff 的 summary、files 必填；每项指标的 benchRunId、ownerUserId、domainId 必填，其余示例字段可选，role 为 candidate_train 或 candidate_test。baseline 的 train、test 及其示例字段全部必填，source 为 generated 或 reused。roundDecision 的 stop 必填，reason 可选；还可提供 spec（version、content_type、content 必填，content_type 为 text）。所有评测标识和指标必须来自真实运行，停止判断必须有实际依据。",
   };
   const patchNotes: Record<StageKey, string> = {
     diagnose: "diagnosis 用于补充诊断摘要和问题，cases 用于修正案例；数组项沿用输入示例中的字段要求，案例类型为 good 或 bad，数量与案例保持一致。",
+    hardening: "只能补充或修正 summary，不得把未发生的修改写入结果。",
     plan: "goal 用于补充目标和指标，spec 用于修正规划文本，benchCases、benchDomains 用于修正评测选择。评测标识必须真实有效；修改数组时提供完整数组项，不能丢失原有案例或填写占位标识。",
     optimize: "diff 用于补充实际修改说明，roundDecision 用于修正继续或停止的判断及原因，spec 用于修订方案。不得修改 metrics 或 baseline，不得把未经评测的结论写成已经达标。",
   };
   return [
     `# ${stage.name} · ${modeNames[mode]} Skill 开发任务`, "",
-    "## 背景与本次开发目标", "", stageDevelopmentBackground(stage, mode, skillFlow), "",
+    "## 背景与本次开发目标", "", stageDevelopmentBackground(stage, mode, skillFlow, hardeningFlow), "",
     "## 输入与输出", "",
     "运行时，平台会向执行 Agent 提供本次输入文件和结果文件的具体位置。读取输入文件，完成处理后，将结果以 JSON 格式写入结果文件。", "",
     "### 输入", "", "以下示例说明数据格式；标识、路径和业务内容以本次实际输入为准。", "", json(input), "",
-    "`task` 是平台提供的任务信息。完整任务的 task_type 为 full，单段集成测试为 stage_test。", "",
+    `\`task\` 是平台提供的任务信息。${hardeningFlow ? "Skill 加固任务的 task_type 为 hardening" : "完整任务的 task_type 为 full"}，单段集成测试为 stage_test。`, "",
     ...(stage.stage !== "optimize" ? [`${skillFlow ? "目标 Skill" : "Bot"}单独诊断任务的 task_type 为 diagnose，执行诊断及按任务选择启用的规划，不进入优化环节。`, ""] : []),
     inputNotes[stage.stage], "",
     ...(skillFlow ? ["`target_skill` 描述本次待进化 Skill 的独立副本。path 是可读取的 Skill 目录，workspace 是本次工作目录；其余字段标识原始 Skill 和内容基线。修改范围限于任务允许的副本内容。", ""] : []),
-    ...(skillFlow && ((stage.stage === "diagnose" && mode === "preprocess") || (stage.stage === "plan" && mode === "replace"))
+    ...(skillFlow && (hardeningFlow || (stage.stage === "diagnose" && mode === "preprocess") || (stage.stage === "plan" && mode === "replace"))
       ? ["本点位的单段集成测试由平台提供独立测试副本；target_skill.kind 为 stage_test_fixture，fixture_id 标明测试素材。此时 asset_id、skill_id 是 fixture: 开头的测试资源标识，不代表正式 Skill 资产，baseline_sha256 是测试素材原始 ZIP 的校验值。读取和输出方式不变，测试不会应用到原始 Skill。", ""] : []),
     ...(mode === "postprocess" ? [`\`builtin_result\` 是平台内置${stage.name}已经生成的结果，结构见上例。`, ""] : []),
     "所需输入或文件不可用时，应如实说明缺少什么，不猜测替代路径，不编造内容或成功结果。", "",

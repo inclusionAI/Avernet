@@ -84,14 +84,14 @@ describe("GET Skill task defaults", () => {
     expect((await getDefaults("outsider")).status).toBe(404);
   });
 
-  it("applies one host contribution to diagnosis and optimization", async () => {
+  it("applies one host contribution to all Skill task presets", async () => {
     await seedAsset();
     await seedStage("old", 1);
     await seedStage("newest", 2);
     const response = await getDefaults();
     expect(response.status, await response.clone().text()).toBe(200);
     const result = await response.json();
-    for (const action of [result.diagnose, result.optimize]) {
+    for (const action of [result.diagnose, result.hardening, result.optimize]) {
       expect(action).toMatchObject({ unavailableReason: null, launchDescription: expect.stringContaining("Host"),
         stageExtensions: { diagnose: { preprocess: { enabled: true, implementationId: "newest" } } } });
     }
@@ -100,7 +100,7 @@ describe("GET Skill task defaults", () => {
   it("fails closed when a matching host requirement cannot be satisfied", async () => {
     await seedAsset();
     const result = await (await getDefaults()).json();
-    for (const action of [result.diagnose, result.optimize]) {
+    for (const action of [result.diagnose, result.hardening, result.optimize]) {
       expect(action).toMatchObject({ stageExtensions: null, unavailableReason: "Host requirement is unavailable" });
     }
   });
@@ -110,8 +110,9 @@ describe("GET Skill task defaults", () => {
     if (scenario === "no-host") extensions.splice(0);
     await seedStage();
     const result = await (await getDefaults()).json();
-    for (const action of [result.diagnose, result.optimize]) {
+    for (const action of [result.diagnose, result.hardening, result.optimize]) {
       expect(action).toMatchObject({ stageExtensions: null, unavailableReason: null, launchDescription: null });
     }
+    expect(result.hardening).toMatchObject({ taskType: "hardening", goal: expect.stringContaining("加固") });
   });
 });

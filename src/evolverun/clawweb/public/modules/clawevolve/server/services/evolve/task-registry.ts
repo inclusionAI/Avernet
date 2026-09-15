@@ -1,7 +1,7 @@
 import type { NodeCommandKey } from "./command.js";
 
 export const EVOLVE_TASK_TYPES = [
-  "diagnose", "optimize", "apply", "full", "bench", "bench_optimize", "pack", "pack_restore", "runtime_cleanup", "repair",
+  "diagnose", "hardening", "optimize", "apply", "full", "bench", "bench_optimize", "pack", "pack_restore", "runtime_cleanup", "repair",
   "suggestion_apply",
   "run_analysis",
   "stage_test",
@@ -10,7 +10,7 @@ export const EVOLVE_TASK_TYPES = [
 export type EvolveTaskType = typeof EVOLVE_TASK_TYPES[number];
 
 export const EVOLVE_STEP_TYPES = [
-  "skill_init", "diagnose", "plan", "optimize", "apply", "bench", "bench_plan", "pack", "restore", "runtime_cleanup", "repair_plan", "repair_apply",
+  "skill_init", "diagnose", "hardening", "plan", "optimize", "apply", "bench", "bench_plan", "pack", "restore", "runtime_cleanup", "repair_plan", "repair_apply",
   "suggestion_apply",
   "run_analysis",
   "stage_extension",
@@ -41,6 +41,7 @@ export const EVOLVE_NODE_REGISTRY: Record<NodeCommandKey, EvolveNodeDefinition> 
     label: "Bot 诊断",
     defaultCommand: "/clawevolve-diagnose --api-key {{api_key}} --model {{model}} --intent {{diagnose_intent}}",
   },
+  hardening: { key: "hardening", label: "Skill 加固", defaultCommand: "/clawevolve-hardening" },
   plan: { key: "plan", label: "进化规划", defaultCommand: "/clawevolve-plan" },
   bench: { key: "bench", label: "Bench 评测", defaultCommand: "/clawevolve-bench --model antchat/GLM-5.2 --suite all" },
   bench_plan: { key: "bench_plan", label: "Baseline 与 Spec v0", defaultCommand: "/clawevolve-workflow --stage bench-plan --model antchat/GLM-5.2 --suite all" },
@@ -49,6 +50,7 @@ export const EVOLVE_NODE_REGISTRY: Record<NodeCommandKey, EvolveNodeDefinition> 
 
 export const EVOLVE_TASK_REGISTRY: Record<EvolveTaskType, EvolveTaskDefinition> = {
   diagnose: { type: "diagnose", label: "Bot诊断", initialStepType: "diagnose", supportsRetry: true, supportsCancel: true, nodes: ["diagnose", "plan"] },
+  hardening: { type: "hardening", label: "Skill加固", initialStepType: "skill_prepare", supportsRetry: true, supportsCancel: true, nodes: ["hardening"] },
   optimize: { type: "optimize", label: "诊断后优化", initialStepType: "optimize", supportsRetry: true, supportsCancel: true, nodes: ["optimize"] },
   apply: { type: "apply", label: "应用优化", initialStepType: "apply", supportsRetry: true, supportsCancel: true, nodes: [] },
   full: { type: "full", label: "Bot自进化", initialStepType: "diagnose", supportsRetry: true, supportsCancel: true, nodes: ["diagnose", "plan", "optimize"] },
@@ -80,6 +82,9 @@ export function isEvolveTaskType(value: unknown): value is EvolveTaskType {
 const EVOLVE_STEP_REGISTRY: Record<EvolveStepType, { baasStage: string; usesBaasRuntime: boolean }> = {
   skill_init: { baasStage: "skill-init", usesBaasRuntime: false },
   diagnose: { baasStage: "clawevolve-diagnose", usesBaasRuntime: true },
+  // Hardening is an agent-executed Skill: the agent edits the frozen candidate
+  // workspace and reports the result. It is not a deterministic BaaS runner stage.
+  hardening: { baasStage: "clawevolve-hardening", usesBaasRuntime: false },
   plan: { baasStage: "clawevolve-plan", usesBaasRuntime: true },
   optimize: { baasStage: "optimize", usesBaasRuntime: true },
   apply: { baasStage: "clawevolve-apply", usesBaasRuntime: false },

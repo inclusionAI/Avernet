@@ -56,6 +56,7 @@ export declare function parsedMarkdownToFormFields(parsed: ParsedBaselineMarkdow
 
 export type EvolveTaskType =
   | "diagnose"
+  | "hardening"
   | "optimize"
   | "apply"
   | "full"

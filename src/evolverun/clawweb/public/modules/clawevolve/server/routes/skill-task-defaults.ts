@@ -51,7 +51,7 @@ export function createSkillTaskDefaultsRouter(input: {
         integrationTestStatus: row.integration_test_status,
       })),
     };
-    const preset = (action: SkillTaskHostAction, taskType: "diagnose" | "full", goal: string) => {
+    const preset = (action: SkillTaskHostAction, taskType: "diagnose" | "hardening" | "full", goal: string) => {
       const contribution = resolveSkillTaskHostPreset(input.hostExtensions ?? [], { ...context, action });
       return {
         taskType,
@@ -64,6 +64,7 @@ export function createSkillTaskDefaultsRouter(input: {
     res.json({
       assetId: asset.asset_id, botId: asset.bot_id, userId: asset.owner_user_id,
       diagnose: preset("diagnose", "diagnose", `诊断 ${asset.display_name} 在真实会话中的准确性、可靠性与任务完成情况。`),
+      hardening: preset("hardening", "hardening", `检查并加固 ${asset.display_name}，保留已确认的业务语义，形成可审阅的新版本。`),
       optimize: preset("optimize", "full", `改进 ${asset.display_name} 的准确性与可靠性，保留已经确认的业务语义。`),
     });
   }));

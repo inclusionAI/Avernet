@@ -2,7 +2,7 @@ import type { FrozenSkillTarget } from "./skill-candidate.js";
 import type { FrozenTaskStageExtensions } from "./stage-execution.js";
 import type { StageExtensionMode, StageKey } from "./stage-catalog.js";
 
-export type SkillTaskHostAction = "diagnose" | "optimize";
+export type SkillTaskHostAction = "diagnose" | "hardening" | "optimize";
 
 export type HostSkillTarget = {
   assetId: string;

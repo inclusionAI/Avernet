@@ -188,7 +188,6 @@ export function TaskList({ version = 'internalversion' }: { version?: 'openversi
                       </CreateMenuGroup>
                       <CreateMenuGroup title="全流程最佳实践">
                         <CreateMenuItem icon="send" title="Bot自进化" description="可选择先诊断再进化，或按目标直接进化" onClick={() => navigate('/evolve/new?type=full')} emphasized />
-                        <CreateMenuItem icon="spark" title="Skill 自进化" description="诊断并持续优化 Bot 中已登记的一个 Skill" onClick={() => navigate('/evolve/new?type=full&target=skill')} emphasized />
                       </CreateMenuGroup>
                     </div>
                   </div>

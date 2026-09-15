@@ -161,7 +161,7 @@ describe('Skill center asset list and recorded events', () => {
     render(<MemoryRouter initialEntries={['/evolve/skills/ASSET-1?selected=task%3ATASK-WAIT&view=task&backTo=%2Fevolve%2Fskills%2Fevents']}><SkillDetail /></MemoryRouter>)
     await screen.findByRole('heading', { name: '加固信息待确认' })
     expect(screen.getByRole('button', { name: '← 返回技能事件日志' })).toBeTruthy()
-    expect(screen.getByText('2 个版本 · 2 次诊断 · 0 次优化')).toBeTruthy()
+    expect(screen.getByText('2 个版本 · 2 次诊断 · 0 次加固 · 0 次优化')).toBeTruthy()
     expect(screen.getByText('历史诊断')).toBeTruthy()
     expect(screen.getAllByText('等待用户输入').length).toBeGreaterThan(1)
     const fullRecord = screen.getByRole('link', { name: '查看完整执行记录 ↗' })

@@ -13,7 +13,7 @@ type Version = NonNullable<EvolveSkillAsset['versions']>[number]
 type ViewerTab = 'task' | 'content' | 'diff'
 type Selection = { kind: 'version'; version: Version } | { kind: 'event'; event: EvolveSkillEvent }
 
-const eventNames = { registered: '登记', diagnosis: '诊断', optimization: '优化' } as const
+const eventNames = { registered: '登记', diagnosis: '诊断', hardening: '加固', optimization: '优化' } as const
 const statusNames = {
   running: '运行中', waiting_user_input: '等待用户输入', waiting_acceptance: '等待版本确认',
   completed: '已完成', failed: '失败', canceled: '已取消',
@@ -27,7 +27,7 @@ const statusTones = {
   canceled: 'border-gray-200 bg-gray-100 text-gray-600',
 } as const
 const eventTones = {
-  registered: 'bg-blue-50 text-blue-700', diagnosis: 'bg-amber-50 text-amber-700', optimization: 'bg-emerald-50 text-emerald-700',
+  registered: 'bg-blue-50 text-blue-700', diagnosis: 'bg-amber-50 text-amber-700', hardening: 'bg-violet-50 text-violet-700', optimization: 'bg-emerald-50 text-emerald-700',
 } as const
 
 function eventVersionId(event: EvolveSkillEvent, fallbackVersionId: string): string {
@@ -84,7 +84,7 @@ function SkillHistoryTimeline({ asset, events, selection, onSelect }: {
   const EventButton = ({ event }: { event: EvolveSkillEvent }) => {
     const active = selection.kind === 'event' && selection.event.eventId === event.eventId
     return <button type="button" onClick={() => onSelect(event.taskId ? `task:${event.taskId}` : `event:${event.eventId}`, 'task')} className={`relative ml-4 block w-[calc(100%_-_1rem)] rounded-xl border px-3 py-3 text-left transition ${active ? 'border-blue-300 bg-blue-50 shadow-sm' : event.status === 'waiting_user_input' ? 'border-amber-200 bg-amber-50/70 hover:border-amber-300' : 'border-transparent hover:border-gray-200 hover:bg-gray-50'}`}>
-      <span className={`absolute -left-[1.35rem] top-4 h-2.5 w-2.5 rounded-full ring-4 ring-white ${event.type === 'diagnosis' ? 'bg-amber-400' : 'bg-emerald-500'}`} />
+      <span className={`absolute -left-[1.35rem] top-4 h-2.5 w-2.5 rounded-full ring-4 ring-white ${event.type === 'diagnosis' ? 'bg-amber-400' : event.type === 'hardening' ? 'bg-violet-500' : 'bg-emerald-500'}`} />
       <span className="flex items-center justify-between gap-2"><span className={`rounded-md px-2 py-1 text-[11px] font-medium ${eventTones[event.type]}`}>{eventNames[event.type]}</span><span className="text-[10px] text-gray-400">{formatStepTime(event.startedAt)}</span></span>
       <span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium ${statusTones[event.status]}`}>{statusNames[event.status]}</span>
       {event.summary && <span className="mt-1.5 block truncate text-xs text-gray-500" title={event.summary}>{event.summary}</span>}
@@ -92,7 +92,7 @@ function SkillHistoryTimeline({ asset, events, selection, onSelect }: {
     </button>
   }
   return <aside aria-label="Skill 迭代时间线" className="border-b border-gray-100 bg-gray-50/50 p-4 lg:border-b-0 lg:border-r">
-    <div className="mb-4"><h2 className="text-sm font-semibold text-gray-900">迭代时间线</h2><p className="mt-1 text-xs text-gray-400">{versions.length} 个版本 · {events.filter((item) => item.type === 'diagnosis').length} 次诊断 · {events.filter((item) => item.type === 'optimization').length} 次优化</p></div>
+    <div className="mb-4"><h2 className="text-sm font-semibold text-gray-900">迭代时间线</h2><p className="mt-1 text-xs text-gray-400">{versions.length} 个版本 · {events.filter((item) => item.type === 'diagnosis').length} 次诊断 · {events.filter((item) => item.type === 'hardening').length} 次加固 · {events.filter((item) => item.type === 'optimization').length} 次优化</p></div>
     <div className="max-h-[760px] space-y-3 overflow-auto pr-1">
       {unassigned.length > 0 && <div className="border-l border-gray-200 pb-2">{sortedEvents(unassigned).map((event) => <EventButton key={event.eventId} event={event} />)}</div>}
       {versions.map((version) => {
@@ -225,7 +225,7 @@ export default function SkillDetail() {
   if (loading) return <div className="mx-auto max-w-7xl px-4 py-20 text-center text-sm text-gray-500">正在加载 Skill 详情…</div>
   return <div className="mx-auto max-w-[1480px] px-4 py-7 sm:px-6 lg:px-8">
     <button className="mb-5 text-sm text-gray-500 hover:text-gray-800" onClick={() => navigate(backTo)}>← {backLabel}</button>
-    <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-sm font-medium text-blue-600">Skill 详情</p><h1 className="mt-1 text-2xl font-semibold text-gray-950">{asset?.name ?? 'Skill 不存在'}</h1>{asset && <><p className="mt-1 font-mono text-xs text-gray-400">{asset.botId} / {asset.skillId}</p>{asset.description && <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-500">{asset.description}</p>}</>}</div>{asset && <div className="flex gap-2"><button onClick={() => setLaunchAction('diagnose')} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-medium text-amber-700 hover:bg-amber-100">诊断</button><button onClick={() => setLaunchAction('optimize')} className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700">优化</button></div>}</div>
+    <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-sm font-medium text-blue-600">Skill 详情</p><h1 className="mt-1 text-2xl font-semibold text-gray-950">{asset?.name ?? 'Skill 不存在'}</h1>{asset && <><p className="mt-1 font-mono text-xs text-gray-400">{asset.botId} / {asset.skillId}</p>{asset.description && <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-500">{asset.description}</p>}</>}</div>{asset && <div className="flex gap-2"><button onClick={() => setLaunchAction('diagnose')} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-medium text-amber-700 hover:bg-amber-100">诊断</button><button onClick={() => setLaunchAction('hardening')} className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-2.5 text-sm font-medium text-violet-700 hover:bg-violet-100">加固</button><button onClick={() => setLaunchAction('optimize')} className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700">优化</button></div>}</div>
     {asset && selection && <section className="mt-5 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm lg:grid lg:grid-cols-[340px_minmax(0,1fr)]">
       <SkillHistoryTimeline asset={asset} events={events} selection={selection} onSelect={select} />
       <div className="min-w-0">

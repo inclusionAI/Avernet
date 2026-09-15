@@ -2016,6 +2016,7 @@ export type WorkflowHealth = {
 }
 export type EvolveTaskType =
   | 'diagnose'
+  | 'hardening'
   | 'optimize'
   | 'apply'
   | 'full'

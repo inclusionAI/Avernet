@@ -25,8 +25,9 @@ export type FrozenStageTestFixture = {
 };
 
 export function usesStageTestFixture(flow: string | undefined, stage: StageKey, mode: StageExtensionMode): boolean {
-  return flow === "skill_evolution"
-    && ((stage === "diagnose" && mode === "preprocess") || (stage === "plan" && mode === "replace"));
+  return (flow === "skill_evolution"
+      && ((stage === "diagnose" && mode === "preprocess") || (stage === "plan" && mode === "replace")))
+    || (flow === "skill_hardening" && stage === "hardening");
 }
 
 /** Only the explicit Plan business Source path gets v3; never infer a Skill from prose/history. */
@@ -111,5 +112,23 @@ export function stageTestFixtureInput(taskId: string, fixture: FrozenStageTestFi
     workspace,
     path: `${workspace}/skills/skills-local/${skillName}`,
     baseline_sha256: fixture.sha256,
+  };
+}
+
+/** Contract-only preview used before a Stage test task and its package are persisted. */
+export function stageTestFixturePreviewInput(version: FrozenStageTestFixture["version"]) {
+  if (!Object.hasOwn(FIXTURES, version)) throw new Error("Stage 测试 fixture 版本不一致");
+  const taskId = "stage-test-preview";
+  const workspace = `/home/admin/.openclaw/clawevolve_workspaces/${taskId}/workspace`;
+  const fixture = FIXTURES[version];
+  return {
+    kind: "stage_test_fixture" as const,
+    fixture_id: fixture.id,
+    asset_id: `fixture:${taskId}:${fixture.id}`,
+    skill_id: `fixture:${fixture.id}`,
+    name: fixture.name,
+    workspace,
+    path: `${workspace}/skills/skills-local/${fixture.name}`,
+    baseline_sha256: "0".repeat(64),
   };
 }

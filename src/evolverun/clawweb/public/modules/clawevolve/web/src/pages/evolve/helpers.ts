@@ -39,6 +39,7 @@ export const taskStatusText: Record<string, string> = {
 export const taskStepText: Record<string, string> = {
   skill_init: 'Skill 初始化',
   diagnose: 'Bot诊断',
+  hardening: 'Skill 加固',
   plan: '目标规划',
   envprep: '环境准备',
   bench: 'Bench诊断',
