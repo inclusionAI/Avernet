@@ -144,6 +144,7 @@ from agentclaw.community.core.service_bot.services.service_publication_facade im
 from agentclaw.community.core.service_bot.services.service_edit_lock_service import (
     ServiceEditLockService,
 )
+from agentclaw.community.core.common_config.bot_config_service import BotStoragePolicyService
 from agentclaw.community.core.system_config import SystemConfigService
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
 from agentclaw.community.core.workspace.engines import create_engine_sandbox_registry
@@ -285,6 +286,7 @@ class ServiceBotModule(Module):
         common_whitelist_service: CommonWhiteListService,
         outbound_rule_provider: OutboundRuleProvider,
         startup_script_service: BotStartupScriptServiceProtocol,
+        bot_storage_service: BotStoragePolicyService,
     ) -> BaasService:
         """Construct ``BaasService`` from typed bindings.
 
@@ -321,6 +323,8 @@ class ServiceBotModule(Module):
             outbound_rule_provider=outbound_rule_provider,
             theta_master_key_secret=secret_names.aicoding_theta_master_key,
             startup_script_reader=startup_script_service,
+            bot_storage_service=bot_storage_service,
+            storage_env=env_utils.get_current_env(),
         )
         logger.info(
             "[NEW-ARCH] BaasService initialized: api_base=%s, tenant=%s, template_uuid=%s, "

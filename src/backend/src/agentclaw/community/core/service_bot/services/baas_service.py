@@ -37,6 +37,7 @@ from agentclaw.community.core.caller_identity.credential import (
 )
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 
+from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.plugin_api.http_client import HttpClient
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
@@ -59,6 +60,7 @@ from agentclaw.community.core.service_bot.services.deploy.deploy_config_composer
 from agentclaw.community.core.service_bot.services.deploy.deploy_models import (
     MountPointEntry,
     Storage,
+    StorageType,
 )
 from agentclaw.community.core.devices.services.sandbox_overrides import (
     InvalidSandboxOverridesError,
@@ -411,6 +413,8 @@ class BaasService:  # pragma: no cover
         deploy_composer: DeployConfigComposer,
         personal_bot_template_uuid: Optional[str] = None,
         theta_master_key_secret: str = "",
+        bot_storage_service: BotStoragePolicyProtocol | None = None,
+        storage_env: str = "",
     ):
         """初始化 BaasService。
 
@@ -449,6 +453,12 @@ class BaasService:  # pragma: no cover
         → token 退化为空字符串,BaaS LocalPaasService 无视 outbound rule)。
         None (仅旧测试构造时省略) → 走 layotto 老路径,仅 prod 可用。
         """
+        # None is a backward-compatible opt-out for non-storage-aware embeddings.
+        # The application composition root always supplies the persisted service.
+        if bot_storage_service is not None and not storage_env:
+            raise ValueError("storage_env is required with bot_storage_service")
+        self._bot_storage_service = bot_storage_service
+        self._storage_env = storage_env
         self._baas_api_base = baas_api_base
         self._http = http_client
         self._general_http = general_http_client
@@ -629,6 +639,61 @@ class BaasService:  # pragma: no cover
                 pass
         return ResourceSpecification(**kwargs)
 
+    def initialize_bot_storage(
+        self,
+        *,
+        bot_id: str,
+        entity_id: str,
+        env: str,
+        engine: str,
+        user_id: str | None,
+        template_uuid: str,
+    ) -> StorageType:
+        """Get or create the Bot's storage policy, independently of creation HTTP.
+
+        Personal and service Draft creation share this entry point. Existing
+        policies are returned without re-evaluating rollout or template readiness.
+        Restart reads the saved policy without initializing one, so legacy Bots
+        without a policy remain NAS and never re-enter initial rollout.
+        """
+        if (
+            self._bot_storage_service is None
+            or not self._deploy_composer.supports_bot_storage_policy
+        ):
+            return StorageType.NAS
+
+        def ready() -> bool:
+            from urllib.parse import quote
+
+            capability = self._get_bots_api(
+                path=f"/api/v1/device-templates/{quote(template_uuid, safe='')}/storage-capability",
+                action="storage_capability",
+                params={"env": env},
+            )
+            result = (
+                isinstance(capability, dict)
+                and capability.get("template_uuid") == template_uuid
+                and capability.get("env") == env
+                and capability.get("upfs_ready") is True
+            )
+            if not result:
+                logger.warning(
+                    "[upfs_rollout] template not ready template_uuid=%s env=%s",
+                    template_uuid,
+                    env,
+                )
+            return result
+
+        policy = self._bot_storage_service.initialize(
+            bot_id=bot_id,
+            entity_id=entity_id,
+            env=env,
+            engine=engine,
+            user_id=user_id,
+            upfs_ready=ready,
+        )
+        return StorageType(policy.storage_type)
+
     def _build_create_bot_payload(
         self,
         bot: Dict[str, Any],
@@ -648,6 +713,7 @@ class BaasService:  # pragma: no cover
         mount_home_dir_storage: bool | None = None,
         ext_info: Optional[Dict[str, Any]] = None,
         startup_script: str | None = None,
+        storage_type: StorageType | None = None,
     ) -> Dict[str, Any]:
         """构建创建 Bot 的请求体。
 
@@ -700,6 +766,24 @@ class BaasService:  # pragma: no cover
         # overriding the caller — but every caller that passes the flag
         # (bot_service restart, baas_device_service allocate) passes an empty
         # migration path, so the override never fired.
+        # Reuse saved decisions; payload composition never creates a policy.
+        # Initial rollout is confined to the shared Bot creation entry point.
+        # Stored UPFS wins over the legacy NAS mount whitelist.
+        if (
+            storage_type is None
+            and bot_type in {"personal", "service"}
+            and self._bot_storage_service is not None
+            and self._deploy_composer.supports_bot_storage_policy
+        ):
+            policy = self._bot_storage_service._resolve_storage_policy(
+                bot_id, entity_id, bot.get("env") or self._storage_env,
+            )
+            if policy is not None:
+                storage_type = StorageType(policy.storage_type)
+        storage_type = storage_type or StorageType.NAS
+        if storage_type == StorageType.UPFS:
+            mount_home_dir_storage = True
+
         if mount_home_dir_storage is None:
             mount_home_dir_storage = self._should_mount_home_dir_storage(
                 owner_id=owner_id,
@@ -736,6 +820,7 @@ class BaasService:  # pragma: no cover
             version=version,
             mount_path=mount_path,
             ext_info=ext_info,
+            storage_type=storage_type,
         )
 
         # 构建 sandbox 成功后执行的命令

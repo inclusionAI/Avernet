@@ -89,6 +89,7 @@ from secbaas.community.core.service.sse import (
 )
 from secbaas.community.core.service.template_manage import DefaultDeviceTemplateService
 from secbaas.community.core.service.tenant_manage import DefaultTenantManageService
+from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.spi.sandbox import PaasSandboxPlugins
 
 
@@ -260,6 +261,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         repository=device_template_repo,
         tenant_service=tenant_service,
         secret_plugin=secret_plugin,
+        deployment_env=providers.Callable(get_current_env),
     )
 
     # ── Desktop infrastructure providers ───────────────────────────────────────────
@@ -433,6 +435,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         repository=device_template_repo,
         tenant_service=tenant_service,
         secret_plugin=secret_plugin,
+        deployment_env=providers.Callable(get_current_env),
     )
 
     # ── Bot Health Checker service ────────────────────────────────────────────
@@ -478,6 +481,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         device_template_service=device_template_service,
         secret_plugin=secret_plugin,
         callback_handler=device_callback_handler,
+        system_config_service=system_config_service,
     )
 
     session_service = providers.Singleton(

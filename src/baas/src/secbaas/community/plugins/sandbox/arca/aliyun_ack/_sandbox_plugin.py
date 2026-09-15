@@ -21,6 +21,7 @@ from secbaas.community.api.device_manage import (
     OutBoundOperationRule,
     ResourceSpecification,
     Storage,
+    VolumeMountSpec,
 )
 from secbaas.community.logger import get_logger
 from secbaas.community.plugins.sandbox.utils.arca_utils import ArcaUtils
@@ -296,7 +297,12 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         image: str | None = None,
         timeout_in_millis: int = 60000,
         ready_timeout_in_seconds: int = 60,
+        volume_mounts: list[VolumeMountSpec] | None = None,
     ) -> ArcaSandbox:
+        if volume_mounts:
+            raise NotImplementedError(
+                "This sandbox provider does not support UPFS mounts"
+            )
 
         # ACK 场景冷启动（拉镜像/调度）较慢，等待就绪的超时时间扩充 3 倍
         logger.info(

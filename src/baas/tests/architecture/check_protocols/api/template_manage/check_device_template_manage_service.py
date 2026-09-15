@@ -14,5 +14,6 @@ _device_template_manage_service: DeviceTemplateManageServiceProtocol = (
         repository=MagicMock(spec=DeviceTemplateRepository),
         tenant_service=MagicMock(spec=TenantManageService),
         secret_plugin=MagicMock(spec=SecretStorePlugin),
+        deployment_env="pre",
     )
 )

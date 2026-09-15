@@ -13,6 +13,7 @@ from ._models import (
     DeviceTemplateResponse,
     TemplateCreate,
     TemplateListResponse,
+    TemplateStorageCapability,
     TemplateUpdate,
 )
 
@@ -20,6 +21,19 @@ from ._models import (
 @runtime_checkable
 class DeviceTemplateManageService(Protocol):
     """Protocol for device template management service."""
+
+    def get_storage_capability(
+        self,
+        tenant: str,
+        template_uuid: str,
+        env: str | None = None,
+    ) -> TemplateStorageCapability:
+        """Check the ONLINE tenant-scoped template in the current server env.
+
+        A mismatched requested env, unsupported provider, or missing Volume is
+        not ready. The response never includes any template secrets.
+        """
+        ...
 
     def create_template(
         self, tenant: str, data: TemplateCreate

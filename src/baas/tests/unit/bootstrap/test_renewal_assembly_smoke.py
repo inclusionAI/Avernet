@@ -158,6 +158,9 @@ class TestDeadlineEngineAssembly:
         svc = container.services().device_service()
         assert isinstance(svc, ArcaScheduleAwareDeviceService)
         assert isinstance(svc._schedule_repo, OrmTtlRenewalScheduleRepository)
+        assert (
+            svc._system_config_service is container.services().system_config_service()
+        )
         # Singleton-cached override: repeat resolution is the same object
         assert container.services().device_service() is svc
 

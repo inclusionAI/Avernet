@@ -55,6 +55,22 @@ class ArcaTemplateConfig(BaseModel):
     arca_template_id_prod: str | None = Field(
         None, description="ARCA 模板 ID (正式环境)"
     )
+    upfs_volume_id_pre: str | None = Field(
+        default=None, description="UPFS Volume ID (pre)"
+    )
+    upfs_volume_id_prod: str | None = Field(
+        default=None, description="UPFS Volume ID (prod)"
+    )
+
+    def get_effective_upfs_volume_id(self, env: str) -> str | None:
+        """No cross-environment fallback; unknown environments are not UPFS-ready."""
+        value = {"pre": self.upfs_volume_id_pre, "prod": self.upfs_volume_id_prod}.get(
+            env
+        )
+        if not value or not value.strip() or value != value.strip():
+            return None
+        return value
+
     oss_mount_id: str | None = Field(None, description="OSS 挂载 ID")
     default_ttl_minutes: int = Field(default=1440, description="默认 TTL（分钟）")
     timeout: float = Field(default=30.0, description="请求超时（秒）")
@@ -401,3 +417,12 @@ class TemplateListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class TemplateStorageCapability(BaseModel):
+    """Safe preflight response: never includes template configuration or secrets."""
+
+    template_uuid: str
+    env: str
+    upfs_ready: bool
+    reason: str = ""

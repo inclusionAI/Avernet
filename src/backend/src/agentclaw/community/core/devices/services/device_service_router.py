@@ -308,34 +308,13 @@ class DeviceServiceRouter(DeviceService):
         template_type: str | None = None,
         template_config: dict | None = None,
         device_props_extra: dict[str, Any] | None = None,
+        initial_storage_decision: bool = False,
     ):
-        """申请新设备 - 根据员工工号 + bot 属性路由到对应 Provider.
+        """Route allocation to the explicit provider or the creation rollout.
 
-        默认根据 staff_id + bot_type + engine bucket 自动选择 provider。
-        如果指定了 device_provider，则必须按该 provider 重建；未注册时直接失败，
-        避免 restart 误进入创建期灰度。
-
-        Args:
-            apply_reason: 申请原因
-            entity_id: 实体 ID（用户或团队）
-            entity_type: 实体类型（staff/team/proj）
-            operator: 操作者上下文
-            bot_id: Bot ID
-            engine: 引擎类型
-            owner_id: 所有者ID（可选，默认为 entity_id）
-            device_provider: 本次 allocation 的显式 device_provider 事实。
-                restart 会传入历史 binding.device_provider；新 BaaS-native 创建
-                分支也应显式传入自己的 provider。有值时跳过 ARCA -> BaaS
-                创建期灰度，未注册时直接失败。
-            symbol: 软链接配置
-            extra_envs: 额外环境变量（可选）
-            template_type: bot 模板类型（personalCoding / applicationCoding 等），
-                用于创建期 engine bucket 归一化并继续向 provider 透传
-            bot_type: bot 业务类型（personal / service / desktop），用于创建期
-                ``staff_id + bot_type + engine bucket`` 白名单判定
-
-        Returns:
-            设备绑定记录
+        Explicit providers preserve existing bindings on recovery; unknown ones
+        fail rather than silently re-enter rollout. Only initial BaaS creation
+        receives the storage-decision flag; other provider contracts are unchanged.
         """
         staff_id = operator.staff_id
 
@@ -364,7 +343,11 @@ class DeviceServiceRouter(DeviceService):
                 f"[apply_device] Routing to {service.__class__.__name__} for staff_id={staff_id}"
             )
 
+        storage_kwargs = {}
+        if initial_storage_decision and service is self._providers.get("baas"):
+            storage_kwargs["initial_storage_decision"] = True
         return service.apply_device(
+            **storage_kwargs,
             apply_reason=apply_reason,
             entity_id=entity_id,
             entity_type=entity_type,

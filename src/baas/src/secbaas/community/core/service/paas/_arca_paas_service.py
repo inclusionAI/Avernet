@@ -327,6 +327,12 @@ class ArcaPaasService(PaasService):
                 "timeout_in_millis": timeout * 1000,
                 "ready_timeout_in_seconds": timeout,
             }
+            if config.volume_mounts is not None:
+                if config.storage is not None:
+                    raise ValueError(
+                        "NAS storage and UPFS volume_mounts are mutually exclusive"
+                    )
+                create_params["volume_mounts"] = config.volume_mounts
             # Build log-safe params dict with storage and image converted to dict if present
             log_params = {
                 k: (v.model_dump() if k == "storage" and v is not None else v)

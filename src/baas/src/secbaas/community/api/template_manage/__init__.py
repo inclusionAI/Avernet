@@ -23,6 +23,7 @@ from ._models import (
     TeClawTemplateConfig,
     TemplateCreate,
     TemplateListResponse,
+    TemplateStorageCapability,
     TemplateUpdate,
 )
 from ._protocols import DeviceTemplateManageService
@@ -45,4 +46,5 @@ __all__ = [
     "TemplateNotFoundError",
     "TemplateStatus",
     "TemplateUpdate",
+    "TemplateStorageCapability",
 ]

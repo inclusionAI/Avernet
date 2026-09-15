@@ -23,6 +23,9 @@ class SystemConfigKey(StrEnum):
     """
 
     # Arca PaaS platform configuration
+    UPFS_SUBPATH_SIZE_BYTES = "upfs.subpath_size_bytes"
+    """Positive byte quota per UPFS subpath, defaults to 1073741824."""
+
     ARCA_DFT_TENANT = "arca.dft_tenant"
     """Default tenant ID for Arca PaaS platform (per environment).
 

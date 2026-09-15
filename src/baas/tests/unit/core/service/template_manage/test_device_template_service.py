@@ -77,6 +77,7 @@ def service(mock_repo, mock_tenant_service) -> "DefaultDeviceTemplateService":
         repository=mock_repo,
         tenant_service=mock_tenant_service,
         secret_plugin=MagicMock(),
+        deployment_env="pre",
     )
 
 

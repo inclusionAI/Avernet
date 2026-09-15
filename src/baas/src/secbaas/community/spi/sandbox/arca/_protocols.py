@@ -10,6 +10,7 @@ from secbaas.community.api.device_manage import (
     OutBoundOperationRuleUpdatedMode,
     ResourceSpecification,
     Storage,
+    VolumeMountSpec,
 )
 
 from ._arca_sandbox_info import ArcaSandboxInfo
@@ -121,6 +122,7 @@ class ArcaSandboxPlugin(Protocol):
         image: str | None = None,
         timeout_in_millis: int = 60000,
         ready_timeout_in_seconds: int = 60,
+        volume_mounts: list[VolumeMountSpec] | None = None,
     ) -> ArcaSandbox:
         """Create a new sandbox and wait for it to be ready.
 
@@ -133,6 +135,7 @@ class ArcaSandboxPlugin(Protocol):
             metadata: Arbitrary passthrough metadata.
             outbound_operation_rule: Network outbound rules.
             storage: NAS storage binding configuration.
+            volume_mounts: UPFS mounts; unsupported implementations must reject them.
             image: Docker image override (overrides template default).
             timeout_in_millis: Maximum creation wait time in milliseconds.
             ready_timeout_in_seconds: Maximum time to wait for sandbox ready state.

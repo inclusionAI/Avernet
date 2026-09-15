@@ -76,6 +76,10 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         self._bot_repo = bot_repo
 
     @property
+    def supports_bot_storage_policy(self) -> bool:
+        return True
+
+    @property
     def name(self) -> DeployRuntime:
         return DeployRuntime.MANAGED
 
@@ -128,8 +132,8 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         )
 
     def build_storage(self, ctx: BotDeployContext) -> Storage | None:
-        """Always a volume: every managed bot keeps its state on NAS."""
-        return self._setup_bot_storage(
+        """Keep the existing storage identity; only switch the backing type."""
+        storage = self._setup_bot_storage(
             entity_id=ctx.entity_id,
             entity_type=ctx.entity_type,
             owner_id=ctx.owner_id,
@@ -139,6 +143,9 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
             bot_type=ctx.bot_type,
             stage=ctx.stage or "",
         )
+
+        storage.type = ctx.storage_type
+        return storage
 
     # ── the managed image's own composition ─────────────────────────────
 
