@@ -1009,18 +1009,46 @@ export type AdminConfig = {
   clawEvolveAdmins: Set<string>;
 };
 
-/** Resolve admin lists purely from yaml config (fallback when DB is unavailable).
+/** Resolve admin lists from an already-loaded config object (same `auth` block shape as yaml).
  *  Values are normalized to lowercase for consistent Set lookups. */
-export function resolveAdminConfig(configPath?: string): AdminConfig {
-  const yaml = readYamlConfig(configPath);
+export function resolveAdminConfigFrom(config: Record<string, unknown>): AdminConfig {
+  const auth = (config.auth ?? {}) as Record<string, unknown>;
   const norm = (arr: unknown) =>
     new Set((arr as string[] ?? []).filter(Boolean).map((s) => String(s).trim().toLowerCase()));
   return {
-    admins: norm(yaml.auth?.admins),
-    logAdmins: norm(yaml.auth?.log_admins),
-    benchAdmins: norm(yaml.auth?.bench_admins),
-    clawEvolveAdmins: norm(yaml.auth?.claw_evolve_admins),
+    admins: norm(auth.admins),
+    logAdmins: norm(auth.log_admins),
+    benchAdmins: norm(auth.bench_admins),
+    clawEvolveAdmins: norm(auth.claw_evolve_admins),
   };
+}
+
+/** Resolve admin lists purely from yaml config (fallback when DB is unavailable). */
+export function resolveAdminConfig(configPath?: string): AdminConfig {
+  return resolveAdminConfigFrom(readYamlConfig(configPath) as Record<string, unknown>);
+}
+
+/**
+ * Seed the configured admin lists into `clawweb_admin_users` and return the enabled roster.
+ * Seeding is idempotent: rows already present (including runtime grants) are left untouched.
+ */
+export async function resolveDynamicAdminConfig(
+  db: IDatabase,
+  config: AdminConfig,
+  createdBy?: string,
+): Promise<AdminConfig> {
+  const { AdminUserRepository } = await import("./repositories/admin-user-repository.js");
+  const repo = new AdminUserRepository(db);
+  await repo.seedFromYaml(
+    {
+      admin: [...config.admins],
+      log_admin: [...config.logAdmins],
+      bench_admin: [...config.benchAdmins],
+      claw_evolve_admin: [...config.clawEvolveAdmins],
+    },
+    createdBy,
+  );
+  return repo.listEnabled();
 }
 
 // ── Dima Config ──
