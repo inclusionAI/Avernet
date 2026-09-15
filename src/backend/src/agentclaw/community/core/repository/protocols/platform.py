@@ -149,6 +149,11 @@ class TaskQueueRepositoryProtocol(Protocol):
 
         Returns only the rows this worker actually won. Racing workers that
         targeted the same rows get fewer results, never duplicates.
+
+        When more rows are eligible than ``limit`` allows, reclaimable ones --
+        ``RUNNING`` with a lapsed lease -- are taken ahead of due ``PENDING``
+        ones, both drawing on that one ``limit``. Due work has the next poll;
+        a row abandoned by a worker that died holding it has no other path back.
         """
         ...
 
