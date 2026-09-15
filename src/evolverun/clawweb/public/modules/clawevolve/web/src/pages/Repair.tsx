@@ -16,10 +16,9 @@ import {
 } from '../api/client'
 import EvolveBotPicker from '../components/EvolveBotPicker'
 import EvolveModelFields, {
-  INITIAL_EVOLVE_MODEL,
   EVOLVE_CUSTOM_MODEL,
-  EVOLVE_MODEL_OPTIONS,
 } from '../components/EvolveModelFields'
+import { useEvolveModelConfig } from '../hooks/useEvolveModelConfig'
 import EvolveTaskOverview from '../components/EvolveTaskOverview'
 import { insightApi } from '../api/insight'
 import { useEvolveAdminScope } from '../features/evolve/admin-scope'
@@ -42,10 +41,6 @@ const inputClass = 'w-full rounded-lg border border-gray-200 bg-white px-3 py-2.
 const primaryButton = 'inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50'
 const secondaryButton = 'inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50'
 const dangerButton = 'inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-4 py-2.5 text-sm font-medium text-red-700 shadow-sm transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50'
-const REPAIR_OPENCLAW_MODEL_OPTIONS = [
-  ...EVOLVE_MODEL_OPTIONS,
-  'DeepSeek-V4-Flash-0731',
-] as const
 type RepairStepView = Pick<NonNullable<RepairTask['currentStep']>, 'stepId' | 'stepNo' | 'phase' | 'status' | 'aisJobId' | 'summary' | 'error' | 'failure'>
 type RepairTaskView = RepairTask & {
   steps?: RepairStepView[]
@@ -451,11 +446,13 @@ function chosenModel(choice: string, customModel: string): string {
 function RepairOpenClawModelFields({
   choice,
   customValue,
+  modelOptions,
   onChoiceChange,
   onCustomValueChange,
 }: {
   choice: string
   customValue: string
+  modelOptions: readonly string[]
   onChoiceChange: (value: string) => void
   onCustomValueChange: (value: string) => void
 }) {
@@ -468,7 +465,7 @@ function RepairOpenClawModelFields({
         value={choice}
         onChange={(event) => onChoiceChange(event.target.value)}
       >
-        {REPAIR_OPENCLAW_MODEL_OPTIONS.map((model) => <option key={model} value={model}>{model}</option>)}
+        {modelOptions.map((model) => <option key={model} value={model}>{model}</option>)}
         <option value={EVOLVE_CUSTOM_MODEL}>自定义模型名称</option>
       </select>
     </label>
@@ -523,6 +520,10 @@ function CreateRepair({
   modelApiKey: string
   setModelApiKey: (value: string) => void
 }) {
+  const modelConfig = useEvolveModelConfig()
+  const repairModelOptions = modelConfig.repairModels?.length
+    ? modelConfig.repairModels
+    : modelConfig.models
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const {
@@ -561,13 +562,19 @@ function CreateRepair({
   const [agentMode, setAgentMode] = useState<RepairAgentMode>('openclaw')
   const [deepDiagnostics, setDeepDiagnostics] = useState(false)
   const [llmUseDefault, setLlmUseDefault] = useState(true)
-  const [llmModelChoice, setLlmModelChoice] = useState<string>(INITIAL_EVOLVE_MODEL)
+  const [llmModelChoice, setLlmModelChoice] = useState<string>('')
   const [customLlmModel, setCustomLlmModel] = useState('')
   const [cfuseEngine, setCfuseEngine] = useState<RepairCfuseEngine>('cfuse')
-  const [cfuseModelChoice, setCfuseModelChoice] = useState<string>(INITIAL_EVOLVE_MODEL)
+  const [cfuseModelChoice, setCfuseModelChoice] = useState<string>('')
   const [customCfuseModel, setCustomCfuseModel] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!modelConfig.defaultModel) return
+    setLlmModelChoice((current) => current || modelConfig.defaultModel)
+    setCfuseModelChoice((current) => current || modelConfig.defaultModel)
+  }, [modelConfig.defaultModel])
 
   useEffect(() => {
     if (adminMode) {
@@ -781,14 +788,14 @@ function CreateRepair({
                   <span><span className="block text-xs font-medium text-gray-700">使用默认 LLM 配置</span><span className="mt-0.5 block text-[11px] text-gray-500">使用 Snapshot 中已有的 OpenClaw 模型配置；默认模式不覆盖模型或 Token。</span></span>
                 </label>
                 {!llmUseDefault && <div className="mt-4 grid gap-4 border-t border-gray-200 pt-4 sm:grid-cols-2">
-                  <RepairOpenClawModelFields choice={llmModelChoice} customValue={customLlmModel} onChoiceChange={setLlmModelChoice} onCustomValueChange={setCustomLlmModel} />
+                  <RepairOpenClawModelFields choice={llmModelChoice} customValue={customLlmModel} modelOptions={repairModelOptions} onChoiceChange={setLlmModelChoice} onCustomValueChange={setCustomLlmModel} />
                   <label className="text-xs font-medium text-gray-600 sm:col-span-2">Token（可选）<input aria-label="模型 Token" type="password" autoComplete="new-password" className={`${inputClass} mt-1.5`} value={modelApiKey} onChange={(event) => setModelApiKey(event.target.value)} placeholder="留空则继续使用 AIS 默认 Token" /><span className="mt-1 block text-[11px] font-normal text-amber-600">Token 只保留在当前页面内存，并仅发送给本次 AIS execution。</span></label>
                 </div>}
               </div>
             ) : (
               <div className="mt-4 grid gap-4 rounded-xl border border-gray-200 bg-gray-50 p-4 sm:grid-cols-2">
                 <label className="text-xs font-medium text-gray-600">Engine<select aria-label="cfuse Engine" className={`${inputClass} mt-1.5`} value={cfuseEngine} onChange={(event) => setCfuseEngine(event.target.value as RepairCfuseEngine)}><option value="cfuse">cfuse</option><option value="claude-code">Claude Code（CC）</option></select></label>
-                <EvolveModelFields choice={cfuseModelChoice} customValue={customCfuseModel} onChoiceChange={setCfuseModelChoice} onCustomValueChange={setCustomCfuseModel} selectAriaLabel="cfuse 模型" customAriaLabel="cfuse 自定义模型名称" customClassName="text-xs font-medium text-gray-600 sm:col-span-2" inputClassName={inputClass} customPlaceholder="请输入模型名称" />
+                <EvolveModelFields modelOptions={modelConfig.models} choice={cfuseModelChoice} customValue={customCfuseModel} onChoiceChange={setCfuseModelChoice} onCustomValueChange={setCustomCfuseModel} selectAriaLabel="cfuse 模型" customAriaLabel="cfuse 自定义模型名称" customClassName="text-xs font-medium text-gray-600 sm:col-span-2" inputClassName={inputClass} customPlaceholder="请输入模型名称" />
               </div>
             )}
           </section>

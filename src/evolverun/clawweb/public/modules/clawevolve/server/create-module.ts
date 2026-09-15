@@ -22,6 +22,7 @@ import { startRunAnalysisTimeoutSweeper } from "./services/evolve/run-analysis-t
 import { startSuggestionApplyTimeoutSweeper } from "./services/evolve/suggestion-apply-timeout.js";
 import { configureClawWebPublicBaseUrl } from "./env.js";
 import type { ClawEvolveInternalApi, ClawInsightInternalApi } from "./internal/module-api.js";
+import { normalizeEvolveModelConfig, type EvolveModelConfig } from "./model-config.js";
 
 export type ClawevolveModuleOptions = {
   /** Trusted composition-root selection; defaults to internalversion. */
@@ -41,6 +42,8 @@ export type ClawevolveModuleOptions = {
   publicBaseUrl?: string;
   trustedPublicOrigins?: readonly string[];
   workflowRuntime?: InternalEvolveWorkflowRuntime;
+  /** Host-owned model catalog. Public code intentionally defines no provider defaults. */
+  modelConfig?: EvolveModelConfig;
 };
 
 export type ClawevolveModule = {
@@ -86,6 +89,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
   const taskSourceService = options.taskSourceService ?? null;
   const dispatch = options.dispatch ?? dispatchEvolveCommand;
   const insightTaskService = options.insightTaskService ?? null;
+  const modelConfig = normalizeEvolveModelConfig(options.modelConfig);
 
   const publicRouter = createEvolveRouter(evolve, {
     version: options.version,
@@ -102,6 +106,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     artifactStore: options.artifactStore,
     artifactUrlStore: options.artifactUrlStore,
     botWorkflowPermissionRepo: botWorkflowPermission,
+    modelConfig,
   });
 
   const internalRouter = createInternalEvolveRouter({

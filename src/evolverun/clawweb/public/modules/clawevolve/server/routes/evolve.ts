@@ -47,6 +47,7 @@ import {
   EVOLVE_NODE_REGISTRY, EVOLVE_TASK_REGISTRY, defaultNodeCommand,
   taskNodeKeys,
 } from "../services/evolve/task-registry.js";
+import type { EvolveModelConfig } from "../model-config.js";
 import { parseEvolveArtifactRef, validatePackArtifact } from "../services/evolve/artifact-ref.js";
 import {
   EVOLVE_ARTIFACT_URL_TTL_SECONDS,
@@ -109,6 +110,7 @@ export type EvolveRouterDeps = {
   artifactUrlStore?: Pick<ObjectStore, "createSignedUrl">;
   botWorkflowPermissionRepo?: BotWorkflowPermissionRepository | null;
   runAnalysisStarter?: RunAnalysisStarter | null;
+  modelConfig?: EvolveModelConfig;
 };
 type BenchDomains = { trainBenchDomainId: string; testBenchDomainId: string };
 
@@ -1099,6 +1101,11 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
   const botWorkflowPermissionRepo = deps.botWorkflowPermissionRepo ?? null;
   const runAnalysisStarter = deps.runAnalysisStarter
     ?? (repo && db ? createRunAnalysisStarter({ repo, db, dispatch }) : null);
+  const modelConfig = deps.modelConfig ?? { defaultModel: "", models: [] };
+
+  router.get("/model-options", (_req, res) => {
+    res.json(modelConfig);
+  });
 
   router.get("/task-definitions", (_req, res) => {
     res.json({
@@ -1173,8 +1180,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if ("apiKey" in judgeInput || "apiKeyRef" in judgeInput || "baseUrlRef" in judgeInput) {
       res.status(400).json({ error: "judge credential 由服务端环境配置，不能从请求传入" }); return;
     }
-    const requestedModel = String(model ?? "").trim();
-    if (requestedModel) safeBenchCommandValue("model", requestedModel);
+    const requestedModel = String(model ?? "").trim() || modelConfig.defaultModel;
+    safeBenchCommandValue("model", requestedModel);
     const defaultBenchCommand = `${defaultNodeCommand("bench")}`
       .replace("--suite all", `--suite ${safeBenchCommandValue("suite", suite)}`);
     const benchCommand = nodeCommands.bench ?? defaultBenchCommand;
@@ -1359,11 +1366,12 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (String(taskName).trim().length > 128 || String(remark ?? "").length > 1000) {
       res.status(400).json({ error: "任务名称不能超过128字，备注不能超过1000字" }); return;
     }
-    const diagnoseModel = String(model ?? "").trim();
+    const requestedDiagnoseModel = String(model ?? "").trim();
+    const diagnoseModel = requestedDiagnoseModel || modelConfig.defaultModel;
     if (diagnoseModel && (diagnoseModel.length > 128 || /[\0\r\n\s]/.test(diagnoseModel))) {
       res.status(400).json({ error: "model 必须是 1 到 128 字符且不能包含空白字符" }); return;
     }
-    if (requiresDiagnose && judgeBackend === "api" && !diagnoseModel) {
+    if (requiresDiagnose && judgeBackend === "api" && !requestedDiagnoseModel) {
       res.status(400).json({ error: "API Judge 模式必须显式指定 model" }); return;
     }
     const rounds = Number(maxRounds);
@@ -1487,7 +1495,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const diagnoseTemplate = nodeCommands.diagnose ?? defaultNodeCommand("diagnose");
     const config = {
       ...(taskType === "full" ? { inputMode } : {}),
-      ...(diagnoseModel ? { model: diagnoseModel } : {}),
+      model: diagnoseModel,
       ...(requiresDiagnose ? { diagnoseIntent, maxSessions } : {}),
       ...(requiresDiagnose ? { sessionSource: { mode: sessionSourceMode } } : {}),
       maxRounds: rounds,
@@ -1644,8 +1652,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!sourceIds.length) {
       res.status(400).json({ error: "诊断进化必须选择一个已完成 Plan 的诊断任务" }); return;
     }
-    let selectedModel = String(model ?? "").trim();
-    try { if (selectedModel) selectedModel = safeBenchCommandValue("model", selectedModel); }
+    let selectedModel = String(model ?? "").trim() || modelConfig.defaultModel;
+    try { selectedModel = safeBenchCommandValue("model", selectedModel); }
     catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); return; }
     if (await rejectUnsupportedBotEngine(repo, res, String(userId), String(botId), String(botEnv ?? ""))) return;
     let primaryBenchDomains: BenchDomains | null = null;
@@ -1716,8 +1724,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!Number.isSafeInteger(rounds) || rounds < 1 || rounds > 100) {
       res.status(400).json({ error: "maxRounds 必须是 1 到 100 的整数" }); return;
     }
-    let selectedModel = String(model ?? "").trim();
-    try { if (selectedModel) selectedModel = safeBenchCommandValue("model", selectedModel); }
+    let selectedModel = String(model ?? "").trim() || modelConfig.defaultModel;
+    try { selectedModel = safeBenchCommandValue("model", selectedModel); }
     catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); return; }
     const actorUserId = resolveRequestUserId(req);
     if (!actorUserId) { res.status(401).json({ error: "无法识别当前登录用户" }); return; }

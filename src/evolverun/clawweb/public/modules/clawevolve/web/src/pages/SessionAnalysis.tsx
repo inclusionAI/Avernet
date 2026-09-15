@@ -14,9 +14,9 @@ import {
 import { useClientUser } from "../hooks/useClientUser";
 import EvolveBotPicker from "../components/EvolveBotPicker";
 import EvolveModelFields, {
-  INITIAL_EVOLVE_MODEL,
   EVOLVE_CUSTOM_MODEL,
 } from "../components/EvolveModelFields";
+import { useEvolveModelConfig } from "../hooks/useEvolveModelConfig";
 import EvolveTaskOverview from "../components/EvolveTaskOverview";
 
 type SessionBotOption = {
@@ -186,6 +186,7 @@ function formatTime(value: number | string | null | undefined): string {
 }
 
 function CreateSessionAnalysis() {
+  const modelConfig = useEvolveModelConfig();
   const navigate = useNavigate();
   const { user } = useClientUser();
   const [bots, setBots] = useState<SessionBotOption[]>([]);
@@ -208,12 +209,17 @@ function CreateSessionAnalysis() {
   );
   const [llmAnalysis, setLlmAnalysis] = useState(true);
   const [llmUseDefault, setLlmUseDefault] = useState(true);
-  const [llmModelChoice, setLlmModelChoice] = useState<string>(INITIAL_EVOLVE_MODEL);
+  const [llmModelChoice, setLlmModelChoice] = useState<string>("");
   const [customLlmModel, setCustomLlmModel] = useState("");
   const [llmApiKey, setLlmApiKey] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [createdId, setCreatedId] = useState("");
+
+  useEffect(() => {
+    if (!modelConfig.defaultModel) return;
+    setLlmModelChoice((current) => current || modelConfig.defaultModel);
+  }, [modelConfig.defaultModel]);
 
   const loadBots = async (ownerUserId?: string) => {
     setBotLoading(true);
@@ -563,6 +569,7 @@ function CreateSessionAnalysis() {
                       {!llmUseDefault && (
                         <div className="mt-4 grid gap-4 sm:grid-cols-2">
                           <EvolveModelFields
+                            modelOptions={modelConfig.models}
                             choice={llmModelChoice}
                             customValue={customLlmModel}
                             onChoiceChange={setLlmModelChoice}

@@ -51,6 +51,7 @@ beforeEach(async () => {
     dispatch, dispatchTaskLogArchive, cancelExecution, improvementRepo, benchDomainRepo, benchTemplateRepo, benchRunRepo,
     artifactStore: { getObject, createSignedUrl },
     artifactUrlStore: { createSignedUrl },
+    modelConfig: { defaultModel: "GLM-5.1", models: ["GLM-5.1"] },
   }));
   const startedServer = await new Promise<ReturnType<express.Application["listen"]>>((resolve) => {
     const instance = app.listen(0, () => resolve(instance));
@@ -791,12 +792,12 @@ describe("ClawEvolve step protocol", () => {
     expect(dispatch.mock.calls.at(-1)?.[0]).not.toHaveProperty("secrets");
   });
 
-  it("lets OpenClaw select its configured model when a Subagent task omits model", async () => {
+  it("freezes the configured ClawEvolve default when a Subagent task omits model", async () => {
     const response = await fetch(`${baseUrl}/api/evolve/diagnoses`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-User-Id": "owner-1" },
       body: JSON.stringify({
-        taskName: "OpenClaw 默认模型诊断",
+        taskName: "ClawEvolve 默认模型诊断",
         userId: "user-1",
         botId: "bot-1",
         judgeBackend: "subagent",
@@ -806,10 +807,10 @@ describe("ClawEvolve step protocol", () => {
     });
     expect(response.status).toBe(201);
     const body = await response.json() as { config: Record<string, unknown>; steps: Array<{ command: string }> };
-    expect(body.config).not.toHaveProperty("model");
-    expect(body.steps[0].command).not.toMatch(/(?:^|\s)--model(?:\s|=|$)/);
+    expect(body.config.model).toBe("GLM-5.1");
+    expect(body.steps[0].command).toContain("--model GLM-5.1");
     expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
-      command: expect.not.stringMatching(/(?:^|\s)--model(?:\s|=|$)/),
+      command: expect.stringContaining("--model GLM-5.1"),
     }));
   });
 
