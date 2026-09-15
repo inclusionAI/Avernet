@@ -44,7 +44,7 @@
     <text x="546" y="158" class="bt" fill="#26452F">③ 机器校验</text>
     <text x="546" y="192" class="bn" fill="#26452F">53</text>
     <text x="590" y="192" class="bd">组架构守护测试</text>
-    <text x="546" y="222" class="bd">解析 AST 而不是跑起来看</text>
+    <text x="546" y="222" class="bd">静态分析，不必把系统跑起来</text>
     <text x="546" y="242" class="bd">把实际 import 图与白名单比对</text>
     <text x="546" y="268" class="bd">迁移期用允许清单收口</text>
     <text x="546" y="288" class="bd">目标是把清单清空</text>
@@ -80,7 +80,7 @@
     <rect x="44" y="418" width="1180" height="180" rx="6" fill="#F1EFEA" stroke="#D8D5CF"/>
 
     <text x="66" y="446" class="m gm" fill="#26452F">test_no_fastapi_in_core</text>
-    <text x="66" y="465" class="gd">core/ 下出现任何 fastapi / starlette 导入即失败 —— 领域逻辑不认识传输</text>
+    <text x="66" y="465" class="gd">core 出现任何交付框架依赖即失败 —— 领域逻辑不认识传输</text>
     <text x="66" y="500" class="m gm" fill="#26452F">test_kernel_no_imports</text>
     <text x="66" y="519" class="gd">底座不得 import 本包任何其他层 —— 依赖箭头只进不出</text>
     <text x="66" y="554" class="m gm" fill="#26452F">test_core_no_concrete_plugin_imports</text>

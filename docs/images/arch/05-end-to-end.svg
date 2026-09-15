@@ -86,14 +86,14 @@
     <text x="368" y="496" class="m bm" fill="#26452F">core/session · core/chat …</text>
     <text x="368" y="520" class="bd">领域模型与协议</text>
     <text x="368" y="540" class="bd">不知道任何引擎的存在</text>
-    <text x="368" y="566" class="bd">能力不支持时明确报错</text>
+    <text x="368" y="566" class="bd">能力不支持时明确拒绝</text>
 
     <rect x="644" y="450" width="264" height="140" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
     <text x="660" y="474" class="num">⑧</text>
     <text x="684" y="474" class="bt" fill="#26452F">反腐层</text>
     <text x="660" y="496" class="m bm" fill="#26452F">core/adapters/claude_code</text>
-    <text x="660" y="520" class="bd">DTO ⇄ 原生形状翻译</text>
-    <text x="660" y="540" class="bd">会话键解析 · 过滤分页</text>
+    <text x="660" y="520" class="bd">领域形状 ⇄ 引擎原生形状</text>
+    <text x="660" y="540" class="bd">引擎差异在这里被吸收</text>
     <text x="660" y="566" class="bd">core 里唯一认识引擎的地方</text>
 
     <rect x="936" y="450" width="264" height="140" rx="6" fill="#EBE5F3" stroke="#69539B"/>
@@ -121,10 +121,10 @@
 
     <rect x="442" y="732" width="376" height="130" rx="6" fill="#F5E5E0" stroke="#A85C47"/>
     <text x="460" y="757" class="inv">不变量 B · 200 不等于成功</text>
-    <text x="460" y="781" class="invd">engine 会在 HTTP 200 里返回失败标志。</text>
-    <text x="460" y="801" class="invd">归一化在这里抛错，绝不让它变成一次</text>
-    <text x="460" y="821" class="invd">对外的成功响应；传输故障也在这里变成</text>
-    <text x="460" y="841" class="invd">语义错误，不泄漏设备细节。</text>
+    <text x="460" y="781" class="invd">engine 会在一次传输成功的应答里</text>
+    <text x="460" y="801" class="invd">报告业务失败。这里必须识别出来，</text>
+    <text x="460" y="821" class="invd">绝不让它变成一次对外的成功；链路</text>
+    <text x="460" y="841" class="invd">故障也在这里收敛成有语义的失败。</text>
 
     <rect x="840" y="732" width="376" height="130" rx="6" fill="#F5E5E0" stroke="#A85C47"/>
     <text x="858" y="757" class="inv">不变量 C · 发布态走发布绑定</text>

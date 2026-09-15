@@ -41,16 +41,16 @@
     <text x="64" y="322" class="lbl">反腐层 ACL · core 中唯一知道具体引擎的地方</text>
     <rect x="64" y="332" width="410" height="76" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
     <text x="80" y="356" class="m bt" fill="#26452F">core/adapters/claude_code/</text>
-    <text x="80" y="376" class="bd">DTO ⇄ 原生形状翻译 · 会话键解析 · 分页过滤</text>
-    <text x="80" y="395" class="bd">能力存在 iff 这里接了一个原生方法</text>
+    <text x="80" y="376" class="bd">领域形状 ⇄ 引擎原生形状 · 引擎差异在这里被吸收</text>
+    <text x="80" y="395" class="bd">能力存在，当且仅当这里真的接上了</text>
     <rect x="494" y="332" width="410" height="76" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
     <text x="510" y="356" class="m bt" fill="#26452F">core/adapters/openclaw/</text>
     <text x="510" y="376" class="bd">同一组核心协议，另一套翻译规则</text>
-    <text x="510" y="395" class="bd">会话键格式、历史接口都与左侧不同</text>
+    <text x="510" y="395" class="bd">接口形状与左侧完全不同</text>
 
     <rect x="64" y="428" width="410" height="60" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
     <text x="80" y="452" class="m bt" fill="#5E4519">plugin_api/claude_code/</text>
-    <text x="80" y="472" class="bd">ClaudeCodeSessionPort / ChatPort / …（原生形状端口）</text>
+    <text x="80" y="472" class="bd">按该引擎原生形状定义的各域端口</text>
     <rect x="494" y="428" width="410" height="60" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
     <text x="510" y="452" class="m bt" fill="#5E4519">plugin_api/openclaw/</text>
     <text x="510" y="472" class="bd">OpenClawPlugin 及其各域端口</text>
@@ -64,7 +64,7 @@
 
     <rect x="64" y="596" width="840" height="64" rx="6" fill="#E9E8E5" stroke="#6E6C66"/>
     <text x="80" y="620" class="m bt" fill="#33322E">kernel/frames</text>
-    <text x="80" y="639" class="bd">线协议信封 · 协议版本 3 · 单帧 512KB 上限 · 30s 心跳　｜　plugins 产生它、core 消费它；两边不能互相依赖，共享原语只能下沉到最底层</text>
+    <text x="80" y="639" class="bd">线协议信封 —— plugins 产生它、core 消费它；两边不能互相依赖，共享原语只能下沉到两边都够得着的最底层</text>
 
     <text x="944" y="322" class="lbl">组装根 · engines/&lt;name&gt;/</text>
     <path d="M 938 332 L 932 332 L 932 572 L 938 572" fill="none" stroke="#A85C47" stroke-width="1.4" stroke-dasharray="4 3"/>
@@ -76,7 +76,7 @@
     <text x="960" y="448" class="bd">import 时自注册到引擎注册表</text>
     <text x="960" y="474" class="bd">唯一可以同时 import 契约</text>
     <text x="960" y="494" class="bd">与具体实现的地方</text>
-    <text x="960" y="520" class="bd">构造期交叉校验「声明的能力」</text>
+    <text x="960" y="520" class="bd">装配期交叉校验「声明的能力」</text>
     <text x="960" y="540" class="bd">与「实际接上的端口」</text>
     <text x="960" y="562" class="bd">两个引擎的能力矩阵不是包含关系</text>
 

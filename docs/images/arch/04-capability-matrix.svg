@@ -124,7 +124,7 @@
     <text x="44" y="700" class="lg"><tspan fill="#3F7350">●</tspan>  原生支持      <tspan fill="#A1762E">◐</tspan>  受限 / 降级 —— 声明时必须写明原因      <tspan fill="#B9B5AD">○</tspan>  未接入 —— 上层不派发</text>
     <rect x="44" y="720" width="1172" height="96" rx="6" fill="#F1EFEA" stroke="#D8D5CF"/>
     <text x="64" y="750" class="ft">两条链路互不包含：claude_code 在技能与对话交互上更强，openclaw 在 MCP、节点、渠道上更全。交集才是 core 可以无条件依赖的部分。</text>
-    <text x="64" y="774" class="ft">声明与实现的一致性在构造期交叉校验 —— 声明了能力却没接端口，启动即失败，而不是等到线上第一次调用。</text>
+    <text x="64" y="774" class="ft">声明与实现的一致性在装配阶段交叉校验 —— 声明了却没真的接上，启动就失败，而不是等到线上第一次调用。</text>
     <text x="64" y="798" class="note">能力名是 engine、backend、前端之间的稳定契约：新增是安全的，改名或删除是破坏性变更。</text>
   </g>
 </svg>

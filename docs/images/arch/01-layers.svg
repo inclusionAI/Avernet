@@ -49,7 +49,7 @@
     <text x="44" y="326" class="roleen">CORE</text>
     <rect x="274" y="284" width="444" height="60" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
     <text x="290" y="310" class="m pkg" fill="#26452F">core/</text>
-    <text x="290" y="330" class="desc">55 个领域模块 · 零 fastapi / starlette 导入（AST 门禁强制）</text>
+    <text x="290" y="330" class="desc">55 个领域模块 · 不含任何交付框架依赖，由门禁强制</text>
     <rect x="734" y="284" width="444" height="60" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
     <text x="750" y="310" class="m pkg" fill="#26452F">core/ + core/adapters/</text>
     <text x="750" y="330" class="desc">领域模型 + 反腐层（ACL）· core 中唯一知道具体引擎的地方</text>

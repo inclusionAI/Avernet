@@ -27,24 +27,24 @@
     <text x="60" y="174" class="bt" fill="#22405F">消费者</text>
     <text x="60" y="198" class="m bm" fill="#22405F">adapters/http · CLI</text>
     <text x="60" y="220" class="bd">进程内嵌入方</text>
-    <text x="60" y="240" class="m bd">Injected(XxxProtocol)</text>
+    <text x="60" y="240" class="m bd">只认契约，不认实现</text>
 
     <rect x="284" y="142" width="196" height="110" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
     <text x="300" y="174" class="bt" fill="#5E4519">Service API</text>
     <text x="300" y="198" class="m bm" fill="#5E4519">api/xxx_service.py</text>
-    <text x="300" y="220" class="bd">@runtime_checkable</text>
+    <text x="300" y="220" class="bd">与交付层分离定义</text>
     <text x="300" y="240" class="bd">契约方向：外 → 内</text>
 
     <rect x="520" y="142" width="200" height="110" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
     <text x="536" y="174" class="bt" fill="#26452F">core 领域实现</text>
     <text x="536" y="198" class="m bm" fill="#26452F">core/xxx/services/</text>
-    <text x="536" y="220" class="bd">继承自己的 Protocol</text>
+    <text x="536" y="220" class="bd">实现自己的契约</text>
     <text x="536" y="240" class="bd">无框架、无传输依赖</text>
 
     <rect x="760" y="142" width="196" height="110" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
     <text x="776" y="174" class="bt" fill="#5E4519">Plugin API</text>
     <text x="776" y="198" class="m bm" fill="#5E4519">plugin_api/xxx.py</text>
-    <text x="776" y="220" class="bd">Protocol(Plugin)</text>
+    <text x="776" y="220" class="bd">外部能力的契约</text>
     <text x="776" y="240" class="bd">契约方向：内 → 外</text>
 
     <rect x="996" y="142" width="220" height="110" rx="6" fill="#EBE5F3" stroke="#69539B"/>
