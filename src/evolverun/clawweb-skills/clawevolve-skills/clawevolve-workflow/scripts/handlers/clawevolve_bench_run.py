@@ -139,12 +139,6 @@ def workflow_config(input_payload: dict[str, Any], args: argparse.Namespace, tas
             "judgeApiKeyRef": judge.get("apiKeyRef") or "",
             "pinnedTemplates": pinned_templates,
         },
-        "versionPolicy": value.get("versionPolicy") or {
-            "latestVersion": "clawbench-20260805-v1",
-            "minimumVersion": "clawbench-20260707-v4",
-            "updateUrl": "",
-            "policy": "enforce",
-        },
         "endpoints": {"clawwebUrl": clawweb_url},
         "runtime": {
             "agentbenchHome": str(release_skill_root() / "clawbench-base"),

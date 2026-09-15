@@ -375,11 +375,9 @@ class WorkflowTests(unittest.TestCase):
         skill = root / "clawbench-base"
         (skill / "scripts").mkdir(parents=True)
         (skill / "scripts/clawmind_adapter.py").write_text("# test\n", encoding="utf-8")
-        (skill / "version").write_text("clawbench-20260810-v1\n", encoding="utf-8")
         return {
             "identity": {"ownerId": "u1", "evolveTaskId": "EV-1", "evolveStepId": "STEP-1"},
             "bench": {"domainId": "blog", "model": "m", "suite": "all", "scene": "test", "pinnedTemplates": [{"templateName": "x", "templateVersion": 1}]},
-            "versionPolicy": {"minimumVersion": "clawbench-20260801-v1", "policy": "enforce"},
             "endpoints": {"clawwebUrl": "https://example.test"},
             "runtime": {
                 "agentbenchHome": str(skill), "taskRoot": str(root / "task"),
@@ -544,15 +542,27 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(summarize_env["REPORT_CHILD_SESSION_KEY"], "child-1")
             self.assertEqual(summarize_env["REPORT_PROMPT_PATH"], "/tmp/prompt")
 
-    def test_version_enforce_rejects_old_skill(self):
+    def test_version_check_uses_bundle_release_marker(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             config = self.config(root)
-            (Path(config["runtime"]["agentbenchHome"]) / "version").write_text("clawbench-20260701-v1\n", encoding="utf-8")
+            marker = Path(config["runtime"]["agentbenchHome"]).parent / ".clawevolve-release-version"
+            marker.write_text("clawevolve-20260915-v2\n", encoding="utf-8")
             flow = workflow_module.Workflow(config, root / "state.json", root / "result.json")
-            with self.assertRaises(workflow_module.WorkflowError) as raised:
-                flow.check_version()
-            self.assertEqual(raised.exception.code, "CLAWBENCH_VERSION_REJECTED")
+            self.assertEqual(
+                flow.check_version(),
+                {"status": "ok", "source": "bundle", "releaseVersion": "clawevolve-20260915-v2"},
+            )
+
+    def test_version_check_accepts_source_checkout(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config = self.config(root)
+            flow = workflow_module.Workflow(config, root / "state.json", root / "result.json")
+            self.assertEqual(
+                flow.check_version(),
+                {"status": "ok", "source": "source", "releaseVersion": ""},
+            )
 
 
 if __name__ == "__main__":
