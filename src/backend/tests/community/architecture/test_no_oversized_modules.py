@@ -64,14 +64,12 @@ _ALLOWLIST: dict[str, str] = {
     # judged worse than the exception: it turned four added rows into a
     # whole-file move and made the change unreadable.
     #
-    # Both were exactly 1000 lines before that PR, so the first route added
+    # This file was exactly 1000 lines before that PR, so the first route added
     # after the guard landed was always going to hit this. Splitting the *seam*
     # from the *table* is still the obvious refactor when someone wants it;
     # it should just be its own change, not a rider on a feature.
     "adapters/http/openapi_v1/admission.py":
         "1020 — one ADMISSION row per public operation; grows with the surface",
-    "adapters/http/openapi_v1/responses.py":
-        "1041 — one row per domain error, plus the ~180 imports naming them",
     # The third file of that shape, and it crossed for the same reason: W9's
     # three ``cli-tools`` operations were the first rows added after it reached
     # exactly 1000. Splitting the ``Check``/``EDIT_LOCK`` vocabulary at the top
