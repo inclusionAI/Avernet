@@ -38,9 +38,24 @@ def client():
 
 def headers():
     now = int(time.time())
-    token = jwt.encode({"iss": "gateway", "aud": "backend", "iat": now, "exp": now + 600,
-                        "principals": [{"type": "app", "tenant": "employee-test", "app": {"app_id": 17, "app_name": "employee-platform", "owners": "platform", "tenant": "employee-test", "app_type": "integration"}}]}, KEY, algorithm="HS256")
-    return {"X-Avernet-Principal": token}
+    claims = {
+        "iss": "gateway",
+        "aud": "backend",
+        "iat": now,
+        "exp": now + 600,
+        "principals": [{
+            "type": "app",
+            "tenant": "employee-test",
+            "app": {
+                "app_id": 17,
+                "app_name": "employee-platform",
+                "owners": "platform",
+                "tenant": "employee-test",
+                "app_type": "integration",
+            },
+        }],
+    }
+    return {"X-Avernet-Principal": jwt.encode(claims, KEY, algorithm="HS256")}
 
 
 def test_open_catalog_still_requires_authenticated_principal(client):
