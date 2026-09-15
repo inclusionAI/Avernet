@@ -444,7 +444,12 @@ async def discover_tasks(
                     "project_name": r.task.title,
                     "success": r.success,
                     "session_id": r.session.session_id if r.session else None,
+                    # 2026-09-16: 通知明细拆分 — notification_sent 是
+                    # card_sent or work_order_sent 的聚合;工单通道(本地 DB)
+                    # 几乎必成功, 单看聚合会掩盖外发卡片失败。
                     "notification_sent": r.notification_sent,
+                    "card_sent": r.card_sent,
+                    "work_order_sent": r.work_order_sent,
                     "error": r.error,
                 }
                 for r in results
@@ -491,13 +496,18 @@ async def get_discovery_status(
             entry["session_url"] = (
                 result.session.session_url if result.session else None
             )
+            # 2026-09-16: 通知明细拆分(见 discover 端点同名注释)。
             entry["notification_sent"] = result.notification_sent
+            entry["card_sent"] = result.card_sent
+            entry["work_order_sent"] = result.work_order_sent
             entry["error"] = result.error
         else:
             entry["discovered"] = False
             entry["session_id"] = None
             entry["session_url"] = None
             entry["notification_sent"] = False
+            entry["card_sent"] = False
+            entry["work_order_sent"] = False
             entry["error"] = None
         task_list.append(entry)
 

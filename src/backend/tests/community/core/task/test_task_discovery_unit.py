@@ -286,6 +286,58 @@ class TestDiscoveryService:
         assert results[0].success  # session created = success
         assert results[0].notification_sent is False
 
+    def test_discover_card_failure_masked_by_work_order_channel(self):
+        """2026-09-16 预发事故形态回归: 钉钉卡片失败 + 工单通道成功 →
+        聚合 notification_sent=True 被工单抬高, 但明细 card_sent=False
+        必须可见(不需要翻服务端日志)。"""
+        reader = MagicMock()
+        reader.read_pending_tasks_for_bot = MagicMock(return_value=[_TASK])
+        initiator = AsyncMock()
+        initiator.initiate_session = AsyncMock(return_value=_SESSION)
+
+        notify_sender = MagicMock(spec=NotifyMessagesProvider)
+        notify_sender.send = MagicMock(return_value=None)  # card fails
+
+        work_order = MagicMock()
+        work_order.create_work_order_event = MagicMock(
+            return_value=MagicMock(notification_ids=[189], work_order_id=None)
+        )
+
+        svc = DiscoveryService(
+            reader=reader,
+            session_initiator=initiator,
+            notify_sender=notify_sender,
+            work_order_service=work_order,
+        )
+        results = asyncio.run(svc.discover(
+            bot_id="test-bot", owner_id="test-owner",
+            agent_id="test-bot",
+        ))
+        r = results[0]
+        assert r.success
+        # 聚合语义保留(向后兼容): 工单通道成功 → True
+        assert r.notification_sent is True
+        # 明细拆分: 钉钉卡片失败不被掩盖
+        assert r.card_sent is False
+        assert r.work_order_sent is True
+
+    def test_discover_both_channels_true(self):
+        """双通道成功 → 聚合与明细全 True。"""
+        work_order = MagicMock()
+        work_order.create_work_order_event = MagicMock(
+            return_value=MagicMock(notification_ids=[1], work_order_id="wo-1")
+        )
+        svc = self._make_service([_TASK], notify_ok=True)
+        svc._work_order_service = work_order
+        results = asyncio.run(svc.discover(
+            bot_id="test-bot", owner_id="test-owner",
+            agent_id="test-bot",
+        ))
+        r = results[0]
+        assert r.notification_sent is True
+        assert r.card_sent is True
+        assert r.work_order_sent is True
+
     def test_discover_session_error(self):
         reader = MagicMock()
         reader.read_pending_tasks_for_bot = MagicMock(return_value=[_TASK])

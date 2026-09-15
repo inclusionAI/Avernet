@@ -81,6 +81,12 @@ class DiscoveryResult:
     session: Optional[DiscoverySession] = None
     notification_message: str = ""
     notification_sent: bool = False
+    # 2026-09-16: 通知明细拆分。notification_sent = card_sent or work_order_sent
+    # 的聚合语义保留(向后兼容), 但工单通道(本地 DB 写, 几乎必成功)会掩盖
+    # 外发卡片失败 —— 明细字段让 discover/status 响应可直读钉钉通道健康度,
+    # 无需翻服务端日志(2026-09-16 预发: notification_sent=true 而钉钉卡片未发)。
+    card_sent: bool = False
+    work_order_sent: bool = False
     error: Optional[str] = None
 
     @property
@@ -351,6 +357,8 @@ class DiscoveryService:
                 task=task,
                 session=session,
                 notification_sent=notification_sent,
+                card_sent=card_sent,
+                work_order_sent=work_order_sent,
             )
         except Exception as exc:
             logger.error(
