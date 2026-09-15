@@ -901,6 +901,16 @@ class _RuntimePassport:
         }
 
 
+class _ResourcePassport:
+    def __init__(self, passport: dict) -> None:
+        self.passport = passport
+        self.calls: list[tuple[str, str]] = []
+
+    def query_agent_passport(self, bot_id: str, owner_id: str) -> dict:
+        self.calls.append((bot_id, owner_id))
+        return self.passport
+
+
 class _RuntimeCallerIdentity:
     """Caller-identity source for the Passport MCP scope.
 
@@ -1745,6 +1755,64 @@ def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_sc
             "engine_type": "openclaw",
         }
     ]
+
+
+def test_resources_enriches_only_default_mcp_display_from_agentpass():
+    class _CustomDisplayResourceRepository(_MixedResourceRepository):
+        def list_mcps(self, **kwargs):
+            self.list_mcp_calls.append(kwargs)
+            return [{
+                "server_code": "ordinary-set-mcp",
+                "name": "自定义快照名称",
+                "description": "自定义快照描述",
+            }]
+
+    repository = _CustomDisplayResourceRepository()
+    legacy = _ResourceLegacyFactory()
+    passport = _ResourcePassport({
+        "mcps": [
+            {
+                "mcp_code": "legacy-default-mcp",
+                "mcp_name": "默认 MCP 中文名称",
+                "mcp_desc": "默认 MCP 中文描述",
+            },
+            {
+                "mcp_code": "ordinary-set-mcp",
+                "mcp_name": "不应覆盖自定义项",
+                "mcp_desc": "不应覆盖自定义描述",
+            },
+        ],
+        "clis": [],
+    })
+    service = SkillSetManagementService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=legacy,
+        passport=passport,
+        authorization=_Authorization(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
+        recovery=MagicMock(),
+    )
+
+    result = service.list_resources(
+        bot_id="bot-1", owner_id="true-owner", user_id="true-owner"
+    )
+
+    assert result[0]["mcps"] == [{
+        "server_code": "legacy-default-mcp",
+        "name": "默认 MCP 中文名称",
+        "description": "默认 MCP 中文描述",
+    }]
+    assert result[1]["mcps"] == [{
+        "server_code": "ordinary-set-mcp",
+        "name": "自定义快照名称",
+        "description": "自定义快照描述",
+    }]
+    assert passport.calls == [("bot-1", "entity-1")]
 
 
 def test_list_mcps_reads_global_default_projection_for_collaborator_owner_scope():
