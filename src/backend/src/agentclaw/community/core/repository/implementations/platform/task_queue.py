@@ -771,6 +771,34 @@ class TaskQueueRepository(
             )
         return affected == 1
 
+    def postpone_by_idempotency_key(
+        self,
+        *,
+        task_type: str,
+        idempotency_key: str,
+        delay_seconds: int,
+        env: str,
+        app: str,
+    ) -> bool:
+        with self._db.orm_session() as db:
+            new_run_at = self._now_plus(db, delay_seconds)
+            affected = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.env == env,
+                    self.Model.app == app,
+                    self.Model.task_type == task_type,
+                    self.Model.active_idempotency_key == idempotency_key,
+                    self.Model.status == TaskStatus.PENDING.value,
+                    new_run_at < self.Model.deadline_at,
+                )
+                .update(
+                    {self.Model.run_at: new_run_at},
+                    synchronize_session=False,
+                )
+            )
+        return affected >= 1
+
     # ── diagnosis / tests ───────────────────────────────────────────────
 
     def get_by_id(self, task_id: int) -> Optional[TaskRecord]:
