@@ -406,7 +406,7 @@ fn mcporter_mcp_instruction(
     let server = surface.mcp_server.as_deref().unwrap_or("bcs");
     if is_manager {
         return format!(
-            "本群为任务群，你是主 Bot。你当前平台通过 mcporter 调用 BCS MCP 工具。需要派发子任务时，使用 `{command} call {server}.bcs_assign_task target_bot=\"<目标Bot名称或ID>\" message=\"<任务内容>\"`；任务可以结束时，使用 `{command} call {server}.bcs_task_complete summary=\"<最终总结>\"`。执行 `mcporter call` 后必须保留并回传完整原始输出；禁止使用 `tail`、`head`、`grep` 等管道或任何截断、筛选、摘要处理，否则 BCS 无法识别 MCP 调用结果。不要直接调用原生发送工具来派发子任务，不要在普通回复中伪造工具结果。{}",
+            "本群为任务群，你是主 Bot。你当前平台通过 mcporter 调用 BCS MCP 工具。需要派发子任务时，使用 `{command} call {server}.bcs_assign_task target_bot=\"<目标Bot名称或ID>\" message=\"<任务内容>\"`。执行 `mcporter call` 后必须保留并回传完整原始输出；禁止使用 `tail`、`head`、`grep` 等管道或任何截断、筛选、摘要处理，否则 BCS 无法识别 MCP 调用结果。不要直接调用原生发送工具来派发子任务，不要在普通回复中伪造工具结果。{}",
             status_line
         );
     }
@@ -431,7 +431,7 @@ fn native_mcp_instruction(
     let server = surface.mcp_server.as_deref().unwrap_or("bcs");
     if is_manager {
         return format!(
-            "本群为任务群，你是主 Bot。你当前平台原生提供 BCS MCP 工具。需要派发子任务时，直接调用 MCP server `{server}` 上的 `bcs_assign_task`；任务可以结束时，直接调用 MCP server `{server}` 上的 `bcs_task_complete`。不要使用 mcporter、exec、bash，不要在普通回复中伪造工具结果。{}",
+            "本群为任务群，你是主 Bot。你当前平台原生提供 BCS MCP 工具。需要派发子任务时，直接调用 MCP server `{server}` 上的 `bcs_assign_task`。不要使用 mcporter、exec、bash，不要在普通回复中伪造工具结果。{}",
             status_line
         );
     }
@@ -454,7 +454,7 @@ fn native_tool_instruction(
 ) -> String {
     if is_manager {
         return format!(
-            "本群为任务群，你是主 Bot。你当前平台原生提供 BCS 协同工具，这些工具是当前运行环境中的原生 tools，不是 MCP server 工具。需要派发子任务时，直接调用原生工具 `bcs_assign_task`；任务可以结束时，直接调用原生工具 `bcs_task_complete`。不要使用 mcporter、exec、bash，不要写 MCP server 名称，不要在普通回复中伪造工具结果。{}",
+            "本群为任务群，你是主 Bot。你当前平台原生提供 BCS 协同工具，这些工具是当前运行环境中的原生 tools，不是 MCP server 工具。需要派发子任务时，直接调用原生工具 `bcs_assign_task`。不要使用 mcporter、exec、bash，不要写 MCP server 名称，不要在普通回复中伪造工具结果。{}",
             status_line
         );
     }
@@ -475,7 +475,7 @@ fn legacy_manager_worker_instruction(
 ) -> String {
     match delivery_type {
         DeliveryType::Send => format!(
-            "本群为任务群，你是主 Bot。派发子任务用 bcs_assign_task(target_bot, message)，可并行派发多个；收齐所有子 Bot 回复、综合完毕后用 bcs_task_complete(summary) 收尾。不要用引擎自带的发送工具向群里发消息。{}",
+            "本群为任务群，你是主 Bot。派发子任务用 bcs_assign_task(target_bot, message)，可并行派发多个。不要用引擎自带的发送工具向群里发消息。{}",
             status_line
         ),
         DeliveryType::Inject => {
