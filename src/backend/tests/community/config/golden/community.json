@@ -252,7 +252,12 @@
     },
     "ecb": {
       "base_url": "${ECB_URL:-}",
-      "base_url_pre": ""
+      "base_url_pre": "",
+      "resource_ready_dedupe_max_entries": 10000,
+      "resource_ready_dedupe_ttl_seconds": 3600.0,
+      "resource_ready_max_in_flight": 8,
+      "resource_ready_timeout_seconds": 10.0,
+      "resource_ready_worker_threads": 2
     },
     "gateway": {
       "base_url": "${GATEWAY_URL:-}",

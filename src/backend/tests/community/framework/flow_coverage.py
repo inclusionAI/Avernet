@@ -99,6 +99,13 @@ _SESSION_RESOURCES_EXEMPT_REASON = (
     "covers the module with core and HTTP API tests."
 )
 
+_TC_FILE_UPLOAD_INTEGRATION_EXEMPT_REASON = (
+    "TC resource-ready notification is a bounded best-effort sidecar, not an "
+    "independent user-facing flow: the live path needs the product upload intake "
+    "plus a reachable ECB endpoint. Covered by exact event, bounded coordinator, "
+    "HTTP publisher, adapter, and DI tests; drain when singlebox has both sides."
+)
+
 _RUNTIME_BINDING_EXEMPT_REASON = (
     "Read-only binding selection used only by the Session File OpenAPI upload "
     "intent. A real flow requires a signed OpenAPI principal and the same "
@@ -184,6 +191,7 @@ _SPACES_FAMILY_EXEMPT_REASON = (
 )
 
 SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
+    "tc_file_upload_integrations": _TC_FILE_UPLOAD_INTEGRATION_EXEMPT_REASON,
     "aicoding": _EXEMPT_REASON,
     "spaces": _SPACES_FAMILY_EXEMPT_REASON,
     "market_favorites": _SPACES_FAMILY_EXEMPT_REASON,

@@ -14,6 +14,9 @@ from injector import Injector, Module
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions import router
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.tc_resource_ready_observer import (
+    TcResourceReadyObserverProtocol,
+)
 from agentclaw.community.api.session_resource_service import SessionResourceServiceProtocol
 from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
 from agentclaw.community.core.session_resources.types import SessionResourceStatus
@@ -140,6 +143,14 @@ class _Resources:
 
 
 
+class _Observer:
+    def __init__(self) -> None:
+        self.records = []
+
+    def notify_in_background(self, resource) -> None:
+        self.records.append(resource)
+
+
 class _RuntimeBindings:
     def __init__(self) -> None:
         self.requests: list[object] = []
@@ -165,12 +176,18 @@ def runtime_bindings() -> _RuntimeBindings:
 
 
 @pytest.fixture
-def client(relay, resources, runtime_bindings):
+def observer() -> _Observer:
+    return _Observer()
+
+
+@pytest.fixture
+def client(relay, resources, runtime_bindings, observer):
     class _Bindings(Module):
         def configure(self, binder):
             binder.bind(EngineRuntimeRelayProtocol, to=relay)
             binder.bind(SessionResourceServiceProtocol, to=resources)
             binder.bind(RuntimeBindingResolutionService, to=runtime_bindings)
+            binder.bind(TcResourceReadyObserverProtocol, to=observer)
             # These six file operations are ``Check(MEMBER)``; the gate runs
             # ahead of every one of them.
             bind_seam_from_relay(binder, relay)
@@ -333,7 +350,7 @@ def test_content_masks_missing_engine_resource_as_openapi_404(client, resources)
     assert response.json()["message"] == "Not found"
 
 
-def test_complete_and_status_return_public_resources(client, resources):
+def test_complete_and_status_return_public_resources(client, resources, observer):
     complete = ok(client.post(
         _base() + "/upload-complete",
         json={"resource_id": "sr_1", "transfer_id": "tr_1"},
@@ -343,6 +360,10 @@ def test_complete_and_status_return_public_resources(client, resources):
     assert complete["resource_id"] == "sr_1"
     assert status["resource_id"] == "sr_1"
     assert [name for name, _ in resources.calls] == ["complete", "status"]
+    assert [record.status for record in observer.records] == [
+        SessionResourceStatus.DEVICE_SYNCING,
+        SessionResourceStatus.UPLOAD_URL_ISSUED,
+    ]
 
 
 def test_openapi_never_exposes_raw_materialization_error_details(client, resources):

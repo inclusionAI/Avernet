@@ -490,6 +490,11 @@ class EcbConfig:
 
     base_url: str = ""
     base_url_pre: str = ""
+    resource_ready_timeout_seconds: float = 10.0
+    resource_ready_worker_threads: int = 2
+    resource_ready_max_in_flight: int = 8
+    resource_ready_dedupe_ttl_seconds: float = 3600.0
+    resource_ready_dedupe_max_entries: int = 10_000
 
 
 @dataclass(frozen=True)

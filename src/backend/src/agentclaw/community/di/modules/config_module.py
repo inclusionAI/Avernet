@@ -22,6 +22,7 @@ from agentclaw.community.core.skill_center import draft_content
 from agentclaw.community.core.task_queue.types import MAX_APP_LEN
 from agentclaw.community.core.skill_center.canonical_center_store import CanonicalCenterStoreConfig
 from agentclaw.community.di import config as cfg
+from agentclaw.community.di.modules.ecb_config import resource_ready_settings
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 from agentclaw.community.plugin_api.http_client import (
     QUALIFIER_BAAS,
@@ -524,15 +525,14 @@ class ConfigModule(Module):
     @singleton
     @provider
     def ecb(self) -> cfg.EcbConfig:
-        """ECB downstream-sync host (neutral empty; corp env overlays set the
-        ``ecb`` yaml block)."""
+        """ECB downstream-sync host (neutral empty; corp env overlays set the ``ecb`` yaml block)."""
         block = _block("ecb")
         defaults = cfg.EcbConfig()
         return cfg.EcbConfig(
             base_url=block.get("base_url", defaults.base_url),
             base_url_pre=block.get("base_url_pre", defaults.base_url_pre),
+            **resource_ready_settings(block, defaults, coerce=_coerce, as_int=_as_int),
         )
-
     @singleton
     @provider
     def gateway(self) -> cfg.GatewayConfig:

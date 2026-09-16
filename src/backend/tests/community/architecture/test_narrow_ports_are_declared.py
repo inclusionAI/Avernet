@@ -62,6 +62,12 @@ from agentclaw.community.core.ports.resource_file_port import ResourceFilePort
 from agentclaw.community.core.ports.skill_package_upload_port import (
     SkillPackageUploadPort,
 )
+from agentclaw.community.core.ports.tc_resource_ready_port import (
+    TcResourceReadyPublisherPort,
+)
+from agentclaw.community.adapters.http.tc_file_upload_integrations.tc_resource_ready_publisher import (
+    HttpTcResourceReadyPublisher,
+)
 
 #: (port, implementer) for every class bound to an outbound port field. Each
 #: port has exactly two, split on where the write lands — the axis every
@@ -76,10 +82,17 @@ _PORT_IMPLEMENTERS = [
     (IdentityFilePort, PlatformIdentity),
     (ResourceFilePort, DeviceResource),
     (ResourceFilePort, PlatformResource),
+    (TcResourceReadyPublisherPort, HttpTcResourceReadyPublisher),
 ]
 
 #: Every outbound port. Members must be abstract for the declarations to gate.
-_PORTS = [ActivationPort, SkillPackageUploadPort, IdentityFilePort, ResourceFilePort]
+_PORTS = [
+    ActivationPort,
+    SkillPackageUploadPort,
+    IdentityFilePort,
+    ResourceFilePort,
+    TcResourceReadyPublisherPort,
+]
 
 
 @pytest.mark.parametrize(

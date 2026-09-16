@@ -56,6 +56,9 @@ Here, both sides can import it and neither owns it.
   bot's identity files — three of `IdentityService`'s fifteen public methods.
 - `resource_file_port.py` — `ResourceFilePort`: uploading, deleting and probing
   a bot's workspace files — three of `ResourceFileService`'s seven.
+- `tc_resource_ready_port.py` — `TcResourceReadyPublisherPort`: publishing the
+  three-field TC resource-ready fact without exposing a concrete HTTP contract
+  to Core.
 
 The `cli_tools` ports (`arca_port`, `delivery_port`) stay where they are. That
 category already splits by family one level down — `CliToolDeliveryPort` with
@@ -103,8 +106,10 @@ provides:
   - SkillPackageUploadPort
   - IdentityFilePort
   - ResourceFilePort
+  - TcResourceReadyPublisherPort
 consumes: []
 consumed_by:
   - "core/bot_config_manifest (apply) — the `mcp` and `skills` materialisers write through these ports; the four implementations are apply/activation_delegates.py, apply/skill_package_upload.py and managed_files/ports.py"
+  - "core/tc_file_upload_integrations — publishes a minimal resource-ready event through an HTTP adapter selected in DI"
 internal_dependencies: []
 ```
