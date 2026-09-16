@@ -16,14 +16,14 @@
 
 | 模块 | 对外接口/订阅 | 输入 | 输出 | 不负责 |
 | --- | --- | --- | --- | --- |
-| TaskCli | `task [goal]`、`task get`、`task list` | 一句话目标、终端对话 | 文本追问、`task_id`、查询结果 | 任务规则、规划、派发、执行 |
-| TaskService | `intake(...)`、`execute(TaskInfoRequest)`、`get_task_dashboard(...)`、`list_tasks(...)` | 对话输入、完整任务请求、查询条件 | 对话结果、`TaskOpResult`、图谱/列表 | TaskPlanner/TaskDispatcher/TaskRunner 的具体策略 |
+| TaskCli | `task-cli [goal]`、`task-cli get`、`task-cli list` | 一句话目标、终端对话 | 文本追问、`task_id`、查询结果 | 任务规则、澄清状态、规划、派发、执行 |
+| TaskService | `intake(TaskIntakeRequest) -> TaskIntakeResult`、`execute(TaskInfoRequest)`、`get_task_dashboard(...)`、`list_tasks(...)` | 澄清对话、已确认任务请求、查询条件 | 澄清结果、`TaskOpResult`、图谱/列表 | TaskPlanner/TaskDispatcher/TaskRunner 的具体策略 |
 | TaskGraphService | `report(TaskCallbackData)`、受控查询 | 报告事实、查询条件 | `TaskOpResult`、语义事件、图谱视图 | 规划、选人、实际执行 |
 | TaskPlanner | 订阅 `PLAN_REQUESTED`；`plan(TaskContext)` | `TaskContext` | `PlanResult`，通过 `report` 上报 | 图谱读写、派发、运行 |
 | TaskDispatcher | 订阅 `DISPATCH_REQUESTED`；`dispatch(TaskNode)` | 一个 `TaskNode` | `TaskNodePatch`，通过 `report` 上报 | 状态迁移、批处理、启动执行 |
 | TaskRunner | 订阅 `EXECUTION_REQUESTED`；`run(TaskNode)` | 一个 `TaskNode` | 启动事实和执行结果，通过 `report` 上报 | 图谱读写、规划、选人 |
 
-`TaskIntake` 是 TaskService 内部的澄清策略和会话组件，不是独立模块或公开服务。TaskCli 只依赖 TaskService。
+`TaskIntake` 不是独立领域模块或公开服务；它只是 `TaskService.intake` 内部维护的澄清会话状态。TaskCli 只依赖 TaskService，且每一轮均调用同一个 `intake` 接口。
 
 ## 3. 领域对象
 
@@ -47,6 +47,66 @@ class TaskContext:
 `graph_version` 属于 `TaskExecutionGraph`，随 `TaskContext` 或 `TaskNode` 携带，用于上报时的乐观并发校验，不是独立业务参数。
 
 `TaskContext` 是面向本次规划的最新完整任务投影：它同时包含任务目标与验收标准、图谱/节点/依赖状态、与本次决策相关的已完成产出、当前未满足的 GAP，以及约束、资源和授权边界。接力模式中，刚完成节点 A 的结果是触发新规划的最新增量，A 的 Bot 仍必须以图谱生成的这个完整投影计算 GAP；不得用 A 的本地结果替代整个上下文。
+
+### 3.1 任务识别澄清契约
+
+TaskCli 与后端只有一个澄清接口和一对输入/输出对象。首次提交、补充回答、选择表达、确认、取消都是自然语言 `message`，不增加 `answer`、`review`、`confirm` 等子接口或 CLI 二级命令：
+
+```python
+class TaskService:
+    async def intake(self, request: TaskIntakeRequest) -> TaskIntakeResult: ...
+
+class TaskIntakeRequest:
+    intake_session_id: str | None
+    message: str
+    target: {type: "BOT" | "GROUP", identifier: str} | None
+
+class TaskIntakeResult:
+    intake_session_id: str
+    status: TaskIntakeStatus
+    task_id: str | None
+    task_info: ...
+    missing_fields: list[str]
+    questions: list[str]
+```
+
+`intake_session_id=None` 仅在首次请求时合法。TaskService 创建会话、生成该 ID、绑定实际处理澄清的 Bot/group 与当前草稿；后续轮次必须带回它，且不得改变已绑定目标。它只关联澄清会话，不是 `task_id`，不进入 `TaskSpec` 或任务图谱。
+
+`TaskIntakeStatus` 仅为 `CLARIFYING`、`READY_FOR_CONFIRMATION`、`CONFIRMED`、`CANCELLED`。显式 TaskCli 入口不返回 `NOT_TASK`；目标不清、信息不足或一句话混合多个独立任务时返回 `CLARIFYING`，并由 `questions` 要求用户明确本次任务。执行中的 `EXECUTING`、`SUCCESS`、`FAILED` 属于正式任务/图谱状态，不是澄清状态。
+
+所有状态均返回同一 `task_info` 字段名及完整字段形状，未知值以空字符串或空列表表达：
+
+```text
+task_info = {
+  title: str,
+  goal: str,
+  background: str,
+  deliverables: list[str],
+  acceptance_criteria: list[str],
+  constraints: list[str],
+  resources: list[...]
+}
+```
+
+`task_info` 是澄清接口的稳定数据字段，不新造与正式任务实体并列的领域对象。
+
+`goal`、`deliverables`、`acceptance_criteria`、`constraints` 是可确认任务的四个必填要素；`title`、`background`、`resources` 同时从用户描述解析，缺失时不阻塞确认（标题可由 goal 生成）。`resources` 只表示用户提供的文档、链接、文件或其他外部资料，不表示运行时资源、Bot、预算或执行模式。
+
+确认轮由 TaskService 在同一次 `intake` 调用内完成 `task_info -> TaskInfoRequest -> execute(...)`。因此对外 `status=CONFIRMED` 时 `task_id` 必须已生成；若 `execute` 失败则整个调用返回提交错误，不得返回虚假的 `CONFIRMED`。TaskCli 不缓存或转换 `task_info`，也不直接调用 `execute`。
+
+确认后字段映射复用现有 `TaskInfoRequest` / `TaskSpec` 结构：
+
+```text
+task_info.title                -> TaskSpec.metadata.title
+task_info.goal                 -> TaskSpec.goal.objective
+task_info.acceptance_criteria  -> TaskSpec.goal.acceptances
+task_info.background           -> TaskSpec.context.background
+task_info.deliverables         -> TaskSpec.context.extend_props.deliverables
+task_info.constraints          -> TaskSpec.context.extend_props.constraints
+task_info.resources            -> TaskSpec.context.extend_props.resources
+```
+
+`TaskSpec` 不包含 `task_id`；任务身份只属于正式任务记录与 `TaskExecutionGraph`，节点身份只属于 `TaskNode`。`TaskSpec.metadata.instruction` 只承载系统指令或受控运行时配置，不能由用户任务信息拼接而成。
 
 ## 4. 统一上报和图谱写入
 
@@ -100,8 +160,8 @@ class TaskRunner(Protocol):
 
 ## 6. 标准数据流
 
-1. TaskCli 将每轮输入交给 `TaskService.intake(...)`；TaskService 内部完成识别、四要素澄清和确认。
-2. 确认后，TaskService 调用 `execute(TaskInfoRequest)` 创建正式图谱和根节点，产生 `PLAN_REQUESTED(TaskContext)`。
+1. TaskCli 将每轮输入交给 `TaskService.intake(TaskIntakeRequest)`；TaskService 创建/恢复澄清会话，并通过目标 Bot/group 已挂载的 `task-loop` 完成识别、四要素澄清和确认。
+2. 确认轮中，TaskService 内部将 `task_info` 映射为 `TaskInfoRequest` 并调用 `execute(...)`，创建正式图谱和根节点，产生 `PLAN_REQUESTED(TaskContext)`；成功后以 `TaskIntakeResult(status=CONFIRMED, task_id=...)` 返回 TaskCli。
 3. TaskPlanner 上报 `PLAN`；图谱接纳后为就绪节点产生 `DISPATCH_REQUESTED(TaskNode)`。
 4. TaskDispatcher 上报 `DISPATCH`；图谱接纳后产生 `EXECUTION_REQUESTED(TaskNode)`。
 5. TaskRunner 启动 executor，并上报启动事实；执行实体上报最终结果。
@@ -270,17 +330,59 @@ bindings:
 
 TaskCli 对以上 case 一律保持相同：用户或 Agent 只输入任务目标；Profile 匹配、策略选择和插件版本冻结由 TaskService 在任务创建时完成。
 
-## 9. TaskCli 与 TaskService
+## 9. TaskCli、目标路由与任务识别澄清
 
 TaskCli 是人和 Agent 的统一终端入口，公开命令保持极简：
 
 ```text
-task [<一句话任务目标>]
-task get <task_id>
-task list
+task-cli [<一句话任务目标>]
+task-cli get <task_id>
+task-cli list
 ```
 
-`task` 在同一会话中完成任务识别、补齐 `goal`、`deliverables`、`acceptance_criteria`、`constraints`、展示汇总和最终确认。确认前不创建正式任务；确认后返回 `task_id`。不暴露 `intake_id`、`answer`、`review`、`confirm`、workflow 或 YAML 二级命令。
+`task-cli` 在一个由后端创建的新澄清会话中完成任务识别、补齐 `goal`、`deliverables`、`acceptance_criteria`、`constraints`、展示汇总和最终确认。确认前不创建正式任务；确认并成功提交后返回 `task_id`。不暴露 `intake_id`、`answer`、`review`、`confirm`、workflow 或 YAML 二级命令。
+
+### 9.1 TaskCli 与 task-loop 的职责
+
+TaskCli 不能也不应直接加载 `SKILL.md` 或运行 Skill。调用路径为：
+
+```text
+TaskCli → TaskService.intake → Bot Runtime/Chat API → 已挂载 task-loop
+        ← TaskIntakeResult  ← 结构化 task_info / 澄清状态
+```
+
+task-loop 只根据当前消息和已绑定 Bot 会话历史做任务识别、信息抽取、缺口提问与确认判定；它不创建任务、执行任务、写图谱、调用 Planner/Dispatcher/Runner。其核心输出是渠道无关的 `task_info` 与澄清判定；TaskService 将其规范化为 `TaskIntakeResult`。产品聊天可将该结果渲染为 AixUI 卡片，TaskCli 仅渲染为终端文本。TaskService 负责会话持久化、权限校验、目标路由和确认后的 `execute` 编排。
+
+### 9.2 发起身份与目标选择
+
+人身份可使用以下命令；`@` 只在首次请求映射为 `TaskIntakeRequest.target`：
+
+```text
+task-cli [<一句话任务目标>]
+task-cli [<一句话任务目标>] @<bot>
+task-cli [<一句话任务目标>] @<group>
+```
+
+- 显式 Bot/group 目标优先，TaskService 必须校验访问权限、运行状态、任务认领权限和 task-loop 激活状态；不满足时明确拒绝，不静默回退。
+- 未显式指定时，按“用户同名 Bot → 需求 Bot → 随机一个合格 Bot”的顺序选择；没有合格 Bot 时提示用户创建 Bot。
+- 合格 Bot 是用户有权限访问、已启用、任务认领已开启、运行时可用且 task-loop 已激活的 Bot。协作群仅由显式指定；后端解析一个具有同等资格的 intake owner/master Bot 承载澄清。
+- Bot 身份调用 `task-cli [<一句话任务目标>]` 时，目标固定为当前 Bot，并新建澄清会话；不使用默认、随机或其他 Bot。后续确认仍遵守该 Bot 的授权策略。
+
+### 9.3 终端交互与确认后结果
+
+TaskCli 根据 `TaskIntakeResult` 渲染自然语言追问和汇总；它不向用户暴露 `intake_session_id`。`READY_FOR_CONFIRMATION` 时展示 `task_info` 摘要并等待用户继续输入“确认提交”等自然语言消息。`CONFIRMED` 时展示任务已提交执行、`task_id`、标题、初始状态和 `task-cli get <task_id>` 查询提示；不会再把确认当作一个待处理的 UI 状态。
+
+### 9.4 多轮澄清示例
+
+以“上线支付风控模型 v3”为例，三个维度的交互如下；每轮均为同一个 `intake` 接口。
+
+| 轮次 | 用户 / TaskCli 输入 | 接口返回 | 系统展示或后续动作 |
+| --- | --- | --- | --- |
+| 1 | `task-cli "帮我上线支付风控模型 v3"`；`{intake_session_id: null, message: "帮我上线支付风控模型 v3", target: null}` | `{intake_session_id: "tis_01HXYZ", status: "CLARIFYING", task_info: {title: "支付风控模型 v3 上线", goal: "将支付风控模型 v3 上线生产", background: "", deliverables: [], acceptance_criteria: [], constraints: [], resources: []}, missing_fields: ["deliverables", "acceptance_criteria", "constraints"], questions: ["本次需要交付哪些具体产物？", "上线成功的验收标准是什么？", "是否有时间窗口、灰度范围或变更限制？"]}` | 展示目标与三个问题。 |
+| 2 | 用户回答：“交付上线记录、监控看板链接和回滚预案；先灰度 10%，核心指标不劣化；本周五 18 点后执行，不能影响已有线上版本。”；TaskCli 原样带回 `tis_01HXYZ` | `status: "READY_FOR_CONFIRMATION"`；`task_info.deliverables=[上线记录, 监控看板链接, 回滚预案]`；`task_info.acceptance_criteria=[完成生产灰度发布, 灰度比例达到 10%, 核心指标不劣化]`；`task_info.constraints=[本周五 18:00 后执行, 不得影响当前线上版本]`；`missing_fields=[]` | 展示完整任务摘要，并询问“是否确认提交执行？”。 |
+| 3 | 用户：“确认提交”；`{intake_session_id: "tis_01HXYZ", message: "确认提交", target: null}` | `status: "CONFIRMED"`，返回完整 `task_info` 与 `task_id: "task_01HABC"` | 后端已在该轮完成 `task_info -> TaskInfoRequest -> execute(...)`；终端展示“任务已提交执行”、任务 ID、标题、初始状态与 `task-cli get task_01HABC`。 |
+
+若第 3 轮 `execute(...)` 失败，接口返回提交错误而不是 `CONFIRMED`；澄清会话和草稿保留，用户可在同一会话修改信息或再次确认。
 
 ## 10. 目标态质量约束
 

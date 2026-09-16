@@ -47,12 +47,17 @@
 
 ## 5. 统一任务入口
 
-- [ ] TaskService 内部完成任务识别、四要素澄清和确认；TaskIntake 不作为公开模块。
-- [ ] TaskCli 仅公开 `task [goal]`、`task get <task_id>`、`task list`。
-- [ ] 确认后由 TaskService 的 `execute(TaskInfoRequest)` 创建正式任务；确认前没有 `task_id`。
+- [ ] TaskService 仅暴露统一的 `intake(TaskIntakeRequest) -> TaskIntakeResult` 澄清接口；首次、补答、确认、取消均使用该接口和自然语言 `message`，不增加 answer/review/confirm 子接口。
+- [ ] TaskService 在首次调用生成并持久化 `intake_session_id`，绑定目标 Bot/group；该 ID 仅由 TaskCli 回传，不是 `task_id`、不进入 TaskSpec 或图谱、也不向终端用户展示。
+- [ ] TaskCli 通过 TaskService 调用目标 Bot/group 已挂载的 task-loop，不直接加载 Skill；task-loop 只做识别、澄清和确认，不创建任务或执行任务。
+- [ ] 所有澄清状态使用同一个 `task_info`：`title`、`goal`、`background`、`deliverables`、`acceptance_criteria`、`constraints`、`resources`；四要素为 goal/deliverables/acceptance_criteria/constraints。
+- [ ] TaskService 将确认后的 `task_info` 映射为既有 `TaskInfoRequest`，在同一次 intake 调用内执行 `execute(...)`；仅 execute 成功后返回 `CONFIRMED` 和 `task_id`。
+- [ ] TaskSpec 移除 task_id；用户信息不拼接到 `metadata.instruction`，deliverables/constraints/resources 使用 `context.extend_props`。
+- [ ] TaskCli 仅公开 `task-cli [goal]`、`task-cli get <task_id>`、`task-cli list`。
+- [ ] 人身份支持未指定目标、显式 `@bot`、显式 `@group`；未指定时按同名 Bot、需求 Bot、随机合格 Bot 选择。Bot 身份固定使用当前 Bot。显式目标不合格时必须拒绝而非回退。
 - [ ] Workflow 和 YAML 仅属于 executor 实现，不成为 TaskCli 的任务类型或二级命令。
 
-验收：人或 Agent 从一句话开始即可完成澄清、确认和执行；TaskCli 不暴露 `intake_id`、`answer`、`review` 或 `confirm`。
+验收：人或 Agent 从一句话开始即可完成澄清、确认和执行；TaskCli 不暴露 `intake_id`、`answer`、`review` 或 `confirm`；确认成功返回已经创建的 `task_id`。
 
 ## 6. 架构约束与验证
 

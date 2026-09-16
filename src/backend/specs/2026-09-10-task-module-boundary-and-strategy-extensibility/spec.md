@@ -4,7 +4,7 @@
 
 将任务模块重构为图谱状态驱动的事件反应链。`TaskGraphService` 是图谱事实、状态机、统一上报入口和事件源；TaskPlanner、TaskDispatcher、TaskRunner 分别订阅规划、派发、执行事件，处理后通过同一 report 接口回报图谱，不直接互调、不直接读写图谱实现。所有模式都遵循同一逻辑链“规划 → 派发 → 执行”；模式只改变每个逻辑角色的实际执行者及 Graph 对事件的定向投递目标。
 
-`TaskCli` 是人和 Agent 的统一、极简入口：一条自然语言目标在 CLI 内部完成识别、四要素澄清和确认，确认后才创建正式执行任务并返回 `task_id`。主动任务发现仍是独立能力；主动输入后的识别与澄清属于统一入口。
+`TaskCli` 是人和 Agent 的统一、极简入口：一条自然语言目标经后端任务识别澄清服务完成识别、四要素澄清和确认，确认成功后才创建正式执行任务并返回 `task_id`。主动任务发现仍是独立能力；主动输入后的识别与澄清属于统一入口。
 
 ## Motivation
 
@@ -29,8 +29,8 @@
 - [ ] TaskRunner consumes one already-dispatched `TaskNode` and reports execution facts through the unified report interface.
 - [ ] A graph report atomically persists its accepted fact and emits the next semantic event through a reliable outbox or equivalent mechanism.
 - [ ] TaskPlanner, TaskDispatcher and TaskRunner do not directly call each other. They subscribe respectively to `PLAN_REQUESTED`、`DISPATCH_REQUESTED`、`EXECUTION_REQUESTED` events.
-- [ ] Stale planning or dispatch reports are rejected using the source `graph_version`, change no graph state, and are retried only from a later graph event.
-- [ ] Centralized planning, master-slave execution and relay planning work through the same logical TaskPlanner → TaskDispatcher → TaskRunner report/event chain; they differ in strategy, actual handler and event affinity, rather than adding direct module calls.
+- [ ] Stale planning or dispatch reports are rejected using the `graph_version` carried by their `TaskContext` or `TaskNode`, change no graph state, and are retried only from a later graph event.
+- [ ] Centralized planning, master-slave execution and relay planning work through the same logical TaskPlanner → TaskDispatcher → TaskRunner report/event chain; they differ in strategy, actual handler and Graph-internal event routing target, rather than adding direct module calls.
 - [ ] In relay mode, a node result accepted by the graph creates a versioned `PLAN_REQUESTED` targeted to the completing Bot runtime. Its `TaskContext` contains the task goal and acceptance criteria, graph/node/dependency state, relevant completed outputs (including but not limited to that node's output), current GAP, and applicable constraints/resource/authorization scope.
 - [ ] In relay mode, Graph 定向投递规划、必要时派发事件给上游完成者 runtime；Graph 根据报告身份、`graph_version`、父节点关系、深度和既有回调幂等机制校验续接。过期、重复或越权报告不改变图谱，也不启动 executor。
 - [ ] Dispatch resolves an execution carrier, not only a Bot: it may select a single Bot, a cooperation group, or escalate to BBS when no eligible single Bot/group matches. The selected `run_mode` and diagnosis are reported in the final dispatch patch.
@@ -39,14 +39,18 @@
 - [ ] A tenant-scoped, declarative `TaskRuntimeProfile` selects approved strategy and executor versions; TaskService resolves and freezes the selected profile and plugin digests when creating a task.
 - [ ] A TaskDispatcher strategy chain evaluates alternatives before reporting: only the final `TaskNodePatch` is reported; a TaskRunner strategy is selected exactly once by run mode and is never automatically retried by another strategy after an external start attempt.
 - [ ] Plugin adapters cannot directly invoke graph write/query operations, TaskService execution, or another task module; all task facts still enter through `TaskGraphService.report`.
-- [ ] TaskCli exposes an interactive `task [goal]` creation conversation plus `task get` and `task list`; it exposes no `workflow_id`、YAML、task type、run mode、draft/intake ID、graph control or internal execution command.
-- [ ] TaskCli does not use AixUI cards. Its internal clarification draft is not a formal task and is not exposed as a normal user-facing object.
+- [ ] TaskCli exposes an interactive `task-cli [goal]` creation conversation plus `task-cli get` and `task-cli list`; it exposes no `workflow_id`、YAML、task type、run mode、draft/intake ID、graph control or internal execution command.
+- [ ] TaskCli only calls `TaskService.intake(TaskIntakeRequest) -> TaskIntakeResult` for every clarification turn. It never loads a Skill, stores the clarification draft, maps `task_info` into an execution request, or directly calls `execute`.
+- [ ] `TaskService.intake` creates and owns the clarification session, routes each message to the selected Bot/group's mounted `task-loop`, and returns a unified `TaskIntakeResult`. On a confirmed turn it internally maps the confirmed `task_info` to `TaskInfoRequest` and calls the existing `execute` exactly once.
+- [ ] `TaskCli` does not use AixUI cards. `task-loop` returns a channel-neutral structured result which product chat may render as an AixUI card and TaskCli renders as terminal text. Its clarification draft is not a formal task and is not exposed as a normal user-facing object.
+- [ ] `task-loop` uses one stable `task_info` shape in every clarification state: `title`、`goal`、`background`、`deliverables`、`acceptance_criteria`、`constraints`、`resources`. `goal`、`deliverables`、`acceptance_criteria`、`constraints` are required before confirmation; the other fields are parsed opportunistically.
+- [ ] `TaskSpec` contains no `task_id`. Confirmed facts map to existing TaskSpec fields: title to `metadata.title`, goal to `goal.objective`, acceptance criteria to `goal.acceptances`, background to `context.background`, and deliverables/constraints/resources to `context.extend_props`; `metadata.instruction` only carries system/runtime instructions.
 - [ ] `TaskNode`、`TaskSpec`、`PlanResult`、`TaskNodePatch`、`TaskCallbackData`、`TaskOpResult`、`NodeOpResult` 和 TaskRunner executor 分层被复用；仅 `TaskContext` 作为图谱到 TaskPlanner 的上下文契约。
 - [ ] `TaskIntake` 是 TaskService 内部能力而非公开服务。TaskCli 只调用 TaskService；确认后由 `execute(TaskInfoRequest) -> TaskOpResult` 创建正式任务，Intake 不创建节点或调度执行。
 
 ## In Scope
 
-- TaskCli unified entry and the internal recognition, four-element clarification and confirmation flow.
+- TaskCli unified entry, target resolution, and the backend-owned recognition, four-element clarification and confirmation flow.
 - Graph-state-driven TaskPlanner, TaskDispatcher, TaskRunner and report/event interfaces.
 - Reusable task recognition, four-element clarification and confirmation policy.
 - Centralized, master-slave and relay strategy support, including Graph-controlled targeted delivery and continuation validation for relay execution.
@@ -67,4 +71,3 @@
 
 - Which exact task facts belong in `TaskContext`, especially when relay Bots have restricted visibility?
 - Which existing event/outbox infrastructure is the repository-standard reliable publisher for graph events?
-- What are the minimal input/output fields and session-state ownership for `TaskService.intake(...)`?
