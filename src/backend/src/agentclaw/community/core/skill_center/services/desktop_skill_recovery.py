@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import time
 from collections.abc import Callable
 from enum import StrEnum
 
@@ -27,6 +26,7 @@ from agentclaw.community.core.skill_center.desktop_skill_recovery_protocol impor
     DesktopSkillRecoveryServiceProtocol,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    ENGINE_SKILL_MAPPING_UNSUPPORTED_CODE,
     ProjectionScope,
     RuntimeProjectionResult,
     RuntimeProjectionIssue,
@@ -52,13 +52,10 @@ from agentclaw.community.core.task_queue.types import (
     TaskOutcome,
 )
 from agentclaw.community.log import get_logger
-from agentclaw.community.di.config import DesktopSkillRecoveryConfig
-from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.utils.env_utils import get_current_env
 
 
 DESKTOP_SKILL_RECOVERY_TASK = "skill_center.desktop_skill_recovery"
-DESKTOP_SKILL_RECOVERY_DEADLINE_SECONDS = 30 * 60
 DESKTOP_SKILL_RECOVERY_DELAY_SECONDS = 5.0
 
 _NORMAL_PENDING_CODES = frozenset(
@@ -152,9 +149,18 @@ def is_normal_center_content_wait(code: str) -> bool:
 class DesktopSkillRecoveryService(DesktopSkillRecoveryServiceProtocol):
     """Common entry-point adapter: Desktop filter plus durable ensure."""
 
-    def __init__(self, *, bots: BotRepository, tasks: TaskQueueService) -> None:
+    def __init__(
+        self,
+        *,
+        bots: BotRepository,
+        tasks: TaskQueueService,
+        task_deadline_seconds: int,
+    ) -> None:
+        if task_deadline_seconds <= 0:
+            raise ValueError("task_deadline_seconds must be positive")
         self._bots = bots
         self._tasks = tasks
+        self._task_deadline_seconds = task_deadline_seconds
 
     def ensure(self, *, owner_id: str, bot_id: str) -> EnqueueResult | None:
         owner_id = _required_text(owner_id, "owner_id")
@@ -176,7 +182,7 @@ class DesktopSkillRecoveryService(DesktopSkillRecoveryServiceProtocol):
         return self._tasks.enqueue(
             DESKTOP_SKILL_RECOVERY_TASK,
             {"owner_id": owner_id, "bot_id": bot_id},
-            deadline_seconds=DESKTOP_SKILL_RECOVERY_DEADLINE_SECONDS,
+            deadline_seconds=self._task_deadline_seconds,
             idempotency_key=build_desktop_skill_recovery_key(
                 owner_id=owner_id, bot_id=bot_id
             ),
@@ -326,6 +332,18 @@ class DesktopSkillRecoveryTaskHandler:
                 and len(permanent_by_name) == len(latest_center_keys)
             ),
         )
+        if any(
+            issue.code == ENGINE_SKILL_MAPPING_UNSUPPORTED_CODE
+            for issue in projection.issues
+        ):
+            logger.warning(
+                "[DesktopSkillRecovery] Engine mapping contract unsupported "
+                "owner_id=%s bot_id=%s engine=%s binding_id=%s",
+                owner_id,
+                bot_id,
+                latest_plan.engine,
+                latest_bot.get("binding_id"),
+            )
         return self._outcome(
             projection,
             prepare_pending=any(
@@ -441,6 +459,11 @@ class DesktopSkillRecoveryTaskHandler:
         prepare_pending: bool,
         prepare_retryable_error: bool,
     ) -> TaskOutcome:
+        if any(
+            issue.code == ENGINE_SKILL_MAPPING_UNSUPPORTED_CODE
+            for issue in projection.issues
+        ):
+            return Fail(ENGINE_SKILL_MAPPING_UNSUPPORTED_CODE)
         retryable = tuple(issue for issue in projection.issues if issue.retryable)
         if any(issue.code == _DEVICE_OFFLINE_CODE for issue in retryable):
             continuation = RecoveryContinuation.COMPLETE_WAITING_FOR_EVENT
@@ -504,143 +527,10 @@ class DesktopSkillRecoveryTaskHandler:
         return Complete()
 
 
-class DesktopSkillRecoverySweeper(LifecycleBase):
-    """Page live, bound Desktop Bots and only ensure their common task."""
-
-    def __init__(
-        self,
-        *,
-        bots: BotRepository,
-        recovery: DesktopSkillRecoveryServiceProtocol,
-        config: DesktopSkillRecoveryConfig,
-    ) -> None:
-        self._bots = bots
-        self._recovery = recovery
-        self._config = config
-        self._running = False
-        self._task: asyncio.Task | None = None
-
-    async def startup(self) -> None:
-        if not self._config.enabled:
-            logger.info("[DesktopSkillRecovery] sweep disabled")
-            return
-        self._running = True
-        await asyncio.to_thread(self.sweep_once)
-        self._task = asyncio.create_task(self._loop())
-
-    async def shutdown(self) -> None:
-        self._running = False
-        if self._task is not None and not self._task.done():
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-
-    async def _loop(self) -> None:
-        while self._running:
-            try:
-                await asyncio.sleep(self._config.sweep_interval_seconds)
-                if self._running:
-                    await asyncio.to_thread(self.sweep_once)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("[DesktopSkillRecovery] sweep round failed")
-
-    def sweep_once(self) -> tuple[int, int]:
-        """Return ``(eligible, ensured)`` for deterministic tests/monitoring."""
-        started_at = time.monotonic()
-        scanned = 0
-        eligible = 0
-        ensured = 0
-        skipped_offline = 0
-        skipped_terminal = 0
-        skipped_unknown_status = 0
-        task_created = 0
-        task_joined_existing = 0
-        ensure_failed = 0
-        page = 1
-        while True:
-            total, bots = self._bots.search_bots(
-                bot_type="desktop",
-                page=page,
-                page_size=self._config.sweep_page_size,
-            )
-            for bot in bots:
-                scanned += 1
-                owner_id = bot.get("owner_id")
-                bot_id = bot.get("bot_id")
-                if (
-                    bot.get("binding_id") is None
-                    or not isinstance(owner_id, str)
-                    or not isinstance(bot_id, str)
-                ):
-                    continue
-                disposition = _desktop_recovery_disposition(bot.get("status"))
-                if disposition is DesktopRecoveryDisposition.WAIT_FOR_DEVICE:
-                    skipped_offline += 1
-                    continue
-                if disposition is DesktopRecoveryDisposition.STOP:
-                    if _is_unknown_recovery_status(bot.get("status")):
-                        skipped_unknown_status += 1
-                        logger.warning(
-                            "[DesktopSkillRecovery] sweep skipped unknown Bot "
-                            "status owner_id=%s bot_id=%s status=%r",
-                            owner_id,
-                            bot_id,
-                            bot.get("status"),
-                        )
-                    else:
-                        skipped_terminal += 1
-                    continue
-                eligible += 1
-                try:
-                    result = self._recovery.ensure(
-                        owner_id=owner_id,
-                        bot_id=bot_id,
-                    )
-                    if result is not None:
-                        ensured += 1
-                        if bool(getattr(result, "created", False)):
-                            task_created += 1
-                        else:
-                            task_joined_existing += 1
-                except Exception:
-                    ensure_failed += 1
-                    logger.exception(
-                        "[DesktopSkillRecovery] sweep ensure failed "
-                        "owner_id=%s bot_id=%s",
-                        owner_id,
-                        bot_id,
-                    )
-            if not bots or page * self._config.sweep_page_size >= total:
-                break
-            page += 1
-        logger.info(
-            "[DesktopSkillRecovery] sweep completed scanned=%s eligible=%s "
-            "skipped_offline=%s skipped_terminal=%s "
-            "skipped_unknown_status=%s task_created=%s "
-            "task_joined_existing=%s ensure_failed=%s duration_ms=%s",
-            scanned,
-            eligible,
-            skipped_offline,
-            skipped_terminal,
-            skipped_unknown_status,
-            task_created,
-            task_joined_existing,
-            ensure_failed,
-            round((time.monotonic() - started_at) * 1000, 3),
-        )
-        return eligible, ensured
-
-
 __all__ = [
-    "DESKTOP_SKILL_RECOVERY_DEADLINE_SECONDS",
     "DESKTOP_SKILL_RECOVERY_DELAY_SECONDS",
     "DESKTOP_SKILL_RECOVERY_TASK",
     "DesktopSkillRecoveryService",
-    "DesktopSkillRecoverySweeper",
     "DesktopSkillRecoveryTaskHandler",
     "build_desktop_skill_recovery_key",
     "is_normal_center_content_wait",

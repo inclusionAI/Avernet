@@ -12,7 +12,6 @@ from agentclaw.community.core.skill_center.desktop_skill_recovery_protocol impor
 from agentclaw.community.core.skill_center.services.desktop_skill_recovery import (
     DESKTOP_SKILL_RECOVERY_TASK,
     DesktopSkillRecoveryService,
-    DesktopSkillRecoverySweeper,
     DesktopSkillRecoveryTaskHandler,
 )
 from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
@@ -35,12 +34,11 @@ from agentclaw.community.di.modules.desktop_skill_recovery_config_module import 
 )
 
 
-def test_desktop_skill_recovery_service_handler_sweeper_and_registry_resolve(
+def test_desktop_skill_recovery_service_handler_and_registry_resolve(
     test_injector,
 ) -> None:
     service = test_injector.get(DesktopSkillRecoveryServiceProtocol)
     handler = test_injector.get(DesktopSkillRecoveryTaskHandler)
-    sweeper = test_injector.get(DesktopSkillRecoverySweeper)
     registrar = test_injector.get(SkillCenterGroup4TaskRegistrar)
     registry = test_injector.get(HandlerRegistry)
     projector = test_injector.get(BotRuntimeProjectorProtocol)
@@ -48,7 +46,6 @@ def test_desktop_skill_recovery_service_handler_sweeper_and_registry_resolve(
 
     assert isinstance(service, DesktopSkillRecoveryService)
     assert isinstance(handler, DesktopSkillRecoveryTaskHandler)
-    assert isinstance(sweeper, DesktopSkillRecoverySweeper)
     assert isinstance(projector, RecoveringBotRuntimeProjector)
     assert handler._projector is raw_projector
 
@@ -57,35 +54,25 @@ def test_desktop_skill_recovery_service_handler_sweeper_and_registry_resolve(
     assert registry.wakes_on_enqueue(DESKTOP_SKILL_RECOVERY_TASK) is True
 
 
-def test_desktop_skill_recovery_config_reads_valid_sweep_values(monkeypatch) -> None:
+def test_desktop_skill_recovery_config_reads_task_deadline(monkeypatch) -> None:
     monkeypatch.setattr(
         desktop_skill_recovery_config_module,
         "_block",
-        lambda: {
-            "enabled": False,
-            "sweep_interval_seconds": 601,
-            "sweep_page_size": 23,
-        },
+        lambda: {"task_deadline_seconds": 600},
     )
 
     value = DesktopSkillRecoveryConfigModule().desktop_skill_recovery()
 
-    assert value.enabled is False
-    assert value.sweep_interval_seconds == 601
-    assert value.sweep_page_size == 23
+    assert value.task_deadline_seconds == 600
 
 
-@pytest.mark.parametrize(
-    "field,value",
-    [("sweep_interval_seconds", 0), ("sweep_page_size", 0)],
-)
-def test_desktop_skill_recovery_config_rejects_nonpositive_values(
-    monkeypatch, field, value
+def test_desktop_skill_recovery_config_rejects_nonpositive_deadline(
+    monkeypatch,
 ) -> None:
     monkeypatch.setattr(
         desktop_skill_recovery_config_module,
         "_block",
-        lambda: {field: value},
+        lambda: {"task_deadline_seconds": 0},
     )
 
     with pytest.raises(ValueError, match="must be positive"):
@@ -95,10 +82,9 @@ def test_desktop_skill_recovery_config_rejects_nonpositive_values(
 @pytest.mark.parametrize(
     "block",
     [
-        {"enabled": "not-bool"},
-        {"sweep_interval_seconds": float("nan")},
-        {"sweep_page_size": True},
-        {"sweep_page_szie": 10},
+        {"task_deadline_seconds": True},
+        {"task_deadline_seconds": 0},
+        {"sweep_interval_seconds": 600},
     ],
 )
 def test_desktop_skill_recovery_config_rejects_invalid_schema(

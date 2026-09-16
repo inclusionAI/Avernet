@@ -64,7 +64,6 @@ provides:
   - "DesktopSkillRecoveryServiceProtocol"
   - "DesktopSkillRecoveryService"
   - "DesktopSkillRecoveryTaskHandler"
-  - "DesktopSkillRecoverySweeper"
   - "SkillParser"
   - "SkillMetadata"
   - "SkillManifestError"
@@ -413,15 +412,14 @@ deletion and Pool cutover/rollback paths. Phase 1 intentionally has no
 cache-backed cross-command Bot mutation fence; durable serialization is
 deferred to the task-queue design.
 
-`desktop_skill_recovery.py` owns the durable level-triggered follow-up:
+`desktop_skill_recovery.py` owns the durable event-triggered follow-up:
 `skill_center.desktop_skill_recovery`, one task type deduped by
 `(env, app, owner_id, bot_id)`. Its payload contains only `owner_id + bot_id`;
 it never freezes an action, Version, mapping, or signed URL. Set/Direct
 mutation completion (including Reference final-add), Track Latest Center
 waiting, and current-binding startup/reconnect events all call the same
-`DesktopSkillRecoveryService.ensure` seam. A low-frequency paged sweeper calls
-that same seam for live bound Desktop Bots and performs no download or Runtime
-projection itself.
+`DesktopSkillRecoveryService.ensure` seam. There is no periodic full-fleet
+sweeper; elapsed time alone never creates a new recovery task.
 
 Ordinary `project` and direct `apply_plan` calls pass through
 `RecoveringBotRuntimeProjector`, so callers such as active Local replacement
@@ -436,8 +434,8 @@ the only Runtime write. Healthy package/download/capacity waiting uses a
 five-second `Reschedule`; transient storage/network/device failures use queue
 `Retry`; permanent exact-package preparation issues replace any derived
 package-pending observation for that same current mapping, while other
-recoverable mappings continue. Permanent degraded items do not pin the live key. The task deadline
-is 30 minutes, and terminal Queue transitions release the Bot-level key.
+recoverable mappings continue. Permanent degraded items do not pin the live key. The configured task deadline
+is 10 minutes, and terminal Queue transitions release the Bot-level key.
 Skill recovery never declares MCP scope or updates Passport. Pool migration
 retains its independent `skills_pool.reconcile` task and exclusive mapping
 ownership during transition.

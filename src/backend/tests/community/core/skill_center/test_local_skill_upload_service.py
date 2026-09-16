@@ -51,8 +51,6 @@ from agentclaw.community.core.skills_pool.types import (
     SkillLayout,
     SkillLayoutPhase,
 )
-
-
 def _skill_md(name: str = "upload-skill", description: str = "useful") -> bytes:
     return f"---\nname: {name}\ndescription: {description}\n---\n".encode()
 
@@ -1451,6 +1449,7 @@ async def test_active_replacement_preserves_enqueue_failure_and_new_content(capl
         recovery=DesktopSkillRecoveryService(
             bots=_DesktopBots(),  # type: ignore[arg-type]
             tasks=_FailingTasks(),  # type: ignore[arg-type]
+            task_deadline_seconds=600,
         ),
     )
 

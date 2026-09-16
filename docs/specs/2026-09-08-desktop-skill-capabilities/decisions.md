@@ -2,6 +2,14 @@
 
 状态：Q1–Q29总体方案及统一恢复约束已定稿；业务待实现。本文件提取最终选择和理由，原始探索中的未采纳候选不作为实施指令。详细目标合同及验收以[spec.md](spec.md)为准。
 
+> 2026-09-16 修订：周期性 `DesktopSkillRecoverySweeper` 已由
+> [ADR 0015](../../adr/0015-event-driven-desktop-skill-recovery.md) 和
+> [事件驱动恢复 Spec](../../../src/backend/specs/2026-09-16-event-driven-desktop-skill-recovery/spec.md)
+> 明确废弃。本文中 Q9/Q10/Q20 以及 R8-R15 关于 Sweep、低频扫漏和
+> `desktop_skill_recovery.enabled` 的描述仅保留为历史决策记录，不再是实施合同。
+> 当前恢复只由 Runtime Ready/Desired-State/Track Latest 等事件触发，单个任务的
+> 截止时间为 600 秒。
+
 ## 已定选择
 
 | 决策 | 最终选择与理由 | 规范落点 |
