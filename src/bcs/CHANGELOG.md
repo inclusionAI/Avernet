@@ -8,6 +8,13 @@ All notable BCS changes are documented here. Items follow
 
 ### Breaking
 
+- **Session listing no longer creates a legacy session for an empty group.**
+  `GET /groups/{id}/sessions` (including `bcs session list`) now returns
+  `200 OK` with `items: []` for sessionless groups without creating a
+  `{group_id}:00000000` session or delivering initial GroupContext messages.
+  Callers that need a session must explicitly create one. Existing legacy
+  sessions and the initial session created during group creation are unchanged.
+
 - **Removed `POST /bot/events/coordination` HTTP Provider coordination
   callback.** The `ProviderCoordinationEventRequest` /
   `ProviderCoordinationEventKindDto` / `ProviderCoordinationIntentDto`

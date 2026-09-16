@@ -1759,9 +1759,8 @@ enum SessionCommands {
     /// Create a new session under a group.
     ///
     /// The server assigns a random session id of the form `{group_id}:{8_hex}`.
-    /// Note: this id will not be the same as the legacy fallback session
-    /// (`{group_id}:00000000`) that some clients expect; once any session
-    /// exists the fallback is no longer auto-created on list.
+    /// Listing sessions never creates one. Existing legacy session ids
+    /// (`{group_id}:00000000`) remain supported.
     Create {
         /// Group ID this session belongs to
         #[arg(long)]

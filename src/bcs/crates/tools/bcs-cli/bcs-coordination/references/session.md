@@ -11,7 +11,9 @@
 
 ### Legacy 兼容
 
-首次 `list` 一个没有 Session 的 Group 时，后端会自动创建 `{group_id}:00000000` 作为默认 Session。老群无感知。
+已有的 `{group_id}:00000000` Session 仍可正常访问。`session list` 只查询已有 Session；没有 Session 的 Group 返回空列表，重复查询也不会自动创建 Session 或发送初始群上下文。需要开始会话时，请显式调用 `session create --group "<group_id>"`。
+
+此变化不影响建群时默认创建初始 Session 的行为。
 
 ### 生命周期
 
