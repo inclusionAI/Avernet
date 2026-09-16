@@ -64,8 +64,8 @@ def client_service():
 def test_application_success_without_user_cookie(client_service, caplog, claims):
     client, service = client_service
     caplog.set_level(logging.INFO)
-    credential = token(**claims)
-    response = client.post(PATH, params=PARAMS, headers={"X-Avernet-Principal": credential})
+    encoded_principal = token(**claims)
+    response = client.post(PATH, params=PARAMS, headers={"X-Avernet-Principal": encoded_principal})
     assert response.status_code == 200
     assert response.json()["data"]["connection"]["token"] == "response-secret"
     assert response.json()["success"] is True
@@ -74,7 +74,7 @@ def test_application_success_without_user_cookie(client_service, caplog, claims)
     assert "app_caller_connection.request" in caplog.text
     assert "app_caller_connection.success" in caplog.text
     assert "active" in caplog.text and "19" in caplog.text
-    for secret in (credential, "response-secret", "nested-secret", "url-secret", KEY, "payload-secret", "other-tenant-secret"):
+    for secret in (encoded_principal, "response-secret", "nested-secret", "url-secret", KEY, "payload-secret", "other-tenant-secret"):
         assert secret not in caplog.text
 
 
@@ -82,7 +82,7 @@ def test_application_success_without_user_cookie(client_service, caplog, claims)
 def test_authentication_denied_before_service(client_service, caplog, case):
     client, service = client_service
     caplog.set_level(logging.INFO)
-    credential = {
+    encoded_principal = {
         "missing": None, "empty": "", "malformed": "secret-malformed", "bearer": "Bearer " + token(),
         "key": token(key="wrong-secret-key-with-at-least-32-bytes"),
         "HS512": token(key=KEY * 2, algorithm="HS512"), "none": token(key="", algorithm="none"),
@@ -93,15 +93,15 @@ def test_authentication_denied_before_service(client_service, caplog, case):
         "future_iat": token(iat=int(time.time()) + 60),
         "future_nbf": token(nbf=int(time.time()) + 60),
     }[case]
-    headers = {} if credential is None else {"X-Avernet-Principal": credential}
+    headers = {} if encoded_principal is None else {"X-Avernet-Principal": encoded_principal}
     response = client.post(PATH, params=PARAMS, headers=headers)
     assert response.status_code == 401
     assert response.json() == {"detail": "Unauthorized"}
     service.get_application_caller_connection.assert_not_called()
     assert "app_caller_connection.denied" in caplog.text
     assert KEY not in caplog.text
-    if credential:
-        assert credential not in caplog.text
+    if encoded_principal:
+        assert encoded_principal not in caplog.text
 
 
 @pytest.mark.parametrize("error,code,event", [(ChatPermissionError("exception-secret"), 403, "denied"), (RuntimeError("exception-secret"), 5999, "failed")])
