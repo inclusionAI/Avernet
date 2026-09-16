@@ -33,6 +33,7 @@ from agentclaw.community.core.gateway_principal import (
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.gateway_principal_config import (
+    ORDINARY_HTTP_ISSUERS,
     get_principal_verifier_config,
 )
 
@@ -99,7 +100,8 @@ async def require_user_caller(connection: HTTPConnection) -> VerifiedCaller:
 def _resolve_ordinary_http_caller(
     connection: HTTPConnection,
 ) -> VerifiedCaller | None:
-    """Verify the ordinary-HTTP JWT without applying OpenAPI audience policy."""
+    """Verify the ordinary-HTTP JWT without applying OpenAPI audience policy and
+    trusting the ordinary-HTTP issuer allow-list."""
     cached = getattr(connection.state, _ORDINARY_CALLER_STATE_ATTR, _UNSET)
     if cached is not _UNSET:
         return cached or None
@@ -107,7 +109,11 @@ def _resolve_ordinary_http_caller(
     if not token:
         setattr(connection.state, _ORDINARY_CALLER_STATE_ATTR, False)
         return None
-    config = replace(get_principal_verifier_config(), verify_audience=False)
+    config = replace(
+        get_principal_verifier_config(),
+        verify_audience=False,
+        issuer=ORDINARY_HTTP_ISSUERS,
+    )
     try:
         caller = verify_principal_token(token, config)
     except PrincipalVerificationError as exc:

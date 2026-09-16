@@ -313,6 +313,7 @@ dependencies = [
  "bcs-http",
  "bcs-human-notify-api",
  "bcs-human-notify-dummy",
+ "bcs-human-notify-work-order",
  "bcs-interaction",
  "bcs-invite-code-store",
  "bcs-judge",
@@ -1315,6 +1316,24 @@ dependencies = [
  "bcs-test-support",
  "futures",
  "inventory",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "bcs-human-notify-work-order"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-config-api",
+ "bcs-human-notify-api",
+ "futures",
+ "inventory",
+ "jsonwebtoken",
+ "reqwest",
+ "secrecy",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]

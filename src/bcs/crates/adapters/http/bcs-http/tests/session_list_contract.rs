@@ -1,9 +1,7 @@
 //! Contract tests for `GET /groups/{id}/sessions`.
 //!
-//! Bug fix #10: when the list is empty and the caller is a formal member,
-//! BCS must create a legacy session `{group_id}:00000000` and return it,
-//! matching legacy server.rs:12838-12871. The current implementation only
-//! `get`s it, so old groups (pre-session-split) get an empty array.
+//! Listing is read-only, including for sessionless groups and formal members.
+//! Existing legacy sessions remain visible without being recreated.
 //!
 //! Bug fix #11: Human caller's "formal member" check must consider both the
 //! Human actor_id AND every Bot the Human owns; legacy server.rs:12767-12782.
@@ -34,8 +32,84 @@ use tokio::sync::Mutex;
 use tower::ServiceExt;
 
 #[tokio::test]
-async fn list_sessions_for_empty_group_creates_legacy_session_for_formal_member() {
+async fn list_sessions_for_empty_group_stays_empty_for_formal_member() {
     let (app, sessions, _temp_dir, _registry) = test_app(/* registry_humans = */ &[]).await;
+
+    for uri in [
+        "/groups/group-1/sessions",
+        "/groups/group-1/sessions",
+        "/groups/group-1/sessions?limit=1&participant=driver-bot",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(uri)
+                    .header("authorization", "Bearer driver-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(body["group_id"], "group-1");
+        assert_eq!(body["items"], serde_json::json!([]));
+        assert!(
+            sessions.create_calls.lock().await.is_empty(),
+            "listing must not create a session"
+        );
+        assert!(
+            sessions.sessions.lock().await.is_empty(),
+            "the group must remain sessionless"
+        );
+    }
+}
+
+#[tokio::test]
+async fn list_sessions_for_empty_group_stays_empty_for_human_owner() {
+    let (app, sessions, _temp_dir, _registry) = human_owner_app().await;
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/groups/group-1/sessions")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+            .unwrap();
+    assert_eq!(body["group_id"], "group-1");
+    assert_eq!(body["items"], serde_json::json!([]));
+    assert!(sessions.create_calls.lock().await.is_empty());
+    assert!(sessions.sessions.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn list_sessions_keeps_existing_legacy_session_without_recreating_it() {
+    let (app, sessions, _temp_dir, _registry) = test_app(&[]).await;
+    sessions
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            params: bcs_service_api::NewSessionParams {
+                id: Some("group-1:00000000".to_string()),
+                participants: vec![Participant::bot("driver-bot", ParticipantRole::Driver)],
+                ..Default::default()
+            },
+        })
+        .await
+        .unwrap();
+    sessions.create_calls.lock().await.clear();
 
     let response = app
         .oneshot(
@@ -54,17 +128,11 @@ async fn list_sessions_for_empty_group_creates_legacy_session_for_formal_member(
         serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
             .unwrap();
     let items = body["items"].as_array().expect("items array");
-    assert_eq!(items.len(), 1, "legacy session must be auto-created");
+    assert_eq!(items.len(), 1);
     assert_eq!(items[0]["session_id"], "group-1:00000000");
-
-    // Verify session was actually persisted via create_or_reactivate.
-    let creates = sessions.create_calls.lock().await;
-    assert!(
-        !creates.is_empty(),
-        "create_or_reactivate must be called to persist the legacy session"
-    );
-    let cmd = &creates[0];
-    assert_eq!(cmd.params.id.as_deref(), Some("group-1:00000000"));
+    assert_eq!(items[0]["id"], "group-1:00000000");
+    assert!(sessions.create_calls.lock().await.is_empty());
+    assert_eq!(sessions.sessions.lock().await.len(), 1);
 }
 
 #[tokio::test]
@@ -121,7 +189,7 @@ async fn participant_scoped_empty_result_does_not_create_legacy_session_when_gro
     );
     assert!(
         sessions.create_calls.lock().await.is_empty(),
-        "legacy session should only be created when the group has no sessions at all"
+        "listing must not create a session when a participant filter returns no matches"
     );
 }
 

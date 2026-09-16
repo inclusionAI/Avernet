@@ -33,6 +33,7 @@ pub struct DeliveryRuntimeConfig {
     pub pause_dispatch: bool,
     pub bots: BTreeMap<String, DeliveryRuntimePolicy>,
     pub tick: Duration,
+    pub expiry_tick: Duration,
     pub io_timeout: Duration,
     pub run_timeout: Duration,
     pub cancel_timeout: Duration,
@@ -137,6 +138,7 @@ impl DeliveryRuntime {
         mut shutdown: tokio::sync::watch::Receiver<bool>,
     ) -> Result<(), ManagedDeliveryError> {
         if self.config.tick.is_zero()
+            || self.config.expiry_tick.is_zero()
             || self.config.io_timeout.is_zero()
             || self.config.run_timeout.is_zero()
             || self.config.cancel_timeout.is_zero()
@@ -169,16 +171,20 @@ impl DeliveryRuntime {
         )> = JoinSet::new();
         let mut ticker = tokio::time::interval(self.config.tick);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut expiry_ticker = tokio::time::interval(self.config.expiry_tick);
+        expiry_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut last_bot = String::new();
         let outcome = async {
         loop {
             if *shutdown.borrow() { break; }
             tokio::select! {
                 _ = shutdown.changed() => { break; }
-                _ = ticker.tick() => {
-                    let tick_started = Instant::now();
+                _ = expiry_ticker.tick() => {
                     let expired = storage!(self.service.work_batch(DeliveryWorkBatch::Expired, now_ms(), "", 100));
                     for row in expired { storage!(self.transition(event(&row, Event::QueueExpired))); }
+                }
+                _ = ticker.tick() => {
+                    let tick_started = Instant::now();
                     let rows = storage!(self.service.work_batch(DeliveryWorkBatch::Control, now_ms(), "", 32));
                     for row in &rows {
                         if row.state.status == Status::PendingContext && row.expire_at_ms.is_some_and(|t| t <= now_ms()) {

@@ -329,7 +329,7 @@ pub async fn list_sessions_for_group(
     uri: Uri,
 ) -> impl IntoResponse {
     // collected filter: requires participant, returns only sessions the bot
-    // has collected in this group. Does NOT run the legacy auto-create path.
+    // has collected in this group.
     if params.collected == Some(true) {
         let bot_uuid = match params.participant.as_deref() {
             Some(p) => p,
@@ -471,130 +471,7 @@ pub async fn list_sessions_for_group(
         sessions
     };
 
-    // Legacy session auto-create: only when the group has no sessions at all.
-    // The response list may be empty because of caller visibility or a
-    // participant filter, and that must not be treated as an empty group.
-    let should_check_legacy_auto_create = visible.is_empty()
-        && is_formal_member
-        && params.q.is_none()
-        && params.offset == 0
-        && params.status != Some(bcs_service_api::SessionStatus::Completed);
-
-    let group_has_any_session = if should_check_legacy_auto_create {
-        match state
-            .services
-            .session_management
-            .list_by_group(&group_id, None, 0, 1, None, None)
-            .await
-        {
-            Ok(existing) => !existing.is_empty(),
-            Err(e) => return session_error_to_response(&e),
-        }
-    } else {
-        false
-    };
-
-    // If the group is truly sessionless, create the legacy session entry so
-    // old groups (pre-session-split) still present a selectable session to the
-    // frontend (matches legacy server.rs:12838-12871).
-    let legacy_sid = format!("{group_id}:00000000");
-    let items: Vec<Value> = if should_check_legacy_auto_create && !group_has_any_session {
-        // First try to fetch — fast path when the legacy row already exists.
-        match state.services.session_management.get(&legacy_sid).await {
-            Ok(Some(sess)) => vec![session_to_json(&sess)],
-            _ => {
-                // Build a chat session pinned to the deterministic legacy id.
-                let mut group = match state.services.group.get(&group_id).await {
-                    Some(g) => g,
-                    None => {
-                        return (
-                            StatusCode::NOT_FOUND,
-                            Json(serde_json::json!({
-                                "error": "not_found",
-                                "message": format!("group {} not found", group_id)
-                            })),
-                        )
-                            .into_response();
-                    }
-                };
-                state.services.backfill_bot_names(&mut group).await;
-                let mut session_participants = group.participants.clone();
-                for p in session_participants.iter_mut() {
-                    if p.mode.is_none() {
-                        p.mode = Some(bcs_service_api::ParticipantMode::default_for(p.actor_kind));
-                    }
-                }
-                let cmd = bcs_service_api::CreateOrReactivateCommand {
-                    group_id: group_id.clone(),
-                    session_id: None,
-                    params: bcs_service_api::NewSessionParams {
-                        session_kind: bcs_service_api::SessionKind::Chat,
-                        participants: session_participants,
-                        group_version: Some(group.version),
-                        id: Some(legacy_sid.clone()),
-                        ..Default::default()
-                    },
-                };
-                match state
-                    .services
-                    .session_management
-                    .create_or_reactivate(cmd)
-                    .await
-                {
-                    Ok(outcome) => {
-                        let items = vec![session_to_json(&outcome.session)];
-                        // A new legacy session was materialized for a sessionless
-                        // group; emit the session-context system message so bots
-                        // receive their `<GroupContext>` injection, mirroring the
-                        // create-session path. Skipped when the legacy row already
-                        // existed (`created == false`, a reactivation).
-                        if outcome.created {
-                            let notify = state.services.system_message.clone();
-                            let gid = group_id.clone();
-                            let sid = legacy_sid.clone();
-                            let session_input = outcome.session.input.clone();
-                            let session_participants = outcome.session.participants.clone();
-                            let reason = bcs_service_api::resolve_session_topic(
-                                session_input.as_ref(),
-                                group.context.as_deref(),
-                                group.label.as_deref(),
-                            )
-                            .unwrap_or_default();
-                            let _task = tokio::spawn(async move {
-                                let _ = notify
-                                    .notify(
-                                        &gid,
-                                        SystemMessageEvent::SessionContext {
-                                            group_id: gid.clone(),
-                                            session_id: sid.clone(),
-                                            reason,
-                                            session_input,
-                                            task_ledger: None,
-                                            driver_delivery: None,
-                                        },
-                                        &sid,
-                                        &session_participants,
-                                    )
-                                    .await;
-                            });
-                        }
-                        items
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            request_id = %bcs_observability::CurrentRequestId,
-                            group_id = %group_id,
-                            error = %e,
-                            "auto-create legacy session failed"
-                        );
-                        Vec::new()
-                    }
-                }
-            }
-        }
-    } else {
-        visible.iter().map(|s| session_to_json(s)).collect()
-    };
+    let items: Vec<Value> = visible.iter().map(session_to_json).collect();
 
     // When the request explicitly specifies a participant, surface that
     // participant's per-session collected state on each item: collected (bool)

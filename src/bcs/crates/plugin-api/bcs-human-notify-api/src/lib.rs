@@ -6,8 +6,8 @@
 //! submit [`HumanMentionNotifierFactory`] entries through `inventory`
 //! (e.g. the internal DingTalk notifier).
 //!
-//! Provider crates receive only their own config table from
-//! `human_notify.providers.<provider>`.
+//! Provider crates receive only their own options table from their
+//! `[[human_notify.providers]]` entry.
 //!
 //! The Plugin API owns its notification schema ([`MentionNotification`] /
 //! [`MentionedHuman`]) so the plugin contract evolves independently from the
@@ -85,10 +85,12 @@ pub type HumanMentionNotifierBuild = fn(
 
 /// Inventory entry for a human-mention notification backend.
 pub struct HumanMentionNotifierFactory {
-    /// Backend name selected by `human_notify.provider`.
+    /// Backend name matching the `name` field of its
+    /// `[[human_notify.providers]]` entry.
     pub name: &'static str,
 
-    /// Build the backend from `human_notify.providers.<name>`.
+    /// Build the backend from its `[[human_notify.providers]]` entry (name +
+    /// enabled + flattened options).
     pub build: HumanMentionNotifierBuild,
 }
 

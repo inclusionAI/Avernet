@@ -634,6 +634,10 @@ class OpenClawGatewayClient:
         emitted_non_terminal = False
         early_final_grace_seconds = _get_early_final_grace_seconds()
         filter_drop_count = 0
+        # A compaction retry emits an intermediate lifecycle/chat final pair.
+        # Keep that pair internal and preserve the visible response text.
+        pending_compaction_finals = 0
+        suppressed_compaction_lifecycle_ends = 0
         # Track pending subagent announce phases.  Incremented when a
         # sessions_spawn tool completes successfully; decremented when
         # the corresponding announce-run's chat-final arrives.
@@ -656,6 +660,7 @@ class OpenClawGatewayClient:
                 "expectedRunId": expected_run_id,
                 "currentRunId": run_id,
                 "pendingAnnounces": pending_announces,
+                "pendingCompactionFinals": pending_compaction_finals,
             }
 
         def is_empty_final_payload(payload: Dict[str, Any]) -> bool:
@@ -730,7 +735,9 @@ class OpenClawGatewayClient:
             return True
 
         def on_chat_event(event: EventFrame) -> None:
-            nonlocal done, pending_announces, pending_early_final, emitted_non_terminal, filter_drop_count
+            nonlocal done, emitted_non_terminal, filter_drop_count, pending_announces
+            nonlocal pending_compaction_finals, pending_early_final
+            nonlocal suppressed_compaction_lifecycle_ends
             if done:
                 return
             payload = event.payload or {}
@@ -750,6 +757,68 @@ class OpenClawGatewayClient:
             # announce phase later for each spawned subagent.
             data = payload.get("data") or {}
             stream_val = payload.get("stream", "")
+            data_phase = data.get("phase") if isinstance(data, dict) else None
+            state = payload.get("state")
+            payload_run_id = payload.get("runId")
+            is_foreground_run = isinstance(payload_run_id, str) and (
+                payload_run_id in allowed_run_ids or payload_run_id == run_id
+            )
+            if (
+                event.event == "agent"
+                and is_foreground_run
+                and stream_val == "compaction"
+                and data_phase == "end"
+                and data.get("willRetry") is True
+            ):
+                pending_compaction_finals += 1
+                log.info(
+                    "[chat_stream][compaction_retry_pending] runId=%s pending=%d",
+                    payload.get("runId", ""),
+                    pending_compaction_finals,
+                )
+
+            if (
+                event.event == "agent"
+                and is_foreground_run
+                and stream_val == "lifecycle"
+                and data_phase == "end"
+                and suppressed_compaction_lifecycle_ends < pending_compaction_finals
+            ):
+                suppressed_compaction_lifecycle_ends += 1
+                log.info(
+                    "[chat_stream][compaction_lifecycle_end_suppressed] "
+                    "runId=%s pending=%d suppressedLifecycleEnds=%d",
+                    payload.get("runId", ""),
+                    pending_compaction_finals,
+                    suppressed_compaction_lifecycle_ends,
+                )
+                return
+
+            is_continuation_event = (
+                event.event == "chat" and state == "delta"
+            ) or (
+                event.event == "agent"
+                and (
+                    stream_val in {"assistant", "tool", "item"}
+                    or (stream_val == "lifecycle" and data_phase == "start")
+                )
+            )
+            if (
+                is_foreground_run
+                and is_continuation_event
+                and pending_compaction_finals > suppressed_compaction_lifecycle_ends
+            ):
+                cleared_retries = (
+                    pending_compaction_finals - suppressed_compaction_lifecycle_ends
+                )
+                pending_compaction_finals = suppressed_compaction_lifecycle_ends
+                log.info(
+                    "[chat_stream][compaction_continuation_without_terminal] "
+                    "runId=%s clearedRetries=%d",
+                    payload_run_id,
+                    cleared_retries,
+                )
+
             if (
                 stream_val == "tool"
                 and isinstance(data, dict)
@@ -763,8 +832,6 @@ class OpenClawGatewayClient:
                     pending_announces,
                 )
 
-            state = payload.get("state")
-            payload_run_id = payload.get("runId")
             if (
                 pending_early_final is not None
                 and state not in ("final", "error", "aborted")
@@ -796,6 +863,20 @@ class OpenClawGatewayClient:
                     # current chat stream — forward without terminating.
                     payload["_source_event"] = event.event
                     event_queue.put_nowait(event)
+                elif (
+                    event.event == "chat"
+                    and is_foreground_run
+                    and pending_compaction_finals > 0
+                    and suppressed_compaction_lifecycle_ends > 0
+                ):
+                    pending_compaction_finals -= 1
+                    suppressed_compaction_lifecycle_ends -= 1
+                    log.info(
+                        "[chat_stream][compaction_final_suppressed] "
+                        "runId=%s pending=%d",
+                        payload_run_id,
+                        pending_compaction_finals,
+                    )
                 elif pending_announces > 0:
                     is_announce = is_announce_event(payload)
                     if is_announce:
@@ -1023,6 +1104,11 @@ class OpenClawGatewayClient:
                         reason = f"all_events_filtered_drop_count={filter_drop_count}"
                     elif pending_announces > 0:
                         reason = f"waiting_subagent_final_pending_announces={pending_announces}"
+                    elif pending_compaction_finals > 0:
+                        reason = (
+                            "waiting_compaction_retry_final_pending="
+                            f"{pending_compaction_finals}"
+                        )
                     else:
                         reason = "stream_stalled_mid_response"
 
@@ -1030,6 +1116,7 @@ class OpenClawGatewayClient:
                         "[chat_stream][timeout] sessionKey=%s expectedRunId=%s "
                         "currentRunId=%s timeoutSeconds=%.1f reason=%s "
                         "emittedNonTerminal=%s filterDropCount=%d pendingAnnounces=%d "
+                        "pendingCompactionFinals=%d "
                         "allowedRunIds=%s wsConnected=%s",
                         session_key,
                         expected_run_id,
@@ -1039,6 +1126,7 @@ class OpenClawGatewayClient:
                         emitted_non_terminal,
                         filter_drop_count,
                         pending_announces,
+                        pending_compaction_finals,
                         sorted(allowed_run_ids),
                         self._connected,
                     )

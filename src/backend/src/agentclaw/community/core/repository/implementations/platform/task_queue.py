@@ -81,6 +81,7 @@ live and keep holding their key.
 ``gmt_created`` / ``gmt_modified`` are left entirely to the database (column
 default + ``ON UPDATE CURRENT_TIMESTAMP``); this body never sets them.
 """
+
 from __future__ import annotations
 
 import json
@@ -92,6 +93,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.elements import ColumnElement
 
 from agentclaw.community.core.task_queue.repository.models import TaskQueueModel
+from agentclaw.community.core.task_queue.repository.trace_carrier import (
+    encode_trace_carrier,
+)
 from agentclaw.community.core.task_queue.types import (
     TERMINAL_STATUSES,
     EnqueueResult,
@@ -100,7 +104,9 @@ from agentclaw.community.core.task_queue.types import (
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.core.repository.protocols.platform import TaskQueueRepositoryProtocol
+from agentclaw.community.core.repository.protocols.platform import (
+    TaskQueueRepositoryProtocol,
+)
 
 logger = get_logger()
 
@@ -410,6 +416,8 @@ class TaskQueueRepository(
         env: str,
         app: str,
         idempotency_key: Optional[str],
+        trace_id: Optional[str],
+        trace_carrier: Optional[dict],
     ) -> TaskRecord:
         """INSERT one PENDING row and return it. Raises ``IntegrityError`` when
         a keyed insert loses to a live holder of the same key.
@@ -430,6 +438,11 @@ class TaskQueueRepository(
                 idempotency_key=idempotency_key,
                 # Mirrors the key while the task is live; nulled on terminal.
                 active_idempotency_key=idempotency_key,
+                trace_id=trace_id,
+                # Serialized here rather than by the caller so the column's
+                # encoding stays this layer's business, exactly like payload —
+                # but guarded, unlike payload. See _encode_trace_carrier.
+                trace_carrier=encode_trace_carrier(trace_carrier),
             )
             db.add(row)
             db.flush()
@@ -532,6 +545,8 @@ class TaskQueueRepository(
         env: str,
         app: str,
         idempotency_key: Optional[str] = None,
+        trace_id: Optional[str] = None,
+        trace_carrier: Optional[dict] = None,
     ) -> EnqueueResult:
         # Validate before any work: neither a key the column cannot hold
         # faithfully, nor a task_type that would blur the dedup scope, may reach
@@ -550,6 +565,8 @@ class TaskQueueRepository(
             env=env,
             app=app,
             idempotency_key=idempotency_key,
+            trace_id=trace_id,
+            trace_carrier=trace_carrier,
         )
 
         # Un-keyed: the caller opted out of dedup, so this stays a plain INSERT
@@ -576,11 +593,20 @@ class TaskQueueRepository(
                     idempotency_key=idempotency_key,
                 )
                 if existing is not None:
+                    # Both trace ids on one line, and that is the whole reason
+                    # this log exists in this shape: the joining request's task
+                    # row carries the *original* requester's trace, so without
+                    # this line a caller handed ``created=False`` would have no
+                    # way to reach the task that absorbed its work. Grep either
+                    # id and the join is the hop between them.
                     logger.info(
-                        "[task_queue.enqueue] type=%s joined existing id=%s key=%s",
+                        "[task_queue.enqueue] type=%s joined existing id=%s key=%s "
+                        "joining_trace_id=%s task_trace_id=%s",
                         task_type,
                         existing.id,
                         idempotency_key,
+                        trace_id or "-",
+                        existing.trace_id or "-",
                     )
                     return EnqueueResult(existing, False)
                 # No live holder of ours, yet an index rejected us. Two very
@@ -679,6 +705,7 @@ class TaskQueueRepository(
         and no row is ``PENDING`` and ``RUNNING`` at once. No de-duplication is
         needed here.
         """
+
         def _arm(where, order_col, priority: int):
             bounded = (
                 select(self.Model.id.label("id"), order_col.label("k"))
@@ -749,11 +776,7 @@ class TaskQueueRepository(
                     )
                 )
                 if claimed == 1:
-                    row = (
-                        db.query(self.Model)
-                        .filter(self.Model.id == task_id)
-                        .first()
-                    )
+                    row = db.query(self.Model).filter(self.Model.id == task_id).first()
                     if row is not None:
                         won.append(row.to_record())
                     continue
@@ -902,11 +925,7 @@ class TaskQueueRepository(
         # out. ``TaskRecord.app`` carries it, so a caller that needs the scope
         # can still check it.
         with self._db.orm_session() as db:
-            row = (
-                db.query(self.Model)
-                .filter(self.Model.id == task_id)
-                .first()
-            )
+            row = db.query(self.Model).filter(self.Model.id == task_id).first()
             return row.to_record() if row else None
 
     def find_by_idempotency_key(

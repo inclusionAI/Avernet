@@ -6,6 +6,7 @@ declare module "express-serve-static-core" {
     isLogAdmin?: boolean;
     isBenchAdmin?: boolean;
     isClawEvolveAdmin?: boolean;
+    isClawInsightAdmin?: boolean;
     isSuperAdmin?: boolean;
   }
 }

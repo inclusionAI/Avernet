@@ -95,3 +95,31 @@ def test_auto_increment_mode_is_pinned_to_order() -> None:
     being monotonic in insertion order and that query answers with an older row.
     """
     assert "AUTO_INCREMENT_MODE = 'ORDER'" in _ddl_without_comments()
+
+
+def _ddl_columns(ddl: str) -> set[str]:
+    """Column names declared by the CREATE TABLE, excluding index definitions.
+
+    Both start with a backticked name at the head of a line; only a column is
+    followed by a type rather than a parenthesised column list, which is what
+    the second group distinguishes.
+    """
+    return {
+        name
+        for name, following in re.findall(r"^\s*`([^`]+)`\s+(\S+)", ddl, flags=re.M)
+        if not following.startswith("(")
+    }
+
+
+def test_ddl_declares_every_column_the_orm_does() -> None:
+    """The same drift guard as the index check, for columns.
+
+    The ORM maps every column unconditionally, so each ``SELECT`` projects and
+    each ``INSERT`` writes all of them. A column the model has and the DDL lacks
+    is therefore not a cosmetic gap: a database provisioned from this file would
+    fail the entire queue with "unknown column" — for *every* task, not only
+    those using the new field.
+    """
+    orm_columns = {column.name for column in TaskQueueModel.__table__.columns}
+    missing = orm_columns - _ddl_columns(_ddl_without_comments())
+    assert not missing, f"columns declared by the ORM but absent from the DDL: {missing}"

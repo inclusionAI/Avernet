@@ -36,6 +36,9 @@ from injector import inject
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.bot_service_protocol import (
+    BotServiceProtocol,
+)
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.caller_identity.contracts import CallerIdentityStage
 from agentclaw.community.core.caller_identity.protocols import (
@@ -58,6 +61,10 @@ from agentclaw.community.core.service_bot.services.baas_service import (
     BaasServiceError,
 )
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
+from agentclaw.community.core.service_bot.services.deploy.service_publish_env import (
+    service_publish_extra_envs,
+    service_publish_template_config,
+)
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
     PublishImagePolicyResolver,
 )
@@ -91,6 +98,7 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         bot_repo: BotRepository,
         binding_repo: DeviceBindingRepository,
         bot_build_service: BotBuildService,
+        bot_service: BotServiceProtocol,
         caller_identity: CallerIdentityTokenExchangeProtocol,
         token_provider: CallerTokenProviderProtocol,
         runtime_updater: CallerRuntimeUpdaterProtocol,
@@ -102,6 +110,7 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         self._bot_repo = bot_repo
         self._binding_repo = binding_repo
         self._bot_build_service = bot_build_service
+        self._bot_service = bot_service
         self._caller_identity = caller_identity
         self._token_provider = token_provider
         self._runtime_updater = runtime_updater
@@ -110,6 +119,41 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
             publish_repository=bot_publish_repo,
             common_config_service=common_config_service,
         )
+
+    def _load_service_bot(self, bot_id: str, owner_id: str) -> Dict[str, Any]:
+        """Fetch the service bot *with* its frozen template_config attached.
+
+        Mirrors the publish/restart/rollback path, which reads the bot through
+        ``BotService.get_bot``: that attaches ``ac_templates.ext`` as
+        ``template_config``, the snapshot the aicoding strategy reads in
+        ``build_extra_envs`` to synthesize ``GIT_ADDRESSES`` /
+        ``AIX_DEVFLOW_INFO`` / ``RELAY_DEFAULT_*`` (and the template's sandbox
+        ``envs``/``image``/``resource_spec`` overrides the BaaS payload layers
+        on top via ``template_config``).
+
+        ``BotRepository.get_by_id_and_owner`` returns ``BotModel.to_dict()``,
+        which does NOT carry ``template_config`` — using it here would leave
+        the caller container with only ``AGENTCLAW_ENGINE``, silently dropping
+        the engine-owned envs. So the bot is read through
+        ``BotServiceProtocol.get_bot`` (which attaches ``ac_templates.ext`` as
+        ``template_config``) once existence is confirmed.
+
+        Not-found is guarded through the injected ``BotRepository`` contract —
+        ``get_by_id_and_owner`` returns ``None`` — mirroring the sibling
+        ``_resolve_publish_image_pin``, so this module depends on no
+        concrete implementation-specific exception: ``BotServiceProtocol`` is
+        the only bot-management surface used here. A vanish-during-fetch race
+        (bot deleted between the guard and ``get_bot``) surfaces as
+        ``get_bot``'s own error and is folded back to this module's
+        ``ConnectionError(5001)`` contract by ``_create_container`` /
+        ``_upgrade_container``'s enclosing ``except Exception`` guard.
+        """
+        if not self._bot_repo.get_by_id_and_owner(bot_id, owner_id):
+            raise ConnectionError(
+                f"Bot not found: bot_id={bot_id} owner_id={owner_id}",
+                error_code="5001",
+            )
+        return self._bot_service.get_bot(bot_id=bot_id, user_id=owner_id)
 
     def _resolve_publish_image_pin(self, publish_record, *, bot_id: str, owner_id: str):
         """Resolve through the shared seam.
@@ -303,6 +347,7 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
                     migration_path=migration_path,
                     version=version,
                     docker_image=image_pin.docker_image,
+                    publish_ext=(publish_record.ext or {}),
                 )
                 bot_uuid = order["bot_uuid"]
                 baas_publish_id = order.get("publish_id")
@@ -325,6 +370,7 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
                     migration_path=migration_path,
                     version=version,
                     docker_image=image_pin.docker_image,
+                    publish_ext=(publish_record.ext or {}),
                 )
                 bot_uuid = upgraded["bot_uuid"]
                 baas_publish_id = upgraded.get("publish_id")
@@ -503,6 +549,7 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         migration_path: Optional[str],
         version: int = 1,
         docker_image: str | None = None,
+        publish_ext: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Call ``release_async`` and return the publish order.
 
@@ -516,12 +563,23 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         Raises:
             ConnectionError: release_async failed or returned no bot_uuid (D5).
         """
-        bot_info = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if not bot_info:
-            raise ConnectionError(
-                f"Bot not found: bot_id={bot_id} owner_id={owner_id}",
-                error_code="5001",
-            )
+        # Align with the service-bot publish/restart/rollback path: load the
+        # bot through ``BotService.get_bot`` so ``template_config`` (the frozen
+        # template snapshot stored in ``ac_templates.ext``) is attached, then
+        # forward the same engine-owned ``extra_envs`` + sandbox
+        # ``template_config`` + skills-manifest ``ext_info`` to BaaS.
+        # Without ``template_config`` the aicoding strategy's
+        # ``build_extra_envs`` emits no ``GIT_ADDRESSES`` /
+        # ``AIX_DEVFLOW_INFO`` / ``RELAY_DEFAULT_*``.
+        bot_info = self._load_service_bot(bot_id, owner_id)
+        publish_ext = publish_ext or {}
+        skills_env = service_publish_extra_envs(publish_ext, bot_info)
+        sandbox_template_config = service_publish_template_config(bot_info)
+        ext_info = (
+            {"skills_manifest": publish_ext["skills_manifest"]}
+            if publish_ext.get("skills_manifest") is not None
+            else None
+        )
         try:
             result = await self._bot_build_service.release_async(
                 bot=bot_info,
@@ -531,6 +589,9 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
                 publish_stage=PublishStage.ONLINE,
                 version=str(version),
                 docker_image=docker_image,
+                ext_info=ext_info,
+                extra_envs=skills_env,
+                template_config=sandbox_template_config,
             )
         except Exception as e:
             logger.error(
@@ -585,6 +646,7 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         migration_path: Optional[str],
         version: int = 1,
         docker_image: str | None = None,
+        publish_ext: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Upgrade a RELEASED container, preferring ``bot_uuid`` preservation.
 
@@ -597,12 +659,19 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         upgrade and the fallback-create path surface a ``publish_id`` so
         the caller queries uniformly.
         """
-        bot_info = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if not bot_info:
-            raise ConnectionError(
-                f"Bot not found: bot_id={bot_id} owner_id={owner_id}",
-                error_code="5001",
-            )
+        # Same alignment as ``_create_container``: carry the engine-owned envs
+        # + sandbox template_config + skills-manifest ``ext_info`` so a
+        # recycled caller container is reprovisioned with the very same
+        # environment contract as a fresh one (and as the publish/restart path).
+        bot_info = self._load_service_bot(bot_id, owner_id)
+        publish_ext = publish_ext or {}
+        skills_env = service_publish_extra_envs(publish_ext, bot_info)
+        sandbox_template_config = service_publish_template_config(bot_info)
+        ext_info = (
+            {"skills_manifest": publish_ext["skills_manifest"]}
+            if publish_ext.get("skills_manifest") is not None
+            else None
+        )
         try:
             result = await self._bot_build_service.upgrade_async(
                 bot_uuid=bot_uuid,
@@ -613,6 +682,9 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
                 publish_stage=PublishStage.ONLINE,
                 version=str(version),
                 docker_image=docker_image,
+                ext_info=ext_info,
+                extra_envs=skills_env,
+                template_config=sandbox_template_config,
             )
             logger.info(
                 "[ExpertChatInstance] upgrade_async succeeded: bot_uuid=%s",

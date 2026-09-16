@@ -98,6 +98,17 @@ const REVIEWED_GOVERNANCE_SOURCE_SQL = sqlValues(
 const REJECTED_GOVERNANCE_SOURCE_SQL = sqlValues(
   GOVERNANCE_SOURCE_TYPES.filter((value) => value.startsWith("REJECTED_RULE_")),
 );
+// 驳回可以作用在所有 Owner 可见来源上（含 USER_SELECTED/ADMIN_SELECTED 待办项，它们不在
+// GOVERNANCE_SOURCE_TYPES 里），以及管理员审批驳回产生的 REJECTED_RULE_* 来源。
+const REJECTABLE_SOURCE_SQL = sqlValues([
+  ...OWNER_VISIBLE_SOURCE_TYPES,
+  ...GOVERNANCE_SOURCE_TYPES.filter((value) => value.startsWith("REJECTED_RULE_")),
+]);
+// 归档本身不是驳回证据：必须存在真实的驳回事件（用户驳回 / 管理员驳回 / Admin审批驳回）。
+const OWNER_REJECTION_EVENT_SQL = "i.user_guidance LIKE '%[用户驳回]%'";
+const ADMIN_REJECTION_EVENT_SQL =
+  "(i.user_guidance LIKE '%[管理员驳回]%' OR i.user_guidance LIKE '%[Admin驳回]%')";
+const ANY_REJECTION_EVENT_SQL = `(${OWNER_REJECTION_EVENT_SQL} OR ${ADMIN_REJECTION_EVENT_SQL})`;
 
 export const STANDARD_VERIFICATION_WAIT_SECONDS = 2 * 24 * 60 * 60;
 export const OPEN_VERIFICATION_WAIT_SECONDS = 7 * 24 * 60 * 60;
@@ -279,6 +290,7 @@ function itemView(row: ImprovementItemRow): ImprovementView {
     rejectReasonCode: guidance.rejectReasonCode,
     rejectComment: guidance.rejectComment,
     rejectedAt: guidance.rejectedAt,
+    rejectedBy: guidance.rejectedBy,
     handledAt: guidance.handledAt,
     verificationStatus,
     verificationLastCheckedAt: guidance.verificationLastCheckedAt,
@@ -992,6 +1004,42 @@ export class InsightImprovementRepository {
       params,
     );
     return rows.map(itemView);
+  }
+
+  /** 全部已驳回改进项（用户驳回 + 管理员驳回），跨 owner、跨来源类型。 */
+  async listAllRejections(input: {
+    since: Date;
+    ownerUserId?: string;
+    botId?: string;
+    sourceRuleId?: string;
+    rejectedBy?: "OWNER" | "ADMIN";
+    limit: number;
+    offset: number;
+  }): Promise<{ total: number; items: ImprovementView[] }> {
+    const conditions = [
+      "i.status = 'ARCHIVED'",
+      `i.source_type IN (${REJECTABLE_SOURCE_SQL})`,
+      ANY_REJECTION_EVENT_SQL,
+      "i.gmt_modified >= ?",
+    ];
+    const params: unknown[] = [timestampForDb(this.db.dbType, input.since)];
+    if (input.ownerUserId) { conditions.push("i.owner_user_id = ?"); params.push(input.ownerUserId); }
+    if (input.botId) { conditions.push("i.bot_id = ?"); params.push(input.botId); }
+    if (input.sourceRuleId) { conditions.push("i.source_rule_id = ?"); params.push(input.sourceRuleId); }
+    if (input.rejectedBy === "OWNER") conditions.push(OWNER_REJECTION_EVENT_SQL);
+    if (input.rejectedBy === "ADMIN") conditions.push(ADMIN_REJECTION_EVENT_SQL);
+    const where = conditions.join(" AND ");
+    const countRow = (await this.db.query<{ item_count: number | string }>(
+      `SELECT COUNT(*) AS item_count FROM insight_improvement_item i WHERE ${where}`,
+      params,
+    ))[0];
+    const rows = await this.db.query<ImprovementItemRow>(
+      `SELECT i.* FROM insight_improvement_item i
+        WHERE ${where}
+        ORDER BY i.gmt_modified DESC, i.id DESC LIMIT ? OFFSET ?`,
+      [...params, input.limit, input.offset],
+    );
+    return { total: Number(countRow?.item_count ?? 0) || 0, items: rows.map(itemView) };
   }
 
   async markGovernanceActionHandled(input: {

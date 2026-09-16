@@ -19,7 +19,7 @@ a handler that reschedules itself until done, bounded by a wall-clock deadline.
 - `types.py` — `TaskRecord`, the `TaskStatus` enum (`PENDING`/`RUNNING`/`SUCCEEDED`/`FAILED`/`TIMED_OUT`), and the handler outcomes `Complete` / `Reschedule` / `Retry` / `Fail`.
 - `services/registry.py` — `TaskHandler` Protocol + `HandlerRegistry`.
 - `services/task_queue_service.py` — `TaskQueueService.enqueue(...)`, the entry point adopters call.
-- `services/worker.py` — `TaskWorker`, the Lifecycle that polls, claims, runs handlers, and applies outcomes.
+- `services/worker.py` — `TaskWorker`, the Lifecycle that polls, claims, runs handlers, and applies outcomes. It also re-establishes each task's enqueuing trace around its execution (see "Request correlation").
 - `examples.py` — `NoopTaskHandler` + `PollUntilTerminalExampleHandler` (not wired in prod).
 
 ## App scoping
@@ -234,6 +234,62 @@ Not covered: pulling an already-queued task forward when a duplicate arrives
 with a sooner `run_at` (debounce). Out of scope for now — a call site that needs
 it should stay un-keyed.
 
+## Request correlation
+
+A task is enqueued by one request and run later by another process, so the two
+halves land in the logs under different traces — or, for the execution, under
+none at all. The row therefore carries the enqueuing request's trace across, and
+`TaskWorker` re-establishes it around the whole of a task's execution. An
+open-API call that queues work can be followed to the work actually running,
+minutes later and on a different pod.
+
+Nothing is asked of callers. `TaskQueueService.enqueue` is the one place every
+adopter passes through, so the capture lives there and not at the ~25 call
+sites:
+
+```
+request (trace T) ──enqueue──▶ ac_task_queue row {trace_id: T, trace_carrier: …}
+                                        │
+                        claim, minutes later, another pod
+                                        ▼
+                          handler runs with trace T restored
+```
+
+**Two columns, two audiences** — the same split as `idempotency_key` /
+`active_idempotency_key`. `trace_id` is the human value: what an operator greps
+for, what a support ticket quotes. `trace_carrier` is the tracer's own
+serialization, handed straight back to `TracerPlugin.trace_scope`; it is opaque
+to this component and nothing here reads its keys. Storing only the id would put
+the corp tracer's propagation headers into neutral code and drop everything the
+id is not — under SofaTracer the carrier also holds the rpc id and the
+penetration attributes, which come back with it.
+
+Both columns are **outside every index and every predicate**. Nothing selects,
+scopes, or dedups on them, so correlation cannot change which row exists or
+which task a keyed enqueue joins.
+
+**A NULL trace is normal, not a defect.** Work enqueued outside a request — a
+handler queueing follow-up work, a boot-time enqueue — has no trace to carry,
+and a deployment whose tracer mints no id (local/test) writes neither column.
+
+**A keyed duplicate keeps the original's trace**, because it inserts no row at
+all: the caller joins the live task, whose trace is the one that created it.
+That is the honest record — the work runs once, under the trace that caused it
+to exist — and the joining request is not lost either: `enqueue` logs the join
+with both trace ids, so either one leads to the task that absorbed the work.
+
+**Correlation never costs a caller its work.** A tracer that fails to export is
+logged and the task is enqueued without correlation; a tracer that fails to
+restore is logged and the task runs untraced. A trace id too long for the column
+is truncated rather than rejected — the opposite of an idempotency key, which
+raises, because a truncated key silently merges two dedup scopes and can drop
+work while a truncated trace id is only a less useful log line.
+
+One shape worth knowing, since it follows from the above rather than being
+designed: a handler enqueuing further work does so *inside* its restored scope,
+so the follow-up task inherits the same trace. A chain of tasks stays correlated
+to the request that started it, with no extra plumbing.
+
 ## Give-up
 
 Every task carries a `deadline_at` (required at enqueue). Past it, the task is
@@ -320,6 +376,16 @@ columns up automatically. What has to exist:
   as its predecessor below.
 - `idempotency_key` and `active_idempotency_key` — nullable, matching the width
   in `models.py`, both pinning `utf8mb4_bin` on MySQL/OceanBase.
+- `trace_id` (`varchar(64)`) and `trace_carrier` (`text`) — both nullable, no
+  collation clause, and **no index**. Unlike everything above them they are
+  additive and safe to apply with the fleet up: a pod running the previous
+  release inserts rows that simply leave them NULL, and the worker reads a NULL
+  carrier as "no trace to restore". The `ALTER TABLE` is at the foot of
+  `sql/2026_09_06_task_queue.sql`. They stay unindexed deliberately — indexing
+  `trace_id` would add write cost to the busiest INSERT this component has for a
+  lookup nobody does on the hot path; if "find the task for trace X" becomes
+  routine, add `KEY idx_env_app_trace_id (env, app, trace_id) GLOBAL`, leading
+  with `env`/`app` like every other index here.
 - `task_type` also pinning `utf8mb4_bin` there — it is the index's other scope
   column, and an index is only as precise as its least precise column.
 - `UNIQUE (env, task_type, active_idempotency_key)` — **`GLOBAL` on OceanBase**,
@@ -387,5 +453,6 @@ internal_dependencies:
   - agentclaw.community.di.config
   - agentclaw.community.kernel.lifecycle
   - agentclaw.community.log
+  - agentclaw.community.plugin_api.tracer                     # carry the enqueuing request's trace to the worker
   - agentclaw.community.utils.env_utils
 ```

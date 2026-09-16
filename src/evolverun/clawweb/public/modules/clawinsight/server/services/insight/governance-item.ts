@@ -150,6 +150,12 @@ export function parseGovernanceGuidance(text: string | null) {
     .filter((item): item is { title: string; index: number; event: string } => item.index >= 0 && item.event !== null)
     .sort((left, right) => right.index - left.index);
   const handledEvent = handledEvents[0]?.event ?? null;
+  // 驳回来源必须可区分：用户驳回（我的待办）与管理员驳回写的是同一批 reasonCode。
+  const rejectedBy: "OWNER" | "ADMIN" | null = ownerRejectEvent
+    ? "OWNER"
+    : adminRejectEvent
+      ? "ADMIN"
+      : null;
   return {
     assignmentReason: labeledValue(text, "指派原因"),
     rootCauseSummary: labeledValue(text, "根因"),
@@ -158,7 +164,7 @@ export function parseGovernanceGuidance(text: string | null) {
     adminReviewedBy: eventValue(adminEvent, "审核人"),
     adminReviewedAt: eventValue(adminEvent, "审核时间"),
     adminReviewComment: eventValue(adminEvent, "说明"),
-    rejectedBy: ownerRejectEvent ? "OWNER" : adminRejectEvent ? "ADMIN" : null,
+    rejectedBy,
     rejectReasonCode: eventValue(rejectionEvent, "原因"),
     rejectComment: eventValue(rejectionEvent, "说明"),
     rejectedAt: eventValue(rejectionEvent, "时间"),

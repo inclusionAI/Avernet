@@ -3827,7 +3827,10 @@ describe("Insight Center local contract", () => {
       expect(recent.body.items).toHaveLength(1);
       expect(recent.body.items[0]).toEqual(expect.objectContaining({
         improvementId,
+        rejectReasonCode: "EXPECTED_BUSINESS_FAILURE",
         rejectComment: "这是业务预期关单。",
+        rejectedBy: "OWNER",
+        rejectedAt: expect.any(String),
       }));
     });
   });
@@ -4029,6 +4032,141 @@ describe("Insight Center local contract", () => {
       );
       expect(invalid.response.status).toBe(400);
     }, null, { agentAuthorizer: lockedAuthorizer });
+  });
+
+  it("lists every rejected improvement, owner and admin, without authentication", async () => {
+    await withDbInsightServer(async ({ baseUrl: isolatedBaseUrl, db: isolatedDb }) => {
+      const failureItem = await realFailureFixtureItem();
+      await jsonRequestAt(isolatedBaseUrl, "/api/insight/v1/internal/failure-tasks/upsert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: [failureItem] }),
+      });
+
+      // 「我的待办」里的用户驳回：USER_SELECTED 不在治理来源里，原先任何内部接口都取不到。
+      const ownerItem = await jsonRequestAt(isolatedBaseUrl, "/api/insight/v1/improvements", {
+        method: "POST",
+        headers: ownerHeaders({ "Content-Type": "application/json", "Idempotency-Key": "rejections-all-owner-1" }),
+        body: JSON.stringify(improvementBody("用户自己驳回的待办项")),
+      });
+      expect(ownerItem.response.status).toBe(201);
+      expect(ownerItem.body.sourceType).toBe("USER_SELECTED");
+      const ownerRejected = await jsonRequestAt(
+        isolatedBaseUrl,
+        `/api/insight/v1/improvements/${Number(ownerItem.body.improvementId)}/reject`,
+        {
+          method: "POST",
+          headers: ownerHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            reasonCode: "EXPECTED_BUSINESS_FAILURE",
+            comment: "工具按协议返回业务拒绝，属于预期结果",
+            version: ownerItem.body.version,
+          }),
+        },
+      );
+      expect(ownerRejected.response.status).toBe(200);
+
+      // 管理员审批驳回：治理来源，rejectedBy 必须是 ADMIN，且与用户驳回同一字段名可区分。
+      const adminItem = await jsonRequestAt(isolatedBaseUrl, "/api/insight/v1/internal/governance/actions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": "rejections-all-admin-1" },
+        body: JSON.stringify({
+          ...improvementBody("管理员驳回的治理项"),
+          ownerUserId: "dev_local",
+          sourceOwnerUserId: "dev_local",
+          sourceRuleId: "rule.rejections.all",
+          actionType: "ASSIGN_OWNER",
+          assignmentReason: "由当前 Bot Owner 处理",
+          rootCauseSummary: "管理员判断不需要处理",
+          suggestedAction: "修复后进入 Agent 验收。",
+        }),
+      });
+      const adminRejected = await jsonRequestAt(
+        isolatedBaseUrl,
+        `/api/insight/v1/admin/improvements/${Number(adminItem.body.improvementId)}/review`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-User-Id": "admin-1" },
+          body: JSON.stringify({
+            decision: "REJECT",
+            comment: "同类问题近期不再打扰",
+            version: adminItem.body.version,
+          }),
+        },
+      );
+      expect(adminRejected.response.status).toBe(200);
+
+      const all = await jsonRequestAt(
+        isolatedBaseUrl,
+        "/api/insight/v1/internal/governance/rejections/all?days=30",
+      );
+      expect(all.response.status).toBe(200);
+      expect(all.body.total).toBe(2);
+      expect(all.body.items).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          improvementId: Number(ownerItem.body.improvementId),
+          ownerUserId: "dev_local",
+          sourceType: "USER_SELECTED",
+          rejectedBy: "OWNER",
+          rejectReasonCode: "EXPECTED_BUSINESS_FAILURE",
+          rejectComment: "工具按协议返回业务拒绝，属于预期结果",
+          rejectedAt: expect.any(String),
+        }),
+        expect.objectContaining({
+          improvementId: Number(adminItem.body.improvementId),
+          rejectedBy: "ADMIN",
+          rejectReasonCode: "ADMIN_REJECTED",
+          rejectComment: "同类问题近期不再打扰",
+        }),
+      ]));
+
+      // 治理动作接口按设计只看治理来源，看不到待办里的用户驳回——这正是离线取数漏数据的原因。
+      const governanceOnly = await jsonRequestAt(
+        isolatedBaseUrl,
+        "/api/insight/v1/internal/governance/actions?status=ARCHIVED&limit=50",
+      );
+      expect(governanceOnly.body.items.map((item: Record<string, unknown>) => item.improvementId))
+        .not.toContain(Number(ownerItem.body.improvementId));
+
+      const ownerOnly = await jsonRequestAt(
+        isolatedBaseUrl,
+        "/api/insight/v1/internal/governance/rejections/all?days=30&rejectedBy=OWNER",
+      );
+      expect(ownerOnly.body.total).toBe(1);
+      expect(ownerOnly.body.items[0]).toEqual(expect.objectContaining({ rejectedBy: "OWNER" }));
+
+      const adminOnly = await jsonRequestAt(
+        isolatedBaseUrl,
+        "/api/insight/v1/internal/governance/rejections/all?days=30&rejectedBy=ADMIN",
+      );
+      expect(adminOnly.body.total).toBe(1);
+      expect(adminOnly.body.items[0]).toEqual(expect.objectContaining({ rejectedBy: "ADMIN" }));
+
+      const paged = await jsonRequestAt(
+        isolatedBaseUrl,
+        "/api/insight/v1/internal/governance/rejections/all?days=30&limit=1&offset=0",
+      );
+      expect(paged.body.total).toBe(2);
+      expect(paged.body.items).toHaveLength(1);
+
+      // 窗口按归档时间（gmt_modified）过滤：把用户驳回项推到 40 天前即不再返回。
+      await isolatedDb.exec(
+        "UPDATE insight_improvement_item SET gmt_modified = ? WHERE id = ?",
+        [Math.floor(Date.now() / 1000) - 40 * 24 * 60 * 60, Number(ownerItem.body.improvementId)],
+      );
+      const windowed = await jsonRequestAt(
+        isolatedBaseUrl,
+        "/api/insight/v1/internal/governance/rejections/all?days=30",
+      );
+      expect(windowed.body.total).toBe(1);
+      expect(windowed.body.items[0]).toEqual(expect.objectContaining({ rejectedBy: "ADMIN" }));
+
+      const invalid = await jsonRequestAt(
+        isolatedBaseUrl,
+        "/api/insight/v1/internal/governance/rejections/all?rejectedBy=SOMEONE",
+      );
+      expect(invalid.response.status).toBe(400);
+    });
   });
 
   it("exposes rule evolution proposals only to Admin", async () => {

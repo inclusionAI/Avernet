@@ -6,6 +6,7 @@ naming the missing member, instead of raising ``AttributeError`` at the call
 site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 ``core/repository/README.md`` for why that direction is load-bearing.
 """
+
 from __future__ import annotations
 
 from abc import abstractmethod
@@ -14,7 +15,11 @@ from typing import Any, List, Optional, Protocol, TYPE_CHECKING, runtime_checkab
 if TYPE_CHECKING:
     from agentclaw.community.core.quality.models import QualityTaskRecord
     from agentclaw.community.core.session_resources.types import SessionResourceRecord
-    from agentclaw.community.core.task_queue.types import EnqueueResult, TaskRecord, TaskStatus
+    from agentclaw.community.core.task_queue.types import (
+        EnqueueResult,
+        TaskRecord,
+        TaskStatus,
+    )
 
 
 @runtime_checkable
@@ -33,6 +38,8 @@ class TaskQueueRepositoryProtocol(Protocol):
         env: str,
         app: str,
         idempotency_key: Optional[str] = None,
+        trace_id: Optional[str] = None,
+        trace_carrier: Optional[dict] = None,
     ) -> EnqueueResult:
         """Persist a ``PENDING`` task and return ``(record, created)``.
 
@@ -117,6 +124,22 @@ class TaskQueueRepositoryProtocol(Protocol):
         and a duplicate enqueue joins it. The next claim scan retires it
         ``TIMED_OUT`` and frees the key. This only bites when the worker is down
         or behind by longer than the task's own deadline.
+
+        ``trace_id`` / ``trace_carrier`` record which request asked for this
+        work, so the execution can log under that request's trace minutes later
+        (see ``TaskQueueService.enqueue``). Both are stored verbatim and read by
+        nobody on the write path: they are in no index, no predicate, and no
+        uniqueness rule, so they cannot change which row exists or which task is
+        joined. ``trace_carrier`` is JSON-serialized on write, exactly like
+        ``payload``, and is opaque to this layer — its keys belong to the tracer.
+
+        **A keyed duplicate keeps the original's trace**, because it inserts no
+        row at all: the caller is handed the live task, whose trace is the one
+        that created it. That is the honest record — the work runs once, under
+        the trace that caused it to exist — and the joining request is not
+        silently lost either, since ``enqueue`` logs the join with both trace
+        ids so the second request can still be followed to the task that
+        absorbed it.
         """
         ...
 
@@ -255,7 +278,6 @@ class TaskQueueRepositoryProtocol(Protocol):
         returned — that is the generation a caller asking "what became of it?"
         means.
         """
-        ...
 
 
 @runtime_checkable

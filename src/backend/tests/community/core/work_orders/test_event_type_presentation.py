@@ -58,3 +58,10 @@ def test_default_event_copy_does_not_include_detail_action():
     for event_type in WorkOrderEventType:
         assert "查看详情" not in event_type.summary
     assert "查看详情" not in notification_summary_for("EXTERNAL_EVENT")
+
+
+def test_group_mention_event_display_contract():
+    definition = WorkOrderEventType("HUMAN_GROUP_MENTIONED")
+    assert definition.notification_category is NotificationCategory.NOTICE
+    assert definition.title == "你被 @ 了"
+    assert notification_summary_for("HUMAN_GROUP_MENTIONED") == "群聊中有消息 @ 了你。"

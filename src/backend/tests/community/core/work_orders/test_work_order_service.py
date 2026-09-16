@@ -598,6 +598,34 @@ def test_create_friend_event_requires_callback_contract(
     repository.create_work_order_event.assert_not_called()
 
 
+def test_create_group_mention_notice_event_reaches_repository() -> None:
+    service, repository, _, _, _ = _service()
+
+    service.create_work_order_event(
+        event_category=NotificationCategory.NOTICE,
+        biz_type=WorkOrderBizType.GROUP_MENTION.value,
+        biz_id="group-1:s1",
+        event_type=WorkOrderEventType.HUMAN_GROUP_MENTIONED.value,
+        applicant_user_id=None,
+        approver_user_ids=[],
+        recipient_user_ids=["447147"],
+        title="你被 @ 了",
+        content={"text": "张三: 你好"},
+        apply_reason=None,
+        biz_data={
+            "group_id": "group-1",
+            "session_id": "group-1:s1",
+            "sender_actor_id": "bot-driver",
+        },
+        actor_id="447147",
+    )
+
+    call = repository.create_work_order_event.call_args.kwargs
+    assert call["event_type"] == WorkOrderEventType.HUMAN_GROUP_MENTIONED.value
+    assert call["biz_type"] == WorkOrderBizType.GROUP_MENTION.value
+    assert call["recipient_user_ids"] == ["447147"]
+
+
 @pytest.mark.parametrize("value", ["x" * 513])
 def test_create_rejects_invalid_reason(value: str) -> None:
     service, repository, _, _, _ = _service()

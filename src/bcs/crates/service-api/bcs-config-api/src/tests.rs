@@ -417,36 +417,36 @@ fn private_endpoint_allowlist_rejects_unsafe_or_ambiguous_rules() {
 }
 
 #[test]
-fn human_notify_config_parses_provider_and_options() {
+fn human_notify_config_parses_provider_array_and_options() {
     let value: toml::Value = toml::from_str(
         r#"
-provider = "dingtalk"
-
-[providers.dingtalk]
+[[providers]]
+name = "dingtalk"
 enabled = true
 robot_code = "ding-robot"
 client_secret = "s3cret"
+
+[[providers]]
+name = "dummy"
 "#,
     )
     .expect("toml must parse");
     let config: HumanNotifyConfig = value.try_into().expect("config must deserialize");
-    assert_eq!(config.provider.as_deref(), Some("dingtalk"));
-    let provider = config
-        .providers
-        .get("dingtalk")
-        .expect("dingtalk provider entry");
-    assert!(provider.enabled);
-    assert!(config.enabled_provider("dingtalk"));
+    assert_eq!(config.providers.len(), 2);
+    let dingtalk = &config.providers[0];
+    assert_eq!(dingtalk.name, "dingtalk");
+    assert!(dingtalk.enabled);
     assert_eq!(
-        provider.options.get("robot_code").and_then(|v| v.as_str()),
+        dingtalk.options.get("robot_code").and_then(|v| v.as_str()),
         Some("ding-robot")
     );
+    let dummy = &config.providers[1];
+    assert_eq!(dummy.name, "dummy");
+    assert!(dummy.enabled, "enabled must default to true when omitted");
 }
 
 #[test]
 fn human_notify_config_defaults_to_disabled() {
     let config = HumanNotifyConfig::default();
-    assert!(config.provider.is_none());
     assert!(config.providers.is_empty());
-    assert!(!config.enabled_provider("dummy"));
 }

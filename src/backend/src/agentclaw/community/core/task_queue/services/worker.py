@@ -34,8 +34,10 @@ import asyncio
 import os
 import random
 import socket
+import sys
 import uuid
-from typing import Optional
+from contextlib import contextmanager
+from typing import Iterator, Optional
 
 from injector import inject
 
@@ -52,6 +54,7 @@ from agentclaw.community.core.task_queue.types import (
 from agentclaw.community.di.config import TaskQueueConfig, TaskQueueWorkerConfig
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.tracer import TracerPlugin
 from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
@@ -74,11 +77,13 @@ class TaskWorker(LifecycleBase):
         config: TaskQueueWorkerConfig,
         wakeup: WorkerWakeup,
         queue_config: TaskQueueConfig,
+        tracer: TracerPlugin,
     ) -> None:
         self._repo = repo
         self._registry = registry
         self._config = config
         self._wakeup = wakeup
+        self._tracer = tracer
         self._worker_id = _make_worker_id()
         self._env = get_current_env()
         # The owning app, from deployment config — the same value the enqueue
@@ -200,22 +205,94 @@ class TaskWorker(LifecycleBase):
         await asyncio.gather(*(self._run_guarded(task) for task in claimed))
         return len(claimed)
 
+    @contextmanager
+    def _restored_trace(self, task: TaskRecord) -> Iterator[None]:
+        """``tracer.trace_scope`` for this task, with the tracer held at arm's length.
+
+        The protocol says an impl must not raise, and none of ours does. This
+        guard is for the one that someday might — a corp SDK throwing from
+        inside its own context handling, say — because of where the call sits.
+        An exception escaping ``__enter__`` here would propagate out of
+        ``_run_guarded``, through the ``asyncio.gather`` that runs the batch, and
+        abort ``run_once`` for **every** task claimed in it: each left RUNNING
+        until its lease expires, and the next poll doing the same thing again.
+        A tracing fault would have become a stalled queue.
+
+        Only the tracer's own enter/exit is guarded. The body is not: an
+        exception from the task keeps propagating to the caller's handling, and
+        is passed to ``__exit__`` so a tracer that records span status sees it.
+        A tracer never gets to *suppress* a task's exception, whatever its
+        ``__exit__`` returns — swallowing failures is not a tracing concern.
+        """
+        try:
+            scope = self._tracer.trace_scope(task.trace_carrier)
+            scope.__enter__()
+        except Exception:
+            logger.warning(
+                "[TaskWorker] could not restore trace for task id=%s — running "
+                "it untraced",
+                task.id,
+                exc_info=True,
+            )
+            yield
+            return
+        try:
+            yield
+        except BaseException:
+            self._close_trace(scope, task, sys.exc_info())
+            raise
+        else:
+            self._close_trace(scope, task, (None, None, None))
+
+    def _close_trace(self, scope, task: TaskRecord, exc_info) -> None:
+        """Exit a restored scope, absorbing a tracer failure on the way out.
+
+        The same reasoning as the enter guard, and the same limit: the task's own
+        outcome has already been decided and written by this point, so a tracer
+        that fails while closing can only cost a log line.
+        """
+        try:
+            scope.__exit__(*exc_info)
+        except Exception:
+            logger.warning(
+                "[TaskWorker] tracer failed to close the restored trace for "
+                "task id=%s",
+                task.id,
+                exc_info=True,
+            )
+
     async def _run_guarded(self, task: TaskRecord) -> None:
         async with self._sem:
-            try:
-                await self._run_one(task)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                # Defensive: _run_one already maps handler errors to Retry; this
-                # only catches a failure in the mapping/DB write itself. Leave
-                # the row RUNNING — its lease will expire and another worker
-                # reclaims it.
-                logger.exception(
-                    "[TaskWorker] task id=%s type=%s outcome handling failed",
-                    task.id,
-                    task.task_type,
-                )
+            # Re-establish the trace of the request that enqueued this task, for
+            # the whole of its execution — so the handler's own logging, the
+            # lease-lost warning, and the defensive catch below all land under
+            # the trace id a support ticket would quote, not under nothing.
+            #
+            # Bound HERE rather than around the handler call alone, and in the
+            # coroutine rather than inside the worker thread, both deliberately.
+            # Every tracer this seam has binds through a ContextVar, and
+            # ``asyncio.gather`` runs each of these coroutines in its own copied
+            # context — so the binding is private to this task and cannot bleed
+            # into a sibling running concurrently under the semaphore. The
+            # ``asyncio.to_thread`` calls inside likewise copy the context, which
+            # carries the trace into the handler thread for free; a thread-local
+            # tracer would need the opposite treatment (bind inside the thread),
+            # so this placement is a fact about the seam, not an accident.
+            with self._restored_trace(task):
+                try:
+                    await self._run_one(task)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # Defensive: _run_one already maps handler errors to Retry;
+                    # this only catches a failure in the mapping/DB write itself.
+                    # Leave the row RUNNING — its lease will expire and another
+                    # worker reclaims it.
+                    logger.exception(
+                        "[TaskWorker] task id=%s type=%s outcome handling failed",
+                        task.id,
+                        task.task_type,
+                    )
 
     # ── per-task execution ──────────────────────────────────────────────
     async def _run_one(self, task: TaskRecord) -> None:

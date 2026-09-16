@@ -18,14 +18,19 @@ use bcs_security_gateway_api::SecurityGatewayPort;
 use bcs_service_api::LeaderElectionPort;
 use bcs_service_api::lifecycle::ServiceLifecycle;
 use bcs_service_api::port::repo::ChannelBindingRepoPort;
+use bcs_service_api::port::HumanMentionNotifyPort;
 use bcs_user_directory_api::UserDirectoryPlugin;
-use futures::future::BoxFuture;
+use futures::future::{BoxFuture, join_all};
 
 // Force-link the built-in dummy notifier so its inventory registration is
 // retained in the final binary: this constant references the dummy build
 // function directly instead of relying on an elided unused import.
 const _: bcs_human_notify_api::HumanMentionNotifierBuild =
     bcs_human_notify_dummy::build_dummy_notifier;
+
+// Force-link the built-in work-order notifier the same way as the dummy.
+const _: bcs_human_notify_api::HumanMentionNotifierBuild =
+    bcs_human_notify_work_order::build_work_order_notifier;
 
 use crate::config::{
     BcsConfig, DatabaseType, SecurityGatewayProviderConfig, UserDirectoryProviderConfig,
@@ -290,39 +295,59 @@ pub fn build_registered_channel_provider(
     Ok(None)
 }
 
-/// Build the selected human mention notification port.
+/// Build the human mention notification port from the provider array.
 ///
-/// Returns a no-op port when the feature is not configured or the selected
-/// provider entry is disabled. Returns a startup error when the selected
-/// provider is not linked into this binary or its config is invalid.
+/// Every enabled `[[human_notify.providers]]` entry is built and fans out in
+/// parallel; a single backend failure is logged and isolated. Returns a
+/// no-op port when no entry is configured or all entries are disabled.
+/// Returns a startup error when two entries share a name, a name is blank,
+/// an enabled provider is not linked into this binary, or its config is
+/// invalid.
 pub async fn build_human_mention_notify_port(
     config: &BcsConfig,
 ) -> crate::Result<Arc<dyn bcs_service_api::port::HumanMentionNotifyPort>> {
-    let Some(provider) = config.human_notify.provider.as_deref() else {
-        tracing::info!("human_notify disabled: no provider configured");
-        return Ok(Arc::new(bcs_service_api::port::NoopHumanMentionNotifyPort));
-    };
-    let Some(provider_config) = config.human_notify.providers.get(provider) else {
-        return Err(crate::BcsError::InvalidConfig(format!(
-            "human_notify.provider '{provider}' has no [human_notify.providers.{provider}] entry"
-        )));
-    };
-    if !provider_config.enabled {
-        tracing::info!(provider, "human_notify disabled: provider entry not enabled");
-        return Ok(Arc::new(bcs_service_api::port::NoopHumanMentionNotifyPort));
-    }
-    for factory in inventory::iter::<bcs_human_notify_api::HumanMentionNotifierFactory> {
-        if factory.name == provider {
-            let notifier = (factory.build)(provider_config.clone())
-                .await
-                .map_err(human_notify_build_error)?;
-            tracing::info!(provider, "human_notify backend selected");
-            return Ok(Arc::new(HumanMentionNotifyAdapter::new(notifier)));
+    let mut seen: std::collections::BTreeSet<String> = Default::default();
+    for provider in &config.human_notify.providers {
+        let name = provider.name.trim();
+        if name.is_empty() {
+            return Err(crate::BcsError::InvalidConfig(
+                "human_notify provider name must not be blank".to_string(),
+            ));
+        }
+        if !seen.insert(name.to_string()) {
+            return Err(crate::BcsError::InvalidConfig(format!(
+                "human_notify provider '{name}' is configured more than once"
+            )));
         }
     }
-    Err(crate::BcsError::InvalidConfig(format!(
-        "human_notify.provider '{provider}' is not available in this binary"
-    )))
+    let mut adapters: Vec<HumanMentionNotifyAdapter> = Vec::new();
+    for provider in &config.human_notify.providers {
+        // 与上面的重复/空白校验一致，统一用 trimmed name 查找 factory，
+        // 避免名字带空白时绕过配置校验、落到 "not available" 报错。
+        let name = provider.name.trim();
+        if !provider.enabled {
+            tracing::info!(provider = %name, "human_notify provider disabled: skipping");
+            continue;
+        }
+        let factory = inventory::iter::<bcs_human_notify_api::HumanMentionNotifierFactory>
+            .into_iter()
+            .find(|factory| factory.name == name)
+            .ok_or_else(|| {
+                crate::BcsError::InvalidConfig(format!(
+                    "human_notify provider '{name}' is not available in this binary"
+                ))
+            })?;
+        let notifier = (factory.build)(provider.clone())
+            .await
+            .map_err(human_notify_build_error)?;
+        tracing::info!(provider = %name, "human_notify backend selected");
+        adapters.push(HumanMentionNotifyAdapter::new(notifier));
+    }
+    if adapters.is_empty() {
+        tracing::info!("human_notify disabled: no enabled provider configured");
+        return Ok(Arc::new(bcs_service_api::port::NoopHumanMentionNotifyPort));
+    }
+    Ok(Arc::new(CompositeHumanMentionNotifyAdapter { adapters }))
 }
 
 fn human_notify_build_error(error: bcs_human_notify_api::HumanNotifyError) -> crate::BcsError {
@@ -418,6 +443,34 @@ impl bcs_service_api::port::HumanMentionNotifyPort for HumanMentionNotifyAdapter
                 ))
             }
         }
+    }
+}
+
+/// Fans one port notification out to every selected notifier in parallel.
+/// Each backend keeps its own DTO translation, timeout, and error logging
+/// (see [`HumanMentionNotifyAdapter`]); a failing backend never fails the
+/// batch because the message flow treats notifications as fire-and-forget.
+pub struct CompositeHumanMentionNotifyAdapter {
+    pub adapters: Vec<HumanMentionNotifyAdapter>,
+}
+
+#[async_trait::async_trait]
+impl HumanMentionNotifyPort for CompositeHumanMentionNotifyAdapter {
+    fn is_available(&self) -> bool {
+        !self.adapters.is_empty()
+    }
+
+    async fn notify_mentioned_humans(
+        &self,
+        notification: bcs_service_api::port::human_notify::MentionNotification,
+    ) -> bcs_service_api::ServiceResult<()> {
+        let futures = self
+            .adapters
+            .iter()
+            .map(|adapter| adapter.notify_mentioned_humans(notification.clone()))
+            .collect::<Vec<_>>();
+        let _ = join_all(futures).await;
+        Ok(())
     }
 }
 
@@ -1056,17 +1109,18 @@ mod tests {
 mod human_notify_selection_tests {
     use super::*;
     use bcs_service_api::port::HumanMentionNotifyPort;
+    use std::sync::Mutex;
 
     fn failing_notifier_factory(
         _config: bcs_config_api::HumanNotifyProviderConfig,
     ) -> futures::future::BoxFuture<
         'static,
-        bcs_human_notify_api::HumanNotifyResult<Arc<dyn bcs_human_notify_api::HumanMentionNotifier>>,
+        bcs_human_notify_api::HumanNotifyResult<
+            Arc<dyn bcs_human_notify_api::HumanMentionNotifier>,
+        >,
     > {
         Box::pin(async move {
-            Err(bcs_human_notify_api::HumanNotifyError::Config(
-                "boom".to_string(),
-            ))
+            Err(bcs_human_notify_api::HumanNotifyError::Config("boom".to_string()))
         })
     }
 
@@ -1077,66 +1131,119 @@ mod human_notify_selection_tests {
         }
     }
 
-    fn config_with(provider: Option<&str>, entry: Option<(bool, &str)>) -> BcsConfig {
-        let mut config = BcsConfig::default();
-        config.human_notify.provider = provider.map(str::to_string);
-        if let Some((enabled, name)) = entry {
-            let mut provider_config = bcs_config_api::HumanNotifyProviderConfig::default();
-            provider_config.enabled = enabled;
-            config.human_notify.providers.insert(name.to_string(), provider_config);
+    static RECORDED_NOTIFICATIONS: Mutex<Vec<bcs_human_notify_api::MentionNotification>> =
+        Mutex::new(Vec::new());
+
+    struct RecordingNotifier;
+
+    #[async_trait::async_trait]
+    impl bcs_human_notify_api::HumanMentionNotifier for RecordingNotifier {
+        fn backend_name(&self) -> &'static str {
+            "test-recorder"
         }
+
+        async fn notify(
+            &self,
+            notification: &bcs_human_notify_api::MentionNotification,
+        ) -> bcs_human_notify_api::HumanNotifyResult<()> {
+            RECORDED_NOTIFICATIONS
+                .lock()
+                .unwrap()
+                .push(notification.clone());
+            Ok(())
+        }
+    }
+
+    fn recording_notifier_factory(
+        _config: bcs_config_api::HumanNotifyProviderConfig,
+    ) -> futures::future::BoxFuture<
+        'static,
+        bcs_human_notify_api::HumanNotifyResult<
+            Arc<dyn bcs_human_notify_api::HumanMentionNotifier>,
+        >,
+    > {
+        Box::pin(async move {
+            Ok(Arc::new(RecordingNotifier) as Arc<dyn bcs_human_notify_api::HumanMentionNotifier>)
+        })
+    }
+
+    inventory::submit! {
+        bcs_human_notify_api::HumanMentionNotifierFactory {
+            name: "test-recorder",
+            build: recording_notifier_factory,
+        }
+    }
+
+    fn entry(name: &str, enabled: bool) -> bcs_config_api::HumanNotifyProviderConfig {
+        bcs_config_api::HumanNotifyProviderConfig {
+            name: name.to_string(),
+            enabled,
+            options: std::collections::BTreeMap::new(),
+        }
+    }
+
+    fn config_with(entries: &[bcs_config_api::HumanNotifyProviderConfig]) -> BcsConfig {
+        let mut config = BcsConfig::default();
+        config.human_notify.providers = entries.to_vec();
         config
     }
 
     #[tokio::test]
-    async fn unset_provider_selects_noop() {
-        let port = build_human_mention_notify_port(&config_with(None, None)).await.unwrap();
-        assert!(!port.is_available());
-    }
-
-    #[tokio::test]
-    async fn disabled_entry_selects_noop() {
-        let port = build_human_mention_notify_port(&config_with(Some("dummy"), Some((false, "dummy"))))
+    async fn no_providers_selects_noop() {
+        let port = build_human_mention_notify_port(&config_with(&[]))
             .await
             .unwrap();
         assert!(!port.is_available());
     }
 
     #[tokio::test]
-    async fn missing_provider_entry_is_startup_error() {
-        let error = match build_human_mention_notify_port(&config_with(Some("dummy"), None)).await
-        {
-            Ok(_) => panic!("missing entry must fail startup"),
-            Err(error) => error,
-        };
-        assert!(error.to_string().contains("human_notify.providers.dummy"));
+    async fn disabled_entry_selects_noop() {
+        let port = build_human_mention_notify_port(&config_with(&[entry("dummy", false)]))
+            .await
+            .unwrap();
+        assert!(!port.is_available());
+    }
+
+    #[tokio::test]
+    async fn duplicate_provider_name_is_startup_error() {
+        let error = build_human_mention_notify_port(&config_with(&[
+            entry("dummy", true),
+            entry("dummy", true),
+        ]))
+        .await
+        .err()
+        .expect("duplicate names must fail startup");
+        assert!(error.to_string().contains("more than once"));
+    }
+
+    #[tokio::test]
+    async fn blank_provider_name_is_startup_error() {
+        let error = build_human_mention_notify_port(&config_with(&[entry("  ", true)]))
+            .await
+            .err()
+            .expect("blank name must fail startup");
+        assert!(error.to_string().contains("blank"));
     }
 
     #[tokio::test]
     async fn unregistered_provider_is_startup_error() {
-        let error = match build_human_mention_notify_port(&config_with(
-            Some("missing-backend"),
-            Some((true, "missing-backend")),
-        ))
-        .await
-        {
-            Ok(_) => panic!("unregistered backend must fail startup"),
-            Err(error) => error,
-        };
+        let error =
+            build_human_mention_notify_port(&config_with(&[entry("missing-backend", true)]))
+                .await
+                .err()
+                .expect("unregistered backend must fail startup");
         assert!(error.to_string().contains("not available in this binary"));
     }
 
     #[tokio::test]
     async fn failing_factory_is_startup_error() {
-        let error = match build_human_mention_notify_port(&config_with(
-            Some("test-failing-notifier"),
-            Some((true, "test-failing-notifier")),
-        ))
+        let error = build_human_mention_notify_port(&config_with(&[entry(
+            "test-failing-notifier",
+            true,
+        )]))
         .await
-        {
-            Ok(_) => panic!("factory config error must fail startup"),
-            Err(error) => error,
-        };
+        .err()
+        .expect("factory config error must fail startup");
         assert!(matches!(error, crate::BcsError::InvalidConfig(_)));
         assert!(
             error.to_string().contains("boom"),
@@ -1146,12 +1253,39 @@ mod human_notify_selection_tests {
 
     #[tokio::test]
     async fn dummy_backend_builds_available_port() {
-        let port = build_human_mention_notify_port(&config_with(Some("dummy"), Some((true, "dummy"))))
+        let port = build_human_mention_notify_port(&config_with(&[entry("dummy", true)]))
             .await
             .unwrap();
         assert!(port.is_available());
     }
 
+    #[tokio::test]
+    async fn all_enabled_backends_fan_out() {
+        RECORDED_NOTIFICATIONS.lock().unwrap().clear();
+        let port = build_human_mention_notify_port(&config_with(&[
+            entry("dummy", true),
+            entry("test-recorder", true),
+        ]))
+        .await
+        .unwrap();
+        assert!(port.is_available());
+
+        port.notify_mentioned_humans(port_notification())
+            .await
+            .expect("fan-out never fails the message flow");
+
+        let recorded = RECORDED_NOTIFICATIONS.lock().unwrap();
+        assert_eq!(
+            recorded.len(),
+            1,
+            "each enabled backend receives exactly one notification"
+        );
+        assert_eq!(recorded[0].mentioned.len(), 1);
+    }
+
+    // SlowNotifier / port_notification / adapter_bounds_runtime_with_timeout /
+    // adapter_translates_port_dto_into_plugin_schema 从原模块原样保留（见
+    // 现有 plugins.rs:1155-1246，无改动）。
     struct SlowNotifier;
 
     #[async_trait::async_trait]

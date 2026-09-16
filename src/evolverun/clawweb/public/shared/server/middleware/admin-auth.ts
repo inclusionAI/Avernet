@@ -3,7 +3,7 @@
  *
  * Reads the admin roster from the dynamic repository (falling back to config) and injects
  * `req.isAdmin` / `req.isLogAdmin` / `req.isBenchAdmin` / `req.isClawEvolveAdmin` /
- * `req.isSuperAdmin` into every request. It never blocks a request: the bypass logic lives in
+ * `req.isClawInsightAdmin` / `req.isSuperAdmin` into every request. It never blocks a request: the bypass logic lives in
  * the individual route handlers.
  *
  * Identity candidates are collected in this order:
@@ -100,13 +100,14 @@ async function resolveAdminSets(options: AdminAuthOptions): Promise<AdminUserSet
     logAdmins: new Set([...options.config.logAdmins].map((id) => id.toLowerCase())),
     benchAdmins: new Set([...options.config.benchAdmins].map((id) => id.toLowerCase())),
     clawEvolveAdmins: new Set([...options.config.clawEvolveAdmins].map((id) => id.toLowerCase())),
+    clawInsightAdmins: new Set([...options.config.clawInsightAdmins].map((id) => id.toLowerCase())),
   };
 }
 
 export function adminAuthMiddleware(options: AdminAuthOptions) {
   const devUserId = (options.devUserId ?? "dev_local").toLowerCase();
   return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
-    const { admins, logAdmins, benchAdmins, clawEvolveAdmins } = await resolveAdminSets(options);
+    const { admins, logAdmins, benchAdmins, clawEvolveAdmins, clawInsightAdmins } = await resolveAdminSets(options);
     const candidates = collectIdentityCandidates(req);
     const isLocalDevAdmin = isLoopbackHost(req) && candidates.includes(devUserId);
 
@@ -115,6 +116,8 @@ export function adminAuthMiddleware(options: AdminAuthOptions) {
     req.isLogAdmin = req.isAdmin || candidates.some((id) => logAdmins.has(id));
     req.isBenchAdmin = req.isAdmin || candidates.some((id) => benchAdmins.has(id));
     req.isClawEvolveAdmin = req.isAdmin || candidates.some((id) => clawEvolveAdmins.has(id));
+    // Monitoring access is an independent allowlist, not inherited from other roles.
+    req.isClawInsightAdmin = candidates.some((id) => clawInsightAdmins.has(id));
 
     req.isSuperAdmin = options.repository
       ? await options.repository.hasRole(candidates, "admin")

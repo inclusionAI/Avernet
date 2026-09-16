@@ -78,6 +78,27 @@ CREATE TABLE `ac_task_queue` (
   -- incidental.
   `idempotency_key` varchar(190) COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'caller-supplied enqueue dedup key; NULL = opted out. Audit only',
   `active_idempotency_key` varchar(190) COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'enforcement copy; NULLed on terminal transitions',
+  -- Request correlation, and nothing else. A task is enqueued by one request
+  -- and run later by another process, so without carrying the trace across, the
+  -- execution logs under no trace at all and an open-API call cannot be followed
+  -- to the work it caused. Both columns sit outside every index and every
+  -- predicate -- nothing selects, scopes or dedups on them -- so they cannot
+  -- affect which row exists or which task a keyed enqueue joins.
+  --
+  -- Two columns for two audiences, the same split as idempotency_key /
+  -- active_idempotency_key: trace_id is the human value an operator greps for,
+  -- trace_carrier is the tracer's own serialization, handed back verbatim to
+  -- TracerPlugin.trace_scope when the worker picks the task up. Storing only the
+  -- id would put the corp tracer's propagation headers into neutral code and
+  -- drop everything the id is not (rpc id, penetration attributes).
+  --
+  -- Both NULL-able, and not only for rows predating them: work enqueued outside
+  -- a request has no trace to carry, and a deployment whose tracer mints no id
+  -- writes neither. NULL here is normal, never a defect -- which is also what
+  -- makes this a safe rolling deploy: pods running the previous version keep
+  -- inserting rows without these columns.
+  `trace_id`      varchar(64)   DEFAULT NULL COMMENT 'trace id of the enqueuing request; correlation only, never queried on',
+  `trace_carrier` text          DEFAULT NULL COMMENT 'JSON trace context, opaque to the queue; replayed via TracerPlugin',
   `env`           varchar(20)   NOT NULL COMMENT '环境标识: prod/pre/dev; all queries filter by env',
   -- Which application owns the row. A second, independently deployed backend
   -- shares this table; without this column both fleets claim each other's
@@ -122,3 +143,22 @@ CREATE TABLE `ac_task_queue` (
     (`env`, `task_type`, `active_idempotency_key`) GLOBAL
 ) AUTO_INCREMENT_MODE = 'ORDER' DEFAULT CHARSET = utf8mb4
   COMMENT = '通用后台任务队列';
+
+-- ---------------------------------------------------------------------------
+-- MIGRATION for a deployment that already HAS ac_task_queue. The two columns
+-- above are additive and nullable, so this runs against a live table with the
+-- fleet up: old pods keep inserting rows that simply leave them NULL, and the
+-- worker treats a NULL carrier as "no trace to restore".
+--
+-- No index is added with them, on purpose. They are diagnostic, read by the
+-- worker on the way out and by a human after the fact; indexing trace_id would
+-- add write cost to the busiest INSERT the component has in exchange for a
+-- lookup nobody does on the hot path. If "find the task for trace X" ever
+-- becomes routine, add `KEY idx_env_app_trace_id (env, app, trace_id) GLOBAL`
+-- then -- with the same env/app leading columns as every other index here.
+--
+-- ALTER TABLE `ac_task_queue`
+--   ADD COLUMN `trace_id` varchar(64) DEFAULT NULL
+--     COMMENT 'trace id of the enqueuing request; correlation only, never queried on' AFTER `active_idempotency_key`,
+--   ADD COLUMN `trace_carrier` text DEFAULT NULL
+--     COMMENT 'JSON trace context, opaque to the queue; replayed via TracerPlugin' AFTER `trace_id`;

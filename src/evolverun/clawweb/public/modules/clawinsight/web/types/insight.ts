@@ -220,6 +220,7 @@ export type ImprovementView = {
   rejectReasonCode: string | null
   rejectComment: string | null
   rejectedAt: number | string | null
+  rejectedBy: 'OWNER' | 'ADMIN' | null
   handledAt: number | string | null
   verificationStatus: 'NOT_STARTED' | 'PENDING' | 'STILL_PRESENT' | 'VERIFIED' | 'INSUFFICIENT_DATA'
   verificationLastCheckedAt: number | string | null

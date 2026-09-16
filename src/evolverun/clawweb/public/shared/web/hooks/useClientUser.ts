@@ -46,6 +46,7 @@ function normalizeClientUser(raw: Partial<ClientUser> | null | undefined): Clien
     isLogAdmin: raw.isLogAdmin ?? raw.isAdmin ?? false,
     isBenchAdmin: raw.isBenchAdmin ?? raw.isAdmin ?? false,
     isClawEvolveAdmin: raw.isClawEvolveAdmin ?? raw.isAdmin ?? false,
+    isClawInsightAdmin: raw.isClawInsightAdmin ?? false,
     isSuperAdmin: raw.isSuperAdmin ?? false,
   }
 }
@@ -234,7 +235,7 @@ export function useClientUser() {
         // Merge server-side role flags into the existing user
         setUser((prev) =>
           prev && prev.userId === serverUser.userId
-            ? { ...prev, isAdmin: serverUser.isAdmin, isLogAdmin: serverUser.isLogAdmin, isBenchAdmin: serverUser.isBenchAdmin, isClawEvolveAdmin: serverUser.isClawEvolveAdmin, isSuperAdmin: serverUser.isSuperAdmin }
+            ? { ...prev, isAdmin: serverUser.isAdmin, isLogAdmin: serverUser.isLogAdmin, isBenchAdmin: serverUser.isBenchAdmin, isClawEvolveAdmin: serverUser.isClawEvolveAdmin, isClawInsightAdmin: serverUser.isClawInsightAdmin, isSuperAdmin: serverUser.isSuperAdmin }
             : prev,
         )
       })

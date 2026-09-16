@@ -33,6 +33,14 @@ DEFAULT_APP = "agentclaw"
 #: the claim filter then never matches, so the work is enqueued and never runs.
 MAX_APP_LEN = 32
 
+#: Stored width of ``trace_id``. Comfortably above both tracers that write it —
+#: SofaTracer's ids are ~31 characters and the community tracer's are a 32-char
+#: uuid4 hex — with room for a format that grows. Unlike the idempotency key,
+#: an overlong value here is **truncated rather than rejected**: this column is
+#: diagnostic, and no diagnostic may cost a caller its enqueue (see
+#: ``TaskQueueService._capture_trace``).
+MAX_TRACE_ID_LEN = 64
+
 
 class TaskStatus(str, Enum):
     """Status of an ``ac_task_queue`` row.
@@ -96,6 +104,19 @@ class TaskRecord:
     #: column that actually backs the unique index is deliberately not projected
     #: here — it is a storage detail, not part of a task's meaning.
     idempotency_key: Optional[str] = None
+    #: The trace id of the request that enqueued this task, for correlation —
+    #: the value an operator greps for. Audit/diagnostic only: nothing reads it
+    #: to make a decision, and it is ``None`` for work enqueued outside a request
+    #: (a handler enqueuing a follow-up, a boot-time enqueue) or under a tracer
+    #: that mints no id.
+    trace_id: Optional[str] = None
+    #: The serialized trace context that ``TaskWorker`` hands back to
+    #: ``TracerPlugin.trace_scope`` so the handler runs under the enqueuing
+    #: request's trace. Opaque here: its keys belong to the tracer, so nothing in
+    #: the queue reads them. Kept alongside ``trace_id`` rather than replacing
+    #: it, because the two answer different questions — this one is for the
+    #: tracer, ``trace_id`` is for the human reading a log line.
+    trace_carrier: Optional[dict] = None
     gmt_create: Optional[datetime] = None
     gmt_modified: Optional[datetime] = None
 

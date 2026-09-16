@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { json, Router, type ErrorRequestHandler, type Request } from "express";
+import { json, Router, type ErrorRequestHandler, type NextFunction, type Request, type Response } from "express";
 import { MonitoringError } from "../services/monitoring/contracts.js";
 import { createMonitoringRuntime, type MonitoringRuntime } from "../services/monitoring/monitoring-runtime.js";
 
 const MAX_BYTES = 128 * 1024;
 const scoped = (req: Request) => /^\/(?:internal\/monitoring|monitoring)(?:\/|$)/.test(req.path);
-const statusCodes = { INVALID_EVENT: 400, BOT_NOT_ALLOWED: 403,
+const statusCodes = { INVALID_EVENT: 400,
   EVENT_CONFLICT: 409, PAYLOAD_TOO_LARGE: 413, NOT_READY: 503, BOT_NOT_FOUND: 404 } as const;
 export const monitoringErrorResponse: ErrorRequestHandler = (error, req, res, next) => {
   if (!scoped(req)) { next(error); return; }
@@ -27,7 +27,7 @@ export function createMonitoringRouter(runtime: MonitoringRuntime = createMonito
   router.use((req, res, next) => {
     if (!scoped(req)) { next("router"); return; }
     res.set("Cache-Control", "no-store");
-    if (!runtime.service) { next(new MonitoringError("NOT_READY", "监控模块未启用或配置无效。")); return; }
+    if (!runtime.service) { next(new MonitoringError("NOT_READY", "监控模块未装配。")); return; }
     next();
   });
   const parseJson = json({ limit: MAX_BYTES, inflate: false });
@@ -58,9 +58,17 @@ export function createMonitoringRouter(runtime: MonitoringRuntime = createMonito
   router.post("/internal/monitoring/bot-checks", async (req, res) => {
     res.json(await runtime.service!.reportCheck(req.body));
   });
-  router.get("/monitoring/bots", (req, res) => {
+  const requireClawInsightAdmin = (req: Request, res: Response, next: NextFunction): void => {
+    if (req.isClawInsightAdmin !== true) {
+      res.status(403).json({ error: "Forbidden", message: "ClawInsight admin permission required" });
+      return;
+    }
+    next();
+  };
+  router.use("/monitoring", requireClawInsightAdmin);
+  router.get("/monitoring/bots", async (req, res) => {
     if (Object.keys(req.query).length) throw new MonitoringError("INVALID_EVENT", "不支持此查询参数。");
-    res.json(runtime.service!.bots());
+    res.json(await runtime.service!.bots());
   });
   router.get("/monitoring/bots/:botId/status", async (req, res) => {
     if (Object.keys(req.query).length) throw new MonitoringError("INVALID_EVENT", "不支持此查询参数。");

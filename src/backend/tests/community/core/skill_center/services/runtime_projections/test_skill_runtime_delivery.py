@@ -26,6 +26,9 @@ from agentclaw.community.core.skills_pool.models import (
     MappingApplyResult,
     MappingItemResult,
     MappingProjectionStatus,
+    MappingPublishResult,
+    MappingResultReason,
+    MappingVerificationResult,
     PoolSkillMapping,
     RegisteredSkillAsset,
     SkillMappingSourceLayout,
@@ -532,6 +535,69 @@ async def test_aggregate_degraded_status_survives_empty_items() -> None:
 
     assert result.status is RuntimeProjectionStatus.DEGRADED
     assert result.issues[0].code == "SKILL_MAPPING_RUNTIME_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_legacy_mapping_contract_unsupported_is_non_retryable() -> None:
+    service = _LegacyRuntimeService()
+    pool = _RecordingPoolRuntime(fallback=True)
+
+    async def unsupported_publish(**kwargs):
+        pool.calls.append(("publish", kwargs))
+        return MappingPublishResult(
+            published=False,
+            status=MappingProjectionStatus.DEGRADED,
+            reason=MappingResultReason.ENGINE_SKILL_MAPPING_UNSUPPORTED,
+            evidence={"reason": "engine_skill_mapping_unsupported"},
+        )
+
+    pool.publish_mappings = unsupported_publish
+    asset = RegisteredSkillAsset(
+        skill_id=8,
+        name="repo-skill",
+        git_path="git://team/repo-skill",
+    )
+    delivery = _delivery(pool, _MissingLayoutRepository())
+
+    result = await delivery.deliver(
+        plan=_plan(asset), service_factory=_Factory(service)
+    )
+
+    assert result.status is RuntimeProjectionStatus.DEGRADED
+    assert result.issues[0].code == "ENGINE_SKILL_MAPPING_UNSUPPORTED"
+    assert result.issues[0].retryable is False
+    assert [name for name, _ in pool.calls] == ["apply", "publish"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_verify_contract_unsupported_is_non_retryable() -> None:
+    service = _LegacyRuntimeService()
+    pool = _RecordingPoolRuntime(fallback=True)
+
+    async def unsupported_verify(**kwargs):
+        pool.calls.append(("verify", kwargs))
+        return MappingVerificationResult(
+            valid=False,
+            status=MappingProjectionStatus.DEGRADED,
+            reason=MappingResultReason.ENGINE_SKILL_MAPPING_UNSUPPORTED,
+        )
+
+    pool.verify_mappings = unsupported_verify
+    asset = RegisteredSkillAsset(
+        skill_id=8,
+        name="repo-skill",
+        git_path="git://team/repo-skill",
+    )
+    delivery = _delivery(pool, _MissingLayoutRepository())
+
+    result = await delivery.deliver(
+        plan=_plan(asset), service_factory=_Factory(service)
+    )
+
+    assert result.status is RuntimeProjectionStatus.DEGRADED
+    assert result.issues[0].code == "ENGINE_SKILL_MAPPING_UNSUPPORTED"
+    assert result.issues[0].retryable is False
+    assert [name for name, _ in pool.calls] == ["apply", "publish", "verify"]
 
 
 @pytest.mark.asyncio

@@ -307,6 +307,7 @@ fn runtime(service: Arc<ManagedMessageDelivery>, io: Arc<RecordingIo>) -> Delive
                 },
             )]),
             tick: Duration::from_millis(1),
+            expiry_tick: Duration::from_millis(10),
             io_timeout: Duration::from_secs(1),
             run_timeout: Duration::from_secs(30),
             cancel_timeout: Duration::from_secs(1),

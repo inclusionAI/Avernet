@@ -32,6 +32,7 @@ from agentclaw.community.core.task_queue.services.worker import TaskWorker
 from agentclaw.community.core.task_queue.types import DEFAULT_APP, Complete, TaskStatus
 from agentclaw.community.di.config import TaskQueueConfig, TaskQueueWorkerConfig
 from agentclaw.community.core.repository.implementations.platform.task_queue import TaskQueueRepository
+from agentclaw.community.plugins.local.tracer import NoopTracer
 
 pytestmark = pytest.mark.integration
 
@@ -57,7 +58,7 @@ class InMemorySqliteDB:
 
 
 class _World:
-    def __init__(self, config: TaskQueueWorkerConfig):
+    def __init__(self, config: TaskQueueWorkerConfig, tracer=None):
         engine = create_engine(
             "sqlite:///:memory:",
             connect_args={"check_same_thread": False},
@@ -76,11 +77,16 @@ class _World:
         # One latch, shared by the enqueue path and the worker — same wiring
         # the DI module provides in production.
         self.wakeup = WorkerWakeup()
+        # The queue's tracer seam. NoopTracer is what test/singlebox DI binds,
+        # so these tests exercise the same wiring the profile does; the trace
+        # carriage tests below swap in a recording double.
+        self.tracer = tracer if tracer is not None else NoopTracer()
         self.service = TaskQueueService(
-            self.repo, self.registry, self.wakeup, self.queue_config
+            self.repo, self.registry, self.wakeup, self.queue_config, self.tracer
         )
         self.worker = TaskWorker(
-            self.repo, self.registry, config, self.wakeup, self.queue_config
+            self.repo, self.registry, config, self.wakeup, self.queue_config,
+            self.tracer,
         )
 
     def enqueue(
@@ -367,7 +373,7 @@ def test_teclaw_publish_task_is_reclaimed_after_worker_restart():
     assert [task.id for task in abandoned] == [record.id]
 
     restarted_worker = TaskWorker(
-        w.repo, w.registry, w.config, w.wakeup, w.queue_config
+        w.repo, w.registry, w.config, w.wakeup, w.queue_config, w.tracer
     )
     asyncio.run(restarted_worker.run_once())
 
@@ -399,7 +405,9 @@ class _RecordingWakeup:
 
 def _service_with(world, wakeup):
     """A service over ``world``'s repo/registry but a countable latch."""
-    return TaskQueueService(world.repo, world.registry, wakeup, world.queue_config)
+    return TaskQueueService(
+        world.repo, world.registry, wakeup, world.queue_config, world.tracer
+    )
 
 
 def test_registry_defaults_to_not_waking_on_enqueue():

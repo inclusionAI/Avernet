@@ -21,6 +21,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetRuntimeReconcileError,
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    ENGINE_SKILL_MAPPING_UNSUPPORTED_CODE,
     ResolvedSkillPlan,
     RuntimeProjectionIssue,
     RuntimeProjectionResult,
@@ -39,6 +40,7 @@ from agentclaw.community.core.skills_pool.models import (
     MappingApplyResult,
     MappingProjectionStatus,
     MappingPublishResult,
+    MappingResultReason,
     MappingVerificationResult,
     PoolSkillMapping,
     SkillMappingSourceLayout,
@@ -171,7 +173,7 @@ class SkillRuntimeDelivery:
                     reason="Desktop Engine 版本不支持 Skill Center 精确内容交付，请升级后重试",
                     status=RuntimeProjectionStatus.DEGRADED,
                     retryable=False,
-                    suggested_action="请升级 Desktop 客户端及 Engine 后重试。",
+                    suggested_action="请升级当前 Engine 后重试。",
                 ),
             ),
         )
@@ -462,6 +464,8 @@ class SkillRuntimeDelivery:
                 mapping_contract_version=contract,
                 apply_mode=MappingApplyMode.BEST_EFFORT,
             )
+            if self._mapping_contract_is_unsupported(raw_published):
+                return self._unsupported_mapping_contract_result()
             raw_verified = await self._pool_runtime.verify_mappings(
                 bot_id=bot_id,
                 user_id=owner_id,
@@ -471,6 +475,8 @@ class SkillRuntimeDelivery:
                 mapping_contract_version=contract,
                 apply_mode=MappingApplyMode.BEST_EFFORT,
             )
+            if self._mapping_contract_is_unsupported(raw_verified):
+                return self._unsupported_mapping_contract_result()
             published = self._publish_result(raw_published)
             verified = self._verification_result(raw_verified)
         except Exception as exc:
@@ -479,6 +485,32 @@ class SkillRuntimeDelivery:
             mappings=mappings,
             published=published,
             verified=verified,
+        )
+
+    @staticmethod
+    def _mapping_contract_is_unsupported(result: object) -> bool:
+        return isinstance(
+            result,
+            (MappingPublishResult, MappingVerificationResult),
+        ) and (
+            result.reason is MappingResultReason.ENGINE_SKILL_MAPPING_UNSUPPORTED
+        )
+
+    @staticmethod
+    def _unsupported_mapping_contract_result() -> RuntimeProjectionResult:
+        return RuntimeProjectionResult(
+            status=RuntimeProjectionStatus.DEGRADED,
+            components={"skills": RuntimeProjectionStatus.DEGRADED},
+            issues=(
+                RuntimeProjectionIssue(
+                    resource_type="RUNTIME",
+                    code=ENGINE_SKILL_MAPPING_UNSUPPORTED_CODE,
+                    reason="当前 Engine 版本不支持 Skill 逻辑映射，请升级后重试",
+                    status=RuntimeProjectionStatus.DEGRADED,
+                    retryable=False,
+                    suggested_action="请升级当前 Engine 后重试。",
+                ),
+            ),
         )
 
     @staticmethod

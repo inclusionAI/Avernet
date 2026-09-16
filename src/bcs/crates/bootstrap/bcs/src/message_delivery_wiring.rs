@@ -100,7 +100,8 @@ pub async fn wire_with_leader(
         transport: flow.bot_delivery.clone(),
         config: DeliveryRuntimeConfig {
             max_safe_retries: 0, bots: BTreeMap::new(), pause_dispatch: false,
-            tick: Duration::from_millis(100), io_timeout: Duration::from_secs(30),
+            tick: Duration::from_millis(100), expiry_tick: Duration::from_secs(1),
+            io_timeout: Duration::from_secs(30),
             run_timeout: Duration::from_millis(config.provider_chat_run_timeout_ms),
             cancel_timeout: Duration::from_secs(30), max_tasks: 32, max_abort_tasks: 2,
         },
