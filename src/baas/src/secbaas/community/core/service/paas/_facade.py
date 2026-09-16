@@ -220,6 +220,7 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
         "oss_mount_id",
         "outbound_operation_rule",
         "storage",
+        "volume_mounts",
         "docker_image",
     }
 
@@ -447,6 +448,33 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
                         f"detail_config field '{key}' is not allowed for override "
                         f"and will be ignored. Allowed fields: {allowed_fields}"
                     )
+
+        if (
+            platform_type == "ARCA"
+            and isinstance(detail_config, ArcaDeviceConfig)
+            and detail_config.volume_mounts
+        ):
+            if detail_config.storage is not None:
+                raise ValueError(
+                    "NAS storage and UPFS volume_mounts are mutually exclusive"
+                )
+            # The facade reloads the template. Revalidate against that final
+            # snapshot rather than sending a stale or cross-environment Volume.
+            expected_volume = (
+                template_config.get_effective_upfs_volume_id(env)
+                if template_config
+                else None
+            )
+            if not expected_volume or any(
+                mount.volume_id != expected_volume
+                for mount in detail_config.volume_mounts
+            ):
+                raise ValueError(
+                    "UPFS template Volume missing or changed before sandbox creation"
+                )
+            # A legacy template may contain a NAS storage default. UPFS is an
+            # explicit replacement, not an additive mount of both substrates.
+            merged.pop("storage", None)
 
         return dict[str, Any](merged)
 

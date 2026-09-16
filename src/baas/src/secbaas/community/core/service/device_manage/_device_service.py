@@ -11,7 +11,9 @@ import re
 import uuid
 from typing import Any
 
+from secbaas.community.api.config_manage import SystemConfigManageService
 from secbaas.community.api.device_manage import (
+    DeployConfig,
     DestroyDeviceResponse,
     DeviceCallbackContext,
     DeviceConfig,
@@ -127,6 +129,23 @@ def _validate_required_field(value: str | None, field_name: str, missing: list) 
         missing.append(field_name)
 
 
+def _require_upfs_template(
+    deploy_config: DeployConfig | None, template_config: object
+) -> None:
+    """UPFS conversion requires the template contract that declares Volume fields.
+
+    This structural check does not duplicate the tenant/env readiness preflight:
+    conversion and the final facade snapshot still validate the configured Volume.
+    """
+    if (
+        deploy_config
+        and deploy_config.storage
+        and deploy_config.storage.type == "upfs"
+        and not isinstance(template_config, ArcaTemplateConfig)
+    ):
+        raise ValueError("UPFS storage requires an ARCA template")
+
+
 def _build_arca_detail_config(
     deploy_config: Any,
     oss_mount_id: str | None,
@@ -134,6 +153,8 @@ def _build_arca_detail_config(
     device_uuid: str,
     secret_plugin: SecretStorePlugin,
     log_prefix: str = "",
+    arca_template_config: ArcaTemplateConfig | None = None,
+    upfs_subpath_size_bytes: int = 1073741824,
 ) -> tuple[Any, list[Any] | None]:
     """Build an ArcaDeviceConfig from the unified DeployConfig.
 
@@ -216,7 +237,44 @@ def _build_arca_detail_config(
                     quota=storage.quota,
                     permission=storage.permission,
                 )
-            detail_config.storage = storage
+            if storage.type == "upfs":
+                from secbaas.community.api.device_manage import VolumeMountSpec
+
+                volume_id = (
+                    arca_template_config.get_effective_upfs_volume_id(env)
+                    if arca_template_config is not None
+                    else None
+                )
+                if not volume_id:
+                    logger.error(
+                        "UPFS creation rejected: missing Volume device_uuid=%s env=%s",
+                        device_uuid,
+                        env,
+                    )
+                    raise ValueError(
+                        "UPFS volume_id is not configured for the template/environment"
+                    )
+                try:
+                    detail_config.volume_mounts = [
+                        VolumeMountSpec(
+                            volume_id=volume_id,
+                            subpath=rendered_storage_id,
+                            mount_path=storage.path,
+                            subpath_size_bytes=upfs_subpath_size_bytes,
+                            read_only=False,
+                        )
+                    ]
+                except ValueError:
+                    logger.error(
+                        "UPFS creation rejected: invalid mount device_uuid=%s",
+                        device_uuid,
+                        exc_info=True,
+                    )
+                    raise
+                # UPFS quota/permission do not map to NAS; no fallback is allowed.
+                detail_config.storage = None
+            else:
+                detail_config.storage = storage
         if deploy_config.resource_spec is not None:
             detail_config.resource_spec = deploy_config.resource_spec
         if deploy_config.docker_image is not None:
@@ -567,6 +625,7 @@ class DefaultDeviceService(DeviceService):
         device_template_service: DeviceTemplateManageService,
         secret_plugin: SecretStorePlugin,
         callback_handler: DeviceCallbackHandler,
+        system_config_service: SystemConfigManageService | None = None,
     ) -> None:
         """Initialize DefaultDeviceService with injected dependencies.
 
@@ -577,6 +636,38 @@ class DefaultDeviceService(DeviceService):
         self._repository = repository
         self._device_template_service = device_template_service
         self._callback_handler = callback_handler
+        self._system_config_service = system_config_service
+
+    def _upfs_subpath_size_bytes(self, deploy_config: Any) -> int:
+        """Only UPFS reads the current env config. Missing/invalid values use 1 GiB."""
+        from secbaas.community.core.service.config import SystemConfigKey
+
+        default = 1073741824
+        if (
+            not deploy_config
+            or not deploy_config.storage
+            or deploy_config.storage.type != "upfs"
+            or self._system_config_service is None
+        ):
+            return default
+        try:
+            config = self._system_config_service.get_config(
+                SystemConfigKey.UPFS_SUBPATH_SIZE_BYTES
+            )
+            value = config.conf_value if config is not None else None
+            # Database values are strings. Do not truncate fractions or accept booleans.
+            if isinstance(value, str) and re.fullmatch(r"[0-9]+", value):
+                quota = int(value)
+                if 0 < quota <= 9223372036854775807:
+                    return quota
+            logger.warning(
+                "Invalid/missing UPFS subpath quota; using %s bytes", default
+            )
+        except Exception:
+            logger.warning(
+                "UPFS subpath quota read failed; using %s bytes", default, exc_info=True
+            )
+        return default
 
     def create_device(
         self,
@@ -747,6 +838,8 @@ class DefaultDeviceService(DeviceService):
                 f"Resolved template: uuid={template.template_uuid}, provider_type={provider_type}"
             )
 
+            _require_upfs_template(deploy_config, template.config)
+
             # Step 4.5: Extract oss_mount_id from template config for Arca platform
             oss_mount_id = None
             if template.config and isinstance(template.config, ArcaTemplateConfig):
@@ -765,6 +858,10 @@ class DefaultDeviceService(DeviceService):
                     env=env,
                     device_uuid=device_uuid,
                     secret_plugin=self._secret_plugin,
+                    arca_template_config=template.config,
+                    upfs_subpath_size_bytes=self._upfs_subpath_size_bytes(
+                        deploy_config
+                    ),
                 )
 
                 # Inject publish_id, device_uuid and tenant into metadata so the sandbox
@@ -1365,8 +1462,10 @@ class DefaultDeviceService(DeviceService):
         record, device_config, template, provider_type = (
             self._resolve_device_for_operation(tenant, device_uuid, "restart")
         )
+        deploy_config = device_config.deploy_config if device_config else None
         env = get_current_env()
         repo = self._repository
+        _require_upfs_template(deploy_config, template.config)
 
         # ===================================================================
         # Platform-specific restart handling: three independent branches
@@ -1509,10 +1608,28 @@ class DefaultDeviceService(DeviceService):
         deploy_config = device_config.deploy_config if device_config else None
         env = get_current_env()
         repo = self._repository
+        _require_upfs_template(deploy_config, template.config)
 
         # ===================================================================
         # Platform-specific update handling
         # ===================================================================
+
+        upfs_detail = None
+        if (
+            deploy_config
+            and deploy_config.storage
+            and deploy_config.storage.type == "upfs"
+        ):
+            upfs_detail = _build_arca_detail_config(
+                deploy_config=deploy_config,
+                oss_mount_id=template.config.oss_mount_id,
+                env=env,
+                device_uuid=device_uuid,
+                secret_plugin=self._secret_plugin,
+                arca_template_config=template.config,
+                upfs_subpath_size_bytes=self._upfs_subpath_size_bytes(deploy_config),
+                log_prefix="[update_device preflight] ",
+            )
 
         if provider_type == "SIGMA":
             err_msg = "Sigma platform update is not yet implemented"
@@ -1855,15 +1972,18 @@ class DefaultDeviceService(DeviceService):
                         f"[update_device] Using oss_mount_id from template: {oss_mount_id}"
                     )
 
-            # Step 8: Build detail_config for ARCA platform (shared helper, WR-03)
-            detail_config, _mount_points_list = _build_arca_detail_config(
-                deploy_config=deploy_config,
-                oss_mount_id=oss_mount_id,
-                env=env,
-                device_uuid=device_uuid,
-                secret_plugin=self._secret_plugin,
-                log_prefix="[update_device] ",
-            )
+            # Validate UPFS before destroy and reuse that exact mount on recreate.
+            if upfs_detail is not None:
+                detail_config, _mount_points_list = upfs_detail
+            else:
+                detail_config, _mount_points_list = _build_arca_detail_config(
+                    deploy_config=deploy_config,
+                    oss_mount_id=oss_mount_id,
+                    env=env,
+                    device_uuid=device_uuid,
+                    secret_plugin=self._secret_plugin,
+                    log_prefix="[update_device] ",
+                )
 
             # Merge DeviceConfig.metadata into ArcaCreateConfig.metadata
             if device_config and device_config.metadata:

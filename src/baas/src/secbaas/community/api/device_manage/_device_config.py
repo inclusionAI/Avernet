@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from ._callback import DeviceCallbackContext
 from ._deploy_config import DeviceCredentials
-from ._models import MountPoint, ResourceSpecification, Storage
+from ._models import MountPoint, ResourceSpecification, Storage, VolumeMountSpec
 from ._outbound_rule import OutBoundOperationRule
 
 
@@ -46,6 +46,10 @@ class ArcaCreateConfig(DeviceCreateConfig):
         default=None, description="设备元数据，将透传至Arca SDK"
     )
     storage: Storage | None = Field(default=None, description="存储配置，用于NAS绑定")
+    volume_mounts: list[VolumeMountSpec] | None = Field(
+        default=None,
+        description="UPFS Volume mounts, mutually exclusive with NAS storage",
+    )
     docker_image: str | None = Field(
         default=None, description="Docker 镜像名称，覆盖 template 中的默认镜像"
     )

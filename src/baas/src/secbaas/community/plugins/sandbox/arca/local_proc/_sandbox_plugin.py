@@ -15,6 +15,7 @@ from secbaas.community.api.device_manage import (
     OutBoundOperationRule,
     ResourceSpecification,
     Storage,
+    VolumeMountSpec,
 )
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.sandbox.arca import ArcaSandbox, ArcaSandboxPlugin
@@ -97,6 +98,7 @@ class LocalProcessArcaSandboxPlugin(ArcaSandboxPlugin):
         image: str | None = None,
         timeout_in_millis: int = 60000,
         ready_timeout_in_seconds: int = 60,
+        volume_mounts: list[VolumeMountSpec] | None = None,
     ) -> ArcaSandbox:
         """创建新的沙箱并等待其就绪。
 
@@ -119,6 +121,10 @@ class LocalProcessArcaSandboxPlugin(ArcaSandboxPlugin):
         Raises:
             RuntimeError: 创建失败或超时。
         """
+        if volume_mounts:
+            raise NotImplementedError(
+                "This sandbox provider does not support UPFS mounts"
+            )
         logger.info(
             "Creating sandbox with all params: "
             "template_id=%s, ttl_in_minutes=%s, envs=%s, mount_points=%s, "

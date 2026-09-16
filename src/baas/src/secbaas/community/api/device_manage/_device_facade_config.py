@@ -22,7 +22,7 @@ from ._device_config import (
 from ._encryptable_header_rule import (
     EncryptableOutBoundRule,
 )
-from ._models import MountPoint, ResourceSpecification, Storage
+from ._models import MountPoint, ResourceSpecification, Storage, VolumeMountSpec
 from ._outbound_rule import OutBoundOperationRule
 
 
@@ -134,6 +134,10 @@ class ArcaDeviceConfig(BaseDeviceConfig):
         default=None,
         description="NAS storage binding configuration",
     )
+    volume_mounts: list[VolumeMountSpec] | None = Field(
+        default=None,
+        description="UPFS Volume mounts, mutually exclusive with NAS storage",
+    )
     docker_image: str | None = Field(
         default=None,
         description="Docker 镜像名称，覆盖 template 中的默认镜像",
@@ -156,6 +160,7 @@ class ArcaDeviceConfig(BaseDeviceConfig):
             resource_spec=self.resource_spec,
             metadata=self.metadata,
             storage=self.storage,
+            volume_mounts=self.volume_mounts,
             docker_image=self.docker_image,
         )
 

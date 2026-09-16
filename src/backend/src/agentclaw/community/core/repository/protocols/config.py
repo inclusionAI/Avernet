@@ -8,6 +8,8 @@ site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from abc import abstractmethod
 from typing import Protocol, TYPE_CHECKING, runtime_checkable
 
@@ -143,3 +145,28 @@ class CommonConfigRepositoryProtocol(Protocol):
     def delete_by_biz_param(
         self, *, business_code: str, param_code: str, env: str
     ) -> bool: ...
+
+
+class BotCommonConfigRepositoryProtocol(Protocol):
+    @abstractmethod
+    def get(self, *, bot_id: str, entity_id: str, env: str, config_key: str) -> str | None: ...
+
+    @abstractmethod
+    def put(self, *, bot_id: str, entity_id: str, env: str, config_key: str, config_value: str) -> None: ...
+
+    @abstractmethod
+    def initialize_once(
+        self,
+        *,
+        bot_id: str,
+        entity_id: str,
+        env: str,
+        config_key: str,
+        factory: Callable[[], str],
+    ) -> None:
+        """Insert one factory-produced value atomically; duplicate losers skip factory.
+
+        Factory/write failures roll back. Existing (even deleted) rows cannot
+        initialize again. The in-transaction placeholder is never committed.
+        """
+        ...

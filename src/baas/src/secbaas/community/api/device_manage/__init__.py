@@ -96,6 +96,7 @@ from ._models import (
     OutBoundOperationRuleUpdatedMode,
     ResourceSpecification,
     Storage,
+    VolumeMountSpec,
 )
 from ._outbound_proxy_rule import K8sOutboundProxyRule
 from ._outbound_rule import HeaderOperationRule, OutBoundOperationRule
@@ -162,6 +163,7 @@ __all__ = [
     "OutBoundOperationRuleUpdatedMode",
     "ResourceSpecification",
     "Storage",
+    "VolumeMountSpec",
     "PaasCredentials",
     "PaasError",
     "PodInfo",

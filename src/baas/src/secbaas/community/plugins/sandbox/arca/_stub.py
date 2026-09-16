@@ -18,6 +18,7 @@ from secbaas.community.api.device_manage import (
     OutBoundOperationRuleUpdatedMode,
     ResourceSpecification,
     Storage,
+    VolumeMountSpec,
 )
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.sandbox.arca import (
@@ -60,6 +61,7 @@ class StubArcaSandbox(ArcaSandbox):
     def __init__(self, sandbox_id: str, template_id: str = "mock-template") -> None:
         self._sandbox_id = sandbox_id
         self._template_id = template_id
+        self.volume_mounts: list[VolumeMountSpec] = []
 
     @property
     def is_ready(self) -> bool:
@@ -137,9 +139,11 @@ class StubArcaSandboxPlugin(ArcaSandboxPlugin):
         image: str | None = None,
         timeout_in_millis: int = 60000,
         ready_timeout_in_seconds: int = 60,
+        volume_mounts: list[VolumeMountSpec] | None = None,
     ) -> ArcaSandbox:
         sandbox_id = f"stub-arca-{uuid.uuid4().hex[:12]}"
         device = StubArcaSandbox(sandbox_id, template_id)
+        device.volume_mounts = list(volume_mounts or [])
         self._sandboxes[sandbox_id] = device
         logger.info(
             "[stub] sandbox created template_id=%s sandbox_id=%s",

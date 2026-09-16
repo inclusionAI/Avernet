@@ -378,5 +378,6 @@ def _apply_enterprise_plugins(container: ApplicationContainer) -> None:
                 device_template_service=container.services().device_template_service(),
                 secret_plugin=container.plugins().secret_plugin(),
                 callback_handler=container.services().device_callback_handler(),
+                system_config_service=container.services().system_config_service(),
             )
         )

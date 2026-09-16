@@ -177,6 +177,8 @@ class BaasDeviceService(DeviceService):
         extra_envs: dict[str, str] | None = None,
         template_type: str | None = None,
         template_config: dict | None = None,
+        initial_storage_user_id: str | None = None,
+        initial_storage_decision: bool = False,
     ) -> AllocatedDevice:
         """Create a BaaS-managed device via ``POST /api/v1/bots`` and
         ``approve_publish``. Returns an ``AllocatedDevice`` whose
@@ -198,6 +200,8 @@ class BaasDeviceService(DeviceService):
             extra_envs=extra_envs,
             template_type=template_type,
             template_config=template_config,
+            initial_storage_user_id=initial_storage_user_id,
+            initial_storage_decision=initial_storage_decision,
         )
 
     def _do_allocate_nas(
@@ -218,6 +222,8 @@ class BaasDeviceService(DeviceService):
         extra_envs: dict[str, str] | None = None,
         template_type: str | None = None,
         template_config: dict | None = None,
+        initial_storage_user_id: str | None = None,
+        initial_storage_decision: bool = False,
     ) -> AllocatedDevice:
         """BaaS-managed devices don't distinguish OSS vs NAS at the OCB
         layer — the selected template owns its storage strategy. Both
@@ -236,6 +242,8 @@ class BaasDeviceService(DeviceService):
             extra_envs=extra_envs,
             template_type=template_type,
             template_config=template_config,
+            initial_storage_user_id=initial_storage_user_id,
+            initial_storage_decision=initial_storage_decision,
         )
 
     def enqueue_create_publish_poll(
@@ -290,6 +298,8 @@ class BaasDeviceService(DeviceService):
         extra_envs: dict[str, str] | None,
         template_type: str | None,
         template_config: dict | None = None,
+        initial_storage_user_id: str | None = None,
+        initial_storage_decision: bool = False,
     ) -> AllocatedDevice:
         request_id = _generate_request_id(
             bot_id=bolt_id,
@@ -332,7 +342,29 @@ class BaasDeviceService(DeviceService):
                 template_config=template_config,
             )
 
+            initial_storage_type = None
+            # Shared initial creation for personal Bots and service Drafts.
+            # Policy creation is reusable; do not duplicate it in either branch.
+            if initial_storage_decision:
+                from agentclaw.community.core.bot_management.engines.registry import (
+                    resolve_baas_engine_bucket,
+                )
+
+                initial_storage_type = self._baas_service.initialize_bot_storage(
+                    bot_id=bolt_id,
+                    entity_id=entity_id,
+                    env=env,
+                    engine=resolve_baas_engine_bucket(
+                        engine_type=engine,
+                        template_type=template_type,
+                        template_config=template_config,
+                    ),
+                    user_id=initial_storage_user_id,
+                    template_uuid=template_uuid,
+                )
+
             bot = {
+                "env": env,
                 "bot_id": bolt_id,
                 "bot_name": bot_name,
                 "bot_desc": bot_desc,
@@ -352,7 +384,7 @@ class BaasDeviceService(DeviceService):
                 "auto_approve_publish": True,
                 "extra_envs": extra_envs,
                 "template_config": template_config,
-                # 个人 Bot / 服务 Bot 草稿没有 migration_path，但启动仍按 NAS home 目录运行。
+                # 个人 Bot / 服务 Bot 草稿共用 home 挂载路径，类型由存储策略选择。
                 "mount_home_dir_storage": True,
                 # The per-bot startup script (issue #926) is NOT passed here.
                 # BaasService resolves it centrally in
@@ -360,6 +392,8 @@ class BaasDeviceService(DeviceService):
                 # deliver it; passing "" from a failed lookup here would read
                 # as a deliberate override and silently suppress it.
             }
+            if initial_storage_type is not None:
+                payload_kwargs["storage_type"] = initial_storage_type
             if effective_bot_type == "service":
                 payload_kwargs["stage"] = PublishStage.DRAFT.value
             payload = self._baas_service._build_create_bot_payload(**payload_kwargs)

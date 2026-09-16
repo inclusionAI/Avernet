@@ -1887,6 +1887,7 @@ class BotService(BotServiceProtocol):
 
                 device_result = service.apply_device(
                     apply_reason=f"Create bot: {resolved_bot_name or bot_id}",
+                    initial_storage_decision=True,
                     entity_id=resolved_entity_id,
                     entity_type=resolved_entity_type,
                     operator=operator,

@@ -39,6 +39,7 @@ from typing import Any, Dict, Optional
 from agentclaw.community.core.service_bot.services.deploy.deploy_models import (
     MountPointEntry,
     Storage,
+    StorageType,
 )
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 
@@ -81,6 +82,7 @@ class BotDeployContext:
     #: Caller-supplied extra NAS mount, mounted at the same path it names.
     mount_path: Optional[str] = None
     ext_info: Optional[Dict[str, Any]] = None
+    storage_type: StorageType = StorageType.NAS
 
 
 class DeployConfigComposer(abc.ABC):
@@ -91,6 +93,11 @@ class DeployConfigComposer(abc.ABC):
     def name(self) -> DeployRuntime:
         """Which runtime this composer builds for — the same value that selects
         it in config, so the boot log and ``baas.deploy_runtime`` cannot drift."""
+
+    @property
+    def supports_bot_storage_policy(self) -> bool:
+        """Whether this composer can apply persisted NAS/UPFS Bot choices."""
+        return False
 
     @abc.abstractmethod
     def build_start_command(self, ctx: BotDeployContext) -> str:

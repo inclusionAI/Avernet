@@ -537,6 +537,7 @@ class DeviceService:
         template_type: str | None = None,
         template_config: dict | None = None,
         device_props_extra: dict[str, Any] | None = None,
+        initial_storage_decision: bool = False,
     ) -> DeviceBindingRecord | None:
         """Apply for a device — template method with provider hooks.
 
@@ -588,11 +589,17 @@ class DeviceService:
             bot_id=resolved_bot_id,
         )
 
+        allocation_context = {}
+        if initial_storage_decision:
+            allocation_context["initial_storage_user_id"] = operator.staff_id
+            allocation_context["initial_storage_decision"] = True
+
         # 1. Directory setup + device allocation (storage_mode 分支)
         if force_nas or storage_mode == "nas":
             # NAS 流程：跳过 _setup_directory（不需要 OSS 目录初始化）
             nas_mappings: list[NasMappingInfo] = []
             allocated = self._do_allocate_nas(
+                **allocation_context,
                 entity_id=resolved_entity_id,
                 entity_type=resolved_entity_type,
                 bolt_id=bolt_id,
@@ -618,6 +625,7 @@ class DeviceService:
                 engine=resolved_engine,
             )
             allocated = self._do_allocate(
+                **allocation_context,
                 entity_id=resolved_entity_id,
                 entity_type=resolved_entity_type,
                 bolt_id=bolt_id,

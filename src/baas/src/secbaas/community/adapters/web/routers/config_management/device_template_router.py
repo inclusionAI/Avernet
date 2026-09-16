@@ -27,6 +27,7 @@ from secbaas.community.api.template_manage import (
     TemplateCreate,
     TemplateListResponse,
     TemplateStatus,
+    TemplateStorageCapability,
     TemplateUpdate,
 )
 from secbaas.community.bootstrap import ApplicationContainer, Provide
@@ -157,6 +158,25 @@ async def resolve_template(
                 "message": str(e),
             },
         )
+
+
+@router.get(
+    "/{template_uuid}/storage-capability",
+    response_model=ApiResponse[TemplateStorageCapability],
+)
+@inject
+async def get_storage_capability(
+    template_uuid: Annotated[str, Path(description="模板UUID")],
+    tenant: Annotated[str, Query(description="租户名称")],
+    env: Annotated[
+        str | None, Query(description="Expected BaaS deployment environment")
+    ] = None,
+    service: DeviceTemplateManageService = Depends(
+        Provide[ApplicationContainer.services.device_template_service]
+    ),
+) -> ApiResponse[TemplateStorageCapability]:
+    """Only return readiness for this tenant and environment, never template secrets."""
+    return ApiResponse(data=service.get_storage_capability(tenant, template_uuid, env))
 
 
 @router.get("/{template_uuid}", response_model=ApiResponse[DeviceTemplateResponse])

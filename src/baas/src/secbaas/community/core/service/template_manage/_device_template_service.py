@@ -20,6 +20,7 @@ from secbaas.community.api.template_manage import (
     TemplateCreate,
     TemplateListResponse,
     TemplateStatus,
+    TemplateStorageCapability,
     TemplateUpdate,
 )
 from secbaas.community.api.tenant_manage import TenantManageService
@@ -154,10 +155,51 @@ class DefaultDeviceTemplateService(DeviceTemplateManageService):
         repository: DeviceTemplateRepository,
         tenant_service: TenantManageService,
         secret_plugin: SecretStorePlugin,
+        deployment_env: str,
     ) -> None:
         self._repository = repository
         self._tenant_service = tenant_service
         self._secret_plugin = secret_plugin
+        self._deployment_env = deployment_env
+
+    def get_storage_capability(
+        self,
+        tenant: str,
+        template_uuid: str,
+        env: str | None = None,
+    ) -> TemplateStorageCapability:
+        current_env = self._deployment_env
+        result = TemplateStorageCapability(
+            template_uuid=template_uuid,
+            env=current_env,
+            upfs_ready=False,
+        )
+        if env is not None and env != current_env:
+            return result.model_copy(update={"reason": "environment_mismatch"})
+        # Read only the minimal capability fields. Do not materialize the full
+        # response model: validation errors in secret fields could disclose them.
+        record = self._repository.get_online_by_template_uuid(
+            template_uuid=template_uuid,
+            tenant=tenant,
+        )
+        if record is None:
+            return result.model_copy(update={"reason": "template_not_found"})
+        if record.type.upper() != "ARCA":
+            return result.model_copy(update={"reason": "unsupported_template_type"})
+        raw = record.config if isinstance(record.config, dict) else {}
+        if str(raw.get("type", "ARCA")).upper() != "ARCA":
+            return result.model_copy(update={"reason": "unsupported_template_type"})
+        volume_fields = {
+            key: value
+            for key in ("upfs_volume_id_pre", "upfs_volume_id_prod")
+            if isinstance(value := raw.get(key), str)
+        }
+        capability_config = ArcaTemplateConfig(
+            type="ARCA", base_url="", api_key="", **volume_fields
+        )
+        if not capability_config.get_effective_upfs_volume_id(current_env):
+            return result.model_copy(update={"reason": "volume_id_not_configured"})
+        return result.model_copy(update={"upfs_ready": True})
 
     def create_template(
         self, tenant: str, data: TemplateCreate
