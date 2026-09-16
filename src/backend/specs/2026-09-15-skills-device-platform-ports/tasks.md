@@ -181,7 +181,9 @@ start with `tests/` (relative to `src/backend/`) or are written out in full.
   - [ ] ARCA → device; teclaw + switch off → device; teclaw + switch on →
         platform. One test per branch
   - [ ] Delivery mode is read from the typed config cluster
-        (`di/config.py:989`, a `TeclawDeliveryMode`); the selector parses no
+        (the `teclaw_delivery_mode` field of `di/config.py`, a
+        `TeclawDeliveryMode` — find it by name; the line has moved twice);
+        the selector parses no
         YAML and re-reads no boolean — `teclaw_delivery_mode_from_config`
         (`core/bot_config_manifest/delivery_mode.py:79`) ends it at boot
   - [ ] The protocol's members are `@abstractmethod`, per the house reason

@@ -79,7 +79,7 @@ Consequences, both reverting to the brief's own assumptions:
    existing enum.
 2. **The switch is a `TeclawDeliveryMode` enum again, not a `bool`.**
    `core/bot_config_manifest/delivery_mode.py` exists on `dev`, and
-   `di/config.py:989` is `teclaw_delivery_mode` once more. The selector reads
+   `di/config.py` carries `teclaw_delivery_mode` once more. The selector reads
    the enum, as the brief describes.
 
 One unrelated change in the same range is worth noting because it edits a file
@@ -298,7 +298,10 @@ class BotSkillPackageService(BotSkillPackageServiceProtocol):
         return self._device()                          # teclaw + switch off
 ```
 
-`delivery_mode` comes from the typed config cluster (`di/config.py:989`),
+`delivery_mode` comes from the typed config cluster — the
+`teclaw_delivery_mode` field of `di/config.py` (`:993` at the time of
+writing; that field has moved twice under active `dev` churn, so find it by
+name, not by line) —
 where `teclaw_delivery_mode_from_config`
 (`core/bot_config_manifest/delivery_mode.py:79`) already ends the boolean at
 boot — it is strict on purpose, because `bool("false")` is `True`. The
