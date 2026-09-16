@@ -73,9 +73,11 @@ function validateAisResult(payload: Record<string, unknown>, config: Config & { 
   if (payload.taskId !== config.taskId || payload.analysisId !== config.taskId) throw new Error("AIS 结果 Task 身份不匹配");
   const uploaded = payload.artifacts;
   if (!uploaded || typeof uploaded !== "object" || Array.isArray(uploaded)) throw new Error("AIS 结果缺少 artifacts");
+  const optional = new Set(["trajectory", "trajectoryPath"]);
   for (const [name, expected] of Object.entries(config.artifacts)) {
     if (name === "result") continue;
     const actual = (uploaded as Record<string, unknown>)[name];
+    if (optional.has(name) && actual == null) continue;
     if (!actual || typeof actual !== "object" || Array.isArray(actual)) throw new Error(`AIS 结果缺少 ${name} 产物`);
     const item = actual as Record<string, unknown>;
     if (item.objectKey !== expected.objectKey) throw new Error(`AIS ${name} 产物路径不匹配`);
@@ -147,12 +149,38 @@ export function createSessionAnalysisRouter(
       clawwebUrl: config.clawwebUrl,
     }),
     buildGlobalParams: (config, uploadArtifacts) => {
-      const taskParams = { schemaVersion: "clawevolve-task/v1",
-        taskType: config.mode === "ANALYZE_SINGLE" ? "session_analysis" : "session_export",
+      if (config.mode !== "ANALYZE_SINGLE") {
+        const legacyParams = { schemaVersion: "clawevolve-task/v1",
+          taskType: "session_export",
+          taskId: (config as Config & { taskId: string }).taskId,
+          stepId: config.stepId,
+          attempt: config.attempt,
+          execution: { executor: "ais", action: "package" },
+          input: { userId: (config as Config & { userId: string }).userId,
+            botId: (config as Config & { botId: string }).botId,
+            stage: config.stage, isServiceBot: config.stage === "service", engineType: "openclaw", env: "prod", entityType: "staff",
+            ...(config.sessionIdentifier ? { sessionIdentifier: config.sessionIdentifier } : {}),
+            ...(config.sessionId ? { sessionId: config.sessionId } : {}), ...(config.sessionKey ? { sessionKey: config.sessionKey } : {}),
+            ...(config.question ? { question: config.question } : {}),
+            llmAnalysis: config.llmAnalysis !== false,
+            llmUseDefault: config.llmUseDefault !== false,
+            ...(config.llmUseDefault === false && config.llmModel ? { llmModel: config.llmModel } : {}),
+            ...(config.llmUseDefault === false && config.llmApiKey ? { llmApiKey: config.llmApiKey } : {}) },
+          runtime: {
+            outputDir: `/tmp/${(config as Config & { taskId: string }).taskId}`,
+            configPath: process.env.CLAWWEB_SESSION_ANALYSIS_LLM_CONFIG_PATH?.trim() || "../config.yaml",
+            clawwebUrl: config.clawwebUrl,
+            artifactUploadMode: config.artifactUploadMode ?? "none",
+            ...(config.callbackUrl ? { callbackUrl: config.callbackUrl } : {}),
+            artifacts: config.artifactUploadMode === "broker" ? config.artifacts : uploadArtifacts,
+          } };
+        return { "${clawevolve_params}": JSON.stringify(legacyParams) };
+      }
+      const taskParams = {
+        taskType: "session_analysis",
         taskId: (config as Config & { taskId: string }).taskId,
         stepId: config.stepId,
         attempt: config.attempt,
-        execution: { executor: "ais", action: config.mode === "ANALYZE_SINGLE" ? "analysis" : "package" },
         input: { userId: (config as Config & { userId: string }).userId,
           botId: (config as Config & { botId: string }).botId,
           stage: config.stage, isServiceBot: config.stage === "service", engineType: "openclaw", env: "prod", entityType: "staff",
@@ -164,14 +192,8 @@ export function createSessionAnalysisRouter(
           llmUseDefault: config.llmUseDefault !== false,
           ...(config.llmUseDefault === false && config.llmModel ? { llmModel: config.llmModel } : {}),
           ...(config.llmUseDefault === false && config.llmApiKey ? { llmApiKey: config.llmApiKey } : {}) },
-        runtime: {
-          outputDir: `/tmp/${(config as Config & { taskId: string }).taskId}`,
-          configPath: process.env.CLAWWEB_SESSION_ANALYSIS_LLM_CONFIG_PATH?.trim() || "../config.yaml",
-          clawwebUrl: config.clawwebUrl,
-          artifactUploadMode: config.artifactUploadMode ?? "none",
-          ...(config.callbackUrl ? { callbackUrl: config.callbackUrl } : {}),
-          artifacts: config.artifactUploadMode === "broker" ? config.artifacts : uploadArtifacts,
-        } };
+        runtime: { clawwebUrl: config.clawwebUrl,
+          package: { packageId: "clawevolve-ais-diagnose" } } };
       return { "${clawevolve_params}": JSON.stringify(taskParams) };
     },
   };
@@ -191,12 +213,14 @@ export function createSessionAnalysisRouter(
     if (!target) return res.status(404).json({ error: "Artifact 不存在" });
     const expectedContentTypes: Record<string, string> = {
       raw: isSingleSessionMode(configOf(task).mode) ? "application/x-ndjson" : "application/gzip",
+      trajectory: "application/x-ndjson", trajectoryPath: "application/json",
       manifest: "application/json", report: "text/markdown; charset=utf-8",
       analysis: "application/json", result: "application/json",
+      runtimeBundle: "application/gzip", openclawSessions: "application/gzip",
     };
     const size = Number(req.body?.size); const sha256 = String(req.body?.sha256 ?? "");
     const contentType = String(req.body?.contentType ?? "");
-    if (!Number.isSafeInteger(size) || size <= 0 || !/^[a-f0-9]{64}$/.test(sha256))
+    if (!Number.isSafeInteger(size) || size < (name === "trajectory" ? 0 : 1) || !/^[a-f0-9]{64}$/.test(sha256))
       return res.status(400).json({ error: "Artifact size 或 sha256 不合法" });
     if (contentType !== expectedContentTypes[name])
       return res.status(422).json({ error: "Artifact Content-Type 不合法" });
@@ -327,10 +351,14 @@ export function createSessionAnalysisRouter(
       return res.status(422).json({ error: `一期仅支持 OpenClaw，当前为 ${runtime.activeEngine}` });
     const taskId = `SA-${randomUUID()}`; const stepId = `${taskId}-AIS`; const attempt = 1;
     const prefix = `evolution/${taskId}/session-analysis/attempt-${attempt}`;
-    const names = mode === "ANALYZE_SINGLE" ? ["raw", "manifest", "report", "analysis", "result"] : ["raw", "manifest", "result"];
+    const names = mode === "ANALYZE_SINGLE"
+      ? ["raw", "trajectory", "trajectoryPath", "manifest", "report", "analysis", "result", "runtimeBundle", "openclawSessions"]
+      : ["raw", "manifest", "result"];
     const suffix: Record<string, string> = {
       raw: mode === "ANALYZE_SINGLE" ? safeSessionFilename(sessionIdentifier || sessionId || sessionKey) : "session.tar.gz",
       manifest: "session.manifest.json", report: "report.md", analysis: "analysis.json", result: "result.json",
+      trajectory: "session.trajectory.jsonl", trajectoryPath: "session.trajectory-path.json",
+      runtimeBundle: "clawevolve-results.tar.gz", openclawSessions: "openclaw-sessions.tar.gz",
     };
     const clawwebUrl = getClawWebPublicBaseUrl();
     const artifacts = Object.fromEntries(names.map((name) => [name, {
