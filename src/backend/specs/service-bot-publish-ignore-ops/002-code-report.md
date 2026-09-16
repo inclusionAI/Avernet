@@ -1,0 +1,49 @@
+# Publish-ignore management implementation
+
+## Scope and existing call chain
+
+The existing publish HTTP router authenticates a caller and calls a service. The service resolves the source Bot and its exact publication/stage binding. A runtime plugin routes to a pinned BaaS replica or resolves the ARCA binding and calls the Engine Bot HTTP router. The Engine writes only its fixed local ignore file.
+
+Allowed additions: request/contract types, a thin endpoint in each existing router, a task-specific application service and runtime plugin, DI wiring, runtime identity projection, tests and documentation. No changes to tar/cp, publication state transitions, generic HTTP clients, Relay, Cron, or remote deployments.
+
+## Implementation
+
+- Backend `/api/service-bot/publish/ops/publish-ignore` accepts Bot ID, entity ID, positive version, verify/online stage, add/remove operation and one literal path.
+- Existing collaborator authorization remains the single source for Bot management permissions; platform administrators bypass that per-Bot restriction, but anonymous requests never do. Entity ID is only a lookup constraint. Authorization precedes device enumeration.
+- Publication lookup uses the exact source Bot primary key and current environment, requires one matching version, and uses only the requested stage binding. No latest-version or draft fallback.
+- BaaS calls pin `device_uuid`; ARCA calls use the selected binding's trusted connection URL/headers and never call BaaS enumeration. Per-target results retain partial failures and unknown delivery outcomes. A second snapshot detects observed target changes; it cannot promise membership never changed between snapshots.
+- Backend signs each per-target payload with Ed25519. Only Backend receives the private PEM key; Engine receives the public PEM key. The signature covers target identity, operation, path, request ID and timestamp.
+- Engine checks the signature and time window, reloads managed runtime identity, takes a bounded fixed sibling lock, and atomically updates the fixed ignore file. A persistent, bounded request journal prevents repeated signed requests from restoring a subsequently removed rule. Failed operations are retried through Backend with a fresh request ID.
+- File service preserves unrelated rules/comments and CRLF, uses literal paths, rejects symlinks/nonregular/oversized files, and leaves the old file intact if replacement fails. Add-existing and remove-absent are successful no-ops.
+- Docker startup now preserves the existing managed-composer `--entity_id`/`--version` arguments in credentials; injected newlines and invalid versions are rejected before writing.
+
+## Changed areas
+
+| Area | Purpose |
+| --- | --- |
+| Backend existing publish router/schema | HTTP input and response mapping only |
+| Backend publish-ignore contracts/service/plugin/DI | Authorization, exact target selection, provider routing and signed delivery |
+| Backend Context Boundary README files | Declare the added service/plugin seams |
+| Engine core publish-ignore models/protocol | Typed mutation contract |
+| Engine plugin and DI module | Signature/identity checks and fixed-file mutation |
+| Engine existing Bot router | Structured inbound boundary logging and response mapping |
+| Engine credentials and Docker dispatcher | Reliable runtime identity projection |
+| Backend/Engine tests | Permissions, providers, edge cases, signatures, file safety, protocol and DI behavior |
+
+## Boundary observability
+
+Backend events: `backend.publish_ignore.request`, `response`, `failure`, `engine_request`, `engine_response`, `engine_failure`, `http_failure`. Engine events: `engine.publish_ignore.request`, `success`, `failure`.
+
+Events carry request correlation, the real operator where available, exact target, literal path/operation, provider/binding/replica, status, results and elapsed time. Authentication objects are excluded; upstream arbitrary exception text/bodies are not blindly logged. File contents are never logged; responses provide rule count and SHA-256 revision. Tests inspect success/failure logs and ensure raw reusable authentication material is absent.
+
+## Validation status
+
+Initial focused checks: Backend 35 cases, Docker dispatcher 9 cases, Engine 44 cases passed. Full Engine suite: 2,692 passed, 5 pre-existing corp-only deselections, 93.50% total line coverage. The local report command initially selected an old system Python; re-running with the project Python 3.12 passed the case and total-coverage gates.
+
+The first complete Backend run found four actionable gate failures (new endpoint registry coverage and contract import direction), with 18,755 passed and 43 existing skips. These are being corrected without new exemptions or lower thresholds. Final review/regression and PR results are recorded in their separate reports; these initial figures are not a final PASS claim.
+
+## Rollout and limits
+
+Set `SERVICE_BOT_PUBLISH_IGNORE_SIGNING_KEY` only in Backend and `SERVICE_BOT_PUBLISH_IGNORE_VERIFY_KEY` in Engine using trusted secret/config management. Missing keys or runtime identity fail closed. No secrets are supplied or committed by this change.
+
+The cp consumer is a separate `agentclaw-daas-scripts` delivery. This Avernet PR does not ship that repository. Updating the ignore file only affects later installations after that consumer is deployed; it neither restarts the Bot nor deletes files. Rules live in the instance home, not a per-version namespace, and are not automatically propagated to new replicas. Actual NAS semantics and deployed-device black-box verification remain rollout work, not claimed local results.
