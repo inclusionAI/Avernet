@@ -2,6 +2,15 @@
 
 ## Provides
 
+TaskDispatchOutcome/TaskMessageOutcome may return `queued`: the canonical source
+and target delivery have committed, but no Bot delivery result exists yet.
+Managed tasks require an explicit canonical running Session. Task completion
+includes durable queued/uncertain task work; an active Manager result may complete
+its own Session, while other queued return legs still block closure. Worker final,
+error and abort settle the assignment and admit a separate Manager result together.
+No new Plugin API or database schema is required. Task lifecycle event projections
+are not part of this atomic guarantee; no durable notification outbox is added.
+
 SystemMessageQueueService atomically admits one producer event before any direct
 delivery; admitted recipients expose delivery_id separately from delivered.
 Group/Session initialization can return queued instead of running. The managed

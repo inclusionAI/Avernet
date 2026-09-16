@@ -113,6 +113,7 @@ async fn publish_status(
     flow: &BcsMessageFlow,
     row: &PersistedMessageDelivery,
 ) -> bcs_service_api::ServiceResult<()> {
+    crate::queued_task::restore(flow, row).await?;
     use bcs_service_api::{
         FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryTarget, ServiceError,
     };

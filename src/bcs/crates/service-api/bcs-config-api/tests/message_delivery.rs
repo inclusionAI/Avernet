@@ -24,6 +24,24 @@ fn durable_defaults_cover_future_bots_and_partial_overrides_inherit() {
 }
 
 #[test]
+fn task_is_ready_independent_of_group_switch_but_still_requires_scheduler() {
+    use bcs_config_api::message_delivery::{DeliveryPolicy, BotDeliveryOverride};
+    let mut policy = DeliveryPolicy::default();
+    assert!(!policy.manages_task("worker"));
+    policy.flow_enabled.task = true;
+    policy.defaults.mode = BotDeliveryMode::Enforce;
+    policy.validate().unwrap();
+    assert!(policy.manages_task("worker"));
+    assert!(policy.needs_scheduler());
+    policy.bots.insert("excluded".into(), BotDeliveryOverride { mode:Some(BotDeliveryMode::Off), ..Default::default() });
+    assert!(!policy.manages_task("excluded"));
+    policy.flow_enabled.task = false;
+    assert!(!policy.needs_scheduler());
+    policy.flow_enabled.state_machine = true;
+    assert!(policy.validate().is_err());
+}
+
+#[test]
 fn group_and_system_must_be_enabled_or_disabled_together() {
     use bcs_config_api::message_delivery::DeliveryPolicy;
     for enabled in [false, true] {

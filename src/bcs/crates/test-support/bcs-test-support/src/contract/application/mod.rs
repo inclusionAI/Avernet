@@ -1,6 +1,7 @@
 //! Application service contract harnesses.
 
 pub mod message_delivery;
+pub mod queued_task;
 
 use bcs_service_api::application::v1::{
     AuthenticatedBotIdentity, AuthenticatedCaller, BotService, CreateEventSubscription,
