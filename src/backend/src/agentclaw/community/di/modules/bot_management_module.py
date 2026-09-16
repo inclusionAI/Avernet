@@ -17,6 +17,9 @@ they pick up the swapped repositories transparently.
 
 from __future__ import annotations
 
+from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
+from agentclaw.community.kernel.deploy_runtime import DeployRuntime
+
 from typing import Annotated, Callable
 
 from injector import (
@@ -490,6 +493,8 @@ class BotManagementModule(Module):
         common_config_service: CommonConfigService,
         caller_identity_repo: CallerIdentityRepositoryProtocol,
         bot_quota_service: BotQuotaServiceProtocol,
+        storage_policy: BotStoragePolicyProtocol,
+        deploy_runtime: cfg.DeployRuntimeConfig,
         injector: Injector,
     ) -> BotService:
         # Explicit provider: ``BotService.__init__`` types several
@@ -537,6 +542,7 @@ class BotManagementModule(Module):
             caller_identity_repo=caller_identity_repo,
             runtime_reconciler_provider=lambda: injector.get(CoreBotRuntimeProjectorProtocol),
             bot_quota_service=bot_quota_service,
+            bot_storage_policy=storage_policy if deploy_runtime.runtime == DeployRuntime.MANAGED else None,
         )
 
     @singleton

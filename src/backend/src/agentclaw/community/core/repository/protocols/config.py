@@ -143,3 +143,27 @@ class CommonConfigRepositoryProtocol(Protocol):
     def delete_by_biz_param(
         self, *, business_code: str, param_code: str, env: str
     ) -> bool: ...
+
+
+class BotCommonConfigRepositoryProtocol(Protocol):
+    @abstractmethod
+    def get(self, *, bot_id: str, entity_id: str, env: str, config_key: str) -> str | None: ...
+
+    @abstractmethod
+    def put(self, *, bot_id: str, entity_id: str, env: str, config_key: str, config_value: str) -> None: ...
+
+    @abstractmethod
+    def initialize_once(
+        self,
+        *,
+        bot_id: str,
+        entity_id: str,
+        env: str,
+        config_key: str,
+        config_value: str,
+    ) -> None:
+        """Insert the final value atomically without overwriting existing rows.
+
+        Write failures roll back; existing (even deleted) rows cannot initialize again.
+        """
+        ...

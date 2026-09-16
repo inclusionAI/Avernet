@@ -63,6 +63,7 @@ from agentclaw.community.core.service_bot.services.deploy.deploy_config_composer
 from agentclaw.community.core.service_bot.services.deploy.deploy_models import (
     MountPointEntry,
     Storage,
+    StorageType,
 )
 from agentclaw.community.core.devices.services.sandbox_overrides import (
     InvalidSandboxOverridesError,
@@ -526,6 +527,8 @@ class BaasService:  # pragma: no cover
         path: str,
         action: str,
         params: Optional[Dict[str, Any]] = None,
+        *,
+        log_response: bool = True,
     ) -> Dict[str, Any]:
         """发送 GET 请求到 BaaS Bot API，处理响应和错误码（内部实现）。
 
@@ -544,22 +547,16 @@ class BaasService:  # pragma: no cover
 
         response_data = response.json()
 
-        logger.info(
-            f"[BaasService.{action}] BaaS raw response: %s",
-            response_data,
-        )
+        if log_response:
+            logger.info(f"[BaasService.{action}] BaaS raw response: %s", response_data)
 
         if response_data.get("code") != 0:
-            raise BaasServiceError(
-                f"BaaS API error: {response_data.get('message', 'Unknown error')}"
-            )
+            message = response_data.get("message", "Unknown error") if log_response else "request failed"
+            raise BaasServiceError(f"BaaS API error: {message}")
 
         result = response_data.get("data", {})
-
-        logger.info(
-            f"[BaasService.{action}] "
-            f"Success: {result}"
-        )
+        if log_response:
+            logger.info(f"[BaasService.{action}] Success: {result}")
 
         return result
 
@@ -643,6 +640,16 @@ class BaasService:  # pragma: no cover
                 pass
         return ResourceSpecification(**kwargs)
 
+    def get_device_template(self, template_uuid: str) -> Dict[str, Any]:
+        """Query the existing tenant-scoped template API without logging credentials."""
+        from urllib.parse import quote
+
+        return self._get_bots_api(
+            path=f"/api/v1/device-templates/{quote(template_uuid, safe='')}",
+            action="get_device_template",
+            log_response=False,
+        )
+
     def _build_create_bot_payload(
         self,
         bot: Dict[str, Any],
@@ -662,6 +669,7 @@ class BaasService:  # pragma: no cover
         mount_home_dir_storage: bool | None = None,
         ext_info: Optional[Dict[str, Any]] = None,
         startup_script: str | None = None,
+        storage_type: StorageType | None = None,
     ) -> Dict[str, Any]:
         """构建创建 Bot 的请求体。
 
@@ -750,7 +758,11 @@ class BaasService:  # pragma: no cover
             version=version,
             mount_path=mount_path,
             ext_info=ext_info,
+            storage_type=storage_type,
+            env=bot.get("env") or "",
         )
+
+        deploy_ctx = self._deploy_composer.prepare_context(deploy_ctx)
 
         # 构建 sandbox 成功后执行的命令
         start_up_cmd = self._compose_start_command(
@@ -765,7 +777,14 @@ class BaasService:  # pragma: no cover
 
         # ``None`` ⇒ 该部署不挂 storage，BotDeployConfig.to_dict 直接不带该字段。
         storage = self._deploy_composer.build_storage(deploy_ctx)
-
+        logger.info(
+            "[BaasService] event=payload_prepared bot_id=%s entity_id=%s request_id=%s template_uuid=%s storage_type=%s storage_id=%s mount_path=%s",
+            bot_id, entity_id, request_id,
+            template_uuid if template_uuid is not None else self._template_uuid,
+            storage.type if storage is not None else "none",
+            storage.storage_id if storage is not None else None,
+            storage.path if storage is not None else None,
+        )
         # 引擎专属模板字段在 strategy 内集中消费；下游只接收通用 dict。
         from agentclaw.community.core.bot_management.engines import resolve_provisioning
 

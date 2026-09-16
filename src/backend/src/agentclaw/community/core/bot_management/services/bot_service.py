@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional, Dict, Any, List, Literal, Tuple, TYPE_CHECKING
 
+from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.core.bot_management.capabilities import (
     can_join_bcn_as_provider,
     has_declared_capabilities,
@@ -364,8 +365,10 @@ class BotService(BotServiceProtocol):
         runtime_reconciler: "CoreBotRuntimeProjectorProtocol | None" = None,
         runtime_reconciler_provider: "Callable[[], CoreBotRuntimeProjectorProtocol] | None" = None,
         bot_quota_service: "BotQuotaServiceProtocol | None" = None,
+        bot_storage_policy: BotStoragePolicyProtocol | None = None,
     ) -> None:
         self._repository = repository
+        self._bot_storage_policy = bot_storage_policy
         self._allocation_config = allocation_config
         if workspace_hosting_config is None:
             from agentclaw.community.di.config import WorkspaceHostingConfig
@@ -1885,7 +1888,7 @@ class BotService(BotServiceProtocol):
                     log_context="bot_service.create_bot",
                 )
 
-                device_result = service.apply_device(
+                create_kwargs = dict(
                     apply_reason=f"Create bot: {resolved_bot_name or bot_id}",
                     entity_id=resolved_entity_id,
                     entity_type=resolved_entity_type,
@@ -1901,6 +1904,12 @@ class BotService(BotServiceProtocol):
                     template_type=template_type,
                     template_config=device_template_config,
                 )
+
+                # 存储业务组件决定接入范围，只返回原申请参数覆写，不创建设备。
+                # 重启/补建不调用初始化，设备路由只负责原有设备申请。
+                if self._bot_storage_policy is not None:
+                    create_kwargs.update(self._bot_storage_policy.prepare_bot_storage_policy(**create_kwargs))
+                device_result = service.apply_device(**create_kwargs)
 
                 if not device_result:
                     raise DeviceAllocationError("设备申请返回空结果")

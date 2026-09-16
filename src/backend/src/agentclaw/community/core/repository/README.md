@@ -81,6 +81,8 @@ in a comment, rather than an exception to the rule.
 ```yaml
 purpose: "Every repository contract (protocols/) and implementation (implementations/) in the backend, grouped by domain. Persistence only — no services, no routers, no domain policy."
 provides:
+  - BotCommonConfigRepository
+  - BotCommonConfigRepositoryProtocol
   # Contracts — protocols/<domain>.py. This is the surface domain services
   # import at runtime for DI; a change here is a change to their constructors.
   # bot

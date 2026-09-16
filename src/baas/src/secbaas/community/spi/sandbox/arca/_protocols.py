@@ -130,9 +130,11 @@ class ArcaSandboxPlugin(Protocol):
             envs: Environment variables to set in the sandbox.
             mount_points: Storage mount point configurations.
             resource_spec: CPU/memory resource specification.
-            metadata: Arbitrary passthrough metadata.
+            metadata: Arbitrary metadata; reserved upfs_volume_id carries the
+                server-resolved Volume ID to the plugin, not the SDK metadata.
             outbound_operation_rule: Network outbound rules.
-            storage: NAS storage binding configuration.
+            storage: Original NAS/UPFS storage identity; no resolved mount fields.
+                Platform-specific validation/conversion belongs to the adapter.
             image: Docker image override (overrides template default).
             timeout_in_millis: Maximum creation wait time in milliseconds.
             ready_timeout_in_seconds: Maximum time to wait for sandbox ready state.

@@ -134,6 +134,7 @@ def _build_arca_detail_config(
     device_uuid: str,
     secret_plugin: SecretStorePlugin,
     log_prefix: str = "",
+    arca_template_config: ArcaTemplateConfig | None = None,
 ) -> tuple[Any, list[Any] | None]:
     """Build an ArcaDeviceConfig from the unified DeployConfig.
 
@@ -221,6 +222,18 @@ def _build_arca_detail_config(
             detail_config.resource_spec = deploy_config.resource_spec
         if deploy_config.docker_image is not None:
             detail_config.docker_image = deploy_config.docker_image
+
+    # Reserved template context is forwarded without interpreting storage.type.
+    volume_id = (
+        arca_template_config.get_effective_upfs_volume_id(env)
+        if arca_template_config is not None
+        else None
+    )
+    if volume_id is not None:
+        detail_config.metadata = {
+            **(detail_config.metadata or {}),
+            "upfs_volume_id": volume_id,
+        }
 
     # Log which fields are being passed
     fields_info = []
@@ -765,6 +778,7 @@ class DefaultDeviceService(DeviceService):
                     env=env,
                     device_uuid=device_uuid,
                     secret_plugin=self._secret_plugin,
+                    arca_template_config=template.config,
                 )
 
                 # Inject publish_id, device_uuid and tenant into metadata so the sandbox
@@ -1863,6 +1877,9 @@ class DefaultDeviceService(DeviceService):
                 device_uuid=device_uuid,
                 secret_plugin=self._secret_plugin,
                 log_prefix="[update_device] ",
+                arca_template_config=template.config
+                if isinstance(template.config, ArcaTemplateConfig)
+                else None,
             )
 
             # Merge DeviceConfig.metadata into ArcaCreateConfig.metadata

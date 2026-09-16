@@ -144,6 +144,7 @@ from agentclaw.community.core.service_bot.services.service_publication_facade im
 from agentclaw.community.core.service_bot.services.service_edit_lock_service import (
     ServiceEditLockService,
 )
+from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.core.system_config import SystemConfigService
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
 from agentclaw.community.core.workspace.engines import create_engine_sandbox_registry
@@ -234,6 +235,7 @@ class ServiceBotModule(Module):
         deploy_runtime: cfg.DeployRuntimeConfig,
         bot_repo: BotRepository,
         sandbox_registry: EngineSandboxRegistry,
+        storage_policy: BotStoragePolicyProtocol,
     ) -> DeployConfigComposer:
         """Select the composer for the container this deployment runs.
 
@@ -252,6 +254,7 @@ class ServiceBotModule(Module):
                     storage_path=storage_path,
                     sandbox_registry=sandbox_registry,
                     bot_repo=bot_repo,
+                    storage_policy=storage_policy,
                 )
             case DeployRuntime.ACK:
                 composer = AckDeployConfigComposer()

@@ -298,3 +298,24 @@ def test_common_config_service_delete_by_id_and_requires_identifier():
 
     with pytest.raises(ValueError, match="删除配置需要"):
         service.delete_config()
+
+
+@pytest.mark.parametrize("value,expected", [
+    (None, "1G"), (True, "1G"), (0, "1G"),
+    (-1, "1G"), (1.5, "1G"), ("2Gi", "2Gi"),
+    (9223372036854775808, "1G"), ("1G", "1G"), ("2G", "2G"), ("", "1G"),
+])
+def test_storage_quota_is_backend_config_independent_of_rollout(value, expected):
+    from unittest.mock import MagicMock
+    from agentclaw.community.core.common_config.bot_config_service import BotStoragePolicyService
+
+    common = MagicMock()
+    common.get_config.return_value = {"param_value": {"quota": value}}
+    service = BotStoragePolicyService(MagicMock(), MagicMock(), common,
+        env="pre", select_provider=MagicMock(), resolve_template=MagicMock(), get_template=MagicMock())
+    assert service.get_storage_quota("pre") == expected
+    common.get_config.assert_called_once_with(
+        business_code="bot_storage", param_code="storage", env="pre"
+    )
+    common.get_config.side_effect = RuntimeError("unavailable")
+    assert service.get_storage_quota("pre") == "1G"

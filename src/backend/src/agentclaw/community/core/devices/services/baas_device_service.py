@@ -41,6 +41,7 @@ from agentclaw.community.core.devices.services.device_service import (
     DEFAULT_ENGINE_TYPE,
     DeviceService,
 )
+from agentclaw.community.core.common_config.bot_config_protocol import PreparedBotStoragePolicy
 from agentclaw.community.log import get_logger
 
 
@@ -322,17 +323,22 @@ class BaasDeviceService(DeviceService):
 
             # template_uid 是上层业务选择 template 的稳定标识；BaaS 创建接口仍使用底层 template_uuid。
             # 这里按 system_config 映射到实际创建用的 template_uuid。
-            template_uid, template_uuid = self._resolve_required_baas_template(
-                bot_id=bolt_id,
-                user_id=effective_owner_id,
-                env=env,
-                bot_type=effective_bot_type,
-                engine_type=engine,
-                template_type=template_type,
-                template_config=template_config,
-            )
+            prepared = (template_config or {}).pop("_prepared_bot_creation", None)
+            if isinstance(prepared, PreparedBotStoragePolicy):
+                template_uid, template_uuid = prepared.template_uid, prepared.template_uuid
+            else:
+                template_uid, template_uuid = self._resolve_required_baas_template(
+                    bot_id=bolt_id,
+                    user_id=effective_owner_id,
+                    env=env,
+                    bot_type=effective_bot_type,
+                    engine_type=engine,
+                    template_type=template_type,
+                    template_config=template_config,
+                )
 
             bot = {
+                "env": env,
                 "bot_id": bolt_id,
                 "bot_name": bot_name,
                 "bot_desc": bot_desc,
@@ -352,7 +358,7 @@ class BaasDeviceService(DeviceService):
                 "auto_approve_publish": True,
                 "extra_envs": extra_envs,
                 "template_config": template_config,
-                # 个人 Bot / 服务 Bot 草稿没有 migration_path，但启动仍按 NAS home 目录运行。
+                # 个人 Bot / 服务 Bot 草稿共用 home 挂载路径，类型由存储策略选择。
                 "mount_home_dir_storage": True,
                 # The per-bot startup script (issue #926) is NOT passed here.
                 # BaasService resolves it centrally in
@@ -360,6 +366,10 @@ class BaasDeviceService(DeviceService):
                 # deliver it; passing "" from a failed lookup here would read
                 # as a deliberate override and silently suppress it.
             }
+            if isinstance(prepared, PreparedBotStoragePolicy):
+                # Initialization already performed strict DB reads. Do not re-read
+                # via restart's compatibility fallback and silently change storage.
+                payload_kwargs["storage_type"] = prepared.storage_type
             if effective_bot_type == "service":
                 payload_kwargs["stage"] = PublishStage.DRAFT.value
             payload = self._baas_service._build_create_bot_payload(**payload_kwargs)
