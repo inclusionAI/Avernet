@@ -1,0 +1,85 @@
+@startuml
+!theme plain
+left to right direction
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam defaultTextAlignment center
+
+title Task 执行模块：图谱状态驱动的事件反应链
+
+actor "人 / Agent" as user
+cloud "外部执行实体\nBot Skill / BCS / Poller" as external
+
+component "TaskCli\n统一终端入口" as cli #EBDEF0
+component "TaskService（既有门面）\nintake(...) / execute(...) / query" as submission #EAF2F8
+component "TaskIntake（TaskService 内部）\n识别、四要素澄清、确认" as intake #EBDEF0
+
+database "TaskGraphService\nreport(TaskCallbackData)\n图谱事实、状态机、持久化\n唯一写模型所有者" as graph #D5F5E3
+queue "Outbox / Event Bus\n可靠语义事件" as events #FCE4D6
+
+component "TaskPlanner\nplan(TaskContext) -> PlanResult" as planner #FCF3CF
+component "TaskDispatcher\ndispatch(TaskNode) -> TaskNodePatch" as dispatcher #FCF3CF
+component "TaskRunner\nrun(TaskNode) -> bool" as runner #FCF3CF
+
+user --> cli : 一句话目标 / 对话
+cli --> submission : intake(每轮终端输入)
+submission ..> intake : 内部调用
+intake --> submission : 已确认 TaskSpec
+submission --> graph : 创建正式图谱与根节点
+user --> cli : get / list
+cli --> submission : get_task_dashboard / list_tasks
+submission --> graph : 受控只读查询
+
+external --> graph : report：执行结果 / 恢复事实
+planner --> graph : report：PLAN + PlanResult
+dispatcher --> graph : report：DISPATCH + TaskNodePatch
+runner --> graph : report：EXECUTION_STARTED / FAILED
+
+graph --> events : 状态变更原子写 Outbox
+events --> planner : PLAN_REQUESTED(TaskContext)
+events --> dispatcher : DISPATCH_REQUESTED(TaskNode)
+events --> runner : EXECUTION_REQUESTED(TaskNode)
+runner --> external : 启动既有 executor
+
+note right of graph
+复用 TaskCallbackData。
+图谱校验 report_type、版本、幂等、
+状态机与字段白名单。
+end note
+
+note bottom of submission
+TaskCli 只依赖 TaskService。确认后由服务内部
+复用既有 execute 创建任务；初始建任务不是执行过程事实，
+因此不走 report。TaskIntake 不提交、不建节点、不调度。
+end note
+
+note right of graph
+TaskExecutionGraph 持有 graph_version。
+图谱持久化和 CAS 是 Graph 模块内部能力；
+原始图谱写接口不对外暴露。
+TaskPlanner / TaskDispatcher / TaskRunner 不读写完整图谱。
+end note
+
+note bottom of planner
+唯一新增跨模块视图是 TaskContext，
+它是图谱按规划所需投影的最小只读上下文，
+不是完整图谱或第二套 Snapshot。
+end note
+
+note bottom of dispatcher
+单节点原子派发；批量并发由事件消费层处理。
+Patch 不可改变节点状态或输出。
+end note
+
+note bottom of runner
+复用现有 TaskRunner -> TaskExecutor 分层。
+工作流是单 Bot executor，YAML 是协作组实现；
+均不属于 TaskCli 命令。
+end note
+
+note bottom of events
+TaskPlanner、TaskDispatcher、TaskRunner 彼此不调用。
+不存在承担业务推进的中心化编排器。
+end note
+
+@enduml
