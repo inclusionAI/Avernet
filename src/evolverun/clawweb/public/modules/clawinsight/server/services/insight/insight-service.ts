@@ -131,7 +131,10 @@ const GOVERNANCE_ACTION_DEFAULT_FIELDS = [
   "updatedAt",
   "version",
 ] as const;
-const GOVERNANCE_ACTION_FIELDS = new Set<string>(["id", ...GOVERNANCE_ACTION_DEFAULT_FIELDS]);
+const GOVERNANCE_ACTION_FIELDS = new Set<string>([
+  "id", ...GOVERNANCE_ACTION_DEFAULT_FIELDS,
+  "rejectReasonCode", "rejectComment", "rejectedAt", "rejectedBy",
+]);
 
 function governanceTimestamp(value: unknown): string | null {
   if (value == null || value === "") return null;
@@ -166,6 +169,10 @@ function governanceActionRecord(item: ImprovementView): Record<string, unknown> 
     status: item.status,
     adminReviewStatus: item.adminReviewStatus,
     adminReviewReason: item.adminReviewComment ?? item.rejectComment,
+    rejectReasonCode: item.rejectReasonCode,
+    rejectComment: item.rejectComment,
+    rejectedAt: governanceTimestamp(item.rejectedAt),
+    rejectedBy: item.rejectedBy,
     adminReviewedBy: item.adminReviewedBy,
     adminReviewedAt: governanceTimestamp(item.adminReviewedAt),
     handledAt: governanceTimestamp(item.handledAt),
@@ -183,6 +190,35 @@ function governanceActionRecord(item: ImprovementView): Record<string, unknown> 
     createdAt: governanceTimestamp(item.gmtCreate),
     updatedAt: governanceTimestamp(item.gmtModified),
     version: item.version,
+  };
+}
+
+/** 驳回反馈的扁平记录：只暴露校准需要的字段，便于外部消费方直接落库/压缩。 */
+function rejectionRecord(item: ImprovementView): Record<string, unknown> {
+  return {
+    improvementId: item.improvementId,
+    ownerUserId: item.ownerUserId,
+    botOwnerUserId: item.botOwnerUserId,
+    botId: item.botId,
+    title: item.title,
+    rootCauseSummary: item.rootCauseSummary,
+    sourceRuleId: item.sourceRuleId,
+    sourceType: item.sourceType,
+    status: item.status,
+    adminReviewStatus: item.adminReviewStatus,
+    rejectedBy: item.rejectedBy,
+    rejectReasonCode: item.rejectReasonCode,
+    rejectComment: item.rejectComment,
+    rejectedAt: governanceTimestamp(item.rejectedAt),
+    adminReviewReason: item.adminReviewComment ?? item.rejectComment,
+    adminReviewedBy: item.adminReviewedBy,
+    adminReviewedAt: governanceTimestamp(item.adminReviewedAt),
+    dataStartTime: item.dataStartTime,
+    dataEndTime: item.dataEndTime,
+    evidenceCount: item.evidenceCount,
+    sessionCount: item.sessionCount,
+    version: item.version,
+    updatedAt: governanceTimestamp(item.gmtModified),
   };
 }
 
@@ -970,6 +1006,41 @@ export class InsightService {
       throw new InsightValidationError("days 必须是 1 到 90 的整数");
     }
     return this.improvementRepo.listRecentRejections(input);
+  }
+
+  /**
+   * 全部已驳回改进项（用户驳回 + 管理员驳回），跨 owner 与来源类型。
+   *
+   * 与 listRecentRejections 的区别：不限定治理来源（GOVERNANCE_SOURCE_TYPES），
+   * 因此「我的待办」里 USER_SELECTED/ADMIN_SELECTED 的驳回也能取到；
+   * 且只有存在真实驳回事件（用户驳回 / 管理员驳回 / Admin 审批驳回）的项才会返回。
+   */
+  async listAllRejections(input: {
+    days: number;
+    ownerUserId?: string;
+    botId?: string;
+    sourceRuleId?: string;
+    rejectedBy?: string;
+    limit: number;
+    offset: number;
+  }): Promise<{ total: number; items: Array<Record<string, unknown>> }> {
+    if (!Number.isInteger(input.days) || input.days < 1 || input.days > 90) {
+      throw new InsightValidationError("days 必须是 1 到 90 的整数");
+    }
+    const rejectedBy = input.rejectedBy?.trim().toUpperCase() || "ANY";
+    if (!["ANY", "OWNER", "ADMIN"].includes(rejectedBy)) {
+      throw new InsightValidationError("rejectedBy 只能是 ANY / OWNER / ADMIN");
+    }
+    const result = await this.improvementRepo.listAllRejections({
+      since: new Date(Date.now() - input.days * 24 * 60 * 60 * 1000),
+      ownerUserId: input.ownerUserId,
+      botId: input.botId,
+      sourceRuleId: input.sourceRuleId,
+      rejectedBy: rejectedBy === "ANY" ? undefined : (rejectedBy as "OWNER" | "ADMIN"),
+      limit: input.limit,
+      offset: input.offset,
+    });
+    return { total: result.total, items: result.items.map(rejectionRecord) };
   }
 
   async markGovernanceActionHandled(
