@@ -1,8 +1,6 @@
 # Group Context API — Core Design Spec
 
 - **Date:** 2026-09-09
-- **Doc:** [group context 的核心抽象](https://yuque.antfin.com/securitytec/otbct4/bdt73nogi6kcgk9z)
-
 ---
 
 ## 1. Problem
@@ -33,23 +31,34 @@ ContextEntry 是 Group Context 中的单条上下文条目，三层职责：数�
 | **provenance** | 信任链。ref（指向 origin）+ chain（派生链：extract/consolidate/propagate 逐跳追加）+ signature（框架签名，三者任一被改即失效） | `{ref: ctx_origin_msg_001, chain: [{op: extract, from: raw_msg_001}], signature: hs256(...)}` |
 | **time** | 双时间线。valid_from / valid_to（内容有效期，多数条目出生时为 ∞，被 supersede 时回填）+ tx_time（系统写入时间） | `valid_to` 被 supersede 时系统回填 |
 
-**首期不做：**
-- `provenance` — 设默认值（ref 指向 origin，chain 为空，不做签名）
 
 ### 2.2 数据面 · 推断注解
 
 抽取器/后台可精化。只用于软判定与"加严"，永不放宽。
+**type (认知类型):**
+认知类型：episodic / semantic / procedural / working。被系统分析并回填，萃取器赋值，巩固时可改。检索时可作为过滤条件
 
-| 字段 | 含义 | 示例 |
-|------|------|------|
-| **type** | 认知类型：episodic / semantic / procedural / working。被系统分析并回填，萃取器赋值，巩固时可改。检索时可作为过滤条件 | `working` |
-| **sensitivity** | 敏感程度。floor（继承地板，由会话渠道策略客观决定，不可降）+ assessed（内容评估，抽取器只许上调）+ effective = max(floor, assessed)，PEP 只读此项 | 首期设默认值 |
-| **derived** | 推断注解。confidence（自评置信度，仅排序/标记用，禁作硬门）+ mentioned_entities（涉及实体）+ topics（话题域）+ pii_suspected（疑似敏感 → 触发复核/加严） | 首期设默认值 |
+**sensitivity（敏感程度）：**
 
-**首期不做：**
-- `type` — 设默认值 `episodic`，不做智能推断
-- `sensitivity` — 设默认值（effective=group）
-- `derived` — 设默认值（confidence=1.0, entities=[], topics=[], pii_suspected=false）
+floor（继承地板，由会话渠道策略客观决定，不可降）+ assessed（内容评估，抽取器只许上调）+ effective = max(floor, assessed)，PEP 只读此项
+```jsonc
+{
+    "floor":     "team",                             // 基础敏感度（由会话渠道策略客观决定，不可降）
+    "assessed":  "secret",                           // 内容评估敏感度（系统评估，只许上调）
+    "effective": "max(floor, assessed)"              // 实际生效的敏感度，用于传播、注入时 trigger 审批流程等
+}
+```
+
+**derived（置信度）：**
+由系统评估回填，用于检索结果排序
+```jsonc
+{
+    "confidence":         {"value": 0.82, "creator": "extractor@v2.3"},  // 自评置信度（排序/标记用，不做为过滤）
+    "mentioned_entities": ["cust_999"],               // 内容涉及的第三方实体
+    "topics":             ["定价","续约"],            // 话题域
+    "pii_suspected":      true,                     // 疑似敏感 → 触发复核/加严
+}
+```
 
 ### 2.3 策略面
 
@@ -59,21 +68,19 @@ ContextEntry 是 Group Context 中的单条上下文条目，三层职责：数�
 
 | 字段 | 含义 | 示例 |
 |------|------|------|
-| **visible_to** | 谁可以检索到这条 context。可选参数：tenant_id、group_id、session_id、run_id、user_ids。**user_ids 为数组，支持多角色可见**（如裁判+玩家两人可见底牌）。 | `{group_id: "game-room-7", user_ids: [judge_bot, player_1]}` |
-| **collect_from** | 谁能写入。可选参数：tenant_id、group_id、session_id、run_id、user_id。**user_id 为单值，一条 context 只有一个写入者。** | `{user_id: "judge_bot_xxxx"}` |
-| **propagate_to** | 能传播到多远（首期写死 `{groups: 0}`） | `{groups: 0}` |
-| **allowed_purposes** | 允许出于什么目的使用 | 首期不做 |
-| **redact_on_export** | 传播前是否脱敏 | 首期不做 |
+| **visible_to** | 谁可以读（如裁判+玩家两人可见底牌） | `{group_id: "game-room-7", user_ids: [judge_bot, player_1]}` |
+| **collect_from** | 谁可以写| `{tag: "game_room_admin"}` |
+| **propagate_to** | 能传播到多远 | 组内可传播，跨租户不可传播`{groups: 1, tenant: 0}` |
+| **allowed_purposes** | 允许出于什么目的使用 | `["投诉处理","账单核验"]` |
+| **redact_on_export** | 传播前是否脱敏 | true |
 
-> **设计说明：** `visible_to` / `collect_from` 是对原文 `flow` 块的拆分，将读写权限分为独立的两端。两者刻意不对称——`visible_to.user_ids` 为数组（多角色可读），`collect_from.user_id` 为单值（单一写入者）。`granularity` 为本设计新增字段，用于界定同 `domain` 下版本链的作用域边界，原文未显式定义此维度。
 
-**consistency（版本管理：同一条信息多次更新时怎么处理）：**
+**consistency（consistency model： 多写者冲突与陈旧度）：**
 
 | 字段 | 取值 | 含义 |
 |------|------|------|
 | **domain** | string（支持 `{param}` 占位符） | 版本标识。同 domain 条目互为版本 |
 | **granularity** | `run` / `session` / `group` / `tenant` | 同 domain 条目在什么范围内互为版本 |
-| **merge_strategy** | `supersede` / `append` / `llm_merge` | 版本合并策略 |
 | **freshness_class** | `volatile` / `stable` / `audit`（默认 `stable`） | 过期策略 |
 | **revalidate_due** | ISO 8601 / null | 过期时间兜底，仅 volatile 必填 |
 
@@ -86,18 +93,8 @@ ContextEntry 是 Group Context 中的单条上下文条目，三层职责：数�
 | `group` | `game_rule` | 同 group 下所有 session 共享一个版本 |
 | `tenant` | `cross_board_insight` | 跨 group |
 
-> **granularity 的设计动机：** 仅靠 domain 区分版本链不足以表达作用域边界——同一个 domain 名（如 `player_state`）在不同 session 下需要独立的版本链，否则跨 session 的状态会互相覆盖。granularity 显式声明版本链的作用域（run / session / group / tenant），让同一个 domain 在不同粒度下独立演进。例如 `player_state` 在 session A 记录玩家 1 的存活状态，在 session B 记录玩家 2 的状态，靠 `granularity=session` 自然隔离，互不干扰。retrieve 时按 granularity 分组逐组取活跃版本，再按从细到粗排序拼出继承链。
-
-**merge_strategy：**
-
-| 取值 | 含义 | 示例 |
-|------|------|------|
-| `supersede` | 新写入自动取代旧版本，用新 content 替换旧 content，系统回填 valid_to + 建立 lineage | `player_state`：新状态覆盖旧状态 |
-| `append` | 新 content 拼接到旧 content 末尾（`\n` 分隔），系统回填 valid_to + 建立 lineage | `player_speech`：每次发言追加到对话记录 |
-| `llm_merge` | **（首期不实现）** 调用 LLM 将新旧版本合并为一条 | 两个客服 agent 独立写入不同结论，LLM 融合 |
-
-> 不论采用哪种 merge_strategy，每个 (domain, granularity) 在同一时刻均只有一条活跃版本（即 valid_to=null 的版本数 ≤ 1）。
-
+> **granularity 的设计动机：** 每个 (domain, granularity) 在同一时刻均只有一条活跃版本（即 valid_to=null 的版本数 ≤ 1）。仅靠 domain 区分版本链不足以表达作用域——同一个 domain 名（如 `player_state`）在不同 session 下需要独立的版本链，否则跨 session 的状态会互相覆盖。granularity 显式声明版本链的作用域（run / session / group / tenant），让同一个 domain 在不同粒度下独立演进。例如 `player_state` 在 session A 记录玩家 1 的存活状态，在 session B 记录玩家 2 的状态，靠 `granularity=session` 自然隔离，互不干扰。retrieve 时按 granularity 分组逐组取活跃版本。
+> **多写者冲突如何解决：** 开放且信任llm写入，但必须留痕。llm 可以先查询后更新一个 context，每次 updateContext 都会 supersede 当前生效的一条，系统记录 linage 和 reason。
 
 **freshness_class：**
 
@@ -107,18 +104,13 @@ ContextEntry 是 Group Context 中的单条上下文条目，三层职责：数�
 | `stable`（默认） | 长期有效，被 supersede 时才失效 | `game_rule`、`faq` |
 | `audit` | 长期有效，写权限严格管控 | 告警根因结论 |
 
-**obligations（附带义务：允许你用，但必须做到这些）：**
+**obligations（附带义务：使用开放，但必须做到这些）：**
 
 | 取值 | 含义 |
 |------|------|
 | `"注入时附置信度标记"` | context 注入 LLM prompt 时必须标注置信度 |
 | `"检索必须落审计"` | 每次检索必须写入审计日志 |
 
-**首期不做（策略面）：**
-- `allowed_purposes` / `redact_on_export` — 不做
-- `collect_from: actor_tag=xxx` — 首期只支持 `actor_id=xxx`
-- 跨 group 传播 — `propagate_to` 写死 `{groups: 0}`
-- obligations — 首期仅实现『检索落审计』（每次 retrieve 写入审计日志），其他 obligation 类型不做
 
 ### 2.4 治理面
 
@@ -126,14 +118,9 @@ ContextEntry 是 Group Context 中的单条上下文条目，三层职责：数�
 
 | 字段 | 含义 |
 |------|------|
-| **lineage** | 取代链（append-only 的"修改"实现）。supersedes（向上：我取代了谁）+ superseded_by（向下：谁取代了我）+ superseded_at（何时被取代）。系统在 merge_strategy=supersede 时自动维护——**不修改旧条目的数据面**（content / origin / provenance 等业务字段保持不变），但会维护旧条目的**生命周期字段**：`time.valid_to`、`lineage.superseded_by`、`lineage.superseded_at`。新条目写入时设 `lineage.supersedes` 指向旧条目 |
+| **lineage** | 取代链（append-only 的"修改"实现）。supersedes（向上：我取代了谁）+ superseded_by（向下：谁取代了我）+ superseded_at（何时被取代）。系统自动维护——**不修改旧条目的数据内容**，但会维护旧条目的**生命周期字段**：`time.valid_to`。新条目写入时设 `lineage.supersedes` 指向旧条目 |
 | **verification** | 保鲜验证。last_verified_at（上次验证时间）+ verified_by（验证方） |
-| **governance** | owner（责任人，跨边界传播/遗忘的审批人）+ policy_version（生命周期受哪版 policy 管辖）+ audit_ref（审计日志指针）+ forget_request（遗忘请求，墓碑化 + 全读路径屏蔽，留痕） |
-
-**首期不做（治理面）：**
-- `verification` — 首期靠 supersede + freshness 管理
-- `forget_request` — 首期不支持遗忘操作
-- `policy_version` — 首期不实现策略版本管理
+| **governance** | owner（责任人，跨边界传播/遗忘的审批人）+ policy_version（生命周期受哪版 policy 管辖）+ audit_ref（审计日志指针）+ forget_request（遗忘请求留痕，归档 + 全读路径屏蔽） |
 
 ---
 
@@ -145,14 +132,4 @@ ContextEntry 是 Group Context 中的单条上下文条目，三层职责：数�
 - judge_bot 看到 `player_word` 的描述："需要为每位玩家单独调用一次"→ 调 5 次创建接口，每次传入不同 player_id
 - 玩家检索自己的底牌：系统按 visible_to 验证，仅包含自己时返回
 - 玩家冒充裁判写入：系统比对 actor_id ≠ 模板的 collect_from → deny
-- 裁判写入 player_state → 同 domain + granularity=session 下已有旧版本 → merge_strategy=supersede → 系统自动回填旧条目 valid_to + 建立新条目的 lineage.supersedes
-
----
-
-## 4. Open Questions
-
-1. **actor_tag 如何写入？** group 级别由哪个接口管理？session 级别由 BCN 在 session 启动时注入还是由 bot 自行注册？
-2. **domain 由谁定义？** domain 名在模板中预设——bot 能不能运行时新增 domain？
-3. **propagate_to 与 granularity 的关系？** propagate_to={groups:1} 但 granularity=session 时，版本合并的范围是什么？
-4. **`append` 的分隔符语义？** 当前用 `\n` 拼接新旧 content，是否需要支持自定义分隔符或结构化追加（如 JSON array append）？
-5. **scope 存储格式与检索效率？** 按 users 列表过滤时是否需要倒排索引？policy 模板如何独立存储并关联版本号？
+- 裁判写入 player_state → 同 domain + granularity=session 下已有旧版本 → 系统自动回填旧条目 valid_to + 建立新条目的 lineage.supersedes

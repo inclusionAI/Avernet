@@ -1,55 +1,28 @@
 # Group Context API — Implementation Plan
 
 - **Date:** 2026-09-09
-- **Status:** Draft
 - **Spec:** `docs/superpowers/specs/2026-09-09-group-context-api-design.md`
 
 ---
 
-> **首期范围说明**
->
-> 本 plan 是 spec 文档的**首期实现版本**，仅覆盖 spec 中标"首期实现"的能力。spec 是完整功能规划（包含拓扑、本体论蒸馏、生命周期完整闭环、as_of 时间旅行、obligations 全集等），plan 是分阶段落地路径。**plan 不实现的部分（如 administer API、propagate_to 跨群传播、llm_merge、obligations 完整实现、as_of 时间旅行、内容蒸馏、forget_request 等）保留到后续迭代**，两者不是一一对应关系。
->
-> review 时请把 spec 当作功能基准、plan 当作本期交付边界。如果 plan 与 spec 在本期功能子集内有冲突，以 plan 为准；如果 plan 引入 spec 未规划的能力，需要单独标记。
-
----
-
-## 1. 首期范围
-
-### 1.1 本期实现
+## 1. 交付范围
 
 | 分层 | 内容 |
 |------|------|
-| **数据面** | ContextEntry 存储：content + origin + time|
-| **策略面** | Policy Template 定义 flow（visible_to + collect_from）|
-| **治理面** | lineage（系统自动维护）+ governance.owner + policy_version + obligations（首期仅『检索落审计』） |
-| **API** | 4 个端点，统一 POST：/groupcontext/status、/groupcontext/createByTemplate、/groupcontext/updateContent、/groupcontext/retrieve |
-| **存储+bcn接入+管理时** | 待细化 |
-
-> **范围说明：**
-> - GroupContext 是**独立于 SessionContext 的持久化存储模块**，不替代也不依赖现有 session 启动时的一次性上下文注入。bot 通过本 API 在运行时主动读写。
-> - **首期模板通过配置文件/管理脚本在 group 创建时注入，不提供运行时 administer API。** bot 只能通过已有模板调用 `createByTemplate`，不能创建或修改模板。后续迭代补 administer 接口。
-
-### 1.2 后续迭代
-
-| 项目 | 方向 | 说明 |
-|------|------|------|
-| administer API | 补齐控制面 | 提供模板/策略的运行时管理接口（创建、更新、删除模板；策略版本管理），目前模板仅通过配置文件注入 |
-| tag 标签体系 | 丰富策略面 | 通过tag关联policy，用于 collect_from 和 visible_to，需要单独的元数据 |
-| merge_strategy 回调 | 丰富版本管理 | 调用方自定义冲突处理逻辑 |
-| createByDomain 接口 | 放宽管控 | 模板预设更少的内容，bot 自由度更大 |
-| 跨 group 传播 | 完善整体功能 | propagate_to 放开，支持跨群组检索 |
-| obligations 执行 | 丰富策略面 | 注入时附置信度标记、检索落审计等 |
+| **数据面** | ContextEntry 存储：content + origin + time |
+| **策略面** | Policy Template 定义 flow（visible_to + collect_from） |
+| **治理面** | lineage（系统自动维护） + policy_version + obligations（仅『检索落审计』） |
+| **API** | 4 个端点，统一 POST：status、createByTemplate、updateContent、retrieve |
 
 ---
 
-## 2. Policy Template
+## 2. 模型与 API
 
-首期通过预定义模板管理策略字段。管理员预设模板，bot 通过模板创建 context。
+### 2.1 Policy Template
 
-### 2.1 系统环境变量
+通过预定义模板管理策略字段。管理员预设模板，bot 通过模板创建 context。
 
-以下变量由框架在运行时自动注入，不在模板中显式声明，调用方不可传：
+**系统环境变量（上游注入，不在模板中声明）：**
 
 | 变量 | 含义 |
 |------|------|
@@ -68,16 +41,14 @@
 |------|------|------|------|
 | `template_id` | string | 是 | 模板唯一标识 |
 | `description` | string | 是 | 给 LLM 的使用说明 |
-| `params` | param[] | 否 | 调用方传入的参数列表|
+| `params` | param[] | 否 | 调用方传入的参数列表 |
 
 **flow：**
 
 | 字段 | 类型 | 必填 | 含义 |
 |------|------|------|------|
-| `visible_to` | dict | 是 | 可见范围。四要素 `tenant_id` / `group_id` / `session_id` / `run_id` + `user_ids` 。支持 `{param}` 占位符|
-| `collect_from` | dict | 是 | 写入范围。四要素 `tenant_id` / `group_id` / `session_id` / `run_id` + `user_id` 。支持 `{param}` 占位符|
-
-> **设计说明 — visible_to 与 collect_from 的不对称：** `visible_to.user_ids` 为数组，支持多角色可见（如裁判+玩家两人可见底牌）；`collect_from.user_id` 首期仅支持单值
+| `visible_to` | dict | 是 | 可见范围。四要素 `tenant_id`/`group_id`/`session_id`/`run_id` + `user_ids`。支持 `{param}` 占位符 |
+| `collect_from` | dict | 是 | 写入范围。四要素 `tenant_id`/`group_id`/`session_id`/`run_id` + `user_id`。支持 `{param}` 占位符 |
 
 **consistency：**
 
@@ -85,17 +56,8 @@
 |------|------|------|--------|------|
 | `domain` | string | 是 | — | 版本标识。同 granularity + domain 条目互为版本。支持 `{param}` 占位符 |
 | `granularity` | enum | 是 | — | run / session / group / tenant |
-| `merge_strategy` | enum | 否 | `supersede` | supersede / append / llm_merge（详见下表） |
-| `freshness_class` | enum | 否 | `stable` | volatile / stable / audit|
-| `revalidate_due` | string / null | 否 | null | ISO 8601，仅 volatile 必填 |
-
-**merge_strategy：**
-
-| 取值 | 行为 | 示例 |
-|------|------|------|
-| `supersede` | 写入时系统自动查同 granularity 下同 domain 的当前活跃版本 → 回填旧条目 valid_to → 写入新条目，lineage.supersedes 指向旧条目。检索时只返回 valid_to=null 的最新条目 | `player_state`：新状态覆盖旧状态 |
-| `append` | 写入时系统查同 domain 当前活跃版本 → 将新 content 用 `\n` 拼接到旧 content 末尾 → 回填旧条目 valid_to → 写入拼接后的新条目，lineage.supersedes 指向旧条目。检索时只返回 valid_to=null 的唯一条目 | `player_speech`：每条发言追加到对话记录 |
-| `llm_merge` | 写入时系统查同 domain 当前活跃版本 → **（首期不实现）** 调 LLM 将新旧内容合并为一条 → 写入合并结果，lineage.supersedes 指向旧版本 | 两个客服 agent 独立写入不同结论，LLM 融合 |
+| `freshness_class` | enum | 否 | `stable` | volatile / stable / audit |
+| `revalidate_due` | string/null | 否 | null | ISO 8601，仅 volatile 必填 |
 
 ### 2.3 模板示例
 
@@ -118,7 +80,6 @@ flow:
 consistency:
   domain:             game_rule
   granularity:        group
-  merge_strategy:     supersede
   freshness_class:    stable
 ```
 
@@ -147,7 +108,6 @@ flow:
 consistency:
   domain:             player_word_{player_id}
   granularity:        session
-  merge_strategy:     supersede
   freshness_class:    stable
 ```
 
@@ -172,30 +132,24 @@ flow:
 consistency:
   domain:             player_state
   granularity:        session
-  merge_strategy:     supersede
   freshness_class:    stable
 ```
 
 ---
 
-## 3. API
+### 2.4 API
 
-### 使用流程
-
-bot 首次进入群组时：
+**使用流程（bot 首次进入群组时）：**
 
 ```
 1. POST /groupcontext/status → 获取 (contexts[], context_templates[])
-2. 对于 contexts 中已存在且 permission 含 W 的条目：
-   → 调用 POST /groupcontext/updateContent 更新内容
-3. 对于 context_templates 中可创建的模板：
-   → 调用 POST /groupcontext/createByTemplate 创建实例
-   （createByTemplate 如已有活跃版本会返回 conflict，此时应改用 updateContent）
-4. 对于 contexts 中 permission 含 R 的条目：
-   → 调用 POST /groupcontext/retrieve 获取当前值
+2. contexts 中 permission 含 W → POST /groupcontext/updateContent
+3. context_templates 中可创建的 → POST /groupcontext/createByTemplate
+   （createByTemplate 已有活跃版本会返回 conflict，应改用 updateContent）
+4. contexts 中 permission 含 R → POST /groupcontext/retrieve
 ```
 
-### 3.1 POST /groupcontext/status
+#### status
 
 获取当前 bot 的 context 视图。
 
@@ -261,7 +215,7 @@ bot 首次进入群组时：
 
 ---
 
-### 3.2 POST /groupcontext/createByTemplate
+#### createByTemplate
 
 通过模板创建一条 context。
 
@@ -297,8 +251,8 @@ bot 首次进入群组时：
   4. content 字节数 ≤ CONTENT_MAX_BYTES（默认 1 KB），超出返回 413 payload_too_large
 
 PDP 判定：
-  5. 提取当前 actor_id（框架注入，不可伪造）
-  6. 比对 collect_from → actor_id 是否匹配（首期直接字符串比对）
+  5. 提取当前 actor_id
+  6. 比对 collect_from → actor_id 是否匹配
      → 不匹配则拒绝，返回 permission_denied
 
 幂等检查：
@@ -341,11 +295,9 @@ PDP 判定：
 
 ---
 
-### 3.3 POST /groupcontext/updateContent
+#### updateContent
 
 更新已存在 context 的 content，系统自动 supersede 旧版本。**仅更新内容，不修改策略字段（策略以条目创建时的快照为准）。**
-
-> **适用条件：** **首期仅支持 `supersede` 与 `append` 两种 merge_strategy**（`llm_merge` 首期不实现，遇到此策略返回 501 not_implemented）。supersede 覆盖写入，append 用 `\n` 拼接到旧 content 末尾。
 
 | 项目 | 内容 |
 |------|------|
@@ -398,10 +350,7 @@ PDP 判定：
 取代写入：
   5. 在目标组内查 valid_to=null 的当前活跃版本
      → 不存在 → not_found
-  6. 按条目内嵌的 merge_strategy 写入：
-      - supersede → 用新 content 替换旧 content
-      - append → 将新 content 用 \n 拼接到旧 content 末尾 
-      - llm_merge → 调 LLM 合并新旧 content（首期不实现）
+  6. 用新 content 替换旧 content
   7. 最终 content size 校验：
     - 最终总字节数  ≤ CONTENT_MAX_BYTES（默认 1 KB），超出返回 413 payload_too_large
   8. 回填旧条目 valid_to = tx_time（生命周期字段维护）
@@ -438,7 +387,7 @@ PDP 判定：
 
 ---
 
-### 3.4 POST /groupcontext/retrieve
+#### retrieve
 
 按 domain 检索 context。
 
@@ -473,7 +422,6 @@ PDP 判定：
 
 版本处理：
   3. 按 granularity 分组，逐组取 valid_to=null 的最新条目
-     （所有 merge_strategy 下每个 domain+granularity 均只有一条活跃版本）
 
 freshness 过期过滤：
   4. 对 freshness_class=volatile 的条目，若 now ≥ revalidate_due 则视为过期，跳过
@@ -539,108 +487,89 @@ granularity 声明），retrieve 会一并返回。
 | `content` | string | 内容 |
 | `time.valid_from` | string | 生效时间 |
 
----
-
-## 4. 存储设计
-
-> 待进行。首期可先用内存存储验证 API 逻辑，存储方案的索引设计、倒排索引选择、Policy Template 独立表结构后续确定。
-
-### 4.1 并发安全
-
-> `supersede` 的"查活跃版本 → 回填 valid_to → 写新条目"三步非原子。存储实现阶段需要保证版本链更新的原子性（per-(domain, granularity) 互斥锁 或 CAS 操作），防止并发写入产出两个 valid_to=null 的活跃版本。
-
----
-
-## 5. 错误响应格式
-
-错误用对应的 HTTP 状态码表达语义，响应体同时携带 `status` 字段作为程序化判别器（与 HTTP 语义一致）：
+### 2.5 错误码
 
 | HTTP | status | 含义 | 适用接口 |
 |------|--------|------|----------|
 | 200 | `ok` | 操作成功 | 全部 |
 | 400 | `invalid_param` | 参数校验失败（缺必填、格式错误、content 超过 size 上限等） | 全部 |
 | 403 | `permission_denied` | 调用方无权执行此操作 | createByTemplate / updateContent / retrieve |
-| 404 | `not_found` | 指定 domain 下无匹配条目（retrieve）或无活跃版本（updateContent） | updateContent / retrieve |
+| 404 | `not_found` | 指定 domain 下无匹配条目或无活跃版本 | updateContent / retrieve |
 | 409 | `conflict` | 同 domain 已有活跃版本，拒绝创建 | createByTemplate |
 | 409 | `ambiguous` | 同一 domain 对应多条版本链，需传 granularity 消歧 | updateContent |
 | 413 | `payload_too_large` | content 超过单条上限（默认 1 KB） | createByTemplate / updateContent |
 | 500 | `internal_error` | 服务端内部错误 | 全部 |
 
-错误时 `context_id` / `superseded_id` / `content` 等数据字段为 null，`error_msg` 携带人类可读说明。success 响应省略 `status` 字段或固定为 `ok`。
-
-> **设计说明：** 用标准 HTTP 状态码而非统一 200，让网关、监控、重试中间件能直接基于 HTTP 语义工作。`status` 字段保留是为了让调用方在不依赖 HTTP 库的情况下也能精确分支（一些 HTTP 客户端在 4xx 时不解析 body）。
+错误时 `context_id` / `superseded_id` / `content` 等数据字段为 null，`error_msg` 携带人类可读说明。
 
 ---
 
-## 6. 代码结构
+## 3. 代码布局
 
-> 按 `CLAUDE.md` 既有分层规范：HTTP route 属于 delivery adapter（不进 service-api），service trait 拆 inbound use-case（`application::*Service`）与 core capability（`core::*CoreService`），repo trait 在 `port::repo`，store 在 `services/*-store`。
+按 `CLAUDE.md` 分层规范：HTTP route → delivery adapter → application → core → repo trait → store。
 
-### 6.1 crate / 目录布局
+### 3.1 crate / 目录
 
 ```
 service-api/bcs-service-api/src/
   application/
-    group_context.rs            # GroupContextService trait（route-facing use-case）
-    mod.rs
+    group_context.rs            # GroupContextService trait
   core/
-    group_context.rs            # GroupContextCoreService trait（核心能力）
-    mod.rs
-  port/
-    mod.rs
-    repo/
-      mod.rs
-      group_context_repo.rs     # GroupContextRepo trait（持久化 SPI）
-      policy_template_repo.rs   # PolicyTemplateRepo trait（模板 SPI）
+    group_context.rs            # GroupContextCoreService trait
+  port/repo/
+    group_context_repo.rs       # GroupContextRepo trait
+    policy_template_repo.rs     # PolicyTemplateRepo trait
   dto/
     group_context.rs            # 请求/响应/错误 wire DTO
-    mod.rs
 
-services/bcs-group-context/    # application + core 实现
-  Cargo.toml
+services/bcs-group-context/     # application + core 实现
   src/
     lib.rs
-    application.rs              # GroupContextServiceImpl
-    core.rs                     # GroupContextCoreServiceImpl
+    application.rs
+    core.rs
     model.rs                    # ContextEntry / Flow / Consistency / Lineage / Governance
     template.rs                 # PolicyTemplate 类型定义 + 参数实例化
     error.rs                    # GroupContextError（含 to_http_status 映射）
-    audit.rs                    # 审计日志写入（retrieve obligations）
+    audit.rs                    # 审计日志写入
 
-services/bcs-group-context-store/  # repo 实现（首期内存，后续 MySQL/SQLite）
-  Cargo.toml
+services/bcs-group-context-store/  # repo 实现
   src/
-    lib.rs
-    memory.rs                   # InMemoryGroupContextRepo（首期）
-    ...
+    lib.rs                      # DbGroupContextStore（DbPlugin + DbSqlFlavor）
 
 adapters/http/bcs-http/src/
   routes/
-    mod.rs
-    group_context.rs            # POST /groupcontext/* 路由定义 + 请求校验
-  error.rs                      # 应用层错误 → HTTP 响应的映射
+    group_context.rs            # POST /groupcontext/* 路由定义
 
-tools/bcs-cli/src/
-  command/
-    group_context.rs            # bcs-cli groupcontext status/create/update/retrieve
+tools/bcs-cli/src/command/
+  group_context.rs              # bcs-cli groupcontext status/create/update/retrieve
 ```
 
-### 6.2 model.rs 类型清单
+### 3.2 分层关系
 
-- `ContextEntry`（content + origin + time + type + provenance + sensitivity + derived）
-- `Flow`（visible_to + collect_from + propagate_to 写死 {groups:0}）
-- `Consistency`（domain + granularity + merge_strategy + freshness_class + revalidate_due）
-- `Lineage`（supersedes + superseded_by + superseded_at）
-- `Governance`（owner + policy_version + audit_ref；首期 owner 由模板预填，policy_version 默认 "v1"）
-- `PolicyTemplate`（template_id + params + description + flow + consistency）
-- `StatusRequest` / `StatusResponse` / `CreateRequest` / `CreateResponse` / `UpdateContentRequest` / `UpdateContentResponse` / `RetrieveRequest` / `RetrieveResponse`
+| 层 | 依赖 | 不依赖 |
+|----|------|--------|
+| `application::GroupContextService` | `core::GroupContextCoreService`、`error`/`audit` | HTTP 类型、DB 客户端、具体 store |
+| `core::GroupContextCoreService` | `port::repo::GroupContextRepo`（trait 注入） | application、delivery adapter |
+| `port::repo::GroupContextRepo` | — | core、application |
 
-### 6.3 application ↔ core ↔ port 分层
+`application` 必须体现 use-case 编排（如 retrieve 串审计日志）；core 持 `Arc<dyn GroupContextRepo>`，不依赖具体 store；delivery adapter 只调 `application`。
 
-| 层 | trait / 实现 | 依赖 | 不依赖 |
-|----|--------------|------|--------|
-| `application::GroupContextService` | 用例编排：参数校验、调用 core、拼装响应、写审计日志 | `core::GroupContextCoreService`、非 repo `port::*Port`、本 crate `error`/`audit` | HTTP 类型、DB 客户端、具体 store |
-| `core::GroupContextCoreService` | 核心能力：PDP 判定、版本链维护、freshness 过滤、模板实例化 | `port::repo::GroupContextRepo`、`port::repo::PolicyTemplateRepo`（以 trait 注入） | application、delivery adapter、HTTP/WS 类型 |
-| `port::repo::{GroupContextRepo,PolicyTemplateRepo}` | 持久化 SPI | — | core、application |
+### 3.3 model.rs 类型
 
-> **核心规则复述：** `application` 不是 `core` 的薄别名，必须体现 use-case 编排（如 retrieve 时串审计日志、错误响应统一翻译）；core 实现持 `Arc<dyn GroupContextRepo>`，不依赖具体 store 类型；delivery adapter 只调 `application`，不直接触碰 `core` 或 repo。
+- `ContextEntry`：content + origin + time + type + provenance + sensitivity + derived
+- `Flow`：visible_to + collect_from + propagate_to（写死 {groups:0}）
+- `Consistency`：domain + granularity + freshness_class + revalidate_due
+- `Lineage`：supersedes + superseded_by + superseded_at
+- `Governance`：owner + policy_version + audit_ref
+- `PolicyTemplate`：template_id + params + description + flow + consistency
+- `StatusRequest/Response`、`CreateRequest/Response`、`UpdateContentRequest/Response`、`RetrieveRequest/Response`
+
+---
+
+## 4. 存储
+
+> 待进行。
+
+### 4.1 并发安全
+
+`supersede` 的"查活跃版本 → 回填 valid_to → 写新条目"三步非原子。存储实现阶段通过 `DbPlugin::transaction` 保证版本链更新的原子性（per-(domain, granularity) 互斥锁或 CAS 操作），防止并发写入产出两个 valid_to=null 的活跃版本。
