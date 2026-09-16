@@ -11,6 +11,7 @@ import { InsightIcon } from "./InsightUi";
 import MonitoringPanel from "./monitoring/MonitoringPanel";
 import { MonitoringIcon } from "./monitoring/MonitoringIcon";
 import "./monitoring/monitoring.css";
+import { useInsightViewport } from "./useInsightViewport";
 
 type InsightTab = "todo" | "evidence" | "overview" | "admin";
 type BotOption = { botId: string; botName: string; ownerUserId?: string };
@@ -44,6 +45,7 @@ function parseImprovementId(value: string | null): number | undefined {
 }
 
 export default function InsightCenter() {
+  const viewportRef = useInsightViewport();
   const [params, setParams] = useSearchParams();
   const { user } = useClientUser();
   const canViewMonitoring = user?.isClawInsightAdmin === true;
@@ -54,7 +56,7 @@ export default function InsightCenter() {
     else next.delete("module");
     setParams(next);
   };
-  return <div className="insight-shell">
+  return <div ref={viewportRef} className="insight-shell">
     <aside className="insight-sidebar">
       <div className="insight-sidebar-inner">
         <div className="insight-workspace-title"><span className="insight-workspace-icon"><MonitoringIcon name="grid" /></span>效果中心</div>
@@ -64,7 +66,7 @@ export default function InsightCenter() {
         </nav>
       </div>
     </aside>
-    <div className="insight-content">{monitoring ? <MonitoringPanel /> : <GovernanceCenter />}</div>
+    <div className="insight-content" role="region" aria-label="效果中心内容" tabIndex={0}>{monitoring ? <MonitoringPanel /> : <GovernanceCenter />}</div>
   </div>;
 }
 

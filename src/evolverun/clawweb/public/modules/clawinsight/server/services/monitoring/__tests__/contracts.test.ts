@@ -23,6 +23,10 @@ function store(): MonitoringStore {
     readStatus: vi.fn().mockResolvedValue({ check: null, count: 0 }), listDiagnoses: vi.fn() };
 }
 describe("monitoring contract validation", () => {
+  it("validates business type query fields", () => {
+    expect(parseQuery({ businessProblemCategory: " 外部服务异常 ", businessProblemSubtype: "数据获取失败" })).toMatchObject({ businessProblemCategory: "外部服务异常", businessProblemSubtype: "数据获取失败" });
+    for (const query of [{ businessProblemSubtype: "孤立子类型" }, { businessProblemCategory: "中".repeat(129) }, { businessProblemCategory: ["a", "b"] }]) expect(() => parseQuery(query)).toThrow();
+  });
   it("normalizes optional fields, equivalent timezones and keeps real intervention", () => {
     const a = parseDiagnosis(alert, alert.eventId);
     const v = { ...alert, diagnosedAt: "2026-09-09T17:00:18+08:00" };

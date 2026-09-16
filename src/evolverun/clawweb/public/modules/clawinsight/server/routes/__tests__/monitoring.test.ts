@@ -70,6 +70,15 @@ afterEach(async () => {
 });
 
 describe("monitoring HTTP -> module schema -> repository -> GET", () => {
+  it("accepts type filters and returns database-derived choices over HTTP", async () => {
+    await post(alert); await post(pass);
+    const params = new URLSearchParams({ businessProblemCategory: alert.businessProblemCategory, businessProblemSubtype: alert.businessProblemSubtype });
+    const result = await get("mock-bot-te", `?${params}`);
+    expect(result.status).toBe(200);
+    expect(result.body.total).toBe(1);
+    expect(result.body.problemTypes).toContainEqual({ category: alert.businessProblemCategory, subtypes: [alert.businessProblemSubtype] });
+    expect((await get("mock-bot-te", "?businessProblemSubtype=orphan")).status).toBe(400);
+  });
   it.each([{}, { CLAWWEB_MONITORING_ENABLED: "false", CLAWWEB_MONITORING_BOTS_JSON: "invalid-json" },
     { CLAWWEB_MONITORING_ENABLED: "true", CLAWWEB_MONITORING_BOTS_JSON: '[{"botId":"old-only","engine":"TE"}]' },
   ])("discovers 26 bots from real writes without a restart or configuration: %j", async (legacy) => {

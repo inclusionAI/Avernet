@@ -82,7 +82,7 @@ export function parseCheck(input: unknown, now: number): BotCheck {
     checkedAt, lastSuccessfulCheckAt, status: oneOf(v.status, ["HEALTHY", "ERROR", "UNKNOWN", "PAUSED"]) };
 }
 export function parseQuery(input: Record<string, unknown>): DiagnosisQuery {
-  const v = record(input, ["startDate", "endDate", "decision", "keyword", "page", "pageSize"]);
+  const v = record(input, ["startDate", "endDate", "decision", "keyword", "page", "pageSize", "businessProblemCategory", "businessProblemSubtype"]);
   if (Object.values(v).some((x) => typeof x !== "string")) invalid("查询参数不能重复或嵌套。");
   const date = (value: unknown): string | null => {
     if (value === undefined) return null;
@@ -100,7 +100,11 @@ export function parseQuery(input: Record<string, unknown>): DiagnosisQuery {
   if (![10, 20, 50].includes(pageSize)) invalid();
   const keyword = ((v.keyword ?? "") as string).trim();
   if ([...keyword].length > 200) invalid("关键词过长。");
-  return { startMs: start ? Date.parse(`${start}T00:00:00+08:00`) : null,
+  const category = ((v.businessProblemCategory ?? "") as string).trim();
+  const subtype = ((v.businessProblemSubtype ?? "") as string).trim();
+  if ([category, subtype].some(value => [...value].length > 128)) invalid("业务问题类型过长。");
+  if (subtype && !category) invalid("选择业务问题子类型前请先选择类型。");
+  return { ...(category ? { businessProblemCategory: category } : {}), ...(subtype ? { businessProblemSubtype: subtype } : {}), startMs: start ? Date.parse(`${start}T00:00:00+08:00`) : null,
     endMs: end ? Date.parse(`${end}T00:00:00+08:00`) + 86400000 : null,
     decision: oneOf(v.decision ?? "ALL", ["ALL", "ALERT", "PASS", "UNRESOLVED"]),
     keyword, page: positive(v.page, 1), pageSize };

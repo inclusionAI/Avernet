@@ -142,6 +142,21 @@ export class MonitoringRepository implements MonitoringStore {
       const conditions = ["bot_id = ?"], params: unknown[] = [botId];
       if (query.startMs !== null) { conditions.push("occurred_at_ms >= ?"); params.push(query.startMs); }
       if (query.endMs !== null) { conditions.push("occurred_at_ms < ?"); params.push(query.endMs); }
+      // Facets use only Bot + dates, never the current page or selected type/result/keyword.
+      // This is a separate read: newly ingested options may precede/follow the list snapshot.
+      const pairs = await this.db.query(`SELECT DISTINCT business_problem_category, business_problem_subtype
+        FROM ${DIAGNOSES_TABLE} WHERE ${conditions.join(" AND ")}
+        AND business_problem_category IS NOT NULL AND business_problem_category <> ''
+        ORDER BY business_problem_category, business_problem_subtype`, [...params]);
+      const categories = new Map<string, Set<string>>();
+      for (const row of pairs) {
+        const category = String(row.business_problem_category);
+        if (!categories.has(category)) categories.set(category, new Set());
+        if (row.business_problem_subtype != null && row.business_problem_subtype !== "") categories.get(category)!.add(String(row.business_problem_subtype));
+      }
+      const problemTypes = [...categories].map(([category, subtypes]) => ({ category, subtypes: [...subtypes] }));
+      if (query.businessProblemCategory) { conditions.push("business_problem_category = ?"); params.push(query.businessProblemCategory); }
+      if (query.businessProblemSubtype) { conditions.push("business_problem_subtype = ?"); params.push(query.businessProblemSubtype); }
       if (query.keyword) {
         // '!' avoids SQL-mode-dependent backslash escaping; a backslash in the bound pattern is literal.
         const pattern = `%${query.keyword.toLowerCase().replace(/[!%_]/g, "!$&")}%`;
@@ -166,7 +181,7 @@ export class MonitoringRepository implements MonitoringStore {
       if (!rows.length) throw new Error("Missing count result");
       const counts = { all: integer(rows[0].all_count), alert: integer(rows[0].alert_count), pass: integer(rows[0].pass_count), unresolved: integer(rows[0].unresolved_count) };
       const total = counts[query.decision.toLowerCase() as keyof typeof counts];
-      return { botId, page: query.page, pageSize: query.pageSize, total, totalPages: Math.ceil(total / query.pageSize), counts,
+      return { botId, page: query.page, pageSize: query.pageSize, total, totalPages: Math.ceil(total / query.pageSize), counts, problemTypes,
         items: rows.filter((row) => row.event_id != null).map((row) => item(eventFromRow(row))) };
     });
   }

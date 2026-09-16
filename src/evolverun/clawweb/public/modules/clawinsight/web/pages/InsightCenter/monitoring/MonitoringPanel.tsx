@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { monitoringApi, monitoringErrorText } from '../../../api/monitoring';
 import type { BotStatus, DiagnosisPage, MonitoringQuery } from '../../../types/monitoring';
 import { DiagnosisRecord, decisionLabels as labels, displayTime, timeParts } from './DiagnosisRecord';
-import { MonitoringControls } from './MonitoringControls';
+import { beijingDateRange, MonitoringControls } from './MonitoringControls';
 import { MonitoringIcon as Icon } from './MonitoringIcon';
 import './monitoring.css';
+import { ProblemTypeFilter } from './ProblemTypeFilter';
 
 export { displayTime } from './DiagnosisRecord';
-const INITIAL: MonitoringQuery = { startDate: '', endDate: '', decision: 'ALL', keyword: '', page: 1, pageSize: 10 };
+const initialQuery = (): MonitoringQuery => ({ ...beijingDateRange(1), decision: 'ALL', keyword: '', page: 1, pageSize: 20 });
 const states = { HEALTHY: '监控正常', ERROR: '检查异常', UNKNOWN: '状态未知', PAUSED: '已暂停' };
 
 export default function MonitoringPanel() {
@@ -16,7 +17,7 @@ export default function MonitoringPanel() {
   const [botsError, setBotsError] = useState('');
   const [botsLoading, setBotsLoading] = useState(true);
   const [botsRevision, setBotsRevision] = useState(0);
-  const [query, setQuery] = useState<MonitoringQuery>(INITIAL);
+  const [query, setQuery] = useState<MonitoringQuery>(initialQuery);
   const [keywordInput, setKeywordInput] = useState('');
   const [revision, setRevision] = useState(0);
   const [pageData, setPageData] = useState<DiagnosisPage | null>(null);
@@ -104,8 +105,8 @@ export default function MonitoringPanel() {
   const pages = pageData?.totalPages ?? 0;
   const pageNumbers = Array.from({ length: Math.min(5, pages) }, (_, i) => Math.max(1, Math.min(query.page - 2, pages - 4)) + i);
 
-  const filtered = Boolean(query.startDate || query.endDate || query.keyword || query.decision !== 'ALL');
-  const clearFilters = () => { setKeywordInput(''); change({ ...INITIAL, pageSize: query.pageSize }); };
+  const filtered = Boolean(query.businessProblemCategory || query.businessProblemSubtype || query.startDate || query.endDate || query.keyword || query.decision !== 'ALL');
+  const clearFilters = () => { setKeywordInput(''); change({ ...initialQuery(), businessProblemCategory: '', businessProblemSubtype: '', pageSize: query.pageSize }); };
   const lastCheck = timeParts(status?.lastSuccessfulCheckAt ?? null);
   const healthClass = statusError ? 'unknown' : status?.status === 'HEALTHY' ? '' : status?.status.toLowerCase() ?? 'unknown';
   return <div className="insight-monitoring">
@@ -128,14 +129,17 @@ export default function MonitoringPanel() {
       <section aria-label="诊断记录" className="records-panel" aria-busy={loading}>
         <div className="records-toolbar">
           <div role="group" aria-label="诊断结果筛选" className="result-tabs">{(Object.keys(labels) as (keyof typeof labels)[]).map(value => <button type="button" aria-pressed={query.decision === value} key={value} onClick={() => change({ decision: value })} className={query.decision === value ? 'active' : ''}>{labels[value]} <span className="number">{pageData ? pageData.counts[countKey[value]] : '—'}</span></button>)}</div>
+          <ProblemTypeFilter key={`${botId}:${query.startDate}:${query.endDate}`} options={pageData?.problemTypes ?? []}
+            category={query.businessProblemCategory ?? ''} subtype={query.businessProblemSubtype ?? ''}
+            onApply={(businessProblemCategory, businessProblemSubtype) => change({ businessProblemCategory, businessProblemSubtype })} />
           <label className="search-box"><Icon name="search" /><input type="search" aria-label="搜索诊断记录" placeholder="搜索 Session Key / Trace ID" maxLength={200} value={keywordInput} onChange={event => setKeywordInput(event.target.value)} />{keywordInput && <button type="button" className="search-clear" aria-label="清空搜索" onClick={() => { setKeywordInput(''); change({ keyword: '' }); }}><Icon name="x" /></button>}</label>
         </div>
-        <div className="list-columns" aria-hidden="true"><span>诊断结论 / 会话标识</span><span>会话时间</span><span className="human-heading">人工干预<Icon name="user" /></span><span /></div>
+        <div className="list-columns" aria-hidden="true"><span>诊断结论 / 会话标识</span><span>TC 故障标签</span><span>会话时间</span><span /></div>
         {error && <div role="alert" className="error-banner">{error}{pageData && ' 当前保留上次结果，尚未更新。'} <button type="button" onClick={() => { setBotsRevision(x => x + 1); setRevision(x => x + 1); }}>重试</button></div>}
         {invalidDates ? <p className="monitoring-empty">请先调整日期范围。</p> : <div>
           {pageData?.items.map(item => <DiagnosisRecord key={item.diagnosisId} item={item} open={openIds.has(item.diagnosisId)} toggle={() => setOpenIds(current => { const next = new Set(current); if (next.has(item.diagnosisId)) next.delete(item.diagnosisId); else next.add(item.diagnosisId); return next; })} />)}
           {!pageData && !error && <p className="monitoring-empty">正在加载诊断记录…</p>}
-          {pageData?.total === 0 && <div className="empty-state"><span className="empty-icon"><Icon name="empty" /></span><h3>{filtered ? '没有符合当前条件的诊断记录。' : '暂无诊断记录'}</h3><p>{filtered ? '试试调整时间范围、诊断结论或搜索关键词。' : '此 Bot 还没有可展示的诊断结果。'}</p>{filtered && <button type="button" onClick={clearFilters}>清空筛选条件</button>}</div>}
+          {pageData?.total === 0 && <div className="empty-state"><span className="empty-icon"><Icon name="empty" /></span><h3>{filtered ? '没有符合当前条件的诊断记录。' : '暂无诊断记录'}</h3><p>{filtered ? '试试调整时间范围、问题类型、诊断结论或搜索关键词。' : '此 Bot 还没有可展示的诊断结果。'}</p>{filtered && <button type="button" onClick={clearFilters}>清空筛选条件</button>}</div>}
           {pageData && pageData.total > 0 && !pageData.items.length && <div className="empty-state"><p>当前页暂无记录。</p><button type="button" onClick={() => change({ page: 1 })}>返回首页</button></div>}
         </div>}
         <footer className="list-footer">

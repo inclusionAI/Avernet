@@ -32,10 +32,10 @@ export function DiagnosisRecord({ item, open, toggle }: { item: DiagnosisItem; o
     <button type="button" onClick={toggle} aria-expanded={open} aria-controls={detailId} className="record-summary">
       <span className="record-main">
         <span className={`decision-symbol ${item.decision.toLowerCase()}`}><Icon name={symbol[item.decision]} /></span>
-        <span className="record-text"><span className="record-title-line"><span className="record-title" title={title}>{title}</span><span className="decision-word">{decisionLabels[item.decision]}</span></span><span className="record-session mono" title={identifier}>{identifier}</span></span>
+        <span className="record-text"><span className="record-title-line"><span className="record-title" title={title}>{title}</span></span><span className="record-session mono" title={identifier}>{identifier}</span></span>
       </span>
-      <span className="record-time" title={displayTime(item.occurredAt)}>{time ? <><span className="day">{time.day}</span><span>{time.time}</span></> : '时间未知'}</span>
-      <span className={`intervention ${item.humanIntervention ? 'yes' : ''}`} aria-label={`人工干预：${item.humanIntervention ? '是' : '否'}`}>{item.humanIntervention && <Icon name="user" />}{item.humanIntervention ? '是' : '否'}</span>
+      <span className="summary-tc mono" title={item.tcFaultLabel ?? '—'}>{item.tcFaultLabel ?? '—'}</span>
+      <span className="record-time" title={displayTime(item.occurredAt)}>{time ? <><span className="day">{time.date}</span><span>{time.time}</span></> : '时间未知'}</span>
       <Icon name="chevron" className="expand-icon" />
     </button>
     {open && <div id={detailId} className="record-detail">

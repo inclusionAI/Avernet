@@ -39,13 +39,14 @@ export type DiagnosisQuery = {
   startMs: number | null;
   endMs: number | null;
   decision: Decision | "ALL";
-  keyword: string;
+  keyword: string; businessProblemCategory?: string; businessProblemSubtype?: string;
   page: number;
   pageSize: number;
 };
 export type DiagnosisCounts = { all: number; alert: number; pass: number; unresolved: number };
 export type DiagnosisPage = {
   botId: string; page: number; pageSize: number; total: number; totalPages: number;
+  problemTypes: { category: string; subtypes: string[] }[];
   counts: DiagnosisCounts; items: DiagnosisItem[];
 };
 export type BotStatus = {
