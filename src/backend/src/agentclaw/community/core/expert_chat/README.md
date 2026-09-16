@@ -40,9 +40,14 @@ Schema changes require SQLite migration. Cross-domain dependencies make refactor
 
 ### Application Caller connection policy
 
-Any signature-verified application identity may access any existing Caller
-instance in its verified tenant, including another user's instance on a private
-Bot. This endpoint does not require an application grant, ownership, or current
+The BaaS-authenticated `POST /api/v1/expert-chats/app-caller-connection`
+may access an existing Caller in the server default tenant, including another
+user's instance on a private Bot. Its HS256 JWT requires `iss=baas`, `iat/exp`
+and validates optional `nbf` with the existing 5-second leeway. It ignores
+`principals`, `app_id`, `tenant` and `aud` and never uses them for tenant routing.
+It reuses the configured `SecretNamesConfig.gateway_principal_signing_key`
+value, with no separate BaaS key or deployment setting. BaaS must securely load
+the same key; issuer separates protocols, not holders of the shared key. This endpoint does not require an application grant, ownership, or current
 collaborator membership. The Bot must exist in the tenant, and the Caller must
 already have an instance with a nonempty bot UUID. No administrator privilege or
 first-time provisioning is granted. User-authenticated endpoints retain their
