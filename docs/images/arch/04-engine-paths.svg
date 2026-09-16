@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1360 940" width="1360" height="940" role="img" aria-label="two onboarding paths for an engine, decided by who controls the runtime">
+  <style>
+    .t{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif}
+    .title{font-size:25px;font-weight:600;fill:#1F1E1C}
+    .sub{font-size:13.5px;fill:#75736E}
+    .bt{font-size:15px;font-weight:600}
+    .bm{font-size:12.5px;fill:#33322E}
+    .bd{font-size:11.5px;fill:#5E5C57}
+    .lbl{font-size:11.5px;font-weight:600;fill:#8A8781;letter-spacing:.05em}
+    .cap{font-size:16px;font-weight:600}
+    .capd{font-size:12px;fill:#75736E}
+    .arw{font-size:11px;fill:#8A8781}
+    .edge{font-size:11px;font-weight:600;fill:#A1762E;letter-spacing:.04em}
+  </style>
+  <rect width="1360" height="940" fill="#FAF9F7"/>
+  <defs>
+    <marker id="m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8A8781"/></marker>
+    <pattern id="hatch" width="7" height="7" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+      <rect width="7" height="7" fill="#F1EFEA"/><line x1="0" y1="0" x2="0" y2="7" stroke="#DEDAD2" stroke-width="2.5"/>
+    </pattern>
+  </defs>
+  <g class="t">
+    <text x="44" y="50" class="title">接一个新引擎，有两条路 —— 分岔点是「运行时归谁控制」</text>
+    <text x="44" y="78" class="sub">两条路交付给上层的是同一组标准接口。真正的区别是那条橙色虚线画在哪：线以上是我们写的代码，线以下是引擎那边的。</text>
+
+    <rect x="44" y="104" width="1272" height="86" rx="6" fill="#E4EBF5" stroke="#3C6198" stroke-width="2"/>
+    <text x="64" y="132" class="bt" fill="#22405F">标准引擎接口</text>
+    <text x="64" y="156" class="bd">会话 · 对话 · 技能 · MCP · 定时 · 审批 · 文件 · 节点 · 模型 · 命令行工具　｜　外加一组引擎自身的状态与能力查询接口</text>
+    <text x="64" y="178" class="bd">前端与 Backend 只面向这组接口编程 —— 换引擎，它们一行不改</text>
+
+    <line x1="352" y1="256" x2="352" y2="196" stroke="#8A8781" stroke-width="1.8" marker-end="url(#m)"/>
+    <line x1="1008" y1="256" x2="1008" y2="196" stroke="#8A8781" stroke-width="1.8" marker-end="url(#m)"/>
+
+    <text x="44" y="236" class="cap" fill="#7A4B22">① 运行时不归我们控制</text>
+    <text x="44" y="258" class="capd">容器在对方那边，自己拉取配置，我们没有进程可以放代码 —— 整组标准接口只能引擎自己实现</text>
+
+    <text x="700" y="236" class="cap" fill="#3E315F">② 运行时是我们起的</text>
+    <text x="700" y="258" class="capd">容器我们创建、镜像我们构建、进程我们拉起 —— 于是可以把适配层放进去，替引擎做翻译</text>
+
+    <line x1="44" y1="286" x2="660" y2="286" stroke="#A1762E" stroke-width="2" stroke-dasharray="7 5"/>
+    <text x="44" y="304" class="edge">我们的代码到此为止</text>
+
+    <rect x="44" y="314" width="616" height="388" rx="6" fill="url(#hatch)" stroke="#A39F97" stroke-width="1.4"/>
+    <text x="64" y="346" class="bt" fill="#33322E">引擎自己的运行时</text>
+    <text x="64" y="372" class="bm">上面那组标准接口，自己实现一遍。</text>
+    <text x="64" y="404" class="bd">· 会话、对话、技能、MCP、定时、审批、文件 —— 一条不落</text>
+    <text x="64" y="432" class="bd">· 能力声明与降级，要自己按矩阵报上来</text>
+    <text x="64" y="460" class="bd">· 统一的应答信封与失败语义，要自己对齐</text>
+    <text x="64" y="488" class="bd">· 我们只递过去一份冻结的配置，内容对我们不透明</text>
+    <text x="64" y="530" class="bm" fill="#7A4B22">换来的是：不依赖我们的任何进程 ——</text>
+    <text x="64" y="554" class="bm" fill="#7A4B22">能跑在我们根本部署不到的地方。</text>
+    <text x="64" y="596" class="bd">这不是「成本高低」的选择题。对这类运行时，</text>
+    <text x="64" y="620" class="bd">第 ② 条路压根不存在：没有地方放适配层。</text>
+    <text x="64" y="662" class="lbl">典型：teclaw 这类外部拉取式运行时</text>
+
+    <rect x="700" y="286" width="616" height="252" rx="6" fill="#E3EDE4" stroke="#3F7350" stroke-width="1.6"/>
+    <text x="720" y="318" class="bt" fill="#26452F">引擎适配层　·　在我们自己的 Engine 进程里</text>
+    <text x="720" y="346" class="bd">· 能力声明与降级 —— 支持什么、什么受限、什么没有</text>
+    <text x="720" y="374" class="bd">· 会话与对话的统一形状 —— 会话标识、历史、流式事件归一</text>
+    <text x="720" y="402" class="bd">· 技能与命令行工具的落盘 —— 安装、更新、清理</text>
+    <text x="720" y="430" class="bd">· 定时任务 · 审批 · 文件操作</text>
+    <text x="720" y="458" class="bd">· 统一的应答信封与失败语义 —— 传输成功不等于业务成功</text>
+    <text x="720" y="486" class="bd">· 每引擎一套，是领域内核里唯一认识具体引擎的地方</text>
+    <text x="720" y="518" class="bm" fill="#26452F">这一整块，引擎那边不用写。</text>
+
+    <line x1="1008" y1="538" x2="1008" y2="576" stroke="#8A8781" stroke-width="1.5" marker-end="url(#m)"/>
+    <text x="1024" y="562" class="arw">按原生接口协议对话</text>
+
+    <line x1="700" y1="598" x2="1316" y2="598" stroke="#A1762E" stroke-width="2" stroke-dasharray="7 5"/>
+    <text x="700" y="616" class="edge">我们的代码到此为止</text>
+
+    <rect x="700" y="626" width="616" height="76" rx="6" fill="url(#hatch)" stroke="#A39F97" stroke-width="1.4"/>
+    <text x="720" y="656" class="bt" fill="#33322E">引擎自己的运行时</text>
+    <text x="720" y="682" class="bd">只按自己本来的形状实现一份原生接口协议，翻译交给适配层。</text>
+
+    <rect x="44" y="736" width="1272" height="166" rx="6" fill="#F1EFEA" stroke="#D8D5CF"/>
+    <text x="64" y="766" class="bt" fill="#33322E">所以，判据只有一条：那个跑引擎的进程，是不是我们拉起来的</text>
+    <text x="64" y="798" class="bm">· 是 —— 容器由我们创建、镜像由我们构建、进程由我们拉起，适配层就有地方待。走 ②。仓库里的 claude_code、openclaw 都是这条。</text>
+    <text x="64" y="826" class="bm">· 不是 —— 容器在对方那边、配置自己拉取、进程我们碰不到，适配层无处安放。只能走 ①。teclaw 就是这一类。</text>
+    <text x="64" y="858" class="bd">注意这跟「哪条路更省事」无关：走 ① 不是因为嫌适配层麻烦，而是因为对外部运行时来说，② 在物理上不成立。</text>
+    <text x="64" y="884" class="bd">两条路对上层完全一样：都只暴露标准接口，都要声明能力矩阵，上层据此派发或隐藏。</text>
+  </g>
+</svg>

@@ -1,83 +1,86 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1360 840" width="1360" height="840" role="img" aria-label="system architecture">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 900" width="1400" height="900" role="img" aria-label="how backend and engine interact with other components">
   <style>
     .t{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif}
     .title{font-size:25px;font-weight:600;fill:#1F1E1C}
     .sub{font-size:13.5px;fill:#75736E}
-    .band{font-size:11.5px;font-weight:600;fill:#8A8781;letter-spacing:.06em}
     .bt{font-size:14px;font-weight:600}
     .bd{font-size:11px;fill:#5E5C57}
-    .tag{font-size:10.5px}
-    .arw{font-size:10.5px;fill:#8A8781}
+    .num{font-size:12px;font-weight:700;fill:#A85C47}
+    .fl{font-size:11.5px;fill:#33322E}
+    .lg{font-size:11.5px;font-weight:600;fill:#8A8781;letter-spacing:.05em}
   </style>
-  <rect width="1360" height="840" fill="#FAF9F7"/>
-  <defs><marker id="m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8A8781"/></marker>
-  <marker id="mt" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#3B7A73"/></marker></defs>
+  <rect width="1400" height="900" fill="#FAF9F7"/>
+  <defs><marker id="m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#A85C47"/></marker>
+  <marker id="mg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8A8781"/></marker></defs>
   <g class="t">
-    <text x="44" y="50" class="title">系统全景：这两个模块坐在什么位置</text>
-    <text x="44" y="78" class="sub">本次要讲的 Backend 与 Engine 在图中加粗。其余组件给出位置和职责，帮助定位边界，本次不展开。</text>
-    <text x="44" y="112" class="band">使用者</text>
-    <rect x="44" y="122" width="1000" height="58" rx="6" fill="#E4EBF5" stroke="#3C6198" stroke-width="1"/>
-    <text x="60" y="148" class="bt" fill="#22405F">前端工作台 · 终端客户端 · 外部租户 API 调用</text>
-    <text x="60" y="163" class="bd">发起会话、管理 Bot 与技能、编排协作</text>
-    <rect x="1064" y="122" width="252" height="58" rx="6" fill="#F3F1EC" stroke="#B9B5AD" stroke-width="1"/>
-    <text x="1080" y="148" class="bt" fill="#5E5C57">相邻系统</text>
-    <text x="1080" y="163" class="bd">工作流 / 评测 / 演进等上层应用</text>
-    <text x="44" y="216" class="band">平台面</text>
-    <rect x="44" y="226" width="400" height="130" rx="6" fill="#E3EDE4" stroke="#3F7350" stroke-width="2.2"/>
-    <text x="60" y="252" class="bt" fill="#26452F">Backend　控制面</text>
-    <text x="60" y="273" class="bd">Bot 生命周期 · 技能与空间治理</text>
-    <text x="60" y="291" class="bd">发布与灰度 · 配额与权限</text>
-    <text x="60" y="309" class="bd">中心化多租户，隔离在这里生效</text>
-    <rect x="468" y="226" width="400" height="130" rx="6" fill="#F1EFEA" stroke="#8A8781" stroke-width="1"/>
-    <text x="484" y="252" class="bt" fill="#33322E">BCS / BCN　协调面</text>
-    <text x="484" y="273" class="bd">Bot 注册与发现 · 组队</text>
-    <text x="484" y="291" class="bd">消息路由 · 群聊与上下文融合</text>
-    <text x="484" y="309" class="bd">多 Bot 之间的协作在这里发生</text>
-    <rect x="892" y="226" width="424" height="130" rx="6" fill="#F1EFEA" stroke="#8A8781" stroke-width="1"/>
-    <text x="908" y="252" class="bt" fill="#33322E">BaaS　供给面</text>
-    <text x="908" y="273" class="bd">Bot 创建 · 沙箱供给</text>
-    <text x="908" y="291" class="bd">运行时调度 · 会话与计费管控</text>
-    <text x="908" y="309" class="bd">把一个 Bot 变成一个跑起来的运行时</text>
-    <text x="44" y="392" class="band">接入面</text>
-    <rect x="44" y="402" width="1272" height="74" rx="6" fill="#F6EBD8" stroke="#A1762E" stroke-width="1"/>
-    <text x="60" y="428" class="bt" fill="#5E4519">sandbox-proxy　统一入口</text>
-    <text x="60" y="449" class="bd">对外一个经过鉴权的入口：JWT 校验 · 目标解析 · HTTP 与长连接转发 —— 把后面的运行时藏在身后</text>
-    <text x="44" y="512" class="band">执行面 · 每个 Bot 一套</text>
-    <rect x="44" y="522" width="400" height="142" rx="6" fill="#E3EDE4" stroke="#3F7350" stroke-width="2.2"/>
-    <text x="60" y="548" class="bt" fill="#26452F">Engine　执行面</text>
-    <text x="60" y="569" class="bd">会话 · 对话 · 技能 · MCP · 定时</text>
-    <text x="60" y="587" class="bd">文件 · 节点 · 审批 · 命令行</text>
-    <text x="60" y="605" class="bd">随 Bot 部署的单机服务</text>
-    <text x="60" y="623" class="bd">只服务它自己那一个 Bot</text>
-    <rect x="468" y="522" width="400" height="142" rx="6" fill="#EBE5F3" stroke="#69539B" stroke-width="1"/>
-    <text x="484" y="548" class="bt" fill="#3E315F">引擎网关</text>
-    <text x="484" y="569" class="bd">claude_code：随仓库分发</text>
-    <text x="484" y="587" class="bd">openclaw：外部部署</text>
-    <text x="484" y="605" class="bd">把统一接口翻到各引擎的原生协议</text>
-    <rect x="892" y="522" width="424" height="142" rx="6" fill="#DFEDEC" stroke="#3B7A73" stroke-width="1"/>
-    <text x="908" y="548" class="bt" fill="#234945">Bot 沙箱运行时</text>
-    <text x="908" y="569" class="bd">容器 / 沙箱 · 工作目录</text>
-    <text x="908" y="587" class="bd">技能与命令行工具落盘</text>
-    <text x="908" y="605" class="bd">模型调用最终在这里发生</text>
-    <line x1="244" y1="184" x2="244" y2="222" stroke="#8A8781" stroke-width="1.5" marker-end="url(#m)"/>
-    <line x1="668" y1="184" x2="668" y2="222" stroke="#8A8781" stroke-width="1.5" marker-end="url(#m)"/>
-    <line x1="244" y1="360" x2="244" y2="398" stroke="#8A8781" stroke-width="1.5" marker-end="url(#m)"/>
-    <line x1="1104" y1="360" x2="1104" y2="398" stroke="#8A8781" stroke-width="1.5" marker-end="url(#m)"/>
-    <line x1="244" y1="480" x2="244" y2="518" stroke="#8A8781" stroke-width="1.5" marker-end="url(#m)"/>
-    <line x1="448" y1="594" x2="464" y2="594" stroke="#8A8781" stroke-width="1.5" marker-end="url(#m)"/>
-    <line x1="872" y1="594" x2="888" y2="594" stroke="#8A8781" stroke-width="1.5" marker-end="url(#m)"/>
-    <text x="262" y="206" class="arw">管理与发布</text>
-    <text x="686" y="206" class="arw">协作与路由</text>
-    <text x="262" y="384" class="arw">下发到运行时</text>
-    <text x="1122" y="384" class="arw">供给与调度</text>
-    <text x="44" y="700" class="band">Bot 接入协作面（BCS / BCN）的两条路</text>
-    <rect x="44" y="710" width="630" height="104" rx="6" fill="#FFFFFF" stroke="#3B7A73" stroke-width="1"/>
-    <text x="60" y="736" class="bt" fill="#234945">① 插件直连</text>
-    <text x="60" y="757" class="bd">Agent 运行时自己连上协调面的长连接，完成注册、收消息、报结果。</text>
-    <text x="60" y="775" class="bd">适合本地 Agent、自建 Bot 进程 —— 由我们提供运行时。</text>
-    <rect x="698" y="710" width="618" height="104" rx="6" fill="#FFFFFF" stroke="#3B7A73" stroke-width="1"/>
-    <text x="714" y="736" class="bt" fill="#234945">② 外部平台托管</text>
-    <text x="714" y="757" class="bd">已有 Bot 平台注册成 Provider，暴露一个回调地址；协作面把请求派下去，</text>
-    <text x="714" y="775" class="bd">平台自己调度自己的 Bot 并回调结果 —— 运行时不在我们手里。</text>
+    <text x="44" y="50" class="title">Backend 与 Engine 怎么跟别的组件打交道</text>
+    <text x="44" y="78" class="sub">要点是那条红线：Backend 想跟某个 Bot 说话，不能直接找它 —— 先问 BaaS 这个 Bot 在哪，拿到定位结果，再经统一入口打进去。</text>
+    <rect x="44" y="120" width="190" height="96" rx="6" fill="#E4EBF5" stroke="#3C6198" stroke-width="1"/>
+    <text x="58" y="145" class="bt" fill="#22405F">前端 / 外部租户</text>
+    <text x="58" y="165" class="bd">发起会话</text>
+    <text x="58" y="182" class="bd">管理 Bot 与技能</text>
+    <rect x="470" y="120" width="340" height="96" rx="6" fill="#F1EFEA" stroke="#8A8781" stroke-width="1"/>
+    <text x="484" y="145" class="bt" fill="#33322E">BCS / BCN　协作面</text>
+    <text x="484" y="165" class="bd">Bot 注册与发现 · 组队</text>
+    <text x="484" y="182" class="bd">消息路由 · 群聊</text>
+    <rect x="1050" y="120" width="306" height="96" rx="6" fill="#F1EFEA" stroke="#8A8781" stroke-width="1"/>
+    <text x="1064" y="145" class="bt" fill="#33322E">外部 Bot 平台</text>
+    <text x="1064" y="165" class="bd">注册成 Provider</text>
+    <text x="1064" y="182" class="bd">自己调度自己的 Bot</text>
+    <rect x="44" y="286" width="390" height="150" rx="6" fill="#E3EDE4" stroke="#3F7350" stroke-width="2.2"/>
+    <text x="58" y="311" class="bt" fill="#26452F">Backend　控制面</text>
+    <text x="58" y="331" class="bd">Bot 生命周期 · 技能 · 空间 · 发布</text>
+    <text x="58" y="348" class="bd">配额与权限 · 多租户隔离</text>
+    <text x="58" y="365" class="bd">自己不持有任何 Bot 运行时</text>
+    <rect x="44" y="500" width="390" height="100" rx="6" fill="#F1EFEA" stroke="#8A8781" stroke-width="1"/>
+    <text x="58" y="525" class="bt" fill="#33322E">BaaS　供给面</text>
+    <text x="58" y="545" class="bd">创建 Bot · 供给容器</text>
+    <text x="58" y="562" class="bd">记录每个 Bot 的容器与连接信息</text>
+    <text x="58" y="579" class="bd">—— Bot 在哪，只有它知道</text>
+    <rect x="560" y="286" width="250" height="314" rx="6" fill="#F6EBD8" stroke="#A1762E" stroke-width="1"/>
+    <text x="574" y="311" class="bt" fill="#5E4519">sandbox-proxy</text>
+    <text x="574" y="331" class="bd">统一入口</text>
+    <text x="574" y="348" class="bd">鉴权 · 目标解析</text>
+    <text x="574" y="365" class="bd">HTTP 与长连接转发</text>
+    <text x="574" y="382" class="bd"></text>
+    <text x="574" y="399" class="bd">把后面的运行时</text>
+    <text x="574" y="416" class="bd">藏在身后</text>
+    <rect x="920" y="286" width="436" height="150" rx="6" fill="#E3EDE4" stroke="#3F7350" stroke-width="2.2"/>
+    <text x="934" y="311" class="bt" fill="#26452F">Engine　执行面</text>
+    <text x="934" y="331" class="bd">会话 · 对话 · 技能 · MCP · 定时 · 审批 · 文件</text>
+    <text x="934" y="348" class="bd">随 Bot 部署，只服务它自己那一个 Bot</text>
+    <rect x="920" y="500" width="436" height="100" rx="6" fill="#DFEDEC" stroke="#3B7A73" stroke-width="1"/>
+    <text x="934" y="525" class="bt" fill="#234945">引擎网关 + 沙箱运行时</text>
+    <text x="934" y="545" class="bd">把标准接口翻到各引擎的原生协议</text>
+    <text x="934" y="562" class="bd">技能与命令行工具落盘 · 模型调用</text>
+    <path d="M 139 220 L 139 282" fill="none" stroke="#8A8781" stroke-width="1.8" marker-end="url(#mg)"/>
+    <text x="150" y="256" class="num">①</text>
+    <path d="M 160 440 L 160 496" fill="none" stroke="#A85C47" stroke-width="1.8" marker-end="url(#m)"/>
+    <text x="172" y="474" class="num">②</text>
+    <path d="M 438 352 L 556 352" fill="none" stroke="#A85C47" stroke-width="1.8" marker-end="url(#m)"/>
+    <text x="480" y="342" class="num">③</text>
+    <path d="M 814 352 L 916 352" fill="none" stroke="#A85C47" stroke-width="1.8" marker-end="url(#m)"/>
+    <text x="856" y="342" class="num">④</text>
+    <path d="M 300 282 L 560 220" fill="none" stroke="#8A8781" stroke-width="1.8" marker-end="url(#mg)"/>
+    <text x="420" y="248" class="num">⑤</text>
+    <path d="M 810 176 L 1046 176" fill="none" stroke="#8A8781" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#mg)"/>
+    <text x="916" y="166" class="num">⑥</text>
+    <path d="M 700 220 L 1000 282" fill="none" stroke="#8A8781" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#mg)"/>
+    <text x="836" y="262" class="num">⑦</text>
+    <path d="M 1138 440 L 1138 496" fill="none" stroke="#8A8781" stroke-width="1.8" marker-end="url(#mg)"/>
+    <text x="1150" y="474" class="num">⑧</text>
+    <text x="44" y="676" class="lg">这几条线分别是什么</text>
+    <text x="44" y="700" class="num">①</text>
+    <text x="104" y="700" class="fl">前端与外部租户只跟 Backend 打交道 —— 管理 Bot、技能、发布，全部走控制面。</text>
+    <text x="44" y="730" class="num">②</text>
+    <text x="104" y="730" class="fl">Backend 想跟某个 Bot 说话，第一步是问 BaaS：这个 Bot 的容器在哪、怎么连。定位信息只有 BaaS 有。</text>
+    <text x="44" y="760" class="num">③ ④</text>
+    <text x="104" y="760" class="fl">拿到定位结果后，经统一入口打到那个 Bot 的 Engine 上 —— 会话、技能、定时都走这条。Backend 从不直连运行时。</text>
+    <text x="44" y="790" class="num">⑤</text>
+    <text x="104" y="790" class="fl">Bot 注册进协作网络，之后的协作路由由协作面负责。</text>
+    <text x="44" y="820" class="num">⑥ ⑦</text>
+    <text x="104" y="820" class="fl">协作面把消息派下去：外部平台走 Provider 回调，自建运行时走长连接直连。</text>
+    <text x="44" y="850" class="num">⑧</text>
+    <text x="104" y="850" class="fl">Engine 把标准接口翻成引擎原生协议，最终在沙箱里调模型、落技能。</text>
   </g>
 </svg>

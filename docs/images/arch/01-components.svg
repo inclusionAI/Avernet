@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1540 1020" width="1540" height="1020" role="img" aria-label="what backend and engine each contain">
+  <style>
+    .t{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif}
+    .title{font-size:25px;font-weight:600;fill:#1F1E1C}
+    .sub{font-size:13.5px;fill:#75736E}
+    .ph{font-size:19px;font-weight:600}
+    .pd{font-size:12.5px}
+    .gh{font-size:14px;font-weight:600;fill:#33322E}
+    .gi{font-size:12px;fill:#5E5C57}
+    .lbl{font-size:11.5px;font-weight:600;fill:#8A8781;letter-spacing:.05em}
+    .note{font-size:12.5px;fill:#5E5C57}
+  </style>
+  <rect width="1540" height="1020" fill="#FAF9F7"/>
+  <g class="t">
+    <text x="40" y="50" class="title">这两个模块里到底有什么</text>
+    <text x="40" y="78" class="sub">同一套七角色骨架，装的是两类东西：Backend 管很多个 Bot 的「身份、资产与生命周期」，Engine 管一个 Bot 的「此刻正在干什么」。</text>
+    <text x="40" y="102" class="sub">下面按领域内核里的业务域列 —— 不是目录清单，是这套系统对外承诺的能力面。</text>
+
+    <rect x="40" y="132" width="716" height="60" rx="6" fill="#E3EDE4" stroke="#3F7350" stroke-width="2"/>
+    <text x="60" y="160" class="ph" fill="#26452F">Backend　·　控制面</text>
+    <text x="60" y="182" class="pd" fill="#3F7350">一套部署服务所有租户与 Bot　·　自己不持有任何 Bot 运行时</text>
+
+    <rect x="784" y="132" width="716" height="60" rx="6" fill="#E3EDE4" stroke="#3F7350" stroke-width="2"/>
+    <text x="804" y="160" class="ph" fill="#26452F">Engine　·　执行面</text>
+    <text x="804" y="182" class="pd" fill="#3F7350">随 Bot 部署，一个实例只服务它自己那一个 Bot</text>
+
+    <rect x="40" y="206" width="716" height="88" rx="5" fill="#FFFFFF" stroke="#D8D5CF"/>
+    <text x="58" y="232" class="gh">Bot 生命周期</text>
+    <text x="58" y="256" class="gi">创建与编辑 · 库存与清单 · 公开上架 · 休眠与唤醒 · 协作者与编辑锁</text>
+    <text x="58" y="278" class="gi">启动脚本 · 桌面 Bot · 服务型 Bot · 应用授权 · 代他人建 Bot</text>
+
+    <rect x="40" y="308" width="716" height="88" rx="5" fill="#FFFFFF" stroke="#D8D5CF"/>
+    <text x="58" y="334" class="gh">发布与部署</text>
+    <text x="58" y="358" class="gi">配置编排与冻结 · 构建产物 · 发布阶段（草稿 → 验证 → 线上）</text>
+    <text x="58" y="380" class="gi">设备与容器绑定 · 运行时绑定解析 · 引擎运行时中继 · 升级回滚 · 扩缩容</text>
+
+    <rect x="40" y="410" width="716" height="88" rx="5" fill="#FFFFFF" stroke="#D8D5CF"/>
+    <text x="58" y="436" class="gh">能力资产</text>
+    <text x="58" y="460" class="gi">技能池与技能中心 · 本地技能上传与删除 · MCP 市场 · MCP 配置/鉴权/同步</text>
+    <text x="58" y="482" class="gi">资源 · 模型 · 命令行工具 · 市场收藏 · Prompt 诊断与补丁</text>
+
+    <rect x="40" y="512" width="716" height="88" rx="5" fill="#FFFFFF" stroke="#D8D5CF"/>
+    <text x="58" y="538" class="gh">会话与协作</text>
+    <text x="58" y="562" class="gi">单聊 · 群聊 · 专家会话 · 渠道绑定（外部平台） · 事件与通知</text>
+    <text x="58" y="584" class="gi">工单与定向通知 · 人机好友关系</text>
+
+    <rect x="40" y="614" width="716" height="88" rx="5" fill="#FFFFFF" stroke="#D8D5CF"/>
+    <text x="58" y="640" class="gh">调度 · 审批 · 任务</text>
+    <text x="58" y="664" class="gi">定时中继 · 任务队列（落库，跨 Backend 与 worker 重启存活）</text>
+    <text x="58" y="686" class="gi">审批流 · 质量评测与压测</text>
+
+    <rect x="40" y="716" width="716" height="88" rx="5" fill="#FFFFFF" stroke="#D8D5CF"/>
+    <text x="58" y="742" class="gh">租户 · 权限 · 配额 · 治理</text>
+    <text x="58" y="766" class="gi">认证与访问控制 · 调用方身份 · 令牌交换 · 网关主体校验 · 空间</text>
+    <text x="58" y="788" class="gi">配额与负向治理 · 存储用量统计 · 系统配置 · 用户清单</text>
+
+    <rect x="784" y="206" width="716" height="88" rx="5" fill="#FFFFFF" stroke="#D8D5CF"/>
+    <text x="802" y="232" class="gh">会话与对话</text>
+    <text x="802" y="256" class="gi">会话生命周期 · 会话文件 · 会话收藏 · 对话与流式事件</text>
+    <text x="802" y="278" class="gi">附件与工作区文件物化 · 资源引用</text>
+
+    <rect x="784" y="308" width="716" height="88" rx="5" fill="#FFFFFF" stroke="#D8D5CF"/>
+    <text x="802" y="334" class="gh">执行能力</text>
+    <text x="802" y="358" class="gi">命令执行 · Web 终端（Pod 内调试用的 PTY） · 文件读写</text>
+    <text x="802" y="380" class="gi">命令行工具的安装与落盘 · 节点 · 模型调用</text>
+
+    <rect x="784" y="410" width="716" height="88" rx="5" fill="#FFFFFF" stroke="#D8D5CF"/>
+    <text x="802" y="436" class="gh">技能与 MCP</text>
+    <text x="802" y="460" class="gi">技能安装 / 更新 / 清理 / 执行 · MCP 服务接入</text>
+    <text x="802" y="482" class="gi">Backend 下发的资产，在这里真正落到盘上、跑起来</text>
+
+    <rect x="784" y="512" width="716" height="88" rx="5" fill="#FFFFFF" stroke="#D8D5CF"/>
+    <text x="802" y="538" class="gh">自动化</text>
+    <text x="802" y="562" class="gi">定时任务（routines）—— Bot 自己按点醒来干活</text>
+    <text x="802" y="584" class="gi">审批 · 通知</text>
+
+    <rect x="784" y="614" width="716" height="88" rx="5" fill="#E3EDE4" stroke="#3F7350"/>
+    <text x="802" y="640" class="gh" fill="#26452F">引擎接入</text>
+    <text x="802" y="664" class="gi">标准引擎接口 · 每引擎一套适配层（claude_code · openclaw）</text>
+    <text x="802" y="686" class="gi">能力矩阵声明 · 透明中继 · 默认配置</text>
+
+    <rect x="784" y="716" width="716" height="88" rx="5" fill="#FFFFFF" stroke="#D8D5CF"/>
+    <text x="802" y="742" class="gh">入口守卫与自描述</text>
+    <text x="802" y="766" class="gi">鉴权门与内容审核（对话前置） · 传输层 · 数据反向代理</text>
+    <text x="802" y="788" class="gi">能力查询 · 自检</text>
+
+    <rect x="40" y="820" width="716" height="62" rx="5" fill="#F1EFEA" stroke="#D8D5CF"/>
+    <text x="58" y="846" class="gh" fill="#5E5C57">底座</text>
+    <text x="58" y="868" class="gi">对象存储 · 数据库仓储 · 配置 · 日志 · 对外端口</text>
+
+    <rect x="784" y="820" width="716" height="62" rx="5" fill="#F1EFEA" stroke="#D8D5CF"/>
+    <text x="802" y="846" class="gh" fill="#5E5C57">底座</text>
+    <text x="802" y="868" class="gi">工作区根 · 存储 · 配置 · 日志</text>
+
+    <text x="40" y="924" class="lbl">看这张图的方式</text>
+    <text x="40" y="950" class="note">左边每一格，都是「很多个 Bot 共享的一份账」：谁拥有它、它装了什么技能、发到了哪一阶段、还剩多少配额。右边每一格，都是「这一个 Bot 此刻的现场」。</text>
+    <text x="40" y="976" class="note">两边同名的域（技能、MCP、定时、审批、文件）不是重复：左边管的是「应该有什么」，右边管的是「现在真的有什么、正在跑什么」。</text>
+  </g>
+</svg>
