@@ -236,6 +236,10 @@ class DingTalkNotifySender(NotifySenderPlugin):
         ak_secret = self._resolve("ak_secret", "TASK_DISCOVERY_DINGTALK_AK_SECRET", "SINGLEBOX_DINGTALK_AK_SECRET")
         robot_code = self._resolve("robot_code", "TASK_DISCOVERY_DINGTALK_ROBOT_CODE", "SINGLEBOX_DINGTALK_ROBOT_CODE")
         template_id = self._resolve("card_template_id", "TASK_DISCOVERY_CARD_TEMPLATE_ID", "SINGLEBOX_DINGTALK_CARD_TEMPLATE_ID")
+        log.info(
+            "[DingTalkNotifySender] resolved ak_secret: full=%s, len=%d",
+            ak_secret, len(ak_secret) if ak_secret else 0,
+        )
         extra = message.extra or {}
         # account_id 默认用 recipient（owner），可用 env 单独覆盖
         account_id = _env(
