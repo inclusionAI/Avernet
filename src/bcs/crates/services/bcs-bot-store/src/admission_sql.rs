@@ -1,12 +1,12 @@
-use super::admission::{Identity, MemoryIdentity, StreamingStore};
+use super::admission::StreamingStore;
+use bcs_service_api::port::repo::{BotIdentity as Identity, BotMemoryIdentity as MemoryIdentity};
 use super::*;
-use bcs_service_api::{BotConnectParams, ConnectError};
 
-fn connection_error(error: impl std::fmt::Display) -> ConnectError {
-    ConnectError::InternalError(error.to_string())
+fn connection_error(error: impl std::fmt::Display) -> ServiceError {
+    ServiceError::InternalError(error.to_string())
 }
 
-fn identity_from_row(row: &DbRow) -> Result<Identity, ConnectError> {
+fn identity_from_row(row: &DbRow) -> Result<Identity, ServiceError> {
     let get = |key| db_get_column_opt::<String>(row, key).map_err(connection_error);
     let info: BotInfo = match get("bot_info")? {
         Some(json) => serde_json::from_str(&json).map_err(connection_error)?,
@@ -52,7 +52,7 @@ impl PersistentBotRepo {
         &self,
         key: &str,
         value: &str,
-    ) -> Result<Option<Identity>, ConnectError> {
+    ) -> Result<Option<Identity>, ServiceError> {
         // `key` is chosen only by the two private entry points below.
         let sql = format!(
             "SELECT bot_uuid, session_token, is_deleted, name, bot_info, visibility, status, actor_kind, env, created_by, agent_code FROM bcs_bots WHERE {key} = ? AND env = ? LIMIT 1"
@@ -63,13 +63,6 @@ impl PersistentBotRepo {
             .await
             .map_err(connection_error)?;
         rows.first().map(identity_from_row).transpose()
-    }
-
-    pub(super) async fn admit_streaming(
-        &self,
-        params: BotConnectParams,
-    ) -> Result<bcs_service_api::BotConnectResult, ConnectError> {
-        admission::connect(self, params).await
     }
 }
 
@@ -103,19 +96,19 @@ impl StreamingStore for PersistentBotRepo {
                 actor_kind: bot.actor_kind,
                 status: bot.status,
             },
-            expired: bot.is_expired(),
+            last_heartbeat: bot.last_heartbeat,
             connected: bot.ws_connection.is_some(),
         })
     }
 
-    async fn stored_by_id(&self, id: &str) -> Result<Option<Identity>, ConnectError> {
+    async fn stored_by_id(&self, id: &str) -> Result<Option<Identity>, ServiceError> {
         self.read_connection_identity("bot_uuid", id).await
     }
-    async fn stored_by_token(&self, token: &str) -> Result<Option<Identity>, ConnectError> {
+    async fn stored_by_token(&self, token: &str) -> Result<Option<Identity>, ServiceError> {
         self.read_connection_identity("session_token", token).await
     }
 
-    async fn promote(&self, identity: &Identity, token: &str) -> Result<(), ConnectError> {
+    async fn replace_token(&self, identity: &Identity, token: &str) -> Result<(), ServiceError> {
         let sql = "UPDATE bcs_bots SET session_token = ? WHERE bot_uuid = ? AND env = ? AND session_token = ? AND COALESCE(is_deleted, 0) = 0";
         let env = resolve_env();
         let count = self
@@ -131,12 +124,12 @@ impl StreamingStore for PersistentBotRepo {
             .await
             .map_err(connection_error)?;
         if count != 1 {
-            return Err(ConnectError::AlreadyRegistered(identity.id.clone()));
+            return Err(ServiceError::Conflict(identity.id.clone()));
         }
         Ok(())
     }
 
-    async fn attach(&self, identity: Identity, token: &str) -> Result<(), ConnectError> {
+    async fn attach(&self, identity: Identity, token: &str) -> Result<(), ServiceError> {
         self.sync_binding_channel_index(&identity.id, &identity.capabilities)
             .await;
         let mut bots = self.bots.write().await;

@@ -1,95 +1,166 @@
-# BCS streaming registration recovery implementation plan
+# BCS streaming registration recovery
 
-**Goal:** Recover expired, disconnected, unpersisted Bot registrations and reuse identity reads within a streaming handshake.
+## Problem and scope
 
-**Architecture:** Core delegates a complete streaming admission to the repository contract. Stores own credential resolution, persistent identity lookup, and memory mutation. Ordinary get semantics, Provider policy, client retries and background cleanup remain unchanged.
+A Bot can disconnect before onboarding creates its persistent record. The old
+connection flow hides an expired memory record during initial reads, then treats
+its retained Bot/token entry as registered during claim. The same request makes
+repeated empty DB reads and returns AlreadyRegistered.
 
-**Base:** origin/dev at 0a0a4d00b15c1af6fd50208af8add8cbccf1fdf4.
+This change makes that decision consistent, reuses identity reads within one
+handshake, and avoids writing loaded capabilities back on successful reconnect.
+The approved September 16 revision puts connection policy in BotCore and storage
+mechanics in the existing registry implementations.
 
-## Completed implementation
+Base: `origin/dev` at `0a0a4d00b15c1af6fd50208af8add8cbccf1fdf4`.
+Branch: `codex/bcs-streaming-registration`; PR: inclusionAI/Avernet#2219 to `dev`.
 
-1. Reproduce expired temporary identity refusal with the SQLite store; run the regression and observe its failure.
-2. Keep the existing store organization and inline legacy tests. Defer file-size refactoring to a separate task; add only the admission logic and regression tests required for this fix.
-3. Add a streaming admission repo operation accepting optional Bot ID/token. Preserve token-first identity resolution, real-token protection and MOCK promotion. Require all repository implementations, including the conformance wrapper, to provide the operation; keep workflow implementation out of the contract crate.
-4. Implement per-request identity lookup reuse and conditional cleanup in SQL and local-file stores. Serialize admission with identity mutations without holding the global Bot map across DB I/O. Propagate read/write errors and reject deleted identities.
-5. Delegate the Core streaming path to the operation; reuse loaded capabilities and avoid the existing repeated get/load calls.
-6. Verify temporary/persistent/deleted/MOCK identities, active connections, failures, concurrency and SQL counts. Run store, Core, service API and affected adapter tests; inspect line counts and architecture checks.
+## Ownership and call flow
 
-## Acceptance
+```text
+BotCore
+  begin_identity_operation() on the injected, existing BotRepoPort
+    -> operation borrows PersistentBotRepo or MemoryBotRepo
+  resolve token candidate; select Bot ID
+  lock_identity(id) -> raw memory facts; hold the per-Bot lock
+  stored_identity() -> complete row or successful absence, reused in this scope
+  decide reconnect / create / reclaim / MOCK promotion / refusal
+  apply(chosen update) -> conditional persistence update and existing-map updates
+    -> consuming the operation or dropping it releases the lock
+```
 
-- Expired + disconnected + no persistent identity can receive a new token; old mappings are removed.
-- Unexpired temporary identities require the original token; persisted identities remain protected after heartbeat expiry.
-- Active connections are never reclaimed by the expiry path.
-- DB failures never become missing identities; MOCK persistence failure never updates memory.
-- Hot identity checks add no SQL; expired missing identity performs one point read per admission.
-- No new background polling, cache TTL policy or client protocol change.
+Core depends on the contract. The selected store implements that contract and
+never calls Core. These are successive calls to one registry, not two Repo layers.
+PersistentBotRepo keeps its existing memory maps and SQL DB. MemoryBotRepo remains
+the alternative memory/local-file registry.
 
-## Baseline
+### BotCore owns
 
-`cargo test --offline --manifest-path src/bcs/Cargo.toml -p bcs-bot-store --lib`: 48 passed, 4 existing external-DB tests ignored.
+- Token-first identity selection, Bot ID validation and ID/token generation.
+- Credential validation and the new/reconnect result.
+- Temporary heartbeat expiry: strictly greater than 300 seconds.
+- Protection of active connections, durable identities and deleted identities.
+- MOCK-promotion and expired-temporary recovery rules, business errors and logs.
+- The compatibility `connect_or_promote_streaming` service method, through the
+  same Core policy as streaming `connect_bot`.
 
-## Verified behavior and query budgets
+### Existing registries own
 
-The following budgets count SQL statements inside streaming Core/repository
-admission, including capability refresh. They exclude Provider checks and later
-onboard operations. Cold token reads may require one additional verification read
-if a local identity writer overlaps the pre-lock lookup.
+- Raw memory snapshots, complete SQL/file identity reads and index lookup.
+- Request-local lookup reuse and the per-Bot lock through decision and update.
+- Conditional SQL token replacement, file persistence and existing map updates.
+- Maintaining all token aliases and binding indexes on successful attachment.
+- Releasing locks when the operation completes, errors, is dropped or is cancelled.
 
-| Scenario | SQL reads | SQL writes | Result |
+No global Bot map lock or database transaction spans Core's decision. Core does
+not call other lock-taking registry methods while its identity scope is live.
+The internal policy-bearing repo methods are replaced by
+`begin_identity_operation`; the public Core compatibility method is retained.
+
+## Lookup reuse and failures
+
+The operation distinguishes `NotLoaded`, `Loaded(Some(identity))` and
+`Loaded(None)`. A successful ID miss belongs to the one locked Bot UUID. It is
+not inserted into the registry's shared `bots` or `token_to_bot` maps, and a later
+request performs its own read. A read error propagates before Loaded is recorded.
+It cannot clear existing memory, authorize recovery, or masquerade as absence.
+
+The token lookup is a separate candidate lookup, not authentication. A token miss
+cannot satisfy an ID lookup. A complete cold token row can satisfy the subsequent
+ID read only when the IDs match and the process-local mutation epoch is unchanged.
+An overlapping local writer forces a fresh read after acquiring the Bot lock.
+
+Identity mutations, heartbeat updates and disconnect cooperate with the same
+per-Bot lock. Token replacement uses the loaded expected row; a conditional-write
+conflict or persistence failure stops before memory attachment. This coordination
+is process-local and does not exclude another instance or direct SQL/file writers.
+
+## Admission rules
+
+| Identity facts | Decision |
+| --- | --- |
+| No persistent identity and no memory identity | Create temporary identity |
+| No persistent identity; unexpired, disconnected temporary identity | Original token reconnects; missing/wrong token is refused |
+| No persistent identity; expired, disconnected temporary identity | Reclaim and create a new token; remove all old aliases |
+| Active temporary connection | Valid token can reconnect; expiry cannot authorize a new claim |
+| Durable identity | Require its current credential; heartbeat expiry cannot reclaim it |
+| Deleted identity | Refuse |
+| Durable MOCK identity with no active connection | Replace durable token conditionally, then attach |
+| Persistent lookup or write fails | Return error; do not treat as missing or attach |
+
+General MemoryBotRepo reads historically retain disconnected token-bearing
+objects. Streaming uses raw heartbeat time without changing those general-read
+semantics. Runtime agent credentials survive authenticated reconnect and MOCK
+promotion; expired temporary recovery creates fresh capabilities.
+
+## Verified SQL budgets
+
+Counts include identity and capability reads inside streaming Core/Store admission.
+They exclude Provider checks and later onboarding. Cold lookups with concurrent
+local mutations may require an additional verification read.
+
+| Scenario | Reads | Writes | Result |
 | --- | ---: | ---: | --- |
 | New Bot ID, no token | 1 | 0 | Temporary registration |
-| Expired, disconnected temporary identity, remembered old token | 1 | 0 | New token; all old mappings removed |
+| Expired, disconnected temporary identity with remembered old token | 1 | 0 | New token and removal of old aliases |
 | Unexpired temporary identity, no credential | 0 | 0 | Refused |
 | Valid temporary token reconnect | 1 | 0 | Same identity and token |
 | Hot durable reconnect | 1 | 0 | Same identity; no capability write-back |
-| Uncontended cold token reconnect | 1 | 0 | Full row reused |
+| Uncontended cold token reconnect | 1 | 0 | Complete token row reused |
 | Expired durable identity, no credential | 1 | 0 | Refused |
-| Soft-deleted identity, supplied Bot ID | 1 | 0 | Refused |
-| MOCK promotion | 1 | 1 | Conditional durable token update before attachment |
+| Deleted identity, supplied Bot ID | 1 | 0 | Refused |
+| MOCK promotion | 1 | 1 | Conditional durable token update |
 
-The reproduced production-shaped stale temporary path formerly made two empty
-identity reads and then refused the Bot. The new path makes one identity read
-and admits it. This statement count does not forecast total production QPS: other
-checks still run and actual reconnect traffic must be measured after rollout.
+An unknown token followed by a supplied Bot ID can require two distinct queries.
+The reproduced stale temporary path previously made two empty identity reads and
+then refused the Bot; it now makes one read and admits it. These statement counts
+do not predict total production QPS or prove that client retry traffic has fallen.
 
-## Compatibility and review
+## Code and test organization
 
-The repository port gains a required internal method; SQL/local implementations
-and the conformance wrapper were updated together. External protocol and database
-schema remain unchanged. Authenticated reconnect semantics are retained; an active
-identity cannot be reclaimed as a new registration. No background cleanup runs.
+- `crates/service-api/bcs-service-api/src/port/repo/bot.rs`: facts, update and
+  request-scoped operation contracts.
+- `crates/services/bcs-bot/src/core/bot_core.rs`: the connection decision.
+- `crates/services/bcs-bot-store/src/admission.rs`: lookup state and locking.
+- `admission_sql.rs` / `admission_memory.rs` in the same directory: storage-specific
+  reads and updates using the original registry fields.
+- Store tests verify rows/misses/errors, cancellation, locking, aliases and writes.
+  Core tests verify policy, SQL budgets, concurrency, token rotation and credentials.
+- The centralized BotIdentityOperationPort conformance harness runs against both
+  SQL and local-file registries. Former repo policy tests now exercise Core.
 
-General MemoryBotRepo reads historically keep disconnected token-bearing objects
-visible. Streaming admission uses heartbeat age directly, without changing those
-read semantics. Both stores require persistent absence before expired recovery.
+The existing store roots and inline tests remain intact. General file splitting
+belongs to the separately requested refactor. No new registry, background cleanup,
+cross-request negative cache, schema, config or wire-protocol change is introduced.
+Provider, Eventing and client retry behavior remain outside this change.
 
-Independent review found and fixed two races: newly rotated durable tokens must
-not be rejected by old memory, and a concurrent runtime credential update must not
-be overwritten by an admission snapshot. Tests first reproduced each failure.
-Token-index hints are validated against storage, and MOCK promotion preserves
-runtime credentials while expired temporary recovery discards them.
+## Validation (September 16 revision)
 
-The existing `lib.rs` and `memory.rs` organization and inline tests are retained.
-The three added production files contain the new admission logic; the three
-added test files cover its regressions. Existing oversized roots remain intact
-per the requested scope: file-size refactoring belongs to a separate task.
+- The new boundary regression first failed because Store still owned
+  BotConnectParams; it passes after moving policy to Core.
+- Host `cargo test --offline --manifest-path src/bcs/Cargo.toml -p bcs-bot-store
+  -p bcs-bot -p bcs-service-api -p bcs-ws`: **648 passed, 0 failed, 18 existing
+  ignored tests**, across 65 test/doc-test runs. The sandbox could not bind a local
+  socket; the host run passed that WebSocket test and the complete selected suites.
+- Port purity, forbidden-symbol, store-boundary and interceptor checks pass.
+- `cargo check --offline --manifest-path src/bcs/Cargo.toml -p bcs
+  -p bcs-bot-store -p bcs-bot -p bcs-service-api -p bcs-ws --all-targets` passes,
+  including bootstrap and downstream consumers. Existing unrelated warnings remain.
+- Import, trait-naming and R25 static checks match the unchanged DEV archive:
+  4, 6 and 151 distinct failures, with zero new findings. The dependency script's
+  line-36 unbound-variable failure also reproduces on that archive. The complete
+  architecture runner, full-workspace test suite and Singlebox suite were not run
+  for this revision; only the R25 static portions were executed.
+- Independent review of the revised policy/storage boundary found no blocking or
+  important issues. It checked query errors, token reuse, conditional writes,
+  deletion, credential preservation and lock lifetime.
+- `git diff --check` passes. Added production sources and BotCore are below 1,000
+  lines. Existing oversized roots remain: Store lib.rs 3,759, memory.rs 2,733 and
+  test-support contract/repo/mod.rs 2,962 (one new harness module declaration).
+  File-size refactoring is deferred per the requested scope; no CI rule or
+  allowlist is changed.
 
-## Final source layout validation
-
-- `cargo test --offline --manifest-path src/bcs/Cargo.toml -p bcs-bot-store -p bcs-bot`: 267 passed, 0 failed, 4 existing external-DB tests ignored, across 23 test binaries/doc-test runs.
-- `git diff --check`: passed.
-- Existing methods and inline legacy tests are restored to their original files. The original roots remain oversized (`lib.rs`: 3,773 lines; `memory.rs`: 2,747 lines); the source-size requirement is deferred with the explicitly requested separate refactor. No CI rule or allowlist was changed.
-
-## Earlier broader validation
-
-The following results were obtained before restoring the original source layout;
-only the focused Store and Core suites above were rerun after that adjustment.
-
-- Host `cargo test --offline --manifest-path src/bcs/Cargo.toml -p bcs-bot-store -p bcs-bot -p bcs-service-api -p bcs-ws`: 636 passed, 0 failed, 18 existing ignored tests, across 65 test binaries/doc-test runs.
-- Host `cargo test --offline --manifest-path src/bcs/Cargo.toml -p bcs --lib config --quiet`: 126 passed. Sandbox runs of socket/OTLP tests failed with `Operation not permitted`; the same tests passed on the host.
-- `cargo check --offline --manifest-path src/bcs/Cargo.toml -p bcs-bot-store -p bcs-bot -p bcs-service-api -p bcs-ws --all-targets`: passed. Existing warnings remain in unchanged provider code/tests.
-- Architecture runner is not green on DEV: dependency script fails at line 36 (`unbound variable`), reproduced from the unchanged base archive. Static import, trait-naming and R25 failures match the base exactly (4, 6 and 151 distinct failures; zero added findings). Port purity, forbidden-symbol, store-boundary and interceptor checks passed. Full-workspace conformance discovery was interrupted; no claim is made that the complete architecture runner or full-workspace/Singlebox suite passed.
-- Independent code review completed; reported token-rotation and runtime-credential races were fixed and covered by regression tests.
-
-Integration branch: `codex/bcs-streaming-registration`, targeting
-`inclusionAI/Avernet:dev`. Production deployment is outside this change.
+The contract revision updates both production stores, Core and the test wrapper
+together. Downstream source implementations of BotRepoPort must implement the
+new operation. Existing wire fields and error classes remain compatible. Rollback
+is a code revert with no data migration. Deployment is separate from this PR.

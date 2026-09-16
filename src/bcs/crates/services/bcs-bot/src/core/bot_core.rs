@@ -6,10 +6,11 @@ use async_trait::async_trait;
 use bcs_bot_store::MemoryBotRepo;
 use bcs_service_api::lifecycle::{LifecycleError, ServiceLifecycle};
 use bcs_service_api::port::repo::{
-    BotRepoPort, ProviderBotBindingRepoPort, ProviderCredentialRepoPort, ProviderRepoPort,
+    BotIdentity, BotIdentityOperationPort, BotIdentityUpdate, BotRepoPort, ProviderBotBindingRepoPort,
+    ProviderCredentialRepoPort, ProviderRepoPort,
 };
 use bcs_service_api::{
-    ActorStatus, AgentCredentials, BotCapabilities, BotConnectParams, BotConnectResult,
+    is_mock_token, ActorStatus, AgentCredentials, BotCapabilities, BotConnectParams, BotConnectResult,
     BotDeliveryTarget, BotRegistryCoreService, ConnectError,
     ConnectStreamError, ConnectionKind, CoordinationSurface, EnsureHumanResult, RedactedToken,
     RegisteredBot, ServiceError, ServiceResult,
@@ -31,7 +32,150 @@ pub struct BotCore {
     provider_bindings: Option<Arc<dyn ProviderBotBindingRepoPort>>,
 }
 
+const STREAMING_IDENTITY_EXPIRY: std::time::Duration = std::time::Duration::from_secs(300);
+
 impl BotCore {
+    /// Streaming policy stays in Core; the existing registry scope retains facts
+    /// and its per-Bot lock through this short decision and the storage update.
+    async fn connect_streaming(
+        &self,
+        params: BotConnectParams,
+    ) -> Result<BotConnectResult, ConnectError> {
+        Self::connect_streaming_with_operation(self.repo.begin_identity_operation(), params).await
+    }
+
+    async fn connect_streaming_with_operation(
+        mut operation: Box<dyn BotIdentityOperationPort + '_>,
+        params: BotConnectParams,
+    ) -> Result<BotConnectResult, ConnectError> {
+        let token = params.token.as_deref();
+        let token_owner = match token {
+            Some(token) => operation
+                .token_owner(token)
+                .await
+                .map_err(|e| ConnectError::InternalError(e.to_string()))?,
+            None => None,
+        };
+        let id = token_owner
+            .clone()
+            .or(params.bot_id)
+            .unwrap_or_else(new_bot_uuid);
+        if id.is_empty() {
+            return Err(ConnectError::InvalidBotId);
+        }
+        let map_error = |error: ServiceError| match error {
+            ServiceError::Conflict(_) => ConnectError::AlreadyRegistered(id.clone()),
+            error => ConnectError::InternalError(error.to_string()),
+        };
+        let memory = operation.lock_identity(&id).await.map_err(&map_error)?;
+        let owns_current = memory.as_ref().is_some_and(|m| {
+            token.is_some()
+                && m.identity.token.as_deref() == token
+                && !token.is_some_and(is_mock_token)
+        });
+        // A token index entry or token lookup only locates a candidate identity.
+        // It may carry a newly rotated credential while memory still has the old
+        // token. Resolve that candidate against storage before rejecting it.
+        let credential_candidate = token.is_some() && token_owner.is_some();
+        // An authenticated reconnect keeps the existing token. An active connection
+        // must never be reclaimed as a new temporary registration, even if expired.
+        if memory.as_ref().is_some_and(|m| m.connected) && !owns_current && !credential_candidate {
+            return Err(ConnectError::AlreadyConnected(id));
+        }
+        if let Some(current) = memory.as_ref().filter(|m| {
+            m.last_heartbeat.elapsed() <= STREAMING_IDENTITY_EXPIRY && !m.identity.deleted
+        }) {
+            if !owns_current
+                && !credential_candidate
+                && !current.identity.token.as_deref().is_some_and(is_mock_token)
+            {
+                return Err(ConnectError::AlreadyRegistered(id));
+            }
+        }
+        let stored = operation.stored_identity().await.map_err(&map_error)?;
+        let mut replace_persistent_token = false;
+        let (identity, assigned_token, is_new, reason) = match stored {
+            Some(identity) if identity.deleted => {
+                tracing::warn!(bot_id = %id, reason = "deleted_identity", "bot.streaming.rejected");
+                return Err(ConnectError::AlreadyRegistered(id));
+            }
+            Some(mut identity) if identity.token.as_deref().is_some_and(is_mock_token) => {
+                if memory.as_ref().is_some_and(|m| m.connected) {
+                    return Err(ConnectError::AlreadyConnected(id));
+                }
+                if let Some(current) = &memory {
+                    identity.capabilities.agent_token =
+                        current.identity.capabilities.agent_token.clone();
+                }
+                let assigned = new_session_token();
+                replace_persistent_token = true;
+                (identity, assigned, true, "promoted_mock")
+            }
+            Some(mut identity) if token.is_some() && identity.token.as_deref() == token => {
+                if let Some(current) = &memory {
+                    identity.capabilities.agent_token =
+                        current.identity.capabilities.agent_token.clone();
+                }
+                (identity, token.unwrap().to_owned(), false, "reconnected")
+            }
+            Some(_) => return Err(ConnectError::AlreadyRegistered(id)),
+            None if owns_current
+                && memory.as_ref().is_some_and(|m| {
+                    m.last_heartbeat.elapsed() <= STREAMING_IDENTITY_EXPIRY || m.connected
+                }) =>
+            {
+                (
+                    memory.as_ref().unwrap().identity.clone(),
+                    token.unwrap().to_owned(),
+                    false,
+                    "reconnected_temporary",
+                )
+            }
+            None => {
+                if memory.as_ref().is_some_and(|m| m.connected) {
+                    return Err(ConnectError::AlreadyConnected(id));
+                }
+                // A live temporary identity is protected even without persistence.
+                if memory.as_ref().is_some_and(|m| {
+                    m.last_heartbeat.elapsed() <= STREAMING_IDENTITY_EXPIRY || m.identity.deleted
+                }) {
+                    return Err(ConnectError::AlreadyRegistered(id));
+                }
+                let identity = BotIdentity {
+                    id: id.clone(),
+                    token: None,
+                    deleted: false,
+                    capabilities: BotCapabilities::default(),
+                    env: None,
+                    created_by: None,
+                    actor_kind: bcs_service_api::ActorKind::Bot,
+                    status: bcs_service_api::ActorStatus::Online,
+                };
+                let reason = if memory.is_some() {
+                    "reclaimed_expired_temporary"
+                } else {
+                    "created"
+                };
+                (identity, new_session_token(), true, reason)
+            }
+        };
+        operation
+            .apply(BotIdentityUpdate {
+                identity,
+                token: assigned_token.clone(),
+                replace_persistent_token,
+            })
+            .await
+            .map_err(map_error)?;
+        tracing::info!(request_id = %bcs_observability::CurrentRequestId, bot_id = %id, reason,
+            "bot.streaming.admitted");
+        Ok(BotConnectResult {
+            is_new,
+            bot_uuid: id,
+            token: assigned_token,
+        })
+    }
+
     pub fn new() -> Self {
         Self::memory()
     }
@@ -514,7 +658,17 @@ impl BotRegistryCoreService for BotCore {
         &self,
         bot_id: String,
     ) -> Result<String, ConnectStreamError> {
-        self.repo.connect_or_promote_streaming(bot_id).await
+        self.connect_streaming(BotConnectParams {
+            bot_id: Some(bot_id),
+            ..Default::default()
+        })
+        .await
+        .map(|result| result.token)
+        .map_err(|error| match error {
+            ConnectError::AlreadyConnected(id) => ConnectStreamError::AlreadyConnected(id),
+            ConnectError::AlreadyRegistered(id) => ConnectStreamError::AlreadyRegistered(id),
+            other => ConnectStreamError::InternalError(other.to_string()),
+        })
     }
 
     async fn reconnect_streaming(&self, existing_token: String) -> Result<(String, String), ()> {
@@ -693,7 +847,7 @@ impl BotRegistryCoreService for BotCore {
         kind: ConnectionKind,
     ) -> Result<BotConnectResult, ConnectError> {
         if matches!(kind, ConnectionKind::Streaming) {
-            return self.repo.connect_streaming(params).await;
+            return self.connect_streaming(params).await;
         }
         let token_preview = params
             .token
@@ -767,3 +921,7 @@ impl BotRegistryCoreService for BotCore {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/streaming_identity_policy.rs"]
+mod streaming_identity_policy;

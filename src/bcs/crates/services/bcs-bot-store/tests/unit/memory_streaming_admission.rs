@@ -1,34 +1,13 @@
 use super::*;
-use bcs_service_api::{BotConnectParams, ConnectError};
-
-fn params(id: Option<&str>, token: Option<&str>) -> BotConnectParams {
-    BotConnectParams {
-        bot_id: id.map(str::to_owned),
-        token: token.map(str::to_owned),
-        ..Default::default()
-    }
-}
+use bcs_service_api::port::repo::{BotIdentity, BotIdentityUpdate};
 
 #[tokio::test]
-async fn local_temporary_registration_obeys_expiry_and_token_ownership() {
+async fn local_scope_preserves_stale_facts_and_replaces_token_indices() {
     let dir = tempfile::tempdir().unwrap();
     let repo = MemoryBotRepo::with_base_dir(dir.path().into());
-    let first = repo
-        .connect_streaming(params(Some("temporary"), None))
+    repo.register_streaming_connection("temporary".into())
         .await
         .unwrap();
-    repo.disconnect_streaming("temporary").await;
-    assert!(matches!(
-        repo.connect_streaming(params(Some("temporary"), None))
-            .await,
-        Err(ConnectError::AlreadyRegistered(_))
-    ));
-    let same = repo
-        .connect_streaming(params(None, Some(&first.token)))
-        .await
-        .unwrap();
-    assert!(!same.is_new);
-    assert_eq!(same.token, first.token);
     repo.disconnect_streaming("temporary").await;
     repo.bots
         .write()
@@ -36,105 +15,85 @@ async fn local_temporary_registration_obeys_expiry_and_token_ownership() {
         .get_mut("temporary")
         .unwrap()
         .last_heartbeat = Instant::now() - BOT_EXPIRY - Duration::from_secs(1);
-    let replacement = repo
-        .connect_streaming(params(Some("temporary"), Some(&first.token)))
-        .await
-        .unwrap();
-    assert!(replacement.is_new);
-    assert_ne!(replacement.token, first.token);
-    assert!(!repo.token_to_bot.read().await.contains_key(&first.token));
+    let mut op = repo.begin_identity_operation();
+    let memory = op.lock_identity("temporary").await.unwrap().unwrap();
+    assert!(memory.last_heartbeat.elapsed() > BOT_EXPIRY);
+    assert!(!memory.connected);
+    assert!(op.stored_identity().await.unwrap().is_none());
+    assert!(op.stored_identity().await.unwrap().is_none());
+    op.apply(BotIdentityUpdate {
+        identity: memory.identity,
+        token: "replacement".into(),
+        replace_persistent_token: false,
+    })
+    .await
+    .unwrap();
+    assert_eq!(repo.token_to_bot.read().await.len(), 1);
     assert_eq!(
-        repo.find_bot_by_token(&replacement.token).await.as_deref(),
-        Some("temporary")
+        repo.load_token("temporary").await.as_deref(),
+        Some("replacement")
     );
 }
 
 #[tokio::test]
-async fn local_persisted_identity_survives_restart_and_cannot_be_claimed_without_token() {
+async fn local_scope_returns_deleted_facts_instead_of_a_business_rejection() {
     let dir = tempfile::tempdir().unwrap();
     let repo = MemoryBotRepo::with_base_dir(dir.path().into());
     repo.register_with_owner_and_token(
         "saved".into(),
-        BotCapabilities {
-            name: Some("Saved name".into()),
-            ..Default::default()
-        },
-        "owner",
-        "saved-token",
-    )
-    .await
-    .unwrap();
-    let cold = MemoryBotRepo::with_base_dir(dir.path().into());
-    assert!(matches!(
-        cold.connect_streaming(params(Some("saved"), None)).await,
-        Err(ConnectError::AlreadyRegistered(_))
-    ));
-    let result = cold
-        .connect_streaming(params(None, Some("saved-token")))
-        .await
-        .unwrap();
-    assert!(!result.is_new);
-    assert_eq!(
-        cold.get("saved")
-            .await
-            .unwrap()
-            .capabilities
-            .name
-            .as_deref(),
-        Some("Saved name")
-    );
-    assert!(cold.soft_delete("saved").await);
-    assert!(matches!(
-        cold.connect_streaming(params(Some("saved"), Some("saved-token")))
-            .await,
-        Err(ConnectError::AlreadyRegistered(_))
-    ));
-}
-
-#[tokio::test]
-async fn local_mock_promotion_is_durable_and_preserves_hidden_status() {
-    let dir = tempfile::tempdir().unwrap();
-    let repo = MemoryBotRepo::with_base_dir(dir.path().into());
-    repo.register_with_owner_and_token(
-        "mock".into(),
         BotCapabilities::default(),
         "owner",
-        "MOCK_test",
+        "real-token",
     )
     .await
     .unwrap();
-    repo.update_actor_status("mock", bcs_service_api::ActorStatus::Hidden)
-        .await
-        .unwrap();
-    let result = repo
-        .connect_streaming(params(Some("mock"), None))
-        .await
-        .unwrap();
-    assert!(result.is_new);
-    assert!(!bcs_service_api::is_mock_token(&result.token));
-    assert_eq!(
-        repo.bots.read().await["mock"].status,
-        bcs_service_api::ActorStatus::Hidden
-    );
-    let cold = MemoryBotRepo::with_base_dir(dir.path().into());
-    let restored = cold
-        .connect_streaming(params(None, Some(&result.token)))
-        .await
-        .unwrap();
-    assert!(!restored.is_new);
-    assert_eq!(restored.bot_uuid, "mock");
+    assert!(repo.soft_delete("saved").await);
+    let mut op = repo.begin_identity_operation();
+    op.lock_identity("saved").await.unwrap();
+    assert!(op.stored_identity().await.unwrap().unwrap().deleted);
 }
 
 #[tokio::test]
-async fn corrupt_local_identity_never_becomes_a_new_registration() {
+async fn corrupt_file_is_an_error_not_a_memoized_miss() {
     let dir = tempfile::tempdir().unwrap();
     let repo = MemoryBotRepo::with_base_dir(dir.path().into());
     let path = repo.bot_info_path("broken");
     fs::create_dir_all(path.parent().unwrap()).await.unwrap();
-    fs::write(path, "{broken").await.unwrap();
-    assert!(matches!(
-        repo.connect_streaming(params(Some("broken"), None)).await,
-        Err(ConnectError::InternalError(_))
-    ));
+    fs::write(&path, "{broken").await.unwrap();
+    let mut op = repo.begin_identity_operation();
+    op.lock_identity("broken").await.unwrap();
+    assert!(op.stored_identity().await.is_err());
     assert!(repo.bots.read().await.is_empty());
+    fs::remove_file(&path).await.unwrap();
+    assert!(op.stored_identity().await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn local_failed_token_write_preserves_memory() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = MemoryBotRepo::with_base_dir(dir.path().into());
+    repo.register_with_owner_and_token(
+        "saved".into(),
+        BotCapabilities::default(),
+        "owner",
+        "old-token",
+    )
+    .await
+    .unwrap();
+    let mut op = repo.begin_identity_operation();
+    op.lock_identity("saved").await.unwrap();
+    let identity: BotIdentity = op.stored_identity().await.unwrap().unwrap();
+    let path = repo.bot_info_path("saved");
+    fs::remove_file(&path).await.unwrap();
+    fs::create_dir(&path).await.unwrap();
+    assert!(op
+        .apply(BotIdentityUpdate {
+            identity,
+            token: "new-token".into(),
+            replace_persistent_token: true
+        })
+        .await
+        .is_err());
+    assert!(!repo.is_connected("saved").await);
+    assert_eq!(repo.load_token("saved").await.as_deref(), Some("old-token"));
 }

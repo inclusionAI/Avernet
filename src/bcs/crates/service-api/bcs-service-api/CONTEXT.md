@@ -137,8 +137,15 @@ MySQL conformance run.
 
 ## Streaming identity operation
 
-`BotRepoPort::connect_streaming(BotConnectParams)` is a required internal repository
-operation returning `BotConnectResult` or `ConnectError`. Both production stores
-and the test wrapper implement it together; Core is its consumer. The operation
-owns serialized identity admission and distinguishes storage failure from absence.
-Existing Bot wire request/response fields and error classes remain unchanged.
+`BotRepoPort::begin_identity_operation` returns a request-local
+`BotIdentityOperationPort` borrowing the existing registry. Its contract covers
+token-candidate lookup, a locked memory snapshot, persistent rows or successful
+misses, and a consuming update. Storage errors remain errors. DTOs carry identity
+facts, including heartbeat time and deletion state; Core owns authentication,
+expiry, ID/token generation and admission decisions. Neither credentials nor
+lookup scopes are serializable or Debug-printable.
+
+Both production registries implement the operation, and both run its centralized
+conformance harness. The former policy-bearing repo methods are replaced together
+with their callers; the Core compatibility method remains available. Existing
+Bot wire fields and error classes remain unchanged.

@@ -1,15 +1,20 @@
 use super::*;
-use crate::admission::{Identity, MemoryIdentity, StreamingStore};
-use bcs_service_api::{BotConnectParams, BotConnectResult, ConnectError};
+use crate::admission::StreamingStore;
+use bcs_service_api::port::repo::{BotIdentity as Identity, BotMemoryIdentity as MemoryIdentity};
 
-fn connection_error(error: impl std::fmt::Display) -> ConnectError {
-    ConnectError::InternalError(error.to_string())
+fn connection_error(error: impl std::fmt::Display) -> ServiceError {
+    ServiceError::InternalError(error.to_string())
 }
 
 impl MemoryBotRepo {
-    async fn read_connection_file(&self, id: &str) -> Result<Option<Identity>, ConnectError> {
+    async fn read_connection_file(&self, id: &str) -> Result<Option<Identity>, ServiceError> {
         if self.deleted_bot_ids.read().await.contains(id) {
-            return Err(ConnectError::AlreadyRegistered(id.to_owned()));
+            return Ok(Some(Identity {
+                id: id.to_owned(), token: None, deleted: true,
+                capabilities: BotCapabilities::default(), env: Some(resolve_env()),
+                created_by: None, actor_kind: bcs_service_api::ActorKind::Bot,
+                status: bcs_service_api::ActorStatus::Online,
+            }));
         }
         let content = match fs::read_to_string(self.bot_info_path(id)).await {
             Ok(content) => content,
@@ -37,13 +42,6 @@ impl MemoryBotRepo {
                 .unwrap_or(bcs_service_api::ActorStatus::Online),
         }))
     }
-
-    pub(super) async fn admit_streaming(
-        &self,
-        params: BotConnectParams,
-    ) -> Result<BotConnectResult, ConnectError> {
-        crate::admission::connect(self, params).await
-    }
 }
 
 #[async_trait]
@@ -68,15 +66,15 @@ impl StreamingStore for MemoryBotRepo {
                 status: bot.status,
             },
             // General local reads keep disconnected token-bearing entries visible.
-            // Streaming admission uses heartbeat age to decide temporary expiry.
-            expired: bot.last_heartbeat.elapsed() > BOT_EXPIRY,
+            // Core receives the timestamp and owns temporary expiry policy.
+            last_heartbeat: bot.last_heartbeat,
             connected: bot.ws_connection.is_some(),
         })
     }
-    async fn stored_by_id(&self, id: &str) -> Result<Option<Identity>, ConnectError> {
+    async fn stored_by_id(&self, id: &str) -> Result<Option<Identity>, ServiceError> {
         self.read_connection_file(id).await
     }
-    async fn stored_by_token(&self, token: &str) -> Result<Option<Identity>, ConnectError> {
+    async fn stored_by_token(&self, token: &str) -> Result<Option<Identity>, ServiceError> {
         let mut entries = match fs::read_dir(&self.bots_base_dir).await {
             Ok(entries) => entries,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -98,15 +96,15 @@ impl StreamingStore for MemoryBotRepo {
         }
         Ok(None)
     }
-    async fn promote(&self, identity: &Identity, token: &str) -> Result<(), ConnectError> {
+    async fn replace_token(&self, identity: &Identity, token: &str) -> Result<(), ServiceError> {
         // Called with the same identity lock used by persistence writers.
         self.save_token_under_identity_lock(&identity.id, token)
             .await
             .map_err(connection_error)
     }
-    async fn attach(&self, identity: Identity, token: &str) -> Result<(), ConnectError> {
+    async fn attach(&self, identity: Identity, token: &str) -> Result<(), ServiceError> {
         if self.deleted_bot_ids.read().await.contains(&identity.id) {
-            return Err(ConnectError::AlreadyRegistered(identity.id));
+            return Err(ServiceError::Conflict(identity.id));
         }
         self.sync_binding_channel_index(&identity.id, &identity.capabilities)
             .await;

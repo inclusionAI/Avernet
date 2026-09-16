@@ -1,7 +1,9 @@
-//! Shared streaming identity decisions for SQL and local-file repositories.
-use bcs_service_api::{
-    BotCapabilities, BotConnectParams, BotConnectResult, ConnectError, is_mock_token,
+//! Request-local identity reads and serialization for the existing registries.
+use bcs_service_api::port::repo::{
+    BotIdentity as Identity, BotIdentityOperationPort, BotIdentityUpdate,
+    BotMemoryIdentity as MemoryIdentity,
 };
+use bcs_service_api::{ServiceError, ServiceResult};
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 use tokio::sync::{Mutex, OwnedMutexGuard};
@@ -67,164 +69,127 @@ impl IdentityLocks {
     }
 }
 
-// Never derive Debug: the snapshot contains a credential.
-#[derive(Clone)]
-pub(crate) struct Identity {
-    pub id: String,
-    pub token: Option<String>,
-    pub deleted: bool,
-    pub capabilities: BotCapabilities,
-    pub env: Option<String>,
-    pub created_by: Option<String>,
-    pub actor_kind: bcs_service_api::ActorKind,
-    pub status: bcs_service_api::ActorStatus,
-}
-
-pub(crate) struct MemoryIdentity {
-    pub identity: Identity,
-    pub expired: bool,
-    pub connected: bool,
-}
-
 #[async_trait::async_trait]
 pub(crate) trait StreamingStore: Send + Sync {
     fn identity_locks(&self) -> &IdentityLocks;
     async fn memory_token_owner(&self, token: &str) -> Option<String>;
     async fn memory_identity(&self, id: &str) -> Option<MemoryIdentity>;
-    async fn stored_by_id(&self, id: &str) -> Result<Option<Identity>, ConnectError>;
-    async fn stored_by_token(&self, token: &str) -> Result<Option<Identity>, ConnectError>;
-    async fn promote(&self, identity: &Identity, token: &str) -> Result<(), ConnectError>;
-    async fn attach(&self, identity: Identity, token: &str) -> Result<(), ConnectError>;
+    async fn stored_by_id(&self, id: &str) -> ServiceResult<Option<Identity>>;
+    async fn stored_by_token(&self, token: &str) -> ServiceResult<Option<Identity>>;
+    async fn replace_token(&self, identity: &Identity, token: &str) -> ServiceResult<()>;
+    async fn attach(&self, identity: Identity, token: &str) -> ServiceResult<()>;
 }
 
-/// Holds the identity lock across lookup and commit, never the global Bot map.
-/// A database miss is carried as a value and is not queried a second time.
-pub(crate) async fn connect<S: StreamingStore>(
-    store: &S,
-    params: BotConnectParams,
-) -> Result<BotConnectResult, ConnectError> {
-    let token = params.token.as_deref();
-    let memory_owner = match token {
-        Some(token) => store.memory_token_owner(token).await,
-        None => None,
-    };
-    // Token lookup is needed only when memory cannot locate the identity.
-    // Recheck this pre-lock snapshot below: local registration may race it.
-    let lookup_epoch = store.identity_locks().read_epoch();
-    let token_row = if memory_owner.is_none() {
-        match token {
-            Some(token) => store.stored_by_token(token).await?,
-            None => None,
-        }
-    } else {
-        None
-    };
-    let token_owner = memory_owner.or_else(|| token_row.as_ref().map(|r| r.id.clone()));
-    let id = token_owner
-        .clone()
-        .or(params.bot_id)
-        .unwrap_or_else(|| format!("bot_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
-    if id.is_empty() {
-        return Err(ConnectError::InvalidBotId);
-    }
-    let guard = store.identity_locks().lock(&id).await;
-    let memory = store.memory_identity(&id).await;
-    let owns_current = memory.as_ref().is_some_and(|m| {
-        token.is_some() && m.identity.token.as_deref() == token && !token.is_some_and(is_mock_token)
-    });
-    // A token index entry or token lookup only locates a candidate identity.
-    // It may carry a newly rotated credential while memory still has the old
-    // token. Resolve that candidate against storage before rejecting it.
-    let credential_candidate = token.is_some() && token_owner.is_some();
-    // An authenticated reconnect keeps the existing token. An active connection
-    // must never be reclaimed as a new temporary registration, even if expired.
-    if memory.as_ref().is_some_and(|m| m.connected) && !owns_current && !credential_candidate {
-        return Err(ConnectError::AlreadyConnected(id));
-    }
-    if let Some(current) = memory
-        .as_ref()
-        .filter(|m| !m.expired && !m.identity.deleted)
-    {
-        if !owns_current
-            && !credential_candidate
-            && !current.identity.token.as_deref().is_some_and(is_mock_token)
-        {
-            return Err(ConnectError::AlreadyRegistered(id));
-        }
-    }
-    // Reuse a complete token lookup when its local identity epoch is stable.
-    let stored =
-        if token_row.is_some() && lookup_epoch.is_some() && lookup_epoch == guard.preceding_epoch {
-            token_row
-        } else {
-            store.stored_by_id(&id).await?
-        };
-    let (identity, assigned_token, is_new, reason) = match stored {
-        Some(identity) if identity.deleted => {
-            tracing::warn!(bot_id = %id, reason = "deleted_identity", "bot.streaming.rejected");
-            return Err(ConnectError::AlreadyRegistered(id));
-        }
-        Some(mut identity) if identity.token.as_deref().is_some_and(is_mock_token) => {
-            if memory.as_ref().is_some_and(|m| m.connected) {
-                return Err(ConnectError::AlreadyConnected(id));
-            }
-            if let Some(current) = &memory {
-                identity.capabilities.agent_token =
-                    current.identity.capabilities.agent_token.clone();
-            }
-            let assigned = uuid::Uuid::new_v4().to_string();
-            store.promote(&identity, &assigned).await?;
-            (identity, assigned, true, "promoted_mock")
-        }
-        Some(mut identity) if token.is_some() && identity.token.as_deref() == token => {
-            if let Some(current) = &memory {
-                identity.capabilities.agent_token =
-                    current.identity.capabilities.agent_token.clone();
-            }
-            (identity, token.unwrap().to_owned(), false, "reconnected")
-        }
-        Some(_) => return Err(ConnectError::AlreadyRegistered(id)),
-        None if owns_current && memory.as_ref().is_some_and(|m| !m.expired || m.connected) => (
-            memory.as_ref().unwrap().identity.clone(),
-            token.unwrap().to_owned(),
-            false,
-            "reconnected_temporary",
-        ),
-        None => {
-            if memory.as_ref().is_some_and(|m| m.connected) {
-                return Err(ConnectError::AlreadyConnected(id));
-            }
-            // A live temporary identity is protected even without persistence.
-            if memory
-                .as_ref()
-                .is_some_and(|m| !m.expired || m.identity.deleted)
-            {
-                return Err(ConnectError::AlreadyRegistered(id));
-            }
-            let identity = Identity {
-                id: id.clone(),
-                token: None,
-                deleted: false,
-                capabilities: BotCapabilities::default(),
-                env: None,
-                created_by: None,
-                actor_kind: bcs_service_api::ActorKind::Bot,
-                status: bcs_service_api::ActorStatus::Online,
-            };
-            let reason = if memory.is_some() {
-                "reclaimed_expired_temporary"
-            } else {
-                "created"
-            };
-            (identity, uuid::Uuid::new_v4().to_string(), true, reason)
-        }
-    };
-    store.attach(identity, &assigned_token).await?;
-    tracing::info!(request_id = %bcs_observability::CurrentRequestId, bot_id = %id, reason,
-        "bot.streaming.admitted");
-    Ok(BotConnectResult {
-        is_new,
-        bot_uuid: id,
-        token: assigned_token,
+enum Lookup {
+    NotLoaded,
+    Loaded(Option<Identity>), // None is a successful miss, never a read error.
+}
+
+struct IdentityOperation<'a, S: StreamingStore> {
+    store: &'a S,
+    token_lookup: Option<(String, Option<String>, Option<Identity>)>,
+    lookup_epoch: Option<u64>,
+    locked: Option<(String, IdentityGuard)>,
+    stored: Lookup,
+}
+
+pub(crate) fn begin<S: StreamingStore>(store: &S) -> Box<dyn BotIdentityOperationPort + '_> {
+    Box::new(IdentityOperation {
+        store,
+        token_lookup: None,
+        lookup_epoch: None,
+        locked: None,
+        stored: Lookup::NotLoaded,
     })
+}
+
+fn invalid_scope(message: &str) -> ServiceError {
+    ServiceError::InternalError(message.to_owned())
+}
+
+#[async_trait::async_trait]
+impl<S: StreamingStore> BotIdentityOperationPort for IdentityOperation<'_, S> {
+    async fn token_owner(&mut self, token: &str) -> ServiceResult<Option<String>> {
+        if self.locked.is_some() {
+            return Err(invalid_scope("token lookup must precede identity locking"));
+        }
+        if let Some((key, owner, _)) = &self.token_lookup {
+            if key == token {
+                return Ok(owner.clone());
+            }
+            return Err(invalid_scope("an identity operation resolves one token"));
+        }
+        let memory_owner = self.store.memory_token_owner(token).await;
+        self.lookup_epoch = self.store.identity_locks().read_epoch();
+        let row = if memory_owner.is_none() {
+            self.store.stored_by_token(token).await?
+        } else {
+            None
+        };
+        let owner = memory_owner.or_else(|| row.as_ref().map(|r| r.id.clone()));
+        self.token_lookup = Some((token.to_owned(), owner.clone(), row));
+        Ok(owner)
+    }
+
+    async fn lock_identity(&mut self, id: &str) -> ServiceResult<Option<MemoryIdentity>> {
+        if self.locked.is_some() {
+            return Err(invalid_scope("an identity operation locks one Bot once"));
+        }
+        let guard = self.store.identity_locks().lock(id).await;
+        let memory = self.store.memory_identity(id).await;
+        self.locked = Some((id.to_owned(), guard));
+        Ok(memory)
+    }
+
+    async fn stored_identity(&mut self) -> ServiceResult<Option<Identity>> {
+        if let Lookup::Loaded(row) = &self.stored {
+            return Ok(row.clone());
+        }
+        let (id, guard) = self
+            .locked
+            .as_ref()
+            .ok_or_else(|| invalid_scope("persistent read requires the identity lock"))?;
+        let reusable = self
+            .token_lookup
+            .as_ref()
+            .and_then(|(_, _, row)| row.as_ref())
+            .filter(|row| {
+                row.id == *id
+                    && self.lookup_epoch.is_some()
+                    && self.lookup_epoch == guard.preceding_epoch
+            });
+        let row = match reusable {
+            Some(row) => Some(row.clone()),
+            None => self.store.stored_by_id(id).await?,
+        };
+        self.stored = Lookup::Loaded(row.clone());
+        Ok(row)
+    }
+
+    async fn apply(self: Box<Self>, update: BotIdentityUpdate) -> ServiceResult<()> {
+        let (id, _) = self
+            .locked
+            .as_ref()
+            .ok_or_else(|| invalid_scope("identity update requires the identity lock"))?;
+        if update.identity.id != *id {
+            return Err(invalid_scope(
+                "identity update does not match the locked Bot",
+            ));
+        }
+        let loaded = match &self.stored {
+            Lookup::NotLoaded => {
+                return Err(invalid_scope(
+                    "identity update requires a successful persistent read",
+                ))
+            }
+            Lookup::Loaded(row) => row,
+        };
+        if update.replace_persistent_token {
+            let expected = loaded.as_ref().ok_or_else(|| {
+                invalid_scope("token replacement requires a loaded persistent row")
+            })?;
+            self.store.replace_token(expected, &update.token).await?;
+        }
+        self.store.attach(update.identity, &update.token).await
+    }
 }

@@ -5,6 +5,9 @@
 - Shared contract-test harnesses for BCS service and plugin boundaries.
 - Reusable fixtures and helpers for local conformance testing.
 - A single place to host boundary-level test utilities reused across crates.
+- `bot_identity_operation_port_contract_tests` verifies scoped registry reads,
+  successful absence, temporary attachment, conditional token replacement and
+  deletion facts against both SQL and local-file implementations.
 - Request-scoped JSON log capture for checking failure diagnostics and correlation,
   enabled only through the consuming crate's dev-dependency `diagnostic-logs` feature.
 

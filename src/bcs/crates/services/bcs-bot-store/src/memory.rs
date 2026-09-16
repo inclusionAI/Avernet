@@ -22,7 +22,7 @@ use bcs_service_api::{
     BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
     BotTaskModesQuery, TaskModeMatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotMetricCount,
-    BotMetricsSnapshotPort, ConnectStreamError, FriendCheckInStrategy, RegisteredBot, ServiceError,
+    BotMetricsSnapshotPort, FriendCheckInStrategy, RegisteredBot, ServiceError,
     ServiceResult, Skill, UserVisibility,
 };
 
@@ -452,10 +452,8 @@ impl BotMetricsSnapshotPort for MemoryBotRepo {
 
 #[async_trait]
 impl BotRepoPort for MemoryBotRepo {
-    async fn connect_streaming(&self, params: bcs_service_api::BotConnectParams)
-        -> Result<bcs_service_api::BotConnectResult, bcs_service_api::ConnectError>
-    {
-        self.admit_streaming(params).await
+    fn begin_identity_operation(&self) -> Box<dyn bcs_service_api::port::repo::BotIdentityOperationPort + '_> {
+        crate::admission::begin(self)
     }
 
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
@@ -1414,18 +1412,6 @@ impl BotRepoPort for MemoryBotRepo {
     }
 
     // ===== Streaming Connection Management =====
-
-    async fn connect_or_promote_streaming(
-        &self,
-        bot_id: String,
-    ) -> Result<String, ConnectStreamError> {
-        self.admit_streaming(bcs_service_api::BotConnectParams { bot_id: Some(bot_id), ..Default::default() })
-            .await.map(|result| result.token).map_err(|error| match error {
-                bcs_service_api::ConnectError::AlreadyConnected(id) => ConnectStreamError::AlreadyConnected(id),
-                bcs_service_api::ConnectError::AlreadyRegistered(id) => ConnectStreamError::AlreadyRegistered(id),
-                other => ConnectStreamError::InternalError(other.to_string()),
-            })
-    }
 
     async fn register_streaming_connection(&self, bot_id: String) -> Result<String, ()> {
         let _identity = self.identity_locks.lock(&bot_id).await;

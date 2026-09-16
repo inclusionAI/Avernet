@@ -32,7 +32,7 @@ use bcs_service_api::{
     BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotTaskModesQuery, TaskModeMatch,
     BotMetricCount,
-    BotMetricsSnapshotPort, ConnectStreamError, RegisteredBot, ServiceError, ServiceResult, Skill,
+    BotMetricsSnapshotPort, RegisteredBot, ServiceError, ServiceResult, Skill,
 };
 
 fn log_bot_cache_source(source: &'static str) {
@@ -1141,10 +1141,8 @@ impl BotMetricsSnapshotPort for PersistentBotRepo {
 
 #[async_trait]
 impl BotRepoPort for PersistentBotRepo {
-    async fn connect_streaming(&self, params: bcs_service_api::BotConnectParams)
-        -> Result<bcs_service_api::BotConnectResult, bcs_service_api::ConnectError>
-    {
-        self.admit_streaming(params).await
+    fn begin_identity_operation(&self) -> Box<dyn bcs_service_api::port::repo::BotIdentityOperationPort + '_> {
+        admission::begin(self)
     }
 
     // ===== Registration & Discovery =====
@@ -2368,18 +2366,6 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     // ===== Streaming Connection Management =====
-
-    async fn connect_or_promote_streaming(
-        &self,
-        bot_id: String,
-    ) -> Result<String, ConnectStreamError> {
-        self.admit_streaming(bcs_service_api::BotConnectParams { bot_id: Some(bot_id), ..Default::default() })
-            .await.map(|result| result.token).map_err(|error| match error {
-                bcs_service_api::ConnectError::AlreadyConnected(id) => ConnectStreamError::AlreadyConnected(id),
-                bcs_service_api::ConnectError::AlreadyRegistered(id) => ConnectStreamError::AlreadyRegistered(id),
-                other => ConnectStreamError::InternalError(other.to_string()),
-            })
-    }
 
     async fn register_streaming_connection(&self, bot_id: String) -> Result<String, ()> {
         let _identity = self.identity_locks.lock(&bot_id).await;
