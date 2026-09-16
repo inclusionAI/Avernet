@@ -18,19 +18,16 @@ class ExpertChatInstanceServiceProtocol(Protocol):
     async def get_application_caller_connection(
         self,
         *,
-        app_id: int,
-        tenant: str,
         user_id: str,
         bot_id: str,
         owner_id: str,
         force_upgrade: bool = False,
     ) -> Dict[str, Any]:
-        """Allow any verified application to operate an existing caller instance.
+        """Allow authenticated BaaS to operate an existing caller instance.
 
-        ``app_id`` and ``tenant`` must come from a verified application identity.
-        The active tenant must match before any repository access. Require a
-        Bot in that tenant. No grant or owner/public/member access is required:
-        an application may target another user's instance even on a private Bot.
+        The HTTP caller must authenticate BaaS and establish the server default
+        tenant before repository access. Require a Bot in that tenant. No grant or owner/public/member access is required:
+        BaaS may target another user's instance even on a private Bot.
         Only an existing instance with a nonempty bot UUID may enter the usual
         lifecycle, including force-upgrade and polling. No admin privilege or
         first-time provisioning is granted. Raise ChatPermissionError on denial;

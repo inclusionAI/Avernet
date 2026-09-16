@@ -2134,8 +2134,8 @@ class TestGetAuthorizedCallerConnection:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("app_id", [7, 8])
-async def test_any_application_can_access_private_nonmember_caller_without_grant(app_id):
+@pytest.mark.parametrize("force_upgrade", [False, True])
+async def test_baas_can_access_private_nonmember_caller_without_grant(force_upgrade):
     from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
     svc = _make_service()[0]
     svc._app_grants = MagicMock()
@@ -2146,34 +2146,31 @@ async def test_any_application_can_access_private_nonmember_caller_without_grant
     svc._instance_repo.get_instance.return_value = {"ext": {"bot_uuid": BOT_UUID}}
     svc.get_caller_connection = AsyncMock(return_value={"need_poll": True})
     with avernet_tenant_scope("acme"):
-        assert await svc.get_application_caller_connection(app_id=app_id, tenant="acme", user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID, force_upgrade=True) == {"need_poll": True}
-    svc.get_caller_connection.assert_awaited_once_with(user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID, force_upgrade=True)
+        assert await svc.get_application_caller_connection(user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID, force_upgrade=force_upgrade) == {"need_poll": True}
+    svc.get_caller_connection.assert_awaited_once_with(user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID, force_upgrade=force_upgrade)
     svc._app_grants.find.assert_not_called()
     svc._collaborator_service.check_collaborator_permission.assert_not_called()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["missing_bot", "tenant_mismatch"])
-async def test_application_rejects_missing_bot_or_tenant_mismatch(mode):
-    from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
+async def test_application_rejects_missing_bot():
     svc = _make_service()[0]
-    svc._bot_repo.get_by_id_and_owner.return_value = None if mode == "missing_bot" else {"bot_id": BOT_ID}
+    svc._bot_repo.get_by_id_and_owner.return_value = None
     svc.get_caller_connection = AsyncMock()
-    with avernet_tenant_scope("acme"), pytest.raises(ChatPermissionError):
-        await svc.get_application_caller_connection(app_id=7, tenant="other" if mode == "tenant_mismatch" else "acme", user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID)
+    with pytest.raises(ChatPermissionError):
+        await svc.get_application_caller_connection(user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID)
     svc.get_caller_connection.assert_not_called()
     svc._instance_repo.get_instance.assert_not_called()
-    if mode == "tenant_mismatch":
-        svc._bot_repo.get_by_id_and_owner.assert_not_called()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("instance", [None, {"ext": None}, {"ext": []}, {"ext": {}}, {"ext": {"bot_uuid": ""}}, {"ext": {"bot_uuid": " "}}])
-async def test_application_cannot_create_first_instance(instance):
+@pytest.mark.parametrize("force_upgrade", [False, True])
+@pytest.mark.parametrize("instance", [None, {"ext": None}, {"ext": []}, {"ext": {}}, {"ext": {"bot_uuid": None}}, {"ext": {"bot_uuid": 1}}, {"ext": {"bot_uuid": ""}}, {"ext": {"bot_uuid": " "}}])
+async def test_application_cannot_create_first_instance(instance, force_upgrade):
     from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
     svc = _make_service()[0]
     svc._instance_repo.get_instance.return_value = instance
     svc.get_caller_connection = AsyncMock()
     with avernet_tenant_scope("acme"), pytest.raises(ChatPermissionError):
-        await svc.get_application_caller_connection(app_id=7, tenant="acme", user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID)
+        await svc.get_application_caller_connection(user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID, force_upgrade=force_upgrade)
     svc.get_caller_connection.assert_not_called()

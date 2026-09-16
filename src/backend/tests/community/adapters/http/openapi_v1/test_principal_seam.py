@@ -598,3 +598,10 @@ def test_an_app_only_caller_still_scopes_to_its_own_tenant(client):
     )
 
     assert response.status_code == 200
+
+
+def test_baas_issuer_is_not_an_openapi_identity(client):
+    response = client.get(
+        "/openapi/v1/bots/_probe", headers={PRINCIPAL_HEADER: mint(issuer="baas")}
+    )
+    assert response.status_code == 401
