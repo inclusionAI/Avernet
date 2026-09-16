@@ -31,6 +31,10 @@ Changing a Plugin Protocol signature breaks every local + prod impl + the contra
 from application-level and proxy 404 responses. Skill logical delivery uses that
 structured fact only together with a same-target `/health` Engine match before
 selecting an older write protocol; other errors retain unknown-result semantics.
+Its multipart operation carries one replayable in-memory package plus logical
+form fields and optional provider headers. Standard Local Skill package apply and
+Teclaw's provider wire share this transport without exposing HTTP or physical
+paths to the Skill Center domain service.
 
 `ImmutableObjectStorageCapability` is an optional structural capability beside
 `ObjectStoragePlugin`, rather than a breaking expansion of its corp-facing

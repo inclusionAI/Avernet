@@ -14,9 +14,14 @@ item.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from agentclaw.community.core.cron.services.cron_relay import CronRelayService
+from agentclaw.community.core.skill_center.services.local_skill_package_runtime import (
+    LocalSkillPackageRuntime,
+)
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTransport,
 )
@@ -94,3 +99,27 @@ async def test_transport_streams_registered_materialized_content(world) -> None:
     assert response.headers["content-disposition"] == 'attachment; filename="ready.txt"'
     assert b"".join([chunk async for chunk in response.body]) == b"ready bytes"
     await response.close()
+
+
+@pytest.mark.asyncio
+async def test_local_package_consumer_runs_over_multipart_transport(world) -> None:
+    transport = world.get(DeviceAdapterTransport)
+    assert isinstance(transport, InMemoryDeviceAdapterTransport)
+    resolver = SimpleNamespace(
+        resolve_for_bot=lambda bot_id, owner_id: SimpleNamespace(
+            provider="local",
+            conn_info={"engine": "openclaw", "bot_id": bot_id, "owner_id": owner_id},
+        )
+    )
+
+    result = await LocalSkillPackageRuntime(resolver, transport).apply(
+        bot_id="bot-package",
+        owner_id="owner-package",
+        skill_name="weather",
+        layout="LEGACY",
+        package=b"canonical-package",
+    )
+
+    assert result is not None
+    assert result.skill_name == "weather"
+    assert result.content_digest.startswith("sha256:")
