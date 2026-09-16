@@ -8,9 +8,9 @@ Allowed additions: request/contract types, a thin endpoint in each existing rout
 
 ## Implementation
 
-- Backend `/api/service-bot/publish/ops/publish-ignore` accepts Bot ID, entity ID, positive version, verify/online stage, add/remove operation and one literal path.
+- Backend `/api/service-bot/publish/ops/publish-ignore` accepts Bot ID, entity ID, draft/verify/online stage, add/remove operation and one literal path. Version selection has been removed; see the current 001 spec for the revised contract.
 - Existing collaborator authorization remains the single source for Bot management permissions; platform administrators bypass that per-Bot restriction, but anonymous requests never do. Entity ID is only a lookup constraint. Authorization precedes device enumeration.
-- Publication lookup uses the exact source Bot primary key and current environment, requires one matching version, and uses only the requested stage binding. No latest-version or draft fallback.
+- Binding selection reuses RuntimeBindingResolutionService.resolve with CALLER_SERVICE; draft uses the Bot binding and published stages use the shared current-stage rules. Connections reuse DeviceContextResolver.resolve_for_binding_invoke with pinned BaaS replica UUIDs.
 - BaaS calls pin `device_uuid`; ARCA calls use the selected binding's trusted connection URL/headers and never call BaaS enumeration. Per-target results retain partial failures and unknown delivery outcomes. A second snapshot detects observed target changes; it cannot promise membership never changed between snapshots.
 - Backend signs each per-target payload with Ed25519. Only Backend receives the private PEM key; Engine receives the public PEM key. The signature covers target identity, operation, path, request ID and timestamp.
 - Engine checks the signature and time window, reloads managed runtime identity, takes a bounded fixed sibling lock, and atomically updates the fixed ignore file. A persistent, bounded request journal prevents repeated signed requests from restoring a subsequently removed rule. Failed operations are retried through Backend with a fresh request ID.

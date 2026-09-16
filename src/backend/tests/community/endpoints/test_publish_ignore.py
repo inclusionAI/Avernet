@@ -17,7 +17,6 @@ _INPUT = CaseInput(
     json_body={
         "bot_id": "ignore-bot",
         "entity_id": "ignore_owner",
-        "version": 3,
         "stage": "online",
         "operation": "add",
         "path": "workspace/cache",
@@ -58,7 +57,7 @@ def publish_ignore_engine_rejected():
     input=CaseInput(
         headers={"x-user-id": "ignore_owner"},
         json_body={
-            "bot_id": "ignore-bot", "entity_id": "ignore_owner", "version": 3,
+            "bot_id": "ignore-bot", "entity_id": "ignore_owner",
             "stage": "draft", "operation": "add", "path": "workspace/cache",
         },
     ),

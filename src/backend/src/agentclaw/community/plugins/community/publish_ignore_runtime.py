@@ -68,7 +68,7 @@ class HttpPublishIgnoreRuntime:
             payload = {
                 "expected_target": {
                     k: getattr(command, k)
-                    for k in ("bot_id", "entity_id", "version", "stage")
+                    for k in ("bot_id", "entity_id", "stage")
                 },
                 "operation": command.operation,
                 "path": command.path,
@@ -87,23 +87,16 @@ class HttpPublishIgnoreRuntime:
                 raise PublishIgnoreError("invalid_management_signing_key")
             signature = base64.b64encode(key.sign(encoded.encode())).decode("ascii")
             payload["authorization"] = {"timestamp": timestamp, "signature": signature}
+            ctx = await asyncio.to_thread(
+                self.resolver.resolve_for_binding_invoke,
+                binding.id, operator_id, bot_id=command.bot_id,
+                device_uuid=target if binding.device_provider == "baas" else None,
+            )
             if binding.device_provider == "baas":
-                conn = {
-                    "binding_id": binding.id,
-                    "engine_port": 20003,
-                    "device_uuid": target,
-                    "device_affinity": operator_id,
-                }
                 response = await self.transport.invoke(
-                    conn, "POST", ENDPOINT, body=payload, timeout=30
+                    ctx.conn_info, "POST", ENDPOINT, body=payload, timeout=30
                 )
             else:
-                ctx = await asyncio.to_thread(
-                    self.resolver.resolve_for_binding,
-                    binding.id,
-                    operator_id,
-                    bot_id=command.bot_id,
-                )
                 # COSEC: URL and credentials come only from the trusted binding resolver.
                 url = ctx.conn_info["url"].rstrip("/") + ENDPOINT
                 raw = await asyncio.to_thread(

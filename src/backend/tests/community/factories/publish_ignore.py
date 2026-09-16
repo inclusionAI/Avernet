@@ -39,6 +39,13 @@ def seed_publish_ignore(world, *, engine_success=True, stage="online"):
         apply_reason="test",
         applied_by="ignore_owner",
     )
+    draft_binding_id = binding_id
+    if stage != "draft":
+        draft_binding_id = world.get(DeviceBindingRepository).insert_binding(
+            entity_id="ignore_owner", entity_type="staff", device_id="draft-runtime",
+            device_provider="baas", env="dev", device_props={}, status="ACTIVE",
+            apply_reason="test", applied_by="ignore_owner",
+        )
     bot = world.get(BotRepository).insert(
         {
             "bot_id": "ignore-bot",
@@ -50,24 +57,25 @@ def seed_publish_ignore(world, *, engine_success=True, stage="online"):
             "entity_id": "ignore_owner",
             "entity_type": "staff",
             "creator_id": "ignore_owner",
-            "binding_id": None if stage == "draft" else binding_id,
+            "binding_id": draft_binding_id,
             "device_id": "ignore-runtime",
         }
     )
-    world.get(BotPublishRepositoryProtocol).insert(
-        {
-            "source_bot_pk": bot["id"],
-            "source_bot_id": "ignore-bot",
-            "publish_bot_id": "ignore-botpub3",
-            "name": "Ignore Bot",
-            "owner_id": "ignore_owner",
-            "permission_owner": "ignore_owner",
-            "status": "draft" if stage == "draft" else "success",
-            "version": 3,
-            "env": "dev",
-            "ext": {} if stage == "draft" else {"binding": {stage: binding_id}},
-        }
-    )
+    if stage != "draft":
+        world.get(BotPublishRepositoryProtocol).insert(
+            {
+                "source_bot_pk": bot["id"],
+                "source_bot_id": "ignore-bot",
+                "publish_bot_id": "ignore-botpub3",
+                "name": "Ignore Bot",
+                "owner_id": "ignore_owner",
+                "permission_owner": "ignore_owner",
+                "status": "validating" if stage == "verify" else "success",
+                "version": 3,
+                "env": "dev",
+                "ext": {"binding": {stage: binding_id}},
+            }
+        )
     world.get(Annotated[HttpClient, QUALIFIER_BAAS]).set_response(
         "get",
         http_envelope_response(data=[{"items": [{"uuid": "replica-a"}]}]),
@@ -95,6 +103,7 @@ def assert_ignore_engine_called(response, world):
     calls = world.get(DeviceAdapterTransport).calls_to("invoke")
     assert len(calls) == 1
     assert calls[0].args[0]["device_uuid"] == "replica-a"
+    assert calls[0].args[0]["bot_uuid"] == "ignore-runtime"
     assert calls[0].args[2] == "/api/bot/publish-ignore"
-    assert calls[0].kwargs["body"]["expected_target"]["version"] == 3
+    assert "version" not in calls[0].kwargs["body"]["expected_target"]
     assert len(calls[0].kwargs["body"]["authorization"]["signature"]) == 88

@@ -7,6 +7,8 @@ iteration: 2
 
 # Code review: publish-ignore operations
 
+Historical review of iteration 2, not an approval of subsequent contract changes. The current 001 spec removes version selection and delegates binding/connection resolution to shared services; current-head validation is recorded in the local 009 report and PR checks.
+
 ## Scope
 
 - Branch: `feat/service-bot-publish-ignore-ops-rel20260917`.

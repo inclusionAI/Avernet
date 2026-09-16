@@ -60,17 +60,13 @@ def normalize_path(value: str) -> str:
 
 
 def verify_identity(target: ExpectedTarget) -> None:
-    """Reload workspace identity; released stages also require the exact version."""
+    """Reload the Bot/entity/stage identity of the selected runtime."""
     service = get_credentials_service()
     service.reload()
     creds = service.get_all()
-    version = creds.version or ""
-    version = version[1:] if version.startswith("V") else version
-    # COSEC: draft is an unversioned workspace; Backend validates its draft row.
-    # All stages require actual bot/entity/stage, with no request/env fallback.
-    version_mismatch = target.stage != "draft" and version != str(target.version)
+    # COSEC: require actual bot/entity/stage, with no request/env fallback.
     if (creds.bot_id != target.bot_id or creds.entity_id != target.entity_id
-            or creds.stage != target.stage or version_mismatch):
+            or creds.stage != target.stage):
         raise PublishIgnoreError(409, "RUNTIME_IDENTITY_MISMATCH")
 
 

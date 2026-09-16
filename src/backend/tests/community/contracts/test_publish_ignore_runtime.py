@@ -20,7 +20,7 @@ async def test_composition_and_anonymous_denial(world):
     assert isinstance(service, PublishIgnoreService)
     assert isinstance(service.runtime, HttpPublishIgnoreRuntime)
     command = PublishIgnoreCommand(
-        "missing", "entity", 3, "online", "add", "cache", "request"
+        "missing", "entity", "online", "add", "cache", "request"
     )
     with pytest.raises(PublishIgnoreError, match="permission_denied"):
         await service.change(command, "anonymous", is_admin=True)
@@ -28,7 +28,7 @@ async def test_composition_and_anonymous_denial(world):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("engine_success", [True, False])
-@pytest.mark.parametrize("stage", ["draft", "online"])
+@pytest.mark.parametrize("stage", ["draft", "verify", "online"])
 async def test_consumer_calls_signed_pinned_runtime(world, engine_success, stage):
     from tests.community.factories.publish_ignore import (
         seed_publish_ignore,
@@ -38,7 +38,7 @@ async def test_consumer_calls_signed_pinned_runtime(world, engine_success, stage
     seed_publish_ignore(world, engine_success=engine_success, stage=stage)
     service = world.get(PublishIgnoreServiceProtocol)
     command = PublishIgnoreCommand(
-        "ignore-bot", "ignore_owner", 3, stage, "add", "cache", "contract"
+        "ignore-bot", "ignore_owner", stage, "add", "cache", "contract"
     )
     result = await service.change(command, "ignore_owner", is_admin=False)
     assert result["success"] is engine_success

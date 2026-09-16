@@ -37,7 +37,7 @@ def setup(tmp_path, monkeypatch):
 
 
 def payload(secret, path="workspace/cache", operation="add", stage="online"):
-    data = {"expected_target": {"bot_id": "bot", "entity_id": "entity", "version": 3, "stage": stage},
+    data = {"expected_target": {"bot_id": "bot", "entity_id": "entity", "stage": stage},
             "operation": operation, "path": path, "request_id": str(uuid.uuid4())}
     timestamp = int(time.time())
     encoded = json.dumps({**data, "timestamp": timestamp}, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
@@ -66,11 +66,11 @@ def test_all_stages_require_real_workspace_identity(setup, stage, field, value):
 
 @pytest.mark.parametrize("stage", ["verify", "online"])
 @pytest.mark.parametrize("version", ["", "V1"])
-def test_release_stages_still_require_exact_version(setup, stage, version):
+def test_release_stages_do_not_require_version(setup, stage, version):
     client, signing_key, credentials = setup
     credentials.write_text(f"BOT_ID=bot\nENTITY_ID=entity\nSTAGE={stage}\nVERSION={version}\n")
-    assert client.post("/api/bot/publish-ignore", json=payload(signing_key, stage=stage)).status_code == 409
-    assert not service.IGNORE_FILE.exists()
+    assert client.post("/api/bot/publish-ignore", json=payload(signing_key, stage=stage)).status_code == 200
+    assert service.IGNORE_FILE.read_text() == "workspace/cache\n"
 
 
 def test_add_remove_preserves_comments_and_crlf(setup):
@@ -129,7 +129,7 @@ def test_authentication_and_logs(setup, caplog, monkeypatch):
 
 def test_identity_mismatch(setup):
     client, secret, credentials = setup
-    credentials.write_text("BOT_ID=bot\nENTITY_ID=entity\nVERSION=4\nSTAGE=online\n")
+    credentials.write_text("BOT_ID=other\nENTITY_ID=entity\nSTAGE=online\n")
     assert client.post("/api/bot/publish-ignore", json=payload(secret)).status_code == 409
     assert not service.IGNORE_FILE.exists()
 

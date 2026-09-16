@@ -203,9 +203,10 @@ class ServiceBotModule(Module):
     def publish_ignore_service(self, injector: Injector) -> PublishIgnoreServiceProtocol:
         from agentclaw.community.core.bot_collaborator.collaborator_service_protocol import CollaboratorServiceProtocol
         from agentclaw.community.core.service_bot.services.publish_ignore_service import PublishIgnoreService
+        from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
 
         return PublishIgnoreService(
-            injector.get(BotRepository), injector.get(BotPublishRepositoryProtocol),
+            injector.get(BotRepository), injector.get(RuntimeBindingResolutionService),
             injector.get(DeviceBindingRepository), injector.get(CollaboratorServiceProtocol),
             injector.get(PublishIgnoreRuntime), env_utils.get_current_env(),
         )

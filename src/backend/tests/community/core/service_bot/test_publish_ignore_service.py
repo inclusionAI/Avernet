@@ -12,14 +12,15 @@ from agentclaw.community.core.service_bot.services.publish_ignore_service import
     PublishIgnoreService,
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
 
 
 @pytest.fixture
 def setup():
     command = PublishIgnoreCommand(
-        "bot", "entity", 3, "online", "add", "workspace/cache", "req"
+        "bot", "entity", "online", "add", "workspace/cache", "req"
     )
-    bot = {"id": 17, "bot_type": "service", "owner_id": "owner"}
+    bot = {"id": 17, "bot_type": "service", "owner_id": "owner", "binding_id": 44}
     publication = NS(
         version=3,
         status="success",
@@ -35,7 +36,7 @@ def setup():
         device_id="baas-bot",
         device_props={"bolt_id": "bot"},
     )
-    bots = Mock(get_by_id_and_entity=Mock(return_value=bot))
+    bots = Mock(get_by_id_and_entity=Mock(return_value=bot), get_by_id_and_owner=Mock(return_value=bot))
     pubs = Mock(list_by_source_bot=Mock(return_value=[publication]))
     bindings = Mock(get_by_id=Mock(return_value=binding))
     perms = Mock(get_operable_permission_level=Mock(return_value=PermissionLevel.ADMIN))
@@ -43,17 +44,21 @@ def setup():
         targets=AsyncMock(return_value=["a", "b"]),
         change=AsyncMock(return_value={"status": "changed"}),
     )
-    service = PublishIgnoreService(bots, pubs, bindings, perms, runtime, "test")
+    resolver = RuntimeBindingResolutionService(
+        bot_repository=bots, publish_repository=pubs, binding_repository=bindings,
+        caller_instance_repository=Mock(),
+    )
+    service = PublishIgnoreService(bots, resolver, bindings, perms, runtime, "test")
     return service, command, publication, binding
 
 
 @pytest.mark.asyncio
-async def test_exact_release_collaborator_and_admin(setup, caplog):
+async def test_current_stage_collaborator_and_admin(setup, caplog):
     service, command, _, _ = setup
     with caplog.at_level("INFO"):
         result = await service.change(command, "collaborator", is_admin=False)
     assert result["success"] and result["scope"] == "current_instances"
-    service.publications.list_by_source_bot.assert_called_with(17, "test")
+    service.bots.get_by_id_and_owner.assert_called_with("bot", "owner")
     assert [c.args[1] for c in service.runtime.change.call_args_list] == ["a", "b"]
     service.permissions.get_operable_permission_level.assert_called_once()
     await service.change(command, "admin", is_admin=True)
@@ -68,9 +73,8 @@ async def test_exact_release_collaborator_and_admin(setup, caplog):
         ("missing_bot", "bot_not_found"),
         ("denied", "permission_denied"),
         ("personal", "not_service_bot"),
-        ("version", "version_not_unique_or_missing"),
         ("stage", "stage_not_bound"),
-        ("binding", "binding_conflict"),
+        ("binding", "stage_not_bound"),
         ("provider", "unsupported_provider"),
         ("empty", "no_current_instances"),
     ],
@@ -88,8 +92,6 @@ async def test_reject_before_mutation(setup, case, code):
         )
     if case == "personal":
         service.bots.get_by_id_and_entity.return_value["bot_type"] = "personal"
-    if case == "version":
-        command = replace(command, version=4)
     if case == "stage":
         pub.ext = {}
     if case == "binding":
@@ -128,7 +130,7 @@ async def test_service_boundary_logs(setup, monkeypatch):
     await service.change(command, "actor", is_admin=True)
     assert audit.info.call_args_list[0].args[0] == "backend.publish_ignore.request %s"
     response = audit.info.call_args_list[1].args[1]
-    assert response["operator_id"] == "actor" and response["version"] == 3
+    assert response["operator_id"] == "actor" and response["stage"] == "online"
     assert response["success"] and "elapsed_ms" in response
     service.bots.get_by_id_and_entity.side_effect = RuntimeError("secret-value")
     with pytest.raises(RuntimeError):
@@ -139,37 +141,34 @@ async def test_service_boundary_logs(setup, monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["baas", "arca"])
-async def test_draft_uses_device_id_without_bot_binding_id(setup, provider):
+async def test_draft_uses_bot_binding_even_for_caller_bot(setup, provider):
     service, command, pub, binding = setup
     pub.status = "draft"
     pub.ext["binding"]["draft"] = 99
-    service.bots.get_by_id_and_entity.return_value["device_id"] = "draft-device"
-    service.bindings.get_by_device_id.return_value = binding
+    service.bots.get_by_id_and_entity.return_value["call_type"] = "caller"
     binding.device_provider = provider
-    result = await service.change(replace(command, stage="draft"), "owner", is_admin=False)
+    result = await service.change(replace(command, stage="draft"), "collaborator", is_admin=False)
     assert result["success"]
-    service.bindings.get_by_device_id.assert_called_once_with("draft-device")
-    service.bindings.get_by_id.assert_not_called()
+    assert service.runtime.change.call_args.args[0].id == 44
+    assert service.runtime.change.call_args.args[3] == "collaborator"
     assert service.runtime.change.call_args.args[0].device_provider == provider
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case,code", [
-    ("missing_device", "stage_not_bound"),
-    ("missing_binding", "binding_conflict"),
-    ("version", "version_not_unique_or_missing"),
+    ("missing_bot_binding", "stage_not_bound"),
+    ("missing_binding", "stage_not_bound"),
+    ("removed_binding", "binding_conflict"),
 ])
 async def test_draft_rejects_invalid_target(setup, case, code):
     service, command, pub, binding = setup
     pub.status = "draft"
-    service.bots.get_by_id_and_entity.return_value["device_id"] = "draft-device"
-    service.bindings.get_by_device_id.return_value = binding
-    if case == "missing_device":
-        service.bots.get_by_id_and_entity.return_value.pop("device_id")
+    if case == "missing_bot_binding":
+        service.bots.get_by_id_and_entity.return_value.pop("binding_id")
     if case == "missing_binding":
-        service.bindings.get_by_device_id.return_value = None
-    if case == "version":
-        command = replace(command, version=4)
+        service.bindings.get_by_id.return_value = None
+    if case == "removed_binding":
+        service.bindings.get_by_id.side_effect = [binding, None]
     with pytest.raises(PublishIgnoreError, match=code):
         await service.change(replace(command, stage="draft"), "owner", is_admin=False)
     service.runtime.change.assert_not_called()

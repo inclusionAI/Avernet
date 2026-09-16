@@ -80,7 +80,7 @@ async def change_publish_ignore(
     user: AuthenticatedUser = Depends(get_current_user),
     service: PublishIgnoreServiceProtocol = Injected(PublishIgnoreServiceProtocol),
 ) -> ApiResponse:
-    """Update a rule on the exact version/stage's current runtime instances."""
+    """Update a rule on the selected stage's current runtime instances."""
     command = PublishIgnoreCommand(**request.model_dump(), request_id=str(uuid4()))
     try:
         result = await service.change(command, user.staffId, is_admin=user.staffId in super_admin())

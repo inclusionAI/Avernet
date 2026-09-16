@@ -36,7 +36,6 @@ async def test_router_mapping(error, code, stage):
     request = PublishIgnoreRequest(
         bot_id="bot",
         entity_id="entity",
-        version=3,
         stage=stage,
         operation="remove",
         path="workspace/cache",
@@ -53,13 +52,12 @@ async def test_router_mapping(error, code, stage):
 
 @pytest.mark.parametrize(
     "field,value",
-    [("stage", "eval"), ("operation", "delete"), ("version", True), ("version", 0)],
+    [("stage", "eval"), ("operation", "delete"), ("version", 3)],
 )
 def test_request_validation(field, value):
     data = dict(
         bot_id="bot",
         entity_id="entity",
-        version=3,
         stage="online",
         operation="add",
         path="cache",

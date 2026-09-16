@@ -80,11 +80,12 @@ class UpdateServiceBotConfigRequest(BaseModel):
     owner_id: str = Field(..., description="Bot 拥有者 ID")
     config_update: Dict[str, Any] = Field(..., description="服务 Bot 配置更新内容")
 class PublishIgnoreRequest(BaseModel):
-    """Change one exact rule on the selected release's current instances."""
+    """Change one rule on the current stage's instances; no version selection."""
+
+    model_config = {"extra": "forbid"}
 
     bot_id: str = Field(min_length=1, max_length=255)
     entity_id: str = Field(min_length=1, max_length=255)
-    version: int = Field(gt=0, strict=True)
     stage: Literal["draft", "verify", "online"]
     operation: Literal["add", "remove"]
     path: str = Field(min_length=1, max_length=4096)

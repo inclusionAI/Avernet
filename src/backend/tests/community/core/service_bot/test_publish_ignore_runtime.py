@@ -33,9 +33,10 @@ def setup():
         list_devices_by_bot_uuid=Mock(return_value=[{"uuid": "a"}, {"uuid": "b"}])
     )
     resolver = Mock(
-        resolve_for_binding=Mock(
+        resolve_for_binding_invoke=Mock(
             return_value=NS(
                 conn_info={
+                    "binding_id": 44, "device_uuid": "a", "device_affinity": "collaborator",
                     "url": "https://runtime.example/proxypass/target",
                     "headers": {"x-proxypass-token": "test-token"},
                 }
@@ -47,7 +48,7 @@ def setup():
     runtime = HttpPublishIgnoreRuntime(baas, resolver, transport, http, pem)
     binding = NS(id=44, device_provider="baas", device_id="baas-bot")
     command = PublishIgnoreCommand(
-        "bot", "entity", 3, "online", "add", "workspace/cache", "parent"
+        "bot", "entity", "online", "add", "workspace/cache", "parent"
     )
     return runtime, binding, command, key
 
@@ -63,9 +64,6 @@ async def test_provider_and_signature(setup, provider):
     if provider == "arca":
         runtime.baas.list_devices_by_bot_uuid.assert_not_called()
         runtime.transport.invoke.assert_not_called()
-        runtime.resolver.resolve_for_binding.assert_called_once_with(
-            44, "collaborator", bot_id="bot"
-        )
         call = runtime.http.post.call_args
         assert call.args[0].endswith(ENDPOINT)
         assert call.kwargs["headers"] == {"x-proxypass-token": "test-token"}
@@ -75,6 +73,10 @@ async def test_provider_and_signature(setup, provider):
         assert call.args[0]["device_uuid"] == "a"
         assert call.args[0]["binding_id"] == 44
         body = call.kwargs["body"]
+    runtime.resolver.resolve_for_binding_invoke.assert_called_once_with(
+        44, "collaborator", bot_id="bot", device_uuid="a" if provider == "baas" else None,
+    )
+    assert body["expected_target"] == {"bot_id": "bot", "entity_id": "entity", "stage": "online"}
     auth = body.pop("authorization")
     encoded = json.dumps(
         {**body, "timestamp": auth["timestamp"]},
@@ -140,7 +142,7 @@ async def test_boundary_logs_and_invalid_response_fields(setup, monkeypatch):
         == "backend.publish_ignore.engine_request %s"
     )
     response = audit.info.call_args_list[1].args[1]
-    assert response["operator_id"] == "operator" and response["version"] == 3
+    assert response["operator_id"] == "operator" and response["stage"] == "online"
     assert response["status"] == "changed" and "elapsed_ms" in response
     runtime.transport.invoke.return_value["data"]["revision"] = "private-test-value"
     result = await runtime.change(binding, "a", command, "operator")

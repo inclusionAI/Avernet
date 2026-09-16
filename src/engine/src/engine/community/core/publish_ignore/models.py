@@ -7,7 +7,6 @@ class ExpectedTarget(BaseModel):
     model_config = ConfigDict(extra="forbid")
     bot_id: str = Field(min_length=1, max_length=256)
     entity_id: str = Field(min_length=1, max_length=256)
-    version: int = Field(gt=0, strict=True)
     stage: Literal["draft", "verify", "online"]
 
 

@@ -8,7 +8,6 @@ from typing import Literal
 class PublishIgnoreCommand:
     bot_id: str
     entity_id: str
-    version: int
     stage: Literal["draft", "verify", "online"]
     operation: Literal["add", "remove"]
     path: str

@@ -63,17 +63,19 @@ def contract(tmp_path, monkeypatch):
             return client.post("/api/bot/publish-ignore", json=json)
 
     baas = Mock(list_devices_by_bot_uuid=Mock(return_value=[{"uuid": "replica-a"}]))
-    resolver = Mock(resolve_for_binding=Mock(return_value=NS(conn_info={"url": "https://device.example", "headers": {}})))
+    resolver = Mock(resolve_for_binding_invoke=Mock(return_value=NS(conn_info={
+        "url": "https://device.example", "headers": {}, "binding_id": 44, "device_uuid": "replica-a",
+    })))
     runtime = HttpPublishIgnoreRuntime(baas, resolver, DeviceTransport(), ArcaHttp(), signing_pem)
     binding = NS(id=44, device_provider="baas", device_id="runtime-binding")
-    command = PublishIgnoreCommand("bot", "entity", 3, "online", "add", "workspace/cache", "parent-request")
+    command = PublishIgnoreCommand("bot", "entity", "online", "add", "workspace/cache", "parent-request")
     return NS(runtime=runtime, binding=binding, command=command, client=client,
               captured=captured, ignore=ignore, credentials=credentials)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["baas", "arca"])
-@pytest.mark.parametrize("stage,version", [("online", "V3"), ("draft", ""), ("draft", "V1")])
+@pytest.mark.parametrize("stage,version", [("online", ""), ("verify", "V4"), ("draft", "")])
 async def test_signed_add_remove_across_real_engine(contract, provider, stage, version):
     ctx = contract
     ctx.command = replace(ctx.command, stage=stage)
@@ -114,7 +116,7 @@ async def test_draft_runtime_identity_mismatch(contract, identity):
 async def test_wrong_runtime_identity_is_not_mutated(contract, provider):
     ctx = contract
     ctx.binding.device_provider = provider
-    ctx.credentials.write_text("BOT_ID=bot\nENTITY_ID=entity\nVERSION=V4\nSTAGE=online\n")
+    ctx.credentials.write_text("BOT_ID=other\nENTITY_ID=entity\nSTAGE=online\n")
     target = (await ctx.runtime.targets(ctx.binding))[0]
     result = await ctx.runtime.change(ctx.binding, target, ctx.command, "authorized-manager")
     assert result["status"] == "failed"

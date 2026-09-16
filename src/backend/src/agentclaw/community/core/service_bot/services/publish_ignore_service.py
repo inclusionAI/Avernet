@@ -1,4 +1,4 @@
-"""Exact release selection and authorization for publish-ignore updates."""
+"""Authorization and current-stage runtime selection for publish-ignore."""
 
 import asyncio
 from dataclasses import asdict
@@ -18,9 +18,12 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.devices import (
     DeviceBindingRepository,
 )
-from agentclaw.community.core.repository.protocols.publishing import (
-    BotPublishRepositoryProtocol,
+from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
+from agentclaw.community.core.runtime_binding.models import (
+    RuntimeBindingRequest, RuntimeBindingTarget,
 )
+from agentclaw.community.core.runtime_binding.errors import RuntimeBindingResolutionError
+from agentclaw.community.core.engine_runtime.errors import EngineStageNotLiveError
 from agentclaw.community.plugin_api.publish_ignore_runtime import PublishIgnoreRuntime
 from agentclaw.community.log import get_logger
 
@@ -31,13 +34,13 @@ class PublishIgnoreService:
     def __init__(
         self,
         bots: BotRepository,
-        publications: BotPublishRepositoryProtocol,
+        runtime_bindings: RuntimeBindingResolutionService,
         bindings: DeviceBindingRepository,
         permissions: CollaboratorServiceProtocol,
         runtime: PublishIgnoreRuntime,
         env: str,
     ):
-        self.bots, self.publications, self.bindings = bots, publications, bindings
+        self.bots, self.runtime_bindings, self.bindings = bots, runtime_bindings, bindings
         self.permissions, self.runtime, self.env = permissions, runtime, env
 
     async def change(
@@ -95,25 +98,19 @@ class PublishIgnoreService:
                 raise PublishIgnoreError("permission_denied")
         if bot.get("bot_type") != "service":
             raise PublishIgnoreError("not_service_bot")
-        records = await asyncio.to_thread(
-            self.publications.list_by_source_bot, bot["id"], self.env
-        )
-        matches = [r for r in records if r.version == command.version]
-        if len(matches) != 1:
-            raise PublishIgnoreError("version_not_unique_or_missing")
-        publication = matches[0]
-        if command.stage == "draft":
-            # Draft Bot rows may have device_id without binding_id.
-            device_id = bot.get("device_id")
-            if not device_id:
-                raise PublishIgnoreError("stage_not_bound")
-            binding = await asyncio.to_thread(self.bindings.get_by_device_id, device_id)
-        else:
-            binding_id = (publication.ext or {}).get("binding", {}).get(command.stage)
-            if not binding_id:
-                raise PublishIgnoreError("stage_not_bound")
-            binding = await asyncio.to_thread(self.bindings.get_by_id, binding_id)
-        if not binding or binding.status != "ACTIVE":
+        try:
+            resolved = await asyncio.to_thread(
+                self.runtime_bindings.resolve,
+                RuntimeBindingRequest(
+                    bot_id=command.bot_id, owner_id=bot["owner_id"],
+                    actor_user_id=operator_id, stage=command.stage,
+                    environment=self.env, target=RuntimeBindingTarget.CALLER_SERVICE,
+                ),
+            )
+        except (RuntimeBindingResolutionError, EngineStageNotLiveError) as exc:
+            raise PublishIgnoreError("stage_not_bound") from exc
+        binding = await asyncio.to_thread(self.bindings.get_by_id, resolved.binding_id)
+        if not binding:
             raise PublishIgnoreError("binding_conflict")
         if binding.device_provider not in {"baas", "arca"}:
             raise PublishIgnoreError("unsupported_provider")

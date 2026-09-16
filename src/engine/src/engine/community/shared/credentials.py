@@ -46,7 +46,6 @@ class Credentials:
     visibility: Optional[str] = None
     admins: Optional[str] = None
     entity_id: Optional[str] = None
-    version: Optional[str] = None
     stage: Optional[str] = None
 
 
@@ -127,8 +126,6 @@ class CredentialsService:
                         creds.admins = value
                     elif key == "ENTITY_ID":
                         creds.entity_id = value
-                    elif key == "VERSION":
-                        creds.version = value
                     elif key == "STAGE":
                         creds.stage = value
 
