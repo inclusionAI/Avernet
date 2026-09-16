@@ -81,6 +81,10 @@ from engine.community.shared import (
 
 from engine.community.core.session.models import SessionResetRequest  # noqa: E402
 from engine.community.api.transport.auth_gate import verify_chat_send  # noqa: E402
+from engine.community.api.transport.openclaw_resume import (
+    OpenClawResumeRegistry,
+    OpenClawResumeRun,
+)
 
 
 log = logging.getLogger("engine-ws-server")
@@ -306,6 +310,7 @@ class EngineWebSocketServer:
             tuple[str | None, int], tuple[Any, Callable[[EventFrame], Any]]
         ] = {}
         self._inject_listener_conns: Dict[tuple[str | None, int], set[str]] = {}
+        self._openclaw_resume = OpenClawResumeRegistry()
         self._seq = 0
         self._version = "1.0.0"
 
@@ -374,6 +379,7 @@ class EngineWebSocketServer:
     async def _release_conn(self, conn_id: str) -> None:
         """Tell the active engine this connection is gone and drop session subscriptions."""
         self._unsubscribe_conn(conn_id)
+        await self._openclaw_resume.detach(conn_id)
         auth = self._conn_auth.pop(conn_id, None)
         if auth is None:
             return
@@ -469,6 +475,11 @@ class EngineWebSocketServer:
                         "exec.approval.resolve",
                         "exec.approvals.get",
                         "exec.approvals.set",
+                        *(
+                            ["chat.status", "chat.resume"]
+                            if EngineManager.get_instance().engine == "openclaw"
+                            else []
+                        ),
                     ],
                     events=["tick", "chat", "agent", "approval.requested", "approval.resolved"],
                 ),
@@ -599,6 +610,10 @@ class EngineWebSocketServer:
                 return await self._handle_chat_subscribe(conn_id, request, params)
             elif method == "chat.unsubscribe":
                 return await self._handle_chat_unsubscribe(conn_id, request, params)
+            elif method == "chat.status" and EngineManager.get_instance().engine == "openclaw":
+                return self._handle_chat_status(request, params), []
+            elif method == "chat.resume" and EngineManager.get_instance().engine == "openclaw":
+                return await self._handle_chat_resume(websocket, conn_id, request, params), []
             elif method == "sessions.reset":
                 response = await self._handle_session_reset(conn_id, request, params)
                 return response, []
@@ -998,6 +1013,69 @@ class EngineWebSocketServer:
             except Exception as e:
                 log.debug("chat.subscribe: off_event failed: %s", e)
 
+    # ── OpenClaw foreground chat recovery ──────────────────────────────────
+
+    def _handle_chat_status(
+        self, request: RequestFrame, params: Dict[str, Any]
+    ) -> ResponseFrame:
+        # COSEC: sessionKey and runId are identifiers, not read credentials.
+        run = self._openclaw_resume.lookup(
+            session_key=params.get("sessionKey"),
+            ticket=params.get("resumeTicket"),
+        )
+        if run is None:
+            return ResponseFrame.ok_response(
+                request.id, {"found": False, "reason": "NO_ACTIVE_RUN"}
+            )
+        return ResponseFrame.ok_response(
+            request.id, {"found": True, **run.summary()}
+        )
+
+    async def _handle_chat_resume(
+        self,
+        websocket: WebSocket,
+        conn_id: str,
+        request: RequestFrame,
+        params: Dict[str, Any],
+    ) -> ResponseFrame:
+        run = self._openclaw_resume.lookup(
+            session_key=params.get("sessionKey"),
+            ticket=params.get("resumeTicket"),
+        )
+        if run is None:
+            return ResponseFrame.ok_response(
+                request.id, {"resumed": False, "reason": "NO_ACTIVE_RUN"}
+            )
+        result = await run.attach(conn_id, websocket)
+        if result is None:
+            return ResponseFrame.ok_response(
+                request.id, {"resumed": False, "reason": run.reason or "UNAVAILABLE"}
+            )
+        return ResponseFrame.ok_response(request.id, {"resumed": True, **result})
+
+    async def _emit_stream_event(
+        self,
+        websocket: WebSocket,
+        event_name: str,
+        payload: Dict[str, Any],
+        *,
+        materialized_paths: tuple[str, ...] = (),
+        resume_run: OpenClawResumeRun | None = None,
+    ) -> None:
+        if resume_run is None:
+            await self._send_event(
+                websocket, event_name, payload, materialized_paths=materialized_paths
+            )
+            return
+        outbound = _redact_materialized_paths(payload, materialized_paths)
+        if not isinstance(outbound, dict):
+            outbound = {}
+        if "seq" not in outbound:
+            outbound["seq"] = self._next_seq()
+        if "ts" not in outbound:
+            outbound["ts"] = int(time.time() * 1000)
+        await resume_run.publish(event_name, outbound)
+
     # ── chat.send ──────────────────────────────────────────────────────────
 
     async def _handle_chat_send(
@@ -1115,6 +1193,66 @@ class EngineWebSocketServer:
         else:
             params.setdefault("idempotencyKey", uuid.uuid4().hex)
 
+        manager = EngineManager.get_instance()
+        if manager.engine == "openclaw" and params.get("resumeEnabled") is True:
+            run_id = params.get("idempotencyKey") or uuid.uuid4().hex
+            if not isinstance(run_id, str) or not run_id:
+                return ResponseFrame.err_response(
+                    request.id,
+                    ErrorShape(ErrorCodes.INVALID_REQUEST, "Invalid idempotencyKey"),
+                )
+            created = self._openclaw_resume.create(
+                session_key=session_key, run_id=run_id
+            )
+            if created is None:
+                return ResponseFrame.err_response(
+                    request.id,
+                    ErrorShape(ErrorCodes.UNAVAILABLE, "Chat recovery capacity reached"),
+                )
+            run, ticket = created
+            auth = self._auth_for(conn_id)
+            try:
+                # Keep the upstream token client alive after this browser socket closes.
+                await manager.on_connection_open(auth)
+            except Exception:
+                self._openclaw_resume.discard(run)
+                log.exception("chat recovery: could not retain upstream connection")
+                return ResponseFrame.err_response(
+                    request.id,
+                    ErrorShape(ErrorCodes.UNAVAILABLE, "Chat recovery unavailable"),
+                )
+            try:
+                await self._subscribe_conn_to_session(conn_id, session_key)
+            except Exception as e:
+                log.warning("chat.send: failed to bind inject listener: %s", e)
+            await run.attach(conn_id, websocket)
+            run.task = asyncio.create_task(
+                self._run_resumable_chat(
+                    run,
+                    websocket,
+                    conn_id,
+                    session_key,
+                    message,
+                    params.get("timeoutMs"),
+                    run_id,
+                    auth,
+                    attachments=attachments,
+                    chat_attachment_requests=chat_attachment_requests,
+                    chat_image_requests=chat_image_requests,
+                    resource_references=resource_references,
+                    prompt_file_refs=prompt_file_refs,
+                )
+            )
+            return ResponseFrame.ok_response(
+                request.id,
+                {
+                    "accepted": True,
+                    "runId": run_id,
+                    "resumeTicket": ticket,
+                    "recovery": "process_local_v1",
+                },
+            )
+
         # The browser only sends chat.send. Bind this connection before starting
         # the stream so OpenClaw-originated inject events can reach the session.
         try:
@@ -1144,6 +1282,62 @@ class EngineWebSocketServer:
 
         return response
 
+    async def _run_resumable_chat(
+        self,
+        run: OpenClawResumeRun,
+        websocket: WebSocket,
+        conn_id: str,
+        session_key: str,
+        message: str,
+        timeout_ms: Optional[int],
+        run_id: str,
+        auth: AuthContext,
+        **stream_kwargs: Any,
+    ) -> None:
+        run.state = "running"
+        try:
+            await self._stream_chat_events(
+                websocket,
+                conn_id,
+                session_key,
+                message,
+                timeout_ms,
+                run_id,
+                auth_override=auth,
+                resume_run=run,
+                **stream_kwargs,
+            )
+        except asyncio.CancelledError:
+            await self._emit_stream_event(
+                websocket,
+                "chat",
+                {
+                    "sessionKey": session_key,
+                    "runId": run_id,
+                    "state": "aborted",
+                },
+                resume_run=run,
+            )
+            raise
+        finally:
+            if run.state not in ("final", "error", "aborted"):
+                await self._emit_stream_event(
+                    websocket,
+                    "chat",
+                    {
+                        "sessionKey": session_key,
+                        "runId": run_id,
+                        "state": "error",
+                        "errorMessage": "Chat stream ended without a terminal event.",
+                    },
+                    resume_run=run,
+                )
+            await run.finish()
+            try:
+                await EngineManager.get_instance().on_connection_close(auth)
+            except Exception:
+                log.exception("chat recovery: could not release upstream connection")
+
     async def _stream_chat_events(
         self,
         websocket: WebSocket,
@@ -1161,6 +1355,8 @@ class EngineWebSocketServer:
         ] = None,
         resource_references: Optional[list[dict[str, Any]]] = None,
         prompt_file_refs: Optional[list[dict[str, Any]]] = None,
+        auth_override: AuthContext | None = None,
+        resume_run: OpenClawResumeRun | None = None,
     ) -> None:
         """Relay `ChatService.stream` events back to the client verbatim.
 
@@ -1219,15 +1415,17 @@ class EngineWebSocketServer:
                     "invalid_image_content": "ATTACHMENT_IMAGE_INVALID_CONTENT",
                     "media_type_mismatch": "ATTACHMENT_IMAGE_MIME_MISMATCH",
                 }.get(exc.reason, "ATTACHMENT_IMAGE_DOWNLOAD_FAILED")
-                await self._send_event(
+                await self._emit_stream_event(
                     websocket,
                     "chat",
                     {
                         "sessionKey": session_key,
+                        **({"runId": idempotency_key} if resume_run is not None else {}),
                         "state": "error",
                         "errorCode": code,
                         "errorMessage": "The attached image could not be prepared.",
                     },
+                    resume_run=resume_run,
                 )
                 return
 
@@ -1296,15 +1494,17 @@ class EngineWebSocketServer:
                         await self._resource_materialization_service.remove_chat_materialization(
                             resource_id
                         )
-                await self._send_event(
+                await self._emit_stream_event(
                     websocket,
                     "chat",
                     {
                         "sessionKey": session_key,
+                        **({"runId": idempotency_key} if resume_run is not None else {}),
                         "state": "error",
                         "errorCode": exc.code,
                         "errorMessage": exc.user_message,
                     },
+                    resume_run=resume_run,
                 )
                 return
 
@@ -1335,7 +1535,7 @@ class EngineWebSocketServer:
             aliveTime=timeout_ms,
             extraParams=extra_params or None,
         )
-        auth = self._auth_for(conn_id)
+        auth = auth_override if auth_override is not None else self._auth_for(conn_id)
         materialized_paths: tuple[str, ...] = ()
 
         try:
@@ -1422,11 +1622,12 @@ class EngineWebSocketServer:
                 ):
                     continue
 
-                await self._send_event(
+                await self._emit_stream_event(
                     websocket,
                     event_name,
                     event_data,
                     materialized_paths=materialized_paths,
+                    resume_run=resume_run,
                 )
 
                 if state in ("final", "error", "aborted"):
@@ -1446,11 +1647,14 @@ class EngineWebSocketServer:
         except Exception as e:
             log.exception(f"Chat stream error: {conn_id}, {e}")
             try:
-                await self._send_event(websocket, "chat", {
+                await self._emit_stream_event(websocket, "chat", {
                     "sessionKey": session_key,
+                    **({"runId": idempotency_key} if resume_run is not None else {}),
                     "state": "error",
-                    "errorMessage": str(e),
-                })
+                    "errorMessage": (
+                        "Chat stream failed." if resume_run is not None else str(e)
+                    ),
+                }, resume_run=resume_run, materialized_paths=materialized_paths)
             except Exception:
                 pass
 
