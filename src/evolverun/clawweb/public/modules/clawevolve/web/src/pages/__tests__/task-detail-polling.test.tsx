@@ -40,11 +40,12 @@ describe('Task detail live updates', () => {
     const waiting = { ...task('waiting_human'), task_type: 'stage_test', user_id: 'viewer',
       config: { stageTest: { stage: 'diagnose', mode: 'preprocess' } },
       steps: [{ stepId: 'STEP-1', taskId: 'TASK-1', stepType: 'stage_extension', status: 'waiting_context', command: 'stage test',
+        stageExtension: { stage: 'diagnose', mode: 'preprocess', implementationId: 'IMPL-RANGE', displayName: '诊断范围确认' },
         error: { code: 'CONTEXT', message: '保留步骤错误' }, output: { hitl: { question } } }],
       interactions: [{ interactionId: 'HITL-1', stepId: 'STEP-1', status: 'waiting', question }],
     }
     api.evolve.getTask.mockResolvedValueOnce(waiting).mockResolvedValue({ ...waiting, status: 'completed',
-      steps: [{ ...waiting.steps[0], status: 'succeeded', output: { summary: '最终交付结果' } }],
+      steps: [{ ...waiting.steps[0], status: 'succeeded', output: { summary: '## 最终交付结果\n\n已按确认范围完成。' } }],
       interactions: [{ ...waiting.interactions[0], status: 'answered', answer: { scope: '已确认' } }],
     })
     const view = open(); await tick()
@@ -60,8 +61,11 @@ describe('Task detail live updates', () => {
     expect(rawOutputs.length).toBeGreaterThan(0)
     expect(rawOutputs.every((el) => el.closest('details')?.open === false)).toBe(true)
     await tick(3000)
-    expect(screen.getAllByText('自定义 Stage 交付结果').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('最终交付结果').length).toBeGreaterThan(0)
+    expect(screen.queryByText('自定义 Stage 交付结果')).toBeNull()
+    expect(screen.getAllByRole('heading', { name: '诊断范围确认' }).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('自定义 Stage').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('诊断 · 前置').length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('heading', { name: '最终交付结果' }).length).toBeGreaterThan(0)
     expect(screen.getByTitle('Stage 已回答的交互表单')).toBeTruthy()
   })
 

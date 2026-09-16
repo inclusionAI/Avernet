@@ -40,6 +40,7 @@ import StageSkillDetail from './StageSkillDetail'
 import SkillCenter from './SkillCenter'
 import SkillEventLog from '../components/SkillEventLog'
 import SkillDetail from './SkillDetail'
+import StageExtensionResultDetail from '../components/StageExtensionResultDetail'
 
 type IconName = 'spark' | 'plus' | 'bot' | 'arrow' | 'check' | 'clock' | 'file' | 'chart' | 'code' | 'send' | 'target' | 'package'
 
@@ -2259,11 +2260,12 @@ function WorkflowNodes({ taskType, steps, config, insightImprovement = false, in
       const binding = configuredExtensions?.[stage]?.[mode]
       if (!binding?.enabled || !binding.implementationId?.trim()) continue
       const key = `${stage}:${mode}:${binding.implementationId}`
+      const displayName = binding.displayName?.trim() || binding.implementationId
       extensionDefinitions.set(key, {
         key, type: 'stage_extension', stage, mode, implementationId: binding.implementationId,
-        title: binding.displayName?.trim() || binding.implementationId,
+        title: displayName,
         command: `${workflowStageNames[stage]} Stage · ${workflowModeNames[mode]}`,
-        deliverable: '自定义 Stage 处理结果', tone: stage === 'optimize' ? 'green' : 'blue', custom: true,
+        deliverable: displayName, tone: stage === 'optimize' ? 'green' : 'blue', custom: true,
       })
     }
   }
@@ -2280,7 +2282,7 @@ function WorkflowNodes({ taskType, steps, config, insightImprovement = false, in
       key, type: 'stage_extension', stage: binding.stage, mode: binding.mode, implementationId: binding.implementationId,
       title: displayName,
       command: `${workflowStageNames[binding.stage]} Stage · ${workflowModeNames[binding.mode]}`,
-      deliverable: '自定义 Stage 处理结果', tone: binding.stage === 'optimize' ? 'green' : 'blue', custom: true,
+      deliverable: displayName, tone: binding.stage === 'optimize' ? 'green' : 'blue', custom: true,
     })
   }
   const definitions = baseDefinitions.flatMap((definition) => {
@@ -2586,6 +2588,7 @@ function stageTestStepLabel(step: EvolveStep, task: EvolveTask): string {
 function StepCard({ step, label, children, suppressDeliverables = false, canRetry = false, canCancel = false, retrying = false, canceling = false, onRetry, onCancel }: { step: EvolveStep; label?: string; children?: ReactNode; suppressDeliverables?: boolean; canRetry?: boolean; canCancel?: boolean; retrying?: boolean; canceling?: boolean; onRetry?: () => void; onCancel?: () => void }) {
   const view = statusView(step.status)
   const dispatchLabel = stepDispatchLabel(step)
+  const extension = workflowStageBinding(step)
   const stepLabel: Record<string, string> = {
     skill_init: 'Skill 初始化', diagnose: 'Bot 诊断', plan: '目标规划', envprep: '环境准备', bench: '基线评测',
     optimize: '策略优化', test: '验证评测', review: '轮次复盘', apply: '应用 Patch',
@@ -2600,7 +2603,14 @@ function StepCard({ step, label, children, suppressDeliverables = false, canRetr
       {step.summary && <p className="mt-3 text-sm text-gray-700">{step.summary}</p>}
       {children}
       {step.error && <p className="mt-3 rounded-lg bg-red-50 p-3 text-xs text-red-700">{step.error.code ? `${step.error.code}: ` : ''}{step.error.message}</p>}
-      {!suppressDeliverables && step.output && !(step.stepType === 'stage_extension' && step.status === 'waiting_context') && <StepDeliverables output={step.output} taskId={step.taskId} stepId={step.stepId} stepType={step.stepType} />}
+      {!suppressDeliverables && step.output && !(step.stepType === 'stage_extension' && step.status === 'waiting_context') && (step.stepType === 'stage_extension'
+        ? <StageExtensionResultDetail
+            step={step}
+            title={extension?.displayName?.trim() || `${extension ? workflowStageNames[extension.stage] : ''}自定义实现`}
+            stageLabel={extension ? workflowStageNames[extension.stage] : undefined}
+            modeLabel={extension ? workflowModeNames[extension.mode] : undefined}
+          />
+        : <StepDeliverables output={step.output} taskId={step.taskId} stepId={step.stepId} stepType={step.stepType} />)}
       <details className="mt-3 border-t border-gray-100 pt-3">
         <summary className="cursor-pointer text-xs text-gray-400 hover:text-gray-600">技术信息</summary>
         <div className="mt-2 rounded-lg bg-gray-50 px-3 py-2 font-mono text-[10px] leading-5 text-gray-600">{step.command}</div>
@@ -2735,10 +2745,9 @@ function StepDeliverables({ output, taskId, stepId, stepType }: { output: Record
     goal && { label: 'Goal', value: typeof goal === 'string' ? goal : goal.title ?? goal.summary ?? '已生成', tone: 'emerald' },
   ].filter(Boolean) as Array<{ label: string; value: string; tone: string }>
   const hasKnownPresentation = items.length > 0 || Boolean(spec || benchCases || baseline || benchResult || diff || runMetrics || roundDecision || benchDecision || reviewStatus || scoreComparison)
-  const showStageSkillResult = stepType === 'stage_extension' && !hasKnownPresentation
   const showLifecycleResult = (stepType === 'skill_prepare' || stepType === 'skill_finalize') && !hasKnownPresentation
   const lifecycleRows = showLifecycleResult ? skillLifecycleRows(output) : []
-  if (!hasKnownPresentation && !showStageSkillResult && !showLifecycleResult) return null
+  if (!hasKnownPresentation && !showLifecycleResult) return null
   const toneClass: Record<string, string> = {
     violet: 'border-violet-100 bg-violet-50 text-violet-700',
     blue: 'border-blue-100 bg-blue-50 text-blue-700',
@@ -2747,13 +2756,6 @@ function StepDeliverables({ output, taskId, stepId, stepType }: { output: Record
   }
   return (
     <div className="mt-3 space-y-2">
-      {showStageSkillResult && <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 text-gray-900">
-        <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
-          自定义 Stage 交付结果
-        </p>
-        {typeof output.summary === 'string' && output.summary.trim() && <p className="mt-2 text-xs leading-5 text-gray-700">{output.summary}</p>}
-        <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border border-gray-200 bg-white p-3 font-mono text-[10px] leading-5 text-gray-700">{JSON.stringify(output, null, 2)}</pre>
-      </div>}
       {showLifecycleResult && <details className="group rounded-lg border border-gray-200 bg-gray-50 text-gray-900">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 marker:content-none">
           <span className="text-[10px] font-medium uppercase tracking-wide text-gray-500">Skill 候选处理结果</span>
