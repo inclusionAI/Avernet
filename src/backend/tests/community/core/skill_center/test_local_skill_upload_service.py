@@ -759,6 +759,28 @@ async def test_new_package_api_creates_metadata_without_per_file_writes():
 
 
 @pytest.mark.asyncio
+async def test_new_package_api_db_failure_does_not_issue_reverse_file_operation():
+    class _FailingRepo(_Repo):
+        def create(self, row):
+            raise RuntimeError("db unavailable")
+
+    package_runtime = _PackageRuntime()
+    service = _service(
+        _Filesystem(), repo=_FailingRepo(), package_runtime=package_runtime
+    )
+
+    with pytest.raises(LocalSkillStorageError):
+        await service.upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip({"SKILL.md": _skill_md()}),
+        )
+
+    assert len(package_runtime.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_new_package_api_replace_preserves_existing_locator():
     locator = "/historical/skills-local/upload-skill"
     row = {

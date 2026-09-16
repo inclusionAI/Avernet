@@ -114,6 +114,12 @@ from agentclaw.community.api.skill_center_gateway_service import (
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
+from agentclaw.community.core.skill_center.local_skill_package_runtime_protocol import (
+    LocalSkillPackageRuntimeProtocol,
+)
+from agentclaw.community.core.skill_center.services.local_skill_package_runtime import (
+    LocalSkillPackageRuntime,
+)
 from agentclaw.community.api.direct_activation_service import (
     DirectActivationServiceProtocol,
 )
@@ -319,6 +325,7 @@ _PAIRS = [
     (DraftEditLeaseServiceProtocol, DraftEditLeaseService),
     (SkillCenterGatewayServiceProtocol, SkillCenterGatewayService),
     (LocalSkillUploadServiceProtocol, LocalSkillUploadService),
+    (LocalSkillPackageRuntimeProtocol, LocalSkillPackageRuntime),
     (DirectActivationServiceProtocol, DirectActivationService),
     (LocalSkillDeleteServiceProtocol, LocalSkillDeleteService),
     (RepositoryCatalogServiceProtocol, RepositoryCatalogService),

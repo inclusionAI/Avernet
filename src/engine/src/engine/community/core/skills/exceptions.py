@@ -21,6 +21,10 @@ class LocalSkillPackagePublishInProgressError(LocalSkillPackageError):
     """Another process currently owns the same target package lock."""
 
 
+class LocalSkillPackagePublishLockUnavailableError(LocalSkillPackageError):
+    """The cross-process lock backend could not be opened safely."""
+
+
 class LocalSkillPackagePublishFailedError(LocalSkillPackageError):
     """Publication failed while the old package remained authoritative."""
 
@@ -35,6 +39,7 @@ __all__ = [
     "LocalSkillPackageInvalidError",
     "LocalSkillPackagePublishFailedError",
     "LocalSkillPackagePublishInProgressError",
+    "LocalSkillPackagePublishLockUnavailableError",
     "LocalSkillPackageRollbackFailedError",
     "LocalSkillPackageTooLargeError",
 ]

@@ -25,9 +25,11 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
 )
+from agentclaw.community.core.skill_center.local_skill_package_runtime_protocol import (
+    LocalSkillPackageRuntimeProtocol,
+)
 from agentclaw.community.core.skill_center.services.local_skill_package_runtime import (
     LocalSkillPackageRuntime,
-    LocalSkillPackageRuntimeProtocol,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator

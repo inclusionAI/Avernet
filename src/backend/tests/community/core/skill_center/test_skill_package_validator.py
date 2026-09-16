@@ -124,6 +124,22 @@ def test_canonical_zip_is_stable_across_input_order_and_archive_metadata() -> No
     assert first.canonical_zip == second.canonical_zip
 
 
+def test_canonicalizer_ignores_shared_teclaw_system_metadata() -> None:
+    validated = SkillPackageValidator(SkillParser()).validate_zip(
+        _zip(
+            [
+                ("weather/SKILL.md", _skill_md()),
+                ("weather/._SKILL.md", b"resource fork"),
+                ("weather/Thumbs.db", b"windows"),
+                ("weather/ehthumbs.db", b"windows"),
+                ("weather/Desktop.ini", b"windows"),
+            ]
+        )
+    )
+
+    assert [path for path, _content in validated.files] == ["SKILL.md"]
+
+
 @pytest.mark.parametrize(
     "config",
     ["{name: region}", "[region]", "not-a-list"],

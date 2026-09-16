@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
-
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
+)
+from agentclaw.community.core.skill_center.local_skill_package_runtime_protocol import (
+    LocalSkillPackageRuntimeProtocol,
+    LocalSkillPackageRuntimeResult,
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillEditBusyError,
@@ -27,29 +28,6 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 _CAPABILITY = "skills.local_package.apply.v1"
 _STANDARD_PATH = "/api/skills/local/apply"
 _TECLAW_PATH = "/api/v1/file/skill-package"
-
-
-@dataclass(frozen=True, slots=True)
-class LocalSkillPackageRuntimeResult:
-    skill_name: str
-    action: str
-    content_digest: str
-    target_path: str | None = None
-
-
-@runtime_checkable
-class LocalSkillPackageRuntimeProtocol(Protocol):
-    async def apply(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        skill_name: str,
-        layout: str,
-        package: bytes,
-    ) -> LocalSkillPackageRuntimeResult | None:
-        """Apply through the new package API, or return None for safe legacy fallback."""
-        ...
 
 
 class LocalSkillPackageRuntime(LocalSkillPackageRuntimeProtocol):
@@ -121,9 +99,13 @@ class LocalSkillPackageRuntime(LocalSkillPackageRuntimeProtocol):
             if not exc.standard_route_missing:
                 raise LocalSkillStorageError() from exc
             try:
-                await self._transport.invoke(conn_info, "GET", "/health")
+                health = await self._transport.invoke(conn_info, "GET", "/health")
             except Exception as health_exc:
                 raise LocalSkillStorageError() from health_exc
+            if not isinstance(health, dict) or not (
+                health.get("status") == "ok" or health.get("ok") is True
+            ):
+                raise LocalSkillStorageError()
             return False
         except Exception as exc:
             raise LocalSkillStorageError() from exc
@@ -188,6 +170,4 @@ class LocalSkillPackageRuntime(LocalSkillPackageRuntimeProtocol):
 
 __all__ = [
     "LocalSkillPackageRuntime",
-    "LocalSkillPackageRuntimeProtocol",
-    "LocalSkillPackageRuntimeResult",
 ]

@@ -20,6 +20,7 @@ from engine.community.core.skills.exceptions import (
     LocalSkillPackageInvalidError,
     LocalSkillPackagePublishFailedError,
     LocalSkillPackagePublishInProgressError,
+    LocalSkillPackagePublishLockUnavailableError,
     LocalSkillPackageRollbackFailedError,
     LocalSkillPackageTooLargeError,
 )
@@ -130,9 +131,15 @@ class LocalSkillPackagePublisher:
     @contextmanager
     def _target_lock(target: Path):
         lock_root = Path(tempfile.gettempdir()) / "agentclaw-local-skill-locks"
-        lock_root.mkdir(parents=True, exist_ok=True)
         lock_name = hashlib.sha256(str(target).encode("utf-8")).hexdigest()
-        with (lock_root / f"{lock_name}.lock").open("a+b") as lock_file:
+        try:
+            lock_root.mkdir(parents=True, exist_ok=True)
+            lock_file = (lock_root / f"{lock_name}.lock").open("a+b")
+        except OSError as exc:
+            raise LocalSkillPackagePublishLockUnavailableError(
+                "publish_lock_unavailable"
+            ) from exc
+        with lock_file:
             try:
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as exc:

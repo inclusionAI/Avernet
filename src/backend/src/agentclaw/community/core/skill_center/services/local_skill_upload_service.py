@@ -43,8 +43,9 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
     RuntimeProjectionResult,
 )
-from agentclaw.community.core.skill_center.services.local_skill_package_runtime import (
+from agentclaw.community.core.skill_center.local_skill_package_runtime_protocol import (
     LocalSkillPackageRuntimeProtocol,
+    LocalSkillPackageRuntimeResult,
 )
 from agentclaw.community.core.skill_center.skill_package import (
     SkillPackageInvalidError,
@@ -60,6 +61,7 @@ from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditRollbackError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
+from agentclaw.community.log import get_logger
 from injector import inject
 from agentclaw.community.core.skill_center.local_skill_upload_service_protocol import LocalSkillUploadServiceProtocol
 
@@ -67,6 +69,8 @@ if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )
+
+logger = get_logger()
 
 
 class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
@@ -211,6 +215,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                         bot_id=bot_id,
                         actor_id=actor_id,
                         description=validated.description,
+                        runtime_result=runtime_result,
                     )
                 return self._commit_runtime_create(
                     owner_id=owner_id,
@@ -219,6 +224,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                     name=validated.name,
                     description=validated.description,
                     directory=location.directory,
+                    runtime_result=runtime_result,
                 )
             if matches:
                 return await self._replace(
@@ -254,6 +260,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         name: str,
         description: str,
         directory: str,
+        runtime_result: LocalSkillPackageRuntimeResult,
     ) -> dict[str, Any]:
         """Persist metadata after Engine success without compensating file I/O."""
 
@@ -282,6 +289,15 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                 }
             )
         except Exception as exc:
+            logger.error(
+                "[LocalSkillUploadService] post-apply persistence failed "
+                "bot_id=%s skill_name=%s action=%s digest=%s target_path=%s",
+                bot_id,
+                name,
+                runtime_result.action,
+                runtime_result.content_digest,
+                runtime_result.target_path,
+            )
             raise LocalSkillStorageError() from exc
         return {
             "operation": "created",
@@ -297,6 +313,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         bot_id: str,
         actor_id: str,
         description: str,
+        runtime_result: LocalSkillPackageRuntimeResult,
     ) -> dict[str, Any]:
         """Persist replace metadata while preserving the historical locator."""
 
@@ -324,6 +341,15 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                 }
             )
         except Exception as exc:
+            logger.error(
+                "[LocalSkillUploadService] post-apply persistence failed "
+                "bot_id=%s skill_name=%s action=%s digest=%s target_path=%s",
+                bot_id,
+                skill["name"],
+                runtime_result.action,
+                runtime_result.content_digest,
+                runtime_result.target_path,
+            )
             raise LocalSkillStorageError() from exc
         return {
             "operation": "updated",

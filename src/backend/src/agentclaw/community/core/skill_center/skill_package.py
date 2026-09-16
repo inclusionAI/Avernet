@@ -331,6 +331,8 @@ class SkillPackageValidator:
         name = parts[-1]
         return (
             name == ".DS_Store"
+            or name.startswith("._")
+            or name in {"Thumbs.db", "ehthumbs.db", "Desktop.ini"}
             or parts[0] == "__MACOSX"
             or ".git" in parts
             or "__pycache__" in parts

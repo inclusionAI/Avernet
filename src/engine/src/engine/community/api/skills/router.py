@@ -49,6 +49,7 @@ from engine.community.core.skills.exceptions import (
     LocalSkillPackageInvalidError,
     LocalSkillPackagePublishFailedError,
     LocalSkillPackagePublishInProgressError,
+    LocalSkillPackagePublishLockUnavailableError,
     LocalSkillPackageRollbackFailedError,
     LocalSkillPackageTooLargeError,
 )
@@ -189,6 +190,12 @@ async def apply_local_skill_package(
     except LocalSkillPackagePublishInProgressError:
         return _local_package_error(
             409, "publish_in_progress", "Skill package publish is in progress"
+        )
+    except LocalSkillPackagePublishLockUnavailableError:
+        return _local_package_error(
+            503,
+            "publish_lock_unavailable",
+            "Skill package publish lock is unavailable",
         )
     except LocalSkillPackagePublishFailedError:
         return _local_package_error(
