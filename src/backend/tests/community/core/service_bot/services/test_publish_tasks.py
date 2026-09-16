@@ -8,11 +8,9 @@ import pytest
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.task_queue.types import Complete, Fail, Reschedule
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
-    EVAL_TEARDOWN_TASK,
     PROGRESS_POLL_TASK,
     RESTART_POLL_TASK,
     PublishEvalTeardownHandler,
-    enqueue_or_postpone_eval_teardown,
     PublishOnlineReleaseHandler,
     PublishProgressPollHandler,
     PublishRestartHandler,
@@ -501,45 +499,6 @@ def test_restart_poll_missing_record_fails_task():
     outcome = poll.handle({"publish_id": 1})
     assert isinstance(outcome, Fail)
     assert "not found" in outcome.error
-
-
-# ── enqueue_or_postpone_eval_teardown ─────────────────────────────────────
-
-
-def test_enqueue_or_postpone_calls_postpone_first():
-    """When postpone succeeds, no new row is enqueued."""
-    tq = Mock()
-    tq.postpone.return_value = True
-
-    enqueue_or_postpone_eval_teardown(
-        tq,
-        publish_id=10,
-        bot_uuid="BOT-1",
-        operator="op",
-        delay_seconds=3600,
-    )
-    tq.postpone.assert_called_once_with(
-        EVAL_TEARDOWN_TASK,
-        "eval_teardown:10:BOT-1",
-        delay_seconds=3600,
-    )
-    tq.enqueue.assert_not_called()
-
-
-def test_enqueue_or_postpone_falls_back_to_enqueue_when_postpone_fails():
-    """When postpone returns False (no PENDING task), enqueue a fresh row."""
-    tq = Mock()
-    tq.postpone.return_value = False
-
-    enqueue_or_postpone_eval_teardown(
-        tq,
-        publish_id=10,
-        bot_uuid="BOT-1",
-        operator="op",
-        delay_seconds=3600,
-    )
-    tq.postpone.assert_called_once()
-    tq.enqueue.assert_called_once()
 
 
 # ── PublishEvalTeardownHandler bot existence short-circuit ────────────────

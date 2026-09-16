@@ -38,6 +38,7 @@ on the publish record — instead of a semantically dishonest SUCCEEDED. Domain
 retry stays user-driven (``retry()`` enqueues a fresh task); the worker never
 re-runs a failed stage on its own.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -101,7 +102,9 @@ _DRAFT_RESTORE_DEADLINE_SECONDS = 1860
 # down. The teardown task's give-up deadline must outlast the delay plus an
 # execution window, or the row would be retired before it ever becomes eligible.
 _EVAL_TEARDOWN_TTL_SECONDS = 86400
-_EVAL_TEARDOWN_DEADLINE_SECONDS = _EVAL_TEARDOWN_TTL_SECONDS + _STAGE_TASK_DEADLINE_SECONDS
+_EVAL_TEARDOWN_DEADLINE_SECONDS = (
+    _EVAL_TEARDOWN_TTL_SECONDS + _STAGE_TASK_DEADLINE_SECONDS
+)
 
 # States still waiting on a BaaS publish → the poll keeps driving them.
 _POLL_ACTIVE_STATES = {PublishStatus.VALIDATE_PUB, PublishStatus.ONLINE_PUB}
@@ -215,7 +218,9 @@ def enqueue_destroy(
     )
 
 
-def build_approval_trigger_payload(*, publish_id: int, action: str, operator: str) -> dict:
+def build_approval_trigger_payload(
+    *, publish_id: int, action: str, operator: str
+) -> dict:
     return {"publish_id": publish_id, "action": action, "operator": operator}
 
 
@@ -236,7 +241,9 @@ def enqueue_approval_trigger(
     )
 
 
-def build_eval_teardown_payload(*, publish_id: int, bot_uuid: str, operator: str) -> dict:
+def build_eval_teardown_payload(
+    *, publish_id: int, bot_uuid: str, operator: str
+) -> dict:
     return {"publish_id": publish_id, "bot_uuid": bot_uuid, "operator": operator}
 
 
@@ -268,42 +275,6 @@ def enqueue_eval_teardown(
         deadline_seconds=_EVAL_TEARDOWN_DEADLINE_SECONDS,
         delay_seconds=delay_seconds,
         idempotency_key=_eval_teardown_idempotency_key(publish_id, bot_uuid),
-    )
-
-
-def enqueue_or_postpone_eval_teardown(
-    task_queue_service: TaskQueueService,
-    *,
-    publish_id: int,
-    bot_uuid: str,
-    operator: str,
-    delay_seconds: int = 0,
-) -> None:
-    """Renewal-safe variant of :func:`enqueue_eval_teardown`.
-
-    If a PENDING task with the same ``(publish_id, bot_uuid)`` key already
-    exists, **postpone** it by setting ``run_at = now() + delay_seconds``
-    instead of inserting a new row.  If no PENDING task holds the key (the
-    task is terminal, absent, or already RUNNING), falls back to a fresh
-    ``enqueue``.
-
-    Use this in renewal loops (e.g. ``renew_default_env_ttl``) to avoid
-    inflating the queue with duplicate delayed rows.
-    """
-    postponed = task_queue_service.postpone(
-        EVAL_TEARDOWN_TASK,
-        _eval_teardown_idempotency_key(publish_id, bot_uuid),
-        delay_seconds=delay_seconds,
-    )
-    if postponed:
-        return
-    # No PENDING task to postpone — enqueue a new one.
-    enqueue_eval_teardown(
-        task_queue_service,
-        publish_id=publish_id,
-        bot_uuid=bot_uuid,
-        operator=operator,
-        delay_seconds=delay_seconds,
     )
 
 
@@ -351,11 +322,15 @@ class PublishVerifyFlowHandler(_PublishTaskBase):
         if status == PublishStatus.BUILDING:
             build_result = await self._flow.execute_build_phase(record, operator)
             if build_result.status != PublishStatus.BUILT:
-                return Fail(f"build failed: publish_id={publish_id}, {build_result.message}")
+                return Fail(
+                    f"build failed: publish_id={publish_id}, {build_result.message}"
+                )
             record, status = self._status(publish_id)
 
         if status == PublishStatus.BUILT:
-            release_result = await self._flow.execute_verify_release_phase(record, operator)
+            release_result = await self._flow.execute_verify_release_phase(
+                record, operator
+            )
             if release_result.status != PublishStatus.VALIDATE_PUB:
                 return Fail(
                     f"verify release failed: publish_id={publish_id}, {release_result.message}"
@@ -400,8 +375,9 @@ class PublishOnlineReleaseHandler(_PublishTaskBase):
         # not-yet-run release from one that already created the BaaS bot. Only the
         # ledger's bot timeline does — a lease-expiry re-run of this task must not
         # create a second bot, and a stale or failed release must re-run.
-        if status == PublishStatus.ONLINE_PUB and not self._flow.is_current_online_deployment(
-            publish_id
+        if (
+            status == PublishStatus.ONLINE_PUB
+            and not self._flow.is_current_online_deployment(publish_id)
         ):
             release_result = await self._flow.execute_release_phase(record, operator)
             if release_result.status != PublishStatus.ONLINE_PUB:
@@ -504,7 +480,9 @@ class PublishDestroyHandler(_PublishTaskBase):
             publish_id=publish_id, stage=stage, operator=operator
         )
         if not result or not result.get("success"):
-            return Fail(f"destroy failed: publish_id={publish_id}, {(result or {}).get('message')}")
+            return Fail(
+                f"destroy failed: publish_id={publish_id}, {(result or {}).get('message')}"
+            )
         return Complete()
 
 
@@ -716,9 +694,7 @@ class PublishDraftRestoreHandler(_PublishTaskBase):
         draft_publish_id = _require_int(payload, "draft_publish_id")
         operation_id = _require_int(payload, "operation_id")
         operator = _require_str(payload, "operator")
-        return asyncio.run(
-            self._run(draft_publish_id, operation_id, operator)
-        )
+        return asyncio.run(self._run(draft_publish_id, operation_id, operator))
 
     async def _run(
         self, draft_publish_id: int, operation_id: int, operator: str

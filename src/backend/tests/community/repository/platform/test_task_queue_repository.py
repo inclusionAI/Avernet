@@ -284,6 +284,7 @@ def test_lease_reclaim_before_and_after_expiry(repo):
 
 # ── the claim scan: one statement, two index-aligned arms, reclaim first ────
 
+
 def _expire_lease(repo, task_id):
     """Backdate a live lease so the reclaim arm sees it. Mirrors
     ``test_lease_reclaim_before_and_after_expiry``: do not sleep across
@@ -377,7 +378,9 @@ def test_the_claim_scan_sorts_only_its_own_bounded_output(repo):
     # Exactly one sort, and it sits above the union rather than inside an arm.
     assert plan.count("TEMP B-TREE") == 1
     arms, _, outer = plan.rpartition("TEMP B-TREE")
-    assert "idx_env_app_status_run_at" in arms and "idx_env_app_lease_expires_at" in arms
+    assert (
+        "idx_env_app_status_run_at" in arms and "idx_env_app_lease_expires_at" in arms
+    )
 
 
 def test_the_combined_or_is_why_the_arms_are_read_separately(repo):
@@ -407,9 +410,7 @@ def test_the_combined_or_is_why_the_arms_are_read_separately(repo):
             .order_by(M.run_at.asc())
             .limit(10)
         )
-        sql = query.statement.compile(
-            db.bind, compile_kwargs={"literal_binds": True}
-        )
+        sql = query.statement.compile(db.bind, compile_kwargs={"literal_binds": True})
         plan = " / ".join(
             str(tuple(row)[-1])
             for row in db.execute(text(f"EXPLAIN QUERY PLAN {sql}")).fetchall()
@@ -1272,111 +1273,3 @@ def test_unkeyed_enqueue_still_accepts_an_over_long_task_type(repo):
     record = _enqueue(repo, task_type="t" * (_MAX_TASK_TYPE_LEN + 50))
     assert len(record.task_type) == _MAX_TASK_TYPE_LEN + 50  # SQLite stores it whole
     assert _key_columns(repo, record.id) == (None, None)
-
-
-# ── postpone_by_idempotency_key ─────────────────────────────────────────────
-
-
-def test_postpone_updates_run_at_on_pending_keyed_task(repo):
-    """Postpone moves run_at forward on a PENDING task that holds the key."""
-    r = _enqueue(repo, idempotency_key="k1", delay_seconds=100, deadline_seconds=7200)
-    original_run_at = r.run_at
-
-    ok = repo.postpone_by_idempotency_key(
-        task_type="demo",
-        idempotency_key="k1",
-        delay_seconds=500,
-        env=ENV,
-        app=APP,
-    )
-    assert ok is True
-
-    updated = repo.get_by_id(r.id)
-    assert updated.run_at > original_run_at
-
-
-def test_postpone_returns_false_when_no_pending_task_holds_key(repo):
-    """No live PENDING task with this key → postpone is a no-op, returns False."""
-    ok = repo.postpone_by_idempotency_key(
-        task_type="demo",
-        idempotency_key="absent",
-        delay_seconds=60,
-        env=ENV,
-        app=APP,
-    )
-    assert ok is False
-
-
-def test_postpone_returns_false_for_running_task(repo):
-    """A RUNNING task is mid-execution and must not be postponed."""
-    _enqueue(repo, idempotency_key="k1", deadline_seconds=7200)
-    claimed = _claim(repo, "w1")
-    assert len(claimed) == 1  # now RUNNING
-
-    ok = repo.postpone_by_idempotency_key(
-        task_type="demo",
-        idempotency_key="k1",
-        delay_seconds=60,
-        env=ENV,
-        app=APP,
-    )
-    assert ok is False
-
-
-def test_postpone_returns_false_for_terminal_task(repo):
-    """A COMPLETED task has released its key → postpone returns False."""
-    _enqueue(repo, idempotency_key="k1", deadline_seconds=7200)
-    claimed = _claim(repo, "w1")
-    repo.complete(task_id=claimed[0].id, worker_id="w1")
-
-    ok = repo.postpone_by_idempotency_key(
-        task_type="demo",
-        idempotency_key="k1",
-        delay_seconds=60,
-        env=ENV,
-        app=APP,
-    )
-    assert ok is False
-
-
-def test_postpone_does_not_cross_app_boundary(repo):
-    """A task in another app cannot be postponed from this app."""
-    _enqueue(repo, idempotency_key="k1", app=OTHER_APP)
-
-    ok = repo.postpone_by_idempotency_key(
-        task_type="demo",
-        idempotency_key="k1",
-        delay_seconds=60,
-        env=ENV,
-        app=APP,
-    )
-    assert ok is False
-
-
-def test_postpone_is_scoped_by_task_type(repo):
-    """Same key under a different task_type is a different dedup slot."""
-    _enqueue(repo, task_type="other", idempotency_key="k1")
-
-    ok = repo.postpone_by_idempotency_key(
-        task_type="demo",
-        idempotency_key="k1",
-        delay_seconds=60,
-        env=ENV,
-        app=APP,
-    )
-    assert ok is False
-
-
-def test_postpone_through_service_facade(repo):
-    """TaskQueueService.postpone scopes by env/app and forwards to repo."""
-    service = TaskQueueService(
-        repo, HandlerRegistry(), WorkerWakeup(), TaskQueueConfig(app=APP)
-    )
-    service.enqueue("demo", {"x": 1}, 7200, idempotency_key="k1", delay_seconds=100)
-
-    ok = service.postpone("demo", "k1", delay_seconds=500)
-    assert ok is True
-
-    # No key at all → False
-    ok = service.postpone("demo", "no_such_key", delay_seconds=60)
-    assert ok is False

@@ -15,13 +15,16 @@ whether an enqueue should wake the in-process worker immediately (see
 :class:`WorkerWakeup`) instead of leaving it to the next idle poll. That is
 opt-in per task type, declared at handler registration.
 """
+
 from __future__ import annotations
 
 from injector import inject
 
 from typing import Optional
 
-from agentclaw.community.core.repository.protocols.platform import TaskQueueRepositoryProtocol
+from agentclaw.community.core.repository.protocols.platform import (
+    TaskQueueRepositoryProtocol,
+)
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.wakeup import WorkerWakeup
 from agentclaw.community.core.task_queue.types import EnqueueResult, TaskRecord
@@ -127,33 +130,6 @@ class TaskQueueService:
         return self._repo.find_by_idempotency_key(
             task_type=task_type,
             idempotency_key=idempotency_key,
-            env=get_current_env(),
-            app=self._config.app,
-        )
-
-    def postpone(
-        self,
-        task_type: str,
-        idempotency_key: str,
-        delay_seconds: int,
-    ) -> bool:
-        """Postpone a live PENDING task found by idempotency key.
-
-        Updates ``run_at = now() + delay_seconds`` on an existing PENDING
-        task that holds the given key.  Returns ``True`` if a row was
-        updated, ``False`` if no live PENDING task holds the key (the
-        caller should ``enqueue`` a new one instead).
-
-        This is the renewal primitive for delayed one-shot tasks (like
-        ``eval_teardown``): "I want to push the deadline back by
-        ``delay_seconds``."  It avoids inflating the queue by inserting
-        duplicate rows — each renewal simply moves the existing row's
-        ``run_at`` forward.
-        """
-        return self._repo.postpone_by_idempotency_key(
-            task_type=task_type,
-            idempotency_key=idempotency_key,
-            delay_seconds=delay_seconds,
             env=get_current_env(),
             app=self._config.app,
         )

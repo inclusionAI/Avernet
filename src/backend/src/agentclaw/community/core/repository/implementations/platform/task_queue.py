@@ -81,6 +81,7 @@ live and keep holding their key.
 ``gmt_created`` / ``gmt_modified`` are left entirely to the database (column
 default + ``ON UPDATE CURRENT_TIMESTAMP``); this body never sets them.
 """
+
 from __future__ import annotations
 
 import json
@@ -100,7 +101,9 @@ from agentclaw.community.core.task_queue.types import (
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.core.repository.protocols.platform import TaskQueueRepositoryProtocol
+from agentclaw.community.core.repository.protocols.platform import (
+    TaskQueueRepositoryProtocol,
+)
 
 logger = get_logger()
 
@@ -679,6 +682,7 @@ class TaskQueueRepository(
         and no row is ``PENDING`` and ``RUNNING`` at once. No de-duplication is
         needed here.
         """
+
         def _arm(where, order_col, priority: int):
             bounded = (
                 select(self.Model.id.label("id"), order_col.label("k"))
@@ -749,11 +753,7 @@ class TaskQueueRepository(
                     )
                 )
                 if claimed == 1:
-                    row = (
-                        db.query(self.Model)
-                        .filter(self.Model.id == task_id)
-                        .first()
-                    )
+                    row = db.query(self.Model).filter(self.Model.id == task_id).first()
                     if row is not None:
                         won.append(row.to_record())
                     continue
@@ -892,34 +892,6 @@ class TaskQueueRepository(
             )
         return affected == 1
 
-    def postpone_by_idempotency_key(
-        self,
-        *,
-        task_type: str,
-        idempotency_key: str,
-        delay_seconds: int,
-        env: str,
-        app: str,
-    ) -> bool:
-        with self._db.orm_session() as db:
-            new_run_at = self._now_plus(db, delay_seconds)
-            affected = (
-                db.query(self.Model)
-                .filter(
-                    self.Model.env == env,
-                    self.Model.app == app,
-                    self.Model.task_type == task_type,
-                    self.Model.active_idempotency_key == idempotency_key,
-                    self.Model.status == TaskStatus.PENDING.value,
-                    new_run_at < self.Model.deadline_at,
-                )
-                .update(
-                    {self.Model.run_at: new_run_at},
-                    synchronize_session=False,
-                )
-            )
-        return affected >= 1
-
     # ── diagnosis / tests ───────────────────────────────────────────────
 
     def get_by_id(self, task_id: int) -> Optional[TaskRecord]:
@@ -930,11 +902,7 @@ class TaskQueueRepository(
         # out. ``TaskRecord.app`` carries it, so a caller that needs the scope
         # can still check it.
         with self._db.orm_session() as db:
-            row = (
-                db.query(self.Model)
-                .filter(self.Model.id == task_id)
-                .first()
-            )
+            row = db.query(self.Model).filter(self.Model.id == task_id).first()
             return row.to_record() if row else None
 
     def find_by_idempotency_key(

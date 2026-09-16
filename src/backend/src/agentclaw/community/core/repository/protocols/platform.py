@@ -6,6 +6,7 @@ naming the missing member, instead of raising ``AttributeError`` at the call
 site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 ``core/repository/README.md`` for why that direction is load-bearing.
 """
+
 from __future__ import annotations
 
 from abc import abstractmethod
@@ -14,7 +15,11 @@ from typing import Any, List, Optional, Protocol, TYPE_CHECKING, runtime_checkab
 if TYPE_CHECKING:
     from agentclaw.community.core.quality.models import QualityTaskRecord
     from agentclaw.community.core.session_resources.types import SessionResourceRecord
-    from agentclaw.community.core.task_queue.types import EnqueueResult, TaskRecord, TaskStatus
+    from agentclaw.community.core.task_queue.types import (
+        EnqueueResult,
+        TaskRecord,
+        TaskStatus,
+    )
 
 
 @runtime_checkable
@@ -255,31 +260,6 @@ class TaskQueueRepositoryProtocol(Protocol):
         returned — that is the generation a caller asking "what became of it?"
         means.
         """
-
-    @abstractmethod
-    def postpone_by_idempotency_key(
-        self,
-        *,
-        task_type: str,
-        idempotency_key: str,
-        delay_seconds: int,
-        env: str,
-        app: str,
-    ) -> bool:
-        """Postpone a live PENDING task found by its idempotency key.
-
-        Sets ``run_at = now() + delay_seconds`` on the task that holds
-        ``active_idempotency_key = idempotency_key`` and whose status is
-        PENDING.  Returns ``True`` if a row was updated, ``False`` if no
-        live PENDING task holds the key (the caller should enqueue a new
-        one instead).
-
-        **No-op on non-PENDING rows.**  A RUNNING task is mid-execution
-        and must not be disturbed; a terminal task has already released
-        the active key.  Either case returns ``False`` so the caller
-        falls through to a fresh ``enqueue``.
-        """
-        ...
 
 
 @runtime_checkable
