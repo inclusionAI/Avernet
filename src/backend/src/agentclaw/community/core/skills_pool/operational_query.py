@@ -14,6 +14,7 @@ from agentclaw.community.core.skills_pool.claim_service import (
 )
 from agentclaw.community.core.skills_pool.operations import (
     RolloutBotEntry,
+    RolloutConfigSnapshot,
     SkillsPoolRolloutOperations,
 )
 from agentclaw.community.core.skills_pool.quarantine import QuarantineOperationalView, SkillsPoolQuarantineService
@@ -155,7 +156,14 @@ class SkillsPoolOperationalQuery:
         batch_id: str,
     ) -> BatchOperationalReport:
         rollout = self._rollout.get_snapshot(env=env)
-        whitelist = self._in_batch(rollout.whitelist, batch_id)
+        whitelist = self._in_batch(
+            self._legacy_batch_entries(
+                rollout,
+                current=rollout.whitelist,
+                key="whitelist",
+            ),
+            batch_id,
+        )
         eligible_scopes: set[BotSkillLayoutScope] = set()
         invalid_batch_members = 0
         for entry in whitelist:
@@ -258,11 +266,19 @@ class SkillsPoolOperationalQuery:
             for code in failures
         )
         negative_controls = self._in_batch(
-            rollout.negative_controls,
+            self._legacy_batch_entries(
+                rollout,
+                current=rollout.negative_controls,
+                key="negative_controls",
+            ),
             batch_id,
         )
         teclaw_controls = self._in_batch(
-            rollout.teclaw_controls,
+            self._legacy_batch_entries(
+                rollout,
+                current=rollout.teclaw_controls,
+                key="teclaw_controls",
+            ),
             batch_id,
         )
         negative_healthy = sum(
@@ -375,6 +391,42 @@ class SkillsPoolOperationalQuery:
         batch_id: str,
     ) -> tuple[RolloutBotEntry, ...]:
         return tuple(entry for entry in entries if entry.batch_id == batch_id)
+
+    @staticmethod
+    def _legacy_batch_entries(
+        rollout: RolloutConfigSnapshot,
+        *,
+        current: tuple[RolloutBotEntry, ...],
+        key: str,
+    ) -> tuple[RolloutBotEntry, ...]:
+        """Recover the final v1 membership snapshot after a v2 cutover."""
+
+        if any(entry.batch_id is not None for entry in current):
+            return current
+        for event in reversed(rollout.audit_log):
+            evidence = event.evidence
+            legacy = evidence.get("legacy_policy") if evidence is not None else None
+            raw = legacy.get(key) if isinstance(legacy, dict) else None
+            if not isinstance(raw, list):
+                continue
+            entries: list[RolloutBotEntry] = []
+            for item in raw:
+                if not isinstance(item, dict):
+                    continue
+                owner_id = item.get("owner_id")
+                bot_id = item.get("bot_id")
+                legacy_batch_id = item.get("batch_id")
+                if owner_id is None or bot_id is None or legacy_batch_id is None:
+                    continue
+                entries.append(
+                    RolloutBotEntry(
+                        owner_id=str(owner_id),
+                        bot_id=str(bot_id),
+                        batch_id=str(legacy_batch_id),
+                    )
+                )
+            return tuple(entries)
+        return current
 
     @staticmethod
     def _is_claimed(state: BotSkillLayoutState) -> bool:

@@ -34,6 +34,19 @@ def _audit(revision: str) -> dict[str, object]:
     }
 
 
+def _v2_value() -> dict[str, object]:
+    return {
+        "schema_version": 2,
+        "engine_admission": {"openclaw": True},
+        "bot_allowlist": [
+            {"owner_id": "owner-1", "bot_id": "bot-1", "engine": "openclaw"}
+        ],
+        "owner_rollouts": [],
+        "environment_rollouts": [],
+        "bot_exclusions": [],
+    }
+
+
 def test_rollout_config_and_append_only_audit_commit_atomically(test_injector):
     from agentclaw.community.plugin_api.database import DatabasePlugin
 
@@ -84,6 +97,49 @@ def test_rollout_config_and_append_only_audit_commit_atomically(test_injector):
         audit=_audit("revision-2"),
     )
     assert len(repository.list_audit_events(env="pre")) == 1
+
+
+def test_v1_expected_value_can_cas_directly_to_v2(test_injector) -> None:
+    from agentclaw.community.plugin_api.database import DatabasePlugin
+
+    database = test_injector.get(DatabasePlugin)
+    asyncio.run(database.bootstrap())
+    repository = SkillsPoolRolloutRepository(database)
+    assert repository.commit_change(
+        env="pre",
+        config_id=None,
+        expected_revision=None,
+        expected_enable=False,
+        expected_value=_value(),
+        next_revision="legacy-revision",
+        enabled=True,
+        value=_value(bots=[{"owner_id": "owner-1", "bot_id": "bot-1"}]),
+        audit=_audit("legacy-revision"),
+    )
+    config = CommonConfigRepository(database).get_by_biz_param(
+        business_code="skills_pool",
+        param_code="layout_rollout",
+        env="pre",
+    )
+    assert config is not None
+
+    assert repository.commit_change(
+        env="pre",
+        config_id=config.id,
+        expected_revision="legacy-revision",
+        expected_enable=True,
+        expected_value=_value(
+            bots=[{"owner_id": "owner-1", "bot_id": "bot-1"}]
+        ),
+        next_revision="policy-v2-revision",
+        enabled=True,
+        value=_v2_value(),
+        audit=_audit("policy-v2-revision"),
+    )
+
+    updated = CommonConfigRepository(database).get_by_id(config_id=config.id)
+    assert updated is not None
+    assert '"schema_version": 2' in (updated.param_value or "")
 
 
 def test_concurrent_first_config_insert_is_reported_as_cas_conflict() -> None:

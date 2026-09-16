@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 from agentclaw.community.core.skills_pool.recovery_service import (
     ManualRepairResolution,
 )
-from agentclaw.community.core.skills_pool.operations import RolloutControlGroup
 
 
 class ApiResponse(BaseModel):
@@ -16,59 +15,30 @@ class ApiResponse(BaseModel):
     data: Any = None
 
 
-class FeatureToggleRequest(BaseModel):
-    enabled: bool
+class PolicyMutationRequest(BaseModel):
+    expected_revision: str | None
     reason: str = Field(min_length=1)
 
 
-class FullRolloutRequest(BaseModel):
+class FeatureToggleRequest(PolicyMutationRequest):
     enabled: bool
-    engine: str | None = None
-    reason: str = Field(min_length=1)
 
 
-class OwnerFullRolloutRequest(BaseModel):
+class EngineAdmissionRequest(PolicyMutationRequest):
+    enabled: bool
+
+
+class BotPolicyRequest(PolicyMutationRequest):
     owner_id: str = Field(min_length=1)
     engine: str = Field(min_length=1)
-    enabled: bool
-    acceptance_batch_id: str | None = None
-    reason: str = Field(min_length=1)
 
 
-class EnginePromotionRequest(BaseModel):
-    engine: str
-    reason: str = Field(min_length=1)
-    acceptance_batch_id: str | None = None
+class OwnerPolicyRequest(PolicyMutationRequest):
+    engine: str = Field(min_length=1)
 
 
 class BotIdentityRequest(BaseModel):
     owner_id: str
-
-
-class WhitelistAddRequest(BotIdentityRequest):
-    bot_id: str
-    batch_id: str = Field(min_length=1)
-    acceptance_batch_id: str | None = None
-    reason: str = Field(min_length=1)
-
-
-class WhitelistRemoveRequest(BotIdentityRequest):
-    bot_id: str
-    reason: str = Field(min_length=1)
-
-
-class ControlBotRequest(BotIdentityRequest):
-    bot_id: str
-    batch_id: str = Field(min_length=1)
-    group: RolloutControlGroup
-    present: bool = True
-    reason: str = Field(min_length=1)
-
-
-class BatchAcceptanceRequest(BaseModel):
-    engine: str
-    batch_id: str = Field(min_length=1)
-    reason: str = Field(min_length=1)
 
 
 class RepairRequest(BotIdentityRequest):

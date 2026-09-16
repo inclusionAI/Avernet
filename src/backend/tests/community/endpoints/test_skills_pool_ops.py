@@ -37,6 +37,7 @@ from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from tests.community.framework import (
     CaseInput,
     ExpectError,
+    ExpectRetired,
     ExpectSuccess,
     bind_overrides,
     endpoint_test,
@@ -50,13 +51,11 @@ _SCOPE = BotSkillLayoutScope("dev", "entity-1", "bot-1")
 # new route shows up here as a deliberate edit.
 _ROLLOUT_MUTATIONS = (
     "set_feature_enabled",
-    "set_full_rollout",
-    "set_owner_full_rollout",
-    "promote_engine",
-    "add_bot",
-    "remove_bot",
-    "accept_batch",
-    "set_control_bot",
+    "set_engine_admission",
+    "set_environment_rollout",
+    "set_owner_rollout",
+    "set_bot_allow",
+    "set_bot_exclusion",
 )
 
 
@@ -113,87 +112,129 @@ _HAPPY_CASES = (
         "/api/ops/skills-pool/rollout/feature",
         CaseInput(
             headers=_HEADERS,
-            json_body={"enabled": True, "reason": "canary"},
-        ),
-    ),
-    (
-        "POST",
-        "/api/ops/skills-pool/rollout/promote",
-        CaseInput(
-            headers=_HEADERS,
-            json_body={"engine": "openclaw", "reason": "first engine"},
-        ),
-    ),
-    (
-        "POST",
-        "/api/ops/skills-pool/rollout/full",
-        CaseInput(
-            headers=_HEADERS,
-            json_body={"enabled": True, "reason": "promote environment"},
-        ),
-    ),
-    (
-        "POST",
-        "/api/ops/skills-pool/rollout/owners",
-        CaseInput(
-            headers=_HEADERS,
             json_body={
-                "owner_id": "owner-1",
-                "engine": "openclaw",
                 "enabled": True,
-                "acceptance_batch_id": "batch-1",
-                "reason": "promote owner bots",
-            },
-        ),
-    ),
-    (
-        "POST",
-        "/api/ops/skills-pool/rollout/whitelist",
-        CaseInput(
-            headers=_HEADERS,
-            json_body={
-                "owner_id": "owner-1",
-                "bot_id": "bot-1",
-                "batch_id": "batch-1",
+                "expected_revision": None,
                 "reason": "canary",
             },
         ),
     ),
     (
-        "POST",
-        "/api/ops/skills-pool/rollout/whitelist/remove",
+        "PUT",
+        "/api/ops/skills-pool/rollout/engines/{engine}/admission",
         CaseInput(
             headers=_HEADERS,
+            path_params={"engine": "openclaw"},
             json_body={
-                "owner_id": "owner-1",
-                "bot_id": "bot-1",
-                "reason": "remove",
+                "enabled": True,
+                "expected_revision": "revision-1",
+                "reason": "enable engine",
             },
         ),
     ),
     (
-        "POST",
-        "/api/ops/skills-pool/rollout/batches/accept",
+        "PUT",
+        "/api/ops/skills-pool/rollout/environments/{engine}",
         CaseInput(
             headers=_HEADERS,
+            path_params={"engine": "openclaw"},
+            json_body={
+                "expected_revision": "revision-1",
+                "reason": "promote environment",
+            },
+        ),
+    ),
+    (
+        "PUT",
+        "/api/ops/skills-pool/rollout/owners/{owner_id}",
+        CaseInput(
+            headers=_HEADERS,
+            path_params={"owner_id": "owner-1"},
             json_body={
                 "engine": "openclaw",
-                "batch_id": "batch-1",
-                "reason": "accepted",
+                "expected_revision": "revision-1",
+                "reason": "promote owner bots",
             },
         ),
     ),
     (
-        "POST",
-        "/api/ops/skills-pool/rollout/controls",
+        "PUT",
+        "/api/ops/skills-pool/rollout/bots/{bot_id}/allow",
         CaseInput(
             headers=_HEADERS,
+            path_params={"bot_id": "bot-1"},
             json_body={
                 "owner_id": "owner-1",
-                "bot_id": "bot-1",
-                "batch_id": "batch-1",
-                "group": "negative",
-                "reason": "control",
+                "engine": "openclaw",
+                "expected_revision": "revision-1",
+                "reason": "canary",
+            },
+        ),
+    ),
+    (
+        "PUT",
+        "/api/ops/skills-pool/rollout/bots/{bot_id}/exclude",
+        CaseInput(
+            headers=_HEADERS,
+            path_params={"bot_id": "bot-1"},
+            json_body={
+                "owner_id": "owner-1",
+                "engine": "openclaw",
+                "expected_revision": "revision-1",
+                "reason": "exclude",
+            },
+        ),
+    ),
+    (
+        "DELETE",
+        "/api/ops/skills-pool/rollout/environments/{engine}",
+        CaseInput(
+            headers=_HEADERS,
+            path_params={"engine": "openclaw"},
+            json_body={
+                "expected_revision": "revision-1",
+                "reason": "stop environment rollout",
+            },
+        ),
+    ),
+    (
+        "DELETE",
+        "/api/ops/skills-pool/rollout/owners/{owner_id}",
+        CaseInput(
+            headers=_HEADERS,
+            path_params={"owner_id": "owner-1"},
+            json_body={
+                "engine": "openclaw",
+                "expected_revision": "revision-1",
+                "reason": "stop owner rollout",
+            },
+        ),
+    ),
+    (
+        "DELETE",
+        "/api/ops/skills-pool/rollout/bots/{bot_id}/allow",
+        CaseInput(
+            headers=_HEADERS,
+            path_params={"bot_id": "bot-1"},
+            json_body={
+                "owner_id": "owner-1",
+                "engine": "openclaw",
+                "expected_revision": "revision-1",
+                "reason": "remove allow",
+            },
+        ),
+    ),
+    (
+        "DELETE",
+        "/api/ops/skills-pool/rollout/bots/{bot_id}/exclude",
+        CaseInput(
+            headers=_HEADERS,
+            path_params={"bot_id": "bot-1"},
+            json_body={
+                "owner_id": "owner-1",
+                "engine": "openclaw",
+                "expected_revision": "revision-1",
+                "reason": "remove exclusion",
             },
         ),
     ),
@@ -271,10 +312,30 @@ for _index, (_method, _path, _input) in enumerate(_HAPPY_CASES):
     )(lambda: None)
 
 
+for _index, _retired_path in enumerate(
+    (
+        "/api/ops/skills-pool/rollout/promote",
+        "/api/ops/skills-pool/rollout/full",
+        "/api/ops/skills-pool/rollout/whitelist",
+        "/api/ops/skills-pool/rollout/whitelist/remove",
+        "/api/ops/skills-pool/rollout/owners",
+        "/api/ops/skills-pool/rollout/batches/accept",
+        "/api/ops/skills-pool/rollout/controls",
+    )
+):
+    endpoint_test(
+        method="POST",
+        path=_retired_path,
+        scenario="retired",
+        input=CaseInput(headers=_HEADERS, json_body={"reason": "legacy client"}),
+        expect=ExpectRetired(),
+    )(lambda: None)
+
+
 _VALIDATION_ERRORS = tuple(
     (method, path, case_input)
     for method, path, case_input in _HAPPY_CASES
-    if method == "POST"
+    if method in {"POST", "PUT", "DELETE"}
 )
 
 for _index, (_method, _path, _input) in enumerate(_VALIDATION_ERRORS):
