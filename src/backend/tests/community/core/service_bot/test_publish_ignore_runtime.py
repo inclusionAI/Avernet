@@ -37,7 +37,7 @@ def setup():
             return_value=NS(
                 conn_info={
                     "url": "https://runtime.example/proxypass/target",
-                    "headers": {"x-proxypass-token": "private-test-value"},
+                    "headers": {"x-proxypass-token": "test-token"},
                 }
             )
         )
@@ -68,7 +68,7 @@ async def test_provider_and_signature(setup, provider):
         )
         call = runtime.http.post.call_args
         assert call.args[0].endswith(ENDPOINT)
-        assert call.kwargs["headers"] == {"x-proxypass-token": "private-test-value"}
+        assert call.kwargs["headers"] == {"x-proxypass-token": "test-token"}
         body = call.kwargs["json"]
     else:
         call = runtime.transport.invoke.call_args
@@ -100,13 +100,13 @@ async def test_provider_and_signature(setup, provider):
 async def test_failures_are_safe(setup, failure, status, caplog):
     runtime, binding, command, _ = setup
     if failure == "timeout":
-        runtime.transport.invoke.side_effect = TimeoutError("private-test-value")
+        runtime.transport.invoke.side_effect = TimeoutError("test-token")
     if failure == "error":
-        runtime.transport.invoke.side_effect = ValueError("private-test-value")
+        runtime.transport.invoke.side_effect = ValueError("test-token")
     if failure == "rejected":
         runtime.transport.invoke.return_value = {
             "success": False,
-            "token": "private-test-value",
+            "token": "test-token",
         }
     if failure == "invalid":
         runtime.transport.invoke.return_value = {"success": True, "data": {}}
@@ -115,8 +115,8 @@ async def test_failures_are_safe(setup, failure, status, caplog):
     with caplog.at_level("INFO"):
         result = await runtime.change(binding, "a", command, "operator")
     assert result["status"] == status
-    assert "private-test-value" not in str(result)
-    assert "private-test-value" not in caplog.text
+    assert "test-token" not in str(result)
+    assert "test-token" not in caplog.text
 
 
 @pytest.mark.asyncio

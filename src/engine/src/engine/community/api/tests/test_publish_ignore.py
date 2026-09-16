@@ -23,8 +23,8 @@ from engine.community.shared.credentials import CredentialsService
 
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
-    secret = Ed25519PrivateKey.generate()
-    monkeypatch.setenv("SERVICE_BOT_PUBLISH_IGNORE_VERIFY_KEY", secret.public_key().public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo).decode())
+    signing_key = Ed25519PrivateKey.generate()
+    monkeypatch.setenv("SERVICE_BOT_PUBLISH_IGNORE_VERIFY_KEY", signing_key.public_key().public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo).decode())
     monkeypatch.setattr(service, "IGNORE_FILE", tmp_path / "ignore")
     credentials = tmp_path / "credentials"
     credentials.write_text("BOT_ID=bot\nENTITY_ID=entity\nVERSION=V3\nSTAGE=online\n")
@@ -33,7 +33,7 @@ def setup(tmp_path, monkeypatch):
     app = FastAPI()
     app.include_router(router)
     attach_injector(app, Injector([PublishIgnoreModule()]))
-    return TestClient(app), secret, credentials
+    return TestClient(app), signing_key, credentials
 
 
 def payload(secret, path="workspace/cache", operation="add"):
