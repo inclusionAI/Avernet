@@ -40,6 +40,10 @@ if TYPE_CHECKING:
 class BaasServiceProtocol(Protocol):
     """BaaS-layer service: bot publish / restart / destroy / inspection."""
 
+    def get_device_template(self, template_uuid: str) -> Dict[str, Any]:
+        """Return tenant-scoped template data; callers own readiness decisions."""
+        ...
+
     def resolve_token_outbound_device_id(
         self, binding: DeviceBindingRecord | None,
     ) -> str:

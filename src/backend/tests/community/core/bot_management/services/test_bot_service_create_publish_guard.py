@@ -31,6 +31,7 @@ from agentclaw.community.core.devices.repository.record import DeviceBindingReco
 def _make_service() -> tuple[BotService, MagicMock]:
     """Minimal BotService able to run create_bot to the publish-record step."""
     svc = BotService.__new__(BotService)
+    svc._bot_storage_policy = None
     svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._repository.count_by_owner.return_value = 0

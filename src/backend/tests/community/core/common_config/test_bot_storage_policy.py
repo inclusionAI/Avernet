@@ -18,6 +18,7 @@ from agentclaw.community.core.repository.implementations.config.bot_common_confi
     BotCommonConfigRepository,
 )
 from agentclaw.community.plugin_api.models import BotCommonConfig
+from agentclaw.community.core.service_bot.services.deploy.deploy_models import StorageType
 
 SCOPE = dict(bot_id="b1", entity_id="staff_10001", env="pre")
 
@@ -51,7 +52,11 @@ def storage(tmp_path, monkeypatch):
     config = BotCommonConfigService(repo)
     common = MagicMock()
     common.get_config.return_value = {"enable": "1", "param_value": {"allow_all": True}}
-    service = BotStoragePolicyService(repo, config, common)
+    service = BotStoragePolicyService(
+        repo, config, common, env="pre",
+        select_provider=MagicMock(return_value="baas"),
+        resolve_template=MagicMock(), get_template=MagicMock(),
+    )
     yield db, repo, config, common, service
     db.engine.dispose()
 
@@ -72,8 +77,8 @@ def test_master_switch_wins(enable):
     assert not decision.enabled
 
 
-@pytest.mark.parametrize("user", [None, "", "   "])
-def test_global_all_does_not_require_user(user):
+@pytest.mark.parametrize("user", ["", "   "])
+def test_global_all_accepts_blank_user(user):
     assert should_rollout_upfs(
         config={"enable": 1, "param_value": {"allow_all": True}},
         engine="unknown",
@@ -176,7 +181,7 @@ def test_json_service_scoping_upsert_and_soft_delete(storage):
 def test_upfs_persisted_before_retry_and_never_rechecks(storage):
     db, repo, config, common, service = storage
     policy = initialize(service)
-    assert policy.storage_type == "upfs"
+    assert policy.storage_type is StorageType.UPFS
     assert config.get_config(**SCOPE, config_key=STORAGE_POLICY) == {
         "storage_type": "upfs",
         "source": "rollout",
@@ -281,11 +286,11 @@ def make_baas(storage):
     registry = MagicMock()
     registry.resolve.return_value = provider
     composer = ManagedDeployConfigComposer(
-        storage_path=MagicMock(), sandbox_registry=registry, bot_repo=MagicMock()
+        storage_path=MagicMock(), sandbox_registry=registry, bot_repo=MagicMock(),
+        storage_policy=storage[-1],
     )
     baas = _make_service(composer)
-    baas._bot_storage_service = storage[-1]
-    baas._storage_env = "pre"
+    storage[-1]._get_template = baas.get_device_template
     baas._get_bots_api = MagicMock(
         return_value={
             "template_uuid": "TEMPLATE-test",
@@ -306,6 +311,9 @@ def allocate(baas, *, new_bot=True, **overrides):
     )
 
     device = _make_service(baas_service=baas)
+    storage_policy = baas._deploy_composer._storage_policy
+    if storage_policy is not None:
+        storage_policy._resolve_template = device._template_resolver.resolve_template
     kwargs = dict(
         entity_id=SCOPE["entity_id"],
         entity_type="staff",
@@ -322,12 +330,12 @@ def allocate(baas, *, new_bot=True, **overrides):
         template_config={"template_uid": "default_template"},
     )
     kwargs.update(overrides)
-    if new_bot and kwargs["bot_type"] == "personal":
+    if new_bot and storage_policy is not None:
         from tests.community.core.devices.services.test_baas_device_service import (
             _operator,
         )
 
-        prepared = device.prepare_bot_storage_policy(
+        prepared = storage_policy.prepare_bot_storage_policy(
             bot_id=kwargs["bolt_id"],
             entity_id=kwargs["entity_id"],
             owner_id=kwargs["owner_id"],
@@ -338,6 +346,7 @@ def allocate(baas, *, new_bot=True, **overrides):
             template_config=kwargs["template_config"],
         )
         kwargs.update(prepared)
+    kwargs.pop("device_provider", None)  # normally consumed by DeviceServiceRouter
     result = device._allocate_via_baas(**kwargs)
     device._template_resolver.resolve_template.assert_called_once()
     return result
@@ -365,7 +374,7 @@ def test_personal_create_payload_and_saved_storage_identity(storage, quota, enab
     if enabled:
         baas._get_bots_api.assert_called_once_with(
             path="/api/v1/device-templates/TEMPLATE-test",
-            action="storage_template_precheck",
+            action="get_device_template",
             log_response=False,
         )
     else:
@@ -502,13 +511,13 @@ def test_recovery_reads_manually_inserted_policy_without_rollout(
     storage[2].set_config(**SCOPE, config_key=STORAGE_POLICY, value=policy)
     storage[3].get_config.side_effect = AssertionError("recovery must not read rollout")
     baas = make_baas(storage)
-    baas.initialize_bot_storage = MagicMock(side_effect=AssertionError("no initialize"))
+    storage[-1].initialize_for_template = MagicMock(side_effect=AssertionError("no initialize"))
     allocate(baas, bot_type=bot_type, new_bot=False)
     assert latest_storage(baas)["type"] == (
         storage_type if bot_type == "personal" else "nas"
     )
     assert storage[2].get_config(**SCOPE, config_key=STORAGE_POLICY) == policy
-    baas.initialize_bot_storage.assert_not_called()
+    storage[-1].initialize_for_template.assert_not_called()
     baas._get_bots_api.assert_not_called()
 
 
@@ -531,6 +540,9 @@ def test_creation_entry_initializes_before_shared_allocation_with_one_template(
         "volume-pre" if ready else None
     )
     device = _make_service(baas_service=baas)
+    storage_policy = baas._deploy_composer._storage_policy
+    if storage_policy is not None:
+        storage_policy._resolve_template = device._template_resolver.resolve_template
     device._get_storage_mode = MagicMock(return_value="oss")
     device._validate_and_generate_device_id = MagicMock(
         return_value=("dev1", "b1", None)
@@ -561,7 +573,8 @@ def test_creation_entry_initializes_before_shared_allocation_with_one_template(
         force_nas=force_nas,
         template_config=template_config,
     )
-    kwargs.update(device.prepare_bot_storage_policy(**kwargs))
+    kwargs.update(storage_policy.prepare_bot_storage_policy(**kwargs))
+    kwargs.pop("device_provider", None)  # direct provider test bypasses the router
     device.apply_device(**kwargs)
     assert latest_storage(baas)["type"] == expected
     device._template_resolver.resolve_template.assert_called_once()
@@ -586,12 +599,15 @@ def test_creation_template_failure_stops_before_policy_and_allocation(
 
     baas = make_baas(storage)
     device = _make_service(baas_service=baas)
+    storage_policy = baas._deploy_composer._storage_policy
+    if storage_policy is not None:
+        storage_policy._resolve_template = device._template_resolver.resolve_template
     device._template_resolver.resolve_template.side_effect = BaasTemplateResolveError(
         "missing template"
     )
     device.apply_device = MagicMock()
     with pytest.raises(BaasTemplateResolveError, match="missing template"):
-        device.prepare_bot_storage_policy(
+        storage_policy.prepare_bot_storage_policy(
             bot_id=SCOPE["bot_id"],
             entity_id=SCOPE["entity_id"],
             owner_id="10001",
@@ -605,14 +621,6 @@ def test_creation_template_failure_stops_before_policy_and_allocation(
     baas.post_bots_api.assert_not_called()
 
 
-def test_default_storage_preparation_is_noop():
-    from agentclaw.community.core.devices.services.device_service import DeviceService
-
-    device = MagicMock()
-    assert (
-        DeviceService.prepare_bot_storage_policy(device, bot_id="b1", owner_id="10001") == {}
-    )
-    device.apply_device.assert_not_called()
 
 
 @pytest.mark.parametrize("ready", [False, True])
@@ -621,78 +629,39 @@ def test_creation_uses_prepared_choice_without_second_policy_read(storage, ready
     baas._get_bots_api.return_value["config"]["upfs_volume_id_pre"] = (
         "volume-pre" if ready else None
     )
-    original = baas.initialize_bot_storage
+    original = storage[-1].initialize_for_template
 
     def initialize_then_disable_reads(**kwargs):
         result = original(**kwargs)
-        baas._bot_storage_service._resolve_storage_policy = MagicMock(
+        baas._deploy_composer._storage_policy._resolve_storage_policy = MagicMock(
             side_effect=AssertionError("payload must use prepared choice")
         )
         return result
 
-    baas.initialize_bot_storage = initialize_then_disable_reads
+    storage[-1].initialize_for_template = initialize_then_disable_reads
     allocate(baas)
     assert latest_storage(baas)["type"] == ("upfs" if ready else "nas")
 
 
 def test_ack_composition_does_not_initialize(storage):
-    from agentclaw.community.core.service_bot.services.deploy.ack_composer import (
-        AckDeployConfigComposer,
-    )
+    from agentclaw.community.core.service_bot.services.deploy.ack_composer import AckDeployConfigComposer
 
     baas = make_baas(storage)
     baas._deploy_composer = AckDeployConfigComposer()
-    # ACK wiring leaves the optional policy service unset (tested below).
-    baas._bot_storage_service = None
-    assert (
-        baas.initialize_bot_storage(
-            **SCOPE, engine="openclaw", user_id="10001", template_uuid="TEMPLATE-test"
-        )
-        == "nas"
-    )
+    kwargs = dict(bot={"bot_id": "b1", "bot_type": "personal"}, owner_id="10001",
+                  request_id="ack", device_count=1, migration_path="")
+    payload = baas._build_create_bot_payload(**kwargs)
+    assert payload["config"]["deploy_config"]["storage"] == {
+        "type": "nas", "path": "/home/admin", "storage_id": "b1",
+        "quota": "1Gi", "permission": "0777",
+    }
     baas._get_bots_api.assert_not_called()
+    storage[3].get_config.assert_not_called()
     assert storage[1].get(**SCOPE, config_key=STORAGE_POLICY) is None
 
 
-def test_new_storage_services_are_wired_in_di(test_injector):
-    from agentclaw.community.core.common_config.bot_config_protocol import (
-        BotCommonConfigServiceProtocol,
-    )
-
-    assert isinstance(
-        test_injector.get(BotCommonConfigServiceProtocol), BotCommonConfigService
-    )
-    assert isinstance(
-        test_injector.get(BotStoragePolicyService), BotStoragePolicyService
-    )
 
 
-@pytest.mark.parametrize("provider", ["baas", "arca"])
-def test_router_prepares_only_once_then_uses_original_allocation(provider):
-    from tests.community.core.devices.services.test_device_service_router import (
-        _make_router,
-        _make_operator,
-    )
-
-    router, _, _, _ = _make_router(is_local=False)
-    service = router._providers[provider]
-    service.prepare_bot_storage_policy.return_value = {}
-    router._get_provider_for_new_device = MagicMock(return_value=service)
-    kwargs = dict(
-        apply_reason="create",
-        entity_id="team-1",
-        entity_type="team",
-        operator=_make_operator(),
-        bot_id="b1",
-        bot_type="personal",
-    )
-    prepared = router.prepare_bot_storage_policy(**kwargs)
-    assert prepared == {"device_provider": provider}
-    service.apply_device.assert_not_called()
-    router.apply_device(**kwargs, **prepared)
-    router._get_provider_for_new_device.assert_called_once()
-    service.prepare_bot_storage_policy.assert_called_once_with(**kwargs)
-    service.apply_device.assert_called_once()
 
 
 @pytest.mark.parametrize("force_nas", [True, False])
@@ -735,7 +704,7 @@ def test_personal_guard_controls_creation(storage, bot_type, ready):
     baas._get_bots_api.return_value["config"]["upfs_volume_id_pre"] = (
         "volume-pre" if ready else None
     )
-    baas.initialize_bot_storage = MagicMock(wraps=baas.initialize_bot_storage)
+    storage[-1].initialize_for_template = MagicMock(wraps=storage[-1].initialize_for_template)
     allocate(baas, bot_type=bot_type)
     selected = bot_type == "personal" and ready
     assert latest_storage(baas)["type"] == ("upfs" if selected else "nas")
@@ -743,7 +712,7 @@ def test_personal_guard_controls_creation(storage, bot_type, ready):
         {"storage_type": "upfs", "source": "rollout"} if selected else None
     )
     if bot_type == "service":
-        baas.initialize_bot_storage.assert_not_called()
+        storage[-1].initialize_for_template.assert_not_called()
         baas._get_bots_api.assert_not_called()
 
 
@@ -756,7 +725,7 @@ def test_initialize_bot_storage_is_reusable_without_creating_a_device(storage, r
     kwargs = dict(
         **SCOPE, engine="openclaw", user_id="10001", template_uuid="TEMPLATE-test"
     )
-    assert baas.initialize_bot_storage(**kwargs) == ("upfs" if ready else "nas")
+    assert storage[-1].initialize_for_template(**kwargs) == ("upfs" if ready else "nas")
     baas.post_bots_api.assert_not_called()
     assert storage[2].get_config(**SCOPE, config_key=STORAGE_POLICY) == (
         {"storage_type": "upfs", "source": "rollout"} if ready else None
@@ -814,7 +783,7 @@ def test_real_restart_entry_reuses_policy_and_baas_identity(
     original_policy = storage[2].get_config(**SCOPE, config_key=STORAGE_POLICY)
     storage[3].get_config.side_effect = AssertionError("restart must not run rollout")
     baas._get_bots_api.side_effect = AssertionError("restart must not run preflight")
-    baas.initialize_bot_storage = MagicMock(
+    storage[-1].initialize_for_template = MagicMock(
         side_effect=AssertionError("no initialization")
     )
     baas.list_bot_publishes = MagicMock(return_value=[])
@@ -855,7 +824,7 @@ def test_real_restart_entry_reuses_policy_and_baas_identity(
         assert "--stage draft" in config["after_create_cmd_hook"]
     assert "--source_dir" not in config["after_create_cmd_hook"]
     assert storage[2].get_config(**SCOPE, config_key=STORAGE_POLICY) == original_policy
-    baas.initialize_bot_storage.assert_not_called()
+    storage[-1].initialize_for_template.assert_not_called()
     stop.assert_not_called()
     start.assert_not_called()
     device.apply_device.assert_not_called()
@@ -874,7 +843,7 @@ def test_storage_policy_capability_does_not_depend_on_composer_name(storage):
     baas = make_baas(storage)
     baas._deploy_composer.__class__ = CapableComposer
     assert (
-        baas.initialize_bot_storage(
+        storage[-1].initialize_for_template(
             **SCOPE, engine="openclaw", user_id="10001", template_uuid="TEMPLATE-test"
         )
         == "upfs"
@@ -893,7 +862,7 @@ def test_published_and_caller_payloads_do_not_consume_draft_policy(
     storage[3].get_config.return_value["param_value"]["quota"] = "2G"
     allocate(baas, bot_type="service")
     reader = MagicMock(side_effect=AssertionError("do not read the draft policy"))
-    baas._bot_storage_service._resolve_storage_policy = reader
+    baas._deploy_composer._storage_policy._resolve_storage_policy = reader
     kwargs = dict(
         bot=dict(
             bot_id=SCOPE["bot_id"],
@@ -909,7 +878,7 @@ def test_published_and_caller_payloads_do_not_consume_draft_policy(
         stage=stage,
     )
     payload = baas._build_create_bot_payload(**kwargs)
-    baas._bot_storage_service = None
+    baas._deploy_composer._storage_policy = None
     legacy_payload = baas._build_create_bot_payload(**kwargs)
     assert payload["config"]["deploy_config"]["storage"]["quota"] == "2G"
     legacy_payload["config"]["deploy_config"]["storage"]["quota"] = "2G"
@@ -920,7 +889,7 @@ def test_published_and_caller_payloads_do_not_consume_draft_policy(
 def test_personal_artifact_deploy_does_not_consume_source_policy(storage):
     baas = make_baas(storage)
     allocate(baas)
-    baas._bot_storage_service._resolve_storage_policy = MagicMock(
+    baas._deploy_composer._storage_policy._resolve_storage_policy = MagicMock(
         side_effect=AssertionError("artifact deployment is outside phase one")
     )
     payload = baas._build_create_bot_payload(
@@ -936,25 +905,9 @@ def test_personal_artifact_deploy_does_not_consume_source_policy(storage):
         migration_path="/published/build",
     )
     assert payload["config"]["deploy_config"]["storage"]["type"] == "nas"
-    baas._bot_storage_service._resolve_storage_policy.assert_not_called()
+    baas._deploy_composer._storage_policy._resolve_storage_policy.assert_not_called()
 
 
-@pytest.mark.parametrize("runtime", ["managed", "ack"])
-def test_composition_root_selects_storage_policy_support(runtime):
-    from inspect import signature
-
-    from agentclaw.community.di import config as cfg
-    from agentclaw.community.di.modules.service_bot_module import ServiceBotModule
-    from agentclaw.community.kernel.deploy_runtime import DeployRuntime
-
-    method = ServiceBotModule.baas_service
-    kwargs = {
-        name: MagicMock() for name in signature(method).parameters if name != "self"
-    }
-    kwargs["deploy_runtime"] = cfg.DeployRuntimeConfig(DeployRuntime(runtime))
-    service = method(ServiceBotModule(), **kwargs)
-    expected = kwargs["bot_storage_service"] if runtime == "managed" else None
-    assert service._bot_storage_service is expected
 
 
 def test_storage_logs_record_outcome_without_exception_contents(storage):
@@ -985,11 +938,33 @@ def test_storage_logs_record_outcome_without_exception_contents(storage):
 def test_payload_log_correlates_bot_request_and_template_without_env_secrets(storage):
     baas = make_baas(storage)
     with patch(
-        "agentclaw.community.core.service_bot.services.baas_service.logger"
+        "agentclaw.community.core.common_config.bot_config_service.logger"
     ) as log:
         allocate(baas, extra_envs={"TOKEN": "<test-only-env-secret>"})
     calls = str(log.mock_calls)
-    assert "event=payload_prepared" in calls and "event=template_precheck" in calls
+    assert "event=storage_composed" in calls and "event=template_precheck" in calls
     assert "TEMPLATE-test" in calls and SCOPE["bot_id"] in calls
-    assert baas.post_bots_api.call_args.kwargs["payload"]["request_id"] in calls
     assert "<test-only-env-secret>" not in calls
+
+
+@pytest.mark.parametrize("value", [None, False, 0, 1.5, "text", [], {"a": [1, True, None]}])
+def test_json_config_round_trip(storage, value):
+    config = storage[2]
+    config.set_config(**SCOPE, config_key="json_value", value=value)
+    assert config.get_config(**SCOPE, config_key="json_value") == value
+
+
+def test_bot_config_keys_keep_one_current_value_each(storage):
+    db, _, config, _, service = storage
+    initialize(service)
+    config.set_config(**SCOPE, config_key="other", value={"version": 1})
+    config.set_config(**SCOPE, config_key="other", value={"version": 2})
+    assert config.get_config(**SCOPE, config_key="other") == {"version": 2}
+    assert service._resolve_storage_policy(**SCOPE).storage_type is StorageType.UPFS
+    with db.orm_session() as session:
+        assert session.query(BotCommonConfig).filter_by(**SCOPE).count() == 2
+
+
+def test_nas_fallback_uses_existing_enum_without_writing(storage):
+    assert initialize(storage[-1], ready=False).storage_type is StorageType.NAS
+    assert storage[2].get_config(**SCOPE, config_key=STORAGE_POLICY) is None

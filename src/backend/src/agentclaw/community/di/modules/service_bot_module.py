@@ -144,7 +144,7 @@ from agentclaw.community.core.service_bot.services.service_publication_facade im
 from agentclaw.community.core.service_bot.services.service_edit_lock_service import (
     ServiceEditLockService,
 )
-from agentclaw.community.core.common_config.bot_config_service import BotStoragePolicyService
+from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.core.system_config import SystemConfigService
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
 from agentclaw.community.core.workspace.engines import create_engine_sandbox_registry
@@ -235,6 +235,7 @@ class ServiceBotModule(Module):
         deploy_runtime: cfg.DeployRuntimeConfig,
         bot_repo: BotRepository,
         sandbox_registry: EngineSandboxRegistry,
+        storage_policy: BotStoragePolicyProtocol,
     ) -> DeployConfigComposer:
         """Select the composer for the container this deployment runs.
 
@@ -253,6 +254,7 @@ class ServiceBotModule(Module):
                     storage_path=storage_path,
                     sandbox_registry=sandbox_registry,
                     bot_repo=bot_repo,
+                    storage_policy=storage_policy,
                 )
             case DeployRuntime.ACK:
                 composer = AckDeployConfigComposer()
@@ -286,8 +288,6 @@ class ServiceBotModule(Module):
         common_whitelist_service: CommonWhiteListService,
         outbound_rule_provider: OutboundRuleProvider,
         startup_script_service: BotStartupScriptServiceProtocol,
-        bot_storage_service: BotStoragePolicyService,
-        deploy_runtime: cfg.DeployRuntimeConfig,
     ) -> BaasService:
         """Construct ``BaasService`` from typed bindings.
 
@@ -324,14 +324,6 @@ class ServiceBotModule(Module):
             outbound_rule_provider=outbound_rule_provider,
             theta_master_key_secret=secret_names.aicoding_theta_master_key,
             startup_script_reader=startup_script_service,
-            # Select storage-policy support alongside the deployment runtime.
-            # Core/payload composition never inspects a composer's identity.
-            bot_storage_service=(
-                bot_storage_service
-                if deploy_runtime.runtime == DeployRuntime.MANAGED
-                else None
-            ),
-            storage_env=env_utils.get_current_env(),
         )
         logger.info(
             "[NEW-ARCH] BaasService initialized: api_base=%s, tenant=%s, template_uuid=%s, "

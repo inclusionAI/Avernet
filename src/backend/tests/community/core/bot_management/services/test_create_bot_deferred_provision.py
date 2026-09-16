@@ -83,6 +83,7 @@ def _device_result() -> DeviceBindingRecord:
 
 def _service(log: list, *, teclaw: bool = False) -> BotService:
     svc = BotService.__new__(BotService)
+    svc._bot_storage_policy = None
     svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = _Repo(log)
     svc._allocation_config = SimpleNamespace(mode="multi", max_devices_per_entity=10)
