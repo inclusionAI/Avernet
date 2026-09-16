@@ -149,7 +149,7 @@ class DingTalkNotifySender(NotifySenderPlugin):
         *,
         channel: str = "markdown",
     ) -> str | None:
-        log.debug("[task_discovery] → DingTalkNotifySender.send(title=%r, recipient=%s, channel=%s)", message.title[:80], message.recipient, channel)
+        log.info("[task_discovery] → DingTalkNotifySender.send(title=%r, recipient=%s, channel=%s)", message.title[:80], message.recipient, channel)
         # 先照常走 inner 通道（日志/兜底），再额外投递钉钉卡片。两者同时进行。
         msg_id = self._inner.send(message, channel=channel)
         try:
@@ -170,7 +170,7 @@ class DingTalkNotifySender(NotifySenderPlugin):
     @staticmethod
     def _resolve(key: str, env_name: str, env_fallback: str) -> str:
         """优先级：API holder > YAML holder > env。"""
-        log.debug("[task_discovery] → DingTalkNotifySender._resolve(key=%s)", key)
+        log.info("[task_discovery] → DingTalkNotifySender._resolve(key=%s)", key)
         val = DingTalkCredentialHolder.get(key)
         if val:
             return val
@@ -208,7 +208,7 @@ class DingTalkNotifySender(NotifySenderPlugin):
         )
 
     def _send_dingtalk_card(self, message: NotifyMessage) -> None:
-        log.debug("[task_discovery] → DingTalkNotifySender._send_dingtalk_card()")
+        log.info("[task_discovery] → DingTalkNotifySender._send_dingtalk_card()")
         if not self._configured():
             # 诊断：逐个检出哪个凭证缺失及其来源
             missing: list[str] = []
