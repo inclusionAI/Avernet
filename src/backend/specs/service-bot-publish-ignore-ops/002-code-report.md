@@ -40,7 +40,18 @@ Events carry request correlation, the real operator where available, exact targe
 
 Initial focused checks: Backend 35 cases, Docker dispatcher 9 cases, Engine 44 cases passed. Full Engine suite: 2,692 passed, 5 pre-existing corp-only deselections, 93.50% total line coverage. The local report command initially selected an old system Python; re-running with the project Python 3.12 passed the case and total-coverage gates.
 
-The first complete Backend run found four actionable gate failures (new endpoint registry coverage and contract import direction), with 18,755 passed and 43 existing skips. These are being corrected without new exemptions or lower thresholds. Final review/regression and PR results are recorded in their separate reports; these initial figures are not a final PASS claim.
+The first complete Backend run found four actionable gate failures (new endpoint registry coverage and contract import direction), with 18,755 passed and 43 existing skips. All four were corrected without new exemptions or lower thresholds: shared command/error/target values now live in `kernel.publish_ignore`, the new endpoint has registered happy/error scenarios, and consumer-to-runtime contracts exercise actual service/DI resolution. Review also added restart-in-progress rejection and a post-delivery publication-binding snapshot check.
+
+Final local complete suites at feature commit `f21ea371b` against base `e12a495a2`:
+
+| Gate | Backend | Engine |
+| --- | --- | --- |
+| Test execution | 18,781 passed; 43 existing skips | 2,692 passed; 5 existing corp-only deselections |
+| Repository case-rate gate | 18,824/18,824 (includes skipped cases by existing checker semantics) | 2,692/2,692 |
+| Total line coverage | 89.16% | 93.50% |
+| Changed executable lines | 210/211 = 99.53% | 395/396 = 99.75% |
+
+Both changed-line results were explicitly checked against 90%, not merely Backend's default 80%. Legacy Skill compatibility, Python SAST block-rule scans for both components, shell syntax and diff whitespace checks passed. Remote PR checks are a separate gate and remain pending until recorded in `008-aci-report.md`.
 
 ## Rollout and limits
 
