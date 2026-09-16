@@ -1533,13 +1533,13 @@ class BotService(BotServiceProtocol):
 
             # Step 1.5: Create template record if template_config is provided
             if template_type and template_config is not None:
-                # 需要创建 DIMA 空间：applicationCoding，或开启
-                # dima_workspace（template_config.bot_template_config.capabilities.dima_workspace == true）。
-                needs_dima_workspace = (
+                # 需要创建托管工作空间：applicationCoding，或显式开启 workspace 托管能力
+                # （template_config.bot_template_config.capabilities.dima_workspace == true）。
+                needs_hosted_workspace = (
                     template_type == "applicationCoding"
                     or has_dima_workspace_enabled(template_config)
                 )
-                if needs_dima_workspace:
+                if needs_hosted_workspace:
                     # A coding bot without a hosted workspace is unusable, so a
                     # failed workspace create is fatal here (unlike a plain bot,
                     # where template creation stays best-effort). The already-
@@ -1591,8 +1591,8 @@ class BotService(BotServiceProtocol):
                     logger.info(f"[bot_service.create_bot] Template created for bot {bot_id}")
                 except Exception as e:
                     logger.error(f"[bot_service.create_bot] Failed to create template for bot {bot_id}: {e}", exc_info=True)
-                    if needs_dima_workspace:
-                        # 需要存放 dima_space_id 的 template 记录必须成功：hosting 已
+                    if needs_hosted_workspace:
+                        # 需存放 workspace id（dima_space_id）的 template 记录必须成功：hosting 已
                         # 成功但本地持久化失败时回滚 bot 行并报错。
                         self._repository.soft_delete_by_owner(bot_id, user_id)
                         raise BotServiceError(
@@ -6231,13 +6231,13 @@ class BotService(BotServiceProtocol):
             default="",
         )
         template_config = self._template_service.get_template_config(bot_id) or {}
-        # 允许创建 DIMA 空间：applicationCoding，或显式开启 dima_workspace。
+        # 允许创建托管工作空间：applicationCoding，或显式开启 workspace 托管能力。
         if not (
             template_type == "applicationCoding"
             or has_dima_workspace_enabled(template_config)
         ):
             raise BotServiceError(
-                f"Bot {bot_id} 未开启 dima_workspace，无法创建 DIMA 空间"
+                f"Bot {bot_id} 未开启 workspace 托管能力，无法创建托管工作空间"
                 f"（template_type={template_type}, active_engine={active_engine or None}）"
             )
 

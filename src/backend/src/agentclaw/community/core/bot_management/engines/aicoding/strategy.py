@@ -347,7 +347,7 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                 raise BotTemplateInvalidError(
                     f"template_config contains server-managed fields: {reserved}"
                 )
-        # 工厂快照默认不要求 DIMA 托管；仅当显式开启 dima_workspace 时才要求，在取值处直接判定。
+        # 工厂快照默认不要求托管工作空间；仅当显式开启 workspace 托管能力时才要求，在取值处直接判定。
         sanitized = to_internal_template_config(template, reject_server_managed_fields=False)
         return PreparedBotCreate(
             template_type=declarative_type,

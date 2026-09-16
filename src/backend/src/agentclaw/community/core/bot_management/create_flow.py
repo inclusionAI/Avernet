@@ -119,7 +119,7 @@ def _prepare_legacy_non_application_template(
             is BotCreateTemplateValidationMode.PUBLIC
         ),
     )
-    # 在 requires_workspace_hosting 的取值处直接或上 dima_workspace 开关：
+    # 在 requires_workspace_hosting 的取值处直接或上 workspace 托管开关：
     # 仅当显式开启时才需要托管，非 applicationCoding 的手工 bot 默认不需要，
     # 不在 _prepare_create 末尾用兜底覆盖重新决定该值。
     return PreparedBotCreate(

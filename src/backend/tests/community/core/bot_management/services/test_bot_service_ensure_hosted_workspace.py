@@ -194,7 +194,7 @@ class TestEnsureDimaWorkspace:
         with pytest.raises(BotServiceError) as exc_info:
             BotService.ensure_hosted_workspace(svc, "bot-001", "owner-1")
 
-        assert "dima_workspace" in str(exc_info.value)
+        assert "workspace" in str(exc_info.value)
         svc._workspace_hosting_service.create_workspace_for_bot.assert_not_called()
 
     def test_propagates_dima_error(self):
