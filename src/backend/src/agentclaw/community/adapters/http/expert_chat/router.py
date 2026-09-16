@@ -621,7 +621,7 @@ async def get_caller_connection_for_application(
         ExpertChatInstanceServiceProtocol
     ),
 ):
-    """Connect an existing caller instance for the authenticated BaaS service."""
+    """Create or connect a caller instance for the authenticated BaaS service."""
     started_at = time.perf_counter()
     context = {
         "system": "backend", "direction": "inbound",

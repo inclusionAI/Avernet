@@ -20,7 +20,7 @@
 
 请求中即使携带principals、app_id或tenant，也不将它们用于鉴权或租户路由。Backend使用该服务入口既有的服务端租户上下文/配置访问数据，不从未校验的请求字段切换租户。“不校验tenant”不等于新增跨所有租户扫描或查询能力。
 
-签名证明调用来自持有受信任密钥的签发方，不证明某个终端用户或独立应用的身份。Bot存在、已有有效Caller实例等业务检查仍保留。
+签名证明调用来自持有受信任密钥的签发方，不证明某个终端用户或独立应用的身份。保留Bot存在和发布产物等业务检查；允许首次创建Caller实例及容器。
 
 ## 2. HTTP传输
 
@@ -28,7 +28,7 @@
 X-Avernet-Principal: <完整JWT>
 ```
 
-调用链：BaaS生成JWT → 请求Backend → Backend按BaaS服务协议验签 → 进入已有Caller连接业务。
+调用链：BaaS生成JWT → 请求Backend → Backend按BaaS服务协议验签 → 进入Caller创建、复用或升级流程。
 
 - Header直接传原始JWT，不加 `Bearer `。
 - 不将整个JWT再次Base64或URL编码，不传JSON对象或单独的签名段。
@@ -117,7 +117,7 @@ BaaS与Backend必须通过受控配置加载相同密钥字节，禁止将密钥
   → 校验iss=baas、必填iat/exp及可选nbf
   → 不解析principals，不校验app_id/tenant/aud
   → 使用既有服务端数据上下文
-  → 检查Bot及有效已有Caller实例
+  → 检查Bot并进入Caller创建、复用或升级流程
   → 执行连接业务
 ```
 
@@ -129,7 +129,7 @@ BaaS与Backend必须通过受控配置加载相同密钥字节，禁止将密钥
 {"detail":"Unauthorized"}
 ```
 
-Bot不存在、实例不存在或缺少有效bot_uuid属于业务失败，与签名失败分开处理。既有接口可能返回HTTP200并携带 `success=false, error_code=403`，调用方不能只看HTTP200。
+Bot不存在属于业务失败，与签名失败分开处理。实例不存在或没有bot_uuid时进入底层创建流程，仍需满足发布产物等生命周期条件。既有接口可能返回HTTP200并携带 `success=false, error_code=403`，调用方不能只看HTTP200。
 
 ## 7. 验收要求
 
@@ -142,7 +142,7 @@ Bot不存在、实例不存在或缺少有效bot_uuid属于业务失败，与签
 | 错误密钥、错误算法、未签名或签名后改Payload | 401 |
 | iss=gateway、iss缺失或其他值 | 此BaaS协议401 |
 | 缺iat或exp、已过期或未来iat/nbf超出容差 | 401 |
-| 鉴权成功但缺少有效已有实例 | 按既有业务错误返回，不首次创建 |
+| 鉴权成功但实例不存在或没有bot_uuid | 进入底层实例/容器创建流程 |
 | 其他使用网关Principal的接口 | 原有issuer/身份/租户验证行为不变 |
 
 ## 8. 实现范围

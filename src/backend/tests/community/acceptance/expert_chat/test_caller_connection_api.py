@@ -759,8 +759,8 @@ def _application_headers(app_id: int | None = None) -> dict[str, str]:
 
 
 @pytest.mark.acceptance
-def test_application_caller_requires_existing_instance(live_backend):
-    """Any app may target a private nonmember caller, but cannot create an instance."""
+def test_application_caller_requires_published_bot(live_backend):
+    """BaaS reaches lifecycle validation even before an instance exists."""
     import json
 
     owner_id = fresh_id("app_caller_owner")
@@ -772,7 +772,7 @@ def test_application_caller_requires_existing_instance(live_backend):
         _seed_service_bot(client, owner_id=owner_id, bot_id=bot_id, bot_name="Application Caller Authorization")
         denied = client.post(route, params=params, headers=_application_headers())
         assert denied.status_code == 200, denied.text
-        assert denied.json()["error_code"] == 403, denied.text
+        assert denied.json()["error_code"] == 5999, denied.text
         _execute_local_sql(client, [{
             "sql": "INSERT INTO ac_expert_chat_instance (user_id, bot_id, owner_id, env, status, ext) VALUES (:user_id, :bot_id, :owner_id, 'dev', 'success', :ext)",
             "params": {**params, "ext": json.dumps({"bot_uuid": "existing-singlebox-caller", "version": 1})},
@@ -794,8 +794,8 @@ def test_application_caller_requires_existing_instance(live_backend):
 
 
 @pytest.mark.acceptance
-def test_any_application_reuses_private_nonmember_instance_without_grant(live_backend):
-    """Two unrelated apps can reuse an existing private Bot's nonowner Caller."""
+def test_baas_creates_and_reuses_private_nonmember_instance_without_grant(live_backend):
+    """BaaS can create and reuse a private Bot's nonowner Caller."""
     owner_id = fresh_id("app_reuse_owner")
     bot_id = fresh_id("app_reuse_bot")
     caller_id = fresh_id("app_reuse_nonmember")
@@ -804,8 +804,8 @@ def test_any_application_reuses_private_nonmember_instance_without_grant(live_ba
         _seed_service_bot(client, owner_id=owner_id, bot_id=bot_id, bot_name="Application Caller Reuse")
         _seed_successful_publish(client, bot_id=bot_id, owner_id=owner_id)
         initial = client.post(
-            "/api/v1/expert-chats/caller-connection", params=params,
-            headers={"x-user-id": ADMIN_USER_ID},
+            "/api/v1/expert-chats/app-caller-connection", params=params,
+            headers=_application_headers(),
         )
         assert initial.status_code == 200, initial.text
         initial_body = initial.json()

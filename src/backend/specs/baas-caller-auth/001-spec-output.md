@@ -158,3 +158,7 @@ iteration: 1
 ### 回滚方案
 
 回滚本 PR 对应提交/发布包，恢复旧应用 Principal 入口；BaaS 调用方同步退回旧协议或暂缓调用。无 DB 迁移，无密钥轮换操作。回滚后 baas-only JWT 将被旧入口拒绝，必须协调调用方版本。
+
+## 2026-09-16 Follow-up: allow first provisioning
+User explicitly removes the existing-instance prerequisite for the BaaS endpoint. After JWT authentication and Bot existence validation, call get_caller_connection directly, allowing its normal instance upsert and container creation. Preserve get_authorized_caller_connection guards for ordinary users. This supersedes the existing-instance-only requirements above.
+Validation: unit tests for missing instance and missing bot_uuid entering the lifecycle; live acceptance creates the first instance through the BaaS endpoint and then reuses it; retain ordinary-user denial tests. Run affected tests, static/secret checks, push to PR2256 and inspect current-head CI.

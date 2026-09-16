@@ -23,14 +23,13 @@ class ExpertChatInstanceServiceProtocol(Protocol):
         owner_id: str,
         force_upgrade: bool = False,
     ) -> Dict[str, Any]:
-        """Allow authenticated BaaS to operate an existing caller instance.
+        """Allow authenticated BaaS to create or operate a caller instance.
 
         The HTTP caller must authenticate BaaS and establish the server default
         tenant before repository access. Require a Bot in that tenant. No grant or owner/public/member access is required:
         BaaS may target another user's instance even on a private Bot.
-        Only an existing instance with a nonempty bot UUID may enter the usual
-        lifecycle, including force-upgrade and polling. No admin privilege or
-        first-time provisioning is granted. Raise ChatPermissionError on denial;
+        The usual lifecycle includes first-time provisioning, reuse, upgrade
+        and polling. Raise ChatPermissionError when the Bot does not exist;
         otherwise return the same instance/connection/need_poll dictionary as
         get_caller_connection. Existing lifecycle errors propagate unchanged.
         """

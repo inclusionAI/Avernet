@@ -731,7 +731,8 @@ class TestGetCallerConnection:
         bot_build_service.release_async.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_new_instance_creates_container(self):
+    @pytest.mark.parametrize("entrypoint", ["get_caller_connection", "get_application_caller_connection"])
+    async def test_new_instance_creates_container(self, entrypoint):
         """New instance triggers create_container."""
         svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         instance_repo.upsert_instance = MagicMock(
@@ -755,7 +756,7 @@ class TestGetCallerConnection:
             return {"id": 1, "status": "success", "ext": {"bot_uuid": BOT_UUID}}
         instance_repo.get_instance = MagicMock(side_effect=mock_get_instance)
 
-        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+        result = await getattr(svc, entrypoint)(user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID)
 
         assert result["need_poll"] is False
         bot_build_service.release_async.assert_called_once()
@@ -880,7 +881,8 @@ class TestGetCallerConnection:
         assert result["connection"] is None
 
     @pytest.mark.asyncio
-    async def test_success_instance_without_bot_uuid_creates_container(self):
+    @pytest.mark.parametrize("entrypoint", ["get_caller_connection", "get_application_caller_connection"])
+    async def test_success_instance_without_bot_uuid_creates_container(self, entrypoint):
         """Success instance without bot_uuid triggers create."""
         svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater = _make_service()
         existing_ext = {
@@ -906,7 +908,7 @@ class TestGetCallerConnection:
             return {"id": 1, "status": "success", "ext": {"bot_uuid": BOT_UUID, "version": 1}}
         instance_repo.get_instance = MagicMock(side_effect=mock_get_instance)
 
-        result = await svc.get_caller_connection(USER_ID, BOT_ID, OWNER_ID)
+        result = await getattr(svc, entrypoint)(user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID)
 
         bot_build_service.release_async.assert_called_once()
         assert result["need_poll"] is False
@@ -2165,12 +2167,18 @@ async def test_application_rejects_missing_bot():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("force_upgrade", [False, True])
-@pytest.mark.parametrize("instance", [None, {"ext": None}, {"ext": []}, {"ext": {}}, {"ext": {"bot_uuid": None}}, {"ext": {"bot_uuid": 1}}, {"ext": {"bot_uuid": ""}}, {"ext": {"bot_uuid": " "}}])
-async def test_application_cannot_create_first_instance(instance, force_upgrade):
-    from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
+@pytest.mark.parametrize("instance", [None, {"ext": None}, {"ext": {}}, {"ext": {"bot_uuid": None}}, {"ext": {"bot_uuid": ""}}])
+async def test_application_allows_first_instance_lifecycle(instance, force_upgrade):
     svc = _make_service()[0]
     svc._instance_repo.get_instance.return_value = instance
-    svc.get_caller_connection = AsyncMock()
-    with avernet_tenant_scope("acme"), pytest.raises(ChatPermissionError):
-        await svc.get_application_caller_connection(user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID, force_upgrade=force_upgrade)
-    svc.get_caller_connection.assert_not_called()
+    svc.get_caller_connection = AsyncMock(return_value={"need_poll": True})
+    result = await svc.get_application_caller_connection(
+        user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID,
+        force_upgrade=force_upgrade,
+    )
+    assert result == {"need_poll": True}
+    svc.get_caller_connection.assert_awaited_once_with(
+        user_id=USER_ID, bot_id=BOT_ID, owner_id=OWNER_ID,
+        force_upgrade=force_upgrade,
+    )
+    svc._instance_repo.get_instance.assert_not_called()
