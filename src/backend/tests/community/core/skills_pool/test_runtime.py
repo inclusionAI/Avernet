@@ -11,6 +11,7 @@ import pytest
 from agentclaw.community.core.devices.services.device_context import DeviceContext
 from agentclaw.community.core.skills_pool.models import (
     MappingProjectionStatus,
+    MappingResultReason,
     PoolCutoverStatus,
     PoolSkillMapping,
 )
@@ -282,6 +283,54 @@ async def test_standard_route_miss_requires_matching_health_before_fallback() ->
 
 
 @pytest.mark.asyncio
+async def test_structured_apply_unsupported_requires_legacy_fallback() -> None:
+    transport = ApplyTransport(
+        DeviceAdapterHTTPStatusError(
+            501,
+            '{"detail":{"code":"SKILL_MAPPINGS_APPLY_UNSUPPORTED",'
+            '"message":"active Engine does not implement logical mapping apply"}}',
+        )
+    )
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=transport,
+        probe_service=FakeProbe(),
+    )
+
+    with pytest.raises(LegacyMappingApplyRequired):
+        await runtime.apply_mappings(
+            context=_context(),
+            engine="openclaw",
+            mappings=[],
+        )
+
+    assert [call["path"] for call in transport.calls] == [
+        "/api/skills/mappings/apply"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_malformed_501_does_not_authorize_legacy_fallback() -> None:
+    transport = ApplyTransport(DeviceAdapterHTTPStatusError(501, "not-json"))
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=transport,
+        probe_service=FakeProbe(),
+    )
+
+    result = await runtime.apply_mappings(
+        context=_context(),
+        engine="openclaw",
+        mappings=[],
+    )
+
+    assert result.status is MappingProjectionStatus.PENDING
+    assert [call["path"] for call in transport.calls] == [
+        "/api/skills/mappings/apply"
+    ]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "failure",
     [
@@ -538,6 +587,45 @@ async def test_pool_runtime_resolves_current_binding_for_each_mutation() -> None
         assert transport.calls[index]["body"]["mappings"] == [logical_mapping]
     for index in (2, 3):
         assert transport.calls[index]["body"]["retired_mappings"] == [logical_mapping]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["publish_mappings", "verify_mappings"])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        DeviceAdapterEndpointNotFoundError(
+            '{"detail":"Not Found"}', standard_route_missing=True
+        ),
+        DeviceAdapterHTTPStatusError(501, '{"detail":"unsupported"}'),
+    ],
+    ids=["route-missing", "capability-unsupported"],
+)
+async def test_legacy_mapping_contract_unavailable_is_not_retryable(
+    operation: str,
+    failure: Exception,
+) -> None:
+    transport = FakeTransport()
+
+    async def reject(*_args, **_kwargs):
+        raise failure
+
+    transport.invoke = reject
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=transport,
+        probe_service=FakeProbe(),
+    )
+
+    result = await getattr(runtime, operation)(
+        bot_id="bot-1",
+        user_id="owner-1",
+        mappings=[],
+    )
+
+    assert result.status is MappingProjectionStatus.DEGRADED
+    assert result.reason is MappingResultReason.ENGINE_SKILL_MAPPING_UNSUPPORTED
+    assert result.evidence == {"reason": "engine_skill_mapping_unsupported"}
 
 
 @pytest.mark.asyncio

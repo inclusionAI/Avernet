@@ -6,8 +6,7 @@ import asyncio
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy import create_engine
@@ -55,11 +54,9 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 )
 from agentclaw.community.core.skill_center.runtime_resolver import RuntimeSkillProjection
 from agentclaw.community.core.skill_center.services.desktop_skill_recovery import (
-    DESKTOP_SKILL_RECOVERY_DEADLINE_SECONDS,
     DESKTOP_SKILL_RECOVERY_DELAY_SECONDS,
     DesktopSkillRecoveryTaskHandler,
     DesktopSkillRecoveryService,
-    DesktopSkillRecoverySweeper,
 )
 from agentclaw.community.core.skill_center.services.track_latest import (
     BotTrackLatestReconcileTaskHandler,
@@ -86,6 +83,7 @@ from agentclaw.community.core.task_queue.services.wakeup import WorkerWakeup
 from agentclaw.community.core.task_queue.types import (
     DEFAULT_APP,
     Complete,
+    Fail,
     Reschedule,
     Retry,
 )
@@ -98,6 +96,7 @@ from agentclaw.community.plugin_api.skill_center_gateway import (
 
 
 _UUID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+_RECOVERY_CONFIG = DesktopSkillRecoveryConfig(task_deadline_seconds=600)
 
 
 def _bot(*, binding_id: int = 17, status: str = "ACTIVE") -> dict:
@@ -564,7 +563,11 @@ def test_track_latest_pending_enters_durable_recovery_and_applies_latest_plan(
 ) -> None:
     bots = MagicMock()
     bots.get_by_id_and_owner.return_value = _bot()
-    recovery = DesktopSkillRecoveryService(bots=bots, tasks=recovery_queue)
+    recovery = DesktopSkillRecoveryService(
+        bots=bots,
+        tasks=recovery_queue,
+        task_deadline_seconds=_RECOVERY_CONFIG.task_deadline_seconds,
+    )
     mapping = _plan("3").projection.skill_mappings[0]
 
     class _VerticalProjector:
@@ -655,7 +658,11 @@ def test_reference_set_and_track_latest_share_one_task_for_latest_combined_plan(
 ) -> None:
     bots = MagicMock()
     bots.get_by_id_and_owner.return_value = _bot()
-    recovery = DesktopSkillRecoveryService(bots=bots, tasks=recovery_queue)
+    recovery = DesktopSkillRecoveryService(
+        bots=bots,
+        tasks=recovery_queue,
+        task_deadline_seconds=_RECOVERY_CONFIG.task_deadline_seconds,
+    )
     combined = _combined_plan()
 
     class _CombinedProjector:
@@ -832,22 +839,33 @@ def test_reference_set_and_track_latest_share_one_task_for_latest_combined_plan(
 
 
 @pytest.mark.parametrize("status", ["ACTIVE", "PENDING"])
-def test_ensure_uses_minimal_payload_and_thirty_minute_deadline(
+def test_ensure_uses_minimal_payload_and_configured_deadline(
     status: str,
 ) -> None:
     bots = MagicMock()
     bots.get_by_id_and_owner.return_value = _bot(status=status)
     tasks = MagicMock()
-    service = DesktopSkillRecoveryService(bots=bots, tasks=tasks)
+    service = DesktopSkillRecoveryService(
+        bots=bots,
+        tasks=tasks,
+        task_deadline_seconds=600,
+    )
 
     service.ensure(owner_id="owner-a", bot_id="bot-a")
 
     _, payload = tasks.enqueue.call_args.args
     assert payload == {"owner_id": "owner-a", "bot_id": "bot-a"}
-    assert tasks.enqueue.call_args.kwargs["deadline_seconds"] == (
-        DESKTOP_SKILL_RECOVERY_DEADLINE_SECONDS
-    )
+    assert tasks.enqueue.call_args.kwargs["deadline_seconds"] == 600
     assert "delay_seconds" not in tasks.enqueue.call_args.kwargs
+
+
+def test_recovery_service_rejects_non_positive_deadline() -> None:
+    with pytest.raises(ValueError, match="task_deadline_seconds must be positive"):
+        DesktopSkillRecoveryService(
+            bots=MagicMock(),
+            tasks=MagicMock(),
+            task_deadline_seconds=0,
+        )
 
 
 @pytest.mark.parametrize(
@@ -857,7 +875,11 @@ def test_ensure_does_not_create_recovery_for_non_runnable_status(status: str) ->
     bots = MagicMock()
     bots.get_by_id_and_owner.return_value = _bot(status=status)
     tasks = MagicMock()
-    service = DesktopSkillRecoveryService(bots=bots, tasks=tasks)
+    service = DesktopSkillRecoveryService(
+        bots=bots,
+        tasks=tasks,
+        task_deadline_seconds=_RECOVERY_CONFIG.task_deadline_seconds,
+    )
 
     assert service.ensure(owner_id="owner-a", bot_id="bot-a") is None
     tasks.enqueue.assert_not_called()
@@ -942,13 +964,40 @@ def test_unknown_retryable_issue_does_not_authorize_task_retry() -> None:
     assert isinstance(outcome, Complete)
 
 
+def test_engine_mapping_unsupported_fails_without_retry() -> None:
+    outcome = DesktopSkillRecoveryTaskHandler._outcome(
+        RuntimeProjectionResult(
+            status=RuntimeProjectionStatus.DEGRADED,
+            components={"skills": RuntimeProjectionStatus.DEGRADED},
+            issues=(
+                RuntimeProjectionIssue(
+                    resource_type="RUNTIME",
+                    code="ENGINE_SKILL_MAPPING_UNSUPPORTED",
+                    reason="unsupported",
+                    status=RuntimeProjectionStatus.DEGRADED,
+                    retryable=False,
+                ),
+            ),
+        ),
+        prepare_pending=False,
+        prepare_retryable_error=False,
+    )
+
+    assert isinstance(outcome, Fail)
+    assert outcome.error == "ENGINE_SKILL_MAPPING_UNSUPPORTED"
+
+
 @pytest.mark.integration
-def test_terminal_recovery_releases_the_bot_key_for_a_later_sweep(
+def test_terminal_recovery_releases_the_bot_key_for_a_later_event(
     recovery_queue,
 ) -> None:
     bots = MagicMock()
     bots.get_by_id_and_owner.return_value = _bot()
-    recovery = DesktopSkillRecoveryService(bots=bots, tasks=recovery_queue)
+    recovery = DesktopSkillRecoveryService(
+        bots=bots,
+        tasks=recovery_queue,
+        task_deadline_seconds=_RECOVERY_CONFIG.task_deadline_seconds,
+    )
     first = recovery.ensure(owner_id="owner-a", bot_id="bot-a")
     assert first is not None
     claimed = recovery_queue._repo.claim_batch(
@@ -962,7 +1011,6 @@ def test_terminal_recovery_releases_the_bot_key_for_a_later_sweep(
         task_id=claimed[0].id,
         worker_id="worker-1",
     )
-
     second = recovery.ensure(owner_id="owner-a", bot_id="bot-a")
 
     assert second is not None
@@ -977,7 +1025,11 @@ def test_existing_live_task_drains_when_bot_is_now_offline(recovery_queue) -> No
         _bot(status="ACTIVE"),
         _bot(status="OFFLINE"),
     ]
-    recovery = DesktopSkillRecoveryService(bots=bots, tasks=recovery_queue)
+    recovery = DesktopSkillRecoveryService(
+        bots=bots,
+        tasks=recovery_queue,
+        task_deadline_seconds=_RECOVERY_CONFIG.task_deadline_seconds,
+    )
     enqueued = recovery.ensure(owner_id="owner-a", bot_id="bot-a")
     assert enqueued is not None
     claimed = recovery_queue._repo.claim_batch(
@@ -1002,70 +1054,3 @@ def test_existing_live_task_drains_when_bot_is_now_offline(recovery_queue) -> No
         task_id=claimed[0].id,
         worker_id="worker-1",
     )
-
-
-def test_sweeper_pages_all_live_bound_desktop_bots_and_only_ensures() -> None:
-    bots = MagicMock()
-    bots.search_bots.side_effect = [
-        (
-            3,
-            [
-                {
-                    "owner_id": "o1",
-                    "bot_id": "b1",
-                    "binding_id": 1,
-                    "status": "ACTIVE",
-                },
-                {
-                    "owner_id": "o2",
-                    "bot_id": "b2",
-                    "binding_id": None,
-                    "status": "PENDING",
-                },
-            ],
-        ),
-        (
-            4,
-            [
-                {
-                    "owner_id": "o3",
-                    "bot_id": "b3",
-                    "binding_id": 3,
-                    "status": "OFFLINE",
-                },
-                {
-                    "owner_id": "o4",
-                    "bot_id": "b4",
-                    "binding_id": 4,
-                    "status": "PENDING",
-                },
-            ],
-        ),
-    ]
-    recovery = MagicMock()
-    recovery.ensure.side_effect = [
-        SimpleNamespace(created=True),
-        SimpleNamespace(created=False),
-    ]
-    sweeper = DesktopSkillRecoverySweeper(
-        bots=bots,
-        recovery=recovery,
-        config=DesktopSkillRecoveryConfig(sweep_page_size=2),
-    )
-
-    with patch(
-        "agentclaw.community.core.skill_center.services."
-        "desktop_skill_recovery.logger"
-    ) as log:
-        assert sweeper.sweep_once() == (2, 2)
-
-    assert recovery.ensure.call_args_list == [
-        call(owner_id="o1", bot_id="b1"),
-        call(owner_id="o4", bot_id="b4"),
-    ]
-    summary = next(
-        call
-        for call in log.info.call_args_list
-        if "sweep completed" in str(call.args[0])
-    )
-    assert summary.args[1:9] == (4, 2, 1, 0, 0, 1, 1, 0)

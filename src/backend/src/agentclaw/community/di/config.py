@@ -560,17 +560,13 @@ class DesktopBotPeriodicScanConfig:
 
 @dataclass(frozen=True)
 class DesktopSkillRecoveryConfig:
-    """Low-frequency safety net for missed Desktop Skill recovery wakes."""
+    """Retry budget for one event-driven Desktop Skill recovery task."""
 
-    enabled: bool = True
-    sweep_interval_seconds: float = 10 * 60
-    sweep_page_size: int = 100
+    task_deadline_seconds: int = 10 * 60
 
     def __post_init__(self) -> None:
-        if self.sweep_interval_seconds <= 0:
-            raise ValueError("sweep_interval_seconds must be positive")
-        if self.sweep_page_size <= 0:
-            raise ValueError("sweep_page_size must be positive")
+        if self.task_deadline_seconds <= 0:
+            raise ValueError("task_deadline_seconds must be positive")
 
 
 @dataclass(frozen=True)

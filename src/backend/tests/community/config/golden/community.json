@@ -76,9 +76,7 @@
       "global_dry_run": false
     },
     "desktop_skill_recovery": {
-      "enabled": true,
-      "sweep_interval_seconds": 600,
-      "sweep_page_size": 100
+      "task_deadline_seconds": 600
     },
     "device_allocation": {
       "max_devices_per_entity": 5,
