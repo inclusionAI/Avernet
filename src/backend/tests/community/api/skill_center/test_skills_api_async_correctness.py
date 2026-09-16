@@ -468,6 +468,26 @@ def _upload_skill_di_app(
     mock_skill_service_factory = MagicMock()
     mock_skill_service_factory.create.return_value = mock_skill_service
 
+    async def upload_local_skill_files(*, bot_id, owner_id, actor_id, files):
+        uploaded_files = [
+            {
+                "filename": Path(relative_path).name,
+                "relative_path": relative_path,
+                "content": content,
+            }
+            for relative_path, content in files
+        ]
+        skill = await mock_skill_service.upload_skill(
+            uploaded_files,
+            user_id=owner_id,
+            bolt_id=bot_id,
+        )
+        return {"operation": "created", "skill": skill, "actor_id": actor_id}
+
+    mock_skill_service.upload_local_skill_files = AsyncMock(
+        side_effect=upload_local_skill_files
+    )
+
     mock_path_factory = MagicMock()
     mock_path_factory.get_bot_skills_dir.return_value = MagicMock()
     mock_path_factory.get_bot_skills_local_dir.return_value = MagicMock()
@@ -545,9 +565,13 @@ def _upload_skill_di_app(
             from agentclaw.community.api.skill_service_factory import (
                 SkillServiceFactoryProtocol,
             )
+            from agentclaw.community.api.local_skill_upload_service import (
+                LocalSkillUploadServiceProtocol,
+            )
 
             binder.bind(SkillServiceFactory, to=mock_skill_service_factory)
             binder.bind(SkillServiceFactoryProtocol, to=mock_skill_service_factory)
+            binder.bind(LocalSkillUploadServiceProtocol, to=mock_skill_service)
             binder.bind(WorkspacePathFactory, to=mock_path_factory)
             binder.bind(BotRepository, to=mock_bot_repo)
             binder.bind(DeviceContextResolver, to=mock_resolver)
@@ -775,7 +799,7 @@ class TestUploadSkillValidation:
             assert kwargs["user_id"] == "bot-owner-1"
             assert "author_id" not in kwargs
 
-    def test_upload_passes_bot_scope_to_layout_aware_factory(self, mock_ctx):
+    def test_upload_passes_bot_scope_to_shared_upload_service(self, mock_ctx):
         with _upload_skill_di_app(
             mock_ctx,
             bot_status="ACTIVE",
@@ -796,10 +820,11 @@ class TestUploadSkillValidation:
             )
 
             assert response.json()["success"] is True
-            create_kwargs = mock_factory.create.call_args.kwargs
-            assert create_kwargs["entity_id"] == mock_ctx.user_id
-            assert create_kwargs["bot_id"] == mock_ctx.bot_id
-            assert create_kwargs["engine_type"] == "openclaw"
+            call_kwargs = mock_svc.upload_local_skill_files.await_args.kwargs
+            assert call_kwargs["bot_id"] == mock_ctx.bot_id
+            assert call_kwargs["owner_id"] == mock_ctx.user_id
+            assert call_kwargs["actor_id"] == mock_ctx.user_id
+            mock_factory.create.assert_not_called()
 
     @pytest.mark.parametrize("engine_type", ["openclaw", "claude_code", "hermes"])
     def test_desktop_upload_preserves_engine_and_bot_scope(self, engine_type):
@@ -834,9 +859,10 @@ class TestUploadSkillValidation:
 
             assert response.status_code == 200, response.text
             assert response.json()["data"]["bot_id"] == desktop_ctx.bot_id
-            create_kwargs = mock_factory.create.call_args.kwargs
-            assert create_kwargs["bot_id"] == desktop_ctx.bot_id
-            assert create_kwargs["engine_type"] == engine_type
+            call_kwargs = mock_svc.upload_local_skill_files.await_args.kwargs
+            assert call_kwargs["bot_id"] == desktop_ctx.bot_id
+            assert call_kwargs["owner_id"] == desktop_ctx.user_id
+            mock_factory.create.assert_not_called()
 
     def test_upload_normalizes_runtime_unavailable_error_message(self, mock_ctx):
         with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (

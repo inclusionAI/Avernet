@@ -105,6 +105,9 @@ from agentclaw.community.api.skill_set_management_service import (
 from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
+from agentclaw.community.api.local_skill_upload_service import (
+    LocalSkillUploadServiceProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_engine_for_bot,
@@ -126,11 +129,9 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneConflictError,
 )
 from agentclaw.community.core.skills_pool.edit_guard import (
-    SkillsPoolEditGuard,
     SkillsPoolEditLockUnavailableError,
     SkillsPoolEditPausedError,
 )
-from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.di import Injected
@@ -687,12 +688,9 @@ async def upload_skill(
     ctx: RequestContext = Depends(get_request_context),
     bot_repo: BotRepository = Injected(BotRepository),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
-    skill_service_factory: SkillServiceFactoryProtocol = Injected(
-        SkillServiceFactoryProtocol
+    upload_service: LocalSkillUploadServiceProtocol = Injected(
+        LocalSkillUploadServiceProtocol
     ),
-    resolver: DeviceContextResolver = Injected(DeviceContextResolver),
-    edit_guard: SkillsPoolEditGuard = Injected(SkillsPoolEditGuard),
 ) -> UploadSkillResponse:
     """Upload a new skill from files.
 
@@ -708,12 +706,12 @@ async def upload_skill(
 
     # Get effective path parameters
     (
-        effective_entity_id,
+        _effective_entity_id,
         effective_bot_id,
-        effective_engine,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop,
+        _effective_engine,
+        _runtime_engine,
+        _effective_entity_type,
+        _is_desktop,
     ) = _get_path_params(
         ctx,
         effective_entity_id_input,
@@ -758,53 +756,6 @@ async def upload_skill(
             message=f"Bot is not ready. Current status: {bot_status or 'UNKNOWN'}, expected ACTIVE.",
         )
 
-    # teclaw owns its local-skill files (engine-owned model): record the minimal
-    # logical path (local://skills-local/<name>) and forward writes per-file to the
-    # draft container, expanding the path to the workspace namespace at the
-    # device-fs seam.
-    is_teclaw, local_skill_adapter = _resolve_teclaw_local_skill(
-        resolver, effective_bot_id, effective_entity_id
-    )
-
-    # Get user-specific paths using new directory structure
-    skills_dir = path_factory.get_bot_skills_dir(
-        effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type
-    )
-    local_dir = path_factory.get_bot_skills_local_dir(
-        effective_entity_id,
-        effective_bot_id,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop=is_desktop,
-        is_teclaw=is_teclaw,
-    )
-    path_factory.get_bot_engine_dir(
-        effective_entity_id, effective_bot_id, runtime_engine, effective_entity_type
-    )
-    repo_dir = path_factory.get_bot_skills_repo_dir(
-        effective_entity_id,
-        effective_bot_id,
-        runtime_engine,
-        effective_entity_type,
-        is_desktop=is_desktop,
-    )
-    logger.info(
-        f"[skills.upload_skill] Paths: skills_dir={skills_dir}, local_dir={local_dir}, repo_dir={repo_dir}, is_teclaw={is_teclaw}"
-    )
-
-    # Create per-request service instance with user-specific paths. teclaw gets the
-    # path adapter that expands skills-local/... → workspace/skills-local/...
-    service = skill_service_factory.create(
-        active_dir=skills_dir,
-        repo_dir=repo_dir,
-        local_dir=local_dir,
-        local_skill_path_adapter=local_skill_adapter,
-        entity_id=effective_entity_id,
-        bot_owner_id=bot_owner_id,
-        bot_id=effective_bot_id,
-        engine_type=effective_engine,
-    )
-
     logger.info(f"[skills.upload_skill] Processing {len(files)} files")
 
     # Parse file_paths JSON
@@ -834,8 +785,7 @@ async def upload_skill(
             )
 
     try:
-        # Convert UploadFile list to the format expected by upload_skill
-        uploaded_files = []
+        uploaded_files: list[tuple[str, bytes]] = []
         for i, file in enumerate(files):
             content = await file.read()
             # Use provided relative_path or fallback to filename
@@ -843,16 +793,11 @@ async def upload_skill(
             logger.info(
                 f"[skills.upload_skill] Processing file {i}: filename={file.filename}, relative_path={relative_path}"
             )
-            uploaded_files.append(
-                {
-                    "filename": file.filename,
-                    "relative_path": relative_path,
-                    "content": content,
-                }
-            )
+            uploaded_files.append((str(relative_path), content))
 
         logger.info(
-            f"[skills.upload_skill] Calling service.upload_skill with {len(uploaded_files)} files"
+            "[skills.upload_skill] Calling LocalSkillUploadService with "
+            f"{len(uploaded_files)} files"
         )
 
         # ``ctx.user_id`` is the authenticated actor used by the collaborator
@@ -860,22 +805,13 @@ async def upload_skill(
         # historical product contract and belongs to the Bot owner, resolved
         # from the persisted Bot rather than a caller-controlled parameter.
 
-        # Call the service method (async)
-        edit_lease = edit_guard.acquire_for_edit(
-            scope=BotSkillLayoutScope(
-                env=str(bot["env"]),
-                entity_id=str(bot["entity_id"]),
-                bot_id=effective_bot_id,
-            )
+        result = await upload_service.upload_local_skill_files(
+            bot_id=effective_bot_id,
+            owner_id=bot_owner_id,
+            actor_id=str(ctx.user_id or bot_owner_id),
+            files=uploaded_files,
         )
-        try:
-            skill = await service.upload_skill(
-                uploaded_files,
-                user_id=bot_owner_id,
-                bolt_id=effective_bot_id,
-            )
-        finally:
-            edit_guard.release(edit_lease)
+        skill = result["skill"]
 
         logger.info(
             f"[skills.upload_skill] Success: skill_id={skill.get('id')}, name={skill.get('name')}"
@@ -914,9 +850,14 @@ async def upload_skill(
             ),
             message="Skill uploaded successfully",
         )
-    except SkillsPoolEditLockUnavailableError as e:
+    except (SkillsPoolEditLockUnavailableError, LocalSkillEditLockUnavailableError) as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
-    except SkillsPoolEditPausedError as e:
+    except (
+        SkillsPoolEditPausedError,
+        LocalSkillEditBusyError,
+        LocalSkillEditPausedError,
+        LocalSkillLayoutRollbackError,
+    ) as e:
         # A held edit/rollback lock is an ordinary request conflict, not a
         # successful response carrying a failed business envelope.  Clients
         # must be able to distinguish it from a completed upload.
