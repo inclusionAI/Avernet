@@ -1,12 +1,13 @@
 import type { IDatabase } from "../db.js";
 
-export type AdminRole = "admin" | "log_admin" | "bench_admin" | "claw_evolve_admin";
+export type AdminRole = "admin" | "log_admin" | "bench_admin" | "claw_evolve_admin" | "claw_insight_admin";
 
 export const ADMIN_ROLES: readonly AdminRole[] = [
   "admin",
   "log_admin",
   "bench_admin",
   "claw_evolve_admin",
+  "claw_insight_admin",
 ];
 
 export type AdminUserRow = {
@@ -25,6 +26,7 @@ export type AdminUserSet = {
   logAdmins: Set<string>;
   benchAdmins: Set<string>;
   clawEvolveAdmins: Set<string>;
+  clawInsightAdmins: Set<string>;
 };
 
 export type AdminUserLists = Record<AdminRole, readonly string[]>;
@@ -62,6 +64,9 @@ export class AdminUserRepository {
           case "claw_evolve_admin":
             acc.clawEvolveAdmins.add(userId);
             break;
+          case "claw_insight_admin":
+            acc.clawInsightAdmins.add(userId);
+            break;
           default:
             break;
         }
@@ -72,6 +77,7 @@ export class AdminUserRepository {
         logAdmins: new Set<string>(),
         benchAdmins: new Set<string>(),
         clawEvolveAdmins: new Set<string>(),
+        clawInsightAdmins: new Set<string>(),
       },
     );
   }

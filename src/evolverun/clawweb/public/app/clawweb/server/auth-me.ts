@@ -90,6 +90,7 @@ export function createAuthMeHandler(options: AuthMeOptions): RequestHandler {
         isLogAdmin: true,
         isBenchAdmin: true,
         isClawEvolveAdmin: true,
+        isClawInsightAdmin: request.isClawInsightAdmin === true,
         isSuperAdmin: true,
       });
     };
@@ -119,6 +120,7 @@ export function createAuthMeHandler(options: AuthMeOptions): RequestHandler {
       isLogAdmin: request.isLogAdmin === true,
       isBenchAdmin: request.isBenchAdmin === true,
       isClawEvolveAdmin: request.isClawEvolveAdmin === true,
+      isClawInsightAdmin: request.isClawInsightAdmin === true,
       isSuperAdmin: request.isSuperAdmin === true,
     });
   };

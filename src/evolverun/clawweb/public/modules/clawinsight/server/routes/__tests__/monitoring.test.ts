@@ -25,8 +25,10 @@ let db: IDatabase, dir: string, url: string;
 let server: ReturnType<express.Application["listen"]> | undefined;
 let clock: number;
 let env: Record<string, string | undefined>;
+let clawInsightAdmin: boolean | undefined = true;
 async function start(parent = true, defaultFactory = false, getDb = () => db, unassembled = false) {
   const app = express();
+  app.use((req, _res, next) => { req.isClawInsightAdmin = clawInsightAdmin; next(); });
   if (parent) app.use(express.json({ limit: "10mb" }));
   for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
   const runtime = unassembled ? { service: null } : createMonitoringRuntime(getDb, () => clock);
@@ -53,6 +55,7 @@ async function post(event: Record<string, unknown>, path = "diagnosis-events", h
 async function get(bot = "mock-bot-te", query = "") { return call(`/monitoring/bots/${bot}/diagnoses${query}`); }
 beforeEach(async () => {
   clock = now;
+  clawInsightAdmin = true;
   env = {};
   dir = mkdtempSync(join(tmpdir(), "monitoring-contract-"));
   db = database(join(dir, "runtime.sqlite3"));
@@ -124,6 +127,22 @@ describe("monitoring HTTP -> module schema -> repository -> GET", () => {
     expect((await call("/monitoring/bots")).status).toBe(503);
     query.mockRestore();
     expect((await call("/monitoring/bots")).body).toEqual({ items: [] });
+  });
+  it.each([false, undefined])("protects all browser reads for flag %s but allows both internal reports", async (flag) => {
+    clawInsightAdmin = flag;
+    expect((await post(alert)).status).toBe(201);
+    expect((await post(check, "bot-checks")).status).toBe(200);
+    for (const path of ["/monitoring/bots", "/monitoring/bots/mock-bot-te/status", "/monitoring/bots/mock-bot-te/diagnoses"]) {
+      const denied = await call(path);
+      expect(denied.status).toBe(403);
+      expect(denied.cache).toBe("no-store");
+    }
+    // Governance keeps its existing readiness behavior, not the monitoring role guard.
+    expect((await call("/overview")).status).toBe(503);
+    clawInsightAdmin = true;
+    for (const path of ["/monitoring/bots", "/monitoring/bots/mock-bot-te/status", "/monitoring/bots/mock-bot-te/diagnoses"]) {
+      expect((await call(path)).status).toBe(200);
+    }
   });
   it("persists all decisions and both intervention values, including same Session/different Trace", async () => {
     for (const event of [alert, pass, unresolved]) expect((await post(event)).status).toBe(201);

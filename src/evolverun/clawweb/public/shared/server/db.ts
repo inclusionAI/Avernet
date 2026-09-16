@@ -206,6 +206,7 @@ type YamlAppConfig = {
     log_admins?: string[];
     bench_admins?: string[];
     claw_evolve_admins?: string[];
+    claw_insight_admins?: string[];
   };
 };
 
@@ -1007,6 +1008,7 @@ export type AdminConfig = {
   logAdmins: Set<string>;
   benchAdmins: Set<string>;
   clawEvolveAdmins: Set<string>;
+  clawInsightAdmins: Set<string>;
 };
 
 /** Resolve admin lists from an already-loaded config object (same `auth` block shape as yaml).
@@ -1020,6 +1022,7 @@ export function resolveAdminConfigFrom(config: Record<string, unknown>): AdminCo
     logAdmins: norm(auth.log_admins),
     benchAdmins: norm(auth.bench_admins),
     clawEvolveAdmins: norm(auth.claw_evolve_admins),
+    clawInsightAdmins: norm(auth.claw_insight_admins),
   };
 }
 
@@ -1045,6 +1048,7 @@ export async function resolveDynamicAdminConfig(
       log_admin: [...config.logAdmins],
       bench_admin: [...config.benchAdmins],
       claw_evolve_admin: [...config.clawEvolveAdmins],
+      claw_insight_admin: [...config.clawInsightAdmins],
     },
     createdBy,
   );

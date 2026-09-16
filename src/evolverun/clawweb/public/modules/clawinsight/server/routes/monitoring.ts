@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { json, Router, type ErrorRequestHandler, type Request } from "express";
+import { json, Router, type ErrorRequestHandler, type NextFunction, type Request, type Response } from "express";
 import { MonitoringError } from "../services/monitoring/contracts.js";
 import { createMonitoringRuntime, type MonitoringRuntime } from "../services/monitoring/monitoring-runtime.js";
 
@@ -58,6 +58,14 @@ export function createMonitoringRouter(runtime: MonitoringRuntime = createMonito
   router.post("/internal/monitoring/bot-checks", async (req, res) => {
     res.json(await runtime.service!.reportCheck(req.body));
   });
+  const requireClawInsightAdmin = (req: Request, res: Response, next: NextFunction): void => {
+    if (req.isClawInsightAdmin !== true) {
+      res.status(403).json({ error: "Forbidden", message: "ClawInsight admin permission required" });
+      return;
+    }
+    next();
+  };
+  router.use("/monitoring", requireClawInsightAdmin);
   router.get("/monitoring/bots", async (req, res) => {
     if (Object.keys(req.query).length) throw new MonitoringError("INVALID_EVENT", "不支持此查询参数。");
     res.json(await runtime.service!.bots());

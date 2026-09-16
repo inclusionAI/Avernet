@@ -13,6 +13,7 @@ const EMPTY_ROSTER: AdminUserSet = {
   logAdmins: new Set(),
   benchAdmins: new Set(),
   clawEvolveAdmins: new Set(),
+  clawInsightAdmins: new Set(),
 };
 
 function adminConfig(lists: Partial<Record<keyof AdminConfig, string[]>> = {}): AdminConfig {
@@ -22,6 +23,7 @@ function adminConfig(lists: Partial<Record<keyof AdminConfig, string[]>> = {}): 
     logAdmins: norm(lists.logAdmins),
     benchAdmins: norm(lists.benchAdmins),
     clawEvolveAdmins: norm(lists.clawEvolveAdmins),
+    clawInsightAdmins: norm(lists.clawInsightAdmins),
   };
 }
 
@@ -34,7 +36,8 @@ function rosterRepository(roster: Partial<AdminUserSet>): AdminAuthRepository {
         role === "admin" ? merged.admins
         : role === "log_admin" ? merged.logAdmins
         : role === "bench_admin" ? merged.benchAdmins
-        : merged.clawEvolveAdmins;
+        : role === "claw_evolve_admin" ? merged.clawEvolveAdmins
+        : merged.clawInsightAdmins;
       return candidates.some((id) => pool.has(id.toLowerCase()));
     },
   };
@@ -70,6 +73,7 @@ async function withApp(
       isLogAdmin: req.isLogAdmin === true,
       isBenchAdmin: req.isBenchAdmin === true,
       isClawEvolveAdmin: req.isClawEvolveAdmin === true,
+      isClawInsightAdmin: req.isClawInsightAdmin === true,
       isSuperAdmin: req.isSuperAdmin === true,
     });
   });
@@ -93,6 +97,7 @@ describe("admin auth middleware", () => {
         isLogAdmin: true,
         isBenchAdmin: true,
         isClawEvolveAdmin: true,
+        isClawInsightAdmin: false,
         isSuperAdmin: true,
       });
     });
@@ -146,6 +151,29 @@ describe("admin auth middleware", () => {
 });
 
 describe("GET /api/auth/me", () => {
+  it("reflects independent monitoring grants and revocations on the next request", async () => {
+    const members = new Set<string>();
+    await withApp({ config: adminConfig(), repository: rosterRepository({ clawInsightAdmins: members }) }, async (baseUrl) => {
+      const me = async () => (await fetch(`${baseUrl}/api/auth/me`, {
+        headers: { cookie: cookieHeader(["staff_id", "member"]) },
+      })).json();
+      expect((await me()).isClawInsightAdmin).toBe(false);
+      members.add("member");
+      expect(await me()).toMatchObject({ isAdmin: false, isSuperAdmin: false, isClawInsightAdmin: true });
+      members.delete("member");
+      expect((await me()).isClawInsightAdmin).toBe(false);
+    });
+  });
+
+  it("supports the monitoring-only configured fallback without granting other roles", async () => {
+    await withApp({ config: adminConfig({ clawInsightAdmins: ["Member"] }) }, async (baseUrl) => {
+      const body = await (await fetch(`${baseUrl}/api/auth/me`, {
+        headers: { cookie: cookieHeader(["staff_id", "member"]) },
+      })).json();
+      expect(body).toMatchObject({ isAdmin: false, isClawEvolveAdmin: false, isClawInsightAdmin: true });
+    });
+  });
+
   it("resolves the loopback dev identity so a local run has a usable session", async () => {
     await withApp({ config: adminConfig() }, async (baseUrl) => {
       const response = await fetch(`${baseUrl}/api/auth/me`);
@@ -181,9 +209,9 @@ describe("GET /api/auth/me", () => {
   it("answers with the full dev user when dev mode is explicitly requested", async () => {
     await withApp({ config: adminConfig() }, async (baseUrl) => {
       const body = await (await fetch(`${baseUrl}/api/auth/me?dev=1`)).json();
-      expect(body).toEqual(expect.objectContaining({ userId: "dev_local", isAdmin: true, isLogAdmin: true }));
+      expect(body).toEqual(expect.objectContaining({ userId: "dev_local", isAdmin: true, isLogAdmin: true, isClawInsightAdmin: false }));
       const header = await (await fetch(`${baseUrl}/api/auth/me`, { headers: { "X-ClawWeb-Dev-Mode": "1" } })).json();
-      expect(header).toEqual(expect.objectContaining({ userId: "dev_local", isClawEvolveAdmin: true }));
+      expect(header).toEqual(expect.objectContaining({ userId: "dev_local", isClawEvolveAdmin: true, isClawInsightAdmin: false }));
     });
   });
 

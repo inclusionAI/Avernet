@@ -1,10 +1,10 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import userEvent from '@testing-library/user-event'
 
 const mocks = vi.hoisted(() => ({
-  user: { userId: 'dev_local', isAdmin: false },
+  user: { userId: 'dev_local', isAdmin: false, isClawInsightAdmin: false as boolean | undefined },
   overview: vi.fn().mockResolvedValue({ dataAsOf: '2026-08-17T00:00:00Z', botComparison: [] }),
 }))
 
@@ -31,6 +31,12 @@ vi.mock('../AdminReviewQueue', () => ({
 vi.mock('../monitoring/MonitoringPanel', () => ({ default: () => <div>MONITORING_CONTENT</div> }))
 
 import InsightCenter from '../index'
+
+beforeEach(() => {
+  mocks.user.isAdmin = false
+  mocks.user.isClawInsightAdmin = false
+  mocks.overview.mockClear()
+})
 
 describe('Insight Center tabs', () => {
   it('opens the overview by default and orders overview, evidence, then todo', async () => {
@@ -73,6 +79,7 @@ describe('Insight monitoring module navigation', () => {
   it('isolates monitoring from governance loading and preserves the governance deep link', async () => {
     mocks.overview.mockClear()
     mocks.user.isAdmin = true
+    mocks.user.isClawInsightAdmin = true
     const user = userEvent.setup()
     render(<MemoryRouter initialEntries={['/insight?module=monitoring&tab=admin&improvementId=88&ownerUserId=*']}><InsightCenter /></MemoryRouter>)
     expect(screen.getByText('MONITORING_CONTENT')).toBeInTheDocument()
@@ -82,5 +89,23 @@ describe('Insight monitoring module navigation', () => {
     await user.click(screen.getByRole('button', { name: 'Agent 监控自愈' }))
     expect(screen.getByText('MONITORING_CONTENT')).toBeInTheDocument()
     expect(screen.queryByText('ADMIN_CONTENT:88')).not.toBeInTheDocument()
+  })
+})
+
+describe('Monitoring allowlist boundary', () => {
+  it.each([false, undefined])('hides navigation and ignores a monitoring deep link for flag %s', (flag) => {
+    mocks.user.isAdmin = true
+    mocks.user.isClawInsightAdmin = flag
+    render(<MemoryRouter initialEntries={['/insight?module=monitoring']}><InsightCenter /></MemoryRouter>)
+    expect(screen.queryByRole('button', { name: 'Agent 监控自愈' })).not.toBeInTheDocument()
+    expect(screen.queryByText('MONITORING_CONTENT')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Agent 治理' })).toBeInTheDocument()
+    expect(screen.getByText('OVERVIEW_CONTENT:mine')).toBeInTheDocument()
+  })
+  it('permits a monitoring-only member without generic admin privileges', () => {
+    mocks.user.isClawInsightAdmin = true
+    render(<MemoryRouter initialEntries={['/insight?module=monitoring']}><InsightCenter /></MemoryRouter>)
+    expect(screen.getByText('MONITORING_CONTENT')).toBeInTheDocument()
+    expect(mocks.overview).not.toHaveBeenCalled()
   })
 })

@@ -8,6 +8,7 @@ export interface ClientUser {
   isLogAdmin?: boolean
   isBenchAdmin?: boolean
   isClawEvolveAdmin?: boolean
+  isClawInsightAdmin?: boolean
   isSuperAdmin?: boolean
 }
 
@@ -712,7 +713,7 @@ export interface AppConfigUpdateInput {
   updated_by?: string
 }
 
-export type AdminRole = 'admin' | 'log_admin' | 'bench_admin' | 'claw_evolve_admin'
+export type AdminRole = 'admin' | 'log_admin' | 'bench_admin' | 'claw_evolve_admin' | 'claw_insight_admin'
 
 export interface AdminUserEntry {
   id: number
