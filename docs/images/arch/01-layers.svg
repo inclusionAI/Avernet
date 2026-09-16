@@ -1,94 +1,153 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1360 760" width="1360" height="760" role="img" aria-label="microkernel seven roles">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1420 950" width="1420" height="950" role="img" aria-label="seven roles with components">
   <style>
     .t{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif}
     .title{font-size:25px;font-weight:600;fill:#1F1E1C}
     .sub{font-size:13.5px;fill:#75736E}
     .colhead{font-size:11.5px;font-weight:600;fill:#8A8781;letter-spacing:.06em}
     .role{font-size:14px;font-weight:600;fill:#1F1E1C}
-    .roleen{font-size:10px;fill:#9A968F;letter-spacing:.04em}
+    .roleen{font-size:9.5px;fill:#9A968F;letter-spacing:.04em}
     .duty{font-size:12px;fill:#33322E}
-    .main{font-size:12.5px;font-weight:600}
-    .desc{font-size:11px;fill:#5E5C57}
+    .chip{font-size:10.5px}
     .foot{font-size:12.5px;fill:#33322E}
     .footm{font-size:11px;fill:#75736E}
     .axis{font-size:11.5px;font-weight:600;fill:#8A8781;letter-spacing:.08em}
   </style>
-  <rect width="1360" height="760" fill="#FAF9F7"/>
+  <rect width="1420" height="950" fill="#FAF9F7"/>
   <defs><marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8A8781"/></marker></defs>
   <g class="t">
     <text x="44" y="50" class="title">微内核七角色：一套分层，两个模块</text>
-    <text x="44" y="78" class="sub">Backend 与 Engine 部署形态完全不同，内部结构却同构。层数与依赖方向一致，不同的是各自的系统边界通向哪里 —— 前者通向基础设施，后者通向异构 Agent 引擎。</text>
-    <text x="44" y="116" class="colhead">架构角色</text>
-    <text x="256" y="116" class="colhead">职责</text>
-    <text x="656" y="116" class="colhead">BACKEND · 中心化多租户服务</text>
-    <text x="996" y="116" class="colhead">ENGINE · 随 Bot 部署的单机服务</text>
-    <line x1="44" y1="126" x2="1314" y2="126" stroke="#D8D5CF" stroke-width="1"/>
-    <text x="44" y="164" class="role">传输协议适配层</text>
-    <text x="44" y="182" class="roleen">DELIVERY</text>
-    <text x="256" y="176" class="duty">把协议报文翻译成领域调用，再把结果翻译回去；不做业务判断</text>
-    <rect x="656" y="140" width="324" height="60" rx="6" fill="#E4EBF5" stroke="#3C6198"/>
-    <text x="672" y="165" class="main" fill="#22405F">面向租户与前端的 HTTP 入口</text>
-    <text x="672" y="185" class="desc">40+ 个路由分组</text>
-    <rect x="996" y="140" width="318" height="60" rx="6" fill="#E4EBF5" stroke="#3C6198"/>
-    <text x="1012" y="165" class="main" fill="#22405F">面向单个 Bot 的 HTTP 与长连接入口</text>
-    <text x="1012" y="185" class="desc">换引擎时这一层不动</text>
-    <text x="44" y="236" class="role">领域服务接口</text>
-    <text x="44" y="254" class="roleen">SERVICE API · 外 → 内</text>
-    <text x="256" y="248" class="duty">内核对外提供的能力清单；进出都是领域对象，不是裸报文</text>
-    <rect x="656" y="212" width="324" height="60" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
-    <text x="672" y="237" class="main" fill="#5E4519">115 个领域服务接口</text>
-    <text x="672" y="257" class="desc">这是内核与传输协议解耦的前提</text>
-    <rect x="996" y="212" width="318" height="60" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
-    <text x="1012" y="237" class="main" fill="#5E4519">23 个能力域接口</text>
-    <text x="1012" y="257" class="desc">会话 / 对话 / 技能 / 定时 …</text>
-    <text x="44" y="308" class="role">领域内核</text>
-    <text x="44" y="326" class="roleen">CORE</text>
-    <text x="256" y="320" class="duty">全部领域逻辑，不认识任何传输框架</text>
-    <rect x="656" y="284" width="324" height="60" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
-    <text x="672" y="309" class="main" fill="#26452F">55 个领域模块</text>
-    <text x="672" y="329" class="desc">Bot 生命周期 · 技能 · 空间 · 发布</text>
-    <rect x="996" y="284" width="318" height="60" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
-    <text x="1012" y="309" class="main" fill="#26452F">领域模型 + 引擎适配层</text>
-    <text x="1012" y="329" class="desc">引擎差异被关在适配层里</text>
-    <text x="44" y="380" class="role">系统边界契约</text>
-    <text x="44" y="398" class="roleen">BOUNDARY CONTRACT · 内 → 外</text>
-    <text x="256" y="392" class="duty">与外部系统接触的每一处，都定义成可替换的契约</text>
-    <rect x="656" y="356" width="324" height="60" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
-    <text x="672" y="381" class="main" fill="#5E4519">35 处边界</text>
-    <text x="672" y="401" class="desc">数据库 / 缓存 / 对象存储 / 身份 / 审批</text>
-    <rect x="996" y="356" width="318" height="60" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
-    <text x="1012" y="381" class="main" fill="#5E4519">每个引擎的原生接口</text>
-    <text x="1012" y="401" class="desc">按该引擎原生形状定义</text>
-    <text x="44" y="452" class="role">系统边界实现</text>
-    <text x="44" y="470" class="roleen">BOUNDARY IMPL</text>
-    <text x="256" y="464" class="duty">契约的具体实现，可整套替换</text>
-    <rect x="656" y="428" width="324" height="60" rx="6" fill="#EBE5F3" stroke="#69539B"/>
-    <text x="672" y="453" class="main" fill="#3E315F">开源 / 本地替身 / 企业，三套</text>
-    <text x="672" y="473" class="desc">换哪一套由部署形态决定，内核无感</text>
-    <rect x="996" y="428" width="318" height="60" rx="6" fill="#EBE5F3" stroke="#69539B"/>
-    <text x="1012" y="453" class="main" fill="#3E315F">每引擎一套传输实现</text>
-    <text x="1012" y="473" class="desc">处在依赖链末端，禁止依赖内核</text>
-    <text x="44" y="524" class="role">底座</text>
-    <text x="44" y="542" class="roleen">KERNEL</text>
-    <text x="256" y="536" class="duty">各层共享的基础类型，不依赖任何上层</text>
-    <rect x="656" y="500" width="324" height="60" rx="6" fill="#E9E8E5" stroke="#6E6C66"/>
-    <text x="672" y="525" class="main" fill="#33322E">生命周期、跨层数据结构</text>
-    <rect x="996" y="500" width="318" height="60" rx="6" fill="#E9E8E5" stroke="#6E6C66"/>
-    <text x="1012" y="525" class="main" fill="#33322E">线协议信封</text>
-    <text x="1012" y="545" class="desc">传输产生、内核消费，故只能放在下面</text>
-    <text x="44" y="596" class="role">依赖注入根</text>
-    <text x="44" y="614" class="roleen">DI ROOT</text>
-    <text x="256" y="608" class="duty">唯一挑选具体实现的地方</text>
-    <rect x="656" y="572" width="324" height="60" rx="6" fill="#F5E5E0" stroke="#A85C47"/>
-    <text x="672" y="597" class="main" fill="#643127">59 个装配模块</text>
-    <text x="672" y="617" class="desc">按部署形态选择，开关必须显式</text>
-    <rect x="996" y="572" width="318" height="60" rx="6" fill="#F5E5E0" stroke="#A85C47"/>
-    <text x="1012" y="597" class="main" fill="#643127">按引擎组装，每引擎一个</text>
-    <text x="1012" y="617" class="desc">把引擎适配层与传输实现拼起来</text>
-    <line x1="1336" y1="140" x2="1336" y2="620" stroke="#8A8781" stroke-width="1.5" marker-end="url(#ar)"/>
-    <text x="1352" y="380" class="axis" transform="rotate(-90 1352 380)" text-anchor="middle">依赖方向 · 单向向下</text>
-    <rect x="44" y="656" width="1270" height="62" rx="6" fill="#F1EFEA" stroke="#D8D5CF"/>
-    <text x="64" y="681" class="foot">依赖只允许向下。依赖注入根是唯一可以同时认识契约与具体实现的地方 —— 越界的依赖在 CI 上直接失败，不靠 review 记忆。</text>
-    <text x="64" y="703" class="footm">25 条架构宪法 · 53 组静态架构检查 · 87 个模块声明机器可校验的依赖白名单</text>
+    <text x="44" y="78" class="sub">Backend 与 Engine 部署形态完全不同，内部结构却同构。每一层里列出几个实际组件，便于对上号；层数与依赖方向一致，不同的是各自的系统边界通向哪里。</text>
+    <text x="44" y="120" class="colhead">架构角色</text>
+    <text x="240" y="120" class="colhead">职责</text>
+    <text x="660" y="120" class="colhead">BACKEND · 中心化多租户服务</text>
+    <text x="1058" y="120" class="colhead">ENGINE · 随 Bot 部署的单机服务</text>
+    <line x1="44" y1="130" x2="1376" y2="130" stroke="#D8D5CF" stroke-width="1"/>
+    <text x="44" y="176" class="role">传输协议适配层</text>
+    <text x="44" y="194" class="roleen">TRANSPORT ADAPTER</text>
+    <text x="240" y="188" class="duty">把传输层的调用翻译成领域调用，再把结果翻回去；不做业务判断</text>
+    <rect x="660" y="146" width="378" height="90" rx="6" fill="#E4EBF5" stroke="#3C6198"/>
+    <rect x="674" y="162" width="65" height="24" rx="4" fill="#FFFFFF" stroke="#3C6198" opacity="0.92"/>
+    <text x="706" y="178" class="chip" fill="#22405F" text-anchor="middle">Bot 管理</text>
+    <rect x="747" y="162" width="62" height="24" rx="4" fill="#FFFFFF" stroke="#3C6198" opacity="0.92"/>
+    <text x="778" y="178" class="chip" fill="#22405F" text-anchor="middle">技能中心</text>
+    <rect x="817" y="162" width="40" height="24" rx="4" fill="#FFFFFF" stroke="#3C6198" opacity="0.92"/>
+    <text x="837" y="178" class="chip" fill="#22405F" text-anchor="middle">空间</text>
+    <rect x="865" y="162" width="40" height="24" rx="4" fill="#FFFFFF" stroke="#3C6198" opacity="0.92"/>
+    <text x="885" y="178" class="chip" fill="#22405F" text-anchor="middle">发布</text>
+    <rect x="913" y="162" width="65" height="24" rx="4" fill="#FFFFFF" stroke="#3C6198" opacity="0.92"/>
+    <text x="945" y="178" class="chip" fill="#22405F" text-anchor="middle">公开 API</text>
+    <rect x="1058" y="146" width="318" height="90" rx="6" fill="#E4EBF5" stroke="#3C6198"/>
+    <rect x="1072" y="162" width="40" height="24" rx="4" fill="#FFFFFF" stroke="#3C6198" opacity="0.92"/>
+    <text x="1092" y="178" class="chip" fill="#22405F" text-anchor="middle">会话</text>
+    <rect x="1120" y="162" width="40" height="24" rx="4" fill="#FFFFFF" stroke="#3C6198" opacity="0.92"/>
+    <text x="1140" y="178" class="chip" fill="#22405F" text-anchor="middle">对话</text>
+    <rect x="1168" y="162" width="40" height="24" rx="4" fill="#FFFFFF" stroke="#3C6198" opacity="0.92"/>
+    <text x="1188" y="178" class="chip" fill="#22405F" text-anchor="middle">技能</text>
+    <rect x="1216" y="162" width="40" height="24" rx="4" fill="#FFFFFF" stroke="#3C6198" opacity="0.92"/>
+    <text x="1236" y="178" class="chip" fill="#22405F" text-anchor="middle">文件</text>
+    <rect x="1264" y="162" width="51" height="24" rx="4" fill="#FFFFFF" stroke="#3C6198" opacity="0.92"/>
+    <text x="1289" y="178" class="chip" fill="#22405F" text-anchor="middle">长连接</text>
+    <text x="44" y="284" class="role">服务接口层</text>
+    <text x="44" y="302" class="roleen">SERVICE INTERFACE · 外 → 内</text>
+    <text x="240" y="296" class="duty">内核对外提供的能力清单；进出都是领域对象，不是裸数据</text>
+    <rect x="660" y="254" width="378" height="90" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
+    <rect x="674" y="270" width="65" height="24" rx="4" fill="#FFFFFF" stroke="#A1762E" opacity="0.92"/>
+    <text x="706" y="286" class="chip" fill="#5E4519" text-anchor="middle">Bot 服务</text>
+    <rect x="747" y="270" width="62" height="24" rx="4" fill="#FFFFFF" stroke="#A1762E" opacity="0.92"/>
+    <text x="778" y="286" class="chip" fill="#5E4519" text-anchor="middle">技能服务</text>
+    <rect x="817" y="270" width="65" height="24" rx="4" fill="#FFFFFF" stroke="#A1762E" opacity="0.92"/>
+    <text x="849" y="286" class="chip" fill="#5E4519" text-anchor="middle">MCP 服务</text>
+    <rect x="890" y="270" width="62" height="24" rx="4" fill="#FFFFFF" stroke="#A1762E" opacity="0.92"/>
+    <text x="921" y="286" class="chip" fill="#5E4519" text-anchor="middle">资源服务</text>
+    <rect x="960" y="270" width="62" height="24" rx="4" fill="#FFFFFF" stroke="#A1762E" opacity="0.92"/>
+    <text x="991" y="286" class="chip" fill="#5E4519" text-anchor="middle">发布服务</text>
+    <rect x="1058" y="254" width="318" height="90" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
+    <rect x="1072" y="270" width="40" height="24" rx="4" fill="#FFFFFF" stroke="#A1762E" opacity="0.92"/>
+    <text x="1092" y="286" class="chip" fill="#5E4519" text-anchor="middle">会话</text>
+    <rect x="1120" y="270" width="40" height="24" rx="4" fill="#FFFFFF" stroke="#A1762E" opacity="0.92"/>
+    <text x="1140" y="286" class="chip" fill="#5E4519" text-anchor="middle">对话</text>
+    <rect x="1168" y="270" width="37" height="24" rx="4" fill="#FFFFFF" stroke="#A1762E" opacity="0.92"/>
+    <text x="1186" y="286" class="chip" fill="#5E4519" text-anchor="middle">MCP</text>
+    <rect x="1213" y="270" width="40" height="24" rx="4" fill="#FFFFFF" stroke="#A1762E" opacity="0.92"/>
+    <text x="1233" y="286" class="chip" fill="#5E4519" text-anchor="middle">技能</text>
+    <rect x="1261" y="270" width="40" height="24" rx="4" fill="#FFFFFF" stroke="#A1762E" opacity="0.92"/>
+    <text x="1281" y="286" class="chip" fill="#5E4519" text-anchor="middle">定时</text>
+    <text x="44" y="392" class="role">领域内核</text>
+    <text x="44" y="410" class="roleen">CORE</text>
+    <text x="240" y="404" class="duty">全部领域逻辑，不认识任何传输框架</text>
+    <rect x="660" y="362" width="378" height="90" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
+    <rect x="674" y="378" width="87" height="24" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.92"/>
+    <text x="717" y="394" class="chip" fill="#26452F" text-anchor="middle">Bot 生命周期</text>
+    <rect x="769" y="378" width="62" height="24" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.92"/>
+    <text x="800" y="394" class="chip" fill="#26452F" text-anchor="middle">技能中心</text>
+    <rect x="839" y="378" width="62" height="24" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.92"/>
+    <text x="870" y="394" class="chip" fill="#26452F" text-anchor="middle">空间治理</text>
+    <rect x="909" y="378" width="62" height="24" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.92"/>
+    <text x="940" y="394" class="chip" fill="#26452F" text-anchor="middle">发布流程</text>
+    <rect x="979" y="378" width="40" height="24" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.92"/>
+    <text x="999" y="394" class="chip" fill="#26452F" text-anchor="middle">配额</text>
+    <rect x="1058" y="362" width="318" height="90" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
+    <rect x="1072" y="378" width="62" height="24" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.92"/>
+    <text x="1103" y="394" class="chip" fill="#26452F" text-anchor="middle">领域模型</text>
+    <rect x="1142" y="378" width="73" height="24" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.92"/>
+    <text x="1178" y="394" class="chip" fill="#26452F" text-anchor="middle">引擎适配层</text>
+    <text x="44" y="500" class="role">系统边界契约</text>
+    <text x="44" y="518" class="roleen">PLUGIN</text>
+    <text x="240" y="512" class="duty">与外部系统接触的每一处，都定义成可替换的契约</text>
+    <rect x="660" y="470" width="378" height="90" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
+    <rect x="674" y="486" width="51" height="24" rx="4" fill="#FFFFFF" stroke="#A1762E" opacity="0.92"/>
+    <text x="699" y="502" class="chip" fill="#5E4519" text-anchor="middle">数据库</text>
+    <rect x="733" y="486" width="40" height="24" rx="4" fill="#FFFFFF" stroke="#A1762E" opacity="0.92"/>
+    <text x="753" y="502" class="chip" fill="#5E4519" text-anchor="middle">缓存</text>
+    <rect x="781" y="486" width="62" height="24" rx="4" fill="#FFFFFF" stroke="#A1762E" opacity="0.92"/>
+    <text x="812" y="502" class="chip" fill="#5E4519" text-anchor="middle">对象存储</text>
+    <rect x="851" y="486" width="40" height="24" rx="4" fill="#FFFFFF" stroke="#A1762E" opacity="0.92"/>
+    <text x="871" y="502" class="chip" fill="#5E4519" text-anchor="middle">身份</text>
+    <rect x="899" y="486" width="40" height="24" rx="4" fill="#FFFFFF" stroke="#A1762E" opacity="0.92"/>
+    <text x="919" y="502" class="chip" fill="#5E4519" text-anchor="middle">审批</text>
+    <rect x="947" y="486" width="40" height="24" rx="4" fill="#FFFFFF" stroke="#A1762E" opacity="0.92"/>
+    <text x="967" y="502" class="chip" fill="#5E4519" text-anchor="middle">通知</text>
+    <rect x="1058" y="470" width="318" height="90" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
+    <rect x="1072" y="486" width="95" height="24" rx="4" fill="#FFFFFF" stroke="#A1762E" opacity="0.92"/>
+    <text x="1119" y="502" class="chip" fill="#5E4519" text-anchor="middle">各引擎原生接口</text>
+    <text x="44" y="608" class="role">系统边界实现</text>
+    <text x="44" y="626" class="roleen">PLUGIN IMPLEMENTATION</text>
+    <text x="240" y="620" class="duty">契约的具体实现，可整套替换</text>
+    <rect x="660" y="578" width="378" height="90" rx="6" fill="#EBE5F3" stroke="#69539B"/>
+    <rect x="674" y="594" width="40" height="24" rx="4" fill="#FFFFFF" stroke="#69539B" opacity="0.92"/>
+    <text x="694" y="610" class="chip" fill="#3E315F" text-anchor="middle">开源</text>
+    <rect x="722" y="594" width="62" height="24" rx="4" fill="#FFFFFF" stroke="#69539B" opacity="0.92"/>
+    <text x="753" y="610" class="chip" fill="#3E315F" text-anchor="middle">本地替身</text>
+    <rect x="792" y="594" width="40" height="24" rx="4" fill="#FFFFFF" stroke="#69539B" opacity="0.92"/>
+    <text x="812" y="610" class="chip" fill="#3E315F" text-anchor="middle">企业</text>
+    <rect x="1058" y="578" width="318" height="90" rx="6" fill="#EBE5F3" stroke="#69539B"/>
+    <rect x="1072" y="594" width="116" height="24" rx="4" fill="#FFFFFF" stroke="#69539B" opacity="0.92"/>
+    <text x="1130" y="610" class="chip" fill="#3E315F" text-anchor="middle">claude_code 传输</text>
+    <rect x="1196" y="594" width="97" height="24" rx="4" fill="#FFFFFF" stroke="#69539B" opacity="0.92"/>
+    <text x="1244" y="610" class="chip" fill="#3E315F" text-anchor="middle">openclaw 传输</text>
+    <text x="44" y="716" class="role">底座</text>
+    <text x="44" y="734" class="roleen">KERNEL</text>
+    <text x="240" y="728" class="duty">各层共享的基础类型，不依赖任何上层</text>
+    <rect x="660" y="686" width="378" height="90" rx="6" fill="#E9E8E5" stroke="#6E6C66"/>
+    <rect x="674" y="702" width="62" height="24" rx="4" fill="#FFFFFF" stroke="#6E6C66" opacity="0.92"/>
+    <text x="705" y="718" class="chip" fill="#33322E" text-anchor="middle">生命周期</text>
+    <rect x="744" y="702" width="84" height="24" rx="4" fill="#FFFFFF" stroke="#6E6C66" opacity="0.92"/>
+    <text x="786" y="718" class="chip" fill="#33322E" text-anchor="middle">跨层数据结构</text>
+    <rect x="1058" y="686" width="318" height="90" rx="6" fill="#E9E8E5" stroke="#6E6C66"/>
+    <rect x="1072" y="702" width="144" height="24" rx="4" fill="#FFFFFF" stroke="#6E6C66" opacity="0.92"/>
+    <text x="1144" y="718" class="chip" fill="#33322E" text-anchor="middle">请求 / 响应 / 事件信封</text>
+    <text x="44" y="824" class="role">依赖注入根</text>
+    <text x="44" y="842" class="roleen">DI ROOT</text>
+    <text x="240" y="836" class="duty">唯一挑选具体实现的地方</text>
+    <rect x="660" y="794" width="378" height="90" rx="6" fill="#F5E5E0" stroke="#A85C47"/>
+    <rect x="674" y="810" width="130" height="24" rx="4" fill="#FFFFFF" stroke="#A85C47" opacity="0.92"/>
+    <text x="739" y="826" class="chip" fill="#643127" text-anchor="middle">按 profile 挑选实现</text>
+    <rect x="1058" y="794" width="318" height="90" rx="6" fill="#F5E5E0" stroke="#A85C47"/>
+    <rect x="1072" y="810" width="139" height="24" rx="4" fill="#FFFFFF" stroke="#A85C47" opacity="0.92"/>
+    <text x="1141" y="826" class="chip" fill="#643127" text-anchor="middle">按引擎组装，每引擎一个</text>
+    <line x1="1398" y1="146" x2="1398" y2="880" stroke="#8A8781" stroke-width="1.5" marker-end="url(#ar)"/>
+    <text x="1414" y="513" class="axis" transform="rotate(-90 1414 513)" text-anchor="middle">依赖方向 · 单向向下</text>
+    <rect x="44" y="900" width="1332" height="34" rx="6" fill="#F1EFEA" stroke="#D8D5CF"/>
+    <text x="64" y="922" class="foot">依赖只允许向下。依赖注入根是唯一可以同时认识契约与具体实现的地方 —— 越界的依赖在 CI 上直接失败。</text>
   </g>
 </svg>

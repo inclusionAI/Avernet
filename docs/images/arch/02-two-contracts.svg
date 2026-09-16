@@ -18,7 +18,7 @@
   </defs>
   <g class="t">
     <text x="44" y="50" class="title">两类契约，方向相反 —— 方向决定了谁实现、谁替换、怎么测</text>
-    <text x="44" y="78" class="sub">领域服务接口是「外部调内核」，系统边界契约是「内核调外部」。把两者混为一谈，就会写出错误的兼容性假设，和错误的测试策略。</text>
+    <text x="44" y="78" class="sub">服务接口层是「外部调内核」，系统边界契约是「内核调外部」。把两者混为一谈，就会写出错误的兼容性假设，和错误的测试策略。</text>
 
     <text x="44" y="122" class="band">① 控制流：一律从左到右</text>
     <text x="232" y="122" class="bandsub">谁调用谁</text>
@@ -30,7 +30,7 @@
     <text x="60" y="240" class="m bd">只认契约，不认实现</text>
 
     <rect x="284" y="142" width="196" height="110" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
-    <text x="300" y="174" class="bt" fill="#5E4519">领域服务接口</text>
+    <text x="300" y="174" class="bt" fill="#5E4519">服务接口层</text>
     <text x="300" y="198" class="bd">声明外部能让内核做什么</text>
     <text x="300" y="220" class="bd">与传输协议适配层分离定义</text>
     <text x="300" y="240" class="bd">契约方向：外 → 内</text>
@@ -68,7 +68,7 @@
     <line x1="1106" y1="256" x2="1106" y2="340" stroke="#D8D5CF" stroke-dasharray="3 3"/>
 
     <rect x="284" y="340" width="196" height="46" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
-    <text x="382" y="369" class="bm" fill="#5E4519" text-anchor="middle">领域服务接口</text>
+    <text x="382" y="369" class="bm" fill="#5E4519" text-anchor="middle">服务接口层</text>
     <rect x="760" y="340" width="196" height="46" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
     <text x="858" y="369" class="bm" fill="#5E4519" text-anchor="middle">系统边界契约</text>
 
