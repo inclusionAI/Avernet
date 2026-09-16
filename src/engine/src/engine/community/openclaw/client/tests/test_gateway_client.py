@@ -37,6 +37,68 @@ def _fire_event(
         listener(frame)
 
 
+def _text_message(text: str) -> Dict[str, Any]:
+    return {
+        "role": "assistant",
+        "content": [{"type": "text", "text": text}],
+    }
+
+
+def _fire_text_chat(
+    client: OpenClawGatewayClient,
+    *,
+    text: str,
+    state: str,
+    run_id: str = "run-1",
+    session_key: str = "sk-1",
+) -> None:
+    payload: Dict[str, Any] = {
+        "sessionKey": session_key,
+        "runId": run_id,
+        "state": state,
+        "message": _text_message(text),
+    }
+    if state == "delta":
+        payload["deltaText"] = text
+    _fire_event(client, "chat", payload)
+
+
+def _fire_compaction_end(
+    client: OpenClawGatewayClient,
+    *,
+    run_id: str = "run-1",
+    session_key: str = "sk-1",
+) -> None:
+    _fire_event(
+        client,
+        "agent",
+        {
+            "sessionKey": session_key,
+            "runId": run_id,
+            "stream": "compaction",
+            "data": {"phase": "end", "willRetry": True, "completed": True},
+        },
+    )
+
+
+def _fire_lifecycle_end(
+    client: OpenClawGatewayClient,
+    *,
+    run_id: str = "run-1",
+    session_key: str = "sk-1",
+) -> None:
+    _fire_event(
+        client,
+        "agent",
+        {
+            "sessionKey": session_key,
+            "runId": run_id,
+            "stream": "lifecycle",
+            "data": {"phase": "end"},
+        },
+    )
+
+
 async def _collect(stream, limit: int = 10) -> list[Dict[str, Any]]:
     events: list[Dict[str, Any]] = []
     async for event in stream:
@@ -409,6 +471,270 @@ async def test_chat_stream_does_not_hold_final_with_message(monkeypatch):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# chat_stream compaction retry handling
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_suppresses_compaction_attempt_terminal(monkeypatch):
+    monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
+    client = _make_client()
+
+    async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
+        _fire_text_chat(client, text="Before ", state="delta")
+        _fire_compaction_end(client)
+        _fire_lifecycle_end(client)
+        _fire_text_chat(client, text="Before ", state="final")
+        _fire_text_chat(client, text="after", state="delta")
+        _fire_lifecycle_end(client)
+        _fire_text_chat(client, text="after", state="final")
+        return ResponseFrame.ok_response("rid", {"runId": "run-1"})
+
+    client.send_request = fake_send_request  # type: ignore[method-assign]
+
+    events = await _collect(
+        client.chat_stream(
+            session_key="sk-1",
+            message="hello",
+            idempotency_key="run-1",
+        )
+    )
+
+    chat_events = [
+        event for event in events if event.get("state") in {"delta", "final"}
+    ]
+    lifecycle_ends = [
+        event
+        for event in events
+        if event.get("stream") == "lifecycle"
+        and isinstance(event.get("data"), dict)
+        and event["data"].get("phase") == "end"
+    ]
+    assert [event["state"] for event in chat_events] == ["delta", "delta", "final"]
+    assert chat_events[1]["deltaText"] == "after"
+    assert chat_events[1]["message"]["content"][0]["text"] == "after"
+    assert chat_events[2]["message"]["content"][0]["text"] == "after"
+    assert len(lifecycle_ends) == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_suppresses_empty_compaction_attempt_final(
+    monkeypatch,
+):
+    monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
+    client = _make_client()
+
+    async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
+        _fire_compaction_end(client)
+        _fire_lifecycle_end(client)
+        _fire_event(
+            client,
+            "chat",
+            {"sessionKey": "sk-1", "runId": "run-1", "state": "final"},
+        )
+        _fire_text_chat(client, text="retry answer", state="delta")
+        _fire_lifecycle_end(client)
+        _fire_text_chat(client, text="retry answer", state="final")
+        return ResponseFrame.ok_response("rid", {"runId": "run-1"})
+
+    client.send_request = fake_send_request  # type: ignore[method-assign]
+
+    events = await _collect(
+        client.chat_stream(
+            session_key="sk-1",
+            message="hello",
+            idempotency_key="run-1",
+        )
+    )
+
+    terminals = [event for event in events if event.get("state") == "final"]
+    assert len(terminals) == 1
+    assert terminals[0]["message"]["content"][0]["text"] == "retry answer"
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_suppresses_multiple_compaction_attempt_terminals(monkeypatch):
+    monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
+    client = _make_client()
+
+    def fire_segment(text: str, *, will_retry: bool) -> None:
+        _fire_text_chat(client, text=text, state="delta")
+        if will_retry:
+            _fire_compaction_end(client)
+        _fire_lifecycle_end(client)
+        _fire_text_chat(client, text=text, state="final")
+
+    async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
+        fire_segment("one ", will_retry=True)
+        fire_segment("two ", will_retry=True)
+        fire_segment("three", will_retry=False)
+        return ResponseFrame.ok_response("rid", {"runId": "run-1"})
+
+    client.send_request = fake_send_request  # type: ignore[method-assign]
+
+    events = await _collect(
+        client.chat_stream(
+            session_key="sk-1",
+            message="hello",
+            idempotency_key="run-1",
+        )
+    )
+
+    finals = [event for event in events if event.get("state") == "final"]
+    assert len(finals) == 1
+    assert finals[0]["message"]["content"][0]["text"] == "three"
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_compaction_retry_accepts_known_source_run_id(monkeypatch):
+    monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
+    client = _make_client()
+
+    async def fire_events() -> None:
+        await asyncio.sleep(0)
+        _fire_compaction_end(client, run_id="client-run")
+        _fire_lifecycle_end(client, run_id="client-run")
+        _fire_text_chat(client, text="first ", state="final", run_id="client-run")
+        _fire_text_chat(client, text="second", state="final", run_id="source-run")
+
+    async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
+        asyncio.create_task(fire_events())
+        return ResponseFrame.ok_response("rid", {"runId": "source-run"})
+
+    client.send_request = fake_send_request  # type: ignore[method-assign]
+
+    events = await _collect(
+        client.chat_stream(
+            session_key="sk-1",
+            message="hello",
+            idempotency_key="client-run",
+        )
+    )
+
+    assert events[-1]["runId"] == "source-run"
+    assert events[-1]["state"] == "final"
+    assert events[-1]["message"]["content"][0]["text"] == "second"
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_does_not_accept_foreign_compaction_retry(monkeypatch):
+    monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
+    client = _make_client()
+
+    async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
+        _fire_compaction_end(client, run_id="foreign-run")
+        _fire_event(
+            client,
+            "chat",
+            {"sessionKey": "sk-1", "runId": "run-1", "state": "final"},
+        )
+        return ResponseFrame.ok_response("rid", {"runId": "run-1"})
+
+    client.send_request = fake_send_request  # type: ignore[method-assign]
+
+    events = await _collect(
+        client.chat_stream(
+            session_key="sk-1",
+            message="hello",
+            idempotency_key="run-1",
+        )
+    )
+
+    assert len(events) == 1
+    assert events[0]["state"] == "final"
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_requires_lifecycle_pair_to_suppress_compaction_final(
+    monkeypatch,
+):
+    monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
+    client = _make_client()
+
+    async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
+        _fire_compaction_end(client)
+        _fire_text_chat(client, text="finished", state="final")
+        return ResponseFrame.ok_response("rid", {"runId": "run-1"})
+
+    client.send_request = fake_send_request  # type: ignore[method-assign]
+
+    events = await _collect(
+        client.chat_stream(
+            session_key="sk-1",
+            message="hello",
+            idempotency_key="run-1",
+        )
+    )
+
+    assert events[-1]["state"] == "final"
+    assert events[-1]["message"]["content"][0]["text"] == "finished"
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_accepts_fixed_upstream_compaction_terminal(monkeypatch):
+    monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
+    client = _make_client()
+
+    async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
+        _fire_compaction_end(client)
+        _fire_text_chat(client, text="continued", state="delta")
+        _fire_lifecycle_end(client)
+        _fire_text_chat(client, text="continued", state="final")
+        return ResponseFrame.ok_response("rid", {"runId": "run-1"})
+
+    client.send_request = fake_send_request  # type: ignore[method-assign]
+
+    events = await _collect(
+        client.chat_stream(
+            session_key="sk-1",
+            message="hello",
+            idempotency_key="run-1",
+        )
+    )
+
+    lifecycle_ends = [
+        event
+        for event in events
+        if event.get("stream") == "lifecycle"
+        and isinstance(event.get("data"), dict)
+        and event["data"].get("phase") == "end"
+    ]
+    assert len(lifecycle_ends) == 1
+    assert events[-1]["state"] == "final"
+
+
+@pytest.mark.parametrize("terminal_state", ["error", "aborted"])
+@pytest.mark.asyncio
+async def test_chat_stream_compaction_retry_does_not_hide_hard_stop(
+    monkeypatch,
+    terminal_state: str,
+):
+    monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
+    client = _make_client()
+
+    async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
+        _fire_compaction_end(client)
+        _fire_event(
+            client,
+            "chat",
+            {"sessionKey": "sk-1", "runId": "run-1", "state": terminal_state},
+        )
+        return ResponseFrame.ok_response("rid", {"runId": "run-1"})
+
+    client.send_request = fake_send_request  # type: ignore[method-assign]
+
+    events = await _collect(
+        client.chat_stream(
+            session_key="sk-1",
+            message="hello",
+            idempotency_key="run-1",
+        )
+    )
+
+    assert events[-1]["state"] == terminal_state
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # chat_stream timeout diagnostic logging
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -447,6 +773,31 @@ async def test_chat_stream_uses_twenty_minute_default_timeout(monkeypatch):
     assert "timeoutMs" not in sent_params
     assert observed_timeouts == [20 * 60]
     assert events[0]["errorMessage"] == "Chat stream timeout"
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_timeout_waiting_for_compaction_retry(monkeypatch, caplog):
+    monkeypatch.setenv("OPENCLAW_EARLY_FINAL_GRACE_SECONDS", "0")
+    client = _make_client()
+    client._ws = object()  # type: ignore[assignment]
+
+    async def fake_send_request(*_args, **_kwargs) -> ResponseFrame:
+        _fire_compaction_end(client)
+        return ResponseFrame.ok_response("rid", {"runId": "run-1"})
+
+    client.send_request = fake_send_request  # type: ignore[method-assign]
+
+    events = await _collect(
+        client.chat_stream(
+            session_key="sk-1",
+            message="hello",
+            timeout_ms=1,
+            idempotency_key="run-1",
+        )
+    )
+
+    assert events[-1]["state"] == "error"
+    assert "waiting_compaction_retry_final_pending=1" in caplog.text
 
 
 @pytest.mark.asyncio
