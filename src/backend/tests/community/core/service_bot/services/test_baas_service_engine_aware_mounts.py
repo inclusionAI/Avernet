@@ -11,6 +11,9 @@ from agentclaw.community.core.common_config import CommonWhiteListService
 from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
     ManagedDeployConfigComposer,
 )
+from tests.community.core.service_bot.services.deploy._noop_storage_policy import (
+    NoopStoragePolicy,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasService, Storage
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
 from agentclaw.community.core.workspace.engines.aicoding import AICodingSandboxProvider
@@ -53,6 +56,7 @@ def _make_composer(storage_path=None, bot_repo=None) -> ManagedDeployConfigCompo
         storage_path=storage_path or _make_storage_path(),
         sandbox_registry=_make_registry(),
         bot_repo=bot_repo or MagicMock(),
+        storage_policy=NoopStoragePolicy(),
     )
 
 
@@ -330,6 +334,7 @@ class TestSetupSessionsDirEngineAware:
             storage_path=_make_storage_path(),
             sandbox_registry=registry,
             bot_repo=MagicMock(),
+            storage_policy=NoopStoragePolicy(),
         )
 
         storage = composer._setup_sessions_dir(

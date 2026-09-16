@@ -90,7 +90,13 @@ class DeployConfigComposer(abc.ABC):
     """Composes the runtime-specific fields of one create-bot ``deploy_config``."""
 
     def prepare_context(self, ctx: BotDeployContext) -> BotDeployContext:
-        """Resolve runtime-specific context once before composing any fields."""
+        """Hook resolving runtime-specific context once before composing fields.
+
+        The base implementation is intentionally the identity: runtimes without
+        a policy hook compose the caller's context unchanged.
+        ``ManagedDeployConfigComposer`` overrides this to apply the bot's saved
+        storage policy (NAS/UPFS choice and mount layout).
+        """
         return ctx
 
     @property

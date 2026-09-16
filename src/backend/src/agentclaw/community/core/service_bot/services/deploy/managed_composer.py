@@ -69,7 +69,7 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         storage_path: StoragePathProtocol,
         sandbox_registry: EngineSandboxRegistry,
         bot_repo: "BotRepository",
-        storage_policy: BotStoragePolicyProtocol | None = None,
+        storage_policy: BotStoragePolicyProtocol,
     ) -> None:
         self._storage_policy = storage_policy
         self._storage_path = storage_path
@@ -85,9 +85,7 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
     # ── DeployConfigComposer ────────────────────────────────────────────
 
     def prepare_context(self, ctx: BotDeployContext) -> BotDeployContext:
-        if self._storage_policy is not None:
-            return self._storage_policy.resolve_deploy_context(ctx)
-        return ctx
+        return self._storage_policy.resolve_deploy_context(ctx)
 
     def build_start_command(self, ctx: BotDeployContext) -> str:
         """Chain the managed image's four boot scripts with ``&&``.
@@ -148,7 +146,7 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
             stage=ctx.stage or "",
         )
 
-        if storage is not None and self._storage_policy is not None:
+        if storage is not None:
             storage = self._storage_policy.apply_to_storage(storage, ctx)
         return storage
 

@@ -1,10 +1,15 @@
 """Bot-scoped JSON configuration and atomic initialization contracts."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from collections.abc import Callable
 from typing import Protocol, Any, TYPE_CHECKING, TypeAlias
 
 if TYPE_CHECKING:
+    # Importing these at runtime cycles through service_bot's package __init__
+    # (services/__init__ -> bot_publish_service -> di -> bot_service -> here).
+    # PEP 563 keeps the annotations unquoted without evaluating them.
     from agentclaw.community.core.service_bot.services.deploy.deploy_models import (
         Storage,
         StorageType,
@@ -42,7 +47,7 @@ class StoragePolicy:
     ``{"storage_type": "upfs", "source": "rollout"}``.
     """
 
-    storage_type: "StorageType"
+    storage_type: StorageType
     source: str = ""
 
 
@@ -52,7 +57,7 @@ class PreparedBotStoragePolicy:
 
     template_uid: str
     template_uuid: str
-    storage_type: "StorageType"
+    storage_type: StorageType
 
 
 class BotStoragePolicyProtocol(Protocol):
@@ -60,13 +65,13 @@ class BotStoragePolicyProtocol(Protocol):
         """Choose provider/template and initialize policy before original allocation."""
         ...
 
-    def resolve_deploy_context(self, ctx: "BotDeployContext") -> "BotDeployContext":
+    def resolve_deploy_context(self, ctx: BotDeployContext) -> BotDeployContext:
         """Resolve saved storage and its mount layout without running rollout."""
         ...
 
     def apply_to_storage(
-        self, storage: "Storage", ctx: "BotDeployContext"
-    ) -> "Storage":
+        self, storage: Storage, ctx: BotDeployContext
+    ) -> Storage:
         """Apply the resolved context and shared quota without reading rollout."""
         ...
 

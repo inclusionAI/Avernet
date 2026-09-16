@@ -17,6 +17,9 @@ from tests.community.core.bot_management.services.test_bot_service_create_publis
     _make_service,
 )
 from agentclaw.community.core.common_config.bot_config_service import STORAGE_POLICY
+from tests.community.core.service_bot.services.deploy._noop_storage_policy import (
+    NoopStoragePolicy,
+)
 from agentclaw.community.plugin_api.models import BotCommonConfig
 
 
@@ -91,7 +94,7 @@ def test_switch_off_payload_only_changes_shared_quota_without_writing_policy(
     assert db.transactions == 0
     assert repo.get(**SCOPE, config_key=STORAGE_POLICY) is None
     # Same dependencies: compare with the old allocation path and no policy service.
-    baas._deploy_composer._storage_policy = None
+    baas._deploy_composer._storage_policy = NoopStoragePolicy()
     allocate(baas, new_bot=False)
     legacy = baas.post_bots_api.call_args.kwargs["payload"]
     assert legacy["config"]["deploy_config"]["storage"]["quota"] == "1Gi"

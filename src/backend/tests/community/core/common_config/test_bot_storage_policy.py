@@ -14,6 +14,9 @@ from agentclaw.community.core.common_config.bot_config_service import (
     STORAGE_POLICY,
     _should_rollout_upfs as should_rollout_upfs,
 )
+from tests.community.core.service_bot.services.deploy._noop_storage_policy import (
+    NoopStoragePolicy,
+)
 from agentclaw.community.core.repository.implementations.config.bot_common_config import (
     BotCommonConfigRepository,
 )
@@ -863,7 +866,7 @@ def test_published_and_caller_payloads_reuse_saved_policy(storage, stage, migrat
     payload = baas._build_create_bot_payload(**kwargs)
     assert payload["config"]["deploy_config"]["storage"]["type"] == "upfs"
     # Without a policy in the DB the same payload keeps the original NAS layout.
-    baas._deploy_composer._storage_policy = None
+    baas._deploy_composer._storage_policy = NoopStoragePolicy()
     legacy_payload = baas._build_create_bot_payload(**kwargs)
     assert legacy_payload["config"]["deploy_config"]["storage"]["type"] == "nas"
 

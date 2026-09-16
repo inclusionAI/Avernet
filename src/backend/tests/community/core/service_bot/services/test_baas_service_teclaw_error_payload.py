@@ -15,6 +15,9 @@ from unittest.mock import MagicMock
 from agentclaw.community.core.service_bot.services.deploy.managed_composer import (
     ManagedDeployConfigComposer,
 )
+from tests.community.core.service_bot.services.deploy._noop_storage_policy import (
+    NoopStoragePolicy,
+)
 from agentclaw.community.core.service_bot.services.baas_service import (
     BaasService,
     BaasServiceError,
@@ -35,6 +38,7 @@ def _svc_with_404(detail: dict) -> BaasService:
             storage_path=MagicMock(),
             sandbox_registry=MagicMock(),
             bot_repo=MagicMock(),
+            storage_policy=NoopStoragePolicy(),
         ),
         startup_script_reader=MagicMock(**{"get_body.return_value": ""}),
         baas_api_base="http://baas.test",
