@@ -24,7 +24,7 @@ from agentclaw.community.plugin_api.notify_sender import (
     NotifySenderPlugin,
 )
 
-log = get_logger(__name__)
+log = get_logger()
 
 
 class DingTalkCredentialHolder:
