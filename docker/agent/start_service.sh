@@ -27,8 +27,6 @@
 #       --client_id <client_id> \
 #       --engine openclaw|claude_code  (default openclaw) \
 #       [--bot_id <bot_id>] \
-#       [--entity_id <entity_id>] \
-#       [--version <positive-version-or-V-prefixed-version>] \
 #       [--stage <stage>] \
 #       [--owner_id <owner_id>]
 ##############################################
@@ -59,8 +57,6 @@ TOKEN=""
 CLIENT_ID=""
 OWNER_ID=""
 BOT_ID=""
-ENTITY_ID=""
-VERSION=""
 STAGE=""
 ENGINE="openclaw"
 ADAPTOR_PORT="${ADAPTOR_PORT:-20003}"
@@ -81,12 +77,6 @@ while [[ $# -gt 0 ]]; do
         --bot_id)
             [ $# -ge 2 ] || { warn "--bot_id value missing"; shift; continue; }
             BOT_ID="$2"; shift 2 ;;
-        --entity_id)
-            [ $# -ge 2 ] || { fail "--entity_id value missing"; exit 1; }
-            ENTITY_ID="$2"; shift 2 ;;
-        --version)
-            [ $# -ge 2 ] || { fail "--version value missing"; exit 1; }
-            VERSION="$2"; shift 2 ;;
         --stage)
             [ $# -ge 2 ] || { warn "--stage value missing"; shift; continue; }
             STAGE="$2"; shift 2 ;;
@@ -101,17 +91,6 @@ done
 
 section "start_service.sh - pod startup dispatcher"
 
-# COSEC: identity metadata must not inject additional credentials-file lines.
-if [[ "$ENTITY_ID" == *$'\n'* || "$ENTITY_ID" == *$'\r'* ]]; then
-    fail "Invalid service Bot entity identity"
-    exit 1
-fi
-if [[ -n "$VERSION" && ! "$VERSION" =~ ^V?[1-9][0-9]*$ ]]; then
-    fail "Invalid service Bot version identity"
-    exit 1
-fi
-info "Service Bot runtime identity: entity_id=$ENTITY_ID version=$VERSION"
-
 # --- Step 1: Save credentials ---
 
 section "Step 1: Saving credentials..."
@@ -123,8 +102,6 @@ TOKEN=$TOKEN
 CLIENT_ID=$CLIENT_ID
 OWNER_ID=$OWNER_ID
 BOT_ID=$BOT_ID
-ENTITY_ID=$ENTITY_ID
-VERSION=$VERSION
 STAGE=$STAGE
 ENGINE=$ENGINE
 EOF

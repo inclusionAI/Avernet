@@ -105,6 +105,6 @@ NAS home 可以跨保留该卷的重启保留文件；临时 home、新设备、
 - 签名覆盖完整 `expected_target`、`operation`、`path`、`request_id` 和时间戳；接收方验证时效并使用常量时间比较。密钥缺失时 fail closed，不允许自动降级为匿名或普通设备 token。
 - 使用 Ed25519：仅 Backend 配置 `SERVICE_BOT_PUBLISH_IGNORE_SIGNING_KEY`（PKCS8 PEM 私钥），Engine 仅配置 `SERVICE_BOT_PUBLISH_IGNORE_VERIFY_KEY`（SubjectPublicKeyInfo PEM 公钥）。两者通过受信任部署配置注入；私钥绝不能下发到 Bot 容器、工作区或日志。共享 HMAC 密钥方案已因跨 Bot 伪造风险放弃。轮换需协调 Backend/Engine，旧验签密钥失效时请求明确失败。
 - Engine 在固定文件锁内持久化受限的已消费请求记录，拒绝重放。先消费请求再写规则；进程崩溃或文件写失败后，不把重发旧签名当作成功，应从 Backend 发起新请求并依据规则幂等语义重试。
-- 社区 Docker 启动分发脚本补齐 `--entity_id`、`--version` 的凭证投影；发布命令已有这两个参数。未提供完整运行身份的旧实例仍拒绝变更，不使用请求中的目标填补身份字段。
+- 按用户确认，不修改 `docker/agent/start_service.sh`。依赖实际部署使用的既有启动脚本提供完整运行身份（daas 启动脚本已保存这些字段）。未提供完整身份的实例仍拒绝变更，不使用请求中的目标填补身份字段。
 - `agentclaw-daas-scripts` 中的 cp ignore 消费逻辑属于独立仓库，本 Avernet PR 不包含该仓库未提交变更。未升级安装脚本时接口更新文件不会产生复制排除效果；不能把接口测试通过等同于发布性能已验证。
 - 固定 ignore 文件按实例 home 生效，不按 version 建命名空间；本次不会重启服务或删除业务路径。生产 NAS 的锁/rename 行为与滚动升级后的真实黑盒验证属于后续部署验证，不在本次本地测试中冒充完成。

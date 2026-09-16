@@ -11,7 +11,7 @@ iteration: 2
 
 - Branch: `feat/service-bot-publish-ignore-ops-rel20260917`.
 - Base: `github/REL20260917` (`e12a495a2d9a3f65fe5a4a6227ed25142fb1d8f4`).
-- Includes staged, unstaged and new Backend/Engine files plus runtime identity bootstrap; no tar or copy-algorithm changes.
+- Includes Backend/Engine files and credential identity reading; Docker startup changes and their nine tests were withdrawn at the user's request. No tar or copy-algorithm changes.
 - Reviewed Head: `f21ea371bf8546c020185a8bcfa32031d1cb15db`; 33 changed files including specification and validation reports.
 - Inputs: `001-spec-output.md`, `002-code-report.md`, `003b-regression-report.md`, complete committed diff and new-file contents. Remote PR/ACI remains pending; code approval is not deployment approval.
 
@@ -19,7 +19,7 @@ iteration: 2
 
 | Check | Result | Evidence |
 | --- | --- | --- |
-| Backend focused behavior | PASS | 44/44 tests, including service, transport, router, DI and nine real shell startup tests |
+| Backend focused behavior (historical review) | PASS | 44/44 at review time; nine Docker startup tests were later withdrawn together with the user-excluded script change |
 | Backend focused line coverage | PASS, local only | New domain service 77/77; transport 63/64; combined 140/141 (99.29%) |
 | Engine focused behavior | PASS | 28/28 tests through real router/DI and filesystem |
 | Engine focused line coverage | PASS, local only | File implementation 139/140 (99.29%) |

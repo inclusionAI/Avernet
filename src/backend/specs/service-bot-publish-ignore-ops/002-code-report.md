@@ -15,7 +15,7 @@ Allowed additions: request/contract types, a thin endpoint in each existing rout
 - Backend signs each per-target payload with Ed25519. Only Backend receives the private PEM key; Engine receives the public PEM key. The signature covers target identity, operation, path, request ID and timestamp.
 - Engine checks the signature and time window, reloads managed runtime identity, takes a bounded fixed sibling lock, and atomically updates the fixed ignore file. A persistent, bounded request journal prevents repeated signed requests from restoring a subsequently removed rule. Failed operations are retried through Backend with a fresh request ID.
 - File service preserves unrelated rules/comments and CRLF, uses literal paths, rejects symlinks/nonregular/oversized files, and leaves the old file intact if replacement fails. Add-existing and remove-absent are successful no-ops.
-- Docker startup now preserves the existing managed-composer `--entity_id`/`--version` arguments in credentials; injected newlines and invalid versions are rejected before writing.
+- Docker startup changes were withdrawn at the user's request. Engine consumes the identity already supplied by the deployed startup script; the existing daas bootstrap saves entity/version metadata. Missing identity still fails closed.
 
 ## Changed areas
 
@@ -27,7 +27,7 @@ Allowed additions: request/contract types, a thin endpoint in each existing rout
 | Engine core publish-ignore models/protocol | Typed mutation contract |
 | Engine plugin and DI module | Signature/identity checks and fixed-file mutation |
 | Engine existing Bot router | Structured inbound boundary logging and response mapping |
-| Engine credentials and Docker dispatcher | Reliable runtime identity projection |
+| Engine credentials | Read runtime identity supplied by the existing bootstrap; no Docker dispatcher changes |
 | Backend/Engine tests | Permissions, providers, edge cases, signatures, file safety, protocol and DI behavior |
 
 ## Boundary observability
@@ -38,7 +38,7 @@ Events carry request correlation, the real operator where available, exact targe
 
 ## Validation status
 
-Initial focused checks: Backend 35 cases, Docker dispatcher 9 cases, Engine 44 cases passed. Full Engine suite: 2,692 passed, 5 pre-existing corp-only deselections, 93.50% total line coverage. The local report command initially selected an old system Python; re-running with the project Python 3.12 passed the case and total-coverage gates.
+Historical initial checks: Backend 35 cases and Engine 44 cases passed; the nine Docker-dispatcher tests were subsequently removed together with the withdrawn script change. Historical full Engine suite: 2,692 passed, 5 pre-existing corp-only deselections, 93.50% total line coverage. The local report command initially selected an old system Python; re-running with the project Python 3.12 passed the case and total-coverage gates.
 
 The first complete Backend run found four actionable gate failures (new endpoint registry coverage and contract import direction), with 18,755 passed and 43 existing skips. All four were corrected without new exemptions or lower thresholds: shared command/error/target values now live in `kernel.publish_ignore`, the new endpoint has registered happy/error scenarios, and consumer-to-runtime contracts exercise actual service/DI resolution. Review also added restart-in-progress rejection and a post-delivery publication-binding snapshot check.
 
