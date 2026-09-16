@@ -54,6 +54,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillInvalidPackageError,
     LocalSkillNotFoundError,
     LocalSkillRuntimeSyncError,
+    LocalSkillRuntimeUnavailableError,
     LocalSkillStorageError,
     LocalSkillTooLargeError,
     SkillRuntimeNameConflictError,
@@ -986,7 +987,7 @@ class TestUploadSkillValidation:
                 "Skill package is too large.",
             ),
             (
-                LocalSkillStorageError(),
+                LocalSkillRuntimeUnavailableError(),
                 SkillUploadErrorCode.RUNTIME_UNAVAILABLE,
                 "当前 Bot 的运行环境暂不可用，请重新启动 Bot 后重试。",
             ),
@@ -1022,6 +1023,36 @@ class TestUploadSkillValidation:
             assert body["success"] is False
             assert body["error_code"] == error_code
             assert body["message"] == message
+
+    def test_upload_keeps_persistence_failure_distinct_from_runtime(self, mock_ctx):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
+            client,
+            mock_svc,
+            _,
+            _,
+        ):
+            error = LocalSkillStorageError()
+            error.__cause__ = RuntimeError("database write failed")
+            mock_svc.upload_local_skill_files.side_effect = error
+
+            response = client.post(
+                "/api/skills/upload",
+                files=[
+                    (
+                        "files",
+                        (
+                            "SKILL.md",
+                            b"---\nname: a\ndescription: a\n---",
+                            "text/markdown",
+                        ),
+                    )
+                ],
+                data={"file_paths": json.dumps(["SKILL.md"])},
+            )
+
+            body = response.json()
+            assert body["success"] is False
+            assert body["error_code"] == SkillUploadErrorCode.UPLOAD_FAILED
 
     @pytest.mark.parametrize(
         ("message", "expected_code"),

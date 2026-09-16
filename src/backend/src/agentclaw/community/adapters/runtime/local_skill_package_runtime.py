@@ -17,7 +17,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillEditBusyError,
     LocalSkillEditLockUnavailableError,
     LocalSkillInvalidPackageError,
-    LocalSkillStorageError,
+    LocalSkillRuntimeUnavailableError,
     LocalSkillTooLargeError,
 )
 from agentclaw.community.plugin_api.device_adapter_transport import (
@@ -56,7 +56,7 @@ class LocalSkillPackageRuntime(LocalSkillPackageRuntimeProtocol):
                 self._resolver.resolve_for_bot, bot_id, owner_id
             )
         except Exception as exc:
-            raise LocalSkillStorageError() from exc
+            raise LocalSkillRuntimeUnavailableError() from exc
 
         is_teclaw = context.provider == "teclaw"
         if not is_teclaw and not await self._supports_package_apply(context.conn_info):
@@ -79,11 +79,11 @@ class LocalSkillPackageRuntime(LocalSkillPackageRuntimeProtocol):
             )
         except DeviceAdapterHTTPStatusError as exc:
             self._raise_known_failure(exc)
-            raise LocalSkillStorageError() from exc
+            raise LocalSkillRuntimeUnavailableError() from exc
         except Exception as exc:
             # The request may already have committed. Never retry through the
             # legacy per-file protocol after this point.
-            raise LocalSkillStorageError() from exc
+            raise LocalSkillRuntimeUnavailableError() from exc
         return self._normalise_result(
             raw,
             skill_name=skill_name,
@@ -100,23 +100,23 @@ class LocalSkillPackageRuntime(LocalSkillPackageRuntimeProtocol):
             )
         except DeviceAdapterEndpointNotFoundError as exc:
             if not exc.standard_route_missing:
-                raise LocalSkillStorageError() from exc
+                raise LocalSkillRuntimeUnavailableError() from exc
             try:
                 health = await self._transport.invoke(conn_info, "GET", "/health")
             except Exception as health_exc:
-                raise LocalSkillStorageError() from health_exc
+                raise LocalSkillRuntimeUnavailableError() from health_exc
             if not isinstance(health, dict) or not (
                 health.get("status") == "ok" or health.get("ok") is True
             ):
-                raise LocalSkillStorageError()
+                raise LocalSkillRuntimeUnavailableError()
             return False
         except Exception as exc:
-            raise LocalSkillStorageError() from exc
+            raise LocalSkillRuntimeUnavailableError() from exc
         if not isinstance(raw, dict) or raw.get("success") is not True:
-            raise LocalSkillStorageError()
+            raise LocalSkillRuntimeUnavailableError()
         data = raw.get("data")
         if not isinstance(data, dict) or not isinstance(data.get("supported"), list):
-            raise LocalSkillStorageError()
+            raise LocalSkillRuntimeUnavailableError()
         return _CAPABILITY in data["supported"]
 
     @staticmethod
@@ -148,10 +148,10 @@ class LocalSkillPackageRuntime(LocalSkillPackageRuntimeProtocol):
         is_teclaw: bool,
     ) -> LocalSkillPackageRuntimeResult:
         if not isinstance(raw, dict) or raw.get("success") is not True:
-            raise LocalSkillStorageError()
+            raise LocalSkillRuntimeUnavailableError()
         payload = raw if is_teclaw else raw.get("data")
         if not isinstance(payload, dict):
-            raise LocalSkillStorageError()
+            raise LocalSkillRuntimeUnavailableError()
         digest = payload.get("sha256") if is_teclaw else payload.get("content_digest")
         if is_teclaw and isinstance(digest, str):
             digest = f"sha256:{digest.lower()}"
@@ -161,7 +161,7 @@ class LocalSkillPackageRuntime(LocalSkillPackageRuntimeProtocol):
             or action not in {"created", "replaced", "unchanged"}
             or digest != expected_digest
         ):
-            raise LocalSkillStorageError()
+            raise LocalSkillRuntimeUnavailableError()
         target_path = payload.get("target_path")
         return LocalSkillPackageRuntimeResult(
             skill_name=skill_name,

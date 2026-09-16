@@ -123,6 +123,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
+    LocalSkillRuntimeUnavailableError,
     LocalSkillStorageError,
     LocalSkillTooLargeError,
     SkillAssetInUseError,
@@ -218,7 +219,7 @@ _RUNTIME_UPLOAD_EXCEPTION_TYPES = (
     DeviceAdapterEndpointNotFoundError,
     DeviceAdapterTimeoutError,
     SandboxRuntimeUnavailableError,
-    LocalSkillStorageError,
+    LocalSkillRuntimeUnavailableError,
     ConnectionError,
     TimeoutError,
 )
