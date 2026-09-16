@@ -23,7 +23,9 @@ Backend：POST `/api/service-bot/publish/ops/publish-ignore`，平放既有 rout
 
 - bot_id 为发布服务 Bot 标识，不是 BaaS bot_uuid；必须核对与指定实体的关系。
 - version 为正整数，Backend 环境 env 从当前认证/部署上下文获取，不把 stage 当 pre/prod 环境。
-- 首期 stage=verify|online；draft 没有相同的发布物安装语义，eval 可能带额外业务实例标识，本期明确拒绝，不能映射到其他阶段。
+- stage=draft|verify|online；eval 可能带额外业务实例标识，本期明确拒绝，不能映射到其他阶段。
+- draft：version 必须精确对应当前唯一 draft 发布单，目标取源 Bot.binding_id，不读取 ext.binding.draft，也不回退 verify/online。草稿容器是长期工作区，BaaS 初始化不传版本号，因此 Engine 校验受管理凭证中的 bot_id/entity_id/stage，发布版本只由 Backend 校验（仍包含在签名中）；verify/online 保持运行版本严格匹配。草稿规则不自动同步到验证/线上实例。
+- draft 操作后复查源 Bot.binding_id、精确版本及唯一 draft 状态；变化时保留已执行结果并报告 snapshot_status=changed。该复查不是跨数据库与运行实例的事务保证。
 - operation=add|remove，path 为单个精确相对路径，采用已有 Shell 相同规范；拒绝绝对路径、换行、NUL、dot traversal、glob、开头 #/!、反斜杠和重复斜杠。保留文件名内部空格，允许 ./ 前缀及尾 / 规范化。
 - 平台管理员可操作任意目标 Bot；普通已登录用户可操作自己拥有或具备管理权限的 Bot，复用现有发布修改/重启的协作者权限服务（默认 PermissionLevel.ADMIN，包含 OWNER）。公开可聊天/只读权限不等于管理权限。entity_id 是定位条件而非授权凭据。授权在设备调用前完成，保留真实 operator。
 - add 已存在/remove 不存在均成功，changed=false；remove 只删规则，不删除业务文件。
@@ -49,7 +51,7 @@ class PublishIgnoreService:
 
 resolve_exact_target 的约束：
 1. 当前租户/env 内唯一解析 Bot，核对 entity_id 和 service 类型，再从真实记录取 owner_id；entity_id 不等于 owner_id。
-2. 使用已存在的 list_by_source_bot(source_bot_pk, env)，按 version 精确筛选并要求唯一，取该发布单 ext.binding[stage]。如需后续优化为专用精确查询，应保留 source_bot_pk/version/env 三个条件，不能改成 latest 或 owner 猜测。
+2. 使用已存在的 list_by_source_bot(source_bot_pk, env)，按 version 精确筛选并要求唯一；verify/online 取该发布单 ext.binding[stage]，draft 取源 Bot.binding_id 并要求该版本是唯一 draft。不能改成 latest 或 owner 猜测。
 3. 校验绑定有效、所属对象匹配、实际运行版本匹配。历史发布单可能保留已被新版本复用的 binding，不能只检查 binding 存在。
 4. 目标已退役、版本不符、无指定阶段绑定、发布/重启正在变更目标时返回冲突或不存在；禁止 fallback 到最新版本或草稿。
 5. 枚举目标设备并固定快照；默认影响该版本阶段当前全部运行副本。未就绪副本记录失败，不静默跳过。
@@ -79,7 +81,7 @@ class PublishIgnoreFileService:
 ```
 
 - 固定文件 `/home/admin/.service_bot_publish_ignore`；锁使用独立固定 `.lock` 文件，不能锁随后被 replace 的 inode。Linux 使用 flock，锁与文件均拒绝 symlink、非普通文件并限制大小；锁持有时间有界。
-- 校验的是受管理运行身份的版本和阶段，不能信任请求自报。运行时 V3 与 API 3 做明确定义的规范化；缺少可靠身份时拒绝修改，不能猜测。部署替换进程/身份与本次操作有竞态时需冲突返回。
+- 校验的是受管理运行身份，不能信任请求自报。verify/online 的运行时 V3 与 API 3 做规范化；draft 工作区没有发布版本身份，只校验 bot/entity/stage，版本由 Backend 的草稿发布单约束。缺少 bot/entity/stage 时一律拒绝。部署替换进程/身份与本次操作有竞态时需冲突返回。
 - 文件不存在视为空。读改写在锁内进行；保留注释、空行和未相关规则；add 规范化去重，remove 删除所有等价规则行。不覆盖其他规则，不执行 shell。
 - 同目录安全创建临时文件，写入、flush/fsync、设置 admin 可读写的受限权限，再 os.replace；失败清理自身临时文件。写失败不返回 changed=true。NFS 锁与 rename 语义须在实际挂载验证。
 - Shell 使用文件描述符读取清单，原子替换使单次读取拿到完整旧版或新版。已经开始并读完清单的发布不受本次写入追溯影响。
@@ -92,6 +94,8 @@ class PublishIgnoreFileService:
 NAS home 可以跨保留该卷的重启保留文件；临时 home、新设备、重建或扩容不保证继承。本期不引入 Backend 规则数据库及自动下发，响应应明确 scope=current_instances；未来需要跨重建保证再增加持久化与启动播种。
 
 ## 6. Review / QA / Ship
+
+draft 增量测试计划：两种 provider 的源绑定定址、精确/唯一草稿版本、错误状态和无源绑定拒绝、操作中源绑定/草稿状态变化、HTTP 接受 draft、真实签名传输到 Engine（草稿凭证缺版本或带旧版本均可）、bot/entity/stage 缺失或错配拒绝、verify/online 版本校验不退化。Docker 启动脚本相对基线 diff 必须为空。
 
 - 允许新增：Backend 请求模型、router endpoint、PublishIgnoreService/DI、精确目标查询的最小接线；Engine 请求模型、既有 bot router endpoint、文件服务与管理授权 guard、运行身份最小投影和测试。
 - 不触碰：Relay 引擎实现、Cron、发布状态机、通用 HTTP 客户端、制品构建和 cp 算法；不借运维接口触发发布重启。

@@ -36,13 +36,41 @@ def setup(tmp_path, monkeypatch):
     return TestClient(app), signing_key, credentials
 
 
-def payload(secret, path="workspace/cache", operation="add"):
-    data = {"expected_target": {"bot_id": "bot", "entity_id": "entity", "version": 3, "stage": "online"},
+def payload(secret, path="workspace/cache", operation="add", stage="online"):
+    data = {"expected_target": {"bot_id": "bot", "entity_id": "entity", "version": 3, "stage": stage},
             "operation": operation, "path": path, "request_id": str(uuid.uuid4())}
     timestamp = int(time.time())
     encoded = json.dumps({**data, "timestamp": timestamp}, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
     data["authorization"] = {"timestamp": timestamp, "signature": base64.b64encode(secret.sign(encoded)).decode()}
     return data
+
+
+@pytest.mark.parametrize("version", ["", "V1", "V3"])
+def test_draft_workspace_has_no_release_version(setup, version):
+    client, signing_key, credentials = setup
+    credentials.write_text(f"BOT_ID=bot\nENTITY_ID=entity\nSTAGE=draft\nVERSION={version}\n")
+    assert client.post("/api/bot/publish-ignore", json=payload(signing_key, stage="draft")).status_code == 200
+    assert service.IGNORE_FILE.read_text() == "workspace/cache\n"
+
+
+@pytest.mark.parametrize("stage", ["draft", "verify", "online"])
+@pytest.mark.parametrize("field,value", [("BOT_ID", "other"), ("ENTITY_ID", ""), ("STAGE", "")])
+def test_all_stages_require_real_workspace_identity(setup, stage, field, value):
+    client, signing_key, credentials = setup
+    identity = {"BOT_ID": "bot", "ENTITY_ID": "entity", "STAGE": stage, "VERSION": "V3"}
+    identity[field] = value
+    credentials.write_text("".join(f"{key}={item}\n" for key, item in identity.items()))
+    assert client.post("/api/bot/publish-ignore", json=payload(signing_key, stage=stage)).status_code == 409
+    assert not service.IGNORE_FILE.exists()
+
+
+@pytest.mark.parametrize("stage", ["verify", "online"])
+@pytest.mark.parametrize("version", ["", "V1"])
+def test_release_stages_still_require_exact_version(setup, stage, version):
+    client, signing_key, credentials = setup
+    credentials.write_text(f"BOT_ID=bot\nENTITY_ID=entity\nSTAGE={stage}\nVERSION={version}\n")
+    assert client.post("/api/bot/publish-ignore", json=payload(signing_key, stage=stage)).status_code == 409
+    assert not service.IGNORE_FILE.exists()
 
 
 def test_add_remove_preserves_comments_and_crlf(setup):

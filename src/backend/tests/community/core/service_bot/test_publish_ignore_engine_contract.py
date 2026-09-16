@@ -73,8 +73,11 @@ def contract(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["baas", "arca"])
-async def test_signed_add_remove_across_real_engine(contract, provider):
+@pytest.mark.parametrize("stage,version", [("online", "V3"), ("draft", ""), ("draft", "V1")])
+async def test_signed_add_remove_across_real_engine(contract, provider, stage, version):
     ctx = contract
+    ctx.command = replace(ctx.command, stage=stage)
+    ctx.credentials.write_text(f"BOT_ID=bot\nENTITY_ID=entity\nVERSION={version}\nSTAGE={stage}\n")
     ctx.binding.device_provider = provider
     targets = await ctx.runtime.targets(ctx.binding)
     result = await ctx.runtime.change(ctx.binding, targets[0], ctx.command, "authorized-manager")
@@ -88,6 +91,22 @@ async def test_signed_add_remove_across_real_engine(contract, provider):
     assert len({data["request_id"] for data in ctx.captured}) == 3
     assert ctx.client.post("/api/bot/publish-ignore", json=ctx.captured[0]).status_code == 409
     assert ctx.ignore.read_bytes() == b""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("identity", [
+    "BOT_ID=other\nENTITY_ID=entity\nSTAGE=draft\n",
+    "BOT_ID=bot\nENTITY_ID=other\nSTAGE=draft\n",
+    "BOT_ID=bot\nENTITY_ID=entity\nSTAGE=online\n",
+    "BOT_ID=bot\nENTITY_ID=entity\n",
+])
+async def test_draft_runtime_identity_mismatch(contract, identity):
+    ctx = contract
+    ctx.command = replace(ctx.command, stage="draft")
+    ctx.credentials.write_text(identity)
+    result = await ctx.runtime.change(ctx.binding, "replica-a", ctx.command, "authorized-manager")
+    assert result["status"] == "failed"
+    assert not ctx.ignore.exists()
 
 
 @pytest.mark.asyncio

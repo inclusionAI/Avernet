@@ -14,6 +14,7 @@ from agentclaw.community.api.publish_ignore_service import PublishIgnoreError
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["draft", "verify", "online"])
 @pytest.mark.parametrize(
     "error,code",
     [
@@ -23,7 +24,7 @@ from agentclaw.community.api.publish_ignore_service import PublishIgnoreError
         ("unexpected", 500),
     ],
 )
-async def test_router_mapping(error, code):
+async def test_router_mapping(error, code, stage):
     service = AsyncMock()
     service.change.return_value = {"success": True, "results": []}
     if error:
@@ -36,7 +37,7 @@ async def test_router_mapping(error, code):
         bot_id="bot",
         entity_id="entity",
         version=3,
-        stage="online",
+        stage=stage,
         operation="remove",
         path="workspace/cache",
     )
@@ -47,11 +48,12 @@ async def test_router_mapping(error, code):
     assert "secret-value" not in result.model_dump_json()
     assert service.change.call_args.args[1] == "actor"
     assert service.change.call_args.args[0].operation == "remove"
+    assert service.change.call_args.args[0].stage == stage
 
 
 @pytest.mark.parametrize(
     "field,value",
-    [("stage", "draft"), ("operation", "delete"), ("version", True), ("version", 0)],
+    [("stage", "eval"), ("operation", "delete"), ("version", True), ("version", 0)],
 )
 def test_request_validation(field, value):
     data = dict(

@@ -26,7 +26,7 @@ from tests.community.factories.access import make_staff_user
 from tests.community.framework import http_envelope_response
 
 
-def seed_publish_ignore(world, *, engine_success=True):
+def seed_publish_ignore(world, *, engine_success=True, stage="online"):
     make_staff_user(world, user_id="ignore_owner")
     binding_id = world.get(DeviceBindingRepository).insert_binding(
         entity_id="ignore_owner",
@@ -61,10 +61,10 @@ def seed_publish_ignore(world, *, engine_success=True):
             "name": "Ignore Bot",
             "owner_id": "ignore_owner",
             "permission_owner": "ignore_owner",
-            "status": "success",
+            "status": "draft" if stage == "draft" else "success",
             "version": 3,
             "env": "dev",
-            "ext": {"binding": {"online": binding_id}},
+            "ext": {} if stage == "draft" else {"binding": {stage: binding_id}},
         }
     )
     world.get(Annotated[HttpClient, QUALIFIER_BAAS]).set_response(

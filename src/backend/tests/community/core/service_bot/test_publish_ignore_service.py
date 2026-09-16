@@ -160,3 +160,63 @@ async def test_service_boundary_logs(setup, monkeypatch):
         await service.change(command, "actor", is_admin=True)
     assert audit.warning.call_args.args[0] == "backend.publish_ignore.failure %s"
     assert "secret-value" not in str(audit.mock_calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["baas", "arca"])
+async def test_draft_uses_source_binding(setup, provider):
+    service, command, pub, binding = setup
+    pub.status = "draft"
+    pub.ext["binding"]["draft"] = 99
+    service.bots.get_by_id_and_entity.return_value["binding_id"] = 44
+    binding.device_provider = provider
+    result = await service.change(replace(command, stage="draft"), "owner", is_admin=False)
+    assert result["success"]
+    assert all(call.args == (44,) for call in service.bindings.get_by_id.call_args_list)
+    assert service.runtime.change.call_args.args[0].device_provider == provider
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case,code", [
+    ("historical", "publication_not_ready"),
+    ("multiple", "publication_not_ready"),
+    ("missing_binding", "stage_not_bound"),
+    ("version", "version_not_unique_or_missing"),
+])
+async def test_draft_rejects_invalid_target(setup, case, code):
+    service, command, pub, _ = setup
+    pub.status = "draft"
+    service.bots.get_by_id_and_entity.return_value["binding_id"] = 44
+    if case == "historical":
+        pub.status = "success"
+    if case == "multiple":
+        service.publications.list_by_source_bot.return_value.append(NS(version=4, status="draft"))
+    if case == "missing_binding":
+        service.bots.get_by_id_and_entity.return_value.pop("binding_id")
+    if case == "version":
+        command = replace(command, version=4)
+    with pytest.raises(PublishIgnoreError, match=code):
+        await service.change(replace(command, stage="draft"), "owner", is_admin=False)
+    service.runtime.change.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["binding", "status", "multiple", "missing_bot"])
+async def test_draft_snapshot_revalidates_source_and_publication(setup, case):
+    service, command, pub, _ = setup
+    pub.status = "draft"
+    bot = service.bots.get_by_id_and_entity.return_value
+    bot["binding_id"] = 44
+    if case in {"binding", "missing_bot"}:
+        service.bots.get_by_id_and_entity.side_effect = [
+            bot, {**bot, "binding_id": 55} if case == "binding" else None,
+        ]
+    else:
+        after = [NS(version=3, status="success" if case == "status" else "draft", ext={})]
+        if case == "multiple":
+            after.append(NS(version=4, status="draft"))
+        service.publications.list_by_source_bot.side_effect = [[pub], after]
+    result = await service.change(replace(command, stage="draft"), "owner", is_admin=False)
+    assert not result["success"]
+    assert result["snapshot_status"] == "changed"
+    assert result["results"][0]["status"] == "changed"

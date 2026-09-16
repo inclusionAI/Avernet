@@ -95,7 +95,7 @@ class PublishIgnoreService:
                 raise PublishIgnoreError("permission_denied")
         if bot.get("bot_type") != "service":
             raise PublishIgnoreError("not_service_bot")
-        if command.stage not in {"verify", "online"} or command.operation not in {
+        if command.stage not in {"draft", "verify", "online"} or command.operation not in {
             "add",
             "remove",
         }:
@@ -109,9 +109,10 @@ class PublishIgnoreService:
         publication = matches[0]
         if (publication.ext or {}).get("restart", {}).get("restarting"):
             raise PublishIgnoreError("restart_in_progress")
-        if publication.status not in {"validating", "success", "upgraded"}:
+        if not self._publication_ready(publication, records, command.stage):
             raise PublishIgnoreError("publication_not_ready")
-        binding_id = (publication.ext or {}).get("binding", {}).get(command.stage)
+        # COSEC: draft targets the source workspace, never a release binding.
+        binding_id = self._stage_binding(bot, publication, command.stage)
         if not binding_id:
             raise PublishIgnoreError("stage_not_bound")
         binding = await asyncio.to_thread(self.bindings.get_by_id, binding_id)
@@ -148,14 +149,19 @@ class PublishIgnoreService:
                 self.publications.list_by_source_bot, bot["id"], self.env
             )
             same_version = [r for r in refreshed if r.version == command.version]
+            current_bot = bot
+            if command.stage == "draft":
+                current_bot = await asyncio.to_thread(
+                    self.bots.get_by_id_and_entity, command.bot_id, command.entity_id
+                )
             publication_changed = (
                 len(same_version) != 1
-                or (same_version[0].ext or {}).get("binding", {}).get(command.stage)
+                or self._stage_binding(current_bot, same_version[0], command.stage)
                 != binding_id
                 or bool(
                     (same_version[0].ext or {}).get("restart", {}).get("restarting")
                 )
-                or same_version[0].status not in {"validating", "success", "upgraded"}
+                or not self._publication_ready(same_version[0], refreshed, command.stage)
             )
             current_binding = await asyncio.to_thread(
                 self.bindings.get_by_id, binding_id
@@ -185,3 +191,18 @@ class PublishIgnoreService:
             "request_id": command.request_id,
         }
         return result
+
+    @staticmethod
+    def _stage_binding(bot, publication, stage):
+        if stage == "draft":
+            return (bot or {}).get("binding_id")
+        return (publication.ext or {}).get("binding", {}).get(stage)
+
+    @staticmethod
+    def _publication_ready(publication, records, stage):
+        if stage == "draft":
+            # COSEC: reject historical or ambiguous drafts before signing a write.
+            return publication.status == "draft" and sum(
+                record.status == "draft" for record in records
+            ) == 1
+        return publication.status in {"validating", "success", "upgraded"}
