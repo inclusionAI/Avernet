@@ -1082,6 +1082,7 @@ async function createBuiltinHardeningStep(
   const config = (parseJson(task.config_json) as {
     nodeCommands?: NodeCommandYamls;
     goal?: string;
+    model?: string;
     clawwebUrl?: string;
   } | null) ?? {};
   const target = requirePreparedSkillCandidate(
@@ -1096,6 +1097,7 @@ async function createBuiltinHardeningStep(
       ["workspace", quoteCommandArgument(target.workspacePath)],
       ["target", quoteCommandArgument(target.skillPath)],
       ["goal", quoteCommandArgument(config.goal ?? "")],
+      ["model", safeBenchCommandValue("model", config.model ?? "GLM-5.2")],
       ["clawweb-url", config.clawwebUrl ?? getClawWebPublicBaseUrl()],
     ],
   );
@@ -1441,6 +1443,7 @@ async function stageRuntimeInput(
     return {
       ...common,
       goal: testInput?.goal ?? config.goal ?? "",
+      model: testInput?.model ?? config.model ?? "",
       ...(mode === "postprocess" && currentResult ? { builtin_result: currentResult } : {}),
     };
   }
@@ -2108,7 +2111,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       res.status(400).json({ error: "任务名称不能超过128字，备注不能超过1000字" }); return;
     }
     const diagnoseModel = String(model);
-    const requiresModel = requiresDiagnose || (taskType === "full" && inputMode === "direct_goal");
+    const requiresModel = taskType === "hardening"
+      || requiresDiagnose || (taskType === "full" && inputMode === "direct_goal");
     if (requiresModel && (!diagnoseModel.trim() || diagnoseModel.length > 128 || /[\0\r\n\s]/.test(diagnoseModel))) {
       res.status(400).json({ error: "model 必须是 1 到 128 字符且不能包含空白字符" }); return;
     }

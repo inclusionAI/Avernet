@@ -59,8 +59,12 @@ describe('Skill task launch confirmation', () => {
     await within(dialog).findByText(defaults[action].goal)
     expect(within(dialog).getByText('original-owner')).toBeTruthy()
     expect(within(dialog).queryByText('viewer-not-owner')).toBeNull()
-    if (action !== 'hardening') expect(within(dialog).getByText(/GLM-5.2/)).toBeTruthy()
+    expect(within(dialog).getByText(/GLM-5.2/)).toBeTruthy()
     expect(within(dialog).queryByRole('combobox')).toBeNull()
+    if (action === 'hardening') {
+      expect(within(dialog).queryByText('hardening-v1')).toBeNull()
+      expect(within(dialog).queryByText('整体替换')).toBeNull()
+    }
     fireEvent.click(within(dialog).getByRole('button', { name: `确认${action === 'diagnose' ? '诊断' : action === 'hardening' ? '加固' : '优化'}` }))
     await waitFor(() => expect(api.evolve.createTask).toHaveBeenCalledTimes(1))
     const [input, key] = api.evolve.createTask.mock.calls[0]
@@ -68,9 +72,10 @@ describe('Skill task launch confirmation', () => {
       targetSkillAssetId: asset.assetId, botId: 'bot-1', userId: 'original-owner', goal: defaults[action].goal,
       runtimeMaintenance: false, stageSelection: action === 'hardening'
         ? { diagnose: false, hardening: true, plan: false, optimize: false }
-        : { diagnose: true, plan: true, optimize: action === 'optimize' } })
+        : { diagnose: true, hardening: false, plan: true, optimize: action === 'optimize' } })
+    expect(input).toMatchObject({ model: 'GLM-5.2' })
     if (action !== 'hardening') expect(input).toMatchObject({ diagnoseIntent: defaults[action].goal,
-      model: 'GLM-5.2', judgeBackend: 'subagent', maxSessions: 10 })
+      judgeBackend: 'subagent', maxSessions: 10 })
     expect(input).not.toHaveProperty('disableStages')
     expect(input).not.toHaveProperty('skipPlan')
     expect(key).toEqual(expect.any(String))
@@ -144,13 +149,13 @@ describe('Skill task launch confirmation', () => {
     expect(api.evolve.createTask.mock.calls[1][1]).toBe(api.evolve.createTask.mock.calls[0][1])
   })
 
-  it.each(['diagnose', 'optimize'] as const)('opens the full advanced form for %s with only the agreed target query', async (action) => {
+  it.each(['diagnose', 'hardening', 'optimize'] as const)('opens the full advanced form for %s with only the agreed target query', async (action) => {
     open(action)
     await screen.findByText(defaults[action].goal)
     fireEvent.click(screen.getByRole('button', { name: '自定义 / 高级' }))
     const url = new URL(screen.getByTestId('location').textContent!, 'https://example.test')
     expect(url.pathname).toBe('/evolve/new')
-    expect(Object.fromEntries(url.searchParams)).toEqual({ type: action === 'diagnose' ? 'diagnose' : 'full',
+    expect(Object.fromEntries(url.searchParams)).toEqual({ type: action === 'diagnose' ? 'diagnose' : action === 'hardening' ? 'hardening' : 'full',
       target: 'skill', assetId: asset.assetId, skillAction: action })
     expect(api.evolve.createTask).not.toHaveBeenCalled()
   })

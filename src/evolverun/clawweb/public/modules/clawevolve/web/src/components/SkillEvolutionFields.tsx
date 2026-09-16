@@ -8,12 +8,14 @@ import {
   type EvolveStageSkill,
 } from '../api/client'
 
+type ConfigurableStage = 'diagnose' | 'hardening' | 'plan' | 'optimize'
+
 export type StageExtensionDraft = Partial<Record<
-  'diagnose' | 'plan' | 'optimize',
+  ConfigurableStage,
   Partial<Record<EvolveStageMode, { enabled: boolean; implementationId: string }>>
 >>
 
-export type StageSelectionDraft = Record<'diagnose' | 'plan' | 'optimize', boolean>
+export type StageSelectionDraft = Record<ConfigurableStage, boolean>
 
 const modeCopy: Record<EvolveStageMode, { name: string; description: string }> = {
   preprocess: { name: '前置处理', description: '先运行你的 Skill，再继续平台原有处理' },
@@ -47,7 +49,7 @@ export default function SkillEvolutionFields({
   stageSelection: StageSelectionDraft
   onStageSelectionChange: (value: StageSelectionDraft) => void
   fullTask: boolean
-  flowKey: 'bot_evolution' | 'skill_evolution'
+  flowKey: 'bot_evolution' | 'skill_evolution' | 'skill_hardening'
   inputMode: 'diagnose_goal' | 'direct_goal'
   hasGoal: boolean
   section?: 'all' | 'target' | 'extensions'
@@ -57,8 +59,8 @@ export default function SkillEvolutionFields({
   const [implementations, setImplementations] = useState<EvolveStageSkill[]>([])
   const [error, setError] = useState('')
   const [expanded, setExpanded] = useState(false)
-  const [customizing, setCustomizing] = useState<Partial<Record<'diagnose' | 'plan' | 'optimize', boolean>>>({})
-  const [pickerStage, setPickerStage] = useState<'diagnose' | 'plan' | 'optimize' | null>(null)
+  const [customizing, setCustomizing] = useState<Partial<Record<ConfigurableStage, boolean>>>({})
+  const [pickerStage, setPickerStage] = useState<ConfigurableStage | null>(null)
   const [stageSearch, setStageSearch] = useState('')
 
   useEffect(() => {
@@ -66,7 +68,7 @@ export default function SkillEvolutionFields({
     Promise.all([
       includeTargetSkill && section !== 'extensions' ? api.evolve.listSkillAssets() : Promise.resolve({ items: [] }),
       section !== 'target' ? api.evolve.stageCatalog({
-        taskType: fullTask ? 'full' : 'diagnose',
+        taskType: flowKey === 'skill_hardening' ? 'hardening' : fullTask ? 'full' : 'diagnose',
         inputMode,
         hasGoal,
       }) : Promise.resolve(null),
@@ -84,10 +86,10 @@ export default function SkillEvolutionFields({
       if (active) setError(reason instanceof Error ? reason.message : 'Skill 进化配置加载失败')
     })
     return () => { active = false }
-  }, [botId, includeTargetSkill, targetLocked, section, fullTask, inputMode, hasGoal])
+  }, [botId, includeTargetSkill, targetLocked, section, fullTask, flowKey, inputMode, hasGoal])
 
   const flowDescription = catalog?.flows.find((flow) => flow.key === flowKey)
-  const stagePolicy = (stage: 'diagnose' | 'plan' | 'optimize') =>
+  const stagePolicy = (stage: ConfigurableStage) =>
     flowDescription?.stages.find((item) => item.key === stage)
 
   const stageSkills = useMemo(() => {
@@ -100,7 +102,7 @@ export default function SkillEvolutionFields({
   }, [implementations])
 
   const updateBinding = (
-    stage: 'diagnose' | 'plan' | 'optimize',
+    stage: ConfigurableStage,
     mode: EvolveStageMode,
     value: { enabled: boolean; implementationId: string },
   ) => {
@@ -113,12 +115,12 @@ export default function SkillEvolutionFields({
     })
   }
 
-  const activeBindings = (stage: 'diagnose' | 'plan' | 'optimize') =>
+  const activeBindings = (stage: ConfigurableStage) =>
     Object.entries(extensions[stage] ?? {})
       .filter((entry): entry is [EvolveStageMode, { enabled: boolean; implementationId: string }] => entry[1]?.enabled === true)
 
   const chooseImplementation = (
-    stage: 'diagnose' | 'plan' | 'optimize',
+    stage: ConfigurableStage,
     implementation: EvolveStageSkill,
   ) => {
     const existing = activeBindings(stage)
@@ -132,12 +134,12 @@ export default function SkillEvolutionFields({
     setPickerStage(null)
   }
 
-  const removeBinding = (stage: 'diagnose' | 'plan' | 'optimize', mode: EvolveStageMode) => {
+  const removeBinding = (stage: ConfigurableStage, mode: EvolveStageMode) => {
     const binding = extensions[stage]?.[mode]
     updateBinding(stage, mode, { enabled: false, implementationId: binding?.implementationId ?? '' })
   }
 
-  const toggleCustom = (stage: 'diagnose' | 'plan' | 'optimize', enabled: boolean) => {
+  const toggleCustom = (stage: ConfigurableStage, enabled: boolean) => {
     setCustomizing((value) => ({ ...value, [stage]: enabled }))
     if (enabled) setPickerStage(stage)
     else {
@@ -148,7 +150,7 @@ export default function SkillEvolutionFields({
 
   const disableExtensions = (
     value: StageExtensionDraft,
-    stage: 'diagnose' | 'plan' | 'optimize',
+    stage: ConfigurableStage,
   ): StageExtensionDraft => ({
     ...value,
     [stage]: Object.fromEntries(Object.entries(value[stage] ?? {}).map(([mode, binding]) => [
@@ -157,7 +159,7 @@ export default function SkillEvolutionFields({
     ])) as StageExtensionDraft[typeof stage],
   })
 
-  const updateStage = (stage: 'diagnose' | 'plan' | 'optimize', enabled: boolean) => {
+  const updateStage = (stage: ConfigurableStage, enabled: boolean) => {
     const policy = stagePolicy(stage)
     if (!policy?.canDisable && enabled !== policy?.enabled) return
     const nextSelection = { ...stageSelection, [stage]: enabled }
@@ -174,14 +176,20 @@ export default function SkillEvolutionFields({
 
   const selectedCount = Object.values(extensions).reduce((count, stageValue) =>
     count + Object.values(stageValue ?? {}).filter((binding) => binding?.enabled).length, 0)
+  const targetLabel = flowKey === 'skill_hardening' ? '待加固 Skill' : '待进化 Skill'
+  const visibleStages = catalog?.stages.filter((stage) => {
+    if (flowKey === 'skill_hardening') return stage.stage === 'hardening'
+    if (stage.stage === 'hardening') return false
+    return fullTask || stage.stage !== 'optimize'
+  })
 
   return <>
     {section !== 'extensions' && includeTargetSkill && <section className="border-t border-gray-100 pt-6">
-      <h2 className="text-sm font-semibold text-gray-900">待进化 Skill</h2>
+      <h2 className="text-sm font-semibold text-gray-900">{targetLabel}</h2>
       <p className="mt-1 text-xs leading-5 text-gray-500">选择已在技能中心登记的 Skill。任务开始时平台会从 OCB 读取最新内容，并为本次任务创建独立候选版本。</p>
       <div className="mt-3 flex items-center gap-3">
-        <select aria-label="待进化 Skill" disabled={targetLocked} value={assetId} onChange={(event) => onAssetIdChange(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500 disabled:bg-gray-50">
-          <option value="">{botId ? '请选择待进化 Skill' : '请先选择目标 Bot'}</option>
+        <select aria-label={targetLabel} disabled={targetLocked} value={assetId} onChange={(event) => onAssetIdChange(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-blue-500 disabled:bg-gray-50">
+          <option value="">{botId ? `请选择${targetLabel}` : '请先选择目标 Bot'}</option>
           {assets.map((asset) => <option key={asset.assetId} value={asset.assetId}>{asset.name} · {asset.currentVersion}</option>)}
         </select>
         <Link to="/evolve/skills" className="shrink-0 text-xs font-medium text-blue-600 hover:text-blue-700">登记新的 Skill ↗</Link>
@@ -198,12 +206,12 @@ export default function SkillEvolutionFields({
       {!expanded && selectedCount > 0 && <p className="mt-2 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">已配置的自定义实现会随本次任务冻结。</p>}
       {expanded && <div className="mt-4 space-y-3">
         <div className="flex justify-end"><Link to="/evolve/stage-skills" className="text-xs font-medium text-blue-600 hover:text-blue-700">管理自定义 Stage ↗</Link></div>
-        {catalog?.stages.filter((stage) => fullTask || stage.stage !== 'optimize').map((stage) => {
-          const stageKey = stage.stage as 'diagnose' | 'plan' | 'optimize'
+        {visibleStages?.map((stage) => {
+          const stageKey = stage.stage as ConfigurableStage
           const selected = activeBindings(stageKey)
           const options = (stageSkills.get(stage.stage) ?? [])
             .filter((item) => stage.extensionModes.includes(item.mode))
-            .filter((item) => flowKey !== 'skill_evolution' || item.integrationTestStatus === 'test_passed')
+            .filter((item) => flowKey === 'bot_evolution' || item.integrationTestStatus === 'test_passed')
           const customEnabled = customizing[stageKey] === true || selected.length > 0
           const hasReplace = selected.some(([mode]) => mode === 'replace')
           const selectedModes = new Set(selected.map(([mode]) => mode))
@@ -235,7 +243,7 @@ export default function SkillEvolutionFields({
             </div>}
           </div>
         })}
-        {flowKey === 'skill_evolution' && implementations.some((item) =>
+        {flowKey !== 'bot_evolution' && implementations.some((item) =>
           item.status === 'registered' && item.integrationTestStatus !== 'test_passed')
           && <p className="text-xs text-gray-500">Skill 自进化只展示已经通过真实集成测试的自定义实现。</p>}
         {error && <p className="text-xs text-red-600">{error}</p>}

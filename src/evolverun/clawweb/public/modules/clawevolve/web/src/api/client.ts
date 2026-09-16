@@ -70,9 +70,13 @@ export type EvolveCreateTaskInput = Parameters<typeof sharedApi.evolve.createTas
   taskName: string
   userId: string
   botId: string
+  botEnv?: string
   targetSkillAssetId: string
   goal: string
+  model: string
   runtimeMaintenance?: boolean
+  forceMessage?: boolean
+  nodeCommandYamls?: Record<string, string>
   stageExtensions?: EvolveTaskStageExtensions
   stageSelection?: { diagnose: boolean; hardening: boolean; plan: boolean; optimize: boolean }
 }

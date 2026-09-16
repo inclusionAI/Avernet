@@ -17,6 +17,7 @@ description: 加固一个已登记 Skill 的候选副本，保留既有业务语
 --workspace <候选工作区>
 --target <目标 Skill 目录>
 --goal <本次加固目标>
+--model <任务选择的执行模型>
 --clawweb-url <ClawWeb 地址>
 ```
 

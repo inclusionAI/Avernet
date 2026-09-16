@@ -15,17 +15,19 @@ vi.mock('../../hooks/useClientUser', () => ({ useClientUser: () => ({ authState:
 const asset = { assetId: 'asset-1', botId: 'owner-bot', name: 'Fixed Skill', currentVersion: 'v1' }
 const bot = { botId: 'owner-bot', botName: 'Owner Bot', ownerId: 'original-owner', env: 'dev', activeEngine: 'openclaw', deviceProvider: 'baas' }
 const stageExtensions = { diagnose: { preprocess: { enabled: true, implementationId: 'verified-host' } } }
+const hardeningExtensions = { hardening: { replace: { enabled: true, implementationId: 'hardening-host' } } }
 const defaults = { assetId: asset.assetId, botId: asset.botId, userId: 'original-owner',
   diagnose: { taskType: 'diagnose', goal: '原技能诊断目标', unavailableReason: null, launchDescription: null, stageExtensions },
+  hardening: { taskType: 'hardening', goal: '原技能加固目标', unavailableReason: null, launchDescription: null, stageExtensions: hardeningExtensions },
   optimize: { taskType: 'full', goal: '原技能优化目标', unavailableReason: null, launchDescription: null, stageExtensions } }
 
 function Navigate() { const navigate = useNavigate(); return <button onClick={() => navigate('/evolve/new?type=full&target=skill&assetId=asset-2&skillAction=optimize')}>另一个登记目标</button> }
 function open(type = 'diagnose', extra = '') {
   return render(<MemoryRouter initialEntries={[
-    `/evolve/new?type=${type}&target=skill&assetId=asset-1&skillAction=${type === 'diagnose' ? 'diagnose' : 'optimize'}${extra}`,
+    `/evolve/new?type=${type}&target=skill&assetId=asset-1&skillAction=${type === 'diagnose' ? 'diagnose' : type === 'hardening' ? 'hardening' : 'optimize'}${extra}`,
   ]}><Navigate /><Evolve /></MemoryRouter>)
 }
-function submit(type = 'diagnose') { return screen.getByRole('button', { name: type === 'diagnose' ? '创建诊断任务' : '创建 Skill 自进化任务' }) as HTMLButtonElement }
+function submit(type = 'diagnose') { return screen.getByRole('button', { name: type === 'diagnose' ? '创建诊断任务' : type === 'hardening' ? '创建 Skill 加固任务' : '创建 Skill 自进化任务' }) as HTMLButtonElement }
 async function ready(type = 'diagnose') { await waitFor(() => expect(submit(type).disabled).toBe(false)) }
 
 beforeEach(() => {
@@ -106,8 +108,32 @@ describe('fixed Skill advanced task form', () => {
     expect(create.mock.calls[0][0]).toMatchObject({ userId: 'original-owner', botId: 'owner-bot', botEnv: 'dev',
       targetSkillAssetId: 'asset-1', model: 'custom-model' })
     if (type === 'full') expect(create.mock.calls[0][0]).toMatchObject({ taskType: 'full', goal: defaults.optimize.goal,
-      stageSelection: { diagnose: true, plan: true, optimize: true }, stageExtensions })
+      stageSelection: { diagnose: true, hardening: false, plan: true, optimize: true }, stageExtensions })
     else expect(create.mock.calls[0][0]).toMatchObject({ stageExtensions })
+  })
+
+  it('opens the fixed Skill hardening form with editable goal, model and frozen Stage defaults', async () => {
+    open('hardening')
+    await ready('hardening')
+    expect(screen.getByRole('heading', { name: '发起 Skill 加固' })).toBeTruthy()
+    const skill = screen.getByRole('combobox', { name: '待加固 Skill' }) as HTMLSelectElement
+    expect(skill.disabled).toBe(true)
+    expect(skill.value).toBe('asset-1')
+    const goal = screen.getByRole('textbox', { name: /加固目标/ }) as HTMLTextAreaElement
+    expect(goal.value).toBe(defaults.hardening.goal)
+    fireEvent.change(goal, { target: { value: '检查输入输出契约并补齐边界条件' } })
+    fireEvent.change(screen.getByRole('combobox', { name: '执行模型' }), { target: { value: '__custom__' } })
+    fireEvent.change(screen.getByRole('textbox', { name: '执行模型自定义模型名称' }), { target: { value: 'hardening-model' } })
+    await waitFor(() => expect(api.evolve.stageCatalog).toHaveBeenCalledWith(expect.objectContaining({ taskType: 'hardening' })))
+    fireEvent.click(submit('hardening'))
+    await waitFor(() => expect(api.evolve.createTask).toHaveBeenCalledOnce())
+    expect(api.evolve.createTask.mock.calls[0][0]).toMatchObject({
+      taskType: 'hardening', userId: 'original-owner', botId: 'owner-bot', botEnv: 'dev',
+      targetSkillAssetId: 'asset-1', goal: '检查输入输出契约并补齐边界条件', model: 'hardening-model',
+      runtimeMaintenance: false,
+      stageSelection: { diagnose: false, hardening: true, plan: false, optimize: false },
+      stageExtensions: hardeningExtensions,
+    })
   })
 
   it('blocks submission and does not query viewer bots before defaults resolve', async () => {

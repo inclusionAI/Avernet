@@ -1927,7 +1927,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
       headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
       body: JSON.stringify({
         taskType: "hardening", taskName: "Skill 加固", userId: "user-1", botId: "bot-arca", botEnv: "pre",
-        targetSkillAssetId: "SKILL-HARDENING", goal: "补齐输入输出与失败处理。",
+        targetSkillAssetId: "SKILL-HARDENING", goal: "补齐输入输出与失败处理。", model: "hardening-model",
         stageSelection: { diagnose: false, hardening: true, plan: false, optimize: false },
         runtimeMaintenance: false,
       }),
@@ -1937,6 +1937,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     expect(task.config.flow).toEqual({ key: "skill_hardening", version: "v1", stages: {
       diagnose: false, hardening: true, plan: false, optimize: false,
     } });
+    expect(task.config.model).toBe("hardening-model");
     expect(task.steps.map((step: { stepType: string }) => step.stepType)).toEqual(["skill_prepare"]);
 
     const workspace = `/home/admin/.openclaw/clawevolve_workspaces/${task.task_id}/workspace`;
@@ -1950,6 +1951,7 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     const hardeningStepId = String(prepared.body.nextStep.stepId);
     const hardeningStep = await repo.findStep(hardeningStepId);
     expect(hardeningStep?.command).toContain("/clawevolve-hardening");
+    expect(hardeningStep?.command).toContain("--model hardening-model");
     expect(hardeningStep?.command).toContain(`--target '${workspace}/skills/skills-local/local-skill'`);
 
     const hardened = await callback(task.task_id, hardeningStepId, { status: "succeeded", output: {

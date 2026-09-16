@@ -319,8 +319,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
   const [botsOwnerId, setBotsOwnerId] = useState('')
   // Preserve the requested type; unavailable local stages are handled by the entry notice.
   const initialType = searchParams.get('type')
-  // Skill 加固只从 Skill Center 固定目标后发起，不进入通用任务创建表单。
-  const taskType = isEvolveTaskType(initialType) && initialType !== 'repair' && initialType !== 'hardening' ? initialType : null
+  const taskType = isEvolveTaskType(initialType) && initialType !== 'repair' ? initialType : null
   const improvementSource = searchParams.get('source') === 'improvement'
   const adminConsentToken = searchParams.get('adminConsent')?.trim() ?? ''
   const adminAutoExecute = Boolean(adminConsentToken)
@@ -348,6 +347,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
   const [diagnoseSessionSource, setDiagnoseSessionSource] = useState<'local' | 'service_export'>('local')
   const [diagnoseModel, setDiagnoseModel] = useState(localModel ?? 'GLM-5.1')
   const [workflowModel, setWorkflowModel] = useState(localModel ?? 'GLM-5.1')
+  const [hardeningModel, setHardeningModel] = useState(localModel ?? 'GLM-5.2')
   const [lookbackDays, setLookbackDays] = useState('3')
   const [maxDiagnoseSessions, setMaxDiagnoseSessions] = useState('10')
   const [badCaseCount, setBadCaseCount] = useState('4')
@@ -355,7 +355,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
   const [focusIssue, setFocusIssue] = useState('影响任务完成率的主要问题，优先关注工具调用失败、任务未完成和未经验证的回答')
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
-  const [runtimeMaintenance, setRuntimeMaintenance] = useState(!openVersion)
+  const [runtimeMaintenance, setRuntimeMaintenance] = useState(!openVersion && taskType !== 'hardening')
   const [bots, setBots] = useState<TCLogBot[]>([])
   const [botId, setBotId] = useState('')
   const [botEnv, setBotEnv] = useState('')
@@ -371,6 +371,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
   const [stageExtensions, setStageExtensions] = useState<StageExtensionDraft>({})
   const [stageSelection, setStageSelection] = useState<StageSelectionDraft>({
     diagnose: true,
+    hardening: false,
     plan: true,
     optimize: true,
   })
@@ -419,8 +420,8 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
     setBotId(''); setBotEnv(''); setBotSelectionKey(''); setBotsOwnerId('')
     setTargetSkillAssetId(fixedSkillAssetId)
     setStageExtensions({}); setEvolutionGoal(''); setFocusIssue(''); setTaskName('')
-    if ((taskType !== 'diagnose' && taskType !== 'full') || improvementSource) {
-      setFixedSkillError('固定 Skill 仅支持诊断或完整优化任务')
+    if ((taskType !== 'diagnose' && taskType !== 'hardening' && taskType !== 'full') || improvementSource) {
+      setFixedSkillError('固定 Skill 仅支持诊断、加固或完整优化任务')
       return
     }
     void api.evolve.getSkillAsset(fixedSkillAssetId).then(async (asset) => {
@@ -433,12 +434,13 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
       }
       setFixedSkill({ assetId: asset.assetId, botId: asset.botId, name: asset.name,
         userId: defaults.userId, actorId: currentUserId, taskType })
-      setTaskName(`${asset.name} · ${taskType === 'diagnose' ? '诊断' : '优化'}`)
+      setTaskName(`${asset.name} · ${taskType === 'diagnose' ? '诊断' : taskType === 'hardening' ? '加固' : '优化'}`)
       setFocusIssue(defaults.diagnose.goal)
-      const preset = taskType === 'diagnose' ? defaults.diagnose : defaults.optimize
+      const preset = taskType === 'diagnose' ? defaults.diagnose
+        : taskType === 'hardening' ? defaults.hardening : defaults.optimize
       if (preset.unavailableReason) throw new Error(preset.unavailableReason)
       setStageExtensions(preset.stageExtensions ?? {})
-      if (taskType === 'full') setEvolutionGoal(defaults.optimize.goal)
+      if (taskType === 'full' || taskType === 'hardening') setEvolutionGoal(preset.goal)
     }).catch((error) => { if (active) setFixedSkillError(error instanceof Error ? error.message : '固定 Skill 加载失败') })
     return () => { active = false }
   }, [fixedSkillAssetId, currentUserId, taskType, improvementSource])
@@ -655,8 +657,10 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
   }, [taskType, evolveUserId])
 
   const effectiveStageSelection: StageSelectionDraft = taskType === 'diagnose'
-    ? { ...stageSelection, diagnose: true, optimize: false }
-    : stageSelection
+    ? { ...stageSelection, diagnose: true, hardening: false, optimize: false }
+    : taskType === 'hardening'
+      ? { diagnose: false, hardening: true, plan: false, optimize: false }
+      : stageSelection
   const diagnoseEnabled = taskType === 'diagnose'
     || (taskType === 'full' && !improvementSource && effectiveStageSelection.diagnose)
   const selectedBot = bots.find((bot) => bot.botId === botId && (bot.env ?? '') === botEnv)
@@ -681,7 +685,8 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
     goodCaseCount: Number(goodCaseCount),
     focusIssue,
   })
-  const isSkillEvolution = (taskType === 'full' || taskType === 'diagnose') && !improvementSource && searchParams.get('target') === 'skill'
+  const isSkillEvolution = (taskType === 'full' || taskType === 'diagnose' || taskType === 'hardening')
+    && !improvementSource && searchParams.get('target') === 'skill'
 
   useEffect(() => {
     if (diagnoseEnabled && serviceRuntimeSelected && diagnoseSessionSource !== 'service_export') {
@@ -726,6 +731,12 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
       title: fixedSkillAssetId ? '发起 Skill 诊断' : '发起 Bot 诊断',
       description: '诊断近期使用情况，产出 Goal、Spec v0 和 Bench Case。',
       submit: '创建诊断任务',
+    },
+    hardening: {
+      eyebrow: 'Skill 加固',
+      title: '发起 Skill 加固',
+      description: '配置加固目标、执行模型和 Skill 加固 Stage，完成后生成可审阅的新版本。',
+      submit: '创建 Skill 加固任务',
     },
     optimize: {
       eyebrow: '诊断后优化',
@@ -791,6 +802,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
             <SummaryRow label="任务类型" value={taskCopy.eyebrow} />
             {taskType === 'full' && !improvementSource && <SummaryRow label="进化方式" value={fullInputMode === 'direct_goal' ? '按目标进化' : '先诊断再进化'} />}
             {taskType === 'full' && evolutionGoal && <SummaryRow label="优化目标" value={evolutionGoal} />}
+            {taskType === 'hardening' && evolutionGoal && <SummaryRow label="加固目标" value={evolutionGoal} />}
           </div>
           <button className={`${primaryButton} mt-6`} onClick={() => navigate(`/evolve/runs/${createdTaskId}?${createdTaskQuery}`)}>查看进化任务 <Icon name="arrow" /></button>
         </div>
@@ -952,11 +964,26 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
               if (taskType === 'full') setFullInputMode(value.diagnose ? 'diagnose_goal' : 'direct_goal')
             }}
             fullTask={taskType === 'full'}
-            flowKey="skill_evolution"
+            flowKey={taskType === 'hardening' ? 'skill_hardening' : 'skill_evolution'}
             inputMode={fullInputMode}
             hasGoal={Boolean(evolutionGoal.trim())}
             section="target"
           />}
+
+          {taskType === 'hardening' && <>
+            <section className="border-t border-gray-100 pt-6">
+              <h2 className="text-sm font-semibold text-gray-900">加固 Stage 输入</h2>
+              <p className="mt-1 text-xs leading-5 text-gray-500">说明本次需要检查、补强和保持不变的内容。该目标会随任务冻结，并提供给 Skill 加固 Stage。</p>
+              <label className="mt-3 block">
+                <span className="mb-1.5 block text-xs font-medium text-gray-600">加固目标 <span className="text-red-500">*</span></span>
+                <textarea className={`${inputClass} min-h-28 resize-y`} value={evolutionGoal} maxLength={2000}
+                  onChange={(event) => setEvolutionGoal(event.target.value)}
+                  placeholder="例如：检查并加固目标 Skill 的指令完整性、边界条件和输出契约，保留已确认的业务语义，形成可审阅的新版本。" />
+                <span className="mt-1 block text-right text-[11px] text-gray-400">{evolutionGoal.length}/2000</span>
+              </label>
+            </section>
+            <TaskModelFields title="执行模型" model={hardeningModel} configuredModel={localModel} onModelChange={setHardeningModel} />
+          </>}
 
           {(taskType === 'diagnose' || (taskType === 'full' && !improvementSource && fullInputMode === 'diagnose_goal')) && <DiagnoseFields
             sessionSource={diagnoseSessionSource}
@@ -1006,7 +1033,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
           {taskType === 'pack_restore' && <PackRestoreFields packs={restorePacks} selectedPackId={restorePackId} onPackIdChange={setRestorePackId} loading={restorePacksLoading} error={restorePacksError} />}
           {taskType === 'runtime_cleanup' && <section className="border-t border-gray-100 pt-6"><h2 className="text-sm font-semibold text-gray-900">清理范围</h2><div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800">{openVersion ? '开源版手动清理：不重启 Gateway，不检查运行任务。只清理所选 Bot 下带 ClawEvolve 标记的 Agent 与 Session，不清理普通业务 Session、业务 Skill、Pack、Bench 日志或进化产物。可能中断正在执行的进化任务，请确认后操作。' : '执行清理前会重启所选 Bot 草稿环境的 Gateway，当前草稿会话可能中断。仅清理带明确 ClawEvolve 任务标记的历史 Agent 与 Session；不会清理普通业务 Session、业务 Skill、Pack、Bench 日志或 clawevolve_results。若仍有进化任务运行，系统会要求再次确认后才能强制清理。'}</div></section>}
           {taskType === 'bench_optimize' && <section className="border-t border-gray-100 pt-6"><h2 className="text-sm font-semibold text-gray-900">优化目标</h2><label className="mt-3 block"><span className="mb-1.5 block text-xs font-medium text-gray-600">目标、成功标准和约束 <span className="text-red-500">*</span></span><textarea className={`${inputClass} min-h-28 resize-y`} value={benchObjective} onChange={(event) => setBenchObjective(event.target.value)} placeholder="例如：提升博客的结构完整性、事实准确性和语言表达，测试集得分不低于 0.9，不得针对测试用例硬编码。" /></label></section>}
-          {!openVersion && (taskType === 'diagnose' || taskType === 'full' || taskType === 'optimize' || taskType === 'bench' || taskType === 'bench_optimize') && <NodeCommandYamlFields definitions={improvementSource && taskType === 'full'
+          {!openVersion && (taskType === 'diagnose' || taskType === 'hardening' || taskType === 'full' || taskType === 'optimize' || taskType === 'bench' || taskType === 'bench_optimize') && <NodeCommandYamlFields definitions={improvementSource && taskType === 'full'
             ? insightNodeDefinitions
             : (nodeDefinitions[taskType] ?? []).filter((node) => {
               if (node.key === 'diagnose') return effectiveStageSelection.diagnose
@@ -1021,7 +1048,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
             <p className="mt-2 text-xs text-gray-400">{taskType === 'full' && fullInputMode === 'direct_goal' ? 'Plan 只执行一次；' : '诊断只执行一次；'}只有优化阶段会按验证结果进行多轮迭代，最多执行 100 轮。</p>
           </section> : null}
           {!openVersion && taskType !== 'pack' && taskType !== 'pack_restore' && taskType !== 'runtime_cleanup' && <RuntimeMaintenanceOption enabled={runtimeMaintenance} onChange={setRuntimeMaintenance} />}
-          {!improvementSource && (taskType === 'diagnose' || taskType === 'full') && <SkillEvolutionFields
+          {!improvementSource && (taskType === 'diagnose' || taskType === 'hardening' || taskType === 'full') && <SkillEvolutionFields
             botId={botId}
             includeTargetSkill={false}
             assetId={targetSkillAssetId}
@@ -1034,7 +1061,7 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
               if (taskType === 'full') setFullInputMode(value.diagnose ? 'diagnose_goal' : 'direct_goal')
             }}
             fullTask={taskType === 'full'}
-            flowKey={isSkillEvolution ? 'skill_evolution' : 'bot_evolution'}
+            flowKey={taskType === 'hardening' ? 'skill_hardening' : isSkillEvolution ? 'skill_evolution' : 'bot_evolution'}
             inputMode={fullInputMode}
             hasGoal={Boolean(evolutionGoal.trim())}
             section="extensions"
@@ -1063,11 +1090,13 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
             if (openVersion && taskType === 'pack_restore' && !window.confirm('将应用所选 Pack，覆盖该 Bot 的工作区配置物料与 Skill；原部署脚本会先备份并在失败时尝试回滚。不会恢复业务会话或运行身份。确认继续？')) return
             if (taskType === 'pack_restore' && !selectedRestorePack) { setSubmitError('请选择要应用的 Pack 版本'); return }
             if (taskType === 'full' && !improvementSource && effectiveStageSelection.plan && !evolutionGoal.trim()) { setSubmitError('请输入一句话优化目标'); return }
+            if (taskType === 'hardening' && !evolutionGoal.trim()) { setSubmitError('请输入加固目标'); return }
             if (isSkillEvolution && !targetSkillAssetId) { setSubmitError('请选择待进化 Skill'); return }
             if (!fixedTargetReady) {
               setSubmitError(fixedSkillError || '请等待固定的 Bot 和 Skill 加载完成'); return
             }
             if (taskType === 'full' && !improvementSource && effectiveStageSelection.plan && fullInputMode === 'direct_goal' && !directGoalModel.trim()) { setSubmitError('请选择或输入模型'); return }
+            if (taskType === 'hardening' && !hardeningModel.trim()) { setSubmitError('请选择或输入执行模型'); return }
             if ((taskType === 'optimize' || taskType === 'bench' || taskType === 'bench_optimize') && !workflowModel.trim()) { setSubmitError('请选择或输入模型'); return }
             if (taskType === 'optimize' && sourceDiagnosisTaskIds.length === 0) { setSubmitError('请选择一个已完成 Plan 的诊断任务'); return }
             if (improvementSource && !activeHandoff) { setSubmitError('请先成功加载 Insight Center 改进项'); return }
@@ -1110,11 +1139,11 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
                 sessionSource: diagnoseSessionSource,
                 apiKey: effectiveJudgeBackend === 'api' ? apiKey.trim() : undefined, model: diagnoseModel,
                 diagnoseIntent, maxSessions: parsedMaxDiagnoseSessions,
-                goal: taskType === 'full' ? evolutionGoal.trim() : undefined,
+                goal: taskType === 'full' || taskType === 'hardening' ? evolutionGoal.trim() : undefined,
                 startDate: payloadStartDate, endDate: payloadEndDate, nodeCommandYamls: customCommands ? (improvementSource
                   ? Object.fromEntries(Object.entries(nodeCommandYamls).filter(([node]) => node === 'plan' || node === 'optimize'))
                   : nodeCommandYamls) : undefined, forceMessage, runtimeMaintenance: taskType === 'pack' || taskType === 'pack_restore' ? false : runtimeMaintenance,
-                ...(!improvementSource && (taskType === 'diagnose' || taskType === 'full')
+                ...(!improvementSource && (taskType === 'diagnose' || taskType === 'hardening' || taskType === 'full')
                   ? { stageExtensions, stageSelection: effectiveStageSelection }
                   : {}),
               }
@@ -1146,6 +1175,13 @@ function StartEvolution({ version = 'internalversion', singleboxModel }: EvolveP
                 ? await api.evolve.createBench({ ...taskInfo, userId: evolveUserId, botId, botEnv, benchDomainId, model: workflowModel.trim(), suite: 'all', scene: 'claw-evolve-bench', nodeCommandYamls: customCommands ? nodeCommandYamls : undefined, forceMessage, runtimeMaintenance })
                 : taskType === 'bench_optimize'
                 ? await api.evolve.createBenchOptimization({ ...taskInfo, userId: evolveUserId, botId, botEnv, objective: benchObjective.trim(), trainBenchDomainId, testBenchDomainId, model: workflowModel.trim(), maxRounds: parsedMaxRounds, nodeCommandYamls: customCommands ? nodeCommandYamls : undefined, forceMessage, runtimeMaintenance })
+                : taskType === 'hardening'
+                ? await api.evolve.createTask({
+                    ...taskInfo, taskType: 'hardening', userId: evolveUserId, botId, botEnv,
+                    targetSkillAssetId, goal: evolutionGoal.trim(), model: hardeningModel.trim(),
+                    nodeCommandYamls: fullNodeCommandYamls, stageExtensions, stageSelection: effectiveStageSelection,
+                    forceMessage, runtimeMaintenance,
+                  })
                 : taskType === 'full'
                 ? fullInputMode === 'direct_goal'
                   ? await api.evolve.createTask({
@@ -1570,6 +1606,16 @@ function TaskFormOverview({ taskType, fullInputMode, improvementSource, stageSel
           ['Bench', '训练与验证 Case'],
         ],
       },
+      hardening: {
+        label: 'Skill 加固',
+        subtitle: '按加固目标生成可审阅的新版本',
+        stages: [['Skill 加固', '使用平台默认或本次指定的 Stage 实现检查并修改目标 Skill']],
+        deliverables: [
+          ['候选版本', '隔离生成的 Skill 新版本'],
+          ['变更 Diff', '相对当前版本的增删改'],
+          ['加固结果', 'Stage 输出的总结与结论'],
+        ],
+      },
       optimize: {
         label: '优化',
         subtitle: '复用已有诊断与规划结果',
@@ -1641,9 +1687,10 @@ function TaskFormOverview({ taskType, fullInputMode, improvementSource, stageSel
       deliverables: [['执行结果', '节点输出与运行记录']],
     }
   })()
-  if (overview && (taskType === 'full' || taskType === 'diagnose') && !improvementSource) {
+  if (overview && (taskType === 'full' || taskType === 'diagnose' || taskType === 'hardening') && !improvementSource) {
     const enabledNames = new Set([
       ...(stageSelection.diagnose ? ['Bot 诊断'] : []),
+      ...(stageSelection.hardening ? ['Skill 加固'] : []),
       ...(stageSelection.plan ? ['进化规划', '目标规划'] : []),
       ...(stageSelection.optimize ? ['优化 Loop'] : []),
     ])

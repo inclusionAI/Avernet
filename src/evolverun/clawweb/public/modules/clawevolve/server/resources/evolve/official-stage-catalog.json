@@ -266,6 +266,7 @@
             }
           },
           "goal": { "type": "string", "description": "本次加固目标；未填写时按平台默认加固要求执行" },
+          "model": { "type": "string", "description": "任务创建时选择的执行模型，供 Skill 加固实现按需使用" },
           "target_skill": {
             "type": "object",
             "description": "本次任务独立的待加固 Skill 候选；集成测试使用明确标记的隔离 fixture",
