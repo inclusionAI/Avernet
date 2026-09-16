@@ -35,6 +35,7 @@ from agentclaw.community.core.bot_management.bot_quota import (
 )
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import WorkspaceHostingService
+from agentclaw.community.core.bot_management.services.aicoding.dima_workspace_capability import has_dima_workspace_enabled
 from agentclaw.community.core.bot_management.codefuse_write import (
     CodefuseWriteResult,
     CodefuseTargetResult,
@@ -1532,7 +1533,13 @@ class BotService(BotServiceProtocol):
 
             # Step 1.5: Create template record if template_config is provided
             if template_type and template_config is not None:
-                if template_type == "applicationCoding":
+                # 需要创建 DIMA 空间：applicationCoding，或开启
+                # dima_workspace（template_config.bot_template_config.capabilities.dima_workspace == true）。
+                needs_dima_workspace = (
+                    template_type == "applicationCoding"
+                    or has_dima_workspace_enabled(template_config)
+                )
+                if needs_dima_workspace:
                     # A coding bot without a hosted workspace is unusable, so a
                     # failed workspace create is fatal here (unlike a plain bot,
                     # where template creation stays best-effort). The already-
@@ -1570,7 +1577,6 @@ class BotService(BotServiceProtocol):
                         workspace_id,
                         bot_id,
                     )
-
                 try:
                     logger.info(
                         "[bot_service.create_bot] Creating template for bot %s, template_type=%s",
@@ -1585,12 +1591,9 @@ class BotService(BotServiceProtocol):
                     logger.info(f"[bot_service.create_bot] Template created for bot {bot_id}")
                 except Exception as e:
                     logger.error(f"[bot_service.create_bot] Failed to create template for bot {bot_id}: {e}", exc_info=True)
-                    if template_type == "applicationCoding":
-                        # An applicationCoding bot without its template record is
-                        # not a usable bot. Do not report success after hosting
-                        # succeeded but local template persistence failed. The
-                        # remote workspace may require manual cleanup because the
-                        # delete contract is intentionally deferred.
+                    if needs_dima_workspace:
+                        # 需要存放 dima_space_id 的 template 记录必须成功：hosting 已
+                        # 成功但本地持久化失败时回滚 bot 行并报错。
                         self._repository.soft_delete_by_owner(bot_id, user_id)
                         raise BotServiceError(
                             "applicationCoding template creation failed"
@@ -6227,16 +6230,16 @@ class BotService(BotServiceProtocol):
             bot.get("active_engine") or bot.get("engine_type"),
             default="",
         )
-        is_legacy_application_coding = template_type == "applicationCoding"
-        is_coding_engine = active_engine in {AICODING_ENGINE_TYPE, CLAUDE_CODE_ENGINE_TYPE}
-        if not (is_legacy_application_coding or is_coding_engine):
-            raise BotServiceError(
-                f"Bot {bot_id} 不是可创建 DIMA 工作空间的 Coding Bot"
-                f"（template_type={template_type}, active_engine={active_engine or None}），"
-                "无法创建 DIMA 工作空间"
-            )
-
         template_config = self._template_service.get_template_config(bot_id) or {}
+        # 允许创建 DIMA 空间：applicationCoding，或显式开启 dima_workspace。
+        if not (
+            template_type == "applicationCoding"
+            or has_dima_workspace_enabled(template_config)
+        ):
+            raise BotServiceError(
+                f"Bot {bot_id} 未开启 dima_workspace，无法创建 DIMA 空间"
+                f"（template_type={template_type}, active_engine={active_engine or None}）"
+            )
 
         existing_id = template_config.get("dima_space_id")
         if existing_id:

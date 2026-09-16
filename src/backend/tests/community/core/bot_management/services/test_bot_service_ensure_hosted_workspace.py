@@ -143,7 +143,10 @@ class TestEnsureDimaWorkspace:
             template_type="normalCC",
             active_engine="claude_code",
         )
-        svc._template_service.get_template_config.return_value = {"foo": "bar"}
+        svc._template_service.get_template_config.return_value = {
+            "bot_template_config": {"capabilities": {"dima_workspace": True}},
+            "foo": "bar",
+        }
 
         def fake_create(staff_id, bot_id, bot_name, template_config, raise_on_failure):
             template_config["dima_space_id"] = "W_CC"
@@ -165,7 +168,9 @@ class TestEnsureDimaWorkspace:
             template_type="personalCoding",
             active_engine="aicoding",
         )
-        svc._template_service.get_template_config.return_value = {}
+        svc._template_service.get_template_config.return_value = {
+            "bot_template_config": {"capabilities": {"dima_workspace": True}},
+        }
         svc._workspace_hosting_service.create_workspace_for_bot.return_value = "W_AI"
 
         result = BotService.ensure_hosted_workspace(svc, "bot-001", "owner-1")
@@ -189,7 +194,7 @@ class TestEnsureDimaWorkspace:
         with pytest.raises(BotServiceError) as exc_info:
             BotService.ensure_hosted_workspace(svc, "bot-001", "owner-1")
 
-        assert "Coding Bot" in str(exc_info.value)
+        assert "dima_workspace" in str(exc_info.value)
         svc._workspace_hosting_service.create_workspace_for_bot.assert_not_called()
 
     def test_propagates_dima_error(self):

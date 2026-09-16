@@ -40,6 +40,7 @@ from agentclaw.community.core.bot_management.legacy_create_compat import (
     legacy_template_engine_properties,
     normalize_legacy_engine_alias,
 )
+from agentclaw.community.core.bot_management.services.aicoding.dima_workspace_capability import has_dima_workspace_enabled
 from agentclaw.community.core.bot_management.manifest_seam import (
     ManifestCreationSeam,
 )
@@ -219,6 +220,17 @@ def _prepare_create(
         # Plain bots and other established template types keep the generic path;
         # the returned value must carry template_type through unchanged.
         prepared = _prepare_legacy_non_application_template(spec)
+
+    # 需要创建 DIMA 空间：applicationCoding，或开启
+    # dima_workspace（template_config.bot_template_config.capabilities.dima_workspace==true）。
+    # 在此统一判定，无托管服务时直接拒绝。
+    prepared = replace(
+        prepared,
+        requires_workspace_hosting=(
+            prepared.template_type == "applicationCoding"
+            or has_dima_workspace_enabled(prepared.template_config)
+        ),
+    )
 
     if (
         prepared.requires_workspace_hosting
