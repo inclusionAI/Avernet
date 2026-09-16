@@ -1784,9 +1784,18 @@ mod gateway_principal_tests {
         config.dingtalk_accounts = vec![account];
         let mut logger = ding_logger::GroupLoggerConfig { enabled: true, client_id: "id".into(), client_secret: String::new(), client_secret_secret: Some("logger".into()), group_ids: vec!["g".into()] };
         config.group_logger = Some(logger.clone());
-        let mut human_options = BTreeMap::new();
-        human_options.insert("client_secret_secret".into(), serde_json::Value::String("human".into()));
-        config.human_notify.providers.insert("dingtalk".into(), bcs_config_api::HumanNotifyProviderConfig { enabled: true, options: human_options });
+        config.human_notify.providers = vec![bcs_config_api::HumanNotifyProviderConfig {
+            name: "dingtalk".to_string(),
+            enabled: true,
+            options: {
+                let mut human_options = BTreeMap::new();
+                human_options.insert(
+                    "client_secret_secret".to_string(),
+                    serde_json::Value::String("human".into()),
+                );
+                human_options
+            },
+        }];
         let mut providers = BTreeMap::new();
         providers.insert("google".into(), ProviderSettings { kind: None, client_id: "id".into(), client_secret: None, client_secret_secret: Some("oauth".into()), private_key: None, alipay_public_key: None });
         config.auth.oauth = Some(OAuthSettings { providers, ..OAuthSettings::default() });
@@ -1803,8 +1812,12 @@ mod gateway_principal_tests {
         assert_eq!(config.session_files.share.token_secret.as_deref(), Some("share-value"));
         assert_eq!(config.dingtalk_accounts[0].client_secret.as_ref().map(|v| v.expose_secret().as_str()), Some("ding-value"));
         assert_eq!(config.group_logger.as_ref().unwrap().client_secret, "logger-value");
-        assert_eq!(config.human_notify.providers["dingtalk"].options["client_secret"], serde_json::Value::String("human-value".into()));
-        assert!(!config.human_notify.providers["dingtalk"].options.contains_key("client_secret_secret"));
+        let dingtalk = &config.human_notify.providers[0];
+        assert_eq!(
+            dingtalk.options["client_secret"],
+            serde_json::Value::String("human-value".into())
+        );
+        assert!(!dingtalk.options.contains_key("client_secret_secret"));
         assert_eq!(config.auth.oauth.as_ref().unwrap().providers["google"].client_secret.as_ref().map(|v| v.expose_secret().as_str()), Some("oauth-value"));
     }
 
@@ -1841,12 +1854,15 @@ mod gateway_principal_tests {
         config.llm.api_key = Some(Secret::new("legacy-llm".into()));
         config.invite.token_secret = Some("legacy-invite".into());
         config.session_files.share.token_secret = Some("legacy-share".into());
-        let mut options = BTreeMap::new();
-        options.insert("client_secret".into(), serde_json::Value::String("legacy-human".into()));
-        config.human_notify.providers.insert(
-            "dingtalk".into(),
-            bcs_config_api::HumanNotifyProviderConfig { enabled: true, options },
-        );
+        config.human_notify.providers = vec![bcs_config_api::HumanNotifyProviderConfig {
+            name: "dingtalk".to_string(),
+            enabled: true,
+            options: {
+                let mut options = BTreeMap::new();
+                options.insert("client_secret".into(), serde_json::Value::String("legacy-human".into()));
+                options
+            },
+        }];
 
         resolve_config_secrets(&mut config, &InMemorySecretAccess::new()).await.unwrap();
 
@@ -1854,7 +1870,62 @@ mod gateway_principal_tests {
         assert_eq!(config.llm.api_key.as_ref().map(|v| v.expose_secret().as_str()), Some("legacy-llm"));
         assert_eq!(config.invite.token_secret.as_deref(), Some("legacy-invite"));
         assert_eq!(config.session_files.share.token_secret.as_deref(), Some("legacy-share"));
-        assert_eq!(config.human_notify.providers["dingtalk"].options["client_secret"], serde_json::Value::String("legacy-human".into()));
+        assert_eq!(config.human_notify.providers[0].options["client_secret"], serde_json::Value::String("legacy-human".into()));
+    }
+
+    #[tokio::test]
+    async fn generic_secret_options_resolve_and_literal_values_win() {
+        use std::collections::BTreeMap;
+        let mut config = BcsConfig::default();
+        let mut signing_key_options = BTreeMap::new();
+        signing_key_options.insert(
+            "signing_key_secret".to_string(),
+            serde_json::Value::String("principal-key".into()),
+        );
+        let mut literal_options = BTreeMap::new();
+        literal_options.insert(
+            "client_secret".to_string(),
+            serde_json::Value::String("literal".into()),
+        );
+        literal_options.insert(
+            "client_secret_secret".to_string(),
+            serde_json::Value::String("ding".into()),
+        );
+        config.human_notify.providers = vec![
+            bcs_config_api::HumanNotifyProviderConfig {
+                name: "work_order".to_string(),
+                enabled: true,
+                options: signing_key_options,
+            },
+            bcs_config_api::HumanNotifyProviderConfig {
+                name: "dingtalk".to_string(),
+                enabled: true,
+                options: literal_options,
+            },
+        ];
+        let access = InMemorySecretAccess::with_entries([
+            ("principal-key", String::new(), "principal-key-value".into()),
+            ("ding", String::new(), "ding-value".into()),
+        ]);
+
+        resolve_config_secrets(&mut config, &access).await.unwrap();
+
+        let work_order = &config.human_notify.providers[0];
+        assert_eq!(
+            work_order.options["signing_key"],
+            serde_json::Value::String("principal-key-value".into())
+        );
+        assert!(!work_order.options.contains_key("signing_key_secret"));
+        let dingtalk = &config.human_notify.providers[1];
+        assert_eq!(
+            dingtalk.options["client_secret"],
+            serde_json::Value::String("literal".into()),
+            "literal value wins over the reference"
+        );
+        assert!(
+            dingtalk.options.contains_key("client_secret_secret"),
+            "unresolved reference is kept untouched"
+        );
     }
 
     #[test]
@@ -3766,12 +3837,12 @@ impl BcsServer {
             ]));
         let state_machine_terminal_observer =
             Arc::new(DeferredStateMachineTerminalObserver::new(terminal_observer));
-        if config.human_notify.provider.is_some() {
+        if config.human_notify.providers.iter().any(|provider| provider.enabled) {
             // This synchronous construction path cannot await the notifier
             // factory build; keep the configured backend from being silently
             // ignored.
             tracing::warn!(
-                "human_notify.provider is configured but ignored in this construction path; \
+                "human_notify providers are configured but ignored in this construction path; \
                  use BcsServer::new_with_storage to enable human mention notifications"
             );
         }
@@ -6624,12 +6695,52 @@ pub async fn resolve_config_secrets(config: &mut BcsConfig, access: &dyn SecretA
         logger.client_secret = value;
         }
     }
-    for (provider_name, provider) in &mut config.human_notify.providers {
-        let Some(name) = provider.options.get("client_secret_secret").and_then(|v| v.as_str()) else { continue; };
-        let field = format!("human_notify.providers.{provider_name}.client_secret_secret");
-        if let Some(value) = resolve_secret_value(Some(name), access, &field).await? {
-            provider.options.insert("client_secret".to_string(), serde_json::Value::String(value));
-            provider.options.remove("client_secret_secret");
+    // Any `<key>_secret` option inside a human_notify provider entry is a
+    // secret-provider reference (e.g. Mist): resolve it here and inject the
+    // plain value as `<key>`, then drop the reference. A non-blank literal
+    // `<key>` wins over the reference so explicit values are never clobbered.
+    // `client_secret_secret` (DingTalk notifier) and `signing_key_secret`
+    // (work-order notifier) are instances of this rule. The DingTalk
+    // notifier's literal secret field is `client_secret`, which itself ends
+    // in `_secret`; it is excluded below so it is never mistaken for a
+    // reference to a (nonexistent) `client` literal.
+    for provider in &mut config.human_notify.providers {
+        let provider_name = provider.name.clone();
+        let reference_keys: Vec<String> = provider
+            .options
+            .keys()
+            .filter(|key| key.ends_with("_secret") && key.as_str() != "client_secret")
+            .cloned()
+            .collect();
+        for reference_key in reference_keys {
+            let Some(reference) = provider
+                .options
+                .get(&reference_key)
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            let target_key = reference_key
+                .strip_suffix("_secret")
+                .expect("reference keys end with _secret")
+                .to_string();
+            let literal_wins = provider
+                .options
+                .get(&target_key)
+                .and_then(|value| value.as_str())
+                .is_some_and(|value| !value.trim().is_empty());
+            if literal_wins {
+                continue;
+            }
+            let field = format!("human_notify.providers.{provider_name}.{reference_key}");
+            if let Some(value) = resolve_secret_value(Some(reference), access, &field).await? {
+                provider
+                    .options
+                    .insert(target_key, serde_json::Value::String(value));
+                provider.options.remove(&reference_key);
+            }
         }
     }
     if let Some(oauth) = config.auth.oauth.as_mut() {

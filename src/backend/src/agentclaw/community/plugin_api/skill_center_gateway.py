@@ -113,6 +113,7 @@ class SkillCenterPublishState(str, Enum):
 class SkillCenterSortOrder(str, Enum):
     """Documented Skill Center catalogue ordering values."""
 
+    HOTTEST = "hottest"
     LATEST = "latest"
     OLDEST = "oldest"
     HEAT = "heat"
@@ -191,7 +192,7 @@ class SkillCenterPublicSkillSearchRequest:
     tags: tuple[str, ...] = ()
     official_only: bool | None = None
     recommended_only: bool | None = None
-    sort_by: SkillCenterSortOrder = SkillCenterSortOrder.LATEST
+    sort_by: SkillCenterSortOrder = SkillCenterSortOrder.HOTTEST
     creator_name: str | None = None
     creator_work_no: str | None = None
     belong_to: SkillCenterBelongTo | None = None

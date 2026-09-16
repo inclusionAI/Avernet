@@ -9,6 +9,7 @@ import asyncio
 import io
 import json
 import os
+import re
 import time
 import zipfile
 from pathlib import Path
@@ -87,6 +88,13 @@ from agentclaw.community.adapters.http.skill_center.schemas import (
     UploadSkillResponse,
     VersionListResponse,
 )
+from agentclaw.community.core.skill_center.upload_error_codes import (
+    SkillUploadErrorCode,
+)
+from agentclaw.community.core.skill_center.skill_metadata import (
+    SkillManifestError,
+    SkillManifestErrorCode,
+)
 from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
     recover_legacy_skill_set_scope,
 )
@@ -151,9 +159,18 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
 from agentclaw.community.core.devices.services.device_context import (
+    BotNotFoundError,
     DeviceNotBoundError,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterEndpointNotFoundError,
+    DeviceAdapterHTTPStatusError,
+    DeviceAdapterTimeoutError,
+)
+from agentclaw.community.plugin_api.sandbox_runtime import (
+    SandboxRuntimeUnavailableError,
+)
 from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterClient,
     SkillCenterMarketSearchRequest,
@@ -192,24 +209,43 @@ def _legacy_runtime_projection(item: dict[str, Any]) -> tuple[str, dict[str, Any
     return "", None
 
 BOT_RUNTIME_UNAVAILABLE_MESSAGE = "当前 Bot 的运行环境暂不可用，请重新启动 Bot 后重试。"
-_BOT_RUNTIME_UNAVAILABLE_MARKERS = (
-    "404 not found",
-    "502 bad gateway",
-    "503 service unavailable",
-    "504 gateway timeout",
-    "bad gateway",
-    "service unavailable",
-    "gateway timeout",
-    "timeout",
-    "connection refused",
-    "connection reset",
-    "connecterror",
-    "readtimeout",
-    "requesterror",
-    "proxypass",
-    "agentclawproxy",
-    "sandbox id is required",
+_RUNTIME_UPLOAD_EXCEPTION_TYPES = (
+    BotNotFoundError,
+    DeviceNotBoundError,
+    DeviceAdapterEndpointNotFoundError,
+    DeviceAdapterTimeoutError,
+    SandboxRuntimeUnavailableError,
+    ConnectionError,
+    TimeoutError,
 )
+_RUNTIME_UPLOAD_ERROR_PATTERNS = (
+    re.compile(r"\b502\s+bad gateway\b"),
+    re.compile(r"\b503\s+service unavailable\b"),
+    re.compile(r"\b504\s+gateway timeout\b"),
+    re.compile(
+        r"(?:bad gateway|service unavailable|gateway timeout|connection refused|"
+        r"connection reset|connecterror|readtimeout|requesterror|proxypass|"
+        r"agentclawproxy|sandbox id is required|404 not found)"
+    ),
+    re.compile(r"\btimeout\b"),
+    re.compile(r"(?:request|read|connect|operation|gateway).{0,24}timed? ?out"),
+)
+_MANIFEST_UPLOAD_ERROR_CODES = {
+    SkillManifestErrorCode.MISSING_FRONTMATTER: SkillUploadErrorCode.MANIFEST_INVALID,
+    SkillManifestErrorCode.INVALID_FRONTMATTER: SkillUploadErrorCode.MANIFEST_INVALID,
+    SkillManifestErrorCode.INVALID_ENCODING: SkillUploadErrorCode.MANIFEST_ENCODING_INVALID,
+    SkillManifestErrorCode.INVALID_PATH: SkillUploadErrorCode.PATH_INVALID,
+    SkillManifestErrorCode.MISSING_NAME: SkillUploadErrorCode.NAME_MISSING,
+    SkillManifestErrorCode.MISSING_DESCRIPTION: SkillUploadErrorCode.DESCRIPTION_MISSING,
+    SkillManifestErrorCode.INVALID_NAME_TYPE: SkillUploadErrorCode.MANIFEST_FIELD_TYPE_INVALID,
+    SkillManifestErrorCode.INVALID_DESCRIPTION_TYPE: SkillUploadErrorCode.MANIFEST_FIELD_TYPE_INVALID,
+    SkillManifestErrorCode.EMPTY_NAME: SkillUploadErrorCode.NAME_EMPTY,
+    SkillManifestErrorCode.EMPTY_DESCRIPTION: SkillUploadErrorCode.DESCRIPTION_EMPTY,
+    SkillManifestErrorCode.NAME_TOO_LONG: SkillUploadErrorCode.NAME_TOO_LONG,
+    SkillManifestErrorCode.DESCRIPTION_TOO_LONG: SkillUploadErrorCode.DESCRIPTION_TOO_LONG,
+    SkillManifestErrorCode.NAME_DIRECTORY_MISMATCH: SkillUploadErrorCode.ROOT_NAME_MISMATCH,
+    SkillManifestErrorCode.INVALID_CONFIG: SkillUploadErrorCode.MANIFEST_INVALID,
+}
 _FILESYSTEM_LAYOUT_ENGINES = frozenset(
     {"openclaw", "claude_code", "aicoding", "hermes"}
 )
@@ -249,11 +285,157 @@ def _desktop_active_root_from_probe(
     )
 
 
-def _normalize_upload_error_message(error_msg: str) -> str:
-    lowered = error_msg.lower()
-    if any(marker in lowered for marker in _BOT_RUNTIME_UNAVAILABLE_MARKERS):
+def _upload_error_chain(error: BaseException) -> tuple[BaseException, ...]:
+    chain: list[BaseException] = []
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+    return tuple(chain)
+
+
+def _contains_zip_upload_error(error: BaseException | str) -> bool:
+    candidates: tuple[BaseException | str, ...] = (
+        _upload_error_chain(error)
+        if isinstance(error, BaseException)
+        else (error,)
+    )
+    for candidate in candidates:
+        if isinstance(candidate, (zipfile.BadZipFile, zipfile.LargeZipFile)):
+            return True
+        message = str(candidate).lower()
+        if any(
+            marker in message
+            for marker in (
+                "badzipfile",
+                "bad crc-32",
+                "not a zip file",
+                "central directory",
+            )
+        ):
+            return True
+    return False
+
+
+def _classify_upload_validation_error(
+    error: BaseException | str,
+) -> SkillUploadErrorCode | None:
+    """Classify known legacy validation failures before transport errors."""
+
+    if _contains_zip_upload_error(error):
+        return SkillUploadErrorCode.ZIP_INVALID
+
+    manifest_code = getattr(error, "code", None)
+    if isinstance(error, SkillManifestError) or manifest_code is not None:
+        try:
+            manifest_code = SkillManifestErrorCode(manifest_code)
+        except (TypeError, ValueError):
+            manifest_code = None
+    if manifest_code is not None:
+        return _MANIFEST_UPLOAD_ERROR_CODES.get(manifest_code)
+
+    message = str(error)
+    if message == "No files uploaded":
+        return SkillUploadErrorCode.NO_FILES
+    if message == "SKILL.md is required.":
+        return SkillUploadErrorCode.MANIFEST_MISSING
+    if message.startswith("Only one skill can be uploaded"):
+        return SkillUploadErrorCode.MANIFEST_MULTIPLE
+    if message == "Upload contains files outside the skill root directory.":
+        return SkillUploadErrorCode.FILE_OUTSIDE_ROOT
+    if message.startswith("Invalid upload path:"):
+        return SkillUploadErrorCode.PATH_INVALID
+    if message == "SKILL.md must contain required field: name.":
+        return SkillUploadErrorCode.NAME_MISSING
+    if message == "SKILL.md field 'name' cannot be empty.":
+        return SkillUploadErrorCode.NAME_EMPTY
+    if message == "SKILL.md must contain required field: description.":
+        return SkillUploadErrorCode.DESCRIPTION_MISSING
+    if message == "SKILL.md must be encoded as UTF-8 or GBK.":
+        return SkillUploadErrorCode.MANIFEST_ENCODING_INVALID
+    if message == "SKILL.md must contain valid frontmatter or legacy metadata.":
+        return SkillUploadErrorCode.MANIFEST_INVALID
+    if message.startswith("SKILL.md field ") and "must be a string" in message:
+        return SkillUploadErrorCode.MANIFEST_FIELD_TYPE_INVALID
+    if message.startswith("SKILL.md field 'description' cannot be empty"):
+        return SkillUploadErrorCode.DESCRIPTION_EMPTY
+    if message.startswith("SKILL.md field 'name' cannot exceed"):
+        return SkillUploadErrorCode.NAME_TOO_LONG
+    if message.startswith("SKILL.md field 'description' cannot exceed"):
+        return SkillUploadErrorCode.DESCRIPTION_TOO_LONG
+    if message.startswith("Skill folder name must match"):
+        return SkillUploadErrorCode.ROOT_NAME_MISMATCH
+    if message.startswith("Skill name ") and " is invalid" in message:
+        return SkillUploadErrorCode.NAME_INVALID
+    if message == "Skill name cannot contain underscore '_'":
+        return SkillUploadErrorCode.NAME_INVALID
+    if message.startswith("Skill name ") and " is reserved" in message:
+        return SkillUploadErrorCode.NAME_RESERVED
+    return None
+
+
+def _is_runtime_upload_error(error: BaseException | str) -> bool:
+    """Classify transport failures at the legacy HTTP adapter boundary."""
+
+    if isinstance(error, BaseException):
+        for current in _upload_error_chain(error):
+            if isinstance(current, (zipfile.BadZipFile, zipfile.LargeZipFile)):
+                return False
+            if isinstance(current, DeviceAdapterHTTPStatusError):
+                return 500 <= current.status_code < 600
+            if isinstance(current, _RUNTIME_UPLOAD_EXCEPTION_TYPES):
+                return True
+            if any(
+                pattern.search(str(current).lower())
+                for pattern in _RUNTIME_UPLOAD_ERROR_PATTERNS
+            ):
+                return True
+        return False
+    return any(pattern.search(error.lower()) for pattern in _RUNTIME_UPLOAD_ERROR_PATTERNS)
+
+
+def _normalize_upload_error_message(
+    error_msg: str,
+    *,
+    error: BaseException | None = None,
+) -> str:
+    if _is_runtime_upload_error(error if error is not None else error_msg):
         return BOT_RUNTIME_UNAVAILABLE_MESSAGE
     return error_msg
+
+
+def _build_upload_error_response(
+    error: BaseException,
+    *,
+    include_upload_prefix: bool = False,
+) -> UploadSkillResponse:
+    """Build the backward-compatible failed-upload envelope once."""
+
+    raw_message = str(error)
+    message = (
+        f"Upload failed: {raw_message}" if include_upload_prefix else raw_message
+    )
+    validation_error_code = _classify_upload_validation_error(error)
+    runtime_unavailable = (
+        validation_error_code is None and _is_runtime_upload_error(error)
+    )
+    normalized_message = (
+        message
+        if validation_error_code is not None
+        else _normalize_upload_error_message(message, error=error)
+    )
+    error_code = (
+        SkillUploadErrorCode.RUNTIME_UNAVAILABLE
+        if runtime_unavailable
+        else validation_error_code or SkillUploadErrorCode.UPLOAD_FAILED
+    )
+    return UploadSkillResponse(
+        success=False,
+        error_code=error_code,
+        message=normalized_message,
+    )
 
 
 def _build_uploaded_zip(uploaded_files: list[dict[str, Any]]) -> bytes:
@@ -544,11 +726,16 @@ async def upload_skill(
     owner_id_for_lookup = user_id or entity_id or ctx.user_id or ""
     bot = bot_repo.get_by_id_and_owner(effective_bot_id, owner_id_for_lookup)
     if not bot:
-        return UploadSkillResponse(success=False, message="Bot not found.")
+        return UploadSkillResponse(
+            success=False,
+            error_code=SkillUploadErrorCode.BOT_NOT_FOUND,
+            message="Bot not found.",
+        )
     bot_owner_id = str(bot.get("owner_id") or "")
     if not bot_owner_id:
         return UploadSkillResponse(
             success=False,
+            error_code=SkillUploadErrorCode.BOT_OWNER_MISSING,
             message="Bot ownership metadata is incomplete.",
         )
 
@@ -567,6 +754,7 @@ async def upload_skill(
     if bot_status != "ACTIVE":
         return UploadSkillResponse(
             success=False,
+            error_code=SkillUploadErrorCode.BOT_NOT_READY,
             message=f"Bot is not ready. Current status: {bot_status or 'UNKNOWN'}, expected ACTIVE.",
         )
 
@@ -628,15 +816,21 @@ async def upload_skill(
         except json.JSONDecodeError as e:
             logger.error(f"[skills.upload_skill] Failed to parse file_paths JSON: {e}")
             return UploadSkillResponse(
-                success=False, message="file_paths must be a JSON array."
+                success=False,
+                error_code=SkillUploadErrorCode.FILE_PATHS_INVALID,
+                message="file_paths must be a JSON array.",
             )
         if not isinstance(parsed_paths, list):
             return UploadSkillResponse(
-                success=False, message="file_paths must be a JSON array."
+                success=False,
+                error_code=SkillUploadErrorCode.FILE_PATHS_INVALID,
+                message="file_paths must be a JSON array.",
             )
         if len(parsed_paths) != len(files):
             return UploadSkillResponse(
-                success=False, message="file_paths length must match files length."
+                success=False,
+                error_code=SkillUploadErrorCode.FILE_PATHS_COUNT_MISMATCH,
+                message="file_paths length must match files length.",
             )
 
     try:
@@ -730,20 +924,13 @@ async def upload_skill(
     except HTTPException:
         raise
     except ValueError as e:
-        error_msg = str(e)
-        logger.error(f"[skills.upload_skill] Validation error: {error_msg}")
-        return UploadSkillResponse(
-            success=False, message=_normalize_upload_error_message(error_msg)
-        )
+        logger.error(f"[skills.upload_skill] Validation error: {e}")
+        return _build_upload_error_response(e)
     except Exception as e:
-        error_msg = str(e)
         logger.error(
-            f"[skills.upload_skill] Unexpected error: {error_msg}", exc_info=True
+            f"[skills.upload_skill] Unexpected error: {e}", exc_info=True
         )
-        return UploadSkillResponse(
-            success=False,
-            message=_normalize_upload_error_message(f"Upload failed: {error_msg}"),
-        )
+        return _build_upload_error_response(e, include_upload_prefix=True)
 
 
 @router.get("", response_model=PaginatedSkillListResponse)

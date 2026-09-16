@@ -1,10 +1,8 @@
-"""Recoverable deletion lifecycle for Bot-owned inactive Local Skills."""
+"""Runtime-owned package deletion for Bot-owned inactive Local Skills."""
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
-from uuid import uuid4
 
 from injector import inject
 
@@ -15,7 +13,6 @@ from agentclaw.community.core.bot_collaborator.protocols import (
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.errors import (
-    LocalSkillActiveError,
     LocalSkillEditBusyError,
     LocalSkillEditLockUnavailableError,
     LocalSkillEditPausedError,
@@ -23,14 +20,12 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
     LocalSkillNotReadyError,
     LocalSkillStorageError,
-    SkillAssetInUseError,
 )
 from agentclaw.community.core.skill_center.factories import SkillServiceFactory
 from agentclaw.community.core.repository.protocols.skill_center import (
     SkillSetRepository,
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.core.skill_center.errors import ActiveSkillSetReferenceError
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditBusyError,
     SkillsPoolEditGuard,
@@ -48,7 +43,7 @@ if TYPE_CHECKING:
 
 
 class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
-    """Delete an inactive Local Skill after reversible package quarantine."""
+    """Delete an inactive Local Skill through one package-level runtime call."""
 
     @inject
     def __init__(
@@ -105,45 +100,22 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
                 is_teclaw=is_teclaw,
                 locator=locator,
             )
-            _, quarantine = (
-                self._skill_service_factory.local_skill_package_storage(
-                    entity_id=str(bot["entity_id"]),
-                    owner_id=owner_id,
-                    bot_id=bot_id,
-                    engine_type=bot.get("active_engine"),
-                    entity_type=str(bot.get("entity_type") or "staff"),
-                    is_desktop=bot.get("bot_type") == "desktop",
-                    is_teclaw=is_teclaw,
-                    name=Path(locator).name,
-                    directory_name=f".{Path(locator).name}.delete-{uuid4().hex}",
-                )
-            )
             try:
-                await package.quarantine_to(quarantine)
+                package_deleted = await package.delete()
             except Exception as exc:
-                await self._discard(quarantine)
                 raise LocalSkillStorageError() from exc
+            if not package_deleted:
+                raise LocalSkillStorageError()
             try:
                 deleted = self._skill_repo.delete_bot_local_skill(
                     skill_id=skill_id,
                     owner_id=owner_id,
                     bot_id=bot_id,
                 )
-                if deleted is None:
+                if not deleted:
                     raise RuntimeError("Local Skill record disappeared during deletion")
             except Exception as exc:
-                try:
-                    restored, _ = await package.restore_from(quarantine)
-                except Exception as restore_exc:
-                    raise LocalSkillStorageError() from restore_exc
-                if not restored:
-                    raise LocalSkillStorageError() from exc
-                if isinstance(exc, ActiveSkillSetReferenceError):
-                    raise LocalSkillActiveError() from exc
-                if isinstance(exc, SkillAssetInUseError):
-                    raise
                 raise LocalSkillStorageError() from exc
-            await self._discard(quarantine)
         finally:
             self._edit_guard.release(lease)
 
@@ -166,14 +138,6 @@ class LocalSkillDeleteService(LocalSkillDeleteServiceProtocol):
             is_teclaw=is_teclaw,
             locator=locator,
         )
-
-    async def _discard(self, storage) -> None:
-        try:
-            cleaned = await storage.cleanup()
-        except Exception as exc:
-            raise LocalSkillStorageError() from exc
-        if not cleaned:
-            raise LocalSkillStorageError()
 
     def _is_teclaw(self, *, bot_id: str, owner_id: str) -> bool:
         try:

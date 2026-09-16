@@ -37,6 +37,7 @@ class WorkOrderBizType(StrEnum):
     BOT_COLLABORATOR = "BOT_COLLABORATOR"
     SKILL_COLLABORATOR = "SKILL_COLLABORATOR"
     BOT_FRIEND = "BOT_FRIEND"
+    GROUP_MENTION = "GROUP_MENTION"
 
 
 class NotificationCategory(StrEnum):
@@ -132,6 +133,10 @@ class WorkOrderEventType(StrEnum):
     BOT2BOT_FRIEND_REVIEWED = (
         "BOT2BOT_FRIEND_REVIEWED", NotificationCategory.NOTICE,
         "Bot 好友申请已处理", "Bot 好友申请已有处理结果。",
+    )
+    HUMAN_GROUP_MENTIONED = (
+        "HUMAN_GROUP_MENTIONED", NotificationCategory.NOTICE,
+        "你被 @ 了", "群聊中有消息 @ 了你。",
     )
     HUMAN2BOT_PUBLIC_ORDER_CREATED = (
         "HUMAN2BOT_PUBLIC_ORDER_CREATED", NotificationCategory.NOTICE,

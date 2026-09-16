@@ -84,13 +84,19 @@ def _user() -> dict:
     return {"id": USER, "username": "caller@example.com"}
 
 
-def _token(user: dict | None, *, audience: str | None = "backend", omit_audience: bool = False) -> str:
+def _token(
+    user: dict | None,
+    *,
+    audience: str | None = "backend",
+    omit_audience: bool = False,
+    issuer: str = "gateway",
+) -> str:
     now = int(time.time())
     principals: list[dict] = []
     if user is not None:
         principals.append({"type": "user", "subject": user})
     claims = {
-        "iss": "gateway",
+        "iss": issuer,
         "iat": now,
         "exp": now + 60,
         "principals": principals,
@@ -105,10 +111,14 @@ def _auth(
     *,
     audience: str | None = "backend",
     omit_audience: bool = False,
+    issuer: str = "gateway",
 ) -> dict[str, str]:
     return {
         PRINCIPAL_HEADER: _token(
-            user=user, audience=audience, omit_audience=omit_audience
+            user=user,
+            audience=audience,
+            omit_audience=omit_audience,
+            issuer=issuer,
         )
     }
 
@@ -261,3 +271,16 @@ def test_directory_unreachable_surfaces_5xx():
         params={"user_id": LOOKED_UP},
     )
     assert resp.status_code >= 500, resp.text
+
+
+def test_ordinary_http_lookup_accepts_bcn_minted_principal():
+    """BCN mints its own short-lived user principals (work-order mention
+    notices) under the shared key; the ordinary-HTTP surface trusts the
+    ("gateway", "bcs") issuer allow-list."""
+    client = TestClient(_make_app(), raise_server_exceptions=False)
+    resp = client.get(
+        "/api/v1/org/user",
+        headers=_auth(_user(), issuer="bcs"),
+        params={"user_id": LOOKED_UP},
+    )
+    assert resp.status_code == 200, resp.text

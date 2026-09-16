@@ -20,12 +20,37 @@ creation sequence the W13 job runs, and the step that closes an apply. The
 orchestrator sees phases and the materialisers see ports; neither learns the
 family. Adding a family is a strategy, not a fork of five materialisers.
 
-**The switch.** Until the teclaw engine supports the artifact's ``ownership``
-map, the platform-managed path is behind
-``user_config.bot_config_manifest.teclaw_platform_managed`` (default off). Off,
-teclaw runs the shape it ran before W8: every non-script construct after the
-container, through the same device-backed ports ARCA uses. The switch is read
-here, by the factory, and nowhere else.
+**Three strategies, not two, and none of them holds a switch.** Until the
+teclaw engine supports the artifact's ``ownership`` map, a deployment may run
+teclaw the way it ran before W8 — every non-script construct after the
+container, through the same device-backed ports ARCA uses. That is
+:class:`TeclawDeviceDelivery`; the artifact-delivered shape is
+:class:`TeclawPlatformDelivery`. Which of the two a deployment runs is a
+:class:`TeclawDeliveryMode`, read once from
+``user_config.bot_config_manifest.teclaw_platform_managed`` (default off) by
+:func:`teclaw_delivery_mode_from_config` and turned into *one built strategy*
+by :data:`TECLAW_DELIVERY_BY_MODE` in the composition root.
+
+That is the whole of the mode's life: a yaml scalar, a table row, an object.
+No strategy carries it as a field and nothing re-reads it per apply, because
+the answer cannot change while the process runs — a deployment-time fact is
+settled at deployment time, and a component that held it would have to be
+asked the same question on every call, in front of every bot. What each
+strategy holds instead is only what its own shape needs: the platform one has
+store-backed ports and a closing redeliver, the device one has device-backed
+ports and no closing step at all. Neither can be handed the other's
+collaborators, because neither takes them.
+
+**Nothing here branches on a family or a mode either.** ``phase_of`` is a table
+lookup in a per-strategy phase map (:data:`_ARCA_PHASES`,
+:data:`_TECLAW_PLATFORM_PHASES`, :data:`_TECLAW_DEVICE_PHASES`), selecting the
+teclaw implementation is a lookup in :data:`TECLAW_DELIVERY_BY_MODE`, and
+:class:`DeliveryStrategyFactory` is a lookup in a
+:class:`EngineFamily`-keyed mapping the composition root hands it. Each table
+is checked for exhaustiveness at import — the discipline
+``source_fetchers.FETCHER_TYPES`` sets — so a family or a construct with no
+answer fails at boot rather than ``KeyError``-ing mid-apply with the bot's
+lock held.
 """
 from __future__ import annotations
 
@@ -33,7 +58,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from types import MappingProxyType
 from abc import abstractmethod
-from typing import Any, Awaitable, Callable, Mapping, Optional, Protocol
+from typing import Any, Awaitable, Callable, ClassVar, Mapping, Optional, Protocol
 
 from agentclaw.community.core.ports.activation_port import (
     ActivationPort,
@@ -71,13 +96,34 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyReport,
 )
 from agentclaw.community.core.bot_config_manifest.capabilities import ManifestSection
+from agentclaw.community.core.bot_config_manifest.delivery_mode import (
+    TECLAW_PLATFORM_MANAGED_KEY,
+    TeclawDeliveryMode,
+    teclaw_delivery_mode_from_config,
+)
 
-#: The yaml key under ``user_config.bot_config_manifest``::
-#:
-#:     user_config:
-#:       bot_config_manifest:
-#:         teclaw_platform_managed: true
-TECLAW_PLATFORM_MANAGED_KEY = "teclaw_platform_managed"
+# ``TECLAW_PLATFORM_MANAGED_KEY`` and ``teclaw_delivery_mode_from_config`` are
+# imported to be re-exported (they are named in ``__all__``): the deployment
+# vocabulary lives in its own leaf module, because the typed config cluster
+# reads it and cannot pull this graph in behind it, while the seam that turns a
+# mode into a strategy is here.
+
+class EngineFamily(StrEnum):
+    """Which delivery mechanism a bot's engine boots from.
+
+    The key a strategy is selected by, and the word a report or a log uses for
+    it. Two values, lowercase on the wire::
+
+        EngineFamily.ARCA.value == "arca"
+
+    Not the engine type: many engine types (``claude_code``, ``openclaw``, …)
+    are ARCA. The mapping from one to the other belongs to the engine
+    authority, which the composition root adapts through
+    :func:`family_from_engine_test`.
+    """
+
+    ARCA = "arca"
+    TECLAW = "teclaw"
 
 
 class CreationSequence(StrEnum):
@@ -89,14 +135,14 @@ class CreationSequence(StrEnum):
 
     #: pre-container phase → create the bot **and provision it** → wait for
     #: ``ACTIVE`` → post-container phase. The manifest is applied in two
-    #: halves around the container. ARCA's sequence, and teclaw's while the
-    #: platform-managed switch is off.
+    #: halves around the container. ARCA's sequence, and the device-backed
+    #: teclaw shape's.
     CREATE_BETWEEN_PHASES = "create_between_phases"
     #: create the bot **record only** → the single pre-container phase writes
     #: platform state against it → provision (which composes the first
     #: artifact from that state) → wait for ``ACTIVE``. No post-container
-    #: phase: everything was delivered before the container existed. teclaw
-    #: with the platform-managed switch on.
+    #: phase: everything was delivered before the container existed.
+    #: Platform-managed teclaw.
     RECORD_APPLY_PROVISION = "record_apply_provision"
 
 
@@ -111,8 +157,8 @@ class MaterialiserPorts:
     teclaw binds store-backed ports, and each field is typed by the narrow port
     the materialiser calls through so the two are interchangeable by shape.
 
-    Created by: ``ArcaDelivery.ports`` and ``TeclawDelivery.ports``, each
-    delegating to a lazy callable bound by the composition root.
+    Created by: the composition root, as the two lazy bundles it binds — the
+    device-backed one and the store-backed one.
     Consumed by: ``apply/registry.build_materialisers``, via
     :meth:`as_kwargs`.
     """
@@ -153,50 +199,53 @@ class MaterialiserPorts:
 class DeliveryStrategy(Protocol):
     """What differs between engine families, and nothing else.
 
-    The four things it owns, and how the two implementations answer:
+    The members it owns, and how the three implementations answer:
 
-    ======================  =====================  ========================
-    Member                  ``ArcaDelivery``       ``TeclawDelivery``
-                                                   (platform-managed on)
-    ======================  =====================  ========================
-    ``family``              ``"arca"``             ``"teclaw"``
-    ``creation_sequence``   ``CREATE_BETWEEN_``    ``RECORD_APPLY_``
-                            ``PHASES``             ``PROVISION``
-    ``phase_of(step)``      :data:`_ARCA_PHASES`   ``PRE_CONTAINER`` for
-                                                   every construct
-    ``needs_container()``   ``True``               ``False``
-    ``ports()``             device-backed          store-backed
-    ``finish()``            ``None``               one whole-artifact
-                                                   redeliver
-    ======================  =====================  ========================
+    =====================  ================  ==================  =================
+    Member                 ``ArcaDelivery``  ``TeclawPlatform``  ``TeclawDevice``
+    =====================  ================  ==================  =================
+    ``family``             ``ARCA``          ``TECLAW``          ``TECLAW``
+    ``creation_sequence``  ``CREATE_``       ``RECORD_APPLY_``   ``CREATE_``
+                           ``BETWEEN_``      ``PROVISION``       ``BETWEEN_``
+                           ``PHASES``                            ``PHASES``
+    ``phase_of(step)``     ``_ARCA_``        ``_TECLAW_``        ``_TECLAW_``
+                           ``PHASES``        ``PLATFORM_``       ``DEVICE_``
+                                             ``PHASES``          ``PHASES``
+    ``needs_container()``  ``True``          ``False``           ``True``
+    ``ports()``            device-backed     store-backed        device-backed,
+                                                                 teclaw CLI port
+    ``finish()``           ``None``          one whole-artifact  ``None``
+                                             redeliver
+    =====================  ================  ==================  =================
 
-    With the switch **off**, ``TeclawDelivery`` answers the ARCA column for
-    every row except ``family`` and ``ports`` — that is the point of the
-    switch.
+    ``TeclawDeviceDelivery`` answers the ARCA column for every row except
+    ``family`` and the CLI port — that is the point of it. It exists so a
+    deployment whose engine has not shipped the ``ownership`` map keeps the
+    behaviour it had, and it disappears the day the mode does.
 
-    Created by: ``DeliveryStrategyFactory.for_engine`` / ``for_bot``.
+    Created by: the composition root, one per row of the mapping it hands
+    :class:`DeliveryStrategyFactory`.
     Consumed by: the apply service (``ports``, ``finish``), the orchestrator
     (``steps_for``), and the creation job (``creation_sequence``,
     ``needs_container``).
 
-    Implemented by ``ArcaDelivery`` and ``TeclawDelivery`` below, which
-    subclass it explicitly so the implementations are one jump away — and
-    every member here is ``@abstractmethod``, so that subclassing is load-
-    bearing rather than decorative. The backend runs no static type checker
-    (the reason ``core/ports/identity_file_port.py`` records): without abstract
-    members a family that dropped ``finish`` would inherit the ``...`` stub and
-    return ``None``, silently skipping the closing redeliver of every apply it
-    ran.
+    Implemented by the three classes below, which subclass it explicitly so the
+    implementations are one jump away — and every member here is
+    ``@abstractmethod``, so that subclassing is load-bearing rather than
+    decorative. The backend runs no static type checker (the reason
+    ``core/ports/identity_file_port.py`` records): without abstract members a
+    family that dropped ``finish`` would inherit the ``...`` stub and return
+    ``None``, silently skipping the closing redeliver of every apply it ran.
     """
 
     @property
     @abstractmethod
-    def family(self) -> str:
-        """The engine family's name: ``"arca"`` or ``"teclaw"``.
+    def family(self) -> EngineFamily:
+        """The engine family this strategy delivers for.
 
-        The key the factory selects a strategy by and the word a report or a
-        log uses for it. Example: ``ArcaDelivery().family == "arca"``;
-        ``DeliveryStrategyFactory.for_engine("teclaw").family == "teclaw"``.
+        Example: ``ArcaDelivery(...).family is EngineFamily.ARCA``. Both teclaw
+        strategies answer ``TECLAW`` — the family is what a bot *is*, the mode
+        is what the deployment *runs*, and a report or a log wants the former.
         """
         ...
 
@@ -211,7 +260,7 @@ class DeliveryStrategy(Protocol):
         """Which phase this family delivers the step's construct in.
 
         The phase table is the strategy's own — :data:`ApplyStep` carries no
-        phase, so the two families are free to disagree and routinely do.
+        phase, so the three are free to disagree and routinely do.
         """
         ...
 
@@ -250,10 +299,11 @@ class DeliveryStrategy(Protocol):
         """Close an apply after every category is written.
 
         Answers a string that becomes one of ``ApplyReport.notes``, or ``None``
-        when there is nothing to say. ARCA always answers ``None``; teclaw
-        answers ``None`` on success and the redeliver's failure text otherwise.
-        A failure here must **not** raise: every category is already written,
-        and losing the report would be worse than recording the note.
+        when there is nothing to say. Only the platform-managed teclaw strategy
+        has anything to do here: it answers ``None`` on success and the
+        redeliver's failure text otherwise. A failure here must **not** raise:
+        every category is already written, and losing the report would be worse
+        than recording the note.
         """
         ...
 
@@ -270,14 +320,44 @@ _ARCA_PHASES: Mapping[ApplyConstruct, ApplyPhase] = MappingProxyType({
     ManifestCategory.CLI_TOOLS: ApplyPhase.ON_CONTAINER,
 })
 
+#: Platform-managed teclaw: the artifact is the delivery and it is composed
+#: before provisioning, so nothing waits for a container. ``script`` is
+#: unsupported on this family (the capability resolver refuses it); its phase
+#: is stated anyway, and stated as the ARCA one, so a declared script still
+#: walks the orchestrator's no-support path and is reported, not skipped.
+_TECLAW_PLATFORM_PHASES: Mapping[ApplyConstruct, ApplyPhase] = MappingProxyType({
+    construct: ApplyPhase.PRE_CONTAINER for construct in _ARCA_PHASES
+})
+
+#: Device-backed teclaw: the ARCA table, with the two constructs that ignore
+#: the deployment's mode moved in front of the container.
+#:
+#: ``cli_tools`` is always platform-managed on this family whatever mode the
+#: deployment runs (spec D-6, D-8), exactly as ``mcp`` is, so it is composed
+#: into the artifact before provisioning. The distinction is invisible on an
+#: existing bot, where the two phases run back to back; it decides something on
+#: exactly one path, the W13 creation whose platform-managed sequence has no
+#: phase B at all, where an ``ON_CONTAINER`` ``cli_tools`` would never run.
+_TECLAW_DEVICE_PHASES: Mapping[ApplyConstruct, ApplyPhase] = MappingProxyType({
+    **_ARCA_PHASES,
+    ManifestSection.SCRIPT: ApplyPhase.PRE_CONTAINER,
+    ManifestCategory.CLI_TOOLS: ApplyPhase.PRE_CONTAINER,
+})
+
 # The no-drift assertion ``source_fetchers.FETCHER_TYPES`` and ``fetch/limits``
-# set the precedent for: adding a construct to APPLY_ORDER without giving this
+# set the precedent for: adding a construct to APPLY_ORDER without giving a
 # family a phase for it would otherwise be a KeyError on the first apply that
 # walked it, on whichever bot happened to declare it first.
-assert set(_ARCA_PHASES) == {step.construct for step in APPLY_ORDER}, (
-    "_ARCA_PHASES and APPLY_ORDER must name the same set of constructs — a "
-    "construct in the order with no phase here has no ARCA delivery at all"
-)
+for _name, _table in (
+    ("_ARCA_PHASES", _ARCA_PHASES),
+    ("_TECLAW_PLATFORM_PHASES", _TECLAW_PLATFORM_PHASES),
+    ("_TECLAW_DEVICE_PHASES", _TECLAW_DEVICE_PHASES),
+):
+    assert set(_table) == {step.construct for step in APPLY_ORDER}, (
+        f"{_name} and APPLY_ORDER must name the same set of constructs — a "
+        "construct in the order with no phase here has no delivery at all"
+    )
+del _name, _table
 
 
 def _steps(
@@ -291,7 +371,31 @@ def _steps(
     )
 
 
-class ArcaDelivery(DeliveryStrategy):
+class _PhaseTableDelivery(DeliveryStrategy):
+    """A strategy whose phase answer is a literal table.
+
+    All three are. Stating it once is what makes a family *be* a table plus a
+    port bundle — the two halves a reviewer has to check — instead of three
+    copies of the same two methods, where the copies are free to drift and the
+    drift shows up as a construct silently skipped on one family.
+
+    Still abstract: ``family``, ``creation_sequence``, ``needs_container``,
+    ``ports`` and ``finish`` stay unanswered here, so a subclass that forgets
+    one cannot be constructed.
+    """
+
+    #: The family's phase per construct. Exhaustive over ``APPLY_ORDER``,
+    #: asserted at import above.
+    _PHASES: ClassVar[Mapping[ApplyConstruct, ApplyPhase]]
+
+    def phase_of(self, step: ApplyStep) -> ApplyPhase:
+        return self._PHASES[step.construct]
+
+    def steps_for(self, phase: ApplyPhase | None = None) -> tuple[ApplyStep, ...]:
+        return _steps(self.phase_of, phase)
+
+
+class ArcaDelivery(_PhaseTableDelivery):
     """The container family: the phase table is :data:`_ARCA_PHASES`.
 
     ``script`` before the container, every other construct after it;
@@ -299,17 +403,12 @@ class ArcaDelivery(DeliveryStrategy):
     the owning services project as they write.
     """
 
-    family = "arca"
+    family = EngineFamily.ARCA
     creation_sequence = CreationSequence.CREATE_BETWEEN_PHASES
+    _PHASES = _ARCA_PHASES
 
     def __init__(self, ports: Callable[[], MaterialiserPorts]) -> None:
         self._ports = ports
-
-    def phase_of(self, step: ApplyStep) -> ApplyPhase:
-        return _ARCA_PHASES[step.construct]
-
-    def steps_for(self, phase: ApplyPhase | None = None) -> tuple[ApplyStep, ...]:
-        return _steps(self.phase_of, phase)
 
     def needs_container(self) -> bool:
         return True
@@ -334,8 +433,105 @@ class ArcaDelivery(DeliveryStrategy):
 #: The note it answers becomes one of ``ApplyReport.notes``.
 #:
 #: Implemented by: ``apply/redeliver``. Consumed by:
-#: :meth:`TeclawDelivery.finish`.
+#: :meth:`TeclawPlatformDelivery.finish`.
 Redeliver = Callable[[ApplyContext], Awaitable[Optional[str]]]
+
+
+class TeclawPlatformDelivery(_PhaseTableDelivery):
+    """The artifact family, delivering through platform state (spec D-3).
+
+    Every construct is ``PRE_CONTAINER``: it writes a database row or an
+    object into the bot-data store, and the artifact composed from that state
+    is the delivery. Nothing waits for a container, so the creation job needs
+    no phase B and no ``ACTIVE`` wait, and the apply is closed by one
+    whole-artifact redeliver.
+
+    It has no CLI-port substitution to make, unlike its device-backed sibling:
+    its bundle is built teclaw-side already, by the same composition root
+    provider that binds the store these ports write to.
+    """
+
+    family = EngineFamily.TECLAW
+    creation_sequence = CreationSequence.RECORD_APPLY_PROVISION
+    _PHASES = _TECLAW_PLATFORM_PHASES
+
+    def __init__(
+        self,
+        *,
+        ports: Callable[[], MaterialiserPorts],
+        redeliver: Redeliver,
+    ) -> None:
+        self._ports = ports
+        # Required, and it is the constructor that makes it so. The old shape
+        # bound both port bundles and a switch, which let "platform-managed
+        # with nothing bound to be platform-managed *with*" be expressible at
+        # all — a misconfiguration the factory then had to refuse at run time,
+        # loudly, in front of a bot. A strategy that cannot be built without
+        # its own collaborators has no such state to refuse.
+        self._redeliver = redeliver
+
+    def needs_container(self) -> bool:
+        return False
+
+    def ports(self) -> MaterialiserPorts:
+        return self._ports()
+
+    async def finish(self, ctx: ApplyContext, report: ApplyReport) -> Optional[str]:
+        return await self._redeliver(ctx)
+
+
+class TeclawDeviceDelivery(_PhaseTableDelivery):
+    """The artifact family, delivering the way it did before W8.
+
+    Every non-script construct is ``ON_CONTAINER`` through the device-backed
+    ports ARCA uses, so nothing regresses in a deployment whose engine has not
+    shipped the artifact's ``ownership`` map yet. This class is the whole of
+    that compatibility: it goes when :class:`TeclawDeliveryMode` does.
+
+    **The one thing it does not take from ARCA is the CLI port.** ``cli_tools``
+    is always platform-managed on this family, so its port cannot come from the
+    device bundle: that bundle carries the *ARCA* port, which would call
+    ARCA-only engine endpoints on a teclaw bot — and, since
+    :data:`_TECLAW_DEVICE_PHASES` puts this category before the container,
+    would run with no container to call at all. The substitution is here, in
+    the one strategy that hands out a bundle it did not have built for it,
+    rather than in a second wiring site that would have to agree with the
+    first.
+
+    ``mcp`` is always platform-managed too and needs none of this, because it
+    has no port in :class:`MaterialiserPorts` at all: on both families its
+    delivery *is* the artifact, so there is nothing family-specific to select.
+    ``cli_tools`` is the one category that is always platform-managed and still
+    has a per-family delivery step — ARCA installs into a live container over
+    an engine endpoint, teclaw does nothing — so it owns a port, and a port
+    taken from the wrong family's bundle is the exact mismatch corrected here.
+    """
+
+    family = EngineFamily.TECLAW
+    creation_sequence = CreationSequence.CREATE_BETWEEN_PHASES
+    _PHASES = _TECLAW_DEVICE_PHASES
+
+    def __init__(
+        self,
+        *,
+        ports: Callable[[], MaterialiserPorts],
+        cli_tool_service: Callable[[], CliToolService],
+    ) -> None:
+        self._ports = ports
+        # Lazy for the reason the bundle itself is lazy — it reaches the device
+        # graph — and resolved per apply, not once at boot.
+        self._cli_tool_service = cli_tool_service
+
+    def needs_container(self) -> bool:
+        return True
+
+    def ports(self) -> MaterialiserPorts:
+        return replace(self._ports(), cli_tool_service=self._cli_tool_service())
+
+    async def finish(self, ctx: ApplyContext, report: ApplyReport) -> Optional[str]:
+        # This shape runs the ARCA one: the device-backed ports projected as
+        # they wrote, so there is nothing left to close.
+        return None
 
 
 @dataclass(frozen=True)
@@ -352,8 +548,8 @@ class TeclawPlatformBindings:
 
     Created by: the composition root, in the manifest-fetch graph beside the
     store these ports write to.
-    Consumed by: the apply service, which unpacks it into
-    ``DeliveryStrategyFactory``.
+    Consumed by: :class:`TeclawDeliveryBindings`, and the W9 CLI service
+    factory, whose ``teclaw-live`` binding pushes through the same redeliver.
     """
 
     #: Builds the store-backed port bundle. Lazy: it reaches the object store
@@ -363,242 +559,150 @@ class TeclawPlatformBindings:
     redeliver: Redeliver
 
 
-class TeclawDelivery(DeliveryStrategy):
-    """The artifact family.
+@dataclass(frozen=True)
+class TeclawDeliveryBindings:
+    """Everything either teclaw strategy is built from, as one DI value.
 
-    Its phase table is not a literal like :data:`_ARCA_PHASES` but computed in
-    :meth:`phase_of` from the platform-managed switch plus the two per-construct
-    rules that ignore it (``script`` and ``cli_tools``).
+    Four fields, of which each row of :data:`TECLAW_DELIVERY_BY_MODE` reads the
+    two its own mode needs and never touches the other two. They share one
+    bundle so the rows share one signature — that is what lets the selection be
+    a table lookup instead of a branch that knows what each arm wants. Every
+    field is a callable, so binding all four resolves nothing: only the
+    strategy the mode names is built, and even that one reaches its graph no
+    earlier than the first apply.
 
-    With ``platform_managed`` on, every non-script construct is
-    ``PRE_CONTAINER``: it writes platform state and needs no container. The
-    apply is closed by one redeliver. Off, the strategy reproduces the shape
-    teclaw ran before W8 — every non-script construct ``ON_CONTAINER`` through
-    the device-backed ports — so nothing regresses while the engine catches up.
+    Created by: the composition root.
+    Consumed by: :func:`teclaw_delivery_for_mode`.
     """
 
-    family = "teclaw"
-
-    def __init__(
-        self,
-        *,
-        platform_managed: bool,
-        platform_ports: Callable[[], MaterialiserPorts],
-        device_ports: Callable[[], MaterialiserPorts],
-        redeliver: Redeliver,
-        cli_tool_service: Optional[CliToolService] = None,
-    ) -> None:
-        self._platform_managed = platform_managed
-        self._platform_ports = platform_ports
-        self._device_ports = device_ports
-        # W9. ``cli_tools`` is always platform-managed on this family, so its
-        # port cannot be whichever the switch selects: with the switch off the
-        # device bundle carries the *ARCA* port, which would call ARCA-only
-        # engine endpoints on a teclaw bot — and, since ``phase_of`` puts this
-        # category before the container, would run with no container to call at
-        # all. Substituted into whichever bundle ``ports`` returns, so the
-        # invariant holds in one place instead of depending on two wiring sites
-        # agreeing.
-        #
-        # ``mcp`` is always platform-managed too and needs none of this,
-        # because it has no port in ``MaterialiserPorts`` at all: on both
-        # families its delivery *is* the artifact, so there is nothing
-        # family-specific to select. ``cli_tools`` is the one category that is
-        # always platform-managed and still has a per-family delivery step —
-        # ARCA installs into a live container over an engine endpoint, teclaw
-        # does nothing — so it owns a port, and a port selected by a switch
-        # this category ignores is the exact mismatch corrected here.
-        self._cli_tool_service = cli_tool_service
-        # Required, not defaulted: the factory always carries one, so the type
-        # said "may be absent" about a value that never is. Whether it *runs*
-        # is the switch's business, below — an absent closing step and a
-        # switched-off family were two ways of writing the same thing, and only
-        # one of them was reachable.
-        self._redeliver = redeliver
-
-    @property
-    def platform_managed(self) -> bool:
-        return self._platform_managed
-
-    @property
-    def creation_sequence(self) -> CreationSequence:
-        if self._platform_managed:
-            return CreationSequence.RECORD_APPLY_PROVISION
-        return CreationSequence.CREATE_BETWEEN_PHASES
-
-    def phase_of(self, step: ApplyStep) -> ApplyPhase:
-        if step.construct == ManifestSection.SCRIPT:
-            # Unsupported on teclaw (the capability resolver refuses it); the
-            # phase is stated anyway, and stated as the ARCA one, so a declared
-            # script still walks the orchestrator's no-support path and is
-            # reported, not skipped.
-            return ApplyPhase.PRE_CONTAINER
-        if step.construct == ManifestCategory.CLI_TOOLS:
-            # The artifact is teclaw's delivery and it is composed before
-            # provisioning, so this category is PRE_CONTAINER whatever the
-            # switch says. It has to be stated per category rather than left to
-            # the generic re-phasing below, because that keys on the switch and
-            # this one is always platform-managed — like ``mcp``, and for the
-            # same reason (spec D-6, D-8). The distinction is invisible on an
-            # existing bot, where the two phases run back to back; it decides
-            # something on exactly one path, the W13 creation whose
-            # switch-on sequence has no phase B at all.
-            return ApplyPhase.PRE_CONTAINER
-        if self._platform_managed:
-            return ApplyPhase.PRE_CONTAINER
-        return ApplyPhase.ON_CONTAINER
-
-    def steps_for(self, phase: ApplyPhase | None = None) -> tuple[ApplyStep, ...]:
-        return _steps(self.phase_of, phase)
-
-    def needs_container(self) -> bool:
-        return not self._platform_managed
-
-    def ports(self) -> MaterialiserPorts:
-        bundle = (
-            self._platform_ports() if self._platform_managed else self._device_ports()
-        )
-        if self._cli_tool_service is None:
-            return bundle
-        return replace(bundle, cli_tool_service=self._cli_tool_service)
-
-    async def finish(self, ctx: ApplyContext, report: ApplyReport) -> Optional[str]:
-        if not self._platform_managed:
-            # Off, this family runs the ARCA shape: the device-backed ports
-            # projected as they wrote, so there is nothing left to close.
-            return None
-        return await self._redeliver(ctx)
+    #: Store-backed ports — ``PLATFORM``'s write targets.
+    platform_ports: Callable[[], MaterialiserPorts]
+    #: Device-backed ports, the bundle ARCA also runs on — ``DEVICE``'s.
+    device_ports: Callable[[], MaterialiserPorts]
+    #: ``PLATFORM``'s closing step. See :data:`Redeliver`.
+    redeliver: Redeliver
+    #: The teclaw-bound CLI service ``DEVICE`` substitutes into its bundle.
+    cli_tool_service: Callable[[], CliToolService]
 
 
-_TRUE_SCALARS = frozenset({"true", "yes", "on", "1"})
-_FALSE_SCALARS = frozenset({"false", "no", "off", "0"})
+#: Which teclaw strategy a deployment's mode names, and how it is built.
+#:
+#: One row per :class:`TeclawDeliveryMode`, exhaustive by construction (the
+#: import-time check below). Supporting a third shape is a class and a row, the
+#: way ``source_fetchers.FETCHER_TYPES`` takes a protocol; retiring the
+#: device-backed shape is deleting a row, a class and an enum member, and
+#: nothing else in the feature has to be found and unbranched first.
+TECLAW_DELIVERY_BY_MODE: Mapping[
+    TeclawDeliveryMode, Callable[[TeclawDeliveryBindings], DeliveryStrategy]
+] = MappingProxyType({
+    TeclawDeliveryMode.PLATFORM: lambda bindings: TeclawPlatformDelivery(
+        ports=bindings.platform_ports, redeliver=bindings.redeliver
+    ),
+    TeclawDeliveryMode.DEVICE: lambda bindings: TeclawDeviceDelivery(
+        ports=bindings.device_ports, cli_tool_service=bindings.cli_tool_service
+    ),
+})
 
-
-def teclaw_platform_managed_from_config(tree: Mapping[str, Any] | None) -> bool:
-    """The switch, read from the ``user_config`` tree. Absent is off.
-
-    ``tree`` is the merged ``user_config`` mapping; the block this reads is
-    ``tree["bot_config_manifest"][TECLAW_PLATFORM_MANAGED_KEY]``.
-
-    ============================================  =====================
-    Value at that key                             Result
-    ============================================  =====================
-    absent, or the block is missing/not a         ``False``
-    mapping, or ``tree`` is ``None``
-    ``None`` (``teclaw_platform_managed:``        ``False``
-    with nothing after it)
-    ``True`` / ``False``                          as written
-    ``"true"``, ``"yes"``, ``"on"``, ``"1"``      ``True``
-    ``"false"``, ``"no"``, ``"off"``, ``"0"``     ``False``
-    ``0`` / ``1``                                 ``False`` / ``True``
-    anything else                                 raises ``ValueError``
-    ============================================  =====================
-
-    Called by: the composition root, at boot.
-
-    Strict, and the strictness is the point: YAML may hand back a string, and
-    ``bool("false")`` is ``True``. A switch that turns a delivery path on
-    because someone quoted ``"off"`` would fail every teclaw apply in a
-    deployment whose engine has not shipped the map. So only a boolean, the
-    usual boolean spellings, or 0/1 are accepted; anything else raises at
-    boot, where a config mistake belongs. A block that is not a mapping is
-    read as absent, the way the sibling readers treat a missing block.
-    """
-    block = (tree or {}).get("bot_config_manifest") or {}
-    if not isinstance(block, Mapping) or TECLAW_PLATFORM_MANAGED_KEY not in block:
-        return False
-    raw = block[TECLAW_PLATFORM_MANAGED_KEY]
-    if raw is None:
-        # ``teclaw_platform_managed:`` with nothing after it — the likeliest
-        # spelling of "not set" — reads as absent, not as a malformed value.
-        return False
-    if isinstance(raw, bool):
-        return raw
-    if isinstance(raw, str):
-        text = raw.strip().lower()
-        if text in _TRUE_SCALARS:
-            return True
-        if text in _FALSE_SCALARS:
-            return False
-        raise ValueError(
-            f"user_config.bot_config_manifest.{TECLAW_PLATFORM_MANAGED_KEY}: "
-            f"not a boolean: {raw!r}"
-        )
-    if isinstance(raw, (int, float)) and raw in (0, 1):
-        return bool(raw)
-    raise ValueError(
-        f"user_config.bot_config_manifest.{TECLAW_PLATFORM_MANAGED_KEY}: "
-        f"not a boolean: {raw!r}"
+_UNBUILT_MODES = set(TeclawDeliveryMode) - set(TECLAW_DELIVERY_BY_MODE)
+if _UNBUILT_MODES:
+    # At import, never at boot-and-then-first-apply. A mode a deployment can
+    # write into its yaml and nothing can build is "the surface accepts what it
+    # cannot run" — the rule this whole feature is built around.
+    raise RuntimeError(
+        "every teclaw delivery mode needs a strategy; missing: "
+        + ", ".join(sorted(m.value for m in _UNBUILT_MODES))
     )
 
 
+def teclaw_delivery_for_mode(
+    mode: TeclawDeliveryMode, bindings: TeclawDeliveryBindings
+) -> DeliveryStrategy:
+    """The one teclaw strategy this deployment runs.
+
+    Called once, by the composition root::
+
+        teclaw_delivery_for_mode(config.teclaw_delivery_mode, bindings)
+
+    The other mode's strategy is never built, so nothing downstream can be
+    handed it by accident and nothing has to ask which mode it is holding.
+    """
+    return TECLAW_DELIVERY_BY_MODE[mode](bindings)
+
+
+def family_from_engine_test(
+    is_teclaw: Callable[[Optional[str]], bool],
+) -> Callable[[Optional[str]], EngineFamily]:
+    """Adapt the engine authority's yes/no into the family key.
+
+    ``TeclawProvisionService.is_teclaw`` answers a boolean because that is the
+    question the rest of the platform asks it. :class:`DeliveryStrategyFactory`
+    keys by :class:`EngineFamily`, so the translation happens once, here, at
+    the boundary with the authority — not at each of the places that would
+    otherwise write ``TECLAW if is_teclaw(e) else ARCA``.
+
+    Called by: the composition root, wrapping the same authority the capability
+    resolver and the CLI-tool surface take, so the three cannot disagree about
+    what a bot is.
+    """
+    families: Mapping[bool, EngineFamily] = MappingProxyType({
+        True: EngineFamily.TECLAW,
+        False: EngineFamily.ARCA,
+    })
+    return lambda engine_type: families[bool(is_teclaw(engine_type))]
+
+
 class DeliveryStrategyFactory:
-    """Pick the strategy for a bot. The one reader of the switch.
+    """Which of the bound strategies a bot applies through. A lookup, and only that.
 
-    ``for_engine("claude_code")`` answers an :class:`ArcaDelivery`;
-    ``for_engine("teclaw")`` answers a :class:`TeclawDelivery` carrying the
-    switch. ``for_bot(bot)`` is the same thing keyed off
-    ``bot["active_engine"]``.
+    It is handed one built strategy per :class:`EngineFamily` and a way to name
+    a bot's family::
 
-    Raises ``RuntimeError`` when the switch is on and no platform ports are
-    bound: a misconfiguration should be loud, not a quiet fallback to writing
-    into a container through the device ports.
+        DeliveryStrategyFactory(
+            family_of=family_from_engine_test(provisioning.is_teclaw),
+            strategies={
+                EngineFamily.ARCA: ArcaDelivery(device_ports),
+                EngineFamily.TECLAW: teclaw_delivery_for_mode(mode, bindings),
+            },
+        )
+
+    It builds nothing and configures nothing. Which teclaw shape sits in that
+    second row was settled in the composition root, by
+    :data:`TECLAW_DELIVERY_BY_MODE`; what reaches this class is an object that
+    already knows how it delivers. So there is no switch to read here, no
+    collaborator to pass through to a constructor, and no misconfiguration left
+    to refuse — a strategy that could not be built was not bound, and a family
+    with no strategy fails below, at boot.
+
+    Created by: the composition root.
+    Consumed by: the apply service, which asks it per apply and per bot.
     """
 
     def __init__(
         self,
         *,
-        is_teclaw: Callable[[Optional[str]], bool],
-        teclaw_platform_managed: bool,
-        arca_ports: Callable[[], MaterialiserPorts],
-        redeliver: Redeliver,
-        teclaw_platform_ports: Optional[Callable[[], MaterialiserPorts]] = None,
-        teclaw_cli_tool_service: Optional[Callable[[], CliToolService]] = None,
+        family_of: Callable[[Optional[str]], EngineFamily],
+        strategies: Mapping[EngineFamily, DeliveryStrategy],
     ) -> None:
-        self._is_teclaw = is_teclaw
-        self._platform_managed = teclaw_platform_managed
-        self._arca_ports = arca_ports
-        # The platform-managed path needs its own ports. With the switch on and
-        # none bound, ``for_engine`` refuses rather than silently writing into
-        # a container through the device ports — a misconfiguration should be
-        # loud, not a quiet fallback.
-        self._teclaw_platform_ports = teclaw_platform_ports
-        # Required: every composition of this factory binds one. ``teclaw_
-        # platform_ports`` above stays optional because it names a real
-        # configuration state — the switch on with nothing bound, which the
-        # guard below refuses loudly — where this one never had a second state
-        # to name.
-        self._redeliver = redeliver
-        # W9: the teclaw-bound CLI service, handed to every teclaw strategy
-        # whatever the switch says. A lazy callable for the reason every other
-        # port here is lazy — it reaches the device graph.
-        self._teclaw_cli_tool_service = teclaw_cli_tool_service
+        unserved = set(EngineFamily) - set(strategies)
+        if unserved:
+            # The same exhaustiveness the phase tables and the mode table get,
+            # at the one point where the mapping is assembled rather than
+            # written down: a family with no strategy would otherwise be a
+            # KeyError on the first apply of a bot that happened to be one.
+            raise ValueError(
+                "every engine family needs a delivery strategy; missing: "
+                + ", ".join(sorted(f.value for f in unserved))
+            )
+        self._family_of = family_of
+        self._strategies = MappingProxyType(dict(strategies))
 
-    @property
-    def teclaw_platform_managed(self) -> bool:
-        return self._platform_managed
+    def for_family(self, family: EngineFamily) -> DeliveryStrategy:
+        """The strategy bound for a family, named directly."""
+        return self._strategies[family]
 
     def for_engine(self, engine_type: Optional[str]) -> DeliveryStrategy:
-        if not self._is_teclaw(engine_type):
-            return ArcaDelivery(self._arca_ports)
-        platform_managed = self._platform_managed
-        if platform_managed and self._teclaw_platform_ports is None:
-            raise RuntimeError(
-                "teclaw_platform_managed is on but no platform ports are bound"
-            )
-        return TeclawDelivery(
-            platform_managed=platform_managed,
-            # With the switch off the platform ports are never consulted;
-            # ``_arca_ports`` stands in only so the constructor has a callable.
-            platform_ports=self._teclaw_platform_ports or self._arca_ports,
-            device_ports=self._arca_ports,
-            redeliver=self._redeliver,
-            cli_tool_service=(
-                self._teclaw_cli_tool_service()
-                if self._teclaw_cli_tool_service is not None
-                else None
-            ),
-        )
+        """The strategy a bot of this engine type applies through."""
+        return self._strategies[self._family_of(engine_type)]
 
     def for_bot(self, bot: Mapping[str, Any]) -> DeliveryStrategy:
         return self.for_engine(bot.get("active_engine"))
@@ -609,10 +713,17 @@ __all__ = [
     "CreationSequence",
     "DeliveryStrategy",
     "DeliveryStrategyFactory",
+    "EngineFamily",
     "MaterialiserPorts",
     "Redeliver",
+    "TECLAW_DELIVERY_BY_MODE",
     "TECLAW_PLATFORM_MANAGED_KEY",
-    "TeclawDelivery",
+    "TeclawDeliveryBindings",
+    "TeclawDeliveryMode",
+    "TeclawDeviceDelivery",
     "TeclawPlatformBindings",
-    "teclaw_platform_managed_from_config",
+    "TeclawPlatformDelivery",
+    "family_from_engine_test",
+    "teclaw_delivery_for_mode",
+    "teclaw_delivery_mode_from_config",
 ]

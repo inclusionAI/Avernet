@@ -13,7 +13,7 @@ reads each file's category and name off its path.
   which categories the platform asserts for a bot (its manifest's declared file
   categories, when the switch is on), and the collector-shaped refs the store
   holds for them.
-- `ports.py` — the store-backed write targets the `TeclawDelivery` strategy
+- `ports.py` — the store-backed write targets the `TeclawPlatformDelivery` strategy
   hands the materialisers.
 
 Boundary metadata lives in the parent package's `README.md`

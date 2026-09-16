@@ -1,5 +1,6 @@
 """The platform's own copy of a teclaw bot's manifest-delivered files (W8)."""
 from agentclaw.community.core.bot_config_manifest.managed_files.reader import (
+    EngineOwnedComposeReader,
     ManagedFilesComposeReader,
 )
 from agentclaw.community.core.bot_config_manifest.managed_files.store import (
@@ -26,6 +27,7 @@ __all__ = [
     "IDENTITY_NS",
     "ManagedFile",
     "ManagedFileScope",
+    "EngineOwnedComposeReader",
     "ManagedFilesComposeReader",
     "ManagedFilesStore",
     "ManagedFilesStoreError",

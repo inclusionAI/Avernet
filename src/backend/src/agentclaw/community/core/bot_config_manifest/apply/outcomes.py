@@ -362,6 +362,12 @@ class SourceResolution:
     because "has this repository's ref moved since we last resolved it" is not
     a question about what the document called the source.
 
+    One declaration answers for one row with one exception, and it is
+    deliberate: a creation's two phases each resolve their own sources, and
+    when a moving ref lands on two different commits between them
+    ``apply/carry_forward`` keeps both rows rather than choose which
+    resolution to hide.
+
     Created by: ``apply/source_session.SourceSession.adopt``, one per distinct
     ``display`` name, returned through ``resolution_records()``.
     Consumed by: ``ApplyReport.sources``, and read back by the apply service to

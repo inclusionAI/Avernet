@@ -427,6 +427,95 @@ def test_clear_messages(client, relay):
     assert ok(client.delete(f"{_base()}/{SESSION_ID}/messages"))["deleted"] is True
 
 
+# ── engine-specific session-id wire form ─────────────────────────────────────
+
+#: ``SESSION_ID`` in the form teclaw's runtime accepts — URL-safe base64 with
+#: the padding stripped, which is what the engine's ``decode_session_key``
+#: reverses. Pinned literally: this is the byte sequence that leaves the
+#: backend, and deriving it here would only restate the implementation.
+TECLAW_ENCODED_SESSION_ID = (
+    "c2Vzc2lvbjoyZDIwZWRjMS0yZjg0LTQ1MjQtODQ4Ni0xNWJiZDcwNzhkNDI6dXNlcjoxNjUxMzc"
+)
+
+
+def test_teclaw_message_history_is_addressed_by_the_encoded_id(client, relay):
+    """The reported bug: the proxy in front of a teclaw runtime answers 400 to
+    a path segment carrying the session id's colons, so the request never
+    reached the engine."""
+    relay.set_active_engine("teclaw")
+    relay.results = [EngineResult(data=[ENGINE_MESSAGE])]
+
+    data = ok(client.get(f"{_base()}/{SESSION_ID}/messages"))
+
+    assert relay.paths == [f"/api/sessions/{TECLAW_ENCODED_SESSION_ID}/messages"]
+    assert ":" not in relay.paths[0].rsplit("/", 2)[1]
+    # The caller keeps the id it passed; the encoding is a wire detail.
+    assert data["items"][0]["session_id"] == SESSION_ID
+
+
+@pytest.mark.parametrize(
+    ("call", "expected_path"),
+    [
+        (
+            lambda c: c.get(f"{_base()}/{SESSION_ID}"),
+            f"/api/sessions/{TECLAW_ENCODED_SESSION_ID}",
+        ),
+        (
+            lambda c: c.patch(f"{_base()}/{SESSION_ID}", json={"title": "New"}),
+            f"/api/sessions/{TECLAW_ENCODED_SESSION_ID}/update",
+        ),
+        (
+            lambda c: c.delete(f"{_base()}/{SESSION_ID}"),
+            f"/api/sessions/{TECLAW_ENCODED_SESSION_ID}",
+        ),
+        (
+            lambda c: c.delete(f"{_base()}/{SESSION_ID}/messages"),
+            f"/api/sessions/{TECLAW_ENCODED_SESSION_ID}/messages",
+        ),
+        (
+            lambda c: c.put(f"{_base()}/{SESSION_ID}/favorite"),
+            f"/api/session-favorites/{TECLAW_ENCODED_SESSION_ID}",
+        ),
+    ],
+    ids=["get", "patch", "delete", "clear_messages", "favorite"],
+)
+def test_every_teclaw_session_route_addresses_the_encoded_id(
+    client, relay, call, expected_path
+):
+    """One route fixed and the rest left raw would only move the 400 around."""
+    relay.set_active_engine("teclaw")
+    relay.results = [EngineResult(data=ENGINE_SESSION)]
+
+    call(client)
+
+    assert relay.paths == [expected_path]
+
+
+def test_the_encoded_favorite_path_needs_no_percent_encoding(client, relay):
+    """The favorite path quotes what it forwards; the teclaw form is already
+    a single safe path segment, so quoting must leave it untouched rather
+    than double-encoding it."""
+    relay.set_active_engine("teclaw")
+
+    ok(client.put(f"{_base()}/{SESSION_ID}/favorite"))
+
+    assert "%" not in relay.paths[0]
+
+
+@pytest.mark.parametrize("engine", ["openclaw", "claude_code", "hermes"])
+def test_an_engine_without_its_own_rule_still_sends_the_id_verbatim(
+    client, relay, engine
+):
+    """The default is pass-through: fixing teclaw must not change the bytes
+    every other bot on the surface already sends."""
+    relay.set_active_engine(engine)
+    relay.results = [EngineResult(data=[ENGINE_MESSAGE])]
+
+    ok(client.get(f"{_base()}/{SESSION_ID}/messages"))
+
+    assert relay.paths == [f"/api/sessions/{SESSION_ID}/messages"]
+
+
 def _sessions(n: int) -> list[dict]:
     return [{**ENGINE_SESSION, "id": f"s{i}"} for i in range(n)]
 

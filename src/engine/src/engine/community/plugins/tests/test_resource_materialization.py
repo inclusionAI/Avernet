@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
-
 from engine.community.core.resource_materialization.models import (
     ChatAttachmentMaterializationRequest,
     MaterializationRequest,
@@ -348,3 +348,280 @@ async def test_temporary_url_pull_rejects_unverifiable_or_private_dns(
         pytest.raises(ValueError, match=message),
     ):
         await client.pull(_chat_request(), Path("unused.part"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+@pytest.mark.parametrize(
+    "location", ["https://storage.example/image?sig=test", "/image?sig=test"]
+)
+async def test_temporary_url_redirect_downloads_with_fresh_pinned_request(
+    tmp_path: Path, status: int, location: str
+):
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(
+                status,
+                headers={"location": location, "set-cookie": "session=private; Path=/"},
+            )
+        assert "cookie" not in request.headers
+        assert "authorization" not in request.headers
+        assert request.url.path == "/image"
+        assert request.url.query == b"sig=test"
+        assert request.url.host == "93.184.216.35"
+        expected_host = (
+            "storage.example" if location.startswith("https:") else "files.example"
+        )
+        assert request.headers["host"] == expected_host
+        assert request.extensions["sni_hostname"] == expected_host
+        return httpx.Response(200, content=b"image bytes")
+
+    client = HttpTemporaryUrlPullClient(transport=httpx.MockTransport(handler))
+    destination = tmp_path / "image.part"
+    with patch(
+        "engine.community.plugins.resource_materialization.socket.getaddrinfo",
+        side_effect=[
+            [(2, 1, 6, "", (ip, 443))] for ip in ["93.184.216.34", "93.184.216.35"]
+        ],
+    ) as resolve:
+        await client.pull(_chat_request(), destination)
+    assert resolve.call_count == 2
+    assert len(requests) == 2
+    assert destination.read_bytes() == b"image bytes"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "location,reason",
+    [
+        ("", "missing Location"),
+        ("http://files.example/image", "downgrade HTTPS"),
+        ("ftp://files.example/image", "untrusted temporary URL"),
+        ("https://user:password@files.example/image", "untrusted temporary URL"),
+    ],
+)
+async def test_temporary_url_rejects_unsafe_redirect_before_request(
+    tmp_path, location, reason
+):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(303, headers={"location": location})
+
+    client = HttpTemporaryUrlPullClient(transport=httpx.MockTransport(handler))
+    with (
+        patch(
+            "engine.community.plugins.resource_materialization.socket.getaddrinfo",
+            return_value=[(2, 1, 6, "", ("93.184.216.34", 443))],
+        ),
+        pytest.raises(ValueError, match=reason),
+    ):
+        await client.pull(_chat_request(), tmp_path / "image.part")
+    assert len(requests) == 1
+    assert not (tmp_path / "image.part").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "private_ip", ["127.0.0.1", "10.0.0.1", "169.254.169.254", "::1"]
+)
+async def test_temporary_url_redirect_rechecks_dns_before_connecting(
+    tmp_path, private_ip
+):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(303, headers={"location": "/image"})
+
+    client = HttpTemporaryUrlPullClient(transport=httpx.MockTransport(handler))
+    with (
+        patch(
+            "engine.community.plugins.resource_materialization.socket.getaddrinfo",
+            side_effect=[
+                [(2, 1, 6, "", ("93.184.216.34", 443))],
+                [
+                    (2, 1, 6, "", ("93.184.216.34", 443)),
+                    (2, 1, 6, "", (private_ip, 443)),
+                ],
+            ],
+        ),
+        pytest.raises(ValueError, match="non-public address"),
+    ):
+        await client.pull(_chat_request(), tmp_path / "image.part")
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("redirects", [5, 6])
+async def test_temporary_url_redirect_limit(tmp_path, redirects):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if len(requests) <= redirects:
+            return httpx.Response(302, headers={"location": "/image"})
+        return httpx.Response(200, content=b"image")
+
+    client = HttpTemporaryUrlPullClient(transport=httpx.MockTransport(handler))
+    destination = tmp_path / "image.part"
+    with patch(
+        "engine.community.plugins.resource_materialization.socket.getaddrinfo",
+        return_value=[(2, 1, 6, "", ("93.184.216.34", 443))],
+    ):
+        if redirects == 6:
+            with pytest.raises(ValueError, match="redirect limit exceeded"):
+                await client.pull(_chat_request(), destination)
+            assert not destination.exists()
+        else:
+            await client.pull(_chat_request(), destination)
+            assert destination.read_bytes() == b"image"
+    assert len(requests) == 6
+
+
+@pytest.mark.asyncio
+async def test_temporary_url_redirect_preserves_size_limit(tmp_path):
+    responses = iter(
+        [
+            httpx.Response(303, headers={"location": "/image"}),
+            httpx.Response(200, content=b"oversized"),
+        ]
+    )
+    client = HttpTemporaryUrlPullClient(
+        transport=httpx.MockTransport(lambda request: next(responses)),
+    )
+    with (
+        patch(
+            "engine.community.plugins.resource_materialization.socket.getaddrinfo",
+            return_value=[(2, 1, 6, "", ("93.184.216.34", 443))],
+        ),
+        pytest.raises(ValueError, match="exceeds size limit"),
+    ):
+        await client.pull(
+            _chat_request().model_copy(update={"download_max_bytes": 4}),
+            tmp_path / "image.part",
+        )
+
+
+@pytest.mark.asyncio
+async def test_temporary_url_deadline_includes_redirect_dns(tmp_path):
+    calls = 0
+
+    async def resolve(host, port):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            await asyncio.sleep(10)
+        return frozenset({"93.184.216.34"})
+
+    client = HttpTemporaryUrlPullClient(
+        timeout_seconds=0.05,
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(303, headers={"location": "/image"})
+        ),
+    )
+    with (
+        patch.object(client, "_resolve_public_ips", AsyncMock(side_effect=resolve)),
+        pytest.raises(TimeoutError),
+    ):
+        await client.pull(_chat_request(), tmp_path / "image.part")
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_temporary_url_redirect_limits_stream_without_content_length(tmp_path):
+    class Body(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b"1234"
+            yield b"5"
+
+    responses = iter(
+        [
+            httpx.Response(303, headers={"location": "/image"}),
+            httpx.Response(200, stream=Body()),
+        ]
+    )
+    client = HttpTemporaryUrlPullClient(
+        max_bytes=4, transport=httpx.MockTransport(lambda request: next(responses))
+    )
+    with (
+        patch(
+            "engine.community.plugins.resource_materialization.socket.getaddrinfo",
+            return_value=[(2, 1, 6, "", ("93.184.216.34", 443))],
+        ),
+        pytest.raises(ValueError, match="exceeds size limit"),
+    ):
+        await client.pull(_chat_request(), tmp_path / "image.part")
+
+
+@pytest.mark.asyncio
+async def test_temporary_url_redirect_propagates_final_http_error(tmp_path):
+    responses = iter(
+        [
+            httpx.Response(303, headers={"location": "/image"}),
+            httpx.Response(403),
+        ]
+    )
+    client = HttpTemporaryUrlPullClient(
+        transport=httpx.MockTransport(lambda request: next(responses))
+    )
+    with (
+        patch(
+            "engine.community.plugins.resource_materialization.socket.getaddrinfo",
+            return_value=[(2, 1, 6, "", ("93.184.216.34", 443))],
+        ),
+        pytest.raises(httpx.HTTPStatusError),
+    ):
+        await client.pull(_chat_request(), tmp_path / "image.part")
+    assert not (tmp_path / "image.part").exists()
+
+
+@pytest.mark.asyncio
+async def test_temporary_url_honors_configured_ca_without_environment_proxy(
+    tmp_path, monkeypatch
+):
+    import ssl
+
+    import certifi
+
+    # Use one real CA rather than the default bundle so ignoring the override
+    # is observable even with a mocked network transport.
+    bundle = Path(certifi.where()).read_text()
+    pem = bundle[bundle.index("-----BEGIN CERTIFICATE-----") :]
+    pem = pem[
+        : pem.index("-----END CERTIFICATE-----") + len("-----END CERTIFICATE-----")
+    ]
+    ca_file = tmp_path / "ca.pem"
+    ca_file.write_text(pem)
+    monkeypatch.setenv("SSL_CERT_FILE", str(ca_file))
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example:3128")
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, content=b"image")
+
+    def transport(**kwargs):
+        assert kwargs["trust_env"] is False
+        assert kwargs.get("proxy") is None
+        context = kwargs["verify"]
+        assert context.verify_mode == ssl.CERT_REQUIRED
+        assert context.check_hostname
+        assert context.get_ca_certs(binary_form=True) == [ssl.PEM_cert_to_DER_cert(pem)]
+        return httpx.MockTransport(handler)
+
+    client = HttpTemporaryUrlPullClient()
+    with (
+        patch("httpx._client.AsyncHTTPTransport", side_effect=transport),
+        patch(
+            "engine.community.plugins.resource_materialization.socket.getaddrinfo",
+            return_value=[(2, 1, 6, "", ("93.184.216.34", 443))],
+        ),
+    ):
+        await client.pull(_chat_request(), tmp_path / "image.part")
+    assert len(requests) == 1
+    assert requests[0].url.host == "93.184.216.34"

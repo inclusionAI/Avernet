@@ -111,8 +111,10 @@ class SkillCenterMarketSearchRequest(BaseModel):
         max_length=50,
         description="Tags that requested Skills must match.",
     )
-    sort_by: Literal["latest", "oldest", "heat", "download", "favorite"] = Field(
-        default="latest",
+    sort_by: Literal[
+        "hottest", "latest", "oldest", "heat", "download", "favorite"
+    ] = Field(
+        default="hottest",
         alias="sortBy",
         description="Ordering applied to matched Skills.",
     )

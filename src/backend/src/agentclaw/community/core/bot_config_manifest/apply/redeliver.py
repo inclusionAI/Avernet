@@ -57,7 +57,7 @@ class TeclawRedeliver:
 
     Created by: the composition root, bound as
     ``TeclawPlatformBindings.redeliver``.
-    Consumed by: ``TeclawDelivery.finish``.
+    Consumed by: ``TeclawPlatformDelivery.finish``.
 
     "Re-deliver" because the container already received an artifact when it
     was provisioned, and on every runtime edit since; after a manifest apply

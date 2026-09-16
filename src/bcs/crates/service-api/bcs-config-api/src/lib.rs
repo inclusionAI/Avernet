@@ -336,38 +336,41 @@ pub struct ChannelDingTalkConfig {
 // ---------------------------------------------------------------------------
 
 /// Human mention notification configuration (`[human_notify]`).
+///
+/// Provider entries are an ordered array (`[[human_notify.providers]]`);
+/// every enabled entry receives each notification (fan-out). The legacy
+/// single-select shape (`provider` + `[human_notify.providers.<name>]`)
+/// was removed in 2026-09: deployments must rewrite their overlays.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HumanNotifyConfig {
-    /// Selected backend name; the feature is off when absent.
+    /// Ordered provider entries; the order decides fan-out log order.
     #[serde(default)]
-    pub provider: Option<String>,
-
-    /// Backend-specific configuration keyed by backend name.
-    #[serde(default)]
-    pub providers: BTreeMap<String, HumanNotifyProviderConfig>,
-}
-
-impl HumanNotifyConfig {
-    /// Returns true when `provider` selects `name` and that entry is enabled.
-    pub fn enabled_provider(&self, name: &str) -> bool {
-        self.provider.as_deref() == Some(name)
-            && self
-                .providers
-                .get(name)
-                .is_some_and(|provider| provider.enabled)
-    }
+    pub providers: Vec<HumanNotifyProviderConfig>,
 }
 
 /// Generic human-mention notification backend configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HumanNotifyProviderConfig {
-    #[serde(default)]
+    /// Backend name, matching the registered factory name.
+    pub name: String,
+
+    #[serde(default = "default_true")]
     pub enabled: bool,
 
     /// Backend-owned options. The public host only carries these through to
     /// the backend factory.
     #[serde(default, flatten)]
     pub options: BTreeMap<String, serde_json::Value>,
+}
+
+impl Default for HumanNotifyProviderConfig {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            enabled: true,
+            options: BTreeMap::new(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

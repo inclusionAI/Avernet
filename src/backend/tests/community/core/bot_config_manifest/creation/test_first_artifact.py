@@ -65,9 +65,15 @@ from agentclaw.community.core.service_bot.services.deploy.teclaw_compose_produce
 )
 from agentclaw.community.kernel.bot_config import StoreRef
 
+from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    TeclawPlatformDelivery,
+)
+
 from ..apply._fakes import (
     FakeActivationService,
     FakeGitClient,
+    delivery_strategies,
+    teclaw_engine_test,
     FakeManifestContent,
     FakeMcpAuth,
     FakeObjectCredentials,
@@ -210,29 +216,28 @@ def _build(db):
         manifest_service=_Manifests(),
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
-        script_service_provider=lambda: scripts,
-        activation_service_provider=lambda: activation,
-        mcp_auth_service_provider=lambda: FakeMcpAuth(),
-        identity_service_provider=lambda: None,
-        upload_service_provider=lambda: None,
-        capability_reader_provider=lambda: reader_of_active,
-        package_validator_provider=lambda: validator,
-        entry_fetcher_provider=fetcher,
-        resource_service_provider=lambda: None,
-        cli_tool_service_factory=lambda family: None,
         git_client_provider=lambda: FakeGitClient(),
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(),
-        is_teclaw=lambda engine: engine == "teclaw",
-        teclaw_platform_managed=True,
-        teclaw_platform_ports_provider=platform_ports,
-        redeliver=no_redeliver,
+        # The platform-managed deployment, assembled the way the composition
+        # root assembles it for ``TeclawDeliveryMode.PLATFORM``: the store-backed
+        # bundle above, and no device-backed row at all — an ARCA bot in this
+        # rig would be a bug, not a fallback.
+        delivery_strategies=delivery_strategies(
+            teclaw=TeclawPlatformDelivery(
+                ports=platform_ports, redeliver=no_redeliver
+            ),
+            is_teclaw=teclaw_engine_test,
+        ),
     )
     queue.service = applies
 
     # ── the compose side: real reader over the same index ────────────────
+    # The platform-managed reader, which is the one a PLATFORM deployment
+    # binds; a DEVICE one binds ``EngineOwnedComposeReader`` instead and owns
+    # no compose at all.
     reader = ManagedFilesComposeReader(
-        store=store, manifest_service_provider=_Manifests, platform_managed=lambda: True
+        store=store, manifest_service_provider=_Manifests
     )
     skill_set_service = MagicMock()
     skill_set_service.get_active_skills.side_effect = lambda **_kw: [

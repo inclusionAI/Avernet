@@ -41,6 +41,7 @@ from agentclaw.community.kernel.bot_config import McpManifest, McpServerRef
 __all__ = [
     "McporterComposer",
     "McporterComposeError",
+    "select_mcp_endpoint",
     "STDIO_TRANSPORT",
     "TECLAW_MCP_NETWORK_PRIORITY",
     "mcp_network_priority_for",
@@ -83,6 +84,28 @@ def mcp_network_priority_for(engine_type: str | None) -> tuple[str, ...] | None:
 
 class McporterComposeError(ValueError):
     """Raised when an MCP entry cannot be composed into the artifact contract."""
+
+
+def select_mcp_endpoint(
+    server_code: str,
+    mcp_data: dict[str, Any],
+    endpoint_env: str,
+    transport_protocol: str | None,
+    network_priority: tuple[str, ...] | None = None,
+) -> tuple[str, str]:
+    """Select the endpoint a remote MCP would receive during composition.
+
+    This narrow public seam lets admission validate the exact same network,
+    environment, transport, and URL rules as runtime composition without
+    materializing credentials or a full manifest.
+    """
+    return McporterComposer()._select_endpoint(
+        server_code,
+        mcp_data,
+        endpoint_env,
+        transport_protocol,
+        network_priority,
+    )
 
 
 class McporterComposer:
