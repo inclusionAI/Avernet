@@ -52,6 +52,25 @@ describe('Skill candidate diff polling', () => {
     expect(api.evolve.getTaskSkillDiff).not.toHaveBeenCalled()
   })
 
+  it('surfaces the hardening conclusion outside the technical execution record', async () => {
+    api.evolve.getTaskSkillDiff.mockResolvedValueOnce(readyDiff)
+    const value = task({ ref: 'candidate/package.zip', sha256: 'ready-hash' })
+    value.task_type = 'hardening'
+    value.steps = [{
+      stepId: 'STEP-HARDEN', taskId: value.task_id, stepType: 'stage_extension', stepNo: 2, roundNo: null,
+      command: '/clawevolve-stage', status: 'succeeded', botRunId: null, botSessionId: null, botResponse: null,
+      startedAt: 1, completedAt: 2, gmtCreate: 1, gmtModified: 2, summary: 'Stage Skill 已完成', error: null,
+      output: { summary: '已完成结构化加固并保留原有业务语义。', changed: true, changed_files: ['SKILL.md'] },
+      stageExtension: { stage: 'hardening', mode: 'replace', implementationId: 'IMPL-97', displayName: '97 Skill 加固' },
+    } as NonNullable<EvolveTask['steps']>[number] & { stageExtension: Record<string, unknown> }]
+
+    render(panel(value))
+
+    expect(await screen.findByText('加固结论')).toBeTruthy()
+    expect(screen.getByText('已完成结构化加固并保留原有业务语义。')).toBeTruthy()
+    expect(screen.getAllByText('SKILL.md').length).toBeGreaterThan(0)
+  })
+
   it('preserves genuine diff failures once an artifact exists', async () => {
     api.evolve.getTaskSkillDiff.mockRejectedValue(new Error('Historical snapshot unavailable'))
     render(panel(task({ ref: 'candidate.zip', sha256: 'sha' })))

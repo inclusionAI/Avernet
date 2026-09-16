@@ -128,6 +128,36 @@ describe('Skill center asset list and recorded events', () => {
     await waitFor(() => expect(api.evolve.getSkillVersionContent).toHaveBeenCalledWith('ASSET-1', 'VERSION-1'))
   })
 
+  it('orders versions and their producing events as one newest-first timeline', async () => {
+    const versionedAsset = {
+      ...asset,
+      currentVersion: 'v3',
+      versions: [
+        { versionId: 'VERSION-3', version: 'v3', createdAt: 1789527832 },
+        { versionId: 'VERSION-2', version: 'v2', createdAt: 1789405465 },
+        { versionId: 'VERSION-1', version: 'v1', createdAt: 1789378091 },
+      ],
+    }
+    api.evolve.getSkillAsset.mockResolvedValue(versionedAsset)
+    api.evolve.getSkillAssetHistory.mockResolvedValue({ events: [{
+      eventId: 'HARDEN-3', assetId: 'ASSET-1', name: 'Evidence Skill', ownerId: 'owner', botId: 'BOT-1',
+      type: 'hardening', status: 'completed', outcome: 'applied', taskId: 'TASK-HARDEN-3', actorId: 'owner', actorType: 'user',
+      versionFrom: { versionId: 'VERSION-2', version: 'v2' }, versionTo: { versionId: 'VERSION-3', version: 'v3' },
+      waitingInteractionId: null, summary: '完成 v2 到 v3 加固', startedAt: 1789526428, completedAt: 1789527832, updatedAt: 1789527832, testBench: null,
+    }] })
+    api.evolve.getSkillVersionContent.mockResolvedValue({ files: [{ path: 'SKILL.md', text: true }], selected: { path: 'SKILL.md', content: 'Current content' } })
+    api.evolve.getSkillVersionDiff.mockResolvedValue({ baseline: { version: 'v2' }, files: [] })
+
+    render(<MemoryRouter initialEntries={['/evolve/skills/ASSET-1']}><SkillDetail /></MemoryRouter>)
+
+    const timeline = await screen.findByLabelText('Skill 迭代时间线')
+    const v3 = within(timeline).getByRole('button', { name: /v3.*当前版本/ })
+    const hardening = within(timeline).getByRole('button', { name: /加固.*完成 v2 到 v3 加固.*v2 → v3/ })
+    const v2 = within(timeline).getByRole('button', { name: /^v2/ })
+    expect(v3.compareDocumentPosition(hardening) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(hardening.compareDocumentPosition(v2) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it('offers Git Diff by default and full comparison only in Skill detail', async () => {
     api.evolve.getSkillAsset.mockResolvedValue(asset)
     api.evolve.getSkillVersionContent.mockResolvedValue({ files: [{ path: 'SKILL.md', text: true }], selected: { path: 'SKILL.md', content: 'Current content' } })

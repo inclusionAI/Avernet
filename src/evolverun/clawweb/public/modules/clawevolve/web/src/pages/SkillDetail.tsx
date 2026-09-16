@@ -30,10 +30,6 @@ const eventTones = {
   registered: 'bg-blue-50 text-blue-700', diagnosis: 'bg-amber-50 text-amber-700', hardening: 'bg-violet-50 text-violet-700', optimization: 'bg-emerald-50 text-emerald-700',
 } as const
 
-function eventVersionId(event: EvolveSkillEvent, fallbackVersionId: string): string {
-  return event.versionFrom?.versionId ?? event.versionTo?.versionId ?? fallbackVersionId
-}
-
 function taskDetailPath(taskId: string, returnTo: string): string {
   const query = new URLSearchParams({ returnTo })
   return `/evolve/runs/${encodeURIComponent(taskId)}?${query}`
@@ -70,17 +66,11 @@ function SkillHistoryTimeline({ asset, events, selection, onSelect }: {
   onSelect: (value: string, tab: ViewerTab) => void
 }) {
   const versions = [...(asset.versions ?? [])].sort((left, right) => (timestampMs(right.createdAt) ?? 0) - (timestampMs(left.createdAt) ?? 0))
-  const fallbackVersionId = versions[0]?.versionId ?? ''
-  const byVersion = new Map<string, EvolveSkillEvent[]>()
-  const unassigned: EvolveSkillEvent[] = []
-  for (const event of events.filter((item) => item.type !== 'registered')) {
-    const versionId = eventVersionId(event, fallbackVersionId)
-    if (!versions.some((version) => version.versionId === versionId)) { unassigned.push(event); continue }
-    const current = byVersion.get(versionId) ?? []
-    current.push(event)
-    byVersion.set(versionId, current)
-  }
-  const sortedEvents = (items: EvolveSkillEvent[]) => [...items].sort((left, right) => (timestampMs(right.startedAt) ?? 0) - (timestampMs(left.startedAt) ?? 0))
+  const timeline = [
+    ...versions.map((version) => ({ kind: 'version' as const, timestamp: timestampMs(version.createdAt) ?? 0, version })),
+    ...events.filter((item) => item.type !== 'registered')
+      .map((event) => ({ kind: 'event' as const, timestamp: timestampMs(event.startedAt) ?? 0, event })),
+  ].sort((left, right) => right.timestamp - left.timestamp || (left.kind === 'version' ? -1 : 1))
   const EventButton = ({ event }: { event: EvolveSkillEvent }) => {
     const active = selection.kind === 'event' && selection.event.eventId === event.eventId
     return <button type="button" onClick={() => onSelect(event.taskId ? `task:${event.taskId}` : `event:${event.eventId}`, 'task')} className={`relative ml-4 block w-[calc(100%_-_1rem)] rounded-xl border px-3 py-3 text-left transition ${active ? 'border-blue-300 bg-blue-50 shadow-sm' : event.status === 'waiting_user_input' ? 'border-amber-200 bg-amber-50/70 hover:border-amber-300' : 'border-transparent hover:border-gray-200 hover:bg-gray-50'}`}>
@@ -94,21 +84,20 @@ function SkillHistoryTimeline({ asset, events, selection, onSelect }: {
   return <aside aria-label="Skill 迭代时间线" className="border-b border-gray-100 bg-gray-50/50 p-4 lg:border-b-0 lg:border-r">
     <div className="mb-4"><h2 className="text-sm font-semibold text-gray-900">迭代时间线</h2><p className="mt-1 text-xs text-gray-400">{versions.length} 个版本 · {events.filter((item) => item.type === 'diagnosis').length} 次诊断 · {events.filter((item) => item.type === 'hardening').length} 次加固 · {events.filter((item) => item.type === 'optimization').length} 次优化</p></div>
     <div className="max-h-[760px] space-y-3 overflow-auto pr-1">
-      {unassigned.length > 0 && <div className="border-l border-gray-200 pb-2">{sortedEvents(unassigned).map((event) => <EventButton key={event.eventId} event={event} />)}</div>}
-      {versions.map((version) => {
+      {timeline.map((item) => {
+        if (item.kind === 'event') return <section key={`event:${item.event.eventId}`} className="border-l border-gray-200 pb-2"><EventButton event={item.event} /></section>
+        const version = item.version
         const active = selection.kind === 'version' && selection.version.versionId === version.versionId
-        const related = sortedEvents(byVersion.get(version.versionId) ?? [])
         const current = version.version === asset.currentVersion
-        return <section key={version.versionId} className="border-l border-gray-200 pb-2">
+        return <section key={`version:${version.versionId}`} className="border-l border-gray-200 pb-2">
           <button type="button" onClick={() => onSelect(`version:${version.versionId}`, 'content')} className={`relative ml-4 block w-[calc(100%_-_1rem)] rounded-xl border px-3 py-3 text-left transition ${active ? 'border-blue-300 bg-white shadow-sm' : 'border-gray-200 bg-white hover:border-blue-200'}`}>
             <span className={`absolute -left-[1.48rem] top-4 h-3.5 w-3.5 rounded-full ring-4 ring-gray-50 ${current ? 'bg-blue-600' : 'bg-gray-400'}`} />
             <span className="flex items-center justify-between gap-2"><strong className="text-sm text-gray-950">{version.version}</strong>{current && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">当前版本</span>}</span>
             <span className="mt-1 block text-[10px] text-gray-400">创建于 {formatStepTime(version.createdAt)}</span>
           </button>
-          <div className="mt-1 space-y-1">{related.map((event) => <EventButton key={event.eventId} event={event} />)}</div>
         </section>
       })}
-      {versions.length === 0 && events.length === 0 && <p className="py-10 text-center text-sm text-gray-400">暂无迭代记录</p>}
+      {timeline.length === 0 && <p className="py-10 text-center text-sm text-gray-400">暂无迭代记录</p>}
     </div>
   </aside>
 }

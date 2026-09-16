@@ -193,6 +193,28 @@ function CandidateDecision({ task, canOperate, onUpdated }: {
   </details>
 }
 
+function HardeningConclusion({ task }: { task: EvolveTask }) {
+  const step = [...(task.steps ?? [])].reverse().find((item) => {
+    const extension = (item as typeof item & { stageExtension?: { stage?: string } | null }).stageExtension
+    return (item.stepType === 'hardening' || extension?.stage === 'hardening')
+      && typeof item.output?.summary === 'string' && item.output.summary.trim()
+  })
+  if (!step?.output) return null
+  const summary = String(step.output.summary).trim()
+  const changedFiles = Array.isArray(step.output.changed_files)
+    ? step.output.changed_files.filter((item): item is string => typeof item === 'string' && Boolean(item.trim()))
+    : []
+  const extension = (step as typeof step & { stageExtension?: { displayName?: string | null } | null }).stageExtension
+  return <section className="rounded-2xl border border-violet-200 bg-violet-50/70 p-5 shadow-sm">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div><h2 className="text-sm font-semibold text-violet-950">加固结论</h2>{extension?.displayName && <p className="mt-1 text-xs text-violet-600">由 {extension.displayName} 完成</p>}</div>
+      <span className="rounded-full border border-violet-200 bg-white px-2.5 py-1 text-[10px] font-medium text-violet-700">{step.output.changed === false ? '无需修改' : '已完成加固'}</span>
+    </div>
+    <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-gray-800">{summary}</p>
+    {changedFiles.length > 0 && <div className="mt-4"><p className="text-[10px] font-medium uppercase tracking-wide text-violet-500">变更文件</p><div className="mt-2 flex flex-wrap gap-2">{changedFiles.map((file) => <span key={file} className="rounded-md border border-violet-100 bg-white px-2 py-1 font-mono text-[10px] text-violet-700">{file}</span>)}</div></div>}
+  </section>
+}
+
 export default function SkillTaskRuntimePanel({ task, canOperate, onUpdated }: {
   task: EvolveTask
   canOperate: boolean
@@ -200,9 +222,11 @@ export default function SkillTaskRuntimePanel({ task, canOperate, onUpdated }: {
 }) {
   const interactions = (task.interactions ?? []).filter((item) => item.status === 'waiting')
   const showCandidate = task.task_type !== 'stage_test' && Boolean(task.config.targetSkill)
-  if (!showCandidate && interactions.length === 0) return null
+  const showHardeningConclusion = task.task_type === 'hardening'
+  if (!showCandidate && interactions.length === 0 && !showHardeningConclusion) return null
   return <div className="space-y-5">
     {interactions.length > 0 && <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">有 {interactions.length} 项信息待补充，请在对应执行步骤中回答。{interactions.map((item) => <a key={item.interactionId} href={'#step-' + item.stepId} className="ml-3 text-xs underline">前往待回答步骤</a>)}</div>}
+    {showHardeningConclusion && <HardeningConclusion task={task} />}
     {showCandidate && <CandidateDecision task={task} canOperate={canOperate} onUpdated={onUpdated} />}
   </div>
 }
