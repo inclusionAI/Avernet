@@ -1,4 +1,5 @@
 """Application Caller HTTP boundary with real Principal verification."""
+import json
 import logging
 import time
 from types import SimpleNamespace
@@ -25,15 +26,12 @@ KEY = "application-boundary-test-key-at-least-32-bytes"
 PARAMS = {"bot_id": "bot", "owner_id": "owner", "user_id": "caller"}
 
 
-def token(kind="app", *, app_id=7, **overrides):
-    principals = [{"type": "app", "tenant": "acme", "app": {"app_id": app_id, "app_name": "partner", "owners": "owner", "tenant": "acme"}}]
-    if kind == "user":
-        principals = []
-    if kind in ("user", "mixed"):
-        principals.append({"type": "user", "subject": {"id": "person", "username": "person", "tenant": "acme"}})
-    claims = dict(iss="gateway", aud="baas", iat=int(time.time()), exp=int(time.time()) + 60, principals=principals)
+def token(*, key=KEY, algorithm="HS256", omit=(), **overrides):
+    claims = dict(iss="baas", iat=int(time.time()), exp=int(time.time()) + 60)
     claims.update(overrides)
-    return jwt.encode(claims, KEY, algorithm="HS256")
+    for name in omit:
+        claims.pop(name, None)
+    return jwt.api_jws.encode(json.dumps(claims).encode(), key, algorithm=algorithm)
 
 
 @pytest.fixture
@@ -41,12 +39,12 @@ def client_service():
     resolver = SimpleNamespace(get_secret=lambda _: SimpleNamespace(secret_value=KEY, secret_user="gateway"))
     init_principal_verifier_config(resolver, "test-key", strict=False)
     async def connect(**kwargs):
-        assert get_current_avernet_tenant() == "acme"
+        assert get_current_avernet_tenant() == "teamclaw"
         return {"instance": {"id": 19}, "connection": {"token": "response-secret", "nested": [{"Authorization": "nested-secret", "status": "active"}], "url": "wss://example.test/ws?token=url-secret&mode=chat"}, "need_poll": False}
     service = SimpleNamespace(get_application_caller_connection=AsyncMock(side_effect=connect))
     injector = Injector()
     def resolve_service():
-        assert get_current_avernet_tenant() == "acme"
+        assert get_current_avernet_tenant() == "teamclaw"
         return service
     injector.binder.bind(ExpertChatInstanceServiceProtocol, to=resolve_service)
     app = FastAPI()
@@ -59,32 +57,51 @@ def client_service():
     reset_principal_verifier_config_cache()
 
 
-@pytest.mark.parametrize("kind,app_id", [("app", 7), ("app", 8), ("mixed", 7)])
-def test_application_success_without_user_cookie(client_service, caplog, kind, app_id):
+@pytest.mark.parametrize("claims", [{}, *[
+    {"principals": value, "app_id": value, "tenant": value, "aud": value}
+    for value in (None, [], "other-tenant-secret", 17, {"malformed": ["payload-secret"]})
+], {"nbf": int(time.time()) - 1}, {"iat": int(time.time()) + 2}])
+def test_application_success_without_user_cookie(client_service, caplog, claims):
     client, service = client_service
     caplog.set_level(logging.INFO)
-    credential = token(kind, app_id=app_id)
-    response = client.post(PATH, params=PARAMS, headers={"X-Avernet-Principal": credential})
+    encoded_principal = token(**claims)
+    response = client.post(PATH, params=PARAMS, headers={"X-Avernet-Principal": encoded_principal})
     assert response.status_code == 200
     assert response.json()["data"]["connection"]["token"] == "response-secret"
     assert response.json()["success"] is True
-    service.get_application_caller_connection.assert_awaited_once_with(app_id=app_id, tenant="acme", force_upgrade=False, **PARAMS)
+    service.get_application_caller_connection.assert_awaited_once_with(force_upgrade=False, **PARAMS)
     assert get_current_avernet_tenant() == "teamclaw"
     assert "app_caller_connection.request" in caplog.text
     assert "app_caller_connection.success" in caplog.text
     assert "active" in caplog.text and "19" in caplog.text
-    for secret in (credential, "response-secret", "nested-secret", "url-secret"):
+    for secret in (encoded_principal, "response-secret", "nested-secret", "url-secret", KEY, "payload-secret", "other-tenant-secret"):
         assert secret not in caplog.text
 
 
-@pytest.mark.parametrize("credential", [None, "forged", "user", "expired", "issuer"])
-def test_authentication_denied_before_service(client_service, credential):
+@pytest.mark.parametrize("case", ["missing", "empty", "malformed", "bearer", "key", "HS512", "none", "tamper", "gateway", "bcs", "issuer_type", "missing_iss", "missing_iat", "missing_exp", "expired", "future_iat", "future_nbf"])
+def test_authentication_denied_before_service(client_service, caplog, case):
     client, service = client_service
-    values = {"user": token("user"), "expired": token(exp=1), "issuer": token(iss="other")}
-    headers = {} if credential is None else {"X-Avernet-Principal": values.get(credential, credential)}
+    caplog.set_level(logging.INFO)
+    encoded_principal = {
+        "missing": None, "empty": "", "malformed": "secret-malformed", "bearer": "Bearer " + token(),
+        "key": token(key="wrong-secret-key-with-at-least-32-bytes"),
+        "HS512": token(key=KEY * 2, algorithm="HS512"), "none": token(key="", algorithm="none"),
+        "tamper": token()[:-8] + "AAAAAAAA", "gateway": token(iss="gateway"),
+        "bcs": token(iss="bcs"), "issuer_type": token(iss=["baas"]),
+        "missing_iss": token(omit=("iss",)), "missing_iat": token(omit=("iat",)),
+        "missing_exp": token(omit=("exp",)), "expired": token(exp=1),
+        "future_iat": token(iat=int(time.time()) + 60),
+        "future_nbf": token(nbf=int(time.time()) + 60),
+    }[case]
+    headers = {} if encoded_principal is None else {"X-Avernet-Principal": encoded_principal}
     response = client.post(PATH, params=PARAMS, headers=headers)
     assert response.status_code == 401
+    assert response.json() == {"detail": "Unauthorized"}
     service.get_application_caller_connection.assert_not_called()
+    assert "app_caller_connection.denied" in caplog.text
+    assert KEY not in caplog.text
+    if encoded_principal:
+        assert encoded_principal not in caplog.text
 
 
 @pytest.mark.parametrize("error,code,event", [(ChatPermissionError("exception-secret"), 403, "denied"), (RuntimeError("exception-secret"), 5999, "failed")])
@@ -107,14 +124,6 @@ def test_invalid_parameters(client_service, params):
     service.get_application_caller_connection.assert_not_called()
 
 
-def test_invalid_principal_payload_never_logs_credentials(client_service, caplog):
-    client, service = client_service
-    credential = token(principals=[{"type": "app", "tenant": "acme", "app": {"app_id": "malformed-payload-secret", "app_name": "app", "owners": "owner", "tenant": "acme"}}])
-    assert client.post(PATH, params=PARAMS, headers={"X-Avernet-Principal": credential}).status_code == 401
-    service.get_application_caller_connection.assert_not_called()
-    assert "malformed-payload-secret" not in caplog.text
-
-
 def test_redaction_handles_nested_urls_and_binary():
     from agentclaw.community.adapters.http.expert_chat.router import _application_log_value
     result = _application_log_value({
@@ -128,26 +137,43 @@ def test_redaction_handles_nested_urls_and_binary():
     assert "mode=chat" in rendered and "17" in rendered
 
 
-def test_verifier_cached_and_tenant_reset(client_service, monkeypatch):
+def test_verifier_uses_endpoint_config_and_tenant_reset(client_service, monkeypatch):
     from agentclaw.community.adapters.http.org import dependencies
     client, service = client_service
     calls = []
-    original = dependencies.verify_principal_token
+    original = dependencies.decode_principal_token
+    shared = dependencies.get_principal_verifier_config()
     def verify(raw, config):
-        calls.append(config.verify_audience)
+        calls.append((config.verify_audience, config.issuer))
         return original(raw, config)
-    monkeypatch.setattr(dependencies, "verify_principal_token", verify)
-    assert client.post(PATH, params=PARAMS, headers={"X-Avernet-Principal": token()}).json()["success"] is True
-    assert calls == [False]
+    monkeypatch.setattr(dependencies, "decode_principal_token", verify)
+    assert client.post(PATH, params={**PARAMS, "tenant": "foreign"}, headers={"X-Avernet-Principal": token(tenant="foreign")}).json()["success"] is True
+    assert calls == [(False, "baas")]
+    assert dependencies.get_principal_verifier_config() is shared
+    assert shared.issuer == "gateway" and shared.verify_audience
     assert get_current_avernet_tenant() == "teamclaw"
     assert client.post(PATH, params=PARAMS).status_code == 401
     assert get_current_avernet_tenant() == "teamclaw"
     assert service.get_application_caller_connection.await_count == 1
 
 
-def test_contradictory_tenant_fails_closed(client_service):
+def test_unconfigured_key_fails_closed(client_service):
     client, service = client_service
-    principals = [{"type": "app", "tenant": "acme", "app": {"app_id": 7, "app_name": "partner", "owners": "owner", "tenant": "other"}}]
-    principals.append({"type": "app", "tenant": "other", "app": {"app_id": 8, "app_name": "second", "owners": "owner", "tenant": "other"}})
-    assert client.post(PATH, params=PARAMS, headers={"X-Avernet-Principal": token(principals=principals)}).status_code == 401
+    reset_principal_verifier_config_cache()
+    assert client.post(PATH, params=PARAMS, headers={"X-Avernet-Principal": token()}).status_code == 401
+    service.get_application_caller_connection.assert_not_called()
+
+
+def test_decoder_exception_does_not_log_untrusted_details(client_service, monkeypatch, caplog):
+    from agentclaw.community.adapters.http.org import dependencies
+    from agentclaw.community.core.gateway_principal import PrincipalVerificationError
+    client, service = client_service
+    caplog.set_level(logging.INFO)
+    def reject(raw, config):
+        raise PrincipalVerificationError("attacker-jose-secret")
+    monkeypatch.setattr(dependencies, "decode_principal_token", reject)
+    response = client.post(PATH, params=PARAMS, headers={"X-Avernet-Principal": token()})
+    assert response.status_code == 401
+    assert "PrincipalVerificationError" in caplog.text
+    assert "attacker-jose-secret" not in caplog.text
     service.get_application_caller_connection.assert_not_called()

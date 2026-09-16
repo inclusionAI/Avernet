@@ -284,3 +284,12 @@ def test_ordinary_http_lookup_accepts_bcn_minted_principal():
         params={"user_id": LOOKED_UP},
     )
     assert resp.status_code == 200, resp.text
+
+
+def test_baas_issuer_is_not_an_ordinary_http_identity():
+    client = TestClient(_make_app(), raise_server_exceptions=False)
+    response = client.get(
+        "/api/v1/org/user", headers=_auth(_user(), issuer="baas"),
+        params={"user_id": LOOKED_UP},
+    )
+    assert response.status_code == 401

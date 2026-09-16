@@ -29,6 +29,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors import MissingPrincipal
 from agentclaw.community.core.gateway_principal import (
     PrincipalVerificationError,
     VerifiedCaller,
+    decode_principal_token,
     verify_principal_token,
 )
 from agentclaw.community.log import get_logger
@@ -56,8 +57,8 @@ async def require_org_user_caller(connection: HTTPConnection) -> VerifiedCaller:
     return caller
 
 
-async def require_app_caller(connection: HTTPConnection) -> VerifiedCaller:
-    """Require an application in the verified ordinary-HTTP identity set."""
+async def require_baas_caller(connection: HTTPConnection) -> None:
+    """Authenticate the BaaS service without projecting JWT claims to identities."""
     started_at = time.perf_counter()
     context = {
         "system": "backend", "direction": "inbound",
@@ -69,24 +70,18 @@ async def require_app_caller(connection: HTTPConnection) -> VerifiedCaller:
     }
     logger.info("event=expert_chat.app_caller_connection.authentication_request context=%s", context)
     try:
-        caller = await require_org_user_caller(connection)
-        # COSEC: a verified user alone cannot authorize application operations.
-        if caller.app_id is None:
-            raise MissingPrincipalError("verified app principal required")
-    except MissingPrincipalError:
-        context.update(status=401, reason="application_authentication_required",
+        config = replace(
+            get_principal_verifier_config(), issuer="baas", verify_audience=False,
+        )
+        # COSEC: authenticate only the service; claims cannot select data tenants.
+        decode_principal_token(connection.headers.get(PRINCIPAL_HEADER, "").strip(), config)
+    except PrincipalVerificationError as exc:
+        context.update(status=401, reason="baas_authentication_required",
+                       exception_type=type(exc).__name__,
                        duration_ms=(time.perf_counter() - started_at) * 1000)
         logger.warning("event=expert_chat.app_caller_connection.denied context=%s", context)
-        raise
-    return caller
-
-
-def resolve_ordinary_http_tenant(connection: HTTPConnection) -> str:
-    """Resolve tenant from the same cached ordinary-HTTP verification result."""
-    from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
-
-    caller = _resolve_ordinary_http_caller(connection)
-    return caller.tenant if caller is not None else DEFAULT_AVERNET_TENANT
+        # COSEC: decoder errors can contain attacker-controlled JOSE fields.
+        raise MissingPrincipalError("BaaS authentication required") from None
 
 
 async def require_user_caller(connection: HTTPConnection) -> VerifiedCaller:

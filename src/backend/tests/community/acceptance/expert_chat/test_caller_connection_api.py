@@ -741,7 +741,7 @@ def test_expert_chat_delete_session(live_backend):
         assert "success" in body, body
 
 
-def _application_headers(app_id: int) -> dict[str, str]:
+def _application_headers(app_id: int | None = None) -> dict[str, str]:
     """Use the same test signing configuration as the live singlebox backend."""
     import os
     import jwt
@@ -752,18 +752,15 @@ def _application_headers(app_id: int) -> dict[str, str]:
     )
     now = int(time.time())
     principal = jwt.encode({
-        "iss": "gateway", "aud": "baas", "iat": now, "exp": now + 120,
-        "principals": [{"type": "app", "tenant": "teamclaw", "app": {
-            "app_id": app_id, "app_name": "singlebox-caller-client",
-            "owners": "singlebox", "tenant": "teamclaw",
-        }}],
+        "iss": "baas", "aud": "backend", "iat": now, "exp": now + 120,
+        **({"principals": {"ignored": app_id}, "tenant": "foreign"} if app_id is not None else {}),
     }, signing_key, algorithm="HS256")
     return {"X-Avernet-Principal": principal}
 
 
 @pytest.mark.acceptance
-def test_application_caller_requires_existing_instance(live_backend):
-    """Any app may target a private nonmember caller, but cannot create an instance."""
+def test_application_caller_requires_published_bot(live_backend):
+    """BaaS reaches lifecycle validation even before an instance exists."""
     import json
 
     owner_id = fresh_id("app_caller_owner")
@@ -773,16 +770,16 @@ def test_application_caller_requires_existing_instance(live_backend):
     route = "/api/v1/expert-chats/app-caller-connection"
     with httpx.Client(base_url=live_backend, timeout=30.0) as client:
         _seed_service_bot(client, owner_id=owner_id, bot_id=bot_id, bot_name="Application Caller Authorization")
-        denied = client.post(route, params=params, headers=_application_headers(7391))
+        denied = client.post(route, params=params, headers=_application_headers())
         assert denied.status_code == 200, denied.text
-        assert denied.json()["error_code"] == 403, denied.text
+        assert denied.json()["error_code"] == 5999, denied.text
         _execute_local_sql(client, [{
             "sql": "INSERT INTO ac_expert_chat_instance (user_id, bot_id, owner_id, env, status, ext) VALUES (:user_id, :bot_id, :owner_id, 'dev', 'success', :ext)",
             "params": {**params, "ext": json.dumps({"bot_uuid": "existing-singlebox-caller", "version": 1})},
         }])
         # No grant or membership is seeded. A valid existing instance reaches
         # the original lifecycle; this unpublished Bot has no build artifact.
-        response = client.post(route, params=params, headers=_application_headers(7391))
+        response = client.post(route, params=params, headers=_application_headers())
         assert response.status_code == 200, response.text
         assert response.json()["success"] is False, response.text
         assert response.json()["error_code"] == 5999, response.text
@@ -797,8 +794,8 @@ def test_application_caller_requires_existing_instance(live_backend):
 
 
 @pytest.mark.acceptance
-def test_any_application_reuses_private_nonmember_instance_without_grant(live_backend):
-    """Two unrelated apps can reuse an existing private Bot's nonowner Caller."""
+def test_baas_creates_and_reuses_private_nonmember_instance_without_grant(live_backend):
+    """BaaS can create and reuse a private Bot's nonowner Caller."""
     owner_id = fresh_id("app_reuse_owner")
     bot_id = fresh_id("app_reuse_bot")
     caller_id = fresh_id("app_reuse_nonmember")
@@ -807,8 +804,8 @@ def test_any_application_reuses_private_nonmember_instance_without_grant(live_ba
         _seed_service_bot(client, owner_id=owner_id, bot_id=bot_id, bot_name="Application Caller Reuse")
         _seed_successful_publish(client, bot_id=bot_id, owner_id=owner_id)
         initial = client.post(
-            "/api/v1/expert-chats/caller-connection", params=params,
-            headers={"x-user-id": ADMIN_USER_ID},
+            "/api/v1/expert-chats/app-caller-connection", params=params,
+            headers=_application_headers(),
         )
         assert initial.status_code == 200, initial.text
         initial_body = initial.json()
@@ -816,8 +813,8 @@ def test_any_application_reuses_private_nonmember_instance_without_grant(live_ba
         original_instance = initial_body["data"]["instance"]
         assert original_instance["ext"]["bot_uuid"], original_instance
         # Bot is private and caller != owner. No app grant or collaborator row
-        # is created; either verified application is sufficient within tenant.
-        for app_id in (7392, 7393):
+        # is created; the authenticated service uses only the server tenant.
+        for app_id in (None, 7393):
             client.cookies.clear()
             response = client.post(
                 "/api/v1/expert-chats/app-caller-connection", params=params,
