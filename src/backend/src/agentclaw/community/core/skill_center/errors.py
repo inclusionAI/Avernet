@@ -298,3 +298,13 @@ class McpPermissionDeniedError(DomainError):
 
     def __init__(self, detail: str = "MCP permission denied") -> None:
         super().__init__(detail)
+
+
+class McpEndpointUnavailableError(DomainError):
+    """No endpoint can be safely delivered to the addressed Bot runtime."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "MCP_NO_COMPATIBLE_SECURE_ENDPOINT: 当前 MCP 没有可安全下发到该 Bot "
+            "的端点，请检查 MCP Center 的网络和端点配置"
+        )

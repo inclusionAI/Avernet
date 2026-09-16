@@ -8,6 +8,8 @@ import type { BenchTemplateRepository } from "../repositories/bench-template-rep
 import type { BenchRunRepository } from "../repositories/bench-run-repository.js";
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { WorkflowEvolutionRepository } from "../repositories/workflow-evolution-repository.js";
+import { IssueAggregationRepository } from '../repositories/issue-aggregation-repository.js';
+import { repairCandidates, selectRepairCandidates, type RepairSelection } from '../services/evolution/group-repair.js';
 import {
   digestCanonicalJson,
   validateWorkflowEvolutionAnalysisResult,
@@ -45,6 +47,7 @@ import {
   EVOLVE_NODE_REGISTRY, EVOLVE_TASK_REGISTRY, defaultNodeCommand,
   taskNodeKeys,
 } from "../services/evolve/task-registry.js";
+import type { EvolveModelConfig } from "../model-config.js";
 import { parseEvolveArtifactRef, validatePackArtifact } from "../services/evolve/artifact-ref.js";
 import {
   EVOLVE_ARTIFACT_URL_TTL_SECONDS,
@@ -107,9 +110,9 @@ export type EvolveRouterDeps = {
   artifactUrlStore?: Pick<ObjectStore, "createSignedUrl">;
   botWorkflowPermissionRepo?: BotWorkflowPermissionRepository | null;
   runAnalysisStarter?: RunAnalysisStarter | null;
+  modelConfig?: EvolveModelConfig;
 };
 type BenchDomains = { trainBenchDomainId: string; testBenchDomainId: string };
-const DIAGNOSE_MODELS = new Set(["GLM-5.1", "GLM-5.2"]);
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "canceled"]);
 const ALLOWED_STATUSES = new Set(["running", ...TERMINAL_STATUSES]);
@@ -665,7 +668,7 @@ async function createPlanStep(
 ) {
   const taskConfig = parseJson(task.config_json) as {
     dispatchMode?: "message" | "run"; nodeCommands?: NodeCommandYamls; forceMessage?: boolean; runtimeMaintenance?: boolean; clawwebUrl?: string;
-    goal?: string;
+    goal?: string; model?: string;
   } | null;
   const dispatchMode = taskConfig?.dispatchMode
     ?? await repo.resolveBotDispatchMode(task.user_id, task.bot_id, taskBotEnv(task));
@@ -677,6 +680,7 @@ async function createPlanStep(
     ["clawweb-url", taskConfig?.clawwebUrl ?? getClawWebPublicBaseUrl()],
   ];
   if (taskConfig?.goal) systemArgs.push(["goal", quoteCommandArgument(taskConfig.goal)]);
+  if (taskConfig?.model) systemArgs.push(["model", taskConfig.model]);
   const nextCommand = renderCommand(
     taskConfig?.nodeCommands?.plan ?? "/clawevolve-plan",
     {},
@@ -769,15 +773,18 @@ async function createOptimizeStep(
   } | null;
   const dispatchMode = config?.dispatchMode ?? await repo.resolveBotDispatchMode(task.user_id, task.bot_id, taskBotEnv(task));
   const stepId = id("STEP");
-  const nodeOptimize = config?.nodeCommands?.optimize;
-  const command = nodeOptimize
-    ? renderCommand(nodeOptimize, {},
-      [["task-id", task.task_id], ["step-id", stepId], ["round", roundNo],
-       ["train-bench-domain-id", config?.trainBenchDomainId ?? ""],
-       ["test-bench-domain-id", config?.testBenchDomainId ?? ""],
-       ["clawweb-url", config?.clawwebUrl ?? getClawWebPublicBaseUrl()],
-       ["openclaw-execution-mode", config?.openclawExecutionMode ?? "local"]])
-    : `/clawevolve-workflow --stage optimize --task-id ${task.task_id} --step-id ${stepId} --round ${roundNo} --train-bench-domain-id ${config?.trainBenchDomainId} --test-bench-domain-id ${config?.testBenchDomainId} --clawweb-url ${config?.clawwebUrl ?? getClawWebPublicBaseUrl()} --openclaw-execution-mode ${config?.openclawExecutionMode ?? "local"}`;
+  const nodeOptimize = config?.nodeCommands?.optimize ?? defaultNodeCommand("optimize");
+  const optimizeSystemArgs: Array<[string, string | number]> = [
+    ["task-id", task.task_id], ["step-id", stepId], ["round", roundNo],
+    ["train-bench-domain-id", config?.trainBenchDomainId ?? ""],
+    ["test-bench-domain-id", config?.testBenchDomainId ?? ""],
+    ["clawweb-url", config?.clawwebUrl ?? getClawWebPublicBaseUrl()],
+    ["openclaw-execution-mode", config?.openclawExecutionMode ?? "local"],
+  ];
+  if (config?.model && !readNodeCommandOption(nodeOptimize, "model")) {
+    optimizeSystemArgs.push(["model", safeBenchCommandValue("model", config.model)]);
+  }
+  const command = renderCommand(nodeOptimize, {}, optimizeSystemArgs);
   const ownerUserId = safeBenchCommandValue("ownerId", config?.ownerUserId ?? task.user_id);
   const commandWithOwner = `${command} --owner-id ${ownerUserId}`;
   const stepNo = Math.max(0, ...existingSteps.map((item) => item.step_no)) + 1;
@@ -874,20 +881,25 @@ async function createBenchEvolutionOptimizeStep(
   if (existing) return { stepId: existing.step_id, stepType: "optimize" as const, roundNo: 1 };
   const config = parseJson(task.config_json) as {
     dispatchMode?: "message" | "run"; trainBenchDomainId?: string; testBenchDomainId?: string;
-    ownerUserId?: string; nodeCommands?: NodeCommandYamls; forceMessage?: boolean; runtimeMaintenance?: boolean; clawwebUrl?: string; openclawExecutionMode?: "local" | "gateway";
+    ownerUserId?: string; model?: string; nodeCommands?: NodeCommandYamls; forceMessage?: boolean; runtimeMaintenance?: boolean; clawwebUrl?: string; openclawExecutionMode?: "local" | "gateway";
   } | null;
   const stepId = id("STEP");
-  const command = renderCommand(config?.nodeCommands?.optimize ?? "/clawevolve-workflow --stage optimize", {
-    train_bench_domain_id: config?.trainBenchDomainId,
-    test_bench_domain_id: config?.testBenchDomainId,
-  }, [
+  const optimizeTemplate = config?.nodeCommands?.optimize ?? defaultNodeCommand("optimize");
+  const optimizeSystemArgs: Array<[string, string | number]> = [
     ["task-id", task.task_id], ["step-id", stepId], ["round", 1],
     ["owner-id", config?.ownerUserId ?? task.user_id],
     ["train-bench-domain-id", config?.trainBenchDomainId ?? ""],
     ["test-bench-domain-id", config?.testBenchDomainId ?? ""],
     ["clawweb-url", config?.clawwebUrl ?? getClawWebPublicBaseUrl()],
     ["openclaw-execution-mode", config?.openclawExecutionMode ?? "local"],
-  ]);
+  ];
+  if (config?.model && !readNodeCommandOption(optimizeTemplate, "model")) {
+    optimizeSystemArgs.push(["model", safeBenchCommandValue("model", config.model)]);
+  }
+  const command = renderCommand(optimizeTemplate, {
+    train_bench_domain_id: config?.trainBenchDomainId,
+    test_bench_domain_id: config?.testBenchDomainId,
+  }, optimizeSystemArgs);
   const stepNo = Math.max(0, ...existingSteps.map((item) => item.step_no)) + 1;
   const step = await repo.createStep({ stepId, taskId: task.task_id, stepType: "optimize", stepNo, roundNo: 1, command });
   console.info("[clawweb][evolve][bench-plan] progressing to optimize", {
@@ -1089,6 +1101,11 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
   const botWorkflowPermissionRepo = deps.botWorkflowPermissionRepo ?? null;
   const runAnalysisStarter = deps.runAnalysisStarter
     ?? (repo && db ? createRunAnalysisStarter({ repo, db, dispatch }) : null);
+  const modelConfig = deps.modelConfig ?? { defaultModel: "", models: [] };
+
+  router.get("/model-options", (_req, res) => {
+    res.json(modelConfig);
+  });
 
   router.get("/task-definitions", (_req, res) => {
     res.json({
@@ -1109,7 +1126,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
     const {
       taskName, remark, userId, botId, botEnv, benchDomainId, templateName = "", templateVersion = null,
-      model = "antchat/GLM-5.1", suite = "all", scene = "claw-evolve-bench", judge,
+      model, suite = "all", scene = "claw-evolve-bench", judge,
       openclawExecutionMode: rawOpenClawExecutionMode,
       nodeCommandYamls, forceMessage: rawForceMessage, runtimeMaintenance: rawRuntimeMaintenance,
     } = req.body ?? {};
@@ -1163,11 +1180,12 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if ("apiKey" in judgeInput || "apiKeyRef" in judgeInput || "baseUrlRef" in judgeInput) {
       res.status(400).json({ error: "judge credential 由服务端环境配置，不能从请求传入" }); return;
     }
+    const requestedModel = String(model ?? "").trim() || modelConfig.defaultModel;
+    safeBenchCommandValue("model", requestedModel);
     const defaultBenchCommand = `${defaultNodeCommand("bench")}`
-      .replace("antchat/GLM-5.1", safeBenchCommandValue("model", model))
       .replace("--suite all", `--suite ${safeBenchCommandValue("suite", suite)}`);
     const benchCommand = nodeCommands.bench ?? defaultBenchCommand;
-    const commandModel = readNodeCommandOption(benchCommand, "model") ?? String(model);
+    const commandModel = readNodeCommandOption(benchCommand, "model") ?? requestedModel;
     const commandSuite = readNodeCommandOption(benchCommand, "suite") ?? String(suite);
     const commandJudge = readNodeCommandOption(benchCommand, "judge")
       ?? (typeof judge === "string" ? judge : (nonEmptyString(judgeInput.model) ? String(judgeInput.model) : ""));
@@ -1203,6 +1221,9 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         ["clawweb-url", clawwebUrl],
         ["openclaw-execution-mode", openclawExecutionMode],
       ];
+      if (commandModel && !readNodeCommandOption(template, "model")) {
+        systemArgs.push(["model", safeBenchCommandValue("model", commandModel)]);
+      }
       if (requestedTemplateName) systemArgs.push(["template-name", safeBenchCommandValue("templateName", requestedTemplateName)]);
       if (selectedTemplates.length === 1) systemArgs.push(["template-version", Number(selectedTemplates[0].published_version)]);
       if (bench.judge.model && !readNodeCommandOption(template, "judge")) {
@@ -1293,7 +1314,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const {
       taskType: requestedTaskType, taskName, remark, userId, botId, botEnv,
       apiKey: rawApiKey, judgeBackend: rawJudgeBackend,
-      model = "GLM-5.1", diagnoseIntent: rawDiagnoseIntent, maxSessions: rawMaxSessions = 10, maxRounds = 3,
+      model = "", diagnoseIntent: rawDiagnoseIntent, maxSessions: rawMaxSessions = 10, maxRounds = 3,
       startDate, endDate, goal: rawGoal, inputMode: rawInputMode, nodeCommandYamls,
       sessionSource: rawSessionSource,
       forceMessage: rawForceMessage, runtimeMaintenance: rawRuntimeMaintenance,
@@ -1345,13 +1366,13 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (String(taskName).trim().length > 128 || String(remark ?? "").length > 1000) {
       res.status(400).json({ error: "任务名称不能超过128字，备注不能超过1000字" }); return;
     }
-    const diagnoseModel = String(model);
-    const requiresModel = requiresDiagnose || (taskType === "full" && inputMode === "direct_goal");
-    if (requiresModel && (!diagnoseModel.trim() || diagnoseModel.length > 128 || /[\0\r\n\s]/.test(diagnoseModel))) {
+    const requestedDiagnoseModel = String(model ?? "").trim();
+    const diagnoseModel = requestedDiagnoseModel || modelConfig.defaultModel;
+    if (diagnoseModel && (diagnoseModel.length > 128 || /[\0\r\n\s]/.test(diagnoseModel))) {
       res.status(400).json({ error: "model 必须是 1 到 128 字符且不能包含空白字符" }); return;
     }
-    if (requiresDiagnose && judgeBackend === "api" && !DIAGNOSE_MODELS.has(diagnoseModel)) {
-      res.status(400).json({ error: "API Judge 的 model 必须是 GLM-5.1 或 GLM-5.2" }); return;
+    if (requiresDiagnose && judgeBackend === "api" && !requestedDiagnoseModel) {
+      res.status(400).json({ error: "API Judge 模式必须显式指定 model" }); return;
     }
     const rounds = Number(maxRounds);
     const maxSessions = Number(rawMaxSessions);
@@ -1474,7 +1495,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const diagnoseTemplate = nodeCommands.diagnose ?? defaultNodeCommand("diagnose");
     const config = {
       ...(taskType === "full" ? { inputMode } : {}),
-      ...(requiresModel ? { model: diagnoseModel } : {}),
+      model: diagnoseModel,
       ...(requiresDiagnose ? { diagnoseIntent, maxSessions } : {}),
       ...(requiresDiagnose ? { sessionSource: { mode: sessionSourceMode } } : {}),
       maxRounds: rounds,
@@ -1492,6 +1513,9 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       ["judge-backend", judgeBackend], ["max-sessions", maxSessions],
       ["task-id", taskId], ["step-id", stepId], ["clawweb-url", clawwebUrl],
     ];
+    if (diagnoseModel && !readNodeCommandOption(diagnoseTemplate, "model")) {
+      diagnoseSystemArgs.push(["model", safeBenchCommandValue("model", diagnoseModel)]);
+    }
     if (sessionSourceMode === "service_export") {
       diagnoseSystemArgs.push(
         ["source", "service_export"],
@@ -1598,7 +1622,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!repo) { res.status(503).json({ error: "数据库不可用" }); return; }
     const {
       taskName, remark, userId, botId, botEnv, sourceDiagnosisTaskIds, maxRounds = 3, nodeCommandYamls,
-      model = "antchat/GLM-5.1",
+      model,
       forceMessage: rawForceMessage, runtimeMaintenance: rawRuntimeMaintenance,
       openclawExecutionMode: rawOpenClawExecutionMode,
     } = req.body ?? {};
@@ -1628,8 +1652,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!sourceIds.length) {
       res.status(400).json({ error: "诊断进化必须选择一个已完成 Plan 的诊断任务" }); return;
     }
-    let selectedModel: string;
-    try { selectedModel = safeBenchCommandValue("model", model); }
+    let selectedModel = String(model ?? "").trim() || modelConfig.defaultModel;
+    try { selectedModel = safeBenchCommandValue("model", selectedModel); }
     catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); return; }
     if (await rejectUnsupportedBotEngine(repo, res, String(userId), String(botId), String(botEnv ?? ""))) return;
     let primaryBenchDomains: BenchDomains | null = null;
@@ -1655,8 +1679,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const taskId = evolveTaskId();
     const clawwebUrl = getClawWebPublicBaseUrl();
     const dispatchMode = await repo.resolveBotDispatchMode(String(userId), String(botId), String(botEnv ?? ""));
-    const optimizeTemplate = nodeCommands.optimize ?? defaultNodeCommand("optimize")
-      .replace("antchat/GLM-5.1", selectedModel);
+    const optimizeTemplate = nodeCommands.optimize ?? defaultNodeCommand("optimize");
     await repo.createTask({
       taskId, taskType: "optimize", userId: String(userId), botId: String(botId),
       taskName: String(taskName).trim(), remark: String(remark ?? "").trim() || null,
@@ -1681,7 +1704,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
     const {
       taskName, remark, userId, botId, botEnv, objective, trainBenchDomainId, testBenchDomainId,
-      model = "antchat/GLM-5.1", maxRounds = 3, nodeCommandYamls, forceMessage: rawForceMessage, runtimeMaintenance: rawRuntimeMaintenance,
+      model, maxRounds = 3, nodeCommandYamls, forceMessage: rawForceMessage, runtimeMaintenance: rawRuntimeMaintenance,
       openclawExecutionMode: rawOpenClawExecutionMode,
     } = req.body ?? {};
     const ownerUserId = String(userId ?? "").trim();
@@ -1701,8 +1724,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!Number.isSafeInteger(rounds) || rounds < 1 || rounds > 100) {
       res.status(400).json({ error: "maxRounds 必须是 1 到 100 的整数" }); return;
     }
-    let selectedModel: string;
-    try { selectedModel = safeBenchCommandValue("model", model); }
+    let selectedModel = String(model ?? "").trim() || modelConfig.defaultModel;
+    try { selectedModel = safeBenchCommandValue("model", selectedModel); }
     catch (error) { res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); return; }
     const actorUserId = resolveRequestUserId(req);
     if (!actorUserId) { res.status(401).json({ error: "无法识别当前登录用户" }); return; }
@@ -1734,18 +1757,20 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const dispatchMode = await repo.resolveBotDispatchMode(ownerUserId, String(botId), String(botEnv ?? ""));
     const forceMessage = rawForceMessage === true;
     const runtimeMaintenance = rawRuntimeMaintenance !== false;
-    const commandTemplate = nodeCommands.bench_plan ?? defaultNodeCommand("bench_plan")
-      .replace("antchat/GLM-5.1", selectedModel);
-    const optimizeTemplate = nodeCommands.optimize ?? defaultNodeCommand("optimize")
-      .replace("antchat/GLM-5.1", selectedModel);
-    const command = renderCommand(commandTemplate, {
-      train_bench_domain_id: trainDomainId, test_bench_domain_id: testDomainId,
-    }, [
+    const commandTemplate = nodeCommands.bench_plan ?? defaultNodeCommand("bench_plan");
+    const optimizeTemplate = nodeCommands.optimize ?? defaultNodeCommand("optimize");
+    const commandSystemArgs: Array<[string, string | number]> = [
       ["task-id", taskId], ["step-id", stepId], ["owner-id", ownerUserId],
       ["train-domain-id", trainDomainId], ["test-domain-id", testDomainId],
       ["clawweb-url", clawwebUrl],
       ["openclaw-execution-mode", openclawExecutionMode],
-    ]);
+    ];
+    if (selectedModel && !readNodeCommandOption(commandTemplate, "model")) {
+      commandSystemArgs.push(["model", selectedModel]);
+    }
+    const command = renderCommand(commandTemplate, {
+      train_bench_domain_id: trainDomainId, test_bench_domain_id: testDomainId,
+    }, commandSystemArgs);
     await repo.createTask({
       taskId, taskType: "bench_optimize", userId: ownerUserId, botId: String(botId),
       taskName: String(taskName).trim(), remark: String(remark ?? "").trim() || null,
@@ -2355,6 +2380,9 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!task || !failedStep || failedStep.task_id !== taskId) {
       res.status(404).json({ error: "任务或 Step 不存在" }); return;
     }
+    if ((parseJson(task.config_json) as { applicationMode?: string } | null)?.applicationMode === 'issue_group_repair') {
+      res.status(409).json({ error: 'group_repair_reconfirmation_required', message: '请回到问题组重新核对最新候选建议后发起修复' }); return;
+    }
     if (!new Set(["failed", "canceled"]).has(failedStep.status)) {
       res.status(409).json({ error: `只有失败或已取消的 Step 可以继续执行: ${failedStep.status}` }); return;
     }
@@ -2456,6 +2484,9 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
           ["task-id", taskId], ["step-id", newStepId],
           ["clawweb-url", config.clawwebUrl ?? getClawWebPublicBaseUrl()],
         ];
+        if (config.model && !readNodeCommandOption(template, "model")) {
+          systemArgs.push(["model", safeBenchCommandValue("model", config.model)]);
+        }
         if (config.sessionSource?.mode === "service_export") {
           systemArgs.push(
             ["source", "service_export"],
@@ -2465,7 +2496,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
           );
         }
         const commonValues = {
-          model: config.model ?? "GLM-5.1",
+          model: config.model ?? "",
           diagnose_intent: config.diagnoseIntent
             ? quoteCommandArgument(normalizeDiagnoseIntent(config.diagnoseIntent))
             : "",
@@ -3966,12 +3997,13 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     userId: string,
     suggestions: EvolveSuggestionRow[],
     body: Record<string, unknown>,
+    repairSelection?: RepairSelection,
   ): Promise<{ taskId: string; stepId: string; status: string; reportUrl: string; suggestionIds: string[] } | null> => {
     if (!repo) return null;
-    const workflowId = suggestions[0]?.workflow_id;
+    const workflowId = repairSelection?.workflowId ?? suggestions[0]?.workflow_id;
     const botId = String(body.botId ?? "").trim();
     const botEnv = body.botEnv ? String(body.botEnv) : undefined;
-    if (!workflowId || suggestions.length === 0) { res.status(400).json({ error: "suggestionIds 为必填项" }); return null; }
+    if (!workflowId || (!repairSelection && suggestions.length === 0)) { res.status(400).json({ error: "suggestionIds 为必填项" }); return null; }
     if (!botId) { res.status(400).json({ error: "botId 为必填项" }); return null; }
     const eligible = await repo.listEligibleBotsForSuggestion(userId, workflowId);
     if (!eligible.some((b) => b.botId === botId && (botEnv == null || b.env === botEnv))) {
@@ -3980,7 +4012,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
 
     const suggestionIds = suggestions.map((suggestion) => String(suggestion.id));
-    const existingTasks = await repo.listSuggestionApplyTasks(suggestionIds);
+    const existingTasks = suggestionIds.length ? await repo.listSuggestionApplyTasks(suggestionIds) : [];
     const activeTask = existingTasks.find((task) =>
       ["created", "pending", "dispatching", "dispatched", "running", "applying"].includes(task.status));
     if (activeTask) {
@@ -4046,7 +4078,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       }
     }
 
-    const defaultSpec = suggestions
+    const defaultSpec = repairSelection ? '处理所选问题组建议；先读取当前 YAML，冲突无法确定时停止部署并逐项说明。' : suggestions
       .map((suggestion) => suggestion.fix_spec?.trim() || `${suggestion.failure_signature}（未提供具体修复说明）`)
       .join("\n");
     const applicationSpec = typeof body.applicationSpec === "string" ? body.applicationSpec.trim() : defaultSpec;
@@ -4057,7 +4089,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const edited = applicationSpec !== defaultSpec;
     const taskId = evolveTaskId();
     const stepId = `${taskId}-step-apply`;
-    const taskName = suggestions.length === 1
+    const taskName = repairSelection ? `问题组修复：${repairSelection.candidates.length} 条建议` : suggestions.length === 1
       ? `应用建议：${suggestions[0].failure_signature.slice(0, 40)}`
       : `批量应用 ${suggestions.length} 条工作流建议`;
     const baseUrl = getClawWebPublicBaseUrl();
@@ -4097,18 +4129,21 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       : `[suggestion-apply] batch · ${suggestions.length} suggestions`;
 
     await repo.createTaskWithStep({
+      ...(repairSelection ? { exclusiveWorkflowId: workflowId } : {}),
       task: {
         taskId, taskType: "suggestion_apply", userId, botId, taskName,
+        ...(repairSelection ? { remark: `group-repair:${workflowId}` } : {}),
         configJson: JSON.stringify({
           suggestionId: suggestionIds[0],
           suggestionIds,
           workflowId,
           botId,
           botEnv: botEnv ?? null,
-          applicationMode: "task_guard_orchestrated",
+          applicationMode: repairSelection ? 'issue_group_repair' : "task_guard_orchestrated",
           claimTokenDigest,
           suggestionRevisions,
           applicationInput: {
+            ...(repairSelection ? { repairSelection } : {}),
             workflowId,
             spec: applicationSpec,
             edited,
@@ -4175,6 +4210,51 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     await repo.markDispatched(stepId, dispatchResult.runId, dispatchResult.sessionId, dispatchResult.platformResponse);
     return { taskId, stepId, status: "running", reportUrl, suggestionIds };
   };
+
+  router.get('/group-repairs', asyncHandler(async (req: Request, res: Response) => {
+    if (!db || !repo || !botWorkflowPermissionRepo) { res.status(503).json({ error: 'service_unavailable' }); return; }
+    const userId = resolveRequestUserId(req);
+    if (!userId) { res.status(401).json({ error: 'unauthorized' }); return; }
+    const workflowId = typeof req.query.workflowId === 'string' ? req.query.workflowId : '';
+    const signature = typeof req.query.signature === 'string' ? req.query.signature : '';
+    if (!workflowId || !signature) { res.status(400).json({ error: 'invalid_group' }); return; }
+    if (!await requireWorkflowAccess(req, res, botWorkflowPermissionRepo, workflowId, 'edit')) return;
+    const group = (await new IssueAggregationRepository(db).list(workflowId)).find(group => group.signature === signature);
+    const rows = await db.query<{ task_id: string; config_json: string; status: string; output_json: string | null; summary: string | null }>(
+      `SELECT t.task_id, t.config_json, s.status, s.output_json, s.summary FROM ce_tasks t JOIN ce_steps s ON s.task_id = t.task_id
+       WHERE t.remark = ? ORDER BY t.id DESC LIMIT 50`, [`group-repair:${workflowId}`]);
+    const tasks = rows.flatMap(row => {
+      const config = JSON.parse(row.config_json);
+      if (config.applicationInput?.repairSelection?.signature !== signature) return [];
+      const output = JSON.parse(row.output_json ?? 'null');
+      return [{ taskId: row.task_id, status: row.status, summary: row.summary, selection: config.applicationInput.repairSelection,
+        progress: output?.applicationProgress, outcomes: output?.repairOutcomes ?? [], deployResult: output?.deployResult }];
+    });
+    res.json({ capability: 'issue-group-repair/v1', inputDigest: group?.inputDigest ?? null, candidates: group ? repairCandidates(group) : [],
+      uncovered: group?.sources.filter(source => !source.proposal).length ?? 0,
+      bots: await repo.listEligibleBotsForSuggestion(userId, workflowId), tasks });
+  }));
+
+  router.post('/group-repairs', asyncHandler(async (req: Request, res: Response) => {
+    if (!db || !repo || !botWorkflowPermissionRepo) { res.status(503).json({ error: 'service_unavailable' }); return; }
+    const userId = resolveRequestUserId(req);
+    if (!userId) { res.status(401).json({ error: 'unauthorized' }); return; }
+    const body = req.body ?? {};
+    if (typeof body.workflowId !== 'string' || typeof body.signature !== 'string') { res.status(400).json({ error: 'invalid_group' }); return; }
+    if (!await requireWorkflowAccess(req, res, botWorkflowPermissionRepo, body.workflowId, 'edit')) return;
+    const group = (await new IssueAggregationRepository(db).list(body.workflowId)).find(group => group.signature === body.signature);
+    if (!group) { res.status(409).json({ error: 'group_changed' }); return; }
+    let selection: RepairSelection;
+    try { selection = selectRepairCandidates(group, body.inputDigest, body.candidateIds); }
+    catch (error) { res.status(409).json({ error: error instanceof Error ? error.message : 'invalid_selection' }); return; }
+    try {
+      const result = await dispatchSuggestionApplication(res, userId, [], body, selection);
+      if (result) res.json({ ok: true, ...result });
+    } catch (error) {
+      if (error instanceof Error && ['group_repair_active', 'workflow_spec_unavailable', 'selection_too_large'].includes(error.message)) { res.status(409).json({ error: error.message }); return; }
+      throw error;
+    }
+  }));
 
   router.post("/suggestions/apply-batch", asyncHandler(async (req: Request, res: Response) => {
     if (!repo || !botWorkflowPermissionRepo) {

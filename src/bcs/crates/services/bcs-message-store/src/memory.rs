@@ -823,7 +823,13 @@ impl bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort for 
         let mut rows: Vec<_> = sessions.values().flat_map(|s| &s.deliveries).filter(|d| d.bound_to_delivery_id.as_deref() == Some(carrier) && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Bound).collect();
         let total = rows.len() as u64;
         rows.sort_by(|a,b| (b.source_session_seq, &b.delivery_id).cmp(&(a.source_session_seq, &a.delivery_id)));
-        Ok(bcs_service_api::port::repo::message_delivery::BoundDeliveryContexts { rows: rows.into_iter().take(limit.min(1025)).cloned().collect(), total })
+        let mut ordinary = 0;
+        rows.retain(|d| {
+            if d.semantic_projection_json.get("required_context").and_then(|v| v.as_bool()) == Some(true) { return true; }
+            ordinary += 1;
+            ordinary <= limit.min(1025)
+        });
+        Ok(bcs_service_api::port::repo::message_delivery::BoundDeliveryContexts { rows: rows.into_iter().cloned().collect(), total })
     }
     async fn lookup(&self, scope: bcs_service_api::port::repo::message_delivery::DeliveryLookup) -> Result<Vec<bcs_domain::message_delivery::PersistedMessageDelivery>, bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
         use bcs_service_api::port::repo::message_delivery::DeliveryLookup as Q;
@@ -837,9 +843,10 @@ impl bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort for 
             Q::BotPending(bot) => d.target_bot_id == *bot && d.state.kind == bcs_domain::DeliveryType::Send && super::delivery::unfinished(d),
             Q::BotPendingContexts(bot) => d.target_bot_id == *bot && d.state.kind == bcs_domain::DeliveryType::Inject && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::PendingContext,
             Q::LanePendingContexts { bot, session } => d.target_bot_id == *bot && d.session_id == *session && d.state.kind == bcs_domain::DeliveryType::Inject && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::PendingContext,
+            Q::LanePendingContextCarrier { bot, session, now_ms } => d.target_bot_id == *bot && d.session_id == *session && d.state.kind == bcs_domain::DeliveryType::Inject && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::PendingContext && d.expire_at_ms.is_none_or(|at| at > *now_ms),
             Q::Message(id) => d.source_message_id == *id,
             Q::Successor { bot, session, after_seq, exclude, now_ms } => d.target_bot_id == *bot && d.session_id == *session && d.source_session_seq > *after_seq && d.delivery_id != *exclude && d.state.kind == bcs_domain::DeliveryType::Send && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Queued && !d.state.may_have_been_sent && d.expire_at_ms.is_none_or(|t| t > *now_ms),
-        }).take(match scope { Q::BotPending(_) | Q::LanePending { .. } | Q::Successor { .. } => 1, Q::BotPendingContexts(_) | Q::LanePendingContexts { .. } => 100, _ => usize::MAX }).collect())
+        }).take(match scope { Q::BotPending(_) | Q::LanePending { .. } | Q::LanePendingContextCarrier { .. } | Q::Successor { .. } => 1, Q::BotPendingContexts(_) | Q::LanePendingContexts { .. } => 100, _ => usize::MAX }).collect())
     }
     async fn queued_bots(&self, after: &str, limit: usize) -> Result<Vec<String>, bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
         Ok(self.list_deliveries(None).await?.into_iter().filter(|d| d.state.kind == bcs_domain::DeliveryType::Send && d.state.status == bcs_domain::message_delivery::MessageDeliveryStatus::Queued && d.target_bot_id.as_str() > after).map(|d| d.target_bot_id).collect::<std::collections::BTreeSet<_>>().into_iter().take(limit.min(256)).collect())
@@ -929,8 +936,12 @@ impl bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort for 
         command: bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries,
     ) -> Result<bcs_service_api::port::repo::message_delivery::DeliveryAdmissionResult,
         bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
-        self.delivery_transaction(Vec::new(), Some(command)).await?
+        self.admit_batch(vec![command]).await?.pop()
             .ok_or_else(|| bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError::Storage("missing admission result".into()))
+    }
+
+    async fn admit_batch(&self, commands: Vec<bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries>) -> Result<Vec<bcs_service_api::port::repo::message_delivery::DeliveryAdmissionResult>, bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
+        self.delivery_transaction(Vec::new(), commands).await
     }
 
     async fn list_deliveries(&self, session_id: Option<&str>) -> Result<Vec<bcs_domain::message_delivery::PersistedMessageDelivery>,
@@ -947,33 +958,35 @@ impl bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort for 
         reply: Option<bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries>,
     ) -> Result<Option<bcs_service_api::port::repo::message_delivery::DeliveryAdmissionResult>,
         bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
-        self.delivery_transaction(changes, reply).await
+        Ok(self.delivery_transaction(changes, reply.into_iter().collect()).await?.pop())
     }
 }
 
 impl MemoryMessageRepo {
     async fn delivery_transaction(&self,
         changes: Vec<bcs_service_api::port::repo::message_delivery::DeliveryCompareAndSet>,
-        admission: Option<bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries>,
-    ) -> Result<Option<bcs_service_api::port::repo::message_delivery::DeliveryAdmissionResult>,
+        admission: Vec<bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries>,
+    ) -> Result<Vec<bcs_service_api::port::repo::message_delivery::DeliveryAdmissionResult>,
         bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
         use bcs_service_api::port::repo::message_delivery::{DeliveryAdmissionResult, MessageDeliveryRepoError as Error};
+        if admission.windows(2).any(|w| w[0].message.session_id != w[1].message.session_id) { return Err(Error::Invalid("batch must share a session".into())); }
         let mut sessions = self.sessions.write().await;
         let mut staged = sessions.clone();
         let env = if self.env.is_empty() { "local" } else { &self.env };
         let mut rows: Vec<_> = staged.values().flat_map(|s| s.deliveries.iter().cloned()).collect();
         if changes.iter().any(|c| c.delivery.env != env) { return Err(Error::Invalid("environment mismatch".into())); }
         super::delivery::apply_changes(&mut rows, &changes)?;
-        let mut result = None;
-        let event = admission.as_ref().and_then(|c| c.event.clone().or_else(|| c.display_message.as_ref().and_then(|d| d.event.clone())));
-        if let Some(command) = admission {
+        let mut result = Vec::new();
+        let mut events = Vec::new();
+        for command in admission {
             super::delivery::validate_admission(&command)?;
             let entry = staged.entry(command.message.session_id.clone()).or_default();
             if let Some(id) = command.message.client_msg_id.as_deref() {
                 if let Some(message) = entry.messages.iter().find(|m| m.sender_id == command.message.sender_id && m.client_msg_id.as_deref() == Some(id)) {
                     if !changes.is_empty() { return Err(Error::Conflict); }
-                    return Ok(Some(DeliveryAdmissionResult { message: message.clone(),
-                        deliveries: rows.into_iter().filter(|d| d.source_message_id == message.message_id).collect(), duplicate: true }));
+                    result.push(DeliveryAdmissionResult { message: message.clone(),
+                        deliveries: rows.iter().filter(|d| d.source_message_id == message.message_id).cloned().collect(), duplicate: true });
+                    continue;
                 }
             }
             if staged.values().any(|s| s.messages.iter().any(|m| m.message_id == command.message_id)) {
@@ -996,13 +1009,19 @@ impl MemoryMessageRepo {
                 entry.messages.push(display);
             }
             entry.messages.push(message.clone());
-            result = Some(DeliveryAdmissionResult { message, deliveries, duplicate: false });
+            if let Some(event) = command.event.clone().or_else(|| command.display_message.as_ref().and_then(|d| d.event.clone())) { events.push(event); }
+            result.push(DeliveryAdmissionResult { message, deliveries, duplicate: false });
+        }
+        for admission in &mut result {
+            for delivery in &mut admission.deliveries {
+                if let Some(current) = rows.iter().find(|d| d.delivery_id == delivery.delivery_id) { *delivery = current.clone(); }
+            }
         }
         for session in staged.values_mut() { session.deliveries.clear(); }
         for row in rows { staged.entry(row.session_id.clone()).or_default().deliveries.push(row); }
-        if let Some(event) = event {
+        if !events.is_empty() {
             let store = self.event_store.as_ref().ok_or_else(|| Error::Storage("event store is not configured".into()))?;
-            store.commit_business_mutation(&event, || {
+            store.commit_business_mutations(&events, || {
                 *sessions = staged;
                 Ok(())
             }).await.map_err(|e| Error::Storage(e.to_string()))?;

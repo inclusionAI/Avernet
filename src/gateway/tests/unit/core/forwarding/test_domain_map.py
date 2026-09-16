@@ -87,6 +87,43 @@ def test_shipped_config_loads() -> None:
     assert spaces.schema.location == "schemas/bots.openapi.json"
 
 
+@pytest.mark.parametrize(
+    ("path", "domain_name", "upstream_path"),
+    [
+        (
+            "/openapi/v1/tclog/query",
+            "tclog",
+            "/api/tclog/query",
+        ),
+        (
+            "/openapi/v1/clawevolve/tasks/task-1",
+            "clawevolve",
+            "/api/evolve/tasks/task-1",
+        ),
+        (
+            "/openapi/v1/clawevolve/bench/runs/run-1",
+            "clawevolve-bench",
+            "/api/bench/runs/run-1",
+        ),
+    ],
+)
+def test_shipped_config_routes_clawweb_machine_apis(
+    path: str, domain_name: str, upstream_path: str
+) -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
+
+    domain = dm.http_domain_for(path)
+
+    assert domain is not None, path
+    assert domain.name == domain_name, path
+    assert domain.server.name == "clawweb", path
+    assert domain.server.base_url == "http://clawweb:8082", path
+    assert domain.upstream_path(path) == upstream_path, path
+    assert domain.serves_http
+    assert not domain.serves_websocket
+
+
 def test_shipped_config_routes_org_user_verbatim_to_backend() -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
     dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)

@@ -39,3 +39,9 @@ The crate owns remote DB transport and driver integration. It does not own servi
 
 - `cargo test --package bcs-db-mysql --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-db-mysql --all-targets --manifest-path src/bcs/Cargo.toml`
+
+Plain Execute transaction steps honor the DB contract's opt-in stop-on-no-rows
+control on the same pinned connection, for text and prepared statement protocols.
+Zero-row early success commits and returns only the executed prefix; execution
+or commit failures propagate. The shared real-MySQL conformance harness covers
+this alongside SQLite.

@@ -24,6 +24,9 @@ import traceback
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from agentclaw.community.adapters.http.org.dependencies import require_app_caller
+from agentclaw.community.core.gateway_principal import VerifiedCaller
+
 from agentclaw.community.adapters.http.expert_chat.schemas import (
     AddChatBotRequest,
     ApiResponse,
@@ -575,3 +578,83 @@ async def get_caller_connection_for_other(
             message="获取 Caller 连接失败，请稍后重试",
             error_code=5999,
         )
+
+
+def _application_log_value(value):
+    """Keep business response fields while removing reusable credentials."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+    sensitive = ("token", "authorization", "cookie", "password", "secret", "key", "credential", "session")
+    # COSEC: recursively redact credentials, including credentials in URLs.
+    if isinstance(value, dict):
+        return {
+            name: "<redacted>" if any(part in str(name).lower() for part in sensitive)
+            else _application_log_value(item)
+            for name, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_application_log_value(item) for item in value]
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return {"type": type(value).__name__, "length": len(value)}
+    if isinstance(value, str) and "://" in value:
+        try:
+            url = urlsplit(value)
+            authority = url.netloc.rsplit("@", 1)[-1]
+            query = urlencode([
+                (name, "<redacted>" if any(part in name.lower() for part in sensitive) else _application_log_value(item))
+                for name, item in parse_qsl(url.query, keep_blank_values=True)
+            ])
+            return urlunsplit((url.scheme, authority, url.path, query, ""))
+        except ValueError:
+            return "<invalid-url>"
+    return value
+
+
+@router.post("/app-caller-connection", response_model=ApiResponse)
+async def get_caller_connection_for_application(
+    request: Request,
+    bot_id: str = Query(..., description="Bot ID"),
+    owner_id: str = Query(..., description="Bot 所有者ID"),
+    user_id: str = Query(..., description="目标 Caller 用户ID"),
+    force_upgrade: bool = Query(False, description="强制升级，跳过版本检查"),
+    caller: VerifiedCaller = Depends(require_app_caller),
+    instance_service: ExpertChatInstanceServiceProtocol = Injected(
+        ExpertChatInstanceServiceProtocol
+    ),
+):
+    """Connect an existing caller instance for any verified app in its tenant."""
+    started_at = time.perf_counter()
+    context = {
+        "system": "backend", "direction": "inbound",
+        "operation": "app_caller_connection", "method": "POST",
+        "route": request.url.path, "request_id": request.headers.get("x-request-id"),
+        "tenant": caller.tenant, "app_id": caller.app_id,
+        "bot_id": bot_id, "owner_id": owner_id, "user_id": user_id,
+        "force_upgrade": force_upgrade,
+    }
+    logger.info("event=expert_chat.app_caller_connection.request context=%s", context)
+    try:
+        # require_app_caller has validated that an application identity exists.
+        assert caller.app_id is not None
+        result = await instance_service.get_application_caller_connection(
+            app_id=caller.app_id, tenant=caller.tenant,
+            bot_id=bot_id, owner_id=owner_id, user_id=user_id,
+            force_upgrade=force_upgrade,
+        )
+        response = ApiResponse(success=True, message="获取成功", error_code=0, data=result)
+        event = "success"
+    except ChatPermissionError as error:
+        context["reason"] = getattr(error, "reason", "permission_denied")
+        context["exception_type"] = type(error).__name__
+        response = ApiResponse(success=False, message="无权限执行此操作", error_code=403, data=None)
+        event = "denied"
+    except Exception as error:
+        context["exception_type"] = type(error).__name__
+        response = ApiResponse(success=False, message="获取 Caller 连接失败，请稍后重试", error_code=5999)
+        event = "failed"
+    context.update(status=200, duration_ms=round((time.perf_counter() - started_at) * 1000, 1))
+    logger.info(
+        "event=expert_chat.app_caller_connection.%s context=%s response=%s",
+        event, context, _application_log_value(response.model_dump()),
+    )
+    return response

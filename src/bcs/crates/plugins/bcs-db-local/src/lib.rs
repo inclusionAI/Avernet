@@ -250,6 +250,7 @@ impl DbPlugin for LocalSqliteDbPlugin {
         &self,
         steps: Vec<DbTransactionStep>,
     ) -> DbResult<Vec<DbTransactionStepResult>> {
+        steps.iter().try_for_each(DbTransactionStep::validate)?;
         self.with_connection(move |connection| {
         let transaction_started = profile_start();
         // Reserve the write lock before any reads to avoid DEFERRED transaction
@@ -278,9 +279,12 @@ impl DbPlugin for LocalSqliteDbPlugin {
                 }
                 DbTransactionStep::Execute(statement) => {
                     let params = statement.resolve_transaction_params(&results, step_index)?;
-                    results.push(DbTransactionStepResult::Executed(
-                        execute_with_connection_params(&tx, statement.sql(), &params)?,
-                    ));
+                    let result = execute_with_connection_params(&tx, statement.sql(), &params)?;
+                    let stop = statement.stops_transaction_on_no_rows() && result.affected_rows == 0;
+                    results.push(DbTransactionStepResult::Executed(result));
+                    if stop {
+                        break;
+                    }
                 }
                 DbTransactionStep::ExecuteChecked { statement, expected_affected_rows } => {
                     let params = statement.resolve_transaction_params(&results, step_index)?;

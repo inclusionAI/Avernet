@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../../api/hooks', () => ({
+  useAnalyzeRun: () => ({ isPending: false, isError: false }),
   useWorkflowHealth: () => ({ data: null }),
   useWorkflowHealthTrend: () => ({ data: [] }),
   useFlowRuns: () => ({
@@ -46,5 +47,6 @@ describe('Task Guard managed-analysis progress', () => {
     expect(screen.getByText('已用时 42秒')).toBeInTheDocument()
     expect(screen.getByText('证据 10/12 · 节点 3（失败 1）· Trace 5')).toBeInTheDocument()
     expect(screen.getByText('输入已截断')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '分析中' })).toBeDisabled()
   })
 })

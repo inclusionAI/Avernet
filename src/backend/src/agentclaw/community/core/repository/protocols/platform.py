@@ -6,6 +6,7 @@ naming the missing member, instead of raising ``AttributeError`` at the call
 site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
 ``core/repository/README.md`` for why that direction is load-bearing.
 """
+
 from __future__ import annotations
 
 from abc import abstractmethod
@@ -14,7 +15,11 @@ from typing import Any, List, Optional, Protocol, TYPE_CHECKING, runtime_checkab
 if TYPE_CHECKING:
     from agentclaw.community.core.quality.models import QualityTaskRecord
     from agentclaw.community.core.session_resources.types import SessionResourceRecord
-    from agentclaw.community.core.task_queue.types import EnqueueResult, TaskRecord, TaskStatus
+    from agentclaw.community.core.task_queue.types import (
+        EnqueueResult,
+        TaskRecord,
+        TaskStatus,
+    )
 
 
 @runtime_checkable
@@ -167,6 +172,11 @@ class TaskQueueRepositoryProtocol(Protocol):
 
         Returns only the rows this worker actually won. Racing workers that
         targeted the same rows get fewer results, never duplicates.
+
+        When more rows are eligible than ``limit`` allows, reclaimable ones --
+        ``RUNNING`` with a lapsed lease -- are taken ahead of due ``PENDING``
+        ones, both drawing on that one ``limit``. Due work has the next poll;
+        a row abandoned by a worker that died holding it has no other path back.
         """
         ...
 
@@ -268,7 +278,6 @@ class TaskQueueRepositoryProtocol(Protocol):
         returned — that is the generation a caller asking "what became of it?"
         means.
         """
-        ...
 
 
 @runtime_checkable

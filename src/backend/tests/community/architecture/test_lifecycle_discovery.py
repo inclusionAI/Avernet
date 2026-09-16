@@ -29,12 +29,12 @@ from agentclaw.community.kernel.lifecycle import Lifecycle, discover_lifecycle_p
 _EXPECTED_PARTICIPANTS: frozenset[str] = frozenset({
     "SqliteDB",                  # Phase 1: schema bootstrap
     "LocalDeviceLifecycle",      # Phase 2: orphan reallocation + symlink restore
-    "SkillScanService",          # Phase 2: scanner + daily-task schedulers
+    "SkillScanService",          # Phase 2: scanner + Git safety scheduler
     # GitSyncService is intentionally NOT here: it requires the skills-repo URL
     # from the secret store and fails construction (skipped by discovery) when
     # absent — which is the case in the test profile (and community). It only
     # participates where the corp secret store provides the repo URL.
-    "SkillCenterSyncService",    # Phase 2: bootstrap + periodic sync
+    "SkillCenterSyncService",    # Phase 2: deferred periodic reconciliation
     "SkillSymlinkListener",      # Phase 2: self-subscribe to event bus
     "CronAutoSetupListener",     # Phase 2: self-subscribe to event bus
     "DesktopBotLifecycle",       # Phase 2: recover PENDING desktop bots

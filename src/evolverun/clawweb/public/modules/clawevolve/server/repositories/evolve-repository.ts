@@ -343,6 +343,7 @@ export class EvolveRepository {
   }
 
   async createTaskWithStep(input: {
+    exclusiveWorkflowId?: string;
     task: {
       taskId: string; taskType: string; userId: string; botId: string;
       taskName: string; remark?: string | null; configJson: string; createdBy: string;
@@ -352,7 +353,15 @@ export class EvolveRepository {
       roundNo?: number | null; command: string;
     };
   }): Promise<void> {
+    if (input.exclusiveWorkflowId && Buffer.byteLength(input.task.configJson, 'utf8') > 60_000) throw new Error('selection_too_large');
     await this.db.transaction(async (tx) => {
+      if (input.exclusiveWorkflowId) {
+        const suffix = this.db.dbType === 'sqlite' ? '' : ' FOR UPDATE';
+        const rows = await tx.query('SELECT workflow_id FROM workflow_specs WHERE workflow_id = ?' + suffix, [input.exclusiveWorkflowId]);
+        if (!rows.length) throw new Error('workflow_spec_unavailable');
+        const active = await tx.query("SELECT task_id FROM ce_tasks WHERE remark = ? AND status NOT IN ('completed', 'failed', 'canceled', 'cancelled') LIMIT 1", [`group-repair:${input.exclusiveWorkflowId}`]);
+        if (active.length) throw new Error('group_repair_active');
+      }
       const now = tx.dialect.now();
       await tx.exec(
         `INSERT INTO ce_tasks

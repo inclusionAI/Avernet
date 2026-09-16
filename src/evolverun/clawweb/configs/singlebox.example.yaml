@@ -3,9 +3,10 @@
 userId: "mock-user"
 # singlebox: reuse Avernet Backend Bots; openclaw: use one local OpenClaw home.
 botSource: "singlebox"
-# Initial selection; the dropdown catalog is maintained by the Clawevolve
-# module's config/model-options.json and still allows a custom model name.
+# Initial selection and optional local catalog. Custom model input remains available.
 model: "your-configured-provider/model"
+# models:
+#   - "your-configured-provider/model"
 backendDb: "/path/to/Avernet/scripts/.dependencies/data/backend.db"
 # Required only when botSource is openclaw:
 # openclawHome: "/Users/you/.openclaw"

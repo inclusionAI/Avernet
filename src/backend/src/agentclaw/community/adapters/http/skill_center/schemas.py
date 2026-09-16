@@ -14,6 +14,10 @@ from typing import Optional, List, Dict, Any, Literal
 
 from pydantic import BaseModel, Field
 
+from agentclaw.community.core.skill_center.upload_error_codes import (
+    SkillUploadErrorCode,
+)
+
 
 # ==================== Request Models (skills) ====================
 
@@ -405,6 +409,12 @@ class UploadSkillResponse(BaseModel):
     success: bool
     data: Optional[SkillMetadataResponse] = None
     message: str
+    error_code: Optional[SkillUploadErrorCode] = Field(
+        None,
+        description=(
+            "Stable business error code for failed legacy uploads; null on success."
+        ),
+    )
 
 
 class UploadSkillErrorResponse(BaseModel):

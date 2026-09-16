@@ -595,7 +595,7 @@ impl BotManagementService for Bot {
             None => return Err(ServiceError::BotNotFound(bot_id).into()),
         }
 
-        let updated = self.registry.update_status(&bot_id, status.clone()).await;
+        let updated = self.registry.update_status(&bot_id).await;
 
         Ok(BotStatusUpdateResult {
             updated,
@@ -880,7 +880,7 @@ impl BotRuntimeConnectionService for Bot {
             None => return Err(ServiceError::BotNotFound(bot_id).into()),
         }
 
-        let updated = self.registry.update_status(&bot_id, status.clone()).await;
+        let updated = self.registry.update_status(&bot_id).await;
 
         Ok(BotRuntimeStatusOutcome {
             updated,

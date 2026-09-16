@@ -7,6 +7,7 @@ import { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/
 import { createEvolveRouter } from "../evolve.js";
 import { createInternalTaskGuardRouter } from "../internal/task-guard.js";
 import { digestCanonicalJson } from "../../services/evolution/contracts.js";
+import { IssueAggregationRepository } from '../../repositories/issue-aggregation-repository.js';
 
 let db: SqliteDatabase;
 let repo: EvolveRepository;
@@ -82,6 +83,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   const activeServer = server;
   server = null;
   if (activeServer) await new Promise<void>((resolve) => activeServer.close(() => resolve()));
@@ -89,6 +91,47 @@ afterEach(async () => {
 });
 
 describe("suggestion batch application", () => {
+  it('freezes selected group candidates, gates old plugins, and rejects incomplete or conflicting deployment results', async () => {
+    const group = { workflowId: 'wf-1', signature: 'sig', inputDigest: 'digest', sources: [
+      { sourceId: 'a', flowId: 'run-a', analysisId: 'an-a', reasoning: 'reason-a', proposal: { summary: 'fix a', operations: [] } },
+      { sourceId: 'b', flowId: 'run-b', analysisId: 'an-b', reasoning: 'reason-b', proposal: { summary: 'fix b', operations: [] } },
+    ] };
+    vi.spyOn(IssueAggregationRepository.prototype, 'list').mockResolvedValue([group as never]);
+    await db.exec("INSERT INTO workflow_specs (workflow_id, spec_json, title) VALUES ('wf-1', '{}', 'workflow')");
+    const url = `${baseUrl}/api/evolve/group-repairs`;
+    const headers = { 'X-User-Id': 'owner-1', 'Content-Type': 'application/json' };
+    expect((await fetch(`${url}?workflowId=wf-1&signature=sig`)).status).toBe(401);
+    const loaded = await fetch(`${url}?workflowId=wf-1&signature=sig`, { headers });
+    expect(loaded.status).toBe(200);
+    const data = await loaded.json() as { candidates: Array<{ id: string }> };
+    const payload = { workflowId: 'wf-1', signature: 'sig', inputDigest: 'digest', candidateIds: [data.candidates[0].id], botId: 'bot-1', botEnv: 'dev' };
+    expect((await fetch(url, { method: 'POST', headers, body: JSON.stringify({ ...payload, inputDigest: 'stale' }) })).status).toBe(409);
+    const started = await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) });
+    expect(started.status).toBe(200);
+    const task = await started.json() as { taskId: string; stepId: string };
+    const saved = await repo.findTask(task.taskId);
+    const config = JSON.parse(saved!.config_json);
+    expect(config.suggestionIds).toEqual([]);
+    expect(config.applicationInput.repairSelection.candidates.map((item: { id: string }) => item.id)).toEqual(payload.candidateIds);
+    expect(config.applicationInput.repairSelection.excludedIds).toEqual([data.candidates[1].id]);
+    expect((await fetch(url, { method: 'POST', headers, body: JSON.stringify(payload) })).status).toBe(409);
+    const command = dispatch.mock.calls[0][0].command as string;
+    const envelope = JSON.parse(command.slice(command.indexOf('{')));
+    const internal = `${baseUrl}/api/internal/task-guard/suggestion-applications/${task.taskId}/steps/${task.stepId}`;
+    const identity = { botId: 'bot-1', claimToken: envelope.taskContext.claimToken };
+    const post = (suffix: string, body: object) => fetch(`${internal}/${suffix}`, { method: 'POST', headers, body: JSON.stringify({ ...identity, ...body }) });
+    expect((await post('claim', {})).status).toBe(409);
+    expect((await post('claim', { capabilities: ['issue-group-repair/v1'] })).status).toBe(200);
+    expect((await post('report', { status: 'succeeded', output: { deployResult: { workflowId: 'wf-1', deployed: true } } })).status).toBe(400);
+    const repairOutcomes = [{ id: payload.candidateIds[0], status: 'unresolved', reason: 'conflicting requirements' }];
+    expect((await post('report', { status: 'succeeded', output: { repairOutcomes, deployResult: { workflowId: 'wf-1', deployed: true } } })).status).toBe(400);
+    const finished = await post('report', { status: 'succeeded', output: { repairOutcomes, deployResult: { workflowId: 'wf-1', deployed: false } } });
+    expect(finished.status).toBe(200);
+    expect(await finished.json()).toMatchObject({ status: 'failed', suggestionIds: [] });
+    const history = await (await fetch(`${url}?workflowId=wf-1&signature=sig`, { headers })).json();
+    expect(JSON.stringify(history)).not.toContain('claimToken');
+    expect(history.tasks[0].outcomes).toEqual(repairOutcomes);
+  });
   it("lists only bots with an explicit bot-level edit grant", async () => {
     await db.exec(
       `INSERT INTO ac_bots

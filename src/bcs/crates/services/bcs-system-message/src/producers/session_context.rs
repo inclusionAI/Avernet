@@ -177,10 +177,10 @@ fn initial_group_context_message(
             "你是本次协作的 Driver。请介绍协作目标，判断下一步需要谁参与，并开始协调。"
         }
         DeliveryType::Inject if use_at_mention_routing => {
-            "你当前通过 chat.inject 收到初始化上下文，应静默观察，不要主动回复；等待 @mention 或任务点名后再响应。"
+            "以下是初始化观察上下文，本条无需单独回复；后续收到 @mention 或任务点名时再响应。"
         }
         DeliveryType::Inject => {
-            "你当前通过 chat.inject 收到初始化上下文，应静默观察，不要主动回复；等待 @mention、bcs_route 或任务点名后再响应。"
+            "以下是初始化观察上下文，本条无需单独回复；后续收到 @mention、bcs_route 或任务点名时再响应。"
         }
     };
     let tool_kind = if use_at_mention_routing {

@@ -2377,7 +2377,7 @@ mod tests {
         MemoryImParticipantRepo,
     };
     use bcs_domain::{
-        ActorKind, BindingStatus, BindingTarget, BotCapabilities, BotDynamicStatus, ChannelBinding,
+        ActorKind, BindingStatus, BindingTarget, BotCapabilities, ChannelBinding,
         ChannelConfig, ChannelType, Group, GroupChatScope, GroupKind, HumanInputNotificationMode,
         HumanInputRequestStatus, Participant, ParticipantMode, ParticipantRole, RegisteredBot,
         Session, SessionKind, SessionScope, SessionStatus, Skill, StateMachineNodeRun,
@@ -7050,7 +7050,7 @@ mod tests {
             Ok(())
         }
 
-        async fn update_status(&self, _bot_id: &str, _status: BotDynamicStatus) -> bool {
+        async fn update_status(&self, _bot_id: &str) -> bool {
             false
         }
 
@@ -7218,6 +7218,12 @@ mod tests {
             message: format!("{name} is not configured"),
             request_id: None,
         }
+    }
+
+    #[tokio::test]
+    async fn recording_registry_update_status_rejects_heartbeat_renewal() {
+        let registry = Arc::new(RecordingRegistry::default());
+        assert!(!registry.update_status("heartbeat-renewal-unsupported").await);
     }
 
     #[tokio::test]

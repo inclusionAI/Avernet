@@ -8,7 +8,7 @@ about earning the right to believe it:
 1. the signature must check out against the shared key,
 2. ``aud`` must name *this* component — a token minted for another upstream is
    not replayable here,
-3. ``iss`` must be the gateway and ``exp`` must not have passed,
+3. ``iss`` must name a trusted component and ``exp`` must not have passed,
 4. the ``principals`` payload must parse onto :mod:`.models`,
 5. every principal that *asserts* a tenant must agree on one, and that tenant
    must not be the internal one (a ``user`` principal asserts none — see
@@ -137,12 +137,13 @@ class PrincipalVerifierConfig:
     verification closed rather than accepting unsigned identity.
 
     ``audience`` is checked when ``verify_audience`` is enabled, and ``issuer``
-    is always checked against its configured ``iss``.
+    is always value-checked — a single expected ``iss``, or an allow-list of
+    trusted component names (PyJWT accepts both).
     """
 
     signing_key: str
     audience: str
-    issuer: str
+    issuer: str | tuple[str, ...]
     verify_audience: bool = True
 
     @property

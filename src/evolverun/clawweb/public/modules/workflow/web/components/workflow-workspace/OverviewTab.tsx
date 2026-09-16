@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAnalysisProgress, useFlowRuns, useWorkflowHealth } from '../../api/hooks'
+import { useAnalyzeRun, useAnalysisProgress, useFlowRuns, useWorkflowHealth } from '../../api/hooks'
+import AnalyzeRunBotModal from '../AnalyzeRunBotModal'
 import { SuccessTrendCard } from '../SuccessTrendCard'
 import { NodeAnalysisPanel } from '../NodeAnalysisPanel'
 import StatusBadge from '../StatusBadge'
@@ -8,6 +9,7 @@ import EmptyState from '../EmptyState'
 import ErrorState from '../ErrorState'
 import { formatTimeShort, formatDuration } from '../../utils/time'
 import type { FlowRun, WorkflowTypeRow } from '@avernet/clawweb-shared/web/types'
+import TimeRangeFilter, { toTimeRange } from '../TimeRangeFilter'
 
 function MetricCell({
   label,
@@ -29,11 +31,16 @@ function MetricCell({
   )
 }
 
-function RunRow({ run }: { run: FlowRun }) {
+function RunRow({ run, onAnalyze, dispatching, busy, onAnalysisFinished }: { run: FlowRun; onAnalyze: (run: FlowRun) => void; dispatching: boolean; busy: boolean; onAnalysisFinished: () => unknown }) {
   const navigate = useNavigate()
   const status = run.evolution_analysis_status ?? null
   const progressQuery = useAnalysisProgress(run.flow_id, status === 'analyzing')
   const progress = progressQuery.data?.progress ?? null
+  useEffect(() => {
+    if (status === 'analyzing' && ['completed', 'failed', 'insufficient_evidence'].includes(progressQuery.data?.status ?? '')) {
+      void onAnalysisFinished()
+    }
+  }, [status, progressQuery.data?.status, onAnalysisFinished])
   const { node_count, succeeded_count, failed_count } = run
   const other = Math.max(0, node_count - succeeded_count - failed_count)
   const parts: string[] = []
@@ -89,6 +96,14 @@ function RunRow({ run }: { run: FlowRun }) {
         ) : (
           <span className="text-gray-300">—</span>
         )}
+        <button
+          type="button"
+          disabled={status === 'analyzing' || busy}
+          onClick={(event) => { event.stopPropagation(); onAnalyze(run) }}
+          className="ml-2 rounded border border-blue-200 px-2 py-1 text-xs text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {dispatching ? '派发中' : status === 'analyzing' ? '分析中' : status === 'completed' || status === 'failed' ? '重新分析' : '分析'}
+        </button>
       </td>
     </tr>
   )
@@ -107,13 +122,43 @@ interface OverviewTabProps {
 }
 
 export default function OverviewTab({ workflow }: OverviewTabProps) {
+  return <OverviewContent key={workflow.workflow_id} workflow={workflow} />
+}
+
+function readListState(workflowId: string) {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(`workflow-run-list:${workflowId}`) ?? 'null')
+    if (saved && typeof saved.query === 'string' && typeof saved.searchInput === 'string'
+      && ['', 'running', 'succeeded', 'failed', 'waiting', 'blocked', 'queued', 'cancelled', 'aborted'].includes(saved.statusFilter)
+      && Number.isSafeInteger(saved.page) && saved.page >= 0) return {
+        ...saved as { query: string; searchInput: string; statusFilter: string; page: number },
+        timeRange: ['', '1d', '3d', '7d'].includes(saved.timeRange) ? String(saved.timeRange) : '7d',
+      }
+  } catch { /* Storage may be unavailable or contain an older format. */ }
+  return { query: '', searchInput: '', statusFilter: '', page: 0, timeRange: '7d' }
+}
+
+function OverviewContent({ workflow }: OverviewTabProps) {
   const workflowId = workflow.workflow_id
+  const [saved] = useState(() => readListState(workflowId))
   const [days, setDays] = useState<1 | 7 | 30>(7)
-  const [page, setPage] = useState(0)
-  const [statusFilter, setStatusFilter] = useState('')
-  const [searchInput, setSearchInput] = useState('')
-  const [query, setQuery] = useState('')
-  const hasFilters = Boolean(statusFilter || query)
+  const [page, setPage] = useState(saved.page)
+  const [statusFilter, setStatusFilter] = useState(saved.statusFilter)
+  const [searchInput, setSearchInput] = useState(saved.searchInput)
+  const [query, setQuery] = useState(saved.query)
+  const [timeRange, setTimeRange] = useState(saved.timeRange)
+  const timeParams = useMemo(() => toTimeRange(timeRange), [timeRange])
+  const [analyzeRun, setAnalyzeRun] = useState<FlowRun | null>(null)
+  const analyzeMutation = useAnalyzeRun()
+  const dispatchError = analyzeMutation.isError
+    ? analyzeMutation.error instanceof Error ? analyzeMutation.error.message : String(analyzeMutation.error)
+    : null
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(`workflow-run-list:${workflowId}`, JSON.stringify({ page, statusFilter, searchInput, query, timeRange }))
+    } catch { /* Filtering still works when browser storage is disabled. */ }
+  }, [workflowId, page, statusFilter, searchInput, query, timeRange])
+  const hasFilters = Boolean(statusFilter || query || timeRange !== '7d')
   const [windowEnd] = useState(() => Math.floor(Date.now() / 1000))
   const [activeSubTab, setActiveSubTab] = useState<'runs' | 'nodes'>('runs')
   const [highlightNodeId, setHighlightNodeId] = useState<string | null>(null)
@@ -151,6 +196,7 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
     status: statusFilter && statusFilter !== 'cancelled' ? statusFilter : undefined,
     statuses: statusFilter === 'cancelled' ? ['cancelled', 'canceled'] : undefined,
     query: query || undefined,
+    ...timeParams,
   })
 
   const runs = useMemo(() => data?.runs ?? [], [data?.runs])
@@ -179,6 +225,11 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
     ? `${stats.succeededRuns} / ${stats.terminalRuns} 个终态运行`
     : isMetricsError ? '运行指标加载失败' : '运行指标加载中'
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
+  useEffect(() => {
+    // Only correct saved offsets after the history request has settled successfully.
+    if (!data || isLoading || isError || isFetching) return
+    setPage((value) => Math.min(value, totalPages - 1))
+  }, [data, isLoading, isError, isFetching, totalPages])
   const currentPage = Math.min(page + 1, totalPages)
   const isRefreshing = isFetching || isMetricsFetching
 
@@ -188,6 +239,18 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
 
   return (
     <div className="space-y-4">
+      {dispatchError && !analyzeRun && <div role="alert" className="rounded border border-red-200 bg-red-50 p-3 text-xs text-red-600">
+        分析任务派发失败：{dispatchError}
+      </div>}
+      {analyzeRun && <AnalyzeRunBotModal
+        flowId={analyzeRun.flow_id}
+        workflowId={analyzeRun.workflow_id}
+        originBotId={analyzeRun.origin_bot_id?.split(':')[0].trim() || null}
+        analyzeMutation={analyzeMutation}
+        dispatchError={dispatchError}
+        isOpen
+        onClose={() => setAnalyzeRun(null)}
+      />}
       <div className="flex items-center justify-end gap-1" aria-label="概览时间范围">
         {([1, 7, 30] as const).map((value) => (
           <button
@@ -288,6 +351,7 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
             onSubmit={(event) => { event.preventDefault(); setQuery(searchInput.trim()); setPage(0) }}
             className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-4 py-3"
           >
+            <label><span className="sr-only">运行时间范围</span><TimeRangeFilter value={timeRange} onChange={(value) => { setTimeRange(value); setPage(0) }} /></label>
             <select aria-label="运行状态" value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(0) }} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
               <option value="">全部状态</option>
               <option value="running">运行中</option>
@@ -299,9 +363,9 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
               <option value="cancelled">取消</option>
               <option value="aborted">终止</option>
             </select>
-            <input type="search" aria-label="搜索运行记录" placeholder="搜索 Run ID / 发起方 / Bot ID" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} className="min-w-0 flex-1 basis-64 rounded-md border border-slate-200 px-3 py-2 text-xs text-slate-700 sm:max-w-sm" />
+            <input type="search" aria-label="搜索运行记录" placeholder="搜索输入内容 / Run ID / 发起方 / Bot ID" value={searchInput} onChange={(event) => setSearchInput(event.target.value)} className="min-w-0 flex-1 basis-64 rounded-md border border-slate-200 px-3 py-2 text-xs text-slate-700 sm:max-w-sm" />
             <button type="submit" className="rounded-md bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700">搜索</button>
-            <button type="button" disabled={!hasFilters && !searchInput} onClick={() => { setStatusFilter(''); setSearchInput(''); setQuery(''); setPage(0) }} className="rounded-md px-3 py-2 text-xs text-slate-500 hover:bg-slate-50 disabled:opacity-40">重置筛选</button>
+            <button type="button" disabled={!hasFilters && !searchInput} onClick={() => { setStatusFilter(''); setSearchInput(''); setQuery(''); setTimeRange('7d'); setPage(0) }} className="rounded-md px-3 py-2 text-xs text-slate-500 hover:bg-slate-50 disabled:opacity-40">重置筛选</button>
             {!isLoading && !isError && <span className="ml-auto text-xs text-slate-400" aria-live="polite">{hasFilters ? '匹配' : '共'} {totalCount} 条</span>}
           </form>
         )}
@@ -342,7 +406,11 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
               </thead>
               <tbody className="divide-y divide-gray-100 bg-white">
                 {runs.map((run) => (
-                  <RunRow key={run.flow_id} run={run} />
+                  <RunRow key={run.flow_id} run={run}
+                    busy={analyzeMutation.isPending}
+                    onAnalysisFinished={refetch}
+                    dispatching={analyzeMutation.isPending && analyzeMutation.variables?.flowId === run.flow_id}
+                    onAnalyze={(selected) => { if (!analyzeMutation.isPending) { analyzeMutation.reset(); setAnalyzeRun(selected) } }} />
                 ))}
               </tbody>
             </table>

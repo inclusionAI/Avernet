@@ -12,7 +12,7 @@ use bcs_domain::{
 };
 use bcs_service_api::{
     ActiveBotRunContext, ActorStatus, AgentCredentials, BotCapabilities, BotDeliveryCommand,
-    BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, BotDynamicStatus,
+    BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget,
     BotRegistryCoreService, BotRunContext, BotRunContextPort, BotRunScope,
     EnsureHumanResult, ProviderRunTransport, ProviderStreamGrayList, RegisteredBot,
     ServiceError, ServiceResult, SystemMessageDispatcherService, SystemMessageProducerService,
@@ -276,6 +276,12 @@ impl bcs_service_api::port::repo::MessageRepoPort for RecordingMessageRepo {
     ) -> Result<i64, bcs_service_api::port::repo::MessageRepoError> {
         Ok(self.appended.read().await.len() as i64)
     }
+}
+
+#[tokio::test]
+async fn provider_target_registry_update_status_rejects_heartbeat_renewal() {
+    let registry = Arc::new(ProviderTargetRegistry::default());
+    assert!(!registry.update_status("heartbeat-renewal-unsupported").await);
 }
 
 #[tokio::test]
@@ -714,7 +720,12 @@ async fn dispatch_manager_worker_session_context_persists_worker_private_context
         .expect("worker-owned context record");
     assert_eq!(worker_context.sender_id, "system");
     assert_eq!(worker_context.message_type, "system");
-    assert_eq!(worker_context.audience, Some(MessageAudience::FullOnly));
+    assert_eq!(
+        worker_context.audience,
+        Some(MessageAudience::Directed {
+            actor_ids: vec!["bot-worker".to_string()],
+        })
+    );
     assert!(content_text(worker_context).contains("你的角色: worker"));
 }
 
@@ -769,12 +780,19 @@ async fn dispatch_manager_worker_session_context_persists_each_worker_private_co
         .find(|msg| msg.owner_bot_id.is_none())
         .expect("public manager copy");
     assert!(content_text(manager_ctx).contains("你的角色: manager"));
+    assert_eq!(manager_ctx.audience, Some(MessageAudience::FullOnly));
     for worker_id in ["bot-worker-a", "bot-worker-b"] {
         let worker_context = appended
             .iter()
             .find(|msg| msg.owner_bot_id.as_deref() == Some(worker_id))
             .unwrap_or_else(|| panic!("worker-owned context for {worker_id}"));
         assert!(content_text(worker_context).contains("你的角色: worker"));
+        assert_eq!(
+            worker_context.audience,
+            Some(MessageAudience::Directed {
+                actor_ids: vec![worker_id.to_string()],
+            })
+        );
     }
 }
 
@@ -879,6 +897,12 @@ async fn dispatch_manager_worker_session_context_does_not_make_worker_context_pu
     let appended = message_repo.appended().await;
     assert_eq!(appended.len(), 1);
     assert_eq!(appended[0].owner_bot_id.as_deref(), Some("bot-worker"));
+    assert_eq!(
+        appended[0].audience,
+        Some(MessageAudience::Directed {
+            actor_ids: vec!["bot-worker".to_string()],
+        })
+    );
     assert_eq!(content_text(&appended[0]), "worker-only context");
 }
 
@@ -1687,7 +1711,7 @@ impl BotRegistryCoreService for ProviderTargetRegistry {
         Ok(())
     }
 
-    async fn update_status(&self, _bot_id: &str, _status: BotDynamicStatus) -> bool {
+    async fn update_status(&self, _bot_id: &str) -> bool {
         false
     }
 

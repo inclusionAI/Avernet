@@ -1652,3 +1652,99 @@ fn now_secs() -> u64 {
         .map(|d| d.as_secs())
         .unwrap_or(0)
 }
+
+// The fake models a paged service; the facade must not page/filter a second time.
+#[derive(Default)]
+struct FriendListConnect {
+    fail: bool,
+    total_override: Option<u64>,
+}
+
+#[async_trait]
+impl bcs_service_api::application::connect::ConnectService for FriendListConnect {
+    async fn create_connect(&self, _: &str, _: &str, _: Option<String>, _: Option<bcs_service_api::RequestAuthHeaders>) -> ServiceResult<bcs_service_api::application::connect::ConnectResult> { unreachable!() }
+    async fn approve(&self, _: &str, _: &str) -> ServiceResult<Vec<u64>> { unreachable!() }
+    async fn reject(&self, _: &str, _: &str, _: Option<String>) -> ServiceResult<()> { unreachable!() }
+    async fn cancel(&self, _: &str) -> ServiceResult<()> { unreachable!() }
+    async fn get_request(&self, _: &str) -> ServiceResult<bcs_domain::edge_permission::PermissionRequest> { unreachable!() }
+    async fn revoke_friend(&self, _: &str, _: &str) -> ServiceResult<Vec<u64>> { unreachable!() }
+    async fn list_requests(&self, _: &str, _: bcs_service_api::application::connect::RequestDirection, _: Option<bcs_domain::edge_permission::RequestStatus>, _: u32, _: u32) -> ServiceResult<bcs_service_api::application::connect::RequestsPage> { unreachable!() }
+    async fn list_friends(&self, _: &str) -> ServiceResult<Vec<bcs_domain::edge_permission::FriendListEntry>> {
+        panic!("V1 must not fetch the full friend list")
+    }
+    async fn list_friends_paginated(
+        &self,
+        actor: &str,
+        query: bcs_service_api::application::connect::FriendListQuery,
+    ) -> ServiceResult<bcs_service_api::application::connect::FriendEntriesPage> {
+        assert_eq!(actor, "bot-1");
+        if self.fail {
+            return Err(ServiceError::InternalError("friend read failed".into()));
+        }
+        let mut items: Vec<_> = [
+            ("human_2002", bcs_domain::ActorKind::Human),
+            ("bot-2", bcs_domain::ActorKind::Bot),
+            ("human_1001", bcs_domain::ActorKind::Human),
+        ].into_iter().map(|(id, kind)| bcs_domain::edge_permission::FriendListEntry {
+            actor_id: id.into(), kind, name: None, summary: None, is_online: false,
+        }).filter(|entry| query.target_type.is_none_or(|kind| entry.kind == kind)).collect();
+        items.sort_by(|a, b| a.actor_id.cmp(&b.actor_id));
+        let total = self.total_override.unwrap_or(items.len() as u64);
+        let items = items.into_iter().skip(query.offset as usize).take(query.limit as usize).collect();
+        Ok(bcs_service_api::application::connect::FriendEntriesPage { items, total })
+    }
+}
+
+#[tokio::test]
+async fn friend_connections_forward_filter_and_pagination() {
+    use bcs_service_api::application::v1::{FriendConnectionService, FriendConnectionActor, FriendConnectionActorType as Kind, ListFriendConnections};
+    let fixture = Fixture::new().await;
+    let service = fixture.service.with_friend_connection_service(Arc::new(FriendListConnect::default()));
+    let command = |target_type, page, page_size| ListFriendConnections {
+        caller: Fixture::bot_only_caller("bot-1"),
+        actor: FriendConnectionActor { actor_type: Kind::Bot, id: "bot-1".into() },
+        target_type, page, page_size,
+    };
+    let first = service.list_friend_connections(command(Some(Kind::Human), 1, 1)).await.unwrap();
+    assert_eq!((first.total, first.page, first.page_size), (2, 1, 1));
+    assert_eq!(first.items.len(), 1);
+    assert_eq!(first.items[0].actor, FriendConnectionActor { actor_type: Kind::Human, id: "1001".into() });
+    let second = service.list_friend_connections(command(Some(Kind::Human), 2, 1)).await.unwrap();
+    assert_eq!(second.total, 2);
+    assert_eq!(second.items[0].actor.id, "2002");
+    let bots = service.list_friend_connections(command(Some(Kind::Bot), 1, 20)).await.unwrap();
+    assert_eq!(bots.total, 1);
+    assert_eq!(bots.items[0].actor.actor_type, Kind::Bot);
+    let all = service.list_friend_connections(command(None, 1, 20)).await.unwrap();
+    assert_eq!(all.total, 3);
+    assert_eq!(all.items.len(), 3);
+    for page in [3, u32::MAX] {
+        let empty = service.list_friend_connections(command(Some(Kind::Human), page, 100)).await.unwrap();
+        assert_eq!(empty.total, 2);
+        assert!(empty.items.is_empty());
+    }
+    for (page, size) in [(0, 20), (1, 0), (1, 101)] {
+        assert_eq!(service.list_friend_connections(command(None, page, size)).await.unwrap_err().code(), "invalid_request");
+    }
+    let mut unauthorized = command(None, 1, 20);
+    unauthorized.actor.id = "another-bot".into();
+    assert_eq!(service.list_friend_connections(unauthorized).await.unwrap_err().code(), "forbidden");
+}
+
+#[tokio::test]
+async fn friend_connections_propagate_read_errors_and_count_overflow() {
+    use bcs_service_api::application::v1::{FriendConnectionService, FriendConnectionActor, FriendConnectionActorType, ListFriendConnections};
+    for connect in [
+        FriendListConnect { fail: true, total_override: None },
+        FriendListConnect { fail: false, total_override: Some(u64::from(u32::MAX) + 1) },
+    ] {
+        let fixture = Fixture::new().await;
+        let service = fixture.service.with_friend_connection_service(Arc::new(connect));
+        let error = service.list_friend_connections(ListFriendConnections {
+            caller: Fixture::bot_only_caller("bot-1"),
+            actor: FriendConnectionActor { actor_type: FriendConnectionActorType::Bot, id: "bot-1".into() },
+            target_type: None, page: 1, page_size: 20,
+        }).await.unwrap_err();
+        assert_eq!(error.code(), "internal_error");
+    }
+}

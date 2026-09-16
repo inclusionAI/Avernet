@@ -1,9 +1,4 @@
-import modelOptions from '../../../config/model-options.json'
-
-export const EVOLVE_MODEL_OPTIONS: readonly string[] = modelOptions.models
-
 export const EVOLVE_CUSTOM_MODEL = '__custom__'
-export const DEFAULT_EVOLVE_MODEL = EVOLVE_MODEL_OPTIONS[0]
 
 export default function EvolveModelFields({
   choice,
@@ -15,7 +10,7 @@ export default function EvolveModelFields({
   selectClassName,
   customClassName,
   inputClassName,
-  modelOptions = EVOLVE_MODEL_OPTIONS,
+  modelOptions = [],
   customPlaceholder = '请输入 OpenAI-compatible 模型名',
 }: {
   choice: string

@@ -533,6 +533,8 @@ fn friend_connection_page() -> FriendConnectionPage {
             is_online: true,
         }],
         total: 1,
+        page: 1,
+        page_size: 20,
     }
 }
 
@@ -1051,6 +1053,9 @@ async fn openapi_friend_connection_routes_forward_commands_and_serialize_respons
         let listed = listed.as_ref().expect("list connections command");
         assert_eq!(listed.actor.actor_type, FriendConnectionActorType::Human);
         assert_eq!(listed.actor.id, "1001");
+        assert_eq!(listed.target_type, None);
+        assert_eq!(listed.page, 1);
+        assert_eq!(listed.page_size, 20);
     }
 }
 
@@ -1290,4 +1295,35 @@ async fn missing_principal_returns_unauthenticated() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let body = response_json(response).await;
     assert_eq!(body["data"]["error_code"], "unauthenticated");
+}
+
+#[tokio::test]
+async fn openapi_friend_connections_passes_filter_and_pagination() {
+    for (value, kind) in [("human", FriendConnectionActorType::Human), ("bot", FriendConnectionActorType::Bot)] {
+        let service = Arc::new(FakeFriendConnectionService::default());
+        let response = openapi_test_router(service.clone()).oneshot(authenticated_request(
+            "GET",
+            &format!("/openapi/v1/collaboration/friend-connections?actor_type=bot&actor_id=bot-1&target_type={value}&page=2&page_size=10"),
+            Value::Null,
+        )).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let commands = service.listed_connections.lock().unwrap();
+        let command = commands.as_ref().unwrap();
+        assert_eq!(command.target_type, Some(kind));
+        assert_eq!((command.page, command.page_size), (2, 10));
+    }
+}
+
+#[tokio::test]
+async fn openapi_friend_connections_rejects_invalid_query_types() {
+    for suffix in ["target_type=unknown", "page=-1", "page=abc", "page=4294967296", "page_size=-1"] {
+        let service = Arc::new(FakeFriendConnectionService::default());
+        let response = openapi_test_router(service.clone()).oneshot(authenticated_request(
+            "GET",
+            &format!("/openapi/v1/collaboration/friend-connections?actor_type=bot&actor_id=bot-1&{suffix}"),
+            Value::Null,
+        )).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{suffix}");
+        assert!(service.listed_connections.lock().unwrap().is_none());
+    }
 }

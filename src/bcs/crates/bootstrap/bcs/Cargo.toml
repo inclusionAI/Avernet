@@ -134,6 +134,7 @@ bcs-secret-api = { workspace = true }
 bcs-secret-local = { workspace = true }
 bcs-human-notify-api = { workspace = true }
 bcs-human-notify-dummy = { workspace = true }
+bcs-human-notify-work-order = { workspace = true }
 ding-logger  = { workspace = true }
 bcs-http      = { workspace = true }
 bcs-api-http  = { workspace = true }

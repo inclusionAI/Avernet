@@ -17,6 +17,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from agentclaw.community.core.bot_config_manifest.delivery_mode import (
+    TeclawDeliveryMode,
+)
 from agentclaw.community.core.task_queue.types import DEFAULT_APP
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 
@@ -972,14 +975,19 @@ class BotConfigManifestConfig:
             fetch road's; the value now serves the endpoint guard alone.
         content_store_dir: The content store's blob root — relative paths
             resolve against the process working directory, ``~`` expands.
-        teclaw_platform_managed: The W8 switch (see the field comment).
+        teclaw_delivery_mode: The W8 delivery shape (see the field comment).
     """
 
     fetch_transport_allowlist: tuple[str, ...] = ()
     content_store_dir: str = "./data/manifest_content"
-    #: W8: whether teclaw bots take the platform-managed delivery path
+    #: W8: which teclaw delivery this deployment runs — ``PLATFORM``
     #: (materialise into the bot-data store + index, deliver by artifact with
-    #: the ``ownership`` map). Off until the teclaw engine supports the map;
-    #: off means the pre-W8 per-file shape. Read only by the delivery
-    #: strategy factory.
-    teclaw_platform_managed: bool = False
+    #: the ``ownership`` map) or ``DEVICE``, the pre-W8 per-file shape.
+    #: ``DEVICE`` until the teclaw engine supports the map.
+    #:
+    #: A mode rather than the boolean the yaml key still spells, because it
+    #: names *which implementation is bound* — the composition root turns it
+    #: into one built strategy and one compose-side reader, and nothing
+    #: downstream sees it. The yaml key is unchanged
+    #: (``teclaw_platform_managed``); this is what it parses to.
+    teclaw_delivery_mode: TeclawDeliveryMode = TeclawDeliveryMode.DEVICE

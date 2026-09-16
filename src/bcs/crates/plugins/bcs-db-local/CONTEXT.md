@@ -45,3 +45,8 @@ settings. SQLite remains single-writer. Timing spans propagate into blocking job
 
 - `cargo test --package bcs-db-local --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-db-local --all-targets --manifest-path src/bcs/Cargo.toml`
+
+Plain Execute transaction steps honor the DB contract's opt-in stop-on-no-rows
+control: commit and return the executed prefix after a zero-row result. Step
+options are validated before acquiring the transaction. Shared conformance tests
+cover prefix commits, skipped SQL, nonempty continuation and rollback.

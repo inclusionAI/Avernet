@@ -43,7 +43,9 @@ it("uses the in-tree skills root exported by the launcher when YAML omits skills
     userId: "owner", model: "local/model",
     backendDb: "scripts/.dependencies/data/backend.db", dataDirectory: "data",
   }));
-  expect(loadSingleboxConfig(configFile).skillsRoot).toBe(realpathSync(skillsRoot));
+  const config = loadSingleboxConfig(configFile);
+  expect(config.skillsRoot).toBe(realpathSync(skillsRoot));
+  expect(config.models).toEqual(["local/model"]);
 });
 it("uses an existing OpenClaw home without an Avernet Backend database", async () => {
   root = realpathSync(mkdtempSync(join(tmpdir(), "ce-openclaw-home-")));

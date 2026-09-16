@@ -288,8 +288,6 @@ if os.environ.get("SINGLEBOX_COVERAGE") == "1":
     )
 
     install_singlebox_coverage_middleware(app)
-
-
 # =============================================================================
 # Exception translation: DomainError / DataProxyError -> HTTP response
 # =============================================================================
@@ -355,6 +353,7 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerMcpNotFoundError, CallerMcpSyncError,
 )
 from agentclaw.community.core.skill_center.errors import (  # noqa: E402
+    McpEndpointUnavailableError,
     McpPermissionDeniedError,
     LocalSkillNotReadyError,
     SkillSetAccessDeniedError,
@@ -394,6 +393,7 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     # decides the wire, exactly as every other domain error already works.
     SkillSetControlPlaneNotFoundError: 404,
     SkillSetAccessDeniedError: 403,
+    McpEndpointUnavailableError: 422,
     McpPermissionDeniedError: 403,
     # 400, not 409: the published wire echoes the reason code as a rejected
     # request and clients already parse it that way. Kept as-is deliberately.
@@ -505,8 +505,6 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
         content={"detail": exc.detail},
         headers=_trace_headers(request),
     )
-
-
 @app.exception_handler(LocalSkillNotReadyError)
 async def _local_skill_not_ready_handler(
     request: Request, exc: LocalSkillNotReadyError,

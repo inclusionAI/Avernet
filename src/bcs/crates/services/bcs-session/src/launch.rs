@@ -478,6 +478,8 @@ impl SessionLaunchApplication {
                         activity_kind: InitialSessionRunActivityKind::SessionContext,
                         state: if result.delivered {
                             InitialSessionRunState::Running
+                        } else if result.accepted() {
+                            InitialSessionRunState::Queued
                         } else {
                             InitialSessionRunState::Failed
                         },

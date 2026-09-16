@@ -32,8 +32,8 @@ from lib_clawevolve_bench import run_clawevolve_bench
 from lib_http_retry import retry_http
 
 DEFAULT_WORKSPACE = Path("/home/admin/.openclaw/workspace")
-DEFAULT_BENCH_MODEL = os.environ.get("CLAWEVOLVE_BENCH_MODEL", "openai/gpt-4.1-mini")
-DEFAULT_OPTIMIZER_MODEL = os.environ.get("CLAWEVOLVE_OPTIMIZER_MODEL", "openai/gpt-4.1-mini")
+DEFAULT_BENCH_MODEL = os.environ.get("CLAWEVOLVE_BENCH_MODEL", "")
+DEFAULT_OPTIMIZER_MODEL = os.environ.get("CLAWEVOLVE_OPTIMIZER_MODEL", "")
 DEFAULT_BENCH_SUITE = os.environ.get("CLAWEVOLVE_BENCH_SUITE", "all")
 DEFAULT_BENCH_SCENE = os.environ.get("CLAWEVOLVE_BENCH_SCENE", "clawevolve-bootstrap")
 
@@ -695,7 +695,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--objective", default="", help="local/debug fallback; ClawWeb mode reads the frozen objective from Step Input")
     parser.add_argument("--workspace", help="OpenClaw workspace path; defaults to /home/admin/.openclaw/workspace")
     parser.add_argument("--skill-base-dir", help="skills base dir; defaults to <workspace>/skills")
-    parser.add_argument("--model", default=DEFAULT_BENCH_MODEL, help="benchmark model")
+    parser.add_argument(
+        "--model",
+        default=DEFAULT_BENCH_MODEL,
+        help="benchmark model; when omitted, use the OpenClaw configured default",
+    )
     parser.add_argument("--suite", default=DEFAULT_BENCH_SUITE, help="suite passed to clawevolve-bench")
     parser.add_argument("--owner-id", help="bench owner id when loading templates from a domain")
     parser.add_argument("--clawweb-url", default=os.environ.get("CLAWEVOLVE_CLAWWEB_URL") or os.environ.get("CLAWWEB_URL", ""), help="ClawWeb base URL")

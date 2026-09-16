@@ -26,6 +26,11 @@ def resolve_judge_runtime(req: RunRequest) -> JudgeRuntimeConfig:
             "API judge requires --api-key or OPENAI_API_KEY; "
             "use --judge-backend subagent to use the Bot's OpenClaw Agent."
         )
+    if backend == "api" and not str(req.model or "").strip():
+        raise ValueError(
+            "API judge requires --model because direct API calls cannot inherit "
+            "the Bot's OpenClaw default model."
+        )
     if backend == "subagent":
         agent_id = _task_agent_id(req.task_id)
         openclaw_home = str(Path(req.openclaw_home or "~/.openclaw").expanduser())
@@ -46,7 +51,7 @@ def resolve_judge_runtime(req: RunRequest) -> JudgeRuntimeConfig:
         api=LlmRuntimeConfig(
             api_key=req.api_key,
             base_url=req.llm_base_url or DEFAULT_BASE_URL,
-            model=req.model or DEFAULT_MODEL,
+            model=req.model,
         ),
     )
 

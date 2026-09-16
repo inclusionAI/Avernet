@@ -15,6 +15,7 @@ import RunEvolutionAnalysis from '../evolution/RunEvolutionAnalysis'
 import { aggregateDiagnoses, diffWorkflowPatchOperations, timeValue, type DiagnosisCluster } from './evolution-utils'
 import { groupDiagnoses, useIssueGroups } from './issue-groups'
 import IssueSummary from './IssueSummary'
+import GroupRepairSelection from './GroupRepairSelection'
 
 export type EvoTab = 'diagnosis' | 'remedies'
 
@@ -159,7 +160,10 @@ function IssueDetailDrawer({ cluster, suggestion, task, previousTask, selectedFl
           <p className="mt-2 truncate font-mono text-[10px] text-slate-400" title={cluster.signature}>{cluster.signature}</p>
         </section>}
 
-        <section className="mt-6 border-t border-slate-100 pt-5">
+        {canEdit && cluster.aggregation && <GroupRepairSelection key={`${cluster.aggregation.workflowId}-${cluster.signature}`} workflowId={cluster.aggregation.workflowId} signature={cluster.signature} />}
+
+        <details className="mt-6 border-t border-slate-100 pt-5" open={!cluster.aggregation}>
+          <summary className="cursor-pointer text-xs font-semibold text-slate-900">历史建议与任务（独立于本次修复）</summary>
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-xs font-semibold text-slate-900">已有建议</p>
             {suggestion && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-600">{REMEDY_KIND[suggestion.kind] ?? suggestion.kind}</span>}
@@ -174,8 +178,9 @@ function IssueDetailDrawer({ cluster, suggestion, task, previousTask, selectedFl
               {[...proposalDiff.added, ...proposalDiff.changed, ...proposalDiff.removed].slice(0, 6).map((operation, index) => <p key={`${String(operation.nodeId)}-${String(operation.path)}-${index}`} className="mt-1 font-mono text-[10px] text-slate-500">{String(operation.nodeId ?? 'workflow')} {String(operation.path ?? '')}</p>)}
             </div>}
             <ApplyTaskStatusBadge task={task} />
+            {cluster.aggregation && <div className="mt-3 flex flex-wrap justify-end gap-2"><SuggestionActions suggestion={suggestion} canEdit={canEdit} onAction={onAction} onApply={onApply} /></div>}
           </> : <p className="mt-2 rounded-lg bg-amber-50/70 px-3 py-2 text-xs leading-5 text-amber-700">暂无可执行建议，暂不处理，等待更多证据或人工判断。</p>}
-        </section>
+        </details>
 
         <section className="mt-6 border-t border-slate-100 pt-5">
           <div className="flex items-center justify-between gap-3">
@@ -229,7 +234,7 @@ function IssueDetailDrawer({ cluster, suggestion, task, previousTask, selectedFl
         </details>}
       </div>
 
-      {suggestion && <footer className="flex min-h-16 items-center justify-end gap-2 border-t border-slate-200 bg-white px-5 py-3">
+      {suggestion && !cluster.aggregation && <footer className="flex min-h-16 items-center justify-end gap-2 border-t border-slate-200 bg-white px-5 py-3">
         <SuggestionActions suggestion={suggestion} canEdit={canEdit} onAction={onAction} onApply={onApply} />
       </footer>}
     </aside>
@@ -315,8 +320,8 @@ function DiagnosisPanel({
   const verifyingCount = enriched.filter((item) => item.state === 'verifying').length
   const observingCount = enriched.filter((item) => item.state === 'observing').length
   const selectedIssue = enriched.find(({ cluster }) => cluster.signature === selectedSignature)
-  const selectableFilteredIds = filtered.flatMap(({ suggestion }) => (
-    suggestion && ['pending', 'adopted', 'failed'].includes(suggestion.status) ? [suggestion.id] : []
+  const selectableFilteredIds = filtered.flatMap(({ cluster, suggestion }) => (
+    !cluster.aggregation && suggestion && ['pending', 'adopted', 'failed'].includes(suggestion.status) ? [suggestion.id] : []
   ))
   const allFilteredSelected = selectableFilteredIds.length > 0
     && selectableFilteredIds.every((id) => selectedSuggestionIds.includes(id))
@@ -410,7 +415,7 @@ function DiagnosisPanel({
           const status = suggestion ? SUGGESTION_STATUS[suggestion.status] ?? SUGGESTION_STATUS.pending : null
           const summary = cluster.aggregation?.summary?.summary ?? '聚合结论尚未生成，查看单次运行分析。'
           const task = suggestion ? applyTaskMap[suggestion.id] : undefined
-          const selectable = canEdit && suggestion != null && ['pending', 'adopted', 'failed'].includes(suggestion.status)
+          const selectable = canEdit && !cluster.aggregation && suggestion != null && ['pending', 'adopted', 'failed'].includes(suggestion.status)
           return <article key={cluster.signature} data-layout="compact-issue-row" className="px-4 py-3 transition-colors hover:bg-slate-50/70">
             <div className="grid items-start gap-3 lg:grid-cols-[20px_minmax(0,1fr)_auto]">
               {selectable ? <input
@@ -428,7 +433,7 @@ function DiagnosisPanel({
                   {!status && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">观察中</span>}
                 </div>
                 <p className="mt-1.5 line-clamp-2 max-w-5xl text-xs leading-5 text-slate-600" title={summary}>{summary}</p>
-                {suggestion ? <div className="mt-2 flex max-w-5xl items-start gap-2 rounded-lg bg-blue-50/70 px-3 py-2">
+                {cluster.aggregation ? <p className="mt-2 rounded-lg bg-blue-50/70 px-3 py-2 text-xs text-blue-700">查看建议总览与原始候选建议，在详情中选择本次修复范围。</p> : suggestion ? <div className="mt-2 flex max-w-5xl items-start gap-2 rounded-lg bg-blue-50/70 px-3 py-2">
                   <span className="shrink-0 text-[10px] font-semibold text-blue-700">建议</span>
                   <p className="line-clamp-2 min-w-0 text-xs leading-5 text-blue-700" title={suggestion.description}>{suggestion.description}</p>
                 </div> : <p className="mt-2 max-w-5xl rounded-lg bg-slate-50 px-3 py-2 text-[11px] leading-5 text-slate-500">暂无可执行建议，暂不处理，等待更多运行证据或人工判断。</p>}

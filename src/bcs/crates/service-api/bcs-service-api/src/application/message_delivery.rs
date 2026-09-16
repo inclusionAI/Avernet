@@ -130,6 +130,9 @@ pub enum ManagedDeliveryError {
 
 #[async_trait]
 pub trait ManagedMessageDeliveryService: Send + Sync {
+    async fn admit_batch(&self, _commands: Vec<AdmitMessageDeliveries>) -> Result<Vec<DeliveryAdmissionResult>, ManagedDeliveryError> {
+        Err(ManagedDeliveryError::Conflict)
+    }
     async fn bounded_contexts(&self, carrier: &str, limit: usize) -> Result<crate::port::repo::message_delivery::BoundDeliveryContexts, ManagedDeliveryError>;
     /// Fixed operation names only; implementations must not record identities
     /// or payloads as metric labels. Observation must never block or fail work.

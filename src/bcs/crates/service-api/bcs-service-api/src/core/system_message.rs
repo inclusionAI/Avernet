@@ -41,13 +41,24 @@ pub struct SystemMessageRecipientResult {
     pub recipient_id: String,
     pub run_id: String,
     pub delivery_type: DeliveryType,
+    /// Queue acceptance, distinct from confirmed transport delivery.
+    /// Present for rejected queue targets too; `error` distinguishes rejection.
+    pub delivery_id: Option<String>,
     pub delivered: bool,
     pub error: Option<ServiceError>,
+}
+
+impl SystemMessageRecipientResult {
+    pub fn accepted(&self) -> bool {
+        self.delivered || (self.delivery_id.is_some() && self.error.is_none())
+    }
 }
 
 #[derive(Debug)]
 pub struct SystemMessageDispatchOutcome {
     pub total_recipients: usize,
+    /// Successfully accepted recipients: durable queue admission or immediate
+    /// delivery. Inspect recipient `delivery_id`/`delivered` for the distinction.
     pub successful_deliveries: usize,
     pub failed_deliveries: usize,
     pub recipient_results: Vec<SystemMessageRecipientResult>,

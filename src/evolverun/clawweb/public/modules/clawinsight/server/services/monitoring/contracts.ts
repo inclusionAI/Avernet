@@ -4,7 +4,7 @@ export const CHECK_VERSION = "claw-monitoring/bot-check/v1";
 export type Engine = "OC" | "TE";
 export type Decision = "ALERT" | "PASS" | "UNRESOLVED";
 export type CheckStatus = "HEALTHY" | "ERROR" | "UNKNOWN" | "PAUSED";
-export type MonitoringBot = { botId: string; engine: Engine; paused?: boolean };
+export type MonitoringBot = { botId: string; engine: Engine };
 export type DiagnosisEvent = {
   schemaVersion: typeof DIAGNOSIS_VERSION;
   eventId: string;
@@ -55,19 +55,21 @@ export type DiagnosisAck = { accepted: true; stored: true; eventId: string; dupl
 export type CheckAck = { accepted: true; botId: string; applied: boolean };
 /** Plugin API: durable storage. Successful writes mean committed, never merely queued. */
 export interface MonitoringStore {
+  /** Distinct persisted bot IDs from both checks and diagnoses, ordered by botId. */
+  listBots(): Promise<{ botId: string }[]>;
   insertDiagnosis(event: DiagnosisEvent, receivedAt: number): Promise<boolean>;
   applyCheck(check: BotCheck, receivedAt: number): Promise<boolean>;
   readStatus(botId: string): Promise<{ check: BotCheck | null; count: number }>;
   listDiagnoses(botId: string, query: DiagnosisQuery): Promise<DiagnosisPage>;
 }
 export interface MonitoringApi {
-  bots(): { items: { botId: string }[] };
+  bots(): Promise<{ items: { botId: string }[] }>;
   reportDiagnosis(input: unknown, key: string | undefined): Promise<DiagnosisAck>;
   reportCheck(input: unknown): Promise<CheckAck>;
   status(botId: string): Promise<BotStatus>;
   diagnoses(botId: string, query: Record<string, unknown>): Promise<DiagnosisPage>;
 }
-export type MonitoringErrorCode = "INVALID_EVENT" | "BOT_NOT_ALLOWED"
+export type MonitoringErrorCode = "INVALID_EVENT"
   | "EVENT_CONFLICT" | "PAYLOAD_TOO_LARGE" | "NOT_READY" | "BOT_NOT_FOUND";
 export class MonitoringError extends Error {
   constructor(readonly code: MonitoringErrorCode, message: string) { super(message); }

@@ -34,6 +34,7 @@ from agentclaw.community.core.config_compose.models import (
 
 __all__ = [
     "ComposeInputCollector",
+    "ComposeManagedFilesReader",
     "ManagedFilesReader",
     "PlatformOwnershipReader",
 ]
@@ -48,7 +49,8 @@ class PlatformOwnershipReader(Protocol):
     first artifact of a bot that carries a manifest, and the engine's for
     every runtime edit — a skill or resource upload, an MCP edit, a publish
     build. The reader also answers ``False`` for an engine family it does not
-    serve and while the platform-managed switch is off. The composer turns the
+    serve, and — in a deployment that runs the device-backed teclaw delivery,
+    where the reader bound owns nothing at all — for every compose. The composer turns the
     answer into the artifact's ``ownership`` map and into which source the
     file categories are read from. The engine decision is the reader's: the
     collector asks without knowing the engine.
@@ -83,6 +85,25 @@ class ManagedFilesReader(Protocol):
     def skill_files(self, req: ComposeRequest, names: Collection[str]) -> list[CollectedFile]:
         """The named packages' files, as resources refs."""
         ...
+
+
+
+@runtime_checkable
+class ComposeManagedFilesReader(ManagedFilesReader, PlatformOwnershipReader, Protocol):
+    """Both questions the collector asks of one object (W8).
+
+    The collector holds a single reader and asks it whether the platform owns a
+    compose and, when it does, what the platform holds. The two questions are
+    separate Protocols because they are separate contracts; this is the type of
+    the object that answers both, and so it is the binding key the composition
+    root selects an implementation under.
+
+    Implemented by ``managed_files.ManagedFilesComposeReader`` (the
+    platform-managed reading) and ``managed_files.EngineOwnedComposeReader``
+    (no compose is the platform's) — one bound per deployment, by delivery
+    mode. Adding no members of its own is deliberate: it names a combination,
+    not a third contract.
+    """
 
 
 @runtime_checkable

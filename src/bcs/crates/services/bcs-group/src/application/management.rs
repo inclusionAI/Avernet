@@ -1238,6 +1238,8 @@ impl GroupManagementService for GroupManagement {
                                     activity_kind: InitialGroupRunActivityKind::GroupBootstrap,
                                     state: if result.delivered {
                                         InitialGroupRunState::Running
+                                    } else if result.accepted() {
+                                        InitialGroupRunState::Queued
                                     } else {
                                         InitialGroupRunState::Failed
                                     },

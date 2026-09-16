@@ -7,7 +7,8 @@
 
 ## 决策摘要
 
-本次修订补充：发送前确定失败分类、Bot/session 级 drain，以及受鉴权与审计的人工处置。
+本次修订补充：System 原子批量准入、Group/System 联合启停、必要初始化上下文保护，
+以及关闭后的上下文载体发送；保留发送前错误分类、Bot/session drain 和人工处置。
 具体 API、错误边界与示例以 [消息投递 Service API](../message-delivery-service-api.md) 为准；
 本版不新增告警，不使 Unknown 自动过期或自动重发。
 
@@ -167,16 +168,18 @@ ChatRun 的执行状态不依赖一次可能丢失的投影通知；查询和 lo
 
 | flow_kind | 业务范围 | 首版接入要求 |
 | --- | --- | --- |
-| `group` | 群聊输入和群聊回复转发 | 首批候选，核对消息落库与准入事务后显式开启 |
+| `group` | 群聊输入和群聊回复转发 | 已就绪，与 system 联合开启/关闭 |
 | `direct_a2a` | Direct A2A 对话 | 当前未接入 bcs_messages，默认关闭；迁移完成后单独验收/开启 |
 | `task` | task 流程中真正发给 Bot 的业务消息 | 核对 canonical 消息与完成回调；未就绪则关闭 |
-| `system` | 需要 Bot 处理或接收上下文的系统业务消息 | 核对 canonical 消息与准入；不包括内部控制事件 |
+| `system` | 需要 Bot 处理或接收上下文的系统业务消息 | 已接入同 Session 原子批量准入；与 group 联合启停，不包括内部控制事件 |
 | `state_machine` | state-machine 产生的 Bot 业务输入 | 当前未接入 bcs_messages，默认关闭；接入完成后单独验收/开启 |
 
 channel/HTTP/WebSocket 是入口渠道，不另设业务类型；按其真实业务归入上述类型。
 `flow_kind` 由服务端业务入口确定并传递，不能由客户端任意指定，也不能在共用的群聊/发送
 辅助函数中丢失原类型，导致 Direct A2A 或 state-machine 被误判成 group。
 同一业务类型的 send 和 inject 一起受开关控制，首版不增加二者各自的开关。
+Group/System 两个开关必须相同，新 PUT 不一致明确拒绝；旧 DB 策略按 group 值迁移 system，
+经 CAS 递增版本持久化，启动、master 接管与周期校验共用同一兼容加载逻辑。
 
 新请求的队列选择规则为：
 
@@ -190,7 +193,8 @@ delivery 创建、附件落库与发送读库、事件关联和取消接入已�
 不静默退回直发。附件 URL 续期/转存不属于首版就绪条件。
 就绪是代码/契约验收结果，不增加一个可由用户强行置真的 ready 配置项。
 
-关闭类型的请求保持原消息/ChatRun/发送路径，不要求先写 bcs_messages，不创建占位消息或
+关闭类型的请求通常保持原消息/ChatRun/发送路径；同 lane 尚有待消费上下文的 Group/System
+Send 例外，进入队列作为上下文载体，见 14.3。其他旧路径不要求先写 bcs_messages，不创建占位消息或
 无 source_message_id 的 delivery，也不显示排队。后续接入这两个类型不属于本次实现前置条件。
 
 混合流量期间，下文的 active 数、max_running、发送速率、队列上限和 FIFO 均指受管 delivery：
@@ -202,6 +206,31 @@ delivery 创建、附件落库与发送读库、事件关联和取消接入已�
   如要求同一会话所有输入有序，必须接入所有会影响该会话的路径，或隔离其 Bot/Session。
 - scope Abort 仍按真实作用域处理，不能因为类型关闭就漏掉原路径 active run；精确 delivery
   cancel 的 Provider 限制见 11.5。
+
+### 2.7 System 初始化与通知准入
+
+System producer 保留原发送类型及可见性。Dispatcher 通过应用层 queue port，把同一次事件的
+全部 canonical 消息和受管目标交给 `admit_batch`；同 Session 的序号、正文、事件和 delivery
+在一个事务内提交。任何失败均返回错误，不能继续发送。整批提交后 Driver Send 才可调度，
+其他 Bot 的初始化 Inject 已经存在，避免快速 Driver 回复越过上下文初始化。
+
+Public 通知保存一份消息；PerRecipient 个性化上下文分别保存并保留 owner/audience。
+Skip 目标副本引用同一 producer 输出中唯一匹配的 Public 消息，不能漏创建 delivery 或重复
+写 history；无来源/歧义副本拒绝准入，空通知不创建投递。容量拒绝仍逐目标生效。
+
+Group/System 共用原 Worker、Bot/session lane、并发和限速；Send 准备从 canonical 消息恢复
+System 发送者与协议上下文。初始化 Inject 和普通群聊 Inject 可以绑定同一后续 Send，最终
+只调用 `chat.send`，不依赖原生 `chat.inject`。BotJoined 给新 Bot 的初始化遵循同一规则。
+
+必要初始化以 `required_context=true` 显式保存，普通 TTL 不适用，条数裁剪不能淘汰它。
+普通历史仍最多 24 条（可配置）；必要上下文完整占用同一个 128 KiB 历史预算（可配置）。
+必要内容过大则 Send 明确准备失败，初始化解绑保留，不能静默截断或突破字节限制。
+真正发送后按原选择消费，未发出的失败/取消/过期释放后等待后继 Send，不因重启丢失。
+
+System 逐目标返回 `delivery_id` 与 `delivered` 区分已准入和已发送；Session/Group 的
+`initial_run.state` 新增 queued。实际运行上下文与超时计时只在 send-start 后建立。
+关闭模式及其他未接入 flow 保留旧 Inject，这一版不宣称全系统所有模式都移除原生 Inject。
+兼容迁移、API 与回滚约束详见消息投递 Service API 文档。
 
 ## 3. 消息与投递基数
 
@@ -1262,7 +1291,7 @@ policy_json 包含 flow_enabled、defaults、bots、queue_ttl_ms、safe_retry、
 - 所有业务类型初始 false，defaults 初始 off / 1 / 1000 ms / 20；这些限额是开发起点，
   不宣称生产压测结论，生产开启前必须核对。
 - 只有对应类型开启且有效 Bot mode=enforce 才受管，类型由服务端业务入口分类。
-- Group（自由聊天、主从群）就绪；Direct A2A/task/system/state-machine 当前未全部接入，
+- Group（自由聊天、主从群）与 System 联合就绪；Direct A2A/task/state-machine 当前未全部接入，
   设置为 true 返回 queue_flow_not_ready。default enforce 不会绕过就绪检查。
 - queue_ttl_ms 省略/null 表示未发送消息不自动过期；safe_retry 省略/null 表示不自动重试。
 - 本地不再需要队列配置；旧 lock_path 字段删除，残留时按 deny_unknown_fields 报错，升级前必须删除。
@@ -1329,8 +1358,8 @@ SQLite/MySQL/OceanBase 持久化模式下，默认 off 也启动空闲调度器�
   返回 queue_draining，不切换 legacy 越过队列。
   检查只取该 lane 一条 Send，其他 session 不因 drain 被阻塞；无法提供 canonical session
   的旧入口保留 Bot 级保守检查。受管 worker 的 Bot active 容量限制保持不变。
-- 已绑定 Inject 随原 Send 消费或释放。旧 Send 排空后，恢复 legacy 的入口按每批最多
-  100 条将当前 Bot/session 剩余未绑定 Inject 标记为 cancelled，不发送、不删除正文；处理失败返回错误。
+- 已绑定 Inject 随原 Send 消费或释放。旧 Send 排空后保留未绑定 Inject，下一条 Group/System
+  Send 作为受管载体消费；准入重新校验当前策略版本与该 lane 的有效上下文，不删除正文。
   仅有 Inject 不再构成无限等待条件。Unknown/cancel_unknown Send 仍必须取得可信终止证据，
   不能因关闭配置释放。
 - bot_relay_turn_limit 对队列与 legacy 均生效：一次回复有新接受的受管目标或成功的
@@ -1433,7 +1462,7 @@ send/abort 选择连接时原子校验，禁止旧请求落到重连后的新连
 同步转发该能力。request alias 与实际 downstream run ID 分离，ACK 的实际 run ID 先写
 delivery 再更新运行索引，取消使用原 downstream session key；运行索引过期不作为已停止证据。
 后续已接入真实 Group 准入、终态回复事务、生产启动装配及授权查询/取消。bootstrap 的 ready
-类型列表为 `group`，所有类型和 Bot 仍默认关闭；Direct A2A、task、system、state-machine
+类型列表为 `group`、`system`，两者联合启停，所有类型和 Bot 仍默认关闭；Direct A2A、task、state-machine
 尚未完成对应类型接入，误开时报 `queue_flow_not_ready`，不会静默降级。
 
 本轮基础切片验证：`cargo test -p bcs-message-flow -p bcs-config-api` 共 370 项通过，

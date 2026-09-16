@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_domain::{
-    ActorKind, ActorStatus, BotCapabilities, BotDynamicStatus, Group, Participant, ParticipantRole,
+    ActorKind, ActorStatus, BotCapabilities, Group, Participant, ParticipantRole,
     RegisteredBot, Skill, SystemMessageEvent,
 };
 use bcs_service_api::{AgentCredentials, BotRegistryCoreService, ServiceResult, SystemMessageProducerService};
@@ -23,7 +23,7 @@ impl BotRegistryCoreService for MockRegistry {
         Ok(())
     }
 
-    async fn update_status(&self, _bot_id: &str, _status: BotDynamicStatus) -> bool {
+    async fn update_status(&self, _bot_id: &str) -> bool {
         false
     }
 
@@ -145,6 +145,12 @@ impl BotRegistryCoreService for MockRegistry {
     async fn register_http_connection(&self, _bot_id: String, _token: String) -> String {
         String::new()
     }
+}
+
+#[tokio::test]
+async fn mock_registry_update_status_rejects_heartbeat_renewal() {
+    let registry = MockRegistry::default();
+    assert!(!registry.update_status("heartbeat-renewal-unsupported").await);
 }
 
 #[tokio::test]

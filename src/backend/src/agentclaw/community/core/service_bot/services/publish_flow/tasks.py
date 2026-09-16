@@ -38,6 +38,7 @@ on the publish record — instead of a semantically dishonest SUCCEEDED. Domain
 retry stays user-driven (``retry()`` enqueues a fresh task); the worker never
 re-runs a failed stage on its own.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -101,7 +102,9 @@ _DRAFT_RESTORE_DEADLINE_SECONDS = 1860
 # down. The teardown task's give-up deadline must outlast the delay plus an
 # execution window, or the row would be retired before it ever becomes eligible.
 _EVAL_TEARDOWN_TTL_SECONDS = 86400
-_EVAL_TEARDOWN_DEADLINE_SECONDS = _EVAL_TEARDOWN_TTL_SECONDS + _STAGE_TASK_DEADLINE_SECONDS
+_EVAL_TEARDOWN_DEADLINE_SECONDS = (
+    _EVAL_TEARDOWN_TTL_SECONDS + _STAGE_TASK_DEADLINE_SECONDS
+)
 
 # States still waiting on a BaaS publish → the poll keeps driving them.
 _POLL_ACTIVE_STATES = {PublishStatus.VALIDATE_PUB, PublishStatus.ONLINE_PUB}
@@ -215,7 +218,9 @@ def enqueue_destroy(
     )
 
 
-def build_approval_trigger_payload(*, publish_id: int, action: str, operator: str) -> dict:
+def build_approval_trigger_payload(
+    *, publish_id: int, action: str, operator: str
+) -> dict:
     return {"publish_id": publish_id, "action": action, "operator": operator}
 
 
@@ -236,8 +241,14 @@ def enqueue_approval_trigger(
     )
 
 
-def build_eval_teardown_payload(*, publish_id: int, bot_uuid: str, operator: str) -> dict:
+def build_eval_teardown_payload(
+    *, publish_id: int, bot_uuid: str, operator: str
+) -> dict:
     return {"publish_id": publish_id, "bot_uuid": bot_uuid, "operator": operator}
+
+
+def _eval_teardown_idempotency_key(publish_id: int, bot_uuid: str) -> str:
+    return f"eval_teardown:{publish_id}:{bot_uuid}"
 
 
 def enqueue_eval_teardown(
@@ -249,7 +260,13 @@ def enqueue_eval_teardown(
     delay_seconds: int = 0,
 ) -> None:
     """Enqueue the durable eval teardown. ``delay_seconds`` = the TTL safety net
-    at publish time; ``0`` for an explicit (post-eval) early teardown."""
+    at publish time; ``0`` for an explicit (post-eval) early teardown.
+
+    An ``idempotency_key`` derived from ``(publish_id, bot_uuid)`` ensures
+    at most one **live** teardown task per environment+app — duplicate
+    enqueues (e.g. from a renewal loop) join the existing live task
+    instead of inserting new rows.
+    """
     task_queue_service.enqueue(
         EVAL_TEARDOWN_TASK,
         build_eval_teardown_payload(
@@ -257,6 +274,7 @@ def enqueue_eval_teardown(
         ),
         deadline_seconds=_EVAL_TEARDOWN_DEADLINE_SECONDS,
         delay_seconds=delay_seconds,
+        idempotency_key=_eval_teardown_idempotency_key(publish_id, bot_uuid),
     )
 
 
@@ -304,11 +322,15 @@ class PublishVerifyFlowHandler(_PublishTaskBase):
         if status == PublishStatus.BUILDING:
             build_result = await self._flow.execute_build_phase(record, operator)
             if build_result.status != PublishStatus.BUILT:
-                return Fail(f"build failed: publish_id={publish_id}, {build_result.message}")
+                return Fail(
+                    f"build failed: publish_id={publish_id}, {build_result.message}"
+                )
             record, status = self._status(publish_id)
 
         if status == PublishStatus.BUILT:
-            release_result = await self._flow.execute_verify_release_phase(record, operator)
+            release_result = await self._flow.execute_verify_release_phase(
+                record, operator
+            )
             if release_result.status != PublishStatus.VALIDATE_PUB:
                 return Fail(
                     f"verify release failed: publish_id={publish_id}, {release_result.message}"
@@ -353,8 +375,9 @@ class PublishOnlineReleaseHandler(_PublishTaskBase):
         # not-yet-run release from one that already created the BaaS bot. Only the
         # ledger's bot timeline does — a lease-expiry re-run of this task must not
         # create a second bot, and a stale or failed release must re-run.
-        if status == PublishStatus.ONLINE_PUB and not self._flow.is_current_online_deployment(
-            publish_id
+        if (
+            status == PublishStatus.ONLINE_PUB
+            and not self._flow.is_current_online_deployment(publish_id)
         ):
             release_result = await self._flow.execute_release_phase(record, operator)
             if release_result.status != PublishStatus.ONLINE_PUB:
@@ -457,7 +480,9 @@ class PublishDestroyHandler(_PublishTaskBase):
             publish_id=publish_id, stage=stage, operator=operator
         )
         if not result or not result.get("success"):
-            return Fail(f"destroy failed: publish_id={publish_id}, {(result or {}).get('message')}")
+            return Fail(
+                f"destroy failed: publish_id={publish_id}, {(result or {}).get('message')}"
+            )
         return Complete()
 
 
@@ -481,6 +506,19 @@ class PublishEvalTeardownHandler(_PublishTaskBase):
         return asyncio.run(self._run(publish_id, bot_uuid, operator))
 
     async def _run(self, publish_id: int, bot_uuid: str, operator: str) -> TaskOutcome:
+        # Short-circuit: if the bot no longer exists on BaaS, the teardown
+        # goal is already met — no need to call destroy_bot (which would
+        # fail with BOT_NOT_FOUND and trigger infinite Retry).
+        try:
+            bot_info = self._flow._baas_service.get_bot(bot_uuid=bot_uuid)
+            if not bot_info:
+                return Complete()
+        except Exception:
+            # Non-fatal: if the existence check itself fails, proceed
+            # with the normal teardown path — the operation runner's
+            # adopt-by-query will handle it.
+            pass
+
         result = await self._flow.execute_eval_teardown(
             publish_id=publish_id, bot_uuid=bot_uuid, operator=operator
         )
@@ -656,9 +694,7 @@ class PublishDraftRestoreHandler(_PublishTaskBase):
         draft_publish_id = _require_int(payload, "draft_publish_id")
         operation_id = _require_int(payload, "operation_id")
         operator = _require_str(payload, "operator")
-        return asyncio.run(
-            self._run(draft_publish_id, operation_id, operator)
-        )
+        return asyncio.run(self._run(draft_publish_id, operation_id, operator))
 
     async def _run(
         self, draft_publish_id: int, operation_id: int, operator: str

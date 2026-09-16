@@ -11,7 +11,6 @@ sys.path.insert(0, str(PLAN_ROOT))
 from clawevolve_plan.intent import normalize_primary_metric, normalize_user_intent  # noqa: E402
 from clawevolve_plan.pipeline.step_report_payload import build_step_report_output  # noqa: E402
 from clawevolve_plan.spec.builder import build_objective_document, build_spec  # noqa: E402
-from clawevolve_plan.spec.document_agent import _build_prompt  # noqa: E402
 from clawevolve_plan.spec.renderer import render_goal_markdown, render_markdown  # noqa: E402
 from clawevolve_plan.spec.contract import (  # noqa: E402
     validate_objective_markdown,
@@ -216,24 +215,6 @@ class SpecGoalAlignmentTests(unittest.TestCase):
             "templateName": "task_case_1",
             "version": 3,
         })
-
-    def test_document_agent_prompt_marks_diagnose_intent_as_evidence_only(self):
-        spec, objective, _, _ = self._build()
-        plan = diagnose_plan()
-        plan["generated_spec_context"] = spec
-        plan["objective_document_context"] = objective
-        prompt = _build_prompt(
-            plan=plan,
-            goal_text="mcp调用成功率80%",
-            discovery_notes="checked",
-            target_files=[TARGET],
-            objective_template="# clawEvolve Objective",
-            spec_template="# Evolution Strategy Spec v0",
-        )
-        self.assertIn("current_optimization_goal", prompt)
-        self.assertIn("只是上游证据采集请求，不是优化目标", prompt)
-        self.assertNotIn('"session_dirs"', prompt)
-        self.assertNotIn('"agents"', prompt)
 
     def test_document_contract_rejects_diagnose_intent_as_objective(self):
         spec, objective, spec_md, objective_md = self._build()

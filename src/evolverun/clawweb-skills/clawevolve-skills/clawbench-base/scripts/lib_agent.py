@@ -53,7 +53,7 @@ class OpenClawAgentCreationError(RuntimeError):
 
 MAX_OPENCLAW_MESSAGE_CHARS = int(os.environ.get("PINCHBENCH_MAX_MSG_CHARS", "8000"))
 JUDGE_MAX_MSG_CHARS = int(os.environ.get("PINCHBENCH_JUDGE_MAX_MSG_CHARS", "30000"))
-DEFAULT_INTERACTION_JUDGE_MODEL = "antchat/GLM-5.1"
+DEFAULT_INTERACTION_JUDGE_MODEL = ""
 DEFAULT_INTERACTION_JUDGE_AGENT_PREFIX = "bench-judge"
 INTERACTION_PREVIEW_CHARS = int(os.environ.get("CLAWBENCH_INTERACTION_PREVIEW_CHARS", "1200"))
 OPENCLAW_AGENTS_LIST_TIMEOUT_SECONDS = float(os.environ.get("CLAWBENCH_OPENCLAW_AGENTS_LIST_TIMEOUT_SECONDS", "20"))
@@ -149,7 +149,7 @@ def _preview_subprocess_output(value: Any, max_chars: int = 2000) -> str:
 
 
 def slugify_model(model_id: str) -> str:
-    return model_id.replace("/", "-").replace(".", "-").lower()
+    return model_id.replace("/", "-").replace(".", "-").lower() or "openclaw-default"
 
 
 def validate_openrouter_model(model_id: str, timeout_seconds: float = 10.0) -> bool:
@@ -377,18 +377,16 @@ def _create_openclaw_agent_once(
         workspace_dir,
     )
     try:
+        create_command = ["openclaw", "agents", "add", agent_id]
+        if model_id:
+            create_command.extend(["--model", model_id])
+        create_command.extend([
+            "--workspace",
+            str(workspace_dir),
+            "--non-interactive",
+        ])
         create_result = subprocess.run(
-            [
-                "openclaw",
-                "agents",
-                "add",
-                agent_id,
-                "--model",
-                model_id,
-                "--workspace",
-                str(workspace_dir),
-                "--non-interactive",
-            ],
+            create_command,
             capture_output=True,
             text=True,
             check=False,
@@ -574,6 +572,10 @@ def ensure_agent_exists(
     main_models = _openclaw_state_root() / "agents" / "main" / "agent" / "models.json"
 
     if base_url:
+        if not model_id:
+            raise OpenClawAgentCreationError(
+                "custom model endpoint requires an explicit model id"
+            )
         # Custom OpenAI-compatible endpoint — build a provider entry
         data: dict[str, Any] = {}
         if main_models.exists():

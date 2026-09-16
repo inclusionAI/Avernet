@@ -23,6 +23,8 @@ pub enum DeliveryLookup {
     /// At most 100 unbound contexts for drain cleanup after all Sends settle.
     BotPendingContexts(String),
     LanePendingContexts { bot: String, session: String },
+    /// At most one live context: expiration filtering must precede LIMIT.
+    LanePendingContextCarrier { bot: String, session: String, now_ms: i64 },
     Message(String),
     Successor { bot: String, session: String, after_seq: i64, exclude: String, now_ms: i64 },
 }
@@ -37,7 +39,8 @@ pub struct DeliveryQueueStatistic {
     pub oldest_created_at_ms: Option<i64>,
 }
 
-/// Newest bound metadata only. Count is complete; canonical bodies are not read.
+/// Newest bounded ordinary metadata plus every required initialization context,
+/// ordered by descending sequence/identity. Count is complete; bodies are not read.
 pub struct BoundDeliveryContexts {
     pub rows: Vec<PersistedMessageDelivery>,
     pub total: u64,
@@ -107,6 +110,11 @@ pub enum MessageDeliveryRepoError {
 
 #[async_trait]
 pub trait MessageDeliveryRepoPort: Send + Sync {
+    /// Atomically admit a same-session initialization batch. Implementations
+    /// must not fall back to sequential independent commits.
+    async fn admit_batch(&self, _commands: Vec<AdmitMessageDeliveries>) -> Result<Vec<DeliveryAdmissionResult>, MessageDeliveryRepoError> {
+        Err(MessageDeliveryRepoError::Invalid("atomic batch admission is unsupported".into()))
+    }
     async fn bounded_contexts(&self, carrier: &str, limit: usize) -> Result<BoundDeliveryContexts, MessageDeliveryRepoError>;
     /// Implementations must filter at storage; no fallback to full history.
     async fn lookup(&self, scope: DeliveryLookup) -> Result<Vec<PersistedMessageDelivery>, MessageDeliveryRepoError>;

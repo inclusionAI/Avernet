@@ -35,13 +35,6 @@ PHASES = (
     "generate_report",
     "summarize",
 )
-VERSION_RE = re.compile(r"^clawbench-(\d{8})-v(\d+)$")
-DEFAULT_VERSION_POLICY = {
-    "latestVersion": "clawbench-20260805-v1",
-    "minimumVersion": "clawbench-20260707-v4",
-    "updateUrl": "",
-    "policy": "enforce",
-}
 DOWNSTREAM_PHASES = {
     "check_version": ("load_templates", "create_run", "run_benchmark", "upload_results", "prepare_report", "generate_report", "summarize"),
     "load_templates": ("create_run", "run_benchmark", "upload_results", "prepare_report", "generate_report", "summarize"),
@@ -138,7 +131,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--domain-id")
     parser.add_argument("--template", action="append", type=parse_template_ref, default=[], help="Advanced: pin name@version; repeat for multiple templates")
     parser.add_argument("--run-scope", choices=["domain", "template"], default="domain")
-    parser.add_argument("--model", default=os.environ.get("CLAWEVOLVE_BENCH_MODEL", "openai/gpt-4.1-mini"))
+    parser.add_argument(
+        "--model",
+        default=os.environ.get("CLAWEVOLVE_BENCH_MODEL", ""),
+        help="Model ID; when omitted, use the OpenClaw configured default",
+    )
     parser.add_argument("--suite", default="all")
     parser.add_argument("--scene", default="claw-evolve-bench")
     parser.add_argument("--judge", default="")
@@ -270,7 +267,6 @@ def direct_config(args: argparse.Namespace) -> tuple[dict[str, Any], Path, Path]
             "judgeApiKeyRef": "env:CLAWBENCH_JUDGE_API_KEY",
             "pinnedTemplates": templates,
         },
-        "versionPolicy": dict(DEFAULT_VERSION_POLICY),
         "endpoints": {"clawwebUrl": str(args.clawweb_url).rstrip("/")},
         "runtime": {
             "agentbenchHome": str(agentbench_home),
@@ -286,11 +282,6 @@ def direct_config(args: argparse.Namespace) -> tuple[dict[str, Any], Path, Path]
     }
     atomic_json(work_dir / "workflow_input.json", config)
     return config, work_dir / "workflow_state.json", work_dir / "workflow_result.json"
-
-
-def version_key(value: str) -> tuple[int, int] | None:
-    match = VERSION_RE.fullmatch(value or "")
-    return (int(match.group(1)), int(match.group(2))) if match else None
 
 
 def last_json(text: str) -> dict[str, Any] | None:
@@ -644,18 +635,11 @@ class Workflow:
         return {"status": "ok", "benchRunId": bench_run_id, "detailUrl": result.get("detailUrl") or ""}
 
     def check_version(self) -> dict[str, Any]:
-        policy = self.config.get("versionPolicy") or {}
-        current_path = self.agentbench_home / "version"
-        current = current_path.read_text(encoding="utf-8").strip() if current_path.is_file() else ""
-        latest = str(policy.get("latestVersion") or "")
-        minimum = str(policy.get("minimumVersion") or latest)
-        mode = str(policy.get("policy") or "warn").lower()
-        current_key, minimum_key = version_key(current), version_key(minimum)
-        status = "ok" if current_key and (not minimum_key or current_key >= minimum_key) else ("outdated" if current_key else "unknown")
-        output = {"status": status, "currentVersion": current, "latestVersion": latest, "minimumVersion": minimum, "policy": mode, "updateUrl": policy.get("updateUrl") or ""}
-        if mode == "enforce" and status != "ok":
-            raise WorkflowError("CLAWBENCH_VERSION_REJECTED", f"ClawBench version {current or 'unknown'} is below {minimum or 'unknown'}", retryable=False)
-        return output
+        release_marker = self.agentbench_home.parent / ".clawevolve-release-version"
+        if release_marker.is_file():
+            release_version = release_marker.read_text(encoding="utf-8").strip()
+            return {"status": "ok", "source": "bundle", "releaseVersion": release_version}
+        return {"status": "ok", "source": "source", "releaseVersion": ""}
 
     def report_skill(self) -> tuple[str, Path]:
         report_config = self.config.get("report") or {}
@@ -681,8 +665,9 @@ class Workflow:
         if exists:
             return
         args = [command, "agents", "add", agent_id, "--workspace", str(workspace), "--non-interactive"]
-        model = str(report_config.get("model") or (self.config.get("bench") or {}).get("model") or os.environ.get("CLAWEVOLVE_BENCH_MODEL", "openai/gpt-4.1-mini")).strip()
-        args.extend(["--model", model])
+        model = str(report_config.get("model") or (self.config.get("bench") or {}).get("model") or os.environ.get("CLAWEVOLVE_BENCH_MODEL", "")).strip()
+        if model:
+            args.extend(["--model", model])
         added = self.command_runner(args, text=True, capture_output=True, timeout=120, env=child_env)
         if added.returncode == 0:
             return

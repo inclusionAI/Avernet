@@ -150,9 +150,10 @@ Train/test 划分由 plan 独立完成，diagnose 中旧的 `case_split` 只作�
 
 ## 8. Spec 与 Objective 生成
 
-Spec 与 Objective 的机器契约由 `spec_builder.build_spec()` 生成；Fresh Plan 的 Markdown 必须由
-Document Agent 基于共享模板生成，再由 Python 校验结构、主指标和 Diagnose/Goal 边界。Document Agent
-调用、解析或校验失败时 Plan 直接失败，不使用 deterministic renderer 替代模型文档。
+Spec 与 Objective 的机器契约由 `spec_builder.build_spec()` 生成。Fresh Plan 的 Markdown 直接由
+`render_goal_markdown()` 和 `render_markdown()` 根据机器契约确定性生成，再由 Python 校验结构、
+主指标和 Diagnose/Goal 边界。最终文档阶段不调用模型；模型只负责上游 Diagnose、Direct Goal 和
+Discovery 中不确定的业务语义。
 
 输入信息：
 
@@ -166,7 +167,7 @@ Document Agent 基于共享模板生成，再由 Python 校验结构、主指标
 1. 显式 `--goal` 是当前优化目标的最高优先级；Diagnose 的自然语言请求描述的是证据如何被采集，不能进入 Objective Summary 成为并列目标。
 2. `--goal` 中明确出现的成功率/完成率百分比会被确定性解析为 `primary_metric`，保留指标对象（例如 MCP 调用成功率）、比较符和目标值。
 3. objective、spec、ClawWeb final step report 都消费同一个 `primary_metric`；只有用户没有提供明确指标时才使用默认任务成功率。
-4. 文档生成 Agent 的输出需通过章节结构、主指标和 Diagnose 意图隔离校验；模型可以等义改写完整用户输入，不要求逐字复制 `intent_text`。
+4. Renderer 输出需通过章节结构、主指标和 Diagnose 意图隔离校验；完整用户输入允许等义表达，不要求 Markdown 逐字复制 `intent_text`。
 5. `allowed_update_targets` 只包含 discovery 实际确认的具体路径；抽象的 retry、prompt、参数校验等建议单独存入 `optimization_topics`。
 6. ClawWeb 上传状态决定文案：两个 Domain 均发布并校验通过时引用 train/test ClawWeb domains，否则明确引用本地评测集。
 7. 附录对 artifacts 和 agent context 使用白名单摘要，禁止展开完整 agents/session_dirs 列表。

@@ -60,6 +60,34 @@ class TranscriptResolutionTests(unittest.TestCase):
 
 
 class AgentCreationTests(unittest.TestCase):
+    def test_agent_add_omits_model_to_inherit_openclaw_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_home:
+            home = Path(temp_home)
+            agent_id = "bench-default-model-agent"
+            workspace = home / "workspace"
+            calls = []
+
+            def fake_run(cmd, **kwargs):
+                calls.append((cmd, kwargs))
+                if cmd == ["openclaw", "agents", "list"]:
+                    listed = len([c for c, _ in calls if c == cmd]) > 1
+                    stdout = (
+                        f"Agents:\n- {agent_id}\n  Workspace: {workspace}\n"
+                        if listed else "Agents:\n- main (default)\n"
+                    )
+                    return lib_agent.subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+                if cmd[:3] == ["openclaw", "agents", "add"]:
+                    return lib_agent.subprocess.CompletedProcess(cmd, 0, stdout="created", stderr="")
+                raise AssertionError(f"unexpected command: {cmd}")
+
+            with patch.object(lib_agent.Path, "home", return_value=home), \
+                    patch.object(lib_agent.subprocess, "run", side_effect=fake_run):
+                created = lib_agent.ensure_agent_exists(agent_id, "", workspace)
+
+            self.assertTrue(created)
+            add_cmd = next(cmd for cmd, _ in calls if cmd[:3] == ["openclaw", "agents", "add"])
+            self.assertNotIn("--model", add_cmd)
+
     def test_agent_add_timeout_continues_when_registry_contains_agent(self) -> None:
         with tempfile.TemporaryDirectory() as temp_home:
             home = Path(temp_home)

@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { parse } from "yaml";
 
 export type SingleboxConfig = {
-  userId: string; model: string;
+  userId: string; model: string; models: string[];
   backendDb: string; skillsRoot: string; botsRoot: string;
   dataDirectory: string; port: number; maxArtifactBytes?: number;
   botSource?: "singlebox" | "openclaw";
@@ -68,8 +68,17 @@ export function loadSingleboxConfig(file: string): SingleboxConfig {
   const backendDb = botSource === "singlebox"
     ? path("backendDb", false)
     : resolve(dataDirectory, "local-bot-catalog.db");
+  const model = required("model");
+  const rawModels = input.models === undefined ? [] : input.models;
+  if (!Array.isArray(rawModels) || rawModels.some((value) => typeof value !== "string")) {
+    throw new Error("Singlebox config models must be a string list");
+  }
+  const models = [...new Set([model, ...rawModels.map((value) => value.trim()).filter(Boolean)])];
+  if (models.some((value) => value.length > 128 || /[\0\r\n\s]/.test(value))) {
+    throw new Error("Invalid local model name");
+  }
   const config = {
-    maxArtifactBytes, userId: required("userId"), model: required("model"),
+    maxArtifactBytes, userId: required("userId"), model, models,
     botSource,
     backendDb, skillsRoot: validateSkillsRoot(path("skillsRoot", true, process.env.CLAWEVOLVE_SKILLS_ROOT)),
     // Same default layout as scripts/singlebox.sh and BAAS local_proc.
@@ -84,6 +93,5 @@ export function loadSingleboxConfig(file: string): SingleboxConfig {
     } : {}),
   };
   if (config.localBotId && !/^[A-Za-z0-9_.-]+$/.test(config.localBotId)) throw new Error("Invalid localBotId");
-  if (config.model.length > 128 || /[\0\r\n\s]/.test(config.model)) throw new Error("Invalid local model name");
   return config;
 }

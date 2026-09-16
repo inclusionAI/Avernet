@@ -1,4 +1,5 @@
 """Unit tests for the durable publish task handlers (Task 11)."""
+
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -9,6 +10,7 @@ from agentclaw.community.core.task_queue.types import Complete, Fail, Reschedule
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     PROGRESS_POLL_TASK,
     RESTART_POLL_TASK,
+    PublishEvalTeardownHandler,
     PublishOnlineReleaseHandler,
     PublishProgressPollHandler,
     PublishRestartHandler,
@@ -67,7 +69,8 @@ class _FakeFlow:
             return SimpleNamespace(status=PublishStatus.FAILED, message="verify boom")
         self.status = PublishStatus.VALIDATE_PUB.value
         return SimpleNamespace(
-            status=PublishStatus.VALIDATE_PUB, message="Released to the verify environment"
+            status=PublishStatus.VALIDATE_PUB,
+            message="Released to the verify environment",
         )
 
     async def execute_release_phase(self, record, operator):
@@ -77,7 +80,9 @@ class _FakeFlow:
             return SimpleNamespace(status=PublishStatus.FAILED, message="online boom")
         self.status = PublishStatus.ONLINE_PUB.value
         self._online_recorded = True
-        return SimpleNamespace(status=PublishStatus.ONLINE_PUB, message="Publish submitted")
+        return SimpleNamespace(
+            status=PublishStatus.ONLINE_PUB, message="Publish submitted"
+        )
 
     def advance_publish_progress(self, publish_id):
         self.calls.append("sync")
@@ -91,12 +96,15 @@ def _handlers(flow):
     return (
         PublishVerifyFlowHandler(flow=flow, task_queue_service=tq),
         PublishOnlineReleaseHandler(flow=flow, task_queue_service=tq),
-        PublishProgressPollHandler(flow=flow, task_queue_service=tq, poll_delay_seconds=1.0),
+        PublishProgressPollHandler(
+            flow=flow, task_queue_service=tq, poll_delay_seconds=1.0
+        ),
         tq,
     )
 
 
 # ── verify_flow ─────────────────────────────────────────────────────────────
+
 
 def test_verify_flow_from_building_builds_releases_and_enqueues_poll():
     # process owns DRAFT -> BUILDING, so the task enters at BUILDING.
@@ -180,6 +188,7 @@ def test_verify_flow_create_runs_once_across_reruns():
 
 # ── online_release ──────────────────────────────────────────────────────────
 
+
 def test_online_release_from_online_pub_releases_and_enqueues_poll():
     # process owns VALIDATING -> ONLINE_PUB, so the task enters at ONLINE_PUB and
     # runs the release within it.
@@ -241,6 +250,7 @@ def test_online_release_missing_record_fails_task():
 
 
 # ── progress_poll ───────────────────────────────────────────────────────────
+
 
 def test_poll_reschedules_while_still_in_validate_pub():
     flow = _FakeFlow(PublishStatus.VALIDATE_PUB, sync_to=PublishStatus.VALIDATE_PUB)
@@ -342,8 +352,10 @@ class _FakeRestartFlow:
 
     def sync_restart_progress(self, publish_id):
         self.calls.append("sync_restart")
-        status = self._sync_statuses.pop(0) if len(self._sync_statuses) > 1 else (
-            self._sync_statuses[0] if self._sync_statuses else None
+        status = (
+            self._sync_statuses.pop(0)
+            if len(self._sync_statuses) > 1
+            else (self._sync_statuses[0] if self._sync_statuses else None)
         )
         if status in ("SUCCESS", "FAILED"):
             self.restarting = False  # the sync clears the marker on terminal
@@ -357,7 +369,9 @@ def _restart_handlers(flow):
     tq = Mock()
     return (
         PublishRestartHandler(flow=flow, task_queue_service=tq),
-        PublishRestartPollHandler(flow=flow, task_queue_service=tq, poll_delay_seconds=1.0),
+        PublishRestartPollHandler(
+            flow=flow, task_queue_service=tq, poll_delay_seconds=1.0
+        ),
         tq,
     )
 
@@ -485,3 +499,68 @@ def test_restart_poll_missing_record_fails_task():
     outcome = poll.handle({"publish_id": 1})
     assert isinstance(outcome, Fail)
     assert "not found" in outcome.error
+
+
+# ── PublishEvalTeardownHandler bot existence short-circuit ────────────────
+
+
+class _FakeEvalTeardownFlow:
+    """Minimal flow stand-in for PublishEvalTeardownHandler tests."""
+
+    def __init__(
+        self, *, bot_exists=True, bot_lookup_raises=False, teardown_success=True
+    ):
+        self._bot_exists = bot_exists
+        self._bot_lookup_raises = bot_lookup_raises
+        self._teardown_success = teardown_success
+        self.teardown_called = False
+
+        class _BaasService:
+            def __init__(self, parent):
+                self._parent = parent
+
+            def get_bot(self, *, bot_uuid):
+                if self._parent._bot_lookup_raises:
+                    raise RuntimeError("BaaS unreachable")
+                if not self._parent._bot_exists:
+                    return None
+                return {"bot_uuid": bot_uuid}
+
+        self._baas_service = _BaasService(self)
+
+    async def execute_eval_teardown(self, *, publish_id, bot_uuid, operator):
+        self.teardown_called = True
+        if self._teardown_success:
+            return {"success": True, "message": "ok"}
+        return {"success": False, "message": "destroy failed"}
+
+
+def test_eval_teardown_short_circuits_when_bot_absent():
+    """Bot already destroyed → Complete() immediately, no teardown call."""
+    flow = _FakeEvalTeardownFlow(bot_exists=False)
+    handler = PublishEvalTeardownHandler(flow=flow, task_queue_service=Mock())
+    outcome = handler.handle(
+        {"publish_id": 1, "bot_uuid": "BOT-GONE", "operator": "op"}
+    )
+    assert isinstance(outcome, Complete)
+    assert flow.teardown_called is False
+
+
+def test_eval_teardown_proceeds_when_bot_exists():
+    """Bot exists → normal teardown path runs."""
+    flow = _FakeEvalTeardownFlow(bot_exists=True, teardown_success=True)
+    handler = PublishEvalTeardownHandler(flow=flow, task_queue_service=Mock())
+    outcome = handler.handle(
+        {"publish_id": 1, "bot_uuid": "BOT-ALIVE", "operator": "op"}
+    )
+    assert isinstance(outcome, Complete)
+    assert flow.teardown_called is True
+
+
+def test_eval_teardown_proceeds_when_existence_check_raises():
+    """BaaS unreachable → non-fatal fallthrough to normal teardown."""
+    flow = _FakeEvalTeardownFlow(bot_lookup_raises=True, teardown_success=True)
+    handler = PublishEvalTeardownHandler(flow=flow, task_queue_service=Mock())
+    outcome = handler.handle({"publish_id": 1, "bot_uuid": "BOT-X", "operator": "op"})
+    assert isinstance(outcome, Complete)
+    assert flow.teardown_called is True

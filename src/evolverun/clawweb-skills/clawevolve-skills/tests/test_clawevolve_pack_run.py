@@ -91,14 +91,26 @@ class ReportRetryTest(unittest.TestCase):
                 deploy.assert_not_called()
 
 
-class LocalNamespaceTest(unittest.TestCase):
-    def test_local_namespace_and_source_checks(self):
+class ArtifactReferenceTest(unittest.TestCase):
+    def test_frozen_reference_owns_bucket_and_source_path(self):
         for kind, suffix, round_no in [("snapshot", "snapshots/artifact.zip", 0), ("baseline", "baseline/artifact_v0.zip", 0), ("round", "rounds/round-002/artifacts/artifact_v2.zip", 2)]:
-            args = type("Args", (), {"source_kind": kind, "source_task_id": "S", "source_round": round_no, "artifact_bucket": "clawevolve-artifacts"})()
-            value = {"ref": f"oss://clawevolve-artifacts/evolution/S/{suffix}", "size": 1, "sha256": "a"*64, "contentType": "application/zip"}
-            MOD.validate_artifact(value, args)
-            for wrong in [value["ref"].replace("/S/", "/OTHER/"), value["ref"].replace("clawevolve-artifacts", "other-bucket")]:
-                with self.assertRaises(RuntimeError): MOD.validate_artifact({**value, "ref": wrong}, args)
+            args = type("Args", (), {"source_kind": kind, "source_task_id": "S", "source_round": round_no, "artifact_bucket": ""})()
+            for bucket in ("clawevolve-artifacts", "antsys-agentclaw-prod"):
+                value = {"ref": f"oss://{bucket}/evolution/S/{suffix}", "size": 1, "sha256": "a"*64, "contentType": "application/zip"}
+                MOD.validate_artifact(value, args)
+                with self.assertRaises(RuntimeError):
+                    MOD.validate_artifact({**value, "ref": value["ref"].replace("/S/", "/OTHER/")}, args)
+
+    def test_explicit_legacy_bucket_must_match_frozen_reference(self):
+        args = type("Args", (), {"source_kind": "snapshot", "source_task_id": "S", "source_round": 0, "artifact_bucket": "clawevolve-artifacts"})()
+        value = {"ref": "oss://other-bucket/evolution/S/snapshots/artifact.zip", "size": 1, "sha256": "a"*64, "contentType": "application/zip"}
+        with self.assertRaises(RuntimeError): MOD.validate_artifact(value, args)
+
+    def test_rejects_noncanonical_or_unsafe_reference(self):
+        args = type("Args", (), {"source_kind": "snapshot", "source_task_id": "S", "source_round": 0, "artifact_bucket": ""})()
+        base = {"size": 1, "sha256": "a"*64, "contentType": "application/zip"}
+        for ref in ["https://bucket/evolution/S/snapshots/artifact.zip", "oss://bucket/evolution/S/%73napshots/artifact.zip", "oss://bucket/evolution/S/snapshots/artifact.zip?x=1"]:
+            with self.assertRaises(RuntimeError): MOD.validate_artifact({**base, "ref": ref}, args)
 
     def test_internal_cli_rejects_namespace_override(self):
         argv = ["pack", "--mode", "restore", "--task-id", "T", "--step-id", "S", "--artifact-bucket", "clawevolve-artifacts"]

@@ -67,29 +67,19 @@ pub async fn guard_legacy_targets(
             request_id: None,
         });
     }
-    // No old Send can carry these contexts. Settle them instead of waiting
-    // for a managed Send that disabled admission will never create.
-    for target in legacy {
-        loop {
-            use bcs_service_api::port::repo::message_delivery::DeliveryLookup;
-            let scope = match session_id {
-                Some(session) => DeliveryLookup::LanePendingContexts { bot: target.bot_uuid.clone(), session: session.into() },
-                None => DeliveryLookup::BotPendingContexts(target.bot_uuid.clone()),
-            };
-            let contexts = service.lookup(scope).await
-                .map_err(|_| ServiceError::InternalError("queue context drain lookup failed".into()))?;
-            if contexts.is_empty() { break; }
-            for row in contexts {
-                service.transition(bcs_service_api::DeliveryTransitionCommand {
-                    delivery_id: row.delivery_id, expected_state_version: row.state.state_version,
-                    event: bcs_service_api::core::message_delivery::DeliveryLifecycleEvent::CancelRequested,
-                    now_ms: chrono::Utc::now().timestamp_millis(), request_id: None, actor_id: None,
-                    reply: None, transport_context_json: None, deadline_at_ms: None,
-                }).await.map_err(|_| ServiceError::InternalError("queue context drain failed".into()))?;
-            }
-        }
-    }
+    // Pending context never blocks drain. The next Send is admitted as its
+    // carrier even after policy is disabled; initialization must not be lost.
     Ok(())
+}
+
+pub(crate) async fn pending_context_carrier(flow: &BcsMessageFlow, bot: &str, kind: bcs_domain::DeliveryType, session: Option<&str>) -> ServiceResult<bool> {
+    if kind != bcs_domain::DeliveryType::Send { return Ok(false); }
+    let (Some(service), Some(session)) = (&flow.managed_deliveries, session) else { return Ok(false); };
+    let now = chrono::Utc::now().timestamp_millis();
+    let rows = service.lookup(bcs_service_api::port::repo::message_delivery::DeliveryLookup::LanePendingContextCarrier {
+        bot: bot.into(), session: session.into(), now_ms: now,
+    }).await.map_err(|_| ServiceError::InternalError("queue context drain lookup failed".into()))?;
+    Ok(!rows.is_empty())
 }
 
 pub async fn resolve_group_session(
@@ -166,8 +156,19 @@ pub async fn find_managed_run(
 
 /// Reuse the session or legacy group participants already resolved for routing.
 pub(crate) async fn needs_reply(flow: &BcsMessageFlow, group: &Group) -> bool {
-    flow.managed_deliveries.is_some() && group.group_strategy != GroupStrategy::StateMachine
-        && manages_any(flow, group).await
+    if flow.managed_deliveries.is_none() || group.group_strategy == GroupStrategy::StateMachine { return false; }
+    if manages_any(flow, group).await { return true; }
+    // A reply from an old direct run may be the first Send that can carry
+    // retained initialization after queue policy was disabled. The scoped
+    // admission below performs the authoritative lookup and propagates errors.
+    let service = flow.managed_deliveries.as_ref().expect("checked above");
+    for participant in &group.participants {
+        match service.lookup(bcs_service_api::port::repo::message_delivery::DeliveryLookup::BotPendingContexts(participant.bot_uuid.clone())).await {
+            Ok(rows) if rows.is_empty() => {},
+            _ => return true,
+        }
+    }
+    false
 }
 
 pub(crate) struct QueuedReply {
@@ -220,15 +221,17 @@ pub(crate) async fn commit_routed_reply(
     } else {
         &flow.group_delivery_limits
     };
-    let selected: Vec<_> = contexts
-        .into_iter()
-        .filter_map(|(target, context)| {
-            let limit = if let Some(p) = &policy {
-                (original.is_some() || p.policy.manages_group(&target.bot_uuid)).then(|| p.policy.bot(&target.bot_uuid).max_queued)
-            } else { reply_limits.get(&target.bot_uuid).copied() };
-            limit.map(|limit| (target, context, limit))
-        })
-        .collect();
+    let mut selected = Vec::new();
+    for (target, context) in contexts {
+        let limit = if let Some(p) = &policy {
+            (original.is_some() || p.policy.manages_group(&target.bot_uuid)).then(|| p.policy.bot(&target.bot_uuid).max_queued)
+        } else { reply_limits.get(&target.bot_uuid).copied() };
+        if let Some(limit) = limit { selected.push((target, context, limit, false)); }
+        else if pending_context_carrier(flow, &target.bot_uuid, target.delivery_type, event.bcs_session_id.as_deref()).await? {
+            let limit = policy.as_ref().map_or(100, |p| p.policy.bot(&target.bot_uuid).max_queued);
+            selected.push((target, context, limit, true));
+        }
+    }
     if original.is_none() && selected.is_empty() {
         return Ok(None);
     }
@@ -273,7 +276,7 @@ pub(crate) async fn commit_routed_reply(
         provider_bypass_headers,
     };
     let mut targets = Vec::new();
-    for (target, context, limit) in selected {
+    for (target, context, limit, drain) in selected {
         let projection = QueuedGroupProjection::capture(
             flow,
             group,
@@ -285,11 +288,15 @@ pub(crate) async fn commit_routed_reply(
         )
         .await?
         .with_reply_context(context, forward_hop, strip_mentions);
-        targets.push(DeliveryAdmissionTarget { rejection: projection.admission_rejection,
+        let rejection = projection.admission_rejection;
+        let mut projection = serde_json::to_value(projection)?;
+        projection["drain_context"] = serde_json::json!(drain);
+        if let Some(policy) = &policy { projection["policy_version"] = serde_json::json!(policy.version); }
+        targets.push(DeliveryAdmissionTarget { rejection,
             target_bot_id: target.bot_uuid,
             kind: target.delivery_type,
             max_queued: limit,
-            semantic_projection_json: serde_json::to_value(projection)?,
+            semantic_projection_json: projection,
         });
     }
     let target_ids = targets.iter().map(|t| t.target_bot_id.clone()).collect();
@@ -454,16 +461,17 @@ pub async fn prepare_group_admission(
     }
     guard_legacy_targets(flow, &decision.targets, command.session_id.as_deref()).await?;
     let policy = match &flow.delivery_policy { Some(live) => Some(live.snapshot.read().await.clone()), None => None };
-    let selected: Vec<_> = decision
-        .targets
-        .iter()
-        .filter_map(|target| {
-            let limit = if let Some(p) = &policy {
-                p.policy.manages_group(&target.bot_uuid).then(|| p.policy.bot(&target.bot_uuid).max_queued)
-            } else { flow.group_delivery_limits.get(&target.bot_uuid).copied() };
-            limit.map(|limit| (target, limit))
-        })
-        .collect();
+    let mut selected = Vec::new();
+    for target in &decision.targets {
+        let limit = if let Some(p) = &policy {
+            p.policy.manages_group(&target.bot_uuid).then(|| p.policy.bot(&target.bot_uuid).max_queued)
+        } else { flow.group_delivery_limits.get(&target.bot_uuid).copied() };
+        if let Some(limit) = limit { selected.push((target, limit, false)); }
+        else if pending_context_carrier(flow, &target.bot_uuid, target.delivery_type, command.session_id.as_deref()).await? {
+            let limit = policy.as_ref().map_or(100, |p| p.policy.bot(&target.bot_uuid).max_queued);
+            selected.push((target, limit, true));
+        }
+    }
     if selected.is_empty() {
         return Ok(None);
     }
@@ -481,7 +489,7 @@ pub async fn prepare_group_admission(
             request_id: None,
         })?;
     let mut targets = Vec::new();
-    for (target, limit) in selected {
+    for (target, limit, drain) in selected {
         let projection = QueuedGroupProjection::capture(
             flow,
             group,
@@ -494,6 +502,7 @@ pub async fn prepare_group_admission(
         .await?;
         let rejection = projection.admission_rejection;
         let mut projection = serde_json::to_value(projection)?;
+        projection["drain_context"] = serde_json::json!(drain);
         if let Some(policy) = &policy { projection["policy_version"] = serde_json::json!(policy.version); }
         targets.push(DeliveryAdmissionTarget { rejection,
             target_bot_id: target.bot_uuid.clone(),

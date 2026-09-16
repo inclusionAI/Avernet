@@ -538,3 +538,21 @@ def test_shipped_config_requires_user_for_harnessflow(method: str, path: str) ->
 
     assert req is not None, (method, path)
     assert req[PrincipalType.USER] is Presence.REQUIRED, (method, path)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/openapi/v1/tclog/query",
+        "/openapi/v1/tclog/traces/trace-1",
+        "/openapi/v1/clawevolve/tasks",
+        "/openapi/v1/clawevolve/bench/runs",
+    ],
+)
+def test_shipped_config_requires_app_for_clawweb_machine_apis(path: str) -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+
+    req = rs.resolve("GET", path)
+
+    assert req == {PrincipalType.APP: Presence.REQUIRED}, path

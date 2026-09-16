@@ -103,9 +103,14 @@ _ISSUER = "gateway"
 # credential is re-addressed before it is forwarded (see
 # ``core/gateway_principal/signer.py``).
 #
+# BCN's component name — the same spelling is what BCN uses as ``iss`` when
+# it mints its own short-lived user principals (work-order mention notices),
+# mirroring :data:`_BCN_ISSUER` for the tokens *we* re-sign for it.
+_BCN_COMPONENT_NAME = "bcs"
+
 # ``aud`` is BCN's name under the gateway's ``servers:`` map, the same way
 # :data:`_AUDIENCE` is ours — it names who the token is *for*.
-_BCN_AUDIENCE = "bcs"
+_BCN_AUDIENCE = _BCN_COMPONENT_NAME
 
 # ``iss`` names who *issued* it, and for a token we mint that is this component,
 # not the gateway: the claims are the gateway's assertions, but the signature
@@ -123,6 +128,14 @@ _BCN_ISSUER = _COMPONENT_NAME
 # below are the same key — so a re-addressed token carries it too, or BCN
 # rejects the header before it ever checks the signature.
 _BCN_KEY_ID = "bare"
+
+# The ``iss`` values the ordinary-HTTP internal surface trusts. Requests
+# forwarded by the gateway carry ``iss=gateway``; BCN-minted principals carry
+# ``iss=bcs``. Under the shared-key model any key holder could sign either
+# name, so the allow-list adds no cryptographic boundary — it keeps ``iss``
+# honest for audit instead. The strict ``/openapi/v1`` surface is NOT touched:
+# it keeps the single ``gateway`` issuer from :func:`get_principal_verifier_config`.
+ORDINARY_HTTP_ISSUERS = (_ISSUER, _BCN_COMPONENT_NAME)
 
 # What every unresolved deployment gets: an empty key, which the verifier treats
 # as "trust nothing" and answers 401 to everything. Also the pre-boot value, so

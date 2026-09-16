@@ -8,7 +8,7 @@ use bcs_protocol::BcsFrame;
 use bcs_service_api::{
     ActorKind, ActorStatus, AgentCredentials, BotAbortDeliveryCommand, BotAbortDeliveryResult,
     BotCapabilities, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult,
-    BotDeliveryTarget, BotDynamicStatus, BotRegistryCoreService, CoordinationSurface,
+    BotDeliveryTarget, BotRegistryCoreService, CoordinationSurface,
     FrontendDeliveryCommand, FrontendDeliveryPort, FrontendDeliveryResult, Group, GroupCoreService,
     GroupMessage, GroupStatus, Participant, ParticipantMode, ParticipantRole,
     ProviderTransportPreference, RedactedToken, RegisteredBot, RouteAndSendResult,
@@ -730,7 +730,7 @@ impl BotRegistryCoreService for FakeRegistryService {
         Ok(())
     }
 
-    async fn update_status(&self, _bot_id: &str, _status: BotDynamicStatus) -> bool {
+    async fn update_status(&self, _bot_id: &str) -> bool {
         false
     }
 

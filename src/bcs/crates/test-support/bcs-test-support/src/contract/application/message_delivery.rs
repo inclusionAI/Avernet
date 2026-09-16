@@ -8,6 +8,30 @@ use bcs_service_api::port::repo::message_delivery::{
     AdmitMessageDeliveries, DeliveryAdmissionTarget,
 };
 
+/// Consumer-facing System queue contract: Public/Skip share one source and
+/// acceptance never claims downstream delivery. Caller supplies a managed
+/// fixture with at least two Bot participants and a canonical Session.
+pub async fn system_message_queue_service_contract_tests<T: bcs_service_api::application::system_message::SystemMessageQueueService + ?Sized>(
+    service: &T, group: &bcs_domain::Group, session_id: &str,
+) -> bcs_service_api::ServiceResult<()> {
+    use bcs_domain::{PersistMode, SystemGroupMessage, SystemMessageEventKind};
+    let bots: Vec<_> = group.participants.iter().filter(|p| p.is_bot()).collect();
+    assert!(bots.len() >= 2);
+    let messages = [
+        SystemGroupMessage { recipients: vec![bots[0].bot_uuid.clone()], message: "shared notice".into(),
+            delivery_type: DeliveryType::Send, persist: PersistMode::Public },
+        SystemGroupMessage { recipients: vec![bots[1].bot_uuid.clone()], message: "shared notice".into(),
+            delivery_type: DeliveryType::Inject, persist: PersistMode::Skip },
+    ];
+    let outcome = service.admit(group, session_id, &group.participants, SystemMessageEventKind::BotHiddenNotice, &messages).await?.expect("managed fixture");
+    assert_eq!(outcome.recipients.len(), 2);
+    assert!(outcome.recipients.iter().all(|(_, r)| r.accepted() && !r.delivered && r.delivery_id.is_some()));
+    let invalid = [SystemGroupMessage { recipients: vec![bots[1].bot_uuid.clone()], message: "orphan".into(),
+        delivery_type: DeliveryType::Inject, persist: PersistMode::Skip }];
+    assert!(service.admit(group, session_id, &group.participants, SystemMessageEventKind::BotHiddenNotice, &invalid).await.is_err());
+    Ok(())
+}
+
 pub async fn managed_message_delivery_service_contract_tests<
     T: ManagedMessageDeliveryService + ?Sized,
 >(

@@ -80,6 +80,18 @@ def test_explicit_api_requires_key(tmp_path: Path) -> None:
         resolve_judge_runtime(_request(tmp_path, judge_backend="api"))
 
 
+def test_api_requires_explicit_model(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="API judge requires --model"):
+        resolve_judge_runtime(_request(tmp_path, api_key="key", model=""))
+
+
+def test_subagent_without_model_inherits_openclaw_default(tmp_path: Path) -> None:
+    runtime = resolve_judge_runtime(_request(tmp_path, model=""))
+
+    assert runtime.backend == "subagent"
+    assert runtime.subagent.model == ""
+
+
 def test_factory_creates_selected_analyzer(tmp_path: Path) -> None:
     preference = CasePreference(raw_message="diagnose")
     api_runtime = resolve_judge_runtime(_request(tmp_path, api_key="key"))

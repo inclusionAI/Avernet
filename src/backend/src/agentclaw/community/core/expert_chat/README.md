@@ -37,3 +37,13 @@ internal_dependencies:
 ### Change impact
 
 Schema changes require SQLite migration. Cross-domain dependencies make refactors risky — start with read-only impact analysis.
+
+### Application Caller connection policy
+
+Any signature-verified application identity may access any existing Caller
+instance in its verified tenant, including another user's instance on a private
+Bot. This endpoint does not require an application grant, ownership, or current
+collaborator membership. The Bot must exist in the tenant, and the Caller must
+already have an instance with a nonempty bot UUID. No administrator privilege or
+first-time provisioning is granted. User-authenticated endpoints retain their
+existing access policies.

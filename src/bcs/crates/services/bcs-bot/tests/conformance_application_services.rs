@@ -11,7 +11,7 @@ use bcs_service_api::core::WorkerProfileCoreService;
 use bcs_service_api::port::repo::BotRepoPort;
 use bcs_service_api::{
     ActorStatus, AgentCredentials, BotCandidateSearchQuery, BotCandidateVisibility,
-    BotCapabilities, BotConnectParams, BotDynamicStatus, BotRegistryCoreService, ConnectionKind,
+    BotCapabilities, BotConnectParams, BotRegistryCoreService, ConnectionKind,
     EnsureHumanResult, RegisteredBot, ServiceError, ServiceResult, WorkerProfile,
     WorkerRecommendCommand, WorkerRecommendResult, WorkerRecommendation,
 };
@@ -127,8 +127,8 @@ impl BotRepoPort for NoConnectBotRepo {
         self.inner.register(bot_id, capabilities).await
     }
 
-    async fn update_status(&self, bot_id: &str, status: BotDynamicStatus) -> bool {
-        self.inner.update_status(bot_id, status).await
+    async fn update_status(&self, bot_id: &str) -> bool {
+        self.inner.update_status(bot_id).await
     }
 
     async fn get(&self, bot_id: &str) -> Option<RegisteredBot> {

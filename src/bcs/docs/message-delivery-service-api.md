@@ -3,6 +3,48 @@
 本文描述单实例消息拥塞控制的后端契约，不包含 Workbench 前端实现。
 详细设计见 [设计方案](plans/2026-09-04-bcs-message-congestion-control-design.md)。
 
+## System 消息与 Group 联合启停
+
+`flow_enabled.group` 和 `flow_enabled.system` 必须同时为 true 或 false；新 PUT 不一致返回
+`queue_group_system_switch_mismatch`。启动、master 接管和 5 秒策略校验读取旧 DB 策略时，
+按原 group 值同步 system，通过 CAS 保存版本 +1，记录
+`updated_by=system:group-system-policy-migration`；冲突重读，不覆盖并发管理更新。
+Bot defaults/overrides 仍控制逐 Bot 灰度。Direct A2A、task、state-machine 尚不因此就绪。
+
+System producer 保留 Send/Inject 与可见性决策。Dispatcher 的
+`SystemMessageQueueService::admit` 将同一次事件的多份消息及受管目标交给
+`ManagedMessageDeliveryService::admit_batch`，在同一 Session 的一个事务中完成序号分配、
+正文、事件、容量检查与 delivery 写入。任何事务失败不调用旧发送端口。
+整批提交后 Driver 才可能被调度，其他 Bot 的初始化上下文已持久化。
+容量拒绝仍逐目标提交，不回滚其他目标。
+
+`Public` 消息对应一个 canonical source，多 Bot 共享；`PerRecipient` 为个性化内容各存一条。
+同一 producer 输出中的 `Skip` 副本必须引用唯一一条相同正文的 Public 消息，不重复新增 history。
+无来源或歧义副本拒绝整次准入；空 GenericNotification 不产生消息或投递。
+人类通知仍由 frontend port 即时发布，Bot 上下文不因入队变成公共消息。
+
+开启的 System Send 使用 `flow_kind=system`，Inject 进入 `pending_context`；Group 与 System
+共享 Bot/session lane 和 Bot 容量。下一条任一 flow 的 Send 按序绑定并携带两类上下文，
+下行仅使用 `chat.send`。普通系统通知沿用历史 TTL、条数与字节预算。
+SessionContext 及 BotJoined 给新 Bot 的个性化初始化 Inject 显式标记
+`semantic_projection_json.required_context=true`，不受普通 TTL 或条数淘汰；普通历史仍最多
+`max_context_messages` 条。必要上下文完整占用同一个 `max_context_bytes` 预算，过大时
+Send 准备失败并释放上下文，不截断初始化、不静默突破预算；原始消息保留。
+该规则不改变“当前 Send 正文不计入附加历史预算”的既有边界。
+
+入队后的 System recipient 返回 `delivery_id`、`delivered=false`，无 error 表示已准入。
+`successful_deliveries` 为兼容保留“成功接纳”计数，通过逐目标字段区分准入和已投递。
+Session/Group 初始化响应增加 `initial_run.state=queued`，不能显示为 running；既有
+`started_at` 在 queued 状态表示响应生成时间，实际运行计时与 run context 由 Worker send-start
+之后建立。ACK、final、error、abort 和 Unknown 恢复复用现有受管运行链路。
+
+联合关闭或 Bot off 后，旧 Send 继续 drain。孤立 pending Inject 不被取消，也不阻塞新 Send；
+下一条 Group/System Send 以 `drain_context=true` 入队携带它，准入时在当前策略版本下重新
+校验同 lane 存在未过期 context。新 Inject 仍按关闭后的旧链路处理。故“不依赖原生
+chat.inject”仅保证已开启的 Group/System Bot；其他 flow 和关闭模式保持兼容。
+不新增数据库列；旧二进制不能消费新的 System projection，回滚前必须停止新准入并排空
+System Send、消费或明确处置剩余初始化上下文，不能直接交给旧 Worker。
+
 ## Provider 运行 ID 与队列尝试 ID
 
 `bcs_message_deliveries.run_id` 标识逻辑运行，`request_id` 标识当前发送尝试。
@@ -174,7 +216,7 @@ PUT 示例（数值是开发初始值，生产需压测）：
       "group": true,
       "direct_a2a": false,
       "task": false,
-      "system": false,
+      "system": true,
       "state_machine": false
     },
     "defaults": {
@@ -216,7 +258,7 @@ TTL / safe_retry 可为 null，分别表示不自动过期、不自动安全重�
 - 关闭类型或 Bot 后，已准入消息及其回复继续受管 drain；存在未完成 Send 时，
   **同一目标 Bot/session** 的新请求返回 queue_draining，其他 session 不受此 drain 检查阻塞。
   检查只取一条未完成 Send，不加载整个 lane；孤立 pending_context 不阻塞 drain，
-  当前 lane 的 Send 排空后分批取消这些 context，不清理其他 session 的 context。
+  当前 lane 的 Send 排空后保留这些 context，下一条 Send 作为受管载体消费，不清理其他 session。
   确实没有 canonical session 的旧入口仍保守检查整个 Bot，不能猜测 session 后放行。
   Unknown 不自动到期，需要可信结束事件或下述人工处置。受管调度的 Bot 级 max_running
   仍统计 unknown 的占用；收窄 drain 不代表取消 Bot 并发限制，也不代表 legacy 受共同限流。
@@ -236,8 +278,8 @@ TTL / safe_retry 可为 null，分别表示不自动过期、不自动安全重�
 存在待恢复 delivery 时，即使 DB 策略关闭也执行恢复，恢复不会按当前开关过滤。
 不引入外部 MQ、outbox 或分布式 lease。
 
-首批就绪类型为 group（自由聊天群及主从群），包括 WebSocket、HTTP 群聊/会话发送、
-持久群普通 Bot 消息、IM 入站及其回复路由。system callback、task、Direct A2A、
+就绪类型为 group（自由聊天群及主从群）及 system，包括 WebSocket、HTTP 群聊/会话发送、
+持久群普通 Bot 消息、IM 入站、System 通知及其回复路由。内部控制回调、task、Direct A2A、
 state-machine 保留原路径；误开启未就绪类型返回 queue_flow_not_ready。
 
 `provider_http.queue_persistable_headers`（默认空）是 `bypass_headers` 的子集，

@@ -1,7 +1,7 @@
 import type { IDatabase, Row } from "@avernet/clawweb-shared/server/db";
 import { CHECK_VERSION, MonitoringError, type BotCheck, type DiagnosisEvent, type DiagnosisItem,
   type DiagnosisPage, type DiagnosisQuery, type MonitoringStore } from "../services/monitoring/contracts.js";
-import { parseCheck, parseDiagnosis } from "../services/monitoring/validation.js";
+import { id, parseCheck, parseDiagnosis } from "../services/monitoring/validation.js";
 import { CHECKS_TABLE, DIAGNOSES_TABLE, verifyMonitoringSchema } from "./monitoring-schema-check.js";
 
 const fields = {
@@ -64,6 +64,15 @@ export class MonitoringRepository implements MonitoringStore {
       this.ready = null;
       throw new MonitoringError("NOT_READY", "监控存储暂不可用或表结构不兼容。");
     }
+  }
+  async listBots(): Promise<{ botId: string }[]> {
+    return this.run(async () => {
+      // Both tables are authoritative: checks discover quiet bots; diagnoses preserve history.
+      // UNION deduplicates in one DB snapshot, including records written by other instances.
+      const rows = await this.db.query(`SELECT bot_id FROM ${CHECKS_TABLE}
+        UNION SELECT bot_id FROM ${DIAGNOSES_TABLE} ORDER BY bot_id`);
+      return rows.map((row) => ({ botId: id(row.bot_id) }));
+    });
   }
   async insertDiagnosis(input: DiagnosisEvent, receivedAt: number): Promise<boolean> {
     const event = parseDiagnosis(input, input.eventId);

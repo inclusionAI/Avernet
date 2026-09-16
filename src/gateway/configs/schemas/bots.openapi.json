@@ -19535,9 +19535,10 @@
             "type": "integer"
           },
           "sortBy": {
-            "default": "latest",
+            "default": "hottest",
             "description": "Ordering applied to matched Skills.",
             "enum": [
+              "hottest",
               "latest",
               "oldest",
               "heat",

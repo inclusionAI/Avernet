@@ -8,7 +8,7 @@ from .. import logger
 from ..io import write_named_outputs
 from ..spec.builder import build_objective_document, build_spec, validate_discovery
 from ..spec.contract import validate_objective_markdown, validate_spec_markdown
-from ..spec.document_agent import generate_plan_markdown_with_agent, load_plan_templates
+from ..spec.renderer import render_goal_markdown, render_markdown
 from ..product import PlanProductService
 from .inputs import _archived_input_path
 
@@ -58,29 +58,17 @@ def build_and_write_spec(
 
     logger.info("build objective start", output_dir=output_dir, task_id=task_id)
     objective_doc = build_objective_document(spec)
-    objective_md: str
-    spec_md: str
-    document_metadata: dict[str, Any]
-    objective_template, spec_template, template_paths = load_plan_templates()
-    document_context = dict(plan)
-    document_context["generated_spec_context"] = spec
-    document_context["objective_document_context"] = objective_doc
-    objective_md, spec_md, document_metadata = generate_plan_markdown_with_agent(
-        plan=document_context,
-        goal_text=args.goal,
-        discovery_notes=discovery_notes,
-        target_files=[str(item) for item in args.target if str(item).strip()],
-        objective_template=objective_template,
-        spec_template=spec_template,
-        workspace=output_dir / "document_agent",
-        task_id=task_id or str(getattr(args, "task_id", "") or "plan"),
-    )
+    objective_md = render_goal_markdown(objective_doc)
+    spec_md = render_markdown(spec)
     validate_objective_markdown(objective_md, objective_doc)
     validate_spec_markdown(spec_md, spec)
-    document_metadata["template_paths"] = template_paths
-    document_metadata["generation_method"] = "agent_template_fill"
+    document_metadata = {
+        "method": "deterministic_renderer",
+        "generation_method": "deterministic_renderer",
+        "model_used": False,
+    }
     logger.info(
-        "plan documents validated", task_id=task_id, method="agent_template_fill"
+        "plan documents validated", task_id=task_id, method="deterministic_renderer"
     )
 
     objective_doc["document_generation"] = document_metadata

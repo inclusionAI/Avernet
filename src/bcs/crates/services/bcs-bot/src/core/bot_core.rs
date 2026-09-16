@@ -10,7 +10,7 @@ use bcs_service_api::port::repo::{
 };
 use bcs_service_api::{
     ActorStatus, AgentCredentials, BotCapabilities, BotConnectParams, BotConnectResult,
-    BotDeliveryTarget, BotDynamicStatus, BotRegistryCoreService, ConnectError,
+    BotDeliveryTarget, BotRegistryCoreService, ConnectError,
     ConnectStreamError, ConnectionKind, CoordinationSurface, EnsureHumanResult, RedactedToken,
     RegisteredBot, ServiceError, ServiceResult,
 };
@@ -173,8 +173,8 @@ impl BotRegistryCoreService for BotCore {
         self.repo.update_capabilities(bot_id, capabilities).await
     }
 
-    async fn update_status(&self, bot_id: &str, status: BotDynamicStatus) -> bool {
-        self.repo.update_status(bot_id, status).await
+    async fn update_status(&self, bot_id: &str) -> bool {
+        self.repo.update_status(bot_id).await
     }
 
     async fn get(&self, bot_id: &str) -> Option<RegisteredBot> {

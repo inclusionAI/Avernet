@@ -29,7 +29,7 @@ container can see, since on that family the composed artifact *is* the
 delivery — but that is the delivery port's job, and rev 8 moved it there. The
 port this service's `CliToolService` holds is the one bound for *this* path,
 which carries the redeliver; the apply path's is bound without it, because a
-manifest apply closes with `TeclawDelivery.finish` instead. Neither branch is
+manifest apply closes with `TeclawPlatformDelivery.finish` instead. Neither branch is
 taken here.
 """
 from __future__ import annotations
@@ -72,7 +72,7 @@ logger = get_logger()
 #: family": teclaw has two, because *who pushes the artifact* differs by caller
 #: and not by engine. This surface is the live one, so its binding carries the
 #: redeliver; a manifest apply asks for plain ``"teclaw"`` and closes with
-#: ``TeclawDelivery.finish`` instead (spec D-14).
+#: ``TeclawPlatformDelivery.finish`` instead (spec D-14).
 FAMILY_TECLAW = "teclaw-live"
 FAMILY_ARCA = "arca"
 

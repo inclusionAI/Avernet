@@ -128,6 +128,28 @@ function isAutoRepair(item: ImprovementView): boolean {
   return item.actionType === "DIRECT_EVOLUTION";
 }
 
+type AdminTargetStatus = "ACTIVE" | "IN_PROGRESS" | "RESOLVED" | "ARCHIVED";
+
+/**
+ * Targets the admin state machine can actually apply for a given status.
+ * `markAdminHandled` only advances ACTIVE/IN_PROGRESS items to 系统验收, and `adminReopen`
+ * only restores ARCHIVED ones; offering any other target would only ever return a state conflict.
+ */
+const ADMIN_STATUS_TRANSITIONS: Record<string, readonly { value: AdminTargetStatus; label: string }[]> = {
+  ACTIVE: [{ value: "IN_PROGRESS", label: "系统验收" }],
+  ARCHIVED: [{ value: "ACTIVE", label: "待修复" }],
+};
+
+function adminTransitionsFor(status: unknown): readonly { value: AdminTargetStatus; label: string }[] {
+  return ADMIN_STATUS_TRANSITIONS[String(status ?? "").toUpperCase()] ?? [];
+}
+
+function evolveTaskPath(taskId: string): string {
+  return taskId.toUpperCase().startsWith("REPAIR-")
+    ? `/evolve/repair-runs/${encodeURIComponent(taskId)}`
+    : `/evolve/runs/${encodeURIComponent(taskId)}`;
+}
+
 function repairCreatePath(item: ImprovementView): string {
   return `/evolve/new?type=repair&improvementId=${encodeURIComponent(item.improvementId)}`;
 }
@@ -157,7 +179,7 @@ function repairActionHint(item: ImprovementView): string {
     return "可选择自动修复进入进化室；如果你已经自行修复，也可以直接标记并进入 Agent 验收。";
   }
   if (normalizedStatus(item.status) === "ACTIVE") {
-    return "该问题需要你手动修改 Agent 配置或业务设置。";
+    return "该问题需要你手动修改 Agent 配置或业务设置；完成后可标记已修复进入系统验收，也可以交给 Bot 修复。";
   }
   if (normalizedStatus(item.status) === "IN_PROGRESS" && isAutoRepair(item)) {
     return "Agent 正在进化室执行修复；执行完成后会自动进入验收。";
@@ -208,6 +230,7 @@ export default function ImprovementItems({
   const [rejecting, setRejecting] = useState<ImprovementView | null>(null);
   const [autoRepairing, setAutoRepairing] = useState<ImprovementDetail | null>(null);
   const [adminExecuting, setAdminExecuting] = useState<ImprovementDetail | null>(null);
+  const [adminTransition, setAdminTransition] = useState<AdminTargetStatus | null>(null);
   const [grantManagerVisible, setGrantManagerVisible] = useState(false);
   const adminListMode = Boolean(readOnly && user?.isAdmin);
 
@@ -332,6 +355,7 @@ export default function ImprovementItems({
     Boolean(selectedImprovementId) &&
     (detailLoading || loadedDetailId !== selectedImprovementId);
   const activeDetailVerifying = activeDetail ? isVerificationStage(activeDetail) : false;
+  const adminTransitions = adminOperate && activeDetail ? adminTransitionsFor(activeDetail.status) : [];
 
   const openFailureTask = (improvement: ImprovementDetail, evidence: ImprovementDetail["evidence"][number]) => {
     const task: FailureTaskIndex = {
@@ -428,6 +452,21 @@ export default function ImprovementItems({
     } finally {
       setStatusSavingId(null);
     }
+  };
+
+  const adminAdvanceTo = async (status: AdminTargetStatus) => {
+    if (!adminOperate || !activeDetail || statusSavingId) return;
+    if (status === "RESOLVED" && !window.confirm("确认由管理员直接推进到系统验收/已完成？")) return;
+    setStatusSavingId(activeDetail.improvementId); setStatusError("");
+    try {
+      const updated = status === "RESOLVED"
+        ? await insightApi.adminForceResolved(activeDetail.improvementId, { version: activeDetail.version, reason: "管理员手动推进状态机" })
+        : status === "IN_PROGRESS" ? await insightApi.adminMarkHandled(activeDetail.improvementId, activeDetail.version)
+        : status === "ACTIVE" ? await insightApi.adminReopenImprovement(activeDetail.improvementId, { version: activeDetail.version, reason: "管理员手动恢复处理" })
+        : await insightApi.updateImprovement(activeDetail.improvementId, { status, version: activeDetail.version });
+      replaceImprovement(updated); setAdminTransition(null);
+    } catch (reason) { setStatusError(reason instanceof Error ? reason.message : "管理员推进状态失败"); }
+    finally { setStatusSavingId(null); }
   };
 
   const markHandled = async (improvement: ImprovementView) => {
@@ -808,13 +847,25 @@ export default function ImprovementItems({
                             </>
                           )}
                           {canOperate && normalizedStatus(activeDetail.status) === "ACTIVE" && !isAutoRepair(activeDetail) && (
-                            <button
-                              disabled={statusSavingId === activeDetail.improvementId}
-                              onClick={() => adminOperate ? setAdminExecuting(activeDetail) : navigate(repairCreatePath(activeDetail))}
-                              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {statusSavingId === activeDetail.improvementId ? "正在开始…" : adminOperate ? "管理员指定方向并进入进化室" : "进入 Bot 修复"}
-                            </button>
+                            <>
+                              <button
+                                disabled={statusSavingId === activeDetail.improvementId}
+                                onClick={() => adminOperate ? setAdminExecuting(activeDetail) : navigate(repairCreatePath(activeDetail))}
+                                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {statusSavingId === activeDetail.improvementId ? "正在开始…" : adminOperate ? "管理员指定方向并进入进化室" : "进入 Bot 修复"}
+                              </button>
+                              {!adminOperate && (
+                                <button
+                                  disabled={statusSavingId === activeDetail.improvementId}
+                                  onClick={() => markHandled(activeDetail)}
+                                  className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-4 py-2.5 text-xs font-semibold text-blue-700 shadow-sm transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  <InsightIcon name="check" />
+                                  {statusSavingId === activeDetail.improvementId ? "正在更新…" : "我已自行修复，开始验收"}
+                                </button>
+                              )}
+                            </>
                           )}
                           {canOperate && normalizedStatus(activeDetail.status) === "IN_PROGRESS" && !activeDetailVerifying && isAutoRepair(activeDetail) && (
                             <button
@@ -872,6 +923,7 @@ export default function ImprovementItems({
                             </button>
                           )}
                         </div>
+                        {adminOperate && adminTransitions.length > 0 && <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 lg:col-span-2"><span className="text-xs font-semibold text-violet-800">管理员状态机</span><select aria-label="管理员推进目标状态" value={adminTransition ?? ""} onChange={(e) => setAdminTransition((e.target.value || null) as AdminTargetStatus | null)} className="rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-xs"><option value="">选择目标状态</option>{adminTransitions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><button type="button" disabled={!adminTransition || Boolean(statusSavingId)} onClick={() => adminTransition && void adminAdvanceTo(adminTransition)} className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">{statusSavingId ? "推进中…" : "立即推进"}</button></div>}
                         <p className="text-left text-xs leading-5 text-gray-500">
                           {readOnly && !adminOperate ? "仅查看对应用户的处理进度和 Agent 验收结果。" : repairActionHint(activeDetail)}
                         </p>
@@ -1047,7 +1099,7 @@ export default function ImprovementItems({
                             key={link.evolveTaskId}
                             onClick={() =>
                               navigate(
-                                `/evolve/runs/${encodeURIComponent(link.evolveTaskId)}`,
+                                evolveTaskPath(link.evolveTaskId),
                               )
                             }
                             className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left hover:bg-gray-50"

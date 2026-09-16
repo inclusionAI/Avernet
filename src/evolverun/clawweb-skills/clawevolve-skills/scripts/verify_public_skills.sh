@@ -11,6 +11,12 @@ requested_root="${1:-${default_root}}"
 }
 skills_root="$(cd "${requested_root}" && pwd -P)"
 
+legacy_version_file="$(find "${skills_root}" -mindepth 2 -maxdepth 2 -type f -name version -print -quit)"
+[[ -z "${legacy_version_file}" ]] || {
+  echo "Legacy per-Skill version file is not allowed: ${legacy_version_file}" >&2
+  exit 1
+}
+
 required_entries=(
   "clawevolve-diagnose/scripts/run.sh"
   "clawevolve-plan/scripts/run.sh"

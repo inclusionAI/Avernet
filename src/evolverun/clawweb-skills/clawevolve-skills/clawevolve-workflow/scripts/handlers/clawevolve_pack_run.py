@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Task-bound immutable Pack/Restore handler."""
-import argparse, hashlib, json, os, subprocess, sys, tempfile, urllib.parse, urllib.request, zipfile
+import argparse, hashlib, json, os, re, subprocess, sys, tempfile, urllib.parse, urllib.request, zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib_artifact_url_client import ArtifactUrlClient
 from lib_http_retry import retry_http
 
-BUCKET = os.environ.get("CLAWEVOLVE_ARTIFACT_BUCKET", "clawevolve-artifacts")
 PREFIX = os.environ.get("CLAWEVOLVE_ARTIFACT_PREFIX", "evolution")
 WORKSPACE = Path(os.environ.get("OPENCLAW_WORKSPACE", "/home/admin/.openclaw/workspace"))
 SKILL_BASE = Path(os.environ.get("SKILL_BASE_DIR") or Path(__file__).resolve().parents[3]).expanduser().resolve()
@@ -70,12 +69,18 @@ def manifest_artifact(manifest, kind):
 
 def validate_artifact(value, args):
     ref, size, digest = str(value.get("ref") or ""), value.get("size"), str(value.get("sha256") or "")
-    bucket = getattr(args, "artifact_bucket", "") or BUCKET
-    expected = f"oss://{bucket}/{PREFIX}/{args.source_task_id}/"
     suffix = "baseline/artifact_v0.zip" if args.source_kind == "baseline" else "snapshots/artifact.zip" if args.source_kind == "snapshot" else f"rounds/round-{args.source_round:03d}/artifacts/artifact_v{args.source_round}.zip"
-    if ref != expected + suffix or value.get("contentType") != "application/zip": raise RuntimeError("manifest contains invalid Pack reference")
+    parsed = urllib.parse.urlsplit(ref)
+    bucket = parsed.netloc
+    expected_path = f"/{PREFIX}/{args.source_task_id}/{suffix}"
+    configured_bucket = getattr(args, "artifact_bucket", "")
+    if (parsed.scheme != "oss" or not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,62}", bucket)
+            or parsed.path != expected_path or "%" in parsed.path or parsed.query or parsed.fragment
+            or (configured_bucket and configured_bucket != bucket)
+            or value.get("contentType") != "application/zip"):
+        raise RuntimeError("manifest contains invalid Pack reference")
     if not isinstance(size, int) or size < 0 or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest): raise RuntimeError("manifest contains invalid Pack digest")
-    return ref[len(f"oss://{bucket}/"):], size, digest
+    return parsed.path[1:], size, digest
 
 def frozen_restore_input(args):
     url = f"{args.clawweb_url}/api/evolve/internal/tasks/{urllib.parse.quote(args.task_id)}/steps/{urllib.parse.quote(args.step_id)}/input"
@@ -158,10 +163,9 @@ def main():
     ap.add_argument("--version", choices=["internalversion", "openversion"], default="internalversion")
     ap.add_argument("--artifact-bucket", default="")
     args = ap.parse_args()
-    # COSEC: only the explicit local mode can override the artifact namespace; internal defaults are unchanged.
+    # Backward compatibility only: the frozen artifact ref is the namespace source of truth.
     if args.artifact_bucket and args.version != "openversion": ap.error("artifact-bucket override requires openversion")
-    if args.version == "openversion":
-        if not __import__('re').fullmatch(r"[a-z0-9][a-z0-9.-]{1,62}", args.artifact_bucket): ap.error("openversion requires a valid artifact-bucket")
+    if args.artifact_bucket and not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,62}", args.artifact_bucket): ap.error("invalid artifact-bucket")
 
     args.clawweb_url = args.clawweb_url.rstrip("/")
     for name, value in (("task-id", args.task_id), ("step-id", args.step_id)):

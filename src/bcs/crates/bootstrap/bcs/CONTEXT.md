@@ -101,3 +101,7 @@ verifier, but does not own request-time business policy.
 
 - `cargo test --package bcs --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs --all-targets --manifest-path src/bcs/Cargo.toml`
+
+Eventing bootstrap resolves optional idle polling ceilings to the existing base
+intervals, and supplies both limits to EventingLifecycle. Old configurations keep
+fixed polling. Larger ceilings require deployment latency validation.

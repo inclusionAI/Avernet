@@ -87,7 +87,7 @@ def run_pipeline(req: RunRequest) -> RunResult:
         base_url=direct_api_config.base_url,
         model=direct_api_config.model,
         base_url_source="cli:--llm-base-url" if req.llm_base_url else "code_default",
-        model_source="cli:--model" if req.model else "code_default",
+        model_source="cli:--model" if req.model else "openclaw_default",
         api_key_configured=bool(direct_api_config.api_key),
         used_for_judge=judge_runtime.backend == "api",
     )

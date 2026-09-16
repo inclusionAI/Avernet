@@ -112,8 +112,9 @@ pub trait BotRegistryCoreService: Send + Sync {
         })
     }
 
-    /// Renew a known registration heartbeat. The legacy payload is not retained.
-    async fn update_status(&self, bot_id: &str, status: BotDynamicStatus) -> bool;
+    /// Renew a known registration heartbeat. The legacy payload is not
+    /// retained and is no longer accepted on this internal core contract.
+    async fn update_status(&self, bot_id: &str) -> bool;
 
     /// Get a bot's registration info.
     /// This method excludes `agent_code` so delivery contracts must opt in to

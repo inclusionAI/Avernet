@@ -4,7 +4,6 @@ Focuses on logic that does NOT require the ant_skills_scan_sdk package
 (config loading, lifecycle, helper methods, update_skill_metadata_by_git_path).
 """
 import asyncio
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,7 +17,6 @@ def _make_skill_scan_service(**kwargs):
     """Construct SkillScanService with required mocks defaulted to MagicMock."""
     kwargs.setdefault("cache_plugin", MagicMock())
     kwargs.setdefault("skill_repository", MagicMock())
-    kwargs.setdefault("skill_center_sync_service", MagicMock())
     kwargs.setdefault("scanner", MagicMock())
     return SkillScanService(**kwargs)
 
@@ -75,6 +73,16 @@ class TestLoadConfig:
 # ---------------------------------------------------------------------------
 
 class TestServiceLifecycle:
+    def test_construction_does_not_require_center_reconciliation_service(self):
+        svc = SkillScanService(
+            cache_plugin=MagicMock(),
+            skill_repository=MagicMock(),
+            scanner=MagicMock(),
+            config={"enabled": False},
+        )
+
+        assert svc.is_running() is False
+
     def test_initial_state(self):
         svc = _make_skill_scan_service()
         assert svc._started is False
@@ -86,16 +94,12 @@ class TestServiceLifecycle:
         asyncio.run(svc.startup())
         assert svc._started is False
 
-    def test_startup_runs_daily_tasks_when_enabled(self):
-        svc = _make_skill_scan_service()
+    def test_startup_runs_only_configured_git_daily_task_when_enabled(self):
+        svc = _make_skill_scan_service(config={"git_archive_url": "https://git"})
         svc._scanner.create_sdk.return_value = MagicMock()
-        with (
-            patch.object(svc, "start_daily_task") as mock_daily,
-            patch.object(svc, "start_center_daily_task") as mock_center,
-        ):
+        with patch.object(svc, "start_daily_task") as mock_daily:
             asyncio.run(svc.startup())
-        mock_daily.assert_not_called()  # no git_archive_url configured
-        mock_center.assert_called_once()
+        mock_daily.assert_called_once_with("https://git")
 
     def test_start_when_scanner_unavailable_returns_false(self):
         svc = _make_skill_scan_service(config={"enabled": False})

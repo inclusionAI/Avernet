@@ -9,6 +9,7 @@ a token an attacker could plausibly present, and each must be rejected.
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 
 import jwt
 import pytest
@@ -742,3 +743,23 @@ def test_a_long_kid_is_clipped():
 
     assert "…" in str(exc.value)
     assert "K" * 100 not in str(exc.value)
+
+
+def test_issuer_allowlist_admits_every_named_component():
+    config = replace(CONFIG, issuer=("gateway", "bcs"))
+    caller = verify_principal_token(mint([user_principal()], issuer="bcs"), config)
+    assert caller.has_user
+
+
+def test_issuer_allowlist_still_rejects_strangers():
+    config = replace(CONFIG, issuer=("gateway", "bcs"))
+    with pytest.raises(PrincipalVerificationError):
+        verify_principal_token(
+            mint([user_principal()], issuer="somebody-else"), config
+        )
+
+
+def test_single_issuer_config_still_rejects_bcn_tokens():
+    """The strict OpenAPI surface keeps the single "gateway" issuer."""
+    with pytest.raises(PrincipalVerificationError):
+        verify_principal_token(mint([user_principal()], issuer="bcs"), CONFIG)

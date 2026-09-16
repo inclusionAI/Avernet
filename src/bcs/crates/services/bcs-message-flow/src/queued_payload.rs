@@ -17,6 +17,12 @@ const HISTORY_HEADER: &str = "历史上下文（以下消息不要求单独回�
 const OMITTED: &str = "部分较早历史因上下文限制已省略。\n";
 const TRUNCATED: &str = "[该条历史前部已省略]\n";
 
+pub(crate) fn required_context(row: &PersistedMessageDelivery) -> bool {
+    row.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::System
+        && row.state.kind == DeliveryType::Inject
+        && row.semantic_projection_json.get("required_context").and_then(serde_json::Value::as_bool) == Some(true)
+}
+
 pub async fn read_queued_payload(
     repo: &dyn MessageRepoPort,
     carrier: &PersistedMessageDelivery,
@@ -55,7 +61,10 @@ pub async fn read_bounded_queued_payload(
         return Err("queued carrier required".into());
     }
     let mut contexts: Vec<_> = contexts.iter().collect();
-    contexts.sort_by_key(|d| std::cmp::Reverse(d.source_session_seq));
+    contexts.sort_by_key(|d| (!required_context(d), std::cmp::Reverse(d.source_session_seq)));
+    let required_count = contexts.iter().filter(|d| required_context(d)).count();
+    let context_order: std::collections::BTreeMap<_, _> = contexts.iter()
+        .map(|d| (d.delivery_id.clone(), d.source_session_seq)).collect();
     let mut seen = BTreeSet::new();
     for context in &contexts {
         if !seen.insert(&context.delivery_id)
@@ -75,12 +84,16 @@ pub async fn read_bounded_queued_payload(
     let budget = usize::try_from(max_bytes).map_err(|_| "invalid context budget")?;
     if max_messages == 0 || budget < 512 || total < contexts.len() as u64 { return Err("invalid context limits or count".into()); }
     if let Some(s) = &saved {
-        if s.version != 1 || s.bound_count != total || s.selected.len() > max_messages as usize { return Err("stale context selection".into()); }
+        if s.version != 1 || s.bound_count != total || s.selected.len() > max_messages as usize + required_count { return Err("stale context selection".into()); }
+        if contexts.iter().filter(|d| required_context(d)).any(|d| !s.selected.iter().any(|item| item.delivery_id == d.delivery_id && item.body_start == 0)) {
+            return Err("required initialization context missing from selection".into());
+        }
     }
     let mut selection = DeliveryContextSelection { version: 1, max_messages, max_bytes, bound_count: total, history_bytes: 0, selected: Vec::new() };
     let mut blocks = Vec::new();
     let mut history_size = HISTORY_HEADER.len();
-    for row in contexts.into_iter().take(max_messages as usize) {
+    for row in contexts.into_iter().take(max_messages as usize + required_count) {
+        let required = required_context(row);
         let previous = saved.as_ref().and_then(|s| s.selected.iter().find(|s| s.delivery_id == row.delivery_id));
         if saved.is_some() && previous.is_none() { break; }
         if previous.is_some_and(|s| s.state_version != row.state.state_version) { return Err("stale context version".into()); }
@@ -98,6 +111,7 @@ pub async fn read_bounded_queued_payload(
         // marker prematurely can truncate history that would fit in full.
         let overhead = history_size + prefix.len() + 1;
         if saved.is_none() && overhead.saturating_add(body.len()) > budget {
+            if required { return Err("required initialization context exceeds byte budget".into()); }
             if !selection.selected.is_empty() { break; }
             let truncated_overhead = overhead + TRUNCATED.len() + if omitted { OMITTED.len() } else { 0 };
             let room = budget.saturating_sub(truncated_overhead);
@@ -110,18 +124,19 @@ pub async fn read_bounded_queued_payload(
         let attachments: Vec<_> = original_attachments.into_iter().filter(|a| a.attachment_type != AttachmentType::File).collect();
         history_size += block.len();
         selection.selected.push(SelectedDeliveryContext { delivery_id: row.delivery_id.clone(), state_version: row.state.state_version, body_start: start });
-        blocks.push((block, attachments, prefix.len()));
+        blocks.push((block, attachments, prefix.len(), row.source_session_seq));
         if start > 0 { break; }
     }
     if saved.is_none() && total > selection.selected.len() as u64 {
         // Once omission is known, its marker is also part of the budget. Drop
         // oldest selected whole messages first, never fill a gap with older ones.
-        while blocks.len() > 1 && history_size + OMITTED.len() > budget {
+        while blocks.len() > required_count.max(1) && history_size + OMITTED.len() > budget {
             history_size -= blocks.pop().expect("nonempty blocks").0.len();
             selection.selected.pop();
         }
         if history_size + OMITTED.len() > budget && !blocks.is_empty() {
-            let (block, _, prefix_len) = &mut blocks[0];
+            if required_count > 0 { return Err("required initialization context exceeds byte budget".into()); }
+            let (block, _, prefix_len, _) = &mut blocks[0];
             let overhead = HISTORY_HEADER.len() + OMITTED.len() + *prefix_len + TRUNCATED.len() + 1;
             if overhead > budget {
                 blocks.clear(); selection.selected.clear();
@@ -140,9 +155,11 @@ pub async fn read_bounded_queued_payload(
     if total > 0 {
         text.push_str(HISTORY_HEADER);
         if total > selection.selected.len() as u64 { text.push_str(OMITTED); }
-        for (block, files, _) in blocks.into_iter().rev() { text.push_str(&block); attachments.extend(files); }
+        blocks.sort_by_key(|(_, _, _, seq)| *seq);
+        for (block, files, _, _) in blocks { text.push_str(&block); attachments.extend(files); }
     }
     selection.history_bytes = text.len() as u64;
+    selection.selected.sort_by_key(|item| std::cmp::Reverse(context_order[&item.delivery_id]));
     if selection.history_bytes > max_bytes { return Err("context wrapper exceeds budget".into()); }
     if saved.as_ref().is_some_and(|s| s != &selection) { return Err("context selection changed".into()); }
     let source = repo.get_message_by_id(&carrier.session_id, &carrier.source_message_id).await.map_err(|_| "canonical source read failed")?.ok_or("canonical source missing")?;

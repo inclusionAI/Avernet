@@ -14,8 +14,8 @@ from lib_grading import DEFAULT_JUDGE_MODEL, _combine_grades, _grade_automated, 
 
 
 class JudgeNormalizationTests(unittest.TestCase):
-    def test_default_judge_model_is_glm_5_1(self) -> None:
-        self.assertEqual(DEFAULT_JUDGE_MODEL, "antchat/GLM-5.1")
+    def test_default_judge_model_inherits_openclaw(self) -> None:
+        self.assertEqual(DEFAULT_JUDGE_MODEL, "")
 
     def test_normalize_judge_response_averages_summed_total_when_breakdown_is_unit_scale(
         self,

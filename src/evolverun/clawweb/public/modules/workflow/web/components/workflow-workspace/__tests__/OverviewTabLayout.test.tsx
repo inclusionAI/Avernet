@@ -1,11 +1,12 @@
-import { render, screen, within, waitFor } from '@testing-library/react'
+import { act, render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   useWorkflowHealth: vi.fn(),
   useFlowRuns: vi.fn(),
+  analyze: { isPending: false, isError: false, error: null as Error | null, variables: undefined as { flowId: string } | undefined, mutate: vi.fn(), reset: vi.fn() },
 }))
 
 vi.mock('../../../api/hooks', () => ({
@@ -13,9 +14,14 @@ vi.mock('../../../api/hooks', () => ({
   useWorkflowHealthTrend: () => ({ data: [] }),
   useFlowRuns: mocks.useFlowRuns,
   useAnalysisProgress: () => ({ data: null, isError: false }),
+  useAnalyzeRun: () => mocks.analyze,
+  useEligibleBotsForAnalyze: () => ({ data: { bots: [{ botId: 'origin', botName: 'Origin Bot', env: 'prod' }] }, isLoading: false }),
 }))
 vi.mock('../../SuccessTrendCard', () => ({ SuccessTrendCard: ({ days, currentDetail }: { days?: number; currentDetail?: string }) => <div><span>成功率趋势 · {days}天</span><span>{currentDetail}</span></div> }))
 vi.mock('../../NodeAnalysisPanel', () => ({ default: () => <div>节点分析</div> }))
+vi.mock('@avernet/workflow/web/api/hooks', () => ({
+  useEligibleBotsForAnalyze: () => ({ data: { bots: [{ botId: 'origin', botName: 'Origin Bot', env: 'prod' }] }, isLoading: false }),
+}))
 
 import OverviewTab from '../OverviewTab'
 
@@ -56,6 +62,66 @@ const workflow = {
 }
 
 describe('task escort overview layout', () => {
+  beforeEach(() => {
+    sessionStorage.clear()
+    Object.assign(mocks.analyze, { isPending: false, isError: false, error: null, variables: undefined })
+    mocks.analyze.mutate.mockReset()
+  })
+
+  it('starts analysis from the row without navigating and blocks duplicate dispatch', async () => {
+    mockQueries()
+    const data = mocks.useFlowRuns().data
+    data.runs = [{ flow_id: 'run-1', workflow_id: workflow.workflow_id, origin_bot_id: 'origin:owner', status: 'failed', node_count: 1, failed_count: 1, succeeded_count: 0 }]
+    const view = render(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '分析', exact: true }))
+    expect(screen.getByText('选择 Bot 分析运行')).toBeInTheDocument()
+    expect(screen.getByText('发起 Bot')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '确认分析' }))
+    expect(mocks.analyze.mutate).toHaveBeenCalledWith({ flowId: 'run-1', botId: 'origin', botEnv: 'prod' }, expect.any(Object))
+    Object.assign(mocks.analyze, { isPending: true, variables: { flowId: 'run-1' } })
+    view.rerender(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
+    expect(screen.getByRole('button', { name: '派发中' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '分析中...' })).toBeDisabled()
+    Object.assign(mocks.analyze, { isPending: false, isError: true, error: new Error('Bot unavailable') })
+    view.rerender(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
+    expect(screen.getByRole('alert')).toHaveTextContent('Bot unavailable')
+    expect(screen.getByRole('button', { name: '确认分析' })).toBeEnabled()
+    act(() => mocks.analyze.mutate.mock.calls[0][1].onSuccess())
+    expect(screen.queryByText('选择 Bot 分析运行')).not.toBeInTheDocument()
+    expect(screen.getByText('run-1')).toBeInTheDocument()
+  })
+
+  it('retains submitted filters and pagination on return, isolated by workflow', async () => {
+    mockQueries()
+    const view = render(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: '运行状态' }), 'failed')
+    await userEvent.type(screen.getByRole('searchbox'), 'keyword{Enter}')
+    await userEvent.click(screen.getByRole('button', { name: '下一页' }))
+    view.unmount()
+    const returned = render(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
+    expect(screen.getByRole('searchbox')).toHaveValue('keyword')
+    expect(screen.getByRole('combobox', { name: '运行状态' })).toHaveValue('failed')
+    expect(mocks.useFlowRuns).toHaveBeenLastCalledWith(expect.objectContaining({ query: 'keyword', status: 'failed', offset: 20 }))
+    returned.rerender(<MemoryRouter><OverviewTab workflow={{ ...workflow, workflow_id: 'another' }} /></MemoryRouter>)
+    expect(screen.getByRole('searchbox')).toHaveValue('')
+    expect(mocks.useFlowRuns).toHaveBeenLastCalledWith(expect.objectContaining({ query: undefined, offset: 0 }))
+  })
+
+  it.each(['completed', 'failed'])('offers reanalysis for %s analyses', async (status) => {
+    mockQueries()
+    mocks.useFlowRuns().data.runs = [{ flow_id: 'run-retry', workflow_id: workflow.workflow_id, status: 'failed', evolution_analysis_status: status, node_count: 1, failed_count: 1, succeeded_count: 0 }]
+    render(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
+    await userEvent.click(screen.getByRole('button', { name: '重新分析' }))
+    expect(screen.getByText('选择 Bot 分析运行')).toBeInTheDocument()
+  })
+
+  it('falls back safely when saved filters are invalid', () => {
+    mockQueries()
+    sessionStorage.setItem(`workflow-run-list:${workflow.workflow_id}`, '{broken')
+    render(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
+    expect(screen.getByRole('searchbox')).toHaveValue('')
+    expect(mocks.useFlowRuns).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 0 }))
+  })
   it('filters all history, resets pagination, and leaves metrics independent', async () => {
     mockQueries()
     render(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
@@ -67,7 +133,7 @@ describe('task escort overview layout', () => {
     expect(mocks.useFlowRuns).toHaveBeenLastCalledWith(expect.objectContaining({ query: 'gateway-client', status: 'failed', offset: 0 }))
     await userEvent.click(screen.getByRole('button', { name: '下一页' }))
     expect(mocks.useFlowRuns).toHaveBeenLastCalledWith(expect.objectContaining({ query: 'gateway-client', status: 'failed', offset: 20 }))
-    const metricCalls = mocks.useFlowRuns.mock.calls.filter(([params]) => params?.from)
+    const metricCalls = mocks.useFlowRuns.mock.calls.filter(([params]) => params?.limit === 1)
     expect(metricCalls.every(([params]) => !params.query && !params.status && !params.statuses)).toBe(true)
     expect(screen.getByText('没有匹配的运行')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: '重置筛选' }))
@@ -91,7 +157,7 @@ describe('task escort overview layout', () => {
     mockQueries()
     const history = mocks.useFlowRuns()
     const metrics = { ...history, refetch: vi.fn() }
-    mocks.useFlowRuns.mockImplementation((params) => params.from ? metrics : history)
+    mocks.useFlowRuns.mockImplementation((params) => params.limit === 1 ? metrics : history)
     const view = render(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
     const refresh = screen.getByRole('button', { name: '刷新' })
     await userEvent.click(refresh)
@@ -123,7 +189,7 @@ describe('task escort overview layout', () => {
       isError: state === 'error' || state === 'refetchError',
     }
     const retry = vi.fn(() => { metrics = { ...history, isPending: false, isError: false } })
-    mocks.useFlowRuns.mockImplementation((params) => params.from ? { ...metrics, refetch: retry } : history)
+    mocks.useFlowRuns.mockImplementation((params) => params.limit === 1 ? { ...metrics, refetch: retry } : history)
     const view = render(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
     const region = screen.getByRole('region', { name: '工作流关键指标' })
     expect(within(region).getByText('异常结束').nextElementSibling).toHaveTextContent(state === 'empty' ? '0' : '—')
@@ -169,11 +235,34 @@ describe('task escort overview layout', () => {
     }))
   })
 
+  it.each([[5, 0], [25, 20], [0, 0]])('clamps restored pagination for %s remaining runs', async (total, offset) => {
+    mockQueries()
+    mocks.useFlowRuns().data.total = total
+    sessionStorage.setItem(`workflow-run-list:${workflow.workflow_id}`, JSON.stringify({ page: 4, statusFilter: '', query: '', searchInput: '', timeRange: '7d' }))
+    render(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
+    await waitFor(() => expect(mocks.useFlowRuns).toHaveBeenLastCalledWith(expect.objectContaining({ offset })))
+    expect(JSON.parse(sessionStorage.getItem(`workflow-run-list:${workflow.workflow_id}`)!).page).toBe(offset / 20)
+  })
+
+  it('switches list time independently and restores the selected range', async () => {
+    mockQueries()
+    const view = render(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
+    expect(screen.getByRole('combobox', { name: '运行时间范围' })).toHaveValue('7d')
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: '运行时间范围' }), '')
+    expect(mocks.useFlowRuns.mock.calls.at(-1)?.[0].from).toBeUndefined()
+    view.unmount()
+    render(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
+    expect(screen.getByRole('combobox', { name: '运行时间范围' })).toHaveValue('')
+    await userEvent.click(screen.getByRole('button', { name: '重置筛选' }))
+    expect(screen.getByRole('combobox', { name: '运行时间范围' })).toHaveValue('7d')
+  })
+
   it('keeps history pagination independent of the metric window', async () => {
     mockQueries()
     render(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
 
-    expect(mocks.useFlowRuns).toHaveBeenLastCalledWith({ workflowId: 'tech-research', limit: 20, offset: 0 })
+    const initialHistory = mocks.useFlowRuns.mock.calls.at(-1)?.[0]
+    expect(initialHistory).toEqual(expect.objectContaining({ workflowId: 'tech-research', limit: 20, offset: 0, from: expect.any(String), to: expect.any(String) }))
 
     await userEvent.click(screen.getByRole('button', { name: '下一页' }))
     await waitFor(() => expect(mocks.useFlowRuns).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -183,7 +272,7 @@ describe('task escort overview layout', () => {
     })))
     await userEvent.click(screen.getByRole('button', { name: '30天' }))
     expect(mocks.useWorkflowHealth).toHaveBeenLastCalledWith('tech-research', 30)
-    expect(mocks.useFlowRuns).toHaveBeenLastCalledWith({ workflowId: 'tech-research', limit: 20, offset: 20 })
+    expect(mocks.useFlowRuns).toHaveBeenLastCalledWith({ ...initialHistory, offset: 20 })
     const metricParams = mocks.useFlowRuns.mock.calls.at(-2)?.[0]
     expect(Number(metricParams.to) - Number(metricParams.from)).toBe(30 * 86400)
   })
@@ -195,7 +284,7 @@ describe('task escort overview layout', () => {
     await userEvent.click(screen.getByRole('button', { name: '今天' }))
     expect(mocks.useWorkflowHealth).toHaveBeenLastCalledWith('tech-research', 1)
 
-    const metricParams = mocks.useFlowRuns.mock.calls.filter(([params]) => params?.from).at(-1)?.[0]
+    const metricParams = mocks.useFlowRuns.mock.calls.filter(([params]) => params?.limit === 1).at(-1)?.[0]
     const localMidnight = Math.floor(new Date(new Date().setHours(0, 0, 0, 0)).getTime() / 1000)
     expect(Number(metricParams?.from)).toBe(localMidnight)
     expect(Number(metricParams?.to)).toBeGreaterThanOrEqual(localMidnight)
