@@ -30,7 +30,7 @@ start with `tests/` (relative to `src/backend/`) or are written out in full.
   - [ ] First upload of `my-skill` succeeds; second upload of the same name
         fails with `LocalSkillStorageError`
   - [ ] The test FAILS against `4d970281` — recorded in the commit message
-  - [ ] The failure is traced to `factories.py:349`, not to some other raise
+  - [ ] The failure is traced to `factories.py:280`, not to some other raise
 - **Depends on:** —
 
 ## Task 2: Reproduce the digest returning `None` on teclaw
@@ -180,10 +180,10 @@ start with `tests/` (relative to `src/backend/`) or are written out in full.
 - **Done when:**
   - [ ] ARCA → device; teclaw + switch off → device; teclaw + switch on →
         platform. One test per branch
-  - [ ] The switch is read from the typed config cluster
-        (`di/config.py:985`, a `bool` on `dev`); the selector parses no YAML
-        and re-reads no boolean — `teclaw_platform_managed_from_config`
-        (`apply/delivery.py:477`) already ends it at boot
+  - [ ] Delivery mode is read from the typed config cluster
+        (`di/config.py:993`, a `TeclawDeliveryMode`); the selector parses no
+        YAML and re-reads no boolean — `teclaw_delivery_mode_from_config`
+        (`core/bot_config_manifest/delivery_mode.py:79`) ends it at boot
   - [ ] The protocol's members are `@abstractmethod`, per the house reason
         (no static type checker to catch a rename)
 - **Depends on:** Task 10
@@ -218,9 +218,8 @@ start with `tests/` (relative to `src/backend/`) or are written out in full.
 - **Files:** `core/bot_config_manifest/apply/delivery.py`,
   `tests/community/api/skill_center/test_skills_routes_teclaw.py`
 - **Done when:**
-  - [ ] `MaterialiserPorts.upload_service` (`apply/delivery.py:124`) is supplied
-        by the selector — on `dev` that is the single `TeclawDelivery`
-        `_platform_ports()`/`_device_ports()` fork at `:459`
+  - [ ] `MaterialiserPorts.upload_service` is supplied by the selector for both
+        teclaw strategies
   - [ ] A second manifest apply for an existing name on a teclaw bot SUCCEEDS
   - [ ] A re-apply of an unchanged package plans `unchanged` and writes nothing
         — the convergence property `materialisers/skills.py:452` documents
@@ -235,11 +234,10 @@ start with `tests/` (relative to `src/backend/`) or are written out in full.
   `core/skill_center/services/local_skill_upload_service.py`,
   `tests/community/core/skill_center/test_local_skill_upload_service.py`
 - **Done when:**
-  - [ ] **On `dev` the file does not exist** (#2187 is `REL`-only). Create it
-        at the same path, with #2187's enum name and member spelling, then
-        add the five storage members — so a later release merge is a union,
-        not a collision between two rival schemes
-  - [ ] Additive for the legacy mapper either way: 
+  - [ ] Five members added to the existing enum — `upload_error_codes.py` is
+        on `dev` now (#2187 ported as `11c53ed7`), so this extends the
+        contract rather than creating it, as the brief intended
+  - [ ] Additive for the legacy mapper:
         `adapters/http/skill_center/skills.py:234-247` maps *from*
         `SkillManifestErrorCode`, so nothing there changes
   - [ ] All six sites carry a code: `:306` WRITE_FAILED, `:451` WRITE_FAILED,

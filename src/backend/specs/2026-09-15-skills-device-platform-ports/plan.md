@@ -17,7 +17,7 @@ Two problems, one change.
 on every row of a recursive listing and uses it as the *read address*
 (`:349` validates it, `:357` reads from it).
 `TeclawDeviceFileSystem.list_dir`
-(`core/devices/services/teclaw_device_filesystem.py:203`) returns engine rows
+(`core/devices/services/teclaw_device_filesystem.py:205`) returns engine rows
 untouched and teclaw supplies no `relative_path` — documented at
 `core/services/resource_file_service.py:351`. Permanent, not intermittent:
 `installed_package_digest` (`.../local_skill_upload_service.py:95`) calls the
@@ -56,45 +56,43 @@ the traversal guards. Do not create engine-named skill ports.
 > Paths in the brief omit the real prefix. Everything below is under
 > `src/backend/src/agentclaw/community/` unless written out in full.
 
-## Base-branch deltas (`dev` vs the brief's `REL20260915`)
+## Base-branch history (deltas retired 2026-09-16)
 
-Of the ten files this plan touches, only `apply/delivery.py` differs between
-the two branches. But two commits the brief's premises rest on are **not on
-`dev`**, and both change a task rather than the design:
+An earlier revision of this plan carried a *Base-branch deltas* section: when
+the work was retargeted from `REL20260915` to `dev`, two commits the brief's
+premises rested on were missing from `dev`, and two tasks had to be written
+around their absence.
 
-**1. `core/skill_center/upload_error_codes.py` does not exist on `dev`.** It
-arrived with `bc1a288a` (#2187), a `REL20260915`-only commit. The brief says
-*"A contract exists … prefer it over a second scheme"* — on `dev` there is no
-first scheme to prefer, so Task 15 **creates** the contract rather than
-extending it. To keep a later release merge trivial rather than conflicted,
-Task 15 creates the file at the same path, with the same enum name and the same
-member spelling #2187 used, and adds the storage members on top. A union merge
-then resolves cleanly instead of two rival schemes colliding.
+**Both are now on `dev` and the deltas are retired.** `dev` picked up the
+`REL20260915` ports as fresh commits (new SHAs, same content):
 
-**2. The platform-managed switch is a `bool` on `dev`, not an enum.**
-`19c0f197` (#2195, *inject the manifest delivery seam instead of assembling it
-from a flag*) is also `REL`-only. The shapes:
+| brief's premise | REL commit | now on `dev` as |
+|---|---|---|
+| `core/skill_center/upload_error_codes.py` exists | `bc1a288a` (#2187) | `11c53ed7` |
+| the manifest delivery seam is injected, not assembled from a flag | `19c0f197` (#2195) | `430b41be` |
 
-```python
-# dev — di/config.py:985, read by apply/delivery.py:477
-teclaw_platform_managed: bool = False
-# one strategy class decides at apply/delivery.py:459
-ports = self._platform_ports() if self._platform_managed else self._device_ports()
-```
+Consequences, both reverting to the brief's own assumptions:
 
-```python
-# REL20260915 after #2195 — a TeclawDeliveryMode enum in its own
-# core/bot_config_manifest/delivery_mode.py, and two strategy classes
-# (TeclawPlatformDelivery / TeclawDeviceDelivery) bound by a table.
-```
+1. **Task 15 extends the contract again, rather than creating it.**
+   `upload_error_codes.py` is present, so the brief's "prefer it over a second
+   scheme" applies as written, and the new storage members are added to the
+   existing enum.
+2. **The switch is a `TeclawDeliveryMode` enum again, not a `bool`.**
+   `core/bot_config_manifest/delivery_mode.py` exists on `dev`, and
+   `di/config.py:993` is `teclaw_delivery_mode` once more. The selector reads
+   the enum, as the brief describes.
 
-Same concept, different representation. The selector reads
-`manifest_config.teclaw_platform_managed` (a bool) instead of a
-`TeclawDeliveryMode`; `TeclawDelivery.ports()` at `:459` is the "the manifest
-can already see the switch" the brief cites. **No design change** — the
-device/platform axis, the three-branch selection table and the ports are
-identical either way. If this work is later cherry-picked onto `REL20260915`,
-the selector's single mode read is the one line that needs adapting.
+One unrelated change in the same range is worth noting because it edits a file
+this plan touches: **#2231** (*fix(skills): delegate local package deletion to
+runtime*) removed `LocalSkillQuarantineRepairError`, `quarantine_to` and
+`restore_from` from `core/skill_center/factories.py` (−77 lines). The P1 funnel
+is unaffected — `_read_package_files` is still the reader `verify` and
+`copy_to` share, still guards the path and still reads from it — but its line
+numbers moved, and are corrected throughout this document.
+
+**#2237** (*remove global git clone timeout*) also lands in this range; it
+supersedes part of the #2224 bootstrap fix that unblocked this PR's CI, and is
+noted only so a later reader does not mistake it for a regression.
 
 ## Approach
 
@@ -175,8 +173,7 @@ onto one address.
 - `di/modules/local_skill_upload_module.py` — bind the selector and both ports.
 - `di/modules/manifest_fetch_module.py` — manifest resolves the same selector.
 - `core/bot_config_manifest/apply/delivery.py` — `MaterialiserPorts.upload_service`
-  (`:124`) is now supplied by the selector; on `dev` that is the single
-  `TeclawDelivery._platform_ports()`/`_device_ports()` fork at `:459`.
+  is now supplied by the selector for both teclaw strategies.
 - `core/skill_center/upload_error_codes.py` — new storage members (additive).
 - `core/bot_config_manifest/apply/orchestrator.py:293` — non-empty `reason`.
 
@@ -235,7 +232,7 @@ returned exactly as today.
 ### 1. Repair the listing contract
 
 ```diff
-# core/devices/services/teclaw_device_filesystem.py:203
+# core/devices/services/teclaw_device_filesystem.py:205
   async def list_dir(self, dir_path, *, recursive=False) -> list[dict] | None:
       engine_path = self._path_mapper(dir_path)
       ...
@@ -267,7 +264,7 @@ async def _walk(self, dir_path: str) -> list[dict[str, Any]]:
     ResourceFileService._rel_path established (not imported — private)."""
 ```
 
-Traversal guards at `core/skill_center/factories.py:345-349` are untouched: a
+Traversal guards at `core/skill_center/factories.py:276-280` are untouched: a
 derived path that starts with `/` or contains `..` must still be rejected
 there. Synthesis never loosens validation.
 
@@ -291,20 +288,20 @@ class BotSkillPackageService(BotSkillPackageServiceProtocol):
 
     def __init__(self, *, bot_service, device_port_factory, platform_port_factory,
                  is_teclaw: Callable[[str, str], bool],
-                 platform_managed: Callable[[], bool]) -> None: ...
+                 delivery_mode: TeclawDeliveryMode) -> None: ...
 
     def _port(self, bot_id: str, owner_id: str) -> SkillPackageUploadPort:
         if not self._is_teclaw(bot_id, owner_id):
             return self._device()                      # ARCA: always device
-        if self._platform_managed():
+        if self._delivery_mode is TeclawDeliveryMode.PLATFORM:
             return self._platform()                    # teclaw + switch on
         return self._device()                          # teclaw + switch off
 ```
 
-`platform_managed` comes from the typed config cluster
-(`di/config.py:985`), where `teclaw_platform_managed_from_config`
-(`core/bot_config_manifest/apply/delivery.py:477`) already ends the boolean
-at boot — it is strict on purpose, because `bool("false")` is `True`. The
+`delivery_mode` comes from the typed config cluster (`di/config.py:993`),
+where `teclaw_delivery_mode_from_config`
+(`core/bot_config_manifest/delivery_mode.py:79`) already ends the boolean at
+boot — it is strict on purpose, because `bool("false")` is `True`. The
 selector re-reads nothing and parses nothing.
 
 ### 4. The lift
@@ -368,7 +365,7 @@ None. No new packages, no version bumps.
 - **Risk:** the open API begins resolving the delivery mode, changing which
   road a teclaw+switch-on upload takes. That is the point (brief §3), but it is
   a behaviour change on a live endpoint.
-  **Mitigation:** switch defaults off (`di/config.py:985`); explicit tests
+  **Mitigation:** switch defaults off (`delivery_mode.py:118`); explicit tests
   for all three selector branches.
 - **Risk:** the walk costs one round trip per subdirectory.
   **Mitigation:** packages cap at 500 files and are typically one or two levels;
