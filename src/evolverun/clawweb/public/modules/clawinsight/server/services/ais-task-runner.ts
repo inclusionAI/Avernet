@@ -1,6 +1,6 @@
 import type { EvolveRepository, EvolveTaskRow } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import type { MistOssObjectStore } from "./object-storage/oss-object-store.js";
-import { AistudioService } from "./aistudio-service.js";
+import type { AisExecutor } from "@avernet/clawevolve/server/contracts/ais-executor";
 
 export type AisArtifactSpec = { objectKey: string; contentType?: string };
 export type AisTaskDefinition<TConfig> = {
@@ -14,7 +14,7 @@ export type AisTaskDefinition<TConfig> = {
 /** Shared executeSnapshot dispatch. Business state is advanced only by executor callbacks. */
 export class AisTaskRunner<TConfig extends { artifacts: Record<string, AisArtifactSpec> }> {
   constructor(private readonly repo: EvolveRepository, private readonly store: MistOssObjectStore,
-    private readonly ais: AistudioService, private readonly definition: AisTaskDefinition<TConfig>) {}
+    private readonly ais: Pick<AisExecutor, "execute">, private readonly definition: AisTaskDefinition<TConfig>) {}
 
   supports(task: EvolveTaskRow): boolean { return this.definition.taskTypes.includes(task.task_type); }
   config(task: EvolveTaskRow): TConfig { return JSON.parse(task.config_json) as TConfig; }
