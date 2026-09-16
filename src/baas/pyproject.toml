@@ -10,7 +10,7 @@ dependencies = [
     "pydantic-settings>=2.14.2",
     "aiosqlite>=0.22.1",
     "aiohttp>=3.13.5",
-    "websockets>=15.0",
+    "websockets==15.0.1",
     "docker>=7.0",
     "websocket-client>=1.6.0",
     "httpx>=0.24.0",
