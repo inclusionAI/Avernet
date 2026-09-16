@@ -69,14 +69,10 @@ async def test_exact_release_collaborator_and_admin(setup, caplog):
         ("denied", "permission_denied"),
         ("personal", "not_service_bot"),
         ("version", "version_not_unique_or_missing"),
-        ("busy", "publication_not_ready"),
-        ("restarting", "restart_in_progress"),
         ("stage", "stage_not_bound"),
         ("binding", "binding_conflict"),
         ("provider", "unsupported_provider"),
-        ("wrong_bot", "binding_bot_mismatch"),
         ("empty", "no_current_instances"),
-        ("operation", "invalid_operation"),
     ],
 )
 async def test_reject_before_mutation(setup, case, code):
@@ -94,51 +90,30 @@ async def test_reject_before_mutation(setup, case, code):
         service.bots.get_by_id_and_entity.return_value["bot_type"] = "personal"
     if case == "version":
         command = replace(command, version=4)
-    if case == "busy":
-        pub.status = "online_pub"
-    if case == "restarting":
-        pub.ext["restart"] = {"restarting": True}
     if case == "stage":
         pub.ext = {}
     if case == "binding":
-        binding.env = "prod"
+        binding.status = "RELEASED"
     if case == "provider":
         binding.device_provider = "other"
-    if case == "wrong_bot":
-        binding.device_props = {"bolt_id": "another"}
     if case == "empty":
         service.runtime.targets.return_value = []
-    if case == "operation":
-        command = replace(command, operation="invalid")
     with pytest.raises(PublishIgnoreError, match=code):
         await service.change(command, actor, is_admin=False)
     service.runtime.change.assert_not_called()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("snapshot", ["change", "error", "partial", "rebinding"])
-async def test_preserves_results_on_snapshot_or_replica_failure(setup, snapshot):
+async def test_preserves_results_on_replica_failure(setup):
     service, command, _, _ = setup
-    if snapshot == "rebinding":
-        original = service.publications.list_by_source_bot.return_value
-        service.publications.list_by_source_bot.side_effect = [
-            original,
-            [NS(version=3, ext={"binding": {"online": 55}}, status="success")],
-        ]
-    if snapshot == "change":
-        service.runtime.targets.side_effect = [["a"], ["a", "b"]]
-    if snapshot == "error":
-        service.runtime.targets.side_effect = [["a"], RuntimeError("unavailable")]
-    if snapshot == "partial":
-        service.runtime.change.side_effect = [
-            {"status": "changed"},
-            {"status": "unknown"},
-        ]
+    service.runtime.change.side_effect = [
+        {"status": "changed"},
+        {"status": "unknown"},
+    ]
     result = await service.change(command, "admin", is_admin=True)
     assert not result["success"]
     assert result["results"][0]["status"] == "changed"
-    if snapshot == "error":
-        assert result["snapshot_status"] == "unknown"
+    assert result["results"][1]["status"] == "unknown"
 
 
 @pytest.mark.asyncio
@@ -164,59 +139,37 @@ async def test_service_boundary_logs(setup, monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["baas", "arca"])
-async def test_draft_uses_source_binding(setup, provider):
+async def test_draft_uses_device_id_without_bot_binding_id(setup, provider):
     service, command, pub, binding = setup
     pub.status = "draft"
     pub.ext["binding"]["draft"] = 99
-    service.bots.get_by_id_and_entity.return_value["binding_id"] = 44
+    service.bots.get_by_id_and_entity.return_value["device_id"] = "draft-device"
+    service.bindings.get_by_device_id.return_value = binding
     binding.device_provider = provider
     result = await service.change(replace(command, stage="draft"), "owner", is_admin=False)
     assert result["success"]
-    assert all(call.args == (44,) for call in service.bindings.get_by_id.call_args_list)
+    service.bindings.get_by_device_id.assert_called_once_with("draft-device")
+    service.bindings.get_by_id.assert_not_called()
     assert service.runtime.change.call_args.args[0].device_provider == provider
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("case,code", [
-    ("historical", "publication_not_ready"),
-    ("multiple", "publication_not_ready"),
-    ("missing_binding", "stage_not_bound"),
+    ("missing_device", "stage_not_bound"),
+    ("missing_binding", "binding_conflict"),
     ("version", "version_not_unique_or_missing"),
 ])
 async def test_draft_rejects_invalid_target(setup, case, code):
-    service, command, pub, _ = setup
+    service, command, pub, binding = setup
     pub.status = "draft"
-    service.bots.get_by_id_and_entity.return_value["binding_id"] = 44
-    if case == "historical":
-        pub.status = "success"
-    if case == "multiple":
-        service.publications.list_by_source_bot.return_value.append(NS(version=4, status="draft"))
+    service.bots.get_by_id_and_entity.return_value["device_id"] = "draft-device"
+    service.bindings.get_by_device_id.return_value = binding
+    if case == "missing_device":
+        service.bots.get_by_id_and_entity.return_value.pop("device_id")
     if case == "missing_binding":
-        service.bots.get_by_id_and_entity.return_value.pop("binding_id")
+        service.bindings.get_by_device_id.return_value = None
     if case == "version":
         command = replace(command, version=4)
     with pytest.raises(PublishIgnoreError, match=code):
         await service.change(replace(command, stage="draft"), "owner", is_admin=False)
     service.runtime.change.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("case", ["binding", "status", "multiple", "missing_bot"])
-async def test_draft_snapshot_revalidates_source_and_publication(setup, case):
-    service, command, pub, _ = setup
-    pub.status = "draft"
-    bot = service.bots.get_by_id_and_entity.return_value
-    bot["binding_id"] = 44
-    if case in {"binding", "missing_bot"}:
-        service.bots.get_by_id_and_entity.side_effect = [
-            bot, {**bot, "binding_id": 55} if case == "binding" else None,
-        ]
-    else:
-        after = [NS(version=3, status="success" if case == "status" else "draft", ext={})]
-        if case == "multiple":
-            after.append(NS(version=4, status="draft"))
-        service.publications.list_by_source_bot.side_effect = [[pub], after]
-    result = await service.change(replace(command, stage="draft"), "owner", is_admin=False)
-    assert not result["success"]
-    assert result["snapshot_status"] == "changed"
-    assert result["results"][0]["status"] == "changed"

@@ -95,11 +95,6 @@ class PublishIgnoreService:
                 raise PublishIgnoreError("permission_denied")
         if bot.get("bot_type") != "service":
             raise PublishIgnoreError("not_service_bot")
-        if command.stage not in {"draft", "verify", "online"} or command.operation not in {
-            "add",
-            "remove",
-        }:
-            raise PublishIgnoreError("invalid_operation")
         records = await asyncio.to_thread(
             self.publications.list_by_source_bot, bot["id"], self.env
         )
@@ -107,32 +102,21 @@ class PublishIgnoreService:
         if len(matches) != 1:
             raise PublishIgnoreError("version_not_unique_or_missing")
         publication = matches[0]
-        if (publication.ext or {}).get("restart", {}).get("restarting"):
-            raise PublishIgnoreError("restart_in_progress")
-        if not self._publication_ready(publication, records, command.stage):
-            raise PublishIgnoreError("publication_not_ready")
-        # COSEC: draft targets the source workspace, never a release binding.
-        binding_id = self._stage_binding(bot, publication, command.stage)
-        if not binding_id:
-            raise PublishIgnoreError("stage_not_bound")
-        binding = await asyncio.to_thread(self.bindings.get_by_id, binding_id)
-        if (
-            not binding
-            or binding.status != "ACTIVE"
-            or binding.entity_id != command.entity_id
-            or binding.env != self.env
-        ):
+        if command.stage == "draft":
+            # Draft Bot rows may have device_id without binding_id.
+            device_id = bot.get("device_id")
+            if not device_id:
+                raise PublishIgnoreError("stage_not_bound")
+            binding = await asyncio.to_thread(self.bindings.get_by_device_id, device_id)
+        else:
+            binding_id = (publication.ext or {}).get("binding", {}).get(command.stage)
+            if not binding_id:
+                raise PublishIgnoreError("stage_not_bound")
+            binding = await asyncio.to_thread(self.bindings.get_by_id, binding_id)
+        if not binding or binding.status != "ACTIVE":
             raise PublishIgnoreError("binding_conflict")
         if binding.device_provider not in {"baas", "arca"}:
             raise PublishIgnoreError("unsupported_provider")
-        declared_bot = binding.device_props.get("bolt_id") or binding.device_props.get(
-            "bot_id"
-        )
-        if declared_bot and declared_bot not in {
-            command.bot_id,
-            publication.publish_bot_id,
-        }:
-            raise PublishIgnoreError("binding_bot_mismatch")
         runtime_binding = PublishIgnoreBinding(
             binding.id, binding.device_provider, binding.device_id
         )
@@ -144,65 +128,9 @@ class PublishIgnoreService:
             results.append(
                 await self.runtime.change(runtime_binding, target, command, operator_id)
             )
-        try:
-            refreshed = await asyncio.to_thread(
-                self.publications.list_by_source_bot, bot["id"], self.env
-            )
-            same_version = [r for r in refreshed if r.version == command.version]
-            current_bot = bot
-            if command.stage == "draft":
-                current_bot = await asyncio.to_thread(
-                    self.bots.get_by_id_and_entity, command.bot_id, command.entity_id
-                )
-            publication_changed = (
-                len(same_version) != 1
-                or self._stage_binding(current_bot, same_version[0], command.stage)
-                != binding_id
-                or bool(
-                    (same_version[0].ext or {}).get("restart", {}).get("restarting")
-                )
-                or not self._publication_ready(same_version[0], refreshed, command.stage)
-            )
-            current_binding = await asyncio.to_thread(
-                self.bindings.get_by_id, binding_id
-            )
-            current = await self.runtime.targets(runtime_binding)
-            target_changed = (
-                publication_changed
-                or set(current) != set(targets)
-                or not current_binding
-                or current_binding.status != "ACTIVE"
-                or current_binding.device_id != binding.device_id
-            )
-            snapshot_status = "changed" if target_changed else "stable"
-        except Exception:
-            target_changed = True
-            snapshot_status = "unknown"
-        success = (
-            all(r["status"] in {"changed", "unchanged"} for r in results)
-            and not target_changed
-        )
-        result = {
-            "success": success,
+        return {
+            "success": all(r["status"] in {"changed", "unchanged"} for r in results),
             "scope": "current_instances",
             "results": results,
-            "targets_changed": target_changed,
-            "snapshot_status": snapshot_status,
             "request_id": command.request_id,
         }
-        return result
-
-    @staticmethod
-    def _stage_binding(bot, publication, stage):
-        if stage == "draft":
-            return (bot or {}).get("binding_id")
-        return (publication.ext or {}).get("binding", {}).get(stage)
-
-    @staticmethod
-    def _publication_ready(publication, records, stage):
-        if stage == "draft":
-            # COSEC: reject historical or ambiguous drafts before signing a write.
-            return publication.status == "draft" and sum(
-                record.status == "draft" for record in records
-            ) == 1
-        return publication.status in {"validating", "success", "upgraded"}

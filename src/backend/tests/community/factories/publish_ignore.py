@@ -50,7 +50,8 @@ def seed_publish_ignore(world, *, engine_success=True, stage="online"):
             "entity_id": "ignore_owner",
             "entity_type": "staff",
             "creator_id": "ignore_owner",
-            "binding_id": binding_id,
+            "binding_id": None if stage == "draft" else binding_id,
+            "device_id": "ignore-runtime",
         }
     )
     world.get(BotPublishRepositoryProtocol).insert(

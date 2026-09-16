@@ -2,6 +2,14 @@
 
 日期：2026-09-16。状态：接口已实现，交付门禁验证中；未部署。源码基于 GitHub inclusionAI/Avernet 的 REL20260917，PR 同样以该分支为目标。
 
+## 评审修订
+
+- draft 不要求 Bot.binding_id；复用 get_by_device_id(bot.device_id)，其查询限定当前环境。verify/online 仍取精确发布版本的 ext.binding[stage]。
+- 保留 Bot/entity 查询和管理权限、精确版本存在、有效设备及 provider 支持检查；运行 Bot/entity/stage 与发布态版本仍由 Engine 验签后核验。
+- 删除重复 stage/operation 校验（请求模型已有）、发布状态/重启阻断、全量草稿唯一性扫描、device_props 内 bot 字段猜测及重复 entity/env 比较。
+- 删除操作后的发布单/绑定/副本多轮复查及 targets_changed/snapshot_status 字段。接口仅汇总本次选定实例的执行结果，不提供并发发布一致性保证。
+- 测试先复现：真实 DB 中 draft Bot.binding_id=NULL、device_id 有值仍能写到正确实例；覆盖 baas/arca 查询、权限拒绝、缺设备、发布版本不存在及副本部分失败。Docker脚本不改。
+
 ## 1. 范围与既有链路
 
 现有安装脚本使用 cp，读取目标容器 `/home/admin/.service_bot_publish_ignore`。本次设计新增 Backend → Engine 的结构化增删接口，文件读改写完全由 Engine 承担。保持 cp，不增加 tar、重启、发布或文件删除。
@@ -24,8 +32,7 @@ Backend：POST `/api/service-bot/publish/ops/publish-ignore`，平放既有 rout
 - bot_id 为发布服务 Bot 标识，不是 BaaS bot_uuid；必须核对与指定实体的关系。
 - version 为正整数，Backend 环境 env 从当前认证/部署上下文获取，不把 stage 当 pre/prod 环境。
 - stage=draft|verify|online；eval 可能带额外业务实例标识，本期明确拒绝，不能映射到其他阶段。
-- draft：version 必须精确对应当前唯一 draft 发布单，目标取源 Bot.binding_id，不读取 ext.binding.draft，也不回退 verify/online。草稿容器是长期工作区，BaaS 初始化不传版本号，因此 Engine 校验受管理凭证中的 bot_id/entity_id/stage，发布版本只由 Backend 校验（仍包含在签名中）；verify/online 保持运行版本严格匹配。草稿规则不自动同步到验证/线上实例。
-- draft 操作后复查源 Bot.binding_id、精确版本及唯一 draft 状态；变化时保留已执行结果并报告 snapshot_status=changed。该复查不是跨数据库与运行实例的事务保证。
+- draft：version 必须对应该 Bot 的发布记录，目标通过源 Bot.device_id 查询，不要求 Bot.binding_id，也不回退 verify/online。草稿容器是长期工作区，BaaS 初始化不传版本号，因此 Engine 校验受管理凭证中的 bot_id/entity_id/stage，发布版本存在性由 Backend 校验（仍包含在签名中）；verify/online 保持运行版本严格匹配。草稿规则不自动同步到验证/线上实例。
 - operation=add|remove，path 为单个精确相对路径，采用已有 Shell 相同规范；拒绝绝对路径、换行、NUL、dot traversal、glob、开头 #/!、反斜杠和重复斜杠。保留文件名内部空格，允许 ./ 前缀及尾 / 规范化。
 - 平台管理员可操作任意目标 Bot；普通已登录用户可操作自己拥有或具备管理权限的 Bot，复用现有发布修改/重启的协作者权限服务（默认 PermissionLevel.ADMIN，包含 OWNER）。公开可聊天/只读权限不等于管理权限。entity_id 是定位条件而非授权凭据。授权在设备调用前完成，保留真实 operator。
 - add 已存在/remove 不存在均成功，changed=false；remove 只删规则，不删除业务文件。
@@ -51,9 +58,9 @@ class PublishIgnoreService:
 
 resolve_exact_target 的约束：
 1. 当前租户/env 内唯一解析 Bot，核对 entity_id 和 service 类型，再从真实记录取 owner_id；entity_id 不等于 owner_id。
-2. 使用已存在的 list_by_source_bot(source_bot_pk, env)，按 version 精确筛选并要求唯一；verify/online 取该发布单 ext.binding[stage]，draft 取源 Bot.binding_id 并要求该版本是唯一 draft。不能改成 latest 或 owner 猜测。
+2. 使用已存在的 list_by_source_bot(source_bot_pk, env)，按 version 精确筛选并要求唯一；verify/online 取该发布单 ext.binding[stage]，draft 通过 get_by_device_id(bot.device_id) 查询设备记录。不能改成 latest 或 owner 猜测。
 3. 校验绑定有效、所属对象匹配、实际运行版本匹配。历史发布单可能保留已被新版本复用的 binding，不能只检查 binding 存在。
-4. 目标已退役、版本不符、无指定阶段绑定、发布/重启正在变更目标时返回冲突或不存在；禁止 fallback 到最新版本或草稿。
+4. 目标已退役、版本不符、无指定阶段设备时返回冲突或不存在；禁止 fallback 到最新版本或其他阶段。不额外阻断发布状态或重启状态，由 Engine 校验收到请求时的运行身份。
 5. 枚举目标设备并固定快照；默认影响该版本阶段当前全部运行副本。未就绪副本记录失败，不静默跳过。
 
 按选中 binding.device_provider 分派，不根据 Bot 默认 provider 或 device_id 外形猜测：
@@ -63,7 +70,7 @@ resolve_exact_target 的约束：
 - DeviceContextResolver 只负责连接解析，不替代业务授权。对非 owner 的管理员/协作者，从已授权 Bot 记录提供身份及 bot_type，保留真实 operator；若连接 builder 有 owner 假设，仅做必要适配，不能冒用 owner 绕过权限。
 - 每目标结果增加 provider、binding_id、target_id；BaaS 另有 device_uuid，ARCA 不伪造 BaaS UUID。同步 SDK 使用线程卸载，不修改通用 HTTP 客户端。
 
-每副本返回 device_uuid、status、changed、entry_count、revision、错误类别。汇总全部成功才 success=true；部分失败为 PARTIAL，结果未知的超时为 UNKNOWN，保留成功项。重试仍固定原设备，且版本校验必须通过；不承诺跨副本事务或自动回滚。操作期间扩缩容发生变化须报告目标变化，不能把快照成功说成新副本也已配置。
+每副本返回 target_id、status、changed、entry_count、revision、错误类别。汇总全部成功才 success=true；超时为 unknown，保留其他成功项。不承诺跨副本事务或自动回滚，不复查并发扩缩容后的目标集合；成功仅表示本次选中实例完成，不代表新副本也已配置。
 
 ## 4. Engine 文件服务
 
@@ -95,7 +102,7 @@ NAS home 可以跨保留该卷的重启保留文件；临时 home、新设备、
 
 ## 6. Review / QA / Ship
 
-draft 增量测试计划：两种 provider 的源绑定定址、精确/唯一草稿版本、错误状态和无源绑定拒绝、操作中源绑定/草稿状态变化、HTTP 接受 draft、真实签名传输到 Engine（草稿凭证缺版本或带旧版本均可）、bot/entity/stage 缺失或错配拒绝、verify/online 版本校验不退化。Docker 启动脚本相对基线 diff 必须为空。
+draft 增量测试计划：两种 provider 的 device_id 定址、真实 DB 中无 Bot.binding_id、版本不存在及设备不存在拒绝、HTTP 接受 draft、真实签名传输到 Engine（草稿凭证缺版本或带旧版本均可）、bot/entity/stage 缺失或错配拒绝、verify/online 版本校验不退化。Docker 启动脚本相对基线 diff 必须为空。
 
 - 允许新增：Backend 请求模型、router endpoint、PublishIgnoreService/DI、精确目标查询的最小接线；Engine 请求模型、既有 bot router endpoint、文件服务与管理授权 guard、运行身份最小投影和测试。
 - 不触碰：Relay 引擎实现、Cron、发布状态机、通用 HTTP 客户端、制品构建和 cp 算法；不借运维接口触发发布重启。
