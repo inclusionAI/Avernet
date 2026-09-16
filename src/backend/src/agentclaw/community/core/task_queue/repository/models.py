@@ -22,6 +22,9 @@ from sqlalchemy.dialects import mysql
 from sqlalchemy.sql import func
 
 from agentclaw.community.core.base import Base
+from agentclaw.community.core.task_queue.repository.trace_carrier import (
+    decode_trace_carrier,
+)
 from agentclaw.community.core.task_queue.types import (
     DEFAULT_APP,
     MAX_APP_LEN,
@@ -29,10 +32,7 @@ from agentclaw.community.core.task_queue.types import (
     TaskRecord,
     TaskStatus,
 )
-from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
-
-logger = get_logger()
 
 # SQLite only auto-increments columns declared as exactly "INTEGER PRIMARY
 # KEY". BigInteger renders as "BIGINT" on SQLite, which breaks autoincrement.
@@ -73,31 +73,6 @@ IdempotencyKeyString = _binary_string(190)
 #: row written by another version during a rolling deploy, which is why the
 #: scope is enforced in the schema rather than only in the application.
 TaskTypeString = _binary_string(100)
-
-
-def _decode_trace_carrier(raw: str | None, task_id: int | None) -> dict | None:
-    """Deserialize ``trace_carrier``, degrading to ``None`` on anything odd.
-
-    Unlike ``payload`` — whose ``json.loads`` is deliberately unguarded, since a
-    task that cannot describe its work is a task that must not run — a trace
-    context is diagnostic. A row whose carrier is malformed (hand-edited, written
-    by a tracer whose format has since changed) must still be claimable: letting
-    it raise here would fail ``to_record`` for that row, and ``claim_batch``
-    projects a whole batch, so one bad row would take its whole batch down and
-    keep doing so on every poll.
-    """
-    if not raw:
-        return None
-    try:
-        decoded = json.loads(raw)
-    except (TypeError, ValueError):
-        decoded = None
-    if not isinstance(decoded, dict):
-        logger.warning(
-            "[task_queue] ignoring unreadable trace_carrier on task id=%s", task_id
-        )
-        return None
-    return decoded
 
 
 class TaskQueueModel(Base):
@@ -334,7 +309,7 @@ class TaskQueueModel(Base):
             app=self.app,
             idempotency_key=self.idempotency_key,
             trace_id=self.trace_id,
-            trace_carrier=_decode_trace_carrier(self.trace_carrier, self.id),
+            trace_carrier=decode_trace_carrier(self.trace_carrier, self.id),
             gmt_create=self.gmt_create,
             gmt_modified=self.gmt_modified,
         )

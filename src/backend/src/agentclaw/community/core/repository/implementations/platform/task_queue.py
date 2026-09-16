@@ -93,6 +93,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.elements import ColumnElement
 
 from agentclaw.community.core.task_queue.repository.models import TaskQueueModel
+from agentclaw.community.core.task_queue.repository.trace_carrier import (
+    encode_trace_carrier,
+)
 from agentclaw.community.core.task_queue.types import (
     TERMINAL_STATUSES,
     EnqueueResult,
@@ -142,42 +145,6 @@ _KEYED_INSERT_ATTEMPTS = 5
 #: distinct values if a non-strict server truncates them.
 _MAX_IDEMPOTENCY_KEY_LEN = TaskQueueModel.__table__.c.idempotency_key.type.length
 _MAX_TASK_TYPE_LEN = TaskQueueModel.__table__.c.task_type.type.length
-
-
-def _encode_trace_carrier(carrier: Optional[dict]) -> Optional[str]:
-    """Serialize a trace carrier for storage, degrading to ``None`` if it cannot be.
-
-    The write-side mirror of ``models._decode_trace_carrier``, and deliberately
-    unlike the ``payload`` dump in :meth:`TaskQueueRepository.enqueue`, which is
-    left unguarded on purpose: a task that cannot describe its *work* must not be
-    enqueued, while a task that cannot describe its *trace* should simply run
-    uncorrelated. ``ensure_ascii=False`` matches payload's spelling; a carrier is
-    ASCII in practice, but the two should not differ by accident.
-
-    ``TracerPlugin`` documents a carrier as JSON-serializable and both in-tree
-    impls return a flat dict of strings, so this should never fire. It exists
-    because the cost of being wrong is asymmetric. An impl that one day returns a
-    ``datetime``, an SDK object, or a cycle would raise here — *inside*
-    ``orm_session()``, which rolls the insert back — and the exception would
-    propagate out of ``TaskQueueService.enqueue`` to the caller, failing the work
-    they actually asked for. That is the one failure this feature guards against
-    at every other seam: ``_capture_trace`` swallows an export that raises and
-    truncates an overlong id, and ``_decode_trace_carrier`` degrades an unreadable
-    carrier at read time rather than failing the batch that projects it. A carrier
-    well-formed enough to export but not to serialize is the single path that
-    would otherwise reach the database unguarded.
-    """
-    if not carrier:
-        return None
-    try:
-        return json.dumps(carrier, ensure_ascii=False)
-    except (TypeError, ValueError):
-        logger.warning(
-            "[task_queue.enqueue] trace_carrier is not JSON-serializable; "
-            "enqueueing without correlation",
-            exc_info=True,
-        )
-        return None
 
 
 def _validate_idempotency_key(key: str) -> None:
@@ -475,7 +442,7 @@ class TaskQueueRepository(
                 # Serialized here rather than by the caller so the column's
                 # encoding stays this layer's business, exactly like payload —
                 # but guarded, unlike payload. See _encode_trace_carrier.
-                trace_carrier=_encode_trace_carrier(trace_carrier),
+                trace_carrier=encode_trace_carrier(trace_carrier),
             )
             db.add(row)
             db.flush()
