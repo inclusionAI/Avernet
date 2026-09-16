@@ -37,9 +37,6 @@ from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.bot_service_protocol import (
     BotServiceProtocol,
 )
-from agentclaw.community.core.bot_management.services.bot_service import (
-    BotNotFoundError as BotLookupNotFoundError,
-)
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.caller_identity.contracts import CallerIdentityStage
 from agentclaw.community.core.caller_identity.protocols import (
@@ -135,20 +132,26 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         ``BotRepository.get_by_id_and_owner`` returns ``BotModel.to_dict()``,
         which does NOT carry ``template_config`` — using it here would leave
         the caller container with only ``AGENTCLAW_ENGINE``, silently dropping
-        the engine-owned envs. ``BotService.get_bot`` raises its own
-        ``BotNotFoundError``; translate it back to this module's
-        ``ConnectionError(5001)`` contract so the caller lifecycle's error
-        surface is unchanged.
+        the engine-owned envs. So the bot is read through
+        ``BotServiceProtocol.get_bot`` (which attaches ``ac_templates.ext`` as
+        ``template_config``) once existence is confirmed.
+
+        Not-found is guarded through the injected ``BotRepository`` contract —
+        ``get_by_id_and_owner`` returns ``None`` — mirroring the sibling
+        ``_resolve_publish_image_pin``, so this module depends on no
+        concrete implementation-specific exception: ``BotServiceProtocol`` is
+        the only bot-management surface used here. A vanish-during-fetch race
+        (bot deleted between the guard and ``get_bot``) surfaces as
+        ``get_bot``'s own error and is folded back to this module's
+        ``ConnectionError(5001)`` contract by ``_create_container`` /
+        ``_upgrade_container``'s enclosing ``except Exception`` guard.
         """
-        try:
-            bot_info = self._bot_service.get_bot(bot_id=bot_id, user_id=owner_id)
-        except BotLookupNotFoundError as e:
+        if not self._bot_repo.get_by_id_and_owner(bot_id, owner_id):
             raise ConnectionError(
                 f"Bot not found: bot_id={bot_id} owner_id={owner_id}",
                 error_code="5001",
-                original_error=str(e),
-            ) from e
-        return bot_info
+            )
+        return self._bot_service.get_bot(bot_id=bot_id, user_id=owner_id)
 
     def _resolve_publish_image_pin(self, publish_record, *, bot_id: str, owner_id: str):
         """Resolve through the shared seam.
