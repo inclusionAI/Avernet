@@ -216,33 +216,63 @@ async fn ws_connect_new_bot_gets_bot_uuid_and_token() {
     assert!(uuid::Uuid::parse_str(token).is_ok(), "Token should be a valid UUID");
 }
 
-/// Bot reconnects with valid token in bot.connect params → gets same botUuid
+/// An active token rejects a duplicate socket, then reconnects after disconnect.
 #[tokio::test]
 async fn ws_connect_reconnect_with_valid_token_in_params() {
-    let _ = tracing_subscriber::fmt::try_init();
     let temp_dir = create_temp_bots_dir();
     let bots_dir = temp_dir.path().to_path_buf();
-    let (addr, _handle) = start_test_server(&bots_dir).await;
+    let (addr, handle) = start_test_server(&bots_dir).await;
 
-    tokio::time::sleep(Duration::from_millis(50)).await;
-
-    // First connection - get token
     let mut ws1 = connect_bot(addr, None).await;
     let resp1 = send_frame(&mut ws1, json!({
         "type": "req", "id": "1", "method": "bot.connect", "params": {}
     })).await.unwrap();
-
+    assert_eq!(resp1["ok"], true);
     let token = resp1["payload"]["token"].as_str().unwrap().to_string();
+    let bot_uuid = resp1["payload"]["bot_uuid"].as_str().unwrap().to_string();
 
-    // Second connection with token in params (not URL)
-    let mut ws2 = connect_bot(addr, None).await;
-    let resp2 = send_frame(&mut ws2, json!({
-        "type": "req", "id": "2", "method": "bot.connect", "params": {
-            "token": token
-        }
+    // Token authentication does not permit replacing an active connection.
+    let mut duplicate = connect_bot(addr, None).await;
+    let rejected = send_frame(&mut duplicate, json!({
+        "type": "req", "id": "duplicate", "method": "bot.connect",
+        "params": {"token": token}
     })).await.unwrap();
+    assert_eq!(rejected["id"], "duplicate");
+    assert_eq!(rejected["ok"], false);
+    assert_eq!(rejected["error"]["code"], "already_connected");
+    let closed = tokio::time::timeout(Duration::from_secs(5), duplicate.next())
+        .await.expect("rejected socket must close");
+    assert!(matches!(closed, Some(Ok(Message::Close(_)))));
 
-    assert!(resp2["ok"].as_bool().unwrap(), "Should succeed with valid token in params");
+    let status = send_frame(&mut ws1, json!({
+        "type": "req", "id": "original-status", "method": "bot.status", "params": {}
+    })).await.unwrap();
+    assert_eq!(status["id"], "original-status");
+    assert_eq!(status["ok"], true, "duplicate must leave the original connected");
+    ws1.close(None).await.unwrap();
+
+    // Closing the client does not synchronously finish server cleanup. Retry
+    // only the documented occupied-slot rejection, with a bounded deadline.
+    let (mut reconnected, response) = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let mut ws = connect_bot(addr, None).await;
+            let response = send_frame(&mut ws, json!({
+                "type": "req", "id": "reconnect", "method": "bot.connect",
+                "params": {"token": token}
+            })).await.unwrap();
+            assert_eq!(response["id"], "reconnect");
+            if response["ok"] == true {
+                break (ws, response);
+            }
+            assert_eq!(response["error"]["code"], "already_connected");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.expect("reconnect must succeed after old connection cleanup");
+    assert_eq!(response["payload"]["bot_uuid"], bot_uuid);
+    assert_eq!(response["payload"]["token"], token);
+    assert_eq!(response["payload"]["is_new"], false);
+    reconnected.close(None).await.unwrap();
+    handle.abort();
 }
 
 
