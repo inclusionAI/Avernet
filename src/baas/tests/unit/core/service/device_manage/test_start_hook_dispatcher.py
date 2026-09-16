@@ -2,7 +2,7 @@
 
 Covers:
 - _generate_wrapper_script: template rendering with escaped variables
-- _get_callback_server: env-based URL selection (prod vs non-prod)
+- _get_callback_server: env-based URL selection (dev/pre/prod)
 - _report_failure: callback dispatch on wrapper failure
 - dispatch_start_hook: threading, wrapper dispatch, error paths
 """
@@ -44,7 +44,7 @@ _CONFIG_WITH_CALLBACK_URLS = Config(
 
 
 class TestGetCallbackServer:
-    """_get_callback_server environment-based URL selection."""
+    """_get_callback_server environment-based URL selection (dev/pre/prod)."""
 
     def test_prod_returns_prod_url(self):
         with (
@@ -74,7 +74,7 @@ class TestGetCallbackServer:
             url = _get_callback_server()
             assert url == "https://cb.pre.example.com"
 
-    def test_dev_falls_back_to_pre_url(self):
+    def test_dev_returns_dev_url(self):
         with (
             patch(
                 "secbaas.community.core.service.paas._start_hook_dispatcher.get_current_env",
@@ -86,9 +86,9 @@ class TestGetCallbackServer:
             ),
         ):
             url = _get_callback_server()
-            assert url == "https://cb.pre.example.com"
+            assert url == "https://cb.dev.example.com"
 
-    def test_unknown_env_returns_pre_url(self):
+    def test_unknown_env_returns_dev_url(self):
         with (
             patch(
                 "secbaas.community.core.service.paas._start_hook_dispatcher.get_current_env",
@@ -100,7 +100,7 @@ class TestGetCallbackServer:
             ),
         ):
             url = _get_callback_server()
-            assert url == "https://cb.pre.example.com"
+            assert url == "https://cb.dev.example.com"
 
 
 # ============== _generate_wrapper_script ==============
