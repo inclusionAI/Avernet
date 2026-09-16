@@ -2,26 +2,74 @@
 
 from dataclasses import dataclass
 from collections.abc import Callable
-from typing import Protocol, Any
+from typing import Protocol, Any, TYPE_CHECKING, TypeAlias
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.service_bot.services.deploy.deploy_models import (
+        Storage,
+        StorageType,
+    )
+    from agentclaw.community.core.service_bot.services.deploy.deploy_config_composer import (
+        BotDeployContext,
+    )
+
+
+JsonValue: TypeAlias = (
+    str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
+)
 
 
 class BotCommonConfigServiceProtocol(Protocol):
     def get_config(
         self, *, bot_id: str, entity_id: str, env: str, config_key: str
-    ) -> Any: ...
+    ) -> JsonValue:
+        """Return decoded JSON; None means an absent config or JSON null."""
+        ...
 
     def set_config(
-        self, *, bot_id: str, entity_id: str, env: str, config_key: str, value: Any
+        self, *, bot_id: str, entity_id: str, env: str, config_key: str, value: JsonValue
     ) -> None: ...
 
 
 @dataclass(frozen=True)
 class StoragePolicy:
-    storage_type: str
+    """Saved storage choice, or an unsaved NAS fallback.
+
+    ``source`` records how the choice was made, not creation success:
+    ``rollout`` means new creation matched the UPFS rollout; ``manual`` denotes
+    an operator-supplied policy. Empty means unspecified (including NAS fallback
+    and older rows). Example persisted JSON:
+    ``{"storage_type": "upfs", "source": "rollout"}``.
+    """
+
+    storage_type: "StorageType"
     source: str = ""
 
 
+@dataclass(frozen=True)
+class PreparedBotStoragePolicy:
+    """Request-local creation choice; never persisted or sent to BaaS."""
+
+    template_uid: str
+    template_uuid: str
+    storage_type: "StorageType"
+
+
 class BotStoragePolicyProtocol(Protocol):
+    def prepare_bot_storage_policy(self, **kwargs: Any) -> dict[str, Any]:
+        """Choose provider/template and initialize policy before original allocation."""
+        ...
+
+    def resolve_deploy_context(self, ctx: "BotDeployContext") -> "BotDeployContext":
+        """Resolve saved storage and its mount layout without running rollout."""
+        ...
+
+    def apply_to_storage(
+        self, storage: "Storage", ctx: "BotDeployContext"
+    ) -> "Storage":
+        """Apply the resolved context and shared quota without reading rollout."""
+        ...
+
     def get_storage_quota(self, env: str) -> str:
         """Read quota independently of rollout; preserve the string, default to 1G."""
         ...
@@ -37,7 +85,7 @@ class BotStoragePolicyProtocol(Protocol):
         entity_id: str,
         env: str,
         engine: str,
-        user_id: str | None,
+        user_id: str,
         upfs_ready: Callable[[], bool],
     ) -> StoragePolicy:
         """Reuse an existing policy, or atomically persist a selected UPFS policy.

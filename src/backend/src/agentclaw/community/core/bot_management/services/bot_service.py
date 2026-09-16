@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional, Dict, Any, List, Literal, Tuple, TYPE_CHECKING
 
+from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.core.bot_management.capabilities import (
     can_join_bcn_as_provider,
     has_declared_capabilities,
@@ -364,8 +365,10 @@ class BotService(BotServiceProtocol):
         runtime_reconciler: "CoreBotRuntimeProjectorProtocol | None" = None,
         runtime_reconciler_provider: "Callable[[], CoreBotRuntimeProjectorProtocol] | None" = None,
         bot_quota_service: "BotQuotaServiceProtocol | None" = None,
+        bot_storage_policy: BotStoragePolicyProtocol | None = None,
     ) -> None:
         self._repository = repository
+        self._bot_storage_policy = bot_storage_policy
         self._allocation_config = allocation_config
         if workspace_hosting_config is None:
             from agentclaw.community.di.config import WorkspaceHostingConfig
@@ -1902,10 +1905,10 @@ class BotService(BotServiceProtocol):
                     template_config=device_template_config,
                 )
 
-                # 本期仅 personal 接入；准备只返回原申请参数的覆写，不创建设备。
-                # 服务草稿后续接入时放开类型判断；重启/补建不调用初始化。
-                if resolved_bot_type == "personal":
-                    create_kwargs.update(service.prepare_bot_storage_policy(**create_kwargs))
+                # 存储业务组件决定接入范围，只返回原申请参数覆写，不创建设备。
+                # 重启/补建不调用初始化，设备路由只负责原有设备申请。
+                if self._bot_storage_policy is not None:
+                    create_kwargs.update(self._bot_storage_policy.prepare_bot_storage_policy(**create_kwargs))
                 device_result = service.apply_device(**create_kwargs)
 
                 if not device_result:

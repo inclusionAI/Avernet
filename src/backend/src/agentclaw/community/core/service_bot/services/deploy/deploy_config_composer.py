@@ -39,6 +39,7 @@ from typing import Any, Dict, Optional
 from agentclaw.community.core.service_bot.services.deploy.deploy_models import (
     MountPointEntry,
     Storage,
+    StorageType,
 )
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 
@@ -81,10 +82,16 @@ class BotDeployContext:
     #: Caller-supplied extra NAS mount, mounted at the same path it names.
     mount_path: Optional[str] = None
     ext_info: Optional[Dict[str, Any]] = None
+    storage_type: StorageType | None = None
+    env: str = ""
 
 
 class DeployConfigComposer(abc.ABC):
     """Composes the runtime-specific fields of one create-bot ``deploy_config``."""
+
+    def prepare_context(self, ctx: BotDeployContext) -> BotDeployContext:
+        """Resolve runtime-specific context once before composing any fields."""
+        return ctx
 
     @property
     @abc.abstractmethod

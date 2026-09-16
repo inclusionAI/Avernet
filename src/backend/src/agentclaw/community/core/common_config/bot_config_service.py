@@ -1,15 +1,30 @@
-"""Bot-scoped JSON configuration and persisted storage selection.
+"""Bot-scoped JSON configuration and storage business decisions.
 
-Generic JSON access and storage policy remain separate services/contracts;
-co-located here to keep the Bot configuration implementation reviewable.
+Generic JSON access and storage policy remain separate services/contracts.
+Storage policy owns creation eligibility, template readiness and deploy decisions;
+HTTP queries and device allocation stay outside this component.
 """
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from collections.abc import Callable
 
 from injector import inject
+from agentclaw.community.core.bot_management.engines.registry import (
+    resolve_baas_engine_bucket,
+)
+from agentclaw.community.core.devices.services.baas_template_resolver import (
+    BaasTemplateResolveError,
+)
+from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
+from agentclaw.community.core.service_bot.services.deploy.deploy_models import (
+    Storage,
+    StorageType,
+)
+from agentclaw.community.core.service_bot.services.deploy.deploy_config_composer import (
+    BotDeployContext,
+)
 
 from agentclaw.community.core.repository.protocols.config import (
     BotCommonConfigRepositoryProtocol,
@@ -18,6 +33,8 @@ from agentclaw.community.core.common_config.bot_config_protocol import (
     BotCommonConfigServiceProtocol,
     BotStoragePolicyProtocol,
     StoragePolicy,
+    PreparedBotStoragePolicy,
+    JsonValue,
 )
 from agentclaw.community.core.common_config.common_config_service_protocol import (
     CommonConfigServiceProtocol,
@@ -35,14 +52,14 @@ class BotCommonConfigService(BotCommonConfigServiceProtocol):
 
     def get_config(
         self, *, bot_id: str, entity_id: str, env: str, config_key: str
-    ) -> Any:
+    ) -> JsonValue:
         value = self._repo.get(
             bot_id=bot_id, entity_id=entity_id, env=env, config_key=config_key
         )
         return json.loads(value) if value is not None else None
 
     def set_config(
-        self, *, bot_id: str, entity_id: str, env: str, config_key: str, value: Any
+        self, *, bot_id: str, entity_id: str, env: str, config_key: str, value: JsonValue
     ) -> None:
         self._repo.put(
             bot_id=bot_id,
@@ -60,7 +77,7 @@ class _UpfsRolloutDecision:
 
 
 def _should_rollout_upfs(
-    *, config: Any, engine: str, user_id: str | None
+    *, config: Any, engine: str, user_id: str
 ) -> _UpfsRolloutDecision:
     if not isinstance(config, dict) or str(config.get("enable")) != "1":
         return _UpfsRolloutDecision(False, "disabled")
@@ -107,10 +124,167 @@ class BotStoragePolicyService(BotStoragePolicyProtocol):
         repository: BotCommonConfigRepositoryProtocol,
         bot_config: BotCommonConfigServiceProtocol,
         common_config: CommonConfigServiceProtocol,
+        *,
+        env: str,
+        select_provider: Callable[..., str],
+        resolve_template: Callable[..., Any],
+        get_template: Callable[[str], dict[str, Any]],
     ) -> None:
         self._repo = repository
         self._bot_config = bot_config
         self._common_config = common_config
+        self._env = env
+        self._select_provider = select_provider
+        self._resolve_template = resolve_template
+        self._get_template = get_template
+
+    def prepare_bot_storage_policy(self, **kwargs: Any) -> dict[str, Any]:
+        """Creation-only business orchestration; allocation still uses apply_device.
+
+        Scope is the original creation entry; Provider/Template rollout decides
+        eligibility. Publish/upgrade/caller instances never enter this entry.
+        """
+        bot_type = (kwargs.get("bot_type") or "").strip()
+        engine = kwargs.get("engine") or DEFAULT_ENGINE_TYPE
+        provider = self._select_provider(
+            user_id=kwargs["operator"].staff_id,
+            bot_type=bot_type,
+            engine_type=engine,
+            template_type=kwargs.get("template_type") or "",
+        )
+        overrides = {"device_provider": provider}
+        if provider != "baas":
+            return overrides
+        bot_id = kwargs.get("bot_id") or "default"
+        entity_id = kwargs.get("entity_id") or kwargs["operator"].staff_id
+        owner_id = kwargs.get("owner_id") or entity_id
+        config = dict(kwargs.get("template_config") or {})
+        config.pop("_prepared_bot_creation", None)
+        template_uid = config.get("template_uid")
+        if not isinstance(template_uid, str) or not template_uid.strip():
+            raise BaasTemplateResolveError(
+                "provider=baas allocation requires non-empty template_config.template_uid"
+            )
+        template = self._resolve_template(
+            bot_id=bot_id,
+            user_id=owner_id,
+            env=self._env,
+            bot_type=bot_type,
+            engine_type=engine,
+            template_type=kwargs.get("template_type"),
+            template_config=config,
+        )
+        choice = self.initialize_for_template(
+            bot_id=bot_id,
+            entity_id=entity_id,
+            env=self._env,
+            engine=resolve_baas_engine_bucket(
+                engine_type=engine,
+                template_type=kwargs.get("template_type"),
+                template_config=config,
+            ),
+            user_id=owner_id,
+            template_uuid=template.template_uuid,
+        )
+        config["_prepared_bot_creation"] = PreparedBotStoragePolicy(
+            template_uid.strip(),
+            template.template_uuid,
+            choice,
+        )
+        return {**overrides, "template_config": config}
+
+    def initialize_for_template(
+        self,
+        *,
+        bot_id: str,
+        entity_id: str,
+        env: str,
+        engine: str,
+        user_id: str,
+        template_uuid: str,
+    ) -> StorageType:
+        """Evaluate template readiness only after the creation rollout matches."""
+
+        def ready() -> bool:
+            template = self._get_template(template_uuid)
+            config = template.get("config") if isinstance(template, dict) else None
+            volume = None
+            if isinstance(config, dict):
+                volume_env = (env or "").lower()
+                volume = (
+                    config.get(f"upfs_volume_id_{volume_env}")
+                    if volume_env in {"pre", "prod"}
+                    else None
+                )
+                volume = volume or config.get("upfs_volume_id")
+            result = (
+                isinstance(template, dict)
+                and template.get("template_uuid") == template_uuid
+                and template.get("type") == "ARCA"
+                and template.get("status") == "ONLINE"
+                and isinstance(config, dict)
+                and config.get("type") == "ARCA"
+                and isinstance(volume, str)
+                and bool(volume.strip())
+                and volume == volume.strip()
+            )
+            log = logger.info if result else logger.warning
+            log(
+                "[upfs_rollout] event=template_precheck bot_id=%s entity_id=%s env=%s template_uuid=%s ready=%s",
+                bot_id,
+                entity_id,
+                env,
+                template_uuid,
+                result,
+            )
+            return result
+
+        policy = self.initialize(
+            bot_id=bot_id,
+            entity_id=entity_id,
+            env=env,
+            engine=engine,
+            user_id=user_id,
+            upfs_ready=ready,
+        )
+        return policy.storage_type
+
+    def resolve_deploy_context(self, ctx: BotDeployContext) -> BotDeployContext:
+        """Resolve once so start command, mounts and storage use the same layout.
+
+        No type/stage/migration restriction: reuse the pinned creation choice or
+        the saved policy, falling back to NAS. Publish, upgrade and Caller
+        payloads therefore read the same policy as creation and restart.
+        """
+        choice = ctx.storage_type
+        if choice is None:
+            policy = self._resolve_storage_policy(
+                ctx.bot_id, ctx.entity_id, ctx.env or self._env
+            )
+            choice = policy.storage_type if policy else StorageType.NAS
+        return replace(
+            ctx,
+            storage_type=choice,
+            mount_home_dir_storage=True
+            if choice == StorageType.UPFS
+            else ctx.mount_home_dir_storage,
+        )
+
+    def apply_to_storage(self, storage: Storage, ctx: BotDeployContext) -> Storage:
+        """Apply the resolved choice and shared quota, without changing identity."""
+        env = ctx.env or self._env
+        if ctx.storage_type is not None:
+            storage.type = ctx.storage_type
+        storage.quota = self.get_storage_quota(env)
+        logger.info(
+            "[storage_policy] event=storage_composed bot_id=%s entity_id=%s env=%s storage_type=%s quota=%s",
+            ctx.bot_id,
+            ctx.entity_id,
+            env,
+            storage.type,
+            storage.quota,
+        )
+        return storage
 
     def get_storage_quota(self, env: str) -> str:
         """Shared NAS/UPFS quota travels through the original Storage.quota string field."""
@@ -125,12 +299,15 @@ class BotStoragePolicyService(BotStoragePolicyProtocol):
                 return value
             logger.warning(
                 "[storage_policy] event=quota_fallback reason=invalid_or_missing env=%s quota=%s",
-                env, default,
+                env,
+                default,
             )
         except Exception as exc:
             logger.warning(
                 "[storage_policy] event=quota_fallback reason=read_error env=%s quota=%s error_type=%s",
-                env, default, type(exc).__name__,
+                env,
+                default,
+                type(exc).__name__,
             )
         return default
 
@@ -164,7 +341,9 @@ class BotStoragePolicyService(BotStoragePolicyProtocol):
                 env,
                 value["storage_type"],
             )
-            return StoragePolicy(value["storage_type"], str(value.get("source", "")))
+            return StoragePolicy(
+                StorageType(value["storage_type"]), str(value.get("source", ""))
+            )
         except Exception as exc:
             logger.error(
                 "[storage_policy] event=read_failed bot_id=%s entity_id=%s env=%s error_type=%s",
@@ -182,7 +361,7 @@ class BotStoragePolicyService(BotStoragePolicyProtocol):
         entity_id: str,
         env: str,
         engine: str,
-        user_id: str | None,
+        user_id: str,
         upfs_ready: Callable[[], bool],
     ) -> StoragePolicy:
         """Reuse a saved policy or persist UPFS only; never create a device.
@@ -240,15 +419,13 @@ class BotStoragePolicyService(BotStoragePolicyProtocol):
                 entity_id,
                 env,
             )
-            return StoragePolicy("nas")
+            return StoragePolicy(StorageType.NAS)
 
         try:
             self._repo.initialize_once(
                 **scope,
                 config_key=STORAGE_POLICY,
-                config_value=json.dumps(
-                    {"storage_type": "upfs", "source": "rollout"}
-                ),
+                config_value=json.dumps({"storage_type": "upfs", "source": "rollout"}),
             )
             policy = self._resolve_storage_policy(**scope)
             if policy is None:

@@ -311,7 +311,8 @@ def test_storage_quota_is_backend_config_independent_of_rollout(value, expected)
 
     common = MagicMock()
     common.get_config.return_value = {"param_value": {"quota": value}}
-    service = BotStoragePolicyService(MagicMock(), MagicMock(), common)
+    service = BotStoragePolicyService(MagicMock(), MagicMock(), common,
+        env="pre", select_provider=MagicMock(), resolve_template=MagicMock(), get_template=MagicMock())
     assert service.get_storage_quota("pre") == expected
     common.get_config.assert_called_once_with(
         business_code="bot_storage", param_code="storage", env="pre"

@@ -1,4 +1,6 @@
 -- Deploy before enabling bot_storage/upfs_rollout. No rollout is enabled here.
+-- A Bot may have different config keys within the same entity/environment.
+-- Each key has one current row; storage_policy is not a history/event table.
 CREATE TABLE IF NOT EXISTS ac_bot_common_config (
     id BIGINT NOT NULL AUTO_INCREMENT,
     bot_id VARCHAR(128) NOT NULL,

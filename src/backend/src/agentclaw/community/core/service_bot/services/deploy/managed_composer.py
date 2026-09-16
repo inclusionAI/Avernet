@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 from agentclaw.community.core.bot_management.services.engine_resolver import (
     resolve_runtime_engine_for_bot,
 )
+from agentclaw.community.core.common_config.bot_config_protocol import BotStoragePolicyProtocol
 from agentclaw.community.core.devices.protocols import StoragePathProtocol
 from agentclaw.community.core.service_bot.services.deploy.deploy_config_composer import (
     BotDeployContext,
@@ -68,7 +69,9 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         storage_path: StoragePathProtocol,
         sandbox_registry: EngineSandboxRegistry,
         bot_repo: "BotRepository",
+        storage_policy: BotStoragePolicyProtocol | None = None,
     ) -> None:
+        self._storage_policy = storage_policy
         self._storage_path = storage_path
         self._sandbox_registry = sandbox_registry
         # Read-only rules are per-bot: the defaults come from the engine's
@@ -80,6 +83,11 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         return DeployRuntime.MANAGED
 
     # ── DeployConfigComposer ────────────────────────────────────────────
+
+    def prepare_context(self, ctx: BotDeployContext) -> BotDeployContext:
+        if self._storage_policy is not None:
+            return self._storage_policy.resolve_deploy_context(ctx)
+        return ctx
 
     def build_start_command(self, ctx: BotDeployContext) -> str:
         """Chain the managed image's four boot scripts with ``&&``.
@@ -128,8 +136,8 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
         )
 
     def build_storage(self, ctx: BotDeployContext) -> Storage | None:
-        """Always a volume: every managed bot keeps its state on NAS."""
-        return self._setup_bot_storage(
+        """Build the original volume layout, then apply the resolved business policy."""
+        storage = self._setup_bot_storage(
             entity_id=ctx.entity_id,
             entity_type=ctx.entity_type,
             owner_id=ctx.owner_id,
@@ -139,6 +147,10 @@ class ManagedDeployConfigComposer(DeployConfigComposer):
             bot_type=ctx.bot_type,
             stage=ctx.stage or "",
         )
+
+        if storage is not None and self._storage_policy is not None:
+            storage = self._storage_policy.apply_to_storage(storage, ctx)
+        return storage
 
     # ── the managed image's own composition ─────────────────────────────
 

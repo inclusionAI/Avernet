@@ -519,14 +519,6 @@ class DeviceService:
     # Core business methods — template method pattern
     # =========================================================================
 
-    def prepare_bot_storage_policy(self, **kwargs: Any) -> dict[str, Any]:
-        """Creation-only preparation; return overrides for the existing apply_device.
-
-        Non-BaaS providers do nothing. Restart/recovery must not call this method.
-        No device is allocated here and existing allocation signatures stay intact.
-        """
-        return {}
-
     def apply_device(
         self,
         *,

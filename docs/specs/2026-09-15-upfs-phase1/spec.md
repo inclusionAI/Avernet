@@ -1,17 +1,16 @@
-# Bot UPFS 第一期：个人 Bot 创建与重启
+# Bot UPFS 第一期：个人 Bot 与服务 Bot 草稿的创建与重启
 
 ## 本次范围
 
-- **仅 personal Bot 接入 UPFS**。创建入口和 payload 策略读取处增加 personal 判断；
-  通用初始化、模板预检和 BaaS 挂载能力不删除，后续接服务草稿可放开判断并补验证。
-- 新建个人 Bot：已有策略则复用；否则读取 `bot_storage/upfs_rollout`，
+- **接入范围不做类型/阶段/迁移路径限制**。创建入口统一写入 UPFS policy；
+  任何部署 payload（草稿重启、发布/升级、Caller、迁移路径）都复用同一份已保存 policy，
+  无 policy 时回退 NAS。隔离靠“没有 policy 就用 NAS”保证，不靠 bot_type/stage 白名单。
+- 新建个人/服务 Bot：已有策略则复用；否则读取 `bot_storage/upfs_rollout`，
   命中后复用原模板详情接口检查当前环境 Volume 配置，有效才保存 policy，再按原链路申请设备。
 - **NAS 不写 storage_policy**。开关关闭、未命中、模板无 Volume 或能力预检失败，
   均沿用 NAS 链路，不新增 NAS 记录；配额统一读取通用 storage 配置。
-- 个人重启/设备补建：只读取已有 policy，不读创建灰度、不补写 policy。
+- 重启/设备补建/发布升级/Caller：只读取已有 policy，不读创建灰度、不补写 policy。
   无策略使用原 NAS；手动插入 UPFS policy 后可读取该选择，但不负责迁移文件。
-- 服务 Bot 创建、草稿重启、已发布服务、发布升级和 Caller 保持原链路，
-  不读写本期 policy，但构建 Storage 时也读取通用配额。不是关闭接口或开放 UPFS。
 - BaaS `/update` 在 ARCA 层可能销毁并重新申请容器；这不是首次创建 Bot，
   不能重新运行创建灰度，也不能称为 ARCA 容器原地重启。
 
@@ -20,19 +19,22 @@
 
 ## 创建链路：准备与原申请分开
 
-1. `BotService._provision_created_bot` 保留原 `apply_device` 调用，personal 分支在其前
-   调用 `prepare_bot_storage`，没有重命名原有创建、申请或升级函数。
-2. Router 按原规则选择 Provider；非 BaaS 的准备方法为空操作。
-   准备结果复用原 `device_provider` 参数固定本次选择，原申请不再重复选 Provider。
-3. BaaS 准备方法按原规则解析实际模板（含模板白名单覆盖），调用
-   `BaasService.initialize_bot_storage`，然后返回原申请参数的覆写。此步骤不创建设备。
-4. 准备结果通过已有 `template_config` 在本次请求内携带模板 UID/UUID 和存储选择。
-   `_PreparedBotCreation` 只用于避免重复选模板和重复读策略，组装请求前移除；
-   不入库、不发送到 BaaS、不修改调用者的原配置。没有新建一套 storage 透传参数。
-5. 原 `apply_device` 继续执行校验、申请、绑定及状态推进；组装 payload 时修改已有
-   Storage 的 type，Backend → BaaS 复用原 `storage` 字段。
+1. `BotService._provision_created_bot` 在原 `apply_device` 前直接调用
+   `BotStoragePolicyService.prepare_bot_storage_policy`；接入范围由业务组件决定。
+   DeviceService、DeviceServiceRouter 不再提供存储策略准备接口。
+2. 业务组件复用 DI 提供的原 Provider 灰度和模板解析能力，固定本次选择，判断存储灰度、
+   检查模板 Volume 并仅保存 UPFS policy；非 BaaS Provider 不初始化存储策略。
+3. 准备结果通过已有 `device_provider` / `template_config` 传给原设备申请流程。
+   `PreparedBotStoragePolicy` 是原临时快照移至业务契约后的名称，固定模板 UID/UUID 和存储选择；
+   不入库、不发送到 BaaS、不修改调用者原配置。
+4. 原 `apply_device` 继续执行校验、申请、绑定及状态推进。`BaasService` 仍组装原请求，
+   但不依赖存储策略服务、不读取灰度/policy/quota，不判断谁能启用 UPFS。
+5. 复用 `ManagedDeployConfigComposer` 组装扩展点：先委托业务组件统一解析部署上下文，
+   使启动命令、挂载和 storage 使用同一个选择；按原规则生成 Storage 后应用类型和通用 quota。
+   UPFS 仍强制 home 挂载，避免重启时旧 NAS 白名单导致 subpath/storage-id 变化。
+   ACK composer 的默认上下文方法原样返回，不接入 UPFS 或通用配额覆盖。
 
-重启/补建仍直接调用原申请或更新方法，不调用 `prepare_bot_storage`。
+重启/补建直接调用原申请或更新方法，不调用初始化；composer 仅委托业务组件读取保存的策略。
 没有 `initial_storage_decision` 或 `initial_storage_user_id` 参数；创建灰度用户复用 owner_id，
 不能用可能为团队 ID 的 entity_id 代替用户。
 
@@ -40,9 +42,16 @@
 
 `BotStoragePolicyService.initialize(...)` 独立负责策略读取、灰度判断和 UPFS 唯一初始化，
 不创建设备。模板能力由回调提供，策略层不访问 HTTP，也不查 BaaS 数据库。
-`BaasService.initialize_bot_storage(...)` 复用 `GET /api/v1/device-templates/{template_uuid}` 接入模板预检，不新增能力接口。
+`BotStoragePolicyService.initialize_for_template(...)` 负责模板就绪判断；
+`BaasService.get_device_template(...)` 仅通过原 `GET /api/v1/device-templates/{template_uuid}` 查询数据，
+不判断可用性、不记录完整响应。模板读取以延迟回调由 DI 提供，避免依赖构造环。
+环境同样由 DI 注入，不在新增业务方法中读取全局环境。
 
 `ac_bot_common_config` 唯一键为 `(bot_id, entity_id, env, config_key)`。
+同一 Bot 可以有不同配置 key，但每个 key 只存一条当前数据，不记录历史。
+`source` 记录策略来源：`rollout` 表示创建时命中灰度，`manual` 表示人工配置，
+空字符串表示未注明来源（兼容旧数据）；它不表示创建成功或失败。
+代码内部复用 `StorageType` 枚举，数据库 JSON 仍使用原来的字符串值。
 `config_key=storage_policy` 的 `config_value` 示例：
 
 ```json
@@ -61,7 +70,7 @@
 ## 旧链路兼容与错误边界
 
 - 开关关闭时不查询模板能力、不写 policy；NAS 仅配额改为通用配置（未配默认 "1G"），
-  其余 payload 与旧实现保持一致。服务创建/草稿重启不读取或初始化 policy，但读取通用配额。
+  其余 payload 与旧实现保持一致。已发布服务和 Caller 不读取或初始化 policy，但读取通用配额。
 - 新表尚未部署时，仅将明确的“表不存在”（MySQL 1146 / SQLite 对应错误）视为无策略；
   关闭灰度仍可创建 NAS。开启灰度且选择 UPFS 时，缺表会导致写入失败，禁止无策略创建。
 - **数据库超时、权限错误及非法 policy 不等于“没有 policy”**，必须报错，不能静默改用 NAS。
@@ -74,13 +83,13 @@
 ## BaaS 与 SDK
 
 - Backend 不查 BaaS 数据库；命中灰度后复用原模板详情接口（租户隔离、ONLINE），检查
-  模板 UUID、ARCA 类型和当前环境的 `upfs_volume_id_pre/prod`。不再新增能力接口或返回模型。
+  模板 UUID、ARCA 类型和当前环境的 `upfs_volume_id_pre/prod`（未配时取默认 `upfs_volume_id`；其他/空环境直接取默认）。不再新增能力接口或返回模型。
 - 旧接口会返回完整 config（包含凭据相关字段）；此次模板调用关闭响应正文日志，错误消息也
   不带接口返回正文。Backend 只判断 Volume 配置有效性，不写入 policy/Storage，不持久化它。
   这不再是“Backend 从不获取 Volume ID”；实际挂载由 BaaS 传递模板配置，内部 ARCA plugin 校验并执行。
 - BaaS 复用已有模板配置取当前环境 Volume ID，按原规则渲染 storage_id。
   Volume ID 写入已有 `metadata["upfs_volume_id"]`（保留键），不再新增 plugin 参数或配置字段。
-  原 arca_metadata 不被就地修改，后续用户 metadata 合并不能覆盖此键；Facade 沿用原透传逻辑。
+  复用原 metadata 合并逻辑，不增加同名字段过滤；调用方不传入同名 Volume 字段。Facade 沿用原透传逻辑。
 - Backend 的 `ac_common_config` 使用 `business_code=bot_storage`、`param_code=storage`、
   `env=pre/prod`，`param_value={"quota":"1G"}`。复用配置 JSON，不新增表/数据库列。
   NAS/UPFS 共用此配置。Backend 只读取原字符串填入 `storage.quota`，不转字节；缺失、非字符串、空白或读取失败默认
@@ -92,8 +101,7 @@
 - 企业 `_arca_sdk.py` 按 `storage.type` 适配：NAS 原转换函数保持不变，配额改为读取通用配置；UPFS 从原
   Storage 的 storage_id/path/quota/permission 构造 SDK 自带 volume_mounts，不新增业务模型。
   `permission == "0777"` 映射 `read_only=false`，其他值（含空值）映射 `true`。
-- plugin 从 metadata 读取并消费保留键，不将 Volume ID 留在 SDK metadata；其他 metadata
-  原样保留，不修改调用方字典。公开层不判断 NAS/UPFS，模板有 Volume 时均透传；NAS 在内部插件忽略该保留键。plugin 不查库、不查询模板。
+- plugin 从 metadata 读取 Volume，metadata 原样保留，不修改调用方字典。公开层不判断 NAS/UPFS，模板有 Volume 时均透传；NAS 在内部插件忽略该保留键。plugin 不查库、不查询模板。
   SDK 升级为 `arca-sandbox==1.3.0`，公共核心不导入企业 SDK。
 - 原 Storage 五字段及 Backend storage ID/目录规则不改；UPFS 挂载 `/home/admin`。
   `create_sync_sandbox` 保持原参数列表，没有新增 Volume ID/配额参数。
@@ -107,7 +115,7 @@
   可见命中原因、预检、NAS 跳过入库、UPFS 初始化/复用、策略读取/持久化失败。
 - `event=payload_prepared` 关联 request_id、模板 UUID、类型/阶段、实际存储和挂载路径。
   BaaS 沿用原创建/重启日志；内部 `[arca_sdk]` 记录创建失败/成功，Backend 记录配额回退。
-- ARCA 创建参数日志屏蔽 metadata 中的 upfs_volume_id；内部参数校验错误不回显原始 Volume，SDK 异常沿用原日志处理。
+- ARCA 创建参数日志恢复原实现，不额外屏蔽 metadata 中的 upfs_volume_id；内部参数校验错误不回显原始 Volume，SDK 异常沿用原日志处理。
 - 公共 DDL：`src/backend/src/agentclaw/community/core/common_config/sql/2026_09_15_bot_common_config.sql`；
   非公开库部署副本：`src/backend/sql/20260915_ac_bot_common_config.sql`，两份需一致。
 - 先部署表、Backend 和企业 BaaS/SDK，配置当前环境 Volume，再开启灰度。
@@ -156,3 +164,22 @@ NAS 与 UPFS 共用 `quota`，默认 "1G"；不挂 storage 的部署不读取此
 - Backend 灰度、policy、通用 quota 配置保持不变。其他 sandbox plugin 保持基线。
 
 本轮验证：公开 BaaS unit/architecture 9036 passed、3 skipped、8 xpassed、1 deselected；随后调整专项断言复测 27 passed。企业 BaaS unit/contract/architecture 718 passed、15 skipped。真实挂载未验证；提交/推送状态见语雀记录。
+
+## Backend 存储业务解耦（2026-09-16，Review 第一项）
+
+- 复用已有 BotStoragePolicyService，迁入创建准备、模板就绪、已存策略应用及 quota 决策，不增加新的服务类。
+- 删除设备层准备接口和 BaasService 的策略依赖；保留原设备/HTTP 流程，只通过原 composer 扩展点接入业务结果。
+- Protocol 同步声明业务准备/上下文解析/Storage 应用及模板查询；DI 延迟查询避免构造环。
+- 单次请求内 Provider、模板、初始存储选择固定；重启只读策略；未接入类型及非 managed 部署不变。
+- 本次只处理业务分层，不宣称已解决其余类型/枚举/注释评论，也不开放 Caller 或发布态（verify/online）。
+- 本地测试和提交状态以此次交付说明为准，下方/前文历史数字不代表本轮全量验证；未执行真实挂载。
+
+## 服务 Bot 草稿接入（2026-09-16）
+
+- 放开业务组件范围判断：创建入口由 personal 扩为 personal + service（服务 Bot 创建时即草稿）；
+  部署上下文由“personal 且无发布阶段”扩为“personal 无阶段 或 service + draft 阶段”。
+- 已发布服务 Bot（verify/online 重启）、发布/升级、Caller 仍由阶段与 migration_path 排除，保持原链路。
+- 服务 Bot 草稿创建命中灰度同样保存 UPFS policy；草稿重启只读已有 policy，不重新灰度。
+- 范围判断仍集中在 BotStoragePolicyService，BaasService 与设备层无新增业务分支。
+- 后续精简：进一步删除部署处阶段与迁移路径限制，改为统一复用已保存 policy；
+  发布产物与 Caller 不再单独排除，没有 policy 的冲突即可回退 NAS。
