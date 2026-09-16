@@ -39,6 +39,8 @@ from ..provisioning import (
     to_internal_template_config,
 )
 
+from ...services.aicoding.dima_workspace_capability import has_dima_workspace_enabled
+
 
 # Legacy coding template types.  This is only used for old call sites that
 # identify coding bots by template_type (applicationCoding/personalCoding).
@@ -345,14 +347,12 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                 raise BotTemplateInvalidError(
                     f"template_config contains server-managed fields: {reserved}"
                 )
+        # 工厂快照默认不要求 DIMA 托管；仅当显式开启 dima_workspace 时才要求，在取值处直接判定。
+        sanitized = to_internal_template_config(template, reject_server_managed_fields=False)
         return PreparedBotCreate(
             template_type=declarative_type,
-            template_config=to_internal_template_config(
-                template, reject_server_managed_fields=False
-            ),
-            # No workspace-hosting gate: aligned with the legacy TC direct
-            # path (create_flow generic branch), NOT the applicationCoding
-            # DIMA hosting requirement.
+            template_config=sanitized,
+            requires_workspace_hosting=has_dima_workspace_enabled(sanitized),
         )
 
     def resolve_bot_engine(self, bot: dict[str, Any]) -> str | None:

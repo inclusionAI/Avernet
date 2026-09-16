@@ -112,15 +112,20 @@ def _prepare_legacy_non_application_template(
         if spec.template_config is not None:
             raise BotTemplateInvalidError("template_config requires template_type")
         return PreparedBotCreate()
+    sanitized = to_internal_template_config(
+        spec.template_config,
+        reject_server_managed_fields=(
+            spec.template_validation_mode
+            is BotCreateTemplateValidationMode.PUBLIC
+        ),
+    )
+    # 在 requires_workspace_hosting 的取值处直接或上 dima_workspace 开关：
+    # 仅当显式开启时才需要托管，非 applicationCoding 的手工 bot 默认不需要，
+    # 不在 _prepare_create 末尾用兜底覆盖重新决定该值。
     return PreparedBotCreate(
         template_type=spec.template_type,
-        template_config=to_internal_template_config(
-            spec.template_config,
-            reject_server_managed_fields=(
-                spec.template_validation_mode
-                is BotCreateTemplateValidationMode.PUBLIC
-            ),
-        ),
+        template_config=sanitized,
+        requires_workspace_hosting=has_dima_workspace_enabled(sanitized),
     )
 
 
@@ -220,17 +225,6 @@ def _prepare_create(
         # Plain bots and other established template types keep the generic path;
         # the returned value must carry template_type through unchanged.
         prepared = _prepare_legacy_non_application_template(spec)
-
-    # 需要创建 DIMA 空间：applicationCoding，或开启
-    # dima_workspace（template_config.bot_template_config.capabilities.dima_workspace==true）。
-    # 在此统一判定，无托管服务时直接拒绝。
-    prepared = replace(
-        prepared,
-        requires_workspace_hosting=(
-            prepared.template_type == "applicationCoding"
-            or has_dima_workspace_enabled(prepared.template_config)
-        ),
-    )
 
     if (
         prepared.requires_workspace_hosting
