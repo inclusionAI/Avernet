@@ -79,7 +79,12 @@ _PORT_IMPLEMENTERS = [
 ]
 
 #: Every outbound port. Members must be abstract for the declarations to gate.
-_PORTS = [ActivationPort, SkillPackageUploadPort, IdentityFilePort, ResourceFilePort]
+_PORTS = [
+    ActivationPort,
+    SkillPackageUploadPort,
+    IdentityFilePort,
+    ResourceFilePort,
+]
 
 
 @pytest.mark.parametrize(

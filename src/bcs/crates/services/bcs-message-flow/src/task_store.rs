@@ -17,6 +17,9 @@ pub struct TaskEntry {
     pub created_at_ms: u64,
     pub response_mode: ChatResponseMode,
     pub status: TaskLedgerStatus,
+    /// Durable delivery owns deadlines and status for managed tasks.
+    pub managed: bool,
+    pub managed_version: u64,
     pub response_content: String,
     response_full_content: String,
     response_strip_prefix: String,
@@ -25,6 +28,7 @@ pub struct TaskEntry {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskLedgerStatus {
+    Queued,
     Dispatched,
     Replied,
     Failed,
@@ -44,6 +48,20 @@ pub struct TaskStore {
 }
 
 impl TaskStore {
+    pub(crate) async fn restore_managed(&self, entry: TaskEntry) -> bool {
+        let mut tasks = self.tasks.write().await;
+        if let Some(existing) = tasks.get_mut(&entry.task_id) {
+            if entry.managed_version >= existing.managed_version {
+                existing.status = entry.status;
+                existing.managed = true;
+                existing.managed_version = entry.managed_version;
+            }
+            false
+        } else {
+            tasks.insert(entry.task_id.clone(), entry);
+            true
+        }
+    }
     pub fn new() -> Self {
         Self::default()
     }
@@ -214,7 +232,7 @@ impl TaskStore {
         let mut targets: Vec<_> = self.tasks.read().await
             .values()
             .filter(|entry| Self::entry_in_scope(entry, group_id, session_id))
-            .filter(|entry| entry.status == TaskLedgerStatus::Dispatched)
+            .filter(|entry| matches!(entry.status, TaskLedgerStatus::Queued | TaskLedgerStatus::Dispatched))
             .map(target_name)
             .collect();
         targets.sort();
@@ -235,7 +253,7 @@ impl TaskStore {
             .values()
             .any(|entry| {
                 Self::entry_in_scope(entry, group_id, session_id)
-                    && entry.status == TaskLedgerStatus::Dispatched
+                    && matches!(entry.status, TaskLedgerStatus::Queued | TaskLedgerStatus::Dispatched)
             })
     }
 
@@ -246,7 +264,7 @@ impl TaskStore {
                 continue;
             }
             match entry.status {
-                TaskLedgerStatus::Dispatched => summary.pending.push(target_name(entry)),
+                TaskLedgerStatus::Queued | TaskLedgerStatus::Dispatched => summary.pending.push(target_name(entry)),
                 TaskLedgerStatus::Replied => summary.replied.push(target_name(entry)),
                 TaskLedgerStatus::Failed => summary.failed.push(target_name(entry)),
                 TaskLedgerStatus::TimedOut => summary.timed_out.push(target_name(entry)),
@@ -271,7 +289,7 @@ impl TaskStore {
                 continue;
             }
             match status_at(entry, now_ms) {
-                TaskLedgerStatus::Dispatched => summary.pending.push(target_name(entry)),
+                TaskLedgerStatus::Queued | TaskLedgerStatus::Dispatched => summary.pending.push(target_name(entry)),
                 TaskLedgerStatus::Replied => summary.replied.push(target_name(entry)),
                 TaskLedgerStatus::Failed => summary.failed.push(target_name(entry)),
                 TaskLedgerStatus::TimedOut => summary.timed_out.push(target_name(entry)),
@@ -289,6 +307,13 @@ impl TaskStore {
         aliases.retain(|_, value| value != task_id);
         drop(aliases);
         self.tasks.write().await.remove(task_id)
+    }
+}
+
+impl TaskEntry {
+    pub(crate) fn empty_tool_response_window(&self) -> bool {
+        self.response_mode == ChatResponseMode::AfterLastToolCall
+            && self.response_seen_tool_call && self.response_content.is_empty()
     }
 }
 
@@ -312,6 +337,8 @@ pub fn new_task_entry(
         created_at_ms,
         response_mode,
         status: TaskLedgerStatus::Dispatched,
+        managed: false,
+        managed_version: 0,
         response_content: String::new(),
         response_full_content: String::new(),
         response_strip_prefix: String::new(),
@@ -327,7 +354,7 @@ fn target_name(entry: &TaskEntry) -> String {
 }
 
 fn status_at(entry: &TaskEntry, now_ms: u64) -> TaskLedgerStatus {
-    if entry.status == TaskLedgerStatus::Dispatched
+    if !entry.managed && entry.status == TaskLedgerStatus::Dispatched
         && now_ms.saturating_sub(entry.created_at_ms) > TASK_TTL_MS
     {
         return TaskLedgerStatus::TimedOut;

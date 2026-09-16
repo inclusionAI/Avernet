@@ -2,6 +2,15 @@
 
 ## Provides
 
+TaskDispatchOutcome/TaskMessageOutcome may return `queued`: the canonical source
+and target delivery have committed, but no Bot delivery result exists yet.
+Managed tasks require an explicit canonical running Session. Task completion
+includes durable queued/uncertain task work; an active Manager result may complete
+its own Session, while other queued return legs still block closure. Worker final,
+error and abort settle the assignment and admit a separate Manager result together.
+No new Plugin API or database schema is required. Task lifecycle event projections
+are not part of this atomic guarantee; no durable notification outbox is added.
+
 SystemMessageQueueService atomically admits one producer event before any direct
 delivery; admitted recipients expose delivery_id separately from delivered.
 Group/Session initialization can return queued instead of running. The managed
@@ -43,6 +52,10 @@ events without prescribing a metrics implementation or exposing payload labels.
 MessageFlowService exposes Human-only environment-wide delivery-policy read/replace operations; policy values use the leaf bcs-config-api contract, and the delivery repository owns durable version CAS. Application validation rejects non-Human callers independently of HTTP.
 
 - Application, core, and port trait contracts for BCS.
+- `GroupCreateCommand` requires an explicit `create_initial_session` boolean.
+  Existing callers use true; false supports non-provisional normal groups, including StateMachine,
+  creation without initial Session writes or bootstrap delivery. It is not a
+  persistent prohibition on subsequent Session creation.
 - Shared contract-level DTOs, error types, and service container types.
 - Default `Noop*` implementations used to keep contract boundaries explicit in tests and local wiring.
 - Current-session state-machine permission/start contracts and the outbound

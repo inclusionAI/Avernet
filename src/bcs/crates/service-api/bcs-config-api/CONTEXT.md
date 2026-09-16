@@ -15,7 +15,10 @@ Bot overrides and Group/System readiness validation. Management updates must set
 `flow_enabled.group` and `flow_enabled.system` to the same boolean; mismatched
 values fail with `queue_group_system_switch_mismatch`. Both disabled retains the
 legacy transport behavior for new work; already admitted deliveries still drain.
-Direct A2A, Task and State-machine remain unready.
+Task is ready under its independent `flow_enabled.task` switch and the same
+per-Bot mode/limits. Task-only enforce also requires healthy scheduler supervision.
+Direct A2A and State-machine remain unready. These business values are configured
+through the durable policy API, not the deprecated TOML policy fields.
 
 The application loader upgrades older durable policies by assigning System the
 Group value, committing a version-incrementing CAS with the migration actor

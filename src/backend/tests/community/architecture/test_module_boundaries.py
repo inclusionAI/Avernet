@@ -101,6 +101,7 @@ BOUNDARY_SIGNIFICANT_MODULES: frozenset[str] = frozenset({
     "agentclaw.community.core.storage",
     "agentclaw.community.core.system_config",
     "agentclaw.community.core.task_queue",
+    "agentclaw.community.core.tc_file_upload_integrations",
     "agentclaw.community.core.workspace",
 })
 

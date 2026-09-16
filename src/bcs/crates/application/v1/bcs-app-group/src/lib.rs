@@ -1185,6 +1185,7 @@ impl GroupServiceImpl {
         let created = self
             .management
             .create_group(GroupCreateCommand {
+                create_initial_session: true,
                 group_id,
                 caller_actor_id: Some(principal_actor_id.clone()),
                 driver_bot_id: request.driver_bot_uuid,

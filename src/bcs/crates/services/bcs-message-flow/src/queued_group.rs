@@ -44,6 +44,8 @@ enum TextProjection {
 #[serde(deny_unknown_fields)]
 pub struct QueuedGroupProjection {
     version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    task: Option<crate::queued_task::TaskIntent>,
     /// Initialization context must survive ordinary history TTL/count limits.
     #[serde(default)]
     required_context: bool,
@@ -267,6 +269,7 @@ impl ManagedDeliveryPreparationService for QueuedGroupPreparation {
                 .cache_channel_source_message_id(&command.run_id, id)
                 .await;
         }
+        crate::queued_task::restore(&flow, delivery).await?;
         Ok(())
     }
 
@@ -332,12 +335,27 @@ fn invalid(message: &str) -> ServiceError {
 }
 
 impl QueuedGroupProjection {
+    pub(crate) fn task_result(row: &PersistedMessageDelivery, task: crate::queued_task::TaskIntent, tags: Vec<String>) -> ServiceResult<Self> {
+        let mut projection = Self::decode(row).map_err(|e| invalid(&e))?;
+        projection.sender_name = task.worker_name.clone();
+        projection.target_tags = tags;
+        projection.mentions = vec![task.manager.clone()];
+        projection.task = Some(task);
+        Ok(projection)
+    }
+    pub(crate) fn task(group: &Group, recipient: &str, sender_name: &str, task: crate::queued_task::TaskIntent) -> ServiceResult<Self> {
+        let mut projection = Self::system(group, recipient, false)?;
+        projection.sender_name = sender_name.into();
+        projection.mentions = vec![recipient.into()];
+        projection.task = Some(task);
+        Ok(projection)
+    }
     pub(crate) fn system(group: &Group, recipient: &str, required_context: bool) -> ServiceResult<Self> {
         let participant = group.participants.iter().find(|p| p.bot_uuid == recipient)
             .ok_or_else(|| invalid("system queue target is not a session participant"))?;
         let snapshot = crate::protocol_context::group_context_input(group);
         Ok(Self {
-            version: 1, required_context, drain_context: false, policy_version: None,
+            version: 1, task: None, required_context, drain_context: false, policy_version: None,
             driver_bot: snapshot.driver_bot, originator: snapshot.originator,
             participants: snapshot.participants.into_iter().map(|p| ParticipantProjection {
                 id: p.id, name: p.name, role: p.role, is_bot: p.is_bot,
@@ -394,6 +412,7 @@ impl QueuedGroupProjection {
             .ok_or_else(|| invalid("queue target is not a session participant"))?;
         let snapshot = crate::protocol_context::group_context_input(group);
         Ok(Self {
+            task: None,
             required_context: false,
             drain_context: false,
             policy_version: None,
@@ -436,8 +455,9 @@ impl QueuedGroupProjection {
     fn decode(row: &PersistedMessageDelivery) -> Result<Self, String> {
         let projection: Self = serde_json::from_value(row.semantic_projection_json.clone())
             .map_err(|_| "invalid queued group projection".to_string())?;
-        if projection.version != 1 || !matches!(row.flow_kind, DeliveryFlowKind::Group | DeliveryFlowKind::System)
-            || (row.flow_kind == DeliveryFlowKind::Group && projection.required_context) {
+        if projection.version != 1 || !matches!(row.flow_kind, DeliveryFlowKind::Group | DeliveryFlowKind::System | DeliveryFlowKind::Task)
+            || (row.flow_kind != DeliveryFlowKind::System && projection.required_context)
+            || (projection.task.is_some() != (row.flow_kind == DeliveryFlowKind::Task)) {
             return Err("unsupported queued group projection version or flow".into());
         }
         Ok(projection)
@@ -527,6 +547,9 @@ async fn prepare_queued_group_bounded(
         && (source.sender_id != "system" || source.sender_type != bcs_domain::SenderType::System || source.message_type != "system") {
         return Err(invalid("invalid queued system message identity"));
     }
+    if let Some(task) = crate::queued_task::intent(row)? {
+        crate::queued_task::authorize(&group, &task, &source.sender_id, &row.target_bot_id)?;
+    }
     let actors = if row.flow_kind == DeliveryFlowKind::System { vec![&row.target_bot_id] }
         else { vec![&source.sender_id, &row.target_bot_id] };
     for actor in actors {
@@ -544,7 +567,12 @@ async fn prepare_queued_group_bounded(
     }
     let limits = match &flow.delivery_policy { Some(p) => p.snapshot.read().await.policy.clone(), None => Default::default() };
     let payload = read_bounded_queued_payload(repo.as_ref(), row, contexts, total, limits.max_context_messages, limits.max_context_bytes, |d, text| {
-        QueuedGroupProjection::decode(d)?.project_text(text)
+        let projection = QueuedGroupProjection::decode(d)?;
+        if d.delivery_id == row.delivery_id && projection.task.as_ref().is_some_and(|t| t.leg == crate::queued_task::TaskLeg::Result) {
+            return source.content.get("task_result_text").and_then(|v| v.as_str()).map(str::to_owned)
+                .ok_or_else(|| "canonical task result missing".into());
+        }
+        projection.project_text(text)
     })
     .await
     .map_err(|e| invalid(&e))?;
@@ -604,6 +632,13 @@ async fn prepare_queued_group_bounded(
     } else {
         &[]
     };
+    let delivery_kind = match projection.task.as_ref().map(|t| t.leg) {
+        Some(crate::queued_task::TaskLeg::Dispatch) => BotDeliveryKind::TaskDispatch,
+        Some(crate::queued_task::TaskLeg::Result) => BotDeliveryKind::TaskResult,
+        Some(crate::queued_task::TaskLeg::Message) => BotDeliveryKind::TaskMessage,
+        None => BotDeliveryKind::Send,
+    };
+    let task_id = projection.task.as_ref().map(|t| t.task_id.clone());
     let mut frame = if let Some(mut context) = projection.reply_context {
         if !context.message.is_empty()
             || context.recipient.as_deref() != Some(row.target_bot_id.as_str())
@@ -684,6 +719,12 @@ async fn prepare_queued_group_bounded(
             Some(&row.session_id),
         )
     };
+    if let (Some(task_id), bcs_protocol::BcsFrame::Request(request)) = (task_id, &mut frame) {
+        if let Some(params) = request.params.as_mut() {
+            params["task_id"] = serde_json::json!(task_id);
+            params["idempotency_key"] = serde_json::json!(row.idempotency_key);
+        }
+    }
     if let Some(identity) = source.content.get("channel_sender_identity") {
         let field = |key| {
             identity
@@ -737,7 +778,7 @@ async fn prepare_queued_group_bounded(
             target: delivery_target,
             run_id: run_id.clone(),
             frame,
-            delivery_kind: BotDeliveryKind::Send,
+            delivery_kind,
             provider_transport: Default::default(),
             provider_bypass_headers: provider_route_headers,
         },

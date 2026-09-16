@@ -143,6 +143,7 @@ from agentclaw.community.adapters.http.aicoding.workitem_noauth_router import ro
 from agentclaw.community.adapters.http.enums.router import router as enums_router  # noqa: E402
 from agentclaw.community.adapters.http.resources import router as resources_router  # noqa: E402
 from agentclaw.community.adapters.http.session_resources import internal_router as session_resources_internal_router, router as session_resources_router  # noqa: E402
+from agentclaw.community.adapters.http.tc_file_upload_integrations.resource_context_router import router as tc_resource_context_router  # noqa: E402
 from agentclaw.community.adapters.http.mcp import router as mcp_router  # noqa: E402
 from agentclaw.community.adapters.http.cron import router as cron_router  # noqa: E402
 from agentclaw.community.adapters.http.cron.cron_noauth_router import router as cron_noauth_router  # noqa: E402
@@ -896,8 +897,6 @@ async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSON
 async def health_check():
     """Health check endpoint."""
     return {"status": "ok", "version": "0.1.0"}
-
-
 # =============================================================================
 # Router registration
 # =============================================================================
@@ -948,6 +947,7 @@ app.include_router(desktop_bot_router)
 app.include_router(resources_router)
 app.include_router(session_resources_router)
 app.include_router(session_resources_internal_router)
+app.include_router(tc_resource_context_router)
 app.include_router(skills.router)
 app.include_router(skillsets.router)
 app.include_router(approvals_router)

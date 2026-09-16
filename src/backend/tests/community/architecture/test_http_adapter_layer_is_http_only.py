@@ -107,6 +107,8 @@ _NON_ENDPOINT_NAME_PATTERNS: tuple[str, ...] = (
                      # which is what lets test_zip_build.py drive it without a
                      # client. Named in full rather than as a short pattern so
                      # this entry cannot exempt anything else.
+    "tc_resource_ready_publisher",
+                     # outbound HTTP client adapter; it is not a FastAPI route.
 )
 
 

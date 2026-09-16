@@ -130,7 +130,20 @@ bcs collaboration create "$candidate_file" \
 
 `collaboration create` 会再次调用服务端校验接口，再检查逻辑角色、必填角色和 driver 绑定，最后通过 `/groups` 创建 `state_machine` 群。需要让后续 service invocation 自动启动同一工作流时，再加 `--auto-start-on-service-invocation`。
 
-11. 建群成功后向用户返回 group ID、driver、participants 和可点击的 `chat_url`（若服务端提供），并保留响应中的 `session_id` 供后续 BCS Session 操作使用。`session_id` 是 BCS 会话标识，不等同于 OpenClaw `sessions_send` 所需的完整 `sessionKey`；使用 `sessions_send` 前先从会话列表解析对应 `sessionKey`，无法解析时改用 `bcs session chat --session "$session_id" --message "..."`。无论校验失败、建群失败还是成功，最后都执行 `rm -f -- "$candidate_file"`。
+业务只需要预先配置群时，加 `--no-session`：群、YAML 和参与者绑定仍然保存，但不创建
+初始 Session，也不启动首次运行。响应的 `session_id` 为 `null`，无需查找或交接会话。
+需要开始执行时，显式创建 `service_invocation` Session：
+
+```bash
+bcs session create --group "$group_id" --kind service_invocation --title "开始协同"
+```
+
+该开关要求先升级服务端；服务端如果仍返回 Session ID，CLI 会报错并报告已创建的资源。
+HTTP 请求若同时带非空 `event_subscriptions` 和 `create_initial_session=false`，会在写入前
+失败，因为现有事件订阅流程需要初始 Session。`start_initial_run` 只在创建初始 Session
+时生效，不能使 `--no-session` 请求启动运行。
+
+11. 建群成功后向用户返回 group ID、driver、participants 和可点击的 `chat_url`（若服务端提供），并保留响应中的 `session_id`（若非空）供后续 BCS Session 操作使用。`session_id` 是 BCS 会话标识，不等同于 OpenClaw `sessions_send` 所需的完整 `sessionKey`；使用 `sessions_send` 前先从会话列表解析对应 `sessionKey`，无法解析时改用 `bcs session chat --session "$session_id" --message "..."`。无论校验失败、建群失败还是成功，最后都执行 `rm -f -- "$candidate_file"`。
 
 ## 编写约束
 

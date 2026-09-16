@@ -1,11 +1,9 @@
 """Typed configuration dataclasses.
-
 Each dataclass corresponds to one cluster of ``user_config.get(...)``
 calls in the legacy codebase. ``ConfigModule`` (Task 5) provides one
 ``@singleton`` ``@provider`` per type; downstream services receive the
 typed object via constructor injection rather than reaching into
 ``sofa.sofa_config`` themselves.
-
 The ``raw`` dict on some types is an escape hatch — there are config
 clusters with sub-blocks (e.g. ``arca_sandbox.alt``) that aren't yet
 worth fully typing. The hatch lets us pull the typed extraction work
@@ -34,7 +32,6 @@ from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 @dataclass(frozen=True)
 class WhitelistConfig:
     """Operator whitelist — frozen set of operator names allowed in.
-
     Sourced from the ``whitelist`` block of ``user_config``.
     """
 
@@ -44,7 +41,6 @@ class WhitelistConfig:
 @dataclass(frozen=True)
 class BotChatConfig:
     """Bot-chat trace-store (Langfuse) config (the ``bot_chat`` user_config block).
-
     Neutral empty defaults — the community build embeds no trace-store endpoint
     or credentials. Corp env overlays set them; empty ⇒ the Langfuse-backed
     bot-chat features report unconfigured (the DB-backed path is unaffected).
@@ -58,7 +54,6 @@ class BotChatConfig:
 @dataclass(frozen=True)
 class YuqueConfig:
     """Yuque binding-verify endpoint config (the ``yuque`` user_config block).
-
     Neutral empty default — the community build embeds no Yuque endpoint; each
     corp env overlay sets ``user_api``. Empty ⇒ the verify endpoint returns an
     "unconfigured" response.
@@ -71,7 +66,6 @@ class YuqueConfig:
 class BcnConfig:
     """BCN (Bot Coordination Network) host + provider credentials (the ``bcn``
     user_config block).
-
     ``base_url`` is the prod BCN host and ``base_url_pre`` overrides it when
     env=='pre'. The ``provider_*`` pairs are the claude_code down-link Provider
     credentials, keyed by env (prod / pre); only those two envs register to a real BCN.
@@ -103,10 +97,8 @@ class BcnConfig:
 @dataclass(frozen=True)
 class OpenApiBotConfig:
     """``openapi_bot`` block — BaaS Open API single-bot dispatch (task ``single_bot``).
-
     Drives the community ``OpenApiBotAdapter`` (Bearer ``api_key`` against
     ``/openapi/v1/messages`` + ``/api/v1/api-keys/<prefix>/allowed-bots``).
-
     ``base_url`` / ``base_url_pre`` are env-aware hosts (non-secret), selected
     per ``get_current_env()`` — mirrors the ``bcn`` block convention
     (``base_url``=prod, ``base_url_pre``=pre). ``api_key_secret`` is the LITERAL
@@ -125,10 +117,8 @@ class OpenApiBotConfig:
 @dataclass(frozen=True)
 class BcsClientConfig:
     """``bcs_client`` block — BCS coordinator HMAC client (task ``coop_group``).
-
     Drives the community ``BcsHttpAdapter`` (HMAC ``X-ECB-Token`` /
     ``X-ECB-Signature`` against ``/groups`` + ``/sessions``).
-
     Distinct from the ``bcn`` block: that block feeds the BCN management plane
     (Bearer ``provider_admin_token``); this block feeds the coordination plane
     (HMAC, group/session lifecycle) consumed by the coop-group task runner. The
@@ -281,6 +271,7 @@ class SecretNamesConfig:
 
     dormant_internal_token: str = ""
     skill_center_internal_token: str = ""
+    tc_file_service_token: str = ""
     aiworkbench_repo_url: str = ""
     gateway_principal_signing_key: str = "gateway_principal_signing_key"
     aicoding_theta_master_key: str = ""
@@ -490,6 +481,12 @@ class EcbConfig:
 
     base_url: str = ""
     base_url_pre: str = ""
+    resource_ready_base_url: str = ""
+    resource_ready_timeout_seconds: float = 10.0
+    resource_ready_worker_threads: int = 2
+    resource_ready_max_in_flight: int = 8
+    resource_ready_dedupe_ttl_seconds: float = 3600.0
+    resource_ready_dedupe_max_entries: int = 10_000
 
 
 @dataclass(frozen=True)
@@ -775,6 +772,13 @@ class DormantInternalToken:
     Empty ``value`` makes the auth Depends 401 all requests
     (feature-off failure mode).
     """
+
+    value: str = ""
+
+
+@dataclass(frozen=True)
+class TcFileServiceToken:
+    """Resolved shared Bearer token for the OCB ↔ ECB TC integration."""
 
     value: str = ""
 

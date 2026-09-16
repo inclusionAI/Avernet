@@ -23,6 +23,9 @@ from tests.community._flows.mcp.api_lifecycle import MCP_FLOWS
 from tests.community._flows.quality.api_lifecycle import QUALITY_FLOWS
 from tests.community._flows.resources.api_lifecycle import RESOURCES_LIFECYCLE_FLOWS
 from tests.community._flows.skill_center.api_lifecycle import API_LIFECYCLE_FLOWS
+from tests.community._flows.tc_file_upload_integrations.api_lifecycle import (
+    TC_FILE_UPLOAD_INTEGRATION_FLOWS,
+)
 from tests.community._flows.user_list.api_lifecycle import USER_LIST_FLOWS
 from tests.community.framework.flow_coverage import (
     SINGLEBOX_E2E_EXEMPT,
@@ -47,6 +50,7 @@ REGISTERED_FLOWS: list = [
     *CRON_FLOWS,
     *QUALITY_FLOWS,
     *USER_LIST_FLOWS,
+    *TC_FILE_UPLOAD_INTEGRATION_FLOWS,
 ]
 
 

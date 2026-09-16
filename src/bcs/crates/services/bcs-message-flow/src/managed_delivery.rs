@@ -644,12 +644,13 @@ impl ManagedMessageDeliveryService for ManagedMessageDelivery {
         let policy = match &self.policy { Some(live) => Some(live.snapshot.read().await), None => None };
         if let Some(policy) = &policy {
           for command in &mut commands {
-            if !matches!(command.flow_kind, bcs_domain::message_delivery::DeliveryFlowKind::Group | bcs_domain::message_delivery::DeliveryFlowKind::System) { return Err(ManagedDeliveryError::Conflict); }
+            if !matches!(command.flow_kind, bcs_domain::message_delivery::DeliveryFlowKind::Group | bcs_domain::message_delivery::DeliveryFlowKind::System | bcs_domain::message_delivery::DeliveryFlowKind::Task) { return Err(ManagedDeliveryError::Conflict); }
             for target in &mut command.targets {
                 let drain = target.kind == DeliveryType::Send && target.semantic_projection_json.get("drain_context").and_then(|v| v.as_bool()) == Some(true)
                     && !self.repo.lookup(DeliveryLookup::LanePendingContextCarrier { bot: target.target_bot_id.clone(), session: command.message.session_id.clone(), now_ms: command.now_ms }).await?.is_empty();
                 let enabled = match command.flow_kind {
                     bcs_domain::message_delivery::DeliveryFlowKind::System => policy.policy.manages_system(&target.target_bot_id),
+                    bcs_domain::message_delivery::DeliveryFlowKind::Task => policy.policy.manages_task(&target.target_bot_id),
                     _ => policy.policy.manages_group(&target.target_bot_id),
                 };
                 if (!enabled && !drain)

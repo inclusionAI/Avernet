@@ -91,6 +91,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.space_skill_source
   - agentclaw.community.plugin_api.staff_dept
   - agentclaw.community.plugin_api.storage
+  - agentclaw.community.plugin_api.tc_resource_ready
   - agentclaw.community.plugin_api.token_exchange
   - agentclaw.community.plugin_api.tracer
   - agentclaw.community.plugins.prod.baas_service    # LocalBaasService inherits ProdBaasService to reuse httpx logic, override URL only

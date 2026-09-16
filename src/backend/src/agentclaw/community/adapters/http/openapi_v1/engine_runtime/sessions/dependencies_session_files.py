@@ -9,6 +9,9 @@ from injector import inject
 from agentclaw.community.api.session_resource_service import (
     SessionResourceServiceProtocol,
 )
+from agentclaw.community.api.tc_resource_ready_observer import (
+    TcResourceReadyObserverProtocol,
+)
 from agentclaw.community.core.runtime_binding.errors import (
     RuntimeBindingResolutionError,
 )
@@ -24,9 +27,11 @@ class OpenApiSessionFileAdapter:
         self,
         session_resources: SessionResourceServiceProtocol,
         runtime_bindings: RuntimeBindingResolutionService,
+        resource_ready_observer: TcResourceReadyObserverProtocol,
     ) -> None:
         self._session_resources = session_resources
         self._runtime_bindings = runtime_bindings
+        self._resource_ready_observer = resource_ready_observer
 
     def create_upload_intents(
         self,
@@ -68,10 +73,14 @@ class OpenApiSessionFileAdapter:
         ]
 
     def complete_upload(self, **kwargs: Any) -> Any:
-        return self._session_resources.complete_upload(**kwargs)
+        record = self._session_resources.complete_upload(**kwargs)
+        self._resource_ready_observer.notify_in_background(record)
+        return record
 
     def get_status(self, **kwargs: Any) -> Any:
-        return self._session_resources.get_status(**kwargs)
+        record = self._session_resources.get_status(**kwargs)
+        self._resource_ready_observer.notify_in_background(record)
+        return record
 
     def list_ready(self, **kwargs: Any) -> Any:
         return self._session_resources.list_resources(ready_only=True, **kwargs)

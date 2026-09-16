@@ -49,7 +49,26 @@ Group terminal normalization reconstructs completed chat segments through the
 scoped repository port, combines the current scoped buffer and final using
 versioned prefix heuristics, and separates visible final segments from internal
 run_reply canonical bodies. It does not infer tool text or promise lossless
-interpretation of rewritten snapshots. Task/A2A-specific completion is unchanged.
+interpretation of rewritten snapshots. Managed task completion uses the same
+canonical reconstruction; direct A2A-specific completion is unchanged.
+
+ManagerWorker TaskDispatch, TaskResult and TaskMessage share the existing queue
+runtime under flow Task. Admission persists canonical text/attachments before
+accepting work. Immutable task intent in the delivery binds task_id to independent
+Worker/result run identities; TaskStore is a versioned recoverable projection.
+Worker terminal CAS and Manager result admission commit atomically, even if the
+Manager queue is full or authorization later changes. Result delivery performs
+current Session/role checks before I/O and never re-executes the Worker.
+The full run_reply body and the response-mode task_result_text are distinct;
+public history receives only the display companion, not the internal summary.
+Queued work does not start the legacy TaskStore TTL. Scoped completion refreshes
+durable task state; group-wide completion also checks its running Sessions.
+Task-only disable drains old work and results. Retained System context can promote
+a legacy Task Send to a scoped queue carrier; it never falls back to native inject.
+Task lifecycle event projections remain post-commit (no new outbox); their errors
+propagate, but a process crash can leave these projections missing. Delivery and
+canonical result persistence, not those projections, determine task completion.
+See `src/bcs/specs/2026-09-16-task-message-queue/spec.md` and conformance_queued_task.
 
 The scheduler wraps an empty Bot page once in the same tick without resetting
 its budgets. Control work uses fair due-action batches rather than a global ID

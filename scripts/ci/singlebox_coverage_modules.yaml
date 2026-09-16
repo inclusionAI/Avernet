@@ -31,6 +31,30 @@ modules:
       router_min_percent: 100.0
       plugin_min_percent: 100.0
 
+  tc_file_upload_integrations:
+    system: backend
+    acceptance_targets:
+      - tests/community/acceptance/tc_file_upload_integrations
+    core_paths:
+      - src/agentclaw/community/core/tc_file_upload_integrations/
+    router_api:
+      status: applicable
+      reason: The authenticated internal context endpoint is the router surface owned by this integration; the session-resource polling route is the upstream trigger and remains in its owning module.
+      items:
+        - POST /api/internal/tc-resource-context
+    plugin_api:
+      status: applicable
+      reason: Singlebox selects the local Plugin API implementation while production selects authenticated HTTP delivery.
+      items:
+        - key: TcResourceReadyPublisherPlugin.publish
+          evidence:
+            path: src/agentclaw/community/plugins/local/tc_resource_ready.py
+            symbol: LocalTcResourceReadyPublisher.publish
+    thresholds:
+      core_min_percent: 40.0
+      router_min_percent: 100.0
+      plugin_min_percent: 100.0
+
   auth:
     system: backend
     acceptance_targets:
