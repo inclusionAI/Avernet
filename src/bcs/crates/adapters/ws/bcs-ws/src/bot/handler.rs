@@ -42,7 +42,7 @@ pub async fn handle_connection(
 
     // Write loop: send frames from channel to WebSocket
     let write_send_error = send_error_seen.clone();
-    let write_handle = tokio::spawn(async move {
+    let mut write_handle = tokio::spawn(async move {
         while let Some(msg) = client_rx.recv().await {
             let close_after_send = should_close_after_sending_bot_frame(&msg);
             if ws_tx.send(Message::Text(msg.into())).await.is_err() {
@@ -65,7 +65,14 @@ pub async fn handle_connection(
     info!(duration_ms = 0u64, "New WebSocket connection established");
 
     // Read loop: process incoming frames
-    while let Some(msg_result) = ws_rx.next().await {
+    loop {
+        let msg_result = tokio::select! {
+            _ = &mut write_handle => break,
+            next = ws_rx.next() => match next {
+                Some(message) => message,
+                None => break,
+            },
+        };
         match msg_result {
             Ok(Message::Text(text)) => {
                 info!(len = text.len(), text = %text, "Received bot frame");
@@ -131,15 +138,30 @@ pub async fn handle_connection(
                         metrics_hook
                             .error(WsPeer::Bot, crate::bot::BOT_WS_ENDPOINT, error_kind)
                             .await;
+                        // Preserve the request id so reconnecting clients can observe
+                        // the rejection before this unregistered socket is closed.
+                        let duplicate_connect = matches!(
+                            &e,
+                            BotWsDispatchError::BotConnectError { source, .. }
+                                if matches!(source.as_ref(), BotWsDispatchError::BotAlreadyConnected(_))
+                        );
+                        let request_id = if duplicate_connect {
+                            serde_json::from_str::<serde_json::Value>(&text)
+                                .ok()
+                                .and_then(|frame| frame.get("id").cloned())
+                                .unwrap_or_else(|| serde_json::json!("error"))
+                        } else {
+                            serde_json::json!("error")
+                        };
                         // Send error response if possible
                         let _ = client_tx
                             .send(
                                 serde_json::json!({
                                     "type": "res",
-                                    "id": "error",
+                                    "id": request_id,
                                     "ok": false,
                                     "error": {
-                                        "code": "dispatch_error",
+                                        "code": if duplicate_connect { "already_connected" } else { "dispatch_error" },
                                         "message": e.to_string()
                                     }
                                 })
@@ -210,7 +232,10 @@ pub async fn handle_connection(
 
     // Cleanup on disconnect
     if let Some(bot_id) = &registered_bot_id {
-        // Remove streaming connection from registry and adapter sender map.
+        // Remove the old sender before releasing the runtime connection slot.
+        // While the slot is occupied, reconnects are rejected; after it is
+        // released, this handler must not remove a newly registered sender.
+        state.bot_connections.disconnect(bot_id).await;
         if let Err(err) = state
             .bot_runtime
             .disconnect_streaming(BotRuntimeDisconnectCommand {
@@ -220,7 +245,6 @@ pub async fn handle_connection(
         {
             warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, error = %err, "Failed to record bot streaming disconnect");
         }
-        state.bot_connections.disconnect(bot_id).await;
 
         // Bot is now offline but token persists for reconnection
 
@@ -273,12 +297,12 @@ fn should_close_after_sending_bot_frame(frame: &str) -> bool {
                 .get("ok")
                 .and_then(|ok| ok.as_bool())
                 .is_some_and(|ok| !ok);
-            let is_provider_delivery_rejection = value
+            let is_connection_rejection = value
                 .get("error")
                 .and_then(|error| error.get("code"))
                 .and_then(|code| code.as_str())
-                .is_some_and(|code| code == "bot_delivery_is_provider");
-            is_error && is_provider_delivery_rejection
+                .is_some_and(|code| matches!(code, "bot_delivery_is_provider" | "already_connected"));
+            is_error && is_connection_rejection
         }
         _ => false,
     }

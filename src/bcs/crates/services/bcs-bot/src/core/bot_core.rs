@@ -782,21 +782,15 @@ impl BotRegistryCoreService for BotCore {
         } else {
             match kind {
                 ConnectionKind::Streaming => {
-                    match self.repo.reconnect_streaming(token.clone()).await {
-                        Ok((reconnected_bot_id, tok)) => {
-                            info!(bot_id = %reconnected_bot_id, "Reconnected via streaming transport");
-                            (reconnected_bot_id, tok)
-                        }
-                        Err(()) => {
-                            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, "Reconnect failed, trying direct register");
-                            let registered_token = self
-                                .repo
-                                .register_streaming_connection(bot_id.clone())
-                                .await
-                                .unwrap_or_else(|_| token.clone());
-                            (bot_id, registered_token)
-                        }
-                    }
+                    // The token was resolved above. An occupied streaming slot
+                    // must reject this socket; never fall back to registration
+                    // and report success without acquiring the slot.
+                    let (reconnected_bot_id, tok) = self.repo
+                        .reconnect_streaming(token.clone())
+                        .await
+                        .map_err(|()| ConnectError::AlreadyConnected(bot_id.clone()))?;
+                    info!(bot_id = %reconnected_bot_id, "Reconnected via streaming transport");
+                    (reconnected_bot_id, tok)
                 }
                 ConnectionKind::Http => {
                     self.repo

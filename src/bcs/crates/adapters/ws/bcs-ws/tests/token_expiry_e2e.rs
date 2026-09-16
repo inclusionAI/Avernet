@@ -53,6 +53,8 @@ const CLOSE_OBSERVE_TIMEOUT: Duration = Duration::from_millis(500);
 struct MockBotRuntime {
     connect_count: AtomicUsize,
     disconnects: Mutex<Vec<String>>,
+    active: Mutex<std::collections::HashSet<String>>,
+    disconnect_gate: Mutex<Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>,
 }
 
 #[async_trait]
@@ -63,6 +65,11 @@ impl BotRuntimeConnectionService for MockBotRuntime {
     ) -> Result<BotRuntimeConnectOutcome, BotUseCaseError> {
         self.connect_count.fetch_add(1, Ordering::Relaxed);
         let bot_uuid = command.bot_id.unwrap_or_else(|| "test-bot".to_string());
+        if !self.active.lock().await.insert(bot_uuid.clone()) {
+            return Err(BotUseCaseError::Connect(
+                bcs_service_api::ConnectError::AlreadyConnected(bot_uuid),
+            ));
+        }
         Ok(BotRuntimeConnectOutcome {
             is_new: true,
             bot_uuid,
@@ -85,6 +92,12 @@ impl BotRuntimeConnectionService for MockBotRuntime {
         &self,
         cmd: BotRuntimeDisconnectCommand,
     ) -> Result<(), BotUseCaseError> {
+        self.active.lock().await.remove(&cmd.bot_id);
+        let gate = self.disconnect_gate.lock().await.take();
+        if let Some((released, resume)) = gate {
+            released.notify_one();
+            resume.notified().await;
+        }
         self.disconnects.lock().await.push(cmd.bot_id);
         Ok(())
     }
@@ -505,4 +518,76 @@ async fn scanner_disconnects_only_expired_bots_in_batch() {
     // alive-bot should still be connected
     assert!(bot_connections.is_connected("alive-bot").await);
     assert!(!bot_connections.is_connected("expired-bot").await);
+}
+
+/// A rejected socket must close without unregistering or replacing the live bot.
+#[tokio::test]
+async fn duplicate_connect_closes_new_socket_and_preserves_old_then_allows_retry() {
+    let (addr, connections, runtime) = start_test_server().await;
+    let mut original = connect_bot(addr, "duplicate-bot").await;
+    let (mut duplicate, _) = tokio_tungstenite::connect_async(
+        format!("ws://{addr}/ws/bot"),
+    ).await.unwrap();
+    duplicate.send(Message::Text(serde_json::json!({
+        "type": "req", "id": "duplicate-connect", "method": "bot.connect",
+        "params": {"bot_id": "duplicate-bot", "token": "tok", "protocol_version": 2}
+    }).to_string().into())).await.unwrap();
+    let response = tokio::time::timeout(Duration::from_secs(2), duplicate.next())
+        .await.unwrap().unwrap().unwrap().into_text().unwrap();
+    let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+    assert_eq!(response["id"], "duplicate-connect");
+    assert_eq!(response["ok"], false);
+    assert_eq!(response["error"]["code"], "already_connected");
+    let close = tokio::time::timeout(Duration::from_secs(2), duplicate.next())
+        .await.unwrap();
+    assert!(matches!(close, Some(Ok(Message::Close(_)))));
+    assert!(runtime.disconnects.lock().await.is_empty());
+    assert!(connections.is_connected("duplicate-bot").await);
+
+    // Routing must still reach the original socket, not merely retain a flag.
+    connections.send_frame_json("duplicate-bot", "original-still-routable".into()).await.unwrap();
+    let delivered = tokio::time::timeout(Duration::from_secs(2), original.next())
+        .await.unwrap().unwrap().unwrap().into_text().unwrap();
+    assert_eq!(delivered, "original-still-routable");
+
+    original.close(None).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while runtime.disconnects.lock().await.is_empty() {
+            tokio::task::yield_now().await;
+        }
+    }).await.unwrap();
+    assert!(!connections.is_connected("duplicate-bot").await);
+    let mut retried = connect_bot(addr, "duplicate-bot").await;
+    assert!(connections.is_connected("duplicate-bot").await);
+    connections.send_frame_json("duplicate-bot", "retry-routable".into()).await.unwrap();
+    let delivered = tokio::time::timeout(Duration::from_secs(2), retried.next())
+        .await.unwrap().unwrap().unwrap().into_text().unwrap();
+    assert_eq!(delivered, "retry-routable");
+    assert_eq!(runtime.disconnects.lock().await.as_slice(), &["duplicate-bot"]);
+}
+
+/// Pause old cleanup after releasing the runtime slot. A new sender installed
+/// during that pause must survive the rest of the old handler's cleanup.
+#[tokio::test]
+async fn reconnect_sender_survives_old_cleanup_after_runtime_slot_release() {
+    let (addr, connections, runtime) = start_test_server().await;
+    let mut original = connect_bot(addr, "cleanup-bot").await;
+    let released = Arc::new(tokio::sync::Notify::new());
+    let resume = Arc::new(tokio::sync::Notify::new());
+    *runtime.disconnect_gate.lock().await = Some((released.clone(), resume.clone()));
+    original.close(None).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), released.notified()).await.unwrap();
+
+    let mut reconnected = connect_bot(addr, "cleanup-bot").await;
+    resume.notify_one();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while runtime.disconnects.lock().await.is_empty() {
+            tokio::task::yield_now().await;
+        }
+    }).await.unwrap();
+    assert!(connections.is_connected("cleanup-bot").await);
+    connections.send_frame_json("cleanup-bot", "new-sender-survived".into()).await.unwrap();
+    let delivered = tokio::time::timeout(Duration::from_secs(2), reconnected.next())
+        .await.unwrap().unwrap().unwrap().into_text().unwrap();
+    assert_eq!(delivered, "new-sender-survived");
 }
