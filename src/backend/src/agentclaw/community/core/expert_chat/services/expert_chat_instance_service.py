@@ -34,9 +34,11 @@ from typing import Any, Dict, Optional
 from injector import inject
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.bot_service_protocol import (
+    BotServiceProtocol,
+)
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError as BotLookupNotFoundError,
-    BotService,
 )
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.caller_identity.contracts import CallerIdentityStage
@@ -97,7 +99,7 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
         bot_repo: BotRepository,
         binding_repo: DeviceBindingRepository,
         bot_build_service: BotBuildService,
-        bot_service: BotService,
+        bot_service: BotServiceProtocol,
         caller_identity: CallerIdentityTokenExchangeProtocol,
         token_provider: CallerTokenProviderProtocol,
         runtime_updater: CallerRuntimeUpdaterProtocol,
