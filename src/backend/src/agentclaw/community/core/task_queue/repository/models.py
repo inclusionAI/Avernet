@@ -25,10 +25,14 @@ from agentclaw.community.core.base import Base
 from agentclaw.community.core.task_queue.types import (
     DEFAULT_APP,
     MAX_APP_LEN,
+    MAX_TRACE_ID_LEN,
     TaskRecord,
     TaskStatus,
 )
+from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
+
+logger = get_logger()
 
 # SQLite only auto-increments columns declared as exactly "INTEGER PRIMARY
 # KEY". BigInteger renders as "BIGINT" on SQLite, which breaks autoincrement.
@@ -69,6 +73,31 @@ IdempotencyKeyString = _binary_string(190)
 #: row written by another version during a rolling deploy, which is why the
 #: scope is enforced in the schema rather than only in the application.
 TaskTypeString = _binary_string(100)
+
+
+def _decode_trace_carrier(raw: str | None, task_id: int | None) -> dict | None:
+    """Deserialize ``trace_carrier``, degrading to ``None`` on anything odd.
+
+    Unlike ``payload`` — whose ``json.loads`` is deliberately unguarded, since a
+    task that cannot describe its work is a task that must not run — a trace
+    context is diagnostic. A row whose carrier is malformed (hand-edited, written
+    by a tracer whose format has since changed) must still be claimable: letting
+    it raise here would fail ``to_record`` for that row, and ``claim_batch``
+    projects a whole batch, so one bad row would take its whole batch down and
+    keep doing so on every poll.
+    """
+    if not raw:
+        return None
+    try:
+        decoded = json.loads(raw)
+    except (TypeError, ValueError):
+        decoded = None
+    if not isinstance(decoded, dict):
+        logger.warning(
+            "[task_queue] ignoring unreadable trace_carrier on task id=%s", task_id
+        )
+        return None
+    return decoded
 
 
 class TaskQueueModel(Base):
@@ -139,6 +168,39 @@ class TaskQueueModel(Base):
         IdempotencyKeyString,
         nullable=True,
         comment="enforcement copy of idempotency_key; NULLed on terminal transitions",
+    )
+
+    # ── request correlation (diagnostic only) ───────────────────────────
+    # A task is enqueued by one request and run later by another process, so the
+    # trace that asked for the work and the trace of the work are two different
+    # things unless the first is carried across. These two columns are that
+    # carriage, and they are deliberately *outside* every index and every query
+    # predicate: nothing selects, scopes, or dedups on them. They are read on the
+    # way out (by the worker) and never on the way in.
+    #
+    # Two columns for two audiences, the same split as idempotency_key /
+    # active_idempotency_key. ``trace_id`` is the human value — what an operator
+    # greps for, what a support ticket quotes, what a SELECT filters on when
+    # someone asks "what did that request end up doing?". ``trace_carrier`` is
+    # the machine value — the tracer's own serialization, handed straight back to
+    # TracerPlugin.trace_scope. Storing only the id would mean this module
+    # deciding how to rebuild a trace context, i.e. hardcoding the corp tracer's
+    # propagation headers in neutral code, and would drop everything the id is
+    # not (rpc id, penetration attributes).
+    #
+    # Both are nullable, and not merely for rows that predate them: work
+    # enqueued outside any request has no trace to carry, and a deployment whose
+    # tracer mints no id (local/test) never writes either. A NULL here is normal,
+    # never a defect.
+    trace_id = Column(
+        String(MAX_TRACE_ID_LEN),
+        nullable=True,
+        comment="trace id of the enqueuing request; correlation only, never queried on",
+    )
+    trace_carrier = Column(
+        Text,
+        nullable=True,
+        comment="JSON trace context, opaque to this module; replayed via TracerPlugin",
     )
 
     # ── env / app scoping / audit ───────────────────────────────────────
@@ -271,6 +333,8 @@ class TaskQueueModel(Base):
             env=self.env,
             app=self.app,
             idempotency_key=self.idempotency_key,
+            trace_id=self.trace_id,
+            trace_carrier=_decode_trace_carrier(self.trace_carrier, self.id),
             gmt_create=self.gmt_create,
             gmt_modified=self.gmt_modified,
         )

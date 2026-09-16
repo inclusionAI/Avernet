@@ -95,6 +95,7 @@ from agentclaw.community.plugin_api.skill_center_gateway import (
     SkillCenterSkill,
     SkillCenterVersion,
 )
+from agentclaw.community.plugins.local.tracer import NoopTracer
 
 
 _UUID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -485,6 +486,7 @@ def recovery_queue(monkeypatch):
         HandlerRegistry(),
         WorkerWakeup(),
         TaskQueueConfig(),
+        NoopTracer(),
     )
 
 

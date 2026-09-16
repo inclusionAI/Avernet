@@ -85,3 +85,45 @@ def test_dispatch_sets_id_during_and_resets_after():
     seen = asyncio.run(_run())
     assert seen["during"] and len(seen["during"]) == 32
     assert seen["after"] is None
+
+
+# ── carrying a trace beyond its request ─────────────────────────────────────
+
+
+def test_exports_nothing_outside_a_request():
+    assert CommunityTracer().export_trace_carrier() is None
+
+
+def test_export_then_restore_round_trips_the_id():
+    """The pair the task queue relies on. This impl has no call tree and no
+    baggage, so its carrier holds only the id — but it travels the same path as
+    the corp impl's, whose carrier holds propagation headers."""
+    tracer = CommunityTracer()
+    with tracer.trace_scope({"trace_id": "carried"}):
+        carrier = tracer.export_trace_carrier()
+    assert carrier
+
+    with tracer.trace_scope(carrier):
+        assert tracer.current_trace_id() == "carried"
+
+
+def test_restoring_nothing_is_a_no_op():
+    """A task enqueued outside any request has no carrier. Entering the scope
+    anyway must be safe, so no caller has to check first."""
+    tracer = CommunityTracer()
+    with tracer.trace_scope(None):
+        assert tracer.current_trace_id() is None
+    with tracer.trace_scope({}):
+        assert tracer.current_trace_id() is None
+
+
+def test_restore_nests_and_unwinds():
+    """Restores stack rather than overwrite: a handler that enqueues follow-up
+    work runs inside its own restored scope, and what it sees afterwards must be
+    what it saw before."""
+    tracer = CommunityTracer()
+    with tracer.trace_scope({"trace_id": "outer"}):
+        with tracer.trace_scope({"trace_id": "inner"}):
+            assert tracer.current_trace_id() == "inner"
+        assert tracer.current_trace_id() == "outer"
+    assert tracer.current_trace_id() is None

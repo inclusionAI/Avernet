@@ -1,14 +1,17 @@
 """Local ``TracerPlugin`` — no tracing in offline/test mode.
 
 ``install`` adds nothing and ``current_trace_id`` returns ``None`` ⇒ no
-``X-Trace-ID`` header, matching the pre-seam local behavior exactly.
+``X-Trace-ID`` header, matching the pre-seam local behavior exactly. Carrying a
+trace across the task queue is inert for the same reason: nothing to export, and
+nothing to restore.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Iterator, Optional
 
 from agentclaw.community.plugin_api.impl_registry import Flavor, Mode, plugin_impl
-from agentclaw.community.plugin_api.tracer import TracerPlugin
+from agentclaw.community.plugin_api.tracer import TraceCarrier, TracerPlugin
 from agentclaw.community.plugins.local._mock_seam import MockSeam
 
 if TYPE_CHECKING:
@@ -24,3 +27,10 @@ class NoopTracer(MockSeam, TracerPlugin):
 
     def current_trace_id(self) -> str | None:
         return None
+
+    def export_trace_carrier(self) -> Optional[TraceCarrier]:
+        return None
+
+    @contextmanager
+    def trace_scope(self, carrier: Optional[TraceCarrier]) -> Iterator[None]:
+        yield

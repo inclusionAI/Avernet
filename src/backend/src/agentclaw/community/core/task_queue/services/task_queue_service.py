@@ -24,9 +24,17 @@ from typing import Optional
 from agentclaw.community.core.repository.protocols.platform import TaskQueueRepositoryProtocol
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.wakeup import WorkerWakeup
-from agentclaw.community.core.task_queue.types import EnqueueResult, TaskRecord
+from agentclaw.community.core.task_queue.types import (
+    MAX_TRACE_ID_LEN,
+    EnqueueResult,
+    TaskRecord,
+)
 from agentclaw.community.di.config import TaskQueueConfig
+from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.tracer import TracerPlugin
 from agentclaw.community.utils.env_utils import get_current_env
+
+logger = get_logger()
 
 
 class TaskQueueService:
@@ -39,11 +47,13 @@ class TaskQueueService:
         registry: HandlerRegistry,
         wakeup: WorkerWakeup,
         config: TaskQueueConfig,
+        tracer: TracerPlugin,
     ) -> None:
         self._repo = repo
         self._registry = registry
         self._wakeup = wakeup
         self._config = config
+        self._tracer = tracer
 
     def enqueue(
         self,
@@ -83,9 +93,20 @@ class TaskQueueService:
         claims it, or what happens if it is missed; a missed signal just means
         the ordinary poll picks the task up.
 
+        **Trace correlation.** The calling request's trace is captured here and
+        stored on the row, and ``TaskWorker`` re-establishes it around the
+        handler — so a task enqueued by an open-API call logs under that call's
+        trace id when it actually runs, however much later and on whichever pod.
+        Nothing is asked of callers: this is the one place every enqueue passes
+        through, which is exactly why the capture lives here rather than at the
+        ~25 call sites. Outside a request (a handler enqueuing follow-up work,
+        a boot-time enqueue) there is no trace to capture and the columns stay
+        ``NULL``.
+
         See ``TaskQueueRepositoryProtocol.enqueue`` for the key convention and
         the full contract.
         """
+        trace_id, trace_carrier = self._capture_trace()
         result = self._repo.enqueue(
             task_type=task_type,
             payload=payload,
@@ -94,6 +115,8 @@ class TaskQueueService:
             env=get_current_env(),
             app=self._config.app,
             idempotency_key=idempotency_key,
+            trace_id=trace_id,
+            trace_carrier=trace_carrier,
         )
         if self._should_wake(result, task_type=task_type, delay_seconds=delay_seconds):
             # Signalled only *after* the repository call returns, which matters:
@@ -102,6 +125,43 @@ class TaskQueueService:
             # would race the worker against our own uncommitted insert.
             self._wakeup.notify()
         return result
+
+    def _capture_trace(self) -> tuple[Optional[str], Optional[dict]]:
+        """The current trace as ``(id, carrier)``, or ``(None, None)``.
+
+        **Swallows everything.** Correlation is a diagnostic, and a diagnostic
+        that can fail an enqueue is worse than no diagnostic at all: the work
+        the caller asked for would be lost to a tracer problem. The protocol
+        already says an impl must not raise, so this is defence in depth against
+        a future one that does — including a corp SDK that throws from deep
+        inside its own context handling.
+
+        The id is truncated rather than rejected for the same reason, and unlike
+        ``idempotency_key``, which is validated and *raises*. The difference is
+        what each column does: a truncated key silently merges two distinct
+        dedup scopes and can drop a caller's work, while a truncated trace id is
+        merely a less useful log line. Both engines would otherwise disagree
+        about the overflow (SQLite ignores the width, strict MySQL raises,
+        non-strict truncates), so the value is bounded here where the behaviour
+        is the same everywhere.
+        """
+        try:
+            trace_id = self._tracer.current_trace_id()
+            carrier = self._tracer.export_trace_carrier()
+        except Exception:
+            logger.warning(
+                "[task_queue.enqueue] tracer failed to export a trace context; "
+                "enqueueing without correlation",
+                exc_info=True,
+            )
+            return None, None
+        if trace_id and len(trace_id) > MAX_TRACE_ID_LEN:
+            logger.warning(
+                "[task_queue.enqueue] trace id longer than %d chars; storing truncated",
+                MAX_TRACE_ID_LEN,
+            )
+            trace_id = trace_id[:MAX_TRACE_ID_LEN]
+        return trace_id or None, carrier or None
 
     def find_by_idempotency_key(
         self, task_type: str, idempotency_key: str
