@@ -1533,6 +1533,11 @@ enum CollaborationCommands {
         /// Auto-start the workflow for later service invocations
         #[arg(long, default_value_t = false)]
         auto_start_on_service_invocation: bool,
+
+        /// Save the group and workflow configuration without an initial session or run.
+        /// Requires a server that supports create_initial_session=false.
+        #[arg(long)]
+        no_session: bool,
     },
 }
 
@@ -3261,6 +3266,7 @@ pub async fn run() -> Result<()> {
                 context,
                 topic,
                 auto_start_on_service_invocation,
+                no_session,
             } => {
                 let definition_yaml = std::fs::read_to_string(&file).map_err(|error| {
                     anyhow!("Failed to read YAML file {}: {error}", file.display())
@@ -3305,20 +3311,24 @@ pub async fn run() -> Result<()> {
                         "context": &context,
                         "topic": &topic,
                         "group_strategy": "state_machine",
+                        "create_initial_session": !no_session,
                         "auto_start_on_service_invocation": auto_start_on_service_invocation,
                         "collaboration_definition_yaml": &definition_yaml
                     })
                 );
                 let result = client
-                    .create_custom_group(CreateCustomGroupOptions {
-                        id,
-                        driver_bot: driver,
-                        participant_bindings,
-                        definition_yaml,
-                        context,
-                        topic,
-                        auto_start_on_service_invocation,
-                    })
+                    .create_custom_group_with_initial_session(
+                        CreateCustomGroupOptions {
+                            id,
+                            driver_bot: driver,
+                            participant_bindings,
+                            definition_yaml,
+                            context,
+                            topic,
+                            auto_start_on_service_invocation,
+                        },
+                        !no_session,
+                    )
                     .await?;
                 debug_response!(
                     debug,
@@ -3332,6 +3342,16 @@ pub async fn run() -> Result<()> {
                     })
                 );
 
+                if no_session
+                    && let Some(session_id) = &result.session_id
+                {
+                    return Err(anyhow!(
+                        "Group {} was created, but the server did not honor --no-session \
+                         (created Session {}). Upgrade the server before using this option; \
+                         the group and session have not been deleted.",
+                        result.id, session_id
+                    ));
+                }
                 if structured_mode {
                     println!(
                         "{}",

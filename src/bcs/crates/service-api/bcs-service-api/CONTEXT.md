@@ -44,7 +44,7 @@ MessageFlowService exposes Human-only environment-wide delivery-policy read/repl
 
 - Application, core, and port trait contracts for BCS.
 - `GroupCreateCommand` requires an explicit `create_initial_session` boolean.
-  Existing callers use true; false supports non-provisional Chat/ManagerWorker
+  Existing callers use true; false supports non-provisional normal groups, including StateMachine,
   creation without initial Session writes or bootstrap delivery. It is not a
   persistent prohibition on subsequent Session creation.
 - Shared contract-level DTOs, error types, and service container types.

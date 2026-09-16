@@ -920,11 +920,9 @@ impl GroupManagementService for GroupManagement {
                 "DM groups must be created through create_dm".to_string(),
             ));
         }
-        if !cmd.create_initial_session
-            && (cmd.group_strategy == Some(GroupStrategy::StateMachine) || cmd.provisioning)
-        {
+        if !cmd.create_initial_session && cmd.provisioning {
             return Err(GroupUseCaseError::InvalidProposal(
-                "create_initial_session=false supports only non-provisional Chat/ManagerWorker groups"
+                "create_initial_session=false is not supported while provisioning a group"
                     .to_string(),
             ));
         }

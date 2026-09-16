@@ -6,7 +6,7 @@
 - Group lifecycle, membership, workspace, and session coordination rules.
 - Application-facing orchestration for group creation, updates, and state changes.
 - `GroupCreateCommand.create_initial_session` controls the initial Session and
-  its bootstrap delivery for non-provisional Chat/ManagerWorker Groups. False
+  its bootstrap delivery for non-provisional normal Groups, including StateMachine. False
   preserves Group authorization, validation, quota and persistence, with no
   Session call or initialization message. The choice is not persisted.
 

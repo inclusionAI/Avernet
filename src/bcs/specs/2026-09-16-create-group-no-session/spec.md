@@ -4,8 +4,10 @@
 
 `bcs-cli create-group --no-session` creates a normal Chat or ManagerWorker
 Group without creating or reactivating an initial Session, sending its
-GroupContext, or starting a bootstrap run. Existing commands keep their
-current behavior when the option is absent.
+GroupContext, or starting a bootstrap run. `bcs-cli collaboration create
+--no-session` provides the same choice for a StateMachine group, keeping the
+workflow configuration. Existing commands keep their behavior when the option
+is absent.
 
 The CLI sends `create_initial_session: false` to `POST /groups`. The HTTP
 request defaults this boolean to true and passes it explicitly to the
@@ -19,11 +21,19 @@ URL without a Session query parameter. The CLI skips its legacy Session-list
 fallback when `--no-session` is present and rejects a contradictory server
 response that supplies a Session ID, reporting the created Group ID.
 
-This first change supports Chat and ManagerWorker only. Requests combining
-`create_initial_session: false` with StateMachine, DM, a collaboration YAML
-definition, or inline event subscriptions fail before side effects. Other Group
-entrypoints retain initial Session creation. `start_initial_run` retains its
-existing semantics.
+Normal Chat, ManagerWorker, and StateMachine groups support sessionless creation.
+`collaboration create --no-session` preserves the validated YAML and participant
+bindings without creating a Session or starting a run. `start_initial_run` applies
+only when `create_initial_session` is true; false skips the initial run even if
+`start_initial_run` is true. Later explicit Session creation starts the configured
+StateMachine through the existing Session launch flow.
+
+Requests combining `create_initial_session: false` with DM or non-empty inline
+event subscriptions fail before side effects. Event provisioning already required
+an initial Session and rolled back if it was missing before this feature. The new
+request-field validation enforces that existing requirement before writes.
+
+Other Group entrypoints retain initial Session creation.
 
 Deploy the server changes, including read-only Session listing, before clients
 use this option. An older server may ignore the field; a response check can
@@ -43,6 +53,9 @@ report that incompatibility but cannot undo an already-started run.
    mismatch reporting. Preserve existing public client helper behavior.
 5. Update user reference, changelog, and affected context/contract docs. Run
    relevant package tests and inspect the final diff with independent review.
+6. Extend the approved behavior to StateMachine groups and the collaboration CLI
+   entrypoint. Test persisted YAML/bindings, no initial delivery, later explicit
+   Session/run creation, unchanged start defaults, and event-subscription rejection.
 
 ## Validation commands
 
@@ -52,6 +65,7 @@ report that incompatibility but cannot undo an already-started run.
 - `cargo test -p bcs-http --offline`
 - `cargo test -p bcs-app-group --offline`
 - `cargo test -p bcs-service-api --offline`
+- `cargo test -p bcs-session --offline`
 - `cargo check -p bcs --tests --offline`
 
 Use focused test targets during implementation, then run affected package
@@ -62,19 +76,23 @@ suites. Do not run a global formatter or change unrelated code.
 Verified on 2026-09-16 against the implementation based on `08625d671`:
 
 - The combined suites for `bcs-protocol`, `bcs-cli`, `bcs-group`, `bcs-http`,
-  `bcs-app-group`, and `bcs-service-api` passed: 1,180 tests passed, zero failed,
+  `bcs-app-group`, `bcs-service-api`, and `bcs-session` passed: 1,215 tests passed, zero failed,
   two existing ignored tests (the CLI timeout test and an OAuth registration
   documentation example).
 - `cargo check -p bcs --tests --offline` passed, including the bootstrap test
   caller of `GroupCreateCommand`.
 - Independent code review found no functional defects. `git diff --check`
   passed. Existing unused-import and dead-code warnings remain.
+- StateMachine regression tests use the real collaboration runtime with memory
+  stores and a recording Bot delivery port. They verify preserved YAML and role
+  bindings, no initial Session/run/delivery, later explicit Session and run
+  creation, all initial-run flag combinations, and early event-subscription rejection.
 - CLI subprocess tests ran on the host. Both `NO_PROXY` and `no_proxy` were set
   to `127.0.0.1,localhost,::1`; otherwise the host proxy changed an existing
   localhost transport-error test into an HTTP 500 response.
 - The whole workspace and live Singlebox coverage were not run. Validation
-  covered the six affected packages and server compilation; the new HTTP
-  contracts use real Group/Session application services with memory storage,
+  covered the seven related packages and server compilation; the new HTTP
+  contracts use real Group/Session/collaboration services with memory storage,
   rather than a deployed stack or real Provider runtime.
 
 ## Existing file-size debt
@@ -84,12 +102,12 @@ the repository limit on the starting `dev` commit `08625d671`:
 
 | File under `src/bcs/crates/` | Before | After |
 | --- | ---: | ---: |
-| `adapters/http/bcs-http/src/routes/groups.rs` | 2,686 | 2,705 |
+| `adapters/http/bcs-http/src/routes/groups.rs` | 2,686 | 2,703 |
 | `application/v1/bcs-app-group/src/lib.rs` | 2,969 | 2,970 |
-| `services/bcs-group/src/application/management.rs` | 2,643 | 2,655 |
+| `services/bcs-group/src/application/management.rs` | 2,643 | 2,653 |
 | `services/bcs-group/tests/management.rs` | 4,158 | 4,163 |
-| `tools/bcs-cli/src/client.rs` | 4,281 | 4,306 |
-| `tools/bcs-cli/src/main.rs` | 7,152 | 7,170 |
+| `tools/bcs-cli/src/client.rs` | 4,281 | 4,316 |
+| `tools/bcs-cli/src/main.rs` | 7,152 | 7,190 |
 
 This change adds only the required request/command wiring and session-creation
 guard to those files; new service and HTTP tests live in separate files. Splitting

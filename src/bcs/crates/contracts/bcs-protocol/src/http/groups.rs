@@ -155,8 +155,8 @@ pub struct CreateGroupRequest {
     /// Group strategy: "chat" (default), "manager_worker", or "state_machine".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_strategy: Option<String>,
-    /// Create the initial Session during normal Chat/ManagerWorker group creation.
-    /// Defaults to true. False is unsupported for DM, StateMachine, and inline
+    /// Create the initial Session during normal group creation, including StateMachine.
+    /// Defaults to true. False is unsupported for DM and non-empty inline
     /// event subscriptions; it does not prevent later explicit Session creation.
     #[serde(default = "default_create_initial_session")]
     pub create_initial_session: bool,
@@ -179,6 +179,7 @@ pub struct CreateGroupRequest {
     pub auto_start_on_service_invocation: Option<bool>,
     /// Whether group creation should immediately start the initial
     /// service-invocation run. Defaults to true for backward compatibility.
+    /// Only applies when create_initial_session is true.
     /// Clients that must provision group-scoped runtime resources first can
     /// set this to false and explicitly start the returned `session_id`.
     #[serde(default, skip_serializing_if = "Option::is_none")]

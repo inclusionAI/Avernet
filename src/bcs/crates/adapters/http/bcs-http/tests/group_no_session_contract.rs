@@ -7,11 +7,17 @@ use axum::{
     http::{Request, StatusCode},
 };
 use bcs_bot::BotCore;
+use bcs_collaboration_runtime::CollaborationRuntime;
+use bcs_collaboration_store::MemoryCollaborationStore;
 use bcs_group::{GroupConfig, GroupManagement, GroupStore, MemoryGroupRepo};
 use bcs_http::{router::build_router, state::HttpAppState};
+use bcs_message_store::MemoryMessageRepo;
 use bcs_service_api::{
-    BotCapabilities, BotRegistryCoreService, GroupCoreService, Participant, ServiceResult,
-    SessionManagementService, SystemMessageEvent, SystemMessageService,
+    BotCapabilities, BotDeliveryCommand, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget,
+    BotRegistryCoreService, GroupCoreService, GroupRuntimeBindingRepoPort, JudgeDecision,
+    JudgeEvaluatorPort, JudgeRequest, Participant, ServiceResult, SessionManagementService,
+    StateMachineDefinitionRepoPort, StateMachineRunRepoPort, SystemMessageEvent,
+    SystemMessageService,
 };
 use bcs_services_container::Services;
 use bcs_session::{SessionLaunchApplication, SessionManagementServiceImpl};
@@ -23,6 +29,35 @@ use tower::ServiceExt;
 
 #[derive(Default)]
 struct RecordingSystemMessages(Mutex<Vec<(String, SystemMessageEvent)>>);
+
+#[derive(Default)]
+struct RecordingDelivery(Mutex<Vec<BotDeliveryCommand>>);
+
+#[async_trait::async_trait]
+impl BotDeliveryPort for RecordingDelivery {
+    async fn is_available(&self, _: &BotDeliveryTarget) -> bool {
+        true
+    }
+
+    async fn deliver(&self, command: BotDeliveryCommand) -> ServiceResult<BotDeliveryResult> {
+        let result = BotDeliveryResult {
+            target_bot_id: command.target_bot_id().to_string(),
+            delivered: true,
+            error: None,
+        };
+        self.0.lock().await.push(command);
+        Ok(result)
+    }
+}
+
+struct UnusedJudge;
+
+#[async_trait::async_trait]
+impl JudgeEvaluatorPort for UnusedJudge {
+    async fn judge(&self, _: JudgeRequest) -> ServiceResult<JudgeDecision> {
+        panic!("this workflow does not use a judge")
+    }
+}
 
 #[async_trait::async_trait]
 impl SystemMessageService for RecordingSystemMessages {
@@ -43,6 +78,8 @@ struct Fixture {
     groups: Arc<GroupStore>,
     sessions: Arc<SessionManagementServiceImpl>,
     notifications: Arc<RecordingSystemMessages>,
+    collaboration: Arc<MemoryCollaborationStore>,
+    delivery: Arc<RecordingDelivery>,
     _temp: TempDir,
 }
 
@@ -78,6 +115,22 @@ impl Fixture {
         services.group = groups.clone();
         services.session_management = sessions.clone();
         services.system_message = notifications.clone();
+        let collaboration = Arc::new(MemoryCollaborationStore::new());
+        let delivery = Arc::new(RecordingDelivery::default());
+        services.collaboration_runtime = Arc::new(
+            CollaborationRuntime::new(
+                collaboration.clone(),
+                collaboration.clone(),
+                collaboration.clone(),
+                collaboration.clone(),
+                groups.clone(),
+                sessions.clone(),
+                delivery.clone(),
+                Arc::new(UnusedJudge),
+            )
+            .with_bot_registry(registry.clone())
+            .with_message_repo(Arc::new(MemoryMessageRepo::new())),
+        );
         services.group_management = Arc::new(GroupManagement::new(
             groups.clone(),
             registry.clone(),
@@ -101,6 +154,8 @@ impl Fixture {
             groups,
             sessions,
             notifications,
+            collaboration,
+            delivery,
             _temp: temp,
         }
     }
@@ -241,9 +296,7 @@ async fn group_creation_still_initializes_a_session_by_default_or_explicit_opt_i
 #[tokio::test]
 async fn unsupported_no_session_combinations_fail_before_group_creation() {
     for extra in [
-        json!({"group_strategy": "state_machine"}),
         json!({"group_kind": "dm", "target_actor_id": "member-bot"}),
-        json!({"collaboration_definition_yaml": "name: Invalid definition"}),
         json!({"event_subscriptions": [{
             "name": "events", "event_filters": ["group.*"],
             "payload": {"mode": "metadata_only"},
@@ -283,4 +336,203 @@ async fn no_session_still_enforces_group_membership_validation() {
     assert!(!status.is_success());
     assert!(fixture.groups.get("new-group").await.is_none());
     assert!(fixture.notifications.0.lock().await.is_empty());
+}
+
+const WORKFLOW_YAML: &str = r#"name: Deferred workflow
+participants:
+  writer:
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      answer:
+        kind: bot_task
+        display_name: Answer
+        assignee:
+          type: bot_binding
+          binding: writer
+        instruction: Answer the request.
+        final_output: true
+"#;
+
+fn state_machine_request() -> Value {
+    let mut request = group_request("state_machine");
+    request["participants"] = json!([{"bot_uuid": "lead-bot"}, {"bot_uuid": "member-bot"}]);
+    request["collaboration_definition_yaml"] = json!(WORKFLOW_YAML);
+    request["participant_bindings"] = json!({
+        "writer": {"source": "manual", "bot_ids": ["member-bot"]}
+    });
+    request["auto_start_on_service_invocation"] = json!(true);
+    request["opening_message"] = json!("Run {{bcs.run_id}}");
+    request
+}
+
+#[tokio::test]
+async fn state_machine_keeps_configuration_until_explicit_session_launch() {
+    for start_initial_run in [None, Some(false), Some(true)] {
+        let fixture = Fixture::new().await;
+        let mut request = state_machine_request();
+        if let Some(start) = start_initial_run {
+            request["start_initial_run"] = json!(start);
+        } else {
+            // YAML also selects StateMachine when no strategy is supplied.
+            request.as_object_mut().unwrap().remove("group_strategy");
+        }
+        let (status, created) = fixture.request("POST", "/groups", request).await;
+        assert_eq!(status, StatusCode::OK, "{created}");
+        for field in ["session_id", "initial_session_id", "initial_run"] {
+            assert_eq!(created.get(field), Some(&Value::Null), "{field}");
+        }
+        assert_eq!(created["context_injected"], 0);
+        assert!(!created["chat_url"].as_str().unwrap().contains("session="));
+        let group = fixture.groups.get("new-group").await.unwrap();
+        assert_eq!(
+            group.group_strategy,
+            bcs_service_api::GroupStrategy::StateMachine
+        );
+        assert_eq!(group.context.as_deref(), Some("Prepare first"));
+        let binding = GroupRuntimeBindingRepoPort::get(&*fixture.collaboration, "new-group")
+            .await
+            .unwrap()
+            .expect("persisted runtime binding");
+        assert_eq!(
+            binding.participant_bindings["writer"].bot_ids,
+            ["member-bot"]
+        );
+        assert!(binding.auto_start_on_service_invocation);
+        let definition = binding.default_definition.unwrap();
+        let record = StateMachineDefinitionRepoPort::get_record(
+            &*fixture.collaboration,
+            &definition.id,
+            definition.version,
+        )
+        .await
+        .unwrap()
+        .expect("persisted definition");
+        assert_eq!(record.yaml_text.as_deref(), Some(WORKFLOW_YAML));
+        for _ in 0..2 {
+            let (status, listed) = fixture
+                .request("GET", "/groups/new-group/sessions", Value::Null)
+                .await;
+            assert_eq!(status, StatusCode::OK, "{listed}");
+            assert_eq!(listed["items"], json!([]));
+        }
+        assert!(fixture.notifications.0.lock().await.is_empty());
+        assert!(fixture.delivery.0.lock().await.is_empty());
+        assert!(
+            fixture
+                .sessions
+                .list_by_group("new-group", None, 0, 20, None, None)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
+        let (status, session) = fixture
+            .request(
+                "POST",
+                "/groups/new-group/sessions",
+                json!({
+                    "session_title": "Start workflow", "input": {"task": "Write an answer"}
+                }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{session}");
+        assert_eq!(session["session_kind"], "service_invocation");
+        let sid = session["session_id"].as_str().unwrap();
+        let run = fixture
+            .collaboration
+            .get_run_by_session_id(sid)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(run.definition_id, definition.id);
+        assert_eq!(run.input, json!({"task": "Write an answer"}));
+        assert_eq!(run.status, bcs_service_api::StateMachineRunStatus::Running);
+        assert_eq!(fixture.delivery.0.lock().await.len(), 1);
+        assert!(fixture.notifications.0.lock().await.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn state_machine_default_session_creation_still_respects_start_initial_run() {
+    for start_initial_run in [None, Some(false), Some(true)] {
+        let fixture = Fixture::new().await;
+        let mut request = state_machine_request();
+        request
+            .as_object_mut()
+            .unwrap()
+            .remove("create_initial_session");
+        if let Some(start) = start_initial_run {
+            request["start_initial_run"] = json!(start);
+        }
+        let (status, created) = fixture.request("POST", "/groups", request).await;
+        assert_eq!(status, StatusCode::OK, "{created}");
+        let sid = created["session_id"].as_str().unwrap();
+        assert!(fixture.sessions.get(sid).await.unwrap().is_some());
+        let run = fixture
+            .collaboration
+            .get_run_by_session_id(sid)
+            .await
+            .unwrap();
+        assert_eq!(run.is_some(), start_initial_run.unwrap_or(true));
+        assert_eq!(
+            fixture.delivery.0.lock().await.len(),
+            usize::from(start_initial_run.unwrap_or(true))
+        );
+    }
+}
+
+#[tokio::test]
+async fn inline_event_subscriptions_require_initial_session_for_every_normal_strategy() {
+    for strategy in ["chat", "manager_worker", "state_machine"] {
+        let fixture = Fixture::new().await;
+        let mut request = if strategy == "state_machine" {
+            state_machine_request()
+        } else {
+            group_request(strategy)
+        };
+        request["event_subscriptions"] = json!([{
+            "name": "events", "event_filters": ["group.*"],
+            "payload": {"mode": "metadata_only"},
+            "sink": {"type": "webhook", "url": "https://example.com/events"}
+        }]);
+        let (status, error) = fixture.request("POST", "/groups", request).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+        assert!(error.to_string().contains("create_initial_session"));
+        assert!(fixture.groups.get("new-group").await.is_none());
+        assert!(
+            GroupRuntimeBindingRepoPort::get(&*fixture.collaboration, "new-group")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            fixture
+                .sessions
+                .list_by_group("new-group", None, 0, 20, None, None)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(fixture.delivery.0.lock().await.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn sessionless_state_machine_still_validates_yaml_before_persistence() {
+    let fixture = Fixture::new().await;
+    let mut request = state_machine_request();
+    request["collaboration_definition_yaml"] = json!("name: Invalid definition");
+    let (status, error) = fixture.request("POST", "/groups", request).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    assert!(
+        error
+            .to_string()
+            .contains("invalid collaboration_definition_yaml")
+    );
+    assert!(fixture.groups.get("new-group").await.is_none());
 }

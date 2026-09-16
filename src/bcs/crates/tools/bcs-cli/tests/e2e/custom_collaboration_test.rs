@@ -313,6 +313,20 @@ async fn collaboration_validate_exits_nonzero_for_invalid_report() {
 
 #[tokio::test]
 async fn collaboration_create_validates_then_posts_state_machine_group() {
+    assert_collaboration_create(false, true).await;
+}
+
+#[tokio::test]
+async fn collaboration_create_no_session_preserves_definition_and_skips_session_lookup() {
+    assert_collaboration_create(true, false).await;
+}
+
+#[tokio::test]
+async fn collaboration_create_no_session_rejects_server_that_created_session() {
+    assert_collaboration_create(true, true).await;
+}
+
+async fn assert_collaboration_create(no_session: bool, server_creates_session: bool) {
     let ctx = TestContext::new()
         .await
         .expect("Failed to create test context");
@@ -341,7 +355,7 @@ async fn collaboration_create_validates_then_posts_state_machine_group() {
             "context": "Produce an article",
             "topic": "Article workflow",
             "group_strategy": "state_machine",
-            "create_initial_session": true,
+            "create_initial_session": !no_session,
             "originator": "bot-driver",
             "collaboration_definition_yaml": WORKFLOW_YAML,
             "auto_start_on_service_invocation": false
@@ -351,7 +365,7 @@ async fn collaboration_create_validates_then_posts_state_machine_group() {
             "driver_bot": "bot-driver",
             "participants": ["bot-driver", "bot-writer"],
             "chat_url": "http://example.test/groups/custom-group-1",
-            "session_id": "custom-group-1:initial",
+            "session_id": server_creates_session.then_some("custom-group-1:initial"),
             "group_kind": "normal",
             "created": true
         })))
@@ -359,8 +373,8 @@ async fn collaboration_create_validates_then_posts_state_machine_group() {
         .mount(&ctx.mock_server)
         .await;
 
-    let output = ctx
-        .cmd()
+    let mut command = ctx.cmd();
+    command
         .arg("collaboration")
         .arg("create")
         .arg(&yaml_file)
@@ -373,10 +387,22 @@ async fn collaboration_create_validates_then_posts_state_machine_group() {
         .arg("--context")
         .arg("Produce an article")
         .arg("--topic")
-        .arg("Article workflow")
-        .output()
+        .arg("Article workflow");
+    if no_session {
+        command.arg("--no-session");
+    }
+    let output = command.output()
         .expect("Failed to execute create custom group command");
 
+    assert_eq!(ctx.mock_server.received_requests().await.unwrap().len(), 2,
+        "only validation and group creation requests are expected");
+    if no_session && server_creates_session {
+        assert_failure(&output, Some(1));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("did not honor --no-session"), "{stderr}");
+        assert!(stderr.contains("custom-group-1:initial"), "{stderr}");
+        return;
+    }
     assert_success(&output);
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(json["id"], "custom-group-1");
@@ -384,5 +410,5 @@ async fn collaboration_create_validates_then_posts_state_machine_group() {
         json["participants"],
         serde_json::json!(["bot-driver", "bot-writer"])
     );
-    assert_eq!(json["session_id"], "custom-group-1:initial");
+    assert_eq!(json["session_id"], serde_json::json!(server_creates_session.then_some("custom-group-1:initial")));
 }

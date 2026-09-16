@@ -10,11 +10,14 @@ All notable BCS changes are documented here. Items follow
 
 - `bcs-cli create-group --no-session` creates a Chat or ManagerWorker group
   without an initial Session, GroupContext delivery, or bootstrap run.
+  `bcs-cli collaboration create --no-session` also supports StateMachine groups,
+  preserving YAML and participant bindings without starting an initial run.
   `POST /groups` accepts `create_initial_session` (default `true`); `false`
   returns null initial Session/run IDs and leaves later explicit Session
-  creation available. DM, StateMachine, and inline event-subscription requests
+  creation available. DM and non-empty inline event-subscription requests
   reject this option before provisioning. Upgrade the server before using it;
   the CLI reports a contradictory Session ID without deleting created resources.
+  `start_initial_run` applies only when an initial Session is created.
 
 ### Breaking
 

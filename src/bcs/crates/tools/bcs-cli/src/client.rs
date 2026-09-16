@@ -1530,9 +1530,19 @@ impl BcsClient {
         &self,
         options: CreateCustomGroupOptions,
     ) -> Result<CreateGroupResponse> {
+        self.create_custom_group_with_initial_session(options, true)
+            .await
+    }
+
+    /// Configure a state-machine group with an explicit initial-session choice.
+    pub async fn create_custom_group_with_initial_session(
+        &self,
+        options: CreateCustomGroupOptions,
+        create_initial_session: bool,
+    ) -> Result<CreateGroupResponse> {
         let url = format!("{}/groups", self.base_url);
         let payload = CreateGroupRequest {
-            create_initial_session: true,
+            create_initial_session,
             id: options.id,
             label: None,
             mode: None,

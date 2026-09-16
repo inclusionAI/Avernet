@@ -163,9 +163,12 @@ Bot 会在发送请求前被拒绝。
 会话列表保持为空，前端展示“暂无会话”。需要开始协作时先显式创建 Session，再发消息。
 
 该选项对应 `POST /groups` 的 `create_initial_session: false`；字段省略时默认为
-`true`。目前不支持与 DM、StateMachine、`collaboration_definition_yaml` 或建群时的
-`event_subscriptions` 组合使用。
-它不同于 StateMachine 的 `start_initial_run=false`，后者仍会创建初始 Session。
+`true`。普通 Chat、ManagerWorker、StateMachine 群均支持；结构化协同使用
+`bcs collaboration create <YAML文件> ... --no-session`，仍保存协同定义和参与者绑定。
+目前不支持与 DM 或建群时非空的 `event_subscriptions` 组合使用。
+事件订阅流程原本就要求初始 Session，这个参数新增的校验会在写入前拒绝冲突请求。
+StateMachine 的 `start_initial_run` 只在创建初始 Session 时生效；单独设为
+`false` 仍创建 Session，而 `create_initial_session=false` 不创建 Session，也不启动运行。
 请先升级服务端：旧服务端可能忽略新字段。如果响应仍包含 Session ID，CLI 会报错并
 报告已创建的群和会话，不会自动删除资源，也不能撤销服务端已经启动的运行。
 

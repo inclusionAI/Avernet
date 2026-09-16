@@ -21,7 +21,11 @@ fn group_only_command(strategy: GroupStrategy) -> GroupCreateCommand {
 
 #[tokio::test]
 async fn group_only_creation_does_not_call_session_service_even_when_it_would_fail() {
-    for strategy in [GroupStrategy::Chat, GroupStrategy::ManagerWorker] {
+    for strategy in [
+        GroupStrategy::Chat,
+        GroupStrategy::ManagerWorker,
+        GroupStrategy::StateMachine,
+    ] {
         let fixture = Fixture::new()
             .with_bot("lead", "Lead", "public", None)
             .with_bot("member", "Member", "public", None);
@@ -45,9 +49,9 @@ async fn group_only_creation_does_not_call_session_service_even_when_it_would_fa
 }
 
 #[tokio::test]
-async fn group_only_creation_rejects_state_machine_and_provisioning_before_persistence() {
+async fn group_only_creation_rejects_provisioning_before_persistence() {
     for (strategy, provisioning) in [
-        (GroupStrategy::StateMachine, false),
+        (GroupStrategy::StateMachine, true),
         (GroupStrategy::Chat, true),
         (GroupStrategy::ManagerWorker, true),
     ] {

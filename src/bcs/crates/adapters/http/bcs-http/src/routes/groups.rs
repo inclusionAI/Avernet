@@ -241,14 +241,12 @@ pub async fn create_group(
         && (req.group_kind.as_deref().is_some_and(|kind| kind != "normal")
             || !matches!(
                 req.group_strategy.as_deref(),
-                None | Some("chat" | "manager_worker")
+                None | Some("chat" | "manager_worker" | "state_machine")
             )
-            || req.collaboration_definition_yaml.is_some()
             || !req.event_subscriptions.is_empty())
     {
         return HttpAdapterError::BadRequest(
-            "create_initial_session=false supports only normal Chat/ManagerWorker groups \
-             without collaboration_definition_yaml or event_subscriptions"
+            "create_initial_session=false supports only normal groups without event_subscriptions"
                 .to_string(),
         )
         .into_response();
@@ -268,7 +266,7 @@ async fn create_group_without_inline_subscriptions(
     uri: Uri,
     req: CreateGroupRequest,
 ) -> Result<Json<Value>, HttpAdapterError> {
-    let start_initial_run = req.start_initial_run.unwrap_or(true);
+    let start_initial_run = req.create_initial_session && req.start_initial_run.unwrap_or(true);
     let caller_actor_id = resolve_group_create_caller(&state, &headers, &uri).await?;
     validate_legacy_opening_message(&req)?;
     let collaboration_definition_yaml = req.collaboration_definition_yaml.clone();

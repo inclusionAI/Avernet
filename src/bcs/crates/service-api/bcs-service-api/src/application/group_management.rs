@@ -22,7 +22,7 @@ pub struct GroupCreateCommand {
     pub context: Option<String>,
     pub opening_message: Option<crate::types::OpeningMessage>,
     /// Whether to create and initialize the first Session. False is supported
-    /// only for non-provisional Chat/ManagerWorker Groups, and is not persisted.
+    /// only for non-provisional normal Groups, including StateMachine, and is not persisted.
     pub create_initial_session: bool,
     pub routing_policy: Option<RoutingPolicy>,
     pub participants: Vec<GroupCreateParticipantCommand>,
@@ -32,7 +32,7 @@ pub struct GroupCreateCommand {
     pub group_kind: Option<GroupKind>,
     /// Service-as-a-Group configuration. None for regular groups.
     pub service_spec: Option<ServiceSpec>,
-    /// Group strategy: Chat (default) or ManagerWorker.
+    /// Group strategy: Chat (default), ManagerWorker, or StateMachine.
     pub group_strategy: Option<GroupStrategy>,
     /// Actor (bot_uuid or human_xxx) that initiated group creation.
     /// Defaults to driver_bot_id when not specified.
