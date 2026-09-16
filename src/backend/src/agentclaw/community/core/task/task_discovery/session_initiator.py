@@ -207,7 +207,9 @@ class OpenApiBotSessionInitiator(SessionInitiator):
         )
 
         # ── Step 4: 更新 session title (send_message 不传 title，需单独调) ──
-        await self._update_session_title(session_id, title, bot_id, owner_id)
+        # 跳过：corp 环境下 _resolve_engine_target 内部调 backend API 无 cookie → 401，
+        # 虽然非致命但每次产生大量 WARNING traceback 噪音。session title 为非关键功能。
+        # await self._update_session_title(session_id, title, bot_id, owner_id)
 
         # ── Step 5: 构建 session_url ───────────────────────────
         session_url = self._build_session_url(session_id, bot_id, owner_id)
