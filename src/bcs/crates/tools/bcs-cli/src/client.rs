@@ -1532,6 +1532,7 @@ impl BcsClient {
     ) -> Result<CreateGroupResponse> {
         let url = format!("{}/groups", self.base_url);
         let payload = CreateGroupRequest {
+            create_initial_session: true,
             id: options.id,
             label: None,
             mode: None,
@@ -1586,6 +1587,7 @@ impl BcsClient {
         let url = format!("{}/groups", self.base_url);
 
         let payload = CreateGroupRequest {
+            create_initial_session: true,
             mode: Some(mode.to_string()),
             driver_bot: Some(driver_bot.to_string()),
             participants,
@@ -1662,9 +1664,32 @@ impl BcsClient {
         topic: Option<&str>,
         group_strategy: Option<&str>,
     ) -> Result<CreateGroupResponse> {
+        self.create_group_with_initial_session(
+            driver_bot,
+            participants,
+            context,
+            topic,
+            group_strategy,
+            true,
+        )
+        .await
+    }
+
+    /// Create a Chat/ManagerWorker group with an explicit initial-session choice.
+    /// A server supporting this option is required when it is false.
+    pub async fn create_group_with_initial_session(
+        &self,
+        driver_bot: &str,
+        participants: Vec<ParticipantInfo>,
+        context: Option<&str>,
+        topic: Option<&str>,
+        group_strategy: Option<&str>,
+        create_initial_session: bool,
+    ) -> Result<CreateGroupResponse> {
         let url = format!("{}/groups", self.base_url);
 
         let payload = CreateGroupRequest {
+            create_initial_session,
             mode: None,
             driver_bot: Some(driver_bot.to_string()),
             participants,

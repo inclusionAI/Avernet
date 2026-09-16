@@ -101,7 +101,7 @@ bcs confirm-group-help --url "http://xxx/proposals/xxx/confirm"
 跳过提案流程，直接创建一个群组。**推荐在 agent 已知参与者的场景下使用**（如 agent 自己建群自己确认）。
 
 ```bash
-bcs create-group (--driver "<driver_bot_id>" | --manager "<manager_bot_id>") --participants "<bot1,bot2>" [--participant-tag "<bot_id>=<tag>"]... [--topic "<群组主题>"] [--context "<协作背景>"]
+bcs create-group (--driver "<driver_bot_id>" | --manager "<manager_bot_id>") --participants "<bot1,bot2>" [--participant-tag "<bot_id>=<tag>"]... [--topic "<群组主题>"] [--context "<协作背景>"] [--no-session]
 ```
 
 **参数：**
@@ -112,6 +112,7 @@ bcs create-group (--driver "<driver_bot_id>" | --manager "<manager_bot_id>") --p
 - `--participant-tag "BotID=Tag"`: 为指定成员设置 Provider 路由 tag，可重复使用；支持 driver、manager 和普通 participant
 - `--topic "主题"`: 群组主题，设置群组 label 为 "Group: {topic}"（可选）
 - `--context "背景"`: 协作背景描述（可选）
+- `--no-session`: 只创建 Chat／ManagerWorker 群，不创建初始 Session，也不投递初始上下文或启动 Driver／Manager。省略时保持默认创建初始 Session 的行为。
 - `--scene-group-id "ID"`: 钉钉场景群 ID（可选，使用 BCS 默认配置）
 
 **示例：**
@@ -131,6 +132,10 @@ bcs create-group --manager "bot-manager" --participants "bot-worker-1,bot-worker
   --participant-tag "bot-manager=tenant-a" \
   --participant-tag "bot-manager=scene-review" \
   --participant-tag "bot-worker-1=worker-tag"
+
+# 先准备群结构，之后按业务需要显式创建会话
+bcs create-group --driver "bot-001" --participants "bot-dba,bot-pm" --no-session
+bcs session create --group "<上一步返回的群 ID>" --title "开始协作"
 ```
 
 `--participant-tag` 中的 Bot 必须是最终群成员。普通群的 driver 和
@@ -152,11 +157,23 @@ Bot 会在发送请求前被拒绝。
 
 > **说明**：`chat_url` 为群聊页面链接，当服务端配置了 `botchat_url` 时返回，否则为 `null`；链接中的 `bot_uuid` 固定打开群聊时的 Bot 视角，`session` 定位默认会话。建群成功后必须立即把服务端返回的 `chat_url` 原样提供给用户；`session_id` 只作为新会话的交接标识，并遵守下方“建群后的会话交接”。
 
+使用 `--no-session` 时，群仍保存成员、topic、context 和路由配置，并占用正常群配额。
+响应中的 `session_id`、`initial_session_id`、`initial_run` 为 `null`，
+`context_injected` 为 `0`，`chat_url` 不含 `session` 参数。CLI 不做会话补查；
+会话列表保持为空，前端展示“暂无会话”。需要开始协作时先显式创建 Session，再发消息。
+
+该选项对应 `POST /groups` 的 `create_initial_session: false`；字段省略时默认为
+`true`。目前不支持与 DM、StateMachine、`collaboration_definition_yaml` 或建群时的
+`event_subscriptions` 组合使用。
+它不同于 StateMachine 的 `start_initial_run=false`，后者仍会创建初始 Session。
+请先升级服务端：旧服务端可能忽略新字段。如果响应仍包含 Session ID，CLI 会报错并
+报告已创建的群和会话，不会自动删除资源，也不能撤销服务端已经启动的运行。
+
 ---
 
 ## 建群后的会话交接（默认规则）
 
-`confirm-group-help` 或 `create-group` 成功时，新群已经拥有独立的 group/session。默认在发起建群的旧会话完成交接，避免旧上下文隐式取得新会话控制权：
+`confirm-group-help` 或未使用 `--no-session` 的 `create-group` 成功时，新群已经拥有独立的 group/session。默认在发起建群的旧会话完成交接，避免旧上下文隐式取得新会话控制权：
 
 1. 只向用户输出服务端响应中的原始 `chat_url`；不要手工重建链接。
 2. 输出链接后立即结束当前激活，不再调用任何工具。

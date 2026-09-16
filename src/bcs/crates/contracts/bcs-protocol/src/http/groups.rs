@@ -155,6 +155,11 @@ pub struct CreateGroupRequest {
     /// Group strategy: "chat" (default), "manager_worker", or "state_machine".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group_strategy: Option<String>,
+    /// Create the initial Session during normal Chat/ManagerWorker group creation.
+    /// Defaults to true. False is unsupported for DM, StateMachine, and inline
+    /// event subscriptions; it does not prevent later explicit Session creation.
+    #[serde(default = "default_create_initial_session")]
+    pub create_initial_session: bool,
     /// Actor (bot_uuid or human_xxx) that initiated group creation.
     /// Defaults to driver_bot when not specified (backward compatible).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -185,6 +190,10 @@ pub struct CreateGroupRequest {
     /// Event Subscriptions provisioned atomically with this Group.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub event_subscriptions: Vec<InlineGroupEventSubscriptionInfo>,
+}
+
+fn default_create_initial_session() -> bool {
+    true
 }
 
 /// Response from group creation.
@@ -220,6 +229,35 @@ pub struct CreateGroupResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn create_group_request_defaults_to_creating_initial_session() {
+        let request: CreateGroupRequest = serde_json::from_value(serde_json::json!({
+            "driver_bot": "driver"
+        }))
+        .unwrap();
+        assert_eq!(serde_json::to_value(request).unwrap()["create_initial_session"], true);
+    }
+
+    #[test]
+    fn create_group_request_preserves_explicit_no_session() {
+        let request: CreateGroupRequest = serde_json::from_value(serde_json::json!({
+            "driver_bot": "driver",
+            "create_initial_session": false
+        }))
+        .unwrap();
+        assert_eq!(serde_json::to_value(request).unwrap()["create_initial_session"], false);
+    }
+
+    #[test]
+    fn create_group_request_rejects_non_boolean_session_choice() {
+        for value in [serde_json::Value::Null, serde_json::json!("false"), serde_json::json!(0)] {
+            assert!(serde_json::from_value::<CreateGroupRequest>(serde_json::json!({
+                "driver_bot": "driver",
+                "create_initial_session": value
+            })).is_err());
+        }
+    }
 
     #[test]
     fn create_group_request_supports_dm_without_driver_bot() {

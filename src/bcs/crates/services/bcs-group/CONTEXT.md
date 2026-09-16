@@ -5,6 +5,10 @@
 - Group session service implementation for BCS.
 - Group lifecycle, membership, workspace, and session coordination rules.
 - Application-facing orchestration for group creation, updates, and state changes.
+- `GroupCreateCommand.create_initial_session` controls the initial Session and
+  its bootstrap delivery for non-provisional Chat/ManagerWorker Groups. False
+  preserves Group authorization, validation, quota and persistence, with no
+  Session call or initialization message. The choice is not persisted.
 
 ## Consumes
 

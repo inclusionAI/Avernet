@@ -7,6 +7,10 @@
 - External wire DTOs, protocol frames, and compatibility-facing payload models for BCS.
 - Stable request and response shapes shared by adapters and external callers.
 - Versionable protocol contract types.
+- `CreateGroupRequest.create_initial_session` defaults to `true`. `false`
+  requests Group-only Chat/ManagerWorker creation; DM, StateMachine, and inline
+  event-subscription combinations are unsupported. Nullable initial Session/run
+  response fields represent a successfully created sessionless Group.
 
 ## Consumes
 

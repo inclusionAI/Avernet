@@ -21,6 +21,9 @@ pub struct GroupCreateCommand {
     pub topic: Option<String>,
     pub context: Option<String>,
     pub opening_message: Option<crate::types::OpeningMessage>,
+    /// Whether to create and initialize the first Session. False is supported
+    /// only for non-provisional Chat/ManagerWorker Groups, and is not persisted.
+    pub create_initial_session: bool,
     pub routing_policy: Option<RoutingPolicy>,
     pub participants: Vec<GroupCreateParticipantCommand>,
     /// Backward-compatible flat member list for callers that do not provide roles.

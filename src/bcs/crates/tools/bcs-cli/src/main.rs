@@ -1200,6 +1200,11 @@ enum Commands {
         #[arg(short, long)]
         token: Option<String>,
 
+        /// Create only the group, without an initial session or bootstrap run.
+        /// Requires a server that supports create_initial_session=false.
+        #[arg(long)]
+        no_session: bool,
+
         /// Group ID (optional, auto-generated if not provided)
         #[arg(short, long, hide = true)]
         id: Option<String>,
@@ -2915,6 +2920,7 @@ pub async fn run() -> Result<()> {
 
         Commands::CreateGroup {
             token,
+            no_session,
             id: _,
             driver,
             manager,
@@ -2985,17 +2991,19 @@ pub async fn run() -> Result<()> {
                 json!({
                     "driver_bot": &driver,
                     "participants": &participants,
-                    "group_strategy": group_strategy
+                    "group_strategy": group_strategy,
+                    "create_initial_session": !no_session
                 })
             );
 
             let result = client
-                .create_group_with_strategy_and_context(
+                .create_group_with_initial_session(
                     &driver,
                     participants,
                     context.as_deref(),
                     topic.as_deref(),
                     group_strategy,
+                    !no_session,
                 )
                 .await?;
 
@@ -3014,7 +3022,17 @@ pub async fn run() -> Result<()> {
             // Surface the session the server auto-creates as part of group
             // creation. New servers return it directly; retain a best-effort
             // lookup for compatibility with older servers.
-            let auto_session_id = if result.session_id.is_some() {
+            let auto_session_id = if no_session {
+                if let Some(session_id) = &result.session_id {
+                    return Err(anyhow!(
+                        "Group {} was created, but the server did not honor --no-session \
+                         (created Session {}). Upgrade the server before using this option; \
+                         the group and session have not been deleted.",
+                        result.id, session_id
+                    ));
+                }
+                None
+            } else if result.session_id.is_some() {
                 result.session_id.clone()
             } else {
                 debug_request!(

@@ -341,6 +341,7 @@ async fn collaboration_create_validates_then_posts_state_machine_group() {
             "context": "Produce an article",
             "topic": "Article workflow",
             "group_strategy": "state_machine",
+            "create_initial_session": true,
             "originator": "bot-driver",
             "collaboration_definition_yaml": WORKFLOW_YAML,
             "auto_start_on_service_invocation": false

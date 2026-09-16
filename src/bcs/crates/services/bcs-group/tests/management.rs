@@ -122,6 +122,9 @@ use bcs_group::{GroupConfig, GroupManagement, GroupStore};
 use bcs_test_support::NoopSystemMessageService;
 use tokio::sync::Mutex;
 
+#[path = "management/no_session.rs"]
+mod no_session;
+
 #[derive(Default)]
 struct RecordingParticipantViewBindings {
     begun: Mutex<Vec<(String, String)>>,
@@ -2798,6 +2801,7 @@ fn create_cmd(
     participants: Vec<GroupCreateParticipantCommand>,
 ) -> GroupCreateCommand {
     GroupCreateCommand {
+        create_initial_session: true,
         group_id: Some("group-under-test".to_string()),
         caller_actor_id: caller_actor_id.map(str::to_string),
         driver_bot_id: driver_bot_id.to_string(),
@@ -3917,6 +3921,7 @@ async fn list_groups_filters_by_visibility() {
 
     // Create a public group
     let cmd2 = GroupCreateCommand {
+        create_initial_session: true,
         group_id: Some("public-group".to_string()),
         caller_actor_id: Some("bot_b".to_string()),
         driver_bot_id: "bot_b".to_string(),

@@ -235,6 +235,24 @@ pub async fn create_group(
     uri: Uri,
     Json(req): Json<CreateGroupRequest>,
 ) -> Response {
+    // Reject unsupported combinations before definition persistence or event
+    // subscription provisioning can create resources.
+    if !req.create_initial_session
+        && (req.group_kind.as_deref().is_some_and(|kind| kind != "normal")
+            || !matches!(
+                req.group_strategy.as_deref(),
+                None | Some("chat" | "manager_worker")
+            )
+            || req.collaboration_definition_yaml.is_some()
+            || !req.event_subscriptions.is_empty())
+    {
+        return HttpAdapterError::BadRequest(
+            "create_initial_session=false supports only normal Chat/ManagerWorker groups \
+             without collaboration_definition_yaml or event_subscriptions"
+                .to_string(),
+        )
+        .into_response();
+    }
     if req.event_subscriptions.is_empty() {
         return create_group_without_inline_subscriptions(state, headers, uri, req)
             .await
@@ -369,6 +387,7 @@ async fn create_group_without_inline_subscriptions(
         None
     };
     let cmd = GroupCreateCommand {
+        create_initial_session: req.create_initial_session,
         group_id: req.id,
         caller_actor_id: caller_actor_id.clone(),
         driver_bot_id: driver_bot,

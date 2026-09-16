@@ -920,6 +920,14 @@ impl GroupManagementService for GroupManagement {
                 "DM groups must be created through create_dm".to_string(),
             ));
         }
+        if !cmd.create_initial_session
+            && (cmd.group_strategy == Some(GroupStrategy::StateMachine) || cmd.provisioning)
+        {
+            return Err(GroupUseCaseError::InvalidProposal(
+                "create_initial_session=false supports only non-provisional Chat/ManagerWorker groups"
+                    .to_string(),
+            ));
+        }
         validate_service_spec_callback_urls(&self.outbound_url_guard, cmd.service_spec.as_ref())?;
 
         let originator = cmd
@@ -1124,6 +1132,10 @@ impl GroupManagementService for GroupManagement {
         for target in &subscription_targets {
             self.try_write_subscription_edge(&cmd.driver_bot_id, target)
                 .await;
+        }
+
+        if !cmd.create_initial_session {
+            return Ok(group_to_detail_with_context(group, 0));
         }
 
         let initial_session_kind = match requested_strategy {
