@@ -53,11 +53,11 @@
           "human_input": {
             "type": "object",
             "description": "用户回答上一次问题后由平台补充；首次执行不提供",
-            "required": ["tag"],
             "properties": {
               "tag": { "type": "string", "description": "与上一次问题对应的标识" },
               "content": { "type": "string", "description": "文本问题的回答" },
-              "fields": { "type": "object", "description": "HTML 表单提交的字段" }
+              "fields": { "type": "object", "description": "HTML 表单提交的字段" },
+              "answers": { "type": "object", "description": "结构化表单中由平台校验并归一化的回答" }
             }
           }
         }
@@ -154,11 +154,11 @@
           "human_input": {
             "type": "object",
             "description": "用户回答上一次问题后由平台补充；首次执行不提供",
-            "required": ["tag"],
             "properties": {
               "tag": { "type": "string", "description": "与上一次问题对应的标识" },
               "content": { "type": "string", "description": "文本问题的回答" },
-              "fields": { "type": "object", "description": "HTML 表单提交的字段" }
+              "fields": { "type": "object", "description": "HTML 表单提交的字段" },
+              "answers": { "type": "object", "description": "结构化表单中由平台校验并归一化的回答" }
             }
           }
         }
@@ -285,11 +285,11 @@
           "human_input": {
             "type": "object",
             "description": "用户回答上一次问题后由平台补充；首次执行不提供",
-            "required": ["tag"],
             "properties": {
               "tag": { "type": "string", "description": "与上一次问题对应的标识" },
               "content": { "type": "string", "description": "文本问题的回答" },
-              "fields": { "type": "object", "description": "HTML 表单提交的字段" }
+              "fields": { "type": "object", "description": "HTML 表单提交的字段" },
+              "answers": { "type": "object", "description": "结构化表单中由平台校验并归一化的回答" }
             }
           }
         }
@@ -347,11 +347,11 @@
           "human_input": {
             "type": "object",
             "description": "用户回答上一次问题后由平台补充；首次执行不提供",
-            "required": ["tag"],
             "properties": {
               "tag": { "type": "string", "description": "与上一次问题对应的标识" },
               "content": { "type": "string", "description": "文本问题的回答" },
-              "fields": { "type": "object", "description": "HTML 表单提交的字段" }
+              "fields": { "type": "object", "description": "HTML 表单提交的字段" },
+              "answers": { "type": "object", "description": "结构化表单中由平台校验并归一化的回答" }
             }
           }
         }

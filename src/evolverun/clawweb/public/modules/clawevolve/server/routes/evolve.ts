@@ -90,7 +90,7 @@ import {
   type FrozenEvolutionFlow,
   type FrozenStageSelection,
 } from "../services/evolve/evolution-flow.js";
-import { parseStageSkillResult } from "../services/evolve/stage-skill-result.js";
+import { parseStageSkillResult, validateStageInteractionAnswer } from "../services/evolve/stage-skill-result.js";
 import {
   candidateWorkspacePath,
   expectedCandidateSkillPath,
@@ -1407,6 +1407,7 @@ async function stageRuntimeInput(
     if (!latestAnswer?.response_json) return null;
     const answer = parseJson(latestAnswer.response_json);
     const request = parseJson(latestAnswer.request_json);
+    if (isRecord(request) && request.format === "form" && isRecord(answer)) return answer;
     const tag = isRecord(request) ? String(request.tag ?? "") : "";
     if (isRecord(answer)) {
       return "tag" in answer ? answer : { tag, fields: answer };
@@ -3332,7 +3333,16 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       || (typeof answer !== "string" && !isRecord(answer))) {
       res.status(400).json({ error: "请提交文本答案或表单字段" }); return;
     }
-    if (!await stageSkillRepo.answerInteraction(interaction.interaction_id, answer)) {
+    let validatedAnswer: unknown;
+    try {
+      const request = parseJson(interaction.request_json);
+      const parsed = parseStageSkillResult({ hitl: true, question: request });
+      if (parsed.kind !== "waiting") throw new Error("待回答问题无效");
+      validatedAnswer = validateStageInteractionAnswer(parsed.question, answer);
+    } catch (validationError) {
+      res.status(400).json({ error: validationError instanceof Error ? validationError.message : String(validationError) }); return;
+    }
+    if (!await stageSkillRepo.answerInteraction(interaction.interaction_id, validatedAnswer)) {
       res.status(409).json({ error: "问题已经被回答" }); return;
     }
     if (!await repo.resumeWaitingStep(step.step_id)) {

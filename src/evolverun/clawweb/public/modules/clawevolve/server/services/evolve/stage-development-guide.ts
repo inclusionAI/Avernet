@@ -54,9 +54,12 @@ function resultExample(stage: StageKey): Record<string, unknown> {
 // Only the new Skill-evolution Plan package describes the four business calls.
 // Keep the approved background and every other slot's guide unchanged.
 function planBusinessGuide(stage: OfficialStageDefinition): string {
-  const question = { tag: "confirm_scope", format: "text", content: "请说明本次允许处理的范围" };
-  const formQuestion = { ...question, format: "html", content: '<form><label>处理范围<input name="scope" required></label><button type="submit">确认</button></form>' };
-  const formAnswer = { scope: "只补充执行前的范围检查" };
+  const formQuestion = {
+    format: "form", title: "确认本次处理范围", description: "请确认后再继续生成方案。",
+    questions: [{ id: "scope", type: "long_text", title: "允许处理的范围", required: true,
+      placeholder: "例如：只补充执行前的范围检查", validation: { minLength: 1, maxLength: 4000 } }],
+  };
+  const formAnswer = { answers: { scope: { value: "只补充执行前的范围检查" } } };
   const discovery = {
     schema_version: "clawevolve.plan.discovery.v1",
     workspace_root: "本次独立工作目录的实际路径",
@@ -126,11 +129,9 @@ function planBusinessGuide(stage: OfficialStageDefinition): string {
     "平台在各次业务处理后沿用默认规划逻辑，组装目标、方案、评测案例和评测域。最终环节结果由平台生成；中间业务结果按本次 output_requirements 校验，不套用整个环节的最终结果格式。平台完成发布后取得真实评测域和模板引用，规划 Skill 不生成或上传这些发布标识。", "",
     "单段集成测试由平台提供独立测试副本及本次真实诊断资料；这里只分析目标 Skill 的独立副本，不修改原始 Skill。", "",
     "### 请求用户补充信息", "",
-    "需要补充信息时，只将问题 JSON 写入结果文件并结束本次处理；不要同时写业务结果。文字问题：", "", json({ question }), "",
-    "需要表单时，format 使用 html，content 提供表单 HTML：", "", json({ question: formQuestion }), "",
-    "平台收集回答后继续调用当前 Skill。恢复输入保留原 phase、input、output_requirements，并增加 hitl：question 是原问题，answer 是文字字符串或原始表单对象，history 是本次工作累计的问题与回答。文字回答示例：", "",
-    json({ hitl: { question, answer: "只补充执行前的范围检查", history: [{ question, answer: "只补充执行前的范围检查" }] } }), "",
-    "表单回答时，answer 直接为表单对象，例如：", "", json({ hitl: { question: formQuestion, answer: formAnswer, history: [{ question: formQuestion, answer: formAnswer }] } }), "",
+    "需要补充信息时，只将结构化问题写入结果文件并结束本次处理；不要同时写业务结果。format 固定为 form；questions 是问题列表，type 可用 single_choice、multiple_choice、short_text、long_text。选择题提供 options，文字题不提供 options。", "", json({ hitl: true, question: formQuestion }), "",
+    "平台负责渲染、分页、校验和保存回答。恢复输入保留原 phase、input、output_requirements，并增加 hitl：question 是原问题，answer.answers 按问题 id 提供平台已校验的回答，history 是本次工作累计的问题与回答。", "",
+    json({ hitl: { question: formQuestion, answer: formAnswer, history: [{ question: formQuestion, answer: formAnswer }] } }), "",
     "读取回答后继续本次工作，完成时返回对应业务结果。不自行等待、轮询或调度下一步。", "",
     "## 开发与交付", "",
     "根据以上说明，将本文件替换为实现当前处理逻辑的 `SKILL.md`。需要时，可以在同目录下增加脚本、参考说明等辅助文件。", "",
@@ -204,9 +205,18 @@ export function stageDevelopmentGuide(stage: OfficialStageDefinition, mode: Stag
     "## 平台提供的能力", "",
     "平台负责准备本次输入、提供文件位置、调用当前 Skill、校验结果并继续后续流程。", "",
     "### 请求用户补充信息", "",
-    "需要用户补充信息时，将以下问题 JSON 写入结果文件并结束本次处理。", "", json({ question: { tag: "confirm_scope", format: "text", content: "请说明本次允许处理的范围" } }), "",
-    "需要表单时，format 使用 html，content 提供表单 HTML：", "", json({ question: { tag: "confirm_scope", format: "html", content: '<form><label>处理范围<input name="scope" required></label><button type="submit">确认</button></form>' } }), "",
-    "平台展示问题、收集回答，再继续调用当前 Skill。下一次输入会增加 human_input，tag 与问题对应；文本回答在 content，表单字段在 fields。例如表单回答：", "", json({ human_input: { tag: "confirm_scope", fields: { scope: "只补充执行前的范围检查" } } }), "",
+    "需要用户补充信息时，将结构化问题写入结果文件并结束本次处理。format 固定为 form；questions 是问题列表，type 可用 single_choice、multiple_choice、short_text、long_text。选择题提供 options，文字题不提供 options。", "", json({ hitl: true, question: {
+      format: "form", title: "确认本次处理范围", description: "请确认后再继续处理。",
+      questions: [
+        { id: "scope", type: "single_choice", title: "处理范围", required: true, options: [
+          { value: "minimal", label: "最小必要范围", description: "只处理当前问题", recommended: true },
+          { value: "related", label: "相关范围", description: "同时处理直接相关问题" },
+        ] },
+        { id: "notes", type: "long_text", title: "补充说明", required: false, placeholder: "选填", validation: { maxLength: 4000 } },
+      ],
+    } }), "",
+    "平台负责生成交互标识、渲染表单、每页最多展示 5 题、校验选项与必填项，并保存回答；当前 Skill 不生成或校验 tag，也不返回 HTML。每道选择题由平台附带一个补充意见框，选择“其他”时该输入框必填。", "",
+    "平台收集回答后继续调用当前 Skill。下一次输入会增加 human_input.answers，并按问题 id 提供平台已校验的 value；选择题还会提供 comment。例如：", "", json({ human_input: { answers: { scope: { value: "minimal", comment: "保留已确认的业务语义" }, notes: { value: "重点检查异常分支" } } } }), "",
     "读取回答后继续处理，完成时按上一节写入业务结果。不要自行等待、轮询或调度下一步。", "",
     "## 开发与交付", "",
     "根据以上说明，将本文件替换为实现当前处理逻辑的 `SKILL.md`。需要时，可以在同目录下增加脚本、参考说明等辅助文件。", "",

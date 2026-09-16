@@ -40,7 +40,9 @@ describe("Stage Skill developer package", () => {
     expect(guide).toContain("背景与本次开发目标");
     expect(guide).toContain("平台提供的能力");
     expect(guide).toContain("提示用户将该 ZIP 上传到平台");
-    expect(guide).not.toMatch(/contract\.json|inputFile|resultFile|runtime\.py|hitl|不要在 Skill 中写死/);
+    expect(guide).not.toMatch(/contract\.json|inputFile|resultFile|runtime\.py|不要在 Skill 中写死/);
+    expect(guide).toContain('"format": "form"');
+    expect(guide).not.toContain("<form>");
   });
 
   it("documents the real postprocess input", async () => {
@@ -98,8 +100,9 @@ describe("Stage Skill developer package", () => {
           expect(output).not.toHaveProperty("result");
           expect(guide).not.toMatch(/contract\.json|inputFile|resultFile|runtime\.py|schema_version|\|---/);
           }
-          expect(guide).toContain("请说明本次允许处理的范围");
-          expect(guide).toContain("<form>");
+          expect(guide).toContain('"format": "form"');
+          expect(guide).toContain(planBusiness ? "answer.answers" : "human_input.answers");
+          expect(guide).not.toContain("<form>");
           if (flow === "bot_evolution") expect(guide).not.toContain("待进化 Skill 的独立副本");
           const hasTestSkill = flow === "skill_evolution"
             && ((stage.stage === "diagnose" && mode === "preprocess") || (stage.stage === "plan" && mode === "replace"));

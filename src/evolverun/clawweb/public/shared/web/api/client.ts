@@ -373,7 +373,22 @@ export type EvolveTask = {
     stepId: string
     attempt: number
     status: 'waiting' | 'answered'
-    question: { tag: string; format: 'text' | 'html'; content: string }
+    question: { tag: string; format: 'text' | 'html'; content: string } | {
+      format: 'form'
+      title: string
+      description?: string
+      questions: Array<{
+        id: string
+        type: 'single_choice' | 'multiple_choice' | 'short_text' | 'long_text'
+        title: string
+        description?: string
+        required: boolean
+        options?: Array<{ value: string; label: string; description?: string; recommended?: boolean }>
+        placeholder?: string
+        visibleWhen?: { questionId: string; operator: 'equals' | 'includes'; value: string }
+        validation?: { minSelections?: number; maxSelections?: number; minLength?: number; maxLength?: number }
+      }>
+    }
     answer: unknown
     createdAt: number | string
     updatedAt: number | string

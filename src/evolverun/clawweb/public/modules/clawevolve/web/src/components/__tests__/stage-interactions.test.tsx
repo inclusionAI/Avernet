@@ -128,4 +128,44 @@ describe('Stage interactions belong to their execution step', () => {
     fireEvent(window, new MessageEvent('message', { source: frame.contentWindow, data: { channel: 'evolve-hitl:HITL-1', type: 'submit', value: { session: 'right' } } }))
     await waitFor(() => expect(api.evolve.answerStageInteraction).toHaveBeenCalledExactlyOnceWith('TEST-1', 'STEP-1', 'HITL-1', { session: 'right' }))
   })
+
+  it('renders structured questions five per page and submits typed answers with choice comments', async () => {
+    const value = task('waiting', false)
+    value.interactions![0].question = {
+      format: 'form', title: '确认加固方案', description: '共 6 项，请逐项确认。',
+      questions: [
+        { id: 'tier', type: 'single_choice', title: '加固等级', required: true, options: [{ value: 'tier1', label: '基础加固', recommended: true }, { value: 'tier2', label: '深度加固' }] },
+        { id: 'scope', type: 'multiple_choice', title: '重点范围', required: true, options: [{ value: 'sop', label: 'SOP' }, { value: 'errors', label: '异常处理' }] },
+        { id: 'q3', type: 'short_text', title: '业务名称', required: true },
+        { id: 'q4', type: 'long_text', title: '保留规则', required: false },
+        { id: 'q5', type: 'short_text', title: '验收人', required: false },
+        { id: 'q6', type: 'single_choice', title: '是否继续', required: true, options: [{ value: 'yes', label: '继续' }, { value: 'no', label: '停止' }] },
+      ],
+    } as never
+    render(<StepInteractions task={value} stepId="STEP-1" canOperate onUpdated={onUpdated} />)
+    expect(screen.getByText('第 1 / 2 页')).toBeTruthy()
+    expect(screen.getByText('加固等级')).toBeTruthy()
+    expect(screen.queryByText('是否继续')).toBeNull()
+    fireEvent.click(screen.getByLabelText('基础加固'))
+    fireEvent.change(screen.getByLabelText('加固等级补充意见'), { target: { value: '保留现有业务语义' } })
+    fireEvent.click(screen.getByLabelText('SOP'))
+    fireEvent.change(screen.getByLabelText('业务名称'), { target: { value: '日报整理' } })
+    fireEvent.click(screen.getByRole('button', { name: '下一页' }))
+    expect(screen.getByText('是否继续')).toBeTruthy()
+    expect(screen.queryByText('加固等级')).toBeNull()
+    fireEvent.click(screen.getByLabelText('继续'))
+    fireEvent.click(screen.getByRole('button', { name: '提交并继续' }))
+    await waitFor(() => expect(api.evolve.answerStageInteraction).toHaveBeenCalledExactlyOnceWith(
+      'TEST-1', 'STEP-1', 'HITL-1', {
+        answers: {
+          tier: { value: 'tier1', comment: '保留现有业务语义' },
+          scope: { value: ['sop'], comment: '' },
+          q3: { value: '日报整理' },
+          q4: { value: '' },
+          q5: { value: '' },
+          q6: { value: 'yes', comment: '' },
+        },
+      },
+    ))
+  })
 })

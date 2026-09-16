@@ -1503,6 +1503,50 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     expect((await repo.listSteps(String(task.task_id))).some((item) => item.step_type === "diagnose")).toBe(false);
   });
 
+  it("validates a server-stored structured form and resumes with normalized answers only", async () => {
+    const implementationId = await seedStageImplementation("replace");
+    const created = await fetch(`${baseUrl}/api/evolve/diagnoses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        taskName: "结构化表单诊断", userId: "user-1", botId: "bot-1",
+        judgeBackend: "subagent", model: "GLM-5.1", diagnoseIntent: "确认业务规则。",
+        stageExtensions: { diagnose: { replace: { enabled: true, implementationId } } },
+      }),
+    });
+    const task = await created.json() as Record<string, unknown>;
+    const step = (task.steps as Array<{ stepId: string }>)[0];
+    const question = {
+      format: "form", title: "确认加固方案", questions: [
+        { id: "tier", type: "single_choice", title: "加固等级", required: true,
+          options: [{ value: "tier1", label: "基础加固" }, { value: "tier2", label: "深度加固" }] },
+        { id: "notes", type: "long_text", title: "业务补充", required: false,
+          validation: { maxLength: 100 } },
+      ],
+    };
+    const waiting = await callback(String(task.task_id), step.stepId, {
+      status: "succeeded", output: { hitl: true, question },
+    });
+    expect(waiting.response.status).toBe(200);
+    const interactionId = String((waiting.body.interaction as Record<string, unknown>).interactionId);
+    const forged = await fetch(`${baseUrl}/api/evolve/tasks/${task.task_id}/steps/${step.stepId}/interactions/${interactionId}/answer`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ answer: { answers: { tier: { value: "tier99" }, injected: { value: "x" } } } }),
+    });
+    expect(forged.status).toBe(400);
+    expect(await repo.findStep(step.stepId)).toMatchObject({ status: "waiting_context" });
+    const answer = { answers: { tier: { value: "tier1", comment: "保留业务语义" }, notes: { value: "重点检查异常分支" } } };
+    const answered = await fetch(`${baseUrl}/api/evolve/tasks/${task.task_id}/steps/${step.stepId}/interactions/${interactionId}/answer`, {
+      method: "POST", headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({ answer }),
+    });
+    expect(answered.status).toBe(200);
+    const inputResponse = await fetch(`${baseUrl}/api/evolve/internal/tasks/${task.task_id}/steps/${step.stepId}/input`);
+    const input = await inputResponse.json();
+    expect(inputResponse.status, JSON.stringify(input)).toBe(200);
+    expect(input.input.human_input).toEqual(answer);
+  });
+
   it('updates one Skill optimization event when a Stage waits for and receives user input', async () => {
     await skillAssetRepo.createAsset({ assetId: 'SKILL-HITL-EVENT', versionId: 'SKVER-HITL-EVENT',
       ownerUserId: 'user-1', botId: 'bot-1', ocbSkillId: 'hitl-event', displayName: 'HITL Skill',

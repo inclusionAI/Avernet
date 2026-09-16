@@ -128,7 +128,8 @@ describe("independent Stage development record", () => {
           }
           expect(Boolean(input.target_skill)).toBe(flow === "skill_evolution" && !planBusiness);
           expect(Boolean(input.builtin_result)).toBe(mode === "postprocess");
-          expect(guide).toContain("<form>");
+          expect(guide).toContain('"format": "form"');
+          expect(guide).not.toContain("<form>");
         }
       }
     }

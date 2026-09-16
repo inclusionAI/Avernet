@@ -5,6 +5,14 @@ import { createUnifiedDiff, GitDiffView } from '../pages/evolve/common'
 
 type Interaction = NonNullable<EvolveTask['interactions']>[number]
 type TaskDiff = Awaited<ReturnType<typeof api.evolve.getTaskSkillDiff>>
+type StructuredQuestion = Extract<Interaction['question'], { format: 'form' }>
+type StructuredAnswers = Record<string, { value: string | string[]; comment?: string }>
+
+const FORM_PAGE_SIZE = 5
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
 
 function AnswerValue({ value, labels }: { value: unknown; labels: Record<string, string> }) {
   if (Array.isArray(value)) return <ul className="list-inside list-disc space-y-1">{value.map((item, index) => <li key={index}><AnswerValue value={item} labels={labels} /></li>)}</ul>
@@ -38,6 +46,125 @@ function ReadOnlyInteractionForm({ html }: { html: string }) {
   return <iframe ref={frame} title="Stage 已回答的交互表单" sandbox="allow-same-origin" srcDoc={html} style={{ height }} className="mt-3 w-full rounded-xl border border-gray-200 bg-white shadow-sm" />
 }
 
+function StructuredInteractionForm({ question, initialAnswers, readOnly, busy, onSubmit }: {
+  question: StructuredQuestion
+  initialAnswers?: StructuredAnswers
+  readOnly: boolean
+  busy: boolean
+  onSubmit: (value: { answers: StructuredAnswers }) => Promise<void>
+}) {
+  const [answers, setAnswers] = useState<StructuredAnswers>(() => Object.fromEntries(question.questions.map((item) => [item.id,
+    initialAnswers?.[item.id] ?? { value: item.type === 'multiple_choice' ? [] : '', ...(item.type.endsWith('choice') ? { comment: '' } : {}) },
+  ])))
+  const [page, setPage] = useState(0)
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const visibleItems = question.questions.filter((item) => {
+    if (!item.visibleWhen) return true
+    const value = answers[item.visibleWhen.questionId]?.value
+    return item.visibleWhen.operator === 'equals'
+      ? value === item.visibleWhen.value
+      : Array.isArray(value) && value.includes(item.visibleWhen.value)
+  })
+  const pageCount = Math.max(1, Math.ceil(visibleItems.length / FORM_PAGE_SIZE))
+  const safePage = Math.min(page, pageCount - 1)
+  const pageItems = visibleItems.slice(safePage * FORM_PAGE_SIZE, (safePage + 1) * FORM_PAGE_SIZE)
+
+  const validate = (items: StructuredQuestion['questions']) => {
+    const next: Record<string, string> = {}
+    for (const item of items) {
+      const answer = answers[item.id]
+      const value = answer?.value
+      if (item.type === 'single_choice') {
+        if (item.required && !value) next[item.id] = '请选择一项'
+        else if (value === '__other__' && !answer?.comment?.trim()) next[item.id] = '选择“其他”时请补充说明'
+      } else if (item.type === 'multiple_choice') {
+        const selected = Array.isArray(value) ? value : []
+        const minimum = item.validation?.minSelections ?? (item.required ? 1 : 0)
+        const maximum = item.validation?.maxSelections ?? Number.MAX_SAFE_INTEGER
+        if (selected.length < minimum) next[item.id] = `请至少选择 ${minimum} 项`
+        else if (selected.length > maximum) next[item.id] = `最多选择 ${maximum} 项`
+        else if (selected.includes('__other__') && !answer?.comment?.trim()) next[item.id] = '选择“其他”时请补充说明'
+      } else {
+        const text = typeof value === 'string' ? value.trim() : ''
+        const minimum = item.validation?.minLength ?? (item.required ? 1 : 0)
+        const maximum = item.validation?.maxLength ?? 4000
+        if (text.length < minimum) next[item.id] = item.required ? '请填写此项' : `至少填写 ${minimum} 个字符`
+        else if (text.length > maximum) next[item.id] = `最多填写 ${maximum} 个字符`
+      }
+    }
+    setErrors((current) => ({ ...current, ...Object.fromEntries(items.map((item) => [item.id, ''])), ...next }))
+    return Object.keys(next).length === 0
+  }
+  const update = (id: string, value: string | string[], comment?: string) => {
+    setAnswers((current) => ({ ...current, [id]: { value, ...(comment !== undefined ? { comment } : current[id]?.comment !== undefined ? { comment: current[id].comment } : {}) } }))
+    setErrors((current) => ({ ...current, [id]: '' }))
+  }
+  const nextPage = () => {
+    if (!readOnly && !validate(pageItems)) return
+    setPage((current) => Math.min(pageCount - 1, current + 1))
+  }
+  const submit = async () => {
+    if (!validate(visibleItems)) {
+      const firstError = visibleItems.findIndex((item) => {
+        const value = answers[item.id]?.value
+        if (item.type === 'single_choice') return item.required && !value
+        if (item.type === 'multiple_choice') return (Array.isArray(value) ? value.length : 0) < (item.validation?.minSelections ?? (item.required ? 1 : 0))
+        return (typeof value === 'string' ? value.trim().length : 0) < (item.validation?.minLength ?? (item.required ? 1 : 0))
+      })
+      if (firstError >= 0) setPage(Math.floor(firstError / FORM_PAGE_SIZE))
+      return
+    }
+    const visibleIds = new Set(visibleItems.map((item) => item.id))
+    await onSubmit({ answers: Object.fromEntries(Object.entries(answers).filter(([id]) => visibleIds.has(id))) })
+  }
+
+  return <div className="mt-3 overflow-hidden rounded-xl border border-amber-100 bg-white shadow-sm">
+    <div className="border-b border-gray-100 bg-gradient-to-r from-amber-50 to-white px-5 py-4">
+      <div className="flex items-start justify-between gap-4">
+        <div><h3 className="text-base font-semibold text-gray-900">{question.title}</h3>{question.description && <p className="mt-1 text-sm leading-6 text-gray-600">{question.description}</p>}</div>
+        <span className="shrink-0 rounded-full bg-white px-3 py-1 text-xs font-medium text-gray-500 shadow-sm">第 {safePage + 1} / {pageCount} 页</span>
+      </div>
+    </div>
+    <div className="space-y-5 px-5 py-5">
+      {pageItems.map((item, index) => {
+        const current = answers[item.id] ?? { value: item.type === 'multiple_choice' ? [] : '' }
+        const choice = item.type === 'single_choice' || item.type === 'multiple_choice'
+        const options = choice ? [...(item.options ?? []), { value: '__other__', label: '其他' }] : []
+        return <fieldset key={item.id} className="rounded-xl border border-gray-200 bg-gray-50/50 p-4" disabled={readOnly}>
+          <legend className="px-1 text-sm font-semibold text-gray-900"><span className="mr-2 text-gray-400">{safePage * FORM_PAGE_SIZE + index + 1}.</span>{item.title}{item.required && <span className="ml-1 text-red-500">*</span>}</legend>
+          {item.description && <p className="mt-1 text-xs leading-5 text-gray-500">{item.description}</p>}
+          {choice ? <div className="mt-3 grid gap-2 sm:grid-cols-2">{options.map((option) => {
+            const selected = item.type === 'multiple_choice'
+              ? Array.isArray(current.value) && current.value.includes(option.value)
+              : current.value === option.value
+            return <label key={option.value} className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-3 text-sm ${selected ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-white'}`}>
+              <input type={item.type === 'multiple_choice' ? 'checkbox' : 'radio'} name={item.id} value={option.value} checked={selected} aria-label={option.label}
+                onChange={(event) => {
+                  if (item.type === 'single_choice') update(item.id, option.value)
+                  else {
+                    const before = Array.isArray(current.value) ? current.value : []
+                    update(item.id, event.target.checked ? [...before, option.value] : before.filter((value) => value !== option.value))
+                  }
+                }} className="mt-0.5" />
+              <span><span className="font-medium text-gray-800">{option.label}</span>{'recommended' in option && option.recommended && <span className="ml-2 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-700">推荐</span>}{'description' in option && option.description && <span className="mt-0.5 block text-xs leading-5 text-gray-500">{option.description}</span>}</span>
+            </label>
+          })}</div> : item.type === 'long_text'
+            ? <textarea aria-label={item.title} value={typeof current.value === 'string' ? current.value : ''} onChange={(event) => update(item.id, event.target.value)} placeholder={item.placeholder} className="mt-3 min-h-28 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500" />
+            : <input aria-label={item.title} value={typeof current.value === 'string' ? current.value : ''} onChange={(event) => update(item.id, event.target.value)} placeholder={item.placeholder} className="mt-3 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500" />}
+          {choice && <textarea aria-label={`${item.title}补充意见`} value={current.comment ?? ''} onChange={(event) => update(item.id, current.value, event.target.value)} placeholder={Array.isArray(current.value) ? current.value.includes('__other__') ? '请填写其他选项（必填）' : '补充意见（选填）' : current.value === '__other__' ? '请填写其他选项（必填）' : '补充意见（选填）'} className="mt-3 min-h-20 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500" />}
+          {errors[item.id] && <p className="mt-2 text-xs text-red-600">{errors[item.id]}</p>}
+        </fieldset>
+      })}
+    </div>
+    <div className="flex items-center justify-between border-t border-gray-100 bg-gray-50/70 px-5 py-4">
+      <button type="button" disabled={safePage === 0} onClick={() => setPage((current) => Math.max(0, current - 1))} className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 disabled:opacity-30">上一页</button>
+      {safePage < pageCount - 1
+        ? <button type="button" onClick={nextPage} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white">下一页</button>
+        : !readOnly && <button type="button" disabled={busy} onClick={() => void submit()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-40">{busy ? '提交中…' : '提交并继续'}</button>}
+    </div>
+  </div>
+}
+
 function InteractionCard({ taskId, interaction, canOperate, onUpdated }: {
   taskId: string
   interaction: Interaction
@@ -52,6 +179,7 @@ function InteractionCard({ taskId, interaction, canOperate, onUpdated }: {
   const channel = useMemo(() => 'evolve-hitl:' + interaction.interactionId, [interaction.interactionId])
   const question = useMemo(() => {
     const labels: Record<string, string> = {}
+    if (interaction.question.format === 'form') return { text: interaction.question.description ?? interaction.question.title, labels }
     if (interaction.question.format !== 'html') return { text: interaction.question.content, labels }
     const template = document.createElement('template')
     template.innerHTML = interaction.question.content
@@ -114,7 +242,11 @@ function InteractionCard({ taskId, interaction, canOperate, onUpdated }: {
       <p className="text-xs font-semibold text-amber-900">{answered ? '用户交互记录' : '需要补充信息'}</p>
       <span className="text-[10px] text-amber-700">{interaction.status === 'waiting' ? '等待回答' : '已回答'}</span>
     </div>
-    {answeredForm
+    {interaction.question.format === 'form'
+      ? <StructuredInteractionForm question={interaction.question}
+          initialAnswers={response && isRecord(response.answers) ? response.answers as StructuredAnswers : undefined}
+          readOnly={answered || !canOperate} busy={busy} onSubmit={submit} />
+      : answeredForm
       ? <ReadOnlyInteractionForm html={answeredForm.html} />
       : !answered && canOperate && interaction.question.format === 'html'
       ? <iframe ref={frameRef} title="Stage 提交的交互表单" sandbox="allow-forms allow-scripts" srcDoc={html} style={{ height: frameHeight }} className="mt-3 w-full rounded-lg border border-amber-100 bg-white" />
@@ -123,7 +255,7 @@ function InteractionCard({ taskId, interaction, canOperate, onUpdated }: {
       <textarea value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="填写回答" className="min-h-20 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500" />
       <button disabled={busy || !answer.trim() || !canOperate} onClick={() => void submit({ tag: interaction.question.tag, content: answer.trim() })} className="self-end rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-40">{busy ? '提交中…' : '提交并继续'}</button>
     </div>}
-    {answered && !answeredForm && <div className="mt-3 rounded-lg bg-white p-3"><p className="mb-2 text-xs font-medium text-gray-500">已提交答案</p><AnswerValue value={answerValue} labels={question.labels} /></div>}
+    {answered && interaction.question.format !== 'form' && !answeredForm && <div className="mt-3 rounded-lg bg-white p-3"><p className="mb-2 text-xs font-medium text-gray-500">已提交答案</p><AnswerValue value={answerValue} labels={question.labels} /></div>}
     {answered && <details className="mt-3"><summary className="cursor-pointer text-xs text-gray-500">交互技术详情</summary><pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-gray-950 p-3 text-xs text-gray-200">{JSON.stringify({ question: interaction.question, answer: interaction.answer }, null, 2)}</pre></details>}
     {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
   </div>
