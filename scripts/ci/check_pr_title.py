@@ -14,6 +14,7 @@ ALLOWED_TYPES = (
     "test",
     "ci",
     "build",
+    "perf",
     "chore",
 )
 REQUIRED_SCOPE = r"\([^()\s](?:[^()\r\n]*[^()\s])?\)"
@@ -54,6 +55,7 @@ def main() -> int:
     print("Examples:")
     print("  feat(backend): add whitelist observed state")
     print("  fix(bcs): reject routing updates for unknown bot ids")
+    print("  perf(bcs): reduce idle delivery expiry polling")
     print("  docs(arch): document plugin protocol conformance shape")
     return 1
 
