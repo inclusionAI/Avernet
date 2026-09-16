@@ -1,4 +1,4 @@
-"""Operator control plane for Skills Pool rollout admission."""
+"""Operator control plane for Skills Pool admission policy."""
 
 from __future__ import annotations
 
@@ -8,8 +8,12 @@ from uuid import uuid4
 
 from injector import inject
 
-from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.common_config.service import CommonConfigService
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolLayoutRepositoryProtocol,
+    SkillsPoolRolloutRepositoryProtocol,
+)
 from agentclaw.community.core.skills_pool.operation_models import (
     BatchPromotionEvidence,
     RolloutAuditEvent,
@@ -20,25 +24,19 @@ from agentclaw.community.core.skills_pool.operation_models import (
     RolloutOwnerEntry,
     WhitelistMutationResult,
 )
-from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
 from agentclaw.community.core.skills_pool.rollout_config import (
-    CONTROL_KEYS,
     ENGINE_PROMOTION_ORDER,
-    is_valid_rollout_config_value,
+    ROLLOUT_SCHEMA_VERSION,
+    rollout_schema_version,
 )
 from agentclaw.community.core.skills_pool.rollout_gate import (
     SKILLS_POOL_ROLLOUT_BUSINESS_CODE,
     SKILLS_POOL_ROLLOUT_PARAM_CODE,
 )
-from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolRolloutRepositoryProtocol
-from agentclaw.community.core.skills_pool.types import (
-    BotSkillLayoutScope,
-    SkillLayout,
-)
 
 
 class SkillsPoolRolloutOperations:
-    """Mutate the environment-scoped, exact-Bot rollout configuration."""
+    """Read and atomically mutate one environment's admission policy."""
 
     @inject
     def __init__(
@@ -51,470 +49,395 @@ class SkillsPoolRolloutOperations:
     ) -> None:
         self._configs = common_config_service
         self._bots = bot_repository
+        # Kept in the constructor contract for DI compatibility with the
+        # already deployed service. Admission no longer mutates layout state.
         self._layouts = layout_repository
         self._repository = rollout_repository
 
     def get_snapshot(self, *, env: str) -> RolloutConfigSnapshot:
-        snapshot = self._parse_config(env=env, config=self._get_config(env))
+        snapshot, _ = self._load_snapshot(env)
+        return snapshot
+
+    def _load_snapshot(
+        self,
+        env: str,
+    ) -> tuple[RolloutConfigSnapshot, dict[str, object]]:
+        config = self._get_config(env)
+        snapshot = self._parse_config(env=env, config=config)
+        stored_value = (
+            config.get("param_value") if isinstance(config, dict) else None
+        )
+        if not isinstance(stored_value, dict):
+            stored_value = self._empty_value()
         return replace(
             snapshot,
-            audit_log=self._audit_events(self._repository.list_audit_events(env=env)),
-        )
+            audit_log=self._audit_events(
+                self._repository.list_audit_events(env=env)
+            ),
+        ), stored_value
 
     def set_feature_enabled(
         self,
         *,
         env: str,
         enabled: bool,
+        expected_revision: str | None,
         operator: str,
         reason: str,
     ) -> RolloutConfigSnapshot:
-        self._validate_change(operator=operator, reason=reason)
-        current = self.get_snapshot(env=env)
-        if current.enabled is enabled and current.config_id is not None:
+        current, policy, expected_value = self._prepare_change(
+            env=env,
+            expected_revision=expected_revision,
+            operator=operator,
+            reason=reason,
+        )
+        if (
+            current.enabled is enabled
+            and current.config_id is not None
+            and current.schema_version == ROLLOUT_SCHEMA_VERSION
+        ):
             return current
         return self._write(
-            snapshot=current,
+            policy=policy,
             expected_snapshot=current,
             enabled=enabled,
             operator=operator,
             reason=reason,
-            batch_id=None,
-            action="enable" if enabled else "disable",
+            action="feature_enable" if enabled else "feature_disable",
+            expected_value=expected_value,
         )
 
-    def set_full_rollout(
+    def set_engine_admission(
         self,
         *,
         env: str,
+        engine: str,
         enabled: bool,
-        engine: str | None = None,
+        expected_revision: str | None,
         operator: str,
         reason: str,
     ) -> RolloutConfigSnapshot:
-        """Enable future claims for one engine or the whole environment."""
-
-        self._validate_change(operator=operator, reason=reason)
-        current = self.get_snapshot(env=env)
-        if engine is not None and engine not in ENGINE_PROMOTION_ORDER:
-            raise RolloutOperationError(f"unsupported engine: {engine}")
-        current_enabled = (
-            current.enable_all
-            if engine is None
-            else engine in current.full_rollout_engines
+        self._validate_engine(engine)
+        current, policy, expected_value = self._prepare_change(
+            env=env,
+            expected_revision=expected_revision,
+            operator=operator,
+            reason=reason,
         )
-        if current_enabled is enabled:
+        if (
+            policy.engine_admission.get(engine) is enabled
+            and current.schema_version == ROLLOUT_SCHEMA_VERSION
+        ):
             return current
-        if enabled:
-            if not current.enabled:
-                raise RolloutOperationError(
-                    "rollout feature must be enabled before full rollout"
-                )
-            target_engines = current.promoted_engines if engine is None else (engine,)
-            if not target_engines:
-                raise RolloutOperationError(
-                    "at least one engine must be promoted before full rollout"
-                )
-            if current.negative_controls:
-                raise RolloutOperationError(
-                    "negative controls must be cleared before full rollout"
-                )
-            for target_engine in target_engines:
-                if target_engine not in current.promoted_engines:
-                    raise RolloutOperationError(
-                        f"{target_engine} must be promoted before full rollout"
-                    )
-                if self._latest_accepted_batch(current, engine=target_engine) is None:
-                    raise RolloutOperationError(
-                        f"an accepted {target_engine} batch is required for full rollout"
-                    )
-                if self._open_batches(current, env=env, engine=target_engine):
-                    raise RolloutOperationError(
-                        f"{target_engine} still has an unaccepted batch"
-                    )
-        full_rollout_engines = current.full_rollout_engines
-        if engine is not None:
-            full_rollout_engines = tuple(
-                item for item in full_rollout_engines if item != engine
-            )
-            if enabled:
-                full_rollout_engines = (*full_rollout_engines, engine)
+        engine_admission = dict(policy.engine_admission)
+        engine_admission[engine] = enabled
         return self._write(
-            snapshot=RolloutConfigSnapshot(
-                **{
-                    **self._snapshot_values(current),
-                    "enable_all": enabled if engine is None else current.enable_all,
-                    "full_rollout_engines": full_rollout_engines,
-                }
-            ),
+            policy=replace(policy, engine_admission=engine_admission),
             expected_snapshot=current,
             enabled=current.enabled,
             operator=operator,
             reason=reason,
-            batch_id=None,
-            action=(
-                f"full_rollout:{engine or 'environment'}:"
-                f"{'enable' if enabled else 'disable'}"
-            ),
+            action=f"engine_admission:{engine}:{'enable' if enabled else 'disable'}",
+            evidence={"engine": engine, "enabled": enabled},
+            expected_value=expected_value,
         )
 
-    def set_owner_full_rollout(
+    def set_environment_rollout(
+        self,
+        *,
+        env: str,
+        engine: str,
+        enabled: bool,
+        expected_revision: str | None,
+        operator: str,
+        reason: str,
+    ) -> RolloutConfigSnapshot:
+        self._validate_engine(engine)
+        current, policy, expected_value = self._prepare_change(
+            env=env,
+            expected_revision=expected_revision,
+            operator=operator,
+            reason=reason,
+        )
+        present = engine in policy.environment_rollouts
+        if present is enabled and current.schema_version == ROLLOUT_SCHEMA_VERSION:
+            return current
+        selected = set(policy.environment_rollouts)
+        if enabled:
+            selected.add(engine)
+        else:
+            selected.discard(engine)
+        engines = tuple(
+            candidate for candidate in ENGINE_PROMOTION_ORDER if candidate in selected
+        )
+        return self._write(
+            policy=replace(policy, environment_rollouts=engines),
+            expected_snapshot=current,
+            enabled=current.enabled,
+            operator=operator,
+            reason=reason,
+            action=f"environment_rollout:{engine}:{'enable' if enabled else 'disable'}",
+            evidence={"engine": engine, "enabled": enabled},
+            expected_value=expected_value,
+        )
+
+    def set_owner_rollout(
         self,
         *,
         env: str,
         owner_id: str,
         engine: str,
         enabled: bool,
-        acceptance_batch_id: str | None,
+        expected_revision: str | None,
         operator: str,
         reason: str,
     ) -> RolloutConfigSnapshot:
-        """Enable future claims for every Bot owned by one person and engine."""
-
-        self._validate_change(operator=operator, reason=reason)
         entry = self._owner_entry(owner_id=owner_id, engine=engine)
-        current = self.get_snapshot(env=env)
-        present = entry in current.full_rollout_owners
-        if present is enabled:
+        current, policy, expected_value = self._prepare_change(
+            env=env,
+            expected_revision=expected_revision,
+            operator=operator,
+            reason=reason,
+        )
+        present = entry in policy.owner_rollouts
+        if present is enabled and current.schema_version == ROLLOUT_SCHEMA_VERSION:
             return current
-
-        acceptance = None
-        if enabled:
-            if not current.enabled:
-                raise RolloutOperationError(
-                    "rollout feature must be enabled before owner full rollout"
-                )
-            if engine not in current.promoted_engines:
-                raise RolloutOperationError(
-                    f"{engine} must be promoted before owner full rollout"
-                )
-            acceptance = self._latest_accepted_batch(current, engine=engine)
-            if acceptance is None:
-                raise RolloutOperationError(
-                    f"an accepted {engine} batch is required for owner full rollout"
-                )
-            if acceptance_batch_id != acceptance.batch_id:
-                raise RolloutOperationError(
-                    "owner full rollout must reference the latest accepted batch"
-                )
-            if self._open_batches(current, env=env, engine=engine):
-                raise RolloutOperationError(f"{engine} still has an unaccepted batch")
-
-        owners = tuple(item for item in current.full_rollout_owners if item != entry)
+        owners = tuple(item for item in policy.owner_rollouts if item != entry)
         if enabled:
             owners = (*owners, entry)
         return self._write(
-            snapshot=RolloutConfigSnapshot(
-                **{
-                    **self._snapshot_values(current),
-                    "full_rollout_owners": owners,
-                }
-            ),
+            policy=replace(policy, owner_rollouts=owners),
             expected_snapshot=current,
             enabled=current.enabled,
             operator=operator,
             reason=reason,
-            batch_id=acceptance.batch_id if acceptance else None,
-            evidence=acceptance.report if acceptance else None,
             action=(
-                f"owner_full_rollout:{entry.owner_id}:{entry.engine}:"
+                f"owner_rollout:{entry.owner_id}:{entry.engine}:"
                 f"{'enable' if enabled else 'disable'}"
             ),
+            evidence={
+                "owner_id": entry.owner_id,
+                "engine": entry.engine,
+                "enabled": enabled,
+            },
+            expected_value=expected_value,
         )
 
-    def promote_engine(
-        self,
-        *,
-        env: str,
-        engine: str,
-        operator: str,
-        reason: str,
-        acceptance_batch_id: str | None = None,
-    ) -> RolloutConfigSnapshot:
-        # Retain the established HTTP/service parameter for callers that still
-        # send it.  Engine promotion is now independent, so it must not
-        # validate or audit acceptance evidence from another engine.
-        del acceptance_batch_id
-        self._validate_change(operator=operator, reason=reason)
-        if engine not in ENGINE_PROMOTION_ORDER:
-            raise RolloutOperationError(f"unsupported engine: {engine}")
-        current = self.get_snapshot(env=env)
-        if engine in current.promoted_engines:
-            return current
-        if current.enable_all:
-            raise RolloutOperationError(
-                "disable environment full rollout before promoting another engine"
-            )
-        promoted = {*current.promoted_engines, engine}
-        promoted_engines = tuple(
-            candidate
-            for candidate in ENGINE_PROMOTION_ORDER
-            if candidate in promoted
-        )
-        return self._write(
-            snapshot=RolloutConfigSnapshot(
-                **{
-                    **self._snapshot_values(current),
-                    "promoted_engines": promoted_engines,
-                }
-            ),
-            expected_snapshot=current,
-            enabled=current.enabled,
-            operator=operator,
-            reason=reason,
-            batch_id=None,
-            evidence=None,
-            action=f"promote:{engine}",
-        )
-
-    def accept_batch(
-        self,
-        *,
-        env: str,
-        acceptance: BatchPromotionEvidence,
-        operator: str,
-        reason: str,
-    ) -> RolloutConfigSnapshot:
-        self._validate_change(operator=operator, reason=reason)
-        if (
-            acceptance.engine not in ENGINE_PROMOTION_ORDER
-            or not acceptance.batch_id.strip()
-            or not acceptance.promotion_ready
-        ):
-            raise RolloutOperationError("batch is not ready for acceptance")
-        current = self.get_snapshot(env=env)
-        if acceptance.report.get("rollout_config_version") != current.config_version:
-            raise RolloutOperationError("batch report is stale")
-        if acceptance.engine not in current.promoted_engines:
-            raise RolloutOperationError("batch engine is not promoted")
-        existing = self._accepted_batch(
-            current,
-            engine=acceptance.engine,
-            batch_id=acceptance.batch_id,
-        )
-        if existing is not None:
-            return current
-        return self._write(
-            snapshot=current,
-            expected_snapshot=current,
-            enabled=current.enabled,
-            operator=operator,
-            reason=reason,
-            batch_id=acceptance.batch_id,
-            evidence=acceptance.report,
-            action=f"accept_batch:{acceptance.engine}",
-        )
-
-    def add_bot(
+    def set_bot_allow(
         self,
         *,
         env: str,
         owner_id: str,
         bot_id: str,
-        batch_id: str,
-        acceptance_batch_id: str | None,
+        engine: str,
+        present: bool,
+        expected_revision: str | None,
         operator: str,
         reason: str,
-    ) -> WhitelistMutationResult:
-        self._validate_change(operator=operator, reason=reason)
-        bot, scope = self._resolve_bot_and_scope(
+    ) -> RolloutConfigSnapshot:
+        return self._set_bot_rule(
             env=env,
             owner_id=owner_id,
             bot_id=bot_id,
-        )
-        engine = bot.get("active_engine")
-        if not isinstance(engine, str) or engine not in ENGINE_PROMOTION_ORDER:
-            raise RolloutOperationError("bot engine is not supported")
-        state = self._layouts.get(scope)
-        claimed = self._claimed(state.active_layout, state.target_layout)
-        current = self.get_snapshot(env=env)
-        open_batches = self._open_batches(current, env=env, engine=engine)
-        if len(open_batches) > 1:
-            raise RolloutOperationError(
-                f"{engine} rollout has multiple unaccepted batches"
-            )
-        if open_batches and batch_id not in open_batches:
-            raise RolloutOperationError(
-                "the current engine batch must be accepted before expansion"
-            )
-        latest_acceptance = self._latest_accepted_batch(
-            current,
             engine=engine,
-        )
-        if latest_acceptance is None:
-            if acceptance_batch_id is not None:
-                raise RolloutOperationError(
-                    "initial batch cannot reference an acceptance"
-                )
-        elif (
-            acceptance_batch_id != latest_acceptance.batch_id
-            or batch_id == latest_acceptance.batch_id
-        ):
-            raise RolloutOperationError(
-                "a new batch must reference the latest accepted batch"
-            )
-        entry = self._entry(owner_id=owner_id, bot_id=bot_id, batch_id=batch_id)
-        existing = next(
-            (
-                item
-                for item in current.whitelist
-                if item.owner_id == entry.owner_id and item.bot_id == entry.bot_id
-            ),
-            None,
-        )
-        if existing == entry:
-            return WhitelistMutationResult(False, claimed, claimed, current)
-        whitelist = tuple(
-            item
-            for item in current.whitelist
-            if not (item.owner_id == entry.owner_id and item.bot_id == entry.bot_id)
-        ) + (entry,)
-        updated = self._write(
-            snapshot=RolloutConfigSnapshot(
-                **{
-                    **self._snapshot_values(current),
-                    "whitelist": whitelist,
-                }
-            ),
-            expected_snapshot=current,
-            enabled=current.enabled,
+            present=present,
+            expected_revision=expected_revision,
             operator=operator,
             reason=reason,
-            batch_id=batch_id,
-            action=f"whitelist_add:{owner_id}:{bot_id}",
+            exclusion=False,
         )
-        # Admission only persists rollout configuration. Claiming remains an
-        # asynchronous reconciliation step, so this write cannot change it.
-        return WhitelistMutationResult(True, claimed, claimed, updated)
 
-    def remove_bot(
+    def set_bot_exclusion(
         self,
         *,
         env: str,
         owner_id: str,
         bot_id: str,
-        operator: str,
-        reason: str,
-    ) -> WhitelistMutationResult:
-        self._validate_change(operator=operator, reason=reason)
-        current = self.get_snapshot(env=env)
-        removed = next(
-            (
-                item
-                for item in current.whitelist
-                if item.owner_id == str(owner_id) and item.bot_id == str(bot_id)
-            ),
-            None,
-        )
-        scope: BotSkillLayoutScope | None = None
-        claimed_before = False
-        try:
-            scope = self._resolve_scope(
-                env=env,
-                owner_id=owner_id,
-                bot_id=bot_id,
-            )
-        except RolloutOperationError:
-            # Configuration cleanup must remain possible after the Bot row
-            # has been deleted or otherwise becomes unresolvable.
-            pass
-        if scope is not None:
-            state = self._layouts.get(scope)
-            claimed_before = self._claimed(
-                state.active_layout,
-                state.target_layout,
-            )
-        whitelist = tuple(
-            item
-            for item in current.whitelist
-            if not (item.owner_id == str(owner_id) and item.bot_id == str(bot_id))
-        )
-        if whitelist == current.whitelist:
-            return WhitelistMutationResult(
-                False,
-                claimed_before,
-                claimed_before,
-                current,
-            )
-        updated = self._write(
-            snapshot=RolloutConfigSnapshot(
-                **{
-                    **self._snapshot_values(current),
-                    "whitelist": whitelist,
-                }
-            ),
-            expected_snapshot=current,
-            enabled=current.enabled,
-            operator=operator,
-            reason=reason,
-            batch_id=removed.batch_id if removed else None,
-            action=f"whitelist_remove:{owner_id}:{bot_id}",
-        )
-        claimed_after = claimed_before
-        if scope is not None:
-            state_after = self._layouts.get(scope)
-            claimed_after = self._claimed(
-                state_after.active_layout,
-                state_after.target_layout,
-            )
-        return WhitelistMutationResult(
-            True,
-            claimed_before,
-            claimed_after,
-            updated,
-        )
-
-    def set_control_bot(
-        self,
-        *,
-        env: str,
-        owner_id: str,
-        bot_id: str,
-        batch_id: str,
-        group: RolloutControlGroup,
+        engine: str,
         present: bool,
+        expected_revision: str | None,
         operator: str,
         reason: str,
     ) -> RolloutConfigSnapshot:
-        self._validate_change(operator=operator, reason=reason)
-        self._resolve_scope(env=env, owner_id=owner_id, bot_id=bot_id)
-        current = self.get_snapshot(env=env)
-        entry = self._entry(
+        return self._set_bot_rule(
+            env=env,
             owner_id=owner_id,
             bot_id=bot_id,
-            batch_id=batch_id,
+            engine=engine,
+            present=present,
+            expected_revision=expected_revision,
+            operator=operator,
+            reason=reason,
+            exclusion=True,
         )
-        source = (
-            current.negative_controls
-            if group is RolloutControlGroup.NEGATIVE
-            else current.teclaw_controls
+
+    def _set_bot_rule(
+        self,
+        *,
+        env: str,
+        owner_id: str,
+        bot_id: str,
+        engine: str,
+        present: bool,
+        expected_revision: str | None,
+        operator: str,
+        reason: str,
+        exclusion: bool,
+    ) -> RolloutConfigSnapshot:
+        self._validate_engine(engine)
+        current, policy, expected_value = self._prepare_change(
+            env=env,
+            expected_revision=expected_revision,
+            operator=operator,
+            reason=reason,
         )
+        entry = RolloutBotEntry(
+            owner_id=self._identity(owner_id, label="owner"),
+            bot_id=self._identity(bot_id, label="bot"),
+            engine=engine,
+        )
+        source = policy.bot_exclusions if exclusion else policy.bot_allowlist
+        existing = next(
+            (
+                item
+                for item in source
+                if item.owner_id == entry.owner_id
+                and item.bot_id == entry.bot_id
+                and item.engine == entry.engine
+            ),
+            None,
+        )
+        if (
+            (existing is not None) is present
+            and current.schema_version == ROLLOUT_SCHEMA_VERSION
+        ):
+            return current
+        if present:
+            actual_engine = self._resolve_bot_engine(
+                env=env,
+                owner_id=entry.owner_id,
+                bot_id=entry.bot_id,
+            )
+            if actual_engine != engine:
+                raise RolloutOperationError("bot engine does not match policy engine")
         retained = tuple(
             item
             for item in source
-            if not (item.owner_id == entry.owner_id and item.bot_id == entry.bot_id)
+            if not (
+                item.owner_id == entry.owner_id
+                and item.bot_id == entry.bot_id
+                and item.engine == entry.engine
+            )
         )
-        updated_entries = (*retained, entry) if present else retained
-        if updated_entries == source:
-            return current
-        values = self._snapshot_values(current)
-        values[
-            "negative_controls"
-            if group is RolloutControlGroup.NEGATIVE
-            else "teclaw_controls"
-        ] = updated_entries
+        updated = (*retained, entry) if present else retained
+        policy = replace(
+            policy,
+            bot_exclusions=updated if exclusion else policy.bot_exclusions,
+            bot_allowlist=policy.bot_allowlist if exclusion else updated,
+        )
+        rule_name = "bot_exclusion" if exclusion else "bot_allow"
         return self._write(
-            snapshot=RolloutConfigSnapshot(**values),
+            policy=policy,
             expected_snapshot=current,
             enabled=current.enabled,
             operator=operator,
             reason=reason,
-            batch_id=batch_id,
-            action=(
-                f"control_{'add' if present else 'remove'}:"
-                f"{group.value}:{owner_id}:{bot_id}"
-            ),
+            action=f"{rule_name}:{'add' if present else 'remove'}:{entry.bot_id}",
+            evidence={
+                "owner_id": entry.owner_id,
+                "bot_id": entry.bot_id,
+                "engine": engine,
+                "present": present,
+            },
+            expected_value=expected_value,
         )
+
+    def _prepare_change(
+        self,
+        *,
+        env: str,
+        expected_revision: str | None,
+        operator: str,
+        reason: str,
+    ) -> tuple[
+        RolloutConfigSnapshot,
+        RolloutConfigSnapshot,
+        dict[str, object],
+    ]:
+        self._validate_change(operator=operator, reason=reason)
+        current, expected_value = self._load_snapshot(env)
+        if current.config_version != expected_revision:
+            raise RolloutOperationError("POLICY_REVISION_CONFLICT")
+        return current, self._to_v2(current), expected_value
+
+    def _to_v2(self, snapshot: RolloutConfigSnapshot) -> RolloutConfigSnapshot:
+        if snapshot.schema_version == ROLLOUT_SCHEMA_VERSION:
+            return snapshot
+
+        def bind_engine(entry: RolloutBotEntry) -> RolloutBotEntry:
+            engine = self._resolve_bot_engine(
+                env=snapshot.env,
+                owner_id=entry.owner_id,
+                bot_id=entry.bot_id,
+            )
+            return RolloutBotEntry(
+                owner_id=entry.owner_id,
+                bot_id=entry.bot_id,
+                engine=engine,
+            )
+
+        return replace(
+            snapshot,
+            schema_version=ROLLOUT_SCHEMA_VERSION,
+            bot_allowlist=tuple(bind_engine(entry) for entry in snapshot.bot_allowlist),
+            bot_exclusions=tuple(bind_engine(entry) for entry in snapshot.bot_exclusions),
+            legacy_teclaw_controls=(),
+        )
+
+    def _write(
+        self,
+        *,
+        policy: RolloutConfigSnapshot,
+        expected_snapshot: RolloutConfigSnapshot,
+        enabled: bool,
+        operator: str,
+        reason: str,
+        action: str,
+        evidence: dict[str, object] | None = None,
+        expected_value: dict[str, object],
+    ) -> RolloutConfigSnapshot:
+        next_revision = uuid4().hex
+        effective_at = datetime.now(UTC).isoformat()
+        audit_evidence = dict(evidence or {})
+        if expected_snapshot.schema_version == 1:
+            # v2 deliberately drops Batch gates. Preserve the last v1 policy
+            # only as immutable diagnostic evidence so the temporary Batch GET
+            # remains useful without letting legacy fields back into admission.
+            audit_evidence["legacy_policy"] = expected_value
+        event = RolloutAuditEvent(
+            env=policy.env,
+            action=action,
+            operator=operator.strip(),
+            reason=reason.strip(),
+            batch_id=None,
+            based_on_config_version=expected_snapshot.config_version,
+            effective_config_version=next_revision,
+            effective_at=effective_at,
+            evidence=audit_evidence or None,
+        )
+        if not self._repository.commit_change(
+            env=policy.env,
+            config_id=expected_snapshot.config_id,
+            expected_revision=expected_snapshot.config_revision,
+            expected_enable=expected_snapshot.enabled,
+            expected_value=expected_value,
+            next_revision=next_revision,
+            enabled=enabled,
+            value=self._config_value(policy),
+            audit=event.to_dict(),
+        ):
+            raise RolloutOperationError("POLICY_REVISION_CONFLICT")
+        return self.get_snapshot(env=policy.env)
 
     def _get_config(self, env: str) -> dict[str, object] | None:
         return self._configs.get_config(
@@ -523,179 +446,6 @@ class SkillsPoolRolloutOperations:
             env=env,
             only_enabled=False,
         )
-
-    def _write(
-        self,
-        *,
-        snapshot: RolloutConfigSnapshot,
-        expected_snapshot: RolloutConfigSnapshot,
-        enabled: bool,
-        operator: str,
-        reason: str,
-        batch_id: str | None,
-        action: str,
-        evidence: dict[str, object] | None = None,
-    ) -> RolloutConfigSnapshot:
-        next_revision = uuid4().hex
-        event = RolloutAuditEvent(
-            env=snapshot.env,
-            action=action,
-            operator=operator.strip(),
-            reason=reason.strip(),
-            batch_id=batch_id,
-            based_on_config_version=snapshot.config_version,
-            effective_config_version=next_revision,
-            effective_at=datetime.now(UTC).isoformat(),
-            evidence=evidence,
-        )
-        next_value = self._config_value(snapshot)
-        if not self._repository.commit_change(
-            env=snapshot.env,
-            config_id=expected_snapshot.config_id,
-            expected_revision=expected_snapshot.config_revision,
-            expected_enable=expected_snapshot.enabled,
-            expected_value=self._config_value(expected_snapshot),
-            next_revision=next_revision,
-            enabled=enabled,
-            value=next_value,
-            audit=event.to_dict(),
-        ):
-            raise RolloutOperationError("rollout config changed concurrently")
-        return self.get_snapshot(env=snapshot.env)
-
-    def _resolve_scope(
-        self,
-        *,
-        env: str,
-        owner_id: str,
-        bot_id: str,
-    ) -> BotSkillLayoutScope:
-        _, scope = self._resolve_bot_and_scope(
-            env=env,
-            owner_id=owner_id,
-            bot_id=bot_id,
-        )
-        return scope
-
-    def _resolve_bot_and_scope(
-        self,
-        *,
-        env: str,
-        owner_id: str,
-        bot_id: str,
-    ) -> tuple[dict[str, object], BotSkillLayoutScope]:
-        matches = self._bots.get_live_by_id_owner_and_env(
-            bot_id=str(bot_id),
-            owner_id=str(owner_id),
-            env=env,
-        )
-        if not matches:
-            raise RolloutOperationError("bot not found")
-        if len(matches) != 1:
-            raise RolloutOperationError("bot identity is ambiguous")
-        entity_id = matches[0].get("entity_id")
-        if not isinstance(entity_id, (str, int)) or isinstance(entity_id, bool):
-            raise RolloutOperationError("bot entity identity is invalid")
-        return (
-            matches[0],
-            BotSkillLayoutScope(
-                env=env,
-                entity_id=str(entity_id),
-                bot_id=str(bot_id),
-            ),
-        )
-
-    @staticmethod
-    def _accepted_batch(
-        snapshot: RolloutConfigSnapshot,
-        *,
-        engine: str,
-        batch_id: str | None,
-    ) -> BatchPromotionEvidence | None:
-        if batch_id is None:
-            return None
-        for event in reversed(snapshot.audit_log):
-            if (
-                event.action == f"accept_batch:{engine}"
-                and event.batch_id == batch_id
-                and event.evidence is not None
-                and event.evidence.get("promotion_ready") is True
-            ):
-                return BatchPromotionEvidence(
-                    engine=engine,
-                    batch_id=batch_id,
-                    promotion_ready=True,
-                    report=event.evidence,
-                )
-        return None
-
-    @classmethod
-    def _latest_accepted_batch(
-        cls,
-        snapshot: RolloutConfigSnapshot,
-        *,
-        engine: str,
-    ) -> BatchPromotionEvidence | None:
-        for event in reversed(snapshot.audit_log):
-            if event.action == f"accept_batch:{engine}" and event.batch_id is not None:
-                return cls._accepted_batch(
-                    snapshot,
-                    engine=engine,
-                    batch_id=event.batch_id,
-                )
-        return None
-
-    @staticmethod
-    def _accepted_batch_ids(
-        snapshot: RolloutConfigSnapshot,
-        *,
-        engine: str,
-    ) -> set[str]:
-        return {
-            event.batch_id
-            for event in snapshot.audit_log
-            if event.action == f"accept_batch:{engine}"
-            and event.batch_id is not None
-            and event.evidence is not None
-            and event.evidence.get("promotion_ready") is True
-        }
-
-    def _open_batches(
-        self,
-        snapshot: RolloutConfigSnapshot,
-        *,
-        env: str,
-        engine: str,
-    ) -> set[str]:
-        accepted = self._accepted_batch_ids(snapshot, engine=engine)
-        opened: set[str] = set()
-        for entry in snapshot.whitelist:
-            if entry.batch_id is None or entry.batch_id in accepted:
-                continue
-            try:
-                bot, _ = self._resolve_bot_and_scope(
-                    env=env,
-                    owner_id=entry.owner_id,
-                    bot_id=entry.bot_id,
-                )
-            except RolloutOperationError:
-                # Keep an orphaned member's batch open until an operator
-                # explicitly removes the stale whitelist entry.
-                opened.add(entry.batch_id)
-                continue
-            if bot.get("active_engine") == engine:
-                opened.add(entry.batch_id)
-        for state in self._layouts.list_states(env=env, engine=engine):
-            evidence = state.rollout_evidence
-            if (
-                self._claimed(state.active_layout, state.target_layout)
-                and evidence is not None
-                and evidence.engine_type == engine
-                and evidence.batch_id is not None
-                and evidence.batch_id not in accepted
-            ):
-                opened.add(evidence.batch_id)
-        return opened
 
     @classmethod
     def _parse_config(
@@ -712,13 +462,12 @@ class SkillsPoolRolloutOperations:
                 record_version=None,
                 config_revision=None,
                 enabled=False,
-                enable_all=False,
-                full_rollout_engines=(),
-                full_rollout_owners=(),
-                promoted_engines=(),
-                whitelist=(),
-                negative_controls=(),
-                teclaw_controls=(),
+                schema_version=ROLLOUT_SCHEMA_VERSION,
+                engine_admission={},
+                bot_allowlist=(),
+                owner_rollouts=(),
+                environment_rollouts=(),
+                bot_exclusions=(),
                 audit_log=(),
             )
         if config.get("env") != env:
@@ -728,21 +477,44 @@ class SkillsPoolRolloutOperations:
         ext_info = config.get("ext_info")
         revision = ext_info.get("revision") if isinstance(ext_info, dict) else None
         value = config.get("param_value")
+        version = rollout_schema_version(value)
         if (
             isinstance(config_id, bool)
             or not isinstance(config_id, int)
             or not isinstance(record_version, str)
             or not record_version
             or (revision is not None and not isinstance(revision, str))
-            or not is_valid_rollout_config_value(value)
+            or version is None
+            or not isinstance(value, dict)
         ):
             raise RolloutOperationError("rollout config is invalid")
-        assert isinstance(value, dict)
-        promoted = value.get("promoted_engines")
-        whitelist = value.get("whitelist")
+
+        if version == ROLLOUT_SCHEMA_VERSION:
+            admission = value["engine_admission"]
+            assert isinstance(admission, dict)
+            return RolloutConfigSnapshot(
+                env=env,
+                config_id=config_id,
+                config_version=revision or record_version,
+                record_version=record_version,
+                config_revision=revision,
+                enabled=config.get("enable") == "1",
+                schema_version=version,
+                engine_admission={str(key): bool(item) for key, item in admission.items()},
+                bot_allowlist=cls._v2_bot_entries(value["bot_allowlist"]),
+                owner_rollouts=cls._owner_entries(value["owner_rollouts"]),
+                environment_rollouts=tuple(value["environment_rollouts"]),
+                bot_exclusions=cls._v2_bot_entries(value["bot_exclusions"]),
+                audit_log=(),
+            )
+
+        promoted = value["promoted_engines"]
         assert isinstance(promoted, list)
-        assert isinstance(whitelist, list)
-        promoted_engines = tuple(promoted)
+        full_engines = value.get("full_rollout_engines", [])
+        assert isinstance(full_engines, list)
+        environment_rollouts = tuple(
+            promoted if value["enable_all"] else full_engines
+        )
         return RolloutConfigSnapshot(
             env=env,
             config_id=config_id,
@@ -750,15 +522,15 @@ class SkillsPoolRolloutOperations:
             record_version=record_version,
             config_revision=revision,
             enabled=config.get("enable") == "1",
-            enable_all=bool(value["enable_all"]),
-            full_rollout_engines=tuple(value.get("full_rollout_engines", [])),
-            full_rollout_owners=cls._owner_entries(
-                value.get("full_rollout_owners", [])
+            schema_version=1,
+            engine_admission={str(engine): True for engine in promoted},
+            bot_allowlist=cls._v1_bot_entries(value["whitelist"]),
+            owner_rollouts=cls._owner_entries(value.get("full_rollout_owners", [])),
+            environment_rollouts=environment_rollouts,
+            bot_exclusions=cls._v1_bot_entries(value.get("negative_controls", [])),
+            legacy_teclaw_controls=cls._v1_bot_entries(
+                value.get("teclaw_controls", [])
             ),
-            promoted_engines=promoted_engines,
-            whitelist=cls._entries(whitelist),
-            negative_controls=cls._entries(value.get(CONTROL_KEYS[0], [])),
-            teclaw_controls=cls._entries(value.get(CONTROL_KEYS[1], [])),
             audit_log=(),
         )
 
@@ -811,101 +583,116 @@ class SkillsPoolRolloutOperations:
         return tuple(events)
 
     @staticmethod
-    def _config_value(
-        snapshot: RolloutConfigSnapshot,
-    ) -> dict[str, object]:
+    def _config_value(policy: RolloutConfigSnapshot) -> dict[str, object]:
+        if policy.schema_version != ROLLOUT_SCHEMA_VERSION:
+            raise RolloutOperationError("rollout policy must be schema v2")
+        if any(entry.engine is None for entry in (*policy.bot_allowlist, *policy.bot_exclusions)):
+            raise RolloutOperationError("rollout policy has an unbound engine")
         return {
-            "enable_all": snapshot.enable_all,
-            "full_rollout_engines": list(snapshot.full_rollout_engines),
-            "full_rollout_owners": [
-                item.to_dict() for item in snapshot.full_rollout_owners
-            ],
-            "promoted_engines": list(snapshot.promoted_engines),
-            "whitelist": [item.to_dict() for item in snapshot.whitelist],
-            "negative_controls": [
-                item.to_dict() for item in snapshot.negative_controls
-            ],
-            "teclaw_controls": [item.to_dict() for item in snapshot.teclaw_controls],
+            "schema_version": ROLLOUT_SCHEMA_VERSION,
+            "engine_admission": dict(policy.engine_admission),
+            "bot_allowlist": [entry.to_dict() for entry in policy.bot_allowlist],
+            "owner_rollouts": [entry.to_dict() for entry in policy.owner_rollouts],
+            "environment_rollouts": list(policy.environment_rollouts),
+            "bot_exclusions": [entry.to_dict() for entry in policy.bot_exclusions],
+        }
+
+    @staticmethod
+    def _empty_value() -> dict[str, object]:
+        return {
+            "schema_version": ROLLOUT_SCHEMA_VERSION,
+            "engine_admission": {},
+            "bot_allowlist": [],
+            "owner_rollouts": [],
+            "environment_rollouts": [],
+            "bot_exclusions": [],
         }
 
     @classmethod
-    def _entries(cls, raw: object) -> tuple[RolloutBotEntry, ...]:
+    def _v1_bot_entries(cls, raw: object) -> tuple[RolloutBotEntry, ...]:
         if not isinstance(raw, list):
-            raise RolloutOperationError("rollout control entries are invalid")
-        entries: list[RolloutBotEntry] = []
-        for value in raw:
-            if not isinstance(value, dict):
-                raise RolloutOperationError("rollout control entry is invalid")
-            entries.append(
-                cls._entry(
-                    owner_id=value.get("owner_id"),
-                    bot_id=value.get("bot_id"),
-                    batch_id=value.get("batch_id"),
-                )
+            raise RolloutOperationError("rollout bot entries are invalid")
+        return tuple(
+            RolloutBotEntry(
+                owner_id=cls._identity(entry["owner_id"], label="owner"),
+                bot_id=cls._identity(entry["bot_id"], label="bot"),
+                batch_id=(
+                    str(entry["batch_id"])
+                    if entry.get("batch_id") is not None
+                    else None
+                ),
             )
-        return tuple(entries)
+            for entry in raw
+            if isinstance(entry, dict)
+        )
+
+    @classmethod
+    def _v2_bot_entries(cls, raw: object) -> tuple[RolloutBotEntry, ...]:
+        if not isinstance(raw, list):
+            raise RolloutOperationError("rollout bot entries are invalid")
+        return tuple(
+            RolloutBotEntry(
+                owner_id=cls._identity(entry["owner_id"], label="owner"),
+                bot_id=cls._identity(entry["bot_id"], label="bot"),
+                engine=str(entry["engine"]),
+            )
+            for entry in raw
+            if isinstance(entry, dict)
+        )
 
     @classmethod
     def _owner_entries(cls, raw: object) -> tuple[RolloutOwnerEntry, ...]:
         if not isinstance(raw, list):
             raise RolloutOperationError("rollout owner entries are invalid")
-        entries: list[RolloutOwnerEntry] = []
-        for value in raw:
-            if not isinstance(value, dict):
-                raise RolloutOperationError("rollout owner entry is invalid")
-            entries.append(
-                cls._owner_entry(
-                    owner_id=value.get("owner_id"),
-                    engine=value.get("engine"),
-                )
+        return tuple(
+            cls._owner_entry(
+                owner_id=entry["owner_id"],
+                engine=entry["engine"],
             )
-        return tuple(entries)
+            for entry in raw
+            if isinstance(entry, dict)
+        )
 
-    @staticmethod
-    def _owner_entry(*, owner_id: object, engine: object) -> RolloutOwnerEntry:
-        if (
-            isinstance(owner_id, bool)
-            or not isinstance(owner_id, (str, int))
-            or str(owner_id).strip() in {"", "*"}
-        ):
-            raise RolloutOperationError("rollout owner identity is invalid")
-        if not isinstance(engine, str) or engine not in ENGINE_PROMOTION_ORDER:
+    @classmethod
+    def _owner_entry(cls, *, owner_id: object, engine: object) -> RolloutOwnerEntry:
+        owner = cls._identity(owner_id, label="owner")
+        if not isinstance(engine, str):
             raise RolloutOperationError("rollout owner engine is invalid")
-        return RolloutOwnerEntry(owner_id=str(owner_id), engine=engine)
+        cls._validate_engine(engine)
+        return RolloutOwnerEntry(owner_id=owner, engine=engine)
+
+    def _resolve_bot_engine(self, *, env: str, owner_id: str, bot_id: str) -> str:
+        matches = self._bots.get_live_by_id_owner_and_env(
+            bot_id=str(bot_id),
+            owner_id=str(owner_id),
+            env=env,
+        )
+        if not matches:
+            raise RolloutOperationError(
+                f"cannot bind engine for missing bot {owner_id}/{bot_id}"
+            )
+        if len(matches) != 1:
+            raise RolloutOperationError("bot identity is ambiguous")
+        engine = matches[0].get("active_engine")
+        if not isinstance(engine, str):
+            raise RolloutOperationError("bot engine is invalid")
+        self._validate_engine(engine)
+        return engine
 
     @staticmethod
-    def _entry(
-        *,
-        owner_id: object,
-        bot_id: object,
-        batch_id: object,
-    ) -> RolloutBotEntry:
-        values = (owner_id, bot_id)
-        if any(
+    def _identity(value: object, *, label: str) -> str:
+        if (
             isinstance(value, bool)
             or not isinstance(value, (str, int))
             or str(value).strip() in {"", "*"}
-            for value in values
         ):
-            raise RolloutOperationError("rollout bot identity is invalid")
-        if batch_id is not None and (
-            isinstance(batch_id, bool)
-            or not isinstance(batch_id, (str, int))
-            or str(batch_id).strip() in {"", "*"}
-        ):
-            raise RolloutOperationError("rollout batch identity is invalid")
-        return RolloutBotEntry(
-            owner_id=str(owner_id),
-            bot_id=str(bot_id),
-            batch_id=str(batch_id) if batch_id is not None else None,
-        )
+            raise RolloutOperationError(f"rollout {label} identity is invalid")
+        return str(value)
 
     @staticmethod
-    def _claimed(
-        active_layout: SkillLayout,
-        target_layout: SkillLayout | None,
-    ) -> bool:
-        return active_layout is SkillLayout.POOL or target_layout is SkillLayout.POOL
+    def _validate_engine(engine: str) -> None:
+        if engine not in ENGINE_PROMOTION_ORDER:
+            raise RolloutOperationError(f"unsupported engine: {engine}")
 
     @staticmethod
     def _validate_change(*, operator: str, reason: str) -> None:
@@ -914,23 +701,12 @@ class SkillsPoolRolloutOperations:
         if not reason.strip():
             raise RolloutOperationError("change reason is required")
 
-    @staticmethod
-    def _snapshot_values(
-        snapshot: RolloutConfigSnapshot,
-    ) -> dict[str, object]:
-        return {
-            "env": snapshot.env,
-            "config_id": snapshot.config_id,
-            "config_version": snapshot.config_version,
-            "record_version": snapshot.record_version,
-            "config_revision": snapshot.config_revision,
-            "enabled": snapshot.enabled,
-            "enable_all": snapshot.enable_all,
-            "full_rollout_engines": snapshot.full_rollout_engines,
-            "full_rollout_owners": snapshot.full_rollout_owners,
-            "promoted_engines": snapshot.promoted_engines,
-            "whitelist": snapshot.whitelist,
-            "negative_controls": snapshot.negative_controls,
-            "teclaw_controls": snapshot.teclaw_controls,
-            "audit_log": snapshot.audit_log,
-        }
+
+__all__ = [
+    "BatchPromotionEvidence",
+    "RolloutConfigSnapshot",
+    "RolloutControlGroup",
+    "RolloutOperationError",
+    "WhitelistMutationResult",
+    "SkillsPoolRolloutOperations",
+]

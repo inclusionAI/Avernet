@@ -9,6 +9,7 @@ from tests.community.framework.case import (
     EndpointCase,
     Expectation,
     ExpectError,
+    ExpectRetired,
     ExpectSuccess,
 )
 from tests.community.framework.di_seams import (
@@ -29,6 +30,7 @@ __all__ = [
     "CaseInput",
     "EndpointCase",
     "ExpectError",
+    "ExpectRetired",
     "ExpectSuccess",
     "Expectation",
     "ENDPOINT_CASES",

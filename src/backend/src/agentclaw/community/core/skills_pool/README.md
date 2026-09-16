@@ -19,13 +19,14 @@ Mapping/DeviceSync 兼容路线，超时、5xx、普通 404 或 501 不会触发
   `LEGACY_ACTIVE`，新 Backend 不会改变既有 Bot。
 - 首次认领同时写入 Pool 目标、初始阶段、唯一
   `migration_generation`、lease 和白名单审计证据。
-- 白名单仅控制首次认领。认领成功后状态具有粘性，移出白名单不会撤销迁移。
+- Admission Policy 仅控制首次认领。认领成功后状态具有粘性，移除 allow
+  规则或关闭 Engine Admission Switch 都不会撤销迁移；回 Legacy 始终走独立
+  rollback。
 - rollout 配置按环境隔离；缺失、禁用、读取失败、格式异常或通配配置均
-  fail closed。`full_rollout_owners` 可在一个已晋级且已有验收批次的引擎内，
-  按 owner 放开其未来新建和后续重启的全部 Bot；`full_rollout_engines`
-  可逐引擎放开全环境，`enable_all=true` 则覆盖当前环境中全部已经人工晋级
-  并验收的引擎。精确负对照优先于所有扩大规则，始终保持不认领。
-  未晋级引擎始终拒绝，环境全量期间也禁止直接晋级新引擎。
+  fail closed。v2 Policy 只包含精确 `bot_allowlist`、`owner+engine`、
+  `environment+engine` 和最高优先级的精确 `bot_exclusions`。所有规则必须绑定
+  Engine；Engine Admission Switch 在规则匹配前阻断该 Engine 的所有新 claim，
+  不影响其他 Engine 和已经 claim 的 Bot。
 - owner 和 engine 来自当前 Bot 记录；服务草稿还必须由当前
   `ac_bot_publish` DRAFT 记录证明。认领入口不接受调用方自报运行形态，
   ONLINE 服务与 Teclaw 不产生认领。
@@ -120,18 +121,15 @@ Mapping/DeviceSync 兼容路线，超时、5xx、普通 404 或 501 不会触发
 - 七天任务由持久化任务队列延迟调度；重复执行、任务接管和目录已不存在均
   幂等。容器只接受 generation，由固定 engine Pool 根推导删除目标，不能
   删除其他 Bot 或 generation。数据库保留清理时间与证据。
-- 灰度运维入口接受当前环境中的精确 `(owner_id, bot_id)`；单个已晋级引擎
-  完成批次验收后，可引用最近一次验收通过
-  `POST /rollout/owners` 按 `(owner_id, engine)` 放开该员工全部未来认领；
-  完成批次验收且无负对照后，可写入 `full_rollout_engines` 单独全量；
-  所有已晋级引擎均满足条件后，可显式打开或关闭环境级 `enable_all`。
-  OpenClaw、Claude Code、AICoding、Hermes 可独立人工晋级并并行测试；
-  `promoted_engines` 以该顺序保存唯一的规范子集。每次扩大同引擎批次必须
-  引用最近一次已冻结验收；晋级接口保留 `acceptance_batch_id` 参数以兼容旧
-  调用方，但不再将其作为跨引擎门禁或审计证据。配置写入使用完整旧值
-  加逻辑 revision CAS，冲突 fail closed；缺少可选默认字段的旧配置按规范化
-  语义参与 CAS，并在首次成功写入时原子升级为完整形状；配置和包含前后
-  revision、原因及验收快照的独立审计事件在同一事务提交。
+- 灰度运维入口通过细粒度 API 修改精确 Bot、Owner+Engine、
+  Environment+Engine 规则和 Engine Admission Switch。每次写入必须携带
+  `expected_revision`；完整旧值、逻辑 revision 与配置行在一个事务内 CAS，
+  冲突返回 `POLICY_REVISION_CONFLICT`。v1 配置继续兼容读取，并在第一次成功
+  的新 Policy 写入时解析 Bot 当前 Engine、原子升级为 v2；历史 Batch 数据不
+  回写。旧 Batch 写 API 返回 `410 Gone`，历史 Batch GET 暂时只读保留。
+- 配置修改继续复用 `ac_skills_pool_rollout_audit`，但新事件的 `batch_id` 为空，
+  evidence 记录 Engine、规则目标和动作。新 claim 的 `RolloutEvidence` 冻结
+  policy revision、Engine 和 admission reason，不再建立 Batch 验收链。
 - 单 Bot 运维视图合成 engine、provider、runtime form、rollout 决策、
   layout/generation、probe/failure 和 quarantine 证据；批次视图只有在
   全部 eligible Bot 激活、无失败且负对照与 Teclaw 对照均健康时才报告
