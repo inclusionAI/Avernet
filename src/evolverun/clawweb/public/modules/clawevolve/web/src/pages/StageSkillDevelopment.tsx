@@ -88,7 +88,7 @@ export default function StageSkillDevelopment() {
   const [development, setDevelopment] = useState<EvolveStageDevelopment | null>(null)
   const [catalog, setCatalog] = useState<EvolveStageCatalog | null>(null)
   const [bots, setBots] = useState<TCLogBot[]>([])
-  const [flow, setFlow] = useState<'bot_evolution' | 'skill_evolution'>('bot_evolution')
+  const [flow, setFlow] = useState<EvolveStageCatalog['flows'][number]['key']>('bot_evolution')
   const [stage, setStage] = useState('diagnose')
   const [mode, setMode] = useState<EvolveStageMode>('preprocess')
   const [showGuide, setShowGuide] = useState(false)
@@ -126,7 +126,7 @@ export default function StageSkillDevelopment() {
       api.evolve.listStageSkills(),
       resumeId ? api.evolve.getStageSkill(resumeId) : Promise.resolve(null),
       developmentId ? api.evolve.getStageDevelopment(developmentId) : Promise.resolve(null),
-    ]).then(([stageCatalog, records, resumed, draft]) => {
+    ]).then(async ([stageCatalog, records, resumed, draft]) => {
       if (!active) return
       setCatalog(stageCatalog)
       if (draft) {
@@ -139,6 +139,12 @@ export default function StageSkillDevelopment() {
         if (latest) navigate(`/evolve/stage-skills/new?implementationId=${encodeURIComponent(latest.implementationId)}`, { replace: true })
       } else if (resumed) {
         if (resumed.status === 'deleted') throw new Error('当前版本已删除，不能继续接入')
+        const sourceDevelopment = await api.evolve.getStageDevelopment(resumed.stageSkillId).catch(() => null)
+        if (!active) return
+        const matchingFlows = stageCatalog.flows.filter((item) =>
+          item.stages?.some((flowStage) => flowStage.key === resumed.stage))
+        const resumedFlow = sourceDevelopment?.flow ?? (matchingFlows.length === 1 ? matchingFlows[0].key : null)
+        if (resumedFlow) setFlow(resumedFlow)
         setImplementation(resumed)
         setStage(resumed.stage)
         setMode(resumed.mode)
@@ -181,8 +187,10 @@ export default function StageSkillDevelopment() {
     return () => { active = false }
   }, [showIntegrationTest, user?.userId])
 
-  const openStages = catalog?.stages.filter((item) => item.extensionModes.length > 0) ?? []
   const flowDefinition = catalog?.flows.find((item) => item.key === flow)
+  const flowStageKeys = flowDefinition?.stages?.map((item) => item.key)
+  const openStages = catalog?.stages.filter((item) =>
+    item.extensionModes.length > 0 && (!flowStageKeys || flowStageKeys.includes(item.stage))) ?? []
   const stageDefinition = openStages.find((item) => item.stage === stage)
   const inputFields = schemaFields(stageDefinition?.inputSchema)
   const outputFields = mode === 'preprocess'
@@ -227,6 +235,14 @@ export default function StageSkillDevelopment() {
     setImplementation(null)
     setPackageFile(null)
     setCaseValues({})
+  }
+
+  const selectFlow = (nextFlow: EvolveStageCatalog['flows'][number]['key']) => {
+    setFlow(nextFlow)
+    const nextDefinition = catalog?.flows.find((item) => item.key === nextFlow)
+    const nextStage = nextDefinition?.stages?.find((item) =>
+      catalog?.stages.some((candidate) => candidate.stage === item.key && candidate.extensionModes.length > 0))
+    if (nextStage) selectStage(nextStage.key)
   }
 
   const startDevelopment = async () => {
@@ -352,7 +368,7 @@ export default function StageSkillDevelopment() {
         <div className="mt-4 grid gap-4 md:grid-cols-3">
           {!resumeId && <label>
             <span className="mb-1.5 block text-xs font-medium text-gray-600">进化流程</span>
-            <select value={flow} disabled={locked} onChange={(event) => setFlow(event.target.value as typeof flow)} className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm disabled:bg-gray-50">
+            <select value={flow} disabled={locked} onChange={(event) => selectFlow(event.target.value as typeof flow)} className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm disabled:bg-gray-50">
               {catalog?.flows.map((item) => <option key={item.key} value={item.key}>{item.name}</option>)}
             </select>
           </label>}

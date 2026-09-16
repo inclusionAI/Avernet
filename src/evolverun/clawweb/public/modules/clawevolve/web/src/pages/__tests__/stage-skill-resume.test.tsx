@@ -144,6 +144,63 @@ describe('Stage Skill exact-version resume', () => {
     expect(screen.queryByRole('button', { name: '上传并校验' })).toBeNull()
   })
 
+  it('selects only the hardening Stage when the Skill hardening flow is chosen', async () => {
+    api.evolve.listStageSkills.mockResolvedValue({ items: [] })
+    api.evolve.stageCatalog.mockResolvedValue({
+      flows: [
+        { key: 'bot_evolution', name: 'Bot 自进化', stages: [{ key: 'diagnose', name: '诊断' }] },
+        { key: 'skill_hardening', name: 'Skill 加固', stages: [{ key: 'hardening', name: 'Skill 加固' }] },
+      ],
+      stages: [
+        { stage: 'diagnose', name: '诊断', description: 'Evidence', extensionModes: ['preprocess', 'replace'], inputSchema: { properties: {} }, resultSchema: { properties: {} } },
+        { stage: 'hardening', name: 'Skill 加固', description: 'Harden', extensionModes: ['preprocess', 'postprocess', 'replace'], inputSchema: { properties: {} }, resultSchema: { properties: {} } },
+      ],
+    })
+    open('/evolve/stage-skills/new')
+    fireEvent.change(await screen.findByRole('combobox', { name: '进化流程' }), { target: { value: 'skill_hardening' } })
+    const stageSelect = screen.getByRole('combobox', { name: '开放的 Stage' }) as HTMLSelectElement
+    expect(stageSelect.value).toBe('hardening')
+    expect([...stageSelect.options].map((option) => option.textContent)).toEqual(['Skill 加固'])
+    fireEvent.change(screen.getByRole('combobox', { name: '接入位置' }), { target: { value: 'replace' } })
+    fireEvent.click(screen.getByRole('button', { name: '确认并开始开发' }))
+    await waitFor(() => expect(api.evolve.createStageDevelopment).toHaveBeenCalledWith({
+      stage: 'hardening', mode: 'replace', flow: 'skill_hardening',
+    }))
+  })
+
+  it('restores the Skill hardening flow when an uploaded implementation is reopened', async () => {
+    const hardening = {
+      ...implementation(),
+      stageSkillId: 'STAGE-HARDENING',
+      displayName: '97 Skill 加固',
+      stage: 'hardening',
+      stageName: 'Skill 加固',
+    }
+    api.evolve.getStageSkill.mockResolvedValue(hardening)
+    api.evolve.getStageDevelopment.mockResolvedValue({
+      stageSkillId: 'STAGE-HARDENING', ownerId: 'owner', displayName: '97 Skill 加固',
+      flow: 'skill_hardening', stage: 'hardening', stageName: 'Skill 加固', mode: 'replace',
+    })
+    api.evolve.stageCatalog.mockResolvedValue({
+      flows: [
+        { key: 'bot_evolution', name: 'Bot 自进化', stages: [{ key: 'diagnose', name: '诊断' }] },
+        { key: 'skill_hardening', name: 'Skill 加固', stages: [{ key: 'hardening', name: 'Skill 加固' }] },
+      ],
+      stages: [
+        { stage: 'diagnose', name: '诊断', description: 'Evidence', extensionModes: ['preprocess', 'replace'], inputSchema: { properties: {} }, resultSchema: { properties: {} } },
+        { stage: 'hardening', name: 'Skill 加固', description: 'Harden', extensionModes: ['preprocess', 'postprocess', 'replace'], inputSchema: { properties: {} }, resultSchema: { properties: {} } },
+      ],
+    })
+
+    open('/evolve/stage-skills/new?implementationId=IMPL-v1')
+
+    await screen.findByText('97 Skill 加固')
+    const stageSelect = screen.getByRole('combobox', { name: '开放的 Stage' }) as HTMLSelectElement
+    expect(stageSelect.value).toBe('hardening')
+    expect([...stageSelect.options].map((option) => option.textContent)).toEqual(['Skill 加固'])
+    expect(api.evolve.getStageDevelopment).toHaveBeenCalledWith('STAGE-HARDENING')
+  })
+
   it('keeps explicit upgrade separate and resumes only the new upload response', async () => {
     api.evolve.uploadStageSkill.mockResolvedValue(implementation('validated', 'v3'))
     api.evolve.getStageSkill.mockResolvedValue(implementation('validated', 'v3'))

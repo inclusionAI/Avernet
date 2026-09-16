@@ -1041,7 +1041,7 @@ export const api = {
       if (input?.hasGoal != null) query.set('hasGoal', String(input.hasGoal))
       return fetchJson(`${BASE}/evolve/stage-catalog${query.size ? `?${query.toString()}` : ''}`)
     },
-    createStageDevelopment(input: { stage: string; mode: EvolveStageMode; flow: 'bot_evolution' | 'skill_evolution' }): Promise<EvolveStageDevelopment> {
+    createStageDevelopment(input: { stage: string; mode: EvolveStageMode; flow: 'bot_evolution' | 'skill_evolution' | 'skill_hardening' }): Promise<EvolveStageDevelopment> {
       return fetchJson(`${BASE}/evolve/stage-developments`, { method: 'POST', body: JSON.stringify(input) })
     },
     listStageDevelopments(): Promise<{ items: EvolveStageDevelopment[] }> {
@@ -1069,7 +1069,7 @@ export const api = {
       const query = path ? `?path=${encodeURIComponent(path)}` : ''
       return fetchJson(`${BASE}/evolve/stage-skills/${encodeURIComponent(implementationId)}/content${query}`)
     },
-    downloadStageDeveloperPackage(stage: string, mode: EvolveStageMode, flow: 'bot_evolution' | 'skill_evolution'): Promise<Blob> {
+    downloadStageDeveloperPackage(stage: string, mode: EvolveStageMode, flow: 'bot_evolution' | 'skill_evolution' | 'skill_hardening'): Promise<Blob> {
       const query = new URLSearchParams({ stage, mode, flow })
       return fetchBlob(`${BASE}/evolve/stage-skills/developer-package?${query.toString()}`)
     },

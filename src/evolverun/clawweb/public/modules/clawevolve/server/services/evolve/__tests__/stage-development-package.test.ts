@@ -109,6 +109,7 @@ describe("Stage Skill developer package", () => {
           if (flow === "skill_hardening") {
             expect(background).toContain("Skill 加固任务");
             expect(background).toContain(`本次需要你开发一个“${skillName}”`);
+            expect(guide).not.toContain("单独诊断任务");
             return;
           }
           expect(background.startsWith(`${flow === "skill_evolution" ? "Skill" : "Bot"} 自进化任务用于`)).toBe(true);
