@@ -34,6 +34,7 @@ def _composer(runtime: DeployRuntime):
         deploy_runtime=cfg.DeployRuntimeConfig(runtime),
         bot_repo=MagicMock(),
         sandbox_registry=MagicMock(),
+        storage_policy=MagicMock(),
     )
 
 

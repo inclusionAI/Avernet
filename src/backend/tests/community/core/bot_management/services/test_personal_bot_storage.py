@@ -302,8 +302,7 @@ def test_new_storage_services_are_wired_in_di(test_injector):
     )
 
 
-@pytest.mark.parametrize("provider", ["baas", "arca"])
-def test_business_prepares_once_then_router_uses_original_allocation(storage, provider):
+def test_baas_provider_is_pinned_and_router_skips_redecide(storage):
     from tests.community.core.devices.services.test_device_service_router import (
         _make_router,
         _make_operator,
@@ -312,7 +311,7 @@ def test_business_prepares_once_then_router_uses_original_allocation(storage, pr
 
     router, _, _, _ = _make_router(is_local=False)
     policy = storage[-1]
-    policy._select_provider.return_value = provider
+    policy._select_provider.return_value = "baas"
     policy._resolve_template.return_value = SimpleNamespace(
         template_uuid="TEMPLATE-test"
     )
@@ -326,8 +325,8 @@ def test_business_prepares_once_then_router_uses_original_allocation(storage, pr
         template_config={"template_uid": "default"},
     )
     prepared = policy.prepare_bot_storage_policy(**kwargs)
-    assert prepared["device_provider"] == provider
-    service = router._providers[provider]
+    assert prepared["device_provider"] == "baas"
+    service = router._providers["baas"]
     service.apply_device.assert_not_called()
     router._get_provider_for_new_device = MagicMock(
         side_effect=AssertionError("already selected")
@@ -336,9 +335,38 @@ def test_business_prepares_once_then_router_uses_original_allocation(storage, pr
     policy._select_provider.assert_called_once()
     router._get_provider_for_new_device.assert_not_called()
     service.apply_device.assert_called_once()
-    if provider == "arca":
-        policy._resolve_template.assert_not_called()
-        storage[3].get_config.assert_not_called()
+
+
+def test_non_baas_provider_is_not_pinned_and_router_routes_normally(storage):
+    """Singlebox/test boots may inject a different policy than the router owns.
+
+    Pinning an unregistered provider there broke demo bot creation; non-BaaS
+    results must fall back to the router's original rollout path.
+    """
+    from tests.community.core.devices.services.test_device_service_router import (
+        _make_router,
+        _make_operator,
+    )
+
+    router, _, _, _ = _make_router(is_local=False)
+    policy = storage[-1]
+    policy._select_provider.return_value = "arca"
+    kwargs = dict(
+        apply_reason="create",
+        entity_id="team-1",
+        entity_type="team",
+        operator=_make_operator(),
+        bot_id="b1",
+        bot_type="personal",
+        template_config={"template_uid": "default"},
+    )
+    prepared = policy.prepare_bot_storage_policy(**kwargs)
+    assert "device_provider" not in prepared
+    policy._resolve_template.assert_not_called()
+    storage[3].get_config.assert_not_called()
+    arca = router._providers["arca"]
+    router.apply_device(**(kwargs | prepared))
+    arca.apply_device.assert_called_once()
 
 
 @pytest.mark.parametrize("runtime", ["managed", "ack"])

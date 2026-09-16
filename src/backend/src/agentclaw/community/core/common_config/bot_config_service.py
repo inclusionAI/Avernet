@@ -152,9 +152,12 @@ class BotStoragePolicyService(BotStoragePolicyProtocol):
             engine_type=engine,
             template_type=kwargs.get("template_type") or "",
         )
-        overrides = {"device_provider": provider}
         if provider != "baas":
-            return overrides
+            # Do not pin non-BaaS providers: some boots (singlebox/test) inject a
+            # different rollout policy than the one inside the device router.
+            # Returning no override preserves the router's original rollout path.
+            return {}
+        overrides = {"device_provider": provider}
         bot_id = kwargs.get("bot_id") or "default"
         entity_id = kwargs.get("entity_id") or kwargs["operator"].staff_id
         owner_id = kwargs.get("owner_id") or entity_id
