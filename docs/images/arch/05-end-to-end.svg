@@ -35,7 +35,7 @@
 
     <rect x="60" y="206" width="264" height="140" rx="6" fill="#E4EBF5" stroke="#3C6198"/>
     <text x="76" y="230" class="num">②</text>
-    <text x="100" y="230" class="bt" fill="#22405F">交付适配</text>
+    <text x="100" y="230" class="bt" fill="#22405F">传输协议适配</text>
     <text x="76" y="252" class="bd">面向租户的 HTTP 表面</text>
     <text x="76" y="276" class="bd">解析请求 · 解释鉴权上下文</text>
     <text x="76" y="296" class="bd">协议校验 · 领域错误 → HTTP 状态</text>
@@ -43,9 +43,9 @@
 
     <rect x="352" y="206" width="264" height="140" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
     <text x="368" y="230" class="num">③</text>
-    <text x="392" y="230" class="bt" fill="#5E4519">服务契约</text>
+    <text x="392" y="230" class="bt" fill="#5E4519">领域服务接口</text>
     <text x="368" y="252" class="bd">拿到的是契约，不是实现</text>
-    <text x="368" y="276" class="bd">交付层不认识具体服务类</text>
+    <text x="368" y="276" class="bd">传输协议适配层不认识具体服务类</text>
     <text x="368" y="296" class="bd">换实现不需要改路由</text>
     <text x="368" y="322" class="bd">契约由领域模块定义</text>
 
@@ -90,7 +90,7 @@
 
     <rect x="644" y="450" width="264" height="140" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
     <text x="660" y="474" class="num">⑧</text>
-    <text x="684" y="474" class="bt" fill="#26452F">反腐层</text>
+    <text x="684" y="474" class="bt" fill="#26452F">引擎适配层</text>
     <text x="660" y="496" class="bd">每引擎一套</text>
     <text x="660" y="520" class="bd">领域形状 ⇄ 引擎原生形状</text>
     <text x="660" y="540" class="bd">引擎差异在这里被吸收</text>
@@ -110,7 +110,7 @@
     <text x="62" y="671" class="bd">桥接官方 SDK 或命令行 → 模型</text>
 
     <line x1="1200" y1="706" x2="60" y2="706" stroke="#3B7A73" stroke-width="1.5" marker-end="url(#c3)"/>
-    <text x="630" y="698" class="bd" text-anchor="middle">回程：流式事件沿同一条链路反向回传 —— 网关 → 传输实现 → 反腐层 → 能力域协议 → 长连接 → 前端</text>
+    <text x="630" y="698" class="bd" text-anchor="middle">回程：流式事件沿同一条链路反向回传 —— 网关 → 传输实现 → 引擎适配层 → 能力域协议 → 长连接 → 前端</text>
 
     <rect x="44" y="732" width="376" height="130" rx="6" fill="#F5E5E0" stroke="#A85C47"/>
     <text x="62" y="757" class="inv">不变量 A · 解析必须先于转发</text>

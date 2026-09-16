@@ -18,7 +18,7 @@
   </defs>
   <g class="t">
     <text x="44" y="50" class="title">两类契约，方向相反 —— 方向决定了谁实现、谁替换、怎么测</text>
-    <text x="44" y="78" class="sub">服务契约是「外部调内核」，插件契约是「内核调外部」。把两者混为一谈，就会写出错误的兼容性假设，和错误的测试策略。</text>
+    <text x="44" y="78" class="sub">领域服务接口是「外部调内核」，系统边界契约是「内核调外部」。把两者混为一谈，就会写出错误的兼容性假设，和错误的测试策略。</text>
 
     <text x="44" y="122" class="band">① 控制流：一律从左到右</text>
     <text x="232" y="122" class="bandsub">谁调用谁</text>
@@ -30,9 +30,9 @@
     <text x="60" y="240" class="m bd">只认契约，不认实现</text>
 
     <rect x="284" y="142" width="196" height="110" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
-    <text x="300" y="174" class="bt" fill="#5E4519">服务契约</text>
+    <text x="300" y="174" class="bt" fill="#5E4519">领域服务接口</text>
     <text x="300" y="198" class="bd">声明外部能让内核做什么</text>
-    <text x="300" y="220" class="bd">与交付层分离定义</text>
+    <text x="300" y="220" class="bd">与传输协议适配层分离定义</text>
     <text x="300" y="240" class="bd">契约方向：外 → 内</text>
 
     <rect x="520" y="142" width="200" height="110" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
@@ -42,13 +42,13 @@
     <text x="536" y="240" class="bd">无框架、无传输依赖</text>
 
     <rect x="760" y="142" width="196" height="110" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
-    <text x="776" y="174" class="bt" fill="#5E4519">插件契约</text>
+    <text x="776" y="174" class="bt" fill="#5E4519">系统边界契约</text>
     <text x="776" y="198" class="bd">声明内核需要外部给什么</text>
     <text x="776" y="220" class="bd">外部能力的契约</text>
     <text x="776" y="240" class="bd">契约方向：内 → 外</text>
 
     <rect x="996" y="142" width="220" height="110" rx="6" fill="#EBE5F3" stroke="#69539B"/>
-    <text x="1012" y="174" class="bt" fill="#3E315F">插件实现</text>
+    <text x="1012" y="174" class="bt" fill="#3E315F">系统边界实现</text>
     <text x="1012" y="198" class="bd">契约的具体实现</text>
     <text x="1012" y="220" class="bd">数据库 / 缓存 / 存储</text>
     <text x="1012" y="240" class="bd">身份 / 审批 / 传输</text>
@@ -68,9 +68,9 @@
     <line x1="1106" y1="256" x2="1106" y2="340" stroke="#D8D5CF" stroke-dasharray="3 3"/>
 
     <rect x="284" y="340" width="196" height="46" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
-    <text x="382" y="369" class="bm" fill="#5E4519" text-anchor="middle">服务契约</text>
+    <text x="382" y="369" class="bm" fill="#5E4519" text-anchor="middle">领域服务接口</text>
     <rect x="760" y="340" width="196" height="46" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
-    <text x="858" y="369" class="bm" fill="#5E4519" text-anchor="middle">插件契约</text>
+    <text x="858" y="369" class="bm" fill="#5E4519" text-anchor="middle">系统边界契约</text>
 
     <line x1="180" y1="363" x2="278" y2="363" stroke="#A1762E" stroke-width="1.5" marker-end="url(#a2)"/>
     <line x1="584" y1="363" x2="486" y2="363" stroke="#A1762E" stroke-width="1.5" marker-end="url(#a2)"/>
@@ -82,7 +82,7 @@
     <text x="1106" y="367" class="arw" text-anchor="middle">插件</text>
     <text x="44" y="412" class="bd">没有任何一条箭头从实现指向实现 —— 消费者不知道内核里放了什么，内核也不知道插件是谁。两者只认契约。</text>
 
-    <text x="44" y="470" class="band">③ 同一份插件契约，多套实现 —— 由组装根按部署形态挑选</text>
+    <text x="44" y="470" class="band">③ 同一份系统边界契约，多套实现 —— 由依赖注入根按部署形态挑选</text>
     <text x="580" y="470" class="bandsub">这是「开源版与内部版同源、零分叉」的技术前提</text>
 
     <rect x="44" y="490" width="300" height="164" rx="6" fill="#F5E5E0" stroke="#A85C47"/>

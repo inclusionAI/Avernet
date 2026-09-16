@@ -79,16 +79,16 @@
     <text x="44" y="404" class="lbl">代表性门禁（节选）</text>
     <rect x="44" y="418" width="1180" height="180" rx="6" fill="#F1EFEA" stroke="#D8D5CF"/>
 
-    <text x="66" y="446" class="gm" fill="#26452F">领域内核不得依赖交付框架</text>
+    <text x="66" y="446" class="gm" fill="#26452F">领域内核不得依赖传输框架</text>
     <text x="66" y="465" class="gd">出现任何一处即失败 —— 领域逻辑不认识传输</text>
     <text x="66" y="500" class="gm" fill="#26452F">底座不得依赖上层</text>
     <text x="66" y="519" class="gd">依赖箭头只进不出，底座才对所有层安全</text>
     <text x="66" y="554" class="gm" fill="#26452F">内核只认契约，不认实现</text>
-    <text x="66" y="573" class="gd">内核可以依赖插件契约，不得依赖任何一个具体实现</text>
+    <text x="66" y="573" class="gd">内核可以依赖系统边界契约，不得依赖任何一个具体实现</text>
 
     <text x="660" y="446" class="gm" fill="#26452F">依赖图 vs 自己声明的白名单</text>
     <text x="660" y="465" class="gd">逐模块逐条比对，未被覆盖的依赖即失败</text>
-    <text x="660" y="500" class="gm" fill="#26452F">开源组装根不含内部实现</text>
+    <text x="660" y="500" class="gm" fill="#26452F">开源依赖注入根不含内部实现</text>
     <text x="660" y="519" class="gd">分发边界也是架构边界</text>
     <text x="660" y="554" class="gm" fill="#26452F">超大模块预警</text>
     <text x="660" y="573" class="gd">单个文件承担多个角色，往往就藏着边界违规</text>

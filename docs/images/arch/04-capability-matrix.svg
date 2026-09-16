@@ -14,7 +14,7 @@
   <rect width="1260" height="840" fill="#FAF9F7"/>
   <g class="t">
     <text x="44" y="50" class="title">能力矩阵：不是完整度排名，是各自的形状</text>
-    <text x="44" y="78" class="sub">每个引擎在组装根声明自己支持什么。上层据此决定是否派发、是否降级提示、还是直接隐藏功能 —— 而不是调用后再捕获异常。</text>
+    <text x="44" y="78" class="sub">每个引擎在依赖注入根声明自己支持什么。上层据此决定是否派发、是否降级提示、还是直接隐藏功能 —— 而不是调用后再捕获异常。</text>
     <text x="44" y="146" class="th">能力域</text>
     <text x="344" y="146" class="th">CLAUDE_CODE （cc）</text>
     <text x="594" y="146" class="th">OPENCLAW （oc）</text>
