@@ -16,7 +16,6 @@ provides:
   - "CurrentRuntimeLayoutProbeService"
   - "SkillQueryService"
   - "LocalSkillUploadService"
-  - "LocalSkillPackageRuntime"
   - "LocalSkillPackageRuntimeProtocol"
   - "LocalSkillPackageRuntimeResult"
   - "SkillPackageValidator"

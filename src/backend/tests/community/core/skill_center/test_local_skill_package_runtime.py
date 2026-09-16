@@ -5,12 +5,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentclaw.community.core.skill_center.services.local_skill_package_runtime import (
+from agentclaw.community.adapters.runtime.local_skill_package_runtime import (
     LocalSkillPackageRuntime,
 )
 from agentclaw.community.core.skill_center.errors import LocalSkillStorageError
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
+    DeviceAdapterHTTPStatusError,
 )
 
 
@@ -171,6 +172,103 @@ async def test_standard_route_404_falls_back_only_after_health_succeeds() -> Non
         "/api/engine/capabilities",
         "/health",
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        DeviceAdapterHTTPStatusError(500, '{"error":"boom"}'),
+        ValueError("invalid capability payload"),
+    ],
+)
+async def test_capability_failure_never_falls_back(failure: Exception) -> None:
+    package = b"canonical-zip"
+    transport = _Transport(provider="baas", package=package)
+
+    async def fail(*_args, **_kwargs):
+        transport.calls.append(("json", "GET", "/api/engine/capabilities"))
+        if isinstance(failure, ValueError) and not isinstance(
+            failure, DeviceAdapterHTTPStatusError
+        ):
+            return {"success": True, "data": {"supported": "invalid"}}
+        raise failure
+
+    transport.invoke = fail
+    with pytest.raises(LocalSkillStorageError):
+        await LocalSkillPackageRuntime(_Resolver("baas"), transport).apply(
+            bot_id="bot-1",
+            owner_id="owner-1",
+            skill_name="weather",
+            layout="LEGACY",
+            package=package,
+        )
+
+    assert [call[0] for call in transport.calls] == ["json"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_route_404_with_unhealthy_runtime_never_falls_back() -> None:
+    package = b"canonical-zip"
+    transport = _Transport(provider="baas", package=package)
+
+    async def unhealthy(conn_info, method, path, body=None, params=None, *, timeout=None):
+        transport.calls.append(("json", method, path))
+        if path == "/api/engine/capabilities":
+            raise DeviceAdapterEndpointNotFoundError(
+                '{"detail":"Not Found"}', standard_route_missing=True
+            )
+        return {"status": "starting"}
+
+    transport.invoke = unhealthy
+    with pytest.raises(LocalSkillStorageError):
+        await LocalSkillPackageRuntime(_Resolver("baas"), transport).apply(
+            bot_id="bot-1",
+            owner_id="owner-1",
+            skill_name="weather",
+            layout="LEGACY",
+            package=package,
+        )
+
+    assert [call[2] for call in transport.calls] == [
+        "/api/engine/capabilities",
+        "/health",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response",
+    [
+        TimeoutError("unknown outcome"),
+        {"success": True, "data": "malformed"},
+        {
+            "success": True,
+            "data": {"skill_name": "weather", "action": "created"},
+        },
+    ],
+)
+async def test_post_send_unknown_never_falls_back(response: object) -> None:
+    package = b"canonical-zip"
+    transport = _Transport(provider="baas", package=package)
+
+    async def unknown(conn_info, path, *, files, data, headers=None, timeout=None):
+        transport.calls.append(("multipart", path, files, data, headers))
+        if isinstance(response, BaseException):
+            raise response
+        return response
+
+    transport.invoke_multipart = unknown
+    with pytest.raises(LocalSkillStorageError):
+        await LocalSkillPackageRuntime(_Resolver("baas"), transport).apply(
+            bot_id="bot-1",
+            owner_id="owner-1",
+            skill_name="weather",
+            layout="LEGACY",
+            package=package,
+        )
+
+    assert [call[0] for call in transport.calls] == ["json", "multipart"]
 
 
 @pytest.mark.asyncio

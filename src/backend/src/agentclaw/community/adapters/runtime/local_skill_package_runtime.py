@@ -1,16 +1,17 @@
-"""Package-level Local Skill delivery to the currently bound Engine Runtime."""
+"""Translate Local Skill package delivery to Engine and Teclaw wire formats."""
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import json
-from agentclaw.community.core.devices.services.device_context_resolver import (
-    DeviceContextResolver,
-)
-from agentclaw.community.core.skill_center.local_skill_package_runtime_protocol import (
+
+from agentclaw.community.api.local_skill_package_runtime import (
     LocalSkillPackageRuntimeProtocol,
     LocalSkillPackageRuntimeResult,
+)
+from agentclaw.community.core.devices.services.device_context_resolver import (
+    DeviceContextResolver,
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillEditBusyError,
@@ -31,6 +32,8 @@ _TECLAW_PATH = "/api/v1/file/skill-package"
 
 
 class LocalSkillPackageRuntime(LocalSkillPackageRuntimeProtocol):
+    """Thin outbound adapter; no persistence or Local Skill domain policy."""
+
     def __init__(
         self,
         resolver: DeviceContextResolver,
@@ -168,6 +171,4 @@ class LocalSkillPackageRuntime(LocalSkillPackageRuntimeProtocol):
         )
 
 
-__all__ = [
-    "LocalSkillPackageRuntime",
-]
+__all__ = ["LocalSkillPackageRuntime"]

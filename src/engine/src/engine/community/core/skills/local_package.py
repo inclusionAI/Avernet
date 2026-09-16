@@ -206,13 +206,22 @@ class LocalSkillPackagePublisher:
             raise LocalSkillPackageInvalidError("missing_or_multiple_root_manifest")
         try:
             text = manifests[0].decode("utf-8")
-            if not text.startswith("---\n"):
-                raise ValueError("missing frontmatter")
-            _marker, frontmatter, _body = text.split("---", 2)
-            metadata = yaml.safe_load(frontmatter)
+            if text.startswith("---\n"):
+                _marker, frontmatter, _body = text.split("---", 2)
+                metadata = yaml.safe_load(frontmatter)
+            else:
+                # The existing Legacy upload contract accepts YAML-only
+                # manifests. Backend canonicalises the filename before this
+                # boundary; Engine still revalidates the canonical bytes.
+                metadata = yaml.safe_load(text)
         except (UnicodeDecodeError, ValueError, yaml.YAMLError) as exc:
             raise LocalSkillPackageInvalidError("invalid_manifest") from exc
-        if not isinstance(metadata, dict) or metadata.get("name") != skill_name:
+        if (
+            not isinstance(metadata, dict)
+            or metadata.get("name") != skill_name
+            or not isinstance(metadata.get("description"), str)
+            or not metadata["description"].strip()
+        ):
             raise LocalSkillPackageInvalidError("skill_name_mismatch")
         return entries
 

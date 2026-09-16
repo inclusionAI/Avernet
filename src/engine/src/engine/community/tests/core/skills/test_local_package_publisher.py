@@ -14,6 +14,8 @@ from engine.community.core.skills.local_package import (
     LocalSkillPackagePublishFailedError,
     LocalSkillPackagePublishInProgressError,
     LocalSkillPackagePublisher,
+    LocalSkillPackageRollbackFailedError,
+    LocalSkillPackageTooLargeError,
 )
 
 
@@ -47,6 +49,20 @@ def test_publish_creates_complete_package(tmp_path: Path) -> None:
     ).read_bytes() == b"print('sunny')\n"
 
 
+def test_publish_accepts_backend_canonical_legacy_manifest(tmp_path: Path) -> None:
+    package = _package(
+        {"SKILL.md": b"name: weather\ndescription: legacy compatibility\n"}
+    )
+
+    result = LocalSkillPackagePublisher().publish(
+        skill_name="weather",
+        package=package,
+        target=tmp_path / "skills-local" / "weather",
+    )
+
+    assert result.action is LocalSkillPackageAction.CREATED
+
+
 def test_publish_replaces_exactly_and_removes_stale_files(tmp_path: Path) -> None:
     target = tmp_path / "skills-local" / "weather"
     target.mkdir(parents=True)
@@ -66,6 +82,72 @@ def test_publish_replaces_exactly_and_removes_stale_files(tmp_path: Path) -> Non
     assert result.action is LocalSkillPackageAction.REPLACED
     assert not (target / "stale.txt").exists()
     assert (target / "fresh.txt").read_bytes() == b"fresh"
+
+
+def test_replaying_same_package_remains_exact(tmp_path: Path) -> None:
+    target = tmp_path / "skills-local" / "weather"
+    package = _package(
+        {"SKILL.md": b"---\nname: weather\ndescription: forecast\n---\n"}
+    )
+    publisher = LocalSkillPackagePublisher()
+
+    first = publisher.publish(skill_name="weather", package=package, target=target)
+    second = publisher.publish(skill_name="weather", package=package, target=target)
+
+    assert first.content_digest == second.content_digest
+    assert second.action is LocalSkillPackageAction.REPLACED
+    assert (target / "SKILL.md").read_bytes().startswith(b"---")
+
+
+@pytest.mark.parametrize(
+    "package",
+    [
+        b"x" * (10 * 1024 * 1024 + 1),
+        _package(
+            {
+                "SKILL.md": b"---\nname: weather\ndescription: forecast\n---\n",
+                "large.bin": b"x" * (10 * 1024 * 1024 + 1),
+            }
+        ),
+        _package(
+            {
+                "SKILL.md": b"---\nname: weather\ndescription: forecast\n---\n",
+                **{f"part-{index}.bin": b"x" * (9 * 1024 * 1024) for index in range(6)},
+            }
+        ),
+        _package(
+            {
+                "SKILL.md": b"---\nname: weather\ndescription: forecast\n---\n",
+                **{f"empty-{index}": b"" for index in range(500)},
+            }
+        ),
+    ],
+)
+def test_package_limits_reject_before_write(tmp_path: Path, package: bytes) -> None:
+    target = tmp_path / "skills-local" / "weather"
+
+    with pytest.raises(LocalSkillPackageTooLargeError):
+        LocalSkillPackagePublisher().publish(
+            skill_name="weather", package=package, target=target
+        )
+
+    assert not target.exists()
+
+
+def test_path_length_limit_rejects_before_write(tmp_path: Path) -> None:
+    package = _package(
+        {
+            "SKILL.md": b"---\nname: weather\ndescription: forecast\n---\n",
+            f"scripts/{'x' * 250}": b"x",
+        }
+    )
+
+    with pytest.raises(LocalSkillPackageInvalidError):
+        LocalSkillPackagePublisher().publish(
+            skill_name="weather",
+            package=package,
+            target=tmp_path / "skills-local" / "weather",
+        )
 
 
 def test_invalid_package_does_not_modify_existing_target(tmp_path: Path) -> None:
@@ -163,3 +245,36 @@ def test_replace_publish_failure_restores_old_package(
         )
 
     assert (target / "SKILL.md").read_bytes() == b"old"
+
+
+def test_replace_and_rollback_failure_is_explicit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "skills-local" / "weather"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_bytes(b"old")
+    package = _package(
+        {"SKILL.md": b"---\nname: weather\ndescription: new\n---\n"}
+    )
+    original_replace = os.replace
+
+    def fail_publish_and_rollback(source, destination):
+        source_path = Path(source)
+        destination_path = Path(destination)
+        if destination_path == target and (
+            ".apply-" in source_path.name or ".rollback-" in source_path.name
+        ):
+            raise OSError("publish or rollback failed")
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", fail_publish_and_rollback)
+
+    with pytest.raises(LocalSkillPackageRollbackFailedError):
+        LocalSkillPackagePublisher().publish(
+            skill_name="weather", package=package, target=target
+        )
+
+    assert not target.exists()
+    backups = list(target.parent.glob(".weather.rollback-*"))
+    assert len(backups) == 1
+    assert (backups[0] / "SKILL.md").read_bytes() == b"old"

@@ -390,6 +390,28 @@ def test_explicit_legacy_local_validation_accepts_a_manifest_without_frontmatter
     assert package.description == "Legacy upload compatibility"
 
 
+def test_legacy_local_normalizes_one_case_insensitive_manifest_name() -> None:
+    package = SkillPackageValidator(SkillParser()).validate_legacy_local_zip(
+        _zip([("weather/SKILL.MD", _skill_md())])
+    )
+
+    assert [path for path, _content in package.files] == ["SKILL.md"]
+
+
+def test_legacy_local_rejects_conflicting_case_insensitive_manifests() -> None:
+    with pytest.raises(SkillPackageInvalidError) as caught:
+        SkillPackageValidator(SkillParser()).validate_legacy_local_zip(
+            _zip(
+                [
+                    ("weather/SKILL.md", _skill_md()),
+                    ("weather/SKILL.MD", _skill_md()),
+                ]
+            )
+        )
+
+    assert caught.value.reason == "multiple_skill_files"
+
+
 def test_unreadable_archive_entry_has_a_stable_reason(monkeypatch) -> None:
     class _UnreadableArchive:
         def __enter__(self):

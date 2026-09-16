@@ -122,7 +122,10 @@ Both Backend and Engine enforce at least:
 - path length: 256 characters;
 - normalized relative paths only;
 - regular files/directories only, no symlink or special entry;
-- exactly one root `SKILL.md`, with frontmatter name equal to `skill_name`.
+- exactly one root `SKILL.md`, with manifest name equal to `skill_name`;
+- the Legacy Backend entry point additionally accepts its historical
+  case-insensitive manifest filename and YAML-only manifest, canonicalises the
+  filename to `SKILL.md`, and sends those canonical bytes to the Engine.
 
 ## Validation
 

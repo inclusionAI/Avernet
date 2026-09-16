@@ -329,7 +329,6 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             )
             if replaced is None:
                 raise RuntimeError("Local Skill metadata switch failed")
-            runtime_projection = await self._sync_runtime(owner_id, bot_id)
             self._audit_log_repo.insert(
                 {
                     "bot_id": bot_id,
@@ -340,6 +339,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                     ),
                 }
             )
+            runtime_projection = await self._sync_runtime(owner_id, bot_id)
         except Exception as exc:
             logger.error(
                 "[LocalSkillUploadService] post-apply persistence failed "
