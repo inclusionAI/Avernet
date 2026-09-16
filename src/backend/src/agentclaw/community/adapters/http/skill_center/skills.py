@@ -118,11 +118,13 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillEditBusyError,
     LocalSkillEditLockUnavailableError,
     LocalSkillEditPausedError,
+    LocalSkillInvalidPackageError,
     LocalSkillLayoutRollbackError,
     LocalSkillNotFoundError,
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
+    LocalSkillTooLargeError,
     SkillAssetInUseError,
     SkillReferencedBySkillSetError,
     SkillRuntimeNameConflictError,
@@ -216,6 +218,7 @@ _RUNTIME_UPLOAD_EXCEPTION_TYPES = (
     DeviceAdapterEndpointNotFoundError,
     DeviceAdapterTimeoutError,
     SandboxRuntimeUnavailableError,
+    LocalSkillStorageError,
     ConnectionError,
     TimeoutError,
 )
@@ -246,6 +249,22 @@ _MANIFEST_UPLOAD_ERROR_CODES = {
     SkillManifestErrorCode.DESCRIPTION_TOO_LONG: SkillUploadErrorCode.DESCRIPTION_TOO_LONG,
     SkillManifestErrorCode.NAME_DIRECTORY_MISMATCH: SkillUploadErrorCode.ROOT_NAME_MISMATCH,
     SkillManifestErrorCode.INVALID_CONFIG: SkillUploadErrorCode.MANIFEST_INVALID,
+}
+_PACKAGE_UPLOAD_ERROR_CODES = {
+    "invalid_zip": SkillUploadErrorCode.ZIP_INVALID,
+    "missing_skill_file": SkillUploadErrorCode.MANIFEST_MISSING,
+    "multiple_skill_files": SkillUploadErrorCode.MANIFEST_MULTIPLE,
+    "unsafe_file_path": SkillUploadErrorCode.PATH_INVALID,
+    "duplicate_file_path": SkillUploadErrorCode.PATH_INVALID,
+    "invalid_wrapper": SkillUploadErrorCode.FILE_OUTSIDE_ROOT,
+    "invalid_encoding": SkillUploadErrorCode.MANIFEST_ENCODING_INVALID,
+    "invalid_metadata": SkillUploadErrorCode.MANIFEST_INVALID,
+    "wrapper_name_mismatch": SkillUploadErrorCode.ROOT_NAME_MISMATCH,
+}
+_PACKAGE_UPLOAD_MESSAGES = {
+    "invalid_zip": "File is not a valid ZIP archive.",
+    "missing_skill_file": "SKILL.md is required.",
+    "multiple_skill_files": "Only one skill can be uploaded at a time.",
 }
 _FILESYSTEM_LAYOUT_ENGINES = frozenset(
     {"openclaw", "claude_code", "aicoding", "hermes"}
@@ -325,6 +344,12 @@ def _classify_upload_validation_error(
 ) -> SkillUploadErrorCode | None:
     """Classify known legacy validation failures before transport errors."""
 
+    if isinstance(error, LocalSkillTooLargeError):
+        return SkillUploadErrorCode.PACKAGE_TOO_LARGE
+    if isinstance(error, LocalSkillInvalidPackageError):
+        return _PACKAGE_UPLOAD_ERROR_CODES.get(
+            str(error), SkillUploadErrorCode.MANIFEST_INVALID
+        )
     if _contains_zip_upload_error(error):
         return SkillUploadErrorCode.ZIP_INVALID
 
@@ -414,7 +439,14 @@ def _build_upload_error_response(
 ) -> UploadSkillResponse:
     """Build the backward-compatible failed-upload envelope once."""
 
-    raw_message = str(error)
+    if isinstance(error, LocalSkillInvalidPackageError):
+        raw_message = _PACKAGE_UPLOAD_MESSAGES.get(
+            str(error), error.public_message
+        )
+    elif isinstance(error, LocalSkillTooLargeError):
+        raw_message = "Skill package is too large."
+    else:
+        raw_message = str(error)
     message = (
         f"Upload failed: {raw_message}" if include_upload_prefix else raw_message
     )
@@ -864,7 +896,7 @@ async def upload_skill(
         raise HTTPException(status_code=409, detail=str(e)) from e
     except HTTPException:
         raise
-    except ValueError as e:
+    except (ValueError, LocalSkillInvalidPackageError, LocalSkillTooLargeError) as e:
         logger.error(f"[skills.upload_skill] Validation error: {e}")
         return _build_upload_error_response(e)
     except Exception as e:

@@ -51,8 +51,11 @@ from agentclaw.community.api.direct_activation_service import (
     DirectActivationServiceProtocol,
 )
 from agentclaw.community.core.skill_center.errors import (
+    LocalSkillInvalidPackageError,
     LocalSkillNotFoundError,
     LocalSkillRuntimeSyncError,
+    LocalSkillStorageError,
+    LocalSkillTooLargeError,
     SkillRuntimeNameConflictError,
     SkillSetControlPlaneConflictError,
 )
@@ -963,6 +966,62 @@ class TestUploadSkillValidation:
             assert body["success"] is False
             assert body["error_code"] == SkillUploadErrorCode.MANIFEST_MISSING
             assert body["message"] == "SKILL.md is required."
+
+    @pytest.mark.parametrize(
+        ("error", "error_code", "message"),
+        [
+            (
+                LocalSkillInvalidPackageError("missing_skill_file"),
+                SkillUploadErrorCode.MANIFEST_MISSING,
+                "SKILL.md is required.",
+            ),
+            (
+                LocalSkillInvalidPackageError("invalid_zip"),
+                SkillUploadErrorCode.ZIP_INVALID,
+                "File is not a valid ZIP archive.",
+            ),
+            (
+                LocalSkillTooLargeError(),
+                SkillUploadErrorCode.PACKAGE_TOO_LARGE,
+                "Skill package is too large.",
+            ),
+            (
+                LocalSkillStorageError(),
+                SkillUploadErrorCode.RUNTIME_UNAVAILABLE,
+                "当前 Bot 的运行环境暂不可用，请重新启动 Bot 后重试。",
+            ),
+        ],
+    )
+    def test_upload_maps_shared_service_domain_errors(
+        self, mock_ctx, error, error_code, message
+    ):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (
+            client,
+            mock_svc,
+            _,
+            _,
+        ):
+            mock_svc.upload_local_skill_files.side_effect = error
+
+            response = client.post(
+                "/api/skills/upload",
+                files=[
+                    (
+                        "files",
+                        (
+                            "SKILL.md",
+                            b"---\nname: a\ndescription: a\n---",
+                            "text/markdown",
+                        ),
+                    )
+                ],
+                data={"file_paths": json.dumps(["SKILL.md"])},
+            )
+
+            body = response.json()
+            assert body["success"] is False
+            assert body["error_code"] == error_code
+            assert body["message"] == message
 
     @pytest.mark.parametrize(
         ("message", "expected_code"),

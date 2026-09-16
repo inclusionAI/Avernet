@@ -122,6 +122,7 @@ def test_replaying_same_package_remains_exact(tmp_path: Path) -> None:
             }
         ),
     ],
+    ids=["compressed", "single-file", "expanded", "file-count"],
 )
 def test_package_limits_reject_before_write(tmp_path: Path, package: bytes) -> None:
     target = tmp_path / "skills-local" / "weather"
