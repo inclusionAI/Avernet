@@ -15,6 +15,7 @@ exactly why nothing here reads a carrier's contents.
 import asyncio
 import threading
 from contextlib import contextmanager
+from datetime import datetime
 
 import pytest
 from sqlalchemy import create_engine
@@ -307,6 +308,37 @@ def test_an_overlong_trace_id_is_truncated_rather_than_rejected(env):
 
     trace_id, _ = world.row(record.id)
     assert trace_id == "t" * MAX_TRACE_ID_LEN
+
+
+def test_an_unserializable_carrier_does_not_fail_the_enqueue(env):
+    """The write-side mirror of the unreadable-carrier case below.
+
+    A carrier can be well-formed enough to export and still not survive
+    ``json.dumps`` — a datetime, an SDK object, a cycle. That serialization
+    happens inside ``orm_session()``, so an unguarded raise would roll the insert
+    back and propagate out of ``TaskQueueService.enqueue``, costing the caller the
+    work it asked for rather than just its correlation. The id still lands; only
+    the carrier is dropped.
+    """
+
+    class _UnserializableCarrierTracer(CommunityTracer):
+        def export_trace_carrier(self):
+            return {"trace_id": "trace-abc", "exported_at": datetime.now()}
+
+    world = _World(_UnserializableCarrierTracer())
+    handler = _CompletingHandler()
+    world.registry.register(handler)
+
+    with world.tracer.trace_scope({"trace_id": "trace-abc"}):
+        record = world.enqueue()
+
+    trace_id, carrier = world.row(record.id)
+    assert trace_id == "trace-abc"
+    assert carrier is None
+
+    assert world.run() == 1
+    assert handler.runs == 1
+    assert world.repo.get_by_id(record.id).status == TaskStatus.SUCCEEDED
 
 
 def test_an_unreadable_carrier_does_not_strand_the_task(world):
