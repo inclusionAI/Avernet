@@ -45,7 +45,6 @@ from agentclaw.community.core.skill_center.desktop_skill_recovery_protocol impor
 )
 from agentclaw.community.core.skill_center.services.desktop_skill_recovery import (
     DesktopSkillRecoveryService,
-    DesktopSkillRecoverySweeper,
     DesktopSkillRecoveryTaskHandler,
 )
 from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
@@ -101,8 +100,13 @@ class SkillCenterGroup4Module(Module):
         self,
         bots: BotRepository,
         tasks: TaskQueueService,
+        config: DesktopSkillRecoveryConfig,
     ) -> DesktopSkillRecoveryServiceProtocol:
-        return DesktopSkillRecoveryService(bots=bots, tasks=tasks)
+        return DesktopSkillRecoveryService(
+            bots=bots,
+            tasks=tasks,
+            task_deadline_seconds=config.task_deadline_seconds,
+        )
 
     @singleton
     @provider
@@ -202,21 +206,6 @@ class SkillCenterGroup4Module(Module):
             projector=projector,
             distribution=distribution,
             layouts=layouts,
-        )
-
-    @singleton
-    @provider
-    @inject
-    def desktop_skill_recovery_sweeper(
-        self,
-        bots: BotRepository,
-        recovery: DesktopSkillRecoveryServiceProtocol,
-        config: DesktopSkillRecoveryConfig,
-    ) -> DesktopSkillRecoverySweeper:
-        return DesktopSkillRecoverySweeper(
-            bots=bots,
-            recovery=recovery,
-            config=config,
         )
 
     @singleton

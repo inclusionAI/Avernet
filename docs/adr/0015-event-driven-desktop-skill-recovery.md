@@ -1,0 +1,3 @@
+# Keep Desktop Skill recovery event-driven
+
+Desktop Skill recovery is triggered only by Runtime Ready events and desired-state changes; the periodic full-fleet Sweeper is removed. Each durable recovery task receives a configurable ten-minute deadline, explicit new-contract `501` and route-missing `404` responses fall back to the Legacy Mapping contract, and only the absence of both generations is reported as non-retryable `ENGINE_SKILL_MAPPING_UNSUPPORTED`. We accept rare in-process event loss as the existing best-effort Runtime limitation rather than adding a recovery-state table or permanent background reconciliation load.

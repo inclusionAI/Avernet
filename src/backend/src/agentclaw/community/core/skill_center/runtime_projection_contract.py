@@ -16,6 +16,9 @@ from agentclaw.community.core.skill_center.runtime_resolver import (
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 
 
+ENGINE_SKILL_MAPPING_UNSUPPORTED_CODE = "ENGINE_SKILL_MAPPING_UNSUPPORTED"
+
+
 class RuntimeProjectionStatus(StrEnum):
     """User-visible outcome of applying a committed Desired State."""
 
@@ -503,6 +506,7 @@ class BotRuntimeProjectorProtocol(Protocol):
 __all__ = [
     "BotRuntimeProjectorProtocol",
     "CapabilityRuntimeBoundary",
+    "ENGINE_SKILL_MAPPING_UNSUPPORTED_CODE",
     "EngineRuntimeProjection",
     "ProjectionScope",
     "RuntimeProjectionIssue",
