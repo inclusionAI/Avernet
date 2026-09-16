@@ -52,17 +52,20 @@ class BotServicePlugin(Protocol):
         bot_id: str,
         owner_id: str,
         user_id: str,
-        token: str,
+        cookie: str,
     ) -> str:
         """caller 模式：按 (bot_id, owner_id, user_id) 拉起一个新容器，返回 sandbox_id。
 
-        依赖外部 caller-connection 接口；``token`` 为调用方带来的身份令牌，透传鉴权。
+        依赖外部 caller-connection 接口；Principal 不经参数传入——real 实现用
+        共享密钥（经 SecretStorePlugin）自行签发 app principal 并置于
+        ``X-Avernet-Principal``。实例就绪后用 ``cookie`` 单次调用
+        /api/v1/token/iam 刷新 Caller 执行凭据（副作用在服务端完成）。
 
         Args:
             bot_id: Bot 标识（bare，不含 entity 后缀）。
             owner_id: 容器归属实体。
             user_id: 使用者标识。
-            token: caller 身份令牌。
+            cookie: 调用方登录态 Cookie（含 IAM_TOKEN），就绪后用于刷新凭据。
 
         Returns:
             新建容器的 sandbox_id。

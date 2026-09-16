@@ -15,6 +15,7 @@ import pytest
 
 from secbaas.community.api.bot_runtime import BotBindingInfo
 from secbaas.community.core.service.bot_run import (
+    BotBindingResolver,
     binding_data_to_info,
     extract_lifecycle_stage,
     extract_session_id_from_record,
@@ -26,8 +27,6 @@ from secbaas.community.core.service.bot_run import (
 from secbaas.community.core.service.bot_run._bot_run_utils import (
     build_caller_binding,
     build_chat_metadata,
-    resolve_binding,
-    resolve_caller_binding,
 )
 from secbaas.community.plugins.eval_env.stub import NoopEvalSessionLog
 from secbaas.community.spi.bot.engine_adapter import extract_session_key_from_planned_id
@@ -717,68 +716,78 @@ class TestBuildCallerBinding:
 
 
 class TestResolveCallerBinding:
-    """测试 resolve_caller_binding：凭 token 调 caller-connection 拉容器。"""
+    """测试 BotBindingResolver.resolve_caller_binding：调 caller-connection 拉容器。
+
+    metadata 的 ``cookie`` 是裸 IAM token 值；resolver 包装成 Cookie 头格式
+    ``IAM_TOKEN=<值>`` 传给插件。
+    """
 
     async def test_resolves_sandbox_via_caller_connection(self):
         plugin = MagicMock()
         plugin.get_caller_connection = AsyncMock(return_value="sbx-9")
-        info = await resolve_caller_binding(
-            plugin,
+        resolver = BotBindingResolver(plugin)
+        info = await resolver.resolve_caller_binding(
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
-            metadata={"token": "tok-1", "user_id": "u-9"},
+            metadata={
+                "user_id": "u-9",
+                "cookie": "iam-token-value",
+            },
         )
         plugin.get_caller_connection.assert_awaited_once_with(
             bot_id=BOT_ID,
             owner_id=ENTITY_ID,
             user_id="u-9",
-            token="tok-1",
+            cookie="IAM_TOKEN=iam-token-value",
         )
         assert info.sandbox_id == "sbx-9"
         assert info.device_provider == "caller"
 
-    async def test_user_id_falls_back_to_bot_id(self):
-        """metadata 无 user_id 时 resolve_user_id 无 binding/context，fallback bot_id。"""
+    async def test_user_id_defaults_to_empty_string(self):
+        """metadata 无 user_id 时直接传空串（无兜底推导）；cookie 空值包装。"""
         plugin = MagicMock()
         plugin.get_caller_connection = AsyncMock(return_value="sbx-8")
-        await resolve_caller_binding(plugin, bot_id=BOT_ID, metadata={"token": "tok-2"})
+        resolver = BotBindingResolver(plugin)
+        await resolver.resolve_caller_binding(bot_id=BOT_ID, metadata={})
         plugin.get_caller_connection.assert_awaited_once_with(
-            bot_id=BOT_ID, owner_id="", user_id=BOT_ID, token="tok-2"
+            bot_id=BOT_ID, owner_id="", user_id="", cookie="IAM_TOKEN="
         )
 
 
-class TestResolveBindingCallerMode:
-    """测试 resolve_binding 的 caller 分支与空 bot_id 防御。"""
+class TestResolveBindingNormalOnly:
+    """resolve_binding 只做正常解析：caller 模式的容器拉起不在本方法。"""
 
-    async def test_caller_sandbox_id_reused_without_new_connection(self):
-        """caller_sandbox_id 已传入时直接复用，不再拉新容器。"""
+    async def test_caller_mode_metadata_resolves_normally(self):
+        """caller 模式 metadata 同样走正常 get_binding，不调 caller-connection。"""
         plugin = MagicMock()
+        plugin.get_binding = AsyncMock(
+            return_value=BotBindingData(
+                bot_id=BOT_ID,
+                owner_id=ENTITY_ID,
+                bot_type="service",
+                engine_type="teclaw",
+                publish_id=None,
+                publish_status=None,
+                binding_id=0,
+                device_provider="teclaw",
+                device_id="dev-1",
+            )
+        )
         plugin.get_caller_connection = AsyncMock()
-        info = await resolve_binding(
-            plugin,
+        resolver = BotBindingResolver(plugin)
+        info = await resolver.resolve_binding(
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
-            metadata={"token": "tok"},
-            caller_sandbox_id="sbx-7",
+            metadata={"cookie": "iam-token-value", "user_id": "u-1"},
         )
-        assert info.sandbox_id == "sbx-7"
-        assert info.device_provider == "caller"
+        assert info is not None
+        assert info.device_provider == "teclaw"
+        plugin.get_binding.assert_awaited_once()
         plugin.get_caller_connection.assert_not_called()
-
-    async def test_caller_without_sandbox_pulls_connection(self):
-        """无 caller_sandbox_id 时经 caller-connection 现拉容器。"""
-        plugin = MagicMock()
-        plugin.get_caller_connection = AsyncMock(return_value="sbx-8")
-        info = await resolve_binding(
-            plugin,
-            bot_id=f"{BOT_ID}:{ENTITY_ID}",
-            metadata={"token": "tok", "user_id": "u-1"},
-        )
-        assert info.sandbox_id == "sbx-8"
-        assert info.device_provider == "caller"
 
     async def test_empty_real_bot_id_returns_none(self):
         """空 bot_id 防御：parse 后 real_bot_id 为空时返回 None。"""
         plugin = MagicMock()
-        info = await resolve_binding(plugin, bot_id="", metadata={})
+        resolver = BotBindingResolver(plugin)
+        info = await resolver.resolve_binding(bot_id="", metadata={})
         assert info is None
 
 

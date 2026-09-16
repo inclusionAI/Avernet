@@ -32,6 +32,7 @@ from secbaas.community.api.device_manage import ErrorCode, PaasError
 from secbaas.community.api.sse import SseEvent, StreamChunk
 from secbaas.community.core.service.bot_run import (
     BotBindingNotFoundError,
+    BotBindingResolver,
     BotEngineAdapterRegistry,
     BotRunner,
     BotServiceSelector,
@@ -160,6 +161,7 @@ def _make_runner(
         bot_service_selector=mock_selector,
         run_repository=mock_run_repo,
         bot_service_plugin=mock_bot_service_plugin,
+        binding_resolver=BotBindingResolver(mock_bot_service_plugin),
         dispatchers=[dispatcher],
         system_config_service=_make_config_service(),
         eval_session_log=MagicMock(),
@@ -182,11 +184,178 @@ def _make_runner_with_task_dispatcher(
         bot_service_selector=mock_selector,
         run_repository=mock_run_repo,
         bot_service_plugin=mock_bot_service_plugin,
+        binding_resolver=BotBindingResolver(mock_bot_service_plugin),
         dispatchers=[dispatcher],
         system_config_service=_make_config_service(),
         eval_session_log=MagicMock(),
         engine_adapter_registry=_OPENCLAW_REGISTRY,
     )
+
+
+# ==================== Tests: caller 模式后台 dispatch ====================
+
+
+class TestRunnerCallerMode:
+    """caller 模式：HTTP 链路秒回，拉容器 + dispatch 后台化；cookie 不落库。"""
+
+    @pytest.mark.asyncio
+    async def test_deliver_defers_container_provisioning(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        baas_binding_data,
+        context,
+    ):
+        """容器拉起挂起时 deliver_message 立即返回；就绪后后台入队。"""
+        mock_bot_service_plugin.get_binding.return_value = baas_binding_data
+        container_ready = asyncio.get_running_loop().create_future()
+
+        async def _slow_pull(*args, **kwargs):
+            return await container_ready
+
+        mock_bot_service_plugin.get_caller_connection = AsyncMock(
+            side_effect=_slow_pull
+        )
+        dispatcher = MagicMock(spec=MessageDispatcher)
+        dispatcher.dispatch_send = AsyncMock()
+        dispatcher.dispatch_inject = AsyncMock()
+        runner = _make_runner(
+            mock_selector, mock_run_repo, mock_bot_service_plugin, dispatcher
+        )
+
+        message_id, session_id = await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hi",
+            context=context,
+            metadata={"cookie": "iam-token", "user_id": "u-1"},
+        )
+
+        # 拉起仍挂起：请求已返回，未入队
+        assert message_id
+        assert session_id
+        dispatcher.dispatch_send.assert_not_awaited()
+
+        # 容器就绪 → 后台任务组 caller binding 并入队
+        container_ready.set_result("sbx-caller-1")
+        for _ in range(100):
+            if not runner._caller_dispatch_tasks:
+                break
+            await asyncio.sleep(0)
+        dispatcher.dispatch_send.assert_awaited_once()
+        kwargs = dispatcher.dispatch_send.await_args.kwargs
+        assert kwargs["binding_info"].sandbox_id == "sbx-caller-1"
+        assert kwargs["binding_info"].device_provider == "caller"
+        mock_bot_service_plugin.get_caller_connection.assert_awaited_once_with(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            user_id="u-1",
+            cookie="IAM_TOKEN=iam-token",
+        )
+
+    @pytest.mark.asyncio
+    async def test_deliver_strips_cookie_from_persisted_run(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        baas_binding_data,
+        context,
+    ):
+        """落库的 run metadata 不含 cookie（敏感凭据只留内存链路）。"""
+        mock_bot_service_plugin.get_binding.return_value = baas_binding_data
+        mock_bot_service_plugin.get_caller_connection = AsyncMock(return_value="sbx-1")
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+
+        await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hi",
+            context=context,
+            metadata={"cookie": "iam-token", "user_id": "u-1", "foo": "bar"},
+        )
+        for _ in range(100):
+            if not runner._caller_dispatch_tasks:
+                break
+            await asyncio.sleep(0)
+
+        persisted = mock_run_repo.insert_run.call_args.kwargs["metadata"]
+        assert "cookie" not in persisted
+        assert persisted["foo"] == "bar"
+
+    @pytest.mark.asyncio
+    async def test_caller_dispatch_failure_marks_run_failed(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        baas_binding_data,
+        context,
+    ):
+        """后台拉起失败：run 落 FAILED，HTTP 不抛（已提前返回）。"""
+        mock_bot_service_plugin.get_binding.return_value = baas_binding_data
+        mock_bot_service_plugin.get_caller_connection = AsyncMock(
+            side_effect=RuntimeError("provisioning failed")
+        )
+        dispatcher = MagicMock(spec=MessageDispatcher)
+        dispatcher.dispatch_send = AsyncMock()
+        runner = _make_runner(
+            mock_selector, mock_run_repo, mock_bot_service_plugin, dispatcher
+        )
+
+        message_id, _ = await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hi",
+            context=context,
+            metadata={"cookie": "iam-token"},
+        )
+        for _ in range(100):
+            if not runner._caller_dispatch_tasks:
+                break
+            await asyncio.sleep(0)
+
+        dispatcher.dispatch_send.assert_not_awaited()
+        mock_run_repo.update_error.assert_called_once()
+        assert mock_run_repo.update_error.call_args.kwargs["run_id"] == message_id
+
+    @pytest.mark.asyncio
+    async def test_inject_message_defers_caller_dispatch(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        baas_binding_data,
+        context,
+    ):
+        """inject 入口同样后台化（dispatch_inject）。"""
+        mock_bot_service_plugin.get_binding.return_value = baas_binding_data
+        mock_bot_service_plugin.get_caller_connection = AsyncMock(
+            return_value="sbx-inj"
+        )
+        dispatcher = MagicMock(spec=MessageDispatcher)
+        dispatcher.dispatch_inject = AsyncMock()
+        runner = _make_runner(
+            mock_selector, mock_run_repo, mock_bot_service_plugin, dispatcher
+        )
+
+        message_id, session_id = await runner.inject_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            message="hi",
+            context=context,
+            metadata={"cookie": "iam-token"},
+            message_id="msg-caller-1",
+        )
+        assert message_id == "msg-caller-1"
+        assert session_id
+        dispatcher.dispatch_inject.assert_not_awaited()
+
+        for _ in range(100):
+            if not runner._caller_dispatch_tasks:
+                break
+            await asyncio.sleep(0)
+        dispatcher.dispatch_inject.assert_awaited_once()
+        kwargs = dispatcher.dispatch_inject.await_args.kwargs
+        assert kwargs["binding_info"].sandbox_id == "sbx-inj"
+        assert kwargs["binding_info"].device_provider == "caller"
 
 
 # ==================== Tests: binding_info passthrough ====================
@@ -1617,6 +1786,7 @@ def _make_runner_with_config(
         bot_service_selector=mock_selector,
         run_repository=mock_run_repo,
         bot_service_plugin=mock_bot_service_plugin,
+        binding_resolver=BotBindingResolver(mock_bot_service_plugin),
         dispatchers=dispatchers,
         system_config_service=config_service,
         eval_session_log=MagicMock(),
@@ -1638,6 +1808,7 @@ class TestSelectDispatcherConfig:
             bot_service_selector=mock_selector,
             run_repository=mock_run_repo,
             bot_service_plugin=mock_bot_service_plugin,
+            binding_resolver=BotBindingResolver(mock_bot_service_plugin),
             dispatchers=[queue_d, task_d],
             system_config_service=_make_config_service(),
             eval_session_log=MagicMock(),
@@ -1908,6 +2079,7 @@ class TestSelectDispatcherBcnSwitch:
             bot_service_selector=mock_selector,
             run_repository=mock_run_repo,
             bot_service_plugin=mock_bot_service_plugin,
+            binding_resolver=BotBindingResolver(mock_bot_service_plugin),
             dispatchers=[queue_d, task_d],
             system_config_service=_make_config_service(),
             eval_session_log=MagicMock(),
@@ -2244,6 +2416,7 @@ class TestListSessions:
             bot_service_selector=mock_selector,
             run_repository=mock_run_repo,
             bot_service_plugin=None,
+            binding_resolver=MagicMock(),
             dispatchers=[],
             system_config_service=_make_config_service(),
             eval_session_log=MagicMock(),
@@ -2473,6 +2646,7 @@ def _make_runner_with_eval_session_log(
         bot_service_selector=mock_selector,
         run_repository=mock_run_repo,
         bot_service_plugin=mock_bot_service_plugin,
+        binding_resolver=BotBindingResolver(mock_bot_service_plugin),
         dispatchers=[dispatcher],
         system_config_service=_make_config_service(),
         eval_session_log=eval_session_log,

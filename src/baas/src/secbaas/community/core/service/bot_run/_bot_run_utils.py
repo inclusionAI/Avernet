@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 
 from secbaas.community.api.bot_runtime import BotBindingInfo
-from secbaas.community.api.device_manage import ErrorCode, PaasError
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot_service import BotBindingData
 from secbaas.community.spi.eval_env import EvalSessionLog
@@ -14,7 +13,6 @@ if TYPE_CHECKING:
     from secbaas.community.api.bot_runtime import BotChatContext
     from secbaas.community.core.repository.bot_run import BotRunRecord
     from secbaas.community.spi.bot.engine_adapter import BotEngineAdapter
-    from secbaas.community.spi.bot_service import BotServicePlugin
 
 logger = get_logger("core-bot-run")
 
@@ -211,8 +209,25 @@ def binding_data_to_info(data: BotBindingData) -> BotBindingInfo:
 
 
 def is_caller_mode(metadata: dict[str, Any] | None) -> bool:
-    """metadata 携带 ``token`` 即视作 caller 模式。"""
-    return bool(metadata and metadata.get("token"))
+    """metadata 携带 ``cookie`` 即视作 caller 模式。
+
+    ``cookie`` 同时是模式开关与拉容器的 IAM 凭据：值只允许存在于内存
+    请求链路（runner 入口 → 后台 dispatch 闭包），落库前必须经
+    :func:`strip_sensitive_metadata` 剥离。
+    """
+    return bool(metadata and metadata.get("cookie"))
+
+
+def strip_sensitive_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    """落库副本：剥离敏感凭据（cookie），其余键原样保留。
+
+    run 记录 / queue meta 等持久化处一律使用本函数的返回值；原始
+    ``metadata``（含 cookie）只在内存链路（resolver 拉容器、后台任务
+    闭包）流转。
+    """
+    if "cookie" not in metadata:
+        return metadata
+    return {k: v for k, v in metadata.items() if k != "cookie"}
 
 
 def build_caller_binding(bot_id: str, sandbox_id: str) -> BotBindingInfo:
@@ -225,84 +240,6 @@ def build_caller_binding(bot_id: str, sandbox_id: str) -> BotBindingInfo:
         device_id=sandbox_id,
         device_provider=CALLER_DEVICE_PROVIDER,
     )
-
-
-async def resolve_caller_binding(
-    plugin: "BotServicePlugin",
-    *,
-    bot_id: str,
-    metadata: dict[str, Any],
-) -> BotBindingInfo:
-    """caller 模式 binding：依赖 caller-connection 按 (bot_id, owner_id, user_id) 拉起新容器。
-
-    与 ``binding_data_to_info``（按 (bot, owner) 解析既有发布设备）不同，caller 模式
-    每次现拉容器，用 ``device_provider="caller"`` 标记，使 ``BotServiceSelector`` 路由到
-    ``CallerBotService``，并把返回的 sandbox_id 作为连接目标（不参与 device affinity 选设备）。
-
-    caller 模式由请求 metadata 携带 ``token`` 触发，凭 token 调 caller-connection。
-    """
-    real_bot_id, entity_id = parse_bot_id(bot_id)
-    token = str(metadata.get("token") or "")
-    user_id = str(metadata.get("user_id") or "") or resolve_user_id(
-        metadata, None, None, real_bot_id
-    )
-    sandbox_id = await plugin.get_caller_connection(
-        bot_id=real_bot_id,
-        owner_id=entity_id,
-        user_id=user_id,
-        token=token,
-    )
-    logger.info(
-        "[resolve_caller_binding] bot_id=%s owner_id=%s user_id=%s sandbox_id=%s",
-        real_bot_id,
-        entity_id,
-        user_id,
-        sandbox_id,
-    )
-    return build_caller_binding(bot_id, sandbox_id)
-
-
-async def resolve_binding(
-    plugin: "BotServicePlugin",
-    *,
-    bot_id: str,
-    metadata: dict[str, Any],
-    caller_sandbox_id: str | None = None,
-) -> BotBindingInfo | None:
-    """解析 bot_id 的 binding（runner 入队时与 worker 执行时共用，保证两条路径一致）。
-
-    - caller 模式（metadata 携带 ``token``）：
-      - 传入 ``caller_sandbox_id``（队列路径从 queue meta 读到入队时已建的容器）→ 直接复用；
-      - 否则经 caller-connection 现拉新容器。
-    - 否则按 (bot, owner) + lifecycle_stage 解析既有发布设备；NOT_FOUND 返回 None。
-    """
-    if is_caller_mode(metadata):
-        if caller_sandbox_id:
-            return build_caller_binding(bot_id, caller_sandbox_id)
-        return await resolve_caller_binding(plugin, bot_id=bot_id, metadata=metadata)
-
-    lifecycle_stage = extract_lifecycle_stage(metadata)
-    real_bot_id, entity_id = parse_bot_id(bot_id)
-    if not real_bot_id:
-        return None
-    try:
-        data = await plugin.get_binding(
-            bot_id=real_bot_id,
-            owner_id=entity_id or "",
-            stage=lifecycle_stage,
-        )
-    except PaasError as e:
-        if e.code == ErrorCode.NOT_FOUND:
-            logger.warning(
-                "[resolve_binding] Bot binding unavailable: bot_id=%s, "
-                "lifecycle_stage=%s, error=%s",
-                bot_id,
-                lifecycle_stage,
-                e,
-            )
-            return None
-        raise
-    return binding_data_to_info(data)
 
 
 def build_chat_metadata(

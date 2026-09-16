@@ -36,13 +36,13 @@ from secbaas.community.core.repository.api_gateway import APIKeyRepository
 from secbaas.community.core.repository.bot_run import BotRunRepository
 from secbaas.community.core.repository.bot_run_queue import BotRunQueueRecord
 from secbaas.community.logger import get_logger
-from secbaas.community.spi.bot_service import BotServicePlugin
 from secbaas.community.spi.eval_env import EvalSessionLog
 
+from ._binding_resolver import BotBindingResolver
 from ._bot_run_utils import (
     CALLER_SANDBOX_META_KEY,
+    build_caller_binding,
     build_chat_metadata,
-    resolve_binding,
     resolve_bot_id,
 )
 from ._bot_service_selector import BotServiceSelector
@@ -249,7 +249,7 @@ class BotRunRequestExecutor:
     def __init__(
         self,
         run_repository: BotRunRepository,
-        bot_service_plugin: BotServicePlugin,
+        binding_resolver: BotBindingResolver,
         bot_service_selector: BotServiceSelector,
         chunk_repository: BotRunQueueChunkRepository,
         cache_plugin: CachePlugin,
@@ -259,7 +259,7 @@ class BotRunRequestExecutor:
         stream_flush_max_content_bytes: int = 65536,
     ) -> None:
         self._repo = run_repository
-        self._bot_service_plugin = bot_service_plugin
+        self._binding_resolver = binding_resolver
         self._bot_service_selector = bot_service_selector
         self._chunk_repository = chunk_repository
         self._cache_plugin = cache_plugin
@@ -298,12 +298,17 @@ class BotRunRequestExecutor:
         context = _rebuild_context(
             run.api_key_prefix, self._api_key_repository, metadata
         )
-        binding_info = await resolve_binding(
-            self._bot_service_plugin,
-            bot_id=run.bot_id,
-            metadata=metadata,
-            caller_sandbox_id=queue_meta.get(CALLER_SANDBOX_META_KEY),
-        )
+        caller_sandbox_id = queue_meta.get(CALLER_SANDBOX_META_KEY)
+        if caller_sandbox_id:
+            # caller 模式：容器在入队前已由 runner 后台拉起——直接用 queue meta
+            # 的 sandbox 组 binding，不再二次调 caller-connection（run metadata
+            # 已脱敏无 cookie，caller 判定以 meta 的 sandbox 存在为准）
+            binding_info = build_caller_binding(run.bot_id, caller_sandbox_id)
+        else:
+            binding_info = await self._binding_resolver.resolve_binding(
+                bot_id=run.bot_id,
+                metadata=metadata,
+            )
 
         if binding_info is None:
             self._repo.update_error(run.run_id, f"binding not found: {run.bot_id}")

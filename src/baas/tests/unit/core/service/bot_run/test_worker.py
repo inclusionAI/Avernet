@@ -21,7 +21,7 @@ from secbaas.community.core.repository.bot_run_queue import (
     BotRunQueueRecord,
     OrmBotRunQueueRepository,
 )
-from secbaas.community.core.service.bot_run import BotRunner
+from secbaas.community.core.service.bot_run import BotBindingResolver, BotRunner
 from secbaas.community.core.service.bot_run._bot_concurrency import (
     BotConcurrencyManager,
 )
@@ -1545,6 +1545,7 @@ async def test_bot_runner_abort_propagates_to_bot_service(repo, queue):
         bot_service_selector=_FakeSelector(),
         run_repository=repo,
         bot_service_plugin=_FakePlugin(),
+        binding_resolver=BotBindingResolver(_FakePlugin()),
         dispatchers=[NoopMessageDispatcher()],
         system_config_service=MagicMock(),  # type: ignore[arg-type]
         eval_session_log=NoopEvalSessionLog(),
@@ -1628,6 +1629,7 @@ def _make_bot_runner_for_abort(
         bot_service_selector=_FakeSelector(),
         run_repository=repo,
         bot_service_plugin=_FakePlugin(),
+        binding_resolver=BotBindingResolver(_FakePlugin()),
         dispatchers=[NoopMessageDispatcher()],
         system_config_service=MagicMock(),  # type: ignore[arg-type]
         eval_session_log=NoopEvalSessionLog(),

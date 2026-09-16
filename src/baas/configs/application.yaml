@@ -181,6 +181,13 @@ user_config:
     base_url: "https://backend.example.com"
     timeout: 10
     max_retries: 0
+    # app-caller-connection 的 Principal 签发（密钥本身不放这里，走 secret 插件）。
+    # issuer / audience 为对端 decode 值校验的契约值。
+    principal:
+      secret_name: "signing_key"
+      issuer: "baas"
+      audience: "backend"
+      ttl_seconds: 60
 
   # agentclawproxy 代理服务主机名（按环境）
   # 用于 proxypass URL 和 WS relay 构造。

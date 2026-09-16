@@ -29,7 +29,11 @@ from secbaas.community.api.bot_runtime import (
     SessionInfo,
 )
 from secbaas.community.bootstrap import ApplicationContainer, Provide
-from secbaas.community.core.service.bot_run import BotRunner, BotServiceSelector
+from secbaas.community.core.service.bot_run import (
+    BotBindingResolver,
+    BotRunner,
+    BotServiceSelector,
+)
 from secbaas.community.core.service.bot_run._internal_protocols import MessageDispatcher
 from secbaas.community.spi.bot_service import BotBindingData
 from tests.unit.adapters.web.conftest import iter_api_routes
@@ -97,6 +101,7 @@ def _make_runner(selector, run_repo, binding_data=None):
         bot_service_selector=selector,
         run_repository=run_repo,
         bot_service_plugin=mock_plugin,
+        binding_resolver=BotBindingResolver(mock_plugin),
         dispatchers=[mock_dispatcher],
         system_config_service=MagicMock(),
         eval_session_log=MagicMock(),
