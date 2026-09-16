@@ -28,16 +28,16 @@
     <text x="106" y="192" class="bd">条规则</text>
     <text x="62" y="222" class="bd">分三级：Invariant 必须遵守</text>
     <text x="62" y="242" class="bd">Policy 强默认、Guideline 建议</text>
-    <text x="62" y="268" class="m bd">docs/arch/arch.rules.md</text>
-    <text x="62" y="288" class="bd">写明每条「防止了什么」</text>
+    <text x="62" y="268" class="bd">每条都写明「防止了什么」</text>
+    <text x="62" y="288" class="bd">明确声明自己不管什么</text>
 
     <rect x="286" y="130" width="212" height="170" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
     <text x="304" y="158" class="bt" fill="#5E4519">② 模块自描述</text>
     <text x="304" y="192" class="bn" fill="#5E4519">87</text>
     <text x="348" y="192" class="bd">个模块边界声明</text>
-    <text x="304" y="222" class="bd">purpose / provides / consumes</text>
-    <text x="304" y="242" class="bd">internal_dependencies 是白名单</text>
-    <text x="304" y="268" class="bd">写在模块自己的 README 里</text>
+    <text x="304" y="222" class="bd">职责 / 对外提供 / 消费契约</text>
+    <text x="304" y="242" class="bd">允许依赖谁 —— 是白名单</text>
+    <text x="304" y="268" class="bd">写在模块自己的文档里</text>
     <text x="304" y="288" class="bd">改动影响也在同一处交代</text>
 
     <rect x="528" y="130" width="212" height="170" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
@@ -45,7 +45,7 @@
     <text x="546" y="192" class="bn" fill="#26452F">53</text>
     <text x="590" y="192" class="bd">组架构守护测试</text>
     <text x="546" y="222" class="bd">静态分析，不必把系统跑起来</text>
-    <text x="546" y="242" class="bd">把实际 import 图与白名单比对</text>
+    <text x="546" y="242" class="bd">把真实依赖图与白名单比对</text>
     <text x="546" y="268" class="bd">迁移期用允许清单收口</text>
     <text x="546" y="288" class="bd">目标是把清单清空</text>
 
@@ -53,7 +53,7 @@
     <text x="788" y="158" class="bt" fill="#22405F">④ CI 门禁</text>
     <text x="788" y="192" class="bn" fill="#22405F">7</text>
     <text x="814" y="192" class="bd">类必过检查</text>
-    <text x="788" y="222" class="bd">依赖方向 · core 无框架</text>
+    <text x="788" y="222" class="bd">依赖方向 · 内核无框架</text>
     <text x="788" y="242" class="bd">环境访问 · 配置 schema</text>
     <text x="788" y="268" class="bd">一致性测试 · 结构化 PR 清单</text>
     <text x="788" y="288" class="bd">不允许为了通过而放宽检查</text>
@@ -63,7 +63,7 @@
     <text x="1030" y="192" class="bn" fill="#3E315F">2</text>
     <text x="1056" y="192" class="bd">条路，没有第三条</text>
     <text x="1030" y="222" class="bd">要么改代码</text>
-    <text x="1030" y="242" class="bd">要么写一份豁免：有 owner</text>
+    <text x="1030" y="242" class="bd">要么写一份豁免：有负责人</text>
     <text x="1030" y="268" class="bd">有期限、经过评审</text>
     <text x="1030" y="288" class="bd">现存豁免 1 条 —— 数量本身就是指标</text>
 
@@ -74,24 +74,24 @@
 
     <path d="M 1118 300 L 1118 348 L 150 348 L 150 306" fill="none" stroke="#A85C47" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#d2)"/>
     <rect x="410" y="334" width="450" height="28" rx="14" fill="#FAF9F7"/>
-    <text x="635" y="353" class="loop" text-anchor="middle">系统级、难以回退的决策沉淀为 ADR（现 11 条），反过来修订宪法</text>
+    <text x="635" y="353" class="loop" text-anchor="middle">系统级、难以回退的决策沉淀为架构决策记录（现 11 条），反过来修订宪法</text>
 
     <text x="44" y="404" class="lbl">代表性门禁（节选）</text>
     <rect x="44" y="418" width="1180" height="180" rx="6" fill="#F1EFEA" stroke="#D8D5CF"/>
 
-    <text x="66" y="446" class="m gm" fill="#26452F">test_no_fastapi_in_core</text>
-    <text x="66" y="465" class="gd">core 出现任何交付框架依赖即失败 —— 领域逻辑不认识传输</text>
-    <text x="66" y="500" class="m gm" fill="#26452F">test_kernel_no_imports</text>
-    <text x="66" y="519" class="gd">底座不得 import 本包任何其他层 —— 依赖箭头只进不出</text>
-    <text x="66" y="554" class="m gm" fill="#26452F">test_core_no_concrete_plugin_imports</text>
-    <text x="66" y="573" class="gd">core 只能依赖插件契约，不得依赖任何一个具体实现</text>
+    <text x="66" y="446" class="gm" fill="#26452F">领域内核不得依赖交付框架</text>
+    <text x="66" y="465" class="gd">出现任何一处即失败 —— 领域逻辑不认识传输</text>
+    <text x="66" y="500" class="gm" fill="#26452F">底座不得依赖上层</text>
+    <text x="66" y="519" class="gd">依赖箭头只进不出，底座才对所有层安全</text>
+    <text x="66" y="554" class="gm" fill="#26452F">内核只认契约，不认实现</text>
+    <text x="66" y="573" class="gd">内核可以依赖插件契约，不得依赖任何一个具体实现</text>
 
-    <text x="660" y="446" class="m gm" fill="#26452F">test_module_boundaries</text>
-    <text x="660" y="465" class="gd">把真实 import 图与每个模块自己声明的白名单逐条比对</text>
-    <text x="660" y="500" class="m gm" fill="#26452F">test_composition_root_corp_free</text>
-    <text x="660" y="519" class="gd">开源组装根里不得出现内部实现 —— 分发边界也是架构边界</text>
-    <text x="660" y="554" class="m gm" fill="#26452F">test_no_oversized_modules</text>
-    <text x="660" y="573" class="gd">超大模块预警：单个文件承担多个角色，往往就藏着边界违规</text>
+    <text x="660" y="446" class="gm" fill="#26452F">依赖图 vs 自己声明的白名单</text>
+    <text x="660" y="465" class="gd">逐模块逐条比对，未被覆盖的依赖即失败</text>
+    <text x="660" y="500" class="gm" fill="#26452F">开源组装根不含内部实现</text>
+    <text x="660" y="519" class="gd">分发边界也是架构边界</text>
+    <text x="660" y="554" class="gm" fill="#26452F">超大模块预警</text>
+    <text x="660" y="573" class="gd">单个文件承担多个角色，往往就藏着边界违规</text>
 
     <text x="44" y="640" class="ft">门禁的目的不是挡人，是让「不许做什么」在提交那一刻就说清楚，而不是等到某次线上事故之后再回头追溯。</text>
     <text x="44" y="664" class="ft">豁免是允许的 —— 但必须写下来、有归属、有期限。能被数出来的例外，才是可以管理的例外。</text>

@@ -16,65 +16,65 @@
   </defs>
   <g class="t">
     <text x="44" y="50" class="title">异构引擎：把「引擎长什么样」关进反腐层</text>
-    <text x="44" y="78" class="sub">core 只认自己定义的 *Service 协议。每接一个新引擎，改动被限制在「一个 ACL 适配器 + 一组原生端口 + 一个传输叶子 + 一个组装根」，core 与 api 不动一行。</text>
+    <text x="44" y="78" class="sub">领域内核只认自己定义的能力域协议。每接一个新引擎，改动被限制在「一套反腐层 + 一组原生端口契约 + 一套传输实现 + 一个组装根」，对外表面与内核一行不改。</text>
 
     <rect x="44" y="108" width="880" height="568" rx="8" fill="none" stroke="#B9B5AD" stroke-dasharray="5 4"/>
-    <text x="60" y="130" class="m lbl">engine.community</text>
+    <text x="60" y="130" class="lbl">ENGINE</text>
 
     <rect x="64" y="142" width="840" height="54" rx="6" fill="#E4EBF5" stroke="#3C6198"/>
-    <text x="80" y="166" class="m bt" fill="#22405F">api/</text>
-    <text x="80" y="185" class="bd">统一对外表面：20+ 个路由组 + WebSocket /api/{engine}/ws —— 与具体引擎无关</text>
+    <text x="80" y="166" class="bt" fill="#22405F">统一对外表面</text>
+    <text x="80" y="185" class="bd">HTTP + 长连接 —— 对外形状与具体引擎无关，接新引擎时这一层一行不改</text>
 
-    <text x="64" y="224" class="lbl">核心服务协议 · core/&lt;domain&gt;/protocol.py</text>
+    <text x="64" y="224" class="lbl">能力域协议 · 领域内核定义，与引擎无关</text>
     <rect x="64" y="234" width="840" height="58" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
     <g class="m chip" fill="#26452F">
-      <rect x="78" y="250" width="112" height="26" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.9"/><text x="134" y="267" text-anchor="middle">SessionService</text>
-      <rect x="200" y="250" width="96" height="26" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.9"/><text x="248" y="267" text-anchor="middle">ChatService</text>
-      <rect x="306" y="250" width="92" height="26" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.9"/><text x="352" y="267" text-anchor="middle">MCPService</text>
-      <rect x="408" y="250" width="100" height="26" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.9"/><text x="458" y="267" text-anchor="middle">SkillsService</text>
-      <rect x="518" y="250" width="92" height="26" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.9"/><text x="564" y="267" text-anchor="middle">CronService</text>
-      <rect x="620" y="250" width="88" height="26" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.9"/><text x="664" y="267" text-anchor="middle">FileService</text>
-      <rect x="718" y="250" width="88" height="26" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.9"/><text x="762" y="267" text-anchor="middle">NodeService</text>
+      <rect x="78" y="250" width="112" height="26" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.9"/><text x="134" y="267" text-anchor="middle">会话</text>
+      <rect x="200" y="250" width="96" height="26" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.9"/><text x="248" y="267" text-anchor="middle">对话</text>
+      <rect x="306" y="250" width="92" height="26" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.9"/><text x="352" y="267" text-anchor="middle">MCP</text>
+      <rect x="408" y="250" width="100" height="26" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.9"/><text x="458" y="267" text-anchor="middle">技能</text>
+      <rect x="518" y="250" width="92" height="26" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.9"/><text x="564" y="267" text-anchor="middle">定时</text>
+      <rect x="620" y="250" width="88" height="26" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.9"/><text x="664" y="267" text-anchor="middle">文件</text>
+      <rect x="718" y="250" width="88" height="26" rx="4" fill="#FFFFFF" stroke="#3F7350" opacity="0.9"/><text x="762" y="267" text-anchor="middle">节点</text>
     </g>
     <text x="820" y="267" class="bd">… 共 23 个</text>
 
-    <text x="64" y="322" class="lbl">反腐层 ACL · core 中唯一知道具体引擎的地方</text>
+    <text x="64" y="322" class="lbl">反腐层 · 领域内核中唯一认识具体引擎的地方</text>
     <rect x="64" y="332" width="410" height="76" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
-    <text x="80" y="356" class="m bt" fill="#26452F">core/adapters/claude_code/</text>
+    <text x="80" y="356" class="bt" fill="#26452F">反腐层 · claude_code</text>
     <text x="80" y="376" class="bd">领域形状 ⇄ 引擎原生形状 · 引擎差异在这里被吸收</text>
     <text x="80" y="395" class="bd">能力存在，当且仅当这里真的接上了</text>
     <rect x="494" y="332" width="410" height="76" rx="6" fill="#E3EDE4" stroke="#3F7350"/>
-    <text x="510" y="356" class="m bt" fill="#26452F">core/adapters/openclaw/</text>
+    <text x="510" y="356" class="bt" fill="#26452F">反腐层 · openclaw</text>
     <text x="510" y="376" class="bd">同一组核心协议，另一套翻译规则</text>
     <text x="510" y="395" class="bd">接口形状与左侧完全不同</text>
 
     <rect x="64" y="428" width="410" height="60" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
-    <text x="80" y="452" class="m bt" fill="#5E4519">plugin_api/claude_code/</text>
+    <text x="80" y="452" class="bt" fill="#5E4519">原生端口契约 · claude_code</text>
     <text x="80" y="472" class="bd">按该引擎原生形状定义的各域端口</text>
     <rect x="494" y="428" width="410" height="60" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
-    <text x="510" y="452" class="m bt" fill="#5E4519">plugin_api/openclaw/</text>
-    <text x="510" y="472" class="bd">OpenClawPlugin 及其各域端口</text>
+    <text x="510" y="452" class="bt" fill="#5E4519">原生端口契约 · openclaw</text>
+    <text x="510" y="472" class="bd">按该引擎原生形状定义的各域端口</text>
 
     <rect x="64" y="508" width="410" height="60" rx="6" fill="#EBE5F3" stroke="#69539B"/>
-    <text x="80" y="532" class="m bt" fill="#3E315F">plugins/claude_code/</text>
-    <text x="80" y="552" class="bd">纯 WebSocket 客户端 —— 传输叶子，禁止 import core</text>
+    <text x="80" y="532" class="bt" fill="#3E315F">传输实现 · claude_code</text>
+    <text x="80" y="552" class="bd">纯传输叶子 —— 禁止依赖领域内核</text>
     <rect x="494" y="508" width="410" height="60" rx="6" fill="#EBE5F3" stroke="#69539B"/>
-    <text x="510" y="532" class="m bt" fill="#3E315F">plugins/openclaw/</text>
+    <text x="510" y="532" class="bt" fill="#3E315F">传输实现 · openclaw</text>
     <text x="510" y="552" class="bd">同上：只负责连上去、收发帧</text>
 
     <rect x="64" y="596" width="840" height="64" rx="6" fill="#E9E8E5" stroke="#6E6C66"/>
-    <text x="80" y="620" class="m bt" fill="#33322E">kernel/frames</text>
-    <text x="80" y="639" class="bd">线协议信封 —— plugins 产生它、core 消费它；两边不能互相依赖，共享原语只能下沉到两边都够得着的最底层</text>
+    <text x="80" y="620" class="bt" fill="#33322E">底座 · 线协议信封</text>
+    <text x="80" y="639" class="bd">传输实现产生它、领域内核消费它；两边不能互相依赖，共享原语只能下沉到两边都够得着的最底层</text>
 
-    <text x="944" y="322" class="lbl">组装根 · engines/&lt;name&gt;/</text>
+    <text x="944" y="322" class="lbl">组装根</text>
     <path d="M 938 332 L 932 332 L 932 572 L 938 572" fill="none" stroke="#A85C47" stroke-width="1.4" stroke-dasharray="4 3"/>
     <rect x="944" y="332" width="272" height="240" rx="6" fill="#F5E5E0" stroke="#A85C47"/>
     <text x="960" y="358" class="bt" fill="#643127">每个引擎一份</text>
     <text x="960" y="382" class="bd">把左边这三层拼起来：</text>
     <text x="960" y="402" class="bd">构造传输实现 → 包进反腐层适配器</text>
     <text x="960" y="428" class="bd">在这里声明该引擎的能力矩阵</text>
-    <text x="960" y="448" class="bd">import 时自注册到引擎注册表</text>
-    <text x="960" y="474" class="bd">唯一可以同时 import 契约</text>
+    <text x="960" y="448" class="bd">启动时自注册到引擎注册表</text>
+    <text x="960" y="474" class="bd">唯一可以同时认识契约</text>
     <text x="960" y="494" class="bd">与具体实现的地方</text>
     <text x="960" y="520" class="bd">装配期交叉校验「声明的能力」</text>
     <text x="960" y="540" class="bd">与「实际接上的端口」</text>
@@ -82,16 +82,16 @@
 
     <line x1="269" y1="678" x2="269" y2="696" stroke="#8A8781" stroke-width="1.5" marker-end="url(#b1)"/>
     <line x1="699" y1="678" x2="699" y2="696" stroke="#8A8781" stroke-width="1.5" marker-end="url(#b1)"/>
-    <text x="484" y="692" class="bd" text-anchor="middle">传输叶子发起的 WebSocket 连接 —— 离开 engine 进程</text>
+    <text x="484" y="692" class="bd" text-anchor="middle">传输实现发起的连接 —— 离开 Engine 进程</text>
 
     <rect x="64" y="700" width="410" height="80" rx="6" fill="#DFEDEC" stroke="#3B7A73"/>
-    <text x="80" y="724" class="m bt" fill="#234945">claude_code_gateway</text>
-    <text x="80" y="744" class="bd">Node 服务，随仓库 vendored · ws://127.0.0.1:18900</text>
-    <text x="80" y="763" class="bd">桥接 Claude Agent SDK 或 claude CLI（两种 bridge 可切）</text>
+    <text x="80" y="724" class="bt" fill="#234945">网关 · claude_code</text>
+    <text x="80" y="744" class="bd">随仓库分发，本机启动</text>
+    <text x="80" y="763" class="bd">桥接官方 SDK 或命令行，两种可切</text>
 
     <rect x="494" y="700" width="410" height="80" rx="6" fill="#DFEDEC" stroke="#3B7A73"/>
-    <text x="510" y="724" class="m bt" fill="#234945">OpenClaw gateway</text>
-    <text x="510" y="744" class="bd">外部部署，不随仓库分发 · ws://…:18789</text>
+    <text x="510" y="724" class="bt" fill="#234945">网关 · openclaw</text>
+    <text x="510" y="744" class="bd">外部部署，不随仓库分发</text>
     <text x="510" y="763" class="bd">开源可跑的那条链路是左边这条</text>
   </g>
 </svg>
