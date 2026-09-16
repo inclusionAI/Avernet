@@ -15,13 +15,16 @@ whether an enqueue should wake the in-process worker immediately (see
 :class:`WorkerWakeup`) instead of leaving it to the next idle poll. That is
 opt-in per task type, declared at handler registration.
 """
+
 from __future__ import annotations
 
 from injector import inject
 
 from typing import Optional
 
-from agentclaw.community.core.repository.protocols.platform import TaskQueueRepositoryProtocol
+from agentclaw.community.core.repository.protocols.platform import (
+    TaskQueueRepositoryProtocol,
+)
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.wakeup import WorkerWakeup
 from agentclaw.community.core.task_queue.types import EnqueueResult, TaskRecord
