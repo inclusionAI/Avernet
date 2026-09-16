@@ -599,7 +599,7 @@ function RunRow({ run, onAutoHeal, onAnalyze, analyzeMutation }: { run: FlowRun;
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-gray-500 text-sm">
         {run.workflow_version != null ? (
-          <span className="font-mono text-xs">{run.workflow_version}</span>
+                        <span className="font-mono text-xs">{run.workflow_version === -1 ? '未绑定发布版本' : run.workflow_version}</span>
         ) : run.workflow_deploy_number != null ? (
           <span className="font-mono text-xs text-gray-400">#{run.workflow_deploy_number}</span>
         ) : (

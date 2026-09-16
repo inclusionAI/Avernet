@@ -69,8 +69,11 @@ export function createInternalRunsRouter(
       }
 
       for (const [field, value] of Object.entries({ workflow_version, workflow_deploy_number })) {
+        // A Git snapshot/draft run is not bound to a published release, even if
+        // this workflow has releases. Keep ClawMind's sentinel without inventing a version.
+        if (field === "workflow_version" && value === -1) continue;
         if (value != null && (!Number.isSafeInteger(value) || value < 1 || value > 2_147_483_647)) {
-          res.status(400).json({ success: false, error: "Bad Request", message: `${field} must be a positive integer or null` });
+          res.status(400).json({ success: false, error: "Bad Request", message: `${field} must be ${field === "workflow_version" ? "-1, a positive integer or null" : "a positive integer or null"}` });
           return;
         }
       }
