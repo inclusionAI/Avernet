@@ -208,8 +208,9 @@ class BotConfigManifestApplyServiceProtocol(Protocol):
 
         What a caller asks it: the creation sequence (the W13 job and its poll),
         and whether any construct needs a live container (the ``PUT`` route's
-        not-ACTIVE warning). The strategy is selected by the engine authority
-        and the platform-managed switch, read once per call.
+        not-ACTIVE warning). A lookup, not a construction: one strategy per
+        engine family was built and bound at boot, and the engine authority
+        names which family this bot is.
         """
         ...
 

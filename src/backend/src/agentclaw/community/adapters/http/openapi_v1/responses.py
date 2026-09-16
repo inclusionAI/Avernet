@@ -18,12 +18,10 @@ from __future__ import annotations
 
 import inspect
 from functools import wraps
-from http import HTTPStatus
 from json import JSONDecodeError
-from typing import Awaitable, Callable, Mapping, TypeVar
+from typing import Awaitable, Callable, TypeVar
 
 from fastapi import Request
-from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 from agentclaw.community.adapters.http.error_logging import (
@@ -37,8 +35,14 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     CODE_OK,
     Deleted,
     Envelope,
-    ErrorEnvelope,
     Page,
+)
+from agentclaw.community.adapters.http.openapi_v1.response_envelope import (
+    error_response,
+    error_response_for,
+    is_public_api,
+    trace_id,
+    unmapped_error_response,
 )
 from agentclaw.community.api.bot_startup_script_service import (
     MAX_SCRIPT_BYTES,
@@ -255,6 +259,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetControlPlaneNotFoundError,
     SkillSetRuntimeReconcileError,
     SkillSetAccessDeniedError,
+    McpEndpointUnavailableError,
     McpPermissionDeniedError,
     LocalSkillTooLargeError,
 )
@@ -302,16 +307,19 @@ from agentclaw.community.plugin_api.skill_center_client import (
     SkillCenterPublishStatusError,
     SkillCenterTeamCreateError,
 )
+
+__all__ = [
+    "error_response",
+    "error_response_for",
+    "is_public_api",
+    "trace_id",
+    "unmapped_error_response",
+]
 T = TypeVar("T")
 
 
 class SkillCenterMarketplaceUnavailableError(RuntimeError):
     """A public Skill Center marketplace read could not be served."""
-
-
-def _trace_id(request: Request) -> str:
-    """Trace id for ``request_id``; empty when the tracer middleware didn't run."""
-    return getattr(request.state, "trace_id", "") or ""
 
 
 def envelope(
@@ -323,7 +331,7 @@ def envelope(
 ) -> Envelope[T]:
     """Wrap ``data`` in the standard success envelope."""
     return Envelope(
-        code=code, message=message, data=data, request_id=_trace_id(request)
+        code=code, message=message, data=data, request_id=trace_id(request)
     )
 
 
@@ -606,6 +614,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillNotFoundError: (404, "Not found"),
     SkillSetControlPlaneNotFoundError: (404, "Not found"),
     SkillSetAccessDeniedError: (403, "Forbidden"),
+    McpEndpointUnavailableError: (
+        422,
+        "当前 MCP 没有可安全下发到该 Bot 的端点，请检查 MCP Center 的网络和端点配置",
+    ),
     McpPermissionDeniedError: (403, "Forbidden"),
     SkillSetControlPlaneConflictError: (
         409,
@@ -859,6 +871,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     **errors_skill_center.SKILL_CENTER_ENVELOPE_ERROR_CODES,
     SkillSetControlPlaneLockUnavailableError: 409209,
     SkillSetAccessDeniedError: 403201,
+    McpEndpointUnavailableError: 422211,
     McpPermissionDeniedError: 403202,
 }
 
@@ -876,110 +889,6 @@ _SKILL_SET_CONFLICT_CODES: dict[str, tuple[int, str]] = {
     "IDEMPOTENCY_KEY_REUSED": (409207, "Idempotency key was reused with a different request"),
     "BOT_MUTATION_BUSY": (409208, "Another SkillSet mutation is in progress"),
 }
-
-
-def is_public_api(request: Request) -> bool:
-    """True for requests on the public ``/openapi/v1`` surface.
-
-    The app-level error handlers use this to decide which contract a failure
-    belongs to: this surface promises the Envelope on every response, while the
-    internal ``/api`` routes keep the ``{"detail": ...}`` shape their existing
-    clients already parse. The prefix import is function-local to keep this
-    module importable from the package's own ``__init__``.
-    """
-    from agentclaw.community.adapters.http.openapi_v1 import PUBLIC_API_PREFIX
-
-    return request.url.path.startswith(PUBLIC_API_PREFIX)
-
-
-def unmapped_error_response(
-    http_status: int,
-    request: Request,
-    *,
-    headers: Mapping[str, str] | None = None,
-) -> JSONResponse:
-    """Envelope for a public failure that reached an app-level handler.
-
-    The message is the standard HTTP reason phrase, never the exception's own
-    text: anything landing here was *not* mapped by :data:`ENVELOPE_ERRORS`, so
-    its message is internal-facing and may carry identifiers or internal-language
-    text that must not reach an external caller.
-
-    ``headers`` carries protocol headers the raised exception attached — the
-    ``Allow`` list on a 405, a ``WWW-Authenticate`` challenge on a 401. Those are
-    part of the answer, not decoration: a 405 without ``Allow`` tells the caller
-    they got it wrong but not what would be right.
-    """
-    try:
-        message = HTTPStatus(http_status).phrase
-    except ValueError:  # non-standard status — say nothing specific
-        message = "Error"
-    return _error_response(http_status, message, request, headers=headers)
-
-
-def error_response(http_status: int, message: str, request: Request) -> JSONResponse:
-    """Build an enveloped error response (``data`` null, 6-digit code).
-
-    Public so pre-handler failures — which never reach ``@envelope_errors`` —
-    can answer in the same shape as everything else on this surface.
-    """
-    return _error_response(http_status, message, request)
-
-
-# Headers that describe *this* response's body. JSONResponse computes them from
-# the envelope it is about to serialize, so forwarding an exception's copies
-# would describe the body we discarded — a wrong Content-Length is a broken
-# response, not a cosmetic issue.
-_BODY_HEADERS: frozenset[str] = frozenset(
-    {
-        "content-length",
-        "content-type",
-        "transfer-encoding",
-    }
-)
-
-
-def _error_headers(request: Request, extra: Mapping[str, str] | None) -> dict[str, str]:
-    """Protocol headers to echo, plus the trace id.
-
-    The trace header is set on success by the tracer middleware; it is repeated
-    here so an error response carries it regardless of middleware ordering —
-    matching ``request_id`` in the body.
-    """
-    headers = {k: v for k, v in (extra or {}).items() if k.lower() not in _BODY_HEADERS}
-    trace_id = _trace_id(request)
-    if trace_id:
-        headers.setdefault("X-Trace-ID", trace_id)
-    return headers
-
-
-def _error_response(
-    http_status: int,
-    message: str,
-    request: Request,
-    *,
-    headers: Mapping[str, str] | None = None,
-    code: int | None = None,
-    data: object | None = None,
-) -> JSONResponse:
-    # ``ErrorEnvelope``, not ``Envelope``: it is the model every route documents
-    resolved_code = code if code is not None else http_status * 1000
-    request_id = _trace_id(request)
-    if data is None:
-        content = ErrorEnvelope(
-            code=resolved_code, message=message, data=None, request_id=request_id
-        ).model_dump()
-    else:
-        # P2-OFF-002 documents Envelope[SkillOfflineImpact], not ErrorEnvelope.
-        content = dict(
-            code=resolved_code, message=message,
-            data=jsonable_encoder(data), request_id=request_id,
-        )
-    return JSONResponse(
-        status_code=http_status,
-        content=content,
-        headers=_error_headers(request, headers),
-    )
 
 
 def _find_request(args: tuple, kwargs: dict) -> Request | None:
@@ -1077,10 +986,10 @@ def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | No
         code, message = _SKILL_SET_CONFLICT_CODES.get(
             str(exc), (409000, "SkillSet state conflicts with this operation")
         )
-        return _error_response(409, message, request, code=code)
+        return error_response_for(409, message, request, code=code)
     for error_type, (http_status, message) in ENVELOPE_ERRORS.items():
         if isinstance(exc, error_type):
-            return _error_response(
+            return error_response_for(
                 http_status,
                 message,
                 request,

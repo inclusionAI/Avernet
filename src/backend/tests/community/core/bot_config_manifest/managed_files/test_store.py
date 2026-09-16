@@ -8,6 +8,7 @@ from agentclaw.community.core.bot_config_manifest.managed_files import (
     CATEGORY_RESOURCES,
     CATEGORY_SKILLS,
     ManagedFileScope,
+    EngineOwnedComposeReader,
     ManagedFilesComposeReader,
     ManagedFilesStore,
     ManagedFilesStoreError,
@@ -207,9 +208,9 @@ class _Manifests:
 _REQ = ComposeRequest(entity_id="u1", bot_id="bot7", user_id="u1", engine_type="teclaw", entity_type="staff")
 
 
-def _reader(store, document, switch=True):
+def _reader(store, document):
     return ManagedFilesComposeReader(
-        store=store, manifest_service_provider=lambda: _Manifests(document), platform_managed=lambda: switch
+        store=store, manifest_service_provider=lambda: _Manifests(document)
     )
 
 
@@ -220,7 +221,7 @@ def _occasion(occasion: ComposeOccasion, engine_type: str = "teclaw") -> Compose
     )
 
 
-def test_ownership_follows_the_operation_when_the_switch_is_on() -> None:
+def test_ownership_follows_the_operation() -> None:
     store, _ = _store()
     doc = "schema_version: 1\nmanifest:\n  identity: []\n"
     apply, provision, runtime = (
@@ -237,11 +238,26 @@ def test_ownership_follows_the_operation_when_the_switch_is_on() -> None:
     assert _reader(store, None).platform_owns(provision) is False
     # A runtime edit is the engine's, manifest or no manifest.
     assert _reader(store, doc).platform_owns(runtime) is False
-    # The engine decision is the reader's: another family gets nothing, switch or no switch.
+    # The engine decision is the reader's: another family gets nothing.
     assert _reader(store, doc).platform_owns(_occasion(ComposeOccasion.MANIFEST_APPLY, "openclaw")) is False
-    # And the switch gates everything.
-    assert _reader(store, doc, switch=False).platform_owns(apply) is False
-    assert _reader(store, doc, switch=False).platform_owns(provision) is False
+
+
+def test_a_device_backed_deployment_owns_no_compose_at_all() -> None:
+    """The other implementation, which is what ``TeclawDeliveryMode.DEVICE``
+    binds: the manifest's file categories go into the container through the
+    device-backed ports, so the platform asserts nothing and holds nothing.
+
+    It answers its reads rather than raising, because that is what the Protocol
+    promises — the collector never asks them, since it consults a reader's
+    categories only when it owns the compose.
+    """
+    reader = EngineOwnedComposeReader()
+    for occasion in ComposeOccasion:
+        assert reader.platform_owns(_occasion(occasion, "teclaw")) is False
+    assert reader.identity_files(_REQ) == []
+    assert reader.resources(_REQ) == []
+    assert reader.skills(_REQ) == []
+    assert reader.skill_files(_REQ, ["anything"]) == []
 
 
 def test_the_reader_yields_collector_shaped_refs_from_the_store() -> None:

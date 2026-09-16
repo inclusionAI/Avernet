@@ -992,17 +992,33 @@ impl FriendConnectionService for InvitationFriendshipServiceImpl {
         &self,
         command: ListFriendConnections,
     ) -> Result<FriendConnectionPage, ApplicationError> {
+        if command.page == 0 || command.page_size == 0 || command.page_size > 100 {
+            return Err(ApplicationError::invalid(
+                "invalid_request",
+                "page must be at least 1 and page_size must be between 1 and 100",
+            ));
+        }
         let connect = self.connect_service()?;
         let actor = self
             .resolve_acting_actor(&command.caller, Some(&command.actor))
             .await?;
-        let items = connect
-            .list_friends(&actor)
-            .await
-            .map_err(map_service_error)?;
-        let total = items.len() as u32;
+        let query = bcs_service_api::application::connect::FriendListQuery {
+            target_type: command.target_type.map(|kind| match kind {
+                FriendConnectionActorType::Human => ActorKind::Human,
+                FriendConnectionActorType::Bot => ActorKind::Bot,
+            }),
+            offset: u64::from(command.page - 1) * u64::from(command.page_size),
+            limit: command.page_size,
+        };
+        let result = connect.list_friends_paginated(&actor, query).await.map_err(map_service_error)?;
+        let total = u32::try_from(result.total).map_err(|_| map_service_error(
+            ServiceError::InternalError("friend count exceeds response range".into()),
+        ))?;
+        let items = result.items.iter().map(project_friend_connection).collect();
         Ok(FriendConnectionPage {
-            items: items.iter().map(project_friend_connection).collect(),
+            items,
+            page: command.page,
+            page_size: command.page_size,
             total,
         })
     }

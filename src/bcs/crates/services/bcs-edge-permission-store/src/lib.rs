@@ -19,6 +19,8 @@ use bcs_domain::edge_permission::{
     ProfileStatus, PermissionRequest, RequestKind, RequestStatus,
 };
 pub use bcs_service_api::port::repo::EdgeGrantRepoPort;
+use bcs_service_api::port::repo::edge_grant::{FriendIdsPage, FriendListQuery};
+use bcs_domain::ActorKind;
 pub use bcs_service_api::port::repo::PermissionProfileRepoPort;
 pub use bcs_service_api::port::repo::PermissionRequestRepoPort;
 pub use bcs_service_api::port::repo::BotActorConfigRepoPort;
@@ -269,6 +271,28 @@ impl EdgeGrantRepoPort for DbEdgeGrantStore {
         let mut out: Vec<String> = friends.into_iter().collect();
         out.sort();
         out
+    }
+
+    async fn list_friends_paginated(
+        &self,
+        actor: &str,
+        env: &str,
+        query: FriendListQuery,
+    ) -> ServiceResult<FriendIdsPage> {
+        let statement = friend_list_statement(self.flavor, actor, env, query)?;
+        let rows = self.query("list_friends_paginated", statement).await?;
+        let first = rows.first().ok_or_else(|| ServiceError::InternalError(
+            "friend list query did not return its count".into(),
+        ))?;
+        let total = required_u64(first, "total")?;
+        let mut items = Vec::new();
+        for row in &rows {
+            // LEFT JOIN yields a single NULL peer when the requested page is empty.
+            if let Some(id) = optional_string(row, "peer_id")? {
+                items.push(id);
+            }
+        }
+        Ok(FriendIdsPage { items, total })
     }
 
     async fn insert_grant(&self, grant: EdgeGrant) -> ServiceResult<u64> {
@@ -1401,6 +1425,64 @@ fn json_to_db_value(value: &Option<serde_json::Value>) -> DbValue {
     }
 }
 
+/// A single read returns count + page from the same statement snapshot, even
+/// beyond the last page. Only the requested IDs cross the DB plugin boundary.
+fn friend_list_statement(
+    flavor: EdgeGrantSqlFlavor,
+    actor: &str,
+    env: &str,
+    query: FriendListQuery,
+) -> ServiceResult<DbStatement> {
+    if query.limit == 0 || query.limit > 100 || query.offset > i64::MAX as u64 {
+        return Err(ServiceError::InvalidOperation {
+            message: "invalid friend pagination bounds".into(), request_id: None,
+        });
+    }
+    // Binary comparison preserves Rust String ordering and HashSet identity,
+    // independent of MySQL's default case-insensitive database collation.
+    let (outbound_id, inbound_id, prefix) = match flavor {
+        EdgeGrantSqlFlavor::Mysql => (
+            "CAST(g.to_id AS BINARY)", "CAST(g.from_id AS BINARY)",
+            "SUBSTR(peer_id, 1, 6) = CAST('human_' AS BINARY)",
+        ),
+        EdgeGrantSqlFlavor::Sqlite => (
+            "g.to_id COLLATE BINARY", "g.from_id COLLATE BINARY",
+            "SUBSTR(peer_id, 1, 6) COLLATE BINARY = 'human_'",
+        ),
+    };
+    let filter = match query.target_type {
+        None => "1 = 1".to_string(),
+        Some(ActorKind::Human) => prefix.to_string(),
+        Some(ActorKind::Bot) => format!("NOT ({prefix})"),
+    };
+    let sql = format!(
+        "WITH friend_ids AS (
+           SELECT {outbound_id} AS peer_id FROM edge_grants g
+           JOIN permission_profiles p ON p.id = g.grant_ref_id
+             AND p.bot_id = g.to_id AND p.env = g.env
+             AND p.is_default = 1 AND p.status = 'active'
+           WHERE g.from_id = ? AND g.env = ? AND g.status = 'approved'
+             AND g.grant_kind = 'permission_profile'
+           UNION
+           SELECT {inbound_id} AS peer_id FROM edge_grants g
+           JOIN permission_profiles p ON p.id = g.grant_ref_id
+             AND p.bot_id = g.to_id AND p.env = g.env
+             AND p.is_default = 1 AND p.status = 'active'
+           WHERE g.to_id = ? AND g.env = ? AND g.status = 'approved'
+             AND g.grant_kind = 'permission_profile'
+         ), filtered AS (SELECT peer_id FROM friend_ids WHERE {filter})
+         SELECT totals.total, page.peer_id
+         FROM (SELECT COUNT(*) AS total FROM filtered) totals
+         LEFT JOIN (SELECT peer_id FROM filtered ORDER BY peer_id LIMIT ? OFFSET ?) page
+           ON 1 = 1 ORDER BY page.peer_id"
+    );
+    Ok(DbStatement::with_params(sql, vec![
+        DbValue::from(actor), DbValue::from(env),
+        DbValue::from(actor), DbValue::from(env),
+        DbValue::from(u64::from(query.limit)), DbValue::from(query.offset),
+    ]))
+}
+
 fn service_db_error(operation: &'static str, err: DbError) -> ServiceError {
     ServiceError::InternalError(format!("edge_grants db {}: {}", operation, err))
 }
@@ -1598,6 +1680,162 @@ mod tests {
         let mut friends = store.list_friends("human_a", "dev").await;
         friends.sort();
         assert_eq!(friends, vec!["bot_b".to_string(), "bot_c".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn friend_page_conformance_filters_deduplicates_and_counts_before_paging() {
+        let store = sqlite_store().await;
+        let bot_default = seed_default(&store, "bot-main", "dev").await;
+        // Deliberately unsorted. Near-prefix IDs must remain Bots, not Humans.
+        for peer in ["human_2002", "humanX1001", "bot-z", "Human_1001", "human_1001", "bot-A", "bot-a"] {
+            store.insert_grant(default_grant(peer, "bot-main", "dev", bot_default)).await.unwrap();
+        }
+        let peer_default = seed_default(&store, "bot-z", "dev").await;
+        store.insert_grant(default_grant("bot-main", "bot-z", "dev", peer_default)).await.unwrap();
+        assert!(store.list_active_grants("bot-main", "human_1001", "dev").await.is_empty());
+
+        let repo: &dyn EdgeGrantRepoPort = &store;
+        let query = |target_type, offset, limit| FriendListQuery { target_type, offset, limit };
+        let first = repo.list_friends_paginated("bot-main", "dev", query(Some(ActorKind::Human), 0, 1)).await.unwrap();
+        assert_eq!(first, FriendIdsPage { items: vec!["human_1001".into()], total: 2 });
+        let second = repo.list_friends_paginated("bot-main", "dev", query(Some(ActorKind::Human), 1, 1)).await.unwrap();
+        assert_eq!(second, FriendIdsPage { items: vec!["human_2002".into()], total: 2 });
+        let bots = repo.list_friends_paginated("bot-main", "dev", query(Some(ActorKind::Bot), 0, 100)).await.unwrap();
+        assert_eq!(bots.total, 5);
+        assert_eq!(bots.items, vec!["Human_1001", "bot-A", "bot-a", "bot-z", "humanX1001"]);
+        let all = repo.list_friends_paginated("bot-main", "dev", query(None, 0, 100)).await.unwrap();
+        assert_eq!(all.total, 7); // bot-z has two grants but is one friend.
+        let mut assembled = Vec::new();
+        for offset in [0, 2, 4, 6] {
+            let page = repo.list_friends_paginated("bot-main", "dev", query(None, offset, 2)).await.unwrap();
+            assert_eq!(page.total, all.total);
+            assembled.extend(page.items);
+        }
+        assert_eq!(assembled, all.items);
+        for offset in [7, u64::from(u32::MAX) * 100] {
+            let empty = repo.list_friends_paginated("bot-main", "dev", query(None, offset, 20)).await.unwrap();
+            assert_eq!(empty.total, 7);
+            assert!(empty.items.is_empty());
+        }
+        let human = repo.list_friends_paginated("human_1001", "dev", query(Some(ActorKind::Bot), 0, 20)).await.unwrap();
+        assert_eq!(human, FriendIdsPage { items: vec!["bot-main".into()], total: 1 });
+        let empty = repo.list_friends_paginated("human_1001", "dev", query(Some(ActorKind::Human), 0, 20)).await.unwrap();
+        assert_eq!(empty, FriendIdsPage { items: vec![], total: 0 });
+        let unknown = repo.list_friends_paginated("unknown", "dev", query(None, 0, 20)).await.unwrap();
+        assert_eq!(unknown, FriendIdsPage { items: vec![], total: 0 });
+    }
+
+    #[tokio::test]
+    async fn friend_page_excludes_non_friend_edges_and_other_environments() {
+        let store = sqlite_store().await;
+        let active = seed_default(&store, "bot-main", "dev").await;
+        let other = seed_default(&store, "other", "dev").await;
+        let prod = seed_default(&store, "bot-main", "prod").await;
+        for (peer, env, profile) in [
+            ("human_valid", "dev", active),
+            ("human_wrong_owner", "dev", other),
+            ("human_wrong_profile_env", "dev", prod),
+            ("human_other_env", "prod", prod),
+        ] {
+            store.insert_grant(default_grant(peer, "bot-main", env, profile)).await.unwrap();
+        }
+        let mut revoked = default_grant("human_revoked", "bot-main", "dev", active);
+        revoked.status = EdgeStatus::Revoked;
+        store.insert_grant(revoked).await.unwrap();
+        let mut rules = default_grant("human_rules", "bot-main", "dev", active);
+        rules.grant_kind = GrantKind::Rules;
+        store.insert_grant(rules).await.unwrap();
+        // Outbound edges must also match an active DEFAULT profile.
+        for (bot, assignment) in [("inactive-bot", "status = 'inactive'"), ("custom-bot", "is_default = 0")] {
+            let profile = seed_default(&store, bot, "dev").await;
+            store.insert_grant(default_grant("bot-main", bot, "dev", profile)).await.unwrap();
+            store.db.execute(DbStatement::with_params(
+                format!("UPDATE permission_profiles SET {assignment} WHERE id = ?"),
+                vec![DbValue::from(profile)],
+            )).await.unwrap();
+        }
+        let query = FriendListQuery { target_type: None, offset: 0, limit: 20 };
+        assert_eq!(store.list_friends_paginated("bot-main", "dev", query).await.unwrap(),
+            FriendIdsPage { items: vec!["human_valid".into()], total: 1 });
+        store.db.execute(DbStatement::with_params(
+            "UPDATE permission_profiles SET status = 'inactive' WHERE id = ?", vec![DbValue::from(active)],
+        )).await.unwrap();
+        assert_eq!(store.list_friends_paginated("bot-main", "dev", query).await.unwrap(),
+            FriendIdsPage { items: vec![], total: 0 });
+    }
+
+    #[tokio::test]
+    async fn friend_page_rejects_invalid_bounds_and_propagates_database_errors() {
+        let store = sqlite_store().await;
+        for (offset, limit) in [(0, 0), (0, 101), (u64::MAX, 20)] {
+            assert!(matches!(store.list_friends_paginated("bot", "dev", FriendListQuery {
+                target_type: None, offset, limit,
+            }).await, Err(ServiceError::InvalidOperation { .. })));
+        }
+        store.db.execute(DbStatement::new("DROP TABLE permission_profiles")).await.unwrap();
+        assert!(matches!(store.list_friends_paginated("bot", "dev", FriendListQuery {
+            target_type: None, offset: 0, limit: 20,
+        }).await, Err(ServiceError::InternalError(_))));
+    }
+
+    #[test]
+    fn friend_page_mysql_uses_binary_identity_and_bound_pagination() {
+        let statement = friend_list_statement(EdgeGrantSqlFlavor::Mysql, "bot'quote", "dev", FriendListQuery {
+            target_type: Some(ActorKind::Human), offset: 40, limit: 20,
+        }).unwrap();
+        assert!(statement.sql().contains("CAST(g.to_id AS BINARY)"));
+        assert!(statement.sql().contains("CAST(g.from_id AS BINARY)"));
+        assert!(statement.sql().contains("SUBSTR(peer_id, 1, 6) = CAST('human_' AS BINARY)"));
+        assert!(statement.sql().contains("LIMIT ? OFFSET ?"));
+        assert!(!statement.sql().contains("bot'quote"));
+        assert_eq!(statement.params(), vec![
+            DbValue::from("bot'quote"), DbValue::from("dev"),
+            DbValue::from("bot'quote"), DbValue::from("dev"),
+            DbValue::from(20_u64), DbValue::from(40_u64),
+        ]);
+    }
+
+    struct RecordingFriendDb {
+        inner: Arc<dyn DbPlugin>,
+        reads: std::sync::Mutex<Vec<(DbStatement, usize)>>,
+    }
+
+    #[async_trait]
+    impl DbPlugin for RecordingFriendDb {
+        async fn query(&self, statement: DbStatement) -> bcs_db_api::DbResult<Vec<DbRow>> {
+            let rows = self.inner.query(statement.clone()).await?;
+            self.reads.lock().unwrap().push((statement, rows.len()));
+            Ok(rows)
+        }
+        async fn execute(&self, statement: DbStatement) -> bcs_db_api::DbResult<DbExecuteResult> {
+            self.inner.execute(statement).await
+        }
+        async fn transaction(&self, steps: Vec<bcs_db_api::DbTransactionStep>) -> bcs_db_api::DbResult<Vec<bcs_db_api::DbTransactionStepResult>> {
+            self.inner.transaction(steps).await
+        }
+        async fn health_check(&self) -> bcs_db_api::DbResult<bcs_db_api::DbHealth> {
+            self.inner.health_check().await
+        }
+    }
+
+    #[tokio::test]
+    async fn friend_page_reads_only_one_bounded_result_from_database() {
+        let seed = sqlite_store().await;
+        let profile = seed_default(&seed, "bot-main", "dev").await;
+        for i in 0..31 {
+            seed.insert_grant(default_grant(&format!("human_{i:03}"), "bot-main", "dev", profile)).await.unwrap();
+        }
+        let db = Arc::new(RecordingFriendDb { inner: seed.db, reads: std::sync::Mutex::new(Vec::new()) });
+        let store = DbEdgeGrantStore::sqlite(db.clone());
+        let page = store.list_friends_paginated("bot-main", "dev", FriendListQuery {
+            target_type: Some(ActorKind::Human), offset: 10, limit: 5,
+        }).await.unwrap();
+        assert_eq!(page.total, 31);
+        assert_eq!(page.items, vec!["human_010", "human_011", "human_012", "human_013", "human_014"]);
+        let reads = db.reads.lock().unwrap();
+        assert_eq!(reads.len(), 1, "no full-list or N+1 default-profile queries");
+        assert_eq!(reads[0].1, 5, "only this page crossed the DB boundary");
+        assert!(reads[0].0.sql().contains("LIMIT ? OFFSET ?"));
     }
 
     // ---- DbPermissionProfileStore (T8) ----

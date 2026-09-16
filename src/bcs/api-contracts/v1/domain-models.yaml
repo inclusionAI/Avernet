@@ -1923,14 +1923,24 @@ FriendConnectionPage:
   required:
     - items
     - total
+    - page
+    - page_size
   properties:
     items:
       type: array
       items:
         $ref: "#/FriendConnection"
     total:
+      description: Total matching peers after target_type filtering and before pagination.
       type: integer
       minimum: 0
+    page:
+      type: integer
+      minimum: 1
+    page_size:
+      type: integer
+      minimum: 1
+      maximum: 100
 
 # ---- Success envelopes for batch 2 resources ------------------------------
 

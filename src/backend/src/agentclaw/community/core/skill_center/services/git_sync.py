@@ -167,11 +167,10 @@ class GitSyncConfig:
         # Sync schedule
         self.sync_interval_minutes = int(os.getenv("SYNC_INTERVAL_MINUTES", "30"))
         self.sync_jitter_seconds = int(os.getenv("SYNC_JITTER_SECONDS", "60"))
-        # Keep bootstrap bounded so a stalled SSH connection can reach the
-        # existing OSS fallback before the service readiness deadline.
-        self.clone_timeout_seconds = int(
-            os.getenv("GIT_CLONE_TIMEOUT_SECONDS", "20")
-        )
+        if self.sync_interval_minutes < 1:
+            raise ValueError("SYNC_INTERVAL_MINUTES must be positive")
+        if self.sync_jitter_seconds < 0:
+            raise ValueError("SYNC_JITTER_SECONDS must be non-negative")
         # 抢不到 bootstrap 锁的 worker 轮询等待 bare repo 就绪的超时（秒）
         self.bootstrap_wait_timeout = int(os.getenv("BOOTSTRAP_WAIT_TIMEOUT", "60"))
         self.archive_cron = "0 0 * * *"  # Daily at 00:00
@@ -192,11 +191,11 @@ class GitSyncService(LifecycleBase, GitSyncServiceProtocol):
     """
 
     async def startup(self) -> None:
-        """Lifecycle hook — bootstrap the local repo + start periodic sync.
+        """Lifecycle hook — seed local-only profiles or start periodic sync.
 
         Body lifted from the pre-R11 ``startup_git_sync_service`` hook in
-        ``api/lifecycle.py``. Logs the bootstrap result before the
-        periodic task starts. Errors propagate (fail-fast boot).
+        ``api/lifecycle.py``. Remote reconciliation is deliberately deferred
+        to the periodic task so backend readiness does not depend on Git/OSS.
         """
         if not self.config.enable_skill_sync:
             logger.info(
@@ -211,15 +210,11 @@ class GitSyncService(LifecycleBase, GitSyncServiceProtocol):
             logger.info("GitSyncService started via Lifecycle.startup() in local mode")
             return
 
-        bootstrap_result = await self.sync_bootstrap()
-        logger.info(f"GitSyncService bootstrap: {bootstrap_result}")
-        if self._local_profile:
-            seed_result = await self._sync_existing_local_market()
-            logger.info(f"GitSyncService local startup seed: {seed_result}")
-            logger.info("GitSyncService started via Lifecycle.startup() in local mode")
-            return
         await self.start_periodic_sync()
-        logger.info("GitSyncService started via Lifecycle.startup()")
+        logger.info(
+            "GitSyncService started via Lifecycle.startup(); "
+            "first remote reconciliation is deferred to the periodic interval"
+        )
 
     async def shutdown(self) -> None:
         """Lifecycle hook — stop periodic sync and shut down the executor."""
@@ -557,20 +552,12 @@ class GitSyncService(LifecycleBase, GitSyncServiceProtocol):
         target.parent.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"[GitSyncService] Cloning {self._repo_url} to {target}")
-        try:
-            result = subprocess.run(
-                ["git", "clone", "--bare", "--branch", self.config.branch,
-                 self._repo_url, str(target)],
-                capture_output=True,
-                text=True,
-                timeout=self.config.clone_timeout_seconds,
-            )
-        except subprocess.TimeoutExpired:
-            # git may leave a partial bare repo behind when it is killed. The
-            # OSS fallback must extract into a clean target directory.
-            if target.exists():
-                shutil.rmtree(target)
-            raise
+        result = subprocess.run(
+            ["git", "clone", "--bare", "--branch", self.config.branch,
+             self._repo_url, str(target)],
+            capture_output=True,
+            text=True
+        )
         if result.returncode != 0:
             raise RuntimeError(f"Git clone failed: {result.stderr}")
 
@@ -1312,20 +1299,19 @@ class GitSyncService(LifecycleBase, GitSyncServiceProtocol):
     async def _sync_loop(self):
         """Main sync loop with jitter."""
         while self._started:
-            try:
-                # Jitter: 0-60s random delay
-                jitter = random.randint(0, self.config.sync_jitter_seconds)
-                logger.debug(f"[GitSyncService] Waiting {jitter}s jitter...")
-                await asyncio.sleep(jitter)
+            jitter = random.randint(0, self.config.sync_jitter_seconds)
+            delay = self.config.sync_interval_minutes * 60 + jitter
+            logger.debug(
+                f"[GitSyncService] Waiting {delay}s before next periodic sync..."
+            )
+            await asyncio.sleep(delay)
 
+            try:
                 result = await self.sync()
                 logger.info(f"[GitSyncService] Periodic sync result: {result}")
 
             except Exception as e:
                 logger.error(f"[GitSyncService] Periodic sync error: {e}")
-
-            # Wait for next interval
-            await asyncio.sleep(self.config.sync_interval_minutes * 60)
 
 
 def _rewrite_presigned_url_to_office(meta_url: str, office_endpoint: str) -> str:

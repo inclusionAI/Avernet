@@ -746,6 +746,7 @@ def test_reference_set_and_track_latest_share_one_task_for_latest_combined_plan(
         audit_log_repo=_Audit(),
         mcp_center=object(),
         mcp_auth=object(),
+        mcp_config=object(),
         ext_info_provider=lambda _bot_id: None,
         recovery=recovery,
     )

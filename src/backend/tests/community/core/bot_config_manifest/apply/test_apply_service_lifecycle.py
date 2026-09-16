@@ -51,27 +51,12 @@ from agentclaw.community.core.repository.implementations.bot.config_manifest_app
     BotConfigManifestApplyLockRepository,
     BotConfigManifestApplyRepository,
 )
-
-from agentclaw.community.core.bot_config_manifest.apply.source_resolver import (
-    DeclaredSourceResolver,
-)
 from ._fakes import (
-    FakeActivationService,
-    FakeCapabilityReader,
-    FakeCredentials,
     FakeGitClient,
-    FakeIdentityService,
-    FakeManifestContent,
-    FakeMcpAuth,
-    FakeResourceFileService,
-    FakeSkillUploadService,
     FakeStartupScriptService,
-    real_validator,
-    arca_only_engine_test,
-    unreachable_platform_ports,
-    unreachable_redeliver,
+    arca_only_delivery,
+    device_port_bundle,
 )
-from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 
 _ENTITY = "u_owner"
 _BOT = "b_1"
@@ -191,33 +176,18 @@ def world():
         manifest_service=_ManifestService(_DOCUMENT),
         apply_repository=applies,
         lock_repository=locks,
-        script_service_provider=lambda: scripts,
-        activation_service_provider=lambda: FakeActivationService(),
-        mcp_auth_service_provider=lambda: FakeMcpAuth(),
-        # W5's materialisers. This suite's document declares only mcp and
-        # script, so the fetch-consuming categories' services are never
-        # reached — but they must exist for the registry to register.
-        identity_service_provider=lambda: FakeIdentityService(),
-        upload_service_provider=lambda: FakeSkillUploadService(),
-        capability_reader_provider=lambda: FakeCapabilityReader(),
-        package_validator_provider=lambda: real_validator(),
-        entry_fetcher_provider=lambda: DeclaredSourceResolver(
-            FakeManifestContent(), FakeCredentials(), FakeObjectStore()
-        ),
-        # W6's materialiser: this suite's document declares no resources,
-        # so the write chain is never reached — but it must exist for the
-        # registry to register.
-        resource_service_provider=lambda: FakeResourceFileService(),
-        cli_tool_service_factory=lambda family: None,
         # W7's git transport. This suite's document declares no ``sources``,
         # so the client is never *used* — it is constructed per apply and
         # must never be fetched through, which FakeGitClient enforces.
         git_client_provider=lambda: FakeGitClient(),
         task_queue_provider=lambda: queue,
         bot_repository=_FakeBotRepository(_BOT_RECORD),
-        is_teclaw=arca_only_engine_test,
-        teclaw_platform_ports_provider=unreachable_platform_ports,
-        redeliver=unreachable_redeliver,
+        # The delivery seam, assembled the way the composition root
+        # assembles it: a bundle of device-backed ports, one strategy
+        # over it, and a lookup. The categories this suite's document
+        # does not declare are never reached, but their ports must
+        # exist for the registry to register them.
+        delivery_strategies=arca_only_delivery(device_port_bundle(script_service=scripts)),
     )
     # Closes the loop: the fake worker needs the service it runs work for.
     queue.service = service
@@ -798,6 +768,50 @@ def test_a_failed_apply_does_not_wipe_a_strict_baseline(world, monkeypatch):
     ) == {("https://git.corp/charts.git", "main", "strict"): "b" * 40}
 
 
+def test_within_one_report_the_later_resolution_is_the_baseline(world, monkeypatch):
+    """A folded creation report can hold two resolutions of one moving ref.
+
+    Its two phases resolve minutes apart, with the carried (pre-container)
+    rows first, so a ``ref: main`` that moved between them leaves both commits
+    in one report. The later row is what the apply's own delivery stood
+    behind, so it is what the next apply compares against — taking the first
+    would hand ``keep_last`` the stored tree of a commit one older than what
+    was actually delivered.
+    """
+    service, _applies, _locks, _scripts, _manifests = world
+    url = "https://git.corp/manifest-testing.git"
+    phase_a = SourceResolution(name="content", url=url, ref="main",
+                               mode="non_strict", resolved_sha="7" * 40)
+    phase_b = SourceResolution(name="content", url=url, ref="main",
+                               mode="non_strict", resolved_sha="9" * 40)
+    monkeypatch.setattr(
+        service._applies,
+        "recent",
+        lambda *, env, entity_id, bot_id, limit: [
+            _row(_report_with_sources([phase_a, phase_b], apply_id="created"))
+        ],
+    )
+    assert service._last_resolutions(entity_id=_ENTITY, bot_id=_BOT) == {
+        (url, "main", "non_strict"): "9" * 40
+    }
+
+    # Across records the newest still wins outright: an older report's later
+    # row must not reach past a newer report that answered the same key.
+    older = SourceResolution(name="content", url=url, ref="main",
+                             mode="non_strict", resolved_sha="1" * 40)
+    monkeypatch.setattr(
+        service._applies,
+        "recent",
+        lambda *, env, entity_id, bot_id, limit: [
+            _row(_report_with_sources([phase_b], apply_id="newest")),
+            _row(_report_with_sources([phase_a, older], apply_id="older")),
+        ],
+    )
+    assert service._last_resolutions(entity_id=_ENTITY, bot_id=_BOT) == {
+        (url, "main", "non_strict"): "9" * 40
+    }
+
+
 
 
 def test_a_failed_handoff_has_no_session_to_leak(world, monkeypatch):
@@ -1111,8 +1125,8 @@ def test_registering_a_materialiser_widens_it_with_no_edit_to_any_caller(world):
     class _StubResourcesMaterialiser:
         construct = ManifestCategory.RESOURCES
 
-    def _widened():
-        built = dict(real())
+    def _widened(strategy):
+        built = dict(real(strategy))
         built[ManifestCategory.RESOURCES] = _StubResourcesMaterialiser()
         return built
 

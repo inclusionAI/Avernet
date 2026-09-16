@@ -23,7 +23,7 @@ single-tool paths compensate by rolling their row back when this port refuses.
 
 * the **management API** has no other closing step, so its binding carries the
   redeliver and this port makes the push;
-* a **manifest apply** ends at ``TeclawDelivery.finish``, which pushes one
+* a **manifest apply** ends at ``TeclawPlatformDelivery.finish``, which pushes one
   artifact covering every category it wrote. Its binding carries ``None``, and
   this port stays silent — a push from here would arrive mid-apply, with
   ``cli_tools`` final and ``resources`` or ``skills`` not yet written, and be

@@ -2,8 +2,8 @@
 
 The identity and resources materialisers write through two narrow ports
 (``core/ports/identity_file_port.py``, ``core/ports/resource_file_port.py``) that the ARCA
-strategy binds to the real device-backed services. The teclaw strategy, with
-the platform-managed switch on, binds them to these: the same method
+strategy binds to the real device-backed services. ``TeclawPlatformDelivery``
+binds them to these: the same method
 signatures, but every read and write goes to the managed-files store — the
 platform's own copy — and never to a container. The materialisers do not know
 which they were handed (spec D-7).

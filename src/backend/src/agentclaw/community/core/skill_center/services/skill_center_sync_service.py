@@ -83,7 +83,6 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
         self._periodic_task: asyncio.Task | None = None
 
     async def startup(self) -> None:
-        await self.sync_bootstrap()
         await self.start_periodic_sync()
 
     async def shutdown(self) -> None:
@@ -159,10 +158,10 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
         except SkillCenterSyncInProgressError:
             return SkillCenterSyncSummary(0, 0, 0, 0, ())
         except SkillCenterSyncUnavailableError:
-            # Startup/periodic reconciliation is best effort and level-triggered;
+            # Bootstrap/periodic reconciliation is best effort and level-triggered;
             # cache recovery will be observed by the next scheduled pass.
             logger.exception(
-                "[SkillCenterSync] startup reconciliation coordinator unavailable"
+                "[SkillCenterSync] bootstrap reconciliation coordinator unavailable"
             )
             return SkillCenterSyncSummary(0, 0, 0, 0, ())
 
@@ -184,7 +183,15 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
         while True:
             await asyncio.sleep(self._interval_seconds)
             try:
-                await asyncio.to_thread(self.sync)
+                summary = await asyncio.to_thread(self.sync)
+                logger.info(
+                    "[SkillCenterSync] periodic reconciliation completed: "
+                    "scanned=%d updated=%d unchanged=%d failed=%d",
+                    summary.scanned,
+                    summary.updated,
+                    summary.unchanged,
+                    summary.failed,
+                )
             except SkillCenterSyncInProgressError:
                 continue
             except Exception:

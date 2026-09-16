@@ -16,8 +16,15 @@ from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     ArcaDelivery,
+    DeliveryStrategyFactory,
+    EngineFamily,
     MaterialiserPorts,
-    TeclawDelivery,
+    TeclawDeliveryBindings,
+    TeclawDeliveryMode,
+    TeclawDeviceDelivery,
+    TeclawPlatformDelivery,
+    family_from_engine_test,
+    teclaw_delivery_for_mode,
 )
 from agentclaw.community.core.bot_config_manifest.apply.source_resolver import DeclaredSourceResolver
 from agentclaw.community.core.bot_config_manifest.apply import triggers
@@ -49,7 +56,10 @@ from ._fakes import (
     FakeResourceFileService,
     FakeSkillUploadService,
     FakeStartupScriptService,
+    device_port_bundle,
+    no_redeliver,
     real_validator,
+    teclaw_engine_test,
 )
 from tests.community.core.bot_config_manifest.apply._fakes import FakeObjectStore
 
@@ -125,7 +135,7 @@ class _InlineQueue:
         return (None, True)
 
 
-def _world(*, bot, platform_managed, platform_activation=None, redeliver=None):
+def _world(*, bot, mode, platform_activation=None, redeliver=None):
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -155,29 +165,32 @@ def _world(*, bot, platform_managed, platform_activation=None, redeliver=None):
             cli_tool_service=object(),
         )
 
+    device_ports = device_port_bundle(activation_service=device_activation)
+
+    # The composition root's own assembly, over this rig's fakes: the two port
+    # bundles, one teclaw strategy chosen from the mode by the table, and a
+    # lookup over that and ARCA's. What the rig varies is the deployment's
+    # mode — the same and only thing a deployment varies.
+    bindings = TeclawDeliveryBindings(
+        platform_ports=platform_ports,
+        device_ports=device_ports,
+        redeliver=redeliver or no_redeliver,
+        cli_tool_service=lambda: None,
+    )
     service = BotConfigManifestApplyService(
         manifest_service=_Manifests(),
         apply_repository=BotConfigManifestApplyRepository(db),
         lock_repository=BotConfigManifestApplyLockRepository(db),
-        script_service_provider=lambda: FakeStartupScriptService(),
-        activation_service_provider=lambda: device_activation,
-        mcp_auth_service_provider=lambda: FakeMcpAuth(),
-        identity_service_provider=lambda: FakeIdentityService(),
-        upload_service_provider=lambda: FakeSkillUploadService(),
-        capability_reader_provider=lambda: FakeCapabilityReader(),
-        package_validator_provider=lambda: real_validator(),
-        entry_fetcher_provider=lambda: DeclaredSourceResolver(
-            FakeManifestContent(), FakeCredentials(), FakeObjectStore()
-        ),
-        resource_service_provider=lambda: FakeResourceFileService(),
-        cli_tool_service_factory=lambda family: None,
         git_client_provider=lambda: FakeGitClient(),
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(bot),
-        is_teclaw=lambda engine: engine == "teclaw",
-        teclaw_platform_managed=platform_managed,
-        teclaw_platform_ports_provider=platform_ports,
-        redeliver=redeliver,
+        delivery_strategies=DeliveryStrategyFactory(
+            family_of=family_from_engine_test(teclaw_engine_test),
+            strategies={
+                EngineFamily.ARCA: ArcaDelivery(device_ports),
+                EngineFamily.TECLAW: teclaw_delivery_for_mode(mode, bindings),
+            },
+        ),
     )
     queue.service = service
     return service, device_activation, platform_activation
@@ -202,13 +215,17 @@ def _apply(service, bot, phase):
     return service.last_apply(entity_id=_ENTITY, bot_id=bot["bot_id"])
 
 
-def test_the_service_selects_the_strategy_by_engine_and_switch() -> None:
-    service, _, _ = _world(bot=_TECLAW_BOT, platform_managed=True)
+def test_the_service_selects_the_strategy_by_engine_alone() -> None:
+    """The service asks one question — which family is this bot? — of a seam
+    that was fully assembled before it existed. Which teclaw shape sits behind
+    the answer is the deployment's, decided by the mode table above."""
+    service, _, _ = _world(bot=_TECLAW_BOT, mode=TeclawDeliveryMode.PLATFORM)
     assert isinstance(service.delivery_for_bot(_ARCA_BOT), ArcaDelivery)
-    teclaw = service.delivery_for_bot(_TECLAW_BOT)
-    assert isinstance(teclaw, TeclawDelivery) and teclaw.platform_managed
-    service_off, _, _ = _world(bot=_TECLAW_BOT, platform_managed=False)
-    assert not service_off.delivery_for_engine("teclaw").platform_managed
+    assert isinstance(service.delivery_for_bot(_TECLAW_BOT), TeclawPlatformDelivery)
+    service_device, _, _ = _world(bot=_TECLAW_BOT, mode=TeclawDeliveryMode.DEVICE)
+    assert isinstance(
+        service_device.delivery_for_engine("teclaw"), TeclawDeviceDelivery
+    )
 
 
 def test_teclaw_on_applies_container_bound_categories_in_the_pre_container_phase() -> None:
@@ -219,7 +236,7 @@ def test_teclaw_on_applies_container_bound_categories_in_the_pre_container_phase
         return None
 
     service, device_activation, platform_activation = _world(
-        bot=_TECLAW_BOT, platform_managed=True, redeliver=redeliver
+        bot=_TECLAW_BOT, mode=TeclawDeliveryMode.PLATFORM, redeliver=redeliver
     )
     report = _apply(service, _TECLAW_BOT, ApplyPhase.PRE_CONTAINER)
     assert report.status is ApplyStatus.SUCCEEDED
@@ -236,7 +253,7 @@ def test_teclaw_on_records_a_failed_closing_step_as_a_note() -> None:
     async def redeliver(ctx):
         return "redeliver failed: container unreachable"
 
-    service, _, _ = _world(bot=_TECLAW_BOT, platform_managed=True, redeliver=redeliver)
+    service, _, _ = _world(bot=_TECLAW_BOT, mode=TeclawDeliveryMode.PLATFORM, redeliver=redeliver)
     report = _apply(service, _TECLAW_BOT, ApplyPhase.PRE_CONTAINER)
     assert report.status is ApplyStatus.SUCCEEDED
     assert report.notes == ("redeliver failed: container unreachable",)
@@ -245,7 +262,7 @@ def test_teclaw_on_records_a_failed_closing_step_as_a_note() -> None:
     assert again.notes == report.notes
 
 
-def test_teclaw_off_is_the_pre_w8_shape() -> None:
+def test_the_device_shape_is_the_pre_w8_shape() -> None:
     calls: list[object] = []
 
     async def redeliver(ctx):
@@ -253,7 +270,7 @@ def test_teclaw_off_is_the_pre_w8_shape() -> None:
         return "never"
 
     service, device_activation, platform_activation = _world(
-        bot=_TECLAW_BOT, platform_managed=False, redeliver=redeliver
+        bot=_TECLAW_BOT, mode=TeclawDeliveryMode.DEVICE, redeliver=redeliver
     )
     pre = _apply(service, _TECLAW_BOT, ApplyPhase.PRE_CONTAINER)
     assert pre.categories == ()  # mcp is not pre-container with the switch off
@@ -265,7 +282,7 @@ def test_teclaw_off_is_the_pre_w8_shape() -> None:
     assert on.notes == ()
 
 
-def test_arca_never_sees_the_switch() -> None:
+def test_arca_is_unaffected_by_the_deployments_teclaw_mode() -> None:
     calls: list[object] = []
 
     async def redeliver(ctx):
@@ -273,7 +290,7 @@ def test_arca_never_sees_the_switch() -> None:
         return "never"
 
     service, device_activation, platform_activation = _world(
-        bot=_ARCA_BOT, platform_managed=True, redeliver=redeliver
+        bot=_ARCA_BOT, mode=TeclawDeliveryMode.PLATFORM, redeliver=redeliver
     )
     pre = _apply(service, _ARCA_BOT, ApplyPhase.PRE_CONTAINER)
     assert pre.categories == ()
@@ -296,7 +313,7 @@ async def test_dry_run_runs_through_the_strategy_and_writes_nothing() -> None:
         return "never"
 
     service, device_activation, platform_activation = _world(
-        bot=_TECLAW_BOT, platform_managed=True, redeliver=redeliver
+        bot=_TECLAW_BOT, mode=TeclawDeliveryMode.PLATFORM, redeliver=redeliver
     )
     report = await service.dry_run(
         entity_id=_ENTITY, bot_id=_BOT, bot=_TECLAW_BOT, owner_id=_ENTITY, actor_id=_ENTITY
@@ -313,7 +330,7 @@ def test_a_raising_closing_step_is_a_note_not_a_failure() -> None:
         raise ConnectionError("container unreachable")
 
     service, _, platform_activation = _world(
-        bot=_TECLAW_BOT, platform_managed=True, redeliver=redeliver
+        bot=_TECLAW_BOT, mode=TeclawDeliveryMode.PLATFORM, redeliver=redeliver
     )
     report = _apply(service, _TECLAW_BOT, ApplyPhase.PRE_CONTAINER)
     assert report.status is ApplyStatus.SUCCEEDED
@@ -365,3 +382,119 @@ def test_the_api_payload_carries_the_notes() -> None:
         started_at=datetime.now(), notes=("redeliver failed",),
     )
     assert apply_payload(report).notes == ["redeliver failed"]
+
+
+def _folded(earlier, later):
+    """``carry_forward`` over two hand-built reports, with the read stubbed out."""
+    from agentclaw.community.core.bot_config_manifest.apply.carry_forward import (
+        carry_forward,
+    )
+
+    class _Applies:
+        def get(self, **_kw):
+            return object()
+
+    return carry_forward(
+        later,
+        ctx=type("C", (), {"env": "dev", "entity_id": _ENTITY, "bot_id": _BOT})(),
+        carry_from_apply_id="a",
+        applies=_Applies(),
+        to_report=lambda record, **_kw: earlier,
+    )
+
+
+def _phase_report(apply_id, trigger, *, sources=(), categories=()):
+    from datetime import datetime
+
+    from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyReport
+
+    return ApplyReport(
+        apply_id=apply_id,
+        bot_id=_BOT,
+        trigger=trigger,
+        status=ApplyStatus.SUCCEEDED,
+        started_at=datetime.now(),
+        sources=tuple(sources),
+        categories=tuple(categories),
+    )
+
+
+def test_one_source_used_by_both_phases_is_one_row() -> None:
+    """The invariant the fold used to break: one declaration, one row.
+
+    A creation's two applies carry two ``SourceSession``s, so a source serving
+    categories on both sides of container provisioning is adopted twice — once
+    per session, each idempotent only within itself. Concatenating the two
+    reports used to publish it twice, against what the schema and
+    ``SourceResolution`` both promise a reader.
+    """
+    from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
+        SourceResolution,
+    )
+
+    content = SourceResolution(
+        name="content",
+        url="https://git.corp/manifest-testing.git",
+        ref="main",
+        mode="non_strict",
+        resolved_sha="7" * 40,
+        auth="gh-readonly",
+    )
+    merged = _folded(
+        _phase_report("a", "create:pre_container", sources=[content]),
+        _phase_report("b", "create:on_container", sources=[content]),
+    )
+    assert merged.sources == (content,)
+
+
+def test_two_resolutions_of_one_moving_ref_stay_two_rows() -> None:
+    """Dedup is on the whole row, so a ref that moved between phases keeps both.
+
+    ``(url, ref, mode)`` would collapse these, and collapsing them would report
+    a delivery that did not happen: phase A served its categories from one
+    commit and phase B served its own from another. Both are true, and the
+    carried row goes first because that is the order they were resolved in.
+    """
+    from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
+        SourceResolution,
+    )
+
+    url = "https://git.corp/manifest-testing.git"
+    before = SourceResolution(name="content", url=url, ref="main",
+                              mode="non_strict", resolved_sha="7" * 40)
+    after = SourceResolution(name="content", url=url, ref="main",
+                             mode="non_strict", resolved_sha="9" * 40)
+    merged = _folded(
+        _phase_report("a", "create:pre_container", sources=[before]),
+        _phase_report("b", "create:on_container", sources=[after]),
+    )
+    assert merged.sources == (before, after)
+
+
+def test_the_folded_category_order_is_untouched() -> None:
+    """Only ``sources`` is deduped; ``categories`` still concatenates in order.
+
+    The carried categories go first because that is ``APPLY_ORDER``'s own
+    order — ``script`` is position 0 — and it is what keeps a pre-container
+    ``script`` from reading as though it had vanished.
+    """
+    from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
+        CategoryResult,
+    )
+    from agentclaw.community.core.bot_config_manifest.capabilities import (
+        ManifestCategory,
+        ManifestSection,
+    )
+
+    script = CategoryResult(construct=ManifestSection.SCRIPT)
+    mcp = CategoryResult(construct=ManifestCategory.MCP)
+    skills = CategoryResult(construct=ManifestCategory.SKILLS)
+    merged = _folded(
+        _phase_report("a", "create:pre_container", categories=[script]),
+        _phase_report("b", "create:on_container", categories=[mcp, skills]),
+    )
+    assert [c.construct for c in merged.categories] == [
+        ManifestSection.SCRIPT,
+        ManifestCategory.MCP,
+        ManifestCategory.SKILLS,
+    ]

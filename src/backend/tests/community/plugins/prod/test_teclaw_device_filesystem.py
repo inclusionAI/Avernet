@@ -3,11 +3,11 @@
 teclaw forwards every read **and write** per-file to the engine over
 ``BaasService.invoke_http`` (agentclawproxy gateway, ``x-proxypass-token``):
 write → ``/api/v1/file/upload`` (multipart), delete → ``/api/v1/file/remove``,
-delete_tree → ``/api/v1/file/rmtree`` (404 → list + remove-each), read →
+delete_tree → the same recursive-capable ``/api/v1/file/remove``, read →
 ``/api/v1/file/read``, list → ``/api/v1/file/list``. No OSS write and no
 whole-artifact redeliver on an edit. These tests inject a stub ``path_mapper``
 (its real behavior is covered in ``test_teclaw_paths``) and pin the per-file
-calls, the auth header, and the rmtree fallback.
+calls and auth header.
 """
 from unittest.mock import MagicMock
 
@@ -56,7 +56,7 @@ class _FakeResponse:
         return self._json
 
     def raise_for_status(self):
-        if self.status_code >= 400:
+        if not 200 <= self.status_code < 300:
             raise httpx.HTTPStatusError(
                 "err", request=httpx.Request("POST", "http://x"),
                 response=httpx.Response(self.status_code),
@@ -82,7 +82,6 @@ async def test_read_preserve_errors_distinguishes_transport_failure_from_absence
 
 
 # ── write (per-file upload, no OSS / no redeliver) ────────────────────
-
 @pytest.mark.asyncio
 async def test_write_file_uploads_multipart_to_engine():
     fs, baas = _fs()
@@ -108,7 +107,6 @@ async def test_write_file_raises_on_non_2xx():
 
 
 # ── delete_file (per-file remove) ─────────────────────────────────────
-
 @pytest.mark.asyncio
 async def test_delete_file_calls_remove():
     fs, baas = _fs()
@@ -128,28 +126,39 @@ async def test_delete_file_returns_false_on_error():
     assert await fs.delete_file(_DEVICE_PATH) is False
 
 
-# ── delete_tree (rmtree, with 404 fallback) ──────────────────────────
+# ── delete_tree (one recursive-capable remove call) ──────────────────
+
 
 @pytest.mark.asyncio
-async def test_delete_tree_calls_rmtree():
+async def test_delete_tree_calls_remove_once_for_the_complete_directory():
     fs, baas = _fs()
     baas.invoke_http.return_value = _FakeResponse()
     ok = await fs.delete_tree(_DEVICE_DIR)
     assert ok is True
     kwargs = baas.invoke_http.call_args.kwargs
-    assert kwargs["path"] == "/api/v1/file/rmtree"
+    assert kwargs["path"] == "/api/v1/file/remove"
     assert kwargs["json"] == {"target_path": _ENGINE_DIR}
+    baas.invoke_http.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_delete_tree_returns_false_on_error():
+@pytest.mark.parametrize("status_code", [302, 404, 500])
+async def test_delete_tree_returns_false_on_any_non_2xx_without_fallback(status_code):
     fs, baas = _fs()
-    baas.invoke_http.return_value = _FakeResponse(status_code=500)
+    baas.invoke_http.return_value = _FakeResponse(status_code=status_code)
     assert await fs.delete_tree(_DEVICE_DIR) is False
+    baas.invoke_http.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_tree_returns_false_on_unknown_transport_outcome():
+    fs, baas = _fs()
+    baas.invoke_http.side_effect = httpx.ReadTimeout("unknown outcome")
+    assert await fs.delete_tree(_DEVICE_DIR) is False
+    baas.invoke_http.assert_called_once()
 
 
 # ── reads (path now /api/v1/file/*) ──────────────────────────────────
-
 @pytest.mark.asyncio
 async def test_read_file_invokes_engine_api_and_returns_bytes():
     fs, baas = _fs()

@@ -90,7 +90,7 @@ def test_bootstrap_clones_and_extracts_skills(
     shutil.which("rsync") is None or shutil.which("tar") is None,
     reason="rsync/tar not available",
 )
-def test_singlebox_startup_clones_when_local_skills_repo_missing(
+def test_singlebox_startup_defers_remote_clone_until_periodic_sync(
     local_skills_bare_repo, tmp_path, monkeypatch
 ):
     bare = local_skills_bare_repo
@@ -127,15 +127,16 @@ def test_singlebox_startup_clones_when_local_skills_repo_missing(
         repo_url_secret_name="aiworkbench-repo-url-secret",
     )
 
-    try:
-        asyncio.run(svc.startup())
-    finally:
-        svc._executor.shutdown(wait=True)
+    async def run_lifecycle() -> None:
+        await svc.startup()
+        assert svc._started is True
+        assert not config.local_bare_repo.exists()
+        assert not config.skills_target.exists()
+        skill_service.sync_skills_from_git.assert_not_called()
+        skill_service._refresh_market_cache.assert_not_called()
+        await svc.shutdown()
 
-    assert config.local_bare_repo.exists()
-    assert (config.skills_target / "business" / "demo" / "SKILL.md").is_file()
-    skill_service.sync_skills_from_git.assert_called_once_with(git_renames={})
-    skill_service._refresh_market_cache.assert_called_once()
+    asyncio.run(run_lifecycle())
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not available")

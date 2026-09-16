@@ -20,6 +20,7 @@ is **not** refused here. Any verified principal may look a user up; the
 from __future__ import annotations
 
 from dataclasses import replace
+import time
 
 from starlette.requests import HTTPConnection
 
@@ -54,6 +55,39 @@ async def require_org_user_caller(connection: HTTPConnection) -> VerifiedCaller:
     return caller
 
 
+async def require_app_caller(connection: HTTPConnection) -> VerifiedCaller:
+    """Require an application in the verified ordinary-HTTP identity set."""
+    started_at = time.perf_counter()
+    context = {
+        "system": "backend", "direction": "inbound",
+        "operation": "app_caller_connection", "method": connection.scope.get("method"),
+        "route": connection.url.path,
+        "request_id": connection.headers.get("x-request-id"),
+        "params": {name: connection.query_params.get(name) for name in
+                   ("bot_id", "owner_id", "user_id", "force_upgrade")},
+    }
+    logger.info("event=expert_chat.app_caller_connection.authentication_request context=%s", context)
+    try:
+        caller = await require_org_user_caller(connection)
+        # COSEC: a verified user alone cannot authorize application operations.
+        if caller.app_id is None:
+            raise MissingPrincipalError("verified app principal required")
+    except MissingPrincipalError:
+        context.update(status=401, reason="application_authentication_required",
+                       duration_ms=(time.perf_counter() - started_at) * 1000)
+        logger.warning("event=expert_chat.app_caller_connection.denied context=%s", context)
+        raise
+    return caller
+
+
+def resolve_ordinary_http_tenant(connection: HTTPConnection) -> str:
+    """Resolve tenant from the same cached ordinary-HTTP verification result."""
+    from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
+
+    caller = _resolve_ordinary_http_caller(connection)
+    return caller.tenant if caller is not None else DEFAULT_AVERNET_TENANT
+
+
 async def require_user_caller(connection: HTTPConnection) -> VerifiedCaller:
     """Require a verified user principal for ordinary HTTP operations."""
     caller = _resolve_ordinary_http_caller(connection)
@@ -78,9 +112,9 @@ def _resolve_ordinary_http_caller(
         caller = verify_principal_token(token, config)
     except PrincipalVerificationError as exc:
         logger.warning(
-            "rejected ordinary HTTP principal on %s: %s",
+            "rejected ordinary HTTP principal on %s: exception_type=%s",
             connection.url.path,
-            exc,
+            type(exc).__name__,
         )
         caller = None
     setattr(connection.state, _ORDINARY_CALLER_STATE_ATTR, caller or False)

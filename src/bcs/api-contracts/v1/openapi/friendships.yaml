@@ -749,6 +749,14 @@ FriendConnectionsPath:
     operationId: list_friend_connections
     tags: ["Collaboration / Friendships"]
     summary: List accepted friend connections for an actor.
+    description: >-
+      Lists approved default-profile connections in either direction. A Human-to-Bot
+      grant is visible from both actors without creating a reverse authorization
+      grant. Filter by target_type before pagination. Results are ordered by internal
+      actor ID ascending; total counts all matching peers, not just this page.
+      Omitted pagination defaults to page 1 with 20 items (previously unpaginated).
+      Clients needing all peers must fetch subsequent pages. Human IDs in responses
+      omit the internal human_ prefix.
     x-avernet-security:
       user: required
       app: required
@@ -764,6 +772,28 @@ FriendConnectionsPath:
         schema:
           type: string
           minLength: 1
+      - name: target_type
+        in: query
+        required: false
+        description: Peer type to include; omit to include both humans and bots.
+        schema:
+          $ref: ../domain-models.yaml#/FriendConnectionActorType
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 4294967295
+          default: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
     responses:
       "200":
         description: Accepted friend connections.

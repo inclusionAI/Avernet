@@ -137,6 +137,14 @@ impl ConnectService for RecordingConnectService {
         Ok(vec![311])
     }
 
+    async fn list_friends_paginated(
+        &self,
+        _: &str,
+        _: bcs_service_api::application::connect::FriendListQuery,
+    ) -> ServiceResult<bcs_service_api::application::connect::FriendEntriesPage> {
+        unreachable!("legacy caller must retain the unpaginated query")
+    }
+
     async fn list_friends(&self, actor: &str) -> ServiceResult<Vec<FriendListEntry>> {
         self.list_friends_commands.lock().await.push(actor.to_string());
         Ok(self.list_friends_result.clone())

@@ -55,6 +55,7 @@ from agentclaw.community.core.skill_center.factories import SkillSetServiceFacto
 from agentclaw.community.core.skill_center.services.skill_set_management_service import (
     SkillSetManagementService,
 )
+from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
@@ -200,6 +201,7 @@ def _seed(world, *, member: bool = False) -> None:
         audit_log_repo=world.get(BotCollabLogRepositoryProtocol),
         mcp_center=world.get(MCPCenterPlugin),
         mcp_auth=world.get(MCPAuthPlugin),
+        mcp_config=world.get(MCPConfigService),
         ext_info_provider=lambda _bot_id: None,
         recovery=world.get(DesktopSkillRecoveryServiceProtocol),
     )
@@ -722,6 +724,13 @@ def _seed_mcp_catalog(world) -> None:
             "name": "Dima MCP",
             "description": "Dima workflow tools",
             "icon": "https://example.test/dima.png",
+            "runMode": "REMOTE",
+            "endpoints": [{
+                "networkType": "OFFICE",
+                "env": "PROD",
+                "transportProtocol": "STREAMABLE_HTTP",
+                "url": "https://mcp.example.test/streamable/mcp",
+            }],
         },
     )
     _seed(world)
@@ -959,6 +968,19 @@ def _seed_excluded_default_mcp(world) -> None:
             server_code="mcp.default",
             engine_type="openclaw", default_engine_types=("openclaw",),
         )
+    world.get(MCPCenterPlugin).set_override(
+        "get_mcp_detail",
+        lambda server_code: {
+            "serverCode": server_code,
+            "runMode": "REMOTE",
+            "endpoints": [{
+                "networkType": "OFFICE",
+                "env": "PROD",
+                "transportProtocol": "STREAMABLE_HTTP",
+                "url": "https://mcp.example.test/streamable/mcp",
+            }],
+        },
+    )
 
 
 def _seed_excluded_platform_default_mcp(world) -> None:

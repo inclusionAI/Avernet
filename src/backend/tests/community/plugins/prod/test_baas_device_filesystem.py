@@ -206,6 +206,66 @@ async def test_list_dir_calls_transport_post():
 
 
 @pytest.mark.asyncio
+async def test_list_dir_returns_none_on_device_404():
+    """A device-level 404 means the requested directory is absent."""
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+
+    response = httpx.Response(
+        status_code=404,
+        json={"detail": "directory not found"},
+        request=httpx.Request("POST", "http://fake/api/file/list"),
+    )
+    transport = _make_transport(response=response)
+    fs = BaasDeviceFileSystem(
+        transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p
+    )
+
+    assert await fs.list_dir("/missing") is None
+
+
+@pytest.mark.asyncio
+async def test_list_dir_raises_on_proxy_routing_404():
+    """A proxy 404 still means the Bot/device cannot be reached."""
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+
+    for marker in ("BOT_NOT_FOUND", "NO_DEVICES_FOUND"):
+        response = httpx.Response(
+            status_code=404,
+            json={"detail": {"error": marker, "message": "gone"}},
+            request=httpx.Request("POST", "http://fake/api/file/list"),
+        )
+        transport = _make_transport(response=response)
+        fs = BaasDeviceFileSystem(
+            transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p
+        )
+
+        with pytest.raises(httpx.HTTPStatusError):
+            await fs.list_dir("/missing")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", (401, 500, 502, 503))
+async def test_list_dir_preserves_auth_and_server_failures(status_code: int):
+    """Only a device-level 404 is absence; auth and service failures propagate."""
+    from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
+
+    response = httpx.Response(
+        status_code=status_code,
+        content=b"unavailable",
+        request=httpx.Request("POST", "http://fake/api/file/list"),
+    )
+    transport = _make_transport(response=response)
+    fs = BaasDeviceFileSystem(
+        transport=transport, conn_info=_conn_info(), path_mapper=lambda p: p
+    )
+
+    with pytest.raises(httpx.HTTPStatusError) as error:
+        await fs.list_dir("/missing")
+
+    assert error.value.response.status_code == status_code
+
+
+@pytest.mark.asyncio
 async def test_exists_returns_true_when_read_succeeds():
     from agentclaw.community.core.devices.services.baas_device_filesystem import BaasDeviceFileSystem
     transport = _make_transport(response=_ok_response(content=b"data"))

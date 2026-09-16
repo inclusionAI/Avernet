@@ -1,8 +1,26 @@
 //! `EdgeGrantRepoPort` — persistence port for `edge_grants`.
 use async_trait::async_trait;
 use bcs_domain::edge_permission::EdgeGrant;
+use bcs_domain::ActorKind;
 
 use crate::core::error::ServiceResult;
+
+/// Transport-neutral friend query. None includes both actor kinds.
+/// Callers supply limit in 1..=100 and offset <= i64::MAX.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FriendListQuery {
+    pub target_type: Option<ActorKind>,
+    pub offset: u64,
+    pub limit: u32,
+}
+
+/// Distinct internal actor IDs, ordered by case-sensitive UTF-8 byte order.
+/// total counts filtered peers before pagination, including for empty pages.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FriendIdsPage {
+    pub items: Vec<String>,
+    pub total: u64,
+}
 
 #[async_trait]
 pub trait EdgeGrantRepoPort: Send + Sync {
@@ -21,6 +39,17 @@ pub trait EdgeGrantRepoPort: Send + Sync {
 
     /// Friends of `actor` (any direction, default-profile edge) — actor ids only.
     async fn list_friends(&self, actor: &str, env: &str) -> Vec<String>;
+
+    /// Store-owned filtering, deduplication, counting and pagination of approved
+    /// active-default-profile edges in either direction. Human IDs start with
+    /// the exact, case-sensitive prefix `human_`; all other IDs are Bots.
+    /// Read failures are errors, never successful empty/partial pages.
+    async fn list_friends_paginated(
+        &self,
+        actor: &str,
+        env: &str,
+        query: FriendListQuery,
+    ) -> ServiceResult<FriendIdsPage>;
 
     async fn insert_grant(&self, grant: EdgeGrant) -> ServiceResult<u64>;
 
