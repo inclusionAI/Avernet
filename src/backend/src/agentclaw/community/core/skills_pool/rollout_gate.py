@@ -12,7 +12,9 @@ from agentclaw.community.core.common_config.whitelist_service import (
 )
 from agentclaw.community.core.skills_pool.types import RolloutEvidence
 from agentclaw.community.core.skills_pool.rollout_config import (
+    ROLLOUT_SCHEMA_VERSION,
     is_valid_rollout_config_value,
+    rollout_schema_version,
 )
 from agentclaw.community.log import get_logger
 
@@ -43,8 +45,11 @@ class RolloutDecisionReason(StrEnum):
     CONFIG_ENV_MISMATCH = "config_env_mismatch"
     ENGINE_NOT_SUPPORTED = "engine_not_supported"
     ENGINE_NOT_PROMOTED = "engine_not_promoted"
+    ENGINE_ADMISSION_DISABLED = "engine_admission_disabled"
     BOT_NEGATIVE_CONTROL = "bot_negative_control"
+    BOT_EXCLUDED = "bot_excluded"
     BOT_NOT_WHITELISTED = "bot_not_whitelisted"
+    BOT_NOT_ALLOWED = "bot_not_allowed"
     RUNTIME_NOT_EDITABLE = "runtime_not_editable"
 
 
@@ -130,6 +135,17 @@ class SkillsPoolRolloutGate:
             return self._reject(RolloutDecisionReason.CONFIG_INVALID)
         assert isinstance(value, dict)
 
+        if rollout_schema_version(value) == ROLLOUT_SCHEMA_VERSION:
+            return self._evaluate_v2(
+                env=env,
+                owner_id=owner_id,
+                bot_id=bot_id,
+                engine_type=engine_type,
+                config_id=config_id,
+                config_version=config_version,
+                value=value,
+            )
+
         promoted_engines = value["promoted_engines"]
         if engine_type not in promoted_engines:
             return self._reject(RolloutDecisionReason.ENGINE_NOT_PROMOTED)
@@ -179,4 +195,86 @@ class SkillsPoolRolloutGate:
             eligible=True,
             reason=RolloutDecisionReason.ELIGIBLE,
             evidence=evidence,
+        )
+
+    def _evaluate_v2(
+        self,
+        *,
+        env: str,
+        owner_id: str,
+        bot_id: str,
+        engine_type: str,
+        config_id: int,
+        config_version: str,
+        value: dict[str, object],
+    ) -> RolloutDecision:
+        admission = value["engine_admission"]
+        assert isinstance(admission, dict)
+        if admission.get(engine_type) is not True:
+            return self._reject(RolloutDecisionReason.ENGINE_ADMISSION_DISABLED)
+
+        exclusions = value["bot_exclusions"]
+        assert isinstance(exclusions, list)
+        if self._matches_bot_rule(
+            exclusions,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            engine=engine_type,
+        ):
+            return self._reject(RolloutDecisionReason.BOT_EXCLUDED)
+
+        allowlist = value["bot_allowlist"]
+        assert isinstance(allowlist, list)
+        decision_reason: str | None = None
+        if self._matches_bot_rule(
+            allowlist,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            engine=engine_type,
+        ):
+            decision_reason = "exact_bot_allowlist"
+        else:
+            owner_rollouts = value["owner_rollouts"]
+            assert isinstance(owner_rollouts, list)
+            if any(
+                str(entry["owner_id"]) == str(owner_id)
+                and entry["engine"] == engine_type
+                for entry in owner_rollouts
+            ):
+                decision_reason = "owner_rollout"
+            else:
+                environment_rollouts = value["environment_rollouts"]
+                assert isinstance(environment_rollouts, list)
+                if engine_type in environment_rollouts:
+                    decision_reason = "environment_rollout"
+        if decision_reason is None:
+            return self._reject(RolloutDecisionReason.BOT_NOT_ALLOWED)
+
+        return RolloutDecision(
+            eligible=True,
+            reason=RolloutDecisionReason.ELIGIBLE,
+            evidence=RolloutEvidence(
+                env=env,
+                config_id=config_id,
+                config_version=config_version,
+                batch_id=None,
+                engine_type=engine_type,
+                decision_reason=decision_reason,
+            ),
+        )
+
+    @staticmethod
+    def _matches_bot_rule(
+        rules: list[object],
+        *,
+        owner_id: str,
+        bot_id: str,
+        engine: str,
+    ) -> bool:
+        return any(
+            isinstance(entry, dict)
+            and str(entry.get("owner_id")) == str(owner_id)
+            and str(entry.get("bot_id")) == str(bot_id)
+            and entry.get("engine") == engine
+            for entry in rules
         )

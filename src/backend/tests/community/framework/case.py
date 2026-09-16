@@ -101,7 +101,18 @@ class ExpectError:
     exception_type: type[BaseException] | None = None
 
 
-Expectation = Union[ExpectSuccess, ExpectError]
+@dataclass(frozen=True)
+class ExpectRetired(ExpectError):
+    """A deliberately terminal route whose only valid contract is HTTP 410.
+
+    The coverage gate treats this one exercised terminal contract as complete;
+    unlike ordinary error cases, a retired route has no successful domain path.
+    """
+
+    status: int = 410
+
+
+Expectation = Union[ExpectSuccess, ExpectError, ExpectRetired]
 
 
 # Forward references for callable signatures. ``World`` is defined in

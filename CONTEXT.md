@@ -160,6 +160,18 @@ _避免使用_: 已发布 Bot、生产发布物
 某次服务 Bot 发布从 Bot 草稿态生成的不可变运行时制品。发布物至少固化每个技能依赖的 `skill_uuid + 外部版本键`；同一发布物的多实例部署、重启和回滚不会重新解析最新版本，也不参与后续 Skill 升级的草稿容器推送。
 _避免使用_: Bot 当前配置、动态 latest 引用
 
+**Skills Pool 准入策略（Skills Pool Admission Policy）**:
+决定尚未认领 Pool 布局的 Bot 是否可以首次 claim 的环境级策略。规则只包含精确 Bot、Owner + Engine、Environment + Engine 和精确 Bot exclusion；策略不负责迁移执行、恢复或回滚。
+_避免使用_: Batch、验收批次、迁移状态
+
+**Engine 准入开关（Engine Admission Switch）**:
+首次 claim 前按 Engine 评估的运维保险丝，优先于所有 allow 规则。关闭只阻止该 Engine 的新 claim，不取消、暂停或回滚已经 claim 的 Bot。
+_避免使用_: 停止运行中 Bot、自动回滚、Batch close
+
+**策略修订号（Policy Revision）**:
+一次 Skills Pool Admission Policy 原子变更的不可变标识。写请求使用上一 revision 做 CAS；Bot 首次 claim 冻结命中的 revision 和 admission reason，用于观测而不构成后续放量门禁。
+_避免使用_: Accepted Batch、Promotion Ready
+
 **运行时技能依赖（Runtime Skill Dependency）**:
 服务 Bot 发布物中记录的、已经从 Skill Reference 解析出的具体技能版本。它是某次发布的确定性输入，不等同于控制面的 Track Latest 绑定策略。
 _避免使用_: Bot 技能绑定、固定版本策略

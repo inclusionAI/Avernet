@@ -10,6 +10,7 @@ from agentclaw.community.core.common_config.whitelist_service import (
     CommonWhiteListService,
 )
 from agentclaw.community.core.skills_pool.rollout_config import (
+    ROLLOUT_SCHEMA_VERSION,
     normalize_rollout_config_value,
 )
 from agentclaw.community.core.skills_pool.rollout_gate import (
@@ -137,6 +138,170 @@ def enabled_config(
             ),
         },
     }
+
+
+def admission_policy_v2(
+    *,
+    engine_admission: object = None,
+    bot_allowlist: object = None,
+    owner_rollouts: object = None,
+    environment_rollouts: object = None,
+    bot_exclusions: object = None,
+) -> dict[str, Any]:
+    return {
+        "id": 42,
+        "enable": "1",
+        "env": "pre",
+        "gmt_modified": "2026-09-16T12:00:00",
+        "ext_info": {"revision": "policy-revision-7"},
+        "param_value": {
+            "schema_version": ROLLOUT_SCHEMA_VERSION,
+            "engine_admission": (
+                {"openclaw": True}
+                if engine_admission is None
+                else engine_admission
+            ),
+            "bot_allowlist": (
+                [] if bot_allowlist is None else bot_allowlist
+            ),
+            "owner_rollouts": (
+                [] if owner_rollouts is None else owner_rollouts
+            ),
+            "environment_rollouts": (
+                [] if environment_rollouts is None else environment_rollouts
+            ),
+            "bot_exclusions": (
+                [] if bot_exclusions is None else bot_exclusions
+            ),
+        },
+    }
+
+
+def test_v2_policy_normalizes_only_explicit_engine_scoped_rules() -> None:
+    value = admission_policy_v2(
+        bot_allowlist=[
+            {"owner_id": 168944, "bot_id": 42, "engine": "openclaw"}
+        ],
+        owner_rollouts=[{"owner_id": 168944, "engine": "openclaw"}],
+        environment_rollouts=["openclaw"],
+        bot_exclusions=[
+            {"owner_id": 168944, "bot_id": 43, "engine": "openclaw"}
+        ],
+    )["param_value"]
+
+    assert normalize_rollout_config_value(value) == {
+        "schema_version": ROLLOUT_SCHEMA_VERSION,
+        "engine_admission": {"openclaw": True},
+        "bot_allowlist": [
+            {"owner_id": "168944", "bot_id": "42", "engine": "openclaw"}
+        ],
+        "owner_rollouts": [
+            {"owner_id": "168944", "engine": "openclaw"}
+        ],
+        "environment_rollouts": ["openclaw"],
+        "bot_exclusions": [
+            {"owner_id": "168944", "bot_id": "43", "engine": "openclaw"}
+        ],
+    }
+
+    invalid = dict(value)
+    invalid["bot_allowlist"] = [{"owner_id": "168944", "bot_id": "42"}]
+    assert normalize_rollout_config_value(invalid) is None
+
+    invalid_engine_list = dict(value)
+    invalid_engine_list["environment_rollouts"] = [{"engine": "openclaw"}]
+    assert normalize_rollout_config_value(invalid_engine_list) is None
+
+
+def test_v2_engine_switch_precedes_every_allow_rule() -> None:
+    config = admission_policy_v2(
+        engine_admission={"openclaw": False},
+        bot_allowlist=[
+            {"owner_id": "owner-1", "bot_id": "bot-1", "engine": "openclaw"}
+        ],
+        owner_rollouts=[{"owner_id": "owner-1", "engine": "openclaw"}],
+        environment_rollouts=["openclaw"],
+    )
+
+    decision = evaluate(make_gate(config))
+
+    assert decision.eligible is False
+    assert decision.reason is RolloutDecisionReason.ENGINE_ADMISSION_DISABLED
+
+
+def test_v2_exclusion_precedes_exact_owner_and_environment_rules() -> None:
+    config = admission_policy_v2(
+        bot_allowlist=[
+            {"owner_id": "owner-1", "bot_id": "bot-1", "engine": "openclaw"}
+        ],
+        owner_rollouts=[{"owner_id": "owner-1", "engine": "openclaw"}],
+        environment_rollouts=["openclaw"],
+        bot_exclusions=[
+            {"owner_id": "owner-1", "bot_id": "bot-1", "engine": "openclaw"}
+        ],
+    )
+
+    decision = evaluate(make_gate(config))
+
+    assert decision.eligible is False
+    assert decision.reason is RolloutDecisionReason.BOT_EXCLUDED
+
+
+@pytest.mark.parametrize(
+    ("policy", "expected_reason"),
+    [
+        (
+            admission_policy_v2(
+                bot_allowlist=[
+                    {
+                        "owner_id": "owner-1",
+                        "bot_id": "bot-1",
+                        "engine": "openclaw",
+                    }
+                ]
+            ),
+            "exact_bot_allowlist",
+        ),
+        (
+            admission_policy_v2(
+                owner_rollouts=[{"owner_id": "owner-1", "engine": "openclaw"}]
+            ),
+            "owner_rollout",
+        ),
+        (
+            admission_policy_v2(environment_rollouts=["openclaw"]),
+            "environment_rollout",
+        ),
+    ],
+)
+def test_v2_allow_rules_freeze_policy_revision_without_batch(
+    policy: dict[str, Any],
+    expected_reason: str,
+) -> None:
+    decision = evaluate(make_gate(policy))
+
+    assert decision.eligible is True
+    assert decision.evidence is not None
+    assert decision.evidence.config_version == "policy-revision-7"
+    assert decision.evidence.batch_id is None
+    assert decision.evidence.engine_type == "openclaw"
+    assert decision.evidence.decision_reason == expected_reason
+
+
+def test_v2_rule_for_another_engine_never_admits_openclaw() -> None:
+    config = admission_policy_v2(
+        engine_admission={"openclaw": True, "hermes": True},
+        bot_allowlist=[
+            {"owner_id": "owner-1", "bot_id": "bot-1", "engine": "hermes"}
+        ],
+        owner_rollouts=[{"owner_id": "owner-1", "engine": "hermes"}],
+        environment_rollouts=["hermes"],
+    )
+
+    decision = evaluate(make_gate(config))
+
+    assert decision.eligible is False
+    assert decision.reason is RolloutDecisionReason.BOT_NOT_ALLOWED
 
 
 def make_gate(
