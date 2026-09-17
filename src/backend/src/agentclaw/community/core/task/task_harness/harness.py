@@ -238,3 +238,54 @@ class TaskHarness:
         while not stop_event.is_set():
             self._poll_once()
             self._sleep(self._interval)
+
+
+# ---------------------------------------------------------------------------
+# SLA threshold helpers for the trajectory RESET gate (REQ-4)
+# ---------------------------------------------------------------------------
+#
+# The engine RESET gate (``task_center/engine.py::_on_harness_collect``) needs
+# the effective SLA threshold **in ms** for ``action_result=sla_timeout`` and
+# ``pending_dispatch_stuck`` rows. The engine does NOT hold a ``self._harness``
+# reference (the harness is owned by ``TaskService`` and bound back via
+# ``set_on_harness`` — a chicken-and-egg that makes wiring ``self._harness``
+# into the engine constructor intrusive). These **pure module-level** helpers
+# read ``execution_config`` + ``run_mode`` and reuse the harness's own default
+# constants, giving the engine a clean public seam without duplicating the
+# numbers. They mirror ``TaskHarness._sla_timeout`` / ``_pending_timeout`` for
+# the **default-constructed** harness (prod wiring: 600 / 900 / 180 s); a
+# harness instance constructed with custom defaults (test-only) is out of
+# scope for the trajectory gate — the spec (REQ-4) records the 600 / 900 / 180
+# baseline. If ``_sla_timeout`` / ``_pending_timeout`` selection logic changes,
+# update these mirrors in lockstep.
+
+
+def effective_sla_threshold_ms(
+    execution_config: dict | None,
+    run_mode: str | None,
+) -> int:
+    """Effective RUNNING-SLA threshold in **ms** for the trajectory RESET gate.
+
+    Honors the per-node ``execution_config["SLA_TIMEOUT"]`` override; otherwise
+    picks ``coop_group`` (900 s) vs the single_bot/BBS default (600 s) by
+    ``run_mode``. Mirrors ``TaskHarness._sla_timeout`` (default-constructed).
+    """
+    cfg = execution_config or {}
+    t = cfg.get("SLA_TIMEOUT")
+    if t is not None:
+        return int(float(t) * 1000)
+    if run_mode == "coop_group":
+        return int(_DEFAULT_COOP_GROUP_SLA_TIMEOUT * 1000)
+    return int(_DEFAULT_SLA_TIMEOUT * 1000)
+
+
+def effective_pending_timeout_ms(execution_config: dict | None) -> int:
+    """Effective pending-dispatch timeout in **ms** for the trajectory RESET gate.
+
+    Honors ``execution_config["PENDING_TIMEOUT"]``; falls back to 180 s.
+    Mirrors ``TaskHarness._pending_timeout`` (default-constructed).
+    """
+    cfg = execution_config or {}
+    t = cfg.get("PENDING_TIMEOUT")
+    return int(float(t) * 1000) if t is not None else int(_DEFAULT_PENDING_TIMEOUT * 1000)
+

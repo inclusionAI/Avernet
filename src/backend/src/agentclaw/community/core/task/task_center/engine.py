@@ -53,6 +53,10 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodeQueryCriteria,
 )
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
+from agentclaw.community.core.task.task_harness.harness import (
+    effective_pending_timeout_ms,
+    effective_sla_threshold_ms,
+)
 from agentclaw.community.core.task.task_trajectory.payloads import emit_trajectory_event
 
 if TYPE_CHECKING:
@@ -2211,6 +2215,123 @@ class ExecutionEngine:
             node_id,
         )
 
+    # ===== RESET trajectory gate helpers (REQ-4) =====
+    #
+    # The harness RESET gate fires an additive ``TrajectoryActionType.RESET``
+    # event next to each harness reset point in ``_on_harness_collect``. The
+    # event carries ``action_result ∈ {sla_timeout, exec_failed_retry,
+    # pending_dispatch_stuck, bbs_lease_expired, harness_max}`` and
+    # ``ext_info = {trigger, elapsed_ms, sla_threshold_ms, attempts_seen}``.
+    # The threshold seam reuses ``harness.effective_sla_threshold_ms`` /
+    # ``effective_pending_timeout_ms`` (pure module helpers) because the engine
+    # does NOT hold a ``self._harness`` reference (the harness is owned by
+    # ``TaskService`` and bound back via ``set_on_harness``; wiring a
+    # ``self._harness`` into the engine constructor would be intrusive). The
+    # threshold read + elapsed computation at the gate are defensive
+    # (``try/except → None``) so a missing threshold never breaks the gate —
+    # only the *emission* itself is swallow+WARNING (决策 #14, inside
+    # ``emit_trajectory_event``).
+
+    def _reset_action_result(self, exec_error: str) -> str:
+        """Map the ``_on_harness_collect`` ``exec_error`` trigger to a RESET
+        ``action_result`` category (REQ-4). ``external_harness`` is the
+        sentinel ``on_harness`` produces from the harness SLA-timeout patch
+        (that patch carries no ``exec_error``), so it maps to ``sla_timeout``;
+        any other non-canonical string (e.g. a poller ``exec_error`` arriving
+        via ``on_report``) is treated as an execution-failure retry.
+        """
+        if exec_error == "pending_dispatch_stuck":
+            return "pending_dispatch_stuck"
+        if exec_error == "bbs_lease_expired":
+            return "bbs_lease_expired"
+        if exec_error in ("exec_failed_retry", "sla_timeout"):
+            return exec_error
+        if exec_error == "external_harness":
+            return "sla_timeout"
+        return "exec_failed_retry"
+
+    def _reset_sla_threshold_ms(
+        self, task_id: str, node: "TaskNode | None", action_result: str
+    ) -> int | None:
+        """Effective SLA threshold (ms) for a RESET trajectory event (REQ-4).
+
+        Timeout-class triggers only: ``sla_timeout`` → RUNNING SLA (600 / 900 s
+        by ``run_mode``, overridable via ``execution_config["SLA_TIMEOUT"]``);
+        ``pending_dispatch_stuck`` → pending timeout (180 s, overridable via
+        ``execution_config["PENDING_TIMEOUT"]``). Non-timeout triggers
+        (``exec_failed_retry`` / ``bbs_lease_expired`` / ``harness_max``) →
+        ``None`` (short-circuited before the ``_execution_config`` graph read,
+        so non-timeout fires pay no threshold read). Defensive: any read
+        failure → ``None`` (never breaks the gate). Mirrors
+        ``harness._sla_timeout`` / ``_pending_timeout`` for the default-
+        constructed harness; keep in sync if those change.
+        """
+        if action_result not in ("sla_timeout", "pending_dispatch_stuck"):
+            return None
+        try:
+            cfg = self._graph._execution_config(task_id)
+            if action_result == "pending_dispatch_stuck":
+                return effective_pending_timeout_ms(cfg)
+            return effective_sla_threshold_ms(cfg, effective_run_mode(node))
+        except Exception:  # noqa: BLE001 defensive read — never break the gate
+            return None
+
+    def _reset_elapsed_ms(self, node: "TaskNode | None") -> int | None:
+        """``elapsed_ms = now_ms - run_info.start_time`` (int-ms epoch, REQ-4).
+
+        ``None`` when the node never started (e.g. a fresh undispatched PENDING
+        node whose dwell baseline lives in the harness's internal
+        ``_pending_seen_at`` rather than on ``run_info.start_time``);
+        defensive → ``None``.
+        """
+        try:
+            st = node.run_info.start_time if node is not None else None
+            if st is None:
+                return None
+            return _now_ms() - int(st)
+        except Exception:  # noqa: BLE001 defensive
+            return None
+
+    def _emit_reset_trajectory(
+        self,
+        task_id: str,
+        node_id: str,
+        *,
+        action_result: str,
+        node: "TaskNode | None",
+        attempts_seen: int,
+        status_from: Status | None = None,
+        status_to: Status | None = None,
+    ) -> None:
+        """Fire one ``TrajectoryActionType.RESET`` trajectory event (REQ-4).
+
+        Additive to ``_log_action(NodeAction.RESET, ...)``; never raises (the
+        emitter swallows + logs WARNING, 决策 #14). ``ext_info.trigger`` echoes
+        ``action_result`` (the normalized category) so the row is self-
+        describing; ``ext_info.{elapsed_ms, sla_threshold_ms, attempts_seen}``
+        carry the failure_reason-derivable material (elapsed/threshold for
+        ``sla_timeout`` / ``pending_dispatch_stuck``).
+        """
+        threshold = self._reset_sla_threshold_ms(task_id, node, action_result)
+        elapsed = self._reset_elapsed_ms(node)
+        ext_info = {
+            "trigger": action_result,
+            "elapsed_ms": elapsed,
+            "sla_threshold_ms": threshold,
+            "attempts_seen": attempts_seen,
+        }
+        self._log_trajectory(
+            task_id,
+            node_id,
+            "reset",  # TrajectoryActionType.RESET.value(TYPE_CHECKING-only enum; emitter accepts str)
+            action_result=action_result,
+            action_input=None,
+            ext_info=ext_info,
+            status_from=status_from,
+            status_to=status_to,
+            attempt=attempts_seen,
+        )
+
     async def _on_harness_collect(
         self, task_id: str, node_id: str, exec_error: str, side: list[tuple]
     ) -> None:
@@ -2238,7 +2359,25 @@ class ExecutionEngine:
                 max_harness,
                 retries,
             )
+            # ``node`` 是图内活引用,``_hung_and_escalate`` 会把 ``node.status``
+            # 改写为 HUNG —— 翻态前快照 status_from(与既有 site 的
+            # ``_prev = node.status`` 同模式)。
+            _prev_status = node.status
             self._hung_and_escalate(task_id, node_id, "exec_stuck")
+            # 轨迹旁路:RESET(harness_max — 重试耗尽→HUNG,无复位)。与既有
+            # ``_log_action`` RESET 路径并列的独立直插轨迹事件(action_result
+            # 标注"重试上限已达"供 analyzer 末事件派生"重试耗尽"根因);决策 #14
+            # 吞+WARNING 在 emitter 层。status_to=None:此处未复位,HUNG 由
+            # ``_hung_and_escalate`` 内的 TRANSITION 动作记录。
+            self._emit_reset_trajectory(
+                task_id,
+                node_id,
+                action_result="harness_max",
+                node=node,
+                attempts_seen=retries,
+                status_from=_prev_status,
+                status_to=None,
+            )
             return
         retries += 1
         logger.info(
@@ -2280,6 +2419,21 @@ class ExecutionEngine:
                 status_from=_prev,
                 status_to=Status.PENDING,
             )
+            # 轨迹旁路:RESET —— 与既有 ``_log_action(NodeAction.RESET, ...)``
+            # 同闸门位置、独立直插 ``task_trajectory_events``(additive,非替换)。
+            # action_result 按 trigger 映射(REQ-4):``external_harness``→sla_timeout、
+            # ``exec_failed_retry``/``bbs_lease_expired``/poller exec_error→对应类;
+            # ext_info 携带 {trigger, elapsed_ms, sla_threshold_ms, attempts_seen}
+            # 供 analyzer 末事件派生"在 N ms 触发,阈值 M ms"。
+            self._emit_reset_trajectory(
+                task_id,
+                node_id,
+                action_result=self._reset_action_result(exec_error),
+                node=node,
+                attempts_seen=retries,
+                status_from=_prev,
+                status_to=Status.PENDING,
+            )
         elif node.status == Status.PENDING and node.run_info.extend_props.get(
             "dispatch_error"
         ):
@@ -2289,6 +2443,21 @@ class ExecutionEngine:
                     node_id=node_id,
                     extend_props_patch={"dispatch_error": None},
                 )
+            )
+            # 轨迹旁路:RESET(pending_dispatch_stuck — PENDING 派发卡住清
+            # dispatch_error 重搜推;此 elif 路径无 ``_log_action(RESET)``,故
+            # 轨迹事件为唯一 RESET 记录)。sla_threshold_ms 取 pending_timeout
+            # (180s,*1000 ms,execution_config 可覆盖);elapsed_ms 为停留时长
+            # (run_info.start_time 缺省时为 None — 未派发 PENDING 的 dwell 基线在
+            # harness 内部 _pending_seen_at,本闸门不可达)。
+            self._emit_reset_trajectory(
+                task_id,
+                node_id,
+                action_result="pending_dispatch_stuck",
+                node=node,
+                attempts_seen=retries,
+                status_from=Status.PENDING,
+                status_to=Status.PENDING,
             )
         # static plan:harness 重派走 static prepare(只派发 readiness.ready 的绑定 bot),
         # 不进搜推/claim_join,避免依赖未满足的节点(strategy_approval/implementation)被提前搜推
