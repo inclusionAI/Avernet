@@ -30,12 +30,14 @@ from agentclaw.community.core.repository.protocols.config import (
     BotCommonConfigRepositoryProtocol,
 )
 from agentclaw.community.core.common_config.bot_config_protocol import (
+    BotCommonConfigEntry,
     BotCommonConfigServiceProtocol,
     BotStoragePolicyProtocol,
     StoragePolicy,
     PreparedBotStoragePolicy,
     JsonValue,
 )
+from agentclaw.community.core.common_config.models import BotCommonConfigRecord
 from agentclaw.community.core.common_config.common_config_service_protocol import (
     CommonConfigServiceProtocol,
 )
@@ -69,27 +71,104 @@ class BotCommonConfigService(BotCommonConfigServiceProtocol):
             config_value=json.dumps(value, ensure_ascii=False),
         )
 
-    # Management operations used by the operator-facing HTTP adapter.
-    def get_record_by_id(self, *, config_id: int) -> Any:
+    # Operator-facing management operations. Encoding/decoding of the stored
+    # ``config_value`` column lives here (single owner), so rows written via
+    # the admin API stay readable by ``get_config`` above: every write is an
+    # unconditional ``json.dumps`` of a ``JsonValue``.
+
+    @staticmethod
+    def _dump(value: JsonValue) -> str:
+        return json.dumps(value, ensure_ascii=False)
+
+    @staticmethod
+    def _parse_stored(value: str) -> JsonValue:
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return value
+
+    def get_record_by_id(self, *, config_id: int) -> BotCommonConfigRecord | None:
         return self._repo.get_record_by_id(config_id=config_id)
 
-    def list_records(self, **kwargs: Any) -> tuple[int, list[Any]]:
-        return self._repo.list_records(**kwargs)
+    def list_records(
+        self,
+        *,
+        bot_id: str | None = None,
+        entity_id: str | None = None,
+        env: str | None = None,
+        config_key: str | None = None,
+        page_num: int = 1,
+        page_size: int = 100,
+    ) -> tuple[int, list[BotCommonConfigRecord]]:
+        return self._repo.list_records(
+            bot_id=bot_id,
+            entity_id=entity_id,
+            env=env,
+            config_key=config_key,
+            page_num=page_num,
+            page_size=page_size,
+        )
 
-    def create_record(self, **kwargs: Any) -> int:
-        return self._repo.create_record(**kwargs)
+    def create_record(
+        self, *, bot_id: str, entity_id: str, env: str, config_key: str, value: JsonValue
+    ) -> int:
+        return self._repo.create_record(
+            bot_id=bot_id,
+            entity_id=entity_id,
+            env=env,
+            config_key=config_key,
+            config_value=self._dump(value),
+        )
 
-    def update_record(self, *, config_id: int, config_value: str) -> bool:
-        return self._repo.update_record(config_id=config_id, config_value=config_value)
+    def update_record(self, *, config_id: int, value: JsonValue) -> bool:
+        return self._repo.update_record(
+            config_id=config_id, config_value=self._dump(value)
+        )
 
     def delete_record(self, *, config_id: int) -> bool:
         return self._repo.delete_record(config_id=config_id)
 
-    def upsert_record(self, **kwargs: Any) -> int:
-        return self._repo.upsert_record(**kwargs)
+    def upsert_record(
+        self, *, bot_id: str, entity_id: str, env: str, config_key: str, value: JsonValue
+    ) -> int:
+        return self._repo.upsert_record(
+            bot_id=bot_id,
+            entity_id=entity_id,
+            env=env,
+            config_key=config_key,
+            config_value=self._dump(value),
+        )
 
-    def batch_upsert_records(self, *, records: list[dict[str, str]]) -> list[int]:
-        return self._repo.batch_upsert_records(records=records)
+    def batch_upsert_records(
+        self, *, env: str, records: list[BotCommonConfigEntry]
+    ) -> list[int]:
+        return self._repo.batch_upsert_records(
+            records=[
+                {
+                    "bot_id": item.bot_id,
+                    "entity_id": item.entity_id,
+                    "env": env,
+                    "config_key": item.config_key,
+                    "config_value": self._dump(item.value),
+                }
+                for item in records
+            ]
+        )
+
+    def record_to_dict(self, record: BotCommonConfigRecord) -> dict[str, Any]:
+        return {
+            "id": record.id,
+            "bot_id": record.bot_id,
+            "entity_id": record.entity_id,
+            "env": record.env,
+            "config_key": record.config_key,
+            "config_value": self._parse_stored(record.config_value),
+            "is_delete": record.is_delete,
+            "gmt_create": record.gmt_create.isoformat() if record.gmt_create else None,
+            "gmt_modified": record.gmt_modified.isoformat()
+            if record.gmt_modified
+            else None,
+        }
 
 
 @dataclass(frozen=True)
