@@ -120,6 +120,7 @@ consumes:
   - "No service impls at import time — Protocols only declare shape, they don't depend on concrete services"
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
+  - agentclaw.community.kernel.publish_ignore
   - agentclaw.community.core.devices.repository.record  # DeviceBindingRecord input for provider-aware token target resolution
   - agentclaw.community.core.bot_collaborator.models # Collaborator records, roles and permission levels — typed in collaborator_service.py
   - agentclaw.community.core.access.models            # UserInfoRecord — typed in user_service.py

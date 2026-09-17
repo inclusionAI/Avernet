@@ -27,6 +27,8 @@ bindings exist so production routes can use ``Injected(...)``.
 from __future__ import annotations
 
 from typing import Annotated, Callable
+from agentclaw.community.api.publish_ignore_service import PublishIgnoreServiceProtocol
+from agentclaw.community.plugin_api.publish_ignore_runtime import PublishIgnoreRuntime
 
 from injector import Binder, Injector, Module, inject, provider, singleton
 
@@ -183,6 +185,32 @@ logger = get_logger()
 
 class ServiceBotModule(Module):
     """Production bindings for service_bot."""
+
+    @singleton
+    @provider
+    def publish_ignore_runtime(self, injector: Injector) -> PublishIgnoreRuntime:
+        import os
+        from agentclaw.community.plugins.community.publish_ignore_runtime import HttpPublishIgnoreRuntime
+        from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
+
+        return HttpPublishIgnoreRuntime(
+            injector.get(BaasService), injector.get(DeviceContextResolver),
+            injector.get(DeviceAdapterTransport), injector.get(Annotated[HttpClient, QUALIFIER_GENERAL]),
+            os.environ.get("SERVICE_BOT_PUBLISH_IGNORE_SIGNING_KEY", ""),
+        )
+
+    @singleton
+    @provider
+    def publish_ignore_service(self, injector: Injector) -> PublishIgnoreServiceProtocol:
+        from agentclaw.community.core.bot_collaborator.collaborator_service_protocol import CollaboratorServiceProtocol
+        from agentclaw.community.core.service_bot.services.publish_ignore_service import PublishIgnoreService
+        from agentclaw.community.core.runtime_binding.service import RuntimeBindingResolutionService
+
+        return PublishIgnoreService(
+            injector.get(BotRepository), injector.get(RuntimeBindingResolutionService),
+            injector.get(DeviceBindingRepository), injector.get(CollaboratorServiceProtocol),
+            injector.get(PublishIgnoreRuntime), env_utils.get_current_env(),
+        )
 
     def configure(self, binder: Binder) -> None:
         binder.bind(WorkspacePathFactory, to=WorkspacePathFactory, scope=singleton)
