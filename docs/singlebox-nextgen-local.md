@@ -89,6 +89,14 @@ FRONTEND_VARIANT=nextgen bash scripts/singlebox.sh stop frontend
 FRONTEND_VARIANT=legacy bash scripts/singlebox.sh start frontend
 ```
 
+Gateway stop shares the same safety contract: `stop gateway` / `stop all` only
+kills processes it can verify against the Gateway directory (pidfile, port
+listener, command pattern — each cwd-checked), and if `GATEWAY_PORT` is still
+held by a process outside the checkout after that, the stop **warns naming the
+holder and refuses to kill it** (stop it yourself, or reassign `GATEWAY_PORT`).
+The gateway's own `app.sh stop` does not have this guard — prefer the singlebox
+stop paths.
+
 Default URL: `http://127.0.0.1:8000/`. Use `FRONTEND_PORT` to select a different
 port. This is Singlebox's local Umi dev-server path, not an Nginx/Docker release.
 The launcher checks the selected root element and `/umi.js`, refusing the Umi
