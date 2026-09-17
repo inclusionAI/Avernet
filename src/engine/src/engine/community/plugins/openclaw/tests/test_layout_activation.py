@@ -294,6 +294,33 @@ def test_registered_local_cutover_syncs_latest_content_and_retires_bridges(
     assert repeated.status is PoolActivationStatus.ALREADY_COMMITTED
 
 
+def test_cutover_commits_with_managed_center_mapping(tmp_path: Path) -> None:
+    home, legacy_local, pool_local, pool_repo = _prepared_home(tmp_path)
+    pool_center = pool_local.parent / "skill-center"
+    center_source = (
+        pool_center
+        / "e5ae3b3a-e94d-4100-af03-5c5a659db7e7"
+        / "v1.5.11"
+    )
+    center_source.mkdir(parents=True)
+    target = legacy_local.parent / "mdata-skills"
+
+    result = activate_openclaw_pool(
+        migration_generation="generation-1",
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[SkillMapping(source=str(center_source), target=str(target))],
+        home=home,
+        repo_is_mounted=lambda path: path in {pool_repo, pool_center},
+    )
+
+    assert result.status is PoolActivationStatus.COMMITTED
+    assert target.is_symlink()
+    assert target.resolve() == center_source
+    marker = json.loads((pool_local.parent / ".pool-active").read_text())
+    assert marker["activation_state"] == "active"
+
+
 def test_invalid_registered_name_is_rejected_before_cutover(
     tmp_path: Path,
 ) -> None:
