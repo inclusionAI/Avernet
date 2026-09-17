@@ -354,52 +354,27 @@ def test_coverage_route_returns_none_when_all_covered():
     assert _coverage_route(["rule-a:1", "rule-b:2"], [], {"single", "group", "bbs"}) is None
 
 
-# ===== on-path 全覆盖后兜底派发(_coverage_post_dispatch): joined/pool 兜底 + single/group 平均随机 =====
+# ===== on-path 全覆盖后兜底派发(_coverage_post_dispatch): joined/pool 兜底 + 确定性正常派发 =====
 
 
-def test_coverage_post_dispatch_single_when_random_below_half(monkeypatch):
-    """random<0.5 → HIT_SINGLE(joined[0],owner 解析);不走 group。"""
-    monkeypatch.setattr(
-        "agentclaw.community.core.task.task_dispatch.strategies.random.random",
-        lambda: 0.3,
-    )
-    result = _coverage_post_dispatch(["rule-a:1", "rule-b:2", "rule-c:3"], [])
-
-    assert result.outcome == SearchOutcome.HIT_SINGLE
-    assert result.bot_id == "rule-a:1"
-    assert result.owner_id == "1"
-
-
-def test_coverage_post_dispatch_group_when_random_at_or_above_half(monkeypatch):
-    """random≥0.5 & len(bots)≥2 → HIT_MULTI_BOTS(前 3,manager_worker)。"""
-    monkeypatch.setattr(
-        "agentclaw.community.core.task.task_dispatch.strategies.random.random",
-        lambda: 0.6,
-    )
+def test_coverage_post_dispatch_uses_normal_group_rule_for_three_candidates():
+    """候选至少 3 个时，确定性创建由前 3 个组成的协作群。"""
     result = _coverage_post_dispatch(["rule-a:1", "rule-b:2", "rule-c:3"], [])
 
     assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
     assert result.group_formation.bot_ids == ["rule-a:1", "rule-b:2", "rule-c:3"]
 
 
-def test_coverage_post_dispatch_pool_fallback_when_joined_empty(monkeypatch):
-    """joined 空 → pool 兜底;random≥0.5 & len(pool)≥2 → group(pool 前 3)。"""
-    monkeypatch.setattr(
-        "agentclaw.community.core.task.task_dispatch.strategies.random.random",
-        lambda: 0.6,
-    )
+def test_coverage_post_dispatch_pool_fallback_when_joined_empty():
+    """joined 空时从 pool 兜底，并按正常规则用前 3 个创建协作群。"""
     result = _coverage_post_dispatch([], ["pool-a:1", "pool-b:2", "pool-c:3"])
 
     assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
     assert result.group_formation.bot_ids == ["pool-a:1", "pool-b:2", "pool-c:3"]
 
 
-def test_coverage_post_dispatch_single_demote_when_fewer_than_two_bots(monkeypatch):
-    """random≥0.5 但 len(bots)<2 → 降级 HIT_SINGLE(bots[0])。"""
-    monkeypatch.setattr(
-        "agentclaw.community.core.task.task_dispatch.strategies.random.random",
-        lambda: 0.9,
-    )
+def test_coverage_post_dispatch_selects_single_for_at_most_two_candidates():
+    """候选不超过 2 个时，确定性选择首个 Bot。"""
     result = _coverage_post_dispatch(["only:1"], [])
 
     assert result.outcome == SearchOutcome.HIT_SINGLE
@@ -442,5 +417,4 @@ def test_load_rule_test_pool_empty_on_roster_failure():
     bcn = _Bcn(exc=RuntimeError("roster down"))
 
     assert _run(_strat(bcn)._load_rule_test_pool()) == []
-
 
