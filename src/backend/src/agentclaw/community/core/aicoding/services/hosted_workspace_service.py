@@ -75,7 +75,11 @@ class AicodingHostedWorkspaceService(AicodingHostedWorkspaceServiceProtocol):
         # 引擎层与 service 层的入口延迟导入：避免与 engines 注册表在加载期互相触发。
         from agentclaw.community.core.bot_management.engines import (
             HostedWorkspaceNotEligibleError,
+            get_engine_provisioning_registry,
             resolve_provisioning,
+        )
+        from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
+            AICODING_ENGINE_TYPE,
         )
         from agentclaw.community.core.bot_management.engines.registry import (
             normalize_engine_type,
@@ -91,7 +95,13 @@ class AicodingHostedWorkspaceService(AicodingHostedWorkspaceServiceProtocol):
             default="",
         )
         template_config = self._template_service.get_template_config(bot_id) or {}
-        provision_ctx, provision_strategy = resolve_provisioning(
+        # 上下文仍统一由 resolve_provisioning 构造（owner_id/bot_type/...
+        # 单入口），但策略显式取 aicoding：托管工作空间的资格与开通是 aicoding
+        # 独有的能力，资格契约（applicationCoding 或显式开启 workspace 能力）
+        # 由 aicoding 策略的 _needs 判定。resolve_for_context 对 "applicationCoding
+        # + 非编码默认 engine(如仓库插入缺省的 moltis)" 会落到 Default(不托管)，
+        # 会让 legacy applicationCoding bot 被误判不可托管；故始终用 aicoding 策略。
+        provision_ctx, _engine_strategy = resolve_provisioning(
             bot_id=bot_id,
             owner_id=str(bot.get("owner_id") or user_id),
             bot_type=str(bot.get("bot_type") or ""),
@@ -99,8 +109,11 @@ class AicodingHostedWorkspaceService(AicodingHostedWorkspaceServiceProtocol):
             template_type=template_type,
             template_config=template_config,
         )
-        # 策略基类已提供默认：非编码引擎直接抛 not-eligible；aicoding 按 mixin 判定。
-        # 服务层不做 getattr 探测，单次直调；引擎抛"资格未开启"统一转 BotServiceError。
+        provision_strategy = get_engine_provisioning_registry().resolve(
+            AICODING_ENGINE_TYPE
+        )
+        # 非托管场景由 aicoding 策略 _needs 直接抛 not-eligible，service 翻译为
+        # BotServiceError；不做 getattr 探测，单次直调。
         try:
             return provision_strategy.ensure_hosted_workspace(
                 provision_ctx,
@@ -111,6 +124,6 @@ class AicodingHostedWorkspaceService(AicodingHostedWorkspaceServiceProtocol):
             )
         except HostedWorkspaceNotEligibleError as exc:
             raise BotServiceError(
-                f"Bot {bot_id} 未开启 workspace 托管能力，无法创建托管工作空间"
+                f"Bot {bot_id} 未开通 workspace 托管能力，无法创建托管工作空间"
                 f"（template_type={template_type}, active_engine={active_engine or None}）"
             ) from exc
