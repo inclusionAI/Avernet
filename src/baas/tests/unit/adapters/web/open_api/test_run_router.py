@@ -490,6 +490,7 @@ class TestGetRunResult:
         assert exc.value.detail["code"] == 40401
         assert "run-404" in exc.value.detail["message"]
 
+
 # ── abort_run ────────────────────────────────────────────────
 
 
@@ -639,4 +640,3 @@ class TestAbortRun:
         assert exc.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
         assert exc.value.detail["code"] == 50001
         assert "Internal server error" in exc.value.detail["message"]
-
