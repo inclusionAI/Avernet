@@ -22,9 +22,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
-# Fallback remote when TEAMCLAW_DIR cannot be resolved (the checkout's own
-# origin is the primary authority — it is the remote frontend-pull fetches).
-DEFAULT_REPO_URL="https://code.alipay.com/datamarket/teamclaw.git"
+# No baked-in remote URL: this is an open-source repo, and the teamclaw remote
+# is internal — cloning it is only possible from inside the company anyway.
+# The checkout's own origin (what frontend-pull fetches) is the only authority
+# this tool accepts; no resolvable checkout → hard refusal.
 SPRINT_CONFIG="${FRONTEND_SPRINT_CONFIG:-${HOME}/.config/teamclaw-frontend/branch}"
 BRANCH_HEADS_PATTERN='refs/heads/sprint_teamclaw*'
 
@@ -54,15 +55,15 @@ bounded_git() {
 }
 
 # Remote authority: the teamclaw checkout's own origin (the same spelling
-# frontend-pull reads); the known teamclaw URL is only a fallback for an
-# unset or non-repo TEAMCLAW_DIR.
+# frontend-pull reads). No fallback URL — the teamclaw remote is internal
+# and must not be spelled out in this open-source repository; without a
+# resolvable checkout the tool refuses rather than guessing where to look.
 resolve_repo_url() {
   REPO_URL=""
   if [ -n "${TEAMCLAW_DIR:-}" ] && \
      git -C "${TEAMCLAW_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     REPO_URL="$(git -C "${TEAMCLAW_DIR}" config --get remote.origin.url 2>/dev/null || true)"
   fi
-  [ -n "${REPO_URL}" ] || REPO_URL="${DEFAULT_REPO_URL}"
 }
 
 # The declared branch: FRONTEND_SPRINT_BRANCH env > the state file (first
@@ -82,6 +83,12 @@ case "${1:-}" in
 esac
 
 resolve_repo_url
+if [ -z "${REPO_URL}" ]; then
+    printf 'error: no teamclaw checkout to resolve the remote from.\n' >&2
+    printf 'set TEAMCLAW_DIR to your teamclaw checkout (its origin is the' >&2
+    printf ' remote this tool validates against); no fallback URL is baked in.\n' >&2
+    exit 1
+fi
 
 if [ "${1:-}" = "--list" ]; then
     if [ "$#" -gt 1 ]; then
