@@ -41,7 +41,13 @@ impl BotDeliveryCommand {
 #[derive(Debug)]
 pub struct BotDeliveryResult {
     pub target_bot_id: String,
+    /// `true` means the transport accepted the request. `false` is a complete,
+    /// explicit downstream rejection and is terminal for this attempt; it is
+    /// not a transport-uncertain error. Safe retry still requires an attached
+    /// `ServiceError::DeliveryNotSent { retryable: true, .. }`.
     pub delivered: bool,
+    /// A transport-neutral diagnostic for an explicit rejection. Callers must
+    /// not infer retry safety from arbitrary error text.
     pub error: Option<ServiceError>,
 }
 

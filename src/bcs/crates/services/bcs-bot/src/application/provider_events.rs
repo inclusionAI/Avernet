@@ -5,14 +5,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use bcs_service_api::{
-    BotEventCommand, BotRunContext, BotRunContextPort, ChatEventState, CollaborationRuntimeError,
+    BotEventCommand, BotRunContextPort, ChatEventState, CollaborationRuntimeError,
     CollaborationRuntimeService, HandleBotTerminalEventCommand,
     MessageFlowService,
     ProviderBotCoreService, ProviderBotEventCommand, ProviderBotEventCredential,
     ProviderBotEventError, ProviderBotEventOutcome, ProviderBotEventService,
     ProviderEventIngestCommand, ProviderEventIngestService, ProviderEventSource,
-    ProviderRunTransport, RuntimeBotIdentity, ServiceError, ServiceResult, TaskCompleteCommand,
-    TaskDispatchCommand, TaskMessageCommand,
+    ProviderRunTransport, RuntimeBotIdentity, ServiceError, ServiceResult,
     DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
 };
 use bcs_protocol::stream::{

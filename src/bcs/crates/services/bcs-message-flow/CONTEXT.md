@@ -26,6 +26,18 @@ exclusivity is implemented; it must never be emulated by a scope-wide abort.
 
 ## Provides
 
+The queue runtime treats a complete `BotDeliveryResult { delivered: false }`
+as terminal Failed, releases the Bot/session lane and never retries it. Only an
+explicit DeliveryNotSent result can consume the safe-retry budget. Transport
+errors without a complete downstream result remain Unknown, and late callbacks
+cannot reopen the terminal delivery.
+
+Bot offline state is not a durable waiting policy. Each scheduler/master epoch
+allows a bounded startup grace for WebSocket Bots to reconnect; an otherwise
+eligible queued head that remains offline after the grace fails before send and
+releases its bound context. A disconnect reported by the WebSocket delivery
+adapter after send-start is also an explicit terminal rejection, not Unknown.
+
 LiveDeliveryPolicy reconciles newer durable versions under the management snapshot
 write lock. Bootstrap invokes this every five seconds on the master to observe
 late old-master commits; failed reads retain the existing snapshot and return an

@@ -1535,45 +1535,49 @@ class BotService(BotServiceProtocol):
 
             # Step 1.5: Create template record if template_config is provided
             if template_type and template_config is not None:
-                if template_type == "applicationCoding":
-                    # A coding bot without a hosted workspace is unusable, so a
-                    # failed workspace create is fatal here (unlike a plain bot,
-                    # where template creation stays best-effort). The already-
-                    # inserted bot row is soft-deleted; deeper compensation
-                    # (Passport / workspace / template) stays best-effort-by-
-                    # caller, per the plan's explicit deferral.
-                    try:
-                        workspace_id = self._require_workspace_hosting().create_workspace_for_bot(
-                            staff_id=user_id,
-                            bot_id=bot_id,
-                            bot_name=resolved_bot_name,
-                            template_config=template_config,
-                        )
-                    except Exception as exc:
-                        logger.exception(
-                            "[bot_service.create_bot] hosted workspace creation failed bot_id=%s",
-                            bot_id,
-                        )
-                        self._repository.soft_delete_by_owner(bot_id, user_id)
-                        raise BotServiceError(
-                            "applicationCoding workspace creation failed"
-                        ) from exc
-                    if not workspace_id:
-                        logger.error(
-                            "[bot_service.create_bot] hosted workspace creation returned "
-                            "no id bot_id=%s",
-                            bot_id,
-                        )
-                        self._repository.soft_delete_by_owner(bot_id, user_id)
-                        raise BotServiceError(
-                            "applicationCoding workspace creation returned no id"
-                        )
-                    logger.info(
-                        "[bot_service.create_bot] Created hosted workspace %s for bot %s",
-                        workspace_id,
+                # 托管工作空间的资格校验与开通由引擎策略决定（aicoding 独有的开通动作）：
+                # 策略基类已提供默认（非编码引擎直接 no-op 返回 None），BotService 单次直调
+                # 即可，无需 getattr 探测能力；非 aicoding 不感知该概念。开通底层抛错原样
+                # 冒泡，未拿到 id 由引擎抛专用信号，两种情况都由 BotService 统一回滚已落库的
+                # bot 行并报错。
+                from agentclaw.community.core.bot_management.engines import (
+                    HostedWorkspaceProvisioningError,
+                    resolve_provisioning,
+                )
+                _provision_ctx, _provision_strategy = resolve_provisioning(
+                    bot_id=bot_id,
+                    owner_id=user_id,
+                    bot_type=resolved_bot_type,
+                    active_engine=resolved_active_engine,
+                    template_type=template_type,
+                    template_config=template_config,
+                )
+                workspace_id = None
+                try:
+                    workspace_id = _provision_strategy.provision_hosted_workspace(
+                        _provision_ctx,
+                        bot_name=resolved_bot_name,
+                        workspace_hosting_provider=self._require_workspace_hosting,
+                    )
+                except HostedWorkspaceProvisioningError:
+                    logger.error(
+                        "[bot_service.create_bot] hosted workspace creation returned "
+                        "no id bot_id=%s",
                         bot_id,
                     )
-
+                    self._repository.soft_delete_by_owner(bot_id, user_id)
+                    raise BotServiceError(
+                        "applicationCoding workspace creation returned no id"
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "[bot_service.create_bot] hosted workspace creation failed bot_id=%s",
+                        bot_id,
+                    )
+                    self._repository.soft_delete_by_owner(bot_id, user_id)
+                    raise BotServiceError(
+                        "applicationCoding workspace creation failed"
+                    ) from exc
                 try:
                     logger.info(
                         "[bot_service.create_bot] Creating template for bot %s, template_type=%s",
@@ -1588,12 +1592,9 @@ class BotService(BotServiceProtocol):
                     logger.info(f"[bot_service.create_bot] Template created for bot {bot_id}")
                 except Exception as e:
                     logger.error(f"[bot_service.create_bot] Failed to create template for bot {bot_id}: {e}", exc_info=True)
-                    if template_type == "applicationCoding":
-                        # An applicationCoding bot without its template record is
-                        # not a usable bot. Do not report success after hosting
-                        # succeeded but local template persistence failed. The
-                        # remote workspace may require manual cleanup because the
-                        # delete contract is intentionally deferred.
+                    if workspace_id:
+                        # 已开通托管工作空间（dima_space_id）的 template 记录必须成功：
+                        # workspace 开通成功但本地持久化失败时回滚 bot 行并报错。
                         self._repository.soft_delete_by_owner(bot_id, user_id)
                         raise BotServiceError(
                             "applicationCoding template creation failed"
@@ -6205,92 +6206,3 @@ class BotService(BotServiceProtocol):
         tripping ``_require_workspace_hosting`` mid-create after side effects.
         """
         return self._workspace_hosting_service is not None
-
-    def ensure_hosted_workspace(self, bot_id: str, user_id: str) -> Optional[str]:
-        """为 Coding bot 确保 DIMA workspace 存在（幂等）。
-
-        创建 bot 时若 DIMA 调用失败，bot 仍会成功落库但 template_config 缺少
-        ``dima_space_id``。此方法暴露给前端做手动补救：
-
-        1. 已有 ``dima_space_id`` → 直接返回（不重复创建）。
-        2. 否则调 DIMA 创建工作空间 + 写回 template_config。
-
-        Args:
-            bot_id: Bot ID
-            user_id: 操作者用户 ID（用于查询 bot；权限校验在 router 层
-                由 ``CollaboratorPermissionInterceptor`` 完成）
-
-        Returns:
-            DIMA workspace ID；DIMA 调用失败时返回 None。
-
-        Raises:
-            BotNotFoundError: bot 不存在或当前用户无权访问
-            BotServiceError: bot 不是可托管 DIMA 工作空间的 Coding Bot
-        """
-        bot = self._repository.get_by_id_and_owner(bot_id, user_id)
-        if not bot:
-            raise BotNotFoundError(f"Bot not found: {bot_id}")
-
-        template_type = bot.get("template_type")
-        active_engine = normalize_engine_type(
-            bot.get("active_engine") or bot.get("engine_type"),
-            default="",
-        )
-        is_legacy_application_coding = template_type == "applicationCoding"
-        is_coding_engine = active_engine in {AICODING_ENGINE_TYPE, CLAUDE_CODE_ENGINE_TYPE}
-        if not (is_legacy_application_coding or is_coding_engine):
-            raise BotServiceError(
-                f"Bot {bot_id} 不是可创建 DIMA 工作空间的 Coding Bot"
-                f"（template_type={template_type}, active_engine={active_engine or None}），"
-                "无法创建 DIMA 工作空间"
-            )
-
-        template_config = self._template_service.get_template_config(bot_id) or {}
-
-        existing_id = template_config.get("dima_space_id")
-        if existing_id:
-            logger.info(
-                "[bot_service.ensure_hosted_workspace] Bot %s already has dima_space_id=%s, skipping",
-                bot_id, existing_id,
-            )
-            return existing_id
-
-        bot_name = bot.get("bot_name") or bot_id
-        owner_id = bot.get("owner_id") or user_id
-
-        workspace_id = self._require_workspace_hosting().create_workspace_for_bot(
-            staff_id=owner_id,
-            bot_id=bot_id,
-            bot_name=bot_name,
-            template_config=template_config,
-            raise_on_failure=True,
-        )
-
-        if not workspace_id:
-            logger.warning(
-                "[bot_service.ensure_hosted_workspace] DIMA create failed for bot %s",
-                bot_id,
-            )
-            return None
-
-        # template_config 已被 create_workspace_for_bot inline 写入 dima_space_id；
-        # 用 create_or_update 兜底首次（template 记录可能尚不存在）
-        try:
-            self._template_service.create_or_update_template(
-                bot_id=bot_id,
-                template_config=template_config,
-                template_type=template_type,
-            )
-            logger.info(
-                "[bot_service.ensure_hosted_workspace] Persisted dima_space_id=%s for bot %s",
-                workspace_id, bot_id,
-            )
-        except Exception as e:
-            logger.error(
-                "[bot_service.ensure_hosted_workspace] Failed to persist template_config for bot %s: %s",
-                bot_id, e, exc_info=True,
-            )
-            # workspace 已经创建成功，持久化失败仍返回 ID 让前端可重试持久化逻辑
-            # （下次调用会因 dima_space_id 不在持久化记录中而重新进入此分支）
-
-        return workspace_id

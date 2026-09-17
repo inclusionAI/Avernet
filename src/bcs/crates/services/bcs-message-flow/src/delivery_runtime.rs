@@ -37,6 +37,9 @@ pub struct DeliveryRuntimeConfig {
     pub io_timeout: Duration,
     pub run_timeout: Duration,
     pub cancel_timeout: Duration,
+    /// Gives WebSocket Bots a short chance to reconnect after this scheduler
+    /// process or master epoch starts. This is not an offline queue policy.
+    pub startup_recovery_grace: Duration,
     pub max_tasks: usize,
     pub max_abort_tasks: usize,
 }
@@ -245,7 +248,8 @@ impl DeliveryRuntime {
                         if let Some(last) = entries.last() { cursors.insert(bot.clone(), last.session_id.clone()); }
                         if entries.is_empty() { continue; }
                         let rate_ready = epoch.elapsed().as_millis() as u64 >= last_send.get(&bot).copied().unwrap_or(0).saturating_add(policy.min_send_interval_ms);
-                        let online = if !paused && active < policy.max_running && rate_ready { self.bot_available(&bot).await } else { true };
+                        let transport_ready = !paused && active < policy.max_running && rate_ready;
+                        let online = if transport_ready { self.bot_available(&bot).await } else { true };
                         let selected = MessageDeliveryCore.select(DeliveryScheduleSnapshot {
                             entries: &entries, max_running: policy.max_running.saturating_sub(active).max(1), bot_online: online,
                             paused, now_ms: now_ms(), monotonic_now_ms: epoch.elapsed().as_millis() as u64,
@@ -254,6 +258,32 @@ impl DeliveryRuntime {
                         })?;
                         if active >= policy.max_running {
                             storage!(self.service.update_wait_reasons(entries.iter().map(|d| (d.delivery_id.clone(), bcs_domain::message_delivery::DeliveryWaitReason::BotCapacity)).collect(), now_ms()));
+                            continue;
+                        }
+                        if selected.action.is_none()
+                            && transport_ready
+                            && !online
+                            && epoch.elapsed() >= self.config.startup_recovery_grace
+                        {
+                            let offline_ids: BTreeSet<_> = selected.waiting.iter()
+                                .filter(|(_, reason)| *reason == bcs_domain::message_delivery::DeliveryWaitReason::BotOffline)
+                                .map(|(id, _)| id.clone())
+                                .collect();
+                            let waiting: Vec<_> = selected.waiting.iter()
+                                .filter(|(id, _)| !offline_ids.contains(id))
+                                .cloned()
+                                .collect();
+                            storage!(self.service.update_wait_reasons(waiting.clone(), now_ms()));
+                            for delivery_id in offline_ids {
+                                let Some(row) = storage!(self.get(&delivery_id)) else { continue; };
+                                tracing::warn!(
+                                    delivery_id = %row.delivery_id,
+                                    bot_id = %row.target_bot_id,
+                                    startup_recovery_grace_ms = self.config.startup_recovery_grace.as_millis() as u64,
+                                    "delivery target remained offline after startup recovery grace; marking failed"
+                                );
+                                storage!(self.transition(event(&row, Event::PreparationFailed)));
+                            }
                             continue;
                         }
                         storage!(self.service.update_wait_reasons(selected.waiting.clone(), now_ms()));
@@ -296,11 +326,32 @@ impl DeliveryRuntime {
                             if storage!(self.service.lane_blocked(row)) { continue; }
                             let entries = schedule_rows(std::slice::from_ref(row), bot);
                             let excluded = entries.iter().filter(|e| e.delivery_id != row.delivery_id).map(|e| e.delivery_id.clone()).collect();
+                            let rate_ready = epoch.elapsed().as_millis() as u64 >= last_send.get(bot).copied().unwrap_or(0).saturating_add(policy.min_send_interval_ms);
+                            let transport_ready = !paused && rate_ready;
+                            let online = if transport_ready { self.bot_available(bot).await } else { true };
                             let selected = MessageDeliveryCore.select(DeliveryScheduleSnapshot {
-                                entries: &entries, max_running: policy.max_running, bot_online: self.bot_available(bot).await,
+                                entries: &entries, max_running: policy.max_running, bot_online: online,
                                 paused, now_ms: now_ms(), monotonic_now_ms: epoch.elapsed().as_millis() as u64,
                                 next_send_tick_ms: last_send.get(bot).copied().unwrap_or(0).saturating_add(policy.min_send_interval_ms), after_session_id: None, preparing_delivery_ids: &excluded,
                             })?;
+                            if matches!(selected.action, Some(DeliveryScheduleAction::Expire { .. })) {
+                                storage!(self.transition(event(row, Event::QueueExpired)));
+                                continue;
+                            }
+                            if selected.action.is_none()
+                                && transport_ready
+                                && !online
+                                && epoch.elapsed() >= self.config.startup_recovery_grace
+                            {
+                                tracing::warn!(
+                                    delivery_id = %row.delivery_id,
+                                    bot_id = %row.target_bot_id,
+                                    startup_recovery_grace_ms = self.config.startup_recovery_grace.as_millis() as u64,
+                                    "prepared delivery target disconnected after startup recovery grace; marking failed"
+                                );
+                                storage!(self.transition(event(row, Event::PreparationFailed)));
+                                continue;
+                            }
                             if !matches!(selected.action, Some(DeliveryScheduleAction::Prepare { ref delivery_id, .. }) if delivery_id == &row.delivery_id) { continue; }
                             if !tokio::time::timeout(self.config.io_timeout, self.preparation.still_valid(&prepared)).await.unwrap_or(false) { continue; }
                             if prepared.command.target_bot_id() != bot || prepared.command.run_id.as_str() != row.run_id.as_deref().unwrap_or("")
@@ -347,18 +398,27 @@ impl DeliveryRuntime {
                                 // Submission is not ACK. A delivered=true result keeps
                                 // dispatching until a trusted Bot event proves receipt.
                                 {
-                                    let failure = match &result {
-                                        Some(Err(error)) => Some(error),
-                                        Some(Ok(result)) if !result.delivered => result.error.as_ref(),
-                                        _ => None,
-                                    };
-                                    let next = match failure {
-                                        Some(bcs_service_api::ServiceError::DeliveryNotSent { code, retryable }) => {
+                                    let next = match &result {
+                                        Some(Err(bcs_service_api::ServiceError::DeliveryNotSent { code, retryable }))
+                                        | Some(Ok(BotDeliveryResult {
+                                            delivered: false,
+                                            error: Some(bcs_service_api::ServiceError::DeliveryNotSent { code, retryable }),
+                                            ..
+                                        })) => {
                                             tracing::warn!(delivery_id = %id, %request_id, code, retryable, "delivery failed before submission");
                                             let (_, _, retries, _) = self.policies(&[row.target_bot_id.clone()]).await;
                                             Event::DefinitelyNotSent { retry: *retryable && row.attempt_no <= retries }
                                         }
-                                        _ if matches!(result, Some(Ok(ref result)) if result.delivered) => Event::Submitted,
+                                        Some(Ok(result)) if result.delivered => Event::Submitted,
+                                        Some(Ok(result)) => {
+                                            tracing::warn!(
+                                                delivery_id = %id,
+                                                %request_id,
+                                                error = ?result.error,
+                                                "delivery explicitly rejected; marking terminal failed"
+                                            );
+                                            Event::Failed
+                                        }
                                         _ => {
                                             tracing::warn!(delivery_id = %id, %request_id, "delivery outcome unknown; no automatic resend");
                                             Event::TransportUnknown

@@ -59,6 +59,9 @@ from agentclaw.community.api.collaborator_service import CollaboratorServiceProt
 from agentclaw.community.api.installation_backfill_service import (
     InstallationBackfillServiceProtocol,
 )
+from agentclaw.community.api.bot_common_config_service import (
+    BotCommonConfigServiceProtocol,
+)
 from agentclaw.community.api.bot_inventory_service import BotInventoryServiceProtocol
 from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
@@ -68,6 +71,9 @@ from agentclaw.community.api.bot_cli_tool_service import (
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools.bot_service import (
     BotCliToolService,
+)
+from agentclaw.community.core.common_config.bot_config_service import (
+    BotCommonConfigService,
 )
 from agentclaw.community.api.bot_config_manifest_apply_service import (
     BotConfigManifestApplyServiceProtocol,
@@ -294,6 +300,7 @@ from agentclaw.community.core.spaces.services import (
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
 _PAIRS = [
+    (BotCommonConfigServiceProtocol, BotCommonConfigService),
     (ExpertChatInstanceServiceProtocol, ExpertChatInstanceService),
     (BotAppGrantServiceProtocol, BotAppGrantService),
     (CollaboratorServiceProtocol, CollaboratorService),

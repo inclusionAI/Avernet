@@ -15,6 +15,7 @@ from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import (
     DEFAULT_CRON_SCHEDULE,
     DEFAULT_CRON_TIMEZONE,
     DEFAULT_CRON_TIMEOUT_SECS,
+    DEFAULT_NO_WORKFLOW_CUSTOM_MESSAGE,
 )
 from agentclaw.community.core.bot_management.utils import extract_workflow_name
 
@@ -97,10 +98,11 @@ class TestBuildCronCommand:
     """Tests for _build_cron_command helper."""
 
     def test_with_dima_space_id_only(self):
-        """仅 dima_space_id 时，构建基本命令。"""
+        """无 workflow 时，使用固定 custom_message 提示语。"""
         result = _build_cron_command("W26001118999")
         assert result.startswith("查询dima空间W26001118999的待开发需求，开启7*24小时自动研发|")
         assert "space:W26001118999" in result
+        assert ("|custom_message:" + DEFAULT_NO_WORKFLOW_CUSTOM_MESSAGE) in result
 
     def test_with_all_params(self):
         """所有参数都提供时，构建完整命令。"""
@@ -109,6 +111,7 @@ class TestBuildCronCommand:
             user_id="user_dima_bot_1",
             agent_id="bot_personal_dima_1",
             message="开始编码",
+            workflow="devflow",
         )
         assert result.startswith("查询dima空间W26001118999的待开发需求，开启7*24小时自动研发|")
         assert "space:W26001118999" in result
@@ -117,16 +120,17 @@ class TestBuildCronCommand:
         assert "message:开始编码" in result
 
     def test_without_message(self):
-        """不提供 message 时，命令中不包含 message 字段。"""
+        """配置 workflow 但不提供 message 时，命令中不包含 message 字段。"""
         result = _build_cron_command(
             dima_space_id="W26001118999",
             user_id="user_1",
             agent_id="agent_1",
+            workflow="devflow",
         )
         assert "space:W26001118999" in result
         assert "user:user_1" in result
         assert "agent:agent_1" in result
-        assert "message:" not in result
+        assert "|message:" not in result
 
     def test_with_message(self):
         """提供 message 时，命令中包含 message 字段。"""
@@ -135,6 +139,7 @@ class TestBuildCronCommand:
             user_id="user_1",
             agent_id="agent_1",
             message="你好，请开始编码",
+            workflow="devflow",
         )
         assert "message:你好，请开始编码" in result
 
@@ -145,12 +150,14 @@ class TestBuildCronCommand:
             user_id="user_dima_bot_1",
             agent_id="bot_personal_dima_1",
             message="开始编码",
+            workflow="devflow",
         )
         assert result == (
             "查询dima空间W26001118999的待开发需求，开启7*24小时自动研发"
             "|space:W26001118999"
             "|user:user_dima_bot_1|agent:bot_personal_dima_1"
             "|kind:autoInitiate"
+            "|workflow:devflow"
             "|message:开始编码"
             "|maxTaskNum:3"
         )
@@ -162,8 +169,9 @@ class TestBuildCronCommand:
             user_id="user_1",
             agent_id="agent_1",
             message="",
+            workflow="devflow",
         )
-        assert "message:" not in result
+        assert "|message:" not in result
 
     def test_with_append_message(self):
         """提供 append_message 时，命令中包含 append_message 字段。"""
@@ -172,6 +180,7 @@ class TestBuildCronCommand:
             user_id="user_1",
             agent_id="agent_1",
             append_message="请优先处理核心逻辑",
+            workflow="devflow",
         )
         assert "append_message:请优先处理核心逻辑" in result
 
@@ -182,8 +191,9 @@ class TestBuildCronCommand:
             user_id="user_1",
             agent_id="agent_1",
             append_message="",
+            workflow="devflow",
         )
-        assert "append_message:" not in result
+        assert "|append_message:" not in result
 
     def test_command_format_with_append_message(self):
         """所有参数（含 append_message）时，命令格式正确。"""
@@ -205,6 +215,44 @@ class TestBuildCronCommand:
             "|append_message:注意代码质量"
             "|maxTaskNum:3"
         )
+
+    def test_no_workflow_uses_default_custom_message(self):
+        """无 workflow 时，maxTaskNum 之后拼固定 custom_message 提示语。"""
+        result = _build_cron_command(
+            dima_space_id="W123",
+            user_id="user_1",
+            agent_id="agent_1",
+        )
+        assert result == (
+            "查询dima空间W123的待开发需求，开启7*24小时自动研发"
+            "|space:W123|user:user_1|agent:agent_1|kind:autoInitiate"
+            "|maxTaskNum:3"
+            "|custom_message:" + DEFAULT_NO_WORKFLOW_CUSTOM_MESSAGE
+        )
+
+    def test_no_workflow_custom_message_param(self):
+        """无 workflow 且传入 custom_message 时，使用传入的提示语。"""
+        result = _build_cron_command(
+            dima_space_id="W123",
+            user_id="user_1",
+            agent_id="agent_1",
+            custom_message="自定义提示语${url}",
+        )
+        assert "|custom_message:自定义提示语${url}" in result
+        assert DEFAULT_NO_WORKFLOW_CUSTOM_MESSAGE not in result
+
+    def test_no_workflow_ignores_message_and_append_message(self):
+        """无 workflow 时，message / append_message 不拼接进命令。"""
+        result = _build_cron_command(
+            dima_space_id="W123",
+            user_id="user_1",
+            agent_id="agent_1",
+            message="应被忽略",
+            append_message="也应被忽略",
+        )
+        assert "|message:" not in result
+        assert "|append_message:" not in result
+        assert ("|custom_message:" + DEFAULT_NO_WORKFLOW_CUSTOM_MESSAGE) in result
 
 
 # ── CronAutoSetupService tests ─────────────────────────────────────────
@@ -563,7 +611,12 @@ class TestCronAutoSetupService:
         service, mock_repo, mock_relay = self._create_service(
             template_data={
                 "name": "TestBot",
-                "ext": {"is_hosted_24x7": 1, "dima_space_id": "W123", "append_message": "请优先处理核心逻辑"}
+                "ext": {
+                    "is_hosted_24x7": 1,
+                    "dima_space_id": "W123",
+                    "devflow_workflow": {"name": "devflow"},
+                    "append_message": "请优先处理核心逻辑",
+                }
             }
         )
         result = await service.auto_setup_cron_for_bot("bot1", "user1", "nick1")

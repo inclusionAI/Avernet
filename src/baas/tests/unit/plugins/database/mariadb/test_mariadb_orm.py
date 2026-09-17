@@ -7,6 +7,7 @@ server by mocking the SQLAlchemy engine/session construction.
 
 from __future__ import annotations
 
+import types
 from contextlib import contextmanager
 
 import pytest
@@ -167,18 +168,179 @@ class TestSeed:
 class TestCreateAll:
     def test_creates_tables(self, plugin: MariaDbOrmPlugin, monkeypatch) -> None:
         created_with: dict = {}
+        engine = _FakeSyncEngine()
+
+        class Table:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+        class FakeMetadata:
+            sorted_tables = [Table("baas_bot"), Table("baas_tenant")]
+
+            def create_all(self, engine, tables=None, checkfirst=True):
+                created_with["engine"] = engine
+                created_with["tables"] = tables
 
         class FakeBase:
-            metadata = _FakeMetadata(created_with)
+            metadata = FakeMetadata()
 
         monkeypatch.setattr(
             "secbaas.community.spi.database.Base",
             FakeBase,
         )
 
-        plugin._sync_engine = "sync-engine"
+        plugin._sync_engine = engine
         plugin.create_all()
-        assert created_with["engine"] == "sync-engine"
+        assert created_with["engine"] is engine
+        assert [t.name for t in created_with["tables"]] == [
+            "baas_bot",
+            "baas_tenant",
+        ]
+
+    def test_creates_only_baas_owned_tables(
+        self, plugin: MariaDbOrmPlugin, monkeypatch
+    ) -> None:
+        """Backend-owned `ac_*` tables are never created by BAAS."""
+        created_with: dict = {}
+
+        class Table:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+        class FakeMetadata:
+            sorted_tables = [
+                Table("ac_bots"),
+                Table("ac_bot_publish"),
+                Table("ac_entity_device_binding"),
+                Table("ac_lock_table"),
+                Table("baas_bot"),
+            ]
+
+            def create_all(self, engine, tables=None, checkfirst=True):
+                created_with["tables"] = tables
+
+        class FakeBase:
+            metadata = FakeMetadata()
+
+        monkeypatch.setattr(
+            "secbaas.community.spi.database.Base",
+            FakeBase,
+        )
+
+        plugin._sync_engine = _FakeSyncEngine()
+        plugin.create_all()
+
+        names = sorted(t.name for t in created_with["tables"])
+        assert names == ["ac_lock_table", "baas_bot"]
+
+    def test_raises_when_named_lock_cannot_be_acquired(
+        self, plugin: MariaDbOrmPlugin, monkeypatch
+    ) -> None:
+        class Table:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+        class FakeMetadata:
+            sorted_tables = [Table("baas_bot")]
+
+            def create_all(self, engine, tables=None, checkfirst=True):
+                raise AssertionError("must not create tables without the lock")
+
+        class FakeBase:
+            metadata = FakeMetadata()
+
+        monkeypatch.setattr(
+            "secbaas.community.spi.database.Base",
+            FakeBase,
+        )
+
+        engine = _FakeSyncEngine(acquire_result=0)
+        plugin._sync_engine = engine
+        with pytest.raises(RuntimeError, match="could not acquire named lock"):
+            plugin.create_all()
+        assert not any("RELEASE_LOCK" in s for s in engine.connection.statements)
+        assert engine.connection.closed is True
+
+    def test_releases_lock_after_creation(
+        self, plugin: MariaDbOrmPlugin, monkeypatch
+    ) -> None:
+        class Table:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+        class FakeMetadata:
+            sorted_tables = [Table("baas_bot")]
+
+            def create_all(self, engine, tables=None, checkfirst=True):
+                pass
+
+        class FakeBase:
+            metadata = FakeMetadata()
+
+        monkeypatch.setattr(
+            "secbaas.community.spi.database.Base",
+            FakeBase,
+        )
+
+        engine = _FakeSyncEngine()
+        plugin._sync_engine = engine
+        plugin.create_all()
+        assert any("GET_LOCK" in s for s in engine.connection.statements)
+        assert any("RELEASE_LOCK" in s for s in engine.connection.statements)
+        assert engine.connection.closed is True
+
+    def test_tolerates_already_exists_race(
+        self, plugin: MariaDbOrmPlugin, monkeypatch
+    ) -> None:
+        class Table:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+        class FakeMetadata:
+            sorted_tables = [Table("baas_bot")]
+
+            def create_all(self, engine, tables=None, checkfirst=True):
+                raise RuntimeError("(1050, \"Table 'baas_bot' already exists\")")
+
+        class FakeBase:
+            metadata = FakeMetadata()
+
+        monkeypatch.setattr(
+            "secbaas.community.spi.database.Base",
+            FakeBase,
+        )
+
+        engine = _FakeSyncEngine()
+        plugin._sync_engine = engine
+        plugin.create_all()
+        assert any("RELEASE_LOCK" in s for s in engine.connection.statements)
+
+    def test_propagates_unrelated_creation_errors(
+        self, plugin: MariaDbOrmPlugin, monkeypatch
+    ) -> None:
+        class Table:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+        class FakeMetadata:
+            sorted_tables = [Table("baas_bot")]
+
+            def create_all(self, engine, tables=None, checkfirst=True):
+                raise RuntimeError("Access denied for user 'baas'@'%'")
+
+        class FakeBase:
+            metadata = FakeMetadata()
+
+        monkeypatch.setattr(
+            "secbaas.community.spi.database.Base",
+            FakeBase,
+        )
+
+        engine = _FakeSyncEngine()
+        plugin._sync_engine = engine
+        with pytest.raises(RuntimeError, match="Access denied"):
+            plugin.create_all()
+        assert engine.connection.closed is True
 
 
 class TestInitDatabase:
@@ -333,9 +495,25 @@ class _FakeDbManager:
         self._records["plugin"] = p
 
 
-class _FakeMetadata:
-    def __init__(self, created_with: dict) -> None:
-        self._created_with = created_with
+class _FakeLockConnection:
+    def __init__(self, acquire_result=1) -> None:
+        self.statements: list[str] = []
+        self.closed = False
+        self._acquire_result = acquire_result
 
-    def create_all(self, engine) -> None:
-        self._created_with["engine"] = engine
+    def execute(self, statement, params=None):
+        sql = str(statement)
+        self.statements.append(sql)
+        value = self._acquire_result if "GET_LOCK" in sql else None
+        return types.SimpleNamespace(scalar=lambda: value)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FakeSyncEngine:
+    def __init__(self, acquire_result=1) -> None:
+        self.connection = _FakeLockConnection(acquire_result)
+
+    def connect(self):
+        return self.connection

@@ -69,6 +69,7 @@ class DeployProfile(Enum):
     TEST = "test"
     CORP_TEST = "corp_test"
     COMMUNITY = "community"
+    LOCAL_K8S = "local-k8s"
 
     @classmethod
     def detect(cls) -> DeployProfile:
@@ -80,12 +81,12 @@ class DeployProfile(Enum):
         raw = os.getenv("DEPLOY_PROFILE")
         if raw is None:
             raise RuntimeError(
-                "DEPLOY_PROFILE must be set (corp|singlebox|test|corp_test|community)"
+                "DEPLOY_PROFILE must be set (corp|singlebox|test|corp_test|community|local-k8s)"
             )
         try:
             return cls(raw.strip().lower())
         except ValueError:
             raise RuntimeError(
                 f"Unknown DEPLOY_PROFILE={raw!r}; "
-                "expected one of corp|singlebox|test|corp_test|community"
+                "expected one of corp|singlebox|test|corp_test|community|local-k8s"
             ) from None

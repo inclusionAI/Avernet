@@ -114,6 +114,40 @@ struct RecordingIo {
     fail_registration: bool,
 }
 
+struct AvailabilityPreparation {
+    inner: Arc<RecordingIo>,
+    available: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[async_trait]
+impl ManagedDeliveryPreparationService for AvailabilityPreparation {
+    async fn is_available(&self, _: &str) -> bool {
+        self.available.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    async fn prepare(
+        &self,
+        row: &PersistedMessageDelivery,
+    ) -> ServiceResult<PreparedManagedDelivery> {
+        self.inner.prepare(row).await
+    }
+
+    async fn before_send(
+        &self,
+        row: &PersistedMessageDelivery,
+        command: &BotDeliveryCommand,
+    ) -> ServiceResult<()> {
+        self.inner.before_send(row, command).await
+    }
+
+    async fn prepare_abort(
+        &self,
+        row: &PersistedMessageDelivery,
+    ) -> ServiceResult<BotAbortDeliveryCommand> {
+        self.inner.prepare_abort(row).await
+    }
+}
+
 #[tokio::test]
 async fn transport_not_sent_is_terminal_unless_explicitly_retryable() -> Result<(), Box<dyn std::error::Error>> {
     struct NotSentIo { retryable: bool, nested: bool, calls: std::sync::atomic::AtomicUsize }
@@ -145,6 +179,175 @@ async fn transport_not_sent_is_terminal_unless_explicitly_retryable() -> Result<
             stop.send(true)?; task.await??;
         }
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn explicit_delivery_rejection_is_terminal_releases_lane_and_is_not_retried(
+) -> Result<(), Box<dyn std::error::Error>> {
+    struct RejectThenAccept {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+    #[async_trait]
+    impl BotDeliveryPort for RejectThenAccept {
+        async fn is_available(&self, _: &BotDeliveryTarget) -> bool {
+            true
+        }
+
+        async fn deliver(&self, cmd: BotDeliveryCommand) -> ServiceResult<BotDeliveryResult> {
+            let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if call == 0 {
+                return Ok(BotDeliveryResult {
+                    target_bot_id: cmd.target_bot_id().into(),
+                    delivered: false,
+                    error: Some(ServiceError::InternalError("provider returned HTTP 500".into())),
+                });
+            }
+            Ok(BotDeliveryResult {
+                target_bot_id: cmd.target_bot_id().into(),
+                delivered: true,
+                error: None,
+            })
+        }
+    }
+
+    let service = Arc::new(ManagedMessageDelivery::new(Arc::new(MemoryMessageRepo::new())));
+    service.admit(command("rejected", "same-lane")).await?;
+    service.admit(command("successor", "same-lane")).await?;
+    let preparation = Arc::new(RecordingIo {
+        service: service.clone(),
+        sent: Default::default(),
+        aborts: Default::default(),
+        fail_send: false,
+        fail_registration: false,
+    });
+    let transport = Arc::new(RejectThenAccept { calls: Default::default() });
+    let mut worker = runtime(service.clone(), preparation);
+    worker.transport = transport.clone();
+    worker.config.max_safe_retries = 5;
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let task = tokio::spawn(worker.run(shutdown));
+
+    let failed = wait_status(&service, "rejected", Status::Failed).await?;
+    assert!(failed.state.may_have_been_sent);
+    assert_eq!(failed.attempt_no, 1);
+    let unchanged = service.transition(event(&failed, Event::Completed)).await?;
+    assert_eq!(unchanged.state.status, Status::Failed);
+    wait_status(&service, "successor", Status::Dispatching).await?;
+    assert_eq!(transport.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+
+    stop.send(true)?;
+    task.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn startup_recovery_grace_bridges_reconnect_but_does_not_queue_offline_bots(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let service = Arc::new(ManagedMessageDelivery::new(Arc::new(MemoryMessageRepo::new())));
+    service.admit(command("reconnect", "lane")).await?;
+    let io = Arc::new(RecordingIo {
+        service: service.clone(),
+        sent: Default::default(),
+        aborts: Default::default(),
+        fail_send: false,
+        fail_registration: false,
+    });
+    let available = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut worker = runtime(service.clone(), io.clone());
+    worker.preparation = Arc::new(AvailabilityPreparation {
+        inner: io.clone(),
+        available: available.clone(),
+    });
+    worker.config.startup_recovery_grace = Duration::from_millis(200);
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let task = tokio::spawn(worker.run(shutdown));
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let row = service.snapshot(None).await.unwrap().remove(0);
+            if row.wait_reason
+                == Some(bcs_domain::message_delivery::DeliveryWaitReason::BotOffline)
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await?;
+    available.store(true, std::sync::atomic::Ordering::SeqCst);
+    wait_status(&service, "reconnect", Status::Dispatching).await?;
+    assert_eq!(io.sent.lock().await.as_slice(), ["reconnect"]);
+    stop.send(true)?;
+    task.await??;
+
+    let service = Arc::new(ManagedMessageDelivery::new(Arc::new(MemoryMessageRepo::new())));
+    service.admit(command("offline", "lane")).await?;
+    let io = Arc::new(RecordingIo {
+        service: service.clone(),
+        sent: Default::default(),
+        aborts: Default::default(),
+        fail_send: false,
+        fail_registration: false,
+    });
+    let mut worker = runtime(service.clone(), io.clone());
+    worker.preparation = Arc::new(AvailabilityPreparation {
+        inner: io.clone(),
+        available: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    });
+    worker.config.startup_recovery_grace = Duration::from_millis(10);
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let task = tokio::spawn(worker.run(shutdown));
+    let failed = wait_status(&service, "offline", Status::Failed).await?;
+    assert!(!failed.state.may_have_been_sent);
+    assert_eq!(failed.attempt_no, 0);
+    assert!(io.sent.lock().await.is_empty());
+    stop.send(true)?;
+    task.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn websocket_disconnect_before_send_is_terminal_and_not_retried(
+) -> Result<(), Box<dyn std::error::Error>> {
+    struct DisconnectedTransport(std::sync::atomic::AtomicUsize);
+
+    #[async_trait]
+    impl BotDeliveryPort for DisconnectedTransport {
+        async fn is_available(&self, _: &BotDeliveryTarget) -> bool {
+            true
+        }
+
+        async fn deliver(&self, cmd: BotDeliveryCommand) -> ServiceResult<BotDeliveryResult> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(BotDeliveryResult {
+                target_bot_id: cmd.target_bot_id().into(),
+                delivered: false,
+                error: Some(ServiceError::BotNotConnected(cmd.target_bot_id().into())),
+            })
+        }
+    }
+
+    let service = Arc::new(ManagedMessageDelivery::new(Arc::new(MemoryMessageRepo::new())));
+    service.admit(command("disconnected", "lane")).await?;
+    let preparation = Arc::new(RecordingIo {
+        service: service.clone(),
+        sent: Default::default(),
+        aborts: Default::default(),
+        fail_send: false,
+        fail_registration: false,
+    });
+    let transport = Arc::new(DisconnectedTransport(Default::default()));
+    let mut worker = runtime(service.clone(), preparation);
+    worker.transport = transport.clone();
+    worker.config.max_safe_retries = 5;
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let task = tokio::spawn(worker.run(shutdown));
+    let failed = wait_status(&service, "disconnected", Status::Failed).await?;
+    assert!(failed.state.may_have_been_sent);
+    assert_eq!(failed.attempt_no, 1);
+    assert_eq!(transport.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+    stop.send(true)?;
+    task.await??;
     Ok(())
 }
 
@@ -311,6 +514,7 @@ fn runtime(service: Arc<ManagedMessageDelivery>, io: Arc<RecordingIo>) -> Delive
             io_timeout: Duration::from_secs(1),
             run_timeout: Duration::from_secs(30),
             cancel_timeout: Duration::from_secs(1),
+            startup_recovery_grace: Duration::ZERO,
             max_tasks: 2,
             max_abort_tasks: 1,
         },

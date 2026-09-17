@@ -82,7 +82,12 @@ def _seed_claude_code_bot_without_dima(world):
     })
 
     template_svc = world.get(TemplateService)
-    template_svc.create_template(bot_id="bot_claude_code", template_config={"foo": "bar"})
+    template_svc.create_template(
+        bot_id="bot_claude_code",
+        template_config={
+            "bot_template_config": {"capabilities": {"dima_workspace": True}},
+        },
+    )
 
 
 

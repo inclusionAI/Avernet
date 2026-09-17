@@ -22,6 +22,16 @@ TEST_ENV = get_current_env()
 """Environment name used consistently across all integration tests."""
 
 
+def _provision_external_tables() -> None:
+    """Create the backend-owned tables BAAS reads, on the booted plugin."""
+    from secbaas.community.core.database import db_manager
+    from tests.utils.external_schema import create_external_tables
+
+    engine = getattr(db_manager._plugin, "_sync_engine", None)
+    if engine is not None:
+        create_external_tables(engine)
+
+
 @pytest.fixture(scope="session")
 def bootstrap_init() -> ApplicationContainer:
     old_overlay = os.environ.pop("SOFAPY_CONFIG_OVERLAY", None)
@@ -36,6 +46,7 @@ def bootstrap_init() -> ApplicationContainer:
         container.config.from_dict(user_config)
 
         asyncio.run(initialize_services(container))
+        _provision_external_tables()
 
         set_container(container)
         bootstrap_init._container = container

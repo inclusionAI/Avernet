@@ -456,7 +456,8 @@ async fn actual_runtime_orders_worker_tasks_and_manager_results_on_independent_l
         transport:f.support.bot_delivery.clone(), config:DeliveryRuntimeConfig {
             max_safe_retries:0, pause_dispatch:false, bots:Default::default(), tick:Duration::from_millis(2),
             expiry_tick:Duration::from_millis(20), io_timeout:Duration::from_secs(1), run_timeout:Duration::from_secs(60),
-            cancel_timeout:Duration::from_secs(1), max_tasks:4, max_abort_tasks:1 } };
+            cancel_timeout:Duration::from_secs(1), startup_recovery_grace:Duration::ZERO,
+            max_tasks:4, max_abort_tasks:1 } };
     let (stop, shutdown) = tokio::sync::watch::channel(false);
     let job = tokio::spawn(worker.run(shutdown));
     f.wait_frames(1).await;

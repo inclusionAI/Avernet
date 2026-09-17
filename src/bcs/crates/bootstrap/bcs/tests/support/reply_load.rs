@@ -205,7 +205,7 @@ async fn reply_scene(name: &str, bots: usize, sessions: usize, offline: bool, si
     let cap = if offline { 1 } else { 4 };
     let worker = DeliveryRuntime { policy: None, service: service.clone(), preparation: io.clone(), transport: io.clone(), config: DeliveryRuntimeConfig {
         max_safe_retries: 0, pause_dispatch: false, bots: (0..bots).map(|b| (format!("bot{b:03}"), DeliveryRuntimePolicy { max_running: cap, min_send_interval_ms: 0 })).collect(),
-        tick: Duration::from_millis(100), expiry_tick: Duration::from_secs(1), io_timeout: Duration::from_secs(10), run_timeout: Duration::from_secs(120), cancel_timeout: Duration::from_secs(10), max_tasks: 32, max_abort_tasks: 2,
+        tick: Duration::from_millis(100), expiry_tick: Duration::from_secs(1), io_timeout: Duration::from_secs(10), run_timeout: Duration::from_secs(120), cancel_timeout: Duration::from_secs(10), startup_recovery_grace: Duration::ZERO, max_tasks: 32, max_abort_tasks: 2,
     }};
     let expected = (bots - usize::from(offline)) * sessions * 10;
     let start = Instant::now();
@@ -242,8 +242,8 @@ async fn reply_scene(name: &str, bots: usize, sessions: usize, offline: bool, si
     let states = db.query(DbStatement::new("SELECT status, count(*) AS n FROM bcs_message_deliveries WHERE kind='send' GROUP BY status")).await?;
     let states: BTreeMap<String, i64> = states.iter().map(|r| Ok((bcs_db_api::db_get_column(r,"status")?, bcs_db_api::db_get_column(r,"n")?))).collect::<bcs_db_api::DbResult<_>>()?;
     assert_eq!(states.get("completed"), Some(&(expected as i64)));
-    assert_eq!(states.get("queued").copied().unwrap_or(0), if offline { (sessions * 10) as i64 } else { 0 });
-    assert!(states.keys().all(|s| s == "completed" || s == "queued"));
+    assert_eq!(states.get("failed").copied().unwrap_or(0), if offline { (sessions * 10) as i64 } else { 0 });
+    assert!(states.keys().all(|s| s == "completed" || s == "failed"));
     for sid in io.flows.keys() {
         let page = repo.list_session_history(sid, bcs_domain::MessageOwnerFilter::Any, None, None, None, 100).await?;
         assert!(page.messages.iter().all(|m| m.message_type != "run_reply"));

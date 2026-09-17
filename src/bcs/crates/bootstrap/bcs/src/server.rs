@@ -1782,7 +1782,7 @@ mod gateway_principal_tests {
         let mut account = config.dingtalk_accounts.first().cloned().unwrap_or_default();
         account.client_secret_secret = Some("ding".into());
         config.dingtalk_accounts = vec![account];
-        let mut logger = ding_logger::GroupLoggerConfig { enabled: true, client_id: "id".into(), client_secret: String::new(), client_secret_secret: Some("logger".into()), group_ids: vec!["g".into()] };
+        let logger = ding_logger::GroupLoggerConfig { enabled: true, client_id: "id".into(), client_secret: String::new(), client_secret_secret: Some("logger".into()), group_ids: vec!["g".into()] };
         config.group_logger = Some(logger.clone());
         config.human_notify.providers = vec![bcs_config_api::HumanNotifyProviderConfig {
             name: "dingtalk".to_string(),
@@ -4232,7 +4232,7 @@ impl BcsServer {
 
     /// Create a new BCS server with externally supplied infrastructure plugins.
     pub async fn new_with_infrastructure(
-        mut config: BcsConfig,
+        config: BcsConfig,
         infrastructure_plugins: InfrastructurePlugins,
         extensions: BcsServerExtensions,
     ) -> crate::Result<Self> {

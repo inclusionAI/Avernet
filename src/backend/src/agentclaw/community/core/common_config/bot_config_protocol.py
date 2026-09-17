@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections.abc import Callable
-from typing import Protocol, Any, TYPE_CHECKING, TypeAlias
+from typing import Protocol, Any, TYPE_CHECKING, TypeAlias, runtime_checkable
+
+from agentclaw.community.core.common_config.models import BotCommonConfigRecord
 
 if TYPE_CHECKING:
     # Importing these at runtime cycles through service_bot's package __init__
@@ -24,6 +26,17 @@ JsonValue: TypeAlias = (
 )
 
 
+@dataclass(frozen=True)
+class BotCommonConfigEntry:
+    """One batch-upsert item; the caller supplies ``env`` separately."""
+
+    bot_id: str
+    entity_id: str
+    config_key: str
+    value: "JsonValue"
+
+
+@runtime_checkable
 class BotCommonConfigServiceProtocol(Protocol):
     def get_config(
         self, *, bot_id: str, entity_id: str, env: str, config_key: str
@@ -34,6 +47,38 @@ class BotCommonConfigServiceProtocol(Protocol):
     def set_config(
         self, *, bot_id: str, entity_id: str, env: str, config_key: str, value: JsonValue
     ) -> None: ...
+
+    # Operator-facing management operations. The service owns the on-disk
+    # JSON format of ``config_value``; callers pass decoded ``JsonValue``.
+
+    def get_record_by_id(self, *, config_id: int) -> BotCommonConfigRecord | None: ...
+
+    def list_records(
+        self,
+        *,
+        bot_id: str | None = None,
+        entity_id: str | None = None,
+        env: str | None = None,
+        config_key: str | None = None,
+        page_num: int = 1,
+        page_size: int = 100,
+    ) -> tuple[int, list[BotCommonConfigRecord]]: ...
+
+    def create_record(
+        self, *, bot_id: str, entity_id: str, env: str, config_key: str, value: JsonValue
+    ) -> int: ...
+
+    def update_record(self, *, config_id: int, value: JsonValue) -> bool: ...
+
+    def delete_record(self, *, config_id: int) -> bool: ...
+
+    def upsert_record(
+        self, *, bot_id: str, entity_id: str, env: str, config_key: str, value: JsonValue
+    ) -> int: ...
+
+    def batch_upsert_records(
+        self, *, env: str, records: list[BotCommonConfigEntry]
+    ) -> list[int]: ...
 
 
 @dataclass(frozen=True)

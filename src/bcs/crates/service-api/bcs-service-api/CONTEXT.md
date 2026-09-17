@@ -2,6 +2,13 @@
 
 ## Provides
 
+BotDeliveryResult distinguishes a complete downstream rejection
+(`delivered=false`) from an uncertain transport error (`Err`). A rejection is
+terminal and is never retryable by itself; safe retry still requires the
+explicit DeliveryNotSent contract. HTTP Provider non-success responses and
+decoded `ok=false` acknowledgements use the rejection result, while missing or
+incomplete responses remain errors for Unknown handling.
+
 TaskDispatchOutcome/TaskMessageOutcome may return `queued`: the canonical source
 and target delivery have committed, but no Bot delivery result exists yet.
 Managed tasks require an explicit canonical running Session. Task completion

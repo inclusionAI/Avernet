@@ -40,6 +40,7 @@ from agentclaw.community.core.bot_management.legacy_create_compat import (
     legacy_template_engine_properties,
     normalize_legacy_engine_alias,
 )
+from agentclaw.community.core.bot_management.services.aicoding.dima_workspace_capability import has_dima_workspace_enabled
 from agentclaw.community.core.bot_management.manifest_seam import (
     ManifestCreationSeam,
 )
@@ -111,15 +112,20 @@ def _prepare_legacy_non_application_template(
         if spec.template_config is not None:
             raise BotTemplateInvalidError("template_config requires template_type")
         return PreparedBotCreate()
+    sanitized = to_internal_template_config(
+        spec.template_config,
+        reject_server_managed_fields=(
+            spec.template_validation_mode
+            is BotCreateTemplateValidationMode.PUBLIC
+        ),
+    )
+    # 在 requires_workspace_hosting 的取值处直接或上 workspace 托管开关：
+    # 仅当显式开启时才需要托管，非 applicationCoding 的手工 bot 默认不需要，
+    # 不在 _prepare_create 末尾用兜底覆盖重新决定该值。
     return PreparedBotCreate(
         template_type=spec.template_type,
-        template_config=to_internal_template_config(
-            spec.template_config,
-            reject_server_managed_fields=(
-                spec.template_validation_mode
-                is BotCreateTemplateValidationMode.PUBLIC
-            ),
-        ),
+        template_config=sanitized,
+        requires_workspace_hosting=has_dima_workspace_enabled(sanitized),
     )
 
 

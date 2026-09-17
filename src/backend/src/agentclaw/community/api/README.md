@@ -204,6 +204,7 @@ internal_dependencies:
   - agentclaw.community.core.channel.channel_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.common_config.beta_quota_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.common_config.common_config_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.common_config.bot_config_protocol  # Protocol + BotCommonConfigEntry defined in their owning core module, re-exported here
   - agentclaw.community.core.cron.cron_relay_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.desktop_bot.desktop_bot_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.devices.device_service_protocol  # Protocol defined in its owning core module, re-exported here

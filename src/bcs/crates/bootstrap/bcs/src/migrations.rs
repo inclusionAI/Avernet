@@ -1712,54 +1712,118 @@ async fn add_sqlite_human_input_output_metadata_schema(db: &dyn DbPlugin) -> DbR
 }
 
 async fn add_sqlite_edge_permission_schema(db: &dyn DbPlugin) -> DbResult<()> {
-    // Five edge-permission tables (idempotent; spec §3.1).
-    for stmt in [
-        "CREATE TABLE IF NOT EXISTS edge_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, env TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, grant_kind TEXT NOT NULL, grant_ref_id INTEGER NOT NULL, rules TEXT, status TEXT NOT NULL DEFAULT 'approved', originator_policy_type TEXT NOT NULL DEFAULT 'any', originator_policy_data TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-        "CREATE UNIQUE INDEX IF NOT EXISTS uk_edge_from_to_env_ref ON edge_grants(from_id, to_id, env, grant_ref_id)",
-        "CREATE INDEX IF NOT EXISTS idx_edge_from_env_status ON edge_grants(from_id, env, status)",
-        "CREATE INDEX IF NOT EXISTS idx_edge_to_env_status ON edge_grants(to_id, env, status)",
-        "CREATE TABLE IF NOT EXISTS permission_profiles (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT NOT NULL, env TEXT NOT NULL, name TEXT NOT NULL DEFAULT 'default', description TEXT, rules_template TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, digest TEXT NOT NULL, is_default INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active', created_by TEXT NOT NULL, updated_by TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-        "CREATE UNIQUE INDEX IF NOT EXISTS uk_profile_bot_env_default ON permission_profiles(bot_id, env, is_default) WHERE status = 'active'",
-        "CREATE INDEX IF NOT EXISTS idx_profile_bot_env ON permission_profiles(bot_id, env, status)",
-        "CREATE TABLE IF NOT EXISTS permission_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT NOT NULL, edge_id INTEGER, env TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, request_kind TEXT NOT NULL, requested_ref_id INTEGER, requested_rules TEXT, message TEXT, status TEXT NOT NULL DEFAULT 'pending', decision_reason TEXT, created_by TEXT NOT NULL, decided_by TEXT, decided_at TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-        "CREATE UNIQUE INDEX IF NOT EXISTS uk_req_request_id ON permission_requests(request_id)",
-        "CREATE INDEX IF NOT EXISTS idx_req_to_env_status ON permission_requests(to_id, env, status)",
-        "CREATE INDEX IF NOT EXISTS idx_req_from_env_status ON permission_requests(from_id, env, status)",
-        "CREATE INDEX IF NOT EXISTS idx_req_edge ON permission_requests(edge_id)",
-        "CREATE TABLE IF NOT EXISTS capabilities (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT NOT NULL, env TEXT NOT NULL, tool TEXT NOT NULL, operation TEXT, specifier_schema TEXT, source TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', raw_metadata TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-        "CREATE INDEX IF NOT EXISTS idx_cap_bot_env ON capabilities(bot_id, env, status)",
-        "CREATE TABLE IF NOT EXISTS authz_decision_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, env TEXT NOT NULL, task_id TEXT, run_id TEXT, from_id TEXT NOT NULL, to_id TEXT NOT NULL, originator TEXT, context_type TEXT NOT NULL, decision TEXT NOT NULL, reason_code TEXT NOT NULL, grant_refs TEXT NOT NULL, context_json TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-        "CREATE INDEX IF NOT EXISTS idx_adl_env_from_to ON authz_decision_logs(env, from_id, to_id)",
-    ] {
-        db.execute(DbStatement::new(stmt)).await?;
+    // Five edge-permission tables (idempotent; spec §3.1). `(create_sql,
+    // data_columns)` pairs feed the gmt_* audit repair below; indexes are
+    // created after the repair because a rebuilt table drops its old
+    // indexes, which would otherwise be lost until the next migration run.
+    const EDGE_TABLES: &[(&str, &str, &[&str])] = &[
+        (
+            "edge_grants",
+            "CREATE TABLE IF NOT EXISTS edge_grants (id INTEGER PRIMARY KEY AUTOINCREMENT, env TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, grant_kind TEXT NOT NULL, grant_ref_id INTEGER NOT NULL, rules TEXT, status TEXT NOT NULL DEFAULT 'approved', originator_policy_type TEXT NOT NULL DEFAULT 'any', originator_policy_data TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+            &["id", "env", "from_id", "to_id", "grant_kind", "grant_ref_id", "rules", "status", "originator_policy_type", "originator_policy_data"],
+        ),
+        (
+            "permission_profiles",
+            "CREATE TABLE IF NOT EXISTS permission_profiles (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT NOT NULL, env TEXT NOT NULL, name TEXT NOT NULL DEFAULT 'default', description TEXT, rules_template TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1, digest TEXT NOT NULL, is_default INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active', created_by TEXT NOT NULL, updated_by TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+            &["id", "bot_id", "env", "name", "description", "rules_template", "revision", "digest", "is_default", "status", "created_by", "updated_by"],
+        ),
+        (
+            "permission_requests",
+            "CREATE TABLE IF NOT EXISTS permission_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, request_id TEXT NOT NULL, edge_id INTEGER, env TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, request_kind TEXT NOT NULL, requested_ref_id INTEGER, requested_rules TEXT, message TEXT, status TEXT NOT NULL DEFAULT 'pending', decision_reason TEXT, created_by TEXT NOT NULL, decided_by TEXT, decided_at TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+            &["id", "request_id", "edge_id", "env", "from_id", "to_id", "request_kind", "requested_ref_id", "requested_rules", "message", "status", "decision_reason", "created_by", "decided_by", "decided_at"],
+        ),
+        (
+            "capabilities",
+            "CREATE TABLE IF NOT EXISTS capabilities (id INTEGER PRIMARY KEY AUTOINCREMENT, bot_id TEXT NOT NULL, env TEXT NOT NULL, tool TEXT NOT NULL, operation TEXT, specifier_schema TEXT, source TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', raw_metadata TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+            &["id", "bot_id", "env", "tool", "operation", "specifier_schema", "source", "status", "raw_metadata"],
+        ),
+        (
+            "authz_decision_logs",
+            "CREATE TABLE IF NOT EXISTS authz_decision_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, env TEXT NOT NULL, task_id TEXT, run_id TEXT, from_id TEXT NOT NULL, to_id TEXT NOT NULL, originator TEXT, context_type TEXT NOT NULL, decision TEXT NOT NULL, reason_code TEXT NOT NULL, grant_refs TEXT NOT NULL, context_json TEXT, gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+            &["id", "env", "task_id", "run_id", "from_id", "to_id", "originator", "context_type", "decision", "reason_code", "grant_refs", "context_json"],
+        ),
+    ];
+    for (_, create_sql, _) in EDGE_TABLES {
+        db.execute(DbStatement::new(*create_sql)).await?;
     }
     // Edge tables: backfill gmt_create / gmt_modified audit columns for DBs
     // that created the tables before the audit-column requirement landed.
     // CREATE TABLE IF NOT EXISTS will not add columns to an existing table,
-    // so ALTER them in idempotently (spec §3.1 — 建表要求 gmt_create/gmt_modified).
-    for table in [
-        "edge_grants",
-        "permission_profiles",
-        "permission_requests",
-        "capabilities",
-        "authz_decision_logs",
-    ] {
+    // and SQLite forbids ADD COLUMN with a non-constant default
+    // (CURRENT_TIMESTAMP), so repair idempotently via table rebuild
+    // (spec §3.1 — 建表要求 gmt_create/gmt_modified).
+    for (table, create_sql, data_columns) in EDGE_TABLES {
         if !table_exists(db, table).await? {
             continue;
         }
         let columns = sqlite_table_columns(db, table).await?;
-        for (name, definition) in [
-            ("gmt_create", "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"),
-            ("gmt_modified", "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"),
-        ] {
-            if !columns.iter().any(|column| column == name) {
-                db.execute(DbStatement::new(format!(
-                    "ALTER TABLE {table} ADD COLUMN {name} {definition}"
-                )))
-                .await?;
-            }
+        let missing_audit_column = ["gmt_create", "gmt_modified"]
+            .iter()
+            .any(|name| !columns.iter().any(|column| column == name));
+        if !missing_audit_column {
+            continue;
+        }
+        rebuild_sqlite_edge_table_with_gmt_columns(db, table, create_sql, data_columns).await?;
+    }
+    for spec in [
+        "CREATE UNIQUE INDEX IF NOT EXISTS uk_edge_from_to_env_ref ON edge_grants(from_id, to_id, env, grant_ref_id)",
+        "CREATE INDEX IF NOT EXISTS idx_edge_from_env_status ON edge_grants(from_id, env, status)",
+        "CREATE INDEX IF NOT EXISTS idx_edge_to_env_status ON edge_grants(to_id, env, status)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uk_profile_bot_env_default ON permission_profiles(bot_id, env, is_default) WHERE status = 'active'",
+        "CREATE INDEX IF NOT EXISTS idx_profile_bot_env ON permission_profiles(bot_id, env, status)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uk_req_request_id ON permission_requests(request_id)",
+        "CREATE INDEX IF NOT EXISTS idx_req_to_env_status ON permission_requests(to_id, env, status)",
+        "CREATE INDEX IF NOT EXISTS idx_req_from_env_status ON permission_requests(from_id, env, status)",
+        "CREATE INDEX IF NOT EXISTS idx_req_edge ON permission_requests(edge_id)",
+        "CREATE INDEX IF NOT EXISTS idx_cap_bot_env ON capabilities(bot_id, env, status)",
+        "CREATE INDEX IF NOT EXISTS idx_adl_env_from_to ON authz_decision_logs(env, from_id, to_id)",
+    ] {
+        db.execute(DbStatement::new(spec)).await?;
+    }
+    Ok(())
+}
+
+/// Rebuild an edge-permission table so it carries the gmt_create/gmt_modified
+/// audit columns with `DEFAULT CURRENT_TIMESTAMP`, preserving every other
+/// column's values (binary rebuild: create shadow, copy, drop, rename).
+async fn rebuild_sqlite_edge_table_with_gmt_columns(
+    db: &dyn DbPlugin,
+    table: &str,
+    create_sql: &str,
+    data_columns: &[&str],
+) -> DbResult<()> {
+    let existing = sqlite_table_columns(db, table).await?;
+    // Copy every data column the legacy table actually has; an audit column
+    // that already exists keeps its values, a missing one takes the fresh
+    // table's DEFAULT CURRENT_TIMESTAMP backfill.
+    let mut copy_columns: Vec<&str> = data_columns
+        .iter()
+        .copied()
+        .filter(|column| existing.iter().any(|present| present == column))
+        .collect();
+    for audit_column in ["gmt_create", "gmt_modified"] {
+        if existing.iter().any(|present| present == audit_column) {
+            copy_columns.push(audit_column);
         }
     }
+    let copy_list = copy_columns.join(", ");
+    let rebuild_table = format!("{table}__gmt_audit_rebuild");
+    let create_rebuild =
+        create_sql.replacen(&format!("{table} ("), &format!("{rebuild_table} ("), 1);
+    db.transaction(vec![
+        DbTransactionStep::Execute(DbStatement::new(format!(
+            "DROP TABLE IF EXISTS {rebuild_table}"
+        ))),
+        DbTransactionStep::Execute(DbStatement::new(create_rebuild)),
+        DbTransactionStep::Execute(DbStatement::new(format!(
+            "INSERT INTO {rebuild_table} ({copy_list}) SELECT {copy_list} FROM {table}"
+        ))),
+        DbTransactionStep::Execute(DbStatement::new(format!("DROP TABLE {table}"))),
+        DbTransactionStep::Execute(DbStatement::new(format!(
+            "ALTER TABLE {rebuild_table} RENAME TO {table}"
+        ))),
+    ])
+    .await?;
     Ok(())
 }
 
@@ -2548,12 +2612,13 @@ mod tests {
     async fn sqlite_eventing_database_upgrades_to_group_opening_message() -> DbResult<()> {
         let db = LocalSqliteDbPlugin::new()?;
         run_sqlite_migrations(&db).await?;
+        // Simulate a DB that lost its v11 migration row (e.g. restored from a
+        // partial backup). SQLite < 3.35 has no DROP COLUMN, so drop only the
+        // schema row; the column add itself is repaired idempotently by
+        // ensure_sqlite_group_opening_message_column (covered by
+        // sqlite_group_opening_message_column_repair_adds_missing_column).
         db.execute(DbStatement::new(
             "DELETE FROM bcs_schema_migrations WHERE version = 11",
-        ))
-        .await?;
-        db.execute(DbStatement::new(
-            "ALTER TABLE bcs_groups DROP COLUMN opening_message_json",
         ))
         .await?;
 
@@ -2581,13 +2646,31 @@ mod tests {
         );
         // group_opening_message is no longer the tail migration (task_modes at v12
         // follows it), so assert it was re-applied as the version-11 row rather than
-        // as the last row. The column check above already proves the migration
-        // re-added opening_message_json; this row check pins it to the right version.
+        // as the last row; re-applying while the column already exists must not
+        // fail on a duplicate column.
         assert!(
             migration_rows(&db)
                 .await?
                 .iter()
                 .any(|(version, name, _)| *version == 11 && name == "group_opening_message")
+        );
+        Ok(())
+    }
+
+    // Coverage for the column-add branch of the v11 repair: a legacy
+    // bcs_groups without opening_message_json gets the column back.
+    #[tokio::test]
+    async fn sqlite_group_opening_message_column_repair_adds_missing_column() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        db.execute(DbStatement::new(
+            "CREATE TABLE bcs_groups (group_id TEXT PRIMARY KEY, name TEXT NOT NULL)",
+        ))
+        .await?;
+        ensure_sqlite_group_opening_message_column(&db).await?;
+        let columns = sqlite_table_columns(&db, "bcs_groups").await?;
+        assert!(
+            columns.iter().any(|column| column == "opening_message_json"),
+            "legacy bcs_groups must gain opening_message_json; got {columns:?}"
         );
         Ok(())
     }
@@ -2764,7 +2847,7 @@ mod tests {
     }
 
     // Repair path: a legacy DB that created the edge tables without gmt_* must
-    // get the audit columns backfilled by the idempotent ALTER in the migration.
+    // get the audit columns backfilled by the idempotent rebuild in the migration.
     #[tokio::test]
     async fn edge_table_audit_columns_backfilled_for_legacy_db() -> DbResult<()> {
         let db = LocalSqliteDbPlugin::new()?;
@@ -2784,7 +2867,8 @@ mod tests {
         ))
         .await?;
         // Re-running the edge-permission migration (v9) must ADD the gmt columns
-        // via the idempotent ALTER repair (CREATE TABLE IF NOT EXISTS is a no-op).
+        // via the idempotent rebuild repair (CREATE TABLE IF NOT EXISTS is a no-op
+        // and SQLite forbids ADD COLUMN with a CURRENT_TIMESTAMP default).
         add_sqlite_edge_permission_schema(&db).await?;
         let columns = column_names(&db, "edge_grants").await?;
         assert!(columns.iter().any(|c| c == "gmt_create"));

@@ -92,9 +92,15 @@ impl TestContext {
     /// Create a CLI command pre-configured with test environment
     pub fn cmd(&self) -> Command {
         let mut cmd = Command::cargo_bin("bcs-cli").expect("Failed to find bcs-cli binary");
-        
+
         // Set required environment variables
         cmd.env("BOT_DATA_DIR", self.temp_dir.path());
+
+        // Assertions match plain error text; clap colorizes output (even to
+        // pipes) when the ambient shell exports CLICOLOR_FORCE/FORCE_COLOR.
+        cmd.env("NO_COLOR", "1");
+        cmd.env_remove("CLICOLOR_FORCE");
+        cmd.env_remove("FORCE_COLOR");
         
         // Use --url arg instead of env var to ensure it takes priority
         cmd.arg("--url").arg(&self.mock_server.uri());

@@ -33,23 +33,76 @@ impl Write for SharedLogWriter {
     }
 }
 
-impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for SharedLogBuffer {
+// `warn!` consults the process-global callsite Interest cache. With per-test
+// scoped subscribers, the first test to evaluate a callsite while no dispatch
+// is alive on its thread poisons it as Interest::never for the whole
+// process, so scoped-subscriber log assertions flake under parallel test
+// runs. Install ONE global subscriber whose writer captures into a
+// thread-local buffer: every callsite registration then always sees this
+// same live dispatch, while concurrent tests keep writing to their own
+// (empty) buffers — the negative log assertions stay reliable.
+static GLOBAL_LOG_SUBSCRIBER: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+
+thread_local! {
+    static CURRENT_CAPTURE: std::cell::RefCell<Option<SharedLogBuffer>> =
+        std::cell::RefCell::new(None);
+}
+
+struct ThreadLogCapture;
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for ThreadLogCapture {
     type Writer = SharedLogWriter;
 
     fn make_writer(&'a self) -> Self::Writer {
-        SharedLogWriter(self.clone())
+        let buffer = CURRENT_CAPTURE
+            .with(|cell| cell.borrow().clone())
+            .unwrap_or_default();
+        SharedLogWriter(buffer)
     }
 }
 
 fn capture_logs(run: impl FnOnce()) -> String {
+    if GLOBAL_LOG_SUBSCRIBER.set(()).is_ok() {
+        // set_global_default alone does NOT recompute the global callsite
+        // Interest cache or the dynamic max level, and a callsite first
+        // evaluated on a plain test thread (no scoped dispatch installed)
+        // registers against NO_SUBSCRIBER and caches Interest::never for
+        // the whole process. Registering two leaked dispatches flips the
+        // tracing-core dispatcher registry into direct-enumeration mode, so
+        // every subsequent Interest rebuild/registration evaluates against
+        // this always-accepting subscriber instead of the registering
+        // thread's (missing) default. The explicit rebuild un-poisons
+        // callsites that were cached before this first call.
+        let _ = tracing::subscriber::set_global_default(
+            tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_target(false)
+                .with_writer(ThreadLogCapture)
+                .finish(),
+        );
+        std::mem::forget(tracing::Dispatch::new(
+            tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_target(false)
+                .with_writer(ThreadLogCapture)
+                .finish(),
+        ));
+        std::mem::forget(tracing::Dispatch::new(
+            tracing_subscriber::fmt()
+                .without_time()
+                .with_ansi(false)
+                .with_target(false)
+                .with_writer(ThreadLogCapture)
+                .finish(),
+        ));
+        tracing::callsite::rebuild_interest_cache();
+    }
     let buffer = SharedLogBuffer::default();
-    let subscriber = tracing_subscriber::fmt()
-        .without_time()
-        .with_ansi(false)
-        .with_target(false)
-        .with_writer(buffer.clone())
-        .finish();
-    tracing::dispatcher::with_default(&tracing::Dispatch::new(subscriber), run);
+    CURRENT_CAPTURE.with(|cell| *cell.borrow_mut() = Some(buffer.clone()));
+    run();
+    CURRENT_CAPTURE.with(|cell| *cell.borrow_mut() = None);
     let bytes = buffer.0.lock().expect("log buffer lock").clone();
     String::from_utf8(bytes).expect("diagnostic logs are UTF-8")
 }
