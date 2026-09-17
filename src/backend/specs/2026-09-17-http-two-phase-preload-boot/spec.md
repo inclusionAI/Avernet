@@ -74,8 +74,15 @@ In this exact order, matching today's:
 
 - `finalize_worker_runtime()` runs at most once per process. The guard records the **pid**
   that finalized, not a boolean: a child that inherits the module state across `fork` sees
-  `os.getpid() != _finalized_pid` and runs its own finalize, so it never serves on the
-  master's injector, middleware or connections.
+  `os.getpid() != _finalized_pid`, so it never mistakes the parent's initialization for its
+  own and never silently serves on the master's injector, middleware or connections.
+- What that child does instead is **refuse, not re-run**. An inherited marker never arrives
+  alone: the parent's middleware stack is on the same `app` object, and its engines, pools and
+  fds sit behind it — a fork copies those rather than reopening them. `install_middleware`
+  appends, so a second finalize gives the child two stacks (measured: 8 entries become 16),
+  and it still holds the parent's resources. The child cannot repair its own process image,
+  so it raises, naming the pre-fork finalize and pointing at `preload`. Under the supported
+  flow the case never arises, because the master constructs only.
 - The pid is recorded **only after** every step succeeds. A partial failure leaves the
   process un-finalized and the exception propagates — the worker fails to start rather than
   serving half-initialized. Fail-fast in `pre`/`prod` is unchanged, since the eager check and

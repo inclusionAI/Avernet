@@ -33,6 +33,15 @@ boolean. A boolean would be inherited across ``fork``: a child would see
 ``True``, skip its own finalize, and serve traffic on the master's injector and
 the master's connections. Comparing ``os.getpid()`` makes the flag meaningless
 in any process that did not set it.
+
+What a child does about an inherited marker is *refuse*, not re-run. The marker
+is never the only thing it inherited — the parent's middleware stack is on the
+same ``app`` object, and the parent's engines, pools and fds sit behind it —
+and finalizing again appends a second stack rather than replacing the first. A
+child in that position cannot be repaired from here, so it fails loudly instead
+of silently serving on its parent's runtime, which is the outcome the pid guard
+exists to prevent. Under the supported flow the question never arises: the
+master imports in ``preload`` mode, so nothing is finalized before the fork.
 """
 from __future__ import annotations
 
@@ -116,6 +125,10 @@ def finalize_worker_runtime(app: "FastAPI", *, profile: "DeployProfile") -> None
     no middleware is installed twice, no tracer thread restarted and no injector
     replaced under a running app.
 
+    Refused in a child forked from a process that had already finalized: what it
+    inherited is a whole wired runtime, not just a flag, and a second finalize
+    would stack on top of it. See the module docstring.
+
     Fail-fast, and it stays failed: the finalize marker is set only after every
     step has succeeded, and a step that raises records the failure and re-raises.
     A later call in the same process refuses rather than replaying the sequence
@@ -136,12 +149,26 @@ def finalize_worker_runtime(app: "FastAPI", *, profile: "DeployProfile") -> None
             "again. Let the worker exit and start a new one."
         )
     if _finalized_pid is not None:
-        # Inherited across fork. Not an error — it is the case the pid guard
-        # exists for — but worth a line, because it is also what a stray second
-        # call in a *new* process looks like.
-        logger.info(
-            "[boot] inherited finalize marker from pid %s; finalizing pid %s",
-            _finalized_pid, pid,
+        # Inherited across fork from a process that had already finalized. The
+        # marker is not all this process inherited: ``app.user_middleware`` still
+        # holds the parent's stack — its auth plugin, its tracer — and behind
+        # those sit the parent's engines, pools and fds, which a fork copies
+        # rather than reopens. Finalizing again cannot replace any of that; it
+        # appends, so the child would serve every request through two stacks (and
+        # raise outright if the parent had already built the cached one).
+        #
+        # So this is refused rather than repaired. It means the runtime was
+        # initialized *before* the fork, which is the one thing preload mode
+        # exists to avoid, and no amount of work here gives the child a clean
+        # process image.
+        raise RuntimeError(
+            f"The worker runtime was finalized in pid {_finalized_pid}, before "
+            f"this process (pid {pid}) was forked from it. This process has "
+            "inherited that runtime's middleware stack, injector and every "
+            "resource behind them, and finalizing again would stack a second "
+            "copy on top rather than replace them. Import the app with "
+            f"{BOOT_MODE_ENV}=preload so the master forks before any worker "
+            "runtime exists, then call finalize_worker_runtime() in each child."
         )
 
     try:

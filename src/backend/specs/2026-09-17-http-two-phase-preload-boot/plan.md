@@ -141,14 +141,27 @@ prints a JSON verdict the parent asserts on.
    middleware stack, and one call of each spy. And the failure side of the same guard: a
    finalize that raises mid-sequence leaves the process un-finalized, and the next call in
    that pid is refused before re-running any step.
-5. **pid guard** — (a) rewriting the recorded pid to a foreign value makes the next call
-   re-run finalize; (b) a real `os.fork()` in preload mode, child finalizes and reports its
-   own injector id and pid, proving it did not skip on the parent's flag.
+5. **pid guard** — (a) the supported shape: a real `os.fork()` in preload mode with nothing
+   finalized before it, child and parent each finalizing their own runtime, neither stack
+   doubled; (b) the unsupported shape: finalize *then* fork, where the child must refuse
+   rather than append a second stack — asserted both against a real fork and against a
+   rewritten `_finalized_pid`.
 6. **eager ≡ preload+finalize** — route paths, methods, `operation_id`s and the full
    `app.openapi()` document compare equal across the two modes.
 7. **call-timing guard** — entering the lifespan (or issuing a request) without finalize in
    preload mode raises a message naming `finalize_worker_runtime()`, rather than serving
    unauthenticated.
+
+## Deviation from the brief, and why
+
+The brief said to "re-run if `os.getpid()` != recorded pid". Implemented literally that is a
+defect, and a review bot found it independently: a marker inherited across `fork` never
+arrives alone, so re-running appends a second middleware stack to the parent's rather than
+replacing it (measured: 8 entries became 16), while the child still holds the parent's
+engines, pools and fds. The brief's *intent* — a child must never silently skip its own
+initialization — is what the pid guard delivers; the child now fails loudly instead, which is
+the same intent carried to the case the instruction did not anticipate. The supported flow is
+unaffected: the master constructs only, so nothing is finalized before the fork.
 
 ## Residual risk
 

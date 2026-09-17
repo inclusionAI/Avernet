@@ -339,8 +339,14 @@ def test_second_finalize_in_the_same_pid_is_inert(preload_then_finalize):
 # 5. the guard is a pid, not a boolean
 # ---------------------------------------------------------------------------
 
-def test_a_foreign_finalized_pid_does_not_suppress_finalize():
-    """Simulated fork: module state says "finalized", but by another process."""
+def test_a_foreign_finalized_pid_is_never_read_as_this_process_being_done():
+    """The flag is a pid, so it says nothing about a process that did not set it.
+
+    A boolean would read ``True`` here and let the caller skip initialization
+    entirely. What this process does *instead* of skipping — refuse, because an
+    inherited marker comes with an inherited runtime — is the subject of
+    ``test_a_child_forked_after_finalize_refuses_rather_than_stacking``.
+    """
     from fastapi import FastAPI
 
     from agentclaw.community.adapters.http import boot
@@ -352,12 +358,12 @@ def test_a_foreign_finalized_pid_does_not_suppress_finalize():
         assert boot.worker_runtime_finalized() is False
 
         fresh = FastAPI()
-        boot.finalize_worker_runtime(fresh, profile=DeployProfile.detect())
+        with pytest.raises(RuntimeError, match="finalized in pid"):
+            boot.finalize_worker_runtime(fresh, profile=DeployProfile.detect())
 
-        assert getattr(fresh.state, "injector", None) is not None
-        assert fresh.user_middleware, "finalize skipped on an inherited flag"
-        assert boot.worker_runtime_finalized() is True
-        assert boot._finalized_pid == os.getpid()
+        # Refused before doing anything, so nothing was half-installed.
+        assert getattr(fresh.state, "injector", None) is None
+        assert fresh.user_middleware == []
     finally:
         boot._finalized_pid = previous
 
@@ -405,27 +411,28 @@ def test_a_failed_finalize_refuses_to_be_retried_in_the_same_process():
         boot._finalized_pid, boot._failed_pid = previous_finalized, previous_failed
 
 
+# The supported preload shape: the master constructs only, forks, and each child
+# finalizes its own runtime. Reported by both sides so the parent's and the
+# child's runtimes can be compared.
 _REAL_FORK = """
 import os, json
 
 from agentclaw.community.adapters.http import app as app_mod
 from agentclaw.community.adapters.http import boot
 
-# The parent finalizes first, so the child inherits a *set* marker — exactly the
-# state a boolean guard would get wrong.
-app_mod.finalize_worker_runtime()
-parent = {"pid": os.getpid(), "injector": id(app_mod.app.state.injector)}
+# Nothing is finalized before the fork — that is what preload mode buys.
+pre_fork = {
+    "finalized": boot.worker_runtime_finalized(),
+    "marker": boot._finalized_pid,
+    "middleware": [m.cls.__name__ for m in app_mod.app.user_middleware],
+}
 
 read_fd, write_fd = os.pipe()
 child_pid = os.fork()
 if child_pid == 0:
     os.close(read_fd)
     try:
-        report = {
-            "pid": os.getpid(),
-            "finalized_before": boot.worker_runtime_finalized(),
-            "inherited_marker": boot._finalized_pid,
-        }
+        report = {"pid": os.getpid(), "finalized_before": boot.worker_runtime_finalized()}
         app_mod.finalize_worker_runtime()
         report["finalized_after"] = boot.worker_runtime_finalized()
         report["marker_after"] = boot._finalized_pid
@@ -446,8 +453,16 @@ while True:
 os.close(read_fd)
 _, status = os.waitpid(child_pid, 0)
 
+# The parent finalizes only after the fork, so it gets a runtime of its own.
+app_mod.finalize_worker_runtime()
+
 emit({
-    "parent": parent,
+    "pre_fork": pre_fork,
+    "parent": {
+        "pid": os.getpid(),
+        "injector": id(app_mod.app.state.injector),
+        "middleware": [m.cls.__name__ for m in app_mod.app.user_middleware],
+    },
     "child": json.loads(b"".join(chunks).decode()),
     "child_status": status,
 })
@@ -455,19 +470,103 @@ emit({
 
 
 def test_a_forked_child_finalizes_its_own_runtime():
+    """The supported shape: construct, fork, then finalize in each worker."""
     got = _run(_REAL_FORK, AGENTCLAW_HTTP_BOOT_MODE="preload")
 
     assert got["child_status"] == 0
-    parent, child = got["parent"], got["child"]
+    assert got["pre_fork"] == {"finalized": False, "marker": None, "middleware": []}
 
+    parent, child = got["parent"], got["child"]
     assert child["pid"] != parent["pid"]
-    # The child inherited the parent's marker...
-    assert child["inherited_marker"] == parent["pid"]
-    # ...and correctly refused to treat it as its own.
     assert child["finalized_before"] is False
     assert child["finalized_after"] is True
-    assert child["marker_after"] == child["pid"]
-    assert child["middleware"], "the child skipped finalize and has no middleware"
+    assert child["marker_after"] == child["pid"], (
+        "the child recorded someone else's pid as its own finalize marker"
+    )
+    # Each side wired itself, and exactly once — no doubling anywhere.
+    assert child["middleware"] == parent["middleware"]
+    assert len(set(child["middleware"])) == len(child["middleware"]), (
+        f"a middleware class was installed twice: {child['middleware']}"
+    )
+
+
+# The unsupported shape the pid guard has to catch: a process that finalized and
+# only then forked. The child inherits a whole wired runtime, not just a flag.
+_FINALIZE_THEN_FORK = """
+import os, json
+
+from agentclaw.community.adapters.http import app as app_mod
+from agentclaw.community.adapters.http import boot
+
+app_mod.finalize_worker_runtime()
+parent = {
+    "pid": os.getpid(),
+    "middleware": [m.cls.__name__ for m in app_mod.app.user_middleware],
+}
+
+read_fd, write_fd = os.pipe()
+child_pid = os.fork()
+if child_pid == 0:
+    os.close(read_fd)
+    try:
+        report = {
+            "pid": os.getpid(),
+            "inherited_marker": boot._finalized_pid,
+            "finalized_before": boot.worker_runtime_finalized(),
+        }
+        try:
+            app_mod.finalize_worker_runtime()
+            report["raised"] = None
+        except RuntimeError as exc:
+            report["raised"] = str(exc)
+        report["middleware"] = [m.cls.__name__ for m in app_mod.app.user_middleware]
+        os.write(write_fd, json.dumps(report).encode())
+    finally:
+        os.close(write_fd)
+        os._exit(0)
+
+os.close(write_fd)
+chunks = []
+while True:
+    chunk = os.read(read_fd, 65536)
+    if not chunk:
+        break
+    chunks.append(chunk)
+os.close(read_fd)
+os.waitpid(child_pid, 0)
+
+emit({"parent": parent, "child": json.loads(b"".join(chunks).decode())})
+"""
+
+
+def test_a_child_forked_after_finalize_refuses_rather_than_stacking():
+    """Re-finalizing an inherited runtime would append a second stack, not replace it.
+
+    A child of a process that already finalized inherits that process's
+    ``user_middleware`` — holding its auth plugin and tracer, and behind them its
+    engines, pools and fds, which a fork copies rather than reopens. Running the
+    sequence again cannot swap any of that out; it only appends, so every request
+    would traverse two stacks. The child cannot repair its own process image, so
+    it must say so instead of serving.
+    """
+    got = _run(_FINALIZE_THEN_FORK, AGENTCLAW_HTTP_BOOT_MODE="preload")
+    parent, child = got["parent"], got["child"]
+
+    assert child["inherited_marker"] == parent["pid"]
+    assert child["finalized_before"] is False, (
+        "the child treated the parent's marker as its own"
+    )
+    assert child["raised"] is not None, (
+        "the child silently re-finalized over an inherited runtime"
+    )
+    assert f"finalized in pid {parent['pid']}" in child["raised"]
+    assert "preload" in child["raised"], (
+        "the refusal should name the mode that avoids this shape"
+    )
+    assert child["middleware"] == parent["middleware"], (
+        "the refused finalize still mutated the inherited middleware stack: "
+        f"{len(parent['middleware'])} entries became {len(child['middleware'])}"
+    )
 
 
 # ---------------------------------------------------------------------------
