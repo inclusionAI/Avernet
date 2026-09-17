@@ -87,6 +87,12 @@ async fn persists_route_per_send_restores_abort_and_relay_without_model_leakage(
     let row = service.snapshot(None).await.unwrap().into_iter().find(|d| d.source_message_id == view.message_id && d.state.kind == DeliveryType::Send).unwrap();
     let preparer = QueuedGroupPreparation { flow: Arc::downgrade(&flow), deliveries: service.clone() };
     let mut prepared = preparer.prepare(&row).await.unwrap();
+    if provider {
+        if let bcs_protocol::BcsFrame::Request(frame) = &mut prepared.command.frame {
+            frame.params.as_mut().unwrap()["session_key"] = json!("group:legacy-provider-wire-key");
+        }
+        prepared.transport_context_json["downstream_session_key"] = json!("group:legacy-provider-wire-key");
+    }
     let expected = vec![("x-routing-zone".into(), "carrier-zone".into())];
     let transport_headers = if provider { expected.clone() } else { Vec::new() };
     assert_eq!(prepared.command.provider_bypass_headers, transport_headers);
@@ -115,6 +121,7 @@ async fn persists_route_per_send_restores_abort_and_relay_without_model_leakage(
         group_id: "group-1".into(), session_id: "group-1:headers".into(), bot_id: "bot-driver".into(), run_id: None,
     }).await.unwrap();
     assert_eq!(support.bot_delivery.aborts().await[0].provider_bypass_headers, expected);
+    assert_eq!(support.bot_delivery.aborts().await[0].session_id, "group-1:headers");
     }
     support.registry.set_delivery_target("bot-observer", support::FakeRegistryService::provider_target("bot-observer")).await;
     flow.handle_bot_event(BotEventCommand { bot_id: "bot-driver".into(), run_id: started.run_id.unwrap(), group_id: "group-1".into(),
