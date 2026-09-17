@@ -168,11 +168,12 @@ class RequireWorkerRuntime:
     is the "never serve half-initialized" rule, and it has to hold independently
     of how the host handles lifespans.
 
-    Installed during construction (phase 1) so it is part of the stack in both
-    modes and under either host. It owns nothing — no state, no resource — so it
-    is safe to inherit across a fork, and it reads
-    :func:`worker_runtime_finalized`, which is per-process: a child that has not
-    finalized refuses even though its parent had.
+    Installed by :func:`install_worker_runtime_guard` during construction, which
+    puts it *outside* every other middleware — see there for why that placement
+    is the whole point. It owns nothing — no state, no resource — so it is safe
+    to inherit across a fork, and it reads :func:`worker_runtime_finalized`,
+    which is per-process: a child that has not finalized refuses even though its
+    parent had.
 
     In ``eager`` mode, and in a correctly finalized worker, it never fires.
     """
@@ -207,6 +208,33 @@ class RequireWorkerRuntime:
             await send({"type": "http.response.body", "body": body})
             return
         await self.app(scope, receive, send)
+
+
+def install_worker_runtime_guard(app: "FastAPI") -> None:
+    """Put :class:`RequireWorkerRuntime` outside every other middleware.
+
+    Deliberately not ``add_middleware``. Starlette *prepends*, so a guard added
+    at construction ends up **innermost** — everything ``install_middleware``
+    adds later wraps around it. That is exactly backwards for the case the guard
+    exists for: a child forked from a finalized parent inherits the parent's
+    whole stack, so the parent's ``UserContextMiddleware`` — and through it the
+    parent's auth plugin, reading the parent's connection pool — would run
+    before the guard got to refuse. Measured on the previous commit: the child
+    answered 503 having already executed ``UserContextMiddleware``.
+
+    Starlette builds the stack lazily on the first ASGI call, so wrapping the
+    *builder* puts the guard outside everything that build produces, including
+    Starlette's own ``ServerErrorMiddleware``. It holds however the stack is
+    reached: built fresh in a worker after the fork, or inherited already-built
+    from a parent that had served a request, since the wrapper is what that
+    parent built too.
+    """
+    build_stack = app.build_middleware_stack
+
+    def build_with_guard() -> "ASGIApp":
+        return RequireWorkerRuntime(build_stack())
+
+    app.build_middleware_stack = build_with_guard  # type: ignore[method-assign]
 
 
 def finalize_worker_runtime(app: "FastAPI", *, profile: "DeployProfile") -> None:

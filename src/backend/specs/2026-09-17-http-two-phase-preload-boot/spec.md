@@ -103,13 +103,21 @@ In this exact order, matching today's:
   Serving is not the only way to do damage, so both gates ask the same question. Entering the
   lifespan un-finalized raises with a message naming `finalize_worker_runtime()`.
 - That lifespan check is not the only guard, because nothing in ASGI obliges a host to drive
-  the lifespan protocol. A `RequireWorkerRuntime` ASGI middleware, installed during
-  construction in both modes, answers **503** to any request reaching a process that has not
-  finalized. Without it a worker that skipped finalize would answer its first request by
-  building and caching a stack with no auth, no tenant scoping, no tracing and no CORS, and
-  then serve on it. The guard owns no state or resource, so it is safe to inherit across a
-  fork, and it reads the per-process marker — a child that has not finalized refuses even
-  though its parent had. In a finalized worker it never fires.
+  the lifespan protocol. `RequireWorkerRuntime` answers **503** to any request reaching a
+  process that has not finalized. Without it a worker that skipped finalize would answer its
+  first request by building and caching a stack with no auth, no tenant scoping, no tracing
+  and no CORS, and then serve on it. The guard owns no state or resource, so it is safe to
+  inherit across a fork, and it reads the per-process marker — a child that has not finalized
+  refuses even though its parent had. In a finalized worker it never fires.
+- It is installed by **wrapping the built middleware stack, not via `add_middleware`**.
+  Starlette prepends, so a guard added at construction would sit *innermost*, with everything
+  `install_middleware` adds later wrapped around it — and a child forked from a finalized
+  parent inherits exactly that stack. It would then run the parent's `UserContextMiddleware`,
+  and through it the parent's auth plugin against the parent's connection pool, before the
+  503 came back. Refusing after touching the resources is not refusing. Wrapping
+  `build_middleware_stack` puts the guard outside everything that build produces, including
+  Starlette's own `ServerErrorMiddleware`, whether the stack is built fresh post-fork or
+  inherited already-built.
 
 ## Behavior compatibility
 

@@ -157,7 +157,10 @@ prints a JSON verdict the parent asserts on.
    resolved. (b) A real request to an un-finalized worker whose lifespan was never driven
    (a `TestClient` used outside its context manager) gets 503 from `RequireWorkerRuntime`
    rather than a 200 through an un-wired stack; a finalized worker serves 200 through the
-   same guard.
+   same guard. (c) A real fork after a finalize, where the child issues a request and must
+   get its 503 **without** any inherited worker middleware having executed — spied through
+   `UserContextMiddleware.dispatch`, since that one reaches the parent's auth plugin and its
+   pool. This is what forces the guard to wrap the stack rather than join it.
 
 ## Deviation from the brief, and why
 

@@ -206,9 +206,9 @@ def test_preload_import_starts_no_worker_runtime():
     got = _run(_IMPORT_AND_REPORT, AGENTCLAW_HTTP_BOOT_MODE="preload", SERVER_ENV="pre")
 
     assert got["routes"], "preload import registered no routes at all"
-    assert got["middleware"] == ["RequireWorkerRuntime"], (
-        "preload import installed worker-owned middleware — the master would "
-        f"hand forked workers a frozen stack: {got['middleware']}"
+    assert got["middleware"] == [], (
+        "preload import installed middleware — the master would hand forked "
+        f"workers a frozen stack: {got['middleware']}"
     )
     assert got["has_injector"] is False, "preload import built and attached an injector"
     assert got["finalized"] is False
@@ -502,9 +502,7 @@ def test_a_forked_child_finalizes_its_own_runtime():
     got = _run(_REAL_FORK, AGENTCLAW_HTTP_BOOT_MODE="preload")
 
     assert got["child_status"] == 0
-    assert got["pre_fork"] == {
-        "finalized": False, "marker": None, "middleware": ["RequireWorkerRuntime"],
-    }
+    assert got["pre_fork"] == {"finalized": False, "marker": None, "middleware": []}
 
     parent, child = got["parent"], got["child"]
     assert child["pid"] != parent["pid"]
@@ -700,9 +698,9 @@ def test_an_unfinalized_worker_refuses_requests_without_a_lifespan():
         "would have served every later one through an un-wired stack too"
     )
     assert "worker runtime not initialized" in got["body"]
-    # The refusal came from the construction-time guard, not from anything
-    # finalize installs — there is nothing else in the stack.
-    assert got["middleware"] == ["RequireWorkerRuntime"]
+    # The guard is not in ``user_middleware`` at all — it wraps the built stack
+    # from outside, which is what lets it short-circuit before anything else.
+    assert got["middleware"] == []
 
 
 def test_a_finalized_worker_serves_normally_through_the_guard():
@@ -713,8 +711,80 @@ def test_a_finalized_worker_serves_normally_through_the_guard():
     ), AGENTCLAW_HTTP_BOOT_MODE="preload")
 
     assert got["status"] == 200, got["body"][:300]
-    assert got["middleware"][-1] == "RequireWorkerRuntime", (
-        "the guard should stay in the stack after finalize, just inert"
+    assert "RequireWorkerRuntime" not in got["middleware"], (
+        "the guard wraps the stack from outside; it is not a user middleware"
+    )
+
+
+_INHERITED_STACK_REQUEST = """
+import os, json
+
+import agentclaw.community.adapters.http.middleware as mw
+
+# Record whether any *worker-owned* middleware body runs. UserContextMiddleware
+# is the one that matters most: it calls the auth plugin, which reads the
+# database — on the parent's pool, in an inherited stack.
+ran = []
+_real_dispatch = mw.UserContextMiddleware.dispatch
+async def _spy(self, request, call_next):
+    ran.append("UserContextMiddleware")
+    return await _real_dispatch(self, request, call_next)
+mw.UserContextMiddleware.dispatch = _spy
+
+from agentclaw.community.adapters.http import app as app_mod
+
+app_mod.finalize_worker_runtime()          # parent wires the stack, then forks
+parent_middleware = [m.cls.__name__ for m in app_mod.app.user_middleware]
+
+read_fd, write_fd = os.pipe()
+child_pid = os.fork()
+if child_pid == 0:
+    os.close(read_fd)
+    try:
+        from fastapi.testclient import TestClient
+        response = TestClient(app_mod.app).get("/api/health")
+        os.write(write_fd, json.dumps({
+            "status": response.status_code,
+            "worker_middleware_ran": ran,
+        }).encode())
+    finally:
+        os.close(write_fd)
+        os._exit(0)
+
+os.close(write_fd)
+chunks = []
+while True:
+    chunk = os.read(read_fd, 65536)
+    if not chunk:
+        break
+    chunks.append(chunk)
+os.close(read_fd)
+os.waitpid(child_pid, 0)
+
+emit({
+    "parent_middleware": parent_middleware,
+    "child": json.loads(b"".join(chunks).decode()),
+})
+"""
+
+
+def test_the_guard_short_circuits_before_inherited_middleware_runs():
+    """Refusing late is not refusing: the guard must be outermost.
+
+    Starlette's ``add_middleware`` prepends, so a guard added at construction
+    would end up *innermost* — everything ``install_middleware`` adds later wraps
+    around it. A child forked from a finalized parent inherits that whole stack,
+    so the parent's ``UserContextMiddleware`` would run, and with it the parent's
+    auth plugin against the parent's connection pool, before the 503 came back.
+    Hence wrapping the built stack rather than joining it.
+    """
+    got = _run(_INHERITED_STACK_REQUEST, AGENTCLAW_HTTP_BOOT_MODE="preload")
+
+    assert got["parent_middleware"], "the parent never installed its stack"
+    assert got["child"]["status"] == 503
+    assert got["child"]["worker_middleware_ran"] == [], (
+        "the child executed inherited worker middleware before refusing — the "
+        "auth plugin it ran belongs to the parent, and so does the pool behind it"
     )
 
 

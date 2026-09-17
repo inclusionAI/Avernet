@@ -47,7 +47,7 @@ from fastapi import FastAPI, Request
 # fork.
 from agentclaw.community.adapters.http.boot import (
     BootMode,
-    RequireWorkerRuntime,
+    install_worker_runtime_guard,
     require_worker_injector,
 )
 from agentclaw.community.adapters.http.boot import (
@@ -255,9 +255,10 @@ async def _app_lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=_app_lifespan)
 
-# Refuse traffic in a process that has not finalized. At construction, because
-# the lifespan guard above only fires on hosts that drive the lifespan protocol.
-app.add_middleware(RequireWorkerRuntime)
+# Refuse traffic in a process that has not finalized — outside every other
+# middleware, and at construction, because the lifespan guard above only fires
+# on hosts that drive the lifespan protocol.
+install_worker_runtime_guard(app)
 
 
 def finalize_worker_runtime() -> None:
