@@ -831,6 +831,54 @@ def test_lifespan_refuses_an_inherited_injector_even_though_one_is_attached():
         boot._finalized_pid = previous
 
 
+# Deliberately does NOT clear ``app.openapi_schema``: the point is what a worker
+# serves when a preload master warmed the cache before forking.
+_WARM_OPENAPI_CACHE = """
+from agentclaw.community.adapters.http import app as app_mod
+
+# A master that exports or inspects the schema pre-fork warms the cache with the
+# phase-1 route set only — finalize has not mounted OptionalRouters yet.
+before = sorted(app_mod.app.openapi()["paths"])
+cached_before = app_mod.app.openapi_schema is not None
+
+app_mod.finalize_worker_runtime()
+
+after = sorted(app_mod.app.openapi()["paths"])
+
+emit({
+    "cached_before": cached_before,
+    "before_has_local_sql": "/local/sql/execute" in before,
+    "after_has_local_sql": "/local/sql/execute" in after,
+})
+"""
+
+
+def test_a_warm_openapi_cache_does_not_hide_routers_finalize_mounts():
+    """What the worker serves must match what it routes, cache or no cache.
+
+    ``finalize_worker_runtime`` mounts the DI-conditional routers *after*
+    construction, so a master that called ``app.openapi()`` before forking has a
+    cache describing fewer routes than the worker actually serves. FastAPI 0.138
+    invalidates on ``router._get_routes_version()`` rather than on "is the cache
+    empty", so ``include_router`` is enough and the seam needs no explicit
+    invalidation — but that is a property of the pinned FastAPI, not of this
+    code, so it is asserted here rather than assumed. If a future FastAPI goes
+    back to caching unconditionally, this fails and the fix is to clear
+    ``app.openapi_schema`` after the mount loop in ``_install_worker_runtime``.
+    """
+    got = _run(_WARM_OPENAPI_CACHE, AGENTCLAW_HTTP_BOOT_MODE="preload")
+
+    assert got["cached_before"] is True, "the master never warmed the cache"
+    assert got["before_has_local_sql"] is False, (
+        "construction mounted the DI-conditional router after all — this test no "
+        "longer exercises the stale-cache shape"
+    )
+    assert got["after_has_local_sql"] is True, (
+        "the worker routes /local/sql/execute but serves an OpenAPI document that "
+        "omits it; clear app.openapi_schema after finalize mounts OptionalRouters"
+    )
+
+
 def test_middleware_cannot_be_installed_after_the_stack_is_built():
     """Why the timing requirement exists, pinned against Starlette's behavior.
 
