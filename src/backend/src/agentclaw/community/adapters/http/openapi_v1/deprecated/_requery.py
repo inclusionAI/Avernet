@@ -87,10 +87,32 @@ def with_query_parameter(
     # ``__wrapped__`` behind, and inspect.signature follows that to the original
     # — so FastAPI would build the route from the *new* signature and the shim
     # would publish a path parameter its address does not have.
-    shim.__signature__ = signature.replace(parameters=parameters)  # type: ignore[attr-defined]
+    rebuilt = signature.replace(parameters=parameters)
+    shim.__signature__ = rebuilt  # type: ignore[attr-defined]
+    shim.__annotations__ = _resolved_hints(rebuilt)
     shim.__name__ = f"{handler.__name__}_{suffix}"
     shim.__doc__ = doc or handler.__doc__
     return shim
+
+
+def _resolved_hints(rebuilt: inspect.Signature) -> dict[str, Any]:
+    """The type hints a hand-built shim should carry beside its ``__signature__``.
+
+    ``authorization._consumes`` reads ``get_type_hints``, which consults
+    ``__annotations__`` and not the ``__signature__`` these shims set — so a
+    re-annotated legacy route would report "takes no OwnerIdDep" and the
+    enforcement check would refuse the migration at import. The signature was
+    taken with ``eval_str=True``, so its annotations are already resolved
+    objects and can be carried as-is.
+    """
+    hints = {
+        key: parameter.annotation
+        for key, parameter in rebuilt.parameters.items()
+        if parameter.annotation is not inspect.Parameter.empty
+    }
+    if rebuilt.return_annotation is not inspect.Signature.empty:
+        hints["return"] = rebuilt.return_annotation
+    return hints
 
 
 def without_parameter(
@@ -145,11 +167,58 @@ def without_parameter(
     # Same reason as ``with_query_parameter``: set, not ``functools.wraps``,
     # or ``inspect.signature`` follows ``__wrapped__`` back to the original and
     # FastAPI republishes the parameter this exists to remove.
-    shim.__signature__ = signature.replace(  # type: ignore[attr-defined]
+    rebuilt = signature.replace(
         parameters=[p for k, p in signature.parameters.items() if k != name]
     )
+    shim.__signature__ = rebuilt  # type: ignore[attr-defined]
+    shim.__annotations__ = _resolved_hints(rebuilt)
     shim.__name__ = f"{handler.__name__}_{suffix}"
     shim.__doc__ = doc or handler.__doc__
+    return shim
+
+
+def pin_owner_to_user(
+    handler: Callable[..., Any],
+    *,
+    name: str = "owner_id",
+    from_key: str = "user_id",
+    suffix: str = "legacy",
+) -> Callable[..., Any]:
+    """A shim calling *handler* with *name* bound to the validated user id.
+
+    The counterpart of :func:`without_parameter` for a parameter whose value
+    is per-request rather than a constant: the retiring resources and routines
+    addresses must not publish ``owner_id`` — both because the contract is
+    frozen and because their paths carry no ``{bot_id}`` a ``Check`` row's gate
+    could adjudicate — so their handlers' addressed-owner parameter is taken
+    off the signature and pinned to the caller, the owner every operation on
+    those addresses always resolved.
+
+    ``from_key`` names the handler parameter that carries the validated user
+    id (``UserIdDep`` resolves it before this runs, so the value is the one
+    ``require_user_id`` proved, not raw query text). Refused at construction —
+    not silently skipped — when either parameter is missing, so a handler
+    rename fails at import rather than republishing the parameter this
+    exists to remove.
+    """
+    signature = inspect.signature(handler, eval_str=True)
+    for key in (name, from_key):
+        if key not in signature.parameters:
+            raise ValueError(f"{handler.__name__} has no parameter {key!r}")
+
+    async def shim(**kwargs: Any) -> Any:
+        return await handler(**kwargs, **{name: kwargs[from_key]})
+
+    # Same reason as ``without_parameter``: set, not ``functools.wraps``, or
+    # ``inspect.signature`` follows ``__wrapped__`` back to the original and
+    # FastAPI republishes the parameter this exists to remove.
+    rebuilt = signature.replace(
+        parameters=[p for k, p in signature.parameters.items() if k != name]
+    )
+    shim.__signature__ = rebuilt  # type: ignore[attr-defined]
+    shim.__annotations__ = _resolved_hints(rebuilt)
+    shim.__name__ = f"{handler.__name__}_{suffix}"
+    shim.__doc__ = handler.__doc__
     return shim
 
 

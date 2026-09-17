@@ -21,6 +21,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
     RuntimeStage,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    OwnerIdDep,
     StageQuery,
     WriteStageQuery,
 )
@@ -70,7 +71,8 @@ FileTypePath = Annotated[
 @envelope_errors
 async def list_bot_identity_files(
     bot_id: BotIdPath,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
     identity_service: IdentityService = Injected(IdentityService),
@@ -83,10 +85,10 @@ async def list_bot_identity_files(
     A file reports exists false both when it is absent and when it exists
     with empty content. Entry order is not guaranteed — key off type.
     """
-    # I2: entity_type/entity_id/operator_id come from the authenticated
-    # request's user_id parameter (personal bot owner = the named user). The
-    # pair is resolved in ``core`` so manifest apply addresses identity the same
-    # way without a request.
+    # I2: the owner is the addressed one (OwnerIdDep: the caller by default,
+    # the shared bot's owner when named) — entity coords all derive from it.
+    # The pair is resolved in ``core`` so manifest apply addresses identity
+    # the same way without a request.
     coords = identity_coords_from_record(bot_id, owner_id)
     entity_type, entity_id = coords.entity_type, coords.entity_id
     presence = await identity_service.list_bot_files(
@@ -115,7 +117,8 @@ async def list_bot_identity_files(
 async def get_bot_identity_file(
     bot_id: BotIdPath,
     file_type: FileTypePath,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
     identity_service: IdentityService = Injected(IdentityService),
@@ -128,8 +131,7 @@ async def get_bot_identity_file(
     A file that has never been written reads as an empty content string, not
     an error.
     """
-    # I2: entity params come from the authenticated principal via UserIdDep
-    # (personal bot owner = the named user). I3: publish_id is not exposed —
+    # I2: the owner is the addressed one (OwnerIdDep). I3: publish_id is not exposed —
     # the runtime is named by ``stage`` instead. The service's
     # validate_file_type requires the physical <type>.md form
     # (VALID_IDENTITY_FILES carries the suffix), so the enum value is
@@ -167,7 +169,8 @@ async def update_bot_identity_file(
     bot_id: BotIdPath,
     file_type: FileTypePath,
     body: IdentityFileWrite,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
     stage: WriteStageQuery = RuntimeStage.DRAFT,
     identity_service: IdentityService = Injected(IdentityService),
@@ -181,8 +184,8 @@ async def update_bot_identity_file(
     produced and is replaced by publishing again, never edited, so naming one is
     refused and nothing is written.
     """
-    # I2: entity params come from the authenticated principal via UserIdDep
-    # as above; validate_file_type requires the <type>.md form.
+    # I2: the owner is the addressed one (OwnerIdDep), as above;
+    # validate_file_type requires the <type>.md form.
     coords = identity_coords_from_record(bot_id, owner_id)
     entity_type, entity_id = coords.entity_type, coords.entity_id
     file_type_md = identity_physical_file_name(file_type.value)

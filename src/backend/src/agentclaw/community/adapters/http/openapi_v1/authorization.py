@@ -18,8 +18,9 @@ Two modes are permanent
 
 - :class:`Check` — verify the caller's level on the bot the operation
   addresses. The level is a parameter rather than a further mode because the
-  bars genuinely differ per operation: MEMBER to drive a bot's sessions, ADMIN
-  to write a channel, OWNER to restart a container or delete the bot.
+  bars genuinely differ per operation: MEMBER to drive a bot's sessions,
+  ADMIN to write a channel, OWNER to restart a container's instance or
+  delete the bot.
 - :class:`NoCheck` — nothing to verify, and the reason says which kind of
   nothing. Either the operation addresses no bot (a name check, the
   marketplace, the caller's own identity), or it is bot-scoped and
@@ -187,7 +188,11 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("tenant-wide display metadata for caller-supplied known bot ids"),
     # ── Bot-scoped operations ─────────────────────────────────────────────
     ("DELETE", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED,
+    # The read moves off OWNER_SCOPED alone: a collaborator who may read a
+    # bot's lifecycle, chats and channels — all MEMBER — has no reason to be
+    # refused the base record those describe. The writes beside it stay
+    # owner-level: renaming and deleting decide what a bot is, not how it works.
+    ("GET", "/openapi/v1/bots/{bot_id}"): Check(PermissionLevel.MEMBER),
     ("PUT", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED,
     ("POST", "/openapi/v1/bots/{bot_id}/activate"): Check(PermissionLevel.OWNER),
     ("POST", "/openapi/v1/bots/{bot_id}/recycle"): Check(PermissionLevel.OWNER),
@@ -261,9 +266,26 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/connection"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.engine_runtime.connection"),
     ("GET", "/openapi/v1/bots/{bot_id}/containers"): Check(PermissionLevel.MEMBER),
+    # The instance-level restart stays OWNER beside this migration, for the
+    # opposite of the bot-level one: it is the milder operation, but the
+    # hosted-runtime facade enforces the same owner bar a second time behind
+    # the gate (`_resolve_bot` — pinned by the facade's four-keeper test),
+    # and moving this row while that enforcement stands would only make the
+    # seam claim a share the facade then refuses. The bot-level restart
+    # beside it carries no second gate, so it is genuinely the member's.
     ("POST", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"): Check(PermissionLevel.OWNER),
-    ("GET", "/openapi/v1/bots/{bot_id}/data-init"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/data-init"): OWNER_SCOPED,
+    # Data-init state is bot workspace state: reading where a cold-start got to
+    # is part of working on the bot, so that read takes MEMBER. The trigger
+    # stays with the owner alone, and for a reason the share bars usually do
+    # not have: it collects the *caller's* IAM token as the credential the
+    # device callback will spend, on a record the bot ext keeps under the
+    # owner — an actor who is not the owner would persist somebody else's
+    # live-session credential onto a bot the owner can see. OWNER plus the
+    # lock, the lifecycle upgrade's own bars.
+    ("GET", "/openapi/v1/bots/{bot_id}/data-init"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/data-init"): Check(
+        PermissionLevel.OWNER, EDIT_LOCK
+    ),
     ("GET", "/openapi/v1/bots/{bot_id}/diagnostics/health"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("DELETE", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER),
@@ -293,9 +315,15 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         ServiceChecked(PermissionLevel.ADMIN, "…openapi_v1.harness.router"),
     ("POST", "/openapi/v1/bots/{bot_id}/harness/rollback"):
         ServiceChecked(PermissionLevel.ADMIN, "…openapi_v1.harness.router"),
-    ("GET", "/openapi/v1/bots/{bot_id}/identity"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}/identity/{file_type}"): OWNER_SCOPED,
-    ("PUT", "/openapi/v1/bots/{bot_id}/identity/{file_type}"): OWNER_SCOPED,
+    # Identity is the bot's persona — RULES, SOUL, the rest of the sixteen.
+    # Reading how a bot is set up is part of working on it (the config-manifest
+    # read's bar), so any collaborator at MEMBER may; rewriting a persona is an
+    # ADMIN act behind the edit lock, like the manifest beside it. The retiring
+    # addresses below mirror these rows explicitly, the way the engine-runtime
+    # legacy rows do.
+    ("GET", "/openapi/v1/bots/{bot_id}/identity"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/identity/{file_type}"): Check(PermissionLevel.MEMBER),
+    ("PUT", "/openapi/v1/bots/{bot_id}/identity/{file_type}"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
     ("DELETE", "/openapi/v1/bots/{bot_id}/lifecycle"): Check(PermissionLevel.OWNER, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/lifecycle"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/lifecycle/advance"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
@@ -327,22 +355,36 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("POST", "/openapi/v1/bots/{bot_id}/render-screens"): Check(PermissionLevel.MEMBER),
     ("DELETE", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"): Check(PermissionLevel.MEMBER),
     ("PATCH", "/openapi/v1/bots/{bot_id}/render-screens/{render_screen_id}"): Check(PermissionLevel.MEMBER),
-    ("DELETE", "/openapi/v1/bots/{bot_id}/resources"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}/resources"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}/resources/download"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}/resources/download-dir"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/resources/mkdir"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}/resources/preview"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}/resources/stat"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/resources/upload"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/restart"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}/routines"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/routines"): OWNER_SCOPED,
-    ("DELETE", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"): OWNER_SCOPED,
-    ("PATCH", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"): OWNER_SCOPED,
-    ("POST", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/run"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs"): OWNER_SCOPED,
+    # Resources are the workspace's files — the material a collaborator edits.
+    # Reading and moving files is member work; uploading, creating and deleting
+    # decide the workspace's contents and so take ADMIN behind the edit lock,
+    # the split the channels and manifest writes take.
+    ("DELETE", "/openapi/v1/bots/{bot_id}/resources"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
+    ("GET", "/openapi/v1/bots/{bot_id}/resources"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/resources/download"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/resources/download-dir"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/resources/mkdir"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
+    ("GET", "/openapi/v1/bots/{bot_id}/resources/preview"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/resources/stat"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/resources/upload"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
+    # Restart takes its sibling lifecycle bar: restarting a bot's container —
+    # which is also what applies a changed startup script — is ordinary
+    # operational work (MEMBER), and a command that applies what somebody is
+    # editing waits for the lock like the lifecycle commands do.
+    ("POST", "/openapi/v1/bots/{bot_id}/restart"): Check(
+        PermissionLevel.MEMBER, EDIT_LOCK
+    ),
+    # Routines are scheduled bot behaviour: reading them (and the run log) is
+    # member work, defining and reshaping them is ADMIN behind the lock, and
+    # firing one is an operational command — MEMBER behind the lock, the bar
+    # the lifecycle commands take.
+    ("GET", "/openapi/v1/bots/{bot_id}/routines"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/routines"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
+    ("DELETE", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
+    ("GET", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"): Check(PermissionLevel.MEMBER),
+    ("PATCH", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/run"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
+    ("GET", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/sessions"):
         ServiceChecked(PermissionLevel.MEMBER,
                        "…openapi_v1.engine_runtime.sessions.router"),
@@ -414,9 +456,16 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): Check(PermissionLevel.MEMBER),
     ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("PUT", "/openapi/v1/bots/{bot_id}/space"): OWNER_SCOPED,
-    ("DELETE", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
-    ("GET", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
-    ("PUT", "/openapi/v1/bots/{bot_id}/startup-script"): OWNER_SCOPED,
+    # The startup script is workspace configuration the manifest converges: read
+    # at MEMBER like the manifest, written behind ADMIN and the lock.
+    ("DELETE", "/openapi/v1/bots/{bot_id}/startup-script"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
+    ("GET", "/openapi/v1/bots/{bot_id}/startup-script"): Check(PermissionLevel.MEMBER),
+    ("PUT", "/openapi/v1/bots/{bot_id}/startup-script"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
+    # The status face stays owner-only beside this migration, deliberately: the
+    # dormant pin holds that a collaborator at ADMIN may not poll a dormant
+    # bot's readout (`test_admin_collaborator_cannot_poll_dormant_status`), so
+    # the base record's MEMBER bar is the wider share, not the pattern — the
+    # two genuinely differ, and the row keeps the pin's answer.
     ("GET", "/openapi/v1/bots/{bot_id}/status"): Check(PermissionLevel.OWNER),
 
     # ── Operations that address no bot ────────────────────────────────────
@@ -639,9 +688,27 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/engine/{bot_id}/available"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/engine/{bot_id}/capabilities"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/engine/{bot_id}/status"): Check(PermissionLevel.MEMBER),
-    ("GET", "/openapi/v1/bots/identity/{bot_id}"): INHERITED,
-    ("GET", "/openapi/v1/bots/identity/{bot_id}/{file_type}"): INHERITED,
-    ("PUT", "/openapi/v1/bots/identity/{bot_id}/{file_type}"): INHERITED,
+    # Identity's retiring addresses mirror the replacement's new rows, not
+    # INHERITED — a forced move, named as such. The chain has no exit:
+    # a ``Check`` replacement leaves an ``INHERITED`` twin abandoned by the
+    # twin guard unless it is exempted; the exemption exists only for twins
+    # with no ``{bot_id}`` on the path (a ``Check`` row's gate cannot read a
+    # query-string bot), and these paths carry the bot; and a ``Check`` row's
+    # handler must consume ``OwnerIdDep``, so honouring a *pinned* owner is
+    # not available either. So these retiring addresses publish and honour
+    # ``owner_id`` — a capability their frozen contract did not have, the one
+    # the resources/routines retirements below refuse via the pin — recorded
+    # here rather than hidden: the alternative was an unadjudicated owner
+    # read at an address the handler still serves. ``relocate`` does not
+    # carry route-level gate dependencies either, so the rows are what makes
+    # the twin's gate attach at all. The resources and routines retiring
+    # addresses below stay INHERITED for that opposite reason: their bots
+    # travel as query/body parameters these paths cannot offer a ``Check``
+    # row's gate, and their shims pin the owner to the caller instead
+    # (``deprecated._requery``).
+    ("GET", "/openapi/v1/bots/identity/{bot_id}"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/identity/{bot_id}/{file_type}"): Check(PermissionLevel.MEMBER),
+    ("PUT", "/openapi/v1/bots/identity/{bot_id}/{file_type}"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/models/{bot_id}"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/models/{bot_id}/{model_id:path}"): Check(PermissionLevel.MEMBER),
     ("DELETE", "/openapi/v1/bots/resources"): INHERITED,

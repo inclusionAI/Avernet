@@ -13,6 +13,9 @@ from typing import Annotated, Any
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    OwnerIdDep,
+)
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     BotIdPath,
     Deleted,
@@ -124,7 +127,8 @@ def _map_run(data: dict, routine_id: str) -> RoutineRun:
 @envelope_errors
 async def list_routines(
     page: PageParamsDep,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_id: BotIdPath,
     request: Request,
     status: Annotated[
@@ -142,14 +146,12 @@ async def list_routines(
     # does not expose a status filter at the list seam, so we return the full
     # set and let the client filter on `enabled`. Wire a server-side filter
     # here only if/when the engine surfaces a status dimension.
-    user_id = owner_id
-    nick_name = owner_id
     # Draft only, like every other route in this group: the public surface
     # operates a bot's pre-publication workspace, so a service bot's published
     # verify/online runtimes are neither listed nor queried here.
     result = await factory.list_all_crons(
-        user_id=user_id,
-        nick_name=nick_name,
+        user_id=owner_id,
+        nick_name=owner_id,
         bot_id=bot_id,
         runtime_stage=RUNTIME_STAGE_DRAFT,
     )
@@ -172,7 +174,8 @@ async def list_routines(
 async def create_routine(
     bot_id: BotIdPath,
     body: RoutineSpec,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
 ) -> Envelope[Routine]:
@@ -186,8 +189,6 @@ async def create_routine(
     # cron expression STRING (not the nested {kind,expr,tz} dict — the adapter
     # wraps it on read in device_adapter_transport._build_item), and timezone
     # defaults to Asia/Shanghai to match legacy cron/router.py's create path.
-    user_id = owner_id
-    nick_name = owner_id
     adapter_body = {
         "name": body.name,
         "schedule": body.trigger.cron,
@@ -198,8 +199,8 @@ async def create_routine(
     }
     result = await factory.create_cron(
         bot_id=bot_id,
-        user_id=user_id,
-        nick_name=nick_name,
+        user_id=owner_id,
+        nick_name=owner_id,
         body=adapter_body,
     )
     data = result.get("data") if isinstance(result, dict) else None
@@ -212,7 +213,8 @@ async def create_routine(
 @envelope_errors
 async def get_routine(
     routine_id: RoutineIdPath,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_id: BotIdPath,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
@@ -224,13 +226,11 @@ async def get_routine(
     keep the one you addressed with.
     """
     # C3: a routine id does not reverse-map to a bot, so the bot has to be
-    # named. It is on the path now, ahead of the routine. Owner identity comes from the
-    # authenticated principal via UserIdDep. Missing/non-dict data collapses
-    # to 404.
-    user_id = owner_id
-    nick_name = owner_id
+    # named. It is on the path now, ahead of the routine. The owner is the
+    # addressed one (OwnerIdDep); the cron relay still attributes the job to
+    # that owner's identity. Missing/non-dict data collapses to 404.
     result = await factory.get_cron_detail(
-        bot_id=bot_id, user_id=user_id, nick_name=nick_name, task_id=routine_id
+        bot_id=bot_id, user_id=owner_id, nick_name=owner_id, task_id=routine_id
     )
     data = result.get("data") if isinstance(result, dict) else None
     if not isinstance(data, dict):
@@ -243,7 +243,8 @@ async def get_routine(
 async def update_routine(
     routine_id: RoutineIdPath,
     body: RoutineUpdate,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_id: BotIdPath,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
@@ -257,8 +258,6 @@ async def update_routine(
     # set fields flow to the adapter. trigger.cron becomes a raw schedule
     # STRING (not a {kind,expr,tz} dict — the adapter wraps it on read; Task 3
     # contract). Missing/non-dict data on the response collapses to 404.
-    user_id = owner_id
-    nick_name = owner_id
     update_body: dict = {}
     if body.name is not None:
         update_body["name"] = body.name
@@ -272,8 +271,8 @@ async def update_routine(
         update_body["schedule"] = body.trigger.cron
     result = await factory.update_cron(
         bot_id=bot_id,
-        user_id=user_id,
-        nick_name=nick_name,
+        user_id=owner_id,
+        nick_name=owner_id,
         task_id=routine_id,
         body=update_body,
     )
@@ -287,7 +286,8 @@ async def update_routine(
 @envelope_errors
 async def delete_routine(
     routine_id: RoutineIdPath,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_id: BotIdPath,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
@@ -303,11 +303,9 @@ async def delete_routine(
     # per-raise, so not in the static ENVELOPE_ERRORS map). The engine result
     # distinguishes timeout-vs-missing only via its error text today; a
     # structured engine error_code would make that precise (follow-up).
-    user_id = owner_id
-    nick_name = owner_id
     try:
         result = await factory.delete_cron(
-            bot_id=bot_id, user_id=user_id, nick_name=nick_name, task_id=routine_id
+            bot_id=bot_id, user_id=owner_id, nick_name=owner_id, task_id=routine_id
         )
     except CronRelayError as e:
         # published-stage delete rejected — CronRelayError carries the engine's
@@ -330,7 +328,8 @@ async def delete_routine(
 @envelope_errors
 async def run_routine(
     routine_id: RoutineIdPath,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_id: BotIdPath,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
@@ -348,13 +347,11 @@ async def run_routine(
     # ``ran=<routine id>, status=not_due`` and ``bool(ran)`` is true, so the old
     # mapping reported that no-op as ``completed``.  Force the trigger and read
     # the runtime status rather than treating its opaque routine id as a bool.
-    user_id = owner_id
-    nick_name = owner_id
     try:
         result = await factory.run_cron(
             bot_id=bot_id,
-            user_id=user_id,
-            nick_name=nick_name,
+            user_id=owner_id,
+            nick_name=owner_id,
             task_id=routine_id,
             force=True,
         )
@@ -424,7 +421,8 @@ async def run_routine(
 async def list_routine_runs(
     routine_id: RoutineIdPath,
     page: PageParamsDep,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_id: BotIdPath,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
@@ -440,10 +438,8 @@ async def list_routine_runs(
     # passthrough; _decorate_single_result only adds bot_metadata fields to
     # data, leaving runs intact). Each entry maps via _map_run; pagination is
     # client-side over the fetched set.
-    user_id = owner_id
-    nick_name = owner_id
     result = await factory.get_cron_runs(
-        bot_id=bot_id, user_id=user_id, nick_name=nick_name, task_id=routine_id
+        bot_id=bot_id, user_id=owner_id, nick_name=owner_id, task_id=routine_id
     )
     runs: list[dict] = []
     if isinstance(result, dict):

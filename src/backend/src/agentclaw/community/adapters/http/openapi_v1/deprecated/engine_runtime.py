@@ -16,8 +16,9 @@ in :mod:`.approvals`.
 
 Two routers rather than one, because the two halves are mounted differently and
 the mount is part of what a caller experiences. The engine-runtime groups
-document a 501 and 504 and resolve their own owner; identity is grant-checked
-at the mount. Merging them would give one half the other's contract.
+document a 501 and 504 and resolve their own owner; identity takes the
+addressed-bot grant at the mount, like its replacement. Merging them would
+give one half the other's contract.
 """
 
 from __future__ import annotations
@@ -131,12 +132,14 @@ identity: APIRouter = relocate(
 #: Mounted with ``ENGINE_RUNTIME_ERROR_RESPONSES``, like their replacements.
 ENGINE_RUNTIME: list[APIRouter] = [connection, engine, models, sessions, approvals]
 
-#: Mounted grant-checked, like its replacement.
-GRANT_CHECKED: list[APIRouter] = [identity]
+#: The config-manifest-style addressed-bot grant, like its replacement. The
+#: retiring identity functions still declare ``OwnerIdDep``, so the grant the
+#: mount declares must be the one that adjudicates the owner they read.
+ADDRESSED: list[APIRouter] = [identity]
 
 __all__ = [
+    "ADDRESSED",
     "ENGINE_RUNTIME",
-    "GRANT_CHECKED",
     "approvals",
     "connection",
     "engine",
