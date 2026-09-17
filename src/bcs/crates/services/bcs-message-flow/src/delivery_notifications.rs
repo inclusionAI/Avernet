@@ -155,7 +155,7 @@ async fn publish_status(
         target: FrontendDeliveryTarget::SessionActors { session_id: row.session_id.clone(), actor_ids },
         event_json: serde_json::to_string(&serde_json::json!({
             "type":"event", "event":"message.delivery.updated", "group_id":row.group_id,
-            "session_id":row.session_id, "payload":bcs_service_api::application::message_delivery::DeliveryStatusView::from(row),
+            "session_id":row.session_id, "payload":bcs_service_api::application::message_delivery::DeliveryStatusView::from(row).with_content_preview(Some(&message.content)),
         }))?, delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
         run_fallback: None, exclude_conn_id: None,
         visibility_domain: message.visibility_domain.unwrap_or(bcs_domain::MessageVisibilityDomain::ManagerWorker),

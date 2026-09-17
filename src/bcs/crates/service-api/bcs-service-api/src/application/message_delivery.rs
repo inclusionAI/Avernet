@@ -22,6 +22,9 @@ pub struct DeliveryStatusView {
     pub state_version: u64,
     pub run_id: Option<String>,
     pub wait_reason: Option<bcs_domain::message_delivery::DeliveryWaitReason>,
+    /// 消息正文预览（截断至前 200 字符），供前端排队列表展示。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_preview: Option<String>,
 }
 
 impl From<&PersistedMessageDelivery> for DeliveryStatusView {
@@ -38,7 +41,20 @@ impl From<&PersistedMessageDelivery> for DeliveryStatusView {
             state_version: row.state.state_version,
             run_id: row.run_id.clone(),
             wait_reason: row.wait_reason,
+            content_preview: None,
         }
+    }
+}
+
+impl DeliveryStatusView {
+    /// 附带消息正文预览的构造函数。
+    pub fn with_content_preview(mut self, content: Option<&serde_json::Value>) -> Self {
+        self.content_preview = content.and_then(|c| {
+            c.get("text")
+                .and_then(|t| t.as_str())
+                .map(|s| if s.len() > 200 { format!("{}…", &s[..200]) } else { s.to_string() })
+        });
+        self
     }
 }
 
@@ -95,7 +111,11 @@ impl From<&DeliveryAdmissionResult> for DeliveryAdmissionView {
         Self {
             message_id: result.message.message_id.clone(),
             duplicate: result.duplicate,
-            deliveries: result.deliveries.iter().map(Into::into).collect(),
+            deliveries: result
+                .deliveries
+                .iter()
+                .map(|d| DeliveryStatusView::from(d).with_content_preview(Some(&result.message.content)))
+                .collect(),
         }
     }
 }
