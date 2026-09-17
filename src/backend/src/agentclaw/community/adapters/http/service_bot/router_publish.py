@@ -181,21 +181,25 @@ async def get_bot_stage_binding_info(
     bot_id: str,
     owner_id: str,
     stage: str,
+    default_tag: str | None = None,
     publish_service: BotPublishServiceProtocol = Injected(BotPublishServiceProtocol),
 ) -> ApiResponse:
     """查询 bot 在指定阶段对应的 binding / BaaS 信息.
 
     GET /api/service-bot/publish/{bot_id}/binding?owner_id=u1&stage=online
+    GET /api/service-bot/publish/{bot_id}/binding?owner_id=u1&stage=eval&default_tag=default
     """
     try:
         logger.info(
-            f"[get_bot_stage_binding_info] Query: bot_id={bot_id}, stage={stage}, owner_id={owner_id}"
+            f"[get_bot_stage_binding_info] Query: bot_id={bot_id}, stage={stage}, "
+            f"owner_id={owner_id}, default_tag={default_tag}"
         )
 
         result = publish_service.get_bot_stage_binding_info(
             bot_id=bot_id,
             owner_id=owner_id,
             stage=stage,
+            default_tag=default_tag,
         )
 
         return ApiResponse(

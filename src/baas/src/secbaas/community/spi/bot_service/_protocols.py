@@ -27,7 +27,7 @@ class BotServicePlugin(Protocol):
         ...
 
     async def get_binding(
-        self, bot_id: str, owner_id: str, stage: str
+        self, bot_id: str, owner_id: str, stage: str, *, default_tag: str | None = None
     ) -> BotBindingData:
         """Query bot binding info from the publish API.
 
@@ -35,6 +35,8 @@ class BotServicePlugin(Protocol):
             bot_id: Bot identifier.
             owner_id: Owner entity identifier (required query param).
             stage: Lifecycle stage, e.g. ``"online"``, ``"verify"``.
+            default_tag: 评测环境 binding 标签（如 ``"default"``、``"eval"``），
+                         透传给后端以支持按 default_tag 查询评测 binding。
 
         Returns:
             BotBindingData with binding details.
