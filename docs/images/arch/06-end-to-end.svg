@@ -107,14 +107,14 @@
     <rect x="60" y="628" width="360" height="96" rx="6" fill="#DFEDEC" stroke="#3B7A73"/>
     <text x="76" y="652" class="num">⑩</text>
     <text x="100" y="652" class="bt" fill="#234945">引擎网关</text>
-    <text x="76" y="676" class="bd">适配层背后的那一跳，讲引擎自己的原生协议</text>
-    <text x="76" y="696" class="bd">claude_code 的网关随仓库分发，与 Engine 同机起</text>
-    <text x="76" y="714" class="bd">openclaw 的网关在外部部署，需自备</text>
+    <text x="76" y="676" class="bd">适配层背后的那一跳</text>
+    <text x="76" y="696" class="bd">从这里开始讲的是引擎自己的原生协议</text>
+    <text x="76" y="714" class="bd">每个引擎的网关怎么部署，由那个引擎自己决定</text>
 
     <rect x="450" y="628" width="360" height="96" rx="6" fill="#DFEDEC" stroke="#3B7A73"/>
     <text x="466" y="652" class="num">⑪</text>
     <text x="490" y="652" class="bt" fill="#234945">引擎本体　·　在沙箱里</text>
-    <text x="466" y="676" class="bd">claude_code　·　openclaw　·　（后续接入的引擎）</text>
+    <text x="466" y="676" class="bd">openclaw · claude_code · aicoding · hermes · deepseek_harness</text>
     <text x="466" y="696" class="bd">技能与命令行工具在这里真正落盘、执行</text>
     <text x="466" y="714" class="bd">Bot 的工作区文件也在这里</text>
 

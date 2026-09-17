@@ -81,7 +81,7 @@
 
     <rect x="44" y="836" width="1272" height="166" rx="6" fill="#F1EFEA" stroke="#D8D5CF"/>
     <text x="64" y="866" class="bt" fill="#33322E">所以，判据只有一条：那个跑引擎的进程，是不是我们拉起来的</text>
-    <text x="64" y="898" class="bm">· 是 —— 容器由我们创建、镜像由我们构建、进程由我们拉起，适配层就有地方待。走 ②。仓库里的 claude_code、openclaw 都是这条。</text>
+    <text x="64" y="898" class="bm">· 是 —— 容器由我们创建、镜像由我们构建、进程由我们拉起，适配层就有地方待。走 ②。仓库里的 openclaw、claude_code、aicoding、hermes、deepseek_harness 都是这条。</text>
     <text x="64" y="926" class="bm">· 不是 —— 容器在对方那边、配置自己拉取、进程我们碰不到，适配层无处安放。只能走 ①。teclaw 就是这一类。</text>
     <text x="64" y="958" class="bd">注意这跟「哪条路更省事」无关：走 ① 不是因为嫌适配层麻烦，而是因为对外部运行时来说，② 在物理上不成立。</text>
     <text x="64" y="984" class="bd">两条路对调用方完全一样：都只暴露标准引擎协议，都要声明能力矩阵，上层据此派发或隐藏。</text>
