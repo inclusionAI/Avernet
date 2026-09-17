@@ -31,6 +31,7 @@ spec.md`` (REQ-11, "领域定位/风险" lines, 已确认决策 #14) + ``plan.md
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
@@ -49,8 +50,10 @@ if TYPE_CHECKING:
     # reference needs the class). Import under TYPE_CHECKING to keep the
     # runtime import surface minimal and avoid a cross-module cycle in narrow
     # test setups. ``from __future__ import annotations`` stringises the
-    # hints so they are never evaluated at runtime.
-    from agentclaw.community.core.task.domain.models import Status
+    # hints so they are never evaluated at runtime. ``TaskInfo`` likewise is
+    # used only in the SUBMIT helper's annotation (the helper reads its fields
+    # via attribute access at runtime; no class reference needed).
+    from agentclaw.community.core.task.domain.models import Status, TaskInfo
 
 logger = logging.getLogger("task.trajectory")
 
@@ -248,3 +251,116 @@ def emit_trajectory_event(
             _enum_to_str(action_type),
             ex,
         )
+
+
+# ---------------------------------------------------------------------------
+# SUBMIT-specific helper (REQ-6) — fires at the task_info persist point
+# ---------------------------------------------------------------------------
+
+# ``Status.PENDING.value`` — the initial status of a submitted task. Spelled
+# as the literal here so the helper doesn't need a runtime ``Status`` import
+# (the module keeps ``Status`` under TYPE_CHECKING to minimise the runtime
+# import surface, per the comment above). The emitter's ``_enum_to_str`` passes
+# plain strings through unchanged, so passing ``"PENDING"`` produces the same
+# record column value as ``Status.PENDING`` (= ``"PENDING"``, StrEnum).
+_SUBMIT_INITIAL_STATUS = "PENDING"
+
+
+def emit_submit_trajectory(
+    repo: TaskTrajectoryRepositoryLike | None,
+    task_id: str,
+    task_info: "TaskInfo",
+    *,
+    submitted_at_ms: int,
+    node_id: str | None = None,
+) -> None:
+    """Emit the SUBMIT trajectory event (REQ-6) at the task_info persist point.
+
+    The first timeline segment of a task's trajectory: fires once, right after
+    ``TaskService.execute`` persists the submitted ``TaskInfo`` (so the task
+    exists), marking the submission — ``timeline[0].action_type == "submit"``.
+
+    Fields (per REQ-6 / spec clarification):
+        action_type   = ``TrajectoryActionType.SUBMIT`` ("submit"; a trajectory
+                         action-type, **not** ``NodeAction`` — submit is absent
+                         from the ``NodeAction`` enum and the spec forbids
+                         changing it).
+        action_input  = ``task_spec_digest`` = SHA-256 over the JSON-serialised
+                         submitted ``TaskSpec`` (``TaskSpec.to_dict()`` with
+                         ``sort_keys=True``); 64-hex. Mirrors the PLAN gate's
+                         SHA-256-over-stringified-form convention (P3-2).
+        ext_info      = ``{"source": <source_type>, "task_type": <task_type>,
+                         "owner_user_id": <...>, "owner_bot_id": <...>,
+                         "submitted_at": <int ms>}`` — values taken verbatim
+                        from the submitted ``TaskInfo`` (``source_type``/
+                        ``owner_user_id``/``owner_bot_id``) and its
+                        ``execution_config`` (``task_type``); ``submitted_at``
+                        is the persist timestamp passed by the caller.
+        status_from   = ``None`` (no prior status — this is the first event).
+        status_to     = ``"PENDING"`` (the initial status of a submitted task;
+                        matches the persisted ``task_info.status`` row).
+        attempt       = ``0`` (no harness retry at submit time).
+        action_result = ``"success"`` (submission is a one-shot accept; a
+                        persist failure short-circuits ``execute`` before this
+                        helper is reached).
+        error_*       = ``None`` (success).
+
+    Swallow discipline (决策 #14): the ``task_spec_digest`` / ``task_type``
+    assembly is wrapped in its own ``try/except → None`` (a swallow at the gate
+    must be trajectory-assembly only — the submit persist itself is NOT
+    wrapped here; the caller wraps the persist in its own IntegrityError
+    handler). The emitter (``emit_trajectory_event``) additionally swallows
+    all exceptions, so a broken repo / malformed spec never breaks the submit
+    path — the trajectory row may land with a ``null`` digest but the
+    forward-driving ``execute`` continues.
+
+    ``node_id`` defaults to ``task_id`` (the root node — submit fires before
+    any child nodes exist).
+    """
+    # Defensive digest: SHA-256 over stringified TaskSpec. Assembly swallow
+    # (决策 #14: trajectory-assembly only) → None on any failure, so the emitter
+    # still fires (with a null digest) rather than skipping the event entirely.
+    task_spec_digest: str | None
+    try:
+        spec_payload = json.dumps(
+            task_info.task_spec.to_dict(),
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        task_spec_digest = hashlib.sha256(spec_payload.encode("utf-8")).hexdigest()
+    except Exception:  # noqa: BLE001  assembly swallow at the gate (决策 #14)
+        task_spec_digest = None
+
+    # ``task_type`` lives in ``execution_config``; the value may be a
+    # ``TaskType`` enum OR a plain string depending on how the request was
+    # constructed. Map to ``.value`` for a stable JSON payload; ``None`` when
+    # absent (dynamic default carries no ``task_type`` in some call paths).
+    try:
+        task_type_raw = task_info.execution_config.get("task_type")
+        task_type = getattr(task_type_raw, "value", task_type_raw)
+    except Exception:  # noqa: BLE001  assembly swallow at the gate (决策 #14)
+        task_type = None
+
+    ext_info: dict[str, Any] = {
+        "source": task_info.source_type,
+        "task_type": task_type,
+        "owner_user_id": task_info.owner_user_id,
+        "owner_bot_id": task_info.owner_bot_id,
+        "submitted_at": submitted_at_ms,
+    }
+
+    emit_trajectory_event(
+        repo,
+        task_id,
+        node_id or task_id,
+        TrajectoryActionType.SUBMIT,
+        action_result="success",
+        action_input=task_spec_digest,
+        ext_info=ext_info,
+        status_from=None,
+        status_to=_SUBMIT_INITIAL_STATUS,
+        attempt=0,
+        error_type=None,
+        error_msg=None,
+        now_ms=submitted_at_ms,
+    )

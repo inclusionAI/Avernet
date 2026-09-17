@@ -67,11 +67,13 @@ from agentclaw.community.core.task.task_center.task_service_support import (
     STATIC_PLAN_TEMPLATES,
     parse_status_filter,
     resolve_coop_collab_mode,
+    split_owner_bot_id,
 )
 
 from agentclaw.community.core.task.task_center.task_service_execution import (
     TaskServiceExecutionMixin,
 )
+from agentclaw.community.core.task.task_trajectory.payloads import emit_submit_trajectory
 
 
 
@@ -368,6 +370,13 @@ class TaskService(TaskServiceExecutionMixin):
                 return TaskOpResult(
                     task_id=task_id, success=False, error=f"persist failed: {exc}"
                 )
+        # REQ-6 SUBMIT trajectory gate: fire once at/after the task_info persist
+        # point (task exists now; covers all execute branches — this sits above
+        # the task_type branch). Persist IntegrityError short-circuits above; only
+        # trajectory assembly (digest/ext_info) is swallowed in the helper (决策 #14).
+        emit_submit_trajectory(
+            self._trajectory_repo, task_id, task_info, submitted_at_ms=int(time.time() * 1000)
+        )
         graph = self._graph.initialize_graph(task_info)
         self._enrich_anniversary_trigger_bot_name(request, graph)
         logger.info(
@@ -663,7 +672,7 @@ class TaskService(TaskServiceExecutionMixin):
             assignee = (node.run_info.assignee or "").strip()
             if not assignee:
                 continue
-            bot_id, composite_owner_id = self._split_owner_bot_id(assignee, "")
+            bot_id, composite_owner_id = split_owner_bot_id(assignee, "")
             owner_id = str(
                 node.run_info.extend_props.get("assignee_owner_id")
                 or composite_owner_id
@@ -736,15 +745,6 @@ class TaskService(TaskServiceExecutionMixin):
                 graph.task_id, bare_bot_id, name,
             )
 
-    @staticmethod
-    def _split_owner_bot_id(owner_bot_id: str, owner_user_id: str) -> tuple[str, str]:
-        """Normalize legacy ``bot_id:owner_id`` storage without writing it back."""
-        bot_id, separator, embedded_owner_id = str(owner_bot_id or "").partition(":")
-        effective_owner_id = (
-            embedded_owner_id if separator and embedded_owner_id else owner_user_id
-        )
-        return bot_id, effective_owner_id
-
     def _enrich_task_owner_display(
         self, records: list[TaskInfoRecord]
     ) -> list[TaskInfoRecord]:
@@ -758,7 +758,7 @@ class TaskService(TaskServiceExecutionMixin):
 
         normalized: list[tuple[TaskInfoRecord, str, str]] = []
         for record in records:
-            bot_id, owner_id = self._split_owner_bot_id(
+            bot_id, owner_id = split_owner_bot_id(
                 record.owner_bot_id, record.owner_user_id
             )
             normalized.append((record, bot_id, owner_id))

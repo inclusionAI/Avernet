@@ -28,6 +28,22 @@ def resolve_coop_collab_mode(has_yaml: bool, group_kind: str | None) -> str:
     raise ValueError(f"未知 group_kind: {group_kind!r}")
 
 
+def split_owner_bot_id(owner_bot_id: str, owner_user_id: str) -> tuple[str, str]:
+    """Normalize legacy ``bot_id:owner_id`` composite storage without writing it back.
+
+    Extracted verbatim from :class:`TaskService` (was the ``_split_owner_bot_id``
+    ``@staticmethod``) to free headroom under the 1000-line CI limit on
+    ``task_service.py`` — pure function, no ``self`` reference, behavior
+    identical. ``TaskService`` and its only internal call sites now call this
+    module-level function directly.
+    """
+    bot_id, separator, embedded_owner_id = str(owner_bot_id or "").partition(":")
+    effective_owner_id = (
+        embedded_owner_id if separator and embedded_owner_id else owner_user_id
+    )
+    return bot_id, effective_owner_id
+
+
 # Content routing is internal to execute. There is no public template endpoint.
 STATIC_PLAN_TEMPLATES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # 商家经营目标 → 经营方案模板。关键词保持为业务语义词，避免仅凭“活动/投诉”等单一

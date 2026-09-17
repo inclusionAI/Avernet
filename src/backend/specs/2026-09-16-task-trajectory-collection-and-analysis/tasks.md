@@ -110,11 +110,22 @@ real sqlite) and asserts the emitted row's `action_type`/`action_result`/`action
       msg; parse failure → `parse_error`; `action_input` carries full request.
 
 ### REQ-6 — SUBMIT
-- [ ] **Locate the real `task_info` persist point** (spec's engine.py:351-357 is stale — search
+- [x] **Locate the real `task_info` persist point** (spec's engine.py:351-357 is stale — search
       `TaskService.execute` ~task_service.py:326 / engine submit flow) and fire
       `action_type=submit` with `action_input=task_spec_digest`, `ext_info={source, task_type,
       owner_user_id, owner_bot_id, submitted_at}`. `submit` is a `TrajectoryActionType`, never `NodeAction`.
-- [ ] Test: any task's `timeline[0].action_type == "submit"`; workflow/yaml/bbs/external branches covered.
+      Located fire point: `task_service.py:TaskService.execute` — the unique `self._task_info_repo.insert(record)`
+      call (status=PENDING) is the real persist; the SUBMIT gate sits right after that block, before
+      `initialize_graph`, covering all branches. Helper `emit_submit_trajectory` in
+      `core/task/task_trajectory/payloads.py` (outside `task_service.py` to respect its 999/1000-line CI
+      limit); `task_service.py` addition is a single call site + 1 import line (net 0 lines — moved
+      `_split_owner_bot_id` to `task_service_support.split_owner_bot_id` to buy headroom).
+- [x] Test: any task's `timeline[0].action_type == "submit"`; workflow/yaml/bbs/external branches covered.
+      `tests/community/core/task/task_trajectory/test_trajectory_gates_submit.py` (16 cases): emission,
+      ext_info fields, digest == SHA-256(json.dumps(spec.to_dict(), sort_keys=True)), branch coverage
+      (dynamic/workflow/yaml/bbs parametrized), fire-point placement (None vs present task_info_repo,
+      persist IntegrityError short-circuits), zero-intrusion (broken repo → execute succeeds + WARNING),
+      action_log untouched, `submit` is `TrajectoryActionType` not `NodeAction`.
 
 ### Intrusion guard (cross-cutting)
 - [ ] Test: with the trajectory repo forced to raise, every gated path (PLAN/DISPATCH/EXECUTE/
