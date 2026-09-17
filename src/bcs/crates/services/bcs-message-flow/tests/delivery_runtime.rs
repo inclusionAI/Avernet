@@ -374,7 +374,7 @@ impl ManagedDeliveryPreparationService for RecordingIo {
                 provider_transport: Default::default(),
                 provider_bypass_headers: Vec::new(),
             },
-            transport_context_json: serde_json::json!({"version":1, "kind":"websocket"}),
+            transport_context_json: serde_json::json!({"version":1, "kind":"websocket", "policy_version":0}),
         })
     }
     async fn before_send(
@@ -940,5 +940,47 @@ async fn uncertain_send_is_not_retried_after_scheduler_restart()
         task.await??;
     }
     assert_eq!(*io.sent.lock().await, vec!["first"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn uncertain_send_expires_after_a_fresh_queue_ttl_and_unblocks_its_lane()
+-> Result<(), Box<dyn std::error::Error>> {
+    use bcs_config_api::message_delivery::{BotDeliveryMode, DeliveryPolicyRecord};
+    let repo = Arc::new(MemoryMessageRepo::new());
+    let mut record = DeliveryPolicyRecord::default();
+    record.policy.flow_enabled.group = true;
+    record.policy.defaults.mode = BotDeliveryMode::Enforce;
+    record.policy.queue_ttl_ms = Some(50);
+    let policy = Arc::new(bcs_message_flow::delivery_policy::LiveDeliveryPolicy::new(repo.clone(), record));
+    let service = Arc::new(ManagedMessageDelivery::new(repo).with_policy(policy));
+    let now = chrono::Utc::now().timestamp_millis();
+    let mut first = command("unknown-first", "lane");
+    first.now_ms = now;
+    first.message.created_at = now as u64;
+    service.admit(first).await?;
+    let io = Arc::new(RecordingIo {
+        service: service.clone(), sent: Default::default(), aborts: Default::default(),
+        fail_send: true, fail_registration: false,
+    });
+    let mut worker = runtime(service.clone(), io.clone());
+    worker.config.expiry_tick = Duration::from_millis(5);
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let task = tokio::spawn(worker.run(shutdown));
+    wait_status(&service, "unknown-first", Status::Unknown).await?;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let now = chrono::Utc::now().timestamp_millis();
+    let mut second = command("unknown-second", "lane");
+    second.now_ms = now;
+    second.message.created_at = now as u64;
+    service.admit(second).await?;
+    let first = wait_status(&service, "unknown-first", Status::Expired).await?;
+    assert!(first.state.may_have_been_sent);
+    assert_eq!(first.last_error_code.as_deref(), Some("unknown_ttl_expired"));
+    let second = wait_status(&service, "unknown-second", Status::Expired).await?;
+    assert!(second.state.may_have_been_sent);
+    assert_eq!(*io.sent.lock().await, vec!["unknown-first", "unknown-second"]);
+    stop.send(true)?;
+    task.await??;
     Ok(())
 }

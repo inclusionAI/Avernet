@@ -13,14 +13,20 @@ pub(crate) async fn commit(flow: &BcsMessageFlow, row: &PersistedMessageDelivery
     // Completion is a fact about an already authorized run. Membership changes
     // must not strand its lane; current authorization is checked before the
     // independent Manager delivery performs network I/O.
-    let tags = flow.group.get(&row.group_id).await.and_then(|group|
-        group.participants.iter().find(|p| p.bot_uuid == task.manager).map(|p| p.tags.clone())).unwrap_or_default();
+    let session = flow.session_management.as_ref()
+        .ok_or_else(|| queued_task::error("task result session service unavailable"))?
+        .get(&row.session_id).await.map_err(|e| queued_task::error(&format!("task result session read failed: {e}")))?;
+    if session.as_ref().is_some_and(|session| session.group_id != row.group_id) {
+        return Err(queued_task::error("task result session scope mismatch"));
+    }
+    let tags = session.and_then(|session| session.participants.into_iter()
+        .find(|p| p.bot_uuid == task.manager).map(|p| p.tags)).unwrap_or_default();
     let projection = crate::queued_group::QueuedGroupProjection::task_result(row, task.clone(), tags)?;
     let now = chrono::Utc::now().timestamp_millis();
     let (visibility_domain, audience) = crate::group_flow::persisted_message_visibility(
         None, &task.worker, bcs_domain::SenderType::Bot, "chat", None)?;
     let reply = bcs_service_api::port::repo::message_delivery::AdmitMessageDeliveries {
-        display_message:None, message_id:uuid::Uuid::new_v4().to_string(), event:None,
+        display_message:None, message_id:result_message_id(&task.task_id), event:None,
         message:bcs_domain::NewMessage { group_id:row.group_id.clone(), session_id:row.session_id.clone(),
             sender_id:task.worker.clone(), sender_type:bcs_domain::SenderType::Bot, message_type:"run_reply".into(),
             content:serde_json::json!({}), client_msg_id:None, owner_bot_id:None, visibility_domain, audience,
@@ -53,6 +59,10 @@ pub(crate) async fn commit(flow: &BcsMessageFlow, row: &PersistedMessageDelivery
     }
     Err(queued_task::error("task terminal changed concurrently"))
 }
+
+/// Stable identity lets terminal callback retries read the committed result,
+/// never rebuild it from a potentially different final payload.
+pub(crate) fn result_message_id(task_id: &str) -> String { format!("task-result:{task_id}") }
 
 async fn result_admission(flow: &BcsMessageFlow, group: &bcs_domain::Group, session: &str,
     task: TaskIntent, cmd: &BotEventCommand, result_text: &str, drain: bool,

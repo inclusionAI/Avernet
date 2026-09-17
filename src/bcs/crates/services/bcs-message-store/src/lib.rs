@@ -1,6 +1,7 @@
 pub mod memory;
 pub mod mysql;
 mod delivery;
+mod memory_delivery_work;
 
 pub use memory::MemoryMessageRepo;
 pub use mysql::MySqlMessageStore;

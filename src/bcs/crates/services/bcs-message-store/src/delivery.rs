@@ -825,21 +825,27 @@ impl MessageDeliveryRepoPort for MySqlMessageStore {
             return Ok(result);
         }
         if matches!(kind, DeliveryWorkBatch::Expired) {
-            let columns = COLS.iter().map(|c| match *c { "semantic_projection_json" => "'{}' AS semantic_projection_json", "transport_context_json" => "NULL AS transport_context_json", c => c }).collect::<Vec<_>>().join(",");
+            let compact_columns = COLS.iter().map(|c| match *c { "semantic_projection_json" => "'{}' AS semantic_projection_json", "transport_context_json" => "NULL AS transport_context_json", c => c }).collect::<Vec<_>>().join(",");
+            let full_columns = COLS.join(",");
             // Independent status ranges preserve the expiry index ordering.
             // Successful transitions remove rows; no OFFSET or full due-set sort.
             let mut rows = Vec::new();
             let limit = limit.min(200);
-            for (status, size) in [("queued", limit.div_ceil(2)), ("pending_context", limit / 2)] {
-                let size = if status == "pending_context" && rows.is_empty() { limit } else { size };
+            let statuses = ["queued", "pending_context", "unknown", "cancel_unknown"];
+            for (index, status) in statuses.into_iter().enumerate() {
+                let remaining_statuses = statuses.len() - index;
+                let size = (limit - rows.len()).div_ceil(remaining_statuses);
                 if size == 0 { continue; }
+                // Uncertain attempts retain transport correlation metadata so
+                // their terminal audit row can still explain late callbacks.
+                let columns = if matches!(status, "unknown" | "cancel_unknown") { &full_columns } else { &compact_columns };
                 rows.extend(self.db.query(DbStatement::with_params(format!("SELECT {columns} FROM bcs_message_deliveries WHERE env = ? AND status = ? AND expire_at_ms <= ? ORDER BY expire_at_ms, delivery_id LIMIT ?"), vec![self.env.as_str().into(), status.into(), now_ms.into(), (size as i64).into()])).await.map_err(storage)?.into_iter().map(row_to_delivery).collect::<Result<Vec<_>,_>>()?);
             }
             return Ok(rows);
         }
         let mut params = vec![self.env.as_str().into(), after.into()];
         let predicate = match kind {
-            DeliveryWorkBatch::Expired => { params.push(now_ms.into()); "status IN ('queued','pending_context') AND expire_at_ms <= ?" }
+            DeliveryWorkBatch::Expired => { params.push(now_ms.into()); "status IN ('queued','pending_context','unknown','cancel_unknown') AND expire_at_ms <= ?" }
             DeliveryWorkBatch::Control => unreachable!("control classes handled above"),
             DeliveryWorkBatch::Recovery => "status IN ('dispatching','running','cancelling')",
         };

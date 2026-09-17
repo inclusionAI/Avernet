@@ -4,7 +4,8 @@ use async_trait::async_trait;
 use bcs_domain::message_delivery::{DeliveryFlowKind, PersistedMessageDelivery};
 use bcs_domain::{DeliveryType, NewMessage, PersistedMessage};
 
-/// Bounded operational scans. Context expiry is independent of send dispatch.
+/// Bounded operational scans. Context and uncertain-attempt expiry are
+/// independent of send dispatch.
 #[derive(Debug, Clone, Copy)]
 pub enum DeliveryWorkBatch { Expired, Control, Recovery }
 

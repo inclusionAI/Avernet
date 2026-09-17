@@ -34,9 +34,6 @@ pub(super) async fn handle_task_bot_event(
                 task_response_text(&scratch.get(task_id).await.unwrap_or_else(|| entry.clone()), cmd)
             };
             crate::queued_task_terminal::commit(flow, &row, cmd, &response_text, normalized).await?;
-            if cmd.state == ChatEventState::Final {
-                crate::task_flow::record_task_completed(flow, &entry, &response_text, now_ms()).await?;
-            }
             if let Some(group) = flow.group.get(&entry.group_id).await {
                 crate::task_flow::emit_task_ledger_status(flow, &group, &entry.group_id,
                     entry.session_id.as_deref(), &entry.driver_bot).await;

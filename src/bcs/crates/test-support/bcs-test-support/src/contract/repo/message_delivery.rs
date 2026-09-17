@@ -254,6 +254,17 @@ pub async fn message_delivery_repo_port_contract_tests<
     assert_eq!(not_due[0].delivery_id, control_ids[2]);
     assert_eq!(repo.work_batch(DeliveryWorkBatch::Control, 499, "", 1).await?.len(), 1);
     assert!(repo.work_batch(DeliveryWorkBatch::Control, 500, "", 0).await?.is_empty());
+    let mut uncertain = repo.admit(command("uncertain-expiry", &[("uncertain-bot", DeliveryType::Send)])).await?.deliveries.remove(0);
+    let expected_state_version = uncertain.state.state_version;
+    uncertain.state.status = Status::Unknown;
+    uncertain.state.state_version += 1;
+    uncertain.state.may_have_been_sent = true;
+    uncertain.expire_at_ms = Some(600);
+    uncertain.transport_context_json = Some(serde_json::json!({"connection_id":"provider-1"}));
+    repo.commit_transition(vec![DeliveryCompareAndSet { expected_state_version, delivery: uncertain.clone() }], None).await?;
+    let due = repo.work_batch(DeliveryWorkBatch::Expired, 600, "ignored-cursor", 200).await?;
+    let due = due.iter().find(|row| row.delivery_id == uncertain.delivery_id).ok_or("missing uncertain expiry")?;
+    assert_eq!(due.transport_context_json, uncertain.transport_context_json);
     run_reply_contract(repo).await?;
     Ok(())
 }

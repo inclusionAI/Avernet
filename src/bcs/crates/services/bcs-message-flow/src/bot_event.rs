@@ -4,6 +4,7 @@ use relay::*;
 #[path = "bot_event/task.rs"]
 mod task;
 use task::*;
+mod task_terminal;
 #[path = "bot_event/coordination.rs"]
 mod coordination;
 use coordination::*;
@@ -77,6 +78,15 @@ pub async fn handle_bot_event(
     if let Some(row) = &managed {
         use bcs_domain::message_delivery::MessageDeliveryStatus as Status;
         if matches!(row.state.status, Status::Completed | Status::Failed | Status::Cancelled | Status::Expired | Status::RejectedCapacity) {
+            if matches!((row.state.status, &cmd.state),
+                    (Status::Completed, ChatEventState::Final) | (Status::Failed, ChatEventState::Error) | (Status::Cancelled, ChatEventState::Aborted))
+                && matches!(cmd.event_type.as_str(), "chat" | "chat.event")
+                && crate::queued_task::intent(row)?.is_some_and(|task| task.leg == crate::queued_task::TaskLeg::Dispatch)
+                && row.state.may_have_been_sent {
+                cmd.bcs_session_id = Some(row.session_id.clone());
+                if let Some(run) = &row.run_id { cmd.run_id = run.clone(); }
+                return task_terminal::finish(flow, row, &cmd, true).await;
+            }
             return Ok(BotEventOutcome { bot_deliveries: Vec::new(), frontend_deliveries: Vec::new(),
                 unregistered_run_ids: Vec::new(), mentions: Vec::new(), delivered_count: 0, failed_count: 0, delivery_results: Vec::new() });
         }
@@ -253,6 +263,11 @@ pub async fn handle_bot_event(
     if let Some(task_id) = task_id_for_event {
         bot_deliveries.extend(handle_task_bot_event(flow, &cmd, &task_id).await?);
         if managed_terminal {
+            if managed.as_ref().is_some_and(|row| row.flow_kind == bcs_domain::message_delivery::DeliveryFlowKind::Task) {
+                let row = crate::queued_admission::find_managed_run(flow, &cmd).await?
+                    .ok_or_else(|| crate::queued_task::error("committed task delivery missing"))?;
+                return task_terminal::finish(flow, &row, &cmd, false).await;
+            }
             frontend_deliveries.extend(publish_incoming_event(flow, &cmd, Some(&task_id)).await?);
             try_channel_outbound(flow, &cmd).await;
             flow.frontend_delivery.unregister_run(&cmd.run_id).await?;

@@ -253,15 +253,17 @@ TTL / safe_retry 可为 null，分别表示不自动过期、不自动安全重�
 - 降低 max_running 不 abort 现有请求，等 active 降至新限额后再发送。
 - 降低 max_queued 不清理旧队列，只限制新准入。
 - 发送间隔基于保留的上次 send-start 单调时间重算，不重置历史。
-- TTL 只用于新准入的 expire_at，不追溯改写已有记录。
+- TTL 用于新准入；delivery 此后新进入 unknown/cancel_unknown 时，以当时策略重新计算
+  expire_at。已经处于这些状态的截止时间不因策略更新追溯改写。
 - pause_dispatch 仅暂停新 send；状态、终态、取消、过期处理继续。
 - 关闭类型或 Bot 后，已准入消息及其回复继续受管 drain；存在未完成 Send 时，
   **同一目标 Bot/session** 的新请求返回 queue_draining，其他 session 不受此 drain 检查阻塞。
   检查只取一条未完成 Send，不加载整个 lane；孤立 pending_context 不阻塞 drain，
   当前 lane 的 Send 排空后保留这些 context，下一条 Send 作为受管载体消费，不清理其他 session。
   确实没有 canonical session 的旧入口仍保守检查整个 Bot，不能猜测 session 后放行。
-  Unknown 不自动到期，需要可信结束事件或下述人工处置。受管调度的 Bot 级 max_running
-  仍统计 unknown 的占用；收窄 drain 不代表取消 Bot 并发限制，也不代表 legacy 受共同限流。
+  Unknown 在重新计算的 TTL 内仍可由可信结束事件或下述人工接口提前处置；到期后自动
+  expired。受管调度的 Bot 级 max_running 在到期前仍统计 unknown 的占用；收窄 drain
+  不代表取消 Bot 并发限制，也不代表 legacy 受共同限流。
 - 开启前仍应确认原 legacy 运行已结束；新策略不接管旧 ChatRun、不补发历史消息。
   未接入类型与受管类型之间不承诺共同限流或有序。
 
@@ -348,7 +350,8 @@ Provider 拒绝本次调用：delivery 直接进入 `failed`、释放 lane 且�
 断线，适配器返回完整 `delivered=false + BotNotConnected`，该 attempt 同样直接 `failed`、不重试；
 只有没有完整结果的传输异常才进入 Unknown。启动恢复窗口是部署竞态保护，不是可配置的业务 TTL。
 
-TTL 到期不触发运行中请求或 Unknown 的强制释放。
+进入 Unknown/CancelUnknown 时复用当前 queue_ttl_ms 重新计时；到期后转为 expired 并释放
+lane/容量，保留 may_have_been_sent=true 和 last_error_code=unknown_ttl_expired。
 
 ## 查询与取消
 
@@ -406,7 +409,8 @@ active Provider 的精确 delivery 取消返回 `exact_abort_not_supported`，�
 - 操作只终结旧投递，不自动重试、不创建新 run，不替用户执行 abort，也不证明引擎实际采用了内容。
   未确认停止时不能用此接口强制放行。迟到生命周期事件不能重新打开终态 delivery。
   响应丢失后查询状态，不使用更新版本盲目重复处置。
-- 本版不新增告警、自动过期或自动处置；部署前遗留的 Unknown 不会因升级自动变更状态。
+- 本版不新增告警；人工接口用于 TTL 前提前处置。旧 Unknown 若其持久化 expire_at 已经过期，
+  升级后的过期扫描会将其转为 expired。迟到回调不能重新打开终态或产生用户回复。
 
 ## 状态与通知
 
@@ -487,8 +491,8 @@ IM 聚合、scope abort、原连接绑定和关闭配置后的 SQLite 恢复。�
 专用队列监控日志见下一节；不新增 Workbench 运维面板。
 
 真实 MySQL/OceanBase、Bot 引擎和 IM 账号需在部署环境执行验收；单元测试不能替代这些。
-没有提供无证据强制释放 Unknown 的接口，必须取得可信终态、明确 abort 结果或完成隔离，
-不能直接改表清除占用。Workbench UI、分布式部署、inject 压缩及 URL 刷新不在本版范围内。
+没有提供无证据立即强制释放 Unknown 的接口；可等待其重新计算的 TTL 自动过期，不能直接
+改表清除占用。Workbench UI、分布式部署、inject 压缩及 URL 刷新不在本版范围内。
 
 ## 单实例 worker 与监控（2026-09-08）
 

@@ -41,7 +41,11 @@ fn valid(state: MessageDeliveryState) -> bool {
                 )
         }
         DeliveryType::Send => match state.status {
-            Queued | Expired | RejectedCapacity => !state.may_have_been_sent,
+            Queued | RejectedCapacity => !state.may_have_been_sent,
+            // Expired also represents an uncertain attempt whose bounded
+            // quarantine elapsed, so it intentionally preserves possible-send
+            // evidence instead of pretending the transport was never reached.
+            Expired => true,
             Dispatching | Running | Unknown | Cancelling | CancelUnknown | Completed => {
                 state.may_have_been_sent
             }
@@ -163,7 +167,14 @@ impl MessageDeliveryCoreService for MessageDeliveryCore {
                 Event::Failed if active(current.status) => Status::Failed,
                 Event::Aborted if active(current.status) => Status::Cancelled,
                 Event::PreparationFailed if current.status == Status::Queued => Status::Failed,
-                Event::QueueExpired if current.status == Status::Queued => Status::Expired,
+                Event::QueueExpired
+                    if matches!(
+                        current.status,
+                        Status::Queued | Status::Unknown | Status::CancelUnknown
+                    ) =>
+                {
+                    Status::Expired
+                }
                 Event::Recover => match current.status {
                     Status::Dispatching | Status::Running => Status::Unknown,
                     Status::Cancelling => Status::CancelUnknown,

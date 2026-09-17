@@ -20,6 +20,8 @@ mod support;
 #[path = "../../../bootstrap/bcs/src/migrations.rs"]
 #[allow(dead_code)]
 mod migrations;
+#[path = "support/queued_task_review.rs"]
+mod queued_task_review;
 
 const SESSION: &str = "group-1:task";
 fn admin() -> CallerContext { CallerContext::Human(HumanActor { actor_id:"human_operator".into(), staff_no:"operator".into() }) }
@@ -71,6 +73,10 @@ impl Fixture {
     }
 
     async fn make_flow(support: &support::FlowTestSupport, service: &Arc<ManagedMessageDelivery>, repo: &Arc<dyn MessageRepoPort>, live: &Arc<LiveDeliveryPolicy>) -> Arc<BcsMessageFlow> {
+        Self::configured_flow(support, service, repo, live, |flow| flow).await
+    }
+
+    async fn configured_flow(support: &support::FlowTestSupport, service: &Arc<ManagedMessageDelivery>, repo: &Arc<dyn MessageRepoPort>, live: &Arc<LiveDeliveryPolicy>, configure: impl FnOnce(BcsMessageFlow) -> BcsMessageFlow) -> Arc<BcsMessageFlow> {
         let group = support.group.get("group-1").await.unwrap();
         let mut flow = BcsMessageFlow::new(support.group.clone(), support.routing.clone(), support.registry.clone(),
             support.bot_delivery.clone(), support.frontend_delivery.clone())
@@ -79,7 +85,7 @@ impl Fixture {
             .with_session_management(Arc::new(sessions::StaticSessionManagement::new(
                 sessions::test_session(SESSION, "group-1", group.participants))));
         flow.delivery_policy = Some(live.clone());
-        let flow = Arc::new(flow); flow.retain_terminal_events(); flow
+        let flow = Arc::new(configure(flow)); flow.retain_terminal_events(); flow
     }
 
     async fn rows(&self) -> Vec<PersistedMessageDelivery> { self.service.snapshot(Some(SESSION)).await.unwrap() }

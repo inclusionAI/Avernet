@@ -20,6 +20,8 @@ pub struct TaskEntry {
     /// Durable delivery owns deadlines and status for managed tasks.
     pub managed: bool,
     pub managed_version: u64,
+    /// Process-local suppression only. Durable event dedup handles restart replay.
+    pub managed_terminal_effects_done: bool,
     pub response_content: String,
     response_full_content: String,
     response_strip_prefix: String,
@@ -48,6 +50,11 @@ pub struct TaskStore {
 }
 
 impl TaskStore {
+    pub(crate) async fn finish_managed_terminal_effects(&self, task_id: &str) {
+        if let Some(entry) = self.tasks.write().await.get_mut(task_id) {
+            entry.managed_terminal_effects_done = true;
+        }
+    }
     pub(crate) async fn restore_managed(&self, entry: TaskEntry) -> bool {
         let mut tasks = self.tasks.write().await;
         if let Some(existing) = tasks.get_mut(&entry.task_id) {
@@ -339,6 +346,7 @@ pub fn new_task_entry(
         status: TaskLedgerStatus::Dispatched,
         managed: false,
         managed_version: 0,
+        managed_terminal_effects_done: false,
         response_content: String::new(),
         response_full_content: String::new(),
         response_strip_prefix: String::new(),

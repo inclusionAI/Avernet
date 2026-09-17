@@ -865,47 +865,7 @@ impl bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort for 
         Ok(heads.into_iter().take(limit.min(64)).map(|d| bcs_service_api::core::message_delivery::DeliveryScheduleEntry { delivery_id: d.delivery_id.clone(), session_id: d.session_id.clone(), source_session_seq: d.source_session_seq as u64, state: d.state, available_at_ms: d.available_at_ms, expire_at_ms: d.expire_at_ms }).collect())
     }
     async fn work_batch(&self, kind: bcs_service_api::port::repo::message_delivery::DeliveryWorkBatch, now: i64, after: &str, limit: usize) -> Result<Vec<bcs_domain::message_delivery::PersistedMessageDelivery>, bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
-        use bcs_service_api::port::repo::message_delivery::DeliveryWorkBatch as B;
-        use bcs_domain::message_delivery::MessageDeliveryStatus as S;
-        if matches!(kind, B::Control) {
-            let all = self.list_deliveries(None).await?;
-            let limit = limit.min(200);
-            let mut result = Vec::new();
-            let mut pages = Vec::new();
-            for category in 0..4 {
-                let mut rows: Vec<_> = all.iter().filter(|d| match category {
-                    0 => d.state.status == S::Dispatching && d.run_deadline_at_ms.is_some_and(|t| t <= now),
-                    1 => d.state.status == S::Running && d.run_deadline_at_ms.is_some_and(|t| t <= now),
-                    2 => d.state.status == S::Cancelling && d.abort_request_id.is_none(),
-                    _ => d.state.status == S::Cancelling && d.abort_request_id.is_some() && d.cancel_deadline_at_ms.is_some_and(|t| t <= now),
-                }).cloned().collect();
-                rows.sort_by(|a,b| {
-                    let key = |d: &bcs_domain::message_delivery::PersistedMessageDelivery| match category {
-                        0 | 1 => d.run_deadline_at_ms, 2 => None, _ => d.cancel_deadline_at_ms,
-                    };
-                    (key(a), &a.delivery_id).cmp(&(key(b), &b.delivery_id))
-                });
-                let quota = (limit / 4 + usize::from(category < limit % 4)).max(1).min(limit - result.len()).min(rows.len());
-                result.extend(rows.drain(..quota)); pages.push(rows);
-            }
-            for rows in pages { result.extend(rows.into_iter().take(limit - result.len())); }
-            return Ok(result);
-        }
-        if matches!(kind, B::Expired) {
-            let all = self.list_deliveries(None).await?; let mut result = Vec::new(); let limit = limit.min(200);
-            for (status, size) in [(S::Queued, limit.div_ceil(2)), (S::PendingContext, limit / 2)] {
-                let size = if status == S::PendingContext && result.is_empty() { limit } else { size };
-                let mut rows: Vec<_> = all.iter().filter(|d| d.state.status == status && d.expire_at_ms.is_some_and(|t| t <= now)).cloned().collect();
-                rows.sort_by(|a,b| (a.expire_at_ms, &a.delivery_id).cmp(&(b.expire_at_ms, &b.delivery_id))); rows.truncate(size); result.extend(rows);
-            }
-            return Ok(result);
-        }
-        let mut rows: Vec<_> = self.list_deliveries(None).await?.into_iter().filter(|d| d.delivery_id.as_str() > after && match kind {
-            B::Expired => matches!(d.state.status, S::Queued | S::PendingContext) && d.expire_at_ms.is_some_and(|t| t <= now),
-            B::Control => unreachable!("control classes handled above"),
-            B::Recovery => matches!(d.state.status, S::Dispatching | S::Running | S::Cancelling),
-        }).collect();
-        rows.sort_by(|a,b| a.delivery_id.cmp(&b.delivery_id)); rows.truncate(limit.min(200)); Ok(rows)
+        crate::memory_delivery_work::work_batch(self, kind, now, after, limit).await
     }
     async fn queue_statistics(&self) -> Result<Vec<bcs_service_api::port::repo::message_delivery::DeliveryQueueStatistic>, bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoError> {
         let mut groups = std::collections::BTreeMap::new();

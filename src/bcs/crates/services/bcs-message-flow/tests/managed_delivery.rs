@@ -143,6 +143,57 @@ async fn manual_resolution_is_atomic_audited_and_preserves_transport_metadata() 
 }
 
 #[tokio::test]
+async fn uncertain_attempts_receive_a_fresh_queue_ttl_and_expire_terminally()
+-> Result<(), Box<dyn std::error::Error>> {
+    use bcs_config_api::message_delivery::{BotDeliveryMode, DeliveryPolicyRecord};
+    let repo = Arc::new(MemoryMessageRepo::new());
+    let mut initial = DeliveryPolicyRecord::default();
+    initial.policy.flow_enabled.group = true;
+    initial.policy.defaults.mode = BotDeliveryMode::Enforce;
+    initial.policy.queue_ttl_ms = Some(1_000);
+    let policy = Arc::new(bcs_message_flow::delivery_policy::LiveDeliveryPolicy::new(repo.clone(), initial));
+    let service = ManagedMessageDelivery::new(repo).with_policy(policy);
+    let queued = service.admit(admit("unknown-expiry", DeliveryType::Send)).await?.deliveries.remove(0);
+    assert_eq!(queued.expire_at_ms, Some(1_100));
+    let mut start = transition(&queued, Event::StartSend);
+    start.now_ms = 500;
+    start.transport_context_json = Some(serde_json::json!({"policy_version":0,"connection_id":"provider-1"}));
+    let dispatching = service.transition(start).await?;
+    let mut uncertain = transition(&dispatching, Event::TransportUnknown);
+    uncertain.now_ms = 600;
+    uncertain.request_id = dispatching.request_id.clone();
+    let uncertain = service.transition(uncertain).await?;
+    assert_eq!(uncertain.state.status, Status::Unknown);
+    assert_eq!(uncertain.expire_at_ms, Some(1_600));
+    assert_eq!(uncertain.transport_context_json.as_ref().unwrap()["connection_id"], "provider-1");
+
+    let mut expire = transition(&uncertain, Event::QueueExpired);
+    expire.now_ms = 1_600;
+    let expired = service.transition(expire).await?;
+    assert_eq!(expired.state.status, Status::Expired);
+    assert!(expired.state.may_have_been_sent);
+    assert_eq!(expired.last_error_code.as_deref(), Some("unknown_ttl_expired"));
+    assert_eq!(expired.transport_context_json.as_ref().unwrap()["connection_id"], "provider-1");
+    let late = service.transition(transition(&expired, Event::Completed)).await?;
+    assert_eq!(late.state, expired.state);
+
+    let queued = service.admit(admit("cancel-unknown-expiry", DeliveryType::Send)).await?.deliveries.remove(0);
+    let mut start = transition(&queued, Event::StartSend);
+    start.now_ms = 700;
+    start.transport_context_json = Some(serde_json::json!({"policy_version":0}));
+    let dispatching = service.transition(start).await?;
+    let mut cancel = transition(&dispatching, Event::CancelRequested);
+    cancel.now_ms = 800;
+    let cancelling = service.transition(cancel).await?;
+    let mut unconfirmed = transition(&cancelling, Event::AbortUnconfirmed);
+    unconfirmed.now_ms = 900;
+    let cancel_unknown = service.transition(unconfirmed).await?;
+    assert_eq!(cancel_unknown.state.status, Status::CancelUnknown);
+    assert_eq!(cancel_unknown.expire_at_ms, Some(1_900));
+    Ok(())
+}
+
+#[tokio::test]
 async fn configured_retry_must_not_override_permanent_not_sent() -> Result<(), Box<dyn std::error::Error>> {
     use bcs_config_api::message_delivery::{DeliveryPolicyRecord, BotDeliveryMode, SafeRetryConfig};
     let repo = Arc::new(MemoryMessageRepo::new());

@@ -123,7 +123,8 @@ TaskStore 是可重建的内存投影，不是第二套持久任务状态机。
 
 - queued 取消/过期：直接结束 Send，释放或重绑上下文，不调用 Bot abort。
 - 已发送取消：复用 cancelling/cancel_unknown，可信 aborted 回调完成终态及结果事务。
-- unknown/cancel_unknown：仍占用原 Bot/session lane，不能通过 TaskStore TTL 假装结束。
+- unknown/cancel_unknown：进入状态时复用当前队列 TTL 重新计算过期点；到期前仍占用原
+  Bot/session lane，到期后自动 expired 并释放。它不复用 TaskStore TTL，也不自动重发。
 - 人工恢复复用现有接口；不会凭空伪造 Worker 输出。
 - 未发送即失败/取消/过期：以 delivery 状态和 ledger 表达，不生成虚假的 Bot 回复。
 - task.complete 先恢复本 Session 的持久任务，排队任务也算 pending；排队或不确定的结果/
@@ -138,6 +139,19 @@ Provider 精确 abort 的已有能力限制不变；本次不以 scope-wide abor
 task.assigned/task.completed 沿用现有事件投影；排队 assigned 标记 status=queued。
 这些事件在队列事务之后写入，写入错误返回失败，不静默返回成功；但进程在两个提交之间崩溃
 可能缺失事件投影。本次不增加 outbox、不承诺事件或 IM 提示恰好一次。
+
+Worker 的 task.completed 写入失败不能跳过已提交终态的 run 注销、send context 结束与跟踪
+清理；收尾会尝试执行所有步骤，最后返回错误。重复 terminal 回调可重试这些步骤，补写事件
+使用稳定的 canonical result message ID 读取已提交正文和时间，不使用重试请求重新生成结果。
+事件复用存储层 producer/producer_key/event_type 去重；成功完成收尾后，在本进程抑制重复
+回调副作用。重启后仍可通过回调恢复，进程崩溃且下游不再回调时不保证主动补发通知。
+
+所有队列 Provider Send 使用入队时的目标 tags 快照；普通群聊、Bot relay 和 Task 派发/
+主动消息取 canonical Session 参与者，System 取生产者传入的会话参与者。TaskResult 在
+Worker 终态时读取对应 Session 的 Manager tags（而非基础 Group）；读取失败返回错误，
+不静默提交空 tags。Session/Manager 已删除不阻止 Worker 终态提交，结果实际发送前重新
+鉴权并失败关闭。排队期间修改 tags 不会回写已有 delivery 的快照。tags 与透传 Header 是
+不同机制，Header 仍遵循 queue_persistable_headers 白名单。
 
 真正决定任务是否完成的是 delivery 终态和 canonical result。状态通知继续复用公共队列
 能力；Workbench 专用 task 排队 UI 不在本次范围。调用方收到不明确错误应先查询状态，
@@ -172,3 +186,11 @@ Manager 忙时结果排队、主节点切换、取消和 Unknown 人工处置。
 - `scripts/ci/arch-check.sh` 未通过：DEP 检查脚本变量展开异常、既有 import/trait 命名及 contract harness 登记问题、全仓 conformance discovery 失败。Task 新测试已接入共享 contract harness；本次未修改门禁，也不声明全仓架构检查通过。
 
 上述 Cargo 命令均在 `src/bcs` workspace 执行；真实 OceanBase、预发和完整 Singlebox E2E 尚未执行。
+
+### PR 评论修复回归
+
+- 增加 6 个回归用例：Task 三种下行的 Session tags；普通 Group/System/relay 的 Provider tags；
+  终态事件失败后的清理、持续失败和重启补写；前端发布失败后的清理；Session 读取失败；取消后的迟到 final。
+- 受影响的五个 crate 测试共 779 项通过，1 个既有 doctest 忽略；Task 专项入口共 49 项通过。
+- Provider transport contract 全量 28 项通过，包含 `params.tags` 到 HTTP `to_bot.tags` 的映射。
+- `cargo check -p bcs --all-targets`、diff 空白检查通过；未新增表、outbox 或全局格式化。
