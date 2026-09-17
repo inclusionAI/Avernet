@@ -40,9 +40,9 @@
     <text x="58" y="482" class="gi">资源 · 模型 · 命令行工具 · 市场收藏 · Prompt 诊断与补丁</text>
 
     <rect x="40" y="512" width="716" height="88" rx="5" fill="#FFFFFF" stroke="#D8D5CF"/>
-    <text x="58" y="538" class="gh">会话与协作</text>
+    <text x="58" y="538" class="gh">聊天入口与协作</text>
     <text x="58" y="562" class="gi">单聊 · 群聊 · 专家会话 · 渠道绑定（外部平台） · 事件与通知</text>
-    <text x="58" y="584" class="gi">工单与定向通知 · 人机好友关系</text>
+    <text x="58" y="584" class="gi">工单与定向通知 · 人机好友关系　——　管的是入口与参与关系，不是会话本身</text>
 
     <rect x="40" y="614" width="716" height="88" rx="5" fill="#FFFFFF" stroke="#D8D5CF"/>
     <text x="58" y="640" class="gh">调度 · 审批 · 任务</text>
@@ -57,7 +57,7 @@
     <rect x="784" y="206" width="716" height="88" rx="5" fill="#FFFFFF" stroke="#D8D5CF"/>
     <text x="802" y="232" class="gh">会话与对话</text>
     <text x="802" y="256" class="gi">会话生命周期 · 会话文件 · 会话收藏 · 对话与流式事件</text>
-    <text x="802" y="278" class="gi">附件与工作区文件物化 · 资源引用</text>
+    <text x="802" y="278" class="gi">附件与工作区文件物化 · 资源引用　——　会话状态在这一侧</text>
 
     <rect x="784" y="308" width="716" height="88" rx="5" fill="#FFFFFF" stroke="#D8D5CF"/>
     <text x="802" y="334" class="gh">执行能力</text>
@@ -76,7 +76,7 @@
 
     <rect x="784" y="614" width="716" height="88" rx="5" fill="#E3EDE4" stroke="#3F7350"/>
     <text x="802" y="640" class="gh" fill="#26452F">引擎接入</text>
-    <text x="802" y="664" class="gi">标准引擎接口 · 每引擎一套适配层（claude_code · openclaw）</text>
+    <text x="802" y="664" class="gi">标准引擎协议 · 每引擎一套适配层（claude_code · openclaw）</text>
     <text x="802" y="686" class="gi">能力矩阵声明 · 透明中继 · 默认配置</text>
 
     <rect x="784" y="716" width="716" height="88" rx="5" fill="#FFFFFF" stroke="#D8D5CF"/>

@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1260 880" width="1260" height="880" role="img" aria-label="端到端请求链路">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1260 800" width="1260" height="800" role="img" aria-label="端到端请求链路">
   <style>
     .t{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif}
     .m{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace}
@@ -13,19 +13,19 @@
     .invd{font-size:11px;fill:#5E5C57}
     .bnd{font-size:12px;font-weight:600;fill:#A85C47}
   </style>
-  <rect width="1260" height="880" fill="#FAF9F7"/>
+  <rect width="1260" height="800" fill="#FAF9F7"/>
   <defs>
     <marker id="c1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#8A8781"/></marker>
     <marker id="c3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#3B7A73"/></marker>
   </defs>
   <g class="t">
     <text x="44" y="50" class="title">一次请求怎么穿透两个模块</text>
-    <text x="44" y="78" class="sub">以一条公开 API 上的会话消息为例。值得记住的不是十个盒子，而是中间那条边界线 —— 以及它右边为什么必须先做三件事。</text>
+    <text x="44" y="78" class="sub">以一条开放 API 上的会话消息为例。值得记住的不是盒子的数量，而是中间那条边界线：过了它，就没有东西再约束这个请求了。</text>
 
     <rect x="44" y="98" width="876" height="54" rx="6" fill="#E4EBF5" stroke="#3C6198"/>
     <text x="62" y="122" class="num">①</text>
-    <text x="86" y="122" class="bt" fill="#22405F">前端工作台 / 外部租户</text>
-    <text x="62" y="141" class="bd">一条公开 API 上的会话消息请求</text>
+    <text x="86" y="122" class="bt" fill="#22405F">前端工作台　·　开放 API 客户端</text>
+    <text x="62" y="141" class="bd">一条开放 API 上的会话消息请求</text>
     <rect x="940" y="98" width="276" height="54" rx="6" fill="none" stroke="#C9C5BD" stroke-dasharray="4 3"/>
     <text x="956" y="120" class="bd">相邻边界，本次不展开：</text>
     <text x="956" y="139" class="bd">BCS 协调 / 群聊 / 路由 · BaaS 运行时供给</text>
@@ -55,7 +55,7 @@
     <text x="660" y="252" class="bd">跨模块中继</text>
     <text x="660" y="276" class="bd">按属主解析 Bot → 判定发布态</text>
     <text x="660" y="296" class="bd">解析设备上下文 → 归一化应答</text>
-    <text x="660" y="322" class="bd">见下方三条不变量</text>
+    <text x="660" y="322" class="bd">隔离只能在这里成立</text>
 
     <rect x="936" y="206" width="264" height="140" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
     <text x="952" y="230" class="num">⑤</text>
@@ -98,39 +98,34 @@
 
     <rect x="936" y="450" width="264" height="140" rx="6" fill="#EBE5F3" stroke="#69539B"/>
     <text x="952" y="474" class="num">⑨</text>
-    <text x="976" y="474" class="bt" fill="#3E315F">传输实现</text>
+    <text x="976" y="474" class="bt" fill="#3E315F">适配层协议的传输实现</text>
     <text x="952" y="496" class="bd">每引擎一套</text>
     <text x="952" y="520" class="bd">与网关之间的长连接</text>
     <text x="952" y="540" class="bd">只负责连上去、收发帧</text>
     <text x="952" y="566" class="bd">禁止依赖领域内核</text>
 
-    <rect x="44" y="628" width="1172" height="54" rx="6" fill="#DFEDEC" stroke="#3B7A73"/>
-    <text x="62" y="652" class="num">⑩</text>
-    <text x="86" y="652" class="bt" fill="#234945">网关 —— 随仓库分发，本机启动</text>
-    <text x="62" y="671" class="bd">桥接官方 SDK 或命令行 → 模型</text>
+    <rect x="60" y="628" width="360" height="96" rx="6" fill="#DFEDEC" stroke="#3B7A73"/>
+    <text x="76" y="652" class="num">⑩</text>
+    <text x="100" y="652" class="bt" fill="#234945">引擎网关</text>
+    <text x="76" y="676" class="bd">适配层背后的那一跳，讲引擎自己的原生协议</text>
+    <text x="76" y="696" class="bd">claude_code 的网关随仓库分发，与 Engine 同机起</text>
+    <text x="76" y="714" class="bd">openclaw 的网关在外部部署，需自备</text>
 
-    <line x1="1200" y1="706" x2="60" y2="706" stroke="#3B7A73" stroke-width="1.5" marker-end="url(#c3)"/>
-    <text x="630" y="698" class="bd" text-anchor="middle">回程：流式事件沿同一条链路反向回传 —— 网关 → 传输实现 → 引擎适配层 → 能力域协议 → 长连接 → 前端</text>
+    <rect x="450" y="628" width="360" height="96" rx="6" fill="#DFEDEC" stroke="#3B7A73"/>
+    <text x="466" y="652" class="num">⑪</text>
+    <text x="490" y="652" class="bt" fill="#234945">引擎本体　·　在沙箱里</text>
+    <text x="466" y="676" class="bd">claude_code　·　openclaw　·　（后续接入的引擎）</text>
+    <text x="466" y="696" class="bd">技能与命令行工具在这里真正落盘、执行</text>
+    <text x="466" y="714" class="bd">Bot 的工作区文件也在这里</text>
 
-    <rect x="44" y="732" width="376" height="130" rx="6" fill="#F5E5E0" stroke="#A85C47"/>
-    <text x="62" y="757" class="inv">不变量 A · 解析必须先于转发</text>
-    <text x="62" y="781" class="invd">按属主解析 Bot，是隔离唯一存在的地方。</text>
-    <text x="62" y="801" class="invd">先转发再解析，或者信任调用方传来的</text>
-    <text x="62" y="821" class="invd">用户标识，隔离就静默失效 —— 下游不会</text>
-    <text x="62" y="841" class="invd">有任何守卫察觉。</text>
+    <rect x="840" y="628" width="360" height="96" rx="6" fill="#F6EBD8" stroke="#A1762E"/>
+    <text x="856" y="652" class="num">⑫</text>
+    <text x="880" y="652" class="bt" fill="#5E4519">模型调用</text>
+    <text x="856" y="676" class="bd">整条链路的终点</text>
+    <text x="856" y="696" class="bd">前面十一步做的所有事，都是为了让这一步</text>
+    <text x="856" y="714" class="bd">在正确的 Bot、正确的会话、正确的现场发生</text>
 
-    <rect x="442" y="732" width="376" height="130" rx="6" fill="#F5E5E0" stroke="#A85C47"/>
-    <text x="460" y="757" class="inv">不变量 B · 传输成功不等于业务成功</text>
-    <text x="460" y="781" class="invd">Engine 会在一次传输成功的应答里</text>
-    <text x="460" y="801" class="invd">报告业务失败。这里必须识别出来，</text>
-    <text x="460" y="821" class="invd">绝不让它变成一次对外的成功；链路</text>
-    <text x="460" y="841" class="invd">故障也在这里收敛成有语义的失败。</text>
-
-    <rect x="840" y="732" width="376" height="130" rx="6" fill="#F5E5E0" stroke="#A85C47"/>
-    <text x="858" y="757" class="inv">不变量 C · 发布态走发布绑定</text>
-    <text x="858" y="781" class="invd">服务型 Bot 必须经由已发布的运行时绑定</text>
-    <text x="858" y="801" class="invd">解析（草稿 / 预发 / 线上 三态），而不是</text>
-    <text x="858" y="821" class="invd">草稿态 —— 否则线上流量会打到发布前的</text>
-    <text x="858" y="841" class="invd">那台机器上。</text>
+    <line x1="1180" y1="752" x2="80" y2="752" stroke="#3B7A73" stroke-width="1.5" marker-end="url(#c3)"/>
+    <text x="630" y="744" class="bd" text-anchor="middle">回程：流式事件沿同一条链路反向回传 —— 引擎网关 → 传输实现 → 引擎适配层 → 能力域协议 → 长连接 → 调用方</text>
   </g>
 </svg>
