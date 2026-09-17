@@ -209,6 +209,7 @@ impl CollaborationRuntimeService for RecordingRuntime {
                     completed_at: None,
                 },
                 nodes: Vec::new(),
+                node_execution_metadata: None,
                 judge_outputs: Vec::new(),
             },
         })
@@ -3193,6 +3194,7 @@ async fn legacy_chat_session_with_state_machine_run_allows_participant_scope_and
             completed_at: Some(1),
         },
         nodes: Vec::new(),
+        node_execution_metadata: None,
         judge_outputs: Vec::new(),
     });
 

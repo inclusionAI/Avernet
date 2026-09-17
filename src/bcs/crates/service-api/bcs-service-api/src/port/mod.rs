@@ -17,6 +17,7 @@ pub mod interaction;
 pub mod judge;
 pub mod leader_election;
 pub mod metrics;
+pub mod state_machine_metrics;
 pub mod pending_group_message;
 pub mod participant_view_binding;
 pub mod provider_stream_gray;
@@ -51,6 +52,7 @@ pub use human_notify::{
 };
 pub use event_delivery::*;
 pub use event_metrics::*;
+pub use state_machine_metrics::*;
 pub use event_recording::*;
 pub use friend_connect_notification::{
     FriendConnectNotificationCommand, FriendConnectNotificationKind, FriendConnectNotificationPort,
@@ -89,6 +91,11 @@ pub use participant_view_binding::{
 };
 pub use provider_stream_gray::ProviderStreamGrayList;
 pub use repo::{
+    FailStateMachineNodeAttempt, StateMachineFailureAction, StateMachineNodeAttemptFailure,
+    FinishStateMachineJudge, StateMachineJudgeClaim, StateMachineJudgeResult,
+    StateMachineOpeningPayload, StateMachineOpeningCheckpoint,
+    StateMachineDispatchPayload, StateMachineDispatchTarget, StateMachineDispatchStatus,
+    StateMachineDispatchCheckpoint, StateMachineDispatchClaim, StateMachineDispatchResult,
     BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
     BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneRepoPort, BotRepoPort,

@@ -112,6 +112,19 @@ pub trait HumanInputRequestRepoPort: Send + Sync {
         &self,
         reply_scope_key: &str,
     ) -> ServiceResult<Option<HumanInputRequest>>;
+    /// Current queue head, including unsent/unknown notifications. Reply lookup
+    /// remains restricted to Active; this read is for stale-slot recovery only.
+    async fn find_occupying_by_scope(&self, scope: &str) -> ServiceResult<Option<HumanInputRequest>> {
+        let _ = scope;
+        Err(crate::ServiceError::InternalError("HumanInput slot recovery is not implemented".into()))
+    }
+    /// Atomically change notification_pending to notifying before external IO.
+    /// Only the winner may send. Preserve the original deadline and payload;
+    /// legacy notifying rows are ambiguous and cannot acquire another send.
+    async fn begin_notification(&self, request_id: &str, now_ms: u64) -> ServiceResult<bool> {
+        let _ = (request_id, now_ms);
+        Err(crate::ServiceError::InternalError("HumanInput send barrier is not implemented".into()))
+    }
     async fn mark_active(
         &self,
         request_id: &str,

@@ -124,16 +124,42 @@ export interface CollaborationDefinitionGraphNode {
   assignee?: CollaborationDefinitionGraphAssignee;
   final_output: boolean;
   judge: boolean;
+  execution?: {
+    definition_node_id: string;
+    loop_id: string;
+    iteration: number;
+    max_iterations: number;
+  };
+}
+
+export interface CollaborationDefinitionLoopRoute {
+  kind: 'continue' | 'break' | 'exhausted';
+  logical_outcome: string;
 }
 
 export interface CollaborationDefinitionGraphEdge {
   source: string;
   target: string;
   outcome: string;
+  loop_route?: CollaborationDefinitionLoopRoute;
+}
+
+export interface StateMachineLoopGraphView {
+  display_name: string;
+  max_iterations: number;
+  entry_node_id: string;
+  result_node_id: string;
+  body_node_ids: string[];
+  continue_outcomes: string[];
+  break_outcomes: string[];
+  exhausted_outcome: string;
 }
 
 export interface CollaborationDefinitionGraphPreview {
+  loops?: Record<string, StateMachineLoopGraphView>;
   graph_mode: CollaborationDefinitionGraphMode;
+  /** Server-compiled layout mode; preview IDs do not identify a future Run. */
+  execution_graph_mode?: 'acyclic';
   nodes: CollaborationDefinitionGraphNode[];
   edges: CollaborationDefinitionGraphEdge[];
 }

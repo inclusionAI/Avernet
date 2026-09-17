@@ -814,6 +814,28 @@ fn validate_mysql_migration_record(
             applied.dialect
         );
     }
+    if plan.version == 16 && applied.version == 16
+        && plan.name == "session_callback_lease_and_chat_runs"
+    {
+        let legacy_sql = match applied.name.as_str() {
+            "session_callback_lease" => Some(include_str!("../../../../migrations/legacy/mysql/016_session_callback_lease.sql")),
+            "chat_runs" => Some(include_str!("../../../../migrations/legacy/mysql/016_chat_runs.sql")),
+            _ => None,
+        };
+        if let Some(sql) = legacy_sql {
+            let expected = sha256_hex(sql.as_bytes());
+            if applied.checksum != expected {
+                bail!(
+                    "mysql migration checksum mismatch for legacy version 016 ({}): applied={}, archived={}",
+                    applied.name, applied.checksum, expected
+                );
+            }
+            bail!(
+                "legacy mysql migration 016 ({}) requires explicit reconciliation before the merged migration can be accepted; verify both callback leases and chat runs; see migrations/reconciliation/016-session-callback-and-chat-runs.md. No migration record was changed",
+                applied.name
+            );
+        }
+    }
     if applied.name != plan.name {
         bail!(
             "mysql migration name mismatch for version {:03}: applied={}, current={}",
@@ -822,7 +844,10 @@ fn validate_mysql_migration_record(
             plan.name
         );
     }
-    if applied.checksum != plan.checksum {
+    if applied.checksum != plan.checksum
+        && !is_legacy_human_input_index_record(plan, applied)
+        && !is_legacy_mysql_syntax_record(plan, applied)
+    {
         bail!(
             "mysql migration checksum mismatch for version {:03} ({}): applied={}, current={}",
             applied.version,
@@ -832,6 +857,70 @@ fn validate_mysql_migration_record(
         );
     }
     Ok(())
+}
+
+// These exact baseline/index revisions retain their historical records.
+// The current checksums are pinned too, so future edits are not accepted
+// automatically. Columns removed from 001 belong to 011/020; migration 028
+// upgrades the HumanInput index separately. Existing databases keep their columns.
+fn is_legacy_human_input_index_record(
+    plan: &MysqlMigrationPlan,
+    applied: &AppliedMysqlMigration,
+) -> bool {
+    if applied.version != i64::from(plan.version) || applied.dialect != "mysql"
+        || applied.name != plan.name
+    {
+        return false;
+    }
+    matches!(
+        (plan.version, plan.name.as_str(), plan.checksum.as_str(), applied.checksum.as_str()),
+        (1, "init_schema",
+            "a7f351ed88f95eb233e535f5fda9226a161fea5fc2af84d97ff2e2593a57a1d3",
+            "b3de64c97b982a735230f6c55e966e4404eb509d70a0b7fd8f11dfa43e3452a7")
+        | (8, "human_input_im_requests",
+            "efc4dc1b457f7ce1f20c78394d1af4b1ca2af7bee963c8cff4f4587660728c96",
+            "0e10c711afc436cf59d2393e3d5c88b9c24e73be72f4e984044840e6f798ebd5")
+    )
+}
+
+// Explicit syntax-only corrections authorized for the archived historical SQL.
+// Pin BOTH checksums: neither unknown history nor future file edits are accepted.
+// (version, name, current checksum, archived checksum)
+const MYSQL_SYNTAX_REVISIONS: &[(u16, &str, &str, &str)] = &[
+    (2, "add_owner_bot_id",
+        "4190aed200a1cf880321bec17ca50ca2835822a90e03df234d1f98ae2d80d588",
+        "b0ee5d777bf79f7c04e676ea61cac4553e0c0be1db3fb3bc2849978104f2ffec"),
+    (7, "add_human_input_runtime",
+        "2a1685ae578fdfe06401321107dab9007266fb367495cae03fbbc662cdfac69c",
+        "4cea1e1ff6db55afa1ac5c7b10823c57f4876c20b033703f98940eb25e4ee19c"),
+    (11, "group_participant_tags",
+        "41e0f84544b1fdc53f840af30e43dc108dc4408c91ee0ceca1e9011e591ae0b1",
+        "3f8148d618395fd2b45312c08287422d4e3b8fdc17587e29f5c80a55a3962053"),
+    (13, "add_bot_task_modes",
+        "956f7cb936e293feb98281d86d78c978432c6c2ed0a75a4c766dc381dde353b3",
+        "fddb6f03977b313c6f5d1bed1ad4a735fb1c439f1b35c0a4436372a90dc1ad3e"),
+    (15, "add_bot_internal_attributes",
+        "b65ac46e25683050fd34c791f2223f7bbd3de59e359a70907579eabec1e48ec8",
+        "247e163a9fd7c4b4c0e023757f72a978857722f9ea6eebee5dc607dbfae44060"),
+    (17, "state_machine_rerun_lineage",
+        "8128dedd4f597c00e8b290cc2046e8417ce40e41a7e75b993080370b3d1b393c",
+        "942f9d52fd2438bfe65badc561c7d0d840d2ce46d164268cb5d60199c258dfd1"),
+    (18, "one_shot_opening_message_override",
+        "1e0a66ad71d6dd5cf98f0b180401dfdeb6e6e2e5984fc690bd67904922ab533d",
+        "57b4534262cd9a30f42e5eeda7cc5953a3c56fc731d3d75c0a540c4d4b98862a"),
+    (20, "human_participant_message_visibility",
+        "24df88c5a34c7f1c547820b8b4483f1dabedd1373a158dc1bbf2e262ee0c60d1",
+        "9423d10481b072df738befc9e8987a70808beba3f199921ee60c8b7463448e8c"),
+];
+
+fn is_legacy_mysql_syntax_record(plan: &MysqlMigrationPlan, applied: &AppliedMysqlMigration) -> bool {
+    applied.version == i64::from(plan.version)
+        && applied.dialect == "mysql"
+        && applied.name == plan.name
+        && MYSQL_SYNTAX_REVISIONS.iter().any(|&(version, name, current, archived)| {
+            plan.version == version && plan.name == name
+                && plan.checksum == current && applied.checksum == archived
+        })
 }
 
 fn format_mysql_check_report(report: &MysqlMigrationCheckReport) -> String {
@@ -1161,7 +1250,7 @@ async fn emit_sqlite_migration_plan(sqlite_path: &Path) -> Result<String> {
             migration.version, migration.name, migration.checksum
         ));
         if migration.statements.is_empty() {
-            output.push_str("-- No ALTER statements are required before recording this version.\n");
+            output.push_str("-- DDL is code-defined; --apply runs the guarded schema changes before recording this version.\n");
         } else {
             for statement in &migration.statements {
                 output.push_str(statement.trim());
@@ -1741,3 +1830,19 @@ mod tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "migrate_fixed_loop_tests.rs"]
+mod fixed_loop_mysql_tests;
+
+#[cfg(test)]
+#[path = "migrate_016_tests.rs"]
+mod merged_016_mysql_tests;
+
+#[cfg(test)]
+#[path = "migrate_human_input_index_tests.rs"]
+mod human_input_index_mysql_tests;
+
+#[cfg(test)]
+#[path = "migrate_mysql_chain_tests.rs"]
+mod mysql_chain_tests;

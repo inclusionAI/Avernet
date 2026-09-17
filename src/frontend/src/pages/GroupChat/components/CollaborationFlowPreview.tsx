@@ -1,31 +1,32 @@
 import { Empty } from '@/components';
 import type { CollaborationDefinitionGraphPreview } from '@/services/backend-api/BcnController';
-import { cn } from '@/utils/utils';
 import {
   Background,
   Controls,
-  Handle,
   MarkerType,
   Position,
   ReactFlow,
   type Edge,
   type Node,
-  type NodeProps,
   type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import React, { useEffect, useMemo, useRef } from 'react';
 import {
   buildCollaborationGraphLayout,
-  buildCollaborationNodePresentation,
   COLLABORATION_FLOW_NODE_WIDTH,
   CollaborationGraphLayoutError,
   getCollaborationNodeInteractionState,
-  getCollaborationNodeTone,
   type CollaborationBindingView,
-  type CollaborationGraphNodeData,
-  type CollaborationNodeTone,
 } from '../utils/collaborationGraphLayout';
+
+import CollaborationLoopEdge from './CollaborationLoopEdge';
+import CollaborationLoopContainer from './CollaborationLoopContainer';
+import { buildCollaborationLoopLayout, hasLogicalLoopDescriptors } from '../utils/collaborationLoopLayout';
+import CollaborationPreviewMetadata from './CollaborationPreviewMetadata';
+import CollaborationNode, {
+  buildNodeAriaLabel,
+} from './CollaborationPreviewNode';
 
 interface CollaborationFlowPreviewProps {
   graph: CollaborationDefinitionGraphPreview;
@@ -36,159 +37,15 @@ interface CollaborationFlowPreviewProps {
   onNodeSelect?: (nodeId: string) => void;
 }
 
-interface CollaborationFlowNodeData extends CollaborationGraphNodeData {
-  selected: boolean;
-  highlighted: boolean;
-  onSelect?: (nodeId: string) => void;
-}
-
-type CollaborationFlowNode = Node<CollaborationFlowNodeData, 'collaboration'>;
-
-const NODE_THEME_CLASSES: Record<
-  CollaborationNodeTone,
-  {
-    default: string;
-    highlighted: string;
-    selected: string;
-    badge: string;
-    bot: string;
-    role: string;
-  }
-> = {
-  blue: {
-    default:
-      'border border-blue-300 bg-blue-50/60 hover:border-blue-400 hover:bg-blue-50',
-    highlighted:
-      'border border-blue-400 bg-blue-50 ring-2 ring-blue-100/80',
-    selected:
-      'border-2 border-blue-500 bg-blue-100/80 ring-2 ring-blue-200/60 shadow-md',
-    badge: 'border-blue-200 bg-blue-500 text-white',
-    bot: 'text-blue-700',
-    role: 'border-blue-200 bg-white/90 text-blue-700',
-  },
-  green: {
-    default:
-      'border border-emerald-300 bg-emerald-50/60 hover:border-emerald-400 hover:bg-emerald-50',
-    highlighted:
-      'border border-emerald-400 bg-emerald-50 ring-2 ring-emerald-100/80',
-    selected:
-      'border-2 border-emerald-500 bg-emerald-100/80 ring-2 ring-emerald-200/60 shadow-md',
-    badge: 'border-emerald-200 bg-emerald-500 text-white',
-    bot: 'text-emerald-700',
-    role: 'border-emerald-200 bg-white/90 text-emerald-700',
-  },
-  neutral: {
-    default:
-      'border border-slate-300 bg-slate-50/80 hover:border-slate-400 hover:bg-slate-100/70',
-    highlighted:
-      'border border-slate-400 bg-slate-100/70 ring-2 ring-slate-200/70',
-    selected:
-      'border-2 border-slate-500 bg-slate-100 ring-2 ring-slate-300/60 shadow-md',
-    badge: 'border-slate-200 bg-slate-500 text-white',
-    bot: 'text-slate-600',
-    role: 'border-slate-200 bg-white/90 text-slate-600',
-  },
-};
-
-function buildNodeAriaLabel(data: CollaborationGraphNodeData) {
-  const presentation = buildCollaborationNodePresentation(data);
-  const markers = [
-    data.isInitial ? '入口节点' : '',
-    data.definition.final_output ? '最终输出节点' : '',
-    data.definition.judge ? 'Judge 节点' : '',
-  ].filter(Boolean);
-  return [
-    presentation.title,
-    `节点名称 ${data.definition.node_id}`,
-    `类型 ${presentation.kindLabel}`,
-    `Bot ${presentation.botName}`,
-    `角色 ${presentation.roleName}`,
-    ...markers,
-  ].join('，');
-}
-
-function CollaborationNode({ data }: NodeProps<CollaborationFlowNode>) {
-  const handleSelect = () => data.onSelect?.(data.definition.node_id);
-  const ariaLabel = buildNodeAriaLabel(data);
-  const presentation = buildCollaborationNodePresentation(data);
-  const tone = getCollaborationNodeTone(data.definition.kind);
-  const theme = NODE_THEME_CLASSES[tone];
-  const isUnboundBot = !!data.assigneeBinding && !data.assigneeBotId;
-
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      aria-pressed={data.selected}
-      aria-label={ariaLabel}
-      title={ariaLabel}
-      onClick={handleSelect}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          handleSelect();
-        }
-      }}
-      className={cn(
-        'nodrag nopan relative flex min-h-[84px] w-[210px] cursor-pointer flex-col justify-center rounded-[18px] px-4 py-3 shadow-sm outline-none transition-all',
-        'focus-visible:ring-2 focus-visible:ring-slate-300 focus-visible:ring-offset-1',
-        data.selected
-          ? theme.selected
-          : data.highlighted
-          ? theme.highlighted
-          : theme.default,
-      )}
-    >
-      <span
-        className={cn(
-          'absolute -right-1.5 -top-2 rounded-full border px-2 py-0.5 text-[10px] font-semibold shadow-sm',
-          theme.badge,
-        )}
-      >
-        {presentation.kindLabel}
-      </span>
-      <Handle
-        type="target"
-        position={Position.Top}
-        className="pointer-events-none opacity-0"
-      />
-      <div className="truncate text-center text-sm font-semibold text-slate-900">
-        {presentation.title}
-      </div>
-      <div className="mt-3 flex min-w-0 items-center justify-between gap-3">
-        <span
-          className={cn(
-            'min-w-0 flex-1 truncate text-xs font-medium',
-            isUnboundBot ? 'text-amber-600' : theme.bot,
-          )}
-          title={presentation.botName}
-        >
-          {presentation.botName}
-        </span>
-        <span
-          className={cn(
-            'max-w-[46%] flex-shrink-0 truncate rounded-full border px-2 py-0.5 text-[11px] font-semibold',
-            theme.role,
-          )}
-          title={presentation.roleName}
-        >
-          {presentation.roleName}
-        </span>
-      </div>
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className="pointer-events-none opacity-0"
-      />
-    </div>
-  );
-}
-
 const nodeTypes = {
   collaboration: CollaborationNode,
+  loopContainer: CollaborationLoopContainer,
 };
 
+const edgeTypes = { loop: CollaborationLoopEdge };
+
 const FIT_VIEW_OPTIONS = { padding: 0.2, maxZoom: 1 };
+const LOOP_FIT_VIEW_OPTIONS = { padding: 0.05, maxZoom: 1 };
 
 const CollaborationFlowPreview: React.FC<CollaborationFlowPreviewProps> = ({
   graph,
@@ -200,15 +57,15 @@ const CollaborationFlowPreview: React.FC<CollaborationFlowPreviewProps> = ({
 }) => {
   const canvasRef = useRef<HTMLDivElement>(null);
   const flowInstanceRef =
-    useRef<ReactFlowInstance<CollaborationFlowNode> | null>(null);
+    useRef<ReactFlowInstance<Node> | null>(null);
+  const hasLoops = hasLogicalLoopDescriptors(graph);
+  const fitViewOptions = hasLoops ? LOOP_FIT_VIEW_OPTIONS : FIT_VIEW_OPTIONS;
   const result = useMemo(() => {
     try {
       return {
-        layout: buildCollaborationGraphLayout(
-          graph,
-          initialNodes,
-          bindingViews,
-        ),
+        layout: hasLoops
+          ? buildCollaborationLoopLayout(graph, initialNodes, bindingViews)
+          : { ...buildCollaborationGraphLayout(graph, initialNodes, bindingViews), groups: [] },
         error: null,
       };
     } catch (error) {
@@ -224,17 +81,28 @@ const CollaborationFlowPreview: React.FC<CollaborationFlowPreviewProps> = ({
               ),
       };
     }
-  }, [bindingViews, graph, initialNodes]);
+  }, [bindingViews, graph, initialNodes, hasLoops]);
+
+  // Binding/selection updates rebuild node data, but should preserve the user's viewport.
+  const viewportLayoutKey = result.layout && JSON.stringify({
+    nodes: result.layout.nodes.map(({ id, parentId, position }) => [id, parentId, position.x, position.y]),
+    groups: result.layout.groups.map(({ id, position, width, height }) => [id, position.x, position.y, width, height]),
+    edges: result.layout.edges.map(({ source, target }) => [source, target]),
+  });
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => { void flowInstanceRef.current?.fitView(fitViewOptions); });
+    return () => cancelAnimationFrame(frame);
+  }, [viewportLayoutKey, fitViewOptions]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => {
-      void flowInstanceRef.current?.fitView(FIT_VIEW_OPTIONS);
+      void flowInstanceRef.current?.fitView(fitViewOptions);
     });
     observer.observe(canvas);
     return () => observer.disconnect();
-  }, []);
+  }, [fitViewOptions]);
 
   if (!result.layout) {
     return (
@@ -251,7 +119,7 @@ const CollaborationFlowPreview: React.FC<CollaborationFlowPreviewProps> = ({
     );
   }
 
-  const nodes: CollaborationFlowNode[] = result.layout.nodes.map((node) => ({
+  const nodes: Node[] = result.layout.nodes.map((node) => ({
     ...node,
     type: 'collaboration',
     sourcePosition: Position.Bottom,
@@ -274,7 +142,9 @@ const CollaborationFlowPreview: React.FC<CollaborationFlowPreviewProps> = ({
   }));
   const edges: Edge[] = result.layout.edges.map((edge) => ({
     ...edge,
-    type: 'default',
+    sourceHandle: edge.sourceHandle || 'main',
+    targetHandle: edge.targetHandle || 'main',
+    type: edge.data?.loopRoute ? 'loop' : 'default',
     markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' },
     style: { stroke: '#3b82f6', strokeWidth: 2 },
     labelStyle: { fill: '#2563eb', fontSize: 11, fontWeight: 700 },
@@ -291,8 +161,9 @@ const CollaborationFlowPreview: React.FC<CollaborationFlowPreviewProps> = ({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <CollaborationPreviewMetadata graph={graph} />
       <div className="sr-only">
-        {graph.nodes.length} 个节点，{graph.edges.length} 条边。入口：
+        {result.layout.nodes.length} 个节点，{result.layout.edges.length} 条边。入口：
         {initialNodeNames.join('、') || '无'}。最终输出：
         {finalOutputNames.join('、') || '无'}。
       </div>
@@ -302,16 +173,19 @@ const CollaborationFlowPreview: React.FC<CollaborationFlowPreviewProps> = ({
         className="min-h-[300px] flex-1 bg-slate-50/50"
         aria-label="协同剧本协作流程"
       >
-        <ReactFlow<CollaborationFlowNode>
-          nodes={nodes}
+        <ReactFlow<Node>
+          nodes={[...result.layout.groups.map((group) => ({ id: group.id, type: 'loopContainer',
+            position: group.position, data: { title: group.title, maxIterations: group.maxIterations, loopId: group.loopId },
+            style: { width: group.width, height: group.height }, draggable: false, selectable: false, focusable: false })), ...nodes]}
           edges={edges}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           fitView
-          fitViewOptions={FIT_VIEW_OPTIONS}
+          fitViewOptions={fitViewOptions}
           onInit={(instance) => {
             flowInstanceRef.current = instance;
           }}
-          onNodeClick={(_, node) => onNodeSelect?.(node.id)}
+          onNodeClick={(_, node) => { if (node.type === 'collaboration') onNodeSelect?.(node.id); }}
           minZoom={0.2}
           maxZoom={1.5}
           nodesDraggable={false}

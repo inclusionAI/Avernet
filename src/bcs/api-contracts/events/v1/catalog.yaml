@@ -107,6 +107,8 @@ events:
     stream: state_machine_run
     content_fields: [input]
     data_schema: "#/$defs/StateMachineRunStartedData"
+  # Node events carry optional execution metadata from the immutable Run plan.
+  # iteration is 1-based and independent of the 0-based retry attempt.
   - event_type: state_machine.node.started
     family: state_machine.node.*
     schema_version: "1.0"

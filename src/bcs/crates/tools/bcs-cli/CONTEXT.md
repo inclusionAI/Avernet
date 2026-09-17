@@ -7,6 +7,14 @@
 - DingTalk conversation-id lookup by BCS session id for channel diagnostics.
 - `collaborate permission` and `collaborate run` for server-authorized,
   one-shot state-machine execution in the current BCS session.
+- `collaborate query` inspects Run, exact Node, graph or authorized pending
+  Human inputs. Text output displays server-provided logical node, iteration,
+  retry attempt, route and LoopContext; JSON remains the complete response.
+- `collaborate respond` first confirms the exact execution ID in the authorized
+  pending list, then submits only content to that ID. The server still owns
+  authorization and race rejection. Paths encode returned IDs as opaque segments.
+- Validation text preserves server warnings and authoring paths; a successful
+  v2 preview does not enable production execution.
 - A tool boundary separate from server runtime assembly.
 
 ## Consumes

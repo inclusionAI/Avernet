@@ -26,6 +26,7 @@ EXPECTED_OPERATIONS = {
     ("get", "/openapi/v1/collaboration/public-groups"),
     ("get", "/openapi/v1/collaboration/register/token"),
     ("post", "/openapi/v1/collaboration/register"),
+    ("post", "/openapi/v1/collaboration/invite-codes/claim"),
     ("post", "/openapi/v1/collaboration/bots/query"),
     ("get", "/openapi/v1/collaboration/bots/{bot_id}"),
     ("get", "/openapi/v1/collaboration/bots/{bot_id}/candidates"),
@@ -59,7 +60,6 @@ EXPECTED_OPERATIONS = {
     ("post", "/openapi/v1/collaboration/groups/{group_id}/invitations"),
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/invitations"),
     ("post", "/openapi/v1/collaboration/invitations/{token}/accept"),
-    ("post", "/openapi/v1/collaboration/invite-codes/claim"),
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/token"),
     ("get", "/openapi/v1/collaboration/messages/ws"),
     ("get", "/openapi/v1/collaboration/bots/{bot_uuid}/friendships"),
@@ -103,7 +103,7 @@ def _actual_operations():
     }
 
 
-def test_contract_contains_exactly_the_72_approved_operations() -> None:
+def test_contract_contains_exactly_the_approved_operations() -> None:
     assert _actual_operations() == EXPECTED_OPERATIONS
 
 
@@ -134,11 +134,10 @@ def test_operations_use_the_approved_gateway_security_boundary() -> None:
                 continue
             if path == "/openapi/v1/collaboration/messages/ws":
                 expected = {}
-            elif (
-                path.startswith("/openapi/v1/auth/")
-                or path == "/openapi/v1/collaboration/register"
-                or path == "/openapi/v1/collaboration/invite-codes/claim"
-            ):
+            elif path.startswith("/openapi/v1/auth/") or path in {
+                "/openapi/v1/collaboration/register",
+                "/openapi/v1/collaboration/invite-codes/claim",
+            }:
                 expected = {}
             elif path == "/openapi/v1/collaboration/public-groups":
                 expected = {"user": "required"}

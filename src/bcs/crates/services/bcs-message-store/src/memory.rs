@@ -34,6 +34,70 @@ struct SessionMessages {
 }
 
 impl MemoryMessageRepo {
+    async fn append_with_identity(
+        &self,
+        msg: NewMessage,
+        message_id: String,
+        stable: bool,
+    ) -> Result<PersistedMessage, MessageRepoError> {
+        validate_new_message_visibility(&msg)?;
+        let error_projection = !stable && msg.message_type == bcs_domain::CHAT_ERROR_MESSAGE_TYPE;
+        if error_projection && msg.run_id.is_empty() {
+            return Err(MessageRepoError::StorageError("chat_error requires run_id".into()));
+        }
+        let mut sessions = self.sessions.write().await;
+        if stable {
+            if let Some(saved) = sessions.values().flat_map(|entry| &entry.messages).find(|saved| saved.message_id == message_id) {
+                if saved.session_id != msg.session_id { return Err(MessageRepoError::StorageError("stable message id belongs to another Session".into())); }
+                return Ok(saved.clone());
+            }
+        }
+        let entry = sessions.entry(msg.session_id.clone()).or_default();
+
+        if error_projection {
+            if let Some(existing) = entry.messages.iter().find(|m| m.group_id == msg.group_id
+                && m.sender_id == msg.sender_id && m.run_id == msg.run_id
+                && m.message_type == bcs_domain::CHAT_ERROR_MESSAGE_TYPE) {
+                return Ok(existing.clone());
+            }
+        }
+
+        // Check idempotency
+        if let Some(client_msg_id) = msg.client_msg_id.as_ref().filter(|_| !error_projection) {
+            if let Some(existing) = entry.messages.iter().find(|m| {
+                m.sender_id == msg.sender_id && m.client_msg_id.as_deref() == Some(client_msg_id)
+            }) {
+                return Ok(existing.clone());
+            }
+        }
+
+        entry.seq += 1;
+        let persisted = PersistedMessage {
+            message_id,
+            group_id: msg.group_id,
+            session_id: msg.session_id,
+            session_seq: entry.seq,
+            sender_id: msg.sender_id,
+            sender_type: msg.sender_type,
+            message_type: msg.message_type,
+            content: msg.content,
+            client_msg_id: msg.client_msg_id,
+            owner_bot_id: msg.owner_bot_id,
+            visibility_domain: Some(msg.visibility_domain),
+            audience: msg.audience,
+            status: PersistedMessageStatus::Normal,
+            created_at: msg.created_at,
+            run_id: msg.run_id,
+        };
+        entry.messages.push(persisted.clone());
+        info!(
+            session_id = %persisted.session_id,
+            session_seq = persisted.session_seq,
+            "message persisted (memory)"
+        );
+        Ok(persisted)
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -66,59 +130,14 @@ impl MessageRepoPort for MemoryMessageRepo {
     fn delivery_repository(self: Arc<Self>) -> Option<Arc<dyn bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort>> {
         Some(self)
     }
-    async fn append_message(
-        &self,
-        msg: NewMessage,
-    ) -> Result<PersistedMessage, MessageRepoError> {
-        validate_new_message_visibility(&msg)?;
-        let mut sessions = self.sessions.write().await;
-        let entry = sessions.entry(msg.session_id.clone()).or_default();
-
-        if msg.message_type == bcs_domain::CHAT_ERROR_MESSAGE_TYPE {
-            if msg.run_id.is_empty() {
-                return Err(MessageRepoError::StorageError("chat_error requires run_id".into()));
-            }
-            if let Some(existing) = entry.messages.iter().find(|m| m.group_id == msg.group_id
-                && m.sender_id == msg.sender_id && m.run_id == msg.run_id
-                && m.message_type == bcs_domain::CHAT_ERROR_MESSAGE_TYPE) {
-                return Ok(existing.clone());
-            }
+    async fn append_message(&self, msg: NewMessage) -> Result<PersistedMessage, MessageRepoError> {
+        self.append_with_identity(msg, uuid::Uuid::new_v4().to_string(), false).await
+    }
+    async fn append_message_with_id(&self, message_id: String, msg: NewMessage) -> Result<PersistedMessage, MessageRepoError> {
+        if message_id.is_empty() || message_id.len() > 256 {
+            return Err(MessageRepoError::StorageError("invalid stable message id".into()));
         }
-
-        // Check idempotency
-        if let Some(client_msg_id) = msg.client_msg_id.as_ref().filter(|_| msg.message_type != bcs_domain::CHAT_ERROR_MESSAGE_TYPE) {
-            if let Some(existing) = entry.messages.iter().find(|m| {
-                m.sender_id == msg.sender_id && m.client_msg_id.as_deref() == Some(client_msg_id)
-            }) {
-                return Ok(existing.clone());
-            }
-        }
-
-        entry.seq += 1;
-        let persisted = PersistedMessage {
-            message_id: uuid::Uuid::new_v4().to_string(),
-            group_id: msg.group_id,
-            session_id: msg.session_id,
-            session_seq: entry.seq,
-            sender_id: msg.sender_id,
-            sender_type: msg.sender_type,
-            message_type: msg.message_type,
-            content: msg.content,
-            client_msg_id: msg.client_msg_id,
-            owner_bot_id: msg.owner_bot_id,
-            visibility_domain: Some(msg.visibility_domain),
-            audience: msg.audience,
-            status: PersistedMessageStatus::Normal,
-            created_at: msg.created_at,
-            run_id: msg.run_id,
-        };
-        entry.messages.push(persisted.clone());
-        info!(
-            session_id = %persisted.session_id,
-            session_seq = persisted.session_seq,
-            "message persisted (memory)"
-        );
-        Ok(persisted)
+        self.append_with_identity(msg, message_id, true).await
     }
 
     async fn append_message_with_event(

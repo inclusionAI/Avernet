@@ -781,7 +781,7 @@ impl DbHumanInputRequestStore {
                 "find_human_input_active_slot",
                 DbStatement::with_params(
                     "SELECT request_id FROM bcs_human_input_requests \
-                     WHERE active_slot_key = ? AND status IN ('notifying', 'active') LIMIT 1",
+                     WHERE active_slot_key = ? AND status IN ('notification_pending', 'notifying', 'active') LIMIT 1",
                     vec![DbValue::from(reply_scope_key)],
                 ),
             )
@@ -799,7 +799,7 @@ impl HumanInputRequestRepoPort for DbHumanInputRequestStore {
         if let Some(existing) = self.get(&request.request_id).await? {
             return Ok(if matches!(
                 existing.status,
-                HumanInputRequestStatus::Notifying | HumanInputRequestStatus::Active
+                HumanInputRequestStatus::NotificationPending | HumanInputRequestStatus::Notifying | HumanInputRequestStatus::Active
             ) {
                 HumanInputEnqueueDisposition::Notifying
             } else {
@@ -810,7 +810,7 @@ impl HumanInputRequestRepoPort for DbHumanInputRequestStore {
         let first_error = match self
             .insert(
                 &request,
-                HumanInputRequestStatus::Notifying,
+                HumanInputRequestStatus::NotificationPending,
                 Some(&request.reply_scope_key),
             )
             .await
@@ -821,7 +821,7 @@ impl HumanInputRequestRepoPort for DbHumanInputRequestStore {
         if let Some(existing) = self.get(&request.request_id).await? {
             return Ok(if matches!(
                 existing.status,
-                HumanInputRequestStatus::Notifying | HumanInputRequestStatus::Active
+                HumanInputRequestStatus::NotificationPending | HumanInputRequestStatus::Notifying | HumanInputRequestStatus::Active
             ) {
                 HumanInputEnqueueDisposition::Notifying
             } else {
@@ -887,6 +887,20 @@ impl HumanInputRequestRepoPort for DbHumanInputRequestStore {
         rows.first().map(row_to_human_input_request).transpose()
     }
 
+    async fn find_occupying_by_scope(&self, scope: &str) -> ServiceResult<Option<HumanInputRequest>> {
+        let rows = self.query("find_human_input_queue_head", DbStatement::with_params(
+            human_input_request_select_sql(self.flavor, "WHERE active_slot_key = ? LIMIT 1"), vec![DbValue::from(scope)],
+        )).await?;
+        rows.first().map(row_to_human_input_request).transpose()
+    }
+
+    async fn begin_notification(&self, request_id: &str, now_ms: u64) -> ServiceResult<bool> {
+        Ok(self.execute("begin_human_input_notification", DbStatement::with_params(
+            format!("UPDATE bcs_human_input_requests SET status = 'notifying', delivery_attempts = delivery_attempts + 1, {} WHERE request_id = ? AND status = 'notification_pending' AND deadline_ms > ? AND active_slot_key IS NOT NULL", self.flavor.set_modified_now()),
+            vec![DbValue::from(request_id), DbValue::from(now_ms)],
+        )).await? == 1)
+    }
+
     async fn mark_active(
         &self,
         request_id: &str,
@@ -900,14 +914,15 @@ impl HumanInputRequestRepoPort for DbHumanInputRequestStore {
                     format!(
                         "UPDATE bcs_human_input_requests \
                          SET status = 'active', provider_message_ref = ?, \
-                             delivery_attempts = delivery_attempts + 1, activated_at = ?, {} \
-                         WHERE request_id = ? AND status = 'notifying'",
+                             activated_at = ?, {} \
+                         WHERE request_id = ? AND status = 'notifying' AND deadline_ms > ?",
                         self.flavor.set_modified_now()
                     ),
                     vec![
                         DbValue::from(provider_message_ref),
                         DbValue::from(activated_at),
                         DbValue::from(request_id),
+                        DbValue::from(activated_at),
                     ],
                 ),
             )
@@ -927,7 +942,6 @@ impl HumanInputRequestRepoPort for DbHumanInputRequestStore {
                     format!(
                         "UPDATE bcs_human_input_requests \
                          SET status = 'delivery_failed', active_slot_key = NULL, \
-                             delivery_attempts = delivery_attempts + 1, \
                              last_delivery_error = ?, {} \
                          WHERE request_id = ? AND status = 'notifying'",
                         self.flavor.set_modified_now()
@@ -1006,7 +1020,7 @@ impl HumanInputRequestRepoPort for DbHumanInputRequestStore {
                 DbStatement::with_params(
                     format!(
                         "UPDATE bcs_human_input_requests \
-                         SET status = 'notifying', active_slot_key = ?, {} \
+                         SET status = 'notification_pending', active_slot_key = ?, {} \
                          WHERE request_id = ? AND status = 'queued'",
                         self.flavor.set_modified_now()
                     ),
@@ -1060,7 +1074,7 @@ impl HumanInputRequestRepoPort for DbHumanInputRequestStore {
                     "UPDATE bcs_human_input_requests \
                      SET status = ?, active_slot_key = NULL, {} \
                      WHERE run_id = ? AND node_id = ? \
-                       AND status IN ('queued', 'notifying', 'active')",
+                       AND status IN ('queued', 'notification_pending', 'notifying', 'active')",
                     self.flavor.set_modified_now()
                 ),
                 vec![
@@ -1232,6 +1246,7 @@ fn parse_human_input_notification_mode(value: &str) -> ServiceResult<HumanInputN
 fn human_input_request_status_to_str(status: HumanInputRequestStatus) -> &'static str {
     match status {
         HumanInputRequestStatus::Queued => "queued",
+        HumanInputRequestStatus::NotificationPending => "notification_pending",
         HumanInputRequestStatus::Notifying => "notifying",
         HumanInputRequestStatus::Active => "active",
         HumanInputRequestStatus::Responded => "responded",
@@ -1244,6 +1259,7 @@ fn human_input_request_status_to_str(status: HumanInputRequestStatus) -> &'stati
 fn parse_human_input_request_status(value: &str) -> ServiceResult<HumanInputRequestStatus> {
     match value {
         "queued" => Ok(HumanInputRequestStatus::Queued),
+        "notification_pending" => Ok(HumanInputRequestStatus::NotificationPending),
         "notifying" => Ok(HumanInputRequestStatus::Notifying),
         "active" => Ok(HumanInputRequestStatus::Active),
         "responded" => Ok(HumanInputRequestStatus::Responded),
@@ -2017,6 +2033,7 @@ mod tests {
             repo.enqueue(first).await?,
             HumanInputEnqueueDisposition::Notifying
         );
+        assert!(repo.begin_notification("request_1", 99).await?);
         assert!(repo.mark_active("request_1", Some("message_1"), 100).await?);
         assert!(!repo.mark_active("request_1", None, 101).await?);
 
@@ -2060,7 +2077,7 @@ mod tests {
             .await?
             .expect("queued request promoted");
         assert_eq!(promoted.request_id, "request_2");
-        assert_eq!(promoted.status, HumanInputRequestStatus::Notifying);
+        assert_eq!(promoted.status, HumanInputRequestStatus::NotificationPending);
         assert_eq!(promoted.active_slot_key.as_deref(), Some("scope_1"));
 
         Ok(())
@@ -2083,6 +2100,7 @@ mod tests {
             .await?,
             HumanInputEnqueueDisposition::Notifying
         );
+        assert!(repo.begin_notification("failed", 100).await?);
         assert!(
             repo.mark_delivery_failed("failed", "provider unavailable")
                 .await?

@@ -392,6 +392,7 @@ impl RegisterService for NoopRegisterService {
 
 #[derive(Default)]
 struct FakeSessionService {
+    state_machine_run: Mutex<Option<bcs_service_api::StateMachineRunView>>,
     created: Mutex<Option<CreateSession>>,
     reuse_create: AtomicBool,
     listed: Mutex<Option<ListSessions>>,
@@ -415,8 +416,11 @@ impl SessionService for FakeSessionService {
         command: CreateSession,
     ) -> Result<CreateSessionOutcome, ApplicationError> {
         *self.created.lock().expect("create lock") = Some(command);
+        let mut session = session_detail();
+        session.state_machine_run = self.state_machine_run.lock().unwrap().clone();
+        session.state_machine_run_id = session.state_machine_run.as_ref().map(|view| view.run.run_id.clone());
         Ok(CreateSessionOutcome {
-            session: session_detail(),
+            session,
             created: !self.reuse_create.load(Ordering::Relaxed),
         })
     }
@@ -1061,6 +1065,21 @@ async fn create_session_returns_created_and_forwards_principal() {
             }))
         );
     }
+}
+
+#[tokio::test]
+async fn create_session_preserves_fixed_loop_run_execution_metadata() {
+    let fixture: Value = serde_json::from_str(include_str!("../../../../../tests/fixtures/fixed_loop_api.json")).unwrap();
+    let session = Arc::new(FakeSessionService::default());
+    *session.state_machine_run.lock().unwrap() = Some(serde_json::from_value(fixture["run"].clone()).unwrap());
+    let app = test_session_router(session, Arc::new(FakeSessionMessageService::default()));
+    let response = app.oneshot(authenticated_request("POST", "/openapi/v1/collaboration/groups/group-1/sessions",
+        json!({"kind": "service_invocation", "input": {"query": "iterate"}}))).await.unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["state_machine_run_id"], "run-1");
+    assert_eq!(body["data"]["state_machine_run"]["node_execution_metadata"], fixture["run"]["node_execution_metadata"]);
+    assert_eq!(body["data"]["state_machine_run"]["nodes"].as_array().unwrap().len(), 4);
 }
 
 #[tokio::test]

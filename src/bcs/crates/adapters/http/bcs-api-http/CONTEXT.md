@@ -2,6 +2,12 @@
 
 ## Provides
 
+- State Machine Run/Node/Graph/PendingHuman responses and Session creation retain
+  the runtime's saved Loop execution mapping/context. The adapter preserves
+  opaque node IDs and static loop routes without reconstructing metadata.
+  V1 payloads omit absent additive fields; rerun's flattened envelope retains
+  the complete node_execution_metadata map.
+
 - Versioned `/openapi/v1/collaboration/**` and `/api/v1/collaboration/**` HTTP delivery
   boundaries.
 - Request/response DTO translation and the common response envelope.

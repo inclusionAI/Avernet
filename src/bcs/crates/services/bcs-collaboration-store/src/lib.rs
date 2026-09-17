@@ -15,16 +15,27 @@ use bcs_domain::{
     StateMachineRunStatus,
 };
 use bcs_event_store::{EventAppendTransactionPlan, MemoryEventStore};
-use bcs_service_api::port::repo::StateMachineEventfulTransition;
+use bcs_service_api::port::repo::{
+    StateMachineEventfulTransition, StateMachineExecutionPlanSnapshot, StateMachineRunSnapshot,
+};
 use bcs_service_api::{
     CollaborationDefinitionRecord, CollaborationEventRecord, CollaborationEventRepoPort,
     CollaborationTemplateEntry, CollaborationTemplateRepoPort, GroupRuntimeBindingRepoPort,
     CreateStateMachineRerun, CreateStateMachineRerunOutcome, MarkHumanNodeRunningCommand,
     ServiceError, ServiceResult, SessionRepoPort, StateMachineDefinitionRepoPort,
-    StateMachineRunRepoPort,
+    FailStateMachineNodeAttempt, StateMachineFailureAction, StateMachineNodeAttemptFailure,
+    StateMachineRunRepoPort, StateMachineDispatchPayload, StateMachineDispatchCheckpoint, StateMachineDispatchClaim, StateMachineDispatchResult,
 };
 use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
+
+mod judge;
+mod opening;
+mod dispatch;
+mod publication;
+mod terminal_im;
+mod recovery_gap;
+mod terminal_cleanup;
 
 const CURRENT_GROUP_VERSION_SENTINEL: i32 = 2_147_483_647;
 const RUN_OPENING_MESSAGE_OVERRIDE_PARAM_INDEX: usize = 13;
@@ -39,16 +50,51 @@ const SM_NODE_SELECT_COLS: &str = "run_id, node_id, status, attempt, node_timeou
 const SM_CORRELATION_SELECT_COLS: &str = "state_machine_run_id, node_id, attempt, \
     assignee_bot_id, delivery_request_id, bot_delivery_run_id";
 
+fn validate_snapshot_envelope(
+    definition: &CollaborationDefinition,
+    execution_plan: Option<&StateMachineExecutionPlanSnapshot>,
+) -> ServiceResult<()> {
+    let v2 = matches!(&definition.runtime,
+        bcs_domain::CollaborationRuntimeDefinition::StateMachine(machine) if machine.version == 2);
+    if v2 != execution_plan.is_some() {
+        return Err(ServiceError::InternalError(
+            "v2 snapshot requires an execution plan; v1 snapshot must omit it".into(),
+        ));
+    }
+    if let Some(snapshot) = execution_plan {
+        if snapshot.compiler_version.is_empty()
+            || snapshot.compiler_version != snapshot.plan.compiler_version
+            || snapshot.content_hash.len() != 64
+            || !snapshot.content_hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(ServiceError::InternalError("invalid execution plan snapshot envelope".into()));
+        }
+    }
+    Ok(())
+}
+
+fn snapshot_column(row: &DbRow, column: &str) -> ServiceResult<Option<String>> {
+    db_get_column_opt(row, column)
+        .map_err(|error| ServiceError::InternalError(format!("snapshot {column}: {error}")))
+}
+
 #[derive(Debug, Default, Clone)]
 struct StoreInner {
     definitions: BTreeMap<(String, i32), CollaborationDefinition>,
     definition_sources: BTreeMap<(String, i32), DefinitionSourceRecord>,
-    run_snapshots: BTreeMap<String, CollaborationDefinition>,
+    run_snapshots: BTreeMap<String, StateMachineRunSnapshot>,
     run_resolved_participant_bindings:
         BTreeMap<String, BTreeMap<String, ResolvedParticipantBinding>>,
     bindings: BTreeMap<String, GroupRuntimeBinding>,
     runs: BTreeMap<String, StateMachineRun>,
     nodes: BTreeMap<(String, String), StateMachineNodeRun>,
+    openings: BTreeMap<String, bcs_service_api::StateMachineOpeningCheckpoint>,
+    dispatches: BTreeMap<String, StateMachineDispatchCheckpoint>,
+    publications: BTreeMap<String, bcs_service_api::StateMachineChatResultCheckpoint>,
+    startup_failures: BTreeMap<String, bcs_service_api::StateMachineStartupFailure>,
+    terminal_notifications: BTreeMap<String, bcs_service_api::StateMachineTerminalImCheckpoint>,
+    judge_leases: BTreeMap<(String, String), judge::JudgeLease>,
+    node_failure_actions: BTreeMap<(String, String), StateMachineFailureAction>,
     correlations: BTreeMap<String, StateMachineDeliveryCorrelation>,
     correlation_aliases: BTreeMap<String, String>,
     events: Vec<CollaborationEventRecord>,
@@ -214,12 +260,18 @@ impl StateMachineDefinitionRepoPort for MemoryCollaborationStore {
         _group_version: i32,
         definition: &CollaborationDefinition,
         resolved_participant_bindings: Option<&BTreeMap<String, ResolvedParticipantBinding>>,
+        execution_plan: Option<&StateMachineExecutionPlanSnapshot>,
     ) -> ServiceResult<()> {
+        validate_snapshot_envelope(definition, execution_plan)?;
         let mut inner = self.inner.write().await;
-        inner
-            .run_snapshots
-            .entry(run.run_id.clone())
-            .or_insert_with(|| definition.clone());
+        if inner.run_snapshots.contains_key(&run.run_id) {
+            return Ok(());
+        }
+        inner.run_snapshots.insert(run.run_id.clone(), StateMachineRunSnapshot {
+            definition: definition.clone(),
+            execution_plan: execution_plan.cloned(),
+            resolved_participant_bindings: resolved_participant_bindings.cloned(),
+        });
         if let Some(resolved) = resolved_participant_bindings {
             inner
                 .run_resolved_participant_bindings
@@ -232,7 +284,7 @@ impl StateMachineDefinitionRepoPort for MemoryCollaborationStore {
     async fn get_run_snapshot(
         &self,
         run_id: &str,
-    ) -> ServiceResult<Option<CollaborationDefinition>> {
+    ) -> ServiceResult<Option<StateMachineRunSnapshot>> {
         let inner = self.inner.read().await;
         Ok(inner.run_snapshots.get(run_id).cloned())
     }
@@ -311,24 +363,74 @@ impl GroupRuntimeBindingRepoPort for MemoryCollaborationStore {
 
 #[async_trait]
 impl StateMachineRunRepoPort for MemoryCollaborationStore {
+    async fn list_terminal_runs_for_cleanup(&self, after: Option<&str>, limit: usize) -> ServiceResult<Vec<String>> { self.terminal_cleanup_candidates(after, limit).await }
+    async fn cleanup_terminal_run_checkpoints(&self, run: &str, limit: usize) -> ServiceResult<usize> { self.cleanup_terminal_work(run, limit).await }
+    async fn fail_missing_startup(&self, command: bcs_service_api::FailStateMachineStartup) -> ServiceResult<bool> { self.fail_startup_gap(command).await }
+    async fn get_startup_failure(&self, run: &str) -> ServiceResult<Option<bcs_service_api::StateMachineStartupFailure>> { self.startup_failure(run).await }
+    async fn fail_missing_dispatch(&self, run: &str, node: &str, attempt: i32, now: u64) -> ServiceResult<bool> { self.fail_dispatch_gap(run, node, attempt, now).await }
+
+    async fn save_terminal_im(&self, payload: bcs_service_api::StateMachineTerminalImPayload) -> ServiceResult<bool> { self.save_terminal_notification(payload).await }
+    async fn get_terminal_im(&self, run: &str) -> ServiceResult<Option<bcs_service_api::StateMachineTerminalImCheckpoint>> { self.get_terminal_notification(run).await }
+    async fn list_terminal_im_pending(&self, after: Option<&str>, limit: usize) -> ServiceResult<Vec<String>> { self.list_terminal_notifications(after, limit).await }
+    async fn claim_terminal_im(&self, run: &str, owner: String, now: u64, until: u64) -> ServiceResult<Option<bcs_service_api::StateMachineTerminalImClaim>> { self.claim_terminal_notification(run, owner, now, until).await }
+    async fn update_terminal_im_progress(&self, claim: &bcs_service_api::StateMachineTerminalImClaim, expected: bcs_service_api::StateMachineTerminalImProgress, next: bcs_service_api::StateMachineTerminalImProgress, now: u64) -> ServiceResult<bool> { self.update_terminal_notification(claim, expected, next, now).await }
+    async fn release_terminal_im(&self, claim: &bcs_service_api::StateMachineTerminalImClaim) -> ServiceResult<bool> { self.release_terminal_notification(claim).await }
+    async fn supersede_terminal_im(&self, run: &str) -> ServiceResult<bool> { self.supersede_terminal_notification(run).await }
+
+    async fn save_chat_result(&self, payload: bcs_service_api::StateMachineChatResultPayload) -> ServiceResult<bool> { self.save_publication(payload).await }
+    async fn get_chat_result(&self, run: &str) -> ServiceResult<Option<bcs_service_api::StateMachineChatResultCheckpoint>> { self.get_publication(run).await }
+    async fn claim_chat_result(&self, run: &str, owner: String, now: u64, until: u64) -> ServiceResult<Option<bcs_service_api::StateMachineChatResultClaim>> { self.claim_publication(run, owner, now, until).await }
+    async fn begin_chat_result_send(&self, claim: &bcs_service_api::StateMachineChatResultClaim, now: u64) -> ServiceResult<bool> { self.begin_publication(claim, now).await }
+    async fn finish_chat_result(&self, claim: &bcs_service_api::StateMachineChatResultClaim, outcome: bcs_service_api::StateMachineChatResultOutcome, now: u64) -> ServiceResult<bool> { self.finish_publication(claim, outcome, now).await }
+    async fn expire_chat_result(&self, run: &str, now: u64) -> ServiceResult<bool> { self.expire_publication(run, now).await }
+    async fn release_chat_result(&self, claim: &bcs_service_api::StateMachineChatResultClaim) -> ServiceResult<bool> { self.release_publication(claim).await }
+
+    async fn save_node_dispatch(&self, payload: StateMachineDispatchPayload) -> ServiceResult<bool> { self.save_dispatch(payload).await }
+    async fn get_node_dispatch(&self, run: &str, node: &str, attempt: i32) -> ServiceResult<Option<StateMachineDispatchCheckpoint>> { self.get_dispatch(run, node, attempt).await }
+    async fn claim_node_dispatch(&self, run: &str, node: &str, attempt: i32, owner: String, now: u64, until: u64) -> ServiceResult<Option<StateMachineDispatchClaim>> { self.claim_dispatch(run, node, attempt, owner, now, until).await }
+    async fn begin_node_dispatch_send(&self, claim: &StateMachineDispatchClaim, now: u64) -> ServiceResult<bool> { self.begin_dispatch_send(claim, now).await }
+    async fn finish_node_dispatch(&self, claim: &StateMachineDispatchClaim, result: StateMachineDispatchResult, now: u64) -> ServiceResult<bool> { self.finish_dispatch(claim, result, now).await }
+    async fn expire_node_dispatch(&self, command: FailStateMachineNodeAttempt) -> ServiceResult<bool> { self.expire_dispatch(command).await }
+    async fn release_node_dispatch(&self, claim: &StateMachineDispatchClaim) -> ServiceResult<bool> { self.release_dispatch(claim).await }
+    async fn supersede_inactive_node_dispatches(&self, run: &str) -> ServiceResult<()> { self.supersede_dispatches(run).await }
+
+    async fn save_run_opening(&self, payload: bcs_service_api::StateMachineOpeningPayload) -> ServiceResult<bool> {
+        self.save_opening(payload).await
+    }
+    async fn get_run_opening(&self, run: &str) -> ServiceResult<Option<bcs_service_api::StateMachineOpeningCheckpoint>> {
+        self.get_opening(run).await
+    }
+    async fn mark_run_opening_delivered(&self, run: &str, at: u64) -> ServiceResult<bool> {
+        self.deliver_opening(run, at).await
+    }
+
+    async fn begin_node_judging(&self, run: &str, node: &str, attempt: i32, artifact: String, responder: Option<String>) -> ServiceResult<bool> {
+        self.begin_judging(run, node, attempt, artifact, responder).await
+    }
+    async fn claim_node_judging(&self, run: &str, node: &str, attempt: i32, owner: String, now: u64, until: u64) -> ServiceResult<Option<bcs_service_api::StateMachineJudgeClaim>> {
+        self.claim_judging(run, node, attempt, owner, now, until).await
+    }
+    async fn release_node_judging(&self, claim: &bcs_service_api::StateMachineJudgeClaim) -> ServiceResult<bool> {
+        self.release_judging(claim).await
+    }
+
     async fn commit_eventful_transition(
         &self,
         transition: StateMachineEventfulTransition,
     ) -> ServiceResult<bool> {
-        let event_store = self
-            .event_store
-            .as_ref()
-            .ok_or_else(|| ServiceError::InvalidOperation {
-                message: "Eventful Memory state-machine transition requires the shared Memory Event Store"
-                    .to_string(),
-                request_id: None,
-            })?;
         let mut inner = self.inner.write().await;
         let mut candidate = inner.clone();
         if !apply_memory_state_machine_transition(&mut candidate, &transition)? {
             return Ok(false);
         }
         let events = state_machine_transition_events(&transition);
+        if events.is_empty() {
+            *inner = candidate;
+            return Ok(true);
+        }
+        let event_store = self.event_store.as_ref().ok_or_else(|| ServiceError::InvalidOperation {
+            message: "Eventful Memory state-machine transition requires the shared Memory Event Store".into(), request_id: None,
+        })?;
         event_store
             .commit_business_mutations(&events, || {
                 *inner = candidate;
@@ -487,6 +589,24 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         Ok(inner.runs.get(run_id).cloned())
     }
 
+    async fn list_running_runs(&self, after_run_id: Option<&str>, limit: usize) -> ServiceResult<Vec<StateMachineRun>> {
+        let inner = self.inner.read().await;
+        Ok(inner.runs.range::<str, _>((
+            after_run_id.map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded),
+            std::ops::Bound::Unbounded,
+        )).filter(|(_, run)| run.status == StateMachineRunStatus::Running)
+            .take(limit).map(|(_, run)| run.clone()).collect())
+    }
+
+    async fn list_pending_runs(&self, after_run_id: Option<&str>, limit: usize) -> ServiceResult<Vec<StateMachineRun>> {
+        let inner = self.inner.read().await;
+        Ok(inner.runs.range::<str, _>((
+            after_run_id.map_or(std::ops::Bound::Unbounded, std::ops::Bound::Excluded),
+            std::ops::Bound::Unbounded,
+        )).filter(|(_, run)| run.status == StateMachineRunStatus::Pending)
+            .take(limit).map(|(_, run)| run.clone()).collect())
+    }
+
     async fn get_run_by_session_id(
         &self,
         session_id: &str,
@@ -571,6 +691,7 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         node.timeout_deadline_ms = node
             .node_timeout_ms
             .map(|timeout_ms| started_at.saturating_add(timeout_ms));
+        inner.node_failure_actions.remove(&(run_id.to_string(), node_id.to_string()));
         Ok(())
     }
 
@@ -624,6 +745,7 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         if !run_is_running(&inner, run_id)? {
             return Ok(false);
         }
+        if judge::is_judging(&inner, run_id, node_id, attempt) { return Ok(false); }
         let node = node_mut(&mut inner, run_id, node_id)?;
         if node.status != StateMachineNodeStatus::Running || node.attempt != attempt {
             return Ok(false);
@@ -679,6 +801,7 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         if !run_is_running(&inner, run_id)? {
             return Ok(false);
         }
+        if judge::is_judging(&inner, run_id, node_id, attempt) { return Ok(false); }
         let node = node_mut(&mut inner, run_id, node_id)?;
         if node.status != StateMachineNodeStatus::Running || node.attempt != attempt {
             return Ok(false);
@@ -700,6 +823,7 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         if !run_is_running(&inner, run_id)? {
             return Ok(false);
         }
+        if judge::is_judging(&inner, run_id, node_id, attempt) { return Ok(false); }
         let node = node_mut(&mut inner, run_id, node_id)?;
         if node.status != StateMachineNodeStatus::Running || node.attempt != attempt {
             return Ok(false);
@@ -735,7 +859,34 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         node.status = StateMachineNodeStatus::Failed;
         node.error = Some(error);
         node.completed_at = Some(completed_at);
+        node.timeout_deadline_ms = None;
+        inner.node_failure_actions.remove(&(run_id.to_string(), node_id.to_string()));
         Ok(true)
+    }
+
+    async fn fail_node_attempt_with_action(&self, command: FailStateMachineNodeAttempt) -> ServiceResult<bool> {
+        let mut inner = self.inner.write().await;
+        if !run_is_running(&inner, &command.run_id)? { return Ok(false); }
+        let node = node_mut(&mut inner, &command.run_id, &command.node_id)?;
+        if node.status != StateMachineNodeStatus::Running || node.attempt != command.attempt { return Ok(false); }
+        if command.action == StateMachineFailureAction::Retry
+            && !retry_is_within_limit(node.attempt, node.max_attempts)
+        {
+            return Ok(false);
+        }
+        node.status = StateMachineNodeStatus::Failed;
+        node.error = Some(command.error);
+        node.completed_at = Some(command.completed_at_ms);
+        node.timeout_deadline_ms = None;
+        inner.node_failure_actions.insert((command.run_id, command.node_id), command.action);
+        Ok(true)
+    }
+
+    async fn get_node_attempt_failure(&self, run_id: &str, node_id: &str, attempt: i32) -> ServiceResult<Option<StateMachineNodeAttemptFailure>> {
+        let inner = self.inner.read().await;
+        let key = (run_id.to_string(), node_id.to_string());
+        Ok(inner.nodes.get(&key).filter(|node| node.status == StateMachineNodeStatus::Failed && node.attempt == attempt)
+            .map(|node| StateMachineNodeAttemptFailure { node: node.clone(), action: inner.node_failure_actions.get(&key).copied() }))
     }
 
     async fn schedule_node_retry(
@@ -749,6 +900,8 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         if !run_is_running(&inner, run_id)? {
             return Ok(false);
         }
+        let key = (run_id.to_string(), node_id.to_string());
+        if inner.node_failure_actions.get(&key) == Some(&StateMachineFailureAction::FailRun) { return Ok(false); }
         let node = node_mut(&mut inner, run_id, node_id)?;
         if node.status != StateMachineNodeStatus::Failed || node.attempt != failed_attempt {
             return Ok(false);
@@ -764,6 +917,7 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         node.started_at = None;
         node.completed_at = None;
         node.timeout_deadline_ms = None;
+        inner.node_failure_actions.remove(&key);
         Ok(true)
     }
 
@@ -773,11 +927,12 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
             return Ok(false);
         }
         let node = node_mut(&mut inner, run_id, node_id)?;
-        if node.status != StateMachineNodeStatus::Pending {
+        if !matches!(node.status, StateMachineNodeStatus::Pending | StateMachineNodeStatus::Ready | StateMachineNodeStatus::RetryScheduled) {
             return Ok(false);
         }
         node.status = StateMachineNodeStatus::Skipped;
         node.completed_at = Some(skipped_at);
+        node.timeout_deadline_ms = None;
         Ok(true)
     }
 
@@ -951,6 +1106,7 @@ fn state_machine_transition_events(
     transition: &StateMachineEventfulTransition,
 ) -> Vec<bcs_service_api::port::repo::AppendEventRecord> {
     match transition {
+        StateMachineEventfulTransition::FinishJudge(command) => command.event.iter().cloned().collect(),
         StateMachineEventfulTransition::StartRun { events, .. } => events.clone(),
         StateMachineEventfulTransition::StartBotNode { event, .. }
         | StateMachineEventfulTransition::StartHumanNode { event, .. }
@@ -965,6 +1121,7 @@ fn apply_memory_state_machine_transition(
     transition: &StateMachineEventfulTransition,
 ) -> ServiceResult<bool> {
     match transition {
+        StateMachineEventfulTransition::FinishJudge(command) => judge::finish_memory(inner, command),
         StateMachineEventfulTransition::StartRun {
             run_id,
             started_at_ms,
@@ -1053,6 +1210,7 @@ fn apply_memory_state_machine_transition(
             if !run_is_running(inner, run_id)? {
                 return Ok(false);
             }
+            if judge::is_judging(inner, run_id, node_id, *attempt) { return Ok(false); }
             let node = node_mut(inner, run_id, node_id)?;
             if node.status != StateMachineNodeStatus::Running || node.attempt != *attempt {
                 return Ok(false);
@@ -1076,6 +1234,8 @@ fn apply_memory_state_machine_transition(
             if !run_is_running(inner, run_id)? {
                 return Ok(false);
             }
+            let key = (run_id.clone(), node_id.clone());
+            if inner.node_failure_actions.get(&key) == Some(&StateMachineFailureAction::FailRun) { return Ok(false); }
             let node = node_mut(inner, run_id, node_id)?;
             if node.status != StateMachineNodeStatus::Failed || node.attempt != *failed_attempt {
                 return Ok(false);
@@ -1089,6 +1249,7 @@ fn apply_memory_state_machine_transition(
             node.started_at = None;
             node.completed_at = None;
             node.timeout_deadline_ms = None;
+            inner.node_failure_actions.remove(&key);
             Ok(true)
         }
         StateMachineEventfulTransition::CompleteRun {
@@ -1434,7 +1595,13 @@ impl StateMachineDefinitionRepoPort for MySqlCollaborationStore {
         group_version: i32,
         definition: &CollaborationDefinition,
         resolved_participant_bindings: Option<&BTreeMap<String, ResolvedParticipantBinding>>,
+        execution_plan: Option<&StateMachineExecutionPlanSnapshot>,
     ) -> ServiceResult<()> {
+        validate_snapshot_envelope(definition, execution_plan)?;
+        let execution_plan_json = execution_plan
+            .map(|snapshot| serde_json::to_string(&snapshot.plan))
+            .transpose()
+            .map_err(|error| ServiceError::InternalError(format!("execution plan json: {error}")))?;
         let snapshot_json = definition_json(definition)?;
         let content_hash = sha256_hex(snapshot_json.as_bytes());
         let resolved_participant_bindings_json = match resolved_participant_bindings {
@@ -1452,8 +1619,9 @@ impl StateMachineDefinitionRepoPort for MySqlCollaborationStore {
             "INSERT INTO bcs_state_machine_definition_snapshots \
              (env, run_id, group_id, session_id, group_version, \
               definition_id, definition_version, definition_content_hash, \
-              snapshot_blob_id, snapshot_json, resolved_participant_bindings_json, source_format) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'json') \
+              snapshot_blob_id, snapshot_json, resolved_participant_bindings_json, source_format, \
+              execution_plan_json, execution_plan_content_hash, execution_plan_compiler_version) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'json', ?, ?, ?) \
              {snapshot_upsert}"
         );
         self.db
@@ -1470,6 +1638,9 @@ impl StateMachineDefinitionRepoPort for MySqlCollaborationStore {
                     DbValue::from(content_hash.as_str()),
                     DbValue::from(snapshot_json.as_str()),
                     DbValue::from(resolved_participant_bindings_json.as_deref()),
+                    DbValue::from(execution_plan_json.as_deref()),
+                    DbValue::from(execution_plan.map(|snapshot| snapshot.content_hash.as_str())),
+                    DbValue::from(execution_plan.map(|snapshot| snapshot.compiler_version.as_str())),
                 ],
             ))
             .await
@@ -1482,8 +1653,9 @@ impl StateMachineDefinitionRepoPort for MySqlCollaborationStore {
     async fn get_run_snapshot(
         &self,
         run_id: &str,
-    ) -> ServiceResult<Option<CollaborationDefinition>> {
-        let sql = "SELECT snapshot_json \
+    ) -> ServiceResult<Option<StateMachineRunSnapshot>> {
+        let sql = "SELECT snapshot_json, resolved_participant_bindings_json, execution_plan_json, \
+                          execution_plan_content_hash, execution_plan_compiler_version \
                    FROM bcs_state_machine_definition_snapshots \
                    WHERE env = ? AND run_id = ? \
                    LIMIT 1";
@@ -1502,12 +1674,33 @@ impl StateMachineDefinitionRepoPort for MySqlCollaborationStore {
         };
         let snapshot_json: Option<String> = db_get_column_opt(&row, "snapshot_json")
             .map_err(|error| ServiceError::InternalError(format!("snapshot_json: {error}")))?;
-        match snapshot_json {
-            Some(raw) if !raw.is_empty() => serde_json::from_str(&raw).map(Some).map_err(|error| {
+        let raw_plan: Option<String> = snapshot_column(&row, "execution_plan_json")?;
+        let content_hash: Option<String> = snapshot_column(&row, "execution_plan_content_hash")?;
+        let compiler_version: Option<String> = snapshot_column(&row, "execution_plan_compiler_version")?;
+        let definition: CollaborationDefinition = match snapshot_json {
+            Some(raw) if !raw.is_empty() => serde_json::from_str(&raw).map_err(|error| {
                 ServiceError::InternalError(format!("definition snapshot parse: {error}"))
-            }),
-            _ => Ok(None),
-        }
+            })?,
+            _ if raw_plan.is_none() && content_hash.is_none() && compiler_version.is_none() => return Ok(None),
+            _ => return Err(ServiceError::InternalError("definition snapshot JSON is missing".into())),
+        };
+        let execution_plan = match (raw_plan, content_hash, compiler_version) {
+            (None, None, None) => None,
+            (Some(raw), Some(content_hash), Some(compiler_version)) => {
+                let plan = serde_json::from_str(&raw).map_err(|error| {
+                    ServiceError::InternalError(format!("execution plan snapshot parse: {error}"))
+                })?;
+                Some(StateMachineExecutionPlanSnapshot { plan, content_hash, compiler_version })
+            }
+            _ => return Err(ServiceError::InternalError("incomplete execution plan snapshot".into())),
+        };
+        validate_snapshot_envelope(&definition, execution_plan.as_ref())?;
+        let bindings_json: Option<String> = snapshot_column(&row, "resolved_participant_bindings_json")?;
+        let resolved_participant_bindings = bindings_json
+            .map(|raw| serde_json::from_str(&raw))
+            .transpose()
+            .map_err(|error| ServiceError::InternalError(format!("snapshot participant bindings: {error}")))?;
+        Ok(Some(StateMachineRunSnapshot { definition, execution_plan, resolved_participant_bindings }))
     }
 }
 
@@ -1785,6 +1978,57 @@ impl GroupRuntimeBindingRepoPort for MySqlCollaborationStore {
 
 #[async_trait]
 impl StateMachineRunRepoPort for MySqlCollaborationStore {
+    async fn list_terminal_runs_for_cleanup(&self, after: Option<&str>, limit: usize) -> ServiceResult<Vec<String>> { self.terminal_cleanup_candidates(after, limit).await }
+    async fn cleanup_terminal_run_checkpoints(&self, run: &str, limit: usize) -> ServiceResult<usize> { self.cleanup_terminal_work(run, limit).await }
+    async fn fail_missing_startup(&self, command: bcs_service_api::FailStateMachineStartup) -> ServiceResult<bool> { self.fail_startup_gap(command).await }
+    async fn get_startup_failure(&self, run: &str) -> ServiceResult<Option<bcs_service_api::StateMachineStartupFailure>> { self.startup_failure(run).await }
+    async fn fail_missing_dispatch(&self, run: &str, node: &str, attempt: i32, now: u64) -> ServiceResult<bool> { self.fail_dispatch_gap(run, node, attempt, now).await }
+
+    async fn save_terminal_im(&self, payload: bcs_service_api::StateMachineTerminalImPayload) -> ServiceResult<bool> { self.save_terminal_notification(payload).await }
+    async fn get_terminal_im(&self, run: &str) -> ServiceResult<Option<bcs_service_api::StateMachineTerminalImCheckpoint>> { self.get_terminal_notification(run).await }
+    async fn list_terminal_im_pending(&self, after: Option<&str>, limit: usize) -> ServiceResult<Vec<String>> { self.list_terminal_notifications(after, limit).await }
+    async fn claim_terminal_im(&self, run: &str, owner: String, now: u64, until: u64) -> ServiceResult<Option<bcs_service_api::StateMachineTerminalImClaim>> { self.claim_terminal_notification(run, owner, now, until).await }
+    async fn update_terminal_im_progress(&self, claim: &bcs_service_api::StateMachineTerminalImClaim, expected: bcs_service_api::StateMachineTerminalImProgress, next: bcs_service_api::StateMachineTerminalImProgress, now: u64) -> ServiceResult<bool> { self.update_terminal_notification(claim, expected, next, now).await }
+    async fn release_terminal_im(&self, claim: &bcs_service_api::StateMachineTerminalImClaim) -> ServiceResult<bool> { self.release_terminal_notification(claim).await }
+    async fn supersede_terminal_im(&self, run: &str) -> ServiceResult<bool> { self.supersede_terminal_notification(run).await }
+
+    async fn save_chat_result(&self, payload: bcs_service_api::StateMachineChatResultPayload) -> ServiceResult<bool> { self.save_publication(payload).await }
+    async fn get_chat_result(&self, run: &str) -> ServiceResult<Option<bcs_service_api::StateMachineChatResultCheckpoint>> { self.get_publication(run).await }
+    async fn claim_chat_result(&self, run: &str, owner: String, now: u64, until: u64) -> ServiceResult<Option<bcs_service_api::StateMachineChatResultClaim>> { self.claim_publication(run, owner, now, until).await }
+    async fn begin_chat_result_send(&self, claim: &bcs_service_api::StateMachineChatResultClaim, now: u64) -> ServiceResult<bool> { self.begin_publication(claim, now).await }
+    async fn finish_chat_result(&self, claim: &bcs_service_api::StateMachineChatResultClaim, outcome: bcs_service_api::StateMachineChatResultOutcome, now: u64) -> ServiceResult<bool> { self.finish_publication(claim, outcome, now).await }
+    async fn expire_chat_result(&self, run: &str, now: u64) -> ServiceResult<bool> { self.expire_publication(run, now).await }
+    async fn release_chat_result(&self, claim: &bcs_service_api::StateMachineChatResultClaim) -> ServiceResult<bool> { self.release_publication(claim).await }
+
+    async fn save_node_dispatch(&self, payload: StateMachineDispatchPayload) -> ServiceResult<bool> { self.save_dispatch(payload).await }
+    async fn get_node_dispatch(&self, run: &str, node: &str, attempt: i32) -> ServiceResult<Option<StateMachineDispatchCheckpoint>> { self.get_dispatch(run, node, attempt).await }
+    async fn claim_node_dispatch(&self, run: &str, node: &str, attempt: i32, owner: String, now: u64, until: u64) -> ServiceResult<Option<StateMachineDispatchClaim>> { self.claim_dispatch(run, node, attempt, owner, now, until).await }
+    async fn begin_node_dispatch_send(&self, claim: &StateMachineDispatchClaim, now: u64) -> ServiceResult<bool> { self.begin_dispatch_send(claim, now).await }
+    async fn finish_node_dispatch(&self, claim: &StateMachineDispatchClaim, result: StateMachineDispatchResult, now: u64) -> ServiceResult<bool> { self.finish_dispatch(claim, result, now).await }
+    async fn expire_node_dispatch(&self, command: FailStateMachineNodeAttempt) -> ServiceResult<bool> { self.expire_dispatch(command).await }
+    async fn release_node_dispatch(&self, claim: &StateMachineDispatchClaim) -> ServiceResult<bool> { self.release_dispatch(claim).await }
+    async fn supersede_inactive_node_dispatches(&self, run: &str) -> ServiceResult<()> { self.supersede_dispatches(run).await }
+
+    async fn save_run_opening(&self, payload: bcs_service_api::StateMachineOpeningPayload) -> ServiceResult<bool> {
+        self.save_opening(payload).await
+    }
+    async fn get_run_opening(&self, run: &str) -> ServiceResult<Option<bcs_service_api::StateMachineOpeningCheckpoint>> {
+        self.get_opening(run).await
+    }
+    async fn mark_run_opening_delivered(&self, run: &str, at: u64) -> ServiceResult<bool> {
+        self.deliver_opening(run, at).await
+    }
+
+    async fn begin_node_judging(&self, run: &str, node: &str, attempt: i32, artifact: String, responder: Option<String>) -> ServiceResult<bool> {
+        self.begin_judging(run, node, attempt, artifact, responder).await
+    }
+    async fn claim_node_judging(&self, run: &str, node: &str, attempt: i32, owner: String, now: u64, until: u64) -> ServiceResult<Option<bcs_service_api::StateMachineJudgeClaim>> {
+        self.claim_judging(run, node, attempt, owner, now, until).await
+    }
+    async fn release_node_judging(&self, claim: &bcs_service_api::StateMachineJudgeClaim) -> ServiceResult<bool> {
+        self.release_judging(claim).await
+    }
+
     async fn commit_eventful_transition(
         &self,
         transition: StateMachineEventfulTransition,
@@ -1796,6 +2040,9 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         let mut steps = Vec::new();
         let events = state_machine_transition_events(&transition);
         match &transition {
+            StateMachineEventfulTransition::FinishJudge(command) => {
+                steps.extend(judge::finish_sql(self, command)?);
+            }
             StateMachineEventfulTransition::StartRun {
                 run_id,
                 started_at_ms,
@@ -1857,7 +2104,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 steps.push(DbTransactionStep::Execute(
                     DbStatement::with_transaction_params(
                         format!(
-                            "UPDATE bcs_state_machine_node_runs SET status = 'running', \
+                            "UPDATE bcs_state_machine_node_runs SET status = 'running', runtime_phase = 'dispatch_pending', \
                              delivery_request_id = ?, bot_delivery_run_id = NULL, outcome = NULL, \
                              responded_by = NULL, artifact_text = NULL, error_message = NULL, \
                              started_at_ms = ?, completed_at_ms = NULL, \
@@ -1935,7 +2182,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                     format!(
                         "SELECT n.run_id, n.node_id FROM bcs_state_machine_node_runs n \
                          WHERE n.env = ? AND n.run_id = ? AND n.node_id = ? AND n.attempt = ? \
-                           AND n.status = 'running' AND n.record_status = 'active' AND EXISTS ( \
+                           AND n.status = 'running' AND (n.runtime_phase IS NULL OR n.runtime_phase IN ('dispatch_pending', 'waiting_provider')) AND n.record_status = 'active' AND EXISTS ( \
                              SELECT 1 FROM bcs_state_machine_runs r \
                              WHERE r.env = n.env AND r.run_id = n.run_id \
                                AND r.status = 'running' AND r.record_status = 'active' \
@@ -1951,7 +2198,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                 steps.push(DbTransactionStep::Execute(
                     DbStatement::with_transaction_params(
                         format!(
-                            "UPDATE bcs_state_machine_node_runs SET status = 'completed', \
+                            "UPDATE bcs_state_machine_node_runs SET status = 'completed', runtime_phase = NULL, \
                              outcome = ?, responded_by = ?, artifact_text = ?, error_message = NULL, \
                              completed_at_ms = ?, timeout_deadline_ms = NULL, {} \
                              WHERE env = ? AND run_id = ? AND node_id = ? AND attempt = ? \
@@ -1982,7 +2229,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                     format!(
                         "SELECT n.run_id, n.node_id FROM bcs_state_machine_node_runs n \
                          WHERE n.env = ? AND n.run_id = ? AND n.node_id = ? AND n.attempt = ? \
-                           AND n.status = 'failed' AND n.record_status = 'active' AND EXISTS ( \
+                           AND n.status = 'failed' AND (n.failure_action IS NULL OR n.failure_action = 'retry') AND n.record_status = 'active' AND EXISTS ( \
                              SELECT 1 FROM bcs_state_machine_runs r \
                              WHERE r.env = n.env AND r.run_id = n.run_id \
                                AND r.status = 'running' AND r.record_status = 'active' \
@@ -2000,10 +2247,10 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                         format!(
                             "UPDATE bcs_state_machine_node_runs SET status = 'retry_scheduled', \
                              attempt = ?, delivery_request_id = NULL, bot_delivery_run_id = NULL, \
-                             artifact_text = NULL, error_message = NULL, started_at_ms = NULL, \
+                             artifact_text = NULL, error_message = NULL, failure_action = NULL, runtime_phase = NULL, recovery_lease_owner = NULL, recovery_lease_until_ms = NULL, started_at_ms = NULL, \
                              completed_at_ms = NULL, timeout_deadline_ms = NULL, {} \
                              WHERE env = ? AND run_id = ? AND node_id = ? AND attempt = ? \
-                               AND status = 'failed' AND record_status = 'active'",
+                               AND status = 'failed' AND (failure_action IS NULL OR failure_action = 'retry') AND record_status = 'active'",
                             self.flavor.set_modified_now()
                         ),
                         vec![
@@ -2255,14 +2502,17 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         let snapshot_sql = "INSERT INTO bcs_state_machine_definition_snapshots \
                             (env, run_id, group_id, session_id, group_version, definition_id, \
                              definition_version, definition_content_hash, snapshot_blob_id, \
-                             snapshot_json, resolved_participant_bindings_json, source_format) \
+                             snapshot_json, resolved_participant_bindings_json, source_format, \
+                             execution_plan_json, execution_plan_content_hash, execution_plan_compiler_version) \
                             SELECT source_snapshot.env, ?, source_snapshot.group_id, \
                                    source_snapshot.session_id, source_snapshot.group_version, \
                                    source_snapshot.definition_id, source_snapshot.definition_version, \
                                    source_snapshot.definition_content_hash, source_snapshot.snapshot_blob_id, \
                                    source_snapshot.snapshot_json, \
                                    source_snapshot.resolved_participant_bindings_json, \
-                                   source_snapshot.source_format \
+                                   source_snapshot.source_format, source_snapshot.execution_plan_json, \
+                                   source_snapshot.execution_plan_content_hash, \
+                                   source_snapshot.execution_plan_compiler_version \
                             FROM bcs_state_machine_definition_snapshots source_snapshot \
                             WHERE source_snapshot.env = ? AND source_snapshot.run_id = ? \
                               AND EXISTS (SELECT 1 FROM bcs_state_machine_runs \
@@ -2376,6 +2626,34 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             .next()
             .map(row_to_state_machine_run)
             .transpose()
+    }
+
+    async fn list_running_runs(&self, after_run_id: Option<&str>, limit: usize) -> ServiceResult<Vec<StateMachineRun>> {
+        if limit == 0 { return Ok(Vec::new()); }
+        let sql = format!(
+            "SELECT {SM_RUN_SELECT_COLS} FROM bcs_state_machine_runs \
+             WHERE env = ? AND status = 'running' AND record_status = 'active' \
+               AND run_id > ? ORDER BY run_id ASC LIMIT ?"
+        );
+        self.db.query(DbStatement::with_params(sql, vec![
+            DbValue::from(self.env.as_str()), DbValue::from(after_run_id.unwrap_or("")),
+            DbValue::from(limit as u64),
+        ])).await.map_err(|error| ServiceError::InternalError(format!("state machine progression candidates: {error}")))?
+            .into_iter().map(row_to_state_machine_run).collect()
+    }
+
+    async fn list_pending_runs(&self, after_run_id: Option<&str>, limit: usize) -> ServiceResult<Vec<StateMachineRun>> {
+        if limit == 0 { return Ok(Vec::new()); }
+        let sql = format!(
+            "SELECT {SM_RUN_SELECT_COLS} FROM bcs_state_machine_runs \
+             WHERE env = ? AND status = 'pending' AND record_status = 'active' \
+               AND run_id > ? ORDER BY run_id ASC LIMIT ?"
+        );
+        self.db.query(DbStatement::with_params(sql, vec![
+            DbValue::from(self.env.as_str()), DbValue::from(after_run_id.unwrap_or("")),
+            DbValue::from(limit as u64),
+        ])).await.map_err(|error| ServiceError::InternalError(format!("state machine progression candidates: {error}")))?
+            .into_iter().map(row_to_state_machine_run).collect()
     }
 
     async fn get_run_by_session_id(
@@ -2494,7 +2772,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
              SET status = 'running', attempt = ?, delivery_request_id = ?, \
                  bot_delivery_run_id = NULL, outcome = NULL, responded_by = NULL, \
                  artifact_text = NULL, \
-                 error_message = NULL, started_at_ms = ?, completed_at_ms = NULL, \
+                 error_message = NULL, failure_action = NULL, started_at_ms = ?, completed_at_ms = NULL, \
                  timeout_deadline_ms = CASE \
                    WHEN node_timeout_ms IS NULL THEN NULL \
                    ELSE ? + node_timeout_ms \
@@ -2535,7 +2813,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         let sql = match self.flavor {
             DbSqlFlavor::Mysql => format!(
                 "UPDATE bcs_state_machine_node_runs n \
-                 SET n.status = 'running', n.delivery_request_id = ?, \
+                 SET n.status = 'running', n.runtime_phase = 'dispatch_pending', n.delivery_request_id = ?, \
                      n.bot_delivery_run_id = NULL, n.outcome = NULL, \
                      n.responded_by = NULL, n.artifact_text = NULL, \
                      n.error_message = NULL, n.started_at_ms = ?, n.completed_at_ms = NULL, \
@@ -2556,7 +2834,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             ),
             DbSqlFlavor::Sqlite => format!(
                 "UPDATE bcs_state_machine_node_runs \
-                 SET status = 'running', delivery_request_id = ?, \
+                 SET status = 'running', runtime_phase = 'dispatch_pending', delivery_request_id = ?, \
                      bot_delivery_run_id = NULL, outcome = NULL, responded_by = NULL, \
                      artifact_text = NULL, \
                      error_message = NULL, started_at_ms = ?, completed_at_ms = NULL, \
@@ -2610,11 +2888,11 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
     ) -> ServiceResult<bool> {
         let sql = format!(
             "UPDATE bcs_state_machine_node_runs \
-             SET status = 'completed', outcome = ?, responded_by = ?, artifact_text = ?, \
+             SET status = 'completed', runtime_phase = NULL, outcome = ?, responded_by = ?, artifact_text = ?, \
                  error_message = NULL, \
                  completed_at_ms = ?, timeout_deadline_ms = NULL, {} \
              WHERE env = ? AND run_id = ? AND node_id = ? \
-               AND attempt = ? AND status = 'running' \
+               AND attempt = ? AND status = 'running' AND (runtime_phase IS NULL OR runtime_phase IN ('dispatch_pending', 'waiting_provider')) \
                AND record_status = 'active' \
                AND EXISTS ( \
                  SELECT 1 FROM bcs_state_machine_runs r \
@@ -2700,7 +2978,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             "UPDATE bcs_state_machine_node_runs \
              SET artifact_text = ?, error_message = NULL, {} \
              WHERE env = ? AND run_id = ? AND node_id = ? \
-               AND attempt = ? AND status = 'running' \
+               AND attempt = ? AND status = 'running' AND (runtime_phase IS NULL OR runtime_phase IN ('dispatch_pending', 'waiting_provider')) \
                AND record_status = 'active' \
                AND EXISTS ( \
                  SELECT 1 FROM bcs_state_machine_runs r \
@@ -2743,7 +3021,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             "UPDATE bcs_state_machine_node_runs \
              SET artifact_text = ?, responded_by = ?, error_message = NULL, {} \
              WHERE env = ? AND run_id = ? AND node_id = ? \
-               AND attempt = ? AND status = 'running' AND artifact_text IS NULL \
+               AND attempt = ? AND status = 'running' AND runtime_phase IS NULL AND artifact_text IS NULL \
                AND record_status = 'active' \
                AND EXISTS ( \
                  SELECT 1 FROM bcs_state_machine_runs r \
@@ -2773,7 +3051,12 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         if result.affected_rows > 0 {
             return Ok(true);
         }
-        let Some(node) = self.get_node_run(run_id, node_id).await? else {
+        let rows = self.db.query(DbStatement::with_params(format!(
+            "SELECT {SM_NODE_SELECT_COLS} FROM bcs_state_machine_node_runs WHERE env = ? AND run_id = ? AND node_id = ? AND runtime_phase IS NULL AND record_status = 'active' \
+             AND EXISTS (SELECT 1 FROM bcs_state_machine_runs r WHERE r.env = bcs_state_machine_node_runs.env AND r.run_id = bcs_state_machine_node_runs.run_id AND r.status = 'running' AND r.record_status = 'active')"),
+            vec![DbValue::from(self.env.as_str()), DbValue::from(run_id), DbValue::from(node_id)],
+        )).await.map_err(|error| ServiceError::InternalError(format!("human response replay: {error}")))?;
+        let Some(node) = rows.into_iter().next().map(row_to_state_machine_node_run).transpose()? else {
             return Ok(false);
         };
         Ok(node.status == StateMachineNodeStatus::Running
@@ -2793,7 +3076,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         let sql = format!(
             "UPDATE bcs_state_machine_node_runs \
              SET status = 'failed', error_message = ?, completed_at_ms = ?, \
-                 timeout_deadline_ms = NULL, {} \
+                 timeout_deadline_ms = NULL, failure_action = NULL, {} \
              WHERE env = ? AND run_id = ? AND node_id = ? \
                AND attempt = ? AND status = 'running' \
                AND record_status = 'active' \
@@ -2825,6 +3108,46 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         Ok(result.affected_rows > 0)
     }
 
+    async fn fail_node_attempt_with_action(&self, command: FailStateMachineNodeAttempt) -> ServiceResult<bool> {
+        let action = failure_action_name(command.action);
+        let sql = format!(
+            "UPDATE bcs_state_machine_node_runs SET status = 'failed', error_message = ?, \
+             completed_at_ms = ?, failure_action = ?, timeout_deadline_ms = NULL, {} \
+             WHERE env = ? AND run_id = ? AND node_id = ? AND attempt = ? AND status = 'running' \
+               AND record_status = 'active' \
+               AND (? = 'fail_run' OR (attempt >= 0 AND attempt < CASE WHEN max_attempts > 0 THEN max_attempts ELSE 1 END - 1)) \
+               AND EXISTS (SELECT 1 FROM bcs_state_machine_runs r \
+                 WHERE r.env = bcs_state_machine_node_runs.env AND r.run_id = bcs_state_machine_node_runs.run_id \
+                   AND r.status = 'running' AND r.record_status = 'active')",
+            self.flavor.set_modified_now(),
+        );
+        let result = self.db.execute(DbStatement::with_params(sql, vec![
+            DbValue::from(command.error), DbValue::from(command.completed_at_ms), DbValue::from(action),
+            DbValue::from(self.env.as_str()), DbValue::from(command.run_id), DbValue::from(command.node_id),
+            DbValue::from(command.attempt), DbValue::from(action),
+        ])).await.map_err(|error| ServiceError::InternalError(format!("state machine node failure action: {error}")))?;
+        Ok(result.affected_rows > 0)
+    }
+
+    async fn get_node_attempt_failure(&self, run_id: &str, node_id: &str, attempt: i32) -> ServiceResult<Option<StateMachineNodeAttemptFailure>> {
+        let sql = format!("SELECT {SM_NODE_SELECT_COLS}, failure_action FROM bcs_state_machine_node_runs \
+            WHERE env = ? AND run_id = ? AND node_id = ? AND attempt = ? AND status = 'failed' AND record_status = 'active' LIMIT 1");
+        let rows = self.db.query(DbStatement::with_params(sql, vec![DbValue::from(self.env.as_str()),
+            DbValue::from(run_id), DbValue::from(node_id), DbValue::from(attempt),
+        ])).await.map_err(|error| ServiceError::InternalError(format!("state machine node failure read: {error}")))?;
+        rows.into_iter().next().map(|row| {
+            let action = match db_get_column_opt::<String>(&row, "failure_action")
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?.as_deref()
+            {
+                None => None,
+                Some("retry") => Some(StateMachineFailureAction::Retry),
+                Some("fail_run") => Some(StateMachineFailureAction::FailRun),
+                Some(_) => return Err(ServiceError::InternalError("unknown persisted node failure action".into())),
+            };
+            Ok(StateMachineNodeAttemptFailure { node: row_to_state_machine_node_run(row)?, action })
+        }).transpose()
+    }
+
     async fn schedule_node_retry(
         &self,
         run_id: &str,
@@ -2836,11 +3159,11 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
             "UPDATE bcs_state_machine_node_runs \
              SET status = 'retry_scheduled', attempt = ?, \
                  delivery_request_id = NULL, bot_delivery_run_id = NULL, \
-                 artifact_text = NULL, error_message = NULL, started_at_ms = NULL, \
+                 artifact_text = NULL, error_message = NULL, failure_action = NULL, runtime_phase = NULL, recovery_lease_owner = NULL, recovery_lease_until_ms = NULL, started_at_ms = NULL, \
                  completed_at_ms = NULL, timeout_deadline_ms = NULL, \
                  {} \
              WHERE env = ? AND run_id = ? AND node_id = ? \
-               AND attempt = ? AND status = 'failed' \
+               AND attempt = ? AND status = 'failed' AND (failure_action IS NULL OR failure_action = 'retry') \
                AND record_status = 'active' \
                AND EXISTS ( \
                  SELECT 1 FROM bcs_state_machine_runs r \
@@ -2875,7 +3198,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
              SET status = 'skipped', completed_at_ms = ?, \
                  timeout_deadline_ms = NULL, {} \
              WHERE env = ? AND run_id = ? AND node_id = ? \
-               AND status = 'pending' AND record_status = 'active' \
+               AND status IN ('pending', 'ready', 'retry_scheduled') AND record_status = 'active' \
                AND EXISTS ( \
                  SELECT 1 FROM bcs_state_machine_runs r \
                  WHERE r.env = bcs_state_machine_node_runs.env \
@@ -3816,6 +4139,14 @@ fn node_mut<'a>(
         })
 }
 
+fn retry_is_within_limit(attempt: i32, max_attempts: i32) -> bool {
+    attempt >= 0 && attempt.checked_add(1).is_some_and(|next| next < max_attempts.max(1))
+}
+
+fn failure_action_name(action: StateMachineFailureAction) -> &'static str {
+    match action { StateMachineFailureAction::Retry => "retry", StateMachineFailureAction::FailRun => "fail_run" }
+}
+
 fn run_is_running(inner: &StoreInner, run_id: &str) -> ServiceResult<bool> {
     let run = inner.runs.get(run_id).ok_or_else(|| {
         ServiceError::InternalError(format!("state machine run not found: {run_id}"))
@@ -3945,6 +4276,9 @@ mod tests {
                 definition_content_hash TEXT NOT NULL,
                 snapshot_blob_id TEXT DEFAULT NULL,
                 snapshot_json TEXT DEFAULT NULL,
+                execution_plan_json TEXT DEFAULT NULL,
+                execution_plan_content_hash TEXT DEFAULT NULL,
+                execution_plan_compiler_version TEXT DEFAULT NULL,
                 resolved_participant_bindings_json TEXT DEFAULT NULL,
                 source_format TEXT NOT NULL DEFAULT 'yaml',
                 UNIQUE(env, run_id)
@@ -3970,6 +4304,7 @@ mod tests {
                 delivery_request_id TEXT DEFAULT NULL,
                 bot_delivery_run_id TEXT DEFAULT NULL,
                 artifact_text TEXT DEFAULT NULL,
+                runtime_phase TEXT DEFAULT NULL,
                 error_message TEXT DEFAULT NULL,
                 started_at_ms INTEGER DEFAULT NULL,
                 completed_at_ms INTEGER DEFAULT NULL,
@@ -4222,7 +4557,7 @@ runtime:
         };
         store.create_run(source.clone(), Vec::new()).await?;
         store
-            .save_run_snapshot(&source, 1, &definition, None)
+            .save_run_snapshot(&source, 1, &definition, None, None)
             .await?;
         let mut child = source.clone();
         child.run_id = "run-one-shot-child".to_string();
@@ -4310,7 +4645,7 @@ runtime:
             .create_run(completed_source.clone(), Vec::new())
             .await?;
         store
-            .save_run_snapshot(&completed_source, 1, &definition, None)
+            .save_run_snapshot(&completed_source, 1, &definition, None, None)
             .await?;
         let mut rejected_child = completed_source.clone();
         rejected_child.run_id = "run-completed-child".to_string();
@@ -4332,7 +4667,7 @@ runtime:
 
         store.create_run(source.clone(), Vec::new()).await?;
         store
-            .save_run_snapshot(&source, 1, &definition, None)
+            .save_run_snapshot(&source, 1, &definition, None, None)
             .await?;
 
         let mut child = source.clone();
@@ -4378,7 +4713,7 @@ runtime:
         source.updated_at = 4;
         store.create_run(source.clone(), Vec::new()).await?;
         store
-            .save_run_snapshot(&source, 1, &definition, None)
+            .save_run_snapshot(&source, 1, &definition, None, None)
             .await?;
         let mut other_child = child;
         other_child.run_id = "run-other-child".to_string();

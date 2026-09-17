@@ -34,6 +34,13 @@ async fn validation_contract_defaults_to_fail_closed() {
 }
 
 #[tokio::test]
+async fn progression_recovery_defaults_to_fail_closed() {
+    assert!(NoopCollaborationRuntimeService.recover_state_machine_progression(None, 32).await.is_err());
+    assert!(NoopCollaborationRuntimeService.recover_state_machine_sessions(None, 32).await.is_err());
+    assert!(NoopCollaborationRuntimeService.recover_state_machine_terminal_im(None, 32).await.is_err());
+}
+
+#[tokio::test]
 async fn session_state_machine_contract_defaults_to_fail_closed() {
     let service = NoopCollaborationRuntimeService;
 
@@ -224,7 +231,9 @@ fn validation_outcome_serializes_without_internal_definition() {
             assigned: true,
         }],
         graph: Some(CollaborationDefinitionGraphPreview {
+                loops: Default::default(),
             graph_mode: StateMachineGraphMode::Acyclic,
+            execution_graph_mode: None,
             nodes: vec![CollaborationDefinitionGraphNode {
                 node_id: "answer".to_string(),
                 display_name: "Answer".to_string(),
@@ -234,6 +243,7 @@ fn validation_outcome_serializes_without_internal_definition() {
                 }),
                 final_output: true,
                 judge: false,
+                execution: None,
             }],
             edges: Vec::new(),
         }),
@@ -303,4 +313,5 @@ async fn state_machine_result_publisher_preserves_chat_identity_and_scope() {
     assert_eq!(commands[0].session_id, "contract-group:00000001");
     assert_eq!(commands[0].sender_bot_id, "contract-initiator");
     assert_eq!(commands[0].content, "contract final result");
+    assert_eq!(commands[0].created_at_ms, 100);
 }

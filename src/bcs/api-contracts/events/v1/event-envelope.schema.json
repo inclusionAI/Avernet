@@ -494,6 +494,17 @@
         "duration_ms": { "$ref": "#/$defs/NonNegativeInteger" }
       }
     },
+    "StateMachineNodeExecutionMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["definition_node_id", "loop_id", "iteration", "max_iterations"],
+      "properties": {
+        "definition_node_id": { "$ref": "#/$defs/OpaqueId" },
+        "loop_id": { "$ref": "#/$defs/OpaqueId" },
+        "iteration": { "type": "integer", "minimum": 1 },
+        "max_iterations": { "type": "integer", "minimum": 1 }
+      }
+    },
     "StateMachineNodeStartedData": {
       "type": "object",
       "additionalProperties": false,
@@ -501,6 +512,7 @@
       "properties": {
         "run_id": { "$ref": "#/$defs/OpaqueId" },
         "node_id": { "$ref": "#/$defs/OpaqueId" },
+        "execution": { "$ref": "#/$defs/StateMachineNodeExecutionMetadata" },
         "attempt": { "$ref": "#/$defs/NonNegativeInteger" },
         "predecessor_node_ids": {
           "type": "array",
@@ -520,6 +532,7 @@
       "properties": {
         "run_id": { "$ref": "#/$defs/OpaqueId" },
         "node_id": { "$ref": "#/$defs/OpaqueId" },
+        "execution": { "$ref": "#/$defs/StateMachineNodeExecutionMetadata" },
         "attempt": { "$ref": "#/$defs/NonNegativeInteger" },
         "outcome": { "$ref": "#/$defs/ShortString" },
         "output": { "$ref": "#/$defs/ContentProjection" },
@@ -534,6 +547,7 @@
       "properties": {
         "run_id": { "$ref": "#/$defs/OpaqueId" },
         "node_id": { "$ref": "#/$defs/OpaqueId" },
+        "execution": { "$ref": "#/$defs/StateMachineNodeExecutionMetadata" },
         "attempt": { "$ref": "#/$defs/NonNegativeInteger" },
         "next_attempt": { "$ref": "#/$defs/NonNegativeInteger" },
         "max_attempts": { "$ref": "#/$defs/NonNegativeInteger" },

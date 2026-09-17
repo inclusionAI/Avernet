@@ -293,3 +293,25 @@ def test_full_fixtures_exclude_internal_reasoning_credentials_and_urls() -> None
         ]
         assert not exposed, f"{path.name} exposes forbidden keys: {sorted(exposed)}"
         assert not urls, f"{path.name} exposes URLs: {urls}"
+
+
+@pytest.mark.parametrize("event_name", ["started", "completed", "retry_scheduled"])
+def test_fixed_loop_events_share_complete_api_metadata(event_name, schema_registry):
+    import copy
+    import json
+
+    schema, registry = schema_registry
+    fixture = next(FIXTURE_ROOT.glob(f"state_machine.node.{event_name}.loop.*.json"))
+    event = _load_json(fixture)
+    api = json.loads((BCS_ROOT / "tests/fixtures/fixed_loop_api.json").read_text())
+    assert event["data"]["execution"] == api["node"]["execution"]
+    assert event["data"]["attempt"] != event["data"]["execution"]["iteration"]
+    validator = Draft202012Validator(schema, registry=registry)
+    validator.validate(event)
+    for field in ["definition_node_id", "loop_id", "iteration", "max_iterations"]:
+        invalid = copy.deepcopy(event)
+        del invalid["data"]["execution"][field]
+        assert list(validator.iter_errors(invalid)), field
+    legacy = copy.deepcopy(event)
+    del legacy["data"]["execution"]
+    validator.validate(legacy)

@@ -97,6 +97,40 @@ CollaborationDefinitionRuntimeActorAssignee:
       type: string
       minLength: 1
 
+StateMachineNodeExecutionMetadata:
+  type: object
+  additionalProperties: false
+  required: [definition_node_id, loop_id, iteration, max_iterations]
+  properties:
+    definition_node_id:
+      type: string
+      minLength: 1
+    loop_id:
+      type: string
+      minLength: 1
+    iteration:
+      type: integer
+      minimum: 1
+    max_iterations:
+      type: integer
+      minimum: 1
+
+StateMachineLoopRoute:
+  type: object
+  additionalProperties: false
+  description: >-
+    Static compiler metadata for a result control exit. The edge outcome remains
+    the actual result outcome; exhausted only changes this logical projection.
+    Ordinary edges omit this field. This is not an edge execution status.
+  required: [kind, logical_outcome]
+  properties:
+    kind:
+      type: string
+      enum: [continue, break, exhausted]
+    logical_outcome:
+      type: string
+      minLength: 1
+
 CollaborationDefinitionGraphNode:
   type: object
   additionalProperties: false
@@ -118,6 +152,8 @@ CollaborationDefinitionGraphNode:
       type: boolean
     judge:
       type: boolean
+    execution:
+      $ref: "#/StateMachineNodeExecutionMetadata"
 
 CollaborationDefinitionGraphEdge:
   type: object
@@ -133,15 +169,68 @@ CollaborationDefinitionGraphEdge:
     outcome:
       type: string
       minLength: 1
+    loop_route:
+      $ref: "#/StateMachineLoopRoute"
+
+StateMachineLoopGraphView:
+  type: object
+  additionalProperties: false
+  description: Logical Loop display descriptor from validated authoring or the immutable Run snapshot. Body IDs are logical IDs. This does not introduce a Loop Node Run.
+  required: [display_name, max_iterations, entry_node_id, result_node_id, body_node_ids, continue_outcomes, break_outcomes, exhausted_outcome]
+  properties:
+    display_name:
+      type: string
+    max_iterations:
+      type: integer
+      minimum: 1
+    entry_node_id:
+      type: string
+      minLength: 1
+    result_node_id:
+      type: string
+      minLength: 1
+    body_node_ids:
+      type: array
+      minItems: 1
+      uniqueItems: true
+      items:
+        type: string
+        minLength: 1
+    continue_outcomes:
+      type: array
+      minItems: 1
+      uniqueItems: true
+      items:
+        type: string
+        minLength: 1
+    break_outcomes:
+      type: array
+      uniqueItems: true
+      items:
+        type: string
+        minLength: 1
+    exhausted_outcome:
+      type: string
+      minLength: 1
 
 CollaborationDefinitionGraphPreview:
   type: object
   additionalProperties: false
   required: [graph_mode, nodes, edges]
   properties:
+    loops:
+      type: object
+      additionalProperties:
+        $ref: "#/StateMachineLoopGraphView"
+      description: Optional logical Loop descriptors; v1 omits this field.
     graph_mode:
       type: string
       minLength: 1
+      description: Authoring mode; hierarchical for a fixed Loop definition.
+    execution_graph_mode:
+      type: string
+      enum: [acyclic]
+      description: Present for compiled v2 previews. Preview IDs are scoped to this response.
     nodes:
       type: array
       items:
@@ -160,7 +249,10 @@ CollaborationDefinitionValidationOutcome:
     legacy `CollaborationDefinitionValidationOutcome` serde projection verbatim
     (byte-compatible). A document that fails to compile or violates a
     validation rule is still returned as `200` with `valid: false` and populated
-    `errors`; it is not surfaced as an HTTP error.
+    `errors`; it is not surfaced as an HTTP error. Fixed Loop v2 returns a
+    VALIDATION_ONLY_FEATURE warning when execution is disabled in this deployment.
+    Explicit experimental execution opt-in removes that warning and allows
+    creation and execution through the same runtime. v1 wire fields remain unchanged.
   properties:
     valid:
       type: boolean

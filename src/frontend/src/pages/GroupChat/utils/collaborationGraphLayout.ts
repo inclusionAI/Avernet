@@ -1,6 +1,7 @@
 import type {
   CollaborationDefinitionGraphNode,
   CollaborationDefinitionGraphPreview,
+  CollaborationDefinitionLoopRoute,
 } from '@/services/backend-api/BcnController';
 import type { CollaborationParticipantDefinition } from './collaborationValidation';
 
@@ -48,6 +49,7 @@ export interface CollaborationGraphNodeData extends Record<string, unknown> {
   assigneeBotId?: string;
   assigneeBotName?: string;
   isInitial: boolean;
+  logicalLoopView?: boolean;
 }
 
 export interface CollaborationNodePresentation {
@@ -58,16 +60,27 @@ export interface CollaborationNodePresentation {
 }
 
 export interface CollaborationGraphLayoutNode {
+  parentId?: string;
   id: string;
   position: { x: number; y: number };
   data: CollaborationGraphNodeData;
 }
 
 export interface CollaborationGraphLayoutEdge {
+  sourceHandle?: string;
+  targetHandle?: string;
   id: string;
   source: string;
   target: string;
   label?: string;
+  data?: {
+    loopRoute: CollaborationDefinitionLoopRoute;
+    outcome: string;
+    labelLane: number;
+    logicalView?: boolean;
+    returnEdge?: boolean;
+    returnX?: number;
+  };
 }
 
 export interface CollaborationGraphLayout {
@@ -205,10 +218,11 @@ export function buildCollaborationGraphLayout(
   initialNodes: string[],
   bindingViews: Record<string, CollaborationBindingView> = {},
 ): CollaborationGraphLayout {
-  if (graph.graph_mode !== 'acyclic') {
+  const layoutMode = graph.execution_graph_mode ?? graph.graph_mode;
+  if (layoutMode !== 'acyclic') {
     throw new CollaborationGraphLayoutError(
       'unsupported_mode',
-      `暂不支持 ${graph.graph_mode} 模式的协作流程预览`,
+      `暂不支持 ${layoutMode} 模式的协作流程预览`,
     );
   }
   if (!graph.nodes.length) {
@@ -301,23 +315,37 @@ export function buildCollaborationGraphLayout(
         },
         data: {
           definition: node,
-          title: node.display_name.trim() || node.node_id,
+          title: node.display_name.trim() || node.execution?.definition_node_id || node.node_id,
           ...formatCollaborationGraphAssignee(node, bindingViews),
           isInitial: initialNodeSet.has(node.node_id),
         },
       }));
     });
 
-  const edges = graph.edges.map((edge, index) => ({
-    id: `${edge.source}:${edge.outcome}:${edge.target}:${index}`,
-    source: edge.source,
-    target: edge.target,
-    label:
-      edge.outcome !== 'complete' ||
-      (outcomeCountBySource.get(edge.source)?.size ?? 0) > 1
-        ? edge.outcome
-        : undefined,
-  }));
+  const pairCounts = new Map<string, number>();
+  const edges = graph.edges.map((edge, index) => {
+    const pair = JSON.stringify([edge.source, edge.target]);
+    const labelLane = pairCounts.get(pair) ?? 0;
+    pairCounts.set(pair, labelLane + 1);
+    return {
+      id: `${edge.source}:${edge.outcome}:${edge.target}:${index}`,
+      source: edge.source,
+      target: edge.target,
+      ...(edge.loop_route ? {
+        data: {
+          loopRoute: edge.loop_route,
+          outcome: edge.outcome,
+          labelLane,
+        },
+      } : {}),
+      label: edge.loop_route
+        ? edge.loop_route.kind === 'continue' ? 'continue' : edge.loop_route.logical_outcome
+        : edge.outcome !== 'complete' ||
+          (outcomeCountBySource.get(edge.source)?.size ?? 0) > 1
+          ? edge.outcome
+          : undefined,
+    };
+  });
 
   return { nodes, edges };
 }

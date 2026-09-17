@@ -60,6 +60,7 @@ impl CollaborationRuntimeService for RecordingRuntime {
                     completed_at: None,
                 },
                 nodes: Vec::new(),
+                node_execution_metadata: None,
                 judge_outputs: Vec::new(),
             },
         })

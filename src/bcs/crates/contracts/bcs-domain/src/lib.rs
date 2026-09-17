@@ -42,6 +42,10 @@ pub use channel::{
     SessionScope, Visibility,
 };
 pub use collaboration::{
+    CompiledArtifactProjection, CompiledEdgeMetadata, CompiledNodeMetadata,
+    FixedLoopDefinition, FixedLoopMode, LoopContext, PreviousLoopResult,
+    StateMachineExecutionPlan, StateMachineLoopRoute, StateMachineLoopRouteKind,
+    StateMachineNodeExecutionMetadata,
     ChatRuntimeProfile, CollaborationDefinition, CollaborationDefinitionRef,
     CollaborationMetadata, CollaborationParticipantBinding, CollaborationRequirements,
     CollaborationRuntimeDefinition, GroupRuntimeBinding, JudgePolicy,
@@ -78,7 +82,7 @@ pub use message::{
     MessagePage, MessageQuery, MessageRole, MessageVisibilityDomain, NewMessage, PersistedMessage,
     PersistedMessageStatus, SESSION_OPENING_MESSAGE_TYPE,
     STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE,
-    STATE_MACHINE_HUMAN_INPUT_RESPONSE_MESSAGE_TYPE, STATE_MACHINE_PANEL_MESSAGE_TYPE, SenderType,
+    STATE_MACHINE_HUMAN_INPUT_RESPONSE_MESSAGE_TYPE, STATE_MACHINE_OUTPUT_MESSAGE_TYPE, STATE_MACHINE_PANEL_MESSAGE_TYPE, SenderType,
     Task, TaskStatus,
 };
 pub use organization::{Organization, OrganizationMember};

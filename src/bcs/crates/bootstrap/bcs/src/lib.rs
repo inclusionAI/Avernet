@@ -144,6 +144,7 @@ mod delivery_metrics;
 pub mod plugins;
 pub mod server;
 pub mod state_machine_timeout_scanner;
+pub mod state_machine_progression_scanner;
 mod telemetry;
 pub mod timeout_scanner;
 pub mod token_expiry_scanner;

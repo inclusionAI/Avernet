@@ -27,6 +27,6 @@ CREATE TABLE IF NOT EXISTS `bcs_human_input_requests` (
   `responded_at` bigint(20) unsigned DEFAULT NULL,
   PRIMARY KEY (`request_id`),
   UNIQUE KEY `uk_human_input_active_slot` (`active_slot_key`),
-  KEY `idx_human_input_scope_status` (`reply_scope_key`, `status`, `deadline_ms`, `created_at`),
+  KEY `idx_human_input_scope_status` (`reply_scope_key`(700), `status`, `deadline_ms`, `created_at`),
   KEY `idx_human_input_run_node` (`run_id`, `node_id`)
 ) DEFAULT CHARSET = utf8mb4;

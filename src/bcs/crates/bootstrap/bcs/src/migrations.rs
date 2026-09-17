@@ -1038,6 +1038,8 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration { version: 26, name: "delivery_pending_abort" },
     SqliteMigration { version: 27, name: "run_reply_segments" },
     SqliteMigration { version: 28, name: "provider_bot_webhook" },
+    SqliteMigration { version: 29, name: "fixed_loop_runtime" },
+    SqliteMigration { version: 32, name: "fixed_loop_legacy_upgrade" },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -1105,12 +1107,7 @@ pub async fn check_sqlite_migrations(db: &dyn DbPlugin) -> DbResult<SqliteMigrat
         if schema_table_exists
             && let Some(applied) = applied_sqlite_migration(db, migration.version).await?
         {
-            if applied.checksum != checksum {
-                return Err(DbError::InvalidInput(format!(
-                    "sqlite migration checksum mismatch for version {} ({}): applied={}, current={}",
-                    migration.version, applied.name, applied.checksum, checksum
-                )));
-            }
+            validate_applied_sqlite_migration(db, migration, &applied).await?;
             continue;
         }
 
@@ -1342,12 +1339,7 @@ pub async fn run_sqlite_versioned_migrations(db: &dyn DbPlugin) -> DbResult<()> 
 async fn apply_sqlite_migration(db: &dyn DbPlugin, migration: &SqliteMigration) -> DbResult<()> {
     let checksum = sqlite_migration_checksum(migration);
     if let Some(applied) = applied_sqlite_migration(db, migration.version).await? {
-        if applied.checksum != checksum {
-            return Err(DbError::InvalidInput(format!(
-                "sqlite migration checksum mismatch for version {} ({}): applied={}, current={}",
-                migration.version, applied.name, applied.checksum, checksum
-            )));
-        }
+        validate_applied_sqlite_migration(db, migration, &applied).await?;
         return Ok(());
     }
 
@@ -1454,8 +1446,70 @@ async fn apply_sqlite_migration_body(
             db.execute(DbStatement::new(include_str!("../../../../migrations/sqlite/028_provider_bot_webhook.sql"))).await?;
             Ok(())
         }
+        29 => add_sqlite_fixed_loop_runtime_schema(db).await,
+        32 => upgrade_sqlite_fixed_loop_legacy_schema(db).await,
         _ => Ok(()),
     }
+}
+
+async fn add_sqlite_fixed_loop_runtime_schema(db: &dyn DbPlugin) -> DbResult<()> {
+    // This migration contains thirteen plain DDL statements, without routines or
+    // semicolons in literals. Keep the column guards tied to their exact DDL.
+    let statements = include_str!("../../../../migrations/sqlite/028_fixed_loop_runtime.sql")
+        .split(';').map(str::trim).filter(|sql| !sql.is_empty()).collect::<Vec<_>>();
+    let [plan, hash, compiler, failure_action, phase, owner, token, lease_until, progression, session_recovery, checkpoints, checkpoint_index, terminal_im_index] = statements.as_slice() else {
+        return Err(DbError::InvalidInput("unexpected fixed Loop migration statements".into()));
+    };
+    for (table, additions) in [
+        ("bcs_state_machine_definition_snapshots", vec![
+            ("execution_plan_json", *plan),
+            ("execution_plan_content_hash", *hash),
+            ("execution_plan_compiler_version", *compiler),
+        ]),
+        ("bcs_state_machine_node_runs", vec![("failure_action", *failure_action),
+            ("runtime_phase", *phase), ("recovery_lease_owner", *owner),
+            ("recovery_lease_token", *token), ("recovery_lease_until_ms", *lease_until)]),
+    ] {
+        let columns = sqlite_table_columns(db, table).await?;
+        for (column, sql) in additions {
+            if !sql.starts_with(&format!("ALTER TABLE {table} ADD COLUMN {column} ")) {
+                return Err(DbError::InvalidInput(format!("unexpected fixed Loop DDL for {table}.{column}")));
+            }
+            if !columns.iter().any(|existing| existing == column) {
+                db.execute(DbStatement::new(sql)).await?;
+            }
+        }
+    }
+    // CREATE INDEX IF NOT EXISTS also resumes after an unrecorded partial apply.
+    for sql in [*progression, *session_recovery, *checkpoints, *checkpoint_index, *terminal_im_index] {
+        db.execute(DbStatement::new(sql)).await?;
+    }
+    Ok(())
+}
+
+async fn upgrade_sqlite_fixed_loop_legacy_schema(db: &dyn DbPlugin) -> DbResult<()> {
+    // Preserve the recorded 028 identity. Replay only missing DDL from the
+    // frozen combined schema, and record this completion separately as 032.
+    add_sqlite_fixed_loop_runtime_schema(db).await?;
+    // CREATE TABLE IF NOT EXISTS cannot extend an earlier opening/dispatch
+    // checkpoint table. These additions also handle earlier combined-028 bodies.
+    let statements = include_str!("../../../../migrations/sqlite/032_fixed_loop_legacy_upgrade.sql")
+        .split(';').map(str::trim).filter(|sql| !sql.is_empty()).collect::<Vec<_>>();
+    let columns = ["progress_json", "node_id", "aggregate_attempt", "deadline_ms",
+        "lease_owner", "lease_token", "lease_until_ms", "last_error"];
+    if statements.len() != columns.len() {
+        return Err(DbError::InvalidInput("unexpected fixed Loop upgrade statements".into()));
+    }
+    let existing = sqlite_table_columns(db, "bcs_collaboration_delivery_checkpoints").await?;
+    for (column, sql) in columns.into_iter().zip(statements) {
+        if !sql.starts_with(&format!("ALTER TABLE bcs_collaboration_delivery_checkpoints ADD COLUMN {column} ")) {
+            return Err(DbError::InvalidInput(format!("unexpected fixed Loop upgrade DDL for {column}")));
+        }
+        if !existing.iter().any(|name| name == column) {
+            db.execute(DbStatement::new(sql)).await?;
+        }
+    }
+    Ok(())
 }
 
 async fn add_sqlite_invite_code_id_schema(db: &dyn DbPlugin) -> DbResult<()> {
@@ -1901,7 +1955,48 @@ fn sqlite_channel_audit_expr(
 #[derive(Debug)]
 struct AppliedMigration {
     name: String,
+    dialect: String,
     checksum: String,
+}
+
+async fn validate_applied_sqlite_migration(
+    db: &dyn DbPlugin,
+    migration: &SqliteMigration,
+    applied: &AppliedMigration,
+) -> DbResult<()> {
+    let checksum = sqlite_migration_checksum(migration);
+    if applied.name == migration.name && applied.dialect == "sqlite" && applied.checksum == checksum {
+        return Ok(());
+    }
+    // Known deployed pre-consolidation 028 only. This is not a checksum reset:
+    // retain its row verbatim and require 032 to finish the current runtime schema.
+    if migration.version == 28 && migration.name == "fixed_loop_runtime"
+        && applied.name == "fixed_loop_execution_plan" && applied.dialect == "sqlite"
+        && applied.checksum == "7b918552e72f1a1c89049ed10ca6bd2f24952f81bed339c5005955d9758d7a58"
+    {
+        let columns = db.query(DbStatement::new(
+            "PRAGMA table_info(bcs_state_machine_definition_snapshots)",
+        )).await?;
+        for name in ["execution_plan_json", "execution_plan_content_hash", "execution_plan_compiler_version"] {
+            let mut valid = false;
+            for column in &columns {
+                if db_get_column::<String>(column, "name")? == name {
+                    valid = db_get_column::<String>(column, "type")?.eq_ignore_ascii_case("TEXT")
+                        && db_get_column::<i64>(column, "notnull")? == 0;
+                }
+            }
+            if !valid {
+                return Err(DbError::InvalidInput(format!(
+                    "legacy sqlite migration 28 schema mismatch: expected nullable TEXT {name}; no migration record was changed",
+                )));
+            }
+        }
+        return Ok(());
+    }
+    Err(DbError::InvalidInput(format!(
+        "sqlite migration checksum mismatch for version {} ({}): applied={}, current={} (expected name={}, dialect=sqlite; applied dialect={})",
+        migration.version, applied.name, applied.checksum, checksum, migration.name, applied.dialect
+    )))
 }
 
 async fn applied_sqlite_migration(
@@ -1910,7 +2005,7 @@ async fn applied_sqlite_migration(
 ) -> DbResult<Option<AppliedMigration>> {
     let rows = db
         .query(DbStatement::with_params(
-            "SELECT name, checksum FROM bcs_schema_migrations WHERE version = ?",
+            "SELECT name, dialect, checksum FROM bcs_schema_migrations WHERE version = ?",
             vec![DbValue::from(version)],
         ))
         .await?;
@@ -1919,6 +2014,7 @@ async fn applied_sqlite_migration(
         .map(|row| {
             Ok(AppliedMigration {
                 name: db_get_column(&row, "name")?,
+                dialect: db_get_column(&row, "dialect")?,
                 checksum: db_get_column(&row, "checksum")?,
             })
         })
@@ -1996,6 +2092,208 @@ fn is_create_index(sql: &str) -> bool {
 mod tests {
     use super::*;
     use bcs_db_local::LocalSqliteDbPlugin;
+
+    async fn sqlite_before_fixed_loop(db: &dyn DbPlugin) -> DbResult<()> {
+        run_sqlite_bootstrap_tables(db).await?;
+        for migration in SQLITE_VERSIONED_MIGRATIONS.iter().filter(|migration| migration.version <= 27) {
+            apply_sqlite_migration(db, migration).await?;
+        }
+        run_sqlite_bootstrap_indexes(db).await
+    }
+
+    async fn assert_fixed_loop_schema(db: &dyn DbPlugin) -> DbResult<()> {
+        let columns = column_names(db, "bcs_state_machine_definition_snapshots").await?;
+        for name in ["execution_plan_json", "execution_plan_content_hash", "execution_plan_compiler_version"] {
+            assert!(columns.iter().any(|column| column == name));
+        }
+        let node_columns = column_names(db, "bcs_state_machine_node_runs").await?;
+        for name in ["failure_action", "runtime_phase", "recovery_lease_owner", "recovery_lease_token", "recovery_lease_until_ms"] {
+            assert!(node_columns.iter().any(|column| column == name));
+        }
+        assert!(index_exists(db, "idx_sm_runs_progression").await?);
+        assert!(index_exists(db, "idx_session_running_recovery").await?);
+        assert!(index_exists(db, "idx_collaboration_checkpoints_run").await?);
+        assert!(index_exists(db, "idx_collaboration_terminal_im_scan").await?);
+        let checkpoint_columns = column_names(db, "bcs_collaboration_delivery_checkpoints").await?;
+        for name in ["env", "operation_key", "aggregate_kind", "aggregate_id", "operation_kind", "payload_json", "progress_json", "status", "created_at_ms", "delivered_at_ms", "node_id", "aggregate_attempt", "deadline_ms", "lease_owner", "lease_token", "lease_until_ms", "last_error"] {
+            assert!(checkpoint_columns.iter().any(|column| column == name));
+        }
+        assert_eq!(current_sqlite_version(db, true).await?, Some(32));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fixed_loop_runtime_migration_is_applied_on_fresh_bootstrap() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        run_sqlite_migrations(&db).await?;
+        run_sqlite_migrations(&db).await?;
+        assert_fixed_loop_schema(&db).await
+    }
+
+    #[tokio::test]
+    async fn fixed_loop_runtime_migration_upgrades_27_and_resumes_each_partial_step() -> DbResult<()> {
+        let statements = include_str!("../../../../migrations/sqlite/028_fixed_loop_runtime.sql")
+            .split(';').map(str::trim).filter(|sql| !sql.is_empty()).collect::<Vec<_>>();
+        assert_eq!(statements.len(), 13);
+        for completed_steps in 0..=statements.len() {
+            let db = LocalSqliteDbPlugin::new()?;
+            sqlite_before_fixed_loop(&db).await?;
+            db.execute(DbStatement::new("INSERT INTO bcs_state_machine_definition_snapshots (env, run_id, group_id, session_id, group_version, definition_id, definition_version, definition_content_hash, snapshot_json) VALUES ('test', 'legacy-run', 'group', 'session', 1, 'definition', 1, 'hash', '{\"version\":1}')")).await?;
+            db.execute(DbStatement::new("INSERT INTO bcs_state_machine_node_runs (env, run_id, node_id, status, assignee_bot_id, error_message) VALUES ('test', 'legacy-run', 'node', 'failed', 'bot', 'legacy failure')")).await?;
+            db.execute(DbStatement::new("UPDATE bcs_schema_migrations SET applied_at = '2026-01-01 00:00:00'")).await?;
+            for sql in &statements[..completed_steps] {
+                db.execute(DbStatement::new(*sql)).await?;
+            }
+            assert!(applied_sqlite_migration(&db, 28).await?.is_none());
+            run_sqlite_migrations(&db).await?;
+            run_sqlite_migrations(&db).await?;
+            assert_fixed_loop_schema(&db).await?;
+            let row = db.query(DbStatement::new("SELECT snapshot_json, execution_plan_json, execution_plan_content_hash, execution_plan_compiler_version FROM bcs_state_machine_definition_snapshots WHERE run_id = 'legacy-run'")).await?.remove(0);
+            assert_eq!(db_get_column::<String>(&row, "snapshot_json")?, "{\"version\":1}");
+            for column in ["execution_plan_json", "execution_plan_content_hash", "execution_plan_compiler_version"] {
+                assert_eq!(bcs_db_api::db_get_column_opt::<String>(&row, column)?, None);
+            }
+            let row = db.query(DbStatement::new("SELECT error_message, failure_action, runtime_phase, recovery_lease_owner, recovery_lease_token, recovery_lease_until_ms FROM bcs_state_machine_node_runs WHERE run_id = 'legacy-run'")).await?.remove(0);
+            assert_eq!(db_get_column::<String>(&row, "error_message")?, "legacy failure");
+            assert_eq!(bcs_db_api::db_get_column_opt::<String>(&row, "failure_action")?, None);
+            assert_eq!(db_get_column::<i64>(&row, "recovery_lease_token")?, 0);
+            for column in ["runtime_phase", "recovery_lease_owner", "recovery_lease_until_ms"] {
+                assert_eq!(bcs_db_api::db_get_column_opt::<String>(&row, column)?, None);
+            }
+            let old_records = db.query(DbStatement::new("SELECT applied_at FROM bcs_schema_migrations WHERE version <= 27")).await?;
+            assert_eq!(old_records.len(), 27);
+            for row in old_records { assert_eq!(db_get_column::<String>(&row, "applied_at")?, "2026-01-01 00:00:00"); }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fixed_loop_runtime_migration_records_only_after_all_steps_succeed() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        sqlite_before_fixed_loop(&db).await?;
+        db.execute(DbStatement::new("DROP TABLE bcs_group_sessions")).await?;
+        let migration = SQLITE_VERSIONED_MIGRATIONS.iter().find(|migration| migration.version == 28).unwrap();
+        assert!(apply_sqlite_migration(&db, migration).await.is_err());
+        assert!(applied_sqlite_migration(&db, 28).await?.is_none());
+        assert!(index_exists(&db, "idx_sm_runs_progression").await?);
+        // Recreate the missing prerequisite, then resume the unrecorded prefix.
+        run_sqlite_migrations(&db).await?;
+        assert_fixed_loop_schema(&db).await
+    }
+
+    #[tokio::test]
+    async fn fixed_loop_runtime_migration_rejects_legacy_record_without_schema() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        sqlite_before_fixed_loop(&db).await?;
+        let draft = SqliteMigration { version: 28, name: "fixed_loop_execution_plan" };
+        db.execute(DbStatement::with_params(
+            "INSERT INTO bcs_schema_migrations (version, name, dialect, checksum) VALUES (28, ?, 'sqlite', ?)",
+            vec![DbValue::from(draft.name), DbValue::from(sqlite_migration_checksum(&draft))],
+        )).await?;
+        assert!(run_sqlite_migrations(&db).await.unwrap_err().to_string().contains("schema mismatch"));
+        assert!(!column_names(&db, "bcs_state_machine_node_runs").await?.iter().any(|column| column == "failure_action"));
+        assert_eq!(applied_sqlite_migration(&db, 28).await?.unwrap().name, draft.name);
+        Ok(())
+    }
+
+    async fn sqlite_legacy_loop_plan(db: &dyn DbPlugin) -> DbResult<()> {
+        sqlite_before_fixed_loop(db).await?;
+        for sql in include_str!("../../../../migrations/sqlite/028_fixed_loop_runtime.sql").split(';').take(3) {
+            db.execute(DbStatement::new(sql.trim())).await?;
+        }
+        db.execute(DbStatement::new(
+            "INSERT INTO bcs_schema_migrations (version, name, dialect, checksum, applied_at) VALUES \
+             (28, 'fixed_loop_execution_plan', 'sqlite', '7b918552e72f1a1c89049ed10ca6bd2f24952f81bed339c5005955d9758d7a58', '2026-09-14 08:52:38')",
+        )).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fixed_loop_legacy_upgrade_preserves_record_and_snapshot() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        sqlite_legacy_loop_plan(&db).await?;
+        db.execute(DbStatement::new("INSERT INTO bcs_state_machine_definition_snapshots (env, run_id, group_id, session_id, group_version, definition_id, definition_version, definition_content_hash, snapshot_json, execution_plan_json, execution_plan_content_hash, execution_plan_compiler_version) VALUES ('test', 'retained-run', 'group', 'session', 1, 'definition', 1, 'hash', '{\"version\":2}', '{\"saved\":true}', 'saved-hash', 'saved-compiler')")).await?;
+        let history = db.query(DbStatement::new("SELECT * FROM bcs_schema_migrations ORDER BY version")).await?;
+        let snapshot = db.query(DbStatement::new("SELECT * FROM bcs_state_machine_definition_snapshots")).await?;
+        let before = check_sqlite_migrations(&db).await?;
+        assert_eq!(before.pending_versions.iter().map(|migration| migration.version).collect::<Vec<_>>(), vec![32]);
+        assert!(!column_names(&db, "bcs_state_machine_node_runs").await?.iter().any(|name| name == "failure_action"));
+        let report = run_sqlite_migrations_with_report(&db).await?;
+        assert_eq!(report.applied_versions.iter().map(|migration| migration.version).collect::<Vec<_>>(), vec![32]);
+        assert_fixed_loop_schema(&db).await?;
+        assert_eq!(history, db.query(DbStatement::new("SELECT * FROM bcs_schema_migrations WHERE version <= 28 ORDER BY version")).await?);
+        assert_eq!(snapshot, db.query(DbStatement::new("SELECT * FROM bcs_state_machine_definition_snapshots")).await?);
+        assert!(run_sqlite_migrations_with_report(&db).await?.applied_versions.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fixed_loop_legacy_upgrade_rejects_unknown_record_or_changed_plan_column() -> DbResult<()> {
+        for mutation in [
+            "UPDATE bcs_schema_migrations SET checksum = 'unknown' WHERE version = 28",
+            "UPDATE bcs_schema_migrations SET name = 'unknown' WHERE version = 28",
+            "UPDATE bcs_schema_migrations SET dialect = 'mysql' WHERE version = 28",
+            "ALTER TABLE bcs_state_machine_definition_snapshots DROP COLUMN execution_plan_json",
+        ] {
+            let db = LocalSqliteDbPlugin::new()?;
+            sqlite_legacy_loop_plan(&db).await?;
+            db.execute(DbStatement::new(mutation)).await?;
+            let history = db.query(DbStatement::new("SELECT * FROM bcs_schema_migrations ORDER BY version")).await?;
+            assert!(check_sqlite_migrations(&db).await.is_err());
+            assert!(run_sqlite_migrations(&db).await.is_err());
+            assert_eq!(history, db.query(DbStatement::new("SELECT * FROM bcs_schema_migrations ORDER BY version")).await?);
+            assert!(!table_exists(&db, "bcs_collaboration_delivery_checkpoints").await?);
+        }
+        let db = LocalSqliteDbPlugin::new()?;
+        sqlite_legacy_loop_plan(&db).await?;
+        db.execute(DbStatement::new("ALTER TABLE bcs_state_machine_definition_snapshots DROP COLUMN execution_plan_json")).await?;
+        db.execute(DbStatement::new("ALTER TABLE bcs_state_machine_definition_snapshots ADD COLUMN execution_plan_json INTEGER")).await?;
+        assert!(run_sqlite_migrations(&db).await.unwrap_err().to_string().contains("schema mismatch"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fixed_loop_legacy_upgrade_resumes_partial_checkpoint_additions() -> DbResult<()> {
+        let additions = include_str!("../../../../migrations/sqlite/032_fixed_loop_legacy_upgrade.sql")
+            .split(';').map(str::trim).filter(|sql| !sql.is_empty()).collect::<Vec<_>>();
+        for completed in 0..=additions.len() {
+            let db = LocalSqliteDbPlugin::new()?;
+            sqlite_before_fixed_loop(&db).await?;
+            // An earlier combined 028 created only the opening checkpoint fields.
+            db.execute(DbStatement::new("CREATE TABLE bcs_collaboration_delivery_checkpoints (env TEXT NOT NULL, operation_key TEXT NOT NULL, aggregate_kind TEXT NOT NULL, aggregate_id TEXT NOT NULL, operation_kind TEXT NOT NULL, payload_json TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at_ms INTEGER NOT NULL, delivered_at_ms INTEGER, PRIMARY KEY (env, operation_key))")).await?;
+            let migration = SQLITE_VERSIONED_MIGRATIONS.iter().find(|migration| migration.version == 28).unwrap();
+            apply_sqlite_migration(&db, migration).await?;
+            db.execute(DbStatement::new("INSERT INTO bcs_collaboration_delivery_checkpoints (env, operation_key, aggregate_kind, aggregate_id, operation_kind, payload_json, created_at_ms) VALUES ('test', 'opening', 'run', 'retained-run', 'opening', '{\"saved\":true}', 10)")).await?;
+            for sql in &additions[..completed] {
+                db.execute(DbStatement::new(*sql)).await?;
+            }
+            let history = db.query(DbStatement::new("SELECT * FROM bcs_schema_migrations ORDER BY version")).await?;
+            run_sqlite_migrations(&db).await?;
+            run_sqlite_migrations(&db).await?;
+            assert_fixed_loop_schema(&db).await?;
+            assert_eq!(history, db.query(DbStatement::new("SELECT * FROM bcs_schema_migrations WHERE version <= 28 ORDER BY version")).await?);
+            let row = db.query(DbStatement::new("SELECT payload_json, status, created_at_ms, progress_json, lease_token FROM bcs_collaboration_delivery_checkpoints")).await?.remove(0);
+            assert_eq!(db_get_column::<String>(&row, "payload_json")?, "{\"saved\":true}");
+            assert_eq!(db_get_column::<String>(&row, "status")?, "pending");
+            assert_eq!(db_get_column::<i64>(&row, "created_at_ms")?, 10);
+            assert_eq!(bcs_db_api::db_get_column_opt::<String>(&row, "progress_json")?, None);
+            assert_eq!(db_get_column::<i64>(&row, "lease_token")?, 0);
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fixed_loop_legacy_upgrade_failure_does_not_record_success() -> DbResult<()> {
+        let db = LocalSqliteDbPlugin::new()?;
+        sqlite_legacy_loop_plan(&db).await?;
+        db.execute(DbStatement::new("DROP TABLE bcs_group_sessions")).await?;
+        let migration = SQLITE_VERSIONED_MIGRATIONS.last().unwrap();
+        assert!(apply_sqlite_migration(&db, migration).await.is_err());
+        assert!(applied_sqlite_migration(&db, 32).await?.is_none());
+        assert_eq!(applied_sqlite_migration(&db, 28).await?.unwrap().name, "fixed_loop_execution_plan");
+        run_sqlite_migrations(&db).await?;
+        assert_fixed_loop_schema(&db).await
+    }
 
     async fn column_names(db: &dyn DbPlugin, table: &str) -> DbResult<Vec<String>> {
         let rows = db
@@ -2183,7 +2481,9 @@ mod tests {
                 (25, "delivery_context_selection".to_string(), "sqlite".to_string()),
                 (26, "delivery_pending_abort".to_string(), "sqlite".to_string()),
                 (27, "run_reply_segments".to_string(), "sqlite".to_string()),
-                (28, "provider_bot_webhook".to_string(), "sqlite".to_string())
+                (28, "provider_bot_webhook".to_string(), "sqlite".to_string()),
+                (29, "fixed_loop_runtime".to_string(), "sqlite".to_string()),
+                (32, "fixed_loop_legacy_upgrade".to_string(), "sqlite".to_string())
             ]
         );
         Ok(())
@@ -2195,7 +2495,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 28);
+        assert_eq!(report.pending_versions.len(), 30);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -2298,7 +2598,7 @@ mod tests {
 
     #[test]
     fn mysql_callback_lease_migration_adds_recovery_index() {
-        let migration = include_str!("../../../../migrations/mysql/016_session_callback_lease.sql");
+        let migration = include_str!("../../../../migrations/mysql/016_session_callback_lease_and_chat_runs.sql");
         assert!(migration.contains("ADD INDEX `idx_session_callback_recovery`"));
         for column in [
             "`env`",
@@ -2393,7 +2693,7 @@ mod tests {
         let migration =
             include_str!("../../../../migrations/mysql/018_one_shot_opening_message_override.sql");
         assert!(migration.contains(
-            "ADD COLUMN IF NOT EXISTS `opening_message_override_json` text DEFAULT NULL"
+            "ADD COLUMN `opening_message_override_json` text DEFAULT NULL"
         ));
     }
 
@@ -2403,13 +2703,27 @@ mod tests {
         let migration = include_str!(
             "../../../../migrations/mysql/020_human_participant_message_visibility.sql"
         );
+        for column in [
+            "message_view_scope", "message_visibility_version", "visibility_domain",
+            "audience_kind", "audience_actor_ids_json",
+        ] {
+            assert!(!baseline.contains(&format!("`{column}`")), "{column} belongs to migration 020");
+        }
         assert!(!baseline.contains("idx_messages_session_audience_created"));
-        assert!(migration.contains("ADD COLUMN IF NOT EXISTS `message_view_scope`"));
-        assert!(migration.contains("ADD COLUMN IF NOT EXISTS `message_visibility_version`"));
-        assert!(migration.contains("ADD COLUMN IF NOT EXISTS `visibility_domain`"));
-        assert!(migration.contains("ADD COLUMN IF NOT EXISTS `audience_kind`"));
-        assert!(migration.contains("ADD COLUMN IF NOT EXISTS `audience_actor_ids_json`"));
+        assert!(migration.contains("ADD COLUMN `message_view_scope`"));
+        assert!(migration.contains("ADD COLUMN `message_visibility_version`"));
+        assert!(migration.contains("ADD COLUMN `visibility_domain`"));
+        assert!(migration.contains("ADD COLUMN `audience_kind`"));
+        assert!(migration.contains("ADD COLUMN `audience_actor_ids_json`"));
         assert!(migration.contains("idx_messages_session_audience_created"));
+    }
+
+    #[test]
+    fn mysql_participant_tags_are_added_only_by_migration_011() {
+        let baseline = include_str!("../../../../migrations/mysql/001_init_schema.sql");
+        let migration = include_str!("../../../../migrations/mysql/011_group_participant_tags.sql");
+        assert!(!baseline.contains("`tags_json`"));
+        assert!(migration.contains("ADD COLUMN `tags_json` text DEFAULT NULL"));
     }
 
     #[tokio::test]
@@ -2609,7 +2923,9 @@ mod tests {
                 (25, "delivery_context_selection".to_string(), "sqlite".to_string()),
                 (26, "delivery_pending_abort".to_string(), "sqlite".to_string()),
                 (27, "run_reply_segments".to_string(), "sqlite".to_string()),
-                (28, "provider_bot_webhook".to_string(), "sqlite".to_string())
+                (28, "provider_bot_webhook".to_string(), "sqlite".to_string()),
+                (29, "fixed_loop_runtime".to_string(), "sqlite".to_string()),
+                (32, "fixed_loop_legacy_upgrade".to_string(), "sqlite".to_string())
             ]
         );
         Ok(())

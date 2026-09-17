@@ -412,6 +412,27 @@ struct DeferredSessionChannelOutbound {
 
 #[async_trait]
 impl SessionChannelOutboundPort for DeferredSessionChannelOutbound {
+    async fn recover_human_input_requests(&self, run_id: &str, session_id: &str) -> ServiceResult<Vec<String>> {
+        let Some(outbound) = self.slot.get() else { return Ok(Vec::new()); };
+        outbound.recover_human_input_requests(run_id, session_id).await
+    }
+    async fn prepare_state_machine_terminal(&self, event: &StateMachineTerminalEvent) -> ServiceResult<Vec<bcs_service_api::StateMachineTerminalNotification>> {
+        let Some(outbound) = self.slot.get() else { return Ok(Vec::new()); };
+        outbound.prepare_state_machine_terminal(event).await
+    }
+    async fn validate_terminal_notification(&self, notification: &bcs_service_api::StateMachineTerminalNotification) -> ServiceResult<()> {
+        let outbound = self.slot.get().ok_or_else(|| bcs_service_api::ServiceError::InternalError("terminal IM is not configured".into()))?;
+        outbound.validate_terminal_notification(notification).await
+    }
+    async fn deliver_terminal_notification(&self, event: &StateMachineTerminalEvent, notification: &bcs_service_api::StateMachineTerminalNotification) -> ServiceResult<Option<String>> {
+        let outbound = self.slot.get().ok_or_else(|| bcs_service_api::ServiceError::InternalError("terminal IM is not configured".into()))?;
+        outbound.deliver_terminal_notification(event, notification).await
+    }
+    async fn finish_state_machine_terminal(&self, event: &StateMachineTerminalEvent) -> ServiceResult<()> {
+        let Some(outbound) = self.slot.get() else { return Ok(()); };
+        outbound.finish_state_machine_terminal(event).await
+    }
+
     async fn validate_human_input_channel(
         &self,
         group_id: &str,
@@ -480,8 +501,8 @@ impl StateMachineResultPublisherPort for MessageFlowStateMachineResultPublisher 
         cmd: StateMachineResultPublishCommand,
     ) -> ServiceResult<()> {
         let idempotency_key = format!("state-machine-result:{}", cmd.run_id);
-        self.message_repo
-            .append_message(NewMessage {
+        let saved = self.message_repo
+            .append_message_with_id(idempotency_key.clone(), NewMessage {
                 group_id: cmd.group_id.clone(),
                 session_id: cmd.session_id.clone(),
                 sender_id: cmd.sender_bot_id.clone(),
@@ -490,7 +511,7 @@ impl StateMachineResultPublisherPort for MessageFlowStateMachineResultPublisher 
                 content: serde_json::Value::String(cmd.content.clone()),
                 client_msg_id: Some(idempotency_key.clone()),
                 owner_bot_id: None,
-                created_at: now_ms(),
+                created_at: cmd.created_at_ms,
                 run_id: cmd.run_id.clone(),
                 visibility_domain: MessageVisibilityDomain::StateMachine,
                 audience: Some(MessageAudience::Public),
@@ -501,6 +522,13 @@ impl StateMachineResultPublisherPort for MessageFlowStateMachineResultPublisher 
                     "persist state-machine result before delivery: {error}"
                 ))
             })?;
+        if saved.group_id != cmd.group_id || saved.session_id != cmd.session_id || saved.run_id != cmd.run_id
+            || saved.sender_id != cmd.sender_bot_id || saved.sender_type != SenderType::Bot
+            || saved.message_type != "chat" || saved.content != serde_json::Value::String(cmd.content.clone())
+            || saved.client_msg_id.as_ref() != Some(&idempotency_key) || saved.created_at != cmd.created_at_ms
+            || saved.visibility_domain != Some(MessageVisibilityDomain::StateMachine) || saved.audience != Some(MessageAudience::Public) {
+            return Err(bcs_service_api::ServiceError::Conflict("Chat result history conflicts with saved publication".into()));
+        }
         self.message_flow
             .handle_web_send(WebSendCommand {
                 caller: CallerContext::Bot(BotActor {
@@ -2386,6 +2414,9 @@ impl Default for BcsServerState {
             .with_bot_registry(bot_registry.clone())
             .with_bot_run_context(bot_run_context.clone())
             .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
+            .with_fixed_loop_limits(config.collaboration.fixed_loop_limits)
+            .with_experimental_fixed_loop_execution_enabled(config.collaboration.experimental_fixed_loop_execution)
+            .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
             .with_callback_url_guard(outbound_url_guard.clone())
             .with_session_channel_outbound(session_channel_outbound)
             .with_result_publisher(Arc::new(MessageFlowStateMachineResultPublisher::new(
@@ -3975,6 +4006,9 @@ impl BcsServer {
             .with_bot_registry(bot_registry.clone())
             .with_bot_run_context(bot_run_context.clone())
             .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
+            .with_fixed_loop_limits(config.collaboration.fixed_loop_limits)
+            .with_experimental_fixed_loop_execution_enabled(config.collaboration.experimental_fixed_loop_execution)
+            .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
             .with_callback_url_guard(callback_url_guard.clone())
             .with_session_channel_outbound(session_channel_outbound)
             .with_result_publisher(Arc::new(MessageFlowStateMachineResultPublisher::new(
@@ -4834,6 +4868,9 @@ impl BcsServer {
                 .with_bot_registry(bot_registry.clone())
                 .with_bot_run_context(bot_run_context.clone())
                 .with_provider_chat_run_timeout_ms(config.provider_chat_run_timeout_ms)
+                .with_fixed_loop_limits(config.collaboration.fixed_loop_limits)
+                .with_experimental_fixed_loop_execution_enabled(config.collaboration.experimental_fixed_loop_execution)
+                .with_loop_instrumentation(state_machine_loop_instrumentation(metrics.as_ref()))
                 .with_callback_url_guard(outbound_url_guard.clone())
                 .with_session_channel_outbound(session_channel_outbound)
                 .with_result_publisher(Arc::new(MessageFlowStateMachineResultPublisher::new(
@@ -5332,6 +5369,17 @@ impl BcsServer {
         )
     }
 
+    fn spawn_state_machine_progression_scanner(&self) -> Option<crate::state_machine_progression_scanner::ProgressionRecoveryTask> {
+        self.config.collaboration.progression_recovery_enabled().then(|| {
+            tracing::info!(fixed_loop_execution = self.config.collaboration.experimental_fixed_loop_execution,
+                "Experimental State Machine progression recovery enabled");
+            crate::state_machine_progression_scanner::spawn(
+                self.state.leader_election.clone(),
+                self.state.services.collaboration_runtime.clone(),
+            )
+        })
+    }
+
     fn spawn_callback_recovery_scanner(&self) -> tokio::task::JoinHandle<()> {
         crate::callback_recovery_scanner::spawn(
             self.state.leader_election.clone(),
@@ -5356,6 +5404,7 @@ impl BcsServer {
 
         self.initialize_lifecycle().await?;
         let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
+        let _state_machine_progression_handle = self.spawn_state_machine_progression_scanner();
         let _callback_recovery_handle = self.spawn_callback_recovery_scanner();
 
         // Spawn async chat-run TTL cleanup loop.
@@ -5485,6 +5534,7 @@ impl BcsServer {
 
         self.initialize_lifecycle().await?;
         let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
+        let state_machine_progression_handle = self.spawn_state_machine_progression_scanner();
         let _callback_recovery_handle = self.spawn_callback_recovery_scanner();
 
         let app = self.build_router().await?;
@@ -5498,6 +5548,8 @@ impl BcsServer {
         let metrics = self.state.metrics.clone();
 
         let handle = tokio::spawn(async move {
+            // Keep recovery alive for the server lifetime, including random-port tests.
+            let _state_machine_progression_handle = state_machine_progression_handle;
             let result = axum::serve(
                 listener,
                 app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
@@ -5696,6 +5748,16 @@ fn ws_lifecycle_hook(_state: &Arc<BcsServerState>) -> Arc<dyn WsLifecycleInstrum
     }
 
     Arc::new(NoopWsLifecycleInstrumentationHook)
+}
+
+fn state_machine_loop_instrumentation(
+    _metrics: Option<&Arc<crate::metrics::MetricsRuntime>>,
+) -> Option<Arc<dyn bcs_service_api::StateMachineLoopInstrumentationHook>> {
+    #[cfg(feature = "prometheus-metrics")]
+    if let Some(metrics) = _metrics {
+        return Some(Arc::new(crate::metrics::MetricsStateMachineLoopHook::new(metrics.env.clone())));
+    }
+    None
 }
 
 fn direct_chat_run_lifecycle_hook(
@@ -5916,6 +5978,10 @@ mod tests {
 
     #[async_trait]
     impl SessionChannelOutboundPort for RecordingSessionChannelOutbound {
+        async fn recover_human_input_requests(&self, run_id: &str, session_id: &str) -> ServiceResult<Vec<String>> {
+            if run_id == "failed" { return Err(bcs_service_api::ServiceError::InternalError("recovery read failed".into())); }
+            Ok(vec![format!("{run_id}/{session_id}/review")])
+        }
         async fn publish_human_input_ready(
             &self,
             event: HumanInputReadyEvent,
@@ -5928,6 +5994,7 @@ mod tests {
     #[tokio::test]
     async fn deferred_session_channel_outbound_is_inert_until_initialized() {
         let (slot, deferred) = deferred_session_channel_outbound();
+        assert!(deferred.recover_human_input_requests("run-1", "session-1").await.unwrap().is_empty());
         let event = HumanInputReadyEvent {
             event_id: "event-1".to_string(),
             group_id: "group-1".to_string(),
@@ -5944,6 +6011,7 @@ mod tests {
             upstream_artifacts: Vec::new(),
             judge_outcomes: vec!["approved".to_string()],
             timeout_deadline_ms: Some(60_000),
+            loop_context: None,
         };
 
         assert_eq!(
@@ -5956,6 +6024,8 @@ mod tests {
 
         let recording = Arc::new(RecordingSessionChannelOutbound::default());
         assert!(slot.set(recording.clone()).is_ok());
+        assert_eq!(deferred.recover_human_input_requests("run-1", "session-1").await.unwrap(), vec!["run-1/session-1/review"]);
+        assert!(deferred.recover_human_input_requests("failed", "session-1").await.unwrap_err().to_string().contains("recovery read failed"));
         assert_eq!(
             deferred
                 .publish_human_input_ready(event)
@@ -6754,3 +6824,7 @@ pub async fn resolve_config_secrets(config: &mut BcsConfig, access: &dyn SecretA
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "state_machine_result_tests.rs"]
+mod state_machine_result_tests;

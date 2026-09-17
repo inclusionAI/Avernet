@@ -56,6 +56,9 @@ macro_rules! test_runtime {
     };
 }
 
+#[path = "runtime_progression/fixed_loop.rs"]
+mod fixed_loop_tests;
+
 #[derive(Default)]
 struct FailingAppendMessageRepo {
     inner: MemoryMessageRepo,
@@ -63,6 +66,10 @@ struct FailingAppendMessageRepo {
 
 #[async_trait]
 impl MessageRepoPort for FailingAppendMessageRepo {
+    async fn append_message_with_id(&self, _id: String, message: NewMessage) -> Result<PersistedMessage, MessageRepoError> {
+        self.append_message(message).await
+    }
+
     async fn append_message(
         &self,
         _message: NewMessage,
@@ -151,7 +158,10 @@ fn test_sessions() -> Arc<SessionManagementServiceImpl> {
 
 #[derive(Default)]
 struct RecordingSessionChannelOutbound {
+    fail_human_publish: std::sync::atomic::AtomicBool,
+    human_publish_calls: std::sync::atomic::AtomicUsize,
     events: Mutex<Vec<HumanInputReadyEvent>>,
+    terminal_events: Mutex<Vec<bcs_service_api::StateMachineTerminalEvent>>,
     validation_calls: Mutex<Vec<(String, String)>>,
     validation_error: Mutex<Option<String>>,
 }
@@ -173,6 +183,17 @@ impl EventRecordFactoryPort for RecordingEventFactory {
 
 #[async_trait]
 impl SessionChannelOutboundPort for RecordingSessionChannelOutbound {
+    async fn finish_state_machine_terminal(&self, event: &bcs_service_api::StateMachineTerminalEvent) -> ServiceResult<()> {
+        self.terminal_events.lock().await.push(event.clone()); Ok(())
+    }
+    async fn publish_state_machine_terminal(
+        &self,
+        event: bcs_service_api::StateMachineTerminalEvent,
+    ) -> ServiceResult<SessionChannelDeliveryOutcome> {
+        self.terminal_events.lock().await.push(event);
+        Ok(SessionChannelDeliveryOutcome::Delivered)
+    }
+
     async fn validate_human_input_channel(
         &self,
         group_id: &str,
@@ -195,7 +216,13 @@ impl SessionChannelOutboundPort for RecordingSessionChannelOutbound {
         &self,
         event: HumanInputReadyEvent,
     ) -> ServiceResult<SessionChannelDeliveryOutcome> {
-        self.events.lock().await.push(event);
+        self.human_publish_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if self.fail_human_publish.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            return Err(ServiceError::InternalError("injected human notification failure".into()));
+        }
+        // The outbound contract replays the same interaction without resending.
+        let mut events = self.events.lock().await;
+        if !events.iter().any(|saved| saved.event_id == event.event_id) { events.push(event); }
         Ok(SessionChannelDeliveryOutcome::Delivered)
     }
 }
@@ -544,7 +571,7 @@ async fn one_shot_session_run_uses_transient_bindings_keeps_chat_open_and_publis
             .await
             .expect("read one-shot run snapshot")
             .expect("one-shot run snapshot");
-    assert_eq!(run_snapshot.id, started.view.run.definition_id);
+    assert_eq!(run_snapshot.definition.id, started.view.run.definition_id);
 
     let frontend_commands = frontend_delivery.commands.lock().await;
     assert_eq!(frontend_commands.len(), 1);
@@ -1076,6 +1103,12 @@ async fn one_shot_result_publication_failure_marks_run_failed_and_allows_rerun()
         CreateStateMachineRerunOutcome::Created
     ));
 
+    store.save_run_opening(bcs_service_api::StateMachineOpeningPayload {
+        run_id: materialized.run_id.clone(), group_id: materialized.group_id.clone(), session_id: materialized.session_id.clone(),
+        client_msg_id: format!("{}:000-panel", materialized.run_id), content: "original rendered opening before crash".into(),
+        component: None, created_at_ms: materialized.created_at,
+    }).await.expect("persist original rendered opening before simulated crash");
+
     let recovered = runtime
         .rerun_state_machine_run(RerunStateMachineCommand {
             source_run_id: failed_rerun.run.run_id,
@@ -1336,8 +1369,9 @@ async fn human_input_waits_without_bot_delivery_and_completes_from_natural_langu
         .upsert(state_machine_test_group())
         .await
         .expect("seed group");
-    let sessions = test_sessions();
-    let store = Arc::new(MemoryCollaborationStore::new());
+    let session_repo = Arc::new(MemorySessionRepo::new());
+    let sessions = Arc::new(SessionManagementServiceImpl::new(session_repo.clone(), Arc::new(MemoryGroupRepo::new())));
+    let store = Arc::new(MemoryCollaborationStore::new().with_session_repo(session_repo));
     let delivery = Arc::new(RecordingDelivery::default());
     let channel_outbound = Arc::new(RecordingSessionChannelOutbound::default());
     let frontend_delivery = Arc::new(RecordingFrontendDelivery::default());
@@ -1623,8 +1657,9 @@ async fn frontend_human_input_skips_im_delivery_and_accepts_present_human() {
         .upsert(state_machine_test_group())
         .await
         .expect("seed group");
-    let sessions = test_sessions();
-    let store = Arc::new(MemoryCollaborationStore::new());
+    let session_repo = Arc::new(MemorySessionRepo::new());
+    let sessions = Arc::new(SessionManagementServiceImpl::new(session_repo.clone(), Arc::new(MemoryGroupRepo::new())));
+    let store = Arc::new(MemoryCollaborationStore::new().with_session_repo(session_repo));
     let channel_outbound = Arc::new(RecordingSessionChannelOutbound::default());
     let runtime = test_runtime!(
         store.clone(),
@@ -2395,7 +2430,7 @@ async fn timeout_scanner_aborts_run_when_group_is_missing() {
             session_id: None,
             definition_yaml: Some(
                 single_node_yaml()
-                    .replace("node_timeout_ms: 60000", "node_timeout_ms: 1")
+                    .replace("node_timeout_ms: 60000", "node_timeout_ms: 1000")
                     .replace("max_attempts: 3", "max_attempts: 1"),
             ),
             definition: None,
@@ -2409,7 +2444,12 @@ async fn timeout_scanner_aborts_run_when_group_is_missing() {
         .await
         .expect("start run");
     group.delete("group-1").await.expect("delete group");
-    tokio::time::sleep(Duration::from_millis(5)).await;
+    let deadline = started.view.nodes.iter()
+        .find_map(|node| node.timeout_deadline_ms)
+        .expect("saved deadline");
+    tokio::time::sleep(Duration::from_millis(
+        deadline.saturating_sub(bcs_protocol::now_ms()) + 5,
+    )).await;
 
     let processed = runtime
         .process_expired_node_timeouts(10, 0)
@@ -2448,7 +2488,7 @@ async fn timeout_scanner_aborts_run_when_session_is_missing() {
             session_id: None,
             definition_yaml: Some(
                 single_node_yaml()
-                    .replace("node_timeout_ms: 60000", "node_timeout_ms: 1")
+                    .replace("node_timeout_ms: 60000", "node_timeout_ms: 1000")
                     .replace("max_attempts: 3", "max_attempts: 1"),
             ),
             definition: None,
@@ -2465,7 +2505,12 @@ async fn timeout_scanner_aborts_run_when_session_is_missing() {
         .delete(&started.view.run.session_id)
         .await
         .expect("delete session");
-    tokio::time::sleep(Duration::from_millis(5)).await;
+    let deadline = started.view.nodes.iter()
+        .find_map(|node| node.timeout_deadline_ms)
+        .expect("saved deadline");
+    tokio::time::sleep(Duration::from_millis(
+        deadline.saturating_sub(bcs_protocol::now_ms()) + 5,
+    )).await;
 
     let processed = runtime
         .process_expired_node_timeouts(10, 0)
@@ -2500,7 +2545,7 @@ async fn timeout_scanner_skips_invalid_candidate_and_processes_later_run() {
     );
     let valid_yaml = single_node_yaml()
         .replace("id: single_node", "id: valid_timeout")
-        .replace("node_timeout_ms: 60000", "node_timeout_ms: 1")
+        .replace("node_timeout_ms: 60000", "node_timeout_ms: 1000")
         .replace("max_attempts: 3", "max_attempts: 1");
     let valid = runtime
         .start_state_machine_run(StartStateMachineRunCommand {
@@ -2558,7 +2603,8 @@ async fn timeout_scanner_skips_invalid_candidate_and_processes_later_run() {
     StateMachineRunRepoPort::create_run(&*store, poison_run.clone(), vec![poison_node])
         .await
         .expect("seed invalid timeout candidate");
-    tokio::time::sleep(Duration::from_millis(5)).await;
+    let deadline = valid.view.nodes.iter().find_map(|node| node.timeout_deadline_ms).expect("saved deadline");
+    tokio::time::sleep(Duration::from_millis(deadline.saturating_sub(bcs_protocol::now_ms()) + 5)).await;
 
     let processed = runtime
         .process_expired_node_timeouts(10, 0)
@@ -2627,7 +2673,7 @@ async fn single_node_run_completes_session_with_bot_final_text() {
             .await
             .expect("get run snapshot")
             .expect("run snapshot");
-    assert_inferred_default_requires(&snapshot);
+    assert_inferred_default_requires(&snapshot.definition);
     let command = delivery.commands.lock().await[0].clone();
     let params = chat_send_params(&command);
     let frontend_commands = frontend_delivery.commands.lock().await;
@@ -3273,6 +3319,41 @@ async fn state_machine_runtime_logs_run_node_and_terminal_lifecycle() {
 }
 
 #[tokio::test]
+async fn fixed_loop_preview_honors_server_limits_and_cannot_start_or_configure_v2() {
+    let group = Arc::new(GroupStore::new());
+    group.upsert(test_group()).await.unwrap();
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let delivery = Arc::new(RecordingDelivery::default());
+    let runtime = test_runtime!(
+        store.clone(), store.clone(), store.clone(), store.clone(), group,
+        test_sessions(), delivery.clone(), noop_judge(),
+    ).with_fixed_loop_limits(bcs_config_api::FixedLoopLimits {
+        max_fixed_loop_iterations: 2,
+        ..Default::default()
+    });
+    let yaml = include_str!("fixtures/fixed_loop.yaml");
+    let command = || bcs_service_api::ValidateCollaborationDefinitionYamlCommand {
+        definition_yaml: yaml.into(), judge_available: true,
+    };
+    assert!(!runtime.validate_definition_yaml(command()).await.unwrap().valid);
+    let runtime = runtime.with_fixed_loop_limits(Default::default());
+    assert!(runtime.validate_definition_yaml(command()).await.unwrap().valid);
+    let configured = runtime.configure_group_runtime(ConfigureGroupRuntimeCommand {
+        group_id: "group-1".into(), definition_yaml: Some(yaml.into()), definition: None,
+        definition_ref: None, participant_bindings: Default::default(), auto_start_on_service_invocation: true,
+    }).await;
+    assert!(matches!(configured, Err(CollaborationRuntimeError::InvalidDefinition(_))));
+    assert!(GroupRuntimeBindingRepoPort::get(store.as_ref(), "group-1").await.unwrap().is_none());
+    let started = runtime.start_state_machine_run(StartStateMachineRunCommand {
+        group_id: "group-1".into(), session_id: None, definition_yaml: Some(yaml.into()),
+        definition: None, definition_ref: None, participant_bindings: None, opening_message_override: None,
+        input: json!({}), caller_id: None, authenticated_human: None,
+    }).await;
+    assert!(matches!(started, Err(CollaborationRuntimeError::InvalidDefinition(_))));
+    assert!(delivery.commands.lock().await.is_empty());
+}
+
+#[tokio::test]
 async fn start_run_uses_group_default_definition_binding() {
     let group = Arc::new(GroupStore::new());
     group.upsert(test_group()).await.expect("seed group");
@@ -3599,8 +3680,9 @@ async fn configure_im_definition_defers_channel_validation_until_run_start() {
         .upsert(state_machine_test_group())
         .await
         .expect("seed group");
-    let sessions = test_sessions();
-    let store = Arc::new(MemoryCollaborationStore::new());
+    let session_repo = Arc::new(MemorySessionRepo::new());
+    let sessions = Arc::new(SessionManagementServiceImpl::new(session_repo.clone(), Arc::new(MemoryGroupRepo::new())));
+    let store = Arc::new(MemoryCollaborationStore::new().with_session_repo(session_repo));
     let channel_outbound = Arc::new(RecordingSessionChannelOutbound::default());
     *channel_outbound.validation_error.lock().await =
         Some("no active dingtalk ChannelBinding exists".to_string());
@@ -3928,7 +4010,7 @@ async fn start_run_from_group_binding_does_not_upsert_persisted_definition() {
             .await
             .expect("get run snapshot")
             .expect("run snapshot");
-    assert_inferred_default_requires(&snapshot);
+    assert_inferred_default_requires(&snapshot.definition);
     assert_eq!(delivery.commands.lock().await.len(), 1);
     let panels = message_repo
         .query_messages(MessageQuery {
@@ -4661,7 +4743,8 @@ async fn judged_node_timeout_records_runtime_event_and_fails_run() {
     let sessions = test_sessions();
     let store = Arc::new(MemoryCollaborationStore::new());
     let delivery = Arc::new(RecordingDelivery::default());
-    let judge = Arc::new(RecordingJudge::with_delayed_outcome("approved", 25));
+    // Leave startup enough wall time; the delayed Judge still deterministically exceeds its own timeout.
+    let judge = Arc::new(RecordingJudge::with_delayed_outcome("approved", 1500));
     let runtime = test_runtime!(
         store.clone(),
         store.clone(),
@@ -4702,7 +4785,7 @@ async fn judged_node_timeout_records_runtime_event_and_fails_run() {
     assert_eq!(view.run.status, StateMachineRunStatus::Failed);
     assert_eq!(
         view.run.error.as_deref(),
-        Some("judge timed out for node review attempt 0 after 1ms")
+        Some("judge timed out for node review attempt 0 after 1000ms")
     );
     let review = view
         .nodes
@@ -4712,7 +4795,7 @@ async fn judged_node_timeout_records_runtime_event_and_fails_run() {
     assert_eq!(review.status, StateMachineNodeStatus::Failed);
     assert_eq!(
         review.error.as_deref(),
-        Some("judge timed out for node review attempt 0 after 1ms")
+        Some("judge timed out for node review attempt 0 after 1000ms")
     );
     let failure_events = CollaborationEventRepoPort::list_events_by_run_node_and_type(
         &*store,
@@ -4728,7 +4811,7 @@ async fn judged_node_timeout_records_runtime_event_and_fails_run() {
         failure_events[0].payload["reason"].as_str(),
         Some("judge_timeout")
     );
-    assert_eq!(failure_events[0].payload["timeout_ms"].as_u64(), Some(1));
+    assert_eq!(failure_events[0].payload["timeout_ms"].as_u64(), Some(1000));
     assert_eq!(delivery.commands.lock().await.len(), 1);
 }
 
@@ -4836,6 +4919,7 @@ impl StateMachineDefinitionRepoPort for CountingDefinitionRepo {
         group_version: i32,
         definition: &CollaborationDefinition,
         resolved_participant_bindings: Option<&BTreeMap<String, ResolvedParticipantBinding>>,
+        execution_plan: Option<&bcs_service_api::port::repo::StateMachineExecutionPlanSnapshot>,
     ) -> ServiceResult<()> {
         StateMachineDefinitionRepoPort::save_run_snapshot(
             &*self.inner,
@@ -4843,6 +4927,7 @@ impl StateMachineDefinitionRepoPort for CountingDefinitionRepo {
             group_version,
             definition,
             resolved_participant_bindings,
+            execution_plan,
         )
         .await
     }
@@ -4850,7 +4935,7 @@ impl StateMachineDefinitionRepoPort for CountingDefinitionRepo {
     async fn get_run_snapshot(
         &self,
         run_id: &str,
-    ) -> ServiceResult<Option<CollaborationDefinition>> {
+    ) -> ServiceResult<Option<bcs_service_api::port::repo::StateMachineRunSnapshot>> {
         StateMachineDefinitionRepoPort::get_run_snapshot(&*self.inner, run_id).await
     }
 }
@@ -5623,7 +5708,7 @@ runtime:
       review:
         kind: bot_task
         display_name: Review
-        node_timeout_ms: 1
+        node_timeout_ms: 1000
         assignee:
           type: bot_binding
           binding: driver

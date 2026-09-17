@@ -68,9 +68,27 @@ pub struct CollaborationDefinitionParticipantSlot {
     pub assigned: bool,
 }
 
+/// Logical Loop display descriptor. Body IDs are logical IDs, never execution IDs.
+/// Preview uses validated authoring; Run graphs use immutable Run authoring snapshots.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StateMachineLoopGraphView {
+    pub display_name: String,
+    pub max_iterations: u32,
+    pub entry_node_id: String,
+    pub result_node_id: String,
+    pub body_node_ids: Vec<String>,
+    pub continue_outcomes: Vec<String>,
+    pub break_outcomes: Vec<String>,
+    pub exhausted_outcome: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CollaborationDefinitionGraphPreview {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub loops: BTreeMap<String, StateMachineLoopGraphView>,
     pub graph_mode: StateMachineGraphMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_graph_mode: Option<StateMachineGraphMode>,
     pub nodes: Vec<CollaborationDefinitionGraphNode>,
     pub edges: Vec<CollaborationDefinitionGraphEdge>,
 }
@@ -84,6 +102,8 @@ pub struct CollaborationDefinitionGraphNode {
     pub assignee: Option<StateMachineAssignee>,
     pub final_output: bool,
     pub judge: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<bcs_domain::StateMachineNodeExecutionMetadata>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -91,6 +111,8 @@ pub struct CollaborationDefinitionGraphEdge {
     pub source: String,
     pub target: String,
     pub outcome: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loop_route: Option<bcs_domain::StateMachineLoopRoute>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -249,6 +271,8 @@ pub struct PendingHumanNodeView {
     pub timeout_deadline_ms: Option<u64>,
     #[serde(default)]
     pub upstream_artifacts: Vec<JudgeArtifact>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loop_context: Option<bcs_domain::LoopContext>,
 }
 
 #[derive(Debug, Clone)]
@@ -321,6 +345,9 @@ pub struct GroupCollaborationDefinitionView {
 pub struct StateMachineRunView {
     pub run: StateMachineRun,
     pub nodes: Vec<StateMachineNodeRun>,
+    /// Complete Loop body mapping from the saved plan, keyed by execution node ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node_execution_metadata: Option<BTreeMap<String, bcs_domain::StateMachineNodeExecutionMetadata>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub judge_outputs: Vec<StateMachineJudgeOutputView>,
 }
@@ -347,6 +374,8 @@ pub enum StateMachineNodeSubStatus {
 pub struct StateMachineNodeRunView {
     pub node: StateMachineNodeRun,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<bcs_domain::StateMachineNodeExecutionMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sub_status: Option<StateMachineNodeSubStatus>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub judge_outputs: Vec<StateMachineJudgeOutputView>,
@@ -354,6 +383,8 @@ pub struct StateMachineNodeRunView {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateMachineRunGraphView {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub loops: BTreeMap<String, StateMachineLoopGraphView>,
     pub run: StateMachineRun,
     pub definition: StateMachineGraphDefinitionView,
     pub nodes: Vec<StateMachineGraphNodeView>,
@@ -367,6 +398,10 @@ pub struct StateMachineGraphDefinitionView {
     pub name: String,
     pub graph_mode: StateMachineGraphMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_graph_mode: Option<StateMachineGraphMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_plan_compiler_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initial_node: Option<String>,
     #[serde(default)]
     pub initial_nodes: Vec<String>,
@@ -375,6 +410,8 @@ pub struct StateMachineGraphDefinitionView {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateMachineGraphNodeView {
     pub node_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<bcs_domain::StateMachineNodeExecutionMetadata>,
     pub display_name: String,
     pub kind: StateMachineNodeKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -384,6 +421,8 @@ pub struct StateMachineGraphNodeView {
     pub status: Option<StateMachineNodeStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attempt: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assignee_bot_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -401,6 +440,8 @@ pub struct StateMachineGraphEdgeView {
     pub target: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guard: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loop_route: Option<bcs_domain::StateMachineLoopRoute>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -424,6 +465,39 @@ pub struct RerunStateMachineOutcome {
 pub struct CancelStateMachineRunCommand {
     pub run_id: String,
     pub reason: Option<String>,
+}
+
+/// One bounded progression sweep. Failures are returned per Run so a corrupt
+/// snapshot or failed write cannot starve later Runs or be reported as success.
+#[derive(Debug, Clone, Default)]
+pub struct StateMachineProgressionRecoveryPage {
+    pub scanned: usize,
+    /// Successful reconciliation passes, including Runs already waiting safely.
+    pub reconciled: usize,
+    pub next_run_id: Option<String>,
+    pub failures: Vec<StateMachineProgressionRecoveryFailure>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StateMachineProgressionRecoveryFailure {
+    pub run_id: String,
+    pub error: String,
+}
+
+/// Bounded Service Session completion sweep, independent of Running Run pages.
+/// `completed` counts CAS winners only; unrelated or newer activations are skipped.
+#[derive(Debug, Clone, Default)]
+pub struct StateMachineSessionRecoveryPage {
+    pub scanned: usize,
+    pub completed: usize,
+    pub next_session_id: Option<String>,
+    pub failures: Vec<StateMachineSessionRecoveryFailure>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StateMachineSessionRecoveryFailure {
+    pub session_id: String,
+    pub error: String,
 }
 
 #[derive(Debug, Clone)]
@@ -522,6 +596,16 @@ pub trait CollaborationRuntimeService: Send + Sync {
         Err(CollaborationRuntimeError::InvalidRequest(
             "session human input is not implemented".to_string(),
         ))
+    }
+
+    /// Read-only preflight for a saved notification, including queued promotion.
+    /// Check the exact Running node/deadline, Run and Session activation. This
+    /// is not a lease: cancellation after a send barrier can still race IO.
+    async fn human_input_notification_is_current(
+        &self, run_id: &str, session_id: &str, node_id: &str, deadline_ms: u64,
+    ) -> Result<bool, CollaborationRuntimeError> {
+        let _ = (run_id, session_id, node_id, deadline_ms);
+        Err(CollaborationRuntimeError::InvalidRequest("HumanInput notification guard is not implemented".into()))
     }
 
     async fn list_pending_human_nodes(
@@ -806,5 +890,50 @@ pub trait CollaborationRuntimeService: Send + Sync {
     ) -> Result<usize, CollaborationRuntimeError> {
         let _ = (limit, timeout_grace_ms);
         Ok(0)
+    }
+
+    /// Reconcile checkpoint-backed startup, completed-node progression, saved
+    /// failure actions and persisted Judging work in one bounded Pending/Running page. Judge takeover uses a fenced
+    /// Node lease and the original input/attempt. Never resend a Running Bot or
+    /// infer an unpersisted opening/publication. Terminal Sessions have a separate page.
+    async fn recover_state_machine_progression(
+        &self,
+        after_run_id: Option<String>,
+        limit: usize,
+    ) -> Result<StateMachineProgressionRecoveryPage, CollaborationRuntimeError> {
+        let _ = (after_run_id, limit);
+        Err(CollaborationRuntimeError::InvalidRequest(
+            "State-machine progression recovery is not configured".into(),
+        ))
+    }
+
+    /// Retire unfinished dispatch/Chat work and Node leases for terminal Runs.
+    /// Independent bounded cursor; no compilation, delivery or result changes.
+    async fn cleanup_state_machine_terminal_work(&self, after_run_id: Option<String>, limit: usize)
+        -> Result<StateMachineProgressionRecoveryPage, CollaborationRuntimeError> {
+        let _ = (after_run_id, limit);
+        Err(CollaborationRuntimeError::InvalidRequest("terminal cleanup is not configured".into()))
+    }
+
+    /// Recover persisted terminal IM intents, including already completed
+    /// Sessions. Uses an independent bounded Run cursor; no Run outcome changes.
+    async fn recover_state_machine_terminal_im(&self, after_run_id: Option<String>, limit: usize)
+        -> Result<StateMachineProgressionRecoveryPage, CollaborationRuntimeError> {
+        let _ = (after_run_id, limit);
+        Err(CollaborationRuntimeError::InvalidRequest("terminal IM recovery is not configured".into()))
+    }
+
+    /// Complete still-Running Service Sessions from their terminal Run's saved
+    /// result and activation, preserving normal callback dispatch and preparing
+    /// terminal IM intents before the Session leaves the recovery page.
+    async fn recover_state_machine_sessions(
+        &self,
+        after_session_id: Option<String>,
+        limit: usize,
+    ) -> Result<StateMachineSessionRecoveryPage, CollaborationRuntimeError> {
+        let _ = (after_session_id, limit);
+        Err(CollaborationRuntimeError::InvalidRequest(
+            "State-machine Session recovery is not configured".into(),
+        ))
     }
 }

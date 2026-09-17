@@ -49,6 +49,7 @@
 // `agentpass` is a bin-local module (dead code here: `AUTH_VIA_AGENT_PASS = false`).
 // It stays as `src/agentpass.rs` so the internal `#[path]` reuse of this file
 // resolves it identically.
+mod collaboration_output;
 mod agentpass;
 // `oauth` is now a `pub mod` on the `bcs_cli` library (public extension point,
 // resolved via `inventory`). Public builds link no provider and fall back to a
@@ -1006,6 +1007,11 @@ fn emit_collaboration_validation(validation: &serde_json::Value, structured_mode
             "  Nodes: {}",
             summary.get("nodes").and_then(serde_json::Value::as_u64).unwrap_or(0)
         );
+        if let Some(graph) = validation.get("graph") {
+            if graph.get("execution_graph_mode").is_some() {
+                print!("{}", collaboration_output::render(graph));
+            }
+        }
     } else if let Some(errors) = validation.get("errors").and_then(serde_json::Value::as_array) {
         for error in errors {
             println!(
@@ -1016,6 +1022,14 @@ fn emit_collaboration_validation(validation: &serde_json::Value, structured_mode
             );
         }
     }
+    if let Some(warnings) = validation.get("warnings").and_then(serde_json::Value::as_array) {
+        for warning in warnings {
+            println!("WARNING {} {}: {}", warning.get("code").and_then(serde_json::Value::as_str).unwrap_or("WARNING"),
+                warning.get("path").and_then(serde_json::Value::as_str).unwrap_or("$"),
+                warning.get("message").and_then(serde_json::Value::as_str).unwrap_or(""));
+        }
+    }
+
 }
 
 /// Skill→BCS interactive debug
@@ -1497,6 +1511,30 @@ enum CollaborationCommands {
         /// Whether the optional panel tab is closable
         #[arg(long, requires = "panel_component")]
         panel_tab_closable: Option<bool>,
+    },
+
+    /// Inspect a Run, graph, exact execution node, or pending Human inputs
+    Query {
+        #[arg(long)]
+        run: String,
+        /// Execution node ID copied from a Run or graph response
+        #[arg(long, conflicts_with_all = ["graph", "pending"])]
+        node: Option<String>,
+        #[arg(long, conflicts_with = "pending")]
+        graph: bool,
+        #[arg(long)]
+        pending: bool,
+    },
+
+    /// Reply to an exact pending Human execution node using natural language
+    Respond {
+        #[arg(long)]
+        run: String,
+        /// Copy the execution ID from `collaborate query --pending`
+        #[arg(long)]
+        node: String,
+        #[arg(long)]
+        content: String,
     },
 
     /// Validate a custom collaboration definition against the current BCS server
@@ -3223,7 +3261,28 @@ pub async fn run() -> Result<()> {
                             .and_then(serde_json::Value::as_str)
                             .unwrap_or("?")
                     );
+                    if result.get("node_execution_metadata").is_some() {
+                        print!("{}", collaboration_output::render(&result));
+                    }
                 }
+            }
+
+            CollaborationCommands::Query { run, node, graph, pending } => {
+                let token = get_token(token.as_deref())?;
+                let client = create_client(&bcs_url, &token, bcs_cookie.as_deref(), oauth_headers.as_ref());
+                let suffix = if let Some(node) = node.as_deref() { vec!["nodes", node] }
+                    else if graph { vec!["graph"] } else if pending { vec!["pending-human-nodes"] } else { vec![] };
+                let result = client.query_collaboration_run(&run, &suffix).await?;
+                if structured_mode { println!("{}", serde_json::to_string(&result)?); }
+                else { print!("{}", collaboration_output::render(&result)); }
+            }
+
+            CollaborationCommands::Respond { run, node, content } => {
+                let token = get_token(token.as_deref())?;
+                let client = create_client(&bcs_url, &token, bcs_cookie.as_deref(), oauth_headers.as_ref());
+                let result = client.respond_collaboration_node(&run, &node, &content).await?;
+                if structured_mode { println!("{}", serde_json::to_string(&result)?); }
+                else { print!("{}", collaboration_output::render(&result)); }
             }
 
             CollaborationCommands::Validate { file } => {

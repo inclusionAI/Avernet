@@ -28,6 +28,183 @@ Consumers are the System dispatcher, session/group launch and shared queue runti
 Memory/SQLite conformance covers persistence, and queued System tests cover the
 dispatcher-to-Send boundary without native inject.
 
+- Terminal Run cleanup has an independent bounded Run-ID page. Each write
+  rechecks terminal state, retires unfinished dispatch/Chat work and clears
+  Node phase/lease without deleting payloads, outcomes or fencing tokens.
+  Partial writes are resumable; cleanup performs no external IO.
+- HumanInput recovery reuses saved request text/target/deadline. The Channel
+  repository CAS from NotificationPending to Notifying grants one external
+  invocation; Notifying, including legacy zero-attempt rows, is never resent.
+  Runtime supplies a read-only Run/Session activation/node/deadline preflight;
+  this is not a cross-Store transaction or an external exactly-once guarantee.
+  Existing requests return covered execution node IDs so the active-Run
+  scanner only reconstructs missing ready events from the immutable snapshot.
+
+- Missing startup facts have a non-renewable 90-second preparation grace from
+  saved Run creation. An active creator is protected during that interval;
+  expiry permits conditional revocation, not a claim that its process died.
+  The Run failure CAS and typed startup-failure fact share a small transaction
+  only on this failure path. Restored facts or a terminal Run make stale CAS
+  fail. Snapshot-less Session completion requires that matching typed fact and
+  original activation; it neither recompiles a definition nor fabricates IM.
+  Missing Bot dispatch payloads use the saved Node timeout/retry policy, or
+  saved start + 90 seconds and FailRun when timeout is disabled (legacy absent
+  start uses Run creation). The Node CAS rechecks absent payload, attempt and
+  no artifact or Provider run ID; it never resends that attempt. A saved Provider
+  run ID is positive acceptance evidence even without a checkpoint, so it keeps
+  waiting under the original Node timeout policy. Legacy/mixed writers still require
+  pre-FO drain. No normal-path writes, migration, new worker or cross-Store
+  transaction is added.
+
+- Terminal IM checkpoints freeze the original Run/Session activation, destination
+  set, rendered text and deadline before Session completion. Per-recipient
+  progress and a cleanup marker use short owner/token leases and JSON CAS;
+  every send and acknowledgement requires the same Completed Service activation.
+  Preflight is read-only and may retry while unsent; Sending/unknown is never
+  resent because Channel delivery has no uniform idempotency guarantee. Partial
+  delivery remains explicit and does not alter the terminal Run outcome. A
+  separate bounded checkpoint page also covers already completed Sessions.
+  Memory/SQLite/MySQL share repository contracts; Channel ports separate pure
+  preparation, preflight, external delivery and existing terminal cleanup.
+
+- Chat result publication checkpoints freeze the original command, timestamp and
+  deadline in the existing delivery table. Only Pending may claim and start IO;
+  owner/token/expiry and active-Run fencing protect acknowledgements. Delivered
+  resumes Run completion without sending again; Failed resumes original failure.
+  Delivering is never replayed: history deduplication does not cover message-flow
+  Bot routing. Uncertainty fails at the original deadline and may have produced a
+  visible result. Persistence errors propagate. Memory, SQLite and MySQL share
+  conformance tests; the active-Run scanner uses the same foreground path. No new
+  public state, migration, whole-workflow transaction or worker is introduced.
+
+- `StateMachineLoopInstrumentationHook` observes committed entry/result transitions
+  and typed v2 compiler rejection through closed metric enums. It cannot receive
+  Run/Node/Bot IDs, raw outcomes or artifact payloads. The synchronous hook must
+  not block or fail execution. Completed-node replay does not recount; a crash
+  after commit can lose an observation. Runtime emits signals, bootstrap selects
+  the Prometheus implementation, and test-support provides noop/conformance
+  consumers. Existing HTTP/Event contracts and persistence are unchanged.
+
+- State Machine Run views expose an optional `node_execution_metadata` map
+  covering every Loop body execution node in start/get/rerun responses. Node
+  queries and graph nodes use the same `execution` object; graph result edges
+  preserve their real outcome and carry the saved `loop_route`. Graph definitions
+  retain authoring graph_mode and add execution_graph_mode and
+  execution_plan_compiler_version.
+  Runtime reads the validated immutable plan, without parsing IDs, recompiling
+  v2 authoring or consulting current limits. Read-only queries are independent
+  of the execution switch. V1 omits these fields; legacy Run/Node rows without
+  snapshots retain their existing raw read path. Present v2 snapshots with a
+  missing, corrupt or unsupported plan fail instead of returning partial metadata.
+  Both HTTP adapters, public Session creation, OpenAPI and panel DTOs preserve
+  the projection. Graph node `outcome` is the saved actual outcome; consumers
+  compare it with edge.outcome instead of inferring selection from target state.
+
+- Public Node started/completed/retry_scheduled Events carry the same optional
+  execution object from the saved plan. Existing Event CAS/transactions remain
+  unchanged. Eventing full and metadata_only projections preserve this metadata.
+  V2 Completed-node output history saves metadata.state_machine.execution with
+  a stable message key before successor progression. Write failures propagate;
+  the existing active-Run scanner can repeat the local history write. Bot output
+  stays FullOnly, Human output is directed to its saved responder. History batch
+  reads return the stored metadata verbatim; legacy v1/pre-persistence output
+  retains the snapshot projection. This is not Chat final-result publication
+  or terminal-Run cleanup, which remain separate FO work.
+
+- Bot dispatch checkpoints freeze the rendered request, delivery identity, target
+  reference and original deadline before external IO. URLs, credentials and
+  forwarding headers are excluded. Normal dispatch and recovery share a short
+  owner/token lease and a durable Pending-to-Delivering send marker. Only Pending
+  requests may be sent; Delivering is never replayed without a transport guarantee.
+  ACK and ambiguous-dispatch expiry fence the active Node/attempt and checkpoint
+  together in a small local transaction. Rejected delivery preserves the existing
+  fatal policy; expiry saves the original retry/fail_run decision. If Node timeout
+  is disabled, the saved Provider deadline bounds ambiguity only. Missing payloads
+  converge only at the saved timeout/preparation deadline, without rebuilding
+  today's request or inferring an unsent state.
+
+- Opening checkpoints save immutable rendered text/component and Run identity
+  before startup. Pending/Running recovery persists that original history and
+  marks its barrier before dispatching unstarted initial nodes. A fixed message
+  primary key and a checkpoint CAS suffice for this local write; there is no
+  external-delivery lease or frontend acknowledgement. Missing startup facts
+  wait for the saved preparation grace, then fail through a conditional Run
+  update and typed failure fact, without rerendering today's Group.
+
+- Judge input persistence records an explicit Node judging phase and immutable
+  artifact/responder. Normal Bot/Human responses and recovery share a short Node
+  lease. FinishJudge fences active Run, Running Node, attempt, owner, monotonic
+  token and lease deadline, then commits terminal state, saved failure action,
+  existing Judge audit and optional public completion Event in one local
+  transaction. Memory/MySQL/SQLite implement the same repo contract. Legacy
+  artifact-only rows are not claimable; delivery correlation never uses this
+  lease token. Completed Judges are not called again; a remote result lost before
+  local commit may be reevaluated with the same saved input and attempt.
+
+- Experimental completed-node progression recovery returns bounded cursor pages
+  with explicit per-Run failures. The Run repository separately pages Pending
+  and Running rows by exclusive run_id under environment/status filters; the
+  runtime merges them under one bounded cursor. Memory and SQL share
+  pagination and Pending/Ready/RetryScheduled skip-CAS conformance tests.
+  Recovery requires immutable snapshots, retains uncertain Running attempts,
+  and resumes Chat finalization from immutable publication facts. It does not
+  infer creator death from absent payloads: bounded preparation expiry and
+  repository conditions decide whether missing-fact convergence may commit.
+  Terminal IM uses its own checkpoint recovery page, independent of active Runs.
+  Already committed RetryScheduled attempts use
+  their saved identity; no extra attempt is created by progression itself.
+
+- Failed-attempt recovery uses a repo-only `StateMachineFailureAction` saved
+  alongside Failed/error/completed_at by one Running-attempt CAS. Retry scheduling
+  clears this action; a saved FailRun cannot be retried. Missing/unknown legacy
+  decisions fail closed, without guessing from error text or current configuration.
+  Memory and SQL share failure/retry/eventful conformance tests. SQL eventful CAS
+  races may surface the existing Conflict error and are retried by a later scan.
+
+- A separate terminal-Run recovery page scans Running ServiceInvocation Sessions
+  by exclusive Session id, then completes only the Run's saved activation from
+  its immutable snapshot and persisted terminal result. Session application and
+  repository contracts provide an activation CAS; Memory/SQL implementations
+  and the runtime-cleanup decorator must preserve it. Normal State Machine
+  completion, failure, and cancellation use the same CAS, propagate write errors,
+  and dispatch callbacks only from the returned activation snapshot. Missing
+  activation metadata is never inferred from the current Session. Completed/Failed
+  Run recovery prepares the immutable terminal IM intent before completing the
+  Session, then shares the foreground delivery path. Chat publication uses its
+  separate checkpoint; no HTTP endpoint or new callback payload is introduced.
+
+- Pending HumanInput views and HumanInputReadyEvent optionally carry the shared
+  LoopContext. A Loop entry includes all four fields, with explicit null only
+  for the first iteration's previous_result; ordinary nodes omit the context.
+  Channel direct-assignee notifications show the complete prior result in a
+  separate section. Shared-group notifications keep iteration information and
+  point to Workbench without exposing private output/outcome/result identities.
+  The structured context is never redacted into a false first-iteration null.
+  Rendered text is saved in the existing HumanInputRequest before delivery;
+  replay and queue activation use the original text/destination/deadline.
+  Replayed Active/terminal requests do not send again. Notifying replay keeps
+  the original interaction stream key; provider retry/exhaustion semantics stay
+  unchanged. Queue activation propagates persistence errors instead of treating
+  them as delivery failures. This does not add a recovery scanner or guarantee
+  exactly-once external delivery across ambiguous multi-instance failures.
+
+- State Machine snapshots return authoring, resolved bindings and an optional
+  complete execution-plan envelope. Saving all snapshot fields is one immutable
+  write; rerun copies the same envelope in its existing creation transaction.
+  V1 omits the envelope; v2 requires plan, hash and compiler version together.
+
+- Definition validation preview optionally projects a compiled acyclic graph
+  with shared node execution metadata and result-edge loop routes, preserving
+  the authoring graph mode. V2 preview reports VALIDATION_ONLY_FEATURE when
+  the runtime's execution capability is disabled. Explicit deployment opt-in
+  enables both validation and persisted-plan execution; v1 omits the added fields.
+
+- Preview and Run graph optionally expose a `loops` map of StateMachineLoopGraphView.
+  These logical descriptors come from validated authoring / immutable Run snapshots.
+  Existing flattened nodes/edges remain unchanged; body logical IDs map to opaque
+  execution IDs via execution metadata. No new persisted state or execution node kind.
+  Consumers: both HTTP adapters, OpenAPI contracts, frontend preview and BCS panel.
+
 DeliveryAdmissionTarget carries a typed per-recipient rejection, committed as an
 unsent Failed delivery without aborting other recipients. DeliveryStatusView
 adds optional fixed admission_error codes, never arbitrary transport error text.
@@ -45,6 +222,14 @@ Failed Group terminals admit a primary chat_error string projection and an
 optional preceding chat display companion, atomically with Failed lifecycle CAS.
 The error has no delivery targets or message.created event and never enters
 run_reply reconstruction. Bot history filters the projection before conversion.
+
+MessageRepoPort also provides append_message_with_id for a caller-owned stable
+logical message id. Memory and SQL return one stored message and one sequence
+under concurrent replay; callers must verify original content and identity.
+SQL relies on the existing message primary key and rolls back the duplicate
+insert's sequence allocation. The old client_msg_id lookup alone is not a
+concurrent uniqueness guarantee. Memory/SQLite/MySQL Text and Prepared contracts
+cover this path; custom implementations default to an explicit storage error.
 
 Control work_batch ignores the legacy ID cursor and reserves per-action shares
 under one total limit; timeout classes use deadline order. This internal contract

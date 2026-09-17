@@ -120,6 +120,9 @@ impl HumanMessageView {
 
 pub const BCS_STATE_MACHINE_MESSAGE_SENDER: &str = "bcs_state_machine";
 pub const BCS_STATE_MACHINE_MESSAGE_SENDER_NAME: &str = "BCS State Machine";
+/// Persisted v2 node output; public history retains the existing role/message shape.
+pub const STATE_MACHINE_OUTPUT_MESSAGE_TYPE: &str = "state_machine_output";
+
 pub const STATE_MACHINE_PANEL_MESSAGE_TYPE: &str = "state_machine_panel";
 pub const STATE_MACHINE_HUMAN_INPUT_PROMPT_MESSAGE_TYPE: &str =
     "state_machine_human_input_prompt";

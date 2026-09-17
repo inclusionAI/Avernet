@@ -1,9 +1,20 @@
+pub mod collaboration_terminal_im;
+mod collaboration_recovery;
+pub use collaboration_recovery::*;
+pub use collaboration_terminal_im::{StateMachineTerminalImPayload, StateMachineTerminalImProgress, StateMachineTerminalImDelivery, StateMachineTerminalImStatus, StateMachineTerminalImCheckpoint, StateMachineTerminalImClaim};
+pub mod collaboration_publication;
+pub use collaboration_publication::{StateMachineChatResultPayload, StateMachineChatResultCheckpoint, StateMachineChatResultStatus, StateMachineChatResultClaim, StateMachineChatResultOutcome};
 pub mod bot;
 pub mod bot_actor_config;
 pub mod bot_control_plane;
 pub mod channel;
 pub mod chat_run;
 pub mod collaboration;
+pub mod collaboration_dispatch;
+pub use collaboration_dispatch::{
+    StateMachineDispatchPayload, StateMachineDispatchTarget, StateMachineDispatchStatus,
+    StateMachineDispatchCheckpoint, StateMachineDispatchClaim, StateMachineDispatchResult,
+};
 pub mod collaboration_template;
 pub mod edge_grant;
 pub mod event;
@@ -36,6 +47,10 @@ pub use collaboration::{
     CollaborationDefinitionRecord, CollaborationEventRecord, CollaborationEventRepoPort,
     CreateStateMachineRerun, CreateStateMachineRerunOutcome, GroupRuntimeBindingRepoPort,
     MarkHumanNodeRunningCommand, StateMachineDefinitionRepoPort, StateMachineEventfulTransition,
+    FailStateMachineNodeAttempt, StateMachineFailureAction, StateMachineNodeAttemptFailure,
+    FinishStateMachineJudge, StateMachineJudgeClaim, StateMachineJudgeResult,
+    StateMachineOpeningPayload, StateMachineOpeningCheckpoint,
+    StateMachineExecutionPlanSnapshot, StateMachineRunSnapshot,
     StateMachineRunRepoPort,
 };
 pub use collaboration_template::{CollaborationTemplateEntry, CollaborationTemplateRepoPort};

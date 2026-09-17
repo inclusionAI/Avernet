@@ -620,6 +620,7 @@ fn default_tag_labels() -> BTreeMap<String, BTreeMap<String, String>> {
         ("branching", "条件分支", "Branching"),
         ("parallel", "并行", "Parallel"),
         ("serial", "串行", "Serial"),
+        ("loop", "循环", "Loop"),
         ("single-step", "单步", "Single Step"),
     ]
     .into_iter()
@@ -717,6 +718,7 @@ runtime:
                 "bot-human-bot-review",
                 "world-cup-preview-content-production",
                 "micro-merchant-event-orchestration",
+                "write-review-loop",
                 "single-bot-guided-answer",
             ]
         );
@@ -756,11 +758,12 @@ runtime:
                 "single-bot-guided-answer",
                 "bot-human-bot-review",
                 "write-and-review",
+                "write-review-loop",
             ]
         );
         let judge_template = response
             .templates
-            .last()
+            .iter().find(|template| template.id == "write-and-review")
             .ok_or_else(|| std::io::Error::other("missing judge template"))?;
         assert_eq!(judge_template.name, "写作质检协同（需要启用 LLM）");
         assert_eq!(judge_template.priority, DEFAULT_PRIORITY);
@@ -772,7 +775,7 @@ runtime:
                 tags: vec!["judge".to_string()],
             })
             .await?;
-        assert_eq!(english_response.templates.len(), 2);
+        assert_eq!(english_response.templates.len(), 3);
         assert_eq!(
             english_response
                 .templates
@@ -782,6 +785,7 @@ runtime:
             vec![
                 "Bot-Human-Bot Review (requires LLM)",
                 "Write & Review (requires LLM)",
+                "Writing Review Loop (requires LLM)",
             ]
         );
 
@@ -819,6 +823,41 @@ runtime:
             "Parallel Expert Review"
         );
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn returns_localized_loop_template_with_editorial_judge() -> Result<(), Box<dyn std::error::Error>> {
+        let repo = Arc::new(FileCollaborationTemplateRepo::new(seed_template_dir()));
+        let service = CollaborationTemplateServiceImpl::new(repo, "zh-CN").with_judge_templates_enabled(true);
+        for (lang, name) in [("zh-CN", "写作评审循环（Loop）"), ("en-US", "Writing Review Loop")] {
+            let list = service.list_templates(ListCollaborationTemplatesQuery {
+                requested_language: Some(lang.into()),
+                accept_language: None,
+                tags: vec!["loop".into()],
+            }).await?;
+            assert_eq!(list.templates.len(), 1);
+            assert_eq!(list.templates[0].id, "write-review-loop");
+            assert_eq!(list.templates[0].name, name);
+            assert_eq!(list.templates[0].priority, 35);
+            assert_eq!(list.templates[0].available_languages, vec!["zh-CN", "en-US"]);
+            assert_eq!(list.tag_labels["loop"][lang], if lang == "zh-CN" { "循环" } else { "Loop" });
+            for role in ["writer", "reviewer", "polisher"] {
+                assert!(list.templates[0].participants[role].required);
+            }
+            let detail = service.get_template(GetCollaborationTemplateQuery {
+                template_id: "write-review-loop".into(),
+                requested_language: Some(lang.into()),
+                accept_language: None,
+                format: CollaborationTemplateFormat::Yaml,
+            }).await?;
+            assert_eq!(detail.name, name);
+            assert_eq!(detail.lang, lang);
+            assert_eq!(detail.definition["runtime"]["state_machine"]["version"], 2);
+            assert_eq!(detail.definition["runtime"]["state_machine"]["nodes"]["revision_rounds"]["loop"]["max_iterations"], 3);
+            let parsed: CollaborationDefinition = serde_yaml::from_str(&detail.yaml)?;
+            assert!(parsed.uses_judge());
+        }
         Ok(())
     }
 

@@ -1,3 +1,7 @@
+#[path = "support/recovery_gap_contract.rs"]
+mod recovery_gap_contract;
+#[path = "support/terminal_cleanup_contract.rs"]
+mod terminal_cleanup_contract;
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::Arc,
@@ -29,6 +33,229 @@ use tokio::sync::Mutex;
 #[path = "../../../bootstrap/bcs/src/migrations.rs"]
 #[allow(dead_code)]
 mod bootstrap_migrations;
+
+#[path = "support/real_mysql_fixed_loop.rs"]
+mod real_mysql_fixed_loop;
+
+#[path = "support/failure_contract.rs"]
+mod failure_contract;
+
+#[path = "support/judge_contract.rs"]
+mod judge_contract;
+
+#[path = "support/opening_contract.rs"]
+mod opening_contract;
+
+#[path = "support/progression_contract.rs"]
+mod progression_contract;
+
+#[tokio::test]
+async fn mysql_progression_query_is_bounded_and_propagates_database_failure() {
+    let db = Arc::new(RecordingDb::default());
+    let store = MySqlCollaborationStore::new(db.clone(), "test".into());
+    store.list_running_runs(Some("run-cursor"), 7).await.unwrap();
+    let queries = db.queries.lock().await;
+    let query = &queries[0];
+    assert!(query.sql().contains("env = ? AND status = 'running' AND record_status = 'active'"));
+    assert!(query.sql().contains("run_id > ? ORDER BY run_id ASC LIMIT ?"));
+    assert_eq!(query.params(), &[DbValue::from("test"), DbValue::from("run-cursor"), DbValue::from(7u64)]);
+    assert!(MySqlCollaborationStore::new(Arc::new(AlwaysFailDb), "test".into())
+        .list_running_runs(None, 7).await.is_err());
+}
+
+fn fixed_loop_snapshot_fixture() -> bcs_service_api::port::repo::StateMachineRunSnapshot {
+    use bcs_service_api::port::repo::{StateMachineExecutionPlanSnapshot, StateMachineRunSnapshot};
+    use sha2::{Digest, Sha256};
+
+    let mut definition = serde_json::to_value(test_definition()).unwrap();
+    let answer = definition["runtime"]["state_machine"]["nodes"]["answer"].clone();
+    let mut body = answer.clone();
+    body["final_output"] = json!(false);
+    definition["runtime"]["state_machine"] = json!({
+        "version": 2, "graph_mode": "hierarchical",
+        "nodes": {
+            "rounds": {"kind": "loop", "display_name": "Rounds", "loop": {
+                "mode": "fixed", "max_iterations": 2, "entry_node": "step", "result_node": "step",
+                "continue_outcomes": ["complete"], "break_outcomes": [], "exhausted_outcome": "exhausted",
+                "nodes": {"step": body.clone()}
+            }, "transitions": {"exhausted": {"targets": ["answer"]}}},
+            "answer": answer.clone()
+        }
+    });
+    let mut first = body.clone();
+    first["transitions"] = json!({"complete": {"targets": ["ln-stored-2"]}});
+    let mut second = body;
+    second["transitions"] = json!({"complete": {"targets": ["answer"]}});
+    let compiler = "bcs.fixed-loop.compiler/v1";
+    let plan: bcs_domain::StateMachineExecutionPlan = serde_json::from_value(json!({
+        "compiler_version": compiler,
+        "state_machine": {"version": 1, "graph_mode": "acyclic", "nodes": {
+            "ln-stored-1": first, "ln-stored-2": second, "answer": answer
+        }},
+        "node_metadata": {
+            "ln-stored-1": {"execution_node_id": "ln-stored-1", "definition_node_id": "step", "loop_id": "rounds", "iteration": 1, "max_iterations": 2, "is_loop_entry": true, "is_loop_result": true, "previous_result_node_id": null},
+            "ln-stored-2": {"execution_node_id": "ln-stored-2", "definition_node_id": "step", "loop_id": "rounds", "iteration": 2, "max_iterations": 2, "is_loop_entry": true, "is_loop_result": true, "previous_result_node_id": "ln-stored-1"},
+            "answer": {"execution_node_id": "answer", "definition_node_id": "answer", "loop_id": null, "iteration": null, "max_iterations": null, "is_loop_entry": false, "is_loop_result": false, "previous_result_node_id": null}
+        },
+        "edge_metadata": [
+            {"source_execution_node_id": "ln-stored-1", "outcome": "complete", "target_execution_node_id": "ln-stored-2", "artifact_projection": "control_only", "loop_route": {"kind": "continue", "logical_outcome": "complete"}},
+            {"source_execution_node_id": "ln-stored-2", "outcome": "complete", "target_execution_node_id": "answer", "artifact_projection": "artifact", "loop_route": {"kind": "exhausted", "logical_outcome": "exhausted"}}
+        ]
+    })).unwrap();
+    let content_hash = format!("{:x}", Sha256::digest(serde_json::to_vec(&plan).unwrap()));
+    StateMachineRunSnapshot {
+        definition: serde_json::from_value(definition).unwrap(),
+        execution_plan: Some(StateMachineExecutionPlanSnapshot { plan, content_hash, compiler_version: compiler.into() }),
+        resolved_participant_bindings: Some(BTreeMap::from([("driver".into(), ResolvedParticipantBinding {
+            source: "group_runtime_binding".into(), binding_source: Some("manual".into()),
+            bot_ids: vec!["original-bot".into()], participants: Vec::new(), extensions: Default::default(),
+        })])),
+    }
+}
+
+fn assert_snapshot_eq(
+    actual: &bcs_service_api::port::repo::StateMachineRunSnapshot,
+    expected: &bcs_service_api::port::repo::StateMachineRunSnapshot,
+) {
+    assert_eq!(serde_json::to_value(&actual.definition).unwrap(), serde_json::to_value(&expected.definition).unwrap());
+    let actual_plan = actual.execution_plan.as_ref().unwrap();
+    let expected_plan = expected.execution_plan.as_ref().unwrap();
+    assert_eq!(serde_json::to_value(&actual_plan.plan).unwrap(), serde_json::to_value(&expected_plan.plan).unwrap());
+    assert_eq!(actual_plan.content_hash, expected_plan.content_hash);
+    assert_eq!(actual_plan.compiler_version, expected_plan.compiler_version);
+    assert_eq!(serde_json::to_value(&actual.resolved_participant_bindings).unwrap(), serde_json::to_value(&expected.resolved_participant_bindings).unwrap());
+}
+
+async fn snapshot_round_trip_is_immutable(store: &dyn StateMachineDefinitionRepoPort) {
+    let run = test_run();
+    let snapshot = fixed_loop_snapshot_fixture();
+    store.save_run_snapshot(&run, 7, &snapshot.definition, snapshot.resolved_participant_bindings.as_ref(), snapshot.execution_plan.as_ref()).await.unwrap();
+    let mut changed = snapshot.clone();
+    changed.definition.name = "Changed authoring".into();
+    changed.resolved_participant_bindings.as_mut().unwrap().get_mut("driver").unwrap().bot_ids = vec!["replacement".into()];
+    changed.execution_plan.as_mut().unwrap().content_hash = "0".repeat(64);
+    store.save_run_snapshot(&run, 7, &changed.definition, changed.resolved_participant_bindings.as_ref(), changed.execution_plan.as_ref()).await.unwrap();
+    let loaded = store.get_run_snapshot(&run.run_id).await.unwrap().unwrap();
+    assert_snapshot_eq(&loaded, &snapshot);
+}
+
+#[tokio::test]
+async fn memory_fixed_loop_snapshot_round_trip_is_immutable() {
+    snapshot_round_trip_is_immutable(&MemoryCollaborationStore::new()).await;
+}
+
+#[tokio::test]
+async fn sqlite_fixed_loop_snapshot_round_trip_is_immutable() {
+    let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new().unwrap());
+    bootstrap_migrations::run_sqlite_migrations(db.as_ref()).await.unwrap();
+    snapshot_round_trip_is_immutable(&MySqlCollaborationStore::sqlite(db, "test".into())).await;
+}
+
+#[tokio::test]
+async fn mysql_fixed_loop_snapshot_preserves_all_fields_in_one_write_and_read() {
+    let snapshot = fixed_loop_snapshot_fixture();
+    let db = Arc::new(RecordingDb::default());
+    let store = MySqlCollaborationStore::new(db.clone(), "test".into());
+    store.save_run_snapshot(&test_run(), 7, &snapshot.definition, snapshot.resolved_participant_bindings.as_ref(), snapshot.execution_plan.as_ref()).await.unwrap();
+    let writes = db.executes.lock().await;
+    assert_eq!(writes.len(), 1);
+    let statement = &writes[0];
+    assert!(statement.sql().contains("execution_plan_json, execution_plan_content_hash, execution_plan_compiler_version"));
+    assert_eq!(statement.params().len(), 13);
+    *db.snapshot_json.lock().await = Some(statement.params()[8].as_str().unwrap().into());
+    let mut columns = db.snapshot_extra_columns.lock().await;
+    for (index, name) in [(9, "resolved_participant_bindings_json"), (10, "execution_plan_json"), (11, "execution_plan_content_hash"), (12, "execution_plan_compiler_version")] {
+        columns.insert(name.into(), statement.params()[index].clone());
+    }
+    drop(columns);
+    drop(writes);
+    let loaded = store.get_run_snapshot("sm-run-1").await.unwrap().unwrap();
+    assert_snapshot_eq(&loaded, &snapshot);
+}
+
+#[tokio::test]
+async fn mysql_fixed_loop_snapshot_rejects_partial_or_malformed_persisted_plan() {
+    let snapshot = fixed_loop_snapshot_fixture();
+    for value in [None, Some("{invalid"), Some("null")] {
+        let db = Arc::new(RecordingDb {
+            snapshot_json: Mutex::new(Some(serde_json::to_string(&snapshot.definition).unwrap())),
+            ..RecordingDb::default()
+        });
+        if let Some(value) = value {
+            let mut columns = db.snapshot_extra_columns.lock().await;
+            columns.insert("execution_plan_json".into(), DbValue::from(value));
+            columns.insert("execution_plan_content_hash".into(), DbValue::from("0".repeat(64)));
+            columns.insert("execution_plan_compiler_version".into(), DbValue::from("bcs.fixed-loop.compiler/v1"));
+        }
+        let store = MySqlCollaborationStore::new(db, "test".into());
+        assert!(store.get_run_snapshot("sm-run-1").await.is_err());
+    }
+}
+
+#[tokio::test]
+async fn fixed_loop_snapshot_write_failure_is_propagated_and_missing_plan_is_rejected() {
+    let snapshot = fixed_loop_snapshot_fixture();
+    let failed = MySqlCollaborationStore::new(Arc::new(AlwaysFailDb), "test".into());
+    assert!(failed.save_run_snapshot(&test_run(), 7, &snapshot.definition,
+        snapshot.resolved_participant_bindings.as_ref(), snapshot.execution_plan.as_ref()).await.is_err());
+    let memory = MemoryCollaborationStore::new();
+    assert!(memory.save_run_snapshot(&test_run(), 7, &snapshot.definition,
+        snapshot.resolved_participant_bindings.as_ref(), None).await.is_err());
+    assert!(memory.get_run_snapshot("sm-run-1").await.unwrap().is_none());
+}
+
+async fn fixed_loop_rerun_copies_snapshot_once<T: StateMachineDefinitionRepoPort + StateMachineRunRepoPort>(store: &T) {
+    use bcs_service_api::{CreateStateMachineRerun, CreateStateMachineRerunOutcome};
+    let snapshot = fixed_loop_snapshot_fixture();
+    let mut source = test_run();
+    source.status = StateMachineRunStatus::Failed;
+    source.error = Some("source failure".into());
+    source.completed_at = Some(2);
+    store.create_run(source.clone(), Vec::new()).await.unwrap();
+    store.save_run_snapshot(&source, 7, &snapshot.definition,
+        snapshot.resolved_participant_bindings.as_ref(), snapshot.execution_plan.as_ref()).await.unwrap();
+    // The mutable authoring store can be changed independently of the source snapshot.
+    let mut replacement = test_definition();
+    replacement.name = "Current definition has changed".into();
+    store.upsert(replacement).await.unwrap();
+    let mut child = source.clone();
+    child.run_id = "sm-loop-child".into();
+    child.rerun_of = Some(source.run_id.clone());
+    child.status = StateMachineRunStatus::Pending;
+    child.error = None;
+    child.completed_at = None;
+    let command = CreateStateMachineRerun {
+        source_run_id: source.run_id.clone(), run: child.clone(), nodes: Vec::new(), reactivate_service_session: false,
+    };
+    let mut competing = command.clone();
+    competing.run.run_id = "sm-loop-competitor".into();
+    let (first, second) = tokio::join!(store.create_rerun_if_session_idle(command), store.create_rerun_if_session_idle(competing));
+    let results = [first.unwrap(), second.unwrap()];
+    assert_eq!(results.iter().filter(|result| matches!(result, CreateStateMachineRerunOutcome::Created)).count(), 1);
+    assert_eq!(results.iter().filter(|result| matches!(result, CreateStateMachineRerunOutcome::Existing(_))).count(), 1);
+    let child = store.get_direct_rerun(&source.run_id).await.unwrap().unwrap();
+    assert_eq!(child.root_run_id, source.root_run_id);
+    assert_eq!(child.status, StateMachineRunStatus::Pending);
+    assert!(child.error.is_none());
+    let loaded = store.get_run_snapshot(&child.run_id).await.unwrap().unwrap();
+    assert_snapshot_eq(&loaded, &snapshot);
+}
+
+#[tokio::test]
+async fn memory_fixed_loop_rerun_preserves_source_plan_and_concurrent_uniqueness() {
+    fixed_loop_rerun_copies_snapshot_once(&MemoryCollaborationStore::new()).await;
+}
+
+#[tokio::test]
+async fn sqlite_fixed_loop_rerun_preserves_source_plan_and_concurrent_uniqueness() {
+    let db: Arc<dyn DbPlugin> = Arc::new(LocalSqliteDbPlugin::new().unwrap());
+    bootstrap_migrations::run_sqlite_migrations(db.as_ref()).await.unwrap();
+    db.execute(DbStatement::new(
+        "INSERT INTO bcs_group_sessions (env, session_id, group_id, session_kind, status, activation_count, participants) \
+         VALUES ('test', 'group-1:abcdef12', 'group-1', 'chat', 'running', 1, '[]')"
+    )).await.unwrap();
+    fixed_loop_rerun_copies_snapshot_once(&MySqlCollaborationStore::sqlite(db, "test".into())).await;
+}
 
 #[tokio::test]
 async fn sqlite_run_start_and_public_event_batch_commit_in_one_transaction() {
@@ -324,7 +551,7 @@ async fn mysql_definition_snapshot_writes_run_definition_snapshot_table() {
         },
     )]);
     store
-        .save_run_snapshot(&run, 7, &definition, Some(&resolved))
+        .save_run_snapshot(&run, 7, &definition, Some(&resolved), None)
         .await
         .expect("save snapshot");
 
@@ -362,8 +589,8 @@ async fn mysql_definition_snapshot_reads_run_definition_snapshot_table() {
         .expect("get snapshot")
         .expect("snapshot");
 
-    assert_eq!(loaded.id, "sm_e2e_single");
-    assert_eq!(loaded.version, 3);
+    assert_eq!(loaded.definition.id, "sm_e2e_single");
+    assert_eq!(loaded.definition.version, 3);
     let queries = db.queries.lock().await;
     assert!(
         queries[0]
@@ -371,6 +598,16 @@ async fn mysql_definition_snapshot_reads_run_definition_snapshot_table() {
             .contains("bcs_state_machine_definition_snapshots")
     );
     assert_eq!(queries[0].params()[1], DbValue::from("sm-run-1"));
+}
+
+#[tokio::test]
+async fn mysql_legacy_empty_snapshot_keeps_the_existing_missing_snapshot_result() {
+    let db = Arc::new(RecordingDb {
+        snapshot_json: Mutex::new(Some(String::new())),
+        ..RecordingDb::default()
+    });
+    let store = MySqlCollaborationStore::new(db, "test".into());
+    assert!(store.get_run_snapshot("legacy-run").await.unwrap().is_none());
 }
 
 #[tokio::test]
@@ -604,7 +841,7 @@ async fn mysql_runtime_node_and_run_updates_use_cas_sql() {
     assert!(executes[4].sql().contains("AND attempt = ? AND status = 'failed'"));
     assert_eq!(executes[4].params()[4], DbValue::from(1));
     assert!(executes[5].sql().contains("SET status = 'skipped'"));
-    assert!(executes[5].sql().contains("AND status = 'pending'"));
+    assert!(executes[5].sql().contains("AND status IN ('pending', 'ready', 'retry_scheduled')"));
     assert_eq!(executes[5].params()[0], DbValue::from(2_200_u64));
 }
 
@@ -895,7 +1132,7 @@ async fn mysql_runtime_propagates_database_failures_across_repository_operations
     );
     assert!(
         store
-            .save_run_snapshot(&run, run.group_version, &definition, None)
+            .save_run_snapshot(&run, run.group_version, &definition, None, None)
             .await
             .is_err()
     );
@@ -1169,6 +1406,7 @@ impl DbPlugin for AliasLookupFailDb {
 struct RecordingDb {
     definition_json: Mutex<Option<String>>,
     snapshot_json: Mutex<Option<String>>,
+    snapshot_extra_columns: Mutex<BTreeMap<String, DbValue>>,
     definition_metadata_rows: Mutex<VecDeque<Option<(String, Option<String>)>>>,
     runtime_run_row: Mutex<Option<DbRow>>,
     runtime_node_rows: Mutex<Vec<DbRow>>,
@@ -1242,16 +1480,16 @@ impl DbPlugin for RecordingDb {
             .sql()
             .contains("FROM bcs_state_machine_definition_snapshots")
         {
+            let extra_columns = self.snapshot_extra_columns.lock().await.clone();
             return Ok(self
                 .snapshot_json
                 .lock()
                 .await
                 .clone()
                 .map(|snapshot_json| {
-                    DbRow::new(BTreeMap::from([(
-                        "snapshot_json".to_string(),
-                        DbValue::from(snapshot_json),
-                    )]))
+                    let mut columns = extra_columns;
+                    columns.insert("snapshot_json".to_string(), DbValue::from(snapshot_json));
+                    DbRow::new(columns)
                 })
                 .into_iter()
                 .collect());
@@ -1591,3 +1829,12 @@ runtime:
     )
     .expect("valid definition")
 }
+
+#[path = "support/dispatch_contract.rs"]
+mod dispatch_contract;
+
+#[path = "support/publication_contract.rs"]
+mod publication_contract;
+
+#[path = "support/terminal_im_contract.rs"]
+mod terminal_im_contract;

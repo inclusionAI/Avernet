@@ -24,6 +24,10 @@ bcs-event-store = { workspace = true }
 bcs-service-api = { workspace = true }
 
 [dev-dependencies]
+bcs-message-store = { workspace = true }
+bcs-config-api = { workspace = true }
+bcs-db-mysql = { workspace = true }
+mysql_async = { workspace = true }
 bcs-db-local = { workspace = true }
 bcs-session-store = { workspace = true }
 tokio = { workspace = true }

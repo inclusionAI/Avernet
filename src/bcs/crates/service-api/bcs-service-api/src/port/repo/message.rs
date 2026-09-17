@@ -66,6 +66,16 @@ pub trait MessageRepoPort: Send + Sync + 'static {
     /// deterministic primary key, memory repositories serialize the same rule.
     async fn append_message(&self, msg: NewMessage) -> Result<PersistedMessage, MessageRepoError>;
 
+    /// Append using a caller-owned stable logical message id. Concurrent/repeated
+    /// writes of that id must return one stored message without allocating extra
+    /// sequence numbers. Return the original content; callers must validate it
+    /// before treating an idempotency collision as their own successful write.
+    /// IDs must be nonempty and at most 256 bytes. A matching legacy client key
+    /// may return a prior logical message with its original generated message id.
+    async fn append_message_with_id(&self, _message_id: String, _msg: NewMessage) -> Result<PersistedMessage, MessageRepoError> {
+        Err(MessageRepoError::StorageError("stable message-id persistence is not configured".into()))
+    }
+
     async fn append_message_with_event(
         &self,
         command: AppendMessageWithEvent,

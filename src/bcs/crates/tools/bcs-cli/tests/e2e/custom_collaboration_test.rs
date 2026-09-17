@@ -412,3 +412,73 @@ async fn assert_collaboration_create(no_session: bool, server_creates_session: b
     );
     assert_eq!(json["session_id"], serde_json::json!(server_creates_session.then_some("custom-group-1:initial")));
 }
+
+fn loop_fixture() -> serde_json::Value {
+    serde_json::from_str(include_str!("../../../../../tests/fixtures/fixed_loop_api.json")).unwrap()
+}
+
+#[tokio::test]
+async fn loop_query_preserves_metadata_and_shows_graph_routes() {
+    let ctx = TestContext::new().await.unwrap();
+    let fixture = loop_fixture();
+    for (suffix, key) in [("", "run"), ("/graph", "graph"), ("/nodes/historical-work-3", "node"), ("/pending-human-nodes", "pending_later")] {
+        Mock::given(method("GET")).and(path(format!("/state-machine-runs/run-1{suffix}")))
+            .and(bearer_token(&ctx.session.token))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"code":20000,"data":fixture[key]})))
+            .mount(&ctx.mock_server).await;
+    }
+    let run = ctx.cmd().args(["collaborate", "query", "--run", "run-1"]).output().unwrap();
+    assert_success(&run);
+    assert_eq!(serde_json::from_slice::<serde_json::Value>(&run.stdout).unwrap(), fixture["run"]);
+    for (args, expected) in [
+        (vec!["--graph"], "exhausted / exhausted (actual: again)"),
+        (vec!["--node", "historical-work-3"], "Logical work · Loop rounds · iteration 3/3"),
+        (vec!["--pending"], "Reply using --node historical-work-3"),
+    ] {
+        let output = ctx.cmd().args(["--no-json", "collaborate", "query", "--run", "run-1"]).args(args).output().unwrap();
+        assert_success(&output);
+        assert!(String::from_utf8_lossy(&output.stdout).contains(expected), "{}", String::from_utf8_lossy(&output.stdout));
+    }
+}
+
+#[tokio::test]
+async fn loop_response_only_posts_to_the_returned_pending_execution_node() {
+    let ctx = TestContext::new().await.unwrap();
+    let fixture = loop_fixture();
+    Mock::given(method("GET")).and(path("/state-machine-runs/run-1/pending-human-nodes"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(&fixture["pending_later"]))
+        .expect(2).mount(&ctx.mock_server).await;
+    Mock::given(method("POST")).and(path("/state-machine-runs/run-1/nodes/historical-work-3/respond"))
+        .and(bearer_token(&ctx.session.token)).and(body_json(serde_json::json!({"content":"approved final result"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(&fixture["node"]))
+        .expect(1).mount(&ctx.mock_server).await;
+    let stale = ctx.cmd().args(["collaborate", "respond", "--run", "run-1", "--node", "historical-work-1", "--content", "old response"]).output().unwrap();
+    assert_failure(&stale, Some(1));
+    assert!(String::from_utf8_lossy(&stale.stderr).contains("not pending"));
+    let output = ctx.cmd().args(["collaborate", "respond", "--run", "run-1", "--node", "historical-work-3", "--content", "approved final result"]).output().unwrap();
+    assert_success(&output);
+    assert_eq!(serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(), fixture["node"]);
+}
+
+#[tokio::test]
+async fn loop_validation_displays_paths_and_execution_preview() {
+    let ctx = TestContext::new().await.unwrap();
+    let file = ctx.temp_dir.path().join("loop.yaml");
+    let yaml = include_str!("../../../../../tests/fixtures/fixed_loop_authoring.yaml");
+    std::fs::write(&file, yaml).unwrap();
+    let fixture = loop_fixture();
+    let mut response = validation_response(true);
+    response["warnings"] = serde_json::json!([{ "code": "VALIDATION_ONLY_FEATURE", "path": "runtime.state_machine.version", "message": "v2 execution is disabled" }]);
+    response["graph"] = fixture["graph"].clone();
+    response["graph"]["execution_graph_mode"] = serde_json::json!("acyclic");
+    response["graph"]["graph_mode"] = serde_json::json!("hierarchical");
+    Mock::given(method("POST")).and(path("/collaboration/definitions/validate")).and(body_json(serde_json::json!({"definition_yaml": yaml})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(response)).mount(&ctx.mock_server).await;
+    let output = ctx.cmd().args(["--no-json", "collaboration", "validate"]).arg(file).output().unwrap();
+    assert_success(&output);
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("VALID"));
+    assert!(text.contains("VALIDATION_ONLY_FEATURE runtime.state_machine.version: v2 execution is disabled"));
+    assert!(text.contains("iteration 3/3"));
+    assert!(text.contains("Graph: hierarchical → acyclic"));
+}

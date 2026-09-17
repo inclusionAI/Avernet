@@ -7,6 +7,9 @@ import React, {
   type CSSProperties,
 } from 'react';
 import styled from 'styled-components';
+import { buildGraphLayout, LEVEL_GAP } from './state-machine-graph/layout';
+import { buildLoopLayout, hasLoopDescriptors } from './state-machine-graph/loops';
+import { LoopControls, LoopContainers } from './state-machine-graph/LoopControls';
 
 type JsonValue =
   | string
@@ -63,7 +66,37 @@ export interface StateMachineDefinition {
   version: number;
   name?: string;
   graph_mode?: string;
+  execution_graph_mode?: 'acyclic';
+  execution_plan_compiler_version?: string;
   initial_nodes?: string[];
+}
+
+export interface StateMachineNodeExecutionMetadata {
+  definition_node_id: string;
+  loop_id: string;
+  iteration: number;
+  max_iterations: number;
+}
+
+export interface StateMachineLoopRoute {
+  kind: 'continue' | 'break' | 'exhausted';
+  logical_outcome: string;
+}
+
+export interface PreviousLoopResult {
+  iteration: number;
+  result_node_id: string;
+  execution_node_id: string;
+  outcome: string;
+  output: string;
+  completed_at: number;
+}
+
+export interface LoopContext {
+  loop_id: string;
+  iteration: number;
+  max_iterations: number;
+  previous_result: PreviousLoopResult | null;
 }
 
 export interface StateMachineAssignee {
@@ -74,12 +107,14 @@ export interface StateMachineAssignee {
 
 export interface StateMachineNode {
   node_id: string;
+  execution?: StateMachineNodeExecutionMetadata;
   display_name?: string;
   kind?: string;
   assignee?: StateMachineAssignee;
   final_output?: boolean;
   status?: StateMachineNodeStatus;
   attempt?: number;
+  outcome?: string;
   assignee_bot_id?: string;
   started_at?: number;
   completed_at?: number;
@@ -111,6 +146,7 @@ export interface StateMachineJudgeOutput {
 
 export interface StateMachineNodeDetailResponse {
   node: StateMachineNodeDetailNode;
+  execution?: StateMachineNodeExecutionMetadata;
   sub_status?: StateMachineNodeSubStatus;
   judge_outputs?: StateMachineJudgeOutput[];
 }
@@ -119,9 +155,22 @@ export interface StateMachineEdge {
   source: string;
   outcome?: string;
   target: string;
+  loop_route?: StateMachineLoopRoute;
+}
+
+export interface StateMachineLoopGraphView {
+  display_name: string;
+  max_iterations: number;
+  entry_node_id: string;
+  result_node_id: string;
+  body_node_ids: string[];
+  continue_outcomes: string[];
+  break_outcomes: string[];
+  exhausted_outcome: string;
 }
 
 export interface StateMachineRunGraph {
+  loops?: Record<string, StateMachineLoopGraphView>;
   run: StateMachineRun;
   definition: StateMachineDefinition;
   nodes: StateMachineNode[];
@@ -130,6 +179,7 @@ export interface StateMachineRunGraph {
 
 interface RerunStateMachineRunResponse {
   run: StateMachineRun;
+  node_execution_metadata?: Record<string, StateMachineNodeExecutionMetadata>;
   idempotent_replay: boolean;
 }
 
@@ -146,6 +196,7 @@ export interface PendingHumanNode {
   judge_outcomes: string[];
   timeout_deadline_ms?: number;
   upstream_artifacts: PendingHumanNodeArtifact[];
+  loop_context?: LoopContext;
 }
 
 export interface StateMachineRunViewData {
@@ -167,25 +218,6 @@ export interface StateMachineRunViewProps extends StateMachineRunViewData {
     node?: StateMachineNode;
     run?: StateMachineRun;
   }) => void;
-}
-
-interface LayoutNode {
-  node: StateMachineNode;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-interface GraphLayout {
-  nodes: LayoutNode[];
-  edges: Array<{
-    edge: StateMachineEdge;
-    source: LayoutNode;
-    target: LayoutNode;
-  }>;
-  width: number;
-  height: number;
 }
 
 const DEFAULT_BASE_URL = '/bcnproxy';
@@ -211,11 +243,6 @@ function unwrapEnvelope<T>(body: any): T {
 }
 const MAX_TRANSIENT_RETRIES = 3;
 const MAX_HUMAN_RESPONSE_BYTES = 64 * 1024;
-const NODE_WIDTH = 188;
-const NODE_HEIGHT = 58;
-const LEVEL_GAP = 56;
-const COLUMN_GAP = 18;
-const PADDING = 28;
 
 const RUN_ACTIVE_STATUSES = new Set<string>(['pending', 'running']);
 const RUN_TERMINAL_STATUSES = new Set<string>([
@@ -561,6 +588,13 @@ const GraphShell = styled.div`
     linear-gradient(90deg, #f1f5f9 1px, transparent 1px), #fafbfd;
   background-size: auto, 24px 24px, 24px 24px, auto;
   box-shadow: inset 0 2px 4px rgba(15, 23, 42, 0.02);
+`;
+
+const GraphViewSwitch = styled.div`
+  display: flex; gap: 6px; padding: 10px 12px; background: white;
+  button { padding: 6px 10px; font: inherit; font-size: 12px; cursor: pointer;
+    border: 1px solid #ddd6fe; border-radius: 7px; background: white; color: #64748b; }
+  button[aria-pressed="true"] { color: #5b21b6; background: #ede9fe; }
 `;
 
 const GraphSvg = styled.svg`
@@ -1992,12 +2026,29 @@ function isSkippedStatus(status?: string) {
   return normalizeStatus(status) === 'skipped';
 }
 
+function loopNodeLabel(node: StateMachineNode) {
+  const name = node.display_name || node.execution?.definition_node_id || node.node_id;
+  return name;
+}
+
+function loopRouteLabel(edge: StateMachineEdge) {
+  if (!edge.loop_route) return edge.outcome;
+  return edge.loop_route.kind === 'continue' ? 'continue' : edge.loop_route.logical_outcome;
+}
+
 function getEdgeState(
   edge: StateMachineEdge,
   nodeById: Map<string, StateMachineNode>,
 ): EdgeState {
   const sourceStatus = nodeById.get(edge.source)?.status;
   const targetStatus = nodeById.get(edge.target)?.status;
+  const selectedOutcome = nodeById.get(edge.source)?.outcome;
+
+  // Route metadata describes the edge, not whether it was selected. A shared
+  // target can run through another branch; compare the saved actual outcome.
+  if (isCompletedStatus(sourceStatus) && selectedOutcome !== undefined) {
+    return selectedOutcome === edge.outcome ? 'executed' : 'skipped';
+  }
 
   if (isFailedStatus(sourceStatus)) {
     return 'blocked';
@@ -2367,106 +2418,6 @@ function formatMilliseconds(value?: number) {
   return `${Math.round(value / 60_000)}m`;
 }
 
-function buildGraphLayout(
-  nodes: StateMachineNode[],
-  edges: StateMachineEdge[],
-  initialNodes: string[] = [],
-): GraphLayout {
-  const nodeById = new Map(nodes.map((node) => [node.node_id, node]));
-  const incomingCount = new Map(nodes.map((node) => [node.node_id, 0]));
-
-  edges.forEach((edge) => {
-    incomingCount.set(edge.target, (incomingCount.get(edge.target) || 0) + 1);
-  });
-
-  const rootIds = initialNodes.filter((nodeId) => nodeById.has(nodeId));
-  const fallbackRoots = nodes
-    .filter((node) => (incomingCount.get(node.node_id) || 0) === 0)
-    .map((node) => node.node_id);
-  const startIds = rootIds.length > 0 ? rootIds : fallbackRoots;
-  const levels = new Map(nodes.map((node) => [node.node_id, 0]));
-
-  startIds.forEach((nodeId) => levels.set(nodeId, 0));
-
-  for (let index = 0; index < nodes.length + edges.length; index += 1) {
-    edges.forEach((edge) => {
-      const sourceLevel = levels.get(edge.source);
-      const targetLevel = levels.get(edge.target);
-
-      if (sourceLevel === undefined || targetLevel === undefined) {
-        return;
-      }
-
-      levels.set(edge.target, Math.max(targetLevel, sourceLevel + 1));
-    });
-  }
-
-  const groups = new Map<number, StateMachineNode[]>();
-
-  nodes.forEach((node) => {
-    const level = levels.get(node.node_id) || 0;
-    const group = groups.get(level) || [];
-
-    group.push(node);
-    groups.set(level, group);
-  });
-
-  const sortedGroups = Array.from(groups.entries()).sort(([a], [b]) => a - b);
-  const maxColumns = Math.max(
-    1,
-    ...sortedGroups.map(([, group]) => group.length),
-  );
-  const width =
-    PADDING * 2 +
-    maxColumns * NODE_WIDTH +
-    Math.max(0, maxColumns - 1) * COLUMN_GAP;
-  const height =
-    PADDING * 2 +
-    sortedGroups.length * NODE_HEIGHT +
-    Math.max(0, sortedGroups.length - 1) * LEVEL_GAP;
-  const layoutNodes: LayoutNode[] = [];
-
-  sortedGroups.forEach(([, group], levelIndex) => {
-    const rowWidth =
-      group.length * NODE_WIDTH + Math.max(0, group.length - 1) * COLUMN_GAP;
-    const rowOffset = Math.max(0, (width - PADDING * 2 - rowWidth) / 2);
-    const y = PADDING + levelIndex * (NODE_HEIGHT + LEVEL_GAP);
-
-    group.forEach((node, row) => {
-      layoutNodes.push({
-        node,
-        x: PADDING + rowOffset + row * (NODE_WIDTH + COLUMN_GAP),
-        y,
-        width: NODE_WIDTH,
-        height: NODE_HEIGHT,
-      });
-    });
-  });
-
-  const layoutById = new Map(
-    layoutNodes.map((layoutNode) => [layoutNode.node.node_id, layoutNode]),
-  );
-  const layoutEdges = edges
-    .map((edge) => {
-      const source = layoutById.get(edge.source);
-      const target = layoutById.get(edge.target);
-
-      if (!source || !target) {
-        return null;
-      }
-
-      return { edge, source, target };
-    })
-    .filter((edge): edge is NonNullable<typeof edge> => Boolean(edge));
-
-  return {
-    nodes: layoutNodes,
-    edges: layoutEdges,
-    width,
-    height,
-  };
-}
-
 function truncateText(text: string, maxLength: number) {
   if (text.length <= maxLength) {
     return text;
@@ -2584,6 +2535,8 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
   const humanResponseInputId = React.useId();
   const [graph, setGraph] = useState<StateMachineRunGraph | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [expandedGraph, setExpandedGraph] = useState(false);
+  const [loopChoices, setLoopChoices] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -3004,6 +2957,8 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
   useEffect(() => {
     setGraph(null);
     setSelectedNodeId(null);
+    setExpandedGraph(false);
+    setLoopChoices({});
     setError(null);
     setNodeDetail(null);
     setNodeDetailError(null);
@@ -3114,17 +3069,28 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
     return () => window.clearTimeout(timer);
   }, [autoRefresh, fetchGraph, graph, pollingInterval, transientRetrySignal]);
 
-  const layout = useMemo(() => {
-    if (!graph) {
-      return null;
+  const logicalLoops = graph ? hasLoopDescriptors(graph) : false;
+  const layoutResult = useMemo(() => {
+    if (!graph) return { layout: null, error: null };
+    try {
+      return { layout: logicalLoops
+        ? buildLoopLayout(graph, loopChoices, expandedGraph)
+        : buildGraphLayout(graph.nodes, graph.edges, graph.definition.initial_nodes), error: null };
+    } catch (error) {
+      return { layout: null, error: error instanceof Error ? error.message : 'Invalid Loop graph' };
     }
-
-    return buildGraphLayout(
-      graph.nodes,
-      graph.edges,
-      graph.definition.initial_nodes,
-    );
-  }, [graph]);
+  }, [graph, expandedGraph, loopChoices, logicalLoops]);
+  const layout = layoutResult.layout;
+  const chooseLoopIteration = (loopId: string, iteration?: number) => {
+    setLoopChoices((previous) => {
+      const next = { ...previous };
+      if (iteration === undefined) delete next[loopId];
+      else next[loopId] = iteration;
+      return next;
+    });
+    setNodeDetailModalOpen(false);
+    setSelectedNodeId(null);
+  };
 
   const selectedNode = useMemo(() => {
     if (!graph || !selectedNodeId) {
@@ -3318,6 +3284,22 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
         <HumanInstruction>{pendingHumanNode.instruction}</HumanInstruction>
       ) : null}
 
+      {pendingHumanNode?.loop_context ? (
+        <HumanArtifactList aria-label="Loop context">
+          <HumanArtifactLabel title={`max_iterations: ${pendingHumanNode.loop_context.max_iterations}`}>
+            Loop {pendingHumanNode.loop_context.loop_id} · #{pendingHumanNode.loop_context.iteration}
+          </HumanArtifactLabel>
+          {pendingHumanNode.loop_context.previous_result ? (
+            <div>
+              <HumanInputMeta>
+                上次执行结果 · {pendingHumanNode.loop_context.previous_result.outcome} · {pendingHumanNode.loop_context.previous_result.execution_node_id}
+              </HumanInputMeta>
+              <HumanArtifactBlock>{pendingHumanNode.loop_context.previous_result.output}</HumanArtifactBlock>
+            </div>
+          ) : <HumanResponseHint>暂无上次执行结果</HumanResponseHint>}
+        </HumanArtifactList>
+      ) : null}
+
       {pendingHumanNode?.judge_outcomes.length ? (
         <HumanInputMeta>
           <span>Judge 可判定：</span>
@@ -3385,7 +3367,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
 
       {pendingHumanNode?.upstream_artifacts.length ? (
         <HumanArtifactList>
-          {pendingHumanNode.upstream_artifacts.map((artifact) => (
+          {pendingHumanNode.upstream_artifacts.filter((artifact) => artifact.node_id !== pendingHumanNode.loop_context?.previous_result?.execution_node_id).map((artifact) => (
             <div key={artifact.node_id}>
               <HumanArtifactLabel>
                 上游输出 · {artifact.node_id}
@@ -3490,6 +3472,16 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
               </NodeInfoStack>
             </NodeInfoCard>
           </NodeMetricGrid>
+
+          {selectedNode.execution ? (
+            <div aria-label="Loop execution details">
+              <HumanInputMeta title={`max_iterations: ${selectedNode.execution.max_iterations}`}>Loop: {selectedNode.execution.loop_id} · #{selectedNode.execution.iteration}</HumanInputMeta>
+              <HumanInputMeta>Logical node: {selectedNode.execution.definition_node_id}</HumanInputMeta>
+              <HumanInputMeta>Execution ID: {selectedNode.node_id}</HumanInputMeta>
+              <HumanInputMeta>Retry attempt: {selectedRuntimeNode?.attempt ?? selectedNode.attempt ?? 0} (从 0 开始)</HumanInputMeta>
+              {selectedNode.outcome ? <HumanInputMeta>实际 outcome: {selectedNode.outcome}</HumanInputMeta> : null}
+            </div>
+          ) : null}
 
           {selectedNode.final_output ? (
             <FinalOutputNote>Final output node</FinalOutputNote>
@@ -3844,6 +3836,12 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
           <>
             <ContentGrid>
               <GraphShell>
+                {logicalLoops && <GraphViewSwitch role="group" aria-label="图形视图">
+                  <button type="button" aria-pressed={!expandedGraph} onClick={() => setExpandedGraph(false)}>循环视图</button>
+                  <button type="button" aria-pressed={expandedGraph} onClick={() => setExpandedGraph(true)}>展开执行图</button>
+                </GraphViewSwitch>}
+                {logicalLoops && !expandedGraph && <LoopControls graph={graph} choices={loopChoices} onChoose={chooseLoopIteration} />}
+                {layoutResult.error && <ErrorMessage>{layoutResult.error}</ErrorMessage>}
                 {layout && layout.nodes.length > 0 ? (
                   <GraphSvg
                     aria-label="State machine graph"
@@ -3851,6 +3849,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
                     role="img"
                     viewBox={`0 0 ${layout.width} ${layout.height}`}
                     width={layout.width}
+                    style={logicalLoops && !expandedGraph ? { width: '100%', maxWidth: layout.width } : undefined}
                   >
                     <defs>
                       <filter
@@ -3899,10 +3898,11 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
                       ))}
                     </defs>
 
+                    {layout.groups && <LoopContainers groups={layout.groups} />}
                     {layout.edges
                       .map((layoutEdge, index) => {
-                        const edgeState = getEdgeState(
-                          layoutEdge.edge,
+                        const edgeState = layoutEdge.stateOverride ?? getEdgeState(
+                          layoutEdge.evidence ?? layoutEdge.edge,
                           nodeById,
                         );
 
@@ -3917,15 +3917,25 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
                           EDGE_RENDER_ORDER[a.edgeState] -
                             EDGE_RENDER_ORDER[b.edgeState] || a.index - b.index,
                       )
-                      .map(({ edge, source, target, edgeState }) => {
+                      .map(({ edge, source, target, edgeState, index, returnX, label }) => {
                         const edgeTone = EDGE_TONES[edgeState];
-                        const sourceX = source.x + source.width / 2;
-                        const sourceY = source.y + source.height;
-                        const targetX = target.x + target.width / 2;
-                        const targetY = target.y;
+                        const labelLane = layout.edges.slice(0, index).filter((other) => other.edge.source === edge.source && other.edge.target === edge.target).length;
+                        const sourceX = source.x + source.width * (returnX !== undefined ? 1 : 0.5);
+                        const sourceY = source.y + source.height * (returnX !== undefined ? 0.65 : 1);
+                        const targetX = target.x + target.width * (returnX !== undefined ? 1 : 0.5);
+                        const targetY = target.y + (returnX !== undefined ? target.height * 0.35 : 0);
                         const midY = sourceY + (targetY - sourceY) / 2;
                         const isStraight = sourceX === targetX;
-                        const path = isStraight
+                        const bypass = Boolean(edge.loop_route && edge.loop_route.kind !== 'continue'
+                          && (expandedGraph || !layout.groups) && targetY - sourceY > LEVEL_GAP + 1);
+                        const bypassX = Math.max(...layout.nodes.map((node) => node.x + node.width), ...(layout.groups || []).map((group) => group.x + group.width)) + 52;
+                        const path = returnX !== undefined && edge.source === edge.target
+                          ? `M ${sourceX} ${sourceY} C ${returnX + 16} ${sourceY + 32}, ${returnX + 16} ${targetY - 32}, ${targetX} ${targetY}`
+                          : returnX !== undefined
+                          ? `M ${sourceX} ${sourceY} L ${returnX - 14} ${sourceY} Q ${returnX} ${sourceY}, ${returnX} ${sourceY - 14} L ${returnX} ${targetY + 14} Q ${returnX} ${targetY}, ${returnX - 14} ${targetY} L ${targetX} ${targetY}`
+                          : bypass
+                          ? `M ${sourceX} ${sourceY} C ${sourceX} ${sourceY + 20}, ${bypassX} ${sourceY + 20}, ${bypassX} ${sourceY + 38} L ${bypassX} ${targetY - 28} Q ${bypassX} ${targetY - 12}, ${targetX} ${targetY}`
+                          : isStraight
                           ? `M ${sourceX} ${sourceY} L ${targetX} ${targetY}`
                           : `M ${sourceX} ${sourceY} C ${sourceX} ${midY}, ${targetX} ${midY}, ${targetX} ${targetY}`;
 
@@ -3935,6 +3945,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
                           >
                             <path
                               data-edge-outcome={edge.outcome || undefined}
+                              data-loop-route={edge.loop_route?.kind}
                               data-edge-source={edge.source}
                               data-edge-state={edgeState}
                               data-edge-target={edge.target}
@@ -3942,13 +3953,14 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
                               fill="none"
                               markerEnd={`url(#sm-arrow-${edgeState})`}
                               stroke={edgeTone.stroke}
-                              strokeDasharray={edgeTone.strokeDasharray}
-                              strokeWidth={edgeTone.strokeWidth}
+                              strokeDasharray={returnX !== undefined ? '5 4' : edgeTone.strokeDasharray}
+                              strokeWidth={returnX !== undefined ? Math.min(edgeTone.strokeWidth, 1.25) : edgeTone.strokeWidth}
                             />
+                            <title>{loopRouteLabel(edge)} · 实际 outcome: {edge.outcome}</title>
                             {edge.outcome ? (
                               <text
                                 fill={edgeTone.label}
-                                fontSize="12"
+                                fontSize={returnX !== undefined ? 10 : 12}
                                 fontWeight={
                                   edgeState === 'executed' ||
                                   edgeState === 'blocked'
@@ -3956,10 +3968,10 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
                                     : 500
                                 }
                                 textAnchor="middle"
-                                x={(sourceX + targetX) / 2}
-                                y={midY - 6}
+                                x={returnX !== undefined ? returnX - 32 : bypass ? bypassX : (sourceX + targetX) / 2}
+                                y={returnX !== undefined ? (sourceY + targetY) / 2 - 5 : bypass ? sourceY + 18 + labelLane * 16 : midY - 6 + labelLane * 16}
                               >
-                                {edge.outcome}
+                                {returnX !== undefined ? 'continue' : label || loopRouteLabel(edge)}
                               </text>
                             ) : null}
                           </g>
@@ -3986,8 +3998,10 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
                         <NodeGroup
                           key={node.node_id}
                           aria-label={`Node ${
-                            node.display_name || node.node_id
+                            loopNodeLabel(node)
                           } ${nodePhase}`}
+                          data-loop-id={node.execution?.loop_id}
+                          data-loop-iteration={node.execution?.iteration}
                           onClick={() => {
                             requestedNodeDetailIdRef.current = null;
                             setSelectedNodeId(node.node_id);
@@ -4015,6 +4029,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
                           role="button"
                           tabIndex={0}
                         >
+                          <title>{loopNodeLabel(node)}{node.execution ? ` · ${node.execution.definition_node_id} · ${node.node_id}` : ''}</title>
                           <rect
                             fill={
                               nodePhase !== 'unknown'
@@ -4073,8 +4088,8 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
                             y={y + 22}
                           >
                             {truncateText(
-                              node.display_name || node.node_id,
-                              22,
+                              loopNodeLabel(node),
+                              28,
                             )}
                           </text>
                           <g
@@ -4142,9 +4157,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
                         </HumanInputStatusTitle>
                         <HumanInputStatusHint>
                           点击图中的“
-                          {pendingHumanNode?.display_name ||
-                            activeHumanNode.display_name ||
-                            activeHumanNode.node_id}
+                          {loopNodeLabel(activeHumanNode)}
                           ”节点进行处理
                         </HumanInputStatusHint>
                       </HumanInputStatusBody>
@@ -4186,7 +4199,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
                     <RuntimeRow>
                       <RuntimeLabel>Graph</RuntimeLabel>
                       <RuntimeValue>
-                        {graph.nodes.length} nodes / {graph.edges.length} edges
+                        {layout?.nodes.length ?? graph.nodes.length} nodes / {layout?.edges.length ?? graph.edges.length} edges
                       </RuntimeValue>
                     </RuntimeRow>
                   </RuntimeRows>

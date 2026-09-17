@@ -12,6 +12,20 @@ The sequence baseline uses a transactional primary read (locking on MySQL) befor
 the existing compare-and-set commit, so a newly committed Session is not mistaken
 for a missing canonical Session because of replica lag.
 
+Fixed Loop output uses the existing caller-owned message primary key and
+content.metadata.state_machine.execution, without new SQL columns. The runtime
+owns construction, identity validation and visibility (Bot FullOnly / Human
+directed); stores preserve content verbatim and batch canonical ID reads.
+
+Caller-owned stable message IDs use the existing message primary key. Concurrent
+append_message_with_id calls return the original stored message and allocate
+one Session sequence; a duplicate SQL insert rolls its sequence increment back
+in the same local transaction. Matching legacy client keys may return their
+original generated message ID. Callers validate content and identity before
+treating an existing record as their successful write. This does not make
+ordinary client_msg_id lookups a database uniqueness constraint or guarantee
+external delivery. Memory, SQLite and MySQL Text/Prepared share this contract.
+
 Delivery decoding failures emit rate-limited column names/types and a fixed error
 category, never row values or serde errors that could include message/header data.
 

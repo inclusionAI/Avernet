@@ -123,7 +123,7 @@ impl CollaborationRuntimeService for FakeRuntimeService {
         node_id: &str,
     ) -> Result<Option<StateMachineNodeRunView>, CollaborationRuntimeError> {
         *self.last_access.lock().expect("access lock") = Some(cmd.clone());
-        assert_eq!(node_id, "node-1");
+        assert_eq!(node_id, self.next_node.lock().expect("node lock").as_ref().expect("configured node").node.node_id);
         Ok(self.next_node.lock().expect("node lock").clone())
     }
 
@@ -283,6 +283,7 @@ async fn get_run_returns_enveloped_view_and_records_access() {
     assert_eq!(body["code"], 20000);
     assert_eq!(body["message"], "OK");
     assert_eq!(body["data"]["run"]["run_id"], RUN_ID);
+    assert!(body["data"].get("node_execution_metadata").is_none());
     assert_eq!(body["request_id"], "req-get-run");
 
     let recorded = service
@@ -445,6 +446,8 @@ async fn get_graph_returns_enveloped_view() {
     assert_eq!(body["code"], 20000);
     assert_eq!(body["data"]["run"]["run_id"], RUN_ID);
     assert_eq!(body["data"]["definition"]["name"], "d");
+    assert!(body["data"]["definition"].get("execution_graph_mode").is_none());
+    assert!(body["data"]["definition"].get("execution_plan_compiler_version").is_none());
 }
 
 #[tokio::test]
@@ -467,6 +470,7 @@ async fn get_node_returns_enveloped_view() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_json(response).await;
     assert_eq!(body["data"]["node"]["node_id"], "node-1");
+    assert!(body["data"].get("execution").is_none());
 }
 
 #[tokio::test]
@@ -478,6 +482,7 @@ async fn pending_human_nodes_returns_enveloped_array() {
         response_ref: "ref-1".to_string(),
         judge_outcomes: vec![],
         timeout_deadline_ms: None,
+        loop_context: None,
         upstream_artifacts: vec![],
     }];
     let service = Arc::new(FakeRuntimeService {
@@ -495,9 +500,35 @@ async fn pending_human_nodes_returns_enveloped_array() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_json(response).await;
     assert_eq!(body["data"][0]["node_id"], "node-1");
+    assert!(body["data"][0].get("loop_context").is_none());
 
     let cmd = service.last_pending_cmd.lock().expect("pending lock").clone().expect("cmd");
     assert_eq!(cmd.caller_actor_id, "human_staff-1");
+}
+
+#[tokio::test]
+async fn pending_human_nodes_preserves_first_and_later_loop_context() {
+    for iteration in [1, 2] {
+        let context = json!({
+            "loop_id": "rounds", "iteration": iteration, "max_iterations": 3,
+            "previous_result": if iteration == 1 { Value::Null } else { json!({
+                "iteration": 1, "result_node_id": "result", "execution_node_id": "ln-previous",
+                "outcome": "continue", "output": "previous output", "completed_at": 1234,
+            }) },
+        });
+        let pending: PendingHumanNodeView = serde_json::from_value(json!({
+            "node_id": "ln-entry", "display_name": "Review", "instruction": "Review previous result",
+            "response_ref": "ref-2", "judge_outcomes": [], "upstream_artifacts": [], "loop_context": context,
+        })).unwrap();
+        let service = Arc::new(FakeRuntimeService {
+            next_pending: Mutex::new(vec![pending]), ..Default::default()
+        });
+        let response = test_router(service).oneshot(Request::builder()
+            .uri("/api/v1/collaboration/state-machine-runs/run-1/pending-human-nodes")
+            .header("x-test-auth", "yes").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response_json(response).await["data"][0]["loop_context"], context);
+    }
 }
 
 #[tokio::test]
@@ -777,3 +808,6 @@ impl RegisterService for NoopRegisterService {
         Err(ApplicationError::internal("register service is a noop in this test"))
     }
 }
+
+#[path = "support/fixed_loop_projection.rs"]
+mod fixed_loop_projection;

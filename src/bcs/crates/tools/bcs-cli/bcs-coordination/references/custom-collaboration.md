@@ -148,9 +148,36 @@ HTTP 请求若同时带非空 `event_subscriptions` 和 `create_initial_session=
 ## 编写约束
 
 - 顶层只允许 `name`、可选 `metadata`、`participants` 和 `runtime`。
-- 保留 `runtime.kind: state_machine` 和 `runtime.state_machine.version: 1`。
+- 保留 `runtime.kind: state_machine`。普通 DAG 使用 `version: 1`；固定 Loop 的 `version: 2` 需按 schema 校验，执行默认关闭，需服务端显式开启 `collaboration.experimental_fixed_loop_execution`；关闭时 preview 返回 `VALIDATION_ONLY_FEATURE`。
 - 不输出顶层 `api_version`、`id` 或 `version`；这些字段由 BCS 创建群时提供。
 - 不把真实 Bot UUID、token、私密地址或运行时 participant role 写进 YAML。
 - 真实 Bot UUID 只放在 `collaborate run --binding` 或 `collaboration create --binding` 参数中，不写入 YAML。
 - 用户可见交付必须包含完整 YAML，不能用临时文件路径、工具输出或“见上文”代替。
 - 执行节点只输出自己的业务产物；不要要求每个节点重复传递完整参数对象。
+
+
+## 查看 Run、Loop 轮次与人工回复
+
+JSON 是默认输出；加 `--no-json` 查看轮次、逻辑节点、attempt、路由和上一轮结果：
+
+```bash
+bcs-cli --no-json collaborate query --run "$run_id"
+bcs-cli --no-json collaborate query --run "$run_id" --graph
+bcs-cli --no-json collaborate query --run "$run_id" --pending
+bcs-cli --no-json collaborate query --run "$run_id" --node "$execution_node_id"
+```
+
+`--node`、`--graph`、`--pending` 互斥。不带选项查询 Run。节点 ID 必须复制自该 Run 的返回值，
+不能把 logical node 或 preview ID 当成 execution ID，更不能手工拼接 `ln-...`。
+iteration 从 1 开始，retry attempt 从 0 开始；相同 logical node 的不同 iteration 是不同节点。
+Graph 的 break/exhausted 说明不表示已经选路，实际选择以 source Node 的 outcome 为准。
+
+人工用户使用现有认证/网关身份查询 `--pending`，阅读 LoopContext 后向其中的节点回复：
+
+```bash
+bcs-cli collaborate respond --run "$run_id" --node "$execution_node_id" --content '同意发布'
+```
+
+CLI 先核对该 execution ID 仍在服务端授权的待处理列表，只提交 `content`，不提交或修改 loop_context、
+iteration、outcome、actor。旧轮或未授权节点在 POST 前拒绝；查询后若状态变化，仍以服务端的冲突响应为准。
+Bot 身份不能借此充当人工用户。版本/能力警告和 authoring path 原样展示；生产 v2 仍默认关闭。

@@ -117,6 +117,8 @@ struct RecordingGroupQuery {
 
 #[derive(Default)]
 struct RecordingCollaborationRuntime {
+    projection_fixture: Mutex<Option<Value>>,
+    queried_node_ids: Mutex<Vec<String>>,
     definitions: Mutex<Vec<CollaborationDefinition>>,
     configure_calls: Mutex<Vec<ConfigureGroupRuntimeCommand>>,
     start_commands: Mutex<Vec<StartStateMachineRunCommand>>,
@@ -154,7 +156,9 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
                 assigned: true,
             }],
             graph: Some(CollaborationDefinitionGraphPreview {
+                loops: Default::default(),
                 graph_mode: StateMachineGraphMode::Acyclic,
+                execution_graph_mode: None,
                 nodes: vec![CollaborationDefinitionGraphNode {
                     node_id: "answer".to_string(),
                     display_name: "Answer".to_string(),
@@ -164,6 +168,7 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
                     }),
                     final_output: true,
                     judge: false,
+                    execution: None,
                 }],
                 edges: Vec::new(),
             }),
@@ -176,6 +181,9 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
         cmd: StartStateMachineRunCommand,
     ) -> Result<StartStateMachineRunOutcome, CollaborationRuntimeError> {
         self.start_commands.lock().await.push(cmd);
+        if let Some(fixture) = self.projection_fixture.lock().await.as_ref() {
+            return Ok(StartStateMachineRunOutcome { view: serde_json::from_value(fixture["run"].clone()).unwrap() });
+        }
         Err(CollaborationRuntimeError::InvalidRequest(
             "unexpected start_state_machine_run call".to_string(),
         ))
@@ -205,6 +213,9 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
         cmd: StartSessionStateMachineRunCommand,
     ) -> Result<StartStateMachineRunOutcome, CollaborationRuntimeError> {
         self.session_start_commands.lock().await.push(cmd.clone());
+        if let Some(fixture) = self.projection_fixture.lock().await.as_ref() {
+            return Ok(StartStateMachineRunOutcome { view: serde_json::from_value(fixture["run"].clone()).unwrap() });
+        }
         Ok(StartStateMachineRunOutcome {
             view: StateMachineRunView {
                 run: StateMachineRun {
@@ -228,6 +239,7 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
                     completed_at: None,
                 },
                 nodes: Vec::new(),
+                node_execution_metadata: None,
                 judge_outputs: Vec::new(),
             },
         })
@@ -237,7 +249,20 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
         &self,
         _run_id: &str,
     ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
-        Ok(None)
+        Ok(self.projection_fixture.lock().await.as_ref().map(|fixture| serde_json::from_value(fixture["run"].clone()).unwrap()))
+    }
+
+    async fn get_state_machine_run_with_access(&self, cmd: bcs_service_api::StateMachineRunAccessCommand) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
+        self.get_state_machine_run(&cmd.run_id).await
+    }
+
+    async fn get_state_machine_run_graph_with_access(&self, _cmd: bcs_service_api::StateMachineRunAccessCommand) -> Result<Option<bcs_service_api::StateMachineRunGraphView>, CollaborationRuntimeError> {
+        Ok(self.projection_fixture.lock().await.as_ref().map(|fixture| serde_json::from_value(fixture["graph"].clone()).unwrap()))
+    }
+
+    async fn get_state_machine_node_run_with_access(&self, _cmd: bcs_service_api::StateMachineRunAccessCommand, node_id: &str) -> Result<Option<bcs_service_api::StateMachineNodeRunView>, CollaborationRuntimeError> {
+        self.queried_node_ids.lock().await.push(node_id.into());
+        Ok(self.projection_fixture.lock().await.as_ref().map(|fixture| serde_json::from_value(fixture["node"].clone()).unwrap()))
     }
 
     async fn rerun_state_machine_run(
@@ -245,6 +270,9 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
         cmd: RerunStateMachineCommand,
     ) -> Result<RerunStateMachineOutcome, CollaborationRuntimeError> {
         self.rerun_commands.lock().await.push(cmd.clone());
+        if let Some(fixture) = self.projection_fixture.lock().await.as_ref() {
+            return Ok(RerunStateMachineOutcome { view: serde_json::from_value(fixture["run"].clone()).unwrap(), created: true });
+        }
         Ok(RerunStateMachineOutcome {
             view: StateMachineRunView {
                 run: StateMachineRun {
@@ -268,6 +296,7 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
                     completed_at: None,
                 },
                 nodes: Vec::new(),
+                node_execution_metadata: None,
                 judge_outputs: Vec::new(),
             },
             created: true,
@@ -279,6 +308,9 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
         cmd: ListPendingHumanNodesCommand,
     ) -> Result<Vec<PendingHumanNodeView>, CollaborationRuntimeError> {
         self.pending_human_commands.lock().await.push(cmd);
+        if let Some(fixture) = self.projection_fixture.lock().await.as_ref() {
+            return Ok(serde_json::from_value(fixture["pending_later"].clone()).unwrap());
+        }
         Ok(vec![PendingHumanNodeView {
             node_id: "human_review".to_string(),
             display_name: "Human review".to_string(),
@@ -286,6 +318,7 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
             response_ref: "run-1:human_review".to_string(),
             judge_outcomes: vec!["approve".to_string(), "reject".to_string()],
             timeout_deadline_ms: Some(1234),
+            loop_context: None,
             upstream_artifacts: Vec::new(),
         }])
     }
@@ -1689,6 +1722,7 @@ async fn rerun_state_machine_route_uses_path_run_as_source_and_returns_created_c
     let body: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(body["run"]["run_id"], "run-2");
     assert_eq!(body["run"]["rerun_of"], "run-1");
+    assert!(body.get("node_execution_metadata").is_none());
     assert_eq!(body["idempotent_replay"], false);
     let commands = collaboration_runtime.rerun_commands.lock().await;
     assert_eq!(commands.len(), 1);
@@ -3136,3 +3170,6 @@ fn group_list_entry(group_id: &str) -> GroupListEntry {
         visibility: "private".to_string(),
     }
 }
+
+#[path = "support/fixed_loop_projection.rs"]
+mod fixed_loop_projection;

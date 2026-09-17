@@ -2,6 +2,11 @@
 
 ## Provides
 
+Node started/completed/retry_scheduled Events optionally carry the shared
+four-field execution metadata. Full and metadata_only projection preserve it;
+only registered content fields are projected/redacted. No Loop-only public
+Event namespace is introduced. The catalog and schema are authoritative.
+
 - The runtime registry loaded from the authoritative public BCS Event Catalog.
 - Transport-neutral validation and lookup for public Event types and registered
   family wildcards.

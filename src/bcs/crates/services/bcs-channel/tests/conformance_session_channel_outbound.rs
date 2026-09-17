@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+mod fixed_loop_notification;
+
 use bcs_channel::BcsChannelService;
 use bcs_channel_api::ChannelProviderRegistry;
 use bcs_channel_store::{

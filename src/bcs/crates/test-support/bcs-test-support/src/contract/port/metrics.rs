@@ -1,5 +1,22 @@
 //! Metrics port and hook contract harnesses.
 
+pub fn state_machine_loop_instrumentation_hook_contract_tests(
+    hook: &dyn bcs_service_api::StateMachineLoopInstrumentationHook,
+) {
+    use bcs_domain::StateMachineLoopRouteKind as Route;
+    use bcs_service_api::{StateMachineLoopCompileRejection as Reason, StateMachineLoopMetric as Metric,
+        StateMachineLoopOutcome as Outcome};
+    hook.record(Metric::IterationStarted);
+    hook.record(Metric::IterationCompleted { route: Route::Continue, outcome: Outcome::Complete });
+    hook.record(Metric::IterationCompleted { route: Route::Exhausted, outcome: Outcome::Complete });
+    for outcome in ["complete", "done", "approved", "rejected", "custom-raw-outcome"] {
+        hook.record(Metric::IterationCompleted { route: Route::Break, outcome: Outcome::from_outcome(outcome) });
+    }
+    for reason in [Reason::InvalidDefinition, Reason::ResourceLimit] {
+        hook.record(Metric::CompileRejected { reason });
+    }
+}
+
 use std::collections::HashSet;
 use std::time::Duration;
 

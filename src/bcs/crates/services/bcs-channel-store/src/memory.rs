@@ -520,21 +520,21 @@ impl MemoryHumanInputRequestRepo {
         Ok(())
     }
 
-    async fn save_to_disk(&self) -> ServiceResult<()> {
-        let Some(ref dir) = self.data_dir else {
-            return Ok(());
-        };
+    // The file store has one process owner. SQL stores provide cross-instance CAS.
+    async fn persist_requests(&self, requests: &[HumanInputRequest]) -> ServiceResult<()> {
+        let Some(ref dir) = self.data_dir else { return Ok(()); };
         tokio::fs::create_dir_all(dir).await?;
-        let requests = self.requests.read().await;
-        let data = serde_json::to_string_pretty(&*requests)?;
-        tokio::fs::write(dir.join(HUMAN_INPUT_REQUESTS_FILE), data).await?;
+        let data = serde_json::to_string_pretty(requests)?;
+        let pending = dir.join(format!("{HUMAN_INPUT_REQUESTS_FILE}.pending"));
+        tokio::fs::write(&pending, data).await?;
+        tokio::fs::rename(&pending, dir.join(HUMAN_INPUT_REQUESTS_FILE)).await?;
         Ok(())
     }
 
     fn occupies_slot(request: &HumanInputRequest) -> bool {
         matches!(
             request.status,
-            HumanInputRequestStatus::Notifying | HumanInputRequestStatus::Active
+            HumanInputRequestStatus::NotificationPending | HumanInputRequestStatus::Notifying | HumanInputRequestStatus::Active
         )
     }
 }
@@ -552,7 +552,8 @@ impl HumanInputRequestRepoPort for MemoryHumanInputRequestRepo {
         mut request: HumanInputRequest,
     ) -> ServiceResult<HumanInputEnqueueDisposition> {
         let disposition = {
-            let mut requests = self.requests.write().await;
+            let mut saved = self.requests.write().await;
+            let mut requests = saved.clone();
             if let Some(existing) = requests
                 .iter()
                 .find(|existing| existing.request_id == request.request_id)
@@ -567,19 +568,21 @@ impl HumanInputRequestRepoPort for MemoryHumanInputRequestRepo {
                 existing.reply_scope_key == request.reply_scope_key
                     && Self::occupies_slot(existing)
             });
-            if occupied {
+            let disposition = if occupied {
                 request.status = HumanInputRequestStatus::Queued;
                 request.active_slot_key = None;
                 requests.push(request);
                 HumanInputEnqueueDisposition::Queued
             } else {
-                request.status = HumanInputRequestStatus::Notifying;
+                request.status = HumanInputRequestStatus::NotificationPending;
                 request.active_slot_key = Some(request.reply_scope_key.clone());
                 requests.push(request);
                 HumanInputEnqueueDisposition::Notifying
-            }
+            };
+            self.persist_requests(&requests).await?;
+            *saved = requests;
+            disposition
         };
-        self.save_to_disk().await?;
         Ok(disposition)
     }
 
@@ -620,6 +623,23 @@ impl HumanInputRequestRepoPort for MemoryHumanInputRequestRepo {
             .cloned())
     }
 
+    async fn find_occupying_by_scope(&self, scope: &str) -> ServiceResult<Option<HumanInputRequest>> {
+        Ok(self.requests.read().await.iter().find(|r| r.active_slot_key.as_deref() == Some(scope)).cloned())
+    }
+
+    async fn begin_notification(&self, request_id: &str, now_ms: u64) -> ServiceResult<bool> {
+        let mut requests = self.requests.write().await;
+        let mut next = requests.clone();
+        let Some(request) = next.iter_mut().find(|r| r.request_id == request_id
+            && r.status == HumanInputRequestStatus::NotificationPending
+            && r.active_slot_key.is_some() && r.deadline_ms > now_ms) else { return Ok(false); };
+        request.status = HumanInputRequestStatus::Notifying;
+        request.delivery_attempts = request.delivery_attempts.saturating_add(1);
+        self.persist_requests(&next).await?;
+        *requests = next;
+        Ok(true)
+    }
+
     async fn mark_active(
         &self,
         request_id: &str,
@@ -627,20 +647,22 @@ impl HumanInputRequestRepoPort for MemoryHumanInputRequestRepo {
         activated_at: u64,
     ) -> ServiceResult<bool> {
         let updated = {
-            let mut requests = self.requests.write().await;
+            let mut saved = self.requests.write().await;
+            let mut requests = saved.clone();
             let Some(request) = requests.iter_mut().find(|request| {
                 request.request_id == request_id
                     && request.status == HumanInputRequestStatus::Notifying
+                    && request.deadline_ms > activated_at
             }) else {
                 return Ok(false);
             };
             request.status = HumanInputRequestStatus::Active;
             request.provider_message_ref = provider_message_ref.map(str::to_string);
-            request.delivery_attempts = request.delivery_attempts.saturating_add(1);
             request.activated_at = Some(activated_at);
+            self.persist_requests(&requests).await?;
+            *saved = requests;
             true
         };
-        self.save_to_disk().await?;
         Ok(updated)
     }
 
@@ -650,7 +672,8 @@ impl HumanInputRequestRepoPort for MemoryHumanInputRequestRepo {
         error: &str,
     ) -> ServiceResult<bool> {
         let updated = {
-            let mut requests = self.requests.write().await;
+            let mut saved = self.requests.write().await;
+            let mut requests = saved.clone();
             let Some(request) = requests.iter_mut().find(|request| {
                 request.request_id == request_id
                     && request.status == HumanInputRequestStatus::Notifying
@@ -659,11 +682,11 @@ impl HumanInputRequestRepoPort for MemoryHumanInputRequestRepo {
             };
             request.status = HumanInputRequestStatus::DeliveryFailed;
             request.active_slot_key = None;
-            request.delivery_attempts = request.delivery_attempts.saturating_add(1);
             request.last_delivery_error = Some(error.to_string());
+            self.persist_requests(&requests).await?;
+            *saved = requests;
             true
         };
-        self.save_to_disk().await?;
         Ok(updated)
     }
 
@@ -673,7 +696,8 @@ impl HumanInputRequestRepoPort for MemoryHumanInputRequestRepo {
         responded_at: u64,
     ) -> ServiceResult<bool> {
         let updated = {
-            let mut requests = self.requests.write().await;
+            let mut saved = self.requests.write().await;
+            let mut requests = saved.clone();
             let Some(request) = requests.iter_mut().find(|request| {
                 request.request_id == request_id
                     && request.status == HumanInputRequestStatus::Active
@@ -683,9 +707,10 @@ impl HumanInputRequestRepoPort for MemoryHumanInputRequestRepo {
             request.status = HumanInputRequestStatus::Responded;
             request.active_slot_key = None;
             request.responded_at = Some(responded_at);
+            self.persist_requests(&requests).await?;
+            *saved = requests;
             true
         };
-        self.save_to_disk().await?;
         Ok(updated)
     }
 
@@ -695,7 +720,8 @@ impl HumanInputRequestRepoPort for MemoryHumanInputRequestRepo {
         now_ms: u64,
     ) -> ServiceResult<Option<HumanInputRequest>> {
         let promoted = {
-            let mut requests = self.requests.write().await;
+            let mut saved = self.requests.write().await;
+            let mut requests = saved.clone();
             for request in requests.iter_mut().filter(|request| {
                 request.reply_scope_key == reply_scope_key
                     && request.status == HumanInputRequestStatus::Queued
@@ -703,7 +729,7 @@ impl HumanInputRequestRepoPort for MemoryHumanInputRequestRepo {
             }) {
                 request.status = HumanInputRequestStatus::Expired;
             }
-            if requests.iter().any(|request| {
+            let promoted = if requests.iter().any(|request| {
                 request.reply_scope_key == reply_scope_key && Self::occupies_slot(request)
             }) {
                 None
@@ -721,13 +747,15 @@ impl HumanInputRequestRepoPort for MemoryHumanInputRequestRepo {
                     .map(|(index, _)| index);
                 next_index.map(|index| {
                     let request = &mut requests[index];
-                    request.status = HumanInputRequestStatus::Notifying;
+                    request.status = HumanInputRequestStatus::NotificationPending;
                     request.active_slot_key = Some(reply_scope_key.to_string());
                     request.clone()
                 })
-            }
+            };
+            self.persist_requests(&requests).await?;
+            *saved = requests;
+            promoted
         };
-        self.save_to_disk().await?;
         Ok(promoted)
     }
 
@@ -761,7 +789,8 @@ impl HumanInputRequestRepoPort for MemoryHumanInputRequestRepo {
             });
         }
         let updated = {
-            let mut requests = self.requests.write().await;
+            let mut saved = self.requests.write().await;
+            let mut requests = saved.clone();
             let mut updated = 0_u64;
             for request in requests.iter_mut().filter(|request| {
                 request.run_id == run_id
@@ -769,6 +798,7 @@ impl HumanInputRequestRepoPort for MemoryHumanInputRequestRepo {
                     && matches!(
                         request.status,
                         HumanInputRequestStatus::Queued
+                            | HumanInputRequestStatus::NotificationPending
                             | HumanInputRequestStatus::Notifying
                             | HumanInputRequestStatus::Active
                     )
@@ -777,11 +807,12 @@ impl HumanInputRequestRepoPort for MemoryHumanInputRequestRepo {
                 request.active_slot_key = None;
                 updated += 1;
             }
+            if updated > 0 {
+                self.persist_requests(&requests).await?;
+                *saved = requests;
+            }
             updated
         };
-        if updated > 0 {
-            self.save_to_disk().await?;
-        }
         Ok(updated)
     }
 }
@@ -1026,7 +1057,9 @@ mod tests {
                 .await?,
             HumanInputEnqueueDisposition::Notifying
         );
+        assert!(repo.begin_notification("first", 39).await?);
         assert!(repo.mark_active("first", Some("card-1"), 40).await?);
+        assert!(repo.begin_notification("parallel", 40).await?);
         assert!(repo.mark_active("parallel", None, 41).await?);
         assert_eq!(repo.count_queued("scope-a").await?, 1);
         assert!(repo.mark_responded("first", 50).await?);
@@ -1036,12 +1069,13 @@ mod tests {
             .await?
             .expect("queued request should be promoted");
         assert_eq!(promoted.request_id, "second");
-        assert_eq!(promoted.status, HumanInputRequestStatus::Notifying);
+        assert_eq!(promoted.status, HumanInputRequestStatus::NotificationPending);
         assert_eq!(promoted.active_slot_key.as_deref(), Some("scope-a"));
         assert!(
             repo.find_active_by_scope("scope-a").await?.is_none(),
             "notifying requests must not consume user replies before delivery is confirmed"
         );
+        assert!(repo.begin_notification("second", 59).await?);
         assert!(repo.mark_active("second", Some("card-2"), 60).await?);
         assert_eq!(
             repo.find_active_by_scope("scope-a")

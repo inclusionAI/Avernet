@@ -16,6 +16,15 @@ EXPECTED_OPERATIONS = {
     ("get", "/api/v1/collaboration/templates"),
     ("get", "/api/v1/collaboration/templates/{template_id}"),
     ("post", "/api/v1/collaboration/definitions/validate"),
+    ("get", "/api/v1/collaboration/manifest"),
+    ("get", "/api/v1/collaboration/assets/{bundle_name}/{file_name}"),
+    ("get", "/api/v1/collaboration/state-machine-runs/{run_id}"),
+    ("get", "/api/v1/collaboration/state-machine-runs/{run_id}/graph"),
+    ("get", "/api/v1/collaboration/state-machine-runs/{run_id}/nodes/{node_id}"),
+    ("get", "/api/v1/collaboration/state-machine-runs/{run_id}/pending-human-nodes"),
+    ("post", "/api/v1/collaboration/state-machine-runs/{run_id}/nodes/{node_id}/respond"),
+    ("post", "/api/v1/collaboration/state-machine-runs/{run_id}/reruns"),
+    ("post", "/api/v1/collaboration/state-machine-runs/{run_id}/cancel"),
     ("get", "/api/v1/collaboration/sessions/{session_id}/files"),
     ("post", "/api/v1/collaboration/sessions/{session_id}/files"),
     ("get", "/api/v1/collaboration/sessions/{session_id}/files/{file_id}"),
@@ -38,7 +47,7 @@ def _actual_operations():
     }
 
 
-def test_contract_contains_exactly_the_13_approved_internal_operations() -> None:
+def test_contract_contains_exactly_the_approved_internal_operations() -> None:
     assert _actual_operations() == EXPECTED_OPERATIONS
 
 

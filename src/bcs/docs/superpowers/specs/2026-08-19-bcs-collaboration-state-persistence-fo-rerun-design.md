@@ -2,6 +2,7 @@
 
 - 日期：2026-08-19
 - 状态：已批准（实施中）
+- 2026-09-14 修订：State Machine 按现有实现采用局部事务、单节点 CAS 和分步推进；§6.3 取代原跨启动/progression 全链路事务要求，以控制锁范围和写放大。
 - 范围：BCS `manager_worker` 主从协作、自定义 State Machine 协作、运行恢复与重跑
 - 术语约定：本文中的 FO 指 failover / fault recovery
 - 相关文档：
@@ -33,12 +34,12 @@ BCS 当前已经持久化 Group、Session 和消息历史，但两种群协作�
 1. 统一 FO 和用户 rerun 所依赖的持久化、幂等和 CAS 原语，但不把 Manager-Worker Task 和 State Machine Node 强行合并成同一业务表，也不为 Manager-Worker 新增自动 retry。
 2. 为 Manager-Worker 增加持久化 task、attempt 和 delivery correlation。
 3. 两种协作共享稳定 event receipt、少量 delivery checkpoint、CAS/必要的 recovery lease、幂等 operation key 和 recovery reconciler；这些能力服务于 FO，不建设通用 inbox/outbox，也不把现有同步正常执行路径改造成异步队列。
-4. State Machine 增加可持久化的内部执行阶段，补齐 `dispatching`、`judging`、`progressing` 和 `finalizing` 等恢复点。
+4. State Machine 补齐 dispatch、judge、progression 和 finalization 恢复点；Running 内部阶段按需持久化，progression 直接从 Completed 节点结果和不可变 snapshot 重算。
 5. FO recover 继续使用同一个 run；State Machine 已有自动 retry 继续在同一个 run 内增加 attempt；用户从头重跑必须创建新的 run，并通过 `rerun_of` 和 `root_run_id` 保存血缘。
 6. BCS 只承诺持久化编排状态的可恢复性。对于已经发往外部 Bot/Provider、但结果不明确的请求，本期只在既有协议明确支持相同幂等键时重交，否则等待原 deadline 后按现有状态结束，不承诺无缝接管外部运行。
-7. 新建 State Machine Run 时，Run、Node、definition snapshot、初始执行 frontier、审计事件、已渲染 opening 内容和初始 delivery checkpoint 必须原子提交；事务提交后仍由当前请求同步持久化/发布 opening 并执行初始 dispatch，不再制造 `Pending Run + 无恢复动作` 或“恢复时按新 Group 配置重新渲染 opening”的窗口。
+7. 新建 State Machine Run 沿用 Pending Run/Node 创建、snapshot 保存、Run start、opening 和 initial frontier 的分步顺序；不要求全链路同事务。snapshot 和 opening 历史保存成功前不派发节点；部分提交由失败处理或恢复收敛。
 8. Manager-Worker 保持当前同步语义：`task.dispatch` 只有 Worker 投递成功才返回 `dispatched`，Bot 不在线或明确拒绝时直接失败；Worker terminal 结果也先同步投递给 Manager，成功后 Task 才进入 `Replied`。Manager result 普通投递失败继续保持 pending，由 FO 复用同一 checkpoint 恢复；这只是结果交付恢复，不重跑 Worker 或增加 Task attempt。
-9. 所有 State Machine ServiceInvocation 的创建和重激活入口通过同一个基础设施事务，同时完成 Session create/activation CAS、Run/Node/Snapshot 创建、rerun lineage、rendered opening 固化和初始 delivery checkpoint 写入。
+9. State Machine ServiceInvocation 首次启动保留现有 Session 与 Run 分步调用；rerun 保留已实现的 Session activation、Run/Node/source snapshot 和 lineage 防重事务，不把 opening、audit、checkpoint 和 dispatch 扩入该事务。
 10. State Machine 保持现有 0-based attempt 和 `max_attempts` 语义；Manager-Worker 本期固定 `attempt=1`，不新增自动 retry。
 11. 本次发布不支持 pre-FO 旧实例与 FO 新实例同时主动执行协作任务；启用主动 reconciler 前必须 drain 并下线旧实例。后续已经遵守本契约的版本可以继续使用常规滚动发布。
 12. 本期手动 rerun 只允许以 Failed Run 为 source，并只支持从头执行、沿用 source Run 的 input 和不可变 snapshot；Completed、Aborted 或未结束的 Run 均不可重跑，也不支持从失败节点/指定节点重跑、替换 input、选择 latest snapshot 或复用历史 artifact。
@@ -215,9 +216,34 @@ Attempt 的标识语义统一，但为了兼容已有持久化数据和 delivery
 6. 外部事件只有与当前 attempt、assignee、delivery request 和 correlation 匹配时才能改变状态；由 claim 直接产生的同步写入还必须匹配该 claim 的 fencing token。
 7. 旧 attempt 的迟到事件必须记录为 ignored/stale，不能完成新 attempt。
 8. Work Item 状态转换必须使用 CAS 或等价的版本条件更新。
-9. 对本文明确列出的可恢复外部副作用，业务状态转换与对应 delivery checkpoint 必须在同一事务提交。正常请求路径在提交后立即同步执行；只有未完成或结果不明确的 checkpoint 才由 FO reconciler 接管。
+9. 可恢复外部副作用在首次发送前保存稳定 operation key 和恢复所需载荷；State Machine 按 §6.3 允许业务状态与 checkpoint 分步提交。Manager-Worker 的 Task/receipt/manager-result checkpoint 局部事务继续按 §8.5、§9.1 处理。
 10. Reconciler 的所有决策只能依赖持久化状态和不可变快照，不能依赖进程内缓存是否存在。
 11. Delivery checkpoint claim token、Node recovery claim token 和 attempt identity 是不同作用域；不得用一次短 recovery claim 的 token 否定同一 attempt 后续合法到达的 Provider event 或 checkpoint result。
+
+### 6.3 State Machine 事务与分步恢复边界
+
+本节按现有实现收敛 State Machine 的事务要求，适用于普通 DAG 和固定 Loop；实现可以在同一 Store 内合并
+少量写入，但不以覆盖整次启动、全部分支或全部下游节点的大事务作为符合本 spec 的条件。
+
+- 保留 `create_run` / `create_run_if_session_idle` 的 Run/Node 局部事务，以及
+  `create_rerun_if_session_idle` 的 Session activation、Run/Node/source snapshot、lineage 和防重事务。
+- 首次启动的 Session 创建、Pending Run/Node 创建、snapshot 保存、Run start、opening 和 initial dispatch
+  可以分别提交；snapshot 内容须一次完整保存。snapshot 或 opening 历史保存失败时不派发节点，返回错误并
+  沿用现有启动失败处理。进程退出可能留下部分启动状态，恢复只能使用已保存载荷；缺少不可变事实且无法恢复
+  时按启动失败收敛，不能猜测原 Definition、bindings 或 opening。
+- 单节点 completion CAS 一次固化 outcome、artifact 和 completed_at；选路从该结果及 snapshot 推导。
+  skip、下游 readiness/dispatch 和 Run finalization 可以依次提交，不回滚已完成节点，不重跑其 Bot/Judge。
+  Completed 只表示该节点结果已确定，允许其下游尚未推进。
+- 不要求为 progression 单独写 `runtime_phase`、逐 edge checkpoint 或逐 skip 恢复游标。Reconciler 对 active
+  Run 有界扫描，批量读取节点和 snapshot，重算未完成动作；即使中间节点已 Skipped，也要继续检查其后代。
+- State Machine 状态与 delivery checkpoint 可以分步保存；尚未发送的 operation 只有在原始载荷可从持久化事实
+  确定时才可幂等补建 checkpoint。首次发送前必须保存所需载荷，不能把缺 checkpoint 一概解释成“从未发送”。
+  已发送但结果不明的场景继续遵守原幂等键/deadline 边界。
+- 保留既有状态 CAS、attempt/correlation 检查、唯一键和已实现的 eventful transition 局部事务。DB 写入失败必须
+  向调用方返回错误，不能静默视为成功；下游补做前重新确认 Run active 和依赖满足。恢复并发仅在需要保护外部
+  调用或可变判断时使用短 claim，纯粹重放不可变结果的 progression 依赖目标节点 CAS，不强制新增父节点 lease。
+- 当前只有 timeout scanner 和部分 request-retry recovery。放宽事务不代表后台 FO 已完成；完整恢复仍需通过
+  分步提交故障注入和多实例测试才能启用或宣称。
 
 ## 7. 总体架构
 
@@ -351,9 +377,11 @@ record_status
 root_run_id
 rerun_of nullable
 session_activation_count nullable  # 新 ServiceInvocation Run 必填；Chat/legacy 可为空
-finalization_phase
 version
 ```
+
+Chat finalization 由 `chat_result` checkpoint 表示；Service finalization 由 Run terminal 与 Session activation
+状态差异表示，不为这两个切片增加重复的 Run `finalization_phase` 列。
 
 #### Node Run
 
@@ -373,11 +401,11 @@ version
 - `waiting_provider`
 - `waiting_human`
 - `judging`
-- `progressing`
 
 Pending 表示仍等待上游或未选择分支，Ready 表示已经进入可执行 frontier，RetryScheduled 继续使用现有 retry
-字段，Completed/Failed/Skipped 直接表示 terminal。只有公开 status 为 Running 时才要求非空 `runtime_phase`；
-这样避免保存 `Pending + ready`、`Completed + progressing` 等两套状态互相矛盾的组合。
+字段，Completed/Failed/Skipped 直接表示本节点 terminal。Running 内部阶段仅在恢复需要时持久化；不增加
+`Completed + progressing` 组合。Completed 的 outcome/artifact/completed_at 和 snapshot 已足以重算下游推进，
+不要求在 completion 前保存一个独立 progressing phase。
 
 ### 8.4 Rerun Natural Idempotency
 
@@ -426,12 +454,12 @@ delivery_request_id + attempt + terminal_kind
 同一时间且 `duplicate_count=0`；相同 key 和 hash 再次到达时，原子增加
 `duplicate_count`、更新 `last_seen_at_ms`，向调用方返回 duplicate outcome，但不把首次 `disposition` 改写为
 `duplicate`。相同 key 但 hash 不同视为协议冲突并写安全审计，也不得覆盖原 receipt。Receipt 不保存待消费
-payload、不维护 processing/retry/dead-letter 状态，也没有独立 lease worker。需要在 Judge/progression 中继续处理的
-内容直接保存到现有 Node artifact/response 字段，由 Node `runtime_phase` 表示下一步。
+payload、不维护 processing/retry/dead-letter 状态，也没有独立 lease worker。后续处理内容保存在 Node
+artifact/response 字段；Judge 按需使用 Running phase，progression 使用已 Completed 的 outcome 和 snapshot。
 
 ### 8.6 Durable Delivery Checkpoint
 
-新增窄用途 `bcs_collaboration_delivery_checkpoints`。它只记录本期明确需要跨进程恢复的协作副作用，不作为
+新增窄用途 `bcs_collaboration_delivery_checkpoints`。它只记录本期明确需要跨进程恢复的协作副作用及失败收尾事实，不作为
 Webhook、callback 或其他业务的通用 outbox：
 
 ```text
@@ -440,12 +468,13 @@ checkpoint_id
 aggregate_kind
 aggregate_id
 operation_kind         # bot_dispatch | manager_result | run_opening | chat_result |
-                       # im_terminal
+                       # im_terminal | startup_failure（恢复终态事实，不可投递）
 operation_key
 delivery_request_id nullable
 aggregate_attempt nullable
 aggregate_version nullable
 payload_json
+progress_json nullable # im_terminal 的 cleanup marker 与逐收件人进度；其他 operation 不使用
 status                 # pending | delivering | delivered | failed | superseded
 recover_after_ms nullable
 lease_owner nullable
@@ -465,7 +494,16 @@ smnode:{run_id}:{node_id}:{attempt}:dispatch
 smrun:{run_id}:opening
 smrun:{run_id}:chat-result
 smrun:{run_id}:im-terminal
+smrun:{run_id}:startup-failure
 ```
+
+State Machine Bot 派发的首个切片复用该表，以 `(env, operation_key)` 为主键，额外索引
+`(env, aggregate_id, operation_kind, status)`。实际列只引入本切片需要的 `node_id`、
+`aggregate_attempt`、`deadline_ms`、lease 和 error；delivery request ID 与不可变请求保存在 payload 内，
+不提前添加尚未使用的 checkpoint ID、aggregate version 或 recover-after 列。Opening 继续只使用历史屏障。
+Bot payload 保存已渲染 request、Run/Node/attempt/Group/Session/Bot 身份、原始 started_at/deadline，
+以及 WebSocket 或 Provider 的引用（provider ID、Bot ref、protocol version）。不保存 URL、凭据或转发
+headers；发送时从可信 registry 解析同一目标引用的当前连接信息，引用变化则按原派发失败策略拒绝。
 
 HumanInput notification 继续复用已有 `bcs_human_input_requests` 持久化状态；Session completion 由 Run/Session
 状态差异驱动恢复；callback 使用下述 Session 内最小 claim/lease 状态；Webhook 继续使用现有 Event delivery
@@ -504,16 +542,23 @@ Callback config 继续按现有 dispatcher 在实际 claim/发送时从 Group �
 
 `run_opening` checkpoint 的 `payload_json` 必须保存已经使用该 Run ID 渲染完成的 opening 内容、
 `component`（如有）、确定性的 `client_msg_id={run_id}:000-panel` 和目标 Session。不能只保存 Group ID 后在
-FO 时重新读取当前 `opening_message`。Run 创建事务只保存这份不可变 rendered payload，不要求跨 Group、Message
-和 Collaboration Store 建立一个更大的数据库事务。事务提交后，当前请求使用确定性 client message ID 幂等写入
-消息历史。
+FO 时重新读取当前 `opening_message`。这份不可变 rendered payload 可以在 Run 创建后独立保存，不要求跨 Group、
+Message 和 Collaboration Store 建立一个数据库事务；缺少原始载荷时不能重渲染并声称恢复了原 opening。
+保存后，当前请求使用确定性 client message ID 幂等写入消息历史。
 
 `run_opening` checkpoint 的完成 barrier 是确定性 opening 消息已经存在于 Session 历史。实时前端 publish 在
 该 barrier 之后由当前请求同步尝试，但 publish 超时或失败不把 checkpoint 改回 pending，也不阻塞 initial
 frontier；前端通过消息历史恢复。本文不为实时 publish 增加 durable retry。
 
-业务状态转换和本文列出的 checkpoint INSERT 必须位于同一数据库事务。创建事务可以同时把 checkpoint claim
-给当前请求实例；当前请求提交后立即通过既有 delivery port 同步发送，并在返回 API/WS response 前写入
+`run_opening` 只写本地幂等消息历史，不覆盖不确定的外部投递：复用 MessageRepo 的固定 message_id
+主键唯一性（`message_id=client_msg_id={run_id}:000-panel`）和 checkpoint pending → delivered CAS，不额外取得外部 delivery lease。写入返回的历史必须与已保存的
+Session、Run、client ID、content/component 一致，冲突不能当作 barrier 成功。正常启动先保存 rendered payload，
+再启动 Run 和写历史；Pending/Running Run 从同一有界扫描恢复，只有显式 checkpoint 的 initial frontier 才可恢复。
+未保存原 opening 的历史或并发创建窗口保持明确诊断，不读取当前 Group 重渲染；缺事实启动的最终失败收敛还需
+独立的超时/存活判据，不能因某次扫描读到未完成创建就误杀正常启动。
+
+State Machine 业务状态转换和 checkpoint INSERT 按 §6.3 分步提交；Manager-Worker 保留其声明的局部事务。
+checkpoint 保存后可以由当前请求 claim，再通过既有 delivery port 同步发送，并在返回 API/WS response 前写入
 delivered、确定性 terminal failed，或结果不明确的 `recover_after_ms`。其中 Manager result 的普通投递错误不是
 terminal failed：checkpoint 必须保持 pending 并设置下次恢复时间；原 Task deadline 耗尽时 Task 进入 TimedOut，
 该 checkpoint 随之 superseded。
@@ -525,7 +570,7 @@ terminal failed：checkpoint 必须保持 pending 并设置下次恢复时间；
   `ResultDeliveryPending`，由现有调用或 FO 使用同一个稳定 checkpoint 重试，不增加 Task attempt；原 Task deadline
   耗尽后才进入 `TimedOut`。同步调用未完成、返回错误、ACK 丢失或结果不明确时，均由 FO 在 checkpoint 到期后
   接管同一次结果交付；
-- State Machine start/rerun 在创建事务后仍由当前请求按“opening 消息幂等持久化、实时发布、initial frontier dispatch”的顺序同步执行；opening 历史持久化失败时不派发节点并沿用现有启动失败语义，实时前端发布失败仍是非致命且由消息历史恢复；HTTP 仍保持现有 accepted response 时点，不把首次 dispatch 延后到后台 worker；
+- State Machine start/rerun 在完成各自必要的 Run/snapshot 保存后，仍由当前请求按“opening 消息幂等持久化、实时发布、initial frontier dispatch”的顺序同步执行；opening 历史持久化失败时不派发节点并沿用现有启动失败语义，实时前端发布失败仍是非致命且由消息历史恢复；HTTP 仍保持现有 accepted response 时点，不把首次 dispatch 延后到后台 worker；
 - callback、IM 和 Webhook 继续使用各自现有首次同步/异步路径；callback/Webhook 不写本表，callback 只增加
   Session 内 activation-aware claim/lease，`im_terminal` checkpoint 只补 IM 的 FO 恢复事实，不改变首次发送机制。
 
@@ -533,36 +578,29 @@ Reconciler 只 claim lease 已到期且仍为 pending/delivering 的 checkpoint�
 Service/delivery port。交付结果通过 checkpoint token 和 aggregate attempt/version 校验后 CAS 推进；不新增独立
 recovery delivery worker 或 internal inbox consumer。
 
-Checkpoint `lease_token` 只保护该 operation 的 claim/确认。State Machine Judge/progression 使用 Node 自己的短
-`recovery_lease_token`；Manager-Worker 不再额外保存 Task lease。Provider event 的有效性仍由 delivery request、
+Checkpoint `lease_token` 只保护该 operation 的 claim/确认。State Machine Judge 使用 Node 自己的短
+`recovery_lease_token`；Completed 结果的 progression 重放依赖目标节点 CAS，不强制单独 claim 父节点。
+Manager-Worker 不再额外保存 Task lease。Provider event 的有效性仍由 delivery request、
 attempt、assignee、correlation 和业务 CAS 判断。
 
-执行现有 State Machine Run/Session cancel 时，事务必须把尚未开始投递的 dispatch/result checkpoint 标记为
-`superseded`。Reconciler 在真正发送前再次校验；本期不新增 Provider cancel capability、cancel checkpoint、
+执行现有 State Machine Run/Session cancel 时，先持久化取消状态，再幂等地把尚未开始投递的 dispatch/result
+checkpoint 标记为 `superseded`，允许分步提交。Reconciler 在真正发送前再次校验 Run/Session；本期不新增 Provider cancel capability、cancel checkpoint、
 Manager-Worker Task cancel API 或新的 Task `Cancelled` 状态。
 
 ### 8.7 Snapshot
 
 FO 必须使用原 Execution 的不可变快照。State Machine 继续使用 definition snapshot 和 resolved participant bindings；Manager-Worker 在 task 创建时保存实际 payload、manager/worker identity、response mode 和 timeout。本期不新增 Manager-Worker retry policy。
 
-State Machine 的新 Run 不再分成“创建 Pending Run”和“随后启动”两个事务。Run、node、snapshot、
-created/started audit event、不可变 rendered opening payload、opening checkpoint，以及初始 BotTask 的 dispatch
-checkpoint 应在一个事务中创建。非初始节点使用现有 `status=Pending`；初始 BotTask 使用
-`status=Running,runtime_phase=dispatch_pending`；初始 HumanInput 使用 `status=Ready`，事务后再通过已有持久化
-HumanInput request 路径激活。Run 在该事务中直接保存为 `Running`。
+State Machine 保留“创建 Pending Run/Node、保存 snapshot、随后启动”的现有调用路径。首次 Run/Node 创建
+沿用现有局部事务，snapshot 使用独立 repository command；不要求 initial frontier、audit、opening 和 dispatch
+checkpoint 同事务预创建。仅实际派发/激活的节点进入 Running，其余节点保持 Pending/Ready。
 
-事务提交后，当前请求先幂等持久化 opening，再同步派发/激活 initial frontier。实时前端发布失败不阻止节点，
-但 opening 历史尚未成功持久化时不得派发。Reconciler 遵守相同应用层顺序：先恢复
-`smrun:{run_id}:opening`，再处理该 Run 的 Ready/dispatch_pending 节点，不增加通用 checkpoint dependency 图。
+snapshot 保存成功后，当前请求继续启动 Run、幂等持久化 opening，再同步派发/激活 initial frontier。
+实时前端发布失败不阻止节点，但 snapshot 或 opening 历史尚未成功持久化时不得派发。Reconciler 遵守相同
+应用层顺序；已保存的原始载荷足够时补做未完成步骤，载荷缺失不可恢复时按启动失败收敛，不读取当前配置补造。
 
-当前“先创建 run/node，再保存 snapshot、再启动 Run”的多步窗口需要收敛为一个 repository use case，例如：
-
-```text
-create_running_run_with_snapshot_opening_and_initial_dispatch_if_session_idle(...)
-```
-
-该 use case 必须同时提供 memory 和 DB 实现并运行同一 conformance suite。首次升级前必须 drain 或确定性终止
-pre-FO active Run；reconciler 不接管没有本期 checkpoint/runtime phase 的旧执行。
+Memory 和 DB 实现分别验证局部事务及步骤间失败边界。首次升级前仍需 drain 或确定性终止 pre-FO active Run；
+不能仅因为其状态是 Pending/Running，就假设具有完整主动恢复所需事实。
 
 ### 8.8 FO Intermediate State Source of Truth
 
@@ -573,7 +611,7 @@ FO 依赖中间状态持久化，但不依赖某个进程的内存对象。状�
 | Manager-Worker Task、attempt、deadline、response aggregation boundary | `bcs_manager_worker_tasks` |
 | Manager-Worker delivery request 与 Provider run alias | `bcs_manager_worker_delivery_correlations` |
 | State Machine Run terminal/finalization/lineage | `bcs_state_machine_runs` |
-| Node public status、runtime phase、attempt、artifact、Judge/progression checkpoint | `bcs_state_machine_node_runs` |
+| Node public status、runtime phase、attempt、artifact、outcome 和 completion time | `bcs_state_machine_node_runs`；progression 从结果与 snapshot 重算 |
 | definition、participant binding 和 policy snapshot | `bcs_state_machine_definition_snapshots` 及现有 runtime binding snapshot |
 | 外部 terminal event 去重事实 | `bcs_collaboration_event_receipts` |
 | 本期声明的可恢复协作副作用 | `bcs_collaboration_delivery_checkpoints` |
@@ -625,28 +663,57 @@ State Machine 继续以公开 Node status 表示 graph/terminal 状态，只对 
 stateDiagram-v2
     [*] --> Pending
     Pending --> Ready: selected and all upstreams satisfied
-    Ready --> DispatchPending: status=Running + checkpoint created
+    Ready --> DispatchPending: CAS Running; then persist checkpoint
+    Pending --> DispatchPending: selected and upstreams satisfied; direct CAS
     DispatchPending --> WaitingProvider: delivery accepted
     WaitingProvider --> Judging: terminal artifact persisted
-    Judging --> Progressing: judge outcome persisted
-    Progressing --> Completed: node CAS completed and transitions recorded
-    WaitingProvider --> RetryScheduled: existing retry policy
+    Judging --> Completed: CAS persists outcome and artifact
+    WaitingProvider --> Completed: no Judge; CAS persists complete outcome
+    WaitingProvider --> Failed: CAS failure and saved action
+    Judging --> Failed: explicit Judge failure and saved action
+    WaitingHuman --> Failed: timeout and saved action
+    Failed --> RetryScheduled: saved retry decision
+    Failed --> [*]: saved fail_run decision; Run failed
     RetryScheduled --> Ready: existing retry due
     Ready --> WaitingHuman: human_input activated
     WaitingHuman --> Judging: human response persisted
-    WaitingHuman --> Progressing: human response persisted, no Judge
+    WaitingHuman --> Completed: no Judge; CAS persists response and outcome
 ```
 
-不需要 Judge 的节点可以从 WaitingProvider 直接进入 Progressing。HumanInput 继续使用已有持久化
+Completed 后在当前调用栈继续执行 progression，公开状态不回到 Running。HumanInput 继续使用已有持久化
 `bcs_human_input_requests` 状态和同步通知路径，不再复制一份 collaboration delivery checkpoint。
 
 单纯 FO 恢复 `Judging` 必须复用已持久化 artifact，在同一 attempt 上继续 Judge，不能借 FO 触发新的 retry。
 State Machine 既有 timeout/retry policy 保持原语义，本 spec 不新增 Judge retry 分支。
 
-创建新 Run 时，初始 Bot frontier 可以在创建事务内直接从 Ready 推进到 Running/DispatchPending 并写入
-checkpoint；初始 HumanInput 保持 Ready，其余节点保持 Pending。Progressing 在同一事务中持久化选中的
-transition、将未选择分支标记为 Skipped，并只把满足依赖的目标节点推进到 Ready。正常下游推进仍在当前事件
-处理调用栈中同步派发，未完成 dispatch checkpoint 才交给 FO。
+Bot Node CAS Running 时进入 `dispatch_pending`，保存不可变 checkpoint 后才可 claim；checkpoint 的
+`pending → delivering` 必须先于外部 IO 持久化。发送开始后不因 lease 过期恢复成 pending。ACK 将 checkpoint
+标记 delivered，并在一个 checkpoint/Node 局部事务内把仍处于 dispatch_pending 的 Node 改为 waiting_provider。
+Bot 结果可能早于 ACK 到达，因此 dispatch_pending 与 waiting_provider 均允许原结果 CAS；已开始 Judge 或完成
+的 Node 拒绝迟到 ACK 改写。恢复根据 checkpoint 而非单独根据 Node phase 决定能否首次发送。
+
+Judge 输入提交在同一 Node CAS 保存 `runtime_phase=judging`、artifact 和 Human responded_by；同一 attempt
+的输入只接受首次写入或完全相同的 replay。普通请求和恢复使用同一 owner/token/until 短租约，claim 时递增
+token，提交时校验 Run active、Node Running、attempt、phase、owner、token 和未到期的 lease。Judge 结果、
+Node completion/failure、既有 Judge audit 和可选 node.completed Event 在单节点局部事务中提交；失败时仍保存
+原 retry/fail_run 决策。成功提交清理 lease；本地准备/写入报错时条件释放，进程退出才等待到期接管。
+已提交的 Judge 不重复调用；远端已返回但本地事务尚未提交时允许同 attempt 重新判定，不承诺远端 exactly-once。
+只有 artifact 而无显式 judging phase 的历史 Running 不自动接管；租约过期不增加 attempt，也不重跑 Bot。
+
+已明确失败的 attempt 与尚在 Judging 的 attempt 分开恢复。Failed CAS 在同一 Node 行保存 error、completed_at
+和 `failure_action=retry|fail_run`。Bot terminal error/aborted、空可见输出、Judge 和 timeout 失败按既有 max attempts
+选择 action；派发拒绝/调用失败保持现有直接 FailRun 策略。恢复沿用已保存的决定：retry 以原 attempt 的 CAS 创建
+下一 attempt；fail_run 使用原 error 终结 Run。Run 仍须 Running，旧 attempt 不得影响新 attempt，取消后不派发。
+RetryScheduled 提交时清除旧 action，不要求 Node 失败、RetryScheduled、Run/Session 收尾同事务提交。保存的
+FailRun 不允许由 retry CAS 改写；无 action 的历史 Failed 明确报错，不能解析错误文本或读取当前配置猜测策略。
+
+completion CAS 提交本节点 outcome、artifact 和 completed_at 后，按现有顺序同步 skip 未选择分支、检查
+upstream barrier、派发满足条件的下游。各节点更新分别提交，不要求全图或整个 Loop 的 skip/frontier 同事务。
+可直接沿用 Pending -> Running 的派发 CAS，不为满足本 spec 强制多写一次 Ready 状态。
+
+进程退出或某一步写入失败后，已 Completed 节点保持不变；reconciler 从它的结果和原 snapshot 重算，补做仍未
+完成的 skip/dispatch。恢复 skip 遍历不能遇到已 Skipped 节点就截断其后代。重复重算可以发生，但目标节点 CAS
+和稳定 delivery request ID 防止重复有效启动。部分 progression 不能被误判为整个 Run 已完成。
 
 ### 9.3 Run Finalization
 
@@ -654,20 +721,50 @@ transition、将未选择分支标记为 Skipped，并只把满足依赖的目�
 
 Chat Session 保持“先同步发布 chat result，再把 Run 标记 terminal”的现有行为：
 
-1. CAS 把 Run 的 `finalization_phase` 写为 `publishing_chat_result`，并写入带稳定 message operation key 的 sync-primary checkpoint；
-2. 当前请求同步调用既有 result publisher；
-3. 发送成功或用 operation key 确认已经发送后，在同一短事务中把 checkpoint 标记 delivered，并将 Run CAS 为 Completed/Failed/Aborted；
-4. 进程在第 1–3 步之间退出时，FO 只恢复这个 checkpoint；目标消息层必须按稳定 message ID 幂等，不能产生第二条用户可见结果。
+1. 所有 Node 完成/跳过后，先独立保存 `smrun:{run_id}:chat-result` checkpoint，冻结 Run/Group/Session、发起 Bot、最终文本、消息时间及原截止时间。checkpoint 本身表示 finalizing，不重复增加 Run phase 列；
+2. 当前请求和 scanner 共用 Pending claim、owner/token 短租约，先持久化 Pending → Delivering，再同步调用既有 result publisher；
+3. publisher 明确返回成功后，fenced CAS 将 checkpoint 标为 Delivered，再独立将仍 Running 的 Run CAS 为 Completed。Run 写失败时只重做收尾，不重新调用 publisher；明确调用失败先保存 Failed/error，再沿用原 Run Failed 策略；
+4. 原始消息历史使用固定 `message_id=client_msg_id=state-machine-result:{run_id}`，并校验保存的目标、sender、文本、时间、visibility/audience。消息历史存在只证明本地写入，不证明后续路由已完成。
+
+现有 message-flow 的非排队路由会生成新的 Bot delivery run ID，因此 **稳定 client message ID 不等于整个
+publisher 的重投幂等**。本切片不改变首次路由行为，也不新增通用消息 outbox：Pending 可在原截止时间内首次
+发送；Delivering 即使 lease 过期也不重发。发送成功但 ACK 未落库、超时或进程退出都属于结果未知，Run 暂保
+Running，原截止时间到达后保存 publication Failed 并将 Run 置 Failed，错误明确说明结果可能已经送达。
+这不承诺最终消息必达或恰好一次远端副作用；若要透明重投，须先给全部 message-flow 分支补齐可验证的幂等
+acceptance 合同。调用明确失败也可能发生在部分发布之后，继续沿用现有失败语义。
+
+原截止时间为最终 Node 完成时间加 90 秒；每次 claim 最长 30 秒，publisher 调用受同一 lease 时间界限约束，
+恢复不能延长原期限。取消/终态 Run 阻止新的 claim/send/ACK，已发出的 IO 不能撤回。存储写失败返回错误，
+不冒充 publisher 拒绝、不丢失发送标记。保存后发送前失败可接管；保存前失败可以从原 snapshot 和全部 terminal
+Node 重建载荷，因该版本在保存成功前绝不发送。仍遵守 §18 的 pre-FO drain 和禁止混合实例主动恢复规则，
+不据此补发旧版本可能已发布但未记录 checkpoint 的历史 Run。终态遗留 checkpoint 的有界清理单独验收。
 
 ServiceInvocation Session 保持“Run terminal 后完成 Session，再触发 callback/IM”的现有行为：
 
 1. CAS 将 Run 标记 Completed/Failed/Aborted；
-2. 当前请求通过 activation-aware Session use case，以 `(session_id, session_activation_count)` CAS 完成 Session；
-3. Session completion 后沿用现有 callback dispatcher 和 IM publisher；callback 的 durable 恢复事实是该 activation
-   已 Completed、`callback_status=pending` 且 callback lease 空闲或已过期，IM 如需要 FO 则用稳定
-   `smrun:{run_id}:im-terminal` checkpoint；
-4. Reconciler 扫描“terminal Run + 同 activation Session 仍 Running”并补做第 2 步，也扫描 completed Service
-   Session 的待恢复 callback；不要求 Session、callback、IM 三类 Store 共享一个新事务。
+2. Completed/Failed 先独立保存 `smrun:{run_id}:im-terminal`：从原 snapshot/Run 及已有 HumanInput requests
+   冻结 Session activation、收件人、原通知文本与 Run 完成时间加 90 秒的截止时间，准备阶段不发送；Aborted
+   保持原来不发终态 IM 的行为。保存失败返回错误，Session 留在 Running 供恢复补做；
+3. 当前请求通过 activation-aware Session use case，以 `(session_id, session_activation_count)` CAS 完成 Session；
+4. Session completion 后沿用现有 callback dispatcher 和同步 IM 发送。Callback 的 durable 恢复事实是该
+   activation 已 Completed、`callback_status=pending` 且 callback lease 空闲或已过期；IM 单独 claim checkpoint；
+5. Reconciler 扫描“terminal Run + 同 activation Session 仍 Running”并补做第 2、3 步，同时用独立有界 Run
+   游标扫描 pending IM checkpoint，覆盖已经 Completed 的 Session；callback 保持其既有恢复路径。不要求
+   Session、callback、IM 三类 Store 共享一个新事务。
+
+IM checkpoint 的 `payload_json` 不可变，`progress_json` 保存 cleanup 完成标记及每个收件人的
+`pending | sending | delivered | failed`。父记录只有全部收件人终结且 cleanup 已完成才进入 Delivered/Failed；
+无收件人时只完成原 cleanup 后记 Delivered。一个收件人成功不能掩盖其他收件人的未完成状态。沿用原请求关闭、
+reset 观察和队列推进逻辑；WaitingHuman 通知自身的跨进程语义仍单独验收。
+
+每次 claim 最长 30 秒，发送标记和 ACK 都校验 owner/token/lease、原 Run 及同一 Completed Service activation。
+绑定不可用等只读预检失败可以保留 Pending，每隔至少 1 秒重试，不能延长原 90 秒期限。调用 Channel 前先持久化
+Sending；成功后保存 provider message ref，其他收件人继续独立处理。Channel delivery 没有统一幂等保证，故
+调用错误、超时、发送后 ACK 写失败或进程退出都可能已送达；恢复遇到 Sending 将该收件人明确 Failed，绝不重发。
+固定 `state-machine-terminal-{run_id}` 只复用现有发送身份，不被当作远端恰好一次保证。确定未发送且已到期的
+收件人也终结为 Failed；新 activation/失效 Run 将旧 Pending checkpoint 标为 Superseded。存储错误传播给调用方，
+不改写为发送失败。原文已保存后不读取当前 Definition 重新渲染。仍要求 pre-FO drain，不能补造历史 Completed
+Session 的未记录通知，也不承诺远端通知必达。
 
 旧 Run 的迟到 finalization 不能完成或通知新的 activation。Callback/IM 暂时失败不能把已经 terminal 的 Run
 改回 Failed。Chat Session 不执行 Session completion，也不创建 Service callback。Callback dispatcher 必须使用
@@ -706,8 +803,9 @@ WHERE checkpoint_id = ?
 确认结果必须携带 checkpoint `lease_token`，并再次校验 aggregate attempt/version。过期 owner 不能确认
 checkpoint 或推进业务状态。
 
-State Machine `Judging/Progressing` 使用 Node 上的独立短 recovery lease；Manager-Worker Task 不保存第三套
-lease。Claim 只覆盖一次短本地推进或一次 delivery 调用，不覆盖远端 Bot 运行周期。
+State Machine `Judging` 使用 Node 上的独立短 recovery lease；Completed 节点的 progression 重算使用下游
+CAS，不强制为每个父节点追加 claim/release 写入。Manager-Worker Task 不保存第三套 lease。
+Claim 只覆盖确有并发保护需要的短动作或 delivery 调用，不覆盖远端 Bot 运行周期。
 
 Callback 不使用上面的 checkpoint SQL，但遵循同样的 fencing 原则：正常 dispatcher 和 FO 都必须通过 Session
 Repository 的 activation-aware callback claim，从 lease 空闲或已过期的 `pending` 取得 owner/token；terminal
@@ -720,19 +818,21 @@ Repository 的 activation-aware callback claim，从 lease 空闲或已过期的
 
 | 持久化状态 | Reconciler 动作 |
 | --- | --- |
-| Node Pending | 根据原 snapshot、上游 terminal 状态和已选择 outcome 重新计算；满足条件进入 Ready，不可达分支进入 Skipped |
+| Run Pending 或启动未完成 | 校验原 snapshot/opening 恢复载荷；事实完整时补做启动，缺失且无法恢复时按启动失败收敛，不使用当前配置补造 |
+| Node Pending | 根据原 snapshot、上游 terminal 状态和已选择 outcome 重新计算；满足条件进入 Ready 或直接调用现有 dispatch CAS，不可达分支进入 Skipped |
 | Ready | 当前请求或 reconciler 使用同一 activation/dispatch use case；BotTask 原子转为 Running/DispatchPending，HumanInput 复用已有 request store 激活 |
 | DispatchPending，发送结果未知 | 既有协议确认支持相同 idempotency key 时用原 delivery request 重交；否则等待原 deadline 后确定性失败/超时 |
 | WaitingProvider | 等待既有 event 或 deadline；State Machine 到期后沿用已有 retry policy，Manager-Worker 到期后 TimedOut，不由 FO 新增 attempt |
 | Manager-Worker ResultDeliveryPending | 当前事件处理先同步投递；普通投递错误保持 pending，并由现有调用或 FO 继续使用同一 manager-result checkpoint；确认送达后进入 Replied，原 Task deadline 耗尽后进入 TimedOut，不增加 attempt |
 | WaitingHuman/Ready HumanInput | 使用已有 HumanInput request 状态恢复通知，不重新创建逻辑 interaction |
 | Judging | claim Judge，使用已持久化 artifact 恢复判断，不重跑 Bot |
-| Progressing | 重新计算 transition，CAS 推进下游 Ready；正常事件处理继续同步派发，FO 只补未完成项 |
+| Node Completed，下游未推进完 | 从已保存 outcome 重算 transition，继续未完成 skip 并用目标 CAS 派发；不新增独立 progressing phase，不重跑本节点 |
 | RetryScheduled | 按 State Machine 现有规则在到期后增加 Node attempt 并进入 Ready；Manager-Worker 没有该状态 |
 | Node terminal，Run active | 检查下游、跳过分支和 Run 完成条件 |
 | 所有 Node terminal，Run active | 按 Session kind 恢复现有 finalization 顺序 |
-| Chat Run finalizing + chat-result checkpoint pending | 恢复稳定最终消息，确认后提交 terminal Run |
-| Service Run terminal + Session 同 activation 仍 Running | activation-aware CAS 完成 Session |
+| Chat Run finalizing + chat-result checkpoint | Pending 在原 deadline 内首次发送；Delivered 补交 Run Completed；Failed 补交 Run Failed；Delivering 不重发，到期按结果未知失败 |
+| Service Run terminal + Session 同 activation 仍 Running | Completed/Failed 先保存原终态 IM intent，再 activation-aware CAS 完成 Session；Aborted 不发 IM |
+| Service Session completed + im-terminal checkpoint pending | 短 lease 与 activation fencing 下按逐收件人进度恢复；仅预检前的 Pending 可发送，Sending/unknown 不重发，旧 activation 记 Superseded |
 | Service Session completed + callback_status pending，lease 空闲 | activation-aware claim lease 后调用现有 callback dispatcher；无配置时写 not_applicable，不创建 collaboration callback outbox |
 | Service Session completed + callback_status pending，lease 过期 | 用同一 activation 重新 claim；旧 token 不能确认，新 owner 按 at-least-once 语义恢复发送 |
 | State Machine Run/Session cancelled/aborted + checkpoint pending | 将未发送 operation 标记 superseded；已 accepted 的外部 run 仅忽略迟到事件，本期不新增 Provider cancel capability |
@@ -749,7 +849,77 @@ Repository 的 activation-aware callback claim，从 lease 空闲或已过期的
 4. State Machine 到期后只按已有 retry policy 决定是否创建新 Node attempt；Manager-Worker 直接 TimedOut/Failed；
 5. 迟到事件按 receipt + current attempt/correlation 判断为 stale，不推进当前状态。
 
+当前 `BotDeliveryPort` 没有统一的幂等重投保证。State Machine 的 pending checkpoint 表示发送标记尚未
+提交，可在原 deadline 内 claim 后首次发送保存的请求；delivering 表示发送已开始或结果未知，恢复只等待原
+correlation 的结果与原 deadline，不补发。即使进程恰在发送标记提交后、真正 IO 前退出，也遵循这一保守边界。
+Delivered 不触发重新派发；明确拒绝或调用失败先保存原错误，再沿用既有直接 FailRun 策略，不能借恢复改成 retry。
+
+到期处理必须在一个 checkpoint/Node 局部事务中同时校验 Pending/Delivering、原 deadline、Run active、Node
+Running、attempt 和无 artifact，保存 Failed 与 retry/fail_run 决策并 supersede checkpoint；ACK 和结果若先提交，
+过时扫描不得覆盖它们。SQL 按 checkpoint 后 Node 的顺序锁定，避免 ACK 与到期事务反向持锁。正常终态/取消和
+活动 Run 扫描会 supersede 失效 attempt 的未完成 checkpoint；终态 Run 使用独立有界清理游标收敛遗留工作。
+Node timeout 为 None 时，checkpoint 固化原 Provider timeout 作为歧义截止时间；已经确认派发的 Node 仍保持
+禁用 timeout，不因该 fallback 被超时。缺失 checkpoint 不能视为未发送或重建当前请求；没有原 deadline 的
+缺失载荷场景按下节的准备宽限期收敛，不把缺记录视为“从未发送”。
+
+#### 10.4.1 原始事实缺失与创建者准备窗口
+
+新版本创建者在保存 snapshot/opening/dispatch 后才进入对应发送路径，但分步写之间会暂时缺少载荷。
+缺记录、当前进程内没有 Future、连续扫描次数均不能证明创建者死亡。本期采用固定、不可续期的准备宽限期，
+到期表示允许撤销尚未完成准备的请求，而不是判断其进程是否存活；不增加心跳、创建者注册表或常态写入。
+
+- 缺 snapshot/opening：从 Run 保存的 `created_at` 起保留 90 秒。期间只报告诊断；到期后 repository 在同一
+  条件更新中重查 Run 仍 Pending/Running、创建时间一致且该原始事实仍不存在，才标为 Failed。创建者补齐事实
+  或其他调用先提交 terminal 状态时，过时收敛无效。前台已明确遇到准备写失败时可立即使用同一条件更新。
+- Failed 与 `smrun:{run_id}:startup-failure` 的类型化事实在一个小事务中提交；保存 Run/Session/activation、
+  缺失类型、原创建时间、失败时间及原错误。写记录失败必须回滚 Run 变更。该记录使用既有 checkpoint 表，
+  `operation_kind=startup_failure,status=failed`，没有发送/claim/retry worker；不新增 schema 或 migration。
+- Session 仍独立完成：缺 snapshot 时只允许严格匹配上述持久化失败事实的 Failed Run 完成原 Service activation
+  并触发现有 callback。不能仅凭错误文本或当前 Session 推断原 activation；不能读取当前 Definition 补造流程名、
+  结果或终态 IM。已有 snapshot 的缺 opening 失败沿用原终态 Session/IM 路径。Session 写失败由现有恢复页补做。
+- Running Bot 缺 dispatch checkpoint 且尚无 artifact：有原 `timeout_deadline_ms` 时等到原 deadline，并保存原
+  max_attempts 对应的 Retry/FailRun；没有节点 deadline 时使用保存的 `started_at + 90 秒`，到期 FailRun，不
+  因当前 Provider 配置推导 deadline、不新增 attempt。历史行连 started_at 也缺少时，使用 Run 原 created_at
+  作为这条不可恢复准备记录的最后宽限依据。条件更新重查 Run active、Node Running、attempt、无 artifact、
+  checkpoint 仍不存在且未保存 Provider run ID；已保存载荷、已完成结果和取消均胜过过时扫描。已有 Provider run ID
+  即为受理的正向证据，即使缺 checkpoint 也继续等原事件或原节点 timeout；已确认派发且关闭 timeout 的 Node 不受影响。
+- 晚恢复的创建者不能重新启动 Failed Run，不能为已经 Failed/更换 attempt 的 Node 保存新的 dispatch checkpoint，
+  也不能取得发送屏障。到期前已发出的远端操作无法撤回；缺载荷的旧 attempt 永不被重发。正常路径仍使用原来
+  的状态/CAS 屏障，不添加全图事务或恢复专用外部协议。
+
+只把缺失事实纳入这一规则，现存但损坏/不支持的 snapshot 或 checkpoint 仍明确报错。恢复 v2 已保存计划仍遵守
+执行开关；完全缺 snapshot 时只提交受约束的失败，不执行工作流。历史写入方必须先 drain，禁止不遵守发送屏障
+的旧版本与主动恢复混合运行。该项不能替代真实多实例/强杀和完整 FO 验收。
+
 该规则只能恢复 BCS 已持久化的编排事实，不宣称透明接管 Provider 内部运行。
+
+#### 10.4.2 终态工作清理与人工通知恢复
+
+终态清理使用既有 Run 索引，分别按 Completed/Failed/Aborted 读取排他的 Run ID 游标并合并有界页面。
+每页最多 32 个 Run；每个 Run 至多退休 32 条未完成 dispatch/Chat checkpoint，并清除至多 32 个 Node
+的内部 phase/lease。每次写入重新校验 Run 仍为终态；中途写失败保留已经完成的部分，后续游标轮转续做。
+不删除 payload、结果、事件、lease token 或已确认送达记录，不更改 Run/Node 业务状态，不发外部消息。
+Opening、startup-failure 和 terminal-IM 事实不属于此清理范围。页面会遍历保留的终态 Run，包括已清理的历史；
+这是有界扫描，不是历史归档或数据库空间回收，也不保证一轮清完单个大 Run。
+
+人工通知继续使用原 HumanInputRequest 表/文件和同一个逻辑 request ID，新增字符串状态
+`notification_pending`，无 schema/migration 变更：
+
+- enqueue/排队提升占用 reply scope 后保存 `notification_pending`，表示尚未跨过外部发送屏障。
+- 只读 Provider 预检后，核对原 Run、Session activation、Running 人工节点、尚无 artifact 和完全相同的原 deadline。
+  request 的 `notification_pending → notifying` CAS 是唯一发送权；`delivery_attempts` 在这一刻加一，ACK 不再加一。
+- `notifying` 表示发送中或结果未知，包括旧版本遗留且 attempts=0 的记录；重启/竞争实例永不据此重发。
+  保留原 deadline 和 Workbench 回复路径。原发送者在状态仍有效、未过期时可以确认 Active；取消/过期不能被迟到 ACK 复活。
+- 已确认的 Active 不重发；明确返回的发送失败保存 DeliveryFailed，沿用 Workbench 处理。预检和持久化失败向上传递，
+  不把未发送当作已送达。文件 Store 先原子替换文件再发布内存状态，只支持单进程所有者；跨实例竞争使用 SQL Store。
+- 通用 active-Run scanner 先恢复已有请求并清理已失效节点/原 deadline 的槽位，再补准备缺失请求。
+  已有请求完全复用原文本/目标/期限；缺请求时只从原 snapshot 和 Node Run 构造相同 ready event，且 enqueue 必须先于 IO。
+  已有请求覆盖的 execution node 不重新构造通知。每次队列推进最多处理 32 项；后续扫描继续处理剩余项。
+- Run/Node/Session 检查是只读预检，不是跨 Store 事务。状态可以在最后一次预检后与外部 IO 竞争；已开始的发送无法撤回。
+  请求级取消 CAS 和 ACK 前的再次预检避免重复调用与迟到确认复活，不能据此宣称外部 exactly-once。
+
+新状态不支持与旧 Channel 写入方混跑。首次启用主动恢复仍按 §18.1 drain/停止旧实例；不能把内部 Store 合同和
+受控跨进程恢复解释为真实 Provider/完整产品多实例强杀验收。
 
 ### 10.5 恢复审计
 
@@ -856,7 +1026,7 @@ created_by
   `tab.id` 中包含 `{{bcs.run_id}}`。
 
 Opening message 是 Group 展示配置，不属于 source execution snapshot。Application Service 生成新 Run ID 后，
-读取当时可见的 Group `opening_message` 并完成渲染，再把 rendered payload 交给原子 Repo use case 保存。这里不
+读取当时可见的 Group `opening_message` 并完成渲染，再独立保存 rendered payload/消息；不要求写入 rerun 创建事务。这里不
 对 Group version 做 CAS；并发 PATCH 与 rerun 的边界沿用现有“Run 启动时读取一次配置”语义。source Run 开始后
 发生的 Group opening 更新可以作用于 rerun，但不能反向修改 source Run。
 
@@ -886,7 +1056,7 @@ hash 字段或 public enum。
 
 ### 12.5 Service Session Activation
 
-对于 ServiceInvocation Session：
+对于 ServiceInvocation Session 的 rerun，保留现有 `create_rerun_if_session_idle` 局部事务：
 
 1. 校验 Session 已 terminal，且 callback 已是 `succeeded`、`partial_failed`、`failed` 或
    `not_applicable`；FO 版本 activation 的 `pending`（无论是否持有 lease）拒绝重激活。对于
@@ -898,29 +1068,23 @@ hash 字段或 public enum。
 3. Run 保存对应的 `session_activation_count`；
 4. 对 `(env, session_id, activation_count)` 建唯一约束，避免并发双重跑。
 
-上述 Session 状态变更、Run、Node、definition snapshot、rendered opening payload、初始 audit/Bot dispatch
-checkpoint 和 rerun lineage，必须由同一个 Repo Port use case 原子完成，例如：
-
-```text
-create_or_reactivate_state_machine_service_session_with_run_atomically(...)
-```
-
-该 use case 同时覆盖首次创建和 terminal Session 重激活；首次创建也必须初始化相同的 callback 状态/lease，rerun
-时额外写入 lineage，首次创建时 `rerun_of=NULL`。
-Application Service 不能先调用 `SessionManagementService::create_or_reactivate`，再调用 State Machine Repo 创建 Run。
-它先为候选新 Run ID 渲染 opening，再把 rendered payload 交给同一个原子 use case。DB 实现在同一 transaction
-中锁定 `bcs_group_sessions` 并写入 collaboration 表；memory 实现使用同一临界区提供相同语义。该事务不锁定
-Group，也不写 Message 表。事务失败时，Session activation、新 Run 和 opening/dispatch checkpoint 必须都不存在。
+上述 rerun Session 状态变更、Run、Node、source definition snapshot 和 lineage 沿用已有局部事务；唯一
+`rerun_of` 保证相同 source 只有一个直接子 Run。Opening、audit、初始 checkpoint 和 dispatch 在其后分别完成，
+不扩入创建事务。DB 和 memory 保持相同的 rerun 防重及 activation 语义，既有事务失败时不留下半个 direct child。
 Legacy pending 的无 callback 判断也使用该请求读取到的 Group 配置，不为这一迁移分支新增 Group 行锁或版本 CAS；
 并发 Group PATCH 的边界沿用现有“调用时读取一次配置”语义。
 
-该约束覆盖所有 State Machine ServiceInvocation 创建或重激活入口，而不只覆盖新增 rerun HTTP API，包括现有 `/services` invocation 路径、`SessionLaunchService`、自动启动入口和后续 CLI 封装。它们必须调用同一个原子 use case；禁止保留“先 create/reactivate Session，再调用 `start_state_machine_run`”的旁路。非 State Machine Group 的普通 Session create/reactivate 不受此约束，继续使用现有 Session use case。
+首次启动及非 rerun 的 ServiceInvocation 入口，包括 `/services` invocation、`SessionLaunchService` 和自动
+启动入口，允许继续先调用现有 Session create/reactivate，再调用 `start_state_machine_run`。它们共享
+§6.3 的 snapshot/dispatch barrier 和错误传播规则，不强制重构成跨 Session/Run 的统一大事务。Session 已创建
+或 activation 已增加而 Run 尚未创建是允许的中间状态；启动失败应按对应 activation 收敛 Session，不能返回
+虚假的启动成功。进程退出后的恢复不得再次增加 activation，缺失不可变载荷时按启动失败结束。
 
 Chat Session 不完成 Session 本身；重跑在同一 Chat Session 中创建新 Run，并继续保持“同一 Session 最多一个 active State Machine Run”的约束。
 
-Chat Session 使用对应的 `create_chat_session_rerun_if_idle_atomically(...)`：在同一事务中检查 active Run 和
-`rerun_of` 唯一约束，并插入 Run/Node/source snapshot 副本、rendered opening payload 和初始 Bot dispatch checkpoint，
-但不修改 Session status 或 activation count。
+Chat Session rerun 也使用现有 `create_rerun_if_session_idle`，关闭 service reactivation；在局部事务中检查
+active Run 和 `rerun_of`，插入 Run/Node/source snapshot 副本。Opening 与 initial dispatch 在事务后执行，
+不修改 Session status 或 activation count。
 
 ## 13. Application API 与 HTTP API
 
@@ -1010,8 +1174,8 @@ Run view 增加可选字段：
 }
 ```
 
-Node view 可增加内部阶段对应的稳定 sub-status，例如 Dispatching、WaitingProvider、Judging、WaitingHuman、
-Progressing。不要把 FO 暂时接管状态建成新的 terminal status；恢复次数和最后恢复时间从 audit/metrics 查询，不写入
+Node view 可增加 Running 内部阶段对应的稳定 sub-status，例如 Dispatching、WaitingProvider、Judging、WaitingHuman。
+Completed 节点的下游补做不改变该节点状态，也不增加 Progressing sub-status。恢复次数和最后恢复时间从 audit/metrics 查询，不写入
 Run view。
 
 ### 13.4 FO 不提供普通用户操作接口
@@ -1033,21 +1197,23 @@ FO 是自动系统行为。普通用户不应通过“recover”按钮直接改�
 - claim/release lease；
 - Ready → DispatchPending；
 - accepted → WaitingProvider；
-- terminal event → Judging/Progressing；
+- terminal event → Judging 或 completion CAS；
 - Node complete/fail/retry；
 - Run finalize；
 - Session complete/reactivate；
 - correlation alias 注册。
 
-受影响行数为 0 时视为并发 no-op 或 conflict，不得继续执行下游副作用。
+受影响行数为 0 时视为并发 no-op 或 conflict，不得据此声称本次转换成功并执行对应副作用。独立 recovery
+可以重新读取已 Completed 结果并检查下游，但实际 dispatch 仍须取得目标节点 CAS。
 
 ### 14.2 Fencing
 
 每次成功 claim 都增加对应 checkpoint 或 Node recovery lease token。由该 claim 同步计算并提交的状态转换必须
-携带 token；旧 owner 在 lease 过期后完成的 Judge、progression 或 delivery 如果 token 不匹配，只能写审计
+携带 token；旧 owner 在 lease 过期后完成的 Judge 或 delivery 如果 token 不匹配，只能写审计
 日志，不能提交状态。
 
-Checkpoint token 只保护 `pending/delivering/delivered` 转换；Node recovery token 只保护 Judge/progression。Delivery
+Checkpoint token 只保护 `pending/delivering/delivered` 转换；Node recovery token 保护被 claim 的 Judge 工作；
+不可变 completion 结果的 progression 重算不强制增加父节点 claim。Delivery
 result 的业务有效性还要校验稳定 operation key、aggregate attempt/version 和 correlation。
 
 Provider event 不要求回传 recovery token。它必须校验 delivery request ID、attempt、assignee 和当前
@@ -1077,15 +1243,17 @@ Callback 在 BCS 内部以 `(session_id, activation_count)` 作为稳定 operati
 - provider run correlation；
 - terminal event 去重；
 - Manager pending ledger；
-- Judge/transition/finalization 当前阶段；
+- Judge/finalization 当前阶段，以及用于重算 transition 的 outcome 和 snapshot；
 - 尚未交付的外部副作用。
 
 ## 15. 故障场景与期望行为
 
 | 故障场景 | 期望行为 |
 | --- | --- |
-| 创建 task/node 后、delivery checkpoint 前退出 | 同事务保证两者都存在或都不存在 |
-| 新 Run 事务提交后、opening 消息写入前退出 | FO 使用 checkpoint 中不可变的 rendered payload 和确定性 client message ID 幂等补写，不读取当前 Group 配置重渲染 |
+| Manager-Worker Task 创建后、delivery checkpoint 前退出 | 保留其局部事务，保证两者都存在或都不存在 |
+| State Machine Node/业务状态已提交、checkpoint 尚未保存 | 持久化原始载荷足够时幂等补建；无法恢复时失败收敛，不猜测载荷或投递状态 |
+| Pending Run 已创建、snapshot 尚未保存 | 不派发节点；缺少原始不可变 snapshot 且无法恢复时按启动失败收敛，不读取当前 Definition 补造 |
+| Run 已创建、opening 消息写入前退出 | 已有不可变 rendered payload 时幂等补写；载荷缺失不可恢复时按启动失败收敛，不读取当前 Group 配置重渲染 |
 | opening 消息已持久化、实时发布前退出 | FO/历史恢复复用同一消息；不追加第二条历史记录 |
 | opening 实时发布中退出或失败 | opening 历史已经满足启动 barrier；前端从历史恢复，或按既有副屏聚焦语义再次发布相同内容，不阻塞节点且不追加消息 |
 | sync-primary checkpoint 已提交、同步发送前退出 | 当前 claim 到期后由 FO 实例 claim checkpoint 并发送 |
@@ -1094,16 +1262,17 @@ Callback 在 BCS 内部以 `(session_id, activation_count)` 作为稳定 operati
 | streaming 中退出 | 保留最后持久化边界并等待后续 terminal/timeout；本期不新增 replay/resume |
 | Worker terminal 已持久化、Manager result 未送达 | Task 保持 ResultDeliveryPending，稳定 checkpoint 恢复；送达前 Manager completion 仍被阻止 |
 | Manager result 普通投递失败 | 保持 ResultDeliveryPending 并复用同一 checkpoint，不把 Task 标为 Failed；原 deadline 耗尽后 TimedOut |
-| terminal receipt/artifact 已写、Node 未推进 | Reconciler 从 Node runtime phase 继续 Judge/progression，不重新消费通用 inbox |
+| terminal receipt/artifact 已写、Node 未完成 | Reconciler 从持久化 artifact/Running phase 继续 Judge 或 completion CAS，不重新消费通用 inbox |
 | artifact 已写、Judge 中退出 | 新实例 claim Judging，继续 Judge，不重跑 Bot |
-| Node complete 后、下游创建前退出 | Progressing 恢复并确定性补齐下游 |
-| Run terminal 后、最终消息前退出 | chat-result checkpoint 或 Service finalization 状态继续恢复 |
+| Node complete 后、skip 或下游派发前退出 | 从 Completed outcome 和 snapshot 重算，幂等补做剩余 skip/frontier，不回滚或重跑本节点 |
+| Chat publication Delivered 后、Run terminal 前退出 | 只补交 Run Completed，不重调 publisher |
+| Service Run terminal 后、Session/最终通知前退出 | activation-aware Session completion 与 terminal IM checkpoint 分别恢复 |
 | Service Session completion 后、callback 调度前退出 | `callback_status=pending` 保留恢复事实，正常路径或 FO 先 claim callback lease，再调用现有 dispatcher |
 | callback 发送中退出或短时双 leader | 只有当前 activation 的 callback lease owner 可以确认；lease 过期后 FO 接管，接收方不幂等时仍可能 at-least-once 重复 |
 | Session 无 callback config 或 channel 为空 | callback_status 收敛为 not_applicable，不永久卡在 pending，也不阻止后续 rerun |
-| 最终消息已发、checkpoint ACK 前退出 | 使用稳定 message operation key 重交，消息层去重 |
+| 最终 Chat 消息已发、checkpoint ACK 前退出 | 保留 Delivering，不重调可能重复路由的 publisher；原 deadline 后明确 Failed，结果可能已送达 |
 | State Machine cancel 与待发送 dispatch 并发 | 未发送 checkpoint 被 supersede；已 accepted run 本期不新增 Provider cancel capability，只忽略其迟到事件 |
-| leader 切换时两个 scanner 同时工作 | 只有一个实例 claim 成功，旧 fencing token 无法提交 |
+| leader 切换时两个 scanner 同时工作 | 需要 claim 的工作只有一个 owner；progression 可重复重算，但目标节点 CAS 只允许一次有效启动 |
 | 旧 attempt terminal 迟到 | event receipt 保存为 ignored_stale，不影响当前 attempt |
 | DB 暂时不可用 | 不执行无持久化依据的外部副作用，恢复后继续扫描 |
 
@@ -1311,7 +1480,7 @@ OpenAPI 和 contract tests 必须在同一变更中更新，接收方必须忽�
 - 冻结 Execution/Work Item/Attempt、FO/State Machine retry/rerun 术语；
 - 冻结 State Machine 既有 0-based attempt 语义；Manager-Worker attempt 本期固定为 `1`；
 - 定义 Manager-Worker Repo Port 和 conformance shape；
-- 定义基于 `rerun_of` 唯一约束的天然幂等 contract 和跨 Session/Run 的原子 Repo use case；
+- 保留基于 `rerun_of` 唯一约束的天然幂等 contract 和现有 rerun Repo 局部事务；
 - 定义 rerun Application outcome 的 `created` 标志，由 HTTP adapter 直接映射 201/200；
 - 定义现有 delivery idempotency key 与结果不明确时的 deadline 行为，不新增 Provider status/replay/cancel capability；
 - 定义 callback Session lease、`not_applicable` 和 pre-FO NULL token 不扫描语义，不扩展 callback channel payload；
@@ -1334,8 +1503,8 @@ OpenAPI 和 contract tests 必须在同一变更中更新，接收方必须忽�
 - 为 delivery checkpoint 和 State Machine Running Node 实现 recovery lease/fencing claim；
 - 实现 leader-triggered reconciler；
 - 接入 Manager-Worker recover；
-- State Machine 只为 Running Node 增加 dispatch/waiting/judge/progression runtime phase，并为 Run 增加 finalization phase；
-- 将所有 State Machine ServiceInvocation 创建/重激活入口收敛为 Session create/activation、Running Run、snapshot、rendered opening、initial frontier 和初始 checkpoint 的单事务 use case；
+- State Machine 按恢复需要为 Running Node 增加 dispatch/waiting/judge phase，为 Run 增加 finalization phase；progression 从 Completed 结果重算；
+- 保留 State Machine 分步启动和现有 Run/Node、rerun 局部事务，补齐 snapshot/opening barrier 及部分启动失败的收敛；
 - 补齐 dispatch、judge、progression、finalization 恢复；
 - 为现有结果消息和 IM 增加窄化的 durable checkpoint；Session completion 使用 activation-aware CAS；callback
   只在 Session 行增加短 lease，并在无配置时写 `not_applicable`，正常路径与 FO 调用同一 claim 后再
@@ -1345,7 +1514,7 @@ OpenAPI 和 contract tests 必须在同一变更中更新，接收方必须忽�
 ### Phase 3：自定义协作重跑
 
 - 为 Run 增加 `root_run_id` 和 `rerun_of` lineage；
-- 实现包含 Session activation、Run/Node/source snapshot、lineage、rendered opening payload 和初始 checkpoint 的事务化 `create rerun`，并在事务后按 opening、initial frontier 顺序同步执行；
+- 沿用 Session activation、Run/Node/source snapshot 和 lineage 的 rerun 局部事务，在事务后分别保存 opening/checkpoint 并按 initial frontier 顺序同步执行；
 - 所有 Node 全新创建，attempt 从 `0` 开始，不复制 source artifact、outcome 或中间状态；
 - 扩展 `state_machine.run.created` 与 `session.completed` Event schema、fixture 和 contract tests，但不增加 FO/recovery public event type；
 - 增加 rerun HTTP API、UI 操作入口和 source/new Run lineage 展示；本期不新增公开 Session Run List API。
@@ -1376,8 +1545,8 @@ Manager-Worker application/WS contract 额外固定现有同步语义：
 - Manager result 普通投递失败时保持 `ResultDeliveryPending` 并复用同一 checkpoint，原 deadline 耗尽后才
   `TimedOut`，不得改为 `Failed` 或增加 Task attempt。
 
-State Machine 现有 Repo conformance 增加 Running runtime phase、Node recovery lease、lineage、atomic start 和
-atomic rerun 覆盖。Session Repo conformance 增加 callback activation claim、expired takeover、旧 token 拒绝、
+State Machine 现有 Repo conformance 覆盖必要的 Running phase/Judge lease、lineage、Run/Node 创建及 rerun
+局部事务，并验证 snapshot/start、completion/skip/dispatch 分步失败后的可恢复性。Session Repo conformance 增加 callback activation claim、expired takeover、旧 token 拒绝、
 无配置 `not_applicable`、legacy NULL token 不扫描，以及 legacy pending 在无配置时的原子规范化/有配置时拒绝。
 DB 与 memory 实现必须对相同 rerun idempotency key、Session activation CAS、callback claim 和 initial frontier
 返回一致结果。
@@ -1386,8 +1555,8 @@ DB 与 memory 实现必须对相同 rerun idempotency key、Session activation C
 
 对 Manager-Worker 和 State Machine 分别在以下位置强制退出并重启 BCS：
 
-1. 原子 Run/Task 创建事务提交后、API 返回前；
-2. 新 Run 事务提交后、opening 消息幂等写入前；
+1. Run/Node 或 Task 局部创建事务提交后、API 返回前；
+2. Pending Run/Node 创建后、snapshot 保存前，以及 snapshot 保存后、opening 消息幂等写入前；
 3. opening 消息写入并完成 checkpoint 后、实时发布前，以及实时发布过程中；
 4. sync-primary dispatch checkpoint 落库并由当前请求 claim 后；
 5. 外部请求发送后、ACK 前；
@@ -1395,11 +1564,11 @@ DB 与 memory 实现必须对相同 rerun idempotency key、Session activation C
 7. terminal event receipt/artifact 写入后、业务状态推进前；
 8. Manager-Worker terminal artifact 落库后、Manager result 送达前；
 9. artifact 写入后、Judge 完成前；
-10. Node 完成后、下游创建前；
+10. Node completion CAS 后、skip 中途（含已 Skipped 节点的未处理后代）、下游派发前；
 11. Run terminal 后、最终结果 checkpoint 完成前；
 12. Session completion CAS 后、callback claim 或 IM checkpoint 执行前；
 13. callback lease claim 后、发送前，以及已发送、terminal callback CAS 前；
-14. Service Session activation CAS 后、新 Run 创建前（该注入点必须证明原子事务不会留下半完成状态）。
+14. 普通启动的 Service Session activation CAS 后、新 Run 创建前：允许中间状态，验证失败收敛不重复 activation；rerun 则验证既有局部事务不留下半个 direct child。
 
 每个用例验证：
 
@@ -1498,15 +1667,16 @@ DB 与 memory 实现必须对相同 rerun idempotency key、Session activation C
 | D12 | 不提供普通用户手工 recover 状态修改接口 | 防止绕过状态机和产生无法审计的状态 |
 | D13 | 公开 State Machine status 继续作为业务真相；`runtime_phase` 仅描述 Running 子阶段 | 避免新增公开状态和迁移兼容成本 |
 | D14 | Worker terminal 后先进入 Manager result delivery barrier；普通结果投递失败保持 pending，原 deadline 后 TimedOut | 保持当前“Manager 收到结果后 Task 才 Replied”的 completion 和 pending ledger 语义，不把交付错误改成业务 Failed |
-| D15 | Session activation、Run/Node/snapshot、rerun lineage、rendered opening 和初始 checkpoint 原子提交，并以唯一 `rerun_of` 提供天然幂等 | 消除 activation 成功但 Run 缺失，以及并发重复 rerun 的窗口 |
+| D15（已由 D24 替代） | 原要求 Session activation、Run/Node/snapshot、rerun lineage、rendered opening 和初始 checkpoint 原子提交 | 原目标为消除全部创建窗口；现改为局部事务和分步恢复 |
 | D16 | callback 保持现有 pending/terminal 状态，只在 Session 行增加 activation-aware 短 lease，并为无配置增加 not_applicable；正常路径和 FO 使用同一 claim，仍不写 collaboration checkpoint | 消除 scanner/dispatcher 并发和永久 pending，不新增公开瞬态状态，同时保持现有 callback payload、channel protocol、首次异步发送及非通用 outbox 边界 |
-| D17 | 所有 State Machine ServiceInvocation 创建/重激活入口汇入同一原子 use case | 防止旧入口绕过 Session activation 与 Run 创建的一致性约束 |
+| D17（已由 D24 替代） | 原要求所有 State Machine ServiceInvocation 创建/重激活入口汇入同一原子 use case | 现保留分步入口，共享 snapshot/dispatch barrier 和失败处理 |
 | D18 | 首次 FO 升级不支持 pre-FO/FO 实例混跑 | 旧实例没有完整持久化 phase/lease；通过 drain 和停机边界替代一次性兼容复杂度 |
 | D19 | Rerun 读取创建时 Group 最新 opening，FO 复用原 Run 已渲染 opening | Rerun 是新 Run；FO 不是新执行，不能因 Group 更新改变历史内容 |
 | D20 | FO 不增加公开 Webhook event type，rerun 复用现有 run event chain | 避免把 lease/checkpoint 等内部机制暴露给既有 wildcard 订阅，同时保持现有消费者能观察新 Run |
 | D21 | Manager-Worker `task.dispatch` 保持同步，不引入 queued/accepted 语义 | Bot 不在线或拒绝时继续按当前 contract 直接失败 |
-| D22 | 首次执行和重激活均进入同一个原子 use case | 保持创建路径和重激活路径行为一致 |
+| D22（已由 D24 替代） | 原要求首次执行和重激活进入同一个原子 use case | 现按既有首次启动与 rerun 的不同事务边界执行 |
 | D23 | Rerun v1 不新增公开 Session Run List API | 发起方已有 response、订阅方已有 run.created lineage；避免把授权、分页、保留策略扩大到本期 |
+| D24 | 2026-09-14：State Machine 使用 §6.3 局部事务与分步恢复，取代 D15/D17/D22 的全链路事务要求；保留现有 rerun 防重事务 | 按现有实现控制锁范围和写放大，允许中间状态并明确失败/恢复边界 |
 
 ## 23. 待评审问题
 

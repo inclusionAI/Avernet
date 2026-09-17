@@ -1,5 +1,11 @@
 mod helpers;
 
+#[path = "provider_downlink/fixed_loop.rs"]
+mod fixed_loop_tests;
+
+#[path = "provider_downlink/fixed_loop_live.rs"]
+mod fixed_loop_live;
+
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use axum::{

@@ -371,3 +371,35 @@ async fn register_routes_have_the_expected_security_boundary() {
 
     handle.abort();
 }
+
+#[tokio::test]
+async fn mounted_fixed_loop_validation_reflects_the_execution_opt_in() {
+    for enabled in [false, true] {
+        let bots_dir = helpers::create_temp_bots_dir();
+        let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
+        config.metrics.enabled = false;
+        config.collaboration.experimental_fixed_loop_execution = enabled;
+        // Validation checks Judge availability without invoking the model.
+        config.llm.provider_type = bcs::LlmProviderType::OpenAiCompatible;
+        config.llm.base_url = "http://127.0.0.1:9/v1".into();
+        config.llm.api_key_env = None;
+        config.llm.api_key = Some(secrecy::Secret::new("test-loop-validation-key".into()));
+        let server = BcsServer::new_allowing_private_outbound_for_tests(config);
+        let (addr, handle) = server.run_on_random_port().await.expect("start server");
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let response = client
+            .post(format!("http://{addr}/api/v1/collaboration/definitions/validate"))
+            .header("x-avernet-principal", user_principal_token(TEST_GATEWAY_PRINCIPAL_SIGNING_KEY))
+            .json(&json!({"definition_yaml": include_str!("../../../../seeds/collaboration-templates/zh-CN/write-review-loop.yaml")}))
+            .send().await.expect("validate Loop template");
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let envelope: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(envelope["code"], 20_000, "{envelope}");
+        let validation = &envelope["data"];
+        assert_eq!(validation["valid"], true, "{envelope}");
+        assert_eq!(validation["warnings"].as_array().into_iter().flatten()
+            .any(|warning| warning["code"] == "VALIDATION_ONLY_FEATURE"), !enabled);
+        assert_eq!(validation["graph"]["nodes"].as_array().unwrap().len(), 9);
+        handle.abort();
+    }
+}

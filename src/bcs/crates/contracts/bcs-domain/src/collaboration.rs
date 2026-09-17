@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use serde::ser::SerializeStruct;
+use serde::ser::{SerializeMap, SerializeStruct};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
@@ -52,7 +52,7 @@ impl CollaborationDefinition {
             CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine
                 .nodes
                 .values()
-                .any(|node| node.judge.is_some()),
+                .any(StateMachineNodeDefinition::uses_judge),
             CollaborationRuntimeDefinition::Chat(_)
             | CollaborationRuntimeDefinition::ManagerWorker(_) => false,
         }
@@ -323,10 +323,12 @@ impl Default for ProjectionVisibility {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct StateMachineNodeDefinition {
     pub kind: StateMachineNodeKind,
     pub display_name: String,
+    #[serde(default, rename = "loop", skip_serializing_if = "Option::is_none")]
+    pub loop_definition: Option<FixedLoopDefinition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assignee: Option<StateMachineAssignee>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -353,6 +355,173 @@ pub struct StateMachineNodeDefinition {
     pub extensions: Map<String, Value>,
 }
 
+impl Serialize for StateMachineNodeDefinition {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // Preserve the v1 field order/omission rules. A Loop has no default
+        // executable final_output field, including when regenerating authoring YAML.
+        let mut node = serializer.serialize_map(None)?;
+        node.serialize_entry("kind", &self.kind)?;
+        node.serialize_entry("display_name", &self.display_name)?;
+        if let Some(value) = &self.loop_definition {
+            node.serialize_entry("loop", value)?;
+        }
+        if let Some(value) = &self.assignee {
+            node.serialize_entry("assignee", value)?;
+        }
+        if let Some(value) = &self.notification {
+            node.serialize_entry("notification", value)?;
+        }
+        if let Some(value) = &self.instruction {
+            node.serialize_entry("instruction", value)?;
+        }
+        if let Some(value) = &self.output_contract {
+            node.serialize_entry("output_contract", value)?;
+        }
+        if let Some(value) = &self.node_timeout_ms {
+            node.serialize_entry("node_timeout_ms", value)?;
+        }
+        if let Some(value) = &self.max_attempts {
+            node.serialize_entry("max_attempts", value)?;
+        }
+        node.serialize_entry("transitions", &self.transitions)?;
+        if let Some(value) = &self.action {
+            node.serialize_entry("action", value)?;
+        }
+        if let Some(value) = &self.visibility {
+            node.serialize_entry("visibility", value)?;
+        }
+        if let Some(value) = &self.judge {
+            node.serialize_entry("judge", value)?;
+        }
+        if self.kind != StateMachineNodeKind::Loop || self.final_output {
+            node.serialize_entry("final_output", &self.final_output)?;
+        }
+        node.serialize_entry("extensions", &self.extensions)?;
+        node.end()
+    }
+}
+
+impl StateMachineNodeDefinition {
+    fn uses_judge(&self) -> bool {
+        self.judge.is_some()
+            || self.loop_definition.as_ref().is_some_and(|body| {
+                body.nodes.values().any(Self::uses_judge)
+            })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FixedLoopDefinition {
+    pub mode: FixedLoopMode,
+    pub max_iterations: u32,
+    pub entry_node: String,
+    pub result_node: String,
+    pub continue_outcomes: Vec<String>,
+    pub break_outcomes: Vec<String>,
+    pub exhausted_outcome: String,
+    pub nodes: BTreeMap<String, StateMachineNodeDefinition>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FixedLoopMode {
+    Fixed,
+}
+
+/// Immutable executable graph and projections produced by a versioned compiler.
+/// Authoring Definition and resolved bindings are stored alongside this plan.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateMachineExecutionPlan {
+    pub compiler_version: String,
+    pub state_machine: StateMachineDefinition,
+    pub node_metadata: BTreeMap<String, CompiledNodeMetadata>,
+    pub edge_metadata: Vec<CompiledEdgeMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CompiledNodeMetadata {
+    pub execution_node_id: String,
+    pub definition_node_id: String,
+    pub loop_id: Option<String>,
+    pub iteration: Option<u32>,
+    pub max_iterations: Option<u32>,
+    pub is_loop_entry: bool,
+    pub is_loop_result: bool,
+    pub previous_result_node_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CompiledArtifactProjection {
+    Artifact,
+    ControlOnly,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CompiledEdgeMetadata {
+    pub source_execution_node_id: String,
+    pub outcome: String,
+    pub target_execution_node_id: String,
+    pub artifact_projection: CompiledArtifactProjection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loop_route: Option<StateMachineLoopRoute>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StateMachineNodeExecutionMetadata {
+    pub definition_node_id: String,
+    pub loop_id: String,
+    pub iteration: u32,
+    pub max_iterations: u32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StateMachineLoopRouteKind {
+    Continue,
+    Break,
+    Exhausted,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StateMachineLoopRoute {
+    pub kind: StateMachineLoopRouteKind,
+    pub logical_outcome: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LoopContext {
+    pub loop_id: String,
+    pub iteration: u32,
+    pub max_iterations: u32,
+    // Deliberately serialized as null for the first iteration.
+    #[serde(deserialize_with = "deserialize_previous_loop_result")]
+    pub previous_result: Option<PreviousLoopResult>,
+}
+
+fn deserialize_previous_loop_result<'de, D>(
+    deserializer: D,
+) -> Result<Option<PreviousLoopResult>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::deserialize(deserializer)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PreviousLoopResult {
+    pub iteration: u32,
+    pub result_node_id: String,
+    pub execution_node_id: String,
+    pub outcome: String,
+    pub output: String,
+    pub completed_at: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HumanInputNotificationDefinition {
     pub mode: HumanInputNotificationMode,
@@ -373,6 +542,7 @@ pub enum StateMachineNodeKind {
     HumanInput,
     ToolAction,
     SubStateMachine,
+    Loop,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

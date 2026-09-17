@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use bcs_config_api::FixedLoopLimits;
 use bcs_domain::{CollaborationDefinition, CollaborationRuntimeDefinition, StateMachineAssignee};
 use bcs_service_api::{
     CollaborationDefinitionGraphEdge, CollaborationDefinitionGraphNode,
@@ -11,10 +12,27 @@ use bcs_service_api::{
 use serde_yaml::{Mapping, Value};
 
 use crate::definition::{DefinitionGraphProjection, project_definition_graph};
-use crate::{CompiledStateMachine, reject_explicit_participant_roles, validate_definition};
+use crate::fixed_loop::compile_authoring_definition_with_instrumentation;
+use crate::{CompiledStateMachine, reject_explicit_participant_roles};
 
 pub fn validate_authoring_definition_yaml(
     cmd: ValidateCollaborationDefinitionYamlCommand,
+) -> CollaborationDefinitionValidationOutcome {
+    validate_authoring_definition_yaml_with_limits(cmd, &FixedLoopLimits::default())
+}
+
+pub fn validate_authoring_definition_yaml_with_limits(
+    cmd: ValidateCollaborationDefinitionYamlCommand,
+    limits: &FixedLoopLimits,
+) -> CollaborationDefinitionValidationOutcome {
+    validate_authoring_definition_yaml_with_instrumentation(cmd, limits, None, false)
+}
+
+pub(crate) fn validate_authoring_definition_yaml_with_instrumentation(
+    cmd: ValidateCollaborationDefinitionYamlCommand,
+    limits: &FixedLoopLimits,
+    hook: Option<&dyn bcs_service_api::StateMachineLoopInstrumentationHook>,
+    fixed_loop_execution_enabled: bool,
 ) -> CollaborationDefinitionValidationOutcome {
     if cmd.definition_yaml.len() > MAX_COLLABORATION_DEFINITION_YAML_BYTES {
         return invalid_outcome(diagnostic(
@@ -85,14 +103,13 @@ pub fn validate_authoring_definition_yaml(
         ));
     }
 
-    let compiled = match validate_definition(definition) {
+    let compiled = match compile_authoring_definition_with_instrumentation(definition, limits, hook) {
         Ok(compiled) => compiled,
-        Err(error) => {
-            return invalid_outcome(diagnostic("INVALID_DEFINITION", "$", error.to_string()));
-        }
+        Err(error) => return invalid_outcome(error),
     };
     // Layer 3: validate capabilities selected by this BCS deployment.
-    let mut outcome = valid_outcome(&compiled);
+    let mut outcome = valid_outcome(&compiled.execution);
+    outcome.definition = Some(compiled.definition.clone());
     if !cmd.judge_available && compiled.definition.uses_judge() {
         outcome.valid = false;
         outcome.errors.push(diagnostic(
@@ -103,19 +120,44 @@ pub fn validate_authoring_definition_yaml(
         outcome.definition = None;
         return outcome;
     }
-    let projection = match project_definition_graph(&compiled) {
+    let projection = match project_definition_graph(&compiled.execution) {
         Ok(projection) => projection,
         Err(error) => {
             return invalid_outcome(diagnostic("INVALID_DEFINITION", "$", error.to_string()));
         }
     };
-    outcome.graph = Some(graph_preview(projection));
+    let mut graph = graph_preview(projection);
+    graph.loops = crate::loop_graph::loop_graph_descriptors(&compiled.definition);
+    if let Some(plan) = &compiled.plan {
+        if !fixed_loop_execution_enabled {
+            outcome.warnings.push(diagnostic(
+                "VALIDATION_ONLY_FEATURE",
+                "$.runtime.state_machine.version",
+                "fixed-loop validation and preview are available; version 2 execution is not enabled",
+            ));
+        }
+        graph.graph_mode = bcs_domain::StateMachineGraphMode::Hierarchical;
+        graph.execution_graph_mode = Some(bcs_domain::StateMachineGraphMode::Acyclic);
+        for node in &mut graph.nodes {
+            let meta = &plan.node_metadata[&node.node_id];
+            node.execution = crate::definition::node_execution_metadata(meta);
+        }
+        let edge_metadata: std::collections::BTreeMap<_, _> = plan.edge_metadata.iter()
+            .map(|edge| ((edge.source_execution_node_id.as_str(), edge.outcome.as_str(), edge.target_execution_node_id.as_str()), edge))
+            .collect();
+        for edge in &mut graph.edges {
+            edge.loop_route = edge_metadata[&(edge.source.as_str(), edge.outcome.as_str(), edge.target.as_str())].loop_route.clone();
+        }
+    }
+    outcome.graph = Some(graph);
     outcome
 }
 
 fn graph_preview(projection: DefinitionGraphProjection) -> CollaborationDefinitionGraphPreview {
     CollaborationDefinitionGraphPreview {
+        loops: Default::default(),
         graph_mode: projection.graph_mode,
+        execution_graph_mode: None,
         nodes: projection
             .nodes
             .into_iter()
@@ -126,6 +168,7 @@ fn graph_preview(projection: DefinitionGraphProjection) -> CollaborationDefiniti
                 assignee: node.assignee,
                 final_output: node.final_output,
                 judge: node.judge,
+                execution: None,
             })
             .collect(),
         edges: projection
@@ -135,6 +178,7 @@ fn graph_preview(projection: DefinitionGraphProjection) -> CollaborationDefiniti
                 source: edge.source,
                 target: edge.target,
                 outcome: edge.outcome,
+                loop_route: None,
             })
             .collect(),
     }
@@ -259,6 +303,18 @@ fn validate_authoring_shape(
             }
         }
     }
+    validate_runtime_shape(top_level)
+}
+
+pub(crate) fn validate_v2_runtime_input(raw: &Value) -> Result<(), CollaborationDefinitionValidationDiagnostic> {
+    if raw["runtime"]["state_machine"]["version"].as_i64() != Some(2) {
+        return Ok(());
+    }
+    let top_level = raw.as_mapping().ok_or_else(|| diagnostic("TYPE", "$", "must be a mapping"))?;
+    validate_runtime_shape(top_level)
+}
+
+fn validate_runtime_shape(top_level: &Mapping) -> Result<(), CollaborationDefinitionValidationDiagnostic> {
     let Some(runtime) = mapping_get(top_level, "runtime").and_then(Value::as_mapping) else {
         return Ok(());
     };
@@ -318,20 +374,36 @@ fn validate_authoring_shape(
     let Some(nodes) = mapping_get(machine, "nodes").and_then(Value::as_mapping) else {
         return Ok(());
     };
+    validate_nodes_shape(nodes, "$.runtime.state_machine.nodes", false)
+}
+
+fn validate_nodes_shape(
+    nodes: &Mapping,
+    nodes_path: &str,
+    inside_loop: bool,
+) -> Result<(), CollaborationDefinitionValidationDiagnostic> {
     for (node_id, node) in nodes {
-        let node_id = yaml_key(node_id, "$.runtime.state_machine.nodes")?;
+        let node_id = yaml_key(node_id, nodes_path)?;
         if !valid_identifier(node_id) {
             return Err(diagnostic(
                 "FORMAT",
-                format!("$.runtime.state_machine.nodes.{node_id}"),
+                format!("{nodes_path}.{node_id}"),
                 "node id has an invalid format",
             ));
         }
         let Some(node) = node.as_mapping() else {
             continue;
         };
-        let node_path = format!("$.runtime.state_machine.nodes.{node_id}");
-        ensure_allowed_keys(
+        let node_path = format!("{nodes_path}.{node_id}");
+        let is_loop = mapping_get(node, "kind").and_then(Value::as_str) == Some("loop");
+        if is_loop {
+            if inside_loop {
+                return Err(diagnostic("INVALID_DEFINITION", &node_path, "nested loops are unsupported"));
+            }
+            ensure_allowed_keys(node, &["kind", "display_name", "loop", "transitions", "extensions"], &node_path)?;
+            validate_loop_shape(node, &node_path)?;
+        } else {
+            ensure_allowed_keys(
             node,
             &[
                 "kind",
@@ -351,6 +423,7 @@ fn validate_authoring_shape(
             ],
             &node_path,
         )?;
+        }
         if let Some(assignee) = mapping_get(node, "assignee").and_then(Value::as_mapping) {
             ensure_allowed_keys(
                 assignee,
@@ -364,6 +437,11 @@ fn validate_authoring_shape(
                 &["mode"],
                 &format!("{node_path}.notification"),
             )?;
+        }
+        if inside_loop {
+            if let Some(judge) = mapping_get(node, "judge").and_then(Value::as_mapping) {
+                ensure_allowed_keys(judge, &["type", "criteria", "outcomes", "extensions"], &format!("{node_path}.judge"))?;
+            }
         }
         if let Some(transitions) = mapping_get(node, "transitions").and_then(Value::as_mapping) {
             for (outcome, transition) in transitions {
@@ -387,6 +465,32 @@ fn validate_authoring_shape(
         }
     }
     Ok(())
+}
+
+fn validate_loop_shape(
+    node: &Mapping,
+    path: &str,
+) -> Result<(), CollaborationDefinitionValidationDiagnostic> {
+    let loop_path = format!("{path}.loop");
+    let body = mapping_get(node, "loop").and_then(Value::as_mapping)
+        .ok_or_else(|| diagnostic("INVALID_DEFINITION", &loop_path, "loop must be a mapping"))?;
+    let fields = ["mode", "max_iterations", "entry_node", "result_node", "continue_outcomes", "break_outcomes", "exhausted_outcome", "nodes"];
+    ensure_allowed_keys(body, &fields, &loop_path)?;
+    for field in fields {
+        if !mapping_contains(body, field) {
+            return Err(diagnostic("INVALID_DEFINITION", format!("{loop_path}.{field}"), "field is required"));
+        }
+    }
+    for field in ["continue_outcomes", "break_outcomes"] {
+        let values = mapping_get(body, field).and_then(Value::as_sequence)
+            .ok_or_else(|| diagnostic("INVALID_DEFINITION", format!("{loop_path}.{field}"), "must be a list"))?;
+        if field == "continue_outcomes" && values.is_empty() {
+            return Err(diagnostic("INVALID_DEFINITION", format!("{loop_path}.{field}"), "must not be empty"));
+        }
+    }
+    let nodes = mapping_get(body, "nodes").and_then(Value::as_mapping)
+        .ok_or_else(|| diagnostic("INVALID_DEFINITION", format!("{loop_path}.nodes"), "must be a mapping"))?;
+    validate_nodes_shape(nodes, &format!("{loop_path}.nodes"), true)
 }
 
 fn ensure_allowed_keys(

@@ -1,0 +1,21 @@
+【待你处理】Review
+
+Review saved result
+
+【Loop 上下文】
+Loop：rounds
+轮次：3/3
+
+上一轮结果（第 2 轮）：
+节点：work
+执行节点：historical-work-2
+结果：again
+完成时间（Unix ms）：2
+输出：
+result-2
+
+可识别结果：again / done
+
+等待截止时间（Unix ms）：1000
+
+请直接回复本会话。

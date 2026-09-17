@@ -179,6 +179,20 @@ pub trait SessionRepoPort: Send + Sync {
     async fn count_running_service(&self, group_id: &str) -> u64;
     async fn list_running_service(&self, offset: u64, limit: u64) -> Vec<Session>;
 
+    /// Bounded, ascending Session-id page of Running ServiceInvocation Sessions.
+    /// The exclusive cursor and environment/status filters apply before LIMIT.
+    /// Zero limit returns an empty page. Storage/decoding failures are errors.
+    async fn list_running_service_after(
+        &self,
+        _after_session_id: Option<&str>,
+        _limit: u64,
+    ) -> ServiceResult<Vec<Session>> {
+        Err(ServiceError::InvalidOperation {
+            message: "Session recovery pagination is not configured".into(),
+            request_id: None,
+        })
+    }
+
     /// List completed service Sessions whose current activation still has a
     /// recoverable callback. Legacy rows are excluded by requiring a
     /// non-null callback lease token in the concrete store.
@@ -222,6 +236,23 @@ pub trait SessionRepoPort: Send + Sync {
         output: Option<serde_json::Value>,
         error: Option<String>,
     ) -> ServiceResult<Option<Session>>;
+
+    /// Complete only the specified Running ServiceInvocation activation.
+    /// A missing Session, another kind/status/activation returns None. Never
+    /// fall back to an unguarded completion. Return the completed activation's
+    /// snapshot, even if another caller reactivates immediately after the CAS.
+    async fn complete_running_service_activation(
+        &self,
+        _session_id: &str,
+        _expected_activation_count: i32,
+        _output: Option<serde_json::Value>,
+        _error: Option<String>,
+    ) -> ServiceResult<Option<Session>> {
+        Err(ServiceError::InvalidOperation {
+            message: "Session completion activation CAS is not configured".into(),
+            request_id: None,
+        })
+    }
 
     async fn complete_if_running_with_event(
         &self,

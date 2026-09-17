@@ -117,6 +117,12 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         self.inner.list_running_service(offset, limit).await
     }
 
+    async fn list_running_service_after(
+        &self, cursor: Option<&str>, limit: u64,
+    ) -> Result<Vec<Session>, SessionUseCaseError> {
+        self.inner.list_running_service_after(cursor, limit).await
+    }
+
     async fn list_recoverable_callbacks(
         &self,
         now_ms: u64,
@@ -159,6 +165,12 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
         self.inner
             .complete_if_running(session_id, output, error)
             .await
+    }
+
+    async fn complete_running_service_activation(
+        &self, session_id: &str, activation: i32, output: Option<Value>, error: Option<String>,
+    ) -> Result<Option<Session>, SessionUseCaseError> {
+        self.inner.complete_running_service_activation(session_id, activation, output, error).await
     }
 
     async fn add_participant(
@@ -277,6 +289,64 @@ impl SessionManagementService for SessionManagementWithRuntimeCleanup {
 }
 
 impl SessionManagementServiceImpl {
+    async fn complete_session(
+        &self,
+        current: Session,
+        output: Option<Value>,
+        error: Option<String>,
+        guard_activation: bool,
+    ) -> Result<Option<Session>, SessionUseCaseError> {
+        let session_id = current.id.as_str();
+        let summary_value = output.clone().unwrap_or(Value::Null);
+        let summary_bytes = serde_json::to_vec(&summary_value).map_err(|serialize_error| {
+            SessionUseCaseError::InvalidParams(format!(
+                "Session output cannot be serialized: {serialize_error}"
+            ))
+        })?;
+        let mut data = BTreeMap::new();
+        data.insert("completed_by".to_string(), json!("bcs-system"));
+        data.insert(
+            "reason".to_string(),
+            json!(if error.is_some() {
+                "failed"
+            } else {
+                "completed"
+            }),
+        );
+        data.insert(
+            "summary".to_string(),
+            json!({
+                "content_type": "application/json",
+                "size_bytes": summary_bytes.len(),
+                "json": summary_value,
+                "truncated": false
+            }),
+        );
+        match self.prepare_event(
+            "session.completed",
+            &current.group_id,
+            session_id,
+            "session",
+            session_id,
+            data,
+        )? {
+            Some(event) => Ok(self
+                .repo
+                .complete_if_running_with_event(CompleteSessionWithEvent {
+                    session_id: session_id.to_string(),
+                    expected_activation_count: current.activation_count,
+                    output,
+                    error,
+                    event,
+                })
+                .await?),
+            None if guard_activation => Ok(self.repo.complete_running_service_activation(
+                session_id, current.activation_count, output, error,
+            ).await?),
+            None => Ok(self.repo.complete_if_running(session_id, output, error).await?),
+        }
+    }
+
     pub fn new(repo: Arc<dyn SessionRepoPort>, group_repo: Arc<dyn GroupRepoPort>) -> Self {
         Self {
             repo,
@@ -685,6 +755,12 @@ impl SessionManagementService for SessionManagementServiceImpl {
         Ok(self.repo.list_running_service(offset, limit).await)
     }
 
+    async fn list_running_service_after(
+        &self, cursor: Option<&str>, limit: u64,
+    ) -> Result<Vec<Session>, SessionUseCaseError> {
+        Ok(self.repo.list_running_service_after(cursor, limit).await?)
+    }
+
     async fn list_recoverable_callbacks(
         &self,
         now_ms: u64,
@@ -770,54 +846,24 @@ impl SessionManagementService for SessionManagementServiceImpl {
         if current.status == SessionStatus::Completed {
             return Ok(None);
         }
-        let summary_value = output.clone().unwrap_or(Value::Null);
-        let summary_bytes = serde_json::to_vec(&summary_value).map_err(|serialize_error| {
-            SessionUseCaseError::InvalidParams(format!(
-                "Session output cannot be serialized: {serialize_error}"
-            ))
-        })?;
-        let mut data = BTreeMap::new();
-        data.insert("completed_by".to_string(), json!("bcs-system"));
-        data.insert(
-            "reason".to_string(),
-            json!(if error.is_some() {
-                "failed"
-            } else {
-                "completed"
-            }),
-        );
-        data.insert(
-            "summary".to_string(),
-            json!({
-                "content_type": "application/json",
-                "size_bytes": summary_bytes.len(),
-                "json": summary_value,
-                "truncated": false
-            }),
-        );
-        match self.prepare_event(
-            "session.completed",
-            &current.group_id,
-            session_id,
-            "session",
-            session_id,
-            data,
-        )? {
-            Some(event) => Ok(self
-                .repo
-                .complete_if_running_with_event(CompleteSessionWithEvent {
-                    session_id: session_id.to_string(),
-                    expected_activation_count: current.activation_count,
-                    output,
-                    error,
-                    event,
-                })
-                .await?),
-            None => Ok(self
-                .repo
-                .complete_if_running(session_id, output, error)
-                .await?),
+        self.complete_session(current, output, error, false).await
+    }
+
+    async fn complete_running_service_activation(
+        &self,
+        session_id: &str,
+        expected_activation_count: i32,
+        output: Option<Value>,
+        error: Option<String>,
+    ) -> Result<Option<Session>, SessionUseCaseError> {
+        let Some(current) = self.repo.try_get(session_id).await? else { return Ok(None); };
+        if current.status != SessionStatus::Running
+            || current.session_kind != SessionKind::ServiceInvocation
+            || current.activation_count != expected_activation_count
+        {
+            return Ok(None);
         }
+        self.complete_session(current, output, error, true).await
     }
 
     async fn add_participant(

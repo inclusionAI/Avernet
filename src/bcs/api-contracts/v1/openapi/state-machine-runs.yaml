@@ -189,6 +189,11 @@ StateMachineRunView:
       type: array
       items:
         $ref: "#/StateMachineNodeRun"
+    node_execution_metadata:
+      description: Complete saved-plan mapping for every Loop body execution node in v2 start/get/rerun responses; ordinary outer nodes are omitted. Omitted for v1. Keys are opaque execution node IDs.
+      type: object
+      additionalProperties:
+        $ref: "./collaboration-definitions.yaml#/StateMachineNodeExecutionMetadata"
     judge_outputs:
       type: array
       items:
@@ -201,6 +206,8 @@ StateMachineNodeRunView:
   properties:
     node:
       $ref: "#/StateMachineNodeRun"
+    execution:
+      $ref: "./collaboration-definitions.yaml#/StateMachineNodeExecutionMetadata"
     sub_status:
       $ref: "#/StateMachineNodeSubStatus"
     judge_outputs:
@@ -224,6 +231,15 @@ StateMachineGraphDefinitionView:
       minLength: 1
     graph_mode:
       $ref: "#/StateMachineGraphMode"
+      description: Saved authoring mode; hierarchical for v2 Loop runs.
+    execution_graph_mode:
+      type: string
+      enum: [acyclic]
+      description: Saved execution-plan layout mode; omitted for v1.
+    execution_plan_compiler_version:
+      type: string
+      minLength: 1
+      description: Compiler version read from the saved execution plan; omitted for v1.
     initial_node:
       type: [string, "null"]
     initial_nodes:
@@ -240,6 +256,8 @@ StateMachineGraphNodeView:
     node_id:
       type: string
       minLength: 1
+    execution:
+      $ref: "./collaboration-definitions.yaml#/StateMachineNodeExecutionMetadata"
     display_name:
       type: string
       minLength: 1
@@ -251,6 +269,9 @@ StateMachineGraphNodeView:
       type: boolean
     status:
       $ref: "#/StateMachineNodeStatus"
+    outcome:
+      type: string
+      description: Actual selected outcome; compare with edge.outcome to determine selection.
     attempt:
       type: [integer, "null"]
       minimum: 0
@@ -283,12 +304,19 @@ StateMachineGraphEdgeView:
       minLength: 1
     guard:
       type: [string, "null"]
+    loop_route:
+      $ref: "./collaboration-definitions.yaml#/StateMachineLoopRoute"
 
 StateMachineRunGraphView:
   type: object
   additionalProperties: false
   required: [run, definition, nodes, edges]
   properties:
+    loops:
+      type: object
+      additionalProperties:
+        $ref: "./collaboration-definitions.yaml#/StateMachineLoopGraphView"
+      description: Logical Loop descriptors read from this Run snapshot, independent of current definitions.
     run:
       $ref: "#/StateMachineRun"
     definition:
@@ -311,6 +339,62 @@ RespondHumanNodeOutcome:
       $ref: "#/StateMachineNodeRun"
     run:
       $ref: "#/StateMachineRun"
+
+PreviousLoopResult:
+  type: object
+  additionalProperties: false
+  required: [iteration, result_node_id, execution_node_id, outcome, output, completed_at]
+  properties:
+    iteration:
+      type: integer
+      minimum: 1
+    result_node_id:
+      type: string
+      minLength: 1
+    execution_node_id:
+      type: string
+      minLength: 1
+    outcome:
+      type: string
+      minLength: 1
+    output:
+      type: string
+    completed_at:
+      type: integer
+      format: int64
+      minimum: 0
+
+LoopContext:
+  type: object
+  additionalProperties: false
+  required: [loop_id, iteration, max_iterations, previous_result]
+  properties:
+    loop_id:
+      type: string
+      minLength: 1
+    iteration:
+      type: integer
+      minimum: 1
+    max_iterations:
+      type: integer
+      minimum: 1
+    previous_result:
+      oneOf:
+        - type: "null"
+        - $ref: "#/PreviousLoopResult"
+  allOf:
+    - if:
+        properties:
+          iteration:
+            const: 1
+      then:
+        properties:
+          previous_result:
+            type: "null"
+      else:
+        properties:
+          previous_result:
+            type: object
 
 PendingHumanNodeView:
   type: object
@@ -347,6 +431,9 @@ PendingHumanNodeView:
       items:
         type: object
         additionalProperties: true
+    loop_context:
+      description: Server-owned context for a Loop entry; omitted for v1, non-entry and outer nodes. Later iterations require the exact persisted previous result.
+      $ref: "#/LoopContext"
 
 StateMachineRunViewEnvelope:
   type: object
@@ -373,6 +460,8 @@ RerunStateMachineRunResponse:
       type: array
       items:
         $ref: "#/StateMachineNodeRun"
+    node_execution_metadata:
+      $ref: "#/StateMachineRunView/properties/node_execution_metadata"
     judge_outputs:
       type: array
       items:

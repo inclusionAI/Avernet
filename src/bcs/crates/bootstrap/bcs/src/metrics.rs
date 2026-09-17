@@ -1,5 +1,11 @@
 //! Prometheus metrics runtime and label helpers.
 
+#[cfg(feature = "prometheus-metrics")]
+#[path = "state_machine_metrics.rs"]
+mod state_machine_metrics;
+#[cfg(feature = "prometheus-metrics")]
+pub use state_machine_metrics::MetricsStateMachineLoopHook;
+
 use std::sync::Arc;
 use std::time::Duration;
 

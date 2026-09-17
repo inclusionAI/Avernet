@@ -1525,6 +1525,39 @@ impl BcsClient {
             .context("Invalid session state-machine run response")
     }
 
+    fn collaboration_run_url(&self, run_id: &str, suffix: &[&str]) -> Result<reqwest::Url> {
+        let mut url = reqwest::Url::parse(&self.base_url)?;
+        url.path_segments_mut().map_err(|_| anyhow!("BCS URL cannot contain path segments"))?
+            .pop_if_empty().push("state-machine-runs").push(run_id).extend(suffix.iter().copied());
+        Ok(url)
+    }
+
+    pub async fn query_collaboration_run(&self, run_id: &str, suffix: &[&str]) -> Result<serde_json::Value> {
+        let response = self.add_auth(self.http_client.get(self.collaboration_run_url(run_id, suffix)?))
+            .send().await.context("Failed to query state-machine Run")?;
+        Self::collaboration_response(response).await
+    }
+
+    pub async fn respond_collaboration_node(&self, run_id: &str, node_id: &str, content: &str) -> Result<serde_json::Value> {
+        if content.trim().is_empty() { return Err(anyhow!("Human response must not be empty")); }
+        let pending = self.query_collaboration_run(run_id, &["pending-human-nodes"]).await?;
+        let matches = pending.as_array().is_some_and(|nodes| nodes.iter().any(|node|
+            node.get("node_id").and_then(serde_json::Value::as_str) == Some(node_id)));
+        if !matches { return Err(anyhow!("Execution node is not pending for the authenticated Human; query --pending again")); }
+        let response = self.add_auth(self.http_client.post(self.collaboration_run_url(run_id, &["nodes", node_id, "respond"])?))
+            .json(&serde_json::json!({"content": content})).send().await.context("Failed to respond to Human node")?;
+        Self::collaboration_response(response).await
+    }
+
+    async fn collaboration_response(response: reqwest::Response) -> Result<serde_json::Value> {
+        if !response.status().is_success() {
+            let status = response.status();
+            return Err(anyhow!("State-machine request failed ({status}): {}", response.text().await?));
+        }
+        let value: serde_json::Value = response.json().await.context("Invalid state-machine response")?;
+        Ok(value.get("data").cloned().unwrap_or(value))
+    }
+
     /// Create a state-machine group from authoring YAML and logical participant bindings.
     pub async fn create_custom_group(
         &self,
@@ -3953,8 +3986,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_chat_async_returns_transport_error_on_non_listening_port() {
-        // Port 1 is unlikely to be listening; connection should fail.
-        let client = BcsClient::new("http://127.0.0.1:1");
+        // Reserve an ephemeral port without listening so another service cannot
+        // claim it. Bypass environment proxies to exercise the local transport.
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let mut client = BcsClient::new(format!("http://{}", socket.local_addr().unwrap()));
+        client.http_client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .unwrap();
         let result = client
             .chat_async("bot-target", "hello", None, None, &[], None, None, 2_000, false)
             .await;

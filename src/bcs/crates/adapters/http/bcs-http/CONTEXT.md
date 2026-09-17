@@ -5,6 +5,9 @@
 GET/PUT /admin/message-delivery/policy allow authenticated Human identities from the configured auth boundary to manage environment-wide policy. Explicit Bot/Provider/service credentials never fall back to local mock Human identity. The old version-prefixed route has no alias; ServiceKey permissions for other APIs are unchanged.
 
 - HTTP delivery adapter for BCS.
+- State Machine start/get/rerun, node, graph and pending-Human routes preserve
+  the runtime's saved Loop metadata/context. Responses keep the legacy shape
+  with optional additive fields; node path IDs remain opaque execution IDs.
 - Single resource-oriented router and route modules under `src/routes/`.
 - Request/response parsing, HTTP auth extraction, and HTTP error mapping.
 - Delivery query, cancel, and manual resolution routes share the

@@ -1,0 +1,169 @@
+{
+  "valid": true,
+  "errors": [],
+  "warnings": [
+    {
+      "code": "VALIDATION_ONLY_FEATURE",
+      "path": "$.runtime.state_machine.version",
+      "message": "fixed-loop validation and preview are available; version 2 execution is not enabled"
+    }
+  ],
+  "summary": {
+    "participants": 1,
+    "nodes": 4,
+    "initial_nodes": [
+      "historical-work-1"
+    ],
+    "final_output_node": "publish"
+  },
+  "participants": [
+    {
+      "binding": "writer",
+      "display_name": "撰稿角色",
+      "required": true,
+      "assigned": true
+    }
+  ],
+  "graph": {
+    "graph_mode": "hierarchical",
+    "execution_graph_mode": "acyclic",
+    "nodes": [
+      {
+        "node_id": "historical-work-1",
+        "display_name": "Work",
+        "kind": "bot_task",
+        "final_output": false,
+        "execution": {
+          "definition_node_id": "work",
+          "loop_id": "rounds",
+          "iteration": 1,
+          "max_iterations": 3
+        },
+        "assignee": {
+          "type": "bot_binding",
+          "binding": "writer"
+        },
+        "judge": true
+      },
+      {
+        "node_id": "historical-work-2",
+        "display_name": "Work",
+        "kind": "bot_task",
+        "final_output": false,
+        "execution": {
+          "definition_node_id": "work",
+          "loop_id": "rounds",
+          "iteration": 2,
+          "max_iterations": 3
+        },
+        "assignee": {
+          "type": "bot_binding",
+          "binding": "writer"
+        },
+        "judge": true
+      },
+      {
+        "node_id": "historical-work-3",
+        "display_name": "Work",
+        "kind": "bot_task",
+        "final_output": false,
+        "execution": {
+          "definition_node_id": "work",
+          "loop_id": "rounds",
+          "iteration": 3,
+          "max_iterations": 3
+        },
+        "assignee": {
+          "type": "bot_binding",
+          "binding": "writer"
+        },
+        "judge": true
+      },
+      {
+        "node_id": "publish",
+        "display_name": "Publish",
+        "kind": "bot_task",
+        "final_output": true,
+        "assignee": {
+          "type": "bot_binding",
+          "binding": "writer"
+        },
+        "judge": false
+      }
+    ],
+    "edges": [
+      {
+        "source": "historical-work-1",
+        "outcome": "again",
+        "target": "historical-work-2",
+        "loop_route": {
+          "kind": "continue",
+          "logical_outcome": "again"
+        }
+      },
+      {
+        "source": "historical-work-1",
+        "outcome": "done",
+        "target": "publish",
+        "loop_route": {
+          "kind": "break",
+          "logical_outcome": "done"
+        }
+      },
+      {
+        "source": "historical-work-2",
+        "outcome": "again",
+        "target": "historical-work-3",
+        "loop_route": {
+          "kind": "continue",
+          "logical_outcome": "again"
+        }
+      },
+      {
+        "source": "historical-work-2",
+        "outcome": "done",
+        "target": "publish",
+        "loop_route": {
+          "kind": "break",
+          "logical_outcome": "done"
+        }
+      },
+      {
+        "source": "historical-work-3",
+        "outcome": "again",
+        "target": "publish",
+        "loop_route": {
+          "kind": "exhausted",
+          "logical_outcome": "exhausted"
+        }
+      },
+      {
+        "source": "historical-work-3",
+        "outcome": "done",
+        "target": "publish",
+        "loop_route": {
+          "kind": "break",
+          "logical_outcome": "done"
+        }
+      }
+    ],
+    "loops": {
+      "rounds": {
+        "display_name": "Rounds",
+        "max_iterations": 3,
+        "entry_node_id": "work",
+        "result_node_id": "work",
+        "body_node_ids": [
+          "work"
+        ],
+        "continue_outcomes": [
+          "again"
+        ],
+        "break_outcomes": [
+          "done"
+        ],
+        "exhausted_outcome": "exhausted"
+      }
+    }
+  }
+}

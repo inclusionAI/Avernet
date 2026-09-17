@@ -110,7 +110,7 @@ run_context_store = "redis" # | "memory";缺省 "memory"
 - `ChatRunStore` 重构为引擎 over `Arc<dyn ChatRunRepoPort>` + 节点本地 `Notify`;`new()`/`with_capacity` 走 Memory,`with_repo` 供持久化。`bcs-message-flow` 全部 234 个既有测试保持通过。
 - `RedisBotRunContextStore`(over `CachePlugin`),`BotRunContext` 加 serde derive。6 个单测通过。
 - 配置:`async_chat_run_store`(memory/persistent,缺省 memory)、`bot_run_context_store`(memory/redis,缺省 memory)。生产组合路径 `new_with_infrastructure` 按配置选实现;standalone/Default/in-memory 路径恒 memory。
-- 迁移:SQLite `SQLITE_DDL_STATEMENTS` + `migrations/mysql/016_chat_runs.sql`。
+- 迁移:SQLite `SQLITE_DDL_STATEMENTS` + `migrations/mysql/016_session_callback_lease_and_chat_runs.sql`。
 - `cargo check -p bcs` 通过;`cargo test -p bcs-chat-run-store`、`cargo test -p bcs-message-flow` 通过。
 
 ### 10.1 评审驱动修订(review-driven fixes)
@@ -170,7 +170,7 @@ Codex 评审后修复(详见 PR 评论):
 - **Drain 路径写失败传播的显式化**:引擎 mutator 在 `Backend` 错误时已记 `error!` 并返回 `false`(不假装成功);`create` 路径错误已映射为 `ServiceError::InternalError`(不发 202)。可选:在 `record_run_event`/drain 把 `Backend` 显式映射为 `emit_run_lifecycle(Failed, InternalError)`。
 - **bootstrap 集成测试(重启/跨副本/审计/配置切换)**:本机磁盘受限(20G,`-p bcs` 测试构建超限),未能运行 `bcs` 测试二进制;建议在 CI(无磁盘约束)新增 `crates/bootstrap/bcs/tests/run_governance_restart.rs` 覆盖验收用例:重启可查、两引擎共享 repo 的跨副本一致、终态幂等 CAS、cancel 幂等、注入 DbPlugin 失败→5xx、TTL 不误删、审计 SQL 可查、SSE reader 死→超时、memory/persistent 切换。
 - **MySQL audit retention 配置化**:当前 persistent 删除交平台(平台侧配 retention cutoff);若后续需代码侧可配,再加 `async_chat_run_audit_retention_ms` 配置。
-- **生产部署前**:确保 `[cache.redis]` 与 `bcs-chat-run-store` 持久化模式在真实 MySQL/Redis 上演练;`016_chat_runs.sql` 经 `bcs-admin migrate` 应用;MySQL 平台定时清理任务按 §11.2 SQL 配置。
+- **生产部署前**:确保 `[cache.redis]` 与 `bcs-chat-run-store` 持久化模式在真实 MySQL/Redis 上演练;`016_session_callback_lease_and_chat_runs.sql` 经 `bcs-admin migrate` 应用;MySQL 平台定时清理任务按 §11.2 SQL 配置。
 
 ## 12. 不在范围
 SSE 文本装配统一(`StreamTextAssembler`)、group `MessageTracker`/`ProviderBotEvents.visible_text`(decision pending)、admin invocation / interaction 持久化、`ChatRunEventPort`/`RunChannelManager` 跨节点路由、SSE 活读流跨节点接管(issue 非本期验收)。

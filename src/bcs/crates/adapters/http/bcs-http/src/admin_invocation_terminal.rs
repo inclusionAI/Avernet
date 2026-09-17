@@ -242,7 +242,10 @@ mod tests {
         };
 
         bot_terminal_observer_port_contract_tests(&observer, event.clone(), async {
-            let (mut socket, _) = timeout(Duration::from_secs(2), listener.accept())
+            // This is an eventual-delivery/at-most-once contract, not a 2s SLA.
+            // Platform TLS client initialization also runs for loopback HTTP
+            // and can exceed 2s under the full workspace's parallel load.
+            let (mut socket, _) = timeout(Duration::from_secs(15), listener.accept())
                 .await
                 .unwrap()
                 .unwrap();

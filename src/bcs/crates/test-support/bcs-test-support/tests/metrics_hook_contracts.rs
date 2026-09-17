@@ -3,6 +3,13 @@ use bcs_test_support::{
     NoopWsLifecycleInstrumentationHook, contract::port,
 };
 
+#[test]
+fn noop_state_machine_loop_hook_satisfies_contract() {
+    port::metrics::state_machine_loop_instrumentation_hook_contract_tests(
+        &bcs_test_support::NoopStateMachineLoopInstrumentationHook,
+    );
+}
+
 #[tokio::test]
 async fn noop_ws_lifecycle_hook_satisfies_contract() {
     port::ws_lifecycle_instrumentation_hook_contract_tests(&NoopWsLifecycleInstrumentationHook)

@@ -2,6 +2,12 @@
 
 ## Provides
 
+- The result-publisher conformance command includes the original message timestamp,
+  preserving Chat publication identity across persistence/recovery consumers.
+
+- Fixed Loop instrumentation noop and shared hook conformance inputs, exercised
+  by noop tests and the bootstrap Prometheus adapter's rendered-series tests.
+
 - Shared contract-test harnesses for BCS service and plugin boundaries.
 - Reusable fixtures and helpers for local conformance testing.
 - A single place to host boundary-level test utilities reused across crates.

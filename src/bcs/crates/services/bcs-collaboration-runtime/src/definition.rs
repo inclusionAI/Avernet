@@ -10,8 +10,29 @@ use bcs_service_api::CollaborationRuntimeError;
 #[derive(Debug, Clone)]
 pub struct CompiledStateMachine {
     pub definition: CollaborationDefinition,
+    pub execution_plan: Option<bcs_domain::StateMachineExecutionPlan>,
     pub upstreams: BTreeMap<String, Vec<String>>,
     pub initial_nodes: Vec<String>,
+}
+
+/// Project only validated compiler/snapshot metadata; execution IDs remain opaque.
+pub(crate) fn node_execution_metadata(
+    meta: &bcs_domain::CompiledNodeMetadata,
+) -> Option<bcs_domain::StateMachineNodeExecutionMetadata> {
+    Some(bcs_domain::StateMachineNodeExecutionMetadata {
+        definition_node_id: meta.definition_node_id.clone(),
+        loop_id: meta.loop_id.clone()?, iteration: meta.iteration?, max_iterations: meta.max_iterations?,
+    })
+}
+
+/// A loaded v2 plan must map every executable node, including ordinary outer nodes.
+pub(crate) fn execution_metadata_for_node(
+    compiled: &CompiledStateMachine, node_id: &str,
+) -> Result<Option<bcs_domain::StateMachineNodeExecutionMetadata>, CollaborationRuntimeError> {
+    let Some(plan) = compiled.execution_plan.as_ref() else { return Ok(None); };
+    let meta = plan.node_metadata.get(node_id).ok_or_else(||
+        CollaborationRuntimeError::InvalidDefinition("Node is absent from its saved execution plan".into()))?;
+    Ok(node_execution_metadata(meta))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,6 +176,9 @@ pub fn validate_definition(
         .collect();
 
     for (node_id, node) in &state_machine.nodes {
+        if node.loop_definition.is_some() {
+            return invalid(format!("node {node_id} loop requires state_machine.version 2"));
+        }
         if !matches!(
             node.kind,
             StateMachineNodeKind::BotTask | StateMachineNodeKind::HumanInput
@@ -382,6 +406,7 @@ pub fn validate_definition(
 
     Ok(CompiledStateMachine {
         definition,
+        execution_plan: None,
         upstreams,
         initial_nodes,
     })
@@ -477,6 +502,7 @@ fn node_kind_feature(kind: StateMachineNodeKind) -> &'static str {
         StateMachineNodeKind::HumanInput => "state_machine.node.kind.human_input",
         StateMachineNodeKind::ToolAction => "state_machine.node.kind.tool_action",
         StateMachineNodeKind::SubStateMachine => "state_machine.node.kind.sub_state_machine",
+        StateMachineNodeKind::Loop => "state_machine.node.kind.loop",
     }
 }
 
@@ -504,7 +530,7 @@ fn validate_requires(
     Ok(())
 }
 
-fn ensure_acyclic(
+pub(crate) fn ensure_acyclic(
     nodes: &BTreeMap<String, bcs_domain::StateMachineNodeDefinition>,
     upstreams: &BTreeMap<String, Vec<String>>,
 ) -> Result<(), CollaborationRuntimeError> {

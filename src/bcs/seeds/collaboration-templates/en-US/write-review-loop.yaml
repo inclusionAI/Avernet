@@ -1,0 +1,117 @@
+# Write and review until the editor approves. Bind logical roles when creating a group.
+# Creation and execution require experimental Loop execution and an LLM Judge.
+name: Writing Review Loop
+
+metadata:
+  description: The writer revises using editorial feedback. A Judge chooses approved or revise; approved leads to a copy editor, exhausted leads to a rewrite, and both paths end in a final summary.
+
+participants:
+  writer:
+    display_name: Writer
+    description: Improves the draft using the user request and previous review, then writes the final response.
+    required: true
+  reviewer:
+    display_name: Editor
+    description: Decides whether the draft meets delivery standards and explicitly approves it or requests required revisions.
+    required: true
+  polisher:
+    display_name: Copy Editor
+    description: Polishes language and structure after editorial approval while preserving facts, conclusions and necessary caveats.
+    required: true
+
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 2
+    graph_mode: hierarchical
+    defaults:
+      node_timeout_ms: 120000
+      max_attempts: 2
+    nodes:
+      revision_rounds:
+        kind: loop
+        display_name: Writing and Editorial Review
+        loop:
+          mode: fixed
+          max_iterations: 3
+          entry_node: draft
+          result_node: review
+          # Exit as soon as approved; unresolved revisions at the iteration limit produce exhausted.
+          continue_outcomes: [revise]
+          break_outcomes: [approved]
+          exhausted_outcome: exhausted
+          nodes:
+            draft:
+              kind: bot_task
+              display_name: Write or Revise the Draft
+              assignee:
+                type: bot_binding
+                binding: writer
+              instruction: |
+                Write a complete draft addressing the user request, including conclusions, evidence, risks and next steps.
+                Create the first draft in round one. In later rounds, revise the full draft using feedback in the previous round's result.
+                Return the complete revised draft and a short account of the changes, never just a diff.
+              transitions:
+                complete:
+                  targets: [review]
+            review:
+              kind: bot_task
+              display_name: Editorial Review
+              assignee:
+                type: bot_binding
+                binding: reviewer
+              instruction: |
+                Check whether this round's draft answers the question, supports its claims, identifies risks and offers actionable advice.
+                Return three sections: the complete draft, an explicit approval or revision decision, and required fixes ordered by priority.
+                Approve as soon as the draft meets delivery standards with no required fixes. Request another round only for substantive issues, never to fill the iteration limit.
+                Your output feeds the next round or final synthesis; never return only an approval or omit the draft.
+              judge:
+                type: llm
+                criteria:
+                  - Choose approved when the editor explicitly approves, includes the complete draft and leaves no required fixes unresolved.
+                  - Choose revise when the editor requests revisions, lists unresolved required fixes or gives no explicit approval.
+                  - Judge the draft and editorial conclusion; unused iterations are never a reason to continue.
+                outcomes: [approved, revise]
+        # Approval is the normal exit. Exhaustion stops repeated revisions but does not imply approval.
+        transitions:
+          approved:
+            targets: [polish]
+          exhausted:
+            targets: [rewrite]
+      polish:
+        kind: bot_task
+        display_name: Polish the Approved Draft
+        assignee:
+          type: bot_binding
+          binding: polisher
+        instruction: |
+          The editor has approved the draft. Improve its language, structure and readability using the complete upstream draft and review.
+          Preserve approved facts, conclusions and necessary caveats. Do not introduce unverified content.
+          Return the complete polished draft and note that it passed editorial review.
+        transitions:
+          complete:
+            targets: [finalize]
+      rewrite:
+        kind: bot_task
+        display_name: Rewrite the Unapproved Draft
+        assignee:
+          type: bot_binding
+          binding: writer
+        instruction: |
+          The draft remains unapproved and the loop has reached its iteration limit. Rewrite the last complete draft using the required fixes.
+          Prioritize defects in conclusions, factual reliability and actionable advice. Return a complete draft, not just revision notes.
+          Explicitly list unresolved issues and missing information. Do not claim the rewrite passed editorial review.
+        transitions:
+          complete:
+            targets: [finalize]
+      finalize:
+        kind: bot_task
+        display_name: Summarize the Final Draft
+        assignee:
+          type: bot_binding
+          binding: writer
+        instruction: |
+          Produce the complete final response from the executed polish or rewrite node, with a brief summary of conclusions and next steps.
+          Preserve the upstream review status and unresolved issues: the polish path passed editorial review; the rewrite path did not.
+          Do not wait for the unexecuted branch, invent facts or present the rewrite as approved.
+        final_output: true

@@ -1,0 +1,3 @@
+ALTER TABLE bcs_state_machine_node_runs
+    ADD COLUMN IF NOT EXISTS outcome VARCHAR(128) DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS responded_by VARCHAR(256) DEFAULT NULL;

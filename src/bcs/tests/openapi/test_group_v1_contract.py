@@ -221,7 +221,7 @@ def test_group_create_response_exposes_optional_initial_manager_run() -> None:
         "started_at",
     }
     assert initial_run["properties"]["activity_kind"]["enum"] == ["group_bootstrap"]
-    assert set(initial_run["properties"]["state"]["enum"]) == {"running", "failed"}
+    assert set(initial_run["properties"]["state"]["enum"]) == {"queued", "running", "failed"}
 
 
 def test_group_create_inline_event_subscriptions_cannot_supply_scope() -> None:
@@ -461,13 +461,17 @@ def test_create_state_machine_group_accepts_definition_content_yaml() -> None:
     assert "version" not in definition["properties"]
 
 
-def test_update_group_does_not_accept_context() -> None:
+def test_update_group_accepts_only_the_current_patch_fields() -> None:
     contract = load_contract(CONTRACT_ROOT)
     operation = contract["paths"][GROUP_PATH]["patch"]
     schema = operation["requestBody"]["content"]["application/json"]["schema"]
 
-    assert "context" not in schema["properties"]
-    assert set(schema["properties"]) == {"name", "visibility", "delivery_policy"}
+    assert schema["additionalProperties"] is False
+    assert schema["minProperties"] == 1
+    assert schema["properties"]["context"] == {"type": "string"}
+    assert set(schema["properties"]) == {
+        "name", "context", "opening_message", "visibility", "delivery_policy",
+    }
 
 
 PUBLIC_GROUPS_PATH = "/openapi/v1/collaboration/public-groups"

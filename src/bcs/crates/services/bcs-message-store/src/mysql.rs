@@ -47,6 +47,185 @@ pub struct MySqlMessageStore {
 }
 
 impl MySqlMessageStore {
+    async fn append_with_identity(
+        &self,
+        msg: NewMessage,
+        message_id: String,
+        stable: bool,
+    ) -> Result<PersistedMessage, MessageRepoError> {
+        let (visibility_domain, audience_kind, audience_actor_ids_json) =
+            serialize_visibility(&msg)?;
+
+        // Ordinary chat_error retries use their scoped identity, while Loop
+        // publication retains the caller-owned stable message ID.
+        let error_projection = !stable && msg.message_type == bcs_domain::CHAT_ERROR_MESSAGE_TYPE;
+        let message_id = if error_projection {
+            use sha2::{Digest, Sha256};
+            if msg.run_id.is_empty() {
+                return Err(MessageRepoError::StorageError("chat_error requires run_id".into()));
+            }
+            let key = serde_json::json!(["chat_error", self.env, msg.group_id,
+                msg.session_id, msg.sender_id, msg.run_id]).to_string();
+            format!("{:x}", Sha256::digest(key.as_bytes()))
+        } else { message_id };
+        if error_projection {
+            if let Some(existing) = self.get_message_by_id(&msg.session_id, &message_id).await? {
+                return Ok(existing);
+            }
+        }
+
+        // Step 1: Idempotency check
+        if let Some(client_msg_id) = msg.client_msg_id.as_ref().filter(|_| !error_projection) {
+            let check_sql = "SELECT message_id, session_seq FROM bcs_messages \
+                WHERE env = ? AND group_id = ? AND session_id = ? AND sender_id = ? AND client_msg_id = ?";
+            let check_stmt = DbStatement::with_params(
+                check_sql,
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(msg.group_id.clone()),
+                    DbValue::from(msg.session_id.clone()),
+                    DbValue::from(msg.sender_id.clone()),
+                    DbValue::from(client_msg_id.clone()),
+                ],
+            );
+            let rows = self
+                .db
+                .query(check_stmt)
+                .await
+                .map_err(|e| MessageRepoError::StorageError(e.to_string()))?;
+            if let Some(row) = rows.first() {
+                let existing_id: String = db_get_column(row, "message_id")
+                    .map_err(|e| {
+                        MessageRepoError::StorageError(format!("message_id: {}", e))
+                    })?;
+                debug!(
+                    message_id = %existing_id,
+                    "idempotent duplicate detected, returning existing message"
+                );
+                // Fetch full message
+                let get_sql = format!(
+                    "SELECT {} FROM bcs_messages WHERE message_id = ?",
+                    SELECT_COLS
+                );
+                let get_stmt =
+                    DbStatement::with_params(&get_sql, vec![DbValue::from(existing_id)]);
+                let existing = self
+                    .db
+                    .query(get_stmt)
+                    .await
+                    .map_err(|e| MessageRepoError::StorageError(e.to_string()))?;
+                if let Some(row) = existing.first() {
+                    return row_to_message(row);
+                }
+            }
+        }
+
+        let sender_type_str = match msg.sender_type {
+            SenderType::Bot => "bot",
+            SenderType::Human => "human",
+            SenderType::System => "system",
+        };
+        let content_str = msg.content.to_string();
+
+        // Allocate the sequence and insert the logical message in one transaction.
+        let seq_update = DbStatement::with_params(
+            "UPDATE bcs_group_sessions SET current_msg_seq = current_msg_seq + 1 \
+             WHERE env = ? AND session_id = ?",
+            vec![
+                DbValue::from(self.env.as_str()),
+                DbValue::from(msg.session_id.as_str()),
+            ],
+        );
+        let seq_select = DbStatement::with_params(
+            "SELECT current_msg_seq FROM bcs_group_sessions WHERE env = ? AND session_id = ?",
+            vec![
+                DbValue::from(self.env.as_str()),
+                DbValue::from(msg.session_id.as_str()),
+            ],
+        );
+        let insert_stmt = DbStatement::with_transaction_params(
+            INSERT_SQL,
+            vec![
+                DbTransactionParam::value(message_id.clone()),
+                DbTransactionParam::value(msg.group_id.as_str()),
+                DbTransactionParam::value(msg.session_id.as_str()),
+                DbTransactionParam::query_result(1, 0, "current_msg_seq"),
+                DbTransactionParam::value(self.env.as_str()),
+                DbTransactionParam::value(msg.sender_id.as_str()),
+                DbTransactionParam::value(sender_type_str),
+                DbTransactionParam::value(msg.message_type.as_str()),
+                DbTransactionParam::value(content_str),
+                DbTransactionParam::value(DbValue::from(msg.client_msg_id.as_deref())),
+                DbTransactionParam::value(DbValue::from(msg.owner_bot_id.as_deref())),
+                DbTransactionParam::value(msg.created_at),
+                DbTransactionParam::value(msg.run_id.as_str()),
+                DbTransactionParam::value(visibility_domain),
+                DbTransactionParam::value(DbValue::from(audience_kind)),
+                DbTransactionParam::value(DbValue::from(audience_actor_ids_json.as_deref())),
+            ],
+        );
+
+        let steps: Vec<DbTransactionStep> = vec![
+            DbTransactionStep::Execute(seq_update),
+            DbTransactionStep::Query(seq_select),
+            DbTransactionStep::Execute(insert_stmt),
+        ];
+
+        let tx_results = match self.db.transaction(steps).await {
+            Ok(results) => results,
+            Err(error) => {
+                if error_projection || (stable && error.is_duplicate_key()) {
+                    let rows = self.db.query(DbStatement::with_params(
+                        format!("SELECT {SELECT_COLS} FROM bcs_messages WHERE env = ? AND session_id = ? AND message_id = ?"),
+                        vec![DbValue::from(self.env.as_str()), DbValue::from(msg.session_id.as_str()), DbValue::from(message_id.as_str())],
+                    )).await.map_err(|read_error| MessageRepoError::StorageError(read_error.to_string()))?;
+                    if let Some(row) = rows.first() { return row_to_message(row); }
+                }
+                return Err(MessageRepoError::StorageError(format!("transaction: {error}")));
+            }
+        };
+
+        let session_seq: i64 = match &tx_results[1] {
+            bcs_db_api::DbTransactionStepResult::Rows(rows) => {
+                let row = rows.first().ok_or_else(|| {
+                    MessageRepoError::SessionNotFound(msg.session_id.clone())
+                })?;
+                db_get_column(row, "current_msg_seq").map_err(|e| {
+                    MessageRepoError::StorageError(format!("seq: {}", e))
+                })?
+            }
+            _ => {
+                return Err(MessageRepoError::SessionNotFound(msg.session_id.clone()));
+            }
+        };
+
+        debug!(
+            session_id = %msg.session_id,
+            message_id = %message_id,
+            session_seq,
+            backend = %self.backend_label(),
+            "message persisted"
+        );
+
+        Ok(PersistedMessage {
+            message_id,
+            group_id: msg.group_id,
+            session_id: msg.session_id,
+            session_seq,
+            sender_id: msg.sender_id,
+            sender_type: msg.sender_type,
+            message_type: msg.message_type,
+            content: msg.content,
+            client_msg_id: msg.client_msg_id,
+            owner_bot_id: msg.owner_bot_id,
+            visibility_domain: Some(msg.visibility_domain),
+            audience: msg.audience,
+            status: PersistedMessageStatus::Normal,
+            created_at: msg.created_at,
+            run_id: msg.run_id,
+        })
+    }
+
     pub fn new(db: Arc<dyn DbPlugin>, env: String) -> Self {
         Self { db, env, flavor: DbSqlFlavor::Mysql, delivery_writer: Default::default() }
     }
@@ -265,178 +444,14 @@ impl MessageRepoPort for MySqlMessageStore {
     fn delivery_repository(self: Arc<Self>) -> Option<Arc<dyn bcs_service_api::port::repo::message_delivery::MessageDeliveryRepoPort>> {
         Some(self)
     }
-    async fn append_message(
-        &self,
-        msg: NewMessage,
-    ) -> Result<PersistedMessage, MessageRepoError> {
-        let (visibility_domain, audience_kind, audience_actor_ids_json) =
-            serialize_visibility(&msg)?;
-        // Error projections have a scoped deterministic primary key. The DB PK,
-        // not the read-before-write optimization below, arbitrates concurrent
-        // retries (including a lost commit acknowledgement).
-        let error_projection = msg.message_type == bcs_domain::CHAT_ERROR_MESSAGE_TYPE;
-        let message_id = if error_projection {
-            use sha2::{Digest, Sha256};
-            if msg.run_id.is_empty() {
-                return Err(MessageRepoError::StorageError("chat_error requires run_id".into()));
-            }
-            let key = serde_json::json!(["chat_error", self.env, msg.group_id,
-                msg.session_id, msg.sender_id, msg.run_id]).to_string();
-            format!("{:x}", Sha256::digest(key.as_bytes()))
-        } else { uuid::Uuid::new_v4().to_string() };
-
-        if error_projection {
-            if let Some(existing) = self.get_message_by_id(&msg.session_id, &message_id).await? {
-                return Ok(existing);
-            }
+    async fn append_message(&self, msg: NewMessage) -> Result<PersistedMessage, MessageRepoError> {
+        self.append_with_identity(msg, uuid::Uuid::new_v4().to_string(), false).await
+    }
+    async fn append_message_with_id(&self, message_id: String, msg: NewMessage) -> Result<PersistedMessage, MessageRepoError> {
+        if message_id.is_empty() || message_id.len() > 256 {
+            return Err(MessageRepoError::StorageError("invalid stable message id".into()));
         }
-        // Step 1: Idempotency check for ordinary messages.
-        if let Some(client_msg_id) = msg.client_msg_id.as_ref().filter(|_| !error_projection) {
-            let check_sql = "SELECT message_id, session_seq FROM bcs_messages \
-                WHERE group_id = ? AND session_id = ? AND sender_id = ? AND client_msg_id = ?";
-            let check_stmt = DbStatement::with_params(
-                check_sql,
-                vec![
-                    DbValue::from(msg.group_id.clone()),
-                    DbValue::from(msg.session_id.clone()),
-                    DbValue::from(msg.sender_id.clone()),
-                    DbValue::from(client_msg_id.clone()),
-                ],
-            );
-            let rows = self
-                .db
-                .query(check_stmt)
-                .await
-                .map_err(|e| MessageRepoError::StorageError(e.to_string()))?;
-            if let Some(row) = rows.first() {
-                let existing_id: String = db_get_column(row, "message_id")
-                    .map_err(|e| {
-                        MessageRepoError::StorageError(format!("message_id: {}", e))
-                    })?;
-                debug!(
-                    message_id = %existing_id,
-                    "idempotent duplicate detected, returning existing message"
-                );
-                // Fetch full message
-                let get_sql = format!(
-                    "SELECT {} FROM bcs_messages WHERE message_id = ?",
-                    SELECT_COLS
-                );
-                let get_stmt =
-                    DbStatement::with_params(&get_sql, vec![DbValue::from(existing_id)]);
-                let existing = self
-                    .db
-                    .query(get_stmt)
-                    .await
-                    .map_err(|e| MessageRepoError::StorageError(e.to_string()))?;
-                if let Some(row) = existing.first() {
-                    return row_to_message(row);
-                }
-            }
-        }
-
-        let sender_type_str = match msg.sender_type {
-            SenderType::Bot => "bot",
-            SenderType::Human => "human",
-            SenderType::System => "system",
-        };
-        let content_str = msg.content.to_string();
-
-        // Allocate the sequence and insert the logical message in one transaction.
-        let seq_update = DbStatement::with_params(
-            "UPDATE bcs_group_sessions SET current_msg_seq = current_msg_seq + 1 \
-             WHERE env = ? AND session_id = ?",
-            vec![
-                DbValue::from(self.env.as_str()),
-                DbValue::from(msg.session_id.as_str()),
-            ],
-        );
-        let seq_select = DbStatement::with_params(
-            "SELECT current_msg_seq FROM bcs_group_sessions WHERE env = ? AND session_id = ?",
-            vec![
-                DbValue::from(self.env.as_str()),
-                DbValue::from(msg.session_id.as_str()),
-            ],
-        );
-        let insert_stmt = DbStatement::with_transaction_params(
-            INSERT_SQL,
-            vec![
-                DbTransactionParam::value(message_id.clone()),
-                DbTransactionParam::value(msg.group_id.as_str()),
-                DbTransactionParam::value(msg.session_id.as_str()),
-                DbTransactionParam::query_result(1, 0, "current_msg_seq"),
-                DbTransactionParam::value(self.env.as_str()),
-                DbTransactionParam::value(msg.sender_id.as_str()),
-                DbTransactionParam::value(sender_type_str),
-                DbTransactionParam::value(msg.message_type.as_str()),
-                DbTransactionParam::value(content_str),
-                DbTransactionParam::value(DbValue::from(msg.client_msg_id.as_deref())),
-                DbTransactionParam::value(DbValue::from(msg.owner_bot_id.as_deref())),
-                DbTransactionParam::value(msg.created_at),
-                DbTransactionParam::value(msg.run_id.as_str()),
-                DbTransactionParam::value(visibility_domain),
-                DbTransactionParam::value(DbValue::from(audience_kind)),
-                DbTransactionParam::value(DbValue::from(audience_actor_ids_json.as_deref())),
-            ],
-        );
-
-        let steps: Vec<DbTransactionStep> = vec![
-            DbTransactionStep::Execute(seq_update),
-            DbTransactionStep::Query(seq_select),
-            DbTransactionStep::Execute(insert_stmt),
-        ];
-
-        let tx_results = match self.db.transaction(steps).await {
-            Ok(results) => results,
-            Err(error) => {
-                if error_projection {
-                    if let Some(existing) = self.get_message_by_id(&msg.session_id, &message_id).await? {
-                        return Ok(existing);
-                    }
-                }
-                return Err(MessageRepoError::StorageError(format!("transaction: {}", error)));
-            }
-        };
-
-        let session_seq: i64 = match &tx_results[1] {
-            bcs_db_api::DbTransactionStepResult::Rows(rows) => {
-                let row = rows.first().ok_or_else(|| {
-                    MessageRepoError::SessionNotFound(msg.session_id.clone())
-                })?;
-                db_get_column(row, "current_msg_seq").map_err(|e| {
-                    MessageRepoError::StorageError(format!("seq: {}", e))
-                })?
-            }
-            _ => {
-                return Err(MessageRepoError::SessionNotFound(msg.session_id.clone()));
-            }
-        };
-
-        debug!(
-            session_id = %msg.session_id,
-            message_id = %message_id,
-            session_seq,
-            backend = %self.backend_label(),
-            "message persisted"
-        );
-
-        Ok(PersistedMessage {
-            message_id,
-            group_id: msg.group_id,
-            session_id: msg.session_id,
-            session_seq,
-            sender_id: msg.sender_id,
-            sender_type: msg.sender_type,
-            message_type: msg.message_type,
-            content: msg.content,
-            client_msg_id: msg.client_msg_id,
-            owner_bot_id: msg.owner_bot_id,
-            visibility_domain: Some(msg.visibility_domain),
-            audience: msg.audience,
-            status: PersistedMessageStatus::Normal,
-            created_at: msg.created_at,
-            run_id: msg.run_id,
-        })
+        self.append_with_identity(msg, message_id, true).await
     }
 
     async fn append_message_with_event(

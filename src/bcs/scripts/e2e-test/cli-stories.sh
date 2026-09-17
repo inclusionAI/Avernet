@@ -203,6 +203,20 @@ runtime:
         return
     fi
 
+    _cli_story_run "operator queries the exact one-shot execution graph" PM \
+        collaborate query --run "$run_id" --graph || return
+    assert_json_eq "CLI graph keeps the Run identity" "$BCS_CLI_STDOUT" "run.run_id" "$run_id"
+    _cli_story_run "operator checks pending Human input through CLI" PM \
+        collaborate query --run "$run_id" --pending || return
+    assert_eq "Bot-only workflow exposes no Human response target" "$BCS_CLI_STDOUT" "[]"
+    # Exercise the reply guard against a real Bot-only Run; it must never POST
+    # a Human response to a node absent from the authorized pending list.
+    if bcs_cli_json PM collaborate respond --run "$run_id" --node plan --content "invalid Human reply"; then
+        assert_eq "CLI refuses a non-pending Human node" "accepted" "rejected"
+    else
+        assert_contains "CLI explains that the node is not pending" "$BCS_CLI_STDERR" "not pending"
+    fi
+
     _cli_story_run "operator reloads current-session history after the one-shot run" PM \
         session messages "$trial_session_id" --view-bot "$BOT_PM_UUID" --limit 50 || {
         bot_post "/state-machine-runs/${run_id}/cancel" PM '{"reason":"E2E cleanup"}'

@@ -86,6 +86,7 @@ pub use application::session_files::{
     ShareMintResult,
 };
 pub use application::collaboration_runtime::{
+    StateMachineLoopGraphView,
     AuthenticatedHumanCaller, CancelStateMachineRunCommand,
     CollaborationDefinitionGraphEdge, CollaborationDefinitionGraphNode,
     CollaborationDefinitionGraphPreview, CollaborationDefinitionParticipantSlot,
@@ -103,6 +104,8 @@ pub use application::collaboration_runtime::{
     StartStateMachineRunOutcome, StateMachineGraphDefinitionView,
     StateMachineGraphEdgeView, StateMachineGraphNodeView, StateMachineRunGraphView,
     StateMachineJudgeOutputView, StateMachineNodeRunView, StateMachineNodeSubStatus,
+    StateMachineProgressionRecoveryPage, StateMachineProgressionRecoveryFailure,
+    StateMachineSessionRecoveryPage, StateMachineSessionRecoveryFailure,
     StateMachineRunAccessCommand, StateMachineRunView, UpgradeGroupCollaborationDefinitionCommand,
     ValidateCollaborationDefinitionYamlCommand,
 };
@@ -191,6 +194,11 @@ pub use application::{
     UpdateOrganizationMemberProfileCommand,
 };
 pub use port::{
+    FailStateMachineNodeAttempt, StateMachineFailureAction, StateMachineNodeAttemptFailure,
+    FinishStateMachineJudge, StateMachineJudgeClaim, StateMachineJudgeResult,
+    StateMachineOpeningPayload, StateMachineOpeningCheckpoint,
+    StateMachineDispatchPayload, StateMachineDispatchTarget, StateMachineDispatchStatus,
+    StateMachineDispatchCheckpoint, StateMachineDispatchClaim, StateMachineDispatchResult,
     ActiveBotRunContext, BotAbortDeliveryCommand, BotAbortDeliveryResult, BotConnectionControlPort,
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotMetricCount,
     BotMetricsSnapshotPort, BotRepoPort, BotRunContext, BotControlPlaneRepoPort,
@@ -202,6 +210,8 @@ pub use port::{
     DeliveryBlockReason, DeliveryBlockSurface, DeliveryMetricKind, DeliveryMetricTarget,
     DeliveryPolicyBlockInstrumentationHook, DirectChatClientKind, DirectChatRunEvent,
     DirectChatRunLifecycleHook, DirectChatRunReason, DirectChatRunSnapshotPort, DirectChatRunState,
+    StateMachineLoopInstrumentationHook, StateMachineLoopMetric, StateMachineLoopOutcome,
+    StateMachineLoopCompileRejection,
     ChannelBindingCleanupPort, ChannelBindingRef, ChannelDeliveryPort, ChannelDeliveryResult,
     ChannelOutboundEvent, ChannelOutboundEventKind, ChannelOutboundPurpose, ChannelRenderHint,
     ChannelBindingRepoPort, ConversationSessionRepoPort, HumanInputEnqueueDisposition,
@@ -317,3 +327,10 @@ pub use bcs_domain::{
 };
 
 // Note: bcs-bot-connectors has been removed. Bot communication uses the streaming adapter.
+
+pub use port::repo::{StateMachineChatResultPayload, StateMachineChatResultCheckpoint, StateMachineChatResultStatus, StateMachineChatResultClaim, StateMachineChatResultOutcome};
+
+pub use port::repo::{StateMachineTerminalImPayload, StateMachineTerminalImProgress, StateMachineTerminalImDelivery, StateMachineTerminalImStatus, StateMachineTerminalImCheckpoint, StateMachineTerminalImClaim};
+pub use port::session_channel_outbound::StateMachineTerminalNotification;
+
+pub use port::repo::{FailStateMachineStartup, StateMachineMissingStartupFact, StateMachineStartupFailure, STATE_MACHINE_PREPARATION_GRACE_MS};

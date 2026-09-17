@@ -27,6 +27,10 @@ templates:
     tags: [parallel]
     priority: 31
 
+  write-review-loop:
+    tags: [loop, judge, serial]
+    priority: 35
+
   single-bot-guided-answer:
     tags: [single-step]
     priority: 40

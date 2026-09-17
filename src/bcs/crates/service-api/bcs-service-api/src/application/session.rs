@@ -117,6 +117,19 @@ pub trait SessionManagementService: Send + Sync {
         limit: u64,
     ) -> Result<Vec<Session>, SessionUseCaseError>;
 
+    /// Fallible, bounded Running ServiceInvocation page ordered by Session id,
+    /// exclusive of the cursor. Restart with None after the end of each sweep.
+    async fn list_running_service_after(
+        &self,
+        _after_session_id: Option<&str>,
+        _limit: u64,
+    ) -> Result<Vec<Session>, SessionUseCaseError> {
+        Err(SessionUseCaseError::Internal(ServiceError::InvalidOperation {
+            message: "Session recovery pagination is not configured".into(),
+            request_id: None,
+        }))
+    }
+
     /// List callback recovery candidates using Session-id keyset pagination.
     /// Only FO-era activations with an idle or expired callback lease are
     /// returned by production repositories.
@@ -164,6 +177,24 @@ pub trait SessionManagementService: Send + Sync {
         output: Option<serde_json::Value>,
         error: Option<String>,
     ) -> Result<Option<Session>, SessionUseCaseError>;
+
+    /// Complete the caller's saved Running ServiceInvocation activation with
+    /// the usual Session event. An observed missing/stale/kind mismatch is a
+    /// no-op; a race in the eventful transaction may return a conflict. Writes
+    /// remain fallible. The caller may dispatch callbacks only for the returned
+    /// completed activation. No unguarded completion fallback is permitted.
+    async fn complete_running_service_activation(
+        &self,
+        _session_id: &str,
+        _expected_activation_count: i32,
+        _output: Option<serde_json::Value>,
+        _error: Option<String>,
+    ) -> Result<Option<Session>, SessionUseCaseError> {
+        Err(SessionUseCaseError::Internal(ServiceError::InvalidOperation {
+            message: "Session completion activation CAS is not configured".into(),
+            request_id: None,
+        }))
+    }
 
     async fn add_participant(
         &self,

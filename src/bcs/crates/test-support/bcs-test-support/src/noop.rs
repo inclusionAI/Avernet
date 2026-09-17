@@ -12,6 +12,13 @@ use bcs_service_api::core::{
 use bcs_service_api::*;
 
 #[derive(Debug, Default)]
+pub struct NoopStateMachineLoopInstrumentationHook;
+
+impl StateMachineLoopInstrumentationHook for NoopStateMachineLoopInstrumentationHook {
+    fn record(&self, _metric: StateMachineLoopMetric) {}
+}
+
+#[derive(Debug, Default)]
 pub struct NoopWsLifecycleInstrumentationHook;
 
 #[async_trait]

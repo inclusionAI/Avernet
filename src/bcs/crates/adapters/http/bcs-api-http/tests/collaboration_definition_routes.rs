@@ -52,6 +52,7 @@ impl PrincipalVerifier for HeaderVerifier {
 struct FakeDefinitionService {
     last: Mutex<Option<ValidateCollaborationDefinition>>,
     invalid: bool,
+    graph: Option<bcs_service_api::CollaborationDefinitionGraphPreview>,
 }
 
 #[async_trait]
@@ -87,7 +88,7 @@ impl CollaborationDefinitionService for FakeDefinitionService {
                 ..Default::default()
             },
             participants: Vec::new(),
-            graph: None,
+            graph: self.graph.clone(),
             definition: None,
         })
     }
@@ -346,6 +347,30 @@ async fn validate_returns_envelope_and_forwards_definition_yaml() {
         .clone()
         .expect("command recorded");
     assert_eq!(recorded.definition_yaml, yaml);
+}
+
+#[tokio::test]
+async fn validate_preserves_compiled_loop_preview_metadata() {
+    let graph = json!({
+        "graph_mode": "hierarchical", "execution_graph_mode": "acyclic",
+        "nodes": [{"node_id": "ln-last-result", "display_name": "Decide", "kind": "bot_task",
+            "final_output": false, "judge": true, "execution": {
+                "definition_node_id": "decision", "loop_id": "rounds", "iteration": 3, "max_iterations": 3
+            }}],
+        "edges": [{"source": "ln-last-result", "target": "manual_finish", "outcome": "continue",
+            "loop_route": {"kind": "exhausted", "logical_outcome": "exhausted"}}]
+    });
+    let service = Arc::new(FakeDefinitionService {
+        graph: Some(serde_json::from_value(graph.clone()).unwrap()),
+        ..Default::default()
+    });
+    let response = test_router(service).oneshot(request(
+        "POST", "/api/v1/collaboration/definitions/validate", json!({"definition_yaml": "name: loop preview"}),
+    )).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["graph"], graph);
+    assert!(body["data"].get("definition").is_none());
 }
 
 #[tokio::test]

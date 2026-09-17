@@ -1,0 +1,63 @@
+name: Fixed loop contract fixture
+participants:
+  speaker:
+    required: true
+  coordinator:
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 2
+    graph_mode: hierarchical
+    nodes:
+      prepare:
+        kind: bot_task
+        display_name: Prepare
+        assignee: {type: bot_binding, binding: coordinator}
+        instruction: Prepare the discussion.
+        transitions:
+          complete: {targets: [rounds]}
+      rounds:
+        kind: loop
+        display_name: Discussion rounds
+        loop:
+          mode: fixed
+          max_iterations: 3
+          entry_node: discussion
+          result_node: decision
+          continue_outcomes: [continue]
+          break_outcomes: [completed]
+          exhausted_outcome: exhausted
+          nodes:
+            discussion:
+              kind: bot_task
+              display_name: Discuss
+              assignee: {type: bot_binding, binding: speaker}
+              instruction: Use the previous result.
+              transitions:
+                complete: {targets: [decision]}
+            decision:
+              kind: bot_task
+              display_name: Decide
+              assignee: {type: bot_binding, binding: coordinator}
+              instruction: Decide whether another round is needed.
+              judge:
+                type: llm
+                criteria: [Whether the discussion has converged]
+                outcomes: [continue, completed]
+        transitions:
+          completed: {targets: [publish]}
+          exhausted: {targets: [manual_finish]}
+      manual_finish:
+        kind: human_input
+        display_name: Resolve exhausted loop
+        instruction: Provide a final decision.
+        node_timeout_ms: 600000
+        transitions:
+          complete: {targets: [publish]}
+      publish:
+        kind: bot_task
+        display_name: Publish
+        assignee: {type: bot_binding, binding: coordinator}
+        instruction: Publish the result.
+        final_output: true

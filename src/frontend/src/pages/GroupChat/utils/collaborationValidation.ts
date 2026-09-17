@@ -1,4 +1,7 @@
-import type { CollaborationDefinitionParticipantSlot } from '@/services/backend-api/BcnController';
+import type {
+  CollaborationDefinitionParticipantSlot,
+  CollaborationDefinitionValidationDiagnostic,
+} from '@/services/backend-api/BcnController';
 
 export interface CollaborationParticipantDefinition {
   key: string;
@@ -40,18 +43,25 @@ export function getCollaborationParticipantLabel(
 }
 
 export function formatCollaborationValidationErrors(
-  errors: Array<{ path: string; message: string }> | undefined,
+  errors: Array<{ path: string; message: string; code?: string; hint?: string }> | undefined,
 ): string {
   if (!errors?.length) {
     return 'YAML 校验未通过';
   }
 
   return errors
-    .map(({ path, message }) => {
+    .map(({ path, message, code, hint }) => {
       const normalizedPath = path.trim();
-      return normalizedPath && normalizedPath !== '$'
+      const diagnostic = normalizedPath && normalizedPath !== '$'
         ? `${normalizedPath}: ${message}`
         : message;
+      return `${code ? `[${code}] ` : ''}${diagnostic}${hint ? `（${hint}）` : ''}`;
     })
     .join('；');
+}
+
+export function canExecuteValidatedCollaboration(
+  warnings: CollaborationDefinitionValidationDiagnostic[] = [],
+): boolean {
+  return !warnings.some(({ code }) => code === 'VALIDATION_ONLY_FEATURE');
 }

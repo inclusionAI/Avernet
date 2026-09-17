@@ -1,0 +1,35 @@
+name: Fixed three rounds
+participants:
+  writer:
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 2
+    graph_mode: hierarchical
+    nodes:
+      rounds:
+        kind: loop
+        display_name: Three rounds
+        loop:
+          mode: fixed
+          max_iterations: 3
+          entry_node: discussion
+          result_node: discussion
+          continue_outcomes: [complete]
+          break_outcomes: []
+          exhausted_outcome: exhausted
+          nodes:
+            discussion:
+              kind: bot_task
+              display_name: Discuss
+              assignee: {type: bot_binding, binding: writer}
+              instruction: Use the previous iteration result.
+        transitions:
+          exhausted: {targets: [publish]}
+      publish:
+        kind: bot_task
+        display_name: Publish
+        assignee: {type: bot_binding, binding: writer}
+        instruction: Publish the final result.
+        final_output: true

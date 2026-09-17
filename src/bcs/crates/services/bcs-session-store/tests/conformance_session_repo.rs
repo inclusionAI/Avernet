@@ -24,6 +24,9 @@ use bcs_session_store::{MemorySessionRepo, MySqlSessionStore};
 #[allow(dead_code)]
 mod bootstrap_migrations;
 
+#[path = "support/session_completion_recovery.rs"]
+mod session_completion_recovery;
+
 #[tokio::test]
 async fn memory_session_repo_passes_session_repo_contract() {
     let repo = MemorySessionRepo::new();

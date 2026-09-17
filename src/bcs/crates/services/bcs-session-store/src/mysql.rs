@@ -768,6 +768,44 @@ impl SessionRepoPort for MySqlSessionStore {
         }
     }
 
+    async fn complete_running_service_activation(
+        &self,
+        session_id: &str,
+        expected_activation_count: i32,
+        output: Option<serde_json::Value>,
+        error: Option<String>,
+    ) -> ServiceResult<Option<Session>> {
+        let Some(mut candidate) = self.try_get(session_id).await? else { return Ok(None); };
+        if candidate.session_kind != SessionKind::ServiceInvocation
+            || candidate.status != SessionStatus::Running
+            || candidate.activation_count != expected_activation_count
+        {
+            return Ok(None);
+        }
+        let now = current_millis();
+        let sql = format!(
+            "UPDATE bcs_group_sessions SET status = 'completed', output = ?, \
+             error_message = ?, completed_at = ?, {} \
+             WHERE env = ? AND session_id = ? AND session_kind = 'service_invocation' \
+               AND status = 'running' AND activation_count = ?",
+            self.flavor.set_modified_now(),
+        );
+        let result = self.db.execute(DbStatement::with_params(sql, vec![
+            json_to_db_value(&output), DbValue::from(error.as_deref()), DbValue::U64(now),
+            DbValue::from(self.env.as_str()), DbValue::from(session_id),
+            DbValue::from(expected_activation_count),
+        ])).await.map_err(|error| ServiceError::InternalError(format!("Session activation completion: {error}")))?;
+        if result.affected_rows == 0 { return Ok(None); }
+        // A post-CAS SELECT could observe a new activation. Return the snapshot
+        // belonging to this transition for callback/notification callers.
+        candidate.status = SessionStatus::Completed;
+        candidate.output = output;
+        candidate.error_message = error;
+        candidate.completed_at = Some(now);
+        candidate.updated_at = now;
+        Ok(Some(candidate))
+    }
+
     async fn complete_if_running_with_event(
         &self,
         command: CompleteSessionWithEvent,
@@ -1313,6 +1351,25 @@ impl SessionRepoPort for MySqlSessionStore {
             Err(_) => return Vec::new(),
         };
         rows.iter().filter_map(|r| row_to_session(r).ok()).collect()
+    }
+
+    async fn list_running_service_after(
+        &self,
+        after_session_id: Option<&str>,
+        limit: u64,
+    ) -> ServiceResult<Vec<Session>> {
+        if limit == 0 { return Ok(Vec::new()); }
+        let select_cols = self.select_cols();
+        let sql = format!(
+            "SELECT {select_cols} FROM bcs_group_sessions \
+             WHERE env = ? AND session_kind = 'service_invocation' AND status = 'running' \
+               AND session_id > ? ORDER BY session_id ASC LIMIT ?"
+        );
+        let rows = self.db.query(DbStatement::with_params(sql, vec![
+            DbValue::from(self.env.as_str()), DbValue::from(after_session_id.unwrap_or("")),
+            DbValue::U64(limit),
+        ])).await.map_err(|error| ServiceError::InternalError(format!("Session recovery candidates: {error}")))?;
+        rows.iter().map(row_to_session).collect()
     }
 
     async fn list_recoverable_callbacks(

@@ -12,6 +12,7 @@
 collaboration-templates/
 ├── zh-CN/               # 简体中文
 │   ├── write-and-review.yaml
+│   ├── write-review-loop.yaml
 │   ├── world-cup-preview-content-production.yaml
 │   ├── micro-merchant-event-orchestration.yaml
 │   ├── parallel-expert-review.yaml
@@ -19,6 +20,7 @@ collaboration-templates/
 │   └── single-bot-guided-answer.yaml
 ├── en-US/               # 美式英文
 │   ├── write-and-review.yaml
+│   ├── write-review-loop.yaml
 │   ├── world-cup-preview-content-production.yaml
 │   ├── micro-merchant-event-orchestration.yaml
 │   ├── parallel-expert-review.yaml
@@ -38,11 +40,35 @@ collaboration-templates/
 | id | 中文模板 | English template |
 | --- | --- | --- |
 | write-and-review | [写作质检协同](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/zh-CN/write-and-review.yaml) | [Write & Review](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/en-US/write-and-review.yaml) |
+| write-review-loop | [写作评审循环（Loop）](zh-CN/write-review-loop.yaml) | [Writing Review Loop](en-US/write-review-loop.yaml) |
 | world-cup-preview-content-production | [世界杯比赛前瞻内容生产](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/zh-CN/world-cup-preview-content-production.yaml) | [World Cup Preview Content Production](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/en-US/world-cup-preview-content-production.yaml) |
 | micro-merchant-event-orchestration | [小微商家活动协同](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/zh-CN/micro-merchant-event-orchestration.yaml) | [Micro-Merchant Event Orchestration](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/en-US/micro-merchant-event-orchestration.yaml) |
 | parallel-expert-review | [多专家并行协同](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/zh-CN/parallel-expert-review.yaml) | [Parallel Expert Review](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/en-US/parallel-expert-review.yaml) |
 | solution-and-risk-review | [方案与风险评审](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/zh-CN/solution-and-risk-review.yaml) | [Solution & Risk Review](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/en-US/solution-and-risk-review.yaml) |
 | single-bot-guided-answer | [单 Bot 引导回答](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/zh-CN/single-bot-guided-answer.yaml) | [Guided Single Answer](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/en-US/single-bot-guided-answer.yaml) |
+
+## Loop 模板
+
+`write-review-loop` 包含三个必选角色 `writer` / `reviewer` / `polisher`，使用 v2 hierarchical
+状态机。先写作/修订，再由主编评审；Judge 根据完整稿件和主编的明确结论选择
+`approved` 或 `revise`，达标即可离开循环，无需执行满三次。
+
+- `approved → polish → finalize`：润色编辑可独立绑定 Bot，保留通过稿件的事实与结论并改善表达。
+- `exhausted → rewrite → finalize`：持续返修达到 `max_iterations: 3` 后，写作者依据必改问题重写，披露未解决问题且不宣称已通过。
+- `revise`：未达到上限时继续写作和评审；主编的输出保留完整稿件、评审结论和必改问题。
+
+两条出口互斥，最终汇总消费实际执行分支的结果，保持其评审状态。
+模板需要可用的 LLM Judge；未配置时列表沿用“需要启用 LLM”提示，校验也会明确指出依赖。
+
+测试部署可在 `[collaboration]` 下设置 `experimental_fixed_loop_execution = true`，重启 BCS 后即可
+使用 v2 Loop 执行；运行本模板还需配置 LLM Judge。此开关同时启用通用恢复扫描。仓库的 `bcs-config-local.toml` 已为本地测试开启。
+其他部署默认关闭，关闭时校验仍返回 `VALIDATION_ONLY_FEATURE`，页面禁止创建。
+实验开放不代表完整 Singlebox、多实例强杀和生产 FO 发布验收已完成。
+模板不会改变运行时开关或替用户配置 LLM 凭证。
+
+local file mode 在进程内缓存模板索引，新增文件后需重启 BCS，再刷新模板列表。
+DB catalog 部署仍通过 `bcs-admin template seed --dry-run` 检查，
+再按已有 seed 流程生成并应用数据，无需 schema migration。
 
 ## 新增语言
 

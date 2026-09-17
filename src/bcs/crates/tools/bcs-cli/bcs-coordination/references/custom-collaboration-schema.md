@@ -10,6 +10,7 @@
 - [Bot task node](#bot-task-node)
 - [Human input node](#human-input-node)
 - [LLM judge node](#llm-judge-node)
+- [Fixed Loop validation preview](#fixed-loop-validation-preview)
 - [Parallel fan-out and join](#parallel-fan-out-and-join)
 - [Runtime input and artifacts](#runtime-input-and-artifacts)
 - [Validation errors](#validation-errors)
@@ -33,7 +34,7 @@ runtime:
 - Allow only `name`, `metadata`, `participants`, and `runtime` at the top level for this authoring Skill.
 - Never emit top-level `api_version`, `id`, or `version`. The create-group path parses authoring YAML after rejecting top-level `id`/`version`; the domain model then supplies the API version and server-owned definition identity defaults.
 - Reject any other top-level key, including spelling variants such as `apiVersion`, `verion`, or `verions`.
-- Do keep the nested `runtime.state_machine.version: 1`; it is a different field with different semantics.
+- Use nested `runtime.state_machine.version: 1` for executable definitions; version 2 is currently limited to fixed-Loop validation/preview below. This differs from the server-owned top-level version.
 - Do not put runtime Bot UUIDs in the definition.
 - Let BCS infer `requires`; omit it from authoring YAML.
 - Keep `metadata.description` as a string, `metadata.labels` as a
@@ -79,7 +80,7 @@ runtime:
     nodes: {}
 ```
 
-- Require `version: 1` and `graph_mode: acyclic`.
+- Executable definitions require `version: 1` and `graph_mode: acyclic`.
 - If projection is present, use only `default_visibility: private` or
   `default_visibility: shared`.
 - Use only `bot_task` and `human_input` nodes.
@@ -92,6 +93,64 @@ runtime:
   transition.
 - Use one zero-in-degree entry node and one final-output sink.
 - Keep every node reachable from the entry and able to reach the final node.
+
+## Fixed Loop validation preview
+
+`collaboration validate` also accepts `version: 2 + graph_mode: hierarchical` for fixed Loop compilation and preview.
+It returns `VALIDATION_ONLY_FEATURE` when this deployment has v2 execution disabled (the default). For testing, set `collaboration.experimental_fixed_loop_execution = true` and restart BCS: validation then omits this warning and create/run/rerun are enabled together with progression recovery. The local config template opts in; full failover and production release gates remain pending.
+Do not use a successful preview as evidence that a deployment can execute Loop definitions.
+
+```yaml
+name: Fixed three rounds
+participants:
+  writer:
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 2
+    graph_mode: hierarchical
+    nodes:
+      rounds:
+        kind: loop
+        display_name: Three rounds
+        loop:
+          mode: fixed
+          max_iterations: 3
+          entry_node: discussion
+          result_node: discussion
+          continue_outcomes: [complete]
+          break_outcomes: []
+          exhausted_outcome: exhausted
+          nodes:
+            discussion:
+              kind: bot_task
+              display_name: Discuss
+              assignee: {type: bot_binding, binding: writer}
+              instruction: Use the previous iteration result.
+        transitions:
+          exhausted: {targets: [publish]}
+      publish:
+        kind: bot_task
+        display_name: Publish
+        assignee: {type: bot_binding, binding: writer}
+        instruction: Publish the final result.
+        final_output: true
+```
+
+- `loop` requires all eight fields shown above; unknown fields are rejected. Body nodes use the ordinary executable-node rules.
+- `continue_outcomes` must be nonempty; `break_outcomes` must be present but may be `[]`. Without a result Judge, use exactly `[complete]` and `[]`.
+- With a result Judge, continue and break must partition all its outcomes. `exhausted_outcome` is separate and cannot be returned by the Judge.
+- Each break/exhausted transition needs at least one existing outer target. Empty break means run to the limit and then route to exhausted targets, not stop the whole workflow.
+- Body has exactly one entry and one result terminal. Result defines no body transitions; body nodes cannot be final_output. Keep the unique final_output outside the Loop.
+- Loop control nodes allow only `kind`, `display_name`, `loop`, `transitions`, `extensions`; no assignee, instruction, Judge, timeout or final_output fields, including null/false placeholders.
+- Nested loops, cross-body targets, arbitrary goto and unbounded loops are unsupported. The `ln-` node ID prefix is reserved in v2; authoring node IDs are at most 128 ASCII bytes.
+- Server-owned limits come from `collaboration.fixed_loop_limits`. Rejection reports the authoring path before any Run creation.
+- Preview retains authoring `graph_mode: hierarchical`, adds `execution_graph_mode: acyclic`, per-node `execution` and result-edge `loop_route`. Last-round edge outcome stays `complete`/the actual continue outcome while route kind/logical_outcome shows exhaustion.
+
+The internal compiler version is `bcs.fixed-loop.compiler/v1`. Generated IDs use a namespace-separated SHA-256 of the JSON
+tuple `(definition_id, definition_version, loop_id, iteration, body_node_id)`, truncated to 128 bits and prefixed with `ln-`.
+Never parse or construct these IDs in clients. Preview IDs do not promise future Run identity.
 
 ## Bot task node
 
@@ -234,3 +293,14 @@ HumanInput has no `--binding` in this frontend flow.
   a Bot.
 
 Treat `bcs-cli collaboration validate` output as authoritative for the current BCS instance. Do not bypass an error because the YAML looks plausible. The command exits non-zero and returns structured `errors` when validation fails.
+
+
+### Loop consumers
+
+Use `collaborate query --run ID` to obtain execution IDs and metadata;
+`--graph` includes continue/break/exhausted routes, `--pending` includes trusted
+first/later LoopContext, and `--node EXECUTION_ID` includes the retry attempt.
+`--no-json` renders those fields as text. `collaborate respond --run ID --node
+EXECUTION_ID --content TEXT` only submits to an ID still returned in the
+current authenticated Human's pending list. Neither command parses generated
+IDs. Read-only historical inspection does not enable v2 execution.

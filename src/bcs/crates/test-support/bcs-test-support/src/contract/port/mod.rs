@@ -283,6 +283,7 @@ pub async fn session_channel_outbound_port_contract_tests<
             upstream_artifacts: Vec::new(),
             judge_outcomes: Vec::new(),
             timeout_deadline_ms: None,
+            loop_context: None,
         })
         .await;
 
@@ -301,6 +302,7 @@ pub async fn state_machine_result_publisher_port_contract_tests<
     port: &T,
 ) {
     port.publish_state_machine_result(StateMachineResultPublishCommand {
+        created_at_ms: 100,
         run_id: "contract-run".to_string(),
         group_id: "contract-group".to_string(),
         session_id: "contract-group:00000001".to_string(),

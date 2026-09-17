@@ -83,6 +83,9 @@ pub struct ImParticipantMap {
 #[serde(rename_all = "snake_case")]
 pub enum HumanInputRequestStatus {
     Queued,
+    /// Slot occupied, durable payload saved, external delivery has not started.
+    NotificationPending,
+    /// Send barrier crossed; delivery may have happened. Never replay the send.
     Notifying,
     Active,
     Responded,

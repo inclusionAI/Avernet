@@ -439,6 +439,50 @@ impl SessionRepoPort for MemorySessionRepo {
         Ok(sessions)
     }
 
+    async fn list_running_service_after(
+        &self,
+        after_session_id: Option<&str>,
+        limit: u64,
+    ) -> ServiceResult<Vec<Session>> {
+        if limit == 0 { return Ok(Vec::new()); }
+        let state = self.state.read().await;
+        // Keep at most one page of references; clone only the returned Sessions.
+        let mut page = std::collections::BTreeMap::new();
+        for session in state.sessions.values().filter(|session| {
+            session.session_kind == SessionKind::ServiceInvocation
+                && session.status == SessionStatus::Running
+                && after_session_id.map_or(true, |cursor| session.id.as_str() > cursor)
+        }) {
+            page.insert(session.id.as_str(), session);
+            if page.len() as u64 > limit { page.pop_last(); }
+        }
+        Ok(page.into_values().cloned().collect())
+    }
+
+    async fn complete_running_service_activation(
+        &self,
+        session_id: &str,
+        expected_activation_count: i32,
+        output: Option<serde_json::Value>,
+        error: Option<String>,
+    ) -> ServiceResult<Option<Session>> {
+        let mut state = self.state.write().await;
+        let Some(session) = state.sessions.get_mut(session_id) else { return Ok(None); };
+        if session.session_kind != SessionKind::ServiceInvocation
+            || session.status != SessionStatus::Running
+            || session.activation_count != expected_activation_count
+        {
+            return Ok(None);
+        }
+        let now = now_ms();
+        session.status = SessionStatus::Completed;
+        session.output = output;
+        session.error_message = error;
+        session.updated_at = now;
+        session.completed_at = Some(now);
+        Ok(Some(session.clone()))
+    }
+
     /// CAS complete: only flips status if currently Running.
     /// Returns `Ok(None)` if already Completed (idempotent).
     async fn complete_if_running(

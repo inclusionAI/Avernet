@@ -130,6 +130,11 @@ allow_non_standard_ports = true
 max_group_subscriptions = 10
 max_filters_per_subscription = 64
 
+[collaboration]
+# Local testing: enable fixed Loop v2 and its shared progression recovery scanner.
+# Other deployments default to false; full product FO/release validation is pending.
+experimental_fixed_loop_execution = true
+
 [collaboration.templates]
 storage_type = "file"
 base_dir = "seeds/collaboration-templates"

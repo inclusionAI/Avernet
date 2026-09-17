@@ -142,6 +142,10 @@ jobs:
         if: steps.changes.outputs.skip-bcs != 'true'
         run: bash scripts/ci_test.sh --coverage
 
+      - name: Run MySQL full migration chain contract
+        if: steps.changes.outputs.skip-bcs != 'true'
+        run: cargo test -p bcs-admin full_mysql_migration_chain_applies_and_preserves_history -- --ignored
+
       - name: Run MySQL DB plugin contract
         if: steps.changes.outputs.skip-bcs != 'true'
         run: cargo test -p bcs-db-mysql --test conformance_db_plugin -- --ignored
@@ -149,6 +153,22 @@ jobs:
       - name: Run MySQL Eventing migration contract
         if: steps.changes.outputs.skip-bcs != 'true'
         run: cargo test -p bcs-admin eventing_mysql_migration_applies_to_real_mysql -- --ignored
+
+      - name: Run MySQL HumanInput index migration contract
+        if: steps.changes.outputs.skip-bcs != 'true'
+        run: cargo test -p bcs-admin human_input_index_migrations_apply_to_real_mysql -- --ignored
+
+      - name: Run MySQL merged 016 migration contract
+        if: steps.changes.outputs.skip-bcs != 'true'
+        run: cargo test -p bcs-admin merged_016_migration_applies_to_real_mysql -- --ignored
+
+      - name: Run MySQL fixed Loop migration contract
+        if: steps.changes.outputs.skip-bcs != 'true'
+        run: cargo test -p bcs-admin fixed_loop_migration_applies_to_real_mysql -- --ignored
+
+      - name: Run MySQL fixed Loop snapshot and rerun contracts
+        if: steps.changes.outputs.skip-bcs != 'true'
+        run: cargo test -p bcs-collaboration-store --test mysql_store real_mysql_fixed_loop_snapshot_and_rerun_contract -- --ignored
 
       - name: Run MySQL Event Store and Delivery contracts
         if: steps.changes.outputs.skip-bcs != 'true'

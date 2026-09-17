@@ -81,6 +81,7 @@ import {
 } from '../utils/collaborationGraphLayout';
 import {
   buildCollaborationParticipantDefinitions,
+  canExecuteValidatedCollaboration,
   formatCollaborationValidationErrors,
   getCollaborationParticipantLabel,
   type CollaborationParticipantDefinition,
@@ -95,6 +96,7 @@ import {
 } from '../utils/groupWebhook';
 import CollaborationFlowPreviewLoader from './CollaborationFlowPreviewLoader';
 import CollaborationFlowWorkspace from './CollaborationFlowWorkspace';
+import CollaborationValidationNotices from './CollaborationValidationNotices';
 import PrivateBotHint from './PrivateBotHint';
 
 /** 最大可选成员 Bot 数量 */
@@ -280,6 +282,8 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     useState('');
   const [validatedCollaborationGraph, setValidatedCollaborationGraph] =
     useState<BcnController.CollaborationDefinitionGraphPreview | null>(null);
+  const [collaborationValidationWarnings, setCollaborationValidationWarnings] =
+    useState<BcnController.CollaborationDefinitionValidationDiagnostic[]>([]);
   const [validatedCollaborationSummary, setValidatedCollaborationSummary] =
     useState<BcnController.CollaborationDefinitionValidationSummary | null>(
       null,
@@ -1147,6 +1151,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     setValidatedCollaborationYaml('');
     setValidatedCollaborationGraph(null);
     setValidatedCollaborationSummary(null);
+    setCollaborationValidationWarnings([]);
     setCollaborationAuthoringStage('yaml');
     setSelectedCollaborationNodeId(undefined);
     setIsCompactCollaborationFlowOpen(false);
@@ -1218,6 +1223,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
     setValidatedCollaborationYaml('');
     setValidatedCollaborationGraph(null);
     setValidatedCollaborationSummary(null);
+    setCollaborationValidationWarnings([]);
     setCollaborationAuthoringStage('yaml');
     setSelectedCollaborationNodeId(undefined);
     setIsCompactCollaborationFlowOpen(false);
@@ -1479,6 +1485,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
       setValidatedCollaborationYaml(definitionYaml);
       setValidatedCollaborationGraph(response.graph ?? null);
       setValidatedCollaborationSummary(response.summary);
+      setCollaborationValidationWarnings(response.warnings ?? []);
       setSelectedCollaborationNodeId(undefined);
       setIsCompactCollaborationFlowOpen(false);
       setCollaborationAuthoringStage('bindings');
@@ -1691,6 +1698,11 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
 
     if (isStateMachine && !isCollaborationYamlValidated) {
       setError('请先点击校验 YAML，并完成 participant 绑定');
+      return;
+    }
+
+    if (isStateMachine && !canExecuteValidatedCollaboration(collaborationValidationWarnings)) {
+      setError('当前服务仅支持校验和预览此流程，暂不能创建协作群。');
       return;
     }
 
@@ -2753,6 +2765,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
             </div>
             {groupStrategy === 'state_machine' ? (
               <div className="flex-1 min-h-0 flex flex-col gap-3">
+                <CollaborationValidationNotices warnings={collaborationValidationWarnings} />
                 {isCollaborationYamlValidated &&
                 collaborationAuthoringStage !== 'yaml' ? (
                   <div className="flex flex-shrink-0 items-center justify-between gap-3 rounded-xl border border-slate-200/60 bg-white px-3 py-2">
@@ -3955,6 +3968,7 @@ const CreateGroupModal: React.FC<CreateGroupModalProps> = ({
                     isValidatingCollaborationYaml ||
                     !collaborationDefinitionYaml.trim() ||
                     !isCollaborationYamlValidated ||
+                    !canExecuteValidatedCollaboration(collaborationValidationWarnings) ||
                     missingParticipantBindingLabels.length > 0 ||
                     allBoundBotIds.length === 0 ||
                     !isOriginatorBoundToParticipant

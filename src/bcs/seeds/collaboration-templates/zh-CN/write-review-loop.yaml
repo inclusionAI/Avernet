@@ -1,0 +1,117 @@
+# 写作与主编评审，达标即退出循环。创建群时将逻辑角色绑定到实际 Bot。
+# 创建与执行需服务端开启实验性 Loop 执行并配置 LLM Judge。
+name: 写作评审循环（Loop）
+
+metadata:
+  description: 写作者按主编意见修订，Judge 决定 approved 或 revise；approved 后由润色编辑处理，exhausted 后由写作者重写，最后汇总。
+
+participants:
+  writer:
+    display_name: 写作者
+    description: 根据用户需求及上一轮评审完善稿件，并生成最终回复。
+    required: true
+  reviewer:
+    display_name: 主编
+    description: 判断稿件是否达到交付标准，明确给出通过或返修结论，以及必须修正的问题。
+    required: true
+  polisher:
+    display_name: 润色编辑
+    description: 对主编已通过的稿件进行语言与结构润色，保持事实、结论和必要的风险说明。
+    required: true
+
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 2
+    graph_mode: hierarchical
+    defaults:
+      node_timeout_ms: 120000
+      max_attempts: 2
+    nodes:
+      revision_rounds:
+        kind: loop
+        display_name: 写作与主编评审
+        loop:
+          mode: fixed
+          max_iterations: 3
+          entry_node: draft
+          result_node: review
+          # 达标即 approved；仍需返修但达到上限时走 exhausted。
+          continue_outcomes: [revise]
+          break_outcomes: [approved]
+          exhausted_outcome: exhausted
+          nodes:
+            draft:
+              kind: bot_task
+              display_name: 编写或修订稿件
+              assignee:
+                type: bot_binding
+                binding: writer
+              instruction: |
+                请围绕用户需求输出完整稿件，包含结论、依据、风险和下一步建议。
+                第一轮生成初稿；后续轮次读取上一轮结果中的完整稿件与评审意见，逐项修订。
+                每轮返回修订后的完整稿件，并简要说明本轮修改，不能只输出差异。
+              transitions:
+                complete:
+                  targets: [review]
+            review:
+              kind: bot_task
+              display_name: 主编评审稿件
+              assignee:
+                type: bot_binding
+                binding: reviewer
+              instruction: |
+                请检查本轮稿件是否回答用户问题、论据是否可靠、风险是否明确、建议是否可执行。
+                输出三部分：本轮完整稿件、明确的评审结论（通过或返修）、按优先级列出的必改问题。
+                稿件达到交付标准且没有必改问题时立即判为通过；只有实质性缺陷才要求返修，不为凑轮数提出修改。
+                你的输出会作为下一轮输入或最终汇总依据，不能只返回“通过”或省略稿件。
+              judge:
+                type: llm
+                criteria:
+                  - 主编明确判定通过、保留完整稿件且无未解决的必改问题时选择 approved。
+                  - 主编判定返修、列出未解决的必改问题或未给出明确通过结论时选择 revise。
+                  - 依据本轮完整稿件和评审结论判断，不以尚未达到轮次上限作为继续的理由。
+                outcomes: [approved, revise]
+        # approved 是正常退出路径；exhausted 仅防止反复修订，不能被当作评审通过。
+        transitions:
+          approved:
+            targets: [polish]
+          exhausted:
+            targets: [rewrite]
+      polish:
+        kind: bot_task
+        display_name: 润色通过稿件
+        assignee:
+          type: bot_binding
+          binding: polisher
+        instruction: |
+          主编已通过稿件。请依据上游完整稿件和主编意见，改善语言、结构和可读性。
+          保持已通过的事实、结论与必要风险说明，不引入未经验证的新内容。
+          输出润色后的完整稿件，并注明稿件已通过主编评审。
+        transitions:
+          complete:
+            targets: [finalize]
+      rewrite:
+        kind: bot_task
+        display_name: 重写待完善稿件
+        assignee:
+          type: bot_binding
+          binding: writer
+        instruction: |
+          稿件仍未通过主编评审，循环已达到执行次数上限。请依据最后的完整稿件和必改问题重写。
+          优先修正影响结论、事实可靠性和可执行性的缺陷，输出完整稿件，不能只返回修订说明。
+          明确列出仍未解决的问题及信息缺口，不宣称重写稿已通过主编评审。
+        transitions:
+          complete:
+            targets: [finalize]
+      finalize:
+        kind: bot_task
+        display_name: 汇总最终稿
+        assignee:
+          type: bot_binding
+          binding: writer
+        instruction: |
+          请根据已执行的润色或重写节点输出，组织完整的最终回复，并简要总结结论和下一步建议。
+          保留上游稿件的评审状态与未解决问题：润色路径已通过主编评审，重写路径尚未通过。
+          不要等待未执行的另一条分支，不要虚构事实或把重写结果宣称为已通过。
+        final_output: true

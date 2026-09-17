@@ -181,7 +181,7 @@ async fn rerun_create_is_source_idempotent_and_rejects_another_active_session_ru
         .await
         .expect("create source run");
     store
-        .save_run_snapshot(&source, 1, &definition, None)
+        .save_run_snapshot(&source, 1, &definition, None, None)
         .await
         .expect("save source snapshot");
 
@@ -228,7 +228,7 @@ async fn rerun_create_is_source_idempotent_and_rejects_another_active_session_ru
         .await
         .expect("create other terminal source");
     store
-        .save_run_snapshot(&other_source, 1, &definition, None)
+        .save_run_snapshot(&other_source, 1, &definition, None, None)
         .await
         .expect("save other source snapshot");
     let mut other_child = test_run("sm-run-other-child", "group-1:abcdef12", 6);
@@ -266,7 +266,7 @@ async fn rerun_create_rejects_completed_and_aborted_sources() {
             .await
             .expect("create non-rerunnable source");
         store
-            .save_run_snapshot(&source, 1, &definition, None)
+            .save_run_snapshot(&source, 1, &definition, None, None)
             .await
             .expect("save source snapshot");
 
@@ -323,7 +323,7 @@ async fn stale_service_rerun_does_not_reactivate_session_without_a_child_run() {
         .await
         .expect("create source Run");
     store
-        .save_run_snapshot(&source, 1, &definition, None)
+        .save_run_snapshot(&source, 1, &definition, None, None)
         .await
         .expect("save source snapshot");
 

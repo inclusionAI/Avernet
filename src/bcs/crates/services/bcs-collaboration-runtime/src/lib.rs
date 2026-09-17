@@ -1,4 +1,9 @@
 pub mod definition;
+pub mod fixed_loop;
+pub mod snapshot;
+pub mod loop_context;
+mod progression;
+mod loop_graph;
 pub mod runtime;
 pub mod validation;
 

@@ -17,6 +17,9 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+bcs-config-api = { workspace = true }
+bcs-db-mysql = { workspace = true }
+mysql_async = { workspace = true }
 bcs-db-local = { workspace = true }
 tempfile = { workspace = true }
 tokio-test = "0.4"

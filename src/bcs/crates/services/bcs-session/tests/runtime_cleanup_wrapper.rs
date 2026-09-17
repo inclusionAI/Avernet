@@ -50,6 +50,8 @@ async fn cleanup_wrapper_forwards_non_delete_operations() {
             .unwrap()
             .is_empty()
     );
+    assert!(service.list_running_service_after(None, 20).await.is_err());
+    assert!(service.complete_running_service_activation("session-1", 1, None, None).await.is_err());
     service
         .update_callback_status("session-1", "completed")
         .await

@@ -2,6 +2,10 @@
 
 ## Provides
 
+- `FixedLoopLimits` defines positive compiler limits for iterations, body nodes,
+  expanded nodes and plan bytes. Bootstrap validates and injects the limits;
+  configuring them does not enable v2 Run execution.
+
 `queued_provider_headers` defines the explicit non-sensitive routing allowlist,
 credential-name restrictions and bounded canonical snapshots shared by bootstrap
 validation and queued application preparation. It does not acquire credentials.

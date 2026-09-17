@@ -2,6 +2,38 @@
 
 ## Provides
 
+- Fixed Loop metrics use the existing `prometheus-metrics` feature and enabled
+  MetricsRuntime. All three CollaborationRuntime assembly paths inject the same
+  `StateMachineLoopInstrumentationHook` implementation; disabled metrics leave
+  it absent. The adapter records only closed outcome/reason labels plus env.
+  Core logs remain independent of the metrics switch.
+
+- `collaboration.experimental_fixed_loop_execution` defaults to false. Explicit
+  opt-in injects the same v2 capability into all three runtime assembly paths,
+  enables group/one-shot/rerun execution, removes the validation-only warning,
+  and always starts the shared progression scanner. The local config template
+  opts in for testing; full product FO/release validation remains pending.
+
+- `collaboration.experimental_progression_recovery` is off by default and can
+  independently enable v1 recovery. Either experimental switch schedules bounded State Machine
+  saved startup/dispatch/progression (including HumanInput request recovery), terminal Session completion, terminal IM and terminal checkpoint cleanup pages with the existing leader
+  election, each bounded to 32 candidates per tick with independent cursors.
+  Demotion cancels all four active pages and resets their cursors; shutdown aborts
+  the task. Opening/dispatch checkpoints and Node failure/Judge state require MySQL 027 / SQLite 028 before the
+  new runtime starts, including when scanning is disabled. Session and terminal IM scans use the MySQL 027 / SQLite 028 cursor indexes.
+  SQLite 032 upgrades retained pre-consolidation/earlier combined Loop databases,
+  preserving their 028 record and completing checkpoint fields and indexes.
+  Only the exact historical execution-plan identity with its three nullable
+  TEXT columns is accepted; other mismatches still abort startup.
+  Completed Sessions remain eligible through their pending IM checkpoints. The
+  deferred Channel port forwards preparation, preflight, delivery and cleanup to
+  the same Channel service, including saved HumanInput recovery and its covered-node IDs. Terminal cleanup does not publish messages or delete results. This experimental
+  recovery-only switch does not enable v2 execution or claim complete failover support.
+  The same active-Run page conditionally fails absent startup/dispatch facts
+  after their original preparation/Node deadlines. A typed startup-failure fact
+  permits snapshot-less completion of only the failed Service activation;
+  bootstrap adds no creator heartbeat, worker or scheduling policy for this.
+
 Master epochs reconcile the durable policy version every five seconds to observe
 late writes from the previous replica. Failed checks retain the last snapshot
 and retry; they do not restart runs. Reconciliation is cancelled on demotion.
@@ -37,7 +69,12 @@ Delivery wiring loads DB policy, rejects non-default legacy file policy, and sup
   V1 Session facade, and mounting of its focused token issuance and WebSocket
   Upgrade Routers.
 - Composition adapter that publishes a completed one-shot state-machine result
-  through the message-flow service under the initiating Bot identity.
+  through the message-flow service under the initiating Bot identity. Its fixed
+  message primary key and original timestamp protect history identity, with
+  explicit conflict checks before routing. History presence is not a successful
+  routing acknowledgement; message-flow failures propagate to the runtime's
+  publication checkpoint. Active-Run scans now include Chat finalization, with
+  conservative no-replay handling of unknown publisher results.
 - Composition of the Event Subscription application service from the selected
   Memory/SQL Event Store, shared outbound URL guard, Webhook client, and managed
   Eventing worker lifecycle.

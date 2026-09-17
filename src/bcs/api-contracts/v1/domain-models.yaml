@@ -1488,6 +1488,8 @@ StateMachineRunView:
       type: array
       items:
         $ref: "#/StateMachineNodeRun"
+    node_execution_metadata:
+      $ref: "./openapi/state-machine-runs.yaml#/StateMachineRunView/properties/node_execution_metadata"
     judge_outputs:
       type: array
       items:

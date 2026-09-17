@@ -1,0 +1,274 @@
+{
+  "run": {
+    "run_id": "run-1",
+    "definition_id": "loop-definition",
+    "definition_version": 1,
+    "group_id": "group-1",
+    "session_id": "session-1",
+    "status": "running",
+    "input": {},
+    "created_at": 1,
+    "updated_at": 3,
+    "group_version": 1
+  },
+  "definition": {
+    "id": "loop-definition",
+    "version": 1,
+    "name": "写作评审循环（Loop）",
+    "graph_mode": "hierarchical",
+    "execution_graph_mode": "acyclic",
+    "execution_plan_compiler_version": "bcs.fixed-loop.compiler/v1",
+    "initial_nodes": [
+      "draft-1"
+    ]
+  },
+  "nodes": [
+    {
+      "node_id": "draft-1",
+      "display_name": "编写或修订稿件",
+      "kind": "bot_task",
+      "assignee": {
+        "type": "bot_binding",
+        "binding": "writer"
+      },
+      "final_output": false,
+      "status": "completed",
+      "attempt": 0,
+      "execution": {
+        "loop_id": "revision_rounds",
+        "definition_node_id": "draft",
+        "iteration": 1,
+        "max_iterations": 3
+      },
+      "outcome": "complete"
+    },
+    {
+      "node_id": "review-1",
+      "display_name": "主编评审稿件",
+      "kind": "bot_task",
+      "assignee": {
+        "type": "bot_binding",
+        "binding": "reviewer"
+      },
+      "final_output": false,
+      "status": "completed",
+      "attempt": 0,
+      "execution": {
+        "loop_id": "revision_rounds",
+        "definition_node_id": "review",
+        "iteration": 1,
+        "max_iterations": 3
+      },
+      "outcome": "revise"
+    },
+    {
+      "node_id": "draft-2",
+      "display_name": "编写或修订稿件",
+      "kind": "bot_task",
+      "assignee": {
+        "type": "bot_binding",
+        "binding": "writer"
+      },
+      "final_output": false,
+      "status": "completed",
+      "attempt": 0,
+      "execution": {
+        "loop_id": "revision_rounds",
+        "definition_node_id": "draft",
+        "iteration": 2,
+        "max_iterations": 3
+      },
+      "outcome": "complete"
+    },
+    {
+      "node_id": "review-2",
+      "display_name": "主编评审稿件",
+      "kind": "bot_task",
+      "assignee": {
+        "type": "bot_binding",
+        "binding": "reviewer"
+      },
+      "final_output": false,
+      "status": "running",
+      "attempt": 0,
+      "execution": {
+        "loop_id": "revision_rounds",
+        "definition_node_id": "review",
+        "iteration": 2,
+        "max_iterations": 3
+      }
+    },
+    {
+      "node_id": "draft-3",
+      "display_name": "编写或修订稿件",
+      "kind": "bot_task",
+      "assignee": {
+        "type": "bot_binding",
+        "binding": "writer"
+      },
+      "final_output": false,
+      "status": "pending",
+      "attempt": 0,
+      "execution": {
+        "loop_id": "revision_rounds",
+        "definition_node_id": "draft",
+        "iteration": 3,
+        "max_iterations": 3
+      }
+    },
+    {
+      "node_id": "review-3",
+      "display_name": "主编评审稿件",
+      "kind": "bot_task",
+      "assignee": {
+        "type": "bot_binding",
+        "binding": "reviewer"
+      },
+      "final_output": false,
+      "status": "pending",
+      "attempt": 0,
+      "execution": {
+        "loop_id": "revision_rounds",
+        "definition_node_id": "review",
+        "iteration": 3,
+        "max_iterations": 3
+      }
+    },
+    {
+      "node_id": "polish",
+      "display_name": "润色通过稿件",
+      "kind": "bot_task",
+      "assignee": {
+        "type": "bot_binding",
+        "binding": "polisher"
+      },
+      "final_output": false,
+      "status": "pending",
+      "attempt": 0
+    },
+    {
+      "node_id": "rewrite",
+      "display_name": "重写待完善稿件",
+      "kind": "bot_task",
+      "assignee": {
+        "type": "bot_binding",
+        "binding": "writer"
+      },
+      "final_output": false,
+      "status": "pending",
+      "attempt": 0
+    },
+    {
+      "node_id": "finalize",
+      "display_name": "汇总最终稿",
+      "kind": "bot_task",
+      "assignee": {
+        "type": "bot_binding",
+        "binding": "writer"
+      },
+      "final_output": true,
+      "status": "pending",
+      "attempt": 0
+    }
+  ],
+  "edges": [
+    {
+      "source": "draft-1",
+      "target": "review-1",
+      "outcome": "complete"
+    },
+    {
+      "source": "review-1",
+      "target": "draft-2",
+      "outcome": "revise",
+      "loop_route": {
+        "kind": "continue",
+        "logical_outcome": "revise"
+      }
+    },
+    {
+      "source": "draft-2",
+      "target": "review-2",
+      "outcome": "complete"
+    },
+    {
+      "source": "review-2",
+      "target": "draft-3",
+      "outcome": "revise",
+      "loop_route": {
+        "kind": "continue",
+        "logical_outcome": "revise"
+      }
+    },
+    {
+      "source": "draft-3",
+      "target": "review-3",
+      "outcome": "complete"
+    },
+    {
+      "source": "review-3",
+      "target": "rewrite",
+      "outcome": "revise",
+      "loop_route": {
+        "kind": "exhausted",
+        "logical_outcome": "exhausted"
+      }
+    },
+    {
+      "source": "review-1",
+      "target": "polish",
+      "outcome": "approved",
+      "loop_route": {
+        "kind": "break",
+        "logical_outcome": "approved"
+      }
+    },
+    {
+      "source": "review-2",
+      "target": "polish",
+      "outcome": "approved",
+      "loop_route": {
+        "kind": "break",
+        "logical_outcome": "approved"
+      }
+    },
+    {
+      "source": "review-3",
+      "target": "polish",
+      "outcome": "approved",
+      "loop_route": {
+        "kind": "break",
+        "logical_outcome": "approved"
+      }
+    },
+    {
+      "source": "polish",
+      "target": "finalize",
+      "outcome": "complete"
+    },
+    {
+      "source": "rewrite",
+      "target": "finalize",
+      "outcome": "complete"
+    }
+  ],
+  "loops": {
+    "revision_rounds": {
+      "display_name": "写作与主编评审",
+      "max_iterations": 3,
+      "entry_node_id": "draft",
+      "result_node_id": "review",
+      "body_node_ids": [
+        "draft",
+        "review"
+      ],
+      "continue_outcomes": [
+        "revise"
+      ],
+      "break_outcomes": [
+        "approved"
+      ],
+      "exhausted_outcome": "exhausted"
+    }
+  }
+}

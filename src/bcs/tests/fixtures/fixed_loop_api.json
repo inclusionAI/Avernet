@@ -1,0 +1,286 @@
+{
+  "run": {
+    "run": {
+      "run_id": "run-1",
+      "definition_id": "loop-definition",
+      "definition_version": 1,
+      "group_id": "group-1",
+      "session_id": "session-1",
+      "status": "running",
+      "input": {},
+      "created_at": 1,
+      "updated_at": 3,
+      "group_version": 1
+    },
+    "nodes": [
+      {
+        "run_id": "run-1",
+        "node_id": "historical-work-1",
+        "status": "completed",
+        "attempt": 0,
+        "outcome": "again",
+        "artifact_text": "result-1",
+        "completed_at": 1,
+        "max_attempts": 1
+      },
+      {
+        "run_id": "run-1",
+        "node_id": "historical-work-2",
+        "status": "completed",
+        "attempt": 0,
+        "outcome": "again",
+        "artifact_text": "result-2",
+        "completed_at": 2,
+        "max_attempts": 1
+      },
+      {
+        "run_id": "run-1",
+        "node_id": "historical-work-3",
+        "status": "running",
+        "attempt": 0,
+        "max_attempts": 1
+      },
+      {
+        "run_id": "run-1",
+        "node_id": "publish",
+        "status": "pending",
+        "attempt": 0,
+        "max_attempts": 1
+      }
+    ],
+    "node_execution_metadata": {
+      "historical-work-1": {
+        "definition_node_id": "work",
+        "loop_id": "rounds",
+        "iteration": 1,
+        "max_iterations": 3
+      },
+      "historical-work-2": {
+        "definition_node_id": "work",
+        "loop_id": "rounds",
+        "iteration": 2,
+        "max_iterations": 3
+      },
+      "historical-work-3": {
+        "definition_node_id": "work",
+        "loop_id": "rounds",
+        "iteration": 3,
+        "max_iterations": 3
+      }
+    }
+  },
+  "node": {
+    "node": {
+      "run_id": "run-1",
+      "node_id": "historical-work-3",
+      "status": "running",
+      "attempt": 0,
+      "max_attempts": 1
+    },
+    "execution": {
+      "definition_node_id": "work",
+      "loop_id": "rounds",
+      "iteration": 3,
+      "max_iterations": 3
+    },
+    "sub_status": "awaiting_response"
+  },
+  "graph": {
+    "run": {
+      "run_id": "run-1",
+      "definition_id": "loop-definition",
+      "definition_version": 1,
+      "group_id": "group-1",
+      "session_id": "session-1",
+      "status": "running",
+      "input": {},
+      "created_at": 1,
+      "updated_at": 3,
+      "group_version": 1
+    },
+    "definition": {
+      "id": "loop-definition",
+      "version": 1,
+      "name": "Loop",
+      "graph_mode": "hierarchical",
+      "execution_graph_mode": "acyclic",
+      "execution_plan_compiler_version": "bcs.fixed-loop.compiler/v1",
+      "initial_nodes": [
+        "historical-work-1"
+      ]
+    },
+    "nodes": [
+      {
+        "node_id": "historical-work-1",
+        "display_name": "Work",
+        "kind": "bot_task",
+        "final_output": false,
+        "status": "completed",
+        "attempt": 0,
+        "execution": {
+          "definition_node_id": "work",
+          "loop_id": "rounds",
+          "iteration": 1,
+          "max_iterations": 3
+        },
+        "outcome": "again"
+      },
+      {
+        "node_id": "historical-work-2",
+        "display_name": "Work",
+        "kind": "bot_task",
+        "final_output": false,
+        "status": "completed",
+        "attempt": 0,
+        "execution": {
+          "definition_node_id": "work",
+          "loop_id": "rounds",
+          "iteration": 2,
+          "max_iterations": 3
+        },
+        "outcome": "again"
+      },
+      {
+        "node_id": "historical-work-3",
+        "display_name": "Work",
+        "kind": "bot_task",
+        "final_output": false,
+        "status": "running",
+        "attempt": 0,
+        "execution": {
+          "definition_node_id": "work",
+          "loop_id": "rounds",
+          "iteration": 3,
+          "max_iterations": 3
+        }
+      },
+      {
+        "node_id": "publish",
+        "display_name": "Publish",
+        "kind": "bot_task",
+        "final_output": true,
+        "status": "pending",
+        "attempt": 0
+      }
+    ],
+    "edges": [
+      {
+        "source": "historical-work-1",
+        "outcome": "again",
+        "target": "historical-work-2",
+        "loop_route": {
+          "kind": "continue",
+          "logical_outcome": "again"
+        }
+      },
+      {
+        "source": "historical-work-1",
+        "outcome": "done",
+        "target": "publish",
+        "loop_route": {
+          "kind": "break",
+          "logical_outcome": "done"
+        }
+      },
+      {
+        "source": "historical-work-2",
+        "outcome": "again",
+        "target": "historical-work-3",
+        "loop_route": {
+          "kind": "continue",
+          "logical_outcome": "again"
+        }
+      },
+      {
+        "source": "historical-work-2",
+        "outcome": "done",
+        "target": "publish",
+        "loop_route": {
+          "kind": "break",
+          "logical_outcome": "done"
+        }
+      },
+      {
+        "source": "historical-work-3",
+        "outcome": "again",
+        "target": "publish",
+        "loop_route": {
+          "kind": "exhausted",
+          "logical_outcome": "exhausted"
+        }
+      },
+      {
+        "source": "historical-work-3",
+        "outcome": "done",
+        "target": "publish",
+        "loop_route": {
+          "kind": "break",
+          "logical_outcome": "done"
+        }
+      }
+    ],
+    "loops": {
+      "rounds": {
+        "display_name": "Rounds",
+        "max_iterations": 3,
+        "entry_node_id": "work",
+        "result_node_id": "work",
+        "body_node_ids": [
+          "work"
+        ],
+        "continue_outcomes": [
+          "again"
+        ],
+        "break_outcomes": [
+          "done"
+        ],
+        "exhausted_outcome": "exhausted"
+      }
+    }
+  },
+  "pending_first": [
+    {
+      "node_id": "historical-work-1",
+      "display_name": "Review",
+      "instruction": "Review saved result",
+      "response_ref": "response-1",
+      "judge_outcomes": [
+        "again",
+        "done"
+      ],
+      "upstream_artifacts": [],
+      "loop_context": {
+        "loop_id": "rounds",
+        "iteration": 1,
+        "max_iterations": 3,
+        "previous_result": null
+      }
+    }
+  ],
+  "pending_later": [
+    {
+      "node_id": "historical-work-3",
+      "display_name": "Review",
+      "instruction": "Review saved result",
+      "response_ref": "response-3",
+      "judge_outcomes": [
+        "again",
+        "done"
+      ],
+      "upstream_artifacts": [],
+      "loop_context": {
+        "loop_id": "rounds",
+        "iteration": 3,
+        "max_iterations": 3,
+        "previous_result": {
+          "iteration": 2,
+          "result_node_id": "work",
+          "execution_node_id": "historical-work-2",
+          "outcome": "again",
+          "output": "result-2",
+          "completed_at": 2
+        }
+      }
+    }
+  ]
+}

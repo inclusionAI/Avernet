@@ -251,8 +251,6 @@ CREATE TABLE IF NOT EXISTS `bcs_group_participants` (
   `env` varchar(64) NOT NULL,
   `actor_kind` varchar(16) NOT NULL DEFAULT 'bot',
   `mode` varchar(16) NOT NULL DEFAULT 'auto',
-  `tags_json` text DEFAULT NULL,
-  `message_view_scope` varchar(32) NOT NULL DEFAULT 'full',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_env_group_bot` (`env`, `group_id`, `bot_uuid`),
   KEY `idx_bot` (`bot_uuid`),
@@ -293,7 +291,6 @@ CREATE TABLE IF NOT EXISTS `bcs_group_sessions` (
   `env` varchar(32) NOT NULL DEFAULT 'prod',
   `status` varchar(16) NOT NULL DEFAULT 'running',
   `session_kind` varchar(32) NOT NULL DEFAULT 'chat',
-  `message_visibility_version` tinyint(4) NOT NULL DEFAULT '0',
   `session_title` varchar(256) DEFAULT NULL,
   `group_version` int(11) DEFAULT NULL,
   `caller_id` varchar(256) DEFAULT NULL,
@@ -348,9 +345,6 @@ CREATE TABLE IF NOT EXISTS `bcs_messages` (
   `message_type` varchar(64) NOT NULL,
   `content` mediumtext NOT NULL,
   `client_msg_id` varchar(256) DEFAULT NULL,
-  `visibility_domain` varchar(32) DEFAULT NULL,
-  `audience_kind` varchar(32) DEFAULT NULL,
-  `audience_actor_ids_json` text DEFAULT NULL,
   `status` varchar(32) DEFAULT 'normal',
   `created_at` bigint(20) NOT NULL,
   `ttl_until` bigint(20) DEFAULT NULL,
@@ -473,7 +467,7 @@ CREATE TABLE IF NOT EXISTS `bcs_human_input_requests` (
   `responded_at` bigint(20) unsigned DEFAULT NULL,
   PRIMARY KEY (`request_id`),
   UNIQUE KEY `uk_human_input_active_slot` (`active_slot_key`),
-  KEY `idx_human_input_scope_status` (`reply_scope_key`, `status`, `deadline_ms`, `created_at`),
+  KEY `idx_human_input_scope_status` (`reply_scope_key`(700), `status`, `deadline_ms`, `created_at`),
   KEY `idx_human_input_run_node` (`run_id`, `node_id`)
 ) DEFAULT CHARSET = utf8mb4;
 
@@ -681,4 +675,4 @@ CREATE TABLE IF NOT EXISTS `bcs_user_identities` (
 
 -- Record the open-source v1 baseline after all schema objects are created.
 INSERT IGNORE INTO `bcs_schema_migrations` (`version`, `name`, `dialect`, `checksum`)
-VALUES (1, 'init_schema', 'mysql', 'b3de64c97b982a735230f6c55e966e4404eb509d70a0b7fd8f11dfa43e3452a7');
+VALUES (1, 'init_schema', 'mysql', 'a7f351ed88f95eb233e535f5fda9226a161fea5fc2af84d97ff2e2593a57a1d3');

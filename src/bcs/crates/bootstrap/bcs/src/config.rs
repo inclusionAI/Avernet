@@ -313,6 +313,16 @@ fn default_telemetry_service_name() -> String {
 pub struct CollaborationConfig {
     #[serde(default)]
     pub templates: CollaborationTemplatesConfig,
+    #[serde(default)]
+    pub fixed_loop_limits: bcs_config_api::FixedLoopLimits,
+    /// Test-only v2 execution. Also enables the shared progression recovery scanner.
+    /// Full product FO/release validation is pending; deployments must opt in explicitly.
+    #[serde(default)]
+    pub experimental_fixed_loop_execution: bool,
+    /// Development-only State Machine recovery, including HumanInput and terminal cleanup.
+    /// Full product FO/release validation is pending; this scanner is off by default.
+    #[serde(default)]
+    pub experimental_progression_recovery: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -411,10 +421,20 @@ fn default_openapi_v1_public_collaboration_base_url() -> String {
     "http://127.0.0.1:21000/api/v1/collaboration".to_string()
 }
 
+impl CollaborationConfig {
+    /// Experimental Loop execution always includes recovery of persisted work.
+    pub fn progression_recovery_enabled(&self) -> bool {
+        self.experimental_fixed_loop_execution || self.experimental_progression_recovery
+    }
+}
+
 impl Default for CollaborationConfig {
     fn default() -> Self {
         Self {
             templates: CollaborationTemplatesConfig::default(),
+            fixed_loop_limits: bcs_config_api::FixedLoopLimits::default(),
+            experimental_fixed_loop_execution: false,
+            experimental_progression_recovery: false,
         }
     }
 }
@@ -1651,6 +1671,10 @@ fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
     })?;
+    config.collaboration.fixed_loop_limits.validate().map_err(|e| {
+        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+            as Box<dyn std::error::Error>
+    })?;
     config.provider_http.validate().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
@@ -2269,6 +2293,51 @@ x-collector-route = "collector-local"
             Err(e) => e,
         };
         assert!(err.contains("client_id"), "got: {err}");
+    }
+
+    #[test]
+    fn fixed_loop_compiler_limits_parse_and_validate_without_enabling_execution() {
+        let config: BcsConfig = toml::from_str(r#"
+            bots_base_dir = "/bots"
+            [collaboration.fixed_loop_limits]
+            max_fixed_loop_iterations = 4
+            max_fixed_loop_body_nodes = 8
+            max_compiled_state_machine_nodes = 64
+            max_compiled_state_machine_bytes = 65536
+        "#).unwrap();
+        assert_eq!(config.collaboration.fixed_loop_limits.max_fixed_loop_iterations, 4);
+        assert!(!config.collaboration.experimental_progression_recovery);
+        assert!(!config.collaboration.experimental_fixed_loop_execution);
+        assert!(!config.collaboration.progression_recovery_enabled());
+        assert!(config.collaboration.fixed_loop_limits.validate().is_ok());
+        let mut invalid = config.collaboration.fixed_loop_limits;
+        invalid.max_compiled_state_machine_bytes = 0;
+        assert!(invalid.validate().is_err());
+        assert!(toml::from_str::<BcsConfig>(r#"
+            bots_base_dir = "/bots"
+            [collaboration.fixed_loop_limits]
+            enabled = true
+        "#).is_err());
+    }
+
+    #[test]
+    fn fixed_loop_execution_opt_in_also_enables_recovery() {
+        let config: BcsConfig = toml::from_str("bots_base_dir = '/bots'\n[collaboration]\nexperimental_fixed_loop_execution = true").unwrap();
+        assert!(config.collaboration.experimental_fixed_loop_execution);
+        assert!(!config.collaboration.experimental_progression_recovery);
+        assert!(config.collaboration.progression_recovery_enabled());
+        assert!(toml::from_str::<BcsConfig>("bots_base_dir = '/bots'\n[collaboration]\nexperimental_fixed_loop_execution = 'true'").is_err());
+        assert!(toml::from_str::<BcsConfig>("bots_base_dir = '/bots'\n[collaboration]\nfixed_loop_execution = true").is_err());
+    }
+
+    #[test]
+    fn progression_recovery_requires_explicit_boolean_opt_in() {
+        let config: BcsConfig = toml::from_str("bots_base_dir = '/bots'\n[collaboration]\nexperimental_progression_recovery = true").unwrap();
+        assert!(config.collaboration.experimental_progression_recovery);
+        assert!(!config.collaboration.experimental_fixed_loop_execution);
+        assert!(config.collaboration.progression_recovery_enabled());
+        assert!(toml::from_str::<BcsConfig>("bots_base_dir = '/bots'\n[collaboration]\nexperimental_progression_recovery = 'true'").is_err());
+        assert!(toml::from_str::<BcsConfig>("bots_base_dir = '/bots'\n[collaboration]\nprogression_recovery = true").is_err());
     }
 
     #[test]
