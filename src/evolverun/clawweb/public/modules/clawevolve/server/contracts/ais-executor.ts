@@ -3,6 +3,8 @@ export type AisStatus = "running" | "success" | "failed" | "stopped";
 export type AisJobStatusDetail = { status: AisStatus; rawStatus: string; errorMessage: string | null };
 export interface AisExecutor {
   execute(userId: string, globalParam: Record<string, string>, snapshotId?: number): Promise<string>;
+  /** Optional platform link for operators; business code never constructs provider URLs. */
+  jobUrl?(jobId: string): string | null;
   getJobStatus(jobId: string): Promise<AisStatus>;
   getJobStatusDetail(jobId: string): Promise<AisJobStatusDetail>;
   stopExecution(jobId: string): Promise<void>;

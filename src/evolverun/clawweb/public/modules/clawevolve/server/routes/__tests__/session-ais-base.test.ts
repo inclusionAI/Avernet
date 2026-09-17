@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runtimeArtifactDownloadFilename, validateAisResult } from "../../routes/session-analysis.js";
+import { runtimeArtifactDownloadFilename, validateAisResult } from "../session-analysis.js";
 
 describe("session analysis AIS base attachments", () => {
   const config = { taskId: "SA-1", mode: "ANALYZE_SINGLE" as const, stage: "all" as const,

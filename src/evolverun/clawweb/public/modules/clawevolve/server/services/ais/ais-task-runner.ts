@@ -1,8 +1,9 @@
-import type { EvolveRepository, EvolveTaskRow } from "@avernet/clawevolve/server/repositories/evolve-repository";
-import type { MistOssObjectStore } from "./object-storage/oss-object-store.js";
-import { AistudioService } from "./aistudio-service.js";
+import type { AisExecutor } from "../../contracts/ais-executor.js";
+import type { EvolveRepository, EvolveTaskRow } from "../../repositories/evolve-repository.js";
+import type { ObjectStore } from "../object-storage/oss-object-store.js";
 
 export type AisArtifactSpec = { objectKey: string; contentType?: string };
+
 export type AisTaskDefinition<TConfig> = {
   taskTypes: readonly string[];
   snapshotId: number | ((config: TConfig) => number);
@@ -11,19 +12,23 @@ export type AisTaskDefinition<TConfig> = {
   buildGlobalParams(config: TConfig, uploadArtifacts: Record<string, unknown>): Record<string, string>;
 };
 
-/** Shared executeSnapshot dispatch. Business state is advanced only by executor callbacks. */
+/** Platform-neutral AIS dispatch for ClawEvolve tasks. */
 export class AisTaskRunner<TConfig extends { artifacts: Record<string, AisArtifactSpec> }> {
-  constructor(private readonly repo: EvolveRepository, private readonly store: MistOssObjectStore,
-    private readonly ais: AistudioService, private readonly definition: AisTaskDefinition<TConfig>) {}
+  constructor(
+    private readonly repo: EvolveRepository,
+    private readonly store: Pick<ObjectStore, "createSignedUrl">,
+    private readonly ais: Pick<AisExecutor, "execute" | "jobUrl">,
+    private readonly definition: AisTaskDefinition<TConfig>,
+  ) {}
 
-  supports(task: EvolveTaskRow): boolean { return this.definition.taskTypes.includes(task.task_type); }
-  config(task: EvolveTaskRow): TConfig { return JSON.parse(task.config_json) as TConfig; }
+  supports(task: EvolveTaskRow): boolean {
+    return this.definition.taskTypes.includes(task.task_type);
+  }
 
-  /**
-   * Builds the exact one-parameter Snapshot envelope without starting a new job.
-   * Repair uses this when the already-running wrapper claims a following CE Step
-   * and continues in the same AIStudio container/CC session.
-   */
+  config(task: EvolveTaskRow): TConfig {
+    return JSON.parse(task.config_json) as TConfig;
+  }
+
   async prepare(config: TConfig): Promise<Record<string, string>> {
     const uploads: Record<string, unknown> = {};
     if ((this.definition.artifactTransport ?? "signed_put") === "signed_put") {
@@ -47,11 +52,8 @@ export class AisTaskRunner<TConfig extends { artifacts: Record<string, AisArtifa
     return this.definition.buildGlobalParams(config, uploads);
   }
 
-  async dispatch(task: EvolveTaskRow, stepId: string, userId: string, configOverride?: TConfig): Promise<string> {
-    // configOverride is intentionally process-local. Repair uses it to add the
-    // current AIS container's model API key without persisting that secret in
-    // ce_tasks.config_json.
-    const config = configOverride ?? this.config(task);
+  async dispatch(task: EvolveTaskRow, stepId: string, userId: string): Promise<string> {
+    const config = this.config(task);
     const snapshotId = typeof this.definition.snapshotId === "function"
       ? this.definition.snapshotId(config)
       : this.definition.snapshotId;
@@ -59,9 +61,10 @@ export class AisTaskRunner<TConfig extends { artifacts: Record<string, AisArtifa
       throw new Error("AIS snapshotId must be a positive safe integer");
     }
     const jobId = await this.ais.execute(userId, await this.prepare(config), snapshotId);
+    const jobUrl = this.ais.jobUrl?.(jobId);
     await this.repo.markExternalDispatched(stepId, jobId, {
       jobId,
-      jobUrl: `https://aistudio.alipay.com/project/job/detail/${jobId}`,
+      ...(jobUrl ? { jobUrl } : {}),
       snapshotId,
       submittedBy: userId,
       ...(this.definition.dispatchMetadata?.(config) ?? {}),
