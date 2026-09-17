@@ -7,6 +7,7 @@ Service-bot domain — bot publication facade, BAAS service binding, sub-resourc
 ```yaml
 purpose: "Service-bot domain — bot publication facade, BAAS service binding, sub-resource management."
 provides:
+  - "PublishIgnoreService"
   - "BotProcess"
   - "PersonalBotProcess"
   - "ServiceBotProcess"
@@ -35,6 +36,10 @@ consumes:
   - "SystemConfig"
   - "PassportPlugin"
 internal_dependencies:
+  - agentclaw.community.core.runtime_binding
+  - agentclaw.community.core.engine_runtime.errors
+  - agentclaw.community.kernel.publish_ignore
+  - agentclaw.community.plugin_api.publish_ignore_runtime
   - agentclaw.community.core.bot_config_manifest.cli_tools.store    # W9: a teclaw promotion copies the bot's CLI-tool objects into the new stage's prefix from the platform's own copy, rather than reading them back out of the engine
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module

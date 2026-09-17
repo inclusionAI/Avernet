@@ -45,6 +45,8 @@ class Credentials:
     role: Optional[str] = None
     visibility: Optional[str] = None
     admins: Optional[str] = None
+    entity_id: Optional[str] = None
+    stage: Optional[str] = None
 
 
 class CredentialsService:
@@ -122,6 +124,10 @@ class CredentialsService:
                         creds.visibility = value
                     elif key == "ADMINS":
                         creds.admins = value
+                    elif key == "ENTITY_ID":
+                        creds.entity_id = value
+                    elif key == "STAGE":
+                        creds.stage = value
 
             log.info(f"[credentials] 加载成功: path={path}")
         except Exception as e:
