@@ -36,3 +36,23 @@ src/engine/community/    # api → core → plugin_api → kernel + community im
   ├── plugins/           # transport leaves
   └── claude_code_gateway/  # vendored Node gateway for claude_code
 ```
+
+## Engine capability matrix
+
+Each engine declares an `EngineCapabilities` (`core/engine/capability.py`).
+`docs/engine-capability-matrix.md` is generated from those declarations — never
+edit it by hand:
+
+```bash
+# print the current matrix (markdown / json / csv)
+python scripts/gen_capability_matrix.py
+python scripts/gen_capability_matrix.py --format json
+
+# refresh the checked-in doc after changing an engine's capabilities
+python scripts/gen_capability_matrix.py --source static \
+  -o docs/engine-capability-matrix.md
+```
+
+The generator reads the live declarations when the engine's dependencies are
+installed and falls back to an `ast` scan of the tree otherwise, so it also runs
+in a bare checkout. A test keeps the checked-in doc from going stale.

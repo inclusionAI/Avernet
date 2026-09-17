@@ -602,6 +602,11 @@ class BaseEngine(ABC):
 
 ## 4. 引擎能力矩阵
 
+> **注意**：本节表格为手工维护的设计稿，可能落后于代码。以代码中各引擎的
+> `EngineCapabilities` 声明为准，运行
+> `python scripts/gen_capability_matrix.py` 可随时从代码生成当前矩阵，
+> 生成结果见 [`engine-capability-matrix.md`](./engine-capability-matrix.md)。
+
 ### 4.1 完整能力对比表
 
 | 能力域 | 能力 | OpenClaw | Hermes Agent | Claude Code | 说明 |
