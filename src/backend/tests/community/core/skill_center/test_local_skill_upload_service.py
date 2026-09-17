@@ -253,6 +253,12 @@ class _Factory:
         )
         return directory, _Storage(self._filesystem, directory)
 
+    def local_skill_package_location(self, *, name, directory_name=None, **_kwargs):
+        return SimpleNamespace(
+            directory=str(self.local_dir / (directory_name or name)),
+            layout="LEGACY",
+        )
+
     def local_skill_package_storage_for_locator(self, *, locator, **kwargs):
         return _Storage(self._filesystem, locator)
 
@@ -612,6 +618,28 @@ class _DeviceResolver:
         return SimpleNamespace(provider=self.provider)
 
 
+class _LegacyPackageRuntime:
+    async def apply(self, **_kwargs):
+        return None
+
+
+class _PackageRuntime:
+    def __init__(self, result=None, error=None):
+        self.result = result or SimpleNamespace(
+            action="created",
+            content_digest="sha256:" + "a" * 64,
+            target_path="/runtime/skills-local/upload-skill",
+        )
+        self.error = error
+        self.calls: list[dict] = []
+
+    async def apply(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
 def _replacement_service(
     filesystem,
     repo,
@@ -621,6 +649,7 @@ def _replacement_service(
     factory=None,
     *,
     provider="local",
+    package_runtime=None,
 ):
     return LocalSkillUploadService(
         repo,
@@ -632,6 +661,7 @@ def _replacement_service(
         lambda: _DeviceResolver(provider),
         runtime,
         SkillPackageValidator(SkillParser()),
+        package_runtime or _LegacyPackageRuntime(),
     )
 
 
@@ -646,6 +676,7 @@ def _service(
     factory=None,
     provider="local",
     guard=None,
+    package_runtime=None,
 ):
     return LocalSkillUploadService(
         repo or _Repo(),
@@ -657,6 +688,7 @@ def _service(
         lambda: _DeviceResolver(provider),
         _RuntimeFactory(),
         SkillPackageValidator(SkillParser()),
+        package_runtime or _LegacyPackageRuntime(),
     )
 
 
@@ -704,6 +736,88 @@ async def test_upload_uses_existing_bot_runtime_without_product_matrix():
     )
 
     assert result["skill"]["active"] is False
+
+
+@pytest.mark.asyncio
+async def test_new_package_api_creates_metadata_without_per_file_writes():
+    filesystem = _Filesystem()
+    package_runtime = _PackageRuntime()
+    service = _service(filesystem, package_runtime=package_runtime)
+
+    result = await service.upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip({"SKILL.md": _skill_md()}),
+    )
+
+    assert result["operation"] == "created"
+    assert result["skill"]["git_path"] == "local:///private/skills-local/upload-skill"
+    assert filesystem.files == {}
+    assert package_runtime.calls[0]["layout"] == "LEGACY"
+    assert package_runtime.calls[0]["package"].startswith(b"PK")
+
+
+@pytest.mark.asyncio
+async def test_new_package_api_db_failure_does_not_issue_reverse_file_operation():
+    class _FailingRepo(_Repo):
+        def create(self, row):
+            raise RuntimeError("db unavailable")
+
+    package_runtime = _PackageRuntime()
+    service = _service(
+        _Filesystem(), repo=_FailingRepo(), package_runtime=package_runtime
+    )
+
+    with pytest.raises(LocalSkillStorageError):
+        await service.upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip({"SKILL.md": _skill_md()}),
+        )
+
+    assert len(package_runtime.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_new_package_api_replace_preserves_existing_locator():
+    locator = "/historical/skills-local/upload-skill"
+    row = {
+        "id": "10",
+        "name": "upload-skill",
+        "description": "old",
+        "git_path": f"local://{locator}",
+        "user_id": "owner",
+        "bolt_id": "bot",
+        "active": False,
+    }
+    repo = _ReplacementRepo([row])
+    package_runtime = _PackageRuntime(
+        result=SimpleNamespace(
+            action="created",
+            content_digest="sha256:" + "b" * 64,
+            target_path="/runtime/skills-local/upload-skill",
+        )
+    )
+    service = _replacement_service(
+        _Filesystem(),
+        repo,
+        _ReplacementRuntime([RuntimeProjectionResult.converged()]),
+        package_runtime=package_runtime,
+    )
+
+    result = await service.upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip({"SKILL.md": _skill_md(description="new")}),
+    )
+
+    assert result["operation"] == "updated"
+    assert result["skill"]["git_path"] == f"local://{locator}"
+    assert repo.atomic_replacements[0]["old_locator"] == locator
+    assert repo.atomic_replacements[0]["new_locator"] == locator
 
 
 @pytest.mark.asyncio

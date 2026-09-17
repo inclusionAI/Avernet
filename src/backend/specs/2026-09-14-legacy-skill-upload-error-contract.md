@@ -53,6 +53,7 @@ contract.
 | `SKILL_NAME_INVALID` | Skill name violates the naming rule | `Skill name ... is invalid...` or underscore validation |
 | `SKILL_NAME_RESERVED` | Skill name is reserved | `Skill name ... is reserved...` |
 | `SKILL_ZIP_INVALID` | ZIP payload cannot be read | ZIP parser error |
+| `SKILL_PACKAGE_TOO_LARGE` | Package exceeds a governed size or file-count limit | `Skill package exceeds the allowed size limits.` |
 | `SKILL_RUNTIME_UNAVAILABLE` | Bot runtime/device is unavailable or timed out | Normalized runtime message |
 | `SKILL_UPLOAD_FAILED` | Unexpected upload/storage failure | `Upload failed: ...` |
 
@@ -66,6 +67,19 @@ For `success=false`, map `error_code` to a friendly localized message and use
 text as the primary user-facing copy. HTTP error responses should continue
 through the shared request error handler.
 
-This contract does not add or change a legacy package-size limit. If a limit is
-introduced later, it must be documented as a new code and returned before any
-device write.
+## Package limits
+
+The legacy endpoint now enters the same validated complete-package lifecycle as
+the folder and OpenAPI upload entry points. Before any device write it enforces:
+
+- compressed ZIP: 10 MiB;
+- expanded total: 50 MiB;
+- one file: 10 MiB;
+- file count: 500;
+- normalized relative path length: 256 characters (reported as
+  `SKILL_PATH_INVALID`).
+
+Size and file-count failures return `SKILL_PACKAGE_TOO_LARGE`. Existing clients
+still receive the legacy HTTP-200 failure envelope; clients that branch on
+stable codes can distinguish these limits from malformed ZIP, invalid paths,
+or runtime failure.

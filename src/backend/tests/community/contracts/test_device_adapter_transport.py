@@ -16,7 +16,11 @@ from __future__ import annotations
 
 import pytest
 
+from agentclaw.community.core.skill_center.services.local_skill_package_runtime import (
+    LocalSkillPackageRuntime,
+)
 from agentclaw.community.core.cron.services.cron_relay import CronRelayService
+from agentclaw.community.core.skill_center.errors import LocalSkillStorageError
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTransport,
 )
@@ -94,3 +98,68 @@ async def test_transport_streams_registered_materialized_content(world) -> None:
     assert response.headers["content-disposition"] == 'attachment; filename="ready.txt"'
     assert b"".join([chunk async for chunk in response.body]) == b"ready bytes"
     await response.close()
+
+
+@pytest.mark.asyncio
+async def test_local_package_consumer_runs_over_multipart_transport(world) -> None:
+    make_staff_user(world, user_id="owner-package")
+    binding_id = make_active_local_device(world, owner_id="owner-package")
+    make_bot(
+        world,
+        bot_id="bot-package",
+        owner_id="owner-package",
+        owner_name="Owner",
+        bot_type="service",
+        status="ACTIVE",
+        binding_id=binding_id,
+    )
+    transport = world.get(DeviceAdapterTransport)
+    assert isinstance(transport, InMemoryDeviceAdapterTransport)
+    runtime = world.get(LocalSkillPackageRuntime)
+
+    result = await runtime.apply(
+        bot_id="bot-package",
+        owner_id="owner-package",
+        skill_name="weather",
+        layout="LEGACY",
+        package=b"canonical-package",
+    )
+
+    assert result is not None
+    assert result.skill_name == "weather"
+    assert result.content_digest.startswith("sha256:")
+    assert len(transport.calls_to("invoke_multipart")) == 1
+
+
+@pytest.mark.asyncio
+async def test_local_package_consumer_propagates_transport_failure(world) -> None:
+    make_staff_user(world, user_id="owner-package")
+    binding_id = make_active_local_device(world, owner_id="owner-package")
+    make_bot(
+        world,
+        bot_id="bot-package",
+        owner_id="owner-package",
+        owner_name="Owner",
+        bot_type="service",
+        status="ACTIVE",
+        binding_id=binding_id,
+    )
+    transport = world.get(DeviceAdapterTransport)
+    assert isinstance(transport, InMemoryDeviceAdapterTransport)
+
+    async def fail_after_send(*args, **kwargs):
+        raise TimeoutError("unknown outcome")
+
+    transport.set_override("invoke_multipart", fail_after_send)
+    runtime = world.get(LocalSkillPackageRuntime)
+
+    with pytest.raises(LocalSkillStorageError):
+        await runtime.apply(
+            bot_id="bot-package",
+            owner_id="owner-package",
+            skill_name="weather",
+            layout="LEGACY",
+            package=b"canonical-package",
+        )
+
+    assert len(transport.calls_to("invoke_multipart")) == 1
