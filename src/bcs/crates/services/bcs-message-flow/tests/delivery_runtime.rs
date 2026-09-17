@@ -148,6 +148,65 @@ async fn transport_not_sent_is_terminal_unless_explicitly_retryable() -> Result<
     Ok(())
 }
 
+#[tokio::test]
+async fn explicit_delivery_rejection_is_terminal_releases_lane_and_is_not_retried(
+) -> Result<(), Box<dyn std::error::Error>> {
+    struct RejectThenAccept {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+    #[async_trait]
+    impl BotDeliveryPort for RejectThenAccept {
+        async fn is_available(&self, _: &BotDeliveryTarget) -> bool {
+            true
+        }
+
+        async fn deliver(&self, cmd: BotDeliveryCommand) -> ServiceResult<BotDeliveryResult> {
+            let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if call == 0 {
+                return Ok(BotDeliveryResult {
+                    target_bot_id: cmd.target_bot_id().into(),
+                    delivered: false,
+                    error: Some(ServiceError::InternalError("provider returned HTTP 500".into())),
+                });
+            }
+            Ok(BotDeliveryResult {
+                target_bot_id: cmd.target_bot_id().into(),
+                delivered: true,
+                error: None,
+            })
+        }
+    }
+
+    let service = Arc::new(ManagedMessageDelivery::new(Arc::new(MemoryMessageRepo::new())));
+    service.admit(command("rejected", "same-lane")).await?;
+    service.admit(command("successor", "same-lane")).await?;
+    let preparation = Arc::new(RecordingIo {
+        service: service.clone(),
+        sent: Default::default(),
+        aborts: Default::default(),
+        fail_send: false,
+        fail_registration: false,
+    });
+    let transport = Arc::new(RejectThenAccept { calls: Default::default() });
+    let mut worker = runtime(service.clone(), preparation);
+    worker.transport = transport.clone();
+    worker.config.max_safe_retries = 5;
+    let (stop, shutdown) = tokio::sync::watch::channel(false);
+    let task = tokio::spawn(worker.run(shutdown));
+
+    let failed = wait_status(&service, "rejected", Status::Failed).await?;
+    assert!(failed.state.may_have_been_sent);
+    assert_eq!(failed.attempt_no, 1);
+    let unchanged = service.transition(event(&failed, Event::Completed)).await?;
+    assert_eq!(unchanged.state.status, Status::Failed);
+    wait_status(&service, "successor", Status::Dispatching).await?;
+    assert_eq!(transport.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+
+    stop.send(true)?;
+    task.await??;
+    Ok(())
+}
+
 #[async_trait]
 impl ManagedDeliveryPreparationService for RecordingIo {
     async fn is_available(&self, _: &str) -> bool {

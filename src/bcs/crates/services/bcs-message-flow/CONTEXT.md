@@ -26,6 +26,12 @@ exclusivity is implemented; it must never be emulated by a scope-wide abort.
 
 ## Provides
 
+The queue runtime treats a complete `BotDeliveryResult { delivered: false }`
+as terminal Failed, releases the Bot/session lane and never retries it. Only an
+explicit DeliveryNotSent result can consume the safe-retry budget. Transport
+errors without a complete downstream result remain Unknown, and late callbacks
+cannot reopen the terminal delivery.
+
 LiveDeliveryPolicy reconciles newer durable versions under the management snapshot
 write lock. Bootstrap invokes this every five seconds on the master to observe
 late old-master commits; failed reads retain the existing snapshot and return an

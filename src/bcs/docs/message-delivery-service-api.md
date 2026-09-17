@@ -333,7 +333,12 @@ Header 值不进入消息正文、模型、History、状态响应或日志。无
 Provider 的请求帧/参数/run ID 校验、URL 安全校验、HTTP 请求构建失败均发生在提交前：
 永久性失败直接 `failed`，仅 DNS 解析等明确暂时性未发送失败允许使用配置的安全重试预算。
 永久性失败不会被 safe_retry 配置改为重试。重复的 Provider run 注册不是“未发送”的证明，
-仍保守处理。网络 execute 开始后的未分类错误/超时保持 Unknown，禁止自动重发。
+仍保守处理。Provider 已返回完整 HTTP 非 2xx，或 2xx ACK 明确返回 `ok=false` 时，表示
+Provider 拒绝本次调用：delivery 直接进入 `failed`、释放 lane 且不自动重试；非 2xx 响应
+正文不写日志，也不参与错误分类。只有 Provider 另行明确证明 `not_sent + retryable` 并映射为
+`DeliveryNotSent`，才允许安全重试。网络 execute 开始后没有取得完整响应的连接错误、响应头
+超时、成功响应体中断/无法解码等仍保持 Unknown，禁止自动重发。终态后的迟到 callback
+不会重新打开 delivery。
 TTL 到期不触发运行中请求或 Unknown 的强制释放。
 
 ## 查询与取消

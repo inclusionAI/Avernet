@@ -99,6 +99,12 @@ struct ProviderClientPolicy {
     http2_only: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProviderStatusPolicy {
+    RequireSuccess,
+    ReturnExplicitRejection,
+}
+
 impl ProviderClientPolicy {
     fn for_request(accept_sse: bool) -> Self {
         if accept_sse {
@@ -410,7 +416,7 @@ impl BotDeliveryPort for HttpProviderTransport {
                     }
                 }
             }
-            let resp = match send_provider_request(
+            let resp = match send_provider_delivery_request(
                 client,
                 &self.url_guard,
                 &cmd.target,
@@ -428,6 +434,15 @@ impl BotDeliveryPort for HttpProviderTransport {
                     return Err(error);
                 }
             };
+            if !resp.status().is_success() {
+                if let Some(context) = run_context.as_ref() {
+                    context.clear_provider_transport(&run_id).await;
+                }
+                return Ok(provider_delivery_rejection(
+                    target_bot_id,
+                    resp.status(),
+                ));
+            }
             let ctype = resp
                 .headers()
                 .get(reqwest::header::CONTENT_TYPE)
@@ -603,17 +618,18 @@ impl BotDeliveryPort for HttpProviderTransport {
         }
 
         let started = Instant::now();
-        let ack_result: ServiceResult<ProviderAckResponse> = post_provider(
+        let response = send_provider_delivery_request(
             &self.client,
             &self.url_guard,
             &cmd.target,
             &body,
+            false,
             &cmd.provider_bypass_headers,
         )
         .await;
         let elapsed_ms = started.elapsed().as_millis();
-        let ack = match ack_result {
-            Ok(ack) => ack,
+        let response = match response {
+            Ok(response) => response,
             Err(error) => {
                 warn!(
                     target_bot_id = %target_bot_id,
@@ -627,6 +643,26 @@ impl BotDeliveryPort for HttpProviderTransport {
                 return Err(error);
             }
         };
+        if !response.status().is_success() {
+            return Ok(provider_delivery_rejection(
+                target_bot_id,
+                response.status(),
+            ));
+        }
+        let status = response.status();
+        let ack = response.json::<ProviderAckResponse>().await.map_err(|error| {
+            warn!(
+                target_bot_id = %target_bot_id,
+                provider_id = %provider_id,
+                method = %method,
+                run_id = %run_id,
+                status = %status.as_u16(),
+                elapsed_ms = %elapsed_ms,
+                error = %error,
+                "provider downlink: decode response failed"
+            );
+            ServiceError::InternalError(format!("decode provider response: {error}"))
+        })?;
         if ack.ok {
             info!(
                 target_bot_id = %target_bot_id,
@@ -752,6 +788,20 @@ impl BotDeliveryPort for HttpProviderTransport {
             target_bot_id,
             aborted_run_ids: result.aborted_run_ids,
         })
+    }
+}
+
+fn provider_delivery_rejection(
+    target_bot_id: String,
+    status: reqwest::StatusCode,
+) -> BotDeliveryResult {
+    BotDeliveryResult {
+        target_bot_id,
+        delivered: false,
+        error: Some(ServiceError::InternalError(format!(
+            "provider explicitly rejected delivery with HTTP {}",
+            status.as_u16()
+        ))),
     }
 }
 
@@ -1153,10 +1203,10 @@ async fn post_provider<T: DeserializeOwned>(
     }).await
 }
 
-/// Send the webhook request and return the raw response (status checked, body
-/// NOT parsed). Shared by the JSON ack/history paths (`post_provider`) and the
-/// 2.0 SSE branch. `accept_sse` selects the `Accept` header: when true the
-/// request prefers `text/event-stream` but still allows JSON fallback.
+/// Send the webhook request and return the raw response after requiring a
+/// successful status (except the documented chat.abort 410). The delivery-only
+/// sibling returns explicit non-success responses so they can become terminal
+/// delivery rejections instead of ambiguous transport failures.
 async fn send_provider_request(
     client: &reqwest::Client,
     url_guard: &OutboundUrlGuard,
@@ -1173,6 +1223,28 @@ async fn send_provider_request(
         accept_sse,
         provider_bypass_headers,
         ProviderClientPolicy::for_request(accept_sse),
+        ProviderStatusPolicy::RequireSuccess,
+    )
+    .await
+}
+
+async fn send_provider_delivery_request(
+    client: &reqwest::Client,
+    url_guard: &OutboundUrlGuard,
+    target: &BotDeliveryTarget,
+    body: &ProviderWebhookRequest,
+    accept_sse: bool,
+    provider_bypass_headers: &[(String, String)],
+) -> ServiceResult<reqwest::Response> {
+    send_provider_request_with_policy(
+        client,
+        url_guard,
+        target,
+        body,
+        accept_sse,
+        provider_bypass_headers,
+        ProviderClientPolicy::for_request(accept_sse),
+        ProviderStatusPolicy::ReturnExplicitRejection,
     )
     .await
 }
@@ -1205,6 +1277,7 @@ async fn send_provider_request_with_policy(
     accept_sse: bool,
     provider_bypass_headers: &[(String, String)],
     client_policy: ProviderClientPolicy,
+    status_policy: ProviderStatusPolicy,
 ) -> ServiceResult<reqwest::Response> {
     bcs_observability::observe_result("provider.send_provider_request_with_policy", async {
     let BotDeliveryTarget::HttpProvider {
@@ -1386,7 +1459,9 @@ async fn send_provider_request_with_policy(
         headers_elapsed_ms = request_started.elapsed().as_millis(),
         "provider downlink: response headers received"
     );
-    if !status.is_success() && !(body.method == "chat.abort" && status == reqwest::StatusCode::GONE)
+    if status_policy == ProviderStatusPolicy::RequireSuccess
+        && !status.is_success()
+        && !(body.method == "chat.abort" && status == reqwest::StatusCode::GONE)
     {
         warn!(
             provider_id = %body.to_bot.provider_id,
@@ -2492,6 +2567,7 @@ Connection: keep-alive\r\n\
             true,
             &[],
             policy,
+            ProviderStatusPolicy::RequireSuccess,
         )
         .await
         .unwrap_err();
