@@ -328,10 +328,13 @@ class TaskTrajectoryModel(Base):
 
     Independent trajectory entity: NO foreign key / NO association column to
     ``task_action_log`` or ``task_callback`` (spec invariant). ``gmt_create`` /
-    ``gmt_modified`` are real stored columns (spec decision #7); the DB
-    ``DEFAULT CURRENT_TIMESTAMP`` is kept only as a fallback — the repo (P1b)
-    ALWAYS supplies ``gmt_create`` explicitly (converted from the domain int-ms
-    timestamp), so the column does not rely on the DB default for ordering.
+    ``gmt_modified`` are real stored columns (spec decision #7). For the head
+    row, ``TaskTrajectoryRepository.upsert_head`` does NOT supply
+    ``gmt_create``/``gmt_modified`` on insert and relies on the DB
+    ``func.now()`` default (the head is not timeline-ordered); only the
+    event-row path (``insert_event`` on ``TaskTrajectoryEventModel``) supplies
+    ``gmt_create`` from the domain int-ms timestamp for timeline ordering.
+    ``backfill_analysis`` sets ``gmt_modified`` explicitly in its UPDATE dict.
     """
 
     __tablename__ = "task_trajectory"
@@ -434,9 +437,11 @@ class TaskCallbackCorrelationModel(Base):
     ``String(256)`` for its unique key (matching task_callback.event_id), and
     ``_SESSION_ID`` / ``_TASK_ID`` / ``_NODE_ID`` binary-string helpers for the
     identifier columns. ``gmt_create`` is the only timestamp (no gmt_modified —
-    this is an append-only correlation row); the repo (P1b) ALWAYS supplies it
-    from the domain int-ms timestamp and does NOT rely on the DB
-    ``DEFAULT CURRENT_TIMESTAMP`` (kept only as a fallback).
+    this is an append-only correlation row);
+    ``TaskCallbackCorrelationRepository.upsert_on_register`` does NOT supply
+    ``gmt_create`` on insert and relies on the DB ``func.now()`` default (the
+    correlation table is a lookup keyed by ``event_id``, not a
+    timeline-ordered one).
     """
 
     __tablename__ = "task_callback_correlation"

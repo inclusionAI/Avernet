@@ -114,6 +114,25 @@ def test_insert_event_writes_gmt_from_record_and_ext_info_as_is(db):
     assert stored.analysis == '{"analysis_type":"tc_bot"}'
 
 
+def test_insert_event_falls_back_to_db_default_when_record_gmt_is_none(db):
+    """When the record carries gmt_create=None / gmt_modified=None (the caller
+    did not derive a datetime from the domain int-ms), ``_to_event_row`` omits
+    them so the ORM ``func.now()`` default fires — the stored row gets real
+    timestamps (the NOT NULL columns are satisfied) rather than NULL. This is
+    the documented fallback path for the event insert."""
+    repo = TaskTrajectoryRepository(db)
+    rec = repo.insert_event(_event(gmt_create=None, gmt_modified=None))
+    assert rec.id > 0
+    # func.now() default fired for both columns (NOT NULL satisfied)
+    assert rec.gmt_create is not None
+    assert rec.gmt_modified is not None
+    # read back from a fresh session and confirm the timestamps persisted
+    [stored] = repo.list_events_by_task("T-1")
+    assert stored.id == rec.id
+    assert stored.gmt_create is not None
+    assert stored.gmt_modified is not None
+
+
 # ---------------------------------------------------------------------------
 # upsert_head
 # ---------------------------------------------------------------------------

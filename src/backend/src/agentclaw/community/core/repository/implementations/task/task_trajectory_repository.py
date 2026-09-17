@@ -151,9 +151,21 @@ class TaskTrajectoryRepository(TaskTrajectoryRepositoryProtocol):
         ``onupdate=func.now()`` (bulk ``Query.update()`` bypasses Python-side
         onupdate callbacks). Never touches ``gmt_create``/typed columns/
         ``ext_info``. Returns total affected rows (head + events).
+
+        Atomicity: the two-table UPDATE runs in one transaction on every
+        profile. ``orm_session()`` runs at AUTOCOMMIT on the corp/OceanBase
+        profile (see ``plugin_api/database.py``), so the two UPDATEs would NOT
+        be atomic there on their own — we therefore prefer
+        ``transactional_orm_session`` when available and fall back to
+        ``orm_session`` on the SQLite test/local profile (mirrors the
+        ``TaskActionLogRepository.append_many`` idiom). Spec REQ-9/REQ-11:
+        both tables update together on backfill.
         """
         ts = now if now is not None else datetime.utcnow()
-        with self._db.orm_session() as db:
+        transaction = getattr(
+            self._db, "transactional_orm_session", self._db.orm_session
+        )
+        with transaction() as db:
             head_count = (
                 db.query(self._model)
                 .filter(self._model.task_id == task_id)
@@ -170,6 +182,7 @@ class TaskTrajectoryRepository(TaskTrajectoryRepositoryProtocol):
                     synchronize_session=False,
                 )
             )
+            db.flush()
         return head_count + event_count
 
     # ------------------------------------------------------------------
