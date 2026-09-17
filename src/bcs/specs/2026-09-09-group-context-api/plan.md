@@ -168,7 +168,6 @@ consistency:
 | `run_id` | string | 否 | — | 框架注入（按操作粒度选填） |
 | `actor_id` | string | 是 | — | 框架注入 |
 
-> 调用方按操作粒度传入相应字段：bot 想知道某 group 的状态就传 `tenant_id + group_id`，想知道某 session 的状态就再传 `session_id`，想知道本次 run 的状态就再传 `run_id`。**未传字段不参与过滤**，不影响结果——这是调用方主动声明查询范围的方式，不是系统自动注入。
 
 **响应：**
 
@@ -340,7 +339,11 @@ PDP 判定：
      → 无可写条目 → permission_denied
 
 版本链定位：
-  4. 将可写条目按 granularity 分组，每组对应一条独立的版本链
+  4. 将可写条目按 (granularity + scope key) 分组，每组对应一条独立的版本链：
+       - granularity=tenant  → key = (tenant_id, domain)
+       - granularity=group   → key = (tenant_id, group_id, domain)
+       - granularity=session → key = (tenant_id, group_id, session_id, domain)
+       - granularity=run     → key = (tenant_id, group_id, session_id, run_id, domain)
      → 仅一组 → 自动定位
      → 多组：
        - granularity 未传 → ambiguity（返回所有可选 granularity）
@@ -492,7 +495,7 @@ granularity 声明），retrieve 会一并返回。
 | HTTP | status | 含义 | 适用接口 |
 |------|--------|------|----------|
 | 200 | `ok` | 操作成功 | 全部 |
-| 400 | `invalid_param` | 参数校验失败（缺必填、格式错误、content 超过 size 上限等） | 全部 |
+| 400 | `invalid_param` | 参数校验失败（缺必填、格式错误等） | 全部 |
 | 403 | `permission_denied` | 调用方无权执行此操作 | createByTemplate / updateContent / retrieve |
 | 404 | `not_found` | 指定 domain 下无匹配条目或无活跃版本 | updateContent / retrieve |
 | 409 | `conflict` | 同 domain 已有活跃版本，拒绝创建 | createByTemplate |
@@ -519,8 +522,6 @@ service-api/bcs-service-api/src/
   port/repo/
     group_context_repo.rs       # GroupContextRepo trait
     policy_template_repo.rs     # PolicyTemplateRepo trait
-  dto/
-    group_context.rs            # 请求/响应/错误 wire DTO
 
 services/bcs-group-context/     # application + core 实现
   src/
@@ -529,7 +530,7 @@ services/bcs-group-context/     # application + core 实现
     core.rs
     model.rs                    # ContextEntry / Flow / Consistency / Lineage / Governance
     template.rs                 # PolicyTemplate 类型定义 + 参数实例化
-    error.rs                    # GroupContextError（含 to_http_status 映射）
+    error.rs                    # GroupContextError
     audit.rs                    # 审计日志写入
 
 services/bcs-group-context-store/  # repo 实现
