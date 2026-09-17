@@ -31,8 +31,15 @@ def mirror_local_tree(
 
     pool_baseline = snapshot_local(pool_local)
     _remove_path(staging_root)
-    staging_root.mkdir()
     source_entries = sorted(source_root.iterdir(), key=lambda path: path.name)
+    if not source_entries and not pool_baseline:
+        # A fresh runtime has nothing to stage or reconcile. Avoid creating an
+        # empty directory only to remove it immediately: shared filesystems may
+        # reject that create/delete sequence even though a later retry can
+        # remove the now-stale directory.
+        return [], {}
+
+    staging_root.mkdir()
     for source in source_entries:
         _copy_entry(source, staging_root / source.name)
 
