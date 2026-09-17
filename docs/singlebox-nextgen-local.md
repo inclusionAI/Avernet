@@ -53,6 +53,33 @@ upstream-based startup sync). It re-runs the dependency install afterwards
 with the same contract as startup (`OCB_SKIP_FRONTEND_INSTALL=1` skips; a
 failed install warns but keeps the pull green).
 
+## Sprint rollover (iteration switch)
+
+When the sprint moves to a new `sprint_teamclaw_*` branch, record the switch —
+the tool validates the branch exists on the checkout's remote (ls-remote,
+anchored under `refs/heads/`) before any write, and never touches the checkout
+itself:
+
+```bash
+./scripts/frontend_sprint_branch.sh --list          # declared branch + remote sprint heads
+./scripts/frontend_sprint_branch.sh sprint_teamclaw_S...
+git -C "$TEAMCLAW_DIR" fetch && git -C "$TEAMCLAW_DIR" checkout sprint_teamclaw_S...
+./scripts/singlebox.sh frontend-pull
+```
+
+Avernet has no submodule to carry the tracked branch in-tree, so
+`frontend_sprint_branch.sh` records it in a per-operator state file
+(`~/.config/teamclaw-frontend/branch`; `FRONTEND_SPRINT_CONFIG` overrides the
+location, and a `FRONTEND_SPRINT_BRANCH` env var overrides the file until
+unset). The remote it validates against is the checkout's own origin — the
+same remote `frontend-pull` fetches. The two manual steps are the operator's
+decision points: the fetch + checkout switches the external checkout onto the
+new sprint branch, and `frontend-pull` advances it (re-running the dependency
+install). ff-only caveat: if the new sprint branch does not contain the old
+one's tip (branches diverged), `frontend-pull` refuses rather than guessing —
+the `git -C "$TEAMCLAW_DIR" checkout <new-sprint>` above is the resolution,
+which also re-arms the upstream-based startup auto-update.
+
 ## Sync the source, not an unrelated checkout
 
 The upstream TeamClaw repository owns the export. Use its clean, pinned source
