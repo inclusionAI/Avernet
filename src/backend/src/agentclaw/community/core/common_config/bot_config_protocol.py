@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections.abc import Callable
-from typing import Protocol, Any, TYPE_CHECKING, TypeAlias
+from typing import Protocol, Any, TYPE_CHECKING, TypeAlias, runtime_checkable
 
 from agentclaw.community.core.common_config.models import BotCommonConfigRecord
 
@@ -36,6 +36,7 @@ class BotCommonConfigEntry:
     value: "JsonValue"
 
 
+@runtime_checkable
 class BotCommonConfigServiceProtocol(Protocol):
     def get_config(
         self, *, bot_id: str, entity_id: str, env: str, config_key: str
@@ -78,10 +79,6 @@ class BotCommonConfigServiceProtocol(Protocol):
     def batch_upsert_records(
         self, *, env: str, records: list[BotCommonConfigEntry]
     ) -> list[int]: ...
-
-    def record_to_dict(self, record: BotCommonConfigRecord) -> dict[str, Any]:
-        """Adapter-ready view; ``config_value`` is JSON-decoded with raw fallback."""
-        ...
 
 
 @dataclass(frozen=True)

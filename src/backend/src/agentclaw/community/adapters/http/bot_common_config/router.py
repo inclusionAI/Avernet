@@ -1,8 +1,8 @@
 """Bot common-config management router.
 
-Thin adapter: request/response translation only. The on-disk JSON format of
-``config_value`` is owned by ``BotCommonConfigServiceProtocol`` — this router
-never serializes or parses it.
+Thin adapter: request/response translation only. Writes pass decoded
+``JsonValue`` straight to the service, which owns the on-disk JSON format of
+``config_value``; read-side view shaping lives in ``converter.py``.
 """
 from __future__ import annotations
 
@@ -10,6 +10,9 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from agentclaw.community.adapters.http.auth.dependencies import require_operator
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
+from agentclaw.community.adapters.http.bot_common_config.converter import (
+    record_to_dict,
+)
 from agentclaw.community.adapters.http.bot_common_config.schemas import (
     BatchUpsertBotCommonConfigRequest,
     CreateBotCommonConfigRequest,
@@ -51,7 +54,7 @@ async def list_bot_common_configs(
         "error_code": 200,
         "data": {
             "total": total,
-            "items": [service.record_to_dict(r) for r in records],
+            "items": [record_to_dict(r) for r in records],
         },
     }
 

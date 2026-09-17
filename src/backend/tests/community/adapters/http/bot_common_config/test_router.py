@@ -49,11 +49,9 @@ def _record(**overrides) -> BotCommonConfigRecord:
     return BotCommonConfigRecord(**values)
 
 
-def test_list_uses_server_env_and_service_view():
+def test_list_uses_server_env_and_serializes_records():
     service = MagicMock()
-    record = _record()
-    service.list_records.return_value = (1, [record])
-    service.record_to_dict.return_value = {"id": 7}
+    service.list_records.return_value = (1, [_record()])
 
     resp = _run(
         router.list_bot_common_configs(
@@ -67,7 +65,12 @@ def test_list_uses_server_env_and_service_view():
         )
     )
 
-    assert resp["data"] == {"total": 1, "items": [{"id": 7}]}
+    assert resp["data"]["total"] == 1
+    item = resp["data"]["items"][0]
+    assert item["id"] == 7
+    assert item["config_value"] == {"storage_type": "upfs"}
+    assert item["gmt_create"] == "2026-09-17T01:02:03"
+    assert item["gmt_modified"] is None
     service.list_records.assert_called_once_with(
         bot_id="b1",
         entity_id=None,
@@ -76,7 +79,15 @@ def test_list_uses_server_env_and_service_view():
         page_num=2,
         page_size=20,
     )
-    service.record_to_dict.assert_called_once_with(record)
+
+
+def test_list_falls_back_to_raw_value_for_legacy_non_json():
+    service = MagicMock()
+    service.list_records.return_value = (1, [_record(config_value="manual")])
+
+    resp = _run(router.list_bot_common_configs(_=_USER, service=service))
+
+    assert resp["data"]["items"][0]["config_value"] == "manual"
 
 
 def test_get_returns_decoded_value_from_service():

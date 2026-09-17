@@ -80,13 +80,6 @@ class BotCommonConfigService(BotCommonConfigServiceProtocol):
     def _dump(value: JsonValue) -> str:
         return json.dumps(value, ensure_ascii=False)
 
-    @staticmethod
-    def _parse_stored(value: str) -> JsonValue:
-        try:
-            return json.loads(value)
-        except (json.JSONDecodeError, TypeError):
-            return value
-
     def get_record_by_id(self, *, config_id: int) -> BotCommonConfigRecord | None:
         return self._repo.get_record_by_id(config_id=config_id)
 
@@ -154,21 +147,6 @@ class BotCommonConfigService(BotCommonConfigServiceProtocol):
                 for item in records
             ]
         )
-
-    def record_to_dict(self, record: BotCommonConfigRecord) -> dict[str, Any]:
-        return {
-            "id": record.id,
-            "bot_id": record.bot_id,
-            "entity_id": record.entity_id,
-            "env": record.env,
-            "config_key": record.config_key,
-            "config_value": self._parse_stored(record.config_value),
-            "is_delete": record.is_delete,
-            "gmt_create": record.gmt_create.isoformat() if record.gmt_create else None,
-            "gmt_modified": record.gmt_modified.isoformat()
-            if record.gmt_modified
-            else None,
-        }
 
 
 @dataclass(frozen=True)

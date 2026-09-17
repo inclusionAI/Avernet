@@ -7,6 +7,7 @@ rows written through the admin API must stay readable by ``get_config``
 
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 
 import pytest
@@ -56,18 +57,17 @@ def test_admin_crud_round_trip(service):
 
     record = service.get_record_by_id(config_id=config_id)
     assert record is not None
-    view = service.record_to_dict(record)
-    assert view["config_value"] == {"storage_type": "upfs"}
-    assert view["env"] == "pre"
+    assert json.loads(record.config_value) == {"storage_type": "upfs"}
+    assert record.env == "pre"
 
     total, items = service.list_records(bot_id="b1", env="pre")
     assert total == 1
     assert items[0].id == config_id
 
     assert service.update_record(config_id=config_id, value={"storage_type": "nas"})
-    assert service.record_to_dict(service.get_record_by_id(config_id=config_id))[
-        "config_value"
-    ] == {"storage_type": "nas"}
+    updated = service.get_record_by_id(config_id=config_id)
+    assert updated is not None
+    assert json.loads(updated.config_value) == {"storage_type": "nas"}
 
     assert service.delete_record(config_id=config_id)
     assert service.get_record_by_id(config_id=config_id) is None
@@ -113,10 +113,3 @@ def test_batch_upsert_then_get_config_per_key(service):
     assert service.get_config(**{**SCOPE, "bot_id": "b2"}) == {"storage_type": "upfs"}
     total, _ = service.list_records(env="pre")
     assert total == 2
-
-
-def test_record_to_dict_falls_back_to_raw_for_legacy_non_json(service, tmp_path):
-    record = service.get_record_by_id(
-        config_id=service.create_record(**SCOPE, value="manual")
-    )
-    assert service.record_to_dict(record)["config_value"] == "manual"
