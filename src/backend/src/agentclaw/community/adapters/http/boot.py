@@ -54,6 +54,7 @@ from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
+    from starlette.types import ASGIApp, Receive, Scope, Send
 
     from agentclaw.community.di.profile import DeployProfile
 
@@ -113,6 +114,64 @@ def worker_runtime_finalized() -> bool:
     which is the whole point of storing a pid.
     """
     return _finalized_pid is not None and _finalized_pid == os.getpid()
+
+
+#: Set once a refusal has been logged, so a worker stuck in this state does not
+#: write one line per request for as long as it is up.
+_refusal_logged = False
+
+
+class RequireWorkerRuntime:
+    """Refuse traffic until *this* process has finalized its worker runtime.
+
+    ``_app_lifespan`` already fails loudly when it is entered un-finalized, but
+    that only helps if the host drives the lifespan protocol — not every ASGI
+    host does, and nothing in the protocol requires it. Without this, a preload
+    worker that skipped its post-fork ``finalize_worker_runtime()`` would answer
+    its first request by building and caching a middleware stack that has no
+    auth, no tenant scoping, no tracing and no CORS, and then serve on it. That
+    is the "never serve half-initialized" rule, and it has to hold independently
+    of how the host handles lifespans.
+
+    Installed during construction (phase 1) so it is part of the stack in both
+    modes and under either host. It owns nothing — no state, no resource — so it
+    is safe to inherit across a fork, and it reads
+    :func:`worker_runtime_finalized`, which is per-process: a child that has not
+    finalized refuses even though its parent had.
+
+    In ``eager`` mode, and in a correctly finalized worker, it never fires.
+    """
+
+    def __init__(self, app: "ASGIApp") -> None:
+        self.app = app
+
+    async def __call__(self, scope: "Scope", receive: "Receive", send: "Send") -> None:
+        kind = scope["type"]
+        if kind in ("http", "websocket") and not worker_runtime_finalized():
+            global _refusal_logged
+            if not _refusal_logged:
+                _refusal_logged = True
+                logger.error(
+                    "[boot] pid %s is serving without a finalized worker runtime "
+                    "and is refusing requests. Call finalize_worker_runtime() "
+                    "after the fork, before the first request.",
+                    os.getpid(),
+                )
+            if kind == "websocket":
+                await send({"type": "websocket.close", "code": 1011})
+                return
+            body = b'{"detail":"Service Unavailable: worker runtime not initialized"}'
+            await send({
+                "type": "http.response.start",
+                "status": 503,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode("ascii")),
+                ],
+            })
+            await send({"type": "http.response.body", "body": body})
+            return
+        await self.app(scope, receive, send)
 
 
 def finalize_worker_runtime(app: "FastAPI", *, profile: "DeployProfile") -> None:

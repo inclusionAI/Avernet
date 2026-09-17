@@ -206,9 +206,9 @@ def test_preload_import_starts_no_worker_runtime():
     got = _run(_IMPORT_AND_REPORT, AGENTCLAW_HTTP_BOOT_MODE="preload", SERVER_ENV="pre")
 
     assert got["routes"], "preload import registered no routes at all"
-    assert got["middleware"] == [], (
-        "preload import installed middleware — the master would hand forked "
-        f"workers a frozen stack: {got['middleware']}"
+    assert got["middleware"] == ["RequireWorkerRuntime"], (
+        "preload import installed worker-owned middleware — the master would "
+        f"hand forked workers a frozen stack: {got['middleware']}"
     )
     assert got["has_injector"] is False, "preload import built and attached an injector"
     assert got["finalized"] is False
@@ -502,7 +502,9 @@ def test_a_forked_child_finalizes_its_own_runtime():
     got = _run(_REAL_FORK, AGENTCLAW_HTTP_BOOT_MODE="preload")
 
     assert got["child_status"] == 0
-    assert got["pre_fork"] == {"finalized": False, "marker": None, "middleware": []}
+    assert got["pre_fork"] == {
+        "finalized": False, "marker": None, "middleware": ["RequireWorkerRuntime"],
+    }
 
     parent, child = got["parent"], got["child"]
     assert child["pid"] != parent["pid"]
@@ -661,6 +663,59 @@ def test_lifespan_without_finalize_fails_loudly():
         "it would then serve requests with no auth/tenant/CORS middleware"
     )
     assert "finalize_worker_runtime()" in got["message"]
+
+
+_REQUEST_WITHOUT_FINALIZE = """
+from fastapi.testclient import TestClient
+
+from agentclaw.community.adapters.http import app as app_mod
+
+# TestClient only drives the lifespan when used as a context manager. Calling it
+# directly is exactly the host that never sends a lifespan event — the case the
+# lifespan guard cannot cover.
+client = TestClient(app_mod.app)
+response = client.get("/api/health")
+
+emit({
+    "status": response.status_code,
+    "body": response.text,
+    "middleware": [m.cls.__name__ for m in app_mod.app.user_middleware],
+})
+"""
+
+
+def test_an_unfinalized_worker_refuses_requests_without_a_lifespan():
+    """A host that skips the lifespan must not get an un-wired app serving 200s.
+
+    Nothing in ASGI obliges a host to drive the lifespan protocol, so the
+    ``_app_lifespan`` check alone would let a preload worker that skipped
+    finalize answer its first request on a stack with no auth, no tenant
+    scoping, no tracing and no CORS — and cache that stack for the rest of its
+    life.
+    """
+    got = _run(_REQUEST_WITHOUT_FINALIZE, AGENTCLAW_HTTP_BOOT_MODE="preload")
+
+    assert got["status"] == 503, (
+        f"an un-finalized worker answered {got['status']} on a real request; it "
+        "would have served every later one through an un-wired stack too"
+    )
+    assert "worker runtime not initialized" in got["body"]
+    # The refusal came from the construction-time guard, not from anything
+    # finalize installs — there is nothing else in the stack.
+    assert got["middleware"] == ["RequireWorkerRuntime"]
+
+
+def test_a_finalized_worker_serves_normally_through_the_guard():
+    """The guard is inert once the runtime is up — in either mode."""
+    got = _run(_REQUEST_WITHOUT_FINALIZE.replace(
+        "client = TestClient(app_mod.app)",
+        "app_mod.finalize_worker_runtime()\nclient = TestClient(app_mod.app)",
+    ), AGENTCLAW_HTTP_BOOT_MODE="preload")
+
+    assert got["status"] == 200, got["body"][:300]
+    assert got["middleware"][-1] == "RequireWorkerRuntime", (
+        "the guard should stay in the stack after finalize, just inert"
+    )
 
 
 def test_middleware_cannot_be_installed_after_the_stack_is_built():

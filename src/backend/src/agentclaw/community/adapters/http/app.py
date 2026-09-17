@@ -1,33 +1,32 @@
 """FastAPI composition root.
 
 Split in two phases, because importing this module and *initializing a worker*
-are different jobs and only the second one has to happen after a ``fork``. Which
-of them an import performs is decided by ``AGENTCLAW_HTTP_BOOT_MODE`` — see
+are different jobs and only the second has to happen after a ``fork``. Which of
+them an import performs is decided by ``AGENTCLAW_HTTP_BOOT_MODE`` — see
 :mod:`agentclaw.community.adapters.http.boot`, which owns that switch.
 
-**Phase 1 — construction. Always runs at import, in both modes.**
-  1. Read the deploy profile and run the pre-DI registrations the injector will
-     later read (``register_config_provider``, ``register_corp_modules``).
-  2. Run pre-import side effects (``AGENTCLAW_CONFIG_PATH``, OpenClaw DB config).
-  3. Construct ``app = FastAPI(lifespan=_app_lifespan)``. The lifespan body
-     discovers every ``Lifecycle`` participant in **the worker's** injector
-     (``app.state.injector``) and drives the four phases (``bootstrap`` →
-     ``startup`` → yield → ``shutdown`` → ``teardown``) concurrently within each.
-  4. Register exception handlers, the health endpoint, all routers.
-
-  Nothing here builds an injector, opens a connection, reads a secret, or starts
-  a thread — that is what makes the result safe to ``fork``.
+**Phase 1 — construction. Always runs at import, in both modes.** Read the
+deploy profile and run the pre-DI registrations the injector will later read
+(``register_config_provider``, ``register_corp_modules``); run the pre-import
+side effects (``AGENTCLAW_CONFIG_PATH``, OpenClaw DB config); construct ``app =
+FastAPI(lifespan=_app_lifespan)``, whose lifespan body discovers every
+``Lifecycle`` participant in **the worker's** injector (``app.state.injector``)
+and drives the four phases (``bootstrap`` → ``startup`` → yield → ``shutdown``
+→ ``teardown``) concurrently within each; and register the exception handlers,
+the health endpoint and all routers. Nothing there builds an injector, opens a
+connection, reads a secret, or starts a thread — that is what makes the result
+safe to ``fork``.
 
 **Phase 2 — :func:`finalize_worker_runtime`.** Builds the worker's injector,
 attaches it, runs the pre/prod eager binding check, initializes the gateway
 principal verifier, and installs the middleware stack. In ``eager`` mode it is
 called inline at the bottom of this module, so an import behaves exactly as it
-always has; in ``preload`` mode the consumer calls it once per worker, after the
-fork and **before** the first ASGI call.
+always has; in ``preload`` the consumer calls it once per worker, after the fork
+and **before** the first ASGI call.
 
-Middleware bodies live in :mod:`agentclaw.community.adapters.http.middleware`. Startup
-and shutdown work lives on the components that own it — they
-implement :class:`agentclaw.community.kernel.lifecycle.Lifecycle`. There is no
+Middleware bodies live in :mod:`agentclaw.community.adapters.http.middleware`.
+Startup and shutdown work lives on the components that own it — they implement
+:class:`agentclaw.community.kernel.lifecycle.Lifecycle`. There is no
 module-global injector handle: ``app.state.injector`` is the single one.
 """
 import asyncio
@@ -43,10 +42,10 @@ from fastapi import FastAPI, Request
 # declaring such a route at import returns a ``Depends`` object and calls
 # nothing, so registering every router needs no injector instance. Building one
 # is ``boot.finalize_worker_runtime``'s job, and under ``preload`` that happens
-# in the forked worker rather than here. What this section does is the pre-DI
-# registration ``build_injector`` later reads: pure registry mutation, safe to
-# inherit across a fork.
-from agentclaw.community.adapters.http.boot import BootMode
+# in the forked worker. What this section does is the pre-DI registration
+# ``build_injector`` later reads: registry mutation, safe to inherit across a
+# fork.
+from agentclaw.community.adapters.http.boot import BootMode, RequireWorkerRuntime
 from agentclaw.community.adapters.http.boot import (
     finalize_worker_runtime as _finalize_worker_runtime,
 )
@@ -70,10 +69,9 @@ register_config_provider(_deploy_profile)  # noqa: FLA010 — composition root, 
 # community / test / singlebox (B8).
 register_corp_modules(_deploy_profile)  # noqa: FLA010 — composition root, before build_injector
 
-# Construction or construction-plus-initialization? Read once, here, the way the
-# deploy profile is. ``eager`` (the default) keeps every existing launch site
-# behaving exactly as before; ``preload`` is what a master-imports-then-forks
-# consumer selects.
+# Construction, or construction plus initialization? Read once, here, the way
+# the deploy profile is. ``eager`` (the default) keeps every existing launch
+# site behaving as before; ``preload`` is for a master that forks.
 _boot_mode = BootMode.detect()
 # ──────────────────────────────────────────────────────────────────────────
 
@@ -259,6 +257,10 @@ async def _app_lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=_app_lifespan)
 
+# Refuse traffic in a process that has not finalized. At construction, because
+# the lifespan guard above only fires on hosts that drive the lifespan protocol.
+app.add_middleware(RequireWorkerRuntime)
+
 
 def finalize_worker_runtime() -> None:
     """Initialize everything this worker process owns — see :mod:`.boot`.
@@ -270,10 +272,12 @@ def finalize_worker_runtime() -> None:
         from agentclaw.community.adapters.http.app import app, finalize_worker_runtime
         finalize_worker_runtime()
 
-    At most once per process; re-runs in a forked child regardless of the
-    parent's state; raises without marking the process finalized if any step
-    fails. Under the default ``eager`` mode this module already called it at the
-    bottom of its own import, so calling it again is a no-op.
+    At most once per process, and only in a process forked **before** any
+    finalize ran: a child of a parent that had already finalized — or had begun
+    and failed — inherits that runtime and is refused rather than wired a second
+    time. A failing step raises without marking the process finalized, and the
+    process cannot retry. Under the default ``eager`` mode this module already
+    called it at the bottom of its own import, so calling it again is a no-op.
     """
     _finalize_worker_runtime(app, profile=_deploy_profile)
 

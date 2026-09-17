@@ -91,10 +91,20 @@ In this exact order, matching today's:
 - A failure also records the **failed pid**, and a later call in that process is refused
   outright. Replaying the sequence over an app that already has an injector attached and part
   of its stack installed would stack a second copy on top; a worker that cannot initialize is
-  replaced, not retried. A forked child, being a different pid, still gets its own attempt.
+  replaced, not retried. A child forked from it is refused for the same reason — it inherited
+  that same half-wired app. **Only a fork performed before any finalize attempt is supported**,
+  which is what `preload` mode gives you.
 - `_app_lifespan` reads participants from `app.state.injector` (the worker's injector), not
   from a module-level handle captured at import. Entering the lifespan without a finalized
   runtime raises with a message naming `finalize_worker_runtime()`.
+- That lifespan check is not the only guard, because nothing in ASGI obliges a host to drive
+  the lifespan protocol. A `RequireWorkerRuntime` ASGI middleware, installed during
+  construction in both modes, answers **503** to any request reaching a process that has not
+  finalized. Without it a worker that skipped finalize would answer its first request by
+  building and caching a stack with no auth, no tenant scoping, no tracing and no CORS, and
+  then serve on it. The guard owns no state or resource, so it is safe to inherit across a
+  fork, and it reads the per-process marker — a child that has not finalized refuses even
+  though its parent had. In a finalized worker it never fires.
 
 ## Behavior compatibility
 
