@@ -176,7 +176,18 @@ class CollaboratorService(CollaboratorQueryMixin, CollaboratorServiceProtocol):
             str(bot.get("owner_id") or ""),
             env,
         )
-        if level in (PermissionLevel.NONE, PermissionLevel.OWNER):
+        if level is PermissionLevel.NONE:
+            # The space-derived grant: a Bot assigned to a Space is under that
+            # Space's collaboration contract, so a member of the Space works
+            # on it at MEMBER without an explicit collaborator row. Granted at
+            # exactly the level an explicit MEMBER row would give — no ADMIN,
+            # no way around the editor face's own ADMIN bars — and answered
+            # by the same live membership read, so leaving the Space revokes
+            # it on the next request.
+            if self._editor_policy.space_member(bot=bot, user_id=user_id):
+                return PermissionLevel.MEMBER
+            return level
+        if level is PermissionLevel.OWNER:
             return level
         # COSEC: a Team Space editor relation is necessary but not sufficient.
         # Removing the user from the Space revokes operation immediately, while
@@ -213,7 +224,20 @@ class CollaboratorService(CollaboratorQueryMixin, CollaboratorServiceProtocol):
                 if role == CollaboratorRole.MEMBER
                 else PermissionLevel.NONE
             )
-            if (
+            # The bulk twin of the single resolve's space-derived grant: a
+            # member of the bot's Space reads the page with MEMBER where no
+            # collaborator row exists, from the same live membership reads the
+            # per-page cache already pays for. The COSEC recheck below is
+            # skipped for the granted answer as in the single resolve — the
+            # grant *is* the live membership read.
+            granted = level is PermissionLevel.NONE
+            if granted:
+                granted = self._editor_policy.space_member(
+                    bot=bot, user_id=user_id, cache=space_cache
+                )
+                if granted:
+                    level = PermissionLevel.MEMBER
+            if not granted and (
                 level is not PermissionLevel.NONE
                 and not self._editor_policy.allows_editor(
                     bot=bot, user_id=user_id, cache=space_cache
