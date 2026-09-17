@@ -1,6 +1,6 @@
 ---
 name: bcs-coordination
-description: 全场景多智能体协作和交互引擎。覆盖 Bot 注册发现、自由聊天、任务协作、上下文融合、路由通信和自定义协作。用户需要自定义参与角色、执行步骤、串并行关系或最终交付物时，使用自定义协作能力，并通过 BCS 的 state_machine YAML 实现和校验。
+description: 全场景多智能体协作和交互引擎。覆盖 Bot 注册发现、自由聊天、任务协作、上下文融合、路由通信和自定义协作。用户需要自定义参与角色、执行步骤、串并行关系、Loop 循环或最终交付物时，使用自定义协作能力，并通过 BCS 的 state_machine YAML 实现和校验。
 allowed-tools:
   - exec
 ---
@@ -101,6 +101,7 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" health
 处理自定义协作时，还需按任务直接读取以下资料：
 
 - 编写或修改 YAML：读取 [references/custom-collaboration-schema.md](references/custom-collaboration-schema.md)。
+- 需要循环评审、反复修订或多个阶段分别循环：读取 schema 的 [Fixed Loop](references/custom-collaboration-schema.md#fixed-loop)。支持多个同级 Loop，不支持嵌套；执行取决于服务端能力开关。
 - 当前 session 一次性运行，或校验 YAML 与新建自定义协作群：严格执行 [references/custom-collaboration.md](references/custom-collaboration.md) 中对应的 CLI 流程。
 
 ---

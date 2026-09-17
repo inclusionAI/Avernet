@@ -148,21 +148,24 @@ fn compile_definition(
                                 )
                             };
                             add_transition(&mut compiled_node, &mut edges, &execution_id, outcome, targets,
-                                projection, Some(StateMachineLoopRoute { kind, logical_outcome: logical }));
+                                projection, Some(StateMachineLoopRoute { kind, logical_outcome: logical }),
+                                if iteration < body.max_iterations { body.continue_display_name.clone() }
+                                else { node.transitions[&body.exhausted_outcome].display_name.clone() });
                         }
                         for outcome in &body.break_outcomes {
                             let targets = node.transitions[outcome].targets.iter()
                                 .map(|target| outer_target(&definition, target)).collect();
                             add_transition(&mut compiled_node, &mut edges, &execution_id, outcome, targets,
                                 CompiledArtifactProjection::Artifact,
-                                Some(StateMachineLoopRoute { kind: StateMachineLoopRouteKind::Break, logical_outcome: outcome.clone() }));
+                                Some(StateMachineLoopRoute { kind: StateMachineLoopRouteKind::Break, logical_outcome: outcome.clone() }),
+                                node.transitions[outcome].display_name.clone());
                         }
                     } else {
                         for (outcome, transition) in &body_node.transitions {
                             let targets = transition.targets.iter()
                                 .map(|target| execution_node_id(&definition, id, iteration, target)).collect();
                             add_transition(&mut compiled_node, &mut edges, &execution_id, outcome, targets,
-                                CompiledArtifactProjection::Artifact, None);
+                                CompiledArtifactProjection::Artifact, None, transition.display_name.clone());
                             compiled_node.transitions.get_mut(outcome).expect("inserted transition").guard = transition.guard.clone();
                         }
                     }
@@ -195,7 +198,7 @@ fn compile_definition(
             for (outcome, transition) in &node.transitions {
                 let targets = transition.targets.iter().map(|target| outer_target(&definition, target)).collect();
                 add_transition(&mut compiled_node, &mut edges, id, outcome, targets,
-                    CompiledArtifactProjection::Artifact, None);
+                    CompiledArtifactProjection::Artifact, None, transition.display_name.clone());
                 compiled_node.transitions.get_mut(outcome).expect("inserted transition").guard = transition.guard.clone();
             }
             let node_metadata = CompiledNodeMetadata {
@@ -301,6 +304,7 @@ fn add_transition(
     targets: Vec<String>,
     projection: CompiledArtifactProjection,
     route: Option<StateMachineLoopRoute>,
+    display_name: Option<String>,
 ) {
     for target in &targets {
         edges.push(CompiledEdgeMetadata {
@@ -311,7 +315,7 @@ fn add_transition(
             loop_route: route.clone(),
         });
     }
-    node.transitions.insert(outcome.into(), StateMachineTransition { targets, guard: None });
+    node.transitions.insert(outcome.into(), StateMachineTransition { targets, guard: None, display_name });
 }
 
 fn validate_loop(
@@ -323,6 +327,9 @@ fn validate_loop(
     let node_path = format!("{MACHINE_PATH}.nodes.{id}");
     let path = format!("{node_path}.loop");
     let body = node.loop_definition.as_ref().ok_or_else(|| invalid(&path, "loop is required"))?;
+    if body.continue_display_name.as_ref().is_some_and(|name| name.trim().is_empty()) {
+        return Err(invalid(format!("{path}.continue_display_name"), "must be a nonblank string"));
+    }
     if node.display_name.trim().is_empty() {
         return Err(invalid(format!("{node_path}.display_name"), "must not be empty"));
     }

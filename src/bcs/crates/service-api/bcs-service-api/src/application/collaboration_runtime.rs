@@ -73,6 +73,8 @@ pub struct CollaborationDefinitionParticipantSlot {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StateMachineLoopGraphView {
     pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continue_display_name: Option<String>,
     pub max_iterations: u32,
     pub entry_node_id: String,
     pub result_node_id: String,
@@ -108,6 +110,8 @@ pub struct CollaborationDefinitionGraphNode {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CollaborationDefinitionGraphEdge {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     pub source: String,
     pub target: String,
     pub outcome: String,
@@ -416,6 +420,8 @@ pub struct StateMachineGraphNodeView {
     pub kind: StateMachineNodeKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assignee: Option<StateMachineAssignee>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignee_display_name: Option<String>,
     pub final_output: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<StateMachineNodeStatus>,
@@ -435,6 +441,8 @@ pub struct StateMachineGraphNodeView {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateMachineGraphEdgeView {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     pub source: String,
     pub outcome: String,
     pub target: String,

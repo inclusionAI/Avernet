@@ -67,6 +67,7 @@ export interface CollaborationGraphLayoutNode {
 }
 
 export interface CollaborationGraphLayoutEdge {
+  outcome: string;
   sourceHandle?: string;
   targetHandle?: string;
   id: string;
@@ -329,6 +330,7 @@ export function buildCollaborationGraphLayout(
     pairCounts.set(pair, labelLane + 1);
     return {
       id: `${edge.source}:${edge.outcome}:${edge.target}:${index}`,
+      outcome: edge.outcome,
       source: edge.source,
       target: edge.target,
       ...(edge.loop_route ? {
@@ -338,12 +340,12 @@ export function buildCollaborationGraphLayout(
           labelLane,
         },
       } : {}),
-      label: edge.loop_route
+      label: edge.display_name ?? (edge.loop_route
         ? edge.loop_route.kind === 'continue' ? 'continue' : edge.loop_route.logical_outcome
         : edge.outcome !== 'complete' ||
           (outcomeCountBySource.get(edge.source)?.size ?? 0) > 1
           ? edge.outcome
-          : undefined,
+          : undefined),
     };
   });
 

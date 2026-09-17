@@ -29,7 +29,7 @@ export default function CollaborationLoopEdge(props: EdgeProps<LoopEdge>) {
       labelBgStyle={{ fill: '#fff', fillOpacity: 0.95 }} labelBgPadding={[5, 3]} labelBgBorderRadius={5} />
     {data?.returnEdge && <text x={returnLabelX} y={(sourceY + targetY) / 2 - 5}
       textAnchor="middle" fill={color} fontSize={10} fontWeight={500}>
-      continue
+      {label}
     </text>}
   </g>;
 }

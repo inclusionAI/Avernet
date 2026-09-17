@@ -111,6 +111,7 @@ export interface StateMachineNode {
   display_name?: string;
   kind?: string;
   assignee?: StateMachineAssignee;
+  assignee_display_name?: string;
   final_output?: boolean;
   status?: StateMachineNodeStatus;
   attempt?: number;
@@ -152,6 +153,7 @@ export interface StateMachineNodeDetailResponse {
 }
 
 export interface StateMachineEdge {
+  display_name?: string;
   source: string;
   outcome?: string;
   target: string;
@@ -159,6 +161,7 @@ export interface StateMachineEdge {
 }
 
 export interface StateMachineLoopGraphView {
+  continue_display_name?: string;
   display_name: string;
   max_iterations: number;
   entry_node_id: string;
@@ -550,9 +553,9 @@ const BotIdText = styled.span`
 `;
 
 const RoleTag = styled.span`
-  display: inline-flex;
+  display: block;
   box-sizing: border-box;
-  max-width: 52px;
+  max-width: 45%;
   flex: none;
   align-items: center;
   border: 1px solid #dbe3f2;
@@ -2032,6 +2035,7 @@ function loopNodeLabel(node: StateMachineNode) {
 }
 
 function loopRouteLabel(edge: StateMachineEdge) {
+  if (edge.display_name) return edge.display_name;
   if (!edge.loop_route) return edge.outcome;
   return edge.loop_route.kind === 'continue' ? 'continue' : edge.loop_route.logical_outcome;
 }
@@ -2435,7 +2439,7 @@ function getNodeBotId(node: StateMachineNode) {
 }
 
 function getNodeRole(node: StateMachineNode) {
-  return node.assignee?.binding || '';
+  return node.assignee_display_name?.trim() || node.assignee?.binding || '';
 }
 
 function CopyIcon({ size = 13 }: { size?: number }) {
@@ -3167,7 +3171,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
   const selectedNodeCompleted =
     selectedRuntimeNode?.completed_at || selectedNode?.completed_at;
   const selectedNodeAssignee = selectedNode
-    ? selectedNode.assignee?.binding ||
+    ? getNodeRole(selectedNode) ||
       selectedRuntimeNode?.assignee_bot_id ||
       selectedNode.assignee_bot_id ||
       stringifyValue(selectedNode.assignee)
@@ -3849,7 +3853,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
                     role="img"
                     viewBox={`0 0 ${layout.width} ${layout.height}`}
                     width={layout.width}
-                    style={logicalLoops && !expandedGraph ? { width: '100%', maxWidth: layout.width } : undefined}
+                    style={logicalLoops ? { width: '100%', maxWidth: layout.width } : undefined}
                   >
                     <defs>
                       <filter
@@ -3971,7 +3975,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
                                 x={returnX !== undefined ? returnX - 32 : bypass ? bypassX : (sourceX + targetX) / 2}
                                 y={returnX !== undefined ? (sourceY + targetY) / 2 - 5 : bypass ? sourceY + 18 + labelLane * 16 : midY - 6 + labelLane * 16}
                               >
-                                {returnX !== undefined ? 'continue' : label || loopRouteLabel(edge)}
+                                {label || loopRouteLabel(edge)}
                               </text>
                             ) : null}
                           </g>
@@ -4121,7 +4125,7 @@ const StateMachineRunView: React.FC<StateMachineRunViewProps> = (props) => {
                                 {truncateText(botId, 20)}
                               </BotIdText>
                               {role ? (
-                                <RoleTag title={role}>{role}</RoleTag>
+                                <RoleTag title={node.assignee?.binding && role !== node.assignee.binding ? `${role} · ${node.assignee.binding}` : role}>{role}</RoleTag>
                               ) : null}
                             </NodeMetaRow>
                           </foreignObject>

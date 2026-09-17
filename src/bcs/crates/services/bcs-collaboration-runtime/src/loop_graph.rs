@@ -12,6 +12,7 @@ pub(crate) fn loop_graph_descriptors(definition: &CollaborationDefinition) -> BT
         let body = node.loop_definition.as_ref()?;
         Some((id.clone(), StateMachineLoopGraphView {
             display_name: node.display_name.clone(),
+            continue_display_name: body.continue_display_name.clone(),
             max_iterations: body.max_iterations,
             entry_node_id: body.entry_node.clone(),
             result_node_id: body.result_node.clone(),

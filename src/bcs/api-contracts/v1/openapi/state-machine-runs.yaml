@@ -265,6 +265,11 @@ StateMachineGraphNodeView:
       $ref: "#/StateMachineNodeKind"
     assignee:
       $ref: "#/StateMachineAssignee"
+    assignee_display_name:
+      type: string
+      minLength: 1
+      pattern: "\\S"
+      description: Participant display_name from the Run definition snapshot for a bot_binding assignee. Omitted when absent or blank; consumers fall back to assignee.binding. Does not change assignment identity.
     final_output:
       type: boolean
     status:
@@ -293,6 +298,11 @@ StateMachineGraphEdgeView:
   additionalProperties: false
   required: [source, outcome, target]
   properties:
+    display_name:
+      type: string
+      minLength: 1
+      pattern: "\\S"
+      description: Optional author-defined label for display only. Does not change outcomes or routing; omitted for legacy definitions.
     source:
       type: string
       minLength: 1

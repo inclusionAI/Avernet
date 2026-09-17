@@ -205,6 +205,19 @@ dispatcher-to-Send boundary without native inject.
   execution IDs via execution metadata. No new persisted state or execution node kind.
   Consumers: both HTTP adapters, OpenAPI contracts, frontend preview and BCS panel.
 
+- Preview/Run edges optionally expose `display_name`; Loop descriptors optionally
+  expose `continue_display_name`. Names come from validated authoring or immutable
+  snapshots, never replace actual outcomes, and do not select routes. Missing fields
+  remain omitted for existing definitions/plans. Authoring transition names cover
+  ordinary/body/break/exhausted edges; Loop continuation names cover the return edge.
+  Both HTTP adapters, OpenAPI, frontend preview, panel and Skill preserve this contract.
+
+- Run graph nodes optionally expose `assignee_display_name`, resolved from the
+  saved definition's participant display name for a BotBinding assignee. Missing
+  or blank names are omitted; consumers fall back to the binding ID. RuntimeActor
+  assignments do not acquire participant names. Both HTTP adapters and the panel
+  preserve this additive display field; execution bindings and snapshots are unchanged.
+
 DeliveryAdmissionTarget carries a typed per-recipient rejection, committed as an
 unsent Failed delivery without aborting other recipients. DeliveryStatusView
 adds optional fixed admission_error codes, never arbitrary transport error text.

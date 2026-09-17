@@ -10,7 +10,7 @@
 - [Bot task node](#bot-task-node)
 - [Human input node](#human-input-node)
 - [LLM judge node](#llm-judge-node)
-- [Fixed Loop validation preview](#fixed-loop-validation-preview)
+- [Fixed Loop](#fixed-loop)
 - [Parallel fan-out and join](#parallel-fan-out-and-join)
 - [Runtime input and artifacts](#runtime-input-and-artifacts)
 - [Validation errors](#validation-errors)
@@ -34,7 +34,7 @@ runtime:
 - Allow only `name`, `metadata`, `participants`, and `runtime` at the top level for this authoring Skill.
 - Never emit top-level `api_version`, `id`, or `version`. The create-group path parses authoring YAML after rejecting top-level `id`/`version`; the domain model then supplies the API version and server-owned definition identity defaults.
 - Reject any other top-level key, including spelling variants such as `apiVersion`, `verion`, or `verions`.
-- Use nested `runtime.state_machine.version: 1` for executable definitions; version 2 is currently limited to fixed-Loop validation/preview below. This differs from the server-owned top-level version.
+- Use nested `runtime.state_machine.version: 1` for an ordinary DAG, or `2` for fixed Loops. V2 execution requires the deployment capability described below. This differs from the server-owned top-level version.
 - Do not put runtime Bot UUIDs in the definition.
 - Let BCS infer `requires`; omit it from authoring YAML.
 - Keep `metadata.description` as a string, `metadata.labels` as a
@@ -80,28 +80,28 @@ runtime:
     nodes: {}
 ```
 
-- Executable definitions require `version: 1` and `graph_mode: acyclic`.
+- Ordinary definitions use `version: 1` and `graph_mode: acyclic`; fixed Loops use `version: 2` and `graph_mode: hierarchical`.
 - If projection is present, use only `default_visibility: private` or
   `default_visibility: shared`.
-- Use only `bot_task` and `human_input` nodes.
+- Executable nodes use `bot_task` or `human_input`. V2 also allows outer `loop` control nodes, whose bodies contain executable nodes.
 - Do not use `initial_node`, `input_schema`, `variables`, `events`, actions,
   output contracts, or guards; the current runtime rejects them. A `bot_task`
   must not use a runtime actor. Runtime actors are reserved for the separately
   configured IM-targeted HumanInput mode described below.
 - A node may use an LLM `judge` only when the current BCS instance has an LLM
-  provider configured. Declare every judge outcome and give each outcome a
-  transition.
+  provider configured. Ordinary nodes route every Judge outcome through a
+  transition. A Loop result instead partitions outcomes into continue/break lists.
 - Use one zero-in-degree entry node and one final-output sink.
 - Keep every node reachable from the entry and able to reach the final node.
 
-## Fixed Loop validation preview
+## Fixed Loop
 
 `collaboration validate` also accepts `version: 2 + graph_mode: hierarchical` for fixed Loop compilation and preview.
 It returns `VALIDATION_ONLY_FEATURE` when this deployment has v2 execution disabled (the default). For testing, set `collaboration.experimental_fixed_loop_execution = true` and restart BCS: validation then omits this warning and create/run/rerun are enabled together with progression recovery. The local config template opts in; full failover and production release gates remain pending.
 Do not use a successful preview as evidence that a deployment can execute Loop definitions.
 
 ```yaml
-name: Fixed three rounds
+name: Repeated discussion
 participants:
   writer:
     required: true
@@ -113,7 +113,7 @@ runtime:
     nodes:
       rounds:
         kind: loop
-        display_name: Three rounds
+        display_name: Discussion Loop
         loop:
           mode: fixed
           max_iterations: 3
@@ -139,18 +139,55 @@ runtime:
 ```
 
 - `loop` requires all eight fields shown above; unknown fields are rejected. Body nodes use the ordinary executable-node rules.
+- `loop.continue_display_name` is optional and labels the logical return edge and expanded continue edges. Exhausted labels belong to `transitions.<exhausted_outcome>.display_name`, not a separate Loop field.
 - `continue_outcomes` must be nonempty; `break_outcomes` must be present but may be `[]`. Without a result Judge, use exactly `[complete]` and `[]`.
 - With a result Judge, continue and break must partition all its outcomes. `exhausted_outcome` is separate and cannot be returned by the Judge.
 - Each break/exhausted transition needs at least one existing outer target. Empty break means run to the limit and then route to exhausted targets, not stop the whole workflow.
 - Body has exactly one entry and one result terminal. Result defines no body transitions; body nodes cannot be final_output. Keep the unique final_output outside the Loop.
 - Loop control nodes allow only `kind`, `display_name`, `loop`, `transitions`, `extensions`; no assignee, instruction, Judge, timeout or final_output fields, including null/false placeholders.
 - Nested loops, cross-body targets, arbitrary goto and unbounded loops are unsupported. The `ln-` node ID prefix is reserved in v2; authoring node IDs are at most 128 ASCII bytes.
+- Multiple sibling Loops are supported in the same outer acyclic graph. An outer transition can target another Loop ID; BCS enters that Loop's entry node. Never target its body node directly. Each Loop has its own iteration count and previous result; the next Loop starts at iteration 1 with no previous result of its own, while the prior Loop's selected output is an ordinary upstream artifact.
 - Server-owned limits come from `collaboration.fixed_loop_limits`. Rejection reports the authoring path before any Run creation.
 - Preview retains authoring `graph_mode: hierarchical`, adds `execution_graph_mode: acyclic`, per-node `execution` and result-edge `loop_route`. Last-round edge outcome stays `complete`/the actual continue outcome while route kind/logical_outcome shows exhaustion.
 
 The internal compiler version is `bcs.fixed-loop.compiler/v1`. Generated IDs use a namespace-separated SHA-256 of the JSON
 tuple `(definition_id, definition_version, loop_id, iteration, body_node_id)`, truncated to 128 bits and prefixed with `ln-`.
 Never parse or construct these IDs in clients. Preview IDs do not promise future Run identity.
+
+The example above intentionally has no Judge and always runs to its limit. For review-driven work, give the result a Judge with `outcomes: [approved, revise]`, set `continue_outcomes: [revise]` and `break_outcomes: [approved]`, then define outer `approved` and `exhausted` transitions. These business outcome names are chosen by the author, not reserved control keywords.
+
+| Field or value | Meaning |
+| --- | --- |
+| `approved`, `revise` | Actual outcomes selected by the result node's Judge |
+| `continue_outcomes`, `break_outcomes` | Classify actual outcomes into Loop routing behavior |
+| `continue`, `break`, `exhausted` | BCS route kinds in execution metadata, not target node IDs |
+| `exhausted_outcome` | Outer exit key produced when the last result still requests continuation; the result's actual outcome remains `revise` |
+| `transitions.approved` | Route selected for the `approved` outcome; a Loop only declares break/exhausted exits here |
+| `targets: [writing_loop]` | Existing outer node IDs to activate; may include a sibling Loop |
+| `entry_node`, `result_node` | Body node IDs scoped to this particular Loop |
+| `assignee.binding` | Participant role to bind to a Bot; it is not a routing target |
+| `transitions.<outcome>.display_name` | Optional display-only label, shared by every target of the transition |
+| `loop.continue_display_name` | Optional display-only label shared by all continuation outcomes of this Loop |
+
+For two review stages, place `research_loop` and `writing_loop` beside each other under outer `nodes`. Route `research_loop.approved` to `writing_loop`, route each exhausted outcome to an explicit handler, and converge the chosen branch on one final-output node. Both bodies may name their result `review`; their execution IDs and contexts remain separate. The Workbench seed template `research-writing-loops` demonstrates this with researcher, writer, reviewer and polisher roles.
+
+Display names are supported on ordinary transitions, body transitions, and Loop exits. Omit them to keep the existing outcome labels (and `continue` for the return edge). When present, use nonblank strings, never null or a locale object. They do not rename Judge outcomes or change routing; the final continuation still saves its actual outcome and uses the exhausted exit's display name. Preview and the Run panel show these names, while tooltips retain the actual outcome. Historical Runs and reruns use their saved names. Deployments must support these authoring fields before using the updated templates.
+
+```yaml
+# Fragment inside a Loop node; other required Loop fields are omitted here.
+loop:
+  continue_outcomes: [revise]
+  continue_display_name: 根据意见修订
+  break_outcomes: [approved]
+  exhausted_outcome: exhausted
+transitions:
+  approved:
+    display_name: 评审通过
+    targets: [polish]
+  exhausted:
+    display_name: 转入重写
+    targets: [rewrite]
+```
 
 ## Bot task node
 

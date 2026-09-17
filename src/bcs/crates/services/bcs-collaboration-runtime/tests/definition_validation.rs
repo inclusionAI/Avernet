@@ -578,6 +578,7 @@ fn rejects_custom_outcome_transition_without_judge() {
         .insert(
             "approved".to_string(),
             bcs_domain::StateMachineTransition {
+                display_name: None,
                 targets: vec!["synthesize".to_string()],
                 guard: None,
             },
@@ -809,6 +810,7 @@ fn validates_human_input_without_judge_uses_complete_transition() {
     review.transitions.insert(
         "complete".to_string(),
         bcs_domain::StateMachineTransition {
+            display_name: None,
             targets: vec!["publish".to_string()],
             guard: None,
         },
@@ -1030,6 +1032,7 @@ fn human_input_does_not_bypass_cycle_rejection() {
         .insert(
             "complete".to_string(),
             bcs_domain::StateMachineTransition {
+                display_name: None,
                 targets: vec!["review".to_string()],
                 guard: None,
             },

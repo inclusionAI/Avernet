@@ -16,7 +16,8 @@
 - YAML 中只声明逻辑 participant binding，不写真实 Bot UUID。运行或创建群时，再通过 CLI 参数把逻辑角色绑定到当前 session 或发现结果中的 Bot。
 - 不根据 YAML 外观猜测有效性。设计交付或建群前必须通过 `bcs-cli collaboration validate`；当前 session 一次性运行由 `bcs collaborate run` 的服务端接口执行同一套 authoring 和运行时校验。
 - 服务端固定拒绝当前运行时尚未实现的 `guard`、`action`、`output_contract`、`variables`、`events` 和 `input_schema`。`judge` 仅在当前 BCS 实例配置了 LLM provider 时可用。
-- 当前运行时要求无环图、唯一零入度入口、唯一 `final_output` 出口，且所有节点从入口可达并能到达最终出口。这些限制始终生效，不由 CLI 参数切换。
+- 普通流程使用 v1 无环图；Loop 使用 v2 hierarchical，由服务端展开为无环执行图。外层图仍要求唯一零入度入口、唯一 `final_output` 出口，且所有节点从入口可达并能到达最终出口。
+- v2 可以在同一外层图中放置多个 Loop，各自维护执行次数和上一结果，通过外层 `transitions` 连接；不支持嵌套 Loop 或直接跳入另一个 Loop 的 body。具体字段及 outcome/target 区别见 [Fixed Loop](custom-collaboration-schema.md#fixed-loop)。
 
 ## 选择执行方式
 

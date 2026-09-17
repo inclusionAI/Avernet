@@ -1,0 +1,148 @@
+# 两个同级 Loop 顺序协作，各自使用独立的执行次数与上一结果。
+name: 资料与写作双循环
+
+metadata:
+  description: 先反复核验资料，再反复评审稿件；两个 Loop 均由 Judge 决定 approved 或 revise。资料 exhausted 时输出缺口报告，写作 exhausted 时重写并保留未通过状态。
+
+participants:
+  researcher:
+    display_name: 资料研究员
+    description: 整理可核验的事实、来源与信息缺口，根据评审补充完整资料包。
+    required: true
+  writer:
+    display_name: 写作者
+    description: 根据已通过的资料包写作、修订，并汇总实际执行分支的结果。
+    required: true
+  reviewer:
+    display_name: 主编
+    description: 分别评审资料充分性与稿件质量，明确给出通过或返修结论。
+    required: true
+  polisher:
+    display_name: 润色编辑
+    description: 润色已通过评审的稿件，保持事实、结论与必要限制。
+    required: true
+
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 2
+    graph_mode: hierarchical
+    defaults:
+      node_timeout_ms: 120000
+      max_attempts: 2
+    nodes:
+      research_loop:
+        kind: loop
+        display_name: 资料核验与评审
+        loop:
+          mode: fixed
+          max_iterations: 3
+          entry_node: research
+          result_node: review
+          continue_outcomes: [revise]
+          continue_display_name: 补充资料
+          break_outcomes: [approved]
+          exhausted_outcome: exhausted
+          nodes:
+            research:
+              kind: bot_task
+              display_name: 整理或补充资料
+              assignee: {type: bot_binding, binding: researcher}
+              instruction: |
+                围绕用户需求整理完整资料包：关键事实、可核验来源、相互矛盾的信息及仍缺少的依据。
+                使用用户提供或能够实际核验的资料；无法核验时明确标注，不编造来源。
+                后续执行根据本 Loop 上一结果中的评审意见补充资料，始终返回完整资料包。
+              transitions:
+                complete: {display_name: 提交评审, targets: [review]}
+            review:
+              kind: bot_task
+              display_name: 评审资料充分性
+              assignee: {type: bot_binding, binding: reviewer}
+              instruction: |
+                判断资料是否足以支撑用户要求的交付，检查来源、关键事实及影响结论的信息缺口。
+                返回完整资料包、明确的通过或返修结论，以及必须补充的问题。
+                足够支撑写作时立即通过；存在关键缺口时返修，不因还有执行次数而要求继续。
+              judge:
+                type: llm
+                criteria:
+                  - 主编明确通过，保留完整资料包且没有影响交付的关键缺口时选择 approved。
+                  - 存在关键资料缺口、主编要求返修或没有明确通过结论时选择 revise。
+                outcomes: [approved, revise]
+        transitions:
+          approved: {display_name: 资料通过, targets: [writing_loop]}
+          exhausted: {display_name: 整理缺口, targets: [research_gaps]}
+      writing_loop:
+        kind: loop
+        display_name: 写作与主编评审
+        loop:
+          mode: fixed
+          max_iterations: 3
+          entry_node: draft
+          result_node: review
+          continue_outcomes: [revise]
+          continue_display_name: 继续修订
+          break_outcomes: [approved]
+          exhausted_outcome: exhausted
+          nodes:
+            draft:
+              kind: bot_task
+              display_name: 编写或修订稿件
+              assignee: {type: bot_binding, binding: writer}
+              instruction: |
+                首次执行使用上游已通过的完整资料包写作；后续执行使用本 Loop 上一结果中的稿件与评审意见。
+                每次返回完整稿件及其资料依据，保留来源和不确定性，不把资料核验通过等同于稿件评审通过。
+              transitions:
+                complete: {display_name: 提交评审, targets: [review]}
+            # 两个 body 都使用 review，但属于各自 Loop，不是同一个执行节点。
+            review:
+              kind: bot_task
+              display_name: 评审稿件质量
+              assignee: {type: bot_binding, binding: reviewer}
+              instruction: |
+                检查稿件是否回答用户问题、忠于已通过的资料，且结构清楚、结论有依据。
+                返回完整稿件、资料依据、明确的通过或返修结论，以及必须修正的问题。
+                达到交付标准即通过，不为凑执行次数提出修改；保留资料依据供下一次修订使用。
+              judge:
+                type: llm
+                criteria:
+                  - 主编明确通过，完整稿件符合资料依据且没有未解决的必改问题时选择 approved。
+                  - 稿件存在实质性缺陷、主编要求返修或没有明确通过结论时选择 revise。
+                outcomes: [approved, revise]
+        transitions:
+          approved: {display_name: 评审通过, targets: [polish]}
+          exhausted: {display_name: 转入重写, targets: [rewrite]}
+      research_gaps:
+        kind: bot_task
+        display_name: 整理资料缺口
+        assignee: {type: bot_binding, binding: researcher}
+        instruction: |
+          资料核验未通过。根据最后的完整资料包与评审意见，列出已确认事实、关键缺口和需要用户补充的信息。
+          明确尚未进入写作阶段，不生成假定资料齐全的成稿，也不把 exhausted 解释为通过。
+        transitions:
+          complete: {display_name: 提交汇总, targets: [finalize]}
+      polish:
+        kind: bot_task
+        display_name: 润色通过稿件
+        assignee: {type: bot_binding, binding: polisher}
+        instruction: |
+          资料与稿件均已通过评审。润色上游完整稿件，保持事实、来源、结论与必要限制，返回完整成稿。
+        transitions:
+          complete: {display_name: 提交汇总, targets: [finalize]}
+      rewrite:
+        kind: bot_task
+        display_name: 重写待完善稿件
+        assignee: {type: bot_binding, binding: writer}
+        instruction: |
+          资料已通过，但稿件尚未通过评审。依据最后的稿件与必改问题重写，保留资料依据并列出未解决的问题。
+          返回完整稿件，不宣称重写结果已经通过主编评审。
+        transitions:
+          complete: {display_name: 提交汇总, targets: [finalize]}
+      finalize:
+        kind: bot_task
+        display_name: 汇总最终结果
+        assignee: {type: bot_binding, binding: writer}
+        instruction: |
+          根据实际执行的分支输出最终结果，明确区分资料核验状态和稿件评审状态。
+          资料缺口分支只报告已确认事实、缺口及下一步；润色分支交付已通过的成稿；重写分支保留尚未通过的状态。
+          不等待未执行分支，不虚构资料或评审通过结论。
+        final_output: true

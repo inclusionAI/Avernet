@@ -21,6 +21,7 @@ import {
 } from '../utils/collaborationGraphLayout';
 
 import CollaborationLoopEdge from './CollaborationLoopEdge';
+import CollaborationTransitionEdge from './CollaborationTransitionEdge';
 import CollaborationLoopContainer from './CollaborationLoopContainer';
 import { buildCollaborationLoopLayout, hasLogicalLoopDescriptors } from '../utils/collaborationLoopLayout';
 import CollaborationPreviewMetadata from './CollaborationPreviewMetadata';
@@ -42,7 +43,7 @@ const nodeTypes = {
   loopContainer: CollaborationLoopContainer,
 };
 
-const edgeTypes = { loop: CollaborationLoopEdge };
+const edgeTypes = { loop: CollaborationLoopEdge, transition: CollaborationTransitionEdge };
 
 const FIT_VIEW_OPTIONS = { padding: 0.2, maxZoom: 1 };
 const LOOP_FIT_VIEW_OPTIONS = { padding: 0.05, maxZoom: 1 };
@@ -144,7 +145,8 @@ const CollaborationFlowPreview: React.FC<CollaborationFlowPreviewProps> = ({
     ...edge,
     sourceHandle: edge.sourceHandle || 'main',
     targetHandle: edge.targetHandle || 'main',
-    type: edge.data?.loopRoute ? 'loop' : 'default',
+    type: edge.data?.loopRoute ? 'loop' : 'transition',
+    data: edge.data ?? { outcome: edge.outcome },
     markerEnd: { type: MarkerType.ArrowClosed, color: '#3b82f6' },
     style: { stroke: '#3b82f6', strokeWidth: 2 },
     labelStyle: { fill: '#2563eb', fontSize: 11, fontWeight: 700 },

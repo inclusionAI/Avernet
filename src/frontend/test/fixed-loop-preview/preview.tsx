@@ -21,15 +21,23 @@ const v1: CollaborationDefinitionValidationResponse = {
   ], edges: [{ source: 'draft', target: 'publish', outcome: 'complete' }] },
 };
 
+const named = structuredClone(loop);
+named.graph!.loops!.revision_rounds.continue_display_name = '根据意见修订';
+for (const edge of named.graph!.edges) {
+  edge.display_name = edge.loop_route
+    ? { continue: '根据意见修订', break: '评审通过', exhausted: '转入重写' }[edge.loop_route.kind]
+    : '提交评审';
+}
+
 function Preview() {
-  const [scenario, setScenario] = useState('loop');
+  const [scenario, setScenario] = useState(new URLSearchParams(location.search).has('names') ? 'named' : 'loop');
   const [selected, setSelected] = useState<string>();
-  const response = scenario === 'loop' ? loop : v1;
+  const response = scenario === 'loop' ? loop : scenario === 'named' ? named : v1;
   return <main className="mx-auto max-w-5xl space-y-3 p-4">
     <label className="flex items-center gap-3 text-sm font-medium">预览测试场景
       <select aria-label="预览测试场景" className="rounded border border-slate-300 p-2" value={scenario}
         onChange={(event) => { setScenario(event.target.value); setSelected(undefined); }}>
-        <option value="loop">Fixed Loop</option><option value="v1">普通 v1</option>
+        <option value="loop">Fixed Loop</option><option value="named">自定义连线名称</option><option value="v1">普通 v1</option>
       </select>
     </label>
     <CollaborationValidationNotices warnings={response.warnings ?? []} />

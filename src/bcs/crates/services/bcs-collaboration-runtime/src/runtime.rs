@@ -5696,6 +5696,12 @@ fn run_graph_view(
                 node_id: node.node_id,
                 display_name: node.display_name,
                 kind: node.kind,
+                assignee_display_name: match &node.assignee {
+                    Some(StateMachineAssignee::BotBinding { binding }) => authoring.participants.get(binding)
+                        .and_then(|participant| participant.display_name.as_deref())
+                        .map(str::trim).filter(|name| !name.is_empty()).map(str::to_owned),
+                    _ => None,
+                },
                 assignee: node.assignee,
                 final_output: node.final_output,
                 status: run_node.map(|node| node.status),
@@ -5712,6 +5718,7 @@ fn run_graph_view(
         .edges
         .into_iter()
         .map(|edge| StateMachineGraphEdgeView {
+            display_name: edge.display_name,
             loop_route: edge_routes.get(&(edge.source.as_str(), edge.outcome.as_str(), edge.target.as_str())).cloned().flatten(),
             source: edge.source,
             outcome: edge.outcome,

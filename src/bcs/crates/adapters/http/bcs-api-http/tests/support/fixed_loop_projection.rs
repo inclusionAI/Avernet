@@ -2,7 +2,12 @@ use super::*;
 
 #[tokio::test]
 async fn loop_get_rerun_node_graph_and_pending_preserve_shared_projection() {
-    let fixture: Value = serde_json::from_str(include_str!("../../../../../../tests/fixtures/fixed_loop_api.json")).unwrap();
+    let mut fixture: Value = serde_json::from_str(include_str!("../../../../../../tests/fixtures/fixed_loop_api.json")).unwrap();
+    fixture["graph"]["loops"]["rounds"]["continue_display_name"] = serde_json::json!("继续修订");
+    fixture["graph"]["nodes"][0]["assignee_display_name"] = serde_json::json!("资料研究员");
+    for edge in fixture["graph"]["edges"].as_array_mut().unwrap() {
+        edge["display_name"] = serde_json::json!("自定义连线");
+    }
     let service = Arc::new(FakeRuntimeService {
         next_run: Mutex::new(Some(serde_json::from_value(fixture["run"].clone()).unwrap())),
         next_rerun: Mutex::new(Some(RerunStateMachineOutcome { view: serde_json::from_value(fixture["run"].clone()).unwrap(), created: true })),

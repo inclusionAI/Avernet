@@ -1,6 +1,6 @@
 # 写作与主编评审，达标即退出循环。创建群时将逻辑角色绑定到实际 Bot。
 # 创建与执行需服务端开启实验性 Loop 执行并配置 LLM Judge。
-name: 写作评审循环（Loop）
+name: 写作评审循环
 
 metadata:
   description: 写作者按主编意见修订，Judge 决定 approved 或 revise；approved 后由润色编辑处理，exhausted 后由写作者重写，最后汇总。
@@ -38,6 +38,7 @@ runtime:
           result_node: review
           # 达标即 approved；仍需返修但达到上限时走 exhausted。
           continue_outcomes: [revise]
+          continue_display_name: 继续修订
           break_outcomes: [approved]
           exhausted_outcome: exhausted
           nodes:
@@ -53,6 +54,7 @@ runtime:
                 每轮返回修订后的完整稿件，并简要说明本轮修改，不能只输出差异。
               transitions:
                 complete:
+                  display_name: 提交评审
                   targets: [review]
             review:
               kind: bot_task
@@ -75,8 +77,10 @@ runtime:
         # approved 是正常退出路径；exhausted 仅防止反复修订，不能被当作评审通过。
         transitions:
           approved:
+            display_name: 评审通过
             targets: [polish]
           exhausted:
+            display_name: 转入重写
             targets: [rewrite]
       polish:
         kind: bot_task
@@ -90,6 +94,7 @@ runtime:
           输出润色后的完整稿件，并注明稿件已通过主编评审。
         transitions:
           complete:
+            display_name: 提交汇总
             targets: [finalize]
       rewrite:
         kind: bot_task
@@ -103,6 +108,7 @@ runtime:
           明确列出仍未解决的问题及信息缺口，不宣称重写稿已通过主编评审。
         transitions:
           complete:
+            display_name: 提交汇总
             targets: [finalize]
       finalize:
         kind: bot_task

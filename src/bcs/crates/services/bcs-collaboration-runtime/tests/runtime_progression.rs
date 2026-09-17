@@ -2580,6 +2580,7 @@ async fn timeout_scanner_skips_invalid_candidate_and_processes_later_run() {
         .insert(
             "complete".to_string(),
             StateMachineTransition {
+                display_name: None,
                 targets: vec!["answer".to_string()],
                 guard: None,
             },

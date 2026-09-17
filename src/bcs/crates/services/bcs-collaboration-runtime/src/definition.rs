@@ -54,6 +54,7 @@ pub(crate) struct DefinitionGraphNodeProjection {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DefinitionGraphEdgeProjection {
+    pub display_name: Option<String>,
     pub source: String,
     pub target: String,
     pub outcome: String,
@@ -84,6 +85,7 @@ pub(crate) fn project_definition_graph(
         for (outcome, transition) in &node.transitions {
             for target in &transition.targets {
                 edges.push(DefinitionGraphEdgeProjection {
+                    display_name: transition.display_name.clone(),
                     source: source.clone(),
                     target: target.clone(),
                     outcome: outcome.clone(),
@@ -340,6 +342,9 @@ pub fn validate_definition(
             ));
         }
         for (outcome, transition) in &node.transitions {
+            if transition.display_name.as_ref().is_some_and(|name| name.trim().is_empty()) {
+                return invalid(format!("node {node_id} transition {outcome} display_name must be a nonblank string"));
+            }
             if let Some(judge) = &node.judge {
                 if !judge.outcomes.iter().any(|allowed| allowed == outcome) {
                     return invalid(format!(

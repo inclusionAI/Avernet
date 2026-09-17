@@ -151,11 +151,11 @@ export function buildLoopLayout(graph: StateMachineRunGraph, choices: Record<str
     const source = getNode(group.loopId, group.iteration, loop.result_node_id), target = getNode(group.loopId, group.iteration, loop.entry_node_id);
     const evidence = graph.edges.find((edge) => edge.source === source.node_id && edge.loop_route?.kind === 'continue'
       && edge.outcome === source.outcome) || graph.edges.find((edge) => edge.source === source.node_id && edge.loop_route?.kind === 'continue');
-    edges.push({ edge: { source: source.node_id, target: target.node_id, outcome: loop.continue_outcomes.join(' / '),
+    edges.push({ edge: { display_name: loop.continue_display_name, source: source.node_id, target: target.node_id, outcome: loop.continue_outcomes.join(' / '),
       loop_route: { kind: 'continue', logical_outcome: loop.continue_outcomes.join(' / ') } },
       source: layouts.get(source.node_id)!, target: layouts.get(target.node_id)!, evidence,
       ...(!evidence ? { stateOverride: 'skipped' as const } : {}), returnX: group.x + group.width + RETURN_LANE - 12,
-      label: 'continue' });
+      label: loop.continue_display_name ?? 'continue' });
   });
   return { nodes, edges, groups, width, height: y - ROW_GAP + PADDING };
 }

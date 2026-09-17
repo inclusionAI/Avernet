@@ -943,3 +943,39 @@ npm --prefix src/bcs/assets/panel run verify
 bash src/frontend/scripts/ci_test.sh
 npm --prefix src/frontend test -- --runInBand
 ```
+
+### 2026-09-17：Skill Loop schema 与多个 Loop 模板（已完成）
+
+- [x] 核对 `bcs-coordination` 已有 Loop schema，修正仅支持 v1/仅预览的旧说明；在 Skill 入口增加 Loop 指引，补充多个同级 Loop、独立 previous_result、外层 target 与 outcome/transition 的区别。嵌套 Loop 仍不支持，执行仍受服务端能力开关控制。
+- [x] 新增并登记中英文 `research-writing-loops` 模板：资料核验 Loop 通过后进入写作 Loop，两个阶段分别由主编和 Judge 决定 approved/revise；资料 exhausted 输出缺口报告，写作 exhausted 走 rewrite，写作 approved 走独立角色 polish，最终汇总保留实际评审状态。
+- [x] 编译回归验证两个 body 可重复使用 review ID、各自继续路径和独立出口；运行时回归覆盖两个 Loop 均中途通过、资料 exhausted 跳过整个写作 Loop、写作 exhausted 三条路径，验证上下文、分支跳过和最终 Completed。
+- [x] 定向验证 **34 passed**：模板目录 11、compiler 21、运行时场景测试 1（含三条路径）、seed loader 1。日志 `/tmp/bcs-multi-loop-{catalog,compiler,runtime,seed}.log`。Skill 校验、中英文结构一致性、修改源码行数限制和 `git diff --check` 通过；模板服务原内联测试移至 `src/tests.rs`，生产实现不变。
+- 当前改动未提交、未重启本地 BCS；local file catalog 缓存需重启后加载新模板，DB catalog 仍按 seed 流程更新。本次不新增 migration，不改变主清单 **24/30** 或生产验收状态。
+- 上一轮 rebase 后的全 workspace 回归在新增模板前主动中断，避免旧编译测试读取修改中的目录；该次 **688 passed、11 项被 SIGINT 中断、4552 项未执行、55 skipped**，不记为完整通过。日志 `/tmp/bcs-loop-rebase-workspace.log`。本次仅完成上述定向验证，未重跑全 workspace、Singlebox 或真实模型质量验收。
+
+### 2026-09-17：连线展示名称、模板与副屏（已完成）
+
+- [x] 按用户确认方案增加可选 `transitions.<outcome>.display_name` 和 `loop.continue_display_name`；exhausted 使用外层对应 transition 的 `display_name`。不填写时保持原标签；填写时必须为非空白字符串。名称仅用于展示，真实 outcome、target、execution ID 和路由语义保持不变。
+- [x] Domain、编译计划、Preview/Run Graph、两个 HTTP adapter 和 OpenAPI 同步透传名称；已有未命名计划的 hash golden 保持通过。Run 使用保存的 snapshot，rerun 继承来源 snapshot，不读取后续定义版本的新名称。
+- [x] 前端预览和副屏同步显示普通连线、continue、break、exhausted 的名称，悬浮保留真实 outcome。浏览器验证 1280px/390px；修复副屏窄屏展开图裁切，只展示实际进入的执行，历史选择和执行状态不变。
+- [x] 完善中英文单 Loop `write-review-loop` 和双 Loop `research-writing-loops` 模板，为提交评审、继续修订、评审通过、重写及汇总设置对应名称；同步 schema、模板说明、spec 和面板文档。
+- [x] Rust runtime **254 passed**，Domain/Service API/模板目录 **250 passed**，v1 HTTP **14 passed**、兼容 HTTP **41 passed**、seed loader **1 passed**；OpenAPI/Event **150 passed**，Frontend Jest **74 passed / 15 suites**。Panel 完整 verify、Frontend CI、预览生产构建、Skill 校验、port purity、Store boundaries、forbidden symbols 和 `git diff --check` 通过。日志 `/tmp/bcs-edge-label-{runtime-all,contracts,http-v1,http-legacy,seeds,openapi,frontend-all,panel-verify,frontend-ci,preview-build,skill,port-purity,store-boundaries,forbidden-symbols}.log`。
+- [x] 构建并重启本地 21000 BCS，保留原 SQLite。在线中英文两套模板与源码一致，四份定义均 valid=true、warnings=[]；单 Loop 11 条、双 Loop 21 条展开边带名称，exhausted 边仍保留实际 `revise` outcome。在线副屏 UMD 与已验证构建逐字节一致，刷新后可新建协作测试。没有创建测试群或启动真实 Run。日志 `/tmp/bcs-edge-label-{build,restart,live}.log`。
+- 源码行数已检查：新增文件均小于 1,000 行；五个原有超长文件仅作必要字段传递/展示调整，仍超过限制（Panel Run View 4,275、runtime 6,689、definition validation tests 1,257、runtime progression tests 5,802、BcnController 1,913）。报告 `/tmp/bcs-edge-label-source-lines.json`。本次未扩大到无关运行时和页面拆分；仓库未找到可用的行数 CI allowlist，不将此项记为通过。后续需分别按图展示、运行时职责、测试场景和 API DTO 拆分，并落实行数门禁。
+- 本次未运行完整 workspace、Singlebox 覆盖门禁或真实模型质量测试；主清单维持 **24/30**，FL-16.9/16.10、FL-26～FL-30 保持未勾选。改动未提交，无新增 migration；历史协作定义/Run 保持原快照。
+
+### 2026-09-17：副屏角色优先显示名称（已完成）
+
+- [x] Run graph 节点增加可选 `assignee_display_name`，从 Run 保存的 `participants.<binding>.display_name` 投影；缺少或空白时省略，RuntimeActor 不套用参与者名。副屏右下角色标签和节点详情优先显示该名称，否则回退 binding ID；长名称省略，悬浮保留完整名称和 ID。
+- [x] 覆盖普通 v1、Loop、历史 Run/rerun 的快照名称、未命名/空白回退与 HumanInput；运行时 **183 passed**，v1/兼容 HTTP **14 + 41 passed**，相关 OpenAPI **48 passed**，Panel 完整 verify 通过。浏览器 1280px/390px 检查中文和长角色名显示，未扩大角色绑定或执行语义。日志 `/tmp/bcs-role-label-{runtime,http-v1,http-legacy,openapi,panel}.log`。
+- [x] 同步 Service API/OpenAPI、spec、Panel README；port purity、Store boundaries、forbidden symbols 和 `git diff --check` 通过。源码行数已检查，新增/扩展专项测试均低于 1,000 行；前条登记的既有超长文件拆分仍未完成，本次 runtime/Panel Run View 分别为 6,695/4,276 行。
+- 本次未运行完整 workspace/Singlebox，无新增 migration；主清单和生产验收状态不变，改动未提交。
+- [x] 已构建并重启本地 21000 BCS，保留数据库。在线核对最近 3 个已有 Run 的 32 个节点，角色名与保存定义一致，包括“资料研究员”“主编”“写作者”“润色编辑”；副屏 UMD 与验证构建逐字节一致。已有 Run 无需重建，刷新即可加载。日志 `/tmp/bcs-role-label-{build,restart,live}.log`。
+
+### 2026-09-20：模板名称修订与 rebase 验证
+
+- [x] 中文写作评审模板名称移除多余的“（Loop）”，名称为“写作评审循环”；模板目录专项 **11 passed**，在线目录和详情名称已核对。修订并入已有功能提交。
+- [x] 两个功能提交已 rebase 到 `origin/dev` 的 `b660c2bb0`。消息存储冲突保留 dev 的 `chat_error` 持久化去重及本分支调用方指定消息 ID 的幂等发布；OpenAPI 保留 dev 的 72 个公开操作与新增接口。不修改迁移历史。
+- [x] rebase 后 OpenAPI/Event **161 passed**、Frontend Jest **74 passed / 15 suites**、Frontend CI 和 Panel 完整 `verify` 通过；port purity、Store boundaries、forbidden symbols 和差异空白检查通过。日志 `/tmp/bcs-loop-rebase-20260920-{contracts,frontend-tests,frontend-ci,panel,ports,stores,forbidden}.log`。
+- [ ] rebase 后消息存储、消息流、协作存储、协作运行时及模板目录的 Rust 定向回归未完成。`cargo nextest run --manifest-path src/bcs/Cargo.toml --profile ci --retries 0 -p bcs-message-store -p bcs-message-flow -p bcs-collaboration-store -p bcs-collaboration-runtime -p bcs-collaboration-template` 编译成功，但多个测试二进制停在 `--list` 枚举超过 5 分钟；单独执行枚举也未返回，尚未开始运行用例，已主动中断（exit 130）。需在合并前重跑，不记为通过。日志 `/tmp/bcs-loop-rebase-20260920-rust.log`。
+- 本次未重跑完整 workspace、真实 MySQL、浏览器或 Singlebox 验收。已有源码行数债务仍未关闭，消息存储 `memory.rs` 为 1,023 行；保留原有职责拆分待办。主清单维持 **24/30**，FL-16.9/16.10、FL-26～FL-30 不改变验收状态。PR 描述已区分当前回归、此前验收和剩余发布工作；未推送分支。

@@ -1146,8 +1146,8 @@ state_machine.loop.completed
 2026-09-17 逻辑 Loop 展示修订：用户已确认方案并要求实施。
 
 - 默认使用循环视图，每个 Loop 使用有标题的容器，循环体仅展示一次；保留内部并行/汇合。
-- continue 用 result 到 entry 的虚线回边表示，标签只写 `continue`；max_iterations=1 不画不可执行回边。
-- break/exhausted 标签只展示逻辑 outcome 原文（例如 `approved`、`exhausted`），不附加中文解释；后续统一考虑 i18n。
+- continue 用 result 到 entry 的虚线回边表示，默认标签为 `continue`；max_iterations=1 不画不可执行回边。
+- break/exhausted 默认展示逻辑 outcome 原文（例如 `approved`、`exhausted`），不自动附加解释；作者可按下述合同提供展示名称。
   上限仅在折叠信息/悬浮说明中使用 `max_iterations` 展示；节点标题不附加“第 N 轮”或序号，外框标识 Loop。
 - Definition preview 没有执行历史，只展示单份循环体，不按上限展开未来 execution nodes。
   实际执行仍是不可变 DAG，不改变 Runtime、编译器或持久化。
@@ -1160,9 +1160,20 @@ state_machine.loop.completed
   普通 v1 省略 loops。旧服务未返回完整 descriptors 时显示展开图，不猜测条件。
 - validation error 指向 authoring path，超限在提交前展示。
 
+#### 连线展示名称（2026-09-17，approved：用户确认实施）
+
+- 普通节点、Loop body 节点及 Loop 外层出口的 transition 可声明 `display_name`；Loop 可声明 `loop.continue_display_name`。两者均可省略，提供时必须为非空白字符串，不接受 null 或其他类型。
+- 当 transition 配置名称时，预览和副屏的对应连线显示该名称，包括默认通常省略标签的 complete 边；同一 transition 的多个 targets 共用名称。
+- 当 Loop 配置 continue 名称时，逻辑回边及实际执行展开图的 continue 边显示该名称；多个 continue outcomes 共用名称。未配置时显示 continue。
+- break/exhausted 的名称取自外层 `transitions.<logical_outcome>.display_name`。最后一次 result 仍返回真实 continue outcome，但连线使用 exhausted 出口名称。无需单独的 exhausted_display_name。
+- 预览与 Run graph 的 edge 增加可选 `display_name`，loops descriptor 增加可选 `continue_display_name`；未配置时均省略。副屏与预览保留原始 outcome 和 loop_route 用于状态判定与悬浮排障，不以展示文案判断执行路径。
+- 当用户查看历史 Run 或 rerun 时，名称来自该 Run 不可变 authoring/plan snapshot，后续修改模板不改变历史文案。缺少新字段的旧定义、plan 与 content hash 必须保持兼容；不新增 migration 或改变 outcome、节点 ID、执行拓扑。
+- 传播范围：Domain authoring、编译与 snapshot、Service API/OpenAPI、两个 HTTP adapter、Frontend preview、BCS panel、Skill 和中英文模板。旧服务不接受新 authoring 字段，模板与服务需同步升级；升级后的服务继续读取旧定义和快照。
+
 ### 16.2 Run graph
 
 - 默认循环视图，外框标识 Loop 与当前/所选执行序号（`#N`），节点只显示名称。退出状态直接使用实际逻辑 outcome。
+- 节点右下角色标签和详情优先显示 Run graph 的可选 `assignee_display_name`，取自保存定义中 `participants.<binding>.display_name`；缺少或空白名称时省略该字段并回退 binding ID。仅 BotBinding 投影角色名，RuntimeActor 不套用参与者名称。长名称省略显示，悬浮保留完整名称和 ID；普通 v1、Loop 及 rerun 使用相同规则，不改变实际绑定或历史快照。
 - 查看执行下拉框与展开执行图仅包含实际进入的 iteration：任一 body 节点 ready/running/retry_scheduled、存在 started_at、completed/failed 或 attempt>0。
   仅因未来跳过而写入 completed_at 的 skipped 节点不算进入。取消前已启动的执行仍保留。
 - 默认跟随当前执行；无活动节点时显示最后实际进入的执行；完全未启动的 Loop 只保留一份待执行结构，没有可选历史。

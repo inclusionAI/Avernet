@@ -1,0 +1,148 @@
+# Two sibling Loops run in sequence, with independent iteration counts and previous results.
+name: Research and Writing Loops
+
+metadata:
+  description: Review research, then review writing in a second Loop. A Judge chooses approved or revise in each stage. Exhausted research produces a gap report; exhausted writing produces an explicitly unapproved rewrite.
+
+participants:
+  researcher:
+    display_name: Researcher
+    description: Maintains a complete research brief with verified facts, sources and gaps, and addresses review feedback.
+    required: true
+  writer:
+    display_name: Writer
+    description: Writes from approved research, revises the draft and summarizes the branch that actually ran.
+    required: true
+  reviewer:
+    display_name: Editor
+    description: Reviews research sufficiency and writing quality separately, explicitly approving or requesting revisions.
+    required: true
+  polisher:
+    display_name: Copy Editor
+    description: Polishes approved writing while preserving facts, conclusions and necessary limitations.
+    required: true
+
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 2
+    graph_mode: hierarchical
+    defaults:
+      node_timeout_ms: 120000
+      max_attempts: 2
+    nodes:
+      research_loop:
+        kind: loop
+        display_name: Research and Evidence Review
+        loop:
+          mode: fixed
+          max_iterations: 3
+          entry_node: research
+          result_node: review
+          continue_outcomes: [revise]
+          continue_display_name: Refine research
+          break_outcomes: [approved]
+          exhausted_outcome: exhausted
+          nodes:
+            research:
+              kind: bot_task
+              display_name: Prepare or Improve Research
+              assignee: {type: bot_binding, binding: researcher}
+              instruction: |
+                Prepare a complete research brief covering key facts, verifiable sources, contradictions and missing evidence for the user's request.
+                Use supplied or actually verifiable material. Explicitly identify unverified claims; never invent sources.
+                On subsequent executions address this Loop's previous review and return the complete research brief.
+              transitions:
+                complete: {display_name: Submit for review, targets: [review]}
+            review:
+              kind: bot_task
+              display_name: Review Research Sufficiency
+              assignee: {type: bot_binding, binding: reviewer}
+              instruction: |
+                Decide whether the research supports the requested deliverable. Check sources, key facts and gaps affecting the conclusion.
+                Return the complete research brief, explicit approval or revision decision, and required additions.
+                Approve as soon as the research supports writing. Request revisions for material gaps, never because iterations remain.
+              judge:
+                type: llm
+                criteria:
+                  - Choose approved when the editor explicitly approves, preserves the full brief and identifies no material delivery gaps.
+                  - Choose revise for material research gaps, requested revisions or missing explicit approval.
+                outcomes: [approved, revise]
+        transitions:
+          approved: {display_name: Research approved, targets: [writing_loop]}
+          exhausted: {display_name: Report gaps, targets: [research_gaps]}
+      writing_loop:
+        kind: loop
+        display_name: Writing and Editorial Review
+        loop:
+          mode: fixed
+          max_iterations: 3
+          entry_node: draft
+          result_node: review
+          continue_outcomes: [revise]
+          continue_display_name: Revise draft
+          break_outcomes: [approved]
+          exhausted_outcome: exhausted
+          nodes:
+            draft:
+              kind: bot_task
+              display_name: Write or Revise the Draft
+              assignee: {type: bot_binding, binding: writer}
+              instruction: |
+                Start from the complete approved upstream research. On subsequent executions use this Loop's previous draft and review.
+                Return the complete draft and supporting research each time, preserving sources and uncertainty. Research approval does not imply writing approval.
+              transitions:
+                complete: {display_name: Submit for review, targets: [review]}
+            # The repeated review ID belongs to this Loop's body, not the first Loop.
+            review:
+              kind: bot_task
+              display_name: Review Writing Quality
+              assignee: {type: bot_binding, binding: reviewer}
+              instruction: |
+                Check whether the draft answers the user, respects the approved research and presents clear, supported conclusions.
+                Return the complete draft, supporting research, explicit approval or revision decision, and required fixes.
+                Approve when delivery standards are met. Never request edits just to fill iterations, and retain research for the next revision.
+              judge:
+                type: llm
+                criteria:
+                  - Choose approved when the editor explicitly approves the complete draft, it follows the research and no required fixes remain.
+                  - Choose revise for substantive defects, requested revisions or missing explicit approval.
+                outcomes: [approved, revise]
+        transitions:
+          approved: {display_name: Approved, targets: [polish]}
+          exhausted: {display_name: Rewrite required, targets: [rewrite]}
+      research_gaps:
+        kind: bot_task
+        display_name: Report Research Gaps
+        assignee: {type: bot_binding, binding: researcher}
+        instruction: |
+          Research did not pass review. Use the last brief and review to report confirmed facts, material gaps and information needed from the user.
+          State that writing has not started. Do not write as if the evidence were complete or interpret exhausted as approval.
+        transitions:
+          complete: {display_name: Summarize, targets: [finalize]}
+      polish:
+        kind: bot_task
+        display_name: Polish Approved Writing
+        assignee: {type: bot_binding, binding: polisher}
+        instruction: |
+          Research and writing both passed review. Polish the complete upstream draft, preserving facts, sources, conclusions and limitations, and return the full text.
+        transitions:
+          complete: {display_name: Summarize, targets: [finalize]}
+      rewrite:
+        kind: bot_task
+        display_name: Rewrite Unapproved Writing
+        assignee: {type: bot_binding, binding: writer}
+        instruction: |
+          Research passed but writing did not. Rewrite using the last draft and required fixes, preserve the supporting evidence and list unresolved issues.
+          Return the full draft without claiming the rewrite passed editorial review.
+        transitions:
+          complete: {display_name: Summarize, targets: [finalize]}
+      finalize:
+        kind: bot_task
+        display_name: Summarize the Final Result
+        assignee: {type: bot_binding, binding: writer}
+        instruction: |
+          Summarize the branch that actually ran, distinguishing research approval from writing approval.
+          The research-gap branch reports facts, gaps and next steps; the polish branch delivers approved writing; the rewrite branch retains its unapproved status.
+          Do not wait for unselected branches or fabricate evidence or approval.
+        final_output: true

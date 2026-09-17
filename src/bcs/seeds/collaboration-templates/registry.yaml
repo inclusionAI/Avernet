@@ -31,6 +31,10 @@ templates:
     tags: [loop, judge, serial]
     priority: 35
 
+  research-writing-loops:
+    tags: [loop, judge, branching, serial]
+    priority: 36
+
   single-bot-guided-answer:
     tags: [single-step]
     priority: 40

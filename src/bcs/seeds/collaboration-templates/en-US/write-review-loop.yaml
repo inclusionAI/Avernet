@@ -38,6 +38,7 @@ runtime:
           result_node: review
           # Exit as soon as approved; unresolved revisions at the iteration limit produce exhausted.
           continue_outcomes: [revise]
+          continue_display_name: Revise draft
           break_outcomes: [approved]
           exhausted_outcome: exhausted
           nodes:
@@ -53,6 +54,7 @@ runtime:
                 Return the complete revised draft and a short account of the changes, never just a diff.
               transitions:
                 complete:
+                  display_name: Submit for review
                   targets: [review]
             review:
               kind: bot_task
@@ -75,8 +77,10 @@ runtime:
         # Approval is the normal exit. Exhaustion stops repeated revisions but does not imply approval.
         transitions:
           approved:
+            display_name: Approved
             targets: [polish]
           exhausted:
+            display_name: Rewrite required
             targets: [rewrite]
       polish:
         kind: bot_task
@@ -90,6 +94,7 @@ runtime:
           Return the complete polished draft and note that it passed editorial review.
         transitions:
           complete:
+            display_name: Summarize
             targets: [finalize]
       rewrite:
         kind: bot_task
@@ -103,6 +108,7 @@ runtime:
           Explicitly list unresolved issues and missing information. Do not claim the rewrite passed editorial review.
         transitions:
           complete:
+            display_name: Summarize
             targets: [finalize]
       finalize:
         kind: bot_task

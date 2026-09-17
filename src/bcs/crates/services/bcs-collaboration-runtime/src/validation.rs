@@ -175,6 +175,7 @@ fn graph_preview(projection: DefinitionGraphProjection) -> CollaborationDefiniti
             .edges
             .into_iter()
             .map(|edge| CollaborationDefinitionGraphEdge {
+                display_name: edge.display_name,
                 source: edge.source,
                 target: edge.target,
                 outcome: edge.outcome,
@@ -458,9 +459,10 @@ fn validate_nodes_shape(
                 };
                 ensure_allowed_keys(
                     transition,
-                    &["targets", "guard"],
+                    &["targets", "guard", "display_name"],
                     &format!("{node_path}.transitions.{outcome}"),
                 )?;
+                validate_optional_display_name(transition, "display_name", &format!("{node_path}.transitions.{outcome}"))?;
             }
         }
     }
@@ -475,7 +477,9 @@ fn validate_loop_shape(
     let body = mapping_get(node, "loop").and_then(Value::as_mapping)
         .ok_or_else(|| diagnostic("INVALID_DEFINITION", &loop_path, "loop must be a mapping"))?;
     let fields = ["mode", "max_iterations", "entry_node", "result_node", "continue_outcomes", "break_outcomes", "exhausted_outcome", "nodes"];
-    ensure_allowed_keys(body, &fields, &loop_path)?;
+    let allowed: Vec<_> = fields.into_iter().chain(["continue_display_name"]).collect();
+    ensure_allowed_keys(body, &allowed, &loop_path)?;
+    validate_optional_display_name(body, "continue_display_name", &loop_path)?;
     for field in fields {
         if !mapping_contains(body, field) {
             return Err(diagnostic("INVALID_DEFINITION", format!("{loop_path}.{field}"), "field is required"));
@@ -506,6 +510,19 @@ fn ensure_allowed_keys(
                 format!("{path}.{key}"),
                 "unsupported or misspelled field",
             ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_optional_display_name(
+    mapping: &Mapping,
+    field: &str,
+    path: &str,
+) -> Result<(), CollaborationDefinitionValidationDiagnostic> {
+    if let Some(value) = mapping_get(mapping, field) {
+        if value.as_str().is_none_or(|name| name.trim().is_empty()) {
+            return Err(diagnostic("INVALID_DEFINITION", format!("{path}.{field}"), "must be a nonblank string"));
         }
     }
     Ok(())

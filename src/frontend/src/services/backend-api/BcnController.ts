@@ -138,6 +138,7 @@ export interface CollaborationDefinitionLoopRoute {
 }
 
 export interface CollaborationDefinitionGraphEdge {
+  display_name?: string;
   source: string;
   target: string;
   outcome: string;
@@ -145,6 +146,7 @@ export interface CollaborationDefinitionGraphEdge {
 }
 
 export interface StateMachineLoopGraphView {
+  continue_display_name?: string;
   display_name: string;
   max_iterations: number;
   entry_node_id: string;

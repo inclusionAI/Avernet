@@ -39,6 +39,33 @@ async function scenario(run) {
 try {
   await scenario(async (container, mount) => {
     graph = JSON.parse(readFileSync(new URL('../../../tests/fixtures/fixed_loop_logical_view.json', import.meta.url), 'utf8'));
+    graph.loops.revision_rounds.continue_display_name = '根据意见修订';
+    graph.nodes.forEach(node => { if (node.assignee?.binding === 'writer') node.assignee_display_name = '资料研究与内容编写负责人'; });
+    const names = { continue: '根据意见修订', break: '评审通过', exhausted: '转入重写' };
+    graph.edges.forEach(edge => { edge.display_name = edge.loop_route ? names[edge.loop_route.kind] : '提交评审'; });
+    await mount(false);
+    const role = container.querySelector('span[title="资料研究与内容编写负责人 · writer"]');
+    assert.equal(role.textContent, '资料研究与内容编写负责人');
+    assert.equal(container.querySelector('span[title="reviewer"]').textContent, 'reviewer', 'legacy responses fall back to binding ID');
+    for (const [kind, name] of Object.entries(names)) {
+      const path = container.querySelector(`[data-loop-route="${kind}"]`);
+      assert.equal(path.parentNode.querySelector('text').textContent, name);
+      assert.ok(path.parentNode.querySelector('title').textContent.includes(name));
+    }
+    assert.equal(container.querySelector('[data-loop-route="exhausted"]').dataset.edgeOutcome, 'revise');
+    assert.equal(container.querySelector('[data-loop-route="continue"]').dataset.edgeState, 'pending');
+    const ordinary = container.querySelector('[data-edge-source="draft-2"]');
+    assert.equal(ordinary.parentNode.querySelector('text').textContent, '提交评审');
+    await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === '展开执行图').click());
+    assert.equal(container.querySelector('[data-loop-route="continue"]').parentNode.querySelector('text').textContent, names.continue);
+    assert.equal(container.querySelector('[aria-label="State machine graph"]').style.width, '100%', 'expanded Loop graphs fit narrow panels too');
+    assert.equal(container.querySelectorAll('span[title="资料研究与内容编写负责人 · writer"]').length, 2);
+    await act(async () => container.querySelector('[data-loop-id]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })));
+    await settle();
+    assert.match(container.querySelector('[role="dialog"]').textContent, /资料研究与内容编写负责人/);
+  });
+  await scenario(async (container, mount) => {
+    graph = JSON.parse(readFileSync(new URL('../../../tests/fixtures/fixed_loop_logical_view.json', import.meta.url), 'utf8'));
     await mount(false);
     assert.equal(container.querySelectorAll('[data-loop-container]').length, 1);
     assert.equal(container.querySelectorAll('[data-loop-id="revision_rounds"]').length, 2);

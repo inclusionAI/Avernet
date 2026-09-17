@@ -15,6 +15,12 @@ mod event_metadata_tests;
 #[path = "loop_observability.rs"]
 mod observability_tests;
 
+#[path = "multi_loop_template.rs"]
+mod multi_loop_template_tests;
+
+#[path = "edge_display_names.rs"]
+mod edge_display_name_tests;
+
 struct SnapshotDefinitions {
     inner: Arc<MemoryCollaborationStore>,
     fail_save: AtomicBool,

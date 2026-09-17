@@ -6,6 +6,13 @@ import writing from '../../../tests/fixtures/fixed_loop_logical_view.json';
 
 const scenario = new URLSearchParams(location.search).get('scenario') || 'writing';
 const graph = structuredClone(scenario === 'writing' ? writing : fixture.graph);
+if (new URLSearchParams(location.search).has('names')) {
+  graph.nodes.forEach(node => Object.assign(node, { assignee_display_name: node.assignee?.type === 'bot_binding'
+    ? { writer: '资料研究与内容编写负责人', reviewer: '主编', polisher: '润色编辑' }[node.assignee.binding] : undefined }));
+  Object.values(graph.loops).forEach(loop => Object.assign(loop, { continue_display_name: '根据意见修订' }));
+  graph.edges.forEach(edge => Object.assign(edge, { display_name: edge.loop_route
+    ? { continue: '根据意见修订', break: '评审通过', exhausted: '转入重写' }[edge.loop_route.kind] : '提交评审' }));
+}
 const human = scenario === 'first' || scenario === 'later';
 const index = scenario === 'first' || scenario === 'break' ? 0 : 2;
 if (scenario !== 'writing') graph.nodes.forEach((node, i) => {

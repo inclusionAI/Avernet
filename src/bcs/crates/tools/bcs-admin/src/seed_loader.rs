@@ -301,6 +301,7 @@ mod tests {
                 "world-cup-preview-content-production",
                 "micro-merchant-event-orchestration",
                 "write-review-loop",
+                "research-writing-loops",
                 "single-bot-guided-answer",
             ]
         );
@@ -340,6 +341,16 @@ mod tests {
             assert!(content.participant_summary_json["writer"]["required"].as_bool().unwrap());
             assert!(content.participant_summary_json["reviewer"]["required"].as_bool().unwrap());
             assert!(content.participant_summary_json["polisher"]["required"].as_bool().unwrap());
+        }
+
+        let multiple_loops = catalog.templates.iter().find(|template| template.id == "research-writing-loops")
+            .with_context(|| "missing research-writing-loops")?;
+        assert_eq!(multiple_loops.priority, 36);
+        assert_eq!(multiple_loops.contents.len(), 2);
+        for content in &multiple_loops.contents {
+            assert_eq!(content.participant_summary_json.as_object().unwrap().len(), 4);
+            let nodes = &content.definition_json["runtime"]["state_machine"]["nodes"];
+            assert_eq!(nodes.as_object().unwrap().values().filter(|node| node["kind"] == "loop").count(), 2);
         }
 
         let bot_human_bot = catalog

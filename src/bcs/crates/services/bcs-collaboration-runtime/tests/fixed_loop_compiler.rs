@@ -28,7 +28,7 @@ fn spec_and_cli_fixed_loop_examples_pass_authoring_validation() {
     let replacement: serde_yaml::Value = serde_yaml::from_str(fragment).unwrap();
     fixed["runtime"]["state_machine"]["nodes"]["rounds"] = replacement["rounds"].clone();
     let cli = include_str!("../../../tools/bcs-cli/bcs-coordination/references/custom-collaboration-schema.md");
-    let cli = yaml_block(cli.split_once("## Fixed Loop validation preview").unwrap().1);
+    let cli = yaml_block(cli.split_once("## Fixed Loop\n").unwrap().1);
     for yaml in [full.to_string(), serde_yaml::to_string(&fixed).unwrap(), cli.to_string()] {
         let result = validate_authoring_definition_yaml(ValidateCollaborationDefinitionYamlCommand { definition_yaml: yaml, judge_available: true });
         assert!(result.valid, "{:?}", result.errors);
@@ -81,6 +81,50 @@ fn seeded_writing_review_loop_routes_approval_to_polish_and_exhaustion_to_rewrit
                 assert_eq!(route.logical_outcome, "exhausted");
                 assert_eq!(edge.target_execution_node_id, "rewrite");
                 assert_eq!(edge.artifact_projection, CompiledArtifactProjection::Artifact);
+            }
+        }
+    }
+}
+
+#[test]
+fn seeded_research_writing_loops_have_independent_bodies_and_explicit_exit_routes() {
+    for yaml in [
+        include_str!("../../../../seeds/collaboration-templates/zh-CN/research-writing-loops.yaml"),
+        include_str!("../../../../seeds/collaboration-templates/en-US/research-writing-loops.yaml"),
+    ] {
+        let validation = validate_authoring_definition_yaml(ValidateCollaborationDefinitionYamlCommand {
+            definition_yaml: yaml.into(), judge_available: true,
+        });
+        assert!(validation.valid, "{:?}", validation.errors);
+        let definition: CollaborationDefinition = serde_yaml::from_str(yaml).unwrap();
+        let plan = compile(serde_json::to_value(definition).unwrap());
+        assert_eq!(plan.state_machine.nodes.len(), 16);
+        assert_eq!(plan.node_metadata.values().filter(|node| node.is_loop_entry && node.iteration == Some(1)).count(), 2);
+        let writing_entry = plan.node_metadata.values().find(|node|
+            node.loop_id.as_deref() == Some("writing_loop") && node.is_loop_entry && node.iteration == Some(1)).unwrap();
+        assert!(writing_entry.previous_result_node_id.is_none());
+        for (loop_id, approved_target, exhausted_target) in [
+            ("research_loop", writing_entry.execution_node_id.as_str(), "research_gaps"),
+            ("writing_loop", "polish", "rewrite"),
+        ] {
+            for iteration in 1..=3 {
+                let result = plan.node_metadata.values().find(|node| node.loop_id.as_deref() == Some(loop_id)
+                    && node.definition_node_id == "review" && node.iteration == Some(iteration)).unwrap();
+                let approved = plan.edge_metadata.iter().find(|edge|
+                    edge.source_execution_node_id == result.execution_node_id && edge.outcome == "approved").unwrap();
+                assert_eq!(approved.target_execution_node_id, approved_target);
+                assert_eq!(approved.loop_route.as_ref().unwrap().kind, StateMachineLoopRouteKind::Break);
+                let revise = plan.edge_metadata.iter().find(|edge|
+                    edge.source_execution_node_id == result.execution_node_id && edge.outcome == "revise").unwrap();
+                if iteration < 3 {
+                    let next = &plan.node_metadata[&revise.target_execution_node_id];
+                    assert_eq!(next.loop_id.as_deref(), Some(loop_id));
+                    assert_eq!(next.iteration, Some(iteration + 1));
+                    assert_eq!(next.previous_result_node_id.as_ref(), Some(&result.execution_node_id));
+                } else {
+                    assert_eq!(revise.target_execution_node_id, exhausted_target);
+                    assert_eq!(revise.loop_route.as_ref().unwrap().kind, StateMachineLoopRouteKind::Exhausted);
+                }
             }
         }
     }

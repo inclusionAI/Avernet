@@ -117,9 +117,9 @@ export function buildCollaborationLoopLayout(
   groups.forEach((group) => {
     const loop = graph.loops![group.loopId];
     if (loop.max_iterations <= 1) return;
-    edges.push({ id: `${group.id}:return`, source: first(group.loopId, loop.result_node_id).node_id,
+    edges.push({ id: `${group.id}:return`, outcome: loop.continue_outcomes.join(' / '), source: first(group.loopId, loop.result_node_id).node_id,
       target: first(group.loopId, loop.entry_node_id).node_id, sourceHandle: 'loop-return', targetHandle: 'loop-return',
-      label: 'continue', data: { loopRoute: { kind: 'continue', logical_outcome: loop.continue_outcomes.join(' / ') },
+      label: loop.continue_display_name ?? 'continue', data: { loopRoute: { kind: 'continue', logical_outcome: loop.continue_outcomes.join(' / ') },
         outcome: loop.continue_outcomes.join(' / '), labelLane: 0, logicalView: true, returnEdge: true,
         returnX: group.position.x + group.width - 12 } });
   });

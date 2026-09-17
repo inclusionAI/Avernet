@@ -160,6 +160,11 @@ CollaborationDefinitionGraphEdge:
   additionalProperties: false
   required: [source, target, outcome]
   properties:
+    display_name:
+      type: string
+      minLength: 1
+      pattern: "\\S"
+      description: Optional author-defined label for display only. Does not change outcomes or routing; omitted for legacy definitions.
     source:
       type: string
       minLength: 1
@@ -178,6 +183,11 @@ StateMachineLoopGraphView:
   description: Logical Loop display descriptor from validated authoring or the immutable Run snapshot. Body IDs are logical IDs. This does not introduce a Loop Node Run.
   required: [display_name, max_iterations, entry_node_id, result_node_id, body_node_ids, continue_outcomes, break_outcomes, exhausted_outcome]
   properties:
+    continue_display_name:
+      type: string
+      minLength: 1
+      pattern: "\\S"
+      description: Optional author-defined label for display only. Does not change outcomes or routing; omitted for legacy definitions.
     display_name:
       type: string
     max_iterations:

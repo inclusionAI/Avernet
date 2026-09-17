@@ -421,6 +421,8 @@ pub struct FixedLoopDefinition {
     pub entry_node: String,
     pub result_node: String,
     pub continue_outcomes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continue_display_name: Option<String>,
     pub break_outcomes: Vec<String>,
     pub exhausted_outcome: String,
     pub nodes: BTreeMap<String, StateMachineNodeDefinition>,
@@ -554,6 +556,8 @@ pub enum StateMachineAssignee {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StateMachineTransition {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     #[serde(default)]
     pub targets: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

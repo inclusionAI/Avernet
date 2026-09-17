@@ -14,7 +14,7 @@
   "definition": {
     "id": "loop-definition",
     "version": 1,
-    "name": "写作评审循环（Loop）",
+    "name": "写作评审循环",
     "graph_mode": "hierarchical",
     "execution_graph_mode": "acyclic",
     "execution_plan_compiler_version": "bcs.fixed-loop.compiler/v1",
