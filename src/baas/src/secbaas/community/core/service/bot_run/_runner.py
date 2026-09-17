@@ -578,7 +578,7 @@ class BotRunner:
         lifecycle_stage = extract_lifecycle_stage(metadata)
 
         try:
-            binding_info = await self._resolve_binding(bot_id, lifecycle_stage)
+            binding_info = await self._resolve_binding(bot_id, lifecycle_stage, metadata=metadata)
         except Exception as e:
             logger.warning(
                 "[runner.abort] binding resolution failed: run_id=%s bot_id=%s %s",
@@ -784,7 +784,7 @@ class BotRunner:
             BotBindingNotFoundError: binding 不存在
         """
         lifecycle_stage = extract_lifecycle_stage(metadata)
-        binding_info = await self._resolve_binding(bot_id, lifecycle_stage)
+        binding_info = await self._resolve_binding(bot_id, lifecycle_stage, metadata=metadata)
         if binding_info is None:
             logger.warning(
                 "[runner] Bot binding not found: bot_id=%s, lifecycle_stage=%s",
@@ -890,24 +890,31 @@ class BotRunner:
         self,
         bot_id: str,
         lifecycle_stage: str = "online",
+        metadata: dict[str, Any] | None = None,
     ) -> BotBindingInfo | None:
         """解析 bot_id 的 binding 信息（通过 BotServicePlugin）"""
         real_bot_id, entity_id = parse_bot_id(bot_id)
         if not real_bot_id:
             return None
+        # 评测流量：将 default_tag 透传给 binding 查找
+        default_tag = None
+        if lifecycle_stage == "eval" and metadata:
+            default_tag = metadata.get("default_tag")
         try:
             data = await self._bot_service_plugin.get_binding(
                 bot_id=real_bot_id,
                 owner_id=entity_id or "",
                 stage=lifecycle_stage,
+                default_tag=default_tag,
             )
         except PaasError as e:
             if e.code == ErrorCode.NOT_FOUND:
                 logger.warning(
                     "[runner] Bot binding unavailable: bot_id=%s, "
-                    "lifecycle_stage=%s, error=%s",
+                    "lifecycle_stage=%s, default_tag=%s, error=%s",
                     bot_id,
                     lifecycle_stage,
+                    default_tag,
                     e,
                 )
                 return None

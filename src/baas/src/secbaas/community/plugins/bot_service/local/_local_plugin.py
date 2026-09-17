@@ -53,6 +53,8 @@ class LocalBotServicePlugin(BotServicePlugin):
         bot_id: str,
         owner_id: str,
         stage: str,
+        *,
+        default_tag: str | None = None,
     ) -> BotBindingData:
         """Not available in local mode — raises PaasError.
 

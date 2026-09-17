@@ -30,6 +30,8 @@ class StubBotServicePlugin(BotServicePlugin):
         bot_id: str,
         owner_id: str,
         stage: str,
+        *,
+        default_tag: str | None = None,
     ) -> BotBindingData:
         """Return deterministic stub BotBindingData, or simulate failures.
 

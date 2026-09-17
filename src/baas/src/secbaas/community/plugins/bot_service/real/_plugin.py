@@ -232,6 +232,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         bot_id: str,
         owner_id: str,
         stage: str,
+        default_tag: str | None = None,
     ) -> dict[str, Any]:
         """GET /api/service-bot/publish/{bot_id}/binding with error propagation.
 
@@ -239,7 +240,9 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         Raises PaasError on transport failure, HTTP error, or envelope failure.
         """
         url = f"{self._base_url.rstrip('/')}/api/service-bot/publish/{bot_id}/binding"
-        params = {"owner_id": owner_id, "stage": stage}
+        params: dict[str, Any] = {"owner_id": owner_id, "stage": stage}
+        if default_tag:
+            params["default_tag"] = default_tag
 
         for attempt in range(1, _BINDING_MAX_ATTEMPTS + 1):
             try:
@@ -279,6 +282,8 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         bot_id: str,
         owner_id: str,
         stage: str,
+        *,
+        default_tag: str | None = None,
     ) -> BotBindingData:
         """Query bot binding info via GET /api/service-bot/publish/{bot_id}/binding.
 
@@ -289,6 +294,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
             bot_id: Bot identifier.
             owner_id: Owner entity identifier.
             stage: Lifecycle stage (online, verify, draft, or all).
+            default_tag: 评测环境 binding 标签，透传至后端 binding 查询接口。
 
         Returns:
             BotBindingData with binding details.
@@ -310,7 +316,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         for s in stages:
             _stage_t0 = time.monotonic()
             try:
-                inner = await self._get_binding_raw(bot_id, owner_id, s)
+                inner = await self._get_binding_raw(bot_id, owner_id, s, default_tag=default_tag)
             except PaasError as e:
                 _stage_ms = (time.monotonic() - _stage_t0) * 1000
                 last_error = e
