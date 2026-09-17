@@ -21,6 +21,12 @@ from agentclaw.community.core.task.domain.models import TaskExecutionGraph, Task
 from agentclaw.community.core.task.domain.prompt_constants import (
     NO_WEB_SEARCH_CONSTRAINT,
 )
+from agentclaw.community.core.task.task_dispatch.rationale import (
+    _build_search_rationale,
+    _claim_product,
+    _extract_skill_response_content,
+)
+from agentclaw.community.core.task.task_trajectory.models import DispatchRationale
 
 logger = logging.getLogger("task.dispatcher")
 
@@ -124,6 +130,12 @@ class SearchResult:
     group_formation: GroupFormation | None = None  # HIT_MULTI_BOTS
     miss_reason: str | None = None  # MISS
     unauthorized_bots: list[dict] | None = None  # JOIN 丢的候选(dashboard unauthorized_bots 契约)
+    # REQ-2 DISPATCH rationale —— 策略 apply 填充,经 dispatcher 写入
+    # ``node.run_info.extend_props["_dispatch_rationale"]`` 透出到引擎 DISPATCH 闸门;
+    # ``None`` 表示策略未填(直驱/重投/装配失败 —— 装配全程 try/except 见
+    # ``_build_search_rationale``)。候选/分/join_dropped 一并由此字段传递,
+    # **不**进 ``unauthorized_bots``(后者保留 ``claim_mode_off`` 兼容 dashboard 契约)。
+    rationale: DispatchRationale | None = None
 
 
 class DispatchStrategy(Protocol):
@@ -156,8 +168,29 @@ class DirectDispatchStrategy:
         cfg = graph.extend_props.get("execution_config", {}) or {}
         static_group = node.run_info.extend_props.get("pending_group_formation")
         if static_group is not None:
-            return SearchResult(outcome=SearchOutcome.HIT_MULTI_BOTS, group_formation=static_group)
-        return SearchResult(outcome=SearchOutcome.HIT_SINGLE, bot_id=node.run_info.extend_props.get("static_bot_id") or cfg.get("bot"))
+            sr = SearchResult(outcome=SearchOutcome.HIT_MULTI_BOTS, group_formation=static_group)
+        else:
+            sr = SearchResult(
+                outcome=SearchOutcome.HIT_SINGLE,
+                bot_id=node.run_info.extend_props.get("static_bot_id") or cfg.get("bot"),
+            )
+        # REQ-2 DISPATCH rationale —— 直驱策略:跳过搜推/JOIN;rationale 仅标
+        # strategy=direct/decision=direct,候选/分/join_dropped 空集(REQ-9
+        # boost_reason 兜底"策略=direct 模式=direct …"经 ext_info 还原)。
+        # try/except 保证直驱永不因 rationale 装配失败退佣:
+        try:
+            sr.rationale = DispatchRationale(
+                strategy_name="direct",
+                decision_mode="direct",
+                join_filter_applied=False,
+            )
+        except Exception as ex:  # noqa: BLE001  rationale 装配失败 → None,直驱继续
+            logger.debug(
+                "[task][dispatch][rationale] direct strategy=%s node=%s 装配失败:%s",
+                "direct", node.node_id, ex,
+            )
+            sr.rationale = None
+        return sr
 
 
 class SearchBasedDispatchStrategy:
@@ -198,7 +231,49 @@ class SearchBasedDispatchStrategy:
     async def matches(self, node: TaskNode, graph: TaskExecutionGraph) -> bool:
         return True  # 兜底
 
+    def _resolve_use_skill(self) -> bool:
+        """``use_search_skill`` 决议:``task_settings`` 优先,否则构造器默认。"""
+        if self._task_settings is not None:
+            return bool(self._task_settings.is_enabled("search_skill"))
+        return bool(self._use_search_skill)
+
+    def _join_filter_ran(self) -> bool:
+        """JOIN claim filter 是否配置启用(gate enabled + bcn 在)——供 DispatchRationale。"""
+        return (
+            self._join_gate is not None
+            and bool(self._join_gate.is_enabled())
+            and self._bcn is not None
+        )
+
+    def _set_rationale(
+        self,
+        node: TaskNode,
+        candidates: list[dict],
+        sr: SearchResult,
+        *,
+        use_skill: bool,
+        prompt_text: str | None,
+        response_text: str | None,
+    ) -> None:
+        """attach ``DispatchRationale`` to ``sr.rationale``(try/except-safe;失败赋 None)。
+
+        ``prefetch_tokens`` 由本模块 ``_prefetch_tokens`` 计算(与 ``_prefetch_candidates``
+        共用,审计可重放)并按 kw 传入 builder —— ``rationale._build_search_rationale``
+        保持为 leaf 模块(不 back-import 本模块)。
+        """
+        sr.rationale = _build_search_rationale(
+            node=node,
+            candidates=candidates,
+            sr=sr,
+            use_skill=use_skill,
+            prompt_text=prompt_text,
+            response_text=response_text,
+            filter_ran=self._join_filter_ran(),
+            prefetch_tokens=_prefetch_tokens(node.task_spec.goal.objective or ""),
+        )
+
     async def apply(self, node: TaskNode, graph: TaskExecutionGraph) -> SearchResult:
+        use_skill = self._resolve_use_skill()
         if self._bot is None or self._discover is None:
             logger.warning(
                 "[task][search] task=%s node=%s dispatch unavailable bot_port=%s discover=%s → MISS(no_port_stub)",
@@ -207,7 +282,9 @@ class SearchBasedDispatchStrategy:
                 type(self._bot).__name__ if self._bot is not None else "None",
                 type(self._discover).__name__ if self._discover is not None else "None",
             )
-            return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_port_stub")
+            sr = SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_port_stub")
+            self._set_rationale(node, [], sr, use_skill=use_skill, prompt_text=None, response_text=None)
+            return sr
         owner = compose_bot_identity(
             str(graph.extend_props.get("owner_bot_id") or ""),
             graph.extend_props.get("owner_user_id"),
@@ -220,7 +297,9 @@ class SearchBasedDispatchStrategy:
                 graph.extend_props.get("owner_bot_id"),
                 graph.extend_props.get("owner_user_id"),
             )
-            return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_owner")
+            sr = SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_owner")
+            self._set_rationale(node, [], sr, use_skill=use_skill, prompt_text=None, response_text=None)
+            return sr
         candidates = await _prefetch_candidates(self._discover, node, graph)
         if not candidates:
             logger.info(
@@ -228,7 +307,9 @@ class SearchBasedDispatchStrategy:
                 node.task_id,
                 node.node_id,
             )
-            return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_candidates")
+            sr = SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_candidates")
+            self._set_rationale(node, [], sr, use_skill=use_skill, prompt_text=None, response_text=None)
+            return sr
         candidate_ids = [c.get("bot_id") for c in candidates]
         logger.info(
             "[task][search] task=%s owner=%s node=%s candidate_count=%d candidate_ids=%s",
@@ -238,11 +319,7 @@ class SearchBasedDispatchStrategy:
             len(candidate_ids),
             candidate_ids,
         )
-        use_skill = self._use_search_skill
-        setting_source = "constructor"
-        if self._task_settings is not None:
-            use_skill = self._task_settings.is_enabled("search_skill")
-            setting_source = "task_settings"
+        setting_source = "task_settings" if self._task_settings is not None else "constructor"
         logger.info(
             "[task][search] task=%s node=%s decision_mode=%s use_search_skill=%s source=%s candidate_count=%d",
             node.task_id,
@@ -252,13 +329,16 @@ class SearchBasedDispatchStrategy:
             setting_source,
             len(candidates),
         )
+        prompt_text: str | None = None
+        response_text: str | None = None
         if use_skill:
-            prompt = _compose_search_prompt(node, candidates)
+            prompt_text = _compose_search_prompt(node, candidates)
             run = await self._bot.send_and_wait_async(
                 bot_id=owner,
-                message=prompt,
+                message=prompt_text,
                 metadata={"phase": "search"},
             )
+            response_text = _extract_skill_response_content(run)
             sr = _parse_search_result(run)
             logger.info(
                 "[task][search] task=%s node=%s raw_skill_status=%s raw_skill_result=%s",
@@ -323,13 +403,22 @@ class SearchBasedDispatchStrategy:
             ).strip()
             if _tc:
                 sr.group_formation.extend_props["task_context"] = _tc
+        # REQ-2 DispatchRationale 装配(全程 try/except,失败→None,不阻断派发)。
+        # use_skill 时填 prompt/response digest;rule 模式 None。
+        self._set_rationale(
+            node, candidates, sr,
+            use_skill=use_skill,
+            prompt_text=prompt_text,
+            response_text=response_text,
+        )
         logger.info(
-            "[task][task_dispatch_search] node=%s → outcome=%s bot_id=%s group=%s miss=%s",
+            "[task][task_dispatch_search] node=%s → outcome=%s bot_id=%s group=%s miss=%s rationale=%s",
             node.node_id,
             sr.outcome,
             sr.bot_id,
             sr.group_id,
             sr.miss_reason,
+            "set" if sr.rationale is not None else "none",
         )
         return sr
 
@@ -502,10 +591,10 @@ def _dropped_unauthorized(candidates: list[dict], dropped_ids: list[str | None])
     return out
 
 
-def _claim_product(bot_id: str | None) -> str:
-    """归一 bcs(``{p}:{o}``) / product(``{p}``) → product(首段)。"""
-    bid = (bot_id or "").strip()
-    return bid.split(":", 1)[0] if bid else ""
+# ``_claim_product`` is imported from ``.rationale`` at the top of this module
+# (leaf-helper split-out for the ≤1000 lines/file constraint). All
+# in-file references (``_apply_claim_join`` / ``_find_candidate`` /
+# ``_join_candidates_pool`` / ``_dropped_unauthorized``) resolve to that import.
 
 
 def _find_candidate(candidates: list[dict], bot_id: str | None) -> dict | None:
@@ -536,6 +625,22 @@ def _tokenize(text: str) -> list[str]:
     return [w for w in words if len(w.strip()) >= 2 and w not in _STOPWORDS]
 
 
+def _prefetch_tokens(text: str) -> list[str]:
+    """分词 + 去重保序 + 取 top ``_PREFETCH_MAX_TOKENS``。
+
+    ``_prefetch_candidates`` 与 ``DispatchRationale.prefetch_tokens`` 共用本函数,
+    保证两者 token 序列一致(REQ-2 审计可重放)。无 ``_STOPWORDS`` 重新展开,
+    直接复用 ``_tokenize``(jieba / fallback 双路径统一 + ≥2 字/停用词过滤)。"""
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for t in _tokenize(text or ""):
+        if t not in seen:
+            seen.add(t)
+            tokens.append(t)
+    return tokens[:_PREFETCH_MAX_TOKENS]
+
+
+
 async def _prefetch_candidates(
     discover, node: TaskNode, graph: TaskExecutionGraph
 ) -> list[dict]:
@@ -547,14 +652,9 @@ async def _prefetch_candidates(
     import asyncio
 
     user_id = str(graph.extend_props.get("owner_bot_id") or "")
-    # 仅 goal.objective 分词 → token 去重保序,取 top _PREFETCH_MAX_TOKENS(字段裁剪 + token 上限降噪)
-    tokens: list[str] = []
-    seen_tok: set[str] = set()
-    for t in _tokenize(node.task_spec.goal.objective or ""):
-        if t not in seen_tok:
-            seen_tok.add(t)
-            tokens.append(t)
-    tokens = tokens[:_PREFETCH_MAX_TOKENS]
+    # 仅 goal.objective 分词 → token 去重保序,取 top _PREFETCH_MAX_TOKENS(字段裁剪 + token 上限降噪).
+    # _prefetch_tokens 与 DispatchRationale.prefetch_tokens 共用,见 REQ-2 审计可重放。
+    tokens = _prefetch_tokens(node.task_spec.goal.objective or "")
     if not tokens:
         return []
     logger.info("[task][search] task=%s node=%s 分词 tokens=%s", node.task_id, node.node_id, tokens)

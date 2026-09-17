@@ -325,6 +325,54 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _read_dispatch_rationale(graph, task_id: str, node_id: str) -> dict | None:
+    """Defensively read the ``_dispatch_rationale`` carrier from the in-memory node
+    (REQ-2 #3) for DISPATCH trajectory gates; return the gate-ready ext_info dict.
+
+    ``TaskDispatcher.dispatch`` writes ``dataclasses.asdict(DispatchRationale)`` into
+    ``node.run_info.extend_props["_dispatch_rationale"]`` (no contextvar exists —
+    extend_props is the carrier). ``query_task_nodes``/``query_task_dashboard``
+    return the same in-memory objects the dispatcher mutated, so the rationale is
+    available even when the engine re-queries the graph after dispatch (the patches
+    ``update_task_node_info`` issues ``extend_props.update(...)`` preserves unknown keys).
+
+    Returns ``{"_dispatch_rationale": <rat_dict>}`` (the gate-ready ``ext_info``
+    payload) when the rationale is present, or ``None`` (gate emits ``ext_info=None``).
+    Any failure (graph raise / missing node / unparsable) → ``None``; the trajectory
+    gate never blocks the forward-driving path (decision #14 swallow guarantee).
+    """
+    try:
+        node = next(
+            (n for n in graph.query_task_dashboard(task_id).tasks if n.node_id == node_id),
+            None,
+        )
+        if node is None:
+            return None
+        rat = node.run_info.extend_props.get("_dispatch_rationale")
+        if not isinstance(rat, dict):
+            return None
+        return {"_dispatch_rationale": rat}
+    except Exception:  # noqa: BLE001  trajectory 旁路读取,失败 → None,不阻塞闸门
+        return None
+
+
+def _resolve_dispatch_attempt(graph, task_id: str, node_id: str) -> int:
+    """Resolve the harness-retry attempt for a DISPATCH trajectory event.
+
+    Mirrors ``_log_action``'s ``attempt`` fallback (queries the graph for the
+    node's ``run_info.extend_props['harness_retries']``). Defensive — any failure
+    → 0 so the trajectory event still fires with a sane default (decision #14).
+    """
+    try:
+        node = next(
+            (n for n in graph.query_task_dashboard(task_id).tasks if n.node_id == node_id),
+            None,
+        )
+        return int(node.run_info.extend_props.get("harness_retries", 0)) if node else 0
+    except Exception:  # noqa: BLE001  防御性 attempt 解析,失败 → 0
+        return 0
+
+
 def _is_stale_dispatching(node: "object") -> bool:
     """``dispatching=True`` 是否崩溃遗留的陈旧飞行态(redrive 清理判定用,纯 timestamp)。
 
@@ -2196,6 +2244,22 @@ class ExecutionEngine:
                 status_from=Status.PENDING,
                 status_to=Status.PENDING,
             )
+            # 轨迹旁路:DISPATCH(MISS) —— 与 ``_log_action`` 同闸门位置、独立直插
+            # ``task_trajectory_events``。action_input=None(MISS 无 dispatch target);
+            # ext_info 携带 ``_dispatch_rationale`` (经 dispatcher 写入节点的 carrier,
+            # 防御读取:缺/异常 → None),strategy_name/decision_mode/candidates/join_dropped
+            # 全在 ext_info(REQ-1 action_input≠候选,候选入 ext_info;决策 #14 吞+WARNING)。
+            self._log_trajectory(
+                patch.task_id,
+                patch.node_id,
+                "dispatch",  # TrajectoryActionType.DISPATCH.value (TYPE_CHECKING-only enum)
+                action_result="miss",
+                action_input=None,
+                ext_info=_read_dispatch_rationale(self._graph, patch.task_id, patch.node_id),
+                status_from=Status.PENDING,
+                status_to=Status.PENDING,
+                attempt=_resolve_dispatch_attempt(self._graph, patch.task_id, patch.node_id),
+            )
             if depth >= max_depth:
                 logger.info(
                     "[task][on_miss] task=%s node=%s depth=%d/%d 拆不动→HUNG",
@@ -2955,6 +3019,19 @@ class ExecutionEngine:
                     status_from=Status.PENDING,
                     status_to=Status.RUNNING,
                 )
+                # 轨迹旁路:DISPATCH(HIT_MULTI) —— action_input=group_id(assignee);
+                # ext_info 携带 ``_dispatch_rationale`` (经 dispatcher 写入节点 extend_props)。
+                self._log_trajectory(
+                    task_id,
+                    node.node_id,
+                    "dispatch",
+                    action_result="hit_multi",
+                    action_input=gid,
+                    ext_info=_read_dispatch_rationale(self._graph, task_id, node.node_id),
+                    status_from=Status.PENDING,
+                    status_to=Status.RUNNING,
+                    attempt=int(node.run_info.extend_props.get("harness_retries", 0) or 0),
+                )
                 run_nodes.append(node)
             elif kind == "auto":
                 auto_nodes.extend(payload[0])
@@ -3045,6 +3122,19 @@ class ExecutionEngine:
                             },
                             status_from=Status.PENDING,
                             status_to=Status.RUNNING,
+                        )
+                        # 轨迹旁路:DISPATCH(HIT_SINGLE) —— action_input=cur.run_info.assignee
+                        # (dispatch target);ext_info 携带 ``_dispatch_rationale``。
+                        self._log_trajectory(
+                            task_id,
+                            node.node_id,
+                            "dispatch",
+                            action_result="hit_single",
+                            action_input=cur.run_info.assignee,
+                            ext_info=_read_dispatch_rationale(self._graph, task_id, node.node_id),
+                            status_from=Status.PENDING,
+                            status_to=Status.RUNNING,
+                            attempt=int(cur.run_info.extend_props.get("harness_retries", 0) or 0),
                         )
         # ④ 固定流程兜底上报:每个真实派发节点都调度一条延迟 mock 兜底(auto=True 短延迟演示,
         #    默认真实模式 fallback 超时 80s);真实回投先到则 _static_auto_report 内自跳过。
