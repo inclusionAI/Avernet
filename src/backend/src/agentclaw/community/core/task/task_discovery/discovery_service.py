@@ -448,6 +448,7 @@ class DiscoveryService:
                 title=task.title,
                 content={
                     **task.to_card_data(),
+                    "text": f"{task.to_card_data().get('card_name', '')}：{task.to_card_data().get('workitem_name', '')}",
                     "session_url": session.session_url,
                     "task_id": task.task_id,
                 },
