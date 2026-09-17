@@ -41,15 +41,22 @@
 
 ## P2 — Emission helper (REQ-11)
 
-- [ ] Add `core/task/task_trajectory/payloads.py`: `TrajectoryEventBuilder` (builds `TrajectoryEvent` +
-      `ext_info: dict` with `schema_v`) and `_log_trajectory(engine, task_id, node_id, action_type,
-      *, action_result, action_input=None, error_type=None, error_msg=None, ext_info=None,
-      status_from=None, status_to=None, attempt=None)` → `self._trajectory_repo.insert_event(...)`
-      inside `try/except Exception: logger.debug(...)` `# noqa: BLE001`, no re-raise. Does NOT call
-      `append_action_event`.
-- [ ] Inject `TaskTrajectoryRepository` into `ExecutionEngine` (DI / constructor).
-- [ ] Test `test_trajectory_emitter.py`: normal emit → one `task_trajectory_events` row with correct
-      flat fields + `ext_info` JSON; repo raises → swallowed, DEBUG logged, returns None, no re-raise.
+- [x] Add `core/task/task_trajectory/payloads.py`: `build_trajectory_event_record(...)` (builds a
+      `TrajectoryEventRecord` persisted projection with `datetime` gmt + `ext_info` JSON envelope
+      `{"schema_v":1, **ext_info}` + domain enum→`.value` string mapping) and
+      `emit_trajectory_event(repo, task_id, node_id, action_type, *, action_result, action_input=None,
+      error_type=None, error_msg=None, ext_info=None, status_from=None, status_to=None, attempt=0,
+      now_ms=None)` → `repo.insert_event(record)` inside `try/except Exception: logger.warning(...)`
+      `# noqa: BLE001`, no re-raise. Does NOT call `append_action_event`. ``repo is None`` → no-op.
+- [x] Inject `TaskTrajectoryRepositoryProtocol` into `ExecutionEngine` as optional dependency
+      (`trajectory_repo: ... | None = None`); add engine method `_log_trajectory(...)` delegating to
+      `emit_trajectory_event(self._trajectory_repo, ...)`. Threaded through `TaskService.__init__` +
+      `_build_engine`; DI wired in `task_module.py` (try/except resolve → prod gets real repo,
+      lightweight tests get None → emitter no-ops).
+- [x] Test `test_trajectory_emitter.py` (9 cases): builder enum→value / ext_info envelope / None
+      defaults / plain-string acceptance; normal emit → exactly one record with correct flat fields
+      + `ext_info` JSON carries `schema_v`+payload + gmt_* from now_ms + enums→strings; repo None →
+      no-op; repo raises → swallowed, WARNING logged (caplog), no re-raise.
 
 ## P3 — Collection gates (REQ-2 … REQ-7)
 

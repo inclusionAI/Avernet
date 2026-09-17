@@ -11,7 +11,10 @@
 `task_trajectory_events`, and surfaces root-cause ("why this assignee / why this failure") on
 demand via `GET /tasks/{id}/trajectory?do_analysis=true`, which triggers a DI-configured bot to
 produce a persisted `TrajectoryAnalysis`. Zero coupling to `task_action_log`; zero intrusion on the
-forward-driving path (every gate emission is `try/except`-swallowed + DEBUG log).
+forward-driving path (every gate emission is `try/except`-swallowed + **WARNING** log; AGENTS.md
+'propagate persistence write failures' is explicitly waived for this fire-and-forget observational
+旁路 — failures don't affect any caller's result, so swallowed (not raised), but logged at WARNING
+for observability — see Global constraints & 已确认决策 #14).
 
 **Architecture:** Three independent layers. (1) **Collection** — `_log_trajectory` helper at
 `engine.py` lifecycle gates emits a `TrajectoryEvent` and **directly INSERTs** into
@@ -64,8 +67,13 @@ These reconcile the spec against the real code; where they conflict with a spec 
 
 - **Zero `task_action_log` changes**: never read/modify/enrich it; tests that touch it stay green.
 - **Zero intrusion on forward driving**: every trajectory emission (incl. `ext_info` assembly)
-  is `try/except Exception: logger.debug(...)` with `# noqa: BLE001`, never re-raised, never blocks
-  the gate's main logic. Verified by a gate test that breaks the repo and asserts the gate still completes.
+  is `try/except Exception: logger.warning(...)` (WARNING = observable, not DEBUG) with `# noqa: BLE001`,
+  never re-raised, never blocks the gate's main logic. **AGENTS.md waiver** (已确认决策 #14): the rule
+  'propagate persistence write failures / never silently swallow failed writes' is explicitly waived
+  for trajectory emission — it is a fire-and-forget observational旁路 whose failure does not affect
+  any caller's result (so swallowing is not 'hiding a write the caller thinks succeeded'); failures
+  are logged at WARNING (not DEBUG) so missing trajectory data is visible to operators. Verified by
+  a gate test that breaks the repo and asserts the gate still completes.
 - **Independent entity**: `task_trajectory*` share **no** foreign key / query dependency with
   `task_action_log` or `task_callback`.
 - **Append-only events**: `task_trajectory_events` has no unique constraint; duplicate emissions may

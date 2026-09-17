@@ -36,7 +36,7 @@
 ## 领域定位
 
 - 轨迹体系是**独立旁路**: 自有发射链路(`_log_trajectory`,与 `_log_action` 在相同闸门位置、互不相干)、自有落库表;**不读不写 `task_action_log`**。
-- 发射零侵入: 全程 `try/except` 吞异常,失败仅 DEBUG 日志,永不阻塞正向驱动;事件**发射即 INSERT** `task_trajectory_events`(append-only,无唯一约束,重复发射可能产生重复行,业务可接受)。
+- 发射零侵入: 全程 `try/except` 吞异常(**不抛出**,永不阻塞正向驱动),失败记 **WARNING 日志**(观测可见,非 DEBUG),由 AGENTS.md "propagate persistence write failures" 对此 fire-and-forget 观测旁路**明示豁免**——发射失败不影响任何调用方结果,故吞而不 "propagate as error",但用 WARNING 使丢轨迹数据可被运营发现(见"已确认决策"第 14 条);事件**发射即 INSERT** `task_trajectory_events`(append-only,无唯一约束,重复发射可能产生重复行,业务可接受)。
 - 新增子模块 `core/task/task_trajectory/`,与 `task_center/task_plan/task_dispatch/task_runner` 平级,定位:**采集旁路 + 只读组装/分析**;不改状态机、不改正向驱动链路。
 
 ## Solution
@@ -258,7 +258,7 @@
 ## 风险与边界
 
 - **`ext_info` 自由 JSON 的 schema 漂移**: `task_trajectory_events.ext_info` 依赖 `schema_v` 版本号 + analyzer 对缺失字段防御性降级;定型列不受影响。
-- **发射阻塞正向驱动**: 所有轨迹发射(含 ext_info 组装)`try/except`,失败仅 DEBUG 日志 + 该字段 null/事件缺失;**不**向上抛,不影响闸门主逻辑。
+- **发射阻塞正向驱动**: 所有轨迹发射(含 ext_info 组装)`try/except`(**不**向上抛,不影响闸门主逻辑);失败记 **WARNING 日志**(非 DEBUG,观测可见)+ 该字段 null/事件缺失。AGENTS.md "propagate persistence write failures" 对此 fire-and-forget 观测旁路**明示豁免**(见"已确认决策"第 14 条)。
 - **digest 隐私**: prompt/response 仅存 SHA-256 digest + 截断 500 字,不存全文(避免 token/敏感信息全量落库)。**例外**:`TrajectoryEvent.action_input` 不截断——execute/verify 的 `request_input` 为下发请求**原文落库**,dispatch 的节点规格内容亦为原文,且经 REQ-11 落到 `task_trajectory_events.action_input` **长期保存**;权限收敛已确认**暂不做**(见"已确认决策"第 4 条),原文暴露与膨胀风险接受、后续迭代再议。
 - **范围边界**: 不改状态机、不改六模块正向 API 契约、不重构 `extend_props`(既有自由字段保持,本 spec 不收敛它们,避免回归)。
 
@@ -289,3 +289,4 @@
 11. **`rule` 执行者首期不自动触发(2026-09-17 确认)**: 原"决策#2 确定性规则归因为主"在首期降为"**bot 为主、rule 备用**"——`rule`/`llm`/`tc_bot` 多执行者框架(REQ-9)保留,首期仅 `tc_bot` 经 `do_analysis=true` 触发;`rule`(及 `llm`)首期不自动触发,将来可加 `analysis_type` 或 `do_analysis` 取值参数按需调用。REQ-9 的 7 条 `failure_reason` 派生规则保留为 `rule` 执行者的实现、首期不进入 live 链路(其单测仍保留,纯函数易测)。
 12. **不自动触发终态/卡死分析(2026-09-17 确认)**: 推翻早先提案"engine 在 terminal TRANSITION/卡死 RESET 旁路自动跑 rule 分析"——首期**不在引擎闸门挂任何分析触发**,分析完全由 `GET /trajectory?do_analysis=true` 按需驱动;终态/卡死任务不调 `do_analysis=true` 则 `analysis=null`,GET 默认返回空分析(不读 action log 兜底)。
 13. **回填覆盖语义(2026-09-17 确认)**: `analysis` 为 single TEXT、只存一份,每次 `do_analysis=true` **覆盖**前值,最终落库"最近一次分析";历史分析保留首期不做(YAGNI,后续如需加 `task_trajectory_analysis_history` 表);并发回填首期"最后写入者胜"(无行锁/版本号),严格化后续再议。
+14. **轨迹发射失败处理 = 吞而不抛 + WARNING + AGENTS.md 豁免(2026-09-17 确认)**: AGENTS.md "Propagate database and persistence write failures as errors; never silently swallow failed writes and return success" 对**轨迹发射**(`_log_trajectory`)做**明示豁免**:轨迹发射是 fire-and-forget 观测旁路,其写入成败不影响任何调用方结果(无人依赖"轨迹已落库"这一效果),故吞而不作为 error 抛出,满足 spec 零侵入核心;但为不违背 AGENTS.md "失败可见"精神,**日志级别由 DEBUG 提为 WARNING**(发射失败、丢轨迹数据可被运营发现)。豁免边界:仅限观测旁路发射;`task_callback`/业务正写等仍按 AGENTS.md 严格 propagate。回填层(`backfill_analysis`)的写失败**不豁免**——两表 UPDATE 须事务原子(`transactional_orm_session` 兜底 `orm_session`),失败须传播。

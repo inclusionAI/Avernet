@@ -23,6 +23,7 @@ from agentclaw.community.core.repository.protocols.task import (
     TaskInfoRepositoryProtocol,
     TaskNodeRepositoryProtocol,
     TaskNodeRunInfoRepositoryProtocol,
+    TaskTrajectoryRepositoryProtocol,
 )
 from agentclaw.community.core.task.domain.identity import compose_bot_identity
 from agentclaw.community.core.task.domain.models import (
@@ -104,6 +105,7 @@ class TaskService(TaskServiceExecutionMixin):
         bot_token_provider=None,
         notify_messages_provider=None,
         bot_bindings=None,
+        trajectory_repo: "TaskTrajectoryRepositoryProtocol | None" = None,
     ) -> None:
         """graph: TaskGraphService;harness: TaskHarness | None(旁路复位,可选);
         bot/bcs/discover: 传输端口(DI 从配置注入 local/prod/double 实现传给引擎;省略=stub 路径/纯内核单测)。
@@ -114,7 +116,10 @@ class TaskService(TaskServiceExecutionMixin):
         ``None`` 时回投不落 ``task_callback``,纯内核/单测路径用)。``task_id_provider``:task_id 生成器(默认 uuid4;
         测试注入确定性 provider)。``task_node_repo``/``task_node_run_info_repo``(可选):workflow/yaml
         分支落 ``task_node``(RUNNING)+ ``task_node_run_info``(retry=0,run_mode,assignee,session_id,
-        start_time)用;``None`` 时跳过持久化(纯内核/单测路径用,与 ``task_info_repo`` 同语义)。"""
+        start_time)用;``None`` 时跳过持久化(纯内核/单测路径用,与 ``task_info_repo`` 同语义)。
+        ``trajectory_repo``(可选):任务轨迹旁路采集落库协议(REQ-11,DI 在 prod 注入真实实现);
+        ``None`` 时引擎内 ``_log_trajectory`` 静默 no-op(纯内核/单测路径用,与 ``task_info_repo`` 同语义,
+        且与 ``task_action_log`` 完全解耦——不读不写 action log)。"""
         self._graph = graph
         self._harness = harness
         self._bcn = bcn
@@ -133,6 +138,10 @@ class TaskService(TaskServiceExecutionMixin):
         self._bot_token_provider = bot_token_provider
         self._notify_provider = notify_messages_provider
         self._bot_bindings = bot_bindings
+        # 任务轨迹旁路采集落库协议(可选,REQ-11):None 时引擎内 _log_trajectory 静默 no-op。
+        # 不进 _build_engine(seam)签名 — 测试子类按旧签名覆写 _build_engine 时仍可发 None 引擎;
+        # prod 的 _build_engine 实现读 self._trajectory_repo 透传给 ExecutionEngine。
+        self._trajectory_repo = trajectory_repo
         # _build_engine(seam)签名保持不变(测试子类按旧签名覆写);claim_on JOIN 经 self._task_auth_gate
         # 传入 ExecutionEngine→dispatcher,不进签名避免破坏覆写 seam。
         self._engine = self._build_engine(bot=bot, bcs=bcs, discover=discover)
@@ -159,7 +168,10 @@ class TaskService(TaskServiceExecutionMixin):
         接线 TaskExecutor。测试可经 facade/engine 子类覆写本方法注入 stub 策略/投递的引擎(测试 seam)。
 
         claim_on JOIN 开关经实例属性 ``self._task_auth_gate`` 传入 ExecutionEngine→dispatcher(strategies),
-        不进本方法签名(保持覆写 seam 向后兼容);None/community 路径派发不做 claim_on 交集。"""
+        不进本方法签名(保持覆写 seam 向后兼容);None/community 路径派发不做 claim_on 交集。
+
+        轨迹旁路采集协议(``self._trajectory_repo``)同样经实例属性透传给 ExecutionEngine
+        (不进 signature,保持覆写 seam 向后兼容);``None`` → 引擎内 ``_log_trajectory`` 静默 no-op。"""
         return ExecutionEngine(
             self._graph,
             bot=bot,
@@ -174,6 +186,7 @@ class TaskService(TaskServiceExecutionMixin):
             bot_token_provider=self._bot_token_provider,
             notify_messages_provider=self._notify_provider,
             bot_bindings=self._bot_bindings,
+            trajectory_repo=self._trajectory_repo,
         )
 
     def _resolve_static_plan_template_id(self, request: "TaskInfoRequest") -> str | None:

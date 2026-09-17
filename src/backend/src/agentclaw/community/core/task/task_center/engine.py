@@ -31,7 +31,7 @@ import random
 import threading
 import time
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.task.domain.errors import (
@@ -53,6 +53,21 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodeQueryCriteria,
 )
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
+from agentclaw.community.core.task.task_trajectory.payloads import emit_trajectory_event
+
+if TYPE_CHECKING:
+    # Protocol + trajectory enum imports are TYPE_CHECKING-only: the engine
+    # stores the optional repo + passes enum members through ``emit_trajectory_event``,
+    # and ``from __future__ import annotations`` stringises these hints so they
+    # are never evaluated at runtime — keeps the engine's runtime import surface
+    # minimal (only ``emit_trajectory_event`` is imported for real).
+    from agentclaw.community.core.repository.protocols.task import (
+        TaskTrajectoryRepositoryProtocol,
+    )
+    from agentclaw.community.core.task.task_trajectory.models import (
+        ReasonCatalog,
+        TrajectoryActionType,
+    )
 
 
 logger = logging.getLogger("task.engine")
@@ -358,6 +373,7 @@ class ExecutionEngine:
         bot_token_provider=None,
         notify_messages_provider=None,
         bot_bindings=None,
+        trajectory_repo: "TaskTrajectoryRepositoryProtocol | None" = None,
     ) -> None:
         """graph: TaskGraphService;bot: OpenApiBotPort;bcs: BcsClientPort;discover: BotDiscoverServiceProtocol。
         端口由 DI 从配置注入(local/prod/double 只换端口实现,引擎代码不变)。prod 必传;测试子类覆写
@@ -366,7 +382,12 @@ class ExecutionEngine:
         BBS 任务模式候选通过 ``bcn.list_bots_by_task_modes``(注入的 BcnService,复用统一 provider 身份)查询。
 
         ``api_base_url``:任务后端 base url,经 _build_executor 透传给 TaskExecutor→bbs_runner.notify,
-        拼成发给胜出 bot 的任务消息(spec §5:主动触发回投路径)。"""
+        拼成发给胜出 bot 的任务消息(spec §5:主动触发回投路径)。
+
+        ``trajectory_repo``(可选):任务轨迹旁路采集落库协议(REQ-11)。PIb DI 在 prod 注入真实实现
+        (``TaskTrajectoryRepository``);测试/轻量 DI 取不到 → ``None`` → ``_log_trajectory`` 静默 no-op,
+        与 ``task_action_log`` 完全解耦(本 spec 不读不写 action log)。``None`` 时引擎仍可正常运行,
+        轨迹事件不落库但正向驱动不受影响。"""
         self._graph = graph
         self._bot = bot
         self._bcs = bcs
@@ -380,6 +401,9 @@ class ExecutionEngine:
         self._bot_token_provider = bot_token_provider
         self._notify_provider = notify_messages_provider
         self._bot_bindings = bot_bindings
+        # 轨迹旁路采集落库协议(可选):None 时 _log_trajectory 静默 no-op(emitter 独立 direct-INSERT,
+        # 不走 task_action_log/append_action_event 链路 — 见 task_trajectory/payloads.py)。
+        self._trajectory_repo = trajectory_repo
         self._bg_tasks: set[object] = set()
         self._bbs_loop: asyncio.AbstractEventLoop | None = None
         self._bbs_loop_thread: threading.Thread | None = None
@@ -757,6 +781,55 @@ class ExecutionEngine:
                 action.value,
                 ex,
             )
+
+    def _log_trajectory(
+        self,
+        task_id: str,
+        node_id: str,
+        action_type: "TrajectoryActionType",
+        *,
+        action_result: str,
+        action_input: str | None = None,
+        error_type: "ReasonCatalog | None" = None,
+        error_msg: str | None = None,
+        ext_info: dict[str, Any] | None = None,
+        status_from: Status | None = None,
+        status_to: Status | None = None,
+        attempt: int = 0,
+    ) -> None:
+        """旁路发射一条任务轨迹事件(REQ-11 采集层)。零侵入驱动逻辑:
+
+        - 与 ``_log_action`` 在同一闸门位置调用,但**完全独立**——经
+          ``emit_trajectory_event(self._trajectory_repo, ...)`` 直接 INSERT 到
+          ``task_trajectory_events``,**不**经 ``self._graph.append_action_event``
+          (plan §"Spec clarifications" #2:The trajectory path is independent and
+          direct-INSERT;mirrors only the swallow + no re-raise pattern)。
+        - ``self._trajectory_repo`` 为 ``None`` 时(测试/轻量 DI 取不到协议)→
+          emitter 静默 no-op,正向驱动不受影响。
+        - 全程 ``try/except Exception`` 吞异常(**不**抛出),失败记 WARNING 日志
+          (已确认决策 #14;AGENTS.md "propagate persistence write failures" 对此
+          fire-and-forget 观测旁路**明示豁免**)——见 ``task_trajectory/payloads.py``。
+
+        线程/调用约定:同步调用,可在各 gate 的锁内/锁外任意位置直接调用。
+        ``action_input`` **不截断**(原文落库);``error_msg`` 由调用方(各 gate)截断后传入。
+        ``now_ms`` 由 emitter 取当前 wall-clock(emitter 内有兜底),故本方法不暴露该参数。
+        """
+        # No need to guard ``self._trajectory_repo is None`` here — the emitter
+        # handles that (no-op + no raise) so the gate stays a one-liner regardless.
+        emit_trajectory_event(
+            self._trajectory_repo,
+            task_id,
+            node_id,
+            action_type,
+            action_result=action_result,
+            action_input=action_input,
+            error_type=error_type,
+            error_msg=error_msg,
+            ext_info=ext_info,
+            status_from=status_from,
+            status_to=status_to,
+            attempt=attempt,
+        )
 
     def _static_runtime(self, task_id: str):
         from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition

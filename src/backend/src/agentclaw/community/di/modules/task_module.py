@@ -44,6 +44,7 @@ from agentclaw.community.core.repository.protocols.task import (
     TaskInfoRepositoryProtocol,
     TaskNodeRepositoryProtocol,
     TaskNodeRunInfoRepositoryProtocol,
+    TaskTrajectoryRepositoryProtocol,
 )
 from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.task.task_center.recovery_lifecycle import (
@@ -274,6 +275,13 @@ class TaskModule(Module):
             task_node_run_info_repo = injector.get(TaskNodeRunInfoRepositoryProtocol)
         except Exception:  # noqa: BLE101 未绑定 → 跳过 task_node_run_info 落库
             task_node_run_info_repo = None
+        # 任务轨迹旁路采集落库(REQ-11):TaskPersistenceModule 装了即取到(与 task_info_repo /
+        # callback_repo / task_node_repo 同模块绑定);未绑 → 取不到 → 引擎内 _log_trajectory 静默
+        # no-op(纯内核/轻量测试路径用;与 task_info_repo 同语义,且与 task_action_log 完全解耦)。
+        try:
+            trajectory_repo = injector.get(TaskTrajectoryRepositoryProtocol)
+        except Exception:  # noqa: BLE101 未绑定 → 跳过轨迹旁路采集
+            trajectory_repo = None
         try:
             bot_service = injector.get(BotServiceProtocol)
         except Exception:  # noqa: BLE101 未绑定 → dashboard 不附加 assignee 的 bot 归属/名
@@ -342,6 +350,7 @@ class TaskModule(Module):
             task_search_skill_enabled=task_dispatch.task_search_skill_enabled,
             task_settings=task_settings,
             bot_bindings=bot_bindings,
+            trajectory_repo=trajectory_repo,
         )
 
     @singleton
