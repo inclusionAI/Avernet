@@ -424,6 +424,7 @@ show_help() {
     echo ""
     echo "Commands:"
     echo "  install-tools                  Install/upgrade dev tools (node, npm, uv, openclaw, optional Claude Code, ...)"
+    echo "  frontend-pull                  Pull the teamclaw frontend checkout (TEAMCLAW_DIR) to the tip of its current branch"
     echo "  setup [service|group|all]      Prepare artifacts/config/links; rebuild stale binaries"
     echo "  start [service|group|all]      Start target (default: current all group)"
     echo "  stop [service|group|all]       Stop target (default: current all group)"
@@ -858,6 +859,7 @@ main() {
     # 解析命令行参数
     local command=""
     local services=()
+    local frontend_pull_args=()
 
     while [ $# -gt 0 ]; do
         case $1 in
@@ -999,6 +1001,18 @@ main() {
                 command="install-tools"
                 shift
                 ;;
+            frontend-pull)
+                # A command, not a service. Passthrough argv: frontend_pull
+                # validates its own options, and an unknown flag must be
+                # refused loudly by the command instead of being eaten by
+                # the generic option parser.
+                command="frontend-pull"
+                shift
+                while [ $# -gt 0 ]; do
+                    frontend_pull_args+=("$1")
+                    shift
+                done
+                ;;
             status|check)
                 command="$1"
                 shift
@@ -1057,7 +1071,7 @@ main() {
     if [ "$STANDALONE_MODE" = true ]; then
         mkdir -p "${STANDALONE_RUNTIME_DIR}"
     fi
-    if [ -n "$command" ] && [ "$command" != "install-tools" ]; then
+    if [ -n "$command" ] && [ "$command" != "install-tools" ] && [ "$command" != "frontend-pull" ]; then
         if [ "$STANDALONE_MODE" = true ]; then
             show_standalone_mode_info
         elif [ "$LOCAL_MODE" = true ]; then
@@ -1112,6 +1126,16 @@ main() {
     case "$command" in
         install-tools)
             toolchain_setup
+            ;;
+        frontend-pull)
+            # A command, not a service: the strict setup/start/restart variant
+            # gate above deliberately does not apply (a pull never demands a
+            # startable stack), but the target checkout must still resolve —
+            # frontend_select_variant's teamclaw arm demands an existing
+            # TEAMCLAW_DIR, and frontend_pull itself hard-refuses an unset
+            # TEAMCLAW_DIR under the other variants.
+            frontend_select_variant || exit 1
+            frontend_pull ${frontend_pull_args[@]+"${frontend_pull_args[@]}"}
             ;;
         setup)
             load_engine_type

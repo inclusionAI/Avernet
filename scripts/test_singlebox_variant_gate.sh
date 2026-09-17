@@ -170,4 +170,29 @@ else
     printf 'SKIP: section 5 (gateway_stop foreign-listener refusal) — python3 not found\n'
 fi
 
-printf 'PASS: variant gate keeps lifecycle commands usable, starts fail-fast, and gateway_stop keeps the owned-process contract\n'
+# 6. The help surface lists the frontend-pull command under Commands.
+help_out="$(bash "${SINGLEBOX}" --help 2>&1)" ||
+    fail "help must stay usable; got: ${help_out}"
+grep -q "frontend-pull" <<<"$help_out" ||
+    fail "help Commands section does not list frontend-pull; got: ${help_out}"
+
+# 7. frontend-pull is a command, not a service: it must route to frontend_pull
+#    with the variant selected — its own refusal for a non-git TEAMCLAW_DIR is
+#    the proof the router arm ran — rather than dying at arg parsing
+#    ("Unknown option") or falling through the router's default arm and
+#    kicking off the full setup-and-start.
+fp_dir="${TEMP}/fp-not-a-repo"
+mkdir -p "${fp_dir}"
+out="$(FRONTEND_VARIANT=teamclaw TEAMCLAW_DIR="${fp_dir}" \
+    bash "${SINGLEBOX}" frontend-pull 2>&1)" &&
+    fail "frontend-pull must fail on a non-git TEAMCLAW_DIR"
+grep -q "not a git checkout" <<<"$out" ||
+    fail "frontend-pull did not reach its own refusal; got: ${out}"
+if grep -q "Unknown option" <<<"$out"; then
+    fail "frontend-pull was rejected by arg parsing: ${out}"
+fi
+if grep -q "STANDALONE MODE ENABLED" <<<"$out"; then
+    fail "frontend-pull fell through to the full-setup default arm: ${out}"
+fi
+
+printf 'PASS: variant gate keeps lifecycle commands usable, starts fail-fast, gateway_stop keeps the owned-process contract, and frontend-pull routes as a command\n'

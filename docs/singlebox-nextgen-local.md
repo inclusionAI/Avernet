@@ -40,6 +40,19 @@ auto-update follows whatever branch the checkout is on. The internal-only
 planes (private chat, clawweb, aix harness) have no singlebox counterpart —
 their panels fail visibly at the gateway instead of dangling on a placeholder.
 
+### Pull the checkout on demand (`frontend-pull`)
+
+The startup sync is best-effort and never blocks. Its operator-facing twin is
+`bash scripts/singlebox.sh frontend-pull`: it refuses loudly instead of
+warning — a dirty tree is never stashed or overwritten, a detached HEAD is
+refused, and a branch without an upstream is a hard refusal (the command
+never guesses a ref to pull toward). The advance is ff-only toward the
+checkout's own upstream; if the branches diverged, resolve manually in the
+checkout (`git -C "$TEAMCLAW_DIR" checkout <branch>` also re-arms the
+upstream-based startup sync). It re-runs the dependency install afterwards
+with the same contract as startup (`OCB_SKIP_FRONTEND_INSTALL=1` skips; a
+failed install warns but keeps the pull green).
+
 ## Sync the source, not an unrelated checkout
 
 The upstream TeamClaw repository owns the export. Use its clean, pinned source

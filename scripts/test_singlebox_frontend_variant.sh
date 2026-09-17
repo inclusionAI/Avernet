@@ -154,3 +154,111 @@ if grep -q "/_dev/login" <<<"$banner"; then
     exit 1
 fi
 printf 'PASS: non-legacy ready banner advertises the gateway dev-login entry\n'
+
+# ---------------------------------------------------------------------------
+# frontend-pull (singlebox.sh frontend-pull): the explicit, on-demand version
+# of the startup auto-update — it refuses loudly where the sync only warns.
+# Offline by construction: local-protocol throwaway remotes only, and
+# OCB_SKIP_FRONTEND_INSTALL=1 on every probe (the npm re-install is the one
+# step that would touch tools/registry; same OCB_SKIP_ escape-prefix family
+# as OCB_SKIP_GIT_HOOKS). Probes run in a child shell so the harness's own
+# TEAMCLAW_DIR never leaks in. utils.sh is sourced because singlebox.sh
+# always has the log_* helpers loaded when it calls frontend_pull.
+# ---------------------------------------------------------------------------
+pull_run() {
+  local tc="$1"
+  shift
+  if [ -n "${tc}" ]; then
+    env PROJECT_ROOT="$ROOT" LOG_DIR="$TEMP" DEP_DIR="$TEMP" TEAMCLAW_DIR="${tc}" \
+      OCB_SKIP_FRONTEND_INSTALL=1 \
+      bash -c "source '$ROOT/scripts/utils.sh'; source '$ROOT/scripts/modules/frontend.sh'; frontend_pull $*" 2>&1
+  else
+    env -u TEAMCLAW_DIR PROJECT_ROOT="$ROOT" LOG_DIR="$TEMP" DEP_DIR="$TEMP" \
+      OCB_SKIP_FRONTEND_INSTALL=1 \
+      bash -c "source '$ROOT/scripts/utils.sh'; source '$ROOT/scripts/modules/frontend.sh'; frontend_pull $*" 2>&1
+  fi
+}
+
+# Fixtures: a bare remote owning main, plus a plain checkout of it on main
+# tracking origin/main. pull_advance_remote pushes one new commit from the
+# checkout's own history and rewinds it, leaving it genuinely one behind.
+git init -q --bare "$TEMP/pull-remote.git"
+git init -q -b main "$TEMP/pull-seed"
+( cd "$TEMP/pull-seed" && git config user.email t@t && git config user.name t
+  echo one > file && git add . && git commit -qm one )
+git -C "$TEMP/pull-seed" push -q "$TEMP/pull-remote.git" main:main
+PULL_TC="$TEMP/pull-tc"
+git init -q -b main "$PULL_TC"
+git -C "$PULL_TC" remote add origin "$TEMP/pull-remote.git"
+( cd "$PULL_TC" && git config user.email t@t && git config user.name t
+  git fetch -q origin
+  git branch -q main origin/main
+  git checkout -q main )
+pull_advance_remote() {
+  ( cd "$PULL_TC" && git fetch -q origin && git reset -q --hard origin/main \
+    && echo "$1" >> file && git commit -qam "$1" && git push -q origin main )
+  git -C "$PULL_TC" reset -q --hard HEAD~1
+}
+
+# No TEAMCLAW_DIR -> the command has no target and must refuse, not guess.
+rc=0; out="$(pull_run "")" || rc=$?
+[ "$rc" -ne 0 ] || { echo 'frontend_pull ran without TEAMCLAW_DIR' >&2; exit 1; }
+grep -q "TEAMCLAW_DIR is not set" <<<"$out" || { echo "unset-TEAMCLAW_DIR refusal must say so: $out" >&2; exit 1; }
+
+# A non-repo dir must fail on the not-a-git-checkout refusal, not vacuously
+# pass the porcelain guard (no `git status` on a non-repo dir can be dirty).
+mkdir -p "$TEMP/pull-not-a-repo"
+rc=0; out="$(pull_run "$TEMP/pull-not-a-repo")" || rc=$?
+[ "$rc" -ne 0 ] || { echo 'frontend_pull accepted a non-repo dir' >&2; exit 1; }
+grep -q "is not a git checkout" <<<"$out" || { echo "non-repo refusal wording missing: $out" >&2; exit 1; }
+
+# Dirty tree -> refuse before any fetch: the WIP file survives verbatim and
+# HEAD does not move even though the remote has advanced.
+pull_advance_remote two
+echo wip > "$PULL_TC/local-note"
+before="$(git -C "$PULL_TC" rev-parse HEAD)"
+rc=0; out="$(pull_run "$PULL_TC")" || rc=$?
+[ "$rc" -ne 0 ] || { echo 'frontend_pull accepted a dirty tree' >&2; exit 1; }
+grep -q "dirty" <<<"$out" || { echo "dirty refusal must say dirty: $out" >&2; exit 1; }
+[ -f "$PULL_TC/local-note" ] || { echo 'dirty refusal destroyed the WIP file' >&2; exit 1; }
+[ "$(git -C "$PULL_TC" rev-parse HEAD)" = "$before" ] || { echo 'dirty refusal moved HEAD' >&2; exit 1; }
+rm -f "$PULL_TC/local-note"
+
+# Detached HEAD -> refused distinctly (advancing a detached checkout would
+# disarm the upstream-based startup auto-update).
+git -C "$PULL_TC" checkout -q --detach
+rc=0; out="$(pull_run "$PULL_TC")" || rc=$?
+[ "$rc" -ne 0 ] || { echo 'frontend_pull accepted a detached checkout' >&2; exit 1; }
+grep -q "detached" <<<"$out" || { echo "detached refusal must say detached: $out" >&2; exit 1; }
+git -C "$PULL_TC" checkout -q main
+
+# Branch with no upstream -> the hard never-guess refusal (frontend-pull
+# never invents a ref like master to pull toward).
+git -C "$PULL_TC" checkout -q -b no-up
+rc=0; out="$(pull_run "$PULL_TC")" || rc=$?
+[ "$rc" -ne 0 ] || { echo 'frontend_pull accepted a branch with no upstream' >&2; exit 1; }
+grep -q "no pull target" <<<"$out" || { echo "no-upstream refusal wording missing: $out" >&2; exit 1; }
+grep -q "refusing to guess" <<<"$out" || { echo "never-guess refusal wording missing: $out" >&2; exit 1; }
+git -C "$PULL_TC" checkout -q main
+
+# Clean + behind -> advanced to the remote tip, on-branch, with the
+# "pulled to (was ...)" report.
+pull_advance_remote three
+rc=0; out="$(pull_run "$PULL_TC")" || rc=$?
+[ "$rc" -eq 0 ] || { echo "clean behind pull failed (rc ${rc}): $out" >&2; exit 1; }
+grep -q "pulled to" <<<"$out" || { echo "expected a 'pulled to' message: $out" >&2; exit 1; }
+[ "$(git -C "$PULL_TC" rev-parse HEAD)" = "$(git -C "$PULL_TC" rev-parse origin/main)" ] || {
+    echo 'clean pull did not advance HEAD to the remote tip' >&2; exit 1; }
+[ "$(git -C "$PULL_TC" branch --show-current)" = "main" ] || {
+    echo 'clean pull moved the checkout off its branch' >&2; exit 1; }
+
+# Already at tip -> friendly no-op with a distinct message and no advance.
+before="$(git -C "$PULL_TC" rev-parse HEAD)"
+rc=0; out="$(pull_run "$PULL_TC")" || rc=$?
+[ "$rc" -eq 0 ] || { echo "at-tip pull must succeed (rc ${rc}): $out" >&2; exit 1; }
+grep -q "already up to date" <<<"$out" || { echo "at-tip pull must say 'already up to date': $out" >&2; exit 1; }
+if grep -q "pulled to" <<<"$out"; then
+    echo "at-tip pull must not report an advance: $out" >&2; exit 1
+fi
+[ "$(git -C "$PULL_TC" rev-parse HEAD)" = "$before" ] || { echo 'at-tip pull moved HEAD' >&2; exit 1; }
+printf 'PASS: frontend-pull refusals, ff-only advance and at-tip no-op\n'
