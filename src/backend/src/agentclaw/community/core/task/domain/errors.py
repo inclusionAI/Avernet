@@ -40,3 +40,12 @@ class DecomposeError(TaskError):
 
 class BotIdentityResolutionError(TaskError):
     """产品 Bot ID 无法唯一解析为 BCS Bot UUID。"""
+
+
+class TrajectoryAnalysisError(TaskError):
+    """轨迹分析执行失败(``tc_bot`` 超时 / 调用失败 / 响应不可解析)。
+
+    REQ-9 + 决策 #10:首期 ``do_analysis=true`` 同步带超时;bot 超时/失败时执行者**抛出此错**
+    (决策 #14 的吞错豁免仅限观测旁路发射,不覆盖分析执行)。P5b service 把此错映射为
+    HTTP 504 且**不**回填 ``analysis``(覆盖语义在失败时保护既有值)。
+    """

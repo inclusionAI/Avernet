@@ -153,13 +153,13 @@ real sqlite) and asserts the emitted row's `action_type`/`action_result`/`action
 ## P5 — Analysis + trigger endpoint (REQ-9 + REQ-8 `do_analysis`)
 
 ### Analyzer
-- [ ] Add `core/task/task_trajectory/analyzer.py::TaskTrajectoryAnalyzer.analyze(trajectory,
+- [x] Add `core/task/task_trajectory/analyzer.py::TaskTrajectoryAnalyzer.analyze(trajectory,
       ext_info_lookup, *, analysis_type, analysis_executor) -> TrajectoryAnalysis`: dispatch
       `rule`/`llm`/`tc_bot`; `boost_reason`/`failure_reason` flattened strings; `analysis` JSON
       serializes with no event list (no recursion).
-- [ ] `rule` executor = the 7-bullet `failure_reason` derivation (REQ-9) + `boost_reason` from last
+- [x] `rule` executor = the 7-bullet `failure_reason` derivation (REQ-9) + `boost_reason` from last
       DISPATCH `ext_info`. Unit-tested; **not wired to live trigger first iteration** (decision #11).
-- [ ] `tc_bot` executor = calls the DI-injected bot (bot_id from `task_trajectory_analysis_bot_id`)
+- [x] `tc_bot` executor = calls the DI-injected bot (bot_id from `task_trajectory_analysis_bot_id`)
       with trajectory + ext_info summary; synchronous with timeout; returns `TrajectoryAnalysis{
       analysis_type="tc_bot", analysis_executor=bot_id, …}`.
 
@@ -174,7 +174,7 @@ real sqlite) and asserts the emitted row's `action_type`/`action_result`/`action
       to the existing internal `GET /api/v1/collaboration/tasks/{task_id}/trajectory` handler and the
       OpenAPI mirror `GET /openapi/v1/collaboration/tasks/{task_id}/trajectory` (`PublicAPIRoute`,
       `principal: PrincipalDep`). Register DI bindings + `task_trajectory_analysis_bot_id` config.
-- [ ] Test `test_trajectory_analyzer.py`: per-`ReasonCatalog` fixture → `failure_reason` prefix;
+- [x] Test `test_trajectory_analyzer.py`: per-`ReasonCatalog` fixture → `failure_reason` prefix;
       `tc_bot` with a mock bot client → `analysis_type="tc_bot"`/`analysis_executor=bot_id`;
       success task → `failure_reason=None`.
 - [ ] Endpoint tests under `tests/community/adapters/http/openapi_v1/`: `do_analysis=false`

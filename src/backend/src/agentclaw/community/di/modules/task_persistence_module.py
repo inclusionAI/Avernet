@@ -12,9 +12,20 @@ is a lightweight DI constructable service-layer object, and co-locating the
 binding with the trajectory repo keeps the trajectory read-side wiring in one
 place so P5's analysis service can ``Injected(...)`` it (per the P4 task's
 "lean toward DI registration" guidance).
+
+The trajectory analysis side ``TaskTrajectoryAnalyzer`` (REQ-9, P5a) is bound
+here too — it consumes the bot-caller ``OpenApiBotPort`` (optional; resolved like
+task_module resolves it, with try/except → None in lightweight DI injectors
+that don't bind the port) + ``TrajectoryAnalysisConfig`` (from ConfigModule;
+fall back to the in-process default when unbound). Co-located with the
+assembler so the trajectory read + analysis wiring stays in one place.
 """
 
-from injector import Binder, Module, singleton
+from injector import Binder, Injector, Module, provider, singleton
+
+import logging
+
+logger = logging.getLogger("task.persistence")
 
 from agentclaw.community.core.repository.implementations.task.task_action_log_repository import (
     TaskActionLogRepository,
@@ -57,6 +68,11 @@ from agentclaw.community.core.repository.protocols.task import (
 from agentclaw.community.core.task.task_trajectory.assembler import (
     TaskTrajectoryAssembler,
 )
+from agentclaw.community.core.task.task_trajectory.analyzer import (
+    TaskTrajectoryAnalyzer,
+)
+from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPort
+from agentclaw.community.di.config import TrajectoryAnalysisConfig
 
 
 class TaskPersistenceModule(Module):
@@ -101,3 +117,43 @@ class TaskPersistenceModule(Module):
             to=TaskCallbackCorrelationRepository,
             scope=singleton,
         )
+
+    @singleton
+    @provider
+    def task_trajectory_analyzer(
+        self, injector: Injector
+    ) -> TaskTrajectoryAnalyzer:
+        """Construct the trajectory analysis multi-executor (REQ-9, P5a).
+
+        Resolves its two optional dependencies the way ``TaskModule`` resolves
+        ``OpenApiBotPort`` (try/except → None / default for lightweight DI
+        injectors that don't bind the port / config):
+        * ``OpenApiBotPort`` — the same bot-caller seam the planner / dispatcher
+          uses; only corp/singlebox profiles bind it. Unbound → ``None`` → the
+          ``tc_bot`` executor raises ``TrajectoryAnalysisError`` when invoked
+          (the ``rule`` executor, being pure-function, still works without it).
+        * ``TrajectoryAnalysisConfig`` — from ``ConfigModule`` (the deployment
+          ``task_trajectory`` user_config block). Unbound → the analyzer's own
+          ``_DefaultAnalysisConfig`` (180s timeout, ``analysis_bot_id=None``).
+
+        Co-located with the assembler so trajectory read + analysis wiring lives
+        in one module; lazy (only resolved when the P5b service asks for the
+        analyzer, so the existing assembler-binding test is unaffected).
+        """
+        try:
+            bot = injector.get(OpenApiBotPort)
+        except Exception as exc:  # noqa: BLE001  unbound in lightweight DI injectors
+            logger.info(
+                "[task-persistence] OpenApiBotPort 未绑定 → 轨迹分析 tc_bot 执行者不可用:%s: %s",
+                type(exc).__name__, exc,
+            )
+            bot = None
+        try:
+            config = injector.get(TrajectoryAnalysisConfig)
+        except Exception as exc:  # noqa: BLE001  ConfigModule 未装配时降级默认
+            logger.info(
+                "[task-persistence] TrajectoryAnalysisConfig 未绑定 → 使用默认配置:%s: %s",
+                type(exc).__name__, exc,
+            )
+            config = None
+        return TaskTrajectoryAnalyzer(bot=bot, config=config)

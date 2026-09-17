@@ -36,6 +36,22 @@ class TrajectoryActionType(StrEnum):
     TRANSITION = "transition"   # 框架直驱翻态 / 终态翻转
 
 
+class AnalysisType(StrEnum):
+    """轨迹分析执行者类型(REQ-9 多执行者框架;决策 #10/11)。
+
+    首期仅 ``TC_BOT`` 经 ``GET /trajectory?do_analysis=true`` 触发(DI 配置注入 bot_id);
+    ``RULE`` 为确定性规则归因(纯函数,首期不自动触发,单测覆盖);``LLM`` 为大模型执行者
+    (首期 stub,决策 #11)。``AnalysisType`` 是 ``StrEnum`` —— 成员与其 ``.value`` 字符串
+    比较相等(``AnalysisType.TC_BOT == "tc_bot"``),保证 P0 以 ``str`` 形态构造
+    ``TrajectoryAnalysis`` 的旧代码向后兼容(M1 收紧:``TrajectoryAnalysis.analysis_type``
+    由 ``str`` 提升为 ``AnalysisType``;dataclass 不在运行期强制,旧 ``str`` 传参仍可用)。
+    """
+
+    LLM = "llm"
+    TC_BOT = "tc_bot"
+    RULE = "rule"
+
+
 class ReasonCatalog(StrEnum):
     """根因分类目录(覆盖 §概述既有失败信号 + REQ-5 ``exec_error_origin`` 分类 + 派发侧 JOIN 丢因)。
 
@@ -115,7 +131,7 @@ class TrajectoryAnalysis:
     由分析执行者填充(REQ-9)。
     """
 
-    analysis_type: str                        # "llm" | "tc_bot" | "rule"
+    analysis_type: AnalysisType               # "llm" | "tc_bot" | "rule" (M1 收紧: StrEnum)
     analysis_executor: str                    # 执行者自身 id
     analysis_input: str                       # 喂给分析器的结构化输入摘要(事件 + ext_info 概要)
     analysis_output: str                      # 结论汇总文本(boost/failure 综合呈现)
