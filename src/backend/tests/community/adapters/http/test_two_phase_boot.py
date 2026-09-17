@@ -358,7 +358,7 @@ def test_a_foreign_finalized_pid_is_never_read_as_this_process_being_done():
         assert boot.worker_runtime_finalized() is False
 
         fresh = FastAPI()
-        with pytest.raises(RuntimeError, match="finalized in pid"):
+        with pytest.raises(RuntimeError, match="finalized the worker runtime"):
             boot.finalize_worker_runtime(fresh, profile=DeployProfile.detect())
 
         # Refused before doing anything, so nothing was half-installed.
@@ -366,6 +366,34 @@ def test_a_foreign_finalized_pid_is_never_read_as_this_process_being_done():
         assert fresh.user_middleware == []
     finally:
         boot._finalized_pid = previous
+
+
+def test_a_foreign_failed_pid_is_refused_the_same_way():
+    """A fork from a process that failed *partway* inherits the same problem.
+
+    Its parent may already have attached an injector and installed part of the
+    stack before raising, so the child is in the same position as one forked
+    after a successful finalize: it cannot replace what it inherited, only
+    append to it.
+    """
+    from fastapi import FastAPI
+
+    from agentclaw.community.adapters.http import boot
+    from agentclaw.community.di import DeployProfile
+
+    previous_finalized, previous_failed = boot._finalized_pid, boot._failed_pid
+    try:
+        boot._finalized_pid = None
+        boot._failed_pid = os.getpid() + 1_000_000     # never this process
+
+        fresh = FastAPI()
+        with pytest.raises(RuntimeError, match="began finalizing the worker runtime and failed"):
+            boot.finalize_worker_runtime(fresh, profile=DeployProfile.detect())
+
+        assert getattr(fresh.state, "injector", None) is None
+        assert fresh.user_middleware == []
+    finally:
+        boot._finalized_pid, boot._failed_pid = previous_finalized, previous_failed
 
 
 def test_a_failed_finalize_refuses_to_be_retried_in_the_same_process():
@@ -559,7 +587,7 @@ def test_a_child_forked_after_finalize_refuses_rather_than_stacking():
     assert child["raised"] is not None, (
         "the child silently re-finalized over an inherited runtime"
     )
-    assert f"finalized in pid {parent['pid']}" in child["raised"]
+    assert f"Pid {parent['pid']} finalized the worker runtime" in child["raised"]
     assert "preload" in child["raised"], (
         "the refusal should name the mode that avoids this shape"
     )

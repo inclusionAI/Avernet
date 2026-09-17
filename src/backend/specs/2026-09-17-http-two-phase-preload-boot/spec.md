@@ -76,7 +76,8 @@ In this exact order, matching today's:
   that finalized, not a boolean: a child that inherits the module state across `fork` sees
   `os.getpid() != _finalized_pid`, so it never mistakes the parent's initialization for its
   own and never silently serves on the master's injector, middleware or connections.
-- What that child does instead is **refuse, not re-run**. An inherited marker never arrives
+- What that child does instead is **refuse, not re-run** — for a parent that finished the
+  sequence and for one that began it and failed alike. An inherited marker never arrives
   alone: the parent's middleware stack is on the same `app` object, and its engines, pools and
   fds sit behind it — a fork copies those rather than reopening them. `install_middleware`
   appends, so a second finalize gives the child two stacks (measured: 8 entries become 16),

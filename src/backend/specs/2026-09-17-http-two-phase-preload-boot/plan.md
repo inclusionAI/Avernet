@@ -145,7 +145,8 @@ prints a JSON verdict the parent asserts on.
    finalized before it, child and parent each finalizing their own runtime, neither stack
    doubled; (b) the unsupported shape: finalize *then* fork, where the child must refuse
    rather than append a second stack — asserted both against a real fork and against a
-   rewritten `_finalized_pid`.
+   rewritten `_finalized_pid`; (c) the same refusal for a parent that *failed* partway,
+   which leaves the child the same half-wired app to inherit.
 6. **eager ≡ preload+finalize** — route paths, methods, `operation_id`s and the full
    `app.openapi()` document compare equal across the two modes.
 7. **call-timing guard** — entering the lifespan (or issuing a request) without finalize in
