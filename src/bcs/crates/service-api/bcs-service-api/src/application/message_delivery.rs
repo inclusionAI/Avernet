@@ -52,10 +52,22 @@ impl DeliveryStatusView {
         self.content_preview = content.and_then(|c| {
             c.get("text")
                 .and_then(|t| t.as_str())
-                .map(|s| if s.len() > 200 { format!("{}…", &s[..200]) } else { s.to_string() })
+                .map(|s| truncate_utf8(s, 200))
         });
         self
     }
+}
+
+/// 在 UTF-8 字符边界安全截断字符串，超出部分以 "…" 结尾。
+fn truncate_utf8(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes {
+        return s.to_string();
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &s[..end])
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -230,4 +242,129 @@ pub trait ManagedDeliveryPreparationService: Send + Sync {
         &self,
         delivery: &PersistedMessageDelivery,
     ) -> crate::ServiceResult<crate::port::BotAbortDeliveryCommand>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_utf8_ascii_within_limit() {
+        assert_eq!(truncate_utf8("hello", 200), "hello");
+    }
+
+    #[test]
+    fn truncate_utf8_ascii_at_limit() {
+        let s = "a".repeat(200);
+        assert_eq!(truncate_utf8(&s, 200), s);
+    }
+
+    #[test]
+    fn truncate_utf8_ascii_over_limit() {
+        let s = "a".repeat(201);
+        let result = truncate_utf8(&s, 200);
+        assert!(result.ends_with('…'));
+        assert_eq!(result.len(), 200 + '…'.len_utf8());
+    }
+
+    #[test]
+    fn truncate_utf8_multibyte_boundary() {
+        // 中文字符占 3 字节，67 个字符 = 201 字节，截断到 200 字节时不能 panic
+        let s = "中".repeat(67);
+        let result = truncate_utf8(&s, 200);
+        assert!(result.ends_with('…'));
+        // 198 字节 = 66 个完整中文字符
+        assert!(result.starts_with(&"中".repeat(66)));
+    }
+
+    #[test]
+    fn truncate_utf8_emoji_boundary() {
+        // emoji 占 4 字节
+        let s = "🎉".repeat(51); // 204 bytes
+        let result = truncate_utf8(&s, 200);
+        assert!(result.ends_with('…'));
+        assert!(result.starts_with(&"🎉".repeat(50))); // 200 bytes = 50 emojis
+    }
+
+    #[test]
+    fn with_content_preview_extracts_text() {
+        let content = serde_json::json!({"text": "hello world"});
+        let view = DeliveryStatusView {
+            admission_error: None,
+            delivery_id: "d1".into(),
+            message_id: "m1".into(),
+            target_bot_id: "b1".into(),
+            flow_kind: bcs_domain::message_delivery::DeliveryFlowKind::Group,
+            kind: bcs_domain::DeliveryType::Send,
+            status: bcs_domain::message_delivery::MessageDeliveryStatus::Queued,
+            state_version: 1,
+            run_id: None,
+            wait_reason: None,
+            content_preview: None,
+        };
+        let view = view.with_content_preview(Some(&content));
+        assert_eq!(view.content_preview.as_deref(), Some("hello world"));
+    }
+
+    #[test]
+    fn with_content_preview_truncates_long_text() {
+        let long_text = "中".repeat(100);
+        let content = serde_json::json!({"text": long_text});
+        let view = DeliveryStatusView {
+            admission_error: None,
+            delivery_id: "d1".into(),
+            message_id: "m1".into(),
+            target_bot_id: "b1".into(),
+            flow_kind: bcs_domain::message_delivery::DeliveryFlowKind::Group,
+            kind: bcs_domain::DeliveryType::Send,
+            status: bcs_domain::message_delivery::MessageDeliveryStatus::Queued,
+            state_version: 1,
+            run_id: None,
+            wait_reason: None,
+            content_preview: None,
+        };
+        let view = view.with_content_preview(Some(&content));
+        let preview = view.content_preview.as_deref().unwrap();
+        assert!(preview.ends_with('…'));
+        assert!(preview.len() <= 200 + '…'.len_utf8());
+    }
+
+    #[test]
+    fn with_content_preview_missing_text_field() {
+        let content = serde_json::json!({"other": "data"});
+        let view = DeliveryStatusView {
+            admission_error: None,
+            delivery_id: "d1".into(),
+            message_id: "m1".into(),
+            target_bot_id: "b1".into(),
+            flow_kind: bcs_domain::message_delivery::DeliveryFlowKind::Group,
+            kind: bcs_domain::DeliveryType::Send,
+            status: bcs_domain::message_delivery::MessageDeliveryStatus::Queued,
+            state_version: 1,
+            run_id: None,
+            wait_reason: None,
+            content_preview: None,
+        };
+        let view = view.with_content_preview(Some(&content));
+        assert!(view.content_preview.is_none());
+    }
+
+    #[test]
+    fn with_content_preview_none_content() {
+        let view = DeliveryStatusView {
+            admission_error: None,
+            delivery_id: "d1".into(),
+            message_id: "m1".into(),
+            target_bot_id: "b1".into(),
+            flow_kind: bcs_domain::message_delivery::DeliveryFlowKind::Group,
+            kind: bcs_domain::DeliveryType::Send,
+            status: bcs_domain::message_delivery::MessageDeliveryStatus::Queued,
+            state_version: 1,
+            run_id: None,
+            wait_reason: None,
+            content_preview: None,
+        };
+        let view = view.with_content_preview(None);
+        assert!(view.content_preview.is_none());
+    }
 }

@@ -425,6 +425,22 @@ active Provider 的精确 delivery 取消返回 `exact_abort_not_supported`，�
 这是提交后 best-effort 事件，不是持久化事件流；客户端按版本去重并通过查询校准。
 Private owner 的 Human 代理读取仍以授权查询为准，不扩大私有消息实时广播范围。
 
+### DeliveryStatusView 字段
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `delivery_id` | `String` | 投递唯一标识 |
+| `message_id` | `String` | 源消息 ID（`bcs_messages.message_id`） |
+| `target_bot_id` | `String` | 目标 Bot ID |
+| `flow_kind` | `DeliveryFlowKind` | 投递流类型：`group` / `direct_a2a` / `task` / `system` / `state_machine` |
+| `kind` | `DeliveryType` | 投递类型：`send` / `inject` |
+| `status` | `MessageDeliveryStatus` | 投递状态（见上方状态机） |
+| `state_version` | `u64` | 单调递增版本号，客户端按版本去重 |
+| `run_id` | `Option<String>` | 关联的运行 ID |
+| `wait_reason` | `Option<DeliveryWaitReason>` | 排队等待原因 |
+| `admission_error` | `Option<&'static str>` | 准入错误码（仅 `delivery_provider_headers_unsupported`） |
+| `content_preview` | `Option<String>` | 消息正文预览（UTF-8 安全截断至前 200 字节，超出以 `…` 结尾），供前端排队列表展示 |
+
 IM 使用原消息来源和原 canonical Session：排队超过 2 秒提示，离线尽快提示，同一消息
 多目标聚合；取消、失败和不确定状态提供简短说明。inject 和普通成功不额外提示。
 通知有界、失败不回滚、不重试可能已发出的 IM 消息，重启不回放历史提示。
