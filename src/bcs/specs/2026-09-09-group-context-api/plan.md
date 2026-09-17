@@ -1,7 +1,6 @@
 # Group Context API — Implementation Plan
 
 - **Date:** 2026-09-09
-- **Spec:** `docs/superpowers/specs/2026-09-09-group-context-api-design.md`
 
 ---
 
