@@ -1,0 +1,272 @@
+# Spec — 任务轨迹采集与关键原因分析 (Task Trajectory Collection & Root-Cause Analysis)
+
+> **状态**: `draft / decisions-confirmed (2026-09-17)`
+> 日期: 2026-09-16(主消费方/范围决策已确认,见文末"已确认决策")。
+> `plan.md` / `tasks.md` 由 writing-plans 产出。
+
+## 假设(已确认 2026-09-17)
+
+- **主消费方**: 工程师排障根因定位 —— 某次任务失败/异常,需快速找到根因(派发选择 / 底层接口报错 / 执行超时 / 卡死)。**已确认**。
+- **分析形式**: 确定性规则归因为主(从富化后的轨迹事件按 `ReasonCatalog` 分类出原因),分析执行者可扩展为 LLM / tc_bot(`analysis_type=llm|tc_bot|rule`,见 REQ-9);原"P2 独立 LLM 叙述层"已裁剪。
+- **理由**: 用户列举的"关键原因"(派发给该执行者的原因、底层接口有报错、执行超时)都是可被确定性归因的运维失败模式;轨迹体系作为**独立旁路采集**对正向驱动零侵入(2026-09-17 修正:与 `task_action_log` 无关,原"复用 action log 骨干"的前提作废,见"已确认决策"第 8 条)。
+- **不锁死**: 采集层(独立发射)对所有消费方(看板/LLM/提交者透明)完全相同,仅**分析呈现层**随消费方不同;选定排障作为主消费方不影响后续叠加看板或 LLM 层。
+
+## 概述
+
+在 task 模块新增**任务轨迹采集 + 关键原因分析**能力:把一个任务从「提交 → 规划 → 派发 → 实际执行」的完整轨迹构建出来,并分析其中关键原因(派发为何选该执行者、任务为何异常——底层接口报错/执行超时等)。
+
+**关键前提(2026-09-17 修正)**: 轨迹体系**与 `task_action_log` 完全无关**——不读、不改、不富化 action log;轨迹事件由**独立采集链路**在生命周期闸门(submit/plan/dispatch/execute/verify/reset/transition)直接发射并**即时落库**至 `task_trajectory`/`task_trajectory_events`(REQ-11)。本 spec 的工作是**采集 + 组装 + 分析 + 落库的从零建设**,不依赖任何既有轨迹数据。
+
+**轨迹事件必须覆盖的信号**(当前仅散落在内存态/日志/结果性 payload 中,无"为何"侧记录):
+- **派发"为何"**: 候选集、候选分、决策模式、策略名、JOIN 滤掉的 bot 及理由、search-skill prompt/LLM 响应摘要 → DISPATCH 轨迹事件(REQ-2)。→ 回答"派发为何选这个执行者"。
+- **PLAN 重试逐轮信号**: `_plan_with_retry`(engine.py:599,最多 `MAX_HARNESS` 次)每次尝试的失败原因(`plan_call_fail`/`plan_parse_fail`)、规划 prompt/owner-bot 响应 digest → 每次尝试一条 PLAN 轨迹事件(REQ-3)。→ 规划阶段失败的轨迹不断链。
+- **RESET 计量**: `elapsed_ms` 与 SLA 阈值 → RESET 轨迹事件(REQ-4)。→ 直接归因"执行超时"。
+- **EXECUTE/VERIFY 错误分类**: 区分**底层接口报错**(bot 侧 200 但 `exec_error` 非空)与执行侧逻辑失败/解析失败 → 事件 `error_type`(REQ-5)。→ 直接归因"底层接口有报错"。
+- **提交段**: 提交时点的来源/task_spec 摘要 → SUBMIT 轨迹事件(REQ-6)。
+- **回调↔节点关联**: `CallbackCorrelationRegistry` 仅内存态,实例重启后无法把在途回调重新关联回节点 → REQ-P1 持久化。
+
+## 关联文档
+
+- `2026-08-09-task-goal-driven-execution-framework/spec.md` —— 任务目标驱动执行框架(任务中心/图谱/规划/派发/执行/Harness 六模块),本 spec 所处上层子系统。
+- `2026-08-24-task-graph-shared-persistence/spec.md` —— `task_action_log` 表(**对照;本 spec 不依赖**,仅闸门坐标参考)。
+- `2026-08-20-task-execute-request-persistence/spec.md` —— `task_callback` 回调审计表(执行侧原始证据来源)。
+- `core/task/domain/models.py:57`(`NodeAction`)、`:161`(`NodeActionEvent`)、`core/task/task_context/task_graph_service.py:512`(`append_action_event`)、`core/task/task_center/engine.py:713`(`_log_action`)—— 既有 action 事件发射链路(**本 spec 不改它**;轨迹事件在相同闸门位置另起旁路发射)。
+- `core/task/task_dispatch/strategies.py`(`SearchBasedDispatchStrategy`/`DirectDispatchStrategy`)、`task_dispatch/dispatcher.py`—— 派发决策点(本 spec 富化重点)。
+
+## 领域定位
+
+- 轨迹体系是**独立旁路**: 自有发射链路(`_log_trajectory`,与 `_log_action` 在相同闸门位置、互不相干)、自有落库表;**不读不写 `task_action_log`**。
+- 发射零侵入: 全程 `try/except` 吞异常,失败仅 DEBUG 日志,永不阻塞正向驱动;事件**发射即 INSERT** `task_trajectory_events`(append-only,无唯一约束,重复发射可能产生重复行,业务可接受)。
+- 新增子模块 `core/task/task_trajectory/`,与 `task_center/task_plan/task_dispatch/task_runner` 平级,定位:**采集旁路 + 只读组装/分析**;不改状态机、不改正向驱动链路。
+
+## Solution
+
+三层架构 + 轨迹持久化:
+
+1. **采集层(独立发射)**: 在 engine 生命周期闸门旁路发射 `TrajectoryEvent`,**发射即落库**(REQ-11);各字段的"为何"信号在发射时定型(REQ-2..7);调度策略额外返回 `DispatchRationale`,随 DISPATCH 事件写入事件行 `ext_info` 列(自由 JSON,领域对象不映射)。
+2. **组装层(`TaskTrajectoryAssembler`)**: 给定 `task_id`,读 `task_trajectory_events` 按 `gmt_create` 升序组装 `TaskTrajectory{task_id, timeline, analysis, gmt_create, gmt_modify}`(**无** `phases` / `graph_snapshot`;字段在发射时已定型,组装层仅排序/拼装),并 UPSERT `task_trajectory` 头行;查询端点读持久化表呈现(跨重启可用)。
+3. **分析层(`TaskTrajectoryAnalyzer`)**: 取 `TaskTrajectory` → 产出扁平 `TrajectoryAnalysis{analysis_type, analysis_executor, analysis_input, analysis_output, boost_reason: str?, failure_reason: str?, gmt_create}`(无 verdict 对象、不含事件列表);`failure_reason` 由决定性终端事件 `error_type`/`error_msg` 派生,`boost_reason` 由末条 DISPATCH 事件的 `ext_info` 派生;分析结果序列化为 JSON 字符串回填 `TaskTrajectory.analysis` 与各 `TrajectoryEvent.analysis`。分析执行者为多源框架:`rule`(规则引擎)/`llm`(大模型)/`tc_bot`(bot),`analysis_type`/`analysis_executor` 记录实际执行者。
+4. **持久化层(REQ-11,2026-09-17 确认)**: 事件在闸门发射时即时 INSERT 落库;头行 `task_trajectory` 组装时 UPSERT;分析结果 UPDATE 回填两表 `analysis` 列与 `gmt_modify`。
+
+### 与状态机的关系
+
+不变。轨迹发射是独立旁路(`_log_action`/action log 链路与 `NodeAction` 动作集均不动);`submit` 是**轨迹动作类型集合**的新成员(REQ-6),不改 `NodeAction` 枚举。
+
+---
+
+## 需求列表
+
+### REQ-1: 新增 `task_trajectory` 子模块与轨迹/分析领域模型
+
+- **描述**: 新增 `core/task/task_trajectory/{__init__,models,assembler,analyzer,payloads}.py`,定义:
+  - `TrajectoryEvent{task_id, node_id, action_type, action_input: str?, action_result, status_from, status_to, attempt, error_type: ReasonCatalog?, error_msg: str?, analysis: str?, gmt_create, gmt_modify}` —— **扁平事件行**(无 `phase`/`payload`/`rationale` 内联)。`gmt_create`/`gmt_modify` = 创建/最后修改时间戳——事件行 append-only,`gmt_create` = 事件发射时间(timeline 排序依据,对应 `task_trajectory_events.gmt_create`),`gmt_modify` 仅在分析回填 `analysis` 时更新(未回填时等于 `gmt_create`);`action_type` = 动作类型(`submit|plan|dispatch|execute|verify|reset|transition`);`action_result` = 该动作结果枚举(`success|hit_single|hit_multi|miss|failed|sla_timeout|pending_dispatch_stuck|exec_failed_retry|bbs_lease_expired|parse_fail|call_fail|accept_pass|accept_fail|...`);`action_input` = 该动作的**输入内容**(完整,**不截断**),由采集层发射时按动作类型定型:`submit→task_spec_digest`(REQ-6)、`plan→prompt_digest`(REQ-3)、`dispatch→下发对象/节点规格内容`(**候选/分写入事件行 `ext_info` 列,不进领域字段**,REQ-9 经 ext_info 读取)、`execute/verify→request_input`(REQ-5,下发请求原文)、`reset/transition→null`(触发原因已由 `action_result`/ext_info 承载);与 `error_msg` 不同,输入不是错误,**成功动作也可非空**;无输入载荷时为 `null`;`error_type` 仅在出错时填 `ReasonCatalog` 分类(成功为 `null`);`error_msg` 为截断消息(成功为 `null`);`analysis` = 内嵌的 `TrajectoryAnalysis` **JSON 字符串**(对象序列化产物,**发射时为 `null`,分析完成后统一回填**;`TrajectoryAnalysis` 已不含事件列表,可直接全量序列化,无递归风险,见 REQ-9)。
+  - `TaskTrajectory{task_id, timeline: list[TrajectoryEvent], analysis: str?, gmt_create, gmt_modify}` —— **仅时间线**,不含 `phases`、不含 `graph_snapshot`;`analysis` = 内嵌的 `TrajectoryAnalysis` JSON 字符串(**组装层产出时为 `null`,分析完成后回填**);`gmt_create` = 组装产出时间,`gmt_modify` = 回填 `analysis` 时更新(未分析时等于 `gmt_create`)。
+  - `TrajectoryAnalysis{analysis_type, analysis_executor, analysis_input, analysis_output, boost_reason: str?, failure_reason: str?, gmt_create}` —— 派发原因/失败原因均为**扁平字符串**(无 `DispatchVerdict`/`FailureVerdict` 对象,也**不含事件列表/时间线**)——事件已在 `TaskTrajectory.timeline` 中并通过 `analysis` 内嵌关联,分析对象不重复携带:`analysis_type` = 分析类型(取值 `llm | tc_bot | rule`——LLM 大模型分析 / tc_bot 分析 / 确定性规则归因,2026-09-17 确认);`analysis_executor` = 执行分析的**主体自身 id**(`llm` 时为大模型名字、`tc_bot` 时为该 bot 的 id、`rule` 时为规则引擎标识如 `rule_engine`);`analysis_input` = 分析输入内容(喂给分析器的结构化输入:轨迹事件摘要 + ext_info 概要);`analysis_output` = 分析结论汇总文本(`boost_reason`/`failure_reason` 的综合呈现);`boost_reason`(原 `dispatch_reason`)由末条 DISPATCH 事件的 `ext_info`(DispatchRationale)派生(见 REQ-9);`failure_reason` 由决定性终端事件的 `error_type`/`error_msg` 派生;`gmt_create` = 分析产出时间。
+  - `ReasonCatalog` 枚举:`execution_timeout | underlying_interface_error | dispatch_stuck | hung | plan_failure | acceptance_failed | parse_error | transport_error | terminal_invalid | unclassified`(及 dispatch 侧 `join_dropped | no_candidates | score_below_threshold | claim_mode_off | catalog_miss`)
+- **验收标准**:
+  - 模型纯 dataclass / 无副作用;`TrajectoryEvent` 为**扁平投影**(不含嵌套 `payload`/`rationale`/`phase`);`ReasonCatalog` 覆盖 §概述中所有既有失败信号(hung_reason 现有 taxonomy 全量入列)及 REQ-5 的 `exec_error_origin` 分类。
+  - **定型列 + ext_info 两层(关键)**: 轨迹事件行(`task_trajectory_events`)由**定型列**(`action_input`/`action_result`/`error_type`/`error_msg` 等,即 `TrajectoryEvent` 领域对象)与一个 `ext_info` 自由 JSON 列(附加素材:`DispatchRationale`、RESET 计量、SUBMIT 来源等,带 `schema_v` 版本号)组成;领域对象**不映射** ext_info,analyzer 按需读;`action_input` **不截断**。两表与 `task_action_log` 无任何关联列/外键。
+- **改动文件**: `core/task/task_trajectory/models.py`(新增)
+- **状态**: 待实现
+
+### REQ-2: 采集层 — 富化 DISPATCH 事件(回答"派发为何选该执行者")
+
+- **描述**:
+  - `DirectDispatchStrategy` / `SearchBasedDispatchStrategy.apply` 在返回 outcome 的同时返回 `DispatchRationale`:`{strategy_name: direct|search|replay|bbs, decision_mode: direct|rule|skill|replay|bbs, candidates:[{bot_id, recommend_score, short_profile}], prefetch_tokens:list[str], join_filter_applied:bool, join_dropped:[{bot_id, reason}], skill_prompt_digest:str?, skill_response_digest:str?}`(digest=SHA-256 over prompt + 截断 500 字响应)。
+  - `TaskDispatcher.dispatch`(dispatcher.py:62)把 `DispatchRationale` 线程注入节点 patch,供 `engine.py` 在 DISPATCH 闸门(engine.py:2964/2871/2113)旁路发射轨迹事件:定型字段按 REQ-1 填写,**rationale 整体写入事件行 `ext_info` 列**(JSON + `schema_v`)。**`task_action_log` 不做任何改动**。
+- **验收标准**:
+  - DISPATCH 轨迹事件行的 `ext_info` 含完整 `DispatchRationale`;候选集与 `recommend.score` 来自 `_prefetch_candidates`(strategies.py:539)实际命中结果(非空);search-skill 模式记录 prompt/response digest;JOIN 滤掉的 bot 带 `reason`(扩展现有仅 `claim_mode_off` → 增加 `catalog_miss`/`score_below_threshold`,见 REQ-7)。
+  - rationale 组装全程 `try/except`,任一子字段缺失不影响 DISPATCH 轨迹事件正常发射落库,仅 `ext_info=None`(或缺失字段) + DEBUG 日志。
+- **改动文件**: `core/task/task_dispatch/strategies.py`、`task_dispatch/dispatcher.py`、`core/task/task_center/engine.py`(DISPATCH 三处闸门挂轨迹发射)、`core/task/task_trajectory/payloads.py`(发射 helper)
+- **状态**: 待实现
+
+### REQ-3: 采集层 — PLAN 重试每轮发事件 + LLM prompt/响应 digest
+
+- **描述**: `_plan_with_retry`(engine.py:599)处**每次尝试发射一条** PLAN 轨迹事件(`attempt=n`):中间失败条带 `error_type/error_msg`(reason code)且 `action_input=prompt_digest`,`ext_info` 存 `gap_detail`+`raw_response_digest`;最终成功那条带 `has_gap/children[node_ids]`(ext_info)。策略名(`workflow`/`gap_based`)来自 `TaskPlanner`(planner.py:62 first-match),写入 ext_info。**`task_action_log` 不做任何改动**。
+- **验收标准**: 对 `MAX_HARNESS=2` 的失败重试,`task_trajectory_events` 出现 ≥2 条 `action_type=plan`,`attempt` 递增,中间条 error 字段非空;成功路径仅 1 条 ext_info 带 children。digest 仅在 `strategies.py:159`(gap-based)planning prompt 非空时计算;workflow 策略 `prompt_digest=None`(action_input 同为 null)。
+- **改动文件**: `core/task/task_center/engine.py`(`_plan_with_retry` 挂轨迹发射)、`core/task/task_plan/planner.py`、`core/task/task_plan/strategies.py`
+- **状态**: 待实现
+
+### REQ-4: 采集层 — RESET 事件带 `trigger`/`elapsed_ms`/`sla_threshold`(回答"执行超时")
+
+- **描述**: harness 复位(engine.py:2057 区)发射 RESET 轨迹事件:`action_result` 按 trigger 映射(`sla_timeout|exec_failed_retry|pending_dispatch_stuck|bbs_lease_expired|harness_max`),`ext_info` 存 `{trigger, elapsed_ms: int, sla_threshold_ms: int?, attempts_seen: int}`。`elapsed_ms = now - run_info.start_time`;`sla_threshold_ms` 取自 `harness.py:131` 当前 SLA(单 bot 600s / 协作群 900s / pending dispatch 180s)。**`task_action_log` 不做任何改动**。
+- **验收标准**: 任一 SLA 超时复位轨迹事件能凭 `action_result` + `ext_info` 得出"在 N ms 触发超时,阈值 M ms";`pending_dispatch_stuck` 带停留时长;非超时 trigger `sla_threshold_ms=null`。
+- **改动文件**: `core/task/task_harness/harness.py`、`core/task/task_center/engine.py`(RESET 闸门挂轨迹发射)
+- **状态**: 待实现
+
+### REQ-5: 采集层 — EXECUTE/VERIFY 区分 `exec_error_origin`(回答"底层接口有报错")
+
+- **描述**: EXECUTE/VERIFY 轨迹事件(engine.py:1691/1701/1709 闸门)发射时定型:`error_type` 按 `exec_error_origin` 分类映射(`bot_interface→underlying_interface_error` / `parse→parse_error` / `terminal_invalid→terminal_invalid` / `transport→transport_error`)、`error_msg` 带截断消息、`action_input` 填下发给 bot 的请求原文(**不截断**;try/except 内采集,失败仅置 None)、`ext_info` 存 `interface_error_code?`。**`task_action_log` 不做任何改动**。来源分类:
+  - `bot_interface`: callback 来的 `TaskNodePatch.exec_error` 非空来自 bot 侧(callback_adapter.py:181,即"底层接口有报错")。
+  - `parse`: callback 整体不可解析(ingest_parse_error, callback_adapter.py:412)。
+  - `terminal_invalid`: success 非 bool / failed 无 gaps(callback_adapter.py:194)。
+  - `transport`: 规划/调度 HTTP 层异常(plan_call_fail / dispatch_exception)。
+- **验收标准**: 给定一条 `exec_error` 来自 bot 回调的轨迹,对应 EXECUTE/VERIFY 轨迹事件 `error_type=underlying_interface_error`、`error_msg` 带接口消息;解析失败类 `error_type=parse_error`;`action_input` 带完整请求内容。
+- **改动文件**: `core/task/task_center/engine.py`(EXECUTE/VERIFY 闸门挂轨迹发射)、`core/task/task_runner/callback_adapter.py`(把 origin 透出到 patch,供发射点读取)
+- **状态**: 待实现
+
+### REQ-6: 采集层 — 新增 `SUBMIT` 动作事件(补齐"从提交"段)
+
+- **描述**: `TaskService.execute`(task_service.py:326,持久化 `task_info` 处 engine.py:351-357)之后发射 SUBMIT 轨迹事件:`action_input` = `task_spec_digest`,`ext_info` 存 `{source: openapi|internal, task_type, owner_user_id, owner_bot_id, submitted_at}`。**`submit` 是轨迹动作类型集合的新成员,不改 `NodeAction` 枚举、不写 `task_action_log`**。
+- **验收标准**: 任意任务轨迹 `timeline[0].action_type=submit`;现有各执行分支(workflow/yaml/bbs/外部)均覆盖。
+- **改动文件**: `core/task/task_center/task_service.py`、`core/task/task_center/engine.py`
+- **状态**: 待实现
+
+### REQ-7: 采集层 — `unauthorized_bots` reason 微分类
+
+- **描述**: JOIN 滤除(strategies.py:359-461)与 catalog 缺失场景的 `reason` 由仅 `claim_mode_off` 扩为:`claim_mode_off | catalog_miss | score_below_threshold | claim_filter_disabled`。写入 `DispatchRationale.join_dropped`(REQ-2,随 DISPATCH 轨迹事件 `ext_info` 落库)。
+- **验收标准**: 分类可在 DISPATCH 轨迹事件 `ext_info.join_dropped[].reason` 还原出具体丢因。
+- **改动文件**: `core/task/task_dispatch/strategies.py`
+- **状态**: 待实现
+
+### REQ-8: 组装层 — `TaskTrajectoryAssembler` + `GET /tasks/{id}/trajectory`
+
+- **描述**: `TaskTrajectoryAssembler.assemble(task_id)` 读 `TaskTrajectoryRepository`(新,读 `task_trajectory_events`;**不读 `task_action_log`**),按 `gmt_create` 升序把每行还原为 `TrajectoryEvent{task_id, node_id, gmt_create, gmt_modify, action_type, action_result, action_input, status_from, status_to, attempt, error_type, error_msg, analysis}`——各字段在发射时已定型,组装层仅读取/排序/拼装——产出 `TaskTrajectory{task_id, timeline, analysis, gmt_create, gmt_modify}`(无 phases / graph_snapshot,读回时 `analysis` 取已回填值,未回填过则 `null`),并 UPSERT `task_trajectory` 头行(REQ-11,不覆盖已有 `analysis`)。新增 HTTP 端点 `GET /api/v1/collaboration/tasks/{task_id}/trajectory` 与 OpenAPI 镜像 `GET /openapi/v1/collaboration/tasks/{task_id}/trajectory`——**读 REQ-11 持久化表呈现**(跨重启可用)。
+- **验收标准**:
+  - timeline 按 `gmt_create` 升序;SUBMIT 在首、terminal TRANSITION 在尾。
+  - 轨迹体系上线前的旧任务无轨迹数据,接口返回空 timeline(**不读 action log 兜底**)。
+  - 现有 `dashboard?include_action_log=true` 行为完全不变(轨迹体系与 action log 无任何交互)。
+  - 端点响应 schema 在 OpenAPI schemas.py 注册;e2e 测试覆盖。
+- **改动文件**: `core/task/task_trajectory/assembler.py`(新增)、`adapters/http/task/router.py`、`adapters/http/openapi_v1/task/router.py`+`schemas.py`、`core/task/api/task/...`(service facade 暴露)
+- **状态**: 待实现
+
+### REQ-9: 分析层 — `TaskTrajectoryAnalyzer` 派生扁平原因字符串
+
+- **描述**: `TaskTrajectoryAnalyzer.analyze(trajectory, ext_info_lookup) -> TrajectoryAnalysis{analysis_type, analysis_executor, analysis_input, analysis_output, boost_reason: str?, failure_reason: str?, gmt_create}`(`ext_info_lookup` 按事件唯一键取 `task_trajectory_events.ext_info` 列(JSON)——因 `TrajectoryEvent` 领域对象不内联候选/分/计量;**无 verdict 对象,原因为扁平字符串**):
+  - `analysis_type`/`analysis_executor` 由实际执行分析的主体决定:REQ-9 内置规则归因固定填 `analysis_type=rule`、`analysis_executor=rule_engine`;`llm`(调大模型分析)/`tc_bot`(调 bot 分析)为扩展执行者,由各自调用方填写 `analysis_executor` 为大模型名字 / bot id,产出同样形态的 `TrajectoryAnalysis` JSON。
+  - `analysis_input` 记录本次分析的输入摘要(事件数 + ext_info 概要);`analysis_output` 为 `boost_reason`/`failure_reason` 拼装后的结论汇总文本;`gmt_create` = 分析产出时间。
+  - **分析结果回填(关键流程)**: 分析完成后,把 `TrajectoryAnalysis` **直接全量 `json.dumps`**(对象不含事件列表,无递归风险)为字符串,统一回填到 `TaskTrajectory.analysis` 与 `timeline` 中每个 `TrajectoryEvent.analysis`(各事件回填同一份分析 JSON),同时把 `TaskTrajectory.gmt_modify` 及各事件 `gmt_modify` 更新为回填时间;回填**持久化**——UPDATE `task_trajectory.analysis` 与 `task_trajectory_events.analysis`,并更新两表 `gmt_modify`(REQ-11)。
+  - `failure_reason`(仅当任务终止态非 SUCCESS——按末条 terminal TRANSITION 事件的 `status_to` 判定,不再落独立 `terminal_status` 字段,反向遍历取决定性终端事件,按优先级拼 `error_type`+`error_msg`):
+    - 末个 RESET `action_result=sla_timeout`/`error_type=execution_timeout` → `"execution_timeout: 在 {elapsed}ms 触发,阈值 {threshold}ms"`(elapsed/threshold 取该 RESET 事件 `ext_info` 的 `elapsed_ms`/`sla_threshold_ms`,REQ-4)
+    - 最近 EXECUTE/VERIFY `error_type=underlying_interface_error` → `"underlying_interface_error: {error_msg}"`
+    - RESET `action_result=pending_dispatch_stuck` → `"dispatch_stuck: 停留 {elapsed}ms"`(elapsed 取 ext_info)
+    - `error_type=hung`(或节点 hung_reason) → `"hung: {hung_reason}"`
+    - plan 终条 `action_result∈{parse_fail,call_fail}` → `"plan_failure: {origin}"`
+    - acceptance FAIL → `"acceptance_failed: {acceptance_result}"`
+    - 无匹配 → `"unclassified: {最近事件摘要}"`
+  - `boost_reason`(原 `dispatch_reason`): 取末条 `action_type=dispatch` 事件 → `"策略={strategy_name} 模式={decision_mode} 选中={assignee}({action_result}); 候选{candidate_count} 取最优; JOIN 丢={join_dropped 摘要}"`(经 `ext_info_lookup` 读该事件 `ext_info` 中的 `DispatchRationale`)。
+- **验收标准**:
+  - 对每种 `ReasonCatalog` 分类各有一个 fixture 轨迹,断言 `failure_reason` 以对应前缀开头。
+  - `failure_reason` 仅依赖扁平 `TrajectoryEvent`,不读日志/不调外部;`boost_reason` 经 `ext_info_lookup` 纯查 `task_trajectory_events.ext_info`。纯函数易测。
+  - 分析完成后 `TaskTrajectory.analysis` 与每个 `TrajectoryEvent.analysis` 均为合法 JSON 字符串,解析后含 `analysis_type`/`analysis_executor`/`boost_reason`/`failure_reason`/`gmt_create`,且不含事件列表(无递归);回填后 `TaskTrajectory.gmt_modify` 与各事件 `gmt_modify` 更新为回填时间(组装时 `gmt_modify=gmt_create`)。
+  - 成功任务 `failure_reason=None`。
+- **改动文件**: `core/task/task_trajectory/analyzer.py`(新增)、`core/task/task_trajectory/models.py`(ReasonCatalog)
+- **状态**: 待实现
+
+### REQ-10: HTTP 端点 `GET /tasks/{id}/trajectory/analysis`
+
+- **描述**: 暴露 `TrajectoryAnalysis`,读 REQ-11 持久化的分析结果(`task_trajectory.analysis` + 事件 `analysis`);原 `?narrative=true` 参数随 REQ-P2 裁剪移除。
+- **验收标准**: 仅读路径;复用 REQ-8/REQ-9 产物与 REQ-11 持久化表;e2e 覆盖至少 success / interface_error / timeout / hung 四类。
+- **改动文件**: `adapters/http/task/router.py`、`adapters/http/openapi_v1/task/router.py`+`schemas.py`
+- **状态**: 待实现
+
+### REQ-11: 存储层 — `task_trajectory` / `task_trajectory_events` 轨迹落库(2026-09-17 确认纳入首期)
+
+- **描述**: 轨迹事件**在采集时(闸门发射点)即时 INSERT 落库**,头行在组装时 UPSERT,新增两表(**与 `task_action_log` 无任何关联**)。轨迹事件自身即数据源,不存在"从 action log 收集"的过程:
+  - `task_trajectory`(一任务一行,`task_id` 唯一):`id, task_id, analysis(TEXT NULL), gmt_create, gmt_modify`——组装时按 `task_id` UPSERT;已有行的 `analysis`/`gmt_modify` 不被覆盖(未分析时保持首建值)。
+  - `task_trajectory_events`(一事件一行):`id, task_id, node_id, action_type, action_input(TEXT), action_result, status_from, status_to, attempt, error_type, error_msg, ext_info(TEXT NULL,自由 JSON), analysis(TEXT NULL), gmt_create, gmt_modify`——闸门发射即 INSERT(append-only,无唯一约束,重复发射可能产生重复行);**完全独立的轨迹事件实体,不读不写 `task_action_log`**。
+
+  **DDL**(`core/task/sql/2026_09_17_task_trajectory.sql`;本地 SQLite 由 `create_all` 自动建表):
+
+  ```sql
+  -- task_trajectory / task_trajectory_events: collected trajectory snapshots + analysis backfill.
+  -- Operator-provisioned in dev/pre/prod; SQLite tests use ORM metadata.
+  CREATE TABLE IF NOT EXISTS `task_trajectory` (
+      `id`         bigint(20)   NOT NULL AUTO_INCREMENT                            COMMENT '主键ID',
+      `task_id`    varchar(128) NOT NULL                                           COMMENT '任务 ID(一任务一行)',
+      `analysis`   text         DEFAULT NULL                                       COMMENT '内嵌 TrajectoryAnalysis JSON 字符串(未分析为 NULL,分析回填时写入)',
+      `gmt_create` timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP                 COMMENT '组装产出时间',
+      `gmt_modify` timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后修改时间(分析回填时间)',
+      PRIMARY KEY (`id`),
+      UNIQUE KEY `uk_task_trajectory_task` (`task_id`)
+  ) DEFAULT CHARSET = utf8mb4 COMMENT='任务轨迹头行(组装时 UPSERT,分析回填 analysis)';
+
+  CREATE TABLE IF NOT EXISTS `task_trajectory_events` (
+      `id`            bigint(20)   NOT NULL AUTO_INCREMENT                         COMMENT '主键ID',
+      `task_id`       varchar(128) NOT NULL                                        COMMENT '归属任务 ID',
+      `node_id`       varchar(128) NOT NULL                                        COMMENT '节点 ID',
+      `action_type`   varchar(64)  NOT NULL                                        COMMENT '动作类型(submit|plan|dispatch|execute|verify|reset|transition)',
+      `action_input`  text         DEFAULT NULL                                    COMMENT '动作输入内容(submit=task_spec_digest;plan=prompt_digest;dispatch=下发对象/节点规格;execute/verify=下发请求原文;reset/transition=NULL)',
+      `action_result` text         DEFAULT NULL                                    COMMENT '动作结果枚举(success|hit_single|hit_multi|miss|failed|sla_timeout|pending_dispatch_stuck|exec_failed_retry|...)',
+      `status_from`   varchar(64)  DEFAULT NULL                                    COMMENT '动作前节点状态',
+      `status_to`     varchar(64)  DEFAULT NULL                                    COMMENT '动作后节点状态',
+      `attempt`       int          NOT NULL DEFAULT 0                              COMMENT 'harness 重试序号快照',
+      `error_type`    varchar(64)  DEFAULT NULL                                    COMMENT 'ReasonCatalog 错误分类(成功为 NULL)',
+      `error_msg`     text         DEFAULT NULL                                    COMMENT '截断后的错误消息(成功为 NULL)',
+      `ext_info`      text         DEFAULT NULL                                    COMMENT '扩展信息 JSON(DispatchRationale/RESET计量/SUBMIT来源等(后续可扩展素材);带 schema_v;领域对象不映射,analyzer 按需读)',
+      `analysis`      text         DEFAULT NULL                                    COMMENT '内嵌 TrajectoryAnalysis JSON 字符串(未回填为 NULL,分析回填时写入)',
+      `gmt_create`    timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP              COMMENT '事件发生时间(timeline 排序依据)',
+      `gmt_modify`    timestamp    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '最后修改时间(分析回填时间)',
+      PRIMARY KEY (`id`),
+      KEY `idx_task_trajectory_events_task` (`task_id`, `gmt_create`),
+      KEY `idx_task_trajectory_events_node` (`task_id`, `node_id`, `gmt_create`)
+  ) DEFAULT CHARSET = utf8mb4 COMMENT='任务轨迹事件投影行(TrajectoryEvent 物化)';
+  ```
+
+  **行为约束**:
+  - 事件行**无唯一约束**(append-only):闸门每次触发产生一行,重复触发/重试可能产生重复行,业务接受(分析取末条即可;以自增 `id` 兜底区分)。
+  - 两表与 `task_action_log` 无任何关联列/外键/查询依赖。
+  - `(task_id, gmt_create)` / `(task_id, node_id, gmt_create)` 支持按任务/节点还原 timeline 升序(无 `seq`,同 `gmt_create` 排序歧义接受)。
+  - 两表 UPDATE **仅**发生在分析回填(REQ-9):写 `analysis` + `gmt_modify`;`gmt_create`/定型列/`ext_info` 永不修改。
+  - `action_input`/`analysis` 为 TEXT 可变长(原文不截断,见"风险与边界"之 digest 隐私例外);`error_msg` 为截断消息;`ext_info` 为带 `schema_v` 的自由 JSON。
+- **验收标准**:
+  - 闸门触发后事件行**即时**出现在 `task_trajectory_events`(无需等待组装);按 `gmt_create` 升序可还原 timeline。
+  - 发射失败(如库异常)仅 DEBUG 日志,不阻塞正向驱动;重复发射可能产生重复事件行(无唯一约束,业务可接受)。
+  - 任务推进后再次组装,头行 UPSERT 保留已回填的 `analysis`。
+  - 分析回填后两表 `analysis` 非空、`gmt_modify` 更新(REQ-9)。
+  - 实例重启后轨迹/分析接口仍可读(数据在库)。
+  - 表 DDL 走 `core/task/sql/2026_09_17_task_trajectory.sql`;本地 SQLite 由 `create_all` 自动建表。
+- **改动文件**: `repository/models.py`、`core/repository/implementations/task/task_trajectory_repository.py`(新增,含发射 INSERT/头行 UPSERT/回填 UPDATE)、`core/task/task_trajectory/payloads.py`(发射 helper `_log_trajectory`,挂到 engine 各闸门)、`core/task/task_trajectory/assembler.py`、`core/task/task_trajectory/analyzer.py`、`core/task/sql/2026_09_17_task_trajectory.sql`(新增)
+- **状态**: 待实现
+
+---
+
+## 跨重启轨迹连续性(2026-09-17 确认纳入首期)
+
+### REQ-P1: 持久化回调↔节点关联
+
+- **描述**: `CallbackCorrelationRegistry`(callback_correlation.py)当前仅内存;新增小表 `task_callback_correlation(event_id, main_session_id, task_id, node_id, retry, gmt_create)`,在 `TaskLoopCallback` 注册时写、回调处理完按 `event_id` 幂等。Assembler 可据此把重启后到达的回调关联回节点。
+- **验收标准**: 重启后 in-flight 任务的回调仍能在 trajectory 中关联回正确 (node, retry);表 DDL 走 `core/task/sql/2026_09_16_task_callback_correlation.sql`;本地 SQLite 由 `create_all` 自动建表。
+- **改动文件**: `repository/models.py`、`core/repository/implementations/task/task_callback_correlation_repository.py`(新增)、`core/task/task_runner/callback_correlation.py`、`core/task/task_runner/callback_adapter.py`
+- **状态**: 待实现(首期,2026-09-17 确认纳入)
+
+## P2(已裁剪,不做)
+
+### REQ-P2: LLM 叙述层
+
+- **描述**: ~~`?narrative=true` 时把 `TrajectoryAnalysis` 喂 owner bot 产出自然语言叙述~~ **不做(2026-09-17 确认)**:轨迹/事件中的 `analysis` 本身就可能是请求大模型或 bot 得到的分析结果(`analysis_type=llm|tc_bot`,REQ-9 多执行者框架),无需在其上再叠独立叙述层。`?narrative` 参数已从 REQ-10 移除。
+- **状态**: 已裁剪(不做)
+
+---
+
+## 验收(端到端)
+
+- 能对一个 `task_id` 调一次轨迹接口得到 submit→plan→dispatch→execute 全段 timeline。
+- **闸门触发即事件落库**(`task_trajectory_events`,发射时即时 INSERT);分析回填后两表 `analysis` 非空、`gmt_modify` 更新;**实例重启后轨迹/分析接口仍可读**;`task_action_log` 相关测试零变化(完全未触碰)。
+- 对"底层接口报错"案例 `failure_reason` 以 `underlying_interface_error` 开头且带接口错误消息。
+- 对"执行超时"案例 `failure_reason` 以 `execution_timeout` 开头且带 elapsed/threshold。
+- 对"派发给该执行者"案例 `boost_reason` 能给出策略+决策模式+选中+候选数+JOIN 丢因。
+- 现有 e2e 测试(`tests/community/core/task/e2e/test_task_pre_e2e_*`)不回归;新增 `tests/community/core/task/task_trajectory/` 单测覆盖发射 helper/assembler/analyzer/落库各分支(发射 INSERT/头行 UPSERT/回填 UPDATE)。
+
+## 风险与边界
+
+- **`ext_info` 自由 JSON 的 schema 漂移**: `task_trajectory_events.ext_info` 依赖 `schema_v` 版本号 + analyzer 对缺失字段防御性降级;定型列不受影响。
+- **发射阻塞正向驱动**: 所有轨迹发射(含 ext_info 组装)`try/except`,失败仅 DEBUG 日志 + 该字段 null/事件缺失;**不**向上抛,不影响闸门主逻辑。
+- **digest 隐私**: prompt/response 仅存 SHA-256 digest + 截断 500 字,不存全文(避免 token/敏感信息全量落库)。**例外**:`TrajectoryEvent.action_input` 不截断——execute/verify 的 `request_input` 为下发请求**原文落库**,dispatch 的节点规格内容亦为原文,且经 REQ-11 落到 `task_trajectory_events.action_input` **长期保存**;权限收敛已确认**暂不做**(见"已确认决策"第 4 条),原文暴露与膨胀风险接受、后续迭代再议。
+- **范围边界**: 不改状态机、不改六模块正向 API 契约、不重构 `extend_props`(既有自由字段保持,本 spec 不收敛它们,避免回归)。
+
+## 已确认决策(2026-09-17)
+
+1. **主消费方**: 确认为"工程师排障根因定位"。
+2. **跨重启关联 + 轨迹落库纳入首期**: 轨迹数据**每次收集后存储到数据库**,新建 `task_trajectory`、`task_trajectory_events` 两表(见 REQ-11);`task_callback_correlation` 关联表纳入首期(见 REQ-P1)。
+3. **P2 独立 LLM 叙述层不做**: 轨迹表/轨迹事件中的 `analysis` 本身就可能是请求大模型或 bot 得到的分析结果,无需独立叙述层(REQ-P2 已裁剪)。
+4. **分析接口权限收敛暂不做**(轨迹含候选/错误/请求原文,暴露风险接受,后续迭代再议)。
+5. (原"分析层是否进一步精简"未直接回复;按第 3/6 条答案,REQ-9 薄 analyzer 保留,并按第 6 条定位为 rule/llm/tc_bot 多执行者框架。如要求连 REQ-9/REQ-10 一并去掉请指正。)
+6. **execute 输入需要**: REQ-5 的 `request_input` 采集保留,`action_input` 对 execute/verify 映射下发请求原文。
+7. **`analysis_type`/`analysis_executor` 取值确认**: `analysis_type ∈ {llm, tc_bot, rule}`;`analysis_executor` 记录执行者自身 id——`llm` 为大模型名字、`tc_bot` 为 bot id、`rule` 为规则引擎标识。连带影响:`analysis` 全量回填每事件的 N 份重复按现状保留(REQ-11 落库后同表冗存,如需事件级独立分析再调整);`gmt_create`/`gmt_modify` 随 REQ-11 成为**真实存储列**(原"内存时间戳、不落库"的结论作废)。
+8. **轨迹体系与 `task_action_log` 完全解耦(2026-09-17 再次修正,推翻原"轨迹骨干已存在"前提)**: 轨迹事件由独立采集链路(`_log_trajectory`)在生命周期闸门直接发射并即时落库 `task_trajectory_events`,**不读、不改、不富化 action log**。连带设计(本轮新增,如与预期不符请指正):
+    - 事件行新增 **`ext_info` 自由 JSON 列**承载 analyzer 素材(`DispatchRationale` 候选/分、RESET 的 elapsed/threshold、SUBMIT 来源),领域对象不映射——否则 `boost_reason`/超时归因无处取数;
+    - 写入时机为**闸门发射即时 INSERT**(非"组装后批量落库"),无唯一约束(append-only,重复发射可能产生重复行,业务接受以末条/自增 `id` 为准);
+    - `submit` 属轨迹动作类型集合,不改 `NodeAction` 枚举;
+    - 轨迹体系上线前的旧任务无轨迹数据(无 action log 兜底)。
+9. **`task_trajectory_events` 表设计微调(2026-09-17)**: 移除唯一键 `uk_task_trajectory_event`(`task_id`,`node_id`,`action_type`,`gmt_create`),事件行改为 append-only(无唯一约束,重复发射可能产生重复行,业务接受以自增 `id`/索引区分、分析取末条);自由 JSON 列 `detail` 更名为 `ext_info`(承载 `DispatchRationale`/RESET 计量/SUBMIT 来源等,后续新增扩展素材统一入此列,领域对象不映射)。原"唯一键幂等/重复发射不产生重复事件行"表述作废,REQ-11 行为约束/验收标准/风险已同步。
