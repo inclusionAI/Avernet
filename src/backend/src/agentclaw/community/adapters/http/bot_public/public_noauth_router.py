@@ -1,15 +1,24 @@
 """Bot Public Router.
 
-提供 Bot 相关接口：
+提供 Bot 相关接口（机器调用，不携带用户身份）：
 - GET /api/public/bots/{bot_id}/appcoding-bots - 获取架构师 bot 关联的 coding bots
 - PATCH /api/public/bots/{bot_id}/ext - 更新 bot ext 字段（限制字段）
+
+鉴权：路由级 ``verify_internal_api_token``（共享内部 Bearer token）。这里没有
+登录态可校验——调用方是平台组件而不是用户——所以由 token 证明"调用方可信"。
+之前 PATCH /ext 完全无鉴权：它用 **被改 Bot 自己的** ``owner_id`` 去调
+``update_by_owner``，属主校验因此恒真，任何人都能改任意 Bot 的 ext 白名单字段。
+token 关掉的就是这条路径；``owner_id`` 现在只是写入时的定位键，不再被当作授权依据。
+
+新增路由自动继承该 guard（依赖挂在 APIRouter 上，而不是逐个 handler）。
 """
 import json
 from typing import Any, Optional
 
-from fastapi import APIRouter, Path, Request
+from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel
 
+from agentclaw.community.adapters.http.internal_auth import verify_internal_api_token
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
@@ -20,7 +29,11 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-router = APIRouter(prefix="/api/public/bots", tags=["bot-public-noauth"])
+router = APIRouter(
+    prefix="/api/public/bots",
+    tags=["bot-public-noauth"],
+    dependencies=[Depends(verify_internal_api_token)],
+)
 
 
 # ==================== Response Models ====================
@@ -204,6 +217,9 @@ async def update_bot_ext_public(
             )
 
         bot = items[0]
+        # 写入定位键，不是授权依据：它取自被改 Bot 自己的行，拿它去
+        # update_by_owner 的属主过滤必然匹配。调用方的授权由路由级
+        # verify_internal_api_token 完成。
         owner_id = bot.get("owner_id")
 
         if not owner_id:

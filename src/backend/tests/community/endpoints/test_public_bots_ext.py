@@ -5,6 +5,12 @@ same SQLAlchemy code paths the production handler does — no mocking of
 injected components. The happy path verifies the whitelisted-field
 update round-trips through the DB; the error path drives the
 not-found branch by simply not seeding.
+
+The route is behind the shared internal Bearer token, so every case presents
+it. The ``unauthenticated`` case is the regression for the horizontal-privilege
+hole this guard closed: the handler read ``owner_id`` off the very Bot being
+modified, so its ``update_by_owner`` owner filter always matched and any caller
+could rewrite any Bot's whitelisted ext fields.
 """
 from __future__ import annotations
 
@@ -16,6 +22,10 @@ from tests.community.framework import (
     endpoint_test,
 )
 from tests.community.framework.world import World
+
+# No secret name is configured in the test profile, so the token provider falls
+# back to the published local constant.
+_AUTH_HEADERS = {"Authorization": "Bearer singlebox-internal-api-token-local"}
 
 
 def _seed_bot(world: World) -> None:
@@ -53,6 +63,7 @@ def _assert_ext_persisted(response, world: World) -> None:
     input=CaseInput(
         path_params={"bot_id": "test_bot"},
         json_body={"is_domain_bot": True, "arch_domain": "新架构域"},
+        headers=_AUTH_HEADERS,
     ),
     seed=_seed_bot,
     expect=ExpectSuccess(
@@ -75,6 +86,7 @@ def update_bot_ext_public_ok():
     input=CaseInput(
         path_params={"bot_id": "missing_bot"},
         json_body={"is_domain_bot": True},
+        headers=_AUTH_HEADERS,
     ),
     expect=ExpectError(
         status=200,
@@ -86,3 +98,30 @@ def update_bot_ext_public_ok():
 )
 def update_bot_ext_public_not_found():
     """Error path: no seeded bot → repo returns empty → 404 envelope."""
+
+
+def _assert_ext_untouched(response, world: World) -> None:
+    """A refused caller must not have changed the Bot it aimed at."""
+    repo = world.get(BotRepository)
+    _, items = repo.list_by_conditions(bot_id="test_bot", page=1, page_size=1)
+    assert items, "seeded bot should still exist after the refused PATCH"
+    ext = items[0].get("ext") or {}
+    assert "is_domain_bot" not in ext
+    assert "arch_domain" not in ext
+    assert ext.get("existing_key") == "existing_value"
+
+
+@endpoint_test(
+    method="PATCH",
+    path="/api/public/bots/{bot_id}/ext",
+    scenario="unauthenticated",
+    input=CaseInput(
+        path_params={"bot_id": "test_bot"},
+        json_body={"is_domain_bot": True, "arch_domain": "新架构域"},
+    ),
+    seed=_seed_bot,
+    expect=ExpectError(status=401),
+    extra_assertions=(_assert_ext_untouched,),
+)
+def update_bot_ext_public_unauthenticated():
+    """Without the internal token the write is refused before it reaches the DB."""

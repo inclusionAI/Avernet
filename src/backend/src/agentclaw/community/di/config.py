@@ -19,6 +19,12 @@ from agentclaw.community.core.bot_config_manifest.delivery_mode import (
     TeclawDeliveryMode,
 )
 from agentclaw.community.core.task_queue.types import DEFAULT_APP
+from agentclaw.community.di.config_tokens import (  # noqa: F401  (re-export)
+    DormantInternalToken,
+    InternalApiToken,
+    SkillCenterInternalToken,
+    TcFileServiceToken,
+)
 from agentclaw.community.kernel.deploy_runtime import DeployRuntime
 
 
@@ -271,6 +277,7 @@ class SecretNamesConfig:
 
     dormant_internal_token: str = ""
     skill_center_internal_token: str = ""
+    internal_api_token: str = ""
     tc_file_service_token: str = ""
     aiworkbench_repo_url: str = ""
     gateway_principal_signing_key: str = "gateway_principal_signing_key"
@@ -753,52 +760,10 @@ class DormantConfig:
     dry_run: bool = True
 
 
-@dataclass(frozen=True)
-class DormantInternalToken:
-    """Resolved bearer token for /api/internal/dormant/* endpoints.
-
-    Produced by ``BotDormantModule._resolved_dormant_token``. Single source
-    of truth for the secret name is the constant in BotDormantModule; YAML
-    does NOT carry the token (would leak it in repo). Resolution rules
-    match the project-wide pattern (see ``plugins/prod/outbound_rules.py``
-    theat_token handling, ``core/skill_center/services/skill_scan.py``
-    skillscan_agent_api_key):
-
-      - Mist returns a secret object  → ``.value = secret.secret_value``
-      - Mist returns None (singlebox /  → ``.value = <fallback constant>``
-        Mist unreachable / no secret)     (so singlebox联调依然可用)
-      - resolver raises                → ``.value = ""`` (failure-closed)
-
-    Empty ``value`` makes the auth Depends 401 all requests
-    (feature-off failure mode).
-    """
-
-    value: str = ""
-
-
-@dataclass(frozen=True)
-class TcFileServiceToken:
-    """Resolved shared Bearer token for the OCB ↔ ECB TC integration."""
-
-    value: str = ""
-
-
-@dataclass(frozen=True)
-class SkillCenterInternalToken:
-    """Resolved bearer token for ``/api/internal/skill-center/*`` endpoints.
-
-    Produced by ``SkillCenterInternalTokenBindings._resolved_internal_token``,
-    with the same
-    resolution rules and the same failure-closed empty default as
-    ``DormantInternalToken``: an empty ``value`` makes the auth Depends 401
-    every request rather than authorize an unverified caller.
-
-    Separate from the dormant token on purpose — these endpoints converge
-    capability state for whole pages of Bots, so the two operations are
-    granted independently.
-    """
-
-    value: str = ""
+# Bearer tokens resolved from SecretResolver at DI time (DormantInternalToken,
+# SkillCenterInternalToken, InternalApiToken, TcFileServiceToken) moved to
+# ``di/config_tokens.py`` — they are resolved secret *values*, never yaml — and
+# are re-exported at the top of this module.
 
 
 @dataclass(frozen=True)

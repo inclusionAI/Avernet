@@ -1,9 +1,12 @@
 """Tests for bot_public_noauth router.
 
-Tests for the public endpoints:
+Tests for the machine-facing endpoints:
 - GET /api/public/bots/{bot_id}/appcoding-bots
 - PATCH /api/public/bots/{bot_id}/ext
 
+Both sit behind the shared internal Bearer token (``verify_internal_api_token``),
+so every case here presents it; ``TestInternalTokenGuard`` covers what happens
+when a caller does not.
 """
 import json
 from unittest.mock import MagicMock
@@ -20,6 +23,10 @@ from agentclaw.community.adapters.http.bot_public.public_noauth_router import (
 )
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.di.config import InternalApiToken
+
+_TOKEN = "test-internal-api-token"
+_AUTH_HEADERS = {"Authorization": f"Bearer {_TOKEN}"}
 
 
 # --- Helpers ---
@@ -34,6 +41,7 @@ def _bind_services(mock_bot_service=None, mock_bot_repo=None):
                 binder.bind(BotServiceProtocol, to=mock_bot_service)
             if mock_bot_repo is not None:
                 binder.bind(BotRepository, to=mock_bot_repo)
+            binder.bind(InternalApiToken, to=InternalApiToken(value=_TOKEN))
     return _M()
 
 
@@ -105,13 +113,25 @@ def mock_bot_repo():
     return repo
 
 
-@pytest.fixture
-def client(mock_bot_service, mock_bot_repo):
-    """TestClient with mocked services."""
+def _app(mock_bot_service, mock_bot_repo) -> FastAPI:
     app = FastAPI()
     app.include_router(router)
     attach_injector(app, Injector([_bind_services(mock_bot_service, mock_bot_repo)]))
-    return TestClient(app)
+    return app
+
+
+@pytest.fixture
+def client(mock_bot_service, mock_bot_repo):
+    """TestClient with mocked services, presenting the internal token."""
+    return TestClient(
+        _app(mock_bot_service, mock_bot_repo), headers=dict(_AUTH_HEADERS)
+    )
+
+
+@pytest.fixture
+def anonymous_client(mock_bot_service, mock_bot_repo):
+    """TestClient that sends no Authorization header."""
+    return TestClient(_app(mock_bot_service, mock_bot_repo))
 
 
 # --- Tests for GET /api/public/bots/{bot_id}/appcoding-bots ---
@@ -119,8 +139,8 @@ def client(mock_bot_service, mock_bot_repo):
 class TestListCodingBotsPublic:
     """GET /api/public/bots/{bot_id}/appcoding-bots."""
 
-    def test_no_auth_required(self, client):
-        """Should respond successfully on a basic request."""
+    def test_token_accepted(self, client):
+        """Should respond successfully when the internal token is presented."""
         resp = client.get("/api/public/bots/arch_001/appcoding-bots")
         assert resp.status_code == 200
         data = resp.json()
@@ -270,8 +290,8 @@ class TestScrubSensitiveUnit:
 class TestUpdateBotExtPublic:
     """PATCH /api/public/bots/{bot_id}/ext — whitelist enforced."""
 
-    def test_no_auth_required(self, client):
-        """Should respond successfully on a basic PATCH."""
+    def test_token_accepted(self, client):
+        """Should respond successfully when the internal token is presented."""
         resp = client.patch(
             "/api/public/bots/default/ext",
             json={"is_domain_bot": True, "arch_domain": "新架构域"},
@@ -385,6 +405,55 @@ class TestUpdateBotExtPublic:
         data = resp.json()
         assert data["success"] is False
         assert data["error_code"] == 500
+
+
+# --- Tests for the shared internal-token guard ---
+
+class TestInternalTokenGuard:
+    """Both routes are closed to a caller without the internal token.
+
+    The regression this pins: PATCH /ext resolved ``owner_id`` from the very
+    Bot being modified, so ``update_by_owner``'s owner filter always matched
+    and any caller could rewrite any Bot's whitelisted ext fields. The guard is
+    what makes the caller prove anything at all, so a 401 here must come before
+    the repository is touched.
+    """
+
+    def test_get_without_token_is_401(self, anonymous_client, mock_bot_service):
+        resp = anonymous_client.get("/api/public/bots/arch_001/appcoding-bots")
+
+        assert resp.status_code == 401
+        mock_bot_service.list_coding_bots_by_architect.assert_not_called()
+
+    def test_patch_without_token_is_401(self, anonymous_client, mock_bot_repo):
+        resp = anonymous_client.patch(
+            "/api/public/bots/default/ext",
+            json={"is_domain_bot": True},
+        )
+
+        assert resp.status_code == 401
+        mock_bot_repo.update_by_owner.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "authorization",
+        [
+            f"Bearer wrong-{_TOKEN}",
+            _TOKEN,  # no Bearer prefix
+            "Bearer ",
+            "",
+        ],
+    )
+    def test_patch_with_a_bad_token_is_401(
+        self, anonymous_client, mock_bot_repo, authorization
+    ):
+        resp = anonymous_client.patch(
+            "/api/public/bots/default/ext",
+            json={"is_domain_bot": True},
+            headers={"Authorization": authorization},
+        )
+
+        assert resp.status_code == 401
+        mock_bot_repo.update_by_owner.assert_not_called()
 
 
 # --- Comparison tests: field structure parity ---

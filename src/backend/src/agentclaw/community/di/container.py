@@ -60,6 +60,9 @@ from agentclaw.community.di.modules.identity_module import IdentityModule
 from agentclaw.community.di.modules.installation_read_config_module import (
     InstallationReadConfigModule,
 )
+from agentclaw.community.di.modules.internal_api_token_module import (
+    InternalApiTokenModule,
+)
 from agentclaw.community.di.modules.mcp_runtime_credentials_config_module import (
     McpRuntimeCredentialsConfigModule,
 )
@@ -171,6 +174,10 @@ def build_injector(
         CallerIdentityModule(),
         UserListModule(),
         BotDormantModule(),
+        # The shared internal Bearer token. ``local`` keeps the published
+        # fallback token to singlebox / test / community; corp resolves the
+        # real secret or closes the routes it gates.
+        InternalApiTokenModule(local=profile is not DeployProfile.CORP),
         TaskQueueModule(),
         TaskPersistenceModule(),
         QualityModule(),

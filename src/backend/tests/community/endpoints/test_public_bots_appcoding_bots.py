@@ -1,4 +1,4 @@
-"""Endpoint test for GET /api/public/bots/{bot_id}/appcoding-bots (no auth).
+"""Endpoint test for GET /api/public/bots/{bot_id}/appcoding-bots.
 
 Exercises the real handler → real ``BotService`` → real repositories against the
 per-test SQLite DB: a coding bot and its template (linked to the architect bot
@@ -15,12 +15,18 @@ from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 
 from tests.community.framework import (
     CaseInput,
+    ExpectError,
     ExpectSuccess,
     endpoint_test,
 )
 
 ARCHITECT_BOT_ID = "arch_001"
 CODING_BOT_ID = "app_bot_1"
+
+# The route is behind the shared internal Bearer token. No secret name is
+# configured in the test profile, so ``InternalApiTokenBindings`` falls back to
+# the published local constant.
+_AUTH_HEADERS = {"Authorization": "Bearer singlebox-internal-api-token-local"}
 
 
 def _seed_appcoding_bot(world):
@@ -53,6 +59,7 @@ def _seed_appcoding_bot(world):
     scenario="ok",
     input=CaseInput(
         path_params={"bot_id": ARCHITECT_BOT_ID},
+        headers=_AUTH_HEADERS,
     ),
     seed=_seed_appcoding_bot,
     expect=ExpectSuccess(
@@ -64,7 +71,21 @@ def _seed_appcoding_bot(world):
     ),
 )
 def list_public_coding_bots_ok():
-    """Happy path: a coding bot linked to the architect bot (no auth required)."""
+    """Happy path: a coding bot linked to the architect bot."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/public/bots/{bot_id}/appcoding-bots",
+    scenario="unauthenticated",
+    input=CaseInput(
+        path_params={"bot_id": ARCHITECT_BOT_ID},
+    ),
+    seed=_seed_appcoding_bot,
+    expect=ExpectError(status=401),
+)
+def list_public_coding_bots_unauthenticated():
+    """Without the internal token the route answers 401, not the bot list."""
 
 
 # --- Regression: members (collaborators) are returned on each coding bot ---
@@ -136,6 +157,7 @@ def _assert_members_returned(response, world):
     scenario="ok-with-members",
     input=CaseInput(
         path_params={"bot_id": ARCHITECT_BOT_ID},
+        headers=_AUTH_HEADERS,
     ),
     seed=_seed_appcoding_bot_with_member,
     expect=ExpectSuccess(
