@@ -136,7 +136,7 @@ src/backend/tests/community/
 ## Phase 0 — Domain models (REQ-1)
 
 1. Add `core/task/task_trajectory/{__init__,models}.py`: plain dataclasses only — `TrajectoryEvent`
-   (flat, no nested payload/rationale/phase), `TaskTrajectory{task_id, timeline, analysis, gmt_create, gmt_modify}`,
+   (flat, no nested payload/rationale/phase), `TaskTrajectory{task_id, timeline, analysis, gmt_create, gmt_modified}`,
    `TrajectoryAnalysis{analysis_type, analysis_executor, analysis_input, analysis_output, boost_reason?, failure_reason?, gmt_create}`,
    `ReasonCatalog` enum, `DispatchRationale`, and `TrajectoryActionType` (separate from `NodeAction`).
 2. TDD: `tests/community/core/task/task_trajectory/test_trajectory_models.py` asserts each dataclass
@@ -153,11 +153,11 @@ src/backend/tests/community/
    `tests/community/repository/task/conftest.py`; verify `create_all` covers the new tables).
 4. Add repository protocols + impls: `TaskTrajectoryRepository` (`insert_event`,
    `upsert_head(task_id, analysis=None)` preserving existing analysis, `backfill_analysis(task_id, analysis_json)`
-   UPDATE both tables + `gmt_modify`, `list_events_by_task(task_id) order by gmt_create`);
+   UPDATE both tables + `gmt_modified`, `list_events_by_task(task_id) order by gmt_create`);
    `TaskCallbackCorrelationRepository` (`upsert_on_register`, `find_by_event_id`).
    Follow the `orm_session()`/`db.flush()` pattern; **no** explicit `commit()`.
 5. TDD: `tests/community/repository/task/test_task_trajectory_repository.py` covers
-   insert→append, head UPSERT preserves analysis, backfill updates analysis+gmt_modify, list ascending;
+   insert→append, head UPSERT preserves analysis, backfill updates analysis+gmt_modified, list ascending;
    `test_task_callback_correlation_repository.py` covers register→find idempotent.
 
 ## Phase 2 — Emission helper (REQ-11 payloads)
@@ -218,7 +218,7 @@ asserts the `task_trajectory_events` row(s) + `ext_info`. Order: DISPATCH (REQ-2
 
 1. Add `core/task/task_trajectory/assembler.py::TaskTrajectoryAssembler.assemble(task_id)`:
    `list_events_by_task` (asc `gmt_create`), map rows → `TrajectoryEvent`, build
-   `TaskTrajectory{task_id, timeline, analysis, gmt_create, gmt_modify}` (`analysis` from head row,
+   `TaskTrajectory{task_id, timeline, analysis, gmt_create, gmt_modified}` (`analysis` from head row,
    None if absent), `upsert_head(task_id)` (preserves existing `analysis`). No `phases`/`graph_snapshot`.
 2. TDD: `test_trajectory_assembler.py` — timeline ordering (SUBMIT first, terminal TRANSITION last),
    empty timeline for pre-trajectory tasks (no action-log fallback), UPSERT preserves a pre-set analysis.

@@ -243,7 +243,7 @@ class TrajectoryEventRecord:
     ext_info: Optional[str] = None
     analysis: Optional[str] = None
     gmt_create: Optional[datetime] = None
-    gmt_modify: Optional[datetime] = None
+    gmt_modified: Optional[datetime] = None
 
 
 @dataclass(frozen=True)
@@ -254,7 +254,7 @@ class TaskTrajectoryRecord:
     task_id: str
     analysis: Optional[str] = None
     gmt_create: Optional[datetime] = None
-    gmt_modify: Optional[datetime] = None
+    gmt_modified: Optional[datetime] = None
 
 
 @dataclass(frozen=True)

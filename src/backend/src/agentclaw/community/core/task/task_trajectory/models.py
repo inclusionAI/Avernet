@@ -69,7 +69,7 @@ class TrajectoryEvent:
 
     定型列即领域字段;附加素材(``DispatchRationale`` / RESET 计量 / SUBMIT 来源等)由采集层
     写入事件行 ``ext_info`` 自由 JSON 列(领域对象不映射,analyzer 按需读)。
-    ``gmt_create`` = 事件发射时间(timeline 排序依据);``gmt_modify`` 仅在分析回填 ``analysis``
+    ``gmt_create`` = 事件发射时间(timeline 排序依据);``gmt_modified`` 仅在分析回填 ``analysis``
     时更新(未回填时 == ``gmt_create``)。``analysis`` 为内嵌 ``TrajectoryAnalysis`` JSON 字符串,
     发射时为 ``None``,分析完成后统一回填(REC-9)。``action_input`` **不截断**(原文落库)。
     """
@@ -80,7 +80,7 @@ class TrajectoryEvent:
     action_result: str                       # 动作结果(success|hit_single|miss|failed|sla_timeout|...)
     attempt: int                             # harness 重试序号快照
     gmt_create: int                          # 事件发射时间(ms epoch)
-    gmt_modify: int                          # 分析回填时更新(未回填 == gmt_create)
+    gmt_modified: int                          # 分析回填时更新(未回填 == gmt_create)
     action_input: str | None = None          # submit=task_spec_digest / plan=prompt_digest / execute|verify=request_input / reset|transition=None
     status_from: Status | None = None        # 动作前节点状态(未翻态时 None)
     status_to: Status | None = None          # 动作后节点状态(未翻态时 None)
@@ -94,13 +94,13 @@ class TaskTrajectory:
     """任务轨迹(仅时间线;无 ``phases`` / 无 ``graph_snapshot``)。
 
     组装层(REQ-8)按 ``gmt_create`` 升序读事件行拼装;``analysis`` 组装产出时为 ``None``,
-    分析完成后回填。``gmt_create`` = 组装产出时间,``gmt_modify`` = 回填 ``analysis`` 时
+    分析完成后回填。``gmt_create`` = 组装产出时间,``gmt_modified`` = 回填 ``analysis`` 时
     更新(未分析时 == ``gmt_create``)。
     """
 
     task_id: str
     gmt_create: int
-    gmt_modify: int
+    gmt_modified: int
     timeline: list[TrajectoryEvent] = field(default_factory=list)
     analysis: str | None = None
 

@@ -38,7 +38,7 @@ def _full_event(**overrides) -> TaskTrajectoryEventModel:
         ext_info='{"schema_v":1,"strategy":"direct"}',
         analysis=None,
         gmt_create=datetime(2026, 9, 17, 10, 0, 0),
-        gmt_modify=datetime(2026, 9, 17, 10, 0, 0),
+        gmt_modified=datetime(2026, 9, 17, 10, 0, 0),
     )
     defaults.update(overrides)
     return TaskTrajectoryEventModel(**defaults)
@@ -80,7 +80,7 @@ def test_event_model_roundtrip(db):
     assert record.ext_info == '{"schema_v":1,"strategy":"direct"}'
     assert record.analysis is None
     assert record.gmt_create == datetime(2026, 9, 17, 10, 0, 0)
-    assert record.gmt_modify == datetime(2026, 9, 17, 10, 0, 0)
+    assert record.gmt_modified == datetime(2026, 9, 17, 10, 0, 0)
 
 
 def test_task_trajectory_unique_task_id_rejects_duplicate(db):
@@ -140,7 +140,7 @@ def test_trajectory_head_and_correlation_roundtrip(db):
             task_id="T-1",
             analysis='{"analysis_type":"tc_bot"}',
             gmt_create=datetime(2026, 9, 17, 11, 0, 0),
-            gmt_modify=datetime(2026, 9, 17, 11, 5, 0),
+            gmt_modified=datetime(2026, 9, 17, 11, 5, 0),
         ))
         session.add(TaskCallbackCorrelationModel(
             event_id="evt-2",
@@ -169,7 +169,7 @@ def test_trajectory_head_and_correlation_roundtrip(db):
     assert head_rec.task_id == "T-1"
     assert head_rec.analysis == '{"analysis_type":"tc_bot"}'
     assert head_rec.gmt_create == datetime(2026, 9, 17, 11, 0, 0)
-    assert head_rec.gmt_modify == datetime(2026, 9, 17, 11, 5, 0)
+    assert head_rec.gmt_modified == datetime(2026, 9, 17, 11, 5, 0)
 
     assert isinstance(corr_rec, TaskCallbackCorrelationRecord)
     assert corr_rec.event_id == "evt-2"

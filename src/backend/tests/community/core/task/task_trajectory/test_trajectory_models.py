@@ -83,7 +83,7 @@ def _event(**overrides) -> TrajectoryEvent:
         action_result="failed",
         attempt=2,
         gmt_create=1700000000_000,
-        gmt_modify=1700000000_000,
+        gmt_modified=1700000000_000,
     )
     base.update(overrides)
     return TrajectoryEvent(**base)
@@ -97,7 +97,7 @@ def test_trajectory_event_constructs_from_kwargs_with_none_defaults():
     assert ev.action_result == "failed"
     assert ev.attempt == 2
     assert ev.gmt_create == 1700000000_000
-    assert ev.gmt_modify == 1700000000_000
+    assert ev.gmt_modified == 1700000000_000
     # None defaults per spec (not-yet-computed / success / no-input).
     assert ev.action_input is None
     assert ev.status_from is None
@@ -115,7 +115,7 @@ def test_trajectory_event_is_flat_no_nested_payload_rationale_phase():
     # Required (non-optional) fields exist.
     required = {
         "task_id", "node_id", "action_type", "action_result",
-        "attempt", "gmt_create", "gmt_modify",
+        "attempt", "gmt_create", "gmt_modified",
     }
     assert required.issubset(field_names)
     # Required fields must NOT be Optional (T | None). ``from __future__``
@@ -152,30 +152,30 @@ def test_trajectory_event_status_fields_accept_domain_status_enum():
 # --- TaskTrajectory ---------------------------------------------------------
 
 def test_task_trajectory_constructs_with_empty_timeline_default():
-    tj = TaskTrajectory(task_id="t1", gmt_create=1, gmt_modify=1)
+    tj = TaskTrajectory(task_id="t1", gmt_create=1, gmt_modified=1)
     assert tj.task_id == "t1"
     assert tj.timeline == []
     assert tj.analysis is None
-    assert tj.gmt_create == 1 and tj.gmt_modify == 1
+    assert tj.gmt_create == 1 and tj.gmt_modified == 1
 
 
 def test_task_trajectory_has_no_phases_or_graph_snapshot():
     field_names = {f.name for f in dataclasses.fields(TaskTrajectory)}
     assert "phases" not in field_names
     assert "graph_snapshot" not in field_names
-    assert field_names == {"task_id", "timeline", "analysis", "gmt_create", "gmt_modify"}
+    assert field_names == {"task_id", "timeline", "analysis", "gmt_create", "gmt_modified"}
 
 
 def test_task_trajectory_timeline_default_is_per_instance():
-    tj1 = TaskTrajectory(task_id="t1", gmt_create=1, gmt_modify=1)
-    tj2 = TaskTrajectory(task_id="t2", gmt_create=2, gmt_modify=2)
+    tj1 = TaskTrajectory(task_id="t1", gmt_create=1, gmt_modified=1)
+    tj2 = TaskTrajectory(task_id="t2", gmt_create=2, gmt_modified=2)
     assert tj1.timeline == [] and tj2.timeline == []
     assert tj1.timeline is not tj2.timeline
 
 
 def test_task_timeline_carries_events_by_reference():
     ev = _event(action_type=TrajectoryActionType.SUBMIT, action_result="success")
-    tj = TaskTrajectory(task_id="t1", gmt_create=1, gmt_modify=1, timeline=[ev])
+    tj = TaskTrajectory(task_id="t1", gmt_create=1, gmt_modified=1, timeline=[ev])
     assert len(tj.timeline) == 1
     assert tj.timeline[0] is ev
 

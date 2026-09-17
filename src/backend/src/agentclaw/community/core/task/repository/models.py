@@ -328,7 +328,7 @@ class TaskTrajectoryModel(Base):
 
     Independent trajectory entity: NO foreign key / NO association column to
     ``task_action_log`` or ``task_callback`` (spec invariant). ``gmt_create`` /
-    ``gmt_modify`` are real stored columns (spec decision #7); the DB
+    ``gmt_modified`` are real stored columns (spec decision #7); the DB
     ``DEFAULT CURRENT_TIMESTAMP`` is kept only as a fallback — the repo (P1b)
     ALWAYS supplies ``gmt_create`` explicitly (converted from the domain int-ms
     timestamp), so the column does not rely on the DB default for ordering.
@@ -343,7 +343,7 @@ class TaskTrajectoryModel(Base):
     analysis = Column(Text, nullable=True)
     # gmt_create 由 repo 从 domain int(ms) 转换写入,不依赖 DB DEFAULT。
     gmt_create = Column(DateTime, default=func.now(), nullable=False)
-    gmt_modify = Column(
+    gmt_modified = Column(
         DateTime, default=func.now(), onupdate=func.now(), nullable=False
     )
 
@@ -357,7 +357,7 @@ class TaskTrajectoryModel(Base):
             task_id=self.task_id,
             analysis=self.analysis,
             gmt_create=self.gmt_create,
-            gmt_modify=self.gmt_modify,
+            gmt_modified=self.gmt_modified,
         )
 
 
@@ -395,7 +395,7 @@ class TaskTrajectoryEventModel(Base):
     analysis = Column(Text, nullable=True)
     # gmt_create 由 repo 从 domain int(ms) 转换写入,不依赖 DB DEFAULT。
     gmt_create = Column(DateTime, default=func.now(), nullable=False)
-    gmt_modify = Column(
+    gmt_modified = Column(
         DateTime, default=func.now(), onupdate=func.now(), nullable=False
     )
 
@@ -420,7 +420,7 @@ class TaskTrajectoryEventModel(Base):
             ext_info=self.ext_info,
             analysis=self.analysis,
             gmt_create=self.gmt_create,
-            gmt_modify=self.gmt_modify,
+            gmt_modified=self.gmt_modified,
         )
 
 
@@ -433,7 +433,7 @@ class TaskCallbackCorrelationModel(Base):
     Mirrors ``task_callback`` idiom (TaskCallbackModel): ``event_id`` plain
     ``String(256)`` for its unique key (matching task_callback.event_id), and
     ``_SESSION_ID`` / ``_TASK_ID`` / ``_NODE_ID`` binary-string helpers for the
-    identifier columns. ``gmt_create`` is the only timestamp (no gmt_modify —
+    identifier columns. ``gmt_create`` is the only timestamp (no gmt_modified —
     this is an append-only correlation row); the repo (P1b) ALWAYS supplies it
     from the domain int-ms timestamp and does NOT rely on the DB
     ``DEFAULT CURRENT_TIMESTAMP`` (kept only as a fallback).

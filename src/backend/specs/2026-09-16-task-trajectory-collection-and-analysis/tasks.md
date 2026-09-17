@@ -13,7 +13,7 @@
       `TrajectoryEvent` (flat: no `payload`/`rationale`/`phase`), `TaskTrajectory`, `TrajectoryAnalysis`,
       `ReasonCatalog` enum, `DispatchRationale`, `TrajectoryActionType` (separate from `NodeAction`).
 - [x] Test `tests/community/core/task/task_trajectory/__init__.py` + `test_trajectory_models.py`:
-      each dataclass builds from kwargs; `analysis`/`gmt_modify` default to `gmt_create`/None;
+      each dataclass builds from kwargs; `analysis`/`gmt_modified` default to `gmt_create`/None;
       `ReasonCatalog` covers every §overview signal + REQ-5 origins; `TrajectoryActionType` ≠ `NodeAction`.
 
 ## P1 — Storage (REQ-11 + REQ-P1)
@@ -28,14 +28,14 @@
 - [x] Verify singlebox `Base.metadata.create_all` creates the new tables (conftest in
       `tests/community/repository/task/` imports `core/task/repository/models`).
 - [ ] Implement `TaskTrajectoryRepository`: `insert_event`, `upsert_head(task_id, analysis=None)`
-      (preserve existing `analysis`/`gmt_modify` when head exists), `backfill_analysis(task_id,
-      analysis_json)` UPDATE both tables `analysis`+`gmt_modify`, `list_events_by_task(task_id)`
+      (preserve existing `analysis`/`gmt_modified` when head exists), `backfill_analysis(task_id,
+      analysis_json)` UPDATE both tables `analysis`+`gmt_modified`, `list_events_by_task(task_id)`
       ascending by `gmt_create`. Add protocol. `orm_session()`/`db.flush()`, no explicit commit.
 - [ ] Implement `TaskCallbackCorrelationRepository`: `upsert_on_register(event_id, main_session_id,
       task_id, node_id, retry)`, `find_by_event_id(event_id)`. Add protocol.
 - [ ] Test `tests/community/repository/task/test_task_trajectory_repository.py`: insert→append
       (append-only, duplicate rows allowed), head UPSERT preserves analysis, backfill updates
-      analysis+`gmt_modify`, list ascending by `gmt_create`.
+      analysis+`gmt_modified`, list ascending by `gmt_create`.
 - [ ] Test `tests/community/repository/task/test_task_callback_correlation_repository.py`:
       register→find by event_id idempotent.
 
@@ -117,7 +117,7 @@ real sqlite) and asserts the emitted row's `action_type`/`action_result`/`action
 
 - [ ] Add `core/task/task_trajectory/assembler.py::TaskTrajectoryAssembler.assemble(task_id)`:
       `list_events_by_task` (asc `gmt_create`) → `TrajectoryEvent`s → `TaskTrajectory{timeline,
-      analysis, gmt_create, gmt_modify}`; `upsert_head(task_id)` preserving existing `analysis`. No
+      analysis, gmt_create, gmt_modified}`; `upsert_head(task_id)` preserving existing `analysis`. No
       `phases`/`graph_snapshot`; never touches `task_action_log`.
 - [ ] Test `test_trajectory_assembler.py`: timeline ascending (SUBMIT first, terminal TRANSITION
       last); pre-trajectory old task → empty timeline (no action-log fallback); UPSERT preserves a
