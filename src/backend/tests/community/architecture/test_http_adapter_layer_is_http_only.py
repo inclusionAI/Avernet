@@ -86,6 +86,12 @@ _NON_ENDPOINT_NAME_PATTERNS: tuple[str, ...] = (
                      # stack by design (router invokes verify() after reading body)
     "translator",    # inbound-callback edge→SSOT folding (schema → TaskCallbackData);
                      # pure dataclass/protocol work, no HTTP stack
+    "creation_grant",
+                     # the grant an application admitted to a creation writes
+                     # for the bot it allocates, shared by the three creation
+                     # routes. Plain functions over the ActingCaller and the
+                     # grant Service API — no FastAPI, so it is testable without
+                     # a client. Named in full for the reason the entry below is.
     "startup_script_support",
                      # the bots group's startup-script helpers, split out when
                      # router.py reached the module line cap. Plain functions

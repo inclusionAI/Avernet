@@ -121,9 +121,10 @@ _HUMAN_ONLY = [
     ("POST", "/openapi/v1/bots/spaces/1/market-favorites/cancel"),
     ("POST", "/openapi/v1/bots/spaces/1/market-favorites/search"),
     ("GET", "/openapi/v1/bots/spaces/1/skills"),
-    ("POST", "/openapi/v1/bots"),
     ("GET", "/openapi/v1/bots/bot-123/authorized-apps"),
     ("DELETE", "/openapi/v1/bots/bot-123/authorized-apps/42"),
+    ("GET", "/openapi/v1/bots/authorized-apps"),
+    ("DELETE", "/openapi/v1/bots/authorized-apps/42"),
     ("GET", "/openapi/v1/bots/logs/traces"),
     ("GET", "/openapi/v1/bots/logs/traces/t-1"),
     ("GET", "/openapi/v1/bots/logs/sessions/s-1/traces"),
@@ -353,6 +354,51 @@ def test_shipped_config_requires_user_and_app_for_session_collection() -> None:
 
 _AUTHORIZED_APPS_PATH = "/openapi/v1/bots/bot-123/authorized-apps"
 _AUTHORIZED_BOTS_PATH = "/openapi/v1/bots/authorized"
+_USER_AUTHORIZED_APPS_PATH = "/openapi/v1/bots/authorized-apps"
+
+
+def test_shipped_config_admits_a_machine_caller_to_bot_creation() -> None:
+    """Creation no longer requires a human at the edge.
+
+    The backend admits an application acting alone on ``POST /openapi/v1/bots``
+    under a user-level delegation (``admission.py`` ``USER_DELEGATED``), so the
+    edge must let the App identity through with the user absent — the wide
+    rule's shape. A ``user: required`` here would refuse the caller before the
+    backend's check could run.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    for method, path in (
+        ("POST", "/openapi/v1/bots"),
+        ("POST", "/openapi/v1/bots/with-manifest"),
+        ("POST", "/openapi/v1/bots/local"),
+    ):
+        req = rs.resolve(method, path)
+        assert req is not None, (method, path)
+        assert req[PrincipalType.USER] is Presence.OPTIONAL, (method, path)
+        assert req[PrincipalType.APP] is Presence.OPTIONAL, (method, path)
+
+
+def test_shipped_config_requires_user_and_app_for_the_user_level_delegation() -> None:
+    """The user-level consent moment: both parties, like the bot-scoped grant.
+
+    And the same asymmetry — listing and withdrawing need only the user, so a
+    delegation can be withdrawn after the application's credential is gone.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    req = rs.resolve("POST", _USER_AUTHORIZED_APPS_PATH)
+    assert req is not None
+    assert req[PrincipalType.USER] is Presence.REQUIRED
+    assert req[PrincipalType.APP] is Presence.REQUIRED
+    for method, path in (
+        ("GET", _USER_AUTHORIZED_APPS_PATH),
+        ("DELETE", f"{_USER_AUTHORIZED_APPS_PATH}/42"),
+    ):
+        req = rs.resolve(method, path)
+        assert req is not None, (method, path)
+        assert req[PrincipalType.USER] is Presence.REQUIRED, (method, path)
+        assert PrincipalType.APP not in req, (method, path)
 
 
 def test_shipped_config_requires_user_and_app_to_grant_a_bot_authorization() -> None:

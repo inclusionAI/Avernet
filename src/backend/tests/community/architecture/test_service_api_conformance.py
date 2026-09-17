@@ -89,6 +89,9 @@ from agentclaw.community.api.engine_config_service import EngineConfigServicePro
 from agentclaw.community.api.engine_connection_service import (
     EngineConnectionServiceProtocol,
 )
+from agentclaw.community.api.user_app_grant_service import (
+    UserAppGrantServiceProtocol,
+)
 from agentclaw.community.api.bot_app_grant_service import (
     BotAppGrantServiceProtocol,
 )
@@ -240,7 +243,10 @@ from agentclaw.community.core.skill_center.services.local_skill_upload_service i
 from agentclaw.community.core.skill_center.services.direct_activation_service import (
     DirectActivationService,
 )
-from agentclaw.community.core.bot_app_grant.services import BotAppGrantService
+from agentclaw.community.core.bot_app_grant.services import (
+    BotAppGrantService,
+    UserAppGrantService,
+)
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
 )
@@ -303,6 +309,7 @@ _PAIRS = [
     (BotCommonConfigServiceProtocol, BotCommonConfigService),
     (ExpertChatInstanceServiceProtocol, ExpertChatInstanceService),
     (BotAppGrantServiceProtocol, BotAppGrantService),
+    (UserAppGrantServiceProtocol, UserAppGrantService),
     (CollaboratorServiceProtocol, CollaboratorService),
     (BotInventoryServiceProtocol, BotInventoryService),
     (BotStartupScriptServiceProtocol, BotStartupScriptService),

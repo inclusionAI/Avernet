@@ -175,6 +175,7 @@ from fastapi import APIRouter, Depends
 
 from .authorized_apps import app_view_router as authorized_bots_router
 from .authorized_apps import router as authorized_apps_router
+from .authorized_apps import user_router as user_authorized_apps_router
 from .bots import router as bots_router
 from .collaboration_bots import public_router as collaboration_public_router
 from .task import task_router
@@ -311,9 +312,10 @@ _SUBGROUPS = [
     token_router,
     # Creating a bot with its manifest (W13, #1696). Here rather than with the
     # config-manifest groups below: those may address a shared bot and take the
-    # addressed-owner grant, while these two are a creation and its poll —
-    # refused to an application caller outright, and for most of a creation's
-    # life there is no bot record for a grant to be about.
+    # addressed-owner grant, while these two are a creation and its poll — the
+    # creation admits an application on the user-level delegation, since for
+    # most of a creation's life there is no bot record for a grant to be about,
+    # and grants it the bot so the poll can take the own-bot grant.
     #
     # Its order relative to `bots` is load-bearing. `POST .../bots/with-manifest`
     # is a top-level literal under the `{bot_id}` wildcard that group
@@ -327,6 +329,10 @@ _SUBGROUPS = [
     # claiming it.
     authorized_apps_router,
     authorized_bots_router,
+    # The user-level delegation, `/openapi/v1/bots/authorized-apps`: a
+    # top-level literal like `authorized`, and depends on this order for the
+    # same reason — `/openapi/v1/bots/{bot_id}` would otherwise claim it.
+    user_authorized_apps_router,
     # Product Bot Chat reads are bot-first and use the product service's
     # owner/collaborator adjudication. Their own route dependency checks an
     # app-only caller's grant against the addressed owner.

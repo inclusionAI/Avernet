@@ -63,6 +63,7 @@ from fastapi import APIRouter, Depends, Path, Query, Request
 from agentclaw.community.adapters.http.openapi_v1.authorized_apps.schemas import (
     AuthorizedApp,
     AuthorizedBot,
+    UserAuthorizedApp,
 )
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     USER_SCOPED_403,
@@ -92,9 +93,15 @@ from agentclaw.community.adapters.http.openapi_v1.authorized_apps.gating import 
 from agentclaw.community.api.bot_app_grant_service import (
     BotAppGrantServiceProtocol,
 )
+from agentclaw.community.api.user_app_grant_service import (
+    UserAppGrantServiceProtocol,
+)
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
-from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
+from agentclaw.community.core.bot_app_grant.models import (
+    BotAppGrantRecord,
+    UserAppGrantRecord,
+)
 from agentclaw.community.core.gateway_principal import PrincipalType
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
@@ -124,6 +131,25 @@ router = APIRouter(
 #: edge rather than served. ``test_path_convention.py`` holds the rule.
 app_view_router = APIRouter(
     prefix="/openapi/v1/bots/authorized", tags=["authorized-apps"],
+    route_class=PublicAPIRoute,
+)
+
+#: The user-level delegation — ``/openapi/v1/bots/authorized-apps``, the same
+#: resource name as the bot-scoped group one level up, because it is the same
+#: act one level up: the user authorizing an application to act as them where
+#: **no bot is addressed**. What it lends is the ``USER_DELEGATED`` operations
+#: (the creations) and the proof of relationship the ``USER_GATED`` reads ask
+#: for; it reaches no existing bot. A bot the application creates under it is
+#: granted separately, on the bot, where the owner sees it.
+#:
+#: All three operations refuse a machine caller for the reason the bot-scoped
+#: group does — an application must not be able to delegate to itself — and
+#: the same asymmetry holds: granting needs both parties on the wire, listing
+#: and withdrawing need only the user.
+user_router = APIRouter(
+    prefix="/openapi/v1/bots/authorized-apps",
+    tags=["authorized-apps"],
+    dependencies=[Depends(refuse_app_only_caller)],
     route_class=PublicAPIRoute,
 )
 
@@ -202,6 +228,15 @@ def _to_authorized_app(record: BotAppGrantRecord) -> AuthorizedApp:
         app_name=record.app_name,
         bot_id=record.bot_id,
         owner_id=record.owner_id,
+        granted_at=record.gmt_create,
+    )
+
+
+def _to_user_authorized_app(record: UserAppGrantRecord) -> UserAuthorizedApp:
+    return UserAuthorizedApp(
+        app_id=record.app_id,
+        app_name=record.app_name,
+        user_id=record.user_id,
         granted_at=record.gmt_create,
     )
 
@@ -396,3 +431,91 @@ async def list_authorized_bots(
     records = grants.list_for_app(app_id=app_id, user_id=user_id)
     items = [_to_authorized_bot(record) for record in records]
     return page(len(items), items, request)
+
+
+@user_router.post(
+    "",
+    status_code=201,
+    response_model=Envelope[UserAuthorizedApp],
+    responses=USER_SCOPED_403,
+)
+@envelope_errors
+async def grant_user_authorized_app(
+    request: Request,
+    user_id: UserIdDep,
+    principal: UserAndAppDep,
+    grants: UserAppGrantServiceProtocol = Injected(UserAppGrantServiceProtocol),
+) -> Envelope[UserAuthorizedApp]:
+    """Let the calling application act as you where no bot is addressed.
+
+    This is what admits an application to **create bots for you** with no
+    human on the wire (`POST /openapi/v1/bots`, its `with-manifest` form and
+    `POST /openapi/v1/bots/local`), and what lets it read the account-level
+    answers those need first — your bot ceiling, your devices. Each bot it then
+    creates is granted to it automatically, as an ordinary authorization on
+    that bot: listed on `GET /openapi/v1/bots/{bot_id}/authorized-apps` and
+    withdrawable there.
+
+    It reaches **none of your existing bots**. Those stay per-bot
+    authorizations, granted on the bot.
+
+    The application is read off your own credential, never named as a
+    parameter, so you cannot delegate to any application but the caller.
+    Idempotent: re-granting a live delegation returns it unchanged.
+    """
+    app_id, app_name = _calling_app(principal)
+    record = grants.grant(user_id=user_id, app_id=app_id, app_name=app_name)
+    return created(_to_user_authorized_app(record), request)
+
+
+@user_router.get(
+    "", response_model=Envelope[Page[UserAuthorizedApp]], responses=USER_SCOPED_403
+)
+@envelope_errors
+async def list_user_authorized_apps(
+    request: Request,
+    user_id: UserIdDep,
+    principal: PrincipalDep,
+    grants: UserAppGrantServiceProtocol = Injected(UserAppGrantServiceProtocol),
+) -> Envelope[Page[UserAuthorizedApp]]:
+    """Which applications may act as you where no bot is addressed.
+
+    Your own delegations only, so there is nothing to mask and no application
+    key is needed to ask.
+    """
+    del principal  # the user is bound to themselves by require_user_id
+    items = [
+        _to_user_authorized_app(record)
+        for record in grants.list_for_user(user_id=user_id)
+    ]
+    return page(len(items), items, request)
+
+
+@user_router.delete(
+    "/{app_id}", response_model=Envelope[Deleted], responses=USER_SCOPED_403
+)
+@envelope_errors
+async def revoke_user_authorized_app(
+    request: Request,
+    user_id: UserIdDep,
+    principal: PrincipalDep,
+    app_id: int = Path(
+        ge=1,
+        description="The application whose delegation to withdraw — its "
+        "`app_id` as listed on your authorized apps.",
+    ),
+    grants: UserAppGrantServiceProtocol = Injected(UserAppGrantServiceProtocol),
+) -> Envelope[Deleted]:
+    """Withdraw an application's account-level delegation.
+
+    Named in the path rather than read off a principal, because a withdrawal
+    must not require the application's cooperation. Withdrawing a delegation
+    that does not exist answers 404, distinctly from a successful withdrawal.
+
+    **Withdraws the account-level consent only.** Bots the application was
+    granted — including those it created under this delegation — keep their
+    per-bot authorizations until withdrawn on each bot, where you can see them.
+    """
+    del principal
+    grants.revoke(user_id=user_id, app_id=app_id)
+    return deleted_envelope(request)

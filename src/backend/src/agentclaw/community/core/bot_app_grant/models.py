@@ -308,9 +308,140 @@ register_avernet_tenant_guard(BotAppGrantModel)
 register_avernet_tenant_guard(BotAppGrantLogModel)
 
 
+# ── the user-level delegation ────────────────────────────────────────────────
+#
+# A second record, one level up from the bot grant, for the operations that
+# act for a user but address no bot: creating one, above all. A bot grant
+# cannot cover a creation — there is no bot for it to name until the request
+# has run — so admitting an application there needs consent that exists
+# *before* any bot does. This is that consent.
+#
+# A row means **"app A may act as user U where no bot is addressed"**. It is
+# deliberately narrow in what it lends: the account-level operations the
+# admission table marks ``USER_DELEGATED``, and the "proof of relationship" the
+# ``USER_GATED`` reads ask for. It does not reach any bot on its own — a bot the
+# application creates under it is granted **separately**, as an ordinary bot
+# grant written at creation, so the bot's owner sees that access in the bot's
+# own listing and can withdraw it there like any other.
+#
+# Same two-table shape as the bot grant, for the same reason: a live table with
+# a real unique key, and an append-only log that accepts every event.
+
+
+class UserAppGrantRecord(BaseModel):
+    """A live user-level delegation, as the service and adapter see it."""
+
+    id: int = Field(..., description="Primary key")
+    app_id: int = Field(..., description="Gateway avernet_application.id")
+    app_name: str = Field(..., description="App display name as at consent time")
+    user_id: str = Field(..., description="The delegating user, resolved server-side")
+    avernet_tenant: str = Field(..., description="Data-isolation tenant")
+    env: str = Field(..., description="Environment marker")
+    gmt_create: datetime = Field(..., description="When this delegation began")
+
+
+class UserAppGrantModel(Base):
+    """Live user-level delegations only — one row iff the app may act as the user.
+
+    No ``owner_id`` and no ``bot_id``: nothing here addresses a bot, and that
+    absence is the record's meaning rather than a column left for later. The
+    one identity column is the delegating user, held at
+    :data:`IDENTITY_MAX_LENGTH` for the same reason the bot grant's is — it is
+    in the unique key, and a truncated identity is a row no lookup can find.
+    """
+
+    __tablename__ = "ac_user_app_grant"
+
+    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
+    app_id = Column(
+        AutoIncrementBigInteger, nullable=False, comment="gateway avernet_application.id"
+    )
+    app_name = Column(
+        String(1024), nullable=False, comment="app display name, snapshotted at consent"
+    )
+    user_id = Column(
+        String(256), nullable=False, comment="delegating user, resolved server-side"
+    )
+    env = Column(String(20), nullable=False, default=get_current_env)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        # One delegation per (tenant, app, user, env). The tenant leads for the
+        # reason the bot grant's key gives: a user id means something only
+        # within a tenant.
+        UniqueConstraint(
+            "avernet_tenant",
+            "app_id",
+            "user_id",
+            "env",
+            name="uk_user_app_grant_scope",
+        ),
+        # The user's view — "which applications may act as me?" — names no app,
+        # so the unique key cannot serve it past the tenant.
+        Index(
+            "idx_user_app_grant_user",
+            "avernet_tenant",
+            "user_id",
+            "env",
+        ),
+    )
+
+    def to_record(self) -> UserAppGrantRecord:
+        """Convert to the Pydantic record the service returns."""
+        return UserAppGrantRecord(
+            id=self.id,
+            app_id=self.app_id,
+            app_name=self.app_name,
+            user_id=self.user_id,
+            avernet_tenant=self.avernet_tenant,
+            env=self.env,
+            gmt_create=self.gmt_create,
+        )
+
+
+class UserAppGrantLogModel(Base):
+    """Append-only history of user-level delegations — never updated, no key."""
+
+    __tablename__ = "ac_user_app_grant_log"
+
+    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
+    app_id = Column(AutoIncrementBigInteger, nullable=False)
+    app_name = Column(String(1024), nullable=False)
+    user_id = Column(String(256), nullable=False)
+    action = Column(
+        String(32), nullable=False, comment=f"{GrantAction.GRANTED} | {GrantAction.REVOKED}"
+    )
+    env = Column(String(20), nullable=False, default=get_current_env)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        Index(
+            "idx_user_app_grant_log_user",
+            "avernet_tenant",
+            "user_id",
+            "env",
+            "gmt_create",
+        ),
+    )
+
+
+# Both registered, for the reason the bot grant's pair is: the log is read
+# after the live row is gone and has no guarded parent left to inherit from.
+register_avernet_tenant_guard(UserAppGrantModel)
+register_avernet_tenant_guard(UserAppGrantLogModel)
+
+
 __all__ = [
     "BotAppGrantLogModel",
     "BotAppGrantModel",
     "BotAppGrantRecord",
     "GrantAction",
+    "UserAppGrantLogModel",
+    "UserAppGrantModel",
+    "UserAppGrantRecord",
 ]

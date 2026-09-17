@@ -99,6 +99,10 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
 )
 from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
+from agentclaw.community.api.user_app_grant_service import (
+    UserAppGrantServiceProtocol,
+)
+from agentclaw.community.core.gateway_principal import PrincipalType
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -183,6 +187,22 @@ def caller_app_id(principal: Principal) -> int | None:
     """
     app_id = getattr(principal, "app_id", None)
     return app_id if isinstance(app_id, int) else None
+
+
+def caller_app_name(principal: Principal) -> str | None:
+    """The calling application's display name, or ``None``, tolerantly.
+
+    Read off the App principal in the verified set, the way the consent routes
+    read it. Only a grant an application writes *for itself* — the creation
+    grant — needs it here; ``None`` for a human caller or a stand-in that
+    models no application.
+    """
+    for entry in getattr(principal, "principals", ()) or ():
+        if getattr(entry, "type", None) == PrincipalType.APP:
+            app = getattr(entry, "app", None)
+            name = getattr(app, "app_name", None)
+            return str(name) if name is not None else None
+    return None
 
 
 async def require_user_id(
@@ -325,6 +345,8 @@ async def require_acting_caller(
         user_id=user_id,
         app_id=app_id,
         grants=_grant_reader(request) if app_id is not None else None,
+        user_grants=_user_grant_reader(request) if app_id is not None else None,
+        app_name=caller_app_name(principal) if app_id is not None else None,
     )
 
 
@@ -350,8 +372,55 @@ def _grant_reader(request: Request) -> BotAppGrantServiceProtocol | None:
         return None
 
 
+def _user_grant_reader(request: Request) -> UserAppGrantServiceProtocol | None:
+    """The user-level delegation service for this app, or ``None`` when unwired.
+
+    Same shape and same contract as :func:`_grant_reader`: ``None`` here makes
+    :meth:`ActingCaller.require_user_delegation` refuse, so an application on
+    an app without the service is denied rather than admitted unchecked.
+    """
+    injector = getattr(request.app.state, "injector", None)
+    if injector is None:
+        return None
+    try:
+        return injector.get(UserAppGrantServiceProtocol)
+    except Exception:  # noqa: BLE001 — any resolution failure is "not wired"
+        logger.warning(
+            "no %s bound; an application caller cannot be admitted to a "
+            "user-delegated operation on this app",
+            UserAppGrantServiceProtocol.__name__,
+        )
+        return None
+
+
 #: The acting caller, for handlers that need to know what governs the request.
 ActingCallerDep = Annotated[ActingCaller, Depends(require_acting_caller)]
+
+
+async def require_delegated_user(caller: ActingCallerDep) -> ActingCaller:
+    """Authorize an application to act for the named user **with no bot**.
+
+    The dependency every ``USER_DELEGATED`` operation declares — the creations
+    — and, as with the two bot-grant dependencies below, the declaration *is*
+    the mode: ``test_admission_inventory.py`` holds each such route to it.
+
+    What it checks is the user-level delegation, not a bot grant. A bot grant
+    covers one bot, and these operations have none to name until they have
+    run; this record covers the person. A human caller passes straight
+    through — the ``user_id`` comparison in :func:`require_user_id` already
+    bound them to themselves. An application with no live delegation from the
+    named user is refused with the same 404 a missing bot grant gets.
+
+    Returns the caller so a handler can take it as its ``ActingCallerDep`` and
+    write the creation grant for the bot it allocates.
+    """
+    caller.require_user_delegation()
+    return caller
+
+
+#: What a ``USER_DELEGATED`` handler declares to be admitted and to receive the
+#: caller it will grant the new bot to.
+DelegatedUserDep = Annotated[ActingCaller, Depends(require_delegated_user)]
 
 #: Where a bot id may be found on the wire, in the order it is looked for.
 #:

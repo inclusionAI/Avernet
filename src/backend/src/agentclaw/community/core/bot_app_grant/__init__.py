@@ -1,10 +1,12 @@
 """Owner-granted bot authorizations for third-party applications.
 
-A bot's owner authorizes one named application to reach one named bot. The
-record this module owns is what a later machine-only call path will be checked
-against; nothing here admits such a caller today.
+Two records. A bot's owner or collaborator authorizes one named application to
+reach one named bot; the public API's machine-caller path is checked against
+that. And a user authorizes one named application to act as them where **no
+bot is addressed** — the consent a creation is admitted on, since a bot grant
+cannot name a bot that does not exist yet.
 
-See :mod:`~agentclaw.community.core.bot_app_grant.models` for why the record is
+See :mod:`~agentclaw.community.core.bot_app_grant.models` for why each record is
 two tables rather than one.
 """
 
@@ -13,6 +15,9 @@ from agentclaw.community.core.bot_app_grant.models import (
     BotAppGrantModel,
     BotAppGrantRecord,
     GrantAction,
+    UserAppGrantLogModel,
+    UserAppGrantModel,
+    UserAppGrantRecord,
 )
 
 __all__ = [
@@ -20,4 +25,7 @@ __all__ = [
     "BotAppGrantModel",
     "BotAppGrantRecord",
     "GrantAction",
+    "UserAppGrantLogModel",
+    "UserAppGrantModel",
+    "UserAppGrantRecord",
 ]

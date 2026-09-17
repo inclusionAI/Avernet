@@ -88,6 +88,7 @@ provides:
   # import at runtime for DI; a change here is a change to their constructors.
   # bot
   - BotAppGrantRepositoryProtocol
+  - UserAppGrantRepositoryProtocol
   - BotCollabLockRepositoryProtocol
   - SourceCredentialRepositoryProtocol
   - BotCollabLogRepositoryProtocol
@@ -190,6 +191,7 @@ provides:
   # directly outside di/modules/. Names repeat above where impl and contract share one.
   # bot
   - BotAppGrantRepository
+  - UserAppGrantRepository
   - BotCollabLockRepository
   - BotCollabLogRepository
   - BotFriendRepository

@@ -140,9 +140,21 @@ class _Passport:
         return {"status": self.status} if self.status else None
 
 
+class _GrantSweep:
+    """The bot-grant sweep, as much of it as the job calls: which bots it was
+    asked to clear, so a test can say the creation grant was withdrawn."""
+
+    def __init__(self) -> None:
+        self.swept: list[tuple[str, str]] = []
+
+    def revoke_all_for_bot(self, *, bot_id, owner_id):
+        self.swept.append((bot_id, owner_id))
+        return 1
+
+
 def _handler(
     *, passport_status="PENDING", applies=None, bots=None, seam=None,
-    relationships=None,
+    relationships=None, grant_sweep=None,
 ):
     applies = applies or _Applies()
     seam = seam or _Seam(applies)
@@ -159,6 +171,7 @@ def _handler(
         # The ARCA order, said rather than defaulted: the composition root,
         # always passes the delivery strategy's own answer.,
         creation_sequence=lambda _engine: CreationSequence.CREATE_BETWEEN_PHASES,
+        grant_sweep_provider=(lambda: grant_sweep) if grant_sweep is not None else None,
     )
     return handler, applies, seam, created
 
@@ -184,6 +197,31 @@ def test_a_declined_authorization_is_terminal_and_cleans_up():
         "written, so ordinary deletion never gets to them"
     )
     assert not created
+
+
+def test_a_declined_authorization_withdraws_the_creation_grant():
+    """An application admitted to the creation was granted the bot at
+    submission; a creation that ends with no bot must take that back, and
+    nothing else can — the bot-deletion sweep never sees a bot that never
+    existed."""
+    sweep = _GrantSweep()
+    handler, _applies, seam, _created = _handler(
+        passport_status="REJECTED", grant_sweep=sweep
+    )
+    assert isinstance(handler.handle(dict(_PAYLOAD)), Fail)
+    assert seam.discards == 1
+    assert sweep.swept == [(_PAYLOAD["bot_id"], _PAYLOAD["user_id"])]
+
+
+def test_a_pending_authorization_keeps_the_creation_grant():
+    """The grant is what admits the application to the status poll while the
+    creation is in flight, so waiting must not withdraw it."""
+    sweep = _GrantSweep()
+    handler, _applies, _seam, _created = _handler(
+        passport_status="PENDING", grant_sweep=sweep
+    )
+    assert isinstance(handler.handle(dict(_PAYLOAD)), Reschedule)
+    assert sweep.swept == []
 
 
 def test_the_pre_container_phase_runs_before_the_bot_is_created():
