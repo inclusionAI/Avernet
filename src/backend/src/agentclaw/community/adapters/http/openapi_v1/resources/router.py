@@ -21,10 +21,11 @@ yet. Do NOT expose to external callers until that lands (see
 ``src/backend/docs/openapi-v1/README.zh-CN.md``).
 
 Gates / follow-ups (block public-readiness, NOT a silent deployment):
-- Owner/identity comes from ``UserIdDep`` — the request's own ``user_id``
-  query parameter, refused unless it names the verified caller — mirroring the
-  bots router. That dependency is the single replaceable point: when an App may
-  act for a user, only ``principal.py`` changes.
+- The owner the operations address comes from ``OwnerIdDep`` — the caller by
+  default, a shared bot's owner when the request names one — while ``UserIdDep``
+  still pins the request's own ``user_id`` to the verified caller, mirroring the
+  bots router. That dependency pair is the single replaceable point: when an
+  App may act for a user, only ``principal.py`` changes.
 - Cross-tenant isolation rides on the ac_bots guard (Phase 0); a deployed DDL
   for ``ac_resource.avernet_tenant`` MUST precede this code reaching prod (see
   Phase 0 plan) — code first / DDL later breaks bot reads with a missing column.
@@ -60,6 +61,9 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     error_example,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    OwnerIdDep,
+)
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     deleted as deleted_envelope,
@@ -248,7 +252,8 @@ DirPathQuery = Annotated[
 @envelope_errors
 async def list_resources(
     page: PageParamsDep,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
     bot_id: BotIdPath,
     path: str = Query(
@@ -318,7 +323,8 @@ async def list_resources(
 @router.get("/stat", response_model=Envelope[FileEntry])
 @envelope_errors
 async def stat_resource(
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     path: FilePathQuery,
     request: Request,
     bot_id: BotIdPath,
@@ -359,7 +365,8 @@ async def stat_resource(
 )
 @envelope_errors
 async def upload_resource(
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     path: FilePathQuery,
     content: Annotated[bytes, Body(media_type="application/octet-stream")],
     request: Request,
@@ -388,8 +395,8 @@ async def upload_resource(
     """
     # The write goes through ResourceFileService, the same service the console
     # uses, so both surfaces compose the workspace address identically and
-    # cannot drift. owner_id comes from the request's user_id (UserIdDep),
-    # fail-closed — mirroring the bots router.
+    # cannot drift. owner_id is the addressed one (OwnerIdDep), fail-closed
+    # — mirroring the bots router.
     safe = _require_path(path)
     _reject_read_only(safe)
     coords = _file_coords(bot_id, owner_id, bot_repo)
@@ -480,8 +487,12 @@ async def upload_resource(
         await factory.create(bot_id=bot_id).record_uploaded_file(
             path=info["path"],
             size=info.get("size", len(content)),
-            user_id=owner_id,
-            created_by=owner_id,
+            # Who uploaded the file: the verified caller. The addressed owner
+            # is whose workspace the bytes landed in — attributing the upload
+            # to them would put a collaborator's name wrongly on record rows
+            # that exist precisely to carry what the filesystem cannot know.
+            user_id=user_id,
+            created_by=user_id,
         )
     except Exception:
         logger.exception(
@@ -634,7 +645,8 @@ async def _preview_resource(
 )
 @envelope_errors
 async def download_file(
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     path: FilePathQuery,
     # Required by ``@envelope_errors`` to locate the request: without it the
     # decorator cannot build an error envelope and re-raises instead, so a
@@ -664,7 +676,8 @@ async def download_file(
 )
 @envelope_errors
 async def download_directory(
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
     bot_id: BotIdPath,
     path: DirPathQuery = "",
@@ -723,7 +736,8 @@ async def download_directory(
 )
 @envelope_errors
 async def preview_file(
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     path: FilePathQuery,
     request: Request,
     bot_id: BotIdPath,
@@ -755,7 +769,8 @@ async def preview_file(
 )
 @envelope_errors
 async def create_directory(
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     path: FilePathQuery,
     request: Request,
     bot_id: BotIdPath,
@@ -800,7 +815,8 @@ async def create_directory(
 )
 @envelope_errors
 async def delete_file(
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     path: FilePathQuery,
     request: Request,
     bot_id: BotIdPath,

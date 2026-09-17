@@ -11,6 +11,13 @@ response model and response table read off the real route rather than restated
 these mount grant-checked exactly as their replacements do: the same code
 deciding the same thing, which is what makes the parity claim true rather than
 hopeful.
+
+The handlers the replacement gained an addressed-owner parameter with its
+collaborator migration. The retiring address must not publish or honour it:
+nothing on this path can adjudicate a named owner, so ``pin_owner_to_user``
+takes the parameter off the signature and binds it to the validated caller —
+the owner every operation here always resolved. The mount stays own-bot, the
+rows stay INHERITED, and the new bars are had at the replacement address.
 """
 
 from __future__ import annotations
@@ -22,16 +29,23 @@ from agentclaw.community.adapters.http.openapi_v1.resources import (
 from fastapi import APIRouter
 
 from ._relocate import bot_first_to_query, relocate
-from ._requery import LegacyBotIdQuery, deprecated_doc, with_query_parameter
+from ._requery import (
+    LegacyBotIdQuery,
+    deprecated_doc,
+    pin_owner_to_user,
+    with_query_parameter,
+)
 from ._shim import legacy_router
 
 
 def _bot_to_query(endpoint, method, new_path):
-    return with_query_parameter(
-        endpoint,
-        "bot_id",
-        LegacyBotIdQuery,
-        doc=deprecated_doc(endpoint, f"{method} {new_path}"),
+    return pin_owner_to_user(
+        with_query_parameter(
+            endpoint,
+            "bot_id",
+            LegacyBotIdQuery,
+            doc=deprecated_doc(endpoint, f"{method} {new_path}"),
+        )
     )
 
 

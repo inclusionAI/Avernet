@@ -213,6 +213,39 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("get", "/openapi/v1/bots/{bot_id}/mcps"),
     ("post", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate"),
     ("post", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate"),
+    # The collaborator-access migration: the identity persona files, the
+    # base bot read and restart, the startup script, data-init state and the
+    # workspace resources/routines moved off OWNER_SCOPED and took the
+    # addressed owner with them. The resources/routines *retiring* addresses
+    # stay pinned to the caller and are deliberately absent here.
+    ("get", "/openapi/v1/bots/{bot_id}"),
+    ("post", "/openapi/v1/bots/{bot_id}/restart"),
+    ("get", "/openapi/v1/bots/{bot_id}/identity"),
+    ("get", "/openapi/v1/bots/{bot_id}/identity/{file_type}"),
+    ("put", "/openapi/v1/bots/{bot_id}/identity/{file_type}"),
+    ("get", "/openapi/v1/bots/identity/{bot_id}"),
+    ("get", "/openapi/v1/bots/identity/{bot_id}/{file_type}"),
+    ("put", "/openapi/v1/bots/identity/{bot_id}/{file_type}"),
+    ("get", "/openapi/v1/bots/{bot_id}/startup-script"),
+    ("put", "/openapi/v1/bots/{bot_id}/startup-script"),
+    ("delete", "/openapi/v1/bots/{bot_id}/startup-script"),
+    ("get", "/openapi/v1/bots/{bot_id}/data-init"),
+    ("post", "/openapi/v1/bots/{bot_id}/data-init"),
+    ("delete", "/openapi/v1/bots/{bot_id}/resources"),
+    ("get", "/openapi/v1/bots/{bot_id}/resources"),
+    ("get", "/openapi/v1/bots/{bot_id}/resources/download"),
+    ("get", "/openapi/v1/bots/{bot_id}/resources/download-dir"),
+    ("post", "/openapi/v1/bots/{bot_id}/resources/mkdir"),
+    ("get", "/openapi/v1/bots/{bot_id}/resources/preview"),
+    ("get", "/openapi/v1/bots/{bot_id}/resources/stat"),
+    ("post", "/openapi/v1/bots/{bot_id}/resources/upload"),
+    ("get", "/openapi/v1/bots/{bot_id}/routines"),
+    ("post", "/openapi/v1/bots/{bot_id}/routines"),
+    ("delete", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"),
+    ("get", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"),
+    ("patch", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"),
+    ("post", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/run"),
+    ("get", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs"),
 }
 
 

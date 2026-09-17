@@ -37,7 +37,12 @@ from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.di import Injected
 
 from ._relocate import bot_first_to_query, relocate
-from ._requery import LegacyBotIdQuery, deprecated_doc, with_query_parameter
+from ._requery import (
+    LegacyBotIdQuery,
+    deprecated_doc,
+    pin_owner_to_user,
+    with_query_parameter,
+)
 from ._shim import legacy_route, legacy_router
 
 _CREATE = "/openapi/v1/bots/{bot_id}/routines"
@@ -95,15 +100,21 @@ _REWORDED = {
 
 
 def _bot_to_query(endpoint, method, new_path):
-    return with_query_parameter(
-        endpoint,
-        "bot_id",
-        LegacyBotIdQuery,
-        doc=deprecated_doc(
+    # The pin composes last, inside the query re-annotation it always followed:
+    # the retiring address takes the addressed-owner parameter off the
+    # signature and binds it to the validated caller, exactly as the
+    # resources retiring addresses do (see ``deprecated/resources.py``).
+    return pin_owner_to_user(
+        with_query_parameter(
             endpoint,
-            f"{method} {new_path}",
-            reword=_REWORDED.get(endpoint.__name__),
-        ),
+            "bot_id",
+            LegacyBotIdQuery,
+            doc=deprecated_doc(
+                endpoint,
+                f"{method} {new_path}",
+                reword=_REWORDED.get(endpoint.__name__),
+            ),
+        )
     )
 
 
@@ -119,7 +130,7 @@ router = relocate(
 
 async def create_routine_legacy(
     body: RoutineCreate,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
     caller: ActingCallerDep,
     request: Request,
     factory: CronRelayServiceProtocol = Injected(CronRelayServiceProtocol),
@@ -133,11 +144,16 @@ async def create_routine_legacy(
     # waved this request through. The check is here, and it is the *first*
     # thing: a refusal that arrived after the routine existed would be the
     # worst of both.
-    caller.require_bot(body.bot_id, owner_id=owner_id)
+    caller.require_bot(body.bot_id, owner_id=user_id)
+    # The owner is pinned to the caller, the only owner this frozen address
+    # ever resolved: the retirement carries no ``Check`` row (no ``{bot_id}``
+    # on its path for a gate to read), so honouring a named owner here would
+    # act unadjudicated. The new bars are had at the replacement address.
     return await create_routine(
         bot_id=body.bot_id,
         body=RoutineSpec(**body.model_dump(exclude={"bot_id"})),
-        owner_id=owner_id,
+        user_id=user_id,
+        owner_id=user_id,
         request=request,
         factory=factory,
     )

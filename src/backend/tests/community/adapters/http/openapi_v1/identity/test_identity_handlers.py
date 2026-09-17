@@ -130,6 +130,7 @@ async def test_list_bot_identity_files_returns_all_16_with_exists():
 
     env = await list_bot_identity_files(
         bot_id="bot-x",
+        user_id="u1",
         owner_id="u1",
         identity_service=service,
         request=_request_without_trace(),
@@ -162,6 +163,7 @@ async def test_list_bot_identity_files_marks_absent_files_false():
 
     env = await list_bot_identity_files(
         bot_id="bot-x",
+        user_id="u1",
         owner_id="u1",
         identity_service=service,
         request=_request_without_trace(),
@@ -180,6 +182,7 @@ async def test_list_bot_identity_files_reads_trace_id_from_request_state():
 
     env = await list_bot_identity_files(
         bot_id="bot-x",
+        user_id="u1",
         owner_id="u1",
         identity_service=service,
         request=request,
@@ -203,6 +206,7 @@ async def test_list_bot_identity_files_400_when_entity_type_invalid():
 
     resp = await list_bot_identity_files(
         bot_id="bot-x",
+        user_id="u1",
         owner_id="u1",
         identity_service=service,
         request=_request_without_trace(),
@@ -327,6 +331,7 @@ async def test_get_bot_identity_file_returns_content_and_path():
     env = await get_bot_identity_file(
         bot_id="bot-x",
         file_type=IdentityFileType.RULES,
+        user_id="u1",
         owner_id="u1",
         identity_service=service,
         request=_request_without_trace(),
@@ -362,6 +367,7 @@ async def test_get_bot_identity_file_400_on_value_error():
     resp = await get_bot_identity_file(
         bot_id="bot-x",
         file_type=IdentityFileType.RULES,
+        user_id="u1",
         owner_id="u1",
         identity_service=service,
         request=_request_without_trace(),
@@ -378,6 +384,7 @@ async def test_update_bot_identity_file_returns_ref():
         bot_id="bot-x",
         file_type=IdentityFileType.SOUL,
         body=IdentityFileWrite(content="# my soul"),
+        user_id="u1",
         owner_id="u1",
         identity_service=service,
         request=_request_without_trace(),
@@ -409,6 +416,7 @@ async def test_update_bot_identity_file_400_on_value_error():
         bot_id="bot-x",
         file_type=IdentityFileType.RULES,
         body=IdentityFileWrite(content="x"),
+        user_id="u1",
         owner_id="u1",
         identity_service=service,
         request=_request_without_trace(),
@@ -425,6 +433,7 @@ async def test_get_and_update_thread_trace_id():
     get_env = await get_bot_identity_file(
         bot_id="bot-x",
         file_type=IdentityFileType.RULES,
+        user_id="u1",
         owner_id="u1",
         identity_service=service,
         request=request,
@@ -435,8 +444,38 @@ async def test_get_and_update_thread_trace_id():
         bot_id="bot-x",
         file_type=IdentityFileType.RULES,
         body=IdentityFileWrite(content="x"),
+        user_id="u1",
         owner_id="u1",
         identity_service=service,
         request=request,
     )
     assert update_env.request_id == "trace-identity-2"
+
+
+# ── the addressed owner (collaborator-access migration) ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_flows_the_addressed_owner_through_to_the_service():
+    """A collaborator's list names the addressed owner, not the caller.
+
+    ``OwnerIdDep`` resolves the addressed owner — the caller by default, the
+    shared bot's owner when named. The service must see the addressed owner's
+    entity coordinates, never the caller's: identity files live under the
+    owner's workspace regardless of who reads them.
+    """
+    service = _StubIdentityService(_all_present())
+
+    env = await list_bot_identity_files(
+        bot_id="bot-x",
+        user_id="collab-1",
+        owner_id="owner-9",
+        identity_service=service,
+        request=_request_without_trace(),
+    )
+
+    assert env.code == CODE_OK
+    assert service.last_call_kwargs["entity_type"] == "staff"
+    assert service.last_call_kwargs["entity_id"] == "owner-9"
+    assert service.last_call_kwargs["owner_id"] == "owner-9"
+    assert service.last_call_kwargs["bot_id"] == "bot-x"

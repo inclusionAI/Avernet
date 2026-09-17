@@ -9,6 +9,7 @@ from fastapi_injector import attach_injector
 from injector import Injector, Module
 
 from tests.community.adapters.http.openapi_v1.conftest import (
+    bind_bot_access_seam,
     mount_public_error_handlers,
     user_scoped_client,
 )
@@ -56,6 +57,9 @@ def client(bot_service, data_init_service):
         def configure(self, binder):
             binder.bind(BotServiceProtocol, to=bot_service)
             binder.bind(DataInitServiceProtocol, to=data_init_service)
+            # The data-init rows moved onto the seam: the gate needs the same
+            # wiring every other hand-built app in this package gets.
+            bind_bot_access_seam(binder)
 
     app = FastAPI()
     app.include_router(router)

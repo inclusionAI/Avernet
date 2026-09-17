@@ -539,6 +539,20 @@ def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
         ("POST", "/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/skill-center-references"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"),
         ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"),
+        # ── the collaborator-access migration ────────────────────────────
+        ("PUT", "/openapi/v1/bots/{bot_id}/identity/{file_type}"),
+        ("PUT", "/openapi/v1/bots/identity/{bot_id}/{file_type}"),
+        ("POST", "/openapi/v1/bots/{bot_id}/data-init"),
+        ("POST", "/openapi/v1/bots/{bot_id}/restart"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/resources"),
+        ("POST", "/openapi/v1/bots/{bot_id}/resources/mkdir"),
+        ("POST", "/openapi/v1/bots/{bot_id}/resources/upload"),
+        ("POST", "/openapi/v1/bots/{bot_id}/routines"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"),
+        ("PATCH", "/openapi/v1/bots/{bot_id}/routines/{routine_id}"),
+        ("POST", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/run"),
+        ("PUT", "/openapi/v1/bots/{bot_id}/startup-script"),
+        ("DELETE", "/openapi/v1/bots/{bot_id}/startup-script"),
     }
     actual = {
         key
@@ -663,7 +677,7 @@ def test_a_check_handler_must_consume_the_owner_the_gate_checks():
     """The seam's guarantee stops at the seam unless the handler joins it.
 
     ``bot_access`` reads ``OwnerIdDep``; a handler that takes ``UserIdDep`` as
-    its owner — as all 34 of today's ``OWNER_SCOPED`` handlers do — reads a
+    its owner — as every ``OWNER_SCOPED`` handler does — reads a
     *different* dependency, and FastAPI's per-request cache does not unify two
     distinct callables. Flipping such a row to ``Check`` without also changing
     the handler would adjudicate one bot and act on another, which for a
@@ -798,6 +812,32 @@ def test_bot_id_anywhere_on_the_path_is_accepted():
 #: ``_require_view_access`` — a MEMBER check on the bot the skill record names.
 #: This feature does not touch that module; deferring the three current skills
 #: rows that share it is precisely what keeps it in place.
+#:
+#: The other fourteen are the query/body-addressed resources and routines
+#: retirements: their paths carry no ``{bot_id}`` for a ``Check`` gate to read
+#: either, and their shims pin the owner to the caller
+#: (``deprecated._requery.pin_owner_to_user``), so the owner resolves as it
+#: always did at these addresses. The replacement's collaborator bars are had
+#: at the replacement address only — retiring is not a way around them, and
+#: the pin's presence is the lives-on test below.
+_PINNED_TWINS = frozenset(
+    {
+        ("GET", "/openapi/v1/bots/resources"),
+        ("DELETE", "/openapi/v1/bots/resources"),
+        ("GET", "/openapi/v1/bots/resources/download"),
+        ("POST", "/openapi/v1/bots/resources/mkdir"),
+        ("GET", "/openapi/v1/bots/resources/preview"),
+        ("GET", "/openapi/v1/bots/resources/stat"),
+        ("POST", "/openapi/v1/bots/resources/upload"),
+        ("GET", "/openapi/v1/bots/routines"),
+        ("POST", "/openapi/v1/bots/routines"),
+        ("DELETE", "/openapi/v1/bots/routines/{routine_id}"),
+        ("GET", "/openapi/v1/bots/routines/{routine_id}"),
+        ("PATCH", "/openapi/v1/bots/routines/{routine_id}"),
+        ("POST", "/openapi/v1/bots/routines/{routine_id}/run"),
+        ("GET", "/openapi/v1/bots/routines/{routine_id}/runs"),
+    }
+)
 _TWINS_CHECKED_INDEPENDENTLY = frozenset(
     {
         ("GET", "/openapi/v1/bots/skills/{skill_id}"),
@@ -805,7 +845,42 @@ _TWINS_CHECKED_INDEPENDENTLY = frozenset(
         ("POST", "/openapi/v1/bots/skills/{skill_id}/activate"),
         ("POST", "/openapi/v1/bots/skills/{skill_id}/deactivate"),
     }
-)
+) | _PINNED_TWINS
+
+
+def test_the_pinned_twins_owner_is_really_the_caller():
+    """The pinned exemption is only true while the pin is there.
+
+    Being unadjudicable is what makes a pinned twin *permissible*; what makes it
+    *safe* is that its shim takes the owner off the wire and binds it to the
+    validated caller — so a collaborator cannot reach around the replacement's
+    bars through an address no gate reads. Delete the pin (or re-publish the
+    handler there unshimmed) and this fails before the sibling test ever
+    notices the twin stopped being exempt.
+    """
+    import inspect
+    from agentclaw.community.adapters.http.openapi_v1.deprecated import (
+        _resources,
+        _routines,
+    )
+
+    offending = []
+    for group in (_resources.router, _routines.router, _routines.create_router):
+        for route in group.routes:
+            pinned_methods = {
+                m
+                for m in (getattr(route, "methods", None) or ())
+                if (m, route.path) in _PINNED_TWINS
+            }
+            if pinned_methods and "owner_id" in inspect.signature(
+                route.endpoint
+            ).parameters:
+                offending.extend(f"{m} {route.path}" for m in sorted(pinned_methods))
+    assert not offending, (
+        "these pinned retiring addresses publish an owner_id parameter, so the "
+        "frozen contract grew a capability and the pin no longer holds: "
+        + ", ".join(offending)
+    )
 
 
 def _replacement_rule(method: str, legacy_path: str, replacement_path: str):
