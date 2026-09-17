@@ -2685,3 +2685,112 @@ class TestEvalSessionLogStream:
             context=context,
             metadata={"eval_id": "eval-str-4", "session_id": "original-sess"},
         )
+
+
+# ==================== Tests: _resolve_binding default_tag passthrough ====================
+
+
+class TestResolveBindingDefaultTag:
+    """_resolve_binding 中 default_tag 从 metadata 提取并透传给 get_binding。"""
+
+    @pytest.mark.asyncio
+    async def test_eval_stage_extracts_default_tag_from_metadata(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin, arca_binding_data
+    ):
+        """lifecycle_stage=eval + metadata 含 default_tag → 透传给 get_binding。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        result = await runner._resolve_binding(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            lifecycle_stage="eval",
+            metadata={"default_tag": "default"},
+        )
+
+        assert result is not None
+        mock_bot_service_plugin.get_binding.assert_awaited_once_with(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            stage="eval",
+            default_tag="default",
+        )
+
+    @pytest.mark.asyncio
+    async def test_eval_stage_no_default_tag_in_metadata(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin, arca_binding_data
+    ):
+        """lifecycle_stage=eval + metadata 不含 default_tag → default_tag=None。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        result = await runner._resolve_binding(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            lifecycle_stage="eval",
+            metadata={"eval_id": "eval-001"},
+        )
+
+        assert result is not None
+        mock_bot_service_plugin.get_binding.assert_awaited_once_with(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            stage="eval",
+            default_tag=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_eval_stage_metadata_is_none(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin, arca_binding_data
+    ):
+        """lifecycle_stage=eval + metadata=None → default_tag=None。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        result = await runner._resolve_binding(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            lifecycle_stage="eval",
+            metadata=None,
+        )
+
+        assert result is not None
+        call_kw = mock_bot_service_plugin.get_binding.call_args.kwargs
+        assert call_kw["default_tag"] is None
+
+    @pytest.mark.asyncio
+    async def test_online_stage_ignores_default_tag(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin, arca_binding_data
+    ):
+        """lifecycle_stage=online → 即使 metadata 含 default_tag 也不透传。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        result = await runner._resolve_binding(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            lifecycle_stage="online",
+            metadata={"default_tag": "default"},
+        )
+
+        assert result is not None
+        mock_bot_service_plugin.get_binding.assert_awaited_once_with(
+            bot_id=BOT_ID,
+            owner_id=ENTITY_ID,
+            stage="online",
+            default_tag=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_not_found_error_returns_none_with_default_tag(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
+        """lifecycle_stage=eval + default_tag + NOT_FOUND → 返回 None（不抛异常）。"""
+        mock_bot_service_plugin.get_binding.side_effect = PaasError(
+            ErrorCode.NOT_FOUND, "binding not found"
+        )
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        result = await runner._resolve_binding(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            lifecycle_stage="eval",
+            metadata={"default_tag": "default"},
+        )
+
+        assert result is None

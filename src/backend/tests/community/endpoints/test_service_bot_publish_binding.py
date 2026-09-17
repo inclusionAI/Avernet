@@ -115,3 +115,23 @@ def get_binding_happy():
 )
 def get_binding_error():
     """Error path: bot not found returns 404."""
+
+
+@endpoint_test(
+    method="GET",
+    path=_ENDPOINT,
+    scenario="happy_default_tag",
+    input=CaseInput(
+        path_params={"bot_id": _BOT_ID},
+        query_params={"owner_id": _OWNER, "stage": "online", "default_tag": "default"},
+    ),
+    seed=_seed_binding_happy,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "success": True,
+        },
+    ),
+)
+def get_binding_with_default_tag():
+    """default_tag query param is accepted and passed through."""

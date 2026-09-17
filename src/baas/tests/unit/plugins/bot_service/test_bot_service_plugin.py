@@ -405,6 +405,129 @@ class TestAiohttpBotServicePluginGetBinding:
         await plugin.close()
 
     @pytest.mark.asyncio
+    async def test_get_binding_with_default_tag_appends_query_param(self):
+        """get_binding(stage="eval", default_tag="default") 时 HTTP params 包含 default_tag。"""
+        plugin = AiohttpBotServicePlugin(
+            base_url="https://agentclaw.example.com",
+        )
+
+        api_response = {
+            "success": True,
+            "message": "查询成功",
+            "error_code": None,
+            "data": {
+                "bot_id": "bot_001",
+                "owner_id": "owner_001",
+                "bot_type": "service",
+                "engine_type": "openclaw",
+                "binding_id": 202,
+                "device_provider": "baas",
+                "device_id": "device-001",
+            },
+        }
+
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value=api_response)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=mock_response)
+        mock_session.closed = False
+        mock_session.close = AsyncMock()
+
+        plugin._session = mock_session
+
+        result = await plugin.get_binding(
+            "bot_001", "owner_001", "eval", default_tag="default"
+        )
+
+        assert result.binding_id == 202
+
+        mock_session.get.assert_called_once()
+        call_args = mock_session.get.call_args
+        assert call_args[1]["params"] == {
+            "owner_id": "owner_001",
+            "stage": "eval",
+            "default_tag": "default",
+        }
+
+        await plugin.close()
+
+    @pytest.mark.asyncio
+    async def test_get_binding_without_default_tag_omits_query_param(self):
+        """get_binding(stage="eval") 不传 default_tag 时 HTTP params 不含 default_tag。"""
+        plugin = AiohttpBotServicePlugin(
+            base_url="https://agentclaw.example.com",
+        )
+
+        api_response = {
+            "success": True,
+            "message": "查询成功",
+            "error_code": None,
+            "data": {
+                "bot_id": "bot_001",
+                "owner_id": "owner_001",
+                "bot_type": "service",
+                "engine_type": "openclaw",
+                "binding_id": 202,
+                "device_provider": "baas",
+                "device_id": "device-001",
+            },
+        }
+
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.json = AsyncMock(return_value=api_response)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=mock_response)
+        mock_session.closed = False
+        mock_session.close = AsyncMock()
+
+        plugin._session = mock_session
+
+        result = await plugin.get_binding("bot_001", "owner_001", "eval")
+
+        mock_session.get.assert_called_once()
+        call_args = mock_session.get.call_args
+        assert "default_tag" not in call_args[1]["params"]
+
+        await plugin.close()
+
+    @pytest.mark.asyncio
+    async def test_get_binding_all_with_default_tag_passes_through(self):
+        """stage="all" + default_tag 时 default_tag 仍透传到 _get_binding_raw。"""
+        plugin = AiohttpBotServicePlugin(
+            base_url="https://agentclaw.example.com",
+        )
+
+        inner = {
+            "bot_id": "bot_001",
+            "owner_id": "owner_001",
+            "bot_type": "service",
+            "engine_type": "openclaw",
+            "binding_id": 202,
+            "device_provider": "baas",
+            "device_id": "device-001",
+        }
+
+        plugin._get_binding_raw = AsyncMock(return_value=inner)
+
+        result = await plugin.get_binding(
+            "bot_001", "owner_001", "all", default_tag="default"
+        )
+
+        assert result.binding_id == 202
+        # _get_binding_raw 应被调用且 default_tag 透传
+        plugin._get_binding_raw.assert_called_once_with(
+            "bot_001", "owner_001", "online", default_tag="default"
+        )
+
+    @pytest.mark.asyncio
     async def test_get_binding_empty_base_url_raises_paas_error(self):
         """Empty base_url → PaasError(CONFIG_INVALID)."""
         plugin = AiohttpBotServicePlugin(base_url="")
@@ -898,6 +1021,18 @@ class TestLocalBotServicePluginGetBinding:
 
         assert exc_info.value.code == ErrorCode.PLATFORM_UNAVAILABLE
 
+    @pytest.mark.asyncio
+    async def test_get_binding_with_default_tag_raises_platform_unavailable(self):
+        """LocalBotServicePlugin.get_binding() with default_tag 仍抛 PaasError。"""
+        plugin = LocalBotServicePlugin()
+
+        with pytest.raises(PaasError) as exc_info:
+            await plugin.get_binding(
+                "bot_001", "owner_001", "eval", default_tag="default"
+            )
+
+        assert exc_info.value.code == ErrorCode.PLATFORM_UNAVAILABLE
+
 
 # ==================== Tests: StubBotServicePlugin.get_binding =================
 
@@ -937,6 +1072,19 @@ class TestStubBotServicePluginGetBinding:
         result = await plugin.get_binding("bot_001", "owner_001", "online")
 
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_binding_with_default_tag_returns_stub_data(self):
+        """StubBotServicePlugin.get_binding() with default_tag 返回 stub 数据（签名兼容）。"""
+        plugin = StubBotServicePlugin()
+
+        result = await plugin.get_binding(
+            "bot_001", "owner_001", "eval", default_tag="default"
+        )
+
+        assert isinstance(result, BotBindingData)
+        assert result.bot_id == "bot_001"
+        assert result.device_provider == "stub"
 
 
 class TestAiohttpBotServicePluginRuntimeEngineSelection:
