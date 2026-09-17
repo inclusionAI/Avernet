@@ -128,8 +128,17 @@ real sqlite) and asserts the emitted row's `action_type`/`action_result`/`action
       action_log untouched, `submit` is `TrajectoryActionType` not `NodeAction`.
 
 ### Intrusion guard (cross-cutting)
-- [ ] Test: with the trajectory repo forced to raise, every gated path (PLAN/DISPATCH/EXECUTE/
+- [x] Test: with the trajectory repo forced to raise, every gated path (PLAN/DISPATCH/EXECUTE/
       VERIFY/RESET/SUBMIT) still completes and drives forward — proves the swallow guarantee.
+      `tests/community/core/task/task_trajectory/test_trajectory_intrusion_guard.py`:
+      one consolidated cross-gate drive (SUBMIT → PLAN → DISPATCH → EXECUTE/VERIFY
+      → RESET) with a single raising-and-capturing repo injected across every
+      gate — asserts every gate's main logic completes + drives forward, every
+      gate's emission was attempted (repo records it), and a WARNING landed on
+      `logger "task.trajectory"` for each raised attempt. AST-level structural
+      decoupling class pins the 独立旁路 invariant (trajectory module doesn't
+      import/reference `NodeAction`; emitter doesn't invoke `append_action_event`;
+      `submit` stays `TrajectoryActionType` only — never `NodeAction`).
 
 ## P4 — Assembly (REQ-8 read side)
 
