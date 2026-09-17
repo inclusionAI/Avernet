@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="description" content="Avernet 50 分钟中文演示稿：当产品开始替用户组队，AI 运营从单点智能走向协作交付。包含讲者备注、小店经营与谁是卧底、上下文设计和部署教程。">
+<meta name="theme-color" content="#101218">
+<title>当产品开始替用户组队 · Avernet Keynote</title>
+<link rel="icon" type="image/png" href="__AVERNET_ICON__">
+<style>__STYLES__</style>
+</head>
+<body>
+<main id="viewport" aria-label="Avernet 演示稿"><div id="deck"></div></main>
+<nav id="controls" aria-label="演示控制">
+  <button type="button" id="prev" aria-label="上一页" title="上一页（←）">←</button>
+  <span id="slide-count" aria-live="off"></span>
+  <button type="button" id="next" aria-label="下一页" title="下一页（→ / 空格）">→</button>
+  <button type="button" id="overview-button" title="总览（O）">总览</button>
+  <button type="button" id="notes-button" title="独立讲者窗口（N）">讲者<span class="desktop-label">视图</span></button>
+  <button type="button" id="fullscreen-button" title="全屏（F）">全屏</button>
+  <button type="button" id="help-button" aria-label="快捷键帮助" title="帮助（?）">?</button>
+</nav>
+<div id="progress" aria-hidden="true"><div id="progress-fill"></div></div>
+<div id="live-status" role="status" aria-live="polite"></div>
+<div id="toast" role="status" hidden></div>
+<div id="blackout" hidden aria-label="黑屏，点击恢复"></div>
+<dialog id="overview" aria-labelledby="overview-title"><div class="dialog-header"><div><h2 id="overview-title">演示总览</h2><p id="overview-summary"></p></div><button class="close-dialog" type="button" data-close="overview">关闭</button></div><div id="overview-grid" class="overview-grid"></div></dialog>
+<dialog id="help" aria-labelledby="help-title"><div class="dialog-header"><h2 id="help-title">演示快捷键</h2><button class="close-dialog" type="button" data-close="help">关闭</button></div><div class="shortcut-list"><div><span>下一页 / 上一页</span><span><kbd>→</kbd> <kbd>←</kbd></span></div><div><span>下一页</span><kbd>空格</kbd></div><div><span>首页 / 最后一页</span><span><kbd>Home</kbd> <kbd>End</kbd></span></div><div><span>幻灯片总览</span><kbd>O</kbd></div><div><span>独立讲者视图</span><kbd>N</kbd></div><div><span>切换全屏</span><kbd>F</kbd></div><div><span>黑屏 / 恢复</span><kbd>B</kbd></div><div><span>打印全部幻灯片</span><kbd>P</kbd></div></div><p>触屏可左右滑动翻页。讲者视图在独立窗口中显示备注、计时和下一页标题，适合双屏演讲。当前 HTML 可离线使用，现场 Demo 与外部文档链接需要相应服务或网络。</p></dialog>
+<section id="presenter-shell" aria-label="讲者视图">
+  <header class="presenter-header"><div><h1>Avernet / 讲者视图</h1><p>备注仅在此窗口显示。主窗口用于投屏。</p></div><div class="timer-controls"><output id="elapsed">00:00</output><button id="timer-toggle" type="button">开始计时</button><button id="timer-reset" type="button">重置</button></div></header>
+  <div class="presenter-left"><div id="presenter-warning" class="presenter-warning" hidden>主窗口未连接。可关闭后从演示主窗口按 N 重新打开。</div><div class="presenter-preview" id="presenter-preview"></div><div class="presenter-schedule" id="presenter-schedule"></div><div class="presenter-next" id="presenter-next"></div></div>
+  <div class="speaker-copy" id="speaker-copy"></div>
+  <footer class="presenter-nav"><output id="presenter-count"></output><button id="presenter-prev" type="button">← 上一页</button><button id="presenter-next-button" type="button">下一页 →</button></footer>
+</section>
+<noscript><p style="padding:48px;font-size:24px">此演示稿需要启用 JavaScript 才能显示与翻页。</p></noscript>
+<script>__CONTENT__</script>
+<script>__RUNTIME__</script>
+</body>
+</html>
