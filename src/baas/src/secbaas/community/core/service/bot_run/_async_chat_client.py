@@ -1255,8 +1255,11 @@ class AsyncChatClient:
         由 BotWebSocketClient._recv_loop 的 finally 块调用，
         替代 1 秒轮询，使断连检测和重连启动接近零延迟。
 
-        同时向所有活跃的 stream_queue 推送 error chunk，
-        使流式消费者不会无限等待。
+        同时把所有在途会话包装成终态 error（复用 _handle_terminal_error）：
+        等待 chat_complete 的调用方立即得到 BotSessionError，
+        流式消费者收到 error chunk 后结束，而不是等自身 timeout。
+        已完成（chat_complete 已置位）的会话跳过，避免把
+        已正常收尾的结果覆盖成 error。
         """
         logger.info(
             "[on_disconnect] event=%s, payload=%s, uri=%s",
@@ -1264,11 +1267,12 @@ class AsyncChatClient:
             payload,
             self.uri,
         )
-        for state in self._sessions.values():
-            if state.stream_queue is not None:
-                state.stream_queue.put_nowait(
-                    StreamChunk(type="error", content="connection lost")
-                )
+        for session_key, state in self._sessions.items():
+            if state.chat_complete.is_set():
+                continue
+            self._handle_terminal_error(
+                state, session_key, "connection lost", "disconnect"
+            )
         self._notify_disconnect()
 
     def _notify_disconnect(self) -> None:
@@ -1284,8 +1288,8 @@ class AsyncChatClient:
 
         使用 _disconnect_event 事件驱动检测断连（替代轮询），
         当底层 BotWebSocketClient 断连时被唤醒，以 exponential backoff
-        尝试重建连接。重连成功后新请求可继续使用；在途请求依赖自身
-        timeout 自然超时——这是 best-effort 行为。
+        尝试重建连接。重连成功后新请求可继续使用；在途会话已在
+        _on_disconnect 中被标记为终态 error，不再等待自身 timeout。
         """
         while not self._closed_intentionally:
             # 等待连接断开：事件驱动，比轮询更及时

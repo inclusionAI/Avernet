@@ -87,10 +87,7 @@ class RunAbortResponseData(BaseModel):
 class RunAbortResponse(ApiResponse[RunAbortResponseData]):
     """Run abort standard response"""
 
-    data: RunAbortResponseData | None = Field(
-        default=None,
-        description="Response data"
-    )
+    data: RunAbortResponseData | None = Field(default=None, description="Response data")
 
 
 class MessageRequest(BaseModel):
