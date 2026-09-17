@@ -1520,7 +1520,14 @@ async def test_bot_runner_abort_propagates_to_bot_service(repo, queue):
             return fake_service
 
     class _FakePlugin:
-        async def get_binding(self, bot_id: str, owner_id: str, stage: str, *, default_tag: str | None = None):
+        async def get_binding(
+            self,
+            bot_id: str,
+            owner_id: str,
+            stage: str,
+            *,
+            default_tag: str | None = None,
+        ):
             from secbaas.community.spi.bot_service import BotBindingData
 
             return BotBindingData(

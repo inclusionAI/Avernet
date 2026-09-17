@@ -23,7 +23,7 @@ Reference: RFC 0002 atomic commit 1
 from __future__ import annotations
 
 import asyncio
-import os
+import json
 import time
 import uuid
 from typing import Any
@@ -32,7 +32,7 @@ import aiohttp
 from pydantic import ValidationError
 
 from secbaas.community.api.device_manage import ErrorCode, PaasError
-from secbaas.community.core.utils.env_utils import is_dev
+from secbaas.community.http_header import get_http_header_plugin
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot_service import (
     BotBindingData,
@@ -258,6 +258,8 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         bot_id: str,
         owner_id: str,
         stage: str,
+        *,
+        default_tag: str | None = None,
     ) -> BotBindingData:
         """GET /api/service-bot/publish/{bot_id}/binding with error propagation.
 
@@ -265,10 +267,11 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         Raises PaasError on transport failure, HTTP error, or envelope failure.
         """
         url = f"{self._base_url.rstrip('/')}/api/service-bot/publish/{bot_id}/binding"
-        params = {"owner_id": owner_id, "stage": stage}
-        headers = {}
-        if is_dev():
-            headers["Cookie"] = f"IAM_TOKEN={os.getenv('IAM_TOKEN')}"
+        params: dict[str, str] = {"owner_id": owner_id, "stage": stage}
+        if default_tag:
+            params["default_tag"] = default_tag
+        headers: dict[str, str] = {}
+        get_http_header_plugin().inject_header(headers)
 
         for attempt in range(1, _BINDING_MAX_ATTEMPTS + 1):
             try:
@@ -304,21 +307,18 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                     continue
                 raise PaasError(
                     ErrorCode.PLATFORM_UNAVAILABLE,
-                    f"AgentClaw binding request failed: {exc}",
+                    f"binding request failed: {exc}",
                 ) from exc
 
         # 不可达兜底：最后一次 attempt 必然 raise；显式写出保证返回类型完备
         raise PaasError(
             ErrorCode.PLATFORM_UNAVAILABLE,
-            f"AgentClaw binding request failed: attempts exhausted "
+            f"binding request failed: attempts exhausted "
             f"(bot_id={bot_id}, stage={stage})",
         )
 
     async def get_binding(
-        self,
-        bot_id: str,
-        owner_id: str,
-        stage: str,
+        self, bot_id: str, owner_id: str, stage: str, *, default_tag: str | None = None
     ) -> BotBindingData:
         """Query bot binding info via GET /api/service-bot/publish/{bot_id}/binding.
 
@@ -329,6 +329,8 @@ class AiohttpBotServicePlugin(BotServicePlugin):
             bot_id: Bot identifier.
             owner_id: Owner entity identifier.
             stage: Lifecycle stage (online, verify, draft, or all).
+            default_tag: 评测环境 binding 标签，仅透传给后端按
+                         default_tag 查询评测 binding（None 不追加参数）。
 
         Returns:
             BotBindingData with binding details.
@@ -350,7 +352,9 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         for s in stages:
             _stage_t0 = time.monotonic()
             try:
-                data = await self._get_binding_raw(bot_id, owner_id, s)
+                data = await self._get_binding_raw(
+                    bot_id, owner_id, s, default_tag=default_tag
+                )
             except PaasError as e:
                 _stage_ms = (time.monotonic() - _stage_t0) * 1000
                 last_error = e
@@ -468,7 +472,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
         execution credentials server-side; failures propagate and are never
         retried.
 
-        Returns ``connection.paas_device_id`` — the ready instance's sandbox
+        Returns ``connection.target`` — the ready instance's sandbox
         id — for use as the caller binding's connection target.
 
         Args:
@@ -479,7 +483,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                 used only for the credential refresh.
 
         Returns:
-            The ready instance's sandbox_id (``connection.paas_device_id``).
+            The ready instance's sandbox_id (``connection.target``).
 
         Raises:
             PaasError: On transport failure, HTTP error, envelope failure,
@@ -491,8 +495,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                 ErrorCode.CONFIG_INVALID,
                 "caller-connection requires a non-empty bot_service base_url",
             )
-        signer = self._principal_signer
-        if signer is None:
+        if self._principal_signer is None:
             raise PaasError(
                 ErrorCode.CONFIG_INVALID,
                 "caller-connection requires a principal signer "
@@ -520,16 +523,13 @@ class AiohttpBotServicePlugin(BotServicePlugin):
 
         while True:
             request_id = str(uuid.uuid4())
-            # 每次尝试现签短 TTL principal：轮询可跨 TTL 边界，旧 token 会过期
-            # （契约："JWT 到期时获取新的 Principal"）。
-            principal_token = signer.mint()
+            principal = self._principal_signer.mint()
             headers = {
                 "Accept": "application/json",
-                "X-Avernet-Principal": principal_token,
+                "X-Avernet-Principal": principal,
                 "X-Request-ID": request_id,
             }
-            if is_dev():
-                headers["Cookie"] = f"IAM_TOKEN={os.getenv('IAM_TOKEN')}"
+            get_http_header_plugin().inject_header(headers)
             try:
                 session = await self._get_session()
                 async with session.post(url, params=params, headers=headers) as resp:
@@ -539,7 +539,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
                         "[bot-service] caller-connection request_id=%s status=%d, raw=%s",
                         request_id,
                         resp.status,
-                        raw,
+                        json.dumps(raw),
                     )
             except (TimeoutError, aiohttp.ClientError, ValueError) as e:
                 last_transport_error = e
@@ -671,7 +671,7 @@ class AiohttpBotServicePlugin(BotServicePlugin):
 
     @staticmethod
     def _extract_caller_sandbox_id(data: CallerConnectionData, request_id: str) -> str:
-        """Extract ``connection.paas_device_id`` from a ready (need_poll=false) response."""
+        """Extract ``connection.target`` from a ready (need_poll=false) response."""
         connection = data.connection
         if connection is None:
             raise PaasError(
@@ -681,14 +681,14 @@ class AiohttpBotServicePlugin(BotServicePlugin):
             )
         # spi.bot_service 的导入在此文件被 mypy 解析为 Any（见类头 BotServicePlugin
         # 同类既有告警），此处显式标注把返回类型收紧回 str
-        sandbox_id: str = connection.paas_device_id
+        sandbox_id: str = connection.target
         if not sandbox_id:
             raise PaasError(
                 ErrorCode.PLATFORM_ERROR,
-                "caller-connection response missing connection.paas_device_id "
+                "caller-connection response missing connection.target "
                 f"(request_id={request_id})",
             )
-        return sandbox_id
+        return sandbox_id.removeprefix("ARCA_").removesuffix(":20003")
 
     async def _refresh_caller_iam_token(self, *, bot_id: str, cookie: str) -> None:
         """GET /api/v1/token/iam — sandbox 就绪后单次刷新 Caller 执行凭据。

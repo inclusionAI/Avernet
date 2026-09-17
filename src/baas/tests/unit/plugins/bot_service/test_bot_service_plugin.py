@@ -510,15 +510,15 @@ class TestAiohttpBotServicePluginGetBinding:
             base_url="https://agentclaw.example.com",
         )
 
-        inner = {
-            "bot_id": "bot_001",
-            "owner_id": "owner_001",
-            "bot_type": "service",
-            "engine_type": "openclaw",
-            "binding_id": 202,
-            "device_provider": "baas",
-            "device_id": "device-001",
-        }
+        inner = BotBindingData(
+            bot_id="bot_001",
+            owner_id="owner_001",
+            bot_type="service",
+            engine_type="openclaw",
+            binding_id=202,
+            device_provider="baas",
+            device_id="device-001",
+        )
 
         plugin._get_binding_raw = AsyncMock(return_value=inner)
 
@@ -939,7 +939,9 @@ class TestAiohttpBotServicePluginGetBinding:
         result = await plugin.get_binding("bot_001", "20881234", "all")
 
         assert result.binding_id == 202
-        plugin._get_binding_raw.assert_called_once_with("bot_001", "20881234", "online", default_tag=None)
+        plugin._get_binding_raw.assert_called_once_with(
+            "bot_001", "20881234", "online", default_tag=None
+        )
 
     @pytest.mark.asyncio
     async def test_get_binding_all_falls_through_to_verify(self):
@@ -1305,8 +1307,8 @@ def _caller_ready_body(sandbox_id: str) -> dict:
             "connection": {
                 "ws_url": "wss://connection.example.invalid/path",
                 "token": "<connection-token>",
-                "target": "<routing-target>",
-                "paas_device_id": sandbox_id,
+                "target": sandbox_id,
+                "paas_device_id": "<paas-device-id>",
                 "baas_base_url": "https://baas.example.invalid",
                 "engine_port": 20003,
                 "tenant": "tenant-1",
@@ -1332,7 +1334,7 @@ def _caller_poll_body() -> dict:
 
 _CALLER_PRINCIPAL_SECRET_NAME = "other_manual_teamclawgw_principal_signing_key"
 _CALLER_PRINCIPAL_KEY = "unit-test-principal-signing-key-0123456789abcdef"
-_CALLER_COOKIE = "IAM_TOKEN=iam-token-value; session=abc"
+_CALLER_COOKIE = "IAM_TOKEN=iam-value; session=abc"
 
 
 class _FakeSecretStore:
@@ -1383,8 +1385,8 @@ class TestAiohttpBotServicePluginGetCallerConnection:
         )
 
     @pytest.mark.asyncio
-    async def test_success_returns_paas_device_id(self):
-        """Ready response returns connection.paas_device_id; query params,
+    async def test_success_returns_target(self):
+        """Ready response returns connection.target; query params,
         empty body, self-minted Principal header and the follow-up IAM
         refresh call all match the contract."""
         mock_post = MagicMock(

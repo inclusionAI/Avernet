@@ -43,14 +43,24 @@ class BotBindingResolver:
         *,
         bot_id: str,
         metadata: dict[str, Any],
+        lifecycle_stage: str | None = None,
     ) -> BotBindingInfo | None:
         """按 (bot, owner) + lifecycle_stage 解析既有发布设备；NOT_FOUND 返回 None。
 
         纯正常模式解析；caller 模式不经过本方法（容器拉起见
         :meth:`resolve_caller_binding`，worker 复用见 queue meta 的
         ``caller_sandbox_id``）。
+
+        lifecycle_stage 显式传入时覆盖 metadata 提取；eval 阶段从
+        metadata 顶层提取 ``default_tag`` 透传（按 tag 路由评测 binding），
+        其余阶段恒为 None。
         """
-        lifecycle_stage = extract_lifecycle_stage(metadata)
+        stage = lifecycle_stage or extract_lifecycle_stage(metadata)
+        default_tag: str | None = None
+        if stage == "eval":
+            tag = metadata.get("default_tag")
+            if tag:
+                default_tag = str(tag)
         real_bot_id, entity_id = parse_bot_id(bot_id)
         if not real_bot_id:
             return None
@@ -58,7 +68,8 @@ class BotBindingResolver:
             data = await self._bot_service_plugin.get_binding(
                 bot_id=real_bot_id,
                 owner_id=entity_id or "",
-                stage=lifecycle_stage,
+                stage=stage,
+                default_tag=default_tag,
             )
         except PaasError as e:
             if e.code == ErrorCode.NOT_FOUND:

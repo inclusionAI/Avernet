@@ -268,15 +268,9 @@ class TestConnect:
             connect_kwargs.update(kwargs)
             return mock_ws
 
-        with (
-            patch(
-                "secbaas.community.core.service.bot_run._bot_websocket_client.websockets.connect",
-                side_effect=mock_connect,
-            ),
-            patch(
-                "secbaas.community.core.service.bot_run._bot_websocket_client.is_dev",
-                return_value=False,
-            ),
+        with patch(
+            "secbaas.community.core.service.bot_run._bot_websocket_client.websockets.connect",
+            side_effect=mock_connect,
         ):
             result = await client.connect(timeout=2.0)
 
@@ -324,15 +318,9 @@ class TestConnect:
         async def mock_connect(*args, **kwargs):
             return mock_ws
 
-        with (
-            patch(
-                "secbaas.community.core.service.bot_run._bot_websocket_client.websockets.connect",
-                side_effect=mock_connect,
-            ),
-            patch(
-                "secbaas.community.core.service.bot_run._bot_websocket_client.is_dev",
-                return_value=False,
-            ),
+        with patch(
+            "secbaas.community.core.service.bot_run._bot_websocket_client.websockets.connect",
+            side_effect=mock_connect,
         ):
             with pytest.raises(RuntimeError, match="Handshake failed"):
                 await client.connect(timeout=2.0)
@@ -368,15 +356,9 @@ class TestConnect:
         async def mock_connect(*args, **kwargs):
             return mock_ws
 
-        with (
-            patch(
-                "secbaas.community.core.service.bot_run._bot_websocket_client.websockets.connect",
-                side_effect=mock_connect,
-            ),
-            patch(
-                "secbaas.community.core.service.bot_run._bot_websocket_client.is_dev",
-                return_value=False,
-            ),
+        with patch(
+            "secbaas.community.core.service.bot_run._bot_websocket_client.websockets.connect",
+            side_effect=mock_connect,
         ):
             await client.connect(timeout=2.0)
 
@@ -386,6 +368,56 @@ class TestConnect:
         assert frame["method"] == "connect"
         assert frame["params"]["client"]["id"] == client.client_id
         assert frame["params"]["client"]["version"] == client.client_version
+
+        await client.close()
+
+    # [单测用例]测试场景：HTTP header 插件注入的 header 透传到 additional_headers
+    async def test_connect_passes_injected_headers(self, client):
+        """connect() forwards headers injected by the HttpHeaderPlugin."""
+        mock_ws = AsyncMock()
+
+        async def mock_send(data):
+            sent = json.loads(data)
+            req_id = sent["id"]
+            entry = client._pending_requests.get(req_id)
+            if entry:
+                if not entry.done():
+                    entry.set_result(
+                        {
+                            "type": "res",
+                            "id": req_id,
+                            "ok": True,
+                            "payload": {"server": {}, "features": {}},
+                        }
+                    )
+
+        mock_ws.send = mock_send
+        mock_ws.close = AsyncMock()
+        mock_ws.__aiter__ = AsyncMock(return_value=iter([]))
+
+        connect_kwargs = {}
+
+        async def mock_connect(*args, **kwargs):
+            connect_kwargs.update(kwargs)
+            return mock_ws
+
+        class _StubHeaderPlugin:
+            def inject_header(self, headers: dict) -> None:
+                headers["Cookie"] = "iam_token=stub"
+
+        with (
+            patch(
+                "secbaas.community.core.service.bot_run._bot_websocket_client.websockets.connect",
+                side_effect=mock_connect,
+            ),
+            patch(
+                "secbaas.community.core.service.bot_run._bot_websocket_client.get_http_header_plugin",
+                return_value=_StubHeaderPlugin(),
+            ),
+        ):
+            await client.connect(timeout=2.0)
+
+        assert connect_kwargs["additional_headers"]["Cookie"] == "iam_token=stub"
 
         await client.close()
 

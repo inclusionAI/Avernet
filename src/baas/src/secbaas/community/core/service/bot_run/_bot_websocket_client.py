@@ -13,7 +13,6 @@ import asyncio
 import dataclasses
 import ipaddress
 import json
-import os
 import ssl
 import uuid
 from collections.abc import Callable
@@ -24,7 +23,7 @@ import websockets
 from websockets.asyncio.client import ClientConnection
 
 from secbaas.community.api.bot_interaction import InteractionResolution
-from secbaas.community.core.utils.env_utils import is_dev
+from secbaas.community.http_header import get_http_header_plugin
 from secbaas.community.logger import get_logger
 from secbaas.community.tracer import get_tracer_plugin
 
@@ -151,11 +150,7 @@ class BotWebSocketClient:
 
         headers = self._get_default_headers()
         logger.info(f"Connecting to: {self.uri}")
-
-        if is_dev():
-            iam_token = os.getenv("IAM_TOKEN")
-            headers["Cookie"] = f"iam_token={iam_token}"
-            logger.info("local dev, add iam token for connection")
+        get_http_header_plugin().inject_header(headers)
 
         # SSL 配置
         ssl_context: ssl.SSLContext | None = None

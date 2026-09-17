@@ -730,14 +730,14 @@ class TestResolveCallerBinding:
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
             metadata={
                 "user_id": "u-9",
-                "cookie": "iam-token-value",
+                "cookie": "test-value",
             },
         )
         plugin.get_caller_connection.assert_awaited_once_with(
             bot_id=BOT_ID,
             owner_id=ENTITY_ID,
             user_id="u-9",
-            cookie="IAM_TOKEN=iam-token-value",
+            cookie="IAM_TOKEN=test-value",
         )
         assert info.sandbox_id == "sbx-9"
         assert info.device_provider == "caller"

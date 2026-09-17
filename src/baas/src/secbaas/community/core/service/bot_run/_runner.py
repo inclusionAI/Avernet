@@ -879,6 +879,25 @@ class BotRunner:
                     break
         return self._dispatcher_map.get(name, self._dispatchers[-1])
 
+    async def _resolve_binding(
+        self,
+        *,
+        bot_id: str,
+        lifecycle_stage: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> BotBindingInfo | None:
+        """统一 binding 解析入口（caller 模式见 resolver.resolve_caller_binding）。
+
+        lifecycle_stage 未显式给出时由 metadata 的 bot_options 提取；
+        eval 阶段从 metadata 顶层提取 ``default_tag`` 透传给 get_binding，
+        其余阶段不透传。NOT_FOUND 时返回 None。
+        """
+        return await self._binding_resolver.resolve_binding(
+            bot_id=bot_id,
+            metadata=metadata or {},
+            lifecycle_stage=lifecycle_stage,
+        )
+
     async def _resolve_bot_route(
         self,
         bot_id: str,
@@ -886,7 +905,8 @@ class BotRunner:
     ) -> _BotRoute:
         """解析 binding → 选择 BotService → 解析 bot_id
 
-        binding 解析策略由 ``_resolve_binding`` 统一处理（caller 模式见该方法）。
+        binding 解析委托 ``BotBindingResolver``（caller 模式见
+        ``resolve_caller_binding``）。
 
         Raises:
             BotBindingNotFoundError: binding 不存在
