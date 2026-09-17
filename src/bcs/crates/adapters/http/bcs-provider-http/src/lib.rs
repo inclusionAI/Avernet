@@ -1807,13 +1807,13 @@ async fn drive_sse_frame(
     };
     let event = parse_stream_event(&frame.event, data);
     let kind = classify(&event);
+    let recv_ms = bcs_protocol::now_ms();
 
     // SSE-detail per-frame trace: `lag_ms` (receipt time minus the engine
     // frame's own ts) measures how far BCS consumption trails the producer.
     // Goes only to the bcs-sse-detail.log target. Interaction business payloads
     // are reduced to safe correlation metadata before they reach that log.
     {
-        let recv_ms = bcs_protocol::now_ms();
         let frame_ts = stream_event_ts(&event);
         let seq = stream_event_seq(&event).unwrap_or(0);
         let lag_ms = frame_ts.map(|t| recv_ms.saturating_sub(t)).unwrap_or(0);
@@ -1969,7 +1969,7 @@ async fn drive_sse_frame(
                 SeqDecision::Gap(gap) => warn!(run_id = %bcn_run_id, gap, "seq gap"),
                 SeqDecision::Accept => {}
             }
-            let payload = build_event_payload(&event, bcn_run_id, group_id);
+            let payload = build_event_payload(&event, bcn_run_id, group_id, recv_ms);
             (event_type, state, payload, false)
         }
         IngestKind::Terminal { event_type, state } => {
@@ -1983,7 +1983,7 @@ async fn drive_sse_frame(
                 }
                 SeqDecision::Accept => {}
             }
-            let payload = build_event_payload(&event, bcn_run_id, group_id);
+            let payload = build_event_payload(&event, bcn_run_id, group_id, recv_ms);
             (event_type, state, payload, true)
         }
     };
@@ -2058,7 +2058,7 @@ fn chat_event_state_slug(state: &ChatEventState) -> &'static str {
 /// Build the downstream `event_payload` by FILLING the existing protocol structs
 /// (#1) so the wire names match the WS plugin path byte-for-byte. `run_id` and
 /// `bcs_group_id` come from the run context (BCN ids), NOT the engine frame.
-fn build_event_payload(event: &StreamEvent, run_id: &str, group_id: &str) -> Value {
+fn build_event_payload(event: &StreamEvent, run_id: &str, group_id: &str, recv_ms: u64) -> Value {
     match event {
         StreamEvent::Agent(agent) => {
             let stream = match &agent.data {
@@ -2110,18 +2110,28 @@ fn build_event_payload(event: &StreamEvent, run_id: &str, group_id: &str) -> Val
             // message is strongly typed (Option<MessageContent>). If the engine
             // frame's message shape doesn't deserialize, WARN rather than
             // silently dropping the body (#1 risk note).
-            let mut message = match chat.message.as_ref() {
-                Some(raw_message) => match serde_json::from_value(raw_message.clone()) {
-                    Ok(parsed) => Some(parsed),
-                    Err(error) => {
-                        warn!(
-                            run_id,
-                            %error,
-                            "chat message did not match MessageContent; body omitted"
-                        );
-                        None
+            let mut message = match chat.message.clone() {
+                Some(mut raw_message) => {
+                    // SSE permits an omitted message timestamp. Normalize a
+                    // copy at this boundary, preserving supplied values and
+                    // validation of malformed messages in the shared WS type.
+                    if let Some(object) = raw_message.as_object_mut() {
+                        object.entry("timestamp").or_insert_with(|| {
+                            Value::from(stream_event_ts(event).unwrap_or(recv_ms))
+                        });
                     }
-                },
+                    match serde_json::from_value(raw_message) {
+                        Ok(parsed) => Some(parsed),
+                        Err(error) => {
+                            warn!(
+                                run_id,
+                                %error,
+                                "chat message did not match MessageContent; body omitted"
+                            );
+                            None
+                        }
+                    }
+                }
                 None => None,
             };
             if matches!(chat.state, ChatState::Error) && !message_has_text(&message) {
@@ -2932,6 +2942,104 @@ mod sse_loop_tests {
         assert_eq!(requested[0].bcs_run_id, "bcs-run-1");
         assert_eq!(requested[0].provider_run_id, "provider-run-1");
         assert_eq!(requested[0].bcs_session_id, "session-1");
+    }
+
+    #[tokio::test]
+    async fn chat_timestamp_missing_uses_event_ts_for_every_state() {
+        for (state, expected_state) in [
+            ("delta", ChatEventState::Delta),
+            ("final", ChatEventState::Final),
+            ("error", ChatEventState::Error),
+            ("aborted", ChatEventState::Aborted),
+        ] {
+            let recording = Arc::new(RecordingFlow::default());
+            let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+            let data = serde_json::json!({
+                "runId": "provider-run", "seq": 1, "ts": 1786260001000_u64,
+                "state": state,
+                "message": {"role": "assistant", "content": [
+                    {"type": "text", "text": "complete answer"}
+                ]}
+            });
+            let terminal = run_sse_text_for_test(
+                &format!("event: chat\ndata: {data}\n\n"),
+                "bcn-run-1", "grp-1", "bot-1", &flow,
+            ).await;
+            assert_eq!(terminal, state != "delta", "{state}");
+            let events = recording.snapshot();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].1, expected_state);
+            assert_eq!(events[0].2["message"]["content"][0]["text"], "complete answer", "{state}");
+            assert_eq!(events[0].2["message"]["timestamp"], 1786260001000_u64, "{state}");
+        }
+    }
+
+    #[tokio::test]
+    async fn chat_timestamp_missing_without_usable_ts_uses_receipt_time() {
+        for ts in [None, Some(Value::Null), Some(serde_json::json!("bad")),
+            Some(serde_json::json!(-1)), Some(serde_json::json!(1.5))] {
+            let mut data = serde_json::json!({
+                "runId": "provider-run", "seq": 1, "state": "final",
+                "message": {"role": "assistant", "content": [
+                    {"type": "text", "text": "final without deltas"}
+                ]}
+            });
+            if let Some(ts) = ts { data["ts"] = ts; }
+            let recording = Arc::new(RecordingFlow::default());
+            let flow: Arc<dyn ProviderEventIngestService> = recording.clone();
+            let before = bcs_protocol::now_ms();
+            assert!(run_sse_text_for_test(
+                &format!("event: chat\ndata: {data}\n\n"),
+                "bcn-run-1", "grp-1", "bot-1", &flow,
+            ).await);
+            let after = bcs_protocol::now_ms();
+            let events = recording.snapshot();
+            let timestamp = events[0].2["message"]["timestamp"].as_u64()
+                .expect("missing timestamp must not discard the final body");
+            assert!((before..=after).contains(&timestamp));
+            assert_eq!(events[0].2["message"]["content"][0]["text"], "final without deltas");
+        }
+    }
+
+    #[test]
+    fn chat_timestamp_preserves_supplied_values_and_raw_event() {
+        for timestamp in [None, Some(0_u64), Some(1786260000000), Some(u64::MAX)] {
+            let mut raw = serde_json::json!({
+                "runId": "provider-run", "state": "final", "ts": 1786260001000_u64,
+                "message": {"role": "assistant", "content": [
+                    {"type": "text", "text": "answer"}
+                ]}
+            });
+            if let Some(timestamp) = timestamp { raw["message"]["timestamp"] = timestamp.into(); }
+            let event = parse_stream_event("chat", raw.clone());
+            let payload = build_event_payload(&event, "bcn-run-1", "grp-1", 1786260002000);
+            assert_eq!(payload["message"]["timestamp"], timestamp.unwrap_or(1786260001000));
+            let StreamEvent::Chat(chat) = event else { panic!("expected chat"); };
+            assert_eq!(chat.raw, raw);
+            assert_eq!(chat.message.as_ref(), raw.get("message"));
+        }
+    }
+
+    #[test]
+    fn chat_timestamp_fallback_does_not_mask_invalid_messages() {
+        for message in [
+            serde_json::json!({"role": "assistant", "content": [], "timestamp": null}),
+            serde_json::json!({"role": "assistant", "content": [], "timestamp": "123"}),
+            serde_json::json!({"role": "assistant", "content": [], "timestamp": -1}),
+            serde_json::json!({"role": "assistant", "content": [], "timestamp": 1.5}),
+            serde_json::json!({"content": []}),
+            serde_json::json!({"role": "assistant"}),
+            serde_json::json!({"role": 1, "content": []}),
+            serde_json::json!({"role": "assistant", "content": "bad"}),
+            Value::Null,
+        ] {
+            let event = parse_stream_event("chat", serde_json::json!({
+                "runId": "provider-run", "state": "final", "ts": 1786260001000_u64,
+                "message": message,
+            }));
+            let payload = build_event_payload(&event, "bcn-run-1", "grp-1", 1786260002000);
+            assert!(payload["message"].is_null(), "invalid message accepted: {message}");
+        }
     }
 
     #[tokio::test]

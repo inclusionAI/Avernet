@@ -822,6 +822,8 @@ async fn provider_delivery_protocol2_sse_ingests_events() {
     assert_eq!(events[2].event_type, "chat.event");
     assert_eq!(events[2].state, ChatEventState::Final);
     assert_eq!(events[2].event_payload["state"], "final");
+    assert_eq!(events[2].event_payload["message"]["content"][0]["text"], "streaming done");
+    assert_eq!(events[2].event_payload["message"]["timestamp"], 1786260001000_u64);
     drop(events);
     assert!(
         message_flow
@@ -1357,7 +1359,7 @@ async fn capture_sse() -> Response {
         "data: {\"runId\":\"engine-run-sse\",\"seq\":2,\"state\":\"delta\",\"deltaText\":\"streaming \"}\n",
         "\n",
         "event: chat\n",
-        "data: {\"runId\":\"engine-run-sse\",\"seq\":3,\"state\":\"final\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"streaming done\"}]}}\n",
+        "data: {\"runId\":\"engine-run-sse\",\"seq\":3,\"ts\":1786260001000,\"state\":\"final\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"streaming done\"}]}}\n",
         "\n",
     );
     Response::builder()
