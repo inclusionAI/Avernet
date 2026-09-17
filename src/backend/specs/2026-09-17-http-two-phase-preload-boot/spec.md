@@ -94,9 +94,14 @@ In this exact order, matching today's:
   replaced, not retried. A child forked from it is refused for the same reason — it inherited
   that same half-wired app. **Only a fork performed before any finalize attempt is supported**,
   which is what `preload` mode gives you.
-- `_app_lifespan` reads participants from `app.state.injector` (the worker's injector), not
-  from a module-level handle captured at import. Entering the lifespan without a finalized
-  runtime raises with a message naming `finalize_worker_runtime()`.
+- `_app_lifespan` reads participants from the injector *this process* finalized, not from a
+  module-level handle captured at import — and the gate is `worker_runtime_finalized()`, not
+  "is an injector attached". The two differ exactly where it matters: a child forked from a
+  finalized parent inherits a non-`None` `app.state.injector`, and gating on presence would
+  let it run `bootstrap()`/`startup()` over the parent's participants, starting background
+  workers on the parent's pools, in a process that is simultaneously being refused traffic.
+  Serving is not the only way to do damage, so both gates ask the same question. Entering the
+  lifespan un-finalized raises with a message naming `finalize_worker_runtime()`.
 - That lifespan check is not the only guard, because nothing in ASGI obliges a host to drive
   the lifespan protocol. A `RequireWorkerRuntime` ASGI middleware, installed during
   construction in both modes, answers **503** to any request reaching a process that has not

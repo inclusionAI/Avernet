@@ -718,6 +718,49 @@ def test_a_finalized_worker_serves_normally_through_the_guard():
     )
 
 
+def test_lifespan_refuses_an_inherited_injector_even_though_one_is_attached():
+    """Presence of an injector is not evidence *this* process may use it.
+
+    A child forked from a finalized parent inherits a perfectly non-``None``
+    ``app.state.injector``. Gating the lifespan on presence alone would let it
+    run ``bootstrap()``/``startup()`` over the parent's participants — starting
+    background workers on the parent's pools — while the request guard is
+    meanwhile refusing to let that same process serve.
+    """
+    import asyncio
+
+    from agentclaw.community.adapters.http import app as app_mod
+    from agentclaw.community.adapters.http import boot
+
+    # Eager mode finalized at import, so an injector really is attached here;
+    # only the pid is made foreign, which is exactly a forked child's view.
+    assert getattr(app_mod.app.state, "injector", None) is not None
+
+    discovered: list[object] = []
+    real_discover = app_mod.discover_lifecycle_participants
+    previous = boot._finalized_pid
+    try:
+        app_mod.discover_lifecycle_participants = (
+            lambda injector: (discovered.append(injector), [])[1]
+        )
+        boot._finalized_pid = os.getpid() + 1_000_000
+
+        async def _drive():
+            async with app_mod.app.router.lifespan_context(app_mod.app):
+                pass
+
+        with pytest.raises(RuntimeError, match="has not finalized its worker runtime"):
+            asyncio.run(_drive())
+
+        assert discovered == [], (
+            "the lifespan resolved participants from an inherited injector before "
+            "refusing — bootstrap()/startup() would have run on the parent's"
+        )
+    finally:
+        app_mod.discover_lifecycle_participants = real_discover
+        boot._finalized_pid = previous
+
+
 def test_middleware_cannot_be_installed_after_the_stack_is_built():
     """Why the timing requirement exists, pinned against Starlette's behavior.
 

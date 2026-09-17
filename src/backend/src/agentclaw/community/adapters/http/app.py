@@ -45,7 +45,11 @@ from fastapi import FastAPI, Request
 # in the forked worker. What this section does is the pre-DI registration
 # ``build_injector`` later reads: registry mutation, safe to inherit across a
 # fork.
-from agentclaw.community.adapters.http.boot import BootMode, RequireWorkerRuntime
+from agentclaw.community.adapters.http.boot import (
+    BootMode,
+    RequireWorkerRuntime,
+    require_worker_injector,
+)
 from agentclaw.community.adapters.http.boot import (
     finalize_worker_runtime as _finalize_worker_runtime,
 )
@@ -189,20 +193,14 @@ async def _app_lifespan(app: FastAPI):
     phase's coroutines have all resolved. Setup direction is
     fail-fast; teardown direction is log-and-continue.
 
-    Participants come from ``app.state.injector`` — the injector the *worker*
-    built in :func:`finalize_worker_runtime` — rather than from a handle captured
-    at import. Under ``preload`` the module-level import happened in another
-    process entirely, so reading the app's own state is what makes a participant
-    the one this worker will actually drive.
+    Participants come from the injector *this process* finalized, not from a
+    handle captured at import: under ``preload`` the module-level import happened
+    in another process entirely. ``require_worker_injector`` refuses when this
+    process did not finalize — including a child that inherited its parent's
+    injector across a fork, which would otherwise start the parent's background
+    workers on the parent's pools.
     """
-    injector = getattr(app.state, "injector", None)
-    if injector is None:
-        raise RuntimeError(
-            "No injector attached to the app: the worker runtime was never "
-            "finalized. Under AGENTCLAW_HTTP_BOOT_MODE=preload the consumer must "
-            "call finalize_worker_runtime() once per worker after the fork and "
-            "before the first ASGI call (the lifespan startup event is one)."
-        )
+    injector = require_worker_injector(app)
     participants = discover_lifecycle_participants(injector)
     logger.info(
         "[lifecycle] %d participants discovered: %s",

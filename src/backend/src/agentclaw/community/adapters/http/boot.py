@@ -54,6 +54,7 @@ from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
+    from injector import Injector
     from starlette.types import ASGIApp, Receive, Scope, Send
 
     from agentclaw.community.di.profile import DeployProfile
@@ -114,6 +115,40 @@ def worker_runtime_finalized() -> bool:
     which is the whole point of storing a pid.
     """
     return _finalized_pid is not None and _finalized_pid == os.getpid()
+
+
+def require_worker_injector(app: "FastAPI") -> "Injector":
+    """The injector *this* process finalized, or refuse to go any further.
+
+    The lifespan's gate, and it deliberately asks whether this process finalized
+    rather than whether the app has an injector at all. Those differ in exactly
+    the case that matters: a child forked from a finalized parent — or from one
+    that failed after ``attach_injector`` — inherits a perfectly non-``None``
+    ``app.state.injector``. Gating on presence alone would let such a child run
+    ``bootstrap()`` and ``startup()`` over the *parent's* participants, starting
+    background workers on the parent's pools and connections, in a process that
+    :class:`RequireWorkerRuntime` is meanwhile refusing to let serve traffic.
+    Serving is not the only way to do damage, so both gates ask the same
+    question.
+    """
+    if not worker_runtime_finalized():
+        raise RuntimeError(
+            f"Pid {os.getpid()} has not finalized its worker runtime, so it must "
+            "not start the lifespan: doing so would run bootstrap() and startup() "
+            "over whatever injector this process holds — inherited from a fork, or "
+            "none at all — and start background work on resources it does not own. "
+            f"Under {BOOT_MODE_ENV}=preload the consumer must call "
+            "finalize_worker_runtime() once per worker after the fork and before "
+            "the first ASGI call (the lifespan startup event is one)."
+        )
+    injector = getattr(app.state, "injector", None)
+    if injector is None:
+        raise RuntimeError(
+            "The worker runtime is marked finalized but no injector is attached; "
+            "something detached app.state.injector after finalize_worker_runtime() "
+            "ran. Refusing to start the lifespan."
+        )
+    return injector
 
 
 #: Set once a refusal has been logged, so a worker stuck in this state does not

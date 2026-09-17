@@ -149,12 +149,15 @@ prints a JSON verdict the parent asserts on.
    which leaves the child the same half-wired app to inherit.
 6. **eager ≡ preload+finalize** — route paths, methods, `operation_id`s and the full
    `app.openapi()` document compare equal across the two modes.
-7. **call-timing guard** — two layers, because a host need not drive the lifespan at all:
-   entering the lifespan un-finalized raises a message naming `finalize_worker_runtime()`,
-   and a real request to an un-finalized worker whose lifespan was never driven (a
-   `TestClient` used outside its context manager) gets 503 from `RequireWorkerRuntime`
-   rather than a 200 served through an un-wired stack. A finalized worker serves 200
-   through the same guard.
+7. **call-timing guards** — two of them, because a host need not drive the lifespan at all
+   and because serving is not the only way an un-finalized process can do damage.
+   (a) The lifespan refuses when `worker_runtime_finalized()` is false, including the case
+   where an injector *is* attached because it was inherited across a fork — asserted by
+   driving the lifespan with a foreign `_finalized_pid` and checking participants were never
+   resolved. (b) A real request to an un-finalized worker whose lifespan was never driven
+   (a `TestClient` used outside its context manager) gets 503 from `RequireWorkerRuntime`
+   rather than a 200 through an un-wired stack; a finalized worker serves 200 through the
+   same guard.
 
 ## Deviation from the brief, and why
 
