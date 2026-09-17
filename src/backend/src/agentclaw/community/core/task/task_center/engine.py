@@ -57,19 +57,26 @@ from agentclaw.community.core.task.task_harness.harness import (
     effective_pending_timeout_ms,
     effective_sla_threshold_ms,
 )
+from agentclaw.community.core.task.task_trajectory.models import ReasonCatalog
 from agentclaw.community.core.task.task_trajectory.payloads import emit_trajectory_event
+from agentclaw.community.core.task.task_runner.callback_adapter import (
+    EXEC_ERROR_ORIGIN_BOT_INTERFACE,
+    EXEC_ERROR_ORIGIN_PARSE,
+    EXEC_ERROR_ORIGIN_TERMINAL_INVALID,
+    EXEC_ERROR_ORIGIN_TRANSPORT,
+)
 
 if TYPE_CHECKING:
-    # Protocol + trajectory enum imports are TYPE_CHECKING-only: the engine
+    # Protocol + trajectory-enum imports are TYPE_CHECKING-only: the engine
     # stores the optional repo + passes enum members through ``emit_trajectory_event``,
     # and ``from __future__ import annotations`` stringises these hints so they
     # are never evaluated at runtime — keeps the engine's runtime import surface
-    # minimal (only ``emit_trajectory_event`` is imported for real).
+    # minimal. ``ReasonCatalog`` is imported for real (used by the EXECUTE/VERIFY
+    # gate's ``_EXEC_ERROR_ORIGIN_TO_REASON`` origin→error_type mapping, REQ-5).
     from agentclaw.community.core.repository.protocols.task import (
         TaskTrajectoryRepositoryProtocol,
     )
     from agentclaw.community.core.task.task_trajectory.models import (
-        ReasonCatalog,
         TrajectoryActionType,
     )
 
@@ -77,6 +84,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger("task.engine")
 
 _DEFAULT_MAX_HARNESS = 2  # 执行报错 harness 重投上限(达上限→HUNG)
+
+# REQ-5 — exec_error_origin(由 ``callback_adapter`` 透出到 patch 的
+# ``extend_props_patch["_exec_error_origin"]``)→ ReasonCatalog 映射,engine EXECUTE/VERIFY
+# 闸门据此设置轨迹事件的 ``error_type``。origin 字符串以 ``callback_adapter`` 的常量为
+# 单一真相源(避免漂移);未映射的 origin 值→ ``error_type=None``(gate 防御性降级)。
+_EXEC_ERROR_ORIGIN_TO_REASON: dict[str, ReasonCatalog] = {
+    EXEC_ERROR_ORIGIN_BOT_INTERFACE: ReasonCatalog.UNDERLYING_INTERFACE_ERROR,
+    EXEC_ERROR_ORIGIN_PARSE: ReasonCatalog.PARSE_ERROR,
+    EXEC_ERROR_ORIGIN_TERMINAL_INVALID: ReasonCatalog.TERMINAL_INVALID,
+    EXEC_ERROR_ORIGIN_TRANSPORT: ReasonCatalog.TRANSPORT_ERROR,
+}
+
+# EXECUTE/VERIFY 轨迹事件 ``error_msg`` 截断上限(对齐 PLAN 闸门 ``_emit_plan_trajectory``
+# 的 ``raw_msg if len(raw_msg) <= 500 else raw_msg[:497] + "..."`` 约定)。
+_EXEC_ERROR_MSG_MAX = 500
 
 # 固定流程兜底 mock 的"产出摘要"(节点真实上报未在 fallback 超时内闭环时,以此真实内容代替 [auto] 占位)。
 # 取自 okr-implementation-relay 剧本(服装多平台大促)各节点"本跳产出正文"摘要,供下游 ## 上游产出正文 可读、
@@ -974,6 +996,130 @@ class ExecutionEngine:
             status_to=status_to,
             attempt=attempt,
         )
+
+    # ------------------------------------------------------------------
+    # REQ-5 — EXECUTE/VERIFY trajectory emission (additive to _log_action)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _read_exec_error_origin(patch: TaskNodePatch) -> str | None:
+        """Read the surfaced ``_exec_error_origin`` from the patch's
+        ``extend_props_patch`` defensively. Returns ``None`` on any failure
+        (incl. a hostile dict that raises on ``.get``) — the gate's
+        origin read is decision-#14 trajectory-assembly scope (a raise here
+        degrades to ``error_type=None``, NOT a gate failure)."""
+        try:
+            ep = patch.extend_props_patch
+            if isinstance(ep, dict):
+                origin = ep.get("_exec_error_origin")
+                if isinstance(origin, str):
+                    return origin
+        except Exception:  # noqa: BLE001  trajectory-assembly read; 决策 #14 scope
+            return None
+        return None
+
+    @staticmethod
+    def _read_interface_error_code(patch: TaskNodePatch) -> str | None:
+        """Read an optional ``interface_error_code`` surfaced on the patch's
+        ``extend_props_patch`` (the bot may set it via ``result._ext_info``).
+        Defensive — ``None`` on any failure / absent key."""
+        try:
+            ep = patch.extend_props_patch
+            if isinstance(ep, dict):
+                code = ep.get("interface_error_code")
+                if code is not None:
+                    return str(code)
+        except Exception:  # noqa: BLE001  trajectory-assembly read; 决策 #14 scope
+            return None
+        return None
+
+    def _read_exec_request_input_and_attempt(
+        self, task_id: str, node_id: str
+    ) -> tuple[str | None, int]:
+        """Defensively read, in ONE graph query, the downstream request原文
+        (``node.run_info.extend_props["_exec_request_input"]``) and the harness
+        retries snapshot (``harness_retries``) for the EXECUTE/VERIFY trajectory
+        event (REQ-1/REQ-5). ``action_input`` is the request原文 — **not
+        truncated** — read from the node the executor would have surfaced it on
+        (production surfacing is a separate executor-wire concern; the gate
+        consumes the key defensively, ``None`` when absent). ``attempt`` mirrors
+        ``_log_action``'s default ``harness_retries`` snapshot. Returns
+        ``(None, 0)`` on any failure — decision-#14 trajectory-assembly scope
+        (NOT the gate's main driving logic)."""
+        try:
+            graph = self._graph.query_task_dashboard(task_id)
+            node = next((n for n in graph.tasks if n.node_id == node_id), None)
+            if node is None:
+                return None, 0
+            ri = node.run_info.extend_props
+            req = ri.get("_exec_request_input")
+            req = req if isinstance(req, str) else None
+            attempts = int(ri.get("harness_retries", 0) or 0)
+            return req, attempts
+        except Exception:  # noqa: BLE001  trajectory-assembly read; 决策 #14 scope
+            return None, 0
+
+    def _emit_execute_trajectory(
+        self,
+        patch: TaskNodePatch,
+        result: NodeOpResult,
+        *,
+        action_type: str,            # "execute" | "verify"
+        action_result: str,          # "failed" | "success" | "accept_pass" | "accept_fail"
+        is_exec_error: bool = False,  # True only on the exec_error (EXECUTE err) path
+    ) -> None:
+        """REQ-5: fire one EXECUTE/VERIFY trajectory event **additively** to
+        ``_log_action(NodeAction.EXECUTE/VERIFY, ...)`` (alongside, NOT replacing).
+
+        ``error_type`` 按 ``patch.extend_props_patch["_exec_error_origin"]``
+        经 ``_EXEC_ERROR_ORIGIN_TO_REASON`` 映射(``bot_interface→
+        underlying_interface_error`` 等);未映射/无 origin → ``None``。
+        ``error_msg`` = ``patch.exec_error`` 截断 ≤500(仅 ``is_exec_error`` 路径;
+        EXECUTE(ok) / VERIFY 无 error_msg)。
+        ``action_input`` = 下发请求原文(从节点 ``run_info.extend_props
+        ["_exec_request_input"]`` 防御性读取;缺失 ``None``、**不截断**)。
+        ``ext_info={"interface_error_code": <code>}`` 若 patch 透出该 code,否则 ``None``。
+        ``status_from``/``status_to``/``attempt`` 对齐 ``_log_action``。
+
+        决策 #14:全程 ``try/except`` 吞而不抛 + WARNING(轨迹旁路 fire-and-forget,
+        不阻塞闸门主逻辑——本方法只在装配/发射轨迹,不在 swallows 内含任何
+        驱动逻辑)。emitter(``emit_trajectory_event``)另兜一层 try/except + WARNING。
+        ``repo is None`` 时 emitter 静默 no-op。
+        """
+        try:
+            origin = self._read_exec_error_origin(patch)
+            error_type = _EXEC_ERROR_ORIGIN_TO_REASON.get(origin) if origin else None
+            if is_exec_error and patch.exec_error:
+                raw = patch.exec_error
+                error_msg = (
+                    raw if len(raw) <= _EXEC_ERROR_MSG_MAX
+                    else raw[: _EXEC_ERROR_MSG_MAX - 3] + "..."
+                )
+            else:
+                error_msg = None
+            action_input, attempt = self._read_exec_request_input_and_attempt(
+                patch.task_id, patch.node_id
+            )
+            code = self._read_interface_error_code(patch)
+            ext_info = {"interface_error_code": code} if code is not None else None
+            self._log_trajectory(
+                patch.task_id,
+                patch.node_id,
+                action_type,  # TrajectoryActionType.EXECUTE/VERIFY.value (emitter accepts str)
+                action_result=action_result,
+                action_input=action_input,
+                error_type=error_type,
+                error_msg=error_msg,
+                ext_info=ext_info,
+                status_from=result.prev_status,
+                status_to=result.new_status,
+                attempt=attempt,
+            )
+        except Exception as ex:  # noqa: BLE001  轨迹旁路:吞而不抛 + WARNING(决策 #14)
+            logger.warning(
+                "[task][trajectory][%s] task=%s node=%s 发射失败:%s",
+                action_type, patch.task_id, patch.node_id, ex,
+            )
 
     def _static_runtime(self, task_id: str):
         from agentclaw.community.core.task.task_plan.static_plan import StaticPlanDefinition
@@ -1913,6 +2059,11 @@ class ExecutionEngine:
                     status_from=result.prev_status,
                     status_to=result.new_status,
                 )
+                # 轨迹旁路:EXECUTE(err) —— error_type 按 _exec_error_origin 分类映射(REQ-5)
+                self._emit_execute_trajectory(
+                    patch, result, action_type="execute",
+                    action_result="failed", is_exec_error=True,
+                )
             elif patch.acceptance_result is not None:
                 _ar = patch.acceptance_result
                 self._log_action(
@@ -1922,6 +2073,11 @@ class ExecutionEngine:
                     {"success": _ar.verdict == AcceptanceVerdict.DONE, "output": _out},
                     status_from=result.prev_status,
                     status_to=result.new_status,
+                )
+                # 轨迹旁路:EXECUTE(ok) —— 执行产出成功(无 error_origin;验收结论由 VERIFY 承载)
+                self._emit_execute_trajectory(
+                    patch, result, action_type="execute",
+                    action_result="success", is_exec_error=False,
                 )
                 self._log_action(
                     patch.task_id,
@@ -1934,6 +2090,16 @@ class ExecutionEngine:
                     },
                     status_from=result.prev_status,
                     status_to=result.new_status,
+                )
+                # 轨迹旁路:VERIFY —— 验收结论(error_origin 不适用;acceptance 另属
+                # ACCEPTANCE_FAILED,取 action_result=accept_pass/accept_fail)
+                self._emit_execute_trajectory(
+                    patch, result, action_type="verify",
+                    action_result=(
+                        "accept_pass" if _ar.verdict == AcceptanceVerdict.DONE
+                        else "accept_fail"
+                    ),
+                    is_exec_error=False,
                 )
             if self._is_external_managed_task(patch.task_id):
                 # Third-party execution owns transitions. Graph status mirrors

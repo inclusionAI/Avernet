@@ -101,7 +101,9 @@ class TestAdapt:
         patch = adapter.adapt(_data(success="false"))
         assert patch.acceptance_result is None
         assert patch.exec_error == "terminal_result_invalid: success must be bool"
-        assert patch.extend_props_patch is None
+        # REQ-5: the terminal_invalid failure path surfaces _exec_error_origin on
+        # the patch's extend_props_patch for the engine EXECUTE/VERIFY gate to map.
+        assert patch.extend_props_patch == {"_exec_error_origin": "terminal_invalid"}
 
     def test_no_data_no_output_patch(self):
         adapter = CallbackAdapter()

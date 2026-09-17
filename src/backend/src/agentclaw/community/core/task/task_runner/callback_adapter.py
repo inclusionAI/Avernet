@@ -141,6 +141,73 @@ def _to_callback_record(payload: dict[str, Any], *, event_id: str | None = None,
     )
 
 
+# ---------------------------------------------------------------------------
+# REQ-5 — exec_error_origin classification (surfaced onto the patch's
+# extend_props_patch under key ``_exec_error_origin`` so the engine
+# EXECUTE/VERIFY gate can map it to a ReasonCatalog error_type).
+# ---------------------------------------------------------------------------
+
+EXEC_ERROR_ORIGIN_BOT_INTERFACE = "bot_interface"      # bot 回 200 但 exec_error 非空(底层接口有报错)
+EXEC_ERROR_ORIGIN_PARSE = "parse"                      # callback 整体不可解析(ingest_parse_error)
+EXEC_ERROR_ORIGIN_TERMINAL_INVALID = "terminal_invalid"  # success 非 bool / failed 无 gaps
+EXEC_ERROR_ORIGIN_TRANSPORT = "transport"              # 规划/调度 HTTP 层异常(plan_call_fail / dispatch_exception)
+
+
+def _classify_exec_error_origin(
+    *,
+    bot_interface_error: str | None = None,
+    success: Any = None,
+    has_gaps: bool = False,
+    parse_failure: bool = False,
+    transport_failure: bool = False,
+) -> str | None:
+    """把一条 callback 的失败形态映射到四个 ``exec_error_origin`` 之一(REQ-5)。
+
+    纯函数,无 IO。分类优先级对齐 ``CallbackAdapter._adapt_poller`` 的失败分流控制流:
+
+      1. ``parse_failure`` (ingest_parse_error 整体不可解析) → ``parse``;
+      2. ``transport_failure`` (规划/调度 HTTP 层异常) → ``transport``;
+      3. ``bot_interface_error`` 非空(bot 侧原始报错,bot 回 200 且 exec_error
+         非空,即"底层接口有报错")→ ``bot_interface``;
+      4. ``success`` 非 bool / 缺失(无 ``exec_error`` 的 terminal_invalid 路径)→
+         ``terminal_invalid``;
+      5. ``success is False`` 且无 gaps(failed 无 gaps 的 terminal_invalid 路径)→
+         ``terminal_invalid``;
+      6. 否则(success=True / success=False+gaps=验收 FAIL)→ ``None``
+         (非执行报错:验收结论由 VERIFY 事件承载,不属 REQ-5 的 4 类 origin)。
+
+    调用方按所在失败路径传对应 kwarg(其余留默认);``bot_interface_error`` 在
+    优先级上先于 success,故 exec_error 路径不会因 success 默认 None 被误判为
+    terminal_invalid。``parse`` / ``transport`` 不在本 adapter 的 patch 构建路径
+    (ingest_parse_error 不构建 patch;规划/调度异常在 plan/dispatch 层),仅由
+    本函数在单测/未来 gate 侧消费时分类。
+    """
+    if parse_failure:
+        return EXEC_ERROR_ORIGIN_PARSE
+    if transport_failure:
+        return EXEC_ERROR_ORIGIN_TRANSPORT
+    if bot_interface_error:
+        return EXEC_ERROR_ORIGIN_BOT_INTERFACE
+    if success is None or not isinstance(success, bool):
+        return EXEC_ERROR_ORIGIN_TERMINAL_INVALID
+    if success is False and not has_gaps:
+        return EXEC_ERROR_ORIGIN_TERMINAL_INVALID
+    return None
+
+
+def _patch_extend_props_with_origin(
+    ext_patch: dict[str, Any] | None, origin: str | None
+) -> dict[str, Any]:
+    """Return a shallow-copied ``extend_props_patch`` carrying ``_exec_error_origin``
+    (only when ``origin`` is non-None — success/OK paths pass None and the key is
+    absent so the engine gate reads None). Mirrors how the adapter folds ``_ext_info``
+    into ``extend_props_patch`` today (shallow per-key merge)."""
+    _ep = dict(ext_patch) if ext_patch else {}
+    if origin is not None:
+        _ep["_exec_error_origin"] = origin
+    return _ep
+
+
 class CallbackAdapter:
     """把执行实体回投的 TaskCallbackData 组装成 TaskNodePatch。
 
@@ -180,24 +247,29 @@ class CallbackAdapter:
         exec_error = result.get("exec_error")
         # ① 执行报错(bot 没跑通):无验收,留 exec_error 走 harness 重投。
         if exec_error:
+            # REQ-5: 透出 exec_error_origin(底层接口报错 = bot_interface)到 patch 的
+            # extend_props_patch["_exec_error_origin"],供 engine EXECUTE/VERIFY 闸门
+            # 映射为 ReasonCatalog.UNDERLYING_INTERFACE_ERROR。
+            _origin = _classify_exec_error_origin(bot_interface_error=exec_error)
             return TaskNodePatch(
                 task_id=task_id,
                 node_id=node_id,
                 status=Status.FAILED,
                 exec_error=exec_error,
-                extend_props_patch=ext_patch,
+                extend_props_patch=_patch_extend_props_with_origin(ext_patch, _origin),
             )
         success = result.get("success")
         data_field = result.get("data")
         content = _unwrap_poller_content(data_field)  # 归一裸文本(展平 {result:<str>})
         # ④ success 非 boolean → 非法终态,无 acceptance。
         if success is None or not isinstance(success, bool):
+            _origin = _classify_exec_error_origin(success=success)
             return TaskNodePatch(
                 task_id=task_id,
                 node_id=node_id,
                 status=Status.FAILED,
                 exec_error="terminal_result_invalid: success must be bool",
-                extend_props_patch=ext_patch,
+                extend_props_patch=_patch_extend_props_with_origin(ext_patch, _origin),
             )
         # ② success=True → 验收 SUCCESS。
         if success:
@@ -221,12 +293,13 @@ class CallbackAdapter:
         elif isinstance(fail_detail, str) and fail_detail:
             gaps = [fail_detail]
         else:
+            _origin = _classify_exec_error_origin(success=False, has_gaps=False)
             return TaskNodePatch(
                 task_id=task_id,
                 node_id=node_id,
                 status=Status.FAILED,
                 exec_error="terminal_result_invalid: failed result requires gaps",
-                extend_props_patch=ext_patch,
+                extend_props_patch=_patch_extend_props_with_origin(ext_patch, _origin),
             )
         merged_ext = dict(ext)
         if isinstance(fail_detail, str) and fail_detail:
