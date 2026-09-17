@@ -544,7 +544,6 @@ def test_edit_lock_operations_exactly_match_the_migrated_check_surface():
         ("PUT", "/openapi/v1/bots/identity/{bot_id}/{file_type}"),
         ("POST", "/openapi/v1/bots/{bot_id}/data-init"),
         ("POST", "/openapi/v1/bots/{bot_id}/restart"),
-        ("POST", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"),
         ("DELETE", "/openapi/v1/bots/{bot_id}/resources"),
         ("POST", "/openapi/v1/bots/{bot_id}/resources/mkdir"),
         ("POST", "/openapi/v1/bots/{bot_id}/resources/upload"),

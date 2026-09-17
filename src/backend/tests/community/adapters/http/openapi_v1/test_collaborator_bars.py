@@ -21,7 +21,6 @@ from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 
 MEMBER_READS = [
     ("GET", "/openapi/v1/bots/{bot_id}"),
-    ("GET", "/openapi/v1/bots/{bot_id}/status"),
     ("GET", "/openapi/v1/bots/{bot_id}/identity"),
     ("GET", "/openapi/v1/bots/{bot_id}/identity/{file_type}"),
     ("GET", "/openapi/v1/bots/identity/{bot_id}"),
@@ -53,7 +52,6 @@ ADMIN_LOCKED_WRITES = [
 
 MEMBER_LOCKED_OPERATIONS = [
     ("POST", "/openapi/v1/bots/{bot_id}/restart"),
-    ("POST", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"),
     ("POST", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/run"),
 ]
 

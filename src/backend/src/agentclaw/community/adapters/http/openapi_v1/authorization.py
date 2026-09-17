@@ -18,8 +18,9 @@ Two modes are permanent
 
 - :class:`Check` — verify the caller's level on the bot the operation
   addresses. The level is a parameter rather than a further mode because the
-  bars genuinely differ per operation: MEMBER to drive a bot's sessions or
-  restart its container, ADMIN to write a channel, OWNER to delete the bot.
+  bars genuinely differ per operation: MEMBER to drive a bot's sessions,
+  ADMIN to write a channel, OWNER to restart a container's instance or
+  delete the bot.
 - :class:`NoCheck` — nothing to verify, and the reason says which kind of
   nothing. Either the operation addresses no bot (a name check, the
   marketplace, the caller's own identity), or it is bot-scoped and
@@ -188,8 +189,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # ── Bot-scoped operations ─────────────────────────────────────────────
     ("DELETE", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED,
     # The read moves off OWNER_SCOPED alone: a collaborator who may read a
-    # bot's status, lifecycle, chats and channels — all MEMBER — has no reason
-    # to be refused the base record those describe. The writes beside it stay
+    # bot's lifecycle, chats and channels — all MEMBER — has no reason to be
+    # refused the base record those describe. The writes beside it stay
     # owner-level: renaming and deleting decide what a bot is, not how it works.
     ("GET", "/openapi/v1/bots/{bot_id}"): Check(PermissionLevel.MEMBER),
     ("PUT", "/openapi/v1/bots/{bot_id}"): OWNER_SCOPED,
@@ -265,13 +266,14 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/connection"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.engine_runtime.connection"),
     ("GET", "/openapi/v1/bots/{bot_id}/containers"): Check(PermissionLevel.MEMBER),
-    # An in-place single-instance restart is the milder sibling of the bot-level
-    # restart beside it — the member who may re-provision the whole bot has
-    # nothing this bar could still protect. It takes the bot restart's own
-    # (MEMBER, EDIT_LOCK) so the two cannot be inverted again.
-    ("POST", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"): Check(
-        PermissionLevel.MEMBER, EDIT_LOCK
-    ),
+    # The instance-level restart stays OWNER beside this migration, for the
+    # opposite of the bot-level one: it is the milder operation, but the
+    # hosted-runtime facade enforces the same owner bar a second time behind
+    # the gate (`_resolve_bot` — pinned by the facade's four-keeper test),
+    # and moving this row while that enforcement stands would only make the
+    # seam claim a share the facade then refuses. The bot-level restart
+    # beside it carries no second gate, so it is genuinely the member's.
+    ("POST", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"): Check(PermissionLevel.OWNER),
     # Data-init state is bot workspace state: reading where a cold-start got to
     # is part of working on the bot, so that read takes MEMBER. The trigger
     # stays with the owner alone, and for a reason the share bars usually do
@@ -459,7 +461,12 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/{bot_id}/startup-script"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/startup-script"): Check(PermissionLevel.MEMBER),
     ("PUT", "/openapi/v1/bots/{bot_id}/startup-script"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
-    ("GET", "/openapi/v1/bots/{bot_id}/status"): Check(PermissionLevel.MEMBER),
+    # The status face stays owner-only beside this migration, deliberately: the
+    # dormant pin holds that a collaborator at ADMIN may not poll a dormant
+    # bot's readout (`test_admin_collaborator_cannot_poll_dormant_status`), so
+    # the base record's MEMBER bar is the wider share, not the pattern — the
+    # two genuinely differ, and the row keeps the pin's answer.
+    ("GET", "/openapi/v1/bots/{bot_id}/status"): Check(PermissionLevel.OWNER),
 
     # ── Operations that address no bot ────────────────────────────────────
     ("GET", "/openapi/v1/org/user"): NoCheck("the caller's own verified identity"),

@@ -786,10 +786,16 @@ top of that. Resolutions now in the code:
 3. startup-script `modifier` attributes the verified caller (`user_id`), not
    the addressed owner.
 4. resources upload records the uploader (`user_id`/`created_by` = caller).
-5. `GET /bots/{bot_id}/status` moved to MEMBER — the base read's own comment
-   is true again; the strict/bar inversion with container restart closed
-   too (7).
-6. Container-instance restart aligned to `(MEMBER, EDIT_LOCK)`.
+5. `GET /bots/{bot_id}/status` **stays OWNER** (correcting this addendum's
+   first resolution): `test_admin_collaborator_cannot_poll_dormant_status`
+   pins that an ADMIN collaborator may not poll a dormant bot's readout, so
+   the owner-only row is deliberate — the base read's comment was rewritten
+   to stop citing status instead, which is finding 5's other offered arm.
+6. Container-instance restart **stays OWNER** as well: the facade's
+   four-keeper test pins `_resolve_bot`'s second owner enforcement behind the
+   gate, so lowering the row would make the seam claim a share the facade
+   refuses. The asymmetry with the member's whole-bot restart is now
+   documented at both rows.
 7. The legacy-identity forced-move chain (twin guard → no-{bot_id} exemption
    → Check row consumes OwnerIdDep → the retiring addresses publish and
    honour owner_id, contra the freeze principle) documented at the rows.
