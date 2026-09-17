@@ -20,8 +20,6 @@
 # exit codes: 0 ok · 1 operational failure · 2 usage error.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="${PROJECT_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 # No baked-in remote URL: this is an open-source repo, and the teamclaw remote
 # is internal — cloning it is only possible from inside the company anyway.
 # The checkout's own origin (what frontend-pull fetches) is the only authority

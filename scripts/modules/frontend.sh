@@ -147,7 +147,7 @@ frontend_pull() {
     # Pull target: the checkout's own upstream. Never guess a ref: a wrong ff
     # target moves the checkout onto an unrelated branch, which is exactly the
     # damage this command refuses to do.
-    local remote=origin branch=""
+    local remote branch=""
     local upstream
     upstream="$(git -C "${dir}" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || true)"
     if [ -z "${upstream}" ] || [ "${upstream}" = "HEAD" ]; then

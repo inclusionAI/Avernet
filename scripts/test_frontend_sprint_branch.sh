@@ -54,6 +54,10 @@ CFG=""
 PROBE_RC=0
 PROBE_OUT=""
 PROBE_ERR=""
+# Ambient-env hygiene: an exported FRONTEND_SPRINT_BRANCH from the caller's
+# shell would shadow the state file in every probe; strip it once here so
+# tests that set it deliberately (env-override case) are the only source.
+unset FRONTEND_SPRINT_BRANCH
 run_tool() {
   : >"${TEMP}/probe-out"
   : >"${TEMP}/probe-err"
@@ -266,6 +270,38 @@ test_unknown_branch_refused_no_write
 test_prefix_and_wildcard_names_do_not_validate
 test_valid_branch_records_state_and_advises
 test_valid_branch_notes_env_shadow
+# ---------------------------------------------------------------------------
+# Boundary fix: no baked-in remote URL — with no resolvable TEAMCLaw checkout
+# the tool hard-refuses instead of falling back to a spelled-out internal URL.
+# ---------------------------------------------------------------------------
+test_no_checkout_refuses_without_url_fallback() {
+  PROBE_RC=0
+  env -u TEAMCLAW_DIR -u FRONTEND_SPRINT_BRANCH \
+    GIT_ALLOW_PROTOCOL=file \
+    FRONTEND_SPRINT_CONFIG="${CFG}" \
+    bash "${TOOL}" --list >"${TEMP}/probe-out" 2>"${TEMP}/probe-err" || PROBE_RC=$?
+  PROBE_OUT="$(cat "${TEMP}/probe-out")"
+  PROBE_ERR="$(cat "${TEMP}/probe-err")"
+  [ "${PROBE_RC}" -eq 1 ] || fail "no-checkout run must be rc 1, got ${PROBE_RC}"
+  assert_contains "${PROBE_ERR}" "no teamclaw checkout to resolve the remote from" \
+    "no-checkout refusal wording"
+  assert_contains "${PROBE_ERR}" "no fallback URL is baked in" \
+    "refusal must state there is no baked-in URL"
+  assert_contains "${PROBE_ERR}" "TEAMCLAW_DIR" "refusal must name the escape hatch"
+  # Non-repo checkout gets the same refusal (not a git error dump).
+  PROBE_RC=0
+  env -u FRONTEND_SPRINT_BRANCH \
+    GIT_ALLOW_PROTOCOL=file \
+    TEAMCLAW_DIR="${TEMP}" \
+    FRONTEND_SPRINT_CONFIG="${CFG}" \
+    bash "${TOOL}" --list >"${TEMP}/probe-out" 2>"${TEMP}/probe-err" || PROBE_RC=$?
+  PROBE_ERR="$(cat "${TEMP}/probe-err")"
+  [ "${PROBE_RC}" -eq 1 ] || fail "non-repo checkout must be rc 1, got ${PROBE_RC}"
+  assert_contains "${PROBE_ERR}" "no teamclaw checkout to resolve the remote from" \
+    "non-repo refusal wording"
+}
+
 test_unreachable_remote_refused_no_write
+test_no_checkout_refuses_without_url_fallback
 
 echo "frontend_sprint_branch: all tests passed"

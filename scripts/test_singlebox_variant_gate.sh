@@ -102,8 +102,8 @@ fi
 grep -q "serves the legacy BCS panel" <<<"$out" ||
     fail "bcs_frontend_start refusal must explain the legacy constraint; got: ${out}"
 
-# 5. gateway_stop must never kill a foreign listener on its port. gateway_stop
-#    delegates to app.sh stop first, and src/gateway/scripts/app.sh do_stop —
+# 5. gateway_stop must never kill a foreign listener on its port. It once
+#    delegated to app.sh stop first, and src/gateway/scripts/app.sh do_stop —
 #    when tmp/app.port is absent (the steady state after any clean stop, since
 #    do_stop itself removes it) — resolves whatever PID holds the app port
 #    and kills it blindly (kill, 1s wait, kill -9) with no ownership check.
