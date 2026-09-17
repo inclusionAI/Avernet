@@ -21,6 +21,7 @@ from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 
 MEMBER_READS = [
     ("GET", "/openapi/v1/bots/{bot_id}"),
+    ("GET", "/openapi/v1/bots/{bot_id}/status"),
     ("GET", "/openapi/v1/bots/{bot_id}/identity"),
     ("GET", "/openapi/v1/bots/{bot_id}/identity/{file_type}"),
     ("GET", "/openapi/v1/bots/identity/{bot_id}"),
@@ -40,7 +41,6 @@ MEMBER_READS = [
 ADMIN_LOCKED_WRITES = [
     ("PUT", "/openapi/v1/bots/{bot_id}/identity/{file_type}"),
     ("PUT", "/openapi/v1/bots/identity/{bot_id}/{file_type}"),
-    ("POST", "/openapi/v1/bots/{bot_id}/data-init"),
     ("PUT", "/openapi/v1/bots/{bot_id}/startup-script"),
     ("DELETE", "/openapi/v1/bots/{bot_id}/startup-script"),
     ("DELETE", "/openapi/v1/bots/{bot_id}/resources"),
@@ -53,7 +53,15 @@ ADMIN_LOCKED_WRITES = [
 
 MEMBER_LOCKED_OPERATIONS = [
     ("POST", "/openapi/v1/bots/{bot_id}/restart"),
+    ("POST", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"),
     ("POST", "/openapi/v1/bots/{bot_id}/routines/{routine_id}/run"),
+]
+
+#: The one share-barred command that stays with the owner: its credential
+#: collection (the caller's IAM token, spent by the device callback) only
+#: means what it should when the actor is the owner.
+OWNER_LOCKED_OPERATIONS = [
+    ("POST", "/openapi/v1/bots/{bot_id}/data-init"),
 ]
 
 
@@ -96,3 +104,20 @@ def test_operational_commands_are_member_behind_the_lock():
         assert rule.edit_lock is EDIT_LOCK, (
             f"{key[0]} {key[1]} is a command on the shared draft and needs the lock"
         )
+
+
+def test_the_credential_collecting_trigger_stays_with_the_owner():
+    """data-init collects the caller's token on the owner's record — owner only.
+
+    The trigger persists the *caller's* IAM token into the owner's bot ext,
+    where the device-ready callback spends it as a bearer. An actor who is
+    not the owner would leave somebody else's live credential on a record the
+    owner can see, so this is the one migrated write collaborators may not
+    reach at any level.
+    """
+    for key in OWNER_LOCKED_OPERATIONS:
+        rule = _bar_of(key)
+        assert rule.level is PermissionLevel.OWNER, (
+            f"{key[0]} {key[1]} moved off the OWNER bar the migration decided"
+        )
+        assert rule.edit_lock is EDIT_LOCK, f"{key[0]} {key[1]} lost its edit lock"

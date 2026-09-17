@@ -18,8 +18,8 @@ Two modes are permanent
 
 - :class:`Check` — verify the caller's level on the bot the operation
   addresses. The level is a parameter rather than a further mode because the
-  bars genuinely differ per operation: MEMBER to drive a bot's sessions, ADMIN
-  to write a channel, OWNER to restart a container or delete the bot.
+  bars genuinely differ per operation: MEMBER to drive a bot's sessions or
+  restart its container, ADMIN to write a channel, OWNER to delete the bot.
 - :class:`NoCheck` — nothing to verify, and the reason says which kind of
   nothing. Either the operation addresses no bot (a name check, the
   marketplace, the caller's own identity), or it is bot-scoped and
@@ -265,12 +265,25 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/connection"):
         ServiceChecked(PermissionLevel.MEMBER, "…core.engine_runtime.connection"),
     ("GET", "/openapi/v1/bots/{bot_id}/containers"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"): Check(PermissionLevel.OWNER),
+    # An in-place single-instance restart is the milder sibling of the bot-level
+    # restart beside it — the member who may re-provision the whole bot has
+    # nothing this bar could still protect. It takes the bot restart's own
+    # (MEMBER, EDIT_LOCK) so the two cannot be inverted again.
+    ("POST", "/openapi/v1/bots/{bot_id}/containers/{instance_id}/restart"): Check(
+        PermissionLevel.MEMBER, EDIT_LOCK
+    ),
     # Data-init state is bot workspace state: reading where a cold-start got to
-    # is part of working on the bot, re-triggering it is an ADMIN act behind
-    # the lock — the same split the manifest takes one address over.
+    # is part of working on the bot, so that read takes MEMBER. The trigger
+    # stays with the owner alone, and for a reason the share bars usually do
+    # not have: it collects the *caller's* IAM token as the credential the
+    # device callback will spend, on a record the bot ext keeps under the
+    # owner — an actor who is not the owner would persist somebody else's
+    # live-session credential onto a bot the owner can see. OWNER plus the
+    # lock, the lifecycle upgrade's own bars.
     ("GET", "/openapi/v1/bots/{bot_id}/data-init"): Check(PermissionLevel.MEMBER),
-    ("POST", "/openapi/v1/bots/{bot_id}/data-init"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
+    ("POST", "/openapi/v1/bots/{bot_id}/data-init"): Check(
+        PermissionLevel.OWNER, EDIT_LOCK
+    ),
     ("GET", "/openapi/v1/bots/{bot_id}/diagnostics/health"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/diagnostics/health-check"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("DELETE", "/openapi/v1/bots/{bot_id}/edit-lock"): Check(PermissionLevel.MEMBER),
@@ -446,7 +459,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("DELETE", "/openapi/v1/bots/{bot_id}/startup-script"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
     ("GET", "/openapi/v1/bots/{bot_id}/startup-script"): Check(PermissionLevel.MEMBER),
     ("PUT", "/openapi/v1/bots/{bot_id}/startup-script"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
-    ("GET", "/openapi/v1/bots/{bot_id}/status"): Check(PermissionLevel.OWNER),
+    ("GET", "/openapi/v1/bots/{bot_id}/status"): Check(PermissionLevel.MEMBER),
 
     # ── Operations that address no bot ────────────────────────────────────
     ("GET", "/openapi/v1/org/user"): NoCheck("the caller's own verified identity"),
@@ -669,14 +682,23 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/engine/{bot_id}/capabilities"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/engine/{bot_id}/status"): Check(PermissionLevel.MEMBER),
     # Identity's retiring addresses mirror the replacement's new rows, not
-    # INHERITED: ``relocate`` does not carry route-level gate dependencies to the
-    # address it re-registers, and ``_rule_for`` resolves a row by path, so an
-    # INHERITED row here would leave the retiring identity hander — which after
-    # the migration resolves ``OwnerIdDep`` off the wire — reading a named owner
-    # no gate adjudicates. The resources and routines retiring addresses below
-    # stay INHERITED for the opposite reason: their bots travel as query/body
-    # parameters these paths cannot offer a ``Check`` row's gate, and their
-    # shims pin the owner to the caller instead (``deprecated._requery``).
+    # INHERITED — a forced move, named as such. The chain has no exit:
+    # a ``Check`` replacement leaves an ``INHERITED`` twin abandoned by the
+    # twin guard unless it is exempted; the exemption exists only for twins
+    # with no ``{bot_id}`` on the path (a ``Check`` row's gate cannot read a
+    # query-string bot), and these paths carry the bot; and a ``Check`` row's
+    # handler must consume ``OwnerIdDep``, so honouring a *pinned* owner is
+    # not available either. So these retiring addresses publish and honour
+    # ``owner_id`` — a capability their frozen contract did not have, the one
+    # the resources/routines retirements below refuse via the pin — recorded
+    # here rather than hidden: the alternative was an unadjudicated owner
+    # read at an address the handler still serves. ``relocate`` does not
+    # carry route-level gate dependencies either, so the rows are what makes
+    # the twin's gate attach at all. The resources and routines retiring
+    # addresses below stay INHERITED for that opposite reason: their bots
+    # travel as query/body parameters these paths cannot offer a ``Check``
+    # row's gate, and their shims pin the owner to the caller instead
+    # (``deprecated._requery``).
     ("GET", "/openapi/v1/bots/identity/{bot_id}"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/identity/{bot_id}/{file_type}"): Check(PermissionLevel.MEMBER),
     ("PUT", "/openapi/v1/bots/identity/{bot_id}/{file_type}"): Check(PermissionLevel.ADMIN, EDIT_LOCK),

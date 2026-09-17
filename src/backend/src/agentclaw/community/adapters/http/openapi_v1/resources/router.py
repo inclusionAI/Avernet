@@ -487,8 +487,12 @@ async def upload_resource(
         await factory.create(bot_id=bot_id).record_uploaded_file(
             path=info["path"],
             size=info.get("size", len(content)),
-            user_id=owner_id,
-            created_by=owner_id,
+            # Who uploaded the file: the verified caller. The addressed owner
+            # is whose workspace the bytes landed in — attributing the upload
+            # to them would put a collaborator's name wrongly on record rows
+            # that exist precisely to carry what the filesystem cannot know.
+            user_id=user_id,
+            created_by=user_id,
         )
     except Exception:
         logger.exception(

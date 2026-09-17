@@ -768,3 +768,36 @@ git commit -m "test(openapi): stop pinning the OWNER_SCOPED handler count"
 - **Spec 覆盖**：GET×2 MEMBER、PUT ADMIN+EDIT_LOCK、owner_id 参数双地址、admission、mount、退役地址行、ocb 核验、验证四层 —— 每项均映射到具体 Task/Step。service 层零改（`entity_id=owner_id` 本为参数）；`_rule_for` 不加机制（退役行显式 Check）。
 - **类型一致性**：`OwnerIdDep`/`UserIdDep`/`AddressedBotGrantDep`/`Check`/`EDIT_LOCK` 引用与源模块导出名一致（channels 测试同款 import）。`user_id="u1"` 新 kwarg 与 Step 6 签名一致。
 - **待执行者留意**：spec 脚本两段代码块中**第二段是可执行骨架**，第一段为锚点演示 —— 执行时只落一个最终脚本；423 拼接在 `"422"` 键之前保持 responses 键接近升序。若 `_DROP_STAGE` import 时报 docstring 不匹配 → Step 6 的"docstring 不动"约束被违反。
+---
+
+## Post-review addendum (2026-09-17, applied to this PR)
+
+The shipped scope grew beyond this document's identity-only draft to the full
+collaborator-access migration (25 rows); the eight review findings landed on
+top of that. Resolutions now in the code:
+
+1. `template_config` masking (`_to_bot(include_template=…)`): the 2026-09-01
+   passthrough's premise ("the query faces are owner-scoped") broke with
+   Check(MEMBER); the owner's snapshot no longer reaches a collaborator's
+   detail/restart response. Regression-tested both directions.
+2. data-init POST hardened to `Check(OWNER, EDIT_LOCK)`: the trigger collects
+   the *caller's* IAM token onto the owner's record, so the actor must be the
+   owner.
+3. startup-script `modifier` attributes the verified caller (`user_id`), not
+   the addressed owner.
+4. resources upload records the uploader (`user_id`/`created_by` = caller).
+5. `GET /bots/{bot_id}/status` moved to MEMBER — the base read's own comment
+   is true again; the strict/bar inversion with container restart closed
+   too (7).
+6. Container-instance restart aligned to `(MEMBER, EDIT_LOCK)`.
+7. The legacy-identity forced-move chain (twin guard → no-{bot_id} exemption
+   → Check row consumes OwnerIdDep → the retiring addresses publish and
+   honour owner_id, contra the freeze principle) documented at the rows.
+8. Spec surgery discipline for future hand edits: pure-insertion anchors only.
+   This PR's −902 lines are diff re-pairing artifacts on near-identical
+   response blocks (jq-verified zero semantic deletions) — do not repeat the
+   423 block-re-anchor; future edits anchor tight like the other ~37 hunks.
+
+Not fixed (recorded, non-blocking): seam-test stub duplication (use
+`bind_bot_access_seam`), `_PINNED_TWINS`/admission pinned-block duplication,
+bot_access double per-request bot resolution.

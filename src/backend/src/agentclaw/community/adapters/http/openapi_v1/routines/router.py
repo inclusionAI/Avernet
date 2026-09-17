@@ -226,9 +226,9 @@ async def get_routine(
     keep the one you addressed with.
     """
     # C3: a routine id does not reverse-map to a bot, so the bot has to be
-    # named. It is on the path now, ahead of the routine. Owner identity comes from the
-    # authenticated principal via UserIdDep. Missing/non-dict data collapses
-    # to 404.
+    # named. It is on the path now, ahead of the routine. The owner is the
+    # addressed one (OwnerIdDep); the cron relay still attributes the job to
+    # that owner's identity. Missing/non-dict data collapses to 404.
     result = await factory.get_cron_detail(
         bot_id=bot_id, user_id=owner_id, nick_name=owner_id, task_id=routine_id
     )

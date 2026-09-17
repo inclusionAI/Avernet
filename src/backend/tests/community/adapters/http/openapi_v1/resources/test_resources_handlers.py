@@ -847,6 +847,37 @@ async def test_upload_hands_the_workspace_relative_path_to_the_engine_seam():
 
 
 @pytest.mark.asyncio
+async def test_upload_records_the_verified_caller_not_the_addressed_owner():
+    """The record row exists to carry what the filesystem cannot know.
+
+    ``record_uploaded_file`` is the one place a record says *who uploaded the
+    file* — the console shows it and the repository can filter on it. A
+    collaborator uploading into a shared bot's workspace must therefore land
+    on the record under their own name; attributing the upload to the
+    addressed owner would put the owner's name on bytes somebody else wrote,
+    exactly the misattribution an audit column must not make.
+    """
+    service = _StubService()
+
+    env = await upload_resource(
+        path="hello.txt",
+        content=b"file bytes",
+        user_id="collab-1",
+        owner_id="owner-9",
+        bot_id="bot-x",
+        factory=_StubFactory(service),
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubFileService(),
+        request=_request_without_trace(),
+    )
+
+    assert isinstance(env, Envelope)
+    assert env.code == CODE_CREATED
+    assert service.recorded[0]["user_id"] == "collab-1"
+    assert service.recorded[0]["created_by"] == "collab-1"
+
+
+@pytest.mark.asyncio
 async def test_upload_keeps_the_directories_carried_by_the_path():
     file_svc = _StubFileService()
 
