@@ -677,7 +677,7 @@ def test_a_check_handler_must_consume_the_owner_the_gate_checks():
     """The seam's guarantee stops at the seam unless the handler joins it.
 
     ``bot_access`` reads ``OwnerIdDep``; a handler that takes ``UserIdDep`` as
-    its owner — as all 34 of today's ``OWNER_SCOPED`` handlers do — reads a
+    its owner — as every ``OWNER_SCOPED`` handler does — reads a
     *different* dependency, and FastAPI's per-request cache does not unify two
     distinct callables. Flipping such a row to ``Check`` without also changing
     the handler would adjudicate one bot and act on another, which for a
