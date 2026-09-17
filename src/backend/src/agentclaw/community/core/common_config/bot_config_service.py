@@ -69,6 +69,28 @@ class BotCommonConfigService(BotCommonConfigServiceProtocol):
             config_value=json.dumps(value, ensure_ascii=False),
         )
 
+    # Management operations used by the operator-facing HTTP adapter.
+    def get_record_by_id(self, *, config_id: int) -> Any:
+        return self._repo.get_record_by_id(config_id=config_id)
+
+    def list_records(self, **kwargs: Any) -> tuple[int, list[Any]]:
+        return self._repo.list_records(**kwargs)
+
+    def create_record(self, **kwargs: Any) -> int:
+        return self._repo.create_record(**kwargs)
+
+    def update_record(self, *, config_id: int, config_value: str) -> bool:
+        return self._repo.update_record(config_id=config_id, config_value=config_value)
+
+    def delete_record(self, *, config_id: int) -> bool:
+        return self._repo.delete_record(config_id=config_id)
+
+    def upsert_record(self, **kwargs: Any) -> int:
+        return self._repo.upsert_record(**kwargs)
+
+    def batch_upsert_records(self, *, records: list[dict[str, str]]) -> list[int]:
+        return self._repo.batch_upsert_records(records=records)
+
 
 @dataclass(frozen=True)
 class _UpfsRolloutDecision:

@@ -12,7 +12,7 @@ from abc import abstractmethod
 from typing import Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.common_config.models import CommonConfigRecord
+    from agentclaw.community.core.common_config.models import CommonConfigRecord, BotCommonConfigRecord
     from agentclaw.community.core.system_config.models import ConfigCategoryRecord, ConfigItemRecord
 
 
@@ -148,6 +148,37 @@ class CommonConfigRepositoryProtocol(Protocol):
 class BotCommonConfigRepositoryProtocol(Protocol):
     @abstractmethod
     def get(self, *, bot_id: str, entity_id: str, env: str, config_key: str) -> str | None: ...
+
+    @abstractmethod
+    def get_record_by_id(self, *, config_id: int) -> BotCommonConfigRecord | None: ...
+
+    @abstractmethod
+    def list_records(
+        self, *, bot_id: str | None = None, entity_id: str | None = None,
+        env: str | None = None, config_key: str | None = None,
+        page_num: int = 1, page_size: int = 100,
+    ) -> tuple[int, list[BotCommonConfigRecord]]: ...
+
+    @abstractmethod
+    def create_record(
+        self, *, bot_id: str, entity_id: str, env: str, config_key: str, config_value: str
+    ) -> int: ...
+
+    @abstractmethod
+    def update_record(self, *, config_id: int, config_value: str) -> bool: ...
+
+    @abstractmethod
+    def delete_record(self, *, config_id: int) -> bool: ...
+
+    @abstractmethod
+    def upsert_record(
+        self, *, bot_id: str, entity_id: str, env: str, config_key: str, config_value: str
+    ) -> int: ...
+
+    @abstractmethod
+    def batch_upsert_records(
+        self, *, records: list[dict[str, str]]
+    ) -> list[int]: ...
 
     @abstractmethod
     def put(self, *, bot_id: str, entity_id: str, env: str, config_key: str, config_value: str) -> None: ...
