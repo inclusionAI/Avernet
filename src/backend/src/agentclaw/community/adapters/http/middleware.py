@@ -3,9 +3,9 @@
 Extracted from ``api/app.py`` to keep the composition root focused on
 wiring rather than middleware bodies (Rule 9 — single-purpose files).
 
-Public entry point: :func:`install_middleware`. Callers (the
-composition root in ``app.py``) pass in the resolved ``AuthPlugin``
-and ``TracerPlugin``; this module owns the order in which middleware
+Public entry point: :func:`install_middleware`. Callers (the composition
+root's worker-runtime phase, ``boot.finalize_worker_runtime``) pass in the
+resolved ``AuthPlugin`` and ``TracerPlugin``; this module owns the order in which middleware
 are attached and the CORS origin list. Tracing lives behind the
 ``TracerPlugin`` capability — this module imports no tracer SDK.
 """

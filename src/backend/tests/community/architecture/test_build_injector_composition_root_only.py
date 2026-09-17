@@ -2,8 +2,9 @@
 
 The injector is the application's wiring graph: ``build_injector(...)``
 constructs it from a ``DeployProfile`` plus the business module list.
-Production code must call this **exactly once** — at the composition
-root in ``adapters/http/app.py`` — and then hand the result to
+Production code must call this **exactly once per process** — at the
+composition root's phase 2, ``adapters/http/boot.py``'s
+``finalize_worker_runtime`` — and then hand the result to
 ``attach_injector(app, injector)`` so FastAPI routes can resolve
 ``Injected(X)`` parameters. Anyone else calling ``build_injector``
 would be constructing a *second*, divorced injector with no relationship
@@ -13,8 +14,8 @@ returning a different instance than `Foo()`?" debugging sessions.
 This test enforces that boundary. Two checks:
 
 1. **No file under ``src/agentclaw/`` may call ``build_injector(...)``**
-   *except* ``adapters/http/app.py`` (the composition root) and
-   ``di/container.py`` (the definition site).
+   *except* ``adapters/http/boot.py`` (the composition root's worker-runtime
+   phase) and ``di/container.py`` (the definition site).
 2. **No file under ``src/agentclaw/`` may import ``build_injector``**
    except the same two — defense in depth against any future code
    pulling it in for a sneaky second injector.
@@ -51,12 +52,15 @@ _ALLOWLIST: dict[str, str] = {
     ),
     "di/__init__.py": (
         "Public surface — re-exports build_injector via __all__ so "
-        "adapters/http/app.py can import it from agentclaw.community.di."
+        "adapters/http/boot.py can import it from agentclaw.community.di."
     ),
-    "adapters/http/app.py": (
-        "Composition root — calls build_injector once at module import "
-        "to construct the app's injector, then hands it to "
-        "attach_injector(app, injector). Single production caller by design."
+    "adapters/http/boot.py": (
+        "Composition root, phase 2 — the only production caller. "
+        "finalize_worker_runtime() builds the injector the worker owns and "
+        "hands it to attach_injector(app, injector). It runs inline at the "
+        "adapters/http/app.py import under AGENTCLAW_HTTP_BOOT_MODE=eager "
+        "(the default) and once per forked worker under 'preload', so the "
+        "master process that preloads the app builds no injector at all."
     ),
 }
 
@@ -123,8 +127,8 @@ def test_build_injector_only_called_at_composition_root():
     if failures:
         pytest.fail(
             "Found build_injector() references outside the composition root. "
-            "build_injector() must be called exactly once, by "
-            "adapters/http/app.py, to construct the app's injector. "
+            "build_injector() must be called exactly once per process, by "
+            "adapters/http/boot.py, to construct the worker's injector. "
             "If you need a service, declare it as Injected(X) on your "
             "route or via @inject on your service constructor — never "
             "build a second injector:\n  "

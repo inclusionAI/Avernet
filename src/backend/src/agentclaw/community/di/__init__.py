@@ -3,8 +3,9 @@
 Public surface:
 
 - :func:`build_injector` — construct the app's ``Injector``. The
-  composition root (``adapters/http/app.py``) calls this once at boot
-  and passes the result to ``attach_injector(app, injector)`` so
+  composition root's worker-runtime phase (``adapters/http/boot.py``)
+  calls this once per worker process and passes the result to
+  ``attach_injector(app, injector)`` so
   FastAPI routes can resolve ``Injected(X)`` parameters. There is no
   module-global injector — every consumer goes through DI or
   ``request.app.state.injector``.

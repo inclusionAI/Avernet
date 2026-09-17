@@ -1,21 +1,34 @@
 """FastAPI composition root.
 
-Responsibilities — and only these:
-  1. Build the DI container (must run before any router import that
-     resolves a singleton at module load).
-  2. Run pre-import side effects (``AGENTCLAW_CONFIG_PATH``, OpenClaw
-     DB configuration).
-  3. Construct ``app = FastAPI(lifespan=_app_lifespan)`` and attach
-     the injector. The lifespan body discovers every
-     ``Lifecycle`` participant in the injector and drives the four
-     phases (``bootstrap`` → ``startup`` → yield → ``shutdown`` →
-     ``teardown``) concurrently within each phase.
+Split in two phases, because importing this module and *initializing a worker*
+are different jobs and only the second one has to happen after a ``fork``. Which
+of them an import performs is decided by ``AGENTCLAW_HTTP_BOOT_MODE`` — see
+:mod:`agentclaw.community.adapters.http.boot`, which owns that switch.
+
+**Phase 1 — construction. Always runs at import, in both modes.**
+  1. Read the deploy profile and run the pre-DI registrations the injector will
+     later read (``register_config_provider``, ``register_corp_modules``).
+  2. Run pre-import side effects (``AGENTCLAW_CONFIG_PATH``, OpenClaw DB config).
+  3. Construct ``app = FastAPI(lifespan=_app_lifespan)``. The lifespan body
+     discovers every ``Lifecycle`` participant in **the worker's** injector
+     (``app.state.injector``) and drives the four phases (``bootstrap`` →
+     ``startup`` → yield → ``shutdown`` → ``teardown``) concurrently within each.
   4. Register exception handlers, the health endpoint, all routers.
-  5. Delegate middleware → ``api/middleware.py``.
+
+  Nothing here builds an injector, opens a connection, reads a secret, or starts
+  a thread — that is what makes the result safe to ``fork``.
+
+**Phase 2 — :func:`finalize_worker_runtime`.** Builds the worker's injector,
+attaches it, runs the pre/prod eager binding check, initializes the gateway
+principal verifier, and installs the middleware stack. In ``eager`` mode it is
+called inline at the bottom of this module, so an import behaves exactly as it
+always has; in ``preload`` mode the consumer calls it once per worker, after the
+fork and **before** the first ASGI call.
 
 Middleware bodies live in :mod:`agentclaw.community.adapters.http.middleware`. Startup
 and shutdown work lives on the components that own it — they
-implement :class:`agentclaw.community.kernel.lifecycle.Lifecycle`.
+implement :class:`agentclaw.community.kernel.lifecycle.Lifecycle`. There is no
+module-global injector handle: ``app.state.injector`` is the single one.
 """
 import asyncio
 import logging
@@ -24,20 +37,22 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 
-# ─── DI container bootstrap ──────────────────────────────────────────────
-# Build the injector at module import time. Routers and services
-# resolve their deps through it via ``Injected(X)``. The injector is
-# bound to FastAPI's ``app.state`` via ``attach_injector(app, injector)``
-# further down (after ``app = FastAPI(...)``), which is the canonical
-# wiring. No module-global injector handle exists — every consumer
-# goes through DI or ``app.state.injector``.
-from agentclaw.community.di import (
-    DeployProfile,
-    build_injector,
-    validate_deploy_environment,
+# ─── Phase 1: pre-DI bootstrap ───────────────────────────────────────────
+# The injector is NOT built here. Routers and services resolve their deps via
+# ``Injected(X)``, a per-request lookup on ``request.app.state.injector`` —
+# declaring such a route at import returns a ``Depends`` object and calls
+# nothing, so registering every router needs no injector instance. Building one
+# is ``boot.finalize_worker_runtime``'s job, and under ``preload`` that happens
+# in the forked worker rather than here. What this section does is the pre-DI
+# registration ``build_injector`` later reads: pure registry mutation, safe to
+# inherit across a fork.
+from agentclaw.community.adapters.http.boot import BootMode
+from agentclaw.community.adapters.http.boot import (
+    finalize_worker_runtime as _finalize_worker_runtime,
 )
+from agentclaw.community.di import DeployProfile, validate_deploy_environment
 from agentclaw.community.di.config_bootstrap import register_config_provider
-from agentclaw.community.di.modules_bootstrap import register_corp_modules, resolve_extra_modules
+from agentclaw.community.di.modules_bootstrap import register_corp_modules
 
 # Single mandatory switch: read the deploy profile once, here at the
 # composition root. ``detect()`` errors out if ``DEPLOY_PROFILE`` is unset
@@ -55,19 +70,11 @@ register_config_provider(_deploy_profile)  # noqa: FLA010 — composition root, 
 # community / test / singlebox (B8).
 register_corp_modules(_deploy_profile)  # noqa: FLA010 — composition root, before build_injector
 
-injector = build_injector(profile=_deploy_profile, extra_modules=resolve_extra_modules(_deploy_profile))
-
-# Startup integrity check: resolve a small set of critical bindings
-# now so misconfiguration surfaces at boot instead of on first request.
-# Gated on ``SERVER_ENV`` — fires in ``pre`` and ``prod`` (where every
-# prod-only dep is expected to resolve), skipped in ``dev`` / local
-# (where ZDAS handle, Arca sandbox config, etc. aren't reachable).
-from agentclaw.community.utils.env_utils import get_current_env  # noqa: E402 post-DI-bootstrap
-
-if get_current_env() in ("pre", "prod"):
-    from agentclaw.community.di.container import eager_check_critical_bindings  # noqa: E402 post-DI-bootstrap
-
-    eager_check_critical_bindings(injector)
+# Construction or construction-plus-initialization? Read once, here, the way the
+# deploy profile is. ``eager`` (the default) keeps every existing launch site
+# behaving exactly as before; ``preload`` is what a master-imports-then-forks
+# consumer selects.
+_boot_mode = BootMode.detect()
 # ──────────────────────────────────────────────────────────────────────────
 
 # =============================================================================
@@ -161,8 +168,6 @@ from agentclaw.community.adapters.http.task import task_internal_router, task_ca
 # skills / skillsets / skill_scan / skill_auth 全部切换到新架构 (core/skill_center + device plugin 抽象)
 from agentclaw.community.adapters.http.skill_center import skills, skillsets, skill_scan, skill_auth, skill_category, verify, sync, batch_sync, installations_internal  # noqa: E402
 
-from fastapi_injector import attach_injector  # noqa: E402
-
 # =============================================================================
 # Lifespan — generic Lifecycle dispatch over DI-discovered participants
 # =============================================================================
@@ -185,7 +190,21 @@ async def _app_lifespan(app: FastAPI):
     ``asyncio.gather``. The next phase only begins after the previous
     phase's coroutines have all resolved. Setup direction is
     fail-fast; teardown direction is log-and-continue.
+
+    Participants come from ``app.state.injector`` — the injector the *worker*
+    built in :func:`finalize_worker_runtime` — rather than from a handle captured
+    at import. Under ``preload`` the module-level import happened in another
+    process entirely, so reading the app's own state is what makes a participant
+    the one this worker will actually drive.
     """
+    injector = getattr(app.state, "injector", None)
+    if injector is None:
+        raise RuntimeError(
+            "No injector attached to the app: the worker runtime was never "
+            "finalized. Under AGENTCLAW_HTTP_BOOT_MODE=preload the consumer must "
+            "call finalize_worker_runtime() once per worker after the fork and "
+            "before the first ASGI call (the lifespan startup event is one)."
+        )
     participants = discover_lifecycle_participants(injector)
     logger.info(
         "[lifecycle] %d participants discovered: %s",
@@ -240,55 +259,25 @@ async def _app_lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=_app_lifespan)
 
-# The injector was built at the top of this file (before router
-# imports). Now that ``app`` exists, attach the same injector so
-# route handlers can resolve via Injected(...) and
-# request.app.state.injector.
-attach_injector(app, injector)
+
+def finalize_worker_runtime() -> None:
+    """Initialize everything this worker process owns — see :mod:`.boot`.
+
+    A ``preload_app`` consumer calls this once per worker, immediately after the
+    fork and **before** the first ASGI call on ``app`` (the lifespan startup
+    event is one)::
+
+        from agentclaw.community.adapters.http.app import app, finalize_worker_runtime
+        finalize_worker_runtime()
+
+    At most once per process; re-runs in a forked child regardless of the
+    parent's state; raises without marking the process finalized if any step
+    fails. Under the default ``eager`` mode this module already called it at the
+    bottom of its own import, so calling it again is a no-op.
+    """
+    _finalize_worker_runtime(app, profile=_deploy_profile)
 
 
-# =============================================================================
-# Middleware (delegated to api/middleware.py)
-# =============================================================================
-from agentclaw.community.adapters.http.middleware import install_middleware  # noqa: E402
-from agentclaw.community.di.config import CorsConfig, SecretNamesConfig  # noqa: E402
-from agentclaw.community.plugin_api.auth import AuthPlugin  # noqa: E402
-from agentclaw.community.plugin_api.secret_resolver import SecretResolver  # noqa: E402
-from agentclaw.community.plugin_api.tracer import TracerPlugin  # noqa: E402
-from agentclaw.community.utils.gateway_principal_config import (  # noqa: E402
-    init_principal_verifier_config,
-)
-
-# Resolve the key the gateway signs /openapi/v1 principals with. Done here
-# because AvernetTenantMiddleware reads the verifier config from the raw ASGI
-# layer, before any route and outside the injector — so the composition root
-# pushes it in rather than the middleware pulling it out.
-#
-# Strict in ``pre``/``prod``, matching the eager binding check above and gated
-# on the same SERVER_ENV: a deployment that serves the public API without a
-# signing key answers 401 to every request while looking healthy, so it must
-# fail the rollout instead. Local, dev, and singlebox legitimately have no key
-# (singlebox ships it empty on purpose), so there it degrades to deny-everything
-# rather than refusing to boot.
-init_principal_verifier_config(
-    injector.get(SecretResolver),
-    injector.get(SecretNamesConfig).gateway_principal_signing_key,
-    strict=get_current_env() in ("pre", "prod"),
-)
-
-install_middleware(
-    app,
-    auth_plugin=injector.get(AuthPlugin),
-    tracer=injector.get(TracerPlugin),
-    cors_config=injector.get(CorsConfig),
-)
-
-if os.environ.get("SINGLEBOX_COVERAGE") == "1":
-    from agentclaw.community.adapters.http.singlebox_coverage import (  # noqa: E402
-        install_singlebox_coverage_middleware,
-    )
-
-    install_singlebox_coverage_middleware(app)
 # =============================================================================
 # Exception translation: DomainError / DataProxyError -> HTTP response
 # =============================================================================
@@ -984,15 +973,24 @@ app.include_router(enums_router)
 app.include_router(task_internal_router)
 app.include_router(task_callback_router)
 
-# Runtime-mode-conditional routers (bound by DI: empty in prod, populated
-# in local boots via ``TestingInfrastructureModule``). The app does not
-# branch on mode here — composition root decides what gets mounted.
-from agentclaw.community.di.optional_routers import OptionalRouters  # noqa: E402
-for _r in injector.get(OptionalRouters).routers:
-    app.include_router(_r)
+# Runtime-mode-conditional routers (bound by DI: empty in prod, populated in
+# local boots via the test column's app-services module) are NOT mounted here:
+# they are the one route registration that needs a resolved binding, so
+# ``finalize_worker_runtime`` mounts them once it has the worker's injector.
 
 # 3. Public /openapi/v1/bots surface — new, definition-only routers for the
 # redesigned external contract (not a re-mount of the handlers above; see
 # adapters/http/openapi_v1). Handlers are stubs until the implementation lands.
 from agentclaw.community.adapters.http.openapi_v1 import build_public_router  # noqa: E402
 app.include_router(build_public_router())
+
+
+# =============================================================================
+# Phase 2 — worker runtime
+# =============================================================================
+# ``eager`` is the default and completes initialization inline, so importing
+# this module returns an app that is ready to serve, exactly as before this seam
+# existed. ``preload`` stops here: the app is constructed, owns no thread,
+# connection or secret, and is safe to fork — the consumer finalizes each worker.
+if _boot_mode is BootMode.EAGER:
+    finalize_worker_runtime()

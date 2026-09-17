@@ -40,7 +40,10 @@ assert importlib.util.find_spec('agentclaw.corp') is None, \\
 import agentclaw                       # PEP 420 namespace (community child only)
 import agentclaw.community.log         # noqa: F401
 from agentclaw.community.adapters.http import app as http_app
-assert http_app.injector is not None
+# The default boot mode (``eager``) finalizes the worker runtime inline during
+# that import, so the injector is attached to the app by the time it returns.
+# ``app.state.injector`` is the single handle — there is no module global.
+assert http_app.app.state.injector is not None
 print('COMMUNITY_BOOT_OK')
 """
 

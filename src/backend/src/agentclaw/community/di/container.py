@@ -4,7 +4,7 @@
 per-business-module ``Module`` is added here as it migrates onto DI.
 
 ``eager_check_critical_bindings`` is a startup integrity check that
-``api/app.py`` runs when ``SERVER_ENV`` resolves to ``pre`` or
+``adapters/http/boot.py`` runs when ``SERVER_ENV`` resolves to ``pre`` or
 ``prod``. It crashes loudly on boot if a critical binding is missing
 instead of deferring the failure to first request. ``dev`` / local
 boots skip it to keep startup snappy and to tolerate the prod-only
@@ -194,7 +194,7 @@ def build_injector(
     #
     # `http_client` rejects unknown keys by raising, and that raise has to land
     # somewhere that stops a boot. `eager_check_critical_bindings` only runs on
-    # pre/prod (adapters/http/app.py), and on a dev / singlebox / community boot
+    # pre/prod (adapters/http/boot.py), and on a dev / singlebox / community boot
     # the raise would instead surface inside `discover_lifecycle_participants`,
     # which swallows provider exceptions — so the app would start with no real
     # HttpClient bindings at all and defer the failure to the first outbound
@@ -229,8 +229,8 @@ def eager_check_critical_bindings(injector: Injector) -> None:
     here forces their providers to run; any unbound dep raises
     ``UnsatisfiedRequirement`` immediately.
 
-    Call site: ``api/app.py`` runs this when ``SERVER_ENV`` resolves
-    to ``pre`` or ``prod``. ``dev`` / local boots skip it because
+    Call site: ``finalize_worker_runtime`` (``adapters/http/boot.py``) runs
+    this when ``SERVER_ENV`` resolves to ``pre`` or ``prod``. ``dev`` / local boots skip it because
     some prod-only deps (e.g. the ZDAS handle + the corp-registered critical
     config bindings) aren't expected to resolve cleanly under SQLite.
     """

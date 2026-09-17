@@ -3,8 +3,8 @@
 The consumer is ``resolve_avernet_tenant``, which ``AvernetTenantMiddleware``
 calls from the raw ASGI layer *before* any route and therefore outside the
 injector — so this config cannot arrive as an ``Injected(...)`` parameter. It is
-**pushed in at boot instead of pulled at request time**: the composition root
-(``adapters/http/app.py``) resolves the key once and calls
+**pushed in at boot instead of pulled at request time**: the composition root's
+worker-runtime phase (``adapters/http/boot.py``) resolves the key once and calls
 :func:`init_principal_verifier_config`, which is the "boot-time callbacks capture
 their deps at registration time" mechanism, not the forbidden service locator
 (see ``tests/community/architecture/test_no_service_locator_calls.py``). Nothing
