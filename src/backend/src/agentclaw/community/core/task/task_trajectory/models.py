@@ -140,6 +140,19 @@ class JoinDropped:
     ``reason`` 取值见 REQ-7:``claim_mode_off | catalog_miss | score_below_threshold |
     claim_filter_disabled``。为字符串(不完全等于 ``ReasonCatalog`` —— ``claim_filter_disabled``
     不在 ``ReasonCatalog`` 中)。
+
+    **跨字段不变式(必须与 ``DispatchRationale.join_filter_applied`` 一起解读)**:
+    当 ``join_filter_applied is False`` 时(JOIN 灰度开关关 / bcn 缺 / 名册异常 fail-open),
+    ``join_dropped`` 中的条目**不是实际发生的丢弃**,而是排障**visibility flag** —— 描述
+    "若 filter 开启本应被丢"的 bot,该 bot 实际**已透传** ``SearchResult`` 未被丢弃(克隆
+    fail-open 链路保持原行为)。此时唯一出现的 ``reason`` 是 ``claim_filter_disabled``。
+    当 ``join_filter_applied is True`` 时,``join_dropped`` 条目是**真实丢弃**(``claim_mode_off``
+    / ``catalog_miss`` / ``score_below_threshold``),``SearchResult.unauthorized_bots`` 同步记录
+    (后者 ``reason`` 保留 ``claim_mode_off`` 兼容 dashboard 契约,与本字段微分类不冲突)。
+
+    误读示例:仅看 ``join_dropped[0].reason == "claim_filter_disabled"`` 推断 "bot X 因 JOIN
+    filter 关闭被丢" 是错误的 —— 实际 X **仍在** ``SearchResult.bot_id`` /
+    ``.group_formation.bot_ids``,未被丢弃。
     """
 
     bot_id: str
@@ -161,6 +174,12 @@ class DispatchRationale:
     join_filter_applied: bool
     candidates: list[DispatchCandidate] = field(default_factory=list)
     prefetch_tokens: list[str] = field(default_factory=list)
+    # **跨字段不变式**:解读 ``join_dropped`` 必须同时看 ``join_filter_applied``。当
+    # ``join_filter_applied is False`` 时,``join_dropped`` 条目为排障 visibility flag,
+    # 描述"若 filter 开启本应被丢"的 bot(reason 唯一取 ``claim_filter_disabled``),
+    # 实际**未丢弃**(克隆 fail-open 透传 ``SearchResult``)。当
+    # ``join_filter_applied is True`` 时,``join_dropped`` 条目是真实丢弃(``claim_mode_off`` /
+    # ``catalog_miss`` / ``score_below_threshold``)。详见 ``JoinDropped`` 文档。
     join_dropped: list[JoinDropped] = field(default_factory=list)
     skill_prompt_digest: str | None = None       # search-skill 模式:SHA-256(prompt)+截断响应 digest
     skill_response_digest: str | None = None

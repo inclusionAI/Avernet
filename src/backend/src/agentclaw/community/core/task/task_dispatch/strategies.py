@@ -177,19 +177,15 @@ class DirectDispatchStrategy:
         # REQ-2 DISPATCH rationale —— 直驱策略:跳过搜推/JOIN;rationale 仅标
         # strategy=direct/decision=direct,候选/分/join_dropped 空集(REQ-9
         # boost_reason 兜底"策略=direct 模式=direct …"经 ext_info 还原)。
-        # try/except 保证直驱永不因 rationale 装配失败退佣:
-        try:
-            sr.rationale = DispatchRationale(
-                strategy_name="direct",
-                decision_mode="direct",
-                join_filter_applied=False,
-            )
-        except Exception as ex:  # noqa: BLE001  rationale 装配失败 → None,直驱继续
-            logger.debug(
-                "[task][dispatch][rationale] direct strategy=%s node=%s 装配失败:%s",
-                "direct", node.node_id, ex,
-            )
-            sr.rationale = None
+        # 字面量化字段构造:无外部输入(无 candidate.score / 等),不会因装配抛错 —— 不
+        # 包 try/except,任何字段名拼写错误直接抛(相对地,search 路径有外部输入,经
+        # ``_build_search_rationale`` 全程 try/except 兜底成 None — 两条路径的装配风险不对称,
+        # 防御性包一层仅必要于搜索路径)。
+        sr.rationale = DispatchRationale(
+            strategy_name="direct",
+            decision_mode="direct",
+            join_filter_applied=False,
+        )
         return sr
 
 

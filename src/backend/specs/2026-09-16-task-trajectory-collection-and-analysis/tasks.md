@@ -64,18 +64,18 @@ Each gate item: write a `test_trajectory_gates.py` case that drives the gate (mo
 real sqlite) and asserts the emitted row's `action_type`/`action_result`/`action_input`/`ext_info`.
 
 ### REQ-2 — DISPATCH rationale
-- [ ] Add `rationale: DispatchRationale | None` to `SearchResult` (strategies.py);
+- [x] Add `rationale: DispatchRationale | None` to `SearchResult` (strategies.py);
       `DirectDispatchStrategy.apply` / `SearchBasedDispatchStrategy.apply` populate strategy_name,
       decision_mode, candidates[], prefetch_tokens, join_filter_applied, join_dropped[],
       skill_prompt_digest, skill_response_digest.
-- [ ] `TaskDispatcher.dispatch` writes rationale JSON into
+- [x] `TaskDispatcher.dispatch` writes rationale JSON into
       `node.run_info.extend_props["_dispatch_rationale"]` (no contextvar available — this is the carrier).
-- [ ] Engine DISPATCH gates fire `_log_trajectory(action_type=dispatch, ext_info=
+- [x] Engine DISPATCH gates fire `_log_trajectory(action_type=dispatch, ext_info=
       {"_dispatch_rationale": ...})` at `_drain` HIT_SINGLE (~engine.py:2963), `_drain` HIT_MULTI
       (~2870), `on_miss` MISS (~2108). Gate test asserts `ext_info` carries full `DispatchRationale`.
 
 ### REQ-7 — join-dropped reason micro-classes
-- [ ] Extend `_apply_claim_join` (strategies.py:359-461) drop reasons to
+- [x] Extend `_apply_claim_join` (strategies.py:359-461) drop reasons to
       `{claim_mode_off, catalog_miss, score_below_threshold, claim_filter_disabled}`; flowed into
       `DispatchRationale.join_dropped[].reason`. Test: each reason restorable from a DISPATCH
       event's `ext_info`.

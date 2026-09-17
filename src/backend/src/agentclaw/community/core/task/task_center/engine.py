@@ -325,21 +325,28 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def _read_dispatch_rationale(graph, task_id: str, node_id: str) -> dict | None:
-    """Defensively read the ``_dispatch_rationale`` carrier from the in-memory node
-    (REQ-2 #3) for DISPATCH trajectory gates; return the gate-ready ext_info dict.
+def _read_dispatch_side_data(graph, task_id: str, node_id: str) -> tuple[dict | None, int]:
+    """Read the DISPATCH trajectory gate's side data — ``_dispatch_rationale`` carrier
+    (REQ-2 #3) and harness-retry attempt — in **one graph query** for one node.
+
+    Returns ``(ext_info_ready_dict_or_None, attempt_int)``:
+        * ``ext_info_ready_dict`` = ``{"_dispatch_rationale": <rat_dict>}`` (the
+          gate-ready ``ext_info`` payload) when the rationale is present, else
+          ``None`` (the gate then emits with ``ext_info=None``).
+        * ``attempt_int`` = ``int(node.run_info.extend_props.get("harness_retries", 0) or 0)``.
 
     ``TaskDispatcher.dispatch`` writes ``dataclasses.asdict(DispatchRationale)`` into
     ``node.run_info.extend_props["_dispatch_rationale"]`` (no contextvar exists —
-    extend_props is the carrier). ``query_task_nodes``/``query_task_dashboard``
-    return the same in-memory objects the dispatcher mutated, so the rationale is
-    available even when the engine re-queries the graph after dispatch (the patches
-    ``update_task_node_info`` issues ``extend_props.update(...)`` preserves unknown keys).
+    extend_props is the carrier). ``query_task_dashboard`` returns the same in-memory
+    objects the dispatcher mutated, so the rationale is available even when the engine
+    re-queries the graph after dispatch (``update_task_node_info`` issues
+    ``extend_props.update(...)`` which preserves unknown keys).
 
-    Returns ``{"_dispatch_rationale": <rat_dict>}`` (the gate-ready ``ext_info``
-    payload) when the rationale is present, or ``None`` (gate emits ``ext_info=None``).
-    Any failure (graph raise / missing node / unparsable) → ``None``; the trajectory
-    gate never blocks the forward-driving path (decision #14 swallow guarantee).
+    Defensive: any failure (graph raise / missing node / unparsable) → ``(None, 0)``;
+    the trajectory gate never blocks the forward-driving path (decision #14 swallow
+    guarantee). Used by the MISS gate (its ``patch`` is a ``TaskNodePatch``, not a
+    node — it must re-query). The HIT_SINGLE / HIT_MULTI gates keep inlining the
+    rationale+attempt from the in-scope in-memory ``cur`` / ``node`` (no extra query).
     """
     try:
         node = next(
@@ -347,30 +354,13 @@ def _read_dispatch_rationale(graph, task_id: str, node_id: str) -> dict | None:
             None,
         )
         if node is None:
-            return None
+            return None, 0
         rat = node.run_info.extend_props.get("_dispatch_rationale")
-        if not isinstance(rat, dict):
-            return None
-        return {"_dispatch_rationale": rat}
-    except Exception:  # noqa: BLE001  trajectory 旁路读取,失败 → None,不阻塞闸门
-        return None
-
-
-def _resolve_dispatch_attempt(graph, task_id: str, node_id: str) -> int:
-    """Resolve the harness-retry attempt for a DISPATCH trajectory event.
-
-    Mirrors ``_log_action``'s ``attempt`` fallback (queries the graph for the
-    node's ``run_info.extend_props['harness_retries']``). Defensive — any failure
-    → 0 so the trajectory event still fires with a sane default (decision #14).
-    """
-    try:
-        node = next(
-            (n for n in graph.query_task_dashboard(task_id).tasks if n.node_id == node_id),
-            None,
-        )
-        return int(node.run_info.extend_props.get("harness_retries", 0)) if node else 0
-    except Exception:  # noqa: BLE001  防御性 attempt 解析,失败 → 0
-        return 0
+        ext_info = {"_dispatch_rationale": rat} if isinstance(rat, dict) else None
+        attempt = int(node.run_info.extend_props.get("harness_retries", 0) or 0)
+        return ext_info, attempt
+    except Exception:  # noqa: BLE001  trajectory 旁路读取,失败 → (None, 0),不阻塞闸门
+        return None, 0
 
 
 def _is_stale_dispatching(node: "object") -> bool:
@@ -2249,16 +2239,22 @@ class ExecutionEngine:
             # ext_info 携带 ``_dispatch_rationale`` (经 dispatcher 写入节点的 carrier,
             # 防御读取:缺/异常 → None),strategy_name/decision_mode/candidates/join_dropped
             # 全在 ext_info(REQ-1 action_input≠候选,候选入 ext_info;决策 #14 吞+WARNING)。
+            # ``patch`` 是 TaskNodePatch(非 node),需查图:经 ``_read_dispatch_side_data``
+            # **一次**查询同时取 ext_info 与 attempt(HIT_SINGLE/HIT_MULTI 从 in-scope
+            # ``cur``/``node`` inline,无额外查询 — 非对称:只有 MISS 走此 helper)。
+            _miss_ext_info, _miss_attempt = _read_dispatch_side_data(
+                self._graph, patch.task_id, patch.node_id
+            )
             self._log_trajectory(
                 patch.task_id,
                 patch.node_id,
                 "dispatch",  # TrajectoryActionType.DISPATCH.value (TYPE_CHECKING-only enum)
                 action_result="miss",
                 action_input=None,
-                ext_info=_read_dispatch_rationale(self._graph, patch.task_id, patch.node_id),
+                ext_info=_miss_ext_info,
                 status_from=Status.PENDING,
                 status_to=Status.PENDING,
-                attempt=_resolve_dispatch_attempt(self._graph, patch.task_id, patch.node_id),
+                attempt=_miss_attempt,
             )
             if depth >= max_depth:
                 logger.info(
@@ -3021,13 +3017,21 @@ class ExecutionEngine:
                 )
                 # 轨迹旁路:DISPATCH(HIT_MULTI) —— action_input=group_id(assignee);
                 # ext_info 携带 ``_dispatch_rationale`` (经 dispatcher 写入节点 extend_props)。
+                # ``node`` 是 in-scope in-memory 节点 —— inline 读 carrier(零额外查询,
+                # 与 MISS 闸门走 _read_dispatch_side_data 的路径对称:那里 patch 是 TaskNodePatch
+                # 必须查图;这里节点已在手上,无需查)。
+                _hit_multi_rat = node.run_info.extend_props.get("_dispatch_rationale")
                 self._log_trajectory(
                     task_id,
                     node.node_id,
                     "dispatch",
                     action_result="hit_multi",
                     action_input=gid,
-                    ext_info=_read_dispatch_rationale(self._graph, task_id, node.node_id),
+                    ext_info=(
+                        {"_dispatch_rationale": _hit_multi_rat}
+                        if isinstance(_hit_multi_rat, dict)
+                        else None
+                    ),
                     status_from=Status.PENDING,
                     status_to=Status.RUNNING,
                     attempt=int(node.run_info.extend_props.get("harness_retries", 0) or 0),
@@ -3125,13 +3129,21 @@ class ExecutionEngine:
                         )
                         # 轨迹旁路:DISPATCH(HIT_SINGLE) —— action_input=cur.run_info.assignee
                         # (dispatch target);ext_info 携带 ``_dispatch_rationale``。
+                        # ``cur`` 是 in-scope in-memory 节点 —— inline 读 carrier(零额外查询,
+                        # 与 MISS 闸门走 _read_dispatch_side_data 的路径对称:那里 patch 是
+                        # TaskNodePatch 必须查图;这里节点已在手上,无需查)。
+                        _hit_single_rat = cur.run_info.extend_props.get("_dispatch_rationale")
                         self._log_trajectory(
                             task_id,
                             node.node_id,
                             "dispatch",
                             action_result="hit_single",
                             action_input=cur.run_info.assignee,
-                            ext_info=_read_dispatch_rationale(self._graph, task_id, node.node_id),
+                            ext_info=(
+                                {"_dispatch_rationale": _hit_single_rat}
+                                if isinstance(_hit_single_rat, dict)
+                                else None
+                            ),
                             status_from=Status.PENDING,
                             status_to=Status.RUNNING,
                             attempt=int(cur.run_info.extend_props.get("harness_retries", 0) or 0),
