@@ -536,12 +536,6 @@ services/bcs-group-context-store/  # repo 实现
   src/
     lib.rs                      # DbGroupContextStore（DbPlugin + DbSqlFlavor）
 
-adapters/http/bcs-http/src/
-  routes/
-    group_context.rs            # POST /groupcontext/* 路由定义
-
-tools/bcs-cli/src/command/
-  group_context.rs              # bcs-cli groupcontext status/create/update/retrieve
 ```
 
 ### 3.2 分层关系
