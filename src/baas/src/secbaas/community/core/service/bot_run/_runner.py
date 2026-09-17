@@ -897,9 +897,7 @@ class BotRunner:
         if not real_bot_id:
             return None
         # 评测流量：将 default_tag 透传给 binding 查找
-        default_tag = None
-        if lifecycle_stage == "eval" and metadata:
-            default_tag = metadata.get("default_tag")
+        default_tag = metadata.get("default_tag") if lifecycle_stage == "eval" and metadata else None
         try:
             data = await self._bot_service_plugin.get_binding(
                 bot_id=real_bot_id,
