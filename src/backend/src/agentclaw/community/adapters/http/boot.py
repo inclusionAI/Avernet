@@ -29,10 +29,12 @@ lifespan and before the first request, or the auth, tenant, tracing and CORS
 middleware this module installs would silently never take effect.
 
 The "already finalized" guard records the **pid** that finalized rather than a
-boolean. A boolean would be inherited across ``fork``: a child would see
-``True``, skip its own finalize, and serve traffic on the master's injector and
-the master's connections. Comparing ``os.getpid()`` makes the flag meaningless
-in any process that did not set it.
+boolean. ``fork`` copies the flag along with everything else, so a boolean would
+read ``True`` in the child and the child could not tell whether it or its parent
+had set it — it would skip its own finalize and serve on the parent's injector
+and the parent's connections. A pid is self-identifying: ``_finalized_pid ==
+os.getpid()`` can only be true in the process that actually wrote it, so the
+inherited value answers "somebody else initialized" rather than "you did".
 
 What a child does about an inherited marker — from a parent that finished the
 sequence, or began it and failed — is *refuse*, not re-run. The marker is never
@@ -75,7 +77,7 @@ class BootMode(Enum):
     PRELOAD = "preload"
 
     @classmethod
-    def detect(cls) -> "BootMode":
+    def detect(cls) -> BootMode:
         """Resolve the mode from :data:`BOOT_MODE_ENV`.
 
         Unset or empty resolves to :attr:`EAGER` so every existing launch site
@@ -117,7 +119,7 @@ def worker_runtime_finalized() -> bool:
     return _finalized_pid is not None and _finalized_pid == os.getpid()
 
 
-def require_worker_injector(app: "FastAPI") -> "Injector":
+def require_worker_injector(app: FastAPI) -> Injector:
     """The injector *this* process finalized, or refuse to go any further.
 
     The lifespan's gate, and it deliberately asks whether this process finalized
@@ -178,10 +180,10 @@ class RequireWorkerRuntime:
     In ``eager`` mode, and in a correctly finalized worker, it never fires.
     """
 
-    def __init__(self, app: "ASGIApp") -> None:
+    def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
-    async def __call__(self, scope: "Scope", receive: "Receive", send: "Send") -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         kind = scope["type"]
         if kind in ("http", "websocket") and not worker_runtime_finalized():
             global _refusal_logged
@@ -210,7 +212,7 @@ class RequireWorkerRuntime:
         await self.app(scope, receive, send)
 
 
-def install_worker_runtime_guard(app: "FastAPI") -> None:
+def install_worker_runtime_guard(app: FastAPI) -> None:
     """Put :class:`RequireWorkerRuntime` outside every other middleware.
 
     Deliberately not ``add_middleware``. Starlette *prepends*, so a guard added
@@ -231,13 +233,13 @@ def install_worker_runtime_guard(app: "FastAPI") -> None:
     """
     build_stack = app.build_middleware_stack
 
-    def build_with_guard() -> "ASGIApp":
+    def build_with_guard() -> ASGIApp:
         return RequireWorkerRuntime(build_stack())
 
     app.build_middleware_stack = build_with_guard  # type: ignore[method-assign]
 
 
-def finalize_worker_runtime(app: "FastAPI", *, profile: "DeployProfile") -> None:
+def finalize_worker_runtime(app: FastAPI, *, profile: DeployProfile) -> None:
     """Build and install everything this worker process owns.
 
     Runs post-fork in ``preload`` mode, inline at the end of the ``app.py``
@@ -313,7 +315,7 @@ def finalize_worker_runtime(app: "FastAPI", *, profile: "DeployProfile") -> None
     logger.info("[boot] worker runtime finalized in pid %s (env=%s)", pid, env or "<unset>")
 
 
-def _install_worker_runtime(app: "FastAPI", profile: "DeployProfile") -> str:
+def _install_worker_runtime(app: FastAPI, profile: DeployProfile) -> str:
     """The finalize sequence itself. Returns the resolved ``SERVER_ENV``.
 
     The steps are exactly the ones that used to sit at ``app.py`` module level,
