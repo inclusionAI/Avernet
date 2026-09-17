@@ -679,14 +679,14 @@ class ExecutionEngine:
         max_h = self._max_harness(task_id)
         # 解析轨迹/动作日志锚定节点 ``target_id``(retry 全程不变 —— ``planner.plan``
         # 不增节点,loop 内图态不变,故提前一次性解析;既有 post-loop ``_log_action``
-        # 仍用同一 ``target_id``,逻辑等价)。缺图/缺根 → None,跳过轨迹与日志。
+        # 仍用同一 ``target_id``,逻辑等价)。NOTE:此处**不走** 决策 #14 swallow ——
+        # ``_root`` 是 engine 自身的图查询(非 fire-and-forget 轨迹发射),异常须按
+        # 既有行为向上传播(pre-change 652beb210 即未 guard);legitimate None(真无
+        # 根)由下游 ``if target_id is not None`` / ``_emit_plan_trajectory`` 兜住。
         target_id = target_node_id
         if target_id is None:
-            try:
-                root = self._root(task_id)
-                target_id = root.node_id if root else None
-            except Exception:  # noqa: BLE001  trajectory 旁路,异常 → None,不阻塞规划
-                target_id = None
+            root = self._root(task_id)
+            target_id = root.node_id if root else None
         pr = None
         for attempt in range(max_h):
             failure_msg: str | None = None
@@ -760,9 +760,10 @@ class ExecutionEngine:
         gap_detail, raw_response_digest}``;成功条带 ``ext_info={strategy_name, has_gap,
         gap_detail, children, raw_response_digest}``、``error_*=None``。
 
-        全程防御:provenance/ext_info 装配 try/except → None;emitter 本身再
-        兜一层 try/except + WARNING(决策 #14),任一失败不影响规划主链路;``repo is
-        None`` 时 emitter 静默 no-op(测试/轻量 DI 取不到协议)。"""
+        全程防御:emitter(``emit_trajectory_event``)兜一层 try/except + WARNING
+        (决策 #14);ext_info 装配在当前 PlanResult 形状下不会抛,无独立内层 guard
+        (避免静默 swallow 掉未来的装配 bug —— 决策 #14 要求失败可见:WARNING)。
+        ``repo is None`` 时 emitter 静默 no-op(测试/轻量 DI 取不到协议)。"""
         if target_id is None:
             # 无锚定节点(无根/缺图)——不发射,跳过;正常路径下不应发生(根已就绪)。
             return
@@ -770,34 +771,36 @@ class ExecutionEngine:
             gd = pr.gap_detail or ""
             is_failure = gd.startswith("plan_")
             if is_failure:
-                # plan_call_fail(plan 抛异常)/ plan_not_completed / plan_empty_content → call_fail;
-                # plan_parse_fail / plan_shape_unexpected → parse_fail(对齐 TrajectoryEvent.action_result 词表)
+                # call_fail  = bot 调用没拿到可用的 COMPLETED 响应(传输/未完成:
+                #   plan_call_fail=planner 抛异常;plan_not_completed=run 非 COMPLETED)
+                # parse_fail = COMPLETED 响应但形态无法用(空 content / 解析失败 /
+                #   形态非预期:plan_parse_fail / plan_shape_unexpected / plan_empty_content)
+                # 对齐 TrajectoryEvent.action_result 词表;analyzer 据此归因 plan_failure 子类。
                 action_result = "parse_fail" if gd in (
-                    "plan_parse_fail", "plan_shape_unexpected",
+                    "plan_parse_fail", "plan_shape_unexpected", "plan_empty_content",
                 ) else "call_fail"
                 raw_msg = failure_msg or gd
                 error_msg = raw_msg if len(raw_msg) <= 500 else raw_msg[:497] + "..."
             else:
                 action_result = "success"
                 error_msg = None
-            # ext_info 装配:任一字段读不到 → 退回 None(emitter 会落 NULL;analyzer 防御读取)
-            try:
-                if is_failure:
-                    ext_info: dict[str, Any] | None = {
-                        "strategy_name": pr.strategy_name,
-                        "gap_detail": gd or None,
-                        "raw_response_digest": pr.raw_response_digest,
-                    }
-                else:
-                    ext_info = {
-                        "strategy_name": pr.strategy_name,
-                        "has_gap": pr.has_gap,
-                        "gap_detail": gd or None,
-                        "children": list(pr.planned_children or []),
-                        "raw_response_digest": pr.raw_response_digest,
-                    }
-            except Exception:  # noqa: BLE001  provenance 缺失 → ext_info=None,不阻塞
-                ext_info = None
+            # ext_info 装配:dict 字面量在当前 PlanResult 形状下不会抛;不做静默 swallow
+            # (决策 #14 要求失败可见:WARNING)。未来的装配 bug 由外层 try/except +
+            # logger.warning 统一捕获可见(此处无独立 guard)。
+            if is_failure:
+                ext_info: dict[str, Any] = {
+                    "strategy_name": pr.strategy_name,
+                    "gap_detail": gd or None,
+                    "raw_response_digest": pr.raw_response_digest,
+                }
+            else:
+                ext_info = {
+                    "strategy_name": pr.strategy_name,
+                    "has_gap": pr.has_gap,
+                    "gap_detail": gd or None,
+                    "children": list(pr.planned_children or []),
+                    "raw_response_digest": pr.raw_response_digest,
+                }
             self._log_trajectory(
                 task_id,
                 target_id,

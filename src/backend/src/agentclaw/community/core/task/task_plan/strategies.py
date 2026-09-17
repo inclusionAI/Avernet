@@ -144,8 +144,10 @@ class GapBasedPlanningStrategy:
             else:
                 response_text = str(run.get("result") or "")
             response_slice = response_text[:500]
+            # ``prompt`` (from _compose_planning_prompt) is already typed ``-> str``;
+            # concat directly (no redundant ``str()`` wrapping).
             prompt_digest = hashlib.sha256(
-                (str(prompt) + response_slice).encode("utf-8")
+                (prompt + response_slice).encode("utf-8")
             ).hexdigest()
             raw_response_digest = hashlib.sha256(
                 response_slice.encode("utf-8")

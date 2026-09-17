@@ -406,6 +406,152 @@ class TestPlanGateGapBasedDigests:
 
 
 # ---------------------------------------------------------------------------
+# 3b. gap_detail → action_result mapping (REQ-3 failure mid-row classification)
+# ---------------------------------------------------------------------------
+
+
+class TestPlanGateActionResultMapping:
+    """REQ-3 (review I-3): pin each ``gap_detail`` → ``action_result`` mapping.
+    Split criterion:
+      * ``call_fail``  = bot call did NOT reach a usable COMPLETED response
+        (transport / abandoned: ``plan_call_fail``, ``plan_not_completed``)
+      * ``parse_fail`` = COMPLETED response but unusable shape/empty
+        (``plan_parse_fail``, ``plan_shape_unexpected``, ``plan_empty_content``)
+    Driven via direct ``_emit_plan_trajectory`` calls to isolate the mapping
+    logic from the retry loop. The existing per-attempt tests above already
+    pin ``plan_parse_fail`` → ``parse_fail`` and ``plan_call_fail`` →
+    ``call_fail`` end-to-end; these pin the remaining cases + the success row."""
+
+    @pytest.mark.parametrize("gap_detail,expected_action_result", [
+        ("plan_call_fail", "call_fail"),          # engine exception (transport)
+        ("plan_not_completed", "call_fail"),       # bot returned non-COMPLETED
+        ("plan_parse_fail", "parse_fail"),         # COMPLETED but unparseable JSON
+        ("plan_shape_unexpected", "parse_fail"),   # COMPLETED but unexpected shape
+        ("plan_empty_content", "parse_fail"),      # COMPLETED but empty content
+    ])
+    def test_failure_gap_detail_to_action_result(self, gap_detail,
+                                                 expected_action_result):
+        svc = TaskGraphService()
+        _make_graph(svc)
+        repo = _TrajRepo()
+        eng = _TrajectoryCaseEngine(svc, trajectory_repo=repo)
+        pr = PlanResult(
+            children=[], has_gap=True, gap_detail=gap_detail,
+            strategy_name="gap_based",
+        )
+        # Drive the per-attempt emitter directly (bypass the retry loop).
+        eng._emit_plan_trajectory("t1", "t1", pr, 0, failure_msg=None)
+        plan_records = _plan_records(repo)
+        assert len(plan_records) == 1
+        rec = plan_records[0]
+        assert rec.action_type == "plan"
+        assert rec.action_result == expected_action_result, (
+            f"gap_detail={gap_detail} should map to {expected_action_result}, "
+            f"got {rec.action_result}"
+        )
+        assert rec.error_type == "plan_failure"
+        assert rec.error_msg is not None
+        # the failure mid-row envelope carries strategy_name / gap_detail /
+        # raw_response_digest (no has_gap / children — those are success-only)
+        assert rec.ext_info is not None
+        payload = json.loads(rec.ext_info)
+        assert payload["schema_v"] == 1
+        assert payload["gap_detail"] == gap_detail
+        assert "has_gap" not in payload
+        assert "children" not in payload
+
+    def test_non_plan_gap_detail_is_success(self):
+        """``gap_detail`` not starting with ``plan_`` → success row (no error)."""
+        svc = TaskGraphService()
+        _make_graph(svc)
+        repo = _TrajRepo()
+        eng = _TrajectoryCaseEngine(svc, trajectory_repo=repo)
+        pr = PlanResult(children=[], has_gap=False, gap_detail="done",
+                        strategy_name="gap_based")
+        eng._emit_plan_trajectory("t1", "t1", pr, 0, failure_msg=None)
+        plan_records = _plan_records(repo)
+        assert len(plan_records) == 1
+        rec = plan_records[0]
+        assert rec.action_result == "success"
+        assert rec.error_type is None
+        assert rec.error_msg is None
+
+
+# ---------------------------------------------------------------------------
+# 3c. _root(task_id) resolution regression (review I-1)
+# ---------------------------------------------------------------------------
+
+
+class TestPlanGateRootResolution:
+    """Review I-1: ``_root(task_id)`` is engine's own graph lookup — NOT under
+    决策 #14's swallow scope (which is for trajectory EMISSION failures only).
+    Pre-change ``652beb210`` had it unguarded; the try/except that wrapped it
+    during REQ-3 was removed because it would silently swallow BOTH the
+    trajectory emission AND the ``_log_action(PLAN)`` write on a graph
+    failure (AGENTS.md anti-pattern).
+
+    Pinned:
+      * Common case (root present): ``target_id`` resolves via ``_root``; BOTH
+        the per-attempt ``_log_trajectory`` row and the post-loop
+        ``_log_action(NodeAction.PLAN, ...)`` fire, anchored on the root's
+        node_id.
+      * Failure case (``_root`` raises): the exception propagates out of
+        ``_plan_with_retry`` (engine behavior preserved — not silently swallowed
+        at the trajectory gate)."""
+
+    def test_legit_root_resolves_emits_trajectory_and_logs_action(self):
+        """Common case: target_node_id=None → _plan_with_retry resolves
+        target_id via _root(task_id); the single root ("t1") becomes the anchor
+        for both the trajectory event and the action-log write."""
+        svc = TaskGraphService()
+        graph = _make_graph(svc)
+        repo = _TrajRepo()
+        pr = PlanResult(children=[], has_gap=False, gap_detail="done")
+        eng = _TrajectoryCaseEngine(
+            svc, planner=_ScriptedPlanner([pr]), trajectory_repo=repo
+        )
+        # target_node_id=None forces the engine to resolve via _root(task_id).
+        result = _run(eng._plan_with_retry("t1", graph, target_node_id=None))
+        # plan completes normally
+        assert result is not None and result.has_gap is False
+        # per-attempt PLAN trajectory fired — anchored on the root "t1"
+        plan_records = _plan_records(repo)
+        assert len(plan_records) == 1, [r.action_result for r in repo.records]
+        assert plan_records[0].node_id == "t1"
+        assert plan_records[0].action_result == "success"
+        # post-loop _log_action(NodeAction.PLAN, ...) ALSO fired on "t1"
+        # (NodeAction is a StrEnum: PLAN.value == "plan")
+        root = svc._get_node(graph, "t1")
+        action_log = root.run_info.action_log
+        plan_actions = [
+            ev for ev in action_log
+            if ev.action.value == "plan" and ev.payload.get("__node_id") == "t1"
+        ]
+        assert plan_actions, [(ev.action.value, ev.payload) for ev in action_log]
+
+    def test_root_raising_propagates_not_swallowed(self):
+        """If ``_root`` raises (graph query failure), the exception propagates
+        out of ``_plan_with_retry`` — NOT swallowed at the trajectory gate
+        (I-1: ``_root`` is outside 决策 #14's scope)."""
+        svc = TaskGraphService()
+        graph = _make_graph(svc)
+        repo = _TrajRepo()
+        pr = PlanResult(children=[], has_gap=False, gap_detail="done")
+        eng = _TrajectoryCaseEngine(
+            svc, planner=_ScriptedPlanner([pr]), trajectory_repo=repo
+        )
+
+        def _boom_root(task_id):  # noqa: ANN001  test monkey-patch
+            raise RuntimeError("graph lookup boom")
+
+        eng._root = _boom_root
+        with pytest.raises(RuntimeError, match="graph lookup boom"):
+            _run(eng._plan_with_retry("t1", graph, target_node_id=None))
+        # No trajectory row fired — the loop was never entered.
+        assert _plan_records(repo) == []
+
+
+# ---------------------------------------------------------------------------
 # 4. PlanResult backward-compat
 # ---------------------------------------------------------------------------
 
