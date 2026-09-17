@@ -36,7 +36,9 @@ core/task/
 │   └── callback_adapter.py        #   TaskCallbackData → TaskNodePatch → engine.on_report
 ├── task_harness/                  # TaskHarness 旁路常驻巡检
 │   └── harness.py                 #   周期巡检超时/崩溃 → 复位 PENDING 重投(不抢正向)
-└── task_discovery/                # 占位(另一位同学的任务挖掘模块,本框架不实现)
+├── task_discovery/                # 占位(另一位同学的任务挖掘模块,本框架不实现)
+└── task_trajectory/               # 任务轨迹采集旁路 + 只读组装/分析(零侵入正向驱动;spec 2026-09-16)
+    └── models.py                 #   纯 dataclass/enum:TrajectoryEvent/TaskTrajectory/TrajectoryAnalysis/ReasonCatalog/DispatchRationale/TrajectoryActionType
 ```
 
 ## 节点状态机流转(6 节点态 + 图态;双机实现于 TaskGraphService)
