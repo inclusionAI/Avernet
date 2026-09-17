@@ -124,12 +124,35 @@ class _AnalysisConfig(Protocol):
 # ---------------------------------------------------------------------------
 
 
+# Terminal-status set (spec.md:147 — "末条 **terminal** TRANSITION 事件"):
+# the analysis ``failure_reason`` derivation fires ONLY when the last terminal
+# transition lands in a terminal status. "Terminal" means the task has stopped
+# for good — the intermediate states (PENDING/PLANNING/RUNNING/DONE) keep the
+# task open (DONE is "执行完成,但尚未通过验收" — accepts verdict yet to come),
+# so a non-terminal transition (e.g. a still-running task's PENDING→RUNNING or
+# RUNNING→DONE flip) must NOT fire the rule derivation (else bullet-7 would
+# emit a misleading ``unclassified`` failure_reason on a task that is not
+# actually done). Expressed as a ``frozenset`` so a future ``Status`` addition
+# is caught at import time (membership is explicit, not inferred).
+_TERMINAL_STATUSES: frozenset[Status] = frozenset({
+    Status.SUCCESS,    # 执行完成且已通过验收
+    Status.FAILED,      # 执行或验收失败
+    Status.HUNG,        # 已挂起(需人介入)
+    Status.CANCELLED,   # 已取消
+})
+
+
 def _terminal_status(timeline: list[TrajectoryEvent]) -> Status | None:
-    """The last ``action_type=transition`` event's ``status_to`` (None if no
-    terminal transition). REQ-9: ``failure_reason`` is derived only when the
-    task is terminal non-SUCCESS, determined by this event."""
+    """The last **terminal** ``action_type=transition`` event's ``status_to``
+    (None if no terminal transition). REQ-9: ``failure_reason`` is derived only
+    when the task is terminal non-SUCCESS, determined by this event.
+
+    Walks the TRANSITION events backward and returns the first ``status_to``
+    that is in ``_TERMINAL_STATUSES`` — intermediate transitions
+    (PENDING→RUNNING, …→DONE) are SKIPPED. Returns ``None`` when no terminal
+    transition exists (the task is still open → ``failure_reason`` is None)."""
     for ev in reversed(timeline):
-        if ev.action_type == TrajectoryActionType.TRANSITION:
+        if ev.action_type == TrajectoryActionType.TRANSITION and ev.status_to in _TERMINAL_STATUSES:
             return ev.status_to
     return None
 
@@ -550,10 +573,12 @@ class TaskTrajectoryAnalyzer:
         Contract: the bot returns a run dict whose ``result`` is either a bare
         string (the JSON response) or a ``{"content": "<json string>"}`` dict
         (the planner's seam shape). The JSON response MUST carry
-        ``analysis_output`` (required); ``boost_reason`` / ``failure_reason``
-        are optional (the bot may decline to populate them). Missing
-        ``analysis_output`` or an unparseable body raises
-        ``TrajectoryAnalysisError`` (decision #10: caller gets a 504, no
+        ``analysis_output`` (required, a STRING — a non-str value is a
+        contract violation, not a coercion candidate; raising surfaces a bot
+        contract bug rather than silently stringifying e.g. a list);
+        ``boost_reason`` / ``failure_reason`` are optional (the bot may decline
+        to populate them). Missing ``analysis_output`` or an unparseable body
+        raises ``TrajectoryAnalysisError`` (decision #10: caller gets a 504, no
         backfill).
         """
         content = _extract_response_content(run)
@@ -572,6 +597,11 @@ class TaskTrajectoryAnalyzer:
             raise TrajectoryAnalysisError(
                 f"tc_bot response missing required 'analysis_output' "
                 f"(bot_id={analysis_executor}): {content!r}"
+            )
+        if not isinstance(analysis_output, str):  # contract: MUST be a string
+            raise TrajectoryAnalysisError(
+                f"tc_bot response 'analysis_output' must be a string, got "
+                f"{type(analysis_output).__name__} (bot_id={analysis_executor}): {content!r}"
             )
         boost_reason = parsed.get("boost_reason")
         if boost_reason is not None and not isinstance(boost_reason, str):

@@ -80,6 +80,9 @@ from agentclaw.community.di.modules.system_config_module import SystemConfigModu
 from agentclaw.community.di.modules.task_discovery_module import TaskDiscoveryModule
 from agentclaw.community.di.modules.task_persistence_module import TaskPersistenceModule
 from agentclaw.community.di.modules.task_queue_module import TaskQueueModule
+from agentclaw.community.di.modules.task_trajectory_config_module import (
+    TaskTrajectoryConfigModule,
+)
 from agentclaw.community.di.modules.user_list_module import UserListModule
 from agentclaw.community.di.modules.work_orders_module import WorkOrdersModule
 from agentclaw.community.di.profile import DeployProfile
@@ -129,6 +132,11 @@ def build_injector(
         ConfigModule(),
         McpRuntimeCredentialsConfigModule(),
         DesktopSkillRecoveryConfigModule(),
+        # Trajectory analysis config (REQ-9 决策 #10): read the
+        # ``task_trajectory`` user_config block → TrajectoryAnalysisConfig
+        # (bot_id + tc_bot timeout). Sits in its own module to keep
+        # ConfigModule at zero headroom under the 1000-line cap.
+        TaskTrajectoryConfigModule(),
         InstallationReadConfigModule(),
         SkillCenterModule(),
         SkillCenterGroup4Module(),

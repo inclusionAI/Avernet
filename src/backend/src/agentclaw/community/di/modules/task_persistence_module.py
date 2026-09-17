@@ -72,7 +72,7 @@ from agentclaw.community.core.task.task_trajectory.analyzer import (
     TaskTrajectoryAnalyzer,
 )
 from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPort
-from agentclaw.community.di.config import TrajectoryAnalysisConfig
+from agentclaw.community.di.task_trajectory_config import TrajectoryAnalysisConfig
 
 
 class TaskPersistenceModule(Module):

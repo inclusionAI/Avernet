@@ -152,6 +152,8 @@ provides:
   - TaskNodeRunInfoRepositoryProtocol
   - TaskNodeRelationRepositoryProtocol
   - TaskCallbackRepositoryProtocol
+  - TaskCallbackCorrelationRepositoryProtocol
+  - TaskTrajectoryRepositoryProtocol
   - TaskDiscoveryLockRepositoryProtocol
   # publishing
   - BotPublishRepositoryProtocol
@@ -237,6 +239,8 @@ provides:
   - TaskNodeRunInfoRepository
   - TaskNodeRelationRepository
   - TaskCallbackRepository
+  - TaskCallbackCorrelationRepository
+  - TaskTrajectoryRepository
   - TaskDiscoveryLockRepository
 consumes:
   - DatabasePlugin                # the per-profile session seam, injected into every implementation

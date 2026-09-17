@@ -849,25 +849,9 @@ class TaskDispatchConfig:
     skill_report_enabled: bool = True
 
 
-@dataclass(frozen=True)
-class TrajectoryAnalysisConfig:
-    """Task trajectory analysis bot + timeout policy (REQ-9, 决策 #10).
-
-    Sourced from the ``task_trajectory`` block of ``user_config``. The
-    ``analysis_bot_id`` is the **deployment-configured** bot the P5b trajectory
-    service calls on ``GET /trajectory?do_analysis=true``
-    (``analysis_type=tc_bot``/``analysis_executor=<bot_id>``); it is NOT a
-    per-request param — callers cannot choose the bot (决策 #10). ``None``
-    (the default) means the deployment has not provisioned a trajectory analysis
-    bot; the P5b service then declines ``do_analysis=true`` (no bot to call).
-
-    ``tc_bot_timeout_seconds`` bounds the synchronous bot round-trip (决策 #10:
-    首期同步带超时;超时返 504、不回填). Defaults to 180s to match
-    ``OpenApiBotPort.send_and_wait_async``'s own default.
-    """
-
-    analysis_bot_id: str | None = None
-    tc_bot_timeout_seconds: float = 180.0
+# Note: TrajectoryAnalysisConfig lives in ``di/task_trajectory_config.py`` (moved
+# out to keep this monolith under the 1000-line architecture cap); its DI provider
+# is ``di/modules/task_trajectory_config_module.py::TaskTrajectoryConfigModule``.
 
 
 @dataclass(frozen=True)

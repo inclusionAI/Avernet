@@ -382,6 +382,72 @@ def test_rule_no_terminal_transition_failure_reason_none():
     assert ta.failure_reason is None
 
 
+def test_rule_non_terminal_transition_failure_reason_none():
+    # Intermediate transitions (PENDING→RUNNING, …→DONE) are NOT terminal — DONE
+    # is "执行完成,但尚未通过验收" (acceptance verdict still pending). A trajectory
+    # whose last transition lands in an intermediate status must yield
+    # ``failure_reason=None`` (the I1 terminal-set fix). Without the filter,
+    # bullet-7 would emit a misleading ``unclassified`` on this non-terminal task.
+    timeline = [
+        _ev(TrajectoryActionType.SUBMIT, action_result="success",
+            status_from=None, status_to=Status.PENDING, ms=_MS),
+        _ev(
+            TrajectoryActionType.TRANSITION, action_result="running",
+            ms=_MS + 3_000, status_from=Status.PENDING, status_to=Status.RUNNING,
+        ),
+        _ev(
+            TrajectoryActionType.EXECUTE, action_result="success", ms=_MS + 9_000,
+        ),
+        # A non-terminal "execution done, acceptance pending" → DONE.
+        _ev(
+            TrajectoryActionType.TRANSITION, action_result="done",
+            ms=_MS + 15_000, status_from=Status.RUNNING, status_to=Status.DONE,
+        ),
+    ]
+    ta = _analyze_rule(timeline)
+    assert ta.failure_reason is None
+
+
+def test_rule_terminal_transition_to_hung_fires_hung_bullet():
+    # HUNG is terminal (the task stopped — 需人介入). The terminal gate accepts
+    # HUNG as terminal non-SUCCESS, and bullet 4 fires (the transition event
+    # itself carries error_type=HUNG + the hung_reason as its error_msg).
+    transition = _ev(
+        TrajectoryActionType.TRANSITION,
+        action_result="hung",
+        error_type=ReasonCatalog.HUNG,
+        error_msg="stuck at step 3 for 300s",
+        ms=_MS + 20_000,
+        status_from=Status.RUNNING,
+        status_to=Status.HUNG,
+    )
+    timeline = [_ev(TrajectoryActionType.SUBMIT, action_result="success"), transition]
+    ta = _analyze_rule(timeline)
+    assert ta.failure_reason == "hung: stuck at step 3 for 300s"
+    assert ta.failure_reason.startswith("hung:")
+
+
+def test_rule_terminal_transition_to_cancelled_yields_unclassified():
+    # CANCELLED is terminal (the task stopped — 已取消) but no decisive
+    # RESET/EXECUTE/PLAN/accept failure event precedes it → bullet 7 fires the
+    # unclassified fallback. Locking in the behavior so a future Status addition
+    # / terminal-set change can't silently regress (the gate must accept
+    # CANCELLED, and with no more-specific bullet, bullet 7 summarises the last
+    # event — the transition itself).
+    transition = _ev(
+        TrajectoryActionType.TRANSITION,
+        action_result="cancelled",
+        error_msg="cancelled by operator",
+        ms=_MS + 18_000,
+        status_from=Status.RUNNING,
+        status_to=Status.CANCELLED,
+    )
+    timeline = [_ev(TrajectoryActionType.SUBMIT, action_result="success"), transition]
+    ta = _analyze_rule(timeline)
+    assert ta.failure_reason.startswith("unclassified:")
+    assert "cancel" in ta.failure_reason  # the terminal CANCELLED gate accepted it; bullet 7 summarised
+
+
 # ---------------------------------------------------------------------------
 # 4. rule executor — boost_reason from last dispatch event
 # ---------------------------------------------------------------------------
@@ -686,6 +752,28 @@ async def test_tc_bot_calls_bot_with_trajectory_summary_and_bot_id():
     assert "events=" in bot.last_call["message"]
     assert "submit" in bot.last_call["message"]
     assert bot.last_call["metadata"] is not None
+    # the default-config timeout (180s) flows through to the bot call (M3).
+    assert bot.last_call["timeout"] == 180.0
+
+
+@pytest.mark.asyncio
+async def test_tc_bot_timeout_flows_from_custom_config():
+    # A custom TrajectoryAnalysisConfig.tc_bot_timeout_seconds flows end-to-end
+    # to the bot call's timeout param (M3 — verifies the config value is used,
+    # not just the default).
+    from agentclaw.community.di.task_trajectory_config import (
+        TrajectoryAnalysisConfig,
+    )
+    bot = _FakeBot(content=_bot_analysis_content())
+    analyzer = TaskTrajectoryAnalyzer(
+        bot=bot, config=TrajectoryAnalysisConfig(tc_bot_timeout_seconds=42.0),
+    )
+    trajectory = _traj([_ev(TrajectoryActionType.SUBMIT, action_result="success"), _terminal_success()])
+    await analyzer.analyze(
+        trajectory, lambda ev: None,
+        analysis_type=AnalysisType.TC_BOT, analysis_executor="bot-analyst",
+    )
+    assert bot.last_call["timeout"] == 42.0
 
 
 @pytest.mark.asyncio

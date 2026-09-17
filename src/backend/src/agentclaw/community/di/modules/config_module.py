@@ -956,42 +956,6 @@ class ConfigModule(Module):
 
     @singleton
     @provider
-    def task_trajectory_analysis(self) -> cfg.TrajectoryAnalysisConfig:
-        """Task trajectory analysis bot + timeout (REQ-9, 决策 #10).
-
-        YAML shape under ``user_config.task_trajectory``::
-
-            task_trajectory:
-              analysis_bot_id: "bot-traj-analyst"      # REQUIRED to enable do_analysis=true
-              tc_bot_timeout_seconds: 180              # synchronous round-trip cap
-
-        Defaults: ``analysis_bot_id`` None (no bot wired → P5b service declines
-        ``do_analysis=true``); ``tc_bot_timeout_seconds`` 180s (matches
-        ``OpenApiBotPort.send_and_wait_async``'s default). The bot_id is
-        deployment-configured, not per-request (决策 #10).
-        """
-        block = _block("task_trajectory")
-        defaults = cfg.TrajectoryAnalysisConfig()
-        return cfg.TrajectoryAnalysisConfig(
-            analysis_bot_id=_coerce(
-                block,
-                "analysis_bot_id",
-                str,
-                defaults.analysis_bot_id,
-                "task_trajectory",
-            )
-            or defaults.analysis_bot_id,
-            tc_bot_timeout_seconds=_coerce(
-                block,
-                "tc_bot_timeout_seconds",
-                float,
-                defaults.tc_bot_timeout_seconds,
-                "task_trajectory",
-            ),
-        )
-
-    @singleton
-    @provider
     def task_queue_worker(self) -> cfg.TaskQueueWorkerConfig:
         """In-process distributed-task-queue worker policy.
 
