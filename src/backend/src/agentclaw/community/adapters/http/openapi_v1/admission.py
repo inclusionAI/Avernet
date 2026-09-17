@@ -60,14 +60,14 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # ── own bot: names a bot, resolved as the delegating user's ──────────────
     # The caller can only ever reach their own bots here, so an application
     # acting as them can only reach the same ones.
-    ("GET", "/openapi/v1/bots/{bot_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("PUT", "/openapi/v1/bots/{bot_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     (
         "PUT",
         "/openapi/v1/bots/{bot_id}/space",
     ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
     ("DELETE", "/openapi/v1/bots/{bot_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("POST", "/openapi/v1/bots/{bot_id}/restart"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/restart"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # The auth-status poll completes a pending creation, so it is a POST; the
     # GET row is its retiring spelling (deprecated/auth_status.py), the same
     # operation at the same address, kept while the old method still answers.
@@ -86,18 +86,18 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/startup-script",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "PUT",
         "/openapi/v1/bots/{bot_id}/startup-script",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "DELETE",
         "/openapi/v1/bots/{bot_id}/startup-script",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/activate"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     ("POST", "/openapi/v1/bots/{bot_id}/recycle"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/data-init"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/data-init"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # The config manifest may address a *shared* bot: its collaborator bars are
     # MEMBER to read and ADMIN to write (authorization.py), so the owner arrives
     # on the wire rather than being pinned to the caller, and the grant is
@@ -247,69 +247,69 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/data-init",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/identity"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/identity"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/identity/{file_type}",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "PUT",
         "/openapi/v1/bots/{bot_id}/identity/{file_type}",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # resources — every operation is bot-first and addressed by workspace path.
     # There are no record-id routes left: a record id cannot address a file the
     # bot created itself, and links are no longer part of this group.
-    ("GET", "/openapi/v1/bots/{bot_id}/resources"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/resources"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "DELETE",
         "/openapi/v1/bots/{bot_id}/resources",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/resources/stat",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/resources/upload",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/resources/download",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/resources/download-dir"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/resources/preview"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/resources/download-dir"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/resources/preview"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/resources/mkdir",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # routines — query ``bot_id``, except the create, which carries it in the
     # path, so the shared dependency checks it like every other operation.
-    ("GET", "/openapi/v1/bots/{bot_id}/routines"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
-    ("POST", "/openapi/v1/bots/{bot_id}/routines"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/{bot_id}/routines"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    ("POST", "/openapi/v1/bots/{bot_id}/routines"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # The owner-level aggregate lists the named user's fleet, not one bot —
     # gated on a live delegation like the ceiling (see owner_router).
     ("GET", "/openapi/v1/bots/routines/all"): AdmissionMode.USER_GATED,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/routines/{routine_id}",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "PATCH",
         "/openapi/v1/bots/{bot_id}/routines/{routine_id}",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "DELETE",
         "/openapi/v1/bots/{bot_id}/routines/{routine_id}",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "POST",
         "/openapi/v1/bots/{bot_id}/routines/{routine_id}/run",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/routines/{routine_id}/runs",
-    ): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # Skills consistently receive an owner-addressed Bot target.  The owner is
     # resolved at the HTTP boundary and all downstream reads use that same pair.
     (
@@ -918,6 +918,29 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # about. Left exactly as they were.
     ("GET", "/openapi/v1/bots/loadtest/hello"): AdmissionMode.REFUSED,
     ("WEBSOCKET", "/openapi/v1/bots/loadtest/ws/echo"): AdmissionMode.REFUSED,
+    # ── Pinned retiring addresses ──────────────────────────────────────────
+    # These resources and routines addresses predate bot-first addressing —
+    # their bots travel as query or body parameters their paths cannot offer a
+    # ``Check`` gate. When their replacements moved onto the seam and gained an
+    # addressed owner, their retiring shims stayed owner-resolved
+    # (``deprecated._requery.pin_owner_to_user``), so the mode that matches
+    # what they enforce is still the own-bot one. Written out rather than
+    # derived because they diverge from their replacements' modes: the
+    # derivation below fills only what is not already decided here.
+    ("GET", "/openapi/v1/bots/resources"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("DELETE", "/openapi/v1/bots/resources"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/resources/download"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("POST", "/openapi/v1/bots/resources/mkdir"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/resources/preview"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/resources/stat"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("POST", "/openapi/v1/bots/resources/upload"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/routines"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("POST", "/openapi/v1/bots/routines"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("DELETE", "/openapi/v1/bots/routines/{routine_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/routines/{routine_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("PATCH", "/openapi/v1/bots/routines/{routine_id}"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("POST", "/openapi/v1/bots/routines/{routine_id}/run"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
+    ("GET", "/openapi/v1/bots/routines/{routine_id}/runs"): AdmissionMode.GRANT_CHECKED_OWN_BOT,
 }
 
 #: Kept as an explicit empty set so the admission-inventory test continues to

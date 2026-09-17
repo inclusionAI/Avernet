@@ -2,10 +2,11 @@
 
 Public handlers that delegate to the existing internal bot services and wrap the
 result in the standard :class:`Envelope` / :class:`Page` contracts. Identity is
-the end user the request names in ``?user_id=`` (owner-scoping, via
-``UserIdDep``) — on 12 of the 13 operations here; ``check-name`` asks a
-tenant-wide question and takes none. The request tenant is bound by
-``AvernetTenantMiddleware``
+the end user the request names in ``?user_id=`` (validated to the verified
+caller via ``UserIdDep``); the bot owner a read or write addresses comes from
+``OwnerIdDep`` — the caller by default, a shared bot's owner when the request
+names one. ``check-name`` asks a tenant-wide question and takes neither. The
+request tenant is bound by ``AvernetTenantMiddleware``
 before the handler runs, so every service read/write is already tenant-scoped by
 the Track A guard. Services are obtained with ``Injected`` exactly as the
 internal router does.
@@ -865,13 +866,14 @@ async def list_inventory(
     "/{bot_id}",
     response_model=Envelope[Bot],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_OWN_BOT,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def get_bot(
     bot_id: BotIdPath,
     request: Request,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Bot]:
     """Get a bot's details."""
@@ -1000,13 +1002,14 @@ async def delete_bot(
     "/{bot_id}/restart",
     response_model=Envelope[Bot],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_OWN_BOT,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def restart_bot(
     bot_id: BotIdPath,
     request: Request,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Bot]:
     """Restart a bot's container.
@@ -1301,13 +1304,14 @@ def _audit_actor(caller: ActingCaller, owner_id: str) -> str:
     "/{bot_id}/startup-script",
     response_model=Envelope[StartupScript],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_OWN_BOT,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def get_bot_startup_script(
     bot_id: BotIdPath,
     request: Request,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     startup_script_service: BotStartupScriptServiceProtocol = Injected(
         BotStartupScriptServiceProtocol
@@ -1329,14 +1333,15 @@ async def get_bot_startup_script(
     "/{bot_id}/startup-script",
     response_model=Envelope[StartupScript],
     responses=STARTUP_SCRIPT_WRITE_RESPONSES,
-    dependencies=_GRANT_CHECKED_OWN_BOT,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def update_bot_startup_script(
     bot_id: BotIdPath,
     body: StartupScriptWrite,
     request: Request,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     caller: ActingCallerDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     startup_script_service: BotStartupScriptServiceProtocol = Injected(
@@ -1380,13 +1385,14 @@ async def update_bot_startup_script(
     "/{bot_id}/startup-script",
     response_model=Envelope[Deleted],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_OWN_BOT,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def delete_bot_startup_script(
     bot_id: BotIdPath,
     request: Request,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     startup_script_service: BotStartupScriptServiceProtocol = Injected(
         BotStartupScriptServiceProtocol
@@ -1439,13 +1445,14 @@ def _observe_data_init_task(task: asyncio.Task[dict[str, str]]) -> None:
     "/{bot_id}/data-init",
     response_model=Envelope[DataInitResult],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_OWN_BOT,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def get_bot_data_init_status(
     bot_id: BotIdPath,
     request: Request,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     data_init_service: DataInitServiceProtocol = Injected(DataInitServiceProtocol),
 ) -> Envelope[DataInitResult]:
@@ -1460,14 +1467,15 @@ async def get_bot_data_init_status(
     "/{bot_id}/data-init",
     response_model=Envelope[DataInitResult],
     responses=USER_SCOPED_403,
-    dependencies=_GRANT_CHECKED_OWN_BOT,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
 )
 @envelope_errors
 async def trigger_bot_data_init(
     bot_id: BotIdPath,
     body: DataInitRequest,
     request: Request,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     data_init_service: DataInitServiceProtocol = Injected(DataInitServiceProtocol),
 ) -> Envelope[DataInitResult]:

@@ -20,6 +20,7 @@ import importlib
 
 from tests.community.adapters.http.openapi_v1.conftest import (
     SeamCollaborators,
+    bind_bot_access_seam,
     mount_public_error_handlers,
     user_scoped_client,
 )
@@ -249,8 +250,11 @@ def client(
             binder.bind(PolicyServiceProtocol, to=policy)
             binder.bind(PassportPlugin, to=passport)
             binder.bind(EngineConfigServiceProtocol, to=engine_config)
-            binder.bind(BotRepository, to=bot_repo)
-            binder.bind(CollaboratorServiceProtocol, to=SeamCollaborators())
+            # The startup-script/data-init rows moved onto the seam: the edit
+            # lock's services join the repositories the gate already read.
+            bind_bot_access_seam(
+                binder, bots=bot_repo, collaborators=SeamCollaborators()
+            )
             binder.bind(SkillSetServiceFactoryProtocol, to=skill_set_factory)
             binder.bind(AuthRelationshipPlugin, to=auth_rel)
             binder.bind(BotStartupScriptServiceProtocol, to=startup_script)
