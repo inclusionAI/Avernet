@@ -867,14 +867,33 @@ class TestOnDisconnect:
         state2.stream_queue = asyncio.Queue()
 
         # State without queue should not cause error
-        _setup_session_state(client, "s3")
+        state3 = _setup_session_state(client, "s3")
 
         client._on_disconnect("disconnect", {"reason": "closed"})
 
         chunk1 = state1.stream_queue.get_nowait()
         assert chunk1.type == "error"
+        assert chunk1.content == "connection lost"
         chunk2 = state2.stream_queue.get_nowait()
         assert chunk2.type == "error"
+        # 断连时所有在途会话被包装成终态 error（无 queue 的会话仅置状态）
+        for state in (state1, state2, state3):
+            assert state.state == "error"
+            assert state.chat_complete.is_set()
+
+    def test_on_disconnect_skips_completed_sessions(self, mock_bot_ws):
+        client = AsyncChatClient(uri="ws://host/ws")
+        done = _setup_session_state(client, "done")
+        done.state = "final"
+        done.content = "ok"
+        done.chat_complete.set()
+        done.stream_queue = asyncio.Queue()
+
+        client._on_disconnect("disconnect", {})
+
+        # 已完成的会话不被覆盖成 error，也不追加 error chunk
+        assert done.state == "final"
+        assert done.stream_queue.empty()
 
     def test_on_disconnect_sets_disconnect_event(self, mock_bot_ws):
         client = AsyncChatClient(uri="ws://host/ws")
