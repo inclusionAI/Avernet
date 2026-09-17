@@ -901,7 +901,7 @@ class TestAiohttpBotServicePluginGetBinding:
         result = await plugin.get_binding("bot_001", "20881234", "all")
 
         assert result.binding_id == 202
-        plugin._get_binding_raw.assert_called_once_with("bot_001", "20881234", "online")
+        plugin._get_binding_raw.assert_called_once_with("bot_001", "20881234", "online", default_tag=None)
 
     @pytest.mark.asyncio
     async def test_get_binding_all_falls_through_to_verify(self):

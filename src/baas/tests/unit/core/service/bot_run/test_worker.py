@@ -1471,7 +1471,7 @@ async def test_bot_runner_abort_propagates_to_bot_service(repo, queue):
             return fake_service
 
     class _FakePlugin:
-        async def get_binding(self, bot_id: str, owner_id: str, stage: str):
+        async def get_binding(self, bot_id: str, owner_id: str, stage: str, *, default_tag: str | None = None):
             from secbaas.community.spi.bot_service import BotBindingData
 
             return BotBindingData(
@@ -1554,6 +1554,8 @@ def _make_bot_runner_for_abort(
             bot_id: str,
             owner_id: str,
             stage: str,
+            *,
+            default_tag: str | None = None,
         ) -> Any:
             if isinstance(binding_return, Exception):
                 raise binding_return

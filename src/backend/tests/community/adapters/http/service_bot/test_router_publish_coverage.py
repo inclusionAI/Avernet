@@ -139,7 +139,7 @@ async def test_get_bot_stage_binding_info_paths():
     assert resp.message == "查询成功"
     assert resp.data == {"bot_id": "bot", "binding_id": 1}
     service.get_bot_stage_binding_info.assert_called_once_with(
-        bot_id="bot", owner_id="owner-1", stage="online"
+        bot_id="bot", owner_id="owner-1", stage="online", default_tag=None
     )
 
     service.get_bot_stage_binding_info.side_effect = BotNotFoundError("bot missing")
