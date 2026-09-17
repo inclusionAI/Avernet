@@ -11,6 +11,8 @@
 //! Layer 2 (Database):  bot_info JSON, session_token, name
 //! ```
 
+#[cfg(test)]
+use bcs_service_api::BotDynamicStatus;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -29,9 +31,8 @@ use bcs_service_api::{
     BotSearchCandidateQuery, BotSearchFriendshipFilter,
     BotCapabilities, BotControlPlaneDescriptor, BotControlPlaneOwnedQuery, BotControlPlanePatch,
     BotControlPlaneRecord, BotControlPlaneRepoPort, BotTaskModesQuery, TaskModeMatch,
-    BotDynamicStatus, BotMetricCount,
-    BotMetricsSnapshotPort, ConnectStreamError, RegisteredBot, ServiceError, ServiceResult, Skill,
-    is_mock_token,
+    BotMetricCount,
+    BotMetricsSnapshotPort, RegisteredBot, ServiceError, ServiceResult, Skill,
 };
 
 fn log_bot_cache_source(source: &'static str) {
@@ -223,6 +224,7 @@ impl RegisteredBotInner {
 /// the database holds persistent capabilities and tokens. Heartbeat payloads
 /// are neither retained nor written to an external cache.
 pub struct PersistentBotRepo {
+    identity_locks: admission::IdentityLocks,
     // Layer 1: Process Memory
     /// Bot connections and state.
     bots: RwLock<HashMap<String, RegisteredBotInner>>,
@@ -256,6 +258,7 @@ impl PersistentBotRepo {
         flavor: DbSqlFlavor,
     ) -> Self {
         Self {
+            identity_locks: admission::IdentityLocks::default(),
             bots: RwLock::new(HashMap::new()),
             token_to_bot: RwLock::new(HashMap::new()),
             binding_channel_index: Arc::new(RwLock::new(HashMap::new())),
@@ -1138,9 +1141,14 @@ impl BotMetricsSnapshotPort for PersistentBotRepo {
 
 #[async_trait]
 impl BotRepoPort for PersistentBotRepo {
+    fn begin_identity_operation(&self) -> Box<dyn bcs_service_api::port::repo::BotIdentityOperationPort + '_> {
+        admission::begin(self)
+    }
+
     // ===== Registration & Discovery =====
 
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
+        let _identity = self.identity_locks.lock(&bot_id).await;
         info!(bot_id = %bot_id, name = ?capabilities.name, "register: received registration request");
 
         // Sync binding channel index
@@ -1223,6 +1231,7 @@ impl BotRepoPort for PersistentBotRepo {
         bot_id: &str,
         capabilities: BotCapabilities,
     ) -> ServiceResult<()> {
+        let _identity = self.identity_locks.lock(&bot_id).await;
         info!(bot_id = %bot_id, name = ?capabilities.name, "update_capabilities: replacing capabilities",);
         let session_token: Option<String> = {
             let bots = self.bots.read().await;
@@ -1269,6 +1278,7 @@ impl BotRepoPort for PersistentBotRepo {
         created_by: &str,
         token: &str,
     ) -> ServiceResult<()> {
+        let _identity = self.identity_locks.lock(&bot_id).await;
         info!(bot_id = %bot_id, name = ?capabilities.name, "register_with_owner_and_token: received registration request");
 
         self.save_to_db(&bot_id, &capabilities, Some(token), Some(created_by))
@@ -1349,6 +1359,7 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn update_status(&self, bot_id: &str) -> bool {
+        let _identity = self.identity_locks.lock(&bot_id).await;
         // Update memory
         {
             let mut bots = self.bots.write().await;
@@ -1487,6 +1498,7 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn add_bot_info(&self, bot_id: &str, key: &str, value: String) {
+        let _identity = self.identity_locks.lock(bot_id).await;
         // 目前仅支持 "agent_token"（复用 capabilities.agent_token 存储，仅内存）。
         // 后期需要其他字段时，应在 RegisteredBotInner 上新增一个 HashMap 内存对象
         // 来承载任意 key/value，而不是继续往 capabilities 上加字段。
@@ -1748,6 +1760,7 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn soft_delete(&self, bot_id: &str) -> bool {
+        let _identity = self.identity_locks.lock(&bot_id).await;
         // Soft-delete in the configured database
         let db_deleted = self.soft_delete_in_db(bot_id).await;
 
@@ -1785,6 +1798,7 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn save_to_storage(&self, bot_id: &str, caps: &BotCapabilities) -> ServiceResult<()> {
+        let _identity = self.identity_locks.lock(&bot_id).await;
         // Sync binding channel index
         self.sync_binding_channel_index(bot_id, caps).await;
 
@@ -1824,6 +1838,7 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn update_visibility(&self, bot_id: &str, visibility: &str) -> ServiceResult<()> {
+        let _identity = self.identity_locks.lock(&bot_id).await;
         let env = resolve_env();
         let visibility_value = if visibility.is_empty() {
             "private"
@@ -1882,6 +1897,7 @@ impl BotRepoPort for PersistentBotRepo {
         bot_id: &str,
         status: bcs_service_api::ActorStatus,
     ) -> ServiceResult<()> {
+        let _identity = self.identity_locks.lock(&bot_id).await;
         let env = resolve_env();
         let status_str = match status {
             bcs_service_api::ActorStatus::Online => "online",
@@ -1944,6 +1960,7 @@ impl BotRepoPort for PersistentBotRepo {
         staff_no: &str,
         nick_name: &str,
     ) -> ServiceResult<bcs_service_api::EnsureHumanResult> {
+        let _identity = self.identity_locks.lock(&format!("human_{staff_no}")).await;
         let env = resolve_env();
         let bot_uuid = format!("human_{}", staff_no);
         let default_summary = "写点什么介绍自己";
@@ -2187,6 +2204,7 @@ impl BotRepoPort for PersistentBotRepo {
     /// back to writing `staff_no` (because the auth SDK didn't return
     /// `nick_name` at the time).
     async fn update_human_name(&self, staff_no: &str, new_name: &str) -> ServiceResult<()> {
+        let _identity = self.identity_locks.lock(&format!("human_{staff_no}")).await;
         let env = resolve_env();
         let bot_uuid = format!("human_{}", staff_no);
 
@@ -2238,6 +2256,7 @@ impl BotRepoPort for PersistentBotRepo {
         created_by: &str,
         overwrite: bool,
     ) -> ServiceResult<()> {
+        let _identity = self.identity_locks.lock(&bot_id).await;
         // Update in-memory (respects overwrite flag)
         {
             let mut bots = self.bots.write().await;
@@ -2254,6 +2273,7 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn save_token(&self, bot_id: &str, token: &str) -> ServiceResult<()> {
+        let _identity = self.identity_locks.lock(&bot_id).await;
         self.save_token_to_db(bot_id, token).await
     }
 
@@ -2347,155 +2367,8 @@ impl BotRepoPort for PersistentBotRepo {
 
     // ===== Streaming Connection Management =====
 
-    async fn connect_or_promote_streaming(
-        &self,
-        bot_id: String,
-    ) -> Result<String, ConnectStreamError> {
-        // Decide the branch from the registry's authoritative current token
-        // (memory → DB fallback via load_token) and existence (memory or DB),
-        // before taking the write lock, so a DB-only bot after a BCS restart is
-        // still located and a previously-registered bot (even with no token) is
-        // refused rather than silently overwritten.
-        let existing_token = self.load_token(&bot_id).await;
-        let is_mock = existing_token.as_deref().map(is_mock_token).unwrap_or(false);
-        let bot_exists = {
-            let in_mem = self.bots.read().await.get(&bot_id).is_some();
-            in_mem || existing_token.is_some() || self.exists_in_db(&bot_id).await
-        };
-        // ws_connection presence and connected state are only meaningful in
-        // memory; a DB-only entry has no live connection.
-        let in_memory_connected = {
-            let bots = self.bots.read().await;
-            bots.get(&bot_id)
-                .map(|bot| bot.ws_connection.is_some())
-                .unwrap_or(false)
-        };
-        let token_preview = |t: &str| format!("{}...", &t[..t.len().min(4)]);
-
-        match (bot_exists, is_mock, in_memory_connected) {
-            // truly new (no record anywhere) → create with a real token
-            (false, _, _) => {
-                let session_token = uuid::Uuid::new_v4().to_string();
-                let mut bots = self.bots.write().await;
-                bots.insert(
-                    bot_id.clone(),
-                    RegisteredBotInner {
-                        bot_uuid: bot_id.clone(),
-                        last_heartbeat: Instant::now(),
-                        capabilities: BotCapabilities::default(),
-                        status: bcs_service_api::ActorStatus::Online,
-                        actor_kind: bcs_service_api::ActorKind::Bot,
-                        ws_connection: Some(BotConnection {
-                            session_token: session_token.clone(),
-                            connected_at: Instant::now(),
-                        }),
-                        session_token: Some(session_token.clone()),
-                        env: Some(resolve_env()),
-                        hidden: false,
-                        created_by: None,
-                    },
-                );
-                self.token_to_bot
-                    .write()
-                    .await
-                    .insert(session_token.clone(), bot_id.clone());
-                info!(
-                    bot_id = %bot_id,
-                    branch = "create",
-                    token_preview = %token_preview(&session_token),
-                    "register_streaming_connection: create"
-                );
-                Ok(session_token)
-            }
-            // pre-registered plugin bot, not yet attached → promote MOCK → real
-            (true, true, _) => {
-                let previous_mock = existing_token.clone();
-                let session_token = uuid::Uuid::new_v4().to_string();
-                // Persist FIRST: if this fails, surface the error before any
-                // in-memory mutation, so memory and DB never split into a
-                // "real-token in memory, MOCK in DB" half-state that only
-                // surfaces as a stale-MOCK reconnect after a BCS restart.
-                if let Err(err) = self.save_token_to_db(&bot_id, &session_token).await {
-                    warn!(
-                        request_id = %bcs_observability::CurrentRequestId,
-                        bot_id = %bot_id,
-                        error = %err,
-                        "connect_or_promote_streaming: promote_mock DB persist failed; refusing ws"
-                    );
-                    return Err(ConnectStreamError::InternalError(format!(
-                        "promote_mock: failed to persist promoted token: {err}"
-                    )));
-                }
-                let mut bots = self.bots.write().await;
-                if let Some(bot) = bots.get_mut(&bot_id) {
-                    bot.ws_connection = Some(BotConnection {
-                        session_token: session_token.clone(),
-                        connected_at: Instant::now(),
-                    });
-                    bot.session_token = Some(session_token.clone());
-                    bot.last_heartbeat = Instant::now();
-                } else {
-                    // DB-only after restart: hydrate the entry with the new real
-                    // token so subsequent connects see a real-token bot.
-                    bots.insert(
-                        bot_id.clone(),
-                        RegisteredBotInner {
-                            bot_uuid: bot_id.clone(),
-                            last_heartbeat: Instant::now(),
-                            capabilities: BotCapabilities::default(),
-                            status: bcs_service_api::ActorStatus::Online,
-                            actor_kind: bcs_service_api::ActorKind::Bot,
-                            ws_connection: Some(BotConnection {
-                                session_token: session_token.clone(),
-                                connected_at: Instant::now(),
-                            }),
-                            session_token: Some(session_token.clone()),
-                            env: Some(resolve_env()),
-                            hidden: false,
-                            created_by: None,
-                        },
-                    );
-                }
-                let mut token_to_bot = self.token_to_bot.write().await;
-                if let Some(prev) = previous_mock {
-                    token_to_bot.remove(&prev);
-                }
-                token_to_bot.insert(session_token.clone(), bot_id.clone());
-                info!(
-                    bot_id = %bot_id,
-                    branch = "promote_mock",
-                    previous_token_kind = "mock",
-                    token_preview = %token_preview(&session_token),
-                    "register_streaming_connection: promote_mock"
-                );
-                Ok(session_token)
-            }
-            // real token, already connected → reject
-            (true, false, true) => {
-                warn!(
-                    request_id = %bcs_observability::CurrentRequestId,
-                    bot_id = %bot_id,
-                    branch = "already_connected",
-                    "connect_or_promote_streaming: real-token bot already connected"
-                );
-                Err(ConnectStreamError::AlreadyConnected(bot_id))
-            }
-            // real token, not connected → anti-hijack: refuse an empty/stale-token
-            // claim of a real-token bot. (Reconnect by the real token still works
-            // via the existing reconnect_streaming(token) path.)
-            (true, false, false) => {
-                warn!(
-                    request_id = %bcs_observability::CurrentRequestId,
-                    bot_id = %bot_id,
-                    branch = "already_registered",
-                    "connect_or_promote_streaming: refusing empty/stale-token claim of real-token bot"
-                );
-                Err(ConnectStreamError::AlreadyRegistered(bot_id))
-            }
-        }
-    }
-
     async fn register_streaming_connection(&self, bot_id: String) -> Result<String, ()> {
+        let _identity = self.identity_locks.lock(&bot_id).await;
         info!(bot_id = %bot_id, "register_streaming_connection: registering new connection");
 
         let mut bots = self.bots.write().await;
@@ -2563,6 +2436,7 @@ impl BotRepoPort for PersistentBotRepo {
         let token_preview = format!("{}...", &existing_token[..existing_token.len().min(4)]);
         info!(bot_id = %bot_id, token_preview = %token_preview, "reconnect_streaming: found bot by token");
 
+        let _identity = self.identity_locks.lock(&bot_id).await;
         let mut bots = self.bots.write().await;
 
         // Check if bot is already connected
@@ -2632,6 +2506,7 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn disconnect_streaming(&self, bot_id: &str) {
+        let _identity = self.identity_locks.lock(&bot_id).await;
         let mut bots = self.bots.write().await;
 
         if let Some(bot) = bots.get_mut(bot_id) {
@@ -2670,12 +2545,12 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn store_token_mapping(&self, token: String, bot_id: String) {
-        let mut token_to_bot = self.token_to_bot.write().await;
-        token_to_bot.insert(token.clone(), bot_id.clone());
-        debug!(bot_id = %bot_id, token = %token, "Token mapping stored");
+        let _identity = self.identity_locks.lock(&bot_id).await;
+        self.store_token_mapping_under_identity_lock(token, bot_id).await
     }
 
     async fn register_http_connection(&self, bot_id: String, token: String) -> String {
+        let _identity = self.identity_locks.lock(&bot_id).await;
         // Create a minimal bot entry if it doesn't exist
         {
             let mut bots = self.bots.write().await;
@@ -2699,7 +2574,7 @@ impl BotRepoPort for PersistentBotRepo {
             }
         }
         // Store token mapping
-        self.store_token_mapping(token.clone(), bot_id.clone())
+        self.store_token_mapping_under_identity_lock(token.clone(), bot_id.clone())
             .await;
         token
     }
@@ -3328,6 +3203,7 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
         env: &str,
         patch: BotControlPlanePatch,
     ) -> ServiceResult<Option<BotControlPlaneRecord>> {
+        let _identity = self.identity_locks.lock(bot_id).await;
         if patch.user_visibility.is_some()
             || patch.friend_ext.is_some()
             || patch.friend_check_in_strategy.is_some()
@@ -3866,3 +3742,18 @@ mod tests {
         assert!(json.contains("single quotes"));
     }
 }
+
+impl PersistentBotRepo {
+    async fn store_token_mapping_under_identity_lock(&self, token: String, bot_id: String) {
+        let mut token_to_bot = self.token_to_bot.write().await;
+        token_to_bot.insert(token.clone(), bot_id.clone());
+        debug!(bot_id = %bot_id, token = %token, "Token mapping stored");
+    }
+}
+
+mod admission;
+mod admission_sql;
+
+#[cfg(test)]
+#[path = "../tests/unit/streaming_admission.rs"]
+mod streaming_admission_tests;

@@ -123,6 +123,10 @@ impl NoConnectBotRepo {
 
 #[async_trait]
 impl BotRepoPort for NoConnectBotRepo {
+    fn begin_identity_operation(&self) -> Box<dyn bcs_service_api::port::repo::BotIdentityOperationPort + '_> {
+        self.inner.begin_identity_operation()
+    }
+
     async fn register(&self, bot_id: String, capabilities: BotCapabilities) -> ServiceResult<()> {
         self.inner.register(bot_id, capabilities).await
     }

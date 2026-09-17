@@ -1,7 +1,7 @@
 use super::*;
 use bcs_db_local::LocalSqliteDbPlugin;
 
-async fn database() -> Arc<dyn DbPlugin> {
+pub(super) async fn database() -> Arc<dyn DbPlugin> {
     let db = Arc::new(LocalSqliteDbPlugin::new().unwrap());
     db.execute(DbStatement::new(
         "CREATE TABLE bcs_bots (

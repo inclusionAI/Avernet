@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 
-use crate::core::registry::ConnectStreamError;
 use crate::types::{
     ActorStatus, AgentCredentials, BotCapabilities, EnsureHumanResult,
     RegisteredBot, ServiceResult,
@@ -263,26 +262,12 @@ pub trait BotRepoPort: Send + Sync {
         None
     }
 
+    /// Start a request-local identity operation against this existing registry.
+    /// The operation owns lookup reuse and per-Bot serialization, not admission
+    /// policy. Core selects the identity, authorizes it and supplies the update.
+    fn begin_identity_operation(&self) -> Box<dyn BotIdentityOperationPort + '_>;
+
     async fn register_streaming_connection(&self, bot_id: String) -> Result<String, ()>;
-    /// Connect or promote a streaming connection by `bot_id`, deciding
-    /// atomically inside the store:
-    /// - bot absent            → create with a fresh real token + attach ws
-    /// - bot exists, MOCK token → promote: replace MOCK with a real token +
-    ///   attach ws (and persist the real token back to `bcs_bots`)
-    /// - bot exists, real token, no ws → `AlreadyRegistered` (anti-hijack)
-    /// - bot exists, real token, ws present → `AlreadyConnected`
-    ///
-    /// Default impl delegates to [`register_streaming_connection`]
-    /// (preserving legacy semantics for noop/test repos).
-    async fn connect_or_promote_streaming(
-        &self,
-        bot_id: String,
-    ) -> Result<String, ConnectStreamError> {
-        let id = bot_id.clone();
-        self.register_streaming_connection(bot_id)
-            .await
-            .map_err(|_| ConnectStreamError::AlreadyConnected(id))
-    }
     async fn reconnect_streaming(&self, existing_token: String) -> Result<(String, String), ()>;
     async fn disconnect_streaming(&self, bot_id: &str);
     async fn is_connected(&self, bot_id: &str) -> bool;
@@ -325,4 +310,59 @@ pub trait BotRepoPort: Send + Sync {
     }
 
     async fn register_http_connection(&self, bot_id: String, token: String) -> String;
+}
+
+/// Complete persistent identity facts for Core admission. Contains credentials:
+/// deliberately neither Debug nor Serialize, and never stored in a global miss cache.
+#[derive(Clone)]
+pub struct BotIdentity {
+    pub id: String,
+    pub token: Option<String>,
+    pub deleted: bool,
+    pub capabilities: BotCapabilities,
+    pub env: Option<String>,
+    pub created_by: Option<String>,
+    pub actor_kind: crate::ActorKind,
+    pub status: ActorStatus,
+}
+
+/// Process-local facts; Core owns the heartbeat-age expiry policy.
+#[derive(Clone)]
+pub struct BotMemoryIdentity {
+    pub identity: BotIdentity,
+    pub last_heartbeat: std::time::Instant,
+    pub connected: bool,
+}
+
+/// Storage mutation chosen by Core after authentication and admission policy.
+/// No ID selection, token generation or business rejection is performed here.
+pub struct BotIdentityUpdate {
+    pub identity: BotIdentity,
+    pub token: String,
+    /// Compare the loaded persistent token/deletion state and replace the token
+    /// before attaching memory. A failed comparison returns ServiceError::Conflict.
+    pub replace_persistent_token: bool,
+}
+
+/// One connection's storage scope, borrowing the existing registry. Implementations
+/// own their locks; callers see facts only. Drop (including cancellation) releases
+/// the scope. No database transaction or global map lock spans Core computation.
+/// All cooperating local identity writers serialize with this scope; this does
+/// not provide cross-process or direct-SQL exclusion.
+#[async_trait]
+pub trait BotIdentityOperationPort: Send {
+    /// Locate a candidate, not authenticate it. Preserve the complete indexed row
+    /// for reuse after lock_identity; a token miss is not an ID miss.
+    async fn token_owner(&mut self, token: &str) -> ServiceResult<Option<String>>;
+    /// Lock the Core-selected ID once and return its memory facts, including stale
+    /// temporary objects. Core may reject immediately without reading persistence.
+    async fn lock_identity(&mut self, id: &str) -> ServiceResult<Option<BotMemoryIdentity>>;
+    /// Read under the identity lock. Repeat calls reuse both rows and successful
+    /// misses. Errors remain errors and never become cached absence. Include deleted
+    /// identities. A pre-lock row is reused only if its local mutation fence holds.
+    async fn stored_identity(&mut self) -> ServiceResult<Option<BotIdentity>>;
+    /// Consume the scope and apply the Core-selected mutation using the loaded
+    /// facts. Persistence failures do not attach memory. Implementations must not
+    /// re-enter lock-taking registry methods while this scope holds the Bot lock.
+    async fn apply(self: Box<Self>, update: BotIdentityUpdate) -> ServiceResult<()>;
 }

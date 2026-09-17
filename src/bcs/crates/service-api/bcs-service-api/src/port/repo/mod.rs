@@ -21,7 +21,7 @@ pub mod session;
 pub mod session_file;
 pub mod user_identity;
 
-pub use bot::BotRepoPort;
+pub use bot::{BotIdentity, BotIdentityOperationPort, BotIdentityUpdate, BotMemoryIdentity, BotRepoPort};
 pub use bot_actor_config::BotActorConfigRepoPort;
 pub use chat_run::{
     CasOutcome, ChatRunCompletionPolicy, ChatRunRecord, ChatRunRepoError, ChatRunRepoPort,

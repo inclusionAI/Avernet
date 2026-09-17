@@ -3,6 +3,7 @@
 //! Concrete repository implementations call these functions from
 //! `tests/conformance_*.rs`.
 
+pub mod bot_identity;
 pub mod edge_grant;
 pub mod message_delivery;
 pub mod permission_profile;

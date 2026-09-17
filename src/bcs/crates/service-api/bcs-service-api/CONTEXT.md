@@ -147,3 +147,18 @@ pages, bounds and errors. Facade tests prohibit full-list calls and verify paged
 results/errors/count conversion. HTTP contract and legacy route/search tests
 cover compatibility. MySQL SQL construction tests do not substitute for a live
 MySQL conformance run.
+
+## Streaming identity operation
+
+`BotRepoPort::begin_identity_operation` returns a request-local
+`BotIdentityOperationPort` borrowing the existing registry. Its contract covers
+token-candidate lookup, a locked memory snapshot, persistent rows or successful
+misses, and a consuming update. Storage errors remain errors. DTOs carry identity
+facts, including heartbeat time and deletion state; Core owns authentication,
+expiry, ID/token generation and admission decisions. Neither credentials nor
+lookup scopes are serializable or Debug-printable.
+
+Both production registries implement the operation, and both run its centralized
+conformance harness. The former policy-bearing repo methods are replaced together
+with their callers; the Core compatibility method remains available. Existing
+Bot wire fields and error classes remain unchanged.

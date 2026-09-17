@@ -49,3 +49,20 @@ delivery state machine or resume nonterminal streams from durable metadata.
 
 - `cargo test --package bcs-bot --manifest-path src/bcs/Cargo.toml`
 - `cargo check --package bcs-bot --all-targets --manifest-path src/bcs/Cargo.toml`
+
+Streaming `connect_bot` owns identity selection, credential validation, token
+generation and the new/reconnect/MOCK-promotion/recovery/rejection decision. Core
+uses a request-local operation borrowed from the existing Bot repository, which
+retains lookup results and the per-Bot lock through the decision and update.
+Core never depends on concrete SQL/file operations, and Store never calls Core.
+
+Temporary identity expiry is heartbeat age greater than 300 seconds. Recovery
+requires successful persistent absence, expired temporary state and no active
+connection. Unexpired temporary identities require their original credential;
+durable and deleted identities cannot be reclaimed by expiry. DB failures remain
+errors. The compatibility `connect_or_promote_streaming` service method uses the
+same Core policy. HTTP behavior is unchanged.
+
+Core tests cover admission policy and the full Core-to-SQL path: one read for a
+new identity, hot reconnect and uncontended cold token reconnect, with no repeated
+get/token/capability lookup chain. Store conformance covers the operation mechanics.
