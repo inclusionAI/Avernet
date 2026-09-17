@@ -247,3 +247,10 @@ Copyright © 2026 Ant Group. All rights reserved.
 ---
 
 **Quick links**: [DESIGN.md](./DESIGN.md) | [install.sh](./install.sh) | [install.md](./install.md)
+
+## Agency profile multi-instance launcher
+
+[`launch-agency.sh`](./launch-agency.sh) starts one isolated local OpenClaw Gateway
+per selected agency-agents profile and connects each Bot to BCS. It keeps the
+existing single-instance installer unchanged. See the [usage and recovery guide
+(in Chinese)](./AGENCY.zh-CN.md). Run `launch-agency.sh --help` for English options.

@@ -217,3 +217,9 @@ Copyright © 2026 Ant Group. All rights reserved.
 ---
 
 **快速链接**：[DESIGN.md](./DESIGN.md) | [install.sh](./install.sh) | [install.md](./install.md)
+
+## Agency 角色多实例接入
+
+使用新增的 [`launch-agency.sh`](./launch-agency.sh)，指定一个或多个 agency-agents
+profile，启动独立的本地 OpenClaw 实例并接入 BCS。用法、隔离与重试语义见
+[Agency 多实例指南](./AGENCY.zh-CN.md)。原 `install.sh` 的单实例行为不变。
