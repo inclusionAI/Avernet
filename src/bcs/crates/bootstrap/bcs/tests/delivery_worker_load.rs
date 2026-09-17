@@ -166,7 +166,7 @@ async fn scene(name: &str, bots: usize, sessions: usize, cap: usize, ballast: bo
     let worker = DeliveryRuntime { policy: None, service: service.clone(), preparation: io.clone(), transport: io.clone(), config: DeliveryRuntimeConfig {
         max_safe_retries: 0, pause_dispatch: false,
         bots: (0..bots).map(|b| (format!("bot{b:03}"), DeliveryRuntimePolicy { max_running: cap, min_send_interval_ms: 0 })).collect(),
-        tick: Duration::from_millis(100), expiry_tick: Duration::from_secs(1), io_timeout: Duration::from_secs(10), run_timeout: Duration::from_secs(120), cancel_timeout: Duration::from_secs(10), max_tasks: 32, max_abort_tasks: 2,
+        tick: Duration::from_millis(100), expiry_tick: Duration::from_secs(1), io_timeout: Duration::from_secs(10), run_timeout: Duration::from_secs(120), cancel_timeout: Duration::from_secs(10), startup_recovery_grace: Duration::ZERO, max_tasks: 32, max_abort_tasks: 2,
     }};
     let expected = (bots - usize::from(offline)) * sessions * 10;
     let start = Instant::now();
@@ -195,8 +195,8 @@ async fn scene(name: &str, bots: usize, sessions: usize, cap: usize, ballast: bo
         if let Some(stats) = m.operations.get(operation) { assert!(stats.2 <= limit, "unbounded {operation}"); }
     }
     assert_eq!(counts.get("completed").copied(), Some(expected as i64));
-    assert_eq!(counts.get("queued").copied().unwrap_or(0), if offline { (sessions * 10) as i64 } else { 0 });
-    assert!(counts.keys().all(|state| state == "completed" || state == "queued"));
+    assert_eq!(counts.get("failed").copied().unwrap_or(0), if offline { (sessions * 10) as i64 } else { 0 });
+    assert!(counts.keys().all(|state| state == "completed" || state == "failed"));
     Ok(())
 }
 

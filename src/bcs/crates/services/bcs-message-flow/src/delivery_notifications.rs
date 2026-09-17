@@ -19,7 +19,7 @@ fn hint(row: &PersistedMessageDelivery, now: i64) -> Option<(&'static str, &'sta
     use bcs_domain::message_delivery::DeliveryWaitReason;
     match row.state.status {
         Status::Queued if row.wait_reason == Some(DeliveryWaitReason::BotOffline) => {
-            Some(("offline", "Bot 暂时离线，消息已排队"))
+            Some(("offline", "服务正在恢复，短暂等待 Bot 重新连接"))
         }
         Status::Queued if now.saturating_sub(row.created_at_ms) >= 2_000 => {
             Some(("queued", "消息已排队，正在等待该 Bot 的处理名额"))

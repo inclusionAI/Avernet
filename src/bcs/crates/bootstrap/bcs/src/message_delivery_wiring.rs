@@ -103,7 +103,9 @@ pub async fn wire_with_leader(
             tick: Duration::from_millis(100), expiry_tick: Duration::from_secs(1),
             io_timeout: Duration::from_secs(30),
             run_timeout: Duration::from_millis(config.provider_chat_run_timeout_ms),
-            cancel_timeout: Duration::from_secs(30), max_tasks: 32, max_abort_tasks: 2,
+            cancel_timeout: Duration::from_secs(30),
+            startup_recovery_grace: Duration::from_secs(10),
+            max_tasks: 32, max_abort_tasks: 2,
         },
     };
     let (sender, receiver) = tokio::sync::watch::channel(false);

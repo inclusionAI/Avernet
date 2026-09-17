@@ -339,6 +339,15 @@ Provider 拒绝本次调用：delivery 直接进入 `failed`、释放 lane 且�
 `DeliveryNotSent`，才允许安全重试。网络 execute 开始后没有取得完整响应的连接错误、响应头
 超时、成功响应体中断/无法解码等仍保持 Unknown，禁止自动重发。终态后的迟到 callback
 不会重新打开 delivery。
+
+离线不是队列的长期等待能力。每次进程启动或 master 接管后，调度器提供固定 10 秒的启动恢复
+窗口，允许 WebSocket Bot 重新连接；窗口内尚未连接的可调度 lane 头保持 `queued`，等待原因是
+`bot_offline`。窗口结束后，只有已满足前序、容量、暂停和限速条件、即将尝试发送的离线 lane 头
+进入 `failed`，未发生网络 I/O，绑定 context 按未发送语义释放。后续 lane 头在成为可调度头时
+执行同样判断，因此不会把离线等待重新做成长时间队列。消息若在准备后、真正写 WebSocket 前
+断线，适配器返回完整 `delivered=false + BotNotConnected`，该 attempt 同样直接 `failed`、不重试；
+只有没有完整结果的传输异常才进入 Unknown。启动恢复窗口是部署竞态保护，不是可配置的业务 TTL。
+
 TTL 到期不触发运行中请求或 Unknown 的强制释放。
 
 ## 查询与取消
