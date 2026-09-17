@@ -2234,11 +2234,17 @@ class ExecutionEngine:
 
     def _reset_action_result(self, exec_error: str) -> str:
         """Map the ``_on_harness_collect`` ``exec_error`` trigger to a RESET
-        ``action_result`` category (REQ-4). ``external_harness`` is the
-        sentinel ``on_harness`` produces from the harness SLA-timeout patch
-        (that patch carries no ``exec_error``), so it maps to ``sla_timeout``;
-        any other non-canonical string (e.g. a poller ``exec_error`` arriving
-        via ``on_report``) is treated as an execution-failure retry.
+        ``action_result`` category (REQ-4).
+
+        ``external_harness`` is the sentinel ``on_harness`` emits when a harness
+        poll patch has no ``exec_error``; in prod the ONLY such patch is the
+        RUNNING SLA-timeout reset (pinned by
+        ``test_only_sla_timeout_harness_patch_omits_exec_error``), so the mapping
+        ``external_harness → sla_timeout`` depends on that invariant — if a
+        future harness patch omits ``exec_error`` for a non-SLA reason, revisit
+        this mapping. Any other non-canonical string (e.g. a poller ``exec_error``
+        arriving via ``on_report``) is treated as an execution-failure retry
+        (``exec_failed_retry``).
         """
         if exec_error == "pending_dispatch_stuck":
             return "pending_dispatch_stuck"

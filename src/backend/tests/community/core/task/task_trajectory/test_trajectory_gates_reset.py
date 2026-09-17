@@ -65,10 +65,16 @@ from agentclaw.community.core.task.domain.models import (
     TaskNode,
     TaskNodePatch,
     TaskSpec,
+    effective_run_mode,
 )
 from agentclaw.community.core.task.repository.types import TrajectoryEventRecord
 from agentclaw.community.core.task.task_center.engine import ExecutionEngine
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_harness.harness import (
+    TaskHarness,
+    effective_pending_timeout_ms,
+    effective_sla_threshold_ms,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -620,3 +626,168 @@ class TestResetDefensive:
         assert any("发射失败" in rec.message for rec in caplog.records)
         # gate drove forward: reset + re-dispatch → RUNNING
         assert svc._get_node(graph, "c1").status == Status.RUNNING
+
+
+# ---------------------------------------------------------------------------
+# I1 — lockstep regression: the threshold mirror must track the harness's own
+#   _sla_timeout / _pending_timeout selection (so the trajectory row records
+#   "the threshold that was actually applied"). Silent drift → noisy regression.
+# ---------------------------------------------------------------------------
+
+
+class _Clock:
+    """Injectable monotonic clock for ``TaskHarness`` (mirrors test_harness.py)."""
+
+    def __init__(self, start: float = 0.0) -> None:
+        self._t = start
+
+    def __call__(self) -> float:
+        return self._t
+
+    def advance(self, dt: float) -> None:
+        self._t += dt
+
+
+class _Recorder:
+    """Records every ``on_harness_fn`` patch (mirrors test_harness.py)."""
+
+    def __init__(self) -> None:
+        self.patches: list[TaskNodePatch] = []
+
+    def __call__(self, patch: TaskNodePatch) -> None:
+        self.patches.append(patch)
+
+
+def _dispatch_running(svc, graph, node_id: str, *, task_id: str = "t1",
+                     run_mode: str = "single_bot", assignee: str = "bot1") -> None:
+    svc.add_task_nodes([_child(node_id, task_id)], parent_node_id=task_id)
+    svc.update_task_node_info(
+        _patch(task_id, node_id, status=Status.RUNNING,
+               run_mode=run_mode, assignee=assignee)
+    )
+
+
+class TestThresholdMirrorLockstep:
+    """I1 lockstep regression pin: ``harness.effective_sla_threshold_ms`` /
+    ``effective_pending_timeout_ms`` must match the harness's OWN
+    ``_sla_timeout`` / ``_pending_timeout`` selection across the
+    {single-bot, coop-group} × {default, override} + {default, PENDING_TIMEOUT
+    override} matrix. The mirror is a silent drift hazard (the trajectory row
+    records ``sla_threshold_ms`` = "the threshold that was actually applied"
+    for an SLA-timeout reset); this test converts silent drift into a noisy
+    regression — if anyone edits the harness's selection math, this test fails
+    and forces the mirror update in lockstep.
+
+    A custom-constructed harness (constructor-injected defaults) is pinned to
+    DIVERGE from the helpers: the helpers read MODULE constants, while the
+    harness instance reads its injected defaults. This is the documented
+    limitation the patch-carried-seam follow-up (harness computing the threshold
+    at reset and passing it via the patch) would remove; if that follow-up
+    retires the helpers, update/remove the divergence test.
+    """
+
+    def test_mirror_matches_default_constructed_harness_across_matrix(self):
+        svc = TaskGraphService()
+        graph = svc.initialize_graph(_task_info("t1"))
+        # two RUNNING leaves: single_bot + coop_group (run_mode drives SLA pick)
+        _dispatch_running(svc, graph, "s1", run_mode="single_bot")
+        _dispatch_running(svc, graph, "g1", run_mode="coop_group")
+        s_node = svc._get_node(graph, "s1")
+        g_node = svc._get_node(graph, "g1")
+        harness = TaskHarness(svc)  # default-constructed (prod wiring)
+        cfg = svc._execution_config("t1") or {}
+
+        # SLA: single-bot 600s, coop-group 900s (default constants)
+        assert int(harness._sla_timeout("t1", s_node) * 1000) == \
+            effective_sla_threshold_ms(cfg, effective_run_mode(s_node)) == 600_000
+        assert int(harness._sla_timeout("t1", g_node) * 1000) == \
+            effective_sla_threshold_ms(cfg, effective_run_mode(g_node)) == 900_000
+        # PENDING: 180s default
+        assert int(harness._pending_timeout("t1") * 1000) == \
+            effective_pending_timeout_ms(cfg) == 180_000
+
+        # SLA_TIMEOUT override → both helper and harness honor it (120s),
+        # regardless of run_mode (override wins over run_mode default).
+        graph.extend_props["execution_config"]["SLA_TIMEOUT"] = 120
+        cfg = svc._execution_config("t1") or {}
+        assert int(harness._sla_timeout("t1", s_node) * 1000) == \
+            effective_sla_threshold_ms(cfg, effective_run_mode(s_node)) == 120_000
+        assert int(harness._sla_timeout("t1", g_node) * 1000) == \
+            effective_sla_threshold_ms(cfg, effective_run_mode(g_node)) == 120_000
+        graph.extend_props["execution_config"].pop("SLA_TIMEOUT", None)
+
+        # PENDING_TIMEOUT override → both honor it (60s)
+        graph.extend_props["execution_config"]["PENDING_TIMEOUT"] = 60
+        cfg = svc._execution_config("t1") or {}
+        assert int(harness._pending_timeout("t1") * 1000) == \
+            effective_pending_timeout_ms(cfg) == 60_000
+
+    def test_mirror_diverges_for_custom_constructed_harness(self):
+        """Known-limitation pin (NOT a desired property): the helpers read
+        MODULE constants; a custom-constructed harness reads its injected
+        defaults. They DIVERGE — the trajectory would record the module
+        constant (600/180 s), not the harness's actual threshold (10/5 s).
+        Production harnesses are default-constructed, so this divergence is
+        latent today; the patch-carried-seam follow-up removes it by having the
+        harness compute the threshold itself. If that follow-up lands, this
+        assertion's ``!=`` should flip to ``==`` (or the helpers retire).
+        """
+        svc = TaskGraphService()
+        graph = svc.initialize_graph(_task_info("t1"))
+        _dispatch_running(svc, graph, "s1", run_mode="single_bot")
+        s_node = svc._get_node(graph, "s1")
+        custom = TaskHarness(
+            svc,
+            default_sla_timeout=10.0,
+            default_coop_group_sla_timeout=20.0,
+            default_pending_timeout=5.0,
+        )
+        cfg = svc._execution_config("t1") or {}
+        # custom harness applies its injected defaults (10s single / 5s pending)
+        assert int(custom._sla_timeout("t1", s_node) * 1000) == 10_000
+        assert int(custom._pending_timeout("t1") * 1000) == 5_000
+        # …while the helpers apply the MODULE constants (600s / 180s) → DIVERGE
+        assert effective_sla_threshold_ms(cfg, effective_run_mode(s_node)) == 600_000
+        assert effective_pending_timeout_ms(cfg) == 180_000
+        assert effective_sla_threshold_ms(cfg, effective_run_mode(s_node)) != \
+            int(custom._sla_timeout("t1", s_node) * 1000)
+        assert effective_pending_timeout_ms(cfg) != \
+            int(custom._pending_timeout("t1") * 1000)
+
+
+# ---------------------------------------------------------------------------
+# M3 — pin the load-bearing invariant behind ``external_harness → sla_timeout``
+# ---------------------------------------------------------------------------
+
+
+class TestExternalHarnessInvariant:
+    """M3: the ``_reset_action_result`` mapping ``external_harness →
+    sla_timeout`` depends on the invariant that the harness's SLA-timeout poll
+    patch is the ONLY harness poll patch carrying no ``exec_error`` (on_harness
+    substitutes the ``external_harness`` sentinel when ``exec_error`` is None).
+    Pin that invariant so a future harness patch that omits ``exec_error`` for
+    a non-SLA reason breaks loudly here, forcing a revisit of the mapping
+    (documented in ``_reset_action_result``'s docstring).
+    """
+
+    def test_only_sla_timeout_harness_patch_omits_exec_error(self):
+        svc = TaskGraphService()
+        graph = svc.initialize_graph(_task_info("t1"))
+        _dispatch_running(svc, graph, "c1", run_mode="single_bot")
+        clock = _Clock(0.0)
+        rec = _Recorder()
+        h = TaskHarness(svc, rec, clock=clock, default_sla_timeout=5.0)
+        h.register("t1")
+        h._poll_once()  # first sight: record t0, no reset
+        clock.advance(10.0)  # t=10 > sla=5 → SLA-timeout reset patch
+        resets = h._poll_once()
+        assert len(resets) == 1, "SLA-timeout reset should fire one patch"
+        patch = rec.patches[0]
+        # The load-bearing invariant: the SLA-timeout patch has NO exec_error
+        # (→ on_harness substitutes "external_harness" → gate maps to sla_timeout).
+        assert patch.exec_error is None, (
+            "SLA-timeout patch must omit exec_error — the external_harness → "
+            "sla_timeout mapping depends on this; if a future harness patch "
+            "omits exec_error for a non-SLA reason, revisit _reset_action_result."
+        )
+        assert patch.extend_props_patch.get("harness_reset") == "timeout"
