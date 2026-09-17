@@ -313,9 +313,87 @@ def test_storage_quota_is_backend_config_independent_of_rollout(value, expected)
     common.get_config.return_value = {"param_value": {"quota": value}}
     service = BotStoragePolicyService(MagicMock(), MagicMock(), common,
         env="pre", select_provider=MagicMock(), resolve_template=MagicMock(), get_template=MagicMock())
-    assert service.get_storage_quota("pre") == expected
+    assert service.get_storage_quota("pre", "openclaw") == expected
     common.get_config.assert_called_once_with(
         business_code="bot_storage", param_code="storage", env="pre"
     )
     common.get_config.side_effect = RuntimeError("unavailable")
-    assert service.get_storage_quota("pre") == "1G"
+    assert service.get_storage_quota("pre", "openclaw") == "1G"
+
+
+def _quota_service(param_value):
+    from unittest.mock import MagicMock
+    from agentclaw.community.core.common_config.bot_config_service import BotStoragePolicyService
+
+    common = MagicMock()
+    common.get_config.return_value = {"param_value": param_value}
+    return BotStoragePolicyService(MagicMock(), MagicMock(), common,
+        env="pre", select_provider=MagicMock(), resolve_template=MagicMock(), get_template=MagicMock())
+
+
+@pytest.mark.parametrize("engine,expected", [
+    ("openclaw", "2G"),
+    ("claude_code", "1G"),
+    ("teclaw", "500M"),
+])
+def test_engine_quota_wins_over_shared_quota(engine, expected):
+    service = _quota_service({
+        "quota": "1G",
+        "engine_quota": {"openclaw": "2G", "claude_code": "1G", "teclaw": "500M"},
+    })
+    assert service.get_storage_quota("pre", engine) == expected
+
+
+@pytest.mark.parametrize("engine", ["unknown_engine", ""])
+def test_engine_quota_falls_back_to_shared_quota(engine):
+    service = _quota_service({
+        "quota": "3G",
+        "engine_quota": {"openclaw": "2G"},
+    })
+    assert service.get_storage_quota("pre", engine) == "3G"
+
+
+@pytest.mark.parametrize("engine_quota", [None, "bad", 1, [], {"openclaw": 2}])
+def test_invalid_engine_quota_keeps_shared_quota(engine_quota):
+    service = _quota_service({"quota": "3G", "engine_quota": engine_quota})
+    assert service.get_storage_quota("pre", "openclaw") == "3G"
+
+
+def test_engine_quota_without_shared_quota_falls_back_to_default():
+    service = _quota_service({"engine_quota": {"teclaw": "500M"}})
+    assert service.get_storage_quota("pre", "teclaw") == "500M"
+    assert service.get_storage_quota("pre", "openclaw") == "1G"
+
+
+def test_apply_to_storage_uses_deploy_context_engine():
+    from unittest.mock import MagicMock
+    from agentclaw.community.core.common_config.bot_config_service import BotStoragePolicyService
+    from agentclaw.community.core.service_bot.services.deploy.deploy_config_composer import BotDeployContext
+    from agentclaw.community.core.service_bot.services.deploy.deploy_models import (
+        MountPermission,
+        Storage,
+        StorageType,
+    )
+
+    common = MagicMock()
+    common.get_config.return_value = {
+        "param_value": {"quota": "1G", "engine_quota": {"openclaw": "4G"}}
+    }
+    service = BotStoragePolicyService(MagicMock(), MagicMock(), common,
+        env="pre", select_provider=MagicMock(), resolve_template=MagicMock(), get_template=MagicMock())
+    ctx = BotDeployContext(
+        bot_id="b1", owner_id="u1", entity_id="u1", entity_type="staff",
+        bot_type="personal", engine="openclaw", migration_path="",
+        mount_home_dir_storage=False, stage="", version="",
+        mount_path="", ext_info=None, storage_type=None, env="pre",
+    )
+    storage = Storage(
+        type=StorageType.UPFS,
+        path="/home/agent",
+        storage_id="ARCA-VOLUME-test",
+        quota="1G",
+        permission=MountPermission.READ_WRITE,
+    )
+    result = service.apply_to_storage(storage, ctx)
+    assert result.quota == "4G"
+    assert result.type == StorageType.UPFS

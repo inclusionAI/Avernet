@@ -353,32 +353,56 @@ class BotStoragePolicyService(BotStoragePolicyProtocol):
         )
 
     def apply_to_storage(self, storage: Storage, ctx: BotDeployContext) -> Storage:
-        """Apply the resolved choice and shared quota, without changing identity."""
+        """Apply the resolved choice and engine-aware quota, without changing identity."""
         env = ctx.env or self._env
         if ctx.storage_type is not None:
             storage.type = ctx.storage_type
-        storage.quota = self.get_storage_quota(env)
+        storage.quota = self.get_storage_quota(env, ctx.engine)
         logger.info(
-            "[storage_policy] event=storage_composed bot_id=%s entity_id=%s env=%s storage_type=%s quota=%s",
+            "[storage_policy] event=storage_composed bot_id=%s entity_id=%s env=%s engine=%s storage_type=%s quota=%s",
             ctx.bot_id,
             ctx.entity_id,
             env,
+            ctx.engine,
             storage.type,
             storage.quota,
         )
         return storage
 
-    def get_storage_quota(self, env: str) -> str:
-        """Shared NAS/UPFS quota travels through the original Storage.quota string field."""
+    def get_storage_quota(self, env: str, engine: str) -> str:
+        """Shared NAS/UPFS quota travels through the original Storage.quota field.
+
+        Resolution order: ``param_value.engine_quota[engine]`` wins for a
+        configured engine; otherwise the shared ``param_value.quota`` keeps the
+        pre-existing behavior; ``1G`` stays the last-resort default. Rows
+        without ``engine_quota`` are therefore unchanged.
+        """
         default = "1G"
         try:
             config = self._common_config.get_config(
                 business_code="bot_storage", param_code="storage", env=env
             )
             params = config.get("param_value") if isinstance(config, dict) else None
-            value = params.get("quota") if isinstance(params, dict) else None
-            if isinstance(value, str) and value.strip():
-                return value
+            if isinstance(params, dict):
+                engine_quota = params.get("engine_quota")
+                if isinstance(engine_quota, dict):
+                    engine_value = engine_quota.get(engine)
+                    if isinstance(engine_value, str) and engine_value.strip():
+                        logger.info(
+                            "[storage_policy] event=quota_engine_matched env=%s engine=%s quota=%s",
+                            env,
+                            engine,
+                            engine_value,
+                        )
+                        return engine_value
+                    logger.info(
+                        "[storage_policy] event=quota_engine_fallback reason=engine_not_configured env=%s engine=%s",
+                        env,
+                        engine,
+                    )
+                value = params.get("quota")
+                if isinstance(value, str) and value.strip():
+                    return value
             logger.warning(
                 "[storage_policy] event=quota_fallback reason=invalid_or_missing env=%s quota=%s",
                 env,

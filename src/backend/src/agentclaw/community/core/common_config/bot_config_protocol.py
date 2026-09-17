@@ -120,8 +120,11 @@ class BotStoragePolicyProtocol(Protocol):
         """Apply the resolved context and shared quota without reading rollout."""
         ...
 
-    def get_storage_quota(self, env: str) -> str:
-        """Read quota independently of rollout; preserve the string, default to 1G."""
+    def get_storage_quota(self, env: str, engine: str) -> str:
+        """Read quota independently of rollout; preserve the string, default to 1G.
+
+        Resolution order: ``engine_quota[engine]`` → shared ``quota`` → ``1G``.
+        """
         ...
 
     def _resolve_storage_policy(

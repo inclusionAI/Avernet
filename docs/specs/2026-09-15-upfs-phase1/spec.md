@@ -183,3 +183,15 @@ NAS 与 UPFS 共用 `quota`，默认 "1G"；不挂 storage 的部署不读取此
 - 范围判断仍集中在 BotStoragePolicyService，BaasService 与设备层无新增业务分支。
 - 后续精简：进一步删除部署处阶段与迁移路径限制，改为统一复用已保存 policy；
   发布产物与 Caller 不再单独排除，没有 policy 的冲突即可回退 NAS。
+
+## 按引擎存储配额（2026-09-17）
+
+- `bot_storage/storage` 的 `param_value` 新增可选 `engine_quota` 映射，键为引擎名（与部署上下文
+  `ctx.engine` 原始值一致），值为容量字符串；`enable` 仍是行级列，不放入 `param_value`。
+- 读取优先级：`engine_quota[engine]` → 共享 `quota` → 硬编码 `"1G"`。引擎未命中、空引擎或
+  `engine_quota` 缺失/非法时回退共享 `quota`，行为与旧配置完全一致。
+- `BotStoragePolicyProtocol.get_storage_quota(env, engine)` 契约为必填 `engine`；
+  唯一调用方 `apply_to_storage` 直接使用部署上下文已有 `ctx.engine`，不新增参数透传。
+- BaaS 不变：quota 仍经 `Storage.quota` 原通道下发，UPFS 容量解析规则不变。
+- 日志：命中记录 `quota_engine_matched`，引擎未配记录 `quota_engine_fallback`，
+  `storage_composed` 增加 engine 维度，便于排查。
