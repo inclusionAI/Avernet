@@ -2794,3 +2794,33 @@ class TestResolveBindingDefaultTag:
         )
 
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_chat_with_eval_default_tag_passes_through(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """chat() 入口：metadata 含 lifecycle_stage=eval + default_tag →
+        _resolve_binding 提取 default_tag 并透传给 get_binding。"""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        await runner.chat(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            context=context,
+            message="hello",
+            metadata={
+                "bot_options": {"lifecycle_stage": "eval"},
+                "default_tag": "default",
+            },
+        )
+
+        # 验证 get_binding 收到 default_tag="default"
+        call_kw = mock_bot_service_plugin.get_binding.call_args.kwargs
+        assert call_kw["stage"] == "eval"
+        assert call_kw["default_tag"] == "default"
