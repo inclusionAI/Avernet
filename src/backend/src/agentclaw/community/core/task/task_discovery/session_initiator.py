@@ -43,14 +43,44 @@ from agentclaw.community.core.task.task_runner.client.ports import (
     OpenApiBotPort,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.base import Plugin
 from agentclaw.community.plugin_api.impl_registry import (
     Flavor,
     Mode,
     plugin_impl,
 )
-from agentclaw.community.plugin_api.session_initiator import SessionInitiator
 
 logger = get_logger()
+
+
+# ── SessionInitiator Protocol（从 plugin_api/ 下沉至 core） ──────────────
+# 唯一实现就在本文件中（OpenApiBotSessionInitiator），无 local/prod 分裂，
+# 不需要 plugin_api 层的独立 Protocol 文件。
+
+from typing import Protocol, runtime_checkable  # noqa: E402
+
+
+@runtime_checkable
+class SessionInitiator(Plugin, Protocol):
+    """Engine session 创建 + 消息注入接口。
+
+    Implementation(s):
+    - ``OpenApiBotSessionInitiator`` (本文件) — BaaS Open API 创建 session + 注入;
+      ``OpenApiBotPort`` 未绑定时组合根注入 ``UnavailableSessionInitiator``
+      fail-closed 占位。
+    """
+
+    async def initiate_session(
+        self,
+        tasks: list[DiscoveredTask],
+        *,
+        bot_id: str,
+        owner_id: str,
+        agent_id: str,
+        model: str | None = None,
+    ) -> DiscoverySession:
+        """为发现任务创建 engine session 并注入发现提示消息。"""
+        ...
 
 
 @plugin_impl(

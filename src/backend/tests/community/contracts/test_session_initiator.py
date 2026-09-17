@@ -20,12 +20,12 @@ from agentclaw.community.core.task.task_discovery.models import (
 )
 from agentclaw.community.core.task.task_discovery.session_initiator import (
     OpenApiBotSessionInitiator,
+    SessionInitiator,
     UnavailableSessionInitiator,
 )
 from agentclaw.community.core.task.task_runner.client.ports import (
     BotSendResult,
 )
-from agentclaw.community.plugin_api.session_initiator import SessionInitiator
 
 _DT = "2026-09-14"
 
