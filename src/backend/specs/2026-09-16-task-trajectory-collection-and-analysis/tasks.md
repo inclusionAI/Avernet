@@ -9,23 +9,23 @@
 
 ## P0 — Domain models (REQ-1)
 
-- [ ] Add `core/task/task_trajectory/__init__.py` + `models.py` with plain dataclasses:
+- [x] Add `core/task/task_trajectory/__init__.py` + `models.py` with plain dataclasses:
       `TrajectoryEvent` (flat: no `payload`/`rationale`/`phase`), `TaskTrajectory`, `TrajectoryAnalysis`,
       `ReasonCatalog` enum, `DispatchRationale`, `TrajectoryActionType` (separate from `NodeAction`).
-- [ ] Test `tests/community/core/task/task_trajectory/__init__.py` + `test_trajectory_models.py`:
+- [x] Test `tests/community/core/task/task_trajectory/__init__.py` + `test_trajectory_models.py`:
       each dataclass builds from kwargs; `analysis`/`gmt_modify` default to `gmt_create`/None;
       `ReasonCatalog` covers every §overview signal + REQ-5 origins; `TrajectoryActionType` ≠ `NodeAction`.
 
 ## P1 — Storage (REQ-11 + REQ-P1)
 
-- [ ] Write additive DDL `core/task/sql/2026_09_17_task_trajectory.sql` (`task_trajectory`,
+- [x] Write additive DDL `core/task/sql/2026_09_17_task_trajectory.sql` (`task_trajectory`,
       `task_trajectory_events` per spec DDL; `task_trajectory` unique on `task_id`);
       write `core/task/sql/2026_09_16_task_callback_correlation.sql`.
-- [ ] Add ORM models `TaskTrajectoryModel`, `TaskTrajectoryEventModel`,
+- [x] Add ORM models `TaskTrajectoryModel`, `TaskTrajectoryEventModel`,
       `TaskCallbackCorrelationModel` into `core/task/repository/models.py` (use
       `AutoIncrementBigInteger`, `_binary_string`, `Index(...)`; mirror `TaskCallbackModel`);
       add `.to_record()` mappers; add record dataclasses to `core/task/repository/types.py`.
-- [ ] Verify singlebox `Base.metadata.create_all` creates the new tables (conftest in
+- [x] Verify singlebox `Base.metadata.create_all` creates the new tables (conftest in
       `tests/community/repository/task/` imports `core/task/repository/models`).
 - [ ] Implement `TaskTrajectoryRepository`: `insert_event`, `upsert_head(task_id, analysis=None)`
       (preserve existing `analysis`/`gmt_modify` when head exists), `backfill_analysis(task_id,

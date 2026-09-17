@@ -29,11 +29,14 @@ from sqlalchemy.sql import func
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.task.domain.models import RelationType, Status
 from agentclaw.community.core.task.repository.types import (
+    TaskCallbackCorrelationRecord,
     TaskCallbackRecord,
     TaskInfoRecord,
     TaskNodeRecord,
     TaskNodeRelationRecord,
     TaskNodeRunInfoRecord,
+    TaskTrajectoryRecord,
+    TrajectoryEventRecord,
 )
 
 # SQLite autoincrements only on INTEGER PRIMARY KEY; BigInteger renders BIGINT
@@ -317,3 +320,150 @@ class TaskActionLogModel(Base):
         Index("idx_task_action_task_node", "task_id", "node_id", "seq"),
         Index("idx_task_action_created", "gmt_create"),
     )
+
+
+class TaskTrajectoryModel(Base):
+    """ORM for ``task_trajectory`` — one head row per task (UPSERT on assemble,
+    UPDATE on analysis backfill).
+
+    Independent trajectory entity: NO foreign key / NO association column to
+    ``task_action_log`` or ``task_callback`` (spec invariant). ``gmt_create`` /
+    ``gmt_modify`` are real stored columns (spec decision #7); the DB
+    ``DEFAULT CURRENT_TIMESTAMP`` is kept only as a fallback — the repo (P1b)
+    ALWAYS supplies ``gmt_create`` explicitly (converted from the domain int-ms
+    timestamp), so the column does not rely on the DB default for ordering.
+    """
+
+    __tablename__ = "task_trajectory"
+
+    id = Column(
+        AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False
+    )
+    task_id = Column(_TASK_ID, nullable=False)
+    analysis = Column(Text, nullable=True)
+    # gmt_create 由 repo 从 domain int(ms) 转换写入,不依赖 DB DEFAULT。
+    gmt_create = Column(DateTime, default=func.now(), nullable=False)
+    gmt_modify = Column(
+        DateTime, default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("uk_task_trajectory_task", "task_id", unique=True),
+    )
+
+    def to_record(self) -> TaskTrajectoryRecord:
+        return TaskTrajectoryRecord(
+            id=self.id,
+            task_id=self.task_id,
+            analysis=self.analysis,
+            gmt_create=self.gmt_create,
+            gmt_modify=self.gmt_modify,
+        )
+
+
+class TaskTrajectoryEventModel(Base):
+    """ORM for ``task_trajectory_events`` — append-only event projection rows
+    (one row per gate emission; no unique constraint, duplicates accepted).
+
+    Independent trajectory entity: NO foreign key / NO association column to
+    ``task_action_log`` or ``task_callback`` (spec invariant). ``action_input``
+    / ``ext_info`` / ``analysis`` are TEXT (raw strings — ``action_input`` is a
+    digest/原文, ``ext_info`` is free JSON the domain does not map, ``analysis``
+    is an embedded JSON string). ``gmt_create`` = event emission time (timeline
+    ordering key); the repo (P1b) ALWAYS supplies it from the domain int-ms
+    timestamp and does NOT rely on the DB ``DEFAULT CURRENT_TIMESTAMP`` (kept
+    only as a fallback). The repo ``list_events_by_task`` MUST ``ORDER BY
+    gmt_create ASC, id ASC`` for deterministic same-second timeline ordering.
+    """
+
+    __tablename__ = "task_trajectory_events"
+
+    id = Column(
+        AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False
+    )
+    task_id = Column(_TASK_ID, nullable=False)
+    node_id = Column(_NODE_ID, nullable=False)
+    action_type = Column(String(64), nullable=False)
+    action_input = Column(Text, nullable=True)
+    action_result = Column(Text, nullable=True)
+    status_from = Column(String(64), nullable=True)
+    status_to = Column(String(64), nullable=True)
+    attempt = Column(Integer, nullable=False, default=0)
+    error_type = Column(String(64), nullable=True)
+    error_msg = Column(Text, nullable=True)
+    ext_info = Column(Text, nullable=True)
+    analysis = Column(Text, nullable=True)
+    # gmt_create 由 repo 从 domain int(ms) 转换写入,不依赖 DB DEFAULT。
+    gmt_create = Column(DateTime, default=func.now(), nullable=False)
+    gmt_modify = Column(
+        DateTime, default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("idx_task_trajectory_events_task", "task_id", "gmt_create"),
+        Index("idx_task_trajectory_events_node", "task_id", "node_id", "gmt_create"),
+    )
+
+    def to_record(self) -> TrajectoryEventRecord:
+        return TrajectoryEventRecord(
+            id=self.id,
+            task_id=self.task_id,
+            node_id=self.node_id,
+            action_type=self.action_type,
+            action_input=self.action_input,
+            action_result=self.action_result,
+            status_from=self.status_from,
+            status_to=self.status_to,
+            attempt=self.attempt,
+            error_type=self.error_type,
+            error_msg=self.error_msg,
+            ext_info=self.ext_info,
+            analysis=self.analysis,
+            gmt_create=self.gmt_create,
+            gmt_modify=self.gmt_modify,
+        )
+
+
+class TaskCallbackCorrelationModel(Base):
+    """ORM for ``task_callback_correlation`` (REQ-P1) — persists the
+    callback↔(task, node, retry) correlation so in-flight callbacks arriving
+    after an instance restart can be re-attached to the right node by
+    ``event_id`` (idempotent).
+
+    Mirrors ``task_callback`` idiom (TaskCallbackModel): ``event_id`` plain
+    ``String(256)`` for its unique key (matching task_callback.event_id), and
+    ``_SESSION_ID`` / ``_TASK_ID`` / ``_NODE_ID`` binary-string helpers for the
+    identifier columns. ``gmt_create`` is the only timestamp (no gmt_modify —
+    this is an append-only correlation row); the repo (P1b) ALWAYS supplies it
+    from the domain int-ms timestamp and does NOT rely on the DB
+    ``DEFAULT CURRENT_TIMESTAMP`` (kept only as a fallback).
+    """
+
+    __tablename__ = "task_callback_correlation"
+
+    id = Column(
+        AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False
+    )
+    event_id = Column(String(256), nullable=False)
+    main_session_id = Column(_SESSION_ID, nullable=False)
+    task_id = Column(_TASK_ID, nullable=False)
+    node_id = Column(_NODE_ID, nullable=False)
+    retry = Column(Integer, nullable=False, default=0)
+    # gmt_create 由 repo 从 domain int(ms) 转换写入,不依赖 DB DEFAULT。
+    gmt_create = Column(DateTime, default=func.now(), nullable=False)
+
+    __table_args__ = (
+        Index("uk_task_callback_correlation_event", "event_id", unique=True),
+        Index("idx_task_callback_correlation_node", "task_id", "node_id"),
+    )
+
+    def to_record(self) -> TaskCallbackCorrelationRecord:
+        return TaskCallbackCorrelationRecord(
+            id=self.id,
+            event_id=self.event_id,
+            main_session_id=self.main_session_id,
+            task_id=self.task_id,
+            node_id=self.node_id,
+            retry=self.retry,
+            gmt_create=self.gmt_create,
+        )

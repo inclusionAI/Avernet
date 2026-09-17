@@ -209,3 +209,66 @@ class TaskActionLogRecord:
             status_to=self.status_to,
             payload=dict(self.payload),
         )
+
+
+# ---------------------------------------------------------------------------
+# Task trajectory storage records (REQ-11 + REQ-P1).
+#
+# Table-faithful records for the trajectory旁路采集 tables. ``action_input`` /
+# ``ext_info`` / ``analysis`` are kept as the raw stored strings: ``action_input``
+# is a digest/原文 (not JSON); ``ext_info`` is free JSON the domain object does
+# NOT map (analyzer reads on demand, spec REQ-1); ``analysis`` is an embedded
+# ``TrajectoryAnalysis`` JSON string. Repo (P1b) supplies ``gmt_create`` from the
+# domain int-ms timestamp and does NOT rely on the DB ``DEFAULT CURRENT_TIMESTAMP``
+# (kept only as a fallback). No FK / no association to ``task_action_log`` or
+# ``task_callback`` — independent trajectory entity (spec invariant).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TrajectoryEventRecord:
+    """Table-faithful record for one ``task_trajectory_events`` row (append-only)."""
+
+    id: int
+    task_id: str
+    node_id: str
+    action_type: str
+    attempt: int
+    action_result: Optional[str] = None
+    action_input: Optional[str] = None
+    status_from: Optional[str] = None
+    status_to: Optional[str] = None
+    error_type: Optional[str] = None
+    error_msg: Optional[str] = None
+    ext_info: Optional[str] = None
+    analysis: Optional[str] = None
+    gmt_create: Optional[datetime] = None
+    gmt_modify: Optional[datetime] = None
+
+
+@dataclass(frozen=True)
+class TaskTrajectoryRecord:
+    """Table-faithful record for one ``task_trajectory`` head row (per task)."""
+
+    id: int
+    task_id: str
+    analysis: Optional[str] = None
+    gmt_create: Optional[datetime] = None
+    gmt_modify: Optional[datetime] = None
+
+
+@dataclass(frozen=True)
+class TaskCallbackCorrelationRecord:
+    """Table-faithful record for one ``task_callback_correlation`` row (REQ-P1).
+
+    Persists the callback↔(node, retry) correlation across restarts so in-flight
+    callbacks arriving after a restart can be re-attached to the right node.
+    """
+
+    id: int
+    event_id: str
+    main_session_id: str
+    task_id: str
+    node_id: str
+    retry: int
+    gmt_create: Optional[datetime] = None
