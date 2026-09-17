@@ -146,3 +146,115 @@ def test_checked_in_matrix_doc_is_up_to_date(script):
     assert MATRIX_DOC.is_file(), f"generated matrix doc missing: {MATRIX_DOC}"
     exit_code = script.main(["--source", "static", "--check", str(MATRIX_DOC)])
     assert exit_code == 0, "engine-capability-matrix.md is stale; regenerate it"
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Frontend adapter matrix (`--target frontend`)
+# ──────────────────────────────────────────────────────────────────────
+#
+# The frontend tree is absent from the engine-only community dist, so every
+# test here skips rather than fails when it is not checked out.
+
+FRONTEND_ADAPTERS = ENGINE_DIR.parents[1] / "src/frontend/src/adapters/engine"
+FEATURE_DOC = ENGINE_DIR.parents[1] / "src/frontend/docs/engine-feature-matrix.md"
+
+
+@pytest.fixture(scope="module")
+def feature_matrix(script):
+    if not FRONTEND_ADAPTERS.is_dir():
+        pytest.skip("frontend tree not present in this checkout")
+    return script.collect_frontend()
+
+
+def test_frontend_vocabulary_is_the_botfeatures_interface(feature_matrix):
+    """Rows are the `BotFeatures` keys, in declaration order."""
+    assert feature_matrix.features[0] == "canDelete"
+    assert "chatRenderMode" in feature_matrix.features
+    assert feature_matrix.features[-1] == "messagePageSize"
+
+
+def test_frontend_finds_every_registered_adapter(feature_matrix):
+    """Including the engines with no backend package in this repo."""
+    names = [adapter.engine_type for adapter in feature_matrix.adapters]
+    assert {"openclaw", "aicoding", "claude_code", "hermes", "teclaw"} <= set(names)
+    # Columns follow the factory's registration order, not the filesystem's.
+    assert names.index("openclaw") < names.index("hermes")
+
+
+def test_frontend_resolves_engine_type_constants(feature_matrix):
+    """`ENGINE_TYPE.CLAUDECODE` must resolve to the wire value, not the key."""
+    hermes = next(a for a in feature_matrix.adapters if a.engine_type == "hermes")
+    assert hermes.display == "Hermes"
+    assert hermes.beta is True
+    assert any(a.engine_type == "claude_code" for a in feature_matrix.adapters)
+
+
+def test_frontend_parses_plain_literals(feature_matrix):
+    hermes = next(a for a in feature_matrix.adapters if a.engine_type == "hermes")
+    assert hermes.value("canDelete").default == "true"
+    assert hermes.value("showHealthCheck").default == "false"
+    assert hermes.value("chatRenderMode").kind == "string"
+    assert hermes.value("chatRenderMode").default == "openclaw"
+    assert hermes.value("messagePageSize").kind == "number"
+
+
+def test_frontend_parses_conditional_features(feature_matrix):
+    """`ConditionalFeature` keeps its default plus every override branch."""
+    openclaw = next(a for a in feature_matrix.adapters if a.engine_type == "openclaw")
+    value = openclaw.value("canUpgradeToService")
+    assert value.kind == "conditional"
+    assert value.default == "true"
+    assert len(value.overrides) == 3
+    conditions = [condition for condition, _ in value.overrides]
+    assert "ctx.isDesktopBot === true" in conditions
+    assert {result for _, result in value.overrides} == {"false"}
+
+
+def test_frontend_flags_undeclared_keys(feature_matrix):
+    """A subclass literal replaces the base wholesale; omissions are reported."""
+    teclaw = next(a for a in feature_matrix.adapters if a.engine_type == "teclaw")
+    assert teclaw.value("messagePageSize").declared is False
+    assert teclaw.value("canDelete").declared is True
+
+
+def test_frontend_renderers(script, feature_matrix):
+    rendered = script.render_frontend_markdown(feature_matrix)
+    assert "| Feature |" in rendered
+    assert "**Legend:**" in rendered
+    for feature in feature_matrix.features:
+        assert f"| `{feature}` |" in rendered
+
+    payload = json.loads(script.render_frontend_json(feature_matrix))
+    assert payload["features"] == feature_matrix.features
+    assert {a["engineType"] for a in payload["adapters"]} >= {"hermes", "aicoding"}
+
+    lines = script.render_frontend_csv(feature_matrix).splitlines()
+    assert lines[0] == "feature,engine,kind,default,overrides"
+    expected = len(feature_matrix.features) * len(feature_matrix.adapters)
+    assert len(lines) == expected + 1
+
+
+def test_frontend_filter_rejects_unknown_names(script, feature_matrix):
+    only = script.filter_adapters(feature_matrix, ["hermes"])
+    assert [a.engine_type for a in only.adapters] == ["hermes"]
+    with pytest.raises(SystemExit):
+        script.filter_adapters(feature_matrix, ["no_such_engine"])
+
+
+def test_checked_in_feature_doc_is_up_to_date(script):
+    """Drift gate for the frontend matrix.
+
+    Fix with:
+        python src/engine/scripts/gen_capability_matrix.py \\
+            --target frontend -o src/frontend/docs/engine-feature-matrix.md
+    """
+    if not FRONTEND_ADAPTERS.is_dir():
+        pytest.skip("frontend tree not present in this checkout")
+    assert FEATURE_DOC.is_file(), f"generated feature doc missing: {FEATURE_DOC}"
+    exit_code = script.main(["--target", "frontend", "--check", str(FEATURE_DOC)])
+    assert exit_code == 0, "engine-feature-matrix.md is stale; regenerate it"
+
+
+def test_engine_target_is_unaffected_by_the_frontend_target(script):
+    """The default target must stay exactly what it was."""
+    assert script.main(["--source", "static", "--check", str(MATRIX_DOC)]) == 0

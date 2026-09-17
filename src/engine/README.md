@@ -56,3 +56,22 @@ python scripts/gen_capability_matrix.py --source static \
 The generator reads the live declarations when the engine's dependencies are
 installed and falls back to an `ast` scan of the tree otherwise, so it also runs
 in a bare checkout. A test keeps the checked-in doc from going stale.
+
+The repo carries a second, unrelated per-engine declaration: each adapter under
+`src/frontend/src/adapters/engine/` declares a `BotFeatures` record that gates
+the UI. `--target frontend` tabulates that one — it covers every adapter the
+frontend factory registers, including engines whose backend packages are not in
+this tree:
+
+```bash
+python scripts/gen_capability_matrix.py --target frontend
+python scripts/gen_capability_matrix.py --target all        # both matrices
+
+# refresh the checked-in frontend doc
+python scripts/gen_capability_matrix.py --target frontend \
+  -o ../frontend/docs/engine-feature-matrix.md
+```
+
+The two vocabularies are kept in separate tables on purpose: the engine's
+`Capability` enum and the frontend's `BotFeatures` flags describe different
+things, and a merged grid would imply a mapping that does not exist.

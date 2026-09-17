@@ -24,6 +24,17 @@ Two collection modes:
 
 ``auto`` (the default) tries runtime first and falls back to static.
 
+``--target`` picks which matrix to build. The repo has two unrelated per-engine
+declarations, and they do not share a vocabulary:
+
+* ``engine`` (the default) — the backend ``EngineCapabilities`` described above.
+* ``frontend`` — the ``BotFeatures`` record each adapter under
+  ``src/frontend/src/adapters/engine/`` declares to gate the UI (which tabs to
+  show, chat render mode, image upload, …). Covers every adapter the factory
+  registers, including the engines whose backend packages are not in this tree.
+  Parsed, not executed, so no npm install is needed; the frontend tree is absent
+  from the engine-only dist, where this target reports that rather than failing.
+
 Usage::
 
     # Markdown table on stdout
@@ -38,6 +49,10 @@ Usage::
     # Machine-readable
     python scripts/gen_capability_matrix.py --format json
     python scripts/gen_capability_matrix.py --format csv --engines openclaw,claude_code
+
+    # The frontend adapters' BotFeatures matrix, and both at once
+    python scripts/gen_capability_matrix.py --target frontend
+    python scripts/gen_capability_matrix.py --target all
 """
 
 from __future__ import annotations
@@ -48,6 +63,7 @@ import csv
 import io
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,10 +80,21 @@ ENGINE_PACKAGE_ROOTS = (
     ("corp", ENGINE_SRC / "engine/corp/engines"),
 )
 
+#: Frontend engine adapters — a second, unrelated capability vocabulary (see
+#: `--target frontend`). Absent from the engine's standalone community dist,
+#: which stages only the engine tree; the collector says so rather than failing.
+FRONTEND_ADAPTER_DIR = ENGINE_DIR.parents[1] / "src/frontend/src/adapters/engine"
+FRONTEND_ENGINE_TYPES = (
+    ENGINE_DIR.parents[1] / "src/frontend/src/services/backend-api/BotController.ts"
+)
+
 MARK_SUPPORTED = "✅"
 MARK_LIMITED = "⚠️"
 MARK_FALLBACK = "↪"
 MARK_UNSUPPORTED = "❌"
+#: Frontend-only marks (see `--target frontend`).
+MARK_CONDITIONAL = "*"
+MARK_UNDECLARED = "–"
 
 STATUS_MARKS = {
     "supported": MARK_SUPPORTED,
@@ -123,6 +150,53 @@ class Matrix:
     source: str
     capabilities: list[str]
     engines: list[EngineCaps]
+
+
+@dataclass
+class FeatureValue:
+    """One `BotFeatures` entry as an adapter declares it.
+
+    `overrides` carries the `ConditionalFeature` branches verbatim — the
+    condition source and the value it yields — because several adapters gate a
+    feature on the bot's kind (desktop / service / default) rather than on the
+    engine alone.
+    """
+
+    kind: str = "missing"  # bool | string | number | conditional | missing
+    default: str = ""
+    overrides: list[tuple[str, str]] = field(default_factory=list)
+
+    @property
+    def declared(self) -> bool:
+        return self.kind != "missing"
+
+
+@dataclass
+class AdapterFeatures:
+    """One frontend engine adapter's declaration."""
+
+    engine_type: str
+    display: str = ""
+    beta: bool = False
+    default_model: str = ""
+    origin: str = ""
+    values: dict[str, FeatureValue] = field(default_factory=dict)
+
+    @property
+    def label(self) -> str:
+        return self.engine_type
+
+    def value(self, feature: str) -> FeatureValue:
+        return self.values.get(feature, FeatureValue())
+
+
+@dataclass
+class FeatureMatrix:
+    """The frontend counterpart of :class:`Matrix`."""
+
+    source: str
+    features: list[str]
+    adapters: list[AdapterFeatures]
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -420,6 +494,301 @@ def _literal_str(node: ast.expr | None) -> str | None:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Collection — frontend engine adapters (TypeScript)
+# ──────────────────────────────────────────────────────────────────────
+#
+# The frontend keeps its own per-engine declaration, unrelated to the backend
+# `Capability` enum: each adapter under src/frontend/src/adapters/engine/
+# overrides `baseFeatures`, a `BotFeatures` record of UI-gating flags (which
+# tabs to show, the chat render mode, image upload, …). It is parsed rather
+# than executed: running it would mean an npm install and a TypeScript
+# toolchain, and the declarations are plain object literals.
+
+
+def collect_frontend(adapter_dir: Path = FRONTEND_ADAPTER_DIR) -> FeatureMatrix:
+    """Parse the frontend engine adapters into a feature matrix."""
+    if not adapter_dir.is_dir():
+        raise FileNotFoundError(
+            f"frontend adapters not found: {adapter_dir} "
+            "(expected in the monorepo; absent from the engine-only dist)"
+        )
+
+    types_file = adapter_dir / "types.ts"
+    features = _parse_interface_keys(types_file, "BotFeatures")
+    engine_types = _parse_engine_type_map(FRONTEND_ENGINE_TYPES)
+
+    adapters: dict[str, AdapterFeatures] = {}
+    for path in sorted(adapter_dir.glob("*Adapter.ts")):
+        if path.name == "BaseEngineAdapter.ts":
+            continue  # the abstract default, not an engine
+        parsed = _parse_adapter(path, engine_types, adapter_dir)
+        if parsed is not None:
+            adapters[path.stem] = parsed
+
+    order = _parse_registration_order(adapter_dir / "EngineAdapterFactory.ts")
+    ordered = [adapters.pop(name) for name in order if name in adapters]
+    ordered.extend(adapters[name] for name in sorted(adapters))
+
+    return FeatureMatrix(
+        source=f"static scan of `{_display_path(adapter_dir)}`",
+        features=features,
+        adapters=ordered,
+    )
+
+
+def _parse_adapter(
+    path: Path, engine_types: dict[str, str], adapter_dir: Path
+) -> AdapterFeatures | None:
+    text = _strip_ts_comments(path.read_text(encoding="utf-8"))
+
+    engine_type = _class_field(text, "engineType")
+    if engine_type is None:
+        warn(f"{path.name}: no engineType field; skipped")
+        return None
+    # `ENGINE_TYPE.HERMES` → "hermes"; a bare literal stays as written.
+    if engine_type.startswith("ENGINE_TYPE."):
+        key = engine_type.split(".", 1)[1]
+        resolved = engine_types.get(key)
+        if resolved is None:
+            warn(f"{path.name}: unknown ENGINE_TYPE.{key}")
+        engine_type = resolved or key.lower()
+
+    adapter = AdapterFeatures(
+        engine_type=engine_type,
+        display=_class_field(text, "displayName") or "",
+        beta=_class_field(text, "isBeta") == "true",
+        default_model=_class_field(text, "defaultModelId") or "",
+        origin=_display_path(path),
+    )
+
+    body = _object_literal(text, "baseFeatures")
+    if body is None:
+        warn(f"{path.name}: no baseFeatures literal found")
+        return adapter
+    for key, raw in _object_entries(body):
+        adapter.values[key] = _parse_feature_value(raw)
+    return adapter
+
+
+def _parse_feature_value(raw: str) -> FeatureValue:
+    """Classify one `baseFeatures` value: literal or `ConditionalFeature`."""
+    raw = raw.strip()
+    if raw.startswith("{"):
+        inner = raw[1 : _match_bracket(raw, 0)]
+        default = ""
+        overrides: list[tuple[str, str]] = []
+        for key, value in _object_entries(inner):
+            if key == "defaultValue":
+                default = _scalar(value)
+            elif key == "overrides" and value.strip().startswith("["):
+                overrides = _parse_overrides(value.strip())
+        return FeatureValue(kind="conditional", default=default, overrides=overrides)
+
+    scalar = _scalar(raw)
+    if scalar in {"true", "false"}:
+        return FeatureValue(kind="bool", default=scalar)
+    if scalar.lstrip("-").isdigit():
+        return FeatureValue(kind="number", default=scalar)
+    return FeatureValue(kind="string", default=scalar)
+
+
+def _parse_overrides(raw: str) -> list[tuple[str, str]]:
+    """Read `[{ when: ctx => …, value: X }, …]` into (condition, value) pairs."""
+    elements = _split_top_level(raw[1 : _match_bracket(raw, 0)])
+    pairs: list[tuple[str, str]] = []
+    for element in elements:
+        element = element.strip()
+        if not element.startswith("{"):
+            continue
+        condition = value = ""
+        for key, item in _object_entries(element[1 : _match_bracket(element, 0)]):
+            if key == "when":
+                # Keep only the predicate body: `(ctx: FeatureContext) => X` → `X`.
+                condition = " ".join(item.split("=>", 1)[-1].split())
+            elif key == "value":
+                value = _scalar(item)
+        if condition:
+            pairs.append((condition, value))
+    return pairs
+
+
+def _scalar(raw: str) -> str:
+    """Normalise a literal: drop `as const` / `as T` casts and quotes."""
+    raw = raw.strip().rstrip(",").strip()
+    raw = re.sub(r"\s+as\s+[A-Za-z_][\w.]*\s*$", "", raw).strip()
+    if len(raw) >= 2 and raw[0] in "'\"`" and raw[-1] == raw[0]:
+        return raw[1:-1]
+    return raw
+
+
+def _parse_interface_keys(path: Path, name: str) -> list[str]:
+    """Top-level property names of a TS interface, in declaration order."""
+    text = _strip_ts_comments(path.read_text(encoding="utf-8"))
+    match = re.search(rf"\binterface\s+{re.escape(name)}\s*{{", text)
+    if not match:
+        raise ValueError(f"no `interface {name}` in {path}")
+    start = match.end() - 1
+    body = text[start + 1 : _match_bracket(text, start)]
+    return [key for key, _ in _object_entries(body, separator=";")]
+
+
+def _parse_engine_type_map(path: Path) -> dict[str, str]:
+    """`ENGINE_TYPE` constant → `{"HERMES": "hermes", …}`."""
+    if not path.is_file():
+        warn(f"engine type map not found: {path}")
+        return {}
+    text = _strip_ts_comments(path.read_text(encoding="utf-8"))
+    match = re.search(r"\bENGINE_TYPE\b[^=]*=\s*{", text)
+    if not match:
+        warn(f"no ENGINE_TYPE constant in {path}")
+        return {}
+    start = match.end() - 1
+    body = text[start + 1 : _match_bracket(text, start)]
+    return {key: _scalar(value) for key, value in _object_entries(body)}
+
+
+def _parse_registration_order(path: Path) -> list[str]:
+    """Adapter class names in the order the factory registers them."""
+    if not path.is_file():
+        return []
+    text = _strip_ts_comments(path.read_text(encoding="utf-8"))
+    return re.findall(r"register\(\s*new\s+(\w+)\s*\(", text)
+
+
+def _class_field(text: str, name: str) -> str | None:
+    """Value of a simple `readonly <name> = <literal>;` class field."""
+    match = re.search(rf"\b{re.escape(name)}\s*=\s*([^;\n]+)", text)
+    return _scalar(match.group(1)) if match else None
+
+
+def _object_literal(text: str, name: str) -> str | None:
+    """Body of `<name> ... = {...}`, braces excluded."""
+    match = re.search(rf"\b{re.escape(name)}\b[^=;{{]*=\s*{{", text)
+    if not match:
+        return None
+    start = match.end() - 1
+    return text[start + 1 : _match_bracket(text, start)]
+
+
+def _object_entries(body: str, separator: str = ",") -> list[tuple[str, str]]:
+    """Split an object body into `(key, raw value)` at nesting depth zero."""
+    entries: list[tuple[str, str]] = []
+    for chunk in _split_top_level(body, separator):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        key, sep, value = _split_key(chunk)
+        if not sep:
+            continue
+        entries.append((key, value.strip()))
+    return entries
+
+
+def _split_key(chunk: str) -> tuple[str, bool, str]:
+    """Split `key: value` on the first colon outside brackets and strings."""
+    depth = 0
+    for index, char in enumerate(_mask_strings(chunk)):
+        if char in "{[(":
+            depth += 1
+        elif char in "}])":
+            depth -= 1
+        elif char == ":" and depth == 0:
+            key = chunk[:index].strip().strip("'\"?")
+            return key, True, chunk[index + 1 :]
+    return chunk, False, ""
+
+
+def _split_top_level(body: str, separator: str = ",") -> list[str]:
+    """Split on `separator` at depth zero, ignoring separators in strings."""
+    masked = _mask_strings(body)
+    parts: list[str] = []
+    depth = 0
+    start = 0
+    for index, char in enumerate(masked):
+        if char in "{[(":
+            depth += 1
+        elif char in "}])":
+            depth -= 1
+        elif char == separator and depth == 0:
+            parts.append(body[start:index])
+            start = index + 1
+    parts.append(body[start:])
+    return parts
+
+
+def _match_bracket(text: str, start: int) -> int:
+    """Index of the bracket closing the one at `start`."""
+    pairs = {"{": "}", "[": "]", "(": ")"}
+    opening = text[start]
+    closing = pairs[opening]
+    masked = _mask_strings(text)
+    depth = 0
+    for index in range(start, len(text)):
+        if masked[index] == opening:
+            depth += 1
+        elif masked[index] == closing:
+            depth -= 1
+            if depth == 0:
+                return index
+    raise ValueError(f"unbalanced {opening!r} at offset {start}")
+
+
+def _mask_strings(text: str) -> str:
+    """Blank out string literals so brackets inside them don't count."""
+    out = []
+    quote = None
+    escaped = False
+    for char in text:
+        if quote:
+            out.append(" ")
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+        elif char in "'\"`":
+            quote = char
+            out.append(" ")
+        else:
+            out.append(char)
+    return "".join(out)
+
+
+def _strip_ts_comments(text: str) -> str:
+    """Remove `//` and `/* */` comments, leaving string literals intact."""
+    out = []
+    index = 0
+    length = len(text)
+    quote = None
+    while index < length:
+        char = text[index]
+        if quote:
+            out.append(char)
+            if char == "\\" and index + 1 < length:
+                out.append(text[index + 1])
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+            index += 1
+        elif char in "'\"`":
+            quote = char
+            out.append(char)
+            index += 1
+        elif text.startswith("//", index):
+            end = text.find("\n", index)
+            index = length if end == -1 else end
+        elif text.startswith("/*", index):
+            end = text.find("*/", index + 2)
+            index = length if end == -1 else end + 2
+        else:
+            out.append(char)
+            index += 1
+    return "".join(out)
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Rendering
 # ──────────────────────────────────────────────────────────────────────
 
@@ -555,6 +924,162 @@ RENDERERS = {
 }
 
 
+def _feature_cell(value: FeatureValue) -> str:
+    """One `BotFeatures` cell: the value `getFeatures()` returns by default."""
+    if not value.declared:
+        return MARK_UNDECLARED
+    if value.kind == "bool":
+        return MARK_SUPPORTED if value.default == "true" else MARK_UNSUPPORTED
+    if value.kind == "conditional":
+        mark = MARK_SUPPORTED if value.default == "true" else MARK_UNSUPPORTED
+        return f"{mark}{MARK_CONDITIONAL}"
+    return f"`{value.default}`"
+
+
+def render_frontend_markdown(matrix: FeatureMatrix, *, notes: bool = True) -> str:
+    out = io.StringIO()
+    labels = [adapter.label for adapter in matrix.adapters]
+
+    out.write("# Frontend engine feature matrix\n\n")
+    out.write(f"<!-- Generated by {GENERATOR}. Do not edit by hand. -->\n\n")
+    out.write(
+        "Each engine adapter under `src/frontend/src/adapters/engine/` declares a "
+        "`BotFeatures` record that gates the UI. This is a **separate vocabulary** "
+        "from the engine's `Capability` enum — see "
+        "`src/engine/docs/engine-capability-matrix.md` for that one.\n\n"
+    )
+    out.write(
+        "Cells show the context-free default, i.e. what `getFeatures()` returns. "
+        f"{MARK_CONDITIONAL} marks a `ConditionalFeature` whose value changes with "
+        "the bot's kind; the branches are listed under Notes.\n\n"
+    )
+    out.write(f"Source: {matrix.source}\n\n")
+
+    if not matrix.adapters:
+        out.write("_No adapters found._\n")
+        return out.getvalue()
+
+    note_index: dict[tuple[str, str], int] = {}
+    for adapter in matrix.adapters:
+        counter = 0
+        for feature in matrix.features:
+            value = adapter.value(feature)
+            if value.overrides or not value.declared:
+                counter += 1
+                note_index[(adapter.label, feature)] = counter
+
+    out.write("| Feature | " + " | ".join(labels) + " |\n")
+    out.write("|---|" + "|".join([":--:"] * len(labels)) + "|\n")
+    for feature in matrix.features:
+        cells = []
+        for adapter in matrix.adapters:
+            cell = _feature_cell(adapter.value(feature))
+            index = note_index.get((adapter.label, feature))
+            cells.append(f"{cell} ({index})" if index else cell)
+        out.write(f"| `{feature}` | " + " | ".join(cells) + " |\n")
+
+    out.write(
+        f"\n**Legend:** {MARK_SUPPORTED} true · {MARK_UNSUPPORTED} false · "
+        f"{MARK_CONDITIONAL} varies by bot context · {MARK_UNDECLARED} not "
+        "declared by this adapter (a subclass `baseFeatures` replaces the base "
+        "wholesale, so an omitted key resolves to `false`, or to `undefined` for "
+        "`chatRenderMode` / `messagePageSize`, which are read directly)\n"
+    )
+
+    if notes and note_index:
+        out.write("\n## Notes\n")
+        for adapter in matrix.adapters:
+            entries = [
+                (index, feature)
+                for (label, feature), index in note_index.items()
+                if label == adapter.label
+            ]
+            if not entries:
+                continue
+            out.write(f"\n### {adapter.label}\n\n")
+            for index, feature in sorted(entries):
+                value = adapter.value(feature)
+                if not value.declared:
+                    out.write(f"{index}. {MARK_UNDECLARED} `{feature}` — not declared\n")
+                    continue
+                branches = "; ".join(
+                    f"`{condition}` → `{result}`" for condition, result in value.overrides
+                )
+                out.write(
+                    f"{index}. {MARK_CONDITIONAL} `{feature}` — "
+                    f"default `{value.default}`, {branches}\n"
+                )
+
+    out.write("\n## Adapters\n\n")
+    out.write(
+        "| Engine type | Display name | Beta | Default model | Source |\n"
+        "|---|---|:--:|---|---|\n"
+    )
+    for adapter in matrix.adapters:
+        out.write(
+            f"| {adapter.engine_type} | {adapter.display or '—'} | "
+            f"{'yes' if adapter.beta else '—'} | "
+            f"{adapter.default_model or '—'} | `{adapter.origin}` |\n"
+        )
+    return out.getvalue()
+
+
+def render_frontend_json(matrix: FeatureMatrix) -> str:
+    payload = {
+        "generated_by": GENERATOR,
+        "source": matrix.source,
+        "features": matrix.features,
+        "adapters": [
+            {
+                "engineType": adapter.engine_type,
+                "displayName": adapter.display,
+                "isBeta": adapter.beta,
+                "defaultModelId": adapter.default_model,
+                "origin": adapter.origin,
+                "features": {
+                    feature: {
+                        "kind": adapter.value(feature).kind,
+                        "default": adapter.value(feature).default,
+                        "overrides": [
+                            {"when": condition, "value": result}
+                            for condition, result in adapter.value(feature).overrides
+                        ],
+                    }
+                    for feature in matrix.features
+                },
+            }
+            for adapter in matrix.adapters
+        ],
+    }
+    return json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+
+
+def render_frontend_csv(matrix: FeatureMatrix) -> str:
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\n")
+    writer.writerow(["feature", "engine", "kind", "default", "overrides"])
+    for feature in matrix.features:
+        for adapter in matrix.adapters:
+            value = adapter.value(feature)
+            writer.writerow(
+                [
+                    feature,
+                    adapter.label,
+                    value.kind,
+                    value.default,
+                    "; ".join(f"{c} -> {v}" for c, v in value.overrides),
+                ]
+            )
+    return out.getvalue()
+
+
+FRONTEND_RENDERERS = {
+    "markdown": lambda m: render_frontend_markdown(m),
+    "json": render_frontend_json,
+    "csv": render_frontend_csv,
+}
+
+
 # ──────────────────────────────────────────────────────────────────────
 # CLI
 # ──────────────────────────────────────────────────────────────────────
@@ -583,6 +1108,39 @@ def filter_engines(matrix: Matrix, wanted: list[str]) -> Matrix:
     return Matrix(source=matrix.source, capabilities=matrix.capabilities, engines=selected)
 
 
+def filter_adapters(matrix: FeatureMatrix, wanted: list[str]) -> FeatureMatrix:
+    selected = [a for a in matrix.adapters if a.engine_type in wanted]
+    missing = sorted(set(wanted) - {a.engine_type for a in selected})
+    if missing:
+        available = ", ".join(a.engine_type for a in matrix.adapters) or "none"
+        raise SystemExit(
+            f"unknown engine(s): {', '.join(missing)} (available: {available})"
+        )
+    return FeatureMatrix(
+        source=matrix.source, features=matrix.features, adapters=selected
+    )
+
+
+def render_target(
+    target: str, args: argparse.Namespace, wanted: list[str] | None
+) -> str:
+    """Collect and render one target."""
+    if target == "engine":
+        matrix = build_matrix(args.source, args.profile)
+        if wanted:
+            matrix = filter_engines(matrix, wanted)
+        if args.format == "markdown":
+            return render_markdown(matrix, notes=not args.no_notes)
+        return RENDERERS[args.format](matrix)
+
+    features = collect_frontend()
+    if wanted:
+        features = filter_adapters(features, wanted)
+    if args.format == "markdown":
+        return render_frontend_markdown(features, notes=not args.no_notes)
+    return FRONTEND_RENDERERS[args.format](features)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Generate the engine capability matrix from the code.",
@@ -608,6 +1166,14 @@ def main(argv: list[str] | None = None) -> int:
         help="ENGINE_PROFILE to collect under; runtime mode only",
     )
     parser.add_argument(
+        "--target",
+        choices=("engine", "frontend", "all"),
+        default="engine",
+        help="which matrix: the engines' EngineCapabilities (engine, the "
+        "default), the frontend adapters' BotFeatures (frontend), or both "
+        "(all; markdown and json only)",
+    )
+    parser.add_argument(
         "--engines",
         help="comma-separated engine names to include (default: all)",
     )
@@ -625,35 +1191,49 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    matrix = build_matrix(args.source, args.profile)
-    if args.engines:
-        wanted = [name.strip() for name in args.engines.split(",") if name.strip()]
-        matrix = filter_engines(matrix, wanted)
+    if args.target == "all" and args.format == "csv":
+        parser.error("--target all has no single csv shape; pick one target")
 
-    if args.format == "markdown":
-        rendered = render_markdown(matrix, notes=not args.no_notes)
+    wanted = (
+        [name.strip() for name in args.engines.split(",") if name.strip()]
+        if args.engines
+        else None
+    )
+
+    if args.target == "all":
+        if args.format == "json":
+            rendered = json.dumps(
+                {
+                    "engine": json.loads(render_target("engine", args, wanted)),
+                    "frontend": json.loads(render_target("frontend", args, wanted)),
+                },
+                indent=2,
+                ensure_ascii=False,
+            ) + "\n"
+        else:
+            rendered = (
+                render_target("engine", args, wanted)
+                + "\n---\n\n"
+                + render_target("frontend", args, wanted)
+            )
     else:
-        rendered = RENDERERS[args.format](matrix)
+        rendered = render_target(args.target, args, wanted)
 
     if args.check:
         current = args.check.read_text(encoding="utf-8") if args.check.is_file() else ""
         if current != rendered:
             warn(
                 f"{args.check} is out of date; regenerate with "
-                f"`python {GENERATOR} -o {args.check}`"
+                f"`python {GENERATOR} --target {args.target} -o {args.check}`"
             )
             return 1
-        print(f"{args.check} is up to date ({len(matrix.engines)} engines)")
+        print(f"{args.check} is up to date")
         return 0
 
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(rendered, encoding="utf-8")
-        print(
-            f"wrote {args.output} ({len(matrix.engines)} engines, "
-            f"{len(matrix.capabilities)} capabilities)",
-            file=sys.stderr,
-        )
+        print(f"wrote {args.output}", file=sys.stderr)
     else:
         sys.stdout.write(rendered)
     return 0
