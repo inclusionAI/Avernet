@@ -68,11 +68,16 @@ export function validateAisResult(payload: Record<string, unknown>, config: Conf
     || payload.success !== !partial) throw new Error("AIS 结果身份或状态不匹配");
   const uploaded = payload.artifacts;
   if (!uploaded || typeof uploaded !== "object" || Array.isArray(uploaded)) throw new Error("AIS 结果缺少 artifacts");
-  const allowedOptional = new Set(["trajectory", "trajectoryPath"]);
+  const sourceAlternatives = new Set(["raw", "trajectory"]);
+  const allowedOptional = new Set(["trajectoryPath", ...sourceAlternatives]);
   const required = Object.keys(config.artifacts).filter(name => !allowedOptional.has(name)
     && (config.aisBase || name !== "result"));
   if (!partial) for (const name of required) {
     if (!(name in uploaded)) throw new Error(`AIS 结果缺少 ${name} 产物`);
+  }
+  if (!partial && config.aisBase
+    && ![...sourceAlternatives].some(name => name in (uploaded as Record<string, unknown>))) {
+    throw new Error("AIS 结果缺少 Session 或 trajectory 证据");
   }
   // 以下为安全注释COSEC：失败附件同样校验归属；允许集合不代表成功时全部必需。
   for (const [name, actual] of Object.entries(uploaded)) {
