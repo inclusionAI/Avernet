@@ -82,6 +82,7 @@ CLAUDE_CODE_COMMUNITY_CAPABILITIES: EngineCapabilities = EngineCapabilities(
         Capability.SKILLS_SYNC_BINDPATHS,
         Capability.SKILLS_CLEAN_SYMLINKS,
         Capability.SKILLS_CENTER_ENSURE,
+        Capability.SKILLS_LOCAL_PACKAGE_APPLY,
         # CLI tools (W9) — model-callable binaries placed by a manifest.
         Capability.CLI_INSTALL,
         Capability.CLI_DELETE,

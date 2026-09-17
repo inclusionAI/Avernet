@@ -8,6 +8,7 @@ import shutil
 import tempfile
 import time
 import zipfile
+from types import SimpleNamespace
 
 import jwt
 
@@ -141,6 +142,12 @@ class _StorageFactory:
         directory = f"test-local/{directory_name or name}"
         return directory, LocalSkillPackageStorage(self._filesystem, directory)
 
+    def local_skill_package_location(self, *, name: str, directory_name=None, **_kwargs):
+        return SimpleNamespace(
+            directory=f"test-local/{directory_name or name}",
+            layout="LEGACY",
+        )
+
     def files_for(self, name: str) -> dict[str, bytes]:
         directory = self._root / "test-local" / name
         return {
@@ -164,6 +171,11 @@ class _RuntimeFactory:
 class _DeviceContextResolverStub:
     def resolve_for_bot(self, _bot_id, _owner_id):
         return type("DeviceContextStub", (), {"provider": "local"})()
+
+
+class _LegacyPackageRuntime:
+    async def apply(self, **_kwargs):
+        return None
 
 
 class _Cleanup:
@@ -286,6 +298,7 @@ def _seed_uploadable_bot(world) -> None:
             lambda: _DeviceContextResolverStub(),
             _RuntimeFactory(),
             SkillPackageValidator(SkillParser()),
+            _LegacyPackageRuntime(),
         ),
         scope=None,
     )

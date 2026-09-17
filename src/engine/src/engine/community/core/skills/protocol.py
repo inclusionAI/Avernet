@@ -40,6 +40,8 @@ from engine.community.core.skills.models import (
     CenterEnsureResult,
     CleanSymlinksRequest,
     CleanSymlinksResult,
+    LocalSkillPackageApplyRequest,
+    LocalSkillPackageApplyResult,
     PoolLayoutActivateRequest,
     PoolLayoutActivationResult,
     PoolLayoutProbeRequest,
@@ -68,6 +70,14 @@ from engine.community.core.skills.models import (
 @runtime_checkable
 class SkillsService(Protocol):
     """Backend talks to skills-capable engines through this Protocol."""
+
+    async def apply_local_package(
+        self,
+        request: LocalSkillPackageApplyRequest,
+        auth: AuthContext | None = None,
+    ) -> LocalSkillPackageApplyResult:
+        """Apply one complete Bot-local Skill package at the selected layout."""
+        ...
 
     # ── Per-skill management ──
     async def list_skills(

@@ -16,6 +16,8 @@ provides:
   - "CurrentRuntimeLayoutProbeService"
   - "SkillQueryService"
   - "LocalSkillUploadService"
+  - "LocalSkillPackageRuntime"
+  - "LocalSkillPackageRuntimeResult"
   - "SkillPackageValidator"
   - "SkillPackageManifestParserProtocol"
   - "ValidatedSkillPackage"
@@ -445,18 +447,21 @@ SkillSet/Direct commands continue to maintain Installation synchronously; the
 lazy flush reconciles the rows that pre-date the new command path, treating a
 Default-Set exclusion as that Set's per-Bot deactivation of the member.
 
-Local Skill replacement is defined only for an existing complete package at the
-stable layout-owned `skills-local/<skill-name>` locator. It stages and verifies
-the new package, backs up the old package, and publishes the replacement back to
-that same locator; the Skill ID, `git_path`, desired active state, membership,
-and Installation identity do not change. Staging and rollback directories are
-temporary implementation details and are removed before success is returned.
-If publication, metadata persistence, audit persistence, or temporary-package
-cleanup fails, the old canonical package and metadata are restored before the
-request fails. A Runtime projection failure is instead returned as `PENDING` /
-`DEGRADED` with the new package and metadata retained. A non-canonical locator or a metadata row
-whose authoritative package is missing fails closed and is repaired outside the
-upload path.
+Local Skill create/replace prefers the package-level Runtime contract when the
+active standard Engine declares `skills.local_package.apply.v1`; Teclaw calls
+its package endpoint directly. Backend sends one canonical ZIP plus logical
+`LEGACY|POOL`, verifies the returned digest, then writes metadata. Engine owns
+staging, exact replacement, rollback, and cleanup. A capability-absent old
+standard Engine keeps the Legacy per-file adapter, but no fallback is allowed
+after a new apply request may have written.
+
+Create continues to persist the existing Backend compatibility locator and
+replace preserves the historical `git_path` byte-for-byte; Engine
+`target_path` is diagnostic only. Engine success followed by DB/audit failure
+returns a storage error without reverse file deletion or Runtime Projection;
+retrying the same complete package converges. Engine storage action and public
+`created|updated` operation are intentionally independent so orphan or missing
+canonical content can self-heal.
 
 Public Local Skill deletion keeps authorization, readiness checks, the edit
 lease, reference prechecks, and metadata deletion in Backend. It delegates the
